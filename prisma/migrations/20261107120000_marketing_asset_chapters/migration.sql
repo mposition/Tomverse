@@ -9,8 +9,10 @@
 -- chapters; the first at 0 seconds; each start a whole second, at least 10
 -- seconds after the one before; the last at least 10 seconds before the end;
 -- every chapter titled in each locale the asset has alt text for, 1 to 60
--- characters on one line with no `#` (the list is added after the hashtags
--- were bounded), in known locales only.
+-- characters on one line with nothing to trim and no `#` (the list is added
+-- after the hashtags were bounded), in known locales only. Whitespace here is
+-- the database's [[:space:]]; the application's trim also takes the rest of
+-- Unicode's, and refuses first.
 --
 -- Like the rest of a submission, chapters never change once the row exists:
 -- a person approves exactly what was submitted. The existing write guard's
@@ -62,7 +64,12 @@ AS $$
                                               "title".key IN ('en', 'ko', 'zh-Hant', 'zh-Hans')
                                           AND pg_catalog.jsonb_typeof("title".value) = 'string'
                                           AND pg_catalog.length("title".value #>> '{}') BETWEEN 1 AND 60
-                                          AND ("title".value #>> '{}') !~ '[[:cntrl:]#]')
+                                          -- One line: no control character and no line or
+                                          -- paragraph separator (U+2028, U+2029); no `#`.
+                                          AND ("title".value #>> '{}')
+                                              !~ ('[[:cntrl:]#' || pg_catalog.chr(8232) || pg_catalog.chr(8233) || ']')
+                                          -- Nothing to trim, so a blank title is no title.
+                                          AND ("title".value #>> '{}') !~ '^[[:space:]]|[[:space:]]$')
                                      FROM pg_catalog.jsonb_each("element"."value" -> 'title') AS "title"), false)
                            END AS "titled"
                       FROM pg_catalog.jsonb_array_elements("chapters") WITH ORDINALITY AS "element"("value", "position")

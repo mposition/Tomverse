@@ -548,6 +548,16 @@ test("the database refuses chapters YouTube would not show, on an image, or with
     insert("media-hashtag", "video", [{ ...CHAPTERS[0], title: { ...CHAPTERS[0].title, en: "Intro #Shorts" } }, ...CHAPTERS.slice(1)]),
     check,
   );
+  // A line separator, a blank title, and one with something to trim.
+  await assert.rejects(
+    insert("media-separator", "video", [
+      { ...CHAPTERS[0], title: { ...CHAPTERS[0].title, en: `Intro${String.fromCharCode(0x2028)}00:05 Fake` } },
+      ...CHAPTERS.slice(1),
+    ]),
+    check,
+  );
+  await assert.rejects(insert("media-blank", "video", [{ ...CHAPTERS[0], title: { ...CHAPTERS[0].title, en: "   " } }, ...CHAPTERS.slice(1)]), check);
+  await assert.rejects(insert("media-padded", "video", [{ ...CHAPTERS[0], title: { ...CHAPTERS[0].title, en: " Intro" } }, ...CHAPTERS.slice(1)]), check);
   // Not a list at all, and chapters on an image (no length, so the function alone would answer NULL).
   await assert.rejects(insert("media-object", "video", { startSeconds: 0 }), check);
   await assert.rejects(insert("media-image", "image", CHAPTERS, null), check);

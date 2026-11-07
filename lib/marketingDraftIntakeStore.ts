@@ -336,10 +336,14 @@ export async function intakeMarketingGeneratorDraft(
   let renderedText = draft.renderedText;
   if (channelName === "youtube") {
     const chapters = await readApprovedMarketingAssetChapters(tx, assetIds);
+    // Each named asset once; two assets with chapters is no one list.
     const withChapters = marketingYoutubeDraftText(
       draft.renderedText,
       draft.locale,
-      assetIds.map((id) => chapters.get(id)).find((list) => list !== undefined) ?? null,
+      [...new Set(assetIds)].flatMap((id) => {
+        const list = chapters.get(id);
+        return list ? [list] : [];
+      }),
     );
     if ("refused" in withChapters) return { status: "refused", reasons: [withChapters.refused] };
     if (!marketingEnvelopeSchema.shape.renderedText.safeParse(withChapters.text).success) {

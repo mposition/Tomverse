@@ -77,7 +77,7 @@ export function marketingVideoChapterIssues(
       issues.push(`chapter ${index + 1} does not start at a whole second`);
       return;
     }
-    if (index === 0 && chapter.startSeconds !== 0) issues.push("the first chapter starts at 0");
+    if (index === 0 && chapter.startSeconds !== 0) issues.push("the first chapter does not start at 0");
     const previous = chapters[index - 1];
     if (previous && chapter.startSeconds - previous.startSeconds < MARKETING_VIDEO_CHAPTER_MIN_SECONDS) {
       issues.push(`chapter ${index} is shorter than ${MARKETING_VIDEO_CHAPTER_MIN_SECONDS} seconds`);
@@ -126,18 +126,29 @@ export function marketingYoutubeChapterBlock(chapters: readonly MarketingVideoCh
 export const MARKETING_CHAPTERS_NO_LOCALE_REFUSAL_CODE = "intake_chapters_no_locale";
 /** The intake's refusal when the draft and its chapter list are longer than a post may be. */
 export const MARKETING_CHAPTERS_DO_NOT_FIT_REFUSAL_CODE = "intake_chapters_do_not_fit";
+/**
+ * The intake's refusal when a draft names more than one asset with chapters: a
+ * YouTube post is one video, so there is no one list to write.
+ */
+export const MARKETING_CHAPTERS_AMBIGUOUS_REFUSAL_CODE = "intake_chapters_ambiguous";
 
 /**
  * A YouTube draft's text with its video's chapter list at the end of the
- * description, a blank line before it; the text as it was when the video has no
- * chapters. The title line is the text's first line and stays first.
+ * description, a blank line before it; the text as it was when no asset it
+ * names has chapters. `chapterLists` are the lists of the draft's assets that
+ * have any. The title line is the text's first line and stays first.
  */
 export function marketingYoutubeDraftText(
   text: string,
   locale: string,
-  chapters: readonly MarketingVideoChapter[] | null,
-): { readonly text: string } | { readonly refused: typeof MARKETING_CHAPTERS_NO_LOCALE_REFUSAL_CODE } {
-  if (chapters === null || chapters.length === 0) return { text };
+  chapterLists: readonly (readonly MarketingVideoChapter[])[],
+):
+  | { readonly text: string }
+  | { readonly refused: typeof MARKETING_CHAPTERS_NO_LOCALE_REFUSAL_CODE | typeof MARKETING_CHAPTERS_AMBIGUOUS_REFUSAL_CODE } {
+  const lists = chapterLists.filter((list) => list.length > 0);
+  if (lists.length === 0) return { text };
+  if (lists.length > 1) return { refused: MARKETING_CHAPTERS_AMBIGUOUS_REFUSAL_CODE };
+  const chapters = lists[0];
   const block = marketingYoutubeChapterBlock(chapters, locale);
   if (block === null) return { refused: MARKETING_CHAPTERS_NO_LOCALE_REFUSAL_CODE };
   // A draft that is only a title line still gets a description: the list.

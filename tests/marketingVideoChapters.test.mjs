@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MARKETING_CHAPTERS_AMBIGUOUS_REFUSAL_CODE,
   MARKETING_CHAPTERS_NO_LOCALE_REFUSAL_CODE,
   MARKETING_SHORT_VIDEO_MAX_SECONDS,
   MARKETING_VIDEO_CHAPTERS_MAX,
@@ -93,18 +94,20 @@ test("the block is one `00:00 Title` line per chapter, in the asked locale only"
 
 test("a YouTube draft gets the list at the end of its description; the title line stays first", () => {
   const draft = "Compare three AI answers in five minutes\nA walkthrough of Tomverse Review.\n\n#AI #Tomverse";
-  const result = marketingYoutubeDraftText(draft, "en", TUTORIAL);
+  const result = marketingYoutubeDraftText(draft, "en", [TUTORIAL]);
   assert.deepEqual(result, {
     text: `${draft}\n\n00:00 What you will build\n00:42 Ask three models\n02:08 Compare the answers`,
   });
   assert.equal(result.text.split("\n")[0], "Compare three AI answers in five minutes");
   // Trailing whitespace before the list is not doubled.
-  assert.deepEqual(marketingYoutubeDraftText(`${draft}\n\n`, "en", TUTORIAL), result);
+  assert.deepEqual(marketingYoutubeDraftText(`${draft}\n\n`, "en", [TUTORIAL]), result);
   // Without chapters the text is as it was.
-  assert.deepEqual(marketingYoutubeDraftText(draft, "en", null), { text: draft });
   assert.deepEqual(marketingYoutubeDraftText(draft, "en", []), { text: draft });
+  assert.deepEqual(marketingYoutubeDraftText(draft, "en", [[]]), { text: draft });
   // Chapters without the draft's locale are a refusal, not a silent omission.
-  assert.deepEqual(marketingYoutubeDraftText(draft, "ko", TUTORIAL), { refused: MARKETING_CHAPTERS_NO_LOCALE_REFUSAL_CODE });
+  assert.deepEqual(marketingYoutubeDraftText(draft, "ko", [TUTORIAL]), { refused: MARKETING_CHAPTERS_NO_LOCALE_REFUSAL_CODE });
+  // Two videos with chapters: no one list to write, so neither is dropped silently.
+  assert.deepEqual(marketingYoutubeDraftText(draft, "en", [TUTORIAL, TUTORIAL]), { refused: MARKETING_CHAPTERS_AMBIGUOUS_REFUSAL_CODE });
 });
 
 test("long-form is a video with chapters or longer than sixty seconds", () => {
