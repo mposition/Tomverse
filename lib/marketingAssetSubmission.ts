@@ -17,6 +17,30 @@ import {
 } from "@/lib/marketingAssetCore";
 import { MARKETING_LOCALES } from "@/lib/marketingAutomationSchema";
 import { marketingAssetSchema } from "@/lib/marketingAssets";
+import {
+  MARKETING_VIDEO_CHAPTERS_MAX,
+  MARKETING_VIDEO_CHAPTER_TITLE_MAX_CHARS,
+  marketingVideoChapterIssues,
+  marketingVideoChapterTitleValid,
+} from "@/lib/marketingVideoChapters";
+
+/**
+ * One of a video's YouTube chapters (owner decision 2026-11-07): where the
+ * section starts and its title per locale. The rules that need the video's
+ * length and its alt locales are checked with the submission below.
+ */
+const chapterSchema = z
+  .object({
+    startSeconds: z.number().int().min(0).max(MARKETING_ASSET_MAX_VIDEO_SECONDS),
+    title: z.partialRecord(
+      z.enum(MARKETING_LOCALES),
+      z
+        .string()
+        .max(MARKETING_VIDEO_CHAPTER_TITLE_MAX_CHARS)
+        .refine(marketingVideoChapterTitleValid, "a chapter title is one line with nothing to trim"),
+    ),
+  })
+  .strict();
 
 /**
  * One file announced for upload: the registry entry it will become, and what
@@ -38,6 +62,11 @@ export const marketingAssetSubmissionSchema = z
     transcript: z
       .partialRecord(z.enum(MARKETING_LOCALES), z.string().trim().min(1).max(MARKETING_ASSET_MAX_TRANSCRIPT_CHARS))
       .optional(),
+    /**
+     * A long video's chapters, which the draft intake writes into a YouTube
+     * description. The Guard reads their titles with the transcript.
+     */
+    chapters: z.array(chapterSchema).max(MARKETING_VIDEO_CHAPTERS_MAX).optional(),
   })
   .strict()
   .superRefine((submission, context) => {
@@ -56,6 +85,13 @@ export const marketingAssetSubmissionSchema = z
     // A video always says something; an image may say nothing.
     if (submission.kind === "video" && Object.keys(submission.transcript ?? {}).length === 0) {
       context.addIssue({ code: "custom", message: "a video needs its transcript in at least one locale" });
+    }
+    if (submission.chapters !== undefined) {
+      const issues =
+        submission.kind === "video"
+          ? marketingVideoChapterIssues(submission.chapters, submission.durationSeconds, Object.keys(submission.asset.alt))
+          : ["only a video has chapters"];
+      for (const message of issues) context.addIssue({ code: "custom", message, path: ["chapters"] });
     }
   });
 export type MarketingAssetSubmission = z.infer<typeof marketingAssetSubmissionSchema>;

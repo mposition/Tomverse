@@ -42,6 +42,19 @@ test("an asset is listed by what a draft may name and what it shows, without its
 test("a stored asset carries the kind the store records", () => {
   const [listed] = generatorAssetProjection({ version: 3, assets: [asset()] }, ["linkedin"], new Map([["asset_hero", "video"]]));
   assert.equal(listed.kind, "video");
+  assert.equal("longForm" in listed, false);
+});
+
+test("a long-form stored video is marked so, and nothing else is (owner decision 2026-11-07)", () => {
+  const [listed] = generatorAssetProjection(
+    { version: 3, assets: [asset()] },
+    ["linkedin"],
+    new Map([["asset_hero", "video"]]),
+    new Set(["asset_hero"]),
+  );
+  assert.equal(listed.longForm, true);
+  // The chapters themselves stay with the asset; the intake writes them.
+  assert.equal(JSON.stringify(listed).includes("chapters"), false);
 });
 
 test("only assets one of the accounts' platforms may carry, in id order", () => {
