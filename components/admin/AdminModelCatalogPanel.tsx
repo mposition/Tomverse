@@ -215,7 +215,6 @@ export function AdminModelCatalogPanel() {
     {
       key: "actions",
       header: m.actions,
-      hideOnCard: true,
       render: (row) => (
         <div>
           {stateButtons("image", row.id)}
@@ -290,13 +289,6 @@ export function AdminModelCatalogPanel() {
               columns={imageColumns}
               rows={report.image.models}
               rowKey={(row) => row.id}
-              cardTitle={(row) => row.name}
-              cardMeta={(row) => `${row.id} · ${row.provider}`}
-              cardAside={(row) => (
-                <AdminStatusChip tone={row.holdReason ? "warn" : row.disabledReason ? "idle" : "ok"}>
-                  {row.disabledReason ?? m.serving}
-                </AdminStatusChip>
-              )}
             />
             {report.image.problems.length > 0 ? (
               <p className="text-xs text-amber-300">
