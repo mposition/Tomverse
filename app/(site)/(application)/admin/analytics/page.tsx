@@ -16,8 +16,8 @@ import { AdminMemoryRevocationPanel } from "@/components/admin/AdminMemoryRevoca
 import { AdminPackageImportPanel } from "@/components/admin/AdminPackageImportPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminProductAnalyticsPanel } from "@/components/admin/AdminProductAnalyticsPanel";
+import { AdminReviewUseSummary } from "@/components/admin/AdminReviewUseSummary";
 import { AdminUsageAnalyticsPanel } from "@/components/admin/AdminUsageAnalyticsPanel";
-import { LaunchFunnelPanel } from "@/components/admin/AdminRiskPanels";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { getAssistantPackageImportMetrics } from "@/lib/assistantPackageImportMetrics";
 import { getAdminUserStats } from "@/lib/adminUsers";
@@ -149,10 +149,17 @@ export default async function AdminAnalyticsPage({
     );
     const messages = await getAdminMessages(adminAiReviewJudgedMessages);
     const catalog = readAiReviewJudgedRunCatalog();
+    // The use numbers come from the product ledger and are read on their own:
+    // a failure leaves the run results below untouched.
+    const reviewUse = await getProductAnalyticsDashboard().then(
+      (dashboard) => dashboard,
+      () => null
+    );
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
         {reviewNavigation}
+        <AdminReviewUseSummary dashboard={reviewUse} />
         <AdminAiReviewM5Progress
           progress={aiReviewM5Progress(
             readAiReviewPreparationCatalog(),
@@ -189,12 +196,11 @@ export default async function AdminAnalyticsPage({
   return (
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
-      <AdminProductAnalyticsPanel dashboard={dashboard} />
-      <LaunchFunnelPanel
-        funnel={{
+      <AdminProductAnalyticsPanel
+        dashboard={dashboard}
+        launch={{
           totalUsers: userStats.totalAccounts,
           usersWithConversations: usersWithConversations.length,
-          usersWithPaidPlan: userStats.activePaidSubscriptions,
           checkoutStarted: checkoutStartedCount,
           paidUsers: userStats.activePaidSubscriptions,
         }}

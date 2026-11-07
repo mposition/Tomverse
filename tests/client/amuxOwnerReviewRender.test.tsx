@@ -360,6 +360,32 @@ test("an expired attempt with its own stored final result offers the server's re
   assert.deepEqual(visibleAmuxOwnerReviewOutcomes(expired(false)), []);
 });
 
+test("a run the code review rejected twice offers the server's retry and names the reason", () => {
+  // AMUX-ROUTERFAIL-004 (owner decision 2026-11-07).
+  const rejected = (reason: string, allowed: Array<"retry" | "block">) => review({
+    task: { ...review().task, status: "blocked" },
+    last_attempt: { ...review().last_attempt!, outcome: "succeeded",
+      to_status: "blocked" },
+    review_context: { ...review().review_context,
+      escalation_reason: "execution_blocked", last_attempt_reason: reason },
+    allowed_outcomes: allowed,
+    proposed_transitions: allowed.includes("retry") ?
+      { retry: "todo", block: "blocked" } : { block: "blocked" },
+  });
+  const item = rejected("review_server_rejected_twice", ["retry", "block"]);
+  assert.deepEqual(visibleAmuxOwnerReviewOutcomes(item), ["retry", "block"]);
+  const tree = render(item);
+  assert.equal(byTestId(tree, "admin-amux-select-retry").length, 1);
+  assert.equal(byTestId(tree, "admin-amux-technical-recovery").length, 0);
+  assert.match(textOf(tree), /review_server_rejected_twice/);
+  // The server's allowed outcomes stay the authority, and an unknown review
+  // is not a finished run.
+  assert.deepEqual(visibleAmuxOwnerReviewOutcomes(
+    rejected("review_server_rejected_twice", ["block"])), ["block"]);
+  assert.deepEqual(visibleAmuxOwnerReviewOutcomes(
+    rejected("review_server_unknown", ["retry", "block"])), []);
+});
+
 test("a step-up from a review returns to that escalation, and only a well-formed one", () => {
   assert.equal(amuxAssignmentReviewReturnPath("clreview1234567890123456"),
     "/admin/amux-execution?tab=review&focusEscalation=clreview1234567890123456");

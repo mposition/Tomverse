@@ -2765,7 +2765,8 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
 - **관측이 판정이다.** 게시 서비스의 병합 보고는 근거가 아니다. 본 앱이 읽기 전용 토큰으로
   병합 commit, base, head를 직접 읽어 v6 3항의 결속과 같을 때만 `done`이다. 다르거나 읽지
   못하면 `done`이 아니며, 다른 결과는 상태 불일치로 사람에게 간다.
-- **바뀌지 않는 것.** 사람 승인 경로(v49), PR 없는 역할의 Admin 사람 승인, 의존 카드 해제는
+- **바뀌지 않는 것.** 사람 승인 경로(v49), PR 없는 역할의 Admin 사람 승인(2026-11-07부터 DM·investigate
+  결론도 할 수 있다. `amux-agent-approval-contract.md` §2, `amux-decision-maker.md` §0a), 의존 카드 해제는
   `v4TerminalAt` 기준, `main` 병합은 운영자의 release, 결과 불명은 멈추고 사람에게 넘긴다는
   원칙, 에이전트는 PR을 승인하지 않는다는 원칙.
 - 이 버전은 문서만 바꾼다. 자동 병합은 v6 3항의 구현·기록과 off 스위치를 켜는 운영자 행위가
@@ -2786,7 +2787,8 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
   감사를 owner의 사람 감사와 같은 source approval 근거로 인정한다(`amux-intake.md` v19 5항, 운영자
   결정 2026-10-27).
 - **바뀌지 않는 것.** 등록된 Task의 v22 자동 편입 규칙, `implement` Task의 PR review·병합(v49)과
-  졸업한 develop 자동 병합(v50), PR 없는 역할의 Admin 사람 승인, `main` 병합은 운영자의 release,
+  졸업한 develop 자동 병합(v50), PR 없는 역할의 Admin 사람 승인(2026-11-07부터 DM·investigate 결론도
+  할 수 있다), `main` 병합은 운영자의 release,
   결과 불명은 멈추고 사람에게 넘긴다는 원칙, 에이전트는 PR을 승인하지 않는다는 원칙.
 - 이 버전은 문서만 바꾼다. 세션 접수·저장소 직접 읽기·자동 등록은 각각 기본 꺼진 스위치를 운영자가
   켤 때만 일어난다.
@@ -2809,7 +2811,8 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
 3. 맞는 등급의 worker가 없으면 위 등급 worker에게 넘기지 않고 기다린다.
 4. AMUX 안의 review 단계와 review Task를 새로 만들지 않는다. 코드 작업의 검토는 runner가 Tomverse
    독립 검토 서버에 요청한다.
-5. Task의 `done`은 지금처럼 본 앱이 관측한 병합이다(v49·v50).
+5. Task의 `done`은 지금처럼 본 앱이 관측한 병합이다(v49·v50). PR 없는 Task의 `done`은 운영자 결정
+   2026-11-07부터 사람 승인, DM 결과 검토, investigate `proceed` 결론 중 하나다(`amux-decision-maker.md` §0a).
 6. 실행 뒤 chore·implementation worker의 변경이 contract 경로에 닿으면, 그 변경을 버리고 Task의
    등급을 `frontier`로 올려 처음부터 다시 실행한다. 그러면 Task 전체를 contract worker가 다시 하므로
    남는 작업이 없다.
@@ -2976,7 +2979,9 @@ Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐�
   - `accept`: v49의 게시 경로(Engineering Publisher의 `develop` PR)로 간다. `done`은 v49·v50의 병합
     관측이다.
   - `reject`: Task는 같은 등급으로 `todo`에 돌아간다. 두 번째 reject 뒤에는 `blocked`가 되고 사람에게
-    간다.
+    간다. 운영자 결정(2026-11-07): 그 시도는 패치와 판정 기록이 있는 끝난 실행이므로 운영자 검토에서
+    재시도할 수 있다(시도 예산 안에서, 그 시도의 reject 기록이 있을 때만). 재시도는 마지막 reject의
+    지적을 prompt에 받고, 재시도 뒤 첫 reject는 다시 같은 등급으로 한 번 돌아간다.
   - `unknown`, 요청 오류, 서버 오류: 다시 보내지 않는다. Task는 `blocked`가 되고 사람에게 간다.
 - **신호이지 승인이 아니다.** accept는 PR의 사람 required review·병합(v49)이나 v50 자동 병합의
   조건을 대신하지 않으며, 이 버전은 그 조건을 바꾸지 않는다.

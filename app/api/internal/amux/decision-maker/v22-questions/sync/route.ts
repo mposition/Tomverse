@@ -27,6 +27,13 @@ import {
   readAmuxV22QuestionSyncRows,
   runAmuxV22ResolveStep,
 } from "@/lib/amux/v22OwnerQuestionDmService";
+import { runAmuxDmAutoApplyStep } from "@/lib/amux/dmAutoApplyService";
+import { amuxV22ResultReviewDmEnabled } from "@/lib/amux/v22ResultReviewCore";
+import {
+  openAmuxV22ResultReviewCards,
+  readAmuxV22ResultReviewSyncRows,
+  recordAmuxV22ResultReviewsUnfilable,
+} from "@/lib/amux/v22ResultReviewService";
 
 /**
  * The relay's v22 question tick (operator decision 2026-10-30): first one
@@ -45,6 +52,12 @@ import {
  * confirmed answer, one new question may open while its own switch is on, and
  * its entries follow the v22 ones in the two lists. A fault in that part leaves
  * the v22 questions to go on.
+ *
+ * Owner decision 2026-11-07: a v22 result waiting for review rides the tick the
+ * same way (lib/amux/v22ResultReviewService.ts; new cards only while
+ * TOMVERSE_AMUX_V22_RESULT_REVIEW_DM=enabled), and while
+ * TOMVERSE_AMUX_DM_APPROVER=enabled one Decision Maker proposal per tick is
+ * applied without the operator (lib/amux/dmAutoApplyService.ts).
  */
 const OPERATION = "decision_maker_v22_question_sync";
 const refused = dmRouteRefusal("synced");
@@ -62,6 +75,10 @@ export async function POST(request: Request) {
       const after = parseDmDeliveryCursor(body.after);
       if (after === undefined) return refused(400, "invalid_request");
       const { resolved: outcome, cursor } = await runAmuxV22ResolveStep(after);
+      const autoApplied = await runAmuxDmAutoApplyStep().catch(() => {
+        console.warn(JSON.stringify({ subsystem: "amux", event: "dm_auto_apply_step_failed" }));
+        return null;
+      });
       await openAmuxIdeaCardCloseQuestionIfDue().catch(() => {
         console.warn(JSON.stringify({ subsystem: "amux", event: "idea_card_close_open_failed" }));
       });
@@ -70,14 +87,31 @@ export async function POST(request: Request) {
         (tx, context) => readAmuxV22QuestionSyncRows(tx, context.dbNow));
       const cards = [...rows.refusalCards, ...await openAmuxV22QuestionCards(rows.pending)];
       const cardClose = await readAmuxIdeaCardCloseSyncForRelay();
+      const review = await withAmuxDbBoundary(
+        AMUX_DB_BOUNDARIES.decisionMakerV22ResultReviewRead,
+        (tx) => readAmuxV22ResultReviewSyncRows(tx)).then(async (rows) => {
+        if (!amuxV22ResultReviewDmEnabled()) return { pending: [], closing: rows.closing };
+        const opened = await openAmuxV22ResultReviewCards(rows.pending);
+        if (opened.unfilable.length > 0)
+          await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22ResultReviewHandoff,
+            (tx, context) => recordAmuxV22ResultReviewsUnfilable(tx,
+              { reviewIds: opened.unfilable, now: context.dbNow }));
+        return { pending: opened.cards, closing: rows.closing };
+      }).catch(() => {
+        console.warn(JSON.stringify({ subsystem: "amux", event: "v22_result_review_sync_failed" }));
+        return { pending: [], closing: [] };
+      });
       return amuxJsonNoStore({
         synced: true,
         resolved: outcome,
+        ...(autoApplied ? { auto_applied: autoApplied.applied ? autoApplied.kind : null } : {}),
         cursor: cursor.move === "advance" ? { move: "advance",
           judged_at_ms: cursor.judgedAtMs, request_id: cursor.requestId } :
           { move: cursor.move },
-        pending: [...cards, ...cardClose.pending].slice(0, AMUX_V22_QUESTION_SYNC_LIMIT),
-        closing: [...rows.closing, ...cardClose.closing].slice(0, AMUX_V22_QUESTION_SYNC_LIMIT)
+        pending: [...cards, ...cardClose.pending, ...review.pending]
+          .slice(0, AMUX_V22_QUESTION_SYNC_LIMIT),
+        closing: [...rows.closing, ...cardClose.closing, ...review.closing]
+          .slice(0, AMUX_V22_QUESTION_SYNC_LIMIT)
           .map((row) => ({ question_id: row.questionId, card_id: row.cardId })),
       });
     } catch (error) {

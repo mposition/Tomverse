@@ -137,6 +137,85 @@ test("a held model whose thinking the request cannot bound is never dispatched",
   }
 });
 
+// A runtime fal model on `apiModelId`, enabled as the resolver would after the
+// judge. The price is a hypothetical fixture for the dispatch, not an approval.
+const runtimeFal = (apiModelId, thinkingCapMicroUsd) => {
+  const seed = IMAGE_MODEL_REGISTRY.find((model) => model.id === "fal-ai/nano-banana-2");
+  return {
+    ...seed,
+    id: apiModelId,
+    apiModelId,
+    disabledReason: null,
+    prices: [{ quality: "medium", size: "1024x1024", credits: 200, outputCostMicroUsd: 40_000 }],
+    priceVerification: { ...seed.priceVerification, thinkingCapMicroUsd },
+  };
+};
+
+const withFalFetch = async (run) => {
+  const sharp = (await import("sharp")).default;
+  const png = await sharp({ create: { width: 1024, height: 1024, channels: 3, background: "#888" } }).png().toBuffer();
+  const calls = [];
+  const original = globalThis.fetch;
+  const key = process.env.FAL_KEY;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (String(url).startsWith("https://fal.run/")) {
+      // Qwen's output shape: no width or height on the file.
+      return Response.json({ images: [{ url: "https://v3b.fal.media/files/out.png", content_type: "image/png" }], seed: 1 });
+    }
+    const asset = new Response(png, { headers: { "content-type": "image/png", "content-length": String(png.byteLength) } });
+    Object.defineProperty(asset, "url", { value: String(url) });
+    return asset;
+  };
+  process.env.FAL_KEY = "test-fal-key";
+  try {
+    return { result: await run(), calls };
+  } finally {
+    globalThis.fetch = original;
+    if (key === undefined) delete process.env.FAL_KEY;
+    else process.env.FAL_KEY = key;
+    resetActiveImageModelCatalog();
+  }
+};
+
+test("a fal model is sent its endpoint's body, not Nano Banana 2's", async () => {
+  const qwen = runtimeFal("alibaba/qwen-image-3/text-to-image", 0);
+  const { result, calls } = await withFalFetch(async () => {
+    setActiveImageModelCatalog([qwen]);
+    return generateImageWithProvider({ prompt: "a red apple", size: "1024x1024", quality: "medium", modelId: qwen.id });
+  });
+  const sent = calls.filter((call) => call.url.startsWith("https://fal.run/"));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, "https://fal.run/alibaba/qwen-image-3/text-to-image");
+  const body = JSON.parse(sent[0].init.body);
+  assert.deepEqual(body.image_size, { width: 1024, height: 1024 });
+  assert.equal(body.enable_prompt_expansion, false);
+  assert.equal("thinking_level" in body, false);
+  assert.equal("resolution" in body, false);
+  // Measured from the bytes, since the response reported no dimensions.
+  assert.equal(result.outputWidth, 1024);
+  assert.equal(result.outputHeight, 1024);
+  assert.equal(result.thinkingTokens, 0);
+});
+
+test("a fal model on a token-billed or unlisted endpoint is refused before any request", async () => {
+  // Nano Banana 2.1 bills thinking per token with no cap parameter; an
+  // unlisted endpoint has no row at all. Both are refused at dispatch even
+  // with a cap written down and the model switched on.
+  for (const model of [runtimeFal("google/nano-banana-2.1", 2_000), runtimeFal("fal-ai/flux/dev", 2_000)]) {
+    const { calls } = await withFalFetch(async () => {
+      setActiveImageModelCatalog([model]);
+      await assert.rejects(
+        generateImageWithProvider({ prompt: "a red apple", size: "1024x1024", quality: "medium", modelId: model.id }),
+        (error) =>
+          error.name === "ImageProviderError" && /no thinking cap its request can enforce/.test(error.message),
+        model.id
+      );
+    });
+    assert.equal(calls.length, 0, model.id);
+  }
+});
+
 test("an enabled model still refuses a size it has no mapping for", async () => {
   // Grok is enabled at 1K square only. A landscape passes the disabledReason
   // check and must still be refused by the request builder rather than sent as

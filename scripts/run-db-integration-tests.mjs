@@ -255,6 +255,9 @@ run(
     // An owner retry of a named Claude CLI failure reaches the claim; its
     // partial receipt still holds the worker for every other Task.
     "tests/integration/amuxV22CliFailureRetryClaim.db.test.mjs",
+    // A run the v52 review rejected twice may be retried by the owner; the
+    // retry reaches the claim and its first rejection returns once more.
+    "tests/integration/amuxV22ReviewRejectedTwiceRetry.db.test.mjs",
     "tests/integration/amuxV22AutoPromotion.db.test.mjs",
     "tests/integration/amuxV22TaskPatchSchema.db.test.mjs",
     "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
@@ -402,6 +405,7 @@ run(
     // statement ceiling and never delivered, nothing closed once work started,
     // and the owner's direct answer.
     "tests/integration/amux-idea-card-close.db.test.ts",
+    "tests/integration/amux-v22-result-review.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.

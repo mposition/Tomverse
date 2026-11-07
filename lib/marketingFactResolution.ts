@@ -255,7 +255,7 @@ export const readMarketingAssetRegistry = async (
   let file: ReturnType<typeof marketingAssetRegistrySchema.parse>;
   try {
     file = marketingAssetRegistrySchema.parse(
-      JSON.parse(await readFile(resolve(process.cwd(), MARKETING_ASSET_REGISTRY_PATH), "utf8")) as unknown,
+      JSON.parse(await readFile(resolve(/*turbopackIgnore: true*/ process.cwd(), MARKETING_ASSET_REGISTRY_PATH), "utf8")) as unknown,
     );
   } catch {
     // A missing, unreadable or invalid registry makes every asset unknown.

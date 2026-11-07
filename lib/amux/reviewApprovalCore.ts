@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { AMUX_V22_CLI_FAILURE_REASON_CODES } from "@/lib/amux/v22TaskExecutionCore";
+import { AMUX_V52_REVIEW_REJECTED_TWICE_REASON } from "@/lib/amux/v52ReviewCore";
 import { amuxReviewPrivateProxyOrigin } from "@/lib/originProtection";
 
 export const AMUX_REVIEW_PROPOSAL_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -145,13 +146,28 @@ const V22_RETRYABLE_BLOCK_REASONS = new Set<string>(["reported_result",
  * the sidecar returned it, so the CLI is no longer running. Only its
  * settlement failed after the result landed (owner decision 2026-11-07,
  * AMUX-FILEGEN-003 after a 409 settle). `storedResultAttemptId` is the attempt
- * id of the Task's latest stored v22 result and must be this exact attempt. */
+ * id of the Task's latest stored v22 result and must be this exact attempt.
+ *
+ * A run whose patch the v52 review server rejected a second time also
+ * finished: it settled `succeeded` with its patch and the recorded verdict,
+ * and only the grade rule (one automatic return) sent it to a person. The
+ * owner may retry it (owner decision 2026-11-07, AMUX-ROUTERFAIL-004).
+ * `rejectedReviewAttemptId` is the attempt id of an audited v52 `reject`
+ * record and must be this exact attempt. An unknown or unavailable review
+ * (`review_server_unknown`, `review_history_unavailable`) stays closed. */
 export const amuxV22ReviewRetryHasVerifiedOutcome = (input: {
   sourceSystem: string | null;
   attempt: { id?: string; v22AssignmentId: string | null; outcome: string | null;
     toStatus: string | null; reason: string | null } | null;
   storedResultAttemptId?: string | null;
+  rejectedReviewAttemptId?: string | null;
 }) => input.sourceSystem !== "admin-idea-v4" || input.attempt === null ||
+  (input.attempt.v22AssignmentId !== null &&
+    input.attempt.outcome === "succeeded" &&
+    input.attempt.toStatus === "blocked" &&
+    input.attempt.reason === AMUX_V52_REVIEW_REJECTED_TWICE_REASON &&
+    typeof input.attempt.id === "string" && input.attempt.id.length > 0 &&
+    input.rejectedReviewAttemptId === input.attempt.id) ||
   (input.attempt.v22AssignmentId !== null &&
     input.attempt.outcome === "blocked" &&
     input.attempt.toStatus === "blocked" &&
