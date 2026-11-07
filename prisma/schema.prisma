@@ -7737,6 +7737,10 @@ model MarketingAsset {
   sha256                  String
   durationSeconds         Int?
   transcript              Json
+  /// A long video's YouTube chapters (owner decision 2026-11-07): start
+  /// seconds and a title per locale, checked and kept immutable by
+  /// 20261107120000_marketing_asset_chapters.
+  chapters                Json?
   status                  String
   uploadedAt              DateTime?
   registryVersion         Int?

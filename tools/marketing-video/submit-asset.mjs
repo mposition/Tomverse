@@ -1,9 +1,10 @@
 // Submits one rendered file as a marketing asset:
 //   node submit-asset.mjs <file> <asset.json>
-// asset.json is the registry entry and transcript (see JOB.md). The file is
-// hashed and measured here, announced to the app (which runs the Guard over the
-// transcript), uploaded to the URL the app returns, and confirmed. Nothing is
-// published: a person approves the asset in Admin.
+// asset.json is the registry entry and transcript (see JOB.md), and for a long
+// video optionally its YouTube chapters (see README.md). The file is hashed and
+// measured here, announced to the app (which runs the Guard over the transcript
+// and the chapter titles), uploaded to the URL the app returns, and confirmed.
+// Nothing is published: a person approves the asset in Admin.
 //
 // Exit codes: 0 submitted, 3 the Guard refused the transcript (its codes are
 // printed; rewrite and submit again), 1 anything else.
@@ -59,6 +60,7 @@ const submission = {
   sha256,
   durationSeconds: durationSeconds(),
   ...(meta.transcript ? { transcript: meta.transcript } : {}),
+  ...(meta.chapters ? { chapters: meta.chapters } : {}),
 };
 
 const post = async (route, body) => {

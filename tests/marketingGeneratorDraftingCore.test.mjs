@@ -452,19 +452,20 @@ test("the instruction tells the model to write from the assets it was given when
   assert.match(system.content, /Give each post a different asset/);
   // The old rule that skipped a post is gone, and the version says the instruction changed.
   assert.doesNotMatch(system.content, /return no draft: a post without/);
-  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v7");
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v8");
 });
 
 test("A5 is told when hashtags help, how many each platform takes, and which tags never to write", () => {
   const [system, user] = marketingA5Messages(context, SCOPE);
-  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v7");
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v8");
   assert.match(system.content, /task\.hashtags gives this platform's range/);
   assert.match(system.content, /fewer or none when a tag would not help/);
   assert.match(system.content, /#Tomverse once is recommended/);
   assert.match(system.content, /Traditional Chinese for zh-Hant, Simplified for zh-Hans/);
   assert.match(system.content, /names another product or company/);
   assert.match(system.content, /#best, #free, #최고 or #무료/);
-  assert.match(system.content, /on youtube they go in the description, never the title line, and one of them is #Shorts/i);
+  assert.match(system.content, /on youtube they go in the description, never the title line; one of them is #Shorts when the video is a short/i);
+  assert.match(system.content, /none is #Shorts when the asset has longForm true/);
   assert.match(system.content, /On threads use at most one/);
   assert.deepEqual(JSON.parse(user.content).task.hashtags, { min: 2, max: 3 });
 
@@ -508,6 +509,40 @@ test("a draft keeps its words and allowed tags; a forbidden tag or one past the 
     [`${statement}\n\n#AI #Tomverse #AIcomparison`, `${statement} #AI`, statement],
   );
   assert.deepEqual(hashtagsRemoved, { hashtag_forbidden: 4, hashtag_over_limit: 1 });
+});
+
+test("a long-form video is marked for the model, its post loses #Shorts, and a short keeps it (owner decision 2026-11-07)", () => {
+  const youtube = marketingGeneratorContextSchema.parse({
+    ...context,
+    channels: [{ id: "chn_yt", channel: "youtube", accountSlug: "youtube-1", defaultLocale: "en", allowedLocales: ["en"] }],
+    assets: [
+      { id: "media-tutorial", allowedChannels: ["youtube"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "video", longForm: true },
+      { id: "media-short", allowedChannels: ["youtube"], altLocales: ["en"], claimIds: [], validUntil: "2099-12-31", kind: "video" },
+    ],
+  });
+  const scope = { channelId: "chn_yt", locale: "en", count: 2, callIndex: 0 };
+  const [system, user] = marketingA5Messages(youtube, scope);
+  assert.match(system.content, /Tomverse adds the video's chapter list after your post, so never write a timestamp or a chapter list yourself/);
+  assert.match(system.content, /keep such a post under 1,500 characters/);
+  const offered = JSON.parse(user.content).assets;
+  assert.equal(offered.find((asset) => asset.id === "media-tutorial").longForm, true);
+  // Only a long-form asset carries the key.
+  assert.equal("longForm" in offered.find((asset) => asset.id === "media-short"), false);
+
+  const text = "Compare three AI answers\nA walkthrough of Tomverse Review.\n#Shorts #AI #Tomverse";
+  const { drafts, hashtagsRemoved } = readMarketingA5Answer(
+    answer([
+      proposal({ renderedText: text, claimIds: [], assetIds: ["media-tutorial"] }),
+      proposal({ renderedText: text, claimIds: [], assetIds: ["media-short"] }),
+    ]),
+    youtube,
+    scope,
+  );
+  assert.deepEqual(
+    drafts.map((draft) => draft.renderedText),
+    ["Compare three AI answers\nA walkthrough of Tomverse Review.\n#AI #Tomverse", text],
+  );
+  assert.deepEqual(hashtagsRemoved, { hashtag_shorts_on_long_form: 1 });
 });
 
 test("a refused answer removes no hashtags", () => {

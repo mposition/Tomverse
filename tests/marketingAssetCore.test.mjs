@@ -94,3 +94,36 @@ test("a video says what it says in at least one locale, each at most 20,000 char
   assert.equal(parses(submission({ transcript: { en: "a".repeat(20_000), ko: "가".repeat(20_000) } })), true);
   assert.equal(parses(submission({ transcript: { en: "a".repeat(20_001) } })), false);
 });
+
+test("a long video may carry YouTube chapters, checked against its length and its alt locales (owner decision 2026-11-07)", () => {
+  const chapters = [
+    { startSeconds: 0, title: { en: "What you will build" } },
+    { startSeconds: 42, title: { en: "Ask three models" } },
+    { startSeconds: 128, title: { en: "Compare the answers" } },
+  ];
+  const tutorial = (overrides = {}) => submission({ durationSeconds: 300, chapters, ...overrides });
+  assert.equal(parses(tutorial()), true);
+  // Absent is no chapters; the field is optional and an explicit null is not a list.
+  assert.equal(parses(submission()), true);
+  assert.equal(parses(tutorial({ chapters: null })), false);
+  // The last section runs to the video's end and needs ten seconds too.
+  assert.equal(parses(tutorial({ durationSeconds: 138 })), true);
+  assert.equal(parses(tutorial({ durationSeconds: 137 })), false);
+  // YouTube's rules: three or more, 0 first, ascending by ten seconds or more.
+  assert.equal(parses(tutorial({ chapters: chapters.slice(0, 2) })), false);
+  assert.equal(parses(tutorial({ chapters: [{ ...chapters[0], startSeconds: 5 }, ...chapters.slice(1)] })), false);
+  assert.equal(parses(tutorial({ chapters: [chapters[0], { ...chapters[1], startSeconds: 9 }, chapters[2]] })), false);
+  // A title per alt locale: this asset is posted in en only; a ko alt text needs ko titles.
+  assert.equal(parses(tutorial({ asset: { ...submission().asset, alt: { en: "A tour.", ko: "둘러보기." } } })), false);
+  // Known locales only, one line, with a length limit.
+  assert.equal(parses(tutorial({ chapters: [{ ...chapters[0], title: { en: "Intro", fr: "Intro" } }, ...chapters.slice(1)] })), false);
+  assert.equal(parses(tutorial({ chapters: [{ ...chapters[0], title: { en: "a".repeat(61) } }, ...chapters.slice(1)] })), false);
+  assert.equal(parses(tutorial({ chapters: [{ ...chapters[0], title: { en: "Intro\n00:05 Fake" } }, ...chapters.slice(1)] })), false);
+  // A field the chapter does not have is refused, not ignored.
+  assert.equal(parses(tutorial({ chapters: [{ ...chapters[0], endSeconds: 42 }, ...chapters.slice(1)] })), false);
+  // An image has no chapters.
+  assert.equal(
+    parses(submission({ kind: "image", contentType: "image/png", bytes: 400_000, durationSeconds: null, chapters })),
+    false,
+  );
+});

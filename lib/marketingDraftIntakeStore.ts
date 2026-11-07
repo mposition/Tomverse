@@ -27,7 +27,8 @@ import {
   resolveMarketingAutomationAccess,
   type ReadResult,
 } from "@/lib/marketingAutomationAccess";
-import type { MarketingChannel as MarketingChannelName } from "@/lib/marketingAutomationSchema";
+import { readApprovedMarketingAssetChapters } from "@/lib/marketingAssetStore";
+import { marketingEnvelopeSchema, type MarketingChannel as MarketingChannelName } from "@/lib/marketingAutomationSchema";
 import {
   MARKETING_LLM_SETTINGS_KEY,
   parseMarketingLlmMonthlyCap,
@@ -56,6 +57,10 @@ import {
   marketingEnvelopeDigest,
   type MarketingTransaction,
 } from "@/lib/marketingStore";
+import {
+  MARKETING_CHAPTERS_DO_NOT_FIT_REFUSAL_CODE,
+  marketingYoutubeDraftText,
+} from "@/lib/marketingVideoChapters";
 
 /** S3's audit actions; the S2 lists stay as they were reviewed. */
 export const MARKETING_S3_ACTIONS = {
@@ -308,18 +313,7 @@ export async function intakeMarketingGeneratorDraft(
   if (!channel) return { status: "refused", reasons: ["intake_channel_unknown"] };
 
   const channelName = channel.channel as MarketingChannelName;
-  const envelope = {
-    channel: channelName,
-    accountSlug: channel.accountSlug,
-    locale: draft.locale,
-    renderedText: draft.renderedText,
-    claimIds: [...draft.claimIds],
-    assets: draft.assets.map((asset) => ({ assetId: asset.assetId, altKey: asset.altKey })),
-    finalUrl: null,
-    scheduledAt: null,
-    disclosureFlags: [...draft.disclosureFlags],
-  };
-  const assetIds = envelope.assets.map((asset) => asset.assetId);
+  const assetIds = draft.assets.map((asset) => asset.assetId);
   // An account does not carry an asset it has already used (owner decision
   // 2026-11-04). The generator is not offered such assets, so this is the
   // second line: a draft that names one is refused before anything is written.
@@ -332,6 +326,42 @@ export async function intakeMarketingGeneratorDraft(
     select: { id: true },
   });
   if (reused) return { status: "refused", reasons: [MARKETING_ASSET_REUSE_REFUSAL_CODE] };
+
+  // A YouTube draft carrying a video with chapters gets the video's chapter
+  // list at the end of its description (owner decision 2026-11-07). Written
+  // here, by code and from the stored asset -- never by the model, which
+  // would make the times up -- so the Guard below reads the whole text and the
+  // envelope digest a person approves covers it; nothing changes the words
+  // after approval.
+  let renderedText = draft.renderedText;
+  if (channelName === "youtube") {
+    const chapters = await readApprovedMarketingAssetChapters(tx, assetIds);
+    // Each named asset once; two assets with chapters is no one list.
+    const withChapters = marketingYoutubeDraftText(
+      draft.renderedText,
+      draft.locale,
+      [...new Set(assetIds)].flatMap((id) => {
+        const list = chapters.get(id);
+        return list ? [list] : [];
+      }),
+    );
+    if ("refused" in withChapters) return { status: "refused", reasons: [withChapters.refused] };
+    if (!marketingEnvelopeSchema.shape.renderedText.safeParse(withChapters.text).success) {
+      return { status: "refused", reasons: [MARKETING_CHAPTERS_DO_NOT_FIT_REFUSAL_CODE] };
+    }
+    renderedText = withChapters.text;
+  }
+  const envelope = {
+    channel: channelName,
+    accountSlug: channel.accountSlug,
+    locale: draft.locale,
+    renderedText,
+    claimIds: [...draft.claimIds],
+    assets: draft.assets.map((asset) => ({ assetId: asset.assetId, altKey: asset.altKey })),
+    finalUrl: null,
+    scheduledAt: null,
+    disclosureFlags: [...draft.disclosureFlags],
+  };
   // S3a2: the facts, their clock and the rows they rest on are read in this
   // transaction, and the snapshot stored with the post is the one the Guard's
   // decision is bound to.
@@ -344,7 +374,7 @@ export async function intakeMarketingGeneratorDraft(
   });
   const verdict = guardDraft({
     draft: {
-      renderedText: draft.renderedText,
+      renderedText: envelope.renderedText,
       locale: draft.locale,
       channel: channelName,
       channelId: draft.channelId,
