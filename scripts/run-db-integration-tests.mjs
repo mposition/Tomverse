@@ -251,6 +251,9 @@ run(
     "tests/integration/amuxCliUsageLedger.db.test.mjs",
     "tests/integration/amuxCliUsageRetention.db.test.mjs",
     "tests/integration/amuxCliUsageWriter.db.test.mjs",
+    // An owner retry of a named Claude CLI failure reaches the claim; its
+    // partial receipt still holds the worker for every other Task.
+    "tests/integration/amuxV22CliFailureRetryClaim.db.test.mjs",
     "tests/integration/amuxV22AutoPromotion.db.test.mjs",
     "tests/integration/amuxV22TaskPatchSchema.db.test.mjs",
     "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
