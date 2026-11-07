@@ -60,7 +60,7 @@ test.describe("admin session contract", () => {
 
     await page.goto("/admin/overview");
     await expect(page).toHaveURL("/admin/overview");
-    await expect(consoleHeading(page)).toHaveText("Overview");
+    await expect(consoleHeading(page)).toHaveText("Today");
   });
 
   test("signing out returns the same route to sign-in", async ({
@@ -71,7 +71,7 @@ test.describe("admin session contract", () => {
   }) => {
     await signInAs("owner");
     await page.goto("/admin/overview");
-    await expect(consoleHeading(page)).toHaveText("Overview");
+    await expect(consoleHeading(page)).toHaveText("Today");
 
     await signOutOfAdmin();
 

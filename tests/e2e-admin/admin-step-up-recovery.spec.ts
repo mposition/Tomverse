@@ -34,7 +34,7 @@ test.describe("high-risk step-up recovery", () => {
     await signInAs("ops", { authenticatedMinutesAgo: 45 });
 
     // 2. Change a platform flag and save.
-    await page.goto("/admin/platform");
+    await page.goto("/admin/platform?tab=features");
     const imageFlag = page.getByTestId("admin-image-generation-flag");
     await expect(imageFlag).not.toBeChecked();
     await imageFlag.check();
@@ -56,7 +56,7 @@ test.describe("high-risk step-up recovery", () => {
     // 4. The CTA leads to the card -- not back to the screen that refused.
     await page.getByTestId("admin-platform-reauthenticate-link").click();
     await expect(page).toHaveURL(
-      "/auth/admin-reauthenticate?callbackUrl=%2Fadmin%2Fplatform&mode=recent"
+      "/auth/admin-reauthenticate?callbackUrl=%2Fadmin%2Fplatform%3Ftab%3Dfeatures&mode=recent"
     );
     const card = page.getByTestId("admin-reauthentication-card");
     await expect(card).toBeVisible();
@@ -86,7 +86,7 @@ test.describe("high-risk step-up recovery", () => {
     await signInAs("ops");
 
     // 7. Back on the same screen, the edit is made again by hand and saved.
-    await page.goto("/admin/platform");
+    await page.goto("/admin/platform?tab=features");
     await expect(
       page.getByTestId("admin-platform-reauthentication")
     ).toHaveCount(0);
@@ -118,10 +118,11 @@ test.describe("high-risk step-up recovery", () => {
     // The other half of the contract: the step-up window is not console
     // access. Widening the recovery must not have turned a 428 into a lockout.
     await signInAs("ops", { authenticatedMinutesAgo: 45 });
-    await page.goto("/admin/platform");
+    await page.goto("/admin/models?tab=defaults");
     await expect(page.getByLabel("Leading model")).toHaveValue(
       FIXTURE_APP_SETTINGS.guestDefaultModelId
     );
+    await page.goto("/admin/platform");
     await expect(page.getByTestId("admin-platform-save")).toBeEnabled();
   });
 

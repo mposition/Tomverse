@@ -13,11 +13,11 @@ const createMissingAdmissionHalt = (reasonCode = "unacked_write_receipt") => adm
 test("legacy halt and Decision Maker bookmarks retain their exact operations-settings section", async ({ page, signInAs }) => {
   await signInAs("owner");
   await page.goto("/admin/amux-execution?tab=halts&taskId=task-example");
-  await expect(page).toHaveURL("/admin/amux-settings?tab=safety&taskId=task-example");
-  await expect(consoleHeading(page)).toHaveText("Operations settings");
-  const tabs = page.getByRole("navigation", { name: "AMUX operations settings sections" });
-  // The owner also sees Automatic admission and Analysis settings.
-  await expect(tabs.getByRole("link")).toHaveCount(5);
+  await expect(page).toHaveURL("/admin/amux-recovery?tab=safety&taskId=task-example");
+  await expect(consoleHeading(page)).toHaveText("Safety & recovery");
+  const tabs = page.getByRole("navigation", { name: "Safety and recovery sections" });
+  // The owner also sees Reservations & claims and the Legacy tools.
+  await expect(tabs.getByRole("link")).toHaveCount(3);
   // The router may retain a hidden previous page; assert the active controls.
   const status = page.getByTestId("amux-halt-status").filter({ visible: true });
   await expect(status).toHaveCount(1);
@@ -32,7 +32,7 @@ test("legacy halt and Decision Maker bookmarks retain their exact operations-set
 test("a halt outside the automatic list needs all operator checks, the exact key, and a server-confirmed clear", async ({ page, signInAs }, testInfo) => {
   await createMissingAdmissionHalt();
   await signInAs("owner");
-  await page.goto("/admin/amux-settings?tab=safety");
+  await page.goto("/admin/amux-recovery?tab=safety");
   const row = page.getByTestId("amux-halt-row").filter({ has: page.getByTestId("amux-halt-clear") });
   await expect(row).toHaveAttribute("data-attention", "operator_required");
   await expect(row).toContainText("not confirmation of no change");
@@ -56,7 +56,7 @@ test("a halt outside the automatic list needs all operator checks, the exact key
 
 test("ops may inspect recovery evidence but cannot clear a halt through UI or API", async ({ page, signInAs }) => {
   await createMissingAdmissionHalt(); await signInAs("ops");
-  await page.goto("/admin/amux-settings?tab=safety");
+  await page.goto("/admin/amux-recovery?tab=safety");
   await expect(page.getByTestId("amux-halt-row")).toContainText("Only the owner can clear");
   await expect(page.getByTestId("amux-halt-clear")).toHaveCount(0);
   const response = await adminApi(page).post("/api/admin/amux/orchestrator-halts", { haltId: HALT_ID, haltKeyPrefix: REQUEST_ID.slice(0, 8) });
@@ -73,7 +73,7 @@ test("an open no_commit halt with incomplete automatic evidence keeps the owner'
     resolvedAt: new Date(now - 10000), resolution: "no_commit",
   } });
   await signInAs("owner");
-  await page.goto("/admin/amux-settings?tab=safety");
+  await page.goto("/admin/amux-recovery?tab=safety");
   const row = page.getByTestId("amux-halt-row");
   await expect(row).toHaveAttribute("data-attention", "operator_required");
   await expect(row).toContainText("Check the automatic-clear audit and evidence");
@@ -89,7 +89,7 @@ test("an open no_commit halt with incomplete automatic evidence keeps the owner'
 
 test("uncertain clear responses hold the controls and never offer a blind retry", async ({ page, signInAs }) => {
   await createMissingAdmissionHalt(); await signInAs("owner");
-  await page.goto("/admin/amux-settings?tab=safety");
+  await page.goto("/admin/amux-recovery?tab=safety");
   const row = page.getByTestId("amux-halt-row");
   for (const checkbox of await row.getByRole("checkbox").all()) await checkbox.check();
   await row.getByTestId("amux-halt-clear-prefix").fill(REQUEST_ID.slice(0, 8));
@@ -111,7 +111,7 @@ test("uncertain clear responses hold the controls and never offer a blind retry"
 test("recovery checks and cause guidance reflow at 320px, large text and dark theme", async ({ page, context, signInAs }, testInfo) => {
   await createMissingAdmissionHalt(); await signInAs("owner");
   await context.addCookies([{ name: "tomverse_admin_lang", value: "ko", url: "https://127.0.0.1:3101" }]);
-  await page.goto("/admin/amux-settings?tab=safety");
+  await page.goto("/admin/amux-recovery?tab=safety");
   await expect(page.getByTestId("amux-halt-row")).toContainText("운영 확인 필요");
   await expect(page.getByTestId("amux-halt-row")).toContainText("미반영 확정과는 다릅니다");
   const decline = page.getByRole("button", { name: "Decline", exact: true });

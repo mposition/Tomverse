@@ -217,31 +217,31 @@ test("an open switch is drawn for attention and a closed one is not", () => {
 });
 
 test("the pages ask the switches rather than writing the state", () => {
-  for (const [segment, tabs] of [
-    ["amux-backlog", ["import", "reconciliation", "metadata"]],
-    ["amux-promotion", ["recommendation", "promotion", "auto-promotion"]],
-  ]) {
-    const page = read(`app/(site)/(application)/admin/${segment}/page.tsx`);
-    assert.ok(
-      page.includes(`amuxSwitchedTabStatuses([${tabs.map((tab) => `"${tab}"`).join(", ")}])`),
-      `${segment} does not read every section's switch`
-    );
-    assert.doesNotMatch(page, /apply off|apply_off"|server switch/i, `${segment} writes a state`);
+  // The six retired tools are the Legacy tools of Safety & recovery; the page
+  // reads each one's switch rather than writing the state.
+  const recovery = read("app/(site)/(application)/admin/amux-recovery/page.tsx");
+  assert.ok(
+    recovery.includes("amuxSwitchedTabStatuses(LEGACY_SECTIONS)"),
+    "amux-recovery does not read every legacy section's switch"
+  );
+  for (const section of ["import", "reconciliation", "metadata", "recommendation", "promotion", "auto-promotion"]) {
+    assert.ok(recovery.includes(`"${section}",`), `${section} is not a legacy section`);
   }
+  assert.doesNotMatch(recovery, /apply off|apply_off"|server switch/i, "amux-recovery writes a state");
+  assert.doesNotMatch(read("app/(site)/(application)/admin/amux-backlog/page.tsx"), /amuxSwitchedTabStatuses/);
   const settings = read("app/(site)/(application)/admin/amux-settings/page.tsx");
   assert.match(
     settings,
     /amuxSwitchedTabStatus\("automatic-admission"\)/
   );
   assert.match(settings, /<AmuxV22PromotionControl \/>/);
-  const promotion = read("app/(site)/(application)/admin/amux-promotion/page.tsx");
-  assert.doesNotMatch(promotion, /AmuxV22PromotionControl/);
+  assert.doesNotMatch(recovery, /AmuxV22PromotionControl/);
   const execution = read("app/(site)/(application)/admin/amux-execution/page.tsx");
   // Assignment is read only exactly when the escalation routes would refuse
   // this viewer's decisions.
   assert.match(
     execution,
-    /assignment: hasAdminPermission\(session, "ops:write"\) \? undefined : "read_only"/
+    /review: hasAdminPermission\(session, "ops:write"\) \? undefined : "read_only"/
   );
   for (const route of [
     "app/api/admin/amux/escalations/route.ts",

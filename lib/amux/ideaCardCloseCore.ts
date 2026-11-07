@@ -44,7 +44,7 @@ export const amuxIdeaCardCloseStaleDays = (env: AmuxIdeaCardCloseEnv = process.e
 
 export type AmuxIdeaCardCloseReason = "blocked_task" | "stale_cards";
 export type AmuxIdeaCardCloseDecision = "close" | "keep";
-export type AmuxIdeaCardCloseAnswerSource = "operator" | "dm_confirmed";
+export type AmuxIdeaCardCloseAnswerSource = "operator" | "dm_confirmed" | "dm";
 
 /** One registered card of an idea, with what could still be moving it. */
 export type AmuxIdeaCardCloseCardFact = {
@@ -105,6 +105,9 @@ export const AMUX_IDEA_CARD_CLOSE_BLOCK_REASON_TEXT: Readonly<Record<AmuxIdeaBlo
   cli_turn_limit: "its run stopped at its turn limit",
   cli_execution_error: "its run stopped with an execution error",
   cli_budget_limit: "its run stopped at its cost limit",
+  analysis_stop: "its investigation concluded the idea should not go on",
+  analysis_replan: "its investigation concluded the remaining plan should change",
+  review_server_rejected_twice: "the automatic code review rejected its change twice",
 });
 
 const FINISHED = new Set(["done", "cancelled"]);

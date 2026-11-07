@@ -8,7 +8,8 @@ import {
 import { adminFixtureDatabase } from "./support/database";
 
 /**
- * "Promotion diagnostics", inside Billing's Promotions section.
+ * "Promotion diagnostics", Billing's Diagnostics tab (it sat under the
+ * Promotions editor until 2026-11-07).
  *
  * The behaviour under test is the reason the panel was built: an operator can
  * investigate a promotion that refuses at Checkout without creating an account
@@ -27,7 +28,7 @@ const panel = (page: import("@playwright/test").Page) =>
   page.getByTestId("promotion-diagnostics-panel");
 
 const openPromotions = async (page: import("@playwright/test").Page) => {
-  await page.goto("/admin/billing?tab=promotions");
+  await page.goto("/admin/billing?tab=diagnostics");
   await expect(panel(page)).toBeVisible();
 };
 
@@ -154,25 +155,23 @@ test.describe("promotion diagnostics", () => {
     ).toContainText("plan_not_eligible");
   });
 
-  test("an unsaved edit disables the run instead of answering about a stale row", async ({
+  test("an unsaved edit does not follow the operator to Diagnostics, and nothing is saved", async ({
     page,
   }) => {
-    await openPromotions(page);
-    await expect(page.getByTestId("promotion-diagnostics-run")).toBeEnabled();
-
-    // Edit the promotion in the catalogue editor above without saving.
+    // Diagnostics is its own tab now, so the editor and its unsaved draft are
+    // no longer beside it: leaving the editor leaves the draft, and the run
+    // must not stay disabled for a draft that is gone.
+    await page.goto("/admin/billing?tab=promotions");
     await page
       .getByRole("textbox", { name: "Code", exact: true })
       .first()
       .fill(`${FIXTURE_PROMOTION.code}X`);
 
-    await expect(
-      page.getByTestId("promotion-diagnostics-dirty-notice")
-    ).toBeVisible();
-    await expect(
-      page.getByTestId("promotion-diagnostics-dirty-notice")
-    ).toContainText("Save or discard changes before diagnosing");
-    await expect(page.getByTestId("promotion-diagnostics-run")).toBeDisabled();
+    await page.getByRole("link", { name: "Diagnostics" }).click();
+    await expect(page).toHaveURL(/tab=diagnostics/);
+    await expect(panel(page)).toBeVisible();
+    await expect(page.getByTestId("promotion-diagnostics-dirty-notice")).toHaveCount(0);
+    await expect(page.getByTestId("promotion-diagnostics-run")).toBeEnabled();
 
     // And nothing was saved on the way past.
     expect((await promotionSnapshot()).appliesToPlanIds).toBe(
@@ -227,10 +226,11 @@ test.describe("promotion diagnostics", () => {
     await expect(
       page.getByTestId("promotion-diagnostics-summary")
     ).toHaveCount(0);
-    await expect(error.getByRole("button", { name: "Retry" })).toBeVisible();
+    // The shared error block names its retry "Try again".
+    await expect(error.getByRole("button", { name: "Try again" })).toBeVisible();
 
     await page.unroute("**/api/admin/billing/promotions/diagnose");
-    await error.getByRole("button", { name: "Retry" }).click();
+    await error.getByRole("button", { name: "Try again" }).click();
     await expect(page.getByTestId("promotion-diagnostics-summary")).toBeVisible();
     await expect(page.getByTestId("promotion-diagnostics-error")).toHaveCount(0);
   });

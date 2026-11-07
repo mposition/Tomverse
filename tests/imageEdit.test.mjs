@@ -270,10 +270,10 @@ test("an xAI edit is the generation's 1K square plus the photo as a data URL", a
 });
 
 test("a fal edit keeps every priced field and adds the photo as a data URI", async () => {
-  const { buildFalImageEditRequest, buildFalImageRequest, FAL_EDIT_ENDPOINT_SUFFIX } = await import(
+  const { buildFalImageEditRequest, buildFalImageRequest, falEndpointUrl } = await import(
     "../lib/falImageRequest.ts"
   );
-  const request = { prompt: "smaller tree", size: "1024x1024", outputFormat: "png" };
+  const request = { apiModelId: "fal-ai/nano-banana-2", prompt: "smaller tree", size: "1024x1024", outputFormat: "png" };
   const body = buildFalImageEditRequest({ ...request, image: { bytes: Buffer.from("png-bytes"), mimeType: "image/png" } });
   assert.deepEqual(body, {
     ...buildFalImageRequest(request),
@@ -282,7 +282,7 @@ test("a fal edit keeps every priced field and adds the photo as a data URI", asy
   assert.equal(body.aspect_ratio, "1:1");
   assert.equal(body.thinking_level, "high");
   assert.equal(body.enable_web_search, false);
-  assert.equal(FAL_EDIT_ENDPOINT_SUFFIX, "/edit");
+  assert.equal(falEndpointUrl("fal-ai/nano-banana-2", true), "https://fal.run/fal-ai/nano-banana-2/edit");
   assert.equal(buildFalImageEditRequest({ ...request, size: "1536x1024", image: { bytes: Buffer.from("x"), mimeType: "image/png" } }), null);
 });
 

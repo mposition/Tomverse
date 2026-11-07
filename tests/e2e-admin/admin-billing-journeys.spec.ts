@@ -27,18 +27,36 @@ const refundCard = (page: import("@playwright/test").Page, reason: string) =>
   page.locator("article").filter({ hasText: reason });
 
 /**
- * Saves the promotion catalogue. Any dirty change makes the panel ask for an
- * explicit publish confirmation first -- "Checkout uses these values
- * immediately" -- so a save is a two-step action, and the test performs both.
+ * Approving asks first: the card's Approve opens a dialog that states the
+ * customer and what will happen, and only its confirm button sends the write.
+ * It is a step-up action, so the confirm button is worded "Sign in again and
+ * approve".
+ */
+const approveRefund = async (
+  page: import("@playwright/test").Page,
+  card: import("@playwright/test").Locator
+) => {
+  await card.getByRole("button", { name: "Approve" }).click();
+  const dialog = page.getByRole("dialog", { name: "Approve this refund?" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(FIXTURE_REFUNDS.pending.email);
+  await dialog.getByRole("button", { name: /approve/i }).click();
+  await expect(dialog).toHaveCount(0);
+};
+
+/**
+ * Saves the promotion catalogue. There is one save path: the save bar that
+ * appears once something is unsaved opens the review of what will change
+ * ("Checkout uses these values as soon as you save"), and only that review's
+ * confirm button writes. The test performs both steps.
  */
 const savePromotions = async (page: import("@playwright/test").Page) => {
-  // The panel header's save is the one that asks for confirmation; the
-  // catalogue footer carries a second, direct save.
-  await page.getByRole("button", { name: "Save to DB" }).first().click();
+  await page.getByRole("button", { name: "Review changes and save" }).click();
+  const review = page.getByRole("dialog");
   await expect(
-    page.getByText("Review before publishing billing changes")
+    review.getByRole("heading", { name: "Review billing changes" })
   ).toBeVisible();
-  await page.getByRole("button", { name: "Publish changes" }).click();
+  await review.getByRole("button", { name: "Save changes" }).click();
 };
 
 test.describe("billing journeys", () => {
@@ -102,7 +120,7 @@ test.describe("billing journeys", () => {
         "I reviewed purchased credit balance, used credits, and funded AI cost."
       )
       .check();
-    await card.getByRole("button", { name: "Approve" }).click();
+    await approveRefund(page, card);
 
     // Success UI: the queue counters move and the request leaves the pending
     // filter the panel opens on.
@@ -169,7 +187,7 @@ test.describe("billing journeys", () => {
     //      any other test in the suite produces, so a stale render cannot pass
     //      by coincidence.
     await page.goto("/admin/users");
-    await expect(page.getByRole("button", { name: /^Free access/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^All accounts/ })).toBeVisible();
     const freeBefore = await database.user.count({ where: { plan: "Free" } });
 
     const PADDING_ACCOUNTS = 7;
@@ -188,7 +206,7 @@ test.describe("billing journeys", () => {
         "I reviewed purchased credit balance, used credits, and funded AI cost."
       )
       .check();
-    await card.getByRole("button", { name: "Approve" }).click();
+    await approveRefund(page, card);
     await expect(page.getByRole("button", { name: "Pending 0" })).toBeVisible();
     await expect(card).toHaveCount(0);
 
@@ -197,9 +215,13 @@ test.describe("billing journeys", () => {
     expect(freeAfter).toBe(freeBefore + PADDING_ACCOUNTS + 1);
 
     await page.goto("/admin/users");
+    // The padding accounts make the total a figure no earlier test produced.
+    const totalAfter = await database.user.count();
     await expect(
-      page.getByRole("button", { name: /^Free access/ })
-    ).toHaveAccessibleName(new RegExp(`^Free access ${freeAfter}\\b`));
+      page.getByRole("button", { name: /^All accounts/ })
+    ).toHaveAccessibleName(
+      new RegExp(`^All accounts ${totalAfter.toLocaleString("en-US")}\\b`)
+    );
   });
 
   test("a refund can be rejected without any credit acknowledgement", async ({

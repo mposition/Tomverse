@@ -5,8 +5,8 @@ import { test } from "node:test";
 import {
   ADMIN_LEGACY_ROUTES,
   ADMIN_SEARCHABLE_PAGES,
+  adminHrefIsVisibleTo,
   adminNavItemTabs,
-  adminSearchablePagesFor,
   resolveAdminPageMeta,
 } from "../lib/adminNavigation.ts";
 import { SYSTEM_AUDIT_ACTORS } from "../lib/adminAuditSystemActors.ts";
@@ -464,35 +464,34 @@ test("the system actor writes only through its own audit module", () => {
 });
 
 test("the screen is owner-only, listed to the owner alone, and offers the step-up link", () => {
-  const page = read("app/(site)/(application)/admin/amux-promotion/page.tsx");
+  const page = read("app/(site)/(application)/admin/amux-recovery/page.tsx");
   const panel = read("components/admin/AmuxBoardAutoPromotionPanel.tsx");
-  assert.match(page, /getAdminRole\(session\) !== "owner"\) notFound\(\)/);
+  // Legacy tools of Safety & recovery are refused to every role but the owner.
+  assert.match(page, /if \(tab\.id === "legacy"\) \{[\s\S]*?if \(!isOwner\) notFound\(\);/);
+  assert.match(page, /<AmuxBoardAutoPromotionPanel \/>/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(
     panel,
-    /adminRecentAuthenticationHref\("\/admin\/amux-promotion\?tab=auto-promotion"\)/,
+    /adminRecentAuthenticationHref\("\/admin\/amux-recovery\?tab=legacy"\)/,
   );
   assert.match(panel, /adminFetch\(/);
   // The resume header the screen sends is the one the core parser accepts.
   assert.match(panel, new RegExp(`RESUME_CANONICALIZATION_VERSION = "${AUTO_PROMOTION_CANONICALIZATION_VERSION}"`));
   assert.match(panel, new RegExp(`RESUME_POLICY_VERSION = ${AUTO_PROMOTION_POLICY_VERSION};`));
-  // The screen moved into Promotion's Auto-promotion section; its old address
-  // still resolves there.
-  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-board-auto-promotion"], "/admin/amux-promotion?tab=auto-promotion");
-  const movedTo = resolveAdminPageMeta("/admin/amux-promotion");
-  assert.equal(movedTo.label, "Promotion");
+  // The screen moved into the Legacy tools tab of Safety & recovery (2026-11-07);
+  // its old addresses still resolve there.
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-board-auto-promotion"], "/admin/amux-recovery?tab=legacy");
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-promotion"], "/admin/amux-recovery?tab=legacy");
+  const movedTo = resolveAdminPageMeta("/admin/amux-recovery");
+  assert.equal(movedTo.label, "Safety & recovery");
   assert.equal(movedTo.isKnown, true);
   assert.equal(
-    adminNavItemTabs("amux-promotion").find((tab) => tab.id === "auto-promotion")?.label,
-    "Auto-promotion",
+    adminNavItemTabs("amux-recovery").find((tab) => tab.id === "legacy")?.label,
+    "Legacy tools",
   );
-  // Listed to the owner only: every other role would receive a 404.
+  // The Legacy tools tab is listed to the owner only: every other role would receive a 404.
   for (const role of ["billing", "support", "ops", "readonly"]) {
-    assert.equal(
-      adminSearchablePagesFor(role).some((entry) => entry.href === "/admin/amux-promotion"),
-      false,
-      role,
-    );
+    assert.equal(adminHrefIsVisibleTo(role, "/admin/amux-recovery?tab=legacy"), false, role);
   }
   assert.equal(
     ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-board-auto-promotion"),

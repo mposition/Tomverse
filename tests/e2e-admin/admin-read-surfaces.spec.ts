@@ -43,28 +43,25 @@ test.describe("admin read surfaces", () => {
     await signInAs("owner");
   });
 
-  test("overview summarises accounts, attention items, and recent admin activity", async ({
+  test("overview greets the operator, counts the waiting decisions, and shows recent admin activity", async ({
     page,
   }) => {
     await page.goto("/admin/overview");
 
-    await expect(consoleHeading(page)).toHaveText("Overview");
+    await expect(consoleHeading(page)).toHaveText("Today");
+    await expect(page.getByTestId("admin-overview-greeting")).toBeVisible();
+    // The decisions waiting on a person are counted from the seeded unclosed
+    // feedback (three, the verified-trace report that arrived in `reviewing`
+    // included), the pending refund and the open privacy request, so the line
+    // is never "nothing is waiting" on this fixture.
+    await expect(page.getByTestId("admin-overview-decision-line")).toContainText(
+      /\d+ decisions? (is|are) waiting on you/
+    );
+    await expect(page.getByRole("heading", { name: "Decide now" })).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Operations snapshot" })
+      page.getByRole("heading", { name: "Waiting on you, by area" })
     ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Launch readiness queue" })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Revenue and retention snapshot" })
-    ).toBeVisible();
-    // The work-queue counter is computed from the seeded unclosed feedback and
-    // pending refund. (The "Needs attention" list is capped at six items and
-    // is dominated by unconfigured providers on this fixture, so the counter
-    // is the deterministic signal.) Three, not two: the verified-trace report
-    // that arrived in `reviewing` is work too, and read zero here until
-    // 2026-09-28.
-    await expect(page.getByText("3 feedback / 1 refund")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Service status" })).toBeVisible();
     // The sidebar badges on real Postgres. Support: three unclosed reports
     // plus the open privacy request. The work queue: those three reports, the
     // refund and the privacy request. Both read one short while the reviewing
@@ -73,18 +70,15 @@ test.describe("admin read surfaces", () => {
       page.getByRole("link", { name: /^Support, 4 awaiting action/ }).first()
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: /^Work queue, 5 awaiting action/ }).first()
+      page.getByRole("link", { name: /^Decisions, 5 awaiting action/ }).first()
     ).toBeVisible();
     // Recent administrator activity replays the seeded audit row.
     await expect(page.getByText(FIXTURE_AUDIT_LOG.summary)).toBeVisible();
-    // Each fact appears once: the operations snapshot, the KPI strip, the
-    // attention list and the environment table used to be rendered twice each.
-    await expect(
-      page.getByRole("heading", { name: "Launch readiness queue" })
-    ).toHaveCount(1);
+    // Each fact appears once: no second decisions list, no environment table.
+    await expect(page.getByRole("heading", { name: "Decide now" })).toHaveCount(1);
     await expect(
       page.getByRole("heading", { name: "Environment health" })
-    ).toHaveCount(1);
+    ).toHaveCount(0);
   });
 
   test("overview offers pinned pages instead of a default-view control", async ({
@@ -100,57 +94,51 @@ test.describe("admin read surfaces", () => {
     await expect(page.getByRole("button", { name: "Set default" })).toHaveCount(0);
   });
 
-  test("the work queue ranks every open item and links to the page that owns it", async ({
+  test("the decision inbox lists every open item and links to the page that owns it", async ({
     page,
   }) => {
     await page.goto("/admin/work-queue");
 
-    await expect(
-      page.getByRole("heading", { name: "Open work, oldest first" })
-    ).toBeVisible();
-    // The refund, the privacy request and the open feedback all appear as queue
+    await expect(page.getByTestId("admin-decision-inbox")).toBeVisible();
+    const pane = page.getByTestId("admin-decision-pane-detail");
+    const open = async (text: string | RegExp, href: string) => {
+      await page.getByTestId("admin-decision-row").filter({ hasText: text }).first().click();
+      // The decision is made on the original screen: the inbox only links.
+      await expect(pane.getByRole("link", { name: /^Handle it on/ })).toHaveAttribute("href", href);
+    };
+    // The refund, the privacy request and the open feedback all appear as
     // rows, each linking to the workspace that can act on it. Matched on the
-    // row's own title rather than on the email, which the seeded refund and the
-    // seeded privacy request share.
-    await expect(
-      page.getByRole("link", {
-        name: new RegExp(`Refund request from ${FIXTURE_REFUNDS.pending.email}`),
-      })
-    ).toHaveAttribute("href", "/admin/refunds");
-    await expect(
-      page.getByRole("link", { name: /export request from/ }).first()
-    ).toHaveAttribute("href", "/admin/support?tab=privacy");
-    await expect(
-      page.getByRole("link", { name: new RegExp(FIXTURE_FEEDBACK.open.message.slice(0, 30)) }).first()
-    ).toHaveAttribute("href", "/admin/support?tab=feedback");
-    // A report that arrived in review, untouched, is in the queue as well --
-    // it is the kind the server confirmed, and the kind the queue used to miss.
-    await expect(
-      page
-        .getByRole("link", {
-          name: new RegExp(FIXTURE_FEEDBACK.autoReviewed.message.slice(0, 30)),
-        })
-        .first()
-    ).toHaveAttribute("href", "/admin/support?tab=feedback");
-    // Only unclosed items belong in the queue.
+    // row's own subject rather than on the email, which the seeded refund and
+    // the seeded privacy request share.
+    await open(new RegExp(`Refund request from ${FIXTURE_REFUNDS.pending.email}`), "/admin/refunds");
+    await open(/export request from/, "/admin/support?tab=privacy");
+    await open(new RegExp(FIXTURE_FEEDBACK.open.message.slice(0, 30)), "/admin/support?tab=feedback");
+    // A report that arrived in review, untouched, is listed as well -- it is
+    // the kind the server confirmed, and the kind the queue used to miss.
+    await open(new RegExp(FIXTURE_FEEDBACK.autoReviewed.message.slice(0, 30)), "/admin/support?tab=feedback");
+    // Only unclosed items belong in the inbox.
     await expect(page.getByText(FIXTURE_FEEDBACK.resolved.message)).toHaveCount(0);
-    // The queue no longer stacks whole management panels underneath itself.
-    await expect(
-      page.getByRole("heading", { name: "Scheduled jobs" })
-    ).toHaveCount(0);
+    // The inbox no longer stacks whole management panels underneath itself.
+    await expect(page.getByRole("heading", { name: "Scheduled jobs" })).toHaveCount(0);
     await expect(
       page.getByRole("heading", { name: "Cancellation and refund requests" })
     ).toHaveCount(0);
     await expect(
       page.getByRole("heading", { name: "Unresolved support age" })
     ).toBeVisible();
+    // An area tab is the same list through a filter.
+    await page.getByRole("link", { name: /^System/ }).click();
+    await expect(page).toHaveURL(/tab=system/);
+    await expect(
+      page.getByTestId("admin-decision-row").filter({ hasText: /export request from/ })
+    ).toHaveCount(0);
   });
 
   test("the old approvals address opens the work queue", async ({ page }) => {
     await page.goto("/admin/approvals");
 
     await expect(page).toHaveURL("/admin/work-queue");
-    await expect(consoleHeading(page)).toHaveText("Work queue");
+    await expect(consoleHeading(page)).toHaveText("Decisions");
     await expect(
       page.getByRole("heading", { name: "High-risk admin approvals" })
     ).toHaveCount(0);
@@ -178,20 +166,26 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/analytics");
 
-    await expect(consoleHeading(page)).toHaveText("Analytics");
+    await expect(consoleHeading(page)).toHaveText("Metrics");
     // Streamed behind loading.tsx: wait for the one settled copy.
     await expect(page.getByTestId("admin-usage-analytics")).toHaveCount(1);
     const usage = page.locator("#main-content");
     await expect(usage.getByTestId("admin-usage-analytics")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Who is using Tomverse" })
-    ).toBeVisible();
-    // Today is the default period and is marked as the current one.
+    ).toHaveCount(1);
+    // Today is the default period and is marked as the current one. Scoped to
+    // the report's own period links: the sidebar now has a "Today" entry too.
     await expect(
-      page.getByRole("link", { name: "Today", exact: true })
+      usage
+        .getByTestId("admin-usage-analytics")
+        .getByRole("link", { name: "Today", exact: true })
     ).toHaveAttribute("aria-current", "page");
-    await expect(usage.getByTestId("admin-usage-models")).toBeVisible();
+    await expect(usage.getByTestId("admin-usage-trend")).toBeVisible();
     await expect(usage.getByTestId("admin-usage-activity")).toBeVisible();
+    // The model table and the distributions sit in the folded "More detail".
+    await usage.getByText("More detail").click();
+    await expect(usage.getByTestId("admin-usage-models")).toBeVisible();
     await expect(usage.getByTestId("admin-usage-segments")).toBeVisible();
     // A failed read renders a banner instead of the numbers; the seeded
     // database must never take that path.
@@ -215,25 +209,23 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/analytics?tab=product");
 
-    await expect(consoleHeading(page)).toHaveText("Analytics");
-    await expect(
-      page.getByRole("heading", { name: "Event funnel · last 30 days" })
-    ).toBeVisible();
+    await expect(consoleHeading(page)).toHaveText("Metrics");
+    await expect(page.getByRole("heading", { name: "From visit to payment" })).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Go-live funnel and activation" })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Top acquisition campaigns · 30d" })
-    ).toBeVisible();
+    ).toHaveCount(1);
     // The account-level funnel moved here from the promotions workspace.
     await expect(
       page.getByRole("heading", { name: "Launch conversion funnel" })
     ).toBeVisible();
-    // The seeded landing_view events reach both the funnel and the campaigns
-    // table, which is what distinguishes a rendered dashboard from an empty one.
+    // The campaign list and the raw event table are folded below the charts.
+    // The seeded landing_view events reach both, which is what distinguishes a
+    // rendered dashboard from an empty one.
+    await page.getByText("Top acquisition campaigns · 30d").click();
     await expect(
       page.getByText(FIXTURE_ANALYTICS.utmCampaign).first()
     ).toBeVisible();
+    await page.getByText("Event funnel · last 30 days").click();
     await expect(page.getByText(FIXTURE_ANALYTICS.eventName)).toBeVisible();
   });
 
@@ -311,15 +303,18 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/users");
 
-    await expect(page.getByText(FIXTURE_CUSTOMERS.activePro.name)).toBeVisible();
+    // The table, not the phone cards rendered (hidden) alongside it.
+    await expect(
+      page.getByRole("table").getByText(FIXTURE_CUSTOMERS.activePro.name)
+    ).toBeVisible();
     await expect(
       page.getByRole("link", {
-        name: `View details for ${FIXTURE_CUSTOMERS.disputedHold.email}`,
+        name: `Open ${FIXTURE_CUSTOMERS.disputedHold.email}`,
       })
     ).toBeVisible();
     // The disputed-hold customer is the one carrying debt, and the row says so.
-    await expect(page.getByText("AI access held")).toBeVisible();
-    await expect(page.getByText(/Debt 640 credits/)).toBeVisible();
+    await expect(page.getByText("AI access held").first()).toBeVisible();
+    await expect(page.getByText(/Owes 640 credits/).first()).toBeVisible();
   });
 
   test("the customer detail page renders plan, usage, credits, and timeline", async ({
@@ -329,11 +324,16 @@ test.describe("admin read surfaces", () => {
 
     await expect(consoleHeading(page)).toHaveText("Customer detail");
     await expect(page.getByText(FIXTURE_CUSTOMERS.activePro.email)).toBeVisible();
-    await expect(page.getByText("cus_e2e_active_pro")).toBeVisible();
+    // Billing section: the credit purchases, with the Stripe ids folded away.
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=billing`);
+    // Shown in the detail header and again in the folded billing facts.
+    await expect(page.getByText("cus_e2e_active_pro").first()).toBeAttached();
     await expect(
-      page.getByRole("heading", { name: "Additional credit purchases" })
+      page.getByRole("heading", { name: "Extra credit purchases" })
     ).toBeVisible();
     await expect(page.getByText(FIXTURE_CREDIT.packId).first()).toBeVisible();
+    // Conversations section.
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=conversations`);
     await expect(
       page.getByRole("heading", { name: "Recent conversations" })
     ).toBeVisible();
@@ -371,12 +371,14 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByTestId("admin-user-detail-messages-today")
     ).toHaveText("2");
-    // Usage is only half the detail; the relations alongside it must render
-    // too, so a green run means data reached the screen rather than an empty
-    // panel that merely stopped erroring.
+    // Usage is only half the detail; the relations on the other sections must
+    // render too, so a green run means data reached the screen rather than an
+    // empty panel that merely stopped erroring.
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=conversations`);
     await expect(
       page.getByText(FIXTURE_CONVERSATION.title).first()
     ).toBeVisible();
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=billing`);
     await expect(page.getByText(FIXTURE_CREDIT.packId).first()).toBeVisible();
   });
 
@@ -395,54 +397,53 @@ test.describe("admin read surfaces", () => {
     ).toHaveText("0");
   });
 
-  test("support's feedback tab shows open and resolved entries with a filter", async ({
+  test("support's feedback tab lists open and resolved reports with a filter", async ({
     page,
   }) => {
     await page.goto("/admin/support?tab=feedback");
 
+    const rows = page.getByTestId("feedback-list-item");
     await expect(consoleHeading(page)).toHaveText("Support");
-    await expect(page.getByText(FIXTURE_FEEDBACK.open.message)).toBeVisible();
-    await expect(page.getByText(FIXTURE_FEEDBACK.resolved.message)).toBeVisible();
+    await expect(rows.filter({ hasText: FIXTURE_FEEDBACK.open.message })).toBeVisible();
+    await expect(rows.filter({ hasText: FIXTURE_FEEDBACK.resolved.message })).toBeVisible();
     // The bounded read states its own scope rather than presenting itself as
     // every report ever filed.
     await expect(page.getByText(/Showing the \d+ most recent reports/)).toBeVisible();
 
+    // The status filter is the first control named "resolved" on the page.
     await page.getByRole("button", { name: "resolved", exact: true }).first().click();
-    await expect(page.getByText(FIXTURE_FEEDBACK.resolved.message)).toBeVisible();
+    await expect(rows.filter({ hasText: FIXTURE_FEEDBACK.resolved.message })).toBeVisible();
     await expect(page.getByText(FIXTURE_FEEDBACK.open.message)).toHaveCount(0);
   });
 
-  test("a finished report starts folded and opens from the keyboard with its actions", async ({
+  test("a finished report is a quiet row until it is opened, then shows its actions", async ({
     page,
   }) => {
     await page.goto("/admin/support?tab=feedback");
 
+    const row = page
+      .getByTestId("feedback-list-item")
+      .filter({ hasText: FIXTURE_FEEDBACK.resolved.message });
     const entry = page
       .getByTestId("feedback-entry")
       .filter({ hasText: FIXTURE_FEEDBACK.resolved.message });
-    const toggle = entry.getByTestId("feedback-fold-toggle");
-    await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toHaveCount(0);
+    await expect(row).not.toHaveAttribute("aria-current", "true");
+    await expect(entry).toHaveCount(0);
 
-    // A working report has no fold at all.
-    const working = page
-      .getByTestId("feedback-entry")
-      .filter({ hasText: FIXTURE_FEEDBACK.open.message });
-    await expect(working.getByTestId("feedback-fold-toggle")).toHaveCount(0);
-    await expect(working.getByRole("button", { name: "reviewing", exact: true })).toBeVisible();
+    // A report still waiting on someone is the one open by default, and it
+    // is never the finished one.
+    await expect(page.getByTestId("feedback-entry")).toHaveCount(1);
+    await expect(
+      page.getByTestId("feedback-entry").getByRole("button", { name: "reviewing", exact: true })
+    ).toBeVisible();
 
-    // Focus stays on the same control through both changes.
-    await toggle.focus();
+    // Opening from the keyboard keeps focus on the same row.
+    await row.focus();
     await page.keyboard.press("Enter");
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await expect(toggle).toBeFocused();
+    await expect(row).toHaveAttribute("aria-current", "true");
+    await expect(row).toBeFocused();
     await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toBeEnabled();
     await expect(entry.getByText("Internal notes", { exact: true })).toBeVisible();
-
-    await page.keyboard.press("Enter");
-    await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(toggle).toBeFocused();
-    await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toHaveCount(0);
   });
 
   test("a search opens the finished report it found", async ({ page }) => {
@@ -450,16 +451,34 @@ test.describe("admin read surfaces", () => {
       `/admin/support?tab=feedback&q=${encodeURIComponent(FIXTURE_FEEDBACK.resolved.id)}`
     );
 
+    const row = page.getByTestId("feedback-list-item");
+    await expect(row).toHaveCount(1);
+    await expect(row).toHaveAttribute("aria-current", "true");
     const entry = page.getByTestId("feedback-entry");
     await expect(entry).toHaveCount(1);
-    await expect(entry.getByTestId("feedback-fold-toggle")).toHaveAttribute(
-      "aria-expanded",
-      "true"
-    );
     await expect(entry.getByRole("button", { name: "reviewing", exact: true })).toBeEnabled();
   });
 
-  test("the feedback list does not scroll sideways at phone width, folded or open", async ({
+  test("support's auto-fix review lists the case waiting for a person, and only reads", async ({
+    page,
+  }) => {
+    await page.goto("/admin/support?tab=autofix");
+
+    // The fixture's verified report has a case the rules passed to a person.
+    const row = page
+      .getByTestId("autofix-review-row")
+      .filter({ hasText: FIXTURE_FEEDBACK.open.message });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("Needs a look");
+    await expect(row.getByRole("link", { name: "Open the inquiry" })).toHaveAttribute(
+      "href",
+      new RegExp(`q=${FIXTURE_FEEDBACK.open.id}`)
+    );
+    // Nothing on this tab runs, approves or changes a fix.
+    await expect(page.getByTestId("autofix-review").locator("button")).toHaveCount(0);
+  });
+
+  test("the feedback list does not scroll sideways at phone width, in the list or the report", async ({
     page,
   }) => {
     // An unbroken line is the worst case: a pasted URL, with nowhere to wrap.
@@ -476,16 +495,21 @@ test.describe("admin read surfaces", () => {
       page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth
       );
-    const toggle = page
-      .getByTestId("feedback-entry")
-      .filter({ hasText: "https://example.com/" })
-      .getByTestId("feedback-fold-toggle");
+    const row = page
+      .getByTestId("feedback-list-item")
+      .filter({ hasText: "https://example.com/" });
 
-    await expect(toggle).toBeVisible();
+    await expect(row).toBeVisible();
     expect(await overflow()).toBe(0);
 
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // On a phone the list gives way to the report, with a way back.
+    await row.click();
+    await expect(
+      page.getByTestId("feedback-entry").filter({ hasText: "https://example.com/" })
+    ).toBeVisible();
+    expect(await overflow()).toBe(0);
+    await page.getByRole("button", { name: "Back to the list" }).click();
+    await expect(row).toBeVisible();
     expect(await overflow()).toBe(0);
   });
 
@@ -506,16 +530,13 @@ test.describe("admin read surfaces", () => {
     await page.goto("/admin/billing");
 
     await expect(
-      page.getByRole("heading", { name: "Refunds and cancellations split" })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", {
-        name: "Plans, fixed market prices, Stripe IDs, and promotion codes",
-      })
+      page.getByRole("heading", { name: "Subscribers, cancellations and refunds" })
     ).toBeVisible();
     for (const plan of ["Free", "Pro", "Max"]) {
       await expect(page.getByRole("heading", { name: plan, exact: true })).toBeVisible();
     }
+    // Nothing is unsaved on a fresh load, so the one save bar is not drawn.
+    await expect(page.getByTestId("admin-save-bar")).toHaveCount(0);
   });
 
   test("billing's promotions tab renders the code catalogue and its risk signals", async ({
@@ -570,17 +591,20 @@ test.describe("admin read surfaces", () => {
     await expect(page.getByText(/newest entries only/)).toBeVisible();
   });
 
-  test("providers renders health, usage sync, and per-model metrics", async ({
+  test("providers renders the status banner, cards, and per-model metrics, with the usage sync a link away", async ({
     page,
   }) => {
     await page.goto("/admin/providers");
 
+    await expect(page.getByTestId("provider-status-banner")).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Provider health" })
+      page.getByRole("heading", { name: "Keys, balances and verification" })
     ).toBeVisible();
+    // The one sync button is on Usage & cost; this tab only points there.
+    await expect(page.getByTestId("provider-sync-moved")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Sync provider usage APIs" })
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       page.getByRole("heading", { name: "Failure rate and latency watch" })
     ).toBeVisible();
@@ -596,9 +620,7 @@ test.describe("admin read surfaces", () => {
   }) => {
     await page.goto("/admin/models");
 
-    await expect(
-      page.getByRole("heading", { name: "Model catalogue and API configuration" })
-    ).toBeVisible();
+    await expect(page.getByTestId("model-registry-panel")).toBeVisible();
     await expect(page.getByText(FIXTURE_MODEL.enabled.name).first()).toBeVisible();
     // The list opens on the Operational lifecycle view, so the blocked row is
     // one explicit selection away rather than on screen by default.
@@ -612,19 +634,23 @@ test.describe("admin read surfaces", () => {
     ).toBeVisible();
   });
 
-  test("providers' usage and cost tab renders provider spend alongside model metrics", async ({
+  test("providers' usage and cost tab renders the cost chart, the reconciliation, and the one sync button", async ({
     page,
   }) => {
     await page.goto("/admin/providers?tab=usage-cost");
 
     await expect(consoleHeading(page)).toHaveText("Providers");
-    await expect(
-      page.getByRole("heading", { name: "Failure rate and latency watch" })
-    ).toBeVisible();
+    await expect(page.getByTestId("provider-cost-chart")).toBeVisible();
+    await expect(page.getByTestId("provider-budget-ring")).toBeVisible();
+    await expect(page.getByTestId("provider-reconciliation")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Sync provider usage APIs" })
     ).toBeVisible();
-    await expect(page.getByText(FIXTURE_MODEL.enabled.name).first()).toBeVisible();
+    await expect(page.getByTestId("admin-image-generation-panel")).toBeVisible();
+    // Per-model metrics belong to the Status tab.
+    await expect(
+      page.getByRole("heading", { name: "Failure rate and latency watch" })
+    ).toHaveCount(0);
   });
 
   test("infrastructure renders its operations panel", async ({ page }) => {
@@ -807,7 +833,7 @@ test.describe("admin read surfaces", () => {
     // in ordinary operation -- which is how three of four senders stayed on the
     // old sending domain through a cutover
     // (docs/ops/email-sending-domains.md §1.2).
-    await page.goto("/admin/alerts?tab=templates");
+    await page.goto("/admin/alerts?tab=mail-test");
 
     const probe = page.getByTestId("operator-alert-probe");
     await expect(

@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildFalImageEditRequest,
   buildFalImageRequest,
   falAssetLengthRefused,
   falAuthorizationHeader,
+  falEndpointProfile,
+  falEndpointUrl,
   falPlatformHeaders,
+  FAL_ENDPOINT_PROFILES,
   FAL_HIGH_THINKING_SURCHARGE_MICRO_USD,
   FAL_MAX_ASSET_BYTES,
   isFalAssetUrl,
@@ -13,8 +17,13 @@ import {
 } from "../lib/falImageRequest.ts";
 import { getImageModel } from "../lib/imageModelRegistry.ts";
 
+const NANO_BANANA_2 = "fal-ai/nano-banana-2";
+const NANO_BANANA_2_1 = "google/nano-banana-2.1";
+const QWEN_IMAGE_3 = "alibaba/qwen-image-3/text-to-image";
+
 const request = (overrides = {}) =>
   buildFalImageRequest({
+    apiModelId: NANO_BANANA_2,
     prompt: "a single red apple",
     size: "1024x1024",
     outputFormat: "png",
@@ -78,8 +87,114 @@ test("only the prompt carries user text", () => {
 test("an unpriced size is refused rather than requested at another rate", () => {
   // 2K and 4K are 1.5x and 2x on fal's published rate: a different price and a
   // different approval, not a bigger version of this one.
-  assert.equal(request({ size: "1536x1024" }), null);
-  assert.equal(request({ size: "1024x1536" }), null);
+  for (const apiModelId of Object.keys(FAL_ENDPOINT_PROFILES)) {
+    assert.equal(request({ apiModelId, size: "1536x1024" }), null, apiModelId);
+    assert.equal(request({ apiModelId, size: "1024x1536" }), null, apiModelId);
+  }
+});
+
+// --- one table says what each fal endpoint is sent and how it bills -------
+
+test("the endpoint table holds exactly the three endpoints whose pages were read", () => {
+  // Spelled out rather than counted: adding a row is what lets a runtime fal
+  // model on that endpoint be built, judged and dispatched at all.
+  assert.deepEqual(Object.keys(FAL_ENDPOINT_PROFILES).sort(), [QWEN_IMAGE_3, NANO_BANANA_2, NANO_BANANA_2_1].sort());
+  assert.deepEqual(falEndpointProfile(NANO_BANANA_2), {
+    bodyFormat: "nano_banana",
+    editEndpoint: "fal-ai/nano-banana-2/edit",
+    thinkingLevel: "high",
+    thinking: { billing: "flat_per_request", surchargeMicroUsd: 2_000 },
+  });
+  assert.deepEqual(falEndpointProfile(NANO_BANANA_2_1), {
+    bodyFormat: "nano_banana",
+    editEndpoint: "google/nano-banana-2.1/edit",
+    thinkingLevel: "minimal",
+    thinking: { billing: "per_token_uncapped" },
+  });
+  assert.deepEqual(falEndpointProfile(QWEN_IMAGE_3), {
+    bodyFormat: "qwen_image",
+    editEndpoint: "alibaba/qwen-image-3/edit",
+    thinkingLevel: null,
+    thinking: { billing: "not_billed" },
+  });
+});
+
+test("an endpoint the table does not list builds nothing and has no URL", () => {
+  // Before the table, every fal model was sent Nano Banana 2's body. A schema
+  // we have not read is not a request we can price, so it is refused here as
+  // well as by the judge and the adapter.
+  for (const apiModelId of ["fal-ai/flux/dev", "alibaba/qwen-image-3/edit", "toString", "constructor", ""]) {
+    assert.equal(falEndpointProfile(apiModelId), null, apiModelId);
+    assert.equal(request({ apiModelId }), null, apiModelId);
+    assert.equal(falEndpointUrl(apiModelId, false), null, apiModelId);
+    assert.equal(falEndpointUrl(apiModelId, true), null, apiModelId);
+  }
+  assert.equal(falEndpointProfile(undefined), null);
+  // The builder no longer has a default endpoint to fall back on.
+  assert.equal(buildFalImageRequest({ prompt: "x", size: "1024x1024", outputFormat: "png" }), null);
+});
+
+test("each endpoint has its own generation and edit URL", () => {
+  assert.equal(falEndpointUrl(NANO_BANANA_2, false), "https://fal.run/fal-ai/nano-banana-2");
+  assert.equal(falEndpointUrl(NANO_BANANA_2, true), "https://fal.run/fal-ai/nano-banana-2/edit");
+  assert.equal(falEndpointUrl(NANO_BANANA_2_1, false), "https://fal.run/google/nano-banana-2.1");
+  assert.equal(falEndpointUrl(NANO_BANANA_2_1, true), "https://fal.run/google/nano-banana-2.1/edit");
+  // Not apiModelId + "/edit": Qwen's edit replaces the last path segment.
+  assert.equal(falEndpointUrl(QWEN_IMAGE_3, false), "https://fal.run/alibaba/qwen-image-3/text-to-image");
+  assert.equal(falEndpointUrl(QWEN_IMAGE_3, true), "https://fal.run/alibaba/qwen-image-3/edit");
+});
+
+test("Nano Banana 2.1 gets the Nano Banana body with thinking pinned to minimal", () => {
+  // Same schema as Nano Banana 2 (read 2026-11-07). thinking_level defaults to
+  // `medium` there, not off, so it is stated -- at the cheapest level.
+  const body = request({ apiModelId: NANO_BANANA_2_1 });
+  assert.deepEqual(body, { ...request(), thinking_level: "minimal" });
+  assert.equal(body.aspect_ratio, "1:1");
+  assert.equal(body.enable_web_search, false);
+});
+
+test("Qwen Image 3 gets its own schema, every priced field stated", () => {
+  // Pinned as a whole shape for the same reason as Nano Banana 2's: an
+  // additive field nobody compared against the schema is how a body drifts.
+  assert.deepEqual(request({ apiModelId: QWEN_IMAGE_3 }), {
+    prompt: "a single red apple",
+    // Pixels, not `square_hd`: the schema page does not say what size the
+    // enum names, and the delivered image is measured against 1024x1024.
+    image_size: { width: 1024, height: 1024 },
+    num_images: 1,
+    // Defaults to true -- an LLM rewriting the user's prompt.
+    enable_prompt_expansion: false,
+    negative_prompt: "",
+    enable_safety_checker: true,
+    output_format: "png",
+  });
+  const body = request({ apiModelId: QWEN_IMAGE_3 });
+  for (const field of ["resolution", "aspect_ratio", "thinking_level", "enable_web_search", "system_prompt"]) {
+    assert.equal(field in body, false, field);
+  }
+});
+
+test("an edit body is built only for the Nano Banana schema", () => {
+  const image = { bytes: Buffer.from("png-bytes"), mimeType: "image/png" };
+  const dataUri = `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`;
+  const edit = (apiModelId) =>
+    buildFalImageEditRequest({ apiModelId, prompt: "x", size: "1024x1024", outputFormat: "png", image });
+  assert.deepEqual(edit(NANO_BANANA_2).image_urls, [dataUri]);
+  // Nano Banana 2.1's edit takes the same `image_urls` (read 2026-11-07).
+  assert.deepEqual(edit(NANO_BANANA_2_1), { ...request({ apiModelId: NANO_BANANA_2_1, prompt: "x" }), image_urls: [dataUri] });
+  // Qwen's edit schema has not been read: no body rather than a guessed one.
+  assert.equal(edit(QWEN_IMAGE_3), null);
+  assert.equal(edit("fal-ai/flux/dev"), null);
+});
+
+test("a response without width or height still parses; the adapter measures the bytes", () => {
+  // Qwen's output schema lists url, content_type, file_name and file_size --
+  // no dimensions. The priced size is checked against the downloaded image.
+  const parsed = parseFalImageResponse({
+    images: [{ url: "https://v3b.fal.media/files/q.png", content_type: "image/png", file_name: "q.png", file_size: 1 }],
+    seed: 7,
+  });
+  assert.deepEqual(parsed, { url: "https://v3b.fal.media/files/q.png", mimeType: "image/png", width: null, height: null });
 });
 
 test("authorization is fal's scheme, not a bearer token", () => {

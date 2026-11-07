@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { AMUX_V22_CLI_FAILURE_REASON_CODES } from "./v22TaskExecutionCore.ts";
+import { AMUX_V52_REVIEW_REJECTED_TWICE_REASON } from "./v52ReviewCore.ts";
 
 /**
  * Whether a worker has an ended v4 attempt whose CLI usage was never reported
@@ -33,6 +34,10 @@ import { AMUX_V22_CLI_FAILURE_REASON_CODES } from "./v22TaskExecutionCore.ts";
  * approved waited as usage_unverified forever (AMUX-FILEGEN-003, review
  * r-20261107-061707-e4a9a6). Nothing is written for that attempt either: every
  * other Task is still refused that worker.
+ *
+ * The same holds for a finished run the v52 review server rejected twice
+ * (outcome succeeded, reason review_server_rejected_twice, with its reject
+ * record), which the owner may also retry (owner decision 2026-11-07).
  */
 export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
   workerName: string, priorAttemptId: string | null, taskId: string): Promise<boolean> {
@@ -59,7 +64,12 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
             AND (SELECT r."attemptId" FROM "AmuxV22TaskResult" r
               WHERE r."taskId" = a."taskId"
               ORDER BY r."createdAt" DESC, r."attemptId" DESC
-              LIMIT 1) = a."id"))
+              LIMIT 1) = a."id")
+          OR (a."outcome" = 'succeeded'
+            AND a."reason" = ${AMUX_V52_REVIEW_REJECTED_TWICE_REASON}
+            AND EXISTS (SELECT 1 FROM "AmuxV52ReviewRecord" r
+              WHERE r."attemptId" = a."id" AND r."taskId" = a."taskId"
+                AND r."verdict" = 'reject')))
         AND EXISTS (SELECT 1 FROM "AmuxReviewProposal" p
           JOIN "AmuxReviewDecision" d ON d."proposalId" = p."id"
             AND d."escalationId" = p."escalationId"

@@ -27,8 +27,8 @@ const EXCLUSION_REASONS = ["secretPath", "secretContent", "nonRegular",
 const LINK = "inline-flex min-h-11 items-center font-medium underline text-blue-200";
 const SCREENS = {
   cards: "/admin/amux-execution?tab=cards",
-  safety: "/admin/amux-settings?tab=safety",
-  promotion: "/admin/amux-promotion",
+  safety: "/admin/amux-recovery?tab=safety",
+  promotion: "/admin/amux-recovery?tab=legacy",
   approval: "#amux-v4-frontier-models-heading",
 } as const;
 /** Owner steps where a hold left by an earlier preview of a page may still be
@@ -142,7 +142,7 @@ export function AmuxIdeaDetailSummary({ row, reservationReleaseAvailable = false
                 {task.escalationId ? null : <p className="text-xs text-zinc-400">{m.blockedNoReview}</p>}
                 <p className="flex flex-wrap gap-x-4">
                   {task.escalationId ? <Link className={LINK}
-                    href={`/admin/amux-execution?tab=assignment&focusEscalation=${encodeURIComponent(task.escalationId)}`}>
+                    href={`/admin/amux-execution?tab=review&focusEscalation=${encodeURIComponent(task.escalationId)}`}>
                     {m.blockedOpenReview}</Link> : null}
                   <Link className={LINK} href={`/admin/amux-execution?tab=cards&taskId=${encodeURIComponent(task.id)}`}>
                     {m.blockedOpenCard}</Link>

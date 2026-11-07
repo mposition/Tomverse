@@ -255,6 +255,9 @@ run(
     // An owner retry of a named Claude CLI failure reaches the claim; its
     // partial receipt still holds the worker for every other Task.
     "tests/integration/amuxV22CliFailureRetryClaim.db.test.mjs",
+    // A run the v52 review rejected twice may be retried by the owner; the
+    // retry reaches the claim and its first rejection returns once more.
+    "tests/integration/amuxV22ReviewRejectedTwiceRetry.db.test.mjs",
     "tests/integration/amuxV22AutoPromotion.db.test.mjs",
     "tests/integration/amuxV22TaskPatchSchema.db.test.mjs",
     "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
@@ -402,6 +405,7 @@ run(
     // statement ceiling and never delivered, nothing closed once work started,
     // and the owner's direct answer.
     "tests/integration/amux-idea-card-close.db.test.ts",
+    "tests/integration/amux-v22-result-review.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.
@@ -436,6 +440,10 @@ run(
     // Verified-trace analysis: off by default, facts only, one idea per case and
     // the daily limits, nothing past a report the server already ruled out.
     "tests/integration/trace-report-analysis.db.test.ts",
+    // Agent office AI briefing: off by default, the day's limit and one call in
+    // flight under a lock, audited before the call, reused while fresh, a failed
+    // call counted and not retried.
+    "tests/integration/agent-office-briefing.db.test.ts",
     // Develop CI repair: off by default, a red head handed over once on its
     // second sighting, audited as the system, and taken by the lane first.
     "tests/integration/develop-ci-repair.db.test.ts",

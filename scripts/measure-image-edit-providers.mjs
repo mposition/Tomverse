@@ -20,9 +20,8 @@ import sharp from "sharp";
 import {
   buildFalImageEditRequest,
   falAuthorizationHeader,
-  FAL_EDIT_ENDPOINT_SUFFIX,
+  falEndpointUrl,
   falPlatformHeaders,
-  FAL_RUN_URL_BASE,
   isFalAssetUrl,
   parseFalImageResponse,
 } from "../lib/falImageRequest.ts";
@@ -90,13 +89,14 @@ for (const [width, height] of [[1024, 1024], [1024, 768]]) {
 
 {
   const body = buildFalImageEditRequest({
+    apiModelId: "fal-ai/nano-banana-2",
     prompt: PROMPT,
     size: "1024x1024",
     outputFormat: "png",
     image: await photo(1024, 768),
   });
   const response = await fetch(
-    `${FAL_RUN_URL_BASE}/fal-ai/nano-banana-2${FAL_EDIT_ENDPOINT_SUFFIX}`,
+    falEndpointUrl("fal-ai/nano-banana-2", true),
     {
       method: "POST",
       headers: {
