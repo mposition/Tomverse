@@ -100,7 +100,7 @@ function HaltCard({ halt, canClear, showCleared, m, locale }: { halt: AmuxOrches
       <div className="flex min-w-0 items-start gap-4">
         <span className="relative shrink-0"><AdminPixelAvatar team="amux" tile={72} unit={3} body={false} /><span aria-hidden="true" className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">!</span></span>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2"><AdminStatusChip tone={tone}>{m.category[attention]}</AdminStatusChip><span className={`text-xs ${muted}`}><DateValue value={halt.openedAt} locale={locale} /></span></div>
+          <div className="flex flex-wrap items-center gap-2"><AdminStatusChip tone={tone} className="!shrink !whitespace-normal">{m.category[attention]}</AdminStatusChip><span className={`text-xs ${muted}`}><DateValue value={halt.openedAt} locale={locale} /></span></div>
           <h4 className="mt-1 text-xl font-bold text-white">{m.reasonLabels[halt.reasonCode]}</h4>
           <p className={`mt-1 text-sm ${muted}`}>{incompleteClear ? m.autoClearIncomplete : m.categoryDetail[attention]}</p>
         </div>
