@@ -130,6 +130,10 @@ export async function recordAmuxPlanRefusalLocalCardClosed(tx: Tx,
   return { recorded: true as const };
 }
 
+/** Open refusals on ideas still in analysis: the decisions waiting on a person (read only). */
+export const countOpenAmuxPlanRefusals = (tx: Tx, now: Date) =>
+  tx.amuxIdeaSessionPlanRefusal.count({ where: { ...open, idea: ideaLive(now) } });
+
 /** The open refusal a card mirrors, on an idea still in analysis. */
 export const readOpenAmuxPlanRefusalOfCard = (tx: Tx, cardId: string, now: Date) =>
   tx.amuxIdeaSessionPlanRefusal.findFirst({ where: { localCardId: cardId, ...open,

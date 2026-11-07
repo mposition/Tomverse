@@ -16,10 +16,15 @@
 
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
+
 import type {
   AgentOfficeReviewState,
   AgentOfficeAmuxState,
+  AgentOfficeAmuxDetail,
   AgentOfficeDecisionState,
+  AgentOfficeInboxCounts,
+  AgentOfficeMerges,
   AgentOfficeDigestState,
   AgentOfficeEngineeringState,
   AgentOfficeFinanceState,
@@ -37,7 +42,16 @@ import {
   countAwaitingAmuxEscalations,
   countPendingMarketingApprovals,
 } from "@/lib/adminNavigationCounts";
-import { agentOfficeAmuxRosterFromRegistry, agentOfficeAmuxState, agentOfficeProviderLabel } from "@/lib/agentOfficeAmuxState";
+import {
+  agentOfficeAmuxDetail,
+  agentOfficeAmuxRosterFromRegistry,
+  agentOfficeAmuxState,
+  agentOfficeProviderLabel,
+  brisbaneMidnight,
+} from "@/lib/agentOfficeAmuxState";
+import { readAmuxCardTitle } from "@/lib/amux/adminExecutionRead";
+import { countDecisionMakerAttention } from "@/lib/amux/decisionMakerAttention";
+import { countOpenAmuxPlanRefusals } from "@/lib/amux/ideaSessionPlanRefusalService";
 import { AGENT_OFFICE_AMUX_ROSTER } from "@/lib/agentOffice/amuxRoster";
 import { agentOfficeDecisionState } from "@/lib/agentOfficeDecisionState";
 import { AGENT_OFFICE_DIGEST_WINDOW_MS, agentOfficeDigestState } from "@/lib/agentOfficeDigestState";
@@ -481,8 +495,140 @@ async function readOperatorQueue(): Promise<AgentOfficeOperatorQueue> {
   };
 }
 
-export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa, finance, routing, sre, support, marketing, trust, engineering, amux, review, decision, digest, queue] =
+/**
+ * Per AMUX worker: its latest quota observation and its last ten ended
+ * attempts' outcomes. For the owner only -- the AMUX card list is the owner's
+ * (lib/adminNavigation.ts, Cards) -- also the open attempt with the card it
+ * holds and today's (AEST) CLI usage. Nothing else of a card, and no prompt or
+ * output, is read.
+ */
+async function readAmuxDetail(amux: AgentOfficeAmuxState, owner: boolean, now: Date): Promise<AgentOfficeAmuxDetail> {
+  if (amux.kind !== "observed") return { kind: "unread" };
+  const names = amux.workers.map((worker) => worker.name);
+  if (names.length === 0) return { kind: "observed", ownerDetail: owner, workers: {} };
+  try {
+    // The newest observation per worker, and its ended attempts of the last
+    // two weeks newest first (the mapping keeps ten each).
+    const [quotas, attempts] = await Promise.all([
+      prisma.amuxQuotaObservation.findMany({
+        where: { worker: { in: names }, observedAt: { lte: now } },
+        distinct: ["worker"],
+        orderBy: [{ worker: "asc" }, { observedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+        select: { worker: true, remainingBasisPoints: true, exhausted: true, observedAt: true, resetAt: true },
+      }),
+      prisma.amuxExecutionAttempt.findMany({
+        where: { worker: { in: names }, endedAt: { not: null, lte: now, gte: new Date(now.getTime() - 14 * 86_400_000) } },
+        orderBy: [{ endedAt: "desc" }, { id: "desc" }],
+        take: names.length * 10 + 200,
+        select: { worker: true, outcome: true },
+      }),
+    ]);
+    let open: Parameters<typeof agentOfficeAmuxDetail>[0]["open"] = [];
+    let usage: { worker: string; tokens: number; cost: number }[] = [];
+    let models: { worker: string; model: string | null }[] = [];
+    if (owner) {
+      const since = brisbaneMidnight(now);
+      const today = { worker: { in: names }, startedAt: { gte: since } };
+      const [openRows, priced, projected, modelRows] = await Promise.all([
+        prisma.amuxExecutionAttempt.findMany({
+          where: { worker: { in: names }, endedAt: null },
+          orderBy: { startedAt: "desc" },
+          select: {
+            worker: true, taskId: true, startedAt: true, leaseExpiresAt: true,
+            task: { select: { id: true, displayKey: true, title: true, sourceSystem: true, sourceSnapshot: true,
+              v4TitleCiphertext: true, v4TitleKeyId: true, v4TitleKeyVersion: true, v4TitleDigest: true, v4TitleDigestKeyId: true } },
+          },
+        }),
+        // An event's actual API price when it has one, else its projected price.
+        prisma.amuxCliUsageEvent.groupBy({
+          by: ["worker"],
+          where: { ...today, actualApiCostMicrousd: { not: null } },
+          _sum: { inputTokens: true, outputTokens: true, actualApiCostMicrousd: true },
+        }),
+        prisma.amuxCliUsageEvent.groupBy({
+          by: ["worker"],
+          where: { ...today, actualApiCostMicrousd: null },
+          _sum: { inputTokens: true, outputTokens: true, projectedApiCostMicrousd: true },
+        }),
+        prisma.amuxCliUsageEvent.findMany({
+          where: { worker: { in: names } },
+          distinct: ["worker"],
+          orderBy: [{ worker: "asc" }, { startedAt: "desc" }],
+          select: { worker: true, actualModelId: true, selectedModelId: true },
+        }),
+      ]);
+      open = await Promise.all(openRows.map(async (row) => ({
+        worker: row.worker,
+        taskId: row.taskId,
+        startedAt: row.startedAt,
+        leaseExpiresAt: row.leaseExpiresAt,
+        cardKey: row.task.displayKey,
+        cardTitle: await readAmuxCardTitle(row.task),
+      })));
+      const sum = new Map<string, { tokens: number; cost: number }>();
+      const add = (worker: string, tokens: number, cost: number) => {
+        const prev = sum.get(worker) ?? { tokens: 0, cost: 0 };
+        sum.set(worker, { tokens: prev.tokens + tokens, cost: prev.cost + cost });
+      };
+      for (const row of priced) {
+        add(row.worker, Number(row._sum.inputTokens ?? 0) + Number(row._sum.outputTokens ?? 0), Number(row._sum.actualApiCostMicrousd ?? 0));
+      }
+      for (const row of projected) {
+        add(row.worker, Number(row._sum.inputTokens ?? 0) + Number(row._sum.outputTokens ?? 0), Number(row._sum.projectedApiCostMicrousd ?? 0));
+      }
+      usage = [...sum].map(([worker, value]) => ({ worker, ...value }));
+      models = modelRows.map((row) => ({ worker: row.worker, model: row.actualModelId ?? row.selectedModelId }));
+    }
+    return agentOfficeAmuxDetail({ names, owner, quotas, attempts, open, usage, models });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "amux_worker_detail" });
+    return { kind: "unread" };
+  }
+}
+
+/** The other queues an AMUX worker waits on a person for, each read on its own. */
+async function readInboxCounts(now: Date): Promise<AgentOfficeInboxCounts> {
+  const [dm, v22, refusals] = await Promise.allSettled([
+    countDecisionMakerAttention(),
+    prisma.amuxV22TaskQuestion.count({ where: { state: "open" } }),
+    countOpenAmuxPlanRefusals(prisma as unknown as Prisma.TransactionClient, now),
+  ]);
+  const value = (result: PromiseSettledResult<number>, read: string) => {
+    if (result.status === "fulfilled") return result.value;
+    console.warn({ event: "admin_agent_office_read_failed", read });
+    return null;
+  };
+  return {
+    dmAttention: value(dm, "inbox_dm_attention"),
+    v22Questions: value(v22, "inbox_v22_questions"),
+    planRefusals: value(refusals, "inbox_plan_refusals"),
+  };
+}
+
+/** Merge-lane merges in the last day: the PR number and when, for the floor's celebration. */
+async function readMerges(now: Date): Promise<AgentOfficeMerges> {
+  try {
+    const rows = await prisma.qaReleaseMergeAttempt.findMany({
+      where: { mergeCommitSha: { not: null }, updatedAt: { gte: new Date(now.getTime() - 86_400_000) } },
+      orderBy: { updatedAt: "desc" },
+      take: 20,
+      select: { pullRequestNumber: true, consumedAt: true, updatedAt: true },
+    });
+    return {
+      kind: "observed",
+      items: rows.map((row) => ({ pr: row.pullRequestNumber, mergedAt: (row.consumedAt ?? row.updatedAt).toISOString() })),
+    };
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "merge_lane_merges" });
+    return { kind: "unread" };
+  }
+}
+
+export async function readAgentOfficeLiveRooms(
+  now: Date = new Date(),
+  options: { owner?: boolean } = {}
+): Promise<AgentOfficeLiveRooms> {
+  const [research, qa, finance, routing, sre, support, marketing, trust, engineering, amux, review, decision, digest, queue, inbox, merges] =
     await Promise.all([
       readResearch(now),
       readQa(),
@@ -498,7 +644,10 @@ export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<
       readDecision(),
       readDigest(now),
       readOperatorQueue(),
+      readInboxCounts(now),
+      readMerges(now),
     ]);
+  const amuxDetail = await readAmuxDetail(amux, options.owner === true, now);
   return {
     readAt: now.toISOString(),
     research,
@@ -515,5 +664,8 @@ export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<
     decision,
     digest,
     queue,
+    amuxDetail,
+    inbox,
+    merges,
   };
 }

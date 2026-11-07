@@ -718,30 +718,29 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
-    // A shell: a pixel office for the eight agent teams that plays a demo day
-    // and links each team to the page that holds its record. A LIVE room reads
-    // that team's operating state, read only; nothing on the page writes, so
-    // it carries no badge and no writeRoles.
+    // A pixel office for the agent teams and the AMUX workers, drawn from their
+    // records, that links each one to the page that holds its record. Read
+    // only; nothing on the page writes, so it carries no badge and no writeRoles.
     id: "office",
     label: "Agent office",
     href: "/admin/office",
     // The office floor scales to the space it is given.
     wide: true,
-    description: "A pixel office shell for the eight agent teams, with a link to each team's record",
+    description: "A pixel office of the agent teams and AMUX workers, what waits on you, and a link to each record",
     group: "Operations",
     aliases: ["office", "agent teams", "pixel office", "live office", "team board"],
     // The office draws its own tab strip, as the original UI did; its tabs are
-    // links to these sections, and one demo engine runs under both.
+    // links to these sections, and one panel stays mounted under both.
     tabs: [
       {
         id: "live",
         label: "Live office",
-        description: "The office floor, the operator console and the demo approval",
+        description: "The floor, what waits on you, each worker's sheet, the roster and today's merges",
       },
       {
         id: "dashboard",
         label: "Dashboard",
-        description: "Team board, demo approval, digest brief and each team's record link",
+        description: "Team board, digest brief and each team's record link",
       },
     ],
   },

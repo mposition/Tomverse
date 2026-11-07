@@ -121,10 +121,12 @@ sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
 **Agent office** is a pixel office for the eight agent teams and the digest
 desk, after the original AI OFFICE UI by godseng.mom. It shows records and
 decides nothing. It is live only (operator decision, 2026-10-09), and the demo
-engine the original played is gone (operator decision, 2026-10-10): every
-team's staff sit at their desks, nobody moves or speaks a scripted line, the
-console answers questions from the records and declines every order, and the
-office approves nothing. It is the one entry marked `wide` in the route
+engine the original played is gone (operator decision, 2026-10-10). Since the
+live office redesign (owner decision, 2026-11-07) the live section is a summary
+strip, the floor, "waiting on you" with a worker sheet, a roster and a today
+strip; the keyword console is gone. Nobody plays a script: a worker walks only
+when a fresh reading moves it to another place (`lib/agentOffice/floor.ts`),
+and the office approves nothing. It is the one entry marked `wide` in the route
 table: the console drops its reading width there, because the floor is a
 canvas that grows with the screen.
 The facts on it are the record links and the rooms marked LIVE. Each team
@@ -180,21 +182,30 @@ A counting the section does not take (switch off, or a fault) is "not counted",
 never zero, and an administrator who is not the owner sees that the record is
 the owner's, not a number. No request, email, name or legal-hold split reaches
 the office; its record link is the Trust and safety tab of Agent digests.
-Under the teams, the AMUX execution room separates the display-only Ubuntu
-resident roster approved in orchestration policy v27 (thirteen desks, no Devin
-or virtual engineering runner) from the app's dispatch admission catalog.
+Under the teams, the AMUX execution room is an open office with one desk island
+per CLI channel (Claude, Codex, Copilot, Cursor), a lounge, sleep pods and a
+bench. It separates the display-only Ubuntu resident roster approved in
+orchestration policy v27 (no Devin or virtual engineering runner) from the
+app's dispatch admission catalog.
 The roster is labelled as a policy roster, not a live process-health reading;
 it grants no registration, claim or execution authority. Workers absent from
 the usable admission catalog are labelled not admitted, never stopped or
 connected, even if an old runtime row exists. Each admitted worker's
-dispatch state is read from its runtime row. Past thirteen,
-the ones that need a look are drawn first and the room says in words how many
-are not drawn, as it does for a failed read or a missing catalog. Each worker is
-drawn seated with its real state -- the operator's exclusions first, then its
-runtime row read the way AMUX reads it when it hands out work (live while the
-lease has not run out and the status is idle or busy) -- and, while the
-route table has it, a link to the AMUX execution page. Each worker is one row
-of its record, and nothing about the cards they work on is read.
+dispatch state is read from its runtime row -- the operator's exclusions
+first, then its runtime row read the way AMUX reads it when it hands out work
+(live while the lease has not run out and the status is idle or busy). Where a
+worker is drawn follows that state: at its desk while busy or failed (with a
+"!"), in the lounge while free for work, in a sleep pod while its latest quota
+observation says it is used up, on the bench while paused, isolated or blocked,
+and nowhere (a covered desk) while not running. An island's desks grow in
+fours with its workers up to 24; whoever does not fit, or has no island, is
+counted on the floor and listed in the roster, never dropped. For everyone the
+office reads each worker's latest quota observation and its last ten ended
+attempts' outcomes. For the owner only -- the AMUX card list is the owner's --
+it also reads the open attempt with the card it holds (display key and title,
+opened the way the card list opens it) and today's CLI usage priced at API
+rates, shown as such and never as money spent. Nothing else of a card, and no
+prompt or output, is read.
 The room's connection light is green while at least one admitted worker has
 a live idle/busy dispatch bridge. Individual lost/error bridges remain red,
 with a separate warning count and attention status in the dashboard; green
@@ -210,12 +221,14 @@ the latest report in one AppSetting row stamped with the app's receipt time.
 Each reviewer is drawn seated as reviewing, idle or off, and a report older
 than five minutes draws them all as without a report. The same report carries
 each reviewer's account quota as the review server's own check last read it
-(a state and one amount: percent, credits or USD); a quota card in the live
-rail shows it, greyed and dated when the report is old, and says so when a
-server too old to send it reports.
-The operator's to-do -- the tab, the dashboard's operator metric and both
-operator windows -- is the queues where an agent waits on a person: marketing
-posts pending approval, AMUX escalations and AMUX halts nobody has cleared.
+(a state and one amount: percent, credits or USD); a reviewer's profile shows
+it, and says so when a server too old to send it reports.
+The operator's to-do on the dashboard is the queues where an agent waits on a
+person: marketing posts pending approval, AMUX escalations and AMUX halts
+nobody has cleared. The live section's "waiting on you" (and the tab's count)
+adds the Decision Maker items, open v22 worker questions, open plan refusals,
+each AMUX worker in error or lost, and each channel whose resting workers have
+used up their quota, most urgent first.
 They are read with the sidebar badges'
 own count functions (`lib/adminNavigationCounts.ts`), each links to the
 screen where it is acted on, and a count that fails to read is drawn as
@@ -225,12 +238,11 @@ each live team room, the AMUX execution room and the review server -- with
 their states, what needs a look first, and each team's record screen; what an
 agent produced stays on that screen. The status report copies or downloads
 that view as Markdown and is sent nowhere. While the tab is visible the page
-reads again every minute, and a live room whose record changed says so in the
-console in its lead's name. Live leads answer a greeting or a thank-you in
-their own voice with social lines only -- no figure, time, state, activity or
-promise, so the words stay true when a room is silent, off or unread, which a
-test holds -- react on the floor with an emoji for a moment, and otherwise
-keep the record line.
+reads again every minute. Between two readings the live section notices a new
+merge-lane merge into develop (a celebration), a halt opened or cleared, and a
+worker gone wrong; a sound plays for those only when the operator turned it on
+in this browser. The floor's light follows Brisbane's clock (day, dawn, dusk,
+night).
 Those reads are read-only (the silence anchor is looked up rather than
 created), and a read that fails is drawn as unread, never as a state
 (`lib/agentOfficeLiveRead.ts`, `lib/agentOffice/roster.ts`,
