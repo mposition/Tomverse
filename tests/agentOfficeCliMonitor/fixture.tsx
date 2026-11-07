@@ -11,6 +11,7 @@ const live: AgentOfficeLiveRooms = {
   amuxDetail: { kind: "observed", ownerDetail: true, workers: {} },
   inbox: { dmAttention: 0, v22Questions: 0, planRefusals: 0 },
   merges: { kind: "observed", items: [] },
+  history: { kind: "observed", since: "2026-01-01T14:00:00.000Z", spans: [], truncated: false },
   amux: { kind: "observed", catalogConfigured: true, workers: AGENT_OFFICE_AMUX_ROSTER.map(worker =>
     ({ ...worker, state: "idle" as const, heartbeatAt: new Date().toISOString() })) },
 };

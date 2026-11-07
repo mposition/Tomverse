@@ -388,6 +388,7 @@ export type AgentOfficeLiveRooms = {
   inbox: AgentOfficeInboxCounts;
   /** Merge-lane merges into develop in the last day. */
   merges: AgentOfficeMerges;
+  history: AgentOfficeHistory;
 };
 
 /** An attempt's outcome, newest first: succeeded, failed, or blocked/expired (unknown). */
@@ -446,6 +447,21 @@ export type AgentOfficeInboxCounts = {
 export type AgentOfficeMerges =
   | { kind: "unread" }
   | { kind: "observed"; items: { pr: number; mergedAt: string }[] };
+
+/** One execution attempt that overlapped today (AEST): who ran it and when. */
+export type AgentOfficeAttemptSpan = { worker: string; startedAt: string; endedAt: string | null; mark: AgentOfficeAttemptMark | null };
+
+/**
+ * Today's attempts since Brisbane midnight, for rewinding the floor. Only
+ * attempts are recorded over time; where a worker rested, or whether it was
+ * paused, is known only for now. `truncated` says the read hit its cap.
+ */
+export type AgentOfficeHistory =
+  | { kind: "unread" }
+  | { kind: "observed"; since: string; spans: AgentOfficeAttemptSpan[]; truncated: boolean };
+
+/** The part of the office re-read every fifteen seconds (the AMUX room and merges). */
+export type AgentOfficeAmuxPulse = Pick<AgentOfficeLiveRooms, "readAt" | "amux" | "amuxDetail" | "merges" | "history">;
 
 /**
  * Everyone the office draws: the teams' staff, and one figure per record row in

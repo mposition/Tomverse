@@ -25,6 +25,8 @@ import type {
   AgentOfficeDecisionState,
   AgentOfficeInboxCounts,
   AgentOfficeMerges,
+  AgentOfficeHistory,
+  AgentOfficeAmuxPulse,
   AgentOfficeDigestState,
   AgentOfficeEngineeringState,
   AgentOfficeFinanceState,
@@ -44,6 +46,7 @@ import {
 } from "@/lib/adminNavigationCounts";
 import {
   agentOfficeAmuxDetail,
+  agentOfficeAttemptMark,
   agentOfficeAmuxRosterFromRegistry,
   agentOfficeAmuxState,
   agentOfficeProviderLabel,
@@ -624,6 +627,54 @@ async function readMerges(now: Date): Promise<AgentOfficeMerges> {
   }
 }
 
+/** Rewinding reads at most this many of today's attempts (newest first). */
+const HISTORY_CAP = 2_000;
+
+/** Today's (AEST) attempts of the seated workers, open ones included, for the rewind. */
+async function readHistory(amux: AgentOfficeAmuxState, now: Date): Promise<AgentOfficeHistory> {
+  if (amux.kind !== "observed") return { kind: "unread" };
+  const since = brisbaneMidnight(now);
+  const names = amux.workers.map((worker) => worker.name);
+  if (names.length === 0) return { kind: "observed", since: since.toISOString(), spans: [], truncated: false };
+  try {
+    const rows = await prisma.amuxExecutionAttempt.findMany({
+      where: {
+        worker: { in: names },
+        startedAt: { lte: now },
+        OR: [{ endedAt: null }, { endedAt: { gte: since } }],
+      },
+      orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+      take: HISTORY_CAP + 1,
+      select: { worker: true, startedAt: true, endedAt: true, outcome: true },
+    });
+    return {
+      kind: "observed",
+      since: since.toISOString(),
+      truncated: rows.length > HISTORY_CAP,
+      spans: rows.slice(0, HISTORY_CAP).map((row) => ({
+        worker: row.worker,
+        startedAt: row.startedAt.toISOString(),
+        endedAt: row.endedAt ? row.endedAt.toISOString() : null,
+        mark: row.endedAt ? agentOfficeAttemptMark(row.outcome) : null,
+      })),
+    };
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "amux_history" });
+    return { kind: "unread" };
+  }
+}
+
+/**
+ * The fifteen-second re-read of the AMUX room: its workers, their detail,
+ * today's attempts and the day's merges. The same reads as the page, nothing
+ * more; the caller decides `owner` from the session.
+ */
+export async function readAgentOfficeAmuxPulse(now: Date = new Date(), options: { owner?: boolean } = {}): Promise<AgentOfficeAmuxPulse> {
+  const [amux, merges] = await Promise.all([readAmuxWorkers(), readMerges(now)]);
+  const [amuxDetail, history] = await Promise.all([readAmuxDetail(amux, options.owner === true, now), readHistory(amux, now)]);
+  return { readAt: now.toISOString(), amux, amuxDetail, merges, history };
+}
+
 export async function readAgentOfficeLiveRooms(
   now: Date = new Date(),
   options: { owner?: boolean } = {}
@@ -647,7 +698,7 @@ export async function readAgentOfficeLiveRooms(
       readInboxCounts(now),
       readMerges(now),
     ]);
-  const amuxDetail = await readAmuxDetail(amux, options.owner === true, now);
+  const [amuxDetail, history] = await Promise.all([readAmuxDetail(amux, options.owner === true, now), readHistory(amux, now)]);
   return {
     readAt: now.toISOString(),
     research,
@@ -667,5 +718,6 @@ export async function readAgentOfficeLiveRooms(
     amuxDetail,
     inbox,
     merges,
+    history,
   };
 }

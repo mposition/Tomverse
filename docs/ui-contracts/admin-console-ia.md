@@ -238,7 +238,13 @@ each live team room, the AMUX execution room and the review server -- with
 their states, what needs a look first, and each team's record screen; what an
 agent produced stays on that screen. The status report copies or downloads
 that view as Markdown and is sent nowhere. While the tab is visible the page
-reads again every minute. Between two readings the live section notices a new
+reads again every minute, and the AMUX room (workers, their detail, today's
+attempts and merges) every fifteen seconds through the read-only
+`GET /api/admin/office/amux`. The today strip rewinds the floor to any five
+minutes since Brisbane midnight, or plays the day: a past floor is drawn from
+execution attempts only (a desk means an attempt covered that moment), and the
+summary, inbox, roster and sheet stay as they are now (`lib/agentOffice/replay.ts`).
+Between two readings the live section notices a new
 merge-lane merge into develop (a celebration), a halt opened or cleared, and a
 worker gone wrong; a sound plays for those only when the operator turned it on
 in this browser. The floor's light follows Brisbane's clock (day, dawn, dusk,
@@ -247,7 +253,16 @@ Those reads are read-only (the silence anchor is looked up rather than
 created), and a read that fails is drawn as unread, never as a state
 (`lib/agentOfficeLiveRead.ts`, `lib/agentOffice/roster.ts`,
 `tests/agentOffice.test.mjs`). The page writes nothing and carries no badge
-and no `writeRoles`. Its two sections are `?tab=` addresses (rule 2); it
+and no `writeRoles`, with one owner-only exception: the AI briefing (owner
+decision and paid-call approval, 2026-11-07; `lib/agentOfficeBriefing.ts`). Off
+unless `AGENT_OFFICE_BRIEFING_ENABLED` is `true`; the owner asks with a recent
+sign-in; each new briefing is one model call (`AGENT_OFFICE_BRIEFING_MODEL`,
+default `gpt-6-luna`) reserved under a lock against a limit of 40 a Brisbane
+day, one in flight, audited as `agent_office.briefing_requested` before it runs
+and never retried; an answer under five minutes old is shown again. Its only
+writes are its own usage and last-answer settings and that audit entry. The
+model reads counts, states and worker names, never a card title, and may link
+only the screens in `BRIEFING_LINKS`; it approves, sends or changes nothing. Its two sections are `?tab=` addresses (rule 2); it
 draws its own tab strip, as the original did, and those tabs are links, so
 moving between them keeps the panel mounted and brings a fresh reading of
 the LIVE rooms. The console shell owns the page's `h1`, so

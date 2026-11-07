@@ -286,6 +286,18 @@
 .itGo { font-size: 12px; color: var(--act); font-weight: 600; margin-top: 4px; display: inline-flex; gap: 3px; }
 .empty { font-size: 13px; color: var(--mu); padding: 10px 2px; }
 .roNote { font-size: 12px; color: var(--fa); margin: 10px 0 0; }
+.brief { padding: 16px; margin-bottom: 12px; background: linear-gradient(160deg, var(--acs), var(--panel) 60%); }
+.briefBtn { width: 100%; margin-top: 4px; padding: 9px 12px !important; border-radius: 12px; background: var(--ac) !important; color: #fff !important; font-weight: 700; font-size: 13.5px; }
+.briefBtn:disabled { opacity: .55; cursor: default; }
+.briefWarn { font-size: 12.5px; color: var(--wat); background: var(--was); border-radius: 10px; padding: 8px 10px; margin: 10px 0 0; }
+.briefBody { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.briefHead { font-weight: 700; font-size: 14px; margin: 0 0 8px; color: var(--tx); }
+.briefBody ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.briefBody li { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; font-size: 13px; color: var(--mu); padding: 7px 10px; border-radius: 10px; background: var(--grs); border-left: 3px solid var(--line); }
+.briefBody li.bp_bad { border-left-color: var(--ba); background: var(--bas); }
+.briefBody li.bp_warn { border-left-color: var(--wa); background: var(--was); }
+.briefBody li.bp_info { border-left-color: var(--ac); background: var(--acs); }
+.briefBody li a { flex-shrink: 0; }
 
 .back { font-size: 12.5px; color: var(--act) !important; font-weight: 600; margin-bottom: 10px; display: inline-flex; gap: 4px; }
 .sheetHead { display: flex; gap: 12px; align-items: center; }
@@ -340,6 +352,9 @@
 .nowline { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1px; border-radius: 2px; background: var(--ac); }
 .nowline b { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font-size: 11px; background: var(--ac); color: #fff; border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
 .hours { display: flex; justify-content: space-between; font-size: 11px; color: var(--fa); margin-top: 4px; }
+.rewind { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.rewind input[type="range"] { flex: 1 1 220px; min-width: 160px; accent-color: var(--ac); }
+.rewinding { color: var(--act); background: var(--acs); border-radius: 999px; padding: 3px 10px; font-weight: 700; font-size: 12.5px; }
 
 /* mobile island summary */
 .islList { display: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }

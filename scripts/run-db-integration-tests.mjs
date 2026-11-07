@@ -436,6 +436,10 @@ run(
     // Verified-trace analysis: off by default, facts only, one idea per case and
     // the daily limits, nothing past a report the server already ruled out.
     "tests/integration/trace-report-analysis.db.test.ts",
+    // Agent office AI briefing: off by default, the day's limit and one call in
+    // flight under a lock, audited before the call, reused while fresh, a failed
+    // call counted and not retried.
+    "tests/integration/agent-office-briefing.db.test.ts",
     // Develop CI repair: off by default, a red head handed over once on its
     // second sighting, audited as the system, and taken by the lane first.
     "tests/integration/develop-ci-repair.db.test.ts",

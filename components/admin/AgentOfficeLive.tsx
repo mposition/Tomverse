@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
+import AgentOfficeBriefing from "@/components/admin/AgentOfficeBriefing";
 import AgentOfficeCliMonitor from "@/components/admin/AgentOfficeCliMonitor";
 import AgentOfficeFloor, {
   CHANNEL_COLOR,
@@ -33,7 +34,9 @@ import {
   type FloorLight,
 } from "@/lib/agentOffice/floor";
 import { agentOfficeInbox, inboxTotal, quotaExhaustedNow, type AgentOfficeInboxItem } from "@/lib/agentOffice/inbox";
+import { busyAt, replayMoment, replayState, replaySteps } from "@/lib/agentOffice/replay";
 import type {
+  AgentOfficeAmuxPulse,
   AgentOfficeAmuxView,
   AgentOfficeAmuxWorkerState,
   AgentOfficeDecisionView,
@@ -51,6 +54,9 @@ const SAFETY_HREF = "/admin/amux-settings?tab=safety";
 const CARDS_HREF = "/admin/amux-execution?tab=cards";
 const RUNNING: readonly AgentOfficeAmuxWorkerState[] = ["ready", "idle", "busy", "starting", "error", "lost", "paused", "isolated", "blocked"];
 const SOUND_KEY = "tomverse.agentOffice.sound";
+/** The AMUX room is re-read this often while the tab is visible; the rest of the office every minute. */
+const AMUX_PULSE_MS = 15_000;
+const PLAY_STEP_MS = 350;
 
 type LightPreview = "now" | FloorLight;
 
@@ -89,7 +95,7 @@ function subscribeSound(onChange: () => void) {
 export default function AgentOfficeLive({
   m,
   engine,
-  live,
+  live: served,
   liveDepts,
   amuxView,
   reviewView,
@@ -119,7 +125,7 @@ export default function AgentOfficeLive({
   const [view, setView] = useState<"floor" | "roster">("floor");
   const [problemsOnly, setProblemsOnly] = useState(false);
   const [lightPreview, setLightPreview] = useState<LightPreview>("now");
-  const [hour, setHour] = useState(() => brisbaneHour(Date.parse(live.readAt)));
+  const [hour, setHour] = useState(() => brisbaneHour(Date.parse(served.readAt)));
   const [selected, setSelected] = useState<string | null>(null);
   const [focusIdx, setFocusIdx] = useState(-1);
   const [cliWorker, setCliWorker] = useState<AgentOfficeCliWorker | null>(null);
@@ -128,6 +134,39 @@ export default function AgentOfficeLive({
   // The operator's own sound choice, kept in this browser only (off unless turned on).
   const sound = useSyncExternalStore(subscribeSound, readSound, () => false);
   const toastTimer = useRef<number | undefined>(undefined);
+  const [pulse, setPulse] = useState<AgentOfficeAmuxPulse | null>(null);
+  // null is now; a number is a five-minute step since Brisbane midnight.
+  const [rewind, setRewind] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+
+  // The AMUX room every fifteen seconds while the tab is visible. A failed
+  // read keeps the last one; the page's own minute refresh still runs.
+  useEffect(() => {
+    let stopped = false;
+    let reading = false;
+    const read = async () => {
+      if (reading || document.visibilityState !== "visible") return;
+      reading = true;
+      try {
+        const res = await fetch("/api/admin/office/amux", { cache: "no-store", credentials: "same-origin" });
+        const body = res.ok ? ((await res.json()) as AgentOfficeAmuxPulse) : null;
+        if (!stopped && body && typeof body.readAt === "string" && body.amux && body.history) setPulse(body);
+      } catch {
+        /* keep the last reading */
+      } finally {
+        reading = false;
+      }
+    };
+    const id = window.setInterval(read, AMUX_PULSE_MS);
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+    };
+  }, []);
+  const live = useMemo<AgentOfficeLiveRooms>(
+    () => (pulse && Date.parse(pulse.readAt) > Date.parse(served.readAt) ? { ...served, ...pulse } : served),
+    [pulse, served]
+  );
 
   useEffect(() => {
     const tick = () => setHour(brisbaneHour());
@@ -166,6 +205,29 @@ export default function AgentOfficeLive({
   const detail = live.amuxDetail.kind === "observed" ? live.amuxDetail.workers : null;
   const ownerDetail = live.amuxDetail.kind === "observed" && live.amuxDetail.ownerDetail;
   const amuxWorkers = useMemo(() => (live.amux.kind === "observed" ? live.amux.workers : []), [live.amux]);
+  const history = live.history;
+  const steps = history.kind === "observed" ? replaySteps(history.since, now) : 0;
+  const replayAt = rewind !== null && history.kind === "observed" ? replayMoment(history.since, now, rewind) : null;
+  const busyThen = useMemo(
+    () => (replayAt !== null && history.kind === "observed" ? busyAt(history.spans, replayAt) : null),
+    [history, replayAt]
+  );
+
+  // Playing moves one step at a time and stops at now.
+  useEffect(() => {
+    if (!playing) return;
+    const id = window.setInterval(() => {
+      setRewind((r) => {
+        const next = (r ?? 0) + 1;
+        if (next >= steps) {
+          setPlaying(false);
+          return null;
+        }
+        return next;
+      });
+    }, PLAY_STEP_MS);
+    return () => window.clearInterval(id);
+  }, [playing, steps]);
 
   const workers: FloorWorker[] = useMemo(
     () =>
@@ -186,9 +248,29 @@ export default function AgentOfficeLive({
       }),
     [amuxWorkers, detail, now, m]
   );
+  // Only the floor is rewound; the summary, inbox, roster and sheet stay now.
+  // A rewound floor knows attempts only: no quota place and no card then.
+  const floorWorkers: FloorWorker[] = useMemo(
+    () =>
+      busyThen === null
+        ? workers
+        : workers.map((w) => {
+            const state = replayState(w.state, busyThen.has(w.name));
+            return {
+              ...w,
+              state,
+              label: m.real.amux.states[state],
+              quotaExhausted: false,
+              quotaPercent: null,
+              cardKey: null,
+              needsLook: workerNeedsLook(state, false),
+            };
+          }),
+    [workers, busyThen, m]
+  );
   const layout = useMemo(
-    () => (live.amux.kind === "observed" ? agentOfficeFloorLayout(workers) : null),
-    [live.amux.kind, workers]
+    () => (live.amux.kind === "observed" ? agentOfficeFloorLayout(floorWorkers) : null),
+    [live.amux.kind, floorWorkers]
   );
 
   const teams: FloorTeam[] = useMemo(
@@ -248,7 +330,7 @@ export default function AgentOfficeLive({
     }
   }, [live, amuxWorkers, f, showToast, chime]);
 
-  const light: FloorLight = lightPreview === "now" ? floorLightAt(hour) : lightPreview;
+  const light: FloorLight = lightPreview === "now" ? floorLightAt(replayAt === null ? hour : brisbaneHour(replayAt)) : lightPreview;
   const lightIcon = { day: "☀️", dawn: "🌅", dusk: "🌇", night: "🌙" }[light];
   const clockText = lightPreview === "now" ? aestClock(new Date().toISOString()) : { day: "11:00", dawn: "06:00", dusk: "18:00", night: "21:30" }[light];
 
@@ -318,6 +400,11 @@ export default function AgentOfficeLive({
           ))}
         </span>
         {stale ? <span className={s.stale} role="status" data-testid="agent-office-stale">{m.live.stale}</span> : <span className={s.faint}>{aestStamp(live.readAt)}</span>}
+        {replayAt !== null ? (
+          <span className={s.rewinding} role="status" data-testid="agent-office-rewinding">
+            ⏪ {f.today.at(clockOf(replayAt))}
+          </span>
+        ) : null}
         <span className={s.spacer} />
         <button type="button" className={s.toggle} onClick={onCopyReport} title={m.live.reportHint} data-testid="agent-office-report-copy">{m.live.reportCopy}</button>
         <button type="button" className={s.toggle} onClick={onDownloadReport} title={m.live.reportHint} data-testid="agent-office-report-download">{m.live.reportDownload}</button>
@@ -363,7 +450,7 @@ export default function AgentOfficeLive({
                 floor={
                   <AgentOfficeFloor
                     copy={f}
-                    workers={workers}
+                    workers={floorWorkers}
                     layout={layout}
                     teams={teams}
                     reviewers={reviewers}
@@ -426,12 +513,34 @@ export default function AgentOfficeLive({
               }
             />
           ) : (
-            <Inbox f={f} items={items} total={total} focusIdx={focusIdx} problemsOnly={problemsOnly} workers={workers} onAct={actOn} />
+            <>
+              <AgentOfficeBriefing f={f} />
+              <Inbox f={f} items={items} total={total} focusIdx={focusIdx} problemsOnly={problemsOnly} workers={workers} onAct={actOn} />
+            </>
           )}
         </aside>
       </div>
 
-      <TodayStrip f={f} live={live} hour={hour} />
+      <TodayStrip
+        f={f}
+        live={live}
+        hour={hour}
+        steps={steps}
+        rewind={rewind}
+        replayAt={replayAt}
+        playing={playing}
+        onRewind={(step) => {
+          setPlaying(false);
+          setRewind(step >= steps ? null : step);
+        }}
+        onPlay={() => {
+          if (playing) setPlaying(false);
+          else {
+            if (rewind === null) setRewind(0);
+            setPlaying(true);
+          }
+        }}
+      />
     </div>
   );
 }
@@ -863,7 +972,29 @@ function Roster({
   );
 }
 
-function TodayStrip({ f, live, hour }: { f: FloorCopy; live: AgentOfficeLiveRooms; hour: number }) {
+function TodayStrip({
+  f,
+  live,
+  hour,
+  steps,
+  rewind,
+  replayAt,
+  playing,
+  onRewind,
+  onPlay,
+}: {
+  f: FloorCopy;
+  live: AgentOfficeLiveRooms;
+  hour: number;
+  steps: number;
+  rewind: number | null;
+  replayAt: number | null;
+  playing: boolean;
+  onRewind: (step: number) => void;
+  onPlay: () => void;
+}) {
+  const lineHour = replayAt === null ? hour : brisbaneHour(replayAt);
+  const shownAt = replayAt === null ? f.today.live : f.today.at(clockOf(replayAt));
   const todayKey = (brisbaneIso(live.readAt) ?? "").slice(0, 10);
   const merges =
     live.merges.kind === "observed"
@@ -888,14 +1019,44 @@ function TodayStrip({ f, live, hour }: { f: FloorCopy; live: AgentOfficeLiveRoom
         {merges.map((x) => (
           <i key={x.pr} className={s.tk} style={{ left: `${pos(x.local)}%` }} title={f.today.merge(x.pr, x.local.slice(11, 16))} />
         ))}
-        <div className={s.nowline} style={{ left: `${(hour / 24) * 100}%` }}>
-          <b>{f.today.now}</b>
+        <div className={s.nowline} style={{ left: `${(lineHour / 24) * 100}%` }}>
+          <b>{replayAt === null ? f.today.now : clockOf(replayAt)}</b>
         </div>
       </div>
       <div className={cn(s.hours, s.num)}><span>00</span><span>04</span><span>08</span><span>12</span><span>16</span><span>20</span><span>24</span></div>
+      {live.history.kind === "observed" ? (
+        <div className={s.rewind}>
+          <button type="button" className={s.toggle} aria-pressed={playing} onClick={onPlay} data-testid="agent-office-rewind-play">
+            {playing ? `⏸ ${f.today.pause}` : `▶ ${f.today.play}`}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={steps}
+            value={rewind ?? steps}
+            onChange={(e) => onRewind(Number(e.target.value))}
+            aria-label={f.today.rewind}
+            aria-valuetext={shownAt}
+            data-testid="agent-office-rewind"
+          />
+          <span className={s.faint}>{shownAt}</span>
+          {rewind !== null ? (
+            <button type="button" className={s.toggle} onClick={() => onRewind(steps)}>{f.today.backToNow}</button>
+          ) : null}
+        </div>
+      ) : (
+        <p className={s.roNote}>{f.today.rewindUnread}</p>
+      )}
+      {rewind !== null ? <p className={s.roNote}>ⓘ {f.today.rewindNote}</p> : null}
+      {live.history.kind === "observed" && live.history.truncated ? <p className={s.roNote}>{f.today.truncated}</p> : null}
       <p className={s.roNote}>{f.today.note}</p>
     </section>
   );
+}
+
+/** HH:MM on Brisbane's clock. */
+function clockOf(at: number): string {
+  return aestClock(new Date(at).toISOString()).replace(" AEST", "");
 }
 
 export type { DeptStatus };

@@ -128,7 +128,7 @@ type DetailOpenRow = {
 type DetailUsageRow = { worker: string; tokens: bigint | number; cost: bigint | number };
 type DetailModelRow = { worker: string; model: string | null };
 
-const attemptMark = (outcome: string | null): AgentOfficeAttemptMark =>
+export const agentOfficeAttemptMark = (outcome: string | null): AgentOfficeAttemptMark =>
   outcome === "succeeded" ? "s" : outcome === "failed" ? "f" : "u";
 
 /**
@@ -160,7 +160,7 @@ export function agentOfficeAmuxDetail(input: {
   }
   for (const a of input.attempts) {
     const w = workers[a.worker];
-    if (w && w.recent.length < 10) w.recent.push(attemptMark(a.outcome));
+    if (w && w.recent.length < 10) w.recent.push(agentOfficeAttemptMark(a.outcome));
   }
   if (input.owner) {
     for (const o of input.open) {
