@@ -1101,7 +1101,7 @@ const staticSpecifiers = (source) => [...source.matchAll(/^\s*(?:import|export)\
 
 test("the review orchestrator imports nothing outside its directory statically, as the server's checkout holds only it", () => {
   // The server's checkout is sparse (tools/review-orchestrator). On 2026-11-07 a
-  // static import of scripts/ from lib/ci-fix.mjs stopped the review server itself.
+  // static import of scripts/ from tools/review-orchestrator/lib/ci-fix.mjs stopped the review server itself.
   const files = [];
   const walk = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
