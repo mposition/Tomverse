@@ -34,6 +34,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND } from
 import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "./workerRuntime.ts";
 import { amuxV22RoutesWithSettledUsage } from "./v22WorkerUsageGate.ts";
+import { decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
@@ -142,6 +143,19 @@ async function claimCandidate(taskId: string, assignmentId: string,
       }
       if (!amuxV22TaskRoleSupported(card.taskRole)) {
         throw new BoardImportError("one_shot_role_unavailable", 409);
+      }
+      // Execution start refuses a Task whose attempts are spent
+      // (startAmuxV22TaskExecution, the same budget). Assigning it anyway only
+      // reserved it for a start that never came, so the unstarted release
+      // requeued it and the next tick, which assigns at most one Task, took it
+      // again ahead of every lower-scored Task (production 2026-11-06 to 11-07:
+      // 149 assignments of one Task, no other Task assigned).
+      const prior = await tx.amuxExecutionAttempt.aggregate({ where: { taskId },
+        _count: { _all: true }, _max: { attemptNumber: true },
+        _sum: { reservedCostMicrousd: true } });
+      if (!decideAmuxAttemptBudget({ historical_rows: prior._count._all,
+          greatest_attempt_number: prior._max.attemptNumber }).allowed) {
+        throw new BoardImportError("attempt_budget_exhausted", 409);
       }
       const lane = await currentLane(tx, taskId);
       // Orchestration policy version 35, section 3: the variables while R2c is
@@ -331,9 +345,6 @@ async function claimCandidate(taskId: string, assignmentId: string,
         exactGradeRouting && matchingRoutes.length === 0 ? "no_worker_for_grade" :
           settled.unsettled ? "usage_unverified" : "worker_unavailable", 409);
       if (recovery) {
-        const prior = await tx.amuxExecutionAttempt.aggregate({ where: { taskId },
-          _count: { _all: true }, _max: { attemptNumber: true },
-          _sum: { reservedCostMicrousd: true } });
         const quote = recovery.riskAcceptanceId ? amuxV22ReadOnlyRetryRouteCost({
           priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
           catalogApprovalId: recoveryApproved.approvalId, receipt: recoveryApproved.receipt,
@@ -474,7 +485,7 @@ export async function tickV22WorkerClaim() {
         continue;
       }
       if (["not_unassigned_todo", "task_not_ready", "worker_unavailable",
-        "one_shot_role_unavailable",
+        "one_shot_role_unavailable", "attempt_budget_exhausted",
         "review_author_unknown", "reserved_capacity_unavailable",
         "lane_capacity_full", "conflict", "usage_unverified"].includes(error.code)) continue;
       return { claimed: false as const, reason: error.code };
