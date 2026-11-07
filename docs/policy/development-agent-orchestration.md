@@ -2173,8 +2173,13 @@ request 하나만 처리하며, queue가 비었거나 gate가 꺼져 있으면 �
   `TOMVERSE_AMUX_V22_RECOVERY_INSPECTOR_SECRET`만 받는다. broad
   `TOMVERSE_AMUX_SYNC_SECRET`과 root
   `TOMVERSE_AMUX_V22_RECOVERY_CONTROLLER_SECRET`은 거절한다. route, DTO, actor,
-  `amux.v22.recovery.inspected` writer와 rate limit은 v36 그대로이며 새 권한·route·writer를
-  만들지 않는다. 전용 secret 값의 생성·등록·host 배포는 이 승인에 포함되지 않는다.
+  `amux.v22.recovery.inspected` writer는 v36 그대로이며 새 권한·route·writer를
+  만들지 않는다. rate limit은 운영자 결정(2026-11-07)으로 worker별 버킷이다. 읽기 분당 30·하루
+  2,000회, 보고 분당 20·하루 1,000회를 코드에 고정된 worker 목록
+  (`lib/amux/workerRegistryCore.ts`의 `AMUX_WORKER_REGISTRY_V31_SEED`)에 있는 worker마다 따로 세고,
+  그 밖의 이름은 하나의 고정 버킷을 함께 쓴다. 복구 profile 설정은 controller의 경계이므로 이 한도의
+  기준이 아니다. worker가 모두 같은 box
+  주소에서 오므로 IP 버킷은 쓰지 않는다(전용 secret 인증 뒤의 제한된 worker 이름이 주체다). 전용 secret 값의 생성·등록·host 배포는 이 승인에 포함되지 않는다.
 - controller는 기존 root 전용 service·전용 secret·두 exact-true gate와 v37의 단회
   durable intent를 그대로 쓴다. timer는 새 stop 권한을 만들지 않고 owner가 exact Task에
   만든 pending `safe_stop` 또는 그 읽기 전용 재확인만 전달한다. worker start/restart,
