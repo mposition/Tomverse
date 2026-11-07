@@ -11,6 +11,7 @@ import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import type { AdminTone } from "@/lib/adminUiCore";
+import { catalogImageDraftHref, isRuntimeImageProvider } from "@/lib/runtimeImageProviders";
 import {
   WORK_ITEM_EXCLUSION_REASONS,
   analysisFingerprint,
@@ -180,6 +181,20 @@ const adoptableMember = (group: ModelFamilyGroup) => {
   // `supportsImage` means image *input*; adopting a generation model here would
   // price and route it as a chat model. The server refuses it as well.
   if (candidate.product !== "chat") return null;
+  return ["discovered", "awaiting_decision", "deferred", "approved", "implementation_pending"].includes(
+    candidate.status
+  )
+    ? candidate
+    : null;
+};
+
+/**
+ * The image-generation counterpart of `adoptableMember`: the member to hand to
+ * the image catalogue, where its profile, price revision and judge live.
+ */
+const imageDraftMember = (group: ModelFamilyGroup) => {
+  const candidate = group.representative;
+  if (candidate.action !== "add" || candidate.product !== "image_generation") return null;
   return ["discovered", "awaiting_decision", "deferred", "approved", "implementation_pending"].includes(
     candidate.status
   )
@@ -727,6 +742,25 @@ export function AdminModelDiscoveryPanel() {
               >
                 {m.table.adopt}
               </a>
+            ) : null}
+            {view === "open" && imageDraftMember(group) ? (
+              isRuntimeImageProvider(imageDraftMember(group)!.provider) ? (
+                <a
+                  data-testid="model-discovery-image-draft"
+                  href={catalogImageDraftHref(imageDraftMember(group)!.provider, imageDraftMember(group)!.apiModel)}
+                  className="inline-flex min-h-8 items-center rounded-xl border border-violet-500/40 bg-violet-500/10 px-3 text-xs font-bold text-violet-300 hover:bg-violet-500/20"
+                >
+                  {m.table.imageDraft}
+                </a>
+              ) : (
+                <span
+                  data-testid="model-discovery-image-no-adapter"
+                  className="inline-flex min-h-8 items-center rounded-xl border border-dashed border-zinc-700 px-3 text-xs text-zinc-500"
+                  title={m.table.noImageAdapterTitle}
+                >
+                  {m.table.noImageAdapter(imageDraftMember(group)!.provider)}
+                </span>
+              )
             ) : null}
             {view === "open" && decisionIds(group, "exclude").length > 0 ? (
               <AdminWriteButton
