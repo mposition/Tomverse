@@ -22,7 +22,11 @@ import {
   judgeEnvironmentNames,
 } from "../scripts/trust-safety/runtime-variables-core.mjs";
 import { EXIT, planStart, supervise } from "../scripts/trust-safety/supervise.mjs";
-import { EXIT as CHILD_EXIT, observeOnce } from "../scripts/trust-safety/observe.mjs";
+import {
+  EXIT as CHILD_EXIT,
+  NOT_ACTIVATED_STATUS,
+  observeOnce,
+} from "../scripts/trust-safety/observe.mjs";
 
 /**
  * The Railway cron service (docs/policy/trust-safety-compliance-agent.md §4,
@@ -239,6 +243,44 @@ test("the child reports a refusal and a failure as different exit codes", async 
     log: () => {},
   });
   assert.equal(threw, CHILD_EXIT.requestFailed);
+});
+
+test("the child exits 0 for the not-activated failed and for nothing else that failed", async () => {
+  // Owner direction 2026-11-07: the route answers `failed` at 202 only when
+  // the activation row was never written. That one case ends 0 so the service
+  // does not show CRASHED every period before activation; every other failure
+  // keeps a non-zero exit.
+  const answer = (status, outcome = "failed") =>
+    observeOnce({
+      env: startableEnv(),
+      fetchImpl: async () => new Response(JSON.stringify({ outcome }), { status }),
+      log: () => {},
+    });
+
+  assert.equal(NOT_ACTIVATED_STATUS, 202);
+  assert.equal(await answer(202), CHILD_EXIT.ok, "no config row yet");
+
+  // Another activation fault or an unexpected error (500), an expected
+  // refusal (409), an authentication refusal (401): all still non-zero.
+  for (const status of [500, 409, 401]) {
+    assert.equal(await answer(status), CHILD_EXIT.routeRefused, String(status));
+  }
+  // A 2xx that says `failed` anywhere but 202 is a route answering what it
+  // should not, and is not taken as success.
+  assert.equal(await answer(200), CHILD_EXIT.routeRefused, "200 with failed");
+  // The ordinary answers are unchanged.
+  assert.equal(await answer(200, "ran"), CHILD_EXIT.ok);
+  assert.equal(await answer(200, "disabled"), CHILD_EXIT.ok);
+
+  // A request that never got an answer is still its own failure.
+  const timedOut = await observeOnce({
+    env: startableEnv(),
+    fetchImpl: async () => {
+      throw new DOMException("timed out", "TimeoutError");
+    },
+    log: () => {},
+  });
+  assert.equal(timedOut, CHILD_EXIT.requestFailed);
 });
 
 test("the child logs only the enum §4 closes, never a string from the body", async () => {
