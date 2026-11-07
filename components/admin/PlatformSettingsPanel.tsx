@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Bot, BrainCircuit, Database, Image as ImageIcon, KeyRound, Loader2, RefreshCw, Save, Settings2, ShieldAlert, Sparkles } from "lucide-react";
@@ -326,7 +327,7 @@ export function PlatformSettingsPanel({
   const selectedModel =
     guestModels.find((model) => model.id === guestDefaultModelId) || guestModels[0];
 
-  const touchSyncedAt = () => setLastSyncedAt(new Date().toLocaleTimeString());
+  const touchSyncedAt = () => setLastSyncedAt(formatAestDateTime(new Date(), { seconds: true }) ?? "-");
 
   const applyLeadSettings = (nextSettings: PublicAppSettings) => {
     setGuestDefaultModelId(nextSettings.guestDefaultModelId);

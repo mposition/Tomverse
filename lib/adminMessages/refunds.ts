@@ -55,7 +55,7 @@ export const adminRefundsMessages = defineAdminMessages({
     },
     timeline: "Timeline",
     timelineMeta: (date: string, actor: string | null) =>
-      `${date} UTC / ${actor || "system"}`,
+      `${date} / ${actor || "system"}`,
     notePlaceholder: "Optional note for the customer email",
     approve: "Approve",
     reject: "Reject",
@@ -120,7 +120,7 @@ export const adminRefundsMessages = defineAdminMessages({
     },
     timeline: "타임라인",
     timelineMeta: (date: string, actor: string | null) =>
-      `${date} UTC / ${actor || "시스템"}`,
+      `${date} / ${actor || "시스템"}`,
     notePlaceholder: "고객 이메일에 넣을 메모(선택)",
     approve: "승인",
     reject: "거절",

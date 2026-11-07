@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { Check, Loader2, RotateCcw, Send, X } from "lucide-react";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -74,7 +75,7 @@ export function RecommendationControls({
           }`}
         >
           {m.recommendationStatuses[item.status]}
-          {item.at ? ` · ${new Date(item.at).toLocaleString()}` : ""}
+          {item.at ? ` · ${formatAestDateTime(item.at, { seconds: true }) ?? "-"}` : ""}
           {item.reason ? ` · ${(m.recommendationFailureReasons as Record<string, string>)[item.reason] ?? item.reason}` : ""}
           {item.amuxIdeaId ? ` · ${item.amuxIdeaId}` : ""}
         </span>
@@ -196,7 +197,7 @@ export function OpenRecommendationsInbox({
                 {item.text}
               </p>
               <p className="mt-1 text-zinc-500">
-                {new Date(item.createdAt).toLocaleString()} ·{" "}
+                {formatAestDateTime(item.createdAt, { seconds: true }) ?? "-"} ·{" "}
                 <a
                   href={`#${optimizerCycleAnchor(item.cycleId)}`}
                   className="font-bold text-blue-300 underline underline-offset-4"

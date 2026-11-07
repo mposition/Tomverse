@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { formatAestClock, formatAestDateTime } from "@/lib/adminUiCore";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { shouldIssueAdminPoll, type AdminPollTrigger } from "@/lib/adminPollTick";
@@ -94,7 +95,7 @@ const fill = (template: string, values: Record<string, string | number>) =>
 
 const clock = (iso: string) => {
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return Number.isNaN(date.getTime()) ? iso : formatAestClock(date);
 };
 
 const PULL_URL = "https://github.com/mposition/Tomverse/pull/";
@@ -972,7 +973,7 @@ function SaturationRecord({ record, capacity }: { record: CiAdmissionState["satu
             key={hour.hour}
             className={`min-w-0 flex-1 rounded-sm ${hour.full > 0 ? "bg-rose-400" : hour.queued > 0 ? "bg-amber-300" : "bg-emerald-400/70"}`}
             style={{ height: `${Math.max(8, Math.min(100, Math.round((hour.peak / capacity) * 100)))}%` }}
-            title={fill(m.saturationHour, { hour: `${hour.hour.slice(5, 10)} ${hour.hour.slice(11, 13)}:00 UTC`, peak: hour.peak, full: hour.full, samples: hour.samples })}
+            title={fill(m.saturationHour, { hour: formatAestDateTime(`${hour.hour}:00:00Z`) ?? hour.hour, peak: hour.peak, full: hour.full, samples: hour.samples })}
           />
         ))}
       </ol>

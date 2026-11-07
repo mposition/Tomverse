@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Mail, RefreshCw } from "lucide-react";
 
@@ -66,12 +67,7 @@ type PolicyResponse = {
   selected: (VersionSummary & { profiles: ProfileView[] }) | null;
 };
 
-const dateLabel = (value: string | null) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string | null) => formatAestDateTime(value) ?? "—";
 
 const footerBlockList = (value: unknown) =>
   Array.isArray(value) ? value.map(String) : [];

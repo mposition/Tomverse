@@ -1,3 +1,4 @@
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import type { AdminSuppressionRow } from "@/lib/adminEmailDeliveries";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminEmailDeliveryMessages } from "@/lib/adminMessages/emailDelivery";
@@ -39,8 +40,7 @@ const REASON_TONE: Record<string, string> = {
   soft_bounce: "border-zinc-700 bg-zinc-900 text-zinc-300",
 };
 
-const when = (value: Date | null) =>
-  value ? value.toISOString().replace("T", " ").slice(0, 19) : "—";
+const when = (value: Date | null) => formatAestDateTime(value, { seconds: true }) ?? "—";
 
 export async function AdminEmailSuppressionsPanel({
   rows,

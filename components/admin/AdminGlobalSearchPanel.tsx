@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -18,12 +19,7 @@ type SearchResult = {
   createdAt: string | null;
 };
 
-const dateLabel = (value: string | null) => {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string | null) => formatAestDateTime(value) ?? "";
 
 export function AdminGlobalSearchPanel() {
   const m = useAdminMessages(adminGlobalSearchMessages);

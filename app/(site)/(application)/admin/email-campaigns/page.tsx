@@ -6,6 +6,7 @@ import { AdminEmailCampaignsPanel } from "@/components/admin/AdminEmailCampaigns
 import { AdminPolicyNoticeComposer } from "@/components/admin/AdminPolicyNoticeComposer";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import {
   listAdminCampaigns,
   listCampaignSchedule,
@@ -79,7 +80,7 @@ export default async function AdminEmailCampaignsPage({
             templateKey={POLICY_CHANGE_NOTICE_TEMPLATE}
             locales={SUPPORTED_LANGUAGES}
             effectiveDate={POLICY_CHANGE_NOTICE_EFFECTIVE_DATE}
-            owedBefore={`${CHANGE_NOTICE_OWED_BEFORE.slice(0, 16).replace("T", " ")} UTC`}
+            owedBefore={formatAestDateTime(CHANGE_NOTICE_OWED_BEFORE) ?? CHANGE_NOTICE_OWED_BEFORE}
             wordingApproved={SUPPORTED_LANGUAGES.every((language) =>
               isPolicyChangeNoticeWordingApproved(language, appUrl())
             )}

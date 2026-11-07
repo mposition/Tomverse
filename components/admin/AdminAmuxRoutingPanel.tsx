@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
@@ -1061,13 +1062,8 @@ const useAmuxRoutingFormatters = () => {
     [locale],
   );
   const date = useCallback(
-    (value: string) => Number.isFinite(Date.parse(value))
-      ? new Intl.DateTimeFormat(adminIntlLocale(locale), {
-        dateStyle: "medium",
-        timeStyle: "medium",
-      }).format(new Date(value))
-      : "—",
-    [locale],
+    (value: string) => formatAestDateTime(value, { seconds: true }) ?? "—",
+    [],
   );
   return { number, date };
 };

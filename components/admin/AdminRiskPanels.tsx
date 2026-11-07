@@ -1,3 +1,4 @@
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { AlertTriangle, BookOpen, TrendingUp } from "lucide-react";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
@@ -44,11 +45,7 @@ export type FunnelMetrics = {
 const pct = (value: number, total: number) =>
   total > 0 ? `${((value / total) * 100).toFixed(1)}%` : "0.0%";
 
-const dateLabel = (value: string) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string) => formatAestDateTime(value) ?? "-";
 
 export async function PromotionRiskPanel({
   promoRisks,

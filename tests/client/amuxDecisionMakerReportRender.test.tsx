@@ -126,7 +126,7 @@ for (const locale of ["en", "ko"] as const) {
     assert.deepEqual(headers, [...DM_INSTANCE_SCOPES]);
     assert.equal(
       textOf(byTestId(tree, "amux-dm-report-computed-at")[0]!.children as ReactNode),
-      m.computedAt("2026-10-12 07:51 UTC"),
+      m.computedAt("2026-10-12 17:51 AEST"),
     );
   });
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { dispatchAppToast } from "@/lib/appToast";
 import {
   describeAdminApiFailure,
@@ -167,13 +168,7 @@ const labelFor = (labels: object, key: string): string | undefined =>
     ? (labels as Record<string, string>)[key]
     : undefined;
 
-const when = (value: string | null) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : date.toISOString().replace("T", " ").slice(0, 16);
-};
+const when = (value: string | null) => formatAestDateTime(value) ?? "—";
 
 export function AdminCampaignDetailPanel({
   campaignId,

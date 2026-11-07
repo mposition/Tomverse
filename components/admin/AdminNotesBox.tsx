@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useEffect, useState } from "react";
 import { Loader2, MessageSquarePlus } from "lucide-react";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -26,11 +27,7 @@ type Props = {
   targetId: string;
 };
 
-const dateLabel = (value: string) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string) => formatAestDateTime(value) ?? "-";
 
 export function AdminNotesBox({ targetType, targetId }: Props) {
   const m = useAdminMessages(adminNotesMessages);
@@ -169,7 +166,7 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
             <article key={note.id} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
               <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-200">{note.body}</p>
               <p className="mt-2 text-xs text-zinc-500">
-                {note.createdByEmail || m.fallbackAuthor} · {dateLabel(note.createdAt)} UTC
+                {note.createdByEmail || m.fallbackAuthor} · {dateLabel(note.createdAt)}
               </p>
             </article>
           ))
