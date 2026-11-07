@@ -3,10 +3,7 @@ export const dynamic = "force-dynamic";
 import type { Session } from "next-auth";
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
-import { AdminBillingFinanceOpsDigestsPanel } from "@/components/admin/AdminBillingFinanceOpsDigestsPanel";
-import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminTrustSafetyDigestPanel } from "@/components/admin/AdminTrustSafetyDigestPanel";
-import { readBillingFinanceOpsConsole } from "@/lib/billingFinanceOpsConsoleRead";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import {
   ADMIN_REAUTHENTICATION_MODE_PARAM,
@@ -18,44 +15,33 @@ import { isTrustSafetyRefusalCode } from "@/lib/trustSafetyActivationCore";
 import { readTrustSafetyDigest, type TrustSafetyDigestView } from "@/lib/trustSafetyDigestRead";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import {
+  ADMIN_AGENT_DIGESTS_DEFAULT_ROUTE,
   ADMIN_AGENT_DIGESTS_LEGACY_TABS,
-  adminNavItemTabs,
   adminRedirectTarget,
-  resolveAdminTab,
 } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
 
-const TABS = adminNavItemTabs("agent-digests");
-
 /**
- * The common Agent digest area: one section per agent that stores digests.
- * QA and release, and CI admission, moved to /admin/qa-release; their old
- * links redirect there. Reading takes ordinary admin authentication, which
- * the console layout has established; recording a control revision takes
- * owner or ops and a recent sign-in, checked by its route.
+ * What is left of the common Agent digest area: the Trust and safety digest.
+ * QA and release, and CI admission, are the Release page, and the billing and
+ * finance digest is the Billing and finance agent page (2026-11-07); their old
+ * links, and a bare address, redirect (ADMIN_AGENT_DIGESTS_LEGACY_TABS). Only
+ * `?tab=trust-safety` renders here: the activation step-up and the Agent
+ * office link it, and it has no menu of its own yet. Reading takes ordinary
+ * admin authentication, which the console layout has established.
  */
 export default async function AdminAgentDigestsPage({ searchParams }: PageProps<"/admin/agent-digests">) {
   const query = await searchParams;
-  const legacy = typeof query.tab === "string" ? ADMIN_AGENT_DIGESTS_LEGACY_TABS[query.tab] : undefined;
+  // A repeated ?tab= names its first value, as resolveAdminTab reads it.
+  const requestedTab = Array.isArray(query.tab) ? query.tab[0] : query.tab;
+  const legacy = typeof requestedTab === "string" ? ADMIN_AGENT_DIGESTS_LEGACY_TABS[requestedTab] : undefined;
   if (legacy) redirect(adminRedirectTarget(legacy, query));
-  const tab = resolveAdminTab(TABS, query.tab);
+  if (requestedTab !== "trust-safety") redirect(adminRedirectTarget(ADMIN_AGENT_DIGESTS_DEFAULT_ROUTE, query));
   const session = await getServerSession(authOptions);
-  const canWrite = hasAdminPermission(session, "ops:write");
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      <AdminPageTabs
-        basePath="/admin/agent-digests"
-        tabs={TABS}
-        activeTabId={tab.id}
-        label="Agent digest sections"
-        query={query}
-      />
-      {tab.id === "trust-safety" ? (
-        <TrustSafetySection session={session} refused={query.refused} />
-      ) : (
-        <AdminBillingFinanceOpsDigestsPanel key={tab.id} initial={await readBillingFinanceOpsConsole(canWrite)} />
-      )}
+      <TrustSafetySection session={session} refused={query.refused} />
     </div>
   );
 }

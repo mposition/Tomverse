@@ -201,6 +201,7 @@ export const AMUX_IDEA_BLOCK_REASONS = [
   "canonical_deadline_review_required", "local_card_closed", "local_card_unlinked", "local_card_ambiguous",
   "assignment_mismatch", "contract_path_touched", "incident_frozen", "orchestrator_halted",
   "cli_turn_limit", "cli_execution_error", "cli_budget_limit",
+  "analysis_stop", "analysis_replan", "review_server_rejected_twice",
 ] as const;
 export type AmuxIdeaBlockReason = typeof AMUX_IDEA_BLOCK_REASONS[number];
 const isBlockReason = (value: string | null | undefined): value is AmuxIdeaBlockReason =>

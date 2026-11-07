@@ -139,7 +139,7 @@ test("owner review renders verified, legacy and unknown evidence honestly at 390
 
   const open = async (width: 390 | 320) => {
     await page.setViewportSize({ width, height: 844 });
-    await page.goto("/admin/amux-execution?tab=assignment");
+    await page.goto("/admin/amux-execution?tab=review");
     await page.getByRole("button", { name: "Open protected review" }).click();
     await expect(page.getByTestId("admin-amux-owner-review")).toBeVisible();
     expect(await page.evaluate(() =>
@@ -368,7 +368,7 @@ test("protected review does not wait for supplemental owner metadata and aborts 
   };
 
   await signInAs("owner");
-  await page.goto("/admin/amux-execution?tab=assignment");
+  await page.goto("/admin/amux-execution?tab=review");
   const open = page.getByRole("button", { name: "Open protected review" });
 
   await open.click();

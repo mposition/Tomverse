@@ -804,7 +804,8 @@ export function runPromptRefinerShadowHarness(input: {
     }
     try {
         const anyExisting =
-            io.existsSync(paths.journal) || io.existsSync(paths.witness);
+            io.existsSync(/*turbopackIgnore: true*/ paths.journal) ||
+            io.existsSync(/*turbopackIgnore: true*/ paths.witness);
         if (input.resume) {
             if (!anyExisting) fail("resume_journal_missing");
         } else if (anyExisting) {

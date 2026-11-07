@@ -15,7 +15,8 @@ test("one-click release lives on the idea detail and keeps an unknown write read
     assert.ok(quiet.includes(`"${step}"`), step);
   }
   assert.doesNotMatch(page, /AmuxUnusedAnalysisReservationPanel|tab\.id === "recovery"/);
-  assert.match(page, /requestedTab === "intake" \|\| requestedTab === "recovery"/);
+  // The retired recovery tab redirects (to Reservations & claims in Safety & recovery).
+  assert.match(page, /ADMIN_AMUX_BACKLOG_LEGACY_TABS\[requestedTab\]/);
   assert.match(panel, /method: "DELETE"/);
   assert.match(panel, /JSON\.stringify\(\{ ideaId, confirmedUnused: true \}\)/);
   // The pending marker is written before the write and only a read-back clears it.

@@ -242,6 +242,6 @@ test("every receipt kind names where its row can be read, except the quota batch
   for (const kind of AMUX_ORCHESTRATOR_RECEIPT_TARGET_KINDS) {
     const href = AMUX_ORCHESTRATOR_RECEIPT_TARGET_HREFS[kind];
     if (kind === "quota_observation_batch") assert.equal(href, null);
-    else assert.match(href, /^\/admin\/amux-(execution|promotion)\?tab=/);
+    else assert.match(href, /^\/admin\/amux-(execution|recovery)\?tab=/);
   }
 });

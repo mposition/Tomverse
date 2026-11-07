@@ -2,10 +2,12 @@
 
 import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Bot, BrainCircuit, Database, Image as ImageIcon, KeyRound, Loader2, RefreshCw, Save, Settings2, ShieldAlert, Sparkles } from "lucide-react";
 import {
   canUseModelWithPlan,
+  getModelUsageCredits,
   getModelUsageProfile,
 } from "@/lib/models";
 import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createDefaultLineupEligibilityCheck, createGuestEligibilityCheck, createReplacementResolver, isDefaultLineupServable, isOnePerLineupProvider, lineupSlotProviders } from "@/lib/appDefaults";
@@ -22,7 +24,6 @@ import {
   type AdminApiFailure,
 } from "@/lib/adminApiOutcome";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
-import { ModelLogo } from "@/components/chat/ModelLogo";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { useAdminMessages,
   useAdminLocale,
@@ -31,16 +32,40 @@ import { adminPlatformMemoryMessages } from "@/lib/adminMessages/platformMemory"
 import { adminPlatformSettingsMessages } from "@/lib/adminMessages/platformSettings";
 import { adminFetch } from "@/lib/adminFetch";
 import { ReviewProviderDefaultsSettings } from "@/components/settings/ReviewProviderDefaultsSettings";
+import { DefaultModelsView, type DefaultModelOption } from "@/components/admin/models/DefaultModelsView";
+
+/**
+ * Which part of the settings a mount shows. `all` is the whole screen; the
+ * other four are the tabs of Feature flags (`emergency`, `features`,
+ * `account-defaults`) and the Default models tab of Models (`default-models`),
+ * which is where the default-model block lives since 2026-11-07. Every mount
+ * holds the same state. The route saves all nine flags together, so a save
+ * from a tab sends its own sections' values and takes the others from the
+ * server as they are when it is pressed: a tab left open must never write
+ * back a value it cannot show, such as an emergency stop another operator has
+ * engaged since the page loaded.
+ */
+export type PlatformSettingsView =
+  | "all"
+  | "emergency"
+  | "features"
+  | "account-defaults"
+  | "default-models";
 
 /**
  * Where the reauthentication CTA brings the operator back to.
  *
- * A constant, not `usePathname()`: this panel is the whole of `/admin/platform`
- * and its only other mount is outside `/admin` entirely, where
- * `normalizeAdminCallbackPath()` would fold the callback to `/admin/overview`
- * and drop the operator somewhere other than the settings they were editing.
+ * A constant per view, not `usePathname()`: this panel's only other mount is
+ * outside `/admin` entirely, where `normalizeAdminCallbackPath()` would fold
+ * the callback to `/admin/overview` and drop the operator somewhere other than
+ * the settings they were editing.
  */
-const PLATFORM_SETTINGS_PATH = "/admin/platform";
+const platformSettingsPath = (view: PlatformSettingsView) =>
+  view === "default-models"
+    ? "/admin/models?tab=defaults"
+    : view === "all"
+      ? "/admin/platform"
+      : `/admin/platform?tab=${view}`;
 
 type AdminAppSettingsResponse = {
   settings?: PublicAppSettings;
@@ -65,6 +90,8 @@ type MemoryReleaseStatus = {
 };
 
 type Props = {
+  /** The part of the screen to draw; the whole screen when absent. */
+  view?: PlatformSettingsView;
   settings: PublicAppSettings;
   /**
    * External assistant package import.
@@ -133,6 +160,7 @@ const PROVIDER_LABELS: ReadonlyMap<string, string> = new Map([
 ]);
 
 export function PlatformSettingsPanel({
+  view = "all",
   settings,
   assistantPackageImportEnabled: initialAssistantPackageImportEnabled = false,
   imageGenerationEnabled: initialImageGenerationEnabled,
@@ -148,6 +176,20 @@ export function PlatformSettingsPanel({
 }: Props) {
   const m = useAdminMessages(adminPlatformSettingsMessages);
   const memoryCopy = useAdminMessages(adminPlatformMemoryMessages);
+  const show = (section: Exclude<PlatformSettingsView, "all">) => view === "all" || view === section;
+  const returnPath = platformSettingsPath(view);
+  const router = useRouter();
+  useEffect(() => {
+    // `/admin/platform#default-models` was a link people kept. A hash never
+    // reaches the server, so the move to Models > Default models is made here.
+    if (
+      view !== "default-models" &&
+      window.location.pathname === "/admin/platform" &&
+      window.location.hash === "#default-models"
+    ) {
+      router.replace("/admin/models?tab=defaults#default-models");
+    }
+  }, [view, router]);
   const { models } = useModelCatalog();
   // The effective default lineup, as the server resolved it (lib/appSettings).
   // A response without the field -- an older build answering -- keeps the
@@ -324,9 +366,6 @@ export function PlatformSettingsPanel({
   const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [reauthenticationRequired, setReauthenticationRequired] =
     useState(false);
-  const selectedModel =
-    guestModels.find((model) => model.id === guestDefaultModelId) || guestModels[0];
-
   const touchSyncedAt = () => setLastSyncedAt(formatAestDateTime(new Date(), { seconds: true }) ?? "-");
 
   const applyLeadSettings = (nextSettings: PublicAppSettings) => {
@@ -453,20 +492,58 @@ export function PlatformSettingsPanel({
     if (isLoading || isSaving || reauthenticationRequired) return;
     setIsSaving(true);
     try {
+      // The route saves the nine flags together. A mount that draws only some
+      // of them sends the values it shows and reads the rest now, so a stale
+      // copy of a stop it cannot show is never written back. If that read
+      // fails nothing is saved.
+      let current: AdminAppSettingsResponse | null = null;
+      if (!(show("emergency") && show("features"))) {
+        const currentResponse = await adminFetch("/api/admin/app-settings", { cache: "no-store" });
+        current = (await currentResponse.json().catch(() => null)) as AdminAppSettingsResponse | null;
+        const readable =
+          currentResponse.ok &&
+          current?.settings &&
+          [
+            current.imageGenerationEnabled,
+            current.externalConversationImportEnabled,
+            current.externalConversationContinuationEnabled,
+            current.assistantProfilesEnabled,
+            current.assistantKnowledgeEnabled,
+            current.chatStarterEnabled,
+          ].every((value) => typeof value === "boolean");
+        if (!readable) {
+          dispatchAppToast(m.toast.notSaved, "error");
+          return;
+        }
+      }
+      const emergency = show("emergency") || !current?.settings
+        ? { aiChatEnabled, attachmentsEnabled, publicSharingEnabled }
+        : {
+            aiChatEnabled: current.settings.aiChatEnabled,
+            attachmentsEnabled: current.settings.attachmentsEnabled,
+            publicSharingEnabled: current.settings.publicSharingEnabled,
+          };
+      const rollout = show("features") || !current
+        ? {
+            imageGenerationEnabled,
+            externalConversationImportEnabled: externalImportEnabled,
+            externalConversationContinuationEnabled: externalContinuationEnabled,
+            assistantProfilesEnabled,
+            assistantKnowledgeEnabled,
+            chatStarterEnabled,
+          }
+        : {
+            imageGenerationEnabled: current.imageGenerationEnabled,
+            externalConversationImportEnabled: current.externalConversationImportEnabled,
+            externalConversationContinuationEnabled: current.externalConversationContinuationEnabled,
+            assistantProfilesEnabled: current.assistantProfilesEnabled,
+            assistantKnowledgeEnabled: current.assistantKnowledgeEnabled,
+            chatStarterEnabled: current.chatStarterEnabled,
+          };
       const response = await adminFetch("/api/admin/app-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          aiChatEnabled,
-          attachmentsEnabled,
-          publicSharingEnabled,
-          imageGenerationEnabled,
-          externalConversationImportEnabled: externalImportEnabled,
-          externalConversationContinuationEnabled: externalContinuationEnabled,
-          assistantProfilesEnabled,
-          assistantKnowledgeEnabled,
-          chatStarterEnabled,
-        }),
+        body: JSON.stringify({ ...emergency, ...rollout }),
       });
       const data = (await response.json().catch(() => null)) as
         | AdminAppSettingsResponse
@@ -670,6 +747,144 @@ export function PlatformSettingsPanel({
       !guestTrio.includes(model.id)
   );
 
+  const reauthAlert = (
+    reauthenticationRequired ? (
+        <div
+          id="admin-platform-reauthentication"
+          data-testid="admin-platform-reauthentication"
+          role="alert"
+          aria-live="assertive"
+          className="border-b border-amber-500/30 bg-amber-500/10 p-5"
+        >
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-200">
+              <KeyRound className="h-5 w-5" aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-lg font-black text-amber-100">
+                {m.reauth.title}
+              </h3>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
+                {m.reauth.body}
+              </p>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
+                {m.reauth.next}
+              </p>
+              <Link
+                href={adminRecentAuthenticationHref(returnPath)}
+                data-testid="admin-platform-reauthenticate-link"
+                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-zinc-950 transition hover:bg-amber-300"
+              >
+                <KeyRound className="h-4 w-4" aria-hidden />
+                {m.reauth.link}
+              </Link>
+            </div>
+          </div>
+        </div>
+    ) : null
+  );
+
+  const optionOf = (model: (typeof models)[number]): DefaultModelOption => ({
+    id: model.id,
+    name: model.name,
+    provider: model.provider,
+    credits: getModelUsageCredits(model),
+  });
+  const defaultModelsView = (
+    <DefaultModelsView
+      syncedLabel={lastSyncedAt}
+      reload={{ busy: isLoading || isSaving, onReload: () => void reload() }}
+      fallback={{
+        name: fallbackRow?.name || APP_DEFAULTS.defaultModelId,
+        id: APP_DEFAULTS.defaultModelId,
+        provider: fallbackRow?.provider || "openai",
+        credits: (() => { const row = models.find((model) => model.id === APP_DEFAULTS.defaultModelId); return row ? getModelUsageCredits(row) : null; })(),
+      }}
+      transition={{
+        loaded: registryLoaded,
+        candidates: registryModels
+          .filter((model) => model.id !== APP_DEFAULTS.defaultModelId && !model.catalogDeleted)
+          .map((model) => ({ id: model.id, name: model.name, provider: model.provider })),
+        candidateId,
+        onCandidate: setCandidateId,
+        checks: transitionChecks,
+        hasCandidate: Boolean(candidate),
+        onCopy: () => {
+          if (!candidate) return;
+          const text = fallbackTransitionRequestText({
+            candidateId: candidate.id,
+            checks: transitionChecks,
+          });
+          void navigator.clipboard?.writeText(text).then(
+            () => dispatchAppToast(m.toast.copyDoesNotApply, "success"),
+            () => dispatchAppToast(m.toast.copyFailed, "error")
+          );
+        },
+      }}
+      lineup={{
+        draft: lineupDraft,
+        slotProviders: lineupDraft.map((_, index) => slotProvider(index)),
+        options: lineupCandidates.map(optionOf),
+        labelFor,
+        changed: lineupChanged,
+        complete: lineupComplete,
+        saving: lineupSaving,
+        error: lineupError,
+        leadMovesTo:
+          lineupChanged && lineupLead && lineupLead !== appliedLead ? labelFor(lineupLead) : null,
+        onSlot: (index, id) => {
+          setLineupError(null);
+          setLineupDraft((current) => current.map((slotId, slot) => (slot === index ? id : slotId)));
+        },
+        onSave: () => void saveLineup(),
+      }}
+      lead={{
+        value: guestDefaultModelId,
+        options: guestModels.map(optionOf),
+        inList: leadInList,
+        saving: leadSaving,
+        error: leadError,
+        onChange: (id) => {
+          setLeadError(null);
+          setGuestDefaultModelId(id);
+        },
+        onSave: () => void saveLead(),
+      }}
+      notices={{
+        visibleOrder: guestDescription.visibleIds.map(labelFor).join(", "),
+        missingProviders:
+          guestDescription.missingProviders.length > 0
+            ? guestDescription.missingProviders
+                .map((provider) => PROVIDER_LABELS.get(provider) ?? provider)
+                .join(", ")
+            : null,
+        storedNotApplied:
+          guestDescription.storedNotApplied && storedGuestLead && guestDescription.effectiveLeadId
+            ? { stored: storedGuestLead, effective: guestDescription.effectiveLeadId }
+            : null,
+        substitutions: guestDescription.ineligibleTrioIds.flatMap((id, index) => {
+          const substituteId = guestDescription.substituteIds[index];
+          return substituteId
+            ? [{ id, missing: labelFor(id), substitute: labelFor(substituteId) }]
+            : [];
+        }),
+        outsideTrio: outsideTrio.map((model) => ({ id: model.id, name: model.name })),
+      }}
+    />
+  );
+
+  // The Default models tab is its own page of cards, not a panel inside this
+  // screen's frame; the whole-screen view keeps it in the frame.
+  if (view === "default-models") {
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
+        {reauthAlert}
+        {defaultModelsView}
+      </div>
+    );
+  }
+
   return (
     <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80 shadow-2xl shadow-black/20">
       {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
@@ -701,6 +916,7 @@ export function PlatformSettingsPanel({
               )}
               {m.reload}
             </button>
+            {view === "all" || view === "emergency" || view === "features" ? (
             <button
               type="button"
               onClick={save}
@@ -723,47 +939,18 @@ export function PlatformSettingsPanel({
               )}
               {m.save}
             </button>
+            ) : null}
           </div>
         </div>
       </div>
 
-      <div className="p-5"><ReviewProviderDefaultsSettings scope="platform" /></div>
-      {reauthenticationRequired ? (
-        <div
-          id="admin-platform-reauthentication"
-          data-testid="admin-platform-reauthentication"
-          role="alert"
-          aria-live="assertive"
-          className="border-b border-amber-500/30 bg-amber-500/10 p-5"
-        >
-          <div className="flex items-start gap-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-200">
-              <KeyRound className="h-5 w-5" aria-hidden />
-            </span>
-            <div className="min-w-0 flex-1">
-              <h3 className="text-lg font-black text-amber-100">
-                {m.reauth.title}
-              </h3>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
-                {m.reauth.body}
-              </p>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
-                {m.reauth.next}
-              </p>
-              <Link
-                href={adminRecentAuthenticationHref(PLATFORM_SETTINGS_PATH)}
-                data-testid="admin-platform-reauthenticate-link"
-                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-zinc-950 transition hover:bg-amber-300"
-              >
-                <KeyRound className="h-4 w-4" aria-hidden />
-                {m.reauth.link}
-              </Link>
-            </div>
-          </div>
-        </div>
+      {show("account-defaults") ? (
+        <div className="p-5"><ReviewProviderDefaultsSettings scope="platform" /></div>
       ) : null}
+      {reauthAlert}
 
       <div className="grid gap-5 p-5 xl:grid-cols-[1fr_0.8fr]">
+        {show("emergency") ? (
         <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-5 xl:col-span-2">
           <div className="flex items-start gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10 text-red-300">
@@ -795,6 +982,8 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
+        ) : null}
+        {show("features") ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
           <div className="flex items-start gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
@@ -819,6 +1008,8 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
+        ) : null}
+        {show("features") ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
           <div className="flex items-start gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-300">
@@ -843,6 +1034,8 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
+        ) : null}
+        {show("features") ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
           <div className="flex items-start gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
@@ -886,6 +1079,8 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
+        ) : null}
+        {show("features") ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
           <div className="flex items-start gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
@@ -925,6 +1120,8 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
+        ) : null}
+        {show("features") ? (
         <div
           data-testid="admin-memory-release-status"
           className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2"
@@ -972,250 +1169,9 @@ export function PlatformSettingsPanel({
             </div>
           </div>
         </div>
-        <div id="default-models" className="grid gap-5 xl:col-span-2">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-              {m.decisions.eyebrow}
-            </p>
-            <h3 className="mt-2 text-xl font-black text-white">{m.decisions.title}</h3>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">{m.decisions.subtitle}</p>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5" data-testid="admin-fallback-card">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">{m.decisions.fallbackBadge}</p>
-            <h3 className="mt-2 text-xl font-black text-white">{m.decisions.fallbackTitle}</h3>
-            <p className="mt-3 font-mono text-sm font-bold text-white">
-              {m.decisions.fallbackCurrent(
-                fallbackRow?.name || APP_DEFAULTS.defaultModelId,
-                APP_DEFAULTS.defaultModelId,
-                fallbackRow?.provider || "openai"
-              )}
-            </p>
-            <p className="mt-3 text-sm leading-6 text-zinc-400">{m.decisions.fallbackApplies}</p>
-            <p className="mt-2 text-sm leading-6 text-zinc-400">{m.decisions.fallbackDoesNot}</p>
-            <p className="mt-2 text-sm leading-6 text-zinc-300">{m.decisions.fallbackProtection}</p>
-            <p className="mt-2 text-sm leading-6 text-zinc-400">{m.decisions.fallbackHow}</p>
-            <div className="mt-5 rounded-xl border border-zinc-800 p-4">
-              <p className="text-sm font-bold text-white">{m.decisions.checkTitle}</p>
-              {registryLoaded && registryModels.filter((model) => model.id !== APP_DEFAULTS.defaultModelId && !model.catalogDeleted).length === 0 ? (
-                <p className="mt-2 text-sm text-zinc-400">{m.decisions.checkEmpty}</p>
-              ) : (
-                <>
-                  <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                    {m.decisions.checkCandidate}
-                    <select
-                      value={candidateId}
-                      onChange={(event) => setCandidateId(event.target.value)}
-                      className="mt-2 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold normal-case tracking-normal text-white"
-                      data-testid="admin-fallback-candidate"
-                    >
-                      <option value="">{m.decisions.checkCandidate}</option>
-                      {registryModels
-                        .filter((model) => model.id !== APP_DEFAULTS.defaultModelId && !model.catalogDeleted)
-                        .map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.name} ({model.id})
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  {candidate ? (
-                    <ul className="mt-3 grid gap-1 text-sm text-zinc-300">
-                      {transitionChecks.map((check) => (
-                        <li key={check.id}>
-                          {check.pass ? m.decisions.pass : m.decisions.fail} · {m.decisions.checks[check.id]}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  <button
-                    type="button"
-                    disabled={!candidate}
-                    data-testid="admin-fallback-copy"
-                    onClick={() => {
-                      if (!candidate) return;
-                      const text = fallbackTransitionRequestText({
-                        candidateId: candidate.id,
-                        checks: transitionChecks,
-                      });
-                      void navigator.clipboard?.writeText(text).then(
-                        () => dispatchAppToast(m.toast.copyDoesNotApply, "success"),
-                        () => dispatchAppToast(m.toast.copyFailed, "error")
-                      );
-                    }}
-                    className="mt-3 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"
-                  >
-                    {m.decisions.checkCopy}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-            <div className="flex items-start gap-4">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
-                <Bot className="h-5 w-5" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-                  {m.guestDefault.eyebrow}
-                </p>
-                <h3 className="mt-2 text-xl font-black text-white">
-                  {m.guestDefault.title}
-                </h3>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
-                  {m.guestDefault.description}
-                </p>
-                <fieldset className="mt-4 rounded-xl border border-zinc-800 p-4" data-testid="admin-guest-lineup">
-                  <legend className="px-1 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                    {m.guestDefault.lineupTitle}
-                  </legend>
-                  <p className="text-sm leading-6 text-zinc-400">{m.guestDefault.lineupDescription}</p>
-                  <div className="mt-3 grid gap-3 md:grid-cols-3">
-                    {lineupDraft.map((slotId, index) => (
-                      <label key={index} className="block">
-                        <span className="mb-2 block text-xs font-semibold text-zinc-500">
-                          {m.guestDefault.lineupSlot(index + 1, PROVIDER_LABELS.get(slotProvider(index) ?? "") ?? slotProvider(index) ?? "")}
-                        </span>
-                        <select
-                          value={slotId}
-                          disabled={lineupSaving}
-                          data-testid={`admin-guest-lineup-slot-${index}`}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            setLineupError(null);
-                            setLineupDraft((current) =>
-                              current.map((id, slot) => (slot === index ? value : id))
-                            );
-                          }}
-                          className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:opacity-60"
-                        >
-                          {lineupCandidates.some(
-                            (model) => model.id === slotId && model.provider === slotProvider(index)
-                          ) ? null : (
-                            <option value={slotId}>{labelFor(slotId)}</option>
-                          )}
-                          {lineupCandidates
-                            .filter((model) => !slotProvider(index) || model.provider === slotProvider(index))
-                            .map((model) => (
-                            <option
-                              key={model.id}
-                              value={model.id}
-                              disabled={model.id !== slotId && lineupDraft.includes(model.id)}
-                            >
-                              {model.name} - {model.provider}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ))}
-                  </div>
-                  {lineupChanged && lineupLead && lineupLead !== appliedLead ? (
-                    <p className="mt-2 text-sm text-amber-200" data-testid="admin-guest-lineup-lead-moves">
-                      {m.guestDefault.lineupLeadMoves(labelFor(lineupLead))}
-                    </p>
-                  ) : null}
-                  {lineupError ? (
-                    <p className="mt-2 text-sm font-bold text-amber-200" data-testid="admin-guest-lineup-error">
-                      {lineupError}
-                    </p>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => void saveLineup()}
-                    disabled={lineupSaving || !lineupChanged || !lineupComplete}
-                    data-testid="admin-guest-lineup-save"
-                    className="mt-3 inline-flex items-center gap-2 rounded-xl border border-blue-500/40 px-4 py-2 text-sm font-bold text-blue-100 hover:bg-blue-500/10 disabled:opacity-50"
-                  >
-                    {lineupSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    {m.guestDefault.saveLineup}
-                  </button>
-                </fieldset>
-                <p className="mt-1 text-sm text-zinc-300">{m.guestDefault.visibleOrder(guestDescription.visibleIds.map(labelFor).join(", "))}</p>
-                {guestDescription.missingProviders.length > 0 ? (
-                  <p className="mt-2 text-sm font-bold text-amber-200" data-testid="admin-guest-lineup-provider-missing">
-                    {m.guestDefault.lineupProviderMissing(
-                      guestDescription.missingProviders
-                        .map((provider) => PROVIDER_LABELS.get(provider) ?? provider)
-                        .join(", ")
-                    )}
-                  </p>
-                ) : null}
-                {guestDescription.storedNotApplied && storedGuestLead && guestDescription.effectiveLeadId ? (
-                  <p className="mt-2 text-sm font-bold text-amber-200">
-                    {m.guestDefault.storedNotApplied(storedGuestLead, guestDescription.effectiveLeadId)}
-                  </p>
-                ) : null}
-                {guestDescription.ineligibleTrioIds.map((id, index) => {
-                  const substituteId = guestDescription.substituteIds[index];
-                  if (!substituteId) return null;
-                  return (
-                    <p key={id} className="mt-2 text-sm text-amber-200">
-                      {m.guestDefault.substituted(labelFor(id), labelFor(substituteId))}{" "}
-                      <Link href={`/admin/models?q=${encodeURIComponent(id)}`} className="font-bold text-white underline">
-                        {labelFor(id)}
-                      </Link>
-                    </p>
-                  );
-                })}
-                {outsideTrio.map((model) => (
-                  <p key={model.id} className="mt-2 text-sm text-zinc-400">
-                    {m.guestDefault.outsideTrio(model.name, model.id)}
-                  </p>
-                ))}
-
-                <label className="mt-5 block">
-                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                    {m.guestDefault.leadingEngine}
-                  </span>
-                  <select
-                    value={leadInList ? guestDefaultModelId : ""}
-                    disabled={guestModels.length === 0 || leadSaving}
-                    onChange={(event) => {
-                      setLeadError(null);
-                      setGuestDefaultModelId(event.target.value);
-                    }}
-                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:opacity-60"
-                  >
-                    {guestModels.length === 0 || !leadInList ? (
-                      <option value="">{m.guestDefault.noEligible}</option>
-                    ) : null}
-                    {guestModels.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name} - {model.provider}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {leadError ? (
-                  <p className="mt-2 text-sm font-bold text-amber-200" data-testid="admin-guest-lead-error">
-                    {leadError}
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => void saveLead()}
-                  disabled={leadSaving || guestModels.length === 0 || !leadInList}
-                  className="mt-3 inline-flex items-center gap-2 rounded-xl border border-blue-500/40 px-4 py-2 text-sm font-bold text-blue-100 hover:bg-blue-500/10 disabled:opacity-50"
-                >
-                  {leadSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  {m.guestDefault.saveLead}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5" data-testid="admin-account-default-card">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">{m.decisions.accountBadge}</p>
-            <h3 className="mt-2 text-xl font-black text-white">{m.decisions.accountTitle}</h3>
-            <p className="mt-2 text-sm leading-6 text-zinc-400">{m.decisions.accountBody}</p>
-            <Link href="/admin/analytics" className="mt-3 inline-block text-sm font-bold text-white underline">
-              {m.decisions.accountLink}
-            </Link>
-          </div>
-        </div>
-
+        ) : null}
+        {view === "all" ? <div className="xl:col-span-2">{defaultModelsView}</div> : null}
+        {show("features") ? (
         <div
           className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2"
           data-testid="admin-package-import-control"
@@ -1267,35 +1223,7 @@ export function PlatformSettingsPanel({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
-            {m.selection.eyebrow}
-          </p>
-          {selectedModel ? (
-            <div className="mt-4 flex items-start gap-4">
-              <ModelLogo provider={selectedModel.provider} size="lg" />
-              <div>
-                <h3 className="font-black text-white">{selectedModel.name}</h3>
-                <p className="mt-1 text-sm font-semibold text-zinc-500">
-                  {selectedModel.provider} · {getModelUsageProfile(selectedModel).category} · Guest
-                </p>
-                <p className="mt-3 text-sm leading-6 text-zinc-400">
-                  {m.selection.eligibility}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <p className="mt-4 text-sm text-red-200">
-              {m.selection.noEligible}
-            </p>
-          )}
-          <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <p className="flex items-center gap-2 text-sm font-bold text-emerald-300">
-              <Database className="h-4 w-4" />
-              {lastSyncedAt ? m.selection.synced(lastSyncedAt) : m.selection.loadedOnOpen}
-            </p>
-          </div>
-        </div>
+        ) : null}
       </div>
     </section>
   );

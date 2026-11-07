@@ -24,6 +24,11 @@ import { BILLING_CURRENCIES, type BillingCurrency } from "@/lib/billingMarkets";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminPromotionDiagnosticsMessages } from "@/lib/adminMessages/promotionDiagnostics";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import type { AdminTone } from "@/lib/adminUiCore";
 import {
   currentPromotionDraftState,
   serverPromotionDraftState,
@@ -69,17 +74,18 @@ type Props = {
   promotions: BillingPromotionConfig[];
 };
 
-const STATUS_STYLES: Record<
+/** A check that was not run is dashed and unlabelled-as-healthy, never green. */
+const STATUS_TONE: Record<
   DiagnosticStatus | "ready" | "blocked" | "warning",
-  { className: string }
+  AdminTone
 > = {
-  pass: { className: "text-emerald-300" },
-  ready: { className: "text-emerald-300" },
-  fail: { className: "text-red-300" },
-  blocked: { className: "text-red-300" },
-  warn: { className: "text-amber-300" },
-  warning: { className: "text-amber-300" },
-  not_checked: { className: "text-zinc-400" },
+  pass: "ok",
+  ready: "ok",
+  fail: "bad",
+  blocked: "bad",
+  warn: "warn",
+  warning: "warn",
+  not_checked: "unknown",
 };
 
 const StatusIcon = ({ status }: { status: DiagnosticStatus }) => {
@@ -141,15 +147,13 @@ const Section = ({
   const m = useAdminMessages(adminPromotionDiagnosticsMessages);
   return (
     <section
-      className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4"
+      className="border-t border-zinc-800 pt-4"
       data-testid={testId}
       data-status={status}
     >
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h4 className="text-sm font-black text-white">{title}</h4>
-        <span className={`text-xs font-bold ${STATUS_STYLES[status].className}`}>
-          {m.status[status]}
-        </span>
+        <h4 className="text-sm font-bold text-white">{title}</h4>
+        <AdminStatusChip tone={STATUS_TONE[status]}>{m.status[status]}</AdminStatusChip>
       </div>
       {description ? (
         <p className="mb-3 text-xs text-zinc-500">{description}</p>
@@ -289,21 +293,12 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
     : "";
 
   return (
-    <section
-      className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-950"
+    <AdminTile
       data-testid="promotion-diagnostics-panel"
+      title={m.title}
+      description={m.description}
     >
-      <header className="border-b border-zinc-800 p-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <Stethoscope className="h-5 w-5 text-blue-400" aria-hidden />
-          <h3 className="text-lg font-black text-white">{m.title}</h3>
-        </div>
-        <p className="mt-1 max-w-3xl text-sm text-zinc-400">
-          {m.description}
-        </p>
-      </header>
-
-      <div className="grid gap-4 p-5 lg:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <label className="flex flex-col gap-1.5 text-sm">
           <span className="font-bold text-zinc-300">{m.fields.promotion}</span>
           <select
@@ -386,7 +381,7 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
         </label>
       </div>
 
-      <div className="flex flex-col gap-3 border-t border-zinc-800 p-5">
+      <div className="flex flex-col gap-3 border-t border-zinc-800 pt-4">
         {selectionIsDirty ? (
           <p
             data-testid="promotion-diagnostics-dirty-notice"
@@ -442,19 +437,8 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
         </div>
 
         {error ? (
-          <div
-            role="alert"
-            data-testid="promotion-diagnostics-error"
-            className="flex flex-wrap items-center gap-3 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200"
-          >
-            <span className="min-w-0">{error}</span>
-            <button
-              type="button"
-              onClick={run}
-              className="rounded-lg border border-red-400/50 px-2 py-1 text-xs font-bold text-red-100 hover:bg-red-500/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-300"
-            >
-              {m.retry}
-            </button>
+          <div data-testid="promotion-diagnostics-error">
+            <AdminStateBlock kind="error" title={error} onRetry={run} />
           </div>
         ) : null}
       </div>
@@ -466,19 +450,17 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
         className="min-w-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
       >
         {report && result ? (
-          <div className="flex min-w-0 flex-col gap-4 border-t border-zinc-800 p-5">
+          <div className="flex min-w-0 flex-col gap-4 border-t border-zinc-800 pt-4">
             <div
               data-testid="promotion-diagnostics-summary"
               data-status={report.status}
-              className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4"
+              className="rounded-xl bg-zinc-950 p-4"
             >
               <p className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-bold text-zinc-300">{m.summary.label}</span>
-                <span
-                  className={`text-sm font-black ${STATUS_STYLES[report.status].className}`}
-                >
+                <AdminStatusChip tone={STATUS_TONE[report.status]}>
                   {m.status[report.status]}
-                </span>
+                </AdminStatusChip>
               </p>
               <p className="mt-2 text-xs text-zinc-500">
                 {report.status === "ready"
@@ -729,22 +711,26 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
                   </li>
                 ))}
               </ul>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <code className="min-w-0 break-all rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-400">
-                  {dryRunCommand}
-                </code>
-                <button
-                  type="button"
-                  onClick={() => copy(dryRunCommand, m.copy.dryRunTarget)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2 py-1 text-xs font-bold text-zinc-200 hover:bg-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
-                >
-                  <ClipboardCopy className="h-3 w-3" aria-hidden />
-                  {m.actions.copyDryRun}
-                </button>
-              </div>
               <p className="mt-2 text-xs text-zinc-500">
                 {m.actions.repairsNote}
               </p>
+              <div className="mt-3">
+                <AdminTechInfo>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code className="min-w-0 break-all rounded bg-zinc-950 px-2 py-1 text-xs text-zinc-300">
+                      {dryRunCommand}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => copy(dryRunCommand, m.copy.dryRunTarget)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2 py-1 font-sans text-xs font-bold text-zinc-200 hover:bg-zinc-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
+                    >
+                      <ClipboardCopy className="h-3 w-3" aria-hidden />
+                      {m.actions.copyDryRun}
+                    </button>
+                  </div>
+                </AdminTechInfo>
+              </div>
             </Section>
 
             {selectedPromotion &&
@@ -758,6 +744,6 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
           </div>
         ) : null}
       </div>
-    </section>
+    </AdminTile>
   );
 }

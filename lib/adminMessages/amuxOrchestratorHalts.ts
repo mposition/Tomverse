@@ -1,7 +1,7 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
- * Copy for AMUX › Operations settings › Safety & recovery (orchestration
+ * Copy for AMUX settings › Safety & recovery (orchestration
  * policy version 20 section 7, amended by version 33). Reason codes, call kinds,
  * receipt kinds, resolutions and ids are
  * identifiers and render as stored.

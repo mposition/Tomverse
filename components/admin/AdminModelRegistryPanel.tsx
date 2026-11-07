@@ -6,16 +6,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
   CheckCircle2,
-  Copy,
-  Database,
-  FilterX,
-  KeyRound,
   Loader2,
-  Pencil,
-  Plus,
-  RefreshCw,
   Save,
-  Search,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -43,10 +35,8 @@ import {
 } from "@/lib/defaultModelConsole";
 import {
   DEFAULT_MODEL_LIFECYCLE_FILTER,
-  MODEL_LIFECYCLE_FILTERS,
   countModelsInLifecycleView,
   filterRegistryModels,
-  modelLifecycleState,
   normalizeModelLifecycleFilter,
   type ModelLifecycleFilter,
 } from "@/lib/adminModelRegistryFilters";
@@ -57,7 +47,12 @@ import {
   isWebSearchOverride,
   type WebSearchOverride,
 } from "@/lib/webSearchOverride";
-import { ModelLogo } from "@/components/chat/ModelLogo";
+import { ModelRegistryList } from "@/components/admin/models/ModelRegistryList";
+import { NewModelsBanner } from "@/components/admin/models/NewModelsBanner";
+import { AdminConfirmDialog } from "@/components/admin/ui/AdminConfirmDialog";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { adminModelsBoardMessages } from "@/lib/adminMessages/modelsBoard";
 import { adminFetch } from "@/lib/adminFetch";
 
 type EnvironmentStatus = {
@@ -383,6 +378,7 @@ function DraftHints({ lines }: { lines: readonly string[] }) {
 
 export function AdminModelRegistryPanel() {
   const m = useAdminMessages(adminModelRegistryMessages);
+  const board = useAdminMessages(adminModelsBoardMessages).registry;
   const { locale } = useAdminLocale();
   const router = useRouter();
   const pathname = usePathname();
@@ -508,6 +504,9 @@ export function AdminModelRegistryPanel() {
   const [lookupSettledForKey, setLookupSettledForKey] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
+  // A failed read is its own state: an empty list would say "no models".
+  const [loadError, setLoadError] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<AdminModel | null>(null);
   const [guestLead, setGuestLead] = useState<{ stored: string | null; effective: string | null; trio?: string[] } | null>(null);
   // The effective default lineup (lib/guestLeadFacts), so the trio role and
   // the adoption warning describe what guests are actually shown.
@@ -533,10 +532,12 @@ export function AdminModelRegistryPanel() {
       } | null;
       if (!response.ok || !data?.models) throw new Error(data?.error || m.toast.loadFailed);
       setModels(data.models);
+      setLoadError(false);
       setSecurityFindings(data.securityFindings || []);
       setReadAt(data.readAt ?? null);
       setGuestLead(data.guestLead ?? null);
     } catch (error) {
+      setLoadError(true);
       dispatchAppToast(error instanceof Error ? error.message : m.toast.loadFailed, "error");
     } finally {
       setLoading(false);
@@ -670,6 +671,15 @@ export function AdminModelRegistryPanel() {
     () => filterRegistryModels(models, { lifecycle, provider, query }),
     [models, lifecycle, provider, query]
   );
+  // Chip counts follow the search and the lifecycle view but not the company
+  // chosen, so the other companies stay one click away.
+  const providerCounts = useMemo(() => {
+    const inView = filterRegistryModels(models, { lifecycle, provider: "all", query });
+    return AI_PROVIDERS.map((item) => ({
+      provider: item,
+      count: inView.filter((model) => model.provider === item).length,
+    })).filter((item) => item.count > 0 || item.provider === provider);
+  }, [models, lifecycle, provider, query]);
   const hiddenByLifecycle = useMemo(
     () => models.length - countModelsInLifecycleView(models, lifecycle),
     [models, lifecycle]
@@ -1249,7 +1259,7 @@ export function AdminModelRegistryPanel() {
   };
 
   const archive = async (model: AdminModel) => {
-    if (!window.confirm(m.toast.archiveConfirm(model.name))) return;
+    setArchiveTarget(null);
     setSaving(true);
     try {
       const response = await adminFetch(`/api/admin/models/${encodeURIComponent(model.id)}`, { method: "DELETE" });
@@ -1311,156 +1321,108 @@ export function AdminModelRegistryPanel() {
   };
 
   return (
-    <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80" data-testid="model-registry-panel">
+    <div className="flex min-w-0 flex-col gap-5" data-testid="model-registry-panel">
       {apiFailure && !editingId ? <AdminApiFailureNotice failure={apiFailure} /> : null}
-      <div className="flex flex-col gap-4 border-b border-zinc-800 bg-zinc-900/50 p-5 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-300">{m.header.eyebrow}</p>
-          <h2 className="mt-2 text-2xl font-black text-white">{m.header.title}</h2>
-          <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-400">
-            {m.header.description}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button type="button" onClick={() => void load()} disabled={loading || saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} {m.header.reload}
-          </button>
-          <button type="button" onClick={beginCreate} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500">
-            <Plus className="h-4 w-4" /> {m.header.addModel}
-          </button>
-        </div>
-      </div>
+      <NewModelsBanner />
 
       {securityFindings.length > 0 ? (
-        <div className="border-b border-red-900/60 bg-red-950/40 p-4 text-sm text-red-100" role="alert">
-          <p className="font-black">{m.security.title}</p>
-          <p className="mt-1 text-red-200/80">
-            {m.security.detail(securityFindings.length)}
-          </p>
-          <ul className="mt-2 list-disc space-y-1 pl-5 font-mono text-xs">
+        <AdminStateBlock
+          kind="error"
+          title={board.securityTitle}
+          detail={board.securityDetail(securityFindings.length)}
+        />
+      ) : null}
+      {securityFindings.length > 0 ? (
+        <AdminTechInfo summary={m.security.title}>
+          <ul className="list-disc space-y-1 pl-5">
             {securityFindings.slice(0, 8).map((finding) => (
               <li key={`${finding.id}:${finding.issue}`}>
                 {finding.id}: {finding.issue} ({finding.configuredValue})
               </li>
             ))}
           </ul>
-        </div>
+        </AdminTechInfo>
       ) : null}
 
-      <div className="grid items-end gap-3 border-b border-zinc-800 p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_220px_220px]">
-        <label className="relative md:col-span-2 xl:col-span-1">
-          <span className="sr-only">{m.filters.searchLabel}</span>
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-          <input
-            value={query}
-            onChange={(event) => {
-              const value = event.target.value;
-              setQuery(value);
-              updateLocation(value, provider, lifecycle);
-            }}
-            placeholder={m.filters.searchPlaceholder}
-            className={`${inputClass} pl-10`}
-          />
-        </label>
-        <label className={labelClass}>
-          {m.filters.provider}
-          <select
-            value={provider}
-            onChange={(event) => {
-              const value = event.target.value as "all" | AiProvider;
-              setProvider(value);
-              updateLocation(query, value, lifecycle);
-            }}
-            className={inputClass}
-            data-testid="model-registry-provider-filter"
-          >
-            <option value="all">{m.filters.allProviders}</option>
-            {AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-        </label>
-        <label className={labelClass}>
-          {m.filters.lifecycle}
-          <select
-            value={lifecycle}
-            onChange={(event) => {
-              const value = normalizeModelLifecycleFilter(event.target.value);
-              setLifecycle(value);
-              updateLocation(query, provider, value);
-            }}
-            className={inputClass}
-            data-testid="model-registry-lifecycle-filter"
-          >
-            {MODEL_LIFECYCLE_FILTERS.map((item) => (
-              <option key={item} value={item}>{lifecycleLabels[item]}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
-        <p className="text-xs text-zinc-400" role="status" data-testid="model-registry-result-summary">
-          <span className="font-bold text-zinc-300">{m.lifecycle.resultSummary(filtered.length, models.length)}</span>
-          {hiddenNote ? <span className="ml-2 text-zinc-500">{hiddenNote}</span> : null}
-        </p>
-        <button
-          type="button"
-          onClick={clearFilters}
-          className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-3 py-1.5 text-xs font-bold text-zinc-200 hover:bg-zinc-900"
-        >
-          <FilterX className="h-3.5 w-3.5" /> {m.filters.clear}
-        </button>
-      </div>
-
-      <div className="grid gap-3 p-4 xl:grid-cols-2">
-        {filtered.map((model) => {
-          // Same classification the filter uses, so the badge can never say
-          // "disabled" about a row the Retired view just returned.
-          const state = modelLifecycleState(model);
-          return (
-            <article key={model.id} className={`rounded-2xl border p-4 ${model.catalogDeleted ? "border-zinc-800 bg-zinc-950/40 opacity-70" : "border-zinc-800 bg-zinc-900/50"}`}>
-              <div className="flex items-start gap-3">
-                <ModelLogo provider={model.provider} size="md" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-black text-white">{model.name}</h3>
-                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${state === "limited" ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : state === "active" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-700 bg-zinc-950 text-zinc-400"}`} data-testid={`model-registry-lifecycle-badge-${model.id}`}>
-                      {lifecycleLabels[state]}
-                    </span>
-                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">{m.card.credits(model.creditWeight || 1)}</span>
-                  </div>
-                  <p className="mt-1 break-all font-mono text-xs text-zinc-500">{model.id} → {model.apiModel}</p>
-                  <p className="mt-2 truncate text-xs text-zinc-400">{model.apiBaseUrl}</p>
-                  <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold">
-                    <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.provider}</span>
-                    <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.minimumPlan}+</span>
-                    <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.usageClass}</span>
-                    {model.id === APP_DEFAULTS.defaultModelId ? <span className="rounded-lg bg-blue-500/10 px-2 py-1 text-blue-200">{m.adopt.roleFallback}</span> : null}
-                    {guestLead?.effective === model.id ? <span className="rounded-lg bg-blue-500/10 px-2 py-1 text-blue-200">{m.adopt.roleGuestLead}</span> : null}
-                    {guestTrio.includes(model.id) ? <span className="rounded-lg bg-zinc-900 px-2 py-1 text-zinc-300">{m.adopt.roleGuestTrio}</span> : null}
-                    <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 ${model.environment.apiKeyConfigured ? "bg-emerald-500/10 text-emerald-300" : "bg-red-500/10 text-red-300"}`}>
-                      <KeyRound className="h-3 w-3" /> {model.environment.apiKeyEnvName}
-                    </span>
-                  </div>
-                  {model.operationalReason ? (
-                    <p className="mt-3 line-clamp-2 text-xs text-amber-200/80">
-                      {m.card.internalPrefix}{model.operationalReason}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <button type="button" onClick={() => beginDuplicate(model)} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={m.card.duplicateLabel(model.name)} title={m.card.duplicateTitle}>
-                    <Copy className="h-4 w-4" />
-                    <span className="hidden text-xs font-bold 2xl:inline">{m.card.copy}</span>
-                  </button>
-                  <button type="button" onClick={() => beginEdit(model)} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={m.card.editLabel(model.name)}>
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                </div>
+      {loadError ? (
+        <AdminStateBlock
+          kind="error"
+          title={board.loadFailedTitle}
+          detail={board.loadFailedDetail}
+          onRetry={() => void load()}
+        />
+      ) : (
+        <ModelRegistryList
+          rows={filtered}
+          providerCounts={providerCounts}
+          provider={provider}
+          query={query}
+          lifecycle={lifecycle}
+          lifecycleLabels={lifecycleLabels}
+          summary={m.lifecycle.resultSummary(filtered.length, models.length)}
+          hiddenNote={hiddenNote}
+          loading={loading || saving}
+          roleLabels={(model) => [
+            ...(model.id === APP_DEFAULTS.defaultModelId ? [m.adopt.roleFallback] : []),
+            ...(guestLead?.effective === model.id ? [m.adopt.roleGuestLead] : []),
+            ...(guestTrio.includes(model.id) && guestLead?.effective !== model.id ? [m.adopt.roleGuestTrio] : []),
+          ]}
+          onQuery={(value) => {
+            setQuery(value);
+            updateLocation(value, provider, lifecycle);
+          }}
+          onProvider={(value) => {
+            setProvider(value);
+            updateLocation(query, value, lifecycle);
+          }}
+          onLifecycle={(value) => {
+            setLifecycle(value);
+            updateLocation(query, provider, value);
+          }}
+          onClear={clearFilters}
+          onReload={() => void load()}
+          onAdd={beginCreate}
+          onEdit={beginEdit}
+          onDuplicate={beginDuplicate}
+          emptyState={
+            !loading ? (
+              <div data-testid="model-registry-empty-state">
+                <AdminStateBlock
+                  kind="empty"
+                  title={
+                    lifecycle === "all"
+                      ? m.lifecycle.emptyAll
+                      : m.lifecycle.emptyInView(lifecycleLabels[lifecycle])
+                  }
+                />
               </div>
-            </article>
-          );
-        })}
-      </div>
+            ) : null
+          }
+          labels={{
+            searchLabel: m.filters.searchLabel,
+            searchPlaceholder: m.filters.searchPlaceholder,
+            clear: m.filters.clear,
+            reload: m.header.reload,
+            addModel: m.header.addModel,
+            editLabel: m.card.editLabel,
+            duplicateLabel: m.card.duplicateLabel,
+            duplicateTitle: m.card.duplicateTitle,
+            internalPrefix: m.card.internalPrefix,
+          }}
+        />
+      )}
+
+      <AdminConfirmDialog
+        open={archiveTarget !== null}
+        title={archiveTarget ? board.archiveTitle(archiveTarget.name) : ""}
+        summary={board.archiveSummary}
+        effects={board.archiveEffects}
+        tone="danger"
+        confirmLabel={board.archiveConfirm}
+        busy={saving}
+        onConfirm={() => archiveTarget && void archive(archiveTarget)}
+        onClose={() => setArchiveTarget(null)}
+      />
 
       {editingId ? (
         <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/75 p-3 backdrop-blur-sm md:p-8" role="dialog" aria-modal="true" aria-label={editingId === "new" ? m.dialog.addModel : m.dialog.editModel(form.name)}>
@@ -1568,7 +1530,7 @@ export function AdminModelRegistryPanel() {
                           models.find((model) => model.id === APP_DEFAULTS.defaultModelId)?.name || APP_DEFAULTS.defaultModelId,
                           APP_DEFAULTS.defaultModelId
                         )}{" "}
-                        <Link href="/admin/platform#default-models" className="font-bold text-white underline">
+                        <Link href="/admin/models?tab=defaults#default-models" className="font-bold text-white underline">
                           {m.adopt.openDefaultModels}
                         </Link>
                       </p>
@@ -1806,7 +1768,7 @@ export function AdminModelRegistryPanel() {
             <div className="sticky bottom-0 flex flex-col gap-3 border-t border-zinc-800 bg-zinc-950/95 p-4 backdrop-blur">
               {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
               {apiFailure && (apiFailureCode === APPLICATION_FALLBACK_PROTECTED || apiFailureCode === GUEST_LEAD_PROTECTED) ? (
-                <Link href="/admin/platform#default-models" className="text-sm font-bold text-white underline">
+                <Link href="/admin/models?tab=defaults#default-models" className="text-sm font-bold text-white underline">
                   {m.adopt.openDefaultModels}
                 </Link>
               ) : null}
@@ -1846,7 +1808,7 @@ export function AdminModelRegistryPanel() {
               <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 {editingId !== "new" ? (
-                  <button type="button" onClick={() => void archive(models.find((model) => model.id === editingId)!)} disabled={saving || form.id === APP_DEFAULTS.defaultModelId} className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 px-4 py-2 text-sm font-bold text-red-200 hover:bg-red-500/10 disabled:opacity-50"><Archive className="h-4 w-4" /> {m.actions.removeFromCatalogue}</button>
+                  <button type="button" onClick={() => setArchiveTarget(models.find((model) => model.id === editingId)!)} disabled={saving || form.id === APP_DEFAULTS.defaultModelId} className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 px-4 py-2 text-sm font-bold text-red-200 hover:bg-red-500/10 disabled:opacity-50"><Archive className="h-4 w-4" /> {m.actions.removeFromCatalogue}</button>
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1870,9 +1832,6 @@ export function AdminModelRegistryPanel() {
         </div>
       ) : null}
 
-      {!loading && filtered.length === 0 ? (
-        <div className="p-10 text-center text-sm text-zinc-500" data-testid="model-registry-empty-state"><Database className="mx-auto mb-3 h-6 w-6" />{lifecycle === "all" ? m.lifecycle.emptyAll : m.lifecycle.emptyInView(lifecycleLabels[lifecycle])}</div>
-      ) : null}
-    </section>
+    </div>
   );
 }

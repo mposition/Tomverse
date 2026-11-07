@@ -1,7 +1,7 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
- * Copy for AMUX › Operations settings › Decision Maker
+ * Copy for AMUX settings › Decision Maker
  * (docs/policy/amux-decision-maker.md §6, §8). Scope ids and switch values
  * are identifiers and render as stored beside their sentence.
  */
@@ -505,7 +505,7 @@ export const adminAmuxDecisionMakerAttentionMessages = defineAdminMessages({
     proposalLabel: { proposal: "DM proposal", delivery_unknown: "Confirmed answer" },
     irreversible: "Irreversible",
     waiting: (asker: string, instance: string, age: string) => `${asker} → ${instance} · waiting ${age}`,
-    more: (count: number) => `${count} more. See Operations settings › Decision Maker for the history.`,
+    more: (count: number) => `${count} more. See AMUX settings › Decision Maker for the history.`,
     bodiesHidden: "The question is shown to administrators who may judge it (ops:write).",
     unavailable: "The Decision Maker requests could not be read. None is shown.",
     open: (cardId: string, revision: number) => `Open ${cardId}, revision ${revision}`,
@@ -515,7 +515,7 @@ export const adminAmuxDecisionMakerAttentionMessages = defineAdminMessages({
     moreContext: "Context",
     deliveryUnknownNext:
       "Nobody knows whether the confirmed answer reached the worker. Check the worker's session in AMUX before answering again.",
-    settingsPointer: "Requests to judge are in AMUX › Execution, in the attention lane.",
+    settingsPointer: "Requests to judge are in the Execution board, in the attention lane.",
     settingsOpen: (count: number) => `Open ${count} waiting`,
     settingsNone: "Nothing waits on a person now.",
     resolveTitle: "Record what happened to the answer",
@@ -540,7 +540,7 @@ export const adminAmuxDecisionMakerAttentionMessages = defineAdminMessages({
     proposalLabel: { proposal: "DM 제안", delivery_unknown: "확정한 답" },
     irreversible: "되돌릴 수 없음",
     waiting: (asker: string, instance: string, age: string) => `${asker} → ${instance} · ${age} 대기`,
-    more: (count: number) => `${count}건이 더 있습니다. 운영 설정 › Decision Maker의 기록에서 보세요.`,
+    more: (count: number) => `${count}건이 더 있습니다. AMUX 설정 › Decision Maker의 기록에서 보세요.`,
     bodiesHidden: "질문은 판정할 수 있는 관리자(ops:write)에게만 보입니다.",
     unavailable: "Decision Maker 요청을 읽지 못했습니다. 아무것도 표시하지 않습니다.",
     open: (cardId: string, revision: number) => `${cardId}, revision ${revision} 열기`,
@@ -550,7 +550,7 @@ export const adminAmuxDecisionMakerAttentionMessages = defineAdminMessages({
     moreContext: "맥락",
     deliveryUnknownNext:
       "확정한 답이 worker에게 전해졌는지 알 수 없습니다. 다시 답하기 전에 AMUX에서 worker 세션을 확인하세요.",
-    settingsPointer: "판정할 요청은 AMUX › 실행의 Attention 열에 있습니다.",
+    settingsPointer: "판정할 요청은 실행 보드의 Attention 열에 있습니다.",
     settingsOpen: (count: number) => `판정 대기 ${count}건 열기`,
     settingsNone: "지금 사람을 기다리는 요청이 없습니다.",
     resolveTitle: "답이 어떻게 됐는지 기록",

@@ -40,22 +40,23 @@ type LocalizedItem = {
 };
 
 export const ADMIN_NAV_GROUP_LABELS_KO: Readonly<Record<AdminNavGroup, string>> = {
-  "Command Center": "운영 현황",
-  Customers: "고객",
-  Revenue: "매출",
+  Home: "홈",
+  "Customers & Revenue": "고객·매출",
   "AI Platform": "AI 플랫폼",
-  Operations: "운영",
-  // A product name, and product names are not translated.
-  AMUX: "AMUX",
+  "AI Agents": "AI 에이전트",
+  Development: "개발",
+  System: "시스템",
+  Messaging: "메시징",
   Governance: "거버넌스",
 };
 
 export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   overview: {
-    label: "개요",
+    label: "오늘",
     description: "운영 스냅샷, 확인 필요 항목, 최근 활동",
     aliases: [
       "홈",
+      "개요",
       "대시보드",
       "상태",
       "현황",
@@ -70,20 +71,28 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
         description: "운영 스냅샷, 확인 필요 항목, 최근 활동",
       },
       health: {
-        label: "상태 점수",
+        label: "건강 점수",
         description: "점수가 어떻게 나왔고 각 항목에 무엇을 해야 하는지",
       },
     },
   },
   "work-queue": {
-    label: "작업 대기열",
-    description: "운영자 조치를 기다리는 모든 항목, 오래된 순",
-    aliases: ["대기열", "할 일", "대기", "승인"],
+    label: "결정함",
+    description: "사람의 결정을 기다리는 모든 항목, 분야별",
+    aliases: ["작업 대기열", "대기열", "할 일", "대기", "승인", "결정"],
+    tabs: {
+      all: { label: "전체", description: "사람을 기다리는 모든 항목, 오래된 순" },
+      customers: { label: "고객·매출", description: "지원, 환불, 개인정보 요청, 결제 결정" },
+      agents: { label: "에이전트", description: "AI 에이전트가 사람을 기다리는 일" },
+      development: { label: "개발", description: "아이디어 승인, 계획 승인, 에스컬레이션, 정지" },
+      system: { label: "시스템", description: "확인이 필요한 웹훅, 예약 작업, 알림 발송" },
+    },
   },
   analytics: {
-    label: "분석",
-    description: "활성 사용자, 사용량, 모델 점유율, 제품 퍼널, 가져오기·메모리 지표",
+    label: "지표",
+    description: "활성 사용자, 사용량, 모델 점유율, 제품 퍼널, AI Review, 가져오기·메모리 지표",
     aliases: [
+      "분석",
       "사용 현황",
       "활성 사용자",
       "사용자 수",
@@ -99,10 +108,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       "교차검토",
     ],
     tabs: {
-      usage: { label: "사용 현황", description: "활성 사용자, 메시지, 모델 점유율, 사용 시간대와 지역" },
-      product: { label: "제품 분석", description: "유입, 활성화, 매출 퍼널" },
-      imports: { label: "가져오기·메모리", description: "외부 대화 가져오기와 메모리 지표" },
+      usage: { label: "사용량", description: "활성 사용자, 메시지, 모델 점유율, 사용 시간대와 지역" },
+      product: { label: "제품·퍼널", description: "유입, 활성화, 매출 퍼널" },
       "ai-review": { label: "AI Review", description: "신뢰성, 채택, 검토자 쌍 근거" },
+      imports: { label: "가져오기·메모리", description: "외부 대화 가져오기와 메모리 지표" },
     },
   },
   users: {
@@ -111,21 +120,24 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     aliases: ["고객", "계정", "회원", "구독자", "이메일"],
   },
   support: {
-    label: "고객 지원",
-    description: "피드백 수신함과 개인정보 권리 요청 대기열",
-    aliases: ["피드백", "수신함", "문의", "개인정보", "정보주체 권리", "불만"],
+    label: "지원",
+    description: "문의, 자동 수정 검토, 개인정보 권리 요청",
+    aliases: ["피드백", "수신함", "문의", "자동 수정", "개인정보", "정보주체 권리", "불만", "고객 지원"],
     tabs: {
-      feedback: { label: "피드백", description: "제품에서 접수된 신고와 요청" },
+      feedback: { label: "문의", description: "제품에서 접수된 신고와 요청" },
+      autofix: { label: "자동 수정 검토", description: "검증된 신고에서 자동화가 제안한 수정, 사람의 검토 대기" },
       privacy: { label: "개인정보 요청", description: "내보내기와 삭제 요청" },
     },
   },
   billing: {
-    label: "결제",
-    description: "플랜, 가격 카탈로그, 프로모션, 프로모션 위험",
-    aliases: ["플랜", "가격", "구독", "카탈로그", "프로모션", "쿠폰", "할인", "위험"],
+    label: "플랜·가격",
+    description: "플랜, 가격 카탈로그, 프로모션, 프로모션 진단",
+    aliases: ["결제", "플랜", "가격", "구독", "카탈로그", "프로모션", "쿠폰", "할인", "위험", "진단"],
     tabs: {
-      plans: { label: "플랜·가격", description: "플랜 카탈로그, Stripe ID, 수명주기 카운터" },
-      promotions: { label: "프로모션·위험", description: "프로모션 코드와 악용 신호" },
+      plans: { label: "플랜", description: "플랜 카탈로그, Stripe ID, 수명주기 카운터" },
+      prices: { label: "가격", description: "플랜과 통화별 현지화 가격" },
+      promotions: { label: "프로모션", description: "프로모션 코드와 악용 신호" },
+      diagnostics: { label: "진단", description: "프로모션 코드별 읽기 전용 점검" },
     },
   },
   refunds: {
@@ -140,70 +152,59 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   },
   providers: {
     label: "공급자",
-    description: "가용성, 지출, 장애, fallback 정책",
-    aliases: ["장애", "사고", "대체", "사용량", "비용", "지출", "잔액", "예산"],
+    description: "가용성, 지출, 장애, 대체 정책",
+    aliases: ["장애", "사고", "대체", "fallback", "사용량", "비용", "지출", "잔액", "예산"],
     tabs: {
       health: { label: "상태", description: "가용성, 키, 모델별 지표" },
       "usage-cost": { label: "사용량·비용", description: "공급자 사용량 대조와 이미지 지출" },
-      incidents: { label: "장애·fallback", description: "준비 테스트, 장애 모드, 복구" },
+      incidents: { label: "장애·대체", description: "준비 테스트, 장애 모드, 복구" },
     },
   },
   models: {
     label: "모델",
-    description: "모델 레지스트리, 가용성, 발견된 모델",
-    aliases: ["레지스트리", "카탈로그", "발견", "후보", "수명주기", "백로그"],
+    description: "모델 레지스트리, 발견된 모델, 기본 모델",
+    aliases: ["레지스트리", "카탈로그", "발견", "후보", "수명주기", "백로그", "기본 모델", "게스트 라인업", "대체 모델"],
     tabs: {
       registry: { label: "레지스트리", description: "가용성, 가격 override, API 구성" },
       discovery: { label: "발견", description: "공급자가 공개했지만 아직 결정되지 않은 모델" },
+      defaults: { label: "기본 모델", description: "대체 모델, 게스트 라인업, 계정 기본값" },
       catalog: { label: "이미지·코딩 카탈로그", description: "이미지·코딩 모델의 켜기·보류, 가격 이력, LLM 초안, Code용 스냅샷" },
     },
   },
   routing: {
     label: "라우팅",
-    description: "Chat shadow 라우팅",
-    aliases: ["자동", "라우터", "섀도", "작업 프로필", "후보"],
-  },
-  infrastructure: {
-    label: "인프라",
-    description: "Railway, R2, 데이터베이스, Prisma 운영",
-    aliases: ["데이터베이스", "호스팅", "스토리지", "저장소"],
-  },
-  automation: {
-    label: "자동화",
-    description: "예약 작업, webhook 전송, 운영 보고서",
-    aliases: ["크론", "작업", "스케줄러", "웹훅", "재전송", "보고서"],
+    description: "자동 라우터, 최적화, 섀도 비교, 통계",
+    aliases: ["자동", "자동 라우터", "라우터", "최적화", "섀도", "통계", "작업 프로필", "후보"],
     tabs: {
-      jobs: { label: "예약 작업", description: "cron 상태, 실행 이력, 멈춘 실행" },
-      webhooks: { label: "Webhook", description: "결제 이벤트 전송과 재전송" },
-      reports: { label: "보고서", description: "운영 보고서와 배포 대상" },
+      auto: { label: "자동 라우터", description: "자동 모델 라우터의 모드와 조정값" },
+      optimizer: { label: "최적화", description: "라우터와 재작성 최적화 권고" },
+      shadow: { label: "섀도 비교", description: "라우터가 골랐을 모델과 실제 실행 비교" },
+      stats: { label: "통계", description: "적응형 라우팅 통계" },
     },
   },
-  alerts: {
-    label: "알림",
-    description: "알림 임계값, 템플릿, 전송 로그",
-    aliases: ["알림", "슬랙", "디스코드", "임계값", "호출"],
+  office: {
+    label: "에이전트 홈",
+    description: "에이전트 팀 현황과 팀별 기록 화면 링크",
+    aliases: ["에이전트", "오피스", "에이전트 팀", "픽셀 오피스", "라이브 오피스", "팀 현황", "팀 보드"],
     tabs: {
-      policy: { label: "정책", description: "예산과 장애 임계값" },
-      templates: { label: "템플릿", description: "메시지 템플릿과 전송 테스트" },
-      deliveries: { label: "전송 로그", description: "무엇을 어디로 보냈고 도착했는지" },
+      dashboard: { label: "팀 보드", description: "팀 현황판, digest 브리핑과 팀별 기록 링크" },
+      live: { label: "라이브 오피스", description: "오피스 바닥과 운영자 지시창" },
     },
   },
   marketing: {
     label: "마케팅",
-    description: "초안 대기열, 게시된 글, 브랜드 계정, 자동화가 남긴 보고",
-    aliases: ["소셜", "게시물", "링크드인", "제르니오", "캠페인", "브랜드 계정", "초안 대기열", "가드"],
+    description: "초안 승인, 게시된 글, 브랜드 계정, 자동화가 남긴 보고",
+    aliases: ["소셜", "게시물", "링크드인", "제르니오", "캠페인", "브랜드 계정", "초안 대기열", "승인", "경쟁사", "자산", "가드"],
     tabs: {
-      queue: { label: "대기열", description: "사람을 기다리는 초안과 Guard가 각각에 대해 말한 것" },
+      overview: { label: "개요", description: "모드, 스위치, 마지막 실행, 대기 중인 일" },
+      queue: { label: "승인 대기", description: "사람을 기다리는 초안과 Guard가 각각에 대해 말한 것" },
       published: {
-        label: "게시 상태",
+        label: "게시 현황",
         description: "승인된 모든 글 — 대기, 전송 중, 게시됨, 실패, 결과 불명",
       },
       accounts: { label: "계정", description: "브랜드 계정과 모드, 정지된 계정이 왜 정지됐는지" },
-      experiments: { label: "실험", description: "랜딩 문구 실험과 결과" },
-      reports: { label: "보고서", description: "주간 요약, 경쟁사 사실, 보존 실행 기록" },
-      competitors: { label: "경쟁사", description: "시장 분석 에이전트가 추적하는 경쟁사와 사람이 승인한 공식 host" },
-      assets: { label: "자산", description: "미디어 에이전트가 제출한 이미지·영상과, 사람이 게시용으로 승인한 것" },
-      comments: { label: "댓글", description: "모니터가 올린 댓글 알림 중 아무도 답하지 않은 것" },
+      reports: { label: "리포트·경쟁사", description: "주간 요약, 경쟁사 사실, 사람이 공식으로 승인한 host" },
+      settings: { label: "설정", description: "마케팅 자동화의 스위치와 웹훅 배선" },
     },
   },
   "product-research": {
@@ -211,16 +212,16 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     description: "Scout가 공개 페이지·생성 파일·카탈로그에서 찾은 개선 제안과 실행·비용",
     aliases: ["스카우트", "개선 제안", "제안", "제품 리서치", "관측", "이슈 백로그", "회차"],
     tabs: {
-      suggestions: { label: "개선 제안", description: "대상별로 묶은 열린 제안. 거절하거나 AMUX로 보냅니다" },
-      runs: { label: "실행과 비용", description: "Scout가 돌았는지, owner가 정한 모델과 하루 상한, 최근 7일" },
-      observations: { label: "이슈 관찰 기록", description: "관측 회차, 가장 최근 회차의 행, staging·production 창 계산값" },
+      suggestions: { label: "제안", description: "대상별로 묶은 열린 제안. 거절하거나 AMUX로 보냅니다" },
+      runs: { label: "실행·비용", description: "Scout가 돌았는지, owner가 정한 모델과 하루 상한, 최근 7일" },
+      observations: { label: "이슈 관찰", description: "관측 회차, 가장 최근 회차의 행, staging·production 창 계산값" },
     },
   },
   "engineering-agent": {
-    label: "엔지니어링 에이전트",
-    description: "엔지니어링 에이전트의 기록 — T2 초안, run, pull request, 모드",
+    label: "엔지니어링",
+    description: "엔지니어링 에이전트의 기록 — 결정 대기, run, pull request, 모드",
     aliases: [
-      "엔지니어링",
+      "엔지니어링 에이전트",
       "에이전트",
       "T2 초안",
       "패치",
@@ -230,155 +231,179 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       "동결",
     ],
     tabs: {
-      queue: { label: "소유자 대기열", description: "사람을 기다리는 T2 초안, 결정, 상태 불일치" },
-      runs: { label: "Run", description: "각 run과 시작 모드, 종료 결과, 정지 여부" },
-      "pull-requests": {
-        label: "Pull request",
-        description: "에이전트가 결속한 것 — pull request, snapshot, 승인·병합 관측",
-      },
-      settings: { label: "모드", description: "모드, 동결, kill switch, 상한 대비 소유자 대기열" },
+      overview: { label: "개요", description: "모드, 스위치, 마지막 실행, 대기 중인 일" },
+      queue: { label: "결정 대기", description: "사람을 기다리는 T2 초안, 결정, 상태 불일치" },
+      runs: { label: "실행·PR", description: "각 실행과 에이전트가 결속한 pull request, 그 결과" },
+      settings: { label: "설정", description: "모드, 동결, kill switch, 상한 대비 소유자 대기열" },
     },
   },
   "sre-ops": {
-    label: "SRE 에이전트",
-    description: "ops observer의 상태 체인, 신뢰 판정, 소유자의 genesis",
-    aliases: ["SRE", "ops observer", "genesis", "신뢰", "상태 체인", "호출"],
-  },
-  "qa-release": {
-    label: "QA·릴리스",
-    description: "develop 병합부터 production까지: 병합 레인, CI 입장, 릴리스 열차",
-    aliases: ["QA", "릴리스", "릴리스 준비", "병합 레인", "릴리스 열차", "제어 revision", "CI 입장", "러너"],
+    label: "SRE",
+    description: "ops observer의 상태 체인, 신뢰 판정, 일일 보고, 소유자의 genesis",
+    aliases: ["SRE", "SRE 에이전트", "ops observer", "genesis", "신뢰", "상태 체인", "호출", "일일 보고"],
     tabs: {
-      overview: { label: "개요", description: "확인할 일, production과 main, 병합 레인, 최근 digest" },
-      train: { label: "릴리스 열차", description: "다음 열차에 실을 PR, 긴급 열차 편성, 지난 열차 출발 전광판" },
-      lane: { label: "병합 레인", description: "레인이 병합할 PR과 내가 병합할 PR, 그 이유가 된 파일" },
-      "ci-admission": { label: "CI 입장 관리", description: "러너를 기다리는 PR, 그 순서와 실시간 러너 사용량" },
+      overview: { label: "개요", description: "상태 체인, 신뢰 판정, 소유자의 genesis" },
+      daily: { label: "일일 보고", description: "ops observer가 날마다 보고한 내용" },
+      settings: { label: "설정", description: "ops observer의 모드와 스위치" },
     },
   },
-  "agent-digests": {
-    label: "Agent digest",
-    description: "각 Agent가 날마다 보고한 내용과 그 Agent가 따르는 운영자 제어",
-    aliases: ["digest", "가격 검증 기한"],
+  "finance-agent": {
+    label: "결제·재무",
+    description: "가격 검증 기한 일일 digest, 에이전트 스위치, monitor 확인",
+    aliases: ["재무", "결제 에이전트", "가격 검증 기한", "가격 마감", "digest", "미확정 가격"],
     tabs: {
-      "billing-finance-ops": { label: "과금·재무", description: "가격 검증 기한 일일 digest, Agent 스위치와 monitor 확인" },
-      "trust-safety": { label: "신뢰·안전", description: "페이지를 열 때 센 DSR 기한과 관측 스위치" },
+      overview: { label: "개요", description: "에이전트 스위치, monitor 확인, 최근 digest" },
+      report: { label: "가격 마감 보고", description: "미확정 가격 마감 일일 보고" },
+      settings: { label: "설정", description: "결제·재무 에이전트의 모드와 스위치" },
     },
-  },
-  office: {
-    label: "에이전트 오피스",
-    description: "8개 에이전트 팀의 픽셀 오피스 껍데기와 팀별 기록 화면 링크",
-    aliases: ["오피스", "에이전트 팀", "픽셀 오피스", "라이브 오피스", "팀 현황"],
-    tabs: {
-      live: { label: "라이브 오피스", description: "오피스 바닥, 운영자 지시창, 데모 결재와 피드" },
-      dashboard: { label: "대시보드", description: "팀 현황판, 데모 결재, digest 브리핑과 팀별 기록 링크" },
-    },
-  },
-  "email-campaigns": {
-    label: "이메일 캠페인",
-    description: "캠페인 초안, 각 캠페인이 기다리는 것, 발송 예정 wave",
-    aliases: ["캠페인", "웨이브", "리마인더", "은퇴 안내", "대량 메일", "공지", "확인", "캠페인 승인"],
-    tabs: {
-      campaigns: { label: "캠페인", description: "모든 캠페인과 상태, 발송을 막고 있는 것" },
-      schedule: { label: "일정", description: "예정 시각순 wave, 지연된 항목 먼저" },
-    },
-  },
-  "email-delivery": {
-    label: "이메일 전송",
-    description: "누구에게 무엇을 보냈는지, 무엇이 거절됐는지, 어떤 주소가 차단됐는지",
-    aliases: ["발신함", "전송 로그", "반송", "스팸 신고", "수신 차단", "포기", "도착 안 함", "받지 못함", "메일 이력"],
-    tabs: {
-      deliveries: { label: "전송", description: "모든 메시지와 그 결과" },
-      suppressions: { label: "수신 차단", description: "메일을 보내지 않는 주소와 그 이유" },
-    },
-  },
-  platform: {
-    label: "플랫폼 설정",
-    description: "제품 기본값과 긴급 기능 제어",
-    aliases: ["설정", "기본값", "기능 플래그", "킬 스위치", "게스트 기본"],
   },
   "amux-backlog": {
-    label: "백로그",
-    description: "아이디어 입력, 카드 목록, 포트폴리오 평가, 카탈로그 이관, 소스 재조정, 카드 메타데이터",
-    aliases: ["백로그", "아이디어", "아이디어 분석", "등록", "카드 등록", "카탈로그 이관", "이관", "재조정", "소스 개정", "메타데이터", "우선순위", "비용 추정", "포트폴리오", "평가", "미사용 예약"],
+    label: "아이디어",
+    description: "아이디어 입력, 카드 목록, 포트폴리오 평가",
+    aliases: ["백로그", "아이디어", "아이디어 분석", "등록", "카드 등록", "우선순위", "비용 추정", "포트폴리오", "평가"],
     tabs: {
       ideas: { label: "아이디어", description: "아이디어를 넣고 실행과 계획을 승인" },
       list: { label: "카드 목록", description: "백로그 카드번호, 생성일, 한줄 설명과 저장된 점수" },
-      portfolio: { label: "포트폴리오 평가", description: "카드별 전략 평가와 점수" },
-      import: { label: "카탈로그 이관", description: "현황판 카탈로그를 미리 보고 승인한 뒤 이관" },
-      reconciliation: { label: "소스 재조정", description: "카드별 새 소스 개정을 수락하거나 거절" },
-      metadata: { label: "카드 메타데이터", description: "backlog 카드 한 건의 kind, priority, 비용 추정" },
-    },
-  },
-  "amux-promotion": {
-    label: "승격",
-    description: "backlog 카드의 추천 풀, 수동 승격, 기존 grant 기반 자동 승격",
-    aliases: ["승격", "추천", "추천 풀", "수동 승격", "자동 승격", "grant", "중지", "재개"],
-    tabs: {
-      recommendation: { label: "추천 풀", description: "backlog snapshot과 카드별 사람의 결정" },
-      promotion: { label: "수동 승격", description: "사람이 고른 backlog 카드 1~3건 승격" },
-      "auto-promotion": {
-        label: "자동 승격",
-        description: "기존 제한 자동 승격의 grant, halt와 재개",
-      },
+      portfolio: { label: "포트폴리오", description: "카드별 전략 평가와 점수" },
     },
   },
   "amux-execution": {
-    label: "실행",
-    description: "AMUX 카드와 실행 상태, AMUX가 작업을 배정한 이유",
-    aliases: ["실행", "카드", "시도", "배정", "에스컬레이션", "사람 검토", "검토", "사고"],
+    label: "실행 보드",
+    description: "AMUX 카드와 실행 상태, 검토 큐, 진단",
+    aliases: ["실행", "보드", "카드", "시도", "배정", "에스컬레이션", "사람 검토", "검토", "검토 큐", "진단", "워커 성과", "결정 로그", "사고"],
     tabs: {
-      cards: { label: "카드", description: "Tomverse에 저장된 모든 AMUX 카드와 실행 상태" },
-      assignment: { label: "배정", description: "AMUX가 작업을 배정한 이유와 사람을 기다리는 에스컬레이션" },
+      cards: { label: "보드", description: "Tomverse에 저장된 모든 AMUX 카드와 실행 상태" },
+      review: { label: "검토 큐", description: "AMUX가 작업을 배정한 이유와 사람을 기다리는 에스컬레이션" },
+      diagnostics: { label: "진단", description: "워커 성과와 결정 로그" },
+    },
+  },
+  release: {
+    label: "릴리스",
+    description: "develop 병합부터 production까지: 병합 레인, 릴리스 열차, CI 대기열",
+    aliases: ["QA", "릴리스", "릴리스 준비", "병합 레인", "릴리스 열차", "제어 revision", "CI 입장", "CI 대기열", "러너"],
+    tabs: {
+      qa: { label: "QA·릴리스", description: "확인할 일, production과 main, 병합 레인, 릴리스 열차" },
+      ci: { label: "CI 대기열", description: "러너를 기다리는 PR, 그 순서와 실시간 러너 사용량" },
     },
   },
   "amux-settings": {
-    label: "운영 설정",
-    description: "AMUX 자동 편입, Worker, 실행 안전, 복구 증거와 Decision Maker 제어",
-    aliases: ["운영 설정", "워커", "등록부", "워커 등록부", "자동 편입", "실행 안전", "복구", "자동 복구", "정지", "해제", "결과 불명", "확인할 쓰기", "Decision Maker", "결정 도우미", "킬 스위치", "분석 설정", "비용 카탈로그"],
+    label: "AMUX 설정",
+    description: "AMUX 자동 편입, 워커, Decision Maker 제어, 분석 예산",
+    aliases: ["설정", "워커", "등록부", "워커 등록부", "자동 편입", "Decision Maker", "결정 도우미", "킬 스위치", "분석 설정", "분석 예산", "비용 카탈로그"],
     tabs: {
       "automatic-admission": {
         label: "자동 편입",
         description: "준비된 Task를 담당 없는 Todo에 편입하는 owner 승인",
       },
-      workers: { label: "Worker", description: "AI worker를 등록하고, 할 수 있는 일을 정하고, 켜고 끕니다" },
-      safety: { label: "실행 안전·복구", description: "자동 복구, 확인할 증거와 운영자 정지 해제 판단" },
+      workers: { label: "워커", description: "AI 워커를 등록하고, 할 수 있는 일을 정하고, 켜고 끕니다" },
       "decision-maker": { label: "Decision Maker", description: "Decision Maker kill switch와 인스턴스별 모드" },
-      analysis: { label: "분석 설정", description: "분석 월 예산과 승인된 분석 모델" },
+      analysis: { label: "분석 예산·모델", description: "분석 월 예산과 승인된 분석 모델" },
+    },
+  },
+  "amux-recovery": {
+    label: "안전·복구",
+    description: "실행 안전과 정지, 예약 복구, 은퇴한 AMUX 도구",
+    aliases: ["안전", "복구", "정지", "해제", "자동 복구", "결과 불명", "확인할 쓰기", "예약", "claim", "레거시", "카탈로그 이관", "이관", "재조정", "소스 개정", "메타데이터", "승격", "추천 풀", "자동 승격"],
+    tabs: {
+      safety: { label: "실행 안전", description: "자동 복구, 확인할 증거와 운영자 정지 해제 판단" },
+      reservations: { label: "예약·claim 복구", description: "쓰이지 않은 분석 예약과 결정이 필요한 claim" },
+      legacy: { label: "레거시 도구", description: "카탈로그 이관, 소스 재조정, 카드 메타데이터, 카드 승격" },
+    },
+  },
+  infrastructure: {
+    label: "인프라",
+    description: "Railway, R2, 데이터베이스, Prisma 운영",
+    aliases: ["데이터베이스", "호스팅", "스토리지", "저장소"],
+  },
+  automation: {
+    label: "자동화",
+    description: "예약 작업, 웹훅 전송, 운영 리포트",
+    aliases: ["크론", "작업", "스케줄러", "웹훅", "재전송", "보고서", "리포트"],
+    tabs: {
+      jobs: { label: "예약 작업", description: "cron 상태, 실행 이력, 멈춘 실행" },
+      webhooks: { label: "웹훅", description: "결제 이벤트 전송과 재전송" },
+      reports: { label: "리포트", description: "운영 리포트와 배포 대상" },
+    },
+  },
+  platform: {
+    label: "기능 플래그",
+    description: "긴급 차단, 기능 스위치, 계정 기본값",
+    aliases: ["플랫폼 설정", "설정", "기본값", "기능 플래그", "킬 스위치", "긴급", "스위치", "게스트 기본"],
+    tabs: {
+      emergency: { label: "긴급 차단", description: "채팅, 첨부, 공개 공유의 kill switch" },
+      features: { label: "기능 스위치", description: "제품 기능의 출시 스위치" },
+      "account-defaults": { label: "계정 기본값", description: "새 계정과 기존 계정이 시작하는 기본값" },
+    },
+  },
+  "email-campaigns": {
+    label: "이메일 캠페인",
+    description: "캠페인 초안, 각 캠페인이 기다리는 것, 발송 예정 wave",
+    aliases: ["캠페인", "웨이브", "리마인더", "은퇴 안내", "대량 메일", "공지", "확인", "캠페인 승인", "새 캠페인"],
+    tabs: {
+      campaigns: { label: "캠페인", description: "모든 캠페인과 상태, 발송을 막고 있는 것" },
+      schedule: { label: "일정", description: "예정 시각순 wave, 지연된 항목 먼저" },
+      new: { label: "새 캠페인", description: "캠페인이나 정책 변경 안내 작성" },
+    },
+  },
+  "email-delivery": {
+    label: "고객 메일 발송",
+    description: "누구에게 무엇을 보냈는지, 무엇이 거절됐는지, 어떤 주소가 차단됐는지",
+    aliases: ["이메일 전송", "발신함", "전송 로그", "발송 기록", "반송", "스팸 신고", "수신 차단", "수신 거부", "포기", "도착 안 함", "받지 못함", "메일 이력"],
+    tabs: {
+      deliveries: { label: "발송 기록", description: "모든 메시지와 그 결과" },
+      suppressions: { label: "수신 거부", description: "메일을 보내지 않는 주소와 그 이유" },
+    },
+  },
+  alerts: {
+    label: "운영자 알림",
+    description: "알림 임계값, 템플릿, 발송 기록, 메일 경로 시험",
+    aliases: ["알림", "슬랙", "디스코드", "임계값", "호출", "시험", "프로브"],
+    tabs: {
+      policy: { label: "정책", description: "예산과 장애 임계값" },
+      templates: { label: "템플릿", description: "메시지 템플릿과 전송 테스트" },
+      deliveries: { label: "발송 기록", description: "무엇을 어디로 보냈고 도착했는지" },
+      "mail-test": { label: "메일 경로 시험", description: "메일 경로로 시험 운영자 알림 보내기" },
     },
   },
   "email-policy": {
     label: "이메일 정책",
-    description: "발신 메일의 관할권 프로필과 현재 적용 중인 버전",
-    aliases: ["이메일", "관할권", "수신 거부", "마케팅", "푸터", "제목 접두어", "야간 발송 제한", "동의", "발송 도메인", "전달성"],
+    description: "발신 메일의 관할 지역 프로필과 현재 적용 중인 버전",
+    aliases: ["이메일", "관할권", "관할 지역", "수신 거부", "마케팅", "푸터", "제목 접두어", "야간 발송 제한", "동의", "발송 도메인", "전달성"],
     tabs: {
-      jurisdictions: { label: "관할권", description: "프로필 버전과 현재 적용 중인 버전" },
+      jurisdictions: { label: "관할 지역", description: "프로필 버전과 현재 적용 중인 버전" },
       domains: { label: "발송 도메인", description: "도메인 인증과 DNS 레코드 상태" },
     },
   },
   audit: {
     label: "감사 로그",
-    description: "관리자 활동, 수행자와 대상 포함",
-    aliases: ["로그", "이력", "활동", "기록", "누가 변경"],
+    description: "관리자 활동(수행자와 대상 포함)과 로그 무결성 검사",
+    aliases: ["로그", "이력", "활동", "기록", "누가 변경", "무결성", "변조"],
+    tabs: {
+      log: { label: "기록", description: "관리자 활동, 수행자와 대상 포함" },
+      integrity: { label: "무결성 검사", description: "감사 로그의 변조 탐지" },
+    },
   },
   retention: {
-    label: "보존",
+    label: "보존·삭제",
     description: "보존 기간과 파괴적 정리 작업",
-    aliases: ["정리", "영구 삭제", "삭제", "데이터 수명주기"],
+    aliases: ["보존", "정리", "영구 삭제", "삭제", "데이터 수명주기"],
   },
   "admin-access": {
-    label: "관리자 접근",
-    description: "역할, 만료, 운영 준비 상태, 감사 무결성",
-    aliases: ["역할", "권한", "관리자", "준비 상태", "무결성"],
+    label: "관리자 권한",
+    description: "관리자 역할과 만료, 운영 준비 상태",
+    aliases: ["관리자 접근", "역할", "권한", "관리자", "준비 상태"],
     tabs: {
       administrators: { label: "관리자", description: "구성된 계정, 역할, 만료" },
-      readiness: { label: "운영 준비 상태", description: "운영자가 확인해야 하는 점검 항목" },
-      integrity: { label: "감사 무결성", description: "감사 로그의 변조 탐지" },
+      readiness: { label: "운영 준비", description: "운영자가 확인해야 하는 점검 항목" },
     },
   },
 };
 
 export const ADMIN_DETAIL_ROUTES_KO: Readonly<
-  Record<(typeof ADMIN_DETAIL_ROUTES)[number]["id"], { label: string; description: string }>
+  Record<
+    (typeof ADMIN_DETAIL_ROUTES)[number]["id"],
+    { label: string; description: string; tabs?: Readonly<Record<string, LocalizedTab>> }
+  >
 > = {
   "amux-u21-test-card": {
     label: "AMUX U21 테스트 카드",
@@ -391,6 +416,13 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   "user-detail": {
     label: "고객 상세",
     description: "계정 타임라인, 결제, 크레딧, 보안 제어",
+    tabs: {
+      overview: { label: "개요", description: "고객이 누구인지, 플랜과 최근 활동" },
+      billing: { label: "결제", description: "구독, 크레딧, 환불, 청구서" },
+      security: { label: "보안", description: "로그인 방법, 세션, 계정 잠금" },
+      conversations: { label: "대화", description: "고객의 대화와 그 안에서 실행된 것" },
+      notes: { label: "메모·타임라인", description: "운영자 메모와 계정 타임라인" },
+    },
   },
   "sre-ops-item": {
     label: "운영 감시 메시지",
@@ -413,6 +445,11 @@ export const ADMIN_UNLISTED_PAGES_KO: Readonly<
     label: "전체 검색",
     description: "콘솔 전체에서 고객, 환불, trace, 감사 이벤트 검색",
     aliases: ["찾기", "조회", "검색", "전체"],
+  },
+  "agent-digests": {
+    label: "신뢰·안전 digest",
+    description: "페이지를 열 때 센 DSR 기한과 신뢰·안전 관측 스위치",
+    aliases: ["신뢰", "안전", "신뢰와 안전", "정보주체 권리", "개인정보 기한", "digest", "관측"],
   },
 };
 
@@ -538,7 +575,7 @@ export const localizedAdminSearchablePages = (
     return {
       id: page.id,
       label: locale === "ko" ? ko.label : page.label,
-      href: page.href,
+      href: "openHref" in page ? page.openHref : page.href,
       description: locale === "ko" ? ko.description : page.description,
       group: null,
       groupLabel: null,

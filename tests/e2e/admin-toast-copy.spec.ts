@@ -80,6 +80,12 @@ async function approveRefund(page: Page, response: unknown, status = 200) {
     (route) => route.fulfill(json(response, status))
   );
   await page.getByRole("button", { name: "Approve", exact: true }).first().click();
+  // Approving asks first. The confirm is the step-up wording ("Sign in again
+  // and approve"); the write below is what the toast reports on.
+  await page
+    .getByRole("dialog", { name: "Approve this refund?" })
+    .getByRole("button", { name: /approve/i })
+    .click();
 }
 
 // ---------------------------------------------------------------------------
