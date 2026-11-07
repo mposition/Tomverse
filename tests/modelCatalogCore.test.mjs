@@ -268,6 +268,54 @@ test("a model that exists only in the database needs a full profile and a price"
   assert.equal(added.provider, "openai");
 });
 
+test("a runtime Qwen model serves only with Qwen's own source, credits at the floor and a budget", () => {
+  const profile = {
+    provider: "qwen",
+    apiModelId: "qwen-image-2.0",
+    name: "Qwen Image 2.0",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["medium"],
+    latencyClass: "balanced",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+  };
+  // Test figures, not a sale price: the $0.035 image plus the 5,000 prompt
+  // budget is a 40,000 worst case, so the floor is ceil(40,000 / 900) = 45.
+  const qwenRevision = (credits, sources = ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"]) => ({
+    modelId: "qwen-image-2.0",
+    pricingVersion: `qwen-image-2-0-test-${credits}-${sources.length}`,
+    effectiveFrom: new Date("2026-10-19T00:00:00Z"),
+    prices: [{ quality: "medium", size: "1024x1024", credits, outputCostMicroUsd: 35_000 }],
+    verification: { verifiedAt: "2026-11-07", sources, thinkingCapMicroUsd: 0 },
+  });
+  const served = (revisions, budgetReady = true) =>
+    resolve([row("qwen-image-2.0", { profile, enabled: true })], revisions, budgetReady).models.find(
+      (m) => m.id === "qwen-image-2.0"
+    );
+
+  const atFloor = served([qwenRevision(45)]);
+  assert.equal(minimumCreditsForImageOption(atFloor, atFloor.prices[0]), 45);
+  assert.equal(atFloor.disabledReason, null);
+  assert.equal(atFloor.provider, "qwen");
+  assert.deepEqual(judge()(atFloor), { admitted: true });
+
+  // The default-off switch: no provider budget, no service.
+  assert.notEqual(served([qwenRevision(45)], false).disabledReason, null);
+  assert.deepEqual(judge(false)(atFloor).reasons, ["provider_budget_missing"]);
+
+  assert.notEqual(served([qwenRevision(44)]).disabledReason, null);
+  assert.ok(judge()({ ...atFloor, prices: qwenRevision(44).prices }).reasons.includes("credits_below_floor:medium/1024x1024"));
+  // Another provider's documentation is not Qwen's price.
+  assert.equal(
+    served([qwenRevision(45, ["https://developers.openai.com/api/docs/pricing"])]).disabledReason,
+    "price_unverified"
+  );
+  // A Qwen model outside the family whose per-image billing was read has no
+  // proven bound, even with a zero cap stated.
+  assert.ok(judge()({ ...atFloor, apiModelId: "z-image-turbo" }).reasons.includes("worst_case_cost_unbounded"));
+});
+
 test("a revision below the floor never serves, even when the row says inherit or there is no row", () => {
   // Review finding 2026-10-19: the judge used to run only for enabled: true.
   const cheap = {

@@ -49,6 +49,7 @@ const OWNER_LABELS: Record<ImageModelOwner, string> = {
   google: "Google",
   xai: "xAI",
   fal: "fal",
+  qwen: "Qwen",
 };
 
 /** Same table, for the supplier when it differs from the owner. */
@@ -57,6 +58,7 @@ const PROVIDER_LABELS: Record<ImageModelProvider, string> = {
   google: "Google",
   xai: "xAI",
   fal: "fal",
+  qwen: "Alibaba Cloud",
 };
 
 const LATENCY_LABEL_KEYS = {

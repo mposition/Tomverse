@@ -28,7 +28,7 @@ import {
  * lookup, provider health and readiness. Keeping the name attached to that
  * meaning is what makes adding a gateway safe -- nothing has to be re-read.
  */
-export type ImageModelProvider = "openai" | "google" | "xai" | "fal";
+export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen";
 
 /**
  * Who made the model, which is a different question and is about to stop having
@@ -45,7 +45,7 @@ export type ImageModelProvider = "openai" | "google" | "xai" | "fal";
  * current roster, not a relationship, and the two are separate aliases so the
  * next reader has to decide which one they mean.
  */
-export type ImageModelOwner = "openai" | "google" | "xai" | "fal";
+export type ImageModelOwner = "openai" | "google" | "xai" | "fal" | "qwen";
 
 export type ImageModelLifecycle = "stable" | "preview";
 
@@ -727,6 +727,11 @@ export const getImageModelPrice = (
  *
  *   - `not_billed`: no reasoning charge on an image request. OpenAI images and
  *     xAI, both verified 2026-08-04. A stated cap is a margin, never owed.
+ *     Qwen (Model Studio International): billed per output image, and the
+ *     price page states no separate thinking or prompt-rewrite charge for
+ *     qwen-image (read 2026-11-07); `buildQwenImageRequest` also sends
+ *     `prompt_extend: false`, which `enable_thinking` requires to be true. No
+ *     Qwen model is seeded, so this applies only to a runtime catalogue row.
  *   - `flat_per_request`: a fixed surcharge for the thinking level the request
  *     pins. fal's Nano Banana 2 page: "If high thinking is used, an additional
  *     $0.002 will be charged" (re-read 2026-10-21), and that endpoint's row
@@ -761,11 +766,27 @@ const IMAGE_PROVIDER_THINKING_BILLING: Readonly<
   openai: "not_billed",
   xai: "not_billed",
   google: "per_token_uncapped",
+  qwen: "not_billed",
+};
+
+/**
+ * The models of a `not_billed` provider whose per-image billing was read for
+ * that family only. Qwen's price page bills the qwen-image models per image
+ * with no thinking or prompt-rewrite charge (read 2026-11-07), but the same
+ * endpoint serves other models -- the page prices prompt_extend separately
+ * for z-image-turbo -- so another Qwen model has no proven bound until its
+ * billing is read and listed here.
+ */
+const IMAGE_PER_IMAGE_BILLED_MODELS: Readonly<Partial<Record<ImageModelProvider, RegExp>>> = {
+  qwen: /^qwen-image-/,
 };
 
 /** The terms for this model's request: per endpoint on fal, per provider elsewhere. */
 const imageThinkingTerms = (provider: unknown, apiModelId: unknown): FalThinkingTerms | null => {
   if (provider === "fal") return falEndpointProfile(apiModelId)?.thinking ?? null;
+  // A family read as per-image is not a bound on the provider's other models.
+  const family = IMAGE_PER_IMAGE_BILLED_MODELS[provider as ImageModelProvider];
+  if (family && typeof apiModelId === "string" && !family.test(apiModelId)) return null;
   return typeof provider === "string" && Object.hasOwn(IMAGE_PROVIDER_THINKING_BILLING, provider)
     ? { billing: IMAGE_PROVIDER_THINKING_BILLING[provider as keyof typeof IMAGE_PROVIDER_THINKING_BILLING] }
     : null;
