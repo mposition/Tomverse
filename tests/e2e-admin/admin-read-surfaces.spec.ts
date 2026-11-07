@@ -174,9 +174,12 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("heading", { name: "Who is using Tomverse" })
     ).toHaveCount(1);
-    // Today is the default period and is marked as the current one.
+    // Today is the default period and is marked as the current one. Scoped to
+    // the report's own period links: the sidebar now has a "Today" entry too.
     await expect(
-      usage.getByRole("link", { name: "Today", exact: true })
+      usage
+        .getByTestId("admin-usage-analytics")
+        .getByRole("link", { name: "Today", exact: true })
     ).toHaveAttribute("aria-current", "page");
     await expect(usage.getByTestId("admin-usage-trend")).toBeVisible();
     await expect(usage.getByTestId("admin-usage-activity")).toBeVisible();

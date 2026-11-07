@@ -448,6 +448,8 @@ export async function applyAmuxIdeaCardCloseAnswerInTransaction(tx: Prisma.Trans
  */
 export async function applyAmuxIdeaCardCloseDmAnswer(tx: Prisma.TransactionClient, input: {
   questionId: string; requestId: string; decision: AmuxIdeaCardCloseDecision; now: Date;
+  /** dm: applied without the operator's confirmation (TOMVERSE_AMUX_DM_APPROVER). */
+  source?: "dm_confirmed" | "dm";
 }) {
   await takeAuditChainLock(tx);
   let killSwitch: boolean | null;
@@ -455,7 +457,8 @@ export async function applyAmuxIdeaCardCloseDmAnswer(tx: Prisma.TransactionClien
   catch { killSwitch = null; }
   if (killSwitch !== false) return { applied: false as const };
   const result = await applyAmuxIdeaCardCloseAnswerInTransaction(tx, {
-    questionId: input.questionId, decision: input.decision, source: "dm_confirmed",
+    questionId: input.questionId, decision: input.decision,
+    source: input.source ?? "dm_confirmed",
     // The person's judgment audit names who confirmed it.
     answeredByUserId: null, now: input.now,
     audit: (entry) => writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,

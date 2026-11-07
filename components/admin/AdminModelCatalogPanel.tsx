@@ -6,6 +6,7 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminModelCatalogMessages } from "@/lib/adminMessages/modelCatalog";
+import { discoveryDraftRequest, runtimeImageProfileTemplate } from "@/lib/runtimeImageProviders";
 
 // Operator surface over /api/admin/model-catalog. Raw JSON editors on purpose:
 // the schemas are enforced server-side (lib/modelCatalogCore.ts), and a form
@@ -36,8 +37,14 @@ type CodingRow = {
   draft: unknown;
 };
 
+type PendingImageRow = { modelId: string; profile: unknown; draft: unknown; problem: string | null };
+
 type CatalogReport = {
-  image: { models: ImageRow[]; problems: { modelId: string; problem: string }[] };
+  image: {
+    models: ImageRow[];
+    problems: { modelId: string; problem: string }[];
+    pending?: PendingImageRow[];
+  };
   coding: {
     models: CodingRow[];
     snapshot: { version: number; models: unknown[]; coverageUntil: string } | null;
@@ -64,6 +71,7 @@ export function AdminModelCatalogPanel() {
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
   const [profileDrafts, setProfileDrafts] = useState<Record<string, string>>({});
   const [newCodingId, setNewCodingId] = useState("");
+  const [newImage, setNewImage] = useState({ modelId: "", profile: "" });
   const [draftForm, setDraftForm] = useState({
     category: "coding",
     modelId: "",
@@ -90,6 +98,21 @@ export function AdminModelCatalogPanel() {
     // the same idiom the other admin panels use for their mount load.
     queueMicrotask(() => void load());
   }, [load]);
+
+  // A link from the discovery queue fills in the image draft and the new
+  // model's profile; nothing is written until the operator submits.
+  useEffect(() => {
+    const request = discoveryDraftRequest(window.location.search);
+    if (!request) return;
+    queueMicrotask(() => {
+      setDraftForm((form) => ({ ...form, category: "image", ...request }));
+      setNewImage({
+        modelId: request.modelId,
+        profile: JSON.stringify(runtimeImageProfileTemplate(request.provider, request.apiModelId), null, 2),
+      });
+      document.getElementById("model-catalog-new-image")?.scrollIntoView({ block: "start" });
+    });
+  }, []);
 
   const send = async (method: "PATCH" | "POST", body: unknown) => {
     setNotice(null);
@@ -138,6 +161,29 @@ export function AdminModelCatalogPanel() {
         {m.inherit}
       </button>
     </div>
+  );
+
+  const priceRevisionBlock = (modelId: string) => (
+    <details className="mt-2">
+      <summary className="cursor-pointer text-xs font-bold text-zinc-400">{m.priceRevision}</summary>
+      <p className="mt-1 text-[11px] text-zinc-500">{m.priceRevisionHint}</p>
+      <textarea
+        className={textarea}
+        rows={5}
+        value={priceDrafts[modelId] ?? ""}
+        onChange={(event) => setPriceDrafts({ ...priceDrafts, [modelId]: event.target.value })}
+      />
+      <button
+        type="button"
+        className={`${button} mt-1`}
+        onClick={() => {
+          const revision = parseJson(priceDrafts[modelId] ?? "");
+          if (revision !== undefined) void send("POST", { action: "price_revision", modelId, revision });
+        }}
+      >
+        {m.submit}
+      </button>
+    </details>
   );
 
   const draftBlock = (category: "image" | "coding", modelId: string, draft: unknown) =>
@@ -192,26 +238,7 @@ export function AdminModelCatalogPanel() {
                       <td className={`${cell} text-xs`}>{row.admissionIfEnabled.admitted ? m.admitted : reasonsOf(row.admissionIfEnabled)}</td>
                       <td className={cell}>
                         {stateButtons("image", row.id)}
-                        <details className="mt-2">
-                          <summary className="cursor-pointer text-xs font-bold text-zinc-400">{m.priceRevision}</summary>
-                          <p className="mt-1 text-[11px] text-zinc-500">{m.priceRevisionHint}</p>
-                          <textarea
-                            className={textarea}
-                            rows={5}
-                            value={priceDrafts[row.id] ?? ""}
-                            onChange={(event) => setPriceDrafts({ ...priceDrafts, [row.id]: event.target.value })}
-                          />
-                          <button
-                            type="button"
-                            className={`${button} mt-1`}
-                            onClick={() => {
-                              const revision = parseJson(priceDrafts[row.id] ?? "");
-                              if (revision !== undefined) void send("POST", { action: "price_revision", modelId: row.id, revision });
-                            }}
-                          >
-                            {m.submit}
-                          </button>
-                        </details>
+                        {priceRevisionBlock(row.id)}
                         {draftBlock("image", row.id, row.draft)}
                       </td>
                     </tr>
@@ -219,11 +246,61 @@ export function AdminModelCatalogPanel() {
                 </tbody>
               </table>
             </div>
-            {report.image.problems.length > 0 ? (
+            {(report.image.pending ?? []).length > 0 ? (
+              <div className="mt-3 flex flex-col gap-3">
+                <div className="text-sm font-bold text-amber-300">{m.pendingImage}</div>
+                {(report.image.pending ?? []).map((row) => (
+                  <div key={row.modelId} data-testid="model-catalog-pending-image" className="rounded-xl border border-amber-900/60 p-3">
+                    <div className="font-mono text-sm font-bold text-zinc-100">{row.modelId}</div>
+                    <div className="text-xs text-amber-300">{row.problem ?? m.pendingNoProblem}</div>
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs font-bold text-zinc-400">{m.profile}</summary>
+                      <pre className="mt-1 max-h-48 overflow-auto rounded bg-zinc-900 p-2 text-[11px] text-zinc-300">
+                        {JSON.stringify(row.profile, null, 2)}
+                      </pre>
+                    </details>
+                    {priceRevisionBlock(row.modelId)}
+                    {draftBlock("image", row.modelId, row.draft)}
+                  </div>
+                ))}
+              </div>
+            ) : report.image.problems.length > 0 ? (
               <p className="mt-2 text-xs text-amber-300">
                 {m.problems}: {report.image.problems.map((p) => `${p.modelId} (${p.problem})`).join(", ")}
               </p>
             ) : null}
+            <div id="model-catalog-new-image" className="mt-4 rounded-xl border border-zinc-800 p-3">
+              <div className="text-sm font-bold text-zinc-100">{m.newImageModel}</div>
+              <p className="mt-1 text-[11px] text-zinc-500">{m.newImageModelHint}</p>
+              <label className="mt-2 block text-xs font-bold text-zinc-400">
+                {m.draftModelId}
+                <input
+                  className={textarea}
+                  value={newImage.modelId}
+                  onChange={(event) => setNewImage({ ...newImage, modelId: event.target.value })}
+                />
+              </label>
+              <label className="mt-2 block text-xs font-bold text-zinc-400">
+                {m.profile}
+                <textarea
+                  className={textarea}
+                  rows={8}
+                  value={newImage.profile}
+                  onChange={(event) => setNewImage({ ...newImage, profile: event.target.value })}
+                />
+              </label>
+              <button
+                type="button"
+                className={`${button} mt-1`}
+                disabled={!newImage.modelId.trim() || !newImage.profile.trim()}
+                onClick={() => {
+                  const profile = parseJson(newImage.profile);
+                  if (profile !== undefined) void send("PATCH", { category: "image", modelId: newImage.modelId.trim(), profile });
+                }}
+              >
+                {m.saveProfile}
+              </button>
+            </div>
           </div>
 
           <div>

@@ -51,6 +51,9 @@ const ESCALATION_REASON_CODES = new Set([
   "cli_turn_limit",
   "cli_execution_error",
   "cli_budget_limit",
+  // Owner decision 2026-11-07: an investigate conclusion parked the Task.
+  "analysis_stop",
+  "analysis_replan",
   "operational_cost_blocked",
   "canonical_deadline_review_required",
   // Policy version 15: why the WSL runner blocked an attempt.
