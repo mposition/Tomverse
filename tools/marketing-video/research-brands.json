@@ -1,0 +1,48 @@
+[
+ {
+  "name": "sauna",
+  "note": "owner reference: cream serif, tool chips wired into a list",
+  "query": "Sauna AI",
+  "advertiser": "Sauna AI"
+ },
+ {
+  "name": "runable",
+  "note": "owner reference: receipt and ticket objects",
+  "query": "Runable",
+  "advertiser": "Runable"
+ },
+ {
+  "name": "floot",
+  "note": "owner reference",
+  "query": "Floot",
+  "advertiser": "Floot"
+ },
+ {
+  "name": "merlin",
+  "note": "owner reference: mascot, model logo row",
+  "query": "Merlin Ai",
+  "advertiser": "Merlin Ai"
+ },
+ {
+  "name": "pyxa",
+  "query": "Pyxa AI",
+  "advertiser": "Pyxa AI",
+  "note": "owner reference: equation and hub diagrams"
+ },
+ {
+  "name": "perplexity",
+  "pageId": "109760398882363"
+ },
+ {
+  "name": "claude",
+  "pageId": "989603317562933"
+ },
+ {
+  "name": "gemini",
+  "pageId": "454530611082670"
+ },
+ {
+  "name": "chatgpt",
+  "pageId": "616148004918000"
+ }
+]
