@@ -213,6 +213,9 @@ test("a stated thinking cap is a bound only where the request can hold it", () =
   // A provider with no adapter, or a prototype key, has no billing answer.
   assert.equal(imageThinkingBilling("ideogram"), null);
   assert.equal(imageThinkingBilling("toString"), null);
+  // Review finding 2026-11-07: an inherited key with a model id must not throw.
+  assert.equal(imageThinkingBilling("toString", "qwen-image-3.0"), null);
+  assert.equal(imageThinkingCapMinimumMicroUsd("constructor", "qwen-image-3.0"), null);
   assert.equal(imageThinkingBilling(undefined), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("ideogram"), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("google"), null);
