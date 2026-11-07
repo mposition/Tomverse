@@ -187,7 +187,7 @@ test.describe("account recovery eligibility", () => {
     expect(requests).toHaveLength(1);
   });
 
-  test("a role without the permission is refused by the server, and the console says so", async ({
+  test("a role without the permission cannot restore, and the console says so", async ({
     page,
     signInAs,
   }) => {
@@ -200,9 +200,11 @@ test.describe("account recovery eligibility", () => {
       .getByTestId("admin-security-reason")
       .fill("Billing should not be able to restore an account.");
     await page.getByTestId("admin-security-ticket").fill("TOMV-7777");
-    await page.getByTestId("admin-security-restore").click();
-
-    await expect(page.getByTestId("admin-security-request-error")).toBeVisible();
+    // The control is withheld up front (the write button is disabled with a
+    // "Needs support access" note) rather than refused after a click.
+    const restore = page.getByTestId("admin-security-restore");
+    await expect(restore).toBeDisabled();
+    await expect(restore).toHaveAttribute("title", "Needs support access");
     // The account is unchanged.
     await expect(
       page.getByTestId("admin-security-account-status")

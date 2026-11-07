@@ -21,7 +21,7 @@ export type AutoFixWaitingKind = "awaiting_human_review" | "prOpen" | "handedOff
  * inquiries already carry -- no new read. A draft PR the lane recorded as open
  * is the plainest case; a fix handed to the lane but not yet a PR is next; and
  * a case the deterministic rules passed to human review (policy
- * trace-feedback-automation §8, `awaiting_human_review`) is the rest. Anything
+ * `docs/policy/trace-feedback-automation.md §8`, `awaiting_human_review`) is the rest. Anything
  * else is still being worked on by the automation or was judged not fixable by
  * code, so nobody is waiting on it.
  */

@@ -37,7 +37,7 @@ test.describe("support journeys", () => {
     });
     await expect(link).toBeVisible();
     await expect(
-      page.getByRole("link", { name: /^Open / })
+      page.locator("#main-content").getByRole("link", { name: /^Open / })
     ).toHaveCount(1);
 
     await link.click();
