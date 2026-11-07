@@ -307,7 +307,8 @@ test('Code managed inference with migrated local schema and real shared credit l
         await db.$transaction(tx=>anonymiseAccountData(tx,user));await db.user.delete({where:{id:user}});
         const snapshot=await db.codeTaskReservation.findUnique({where:{id:held.reservationId}}),callBefore=await db.codeManagedCall.findUnique({where:{id:req.callId}});
         const where={key_period_periodStart:{key:'provider:openai',period:'provider-cost-day',periodStart:usagePeriodStart('day',callBefore.createdAt)}},providerBefore=await db.chatUsageBucket.findUnique({where});
-        await db.codeManagedCall.update({where:{id:req.callId},data:{createdAt:new Date(Date.now()-180000)}});
+        // Expire by moving the sweep clock, not createdAt: the provider hold is
+        // refunded to the createdAt day, so back-dating crosses UTC midnight.
         await service.reconcileExpiredCodeTasks(new Date(Date.now()+180000));
         assert.equal((await db.codeManagedCall.findUnique({where:{id:req.callId}})).status,'outcome_unknown');
         // Account anonymisation already closes the task; expiry only recovers
