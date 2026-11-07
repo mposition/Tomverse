@@ -9,8 +9,8 @@ import { computeAdminAuditEntryHash } from "../lib/adminAuditIntegrityCore.ts";
 import {
   ADMIN_LEGACY_ROUTES,
   ADMIN_SEARCHABLE_PAGES,
+  adminHrefIsVisibleTo,
   adminNavItemTabs,
-  adminSearchablePagesFor,
   resolveAdminPageMeta,
 } from "../lib/adminNavigation.ts";
 import {
@@ -509,23 +509,19 @@ test("preview does not write, apply has no caller latch, and the worker boundary
   assert.match(panel, /applyReady \? messages\.applyPermitted\("true"\) : messages\.applyDisabled/);
   assert.match(panel, /bg-zinc-950 text-zinc-100/);
   assert.match(panel, /send\("apply"/);
-  // The screen moved into Backlog's Catalog import section; its old address
-  // still resolves there.
-  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-board-import"], "/admin/amux-backlog?tab=import");
-  const movedTo = resolveAdminPageMeta("/admin/amux-backlog");
-  assert.equal(movedTo.label, "Backlog");
+  // The screen moved into the Legacy tools tab of Safety & recovery
+  // (2026-11-07); its old address still resolves there.
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-board-import"], "/admin/amux-recovery?tab=legacy");
+  const movedTo = resolveAdminPageMeta("/admin/amux-recovery");
+  assert.equal(movedTo.label, "Safety & recovery");
   assert.equal(movedTo.isKnown, true);
   assert.equal(
-    adminNavItemTabs("amux-backlog").find((tab) => tab.id === "import")?.label,
-    "Catalog import",
+    adminNavItemTabs("amux-recovery").find((tab) => tab.id === "legacy")?.label,
+    "Legacy tools",
   );
-  // Listed to the owner only: every other role would receive a 404.
+  // The tab is listed to the owner only: every other role would receive a 404.
   for (const role of ["billing", "support", "ops", "readonly"]) {
-    assert.equal(
-      adminSearchablePagesFor(role).some((entry) => entry.href === "/admin/amux-backlog"),
-      false,
-      role,
-    );
+    assert.equal(adminHrefIsVisibleTo(role, "/admin/amux-recovery?tab=legacy"), false, role);
   }
   assert.equal(
     ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-board-import"),

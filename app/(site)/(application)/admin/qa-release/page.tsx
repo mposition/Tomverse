@@ -1,155 +1,26 @@
-export const dynamic = "force-dynamic";
-
-import { Suspense } from "react";
-import { getServerSession } from "next-auth/next";
-import { AdminAgentDigestsPanel } from "@/components/admin/AdminAgentDigestsPanel";
-import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
-import { AmuxIdeaLaneDailyLoading, AmuxIdeaLaneDailySection } from "@/components/admin/AmuxIdeaLaneDailySection";
-import { CiAdmissionSection } from "@/components/admin/CiAdmissionSection";
-import { QaReleaseLaneVerdictsSection } from "@/components/admin/QaReleaseLaneVerdictsSection";
-import { QaReleaseMergeLaneSection } from "@/components/admin/QaReleaseMergeLaneSection";
-import { QaReleaseTrainBoard } from "@/components/admin/QaReleaseTrainBoard";
-import { QaReleaseTrainCargoSection } from "@/components/admin/QaReleaseTrainCargoSection";
-import { QaReleaseTrainEmergencySection } from "@/components/admin/QaReleaseTrainEmergencySection";
-import { QaReleaseTrainRefresher } from "@/components/admin/QaReleaseTrainRefresher";
-import { QaReleaseTrainLoading, QaReleaseTrainSummary } from "@/components/admin/QaReleaseTrainSummary";
-import { QA_RELEASE_SECTION_IDS } from "@/components/admin/qaReleaseTabParts";
-import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
-import { readAmuxIdeaLaneDailyReport } from "@/lib/amux/ideaLaneDailyReportRead";
-import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
-import { readQaReleaseCiAdvice } from "@/lib/qaReleaseCiAdviceStore";
-import { readQaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesRead";
-import { type QaReleaseLaneRounds, readQaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
-import { readQaReleaseTrainBoard } from "@/lib/qaReleaseTrainBoardRead";
-import { qaReleaseTrainNextDepartureMs } from "@/lib/qaReleaseTrainCore";
-import { readQaReleaseTrainReports, readQaReleaseTrainSchedule, readQaReleaseTrainSelection } from "@/lib/qaReleaseTrainStore";
-import { hasAdminPermission } from "@/lib/adminAuth";
-import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
-import { authOptions } from "@/lib/auth";
-
-const TABS = adminNavItemTabs("qa-release");
+import { redirect } from "next/navigation";
+import {
+  ADMIN_LEGACY_ROUTES,
+  ADMIN_QA_RELEASE_LEGACY_TABS,
+  adminRedirectTarget,
+} from "@/lib/adminNavigation";
 
 /**
- * QA and release (docs/policy/qa-release-agent.md section 4): from a develop
- * merge to production -- the merge lane, CI admission and the release train,
- * each on its own tab.
- * Only the open tab's data is loaded. Reading takes ordinary admin
- * authentication, which the console layout has established; every write takes
- * owner or ops and a recent sign-in, checked by its route.
+ * Retired route, preserved as a redirect.
+ *
+ * QA and release is the Release page (2026-11-07). The old page's four
+ * sections each land on the Release tab, and the view of it, that now holds
+ * them; a bare address opens the QA tab. Operator emails, commit statuses and
+ * audit summaries link these addresses, so every one keeps working. The
+ * destination decides access; this page never reads the session.
  */
-export default async function AdminQaReleasePage({ searchParams }: PageProps<"/admin/qa-release">) {
+export default async function AdminQaReleaseRedirectPage({
+  searchParams,
+}: PageProps<"/admin/qa-release">) {
   const query = await searchParams;
-  const tab = resolveAdminTab(TABS, query.tab);
-  const session = await getServerSession(authOptions);
-  // Whether this viewer may write travels with the payload, so a reader is not
-  // offered a form that can only refuse; the routes check again.
-  const canWrite = hasAdminPermission(session, "ops:write");
-  // The waiting line is one stored row; its length is the CI admission tab's
-  // chip on every tab.
-  const now = new Date();
-  const admission = await readCiAdmissionAdminView();
-  const waiting = admission.state.queue.length;
-  // The merge lane's own record is one stored row too; the pull requests that
-  // are the operator's are the lane tab's chip on every tab.
-  const laneRounds = await readQaReleaseLaneRounds();
-  const yours = (laneRounds.verdicts?.list ?? []).filter((verdict) => verdict.status === "human").length;
-
-  return (
-    <div className="flex min-w-0 flex-col gap-5">
-      <AdminPageTabs
-        basePath="/admin/qa-release"
-        tabs={TABS}
-        activeTabId={tab.id}
-        label="QA and release sections"
-        query={query}
-        chips={{
-          lane: yours > 0 ? { label: String(yours), attention: true } : undefined,
-          "ci-admission": waiting > 0 ? { label: String(waiting), attention: true } : undefined,
-        }}
-      />
-      {tab.id === "ci-admission" ? (
-        <CiAdmissionSection key={tab.id} initial={admission} canWrite={canWrite} />
-      ) : tab.id === "train" ? (
-        // The tab changes at once and says it is reading; what reads GitHub
-        // streams in after (on 2026-10-25 a cold read held the click 20-28 s).
-        <Suspense key={tab.id} fallback={<QaReleaseTrainLoading />}>
-          <TrainTab canWrite={canWrite} nowMs={now.getTime()} />
-        </Suspense>
-      ) : tab.id === "lane" ? (
-        <LaneTab rounds={laneRounds} canWrite={canWrite} />
-      ) : (
-        <AdminAgentDigestsPanel
-          key={tab.id}
-          initial={await readAgentDigestConsole(canWrite)}
-          main={await readQaReleaseMainCandidates()}
-          trains={(await readQaReleaseTrainReports()).map(({ slot, at, report }) => ({
-            slot,
-            at: at.toISOString(),
-            outcome: report.outcome,
-            pullRequestNumber: report.pullRequestNumber,
-            failure: report.failure,
-            picks: report.picks,
-          }))}
-          ciAdvice={await readQaReleaseCiAdvice()}
-          laneRounds={laneRounds}
-          nowMs={now.getTime()}
-        />
-      )}
-    </div>
-  );
-}
-
-/**
- * The release train (owner, 2026-10-25): where the next train stands, an
- * emergency departure, the next train's cargo and the departure board.
- */
-async function TrainTab({ canWrite, nowMs }: { canWrite: boolean; nowMs: number }) {
-  const [board, next, schedule] = await Promise.all([
-    readQaReleaseTrainBoard(nowMs),
-    readQaReleaseTrainSelection(),
-    readQaReleaseTrainSchedule(),
-  ]);
-  const nextMs = schedule ? qaReleaseTrainNextDepartureMs(nowMs, schedule.hours) : null;
-  const carried = next.departedWith && next.lastTrain?.slot === next.departedWith ? next.numbers.length : 0;
-  return (
-    <div className="flex min-w-0 flex-col gap-5">
-      <QaReleaseTrainRefresher />
-      <QaReleaseTrainSummary
-        nextDepartureAt={nextMs === null ? null : new Date(nextMs).toISOString()}
-        riding={next.numbers.length}
-        carried={carried}
-        openTrain={board.openTrains[0] ?? null}
-        openUnknown={!board.openRead}
-        emergencyPulls={next.emergency.pending?.numbers.length ?? null}
-      />
-      <QaReleaseTrainEmergencySection canWrite={canWrite} openUnknown={!board.openRead} />
-      {/* What the idea lane merged into develop over the last day (owner, 2026-11-04): tested on develop, then picked below. */}
-      <Suspense fallback={<AmuxIdeaLaneDailyLoading />}>
-        <IdeaLaneDaily nowMs={nowMs} />
-      </Suspense>
-      <QaReleaseTrainCargoSection canWrite={canWrite} id={QA_RELEASE_SECTION_IDS.cargo} />
-      <QaReleaseTrainBoard rows={board.rows} pullsRead={board.pullsRead} nowMs={nowMs} />
-    </div>
-  );
-}
-
-/** The idea lane's daily report, streamed on its own: the cargo's GitHub read can take a while cold. */
-async function IdeaLaneDaily({ nowMs }: { nowMs: number }) {
-  // A failed read is "unread" on this section alone; the rest of the tab still shows.
-  const report = await readAmuxIdeaLaneDailyReport(nowMs).catch(() => {
-    console.warn(JSON.stringify({ event: "amux_idea_lane_daily_read_failed" }));
-    return { status: "unread", failure: "read_failed" } as const;
-  });
-  return <AmuxIdeaLaneDailySection report={report} />;
-}
-
-/** The merge lane: what it will merge and what is the operator's, then its latch and attempt. */
-async function LaneTab({ rounds, canWrite }: { rounds: QaReleaseLaneRounds; canWrite: boolean }) {
-  const digest = await readAgentDigestConsole(canWrite);
-  return (
-    <div className="flex min-w-0 flex-col gap-5">
-      <QaReleaseLaneVerdictsSection rounds={rounds} latched={digest.mergeLane.latched} />
-      <QaReleaseMergeLaneSection lane={digest.mergeLane} canWrite={canWrite} />
-    </div>
-  );
+  const tab = typeof query.tab === "string" ? query.tab : undefined;
+  const destination =
+    (tab !== undefined ? ADMIN_QA_RELEASE_LEGACY_TABS[tab] : undefined) ??
+    ADMIN_LEGACY_ROUTES["/admin/qa-release"];
+  redirect(adminRedirectTarget(destination, query));
 }

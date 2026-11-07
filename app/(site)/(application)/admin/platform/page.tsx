@@ -1,74 +1,41 @@
 export const dynamic = "force-dynamic";
 
+import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { PlatformSettingsPanel } from "@/components/admin/PlatformSettingsPanel";
-import {
-  getMemoryExtractionRevokedPairs,
-  getPublicAppSettings,
-  isAssistantKnowledgeEnabled,
-  isAssistantPackageImportEnabled,
-  isAssistantProfilesEnabled,
-  isChatStarterEnabled,
-  isExternalContinuationEnabled,
-  isExternalImportEnabled,
-  isImageGenerationEnabled,
-  isMemoryExtractionEnabled,
-  isMemoryInjectionEnabled,
-} from "@/lib/appSettings";
-import { injectableExtractionPairs } from "@/lib/memoryInjectionGate";
-import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
+import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import { readPlatformSettingsPanelProps } from "@/lib/adminPlatformSettingsRead";
 
-export default async function AdminPlatformSettingsPage() {
-  const [
-    settings,
-    imageGenerationEnabled,
-    externalConversationImportEnabled,
-    externalConversationContinuationEnabled,
-    assistantProfilesEnabled,
-    assistantKnowledgeEnabled,
-    chatStarterEnabled,
-    assistantPackageImportEnabled,
-    memoryExtractionEnabled,
-    memoryInjectionEnabled,
-    revokedPairs,
-    guestLead,
-  ] = await Promise.all([
-    getPublicAppSettings(),
-    isImageGenerationEnabled(),
-    isExternalImportEnabled(),
-    isExternalContinuationEnabled(),
-    isAssistantProfilesEnabled(),
-    isAssistantKnowledgeEnabled(),
-    isChatStarterEnabled(),
-    // Reported here, changed through its own control and its own request: a
-    // save that carried it with everything else could not leave an audit row
-    // saying this flag moved
-    // (`docs/policy/assistant-package-import.md` §12.2.1).
-    isAssistantPackageImportEnabled(),
-    // Read, never written from this screen: the two Release B flags are the
-    // policy §12.4 human procedure and the panel reports them without offering
-    // to change them. See the PATCH schema in /api/admin/app-settings.
-    isMemoryExtractionEnabled(),
-    isMemoryInjectionEnabled(),
-    getMemoryExtractionRevokedPairs(),
-    readGuestLeadFacts(),
-  ]);
+const TABS = adminNavItemTabs("platform");
+
+/**
+ * Feature flags: emergency stops, feature switches and account defaults, one
+ * section each (`?tab=emergency`, `features`, `account-defaults`). The default
+ * models that used to sit here are the Default models tab of Models.
+ *
+ * Every section is the same panel drawing its part of one state, so the save
+ * and its step-up behave as they did on the single screen.
+ */
+export default async function AdminPlatformSettingsPage({
+  searchParams,
+}: PageProps<"/admin/platform">) {
+  const query = await searchParams;
+  const tab = resolveAdminTab(TABS, query.tab);
+  const props = await readPlatformSettingsPanelProps();
 
   return (
-    <PlatformSettingsPanel
-      settings={settings}
-      imageGenerationEnabled={imageGenerationEnabled}
-      externalConversationImportEnabled={externalConversationImportEnabled}
-      externalConversationContinuationEnabled={
-        externalConversationContinuationEnabled
-      }
-      assistantProfilesEnabled={assistantProfilesEnabled}
-      assistantKnowledgeEnabled={assistantKnowledgeEnabled}
-      chatStarterEnabled={chatStarterEnabled}
-      assistantPackageImportEnabled={assistantPackageImportEnabled}
-      memoryExtractionEnabled={memoryExtractionEnabled}
-      memoryInjectionEnabled={memoryInjectionEnabled}
-      memoryApprovedPairCount={injectableExtractionPairs(revokedPairs).length}
-      storedGuestDefaultModelId={guestLead.stored}
-    />
+    <div className="flex min-w-0 flex-col gap-5">
+      <AdminPageTabs
+        basePath="/admin/platform"
+        tabs={TABS}
+        activeTabId={tab.id}
+        label="Feature flag sections"
+        query={query}
+      />
+      <PlatformSettingsPanel
+        key={tab.id}
+        view={tab.id as "emergency" | "features" | "account-defaults"}
+        {...props}
+      />
+    </div>
   );
 }

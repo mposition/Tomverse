@@ -5,8 +5,8 @@ import test from "node:test";
 import {
   ADMIN_LEGACY_ROUTES,
   ADMIN_SEARCHABLE_PAGES,
+  adminHrefIsVisibleTo,
   adminNavItemTabs,
-  adminSearchablePagesFor,
   resolveAdminPageMeta,
 } from "../lib/adminNavigation.ts";
 import {
@@ -322,30 +322,26 @@ test("the page is owner-only, listed to the owner alone, and offers the step-up 
   const panel = read("components/admin/AmuxBacklogMetadataPanel.tsx");
   assert.match(panel, /\/api\/admin\/amux\/backlog-metadata\?action=/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
-  assert.match(panel, /adminRecentAuthenticationHref\("\/admin\/amux-backlog\?tab=metadata"\)/);
+  assert.match(panel, /adminRecentAuthenticationHref\("\/admin\/amux-recovery\?tab=legacy"\)/);
   // Apply needs a preview of the exact text on screen that reported valid and permitted.
   assert.match(
     panel,
     /previewed !== null &&\s*previewed\.valid === true &&\s*previewed\.applyPermitted === true &&\s*previewed\.text === requestText/,
   );
   assert.match(panel, /disabled=\{pending \|\| !applyReady\}/);
-  // The screen moved into Backlog's Card metadata section; its old address
-  // still resolves there.
-  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-backlog-metadata"], "/admin/amux-backlog?tab=metadata");
-  const movedTo = resolveAdminPageMeta("/admin/amux-backlog");
-  assert.equal(movedTo.label, "Backlog");
+  // The screen moved into the Legacy tools tab of Safety & recovery
+  // (2026-11-07); its old addresses still resolve there.
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-backlog-metadata"], "/admin/amux-recovery?tab=legacy");
+  const movedTo = resolveAdminPageMeta("/admin/amux-recovery");
+  assert.equal(movedTo.label, "Safety & recovery");
   assert.equal(movedTo.isKnown, true);
   assert.equal(
-    adminNavItemTabs("amux-backlog").find((tab) => tab.id === "metadata")?.label,
-    "Card metadata",
+    adminNavItemTabs("amux-recovery").find((tab) => tab.id === "legacy")?.label,
+    "Legacy tools",
   );
-  // Listed to the owner only: every other role would receive a 404.
+  // The tab is listed to the owner only: every other role would receive a 404.
   for (const role of ["billing", "support", "ops", "readonly"]) {
-    assert.equal(
-      adminSearchablePagesFor(role).some((entry) => entry.href === "/admin/amux-backlog"),
-      false,
-      role,
-    );
+    assert.equal(adminHrefIsVisibleTo(role, "/admin/amux-recovery?tab=legacy"), false, role);
   }
   assert.equal(
     ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-backlog-metadata"),

@@ -13,7 +13,7 @@ import {
 test("the monitor-failure alert is its own fixed subject and sentence, with the date and the Admin link", () => {
   const email = buildQaReleaseOperatorEmail("monitor_failed", {
     date: "2026-10-03",
-    consoleUrl: "https://tomverse.app/admin/agent-digests?tab=qa-release",
+    consoleUrl: "https://tomverse.app/admin/release",
   });
   assert.equal(email.subject, "Tomverse QA release digest check could not finish");
   assert.notEqual(email.text, buildQaReleaseOperatorEmail("digest_stale", { date: "2026-10-03", consoleUrl: "x" }).text);
@@ -24,7 +24,7 @@ test("the monitor-failure alert is its own fixed subject and sentence, with the 
 test("the needs-a-check alert names both mismatches and nothing the agent read", () => {
   const email = buildQaReleaseOperatorEmail("attention", {
     date: "2026-10-03",
-    consoleUrl: "https://tomverse.app/admin/agent-digests?tab=qa-release",
+    consoleUrl: "https://tomverse.app/admin/release",
   });
   assert.equal(email.subject, "Tomverse QA release agent needs a check");
   assert.match(email.text, /revision other than the newest/);
@@ -64,16 +64,16 @@ test("each kind reads only its own reference shape", () => {
 test("the silence alert is a fixed subject, a fixed sentence, the date and the Admin link", () => {
   const email = buildQaReleaseOperatorEmail("digest_stale", {
     date: "2026-10-03",
-    consoleUrl: "https://tomverse.app/admin/agent-digests?tab=qa-release",
+    consoleUrl: "https://tomverse.app/admin/release",
   });
   assert.equal(email.subject, "Tomverse QA release digest has gone quiet");
   assert.match(email.text, /Date \(UTC\): 2026-10-03/);
-  assert.match(email.text, /Console: https:\/\/tomverse\.app\/admin\/agent-digests\?tab=qa-release/);
-  assert.ok(email.html.includes("tab=qa-release"));
+  assert.match(email.text, /Console: https:\/\/tomverse\.app\/admin\/release/);
+  assert.ok(email.html.includes("tomverse.app/admin/release"));
   // Deterministic: the retry queue re-renders the same payload.
   assert.deepEqual(email, buildQaReleaseOperatorEmail("digest_stale", {
     date: "2026-10-03",
-    consoleUrl: "https://tomverse.app/admin/agent-digests?tab=qa-release",
+    consoleUrl: "https://tomverse.app/admin/release",
   }));
 });
 

@@ -87,7 +87,7 @@ test("the operator reorders the line by dragging and from the keyboard, and each
     update: { value: reviewStatus() },
   });
   await signInAs("owner");
-  await page.goto("/admin/qa-release?tab=ci-admission");
+  await page.goto("/admin/release?tab=ci");
   // The analytics consent banner sits over the bottom of the page until declined.
   await page.getByRole("button", { name: "Decline", exact: true }).click();
 

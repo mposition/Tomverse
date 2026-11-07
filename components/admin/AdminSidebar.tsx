@@ -288,7 +288,7 @@ export function AdminSidebar({
             const open = isOpen(group.label);
             const panelId = `admin-nav-group-${group.label
               .toLowerCase()
-              .replace(/\s+/g, "-")}`;
+              .replace(/[^a-z0-9]+/g, "-")}`;
             const groupBadge = group.items.reduce<number | null>((total, item) => {
               const value = item.badge
                 ? adminNavigationBadge(item.badge, counts)

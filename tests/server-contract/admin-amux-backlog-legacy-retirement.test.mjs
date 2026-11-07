@@ -44,9 +44,9 @@ mock.module(mod("lib/amux/ideaProgressRead.ts"), { namedExports: {
   readAmuxIdeaProgressForOwner: async () => [],
 } });
 const panels = {};
-for (const name of ["AdminPageTabs", "AmuxBacklogListPanel", "AmuxBacklogMetadataPanel", "AmuxBoardImportPanel",
+for (const name of ["AdminPageTabs", "AmuxBacklogListPanel",
   "AmuxIdeaInputPanel", "AmuxAnalysisClaimResolutionPanel",
-  "AmuxPortfolioPanel", "AmuxReconciliationPanel", "AmuxIdeaProgressPanel", "AmuxIdeaDetailSummary"]) {
+  "AmuxPortfolioPanel", "AmuxIdeaProgressPanel", "AmuxIdeaDetailSummary"]) {
   const panel = () => null;
   panels[name] = panel;
   mock.module(mod(`components/admin/${name}.tsx`), { namedExports: { [name]: panel } });
@@ -75,7 +75,7 @@ test("default and unknown tabs render Ideas without offering legacy intake", asy
     const tabs = tree.find((element) => element.type === panels.AdminPageTabs).props;
     assert.equal(tabs.activeTabId, "ideas");
     assert.deepEqual(tabs.tabs.map((tab) => tab.id),
-      ["ideas", "list", "portfolio", "import", "reconciliation", "metadata"]);
+      ["ideas", "list", "portfolio"]);
     assert.equal("intake" in tabs.chips, false);
     assert.ok(tree.some((element) => element.type === panels.AmuxIdeaInputPanel));
     assert.equal(tree.some((element) => element.type === panels.AmuxBacklogListPanel), false);
@@ -140,12 +140,12 @@ test("old intake tab redirects before panel reads and preserves recovery and fil
     "/admin/amux-backlog?tab=ideas&analysisHoldId=hold-a&sourceKey=source-a");
 });
 
-test("retired Cleanup and recovery redirects to Ideas before any read and keeps the other queries", async () => {
+test("retired Cleanup and recovery redirects to Reservations & claims before any read and keeps the other queries", async () => {
   const values = { tab: "recovery", idea: "cfa39925-f53e-4d19-9eb7-3b8ec2e94f68", analysisHoldId: "hold-a" };
   await assert.rejects(open(query(values)), (error) => {
     assert.ok(error instanceof Redirect);
     assert.equal(error.destination,
-      "/admin/amux-backlog?tab=ideas&idea=cfa39925-f53e-4d19-9eb7-3b8ec2e94f68&analysisHoldId=hold-a");
+      "/admin/amux-recovery?tab=reservations&idea=cfa39925-f53e-4d19-9eb7-3b8ec2e94f68&analysisHoldId=hold-a");
     return true;
   });
   assert.equal(messageReads, 0);
@@ -192,14 +192,17 @@ test("non-owners are refused before a legacy tab redirect or any panel read", as
   assert.deepEqual(backlogReads, []);
 });
 
-test("surviving sections still mount only their own panel", async () => {
-  for (const [tab, name] of [["import", "AmuxBoardImportPanel"],
-    ["reconciliation", "AmuxReconciliationPanel"], ["metadata", "AmuxBacklogMetadataPanel"]]) {
-    const tree = elements(await open(query({ tab })));
-    assert.ok(tree.some((element) => element.type === panels[name]));
-    assert.equal(tree.some((element) => element.type === panels.AmuxIdeaInputPanel), false);
-    assert.deepEqual(tree.filter((element) => Object.values(panels).includes(element.type))
-      .map((element) => element.type), [panels.AdminPageTabs, panels[name]]);
+test("import, reconciliation and metadata moved to Safety & recovery and redirect before any panel read", async () => {
+  for (const tab of ["import", "reconciliation", "metadata"]) {
+    await assert.rejects(open(query({ tab, sourceKey: "source-a" })), (error) => {
+      assert.ok(error instanceof Redirect);
+      assert.equal(error.destination, "/admin/amux-recovery?tab=legacy&sourceKey=source-a");
+      return true;
+    }, tab);
   }
+  assert.equal(messageReads, 0);
   assert.deepEqual(backlogReads, []);
+  // Their panels are no longer mounted by this page at all.
+  const page = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-backlog/page.tsx"), "utf8");
+  assert.doesNotMatch(page, /AmuxBoardImportPanel|AmuxReconciliationPanel|AmuxBacklogMetadataPanel/);
 });

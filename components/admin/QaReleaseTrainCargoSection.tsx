@@ -23,7 +23,7 @@ import type { QaReleaseTrainSchedule } from "@/lib/qaReleaseTrainStore";
 import type { QaReleaseTrainModelDecision } from "@/lib/qaReleaseTrainVerdictCore";
 
 const API = "/api/admin/agent-digests/qa-release/train-cargo";
-const PAGE_PATH = "/admin/qa-release?tab=train";
+const PAGE_PATH = "/admin/release?tab=qa&view=train";
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
 /** The hidden route takes at most this many numbers in one request. */
 const HIDE_BATCH = 200;

@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AdminTabPlaceholder } from "@/components/admin/AdminTabPlaceholder";
 import { AdminPrivacyRequestsPanel } from "@/components/admin/AdminPrivacyRequestsPanel";
 import { FeedbackInboxPanel } from "@/components/admin/FeedbackInboxPanel";
 import { SupportTriageModelPanel } from "@/components/admin/SupportTriageModelPanel";
@@ -16,6 +17,9 @@ const TABS = adminNavItemTabs("support");
  * difference was that Support also showed privacy requests. `/admin/feedback`
  * now redirects here with `?tab=feedback`, so every existing link still lands on
  * the inbox. The retired `?tab=fixes` falls to the first tab, the same inbox.
+ *
+ * The Auto-fix review tab (`?tab=autofix`, 2026-11-07) is declared in the route
+ * table and waits for its screen; the retired `fixes` value is not it.
  */
 export default async function AdminSupportPage({
   searchParams,
@@ -34,6 +38,8 @@ export default async function AdminSupportPage({
       />
       {tab.id === "privacy" ? (
         <AdminPrivacyRequestsPanel />
+      ) : tab.id === "autofix" ? (
+        <AdminTabPlaceholder />
       ) : (
         <>
         <SupportTriageModelPanel />
