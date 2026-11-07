@@ -47,6 +47,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
 import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 import { formatAmuxV52ReviewScope } from "@/lib/amux/v52ReviewCore";
+import { amuxV52ReviewFeedbackJobId } from "@/lib/amux/v52ReviewRejections";
 import { AMUX_V22_PROVIDERS, amuxV22ExecutionRole, amuxV22Provider,
   amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 
@@ -568,13 +569,8 @@ export async function pullAmuxWorkDelivery(input: {
               item.length > 500))
           throw new Error("v52 review scope invalid");
         reviewScope = formatAmuxV52ReviewScope(titleText, criteria);
-        const prior = await tx.amuxV52ReviewRecord.findFirst({
-          where: { taskId: delivery.taskId },
-          orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
-          select: { jobId: true, verdict: true },
-        });
-        reviewFeedbackJobId = prior?.verdict === "reject" ?
-          prior.jobId ?? undefined : undefined;
+        reviewFeedbackJobId = await amuxV52ReviewFeedbackJobId(tx,
+          delivery.taskId);
       }
       const head = `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
         `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n`;
