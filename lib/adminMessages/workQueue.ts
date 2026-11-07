@@ -68,8 +68,8 @@ export const adminWorkQueueMessages = defineAdminMessages({
       target: (targetType: string, targetId: string, requester: string) =>
         `Target: ${targetType} ${targetId} / Requested by ${requester}`,
       fallbackAdmin: "admin",
-      expires: (date: string) => `Expires ${date} UTC`,
-      consumed: (date: string) => ` / Consumed ${date} UTC`,
+      expires: (date: string) => `Expires ${date}`,
+      consumed: (date: string) => ` / Consumed ${date}`,
       reviewed: (date: string, reviewer: string) => `Reviewed ${date} by ${reviewer}`,
       approve: "Approve",
       reject: "Reject",
@@ -142,8 +142,8 @@ export const adminWorkQueueMessages = defineAdminMessages({
       target: (targetType: string, targetId: string, requester: string) =>
         `대상: ${targetType} ${targetId} / 요청자 ${requester}`,
       fallbackAdmin: "관리자",
-      expires: (date: string) => `만료 ${date} UTC`,
-      consumed: (date: string) => ` / 소비 ${date} UTC`,
+      expires: (date: string) => `만료 ${date}`,
+      consumed: (date: string) => ` / 소비 ${date}`,
       reviewed: (date: string, reviewer: string) => `검토 ${date} / 검토자 ${reviewer}`,
       approve: "승인",
       reject: "거절",

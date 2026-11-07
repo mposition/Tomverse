@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { RotateCcw } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
@@ -60,7 +61,7 @@ export function AutoRouterTunables({
               {m.tunableTimeout(settings.routerTimeoutMs.previous, settings.routerTimeoutMs.value)}
             </p>
             <p className="mt-1 text-zinc-400">{settings.routerTimeoutMs.reason}</p>
-            <p className="mt-1 text-zinc-500">{new Date(settings.routerTimeoutMs.setAt).toLocaleString()}</p>
+            <p className="mt-1 text-zinc-500">{formatAestDateTime(settings.routerTimeoutMs.setAt, { seconds: true }) ?? "-"}</p>
             <button
               type="button"
               onClick={() => send({ action: "undo_router_timeout" })}
@@ -79,7 +80,7 @@ export function AutoRouterTunables({
             className="rounded-xl border border-zinc-800 p-3"
             data-testid="admin-auto-router-tunable-exclusion"
           >
-            <p className="font-bold">{m.tunableExclusion(item.modelId, new Date(item.until).toLocaleString())}</p>
+            <p className="font-bold">{m.tunableExclusion(item.modelId, formatAestDateTime(item.until, { seconds: true }) ?? "-")}</p>
             <p className="mt-1 text-zinc-400">{item.reason}</p>
             <button
               type="button"

@@ -24,7 +24,7 @@ export const adminOverviewMessages = defineAdminMessages({
     report: {
       title: "Tomverse Admin Snapshot",
       unreadable: "could not be read",
-      generated: (at: string) => `Generated: ${at} UTC`,
+      generated: (at: string) => `Generated: ${at}`,
       users: (total: number, paid: number, active: number) =>
         `Users: ${total} total / ${paid} paid / ${active} active subscriptions`,
       providers: (available: number, total: number) =>
@@ -53,7 +53,7 @@ export const adminOverviewMessages = defineAdminMessages({
         `${limited} limited · ${outage} outage`,
       monthlySpend: "Monthly spend",
       monthlySpendDetail: (today: number | bigint, month: number | bigint) =>
-        `Estimated from reserved token budgets. ${today} plan credits today, ${month} this month (UTC).`,
+        `Estimated from reserved token budgets. ${today} plan credits today (since 10:00 AEST), ${month} this month (since the 1st, 10:00 AEST).`,
       estimatedMrr: "Estimated MRR",
       estimatedMrrDetail: "Calculated from active Pro and Max monthly list prices.",
       paidConversion: "Paid conversion",
@@ -70,7 +70,7 @@ export const adminOverviewMessages = defineAdminMessages({
     summary: {
       snapshotTitle: "Operations snapshot",
       generated: (generatedAt: string, role: string) =>
-        `Generated ${generatedAt} UTC · signed in as ${role}.`,
+        `Generated ${generatedAt} · signed in as ${role}.`,
       healthScore: "Health score",
       healthScoreDetail:
         "Readiness out of 100, weighted by outages, queue depth, and missing configuration.",
@@ -102,7 +102,7 @@ export const adminOverviewMessages = defineAdminMessages({
       environmentNoneBlocking:
         "None of them are blocking. They are listed so you can see them, and cost nothing.",
       processStartedNote: (at: string) =>
-        `Read from the process that started at ${at} UTC. A variable added to the host after that is not visible here until the service is redeployed — refreshing re-renders inside the same process.`,
+        `Read from the process that started at ${at}. A variable added to the host after that is not visible here until the service is redeployed — refreshing re-renders inside the same process.`,
       unreadable: "Could not be read",
       unreadableDetail:
         "This read failed. The figure is unknown, which is not the same as zero.",
@@ -183,7 +183,7 @@ export const adminOverviewMessages = defineAdminMessages({
       conditionLabel: "Condition",
       processTitle: "What this page can and cannot see",
       processStarted: (at: string) =>
-        `The process answering this request started at ${at} UTC.`,
+        `The process answering this request started at ${at}.`,
       processCaveat:
         "It reads the environment it was started with. A variable added to the deployment host after that time is not visible here and refreshing will not bring it in -- the refresh re-renders inside this same process. If a variable is set on the host and reported missing here, redeploy or restart the service and read this page again.",
     },
@@ -218,7 +218,7 @@ export const adminOverviewMessages = defineAdminMessages({
     report: {
       title: "Tomverse 관리자 스냅샷",
       unreadable: "읽지 못함",
-      generated: (at: string) => `생성 시각: ${at} UTC`,
+      generated: (at: string) => `생성 시각: ${at}`,
       users: (total: number, paid: number, active: number) =>
         `사용자: 전체 ${total}명 / 유료 ${paid}명 / 활성 구독 ${active}건`,
       providers: (available: number, total: number) =>
@@ -245,7 +245,7 @@ export const adminOverviewMessages = defineAdminMessages({
         `제한 ${limited}개 · 장애 ${outage}개`,
       monthlySpend: "월 비용",
       monthlySpendDetail: (today: number | bigint, month: number | bigint) =>
-        `예약된 token 예산 기준 추정치입니다. 플랜 크레딧 오늘 ${today}, 이번 달 ${month} (UTC).`,
+        `예약된 token 예산 기준 추정치입니다. 플랜 크레딧 오늘(10:00 AEST부터) ${today}, 이번 달(1일 10:00 AEST부터) ${month}.`,
       estimatedMrr: "예상 MRR",
       estimatedMrrDetail: "활성 Pro·Max 구독의 월간 정가로 계산했습니다.",
       paidConversion: "유료 전환율",
@@ -262,7 +262,7 @@ export const adminOverviewMessages = defineAdminMessages({
     summary: {
       snapshotTitle: "운영 스냅샷",
       generated: (generatedAt: string, role: string) =>
-        `${generatedAt} UTC 생성 · ${role} 역할로 로그인.`,
+        `${generatedAt} 생성 · ${role} 역할로 로그인.`,
       healthScore: "상태 점수",
       healthScoreDetail:
         "100점 만점의 준비도로, 장애·대기열 적체·누락된 설정에 가중치를 둡니다.",
@@ -294,7 +294,7 @@ export const adminOverviewMessages = defineAdminMessages({
       environmentNoneBlocking:
         "조치가 필요한 것은 없습니다. 나머지는 확인하실 수 있도록 함께 적었을 뿐 점수에 반영되지 않습니다.",
       processStartedNote: (at: string) =>
-        `${at} UTC에 시작한 프로세스가 읽은 값입니다. 그 이후 호스트에 추가한 변수는 재배포 전까지 여기 보이지 않습니다 — 새로고침은 같은 프로세스 안에서 다시 그릴 뿐입니다.`,
+        `${at}에 시작한 프로세스가 읽은 값입니다. 그 이후 호스트에 추가한 변수는 재배포 전까지 여기 보이지 않습니다 — 새로고침은 같은 프로세스 안에서 다시 그릴 뿐입니다.`,
       unreadable: "읽지 못함",
       unreadableDetail:
         "이 값을 읽지 못했습니다. 모르는 것이지 0이 아닙니다.",
@@ -375,7 +375,7 @@ export const adminOverviewMessages = defineAdminMessages({
       conditionLabel: "조건",
       processTitle: "이 화면이 볼 수 있는 것과 없는 것",
       processStarted: (at: string) =>
-        `이 요청에 답한 프로세스는 ${at} UTC에 시작했습니다.`,
+        `이 요청에 답한 프로세스는 ${at}에 시작했습니다.`,
       processCaveat:
         "프로세스는 시작할 때 주어진 환경만 읽습니다. 그 시각 이후에 배포 호스트에 추가한 변수는 여기 보이지 않고, 새로고침해도 들어오지 않습니다 — 새로고침은 같은 프로세스 안에서 다시 그릴 뿐입니다. 호스트에는 설정돼 있는데 여기서 미설정으로 보인다면, 서비스를 재배포하거나 재시작한 뒤 이 화면을 다시 보십시오.",
     },

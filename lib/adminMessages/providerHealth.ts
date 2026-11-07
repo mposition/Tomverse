@@ -107,7 +107,7 @@ export const adminProviderHealthMessages = defineAdminMessages({
       policy: (minutes: number) =>
         `Policy: the recent ${minutes}-minute window needs at least 5 calls, 3 failures, and a 50% failure rate before a provider is Limited. Five failures at an 80% rate indicate Outage. Three consecutive successes restore Available status. Empty model output remains a model-level diagnostic. Monthly budget warnings still apply at 80% and 100%.`,
       usageCost: "Usage / Cost",
-      todayInternal: (amount: string) => `Today internal (UTC) ${amount}`,
+      todayInternal: (amount: string) => `Today internal (from 10:00 AEST) ${amount}`,
       monthInternal: (amount: string, budget: string) =>
         `Month internal ${amount} of ${budget}`,
       mistralReconciliation: "Provider reconciliation: Unavailable on current Mistral plan",
@@ -318,7 +318,7 @@ export const adminProviderHealthMessages = defineAdminMessages({
       policy: (minutes: number) =>
         `정책: 최근 ${minutes}분 창에서 호출 5건 이상, 실패 3건 이상, 실패율 50% 이상이면 공급자가 제한됨이 됩니다. 실패율 80%에서 실패 5건이면 장애입니다. 연속 성공 3건이면 사용 가능 상태로 돌아옵니다. 빈 모델 출력은 모델 단위 진단으로 남습니다. 월 예산 경고는 80%와 100%에서 계속 적용됩니다.`,
       usageCost: "사용량 / 비용",
-      todayInternal: (amount: string) => `오늘 내부 집계(UTC) ${amount}`,
+      todayInternal: (amount: string) => `오늘 내부 집계(10:00 AEST부터) ${amount}`,
       monthInternal: (amount: string, budget: string) =>
         `이번 달 내부 집계 ${amount} / ${budget}`,
       mistralReconciliation: "공급자 대조: 현재 Mistral 플랜에서는 사용할 수 없음",
