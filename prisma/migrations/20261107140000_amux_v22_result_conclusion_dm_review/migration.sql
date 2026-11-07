@@ -51,7 +51,9 @@ CREATE TABLE "AmuxV22ResultReview" (
     ("handoffReason" IS NULL OR "handoffReason" ~ '^[a-z_]{1,64}$') AND
     ("requestId" IS NULL OR "requestId" ~ '^[A-Za-z0-9_-]{1,64}$') AND
     ("localCardId" IS NULL OR "localCardId" ~ '^[A-Za-z0-9_-]{1,64}$') AND
-    ("localCardClosedAt" IS NULL OR ("localCardId" IS NOT NULL AND "state" <> 'open'))
+    -- A handed-off review's card closes too: the person decides elsewhere.
+    ("localCardClosedAt" IS NULL OR ("localCardId" IS NOT NULL AND
+      ("state" <> 'open' OR "handoffAt" IS NOT NULL)))
   ),
   CONSTRAINT "AmuxV22ResultReview_state_check" CHECK (
     ("state" = 'open' AND "decision" IS NULL AND "answerSource" IS NULL AND

@@ -69,7 +69,7 @@ export async function readAmuxV22ResultReviewSyncRows(tx: Prisma.TransactionClie
   const closing = await tx.$queryRaw<Array<{ questionId: string; cardId: string }>>`
     SELECT v."id" AS "questionId", v."localCardId" AS "cardId"
     FROM "AmuxV22ResultReview" v
-    WHERE v."state" <> 'open' AND v."localCardId" IS NOT NULL
+    WHERE (v."state" <> 'open' OR v."handoffAt" IS NOT NULL) AND v."localCardId" IS NOT NULL
       AND v."localCardClosedAt" IS NULL
     ORDER BY v."updatedAt", v."id"
     LIMIT ${AMUX_V22_RESULT_REVIEW_SYNC_LIMIT}`;
@@ -132,18 +132,20 @@ export async function recordAmuxV22ResultReviewsUnfilable(tx: Prisma.Transaction
   if (ids.length === 0) return { recorded: 0 };
   await takeAuditChainLock(tx);
   const at = input.now.toISOString();
-  const changed = await tx.$executeRaw`
+  const changed = await tx.$queryRaw<Array<{ id: string }>>`
     UPDATE "AmuxV22ResultReview" SET "handoffReason" = 'evidence_unavailable',
       "handoffAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
       "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
-    WHERE "id" = ANY(${ids}) AND "state" = 'open' AND "handoffAt" IS NULL`;
-  if (changed > 0)
+    WHERE "id" = ANY(${ids}) AND "state" = 'open' AND "handoffAt" IS NULL
+    RETURNING "id"`;
+  const handed = changed.map((row) => row.id).sort();
+  if (handed.length > 0)
     await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
       action: "amux.v22.result_review.handed_off", targetType: "AmuxV22ResultReview",
-      targetId: ids[0]!,
+      targetId: handed[0]!,
       summary: "Left v22 result reviews to a person: their evidence could not be read or did not fit a card whole.",
-      metadata: { reviewIds: ids, reason: "evidence_unavailable" } });
-  return { recorded: changed };
+      metadata: { reviewIds: handed, reason: "evidence_unavailable" } });
+  return { recorded: handed.length };
 }
 
 /** Names the local card of a review, once. Null when no such review exists. */
@@ -171,7 +173,7 @@ export async function recordAmuxV22ResultReviewLocalCardClosed(tx: Prisma.Transa
     UPDATE "AmuxV22ResultReview" SET "localCardClosedAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
       "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
     WHERE "id" = ${input.questionId} AND "localCardId" = ${input.cardId}
-      AND "state" <> 'open' AND "localCardClosedAt" IS NULL`;
+      AND ("state" <> 'open' OR "handoffAt" IS NOT NULL) AND "localCardClosedAt" IS NULL`;
   if (changed === 1) return { recorded: true as const };
   const rows = await tx.$queryRaw<Array<{ localCardId: string | null; closed: boolean }>>`
     SELECT "localCardId", "localCardClosedAt" IS NOT NULL AS "closed"
@@ -182,16 +184,18 @@ export async function recordAmuxV22ResultReviewLocalCardClosed(tx: Prisma.Transa
   return { recorded: true as const };
 }
 
-/** The open review of a local card, for the walk. One statement. */
+/** The open review of a local card, for the walk; one handed to the person
+ * is not the Decision Maker's any more. One statement. */
 export async function readOpenAmuxV22ResultReviewOfCard(tx: Prisma.TransactionClient,
   cardId: string) {
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxV22ResultReview"
-    WHERE "localCardId" = ${cardId} AND "state" = 'open' LIMIT 1`;
+    WHERE "localCardId" = ${cardId} AND "state" = 'open' AND "handoffAt" IS NULL LIMIT 1`;
   return rows[0] ?? null;
 }
 
-type LockedReview = { reviewId: string; state: string; attemptId: string; taskId: string;
+type LockedReview = { reviewId: string; state: string; handedOff: boolean;
+  attemptId: string; taskId: string;
   taskStatus: string; taskRevision: number; sourceSystem: string | null;
   archived: boolean; attemptNumber: number | null; newestAttemptId: string | null;
   resultReadable: boolean };
@@ -216,7 +220,8 @@ export async function applyAmuxV22ResultReviewDecision(tx: Prisma.TransactionCli
   catch { killSwitch = null; }
   if (killSwitch !== false) return { applied: false as const, outcome: null };
   const rows = await tx.$queryRaw<LockedReview[]>`
-    SELECT v."id" AS "reviewId", v."state", v."attemptId", v."taskId",
+    SELECT v."id" AS "reviewId", v."state", v."handoffAt" IS NOT NULL AS "handedOff",
+      v."attemptId", v."taskId",
       w."status" AS "taskStatus", w."revision" AS "taskRevision", w."sourceSystem",
       w."archivedAt" IS NOT NULL AS "archived",
       a."attemptNumber", a."id" AS "newestAttemptId",
@@ -232,6 +237,8 @@ export async function applyAmuxV22ResultReviewDecision(tx: Prisma.TransactionCli
     FOR UPDATE OF v, w`;
   const row = rows[0];
   if (!row || row.state !== "open") return { applied: false as const, outcome: null };
+  // Handed to the person: no later Decision Maker answer decides it.
+  if (row.handedOff) return { applied: false as const, outcome: "handed_off" as const };
   const at = input.now.toISOString();
   if (row.taskStatus !== "review" || row.archived || row.sourceSystem !== "admin-idea-v4" ||
       row.newestAttemptId !== row.attemptId) {

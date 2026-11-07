@@ -1667,7 +1667,7 @@ export async function settleAmuxV22TaskExecution(input: {
       const conclusionPlan = conclusionMode === "auto" &&
         input.outcome === "succeeded" && !ownerQuestion && !reviewRequired &&
         effectivePathDecision === "pass" && executionRole === "investigate" &&
-        patch === null && task.sourceSystem === "admin-idea-v4" ?
+        patch === null && storedPatch === null && task.sourceSystem === "admin-idea-v4" ?
         amuxV22ConclusionSettlement(storedResult?.conclusionVerdict ?? null) : null;
       const budget = settlementDestinationForBudget({
         requested_status: questionPlan ? questionPlan.toStatus :

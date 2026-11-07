@@ -201,6 +201,18 @@ test("an unreadable answer hands the review to a person once, and the card dispa
   assert.deepEqual(await handoff(), { recorded: true });
   assert.deepEqual(await handoff(), { recorded: false });
   assert.equal((await reviewOf(seed.reviewId)).handoffReason, "answer_unreadable");
+  assert.deepEqual(await apply(seed.reviewId, "approve", { replica: true }),
+    { applied: false, outcome: "handed_off" }, "handed to the person, no later DM answer decides it");
+  assert.equal((await taskOf(seed.taskId)).status, "review");
+  assert.equal((await escalationOf(seed.taskId)).status, "open");
+
+  const handedCard = `RR-${randomUUID().slice(0, 8)}`;
+  await prisma.$transaction((tx) => recordDmQuestionLocalCard(tx,
+    { questionId: seed.reviewId, cardId: handedCard }));
+  const sync = await prisma.$transaction((tx) => readAmuxV22ResultReviewSyncRows(tx));
+  assert.ok(sync.closing.some((row) => row.questionId === seed.reviewId), "its card is closed by the relay");
+  assert.deepEqual(await prisma.$transaction((tx) => recordDmQuestionLocalCardClosed(tx,
+    { questionId: seed.reviewId, cardId: handedCard, now: new Date() })), { recorded: true });
 
   const filed = await seedReview();
   assert.deepEqual(await prisma.$transaction((tx) => recordDmQuestionLocalCard(tx,
