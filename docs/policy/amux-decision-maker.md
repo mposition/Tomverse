@@ -40,17 +40,43 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
 11. kill switch 중에도 보존·개인정보 관리 같은 사람 조작과 시스템의 보존 정리는 허용한다(공통 기반 r16 §4의
     좁은 예외, §6의 표). 마지막 검토 지적을 반영한 판을 추가 검토 없이 승인 결정에 올린다.
 
+## 0a. 운영자 결정 (2026-11-07) — DM이 되돌릴 수 있는 승인을 한다
+
+운영자 결정 2026-11-07(채팅 원문: "승인은 사람만 할수 있다는 승인 정책들또한 없애주세요. Decision Maker가 대부분 운영자를 대체하는 자동화 시스템으로 진행됩니다."). 아래 §1의 "DM은 승인자가 아니다", "운영자가 확정하기 전에는 worker에게 가지 않는다",
+"완료 확정에서 DM은 사람으로 인정되지 않는다" 류의 문장은 되돌릴 수 있는 승인에 대해 이 결정으로 바뀐다.
+
+1. **DM 승인자(`TOMVERSE_AMUX_DM_APPROVER=enabled`, 기본 꺼짐).** 앱이 스스로 답을 적용하는 질문(§2-8의
+   v22 worker 질문, §2-9의 계획 거부, §2-10의 남은 카드 닫기, 아래 2의 결과 검토)에 DM 제안이 저장되면, 운영자
+   확정 없이 앱이 그 제안을 적용한다. 답 출처는 `dm`이다. DM이 `irreversible`로 표시한 제안, 질문의 고정 답이
+   아닌 답, §3으로 `operator`에 라우팅된 질문은 지금처럼 사람에게 남는다. 적용한 요청은 `direct_answer_close`로
+   닫아 Admin이 더 확정을 묻지 않는다. kill switch는 이 경로도 멈춘다. relay tick마다 한 건이다.
+2. **결과 검토(`TOMVERSE_AMUX_V22_RESULT_REVIEW_DM=enabled`, 기본 꺼짐).** 패치 없이 review로 가는 v22 결과
+   (investigate의 `needs_owner`·결론 형식 불일치, design·verify 결과, 패치 없는 implement 성공)는 사람
+   escalation과 함께 `AmuxV22ResultReview` 행이 되고, relay가 §2-8과 같은 카드로 올린다. 세션 이름은
+   `amux-result-review`, provider는 `claude`다. 선택지는 `approve`(done, `v4TerminalAt`), `retry`(시도
+   예산 안에서 todo, 넘으면 blocked), `block`(blocked, 사람 escalation 유지)이다. 세 단어가 아닌 답은 사람에게
+   넘긴다. 사람이 먼저 답하면 검토 행은 취소된다. 카드를 올리는 것이 DM 호출을 부르므로 켜는 것은 운영자 몫이다.
+3. **investigate 결론(`TOMVERSE_AMUX_V22_CONCLUSION`, 기본 `off`, `prompt`·`auto`).** investigate(verify 포함)
+   실행은 마지막 줄에 `AMUX_CONCLUSION:` JSON(`verdict` `proceed`·`replan`·`stop`·`needs_owner`, `findings`,
+   `handoff`, `evidence`)을 낸다. 앱은 결과 저장 때 형식만 검사해 verdict와 digest를 남긴다. `auto`에서
+   `proceed`는 사람 검토 없이 done이 되어 의존 Task가 자동 승격 대상이 되고, `stop`·`replan`은 Task를
+   blocked(`analysis_stop`·`analysis_replan`)로 두어 §2-10의 남은 카드 닫기 질문 후보가 되며, `needs_owner`와
+   형식 불일치는 지금처럼 review(그리고 2의 결과 검토)로 간다. 적용은 해시 체인 시스템 감사로 남는다.
+4. **사람에게 남는 것.** 실제 돈이 나가는 새 유료 호출 승인과 한도 상향, 외부 게시와 발송, 사용자 데이터 삭제,
+   자격증명과 보안 경계, production 병합과 배포. DM은 이것들의 승인자가 아니다.
+
 ## 1. 목적과 경계
 
 AMUX worker가 운영자의 답을 요구하는 질문(로컬 AMUX board의 typed ask)을 DM이 먼저 읽고 **답의 제안**을
 만든다. 운영자는 Tomverse Admin에서 그 제안을 그대로 확정하거나, 고쳐서 확정하거나, 거절하고 직접 답한다.
 **DM의 출력은 운영자가 확정하기 전에는 worker에게 가지 않는다.** v1에 자율 답변은 없다.
 
-DM은 **제안을 쓰는 worker이지 승인자가 아니다.**
+DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 있는 승인에 대해서는 §0a가 우선한다.)
 
 - `docs/policy/amux-agent-approval-contract.md`(이하 승인 계약)의 작업 검토·외부 행위 승인,
   `docs/policy/development-agent-orchestration.md`(이하 오케스트레이션 정책)의 승격·자동 승격·완료
-  확정, PR 병합, 배포, 그 밖에 사람 actor를 요구하는 모든 게이트에서 DM은 사람으로 인정되지 않는다.
+  확정, PR 병합, 배포, 그 밖에 사람 actor를 요구하는 모든 게이트에서 DM은 사람으로 인정되지 않는다. 다만 §0a의
+  되돌릴 수 있는 승인(PR 없는 결과의 완료 확정 포함)은 사람 actor를 요구하지 않는 별도 경로로 DM이 한다.
   DM의 시스템 actor는 닫힌 목록 항목이고 `auditRowActorKind()`가 사람으로 판정하지 않는다.
 - 운영자가 확정한 답도 질문에 대한 답일 뿐 승인 계약의 승인이 아니다. 사람 승인이 필요한 게이트는
   worker가 따로 요청한다.
@@ -510,7 +536,7 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 기록이다.
 
 차단 기준(되돌릴 수 없는 것): DM이 승인 게이트에서 사람으로 인정되지 않는다는 테스트, **운영자 확정 없이는
-어떤 DM 출력도 worker에게 전달되지 않는다는 테스트**, 스위치가 `off`·`proposal` 밖의 값을 거부한다는 DB
+어떤 DM 출력도 worker 세션에 전달되지 않는다는 테스트**(§0a의 DM 승인자는 세션이 아니라 앱이 적용하는 질문만 다룬다), 스위치가 `off`·`proposal` 밖의 값을 거부한다는 DB
 테스트, 용어 목록·`resolution`·카드 secret 검사 라우팅 테스트, 검사 시점에 마감을 넘긴 COMMIT 거부 DB
 테스트, 요청당 종결 결과 1개 테스트, 직접 답과 확정 답이 함께 와도 하나만 전달된다는 로컬 테스트, 확정 전
 카드 상태가 DM 출력 종류(`select`·`free_text`·`escalate`·실패)와 무관하다는 테스트, 연산별 SQL 문장 수(감사

@@ -1238,6 +1238,38 @@ export async function closeDecisionMakerRequestOnDirectAnswer(
 }
 
 /**
+ * Owner decision 2026-11-07 (the Decision Maker as the approver): the oldest
+ * request routed to a DM, on one of the given cards, whose terminal result is
+ * a proposal and which nothing has closed -- a proposal no person has judged.
+ * One statement; null when there is none.
+ */
+export async function readNextDecisionMakerOpenProposal(
+  client: LedgerReader,
+  cardIds: readonly string[],
+): Promise<string | null> {
+  if (cardIds.length === 0) return null;
+  if (cardIds.length > 100 || !cardIds.every((id) => isDmLedgerIdentifier(id))) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  const ids = [...cardIds];
+  const rows = await client.$queryRaw<Array<{ id: unknown }>>`
+    SELECT r."id" FROM "AmuxDecisionMakerRequest" r
+    WHERE r."route" = 'dm_proposal' AND r."cardId" = ANY(${ids}::text[])
+      AND EXISTS (SELECT 1 FROM "AmuxDecisionMakerRequestEvent" ev
+        WHERE ev."requestId" = r."id" AND ev."kind" = 'result' AND ev."resultKind" = 'proposal')
+      AND NOT EXISTS (SELECT 1 FROM "AmuxDecisionMakerRequestEvent" ev
+        WHERE ev."requestId" = r."id" AND ev."kind" IN
+          ('assign_discarded', 'stale_close', 'direct_answer_close', 'confirm', 'edit_confirm', 'reject'))
+    ORDER BY r."createdAt", r."id"
+    LIMIT 1
+  `;
+  const id = rows[0]?.id;
+  if (id === undefined) return null;
+  if (!isDmRequestId(id)) throw new DecisionMakerRequestWriteError("state_unreadable");
+  return id;
+}
+
+/**
  * §10: an open request is closed 30 days after it was created, by the
  * database clock. Statements: 2 for a refusal; 6, or 7.
  */

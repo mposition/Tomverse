@@ -32,6 +32,7 @@ type World = {
   openError: Error | null; resolved: unknown; ownerResult: unknown; ownerError: Error | null; question: unknown;
   direct: unknown; directInput: unknown;
   calls: string[]; boundaries: string[]; ownerInput: unknown; recordedInput: unknown;
+  reviewPending: unknown[]; reviewClosing: unknown[]; autoApplied: unknown; autoCalls: number;
 };
 let world: World;
 const reset = (changes: Partial<World> = {}) => {
@@ -42,6 +43,7 @@ const reset = (changes: Partial<World> = {}) => {
     v22Pending: [], v22Closing: [], closePending: [], closeClosing: [],
     openError: null, resolved: null, ownerResult: { outcome: "closed", closedCards: 2, auditId: "a" },
     ownerError: null, question: null, direct: null, directInput: null, calls: [], boundaries: [], ownerInput: null, recordedInput: null,
+    reviewPending: [], reviewClosing: [], autoApplied: null, autoCalls: 0,
     ...changes,
   };
   if (world.routing === undefined) delete process.env.TOMVERSE_AMUX_DM_ROUTING;
@@ -99,6 +101,13 @@ mock.module(mod("lib/amux/v22OwnerQuestionDmService.ts"), { namedExports: {
   recordDmQuestionLocalCardClosed: async (_tx: unknown, input: unknown) => {
     world.recordedInput = input; return { recorded: true };
   },
+} });
+mock.module(mod("lib/amux/dmAutoApplyService.ts"), { namedExports: {
+  runAmuxDmAutoApplyStep: async () => { world.autoCalls += 1; return world.autoApplied; },
+} });
+mock.module(mod("lib/amux/v22ResultReviewService.ts"), { namedExports: {
+  readAmuxV22ResultReviewSyncRows: async () => ({ pending: world.reviewPending, closing: world.reviewClosing }),
+  openAmuxV22ResultReviewCards: async (pending: unknown[]) => pending,
 } });
 mock.module(mod("lib/amux/ideaCardCloseService.ts"), { namedExports: {
   openAmuxIdeaCardCloseQuestionIfDue: async () => {
@@ -169,6 +178,25 @@ test("the sync lists a card close question beside the v22 ones, three at most, i
   assert.deepEqual(full.pending.map((entry: { question_id: string }) => entry.question_id), ["a", "b", "c"],
     "v22 first; the next tick lists what is left");
   assert.deepEqual(full.closing.map((entry: { question_id: string }) => entry.question_id), ["a", "b", "c"]);
+});
+
+test("a v22 result review rides the same tick after the others, filed only while its switch is on", async () => {
+  const reviewEntry = { question_id: OTHER, worker: "amux-result-review" };
+  delete process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM;
+  reset({ reviewPending: [reviewEntry], reviewClosing: [{ questionId: QUESTION, cardId: "RR-1" }] });
+  const off = await (await syncRoute.POST(post({}))).json();
+  assert.deepEqual(off.pending, [], "no new review card while the switch is off");
+  assert.deepEqual(off.closing, [{ question_id: QUESTION, card_id: "RR-1" }], "its cards still close");
+  assert.equal(world.autoCalls, 1, "the DM approver step runs once per tick (it checks its own switch)");
+  assert.ok(world.boundaries.includes("decisionMakerV22ResultReviewRead"));
+  process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM = "enabled";
+  try {
+    reset({ v22Pending: [v22Entry("a")], closePending: [closeEntry(QUESTION)], reviewPending: [reviewEntry],
+      autoApplied: { requestId: "r", kind: "result_review", applied: true } });
+    const on = await (await syncRoute.POST(post({}))).json();
+    assert.deepEqual(on.pending, [v22Entry("a"), closeEntry(QUESTION), reviewEntry], "after the v22 and card close ones");
+    assert.equal(on.auto_applied, "result_review");
+  } finally { delete process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM; }
 });
 
 test("a fault in opening a question costs nothing of the v22 path", async () => {
