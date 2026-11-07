@@ -110,9 +110,10 @@ async function readWeek() {
  */
 async function readScoutHeader() {
   const enabled = isProductResearchRouteEnabled(process.env, PRODUCT_RESEARCH_SCOUT_SWITCH_ENV);
-  const settings = await readScoutSettings().catch(() => null);
+  // Never throws: an unreadable settings store reads as off, which is how the agent itself acts.
+  const settings = await readScoutSettings();
   return {
-    state: !enabled ? ("off" as const) : settings ? scoutState({ enabled, settings }) : null,
+    state: !enabled ? ("off" as const) : scoutState({ enabled, settings }),
     nextRunAt: enabled ? nextScoutRunAt(new Date()).toISOString() : null,
     testAccountConfigured: scoutTestAccountEmail() !== null,
   };

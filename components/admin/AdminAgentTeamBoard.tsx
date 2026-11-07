@@ -205,7 +205,7 @@ function TeamCard({ card }: { card: TeamBoardCard }) {
           <span className="tabular-nums text-zinc-200">
             {card.cost.kind === "known"
               ? card.cost.capMicroUsd
-                ? `${teamBoardUsd(card.cost.spentMicroUsd)} / ${Math.round(card.cost.capMicroUsd / 1_000_000)}`
+                ? `${teamBoardUsd(card.cost.spentMicroUsd)} / ${teamBoardUsd(card.cost.capMicroUsd)}`
                 : teamBoardUsd(card.cost.spentMicroUsd)
               : card.cost.kind === "unknown"
                 ? board.costUnknown
