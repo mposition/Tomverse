@@ -1568,7 +1568,7 @@ export function AdminModelRegistryPanel() {
                           models.find((model) => model.id === APP_DEFAULTS.defaultModelId)?.name || APP_DEFAULTS.defaultModelId,
                           APP_DEFAULTS.defaultModelId
                         )}{" "}
-                        <Link href="/admin/platform#default-models" className="font-bold text-white underline">
+                        <Link href="/admin/models?tab=defaults#default-models" className="font-bold text-white underline">
                           {m.adopt.openDefaultModels}
                         </Link>
                       </p>
@@ -1806,7 +1806,7 @@ export function AdminModelRegistryPanel() {
             <div className="sticky bottom-0 flex flex-col gap-3 border-t border-zinc-800 bg-zinc-950/95 p-4 backdrop-blur">
               {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
               {apiFailure && (apiFailureCode === APPLICATION_FALLBACK_PROTECTED || apiFailureCode === GUEST_LEAD_PROTECTED) ? (
-                <Link href="/admin/platform#default-models" className="text-sm font-bold text-white underline">
+                <Link href="/admin/models?tab=defaults#default-models" className="text-sm font-bold text-white underline">
                   {m.adopt.openDefaultModels}
                 </Link>
               ) : null}

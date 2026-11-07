@@ -46,6 +46,9 @@ const LIMIT = 100;
  *
  * Only the open section is loaded. Neither read is expensive, but a page that
  * loads both teaches the next section added here to do the same.
+ *
+ * Writing a campaign has its own section (`?tab=new`, 2026-11-07): the two
+ * composers used to sit open above the campaign list.
  */
 export default async function AdminEmailCampaignsPage({
   searchParams,
@@ -72,7 +75,7 @@ export default async function AdminEmailCampaignsPage({
           rows={await listCampaignSchedule({ limit: LIMIT })}
           limit={LIMIT}
         />
-      ) : (
+      ) : tab.id === "new" ? (
         <>
           <AdminPolicyNoticeComposer
             mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
@@ -92,11 +95,12 @@ export default async function AdminEmailCampaignsPage({
               includePackageImport: packageImportAvailable,
             })}
           />
-          <AdminEmailCampaignsPanel
-            rows={await listAdminCampaigns({ limit: LIMIT })}
-            limit={LIMIT}
-          />
         </>
+      ) : (
+        <AdminEmailCampaignsPanel
+          rows={await listAdminCampaigns({ limit: LIMIT })}
+          limit={LIMIT}
+        />
       )}
     </div>
   );

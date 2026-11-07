@@ -406,13 +406,13 @@ export const AMUX_ORCHESTRATOR_RECEIPT_TARGET_HREFS: Record<
   string | null
 > = {
   work_item: "/admin/amux-execution?tab=cards",
-  claim_decision: "/admin/amux-execution?tab=assignment",
+  claim_decision: "/admin/amux-execution?tab=review",
   execution_attempt: "/admin/amux-execution?tab=cards",
-  auto_promotion_grant: "/admin/amux-promotion?tab=auto-promotion",
-  auto_promotion_consumption: "/admin/amux-promotion?tab=auto-promotion",
-  v22_promotion_receipt: "/admin/amux-promotion?tab=auto-promotion",
-  v22_promotion_unknown: "/admin/amux-promotion?tab=auto-promotion",
-  v22_promotion_halt: "/admin/amux-promotion?tab=auto-promotion",
-  v22_worker_assignment: "/admin/amux-execution?tab=assignment",
+  auto_promotion_grant: "/admin/amux-recovery?tab=legacy",
+  auto_promotion_consumption: "/admin/amux-recovery?tab=legacy",
+  v22_promotion_receipt: "/admin/amux-recovery?tab=legacy",
+  v22_promotion_unknown: "/admin/amux-recovery?tab=legacy",
+  v22_promotion_halt: "/admin/amux-recovery?tab=legacy",
+  v22_worker_assignment: "/admin/amux-execution?tab=review",
   quota_observation_batch: null,
 };

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { adminNavItemTabs } from "../lib/adminNavigation.ts";
+import { ADMIN_NAVIGATION, ADMIN_UNLISTED_PAGES } from "../lib/adminNavigation.ts";
 import { adminTrustSafetyMessages } from "../lib/adminMessages/trustSafety.ts";
 import { TRUST_SAFETY_CONFIG_FAULTS } from "../lib/trustSafetyActivationCore.ts";
 
@@ -24,12 +24,16 @@ const codeOf = (file) =>
 test("the section is a tab of the common digest area, not a page of its own", () => {
   // §9: the display is one section inside the common area, and a team-owned
   // digest screen is refused. docs/ui-contracts/admin-console-ia.md rule 2
-  // puts a section in `?tab=`.
-  const tabs = adminNavItemTabs("agent-digests");
-  const tab = tabs.find((candidate) => candidate.id === "trust-safety");
-  assert.ok(tab, "the tab is registered");
-  assert.equal(tab.label, "Trust and safety");
-  assert.match(codeOf(PAGE), /tab\.id === "trust-safety"/);
+  // puts a section in `?tab=`. Since 2026-11-07 the common area has no menu:
+  // the other digests are the Release and Billing & finance pages, and this
+  // section keeps the address it always had, as an unlisted page that renders
+  // that one tab and redirects every other value.
+  const page = ADMIN_UNLISTED_PAGES.find((candidate) => candidate.href === "/admin/agent-digests");
+  assert.ok(page, "the common digest area is still a known page");
+  assert.deepEqual(page.sections, ["trust-safety"]);
+  assert.equal(ADMIN_NAVIGATION.some((entry) => entry.href === "/admin/agent-digests"), false);
+  assert.match(codeOf(PAGE), /requestedTab !== "trust-safety"\) redirect\(/);
+  assert.match(codeOf(PAGE), /<TrustSafetySection /);
 });
 
 test("the read refuses a caller without trust-safety:read, before reading", () => {

@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth/next";
 
 import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AdminTabPlaceholder } from "@/components/admin/AdminTabPlaceholder";
 import { AmuxExecutionSupportingRecords } from "@/components/admin/AmuxExecutionSupportingRecords";
 import { AmuxCardDisplayKeyBackfillPanel } from "@/components/admin/AmuxCardDisplayKeyBackfillPanel";
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
@@ -34,17 +35,21 @@ import { authOptions } from "@/lib/auth";
 const TABS = adminNavItemTabs("amux-execution");
 
 /**
- * What AMUX is running: the cards and why each was assigned where it was.
+ * What AMUX is running: the board of cards and why each was assigned where it
+ * was.
  *
- * Cards is the owner-only list that used to live at `/admin/amux-cards`.
- * Assignment is the panel that used to sit on `/admin/routing` beside Chat
- * shadow routing; it opens to every admin role, as it did there, and its
- * decisions still take `ops:write` in every route they call.
+ * The board (`?tab=cards`) is the owner-only list that used to live at
+ * `/admin/amux-cards`. The review queue (`?tab=review`, once Assignment) is
+ * the panel that used to sit on `/admin/routing` beside Chat shadow routing;
+ * it opens to every admin role, as it did there, and its decisions still take
+ * `ops:write` in every route they call. Diagnostics is declared and waits for
+ * its screen; the worker performance and the decision log it will hold are in
+ * the review queue's panel until then.
  *
- * The owner opens on Cards and everyone else on Assignment, because each opens
- * on the first section they may see. A non-owner who names `?tab=cards` gets
- * a 404 rather than Assignment in its place, which is what the old address
- * answered them.
+ * The owner opens on the board and everyone else on the review queue, because
+ * each opens on the first section they may see. A non-owner who names
+ * `?tab=cards` gets a 404 rather than the review queue in its place, which is
+ * what the old address answered them.
  */
 export default async function AdminAmuxExecutionPage({
   searchParams,
@@ -89,7 +94,7 @@ export default async function AdminAmuxExecutionPage({
     // owner authorization again; other administrators only inspect it.
     cards: isOwner ? undefined : "read_only",
     // The same permission every escalation, proposal and review route checks.
-    assignment: hasAdminPermission(session, "ops:write") ? undefined : "read_only",
+    review: hasAdminPermission(session, "ops:write") ? undefined : "read_only",
   };
 
   const tabs = (
@@ -97,7 +102,7 @@ export default async function AdminAmuxExecutionPage({
       basePath="/admin/amux-execution"
       tabs={TABS}
       activeTabId={tab.id}
-      label="Execution sections"
+      label="Execution board sections"
       query={query}
       role={role}
       counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxEscalations, awaitingAmuxDecisionMaker }}
@@ -133,6 +138,16 @@ export default async function AdminAmuxExecutionPage({
           <AmuxCardDisplayKeyBackfillPanel />
           <AmuxCliUsagePanel view={usage} />
         </AmuxExecutionSupportingRecords>
+      </div>
+    );
+  }
+
+  if (tab.id === "diagnostics") {
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        {drawer}
+        <AdminTabPlaceholder />
       </div>
     );
   }

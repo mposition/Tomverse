@@ -1,7 +1,7 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
- * Copy for AMUX › Operations settings › Workers. Worker names, roles, models
+ * Copy for AMUX settings › Workers. Worker names, roles, models
  * and tags are identifiers and render as stored beside their sentence. No
  * sentence here names a policy version, a build stage or an internal code.
  */

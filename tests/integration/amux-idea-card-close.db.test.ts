@@ -17,7 +17,9 @@ import {
 import { readDecisionMakerDeliveryCandidate } from "@/lib/amux/decisionMakerDeliveryRead";
 import type { DmShownProposal } from "@/lib/amux/decisionMakerJudgmentCore";
 import { recordDecisionMakerJudgment } from "@/lib/amux/decisionMakerJudgmentStore";
-import { readDecisionMakerRequestState, recordDecisionMakerTransmitIntent } from "@/lib/amux/decisionMakerRequestStore";
+import { closeDecisionMakerRequestOnDirectAnswer, readDecisionMakerRequestState,
+  recordDecisionMakerTransmitIntent } from "@/lib/amux/decisionMakerRequestStore";
+import { runAmuxDmAutoApplyStep } from "@/lib/amux/dmAutoApplyService";
 import { recordDecisionMakerSwitchByOperator } from "@/lib/amux/decisionMakerSwitchStore";
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { AMUX_IDEA_CARD_CLOSE_SCAN } from "@/lib/amux/ideaCardCloseCore";
@@ -1196,4 +1198,139 @@ test("the Decision Maker's apply refuses a held card with lock_not_available and
   assert.equal((await questionOf(ideaId))!.state, "open");
   assert.deepEqual(await apply(), { applied: true, outcome: "closed" });
   assert.equal((await card(cardIds[0])).status, "cancelled");
+});
+
+// The Decision Maker as the approver (owner decision 2026-11-07,
+// TOMVERSE_AMUX_DM_APPROVER): the same filed card, with no person's judgment.
+const APPROVER = { TOMVERSE_AMUX_DM_APPROVER: "enabled" };
+
+test("the DM approver applies an open proposal without a person, as dm, after claiming the request", async () => {
+  const { ideaId } = await seedIdea([{ status: "blocked" }, { status: "backlog" }]);
+  await drain();
+  const proposal = await proposed(ideaId, select("close"));
+  assert.equal(await runAmuxDmAutoApplyStep({}), null, "off by default");
+  assert.equal((await questionOf(ideaId))!.state, "open");
+  assert.deepEqual(await runAmuxDmAutoApplyStep(APPROVER),
+    { requestId: proposal.requestId, kind: "card_close", applied: true });
+  const question = (await questionOf(ideaId))!;
+  assert.equal(question.state, "closed");
+  assert.equal(question.answerSource, "dm");
+  assert.equal(question.answeredByUserId, null);
+  assert.equal((await readDecisionMakerRequestState(prisma, proposal.requestId))!.closing, "direct_answer_close",
+    "Admin no longer offers it for confirmation");
+  const audits = await auditOf(question.id);
+  assert.ok(audits.some((row) => row.entryHash && (row.metadata as Record<string, unknown>).source === "dm"),
+    "the hash-chained system audit names the dm source");
+  assert.equal(await runAmuxDmAutoApplyStep(APPROVER), null, "nothing is left to apply");
+});
+
+test("the DM approver leaves an irreversible or unfixed proposal to a person, and never one a person judged", async () => {
+  const irreversible = await seedIdea([{ status: "blocked" }]);
+  const unfixed = await seedIdea([{ status: "blocked" }]);
+  await drain();
+  const first = await proposed(irreversible.ideaId, { kind: "select", optionId: "close",
+    rationale: "Nothing has moved.", irreversible: true });
+  const second = await proposed(unfixed.ideaId, { kind: "free_text", answer: "Maybe close them later.",
+    rationale: "Unsure.", irreversible: false });
+  for (let round = 0; round < 6; round += 1)
+    assert.equal(await runAmuxDmAutoApplyStep(APPROVER), null, "whichever is picked, it is not applied");
+  assert.equal((await questionOf(irreversible.ideaId))!.state, "open");
+  assert.equal((await questionOf(unfixed.ideaId))!.state, "open");
+  assert.equal((await readDecisionMakerRequestState(prisma, first.requestId))!.closing, null);
+  assert.equal((await readDecisionMakerRequestState(prisma, second.requestId))!.closing, null,
+    "still open for the operator's confirmation");
+
+  // A person's judgment that lands between the approver's read and its claim wins:
+  // the claim is refused, so nothing is applied.
+  const judged = await seedIdea([{ status: "blocked" }]);
+  await drain();
+  const third = await proposed(judged.ideaId, select("close"));
+  await judge(third.requestId, "reject");
+  const claim = await prisma.$transaction((tx) => closeDecisionMakerRequestOnDirectAnswer(tx,
+    { cardId: third.cardId, questionRevision: 1 }));
+  assert.equal(claim.recorded, false);
+  assert.equal(await runAmuxDmAutoApplyStep(APPROVER), null);
+  assert.equal((await questionOf(judged.ideaId))!.state, "open");
+});
+
+/** A v22 worker question parked on its Task, filed to the relay and proposed by a DM. */
+async function proposedWorkerQuestion(output: Output) {
+  const task = await prisma.amuxWorkItem.create({ data: {
+    id: `amux-approver-question-${randomUUID()}`, title: "Approver question fixture",
+    status: "blocked", kind: "code", priority: "p2", revision: 4 } });
+  const now = new Date();
+  const attempt = await prisma.amuxExecutionAttempt.create({ data: {
+    id: randomUUID(), taskId: task.id, worker: "codex-impl", workerInstanceId: "fixture-instance",
+    workerGeneration: 1, taskRevision: 3, attemptNumber: 1, heartbeatAt: now, startedAt: now,
+    endedAt: now, outcome: "succeeded", toStatus: "blocked", endedBy: "codex-impl", reason: "owner_question" } });
+  const question = await prisma.amuxV22TaskQuestion.create({ data: {
+    id: randomUUID(), taskId: task.id, attemptId: attempt.id, worker: "codex-impl", sequence: 1,
+    questionSha256: digest } });
+  const cardId = `VQ-${randomUUID().slice(0, 8)}`;
+  await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerV22QuestionWrite,
+    (tx) => recordDmQuestionLocalCard(tx, { questionId: question.id, cardId }));
+  const options = [{ id: "a", label: "Use the short name" }, { id: "b", label: "Use the long name" }];
+  const binding = { cardId, questionRevision: 1, askingWorkerId: "codex-impl", amuxSessionId: "codex-impl",
+    amuxSessionAttempt: 0, askingProvider: "claude", termListVersion: "v1",
+    classificationVersion: "authority-manifest-1", scannerVersion: "v1" };
+  const dmCard = { askType: "decision", resolution: null, type: "task",
+    tags: ["v22-question", `v22q-${question.id}`, "v22-provider-claude"],
+    title: "v22 Task question 1", question: "Which name should the helper use?",
+    options: options.map((option) => ({ ...option, effect: "choice_only", paths: [] as string[] })),
+    unblocks: "Finishing the rename.", context: "", contextPaths: [] as string[] };
+  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequestWithCardText(tx,
+    { binding, card: dmCard, keyRing: RING }));
+  assert.equal(routed.route, "dm_proposal");
+  const instance = routed.instance!;
+  const assigned = await prisma.$transaction((tx) => assignDecisionMakerRequestWithDigestKey(tx,
+    { requestId: routed.requestId, requireLeaseAt: () => {}, keyRing: RING }));
+  const requestKey = (assigned as { requestKey: Buffer }).requestKey;
+  const transmission = { snapshotState: "worker_head", snapshotTargetSha: SHA,
+    snapshotManifestDigest: dmSnapshotManifestDigest(requestKey, [{ path: "lib/cache.ts", blobId: "f".repeat(40) }]),
+    inputPayloadDigest: dmBodyDigest(requestKey, "card_text", "payload") };
+  await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx,
+    { requestId: routed.requestId, instance, transmission, requireLeaseAt: () => {} }));
+  const stored: Record<string, unknown> = { ...(await readDecisionMakerRequestState(prisma, routed.requestId))!.binding };
+  delete stored.askingProvider;
+  const submitted = await prisma.$transaction((tx) => submitDecisionMakerOutput(tx, {
+    requestId: routed.requestId, instance, binding: { ...stored, transmission },
+    output: { kind: "output", raw: JSON.stringify(output), options }, requireLeaseAt: () => {}, keyRing: RING }));
+  assert.equal(submitted.status === "submitted" && submitted.result.status, "accepted");
+  return { task, question, requestId: routed.requestId };
+}
+
+test("the DM approver answers a worker question only with an option it offered; a free-text answer waits for a person", async () => {
+  const chosen = await proposedWorkerQuestion({ kind: "select", optionId: "a",
+    rationale: "Shorter reads better.", irreversible: false });
+  assert.deepEqual(await runAmuxDmAutoApplyStep(APPROVER),
+    { requestId: chosen.requestId, kind: "question", applied: true });
+  const answered = await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: chosen.question.id } });
+  assert.equal(answered.state, "answered");
+  assert.equal(answered.answerSource, "dm");
+  assert.match(answered.answerText ?? "", /Chosen option: a$/);
+  assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: chosen.task.id } })).status, "todo",
+    "the Task goes back to its worker with the answer");
+  assert.equal((await readDecisionMakerRequestState(prisma, chosen.requestId))!.closing, "direct_answer_close");
+
+  const free = await proposedWorkerQuestion({ kind: "free_text", answer: "Use whichever reads better.",
+    rationale: "Either works.", irreversible: false });
+  assert.equal(await runAmuxDmAutoApplyStep(APPROVER), null);
+  assert.equal((await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: free.question.id } })).state, "open");
+  assert.equal((await readDecisionMakerRequestState(prisma, free.requestId))!.closing, null,
+    "still open for the operator's confirmation");
+});
+
+test("the approver's claim and answer are one transaction: a refused answer rolls the claim back", async () => {
+  const proposal = await proposedWorkerQuestion({ kind: "select", optionId: "a",
+    rationale: "Shorter reads better.", irreversible: false });
+  // The Task left its parked state after the question was filed: the answer
+  // cannot resume it and is refused inside the approver's transaction.
+  await asReplica((tx) => tx.$executeRaw`UPDATE "AmuxWorkItem" SET "status" = 'todo'
+    WHERE "id" = ${proposal.task.id}`);
+  assert.deepEqual(await runAmuxDmAutoApplyStep(APPROVER),
+    { requestId: proposal.requestId, kind: "question", applied: false });
+  assert.equal((await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: proposal.question.id } })).state,
+    "open");
+  assert.equal((await readDecisionMakerRequestState(prisma, proposal.requestId))!.closing, null,
+    "the claim was rolled back with the refused answer: the operator can still confirm or reject it");
 });

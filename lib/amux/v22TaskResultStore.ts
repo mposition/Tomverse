@@ -13,6 +13,8 @@ import { amuxContentDigest, openAmuxContent, verifyAmuxContentDigest } from
 import { decodeV22PatchEvidence, encodeV22PatchEvidence,
   type V22PublishFile } from "@/lib/amux/v22PatchEvidence";
 import { loadAmuxContentUnitKeys } from "@/lib/amux/ideaKeyStore";
+import { amuxV22ConclusionSha256, parseAmuxV22Conclusion } from
+  "@/lib/amux/v22ConclusionCore";
 import { amuxV22OwnerQuestionSettlement, amuxV22OwnerQuestionSha256,
   parseAmuxV22OwnerQuestion } from "@/lib/amux/v22OwnerQuestionCore";
 import { prisma } from "@/lib/prisma";
@@ -125,6 +127,9 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
     // verifies the current run and base separately before exposing bytes.
   }
   const bytes = Buffer.from(input.text, "utf8");
+  // An investigate conclusion is checked here, where the text is plain; the
+  // row keeps its verdict and digest, and settlement reads only those.
+  const conclusion = parseAmuxV22Conclusion(input.text);
   const sealed = sealAmuxContent(bytes, "task_result", input.attemptId,
     input.keys);
   const patchBytes = patch ? encodeV22PatchEvidence(patch.text,
@@ -140,6 +145,8 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
       keyVersion: sealed.keyVersion, digest: sealed.digest,
       digestKeyId: sealed.digestKeyId,
       sourceSha256: input.sourceSha256, byteLength: bytes.length,
+      conclusionVerdict: conclusion?.verdict ?? null,
+      conclusionSha256: conclusion ? amuxV22ConclusionSha256(conclusion) : null,
     } });
     if (patch && patchBytes && sealedPatch) {
       await tx.amuxV22TaskPatch.create({ data: {
@@ -182,7 +189,8 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
       summary: "Recorded one encrypted v22 Task result.",
       metadata: { taskId: task.id, sourceSha256: input.sourceSha256,
         byteLength: bytes.length,
-        patchSha256: patch?.sha256 ?? null, ownerQuestionSequence: questionSequence },
+        patchSha256: patch?.sha256 ?? null, ownerQuestionSequence: questionSequence,
+        conclusionVerdict: conclusion?.verdict ?? null },
     });
     return { attemptId: input.attemptId, sourceSha256: input.sourceSha256,
       patchSha256: patch?.sha256 ?? null, duplicate: false };

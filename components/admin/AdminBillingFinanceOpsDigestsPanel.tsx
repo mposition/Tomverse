@@ -10,7 +10,7 @@ import { adminBillingFinanceOpsDigestsMessages } from "@/lib/adminMessages/billi
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import type { BillingFinanceOpsConsole } from "@/lib/billingFinanceOpsConsoleRead";
 
-const PAGE_PATH = "/admin/agent-digests?tab=billing-finance-ops";
+const PAGE_PATH = "/admin/finance-agent";
 const CONTROL_ROUTE = "/api/admin/agent-digests/billing-finance-ops/control";
 const MONITORS_ROUTE = "/api/admin/agent-digests/billing-finance-ops/monitor-confirmation";
 

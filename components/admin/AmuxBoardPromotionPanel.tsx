@@ -7,7 +7,7 @@ import { adminAmuxBoardPromotionMessages } from "@/lib/adminMessages/amuxBoardPr
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { adminFetch } from "@/lib/adminFetch";
 
-const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-promotion?tab=promotion");
+const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-recovery?tab=legacy");
 const AMUX_BOARD_PROMOTION_CLIENT_TIMEOUT_MS = 15_000;
 
 type PromotionBody = {

@@ -1,7 +1,7 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
- * Copy for the capability editor in AMUX › Operations settings › Workers.
+ * Copy for the capability editor in AMUX settings › Workers.
  * Worker names, tags, roles and models are identifiers and render as stored.
  */
 export const adminAmuxWorkerCapabilityMessages = defineAdminMessages({
