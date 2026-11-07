@@ -133,6 +133,21 @@ const CONTROL_PLANE_PATTERNS = [
   "lib/adminMessages/agentDigests*",
   // The Agent office's copy, which names the agent teams and what each may do.
   "lib/adminMessages/agentOffice*",
+  // The agent pages of the console (team board, marketing, Scout, SRE,
+  // billing-finance): their reads, judgements and copy describe what each
+  // agent team is doing and may do, like components/admin/** that draws them.
+  "lib/adminAgentTeamBoard*",
+  "lib/adminMessages/agentPage.ts",
+  "lib/adminMessages/billingFinanceAgent.ts",
+  "lib/adminMessages/marketingAgent.ts",
+  "lib/adminMessages/scoutAgent.ts",
+  "lib/adminMessages/sreOpsAgent.ts",
+  "lib/billingFinanceAgentCore.ts",
+  "lib/marketingAgentOverview*",
+  "tests/adminAgentTeamBoard*",
+  "tests/client/adminAgentTeamBoardRender.test.tsx",
+  "tests/client/agentScreensRender.test.tsx",
+  "tests/client/marketingAgentScreensRender.test.tsx",
   // §4-4: the whole AMUX execution control plane, and its tests.
   "lib/amux/**",
   "crates/**",

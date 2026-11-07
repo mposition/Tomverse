@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminBars, AdminRing } from "@/components/admin/ui/AdminCharts";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { CHIP, STATE_CHIP, fill, fullNumber, localTime, scoutState } from "@/lib/adminScoutDisplay";
 import { adminNetworkFailure, readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
@@ -17,7 +19,6 @@ import type { ScoutConsoleView } from "@/lib/productResearchScoutConsoleRead";
  */
 const RETURN_TO = "/admin/product-research?tab=runs";
 
-const CARD = "rounded-xl border border-zinc-800 bg-zinc-900 p-5";
 const INPUT =
   "min-h-11 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-50 disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -70,14 +71,15 @@ export function AdminScoutRunsPanel({ initial }: { initial: ScoutConsoleView }) 
 
   return (
     <div className="flex min-w-0 flex-col gap-5" data-testid="admin-product-research-scout-runs">
-      <section className={CARD}>
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-[15px] font-bold text-zinc-50">{m.nowHeading}</h2>
+      <AdminTile
+        title={m.nowHeading}
+        action={
           <span className={`${CHIP} ${STATE_CHIP[state]}`}>
             {state === "on" ? m.stateOn : state === "judging_off" ? m.stateJudgingOff : m.stateOff}
           </span>
-        </div>
-        <dl className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        }
+      >
+        <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div>
             <dt className="text-xs text-zinc-500">{m.factSwitch}</dt>
             <dd className="mt-0.5 text-base font-bold text-zinc-50">{initial.enabled ? m.switchOn : m.switchOff}</dd>
@@ -103,15 +105,15 @@ export function AdminScoutRunsPanel({ initial }: { initial: ScoutConsoleView }) 
             <dd className="mt-0.5 text-xs text-zinc-400">{m.scheduleHint}</dd>
           </div>
         </dl>
-      </section>
+      </AdminTile>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <section className={CARD} data-testid="admin-product-research-scout-settings">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-[15px] font-bold text-zinc-50">{m.settingsHeading}</h2>
-            <span className={`${CHIP} border-amber-500/40 bg-amber-500/10 text-amber-300`}>{m.ownerOnly}</span>
-          </div>
-          <p className="mt-1 text-xs text-zinc-400">{m.settingsIntro}</p>
+        <AdminTile
+          data-testid="admin-product-research-scout-settings"
+          title={m.settingsHeading}
+          description={m.settingsIntro}
+          action={<span className={`${CHIP} border-amber-500/40 bg-amber-500/10 text-amber-300`}>{m.ownerOnly}</span>}
+        >
           <label className="mt-4 flex flex-col gap-1.5 text-xs font-medium text-zinc-300">
             {m.modelLabel}
             <select
@@ -179,20 +181,22 @@ export function AdminScoutRunsPanel({ initial }: { initial: ScoutConsoleView }) 
           {saveState.kind === "failed" ? (
             <AdminApiFailureNotice failure={saveState.failure} returnTo={RETURN_TO} testId="admin-product-research-scout-settings-failure" />
           ) : null}
-        </section>
+        </AdminTile>
 
-        <section className={CARD}>
-          <h2 className="text-[15px] font-bold text-zinc-50">{m.usageHeading}</h2>
-          <p className="mt-3 text-3xl font-bold tabular-nums text-zinc-50">{fill(m.usageValue, { calls: used, cap })}</p>
-          <div
-            className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-800"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={cap}
-            aria-valuenow={Math.min(used, cap)}
-            aria-label={m.usageHeading}
-          >
-            <div className={`h-full rounded-full ${ratio >= 1 ? "bg-amber-500" : "bg-blue-500"}`} style={{ width: `${Math.round(ratio * 100)}%` }} />
+        <AdminTile title={m.usageHeading}>
+          <div className="flex items-center gap-4">
+            <div
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={cap}
+              aria-valuenow={Math.min(used, cap)}
+              aria-label={m.usageHeading}
+            >
+              <AdminRing fraction={ratio} size={72} stroke={9} color={ratio >= 1 ? "amber" : "emerald"} label={m.usageHeading}>
+                <span className="text-sm font-bold tabular-nums text-white">{Math.round(ratio * 100)}%</span>
+              </AdminRing>
+            </div>
+            <p className="text-3xl font-bold tabular-nums text-zinc-50">{fill(m.usageValue, { calls: used, cap })}</p>
           </div>
           <p className="mt-3 text-xs text-zinc-400">
             {fill(m.usageTokens, { input: number(initial.usageToday.inputTokens), output: number(initial.usageToday.outputTokens) })}
@@ -201,15 +205,20 @@ export function AdminScoutRunsPanel({ initial }: { initial: ScoutConsoleView }) 
           <p className="mt-1 text-xs text-zinc-400">
             {fill(m.usageGenerations, { used: initial.usageToday.generations, cap: settings.generationDailyCap })}
           </p>
-        </section>
+        </AdminTile>
       </div>
 
-      <section className={CARD}>
-        <div className="flex flex-wrap items-baseline gap-2">
-          <h2 className="text-[15px] font-bold text-zinc-50">{m.daysHeading}</h2>
-          <p className="text-xs text-zinc-500">{m.daysNote}</p>
-        </div>
-        <div className="mt-3 overflow-x-auto">
+      <AdminTile title={m.daysHeading} description={m.daysNote}>
+        <AdminBars
+          values={[...initial.days].reverse().map((day) => day.kept)}
+          width={640}
+          height={64}
+          color="emerald"
+          highlight={initial.days.length - 1}
+          label={m.keptColumn}
+          className="w-full"
+        />
+        <div className="overflow-x-auto">
           <table className="w-full min-w-[36rem] text-left text-sm">
             <thead className="text-xs text-zinc-400">
               <tr className="border-b border-zinc-700">
@@ -247,7 +256,7 @@ export function AdminScoutRunsPanel({ initial }: { initial: ScoutConsoleView }) 
             </tbody>
           </table>
         </div>
-      </section>
+      </AdminTile>
     </div>
   );
 }

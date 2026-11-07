@@ -16,6 +16,7 @@ import {
   resolveAdminView,
 } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
+import { readMarketingAgentOverview } from "@/lib/marketingAgentOverviewRead";
 import { readMarketingConsole } from "@/lib/marketingConsoleRead";
 import type { MarketingConsoleSection } from "@/lib/marketingConsoleSections";
 
@@ -71,7 +72,12 @@ export default async function AdminMarketingPage({
     : tab.id === "accounts" ? "accounts"
     : "queue";
   const part = tab.id === "overview" ? "overview" : tab.id === "settings" ? "settings" : "section";
-  const initial = await readMarketingConsole(section, hasAdminPermission(session, "marketing:write"));
+  // The Overview's extra reads (posts per day, the schedule, recent runs) are
+  // read-only and load for that tab alone; each part is null when unreadable.
+  const [initial, agent] = await Promise.all([
+    readMarketingConsole(section, hasAdminPermission(session, "marketing:write")),
+    part === "overview" ? readMarketingAgentOverview() : Promise.resolve(undefined),
+  ]);
 
   // What each tab holds, from the overview the loader already read: the
   // drafts waiting for a person (in the attention colour) and the accounts.
@@ -98,6 +104,7 @@ export default async function AdminMarketingPage({
       <AdminMarketingPanel
         key={`${section}-${part}`}
         initial={initial}
+        agent={agent}
         part={part}
         tabs={
           <>

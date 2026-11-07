@@ -3,11 +3,14 @@ export const dynamic = "force-dynamic";
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import { AdminEngineeringAgentPanel } from "@/components/admin/AdminEngineeringAgentPanel";
-import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
-import { AdminTabPlaceholder } from "@/components/admin/AdminTabPlaceholder";
+import { AdminEngineeringOverview } from "@/components/admin/AdminEngineeringOverview";
+import { AdminPageTabs, type AdminPageTabChip } from "@/components/admin/AdminPageTabs";
 import { AdminViewSwitch } from "@/components/admin/AdminViewSwitch";
+import { AdminAgentHeader } from "@/components/admin/ui/AdminAgentHeader";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminAgentPageMessages } from "@/lib/adminMessages/agentPage";
+import { adminEngineeringAgentOverviewMessages } from "@/lib/adminMessages/engineeringAgentOverview";
 import { adminUiMessages } from "@/lib/adminMessages/ui";
 import {
   ADMIN_ENGINEERING_AGENT_LEGACY_TABS,
@@ -16,11 +19,14 @@ import {
   resolveAdminTab,
   resolveAdminView,
 } from "@/lib/adminNavigation";
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { authOptions } from "@/lib/auth";
 import {
   readEngineeringAgentConsole,
   type EngineeringAgentConsoleSection,
 } from "@/lib/engineeringAgentConsoleRead";
+import { engineeringHeadStatus } from "@/lib/engineeringAgentOverviewCore";
+import { readEngineeringAgentHead, readEngineeringOverviewBody } from "@/lib/engineeringAgentOverviewRead";
 
 const TABS = adminNavItemTabs("engineering-agent");
 
@@ -42,8 +48,9 @@ const RUN_VIEWS = ["runs", "pull-requests"] as const;
  * Product research had a tab here until 2026-10-19; it is its own workspace
  * now, and the old tab link redirects there. Since 2026-11-07 the Runs & PRs
  * tab holds the runs and the pull requests as two views (the old
- * `?tab=pull-requests` opens the second), and Overview is declared and waits
- * for its screen.
+ * `?tab=pull-requests` opens the second). Every tab sits under the agent's
+ * head, which reads the agent's own switch and halt; its auto-run mark is a
+ * reading that links to Settings, where the real switch is.
  */
 export default async function AdminEngineeringAgentPage({
   searchParams,
@@ -55,27 +62,62 @@ export default async function AdminEngineeringAgentPage({
   const view = resolveAdminView(RUN_VIEWS, query.view);
   // The strip carries no `view`: switching tab starts that tab on its first view.
   const tabQuery = { ...query, view: undefined };
-  const strip = (
-    <AdminPageTabs
-      basePath="/admin/engineering-agent"
-      tabs={TABS}
-      activeTabId={tab.id}
-      label="Engineering agent sections"
-      query={tabQuery}
-    />
+
+  const [head, agent, copy, ui] = await Promise.all([
+    readEngineeringAgentHead(),
+    getAdminMessages(adminAgentPageMessages),
+    getAdminMessages(adminEngineeringAgentOverviewMessages),
+    getAdminMessages(adminUiMessages),
+  ]);
+  const standing = engineeringHeadStatus(head);
+  const decisions =
+    head.kind === "observed" ? head.pending.t2Draft + head.pending.decision + head.pending.stateMismatch : 0;
+  const chips: Record<string, AdminPageTabChip | undefined> = {
+    queue: decisions > 0 ? { label: String(decisions), attention: true } : undefined,
+  };
+  const lastEnded = head.kind === "observed" && head.lastRun ? formatAestDateTime(head.lastRun.endedAt) : null;
+  const statusLabel = standing.status === "frozen" ? copy.statusFrozen : agent.status[standing.status];
+
+  const top = (
+    <>
+      <AdminAgentHeader
+        team="engineering"
+        name={copy.name}
+        status={{ tone: standing.tone, label: statusLabel }}
+        description={copy.description}
+        meta={[
+          { icon: "branch", label: copy.metaBranch },
+          ...(head.kind === "observed"
+            ? [{ icon: "clock" as const, label: lastEnded ? copy.metaLastRun(lastEnded) : copy.metaNoRun }]
+            : []),
+        ]}
+        autoRun={{ state: standing.autoRun, href: "/admin/engineering-agent?tab=settings" }}
+      />
+      <AdminPageTabs
+        basePath="/admin/engineering-agent"
+        tabs={TABS}
+        activeTabId={tab.id}
+        label="Engineering agent sections"
+        query={tabQuery}
+        chips={chips}
+        variant="underline"
+      />
+    </>
   );
+
   if (tab.id === "overview") {
+    const body = await readEngineeringOverviewBody();
     return (
       <div className="flex min-w-0 flex-col gap-5">
-        {strip}
-        <AdminTabPlaceholder />
+        {top}
+        <AdminEngineeringOverview head={head} body={body} />
       </div>
     );
   }
 
   const section: EngineeringAgentConsoleSection =
     tab.id === "runs" ? (view === "pull-requests" ? "pull-requests" : "runs") : (tab.id as "queue" | "settings");
-  const [session, ui] = await Promise.all([getServerSession(authOptions), getAdminMessages(adminUiMessages)]);
+  const session = await getServerSession(authOptions);
   const initial = await readEngineeringAgentConsole(
     section,
     hasAdminPermission(session, "engineering-agent:write"),
@@ -83,7 +125,7 @@ export default async function AdminEngineeringAgentPage({
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      {strip}
+      {top}
       {tab.id === "runs" ? (
         <AdminViewSwitch
           basePath="/admin/engineering-agent"

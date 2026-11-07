@@ -431,6 +431,67 @@ results"), `/admin/users/[userId]` and `/admin/providers/[provider]`.
 
 `/admin` itself is an entry point, not a workspace: it forwards to Overview.
 
+### The agent pages (2026-11-07, redesign step 6)
+
+Every AI agent page wears the same head, `AdminAgentHeader`
+(`components/admin/ui/AdminAgentHeader.tsx`): the team's pixel face, its name,
+a status chip, one line about what it does, a meta line (last run, mode) and
+the **Auto run** state. Auto run is a *reading* that links to the settings tab
+holding the real switch; the head never writes. The switch keeps its own role,
+step-up and audit path, so a person-made "off" is still never turned on by
+automation or by this page, and an unread switch is drawn as unavailable, never
+as off. There is no "Run now" button: no agent has a manual-run route, and the
+redesign adds no paid call or outside send. The tab strip and the route table
+are unchanged.
+
+- **Agents home › Team board** (`?tab=dashboard`, `AdminAgentTeamBoard`,
+  derivations in `lib/adminAgentTeamBoardCore.ts`, reads in
+  `lib/adminAgentTeamBoardRead.ts`). Three totals (waiting on a person, agent
+  cost this month, teams working now) and one card per team: Marketing, Product
+  research, Engineering, SRE, Billing & finance, QA & release, Support triage,
+  Auto router, AMUX workers, Trust & safety. Every figure is the office's own
+  live read of the team (`readAgentOfficeLiveRooms`, read only), so the board
+  and the live floor cannot disagree. A room that could not be read is a dashed
+  "Unavailable" card; a total that depends on one ends in "+?" and says it is a
+  floor. Cost is summed only over teams that keep a cost record (Marketing's
+  generator month against its cap, the router optimizer's month against its
+  cap) and says how many; a team without one says "No cost record", never 0.
+  The live floor is `?tab=live` (`AgentOfficePanel`, not touched here).
+  Trust & safety opens its Agent digests tab.
+- **Marketing**: Overview (waiting posts with their own approve/reject
+  controls, scheduled posts, posts written per Brisbane day, month cost ring,
+  recent generator runs, from `lib/marketingAgentOverviewRead.ts`), Approvals
+  (large preview, caption and the checks that are recorded: the Guard verdict,
+  cited facts, attachments, expiry), and the webhook blocks on Settings only.
+  Approve, reject, schedule and publish are the same routes with the same
+  compare-and-set values as before; an outside post still leaves only after a
+  person approves it. Left out because no record exists: a "next run" time (the
+  generator runs on the Ubuntu box), an AI "ask for a rewrite" action (no
+  route), and check lines that are not recorded.
+- **Product research (Scout)**: a head on every tab, the Suggestions tab keeps
+  its list and bulk actions with a weekly bar and call ring beside it, Runs
+  holds the model and cap controls. Suggestions carry no screenshot and the
+  ledger records calls and tokens, not money, so the ring is today's calls
+  against the daily cap and no monthly figure is invented.
+- **Engineering**: Overview is four numbers (open pull requests, runs in
+  progress, decisions waiting, drafts a person turned down in 30 days), the
+  pull requests the agent bound (those approved and not yet merged are the ones
+  to check; merging is always a person's, in GitHub) and minutes from run start
+  to the first pull request. CI failure to pull request is not recorded, so the
+  chart says what it measures instead.
+- **SRE**: Overview is the state chain and the genesis as before under the
+  head; Daily report lists the kept digests by date and reads one in plain
+  words (`?item=` opens one, otherwise the newest list); Settings states the
+  mode and the contact path (the mode still changes only by the owner's genesis
+  approval on Overview). Uptime, p95 and AI cost are not in the digest and are
+  not drawn.
+- **Billing & finance**: this agent is the model price-deadline digest agent
+  (`docs/policy/billing-finance-ops.md`), not a Stripe-to-ledger reconciler, so
+  the Overview's four numbers are pending prices, nearest deadline, deadlines
+  within 7 days and the newest report, with a 14-day report calendar; Daily
+  report and Settings read the same stored data. The mode is the real switch row
+  (off, on, unreadable) and changes only through the existing control.
+
 ## Old route → new route
 
 Nothing was deleted. Every previously reachable URL still resolves, and it
