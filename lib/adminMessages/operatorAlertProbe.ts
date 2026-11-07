@@ -41,26 +41,26 @@ export const adminOperatorAlertProbeMessages = defineAdminMessages({
       operational: {
         name: "운영 알림",
         description:
-          "readiness 실패, 예산 소진 등 플랫폼 자체가 발생시키는 장애 알림입니다.",
+          "점검 실패, 예산 소진처럼 플랫폼이 스스로 알리는 장애 알림이에요.",
       },
       provider: {
         name: "공급자 알림",
         description:
-          "모델 공급자 장애, 지출 예산, 계정 잔액 알림입니다. 결과를 전송 로그에 기록합니다.",
+          "모델 공급자 장애, 지출 예산, 계정 잔액 알림이에요. 결과는 발송 기록에 남아요.",
       },
     },
-    runFailed: "테스트를 실행하지 못했습니다.",
-    sentFrom: (from: string | null) => `${from}에서 보냈습니다.`,
-    nothingSent: (code: string | undefined) => `아무것도 보내지 않았습니다: ${code}.`,
+    runFailed: "시험을 실행하지 못했어요.",
+    sentFrom: (from: string | null) => `${from}에서 보냈어요.`,
+    nothingSent: (code: string | undefined) => `아무것도 보내지 않았어요: ${code}.`,
     eyebrow: "이메일",
     title: "운영자 알림 경로",
     description:
-      "이 두 경로는 문제가 있을 때만 발송하므로 평소 운영에서는 아무것도 이 경로를 실행하지 않습니다. 각 버튼은 해당 경로 자체의 코드로 실제 메시지 한 통을 보내고, 공급자가 수락한 주소를 보고합니다.",
+      "이 두 경로는 문제가 있을 때만 메일을 보내서, 평소에는 아무도 써 보지 못해요. 버튼을 누르면 그 경로의 코드로 실제 메일 한 통을 보내고, 공급자가 받은 주소를 알려 줘요.",
     caveat:
-      "테스트 통과는 이 경로가 발송할 수 있다는 뜻입니다. 이 경로를 호출해야 하는 조건(readiness 검사 실패, 예산 소진)이 여전히 이 경로를 호출한다는 뜻은 아닙니다.",
-    to: "수신: ",
+      "시험을 통과해도 이 경로로 메일을 보낼 수 있다는 것만 알 수 있어요. 이 경로를 불러야 하는 상황(점검 실패, 예산 소진)이 지금도 이 경로를 부른다는 뜻은 아니에요.",
+    to: "받는 주소: ",
     sending: "보내는 중...",
-    sendTest: "테스트 전송",
+    sendTest: "시험 메일 보내기",
     result: "결과",
     sent: "발송됨",
     notSent: "발송 안 됨",

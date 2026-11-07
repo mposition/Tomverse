@@ -4,7 +4,7 @@ import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Bot, BrainCircuit, Database, Image as ImageIcon, KeyRound, Loader2, RefreshCw, Save, Settings2, ShieldAlert, Sparkles } from "lucide-react";
+import { Bot, Database, KeyRound, Link2, Loader2, MessageCircle, Paperclip, RefreshCw, Save } from "lucide-react";
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
@@ -28,6 +28,11 @@ import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { useAdminMessages,
   useAdminLocale,
 } from "@/components/admin/AdminLocaleProvider";
+import { EmergencyStopsSection, FeatureSwitchesSection } from "@/components/admin/PlatformSwitchSections";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminPlatformMemoryMessages } from "@/lib/adminMessages/platformMemory";
 import { adminPlatformSettingsMessages } from "@/lib/adminMessages/platformSettings";
 import { adminFetch } from "@/lib/adminFetch";
@@ -749,329 +754,11 @@ export function PlatformSettingsPanel({
       !guestTrio.includes(model.id)
   );
 
-  return (
-    <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80 shadow-2xl shadow-black/20">
-      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
-      <div className="border-b border-zinc-800 bg-zinc-900/60 p-5">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-          {view === "default-models" ? (
-            <div />
-          ) : (
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">
-              <Settings2 className="h-3.5 w-3.5" />
-              {m.eyebrow}
-            </div>
-            <h2 className="mt-3 text-2xl font-black text-white">
-              {m.title}
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              {m.description}
-            </p>
-          </div>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={reload}
-              disabled={isLoading || isSaving}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4" />
-              )}
-              {m.reload}
-            </button>
-            {view === "all" || view === "emergency" || view === "features" ? (
-            <button
-              type="button"
-              onClick={save}
-              // Disabled while a step-up is outstanding, and described by the
-              // alert that says why: the endpoint would answer 428 again, and
-              // an enabled Save is what turns one refusal into a loop.
-              disabled={isLoading || isSaving || reauthenticationRequired}
-              aria-describedby={
-                reauthenticationRequired
-                  ? "admin-platform-reauthentication"
-                  : undefined
-              }
-              data-testid="admin-platform-save"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSaving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              {m.save}
-            </button>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
-      {show("account-defaults") ? (
-        <div className="p-5"><ReviewProviderDefaultsSettings scope="platform" /></div>
-      ) : null}
-      {reauthenticationRequired ? (
-        <div
-          id="admin-platform-reauthentication"
-          data-testid="admin-platform-reauthentication"
-          role="alert"
-          aria-live="assertive"
-          className="border-b border-amber-500/30 bg-amber-500/10 p-5"
-        >
-          <div className="flex items-start gap-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-200">
-              <KeyRound className="h-5 w-5" aria-hidden />
-            </span>
-            <div className="min-w-0 flex-1">
-              <h3 className="text-lg font-black text-amber-100">
-                {m.reauth.title}
-              </h3>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
-                {m.reauth.body}
-              </p>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
-                {m.reauth.next}
-              </p>
-              <Link
-                href={adminRecentAuthenticationHref(returnPath)}
-                data-testid="admin-platform-reauthenticate-link"
-                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-zinc-950 transition hover:bg-amber-300"
-              >
-                <KeyRound className="h-4 w-4" aria-hidden />
-                {m.reauth.link}
-              </Link>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="grid gap-5 p-5 xl:grid-cols-[1fr_0.8fr]">
-        {show("emergency") ? (
-        <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-5 xl:col-span-2">
-          <div className="flex items-start gap-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10 text-red-300">
-              <ShieldAlert className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-300">{m.killSwitches.eyebrow}</p>
-              <h3 className="mt-2 text-xl font-black text-white">{m.killSwitches.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-zinc-400">
-                {m.killSwitches.description}
-              </p>
-              <div className="mt-4 grid gap-2 md:grid-cols-3">
-                {([
-                  [m.killSwitches.aiChat, aiChatEnabled, setAiChatEnabled],
-                  [m.killSwitches.attachments, attachmentsEnabled, setAttachmentsEnabled],
-                  [m.killSwitches.publicSharing, publicSharingEnabled, setPublicSharingEnabled],
-                ] as const).map(([label, enabled, setEnabled]) => (
-                  <label key={label} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
-                    <span>{label}</span>
-                    <input
-                      type="checkbox"
-                      checked={enabled}
-                      onChange={(event) => setEnabled(event.target.checked)}
-                      className="h-5 w-5 accent-blue-600"
-                    />
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-        ) : null}
-        {show("features") ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
-          <div className="flex items-start gap-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
-              <Sparkles className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{m.chatStarter.eyebrow}</p>
-              <h3 className="mt-2 text-xl font-black text-white">{m.chatStarter.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-zinc-400">
-                {m.chatStarter.description}
-              </p>
-              <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
-                <input
-                  type="checkbox"
-                  data-testid="admin-chat-starter-flag"
-                  checked={chatStarterEnabled}
-                  onChange={(event) => setChatStarterEnabled(event.target.checked)}
-                  className="h-5 w-5 accent-blue-600"
-                />
-                <span>{m.chatStarter.toggle}</span>
-              </label>
-            </div>
-          </div>
-        </div>
-        ) : null}
-        {show("features") ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
-          <div className="flex items-start gap-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-300">
-              <ImageIcon className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-fuchsia-300">{m.imageGeneration.eyebrow}</p>
-              <h3 className="mt-2 text-xl font-black text-white">{m.imageGeneration.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-zinc-400">
-                {m.imageGeneration.description}
-              </p>
-              <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
-                <input
-                  type="checkbox"
-                  data-testid="admin-image-generation-flag"
-                  checked={imageGenerationEnabled}
-                  onChange={(event) => setImageGenerationEnabled(event.target.checked)}
-                  className="h-5 w-5 accent-fuchsia-600"
-                />
-                <span>{m.imageGeneration.toggle}</span>
-              </label>
-            </div>
-          </div>
-        </div>
-        ) : null}
-        {show("features") ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
-          <div className="flex items-start gap-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
-              <Database className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{m.optInRollout}</p>
-              <h3 className="mt-2 text-xl font-black text-white">{m.externalImport.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-zinc-400">
-                {m.externalImport.description}
-              </p>
-              <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
-                <input
-                  type="checkbox"
-                  data-testid="admin-external-import-flag"
-                  checked={externalImportEnabled}
-                  onChange={(event) => setExternalImportEnabled(event.target.checked)}
-                  className="h-5 w-5 accent-blue-600"
-                />
-                <span>{m.externalImport.toggle}</span>
-              </label>
-              <p className="mt-4 text-sm leading-6 text-zinc-400">
-                {m.externalImport.continuationBefore}
-                <strong className="text-zinc-200">
-                  {m.externalImport.continuationSeparate}
-                </strong>
-                {m.externalImport.continuationAfter}
-              </p>
-              <label className="mt-3 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
-                <input
-                  type="checkbox"
-                  data-testid="admin-external-continuation-flag"
-                  checked={externalContinuationEnabled}
-                  onChange={(event) =>
-                    setExternalContinuationEnabled(event.target.checked)
-                  }
-                  className="h-5 w-5 accent-blue-600"
-                />
-                <span>{m.externalImport.continuationToggle}</span>
-              </label>
-            </div>
-          </div>
-        </div>
-        ) : null}
-        {show("features") ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-          <div className="flex items-start gap-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
-              <Bot className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{m.optInRollout}</p>
-              <h3 className="mt-2 text-xl font-black text-white">{m.assistantProfiles.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-zinc-400">
-                {m.assistantProfiles.description}
-              </p>
-              <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
-                <input
-                  type="checkbox"
-                  data-testid="admin-assistant-profiles-flag"
-                  checked={assistantProfilesEnabled}
-                  onChange={(event) => setAssistantProfilesEnabled(event.target.checked)}
-                  className="h-5 w-5 accent-blue-600"
-                />
-                <span>{m.assistantProfiles.profilesToggle}</span>
-              </label>
-              <label className="mt-3 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
-                <input
-                  type="checkbox"
-                  data-testid="admin-assistant-knowledge-flag"
-                  checked={assistantKnowledgeEnabled}
-                  onChange={(event) => setAssistantKnowledgeEnabled(event.target.checked)}
-                  className="h-5 w-5 accent-blue-600"
-                />
-                <span>{m.assistantProfiles.knowledgeToggle}</span>
-              </label>
-              {assistantKnowledgeEnabled && !assistantProfilesEnabled ? (
-                <p className="mt-3 text-sm font-bold text-amber-300">
-                  {m.assistantProfiles.knowledgeStaysOff}
-                </p>
-              ) : null}
-            </div>
-          </div>
-        </div>
-        ) : null}
-        {show("features") ? (
-        <div
-          data-testid="admin-memory-release-status"
-          className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2"
-        >
-          <div className="flex items-start gap-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-teal-500/30 bg-teal-500/10 text-teal-300">
-              <BrainCircuit className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-300">
-                {memoryCopy.eyebrow}
-              </p>
-              <h3 className="mt-2 text-xl font-black text-white">{memoryCopy.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-zinc-400">
-                {memoryCopy.description}
-              </p>
-              <dl className="mt-4 grid gap-2 md:grid-cols-3">
-                {([
-                  ["memoryExtractionEnabled", memoryStatus.memoryExtractionEnabled ? "on" : "off", "memory-extraction-flag"],
-                  ["memoryInjectionEnabled", memoryStatus.memoryInjectionEnabled ? "on" : "off", "memory-injection-flag"],
-                  [memoryCopy.approvedPairs, String(memoryStatus.memoryApprovedPairCount), "memory-approved-pairs"],
-                ] as const).map(([label, value, testId]) => (
-                  <div
-                    key={label}
-                    className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3"
-                  >
-                    <dt className="text-[11px] font-semibold text-zinc-500">{label}</dt>
-                    <dd
-                      data-testid={`admin-${testId}`}
-                      className="mt-1 font-mono text-sm font-bold text-white"
-                    >
-                      {value}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-              {memoryStatus.memoryApprovedPairCount === 0 ? (
-                <p
-                  data-testid="admin-memory-blocked-notice"
-                  className="mt-3 text-sm font-bold text-amber-300"
-                >
-                  {memoryCopy.blocked}
-                </p>
-              ) : null}
-            </div>
-          </div>
-        </div>
-        ) : null}
-        {show("default-models") ? (
+  // The default-model blocks are the Models page's Default models tab (and the
+  // whole-screen fixture); they keep their own layout.
+  const defaultModelsBlocks = (
+    <>
+      {show("default-models") ? (
         <div id="default-models" className="grid gap-5 xl:col-span-2">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
@@ -1317,60 +1004,7 @@ export function PlatformSettingsPanel({
         </div>
 
         ) : null}
-        {show("features") ? (
-        <div
-          className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2"
-          data-testid="admin-package-import-control"
-        >
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
-            {m.packageImport.eyebrow}
-          </p>
-          <h3 className="mt-2 text-xl font-black text-white">
-            {m.packageImport.title}
-          </h3>
-          <p className="mt-2 text-sm leading-6 text-zinc-400">
-            {m.packageImport.description}
-          </p>
-          <p className="mt-3 text-sm font-bold text-white">
-            {packageImportEnabled
-              ? m.packageImport.currentlyEnabled
-              : m.packageImport.currentlyDisabled}
-          </p>
-          <label className="mt-4 block text-sm font-bold text-white">
-            {m.packageImport.rationale}
-            <textarea
-              value={packageImportRationale}
-              onChange={(event) => setPackageImportRationale(event.target.value)}
-              maxLength={500}
-              rows={2}
-              className="mt-2 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm font-normal text-white"
-              data-testid="admin-package-import-rationale"
-            />
-          </label>
-          <div className="mt-3 flex flex-wrap gap-3">
-            <button
-              type="button"
-              disabled={packageImportBusy}
-              onClick={() => void submitPackageImportFlag(true)}
-              className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
-              data-testid="admin-package-import-enable"
-            >
-              {m.packageImport.enable}
-            </button>
-            <button
-              type="button"
-              disabled={packageImportBusy}
-              onClick={() => void submitPackageImportFlag(false)}
-              className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
-              data-testid="admin-package-import-disable"
-            >
-              {m.packageImport.rollBack}
-            </button>
-          </div>
-        </div>
-
-        ) : null}
-        {show("default-models") ? (
+      {show("default-models") ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
             {m.selection.eyebrow}
@@ -1401,7 +1035,271 @@ export function PlatformSettingsPanel({
           </div>
         </div>
         ) : null}
+    </>
+  );
+
+  const stops = [
+    { id: "ai-chat", icon: MessageCircle, copy: m.stops.cards.aiChat, enabled: aiChatEnabled, set: setAiChatEnabled },
+    { id: "attachments", icon: Paperclip, copy: m.stops.cards.attachments, enabled: attachmentsEnabled, set: setAttachmentsEnabled },
+    { id: "public-sharing", icon: Link2, copy: m.stops.cards.publicSharing, enabled: publicSharingEnabled, set: setPublicSharingEnabled },
+  ].map((stop) => ({
+    id: stop.id,
+    icon: stop.icon,
+    label: stop.copy.label,
+    detail: stop.copy.detail,
+    enabled: stop.enabled,
+    onChange: stop.set,
+  }));
+
+  const flagRows = [
+    { testId: "admin-chat-starter-flag", copy: m.switches.items.chatStarter, enabled: chatStarterEnabled, set: setChatStarterEnabled, waiting: false },
+    { testId: "admin-image-generation-flag", copy: m.switches.items.imageGeneration, enabled: imageGenerationEnabled, set: setImageGenerationEnabled, waiting: false },
+    { testId: "admin-external-import-flag", copy: m.switches.items.externalImport, enabled: externalImportEnabled, set: setExternalImportEnabled, waiting: false },
+    { testId: "admin-external-continuation-flag", copy: m.switches.items.externalContinuation, enabled: externalContinuationEnabled, set: setExternalContinuationEnabled, waiting: false },
+    { testId: "admin-assistant-profiles-flag", copy: m.switches.items.assistantProfiles, enabled: assistantProfilesEnabled, set: setAssistantProfilesEnabled, waiting: false },
+    {
+      testId: "admin-assistant-knowledge-flag",
+      copy: m.switches.items.assistantKnowledge,
+      enabled: assistantKnowledgeEnabled,
+      set: setAssistantKnowledgeEnabled,
+      // Knowledge is only in force while profiles are on (policy section 15).
+      waiting: assistantKnowledgeEnabled && !assistantProfilesEnabled,
+    },
+  ].map((flag) => ({
+    testId: flag.testId,
+    label: flag.copy.label,
+    detail: flag.copy.detail,
+    enabled: flag.enabled,
+    onChange: flag.set,
+    waiting: flag.waiting,
+  }));
+
+  const reloadButton = (
+    <button
+      type="button"
+      onClick={reload}
+      disabled={isLoading || isSaving}
+      className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {isLoading ? (
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+      ) : (
+        <RefreshCw className="h-4 w-4" aria-hidden />
+      )}
+      {m.reload}
+    </button>
+  );
+
+  if (view === "default-models") {
+    return (
+      <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80 shadow-2xl shadow-black/20">
+        {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
+        <div className="flex justify-end border-b border-zinc-800 bg-zinc-900/60 p-5">{reloadButton}</div>
+      {reauthenticationRequired ? (
+        <div
+          id="admin-platform-reauthentication"
+          data-testid="admin-platform-reauthentication"
+          role="alert"
+          aria-live="assertive"
+          className="border-b border-amber-500/30 bg-amber-500/10 p-5"
+        >
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-200">
+              <KeyRound className="h-5 w-5" aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-lg font-black text-amber-100">
+                {m.reauth.title}
+              </h3>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
+                {m.reauth.body}
+              </p>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
+                {m.reauth.next}
+              </p>
+              <Link
+                href={adminRecentAuthenticationHref(returnPath)}
+                data-testid="admin-platform-reauthenticate-link"
+                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-zinc-950 transition hover:bg-amber-300"
+              >
+                <KeyRound className="h-4 w-4" aria-hidden />
+                {m.reauth.link}
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : null}
+        <div className="grid gap-5 p-5 xl:grid-cols-[1fr_0.8fr]">{defaultModelsBlocks}</div>
+      </section>
+    );
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-5" data-testid="admin-platform-settings">
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
+      {reauthenticationRequired ? (
+        <div
+          id="admin-platform-reauthentication"
+          data-testid="admin-platform-reauthentication"
+          role="alert"
+          aria-live="assertive"
+          className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5"
+        >
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-200">
+              <KeyRound className="h-5 w-5" aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-lg font-black text-amber-100">
+                {m.reauth.title}
+              </h3>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
+                {m.reauth.body}
+              </p>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
+                {m.reauth.next}
+              </p>
+              <Link
+                href={adminRecentAuthenticationHref(returnPath)}
+                data-testid="admin-platform-reauthenticate-link"
+                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-zinc-950 transition hover:bg-amber-300"
+              >
+                <KeyRound className="h-4 w-4" aria-hidden />
+                {m.reauth.link}
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {reloadButton}
+        {view === "all" || view === "emergency" || view === "features" ? (
+          <AdminWriteButton
+            stepUp
+            onClick={save}
+            // Disabled while a step-up is outstanding, and described by the
+            // alert that says why: the endpoint would answer 428 again, and
+            // an enabled Save is what turns one refusal into a loop.
+            disabled={isLoading || isSaving || reauthenticationRequired}
+            aria-describedby={
+              reauthenticationRequired ? "admin-platform-reauthentication" : undefined
+            }
+            data-testid="admin-platform-save"
+          >
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
+            {m.save}
+          </AdminWriteButton>
+        ) : null}
       </div>
-    </section>
+
+      {show("emergency") ? <EmergencyStopsSection items={stops} /> : null}
+
+      {show("features") ? (
+        <>
+          <FeatureSwitchesSection items={flagRows} />
+
+          <AdminTile
+            data-testid="admin-memory-release-status"
+            title={m.switches.memory.title}
+            description={m.switches.memory.summary}
+          >
+            <dl className="grid gap-3 sm:grid-cols-3">
+              {[
+                [m.switches.memory.extraction, memoryStatus.memoryExtractionEnabled, "memory-extraction-flag"],
+                [m.switches.memory.injection, memoryStatus.memoryInjectionEnabled, "memory-injection-flag"],
+              ].map(([label, on, testId]) => (
+                <div key={String(testId)} className="rounded-xl bg-zinc-950/50 p-3">
+                  <dt className="text-xs text-zinc-500">{label}</dt>
+                  <dd data-testid={"admin-" + testId} className="mt-1">
+                    <AdminStatusChip tone={on ? "ok" : "idle"}>
+                      {on ? m.switches.memory.on : m.switches.memory.off}
+                    </AdminStatusChip>
+                  </dd>
+                </div>
+              ))}
+              <div className="rounded-xl bg-zinc-950/50 p-3">
+                <dt className="text-xs text-zinc-500">{memoryCopy.approvedPairs}</dt>
+                <dd
+                  data-testid="admin-memory-approved-pairs"
+                  className="mt-1 text-lg font-bold tabular-nums text-white"
+                >
+                  {String(memoryStatus.memoryApprovedPairCount)}
+                </dd>
+              </div>
+            </dl>
+            {memoryStatus.memoryApprovedPairCount === 0 ? (
+              <p data-testid="admin-memory-blocked-notice" className="text-sm font-bold text-amber-300">
+                {memoryCopy.blocked}
+              </p>
+            ) : null}
+            <AdminTechInfo summary={m.switches.memory.details}>
+              <p className="font-sans leading-5">{memoryCopy.description}</p>
+            </AdminTechInfo>
+          </AdminTile>
+
+          <AdminTile
+            data-testid="admin-package-import-control"
+            title={m.switches.packageImport.title}
+            description={m.switches.packageImport.summary}
+            action={
+              <AdminStatusChip tone={packageImportEnabled ? "ok" : "idle"}>
+                {packageImportEnabled
+                  ? m.switches.packageImport.enabled
+                  : m.switches.packageImport.disabled}
+              </AdminStatusChip>
+            }
+          >
+            <p className="sr-only">
+              {packageImportEnabled
+                ? m.packageImport.currentlyEnabled
+                : m.packageImport.currentlyDisabled}
+            </p>
+            <label className="block text-sm font-bold text-white">
+              {m.packageImport.rationale}
+              <textarea
+                value={packageImportRationale}
+                onChange={(event) => setPackageImportRationale(event.target.value)}
+                maxLength={500}
+                rows={2}
+                className="mt-2 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm font-normal text-white"
+                data-testid="admin-package-import-rationale"
+              />
+            </label>
+            <div className="flex flex-wrap gap-3">
+              <AdminWriteButton
+                stepUp
+                disabled={packageImportBusy}
+                onClick={() => void submitPackageImportFlag(true)}
+                data-testid="admin-package-import-enable"
+              >
+                {m.packageImport.enable}
+              </AdminWriteButton>
+              <AdminWriteButton
+                variant="secondary"
+                disabled={packageImportBusy}
+                onClick={() => void submitPackageImportFlag(false)}
+                data-testid="admin-package-import-disable"
+              >
+                {m.packageImport.rollBack}
+              </AdminWriteButton>
+            </div>
+            <AdminTechInfo summary={m.switches.packageImport.details}>
+              <p className="font-sans leading-5">{m.packageImport.eyebrow}</p>
+              <p className="mt-2 font-sans leading-5">{m.packageImport.description}</p>
+            </AdminTechInfo>
+          </AdminTile>
+        </>
+      ) : null}
+
+      {show("account-defaults") ? (
+        <div data-testid="admin-account-defaults">
+          <ReviewProviderDefaultsSettings scope="platform" />
+        </div>
+      ) : null}
+
+      {view === "all" ? (
+        <div className="grid gap-5 xl:grid-cols-[1fr_0.8fr]">{defaultModelsBlocks}</div>
+      ) : null}
+    </div>
   );
 }

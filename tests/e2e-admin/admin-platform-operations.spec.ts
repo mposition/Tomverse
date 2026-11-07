@@ -422,7 +422,7 @@ test.describe("platform operations", () => {
       .locator("section")
       .filter({ hasText: "Billing event monitor" });
     await expect(
-      monitor.getByText(FIXTURE_WEBHOOK.failed.stripeEventId)
+      monitor.getByText(FIXTURE_WEBHOOK.failed.stripeEventId).first()
     ).toBeVisible();
 
     await monitor.getByRole("button", { name: "Reprocess" }).click();
