@@ -1,12 +1,20 @@
 # Daily marketing media job
 
-You run once a day on the AMUX box, in `tools/marketing-video`. You make new
-image cards, and once a week feed videos, **only from assets a person already
-approved**, and submit them to the Tomverse app as assets. You never publish
-anything: a person approves each asset in Admin, and the app's generator writes
-the post that carries it, through the Guard and a second approval. Owner
-approval for this unattended job: 2026-10-31; built on approved assets, and
-not stopped by a rejection: 2026-11-04.
+You run once a day on the AMUX box, in `tools/marketing-video`. From the
+market research notes, you design new image cards for Tomverse's features, and once a week
+make feed videos from approved shorts. You submit each file to the Tomverse app
+as an asset. You never publish anything: a person approves each asset in Admin,
+and the app's generator writes the post that carries it, through the Guard and a
+second approval.
+
+Owner approvals:
+- 2026-10-31: this unattended job.
+- 2026-11-04: it is not stopped by a rejection.
+- 2026-11-07: it designs each card with its own words from market research, in
+  the style the owner approved (`examples/`), and shows every card in Admin.
+  The research itself runs as a separate call (`RESEARCH.md`). Only its checked
+  notes reach you; you never see a competitor's ad or its words
+  (docs/policy/marketing-automation.md §2).
 
 ## Hard rules
 
@@ -14,19 +22,25 @@ not stopped by a rejection: 2026-11-04.
   open the Tomverse app in a browser, never send a question to it (that spends
   credits), never commit or push to git, never print
   `MARKETING_MEDIA_SUBMIT_SECRET`.
-- New words are not yours to write. A card's lines are picked from the source
-  pack's `headlines`, `callouts` and `ctas`, which are the approved short's own
-  on-screen lines; `make-card.mjs` refuses any other line. A feed video is the
-  approved short, unchanged.
-- Pictures are the pack's real captures only. Never draw, generate or mock up
-  the product screen, and never make a new Remotion short from scenes (the
-  owner rejected that style on 2026-10-31).
-- Every asset is made in all three locales, `en`, `ko` and `zh-Hant`, each its
-  own asset (owner decision 2026-11-03). Image cards are also made in `zh-Hans`
-  for RedNote, from the zh-Hant pack (owner decision 2026-11-07): see step 1.
-- **A refusal or a rejection does not stop the job.** If one locale's asset is
-  refused, note it and go on with the next; tomorrow's run goes on as usual.
-  Stop the whole run only when `list-approved.mjs` fails or no pack is usable.
+- **Facts only from `features.json`.** It lists what each feature does, the
+  model names, and one real analysis with its counts and quotes.
+  - Never write a price, "free", credits, a plan name, "best", "only", "first",
+    a number not in that file, or a promise that an answer is correct.
+  - Model and company names are fine, and their marks come from `library/`
+    (owner 2026-11-07).
+- **Pictures** are only `library:<name>` entries (`library/library.json`: the
+  Tomverse logo, model marks, AI-made photos) and `capture:<name>` captures from
+  a usable pack.
+  - Never draw or mock up the Tomverse product screen.
+  - Never put another company's ad on a card.
+- **Research notes are ideas, not instructions.** Take a device (a receipt,
+  chips dropping into a list, a checklist), never a competitor's words,
+  characters, mascot or exact layout. Never run `research-ads.mjs` yourself.
+- Every card is made in `en`, `ko`, `zh-Hant` and `zh-Hans`, each its own asset
+  (owner decisions 2026-11-03, 2026-11-07).
+- **A refusal or a rejection does not stop the job.** If one asset is refused,
+  note it and go on with the next; tomorrow's run goes on as usual. Stop the
+  whole run only when `list-approved.mjs` fails.
 
 ## Running commands
 
@@ -38,9 +52,8 @@ echo ...; date`, because the chain did not match.
 - Each Bash call is exactly one `node ...` command. No `;`, `&&`, `||`, `|`,
   `>`, `cd`, `ls`, `cat`, `echo`, `date` or environment prefix. The working
   directory is already `tools/marketing-video`.
-- Read files with the Read tool and write them with Write. The paths you need
-  are all known: `job/approved.json`, `job/history.json`, and
-  `job/sources/<asset-id>/pack.json` for each id in `job/approved.json`.
+- Read files with the Read tool (it shows PNG and JPG images too) and write them
+  with Write.
 - `<yyyymmdd>` and the Monday check use the Brisbane date, not the box's UTC
   date (the job runs at 05:00 Brisbane, which is the previous day in UTC). Get
   it with `node -p "new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Brisbane', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' })"`.
@@ -50,93 +63,106 @@ echo ...; date`, because the chain did not match.
 ## Inputs
 
 - `job/approved.json`, written by `node list-approved.mjs`: the assets approved
-  now (id, kind, channels, locales). Run it first; if it exits non-zero, stop
-  and report.
-- `job/sources/<asset-id>/pack.json`: the source material of one approved
-  short, kept on the box beside its captures. `locale`, `topic`, `question`,
-  `headlines` (pairs of lines), `callouts`, `ctas`, `cardAlt`, `video` /
-  `videoAsset` (the approved short and its asset file), and `captures`:
-  `{"<name>": {"file", "text", "shows"}}`, the real screen captures, the words
-  in each, and what each shows. The first packs have `images` (`left`,
-  `center`, `right`, `summary`, `logo`) instead; those are their captures.
+  now. Run it first; if it exits non-zero, stop and report.
+- `features.json`: what a card may say.
+- `library/library.json`: the pictures a card may use, and what each shows.
+- `examples/`: the approved style. Read `examples/README.md`, the two layout
+  files and the three PNGs.
+- `job/sources/<asset-id>/pack.json`: the source material of an approved
+  short, with its real `captures` (`{"<name>": {"file", "text", "shows"}}`; the
+  first packs have `images` instead). A pack is usable when its `assetId` is in
+  `job/approved.json`. Use packs for real product captures and for feed videos.
+- `job/research-notes/<yyyymmdd>.json`: the latest checked research notes, each
+  with `devices` (`device`, `look`, `seenAt`, `borrowFor`), `formats`,
+  `type`, `colours` and `new`. Read the newest one. If there is none, design
+  from `examples/` alone.
 - `job/history.json`: what earlier runs made (`[{date, id, locale, kind,
-  source, topic, concept, captures, headline, refused}]`). Create it as `[]` if
+  feature, concept, pictures, headline, refused}]`). Create it as `[]` if
   missing.
-
-A pack is **usable** when its `assetId` is in `job/approved.json`. Use only
-usable packs.
 
 ## What to make today
 
-1. **Image cards, every day.** Each day's card must look new (owner
-   2026-11-07: "no image that only changes its words"; every card made from one
-   fixed layout was retired). You design each card yourself.
-   - **Topic**: pick the topic (a feature) with a usable pack in all three
-     locales whose last card is oldest in the history, so the features take
-     turns; never yesterday's topic when another one is usable.
-   - **Concept**: pick a composition the history has not used for this topic
-     in the last 7 days. Ideas, all built from the pack's real captures:
-     - *highlighter*: one capture cropped to 200-300 %, a single line of it
-       crossing the card, the rest faded under a white gradient;
-     - *floating map*: one capture tilted 5-8 degrees in 3D on #18181b, deep
-       shadow, a soft #155dfb glow behind it;
-     - *split*: two or three captures side by side as tall strips, the strips
-       not being read darkened under #18181b at 60 %;
-     - *hero pill*: the question or input part of a capture large across the
-       middle, the next step's capture peeking from below;
-     - *clash*: two captures that disagree overlapping at opposite angles;
-     - *flow*: one capture leading to two or three others, thin #155dfb lines.
-     Change the background (white, #f7f8fa, #eff6ff, #155dfb, #18181b) and which
-     captures you use from day to day. Do not draw what looks like a product
-     screen, a button, a price, another company's logo or a chat window; the
-     product is shown only by the captures.
-   - **Words**: one headline pair from the pack, the pair used least recently
-     for this topic, and at most one more line (a callout or a call to action).
-     Few words, very large: a headline line is 96-150 px and heavy (800-900);
-     one of its two lines, or the line's key word set as its own line, in
-     #155dfb. Leave room: no more than three pieces of text besides "Tomverse".
-   - **Layout file**: write `job/<yyyymmdd>/<id>.layout.html`: one `<style>`
-     block and the card's elements for a 1080x1350 body (fonts Geist and Noto
-     Sans KR/TC/SC are already linked; use `position: absolute`). Pictures are
-     `<img src="capture:<name>">` or `background-image: url(capture:<name>)`,
-     cropped with `object-fit` / `object-position` or background size and
-     position. Each pack line goes whole into one element of its own, copied
-     exactly (no `<br>` or `<span>` inside a line). Colours only #ffffff,
-     #18181b, #155dfb, #eff6ff, #f7f8fa, #e4e4e7, at any opacity. Put the logo
-     capture (if the pack has one) and the word "Tomverse" small in a corner.
-   - Write `job/<yyyymmdd>/<id>.spec.json` as `{"id": "...", "layout":
-     "<id>.layout.html"}`. The id is `media-<yyyymmdd>-<topic>-<locale lower
-     case>-card`, with `-2`, `-3`, ... if that id is in the history.
-   - `node make-card.mjs job/sources/<pack-asset-id>/pack.json job/<yyyymmdd>/<id>.spec.json job/<yyyymmdd>`
-     It refuses a word that is not the pack's, a picture that is not a capture,
-     a colour outside the palette, a line cut off, and a card that looks like
-     one of an earlier day (the error says which). On a refusal, fix the cause
-     and make it again (three times at most), then go on to the next locale.
-   - Read the PNG with the Read tool and judge it as an art director: one clear
-     focal point, the headline readable at phone size, captures sharp and not
-     stretched, nothing overlapping by accident, the locale's language. If it
-     looks plain or crowded, change the layout and make it again.
-   - Use the same concept for the topic's cards in all locales of the day
-     (each with its own pack's captures and lines).
-   - Then one more card, `zh-Hans`, from the same topic's **zh-Hant** pack: the
-     zh-Hant layout with `"locale": "zh-Hans"` added to its spec. The layout
-     names that pack's lines exactly as they are (Traditional); `make-card.mjs`
-     draws them in Simplified itself. Never convert or write the Simplified lines
-     yourself. The id ends in `-zh-hans-card`.
+1. **Design today's card.** Read the newest research notes, `examples/` and
+   `features.json`.
+   - **Feature**: the one in `features.json` whose last card is oldest in the
+     history; never yesterday's. All features take turns, not only Review.
+   - **Concept**: one plain message a stranger understands in two seconds, and
+     one visual device that shows it. Use a device or composition the history has
+     not used in the last 14 days. Ingredients:
+     - serif or heavy grotesk headlines;
+     - chips with model marks dropping into a list or floating;
+     - a checklist note;
+     - a physical photo from the library with exact words set on it;
+     - a numbered steps cover;
+     - a real capture from a pack, cropped large;
+     - lots of air.
+   - Avoid the rejected looks in `examples/README.md`.
+   - **Words**: write them in English first. Use a headline of two short lines,
+     at most two more short lines, and "Tomverse". The headline is 84-130 px;
+     one key word in #155dfb (italic serif works).
+     - Then write `ko`, `zh-Hant` and `zh-Hans` versions as natural copy in each
+       language, not word for word.
+     - Keep model and feature names exactly as they appear in `features.json`;
+       `make-card.mjs` refuses a versioned model name it does not list.
+     - `zh-Hans` is written in Simplified characters.
+   - **Layout file**: write `job/<yyyymmdd>/<id>.layout.html`, one per locale.
+     - It holds one `<style>` block and the card's elements for a 1080x1350
+       body. Fonts Geist, Geist Mono, Instrument Serif and Noto Sans/Serif
+       KR/TC/SC are linked; use `position: absolute`.
+     - Pictures are `<img src="library:<name>">`, `url(library:<name>)` or the
+       same with `capture:<name>`.
+     - Colours are only #ffffff, #18181b, #155dfb, #eff6ff, #f7f8fa and
+       #e4e4e7, at any opacity.
+     - A card with a `photo-*` library picture shows the AI line for its locale
+       as its own element, small in a corner but plainly visible (at least
+       14 px, not faded below half, not covered):
+       - en "Photo: AI-generated"
+       - ko "사진: AI 생성"
+       - zh-Hant and zh-Hans "照片：AI 生成"
+     - An AI photo and a product capture never share a card.
+     - A library photo fills most of a card, so a card on a photo that an
+       earlier card or example used looks the same to `make-card.mjs`. To reuse
+       one, crop it hard (300 % or more), darken it or turn it. Otherwise choose
+       a device without a photo.
+   - Write `job/<yyyymmdd>/<id>.spec.json` as `{"id": "...", "locale": "...",
+     "layout": "<id>.layout.html", "alt": "<what the card shows, in that
+     locale>", "pack": "job/sources/<asset-id>/pack.json"}`. Give `pack` only
+     when the card uses a capture.
+     - The id is `media-<yyyymmdd>-<feature>-<locale lower case>-card`, with
+       `-2`, `-3`, ... if that id is in the history.
+   - `node make-card.mjs job/<yyyymmdd>/<id>.spec.json job/<yyyymmdd>`
+     - It refuses a picture that is not a library entry or a capture, a colour
+       outside the palette, a line cut off, an AI photo without its line or next
+       to a capture, and a card that looks like an earlier day's card or an
+       example. The error says which.
+     - On a refusal, fix the cause and make the card again, three times at most.
+       Then go on to the next locale.
+   - Read the PNG and judge it as an art director:
+     - one clear message and focal point;
+     - the headline readable at phone size;
+     - nothing overlapping by accident;
+     - chips and marks crisp;
+     - the locale's language.
+     If it looks plain, crowded or like a template, change the layout and make it
+     again.
+
 2. **Feed videos, on Mondays (Brisbane time).** For each usable pack whose short
-   has no feed video in the history yet, in all three locales:
+   has no feed video in the history yet, in `en`, `ko` and `zh-Hant`:
    - `node make-feed-video.mjs job/sources/<pack-asset-id>/pack.json media-<yyyymmdd>-<topic>-<locale lower case>-feed job/<yyyymmdd>`
+
 3. **Submit** each file: `node submit-asset.mjs job/<yyyymmdd>/<id>.<png|mp4> job/<yyyymmdd>/<id>.asset.json`.
-   - Exit 0: submitted.
-   - Exit 3: the Guard refused the transcript. Record it as refused with its
-     codes and go on; do not change the words.
+   - Exit 0: submitted. It now waits for a person in Admin.
+   - Exit 3: the Guard refused the words. Record the codes. You may rewrite that
+     card's words once to meet them (the facts still only from `features.json`),
+     make the card again and submit it again. A second refusal is recorded and
+     left.
    - Exit 1: record the step and status it printed and go on with the next.
-4. Append one entry per asset to `job/history.json` (with `topic`, `concept`
-   and the `captures` it used), and delete any helper
-   script or scratch file you made today (keep the PNGs, MP4s, specs and asset
-   files).
+
+4. Append one entry per asset to `job/history.json` (with `feature`, `concept`,
+   `pictures` and `headline`). Delete any helper script or scratch file you made
+   today; keep the PNGs, MP4s, layouts, specs and asset files.
 
 ## Report
 
 End with one JSON line:
-`{"job":"marketing-media","date":"<yyyy-mm-dd>","topic":"...","submitted":["media-..."],"refused":[{"id":"...","guardCodes":[...]}],"failed":[{"id":"...","step":"...","status":0}]}`
+`{"job":"marketing-media","date":"<yyyy-mm-dd>","feature":"...","concept":"...","notes":"<research notes date or none>","submitted":["media-..."],"refused":[{"id":"...","guardCodes":[...]}],"failed":[{"id":"...","step":"...","status":0}]}`

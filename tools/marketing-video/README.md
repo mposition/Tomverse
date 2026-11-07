@@ -57,25 +57,46 @@ line each) to the end of the description before the Guard reads the post and a
 person approves it. A video with chapters, or longer than 60 seconds, is
 long-form, and its post carries no `#Shorts`.
 
-## Cards and feed videos from approved assets
+## Researched cards and feed videos
 
-Owner decision 2026-11-04: the daily job makes new assets only from assets a
-person approved, in `en`, `ko` and `zh-Hant`, and a rejection does not stop it.
+Owner decisions:
+- 2026-11-04: a rejection does not stop the daily job.
+- 2026-11-07: the job researches the market's ads and designs each card with
+  its own words in the approved style, and a person sees every card in Admin
+  before anything is posted.
 
 ```
 node list-approved.mjs                                  # job/approved.json
-node make-card.mjs <pack.json> <spec.json> <out-dir>    # 4:5 image card + asset file
+node research-ads.mjs <out-dir>                         # public Meta Ad Library: ads + contact sheets
+node make-card.mjs <spec.json> <out-dir>                # 4:5 image card + asset file
 node make-feed-video.mjs <pack.json> <id> <out-dir>     # 4:5 feed version of the short
 ```
 
-A source pack (`job/sources/<asset-id>/pack.json`, on the box only) is the
-material one approved short was made from: its real captures, its question and
-its approved on-screen lines. The job designs each card itself (owner
-2026-11-07: no card that only changes its words); `make-card.mjs` renders the
-job's layout and refuses words the pack does not carry, pictures that are not
-its captures, colours outside the brand palette, cut-off lines, and a look an
-earlier day already used (`tests/marketingMediaMakeCard.test.mjs`). `make-feed-video.mjs` renders the `Feed` composition: the
-approved short, whole, on a 1080x1350 frame.
+- `research-ads.mjs` saves a few current ads of each advertiser in
+  `research-brands.json`, a still for a video, and contact sheets. No login,
+  nothing posted. `run-daily.sh` fetches them. A separate CLI call
+  (`RESEARCH.md`) reads them. That call has only the Read tool, on
+  `job/research-raw/`, and no submission secret, and it answers with structured
+  notes. `check-research-notes.mjs` writes those notes only in the agreed
+  shape, with brands from `research-brands.json` and no run of five words from
+  an ad. The raw ads are then deleted, so the call that writes copy sees only
+  checked notes (docs/policy/marketing-automation.md §2).
+- The job writes words from `features.json` and pictures from
+  `library/library.json`: the logo, model marks (owner 2026-11-07) and AI-made
+  photos. It can also use real captures from a source pack
+  (`job/sources/<asset-id>/pack.json`, on the box only). `examples/` holds the
+  approved style.
+- `make-card.mjs` puts every visible word in the transcript the Guard judges at
+  submission. It refuses:
+  - a picture that is not a library entry or a capture;
+  - a colour outside the brand palette;
+  - cut-off lines;
+  - an AI photo without the locale's AI line, or beside a product capture;
+  - a look an earlier day or an example already used.
+
+  Tests: `tests/marketingMediaMakeCard.test.mjs`.
+- `make-feed-video.mjs` renders the `Feed` composition: the approved short,
+  whole, on a 1080x1350 frame.
 
 ## The daily job
 
