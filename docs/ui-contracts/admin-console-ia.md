@@ -94,8 +94,8 @@ What moved, and what it means for the paragraphs below (which keep the names
 they were written under):
 
 - **Command Center, Customers and Revenue** became Home and Customers &
-  Revenue. Billing is Plans & pricing and its editor's client tabs are URL tabs
-  (`urlTabs`): the address names the section the screen shows. Prices and
+  Revenue. Billing is Plans & pricing and its editor follows the URL
+  (`initialTab`): the address names the section the screen shows. Prices and
   Diagnostics are tabs of their own; Diagnostics holds what sat under the
   promotion editor.
 - **AI Agents** is a new group. Marketing, Product research, Engineering, SRE
@@ -831,3 +831,31 @@ change (`POST /api/admin/amux/workers`), sent once and read back; a refusal is
 shown in plain words and an unknown outcome sends nothing more. The drawer
 edits what a worker can do through the existing capability editor. Its copy
 names no policy version, build stage or internal refusal code.
+
+### Customers & Revenue screens (2026-11-07)
+
+The six screens of the group are drawn from the shared parts above and change
+no route, role, step-up or audit behaviour:
+
+- **Users** is a list only (five count cards that filter it, search, one
+  `AdminDataTable`). A customer is `/admin/users/[userId]` with `?tab=`
+  `overview`, `billing`, `security`, `conversations`, `notes` (the
+  `user-detail` entry's tabs); the detail is read once in the browser and kept
+  across sections. The list has no per-user country or last-activity read, so
+  it shows join date and time zone; the credit bar needs the plan's daily
+  limit and is left off without one.
+- **Security** shows the account's state, then the actions as cards (restrict
+  AI, suspend, sign out everywhere, unlink a sign-in, delete). A card opens to
+  the shared reason (required), expiry (only for the two actions that take
+  one) and note. Every card sends the route's existing payload; the
+  confirming button carries the step-up shield. There is no "notify the user"
+  field: the route has none, and adding one would be a new send.
+- **Plans & pricing** has one save bar. Every change goes through the review
+  dialog before the one PATCH; the former saves that skipped the review are
+  gone.
+- **Refunds** approve through `AdminConfirmDialog` with the step-up note. The
+  monthly bars and totals are computed from the rows read, and say so.
+- **Credit ledger** is read-only; its totals describe the rows read, not a
+  period.
+- **Support**'s Auto-fix review tab is the same newest reports as the inquiries
+  tab, seen by the automation's case. It has no store of its own and no write.

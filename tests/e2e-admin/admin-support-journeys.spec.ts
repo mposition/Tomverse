@@ -28,16 +28,16 @@ test.describe("support journeys", () => {
 
     // Search narrows the list to the matching account only.
     await page
-      .getByPlaceholder("Search users by email, ID, name, or Stripe customer")
+      .getByPlaceholder("Search by name, email, user ID or Stripe customer")
       .fill(FIXTURE_CUSTOMERS.disputedHold.email);
     await page.getByRole("button", { name: "Search", exact: true }).click();
 
     const link = page.getByRole("link", {
-      name: `View details for ${FIXTURE_CUSTOMERS.disputedHold.email}`,
+      name: `Open ${FIXTURE_CUSTOMERS.disputedHold.email}`,
     });
     await expect(link).toBeVisible();
     await expect(
-      page.getByRole("link", { name: /^View details for/ })
+      page.getByRole("link", { name: /^Open / })
     ).toHaveCount(1);
 
     await link.click();
@@ -48,7 +48,8 @@ test.describe("support journeys", () => {
     await expect(
       page.getByText(FIXTURE_CUSTOMERS.disputedHold.email)
     ).toBeVisible();
-    // The billing risk that brought the operator here is on the page.
+    // The billing risk that brought the operator here is on the Billing section.
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.disputedHold.id}?tab=billing`);
     await expect(
       page.getByText("Chargeback opened on the Power credit pack")
     ).toBeVisible();
@@ -59,7 +60,7 @@ test.describe("support journeys", () => {
     signInAs,
   }) => {
     await signInAs("support");
-    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}`);
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}?tab=notes`);
 
     const notes = page.locator("section").filter({ hasText: "Internal notes" }).last();
     await expect(notes.getByText("No internal notes yet.")).toBeVisible();
@@ -100,8 +101,13 @@ test.describe("support journeys", () => {
     await signInAs("support");
     await page.goto("/admin/support?tab=feedback");
 
+    // The report is open in the detail pane once its row in the list is chosen.
+    await page
+      .getByTestId("feedback-list-item")
+      .filter({ hasText: FIXTURE_FEEDBACK.open.message })
+      .click();
     const entry = page
-      .locator("article")
+      .getByTestId("feedback-entry")
       .filter({ hasText: FIXTURE_FEEDBACK.open.message });
     // The current status is the one that cannot be re-selected.
     await expect(entry.getByRole("button", { name: "open", exact: true })).toBeDisabled();
@@ -115,8 +121,12 @@ test.describe("support journeys", () => {
     ).toBeEnabled();
 
     await page.reload();
+    await page
+      .getByTestId("feedback-list-item")
+      .filter({ hasText: FIXTURE_FEEDBACK.open.message })
+      .click();
     const reloaded = page
-      .locator("article")
+      .getByTestId("feedback-entry")
       .filter({ hasText: FIXTURE_FEEDBACK.open.message });
     await expect(
       reloaded.getByRole("button", { name: "reviewing", exact: true })
@@ -144,8 +154,12 @@ test.describe("support journeys", () => {
     await signInAs("support");
     await page.goto("/admin/support?tab=feedback");
 
+    await page
+      .getByTestId("feedback-list-item")
+      .filter({ hasText: FIXTURE_FEEDBACK.open.message })
+      .click();
     const entry = page
-      .locator("article")
+      .getByTestId("feedback-entry")
       .filter({ hasText: FIXTURE_FEEDBACK.open.message });
     // The reporter opted into lifecycle emails; the console says so without
     // repeating the address.
@@ -232,7 +246,8 @@ test.describe("support journeys", () => {
       .fill("Export bundle generated and delivered to the customer.");
     await request.getByRole("button", { name: "Save request" }).click();
 
-    await expect(request.getByText("in_progress").first()).toBeVisible();
+    // The row says the new status in words, not in its stored value.
+    await expect(request.getByText("In progress").first()).toBeVisible();
 
     const stored = await adminFixtureDatabase().privacyRequest.findUniqueOrThrow({
       where: { id: FIXTURE_PRIVACY_REQUEST.open.id },
