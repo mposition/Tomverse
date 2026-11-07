@@ -792,7 +792,7 @@ test("the flash-lite standard-credit exception ends after its review day", () =>
     now: afterFlashLiteException,
   });
   assert.equal(refusal?.status, 409);
-  assert.match(refusal!.message, /ended after 2026-12-27/);
+  assert.match(refusal!.message, /ended at 2026-12-28 10:00 AEST/);
 });
 
 test("a flash-lite sale already at the floor does not need the exception", () => {

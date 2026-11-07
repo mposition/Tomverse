@@ -11,7 +11,10 @@ import {
   adminRingArc,
   adminSparkGeometry,
   formatAestClock,
+  formatAestDate,
+  formatAestDateTime,
 } from "../lib/adminUiCore.ts";
+import { adminDateTimeLabel } from "../lib/adminDateTime.ts";
 import { ADMIN_PIXEL_TEAMS, adminPixelRects } from "../lib/adminPixelAvatarPalette.ts";
 
 test("times read as Brisbane time, not UTC", () => {
@@ -22,6 +25,43 @@ test("times read as Brisbane time, not UTC", () => {
   // Sydney is on UTC+11 in January; Brisbane is not.
   assert.equal(formatAestClock(new Date("2026-01-15T13:30:00Z")), "23:30");
   assert.equal(formatAestClock(new Date(Number.NaN)), "--:--");
+});
+
+test("date and date-time read as AEST and return null for an unreadable value", () => {
+  assert.equal(formatAestDateTime("2026-11-07T03:42:10Z"), "2026-11-07 13:42 AEST");
+  assert.equal(formatAestDateTime(new Date("2026-11-07T03:42:10Z")), "2026-11-07 13:42 AEST");
+  assert.equal(formatAestDateTime(Date.UTC(2026, 10, 7, 3, 42)), "2026-11-07 13:42 AEST");
+  // 20:00 UTC is already the next day in Brisbane.
+  assert.equal(formatAestDateTime("2026-11-06T20:00:00Z"), "2026-11-07 06:00 AEST");
+  assert.equal(formatAestDate("2026-11-06T20:00:00Z"), "2026-11-07");
+  // Midnight Brisbane is 00:00, never 24:00.
+  assert.equal(formatAestDateTime("2026-11-06T14:00:00Z"), "2026-11-07 00:00 AEST");
+  // January is daylight saving in Sydney, never in Brisbane.
+  assert.equal(formatAestDateTime("2026-01-15T13:30:00Z"), "2026-01-15 23:30 AEST");
+  for (const bad of [null, undefined, "", "not a date", Number.NaN, new Date(Number.NaN)]) {
+    assert.equal(formatAestDateTime(bad), null);
+    assert.equal(formatAestDate(bad), null);
+  }
+});
+
+test("seconds are shown only when asked for", () => {
+  assert.equal(formatAestDateTime("2026-11-07T03:42:05Z", { seconds: true }), "2026-11-07 13:42:05 AEST");
+  assert.equal(formatAestDateTime("2026-11-07T03:42:05Z", { seconds: false }), "2026-11-07 13:42 AEST");
+  assert.equal(formatAestDateTime("2026-11-07T03:42:05Z"), "2026-11-07 13:42 AEST");
+  assert.equal(formatAestDateTime("nope", { seconds: true }), null);
+});
+
+test("a customer date keeps the customer zone, and falls back to AEST without one", () => {
+  const at = "2026-11-07T03:42:10Z";
+  assert.match(adminDateTimeLabel(at, "Asia/Seoul"), /^2026-11-07,? 12:42 /);
+  // A customer zone that really is UTC is the customer's own data.
+  assert.match(adminDateTimeLabel(at, "Etc/UTC"), /^2026-11-07,? 03:42 UTC$/);
+  for (const missing of [undefined, null, "", "Not/AZone"]) {
+    assert.equal(adminDateTimeLabel(at, missing), "2026-11-07 13:42 AEST");
+  }
+  assert.equal(adminDateTimeLabel(at), "2026-11-07 13:42 AEST");
+  assert.equal(adminDateTimeLabel(null), "-");
+  assert.equal(adminDateTimeLabel("garbage", "Asia/Seoul"), "-");
 });
 
 test("a tone names a palette family, so Light can remap it", () => {

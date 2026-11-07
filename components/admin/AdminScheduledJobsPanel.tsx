@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock3, Loader2, RefreshCw } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminScheduledJobsMessages } from "@/lib/adminMessages/scheduledJobs";
 import { adminFetch } from "@/lib/adminFetch";
@@ -27,10 +28,7 @@ const dateLabel = (
   m: { never: string; unknown: string }
 ) => {
   if (!value) return m.never;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? m.unknown
-    : `${date.toISOString().replace("T", " ").slice(0, 16)} UTC`;
+  return formatAestDateTime(value) ?? m.unknown;
 };
 
 export function AdminScheduledJobsPanel() {

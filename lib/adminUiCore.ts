@@ -48,6 +48,48 @@ export function formatAestClock(date: Date): string {
   }).format(date);
 }
 
+const AEST_PARTS = new Intl.DateTimeFormat("en-CA", {
+  timeZone: BRISBANE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+function aestParts(value: Date | string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  const parts = Object.fromEntries(AEST_PARTS.formatToParts(date).map((part) => [part.type, part.value]));
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+    timeWithSeconds: `${parts.hour}:${parts.minute}:${parts.second}`,
+  };
+}
+
+/**
+ * "2026-11-07 13:42 AEST" for any instant the console shows. Returns null for a
+ * value that cannot be read, so the caller keeps its own placeholder text.
+ * `{ seconds: true }` gives "2026-11-07 13:42:05 AEST" where the seconds matter.
+ */
+export function formatAestDateTime(
+  value: Date | string | number | null | undefined,
+  options: { seconds?: boolean } = {}
+): string | null {
+  const parts = aestParts(value);
+  if (!parts) return null;
+  return `${parts.date} ${options.seconds ? parts.timeWithSeconds : parts.time} AEST`;
+}
+
+/** "2026-11-07" in Brisbane time, or null for a value that cannot be read. */
+export function formatAestDate(value: Date | string | number | null | undefined): string | null {
+  return aestParts(value)?.date ?? null;
+}
+
 const finite = (values: readonly number[]) =>
   values.length > 0 && values.every((value) => Number.isFinite(value));
 
