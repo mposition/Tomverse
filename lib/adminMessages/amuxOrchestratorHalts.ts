@@ -65,6 +65,18 @@ export const adminAmuxOrchestratorHaltsMessages = defineAdminMessages({
       `Cleared halts: ${total}. Showing ${shown}, at most the ${limit} most recently cleared.`,
     humanShown: (shown: number, total: number, limit: number) =>
       `Writes a person has to confirm: ${total}. Showing ${shown}, at most ${limit}. Each committed a change and never got an acknowledged answer.`,
+    // The big card of an open halt (admin redesign, 2026-11-07).
+    screen: {
+      checkedTitle: "What we checked",
+      optionsTitle: "What do you want to do?",
+      restartTitle: "Clear the halt and resume",
+      restartBody: "New assignments and recovery start again. The original request is not sent a second time.",
+      leaveTitle: "Leave it as it is",
+      leaveBody: "Nothing changes. New claims stay on hold until you decide.",
+      stepUpHint: "Clearing asks for a recent sign-in first.",
+      automaticNote: "No decision is needed. The server is checking and will clear it itself.",
+      causeNote: "Clearing does not fix the cause. Fix it first.",
+    },
     openTitle: "Open halts",
     clearedTitle: "Recently cleared",
     humanTitle: "Writes to confirm",
@@ -163,6 +175,17 @@ export const adminAmuxOrchestratorHaltsMessages = defineAdminMessages({
       `해제된 정지 ${total}건. 최근에 해제된 ${limit}건 한도에서 ${shown}건을 보여 줍니다.`,
     humanShown: (shown: number, total: number, limit: number) =>
       `사람 확인이 필요한 쓰기 ${total}건. ${limit}건 한도에서 ${shown}건을 보여 줍니다. 모두 변경을 커밋했고 ack된 답을 받지 못했습니다.`,
+    screen: {
+      checkedTitle: "확인한 것",
+      optionsTitle: "어떻게 할까요?",
+      restartTitle: "정지를 풀고 다시 시작",
+      restartBody: "새 배정과 복구가 다시 시작돼요. 원래 요청을 한 번 더 보내지는 않아요.",
+      leaveTitle: "그대로 두기",
+      leaveBody: "아무것도 바뀌지 않아요. 정하기 전까지 새 claim은 멈춘 채로 있어요.",
+      stepUpHint: "풀기 전에 최근 로그인 확인을 한 번 더 해요.",
+      automaticNote: "정할 일은 없어요. 서버가 확인하고 스스로 풀어요.",
+      causeNote: "풀어도 원인이 고쳐지지는 않아요. 원인부터 고쳐 주세요.",
+    },
     openTitle: "열린 정지",
     clearedTitle: "최근 해제",
     humanTitle: "확인할 쓰기",

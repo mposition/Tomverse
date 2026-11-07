@@ -94,3 +94,23 @@ test("an eight-character key alone does not satisfy the operator confirmation co
   assert.equal(amuxHaltClearReady("0000000", [true, true, true]), false);
   assert.equal(amuxHaltClearReady("00000000", [true, true, true]), true);
 });
+
+test("an open halt is one big card with what was checked and two choices; only a person's decision offers the clear form", () => {
+  const unacked = halt({ reasonCode: "unacked_write_receipt" });
+  const tree = render({ ...empty, openCount: 1, open: [unacked] });
+  const text = textOf(tree);
+  assert.match(text, /What we checked/);
+  assert.match(text, /What do you want to do\?/);
+  assert.match(text, /Clear the halt and resume/);
+  assert.match(text, /Leave it as it is/);
+  assert.match(text, /Clearing asks for a recent sign-in first/);
+  // The clear form is still the existing one, behind the owner role.
+  assert.equal(propsOf(tree).filter(p => p.haltId === unacked.haltId).length, 1);
+  assert.equal(propsOf(render({ ...empty, openCount: 1, open: [unacked] }, false)).filter(p => p.haltId === unacked.haltId).length, 0);
+  // A halt the server is already checking offers no decision, and says so.
+  const checking = textOf(render({ ...empty, openCount: 1, open: [halt()] }));
+  assert.match(checking, /The server is checking and will clear it itself/);
+  // A cause to fix is not made to look fixed by clearing it.
+  const cause = textOf(render({ ...empty, openCount: 1, open: [halt({ reasonCode: "contract_violation", requestId: null })] }));
+  assert.match(cause, /Clearing does not fix the cause/);
+});

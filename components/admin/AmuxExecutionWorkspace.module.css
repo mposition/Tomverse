@@ -11,7 +11,7 @@
 }
 .workspace :global(.text-zinc-500), .workspace :global(.text-zinc-600),
 .overlay :global(.text-zinc-500), .overlay :global(.text-zinc-600) { color:var(--amux-muted); }
-.workspace { width:100%; min-width:0; padding:20px; background:var(--amux-canvas); border:1px solid var(--amux-border); border-radius:12px; }
+.workspace { width:100%; min-width:0; padding:0; background:transparent; border:0; }
 .header, .toolbar, .summary, .columnHeading, .identity, .dialogBar, .dialogFooter { display:flex; align-items:center; gap:12px; }
 .header { justify-content:space-between; flex-wrap:wrap; margin-bottom:20px; }
 .header h2 { font-size:22px; font-weight:700; }
@@ -38,19 +38,19 @@
 .summary strong { color:var(--amux-blue); font-variant-numeric:tabular-nums; }
 .summary a { margin-left:auto; color:var(--amux-warning); text-decoration:underline; }
 .board { display:flex; gap:12px; overflow-x:auto; padding-bottom:12px; align-items:flex-start; scrollbar-gutter:stable; }
-.column { flex:1 0 225px; min-width:225px; max-width:300px; }
+.column { flex:1 0 232px; min-width:232px; max-width:340px; padding:12px; border-radius:16px; background:color-mix(in oklab, var(--amux-raised) 55%, transparent); }
 .columnHeading { justify-content:space-between; font-size:13px; font-weight:600; }
 .count { font-variant-numeric:tabular-nums; border-radius:5px; padding:2px 7px; background:var(--amux-raised); font-size:12px; }
 .columnHint { color:var(--amux-subtle); font-size:11px; min-height:36px; padding:8px 0; border-bottom:1px solid var(--amux-border); }
 .cards { overflow-y:auto; max-height:min(64vh,720px); display:flex; flex-direction:column; gap:12px; padding:12px 2px; scrollbar-gutter:stable; }
-.card { display:flex; flex-direction:column; gap:10px; padding:14px; background:var(--amux-surface); border:1px solid var(--amux-border); border-radius:9px; font-size:12px; }
+.card { display:flex; flex-direction:column; gap:10px; padding:14px; background:var(--amux-surface); border:1px solid var(--amux-border); border-radius:12px; font-size:12px; }
 .card:hover { border-color:var(--amux-blue); }
 .attention { border-color:var(--amux-warning); }
 .identity { justify-content:space-between; gap:8px; }
 .cardId { color:var(--amux-blue); font-size:11px; font-weight:500; text-align:left; word-break:break-all; cursor:pointer; }
 .cardTitle { text-align:left; font-size:14px; font-weight:600; line-height:1.55; cursor:pointer; overflow-wrap:anywhere; }
 .cardMeta { color:var(--amux-muted); font-size:11px; line-height:1.6; overflow-wrap:anywhere; }
-.cardWorker { display:flex; align-items:center; gap:7px; color:var(--amux-muted); border-top:1px solid var(--amux-border); padding-top:9px; font-size:11px; overflow-wrap:anywhere; }
+.cardWorker { display:flex; align-items:center; gap:8px; color:var(--amux-muted); border-top:1px solid var(--amux-border); padding-top:9px; font-size:11px; overflow-wrap:anywhere; }
 .cardState { font-size:11px; color:var(--amux-muted); }
 .cardWarning { color:var(--amux-warning); }
 .reasonChip { align-self:flex-start; display:inline-flex; align-items:center; min-height:22px; padding:2px 8px; border:1px solid var(--amux-warning); border-radius:999px; color:var(--amux-warning); font-size:11px; font-weight:600; }
@@ -137,3 +137,19 @@
 .laneChip { display:inline-flex; align-items:center; gap:4px; min-height:22px; padding:2px 8px; border:1px solid var(--amux-blue); border-radius:999px; background:var(--amux-selected); color:var(--amux-blue); font-size:11px; font-weight:600; }
 .groupHeadingLane { color:var(--amux-blue); }
 .laneDone { max-height:none; }
+
+/* Admin redesign (2026-11-07): five columns on the page, no frame around the board. */
+.channels { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.channel { display:inline-flex; align-items:center; gap:6px; padding:3px 10px 3px 4px; border:1px solid var(--amux-border); border-radius:999px; background:var(--amux-surface); font-size:12px; }
+.columnTitle { display:inline-flex; align-items:center; gap:8px; }
+.subLane { margin-top:14px; padding-top:12px; border-top:1px solid var(--amux-border); }
+.subLane:first-of-type { margin-top:8px; }
+.subHeading { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12px; font-weight:600; color:var(--amux-muted); }
+.cardApprove { border-color:var(--amux-blue); box-shadow:0 0 0 1px var(--amux-blue); }
+.cardStuck { border-color:var(--color-red-500); box-shadow:0 0 0 1px var(--color-red-500); background:color-mix(in oklab, var(--color-red-950) 40%, var(--amux-surface)); }
+.reasonChipStuck { border-color:var(--color-red-500); color:var(--color-red-300); }
+.safetyLink { display:inline-flex; align-items:center; justify-content:center; min-height:36px; padding:6px 12px; border:1px solid var(--color-red-500); border-radius:9px; color:var(--color-red-300); font-size:12px; font-weight:700; text-decoration:none; }
+.safetyLink:hover { background:var(--color-red-950); }
+.safetyLink:focus-visible { outline:2px solid var(--amux-blue); outline-offset:3px; }
+.workerName { flex:1; min-width:0; font-weight:600; color:var(--amux-text); }
+.elapsed { margin-left:auto; font-variant-numeric:tabular-nums; color:var(--amux-subtle); }

@@ -46,6 +46,14 @@ export const adminAmuxWorkersMessages = defineAdminMessages({
     },
     column: { worker: "Worker", status: "Status and reason", role: "Role ceiling", capability: "What it can do", next: "Next" },
     mode: { session: "Session only", v22: "Takes Tasks" },
+    // The channel-grouped cards (admin redesign, 2026-11-07).
+    screen: {
+      channelCount: (count: number) => (count === 1 ? "1 worker" : `${count} workers`),
+      bannerTitle: (count: number) => (count === 1 ? "1 worker cannot take work" : `${count} workers cannot take work`),
+      bannerBody: "Work moves to the other workers meanwhile. Open a card to see why and what turns it back on.",
+      bannerAction: "Show these workers",
+      quotaNote: "Weekly quota is not recorded per worker, so no bar is drawn.",
+    },
     empty: "No worker is registered yet.",
     noMatch: "No worker matches.",
     noCapability: "Not recorded",
@@ -229,6 +237,13 @@ export const adminAmuxWorkersMessages = defineAdminMessages({
     },
     column: { worker: "Worker", status: "상태와 이유", role: "역할 상한", capability: "할 수 있는 일", next: "다음 할 일" },
     mode: { session: "상주 세션만", v22: "Task 받음" },
+    screen: {
+      channelCount: (count: number) => `${count}명`,
+      bannerTitle: (count: number) => `워커 ${count}명이 일을 받지 못해요`,
+      bannerBody: "그동안 다른 워커가 대신 일해요. 카드를 열면 이유와 다시 켜는 방법이 나와요.",
+      bannerAction: "해당 워커만 보기",
+      quotaNote: "이번 주 쿼터는 워커별로 기록하지 않아서 막대를 그리지 않아요.",
+    },
     empty: "아직 등록된 worker가 없습니다.",
     noMatch: "찾는 worker가 없습니다.",
     noCapability: "기록 없음",

@@ -7,6 +7,7 @@ import { getServerSession } from "next-auth/next";
 import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminTabPlaceholder } from "@/components/admin/AdminTabPlaceholder";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { AmuxExecutionSupportingRecords } from "@/components/admin/AmuxExecutionSupportingRecords";
 import { AmuxCardDisplayKeyBackfillPanel } from "@/components/admin/AmuxCardDisplayKeyBackfillPanel";
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
@@ -17,6 +18,7 @@ import type { DmAdminRequestDetailView } from "@/components/admin/AmuxDecisionMa
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminAmuxScreensMessages } from "@/lib/adminMessages/amuxScreens";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { ADMIN_AMUX_EXECUTION_LEGACY_TABS, adminRedirectTarget, adminNavItemTabs, resolveAdminTabFor } from "@/lib/adminNavigation";
 import {
@@ -79,8 +81,9 @@ export default async function AdminAmuxExecutionPage({
     return read.detail === null ? { kind: "not_found" } : { kind: "detail", detail: read.detail };
   };
 
-  const [m, openAmuxEscalations, awaitingAmuxDecisionMaker, dmView] = await Promise.all([
+  const [m, screens, openAmuxEscalations, awaitingAmuxDecisionMaker, dmView] = await Promise.all([
     getAdminMessages(adminAmuxWorkspaceMessages),
+    getAdminMessages(adminAmuxScreensMessages),
     // The tabs' badges. A failed count shows no badge rather than a zero.
     countAwaitingAmuxEscalations().catch(() => null),
     countDecisionMakerAttention().catch(() => null),
@@ -148,6 +151,14 @@ export default async function AdminAmuxExecutionPage({
         {tabs}
         {drawer}
         <AdminTabPlaceholder />
+        {/* Until its own screen is built, the evidence diagnostics will draw from is in the review queue. */}
+        <AdminTile title={screens.board.diagnostics.title} description={screens.board.diagnostics.detail}
+          data-testid="amux-diagnostics-pointer">
+          <Link href="/admin/amux-execution?tab=review"
+            className="inline-flex min-h-10 w-fit items-center rounded-xl border border-zinc-700 px-4 text-sm font-bold text-zinc-100 hover:bg-zinc-800">
+            {screens.board.diagnostics.link}
+          </Link>
+        </AdminTile>
       </div>
     );
   }

@@ -229,7 +229,7 @@ export function AmuxFrontierModelRegistrationPanel({ writeAvailable, operatorId 
 
 
   return (
-    <section className="space-y-2 rounded-xl border p-4 text-sm border-zinc-800"
+    <section className="space-y-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-sm"
       data-testid="amux-frontier-model-registration">
       <div className="space-y-3 rounded-lg border p-3 border-zinc-700">
         <h4 className="font-semibold text-zinc-100">

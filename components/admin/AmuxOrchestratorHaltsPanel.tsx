@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock3, RefreshCw } from "lucide-react";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import { AdminPixelAvatar } from "@/components/admin/ui/AdminPixelAvatar";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminNetworkFailure, readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
@@ -58,7 +61,7 @@ export function AmuxOrchestratorHaltsView({ view, canClear, limits, m, locale, o
   return <section className="flex min-w-0 flex-col gap-6 text-sm leading-6 text-zinc-100" data-testid="amux-orchestrator-halts-panel">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold">{m.title}</h2><p className={`mt-1 ${muted}`}>{m.description}</p></div>
       <Link className={`inline-flex min-h-11 items-center text-blue-300 underline underline-offset-4 ${focus}`} href="/admin/amux-execution">{m.executionLink}</Link></div>
-    <div role={view === null ? "alert" : "status"} data-testid="amux-halt-status" className={`flex items-start gap-3 rounded-lg border p-4 ${view === null ? "border-red-800 bg-red-950/50 text-red-200" : blocked ? "border-amber-800 bg-amber-950/50 text-amber-200" : "border-status-success-900 bg-status-success-950/50 text-status-success-200"}`}>
+    <div role={view === null ? "alert" : "status"} data-testid="amux-halt-status" className={`flex items-start gap-3 rounded-2xl border p-4 ${view === null ? "border-red-800 bg-red-950/50 text-red-200" : blocked ? "border-amber-800 bg-amber-950/50 text-amber-200" : "border-status-success-900 bg-status-success-950/50 text-status-success-200"}`}>
       {view === null || blocked ? <AlertTriangle aria-hidden className="mt-1 size-5 shrink-0" /> : <CheckCircle2 aria-hidden className="mt-1 size-5 shrink-0" />}
       <div className="min-w-0"><h3 className="text-base font-semibold">{view === null ? m.unavailableTitle : blocked ? m.blockedTitle : m.quietTitle}</h3><p className="mt-1">{view === null ? m.unavailableBody : blocked ? m.blockedBody : m.quietBody}</p>
         {view === null ? <button className={`mt-2 inline-flex min-h-11 items-center gap-2 underline ${focus}`} onClick={onRefresh}><RefreshCw aria-hidden className="size-4" />{m.refresh}</button> : null}</div></div>
@@ -66,14 +69,14 @@ export function AmuxOrchestratorHaltsView({ view, canClear, limits, m, locale, o
     <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]"><div className="min-w-0 space-y-4">
       {view ? <><div><h3 className="text-lg font-semibold">{m.openTitle}</h3><p className={`mt-1 ${muted}`} data-testid="amux-halts-open-count">{m.openShown(view.open.length, view.openCount, limits.open)}</p></div>
         {view.open.length === 0 ? <p className={muted}>{m.noOpen}</p> : view.open.map(halt => HaltCard({ halt, m, locale, canClear, showCleared: false }))}</> : null}</div>
-      <aside className="h-fit rounded-lg border border-zinc-800 bg-zinc-900 p-5" aria-labelledby="amux-halt-guide"><h3 id="amux-halt-guide" className="text-base font-semibold">{m.guideTitle}</h3>
+      <aside className="h-fit rounded-2xl border border-zinc-800 bg-zinc-900 p-5" aria-labelledby="amux-halt-guide"><h3 id="amux-halt-guide" className="text-base font-semibold">{m.guideTitle}</h3>
         <dl className="mt-4 space-y-5">{m.guide.map((item, index) => <div key={item.title}><dt className={`font-semibold ${index === 0 ? "text-status-success-300" : index === 2 ? "text-amber-300" : ""}`}>{item.title}</dt><dd className={`mt-1 ${muted}`}>{item.body}</dd></div>)}</dl>
         {view?.humanRequiredCount ? <a href="#amux-halts-writes" className={`mt-3 inline-flex min-h-11 items-center text-blue-300 underline ${focus}`}>{m.humanTitle}</a> : null}</aside></div>
     {view ? <><section id="amux-halts-writes" className="min-w-0 space-y-3" aria-label={m.humanTitle}><h3 className="text-lg font-semibold">{m.humanTitle}</h3>
       <p className={muted} data-testid="amux-halts-human-count">{m.humanShown(view.humanRequired.length, view.humanRequiredCount, limits.human)}</p>
       {view.humanRequired.length === 0 ? <p className={muted}>{m.noHuman}</p> : <ul className="space-y-4" data-testid="amux-halts-human-list">{view.humanRequired.map(write => <li key={write.requestId} className="rounded-lg border border-zinc-800 p-4">{WriteSummary({ write, m, locale })}</li>)}</ul>}</section>
-      <section className="min-w-0 space-y-3" aria-label={m.clearedTitle}><h3 className="text-lg font-semibold">{m.clearedTitle}</h3><p className={muted}>{m.clearedShown(view.cleared.length, view.clearedCount, limits.cleared)}</p>
-        {view.cleared.length === 0 ? <p className={muted}>{m.noCleared}</p> : <ul className="space-y-3">{view.cleared.map(halt => <li key={halt.haltId}>{HaltCard({ halt, m, locale, canClear: false, showCleared: true })}</li>)}</ul>}</section></> : null}
+      <AdminTile as="section" aria-label={m.clearedTitle} title={m.clearedTitle} description={m.clearedShown(view.cleared.length, view.clearedCount, limits.cleared)}>
+        {view.cleared.length === 0 ? <p className={muted}>{m.noCleared}</p> : <ul className="space-y-3">{view.cleared.map(halt => <li key={halt.haltId}>{HaltCard({ halt, m, locale, canClear: false, showCleared: true })}</li>)}</ul>}</AdminTile></> : null}
   </section>;
 }
 
@@ -89,6 +92,33 @@ function HaltCard({ halt, canClear, showCleared, m, locale }: { halt: AmuxOrches
   const incompleteClear = !showCleared && amuxOrchestratorHaltReasonAllowsAutoClear(halt.reasonCode)
     && halt.requestId !== null && halt.write?.requestId === halt.requestId
     && halt.write.resolution === "no_commit" && halt.write.receiptCount === 0 && halt.write.ackedAt === null;
+  const tone = attention === "automatic_pending" ? "info" : attention === "cause_required" ? "bad" : "warn";
+  const checks = <dl className="grid min-w-0 gap-x-4 gap-y-2 rounded-xl bg-zinc-950/50 p-3 sm:grid-cols-[auto_minmax(0,1fr)]"><dt className={muted}>{m.admission}</dt><dd>{halt.write ? m.admissionPresent : attention === "automatic_pending" ? m.admissionPlaceholderPending : m.admissionMissing}</dd><dt className={muted}>{m.openedAt}</dt><dd><DateValue value={halt.openedAt} locale={locale} /></dd></dl>;
+  const technical = <details className="mt-3 min-w-0"><summary className={`min-h-11 cursor-pointer py-2 font-medium ${focus}`}>{m.reason} · <code className="break-all font-mono text-xs">{halt.reasonCode}</code></summary><dl className="grid gap-1 break-all text-xs sm:grid-cols-[auto_minmax(0,1fr)]"><dt>{m.haltId}</dt><dd className="font-mono">{halt.haltId}</dd><dt>{m.haltKey}</dt><dd className="font-mono">{halt.haltKey}</dd><dt>{m.request}</dt><dd className="font-mono">{halt.requestId ?? m.none}</dd></dl></details>;
+  if (!showCleared) {
+    return <article key={halt.haltId} className="min-w-0 rounded-2xl border-2 border-red-500/50 bg-zinc-900 p-5" data-testid="amux-halt-row" data-attention={attention}>
+      <div className="flex min-w-0 items-start gap-4">
+        <span className="relative shrink-0"><AdminPixelAvatar team="amux" tile={72} unit={3} body={false} /><span aria-hidden="true" className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">!</span></span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2"><AdminStatusChip tone={tone}>{m.category[attention]}</AdminStatusChip><span className={`text-xs ${muted}`}><DateValue value={halt.openedAt} locale={locale} /></span></div>
+          <h4 className="mt-1 text-xl font-bold text-white">{m.reasonLabels[halt.reasonCode]}</h4>
+          <p className={`mt-1 text-sm ${muted}`}>{incompleteClear ? m.autoClearIncomplete : m.categoryDetail[attention]}</p>
+        </div>
+      </div>
+      <div className="mt-5 grid min-w-0 gap-6 lg:grid-cols-2">
+        <div className="min-w-0 space-y-3"><h5 className="font-bold">{m.screen.checkedTitle}</h5>{checks}{halt.write ? WriteSummary({ write: halt.write, m, locale }) : null}</div>
+        <div className="min-w-0 space-y-3"><h5 className="font-bold">{m.screen.optionsTitle}</h5>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-zinc-800 p-4"><p className="font-bold">{m.screen.restartTitle}</p><p className={`mt-1 text-sm ${muted}`}>{m.screen.restartBody}</p>
+              {attention === "automatic_pending" ? <p className="mt-2 text-xs text-blue-300">{m.screen.automaticNote}</p> : attention === "cause_required" ? <p className="mt-2 text-xs text-amber-300">{m.screen.causeNote}</p> : canClear ? <p className="mt-2 text-xs text-zinc-500">{m.screen.stepUpHint}</p> : null}</div>
+            <div className="rounded-xl border border-zinc-800 p-4"><p className="font-bold">{m.screen.leaveTitle}</p><p className={`mt-1 text-sm ${muted}`}>{m.screen.leaveBody}</p></div>
+          </div>
+          {attention !== "automatic_pending" ? canClear ? <ClearHaltForm haltId={halt.haltId} /> : <p className={`mt-3 ${muted}`}>{m.clearOwnerOnly}</p> : null}
+        </div>
+      </div>
+      {technical}
+    </article>;
+  }
   return <article key={halt.haltId} className="min-w-0 rounded-lg border border-zinc-800 p-4" data-testid="amux-halt-row" data-attention={showCleared ? "cleared" : attention}>
     <div className="flex flex-wrap items-start justify-between gap-2"><h4 className="font-semibold">{m.reasonLabels[halt.reasonCode]}</h4><span className={`inline-flex items-center gap-1 text-xs font-semibold ${automatic ? "text-status-success-300" : "text-amber-300"}`}>
       {automatic ? <CheckCircle2 className="size-4" aria-hidden /> : attention === "automatic_pending" ? <Clock3 className="size-4" aria-hidden /> : <AlertTriangle className="size-4" aria-hidden />}

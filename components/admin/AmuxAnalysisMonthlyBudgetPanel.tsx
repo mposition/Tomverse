@@ -121,7 +121,7 @@ export function AmuxAnalysisMonthlyBudgetPanel({ available, operatorId }: {
     finally { setBusy(false); }
   };
   return <section aria-labelledby="amux-analysis-monthly-budget-title"
-    className="space-y-3 rounded-lg border p-4 text-sm border-zinc-700">
+    className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-sm">
     <h4 id="amux-analysis-monthly-budget-title" className="font-semibold">{m.title}</h4>
     <p>{m.hint}</p>
     {snapshot ? <dl className="grid grid-cols-2 gap-2">
