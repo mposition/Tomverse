@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, Download, Loader2, RotateCcw, XCircle } from "lucide-react";
@@ -72,12 +73,7 @@ const statusClass = (status: string) => {
   return "border-amber-500/30 bg-amber-500/10 text-amber-300";
 };
 
-const dateLabel = (value: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string | null) => formatAestDateTime(value) ?? "-";
 
 const money = (amountMinor: number | null, currencyValue: string | null) => {
   const currency = normalizeBillingCurrency(currencyValue || "USD") || "USD";

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { AlertTriangle, ArrowRight, Bot, Clock, GitPullRequest, GripVertical, MoveRight } from "lucide-react";
@@ -106,7 +107,7 @@ type Parent = { kind: "root" } | { kind: "unassigned" } |
 const keyOf = (parent: Parent) => parent.kind === "root" || parent.kind === "unassigned" ?
   parent.kind :
   `${parent.kind}:${parent.id}`;
-const date = (value: string) => new Date(value).toLocaleString();
+const date = (value: string) => formatAestDateTime(value, { seconds: true }) ?? "-";
 const USD = (micro: string | null) => micro === null ? null :
   (Number(micro) / 1_000_000).toFixed(4);
 const assessmentValue = (value: unknown) => value && typeof value === "object" &&

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Clipboard, Eye, Loader2, Search, ShieldCheck, X } from "lucide-react";
@@ -38,11 +39,7 @@ type Props = {
   requestedEntry?: AdminAuditRow | null;
 };
 
-const dateTimeLabel = (value: string) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateTimeLabel = (value: string) => formatAestDateTime(value) ?? "-";
 
 const actionTone = (action: string) => {
   if (action.includes("delete") || action.includes("refund.approve")) {
@@ -120,7 +117,7 @@ export function AdminAuditPanel({
   const copyAudit = async (row: AdminAuditRow) => {
     const text = [
       "Tomverse Admin Audit Event",
-      `Time: ${dateTimeLabel(row.createdAt)} UTC`,
+      `Time: ${dateTimeLabel(row.createdAt)}`,
       `Actor: ${row.actorEmail || row.actorUserId || "Unknown admin"}`,
       `Action: ${row.action}`,
       `Target: ${row.targetType} ${row.targetId || ""}`.trim(),
@@ -221,7 +218,7 @@ export function AdminAuditPanel({
                 {requestedEntry.action}
               </p>
               <p className="mt-1 text-xs text-zinc-400">
-                {dateTimeLabel(requestedEntry.createdAt)} UTC ·{" "}
+                {dateTimeLabel(requestedEntry.createdAt)} ·{" "}
                 {requestedEntry.actorEmail ||
                   requestedEntry.actorUserId ||
                   m.unknownAdmin}{" "}
@@ -400,7 +397,7 @@ export function AdminAuditPanel({
                 </p>
                 <h3 className="mt-2 text-xl font-black text-white">{detail.action}</h3>
                 <p className="mt-1 text-sm text-zinc-500">
-                  {dateTimeLabel(detail.createdAt)} UTC / {detail.actorEmail || m.unknownAdmin}
+                  {dateTimeLabel(detail.createdAt)} / {detail.actorEmail || m.unknownAdmin}
                 </p>
               </div>
               <button

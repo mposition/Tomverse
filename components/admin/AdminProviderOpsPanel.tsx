@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, Play, RotateCcw, ShieldAlert } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
@@ -63,12 +64,7 @@ const providerLabel: Record<AiProvider, string> = {
   sail: "Sail Research",
 };
 
-const dateLabel = (value: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string | null) => formatAestDateTime(value) ?? "-";
 
 const statusClass = (status: string) => {
   if (status === "ok" || status === "resolved") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
@@ -311,7 +307,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
                 </div>
                 <p className="mt-1 text-zinc-400">{check.message || check.errorCode || m.noDetails}</p>
                 <p className="mt-1 text-zinc-600">
-                  {dateLabel(check.createdAt)} UTC / {check.latencyMs ?? "-"} ms
+                  {dateLabel(check.createdAt)} / {check.latencyMs ?? "-"} ms
                 </p>
               </div>
             ))}

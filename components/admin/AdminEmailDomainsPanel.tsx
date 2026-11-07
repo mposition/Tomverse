@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import type { SendingDomainReport } from "@/lib/emailSendingDomains";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminEmailPolicyMessages } from "@/lib/adminMessages/emailPolicy";
@@ -170,7 +171,7 @@ export async function AdminEmailDomainsPanel({
 
       <p className="mt-5 text-xs leading-5 text-zinc-500">
         {blocking.length > 0 ? m.blockingCount(blocking.length) : ""}
-        {m.readAt(report.checkedAt.replace("T", " ").slice(0, 16))}
+        {m.readAt(formatAestDateTime(report.checkedAt) ?? report.checkedAt)}
       </p>
     </section>
   );
