@@ -2275,6 +2275,39 @@ export function MarketingPostAssets({
   );
 }
 
+/**
+ * A hand-posted account's approved words, whole and with their line breaks,
+ * and a button that copies them: the person posts them by hand, so after
+ * approval the queue no longer shows them and they had nowhere to be read
+ * (owner 2026-11-07).
+ */
+export function MarketingManualPostBody({ body, m }: { body: unknown; m: Record<string, string> }) {
+  const [copied, setCopied] = useState(false);
+  const words = text(body);
+  if (!words) return null;
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3" data-testid="marketing-manual-post-body">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-zinc-500">{m.manualPostBody}</span>
+        <button
+          type="button"
+          className="rounded-md border border-zinc-700 px-2 py-0.5 text-xs text-zinc-200 hover:border-zinc-500 hover:text-white"
+          data-testid="marketing-manual-post-copy"
+          onClick={() => {
+            void navigator.clipboard?.writeText(words).then(
+              () => setCopied(true),
+              () => setCopied(false),
+            );
+          }}
+        >
+          {copied ? m.manualPostBodyCopied : m.manualPostBodyCopy}
+        </button>
+      </div>
+      <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-100">{words}</p>
+    </div>
+  );
+}
+
 function MarketingRow({
   section,
   row,
@@ -2356,6 +2389,7 @@ function MarketingRow({
             }
           />
         </div>
+        <MarketingManualPostBody body={row.renderedText} m={m} />
         <MarketingPostAssets assetIds={row.assetIds} downloadable={str(row.provider) === "manual"} m={m} />
       </>
     );
