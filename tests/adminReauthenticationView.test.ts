@@ -358,7 +358,7 @@ test("high-risk panels link to the step-up flow, the layout to the session flow"
   const securityControls = readRepoCode(
     "components/admin/AdminUserSecurityControls.tsx"
   );
-  assert.match(securityControls, /adminRecentAuthenticationHref\(pathname\)/);
+  assert.match(securityControls, /adminRecentAuthenticationHref\(returnTo \?\? pathname\)/);
   assert.doesNotMatch(securityControls, /adminReauthenticationHref\(/);
 
   const platformPanel = readRepoCode("components/admin/PlatformSettingsPanel.tsx");

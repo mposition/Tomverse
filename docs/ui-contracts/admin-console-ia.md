@@ -94,8 +94,8 @@ What moved, and what it means for the paragraphs below (which keep the names
 they were written under):
 
 - **Command Center, Customers and Revenue** became Home and Customers &
-  Revenue. Billing is Plans & pricing and its editor's client tabs are URL tabs
-  (`urlTabs`): the address names the section the screen shows. Prices and
+  Revenue. Billing is Plans & pricing and its editor follows the URL
+  (`initialTab`): the address names the section the screen shows. Prices and
   Diagnostics are tabs of their own; Diagnostics holds what sat under the
   promotion editor.
 - **AI Agents** is a new group. Marketing, Product research, Engineering, SRE
@@ -841,3 +841,31 @@ The three Home entries were redrawn from the approved designs. No loader, route,
 - **Decisions** (`lib/adminDecisionInbox.ts`, `lib/adminDecisionInboxLoad.ts`, `components/admin/AdminWorkQueuePanel.tsx`) is one inbox read once: the work queue's rows (with the time each started waiting) plus the sidebar badge counts for the agent and AMUX approvals, which are counted but not listed row by row (marketing drafts, product suggestions, AMUX escalations, orchestrator halts, Decision Maker requests). The area tabs are the same list through a filter. It only reads and links: the decision is made on the screen that owns it, so it has no write, step-up or confirmation. A line whose screen the role cannot open (`adminHrefIsVisibleTo`) is left out. A source that failed is named in a notice and an inbox is never drawn as clear while one is missing. The sidebar's Decisions badge keeps its own, narrower definition (refunds, feedback, privacy requests), so the inbox total can be larger than the badge.
 - **Metrics** (`components/admin/AdminUsageAnalyticsPanel.tsx`, `AdminProductAnalyticsPanel.tsx`, `AdminReviewUseSummary.tsx`) puts the period picker (`?period=`, unchanged) at the top right of the usage tab, with four numbers, the active-accounts line (the previous period dashed where the report's fixed 30-day series can hold both), model share by provider, a weekday-by-hour heatmap in AEST, country share and the footer figures. The model table, weekly and monthly users, new-account return and the distributions are folded under "More detail". The product tab draws the funnel from the ledger's 30-day event counts, sign-up sources and the launch funnel, with the raw event table, Google Analytics delivery and campaign lists folded below. Elements the data does not hold are not drawn (a monthly revenue history, a cohort retention table, a plan donut on the product tab, the review model-agreement matrix): no store or migration was added for them.
 - Shared parts added to `components/admin/ui/`: `AdminLineChart`, `AdminHeatmap`, `AdminFunnel`, `AdminShareList`, `AdminSegmentedLinks`, `AdminProviderMark`. Regression tests: `tests/adminDecisionInbox.test.mjs`, `tests/adminLineChartCore.test.mjs`, `tests/client/adminHomeRender.test.tsx`.
+
+### Customers & Revenue screens (2026-11-07)
+
+The six screens of the group are drawn from the shared parts above and change
+no route, role, step-up or audit behaviour:
+
+- **Users** is a list only (five count cards that filter it, search, one
+  `AdminDataTable`). A customer is `/admin/users/[userId]` with `?tab=`
+  `overview`, `billing`, `security`, `conversations`, `notes` (the
+  `user-detail` entry's tabs); the detail is read once in the browser and kept
+  across sections. The list has no per-user country or last-activity read, so
+  it shows join date and time zone; the credit bar needs the plan's daily
+  limit and is left off without one.
+- **Security** shows the account's state, then the actions as cards (restrict
+  AI, suspend, sign out everywhere, unlink a sign-in, delete). A card opens to
+  the shared reason (required), expiry (only for the two actions that take
+  one) and note. Every card sends the route's existing payload; the
+  confirming button carries the step-up shield. There is no "notify the user"
+  field: the route has none, and adding one would be a new send.
+- **Plans & pricing** has one save bar. Every change goes through the review
+  dialog before the one PATCH; the former saves that skipped the review are
+  gone.
+- **Refunds** approve through `AdminConfirmDialog` with the step-up note. The
+  monthly bars and totals are computed from the rows read, and say so.
+- **Credit ledger** is read-only; its totals describe the rows read, not a
+  period.
+- **Support**'s Auto-fix review tab is the same newest reports as the inquiries
+  tab, seen by the automation's case. It has no store of its own and no write.

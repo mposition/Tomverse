@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminFeedbackInboxMessages } from "@/lib/adminMessages/feedbackInbox";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import type { SupportTriageHealth } from "@/lib/supportTriageCycle";
 
@@ -23,7 +25,7 @@ const runLine = (run: SupportTriageHealth["worker"], m: Messages) =>
 /** The last runs, today's counts and the overdue warning. Hook-free, so a render test can walk it. */
 export function SupportTriageHealthLine({ health, m }: { health: SupportTriageHealth; m: Messages }) {
   return (
-    <div className="mt-3 text-xs leading-5 text-zinc-400" data-testid="support-triage-health">
+    <div className="text-xs leading-5 text-zinc-400" data-testid="support-triage-health">
       <p>
         {m.triageHealthWorker}: {runLine(health.worker, m)} · {m.triageHealthRetention}: {runLine(health.retention, m)}
       </p>
@@ -31,7 +33,7 @@ export function SupportTriageHealthLine({ health, m }: { health: SupportTriageHe
         {m.triageHealthReportsToday}: {health.reportsToday} · {m.triageHealthFailedToday}: {health.failedRunsToday}
       </p>
       {health.stale ? (
-        <p role="alert" className="text-amber-300" data-testid="support-triage-health-stale">
+        <p role="alert" className="mt-1 rounded-xl bg-amber-500/10 px-3 py-2 font-bold text-amber-300" data-testid="support-triage-health-stale">
           {m.triageHealthStale}
         </p>
       ) : null}
@@ -151,17 +153,14 @@ export function SupportTriageModelPanel() {
   };
 
   return (
-    <section
-      className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4"
+    <AdminTile
       data-testid="support-triage-model-panel"
-      aria-labelledby="support-triage-model-title"
+      aria-label={m.triageModelTitle}
+      title={m.triageModelTitle}
+      description={m.triageModelHelp}
     >
-      <h2 id="support-triage-model-title" className="text-sm font-bold text-white">
-        {m.triageModelTitle}
-      </h2>
-      <p className="mt-1 text-xs leading-5 text-zinc-400">{m.triageModelHelp}</p>
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-zinc-200">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="font-bold text-zinc-100">
           {enabled === null ? m.triageSwitchUnknown : enabled ? m.triageSwitchOn : m.triageSwitchOff}
         </span>
         {enabledSource ? (
@@ -169,17 +168,17 @@ export function SupportTriageModelPanel() {
             {enabledSource === "admin" ? m.triageSwitchFromAdmin : m.triageSwitchFromEnvironment}
           </span>
         ) : null}
-        <button
-          type="button"
+        <AdminWriteButton
+          variant="secondary"
+          stepUp
           data-testid="support-triage-switch"
           onClick={() => void put({ enabled: !enabled })}
           disabled={enabled === null || busy}
-          className="min-h-11 rounded-xl border border-zinc-700 px-4 text-sm font-bold text-zinc-100 transition hover:bg-zinc-800 disabled:opacity-50"
         >
           {enabled ? m.triageSwitchTurnOff : m.triageSwitchTurnOn}
-        </button>
+        </AdminWriteButton>
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <label className="sr-only" htmlFor="support-triage-model-select">
           {m.triageModelTitle}
         </label>
@@ -188,7 +187,7 @@ export function SupportTriageModelPanel() {
           value={choice}
           onChange={(event) => setChoice(event.target.value)}
           disabled={options === null || busy}
-          className="min-h-11 min-w-64 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100"
+          className="min-h-11 min-w-0 max-w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 sm:min-w-64"
         >
           <option value="">{m.triageModelOff}</option>
           {(options ?? []).map((option) => (
@@ -197,21 +196,20 @@ export function SupportTriageModelPanel() {
             </option>
           ))}
         </select>
-        <button
-          type="button"
+        <AdminWriteButton
+          stepUp
           onClick={() => void put({ modelId: choice === "" ? null : choice })}
           disabled={options === null || busy || (choice === (saved ?? "") && (modelSource === "admin" || saved === null))}
-          className="min-h-11 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 text-sm font-bold text-blue-100 transition hover:bg-blue-500/20 disabled:opacity-50"
         >
           {m.triageModelSave}
-        </button>
+        </AdminWriteButton>
         {modelSource === "admin" || saved !== null ? (
           <span className="text-xs text-zinc-500" data-testid="support-triage-model-source">
             {modelSource === "admin" ? m.triageSwitchFromAdmin : m.triageSwitchFromEnvironment}
           </span>
         ) : null}
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3">
+      <div className="flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3">
         <label className="text-sm text-zinc-200" htmlFor="trace-analysis-mode">
           {m.traceAnalysisModeLabel}
         </label>
@@ -234,36 +232,36 @@ export function SupportTriageModelPanel() {
           </p>
         )}
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3">
+      <div className="flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3">
         <span className="text-sm text-zinc-200">
           {m.developCiRepairLabel}:{" "}
           {developCiRepair === null ? m.triageSwitchUnknown : developCiRepair ? m.triageSwitchOn : m.triageSwitchOff}
         </span>
-        <button
-          type="button"
+        <AdminWriteButton
+          variant="secondary"
+          stepUp
           data-testid="develop-ci-repair-switch"
           onClick={() => void put({ developCiRepair: !developCiRepair })}
           disabled={developCiRepair === null || busy}
-          className="min-h-11 rounded-xl border border-zinc-700 px-4 text-sm font-bold text-zinc-100 transition hover:bg-zinc-800 disabled:opacity-50"
         >
           {developCiRepair ? m.triageSwitchTurnOff : m.triageSwitchTurnOn}
-        </button>
+        </AdminWriteButton>
         <p className="w-full text-xs leading-5 text-zinc-400">{m.developCiRepairHelp}</p>
       </div>
       {health ? <SupportTriageHealthLine health={health} m={m} /> : null}
       {reauthenticationRequired ? (
-        <p role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-sm text-amber-300">
+        <p role="alert" className="flex flex-wrap items-center gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
           {m.triageModelReauthenticate}
-          <a className="font-medium underline" href={adminRecentAuthenticationHref(PAGE_PATH)}>
+          <a className="font-bold underline" href={adminRecentAuthenticationHref(PAGE_PATH)}>
             {m.triageModelSignInAgain}
           </a>
         </p>
       ) : null}
       {notice ? (
-        <p role="status" className={`mt-2 text-sm ${notice.tone === "ok" ? "text-zinc-200" : "text-red-300"}`}>
+        <p role="status" className={`text-sm ${notice.tone === "ok" ? "text-zinc-200" : "text-red-300"}`}>
           {notice.text}
         </p>
       ) : null}
-    </section>
+    </AdminTile>
   );
 }
