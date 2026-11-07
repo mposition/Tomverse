@@ -78,7 +78,8 @@ test("the board groups the server lanes into five columns without changing a lan
   assert.ok(board.includes("workerChannels?.[card.worker]"));
   assert.equal(board.includes("amuxWorkerChannel("), false);
   const executionPage = read("app/(site)/(application)/admin/amux-execution/page.tsx");
-  assert.ok(executionPage.includes("workerChannels={registry === null ? null : amuxWorkerChannels(registry.rows)}"));
+  assert.ok(executionPage.includes("workerChannels={workerChannels}"));
+  assert.ok(read("lib/amux/adminBoardWorkerChannels.ts").includes("amuxWorkerChannels(registry.rows)"), "the channel is the registered class");
   // A worker avatar and channel badge, and an age read when the board was read, not on each render.
   assert.ok(board.includes('<AdminPixelAvatar team="amux"'));
   assert.ok(board.includes("setNowMs(Date.now())"));
