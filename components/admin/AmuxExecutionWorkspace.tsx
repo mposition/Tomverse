@@ -11,6 +11,7 @@ import { AmuxBoardAttentionLane, AMUX_ATTENTION_LANE_ROWS, type AmuxBoardOwnerQu
 import { AmuxBoardPastWork } from "./AmuxBoardPastWork";
 import { AmuxCardListPanel } from "./AmuxCardListPanel";
 import { AmuxTaskQuestionSection } from "./AmuxWorkerQuestion";
+import { AmuxLegacyCardPanel, type AmuxLegacyCardView } from "./AmuxLegacyCardPanel";
 import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
 import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent } from "react";
@@ -87,6 +88,8 @@ type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
   brief: string | null;
   feedback: AmuxTaskFeedbackProjection | null;
   outcomeWriteEnabled: boolean;
+  /** A legacy WORKBOARD card's recreate and close; null or absent for any other card. */
+  legacyCard?: AmuxLegacyCardView | null;
   result: { attemptId: string; state: "available" | "purged";
     createdAt: string; text: string | null; sha256: string | null;
     patch: { state: "available"; baseSha: string; sha256: string } |
@@ -447,7 +450,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         setSelected(result);
         // A card waiting on the owner opens where the owner acts on it.
         // A worker question is answered on the overview, where it is shown.
-        if (canReviewCards && result.escalations.length > 0 && !preferOverview)
+        // A legacy WORKBOARD card has no review decision; it opens on its recreate and close.
+        if (canReviewCards && result.escalations.length > 0 && !preferOverview && !result.legacyCard)
           setDetailTab("ownerReview");
       }
     } catch (reason) { if (request === detailRequest.current)
@@ -992,6 +996,10 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                 }} />
             </div>}
             <div id="amux-panel-overview" role="tabpanel" aria-labelledby="amux-tab-overview" hidden={detailTab !== "overview"} className={styles.panel}>
+      {selected.legacyCard && <AmuxLegacyCardPanel key={selected.id + ":" + selected.revision}
+        taskId={selected.id} revision={selected.revision} view={selected.legacyCard} canAct={canReviewCards}
+        // The board moves the card to the archive; the panel keeps its answer and the idea link.
+        onChanged={() => void refreshBoard()} />}
       {selected.ownerQuestion && <AmuxTaskQuestionSection key={selected.id + ":" + selected.revision}
         taskId={selected.id} canAnswer={canReviewCards} onAnswered={() => {
           void refreshBoard();

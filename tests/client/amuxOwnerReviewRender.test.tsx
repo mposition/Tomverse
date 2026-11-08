@@ -954,3 +954,24 @@ test("an owner metadata timeout resolves unavailable instead of leaving loading 
   assert.equal(controller.signal.aborted, true);
   assert.equal(AMUX_OWNER_EXECUTION_READ_TIMEOUT_MS, 10_000);
 });
+
+test("a card the recovery inspections do not apply to says so instead of offering their buttons", () => {
+  const stopped = review({
+    task: { ...review().task, status: "blocked" },
+    last_attempt: { ...review().last_attempt!, outcome: "expired", to_status: "blocked" },
+    review_context: { ...review().review_context, result_sha256: null, last_attempt_reason: "usage_outcome_unknown" },
+    review_report: { ...review().review_report!, worker_report: null, worker_report_verified: false },
+  });
+  const panel = (tree: ReactNode) => propsOf(tree).filter((props) => "identity" in props && "returnTo" in props);
+  const legacy = render({ ...stopped, task: { ...stopped.task, recovery_inspectable: false } });
+  assert.equal(byTestId(legacy, "admin-amux-technical-recovery").length, 1);
+  assert.equal(panel(legacy).length, 0);
+  assert.equal(byTestId(legacy, "admin-amux-recovery-not-inspectable").length, 1);
+  assert.match(textOf(legacy), /not a v22 Task/);
+  // A v4 Task, or a server that does not send the flag, keeps the inspections.
+  for (const task of [{ ...stopped.task, recovery_inspectable: true }, stopped.task]) {
+    const tree = render({ ...stopped, task });
+    assert.equal(panel(tree).length, 1);
+    assert.equal(byTestId(tree, "admin-amux-recovery-not-inspectable").length, 0);
+  }
+});

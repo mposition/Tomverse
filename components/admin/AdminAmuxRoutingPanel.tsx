@@ -58,6 +58,8 @@ export type AmuxReviewDetail = {
     status: string;
     revision: number;
     due_parse_state: string;
+    /** False for a card the recovery inspections do not apply to (not a v4 Task). */
+    recovery_inspectable?: boolean;
   };
   last_attempt: {
     id: string;
@@ -594,7 +596,10 @@ export function AmuxOwnerReviewView({
             <h5 className="font-bold">{m.technicalRecovery}</h5>
           </div>
           <p className="mt-3 text-sm leading-6 text-amber-100/90">{m.recoveryPreparationIntro}</p>
-          {canInspectCards && <AmuxOwnerRecoveryInspectionPanel
+          {canInspectCards && review.task.recovery_inspectable === false &&
+            <p className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3 text-sm leading-6 text-zinc-200"
+              data-testid="admin-amux-recovery-not-inspectable">{m.recoveryNotInspectable}</p>}
+          {canInspectCards && review.task.recovery_inspectable !== false && <AmuxOwnerRecoveryInspectionPanel
             key={`${review.task.id}:${review.task.revision}:${review.last_attempt?.id ?? "none"}`}
             identity={{ taskId: review.task.id, taskRevision: review.task.revision,
               attemptId: review.last_attempt?.id ?? null }}
