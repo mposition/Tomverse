@@ -8,7 +8,9 @@ the same ingredients in a new composition every day.
   - Sauna.ai: cream background, serif headline, tool chips dropped into a
     feature list.
   - Chase AI: laptop, floating chips, a checklist sticky note, an "in N steps"
-    carousel cover.
+    headline. Chase uses that as a carousel cover; our cards are posted one at
+    a time, so a card shows all its steps and carries no page marker such as
+    "1/5".
   - Runable: a physical object, such as a receipt or a ticket, that explains
     the idea at a glance.
 - Rejected styles:
