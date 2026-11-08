@@ -1816,7 +1816,7 @@ export function PricingPageContent() {
                 {lang === "ko" && planId !== "free" && (ctaState === "signed_out" || ctaState === "upgrade") ? (
                   <p data-testid={`pricing-selected-billing-${planId}`} className="mt-3 text-sm font-bold leading-6">
                     {subscriptionInterval === "annual" ? `연 ${annualPrice} 일괄 결제` : `${salePrice ? "첫 달 " : "월 "}${salePrice || displayPrice} 결제`}
-                    <span className="mt-1 block font-normal">세전 금액입니다. 할인 적용과 최종 결제 조건은 다음 확인창에서 확인하세요.</span>
+                    <span className="mt-1 block font-normal">할인 적용과 최종 결제 조건은 다음 확인창에서 확인하세요.</span>
                   </p>
                 ) : null}
                 {ctaState === "manage_plan" &&
