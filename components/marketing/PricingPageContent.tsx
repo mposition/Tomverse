@@ -1451,6 +1451,8 @@ export function PricingPageContent() {
               data-cta-state={ctaState}
               data-requested-target={isRequestedTarget ? "true" : undefined}
               aria-labelledby={`pricing-plan-name-${planId}`}
+              // Korean desktop subgrid has eight in-flow rows (eyebrow through
+              // features); keep the span and alignment regression with that structure.
               className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm [overflow-wrap:anywhere] ${lang === "ko" ? "lg:row-span-8 lg:grid lg:grid-rows-subgrid" : ""} ${
                 plan.highlighted ? "border-blue-600 bg-blue-700 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
