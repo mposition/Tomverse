@@ -145,6 +145,8 @@ export const APPEND_ONLY_LEDGER_TABLES = [
   "AmuxV22TaskRecoveryEvidence",
   "AmuxV22TaskRecoveryApproval",
   "AmuxV22TaskRecoveryRiskAcceptance",
+  "AmuxV22TaskRecoveryPreApproval",
+  "AmuxV22TaskRecoveryPreApprovalResult",
   "AmuxV22ReadOnlyLaunchCheck",
   "AmuxV22ReadOnlyLaunchProof",
   "AmuxV22ApiModelAccessEvidence",
@@ -500,6 +502,8 @@ export const PROTECTED_TABLES = [
     "AmuxV22TaskRecoveryEvidence",
     "AmuxV22TaskRecoveryApproval",
     "AmuxV22TaskRecoveryRiskAcceptance",
+    "AmuxV22TaskRecoveryPreApproval",
+    "AmuxV22TaskRecoveryPreApprovalResult",
     "AmuxV22ReadOnlyLaunchCheck",
     "AmuxV22ReadOnlyLaunchProof",
   ].map((table) => ({
@@ -1714,30 +1718,63 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/amux/v22TaskRecoveryService.ts",
     table: "AmuxV22TaskRecoveryInspectionRequest",
     tableMentions: 7,
-    writeVerbs: 4,
+    writeVerbs: 5,
     reason:
-      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable inspection request. It adds no writer; the raw-SQL verbs remain the four reviewed SELECT FOR UPDATE locks (v46 adds the live-profile runtime lock) and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
+      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable inspection request. It adds no writer; the raw-SQL verbs remain the reviewed SELECT FOR UPDATE locks (v46 adds the live-profile runtime lock) and all ledger mutations use protected Prisma delegates with same-transaction audit writes. Owner decision 2026-11-08 adds a fifth: the pre-approval row lock that serializes a consent's single settlement.",
   },
   {
     path: "lib/amux/v22TaskRecoveryService.ts",
     table: "AmuxV22TaskRecoveryEvidence",
     tableMentions: 5,
-    writeVerbs: 4,
+    writeVerbs: 5,
     reason:
-      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable evidence receipt. It adds no writer; the raw-SQL verbs remain the four reviewed SELECT FOR UPDATE locks (v46 adds the live-profile runtime lock) and all ledger mutations use protected Prisma delegates with same-transaction audit writes.",
+      "The sole recovery-ledger writer adds one fixed fresh-nonce resume GET read of the immutable evidence receipt. It adds no writer; the raw-SQL verbs remain the reviewed SELECT FOR UPDATE locks (v46 adds the live-profile runtime lock) and all ledger mutations use protected Prisma delegates with same-transaction audit writes. Owner decision 2026-11-08 adds a fifth: the pre-approval row lock that serializes a consent's single settlement.",
   },
   ...[
     ["AmuxV22TaskRecoveryApproval", 3],
     ["AmuxV22TaskRecoveryRiskAcceptance", 5],
+    ["AmuxV22TaskRecoveryPreApproval", 6],
+    ["AmuxV22TaskRecoveryPreApprovalResult", 1],
     ["AmuxV22ReadOnlyLaunchCheck", 2],
     ["AmuxV22ReadOnlyLaunchProof", 1],
   ].map(([table, tableMentions]) => ({
     path: "lib/amux/v22TaskRecoveryService.ts",
     table,
     tableMentions,
-    writeVerbs: 4,
+    writeVerbs: 5,
     reason:
-      "The sole recovery-ledger writer names this model in fixed canonical audit targets and read-back checks. Its raw-SQL write verbs are constant SELECT FOR UPDATE locks in the global-first Task, prior-attempt and physical-profile order; all recovery ledger mutations and their same-transaction audits use the protected Prisma delegates in this file.",
+      "The sole recovery-ledger writer names this model in fixed canonical audit targets and read-back checks. Its raw-SQL write verbs are constant SELECT FOR UPDATE locks in the global-first Task, prior-attempt and physical-profile order, plus the pre-approval row lock that serializes a consent's single settlement (owner decision 2026-11-08); all recovery ledger mutations and their same-transaction audits use the protected Prisma delegates in this file.",
+  })),
+  ...["AmuxV22TaskRecoveryApproval", "AmuxV22TaskRecoveryPreApprovalResult"].map((table) => ({
+    path: "lib/adminAuditSystemActors.ts",
+    table,
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The closed system-actor manifest names the two targets the pre-approval actor may audit (owner decision 2026-11-08). It executes no SQL and cannot access a Prisma delegate; canonical audit mutation remains in lib/adminAudit.ts.",
+  })),
+  ...["AmuxV22TaskRecoveryPreApproval"].map((table) => ({
+    path: "lib/accountDataExportDomains.ts",
+    table,
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "The account-data domain registry names this model once to exclude its operator evidence from a customer export. It executes no SQL; the write verbs are prose.",
+  })),
+  ...[
+    ["AdminAuditLog", 7],
+    ["AmuxV22TaskRecoveryInspectionRequest", 6],
+    ["AmuxV22TaskRecoveryEvidence", 2],
+    ["AmuxV22TaskRecoveryApproval", 7],
+    ["AmuxV22TaskRecoveryPreApproval", 10],
+    ["AmuxV22TaskRecoveryPreApprovalResult", 5],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261108130000_amux_v22_recovery_preapproval/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 25,
+    reason:
+      "The additive one-click recovery migration (owner decision 2026-11-08) creates the append-only pre-approval and result ledgers, their guards and the approval's preApprovalId column, and replaces the approval guard body. It seeds and mutates no row; the write verbs are DDL, trigger events and guard predicates.",
   })),
   {
     path: "lib/adminAuditSystemActors.ts",
