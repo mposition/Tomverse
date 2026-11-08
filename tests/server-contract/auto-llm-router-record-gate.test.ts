@@ -191,7 +191,6 @@ test("router failures preserve known usage and log content-free causes without r
         assert.equal(log.traceId, "trace-call");
         assert.equal(log.cycleId, "cycle-call");
         assert.equal(log.decisionId, "decision-call");
-        // The deadline the call ran with: AUTO_LLM_ROUTER_TIMEOUT_MS, which #3481 raised to 7 s.
         assert.equal(log.timeoutMs, AUTO_LLM_ROUTER_TIMEOUT_MS);
         for (const [key, value] of Object.entries(scenario.detail ?? {})) assert.equal(log[key], value);
       } finally {
