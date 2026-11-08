@@ -288,3 +288,29 @@ test("a finished run in review names its pull request, and an unread review clai
   assert.match(unread, /The worker finished\. This card needs your review/);
   assert.doesNotMatch(unread, /pull request/);
 });
+
+test("a finished review run whose usage was never reported still offers the server's block", () => {
+  // AMUX-AGENTOPS-001: no choice at all was shown for nine days.
+  const card = item({ status: "review", taskId: "task-1" });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({
+    selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      review_context: {
+        title: "Tidy", description: "Scope text", result_sha256: "b".repeat(64),
+        escalation_reason: "human_review_required",
+        last_attempt_reason: "usage_outcome_unknown", previous_block_reason: null,
+      },
+      allowed_outcomes: ["block"],
+      proposed_transitions: { block: "blocked" },
+    }),
+  }));
+  assert.doesNotMatch(html, /No choice is open for this card yet/);
+  assert.match(html, /<kbd[^>]*>1<\/kbd>Block/);
+  assert.match(html, /data-testid="admin-amux-select-block"/);
+  assert.match(html, /data-testid="amux-owner-queue-usage-unknown"/);
+  assert.match(html, /its usage was never reported/);
+  assert.doesNotMatch(html, /data-testid="admin-amux-select-retry"/);
+});

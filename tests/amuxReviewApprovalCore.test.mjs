@@ -321,7 +321,8 @@ test("only the five approved task-review transitions exist", () => {
 
 const prlessImplement = {
   sourceSystem: "admin-idea-v4", cardType: "task", reviewPrNumber: null,
-  attempt: { v22AssignmentId: "assignment", outcome: "succeeded", toStatus: "review" },
+  attempt: { v22AssignmentId: "assignment", outcome: "succeeded", toStatus: "review",
+    reason: "reported_result" },
   v4EvidenceVerified: true, publicationMayOpenPr: false,
   displayTruncated: false, displayExact: true,
 };
@@ -340,6 +341,8 @@ test("a v22 result in review with no pull request may be run again", () => {
     { ...prlessImplement.attempt, v22AssignmentId: null },
     { ...prlessImplement.attempt, outcome: "expired" },
     { ...prlessImplement.attempt, toStatus: "blocked" },
+    // Its usage was never reported (AMUX-AGENTOPS-001): block only.
+    { ...prlessImplement.attempt, reason: "usage_outcome_unknown" },
   ]) {
     assert.equal(amuxV22PrlessReviewRetryAllowed({ ...prlessImplement, attempt }), false);
   }

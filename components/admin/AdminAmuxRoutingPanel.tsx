@@ -19,7 +19,7 @@ import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminFetch } from "@/lib/adminFetch";
-import { amuxOwnerRecoveryPreparation } from "@/lib/amux/ownerRecoveryCore";
+import { amuxOwnerRecoveryPreparation, amuxReviewUsageOutcomeUnknown } from "@/lib/amux/ownerRecoveryCore";
 import { amuxReviewReadError } from "@/lib/amux/reviewReadErrorCore";
 import { AmuxOwnerRecoveryInspectionPanel } from "./AmuxOwnerRecoveryInspectionPanel";
 
@@ -300,6 +300,16 @@ const isOutcomeUnknown = (review: ReviewDetail) => {
   // only its settlement was lost (owner decision 2026-11-07).
   if (attemptOutcome === "expired" && review.last_attempt?.result_stored === true &&
       review.last_attempt.to_status === "blocked") return false;
+  // A finished run in review with only its usage unreported: the run's own
+  // outcome is known (amuxReviewUsageOutcomeUnknown); its retry and approve
+  // stay closed in the recovery preparation.
+  if (review.last_attempt && amuxReviewUsageOutcomeUnknown({
+    taskStatus: review.task.status,
+    lastAttemptReason: review.review_context.last_attempt_reason,
+    lastAttemptOutcome: review.last_attempt.outcome,
+    lastAttemptToStatus: review.last_attempt.to_status,
+    lastAttemptEndedAt: review.last_attempt.ended_at,
+  })) return false;
   const attemptReason = review.review_context.last_attempt_reason?.toLowerCase() ?? "";
   return attemptOutcome === "expired" || attemptOutcome.includes("unknown") ||
     attemptReason.includes("outcome_unknown");

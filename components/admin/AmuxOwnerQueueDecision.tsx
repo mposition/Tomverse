@@ -23,6 +23,7 @@ import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue"
 import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { amuxElapsed } from "@/lib/adminAmuxFlow";
 import { amuxVisibleInspectionText } from "@/lib/amux/adminExecutionViewCore";
+import { amuxReviewUsageOutcomeUnknown } from "@/lib/amux/ownerRecoveryCore";
 import {
   amuxOwnerQueueGroup,
   type AmuxOwnerQueueGroup,
@@ -130,6 +131,12 @@ export function AmuxOwnerQueueDecision({
     : (item.attentionReason ? copy.why.byReason[item.attentionReason] : undefined) ?? copy.why[group];
   const reportExcerpt = reviewPr === null && reviewMatches
     ? workerReportExcerpt(review.review_report?.worker_report ?? null) : null;
+  const usageUnknown = reviewMatches && review.last_attempt !== null &&
+    amuxReviewUsageOutcomeUnknown({ taskStatus: review.task.status,
+      lastAttemptReason: review.review_context.last_attempt_reason,
+      lastAttemptOutcome: review.last_attempt.outcome,
+      lastAttemptToStatus: review.last_attempt.to_status,
+      lastAttemptEndedAt: review.last_attempt.ended_at });
   const classification = summary === null ? null
     : classifyAmuxOwnerQueueItem(summary, reviewMatches ? review : null);
   const outcomes = reviewMatches ? visibleAmuxOwnerReviewOutcomes(review) : [];
@@ -181,6 +188,11 @@ export function AmuxOwnerQueueDecision({
           {copy.detail.whyStopped}
         </p>
         <p className="mt-1.5 text-sm leading-6 text-zinc-300">{why}</p>
+        {usageUnknown ? (
+          <p className="mt-1.5 text-sm leading-6 text-zinc-300" data-testid="amux-owner-queue-usage-unknown">
+            {copy.why.reviewUsageUnknown}
+          </p>
+        ) : null}
         {reportExcerpt ? (
           <div className="mt-3" data-testid="amux-owner-queue-report-excerpt">
             <p className="text-xs font-bold text-zinc-400">{copy.detail.workerReportExcerpt}</p>

@@ -200,14 +200,17 @@ export const amuxReviewPublicationMayOpenPr = (items: ReadonlyArray<{
  * must be this exact attempt's stored, readable result (the same evidence
  * that shows the worker report as verified), and no publication work may
  * still open a pull request for it; the attempt budget is checked by the
- * caller. Approval is unchanged: an implement Task still needs its PR.
+ * caller. A run whose usage receipt was never reported
+ * (`usage_outcome_unknown`) is not retried: the claim would hold every
+ * Task on that worker until it is, as the blocked path refuses it too.
+ * Approval is unchanged: an implement Task still needs its PR.
  */
 export const amuxV22PrlessReviewRetryAllowed = (input: {
   sourceSystem: string | null;
   cardType: string | null;
   reviewPrNumber: number | null;
   attempt: { v22AssignmentId: string | null; outcome: string | null;
-    toStatus: string | null } | null;
+    toStatus: string | null; reason: string | null } | null;
   v4EvidenceVerified: boolean;
   publicationMayOpenPr: boolean;
   displayTruncated: boolean;
@@ -216,6 +219,7 @@ export const amuxV22PrlessReviewRetryAllowed = (input: {
   input.reviewPrNumber === null && input.attempt !== null &&
   input.attempt.v22AssignmentId !== null &&
   input.attempt.outcome === "succeeded" && input.attempt.toStatus === "review" &&
+  input.attempt.reason !== "usage_outcome_unknown" &&
   input.v4EvidenceVerified && !input.publicationMayOpenPr &&
   !input.displayTruncated && input.displayExact;
 
