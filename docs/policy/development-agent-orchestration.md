@@ -2164,7 +2164,9 @@ request 하나만 처리하며, queue가 비었거나 gate가 꺼져 있으면 �
 - 기존 pending inspection request에는 expiry나 `requestedAt` TTL filter가 없다. 60초는
   queue pickup 주기이지 request TTL이 아니며, 이 버전은 새 만료 시간을 만들지 않는다.
   기존 90초는 report가 DB에 기록된 `evidence.recordedAt`부터 owner 승인까지의 immutable
-  evidence freshness이고 request 생성 시각부터 세지 않는다. service의 30초도 한 번의
+  evidence freshness이고 request 생성 시각부터 세지 않는다. 오너 결정 2026-11-08: 사람이
+  읽고 승인하는 inspect 증거는 이 창이 15분이고(safe-stop·FIRST 예외는 90초 그대로),
+  원클릭 사전 승인은 증거가 그 승인 뒤에, 승인 뒤 30분 안에 기록됐는지로 판단한다. service의 30초도 한 번의
   host process 실행 상한이지 request나 evidence의 만료가 아니다. 따라서 timer 대기 시간이
   evidence freshness를 미리 소비했다고 계산하지 않으며, report 뒤 90초를 갱신하거나
   늘리지도 않는다.
