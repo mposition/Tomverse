@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, openModelPickerCatalogue, prepareGuestPage, type QaConversationMessage } from "./support/app-fixtures";
 import { finishControlledStream, installChatModelStub, mockUserUsage, pushControlledChunk, restoreActiveConversation, setDeterministicTheme, suppressTransientUi, THREE_MODELS, waitForControlledStream } from "./support/chat-state-fixtures";
-import { expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
+import { expectAccessibleContrast, expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
 
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => { test.skip(info.project.name !== "desktop-chromium", "Explicit desktop and phone viewports use one browser engine."); });
@@ -37,6 +37,26 @@ async function expectHeaderControlsFit(page: Page) {
     return box.left < -1 || box.right > innerWidth + 1 || text.left < box.left - 1 || text.right > box.right + 1
       ? [button.textContent || button.getAttribute("aria-label")] : [];
   }))).toEqual([]);
+}
+
+for (const theme of ["light", "dark"] as const) {
+  test(`Studio guidance and placeholder meet text contrast at desktop and phone sizes in ${theme}`, async ({ page }) => {
+    await prepare(page, 1600, theme);
+    for (const locator of [page.locator(".review-canvas-intro small:visible"), page.locator(".review-extra-starters button:visible").filter({ hasText: "코드" })]) {
+      await expect(locator).toBeVisible();
+      const sample = await expectAccessibleContrast(locator, "Studio secondary guidance");
+      expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const width of [1600, 320]) {
+      await page.setViewportSize({ width, height: 932 });
+      const input = page.getByTestId("chat-textarea");
+      await expect(input).toBeVisible();
+      await expect(input).toHaveValue("");
+      const sample = await expectAccessibleContrast(input, `Studio placeholder at ${width}px`, "::placeholder");
+      expect(sample.text).not.toBe("");
+      expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+    }
+  });
 }
 
 function storedComparison(models: string[]): QaConversationMessage[] {
