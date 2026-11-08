@@ -20,6 +20,7 @@ import {
   getTypicalShortRequestCapacities,
 } from "@/lib/models";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
+import { PricingKoreanPlanLimits } from "./PricingKoreanPlanLimits";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { usePricingAccount } from "@/components/marketing/usePricingAccount";
@@ -684,7 +685,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "모델 접근", free: "선별된 모델", pro: "모든 사용 가능 모델 · Pro 사용량 적용", max: "모든 사용 가능 모델 · 가장 큰 월 제공량" },
         { label: "다중 모델 비교", free: "최대 3개 모델", pro: "최대 3개 모델", max: "최대 3개 모델" },
-        { label: "파일 첨부", free: "이미지, PDF, Office, Drive", pro: "이미지, PDF, Office, Drive", max: "더 높은 파일 및 맥락 한도" },
+        { label: "파일 첨부 (허용 시)", free: "5개 · 각 10 MiB · 총 25 MiB", pro: "5개 · 각 10 MiB · 총 25 MiB", max: "5개 · 각 10 MiB · 총 25 MiB" },
         { label: "대화 공유", free: "공유 및 다운로드", pro: "공유 및 다운로드", max: "공유 및 다운로드" },
         { label: "AI 크레딧", free: "월 300", pro: "월 3,000", max: "월 10,000" },
       ],
@@ -699,7 +700,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     plans: [
       { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: REVIEW_SIGN_IN_HREF, usage: "월 300 AI 크레딧", features: ["선별된 모델 이용","선별된 고비용 모델 월 최대 30응답","최대 3개 모델 비교","저장한 대화 기록","로그인 후 파일 첨부, 공유 및 다운로드","가벼운 일상 질문부터 시작하기"] },
       { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", cta: "Pro로 업그레이드", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "추천", usage: "월 3,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","모델별 크레딧 차감량에 따라 월 제공량 사용","최대 3개 모델 나란히 비교","파일 첨부 및 Google Drive 파일","대화 공유 및 다운로드"] },
-      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","Standard 모델 일일 제한 없음","Premium 사용량은 월 크레딧 및 공정사용 정책 적용","더 높은 첨부파일 및 맥락 한도","고급 모델과 긴 문서를 자주 쓰는 경우에 적합"] },
+      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","현재 일일 플랜 크레딧 한도 표시","Premium 사용량은 월 크레딧 및 공정사용 정책 적용","첨부 허용 시 5개 · 각 10 MiB · 총 25 MiB","고급 모델과 긴 문서를 자주 쓰는 경우에 적합"] },
     ],
   },
   zh: {
@@ -1405,6 +1406,7 @@ export function PricingPageContent() {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
             const cardPlan: AccountPlanTier =
               plan.name === "Max" ? "Max" : plan.name === "Pro" ? "Pro" : "Free";
+            const publicPlan = billing.config?.plans.find((item) => item.id === planId);
             const ctaState = resolvePlanCtaState({
               sessionStatus: account.status,
               currentPlan: account.plan,
@@ -1650,6 +1652,7 @@ export function PricingPageContent() {
               <p className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
+              {lang === "ko" ? <PricingKoreanPlanLimits plan={cardPlan} dailyCredits={publicPlan?.dailyMessageLimit ?? null} allowAttachments={publicPlan?.allowAttachments} appInputTokenLimit={billing.config?.appInputTokenLimit ?? null} /> : null}
               {/*
                 The plan CTA is chosen by resolvePlanCtaState(), not by the
                 card's own name. Every card used to render the same "Upgrade"
