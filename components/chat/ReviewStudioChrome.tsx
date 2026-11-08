@@ -47,7 +47,7 @@ export function ReviewCommandBar({ review, locked = false, view, setView, showMo
   const { lang } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
   return <header className="review-command-bar" data-testid="review-command-bar">
-    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong>Review</strong><span>/ {c.newTask}</span></div>
+    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].review.description}>Review{chatProductUiCopy[lang].review.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].review.shortDescription}</small>}</strong><span>/ {c.newTask}</span></div>
     {showModeSwitcher && <ReviewModeSwitcher review={review} locked={locked} />}
     {setView && <div className="review-view-switch" role="group" aria-label={c.results}>
       <button type="button" aria-pressed={view === "write"} onClick={() => setView("write")}>{c.write}</button>
@@ -76,7 +76,7 @@ function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace
 export function ChatCommandBar({ workspace, locked = false }: { workspace: WorkspaceAppearanceControls; locked?: boolean }) {
   const { lang, t } = useLanguage();
   return <header className="review-command-bar chat-command-bar" data-testid="chat-command-bar">
-    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong>Chat</strong><span>/ {t("sidebar.newChat")}</span></div>
+    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].chat.description}>Chat{chatProductUiCopy[lang].chat.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].chat.shortDescription}</small>}</strong><span>/ {t("sidebar.newChat")}</span></div>
     <span className="chat-studio-description">{chatProductUiCopy[lang].chat.description}</span>
     <WorkspaceAppearanceActions workspace={workspace} disabled={locked} testId="chat-appearance" />
   </header>;
@@ -84,6 +84,10 @@ export function ChatCommandBar({ workspace, locked = false }: { workspace: Works
 
 export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product = "review", locked = false }: { sidebar: ReactNode; onNewChat: () => void; onChat?: () => boolean; onReview?: () => boolean; product?: ChatWorkspaceProduct | "plugins"; locked?: boolean }) {
   const { lang } = useLanguage(); const c = reviewWorkspaceCopy[lang];
+  const productLabel = (key: ChatWorkspaceProduct) => {
+    const item = chatProductUiCopy[lang][key];
+    return <span className={item.shortDescription ? "review-product-label" : undefined}>{item.shortLabel}{item.shortDescription && <small className="review-product-caption" aria-hidden="true">{item.shortDescription}</small>}</span>;
+  };
   const [open, setOpen] = useState(false);
   const keyboardInset = useKeyboardInset();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -109,10 +113,10 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product
     <nav className="review-navigation" aria-label="Tomverse">
       <Image loading="eager" unoptimized className="review-nav-logo" src="/tomverse-logo.png" alt="Tomverse" width={44} height={44} />
       <button type="button" className="review-new-task" disabled={locked} onClick={onNewChat}><Icon file="5d798" /><span>{c.newTask}</span></button>
-      {product === "review" ? <button type="button" aria-current="page" onClick={() => setOpen(false)}><Icon file="96fdd" /><span>Review</span></button>
-        : <Link className="review-navigation-chat" aria-disabled={locked} href={localizedProductHref("review", lang)} onClick={event => { if (locked || (onReview && !onReview())) event.preventDefault(); }}><Icon file="96fdd" /><span>Review</span></Link>}
-      {product === "chat" ? <button type="button" aria-current="page" onClick={() => setOpen(false)}><Icon file="63e9a" /><span>Chat</span></button>
-        : <Link className="review-navigation-chat" aria-disabled={locked} href={localizedProductHref("chat", lang)} onClick={event => { if (locked || (onChat && !onChat())) event.preventDefault(); }}><Icon file="63e9a" /><span>Chat</span></Link>}
+      {product === "review" ? <button type="button" aria-current="page" title={chatProductUiCopy[lang].review.description} onClick={() => setOpen(false)}><Icon file="96fdd" />{productLabel("review")}</button>
+        : <Link className="review-navigation-chat" title={chatProductUiCopy[lang].review.description} aria-disabled={locked} href={localizedProductHref("review", lang)} onClick={event => { if (locked || (onReview && !onReview())) event.preventDefault(); }}><Icon file="96fdd" />{productLabel("review")}</Link>}
+      {product === "chat" ? <button type="button" aria-current="page" title={chatProductUiCopy[lang].chat.description} onClick={() => setOpen(false)}><Icon file="63e9a" />{productLabel("chat")}</button>
+        : <Link className="review-navigation-chat" title={chatProductUiCopy[lang].chat.description} aria-disabled={locked} href={localizedProductHref("chat", lang)} onClick={event => { if (locked || (onChat && !onChat())) event.preventDefault(); }}><Icon file="63e9a" />{productLabel("chat")}</Link>}
       <button className="review-navigation-history" ref={trigger} type="button" onClick={() => setOpen(true)} aria-expanded={open}><Icon file="c8527" /><span>{c.history}</span></button>
       <Link href={`/plugins?lang=${lang}`} className="review-navigation-plugins" data-testid="navigation-plugins" aria-current={product === "plugins" ? "page" : undefined} aria-disabled={locked || undefined} onClick={event => { if (locked) event.preventDefault(); }}><Puzzle size={22} aria-hidden="true" /><span>{mcpConnectorCopy[lang].title}</span></Link>
       <div className="review-nav-spacer" />

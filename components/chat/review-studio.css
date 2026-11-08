@@ -56,6 +56,8 @@
 .review-brand strong { font-size:1.688rem; font-weight:650; letter-spacing:-.04em; }
 .review-brand img { display:none; object-fit:contain; background:white; border-radius:10px; }
 .review-brand>span { font-size:0.8125rem; color:var(--review-muted, #71717a); }
+.review-product-caption { display:block; font-size:0.75rem; line-height:1; font-weight:400; }
+.review-navigation .review-product-label { line-height:1.2; }
 .review-mode,.review-view-switch { display:flex; align-items:center; border-radius:24px; padding:3px; background:var(--review-raised, #f4f4f5); }
 .review-mode button,.review-view-switch button { padding:10px 14px; min-height:40px; font-size:0.8125rem; border-radius:18px; white-space:nowrap; }
 .review-mode button[aria-pressed="true"],.review-view-switch button[aria-pressed="true"] { background:var(--review-selected, #e9edff); color:var(--review-selected-text, #344ac4); font-weight:600; }
