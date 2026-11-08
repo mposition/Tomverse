@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
@@ -14,6 +15,7 @@ export type MarketingInfoSection = {
   lang?: Language;
   title: string;
   body: string;
+  bodyLinks?: { text: string; href: string }[];
   bullets?: string[];
   link?: {
     label: string;
@@ -33,6 +35,21 @@ export type MarketingInfoCopy = {
     href: string;
   };
 };
+
+function sectionBody(section: MarketingInfoSection, pageHref: (href: string) => string): ReactNode {
+  if (!section.bodyLinks?.length) return section.body;
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const [index, link] of section.bodyLinks.entries()) {
+    const start = section.body.indexOf(link.text, cursor);
+    if (start < 0) continue;
+    parts.push(section.body.slice(cursor, start));
+    parts.push(<Link key={index} href={pageHref(link.href)} className="font-semibold text-blue-600 underline underline-offset-4 dark:text-blue-300">{link.text}</Link>);
+    cursor = start + link.text.length;
+  }
+  parts.push(section.body.slice(cursor));
+  return parts;
+}
 
 export function MarketingInfoPage({
   content,
@@ -89,7 +106,7 @@ export function MarketingInfoPage({
               {page.sections.map((section) => (
                 <article key={section.title} lang={section.lang} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
                   <h2 className="text-xl font-black">{section.title}</h2>
-                  <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{section.body}</p>
+                  <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{sectionBody(section, pageHref)}</p>
                   {section.bullets && (
                     <ul className="mt-5 grid gap-3">
                       {section.bullets.map((bullet) => (
