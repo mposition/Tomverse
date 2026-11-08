@@ -1022,6 +1022,7 @@ export const en = {
         imageUnsupported: "This model cannot read the attached image",
     },
     providerStatus: {
+        lookupUnavailable: "Model status could not be refreshed. The last confirmed result is retained.",
         allAvailable: "All selected providers are available",
         allAvailableBody: "Model providers are responding normally.",
         selectedUnavailableOne: "{model} is temporarily unavailable",
