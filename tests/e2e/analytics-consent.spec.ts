@@ -8,6 +8,7 @@ test.beforeEach(async ({ page }) => {
 
 test("mobile analytics consent stays compact with one-row actions", async ({
   page,
+  baseURL,
 }, testInfo) => {
   test.skip(
     !testInfo.project.name.startsWith("mobile"),
@@ -19,9 +20,10 @@ test("mobile analytics consent stays compact with one-row actions", async ({
     {
       name: "__tomverse_e2e_analytics",
       value: "1",
-      url: "http://127.0.0.1:3100",
+      url: baseURL!,
     },
   ]);
+  await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
   await prepareGuestPage(page, "en");
   await page.route("**/api/analytics/events", (route) =>
     route.fulfill({ status: 202, body: "" })
@@ -33,7 +35,7 @@ test("mobile analytics consent stays compact with one-row actions", async ({
   });
   await expect(banner).toBeVisible();
   await expect(banner).toContainText(
-    "Help improve Tomverse. Prompts and file contents are never collected."
+    "Usage analytics excludes prompts and file content."
   );
 
   const decline = banner.getByRole("button", { name: "Decline" });

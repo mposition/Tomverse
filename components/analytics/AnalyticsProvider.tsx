@@ -184,7 +184,7 @@ const consentCopy: Record<
   en: {
     title: "Privacy-safe product analytics",
     body: "With your permission, Tomverse measures product usage and campaign attribution. Prompts, responses, filenames, and file contents are never included.",
-    mobileBody: "Help improve Tomverse. Prompts and file contents are never collected.",
+    mobileBody: "Usage analytics excludes prompts and file content.",
     accept: "Allow analytics",
     acceptShort: "Allow",
     decline: "Decline",
@@ -193,7 +193,7 @@ const consentCopy: Record<
     settings: "Analytics settings",
     noticeTitle: "Privacy-safe analytics is on",
     noticeBody: "In this region, Tomverse starts privacy-minimized product analytics with a clear opt-out. Prompts, responses, filenames, and file contents are never included, and advertising storage stays off.",
-    noticeMobileBody: "Analytics is on. Prompts and files are never collected.",
+    noticeMobileBody: "Usage analytics is on; prompts and file content are excluded.",
     keepOn: "Keep analytics on",
     keepOnShort: "Keep",
     turnOff: "Turn off analytics",
