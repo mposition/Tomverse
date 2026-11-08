@@ -206,3 +206,15 @@ test("reading a question carries its Decision Maker state; a proposal missing wh
   assert.equal(amuxWorkerQuestionDmFrom({ decisionMaker: null }), null);
   assert.deepEqual(amuxWorkerQuestionDmFrom({ decisionMaker: { state: "filed" } }), { state: "filed" });
 });
+
+test("the question shows what the worker found and the files it points at, when it gave them", () => {
+  for (const locale of ["en", "ko"] as const)
+    assert.ok(adminAmuxCardsMessages[locale].questionContext && adminAmuxCardsMessages[locale].questionPaths);
+  const m = adminAmuxCardsMessages.en;
+  const html = renderToStaticMarkup(<AmuxWorkerQuestionBox taskId={TASK_ID}
+    question={{ ...question(), context: "Two retry paths exist.", paths: ["lib/amux/fileRetry.ts"] }} />);
+  assert.ok(html.includes(`${m.questionContext}: Two retry paths exist.`));
+  assert.match(html, /data-testid="amux-worker-question-paths"><li>lib\/amux\/fileRetry\.ts<\/li>/);
+  const plain = renderToStaticMarkup(<AmuxWorkerQuestionBox taskId={TASK_ID} question={question()} />);
+  assert.doesNotMatch(plain, /amux-worker-question-context|amux-worker-question-paths/);
+});

@@ -17,6 +17,8 @@ import type { AmuxV22QuestionDm } from "@/lib/amux/v22OwnerQuestionDmCore";
 export type AmuxWorkerQuestion = {
   id: string; sequence: number; state: string; question: string;
   unblocks: string; options: Array<{ id: string; label: string }>;
+  /** What the worker found, and the files it points at, when it gave them. */
+  context?: string; paths?: string[];
 };
 
 export type AmuxAnswerOutcome = "sent" | { failed: string };
@@ -215,6 +217,14 @@ export function AmuxWorkerQuestionBox({ taskId, question, decisionMaker = null, 
       <p className="font-semibold">{messages.questionTitle(question.sequence)} · {messages.questionState(state)}</p>
       <p className="mt-1 whitespace-pre-wrap break-words">{question.question}</p>
       <p className="mt-1 text-sm text-zinc-300">{messages.questionUnblocks}: {question.unblocks}</p>
+      {question.context && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-zinc-300"
+        data-testid="amux-worker-question-context">{messages.questionContext}: {question.context}</p>}
+      {question.paths && question.paths.length > 0 && (
+        <ul className="mt-1 font-mono text-xs" aria-label={messages.questionPaths}
+          data-testid="amux-worker-question-paths">
+          {question.paths.map((path) => <li key={path}>{path}</li>)}
+        </ul>
+      )}
       {question.options.length > 0 && (
         <>
         <p className="mt-1 text-sm text-zinc-300">{messages.questionOptions}</p>
