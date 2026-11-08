@@ -239,6 +239,8 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
    **AMUX로 보내기**를 누릅니다(한 건씩 또는 골라서 한꺼번에). Admin 아이디어 입력과 같은 입구로 들어갑니다. session intake가
    켜져 있으면 `mposition/Tomverse`를 참조로 삼는 session 아이디어가 되어 분석·카드·worker로 이어지고(이 저장소가 operating
    scope에 있어야 합니다), 꺼져 있으면 v4 owner 아이디어가 됩니다. 보낸 뒤의 분석·카드는 AMUX intake 규칙을 따릅니다.
+   그 옆의 **작업문 복사**는 같은 아이디어 문구(`suggestionIdeaText`)에 page URL과 완료 기준을 붙여 클립보드에만 넣습니다.
+   서버에 쓰는 것이 없으므로 권한과 상관없이 누를 수 있고, 운영자가 로컬 CLI에서 직접 고칠 때 씁니다.
 
 ## 11. 지키는 것 (개선 탐색)
 
