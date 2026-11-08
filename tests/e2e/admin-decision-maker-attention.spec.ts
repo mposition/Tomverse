@@ -36,8 +36,10 @@ test("the attention lane holds the waiting requests above the escalated card, an
   // The column heading counts both kinds, and one link takes all of them to the tab that handles them.
   await expect(lane.getByRole("heading", { level: 3 })).toContainText("3");
   await expect(lane.getByTestId("amux-attention-open-tab")).toHaveAttribute("href", "/admin/amux-execution?tab=review");
-  // The two Decision Maker requests are decisions and the escalated card is one more.
-  await expect(lane.getByTestId("amux-attention-group-decision")).toHaveText("3");
+  // The groups count the owner queue once, as the tab and the sidebar badge do:
+  // the escalated card. The two Decision Maker requests are listed above it but
+  // are not cards in that queue.
+  await expect(lane.getByTestId("amux-attention-group-decision")).toHaveText("1");
   await expect(lane.getByTestId("amux-attention-group-question")).toHaveText("0");
 
   const requests = lane.getByTestId("amux-dm-attention-list").getByRole("link");
