@@ -71,11 +71,10 @@ export const autoLlmRouterSession = (
 export const AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS = 200;
 
 /**
- * Past this the turn proceeds on the deterministic choice. On Test (2026-10-19,
- * gpt-6-luna at low effort) 4 of 26 calls hit the former 3 s deadline (p50 2.07 s,
- * p90 3.0 s), so the live call now gets 5 s.
+ * Past this the turn proceeds on the deterministic choice. The optimizer cycle
+ * on 2026-11-06 reported p90 latency around 5.5 s, so live calls now get 7 s.
  */
-export const AUTO_LLM_ROUTER_TIMEOUT_MS = 5_000;
+export const AUTO_LLM_ROUTER_TIMEOUT_MS = 7_000;
 
 /**
  * The optimizer's replay of a past decision (lib/autoRouterOptimizer.ts). No
@@ -300,7 +299,7 @@ export const AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS = 1_500;
 export const AUTO_LLM_ROUTER_REWRITE_MAX_CHARS = 1_500;
 /** The call's budget when a rewrite is asked for: the rewrite itself needs room. */
 export const AUTO_LLM_ROUTER_REWRITE_MAX_OUTPUT_TOKENS = 900;
-export const AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS = 6_000;
+export const AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS = AUTO_LLM_ROUTER_TIMEOUT_MS;
 
 /**
  * The rewrite the final model may read instead of the message, or null.
