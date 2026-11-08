@@ -358,6 +358,7 @@ async function runInBackground(input: {
                         rewrite: true,
                         rewriteGuidance,
                         timeoutMs: AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
+                        source: "rewrite_optimizer",
                     });
                     if (routed.failure) {
                         console.info(JSON.stringify({
