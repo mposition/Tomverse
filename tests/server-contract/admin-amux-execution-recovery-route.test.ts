@@ -5,7 +5,8 @@ import { mock, test } from "node:test";
 import { BoardImportError } from "../../lib/amux/boardImportCore.ts";
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const state = { session: { user: { id: "owner" } } as { user: { id: string } } | null,
-  role: "owner", recent: true, calls: 0, failure: false };
+  role: "owner", recent: true, calls: 0, failure: false,
+  preApprovals: [] as string[], quotes: [] as string[] };
 mock.module("next-auth/next", { namedExports: { getServerSession: async () => state.session } });
 mock.module(mod("lib/adminAuth.ts"), { namedExports: { isAdminSession: () => state.session !== null, getAdminRole: () => state.role } });
 mock.module(mod("lib/adminReauthentication.ts"), { namedExports: {
@@ -33,6 +34,10 @@ mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
   requestAmuxV22RecoveryInspection: result, requestAmuxV22LegacySafeStop: safeResult,
   acceptAmuxV22UnknownPriorEffects: result,
   approveAmuxV22TaskRecovery: result, readAmuxV22TaskRecovery: result,
+  requestAmuxV22RecoveryPreApproval: async (input: { costDigest: string }) => {
+    state.preApprovals.push(input.costDigest); return result(); },
+  readAmuxV22RecoveryPreApprovalQuote: async (_session: unknown, taskId: string) => {
+    state.quotes.push(taskId); return { taskId, eligible: true, retryWrite: false }; },
 } });
 const url = "https://tomverse.test/api/admin/amux/execution-recovery";
 const requestId = "530abfe8-b2e0-4b58-bef9-ea5a63a2e90d";
@@ -111,4 +116,23 @@ test("a write answer carries the same gates as the read, so the next control is 
   for (const body of [valid, acceptRisk, safeStop])
     assert.deepEqual(await (await POST(post(body))).json(), { state: "pending", retryWrite: false,
       recoveryEnabled: true, safeStopEnabled: true });
+});
+
+// Owner decision 2026-11-08: the one-click quote is a read; the consent POST
+// carries only the quoted digest and an explicit acceptRetry.
+test("one-click recovery reads a quote and posts only a digest-bound consent", async () => {
+  reset(); state.preApprovals = []; state.quotes = []; const { GET, POST } = await route();
+  const quote = await GET(new Request(`${url}?taskId=task-1234&view=preapproval_quote`));
+  assert.equal(quote.status, 200); assert.deepEqual(state.quotes, ["task-1234"]);
+  assert.equal((await GET(new Request(`${url}?taskId=task-1234&view=other`))).status, 400);
+  const consent = { action: "preapprove_attempt", taskId: "task-1234", expectedRevision: 8,
+    priorAttemptId: requestId, requestId, costDigest: "c".repeat(64), acceptRetry: true };
+  assert.equal((await POST(post(consent))).status, 200);
+  assert.deepEqual(state.preApprovals, ["c".repeat(64)]);
+  for (const changed of [{ acceptRetry: false }, { costDigest: "nope" },
+    { additionalCapMicroUsd: "1" }, { expiresAt: "2099-01-01T00:00:00.000Z" }])
+    assert.equal((await POST(post({ ...consent, ...changed }))).status, 400);
+  const { acceptRetry: _omitted, ...withoutAccept } = consent; void _omitted;
+  assert.equal((await POST(post(withoutAccept))).status, 400);
+  assert.equal(state.preApprovals.length, 1);
 });
