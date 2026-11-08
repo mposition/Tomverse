@@ -65,7 +65,7 @@
 .previewBody { font-size: .875rem; color: #52525b; }
 .previewFollowup { font-size: .8125rem; font-weight: 700; color: var(--launch-brand); }
 .heroDemo { font-size: .6875rem; color: var(--launch-muted); margin: 14px 40px 0 62px; line-height: 1.5; display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; }
-.motionToggle { min-height: 44px; border: 0; padding: 8px 0; background: transparent; color: #d4d4d8; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.motionToggle { min-height: 44px; min-width: 44px; border: 1px solid #71717a; border-radius: 10px; padding: 8px 12px; background: transparent; color: #d4d4d8; font: inherit; font-size: .875rem; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .ribbonWrap { margin-top: 18px; padding-block: 30px 54px; }
 .ribbon { display: flex; width: 112%; margin-left: -4%; gap: 40px; background: var(--launch-brand); padding: 16px 48px; transform: rotate(-3deg); color: #fafafa; font-size: 2.625rem; font-weight: 800; line-height: 1.1; white-space: nowrap; }
 .ribbon span { flex: none; }
