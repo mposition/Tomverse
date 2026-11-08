@@ -15,7 +15,8 @@ test("each plan exposes eligible public models and concrete attachment limits", 
     for (const model of AVAILABLE_MODELS.filter((item) => item.enabled && isPubliclySelectableModel(item))) {
       if (canUseModelWithPlan(plan, model)) {
         await expect(details.locator(`[data-model-id="${model.id}"]`)).toBeVisible();
-        await expect(details.locator(`[data-model-id="${model.id}"]`)).toContainText(model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "context ceiling not listed");
+        const contextWindowTokens = (model as { contextWindowTokens?: number }).contextWindowTokens;
+        await expect(details.locator(`[data-model-id="${model.id}"]`)).toContainText(contextWindowTokens ? `${contextWindowTokens.toLocaleString("en-US")} tokens` : "context ceiling not listed");
       } else {
         await expect(details.locator(`[data-model-id="${model.id}"]`)).toHaveCount(0);
       }
