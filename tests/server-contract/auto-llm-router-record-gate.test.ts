@@ -191,7 +191,7 @@ test("router failures preserve known usage and log content-free causes without r
         assert.equal(log.traceId, "trace-call");
         assert.equal(log.cycleId, "cycle-call");
         assert.equal(log.decisionId, "decision-call");
-        assert.equal(log.timeoutMs, 5_000);
+        assert.equal(log.timeoutMs, 7_000);
         for (const [key, value] of Object.entries(scenario.detail ?? {})) assert.equal(log[key], value);
       } finally {
         generateRouterResult = undefined;
