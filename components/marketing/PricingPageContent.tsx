@@ -20,6 +20,7 @@ import {
   getTypicalShortRequestCapacities,
 } from "@/lib/models";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
+import { PricingPlanCapabilities } from "./PricingPlanCapabilities";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { usePricingAccount } from "@/components/marketing/usePricingAccount";
@@ -606,7 +607,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Model access", free: "Selected models", pro: "All available models · Pro usage limits", max: "All available models · largest monthly allowance" },
         { label: "Multi-model comparison", free: "Up to 3 models", pro: "Up to 3 models", max: "Up to 3 models" },
-        { label: "File attachments", free: "Images, PDFs, Office, Drive", pro: "Images, PDFs, Office, Drive", max: "Higher file and context limits" },
+        { label: "File attachments", free: "5 files · 10 MiB each · 25 MiB total", pro: "5 files · 10 MiB each · 25 MiB total", max: "5 files · 10 MiB each · 25 MiB total" },
         { label: "Conversation sharing", free: "Share and download", pro: "Share and download", max: "Share and download" },
         { label: "AI credits", free: "300/month", pro: "3,000/month", max: "10,000/month" },
       ],
@@ -663,7 +664,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         cta: "Upgrade to Max",
         href: REVIEW_WORKSPACE_PATH,
         usage: "10,000 monthly AI credits",
-        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Higher attachment and context limits","For frequent advanced-model and long-document work"],
+        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Up to 5 files per message · 10 MiB each · 25 MiB combined","For frequent advanced-model and long-document work"],
       },
     ],
   },
@@ -1812,6 +1813,7 @@ export function PricingPageContent() {
                   </p>
                 ) : null}
               </div>
+              {lang === "en" ? <PricingPlanCapabilities plan={cardPlan} /> : null}
               <ul className="mt-8 space-y-3">
                 {plan.features.map((feature) => (
                   // UI-005. The bullet's icon is `shrink-0` and the label was a
