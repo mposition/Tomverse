@@ -1033,6 +1033,7 @@ export const zh = {
         imageUnsupported: "此模型无法读取附加的图片",
     },
     providerStatus: {
+        lookupUnavailable: "无法刷新模型状态。将保留上次确认的结果。",
         allAvailable: "所选提供商均可用",
         allAvailableBody: "模型提供商响应正常。",
         selectedUnavailableOne: "{model}暂时无法使用",
