@@ -22,6 +22,7 @@ import {
     AUTO_LLM_ROUTER_TIMEOUT_MS,
     autoLlmRouterCandidates,
     autoLlmRouterDecisionVersion,
+    autoLlmRouterFailureDetail,
     autoLlmRouterOutputSchema,
     autoLlmRouterProviderOptions,
     autoLlmRouterSession,
@@ -33,6 +34,7 @@ import {
     type AutoLlmRouterCandidate,
     type AutoLlmRouterPick,
     type AutoLlmRouterSession,
+    type AutoLlmRouterFailure,
     type AutoFileGenerationContext,
     withAutoFileCapabilities,
 } from "@/lib/autoLlmRouterCore";
@@ -40,9 +42,10 @@ import { effectiveRouterTimeoutMs, withoutExcludedModels } from "@/lib/autoRoute
 import { readAutoRouterTunables } from "@/lib/autoRouterTunablesRead";
 
 export type AutoLlmRouterCallResult = {
-    outcome: "picked" | "invalid" | "error";
+    outcome: "picked" | "invalid" | "error" | "timeout";
     pick: AutoLlmRouterPick | null;
     usage: { inputTokens?: number; outputTokens?: number } | undefined;
+    failure?: AutoLlmRouterFailure;
 };
 
 /**
@@ -92,17 +95,18 @@ export async function callAutoLlmRouter(
     input: AutoLlmRouterCallInput
 ): Promise<AutoLlmRouterCallResult> {
     const { rewrite, system, prompt, maxOutputTokens, candidates } = routerRequest(input);
+    let abortSignal: AbortSignal | undefined;
     try {
+        abortSignal = AbortSignal.timeout(
+            input.timeoutMs ?? (rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : AUTO_LLM_ROUTER_TIMEOUT_MS)
+        );
         const generated = await generateText({
             model: getActiveAiModel(input.routerModel),
             system,
             prompt,
             maxOutputTokens,
             maxRetries: 0,
-            abortSignal: AbortSignal.timeout(
-                input.timeoutMs ??
-                    (rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : AUTO_LLM_ROUTER_TIMEOUT_MS)
-            ),
+            abortSignal,
             output: Output.object({
                 schema: jsonSchema(
                     autoLlmRouterOutputSchema(candidates, { rewrite }) as unknown as JSONSchema7
@@ -117,9 +121,11 @@ export async function callAutoLlmRouter(
             candidates,
             rewrite ? input.prompt : null
         );
-        return { outcome: pick ? "picked" : "invalid", pick, usage };
-    } catch {
-        return { outcome: "error", pick: null, usage: undefined };
+        return { outcome: pick ? "picked" : "invalid", pick, usage,
+            ...(!pick ? { failure: { kind: "invalid_output" as const } } : {}) };
+    } catch (error) {
+        const failure = autoLlmRouterFailureDetail(error, abortSignal?.aborted === true);
+        return { outcome: failure.kind === "timeout" ? "timeout" : "error", pick: null, usage: undefined, failure };
     }
 }
 
@@ -338,7 +344,7 @@ export async function pickAutoModelWithLlm(input: {
         return null;
     }
     const startedAt = Date.now();
-    const { outcome, pick, usage } = await callAutoLlmRouter(call);
+    const { outcome, pick, usage, failure } = await callAutoLlmRouter(call);
     const latencyMs = Date.now() - startedAt;
     if (prices && usage?.inputTokens !== undefined && usage.outputTokens !== undefined) {
         const actual = callCostMicroUsd({
@@ -363,6 +369,8 @@ export async function pickAutoModelWithLlm(input: {
             rewriteKept: Boolean(pick?.rewrite),
             outcome,
             latencyMs,
+            timeoutMs: call.timeoutMs,
+            ...(failure ? { failure } : {}),
         })
     );
 

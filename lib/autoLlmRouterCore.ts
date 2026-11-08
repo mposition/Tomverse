@@ -85,6 +85,36 @@ export const AUTO_LLM_ROUTER_TIMEOUT_MS = 5_000;
  */
 export const AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS = 15_000;
 
+export type AutoLlmRouterFailure = {
+    kind: "timeout" | "structured_output" | "provider" | "invalid_output" | "unknown";
+    error?: string;
+    finishReason?: string;
+    outputChars?: number;
+    statusCode?: number;
+};
+
+/** Content-free diagnostics: never retain messages, response bodies or causes. */
+export const autoLlmRouterFailureDetail = (error: unknown, timedOut: boolean): AutoLlmRouterFailure => {
+    const value = error && typeof error === "object"
+        ? error as { name?: unknown; finishReason?: unknown; text?: unknown; statusCode?: unknown }
+        : {};
+    const name = typeof value.name === "string" && [
+        "TimeoutError", "AbortError", "AI_NoObjectGeneratedError", "AI_NoOutputGeneratedError",
+        "AI_APICallError", "AI_JSONParseError", "AI_TypeValidationError",
+    ].includes(value.name) ? value.name : "unknown";
+    const kind = timedOut || name === "TimeoutError" ? "timeout"
+        : ["AI_NoObjectGeneratedError", "AI_NoOutputGeneratedError", "AI_JSONParseError", "AI_TypeValidationError"].includes(name)
+            ? "structured_output" : name === "AI_APICallError" ? "provider" : "unknown";
+    const detail: AutoLlmRouterFailure = { kind, error: name };
+    if (typeof value.finishReason === "string" && [
+        "stop", "length", "content-filter", "tool-calls", "error", "other", "unknown",
+    ].includes(value.finishReason)) detail.finishReason = value.finishReason;
+    if (typeof value.text === "string") detail.outputChars = value.text.length;
+    if (typeof value.statusCode === "number" && Number.isInteger(value.statusCode) &&
+        value.statusCode >= 100 && value.statusCode <= 599) detail.statusCode = value.statusCode;
+    return detail;
+};
+
 /**
  * Provider options for the router call. Choosing one id from a list needs no
  * deliberation, and an OpenAI reasoning model left at its default effort was
@@ -216,7 +246,7 @@ const AUTO_LLM_ROUTER_SYSTEM_HEAD = [
 
 export const AUTO_LLM_ROUTER_DEFAULT_GUIDANCE = [
     "Match the model to the work: casual chat, short factual questions, translation and simple rewriting go to light, low-credit models.",
-    "Hard reasoning, maths, non-trivial code, long-form writing, and legal, medical or financial analysis go to stronger models.",
+    "Hard reasoning, maths, non-trivial code, long-form writing, and in-depth legal, medical or financial analysis go to stronger models. A short stock suggestion or basic financial question alone does not require premium reasoning; choose a lower-credit model when it can answer as well.",
     "Credits are what the user pays. When two candidates would answer about as well, choose the one with fewer credits.",
     "Use each candidate's bestFor description, tier, reasoning setting, context window and image support to decide which kind of work it is strong at.",
 ].join("\n");
