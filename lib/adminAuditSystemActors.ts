@@ -268,7 +268,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "trace-report-analysis", "develop-ci-repair", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane", "ops-observer", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "model-catalog-renewal",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "trace-report-analysis", "develop-ci-repair", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane", "ops-observer", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "model-catalog-renewal", "model-catalog-env-sync",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -429,7 +429,7 @@ export const systemAuditActionAllowed = (
   isSystemAuditActor(actor) &&
   (actor !== "product-research-scout" ||
     (action === "product_research.scout.test_session_issued" && targetType === "User")) &&
-  marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) && supportTriageAuditScope(actor, action, targetType) &&
+  marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) && modelCatalogEnvSyncAuditScope(actor, action, targetType) && supportTriageAuditScope(actor, action, targetType) &&
   (actor !== "trace-report-analysis" ||
     (action === "trace_report_analysis.idea_submitted" && targetType === "AmuxIdeaSubmission")) &&
   (actor !== "develop-ci-repair" ||
@@ -636,6 +636,21 @@ export const MODEL_CATALOG_SNAPSHOT_RENEWED_ACTION = "model_catalog.snapshot_ren
 function modelCatalogRenewalAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
   return actor !== "model-catalog-renewal" ||
     (action === "model_catalog.snapshot_renewed" && targetType === "ModelCatalogSnapshot");
+}
+
+/**
+ * The weekly copy of production's model catalogue into staging and dev
+ * (runModelCatalogEnvSync in lib/modelCatalogEnvSync.ts): one action, one
+ * target, written only in a lower environment's transaction that applies the
+ * copy. Not a person, so never approval evidence. Joined into
+ * `systemAuditActionAllowed()` on its existing first line.
+ */
+export const MODEL_CATALOG_ENV_SYNC_AUDIT_ACTOR = "model-catalog-env-sync" as const satisfies SystemAuditActor;
+export const MODEL_CATALOG_ENV_SYNCED_ACTION = "model_catalog.env_synced" as const;
+export const MODEL_CATALOG_ENV_SYNC_TARGET = "ModelCatalogEnvSync" as const;
+function modelCatalogEnvSyncAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
+  return actor !== "model-catalog-env-sync" ||
+    (action === "model_catalog.env_synced" && targetType === "ModelCatalogEnvSync");
 }
 
 /**

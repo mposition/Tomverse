@@ -61,6 +61,17 @@ export type AmuxV22Provider = keyof typeof AMUX_V22_PROVIDERS;
 export const AMUX_V22_MULTI_PROVIDER_ENV = "TOMVERSE_AMUX_V22_MULTI_PROVIDER";
 export const amuxV22MultiProviderEnabled = (value: string | undefined) =>
   value === "enabled";
+/**
+ * Since 2026-11-08 the Codex, Copilot and Cursor sidecars record their own
+ * sign-in's subscription quota as Claude's does, for the Agent office.
+ * Whether such a reading also feeds dispatch -- the routing score and both
+ * exhausted checks (the native router's and the v22 claim's) -- is this
+ * switch, off unless exactly `enabled`; off, dispatch treats those workers
+ * as before, with no reading. Claude's readings always count.
+ */
+export const AMUX_V22_NON_CLAUDE_QUOTA_GATE_ENV = "TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE";
+export const amuxQuotaObservationFeedsDispatch = (provider: string, gate: string | undefined) =>
+  provider.trim().toLowerCase() === "anthropic" || gate === "enabled";
 export const amuxV22Provider = (provider: string): AmuxV22Provider | null => {
   const key = provider.toLowerCase();
   return Object.hasOwn(AMUX_V22_PROVIDERS, key) ? key as AmuxV22Provider : null;
