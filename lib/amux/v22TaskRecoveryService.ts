@@ -1866,7 +1866,13 @@ async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: D
         risk || launchProof))
       throw new BoardImportError("recovery_cost_changed", 409);
     const approvalId = randomUUID();
-    const approvalMetadata = { taskId: task.id, inspectionId: inspection.id, evidenceId: evidence.id,
+    // The approval answers the person's open escalation for this Task: it is
+    // resolved as a retry in this transaction, so the queue no longer shows
+    // the old reason and a later stop opens a fresh escalation with its own.
+    const openEscalations = (await tx.amuxHumanEscalation.findMany({ where: { taskId: task.id,
+      status: { in: ["open", "acknowledged"] } }, select: { id: true },
+      orderBy: { createdAt: "asc" } })).map((row) => row.id);
+    const approvalMetadata = { taskId: task.id, resolvedEscalationIds: openEscalations, inspectionId: inspection.id, evidenceId: evidence.id,
         ownerRequestId: input.requestId, priorAttemptId: input.priorAttemptId,
         beforeRevision: task.revision, afterRevision: task.revision + 1,
         evidenceDigest: evidence.evidenceDigest, ...approvedCost,
@@ -1928,6 +1934,19 @@ async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: D
       status: "blocked", owner: null, claimedAt: null, v22AssignmentId: null, archivedAt: null },
       data: { status: "todo", revision: { increment: 1 } } });
     if (changed.count !== 1) throw new BoardImportError("recovery_identity_changed", 409);
+    if (openEscalations.length) {
+      const resolved = await tx.amuxHumanEscalation.updateMany({ where: {
+        id: { in: openEscalations }, taskId: task.id, status: { in: ["open", "acknowledged"] } },
+        data: { status: "resolved", resolutionOutcome: "retry",
+          resolution: authority.kind === "owner" ?
+            "Owner approved one additional capped recovery attempt." :
+            "Owner pre-approval opened one additional capped recovery attempt after verified stop evidence.",
+          resolvedById: ownerId,
+          resolvedByEmail: authority.kind === "owner" ? authority.session.user?.email ?? null : null,
+          resolvedAt: now } });
+      if (resolved.count !== openEscalations.length)
+        throw new BoardImportError("recovery_identity_changed", 409);
+    }
     return approvalId;
   }
 }

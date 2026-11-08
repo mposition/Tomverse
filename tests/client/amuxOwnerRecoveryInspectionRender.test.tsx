@@ -559,7 +559,24 @@ test("advanced app task status remains separate from the immutable approval rece
 
 // Minimal hook harness for the actual Panel, not a second implementation of
 // its request logic. React's installed dispatcher shape is asserted explicitly.
+/** The app-record check reads on its own when the panel mounts (owner
+ * decision 2026-11-08). The harness answers that read-only GET itself and
+ * records it, so each test's stub still sees only the recovery calls. */
+const inspectionReads: string[] = [];
+function answerInspectionReads() {
+  const forward = globalThis.fetch as typeof fetch & { amuxInspectionReads?: true };
+  if (forward.amuxInspectionReads) return;
+  const wrapped = Object.assign(async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).startsWith("/api/admin/amux/execution-view")) {
+      assert.notEqual(init?.method, "POST"); inspectionReads.push(String(url));
+      return Response.json(fixture());
+    }
+    return forward(url, init);
+  }, { amuxInspectionReads: true as const });
+  globalThis.fetch = wrapped as typeof fetch;
+}
 function mountRecoveryPanel(initialIdentity = identity) {
+  answerInspectionReads();
   const internals = (React as unknown as { __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE:
     { H: unknown } }).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
   assert.ok(internals && "H" in internals, "installed React client dispatcher is required");
@@ -567,6 +584,8 @@ function mountRecoveryPanel(initialIdentity = identity) {
   const effects = new Map<number, { deps: unknown[]; cleanup?: () => void }>();
   let cursor = 0, dirty = true, mounted = true, taskIdentity = initialIdentity;
   let hostProps!: Parameters<typeof AmuxHostRecoveryView>[0];
+  let inspectionProps!: Parameters<typeof AmuxRecoveryInspectionView>[0];
+  let oneClickProps: Parameters<typeof AmuxOneClickRecoveryView>[0] | null = null;
   const queued: (() => void)[] = [];
   const dispatcher = {
     useContext: () => ({ locale: "ko", pending: false, setLocale: () => {} }),
@@ -596,6 +615,11 @@ function mountRecoveryPanel(initialIdentity = identity) {
       const tree = AmuxOwnerRecoveryInspectionPanel({ identity: taskIdentity,
         taskStatus: "blocked", onReloadReview: () => {} });
       hostProps = (tree.props.children[1] as React.ReactElement<Parameters<typeof AmuxHostRecoveryView>[0]>).props;
+      inspectionProps = (tree.props.children[0] as React.ReactElement<
+        Parameters<typeof AmuxRecoveryInspectionView>[0]>).props;
+      const oneClick = tree.props.children[2] as React.ReactElement<
+        Parameters<typeof AmuxOneClickRecoveryView>[0]> | false;
+      oneClickProps = oneClick ? oneClick.props : null;
     } finally { internals.H = previous; }
     queued.splice(0).forEach(create => create());
   };
@@ -605,6 +629,7 @@ function mountRecoveryPanel(initialIdentity = identity) {
   };
   render();
   return { flush, get props() { return hostProps; }, get view() { return AmuxHostRecoveryView(hostProps); },
+    get inspection() { return inspectionProps; }, get oneClick() { return oneClickProps; },
     replace: async (next: typeof identity) => { taskIdentity = next; dirty = true; await flush(); },
     unmount: () => { effects.forEach(effect => effect.cleanup?.()); mounted = false; },
   };
@@ -1088,4 +1113,41 @@ test("the quote binds only this identity and the POST sends the quoted digest, n
   assert.deepEqual(bindAmuxPendingRecovery(pending, identity.taskId), pending);
   assert.equal(bindAmuxPendingRecovery({ ...pending, expectedReceipt: null }, identity.taskId), null);
   assert.equal(AMUX_PREAPPROVAL_AUTO_READ_MS * AMUX_PREAPPROVAL_AUTO_READS >= 30 * 60_000, true);
+});
+
+// Owner decision 2026-11-08: "why must a person press app-record check, new
+// Ubuntu evidence and read result as three steps?" The records load by
+// themselves; the one press is the one-click consent.
+test("actual Panel reads app records on open and needs only the one-click button pressed", async t => {
+  recoveryBrowser(t); inspectionReads.length = 0;
+  const posts: Record<string, unknown>[] = []; const quoteReads: string[] = [];
+  t.mock.method(globalThis, "fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      const body = JSON.parse(String(init.body)); posts.push(body);
+      return Response.json({ ...hostFixture(), requestId: body.requestId, state: "pending",
+        evidenceId: null, evidenceDigest: null, cost: null, quote: null,
+        eligibility: { ...normalEligibility, approveAttempt: false },
+        preApproval: preApproval("waiting") });
+    }
+    quoteReads.push(String(url)); return Response.json(preApprovalQuote);
+  });
+  const panel = mountRecoveryPanel(); await panel.flush();
+  // Opened, not pressed: the app records are already shown.
+  assert.equal(inspectionReads.length, 1);
+  assert.equal(panel.inspection.state.state, "ready");
+  assert.match(textOf(AmuxRecoveryInspectionView(panel.inspection)), /앱 기록 다시 점검/);
+  // The one press: start, confirm the server quote, approve.
+  assert.ok(panel.oneClick); panel.oneClick.onStart(); await panel.flush();
+  assert.deepEqual(quoteReads, ["/api/admin/amux/execution-recovery?taskId=task-1&view=preapproval_quote"]);
+  panel.oneClick!.onConfirm(true); await panel.flush();
+  panel.oneClick!.onApprove(); await panel.flush();
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].action, "preapprove_attempt");
+  assert.equal(posts[0].costDigest, quote.costDigest);
+  assert.match(textOf(AmuxOneClickRecoveryView(panel.oneClick!)), /종료 확인을 기다리는 중/);
+  // No other write was needed: no separate inspection request or approval.
+  assert.equal(posts.some((body) => body.action === "request_inspection" ||
+    body.action === "approve_attempt"), false);
+  assert.equal(inspectionReads.length, 1);
+  panel.unmount();
 });

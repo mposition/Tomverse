@@ -3,7 +3,7 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 export const adminAmuxRecoveryInspectionMessages = defineAdminMessages({
   en: {
     title: "Check this attempt's app records",
-    intro: "Read the latest records for this task and attempt. This check does not run work or change costs.",
+    intro: "The latest records for this task and attempt are read when this area opens. This check does not run work or change costs.",
     inspect: "Check app records", inspectAgain: "Check app records again",
     loading: "Reading the task, result record, usage receipts and cost settlement…",
     checkedAt: "App records checked at", noInspection: "These records have not been checked yet.",
@@ -149,7 +149,7 @@ export const adminAmuxRecoveryInspectionMessages = defineAdminMessages({
   },
   ko: {
     title: "이전 실행의 앱 기록 점검",
-    intro: "이 작업과 이전 실행에 연결된 최신 기록을 읽습니다. 점검만으로 작업을 실행하거나 비용을 바꾸지 않습니다.",
+    intro: "이 영역을 열면 이 작업과 이전 실행에 연결된 최신 기록을 자동으로 읽습니다. 점검만으로 작업을 실행하거나 비용을 바꾸지 않습니다.",
     inspect: "앱 기록 점검", inspectAgain: "앱 기록 다시 점검",
     loading: "작업·결과물 기록·사용량 영수증·비용 정산을 읽고 있습니다…",
     checkedAt: "앱 기록 점검 시각", noInspection: "아직 이 기록을 점검하지 않았습니다.",

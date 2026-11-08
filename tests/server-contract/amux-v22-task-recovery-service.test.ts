@@ -66,7 +66,7 @@ const world = { task: {} as Row, attempt: {} as Row, runtime: {} as Row,
   inspections: [] as Row[], evidence: [] as Row[], approvals: [] as Row[], audits: [] as Row[],
   risks: [] as Row[], launchChecks: [] as Row[], launchProofs: [] as Row[],
   apiModelAccessEvidence: [] as Row[],
-  preApprovals: [] as Row[], preApprovalResults: [] as Row[],
+  preApprovals: [] as Row[], preApprovalResults: [] as Row[], escalations: [] as Row[],
   ready: true, incident: false, cap: "3400000", costAdmission: true, cas: true,
   otherWork: false,
   // null keeps the fixed test receipt. A Date makes the receipt digest depend on
@@ -105,7 +105,7 @@ function reset() {
   world.inspections = []; world.evidence = []; world.approvals = []; world.audits = [];
   world.risks = []; world.launchChecks = []; world.launchProofs = [];
   world.apiModelAccessEvidence = [];
-  world.preApprovals = []; world.preApprovalResults = [];
+  world.preApprovals = []; world.preApprovalResults = []; world.escalations = [];
   world.ready = true; world.incident = false; world.cap = "3400000"; world.costAdmission = true;
   world.cas = true; world.otherWork = false; world.changedOld = 0;
   world.ledgerWrites = 0; world.attemptWrites = 0;
@@ -207,6 +207,26 @@ const tx = {
     },
     create: async ({ data }: { data: Row }) => { world.preApprovals.push(data); return data; },
   },
+  amuxHumanEscalation: {
+    findMany: async ({ where }: { where: Row }) => world.escalations.filter((row) =>
+      row.taskId === where.taskId &&
+      ((where.status as { in: string[] }).in.includes(row.status as string))).map((row) => ({ id: row.id })),
+    findFirst: async ({ where }: { where: Row }) => world.escalations.find((row) =>
+      row.taskId === where.taskId &&
+      ((where.status as { in: string[] }).in.includes(row.status as string))) ?? null,
+    updateMany: async ({ where, data }: { where: Row; data: Row }) => {
+      const ids = (where.id as { in: string[] }).in;
+      const rows = world.escalations.filter((row) => ids.includes(row.id as string) &&
+        row.taskId === where.taskId &&
+        (where.status as { in: string[] }).in.includes(row.status as string));
+      rows.forEach((row) => Object.assign(row, data));
+      return { count: rows.length };
+    },
+    create: async ({ data }: { data: Row }) => {
+      const row = { id: `escalation-${world.escalations.length + 1}`, status: "open", ...data };
+      world.escalations.push(row); return row;
+    },
+  },
   amuxV22TaskRecoveryPreApprovalResult: {
     create: async ({ data }: { data: Row }) => { world.preApprovalResults.push(data); return data; },
   },
@@ -293,7 +313,8 @@ function load() {
         approvals: [...world.approvals], evidence: [...world.evidence], audits: [...world.audits],
         risks: [...world.risks], launchChecks: [...world.launchChecks], launchProofs: [...world.launchProofs],
         apiModelAccessEvidence: [...world.apiModelAccessEvidence],
-        preApprovals: [...world.preApprovals], preApprovalResults: [...world.preApprovalResults] };
+        preApprovals: [...world.preApprovals], preApprovalResults: [...world.preApprovalResults],
+        escalations: structuredClone(world.escalations) };
       try { return await callback(tx, now); }
       catch (error) { world.task = saved.task; world.inspections = saved.inspections;
         world.approvals = saved.approvals;
@@ -302,6 +323,7 @@ function load() {
         world.launchProofs = saved.launchProofs;
         world.apiModelAccessEvidence = saved.apiModelAccessEvidence;
         world.preApprovals = saved.preApprovals; world.preApprovalResults = saved.preApprovalResults;
+        world.escalations = saved.escalations;
         throw error; }
     },
   } });
@@ -1478,4 +1500,33 @@ test("manual approval: blocked while a consent waits, and inspect evidence lasts
   world.evidence[0]!.recordedAt = new Date(now.getTime() - 10 * 60_000);
   const read = await service.approveAmuxV22TaskRecovery(input);
   assert.equal(read.state, "approved"); assert.equal(world.approvals[0]!.preApprovalId, null);
+});
+
+// Operator report 2026-11-08: after an approved recovery the Task ran again,
+// but the queue still showed the old escalation, and the next stop reused it.
+test("an approval resolves the open escalation as a retry, and the next stop opens a new one", async () => {
+  for (const path of ["manual", "one-click"] as const) {
+    reset(); const service = await load();
+    world.escalations.push({ id: "escalation-old", taskId: "task-1234", status: "acknowledged",
+      reason: "outcome_unknown" }, { id: "escalation-other", taskId: "task-other", status: "open",
+      reason: "outcome_unknown" });
+    if (path === "manual") {
+      await requestInspection(); await service.approveAmuxV22TaskRecovery(await approvalInput());
+    } else { await preApprove(); await submitEvidence(); }
+    assert.equal(world.task.status, "todo", path);
+    const old = world.escalations.find((row) => row.id === "escalation-old")!;
+    assert.equal(old.status, "resolved", path); assert.equal(old.resolutionOutcome, "retry", path);
+    assert.equal(old.resolvedById, "owner-1", path);
+    assert.ok(old.resolvedAt instanceof Date, path);
+    assert.equal(world.escalations.find((row) => row.id === "escalation-other")!.status, "open", path);
+    const audit = world.audits.find((row) => row.action === (path === "manual" ?
+      "amux.v22.recovery.approved" : "amux.v22.recovery.preapproval_applied"))!;
+    assert.deepEqual((audit.metadata as Row).resolvedEscalationIds, ["escalation-old"], path);
+    const { openAmuxHumanEscalation } = await import(mod("lib/amux/escalation.ts"));
+    const next = await openAmuxHumanEscalation(tx as never, { taskId: "task-1234",
+      specialty: null, reason: "outcome_unknown", openedBy: "amux-system" });
+    assert.notEqual(next.id, "escalation-old", path);
+    assert.equal(world.escalations.filter((row) => row.taskId === "task-1234" &&
+      row.status !== "resolved").length, 1, path);
+  }
 });

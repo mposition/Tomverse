@@ -534,7 +534,7 @@ export function AmuxRecoveryInspectionView({ m, state, onInspect, onReloadReview
       className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-blue-500/40 px-4 py-2 text-sm font-semibold text-blue-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 disabled:opacity-60">
       {state.state === "loading" ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
         : <RefreshCw aria-hidden="true" className="h-4 w-4" />}
-      {state.state === "ready" || state.state === "unavailable" ? m.inspectAgain : m.inspect}
+      {m.inspectAgain}
     </button>
     <div role="status" aria-live="polite" className="mt-3 text-sm leading-6 text-zinc-300">
       {state.state === "idle" && m.noInspection}
@@ -850,19 +850,36 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     });
     return () => { disposed = true; requestId.current += 1; active.current?.abort(); active.current = null; };
   }, [identity.taskId, identity.taskRevision, identity.attemptId, locale, m.host.unavailable]);
+  // The app-record check is a read: it has its own request fence so it never
+  // waits on, or blocks, a recovery write on the same card.
+  const inspectActive = useRef<AbortController | null>(null);
+  const inspectSeq = useRef(0);
+  // Re-created every render on purpose, like recover below; the mount effect
+  // reaches the latest one through inspectRef.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const inspect = async () => {
-    if (active.current) return;
+    if (inspectActive.current) return;
     const controller = new AbortController();
-    active.current = controller;
-    const current = ++requestId.current;
-    const isCurrent = () => current === requestId.current && active.current === controller;
+    inspectActive.current = controller;
+    const current = ++inspectSeq.current;
+    const isCurrent = () => current === inspectSeq.current && inspectActive.current === controller;
     setState({ state: "loading" });
     const next = await fetchAmuxRecoveryInspection({ identity, taskStatus, controller, isCurrent,
       fallback: m.unavailable, locale });
     if (!isCurrent()) return;
     if (next) setState(next);
-    active.current = null;
+    inspectActive.current = null;
   };
+  // Owner decision 2026-11-08: the app records are read as soon as the
+  // recovery area opens; the button only reads them again.
+  const inspectRef = useRef(inspect);
+  useEffect(() => { inspectRef.current = inspect; }, [inspect]);
+  useEffect(() => {
+    let disposed = false;
+    queueMicrotask(() => { if (!disposed) void inspectRef.current(); });
+    return () => { disposed = true; inspectSeq.current += 1; inspectActive.current?.abort();
+      inspectActive.current = null; };
+  }, [identity.taskId, identity.taskRevision, identity.attemptId, taskStatus]);
   // Re-created every render on purpose; the auto-read timer reaches the latest
   // one through recoverRef, synced by an effect keyed on it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1036,7 +1053,8 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     active.current = null;
   };
   const date = (value: string) => formatAestDateTime(value, { seconds: true }) ?? "—";
-  const busy = state.state === "loading" || host.state === "loading";
+  // Only a recovery write waits on another; the read-only record check does not.
+  const busy = host.state === "loading";
   return <><AmuxRecoveryInspectionView m={m} state={state} busy={busy} onInspect={() => void inspect()}
     onReloadReview={onReloadReview} date={date} returnTo={returnTo} />
     <AmuxHostRecoveryView m={m} state={host} busy={busy} confirmed={confirmed} onConfirm={setConfirmed}
