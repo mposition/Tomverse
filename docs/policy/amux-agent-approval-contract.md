@@ -190,12 +190,13 @@ reason digest를 시스템 감사에 남긴다.
 |---|---|---|
 | `review`, 마지막 시도 terminal `succeeded`이고 `toStatus=review`, 해당 revision 일치 | `approve` | `done`; 새 Agent 실행이나 외부 행위는 없음 |
 | `review`, 같은 조건 | `block` | `blocked`; 사유·actor·시각 기록 |
+| `review`, 같은 조건, v4 Task에 PR이 없고 이 시도의 저장된 결과가 검증됨, 이 시도의 PR을 열었거나 열 수 있는 게시 작업이 없음, 재시도 상한 미소진 (운영자 결정 2026-11-08) | `retry` | owner·claim fence와 `reviewPrNumber`를 정리한 `todo`; 다음 claim은 모든 admission을 다시 검사 |
 | `blocked`, 마지막 시도 terminal, 재시도 상한 미소진, 원인 교정됨 | `retry` | owner·claim fence를 정리한 `todo`; 다음 claim은 모든 admission을 다시 검사 |
 | `blocked`, `planning-review`가 실행 전 invalid/ambiguous due로 열렸고 원천 기한이 교정·동기화됨 | `retry` | 시도 기록을 만들지 않고 `todo`; 다음 claim은 모든 admission을 다시 검사 |
 | 이미 `blocked` | `block` | 상태 유지, 새 결정의 사유를 append-only 기록 |
 
 그 밖의 조합은 거절한다. `open` 또는 `acknowledged` escalation에만 제안을 만들고,
-`acknowledge`는 승인의 선행 조건이 아니다. 특히 `review`의 `retry`, `blocked`의 `approve`, 이미
+`acknowledge`는 승인의 선행 조건이 아니다. 특히 위 표 밖의 `review`의 `retry`(PR이 있거나 결과가 검증되지 않은 경우), `blocked`의 `approve`, 이미
 종결된 escalation의 재처리, 실행 중인 attempt·유효 delivery receipt가 남은
 작업은 자동 전이하지 않는다. 마지막 시도는 최대 `taskRevision`, 그다음
 `startedAt`·ID 순으로 판정하며, terminal이면 `endedAt`과 outcome·toStatus가
