@@ -104,7 +104,14 @@ test("plan creates missing rows, updates changed ones and keeps local-only rows"
   assert.equal(table.update[0].data.creditWeight, 2);
   assert.equal("id" in table.update[0].data, false);
   assert.equal(table.localOnly, 1);
-  assert.deepEqual(plan.totals, { create: 1, update: 1, unchanged: 1, conflicts: 0, localOnly: 1 });
+  assert.deepEqual(plan.totals, {
+    create: 1,
+    update: 1,
+    unchanged: 1,
+    conflicts: 0,
+    localOnly: 1,
+    held: 0,
+  });
 });
 
 test("a column production does not export yet is kept, and one this environment lacks is dropped", () => {
@@ -138,33 +145,84 @@ test("JSON fields compare by content, not key order", () => {
   assert.equal(tablePlan(planModelCatalogEnvSync(source, local), "ModelCatalogEntry").unchanged, 1);
 });
 
-test("an append-only row is inserted when missing and never rewritten", () => {
-  const item = spec("ModelCatalogPriceRevision");
-  const revision = (id, prices) =>
-    normalizeSyncRow(item, {
-      id,
-      category: "image",
-      modelId: "m",
-      pricingVersion: "v1",
-      prices,
-      verification: {},
-      effectiveFrom: new Date("2026-11-01T00:00:00.000Z"),
-      createdAt: new Date("2026-11-01T00:00:00.000Z"),
-    });
+const revision = (id, pricingVersion, prices, effectiveFrom = "2026-11-01T00:00:00.000Z") =>
+  normalizeSyncRow(spec("ModelCatalogPriceRevision"), {
+    id,
+    category: "image",
+    modelId: "m",
+    pricingVersion,
+    prices,
+    verification: {},
+    effectiveFrom: new Date(effectiveFrom),
+    createdAt: new Date(effectiveFrom),
+  });
+
+const catalogEntry = (profile) =>
+  normalizeSyncRow(spec("ModelCatalogEntry"), { category: "image", modelId: "m", enabled: true, profile });
+
+test("a price revision is inserted when missing, and an existing event is never rewritten", () => {
   const source = emptyTables();
   const local = emptyTables();
-  source.ModelCatalogPriceRevision = [revision("prod-1", { usd: 1 })];
-  local.ModelCatalogPriceRevision = [revision("local-1", { usd: 2 })];
-  const conflicting = tablePlan(planModelCatalogEnvSync(source, local), "ModelCatalogPriceRevision");
-  assert.equal(conflicting.conflicts, 1);
-  assert.equal(conflicting.update.length, 0);
-  assert.equal(conflicting.create.length, 0);
-
-  local.ModelCatalogPriceRevision = [];
+  source.ModelCatalogPriceRevision = [revision("prod-1", "v1", { usd: 1 })];
   const missing = tablePlan(planModelCatalogEnvSync(source, local), "ModelCatalogPriceRevision");
   assert.equal(missing.create.length, 1);
   assert.equal(missing.create[0].id, "prod-1");
   assert.equal(missing.create[0].effectiveFrom, "2026-11-01T00:00:00.000Z");
+
+  const event = spec("ModelLifecycleWorkItemEvent");
+  const at = new Date("2026-11-01T00:00:00.000Z");
+  source.ModelLifecycleWorkItemEvent = [
+    normalizeSyncRow(event, { id: "ev", workItemId: "w", occurredAt: at, toStatus: "adopted" }),
+  ];
+  local.ModelLifecycleWorkItemEvent = [
+    normalizeSyncRow(event, { id: "ev", workItemId: "w", occurredAt: at, toStatus: "excluded" }),
+  ];
+  const events = tablePlan(planModelCatalogEnvSync(source, local), "ModelLifecycleWorkItemEvent");
+  assert.equal(events.conflicts, 1);
+  assert.equal(events.update.length, 0);
+  assert.equal(events.create.length, 0);
+});
+
+test("production's profile is not installed over prices this environment set for another profile", () => {
+  const source = emptyTables();
+  const local = emptyTables();
+  source.ModelCatalogEntry = [catalogEntry({ endpoint: "production-model" })];
+  source.ModelCatalogPriceRevision = [revision("prod-1", "v1", { usd: 1 })];
+  local.ModelCatalogEntry = [catalogEntry({ endpoint: "local-model" })];
+  // Same pricingVersion, other prices -- and a later local-only revision.
+  local.ModelCatalogPriceRevision = [
+    revision("local-1", "v1", { usd: 2 }),
+    revision("local-2", "local-v2", { usd: 3 }, "2026-11-05T00:00:00.000Z"),
+  ];
+  const plan = planModelCatalogEnvSync(source, local);
+  const entries = tablePlan(plan, "ModelCatalogEntry");
+  const prices = tablePlan(plan, "ModelCatalogPriceRevision");
+  assert.equal(entries.update.length, 0);
+  assert.equal(entries.held, 1);
+  assert.equal(prices.create.length, 0);
+  assert.equal(prices.held, 1);
+  assert.deepEqual(plan.heldModels, ["image:m"]);
+  assert.equal(plan.totals.held, 2);
+
+  // A local-only revision alone is enough to hold the model.
+  local.ModelCatalogPriceRevision = [revision("prod-1", "v1", { usd: 1 }), revision("local-2", "local-v2", { usd: 3 })];
+  assert.equal(tablePlan(planModelCatalogEnvSync(source, local), "ModelCatalogEntry").held, 1);
+});
+
+test("a model whose local prices are production's own goes through", () => {
+  const source = emptyTables();
+  const local = emptyTables();
+  source.ModelCatalogEntry = [catalogEntry({ endpoint: "production-model-v2" })];
+  source.ModelCatalogPriceRevision = [
+    revision("prod-1", "v1", { usd: 1 }),
+    revision("prod-2", "v2", { usd: 2 }, "2026-11-05T00:00:00.000Z"),
+  ];
+  local.ModelCatalogEntry = [catalogEntry({ endpoint: "production-model" })];
+  local.ModelCatalogPriceRevision = [revision("staging-id-of-v1", "v1", { usd: 1 })];
+  const plan = planModelCatalogEnvSync(source, local);
+  assert.equal(tablePlan(plan, "ModelCatalogEntry").update.length, 1);
+  assert.deepEqual(tablePlan(plan, "ModelCatalogPriceRevision").create.map((row) => row.id), ["prod-2"]);
+  assert.deepEqual(plan.heldModels, []);
 });
 
 test("work items and their events point at this environment's ids", () => {

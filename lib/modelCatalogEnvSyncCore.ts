@@ -254,11 +254,22 @@ export type TablePlan = {
   conflicts: number;
   /** Rows only the lower environment has. Kept. */
   localOnly: number;
+  /** Rows of a model whose prices here differ from production's (see heldPricedModels). Left alone. */
+  held: number;
 };
 
 export type SyncPlan = {
   tables: TablePlan[];
-  totals: { create: number; update: number; unchanged: number; conflicts: number; localOnly: number };
+  totals: {
+    create: number;
+    update: number;
+    unchanged: number;
+    conflicts: number;
+    localOnly: number;
+    held: number;
+  };
+  /** The catalogue models held back, as "category:modelId". */
+  heldModels: string[];
 };
 
 const specFor = (model: string): SyncTableSpec => {
@@ -288,7 +299,36 @@ export const referenceTranslator = (model: string, source: SyncTables, local: Sy
   };
 };
 
+/**
+ * Catalogue models whose price history here is not a subset of production's:
+ * a revision only this environment has, or one under production's
+ * pricingVersion with other content. Production's execution profile must not
+ * be installed over prices that were set for another profile -- the latest
+ * revision would still price it, which is what the admin editor refuses
+ * (execution_profile_priced). So such a model's catalogue row and its price
+ * revisions are left exactly as they are here, and counted as held.
+ */
+const pricedModel = (row: SyncRow) => `${String(row.category)}:${String(row.modelId)}`;
+
+export const heldPricedModels = (source: SyncTables, local: SyncTables): Set<string> => {
+  const spec = specFor("ModelCatalogPriceRevision");
+  const sourceByKey = new Map<string, SyncRow>();
+  for (const row of source.ModelCatalogPriceRevision ?? []) sourceByKey.set(syncRowKey(spec, row), row);
+  const held = new Set<string>();
+  for (const row of local.ModelCatalogPriceRevision ?? []) {
+    const match = sourceByKey.get(syncRowKey(spec, row));
+    const fields = match ? carried(spec, match) : [];
+    if (!match || comparable(fields, match) !== comparable(fields, row)) held.add(pricedModel(row));
+  }
+  return held;
+};
+
+const PRICED_TABLES = new Set(["ModelCatalogEntry", "ModelCatalogPriceRevision"]);
+
 export const planModelCatalogEnvSync = (source: SyncTables, local: SyncTables): SyncPlan => {
+  const held = heldPricedModels(source, local);
+  const isHeld = (model: string, row: SyncRow) =>
+    PRICED_TABLES.has(model) && held.has(pricedModel(row));
   const entryId = referenceTranslator("ProviderModelCatalogEntry", source, local);
   const workItemId = referenceTranslator("ModelLifecycleWorkItem", source, local);
   const remap = (model: string, row: SyncRow): SyncRow =>
@@ -308,6 +348,7 @@ export const planModelCatalogEnvSync = (source: SyncTables, local: SyncTables): 
       unchanged: 0,
       conflicts: 0,
       localOnly: 0,
+      held: 0,
     };
     const seen = new Set<string>();
     for (const raw of source[spec.model] ?? []) {
@@ -316,7 +357,9 @@ export const planModelCatalogEnvSync = (source: SyncTables, local: SyncTables): 
       seen.add(key);
       const existing = localByKey.get(key);
       const fields = carried(spec, row);
-      if (!existing) {
+      if (isHeld(spec.model, row)) {
+        plan.held += 1;
+      } else if (!existing) {
         plan.create.push(createData(spec, fields, row));
       } else if (comparable(fields, existing) === comparable(fields, row)) {
         plan.unchanged += 1;
@@ -333,15 +376,16 @@ export const planModelCatalogEnvSync = (source: SyncTables, local: SyncTables): 
     return plan;
   });
 
-  const totals = { create: 0, update: 0, unchanged: 0, conflicts: 0, localOnly: 0 };
+  const totals = { create: 0, update: 0, unchanged: 0, conflicts: 0, localOnly: 0, held: 0 };
   for (const plan of tables) {
     totals.create += plan.create.length;
     totals.update += plan.update.length;
     totals.unchanged += plan.unchanged;
     totals.conflicts += plan.conflicts;
     totals.localOnly += plan.localOnly;
+    totals.held += plan.held;
   }
-  return { tables, totals };
+  return { tables, totals, heldModels: [...held].sort() };
 };
 
 /**
@@ -377,9 +421,11 @@ export const summarizeSyncPlan = (plan: SyncPlan) => ({
         unchanged: table.unchanged,
         conflicts: table.conflicts,
         localOnly: table.localOnly,
+        held: table.held,
       },
     ])
   ),
+  heldModels: plan.heldModels,
 });
 
 /**
