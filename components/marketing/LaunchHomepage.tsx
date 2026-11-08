@@ -132,6 +132,7 @@ export default function LaunchHomepage({ reviewInfoHref, variantCopy }: LaunchHo
   const copy: LaunchHomepageCopy = variantCopy
     ? { ...defaultCopy, hero: { ...defaultCopy.hero, title: variantCopy.title ? [variantCopy.title[0], variantCopy.title[1]] : defaultCopy.hero.title, body: variantCopy.body ?? defaultCopy.hero.body } }
     : defaultCopy;
+  const mobileHeroBody = variantCopy?.body ? undefined : copy.hero.mobileBody;
   const { chatAvailable, guestTrialAvailable, isAuthenticated, chatHref, reviewHref: reviewEntryHref, primaryHref, primaryProduct } = useMarketingChatEntry();
   const reviewEntryCopy = launchReviewEntryCopy[lang];
   const accountCopy = isAuthenticated && chatAvailable ? launchAccountEntryCopy[lang] : null;
@@ -154,12 +155,13 @@ export default function LaunchHomepage({ reviewInfoHref, variantCopy }: LaunchHo
             <h1 id="landing-hero-title" data-testid="landing-hero-title" className={styles.heroTitle}><Lines lines={copy.hero.title} /></h1>
             <div className={styles.heroContent}>
               <div className={styles.heroStory}>
-                <p>{copy.hero.body}</p>
+                <p>{mobileHeroBody ? <><span className={styles.desktopHeroText}>{copy.hero.body}</span><span className={styles.mobileHeroText}>{mobileHeroBody}</span></> : copy.hero.body}</p>
                 <div className={styles.actions}>
                   <ActionLink href={primaryHref} id="landing-hero-primary" testId="landing-primary-cta" location={`landing_hero_${primaryProduct}`}>{variantCopy?.cta ?? copy.actions[primaryProduct]}</ActionLink>
                   <ActionLink href={reviewInfoHref} inverse testId="launch-review-info-cta">{copy.actions.reviewInfo}</ActionLink>
                 </div>
                 <p className={styles.heroAccess} data-testid="landing-hero-signup-note">{accountCopy?.heroAccess ?? (isGuestChatTrial ? copy.hero.access : reviewEntryCopy.heroAccess)}</p>
+                {mobileHeroBody && <p className={styles.mobileHeroDetails} data-testid="launch-mobile-hero-details">{copy.hero.body}</p>}
               </div>
               <HeroPreview copy={copy.hero} motionDisabled={motionDisabled}
                 motionLabel={motionDisabled ? copy.actions.motionOn : copy.actions.motionOff}
