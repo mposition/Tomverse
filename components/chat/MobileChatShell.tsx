@@ -1640,7 +1640,7 @@ export function MobileChatShell({
         // into view by the browser instead.
         style={{ minHeight: `${MIN_CONVERSATION_AREA_REM}rem` }}
         className={`relative flex min-h-0 flex-1 flex-col bg-zinc-50 dark:bg-zinc-950 ${
-          showWelcomeSurface ? "overflow-y-auto overscroll-contain" : "overflow-hidden"
+          showWelcomeSurface ? "overflow-y-auto overscroll-contain scroll-pb-4 [scrollbar-gutter:stable]" : "overflow-hidden"
         }`}
         onTouchStart={(event) => {
           const touch = event.touches[0];

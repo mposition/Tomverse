@@ -3114,6 +3114,32 @@ export function ChatInput({
   // reserve the home-indicator space twice, once above the footer notices.
   // (Above md the bar's md:py-4/md:pb-4 applies and no inset was ever added.) The
   // dock's bottom edge is the only place the inset belongs.
+  const separateStudioPicker = isStudio && (!isMobileShell || isReviewProduct);
+  const compactGuestHelp = isMobileShell && currentProduct === "chat" && showProductSwitcher;
+  const guestQuickStartInfo = isGuestMode && showGuestQuickStart && (
+    <div
+      data-testid="guest-quick-start"
+      className={compactGuestHelp ? "ml-auto flex items-center" : "mb-2 flex items-center gap-1.5 px-1"}
+    >
+      <span className={compactGuestHelp ? "sr-only" : "min-w-0 flex-1 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400"}>
+        {currentProduct === "chat"
+          ? chatProductUiCopy[lang].tryGuestChat
+          : t("chat.guestQuickLine")}
+      </span>
+      <FeatureHelpPopover
+        title={t("chat.guestQuickLineHelp")}
+        description={currentProduct === "chat"
+          ? chatProductUiCopy[lang].guestChatDescription
+          : t("chat.guestQuickLineHelpBody")}
+        buttonLabel={t("chat.guestQuickLineHelp")}
+        learnMoreLabel={helpCopy.learnMore}
+        topic="guest_trial"
+        align="right"
+        testId="guest-quick-start-help"
+      />
+    </div>
+  );
+
   return (
       <div data-chat-composer={currentProduct === "chat" ? workspaceAppearance : undefined} data-review-composer={review?.appearance === "studio" ? "studio" : undefined} className={variant === "floating"
         ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
@@ -3225,6 +3251,7 @@ export function ChatInput({
                   </span>
                 </div>
               )}
+              {compactGuestHelp && guestQuickStartInfo}
             </div>
           )}
           {isDragActive && (
@@ -3271,29 +3298,7 @@ export function ChatInput({
               </button>
             </div>
           )}
-          {isGuestMode && showGuestQuickStart && (
-            <div
-              data-testid="guest-quick-start"
-              className="mb-2 flex items-center gap-1.5 px-1"
-            >
-              <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
-                {currentProduct === "chat"
-                  ? chatProductUiCopy[lang].tryGuestChat
-                  : t("chat.guestQuickLine")}
-              </span>
-              <FeatureHelpPopover
-                title={t("chat.guestQuickLineHelp")}
-                description={currentProduct === "chat"
-                  ? chatProductUiCopy[lang].guestChatDescription
-                  : t("chat.guestQuickLineHelpBody")}
-                buttonLabel={t("chat.guestQuickLineHelp")}
-                learnMoreLabel={helpCopy.learnMore}
-                topic="guest_trial"
-                align="right"
-                testId="guest-quick-start-help"
-              />
-            </div>
-          )}
+          {!compactGuestHelp && guestQuickStartInfo}
           {isNewConversation && !value.trim() && attachments.length === 0 && personalizedPrompt && (
             <div className="mb-2 flex max-w-full flex-wrap gap-2">
               <button
@@ -3800,7 +3805,7 @@ export function ChatInput({
           </button>
           {showWebSearchInFooter && webSearchChip}
           {isStudio && !webSearchState.isVisible && <button type="button" data-testid="composer-web-search-shortcut" className="review-search-shortcut" onClick={() => onWebSearchModeChange?.("always")}><Globe2 className="h-4 w-4" aria-hidden="true" />{t("chat.toolsWebSearch")}</button>}
-          {!isStudio && (review && footerModelPicker ? <div data-testid="composer-review-models" className="flex min-w-0">
+          {!separateStudioPicker && (review && footerModelPicker ? <div data-testid="composer-review-models" className="flex min-w-0">
             {footerModelPicker}
             <span className="sr-only">{activeSelectedModelObjects.map(model => <span key={model.id} className="sr-only" data-testid="composer-review-selected-model" data-model-id={model.id}>{model.name}</span>)}</span>
           </div> : footerModelPicker)}
@@ -3920,7 +3925,7 @@ export function ChatInput({
           )}
         </div>
 
-          {isStudio && footerModelPicker && <div className="basis-full">{footerModelPicker}</div>}
+          {separateStudioPicker && footerModelPicker && <div className="basis-full">{footerModelPicker}</div>}
           {isMenuOpen && (
             <ComposerMenuPortal>
             <>
