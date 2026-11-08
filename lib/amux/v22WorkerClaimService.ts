@@ -303,8 +303,10 @@ async function claimCandidate(taskId: string, assignmentId: string,
             route.workerName === recovery.workerName)
           return apiModelAccessCurrent;
         const quota = telemetry.get(route.workerName);
-        // Only the Claude sidecar can read its subscription quota. Another
-        // provider's limit shows up as a failed attempt, not a blocked claim.
+        // Another provider's limit shows up as a failed attempt, not a
+        // blocked claim: its reading reaches this check only while
+        // TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE is enabled (telemetry.ts),
+        // and then only a fresh exhausted one holds the route.
         if (amuxV22Provider(route.provider) !== "anthropic")
           return !quota?.scoring.provider_exhausted;
         return quota?.evidence.quota.state === "fresh" &&

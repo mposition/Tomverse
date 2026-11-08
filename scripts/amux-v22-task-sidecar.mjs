@@ -3,6 +3,7 @@ import { createAmuxV22SidecarServer, createAmuxV22SidecarHandler,
   amuxV22SidecarEnabled,
   AMUX_V22_SIDECAR_ENV, runAmuxV22OneShot, probeAmuxV22ClaudeQuota } from
   "../lib/amux/v22OneShotSidecar.mjs";
+import { probeAmuxV22ChannelQuota } from "../lib/amux/v22ChannelQuota.mjs";
 import { inspectAmuxV22RecoveryUnit } from "../lib/amux/v22RecoveryHost.mjs";
 import { captureAmuxV22PatchBaseline } from "../lib/amux/v22PatchCapture.mjs";
 import { amuxV22SidecarLaunchConfigFromEnvironment } from
@@ -35,8 +36,9 @@ const sidecar = createAmuxV22SidecarServer(socketPath,
     invocationId,
     recoveryUnit: () => inspectAmuxV22RecoveryUnit({ worker: config.worker, invocationId }),
     recoveryWorkspace: () => captureAmuxV22PatchBaseline(config.worktreePath),
-    // Only Claude's subscription quota can be read; the app claims another
-    // provider's route without one.
-    quota: () => provider === "anthropic" ? probeAmuxV22ClaudeQuota(config) : null,
+    // Each provider reads its own sign-in's subscription quota; what the
+    // app does with a non-Claude reading is TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE.
+    quota: () => provider === "anthropic" ? probeAmuxV22ClaudeQuota(config) :
+      probeAmuxV22ChannelQuota(provider, config),
     run: (request) => runAmuxV22OneShot(request, config) }));
 await sidecar.listen();
