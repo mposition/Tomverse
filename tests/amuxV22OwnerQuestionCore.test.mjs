@@ -10,6 +10,8 @@ import {
   amuxV22OwnerQuestionSettlement,
   amuxV22OwnerQuestionSettlementPlan,
   amuxV22OwnerQuestionSha256,
+  amuxV22QuestionCardBytes,
+  amuxV22QuestionDmCard,
   buildAmuxV22ResumeSection,
   normalizeAmuxV22OwnerAnswer,
   parseAmuxV22OwnerQuestion,
@@ -126,3 +128,73 @@ test("a settlement parks a questioning run blocked, escalating only over the lim
     { toStatus: "blocked", reason: "owner_question_limit", openEscalation: true });
 });
 
+
+test("a question may carry what the worker found and the files to read; a bad one is left out, never the question", () => {
+  const withContext = parseAmuxV22OwnerQuestion(line({ ...asked,
+    context: "lib/amux/fileRetry.ts retries twice and shows nothing.",
+    paths: ["lib/amux/fileRetry.ts", "lib/amux/fileRetry.ts", "../etc/passwd", "/abs/path", 7, "components/chat/FileCard.tsx"] }));
+  assert.equal(withContext.context, "lib/amux/fileRetry.ts retries twice and shows nothing.");
+  // Once each, repository-relative only.
+  assert.deepEqual(withContext.paths, ["lib/amux/fileRetry.ts", "components/chat/FileCard.tsx"]);
+  const tooLong = parseAmuxV22OwnerQuestion(line({ ...asked, context: "x".repeat(2_001), paths: "not a list" }));
+  assert.equal(tooLong.question, asked.question);
+  assert.equal("context" in tooLong, false);
+  assert.equal("paths" in tooLong, false);
+  // A question without them parses exactly as before, so its digest is unchanged.
+  assert.deepEqual(Object.keys(parseAmuxV22OwnerQuestion(line(asked))).sort(), ["options", "question", "unblocks"]);
+  assert.equal(amuxV22OwnerQuestionSha256(withContext), amuxV22OwnerQuestionSha256(parseAmuxV22OwnerQuestion(line(asked))));
+});
+
+test("the Decision Maker's card names the asking card and carries the worker's context and paths", () => {
+  const question = parseAmuxV22OwnerQuestion(line({ ...asked, context: "Two retry paths exist.",
+    paths: ["lib/amux/fileRetry.ts"] }));
+  const card = amuxV22QuestionDmCard({ questionId: "q-1", worker: "codex-impl", providerClass: "codex",
+    taskId: "cdd90973-16bd-4729-8940-1219cc639be5", sequence: 1, displayKey: "AMUX-AUTOFILE-003",
+    cardTitle: "File retry trailer signal", question });
+  assert.equal(card.title, "AMUX-AUTOFILE-003 File retry trailer signal");
+  assert.equal(card.context, 'Card: AMUX-AUTOFILE-003 "File retry trailer signal", question 1 from worker codex-impl.\n\nTwo retry paths exist.');
+  assert.deepEqual(card.context_paths, ["lib/amux/fileRetry.ts"]);
+  assert.deepEqual(card.options, asked.options);
+  assert.equal(card.provider, "codex");
+  // No key or title: the Task id, as before, and still the card line.
+  const bare = amuxV22QuestionDmCard({ questionId: "q-1", worker: "codex-impl", providerClass: "codex",
+    taskId: "t-1", sequence: 2, displayKey: null, cardTitle: null, question: parseAmuxV22OwnerQuestion(line(asked)) });
+  assert.equal(bare.title, "v22 Task t-1 question 2");
+  assert.equal(bare.context, "Card: v22 Task t-1, question 2 from worker codex-impl.");
+  assert.deepEqual(bare.context_paths, []);
+  // Local AMUX's bounds: a 200-unit title, a 4000-unit context.
+  const long = amuxV22QuestionDmCard({ questionId: "q-1", worker: "w", providerClass: "codex", taskId: "t",
+    sequence: 1, displayKey: "K-1", cardTitle: "가".repeat(400),
+    question: { ...question, context: "y".repeat(2_000) } });
+  assert.ok(long.title.length <= 200 && long.title.endsWith("…"));
+  assert.ok(long.context.length <= 4_000);
+});
+
+test("the rules ask for options, context and paths, and say the Decision Maker escalates without grounds", () => {
+  assert.match(AMUX_V22_OWNER_QUESTION_RULES, /"context":"<what you found/);
+  assert.match(AMUX_V22_OWNER_QUESTION_RULES, /"paths":\["<repository-relative file/);
+  assert.match(AMUX_V22_OWNER_QUESTION_RULES, /escalates a question it has no grounds for/);
+});
+
+test("a card whose optional parts would pass 16 KiB gives them up, paths first, so it still reaches the Decision Maker", () => {
+  const big = { question: `${"가".repeat(600)}?`, unblocks: "나".repeat(300),
+    options: Array.from({ length: 6 }, (_, i) => ({ id: `o${i}`, label: "다".repeat(300) })),
+    context: "라".repeat(2_000),
+    paths: Array.from({ length: 32 }, (_, i) => `lib/${String(i).padStart(2, "0")}/${"p".repeat(190)}`) };
+  const question = parseAmuxV22OwnerQuestion(line(big));
+  assert.equal(question.paths.length, 32);
+  const card = amuxV22QuestionDmCard({ questionId: "q-1", worker: "codex-impl", providerClass: "codex",
+    taskId: "t", sequence: 1, displayKey: "AMUX-AUTOFILE-003", cardTitle: "File retry", question });
+  const bytes = amuxV22QuestionCardBytes({ ...card, paths: card.context_paths });
+  assert.ok(bytes <= 15 * 1_024, `${bytes}`);
+  // The question, what it unblocks and the options are never cut; the card line stays.
+  assert.equal(card.question, big.question);
+  assert.equal(card.options.length, 6);
+  assert.match(card.context, /^Card: AMUX-AUTOFILE-003 "File retry"/);
+  assert.ok(card.context_paths.length < 32);
+  // A small card keeps everything.
+  const small = amuxV22QuestionDmCard({ questionId: "q-1", worker: "w", providerClass: "codex", taskId: "t",
+    sequence: 1, displayKey: "K", cardTitle: null, question: parseAmuxV22OwnerQuestion(line({ ...asked,
+      context: "c", paths: ["lib/a.ts"] })) });
+  assert.deepEqual(small.context_paths, ["lib/a.ts"]);
+});
