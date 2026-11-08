@@ -62,7 +62,7 @@ export const workspaceWelcomeCopy = {
     greeting: "다시 만나 반가워요. 무엇을 도와드릴까요?",
     starter: {
         title: "여기서 할 수 있는 일",
-        hint: "하나를 고르면 아래 입력란이 채워집니다. 보내기를 누르기 전에는 아무것도 전송되지 않습니다.",
+        hint: "하나를 고르면 입력창에 질문이 채워집니다. 보내기를 누르기 전에는 아무것도 전송되지 않습니다.",
         lockedSignIn: "로그인하면 사용할 수 있습니다",
         lockedPlan: "{plan} 플랜이 필요합니다",
         lockedSignInShort: "로그인 필요",
