@@ -16,8 +16,8 @@
 //  3. the ledger admits it (model, ratio, one picture, daily cap) and records
 //     it before anything is submitted;
 //  4. `generate create` without waiting, so the job id is known and recorded
-//     at once; if create fails, `generate list` shows whether a job started
-//     after all, and only a call proven not to have started is settled failed;
+//     at once; if create answers no id, the call stays unknown (a job missing
+//     from `generate list` proves nothing); more than one id blocks the day;
 //  5. `generate wait <id>`; a timeout leaves the entry unknown with its id,
 //     for step 1 of the next call.
 import { spawnSync } from "node:child_process";
@@ -175,19 +175,20 @@ export async function makeImage({ prompt, references = [], out, label, jobDir, e
     ids = [];
   }
   if (ids.length === 0) {
-    // Did a job start anyway? Only a list read that shows none settles it.
+    // Whether a job started is not known: a job missing from the list proves
+    // nothing (it may not be listed yet), so the call is never settled as
+    // failed here. When the list shows exactly one new job, its id is kept so
+    // the next call can look it up; otherwise the entry has no id and blocks
+    // the rest of the day.
     const since = jobsSince(cli, entry.at);
-    if (since !== null && since.length === 0) {
-      settle(file, entry.id, { status: "failed" });
-      return { ok: false, reason: "create_failed", detail: { status: created.status } };
-    }
     const found = since && since.length === 1 ? jobIdsOf(since[0])[0] : undefined;
     settle(file, entry.id, { status: "unknown", jobId: found });
-    return { ok: false, reason: "create_outcome_unknown", detail: { status: created.status, timedOut: created.timedOut } };
+    return { ok: false, reason: "create_outcome_unknown", detail: { status: created.status, timedOut: created.timedOut, jobFound: Boolean(found) } };
   }
   if (ids.length > 1) {
-    // More than the one picture priced: every job is in the ledger's note, and the run stops.
-    settle(file, entry.id, { status: "unknown", jobId: ids[0] });
+    // More than the one picture admitted: every id is kept, each counted at the
+    // quoted price, and the day is blocked until a person has looked at them.
+    settle(file, entry.id, { status: "unknown", jobIds: ids, cost: entry.cost * ids.length });
     return { ok: false, reason: "more_than_one_job", detail: { jobs: ids.length } };
   }
   const [jobId] = ids;

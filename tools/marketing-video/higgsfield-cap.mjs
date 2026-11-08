@@ -13,7 +13,7 @@
 //    blocks the rest of the day: it is never sent again blindly.
 // The entry is written before the request leaves, so a crash mid-call is
 // counted and blocks, never forgotten.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -69,6 +69,36 @@ function writeLedger(file, ledger) {
   renameSync(temp, file);
 }
 
+/**
+ * Runs `run` holding the ledger's lock (an exclusive lock file), so two runs on
+ * the box -- cron and a manual one -- never both read the same total and both
+ * spend it. A lock left by a crashed run is never broken here: it refuses
+ * spending until a person removes it (the ledger is per day, so the next day
+ * starts clean). Returns {locked: true} when the lock could not be taken.
+ */
+function withLock(file, run, waitMs = 30_000) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const lock = `${file}.lock`;
+  const deadline = Date.now() + waitMs;
+  let fd;
+  for (;;) {
+    try {
+      fd = openSync(lock, "wx");
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (Date.now() >= deadline) return { locked: true };
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+  try {
+    return { locked: false, value: run() };
+  } finally {
+    closeSync(fd);
+    rmSync(lock, { force: true });
+  }
+}
+
 /** Every entry counts, whatever became of it: a failed call may still have been charged. */
 export const spent = (ledger) => ledger.entries.reduce((sum, entry) => sum + (Number(entry.cost) || 0), 0);
 
@@ -80,7 +110,7 @@ export const unsettled = (ledger) => ledger.entries.filter((entry) => entry.stat
  * (status "sent") before anything leaves the box.
  * @returns {{ok: true, entry: object, file: string} | {ok: false, reason: string, detail?: object}}
  */
-export function admit({ jobDir, day = brisbaneDay(), env = process.env, request, label, cost: priced }) {
+export function admit({ jobDir, day = brisbaneDay(), env = process.env, request, label, cost: priced, lockWaitMs }) {
   const problem = requestProblem(request);
   if (problem) return { ok: false, reason: problem };
   // The price Higgsfield quoted, never less than the known price of a picture.
@@ -88,6 +118,12 @@ export function admit({ jobDir, day = brisbaneDay(), env = process.env, request,
   const cap = dailyCap(env);
   if (cap === null) return { ok: false, reason: "no_daily_cap" };
   const file = ledgerPath(jobDir, day);
+  // From reading the total to writing the entry, no other run touches the ledger.
+  const held = withLock(file, () => admitLocked({ file, cap, cost, request, label }), lockWaitMs);
+  return held.locked ? { ok: false, reason: "ledger_locked" } : held.value;
+}
+
+function admitLocked({ file, cap, cost, request, label }) {
   const ledger = readLedger(file);
   const open = unsettled(ledger);
   if (open.length > 0) return { ok: false, reason: "unknown_outcome_pending", detail: { entries: open.map((entry) => entry.id) } };
@@ -102,17 +138,34 @@ export function admit({ jobDir, day = brisbaneDay(), env = process.env, request,
   return { ok: true, entry, file };
 }
 
-/** Records what became of an admitted call: "done", "failed" (Higgsfield answered it failed) or "unknown" (no answer, or still running). */
-export function settle(file, entryId, { status, jobId }) {
+/**
+ * Records what became of an admitted call: "done", "failed" (Higgsfield's own
+ * job status says it failed) or "unknown" (no answer, or still running).
+ * `jobIds` (more than one job for one admitted picture) keeps every id and the
+ * entry's job id empty, so nothing can settle it automatically: it blocks the
+ * day until a person has looked at each job.
+ */
+export function settle(file, entryId, { status, jobId, jobIds, cost }) {
   if (!["done", "failed", "unknown"].includes(status)) throw new Error(`settle: bad status ${status}`);
-  const ledger = readLedger(file);
-  const entry = ledger.entries.find((candidate) => candidate.id === entryId);
-  if (!entry) throw new Error(`settle: no entry ${entryId}`);
-  entry.status = status;
-  if (jobId) entry.jobId = jobId;
-  entry.settledAt = new Date().toISOString();
-  writeLedger(file, ledger);
-  return entry;
+  const held = withLock(file, () => {
+    const ledger = readLedger(file);
+    const entry = ledger.entries.find((candidate) => candidate.id === entryId);
+    if (!entry) throw new Error(`settle: no entry ${entryId}`);
+    entry.status = status;
+    if (jobId) entry.jobId = jobId;
+    if (jobIds) {
+      entry.jobIds = jobIds;
+      entry.jobId = null;
+      entry.needsPerson = true;
+    }
+    if (Number.isFinite(cost) && cost > entry.cost) entry.cost = cost;
+    entry.settledAt = new Date().toISOString();
+    writeLedger(file, ledger);
+    return entry;
+  });
+  // Not recorded: the entry stays "sent", which blocks every later call -- the safe side.
+  if (held.locked) throw new Error("settle: the ledger is locked");
+  return held.value;
 }
 
 /**
@@ -123,7 +176,7 @@ export function settle(file, entryId, { status, jobId }) {
 export async function resolveUnsettled(file, lookup) {
   const ledger = readLedger(file);
   for (const entry of unsettled(ledger)) {
-    if (!entry.jobId) continue;
+    if (!entry.jobId || entry.needsPerson) continue;
     let status = "unknown";
     try {
       status = await lookup(entry.jobId);

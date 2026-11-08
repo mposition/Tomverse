@@ -157,11 +157,18 @@ writeFileSync(conceptsPath, `${JSON.stringify({ feature, concepts }, null, 1)}\n
 report.concepts = concepts.map((concept) => concept.id);
 
 // Paid steps stop for the day at the first refusal by the cap; finished cards are still submitted.
-const HALTING = new Set(["no_daily_cap", "daily_cap_reached", "unknown_outcome_pending", "cost_unreadable", "cost_above_call_ceiling", "create_outcome_unknown", "wait_outcome_unknown", "more_than_one_job"]);
+const HALTING = new Set(["no_daily_cap", "ledger_locked", "daily_cap_reached", "unknown_outcome_pending", "cost_unreadable", "cost_above_call_ceiling", "create_outcome_unknown", "wait_outcome_unknown", "more_than_one_job"]);
 const NO_LOGO = "Do not draw the Tomverse logo, any wordmark or any web address. Fill the frame edge to edge, and keep the bottom 10% of the picture calm, without text or important detail.";
 async function picture(label, prompt, references, out) {
   if (report.halted) return null;
-  const made = await makeImage({ prompt: `${prompt}\n\n${NO_LOGO}`, references, out, label, jobDir: "job", day });
+  let made;
+  try {
+    made = await makeImage({ prompt: `${prompt}\n\n${NO_LOGO}`, references, out, label, jobDir: "job", day });
+  } catch (error) {
+    // An error inside a paid call (the ledger could not be written, say): no further paid call today.
+    made = { ok: false, reason: "call_error", detail: String(error instanceof Error ? error.message : error).slice(0, 200) };
+    report.halted = { at: label, reason: "call_error" };
+  }
   if (made.ok) return out;
   if (HALTING.has(made.reason)) report.halted = { at: label, reason: made.reason };
   report.failed.push({ id: label, step: "higgsfield", reason: made.reason });

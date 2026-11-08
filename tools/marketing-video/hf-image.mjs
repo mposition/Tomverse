@@ -21,5 +21,5 @@ const result = await makeImage({
   jobDir: values("--job-dir")[0] ?? "job",
 });
 console.log(JSON.stringify({ step: "hf-image", ...result }));
-const BEFORE_SENDING = new Set(["no_daily_cap", "daily_cap_reached", "unknown_outcome_pending", "cost_unreadable", "cost_above_call_ceiling", "model_not_allowed", "aspect_ratio_not_allowed", "count_not_one", "use_unlim_not_allowed"]);
+const BEFORE_SENDING = new Set(["no_daily_cap", "ledger_locked", "daily_cap_reached", "unknown_outcome_pending", "cost_unreadable", "cost_above_call_ceiling", "model_not_allowed", "aspect_ratio_not_allowed", "count_not_one", "use_unlim_not_allowed"]);
 process.exit(result.ok ? 0 : BEFORE_SENDING.has(result.reason) ? 3 : 1);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -139,23 +139,102 @@ test("after a timeout nothing is sent again until the job id shows the outcome",
   }
 });
 
-test("a create with no answer is settled only by a job list that shows no job; otherwise it blocks the day", async () => {
+test("a create with no answer stays unknown even when the job list is empty, and blocks the day", async () => {
   const jobDir = tempJob();
   try {
     const failing = { status: 1, stdout: "", stderr: "network", timedOut: true };
-    const proven = fakeCli({ cost: ok({ credits: 0.25 }), create: failing, list: ok([]) });
+    // An empty list proves nothing: the job may not be listed yet.
+    const empty = fakeCli({ cost: ok({ credits: 0.25 }), create: failing, list: ok([]) });
     const args = { prompt: "scene", out: join(jobDir, "x.png"), jobDir, day: DAY, env: capEnv("5"), fetchBytes: async () => PNG };
-    assert.equal((await makeImage({ ...args, cli: proven.cli })).reason, "create_failed");
-    assert.equal(readLedger(ledgerPath(jobDir, DAY)).entries[0].status, "failed");
-
-    const unreadable = fakeCli({ cost: ok({ credits: 0.25 }), create: failing, list: { status: 1, stdout: "", stderr: "", timedOut: false } });
-    assert.equal((await makeImage({ ...args, cli: unreadable.cli })).reason, "create_outcome_unknown");
+    assert.equal((await makeImage({ ...args, cli: empty.cli })).reason, "create_outcome_unknown");
+    const [entry] = readLedger(ledgerPath(jobDir, DAY)).entries;
+    assert.deepEqual({ status: entry.status, jobId: entry.jobId }, { status: "unknown", jobId: null });
     // No job id to look up: every later call of the day is refused before pricing.
     const later = fakeCli({ cost: ok({ credits: 0.25 }), create: ok({ id: "job-z" }) });
     assert.equal((await makeImage({ ...args, cli: later.cli })).reason, "unknown_outcome_pending");
     assert.equal(later.count("create"), 0);
+    assert.equal(later.count("cost"), 0);
   } finally {
     rmSync(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("a create with no answer keeps the one new listed job's id, so it can be looked up", async () => {
+  const jobDir = tempJob();
+  try {
+    const listed = fakeCli({
+      cost: ok({ credits: 0.25 }),
+      create: { status: 1, stdout: "", stderr: "network", timedOut: true },
+      list: () => ok([{ id: "job-l", created_at: new Date().toISOString() }]),
+      get: ok({ id: "job-l", status: "completed" }),
+    });
+    const args = { prompt: "scene", out: join(jobDir, "x.png"), jobDir, day: DAY, env: capEnv("5"), fetchBytes: async () => PNG, cli: listed.cli };
+    assert.equal((await makeImage(args)).reason, "create_outcome_unknown");
+    assert.equal(readLedger(ledgerPath(jobDir, DAY)).entries[0].jobId, "job-l");
+    // Looked up as finished: the next call goes ahead (and its create fails again here).
+    await makeImage(args);
+    assert.equal(readLedger(ledgerPath(jobDir, DAY)).entries[0].status, "done");
+    assert.equal(listed.count("create"), 2);
+  } finally {
+    rmSync(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("more than one job for one picture keeps every id, counts each, and blocks the day for a person", async () => {
+  const jobDir = tempJob();
+  try {
+    const many = fakeCli({ cost: ok({ credits: 0.25 }), create: ok([{ id: "job-1" }, { id: "job-2" }, { id: "job-3" }]), get: ok({ status: "completed" }) });
+    const args = { prompt: "scene", out: join(jobDir, "x.png"), jobDir, day: DAY, env: capEnv("5"), fetchBytes: async () => PNG, cli: many.cli };
+    assert.equal((await makeImage(args)).reason, "more_than_one_job");
+    const [entry] = readLedger(ledgerPath(jobDir, DAY)).entries;
+    assert.deepEqual({ jobIds: entry.jobIds, cost: entry.cost, status: entry.status, needsPerson: entry.needsPerson }, { jobIds: ["job-1", "job-2", "job-3"], cost: 0.75, status: "unknown", needsPerson: true });
+    // No automatic lookup clears it, even though each job reads as completed.
+    assert.equal((await makeImage(args)).reason, "unknown_outcome_pending");
+    assert.equal(many.count("get"), 0);
+    assert.equal(many.count("create"), 1);
+  } finally {
+    rmSync(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("a held ledger lock refuses the call", () => {
+  const jobDir = tempJob();
+  try {
+    writeFileSync(`${ledgerPath(jobDir, DAY)}.lock`, "");
+    assert.deepEqual(admit({ jobDir, day: DAY, env: capEnv("5"), request: request(), lockWaitMs: 100 }), { ok: false, reason: "ledger_locked" });
+    assert.equal(existsSync(ledgerPath(jobDir, DAY)), false);
+  } finally {
+    rmSync(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("two runs admitting at the same moment never both get the one call the ledger allows", async () => {
+  const cap = new URL("../tools/marketing-video/higgsfield-cap.mjs", import.meta.url).href;
+  // Each run admits once at the same instant. An admitted call stays unsettled,
+  // so the ledger allows exactly one: without the lock both read an empty
+  // ledger, both are admitted, and one entry is lost.
+  const script = `const { admit } = await import(${JSON.stringify(cap)});
+const start = Number(process.argv[1]); while (Date.now() < start) {}
+const r = admit({ jobDir: process.argv[2], day: "${DAY}", env: { MARKETING_HIGGSFIELD_DAILY_CREDIT_CAP: "5" }, request: { model: "gpt_image_2_6", aspect_ratio: "4:5", count: 1, prompt: "p" } });
+console.log(r.ok ? "ok" : r.reason);`;
+  const run = (start, jobDir) =>
+    new Promise((done) => {
+      const child = spawn(process.execPath, ["--input-type=module", "-e", script, String(start), jobDir]);
+      let out = "";
+      child.stdout.on("data", (chunk) => (out += chunk));
+      child.on("close", () => done(out.trim()));
+    });
+  for (let round = 0; round < 4; round += 1) {
+    const jobDir = tempJob();
+    try {
+      const start = Date.now() + 1200;
+      const answers = await Promise.all([run(start, jobDir), run(start, jobDir), run(start, jobDir)]);
+      const ledger = readLedger(ledgerPath(jobDir, DAY));
+      assert.equal(answers.filter((answer) => answer === "ok").length, 1, JSON.stringify(answers));
+      assert.equal(ledger.entries.length, 1);
+    } finally {
+      rmSync(jobDir, { recursive: true, force: true });
+    }
   }
 });
 
