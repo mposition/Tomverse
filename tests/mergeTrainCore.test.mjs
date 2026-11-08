@@ -100,6 +100,13 @@ test("a run superseded on the same commit no longer counts, as in GitHub's merge
   // startedAt orders runs that carry no job link.
   const started = (iso, conclusion) => ({ ...gate, conclusion, startedAt: iso });
   assert.equal(checksVerdict([started("2026-11-07T16:07:48Z", "CANCELLED"), started("2026-11-07T17:11:11Z", "SUCCESS")]), "passed");
+  // A job id and a start time are not compared: one key orders the whole group,
+  // so a linked 16:00 success does not outrank a 17:00 failure or run without a link.
+  const linked = { ...at(100, "COMPLETED", "SUCCESS"), startedAt: "2026-11-07T16:00:00Z" };
+  assert.equal(checksVerdict([linked, started("2026-11-07T17:00:00Z", "FAILURE")]), "failed");
+  assert.equal(checksVerdict([linked, { ...gate, status: "IN_PROGRESS", conclusion: null, startedAt: "2026-11-07T17:00:00Z" }]), "pending");
+  assert.equal(checksVerdict([at(100, "COMPLETED", "SUCCESS"), started("2026-11-07T17:00:00Z", "FAILURE")]), "failed",
+    "no key common to both runs: both count");
   // Runs that cannot be ordered, or tie, all count: an older failure is never guessed away.
   assert.equal(checksVerdict([gate, run("COMPLETED", "CANCELLED", "Unit and API policy tests", "PR Fast Gate")]), "failed");
   assert.equal(checksVerdict([started("2026-11-07T17:11:11Z", "SUCCESS"), started("2026-11-07T17:11:11Z", "FAILURE")]), "failed");

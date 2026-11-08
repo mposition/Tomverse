@@ -99,15 +99,20 @@ export function checksVerdict(rollup, requiredWorkflows = REQUIRED_WORKFLOWS) {
 }
 
 // A job's id grows with every run and every rerun attempt, so it orders two
-// runs of one check on one commit; `startedAt` is the fallback.
+// runs of one check on one commit; `startedAt` is the fallback. One key orders
+// a whole group or none of it: a job id and a start time are not comparable.
 const JOB_ID = /\/job\/(\d+)/;
-const checkOrder = (check) => {
-  const job = JOB_ID.exec(String(check.detailsUrl ?? check.targetUrl ?? ""))?.[1];
-  if (job) return [1, Number(job)];
-  const started = Date.parse(check.startedAt ?? "");
-  return Number.isFinite(started) ? [0, started] : null;
+const ORDER_KEYS = [
+  (check) => Number(JOB_ID.exec(String(check.detailsUrl ?? check.targetUrl ?? ""))?.[1] ?? NaN),
+  (check) => Date.parse(check.startedAt ?? ""),
+];
+const groupOrder = (runs) => {
+  for (const key of ORDER_KEYS) {
+    const values = runs.map(key);
+    if (values.every(Number.isFinite)) return values;
+  }
+  return null;
 };
-const newer = (a, b) => a[0] > b[0] || (a[0] === b[0] && a[1] > b[1]);
 
 /**
  * The newest run of each check on the head commit, as GitHub's own merge box
@@ -129,13 +134,11 @@ export function latestChecks(rollup) {
   });
   return [...groups.values()].flatMap((runs) => {
     if (runs.length === 1) return runs;
-    const orders = runs.map(checkOrder);
-    if (orders.some((order) => order === null)) return runs;
-    let best = 0;
-    for (let i = 1; i < runs.length; i += 1) if (newer(orders[i], orders[best])) best = i;
+    const orders = groupOrder(runs);
+    if (orders === null) return runs;
+    const newest = Math.max(...orders);
     // Two runs with the same order are not told apart: keep both.
-    const tied = runs.filter((_, i) => i !== best && !newer(orders[best], orders[i]));
-    return [runs[best], ...tied];
+    return runs.filter((_, i) => orders[i] === newest);
   });
 }
 
