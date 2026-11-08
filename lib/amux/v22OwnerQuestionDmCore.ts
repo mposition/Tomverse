@@ -94,7 +94,9 @@ export type AmuxV22QuestionDmDetail = {
   card: { contextPaths: readonly string[]; options: ReadonlyArray<{ paths: readonly string[] }> } | null;
 };
 
-/** The snapshot's paths (§5: the context paths and the paths the options declare), once each, in card order. */
+/** The paths the snapshot asked for (§5: the context paths and the paths the options declare), once each, in
+ * card order. Not the sent manifest: a file the broker could not fetch is left out of what was sent, which the
+ * card's label says. */
 export const amuxV22QuestionDmSnapshotPaths = (card: NonNullable<AmuxV22QuestionDmDetail["card"]>) =>
   [...new Set([...card.contextPaths, ...card.options.flatMap((option) => option.paths)])];
 

@@ -47,7 +47,7 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     dmSnapshot: "Repository snapshot",
     dmCardOnly: "Card only: no repository snapshot was sent.",
     dmSnapshotAt: (state: string, sha: string) => `${state} at ${sha}`,
-    dmSnapshotPaths: "Snapshot paths",
+    dmSnapshotPaths: "Paths the snapshot asked for (a file that could not be fetched is left out of what was sent)",
     dmDirect: "Or answer yourself",
     dmReasons: {
       kill_switch_on: "the kill switch is on",
@@ -136,7 +136,7 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     dmSnapshot: "저장소 스냅샷",
     dmCardOnly: "카드만: 저장소 스냅샷을 보내지 않았습니다.",
     dmSnapshotAt: (state: string, sha: string) => `${state}, ${sha}`,
-    dmSnapshotPaths: "스냅샷 경로",
+    dmSnapshotPaths: "스냅샷에 요청한 경로 (가져오지 못한 파일은 보낸 스냅샷에서 빠집니다)",
     dmDirect: "또는 직접 답하기",
     dmReasons: {
       kill_switch_on: "kill switch가 켜져 있음",
