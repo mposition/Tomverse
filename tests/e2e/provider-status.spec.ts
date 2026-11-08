@@ -121,6 +121,41 @@ async function settleStatusPolls(page: Page, requestCount: () => number) {
 
 const banner = (page: Page) => page.getByTestId("provider-outage-banner");
 
+test("status consumers share one snapshot and keep it during a rate-limit cooldown", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  let requests = 0;
+  await page.route("**/api/models/status", route => {
+    requests += 1;
+    return route.fulfill(requests > 1
+      ? { status: 429, headers: { "Retry-After": "600" }, body: "Too many requests" }
+      : { json: { models: [{ id: SELECTED.gpt.id, provider: "openai", status: "unavailable", fallbackModelIds: [], fallbackHealth: "none" }] } });
+  });
+  await page.goto("/review");
+  await expect(banner(page)).toBeVisible();
+  await expect.poll(() => requests).toBe(1);
+  const refresh = banner(page).getByTestId("provider-status-refresh");
+  await refresh.click();
+  await expect(page.getByTestId("model-status-unavailable")).toBeVisible();
+  await expect(banner(page)).toBeVisible();
+  await expect(refresh).toBeEnabled();
+  await refresh.click();
+  await expect(refresh).toBeEnabled();
+  expect(requests).toBe(2);
+});
+
+test("an initial status lookup failure shows a temporary-unavailable notice", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  let requests = 0;
+  await page.route("**/api/models/status", route => {
+    requests += 1;
+    return route.fulfill({ status: 429, headers: { "Retry-After": "600" }, body: "Too many requests" });
+  });
+  await page.goto("/review");
+  await expect(page.getByTestId("model-status-unavailable")).toContainText("could not be refreshed");
+  await expect(banner(page)).toHaveCount(0);
+  expect(requests).toBe(1);
+});
+
 async function horizontalOverflow(page: Page) {
   return page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth

@@ -1018,6 +1018,7 @@ export const es = {
         imageUnsupported: "Este modelo no puede leer la imagen adjunta",
     },
     providerStatus: {
+        lookupUnavailable: "No se pudo actualizar el estado de los modelos. Se conserva el último resultado confirmado.",
         allAvailable: "Los proveedores seleccionados están disponibles",
         allAvailableBody: "Los proveedores de modelos responden con normalidad.",
         selectedUnavailableOne: "{model} no está disponible temporalmente",
