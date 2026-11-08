@@ -1001,12 +1001,16 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
           "body": "Use clear, non-corrupted files and ask a specific question. Password-protected, scanned, malformed, or very large documents may not contain extractable text. Check important numbers, citations, formulas, and conclusions against the original file."
         },
         {
-          "title": "Security boundaries",
-          "body": "Where guest attachments are offered, you can send one supported image or readable document up to 5 MiB. Signed-in accounts with attachment access can send up to five files per message, 10 MiB each and 25 MiB combined. Google Drive requires sign-in. The selected AI providers process the required file content; upload only material you are allowed to use."
+          "title": "Upload limits",
+          "body": "Limits apply where attachments are available for your account or guest session.",
+          "bullets": [
+            "Guest: 1 supported file per message, up to 5 MiB per file and 5 MiB total.",
+            "Signed-in account with attachment access: up to 5 files per message, 10 MiB per file and 25 MiB total."
+          ]
         },
         {
-          "title": "Retention and provider processing",
-          "body": "Attachments sent from a signed-in account are kept with the conversation and scheduled for deletion when that conversation or account is deleted. Guest files are temporary, scoped to the session and removed automatically; they are not included in saved conversations, shares or exports. Provider-side processing follows each provider’s terms."
+          "title": "Security, retention and provider processing",
+          "body": "Google Drive requires sign-in. The selected AI providers process the required file content; upload only material you are allowed to use. Attachments sent from a signed-in account are kept with the conversation and scheduled for deletion when that conversation or account is deleted. Guest files are temporary, scoped to the session and removed automatically; they are not included in saved conversations, shares or exports. Provider-side processing follows each provider’s terms."
         }
       ],
       "cta": {
