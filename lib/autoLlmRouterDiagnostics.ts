@@ -17,6 +17,9 @@ type RouterFailureDetail = {
 
 const FINISH_REASONS = new Set(["stop", "length", "content-filter", "tool-calls", "error", "other", "unknown"]);
 
+export const autoLlmRouterFinishReason = (value: unknown): string | undefined =>
+    typeof value === "string" && FINISH_REASONS.has(value) ? value : undefined;
+
 /** Only categorical and numeric diagnostics; never error messages, bodies or headers. */
 export const autoLlmRouterFailureDetail = (
     error: unknown,
@@ -38,8 +41,8 @@ export const autoLlmRouterFailureDetail = (
         Number.isInteger(error.statusCode) && error.statusCode >= 100 && error.statusCode <= 599) {
         detail.statusCode = error.statusCode;
     }
-    const finishReason = structured ? error.finishReason : context.finishReason;
-    if (typeof finishReason === "string" && FINISH_REASONS.has(finishReason)) {
+    const finishReason = autoLlmRouterFinishReason(structured ? error.finishReason : context.finishReason);
+    if (finishReason !== undefined) {
         detail.finishReason = finishReason;
     }
     if ((structured || JSONParseError.isInstance(error)) && typeof error.text === "string") {

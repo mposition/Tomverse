@@ -6,6 +6,7 @@ import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { readAmuxV22TaskResultForOwner } from "./v22TaskResultStore.ts";
+import { readAmuxLegacyCardView } from "./legacyCardOwnerService.ts";
 import { amuxFeedbackTaskWhere, projectAmuxTaskFeedback, readAmuxV4ApprovedCeiling,
   rollupAmuxTaskFeedback } from
   "./v22TaskFeedbackCore.ts";
@@ -485,9 +486,14 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
         card.v4BriefKeyVersion, card.v4BriefDigest, card.v4BriefDigestKeyId),
     ]);
   }
+  // A card the owner can only remake: its idea is built from the readable body
+  // read above (a v4 Task's decrypted body), never sent by the browser.
+  const legacyCard = await readAmuxLegacyCardView({ id: card.id, revision: card.revision,
+    displayKey: card.displayKey, sourceSystem: card.sourceSystem, body, brief }).catch(() => null);
   const currentDecision = feedbackDecisions.find((decision) =>
     decision.proposal.taskRevision + 1 === card.revision);
   return { ...summary, revision: card.revision, body, brief,
+    legacyCard,
     outcomeWriteEnabled: amuxV22OutcomeWriteEnabled(
       process.env[AMUX_V22_OUTCOME_WRITE_ENV]) &&
       card.sourceSystem === "admin-idea-v4" &&
