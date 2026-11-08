@@ -143,7 +143,7 @@ test("file routing records the raw model and reason without losing intent when c
 test("router failures preserve known usage and log content-free causes without retrying", async (t) => {
   const { callAutoLlmRouter } = await load();
   const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts")) as typeof import("../../lib/models.ts");
-  const { autoLlmRouterCandidates } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts")) as typeof import("../../lib/autoLlmRouterCore.ts");
+  const { AUTO_LLM_ROUTER_TIMEOUT_MS, autoLlmRouterCandidates } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts")) as typeof import("../../lib/autoLlmRouterCore.ts");
   const { APICallError, JSONParseError, NoObjectGeneratedError, NoOutputGeneratedError, TypeValidationError } = require("ai") as typeof import("ai");
   const usage = { inputTokens: 100, outputTokens: 20 };
   const secret = "private-prompt-and-provider-secret";
@@ -191,7 +191,8 @@ test("router failures preserve known usage and log content-free causes without r
         assert.equal(log.traceId, "trace-call");
         assert.equal(log.cycleId, "cycle-call");
         assert.equal(log.decisionId, "decision-call");
-        assert.equal(log.timeoutMs, 5_000);
+        // The deadline the call ran with: AUTO_LLM_ROUTER_TIMEOUT_MS, which #3481 raised to 7 s.
+        assert.equal(log.timeoutMs, AUTO_LLM_ROUTER_TIMEOUT_MS);
         for (const [key, value] of Object.entries(scenario.detail ?? {})) assert.equal(log[key], value);
       } finally {
         generateRouterResult = undefined;
