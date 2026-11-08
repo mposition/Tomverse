@@ -19,8 +19,9 @@
  * Line breaking measures every glyph against the embedded font's own advance
  * widths, so a line fits because it was measured rather than because a
  * character count guessed. Korean breaks between any two syllables, which is
- * how Korean actually wraps; Latin breaks at spaces and falls back to
- * mid-word only when a single word is wider than the column.
+ * how Korean body text wraps; the document title prefers whole words.
+ * Latin breaks at spaces and falls back to mid-word only when a single word
+ * is wider than the column.
  */
 
 import "server-only";
@@ -65,10 +66,11 @@ type Style = {
   spaceAfter: number;
   indent: number;
   grey?: number;
+  keepWords?: boolean;
 };
 
 const STYLES = {
-  title: { size: 26, leading: 32, spaceBefore: 0, spaceAfter: 14, indent: 0 },
+  title: { size: 26, leading: 32, spaceBefore: 0, spaceAfter: 14, indent: 0, keepWords: true },
   subtitle: { size: 13, leading: 18, spaceBefore: 0, spaceAfter: 20, indent: 0, grey: 0.35 },
   h1: { size: 19, leading: 25, spaceBefore: 18, spaceAfter: 8, indent: 0 },
   h2: { size: 16, leading: 22, spaceBefore: 15, spaceAfter: 7, indent: 0 },
@@ -128,7 +130,8 @@ const wrap = (
   font: LoadedFont,
   value: string,
   size: number,
-  width: number
+  width: number,
+  keepWords = false
 ): Glyph[][] => {
   const lines: Glyph[][] = [];
   for (const paragraph of value.split(/\r\n|\r|\n/)) {
@@ -170,7 +173,7 @@ const wrap = (
 
       // A space is an opportunity *after* it; a Korean syllable is one before
       // the next character, which is the same index once this one is pushed.
-      if (character === " " || breaksBefore(codePoint)) {
+      if (character === " " || (!keepWords && breaksBefore(codePoint))) {
         lastBreak = line.length;
         widthAtBreak = lineWidth;
       }
@@ -300,7 +303,7 @@ const paragraph = (
 ) => {
   builder.advance(style.spaceBefore);
   const width = CONTENT_WIDTH - style.indent - extraIndent;
-  for (const line of wrap(font, value, style.size, width)) {
+  for (const line of wrap(font, value, style.size, width, style.keepWords)) {
     builder.text(line, style, extraIndent);
   }
   builder.advance(style.spaceAfter);
@@ -529,10 +532,21 @@ export const renderDocumentPdf = (spec: DocumentSpec): Uint8Array => {
     }
   }
 
-  if (spec.title) paragraph(builder, font, spec.title, STYLES.title);
+  if (spec.title) {
+    const titleWidth = Math.max(...spec.title.split(/\r\n|\r|\n/).map((line) =>
+      glyphsWidth(toGlyphs(font, line), STYLES.title.size, font.unitsPerEm)
+    ));
+    const size = titleWidth > CONTENT_WIDTH
+      ? Math.max(20, STYLES.title.size * CONTENT_WIDTH / titleWidth)
+      : STYLES.title.size;
+    paragraph(builder, font, spec.title, { ...STYLES.title, size, leading: size + 6 });
+  }
   if (spec.subtitle) paragraph(builder, font, spec.subtitle, STYLES.subtitle);
 
-  for (const block of spec.blocks) {
+  for (const [index, block] of spec.blocks.entries()) {
+    if (index === 0 && spec.title && block.type === "heading" && block.text.trim() === spec.title.trim()) {
+      continue;
+    }
     switch (block.type) {
       case "heading":
         paragraph(
