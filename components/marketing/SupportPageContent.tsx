@@ -46,6 +46,7 @@ type SupportCopy = {
   cards: { title: string; body: string; bullets: string[] }[];
   formTitle: string;
   formDescription: string;
+  attachmentHelp?: string;
   typeLabel: string;
   types: Record<"support" | "bug" | "billing" | "feature" | "other", string>;
   emailInput: string;
@@ -98,12 +99,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "Tell us the page or device",
           "Describe expected behavior",
-          "Share screenshots when helpful"
+          "Send screenshot inquiries to support@tomverse.app"
         ]
       }
     ],
     "formTitle": "Contact support",
     "formDescription": "Your request goes to the support team. If you choose email updates, the receipt reference and progress updates go to that address.",
+    "attachmentHelp": "This form cannot attach files. If your inquiry needs a screenshot, attach it to an email to our support address.",
     "typeLabel": "Request type",
     "types": {
       "support": "General support",
@@ -752,6 +754,12 @@ export function SupportPageContent() {
             <LifeBuoy className="h-6 w-6 text-blue-600 dark:text-blue-400" />
             <h2 className="mt-4 text-2xl font-black">{page.formTitle}</h2>
             <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{page.formDescription}</p>
+            {page.attachmentHelp ? (
+              <p className="mt-4 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                {page.attachmentHelp}{" "}
+                <a href={`mailto:${page.emailValue}`} data-testid="support-screenshot-email" className="font-bold text-blue-600 underline underline-offset-4 dark:text-blue-300">{page.emailValue}</a>
+              </p>
+            ) : null}
             <p id="support-message-example" className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{page.messageExample}</p>
           </div>
 
