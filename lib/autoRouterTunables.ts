@@ -159,7 +159,7 @@ export async function revertTunedTimeoutIfWorse(): Promise<"kept" | "reverted" |
         take: REVERT_CHECK_MAX_ROWS,
         select: { outcome: true, pickedModelId: true, ruleModelId: true, latencyMs: true },
     });
-    const after = routerOutcomeShares(summarizeRouterDecisions(rows, tuned.value));
+    const after = routerOutcomeShares(summarizeRouterDecisions(rows));
     const decision = tunableRevertDecision(tuned, after);
     if (decision !== "revert") return decision === "wait" ? "waiting" : "kept";
 
