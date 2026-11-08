@@ -2373,7 +2373,7 @@ const checks = [
       source.includes("Cancellation and end of paid access") &&
       source.includes("Monthly credits and additional credits") &&
       source.includes("Additional-credit refunds, partial refunds, and chargebacks") &&
-      source.includes("12 months (365 days)") &&
+      source.includes("expire 365 days after purchase") &&
       source.includes("Starter Credit Pack") &&
       source.includes("Promotional purchases") &&
       source.includes("Provider incidents and credit restoration") &&
