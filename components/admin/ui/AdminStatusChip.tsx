@@ -33,7 +33,7 @@ export function AdminStatusChip({
   return (
     <span
       data-tone={tone}
-      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold ${TONE_CLASS[tone]} ${className}`}
+      className={`inline-flex min-w-0 max-w-full shrink items-center gap-1.5 whitespace-normal [overflow-wrap:anywhere] sm:shrink-0 sm:whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold ${TONE_CLASS[tone]} ${className}`}
     >
       {children ?? m.tone[tone]}
     </span>

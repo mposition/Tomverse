@@ -54,7 +54,7 @@ export function AdminWriteButton({
       title={lockedNote ?? rest.title}
       aria-describedby={lockedNote ? noteId : rest["aria-describedby"]}
       data-step-up={stepUp ? "true" : undefined}
-      className={`inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl font-bold transition disabled:cursor-not-allowed ${
+      className={`inline-flex min-w-0 max-w-full shrink items-center justify-center gap-1.5 whitespace-normal text-center [overflow-wrap:anywhere] sm:shrink-0 sm:whitespace-nowrap rounded-xl font-bold transition disabled:cursor-not-allowed ${
         size === "sm" ? "min-h-8 px-3 text-xs" : "min-h-10 px-4 text-sm"
       } ${
         locked
