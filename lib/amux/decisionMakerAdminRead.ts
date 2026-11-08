@@ -155,6 +155,36 @@ export async function readDecisionMakerRequestDetailForAdmin(
   if (ledger.rows.length === 0) return null;
   const ledgerRow = ledger.rows[0]!;
   if (ledger.rows.length !== 1 || ledgerRow.id !== requestId) throw new DecisionMakerAdminReadError("state_unreadable");
+  return detailOfLedgerRow(client, ledger.dbNowMs, ledgerRow, requestId);
+}
+
+/**
+ * The newest request of one local card, for the person who judges it, in the
+ * same five statements as `readDecisionMakerRequestDetailForAdmin`: a v22
+ * worker question's card shows the Decision Maker's proposal beside the
+ * question (lib/amux/v22OwnerQuestionDmRead.ts). Null when the card has no
+ * request yet.
+ */
+export async function readDecisionMakerCardDetailForAdmin(
+  client: LedgerReader,
+  cardId: string,
+): Promise<DmAdminRequestDetail | null> {
+  const ledger = await readRecentDecisionMakerRequestLedger(client, { cardId });
+  if (ledger.rows.length === 0) return null;
+  const ledgerRow = ledger.rows[0]!;
+  if (ledger.rows.length !== 1 || ledgerRow.cardId !== cardId || !isDmRequestId(ledgerRow.id)) {
+    throw new DecisionMakerAdminReadError("state_unreadable");
+  }
+  return detailOfLedgerRow(client, ledger.dbNowMs, ledgerRow, ledgerRow.id);
+}
+
+async function detailOfLedgerRow(
+  client: LedgerReader,
+  dbNowMs: number,
+  ledgerRow: Record<string, unknown>,
+  requestId: string,
+): Promise<DmAdminRequestDetail> {
+  const ledger = { dbNowMs };
   const detail = await readDecisionMakerResultDetail(client, requestId);
   const judgments = await readDecisionMakerJudgmentsForAdmin(client, [requestId]);
   const bodies = await readDecisionMakerBodies(client, requestId);
