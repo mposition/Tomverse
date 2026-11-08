@@ -76,6 +76,38 @@ async function seedCard(input: { sourceSystem?: string; status?: string; revisio
   return id;
 }
 
+/**
+ * An admin-idea-v4 Task in the shape the card-close suite seeds, stopped in
+ * blocked. `receipt` false is a Task made before v22: no v22 receipt, so the
+ * Ubuntu inspection's lockRecoveryTask refuses it.
+ */
+async function seedV4Task(input: { receipt: boolean }) {
+  const id = randomUUID();
+  seeded.push(id);
+  const cipher = Buffer.from("synthetic-only", "utf8");
+  const displayKey = `AMUX-LC${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}-${100 + ++counter}`;
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+    await tx.$executeRaw`
+      INSERT INTO "AmuxWorkItem" ("id", "title", "status", "revision", "sourceSystem", "sourceKey",
+        "sourceVersion", "sourceDigest", "sourceSnapshot", "cardType", "parentFeatureNodeId",
+        "v4TitleCiphertext", "v4TitleKeyId", "v4TitleKeyVersion", "v4TitleDigest", "v4TitleDigestKeyId",
+        "v4BodyCiphertext", "v4BodyKeyId", "v4BodyKeyVersion", "v4BodyDigest", "v4BodyDigestKeyId",
+        "v4BriefCiphertext", "v4BriefKeyId", "v4BriefKeyVersion", "v4BriefDigest", "v4BriefDigestKeyId",
+        "v4SourceApprovalId", "v22ReceiptId", "taskRole", "executionGrade", "displayKey", "createdAt", "updatedAt")
+      VALUES (${id}, 'AMUX Task', 'blocked', 4, 'admin-idea-v4', ${randomUUID().toUpperCase()}, '1', ${digest},
+        ${JSON.stringify({ schemaVersion: "amux-v4", ideaId: randomUUID(), approvalId: randomUUID() })}::jsonb,
+        'task', ${randomUUID()}, ${cipher}, 'synthetic', 1, ${digest}, 'synthetic',
+        ${cipher}, 'synthetic', 1, ${digest}, 'synthetic', ${cipher}, 'synthetic', 1, ${digest}, 'synthetic',
+        ${randomUUID()}, ${input.receipt ? randomUUID() : null}::uuid, 'investigate', 'advanced', ${displayKey},
+        now(), now())`;
+    await tx.$executeRaw`
+      INSERT INTO "AmuxHumanEscalation" ("id", "taskId", "reason", "status", "openedBy", "createdAt", "updatedAt")
+      VALUES (${`esc-${randomUUID()}`}, ${id}, 'execution_lease_expired', 'open', 'amux-sync', now(), now())`;
+  });
+  return id;
+}
+
 after(async () => {
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
@@ -92,8 +124,8 @@ const auditsOf = (taskId: string) => prisma.adminAuditLog.findMany({
 test("closing archives the card, keeps its status, resolves its escalation and chains one audit entry", async () => {
   const id = await seedCard();
   const view = await readAmuxLegacyCardView({ id, revision: 4, displayKey: null,
-    sourceSystem: "tomverse_private_workboard", description: (await prisma.amuxWorkItem.findUnique({
-      where: { id }, select: { description: true } }))!.description, executionBrief: null });
+    sourceSystem: "tomverse_private_workboard", body: (await prisma.amuxWorkItem.findUnique({
+      where: { id }, select: { description: true } }))!.description, brief: null });
   assert.equal(view?.closeRefusal, null);
   assert.equal(view?.idea.state, "ready");
 
@@ -125,7 +157,7 @@ test("closing archives the card, keeps its status, resolves its escalation and c
 test("a queued delivery, a changed revision or another source refuses without any write", async () => {
   const running = await seedCard({ delivery: true });
   assert.equal((await readAmuxLegacyCardView({ id: running, revision: 4, displayKey: null,
-    sourceSystem: "tomverse_private_workboard", description: "x", executionBrief: null }))?.closeRefusal,
+    sourceSystem: "tomverse_private_workboard", body: "x", brief: null }))?.closeRefusal,
   "running");
   const stale = await seedCard();
   const intake = await seedCard({ sourceSystem: "local-agent-intake" });
@@ -174,4 +206,32 @@ test("only a recently authenticated owner closes", async () => {
   await assert.rejects(closeAmuxLegacyCardForOwner({ session: notOwner, request: request(), taskId: id,
     revision: 4, ideaId: null }), (error) => error instanceof AmuxLegacyCardOwnerError && error.code === "forbidden");
   assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id } })).archivedAt, null);
+});
+
+test("a pre-v22 Task with no recovery path closes the same way; a v22 Task does not", async () => {
+  const body = JSON.stringify({ problem: "Can the PR check be reused? Look first.", scopeIn: ["Read"],
+    scopeOut: ["Change code"], completionCriteria: ["A report"] });
+  const preV22 = await seedV4Task({ receipt: false });
+  const view = await readAmuxLegacyCardView({ id: preV22, revision: 4, displayKey: "AMUX-GITHUB-002",
+    sourceSystem: "admin-idea-v4", body, brief: null });
+  assert.equal(view?.kind, "pre_v22_task");
+  assert.equal(view?.closeRefusal, null);
+  assert.match(view?.idea.state === "ready" ? view.idea.text : "", /작업 성격: 조사 \(코드 수정이 아닌 작업/);
+  const result = await closeAmuxLegacyCardForOwner({ session: owner(), request: request(), taskId: preV22,
+    revision: 4, ideaId: null });
+  assert.equal(result.outcome, "closed");
+  const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: preV22 },
+    select: { status: true, archivedAt: true } });
+  assert.equal(card.status, "blocked");
+  assert.ok(card.archivedAt);
+  const audits = await auditsOf(preV22);
+  assert.equal(audits.length, 1);
+  assert.equal((audits[0]!.metadata as Record<string, unknown>).kind, "pre_v22_task");
+
+  // A Task the Ubuntu inspection takes keeps the v22 recovery path: no view, and the close refuses.
+  const v22 = await seedV4Task({ receipt: true });
+  assert.equal(await readAmuxLegacyCardView({ id: v22, revision: 4, displayKey: null,
+    sourceSystem: "admin-idea-v4", body, brief: null }), null);
+  assert.deepEqual(await closeAmuxLegacyCardForOwner({ session: owner(), request: request(), taskId: v22,
+    revision: 4, ideaId: null }), { outcome: "refused", reason: "not_legacy" });
 });

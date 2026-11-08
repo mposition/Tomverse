@@ -24,9 +24,11 @@ const world = {
   role: "owner", recent: true,
   card: null as Card | null,
   refusal: null as string | null,
+  /** The card's kind in the detail read; null: not a card the owner can only remake. */
+  kind: "workboard" as "workboard" | "pre_v22_task" | null,
   readBack: [] as Array<{ status: "absent" } | { status: "committed"; ideaId: string }>,
   submits: [] as string[],
-  sendPathIdeas: [] as Array<{ requestId: string; idea: string }>,
+  sendPathIdeas: [] as Array<{ requestId: string; idea: string; sessionDisplay: string }>,
   closes: [] as Array<{ taskId: string; revision: number; ideaId: string | null }>,
   closeOutcome: "closed" as "closed" | "refused" | "busy",
   writeOn: "true",
@@ -36,7 +38,7 @@ const reset = () => {
   world.card = { id: "cmlegacy0001", displayKey: "AMUX-WORKBOARD-061", sourceSystem: "tomverse_private_workboard",
     description: JSON.stringify({ problem: "The renewal date is hidden. Users ask support.",
       completionCriteria: ["The date shows"] }), executionBrief: null, revision: 4 };
-  world.refusal = null; world.readBack = [{ status: "absent" }]; world.submits = []; world.sendPathIdeas = [];
+  world.refusal = null; world.kind = "workboard"; world.readBack = [{ status: "absent" }]; world.submits = []; world.sendPathIdeas = [];
   world.closes = []; world.closeOutcome = "closed"; world.writeOn = "true";
 };
 
@@ -75,22 +77,28 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
     mock.module(mod("lib/amux/ideaSessionSubmissionCore.ts"), { namedExports: {
       amuxIdeaSessionPrewriteStatus: () => null } });
     mock.module(mod("lib/amux/ideaSendPath.ts"), { namedExports: {
-      ideaSendPath: async (input: { requestId: string; idea: string }) => {
-        world.sendPathIdeas.push({ requestId: input.requestId, idea: input.idea });
+      ideaSendPath: async (input: { requestId: string; idea: string; sessionDisplay: string }) => {
+        world.sendPathIdeas.push({ requestId: input.requestId, idea: input.idea,
+          sessionDisplay: input.sessionDisplay });
         return { ok: true,
           readBack: async () => world.readBack.shift() ?? { status: "absent" },
           submit: async () => { world.submits.push(input.requestId); return { ideaId: "idea-1" }; },
           isAlreadySeen: () => false };
       } } });
+    // The card detail read builds the view on the server (lib/amux/adminExecutionRead.ts).
+    mock.module(mod("lib/amux/adminExecutionRead.ts"), { namedExports: {
+      readAmuxExecutionTaskDetail: async (taskId: string) => {
+        const card: Card | null = world.card;
+        if (!card || card.id !== taskId) return null;
+        return { id: card.id, revision: card.revision, legacyCard: world.kind === null ? null : {
+          kind: world.kind, closeRefusal: world.refusal,
+          idea: card.description?.includes("someone@") ? { state: "refused", code: "content_refused" } :
+            { state: "ready", title: "The renewal date is hidden.", truncated: false,
+              text: `The renewal date is hidden.\n\n${card.description}` } } };
+      } } });
     mock.module(mod("lib/amux/legacyCardOwnerService.ts"), { namedExports: {
       AmuxLegacyCardOwnerError: FakeOwnerError,
       assertAmuxLegacyCardOwner: async () => { if (!world.recent) throw new Error("reauth"); },
-      readAmuxLegacyCardForRecreate: async (taskId: string) => world.card && world.card.id === taskId ?
-        { card: world.card, refusal: world.refusal } : null,
-      legacyIdea: (card: Card) => card.description?.includes("someone@") ?
-        { state: "refused", code: "content_refused" } :
-        { state: "ready", title: "The renewal date is hidden.", text: `The renewal date is hidden.\n\n${card.description}`,
-          truncated: false },
       closeAmuxLegacyCardForOwner: async (input: { taskId: string; revision: number; ideaId: string | null }) => {
         world.closes.push(input);
         if (world.closeOutcome === "busy") throw new FakeOwnerError("busy");
@@ -138,7 +146,8 @@ test("the body is exact: an action, the card, the shown revision and the owner's
 test("a running, closed, changed or missing card refuses before any idea is saved", async () => {
   const { POST } = await loadRoute();
   for (const refusal of ["running", "already_closed", "not_legacy"]) {
-    reset(); world.refusal = refusal;
+    reset();
+    if (refusal === "not_legacy") world.kind = null; else world.refusal = refusal;
     const response = await POST(post(recreate));
     assert.equal(response.status, 409);
     assert.deepEqual(await response.json(), { error: "not_closable", reason: refusal });
@@ -178,6 +187,7 @@ test("a recreate saves the idea under the card's derived request id, then closes
     archivedAt: "2026-11-08T09:00:00.000Z", escalationsResolved: 1 });
   assert.deepEqual(world.submits, [requestId]);
   assert.match(world.sendPathIdeas[0]!.idea, /^The renewal date is hidden\./);
+  assert.equal(world.sendPathIdeas[0]!.sessionDisplay, "Legacy WORKBOARD card");
   assert.deepEqual(world.closes, [{ ...world.closes[0], taskId: "cmlegacy0001", revision: 4, ideaId: "idea-1" }]);
 
   // A second click after a close that did not land reads the same idea back: no second idea.
@@ -194,6 +204,16 @@ test("a recreate saves the idea under the card's derived request id, then closes
   const changedBody = await changed.json() as { requestId: string };
   assert.notEqual(changedBody.requestId, requestId);
   assert.deepEqual(world.submits, [changedBody.requestId]);
+});
+
+test("a pre-v22 Task is recreated and closed the same way, under its own source label", async () => {
+  const { POST } = await loadRoute();
+  reset(); world.kind = "pre_v22_task";
+  const response = await POST(post(recreate));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json() as { closed: boolean }).closed, true);
+  assert.equal(world.sendPathIdeas[0]!.sessionDisplay, "Pre-v22 AMUX Task");
+  assert.equal(world.closes.length, 1);
 });
 
 test("close only archives without an idea; a held card answers busy", async () => {

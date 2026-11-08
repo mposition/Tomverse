@@ -12,7 +12,7 @@ import { amuxIdeaLaneBoardHref } from "@/lib/amux/ideaLaneBoardCore";
 
 /** What the card detail read returns for a legacy card (lib/amux/legacyCardOwnerService.ts). */
 export type AmuxLegacyCardView = {
-  legacy: true;
+  kind: "workboard" | "pre_v22_task";
   closeRefusal: string | null;
   idea: { state: "ready"; title: string; text: string; truncated: boolean } |
     { state: "refused"; code: string };
@@ -86,8 +86,8 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
 
   return <section className="space-y-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-4"
     data-testid="amux-legacy-card">
-    <h4 className="font-semibold">{m.title}</h4>
-    <p className="text-sm leading-6">{m.intro}</p>
+    <h4 className="font-semibold">{m.title[view.kind]}</h4>
+    <p className="text-sm leading-6">{m.intro[view.kind]} {m.closeEffect}</p>
     {blocked && <p role="status" className="text-sm font-semibold text-amber-200"
       data-testid="amux-legacy-card-not-closable">{m.notClosable} {reasonText(m, view.closeRefusal)}</p>}
     {ready ? <details className="rounded border border-zinc-700 p-2 text-sm">
@@ -105,7 +105,7 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
         <button type="button" className="min-h-11 rounded-lg border border-zinc-600 px-3 py-2 font-semibold"
           disabled={busy} onClick={() => setConfirming("close")}
           data-testid="amux-legacy-card-close">{m.close}</button>
-      </> : <div className="space-y-2" role="group" aria-label={m.title}>
+      </> : <div className="space-y-2" role="group" aria-label={m.title[view.kind]}>
         <p className="text-sm font-semibold">{confirming === "recreate" ? m.confirmRecreate : m.confirmClose}</p>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="min-h-11 rounded-lg border border-blue-500/50 px-3 py-2 font-semibold"

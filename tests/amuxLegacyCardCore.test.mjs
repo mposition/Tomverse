@@ -9,8 +9,9 @@ import {
   amuxLegacyCardCloseRefusal,
   amuxLegacyCardIdeaText,
   amuxLegacyCardRecreateRequestId,
-  isAmuxLegacyWorkboardCard,
+  amuxLegacyCardKind,
   isAmuxRecoveryInspectableCard,
+  isAmuxV22RecoverableTask,
 } from "../lib/amux/legacyCardCore.ts";
 
 const card = (description, extra = {}) => ({ id: "cmlegacy0001", displayKey: "AMUX-WORKBOARD-061",
@@ -19,11 +20,38 @@ const card = (description, extra = {}) => ({ id: "cmlegacy0001", displayKey: "AM
 const inspect = (text) =>
   inspectAmuxIdeaInput(JSON.stringify({ version: 1, idea: text, repositories: [], pullRequests: [] }));
 
-test("only a workboard import is a legacy card; only a v4 Task is inspectable", () => {
-  assert.equal(isAmuxLegacyWorkboardCard({ sourceSystem: "tomverse_private_workboard" }), true);
-  for (const sourceSystem of ["admin-idea-v4", "local-agent-intake", null]) {
-    assert.equal(isAmuxLegacyWorkboardCard({ sourceSystem }), false);
+const v4Task = (over = {}) => ({ sourceSystem: "admin-idea-v4", cardType: "task", status: "blocked",
+  v22ReceiptId: null, taskRole: "investigate", executionGrade: null,
+  lastAttempt: { endedAt: "2026-10-12T00:00:00.000Z", outcome: "expired", reason: "execution_lease_expired" }, ...over });
+
+test("a workboard import and a pre-v22 Task with an unknown outcome are the cards the owner can only remake", () => {
+  assert.equal(amuxLegacyCardKind({ ...v4Task(), sourceSystem: "tomverse_private_workboard", cardType: null }),
+    "workboard");
+  // AMUX-GITHUB-002's shape: a v4 Task with no v22 receipt, stopped after a lost run.
+  assert.equal(amuxLegacyCardKind(v4Task()), "pre_v22_task");
+  assert.equal(amuxLegacyCardKind(v4Task({ status: "review", lastAttempt: null })), "pre_v22_task");
+  assert.equal(amuxLegacyCardKind(v4Task({ lastAttempt: { endedAt: "x", outcome: "failed",
+    reason: "usage_outcome_unknown" } })), "pre_v22_task");
+  // An open run is still a candidate; the close refuses it as running.
+  assert.equal(amuxLegacyCardKind(v4Task({ lastAttempt: { endedAt: null, outcome: null, reason: null } })),
+    "pre_v22_task");
+  for (const card of [
+    // The Ubuntu inspection takes it: the v22 recovery path decides.
+    v4Task({ v22ReceiptId: "r", taskRole: "implement", executionGrade: "advanced" }),
+    // A known outcome or a lane that is not stopped is not stuck.
+    v4Task({ lastAttempt: { endedAt: "x", outcome: "succeeded", reason: "reported_result" } }),
+    v4Task({ status: "todo" }), v4Task({ status: "done" }),
+    v4Task({ cardType: "story" }), v4Task({ sourceSystem: "local-agent-intake" }), v4Task({ sourceSystem: null }),
+  ]) assert.equal(amuxLegacyCardKind(card), null);
+  // Missing any one of the three keeps a Task out of the v22 recovery path.
+  for (const missing of ["v22ReceiptId", "taskRole", "executionGrade"]) {
+    const full = v4Task({ v22ReceiptId: "r", taskRole: "implement", executionGrade: "advanced" });
+    assert.equal(isAmuxV22RecoverableTask({ ...full, [missing]: null }), false);
+    assert.equal(amuxLegacyCardKind({ ...full, [missing]: null }), "pre_v22_task");
   }
+});
+
+test("only a v4 Task is inspectable", () => {
   assert.equal(isAmuxRecoveryInspectableCard({ sourceSystem: "admin-idea-v4", cardType: "task" }), true);
   for (const value of [
     { sourceSystem: "admin-idea-v4", cardType: "story" },
@@ -31,6 +59,21 @@ test("only a workboard import is a legacy card; only a v4 Task is inspectable", 
     { sourceSystem: "tomverse_private_workboard", cardType: "task" },
     { sourceSystem: null, cardType: null },
   ]) assert.equal(isAmuxRecoveryInspectableCard(value), false);
+});
+
+test("a pre-v22 investigation keeps its nature in the remade idea", () => {
+  const built = amuxLegacyCardIdeaText({ ...card(JSON.stringify({ problem: "Can the PR check be reused? Look first.",
+    scopeIn: ["Read the excerpt code"], scopeOut: ["Change code"], completionCriteria: ["A report"] })),
+  displayKey: "AMUX-GITHUB-002", kind: "pre_v22_task", taskRole: "investigate" });
+  assert.equal(built.ok && built.title, "Can the PR check be reused?");
+  const text = built.ok ? built.text : "";
+  assert.ok(text.startsWith("Can the PR check be reused?\n\n작업 성격: 조사 (코드 수정이 아닌 작업"));
+  assert.ok(text.includes("원래 카드: AMUX-GITHUB-002 (v22 이전에 만든 Task를"));
+  const implement = amuxLegacyCardIdeaText({ ...card(JSON.stringify({ problem: "Build it." })),
+    kind: "pre_v22_task", taskRole: "implement" });
+  assert.ok((implement.ok ? implement.text : "").includes("작업 성격: 구현\n"));
+  assert.doesNotMatch(implement.ok ? implement.text : "", /코드 수정이 아닌/);
+  assert.equal(inspect(built.ok ? built.text : "").ok, true);
 });
 
 test("the idea opens with the problem's first sentence as a readable title", () => {
@@ -100,11 +143,14 @@ test("the recreate request id is a stable v4 UUID per card and idea text", () =>
 });
 
 test("a close refuses a running, closed, changed or non-legacy card", () => {
-  const base = { sourceSystem: "tomverse_private_workboard", archivedAt: null, revision: 3, status: "review",
-    activeDelivery: false, liveAttempt: false };
+  const base = { ...v4Task(), sourceSystem: "tomverse_private_workboard", archivedAt: null, revision: 3,
+    status: "review", activeDelivery: false, liveAttempt: false };
   assert.equal(amuxLegacyCardCloseRefusal(base, 3), null);
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, status: "blocked" }, 3), null);
-  assert.equal(amuxLegacyCardCloseRefusal({ ...base, sourceSystem: "admin-idea-v4" }, 3), "not_legacy");
+  assert.equal(amuxLegacyCardCloseRefusal({ ...base, sourceSystem: "admin-idea-v4" }, 3), null);
+  assert.equal(amuxLegacyCardCloseRefusal({ ...base, sourceSystem: "admin-idea-v4", v22ReceiptId: "r",
+    executionGrade: "advanced" }, 3), "not_legacy");
+  assert.equal(amuxLegacyCardCloseRefusal({ ...base, sourceSystem: "local-agent-intake" }, 3), "not_legacy");
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, archivedAt: new Date() }, 3), "already_closed");
   assert.equal(amuxLegacyCardCloseRefusal(base, 2), "changed");
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, activeDelivery: true }, 3), "running");

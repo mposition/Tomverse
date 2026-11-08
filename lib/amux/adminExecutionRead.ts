@@ -486,9 +486,10 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
         card.v4BriefKeyVersion, card.v4BriefDigest, card.v4BriefDigestKeyId),
     ]);
   }
+  // A card the owner can only remake: its idea is built from the readable body
+  // read above (a v4 Task's decrypted body), never sent by the browser.
   const legacyCard = await readAmuxLegacyCardView({ id: card.id, revision: card.revision,
-    displayKey: card.displayKey, sourceSystem: card.sourceSystem, description: card.description,
-    executionBrief: card.executionBrief }).catch(() => null);
+    displayKey: card.displayKey, sourceSystem: card.sourceSystem, body, brief }).catch(() => null);
   const currentDecision = feedbackDecisions.find((decision) =>
     decision.proposal.taskRevision + 1 === card.revision);
   return { ...summary, revision: card.revision, body, brief,

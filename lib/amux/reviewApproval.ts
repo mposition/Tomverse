@@ -25,7 +25,7 @@ import { amuxV52RejectedTwiceReviewAttemptId } from "@/lib/amux/v52ReviewRejecti
 import { normalizeAmuxUntrustedReason, openAmuxHumanEscalation, publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
 import { readAmuxReviewPullRequest, type AmuxReviewPullRequest } from "@/lib/amux/reviewGitHub";
 import { readAmuxExecutionTaskDetail } from "@/lib/amux/adminExecutionRead";
-import { isAmuxRecoveryInspectableCard } from "@/lib/amux/legacyCardCore";
+import { isAmuxRecoveryInspectableCard, isAmuxV22RecoverableTask } from "@/lib/amux/legacyCardCore";
 import { evaluateLockedAmuxCostAdmission, lockAmuxResourcePolicies } from "@/lib/amux/resourcePolicy";
 import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
 import { prisma } from "@/lib/prisma";
@@ -326,6 +326,8 @@ export async function getAmuxReviewDetail(escalationId: string) {
       due_parse_state: task.dueParseState,
       // The two recovery inspections read evidence only a v4 Task has.
       recovery_inspectable: isAmuxRecoveryInspectableCard(task),
+      // The Ubuntu inspection also needs the v22 receipt, role and grade (lockRecoveryTask).
+      host_recovery_available: isAmuxV22RecoverableTask(task),
     },
     last_attempt: lastAttempt ? {
       id: lastAttempt.id,

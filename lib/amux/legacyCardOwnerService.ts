@@ -9,13 +9,14 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import {
-  amuxLegacyCardCloseRefusal, amuxLegacyCardIdeaText, isAmuxLegacyWorkboardCard,
-  type AmuxLegacyCardCloseRefusal,
+  amuxLegacyCardCloseRefusal, amuxLegacyCardIdeaText, amuxLegacyCardKind,
+  type AmuxLegacyCardCloseRefusal, type AmuxLegacyCardFacts, type AmuxLegacyCardKind,
 } from "./legacyCardCore.ts";
 import { amuxDatabaseDiagnosticCode } from "./readFailureCore.ts";
 
 /**
- * The owner's two actions on a legacy WORKBOARD card (legacyCardCore.ts):
+ * The owner's two actions on a card the owner can only remake -- a legacy
+ * WORKBOARD card or a pre-v22 Task (legacyCardCore.ts):
  * remake it as a new owner idea, and close it. Closing archives the card --
  * `archivedAt` and `revision` change, the status and every ledger stay -- and
  * resolves its open escalations, so it leaves the board and the owner queue.
@@ -32,34 +33,45 @@ export class AmuxLegacyCardOwnerError extends Error {
 
 const LEGACY_CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
-type LockedCard = {
-  id: string; displayKey: string | null; sourceSystem: string | null; status: string;
-  revision: number; archivedAt: Date | null; activeDelivery: boolean; liveAttempt: boolean;
+type CardFacts = AmuxLegacyCardFacts & {
+  id: string; displayKey: string | null; revision: number; archivedAt: Date | null;
+  activeDelivery: boolean; liveAttempt: boolean;
 };
 
-/** The facts a close is judged on, in one statement; `lock` takes the card row without waiting. */
+/**
+ * The facts a close is judged on, in one statement; `lock` takes the card row
+ * without waiting. The last attempt is ordered as lockRecoveryTask orders it.
+ */
 async function readCardFacts(client: Prisma.TransactionClient | typeof prisma, taskId: string, lock: boolean) {
-  const rows = lock ? await client.$queryRaw<LockedCard[]>`
-      SELECT w."id", w."displayKey", w."sourceSystem", w."status", w."revision", w."archivedAt",
+  const rows = lock ? await client.$queryRaw<CardFacts[]>`
+      SELECT w."id", w."displayKey", w."sourceSystem", w."cardType", w."status", w."revision",
+        w."archivedAt", w."v22ReceiptId"::text AS "v22ReceiptId", w."taskRole", w."executionGrade",
         EXISTS (SELECT 1 FROM "AmuxWorkDelivery" d WHERE d."taskId" = w."id"
           AND d."status" IN ('queued', 'leased')) AS "activeDelivery",
         EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
-          AND a."endedAt" IS NULL) AS "liveAttempt"
+          AND a."endedAt" IS NULL) AS "liveAttempt",
+        (SELECT json_build_object('endedAt', a."endedAt", 'outcome', a."outcome", 'reason', a."reason")
+          FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
+          ORDER BY a."taskRevision" DESC, a."startedAt" DESC, a."id" DESC LIMIT 1) AS "lastAttempt"
       FROM "AmuxWorkItem" w WHERE w."id" = ${taskId}
       FOR UPDATE OF w NOWAIT` :
-    await client.$queryRaw<LockedCard[]>`
-      SELECT w."id", w."displayKey", w."sourceSystem", w."status", w."revision", w."archivedAt",
+    await client.$queryRaw<CardFacts[]>`
+      SELECT w."id", w."displayKey", w."sourceSystem", w."cardType", w."status", w."revision",
+        w."archivedAt", w."v22ReceiptId"::text AS "v22ReceiptId", w."taskRole", w."executionGrade",
         EXISTS (SELECT 1 FROM "AmuxWorkDelivery" d WHERE d."taskId" = w."id"
           AND d."status" IN ('queued', 'leased')) AS "activeDelivery",
         EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
-          AND a."endedAt" IS NULL) AS "liveAttempt"
+          AND a."endedAt" IS NULL) AS "liveAttempt",
+        (SELECT json_build_object('endedAt', a."endedAt", 'outcome', a."outcome", 'reason', a."reason")
+          FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
+          ORDER BY a."taskRevision" DESC, a."startedAt" DESC, a."id" DESC LIMIT 1) AS "lastAttempt"
       FROM "AmuxWorkItem" w WHERE w."id" = ${taskId}`;
   return rows[0] ?? null;
 }
 
 export type AmuxLegacyCardView = {
-  /** Whether the card shown is a legacy WORKBOARD card at all. */
-  legacy: true;
+  /** Which kind of card the owner can only remake (legacyCardCore.ts). */
+  kind: AmuxLegacyCardKind;
   /** Null when it can be closed now. */
   closeRefusal: Exclude<AmuxLegacyCardCloseRefusal, "not_legacy" | "changed"> | null;
   /** The idea a recreate would save, or why it would refuse. */
@@ -68,43 +80,34 @@ export type AmuxLegacyCardView = {
 };
 
 /**
- * What the card detail shows for a legacy card: whether it closes now and the
- * idea a recreate would save, checked by the same input gate the save uses.
- * Null for any other card. Read only.
+ * What the card detail shows for a card the owner can only remake: its kind,
+ * whether it closes now, and the idea a recreate would save, checked by the
+ * same input gate the save uses. `body` and `brief` are the card's readable
+ * assigned work (a v4 Task's decrypted body). Null for any other card. Read only.
  */
 export async function readAmuxLegacyCardView(card: {
   id: string; revision: number; displayKey: string | null; sourceSystem: string | null;
-  description: string | null; executionBrief: string | null;
+  body: string | null; brief: string | null;
 }): Promise<AmuxLegacyCardView | null> {
-  if (!isAmuxLegacyWorkboardCard(card)) return null;
+  if (card.sourceSystem !== "admin-idea-v4" && card.sourceSystem !== "tomverse_private_workboard") return null;
   const facts = await readCardFacts(prisma, card.id, false);
-  const refusal = facts ? amuxLegacyCardCloseRefusal(facts, card.revision) : "changed";
-  return { legacy: true,
+  const kind = facts ? amuxLegacyCardKind(facts) : null;
+  if (!facts || !kind) return null;
+  const refusal = amuxLegacyCardCloseRefusal(facts, card.revision);
+  return { kind,
     closeRefusal: refusal === "not_legacy" || refusal === "changed" ? null : refusal,
-    idea: legacyIdea(card) };
+    idea: legacyIdea({ id: card.id, displayKey: card.displayKey, description: card.body,
+      executionBrief: card.brief, kind, taskRole: facts.taskRole }) };
 }
 
 /** The idea text of a card and the input gate's verdict on it. */
-export function legacyIdea(card: {
-  id: string; displayKey: string | null; description: string | null; executionBrief: string | null;
-}): AmuxLegacyCardView["idea"] {
+function legacyIdea(card: Parameters<typeof amuxLegacyCardIdeaText>[0]): AmuxLegacyCardView["idea"] {
   const built = amuxLegacyCardIdeaText(card);
   if (!built.ok) return { state: "refused", code: built.code };
   const inspected = inspectAmuxIdeaInput(JSON.stringify({ version: 1, idea: built.text,
     repositories: [], pullRequests: [] }));
   if (!inspected.ok) return { state: "refused", code: inspected.code };
   return { state: "ready", title: built.title, text: built.text, truncated: built.truncated };
-}
-
-/** The card a recreate reads, before any write. Null when there is no such card. */
-export async function readAmuxLegacyCardForRecreate(taskId: string) {
-  if (!LEGACY_CARD_ID.test(taskId)) return null;
-  const card = await prisma.amuxWorkItem.findUnique({ where: { id: taskId },
-    select: { id: true, displayKey: true, sourceSystem: true, description: true, executionBrief: true,
-      revision: true } });
-  if (!card) return null;
-  const facts = await readCardFacts(prisma, taskId, false);
-  return { card, refusal: facts ? amuxLegacyCardCloseRefusal(facts, card.revision) : "changed" as const };
 }
 
 export type AmuxLegacyCardCloseResult =
@@ -149,9 +152,11 @@ export async function closeAmuxLegacyCardForOwner(input: {
       data: { archivedAt: now, revision: { increment: 1 } },
     });
     if (moved.count !== 1) return { outcome: "refused" as const, reason: "changed" as const };
+    const kind = amuxLegacyCardKind(card)!;
+    const label = kind === "workboard" ? "a legacy WORKBOARD card" : "a pre-v22 Task with no recovery path";
     const resolution = input.ideaId ?
-      `Closed as a legacy WORKBOARD card; recreated as AMUX idea ${input.ideaId}.` :
-      "Closed as a legacy WORKBOARD card by the owner.";
+      `Closed as ${label}; recreated as AMUX idea ${input.ideaId}.` :
+      `Closed as ${label} by the owner.`;
     const resolved = await tx.amuxHumanEscalation.updateMany({
       where: { taskId: card.id, status: { in: ["open", "acknowledged"] } },
       data: { status: "resolved", resolutionOutcome: "block", resolution,
@@ -160,10 +165,8 @@ export async function closeAmuxLegacyCardForOwner(input: {
     const archivedAt = now.toISOString();
     const auditId = await writeAdminAuditLog({ tx, session: input.session, request: input.request,
       action: "amux.legacy_card.closed", targetType: "AmuxWorkItem", targetId: card.id,
-      summary: input.ideaId ?
-        "Closed a legacy WORKBOARD card after recreating it as a new AMUX idea." :
-        "Closed a legacy WORKBOARD card.",
-      metadata: { displayKey: card.displayKey, status: card.status, revision: card.revision,
+      summary: input.ideaId ? `Closed ${label} after recreating it as a new AMUX idea.` : `Closed ${label}.`,
+      metadata: { kind, displayKey: card.displayKey, status: card.status, revision: card.revision,
         archivedAt, escalationsResolved: resolved.count,
         ...(input.ideaId ? { recreatedIdeaId: input.ideaId } : {}) } });
     return { outcome: "closed" as const, archivedAt, escalationsResolved: resolved.count, auditId };

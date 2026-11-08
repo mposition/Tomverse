@@ -2,8 +2,12 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 
 export const adminAmuxLegacyCardMessages = defineAdminMessages({
   en: {
-    title: "Legacy WORKBOARD card",
-    intro: "This card was moved from the old workboard in 2026-10. It is not a v22 Task, so review decisions and recovery inspections do not apply. Remake it as a new idea for the idea lane, or close it. Closing archives the card and resolves its open escalations; its status and history stay.",
+    title: { workboard: "Legacy WORKBOARD card", pre_v22_task: "Task made before v22" },
+    intro: {
+      workboard: "This card was moved from the old workboard in 2026-10. It is not a v22 Task, so review decisions and recovery inspections do not apply. Remake it as a new idea for the idea lane, or close it.",
+      pre_v22_task: "This Task was made before v22 and has no v22 receipt, so the Ubuntu inspection cannot prove what its last run did and no review decision can open. Remake it as a new idea for the idea lane, or close it.",
+    },
+    closeEffect: "Closing archives the card and resolves its open escalations; its status and history stay.",
     preview: "The idea that will be saved",
     truncated: "The assigned work is longer than an idea allows; its beginning is kept. The archived card keeps all of it.",
     recreate: "Recreate as a new idea",
@@ -25,7 +29,7 @@ export const adminAmuxLegacyCardMessages = defineAdminMessages({
       running: "work for this card is still queued, leased or running",
       already_closed: "it is already closed",
       changed: "the card changed since it was shown; reload it",
-      not_legacy: "it is not a legacy WORKBOARD card",
+      not_legacy: "it is neither a legacy WORKBOARD card nor a pre-v22 Task without a recovery path",
       not_found: "the card was not found",
       busy: "a worker holds the card right now; try again in a moment",
       no_assigned_work: "it has no assigned work to remake",
@@ -40,8 +44,12 @@ export const adminAmuxLegacyCardMessages = defineAdminMessages({
     } as Record<string, string>,
   },
   ko: {
-    title: "옛 작업판(WORKBOARD) 카드",
-    intro: "2026-10에 옛 작업판에서 옮겨 온 카드입니다. v22 Task가 아니어서 검토 결정과 복구 점검을 할 수 없습니다. 새 아이디어로 다시 만들어 아이디어 레인에 맡기거나 닫으세요. 닫으면 카드는 보관되고 열린 escalation은 해결됩니다. 상태와 이력은 그대로 남습니다.",
+    title: { workboard: "옛 작업판(WORKBOARD) 카드", pre_v22_task: "v22 이전에 만든 Task" },
+    intro: {
+      workboard: "2026-10에 옛 작업판에서 옮겨 온 카드입니다. v22 Task가 아니어서 검토 결정과 복구 점검을 할 수 없습니다. 새 아이디어로 다시 만들어 아이디어 레인에 맡기거나 닫으세요.",
+      pre_v22_task: "v22 이전에 만든 Task라 v22 접수 기록이 없습니다. 그래서 Ubuntu 검사로 마지막 실행 결과를 증명할 수 없고 검토 결정도 열리지 않습니다. 새 아이디어로 다시 만들어 아이디어 레인에 맡기거나 닫으세요.",
+    },
+    closeEffect: "닫으면 카드는 보관되고 열린 escalation은 해결됩니다. 상태와 이력은 그대로 남습니다.",
     preview: "저장될 아이디어",
     truncated: "원래 배정된 작업이 아이디어 길이 제한보다 길어 앞부분만 넣습니다. 전체 내용은 보관된 카드에 남습니다.",
     recreate: "새 아이디어로 다시 만들기",
@@ -63,7 +71,7 @@ export const adminAmuxLegacyCardMessages = defineAdminMessages({
       running: "이 카드의 작업이 아직 대기, 임대 또는 실행 중입니다",
       already_closed: "이미 닫혔습니다",
       changed: "보여 준 뒤 카드가 바뀌었습니다. 새로 읽으세요",
-      not_legacy: "옛 작업판 카드가 아닙니다",
+      not_legacy: "옛 작업판 카드도, 복구 경로가 없는 v22 이전 Task도 아닙니다",
       not_found: "카드를 찾지 못했습니다",
       busy: "지금 작업자가 카드를 잡고 있습니다. 잠시 뒤 다시 시도하세요",
       no_assigned_work: "다시 만들 배정 작업이 없습니다",

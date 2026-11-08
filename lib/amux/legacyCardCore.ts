@@ -4,19 +4,55 @@ import { BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM } from "./boardImportCore.ts";
 import { AMUX_IDEA_INPUT_MAX_BYTES } from "./ideaInputCore.ts";
 
 /**
- * Legacy WORKBOARD cards (owner decision 2026-11-08): the cards imported from
- * the old private workboard in 2026-10 are not v22 Tasks, so the review
- * decision, the app record inspection and the Ubuntu inspection all refuse
- * them. The owner remakes each one as a new owner idea, which the idea lane
+ * Cards the owner can only remake (owner decision 2026-11-08). Two kinds have
+ * no path to a review decision or a recovery inspection:
+ *
+ * - `workboard`: imported from the old private workboard in 2026-10. They are
+ *   not v22 Tasks, so the review decision, the app record inspection and the
+ *   Ubuntu inspection all refuse them.
+ * - `pre_v22_task`: an admin-idea-v4 Task made before v22 that lacks the v22
+ *   receipt, task role or execution grade the Ubuntu inspection requires
+ *   (lockRecoveryTask in v22TaskRecoveryService.ts), stopped in blocked or
+ *   review with no run or a run whose outcome is unknown. No recovery proof
+ *   can ever open its decision.
+ *
+ * The owner remakes such a card as a new owner idea, which the idea lane
  * builds, and closes the old card by archiving it: its status, attempts,
  * escalation history and audit stay as they are.
  *
  * Pure: no database, no clock.
  */
 
-/** Only these cards take the recreate and close actions. */
-export const isAmuxLegacyWorkboardCard = (card: { sourceSystem: string | null }) =>
-  card.sourceSystem === BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM;
+export type AmuxLegacyCardKind = "workboard" | "pre_v22_task";
+
+/** The facts that decide whether a card is one the owner can only remake. */
+export type AmuxLegacyCardFacts = {
+  sourceSystem: string | null; cardType: string | null; status: string;
+  v22ReceiptId: string | null; taskRole: string | null; executionGrade: string | null;
+  /** The newest attempt, or null when the card never ran. */
+  lastAttempt: { endedAt: Date | string | null; outcome: string | null; reason: string | null } | null;
+};
+
+/** What the Ubuntu inspection accepts (lockRecoveryTask), apart from the archive. */
+export const isAmuxV22RecoverableTask = (card: Pick<AmuxLegacyCardFacts,
+  "sourceSystem" | "cardType" | "v22ReceiptId" | "taskRole" | "executionGrade">) =>
+  card.sourceSystem === "admin-idea-v4" && card.cardType === "task" &&
+  Boolean(card.v22ReceiptId) && Boolean(card.taskRole) && Boolean(card.executionGrade);
+
+const UNKNOWN_OUTCOMES = new Set(["expired", "outcome_unknown"]);
+const UNKNOWN_REASONS = new Set(["usage_outcome_unknown", "outcome_unknown"]);
+
+export function amuxLegacyCardKind(card: AmuxLegacyCardFacts): AmuxLegacyCardKind | null {
+  if (card.sourceSystem === BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM) return "workboard";
+  if (card.sourceSystem !== "admin-idea-v4" || card.cardType !== "task" || isAmuxV22RecoverableTask(card)) return null;
+  if (card.status !== "blocked" && card.status !== "review") return null;
+  const attempt = card.lastAttempt;
+  // A run still open is not an unknown outcome yet; the close refuses it as running.
+  if (attempt === null) return "pre_v22_task";
+  if (attempt.endedAt === null) return "pre_v22_task";
+  return UNKNOWN_OUTCOMES.has(attempt.outcome ?? "") || UNKNOWN_REASONS.has(attempt.reason ?? "") ?
+    "pre_v22_task" : null;
+}
 
 /**
  * The app record inspection and the Ubuntu inspection read v22 execution
@@ -46,11 +82,10 @@ export function amuxLegacyCardRecreateRequestId(taskId: string, ideaText: string
 export type AmuxLegacyCardCloseRefusal =
   | "not_legacy" | "already_closed" | "changed" | "running";
 
-export function amuxLegacyCardCloseRefusal(card: {
-  sourceSystem: string | null; archivedAt: Date | null; revision: number; status: string;
-  activeDelivery: boolean; liveAttempt: boolean;
+export function amuxLegacyCardCloseRefusal(card: AmuxLegacyCardFacts & {
+  archivedAt: Date | null; revision: number; activeDelivery: boolean; liveAttempt: boolean;
 }, shownRevision: number): AmuxLegacyCardCloseRefusal | null {
-  if (!isAmuxLegacyWorkboardCard(card)) return "not_legacy";
+  if (amuxLegacyCardKind(card) === null) return "not_legacy";
   if (card.archivedAt !== null) return "already_closed";
   if (card.revision !== shownRevision) return "changed";
   // A queued or leased delivery, an open attempt or a card a worker is doing
@@ -117,8 +152,16 @@ export type AmuxLegacyCardIdea =
  * replaces. A text over the idea limit keeps its head; the old card stays in
  * the archive with the whole of it.
  */
+const ROLE_LABELS: Record<string, string> = {
+  investigate: "조사", design: "설계", review: "검토", verify: "검증", operate: "운영", implement: "구현",
+};
+
+/** Roles whose work is not a code change; the remade idea says so, so the lane keeps it that way. */
+const NON_CODE_ROLES = new Set(["investigate", "design", "review", "verify", "operate"]);
+
 export function amuxLegacyCardIdeaText(card: {
   displayKey: string | null; id: string; description: string | null; executionBrief: string | null;
+  kind?: AmuxLegacyCardKind; taskRole?: string | null;
 }): AmuxLegacyCardIdea {
   const raw = card.description?.trim() ?? "";
   if (!raw) return { ok: false, code: "no_assigned_work" };
@@ -143,8 +186,12 @@ export function amuxLegacyCardIdeaText(card: {
   }
   if (!title) return { ok: false, code: "no_assigned_work" };
   const brief = card.executionBrief?.trim();
-  const footer = `원래 카드: ${card.displayKey ?? card.id} (옛 작업판에서 이관한 카드를 새 아이디어로 다시 만듦)`;
-  const head = [title, "", ...body, ...(brief ? ["", "승인된 실행 브리프:", brief] : [])].join("\n").trim();
+  const footer = `원래 카드: ${card.displayKey ?? card.id} (${card.kind === "pre_v22_task" ?
+    "v22 이전에 만든 Task" : "옛 작업판에서 이관한 카드"}를 새 아이디어로 다시 만듦)`;
+  const role = card.taskRole ? ROLE_LABELS[card.taskRole] ?? card.taskRole : null;
+  const nature = role ? [`작업 성격: ${role}${NON_CODE_ROLES.has(card.taskRole!) ?
+    " (코드 수정이 아닌 작업입니다. 결과는 보고서로 남기고 코드를 바꾸지 않습니다)" : ""}`] : [];
+  const head = [title, "", ...nature, ...(nature.length ? [""] : []), ...body, ...(brief ? ["", "승인된 실행 브리프:", brief] : [])].join("\n").trim();
   const room = AMUX_IDEA_INPUT_MAX_BYTES - Buffer.byteLength(`\n\n…\n\n${footer}`, "utf8");
   const cut = cutToBytes(head, room);
   const truncated = cut !== head;

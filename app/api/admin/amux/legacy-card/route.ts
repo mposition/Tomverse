@@ -16,15 +16,17 @@ import {
 } from "@/lib/amux/ideaSubmissionCore";
 import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
 import { amuxLegacyCardRecreateRequestId } from "@/lib/amux/legacyCardCore";
+import { readAmuxExecutionTaskDetail } from "@/lib/amux/adminExecutionRead";
 import {
   AmuxLegacyCardOwnerError, assertAmuxLegacyCardOwner, closeAmuxLegacyCardForOwner,
-  legacyIdea, readAmuxLegacyCardForRecreate, type AmuxLegacyCardCloseResult,
+  type AmuxLegacyCardCloseResult,
 } from "@/lib/amux/legacyCardOwnerService";
 import { authOptions } from "@/lib/auth";
 import { sendScoutSuggestion } from "@/lib/productResearchScoutSend";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
-// The owner's actions on a legacy WORKBOARD card (lib/amux/legacyCardCore.ts):
+// The owner's actions on a card the owner can only remake -- a legacy
+// WORKBOARD card or a pre-v22 Task with no recovery path (lib/amux/legacyCardCore.ts):
 //
 //   { "action": "recreate", taskId, revision, ownerConfirmed: true }
 //     saves the card's assigned work as a new owner idea through the same
@@ -87,11 +89,14 @@ export async function POST(request: Request): Promise<Response> {
     await consumeApiRateLimit(request, session.user.id, "admin-amux-legacy-card-write", { minute: 10, day: 100 });
     const parsed = await readLimitedJson(request, 1_024, body);
 
-    const read = await readAmuxLegacyCardForRecreate(parsed.taskId);
-    if (!read) return json({ error: "not_found" }, 404);
-    // The card's own revision is the one judged; the shown one must match it.
-    const refusal = read.refusal ?? (read.card.revision !== parsed.revision ? "changed" : null);
-    if (refusal) return json({ error: "not_closable", reason: refusal }, 409);
+    // The same read the card detail shows: its kind, its close refusal and the
+    // idea built on the server from the card's readable (for a v4 Task,
+    // decrypted) assigned work. The close judges it all again under its lock.
+    const detail = await readAmuxExecutionTaskDetail(parsed.taskId);
+    if (!detail) return json({ error: "not_found" }, 404);
+    const view = detail.legacyCard;
+    const refusal = !view ? "not_legacy" : detail.revision !== parsed.revision ? "changed" : view.closeRefusal;
+    if (!view || refusal) return json({ error: "not_closable", reason: refusal }, 409);
 
     if (parsed.action === "close") {
       const result = await closeAmuxLegacyCardForOwner({ session, request, taskId: parsed.taskId,
@@ -100,15 +105,15 @@ export async function POST(request: Request): Promise<Response> {
       return json({ status: "closed", ...closed(result) });
     }
 
-    const idea = legacyIdea(read.card);
+    const idea = view.idea;
     if (idea.state !== "ready") return json({ error: "idea_refused", reason: idea.code }, 400);
     if (!ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) ||
         !ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])) {
       return json({ error: "amux_submission_disabled" }, 503);
     }
-    const requestId = amuxLegacyCardRecreateRequestId(read.card.id, idea.text);
+    const requestId = amuxLegacyCardRecreateRequestId(parsed.taskId, idea.text);
     const path = await ideaSendPath({ session, request, requestId, idea: idea.text,
-      sessionDisplay: "Legacy WORKBOARD card" });
+      sessionDisplay: view.kind === "workboard" ? "Legacy WORKBOARD card" : "Pre-v22 AMUX Task" });
     if (!path.ok) return json({ error: "idea_refused", reason: path.code }, path.status);
     const closing: { result: AmuxLegacyCardCloseResult | null } = { result: null };
     const result = await sendScoutSuggestion({ readBack: path.readBack, submit: path.submit,

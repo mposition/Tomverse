@@ -12,7 +12,7 @@ import {
 // The legacy WORKBOARD card panel on the execution board's card detail: what
 // the owner sees before acting, and how each answer of the route is read.
 
-const ready: AmuxLegacyCardView = { legacy: true, closeRefusal: null,
+const ready: AmuxLegacyCardView = { kind: "workboard", closeRefusal: null,
   idea: { state: "ready", title: "The renewal date is hidden.", truncated: false,
     text: "The renewal date is hidden.\n\n완료 기준:\n- The date shows\n\n원래 카드: AMUX-WORKBOARD-061" } };
 
@@ -27,6 +27,13 @@ test("the owner sees the idea that will be saved and both actions", () => {
   assert.match(out, /data-testid="amux-legacy-card-recreate"/);
   assert.match(out, /data-testid="amux-legacy-card-close"/);
   assert.doesNotMatch(out, /amux-legacy-card-not-closable/);
+});
+
+test("a pre-v22 Task says why it has no recovery path", () => {
+  const out = html({ ...ready, kind: "pre_v22_task" });
+  assert.match(out, /Task made before v22/);
+  assert.match(out, /has no v22 receipt/);
+  assert.match(out, /data-testid="amux-legacy-card-recreate"/);
 });
 
 test("a viewer who is not the owner sees the card but no action", () => {
