@@ -27,6 +27,7 @@ export type MarketingInfoCopy = {
   title: string;
   description: string;
   updated?: string;
+  keepWords?: boolean;
   sections: MarketingInfoSection[];
   cta?: {
     label: string;
@@ -67,7 +68,7 @@ export function MarketingInfoPage({
 
       <section
         lang={localizedPage ? lang : "en"}
-        className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20"
+        className={`mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20 ${page.keepWords ? "break-keep [overflow-wrap:anywhere]" : ""}`}
       >
         <div className="max-w-3xl">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{page.eyebrow}</p>
