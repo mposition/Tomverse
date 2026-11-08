@@ -71,7 +71,7 @@ const candidates = [
   { id: "luna", credits: 9 },
   { id: "terra", credits: 12 },
 ];
-const raiseTimeout = { setting: "routerTimeoutMs", value: 6_500, modelId: null, hours: null, reason: "타임아웃 8%" };
+const raiseTimeout = { setting: "routerTimeoutMs", value: AUTO_LLM_ROUTER_TIMEOUT_MS + 500, modelId: null, hours: null, reason: "타임아웃 8%" };
 const excludeMini = { setting: "excludeModel", value: null, modelId: "mini", hours: 12, reason: "답변 실패 반복" };
 
 const auditRows = (action: string) =>
@@ -108,7 +108,7 @@ test("an admitted change commits with its system audit entry and its outcome in 
   });
   assert.equal(applied.length, 2);
   const tunables = await readAutoRouterTunables();
-  assert.equal(tunables.routerTimeoutMs?.value, 6_500);
+  assert.equal(tunables.routerTimeoutMs?.value, AUTO_LLM_ROUTER_TIMEOUT_MS + 500);
   assert.equal(tunables.routerTimeoutMs?.previous, AUTO_LLM_ROUTER_TIMEOUT_MS);
   assert.deepEqual(tunables.excluded.map((item) => item.modelId), ["mini"]);
   const audit = await auditRows("auto.llm_router_tunable.applied");
