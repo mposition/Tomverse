@@ -1,10 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { infoPages } from "../components/marketing/marketingInfoContent.ts";
 import {
   getCreditPacksForPlan,
   getPublicCreditPackCatalog,
   recommendCreditAction,
 } from "../lib/creditPacks.ts";
+
+test("public terms and refunds use the catalog's fixed day count for additional credits", () => {
+  const days = [...new Set(getPublicCreditPackCatalog().map((pack) => pack.validityDays))];
+  assert.deepEqual(days, [365]);
+  for (const page of [infoPages.terms, infoPages.refund]) {
+    for (const [locale, duration] of [["en", `${days[0]} days`], ["ko", `${days[0]}일`]]) {
+      const copy = page[locale].sections.map((section) => section.body).join(" ");
+      assert.ok(copy.includes(duration), `${locale}: missing catalog validity`);
+      assert.doesNotMatch(copy, /12 months \(365 days\)|12개월\(365일\)/);
+    }
+  }
+});
 
 test("public credit-pack catalog exposes prices and eligibility without payment secrets", () => {
   const catalog = getPublicCreditPackCatalog();

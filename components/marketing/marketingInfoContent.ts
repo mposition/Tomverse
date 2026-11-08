@@ -601,7 +601,7 @@ export const infoPages = {
         },
         {
           title: "Additional credit packs",
-          body: "An additional credit pack is a one-time purchase that is separate from a subscription and its monthly credits. Additional credits expire 12 months (365 days) after purchase, are not transferable, and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry. A pack increases only the credit balance available for usage: it does not upgrade the plan or increase model access, features, daily limits, plan-specific higher-cost model limits, fair-use limits, or other safeguards.",
+          body: "An additional credit pack is a one-time purchase that is separate from a subscription and its monthly credits. Additional credits expire 365 days after purchase, are not transferable, and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry. A pack increases only the credit balance available for usage: it does not upgrade the plan or increase model access, features, daily limits, plan-specific higher-cost model limits, fair-use limits, or other safeguards.",
         },
         {
           title: "Monthly and annual subscriptions; automatic renewal",
@@ -662,7 +662,7 @@ export const infoPages = {
         },
         {
           title: "추가 크레딧 팩",
-          body: "추가 크레딧 팩은 구독 및 구독에 포함된 월 크레딧과 분리된 일회성 구매 상품입니다. 추가 크레딧은 구매일로부터 12개월(365일) 후 만료되며 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다. 추가 크레딧은 사용 가능한 크레딧 잔액만 늘리며, 플랜을 업그레이드하거나 모델 접근권한, 기능, 일일 제한, 플랜별 고비용 모델 제한, 공정사용 한도 또는 기타 안전장치를 늘리지 않습니다.",
+          body: "추가 크레딧 팩은 구독 및 구독에 포함된 월 크레딧과 분리된 일회성 구매 상품입니다. 추가 크레딧은 구매일로부터 365일 후 만료되며 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다. 추가 크레딧은 사용 가능한 크레딧 잔액만 늘리며, 플랜을 업그레이드하거나 모델 접근권한, 기능, 일일 제한, 플랜별 고비용 모델 제한, 공정사용 한도 또는 기타 안전장치를 늘리지 않습니다.",
         },
         {
           title: "월간·연간 구독과 자동 갱신",
@@ -743,7 +743,7 @@ export const infoPages = {
         },
         {
           title: "Monthly credits and additional credits",
-          body: "AI credits are a service allowance, not stored money. Monthly plan credits reset each calendar month in UTC, do not roll over, and remain tied to the applicable plan period. Additional credits are a separate one-time purchase, expire 12 months (365 days) after purchase, and do not reset with the monthly allowance. Both balances are non-transferable and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry.",
+          body: "AI credits are a service allowance, not stored money. Monthly plan credits reset each calendar month in UTC, do not roll over, and remain tied to the applicable plan period. Additional credits are a separate one-time purchase, expire 365 days after purchase, and do not reset with the monthly allowance. Both balances are non-transferable and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry.",
         },
         {
           title: "Plan cancellation and additional-credit access",
@@ -801,7 +801,7 @@ export const infoPages = {
         },
         {
           title: "월 크레딧과 추가 크레딧",
-          body: "AI 크레딧은 예치금이 아닌 서비스 사용 한도입니다. 월 플랜 크레딧은 매월 1일 00:00 UTC에 초기화되고 이월되지 않으며 해당 플랜 기간에 귀속됩니다. 추가 크레딧은 월 크레딧과 분리된 일회성 구매분으로, 구매일로부터 12개월(365일) 후 만료되고 월 초기화 때 사라지지 않습니다. 두 잔액 모두 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다.",
+          body: "AI 크레딧은 예치금이 아닌 서비스 사용 한도입니다. 월 플랜 크레딧은 매월 1일 00:00 UTC에 초기화되고 이월되지 않으며 해당 플랜 기간에 귀속됩니다. 추가 크레딧은 월 크레딧과 분리된 일회성 구매분으로, 구매일로부터 365일 후 만료되고 월 초기화 때 사라지지 않습니다. 두 잔액 모두 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다.",
         },
         {
           title: "플랜 해지 후 추가 크레딧 이용",
