@@ -17,6 +17,7 @@ import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./use
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { storeAndApplyThemePreference } from "@/lib/theme";
 import { openAccountSettings } from "@/lib/accountSettingsEvents";
+import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
 import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
 import { useKeyboardInset } from "./useVisualViewport";
 import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
@@ -92,6 +93,12 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product
   const keyboardInset = useKeyboardInset();
   const trigger = useRef<HTMLButtonElement>(null);
   const drawer = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!parseSettingsDeepLink(window.location.search)) return;
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) setOpen(true); });
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
