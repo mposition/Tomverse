@@ -54,6 +54,7 @@ type SupportCopy = {
   traceInput: string;
   messageInput: string;
   messageExample: string;
+  messageHelp?: string;
   submit: string;
   sending: string;
   success: string;
@@ -179,6 +180,7 @@ const copy: Record<Language, SupportCopy> = {
     "emailUpdatesNote": "접수 및 처리 상태 안내가 이 주소로 발송됩니다. 원치 않으면 선택을 해제하세요.",
     "traceInput": "추적 ID 또는 참고 번호, 선택 사항",
     "messageInput": "무슨 일이 있었고 어떤 결과를 기대했는지 알려주세요.",
+    "messageHelp": "문의 내용을 {min}자 이상 입력해 주세요.",
     "submit": "문의 보내기",
     "sending": "전송 중...",
     "success": "지원 요청이 접수되었습니다.",
@@ -830,7 +832,7 @@ export function SupportPageContent() {
                     "{count}",
                     String(messageState.remaining)
                   )
-                : t("feedback.messageHelp").replaceAll(
+                : (page.messageHelp ?? t("feedback.messageHelp")).replaceAll(
                     "{min}",
                     String(FEEDBACK_MESSAGE_MIN_LENGTH)
                   )}
