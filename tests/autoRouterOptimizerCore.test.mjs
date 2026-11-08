@@ -8,6 +8,7 @@ import {
   buildAutoLlmRouterSystem,
 } from "../lib/autoLlmRouterCore.ts";
 import {
+  AUTO_ROUTER_GENERATOR_SYSTEM,
   AUTO_ROUTER_GUIDANCE_MAX_CHARS,
   AUTO_ROUTER_OPTIMIZER_CONCURRENCY,
   AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD,
@@ -799,6 +800,12 @@ test("the report is admitted bounded, of known kinds, and never repeating a user
     "guidance",
     "settingChanges",
   ]);
+});
+
+test("optimizer treats timeout statistics as estimates and does not infer failure causes", () => {
+  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /Zero does not prove there were no timeouts/);
+  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /describe error causes as unknown/);
+  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /errors alone or a zero timeout estimate do not justify changing it/);
 });
 
 test("router statistics count outcomes, timeouts, fallbacks and pick shares only", () => {
