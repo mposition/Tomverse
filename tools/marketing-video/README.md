@@ -118,3 +118,24 @@ Cron on the box (05:00 Brisbane, before the generator's run, so its assets can b
 ```
 0 19 * * * set -a; . $HOME/.config/tomverse/marketing-video.prod.env; set +a; PATH=$HOME/.local/bin:$PATH $HOME/marketing-video-job/tools/marketing-video/run-daily.sh
 ```
+
+## The Higgsfield image path (off by default)
+
+Owner decision 2026-11-08. With `MARKETING_MEDIA_IMAGE_PATH=higgsfield` in the
+box's env file, `run-daily.sh` runs `run-higgsfield.mjs` instead of the HTML
+card call: concepts from one Claude call (`JOB-higgsfield.md`), pictures from
+Higgsfield `gpt_image_2_6` (4:5, one per call), a guide review and a content
+review as separate Claude calls (`REVIEW-higgsfield.md`, Read on their own
+folder only), real-font Korean and Chinese words (`compose.mjs`), the real
+provider marks, and the fixed band (`band-layout.mjs`) through `make-card.mjs`.
+The design guide every call follows is `HIGGSFIELD-GUIDE.md`.
+
+- Calls go through the official Higgsfield CLI (`@higgsfield/cli`, logged in on
+  the box with `higgsfield auth login`), which draws on the web plan's
+  credits. The HTTP API has no GPT Image 2.6 and bills a separate balance.
+- `hf-image-core.mjs` and `higgsfield-cap.mjs` keep the spend: only the one
+  model, ratio and count; a daily ledger `job/higgsfield-ledger-<yyyymmdd>.json`
+  under `MARKETING_HIGGSFIELD_DAILY_CREDIT_CAP` (unset or 0 refuses every call);
+  a call whose outcome is unknown blocks the next until its job id shows it.
+- `HIGGSFIELD_BIN` and `CLAUDE_BIN` name other binaries (a `.mjs` is run with
+  node), for a dry run with stand-ins.

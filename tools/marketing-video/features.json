@@ -1,5 +1,5 @@
 {
-  "note": "What a card may say about Tomverse. Say only these; never a price, 'free', credits, plan names, 'best', 'only', 'first', or a promise that an answer is correct. Model and company names are fine (owner 2026-11-07), and model marks come from library/. Checked 2026-11-07 against the app and the FAQ (claim.* ids in lib/marketingClaims.ts).",
+  "note": "What a card may say about Tomverse: facts only from this file. Model and company names are fine (owner 2026-11-07), and model marks come from library/ or public/model-icons/. Owner 2026-11-08: copy may use price, 'free' and bold wording; 'free' always carries its condition ('Free to try within the included credits'), and the Guard judges every word at submission and refuses what it does not allow. Never promise that an answer is correct. Checked 2026-11-07 against the app and the FAQ (claim.* ids in lib/marketingClaims.ts).",
   "features": [
     {
       "id": "chat",
