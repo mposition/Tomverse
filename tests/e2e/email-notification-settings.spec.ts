@@ -5,6 +5,7 @@ import {
   mockAuthenticatedApi,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import { expectAccessibleContrast } from "./support/ui-audit";
 
 const preferences = (productUpdatesPending: boolean) => [
   { purpose: "security", enabled: true, locked: true, confirmation: null },
@@ -117,6 +118,22 @@ test("marketing opt-in confirms a country and asks for an email confirmation @ui
   await expect(countrySelect).toBeVisible();
   await expect(optIn).toBeVisible();
   await expect(page.getByTestId("email-withdraw-all")).toHaveCount(0);
+
+  for (const theme of ["light", "dark"] as const) {
+    await page.locator("html").evaluate((element, value) => {
+      element.classList.toggle("dark", value === "dark");
+    }, theme);
+    const descriptions = [
+      page.locator("#email-country-description"),
+      page.getByTestId("email-preference-security").getByText("끌 수 없습니다", { exact: false }),
+      page.getByTestId("email-preference-billing").getByText("끌 수 없습니다", { exact: false }),
+    ];
+    for (const description of descriptions) {
+      await expect(description).toBeVisible();
+      const sample = await expectAccessibleContrast(description, `${theme} notification guidance`);
+      expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+    }
+  }
 
   // The value-focused CTA is prominent, but it cannot bypass the same country
   // requirement as the granular switch.

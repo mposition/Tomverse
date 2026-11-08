@@ -269,7 +269,7 @@ export function EmailNotificationSettings() {
                         </label>
                         <p
                             id="email-country-description"
-                            className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400"
+                            className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400"
                         >
                             {t("emailNotifications.countryDescription")}
                         </p>
@@ -394,7 +394,7 @@ export function EmailNotificationSettings() {
                                         )}
                                     </p>
                                     {preference.locked ? (
-                                        <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                                        <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-400">
                                             {t("emailNotifications.lockedNote")}
                                         </p>
                                     ) : null}

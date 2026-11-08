@@ -778,7 +778,7 @@ export function MemoryReviewSettings() {
                                 <span className="block text-sm font-semibold">
                                     {t("memoryReview.masterToggleLabel")}
                                 </span>
-                                <span className="mt-0.5 block text-xs leading-5 text-zinc-500">
+                                <span className="mt-0.5 block text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                                     {t("memoryReview.masterToggleDescription")}
                                 </span>
                             </span>
@@ -800,7 +800,7 @@ export function MemoryReviewSettings() {
                                 <span className="block text-sm font-semibold">
                                     {t("memoryReview.styleToggleLabel")}
                                 </span>
-                                <span className="mt-0.5 block text-xs leading-5 text-zinc-500">
+                                <span className="mt-0.5 block text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                                     {t("memoryReview.styleToggleDescription")}
                                 </span>
                             </span>
@@ -1076,7 +1076,7 @@ export function MemoryReviewSettings() {
                         <span className="text-sm font-semibold">
                             {t("memoryReview.createGroundsLabel")}
                         </span>
-                        <span className="mt-0.5 block text-xs leading-5 text-zinc-500">
+                        <span className="mt-0.5 block text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                             {t("memoryReview.createGroundsDescription")}
                         </span>
                         <textarea
