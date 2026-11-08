@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft, BarChart3, Bot, Database, FileUp, Mail, MapPin, MessageSquare, Mic, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { englishLocationNotice } from "@/locales/privacyLocation";
 import {
     MarketingFooter,
     MarketingHeader,
@@ -328,7 +329,24 @@ export function PrivacyPolicy() {
                                 With it, only the table scrolls.
                             */}
                             <div className="min-w-0 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
-                                <p>{t(`privacyPolicy.${bodyKey}`)}</p>
+                                {bodyKey === "location" && lang === "en" ? (
+                                    <div className="space-y-5" data-testid="privacy-location-sections">
+                                        {englishLocationNotice.map(group => (
+                                            <div key={group.title}>
+                                                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{group.title}</h3>
+                                                {"items" in group ? (
+                                                    <ul className="mt-2 list-disc space-y-2 pl-5">
+                                                        {group.items.map(item => <li key={item}>{item}</li>)}
+                                                    </ul>
+                                                ) : (
+                                                    <div className="mt-2 space-y-3">
+                                                        {group.paragraphs.map(paragraph => <p key={paragraph}>{paragraph}</p>)}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : <p>{t(`privacyPolicy.${bodyKey}`)}</p>}
                                 {bodyKey === "rights" && (
                                     <div className="mt-5 space-y-3">
                                         <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{t("auth.deleteAccount")}</h3>
