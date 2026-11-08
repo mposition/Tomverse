@@ -467,8 +467,8 @@ export function AdminUserSecurityControls({
             {spec.icon}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-bold text-white">{spec.title}</span>
-            <span className="mt-0.5 block text-xs text-zinc-400">{spec.description}</span>
+            <span className="block text-sm font-bold text-white [overflow-wrap:anywhere]">{spec.title}</span>
+            <span className="mt-0.5 block text-xs text-zinc-400 [overflow-wrap:anywhere]">{spec.description}</span>
           </span>
           <ChevronDown
             className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${expanded ? "rotate-180" : ""}`}
@@ -514,7 +514,7 @@ export function AdminUserSecurityControls({
               <ShieldCheck className="h-5 w-5" aria-hidden />
             </span>
             <div className="min-w-0">
-              <h3 className="text-base font-bold text-white">
+              <h3 className="text-base font-bold text-white [overflow-wrap:anywhere]">
                 {restricted ? m.status.restrictedTitle : m.status.calmTitle}
               </h3>
               <p className="mt-0.5 text-xs text-zinc-400">
