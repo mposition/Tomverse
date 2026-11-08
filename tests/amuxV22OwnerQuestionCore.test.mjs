@@ -10,6 +10,7 @@ import {
   amuxV22OwnerQuestionSettlement,
   amuxV22OwnerQuestionSettlementPlan,
   amuxV22OwnerQuestionSha256,
+  amuxV22QuestionCardBytes,
   amuxV22QuestionDmCard,
   buildAmuxV22ResumeSection,
   normalizeAmuxV22OwnerAnswer,
@@ -173,4 +174,27 @@ test("the rules ask for options, context and paths, and say the Decision Maker e
   assert.match(AMUX_V22_OWNER_QUESTION_RULES, /"context":"<what you found/);
   assert.match(AMUX_V22_OWNER_QUESTION_RULES, /"paths":\["<repository-relative file/);
   assert.match(AMUX_V22_OWNER_QUESTION_RULES, /escalates a question it has no grounds for/);
+});
+
+test("a card whose optional parts would pass 16 KiB gives them up, paths first, so it still reaches the Decision Maker", () => {
+  const big = { question: `${"가".repeat(600)}?`, unblocks: "나".repeat(300),
+    options: Array.from({ length: 6 }, (_, i) => ({ id: `o${i}`, label: "다".repeat(300) })),
+    context: "라".repeat(2_000),
+    paths: Array.from({ length: 32 }, (_, i) => `lib/${String(i).padStart(2, "0")}/${"p".repeat(190)}`) };
+  const question = parseAmuxV22OwnerQuestion(line(big));
+  assert.equal(question.paths.length, 32);
+  const card = amuxV22QuestionDmCard({ questionId: "q-1", worker: "codex-impl", providerClass: "codex",
+    taskId: "t", sequence: 1, displayKey: "AMUX-AUTOFILE-003", cardTitle: "File retry", question });
+  const bytes = amuxV22QuestionCardBytes({ ...card, paths: card.context_paths });
+  assert.ok(bytes <= 15 * 1_024, `${bytes}`);
+  // The question, what it unblocks and the options are never cut; the card line stays.
+  assert.equal(card.question, big.question);
+  assert.equal(card.options.length, 6);
+  assert.match(card.context, /^Card: AMUX-AUTOFILE-003 "File retry"/);
+  assert.ok(card.context_paths.length < 32);
+  // A small card keeps everything.
+  const small = amuxV22QuestionDmCard({ questionId: "q-1", worker: "w", providerClass: "codex", taskId: "t",
+    sequence: 1, displayKey: "K", cardTitle: null, question: parseAmuxV22OwnerQuestion(line({ ...asked,
+      context: "c", paths: ["lib/a.ts"] })) });
+  assert.deepEqual(small.context_paths, ["lib/a.ts"]);
 });

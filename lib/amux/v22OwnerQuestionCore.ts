@@ -142,14 +142,38 @@ export function amuxV22QuestionDmCard(input: { questionId: string; worker: strin
     `${name} question ${input.sequence}`;
   const cardLine = `Card: ${name}${input.cardTitle?.trim() ? ` "${input.cardTitle.trim()}"` : ""}` +
     `, question ${input.sequence} from worker ${input.worker}.`;
-  const context = [cardLine, input.question.context].filter(Boolean).join("\n\n");
-  return { question_id: input.questionId, worker: input.worker, provider: input.providerClass,
-    title: clip(title.replace(/\s+/g, " "), DM_CARD_TITLE_MAX),
+  let context = clip([cardLine, input.question.context].filter(Boolean).join("\n\n"),
+    DM_CARD_CONTEXT_MAX);
+  // Local AMUX refuses a typed ask over 16 KiB (a refused card is filed again
+  // every tick and never reaches the Decision Maker), and the routing sends a
+  // card text over 16 KiB to the operator. The optional parts give way: paths
+  // from the end first, then the context down to the card line.
+  const paths = [...(input.question.paths ?? [])];
+  const fixed = { title: clip(title.replace(/\s+/g, " "), DM_CARD_TITLE_MAX),
     question: input.question.question, unblocks: input.question.unblocks,
-    options: input.question.options,
-    context: clip(context, DM_CARD_CONTEXT_MAX),
-    context_paths: input.question.paths ?? [] };
+    options: input.question.options };
+  while (amuxV22QuestionCardBytes({ ...fixed, context, paths }) > DM_CARD_BUDGET_BYTES) {
+    if (paths.length > 0) paths.pop();
+    else if (context.length > cardLine.length) context = clip(context, Math.max(cardLine.length, context.length - 500));
+    else break;
+  }
+  return { question_id: input.questionId, worker: input.worker, provider: input.providerClass,
+    ...fixed, context, context_paths: paths };
 }
+
+/**
+ * Both ends bound the card at 16 KiB: local AMUX its typed ask, and the
+ * Decision Maker routing its whole card text (DM_CARD_TEXT_MAX_BYTES). 15 KiB
+ * leaves room for the format, type and tags the card text adds.
+ */
+const DM_CARD_BUDGET_BYTES = 15 * 1_024;
+
+/** The card as the Decision Maker would read it, in UTF-8 bytes. */
+export const amuxV22QuestionCardBytes = (input: { title: string; question: string; unblocks: string;
+  options: AmuxV22OwnerQuestion["options"]; context: string; paths: readonly string[] }) =>
+  Buffer.byteLength(JSON.stringify({ title: input.title, question: input.question, unblocks: input.unblocks,
+    options: input.options.map((option) => ({ id: option.id, label: option.label, effect: "choice_only",
+      paths: [] })), context: input.context, contextPaths: input.paths }), "utf8");
 
 /** The digest the question row keeps instead of the text (the text stays in
  * the encrypted result body). */
