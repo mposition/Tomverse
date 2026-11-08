@@ -120,8 +120,8 @@ const recoveryGuards = (value: unknown): value is AmuxV22RecoveryRead["guards"] 
   value.priorEffects === "unknown" && value.oldCost === "held" &&
   value.readOnlyLaunch === "required" && value.taskAttemptLimit === 2;
 const recoveryPreApproval = (value: unknown): value is NonNullable<AmuxV22RecoveryRead["preApproval"]> =>
-  record(value) && keys(value, "approvalId,costDigest,expiresAt,id,reason,requestedAt,state") &&
-  uuid(value.id) && ["waiting", "applied", "refused", "expired"].includes(String(value.state)) &&
+  record(value) && keys(value, "approvalId,costDigest,expiresAt,id,ownerRequestId,reason,requestedAt,state") &&
+  uuid(value.id) && uuid(value.ownerRequestId) && ["waiting", "applied", "refused", "expired"].includes(String(value.state)) &&
   typeof value.requestedAt === "string" && Number.isFinite(Date.parse(value.requestedAt)) &&
   typeof value.expiresAt === "string" && Number.isFinite(Date.parse(value.expiresAt)) &&
   digest(value.costDigest) && (value.reason === null ||
@@ -279,6 +279,7 @@ export async function fetchAmuxHostRecovery({ identity, requestId, action, displ
         (unresolvedAction === "approve_attempt" && data.state !== "approved") ||
         (unresolvedAction === "request_safe_stop" && data.requestKind !== "safe_stop") ||
         (unresolvedAction === "preapprove_attempt" && (!preApprovalReceipt(receiptBinding) ||
+          data.preApproval?.ownerRequestId !== requestId ||
           data.preApproval?.costDigest !== receiptBinding.preApprovalCostDigest)) ||
         (unresolvedAction === "accept_unknown_prior_effects" &&
           data.riskAcceptance?.ownerRequestId !== requestId)))
@@ -979,6 +980,7 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
         next.data.riskAcceptance.sourceEvidenceDigest === pendingReceipt.sourceEvidenceDigest;
       const confirmedResult = next.state === "ready" && next.data.state !== "not_visible" &&
         (pending.action === "preapprove_attempt" ? preApprovalReceipt(pendingReceipt) &&
+          next.data.preApproval?.ownerRequestId === pending.requestId &&
           next.data.preApproval?.costDigest === pendingReceipt.preApprovalCostDigest :
          pending.action === "approve_attempt" ? next.data.state === "approved" :
          pending.action === "accept_unknown_prior_effects" ? riskAcceptanceConfirmedResult :

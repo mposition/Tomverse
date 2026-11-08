@@ -1544,6 +1544,7 @@ test("one click: an incident leaves the consent waiting, and a fresh read nonce 
     "0c1a9db5-b13e-4bf6-97c4-672a024b4a75");
   assert.equal(reopened.preApproval?.id, world.preApprovals[0]!.id);
   assert.equal(reopened.inspectionId, world.preApprovals[0]!.inspectionId);
+  assert.equal(reopened.preApproval?.ownerRequestId, requestId);
   // When the incident ends, the checker poll settles it once.
   world.incident = false;
   await service.pendingAmuxV22RecoveryInspections("claude-test");

@@ -1550,6 +1550,7 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
     throw new BoardImportError("audit_unbound", 503);
   const preExpired = !!pre && !pre.result && now > pre.expiresAt;
   const preApproval: AmuxV22RecoveryPreApprovalRead | undefined = pre ? { id: pre.id,
+    ownerRequestId: pre.ownerRequestId,
     state: pre.result ? pre.result.outcome === "applied" ? "applied" :
       pre.result.reason === "preapproval_expired" ? "expired" : "refused" :
       preExpired ? "expired" : "waiting",

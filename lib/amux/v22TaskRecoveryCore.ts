@@ -415,6 +415,9 @@ export type AmuxV22RecoveryRead = { taskId: string; requestId: string;
   preApproval?: AmuxV22RecoveryPreApprovalRead;
   retryWrite: false };
 export type AmuxV22RecoveryPreApprovalRead = { id: string;
+  /** The owner's request nonce that created it: an unresolved write is
+   * confirmed only by its own nonce, never by a later read's fallback. */
+  ownerRequestId: string;
   state: "waiting" | "applied" | "refused" | "expired";
   requestedAt: string; expiresAt: string; costDigest: string;
   reason: string | null; approvalId: string | null };

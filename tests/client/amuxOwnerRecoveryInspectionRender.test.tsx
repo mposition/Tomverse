@@ -1025,7 +1025,8 @@ const preApprovalQuote = { taskId: identity.taskId, taskRevision: identity.taskR
   priorAttemptId: identity.attemptId, cost: quote, expiresInMinutes: 30 as const,
   eligible: true, reason: null, retryWrite: false as const };
 const preApproval = (state: "waiting" | "applied" | "refused" | "expired",
-  reason: string | null = null) => ({ id: "00000000-0000-4000-8000-000000000020", state,
+  reason: string | null = null, ownerRequestId = inspectionRequestId) => ({
+  id: "00000000-0000-4000-8000-000000000020", ownerRequestId, state,
   requestedAt: "2026-11-08T01:00:00.000Z", expiresAt: "2026-11-08T01:30:00.000Z",
   costDigest: quote.costDigest, reason,
   approvalId: state === "applied" ? "00000000-0000-4000-8000-000000000021" : null });
@@ -1104,6 +1105,16 @@ test("the quote binds only this identity and the POST sends the quoted digest, n
       evidenceDigest: null, cost: null, quote: null,
       preApproval: { ...preApproval("waiting"), costDigest: "d".repeat(64) } }) });
   assert.equal(mismatched?.state, "unavailable");
+  // Review: a lost POST read back finds an older consent at the same cost
+  // through the latest-consent fallback; that is not this write's result.
+  const older = await fetchAmuxHostRecovery({ identity, requestId: inspectionRequestId,
+    action: "preapprove_attempt", expectedReceipt: { preApprovalCostDigest: quote.costDigest },
+    controller: new AbortController(), isCurrent: () => true, fallback: "unavailable",
+    fetcher: async () => Response.json({ ...hostFixture(), state: "unverified",
+      preApproval: preApproval("refused", "recovery_cost_changed",
+        "00000000-0000-4000-8000-000000000099") }) });
+  assert.equal(older?.state, "unavailable");
+  assert.equal(older?.state === "unavailable" && older.unknownWrite, true);
   // A malformed pre-approval in the read is refused outright.
   assert.equal(bindAmuxHostRecovery({ ...hostFixture(), preApproval: { ...preApproval("applied"),
     approvalId: null } }, identity, inspectionRequestId), null);
@@ -1128,7 +1139,7 @@ test("actual Panel reads app records on open and needs only the one-click button
       return Response.json({ ...hostFixture(), requestId: body.requestId, state: "pending",
         evidenceId: null, evidenceDigest: null, cost: null, quote: null,
         eligibility: { ...normalEligibility, approveAttempt: false },
-        preApproval: preApproval("waiting") });
+        preApproval: preApproval("waiting", null, body.requestId) });
     }
     if (String(url).includes("view=preapproval_quote")) {
       quoteReads.push(String(url)); return Response.json(preApprovalQuote); }
