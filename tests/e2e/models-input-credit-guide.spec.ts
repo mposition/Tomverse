@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { INPUT_CREDIT_MULTIPLIERS } from "../../lib/models";
+import { NATIVE_ATTACHMENT_ESTIMATED_TOKENS } from "../../lib/chatAttachmentTokens";
 
 test("model base-credit help explains inclusive input multiplier bands", async ({ page }, info) => {
   await page.setViewportSize({ width: info.project.name.includes("mobile") ? 320 : 1440, height: 900 });
@@ -18,7 +19,9 @@ test("model base-credit help explains inclusive input multiplier bands", async (
     await expect(bands.nth(index + 1)).toContainText(`More than ${threshold.aboveTokens.toLocaleString("en-US")}`);
     await expect(bands.nth(index + 1)).toContainText(`${threshold.multiplier}× base credits`);
   }
-  await expect(guide).toContainText("including your conversation history and extracted file content");
+  await expect(guide).toContainText("including conversation history, file content and other included request context");
+  await expect(guide).toContainText(`${NATIVE_ATTACHMENT_ESTIMATED_TOKENS.toLocaleString("en-US")}-token allowance per file for credit weighting`);
+  await expect(guide).toContainText("One such file plus one text token enters the 1.5× band");
   await expect(guide).toContainText("rounded up to whole credits per model");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

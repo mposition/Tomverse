@@ -1,4 +1,5 @@
-import { INPUT_CREDIT_MULTIPLIERS } from "@/lib/models";
+import { INPUT_CREDIT_MULTIPLIERS, getInputCreditMultiplier } from "@/lib/models";
+import { NATIVE_ATTACHMENT_ESTIMATED_TOKENS } from "@/lib/chatAttachmentTokens";
 
 export function ModelInputCreditGuide() {
   const format = (value: number) => value.toLocaleString("en-US");
@@ -12,7 +13,8 @@ export function ModelInputCreditGuide() {
   return (
     <details id="model-input-credit-guide" tabIndex={-1} className="mt-8 scroll-mt-28 rounded-2xl border border-zinc-200 p-5 text-sm leading-6 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-800">
       <summary className="min-h-11 cursor-pointer py-2.5 font-bold">Input size and credit multipliers</summary>
-      <p>The short-request base credits apply at 1×. The multiplier uses estimated request input tokens, including your conversation history and extracted file content; it is not a character count or just your latest message. Extra internal tool-reservation overhead does not itself increase this credit multiplier.</p>
+      <p>The short-request base credits apply at 1×. The multiplier uses the server’s estimated request input, including conversation history, file content and other included request context. It is not a character count or just your latest message.</p>
+      <p className="mt-3">Images and PDFs sent directly to a model count with a fixed {format(NATIVE_ATTACHMENT_ESTIMATED_TOKENS)}-token allowance per file for credit weighting, even when no text is extracted. One such file plus one text token enters the {getInputCreditMultiplier(NATIVE_ATTACHMENT_ESTIMATED_TOKENS + 1)}× band. Other file inputs can contribute extracted text. This credit allowance can differ from the image-token estimate used for input limits.</p>
       <dl className="my-4 space-y-2">
         {bands.map(band => <div key={band.range} data-testid="model-input-credit-band" className="flex flex-wrap justify-between gap-x-4"><dt>{band.range}</dt><dd className="font-bold">{band.multiplier}× base credits</dd></div>)}
       </dl>
