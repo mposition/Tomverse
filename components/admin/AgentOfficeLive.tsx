@@ -34,7 +34,15 @@ import {
   type AgentOfficeChannel,
   type FloorLight,
 } from "@/lib/agentOffice/floor";
-import { agentOfficeInbox, inboxTotal, quotaExhaustedNow, type AgentOfficeInboxItem } from "@/lib/agentOffice/inbox";
+import {
+  AGENT_OFFICE_QUOTA_FRESH_MS,
+  agentOfficeChannelQuota,
+  agentOfficeInbox,
+  agentOfficeQuotaReading,
+  inboxTotal,
+  type AgentOfficeInboxItem,
+  type AgentOfficeQuotaReading,
+} from "@/lib/agentOffice/inbox";
 import { busyAt, replayMoment, replayState, replaySteps } from "@/lib/agentOffice/replay";
 import type {
   AgentOfficeAmuxPulse,
@@ -47,11 +55,15 @@ import type {
 } from "@/lib/agentOffice/live";
 import { AGENT_OFFICE_DEPT_IDS, agentOfficeDept, agentOfficeSeatedClothes } from "@/lib/agentOffice/roster";
 import type { AgentOffice, DeptStatus, OfficeCopy } from "@/lib/agentOffice/sim";
-import { aestClock, aestStamp, brisbaneIso } from "@/lib/agentOffice/time";
+import { aestClock, aestSince, aestStamp, brisbaneIso } from "@/lib/agentOffice/time";
 
 const WORKERS_HREF = "/admin/amux-settings?tab=workers";
 const SAFETY_HREF = "/admin/amux-recovery?tab=safety";
 const CARDS_HREF = "/admin/amux-execution?tab=cards";
+/** A floor worker with what the office may say about its quota. */
+type LiveWorker = FloorWorker & { quota: AgentOfficeQuotaReading };
+const QUOTA_FRESH_MINUTES = AGENT_OFFICE_QUOTA_FRESH_MS / 60_000;
+
 const RUNNING: readonly AgentOfficeAmuxWorkerState[] = ["ready", "idle", "busy", "starting", "error", "lost", "paused", "isolated", "blocked"];
 const SOUND_KEY = "tomverse.agentOffice.sound";
 /** The AMUX room is re-read this often while the tab is visible; the rest of the office every minute. */
@@ -228,18 +240,21 @@ export default function AgentOfficeLive({
     return () => window.clearInterval(id);
   }, [playing, steps]);
 
-  const workers: FloorWorker[] = useMemo(
+  // Only a fresh reading is drawn as a live bar or rests a worker in a pod.
+  const workers: LiveWorker[] = useMemo(
     () =>
       amuxWorkers.map((w, i) => {
         const d = detail?.[w.name];
-        const exhausted = quotaExhaustedNow(d?.quota, now);
+        const quota = agentOfficeQuotaReading(d?.quota, now);
+        const exhausted = quota.kind === "fresh" && quota.exhausted;
         return {
           name: w.name,
           channel: agentOfficeChannel(w.provider),
           state: w.state,
           label: m.real.amux.states[w.state],
+          quota,
           quotaExhausted: exhausted,
-          quotaPercent: d?.quota ? (exhausted ? 0 : d.quota.remainingPercent) : null,
+          quotaPercent: quota.kind === "fresh" ? quota.percent : null,
           cardKey: d?.work?.cardKey ?? null,
           needsLook: workerNeedsLook(w.state, exhausted),
           clothes: agentOfficeSeatedClothes("amux", i),
@@ -376,7 +391,7 @@ export default function AgentOfficeLive({
 
   return (
     <div className={s.root} data-testid="agent-office-live">
-      <Kpis f={f} items={items} workers={workers} amuxRead={live.amux.kind === "observed"} detail={detail} ownerDetail={ownerDetail} />
+      <Kpis f={f} items={items} workers={workers} amuxRead={live.amux.kind === "observed"} detail={detail} ownerDetail={ownerDetail} now={now} />
 
       <div className={s.controls}>
         <span className={s.seg} role="group" aria-label={f.controls.view}>
@@ -578,13 +593,15 @@ function Kpis({
   amuxRead,
   detail,
   ownerDetail,
+  now,
 }: {
   f: FloorCopy;
   items: AgentOfficeInboxItem[];
-  workers: FloorWorker[];
+  workers: LiveWorker[];
   amuxRead: boolean;
   detail: Record<string, AgentOfficeWorkerDetail> | null;
   ownerDetail: boolean;
+  now: number;
 }) {
   const total = inboxTotal(items);
   const sev = { bad: 0, warn: 0, info: 0 };
@@ -604,6 +621,10 @@ function Kpis({
   }));
   const costTotal = costByChannel.reduce((a, b) => a + b.micro, 0);
   const costMax = Math.max(1, ...costByChannel.map((x) => x.micro));
+  const channelQuota = AGENT_OFFICE_CHANNELS.map((ch) => ({
+    ch,
+    q: agentOfficeChannelQuota(workers.filter((w) => w.channel === ch).map((w) => w.quota)),
+  }));
   return (
     <section className={s.kpis} aria-label={f.inbox.title}>
       <div className={cn(s.kpi, total.urgent > 0 && s.urgent)} data-testid="agent-office-kpi-waiting">
@@ -671,19 +692,31 @@ function Kpis({
       <div className={s.kpi} data-testid="agent-office-kpi-quota">
         <div className={s.qbars}>
           <div className={s.kl}>{f.kpi.quota}</div>
-          {AGENT_OFFICE_CHANNELS.map((ch) => {
-            const qs = workers.filter((w) => w.channel === ch && w.quotaPercent !== null).map((w) => w.quotaPercent as number);
-            const q = qs.length ? Math.round(qs.reduce((a, b) => a + b, 0) / qs.length) : null;
-            return (
-              <div key={ch} className={s.qrow}>
-                <span>{f.channels[ch]}</span>
-                <span className={s.qtrack}>
-                  {q !== null ? <span className={s.qfill} style={{ width: `${q}%`, background: q < 20 ? "var(--ba)" : q < 40 ? "var(--wa)" : "var(--ok)" }} /> : null}
+          {channelQuota.map(({ ch, q }) => (
+            <div key={ch} className={s.qrow} data-quota={q.kind}>
+              <span>{f.channels[ch]}</span>
+              {q.kind === "fresh" ? (
+                <>
+                  <span className={s.qtrack}>
+                    <span className={s.qfill} style={{ width: `${q.percent}%`, background: q.percent < 20 ? "var(--ba)" : q.percent < 40 ? "var(--wa)" : "var(--ok)" }} />
+                  </span>
+                  <b className={s.num}>{q.percent}%</b>
+                </>
+              ) : q.kind === "old" ? (
+                <span className={s.qnote} title={f.kpi.quotaOldHint(QUOTA_FRESH_MINUTES)}>
+                  <span className={s.num}>{q.percent}%</span> · {f.kpi.quotaAsOf(aestSince(q.observedAt, now))}
                 </span>
-                <b className={s.num}>{q !== null ? `${q}%` : "–"}</b>
-              </div>
-            );
-          })}
+              ) : q.kind === "missing" ? (
+                <span className={s.qnote} title={f.kpi.quotaNotCollectedHint}>{f.kpi.quotaNotCollected}</span>
+              ) : (
+                <>
+                  <span className={s.qtrack} />
+                  <b className={s.num}>–</b>
+                </>
+              )}
+            </div>
+          ))}
+          {channelQuota.some(({ q }) => q.kind === "missing") ? <div className={s.qhint}>{f.kpi.quotaNotCollectedHint}</div> : null}
         </div>
       </div>
     </section>
@@ -791,7 +824,8 @@ function WorkerSheet({
   onBack: () => void;
   onTerminal?: () => void;
 }) {
-  const exhausted = quotaExhaustedNow(detail?.quota, now);
+  const quota = agentOfficeQuotaReading(detail?.quota, now);
+  const exhausted = quota.kind === "fresh" && quota.exhausted;
   const hb = ago(heartbeatAt, now, f);
   const late = hb !== null && hb.seconds > 120;
   const work = detail?.work ?? null;
@@ -855,22 +889,32 @@ function WorkerSheet({
           <div className={s.fl}>{f.sheet.apiCost}</div>
           <div className={s.fv}>{ownerDetail && detail?.usage ? usd(detail.usage.apiCostMicrousd) : "–"}</div>
         </div>
-        <div className={cn(s.fact, s.span2)}>
+        <div className={cn(s.fact, s.span2)} data-testid="agent-office-worker-quota" data-quota={quota.kind}>
           <div className={s.row}><span className={s.fl}>{f.sheet.quota}</span><span className={s.grow} />
-            {detail?.quota?.resetAt ? <span className={s.fl}>{f.sheet.quotaReset(aestClock(detail.quota.resetAt))}</span> : null}
+            {quota.kind === "fresh" && quota.resetAt ? <span className={s.fl}>{f.sheet.quotaReset(aestClock(quota.resetAt))}</span> : null}
           </div>
-          {detail?.quota ? (
+          {quota.kind === "fresh" ? (
             <>
               <div className={s.row}>
                 <span className={s.qtrack} style={{ height: 8 }}>
-                  <span className={s.qfill} style={{ width: `${exhausted ? 0 : detail.quota.remainingPercent}%`, background: exhausted || detail.quota.remainingPercent < 20 ? "var(--ba)" : "var(--ok)" }} />
+                  <span className={s.qfill} style={{ width: `${quota.percent}%`, background: exhausted || quota.percent < 20 ? "var(--ba)" : "var(--ok)" }} />
                 </span>
-                <b className={s.num}>{exhausted ? 0 : detail.quota.remainingPercent}%</b>
+                <b className={s.num}>{quota.percent}%</b>
               </div>
-              <div className={s.fs}>{f.sheet.quotaObserved(aestStamp(detail.quota.observedAt))}</div>
+              <div className={s.fs}>{f.sheet.quotaObserved(aestStamp(quota.observedAt))}</div>
+            </>
+          ) : quota.kind === "old" ? (
+            <>
+              <div className={cn(s.fv, s.faint)}>
+                <span className={s.num}>{quota.percent}%</span> · {f.sheet.quotaAsOf(aestSince(quota.observedAt, now))}
+              </div>
+              <div className={s.fs}>{f.sheet.quotaOldHint(QUOTA_FRESH_MINUTES)}</div>
             </>
           ) : (
-            <div className={s.fs}>{f.sheet.quotaNone}</div>
+            <>
+              <div className={cn(s.fv, s.faint)}>{f.sheet.quotaNotCollected}</div>
+              <div className={s.fs}>{f.sheet.quotaNotCollectedHint}</div>
+            </>
           )}
         </div>
         <div className={cn(s.fact, s.span2)}>
@@ -913,7 +957,7 @@ function Roster({
 }: {
   f: FloorCopy;
   heartbeats: ReadonlyMap<string, string | null>;
-  workers: FloorWorker[];
+  workers: LiveWorker[];
   detail: Record<string, AgentOfficeWorkerDetail> | null;
   ownerDetail: boolean;
   now: number;
@@ -953,13 +997,21 @@ function Roster({
                 <td>{work ? <><b style={{ color: "var(--act)" }}>{work.cardKey ?? "–"}</b> <span className={s.faint}>{work.cardTitle ?? ""}</span></> : <span className={s.faint}>{ownerDetail ? f.roster.none : f.sheet.ownerOnly}</span>}</td>
                 <td className={s.num}>{work ? f.sheet.minutes(Math.max(0, Math.round((now - Date.parse(work.startedAt)) / 60_000))) : <span className={s.faint}>–</span>}</td>
                 <td className={s.num}>{heartbeat(w.name) || "–"}</td>
-                <td>
-                  <span className={s.row}>
-                    <span className={s.qtrack} style={{ width: 56, flex: "none" }}>
-                      {w.quotaPercent !== null ? <span className={s.qfill} style={{ width: `${w.quotaPercent}%`, background: w.quotaPercent < 20 ? "var(--ba)" : "var(--ok)" }} /> : null}
+                <td data-quota={w.quota.kind}>
+                  {w.quota.kind === "fresh" ? (
+                    <span className={s.row}>
+                      <span className={s.qtrack} style={{ width: 56, flex: "none" }}>
+                        <span className={s.qfill} style={{ width: `${w.quota.percent}%`, background: w.quota.percent < 20 ? "var(--ba)" : "var(--ok)" }} />
+                      </span>
+                      <span className={cn(s.faint, s.num)}>{w.quota.percent}%</span>
                     </span>
-                    <span className={cn(s.faint, s.num)}>{w.quotaPercent !== null ? `${w.quotaPercent}%` : "–"}</span>
-                  </span>
+                  ) : w.quota.kind === "old" ? (
+                    <span className={s.faint} title={f.sheet.quotaOldHint(QUOTA_FRESH_MINUTES)}>
+                      <span className={s.num}>{w.quota.percent}%</span> · {f.sheet.quotaAsOf(aestSince(w.quota.observedAt, now))}
+                    </span>
+                  ) : (
+                    <span className={s.faint} title={f.sheet.quotaNotCollectedHint}>{f.sheet.quotaNotCollected}</span>
+                  )}
                 </td>
                 <td className={cn(s.num, s.right)}>{ownerDetail && d?.usage ? usd(d.usage.apiCostMicrousd) : "–"}</td>
               </tr>

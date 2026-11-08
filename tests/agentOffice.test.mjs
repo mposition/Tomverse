@@ -2894,7 +2894,7 @@ test("waiting on you lists what an agent waits on, most urgent first, and never 
       { name: "claude-chore", provider: "anthropic", state: "busy", heartbeatAt: null },
     ],
   };
-  const quota = { remainingPercent: 0, exhausted: true, resetAt: "2026-11-07T09:00:00.000Z", observedAt: "2026-11-07T03:00:00.000Z" };
+  const quota = { remainingPercent: 0, exhausted: true, resetAt: "2026-11-07T09:00:00.000Z", observedAt: "2026-11-07T04:55:00.000Z" };
   const amuxDetail = {
     kind: "observed",
     ownerDetail: false,
