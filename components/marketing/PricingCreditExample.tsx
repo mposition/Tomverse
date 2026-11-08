@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
-import { DEFAULT_MODEL_ID, getModelUsageProfile } from "@/lib/models";
+import { DEFAULT_MODEL_ID, INPUT_CREDIT_MULTIPLIERS, getModelUsageProfile } from "@/lib/models";
 
 export function PricingCreditExample({ credits, testId }: { credits: number; testId: string }) {
   const { publicModels } = useModelCatalog();
@@ -16,7 +16,7 @@ export function PricingCreditExample({ credits, testId }: { credits: number; tes
       {model && baseCredits ? (
         <>
           <p>{format(credits)} credits cover up to {format(Math.floor(credits / baseCredits))} short text requests with {model.name} at {format(baseCredits)} base {baseCredits === 1 ? "credit" : "credits"} per request.</p>
-          <p>Illustration only: manually selected model, up to 16,000 input tokens, no files, tools or long history, and no other credit use. Actual usage can vary.</p>
+          <p>Illustration only: manually selected model, up to {format(INPUT_CREDIT_MULTIPLIERS[0].aboveTokens)} input tokens, no files, tools or long history, and no other credit use. Daily plan limits and service availability still apply. Actual usage can vary.</p>
         </>
       ) : null}
     </div>

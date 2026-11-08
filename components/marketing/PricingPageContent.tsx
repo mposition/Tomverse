@@ -2074,6 +2074,7 @@ export function PricingPageContent() {
                 <p className="mt-3 min-w-0 break-words text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                   {creditGuide.description}
                 </p>
+                {lang === "en" ? <p data-testid="pricing-category-capacity-note" className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">The category examples below use the illustrative base rates shown here. Current model-specific credit costs can differ; check each model’s base credits before choosing.</p> : null}
               </div>
               <span className="w-fit min-w-0 break-words rounded-full border border-accent-promotion-500/30 bg-accent-promotion-500/10 px-4 py-2 text-xs font-bold text-accent-promotion-700 dark:text-accent-promotion-300">
                 {creditGuide.typicalLabel}
