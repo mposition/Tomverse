@@ -918,6 +918,8 @@ test.describe("external import settings", () => {
 
     await page.goto("/settings/imports");
     await expect(page.getByTestId("external-import-disabled")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "가져오기 기록", exact: true })).toBeVisible();
+    await expect(page.getByText("선택한 가져오기 항목을 삭제하면 Tomverse에 저장된 해당 사본이 제거됩니다.", { exact: false })).toBeVisible();
     await expect(
       page.getByTestId("external-import-file-input")
     ).toHaveCount(0);
