@@ -113,7 +113,7 @@ test("each browser job decides with the script and gates its expensive steps on 
 test("the PR-commit secret scan stays on the required check's path", () => {
     const fastGate = load("pr-fast-gate.yml");
     const staticJob = fastGate.jobs["static-and-unit"];
-    assert.ok(staticJob.steps.some((step) => String(step.uses).startsWith("gitleaks/gitleaks-action@")));
+    assert.ok(staticJob.steps.some((step) => String(step.run).trim() === "scripts/ci/gitleaks-scan.sh"));
     assert.ok(fastGate.jobs["fast-gate"].needs.includes("static-and-unit"));
     assert.equal(fastGate.jobs["secret-scan"], undefined);
 });
