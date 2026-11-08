@@ -20,6 +20,10 @@ process.env.DATABASE_URL ||=
 
 const created: unknown[] = [];
 let mocksInstalled = false;
+let generationError: unknown;
+let parsingError: unknown;
+let generationDelayMs = 0;
+const requests: Array<{ maxRetries: number }> = [];
 let routerOutput: { reason: string; topic: string; modelId: string; requiresFileGeneration?: boolean } = {
   reason: "short question", topic: "cats", modelId: "deepseek-v4-flash",
 };
@@ -44,10 +48,18 @@ async function load() {
     mock.module("ai", {
       namedExports: {
         ...realAi,
-        generateText: async () => ({
-          output: routerOutput,
-          usage: { inputTokens: 100, outputTokens: 20 },
-        }),
+        generateText: async (options: { maxRetries: number }) => {
+          requests.push(options);
+          if (generationDelayMs) await new Promise((resolve) => setTimeout(resolve, generationDelayMs));
+          if (generationError) throw generationError;
+          return {
+            get output() {
+              if (parsingError) throw parsingError;
+              return routerOutput;
+            },
+            usage: { inputTokens: 100, outputTokens: 20 },
+          };
+        },
       },
     });
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: prismaMock } });
@@ -129,4 +141,102 @@ test("file routing records the raw model and reason without losing intent when c
       assert.equal(row.outcome, "picked");
     }
   } finally { routerOutput = original; }
+});
+
+test("live API failures retain fallback and record content-free diagnostics with the trace and actual deadline", async () => {
+  const { APICallError } = require("ai");
+  const warnings: string[] = [];
+  const logger = mock.method(console, "warn", (line: string) => warnings.push(line));
+  generationError = new APICallError({
+    message: "private provider response", url: "https://example.com/private",
+    requestBodyValues: { prompt: "private prompt" }, responseBody: "private response", statusCode: 503,
+  });
+  created.length = 0;
+  requests.length = 0;
+  try {
+    assert.equal(await pick(), null);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].maxRetries, 0);
+    assert.equal((created[0] as { outcome: string }).outcome, "error");
+    const log = JSON.parse(warnings[0]);
+    assert.equal(warnings.length, 1);
+    assert.equal(log.event, "auto_llm_router_call_failed");
+    assert.equal(log.traceId, "trace-1");
+    assert.equal(log.timeoutMs, 5_000);
+    assert.equal(log.failureKind, "api");
+    assert.equal(log.statusCode, 503);
+    assert.ok(!warnings[0].includes("private"));
+    assert.ok(!warnings[0].includes("고양이"));
+  } finally { generationError = undefined; logger.mock.restore(); }
+});
+
+test("optimizer parsing failures record cycle and decision ids and keep the existing error result", async () => {
+  const { NoObjectGeneratedError, JSONParseError } = require("ai");
+  const warnings: string[] = [];
+  const logger = mock.method(console, "warn", (line: string) => warnings.push(line));
+  parsingError = new NoObjectGeneratedError({
+    cause: new JSONParseError({ text: "private output", cause: new SyntaxError("private") }),
+    text: "private output", finishReason: "length", response: {}, usage: {},
+  });
+  try {
+    const { callAutoLlmRouter } = await load();
+    const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
+    const result = await callAutoLlmRouter({
+      routerModel: AVAILABLE_MODELS.find((model: { id: string }) => model.id === "gpt-6-luna"),
+      guidance: "private guidance", prompt: "private prompt", previousAnswer: null,
+      candidates: [], session: null, rewrite: true, timeoutMs: 15_000,
+      cycleId: "cycle-1", decisionId: "decision-1",
+    });
+    assert.deepEqual(result, { outcome: "error", pick: null, usage: undefined });
+    const log = JSON.parse(warnings[0]);
+    assert.equal(warnings.length, 1);
+    assert.equal(log.cycleId, "cycle-1");
+    assert.equal(log.decisionId, "decision-1");
+    assert.equal(log.timeoutMs, 15_000);
+    assert.equal(log.rewriteAsked, true);
+    assert.equal(log.failureKind, "response_parse");
+    assert.equal(log.finishReason, "length");
+    assert.equal(log.outputChars, 14);
+    assert.ok(!warnings[0].includes("private"));
+  } finally { parsingError = undefined; logger.mock.restore(); }
+});
+
+test("an out-of-candidate pick is logged separately from an exception and still falls back", async () => {
+  const original = routerOutput;
+  const warnings: string[] = [];
+  const logger = mock.method(console, "warn", (line: string) => warnings.push(line));
+  routerOutput = { ...original, modelId: "not-a-candidate" };
+  created.length = 0;
+  try {
+    assert.equal(await pick(), null);
+    assert.equal((created[0] as { outcome: string }).outcome, "invalid");
+    assert.equal(warnings.length, 1);
+    assert.equal(JSON.parse(warnings[0]).failureKind, "invalid_pick");
+  } finally { routerOutput = original; logger.mock.restore(); }
+});
+
+test("an expired call deadline is logged as a timeout even if the provider throws a generic error", async () => {
+  const warnings: string[] = [];
+  const logger = mock.method(console, "warn", (line: string) => warnings.push(line));
+  generationError = new Error("private provider cancellation");
+  generationDelayMs = 20;
+  try {
+    const { callAutoLlmRouter } = await load();
+    const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
+    const result = await callAutoLlmRouter({
+      routerModel: AVAILABLE_MODELS.find((model: { id: string }) => model.id === "gpt-6-luna"),
+      guidance: "", prompt: "private prompt", previousAnswer: null,
+      candidates: [], session: null, timeoutMs: 1,
+    });
+    assert.equal(result.outcome, "error");
+    assert.equal(warnings.length, 1);
+    const log = JSON.parse(warnings[0]);
+    assert.equal(log.failureKind, "timeout");
+    assert.equal(log.timeoutMs, 1);
+    assert.ok(!warnings[0].includes("private"));
+  } finally {
+    generationError = undefined;
+    generationDelayMs = 0;
+    logger.mock.restore();
+  }
 });

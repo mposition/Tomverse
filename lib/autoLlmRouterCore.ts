@@ -217,6 +217,7 @@ const AUTO_LLM_ROUTER_SYSTEM_HEAD = [
 export const AUTO_LLM_ROUTER_DEFAULT_GUIDANCE = [
     "Match the model to the work: casual chat, short factual questions, translation and simple rewriting go to light, low-credit models.",
     "Hard reasoning, maths, non-trivial code, long-form writing, and legal, medical or financial analysis go to stronger models.",
+    "Judge the work required, not just its subject: a short general financial opinion or recommendation does not by itself require a stronger model; calculations, risk analysis and consequential personalized advice may.",
     "Credits are what the user pays. When two candidates would answer about as well, choose the one with fewer credits.",
     "Use each candidate's bestFor description, tier, reasoning setting, context window and image support to decide which kind of work it is strong at.",
 ].join("\n");
