@@ -129,7 +129,8 @@ const recoveryPreApproval = (value: unknown): value is NonNullable<AmuxV22Recove
   (value.approvalId === null || uuid(value.approvalId)) &&
   (value.state === "applied") === (value.approvalId !== null);
 const preApprovalReceipt = (value: RecoveryReceiptBinding | undefined): value is
-  { preApprovalCostDigest: string } => Boolean(value && "preApprovalCostDigest" in value);
+  { preApprovalCostDigest: string } => Boolean(value && "preApprovalCostDigest" in value &&
+    digest(value.preApprovalCostDigest));
 const approvalReceipt = (value: RecoveryReceiptBinding | undefined): value is RecoveryReceiptBinding &
   { inspectionId: string | null; evidenceId: string | null; evidenceDigest: string | null; costDigest: string } =>
   Boolean(value && "costDigest" in value);
@@ -983,7 +984,10 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
          pending.action === "accept_unknown_prior_effects" ? riskAcceptanceConfirmedResult :
          pending.action === "request_safe_stop" ? safeStopConfirmedResult :
            next.data.state !== "approved");
-      const resume = pending.action === "accept_unknown_prior_effects" ? {
+      // A recorded consent is read back after a reload or reopen with a fresh
+      // nonce, like an accepted risk: the server shows the owner's latest one.
+      const resume = pending.action === "accept_unknown_prior_effects" ||
+        pending.action === "preapprove_attempt" ? {
         version: 1 as const, taskId: pending.identity.taskId,
         priorAttemptId: pending.identity.attemptId } : null;
       const resumeStored = !resume || !confirmedResult || saveAmuxAcceptedRiskResume(resume);

@@ -1767,7 +1767,7 @@ export const RAW_SQL_ALLOWLIST = [
     ["AmuxV22TaskRecoveryEvidence", 2],
     ["AmuxV22TaskRecoveryApproval", 7],
     ["AmuxV22TaskRecoveryPreApproval", 10],
-    ["AmuxV22TaskRecoveryPreApprovalResult", 4],
+    ["AmuxV22TaskRecoveryPreApprovalResult", 5],
   ].map(([table, tableMentions]) => ({
     path: "prisma/migrations/20261108130000_amux_v22_recovery_preapproval/migration.sql",
     table,

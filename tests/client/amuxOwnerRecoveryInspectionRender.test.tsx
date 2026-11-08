@@ -1121,6 +1121,7 @@ test("the quote binds only this identity and the POST sends the quoted digest, n
 test("actual Panel reads app records on open and needs only the one-click button pressed", async t => {
   recoveryBrowser(t); inspectionReads.length = 0;
   const posts: Record<string, unknown>[] = []; const quoteReads: string[] = [];
+  const resumeReads: string[] = [];
   t.mock.method(globalThis, "fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === "POST") {
       const body = JSON.parse(String(init.body)); posts.push(body);
@@ -1129,7 +1130,14 @@ test("actual Panel reads app records on open and needs only the one-click button
         eligibility: { ...normalEligibility, approveAttempt: false },
         preApproval: preApproval("waiting") });
     }
-    quoteReads.push(String(url)); return Response.json(preApprovalQuote);
+    if (String(url).includes("view=preapproval_quote")) {
+      quoteReads.push(String(url)); return Response.json(preApprovalQuote); }
+    const nonce = new URL(String(url), "https://tomverse.test").searchParams.get("requestId")!;
+    resumeReads.push(nonce);
+    return Response.json({ ...hostFixture(), requestId: nonce, state: "pending",
+      evidenceId: null, evidenceDigest: null, cost: null, quote: null,
+      eligibility: { ...normalEligibility, approveAttempt: false },
+      preApproval: preApproval("waiting") });
   });
   const panel = mountRecoveryPanel(); await panel.flush();
   // Opened, not pressed: the app records are already shown.
@@ -1150,4 +1158,11 @@ test("actual Panel reads app records on open and needs only the one-click button
     body.action === "approve_attempt"), false);
   assert.equal(inspectionReads.length, 1);
   panel.unmount();
+  // Reopened (or reloaded): one fresh-nonce read shows the same waiting consent.
+  const reopened = mountRecoveryPanel(); await reopened.flush();
+  assert.equal(resumeReads.length, 1); assert.notEqual(resumeReads[0], posts[0].requestId);
+  assert.equal(reopened.props.state.state, "ready");
+  assert.match(textOf(AmuxOneClickRecoveryView(reopened.oneClick!)), /종료 확인을 기다리는 중/);
+  assert.equal(posts.length, 1);
+  reopened.unmount();
 });

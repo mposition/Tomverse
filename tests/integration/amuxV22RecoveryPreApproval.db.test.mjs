@@ -177,7 +177,7 @@ test("the database opens one approval from an exact, unexpired, audited pre-appr
         budget.used, budget.next, held, ADDITIONAL, held + ADDITIONAL, pre?.id ?? null, OWNER, auditId]);
       await client.query(`UPDATE public."AmuxWorkItem" SET "status"='todo', "revision"="revision"+1
         WHERE "id"=$1`, [taskId]);
-      if (pre) await result(pre, "applied", id);
+      if (pre && change.result !== false) await result(pre, "applied", id);
       return id;
     }
     async function result(pre, outcome, approvalId = null) {
@@ -273,6 +273,20 @@ test("the database opens one approval from an exact, unexpired, audited pre-appr
       await evidence(request, { verified: false });
       await result(pre, "refused");
     });
+    // Review 2026-11-08: a consent already settled as refused, or an approval
+    // with no applied result of its own, can never open an attempt.
+    await scenario("a consent settled as refused cannot open a later approval", async () => {
+      const request = await inspection(); const pre = await consent(request);
+      const proofRow = await evidence(request);
+      await result(pre, "refused");
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await client.query("SET CONSTRAINTS ALL DEFERRED");
+      await approve(request, proofRow, pre, { result: false });
+    }, { constraint: "AmuxV22RecoveryApproval_binding_check" });
+    await scenario("an approval from a consent needs its own applied result", async () => {
+      const request = await inspection(); const pre = await consent(request);
+      await approve(request, await evidence(request), pre, { result: false });
+    }, { constraint: "AmuxV22RecoveryApproval_binding_check" });
 
     // The manual inspect approval: 15 minutes for a person to read evidence.
     // Inside each scenario transaction only: let the test set recordedAt.

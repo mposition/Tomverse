@@ -162,6 +162,11 @@ BEGIN
       pa."oldHeldMicroUsd" = NEW."oldHeldMicroUsd" AND pa."catalogApprovalId" = NEW."catalogApprovalId" AND
       pa."costReceiptDigest" = NEW."costReceiptDigest" AND
       e."recordedAt" >= pa."requestedAt" AND db_now <= pa."expiresAt" AND
+      -- The consent's one result is this approval, written in this transaction:
+      -- a refused or earlier-settled consent can never open an approval.
+      EXISTS (SELECT 1 FROM "AmuxV22TaskRecoveryPreApprovalResult" res
+        WHERE res."preApprovalId" = pa."id" AND res."outcome" = 'applied' AND
+          res."approvalId" = NEW."id" AND res.xmin = pg_current_xact_id()::xid) AND
       EXISTS (SELECT 1 FROM "AdminAuditLog" a WHERE a."id" = pa."authorizationAuditLogId" AND a."entryHash" IS NOT NULL AND
        a."action" = 'amux.v22.recovery.preapproved' AND a."targetType" = 'AmuxV22TaskRecoveryPreApproval' AND
        a."targetId" = pa."id"::text AND a."actorUserId" = pa."requestedByUserId" AND NOT (a."metadata" ? 'systemActor') AND

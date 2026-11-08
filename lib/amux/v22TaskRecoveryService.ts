@@ -1110,6 +1110,9 @@ export async function settleAmuxV22RecoveryPreApproval(target: { id: string; tas
     // read back on the next settle before anything is written again.
     if (!(error instanceof BoardImportError) || error.code === "outcome_unknown" ||
         error.code === "audit_key_missing") throw error;
+    // An incident or a halt passes; the consent waits for it until it expires,
+    // when the next settle records preapproval_expired. Nothing is written now.
+    if (PREAPPROVAL_WAIT_CODES.has(error.code)) return "waiting";
     refusal = /^[a-z0-9_]{1,128}$/.test(error.code) ? error.code : "preapproval_refused";
   }
   return withAutoTransaction(target.id, TICK_TRANSACTION_LIMITS, async (tx, now) => {
@@ -1120,6 +1123,8 @@ export async function settleAmuxV22RecoveryPreApproval(target: { id: string; tas
     return "refused" as const;
   });
 }
+
+const PREAPPROVAL_WAIT_CODES = new Set(["incident_blocked", "orchestrator_halted"]);
 
 async function recordPreApprovalResult(tx: Prisma.TransactionClient, now: Date, preApprovalId: string,
   outcome: "applied" | "refused", reason: string | null, approvalId: string | null) {
@@ -1138,7 +1143,9 @@ async function settleAmuxV22RecoveryPreApprovalQuietly(target: { id: string; tas
   catch { /* The consent stays waiting until a later settle reads it back. */ }
 }
 
-/** One waiting consent whose evidence arrived, or whose time ran out. */
+/** One waiting consent whose evidence arrived, or whose time ran out, per
+ * checker poll: the post-evidence settle handles the usual case at once, so
+ * this only drains leftovers (a lost settle, a passing incident, an expiry). */
 async function sweepAmuxV22RecoveryPreApprovals() {
   try {
     const target = await withAutoTransaction(null, TICK_TRANSACTION_LIMITS, (tx, now) =>
@@ -1316,6 +1323,15 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
       sourceEvidenceDigest: visibleRisk.sourceEvidenceDigest },
     include: { evidence: true, approval: true, preApproval: { include: { result: true } } },
     orderBy: [{ requestedAt: "desc" }, { id: "desc" }] });
+  // A reopened card reads with a fresh nonce: it is shown the owner's latest
+  // one-click consent for this Task, whatever state that consent is in.
+  if (!inspection && !visibleRisk && !approval && taskId !== AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID) {
+    const latest = await tx.amuxV22TaskRecoveryPreApproval.findFirst({ where: {
+      taskId, requestedByUserId: ownerId }, orderBy: [{ requestedAt: "desc" }, { id: "desc" }] });
+    if (latest) inspection = await tx.amuxV22TaskRecoveryInspectionRequest.findFirst({
+      where: { id: latest.inspectionId, taskId, requestedByUserId: ownerId },
+      include: { evidence: true, approval: true, preApproval: { include: { result: true } } } });
+  }
   const linkedRiskId = visibleRisk?.id ?? inspection?.riskAcceptanceId ??
     approval?.riskAcceptanceId ?? null;
   const risk = linkedRiskId ? await tx.amuxV22TaskRecoveryRiskAcceptance.findUnique({
@@ -1507,7 +1523,7 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
       if (evidence?.verified && !(inspection.preApproval && !inspection.preApproval.result &&
           inspection.preApproval.expiresAt > now) &&
           !evidenceWithin(evidence.recordedAt, now, manualEvidenceWindowMs(
-            inspection.requestKind, !!risk))) {
+            inspection.requestKind, !!inspection.riskAcceptanceId))) {
         state = "unverified"; reason = "evidence_stale";
       } else if (evidence?.verified && !journalProvenReport(evidence.report) &&
           !await currentRuntime(tx, inspection)) {

@@ -1530,3 +1530,24 @@ test("an approval resolves the open escalation as a retry, and the next stop ope
       row.status !== "resolved").length, 1, path);
   }
 });
+
+// Review 2026-11-08: an incident or halt that passes must not burn the
+// consent; and a reopened card must find the waiting consent again.
+test("one click: an incident leaves the consent waiting, and a fresh read nonce finds it", async () => {
+  reset(); const service = await load(); await preApprove();
+  world.incident = true;
+  const waiting = await submitEvidence();
+  assert.equal(world.preApprovalResults.length, 0); assert.equal(world.approvals.length, 0);
+  assert.equal(waiting.preApproval?.state, "waiting");
+  // A reopened card reads with another nonce and still sees this consent.
+  const reopened = await service.readAmuxV22TaskRecovery(owner, "task-1234",
+    "0c1a9db5-b13e-4bf6-97c4-672a024b4a75");
+  assert.equal(reopened.preApproval?.id, world.preApprovals[0]!.id);
+  assert.equal(reopened.inspectionId, world.preApprovals[0]!.inspectionId);
+  // When the incident ends, the checker poll settles it once.
+  world.incident = false;
+  await service.pendingAmuxV22RecoveryInspections("claude-test");
+  assert.equal(world.approvals.length, 1);
+  assert.equal(world.preApprovalResults[0]!.outcome, "applied");
+  assert.equal(world.task.status, "todo");
+});
