@@ -45,3 +45,22 @@ for (const scenario of ["USD", "AUD", "KRW", "partial", "unavailable"] as const)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 }
+
+test("Korean purchase details keep the same final-currency confirmation guidance", async ({ page }, info) => {
+  await page.setViewportSize({ width: info.project.name.includes("mobile") ? 320 : 1440, height: 900 });
+  await prepareGuestPage(page, "ko");
+  await page.route("**/api/auth/session**", route => route.fulfill({ json: { user: { id: "currency-buyer", email: "buyer@example.com", name: "Buyer" }, expires: "2099-01-01T00:00:00.000Z" } }));
+  await page.route("**/api/user/usage**", route => route.fulfill({ json: { plan: "Free", subscription: { status: null, billingInterval: null }, balances: { planRemainingCredits: 300, purchasedRemainingCredits: 0 }, limits: { creditsDay: 30, creditsMonth: 300 } } }));
+  await page.route("**/api/billing/config**", route => route.fulfill({ json: { displayCurrency: "AUD", displayCountry: "AU", featuredPromotion: null, creditPacks: [], plans: [
+    { id: "free", name: "Free", currency: "USD", monthlyPriceCents: 0, annualPriceCents: 0, displayCurrency: "AUD", displayMonthlyPriceAmount: 0, displayAnnualPriceAmount: 0 },
+    { id: "pro", name: "Pro", currency: "USD", monthlyPriceCents: 1500, annualPriceCents: 14400, displayCurrency: "AUD", displayMonthlyPriceAmount: 20, displayAnnualPriceAmount: 192 },
+    { id: "max", name: "Max", currency: "USD", monthlyPriceCents: 2500, annualPriceCents: 24000, displayCurrency: "AUD", displayMonthlyPriceAmount: 39, displayAnnualPriceAmount: 374 },
+  ] } }));
+  let checkouts = 0;
+  page.on("request", request => { if (request.method() === "POST" && request.url().includes("/api/billing/checkout")) checkouts++; });
+  await page.goto("/pricing?lang=ko");
+  await page.getByTestId("pricing-cta-pro").getByRole("button").first().click();
+  await expect(page.getByTestId("checkout-due-today")).toBeVisible();
+  await expect(page.getByText(/^표시 금액: .*최종 결제 통화와 금액은 결제 화면에서 확인하세요\.$/)).toBeVisible();
+  expect(checkouts).toBe(0);
+});
