@@ -241,22 +241,8 @@ export function suggestionSendRequestId(suggestionId: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** The AMUX idea text an operator sends from a suggestion: what, where, why, what to change. */
-export function suggestionIdeaText(input: {
-  readonly subject: string;
-  readonly title: string;
-  readonly area: string;
-  readonly severity: string;
-  readonly evidence: string;
-  readonly suggestion: string;
-}): string {
-  return [
-    `[Scout 제안] ${input.title}`,
-    `대상: ${input.subject} · 영역: ${input.area} · 심각도: ${input.severity}`,
-    `근거: ${input.evidence}`,
-    `제안: ${input.suggestion}`,
-  ].join("\n");
-}
+// The idea text lives without node:crypto so the Admin console can copy the same text for a local CLI.
+export { suggestionIdeaText } from "./productResearchScoutIdeaText.ts";
 
 // ---------------------------------------------------------------- the Admin view of runs
 
