@@ -3244,7 +3244,7 @@ const checks = [
         !source.includes("pull_request:") &&
         !source.includes("push:") &&
         source.includes("actions: read") &&
-        source.includes("gitleaks/gitleaks-action@v3") &&
+        source.includes("run: scripts/ci/gitleaks-scan.sh") &&
         source.includes("actions/checkout@v6") &&
         source.includes("actions/setup-node@v6") &&
         // Restore, never save. This workflow runs on the default branch, so an
@@ -3396,8 +3396,7 @@ const checks = [
         // Secret scanning stays in this workflow: the aggregating job is the
         // only required status check on develop and main, so dropping the
         // scan would take gitleaks off the merge-blocking path.
-        prWorkflow.includes("gitleaks/gitleaks-action@v3") &&
-        prWorkflow.includes('GITLEAKS_ENABLE_COMMENTS: "false"') &&
+        prWorkflow.includes("run: scripts/ci/gitleaks-scan.sh") &&
         prWorkflow.includes("fetch-depth: 0") &&
         prWorkflow.includes("npm run security:regression") &&
         prWorkflow.includes("npm run test:unit") &&
@@ -3612,8 +3611,7 @@ const checks = [
         source.includes("push:") &&
         source.includes("branches: [main]") &&
         source.includes('cron: "45 22 * * 0"') &&
-        source.includes("gitleaks/gitleaks-action@v3") &&
-        source.includes('GITLEAKS_ENABLE_COMMENTS: "false"') &&
+        source.includes("run: scripts/ci/gitleaks-scan.sh") &&
         job.includes(
           'continue-on-error: "${{ github.event_name == \'schedule\' || github.event_name == \'workflow_dispatch\' }}"'
         ) &&
