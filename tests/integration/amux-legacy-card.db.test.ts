@@ -235,3 +235,11 @@ test("a pre-v22 Task with no recovery path closes the same way; a v22 Task does 
   assert.deepEqual(await closeAmuxLegacyCardForOwner({ session: owner(), request: request(), taskId: v22,
     revision: 4, ideaId: null }), { outcome: "refused", reason: "not_legacy" });
 });
+
+test("a view built from a body whose card moved on refuses as changed, so nothing is saved from it", async () => {
+  const id = await seedCard();
+  // The detail read built the body at revision 3; the card is at 4 by the time its facts are read.
+  const view = await readAmuxLegacyCardView({ id, revision: 3, displayKey: null,
+    sourceSystem: "tomverse_private_workboard", body: "x", brief: null });
+  assert.equal(view?.closeRefusal, "changed");
+});

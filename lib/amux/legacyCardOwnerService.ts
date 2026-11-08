@@ -72,8 +72,11 @@ async function readCardFacts(client: Prisma.TransactionClient | typeof prisma, t
 export type AmuxLegacyCardView = {
   /** Which kind of card the owner can only remake (legacyCardCore.ts). */
   kind: AmuxLegacyCardKind;
-  /** Null when it can be closed now. */
-  closeRefusal: Exclude<AmuxLegacyCardCloseRefusal, "not_legacy" | "changed"> | null;
+  /**
+   * Null when it can be closed now. `changed`: the card moved on between the
+   * body this view was built from and its facts, so nothing is saved from it.
+   */
+  closeRefusal: Exclude<AmuxLegacyCardCloseRefusal, "not_legacy"> | null;
   /** The idea a recreate would save, or why it would refuse. */
   idea: { state: "ready"; title: string; text: string; truncated: boolean } |
     { state: "refused"; code: string };
@@ -95,7 +98,7 @@ export async function readAmuxLegacyCardView(card: {
   if (!facts || !kind) return null;
   const refusal = amuxLegacyCardCloseRefusal(facts, card.revision);
   return { kind,
-    closeRefusal: refusal === "not_legacy" || refusal === "changed" ? null : refusal,
+    closeRefusal: refusal === "not_legacy" ? null : refusal,
     idea: legacyIdea({ id: card.id, displayKey: card.displayKey, description: card.body,
       executionBrief: card.brief, kind, taskRole: facts.taskRole }) };
 }

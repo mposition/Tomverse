@@ -145,7 +145,7 @@ test("the body is exact: an action, the card, the shown revision and the owner's
 
 test("a running, closed, changed or missing card refuses before any idea is saved", async () => {
   const { POST } = await loadRoute();
-  for (const refusal of ["running", "already_closed", "not_legacy"]) {
+  for (const refusal of ["running", "already_closed", "changed", "not_legacy"]) {
     reset();
     if (refusal === "not_legacy") world.kind = null; else world.refusal = refusal;
     const response = await POST(post(recreate));
