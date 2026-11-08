@@ -90,6 +90,15 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     recoveryPreparationIntro:
       "This is a read-only preparation checklist. It does not start an evidence-retrieval job, rerun work, settle cost or clear a stop.",
     recoveryWhyStopped: "Why this stopped",
+    decisionHoldTitle: "Why no decision is open",
+    decisionHold: {
+      escalation_closed: "This review is already closed. Reload the list to open the card's current one.",
+      card_archived: "The card is archived, so no review decision can be made on it.",
+      task_status: "The card is not in review or blocked, so there is nothing to decide here.",
+      attempt_running: "The last run has not ended in the app's records. Check the app record or the Ubuntu worker below first.",
+      delivery_pending: "A work delivery for this card is still waiting or leased, so a decision now could race a run. Check the app record or the Ubuntu worker below first.",
+      review_attempt_mismatch: "The card's last run does not match its review state. Check the app record below.",
+    } as Record<string, string>,
     recoveryReason: {
       local_card_done:
         "The local card was marked done. That flag is not the worker report and does not prove the completion criteria were met.",
@@ -167,6 +176,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerDecision: "Genuine owner decision",
     ownerQuestionApprove: "Does the submitted result satisfy the assigned scope and completion criteria?",
     ownerQuestionRetry: "Has the reported blocker been corrected enough to requeue this same task?",
+    ownerQuestionRetryNoPr: "This result has no pull request. Should this same task run again?",
     ownerQuestionBlock: "Should this task remain blocked with this recorded reason?",
     blockWithoutResultNotice: (source: string, target: string) =>
       `No completion or retry evidence is connected. From the connected assignment and permitted decisions, this review shows the ${source} → ${target} block choice. This does not prove that a host process stopped, nor that no process ran, and does not delete, cancel, requeue, or run the Task.`,
@@ -396,6 +406,15 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     recoveryPreparationIntro:
       "이 목록은 읽기 전용 복구 준비입니다. 근거 조회 작업을 시작하거나, 일을 다시 실행하거나, 비용을 정산하거나, 정지를 해제하지 않습니다.",
     recoveryWhyStopped: "왜 멈췄나요?",
+    decisionHoldTitle: "결정이 열리지 않은 이유",
+    decisionHold: {
+      escalation_closed: "이 검토는 이미 닫혔어요. 목록을 다시 불러와 카드의 현재 검토를 여세요.",
+      card_archived: "카드가 보관돼 있어서 검토 결정을 할 수 없어요.",
+      task_status: "카드가 검토나 차단 상태가 아니어서 여기서 정할 것이 없어요.",
+      attempt_running: "앱 기록에서 마지막 실행이 아직 끝나지 않았어요. 아래 앱 기록 점검이나 Ubuntu 검사부터 해 주세요.",
+      delivery_pending: "이 카드의 작업 전달(delivery)이 아직 대기 중이거나 임대돼 있어서, 지금 결정하면 실행과 겹칠 수 있어요. 아래 앱 기록 점검이나 Ubuntu 검사부터 해 주세요.",
+      review_attempt_mismatch: "카드의 마지막 실행이 검토 상태와 맞지 않아요. 아래 앱 기록 점검부터 해 주세요.",
+    } as Record<string, string>,
     recoveryReason: {
       local_card_done:
         "로컬 카드에 완료 표시가 있습니다. 이 표시는 작업자 보고서가 아니며 완료 기준을 충족했다는 증거도 아닙니다.",
@@ -480,6 +499,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerDecision: "실제 운영자 결정",
     ownerQuestionApprove: "제출된 결과가 배정 범위와 완료 기준을 충족합니까?",
     ownerQuestionRetry: "보고된 차단 원인이 이 작업을 다시 대기열에 넣을 만큼 해결됐습니까?",
+    ownerQuestionRetryNoPr: "이 결과에는 PR이 없습니다. 같은 작업을 다시 실행하시겠습니까?",
     ownerQuestionBlock: "기록된 사유로 이 작업을 차단 상태에 유지해야 합니까?",
     blockWithoutResultNotice: (source: string, target: string) => {
       const effect = source === "blocked" && target === "blocked"

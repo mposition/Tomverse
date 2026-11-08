@@ -253,3 +253,36 @@ test("a protected terminal block keeps decision context without result evidence"
   assert.equal(result.retryPreviewReady, false);
   assert.deepEqual(result.missingEvidence, ["worker_output"]);
 });
+
+test("a finished run in review with only its usage unreported keeps block, not approve or retry", () => {
+  // AMUX-AGENTOPS-001: settlement wrote usage_outcome_unknown on a succeeded
+  // -> review attempt, and the review showed no choice at all.
+  const usageOnly = prepare({ taskStatus: "review",
+    escalationReason: "human_review_required",
+    lastAttemptReason: "usage_outcome_unknown",
+    lastAttemptOutcome: "succeeded", lastAttemptToStatus: "review" });
+  assert.equal(usageOnly.executionOutcomeKnown, true);
+  assert.equal(usageOnly.decisionContextReady, true);
+  assert.equal(usageOnly.approvalExecutionSourceReady, false);
+  assert.equal(usageOnly.retryPreviewReady, false);
+  assert.equal(usageOnly.reason, "terminal_recorded");
+  // The same run with its usage reported is unchanged.
+  const reported = prepare({ taskStatus: "review",
+    escalationReason: "human_review_required", lastAttemptReason: "reported_result",
+    lastAttemptOutcome: "succeeded", lastAttemptToStatus: "review" });
+  assert.equal(reported.approvalExecutionSourceReady, true);
+  assert.equal(reported.retryPreviewReady, true);
+  // Outside a finished review run the reason still means an unknown outcome.
+  for (const overrides of [
+    { taskStatus: "blocked", lastAttemptOutcome: "succeeded", lastAttemptToStatus: "review" },
+    { taskStatus: "review", lastAttemptOutcome: "expired", lastAttemptToStatus: "review" },
+    { taskStatus: "review", lastAttemptOutcome: "succeeded", lastAttemptToStatus: "review",
+      lastAttemptEndedAt: null },
+    { taskStatus: "review", lastAttemptOutcome: "succeeded", lastAttemptToStatus: "review",
+      escalationReason: "usage_outcome_unknown" },
+  ]) {
+    const unknown = prepare({ lastAttemptReason: "usage_outcome_unknown", ...overrides });
+    assert.equal(unknown.executionOutcomeKnown, false, JSON.stringify(overrides));
+    assert.equal(unknown.retryPreviewReady, false);
+  }
+});

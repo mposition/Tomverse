@@ -47,6 +47,15 @@ import {
 import type { MarketingConsoleOverview } from "@/lib/marketingConsoleOverview";
 import type { ExperimentRowView, ExperimentsConsoleView } from "@/lib/marketingExperimentView";
 import { marketingYoutubeChapterBlock, type MarketingVideoChapter } from "@/lib/marketingVideoChapters";
+import {
+  dailySchedulablePosts,
+  MARKETING_DAILY_SCHEDULE_LEAD_MS,
+  offHourLocalTime,
+  planDailyMarketingSchedule,
+  type DailySchedulePlan,
+  type DailySchedulePost,
+  type DailyScheduleTakenSlot,
+} from "@/lib/marketingDailyScheduleCore";
 
 type Availability = { available: true } | { available: false; stage: "S4" | "S5" };
 
@@ -79,6 +88,10 @@ export type MarketingConsoleView = {
   truncated?: boolean;
   /** The experiments section only (lib/marketingExperimentView.ts). */
   experiments?: ExperimentsConsoleView;
+  /** The published section only: days each account already holds (lib/marketingConsoleRead.ts). */
+  takenPublishDays?: DailyScheduleTakenSlot[];
+  /** True when that read stopped at its limit: the plan would miss days, so it is not offered. */
+  takenPublishDaysTruncated?: boolean;
 };
 
 type LlmView = {
@@ -423,7 +436,16 @@ export function AdminMarketingPanel({
               </div>
               {view.section === "published" && view.canWrite ? (
                 <MarketingActionRail
-                  actions={scheduleAllApprovedActions(rows, m)}
+                  actions={[
+                    ...scheduleAllApprovedActions(rows, m),
+                    ...scheduleDailyApprovedActions(
+                      rows,
+                      view.takenPublishDaysTruncated ? null : (view.takenPublishDays ?? []),
+                      m,
+                      Date.now,
+                      () => readDailyScheduleLatest(channel)
+                    ),
+                  ]}
                   section={view.section}
                   onDone={done}
                   m={m}
@@ -1836,6 +1858,213 @@ export function scheduleAllApprovedActions(rows: Row[], m: Record<string, string
           .replace("{sent}", String(sent))
           .replace("{failed}", String(failed))
           .replace("{unsent}", String(unsent));
+      },
+    },
+  ];
+}
+
+const nullableIso = (value: unknown): string | null => (typeof value === "string" ? value : null);
+
+/** The published rows and the days already held, as the server has them now. */
+export type DailyScheduleLatest = {
+  readonly rows: Row[];
+  /** null when the days already held could not all be read. */
+  readonly taken: readonly DailyScheduleTakenSlot[] | null;
+};
+
+/**
+ * Reads the published section again, through the same route the page
+ * refreshes from, and narrows it by the same channel filter. null when the
+ * read failed: the caller then sends nothing.
+ */
+async function readDailyScheduleLatest(channel: string): Promise<DailyScheduleLatest | null> {
+  try {
+    const response = await adminFetch("/api/admin/marketing?section=published", { cache: "no-store" });
+    if (!response.ok) {
+      await discardResponseBody(response);
+      return null;
+    }
+    const latest = (await response.json()) as MarketingConsoleView;
+    return {
+      rows: channel ? latest.rows.filter((row) => str(row.channel) === channel) : latest.rows,
+      taken: latest.takenPublishDaysTruncated ? null : (latest.takenPublishDays ?? []),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const dailySchedulePostsOf = (rows: readonly Row[]): DailySchedulePost[] =>
+  rows.map((row) => ({
+    id: str(row.id),
+    status: str(row.status),
+    provider: str(row.provider),
+    channelId: str(row.channelId),
+    accountLocale: str(row.accountLocale),
+    approvedAt: nullableIso(row.approvedAt),
+    approvalExpiresAt: nullableIso(row.approvalExpiresAt),
+    dailyCap: typeof row.dailyCap === "number" ? row.dailyCap : null,
+    weeklyCap: typeof row.weeklyCap === "number" ? row.weeklyCap : null,
+  }));
+
+/** "2026-11-09" as "11/9": the market's own date, short. */
+const shortDay = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+
+/**
+ * One press that spreads the approved posts on this page one a day per account
+ * (owner request 2026-11-08), instead of all at once. Only the times differ
+ * from the button above: each post is scheduled through its own route, with
+ * its own checks and audit entry, and the publisher's caps still apply. The
+ * plan is lib/marketingDailyScheduleCore.ts; the confirmation shows it whole.
+ *
+ * The plan is a function of the clock, so it is built again when the button is
+ * pressed (that is the plan the confirmation shows) and once more after the
+ * person says yes. If the two differ, or a time is no longer far enough ahead,
+ * nothing is sent: a page left open, or a question left open, would otherwise
+ * send times that have passed.
+ *
+ * `takenOrIncomplete` is null when the days already held could not all be
+ * read: a plan without them could put two posts on one day, so the button is
+ * shown as unavailable and sends nothing.
+ *
+ * The rows and days were read with the page, and another tab may have
+ * scheduled or published on the same accounts since. So after the person says
+ * yes, `reload` reads both again and the plan is rebuilt from them; if it is
+ * not the plan the person confirmed, or the read fails, nothing is sent and
+ * the page is read again for the next press.
+ */
+export function scheduleDailyApprovedActions(
+  rows: Row[],
+  takenOrIncomplete: readonly DailyScheduleTakenSlot[] | null,
+  m: Record<string, string>,
+  clock: () => number = Date.now,
+  reload: (() => Promise<DailyScheduleLatest | null>) | null = null
+): MarketingAction[] {
+  const byId = new Map(rows.map((row) => [str(row.id), row]));
+  const posts = dailySchedulePostsOf(rows);
+  const eligible = dailySchedulablePosts(posts);
+  if (eligible.length === 0) return [];
+  const incomplete = takenOrIncomplete === null;
+  const taken = takenOrIncomplete ?? [];
+  const planAt = (now: number) => planDailyMarketingSchedule({ posts, taken, now });
+  const rendered = planAt(clock());
+
+  const labels = new Map<string, string>();
+  for (const account of rendered.accounts) {
+    const first = byId.get(account.slots[0]?.postId ?? account.expired[0]);
+    labels.set(account.channelId, `${channelName(first?.channel)} ${str(first?.accountLocale)}`.trim());
+  }
+  // Two accounts on one network in one language are told apart by name.
+  const repeated = new Set(
+    [...labels.values()].filter((label, index, all) => all.indexOf(label) !== index)
+  );
+  const labelFor = (channelId: string) => {
+    const label = labels.get(channelId) ?? channelId;
+    if (!repeated.has(label)) return label;
+    const first = rows.find((row) => str(row.channelId) === channelId);
+    return `${label} (${str(first?.accountSlug)})`;
+  };
+
+  const expiredLineOf = (plan: DailySchedulePlan) =>
+    plan.expired.length > 0 ? m.scheduleDailyExpired.replace("{n}", String(plan.expired.length)) : "";
+  const confirmOf = (plan: DailySchedulePlan) => {
+    const lines = plan.accounts
+      .filter((account) => account.slots.length > 0)
+      .map((account) =>
+        m.scheduleDailyAccountLine
+          .replace("{account}", labelFor(account.channelId))
+          .replace(
+            "{days}",
+            account.slots
+              .map((slot) => {
+                const at = offHourLocalTime(slot, account.timeZone);
+                return at === null ? shortDay(slot.localDay) : `${shortDay(slot.localDay)} ${at}`;
+              })
+              .join(", ")
+          )
+          .replace("{n}", String(account.slots.length))
+      );
+    return [
+      m.confirmScheduleDailyApproved
+        .replace("{count}", String(plan.slots.length))
+        .replace("{plan}", lines.join("\n")),
+      expiredLineOf(plan),
+    ]
+      .filter(Boolean)
+      .join("\n");
+  };
+  const sameTimes = (a: DailySchedulePlan, b: DailySchedulePlan) =>
+    a.slots.length === b.slots.length &&
+    a.slots.every(
+      (slot, index) => slot.postId === b.slots[index].postId && slot.scheduledAt === b.slots[index].scheduledAt
+    ) &&
+    a.expired.join("\n") === b.expired.join("\n");
+
+  // The plan the person was shown, then the one that is sent: both rebuilt per press.
+  let confirmed: DailySchedulePlan | null = null;
+  let sending: DailySchedulePlan = rendered;
+
+  return [
+    {
+      id: "schedule-daily-approved",
+      label: m.actScheduleDailyApproved.replace("{n}", String(eligible.length)),
+      path: "",
+      unavailable: incomplete
+        ? m.scheduleDailyTakenIncomplete
+        : rendered.slots.length === 0
+          ? m.scheduleDailyNothingFits
+          : undefined,
+      confirm: () => {
+        confirmed = planAt(clock());
+        return confirmOf(confirmed);
+      },
+      stale: async () => {
+        if (incomplete) return m.scheduleDailyTakenIncomplete;
+        let latest: DailyScheduleLatest = { rows, taken };
+        if (reload) {
+          const read = await reload();
+          if (read === null) return m.scheduleDailyRecheckFailed;
+          if (read.taken === null) return m.scheduleDailyTakenIncomplete;
+          latest = read;
+        }
+        const now = clock();
+        const fresh = planDailyMarketingSchedule({
+          posts: dailySchedulePostsOf(latest.rows),
+          taken: latest.taken ?? [],
+          now,
+        });
+        const asked = confirmed ?? fresh;
+        if (fresh.slots.length === 0) return m.scheduleDailyNothingFits;
+        const tooSoon = asked.slots.some(
+          (slot) => Date.parse(slot.scheduledAt) - now < MARKETING_DAILY_SCHEDULE_LEAD_MS
+        );
+        return tooSoon || !sameTimes(asked, fresh) ? m.scheduleDailyPlanChanged : null;
+      },
+      body: () => null,
+      batch: () => {
+        if (incomplete) return [];
+        sending = confirmed ?? planAt(clock());
+        confirmed = null;
+        return sending.slots.flatMap((slot) => {
+          const row = byId.get(slot.postId);
+          return row
+            ? [{ path: POST(row.id, "schedule"), body: { ...postCas(row), scheduledAt: slot.scheduledAt } }]
+            : [];
+        });
+      },
+      describe: (result) => {
+        const { sent, failed, unsent } = result as MarketingBatchResult;
+        const sentence =
+          unsent > 0 ? m.scheduleAllStopped : failed > 0 ? m.scheduleAllPartial : m.scheduleDailyDone;
+        return [
+          sentence
+            .replace("{sent}", String(sent))
+            .replace("{failed}", String(failed))
+            .replace("{unsent}", String(unsent)),
+          expiredLineOf(sending),
+        ]
+          .filter(Boolean)
+          .join(" ");
       },
     },
   ];

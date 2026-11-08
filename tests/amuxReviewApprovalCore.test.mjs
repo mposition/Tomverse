@@ -4,14 +4,19 @@ import test from "node:test";
 import {
   AMUX_REVIEW_DISPLAY_MAX_BYTES,
   AMUX_REVIEW_PROPOSAL_TTL_MS,
+  AMUX_REVIEW_PUBLICATION_PENDING_STATES,
+  amuxReviewAllowedOutcomes,
   amuxReviewApprovalReadiness,
   amuxReviewApprovalHasEvidence,
+  amuxReviewDecisionHold,
   amuxReviewDisplayIsExact,
   amuxReviewTextExceedsDisplay,
   amuxReviewProposalExpiry,
   amuxReviewRequestDigest,
   amuxReviewSubjectDigest,
+  amuxReviewPublicationMayOpenPr,
   amuxReviewTargetStatus,
+  amuxV22PrlessReviewRetryAllowed,
   amuxV22ReviewRetryHasVerifiedOutcome,
   amuxV4ReviewEvidenceMatches,
   amuxV4ReviewReportProjection,
@@ -305,17 +310,128 @@ test("request digest binds proposal, key, and resolution", () => {
   assert.notEqual(digest, amuxReviewRequestDigest({ ...input, proposal_id: "other" }));
 });
 
-test("only the four approved task-review transitions exist", () => {
+test("only the five approved task-review transitions exist", () => {
   assert.equal(amuxReviewTargetStatus("review", "approve"), "done");
   assert.equal(amuxReviewTargetStatus("review", "block"), "blocked");
+  // A v22 result with no pull request (owner decision 2026-11-08).
+  assert.equal(amuxReviewTargetStatus("review", "retry"), "todo");
   assert.equal(amuxReviewTargetStatus("blocked", "retry"), "todo");
   assert.equal(amuxReviewTargetStatus("blocked", "block"), "blocked");
-  assert.equal(amuxReviewTargetStatus("review", "retry"), null);
   assert.equal(amuxReviewTargetStatus("blocked", "approve"), null);
+});
+
+const prlessImplement = {
+  sourceSystem: "admin-idea-v4", cardType: "task", reviewPrNumber: null,
+  attempt: { v22AssignmentId: "assignment", outcome: "succeeded", toStatus: "review",
+    reason: "reported_result" },
+  v4EvidenceVerified: true, publicationMayOpenPr: false,
+  displayTruncated: false, displayExact: true,
+};
+
+test("a v22 result in review with no pull request may be run again", () => {
+  assert.equal(amuxV22PrlessReviewRetryAllowed(prlessImplement), true);
+  for (const [field, value] of [
+    ["sourceSystem", "legacy"], ["cardType", "idea"], ["reviewPrNumber", 3501],
+    ["v4EvidenceVerified", false], ["publicationMayOpenPr", true],
+    ["displayTruncated", true], ["displayExact", false], ["attempt", null],
+  ]) {
+    assert.equal(amuxV22PrlessReviewRetryAllowed({ ...prlessImplement, [field]: value }),
+      false, field);
+  }
+  for (const attempt of [
+    { ...prlessImplement.attempt, v22AssignmentId: null },
+    { ...prlessImplement.attempt, outcome: "expired" },
+    { ...prlessImplement.attempt, toStatus: "blocked" },
+    // Its usage was never reported (AMUX-AGENTOPS-001): block only.
+    { ...prlessImplement.attempt, reason: "usage_outcome_unknown" },
+  ]) {
+    assert.equal(amuxV22PrlessReviewRetryAllowed({ ...prlessImplement, attempt }), false);
+  }
+});
+
+test("publication that has opened or may still open the PR holds the retry", () => {
+  const tierPending = "tier_pending";
+  assert.equal(amuxReviewPublicationMayOpenPr([], tierPending), false);
+  for (const state of AMUX_REVIEW_PUBLICATION_PENDING_STATES) {
+    assert.equal(amuxReviewPublicationMayOpenPr(
+      [{ kind: "publish", state, reason: null }], tierPending), true, state);
+  }
+  for (const state of ["publish_refused", "publish_failed", "expired"]) {
+    assert.equal(amuxReviewPublicationMayOpenPr(
+      [{ kind: "publish", state, reason: null }], tierPending), false, state);
+  }
+  assert.equal(amuxReviewPublicationMayOpenPr(
+    [{ kind: "t2_draft", state: "open", reason: tierPending }], tierPending), true);
+  // A draft kept private (T2 with the review switch off, no tier evidence).
+  for (const reason of ["tier_two", "tier_evidence_unavailable", "publish_refused"]) {
+    assert.equal(amuxReviewPublicationMayOpenPr(
+      [{ kind: "t2_draft", state: "open", reason }], tierPending), false, reason);
+  }
+  assert.equal(amuxReviewPublicationMayOpenPr(
+    [{ kind: "t2_draft", state: "resolved", reason: tierPending }], tierPending), false);
+});
+
+const outcomeInput = {
+  eligible: true, taskStatus: "review", reviewAttempt: true,
+  approvalHasEvidence: false, prlessRetryAllowed: false,
+  blockedRetryVerified: false, budgetAllowed: true, dueCorrected: true,
+  displayTruncated: false, displayExact: true,
+};
+
+test("review with no pull request offers block and retry, never approve", () => {
+  // AMUX-FILEGEN-003: an implement Task whose result has no PR.
+  assert.deepEqual(amuxReviewAllowedOutcomes({ ...outcomeInput,
+    prlessRetryAllowed: true }), ["block", "retry"]);
+  // The retry keeps the attempt budget, due date and exact display gates.
+  for (const [field, value] of [["budgetAllowed", false], ["dueCorrected", false],
+    ["displayTruncated", true], ["displayExact", false]]) {
+    assert.deepEqual(amuxReviewAllowedOutcomes({ ...outcomeInput,
+      prlessRetryAllowed: true, [field]: value }), ["block"], field);
+  }
+  // Without the PR-less evidence, review still offers block alone.
+  assert.deepEqual(amuxReviewAllowedOutcomes(outcomeInput), ["block"]);
+  // A blocked-path verdict never opens a retry from review.
+  assert.deepEqual(amuxReviewAllowedOutcomes({ ...outcomeInput,
+    blockedRetryVerified: true }), ["block"]);
+});
+
+test("review with a pull request and the blocked path are unchanged", () => {
+  assert.deepEqual(amuxReviewAllowedOutcomes({ ...outcomeInput,
+    approvalHasEvidence: true }), ["approve", "block"]);
+  assert.deepEqual(amuxReviewAllowedOutcomes({ ...outcomeInput,
+    reviewAttempt: false, approvalHasEvidence: true, prlessRetryAllowed: true }), []);
+  const blocked = { ...outcomeInput, taskStatus: "blocked" };
+  assert.deepEqual(amuxReviewAllowedOutcomes(blocked), ["block"]);
+  assert.deepEqual(amuxReviewAllowedOutcomes({ ...blocked,
+    blockedRetryVerified: true }), ["block", "retry"]);
+  // A PR-less review verdict never opens a retry from blocked, nor approve.
+  assert.deepEqual(amuxReviewAllowedOutcomes({ ...blocked,
+    prlessRetryAllowed: true, approvalHasEvidence: true }), ["block"]);
+  assert.deepEqual(amuxReviewAllowedOutcomes({ ...blocked,
+    blockedRetryVerified: true, budgetAllowed: false }), ["block"]);
+  assert.deepEqual(amuxReviewAllowedOutcomes({ ...blocked, eligible: false,
+    blockedRetryVerified: true }), []);
+  assert.deepEqual(amuxReviewAllowedOutcomes({ ...outcomeInput, taskStatus: "todo" }), []);
 });
 
 test("proposal TTL is exactly 24 hours", () => {
   const issued = new Date("2026-09-21T00:00:00.000Z");
   assert.equal(AMUX_REVIEW_PROPOSAL_TTL_MS, 86_400_000);
   assert.equal(amuxReviewProposalExpiry(issued).toISOString(), "2026-09-22T00:00:00.000Z");
+});
+
+test("the decision hold names what keeps every outcome closed, first cause first", () => {
+  const open = { escalationOpen: true, archived: false, taskStatus: "blocked",
+    lastTerminal: true, activeDelivery: false, reviewAttempt: false };
+  assert.equal(amuxReviewDecisionHold(open), null);
+  assert.equal(amuxReviewDecisionHold({ ...open, taskStatus: "review", reviewAttempt: true }), null);
+  assert.equal(amuxReviewDecisionHold({ ...open, activeDelivery: true }), "delivery_pending");
+  assert.equal(amuxReviewDecisionHold({ ...open, lastTerminal: false, activeDelivery: true }),
+    "attempt_running");
+  assert.equal(amuxReviewDecisionHold({ ...open, archived: true, activeDelivery: true }),
+    "card_archived");
+  assert.equal(amuxReviewDecisionHold({ ...open, escalationOpen: false, archived: true }),
+    "escalation_closed");
+  assert.equal(amuxReviewDecisionHold({ ...open, taskStatus: "todo" }), "task_status");
+  assert.equal(amuxReviewDecisionHold({ ...open, taskStatus: "review" }), "review_attempt_mismatch");
 });

@@ -78,13 +78,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      # gitleaks-action until 2026-11-08, when its only download path (the
+      # release web URL) returned 504; see scripts/ci/gitleaks-scan.sh. The
+      # step id and its outcome feed the report exactly as before.
       - name: Scan repository history for secrets
         id: gitleaks
         continue-on-error: true
-        uses: gitleaks/gitleaks-action@v3
+        run: scripts/ci/gitleaks-scan.sh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: "false"
+
+      - name: Upload gitleaks SARIF report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: gitleaks-results.sarif
+          path: results.sarif
+          if-no-files-found: ignore
 
       - name: Setup Node.js
         id: setup_node
