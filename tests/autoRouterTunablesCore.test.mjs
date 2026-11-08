@@ -18,6 +18,7 @@ import {
   withoutExcludedModels,
 } from "../lib/autoRouterTunablesCore.ts";
 import { autoRouterGeneratorSchema, AUTO_ROUTER_GENERATOR_SYSTEM } from "../lib/autoRouterOptimizerCore.ts";
+import { AUTO_LLM_ROUTER_TIMEOUT_MS } from "../lib/autoLlmRouterCore.ts";
 
 const NOW = Date.parse("2026-10-20T12:00:00.000Z");
 const CODE_TIMEOUT = 5_000;
@@ -66,6 +67,25 @@ const admit = (proposed, extra = {}) =>
     now: NOW,
     ...extra,
   });
+
+test("the 7 s code deadline is used without a valid stored timeout and stored tuning still takes precedence", () => {
+  for (const raw of [undefined, null, "", "not json", JSON.stringify({ routerTimeoutMs: { value: 6_000 } })]) {
+    assert.equal(effectiveRouterTimeoutMs(parseTunables(raw), AUTO_LLM_ROUTER_TIMEOUT_MS), 7_000);
+  }
+
+  for (const value of [3_000, 6_000, 8_000]) {
+    const tuned = applyTunableChanges({
+      current: EMPTY_TUNABLES,
+      changes: [{ setting: "routerTimeoutMs", value, reason: "Measured routing latency." }],
+      cycleId: "c1",
+      now: NOW,
+      codeTimeoutMs: AUTO_LLM_ROUTER_TIMEOUT_MS,
+      before: { decisions: 107, timeoutOrErrorShare: 9 / 107, p90LatencyMs: 5_500 },
+    });
+    assert.equal(effectiveRouterTimeoutMs(parseTunables(JSON.stringify(tuned)), AUTO_LLM_ROUTER_TIMEOUT_MS), value);
+    assert.equal(tuned.routerTimeoutMs.previous, 7_000);
+  }
+});
 
 test("a timeout is raised only when timeouts or errors were frequent, inside its range and steps", () => {
   const busy = evidence({ routerStats: stats({ timeout: 4, error: 2 }) });

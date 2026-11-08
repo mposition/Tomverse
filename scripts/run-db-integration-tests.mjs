@@ -258,6 +258,9 @@ run(
     // A run the v52 review rejected twice may be retried by the owner; the
     // retry reaches the claim and its first rejection returns once more.
     "tests/integration/amuxV22ReviewRejectedTwiceRetry.db.test.mjs",
+    // A v22 result in review with no pull request may be run again by the
+    // owner; the proposal and decision guards accept review -> retry -> todo.
+    "tests/integration/amuxV22PrlessReviewRetry.db.test.mjs",
     "tests/integration/amuxV22AutoPromotion.db.test.mjs",
     "tests/integration/amuxV22TaskPatchSchema.db.test.mjs",
     "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
