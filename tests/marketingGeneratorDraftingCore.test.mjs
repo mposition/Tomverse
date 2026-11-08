@@ -617,3 +617,15 @@ test("a draft that names a carousel carries every page in order; mixed with anot
   // A later page is never offered, so naming one is an unknown asset.
   assert.deepEqual(dropped, { draft_mixes_carousel: 1, draft_names_unknown_asset: 1 });
 });
+
+test("a carousel whose pages are not all images, or rest on other claims than page 1, is not offered", () => {
+  const video = carouselPages(5).map((asset, index) => (index === 3 ? { ...asset, kind: "video" } : asset));
+  assert.deepEqual(marketingA5AssetsFor(carouselContext(video), "linkedin", "en", undefined, "chn_li"), []);
+  const claims = carouselPages(5).map((asset, index) => (index === 2 ? { ...asset, claimIds: ["claim_compare"] } : asset));
+  assert.deepEqual(marketingA5AssetsFor(carouselContext(claims), "linkedin", "en", undefined, "chn_li"), []);
+  const shared = carouselPages(5, { claimIds: ["claim_compare"] });
+  assert.deepEqual(
+    marketingA5AssetsFor(carouselContext(shared), "linkedin", "en", undefined, "chn_li").map((asset) => asset.id),
+    ["media-x-steps-en-card-p1of5"],
+  );
+});

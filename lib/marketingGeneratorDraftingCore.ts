@@ -186,14 +186,21 @@ export function marketingA5AssetsFor(
       (kind === undefined || asset.kind === kind),
   );
   // A carousel is offered as its first page only, and only whole: every page
-  // fits here and the platform takes that many images in one post.
-  const fitting = new Set(fits.map((asset) => asset.id));
+  // fits here, is an image, and rests on exactly page 1's claims (so the claims
+  // the model sees on page 1 are the post's), and the platform takes that many
+  // images in one post.
+  const fitting = new Map(fits.map((asset) => [asset.id, asset]));
+  const sameClaims = (a: readonly string[], b: readonly string[]) =>
+    a.length === b.length && [...a].sort().every((id, index) => id === [...b].sort()[index]);
   return fits.filter((asset) => {
     const page = marketingCarouselPage(asset.id);
     if (!page) return true;
-    if (page.page !== 1 || asset.kind !== "image") return false;
+    if (page.page !== 1) return false;
     if (page.of > (MARKETING_CAROUSEL_MAX_IMAGES[channel] ?? 1)) return false;
-    return marketingCarouselPageIds(page).every((id) => fitting.has(id));
+    return marketingCarouselPageIds(page).every((id) => {
+      const member = fitting.get(id);
+      return member?.kind === "image" && sameClaims(member.claimIds, asset.claimIds);
+    });
   });
 }
 
@@ -305,20 +312,23 @@ export function marketingA5Messages(
         statement: claim.statements?.[scope.locale] ?? null,
         values: claim.values ?? null,
       })),
-    assets: marketingA5AssetsFor(context, account.channel, scope.locale, scope.mediaKind, account.id).map((asset) => ({
-      id: asset.id,
-      kind: asset.kind ?? null,
+    assets: marketingA5AssetsFor(context, account.channel, scope.locale, scope.mediaKind, account.id).map((asset) => {
       // A carousel's first page stands for the whole carousel.
-      ...(marketingCarouselPage(asset.id) ? { pages: marketingCarouselPage(asset.id)?.of } : {}),
-      ...(asset.longForm ? { longForm: true } : {}),
-      description: asset.alt?.[scope.locale] ?? null,
-      claimIds: asset.claimIds,
-      validUntil: asset.validUntil,
-      // What other accounts already posted with it, in this locale (owner decision 2026-11-06).
-      publishedCopies: (asset.publishedCopies ?? [])
-        .filter((copy) => copy.locale === scope.locale)
-        .map((copy) => copy.text),
-    })),
+      const carousel = marketingCarouselPage(asset.id);
+      return {
+        id: asset.id,
+        kind: asset.kind ?? null,
+        ...(carousel ? { pages: carousel.of } : {}),
+        ...(asset.longForm ? { longForm: true } : {}),
+        description: asset.alt?.[scope.locale] ?? null,
+        claimIds: asset.claimIds,
+        validUntil: asset.validUntil,
+        // What other accounts already posted with it, in this locale (owner decision 2026-11-06).
+        publishedCopies: (asset.publishedCopies ?? [])
+          .filter((copy) => copy.locale === scope.locale)
+          .map((copy) => copy.text),
+      };
+    }),
   };
   return [
     { role: "system", content: SYSTEM_PROMPT },
