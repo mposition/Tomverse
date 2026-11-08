@@ -7,7 +7,7 @@ const messages = readFileSync("lib/adminMessages/amuxRouting.ts", "utf8");
 
 test("general routing cards use only safe reason codes, not the raw escalation reason", () => {
   const escalationType = panel.split("export type AmuxEscalationSummary = {")[1]
-    ?.split("type AmuxReport = {")[0];
+    ?.split(/\n(?:export )?type /)[0];
   assert.ok(escalationType);
   assert.match(panel, /reason_code:/);
   assert.match(panel, /m\.reasonCode\[escalation\.reason_code\]/);
