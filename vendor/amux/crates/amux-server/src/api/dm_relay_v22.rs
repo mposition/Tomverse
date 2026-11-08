@@ -39,6 +39,9 @@ const UNBLOCKS_MAX: usize = 1_000;
 const TITLE_MAX: usize = 200;
 const LABEL_MAX: usize = 300;
 const OPTIONS_MAX: usize = 6;
+/// The app's card context bound (`amuxV22QuestionDmCard`): the card line and
+/// what the worker found.
+const CONTEXT_MAX: usize = 4_000;
 
 /// The tag naming the app's question id on its card.
 pub fn question_tag(question_id: &str) -> String {
@@ -87,6 +90,13 @@ pub(crate) struct FileBody {
     question: String,
     unblocks: String,
     options: Vec<OptionBody>,
+    /// What the worker found (2026-11-08); optional, so an older app's card
+    /// still files.
+    #[serde(default)]
+    context: String,
+    /// Repository files the Decision Maker's snapshot should hold.
+    #[serde(default)]
+    context_paths: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -159,14 +169,19 @@ pub(crate) async fn file_with(state: &AppState, configured: Option<&str>, header
         || !bounded(&body.title, TITLE_MAX)
         || !bounded(&body.question, QUESTION_MAX)
         || !bounded(&body.unblocks, UNBLOCKS_MAX)
+        || !(body.context.is_empty() || bounded(&body.context, CONTEXT_MAX))
         || !options_ok
     {
         return super::dm_relay::invalid_request();
     }
+    // The context paths are checked by the typed ask's own rules (count and
+    // repository path grammar), like any worker's ask.
     let typed_ask = match dm_ask::parse_typed_ask(&json!({
         "options": body.options.iter().map(|option| json!({
             "id": option.id, "label": option.label, "effect": "choice_only", "paths": [],
         })).collect::<Vec<Value>>(),
+        "context": body.context,
+        "context_paths": body.context_paths,
     })) {
         Ok(input) => input,
         Err(_) => return super::dm_relay::invalid_request(),
@@ -361,6 +376,29 @@ mod tests {
         assert!(v22);
         assert!(typed.to_string().contains("\"choice_only\""), "{typed}");
         assert_eq!(refuses_delivery(&state, &card).await, Err(REFUSAL));
+    }
+
+    #[tokio::test]
+    async fn a_question_s_context_and_paths_go_into_its_typed_ask_and_a_bad_path_is_refused() {
+        let (state, _dir) = state();
+        let digest = digest();
+        let mut body: Value = serde_json::from_slice(&question()).unwrap();
+        body["context"] = json!("Card: AMUX-AUTOFILE-003, question 1 from worker codex-impl.");
+        body["context_paths"] = json!(["lib/amux/fileRetry.ts", "lib/amux/retryModel.ts"]);
+        let (status, filed) =
+            json_of(file_with(&state, Some(&digest), &headers(TOKEN), body.to_string().as_bytes()).await).await;
+        assert_eq!(status, StatusCode::OK, "{filed}");
+        let id = filed["card_id"].as_str().unwrap().to_owned();
+        let typed = state.store.read_async(move |conn| Ok(dm_ask::state_json(conn, &id)?)).await.unwrap();
+        let text = typed.to_string();
+        assert!(text.contains("Card: AMUX-AUTOFILE-003"), "{typed}");
+        assert!(text.contains("lib/amux/retryModel.ts"), "{typed}");
+
+        let mut bad: Value = serde_json::from_slice(&question()).unwrap();
+        bad["question_id"] = json!("00000000-0000-4000-8000-00000000000b");
+        bad["context_paths"] = json!(["../etc/passwd"]);
+        let (status, _) = json_of(file_with(&state, Some(&digest), &headers(TOKEN), bad.to_string().as_bytes()).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

@@ -91,7 +91,7 @@ fn card_body(entry: &Value) -> Option<Value> {
         .iter()
         .map(|option| Some(json!({"id": text(option, "id")?, "label": text(option, "label")?})))
         .collect::<Option<_>>()?;
-    Some(json!({
+    let mut card = json!({
         "question_id": text(entry, "question_id")?,
         "worker": text(entry, "worker")?,
         "provider": text(entry, "provider")?,
@@ -99,7 +99,19 @@ fn card_body(entry: &Value) -> Option<Value> {
         "question": text(entry, "question")?,
         "unblocks": text(entry, "unblocks")?,
         "options": options,
-    }))
+    });
+    // What the worker found and the files it points at (2026-11-08), so the
+    // Decision Maker reads more than the question line. Passed only when the
+    // app sent them, as a string and a list of strings; the local route checks
+    // them like any typed ask's context.
+    if let Some(context) = text(entry, "context") {
+        card["context"] = json!(context);
+    }
+    if let Some(paths) = entry.get("context_paths").and_then(Value::as_array) {
+        let paths: Option<Vec<&str>> = paths.iter().map(Value::as_str).collect();
+        card["context_paths"] = json!(paths?);
+    }
+    Some(card)
 }
 
 fn cursor_of(sync: &Value) -> V22Cursor {
@@ -235,6 +247,23 @@ mod tests {
         assert!(filed[0].1.get("extra").is_none(), "only the route's own fields");
         let calls = app.calls.lock().unwrap();
         assert_eq!(calls[1], (AppRoute::V22QuestionCard, json!({"question_id": QUESTION, "card_id": "CI-9"})));
+    }
+
+    #[tokio::test]
+    async fn a_question_s_context_and_paths_ride_to_the_local_card() {
+        let mut entry = pending();
+        entry["context"] = json!("Card: AMUX-AUTOFILE-003, question 1 from worker codex-impl.");
+        entry["context_paths"] = json!(["lib/amux/fileRetry.ts"]);
+        let app = App {
+            sync: answered(200, json!({"synced": true, "resolved": null, "pending": [entry], "closing": []})),
+            calls: Mutex::new(vec![]),
+        };
+        let local = Local { answer: answered(200, json!({"card_id": "CI-9", "created": true})), calls: Mutex::new(vec![]) };
+        sync_v22_questions(&app, &local, None).await;
+        let filed = local.calls.lock().unwrap();
+        assert_eq!(filed[0].1["context"], json!("Card: AMUX-AUTOFILE-003, question 1 from worker codex-impl."));
+        assert_eq!(filed[0].1["context_paths"], json!(["lib/amux/fileRetry.ts"]));
+        assert!(filed[0].1.get("extra").is_none());
     }
 
     /// An idea card close question (the app's `amuxIdeaCardCloseRelayCard`)

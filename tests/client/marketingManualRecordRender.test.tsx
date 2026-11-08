@@ -122,6 +122,6 @@ test("the Published tab's read hands each row its account's provider", async () 
   const source = readFileSync(new URL("../../lib/marketingConsoleRead.ts", import.meta.url), "utf8");
   const published = source.slice(source.indexOf('if (section === "published")'));
   const section = published.slice(0, published.indexOf('if (section === "accounts")'));
-  assert.match(section, /channel: \{ select: \{ accountSlug: true, channel: true, provider: true \} \}/u);
+  assert.match(section, /channel: \{\s*select: \{[^}]*\bprovider: true,?[^}]*\},?\s*\}/u);
   assert.match(section, /provider: post\.channel\.provider/u);
 });

@@ -241,3 +241,138 @@ test("the read validator accepts what the route returns and rejects anything els
   assert.equal(isAmuxOwnerQueueRead({ error: "Server error." }), false);
   assert.equal(isAmuxOwnerQueueRead(null), false);
 });
+
+test("a finished run in review with no pull request says so, shows the report and offers retry", () => {
+  // AMUX-FILEGEN-003: an implement Task whose result was saved with no PR.
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({
+    selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      review_report: {
+        scope_and_completion_criteria: "Scope and criteria", approved_execution_brief: null,
+        worker_report: "Added the notice decision.\nNo PR, merge or deploy.\n\nTests blocked: tsx is not installed.",
+        worker_report_verified: true,
+      },
+      allowed_outcomes: ["block", "retry"],
+      proposed_transitions: { block: "blocked", retry: "todo" },
+    }),
+  }));
+  assert.match(html, /The work result is saved, but there is no pull request/);
+  assert.doesNotMatch(html, /opened a pull request/);
+  assert.match(html, /data-testid="amux-owner-queue-report-excerpt"/);
+  assert.match(html, /Tests blocked: tsx is not installed\./);
+  assert.match(html, /<kbd[^>]*>1<\/kbd>Block/);
+  assert.match(html, /<kbd[^>]*>2<\/kbd>Retry/);
+  assert.doesNotMatch(html, /Approve<\/li>/);
+  assert.match(html, /data-testid="admin-amux-select-retry"/);
+  assert.doesNotMatch(html, /data-testid="admin-amux-select-approve"/);
+  assert.match(html, /This result has no pull request\. Should this same task run again\?/);
+});
+
+test("a finished run in review names its pull request, and an unread review claims none", () => {
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const withPr = decision(card, controller({
+    selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: 3501 },
+    }),
+  }));
+  assert.match(withPr, /pull request #3501 is open/);
+  assert.doesNotMatch(withPr, /amux-owner-queue-report-excerpt/);
+  const unread = decision(card, controller());
+  assert.match(unread, /The worker finished\. This card needs your review/);
+  assert.doesNotMatch(unread, /pull request/);
+});
+
+test("a finished review run whose usage was never reported still offers the server's block", () => {
+  // AMUX-AGENTOPS-001: no choice at all was shown for nine days.
+  const card = item({ status: "review", taskId: "task-1" });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({
+    selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      review_context: {
+        title: "Tidy", description: "Scope text", result_sha256: "b".repeat(64),
+        escalation_reason: "human_review_required",
+        last_attempt_reason: "usage_outcome_unknown", previous_block_reason: null,
+      },
+      allowed_outcomes: ["block"],
+      proposed_transitions: { block: "blocked" },
+    }),
+  }));
+  assert.doesNotMatch(html, /No choice is open for this card yet/);
+  assert.match(html, /<kbd[^>]*>1<\/kbd>Block/);
+  assert.match(html, /data-testid="admin-amux-select-block"/);
+  assert.match(html, /data-testid="amux-owner-queue-usage-unknown"/);
+  assert.match(html, /its usage was never reported/);
+  assert.doesNotMatch(html, /data-testid="admin-amux-select-retry"/);
+});
+
+test("the no-PR words follow the choices shown: approvable, retryable or block only", () => {
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const noPrTask = { id: "task-1", title: "Tidy", status: "review", revision: 8,
+    due_parse_state: "valid", review_pr_number: null };
+  // A verified design Task is approved on its result without a PR.
+  const approvable = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, { task: noPrTask }) }));
+  assert.match(approvable, /this kind of task is approved on its verified result/);
+  assert.doesNotMatch(approvable, /so it cannot be approved/);
+  // No retry left (budget spent, publication pending): block only.
+  const blockOnly = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, { task: noPrTask, allowed_outcomes: ["block"],
+      proposed_transitions: { block: "blocked" } }) }));
+  assert.match(blockOnly, /cannot be run again right now\. You can block it\./);
+  assert.doesNotMatch(blockOnly, /You can run it again/);
+});
+
+test("a blocked card says what its own attempt reason was, not only 'blocked before it finished'", () => {
+  // AMUX-FILEREQ-003: the worker ended the run and reported it blocked
+  // (reported_result); the escalation stores only execution_blocked.
+  const card = item({ status: "blocked", attentionReason: "execution_blocked" });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({
+    selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "blocked", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      last_attempt: { id: "attempt-1", task_revision: 7, outcome: "blocked",
+        to_status: "blocked", ended_at: "2026-11-08T01:30:00.000Z" },
+      review_context: {
+        title: "Tidy", description: "Scope text", result_sha256: "b".repeat(64),
+        escalation_reason: "execution_blocked",
+        last_attempt_reason: "reported_result", previous_block_reason: null,
+      },
+      review_report: {
+        scope_and_completion_criteria: "Scope and criteria", approved_execution_brief: null,
+        worker_report: "Changed lib/generatedArtifactToolPolicy.ts locally.\nTests deferred to a separate Task.",
+        worker_report_verified: true,
+      },
+      allowed_outcomes: ["block", "retry"],
+      proposed_transitions: { block: "blocked", retry: "todo" },
+    }),
+  }));
+  assert.match(html, /reported it as blocked itself, so no pull request was prepared/);
+  assert.doesNotMatch(html, /The run was blocked before it could finish/);
+  assert.match(html, /Tests deferred to a separate Task\./);
+  // An attempt reason with no sentence keeps the reason's own words.
+  const other = decision(card, controller({
+    selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "blocked", revision: 8, due_parse_state: "valid" },
+      review_context: {
+        title: "Tidy", description: "Scope text", result_sha256: null,
+        escalation_reason: "execution_blocked",
+        last_attempt_reason: "something_else", previous_block_reason: null,
+      },
+    }),
+  }));
+  assert.match(other, /The run was blocked before it could finish/);
+});
