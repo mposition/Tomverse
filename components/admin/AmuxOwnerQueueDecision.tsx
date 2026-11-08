@@ -124,8 +124,6 @@ export function AmuxOwnerQueueDecision({
   // has a pull request; until then the reason's own words make no PR claim.
   const reviewPr = reviewMatches && review.task.status === "review" &&
     item.attentionReason === "human_review_required" ? review.task.review_pr_number : undefined;
-  const reportExcerpt = reviewPr === null && reviewMatches
-    ? workerReportExcerpt(review.review_report?.worker_report ?? null) : null;
   const usageUnknown = reviewMatches && review.last_attempt !== null &&
     amuxReviewUsageOutcomeUnknown({ taskStatus: review.task.status,
       lastAttemptReason: review.review_context.last_attempt_reason,
@@ -140,10 +138,21 @@ export function AmuxOwnerQueueDecision({
   // result or pending publication leaves no retry.
   const noPrWhy = outcomes.includes("approve") ? copy.why.reviewNoPrApprovable
     : outcomes.includes("retry") ? copy.why.reviewNoPr : copy.why.reviewNoPrBlockOnly;
+  // A blocked card's escalation keeps only execution_blocked; the attempt's
+  // own reason, once the review is read, says what actually stopped it.
+  const blockedAttemptReason = reviewMatches && review.task.status === "blocked" &&
+    item.attentionReason === "execution_blocked" ?
+    review.review_context.last_attempt_reason : null;
+  const blockedWhy = blockedAttemptReason !== null &&
+    Object.hasOwn(copy.why.byAttemptReason, blockedAttemptReason) ?
+    copy.why.byAttemptReason[blockedAttemptReason] : null;
   const why = group === "question" ? copy.why.question
+    : blockedWhy !== null ? blockedWhy
     : reviewPr === null ? noPrWhy
     : typeof reviewPr === "number" ? copy.why.reviewWithPr(reviewPr)
     : (item.attentionReason ? copy.why.byReason[item.attentionReason] : undefined) ?? copy.why[group];
+  const reportExcerpt = reviewMatches && (reviewPr === null || blockedAttemptReason === "reported_result")
+    ? workerReportExcerpt(review.review_report?.worker_report ?? null) : null;
   const showRecoverySteps = group !== "question" && summary !== null &&
     (group === "recover" || group === "read" || classification === "technical_recovery");
   const decisionOpen = classification === "owner_decision";

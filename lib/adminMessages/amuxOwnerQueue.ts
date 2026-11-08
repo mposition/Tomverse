@@ -81,6 +81,16 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       reviewNoPrBlockOnly: "The work result is saved, but there is no pull request, so it cannot be approved, and it cannot be run again right now. You can block it. Check the worker report first.",
       reviewNoPrApprovable: "The work result is saved with no pull request; this kind of task is approved on its verified result. Check the worker report before deciding.",
       reviewUsageUnknown: "The run finished, but its usage was never reported, so it cannot be approved or run again yet. You can still block it.",
+      // A blocked run's own attempt reason, which the escalation stores only
+      // as execution_blocked (storedAmuxEscalationReasonCode).
+      byAttemptReason: {
+        reported_result: "The worker ended the run and reported it as blocked itself, so no pull request was prepared. Read its report: retry once the blocker is fixed, or block it.",
+        review_server_unknown: "The code review server returned no verdict for this run, so it stopped here.",
+        review_history_unavailable: "The earlier code review history could not be read, so this run stopped here.",
+        changed_paths_unavailable: "The files this run changed could not be checked, so it stopped here.",
+        grade_receipt_unavailable: "This run touched a contract path and could not move to a higher grade, so it stopped here.",
+        grade_binding_unverified: "This run touched a contract path and could not move to a higher grade, so it stopped here.",
+      } as Record<string, string>,
       byReason: {
         human_review_required: "The worker finished. This card needs your review before it moves on.",
         canonical_deadline_review_required: "The deadline on this card needs a person to look at it.",
@@ -184,6 +194,14 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       reviewNoPrBlockOnly: "작업 결과는 저장됐지만 PR이 없어서 승인할 수 없고, 지금은 다시 실행할 수도 없어요. 차단할 수 있어요. 작업자 보고부터 확인해 주세요.",
       reviewNoPrApprovable: "작업 결과가 PR 없이 저장됐어요. 이 종류의 작업은 검증된 결과로 승인해요. 결정하기 전에 작업자 보고를 확인해 주세요.",
       reviewUsageUnknown: "실행은 끝났지만 사용량 기록이 들어오지 않아서, 아직 승인하거나 다시 실행할 수 없어요. 차단은 할 수 있어요.",
+      byAttemptReason: {
+        reported_result: "워커가 실행을 끝내면서 스스로 막혔다고 보고해서 PR을 준비하지 않았어요. 보고를 읽고, 막힌 원인이 풀렸으면 다시 시도하고 아니면 차단해 주세요.",
+        review_server_unknown: "코드 검토 서버가 이 실행의 판정을 돌려주지 않아서 여기서 멈췄어요.",
+        review_history_unavailable: "이전 코드 검토 기록을 읽지 못해서 이 실행이 여기서 멈췄어요.",
+        changed_paths_unavailable: "이 실행이 바꾼 파일을 확인하지 못해서 여기서 멈췄어요.",
+        grade_receipt_unavailable: "이 실행이 계약 경로를 건드렸는데 더 높은 등급으로 넘기지 못해서 여기서 멈췄어요.",
+        grade_binding_unverified: "이 실행이 계약 경로를 건드렸는데 더 높은 등급으로 넘기지 못해서 여기서 멈췄어요.",
+      } as Record<string, string>,
       byReason: {
         human_review_required: "워커가 작업을 끝냈어요. 이 카드는 사람이 확인해야 다음 단계로 넘어가도록 설정돼 있어요.",
         canonical_deadline_review_required: "이 카드의 마감을 사람이 확인해야 해요.",

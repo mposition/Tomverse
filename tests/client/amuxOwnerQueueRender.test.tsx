@@ -332,3 +332,47 @@ test("the no-PR words follow the choices shown: approvable, retryable or block o
   assert.match(blockOnly, /cannot be run again right now\. You can block it\./);
   assert.doesNotMatch(blockOnly, /You can run it again/);
 });
+
+test("a blocked card says what its own attempt reason was, not only 'blocked before it finished'", () => {
+  // AMUX-FILEREQ-003: the worker ended the run and reported it blocked
+  // (reported_result); the escalation stores only execution_blocked.
+  const card = item({ status: "blocked", attentionReason: "execution_blocked" });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({
+    selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "blocked", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      last_attempt: { id: "attempt-1", task_revision: 7, outcome: "blocked",
+        to_status: "blocked", ended_at: "2026-11-08T01:30:00.000Z" },
+      review_context: {
+        title: "Tidy", description: "Scope text", result_sha256: "b".repeat(64),
+        escalation_reason: "execution_blocked",
+        last_attempt_reason: "reported_result", previous_block_reason: null,
+      },
+      review_report: {
+        scope_and_completion_criteria: "Scope and criteria", approved_execution_brief: null,
+        worker_report: "Changed lib/generatedArtifactToolPolicy.ts locally.\nTests deferred to a separate Task.",
+        worker_report_verified: true,
+      },
+      allowed_outcomes: ["block", "retry"],
+      proposed_transitions: { block: "blocked", retry: "todo" },
+    }),
+  }));
+  assert.match(html, /reported it as blocked itself, so no pull request was prepared/);
+  assert.doesNotMatch(html, /The run was blocked before it could finish/);
+  assert.match(html, /Tests deferred to a separate Task\./);
+  // An attempt reason with no sentence keeps the reason's own words.
+  const other = decision(card, controller({
+    selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "blocked", revision: 8, due_parse_state: "valid" },
+      review_context: {
+        title: "Tidy", description: "Scope text", result_sha256: null,
+        escalation_reason: "execution_blocked",
+        last_attempt_reason: "something_else", previous_block_reason: null,
+      },
+    }),
+  }));
+  assert.match(other, /The run was blocked before it could finish/);
+});
