@@ -83,12 +83,15 @@ test("the detail section reads nothing for a non-owner and says the question is 
   assert.equal(adminAmuxExecutionMessages.ko.questionPending, "답변 대기 질문");
 });
 
-test("the card list and the execution detail share the one question component", () => {
+test("the card detail owns the one question component; the list and the board lane only open the card", () => {
   const panel = readFileSync("components/admin/AmuxCardListPanel.tsx", "utf8");
+  const lane = readFileSync("components/admin/AmuxBoardAttentionLane.tsx", "utf8");
   const workspace = readFileSync("components/admin/AmuxExecutionWorkspace.tsx", "utf8");
-  assert.match(panel, /<AmuxWorkerQuestionBox key=\{question\.id\}/);
-  assert.doesNotMatch(panel, /v22-owner-question/);
+  // The list view no longer answers questions itself: a row opens the card, where the answer form is.
+  assert.doesNotMatch(panel, /AmuxWorkerQuestionBox|v22-owner-question|v22-task-result/);
   assert.match(workspace, /\{selected\.ownerQuestion && <AmuxTaskQuestionSection/);
-  assert.match(workspace, /card\.ownerQuestion === "open" && <button/);
+  // A card with an open question still has its call to act on the board, which opens the card on its overview.
+  assert.match(lane, /card\.ownerQuestion === "open" && <button/);
+  assert.match(lane, /onOpen\(card\.id, true, event\.currentTarget\)/);
   assert.doesNotMatch(workspace, /v22-owner-question/);
 });

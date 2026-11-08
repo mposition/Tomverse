@@ -9,6 +9,7 @@ import { AmuxBoardAutoPromotionPanel } from "@/components/admin/AmuxBoardAutoPro
 import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxBoardPromotionPanel } from "@/components/admin/AmuxBoardPromotionPanel";
 import { AmuxBoardRecommendationPanel } from "@/components/admin/AmuxBoardRecommendationPanel";
+import { AmuxCardDisplayKeyBackfillPanel } from "@/components/admin/AmuxCardDisplayKeyBackfillPanel";
 import { AmuxLegacyToolSection } from "@/components/admin/AmuxLegacyToolSection";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
 import { AmuxReconciliationPanel } from "@/components/admin/AmuxReconciliationPanel";
@@ -17,6 +18,7 @@ import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { amuxSwitchedTabStatuses, amuxTabChips } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminAmuxBoardViewsMessages } from "@/lib/adminMessages/amuxBoardViews";
 import { adminAmuxScreensMessages } from "@/lib/adminMessages/amuxScreens";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { adminNavItemTabs, resolveAdminTabFor } from "@/lib/adminNavigation";
@@ -69,9 +71,10 @@ export default async function AdminAmuxRecoveryPage({
   const resolved = resolveAdminTabFor(TABS, role, query.tab);
   if (!resolved) notFound();
   const { tab } = resolved;
-  const [m, screens, openAmuxOrchestratorHalts] = await Promise.all([
+  const [m, screens, boardViews, openAmuxOrchestratorHalts] = await Promise.all([
     getAdminMessages(adminAmuxWorkspaceMessages),
     getAdminMessages(adminAmuxScreensMessages),
+    getAdminMessages(adminAmuxBoardViewsMessages),
     countOpenAmuxOrchestratorHalts().catch(() => null),
   ]);
   const isOwner = role === "owner";
@@ -116,6 +119,10 @@ export default async function AdminAmuxRecoveryPage({
             {panels[id]}
           </AmuxLegacyToolSection>
         ))}
+        {/* The card number cleanup moved here from the Execution board; it is the same panel and the same owner-only write. */}
+        <AmuxLegacyToolSection id="amux-legacy-display-key-backfill" title={boardViews.backfill.legacyTitle}>
+          <AmuxCardDisplayKeyBackfillPanel />
+        </AmuxLegacyToolSection>
       </div>
     );
   }

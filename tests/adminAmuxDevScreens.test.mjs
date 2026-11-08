@@ -71,9 +71,14 @@ test("the board groups the server lanes into five columns without changing a lan
   for (const kept of ["<AmuxExecutionDialog", "<AmuxExecutionMovePanel", "<DecisionMakerAttentionCard"]) {
     assert.ok(board.includes(kept), `${kept} is still mounted`);
   }
-  // A stopped card is red and links to Safety & recovery; it is never one the owner is asked about.
-  assert.ok(board.includes("amuxBoardCardStuck({ lane, attentionReason: card.attentionReason, ownerQuestion: card.ownerQuestion })"));
-  assert.ok(board.includes('href="/admin/amux-recovery?tab=safety" className={styles.safetyLink}'));
+  // A stopped card is red and links to Safety & recovery; it is never one the owner is asked about. The
+  // "waiting on you" column draws it as one line (AmuxBoardAttentionLane), the other columns draw the shorter card.
+  const lane = read("components/admin/AmuxBoardAttentionLane.tsx");
+  assert.ok(lane.includes('amuxBoardCardStuck({ lane: "attention", attentionReason: card.attentionReason, ownerQuestion: card.ownerQuestion })'));
+  assert.ok(lane.includes('href="/admin/amux-recovery?tab=safety"'));
+  assert.ok(lane.includes('"amux-card-safety-link-" + card.id'));
+  assert.ok(board.includes("<AmuxBoardAttentionLane "), "the board hands the column to the compact lane");
+  assert.equal(board.includes("amuxBoardCardStuck("), false, "the board itself no longer draws the red edge");
   // The channel is the class the worker was registered with, never a guess from its name.
   assert.ok(board.includes("workerChannels?.[card.worker]"));
   assert.equal(board.includes("amuxWorkerChannel("), false);
@@ -86,11 +91,52 @@ test("the board groups the server lanes into five columns without changing a lan
   assert.equal(/Date\.now\(\)/.test(board.slice(board.indexOf("const elapsedText"), board.indexOf("const dropProps"))), false);
 });
 
-test("the diagnostics tab keeps its placeholder and points at the review queue's evidence", () => {
+test("the diagnostics tab draws the usage coverage and the assignment evidence, and the owner alone sees the estimates", () => {
   const page = read("app/(site)/(application)/admin/amux-execution/page.tsx");
   const diagnostics = page.slice(page.indexOf('tab.id === "diagnostics"'), page.indexOf("<AdminAmuxRoutingPanel"));
-  assert.ok(diagnostics.includes("<AdminTabPlaceholder />"));
-  assert.ok(diagnostics.includes('href="/admin/amux-execution?tab=review"'));
+  assert.equal(diagnostics.includes("AdminTabPlaceholder"), false, "the placeholder is gone");
+  assert.ok(diagnostics.includes("<AmuxDiagnosticsPanel workerChannels={workerChannels} />"));
+  assert.ok(diagnostics.includes("<AmuxCliUsagePanel view={usage}"));
+  // The estimates were the owner's (they sat in the owner-only board); a non-owner is told, and nothing is read for them.
+  assert.ok(diagnostics.includes("isOwner ? readAmuxCliUsageSummaryForAdmin()"));
+  assert.ok(diagnostics.includes('data-testid="amux-usage-owner-only"'));
+  // The diagnostics read is the one the review queue made: the routing report route, read with the console's deadline fetch.
+  const panel = read("components/admin/AmuxDiagnosticsPanel.tsx");
+  assert.ok(panel.includes('adminFetch("/api/admin/amux/routing"'));
+  assert.equal(/method:\s*["'](?:POST|PUT|PATCH|DELETE)/i.test(panel), false);
+  assert.ok(panel.includes('kind="error"'), "a failed read is an error block, never an empty list");
+  // The human review queue and its detail stay in the review panel, not in diagnostics.
+  assert.equal(/AmuxOwnerReviewQueueView|AmuxOwnerReviewDetail|useAmuxOwnerReview/.test(panel), false);
+  const review = read("components/admin/AdminAmuxRoutingPanel.tsx");
+  const reviewPanel = review.slice(review.indexOf("export function AdminAmuxRoutingPanel"));
+  assert.ok(reviewPanel.includes("<AmuxOwnerReviewQueueView"));
+  assert.equal(/admin-amux-incident-state|report\.policies|report\.workers|report\.decisions/.test(reviewPanel), false, "the diagnostics left the review panel");
+});
+
+test("the incident band runs above the tab strip of every tab, and a failed read says it could not check", () => {
+  const page = read("app/(site)/(application)/admin/amux-execution/page.tsx");
+  assert.ok(page.indexOf("<AmuxIncidentBand state={incident} />") < page.indexOf("<AdminPageTabs"), "the band is above the strip");
+  assert.ok(page.includes("readAmuxIncidentBandState()"));
+  const band = read("components/admin/AmuxIncidentBand.tsx");
+  assert.ok(band.includes("if (state !== null && !state.blocksAdmission) return null;"), "calm and read: nothing is drawn");
+  assert.ok(band.includes('data-state="unknown"'), "an unread state is drawn, never hidden");
+  const loader = read("lib/amux/adminIncidentRead.ts");
+  assert.ok(loader.includes("parseAmuxIncidentSetting(row?.value)"), "the same parse the admission gate and the routing report use");
+  assert.equal(/\.(update|updateMany|create|createMany|upsert|delete|deleteMany)\(/.test(loader), false);
+});
+
+test("the supporting-records box is gone: usage is on Diagnostics and the card number cleanup is a legacy tool", () => {
+  const page = read("app/(site)/(application)/admin/amux-execution/page.tsx");
+  for (const gone of ["AmuxExecutionSupportingRecords", "AmuxCardDisplayKeyBackfillPanel"]) assert.equal(page.includes(gone), false, gone);
+  const recovery = read("app/(site)/(application)/admin/amux-recovery/page.tsx");
+  assert.ok(recovery.includes("<AmuxCardDisplayKeyBackfillPanel />"));
+  // The write is the panel's own, unchanged: the same route, the digest of the plan, never retried blind.
+  const backfill = read("components/admin/AmuxCardDisplayKeyBackfillPanel.tsx");
+  assert.ok(backfill.includes('const ENDPOINT = "/api/admin/amux/card-display-key-backfill"'));
+  assert.ok(backfill.includes("planDigest: plan.planDigest"));
+  // It sits under the owner-only Legacy tools tab.
+  assert.ok(recovery.indexOf('if (tab.id === "legacy")') < recovery.indexOf("<AmuxCardDisplayKeyBackfillPanel />"));
+  assert.ok(recovery.slice(recovery.indexOf('if (tab.id === "legacy")')).startsWith('if (tab.id === "legacy") {\n    // Owner only'));
 });
 
 test("the release overview reads each source on its own and never draws a failed read as nothing", () => {

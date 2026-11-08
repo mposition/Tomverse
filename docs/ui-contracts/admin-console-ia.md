@@ -923,15 +923,52 @@ audit record is as it was, and `tests/adminAmuxDevScreens.test.mjs` pins that.
   (Tomverse Backlog, AMUX Backlog and Todo as sub-lists, each still a
   `data-amux-lane` section, and AMUX Backlog still the only drop target), Waiting
   on you (the attention lane, so its count is the server's), Running, In review
-  and Done (the idea lane's recent merges; older finished cards stay in the
-  history below). A card shows its worker's avatar, its channel (Claude, Codex,
-  Copilot or Cursor, read from the worker's name) and the time since it last
-  changed; the board snapshot carries no per-card cost, so none is drawn. A card
-  stopped by the work itself (a lost run, an unknown outcome, a limit) has a red
-  edge and a link to Safety & recovery. The card dialog, the move panel and the
-  Decision Maker judgment are unchanged. Diagnostics still reads "Opening soon"
-  and points at the review queue, where the worker report and the assignment
-  evidence are.
+  and Done (the idea lane's recent merges). A card is short: its number, its
+  worker's channel, its title and one line (worker, priority, the time since it
+  last changed); the Task ID, source key, score and brief are in the card detail.
+  The board snapshot carries no per-card cost, so none is drawn. A view switch at
+  the top holds Board, List and Hierarchy. (2026-11-08, redesign step 9)
+  - **Waiting on you** is a short column: four counts by what the cards need
+    (decide, answer a question, recover, read), the first five as one line each
+    (Decision Maker requests first), and one link to `?tab=review`. The counts
+    are of the cards the board has loaded (it pages the rest of the lane in, up to
+    96) and say so with a "+" until all are. The split follows
+    `classifyAmuxOwnerQueueItem` (decision, technical recovery, needs a read) with
+    the worker question as a fourth group; it is drawn from the card's open
+    question and its newest open escalation's reason code, because the board does
+    not load the protected review that classifier needs. A card stopped by the
+    work itself (a lost run, an unknown outcome, a limit) has a red edge and a
+    link to Safety & recovery. Opening a card, the review button and the question
+    button are as they were.
+  - **Past work** replaces the closed archive drawer: a state filter (Done,
+    Blocked, Cancelled, Archived), a search, the state chip, the number, the
+    title, the worker and the AEST time, paged by the archive lane exactly as
+    before. The filters and the state counts cover the cards loaded so far, and
+    the list says so.
+  - **List** is the owner card list as one table (`AdminDataTable`): card number
+    and title, state chip, worker, priority, runs and the last change (AEST and how
+    long ago). A row opens the card detail, which already holds the worker
+    result, a waiting worker question with its answer form, the attempts and the
+    technical values; the table holds none of them and writes nothing. It reads
+    the same newest-cards list as before, with the title and worker added
+    (`lib/amux/adminExecutionCardList.ts`); a failed read shows an error, never an
+    empty table.
+  - **Moved.** The "additional card and usage records" box is gone. Worker usage
+    coverage is on Diagnostics (owner only, because it lists estimated API
+    costs), and the card number cleanup is a section of Safety & recovery ›
+    Legacy tools (owner only, the same panel and the same write).
+  - **Diagnostics** holds worker usage coverage (four numbers, then one row per
+    worker; a row opens to the models and rounds behind it), why work went to each
+    worker, how each worker did, and incident mode, the active queue and the
+    planning limits. It reads the routing report the review queue used to draw
+    beside the escalations; raw metrics and policy keys are under "Technical
+    details". The human review queue and the review detail stay with the "waiting
+    on you" screen (`AdminAmuxRoutingPanel` keeps only that part).
+  - **Incident band.** While incident mode stops admission (or its setting is
+    missing or damaged, which stops it fail-closed) a red band runs across the top
+    of all three tabs. A failed read of the setting is drawn as "unavailable",
+    never as calm and never hidden.
+  The card dialog, the move panel and the Decision Maker judgment are unchanged.
 - **Release › QA.** It opens on the next train (its AEST time and the time left),
   today's route (a train counts as departed only when its admission was
   recorded), production against main, the pull requests picked for the next

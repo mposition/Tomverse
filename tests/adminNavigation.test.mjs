@@ -911,7 +911,7 @@ test("view roles never promise more than the pages grant, nor hide what they gra
   const cardsBranch = page.slice(branchAt);
   const gateAt = cardsBranch.search(OWNER_GATE);
   assert.ok(
-    gateAt >= 0 && gateAt < cardsBranch.indexOf("listAmuxCardsForAdmin()"),
+    gateAt >= 0 && gateAt < cardsBranch.indexOf("listAmuxCardsForExecutionList()"),
     "the Cards branch reads the list before refusing a non-owner"
   );
   assert.match(page, /if \(!resolved\) notFound\(\);/);

@@ -36,7 +36,6 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
     previousCard: "Previous card", nextCard: "Next card", copyLink: "Copy card link",
     copied: "Card link copied.", copyFailed: "Could not copy the link. Copy it from the address bar.",
     cardProperties: "Work information", cardStatus: "Status", cardRole: "Role", cardGrade: "Execution grade",
-    supportingRecords: "Additional card and usage records",
 
     title: "AMUX execution",
     description: "Canonical cards and execution evidence in one workspace. Use the guarded move action to admit approved work to the queue.",
@@ -185,7 +184,6 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
     previousCard: "이전 카드", nextCard: "다음 카드", copyLink: "카드 링크 복사",
     copied: "카드 링크를 복사했습니다.", copyFailed: "링크를 복사하지 못했습니다. 주소 표시줄에서 복사하세요.",
     cardProperties: "작업 정보", cardStatus: "상태", cardRole: "실행 역할", cardGrade: "실행 등급",
-    supportingRecords: "추가 카드·사용량 기록",
 
     title: "AMUX 실행 현황",
     description: "정본 카드와 실행 근거를 한 화면에서 확인합니다. 승인된 작업은 이동 버튼으로 조건을 검사하고 대기열에 편입합니다.",
