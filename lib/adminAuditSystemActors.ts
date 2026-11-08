@@ -61,6 +61,10 @@ export const AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR = "amux-v22-recovery-checker"
 export const AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR = "amux-v22-recovery-controller" as const;
 /** Policy v42: records only content-free, exact FIRST model-access evidence. */
 export const AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR = "amux-v22-api-model-access" as const;
+/** Owner decision 2026-11-08: applies one owner's own one-click recovery
+ * pre-approval after the checker's evidence. It writes only that approval and
+ * its one result; it cannot create a consent, widen a cost or start work. */
+export const AMUX_V22_RECOVERY_PREAPPROVAL_AUDIT_ACTOR = "amux-v22-recovery-preapproval" as const;
 
 /** Provider-free CHAT-01 optimizer metadata only. The scoped actions below
  * cannot authorize a paid call, external dispatch or candidate promotion
@@ -261,6 +265,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR,
   AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR,
   AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR,
+  AMUX_V22_RECOVERY_PREAPPROVAL_AUDIT_ACTOR,
   CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR,
   AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR,
   AUTO_ROUTER_REC_AGENT_AUDIT_ACTOR,
@@ -447,6 +452,11 @@ export const systemAuditActionAllowed = (
   (actor !== AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR ||
     (action === "amux.v22.recovery.api_model_access_observed" &&
       targetType === "AmuxV22ApiModelAccessEvidence")) &&
+  (actor !== AMUX_V22_RECOVERY_PREAPPROVAL_AUDIT_ACTOR ||
+    (action === "amux.v22.recovery.preapproval_applied" &&
+      targetType === "AmuxV22TaskRecoveryApproval") ||
+    (action === "amux.v22.recovery.preapproval_settled" &&
+      targetType === "AmuxV22TaskRecoveryPreApprovalResult")) &&
   (actor !== AUTO_ROUTER_REC_AGENT_AUDIT_ACTOR ||
     ((action === "auto.llm_router_recommendation.claimed" ||
       action === "auto.llm_router_recommendation.result_recorded") &&
