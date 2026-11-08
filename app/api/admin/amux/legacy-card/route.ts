@@ -106,7 +106,7 @@ export async function POST(request: Request): Promise<Response> {
         !ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])) {
       return json({ error: "amux_submission_disabled" }, 503);
     }
-    const requestId = amuxLegacyCardRecreateRequestId(read.card.id);
+    const requestId = amuxLegacyCardRecreateRequestId(read.card.id, idea.text);
     const path = await ideaSendPath({ session, request, requestId, idea: idea.text,
       sessionDisplay: "Legacy WORKBOARD card" });
     if (!path.ok) return json({ error: "idea_refused", reason: path.code }, path.status);

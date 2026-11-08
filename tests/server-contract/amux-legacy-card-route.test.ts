@@ -171,7 +171,9 @@ test("a recreate saves the idea under the card's derived request id, then closes
   reset();
   const response = await POST(post(recreate));
   assert.equal(response.status, 200);
-  const requestId = amuxLegacyCardRecreateRequestId("cmlegacy0001");
+  // The mocked idea text: the title line, a blank line, then the description.
+  const requestId = amuxLegacyCardRecreateRequestId("cmlegacy0001",
+    ["The renewal date is hidden.", "", world.card!.description].join("\n"));
   assert.deepEqual(await response.json(), { status: "recreated", ideaId: "idea-1", requestId, closed: true,
     archivedAt: "2026-11-08T09:00:00.000Z", escalationsResolved: 1 });
   assert.deepEqual(world.submits, [requestId]);
@@ -185,6 +187,13 @@ test("a recreate saves the idea under the card's derived request id, then closes
   assert.deepEqual(await again.json(), { status: "recreated", ideaId: "idea-1", requestId, closed: false,
     reason: "running" });
   assert.equal(world.submits.length, 0);
+
+  // Changed assigned work saves its own idea instead of reading the old one back.
+  reset(); world.card!.description = JSON.stringify({ problem: "Now a different task." });
+  const changed = await POST(post(recreate));
+  const changedBody = await changed.json() as { requestId: string };
+  assert.notEqual(changedBody.requestId, requestId);
+  assert.deepEqual(world.submits, [changedBody.requestId]);
 });
 
 test("close only archives without an idea; a held card answers busy", async () => {

@@ -58,6 +58,10 @@ test("Korean sentence ends, a missing problem and plain text still give a title"
   const plain = amuxLegacyCardIdeaText(card("\n\nFix the empty state on the inbox\nmore detail"));
   assert.equal(plain.ok && plain.title, "Fix the empty state on the inbox");
   assert.match(plain.ok ? plain.text : "", /more detail/);
+  // The title keeps one sentence; the rest of that first line stays in the body.
+  const several = amuxLegacyCardIdeaText(card("Add export. Include CSV and JSON.\nKeep the old button."));
+  assert.equal(several.ok && several.title, "Add export.");
+  assert.match(several.ok ? several.text : "", /Add export\. Include CSV and JSON\.\nKeep the old button\./);
 });
 
 test("no assigned work refuses; an approved brief is carried along", () => {
@@ -86,10 +90,12 @@ test("content the idea gate refuses stays refused", () => {
   assert.equal(inspect(built.text).ok, false);
 });
 
-test("the recreate request id is a stable v4 UUID per card", () => {
-  const a = amuxLegacyCardRecreateRequestId("cmlegacy0001");
-  assert.equal(a, amuxLegacyCardRecreateRequestId("cmlegacy0001"));
-  assert.notEqual(a, amuxLegacyCardRecreateRequestId("cmlegacy0002"));
+test("the recreate request id is a stable v4 UUID per card and idea text", () => {
+  const a = amuxLegacyCardRecreateRequestId("cmlegacy0001", "Do X.");
+  assert.equal(a, amuxLegacyCardRecreateRequestId("cmlegacy0001", "Do X."));
+  assert.notEqual(a, amuxLegacyCardRecreateRequestId("cmlegacy0002", "Do X."));
+  // A card whose assigned work changed saves the new text, not the old idea read back.
+  assert.notEqual(a, amuxLegacyCardRecreateRequestId("cmlegacy0001", "Do Y."));
   assert.equal(isAmuxIdeaRequestId(a), true);
 });
 

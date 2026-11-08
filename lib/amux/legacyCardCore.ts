@@ -27,9 +27,15 @@ export const isAmuxLegacyWorkboardCard = (card: { sourceSystem: string | null })
 export const isAmuxRecoveryInspectableCard = (card: { sourceSystem: string | null; cardType: string | null }) =>
   card.sourceSystem === "admin-idea-v4" && card.cardType === "task";
 
-/** The request id of a card's recreate, derived on the server so a resend reads the same idea back. */
-export function amuxLegacyCardRecreateRequestId(taskId: string): string {
-  const bytes = createHash("sha256").update(`amux-legacy-card-recreate:${taskId}`).digest().subarray(0, 16);
+/**
+ * The request id of a card's recreate, derived on the server from the card and
+ * the exact idea text, so a resend of the same text reads the same idea back,
+ * and a card whose assigned work changed since saves the text shown now rather
+ * than reading back an idea made from the old one.
+ */
+export function amuxLegacyCardRecreateRequestId(taskId: string, ideaText: string): string {
+  const bytes = createHash("sha256").update(`amux-legacy-card-recreate:${taskId}\n`)
+    .update(createHash("sha256").update(ideaText, "utf8").digest("hex")).digest().subarray(0, 16);
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = bytes.toString("hex");
@@ -132,7 +138,8 @@ export function amuxLegacyCardIdeaText(card: {
     const lines = raw.split(/\r\n|\r|\n/);
     const first = lines.findIndex((line) => line.trim() !== "");
     title = amuxFirstSentence(lines[first] ?? "");
-    body = lines.slice(first + 1).map((line) => line.trimEnd());
+    // The whole text, first line included: the title keeps only its first sentence.
+    body = lines.slice(first).map((line) => line.trimEnd());
   }
   if (!title) return { ok: false, code: "no_assigned_work" };
   const brief = card.executionBrief?.trim();
