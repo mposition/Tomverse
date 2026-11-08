@@ -202,6 +202,12 @@ test("our own bare host may be named, and nothing address-like around it", () =>
     // A particle, then prose: the boundary the CJK allowance draws.
     "tomverse.app에서 com",
     "到 tomverse.app。",
+    "WWW.TOMVERSE.APP",
+    "Have you tried tomverse.app?",
+    "\"tomverse.app\", then Review!",
+    "「tomverse.app」",
+    "（tomverse.app）",
+    "Easy, tomverse.app; Professional",
   ]) {
     assert.deepEqual(marketingTextHygiene(text), [], text);
   }
@@ -236,6 +242,15 @@ test("our own bare host may be named, and nothing address-like around it", () =>
     // CJK text may follow the host; an address after that text is still one.
     "tomverse.app에서.com",
     "tomverse.app例子.com",
+    // A combining mark or a joining letter on either side makes another IDN
+    // name (second review): only listed marks may stand next to the host.
+    "x́tomverse.app",
+    "tomverse.apṕ",
+    "l·tomverse.app",
+    "tomverse.app?ref=x",
+    "tomverse.app!x.com",
+    "www.tomverse.app:8080",
+    "WWW.TOMVERSE.APP/x",
   ]) {
     assert.ok(marketingTextHygiene(text).includes("url_like"), `${text} should read as an address`);
   }
