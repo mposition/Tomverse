@@ -66,6 +66,16 @@ if ! find job/research-notes -name '*.json' -mtime -7 | grep -q .; then
   rm -rf job/research-raw
 fi
 
+# The Higgsfield image path (owner 2026-11-08), off unless the operator sets
+# MARKETING_MEDIA_IMAGE_PATH=higgsfield in the box's env file. run-higgsfield.mjs
+# is deterministic: it runs the concept and review calls itself, each with Read
+# on its own folder only, and spends only through hf-image-core.mjs, which
+# refuses every call unless MARKETING_HIGGSFIELD_DAILY_CREDIT_CAP is set.
+if [ "${MARKETING_MEDIA_IMAGE_PATH:-}" = higgsfield ]; then
+  node run-higgsfield.mjs | tee -a "job/run-$(date -u +%Y%m%d).log"
+  exit "${PIPESTATUS[0]}"
+fi
+
 ENABLE_CLAUDEAI_MCP_SERVERS=false "${CLAUDE_BIN:-claude}" --print "$(cat JOB.md)" \
   --no-session-persistence \
   --permission-mode dontAsk --permission-prompts none \

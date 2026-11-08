@@ -1,0 +1,230 @@
+// One Higgsfield picture through the official Higgsfield CLI (`@higgsfield/cli`),
+// behind the cap in higgsfield-cap.mjs. Deterministic: a model only wrote the
+// prompt file; it never runs this, and no model call has a shell on this path.
+//
+// Why the CLI and not the HTTP API (checked 2026-11-08 against Higgsfield's own
+// docs): the API's model catalogue has no GPT Image 2.6 and bills a separate
+// prepaid balance, while the CLI (like Higgsfield's MCP) draws on the web
+// plan's credits, the Plus plan the owner took.
+//
+// Order of a call, so that no outcome is ever unknown and resent:
+//  1. every earlier call of the day whose outcome is unknown is looked up by
+//     its job id (`generate get`); one that stays unknown, or has no id,
+//     refuses this call;
+//  2. `generate cost` prices the exact request without submitting it; a price
+//     above HF_MAX_CALL_COST, or one that cannot be read, refuses it;
+//  3. the ledger admits it (model, ratio, one picture, daily cap) and records
+//     it before anything is submitted;
+//  4. `generate create` without waiting, so the job id is known and recorded
+//     at once; if create fails, `generate list` shows whether a job started
+//     after all, and only a call proven not to have started is settled failed;
+//  5. `generate wait <id>`; a timeout leaves the entry unknown with its id,
+//     for step 1 of the next call.
+import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+
+import { admit, brisbaneDay, HF_ASPECT_RATIO, HF_MODEL, ledgerPath, requestProblem, resolveUnsettled, settle } from "./higgsfield-cap.mjs";
+
+/** A picture is priced at 0.25 credits (owner's trial); twice that is a sign the request is not the one priced. */
+export const HF_MAX_CALL_COST = 0.5;
+const DONE = new Set(["completed", "succeeded", "success", "done"]);
+const FAILED = new Set(["failed", "nsfw", "canceled", "cancelled", "error"]);
+
+/** Runs the CLI: `HIGGSFIELD_BIN` (a .mjs is run with node) or `higgsfield` on the PATH. */
+export function cliRunner(env = process.env) {
+  const bin = env.HIGGSFIELD_BIN || "higgsfield";
+  return (args, { timeoutMs = 120_000 } = {}) => {
+    const [command, prefix] = /\.m?js$/u.test(bin) ? [process.execPath, [bin]] : [bin, []];
+    const out = spawnSync(command, [...prefix, ...args], { encoding: "utf8", timeout: timeoutMs, env: cliEnv(env), maxBuffer: 16 * 1024 * 1024 });
+    return { status: out.error ? null : out.status, stdout: out.stdout ?? "", stderr: out.stderr ?? "", timedOut: out.error?.code === "ETIMEDOUT" };
+  };
+}
+
+/** The CLI gets the box's own login, never the job's submission secret. */
+function cliEnv(env) {
+  const copy = { ...env };
+  delete copy.MARKETING_MEDIA_SUBMIT_SECRET;
+  delete copy.MARKETING_APP_URL;
+  return copy;
+}
+
+/** Every value under `node` (objects and arrays, depth first). */
+function* walk(node) {
+  yield node;
+  if (Array.isArray(node)) for (const item of node) yield* walk(item);
+  else if (node && typeof node === "object") for (const value of Object.values(node)) yield* walk(value);
+}
+
+export function parseJson(text) {
+  const trimmed = String(text ?? "").trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // The CLI may print a line before its JSON.
+    const start = trimmed.search(/[[{]/u);
+    return start >= 0 ? JSON.parse(trimmed.slice(start)) : null;
+  }
+}
+
+/** The job ids a create answered: `id`, `job_id` or `request_id` on the top object or its list. */
+export function jobIdsOf(value) {
+  const list = Array.isArray(value) ? value : Array.isArray(value?.jobs) ? value.jobs : [value];
+  return list.map((item) => (typeof item === "string" ? item : item?.id ?? item?.job_id ?? item?.request_id)).filter((id) => typeof id === "string" && id.length > 0);
+}
+
+/** "done", "failed" or "unknown" for one job object (or a list holding it). */
+export function outcomeOf(value) {
+  const job = Array.isArray(value) ? value[0] : value?.job ?? value;
+  const status = String(job?.status ?? "").toLowerCase();
+  if (DONE.has(status)) return "done";
+  if (FAILED.has(status)) return "failed";
+  return "unknown";
+}
+
+/** The first https picture URL in a finished job. */
+export function resultUrlOf(value) {
+  for (const node of walk(value)) {
+    if (typeof node === "string" && /^https:\/\/\S+$/u.test(node) && !/\/requests\/|status|cancel/u.test(node)) return node;
+  }
+  return null;
+}
+
+/** The credits `generate cost --json` answered, or null. */
+export function costOf(value) {
+  if (typeof value === "number") return value;
+  for (const node of walk(value)) {
+    if (!node || typeof node !== "object" || Array.isArray(node)) continue;
+    for (const key of ["credits", "cost", "total_credits", "credit_cost", "price"]) {
+      const amount = node[key];
+      if (typeof amount === "number" && Number.isFinite(amount)) return amount;
+      if (typeof amount === "string" && /^\d+(?:\.\d+)?$/u.test(amount)) return Number(amount);
+    }
+  }
+  return null;
+}
+
+const requestArgs = (request) => [
+  HF_MODEL,
+  "--prompt",
+  request.prompt,
+  "--aspect_ratio",
+  HF_ASPECT_RATIO,
+  ...(request.image_references ?? []).flatMap((file) => ["--image-references", file]),
+  "--json",
+];
+
+/** Jobs the CLI lists as created at or after `since` (ISO), or null when the list cannot be read. */
+function jobsSince(cli, since) {
+  const listed = cli(["generate", "list", "--json"]);
+  if (listed.status !== 0) return null;
+  let value;
+  try {
+    value = parseJson(listed.stdout);
+  } catch {
+    return null;
+  }
+  const list = Array.isArray(value) ? value : Array.isArray(value?.jobs) ? value.jobs : null;
+  if (!list) return null;
+  const at = Date.parse(since);
+  const created = [];
+  for (const job of list) {
+    const stamp = Date.parse(job?.created_at ?? job?.createdAt ?? "");
+    if (!Number.isFinite(stamp)) return null;
+    if (stamp >= at - 5_000) created.push(job);
+  }
+  return created;
+}
+
+/**
+ * Makes one picture and writes it to `out`.
+ * @returns {Promise<{ok: true, jobId: string, cost: number, out: string} | {ok: false, reason: string, detail?: object}>}
+ */
+export async function makeImage({ prompt, references = [], out, label, jobDir, env = process.env, cli = cliRunner(env), fetchBytes = defaultFetch, day = brisbaneDay() }) {
+  const request = { model: HF_MODEL, aspect_ratio: HF_ASPECT_RATIO, count: 1, prompt, ...(references.length > 0 ? { image_references: references } : {}) };
+  const problem = requestProblem(request);
+  if (problem) return { ok: false, reason: problem };
+  const file = ledgerPath(jobDir, day);
+
+  const lookup = (jobId) => {
+    const got = cli(["generate", "get", jobId, "--json"]);
+    if (got.status !== 0) return "unknown";
+    return outcomeOf(parseJson(got.stdout));
+  };
+  const open = await resolveUnsettled(file, lookup);
+  if (open.length > 0) return { ok: false, reason: "unknown_outcome_pending", detail: { entries: open.map((entry) => entry.id) } };
+
+  const priced = cli(["generate", "cost", ...requestArgs(request)]);
+  let cost = null;
+  try {
+    cost = priced.status === 0 ? costOf(parseJson(priced.stdout)) : null;
+  } catch {
+    cost = null;
+  }
+  if (cost === null) return { ok: false, reason: "cost_unreadable" };
+  if (cost > HF_MAX_CALL_COST) return { ok: false, reason: "cost_above_call_ceiling", detail: { cost, ceiling: HF_MAX_CALL_COST } };
+
+  const admitted = admit({ jobDir, day, env, request, label, cost });
+  if (!admitted.ok) return admitted;
+  const { entry } = admitted;
+
+  const created = cli(["generate", "create", ...requestArgs(request)]);
+  let ids = [];
+  try {
+    ids = created.status === 0 ? jobIdsOf(parseJson(created.stdout)) : [];
+  } catch {
+    ids = [];
+  }
+  if (ids.length === 0) {
+    // Did a job start anyway? Only a list read that shows none settles it.
+    const since = jobsSince(cli, entry.at);
+    if (since !== null && since.length === 0) {
+      settle(file, entry.id, { status: "failed" });
+      return { ok: false, reason: "create_failed", detail: { status: created.status } };
+    }
+    const found = since && since.length === 1 ? jobIdsOf(since[0])[0] : undefined;
+    settle(file, entry.id, { status: "unknown", jobId: found });
+    return { ok: false, reason: "create_outcome_unknown", detail: { status: created.status, timedOut: created.timedOut } };
+  }
+  if (ids.length > 1) {
+    // More than the one picture priced: every job is in the ledger's note, and the run stops.
+    settle(file, entry.id, { status: "unknown", jobId: ids[0] });
+    return { ok: false, reason: "more_than_one_job", detail: { jobs: ids.length } };
+  }
+  const [jobId] = ids;
+  settle(file, entry.id, { status: "unknown", jobId });
+
+  const waited = cli(["generate", "wait", jobId, "--json", "--wait-timeout", "20m"], { timeoutMs: 21 * 60_000 });
+  let job = null;
+  try {
+    job = waited.status === 0 ? parseJson(waited.stdout) : null;
+  } catch {
+    job = null;
+  }
+  const outcome = job ? outcomeOf(job) : "unknown";
+  if (outcome === "unknown") return { ok: false, reason: "wait_outcome_unknown", detail: { jobId } };
+  settle(file, entry.id, { status: outcome, jobId });
+  if (outcome === "failed") return { ok: false, reason: "job_failed", detail: { jobId } };
+
+  const url = resultUrlOf(job);
+  if (!url) return { ok: false, reason: "no_result_url", detail: { jobId } };
+  const bytes = await fetchBytes(url);
+  if (!isPicture(bytes)) return { ok: false, reason: "result_not_a_picture", detail: { jobId } };
+  writeFileSync(out, bytes);
+  return { ok: true, jobId, cost, out };
+}
+
+/** PNG, JPEG or WebP, by their first bytes. */
+export function isPicture(bytes) {
+  if (!bytes || bytes.length < 12) return false;
+  const png = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+  const webp = bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP";
+  return png || jpeg || webp;
+}
+
+async function defaultFetch(url) {
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  const bytes = Buffer.from(await response.arrayBuffer());
+  return bytes.length > 40 * 1024 * 1024 ? null : bytes;
+}
