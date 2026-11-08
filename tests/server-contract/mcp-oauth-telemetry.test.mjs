@@ -7,6 +7,9 @@ await import("../../sentry.edge.config.ts");
 test("server and edge discard OAuth callback errors and transactions including their child spans", () => {
   assert.equal(configs.length, 2);
   for (const config of configs) {
+    // Sentry 11 never calls beforeSendTransaction while it streams spans, so
+    // the filter below only holds with the static lifecycle.
+    assert.equal(config.traceLifecycle, "static");
     for (const event of [
       { request: { url: "https://tomverse.app/api/mcp/oauth/callback?code=synthetic-secret&state=synthetic-state" } },
       { request: { url: "/api/mcp/oauth/callback?code=synthetic-secret" } },

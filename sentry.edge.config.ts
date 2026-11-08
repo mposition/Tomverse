@@ -45,6 +45,12 @@ Sentry.init({
       ? Math.min(1, tracesSampleRate)
       : 0,
   ignoreErrors: ["Internal: NoFallbackError"],
+  // Sentry 11 streams spans by default, and under streaming
+  // `beforeSendTransaction` is never called, so the MCP OAuth callback filter
+  // below would stop dropping traces that carry an authorization code and
+  // state (lib/mcpConnectorTelemetry.ts). The static lifecycle keeps the
+  // transaction model this filter is written for.
+  traceLifecycle: "static",
   beforeSendTransaction: event => isMcpOAuthCallbackTelemetry(event) ? null : event,
   beforeSend(event, hint) {
     if (
