@@ -853,7 +853,7 @@ export function AnalyticsProvider({
             {promptCopy.mobileBody}{" "}
             <Link
               href="/privacy"
-              className="font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+              className={`${pathname === "/privacy" && lang === "en" ? "mt-1 block w-fit whitespace-nowrap" : ""} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
             >
               {copy.privacy}
             </Link>
