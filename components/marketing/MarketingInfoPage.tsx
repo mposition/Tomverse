@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { useId, useState } from "react";
+import { ArrowRight, CheckCircle2, ChevronDown } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { ChatGptVsClaudeGuide } from "./ChatGptVsClaudeGuide";
@@ -27,6 +28,7 @@ export type MarketingInfoCopy = {
   title: string;
   description: string;
   updated?: string;
+  mobileAccordion?: boolean;
   sections: MarketingInfoSection[];
   cta?: {
     label: string;
@@ -44,6 +46,8 @@ export function MarketingInfoPage({
   const { lang } = useLanguage();
   const localizedPage = content[lang];
   const page = localizedPage ?? content.en;
+  const sectionId = useId();
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const pageHref = (href: string) => {
     if (href === "/support/help-centre/chat-workspace") return chatWorkspaceGuideHref(lang);
     if (href.startsWith("/review") || /^\/chat(?=\?|$)/.test(href)) {
@@ -71,7 +75,7 @@ export function MarketingInfoPage({
       >
         <div className="max-w-3xl">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{page.eyebrow}</p>
-          <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{page.title}</h1>
+          <h1 className={`mt-4 text-4xl font-black leading-tight sm:text-6xl ${page.mobileAccordion ? "[overflow-wrap:anywhere]" : ""}`}>{page.title}</h1>
           <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{page.description}</p>
           {page.updated && <p className="mt-4 text-sm font-semibold text-zinc-500 dark:text-zinc-400">{page.updated}</p>}
         </div>
@@ -85,10 +89,26 @@ export function MarketingInfoPage({
                 <AiReviewDemo showLearnMore={false} />
               </div>
             ) : null}
-            <div className="mt-12 grid gap-5">
-              {page.sections.map((section) => (
-                <article key={section.title} lang={section.lang} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
-                  <h2 className="text-xl font-black">{section.title}</h2>
+            <div className={`mt-12 grid ${page.mobileAccordion ? "grid-cols-1 gap-3 sm:gap-5" : "gap-5"}`}>
+              {page.sections.map((section, index) => (
+                <article key={section.title} lang={section.lang} className={`rounded-2xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40 ${page.mobileAccordion ? "min-w-0 p-4 [overflow-wrap:anywhere] sm:p-6" : "p-6"}`}>
+                  <h2 className="text-xl font-black">
+                    {page.mobileAccordion ? <>
+                      <span className="hidden sm:inline">{section.title}</span>
+                      <button type="button" className="flex min-h-11 w-full items-center justify-between gap-3 text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-500 sm:hidden"
+                        aria-expanded={expandedSections.has(section.title)}
+                        aria-controls={`${sectionId}-${index}`}
+                        onClick={() => setExpandedSections(previous => {
+                          const next = new Set(previous);
+                          if (next.has(section.title)) next.delete(section.title);
+                          else next.add(section.title);
+                          return next;
+                        })}>
+                        <span className="min-w-0 flex-1">{section.title}</span><ChevronDown aria-hidden="true" className={`h-5 w-5 shrink-0 ${expandedSections.has(section.title) ? "rotate-180" : ""}`} />
+                      </button>
+                    </> : section.title}
+                  </h2>
+                  <div id={`${sectionId}-${index}`} className={page.mobileAccordion && !expandedSections.has(section.title) ? "hidden sm:block" : undefined}>
                   <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{section.body}</p>
                   {section.bullets && (
                     <ul className="mt-5 grid gap-3">
@@ -111,6 +131,7 @@ export function MarketingInfoPage({
                       <ArrowRight className="h-4 w-4" />
                     </Link>
                   ) : null}
+                  </div>
                 </article>
               ))}
             </div>
