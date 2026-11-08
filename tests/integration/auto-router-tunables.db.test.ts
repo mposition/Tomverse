@@ -17,6 +17,7 @@ import {
   readAutoRouterTunables,
   readSettingAutoApply,
 } from "@/lib/autoRouterTunablesRead";
+import { ROUTER_TIMEOUT_TUNABLE } from "@/lib/autoRouterTunablesCore";
 
 // The optimizer's own setting changes on a real database (owner approval
 // 2026-10-20, with a notice to the operator): nothing applies while the
@@ -71,7 +72,9 @@ const candidates = [
   { id: "luna", credits: 9 },
   { id: "terra", credits: 12 },
 ];
-const raiseTimeout = { setting: "routerTimeoutMs", value: 6_500, modelId: null, hours: null, reason: "타임아웃 8%" };
+// One step above the code default, so the change is a raise whatever that default is.
+const raisedTimeoutMs = AUTO_LLM_ROUTER_TIMEOUT_MS + ROUTER_TIMEOUT_TUNABLE.step;
+const raiseTimeout = { setting: "routerTimeoutMs", value: raisedTimeoutMs, modelId: null, hours: null, reason: "타임아웃 8%" };
 const excludeMini = { setting: "excludeModel", value: null, modelId: "mini", hours: 12, reason: "답변 실패 반복" };
 
 const auditRows = (action: string) =>
@@ -108,7 +111,7 @@ test("an admitted change commits with its system audit entry and its outcome in 
   });
   assert.equal(applied.length, 2);
   const tunables = await readAutoRouterTunables();
-  assert.equal(tunables.routerTimeoutMs?.value, 6_500);
+  assert.equal(tunables.routerTimeoutMs?.value, raisedTimeoutMs);
   assert.equal(tunables.routerTimeoutMs?.previous, AUTO_LLM_ROUTER_TIMEOUT_MS);
   assert.deepEqual(tunables.excluded.map((item) => item.modelId), ["mini"]);
   const audit = await auditRows("auto.llm_router_tunable.applied");
