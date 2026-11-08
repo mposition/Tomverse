@@ -118,6 +118,25 @@ async function fetchProductionExport(secret: string): Promise<ModelCatalogExport
   return validateModelCatalogExport(JSON.parse(body));
 }
 
+/**
+ * Retries a write the database rolled back because a concurrent write made
+ * its plan stale (serialization failure, or a unique key the plan did not
+ * see). Both outcomes are known -- nothing committed -- so a retry re-plans
+ * from scratch rather than repeating an unknown write.
+ */
+const RETRYABLE_PRISMA_CODES = new Set(["P2034", "P2002"]);
+export async function applyWithRetry<T>(run: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      const code =
+        error instanceof Prisma.PrismaClientKnownRequestError ? error.code : undefined;
+      if (!code || !RETRYABLE_PRISMA_CODES.has(code) || attempt >= attempts) throw error;
+    }
+  }
+}
+
 export type ModelCatalogEnvSyncResult =
   | { status: "skipped"; reason: "production" | "environment" | "export_secret_missing" }
   | {
@@ -160,9 +179,13 @@ export async function runModelCatalogEnvSync(
     };
   }
 
-  const { summary, auditLogId } = await prisma.$transaction(
+  const { summary, auditLogId } = await applyWithRetry(() => prisma.$transaction(
     async (tx) => {
       // Planned inside the transaction, against what it is about to change.
+      // Serializable: if this environment's own discovery inserts a row the
+      // plan did not see (a work item under the same key with its own id),
+      // the transaction fails and is planned again, instead of writing events
+      // that point at a work item id that was never inserted.
       const plan = planModelCatalogEnvSync(source.tables, await readTables(tx));
       const summary = summarizeSyncPlan(plan);
       if (plan.totals.create === 0 && plan.totals.update === 0) {
@@ -172,10 +195,9 @@ export async function runModelCatalogEnvSync(
         const spec = MODEL_CATALOG_SYNC_TABLES.find((item) => item.model === table.model)!;
         const client = delegate(tx, spec);
         if (table.create.length > 0) {
-          await client.createMany({
-            data: table.create.map((row) => toWrite(spec, row)),
-            skipDuplicates: true,
-          });
+          // No skipDuplicates: a duplicate means the plan is stale, and a
+          // silently skipped row would leave its references dangling.
+          await client.createMany({ data: table.create.map((row) => toWrite(spec, row)) });
         }
         for (const change of table.update) {
           await client.updateMany({ where: change.where, data: toWrite(spec, change.data) });
@@ -194,8 +216,12 @@ export async function runModelCatalogEnvSync(
       });
       return { summary, auditLogId };
     },
-    { timeout: 180_000, maxWait: 30_000 }
-  );
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      timeout: 180_000,
+      maxWait: 30_000,
+    }
+  ));
   invalidateImageModelCatalog();
   return {
     status: "applied",
