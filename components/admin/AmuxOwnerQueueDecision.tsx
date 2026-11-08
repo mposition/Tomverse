@@ -123,8 +123,7 @@ export function AmuxOwnerQueueDecision({
   // Once this card's review is read, a finished run in review says whether it
   // has a pull request; until then the reason's own words make no PR claim.
   const reviewPr = reviewMatches && review.task.status === "review" &&
-    item.attentionReason === "human_review_required" &&
-    review.task.review_pr_number !== undefined ? review.task.review_pr_number : undefined;
+    item.attentionReason === "human_review_required" ? review.task.review_pr_number : undefined;
   const reportExcerpt = reviewPr === null && reviewMatches
     ? workerReportExcerpt(review.review_report?.worker_report ?? null) : null;
   const usageUnknown = reviewMatches && review.last_attempt !== null &&
@@ -193,7 +192,7 @@ export function AmuxOwnerQueueDecision({
           {copy.detail.whyStopped}
         </p>
         <p className="mt-1.5 text-sm leading-6 text-zinc-300">{why}</p>
-        {usageUnknown ? (
+        {usageUnknown && !outcomes.includes("approve") && !outcomes.includes("retry") ? (
           <p className="mt-1.5 text-sm leading-6 text-zinc-300" data-testid="amux-owner-queue-usage-unknown">
             {copy.why.reviewUsageUnknown}
           </p>

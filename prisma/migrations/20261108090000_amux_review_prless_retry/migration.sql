@@ -7,7 +7,7 @@
 -- delivery fence and that the review attempt succeeded into review.
 --
 -- Additive: every transition the previous check allowed is still allowed, so
--- no existing row can fail the validation. No row is read or written. One
+-- no existing row can fail the validation the ADD runs. No row is written. One
 -- ALTER TABLE holding the DROP and the ADD, so the constraint is never absent
 -- and baseline-check.json can bind the replacement
 -- (scripts/baseline-presence-core.mjs).

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "migrationSqlSha256": "4c080a3f3c3dc0a865b8bb00771b914cd8d2d787c6138bc4dd3a47c2113aca3f",
+  "migrationSqlSha256": "08b4843f986d6b849eebc0d58a06913ea07a5cff14d3b701cd86908c786e7c84",
   "replacedChecks": [
     {
       "table": "AmuxReviewProposal",
