@@ -197,4 +197,27 @@ test.describe("account data download", () => {
     await expect(list.locator("li")).toHaveCount(2);
     await expect(list).toContainText(/거부|Refused/);
   });
+
+  test("history explains recorded refusal reasons without guessing unknown details", async ({ page }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    await mockExportApi(page, { history: [
+      historyRow({ status: "refused", refusalReason: "expired" }),
+      historyRow({ status: "refused", refusalReason: "wrong_user" }),
+      historyRow({ status: "refused", refusalReason: "already_used" }),
+      historyRow({ status: "refused", refusalReason: "future_internal_reason" }),
+      historyRow({ status: "refused", refusalReason: null }),
+      historyRow({ status: "downloaded", refusalReason: "already_used" }),
+    ] });
+    await openDataSettings(page);
+    const list = page.getByTestId("account-data-export-history");
+    await expect(list.locator("li")).toHaveCount(6);
+    await expect(list).toContainText("링크가 만료되어 시스템이 다운로드 요청을 거절했습니다");
+    await expect(list).toContainText("요청한 계정이 링크 소유 계정과 달라");
+    await expect(list.getByText("이미 사용된 일회용 링크", { exact: false })).toHaveCount(2);
+    await expect(list.getByText("구체적인 사유는 기록되지 않았습니다", { exact: false })).toHaveCount(2);
+    await expect(list).not.toContainText("future_internal_reason");
+    await expect(list.locator("li").last()).toContainText("내려받음");
+    await expect(page.getByText("이 기록만으로 누가 시도했는지는 알 수 없습니다", { exact: false })).toBeVisible();
+  });
 });

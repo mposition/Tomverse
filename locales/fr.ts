@@ -1671,6 +1671,9 @@ export const fr = {
         historyDescription: "Chaque demande, téléchargement et refus sur ce compte, conservés quatre-vingt-dix jours. Un refus signifie qu'un lien de téléchargement pour votre compte a été présenté puis rejeté.",
         historyEmpty: "Vous n'avez pas encore téléchargé les données de votre compte.",
         historyLoading: "Chargement...",
+        refusedExpired: "Le système a refusé ce téléchargement car le lien a expiré. Préparez un nouveau lien.",
+        refusedUsed: "Le système a refusé un nouveau téléchargement avec un lien à usage unique déjà utilisé.",
+        refusedAccountMismatch: "Le système a refusé ce téléchargement car le compte demandeur ne possédait pas le lien.",
         refusedNote: "Un lien a été présenté alors qu'il avait expiré, avait déjà servi, ou appartenait à un autre compte.",
         status: {
             ...en.accountDataExport.status,

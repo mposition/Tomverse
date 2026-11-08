@@ -18,8 +18,7 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
  * promise the product is making. Asking for the file requires a recent sign-in;
  * the link that comes back works once and dies in five minutes; and every
  * request, download and refusal is listed underneath. That last part is not
- * decoration: a refused row is how somebody finds out a link of theirs was
- * presented by someone else.
+ * decoration: a refusal records a blocked redemption, not proof of who tried it.
  */
 
 type ExportHistoryEntry = {
@@ -268,11 +267,17 @@ export function AccountDataDownload() {
                       {new Date(entry.createdAt).toLocaleString()}
                       {size ? ` · ${size}` : ""}
                     </p>
-                    {/* A refusal is the row worth reading twice: it means a
-                        link for this account was presented and turned away. */}
-                    {entry.status === "refused" && (
+                    {/* A replay keeps the original downloaded status, but its
+                        recorded refusal still explains the blocked retry. */}
+                    {(entry.status === "refused" || entry.refusalReason) && (
                       <p className="mt-1 text-xs text-red-600 dark:text-red-400">
-                        {t("accountDataExport.refusedNote")}
+                        {entry.refusalReason === "expired"
+                          ? t("accountDataExport.refusedExpired")
+                          : entry.refusalReason === "already_used"
+                            ? t("accountDataExport.refusedUsed")
+                            : entry.refusalReason === "wrong_user"
+                              ? t("accountDataExport.refusedAccountMismatch")
+                              : t("accountDataExport.refusedNote")}
                       </p>
                     )}
                   </div>
