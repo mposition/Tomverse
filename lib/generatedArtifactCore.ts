@@ -441,6 +441,8 @@ const blockSchema = z.discriminatedUnion("type", [
         .array(z.string().max(ARTIFACT_LIMITS.maxTitleLength))
         .min(1)
         .max(ARTIFACT_LIMITS.maxDocumentTableColumns),
+      pdfNumberColumns: z.array(z.number().int().min(0))
+        .max(ARTIFACT_LIMITS.maxDocumentTableColumns).optional(),
       rows: z
         .array(
           z
@@ -449,7 +451,11 @@ const blockSchema = z.discriminatedUnion("type", [
         )
         .max(ARTIFACT_LIMITS.maxDocumentTableRows),
     })
-    .strict(),
+    .strict()
+    .refine(block => !block.pdfNumberColumns || (
+      new Set(block.pdfNumberColumns).size === block.pdfNumberColumns.length &&
+      block.pdfNumberColumns.every(index => index < block.columns.length)
+    ), { message: "PDF number columns must be distinct existing zero-based column indices." }),
   z.object({ type: z.literal("divider") }).strict(),
   z.object({ type: z.literal("pageBreak") }).strict(),
 ]);
