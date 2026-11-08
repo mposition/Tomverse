@@ -8,6 +8,7 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { APICallError } from "ai";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(ROOT, path)).href;
@@ -19,6 +20,7 @@ process.env.DATABASE_URL ||=
   "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1";
 
 const created: unknown[] = [];
+let routerError: unknown;
 let mocksInstalled = false;
 let routerOutput: { reason: string; topic: string; modelId: string; requiresFileGeneration?: boolean } = {
   reason: "short question", topic: "cats", modelId: "deepseek-v4-flash",
@@ -44,10 +46,13 @@ async function load() {
     mock.module("ai", {
       namedExports: {
         ...realAi,
-        generateText: async () => ({
-          output: routerOutput,
-          usage: { inputTokens: 100, outputTokens: 20 },
-        }),
+        generateText: async () => {
+          if (routerError) throw routerError;
+          return {
+            output: routerOutput,
+            usage: { inputTokens: 100, outputTokens: 20 },
+          };
+        },
       },
     });
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: prismaMock } });
@@ -128,5 +133,48 @@ test("file routing records the raw model and reason without losing intent when c
       assert.equal(row.reason, routerOutput.reason);
       assert.equal(row.outcome, "picked");
     }
+  } finally { routerOutput = original; }
+});
+
+test("a provider failure logs its category and trace while preserving the error fallback and decision row", async (t) => {
+  const logs: string[] = [];
+  const warning = mock.method(console, "warn", (value: string) => logs.push(value));
+  t.after(() => warning.mock.restore());
+  created.length = 0;
+  const secret = "private response and credential";
+  routerError = new APICallError({
+    message: secret, url: "https://example.invalid", statusCode: 503,
+    requestBodyValues: { prompt: secret }, responseBody: secret,
+  });
+  try {
+    assert.equal(await pick(), null);
+    assert.equal((created[0] as { outcome: string }).outcome, "error");
+    const failure = logs.map((line) => JSON.parse(line)).find((entry) => entry.event === "auto_llm_router_call_failed");
+    assert.equal(failure.source, "live");
+    assert.equal(failure.traceId, "trace-1");
+    assert.equal(failure.routerModelId, "gpt-6-luna");
+    assert.equal(failure.outcome, "error");
+    assert.equal(failure.failureKind, "provider");
+    assert.equal(failure.statusCode, 503);
+    assert.ok(!logs.join("\n").includes(secret));
+    assert.ok(!logs.join("\n").includes("고양이 그려줘"));
+  } finally { routerError = undefined; }
+});
+
+test("an invalid pick logs separately from a provider failure and keeps its original outcome", async (t) => {
+  const logs: string[] = [];
+  const warning = mock.method(console, "warn", (value: string) => logs.push(value));
+  t.after(() => warning.mock.restore());
+  const original = routerOutput;
+  created.length = 0;
+  routerOutput = { ...original, modelId: "private invalid model response" };
+  try {
+    assert.equal(await pick(), null);
+    assert.equal((created[0] as { outcome: string }).outcome, "invalid");
+    const failure = JSON.parse(logs[0]);
+    assert.equal(failure.outcome, "invalid");
+    assert.equal(failure.failureKind, "invalid_output");
+    assert.equal(failure.source, "live");
+    assert.ok(!logs.join("\n").includes(routerOutput.modelId));
   } finally { routerOutput = original; }
 });

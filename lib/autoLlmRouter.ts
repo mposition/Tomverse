@@ -38,6 +38,7 @@ import {
 } from "@/lib/autoLlmRouterCore";
 import { effectiveRouterTimeoutMs, withoutExcludedModels } from "@/lib/autoRouterTunablesCore";
 import { readAutoRouterTunables } from "@/lib/autoRouterTunablesRead";
+import { autoLlmRouterFailureDetail } from "@/lib/autoLlmRouterDiagnostics";
 
 export type AutoLlmRouterCallResult = {
     outcome: "picked" | "invalid" | "error";
@@ -63,6 +64,11 @@ type AutoLlmRouterCallInput = {
     rewriteGuidance?: string;
     /** The live turn's deadline unless given; the optimizer's replay waits longer. */
     timeoutMs?: number;
+    diagnostics?: {
+        source: "live" | "routing_optimizer" | "rewrite_optimizer";
+        traceId?: string | null;
+        cycleId?: string;
+    };
 };
 
 /** What the call sends, built once so its cost bound is of the same request. */
@@ -92,17 +98,38 @@ export async function callAutoLlmRouter(
     input: AutoLlmRouterCallInput
 ): Promise<AutoLlmRouterCallResult> {
     const { rewrite, system, prompt, maxOutputTokens, candidates } = routerRequest(input);
+    const timeoutMs = input.timeoutMs ??
+        (rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : AUTO_LLM_ROUTER_TIMEOUT_MS);
+    let signal: AbortSignal | undefined;
+    const startedAt = Date.now();
+    let finishReason: unknown;
+    const logFailure = (
+        outcome: "invalid" | "error",
+        detail: ReturnType<typeof autoLlmRouterFailureDetail> | { failureKind: "invalid_output" }
+    ) => {
+        console.warn(JSON.stringify({
+            event: "auto_llm_router_call_failed",
+            source: input.diagnostics?.source ?? "unknown",
+            traceId: input.diagnostics?.traceId ?? null,
+            cycleId: input.diagnostics?.cycleId ?? null,
+            routerModelId: input.routerModel.id,
+            provider: input.routerModel.provider,
+            rewriteAsked: rewrite,
+            outcome,
+            latencyMs: Date.now() - startedAt,
+            timeoutMs,
+            ...detail,
+        }));
+    };
     try {
+        signal = AbortSignal.timeout(timeoutMs);
         const generated = await generateText({
             model: getActiveAiModel(input.routerModel),
             system,
             prompt,
             maxOutputTokens,
             maxRetries: 0,
-            abortSignal: AbortSignal.timeout(
-                input.timeoutMs ??
-                    (rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : AUTO_LLM_ROUTER_TIMEOUT_MS)
-            ),
+            abortSignal: signal,
             output: Output.object({
                 schema: jsonSchema(
                     autoLlmRouterOutputSchema(candidates, { rewrite }) as unknown as JSONSchema7
@@ -111,14 +138,17 @@ export async function callAutoLlmRouter(
             }),
             providerOptions: autoLlmRouterProviderOptions(input.routerModel.provider),
         });
+        finishReason = generated.finishReason;
         const usage = generated.usage as AutoLlmRouterCallResult["usage"];
         const pick = parseAutoLlmRouterOutput(
             generated.output,
             candidates,
             rewrite ? input.prompt : null
         );
+        if (!pick) logFailure("invalid", { failureKind: "invalid_output" });
         return { outcome: pick ? "picked" : "invalid", pick, usage };
-    } catch {
+    } catch (error) {
+        logFailure("error", autoLlmRouterFailureDetail(error, { timedOut: signal?.aborted, finishReason }));
         return { outcome: "error", pick: null, usage: undefined };
     }
 }
@@ -321,6 +351,7 @@ export async function pickAutoModelWithLlm(input: {
         rewriteGuidance: rewriteGuidance?.guidance,
         // A rewrite needs its own longer deadline; a tuned one only ever adds to it.
         timeoutMs: rewrite ? Math.max(AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS, timeoutMs) : timeoutMs,
+        diagnostics: { source: "live", traceId: input.traceId },
     };
     const prices = routerPrices(routerModel);
     const request = routerRequest(call);
