@@ -535,8 +535,9 @@ const percentile = (sorted: readonly number[], fraction: number) =>
 
 /**
  * The router's recent behaviour for the generator, from AutoRouterDecision
- * rows. An `error` that ran to the live deadline is counted as a timeout; a
- * decision the router did not pick fell back to the rule's model.
+ * rows. Timeout counts are estimates against the current deadline, not the
+ * historical call's abort signal; a changed deadline can hide old timeouts.
+ * A decision the router did not pick fell back to the rule's model.
  */
 export const summarizeRouterDecisions = (
     rows: readonly { outcome: string; pickedModelId: string | null; ruleModelId: string; latencyMs: number }[],
@@ -763,6 +764,7 @@ export const AUTO_ROUTER_GENERATOR_SYSTEM = [
     "Find where the picks look wrong: paying for a strong model on work a cheaper one answers as well, or giving hard work to a model that is too weak. Then write guidance that would fix those cases without breaking the right ones.",
     "Describe kinds of work, never specific messages. Do not quote the messages or include personal details.",
     "You may name a model by its exact candidate id only where directComparisons judged it (verdict a, b or tie) against another candidate -- for example: \"Among 9-credit standard candidates, prefer X or Y over Z for short factual questions.\" Never name a model the comparisons did not judge, and never a model that is not a candidate.",
+    "Keep each model preference within the kind of work and model pair actually compared. A win or tie on research does not establish translation quality; a loss does not establish equivalence. Pick frequency and catalogue descriptions are not comparative quality evidence. Where evidence is missing, use a general work-and-credit rule instead of naming a model.",
     `Write the guidance in plain text, one rule per line: aim for about ${AUTO_ROUTER_GUIDANCE_TARGET_CHARS} characters, and never more than ${AUTO_ROUTER_GUIDANCE_MAX_LINES} lines or ${AUTO_ROUTER_GUIDANCE_MAX_CHARS} characters.`,
     TUNABLE_GENERATOR_RULE,
     `Before the guidance, write a short report for the operator in Korean: findings (what the evidence shows) and recommendations, each with a kind -- guidance (a routing rule), code (something an engineer should change, such as a failing call) or setting (an Admin setting). At most ${AUTO_ROUTER_REPORT_MAX_ITEMS} of each, each under 300 characters. Describe kinds of work and models; never quote or paraphrase a message.`,
