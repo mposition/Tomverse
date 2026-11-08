@@ -1341,3 +1341,18 @@ run(
   ],
   "Running the dynamic model catalogue scenarios"
 );
+// The weekly production-to-staging/dev catalogue copy: references land on this
+// environment's ids, the sync actor's audit entry, and a price revision an
+// operator commits while the copy waits for the catalogue writers' lock holds
+// the model.
+run(
+  [
+    "--conditions=react-server",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/model-catalog-env-sync.db.test.ts",
+  ],
+  "Running the model catalogue environment copy scenarios"
+);

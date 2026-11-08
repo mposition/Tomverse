@@ -7,7 +7,7 @@ import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 import { z } from "zod";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { IMAGE_MODEL_REGISTRY, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
 import { invalidateImageModelCatalog, judgeCoding, judgeImage } from "@/lib/modelCatalog";
 import {
@@ -111,6 +111,11 @@ export const updateCatalogEntry = async (input: {
   const run = (body: (tx: Prisma.TransactionClient) => Promise<Awaited<ReturnType<typeof prisma.modelCatalogEntry.upsert>>>) =>
     input.tx ? body(input.tx) : prisma.$transaction(body);
   const result = await run(async (tx) => {
+    // First, before the read: every catalogue writer -- this editor, the
+    // price revision, the draft and the weekly environment copy
+    // (lib/modelCatalogEnvSync.ts) -- takes this lock before reading, so none
+    // of them judges a profile against prices another changed meanwhile.
+    await takeAuditChainLock(tx);
     const before = await tx.modelCatalogEntry.findUnique({
       where: { category_modelId: { category, modelId } },
     });
@@ -220,6 +225,8 @@ export const createImagePriceRevision = async (input: {
   const run = (body: (tx: Prisma.TransactionClient) => Promise<Awaited<ReturnType<typeof prisma.modelCatalogPriceRevision.create>>>) =>
     input.tx ? body(input.tx) : prisma.$transaction(body);
   const result = await runRevision(run, async (tx) => {
+    // Before the read, as in updateCatalogEntry.
+    await takeAuditChainLock(tx);
     const row = await tx.modelCatalogEntry.findUnique({
       where: { category_modelId: { category: "image", modelId } },
     });
@@ -322,6 +329,9 @@ export const applyCatalogDraft = async (input: {
   // One transaction: the draft read, its application and its removal commit
   // together, so a draft written in between is neither applied nor lost.
   await prisma.$transaction(async (tx) => {
+    // Before the row lock below: the catalogue writers take this lock first,
+    // so a row lock is never held while waiting for it (no lock-order deadlock).
+    await takeAuditChainLock(tx);
     const rows = await tx.$queryRaw<{ draft: unknown }[]>`
       SELECT "draft" FROM "ModelCatalogEntry"
       WHERE "category" = ${input.category} AND "modelId" = ${input.modelId}
@@ -367,6 +377,7 @@ export const storeCatalogDraft = async (input: {
   request?: Request;
 }) =>
   prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
     const data = {
       draft: input.draft as Prisma.InputJsonValue,
       draftSource: "llm",

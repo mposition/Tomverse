@@ -19,7 +19,7 @@ export const adminAmuxWorkspaceMessages = defineAdminMessages({
     },
     routingMoved: {
       before: "AMUX assignment evidence moved to ",
-      link: "Execution board › Review queue",
+      link: "Execution board › Diagnostics",
       after: ".",
     },
     // Safety & recovery: the retired tools and the reservation tab.
@@ -54,7 +54,7 @@ export const adminAmuxWorkspaceMessages = defineAdminMessages({
     },
     routingMoved: {
       before: "AMUX 배정 근거는 ",
-      link: "실행 보드 › 검토 큐",
+      link: "실행 보드 › 진단",
       after: "로 옮겼습니다.",
     },
     legacy: {

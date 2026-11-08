@@ -30,15 +30,18 @@ async function board(page: Page) {
   await expect(page.getByTestId("amux-board-card-" + escalated.id)).toBeVisible();
 }
 
-test("the attention lane holds the waiting requests above the escalated card, and the summary counts both", async ({ page }) => {
+test("the attention lane holds the waiting requests above the escalated card, and its counts and tab link cover both", async ({ page }) => {
   await board(page);
-  const summary = page.getByTestId("amux-attention-summary");
-  await expect(summary).toContainText("3 waiting on you");
-  await expect(summary).toContainText("Decision Maker 2");
-  await expect(summary).toContainText("Card reviews 1");
-
   const lane = page.locator('[data-amux-lane="attention"]');
+  // The column heading counts both kinds, and one link takes all of them to the tab that handles them.
   await expect(lane.getByRole("heading", { level: 3 })).toContainText("3");
+  await expect(lane.getByTestId("amux-attention-open-tab")).toHaveAttribute("href", "/admin/amux-execution?tab=review");
+  // The groups count the owner queue once, as the tab and the sidebar badge do:
+  // the escalated card. The two Decision Maker requests are listed above it but
+  // are not cards in that queue.
+  await expect(lane.getByTestId("amux-attention-group-decision")).toHaveText("1");
+  await expect(lane.getByTestId("amux-attention-group-question")).toHaveText("0");
+
   const requests = lane.getByTestId("amux-dm-attention-list").getByRole("link");
   await expect(requests).toHaveCount(2);
   await expect(requests.nth(0)).toHaveAttribute("data-kind", "proposal");
@@ -49,10 +52,8 @@ test("the attention lane holds the waiting requests above the escalated card, an
   const listBox = await lane.getByTestId("amux-dm-attention-list").boundingBox();
   const cardBox = await page.getByTestId("amux-board-card-" + escalated.id).boundingBox();
   expect(listBox!.y + listBox!.height).toBeLessThanOrEqual(cardBox!.y);
-
-  // The summary's jump moves focus to the lane.
-  await summary.getByRole("button").click();
-  await expect(lane).toBeFocused();
+  // The card is one line, not a full card.
+  expect(cardBox!.height).toBeLessThan(64);
 });
 
 test("a request opens as a modal side panel with the judgment pinned to its foot, and Escape closes it", async ({ page }) => {

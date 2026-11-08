@@ -104,8 +104,9 @@ they were written under):
   opens on its Team board (`?tab=dashboard`); the live office is
   `?tab=live`, and the ids are the addresses the office itself links.
 - **Development** is the AMUX group plus Release. Backlog is Ideas, Execution
-  is the Execution board (its Assignment tab is the **review queue**,
-  `?tab=review`; **diagnostics** is declared and waits for its screen), and
+  is the Execution board (its `?tab=review` tab is **Waiting on me**, the old
+  review queue under a new name and a new screen, see "Waiting on me" below;
+  **diagnostics** is declared and waits for its screen), and
   Operations settings is AMUX settings without Execution safety. **Safety &
   recovery** (`/admin/amux-recovery`) holds the halts (`safety`, readable by
   every role, cleared by the owner, carrying the `amuxOrchestratorHalts`
@@ -269,7 +270,7 @@ dispatch state is read from its runtime row -- the operator's exclusions
 first, then its runtime row read the way AMUX reads it when it hands out work
 (live while the lease has not run out and the status is idle or busy). Where a
 worker is drawn follows that state: at its desk while busy or failed (with a
-"!"), in the lounge while free for work, in a sleep pod while its latest quota
+"!"), in the lounge while free for work, in a sleep pod while a fresh quota
 observation says it is used up, on the bench while paused, isolated or blocked,
 and nowhere (a covered desk) while not running. An island's desks grow in
 fours with its workers up to 24; whoever does not fit, or has no island, is
@@ -280,6 +281,13 @@ it also reads the open attempt with the card it holds (display key and title,
 opened the way the card list opens it) and today's CLI usage priced at API
 rates, shown as such and never as money spent. Nothing else of a card, and no
 prompt or output, is read.
+A quota observation is fresh for 20 minutes (`AGENT_OFFICE_QUOTA_FRESH_MS`
+in `lib/agentOffice/inbox.ts`; the AMUX box probes every five). Only a fresh
+reading is drawn as a live bar (summary, roster, worker sheet, island mean),
+rests a worker in a sleep pod or makes a quota inbox item. An older one is
+drawn greyed as a value from back then with its AEST time ("10:42 AEST
+기준"), and a worker or channel with no reading at all says "Not collected"
+("수집 안 됨"): the AMUX server does not send that channel's quota yet.
 The room's connection light is green while at least one admitted worker has
 a live idle/busy dispatch bridge. Individual lost/error bridges remain red,
 with a separate warning count and attention status in the dashboard; green
@@ -302,7 +310,7 @@ person: marketing posts pending approval, AMUX escalations and AMUX halts
 nobody has cleared. The live section's "waiting on you" (and the tab's count)
 adds the Decision Maker items, open v22 worker questions, open plan refusals,
 each AMUX worker in error or lost, and each channel whose resting workers have
-used up their quota, most urgent first.
+used up their quota by a fresh reading, most urgent first.
 They are read with the sidebar badges'
 own count functions (`lib/adminNavigationCounts.ts`), each links to the
 screen where it is acted on, and a count that fails to read is drawn as
@@ -377,10 +385,11 @@ v49 backlog paragraph below). The legacy server
 APIs, gates, cards and audit records are unchanged; retiring their panels
 neither deletes data nor grants execution.
 
-Its Assignment tab carries the count of AMUX escalations still `open` or
+Its Assignment tab carried the count of AMUX escalations still `open` or
 `acknowledged`, from the same status list the section reads
-(`AMUX_ESCALATION_AWAITING_STATUSES`). The Execution entry carries that count
-(`amuxEscalations`). The **Safety & recovery** section in **Operations
+(`AMUX_ESCALATION_AWAITING_STATUSES`); since 2026-11-08 the tab and the
+Execution entry carry the count of cards waiting on the owner instead (see
+"Waiting on me"). The **Safety & recovery** section in **Operations
 settings** opens to every admin role (orchestration policy v20 section 7, amended by v33 section 4).
 It explains stop reasons and evidence, shows receipt confirmation and the
 owner's clear, and carries the count of open halts (`amuxOrchestratorHalts`).
@@ -534,7 +543,7 @@ loses its redirect route or points at a tab that does not exist, and
 | `/admin/amux-backlog?tab=recovery` | `/admin/amux-recovery?tab=reservations` | As above (it opened Ideas from 2026-11-06 until 2026-11-07) |
 | `/admin/amux-backlog?tab=intake` | `/admin/amux-backlog?tab=ideas` | As above |
 | `/admin/amux-settings?tab=safety` | `/admin/amux-recovery?tab=safety` | Execution safety is Safety & recovery; the halt clear's step-up returns there |
-| `/admin/amux-execution?tab=assignment` | `/admin/amux-execution?tab=review` | The review queue under its new name; `halts` now lands on `/admin/amux-recovery?tab=safety` |
+| `/admin/amux-execution?tab=assignment` | `/admin/amux-execution?tab=review` | Waiting on me: old links carry `focusEscalation` and open that decision (the statistics are on Diagnostics); `halts` now lands on `/admin/amux-recovery?tab=safety` |
 | `/admin/admin-access?tab=integrity` | `/admin/audit?tab=integrity` | The chain check is part of the Audit log |
 | `/admin/marketing?tab=competitors` | `/admin/marketing?tab=reports&view=competitors` | `ADMIN_MARKETING_LEGACY_TABS`; `experiments` opens `?tab=reports&view=experiments`, `assets` `?tab=queue&view=assets`, `comments` `?tab=queue&view=comments` |
 | `/admin/engineering-agent?tab=pull-requests` | `/admin/engineering-agent?tab=runs&view=pull-requests` | Runs & PRs holds both records |
@@ -864,7 +873,7 @@ console has no copy for (French, German, …) reads English.
 
 ### AMUX operations settings (2026-10-12)
 
-The operator approved grouping execution safety and recovery with Decision Maker controls in Operations settings. Execution retains cards and assignment; its badge counts escalations. Operations settings counts open orchestrator halts, without adding those halts to the Execution badge again. The legacy `?tab=halts` and `?tab=decision-maker` addresses on Execution redirect to their respective settings sections while preserving other query parameters. Both settings sections remain readable to every admin role. Halt clear remains owner-only; Decision Maker changes retain `ops:write`. Both mutations require their existing recent authentication checks. Reauthentication returns to the exact settings section.
+The operator approved grouping execution safety and recovery with Decision Maker controls in Operations settings. Execution retains cards and assignment; its badge counts the cards waiting on the owner (2026-11-08). Operations settings counts open orchestrator halts, without adding those halts to the Execution badge again. The legacy `?tab=halts` and `?tab=decision-maker` addresses on Execution redirect to their respective settings sections while preserving other query parameters. Both settings sections remain readable to every admin role. Halt clear remains owner-only; Decision Maker changes retain `ops:write`. Both mutations require their existing recent authentication checks. Reauthentication returns to the exact settings section.
 
 The safety section distinguishes automatic recovery checks, operator confirmation and causes that need fixing. A missing admission is never presented as a confirmed non-commit. Automatic history is labelled only with the server-provided system clear kind and matching no-commit/audit evidence. Read failure is shown as unknown, never as an empty or healthy state. The existing 50 open / 20 cleared / 50 human-required display ceilings remain visible. Confirmation checkboxes guide the operator and confer no server authority; the clear endpoint still verifies role, recent authentication and the halt key.
 
@@ -923,15 +932,52 @@ audit record is as it was, and `tests/adminAmuxDevScreens.test.mjs` pins that.
   (Tomverse Backlog, AMUX Backlog and Todo as sub-lists, each still a
   `data-amux-lane` section, and AMUX Backlog still the only drop target), Waiting
   on you (the attention lane, so its count is the server's), Running, In review
-  and Done (the idea lane's recent merges; older finished cards stay in the
-  history below). A card shows its worker's avatar, its channel (Claude, Codex,
-  Copilot or Cursor, read from the worker's name) and the time since it last
-  changed; the board snapshot carries no per-card cost, so none is drawn. A card
-  stopped by the work itself (a lost run, an unknown outcome, a limit) has a red
-  edge and a link to Safety & recovery. The card dialog, the move panel and the
-  Decision Maker judgment are unchanged. Diagnostics still reads "Opening soon"
-  and points at the review queue, where the worker report and the assignment
-  evidence are.
+  and Done (the idea lane's recent merges). A card is short: its number, its
+  worker's channel, its title and one line (worker, priority, the time since it
+  last changed); the Task ID, source key, score and brief are in the card detail.
+  The board snapshot carries no per-card cost, so none is drawn. A view switch at
+  the top holds Board, List and Hierarchy. (2026-11-08, redesign step 9)
+  - **Waiting on you** is a short column: four counts by what the cards need
+    (decide, answer a question, recover, read), the first five as one line each
+    (Decision Maker requests first), and one link to `?tab=review`. The counts
+    are of the cards the board has loaded (it pages the rest of the lane in, up to
+    96) and say so with a "+" until all are. The split follows
+    `classifyAmuxOwnerQueueItem` (decision, technical recovery, needs a read) with
+    the worker question as a fourth group; it is drawn from the card's open
+    question and its newest open escalation's reason code, because the board does
+    not load the protected review that classifier needs. A card stopped by the
+    work itself (a lost run, an unknown outcome, a limit) has a red edge and a
+    link to Safety & recovery. Opening a card, the review button and the question
+    button are as they were.
+  - **Past work** replaces the closed archive drawer: a state filter (Done,
+    Blocked, Cancelled, Archived), a search, the state chip, the number, the
+    title, the worker and the AEST time, paged by the archive lane exactly as
+    before. The filters and the state counts cover the cards loaded so far, and
+    the list says so.
+  - **List** is the owner card list as one table (`AdminDataTable`): card number
+    and title, state chip, worker, priority, runs and the last change (AEST and how
+    long ago). A row opens the card detail, which already holds the worker
+    result, a waiting worker question with its answer form, the attempts and the
+    technical values; the table holds none of them and writes nothing. It reads
+    the same newest-cards list as before, with the title and worker added
+    (`lib/amux/adminExecutionCardList.ts`); a failed read shows an error, never an
+    empty table.
+  - **Moved.** The "additional card and usage records" box is gone. Worker usage
+    coverage is on Diagnostics (owner only, because it lists estimated API
+    costs), and the card number cleanup is a section of Safety & recovery ›
+    Legacy tools (owner only, the same panel and the same write).
+  - **Diagnostics** holds worker usage coverage (four numbers, then one row per
+    worker; a row opens to the models and rounds behind it), why work went to each
+    worker, how each worker did, and incident mode, the active queue and the
+    planning limits. It reads the routing report the review queue used to draw
+    beside the escalations; raw metrics and policy keys are under "Technical
+    details". The human review queue and the review detail stay with the "waiting
+    on you" screen (`AdminAmuxRoutingPanel` keeps only that part).
+  - **Incident band.** While incident mode stops admission (or its setting is
+    missing or damaged, which stops it fail-closed) a red band runs across the top
+    of all three tabs. A failed read of the setting is drawn as "unavailable",
+    never as calm and never hidden.
+  The card dialog, the move panel and the Decision Maker judgment are unchanged.
 - **Release › QA.** It opens on the next train (its AEST time and the time left),
   today's route (a train counts as departed only when its admission was
   recorded), production against main, the pull requests picked for the next
@@ -964,12 +1010,54 @@ summary line above the board that counts both and jumps to the lane. It opens as
 a side panel at `?dmRequest=<id>` on any Execution tab, so an operator who may
 judge but cannot see the Cards board still reaches it; the panel is modal, closes
 by navigating (scrim, close link, Escape), and its bodies are read only for
-`ops:write`. The Execution badge counts escalations plus waiting requests (both
-must be known), the Cards tab badge the requests alone. Operations settings keeps
+`ops:write`. The Cards tab badge counts the requests alone; the Execution badge and the
+Waiting on me tab count cards (see "Waiting on me"), not requests. Operations settings keeps
 the switches, the accuracy report and the request history, says where the
 requests to judge are, and the old `?tab=decision-maker&request=<id>` address
 redirects to the panel. A delivery that is unknown is shown but not resolved
 here: the console has no resolution control yet.
+
+### Waiting on me (2026-11-08, redesign step 9)
+
+`/admin/amux-execution?tab=review` keeps its address (bookmarks, runbooks and
+the old `?tab=assignment` redirect still land on it, since those links open a
+decision; the Routing page's pointer to the statistics goes to Diagnostics) and becomes **Waiting on
+me** (내 확인 대기): one screen where the owner works through every card that
+waits on a person, one after another. The assignment statistics that used to
+fill the tab (incident mode, active queue, planning policy, worker evidence,
+assignment decisions) belong to Diagnostics.
+
+- **What is in it.** One set of cards, each counted once
+  (`amuxOwnerQueueWhere`, `lib/amux/ownerQueueCore.ts`): a card in the board's
+  attention lane, a card whose worker question is open in any lane, and a card
+  with an open escalation. It is read by `GET /api/admin/amux/owner-queue`
+  (read only, any admin role, rate limited, no migration). The list holds the
+  newest 100 and says so when the queue is longer; the total is the whole set.
+- **One number.** The sidebar entry, this tab and the board's "Waiting on me"
+  column show the same count (`awaitingAmuxOwnerQueue`, badge key
+  `amuxOwnerQueue`; `countAmuxOwnerQueue` is the one loader). A count that
+  could not be read is no badge, never zero. Decision Maker requests are not in
+  it: they keep the Board tab's own chip and their drawer.
+- **Groups.** To decide, To answer (an open worker question), To recover (the
+  work itself stopped) and To read and pass (an unknown outcome, or no open
+  reason), by the escalation's reason code and the question state. The group
+  only orders the list. What can be decided is still decided by the protected
+  review for the chosen card (`classifyAmuxOwnerQueueItem`).
+- **Decision pane.** Why it stopped, then the existing parts: the worker
+  question box for a question, the protected owner review (`useAmuxOwnerReview`,
+  `AmuxOwnerReviewDetail`) for an escalation. They show only the choices the
+  server allows and keep the proposal, the confirmation, the step-up and the
+  "unknown outcome means no retry" rule. A lost run or an unknown outcome reads
+  "check the result first, then decide" and links to Safety & recovery; the
+  screen adds no run button and no write route.
+- **Keys.** J and K move between cards, a number picks a choice (it never
+  prepares or confirms it), typing in a field is left alone. While a decision
+  is being read or recorded the list and the keys do not leave the card. "Move
+  to the next card after I decide" is on by default. Full screen is a pressed
+  state that covers the shell; Escape leaves it.
+- **Today's count** is the escalations a person resolved and the questions a
+  person answered since 00:00 AEST; unread is "Unavailable".
+- A failed read is an alert with a retry, never an empty list.
 
 ### AMUX Workers in Operations settings (2026-10-20)
 

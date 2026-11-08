@@ -174,6 +174,8 @@ test("the system actor list is closed and changes only by review", () => {
     // The scheduled renewal of the Code client's coding catalogue snapshot:
     // identical content only, one action about one snapshot row.
     "model-catalog-renewal",
+    // The weekly production-to-staging/dev catalogue copy: one action, one target.
+    "model-catalog-env-sync",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
@@ -502,6 +504,21 @@ test("the coding catalogue renewal actor may only record a snapshot renewal", ()
     "model_catalog.entry_updated", "ModelCatalogEntry"), false);
   assert.equal(systemAuditActionAllowed("model-catalog-renewal",
     "model_catalog.snapshot_renewed", "AppSettings"), false);
+});
+
+test("the catalogue environment sync actor may only record a sync", () => {
+  assert.equal(isSystemAuditActor("model-catalog-env-sync"), true);
+  assert.equal(systemAuditActionAllowed("model-catalog-env-sync",
+    "model_catalog.env_synced", "ModelCatalogEnvSync"), true);
+  assert.equal(systemAuditActionAllowed("model-catalog-env-sync",
+    "model_catalog.snapshot_renewed", "ModelCatalogSnapshot"), false);
+  assert.equal(systemAuditActionAllowed("model-catalog-env-sync",
+    "model_catalog.entry_updated", "ModelCatalogEntry"), false);
+  assert.equal(systemAuditActionAllowed("model-catalog-env-sync",
+    "model_catalog.env_synced", "AppSettings"), false);
+  // And the renewal actor cannot record a sync.
+  assert.equal(systemAuditActionAllowed("model-catalog-renewal",
+    "model_catalog.env_synced", "ModelCatalogEnvSync"), false);
 });
 
 test("the Auto router coding agent may only claim a recommendation and record its result", () => {

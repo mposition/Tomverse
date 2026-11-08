@@ -3,10 +3,13 @@
 import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, X } from "lucide-react";
-import { AlertTriangle, ArrowRight, Bot, Clock, GitPullRequest, GripVertical, MoveRight } from "lucide-react";
+import { Bot, Columns3, GitPullRequest, GripVertical, List, MoveRight, Network } from "lucide-react";
 import { AmuxExecutionMovePanel, type AmuxBoardMove } from "./AmuxExecutionMovePanel";
 import { AmuxExecutionDialog } from "./AmuxExecutionDialog";
 import { AmuxCardOwnerReview } from "./AdminAmuxRoutingPanel";
+import { AmuxBoardAttentionLane, AMUX_ATTENTION_LANE_ROWS, type AmuxBoardOwnerQueue } from "./AmuxBoardAttentionLane";
+import { AmuxBoardPastWork } from "./AmuxBoardPastWork";
+import { AmuxCardListPanel } from "./AmuxCardListPanel";
 import { AmuxTaskQuestionSection } from "./AmuxWorkerQuestion";
 import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
@@ -14,8 +17,9 @@ import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEv
 
 import { AdminChannelIcon, adminChannelName } from "@/components/admin/ui/AdminChannelIcon";
 import { AdminPixelAvatar } from "@/components/admin/ui/AdminPixelAvatar";
+import { AdminReadFailed } from "@/components/admin/ui/AdminReadFailed";
 import {
-  AMUX_BOARD_COLUMNS, AMUX_WORKER_CHANNELS, amuxBoardCardStuck, amuxElapsed,
+  AMUX_BOARD_COLUMNS, AMUX_WORKER_CHANNELS, amuxElapsed,
   type AmuxBoardColumn, type AmuxWorkerChannel,
 } from "@/lib/adminAmuxFlow";
 import { adminFetch } from "@/lib/adminFetch";
@@ -23,6 +27,9 @@ import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxExecutionMessages } from "@/lib/adminMessages/amuxExecution";
 import { adminAmuxScreensMessages } from "@/lib/adminMessages/amuxScreens";
+import { amuxStatusChip } from "@/lib/adminAmuxBoardView";
+import { adminAmuxBoardViewsMessages } from "@/lib/adminMessages/amuxBoardViews";
+import type { AmuxExecutionListRow } from "@/lib/amux/adminExecutionCardList";
 import { adminAmuxDecisionMakerAttentionMessages } from "@/lib/adminMessages/amuxDecisionMaker";
 import type { DmAttention, DmAttentionItem } from "@/lib/amux/decisionMakerAttention";
 import { AmuxOutcomeObservationForm } from "./AmuxOutcomeObservationForm";
@@ -51,6 +58,8 @@ type Card = {
   attentionReason: string | null;
   /** A v22 worker question still waiting on the owner; null when none. */
   ownerQuestion: "open" | "answered" | null;
+  /** In the archive drawer (the archive lane also holds finished cards that were never archived). */
+  archived?: boolean;
   updatedAt: string;
 };
 type BoardSnapshot = { pageSize: number;
@@ -160,27 +169,26 @@ function DecisionMakerAttentionCard({ item, nowMs }: { item: DmAttentionItem; no
   const d = useAdminMessages(adminAmuxDecisionMakerAttentionMessages);
   const { locale } = useAdminLocale();
   const unknown = item.kind === "delivery_unknown";
+  const waited = d.waiting(item.askingWorkerId, item.instance ?? "-", waitedFor(item.createdAtMs, nowMs, locale));
   return <li><Link href={dmRequestHref(item.requestId)} prefetch={false}
-    className={styles.dmCard + (unknown ? " " + styles.dmCardUnknown : "")}
-    aria-label={d.open(item.cardId, item.questionRevision)}
+    className={"flex min-h-10 min-w-0 items-center gap-2 rounded-xl border bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-100 hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 " +
+      (unknown ? "border-amber-500/60" : "border-sky-500/50")}
+    aria-label={d.open(item.cardId, item.questionRevision)} title={waited}
     data-testid={"amux-dm-attention-" + item.requestId} data-kind={item.kind}>
-    <span className={styles.dmChips}>
-      <span className={styles.dmChip + (unknown ? " " + styles.dmChipUnknown : "")}>
-        <Bot size={12} aria-hidden="true" />{d.kinds[item.kind]}</span>
-      {item.irreversible === true && <span className={styles.dmChip + " " + styles.dmChipIrreversible}>
-        {d.irreversible}</span>}
-    </span>
-    <span className={styles.dmKey}>{amuxVisibleInspectionText(item.cardId)} · rev {item.questionRevision}</span>
-    {item.question !== null && <span className={styles.dmQuestion}>{amuxVisibleInspectionText(item.question)}</span>}
-    {item.proposal !== null && <span className={styles.dmProposal}>
-      <span>{d.proposalLabel[item.kind]}</span>
-      <span>{amuxVisibleInspectionText(item.proposal)}</span></span>}
-    <span className={styles.dmMeta}><Clock size={12} aria-hidden="true" />
-      {d.waiting(item.askingWorkerId, item.instance ?? "-", waitedFor(item.createdAtMs, nowMs, locale))}</span>
+    <Bot size={14} aria-hidden="true" className={"shrink-0 " + (unknown ? "text-amber-300" : "text-sky-300")} />
+    <span className="shrink-0 font-mono text-[11px] font-bold">{amuxVisibleInspectionText(item.cardId)}</span>
+    <span className={"shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold " +
+      (unknown ? "bg-amber-500/15 text-amber-300" : "bg-sky-500/15 text-sky-300")}>{d.kinds[item.kind]}</span>
+    {item.irreversible === true && <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-[11px] font-bold text-red-300">
+      {d.irreversible}</span>}
+    {item.question !== null && <span className="min-w-0 flex-1 truncate text-zinc-400">{amuxVisibleInspectionText(item.question)}</span>}
   </Link></li>;
 }
 
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
+
+/** The most attention-lane cards the board loads on its own for the column's counts. */
+const ATTENTION_AUTOLOAD_MAX = 96;
 
 /** The lanes each board column holds; the lanes themselves are the server's. */
 const COLUMN_LANES: Record<AmuxBoardColumn, AmuxExecutionLane[]> = {
@@ -220,8 +228,10 @@ function IdeaLaneCard({ card }: { card: AmuxIdeaLaneBoardCard }) {
 }
 
 export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false,
-  canReviewCards = false, decisionMaker, laneIdeas, workerChannels }: {
+  canReviewCards = false, decisionMaker, laneIdeas, workerChannels, cardList, ownerQueue }: {
   initialTaskId?: string | null; canMoveCards?: boolean;
+  /** The "Waiting on me" queue's count and groups, read by the page; null: not read. */
+  ownerQueue?: AmuxBoardOwnerQueue | null;
   /**
    * Each registered worker's channel, from the registry the page read. Absent
    * or a worker not in it: no channel badge, never one guessed from a name.
@@ -241,15 +251,23 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
    * not offered; null: the read failed.
    */
   laneIdeas?: AmuxIdeaLaneBoardCard[] | null;
+  /**
+   * The List view's rows, read by the page (lib/amux/adminExecutionCardList.ts).
+   * Absent: the view is not offered; null: the read failed, which the view says.
+   */
+  cardList?: { rows: AmuxExecutionListRow[]; total: number; limit: number } | null;
 }) {
   const m = useAdminMessages(adminAmuxExecutionMessages);
   const d = useAdminMessages(adminAmuxDecisionMakerAttentionMessages);
   const screens = useAdminMessages(adminAmuxScreensMessages).board;
+  const views = useAdminMessages(adminAmuxBoardViewsMessages);
   const { locale } = useAdminLocale();
   // The clock the card ages are counted against: read when the board was read, not on every render.
   const [nowMs, setNowMs] = useState<number | null>(null);
   const dmTotal = decisionMaker?.total ?? 0;
-  const [view, setView] = useState<"board" | "hierarchy">("board");
+  const [view, setView] = useState<"board" | "list" | "hierarchy">("board");
+  // A lane the board pages on its own (the attention lane's rest, the past-work list) stops after a failed read instead of retrying in a loop.
+  const [autoStopped, setAutoStopped] = useState<Partial<Record<AmuxExecutionLane, true>>>({});
   const [board, setBoard] = useState<BoardSnapshot | null>(null);
   const [activation, setActivation] = useState<ActivationSnapshot | null>(null);
   const [boardPages, setBoardPages] = useState<Partial<Record<AmuxExecutionLane, number>>>({});
@@ -294,7 +312,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     try {
       const result = await getJson<BoardSnapshot>("/api/admin/amux/execution-view?view=board_snapshot");
       if (generation === boardGeneration.current) {
-        setBoard(result); setBoardPages({}); setArchive([]); setNowMs(Date.now());
+        setBoard(result); setBoardPages({}); setArchive([]); setAutoStopped({}); setNowMs(Date.now());
       }
     } catch (reason) { if (generation === boardGeneration.current) showError(reason); }
     finally { if (generation === boardGeneration.current) setBoardLoading(false); }
@@ -360,8 +378,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     setExpanded((current) => ({ ...current, [key]: next }));
     if (next && !tree[key]) void loadHierarchy(parent);
   };
-  const loadBoardPage = async (lane: AmuxExecutionLane) => {
-    if (boardBusy || boardLoading) return;
+  /** true: a page was added; false: the read failed; null: nothing was read (busy, or the board was reloaded meanwhile). */
+  const loadBoardPage = async (lane: AmuxExecutionLane): Promise<boolean | null> => {
+    if (boardBusy || boardLoading) return null;
     const generation = boardGeneration.current;
     const next = lane === "archive" && boardPages.archive === undefined ? 0 :
       (boardPages[lane] ?? 0) + 1;
@@ -369,15 +388,35 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     try {
       const result = await getJson<{ cards: Card[]; counts: BoardSnapshot["counts"] }>(
         `/api/admin/amux/execution-view?view=board&lane=${lane}&page=${next}`);
-      if (generation !== boardGeneration.current) return;
+      if (generation !== boardGeneration.current) return null;
       setBoardPages((current) => ({ ...current, [lane]: next }));
       if (lane === "archive") setArchive((current) => [...current, ...result.cards]);
       else setBoard((current) => current ? { ...current, counts: result.counts,
         lanes: current.lanes.map((column) => column.lane === lane ?
           { ...column, cards: [...column.cards, ...result.cards] } : column) } : current);
-    } catch (reason) { if (generation === boardGeneration.current) showError(reason); }
+      return true;
+    } catch (reason) {
+      if (generation !== boardGeneration.current) return null;
+      showError(reason);
+      return false;
+    }
     finally { if (generation === boardGeneration.current) setBoardBusy(null); }
   };
+  // The four counts in the "waiting on you" column and the past-work list read whole lanes, so the rest of the
+  // attention lane (up to ATTENTION_AUTOLOAD_MAX cards) and the first page of the archive load after the snapshot.
+  const loadPageRef = useRef(loadBoardPage);
+  useEffect(() => { loadPageRef.current = loadBoardPage; });
+  useEffect(() => {
+    if (!board || boardLoading || boardBusy) return;
+    const attentionLoaded = board.lanes.find((item) => item.lane === "attention")?.cards.length ?? 0;
+    const lane: AmuxExecutionLane | null = !autoStopped.attention && attentionLoaded < board.counts.attention &&
+      ((boardPages.attention ?? 0) + 1) * board.pageSize < ATTENTION_AUTOLOAD_MAX ? "attention" :
+      !autoStopped.archive && boardPages.archive === undefined && board.counts.archive > 0 ? "archive" : null;
+    if (lane === null) return;
+    void loadPageRef.current(lane).then((result) => {
+      if (result === false) setAutoStopped((current) => ({ ...current, [lane]: true }));
+    });
+  }, [board, boardLoading, boardBusy, boardPages, autoStopped]);
   const closeCard = useCallback((updateHistory = true) => {
     detailRequest.current += 1;
     setDetailOpen(false); setSelected(null); setDetailBusy(false); setDetailError(null);
@@ -624,14 +663,13 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       if (lane === "amux_backlog" && id) openMove(id);
     },
   });
+  /** A card of a lane other than "waiting on you": its number, title and one line (worker, priority, time since it changed). */
   const renderCard = (card: Card, lane: AmuxExecutionLane) => {
-    const stuck = amuxBoardCardStuck({ lane, attentionReason: card.attentionReason, ownerQuestion: card.ownerQuestion });
-    const asksOwner = lane === "attention" && !stuck;
     const channel = card.worker ? workerChannels?.[card.worker] ?? null : null;
     const since = elapsedText(card.updatedAt);
     return <li key={card.id}
-      className={styles.card + (stuck ? " " + styles.cardStuck : asksOwner ? " " + styles.cardApprove : "")}
-      data-testid={"amux-board-card-" + card.id} data-stuck={stuck ? "true" : undefined}
+      className={styles.card}
+      data-testid={"amux-board-card-" + card.id}
       draggable={canMoveCards && lane === "tomverse_backlog" && card.cardType === "task"}
       onDragStart={(event) => { if (pointerDrag.current) { event.preventDefault(); return; }
         dragCard.current = card.id;
@@ -664,40 +702,26 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
             onClick={(event) => { returnFocusRef.current = event.currentTarget; openMove(card.id); }}>
             <MoveRight size={14} aria-hidden="true" /></button>}
       </div>
-      {card.attentionReason && <span className={styles.reasonChip + (stuck ? " " + styles.reasonChipStuck : "")}
-        data-testid={"amux-card-attention-reason-" + card.id}>
-        {m.attentionReason[card.attentionReason] ?? m.attentionReasonFallback}</span>}
       <button type="button" className={styles.cardTitle}
         onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
         {amuxVisibleInspectionText(card.title ?? m.protectedTitle)}
       </button>
+      {/* docs/policy/amux-card-display-key.md S5: the number leads, the Task ID beside it. */}
       {card.displayKey && <p className={styles.cardMeta}>
         {m.taskId}: {amuxVisibleInspectionText(card.id)}</p>}
-      {amuxDistinctSourceKey(card.id, card.sourceKey) && <p className={styles.cardMeta}>
+      {!card.displayKey && amuxDistinctSourceKey(card.id, card.sourceKey) && <p className={styles.cardMeta}>
         {m.sourceKey}: {amuxVisibleInspectionText(card.sourceKey ?? "")}</p>}
-      <p className={styles.cardMeta}>{card.cardType ?? card.kind} · {card.priority.toUpperCase()}
-        {card.taskRole ? " · " + card.taskRole : ""}</p>
       <p className={styles.cardWorker}>
-        {card.worker ? <AdminPixelAvatar team="amux" tile={30} unit={1.5} body={false} /> : null}
+        {card.worker ? <AdminPixelAvatar team="amux" tile={22} unit={1.1} body={false} /> : null}
         <span className={styles.workerName}>{card.worker ?? m.noWorker}</span>
+        <span>{card.priority.toUpperCase()}</span>
         {since && <span className={styles.elapsed} title={screens.sinceChange}>{since}</span>}
       </p>
-      {card.ownerQuestion === "open" && <button type="button" className={styles.reviewButton}
-        data-testid={"amux-card-open-question-" + card.id}
-        onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id, true, true); }}>
-        {m.questionPending}<MoveRight size={14} aria-hidden="true" /></button>}
-      {canReviewCards && card.attentionReason && <button type="button" className={styles.reviewButton}
-        data-testid={"amux-card-open-review-" + card.id}
-        onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
-        {m.openOwnerReview}<MoveRight size={14} aria-hidden="true" /></button>}
-      {stuck && <Link href="/admin/amux-recovery?tab=safety" className={styles.safetyLink}
-        data-testid={"amux-card-safety-link-" + card.id}>{screens.openSafety}</Link>}
-      <p className={styles.cardState + (!card.briefPresent || !card.scoreFresh ? " " + styles.cardWarning : "")}>
-        {card.dependencyCount > 0 ? m.dependencyCount(card.dependencyCount) :
-          card.score !== null ? m.score + " " + card.score + (card.scoreFresh ? "" : " · " + m.stale) :
-            m.scoreUnavailable}
-      </p>
     </li>;
+  };
+  /** The "waiting on you" column: counts by reason, the first cards as one line each, and the way to the tab that handles them. */
+  const openFromLane = (taskId: string, preferOverview: boolean, opener: HTMLElement) => {
+    returnFocusRef.current = opener; void openCard(taskId, true, preferOverview);
   };
   /** What fills a lane: the Decision Maker requests above its cards, then the cards, then idea-lane display cards. */
   const laneBody = (snapshot: BoardSnapshot, lane: AmuxExecutionLane) => {
@@ -705,32 +729,28 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     const matches = filtered(cards);
     const laneCards = laneCardsFor(lane);
     const attention = lane === "attention";
+    const attentionTotal = Math.max(snapshot.counts.attention, ownerQueue?.total ?? 0) + dmTotal;
     return <>
+      {attention && attentionTotal > 0 && <AmuxBoardAttentionLane cards={matches} countedCards={cards}
+        cardTotal={snapshot.counts.attention} decisionMakerTotal={dmTotal} canReviewCards={canReviewCards}
+        workerChannels={workerChannels} onOpen={openFromLane} ownerQueue={ownerQueue}
+        decisionMakerRows={decisionMaker ? decisionMaker.items.slice(0, AMUX_ATTENTION_LANE_ROWS).map((item) =>
+          <DecisionMakerAttentionCard key={item.requestId} item={item} nowMs={decisionMaker.dbNowMs} />) : []}
+        decisionMakerNote={<>
+          {decisionMaker?.items.some((item) => item.question === null) && <p className={styles.dmMore}>{d.bodiesHidden}</p>}
+        </>} />}
       {attention && decisionMaker === null && <p role="alert" className={styles.dmMore}>{d.unavailable}</p>}
-      {attention && decisionMaker && dmTotal > 0 && <>
-        <h4 className={styles.groupHeading + " " + styles.groupHeadingDm}>
-          <Bot size={14} aria-hidden="true" />{d.groupDm(dmTotal)}</h4>
-        <ol className={styles.cards} data-testid="amux-dm-attention-list">
-          {decisionMaker.items.map((item) =>
-            <DecisionMakerAttentionCard key={item.requestId} item={item} nowMs={decisionMaker.dbNowMs} />)}
-        </ol>
-        {decisionMaker.items.some((item) => item.question === null) && <p className={styles.dmMore}>{d.bodiesHidden}</p>}
-        {dmTotal > decisionMaker.items.length && <p className={styles.dmMore}>
-          {d.more(dmTotal - decisionMaker.items.length)}</p>}
-        {snapshot.counts.attention > 0 && <h4 className={styles.groupHeading + " " + styles.groupHeadingCards}>
-          <AlertTriangle size={14} aria-hidden="true" />{d.groupCards(snapshot.counts.attention)}</h4>}
-      </>}
-      <ol className={styles.cards}>{matches.map((card) => renderCard(card, lane))}</ol>
+      {!attention && <ol className={styles.cards}>{matches.map((card) => renderCard(card, lane))}</ol>}
       {laneCards.length > 0 && <>
         <h4 className={styles.groupHeading + " " + styles.groupHeadingLane}>
           <GitPullRequest size={14} aria-hidden="true" />{m.ideaLane.group(laneCards.length)}</h4>
         <ol className={styles.cards} data-testid={"amux-lane-ideas-" + lane}>
           {laneCards.map((card) => <IdeaLaneCard key={card.requestId} card={card} />)}</ol>
       </>}
-      {matches.length === 0 && laneCards.length === 0 && !(attention && cards.length === 0 && dmTotal > 0) &&
+      {(attention ? attentionTotal === 0 : matches.length === 0) && laneCards.length === 0 &&
         <p className={styles.empty}>{cards.length === 0 ? m.empty : m.noMatches}</p>}
       {(query || workerFilter || priorityFilter) && <p className={styles.hint}>{m.matchCount(matches.length, cards.length)}</p>}
-      {cards.length < snapshot.counts[lane] && <button type="button"
+      {!attention && cards.length < snapshot.counts[lane] && <button type="button"
         disabled={boardBusy !== null || boardLoading} className={styles.button}
         onClick={() => void loadBoardPage(lane)}>
         {m.loadMore(cards.length, snapshot.counts[lane])}
@@ -750,11 +770,17 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
           {AMUX_WORKER_CHANNELS.map((channel) => <li key={channel} className={styles.channel}>
             <AdminChannelIcon channel={channel} size={16} />{adminChannelName(channel)}</li>)}
         </ul></div>
-      <div className="flex gap-2" role="group" aria-label={m.viewLabel}>
-        <button type="button" aria-pressed={view === "board"}
-          className={styles.viewButton} onClick={() => setView("board")}>{m.board}</button>
-        <button type="button" aria-pressed={view === "hierarchy"}
-          className={styles.viewButton} onClick={openHierarchy}>{m.hierarchy}</button>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex gap-1 rounded-2xl border border-zinc-800 bg-zinc-900 p-1" role="group"
+          aria-label={views.views.label} data-testid="amux-view-switch">
+          {([["board", views.views.board, Columns3, () => setView("board")],
+            ...(cardList === undefined ? [] : [["list", views.views.list, List, () => setView("list")] as const]),
+            ["hierarchy", views.views.hierarchy, Network, openHierarchy]] as const).map(([id, label, Icon, go]) =>
+            <button key={id} type="button" aria-pressed={view === id} onClick={go} data-testid={"amux-view-" + id}
+              className={"inline-flex min-h-9 items-center gap-1.5 rounded-xl px-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 " +
+                (view === id ? "bg-zinc-100 font-bold text-zinc-900" : "font-medium text-zinc-400 hover:text-white")}>
+              <Icon className="h-4 w-4" aria-hidden="true" />{label}</button>)}
+        </div>
         <button type="button" className={styles.button} disabled={boardLoading}
           onClick={() => void refreshBoard()}><RefreshCw size={14} aria-hidden="true" />{m.refresh}</button>
         {canMoveCards && board && activeCardCount > 0 && <button type="button"
@@ -787,12 +813,6 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       </div>
     </div>}
     <p className={styles.hint}>{m.searchScope}</p>
-    <div className={styles.summary}>
-      <span>{m.activeTasks} <strong>{board ? board.counts.in_progress : m.unknown}</strong></span>
-      <span>{m.awaitingWorker} <strong>{board ? board.counts.amux_backlog : m.unknown}</strong></span>
-      <span>{m.awaitingReview} <strong>{board ? board.counts.in_review : m.unknown}</strong></span>
-      <Link href="/admin/amux-recovery?tab=safety">{m.haltsLink}</Link>
-    </div>
     {activation && <details data-testid="amux-v22-activation-diagnostic"
       className="rounded border p-3 text-sm border-zinc-700">
       <summary className="cursor-pointer font-semibold">{m.activationReadout}</summary>
@@ -812,19 +832,6 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         href={adminRecentAuthenticationHref("/admin/amux-execution?tab=cards")}>{m.reauth}</Link> :
         m.unavailable}
     </p>}
-    {view === "board" && board && board.counts.attention + dmTotal > 0 &&
-      <div className={styles.attentionSummary} data-testid="amux-attention-summary">
-        <AlertTriangle size={16} aria-hidden="true" />
-        <strong>{d.summary(board.counts.attention + dmTotal)}</strong>
-        {dmTotal > 0 && <span className={styles.summaryChip + " " + styles.summaryChipDm}>
-          <Bot size={12} aria-hidden="true" />{d.summaryDm(dmTotal)}</span>}
-        {board.counts.attention > 0 && <span className={styles.summaryChip}>{d.summaryCards(board.counts.attention)}</span>}
-        <button type="button" className={styles.summaryJump} onClick={() => {
-          const lane = boardRef.current?.querySelector<HTMLElement>('[data-amux-lane="attention"]');
-          lane?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "end" });
-          lane?.focus({ preventScroll: true });
-        }}>{d.jumpToLane}<ArrowRight size={14} aria-hidden="true" /></button>
-      </div>}
     {view === "board" && <>
       {!board ? <p role="status" className={styles.empty}>{boardLoading ? m.loading : m.unavailable}</p> :
         <div ref={boardRef} className={styles.board} aria-label={m.board} data-testid="amux-board-lanes">
@@ -870,25 +877,24 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
             </div>;
           })}
         </div>}
-      <details className={styles.archive}>
-        <summary className="cursor-pointer text-sm font-semibold">{m.archive}
-          {board ? ` (${board.counts.archive})` : ""}</summary>
-        <ul className="mt-3 space-y-2 text-sm">{archive.map((card) => <li key={card.id}>
-          <span className="font-mono text-xs" data-testid="amux-archive-card-label">
-            {amuxVisibleInspectionText(amuxCardLabel(card))}
-            <AmuxSourceKeySuffix id={card.id} displayKey={card.displayKey} sourceKey={card.sourceKey} m={m} /></span>{" "}
-          <button type="button" className="underline" onClick={(event) => {
-            returnFocusRef.current = event.currentTarget; void openCard(card.id);
-          }}>
-            {amuxVisibleInspectionText(card.title ?? m.protectedTitle)}</button> · {card.status}
-        </li>)}</ul>
-        {board && archive.length < board.counts.archive && <button type="button"
-          disabled={boardBusy !== null} className="mt-2 text-sm underline"
-          onClick={() => void loadBoardPage("archive")}>
-          {m.loadMore(archive.length, board.counts.archive)}
-        </button>}
-      </details>
+      <AmuxBoardPastWork cards={archive.map((card) => ({ id: card.id, title: card.title, displayKey: card.displayKey,
+          status: card.status, archived: card.archived === true, worker: card.worker, updatedAt: card.updatedAt }))}
+        total={board ? board.counts.archive : null}
+        loading={boardBusy === "archive" || boardLoading || (board !== null && archive.length === 0 &&
+          boardPages.archive === undefined && board.counts.archive > 0 && !autoStopped.archive)}
+        failed={Boolean(autoStopped.archive) && archive.length === 0} workerChannels={workerChannels}
+        protectedTitle={m.protectedTitle}
+        onOpen={(taskId, opener) => { returnFocusRef.current = opener; void openCard(taskId); }}
+        onLoadMore={() => void loadBoardPage("archive")}
+        onRetry={() => setAutoStopped((current) => { const next = { ...current }; delete next.archive; return next; })} />
+      <p className="rounded-2xl border border-zinc-800 bg-zinc-900 px-5 py-3 text-sm text-zinc-400" data-testid="amux-moved-note">
+        <strong className="mr-2 text-zinc-100">{views.moved.title}</strong>{views.moved.body}</p>
     </>}
+    {view === "list" && cardList !== undefined && (cardList === null ?
+      <AdminReadFailed title={views.list.unavailableTitle} detail={views.list.unavailableDetail} /> :
+      <AmuxCardListPanel rows={cardList.rows} total={cardList.total} limit={cardList.limit} nowMs={nowMs}
+        workerChannels={workerChannels}
+        onOpen={(taskId, opener) => { returnFocusRef.current = opener; void openCard(taskId); }} />)}
     {view === "hierarchy" && <section className="rounded-lg border p-4 border-zinc-700">
       <h3 className="font-semibold">{m.hierarchy}</h3>
       <p className="text-xs text-zinc-500">{m.hierarchyHelp}</p>
@@ -1154,7 +1160,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
           </div>
           <aside className={styles.properties} aria-label={m.cardProperties}>
             <h4>{m.cardProperties}</h4><dl>
-              {[[m.cardStatus,selected.status],[m.priorityFilter,selected.priority.toUpperCase()],
+              {[[m.cardStatus,views.status[amuxStatusChip(selected.status).group]],[m.priorityFilter,selected.priority.toUpperCase()],
                 [m.workerFilter,selected.worker ?? m.noWorker],[m.cardRole,selected.taskRole ?? m.noRole],
                 [m.cardGrade,selected.executionGrade ?? m.noGrade]].map(([name,value]) =>
                   <div key={name} className={styles.property}><dt>{name}</dt><dd>{value}</dd></div>)}

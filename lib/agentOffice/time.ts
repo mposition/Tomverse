@@ -27,3 +27,10 @@ export function aestClock(iso: string): string {
   const local = brisbaneIso(iso);
   return local ? `${local.slice(11, 16)} AEST` : "—";
 }
+
+/** An instant as `HH:mm AEST` when it fell on today's Brisbane date, else as `MM-DD HH:mm AEST`. */
+export function aestSince(iso: string, now: number): string {
+  const local = brisbaneIso(iso);
+  const today = brisbaneIso(new Date(now).toISOString());
+  return local && today && local.slice(0, 10) === today.slice(0, 10) ? aestClock(iso) : aestStamp(iso);
+}

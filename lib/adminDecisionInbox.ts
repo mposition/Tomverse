@@ -150,7 +150,7 @@ const COUNTED_SOURCES: ReadonlyArray<{
 }> = [
   { kind: "marketing", count: (c) => c.pendingMarketingApprovals, href: "/admin/marketing?tab=queue", severity: "normal" },
   { kind: "scout", count: (c) => c.openProductResearchSuggestions, href: "/admin/product-research?tab=suggestions", severity: "normal" },
-  { kind: "amuxReview", count: (c) => c.openAmuxEscalations, href: "/admin/amux-execution?tab=review", severity: "high" },
+  { kind: "amuxReview", count: (c) => c.awaitingAmuxOwnerQueue, href: "/admin/amux-execution?tab=review", severity: "high" },
   { kind: "amuxHalt", count: (c) => c.openAmuxOrchestratorHalts, href: "/admin/amux-recovery?tab=safety", severity: "high" },
   { kind: "amuxDecisionMaker", count: (c) => c.awaitingAmuxDecisionMaker, href: "/admin/amux-execution?tab=cards", severity: "high" },
 ];

@@ -85,7 +85,8 @@ test("a card waiting on the owner opens on the same owner review Assignment host
 
 test("a board card says why it waits on the owner, from its newest open escalation", async () => {
   const service = await readFile(new URL("../lib/amux/adminExecutionRead.ts", import.meta.url), "utf8");
-  const ui = await readFile(new URL("../components/admin/AmuxExecutionWorkspace.tsx", import.meta.url), "utf8");
+  // The "waiting on you" column draws its cards as one line each.
+  const ui = await readFile(new URL("../components/admin/AmuxBoardAttentionLane.tsx", import.meta.url), "utf8");
   // One bounded read per page of cards, one row per card, the same reason
   // normaliser the card detail uses.
   assert.match(service, /prisma\.amuxHumanEscalation\.findMany\(\{\s*where: \{ taskId: \{ in: ids \}, status: \{ in: \["open", "acknowledged"\] \} \}/);
@@ -96,7 +97,7 @@ test("a board card says why it waits on the owner, from its newest open escalati
   assert.match(service, /prisma\.amuxV22TaskQuestion\.findMany\(\{\s*where: \{ taskId: \{ in: ids \}, state: \{ in: \["open", "answered"\] \} \}/);
   assert.match(service, /ownerQuestion: ownerQuestion\.get\(row\.id\) \?\? null/);
   // The call to act is offered only where the review can be opened.
-  assert.match(ui, /\{canReviewCards && card\.attentionReason && <button type="button" className=\{styles\.reviewButton\}/);
+  assert.match(ui, /\{canReviewCards && card\.attentionReason && <button type="button" aria-label=\{m\.openOwnerReview\}/);
   assert.match(ui, /m\.attentionReason\[card\.attentionReason\] \?\? m\.attentionReasonFallback/);
 });
 
