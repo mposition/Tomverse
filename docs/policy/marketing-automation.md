@@ -287,14 +287,18 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 빠진다. 생성기 맥락의 계정별 `usedAssetIds`를 `marketingA5AssetsFor`가 결정적으로 거르고(모델 판단이 아님), 남은 자산이 없는
 계정은 호출하지 않는다(`accountsWithoutMedia`). 초안 접수도 그 계정이 이미 쓴 자산이 붙은 초안을
 `intake_asset_already_used`로 거절한다(아무것도 쓰지 않고, 호출도 소비하지 않는다). 이 사유는 S2B1 refusal 목록 밖의 접수 전용 문자열이다.
-자산이 브리프 주제와 맞지 않아도 계정에 주어진 자산이 하나라도 있으면 초안을 만든다. 프롬프트(`a5-social-v8`)는 그 경우 자산 설명이
+자산이 브리프 주제와 맞지 않아도 계정에 주어진 자산이 하나라도 있으면 초안을 만든다. 프롬프트(`a5-social-v9`)는 그 경우 자산 설명이
 보여 주는 내용으로만 쓰게 한다.
+캐러셀(운영자 결정 2026-11-08): 여러 장을 한 게시물에 순서대로 싣는 자산은 장마다 따로 승인된 자산이며 id가
+`<시리즈>-p<장>of<장수>`다. 캐러셀은 2~20장이다. `marketingA5AssetsFor`는 모든 장이 그 계정에 맞는 이미지이고, 아직 쓰이지 않았고, 1장과 같은 claim을 가지며,
+플랫폼 한 게시물의 이미지 한도(`MARKETING_CAROUSEL_MAX_IMAGES`, X는 4장) 안일 때만 1장을 내놓는다. 모델은 그 1장을 `pages`(장 수)와 함께
+보고, 1장을 고르면 코드가 나머지 장을 순서대로 붙인다. 형식이 맞지 않는 장 번호(앞자리 0, 장 수 초과, 21장 이상)는 내놓지 않는다. 캐러셀에 다른 자산을 섞은 초안은 `draft_mixes_carousel`로 버린다.
 
 해시태그(운영자 결정 2026-11-04, YouTube 부분은 2026-11-07): 도움이 될 때만, Instagram·TikTok·RedNote 3~5, YouTube 설명에 2~3(쇼트는
 `#Shorts` 포함, 롱폼은 `#Shorts`를 넣지 않음), LinkedIn
 2~3, X 1~2, Facebook 0~2, Threads 최대 1. `#Tomverse` 하나를 권장하고 개수에 넣는다. 그 계정 locale의 언어와 문자로 쓰고, 다른
 회사·제품 이름 태그와 과장·가격 암시 태그(`#best`, `#free`, `#최고`, `#무료` 등)는 쓰지 않는다. 판단은 프롬프트가 모델에 맡기고
-(`a5-social-v8`, 범위는 `task.hashtags`), 생성기의 초안 읽기가 금지 태그와 상한을 넘는 태그, 롱폼 영상 초안의 `#Shorts`를 결정적으로 지운다(`lib/marketingHashtags.ts`,
+(`a5-social-v9`, 범위는 `task.hashtags`), 생성기의 초안 읽기가 금지 태그와 상한을 넘는 태그, 롱폼 영상 초안의 `#Shorts`를 결정적으로 지운다(`lib/marketingHashtags.ts`,
 초안은 버리지 않고 `hashtagsRemoved`로 센다). Guard는 태그를 포함한 전체 글을 그대로 읽는다.
 
 YouTube 롱폼과 챕터(운영자 결정 2026-11-07, 정책 버전 변경 없음): 챕터가 있거나 60초를 넘는 영상 자산이 롱폼이다(`lib/marketingVideoChapters.ts`;

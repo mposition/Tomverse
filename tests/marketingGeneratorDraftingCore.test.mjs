@@ -452,12 +452,12 @@ test("the instruction tells the model to write from the assets it was given when
   assert.match(system.content, /Give each post a different asset/);
   // The old rule that skipped a post is gone, and the version says the instruction changed.
   assert.doesNotMatch(system.content, /return no draft: a post without/);
-  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v8");
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v9");
 });
 
 test("A5 is told when hashtags help, how many each platform takes, and which tags never to write", () => {
   const [system, user] = marketingA5Messages(context, SCOPE);
-  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v8");
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v9");
   assert.match(system.content, /task\.hashtags gives this platform's range/);
   assert.match(system.content, /fewer or none when a tag would not help/);
   assert.match(system.content, /#Tomverse once is recommended/);
@@ -564,4 +564,91 @@ test("a cross-post sees what other accounts posted with its asset, in its own lo
   assert.match(system.content, /publishedCopies are posts other Tomverse accounts already published with it/);
   assert.match(system.content, /write the post fresh/);
   assert.deepEqual(JSON.parse(user.content).assets[0].publishedCopies, ["Same question. Where do the answers differ?"]);
+});
+
+// A carousel (owner 2026-11-08): pages are separate approved assets named
+// <series>-p<page>of<pages>, offered as page 1 only and carried whole, in order.
+const carouselPages = (count, overrides = {}) =>
+  Array.from({ length: count }, (_, index) => ({
+    id: `media-x-steps-en-card-p${index + 1}of${count}`,
+    allowedChannels: ["linkedin", "instagram", "x"],
+    altLocales: ["en"],
+    claimIds: [],
+    validUntil: "2099-12-31",
+    kind: "image",
+    ...overrides,
+  }));
+const carouselContext = (assets, channels = context.channels) =>
+  marketingGeneratorContextSchema.parse({ ...context, channels, assets });
+
+test("a carousel is offered as its first page with the page count, and only whole", () => {
+  const whole = carouselContext([...carouselPages(5), context.assets[0]]);
+  const offered = marketingA5AssetsFor(whole, "linkedin", "en", undefined, "chn_li").map((asset) => asset.id);
+  assert.deepEqual(offered, ["media-x-steps-en-card-p1of5", "asset_hero"]);
+  const [system, user] = marketingA5Messages(whole, SCOPE);
+  assert.match(system.content, /An asset with pages is a carousel/);
+  assert.equal(JSON.parse(user.content).assets[0].pages, 5);
+
+  // A missing page, a used page, or a platform that takes fewer images: not offered.
+  const missing = carouselContext(carouselPages(5).filter((asset) => !asset.id.includes("-p3of")));
+  assert.deepEqual(marketingA5AssetsFor(missing, "linkedin", "en", undefined, "chn_li"), []);
+  const used = carouselContext(carouselPages(5), [{ ...context.channels[0], usedAssetIds: ["media-x-steps-en-card-p4of5"] }]);
+  assert.deepEqual(marketingA5AssetsFor(used, "linkedin", "en", undefined, "chn_li"), []);
+  assert.deepEqual(marketingA5AssetsFor(carouselContext(carouselPages(5)), "x", "en"), []);
+  assert.deepEqual(marketingA5AssetsFor(carouselContext(carouselPages(4)), "x", "en").map((asset) => asset.id), ["media-x-steps-en-card-p1of4"]);
+});
+
+test("a draft that names a carousel carries every page in order; mixed with another asset it is dropped", () => {
+  const whole = carouselContext([...carouselPages(5), context.assets[0]]);
+  const { drafts, dropped } = readMarketingA5Answer(
+    answer([
+      proposal({ claimIds: [], assetIds: ["media-x-steps-en-card-p1of5"] }),
+      proposal({ claimIds: [], assetIds: ["media-x-steps-en-card-p1of5", "asset_hero"] }),
+      proposal({ claimIds: [], assetIds: ["media-x-steps-en-card-p2of5"] }),
+    ]),
+    whole,
+    SCOPE,
+  );
+  assert.equal(drafts.length, 1);
+  assert.deepEqual(
+    drafts[0].assets.map((asset) => asset.assetId),
+    [1, 2, 3, 4, 5].map((page) => `media-x-steps-en-card-p${page}of5`),
+  );
+  // A later page is never offered, so naming one is an unknown asset.
+  assert.deepEqual(dropped, { draft_mixes_carousel: 1, draft_names_unknown_asset: 1 });
+});
+
+test("a carousel whose pages are not all images, or rest on other claims than page 1, is not offered", () => {
+  const video = carouselPages(5).map((asset, index) => (index === 3 ? { ...asset, kind: "video" } : asset));
+  assert.deepEqual(marketingA5AssetsFor(carouselContext(video), "linkedin", "en", undefined, "chn_li"), []);
+  const claims = carouselPages(5).map((asset, index) => (index === 2 ? { ...asset, claimIds: ["claim_compare"] } : asset));
+  assert.deepEqual(marketingA5AssetsFor(carouselContext(claims), "linkedin", "en", undefined, "chn_li"), []);
+  const shared = carouselPages(5, { claimIds: ["claim_compare"] });
+  assert.deepEqual(
+    marketingA5AssetsFor(carouselContext(shared), "linkedin", "en", undefined, "chn_li").map((asset) => asset.id),
+    ["media-x-steps-en-card-p1of5"],
+  );
+});
+
+test("a carousel past every platform's limit, or a malformed page id, is never offered, not even as a single image", () => {
+  const eleven = carouselContext(carouselPages(11, { allowedChannels: ["instagram", "facebook", "threads", "linkedin", "x"] }));
+  for (const channel of ["instagram", "facebook", "threads", "linkedin", "x"]) {
+    assert.deepEqual(marketingA5AssetsFor(eleven, channel, "en"), [], channel);
+  }
+  const malformed = carouselContext(
+    ["media-x-a-p01of05", "media-x-b-p1of21", "media-x-c-p6of5", "media-x-d-p0of3"].map((id) => ({ ...carouselPages(1)[0], id })),
+  );
+  assert.deepEqual(marketingA5AssetsFor(malformed, "linkedin", "en"), []);
+});
+
+test("a draft that names two carousels is dropped", () => {
+  const second = carouselPages(3).map((asset) => ({ ...asset, id: asset.id.replace("x-steps", "y-tour") }));
+  const both = carouselContext([...carouselPages(5), ...second]);
+  const { drafts, dropped } = readMarketingA5Answer(
+    answer([proposal({ claimIds: [], assetIds: ["media-x-steps-en-card-p1of5", "media-y-tour-en-card-p1of3"] })]),
+    both,
+    SCOPE,
+  );
+  assert.equal(drafts.length, 0);
+  assert.deepEqual(dropped, { draft_mixes_carousel: 1 });
 });
