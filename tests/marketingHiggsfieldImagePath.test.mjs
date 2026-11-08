@@ -274,7 +274,8 @@ test("well-formed concepts pass", () => {
 test("concepts with the wrong shape, feature or count are refused", () => {
   assert.match(check(conceptsOf(concept("c1"))), /2-3 entries/u);
   assert.match(check(conceptsOf(concept("c1"), concept("c2", { feature: "review" }))), /today's/u);
-  const { alt, ...noAlt } = concept("c2");
+  const noAlt = concept("c2");
+  delete noAlt.alt;
   assert.match(check(conceptsOf(concept("c1"), noAlt)), /keys must be exactly/u);
   assert.match(check(conceptsOf(concept("c1"), concept("c2", { logos: ["../secret"] }))), /not a file in public\/model-icons/u);
   assert.match(check(conceptsOf(concept("c1"), concept("c2", { factRefs: ["chat.price"] }))), /not in features\.json/u);
