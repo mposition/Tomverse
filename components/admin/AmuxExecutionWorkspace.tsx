@@ -11,7 +11,7 @@ import { AmuxBoardAttentionLane, AMUX_ATTENTION_LANE_ROWS, type AmuxBoardOwnerQu
 import { AmuxBoardPastWork } from "./AmuxBoardPastWork";
 import { AmuxCardListPanel } from "./AmuxCardListPanel";
 import { AmuxTaskQuestionSection } from "./AmuxWorkerQuestion";
-import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel } from "./AmuxCardIdentity";
+import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
 import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent } from "react";
 
@@ -706,6 +706,11 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
         {amuxVisibleInspectionText(card.title ?? m.protectedTitle)}
       </button>
+      {/* docs/policy/amux-card-display-key.md S5: the number leads, the Task ID beside it. */}
+      {card.displayKey && <p className={styles.cardMeta}>
+        {m.taskId}: {amuxVisibleInspectionText(card.id)}</p>}
+      {!card.displayKey && amuxDistinctSourceKey(card.id, card.sourceKey) && <p className={styles.cardMeta}>
+        {m.sourceKey}: {amuxVisibleInspectionText(card.sourceKey ?? "")}</p>}
       <p className={styles.cardWorker}>
         {card.worker ? <AdminPixelAvatar team="amux" tile={22} unit={1.1} body={false} /> : null}
         <span className={styles.workerName}>{card.worker ?? m.noWorker}</span>
