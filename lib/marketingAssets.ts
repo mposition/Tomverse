@@ -5,7 +5,15 @@
  * Contract: docs/policy/marketing-automation.md §7.3 -- "assets use only ids
  * from the approved asset list. The provenance (capture, operator upload, AI
  * generated, AI modified) and the per-channel AI disclosure decision are kept
- * with it. AI generated images and video do not imitate the product's UI."
+ * with it."
+ *
+ * An AI-generated image may draw a Tomverse screen (owner decision 2026-11-08)
+ * when everything on that screen is real: real features, model names and copy,
+ * and only recorded answers under a model's name. It carries the AI line and an
+ * AI disclosure on every channel, and it is never presented as a capture. Such
+ * a drawing is not the product's interface, so it is submitted with
+ * `depictsProductInterface: false`; the media job's review and the person who
+ * approves it in Admin check those conditions, which no schema can read.
  *
  * Provenance is the field everything else hangs off. A screen capture and an
  * AI-generated picture of a screen look the same in a post and are not the
@@ -132,10 +140,12 @@ export const marketingAssetSchema = z
       z.enum(MARKETING_ASSET_DISCLOSURES),
     ),
     /**
-     * Whether the asset shows the product's own interface. An AI origin cannot
-     * claim this: a generated picture of our UI is a picture of something that
-     * does not exist, and §7.3 refuses it outright rather than disclosing it.
-     * The exception is `capture_with_ai_presenter`, whose screens are captures.
+     * Whether the asset shows the product's own interface: real screen captures
+     * or recordings. An AI origin cannot claim this: a generated picture of our
+     * UI is a drawing, not the interface. §7.3 lets such a drawing out only as
+     * a disclosed AI image whose screen shows real features and copy, declared
+     * `false` here. The exception is `capture_with_ai_presenter`, whose screens
+     * are captures.
      */
     depictsProductInterface: z.boolean(),
   })
