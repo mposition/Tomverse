@@ -334,6 +334,11 @@ test.describe("memory settings", () => {
     });
     await openMemoryPage(page);
 
+    await expect(page.getByRole("checkbox", { name: "모든 대화에서 기억 사용" })).toBeChecked();
+    await expect(page.getByRole("combobox", { name: "대화 기억 기본값", exact: true })).toHaveAttribute("aria-describedby", "memory-default-mode-description");
+    await expect(page.locator("#memory-default-mode-description")).toContainText("새 대화와 기존 대화");
+    await expect(page.locator("#memory-default-mode-description")).toContainText("대화별로 직접 정한 설정이 우선");
+
     await expect(page.getByTestId("memory-active-row")).toHaveCount(1);
     await expect(page.getByTestId("memory-pinned-badge")).toBeVisible();
     await expect(

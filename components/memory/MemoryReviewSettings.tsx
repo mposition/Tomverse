@@ -806,10 +806,12 @@ export function MemoryReviewSettings() {
                             </span>
                         </label>
                         <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-semibold">
+                            <label htmlFor="memory-default-mode" className="text-sm font-semibold">
                                 {t("memoryReview.defaultModeLabel")}
-                            </span>
+                            </label>
                             <select
+                                id="memory-default-mode"
+                                aria-describedby="memory-default-mode-description"
                                 className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
                                 data-testid="memory-default-mode"
                                 value={
@@ -834,6 +836,9 @@ export function MemoryReviewSettings() {
                                 </option>
                             </select>
                         </div>
+                        <p id="memory-default-mode-description" className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                            {t("memoryReview.defaultModeDescription")}
+                        </p>
                     </div>
                 )}
             </section>
