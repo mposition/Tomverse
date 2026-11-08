@@ -23,6 +23,7 @@ const post = (id: string, overrides: Partial<DailySchedulePost> = {}): DailySche
   approvedAt: "2026-11-07T00:00:00.000Z",
   approvalExpiresAt: "2026-11-30T00:00:00.000Z",
   dailyCap: 1,
+  weeklyCap: 7,
   ...overrides,
 });
 
@@ -76,7 +77,7 @@ test("each account gets one post a day, at its market's 10:00, oldest approval f
 test("an account whose cap is already spent today starts tomorrow", () => {
   const plan = planDailyMarketingSchedule({
     now: EARLY,
-    taken: [{ channelId: "ig-ko", slotDay: "2026-11-08", scheduledAt: null }],
+    taken: [{ channelId: "ig-ko", status: "published", slotDay: "2026-11-08", scheduledAt: null }],
     posts: [post("a"), post("b", { approvedAt: "2026-11-07T01:00:00.000Z" })],
   });
   assert.deepEqual(times(plan), ["2026-11-09T01:00:00.000Z", "2026-11-10T01:00:00.000Z"]);
@@ -85,7 +86,7 @@ test("an account whose cap is already spent today starts tomorrow", () => {
 test("a post already scheduled for today fills a one-a-day account's today", () => {
   const plan = planDailyMarketingSchedule({
     now: EARLY,
-    taken: [{ channelId: "ig-ko", slotDay: null, scheduledAt: "2026-11-08T07:00:00.000Z" }],
+    taken: [{ channelId: "ig-ko", status: "scheduled", slotDay: null, scheduledAt: "2026-11-08T07:00:00.000Z" }],
     posts: [post("a")],
   });
   assert.deepEqual(times(plan), ["2026-11-09T01:00:00.000Z"]);
@@ -95,7 +96,7 @@ test("an account with room left today still uses today", () => {
   // X allows two a day; one went out this morning.
   const plan = planDailyMarketingSchedule({
     now: EARLY,
-    taken: [{ channelId: "x-en", slotDay: "2026-11-08", scheduledAt: null }],
+    taken: [{ channelId: "x-en", status: "verified", slotDay: "2026-11-08", scheduledAt: null }],
     posts: [
       post("a", { channelId: "x-en", accountLocale: "en", dailyCap: 2 }),
       post("b", { channelId: "x-en", accountLocale: "en", dailyCap: 2, approvedAt: "2026-11-07T01:00:00.000Z" }),
@@ -106,9 +107,9 @@ test("an account with room left today still uses today", () => {
 
 test("days already holding a scheduled post are gone around, and the post is not moved", () => {
   const taken: DailyScheduleTakenSlot[] = [
-    { channelId: "ig-ko", slotDay: null, scheduledAt: "2026-11-09T03:00:00.000Z" },
+    { channelId: "ig-ko", status: "scheduled", slotDay: null, scheduledAt: "2026-11-09T03:00:00.000Z" },
     // Another account's post does not take this account's day.
-    { channelId: "li-en", slotDay: null, scheduledAt: "2026-11-10T00:00:00.000Z" },
+    { channelId: "li-en", status: "scheduled", slotDay: null, scheduledAt: "2026-11-10T00:00:00.000Z" },
   ];
   const plan = planDailyMarketingSchedule({
     now: EARLY,
@@ -131,8 +132,8 @@ test("overdue scheduled posts take the next days first, as the publisher would c
   const plan = planDailyMarketingSchedule({
     now: EARLY,
     taken: [
-      { channelId: "ig-ko", slotDay: null, scheduledAt: "2026-11-07T10:00:00.000Z" },
-      { channelId: "ig-ko", slotDay: null, scheduledAt: "2026-11-07T10:00:00.000Z" },
+      { channelId: "ig-ko", status: "scheduled", slotDay: null, scheduledAt: "2026-11-07T10:00:00.000Z" },
+      { channelId: "ig-ko", status: "scheduled", slotDay: null, scheduledAt: "2026-11-07T10:00:00.000Z" },
     ],
     posts: [post("a")],
   });
@@ -243,4 +244,83 @@ test("hand-posted accounts, accounts the publisher does not post to and posts no
   assert.deepEqual(plan.slots.map((slot) => slot.postId), ["ok"]);
   assert.deepEqual(plan.accounts.map((account) => account.channelId), ["ig-ko"]);
   assert.deepEqual(plan.expired, []);
+});
+
+const linkedin = (id: string, n: number, overrides: Partial<DailySchedulePost> = {}) =>
+  post(id, { channelId: "li-en", accountLocale: "en", weeklyCap: 3, approvedAt: `2026-11-07T0${n}:00:00.000Z`, ...overrides });
+
+test("the rolling seven-day cap is kept: a fourth post on a three-a-week account waits for the week to clear", () => {
+  const plan = planDailyMarketingSchedule({
+    now: EARLY,
+    taken: [],
+    posts: [linkedin("a", 1), linkedin("b", 2), linkedin("c", 3), linkedin("d", 4)],
+  });
+  // 8, 9 and 10 Nov fill the week; the week ending 15 Nov holds only 9 and 10.
+  assert.deepEqual(times(plan), [
+    "2026-11-08T00:00:00.000Z",
+    "2026-11-09T00:00:00.000Z",
+    "2026-11-10T00:00:00.000Z",
+    "2026-11-15T00:00:00.000Z",
+  ]);
+
+  // The same fourth post with an approval that ends first is reported, not planned.
+  const short = planDailyMarketingSchedule({
+    now: EARLY,
+    taken: [],
+    posts: [linkedin("a", 1), linkedin("b", 2), linkedin("c", 3), linkedin("d", 4, { approvalExpiresAt: "2026-11-14T00:00:00.000Z" })],
+  });
+  assert.deepEqual(short.expired, ["d"]);
+});
+
+test("days spent in the last week count against the weekly cap", () => {
+  const plan = planDailyMarketingSchedule({
+    now: EARLY,
+    taken: [
+      { channelId: "li-en", status: "verified", slotDay: "2026-11-03", scheduledAt: null },
+      { channelId: "li-en", status: "deleted", slotDay: "2026-11-05", scheduledAt: null },
+    ],
+    posts: [linkedin("a", 1), linkedin("b", 2), linkedin("c", 3)],
+  });
+  // 8 Nov is the third in its week; the week ending 9 Nov holds 3, 5 and 8 Nov,
+  // the week ending 10 Nov only 5 and 8 Nov.
+  assert.deepEqual(times(plan), [
+    "2026-11-08T00:00:00.000Z",
+    "2026-11-10T00:00:00.000Z",
+    "2026-11-12T00:00:00.000Z",
+  ]);
+});
+
+test("a planned post never pushes an already scheduled post past its day by the weekly cap", () => {
+  // Three a week; 10 and 11 Nov are already scheduled.
+  const plan = planDailyMarketingSchedule({
+    now: EARLY,
+    taken: [
+      { channelId: "li-en", status: "scheduled", slotDay: null, scheduledAt: "2026-11-10T00:00:00.000Z" },
+      { channelId: "li-en", status: "scheduled", slotDay: null, scheduledAt: "2026-11-11T00:00:00.000Z" },
+    ],
+    posts: [linkedin("a", 1), linkedin("b", 2)],
+  });
+  // 8 Nov fits, and the weeks ending 10 and 11 Nov stay at three. A post on
+  // 9 Nov would make the week ending 11 Nov four, so the next day that fits
+  // is 15 Nov.
+  assert.deepEqual(times(plan), ["2026-11-08T00:00:00.000Z", "2026-11-15T00:00:00.000Z"]);
+});
+
+test("a requeued post still holding an old day is waiting, and takes today before the plan does", () => {
+  // Seoul 09:30 on 8 Nov, which is also 8 Nov in UTC.
+  const now = Date.parse("2026-11-08T00:30:00.000Z");
+  const plan = planDailyMarketingSchedule({
+    now,
+    taken: [{ channelId: "ig-ko", status: "scheduled", slotDay: "2026-11-01", scheduledAt: "2026-11-01T01:00:00.000Z" }],
+    posts: [post("a")],
+  });
+  assert.deepEqual(times(plan), ["2026-11-09T01:00:00.000Z"]);
+
+  // A scheduled post already claimed today is being published today.
+  const claimed = planDailyMarketingSchedule({
+    now,
+    taken: [{ channelId: "ig-ko", status: "scheduled", slotDay: "2026-11-08", scheduledAt: "2026-11-08T00:00:00.000Z" }],
+    posts: [post("a")],
+  });
+  assert.deepEqual(times(claimed), ["2026-11-09T01:00:00.000Z"]);
 });

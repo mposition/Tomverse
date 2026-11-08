@@ -208,22 +208,26 @@ export type MarketingConsolePayload = {
 const TAKEN_PUBLISH_DAYS_LIMIT = 500;
 
 /**
- * Days already held: a claimed slot from yesterday (UTC) on, and every post
- * still waiting in `scheduled` whatever its time, since an overdue one will
- * spend the next free day.
+ * Days already held: every slot spent in the publisher's rolling week (the
+ * last seven UTC days, so the weekly cap can be counted), and every post still
+ * waiting in `scheduled` whatever day it holds, because a requeued post keeps
+ * its earlier attempt's day and still has to spend a new one.
  */
 async function readTakenPublishDays(): Promise<DailyScheduleTakenSlot[]> {
-  const since = new Date(`${new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}T00:00:00.000Z`);
+  const since = new Date(
+    `${new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}T00:00:00.000Z`
+  );
   const posts = await prisma.marketingPost.findMany({
     where: {
-      OR: [{ slotDate: { gte: since } }, { status: "scheduled", slotDate: null }],
+      OR: [{ slotDate: { gte: since } }, { status: "scheduled" }],
     },
     orderBy: { createdAt: "desc" },
     take: TAKEN_PUBLISH_DAYS_LIMIT,
-    select: { channelId: true, slotDate: true, scheduledAt: true },
+    select: { channelId: true, status: true, slotDate: true, scheduledAt: true },
   });
   return posts.map((post) => ({
     channelId: post.channelId,
+    status: post.status,
     slotDay: post.slotDate?.toISOString().slice(0, 10) ?? null,
     scheduledAt: post.scheduledAt?.toISOString() ?? null,
   }));
@@ -622,6 +626,7 @@ export async function readMarketingConsole(
         channelId: post.channel.id,
         accountLocale: post.channel.defaultLocale,
         dailyCap: marketingChannelCaps(post.channel)?.daily ?? null,
+        weeklyCap: marketingChannelCaps(post.channel)?.weekly ?? null,
         approvedAt: post.approvedAt?.toISOString() ?? null,
         approvalExpiresAt: post.approvalExpiresAt?.toISOString() ?? null,
       })),

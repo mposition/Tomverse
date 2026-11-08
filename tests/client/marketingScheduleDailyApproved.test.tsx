@@ -25,6 +25,7 @@ const row = (id: string, overrides: Record<string, unknown> = {}) => ({
   accountSlug: "tomverse-ko",
   accountLocale: "ko",
   dailyCap: 1,
+  weeklyCap: 4,
   approvedAt: "2026-11-07T00:00:00.000Z",
   approvalExpiresAt: "2026-11-30T00:00:00.000Z",
   envelopeDigest: id.repeat(64).slice(0, 64),
@@ -87,17 +88,18 @@ for (const locale of ["en", "ko"] as const) {
     assert.equal(done, m.scheduleDailyDone.replace("{sent}", "4"));
   });
 
-  test(`${locale}: days the account already holds are skipped`, () => {
+  // Instagram allows four a week: with 8 and 10 Nov taken, 12 Nov would be a fifth in its week.
+  test(`${locale}: days the account already holds are skipped, and the week cap is kept`, () => {
     const [action] = scheduleDailyApprovedActions(
       rows(),
       [
-        { channelId: "ig-ko", slotDay: "2026-11-08", scheduledAt: null },
-        { channelId: "ig-ko", slotDay: null, scheduledAt: "2026-11-10T03:00:00.000Z" },
+        { channelId: "ig-ko", status: "published", slotDay: "2026-11-08", scheduledAt: null },
+        { channelId: "ig-ko", status: "scheduled", slotDay: null, scheduledAt: "2026-11-10T03:00:00.000Z" },
       ],
       m,
       NOW
     );
-    assert.ok(String(action.confirm).includes("Instagram ko: 11/9, 11/11, 11/12 (3"), String(action.confirm));
+    assert.ok(String(action.confirm).includes("Instagram ko: 11/9, 11/11, 11/15 (3"), String(action.confirm));
   });
 
   test(`${locale}: posts whose turn comes after their approval expires are named, not scheduled`, () => {

@@ -1880,6 +1880,7 @@ export function scheduleDailyApprovedActions(
     approvedAt: nullableIso(row.approvedAt),
     approvalExpiresAt: nullableIso(row.approvalExpiresAt),
     dailyCap: typeof row.dailyCap === "number" ? row.dailyCap : null,
+    weeklyCap: typeof row.weeklyCap === "number" ? row.weeklyCap : null,
   }));
   const eligible = dailySchedulablePosts(posts);
   if (eligible.length === 0) return [];

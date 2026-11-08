@@ -56,16 +56,21 @@ export type DailySchedulePost = {
   readonly approvalExpiresAt: string | null;
   /** The account's daily cap in force; null for an account the publisher does not post to. */
   readonly dailyCap: number | null;
+  /** The account's rolling seven-day cap in force; null as for `dailyCap`. */
+  readonly weeklyCap: number | null;
 };
 
 /**
- * A day an account has already spent or promised.
+ * A post that has spent, or will spend, one of the account's days.
  *
- * `slotDay` is a claim the publisher made (YYYY-MM-DD, UTC). Without one, a
- * `scheduledAt` is a post that will spend a day when it is claimed.
+ * `slotDay` is the UTC day the publisher's claim wrote (YYYY-MM-DD). A post
+ * still `scheduled` has not gone out: it keeps an earlier attempt's day after a
+ * requeue, and the publisher moves it to whatever day it is claimed on, so
+ * only a `slotDay` of today means it is being published now.
  */
 export type DailyScheduleTakenSlot = {
   readonly channelId: string;
+  readonly status: string;
   readonly slotDay: string | null;
   readonly scheduledAt: string | null;
 };
@@ -173,43 +178,80 @@ const time = (iso: string | null): number | null => {
   return Number.isFinite(value) ? value : null;
 };
 
+type Caps = { readonly daily: number; readonly weekly: number };
+
+const dayStart = (instant: number) => Date.parse(`${utcDay(instant)}T00:00:00.000Z`);
+
+/** Posts on the UTC day starting at `start` and the six before it: the publisher's week. */
+const weekCount = (counts: Map<string, number>, start: number): number => {
+  let total = 0;
+  for (let back = 0; back < 7; back += 1) total += counts.get(utcDay(start - back * DAY_MS)) ?? 0;
+  return total;
+};
+
+/** The publisher's own test for claiming on a day: both caps, counted without the post itself. */
+const publisherWouldClaim = (counts: Map<string, number>, start: number, caps: Caps) =>
+  (counts.get(utcDay(start)) ?? 0) < caps.daily && weekCount(counts, start) < caps.weekly;
+
 /**
- * How many posts each UTC day already holds for one account.
+ * How many posts each UTC day holds for one account, now and as the publisher
+ * will take what is waiting.
  *
- * A post scheduled for a time already past has not gone out yet: the publisher
- * will claim it on the next day with room, so it is counted there, one after
- * another from today, the way the publisher would take them.
+ * A post that is no longer `scheduled` keeps the day it spent. A `scheduled`
+ * post whose day is today is being published. Every other `scheduled` post is
+ * still waiting, including one that a requeue left holding an earlier
+ * attempt's day: the publisher moves it to the day it claims it. The waiting
+ * ones are placed in time order on the first day from their own time (and
+ * from today) where both caps leave room, which is where the publisher's claim
+ * would land.
  */
 const takenDays = (
   taken: readonly DailyScheduleTakenSlot[],
-  cap: number,
+  caps: Caps,
   now: number
 ): Map<string, number> => {
   const counts = new Map<string, number>();
   const bump = (day: string) => counts.set(day, (counts.get(day) ?? 0) + 1);
-  const overdue: number[] = [];
+  const today = utcDay(now);
+  const waiting: number[] = [];
   for (const slot of taken) {
-    if (slot.slotDay !== null) {
-      bump(slot.slotDay.slice(0, 10));
+    const slotDay = slot.slotDay === null ? null : slot.slotDay.slice(0, 10);
+    if (slot.status !== "scheduled") {
+      if (slotDay !== null) bump(slotDay);
+      continue;
+    }
+    if (slotDay === today) {
+      bump(today);
       continue;
     }
     const at = time(slot.scheduledAt);
-    if (at === null) continue;
-    if (at > now) bump(utcDay(at));
-    else overdue.push(at);
+    if (at !== null) waiting.push(at);
   }
-  overdue.sort((a, b) => a - b);
-  let cursor = Date.parse(`${utcDay(now)}T00:00:00.000Z`);
-  for (let index = 0; index < overdue.length; ) {
-    const day = utcDay(cursor);
-    if ((counts.get(day) ?? 0) < cap) {
-      bump(day);
-      index += 1;
-    } else {
-      cursor += DAY_MS;
+  waiting.sort((a, b) => a - b);
+  for (const at of waiting) {
+    let start = dayStart(Math.max(at, now));
+    for (let guard = 0; guard < MAX_PLAN_DAYS && !publisherWouldClaim(counts, start, caps); guard += 1) {
+      start += DAY_MS;
     }
+    bump(utcDay(start));
   }
   return counts;
+};
+
+/**
+ * Whether one more post on the UTC day starting at `start` fits: the day's own
+ * limit, the publisher's week ending that day, and every later week it falls
+ * in that ends on a day already holding a post, so no waiting post is pushed
+ * past its day by the week cap.
+ */
+const planFits = (counts: Map<string, number>, start: number, dayLimit: number, caps: Caps) => {
+  if ((counts.get(utcDay(start)) ?? 0) >= dayLimit) return false;
+  if (weekCount(counts, start) >= caps.weekly) return false;
+  for (let ahead = 1; ahead < 7; ahead += 1) {
+    const later = start + ahead * DAY_MS;
+    if ((counts.get(utcDay(later)) ?? 0) > 0 && weekCount(counts, later) + 1 > caps.weekly) return false;
+  }
+  return true;
 };
 
 const approvalOrder = (a: DailySchedulePost, b: DailySchedulePost) => {
@@ -228,7 +270,9 @@ export const dailySchedulablePosts = (
       post.status === "approved" &&
       post.provider !== "manual" &&
       typeof post.dailyCap === "number" &&
-      post.dailyCap > 0
+      post.dailyCap > 0 &&
+      typeof post.weeklyCap === "number" &&
+      post.weeklyCap > 0
   );
 
 /**
@@ -241,6 +285,9 @@ export const dailySchedulablePosts = (
  *   soon as possible" rather than the 10:00 that has passed).
  * - A later day that already holds a post is full: a scheduled post is never
  *   moved, and the plan goes around it.
+ * - The rolling seven-day cap is kept the way the publisher counts it, so a
+ *   planned day is one the publisher will actually use, and a planned post
+ *   never pushes a post already waiting past its day.
  * - A post whose turn would come after its approval expires is not scheduled.
  *   The plan never extends an approval; the person decides whether to approve
  *   again with a longer expiry. The day stays free for the next post.
@@ -260,11 +307,11 @@ export function planDailyMarketingSchedule(input: {
 
   const accounts: DailyScheduleAccountPlan[] = [];
   for (const [channelId, posts] of byAccount) {
-    const cap = posts[0].dailyCap as number;
+    const caps: Caps = { daily: posts[0].dailyCap as number, weekly: posts[0].weeklyCap as number };
     const timeZone = marketingTimeZoneFor(posts[0].accountLocale);
     const counts = takenDays(
       input.taken.filter((slot) => slot.channelId === channelId),
-      cap,
+      caps,
       now
     );
     const today = localParts(now, timeZone);
@@ -286,8 +333,8 @@ export function planDailyMarketingSchedule(input: {
           local.hour < MARKETING_LOCAL_POSTING_WINDOW.endHour;
         // Today may share the cap with what already went out; any later day
         // that already holds a post is left to that post.
-        const limit = offset === 0 ? cap : 1;
-        if (inWindow && (counts.get(utcDay(at)) ?? 0) < limit) {
+        const limit = offset === 0 ? caps.daily : 1;
+        if (inWindow && planFits(counts, dayStart(at), limit, caps)) {
           planned = { postId: post.id, channelId, scheduledAt: new Date(at).toISOString(), localDay: ymd(date) };
         } else {
           offset += 1;
