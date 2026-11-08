@@ -554,7 +554,7 @@ test("each evaluation message is answered by its current pick and a same-credit 
     answer: async (modelId, turn) => { answered.push(modelId); return deps.answer(modelId, turn); },
     judge: async (message) => { judged.push(message); return deps.judge(message); },
   };
-  const routerStats = summarizeRouterDecisions([], 5_000);
+  const routerStats = summarizeRouterDecisions([]);
   const result = await runOptimizerCycle(
     { decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, routerStats },
     counting
@@ -802,10 +802,10 @@ test("the report is admitted bounded, of known kinds, and never repeating a user
   ]);
 });
 
-test("optimizer treats timeout statistics as estimates and does not infer failure causes", () => {
-  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /Zero does not prove there were no timeouts/);
-  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /describe error causes as unknown/);
-  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /errors alone or a zero timeout estimate do not justify changing it/);
+test("optimizer distinguishes recorded timeouts and historical errors without inferring causes", () => {
+  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /zero recorded timeouts does not prove none occurred/);
+  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /Do not infer parsing or provider causes from aggregate counts/);
+  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /errors alone or zero recorded timeouts do not justify changing it/);
 });
 
 test("router statistics count outcomes, timeouts, fallbacks and pick shares only", () => {
@@ -813,11 +813,11 @@ test("router statistics count outcomes, timeouts, fallbacks and pick shares only
     { outcome: "picked", pickedModelId: "light", ruleModelId: "light", latencyMs: 900 },
     { outcome: "picked", pickedModelId: "light", ruleModelId: "strong", latencyMs: 1_100 },
     { outcome: "picked", pickedModelId: "strong", ruleModelId: "strong", latencyMs: 1_500 },
-    { outcome: "error", pickedModelId: null, ruleModelId: "strong", latencyMs: 5_004 },
+    { outcome: "timeout", pickedModelId: null, ruleModelId: "strong", latencyMs: 5_004 },
     { outcome: "error", pickedModelId: null, ruleModelId: "strong", latencyMs: 300 },
     { outcome: "invalid", pickedModelId: null, ruleModelId: "light", latencyMs: 2_000 },
   ];
-  assert.deepEqual(summarizeRouterDecisions(rows, 5_000), {
+  assert.deepEqual(summarizeRouterDecisions(rows), {
     decisions: 6,
     outcomes: { picked: 3, invalid: 1, error: 1, timeout: 1 },
     fallbackShare: 0.5,
@@ -825,7 +825,7 @@ test("router statistics count outcomes, timeouts, fallbacks and pick shares only
     picks: [{ modelId: "light", count: 2, share: 0.667 }, { modelId: "strong", count: 1, share: 0.333 }],
     latencyMs: { p50: 1_500, p90: 5_004 },
   });
-  assert.deepEqual(summarizeRouterDecisions([], 5_000), {
+  assert.deepEqual(summarizeRouterDecisions([]), {
     decisions: 0,
     outcomes: { picked: 0, invalid: 0, error: 0, timeout: 0 },
     fallbackShare: 0,
@@ -833,6 +833,18 @@ test("router statistics count outcomes, timeouts, fallbacks and pick shares only
     picks: [],
     latencyMs: { p50: null, p90: null },
   });
+});
+
+test("recorded timeouts survive tuning and legacy errors are not guessed from latency", () => {
+  const row = { pickedModelId: null, ruleModelId: "light" };
+  const summary = summarizeRouterDecisions([
+    { ...row, outcome: "timeout", latencyMs: 3_001 },
+    { ...row, outcome: "timeout", latencyMs: 6_003 },
+    { ...row, outcome: "error", latencyMs: 15_000 },
+    { ...row, outcome: "invalid", latencyMs: 8_000 },
+  ]);
+  assert.deepEqual(summary.outcomes, { picked: 0, invalid: 1, error: 1, timeout: 2 });
+  assert.equal(summary.fallbackShare, 1);
 });
 
 test("a reasoning model answers with its reservation as room to think, within its own cap", async () => {
