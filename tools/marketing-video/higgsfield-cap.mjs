@@ -128,8 +128,8 @@ function admitLocked({ file, cap, cost, request, label }) {
   const open = unsettled(ledger);
   if (open.length > 0) return { ok: false, reason: "unknown_outcome_pending", detail: { entries: open.map((entry) => entry.id) } };
   const total = spent(ledger);
-  // Rounded to cents of a credit, so 0.1 + 0.2 does not refuse a call that fits.
-  if (Math.round((total + cost) * 100) > Math.round(cap * 100)) {
+  // Only floating-point error is forgiven (0.1 + 0.2), never a real fraction of a credit.
+  if (total + cost > cap + 1e-9) {
     return { ok: false, reason: "daily_cap_reached", detail: { spent: total, cap, cost } };
   }
   const entry = { id: randomUUID(), at: new Date().toISOString(), label: label ?? null, model: request.model, cost, status: "sent", jobId: null };

@@ -16,8 +16,8 @@
 //  3. the ledger admits it (model, ratio, one picture, daily cap) and records
 //     it before anything is submitted;
 //  4. `generate create` without waiting, so the job id is known and recorded
-//     at once; if create answers no id, the call stays unknown (a job missing
-//     from `generate list` proves nothing); more than one id blocks the day;
+//     at once; if create answers no id, the call stays unknown with no id
+//     and blocks the day; more than one id blocks the day too;
 //  5. `generate wait <id>`; a timeout leaves the entry unknown with its id,
 //     for step 1 of the next call.
 import { spawnSync } from "node:child_process";
@@ -113,28 +113,6 @@ const requestArgs = (request) => [
   "--json",
 ];
 
-/** Jobs the CLI lists as created at or after `since` (ISO), or null when the list cannot be read. */
-function jobsSince(cli, since) {
-  const listed = cli(["generate", "list", "--json"]);
-  if (listed.status !== 0) return null;
-  let value;
-  try {
-    value = parseJson(listed.stdout);
-  } catch {
-    return null;
-  }
-  const list = Array.isArray(value) ? value : Array.isArray(value?.jobs) ? value.jobs : null;
-  if (!list) return null;
-  const at = Date.parse(since);
-  const created = [];
-  for (const job of list) {
-    const stamp = Date.parse(job?.created_at ?? job?.createdAt ?? "");
-    if (!Number.isFinite(stamp)) return null;
-    if (stamp >= at - 5_000) created.push(job);
-  }
-  return created;
-}
-
 /**
  * Makes one picture and writes it to `out`.
  * @returns {Promise<{ok: true, jobId: string, cost: number, out: string} | {ok: false, reason: string, detail?: object}>}
@@ -175,15 +153,12 @@ export async function makeImage({ prompt, references = [], out, label, jobDir, e
     ids = [];
   }
   if (ids.length === 0) {
-    // Whether a job started is not known: a job missing from the list proves
-    // nothing (it may not be listed yet), so the call is never settled as
-    // failed here. When the list shows exactly one new job, its id is kept so
-    // the next call can look it up; otherwise the entry has no id and blocks
-    // the rest of the day.
-    const since = jobsSince(cli, entry.at);
-    const found = since && since.length === 1 ? jobIdsOf(since[0])[0] : undefined;
-    settle(file, entry.id, { status: "unknown", jobId: found });
-    return { ok: false, reason: "create_outcome_unknown", detail: { status: created.status, timedOut: created.timedOut, jobFound: Boolean(found) } };
+    // Whether a job started is not known, and nothing ties a listed job to
+    // this request (a job missing from the list may not be listed yet; a job
+    // in it may be an earlier one). So the entry keeps no job id and blocks the
+    // rest of the day until a person has looked at Higgsfield's history.
+    settle(file, entry.id, { status: "unknown" });
+    return { ok: false, reason: "create_outcome_unknown", detail: { status: created.status, timedOut: created.timedOut } };
   }
   if (ids.length > 1) {
     // More than the one picture admitted: every id is kept, each counted at the

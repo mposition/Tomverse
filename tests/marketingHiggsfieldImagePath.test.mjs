@@ -62,6 +62,10 @@ test("the ledger adds every admitted call and refuses the one that would pass th
       writeFileSync(file, JSON.stringify(ledger));
     }
     assert.equal(spent(readLedger(file)), 1);
+    // A cap a fraction below the price refuses: only float error is forgiven.
+    const fresh = tempJob();
+    assert.equal(admit({ jobDir: fresh, day: DAY, env: capEnv("0.246"), request: request() }).reason, "daily_cap_reached");
+    rmSync(fresh, { recursive: true, force: true });
     const refused = admit({ jobDir, day: DAY, env: capEnv("1"), request: request() });
     assert.equal(refused.reason, "daily_cap_reached");
     assert.equal(readLedger(file).entries.length, 4);
@@ -139,12 +143,12 @@ test("after a timeout nothing is sent again until the job id shows the outcome",
   }
 });
 
-test("a create with no answer stays unknown even when the job list is empty, and blocks the day", async () => {
+test("a create with no answer stays unknown with no job id, and blocks the day", async () => {
   const jobDir = tempJob();
   try {
     const failing = { status: 1, stdout: "", stderr: "network", timedOut: true };
-    // An empty list proves nothing: the job may not be listed yet.
-    const empty = fakeCli({ cost: ok({ credits: 0.25 }), create: failing, list: ok([]) });
+    // Nothing ties a listed job to this request, so the list is not read.
+    const empty = fakeCli({ cost: ok({ credits: 0.25 }), create: failing, list: ok([{ id: "job-earlier", created_at: new Date().toISOString() }]) });
     const args = { prompt: "scene", out: join(jobDir, "x.png"), jobDir, day: DAY, env: capEnv("5"), fetchBytes: async () => PNG };
     assert.equal((await makeImage({ ...args, cli: empty.cli })).reason, "create_outcome_unknown");
     const [entry] = readLedger(ledgerPath(jobDir, DAY)).entries;
@@ -154,27 +158,7 @@ test("a create with no answer stays unknown even when the job list is empty, and
     assert.equal((await makeImage({ ...args, cli: later.cli })).reason, "unknown_outcome_pending");
     assert.equal(later.count("create"), 0);
     assert.equal(later.count("cost"), 0);
-  } finally {
-    rmSync(jobDir, { recursive: true, force: true });
-  }
-});
-
-test("a create with no answer keeps the one new listed job's id, so it can be looked up", async () => {
-  const jobDir = tempJob();
-  try {
-    const listed = fakeCli({
-      cost: ok({ credits: 0.25 }),
-      create: { status: 1, stdout: "", stderr: "network", timedOut: true },
-      list: () => ok([{ id: "job-l", created_at: new Date().toISOString() }]),
-      get: ok({ id: "job-l", status: "completed" }),
-    });
-    const args = { prompt: "scene", out: join(jobDir, "x.png"), jobDir, day: DAY, env: capEnv("5"), fetchBytes: async () => PNG, cli: listed.cli };
-    assert.equal((await makeImage(args)).reason, "create_outcome_unknown");
-    assert.equal(readLedger(ledgerPath(jobDir, DAY)).entries[0].jobId, "job-l");
-    // Looked up as finished: the next call goes ahead (and its create fails again here).
-    await makeImage(args);
-    assert.equal(readLedger(ledgerPath(jobDir, DAY)).entries[0].status, "done");
-    assert.equal(listed.count("create"), 2);
+    assert.equal(empty.count("list"), 0, "no listed job is tied to the request");
   } finally {
     rmSync(jobDir, { recursive: true, force: true });
   }
