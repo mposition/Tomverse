@@ -74,6 +74,7 @@ const PASSING_CHECK_CONCLUSIONS = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
  */
 export function checksVerdict(rollup, requiredWorkflows = REQUIRED_WORKFLOWS) {
   if (!Array.isArray(rollup) || rollup.length === 0) return "none";
+  rollup = latestChecks(rollup);
   let pending = false;
   for (const check of rollup) {
     if (check.__typename === "StatusContext") {
@@ -95,6 +96,47 @@ export function checksVerdict(rollup, requiredWorkflows = REQUIRED_WORKFLOWS) {
     rollup.some((check) => check.workflowName === workflow && check.conclusion === "SUCCESS"),
   );
   return satisfied ? "passed" : "missing_required";
+}
+
+// A job's id grows with every run and every rerun attempt, so it orders two
+// runs of one check on one commit; `startedAt` is the fallback.
+const JOB_ID = /\/job\/(\d+)/;
+const checkOrder = (check) => {
+  const job = JOB_ID.exec(String(check.detailsUrl ?? check.targetUrl ?? ""))?.[1];
+  if (job) return [1, Number(job)];
+  const started = Date.parse(check.startedAt ?? "");
+  return Number.isFinite(started) ? [0, started] : null;
+};
+const newer = (a, b) => a[0] > b[0] || (a[0] === b[0] && a[1] > b[1]);
+
+/**
+ * The newest run of each check on the head commit, as GitHub's own merge box
+ * counts them. A run superseded on the same commit -- cancelled when CI
+ * admission held the pull request, or a failure a rerun has since replaced --
+ * no longer says anything about the commit. On 2026-11-07 eight Dependabot
+ * updates were refused as checks_failed although every check had a newer
+ * success: their first runs were cancelled at open and run again an hour later.
+ *
+ * A check whose runs cannot be ordered keeps every run, so an older failure is
+ * never hidden by a guess.
+ */
+export function latestChecks(rollup) {
+  const groups = new Map();
+  rollup.forEach((check, index) => {
+    const name = check.__typename === "StatusContext" ? check.context : check.name;
+    const key = name ? `${check.__typename}\0${check.workflowName ?? ""}\0${name}` : `\0${index}`;
+    groups.set(key, [...(groups.get(key) ?? []), check]);
+  });
+  return [...groups.values()].flatMap((runs) => {
+    if (runs.length === 1) return runs;
+    const orders = runs.map(checkOrder);
+    if (orders.some((order) => order === null)) return runs;
+    let best = 0;
+    for (let i = 1; i < runs.length; i += 1) if (newer(orders[i], orders[best])) best = i;
+    // Two runs with the same order are not told apart: keep both.
+    const tied = runs.filter((_, i) => i !== best && !newer(orders[best], orders[i]));
+    return [runs[best], ...tied];
+  });
 }
 
 /** Why `pr` may not be merged into `branch` right now, or null if it may. */

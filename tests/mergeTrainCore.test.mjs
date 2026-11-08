@@ -79,6 +79,34 @@ test("a rollup without a successful PR Fast Gate run is not green", () => {
   assert.equal(checksVerdict([run("QUEUED", null, "x", "PR Fast Gate")]), "pending");
 });
 
+test("a run superseded on the same commit no longer counts, as in GitHub's merge box", () => {
+  // 2026-11-07: Dependabot updates had their first runs cancelled at open and
+  // run again an hour later; the cancelled runs kept eight of them out.
+  const at = (job, status, conclusion, name = "Unit and API policy tests", workflowName = "PR Fast Gate") => ({
+    ...run(status, conclusion, name, workflowName),
+    detailsUrl: `https://github.com/mposition/Tomverse/actions/runs/1/job/${job}`,
+  });
+  const rerun = [
+    at(100, "COMPLETED", "CANCELLED"), at(101, "COMPLETED", "FAILURE", "Admin Console E2E (PostgreSQL)", "Admin Console E2E"),
+    at(200, "COMPLETED", "SUCCESS"), at(201, "COMPLETED", "SUCCESS", "Admin Console E2E (PostgreSQL)", "Admin Console E2E"),
+  ];
+  assert.equal(checksVerdict(rerun), "passed");
+  assert.equal(refusalReason(pr(1, "2026-11-07T00:00:00Z", { statusCheckRollup: rerun }), "develop"), null);
+  // The newest run decides either way: a later failure or a run still going.
+  assert.equal(checksVerdict([at(200, "COMPLETED", "SUCCESS"), at(300, "COMPLETED", "FAILURE")]), "failed");
+  assert.equal(checksVerdict([at(200, "COMPLETED", "SUCCESS"), at(300, "IN_PROGRESS", null)]), "pending");
+  // The same job name in another workflow is another check.
+  assert.equal(checksVerdict([at(200, "COMPLETED", "SUCCESS"), at(100, "COMPLETED", "FAILURE", "Unit and API policy tests", "Other")]), "failed");
+  // startedAt orders runs that carry no job link.
+  const started = (iso, conclusion) => ({ ...gate, conclusion, startedAt: iso });
+  assert.equal(checksVerdict([started("2026-11-07T16:07:48Z", "CANCELLED"), started("2026-11-07T17:11:11Z", "SUCCESS")]), "passed");
+  // Runs that cannot be ordered, or tie, all count: an older failure is never guessed away.
+  assert.equal(checksVerdict([gate, run("COMPLETED", "CANCELLED", "Unit and API policy tests", "PR Fast Gate")]), "failed");
+  assert.equal(checksVerdict([started("2026-11-07T17:11:11Z", "SUCCESS"), started("2026-11-07T17:11:11Z", "FAILURE")]), "failed");
+  const status = (state, iso) => ({ __typename: "StatusContext", context: "CI admission", state, startedAt: iso });
+  assert.equal(checksVerdict([gate, status("FAILURE", "2026-11-07T16:00:00Z"), status("SUCCESS", "2026-11-07T17:00:00Z")]), "passed");
+});
+
 test("refusalReason re-checks a PR read just before merging", () => {
   const ok = pr(1, "2026-10-02T00:00:00Z", { state: "OPEN" });
   assert.equal(refusalReason(ok, "develop"), null);
