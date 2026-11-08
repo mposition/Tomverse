@@ -39,6 +39,22 @@ async function expectHeaderControlsFit(page: Page) {
   }))).toEqual([]);
 }
 
+for (const width of [320, 430]) test(`mobile provider selection keeps checkmarks and borders at ${width}px`, async ({ page }) => {
+  await prepare(page, width, width === 320 ? "light" : "dark");
+  const selected = page.locator('.review-participant-list>button[aria-pressed="true"]');
+  await expect(selected).toHaveCount(3);
+  for (const button of await selected.all()) {
+    await expect(button.locator(":scope > svg")).toBeVisible();
+    await expect(button).toHaveCSS("box-shadow", /inset/);
+  }
+  await page.locator(".review-participants-heading").click();
+  const unselected = page.locator('.review-participant-list>button[aria-pressed="false"]').first();
+  await expect(unselected).toBeVisible();
+  await expect(unselected.locator(":scope > svg")).toBeHidden();
+  await expect(unselected).toHaveCSS("box-shadow", "none");
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
 function storedComparison(models: string[]): QaConversationMessage[] {
   return [
     { id: "layout-question", role: "user", content: "Compare the stored answers." },
