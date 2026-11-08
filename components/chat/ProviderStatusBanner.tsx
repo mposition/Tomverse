@@ -6,7 +6,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useIsMobileShell } from "@/components/chat/useIsMobileShell";
 import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
-import { discardResponseBody } from "@/lib/discardResponseBody";
+import { readPublicModelStatus } from "@/lib/publicModelStatusClient";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 
@@ -144,25 +144,23 @@ export function ProviderStatusBanner({
   const isMobileShell = useIsMobileShell();
   const [models, setModels] = useState<PublicModelStatusRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [lookupUnavailable, setLookupUnavailable] = useState(false);
   const headingId = useId();
   const actionsId = useId();
 
-  const loadStatus = useCallback(async () => {
+  const loadStatus = useCallback(async (force = false) => {
     setIsLoading(true);
     try {
-      const response = await fetch("/api/models/status", {
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        await discardResponseBody(response);
-        return;
-      }
-      const data = (await response.json()) as { models?: unknown };
+      const result = await readPublicModelStatus({ force });
+      setLookupUnavailable(result.unavailable);
+      const data = result.snapshot;
+      if (!data) return;
       if (!Array.isArray(data.models)) return;
 
       setModels(
         data.models
           .map((item) => {
+            if (!item || typeof item !== "object") return null;
             const record = item as {
               id?: unknown;
               provider?: unknown;
@@ -325,8 +323,12 @@ export function ProviderStatusBanner({
     }
   }, [hasImpact]);
 
-  if (models.length === 0) return null;
-  if (!hasImpact) return null;
+  const statusNotice = lookupUnavailable ? (
+    <p role="status" data-testid="model-status-unavailable" className="mx-3 my-2 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+      {t("providerStatus.lookupUnavailable")}
+    </p>
+  ) : null;
+  if (models.length === 0 || !hasImpact) return statusNotice;
 
   const title =
     bannerState.impacted.length === 1
@@ -418,7 +420,7 @@ export function ProviderStatusBanner({
       type="button"
       onClick={() => {
         rememberFocusTarget();
-        void loadStatus();
+        void loadStatus(true);
       }}
       className={className}
       data-testid="provider-status-refresh"
@@ -463,6 +465,7 @@ export function ProviderStatusBanner({
         aria-describedby={actionsId}
         data-testid="provider-outage-banner"
       >
+        {statusNotice}
         {/*
           REAUDIT-P2-02. The heading had 102px to work with at 320px with a 200%
           root font -- narrower than a single five-syllable Korean word -- so
@@ -531,6 +534,7 @@ export function ProviderStatusBanner({
       aria-describedby={actionsId}
       data-testid="provider-outage-banner"
     >
+      {statusNotice}
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div className="min-w-0 flex-1">

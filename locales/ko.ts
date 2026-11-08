@@ -1020,6 +1020,7 @@ export const ko = {
         imageUnsupported: "이 모델은 첨부된 이미지를 읽을 수 없습니다",
     },
     providerStatus: {
+        lookupUnavailable: "모델 상태를 새로 확인하지 못했습니다. 마지막 확인 결과를 유지합니다.",
         allAvailable: "선택한 모든 공급자가 사용 가능합니다",
         allAvailableBody: "모델 공급자가 정상적으로 응답하고 있습니다.",
         selectedUnavailableOne: "일시적으로 사용할 수 없는 모델: {model}",
