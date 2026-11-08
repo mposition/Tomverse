@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { expectAccessibleContrast } from "./support/ui-audit";
 
 /**
  * /settings/data -- the surface PRIVACY-02 needed and did not have.
@@ -157,6 +158,24 @@ test.describe("account data download", () => {
     await openDataSettings(page);
 
     await expect(page.getByTestId("account-data-export-history-empty")).toBeVisible();
+    for (const theme of ["light", "dark"] as const) {
+      await page.locator("html").evaluate((element, value) => {
+        element.classList.toggle("dark", value === "dark");
+      }, theme);
+      const guidance = [
+        page.getByTestId("account-data-export-history-empty"),
+        page.getByText("이 계정의 모든 요청·다운로드·거부 기록이며", { exact: false }),
+      ];
+      const breadcrumb = page.getByTestId("settings-breadcrumb");
+      if (await breadcrumb.isVisible()) guidance.push(breadcrumb.locator("a").first());
+      for (const description of guidance) {
+        await description.evaluate(async element => {
+          await Promise.all(element.getAnimations().map(animation => animation.finished.catch(() => {})));
+        });
+        const sample = await expectAccessibleContrast(description, `${theme} account data guidance`);
+        expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+      }
+    }
   });
 
   // The row worth reading twice: a refusal means a download link for this
