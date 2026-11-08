@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { setDeterministicTheme } from "./support/chat-state-fixtures";
 
 import {
   mockAuthenticatedApi,
@@ -21,6 +22,49 @@ const preferences = (productUpdatesPending: boolean) => [
   { purpose: "newsletter", enabled: false, locked: false, confirmation: "off" },
   { purpose: "promotions", enabled: false, locked: false, confirmation: "off" },
 ];
+
+for (const theme of ["light", "dark"] as const) {
+  test(`notification switch thumb stays inside its track and changes sides in ${theme}`, async ({ page, isMobile }) => {
+    await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
+    await prepareGuestPage(page, "ko");
+    const account = await mockAuthenticatedApi(page);
+    account.theme = theme;
+    await setDeterministicTheme(page, theme);
+    let serviceEnabled = true;
+    const writes: unknown[] = [];
+    await page.route("**/api/user/email-preferences", async route => {
+      if (route.request().method() === "PATCH") {
+        const body = route.request().postDataJSON();
+        writes.push(body);
+        serviceEnabled = body.enabled;
+      }
+      await route.fulfill({ json: {
+        preferences: preferences(false).map(row => row.purpose === "service_status" ? { ...row, enabled: serviceEnabled } : row),
+        country: { selfDeclared: "DE", resolved: "DE", confidence: "high", conflicts: [], needsConfirmation: false, marketingSupported: true },
+      } });
+    });
+    await page.goto("/settings/notifications?lang=ko");
+    const service = page.getByTestId("email-preference-service_status-toggle");
+    const newsletter = page.getByTestId("email-preference-newsletter-toggle");
+    const expectSide = async (control: typeof service, on: boolean) => {
+      await expect(control).toHaveAttribute("aria-checked", String(on));
+      await expect.poll(() => control.evaluate((element, enabled) => {
+        const track = element.getBoundingClientRect();
+        const thumb = element.querySelector("span")!.getBoundingClientRect();
+        const inset = enabled ? track.right - thumb.right : thumb.left - track.left;
+        return thumb.top >= track.top && thumb.bottom <= track.bottom && inset >= 1 && inset <= 3;
+      }, on)).toBe(true);
+    };
+    await expectSide(service, true);
+    await expectSide(newsletter, false);
+    expect(writes).toEqual([]);
+    await service.click();
+    await expectSide(service, false);
+    await service.click();
+    await expectSide(service, true);
+    expect(writes).toEqual([{ purpose: "service_status", enabled: false }, { purpose: "service_status", enabled: true }]);
+  });
+}
 
 test("marketing opt-in confirms a country and asks for an email confirmation @ui-risk", async ({
   page,
