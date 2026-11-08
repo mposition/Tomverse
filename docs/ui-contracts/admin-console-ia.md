@@ -269,7 +269,7 @@ dispatch state is read from its runtime row -- the operator's exclusions
 first, then its runtime row read the way AMUX reads it when it hands out work
 (live while the lease has not run out and the status is idle or busy). Where a
 worker is drawn follows that state: at its desk while busy or failed (with a
-"!"), in the lounge while free for work, in a sleep pod while its latest quota
+"!"), in the lounge while free for work, in a sleep pod while a fresh quota
 observation says it is used up, on the bench while paused, isolated or blocked,
 and nowhere (a covered desk) while not running. An island's desks grow in
 fours with its workers up to 24; whoever does not fit, or has no island, is
@@ -280,6 +280,13 @@ it also reads the open attempt with the card it holds (display key and title,
 opened the way the card list opens it) and today's CLI usage priced at API
 rates, shown as such and never as money spent. Nothing else of a card, and no
 prompt or output, is read.
+A quota observation is fresh for 20 minutes (`AGENT_OFFICE_QUOTA_FRESH_MS`
+in `lib/agentOffice/inbox.ts`; the AMUX box probes every five). Only a fresh
+reading is drawn as a live bar (summary, roster, worker sheet, island mean),
+rests a worker in a sleep pod or makes a quota inbox item. An older one is
+drawn greyed as a value from back then with its AEST time ("10:42 AEST
+기준"), and a worker or channel with no reading at all says "Not collected"
+("수집 안 됨"): the AMUX server does not send that channel's quota yet.
 The room's connection light is green while at least one admitted worker has
 a live idle/busy dispatch bridge. Individual lost/error bridges remain red,
 with a separate warning count and attention status in the dashboard; green
@@ -302,7 +309,7 @@ person: marketing posts pending approval, AMUX escalations and AMUX halts
 nobody has cleared. The live section's "waiting on you" (and the tab's count)
 adds the Decision Maker items, open v22 worker questions, open plan refusals,
 each AMUX worker in error or lost, and each channel whose resting workers have
-used up their quota, most urgent first.
+used up their quota by a fresh reading, most urgent first.
 They are read with the sidebar badges'
 own count functions (`lib/adminNavigationCounts.ts`), each links to the
 screen where it is acted on, and a count that fails to read is drawn as

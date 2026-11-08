@@ -264,3 +264,82 @@ test("the roster's heartbeats follow the fifteen-second reading", () => {
   assert.match(live, /const heartbeats = useMemo\(\(\) => new Map\(amuxWorkers\.map\(\(w\) => \[w\.name, w\.heartbeatAt\]\)\)/);
   assert.doesNotMatch(live, /amuxView/);
 });
+
+test("a quota reading is fresh, old or missing, and only a fresh one is drawn as now or rests a worker", async () => {
+  const { AGENT_OFFICE_QUOTA_FRESH_MS, agentOfficeQuotaReading, agentOfficeChannelQuota, quotaExhaustedNow, agentOfficeInbox } = await import("../lib/agentOffice/inbox.ts");
+  const { aestSince } = await import("../lib/agentOffice/time.ts");
+  const now = Date.parse("2026-11-08T02:00:00.000Z"); // 12:00 AEST
+  const at = (msAgo) => new Date(now - msAgo).toISOString();
+  const obs = (msAgo, extra = {}) => ({ remainingPercent: 62, exhausted: false, resetAt: null, observedAt: at(msAgo), ...extra });
+  assert.equal(AGENT_OFFICE_QUOTA_FRESH_MS, 20 * 60_000);
+
+  // Fresh: within the window, drawn as now.
+  assert.deepEqual(agentOfficeQuotaReading(obs(5 * 60_000), now), { kind: "fresh", percent: 62, exhausted: false, resetAt: null, observedAt: at(5 * 60_000) });
+  assert.equal(agentOfficeQuotaReading(obs(AGENT_OFFICE_QUOTA_FRESH_MS), now).kind, "fresh");
+  // Old: past the window, a value from back then only.
+  assert.deepEqual(agentOfficeQuotaReading(obs(AGENT_OFFICE_QUOTA_FRESH_MS + 1), now), { kind: "old", percent: 62, observedAt: at(AGENT_OFFICE_QUOTA_FRESH_MS + 1) });
+  assert.equal(agentOfficeQuotaReading(obs(0, { observedAt: "not a date" }), now).kind, "old");
+  // Missing: never recorded.
+  assert.deepEqual(agentOfficeQuotaReading(null, now), { kind: "missing" });
+  assert.deepEqual(agentOfficeQuotaReading(undefined, now), { kind: "missing" });
+
+  // Used up: a fresh reading before its reset rests the worker; an old one never does.
+  const out = (msAgo, resetAt = null) => obs(msAgo, { remainingPercent: 0, exhausted: true, resetAt });
+  assert.equal(quotaExhaustedNow(out(60_000), now), true);
+  assert.equal(quotaExhaustedNow(out(60_000, at(-3_600_000)), now), true);
+  assert.equal(quotaExhaustedNow(out(60_000, at(1)), now), false);
+  assert.equal(quotaExhaustedNow(out(3 * 3_600_000), now), false);
+  assert.equal(quotaExhaustedNow(null, now), false);
+  assert.equal(agentOfficeQuotaReading(obs(60_000, { exhausted: true }), now).percent, 0);
+
+  // A channel: fresh mean first, else old mean with the newest time, else not collected.
+  const fresh = agentOfficeQuotaReading(obs(60_000), now);
+  const fresh2 = agentOfficeQuotaReading(obs(60_000, { remainingPercent: 40 }), now);
+  const old = agentOfficeQuotaReading(obs(2 * 3_600_000, { remainingPercent: 30 }), now);
+  const older = agentOfficeQuotaReading(obs(5 * 3_600_000, { remainingPercent: 10 }), now);
+  const missing = agentOfficeQuotaReading(null, now);
+  assert.deepEqual(agentOfficeChannelQuota([]), { kind: "none" });
+  assert.deepEqual(agentOfficeChannelQuota([fresh, fresh2, old, missing]), { kind: "fresh", percent: 51 });
+  assert.deepEqual(agentOfficeChannelQuota([older, old, missing]), { kind: "old", percent: 20, observedAt: at(2 * 3_600_000) });
+  assert.deepEqual(agentOfficeChannelQuota([missing, missing]), { kind: "missing" });
+
+  // The inbox makes a quota item from a fresh used-up reading only.
+  const zero = { queue: { marketing: 0, amuxEscalations: 0, amuxHalts: 0 }, inbox: { dmAttention: 0, v22Questions: 0, planRefusals: 0 }, now };
+  const worker = (name, provider) => ({ name, provider, state: "ready", heartbeatAt: null });
+  const amux = { kind: "observed", catalogConfigured: true, workers: [worker("claude-a", "anthropic"), worker("codex-a", "openai"), worker("copilot-a", "copilot")] };
+  const detail = (quota) => ({ quota, recent: [], work: null, usage: null });
+  const items = agentOfficeInbox({
+    ...zero,
+    amux,
+    amuxDetail: { kind: "observed", ownerDetail: false, workers: { "claude-a": detail(out(60_000)), "codex-a": detail(out(3 * 3_600_000)), "copilot-a": detail(null) } },
+  });
+  assert.deepEqual(items.map((i) => [i.kind, i.channel, i.count]), [["quota", "claude", 1]]);
+
+  // Times are AEST: today's as a clock, an earlier day's with its date.
+  assert.equal(aestSince(at(78 * 60_000), now), "10:42 AEST");
+  assert.equal(aestSince("2026-11-07T00:42:00.000Z", now), "11-07 10:42 AEST");
+});
+
+test("the office says old and not-collected quota in words, in AEST, with no em dash", () => {
+  const live = read("components/admin/AgentOfficeLive.tsx");
+  // Every quota place reads through the one freshness rule.
+  assert.match(live, /const quota = agentOfficeQuotaReading\(d\?\.quota, now\);/);
+  assert.match(live, /quotaPercent: quota\.kind === "fresh" \? quota\.percent : null/);
+  assert.match(live, /agentOfficeChannelQuota\(workers\.filter\(\(w\) => w\.channel === ch\)\.map\(\(w\) => w\.quota\)\)/);
+  assert.match(live, /data-testid="agent-office-worker-quota" data-quota=\{quota\.kind\}/);
+  assert.match(live, /<td data-quota=\{w\.quota\.kind\}>/);
+  assert.doesNotMatch(live, /quotaExhaustedNow\(/);
+  for (const locale of ["en", "ko"]) {
+    const c = adminAgentOfficeFloorMessages[locale];
+    for (const part of [c.kpi, c.sheet]) {
+      assert.ok(part.quotaNotCollected && part.quotaNotCollectedHint, `${locale}: not-collected copy`);
+      assert.match(part.quotaAsOf("10:42 AEST"), /10:42 AEST/);
+      assert.match(part.quotaOldHint(20), /20/);
+      const text = [part.quotaNotCollected, part.quotaNotCollectedHint, part.quotaAsOf("10:42 AEST"), part.quotaOldHint(20)].join(" ");
+      assert.doesNotMatch(text, /UTC|—/);
+    }
+  }
+  assert.equal(adminAgentOfficeFloorMessages.ko.kpi.quotaNotCollected, "수집 안 됨");
+  assert.equal(adminAgentOfficeFloorMessages.ko.kpi.quotaAsOf("10:42 AEST"), "10:42 AEST 기준");
+  assert.equal(adminAgentOfficeFloorMessages.en.kpi.quotaNotCollected, "Not collected");
+});
