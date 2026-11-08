@@ -122,15 +122,17 @@ export function AmuxBoardAttentionLane({
         const title = amuxVisibleInspectionText(card.title ?? m.protectedTitle);
         return <li key={card.id} data-testid={"amux-board-card-" + card.id} data-stuck={stuck ? "true" : undefined}
           data-attention-group={group} title={reason ?? undefined}
-          className={"flex min-h-10 items-center gap-2 rounded-xl border bg-zinc-900 px-2.5 py-1.5 text-xs " +
+          // Wraps: the title takes a line of its own, so a long number or the
+          // row's buttons can never squeeze it to nothing in a narrow column.
+          className={"flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border bg-zinc-900 px-2.5 py-1.5 text-xs " +
             (stuck ? "border-red-500/60" : "border-zinc-800")}>
           <span aria-hidden="true" className={"h-2 w-2 shrink-0 rounded-full " +
             (stuck ? "bg-red-500" : group === "question" ? "bg-blue-500" : "bg-amber-500")} />
-          <button type="button" className="shrink-0 font-mono text-[11px] font-bold text-blue-300 hover:underline"
+          <button type="button" className="min-w-0 max-w-full truncate font-mono text-[11px] font-bold text-blue-300 hover:underline"
             onClick={(event) => onOpen(card.id, false, event.currentTarget)}>{label}</button>
           {channel && <AdminChannelIcon channel={channel} size={16} label={adminChannelName(channel)} />}
           {card.sev1 && <span className="shrink-0 font-bold text-amber-300">SEV1</span>}
-          <button type="button" className="min-w-0 flex-1 truncate text-left font-medium text-zinc-100 hover:underline"
+          <button type="button" className="order-last min-w-0 basis-full truncate text-left font-medium text-zinc-100 hover:underline"
             onClick={(event) => onOpen(card.id, false, event.currentTarget)}>{title}</button>
           {reason && <span className="sr-only" data-testid={"amux-card-attention-reason-" + card.id}>{reason}</span>}
           {card.ownerQuestion === "open" && <button type="button" aria-label={m.questionPending}
