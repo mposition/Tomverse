@@ -1368,11 +1368,13 @@ export const infoPages = {
       },
       {
         "title": "When an answer does not arrive",
-        "body": "Models can be temporarily limited or fail to answer. Check the reason and service status, then try a suggested alternative once if needed. If the problem continues, send support the trace ID and model name."
+        "body": "Models can be temporarily limited or fail to answer. Check the reason and service status, then try a suggested alternative once if needed. If the problem continues, send support the trace ID and model name.",
+        "link": { "label": "View service status", "href": "/status" }
       },
       {
         "title": "Saving, sharing and data",
-        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details."
+        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details.",
+        "link": { "label": "How we handle your data", "href": "/safety/security-privacy" }
       },
       {
         "title": "Contact support",
