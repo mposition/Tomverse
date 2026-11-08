@@ -20,6 +20,7 @@ import {
   getTypicalShortRequestCapacities,
 } from "@/lib/models";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
+import { PricingCreditExample } from "./PricingCreditExample";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { usePricingAccount } from "@/components/marketing/usePricingAccount";
@@ -1650,6 +1651,7 @@ export function PricingPageContent() {
               <p className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
+              {lang === "en" ? <PricingCreditExample credits={billing.planLimits(planId).monthlyCredits} testId={`pricing-credit-example-plan-${planId}`} /> : null}
               {/*
                 The plan CTA is chosen by resolvePlanCtaState(), not by the
                 card's own name. Every card used to render the same "Upgrade"
@@ -2002,6 +2004,7 @@ export function PricingPageContent() {
                   <p className="mt-4 min-w-0 break-words border-t border-zinc-200 pt-3 text-xs font-bold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
                     {creditPackGuide.validity}
                   </p>
+                  {lang === "en" ? <PricingCreditExample credits={pack.credits} testId={`pricing-credit-example-pack-${pack.id}`} /> : null}
                   {/* Per-pack CTA. The pack the visitor clicked is what the
                       modal opens on, and what a sign-in detour carries back,
                       so the choice is never made twice. */}
