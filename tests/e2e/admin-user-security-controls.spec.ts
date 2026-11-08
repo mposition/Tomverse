@@ -104,7 +104,9 @@ async function openHarness(page: Page, state?: string) {
   const response = await page.goto(state ? `${HARNESS}?state=${state}` : HARNESS);
   expect(response?.status()).toBeLessThan(400);
   await expect(page.getByTestId("admin-user-security-controls")).toBeVisible();
-  await waitForHydration(page, '[data-testid="admin-security-reason"]');
+  // The section itself, not a field: a field is drawn only inside an open
+  // card, and an active account opens with every card closed.
+  await waitForHydration(page, '[data-testid="admin-user-security-controls"]');
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +171,7 @@ test("a support ticket reference under three characters blocks the restoration",
 // The original defect: one shared expiry field, forwarded whatever the action,
 // so a date left over from an earlier suspension made restoration fail with
 // `The "restore_account" action does not accept an expiry.`
-test("restore_account sends until: null even with an expiry left in the form", async ({
+test("restore_account sends until: null and its card draws no expiry", async ({
   page,
 }) => {
   const requests = await interceptSecurity(page, (route) =>
@@ -180,10 +182,10 @@ test("restore_account sends until: null even with an expiry left in the form", a
   );
   await openHarness(page, "pendingDeletion");
 
-  // The expiry input lives in the AI-restriction card, apart from the
-  // restoration card, but its state is still shared.
-  await openCard(page, "ai");
-  await page.getByTestId("admin-security-until").fill("2099-01-01T09:00");
+  // A pending deletion offers no expiry field at all now: its AI card lifts a
+  // restriction and its suspension card is not drawn. The restore card itself
+  // must still never draw one, and the request must carry none.
+  await expect(page.getByTestId("admin-security-until")).toHaveCount(0);
   await openCard(page, "restore");
   await page.getByTestId("admin-security-reason").fill(REASON);
   await page.getByTestId("admin-security-ticket").fill(TICKET);
@@ -450,10 +452,13 @@ test("every security input has a real label and helper text, not just a placehol
     { card: "restore" as const, testId: "admin-security-reason", label: /Audit reason/ },
     { card: "restore" as const, testId: "admin-security-incident-note", label: /Security incident note/ },
     { card: "restore" as const, testId: "admin-security-ticket", label: /Support ticket reference/ },
-    { card: "ai" as const, testId: "admin-security-until", label: /Control expiry/ },
   ];
+  // The expiry belongs to an account that can still be restricted, so it is
+  // checked on the active account, in its AI-restriction card.
+  const expiryField = { card: "ai" as const, testId: "admin-security-until", label: /Control expiry/ };
 
-  for (const field of fields) {
+  for (const field of [...fields, expiryField]) {
+    if (field === expiryField) await openHarness(page);
     await openCard(page, field.card);
     const input = page.getByTestId(field.testId);
     const id = await input.getAttribute("id");
@@ -480,6 +485,8 @@ test("the expiry field says what it applies to, when it lifts, and which clock i
   await expect(restoreGroup.getByTestId("admin-security-until")).toHaveCount(0);
   await expect(restoreGroup.getByTestId("admin-security-ticket")).toHaveCount(1);
 
+  // The expiry itself is drawn for an account that can still be restricted.
+  await openHarness(page);
   await openCard(page, "ai");
   const hintId = (
     await page.getByTestId("admin-security-until").getAttribute("aria-describedby")
