@@ -191,7 +191,12 @@ function review(stage, concept, locale, file, attempt) {
   const folder = path.join(dir, "review", name);
   mkdirSync(path.join(folder, "logos"), { recursive: true });
   copyFileSync(file, path.join(folder, "picture.png"));
-  writeFileSync(path.join(folder, "concept.json"), JSON.stringify({ id: concept.id, feature: concept.feature, device: concept.device, texts: textsFor(concept, locale), logos: concept.logos }, null, 1));
+  writeFileSync(
+    path.join(folder, "concept.json"),
+    JSON.stringify({ id: concept.id, feature: concept.feature, device: concept.device, texts: textsFor(concept, locale), logos: concept.logos, factRefs: concept.factRefs }, null, 1),
+  );
+  // The facts the reviewer judges against: the whole of features.json (what Tomverse does, its models and the recorded answers).
+  copyFileSync("features.json", path.join(folder, "features.json"));
   for (const logo of concept.logos) copyFileSync(path.join(ICON_DIR, `${logo}.png`), path.join(folder, "logos", `${logo}.png`));
   const rel = folder.split(path.sep).join("/");
   const prompt = readFileSync("REVIEW-higgsfield.md", "utf8")
@@ -213,7 +218,8 @@ function review(stage, concept, locale, file, attempt) {
 const editPrompt = (fixes) => `Edit the attached picture. Keep everything else exactly as it is: the people, the scene, the light, the composition and every word that is right. Make only these changes:\n${fixes.map((fix) => `- ${fix}`).join("\n")}`;
 const SMOOTH =
   "Edit the attached picture. Do not change a single character of any text. Make the whole photo look natural, as if the words were really shown on the screens: match each screen's light, focus, glare and perspective, and keep everything else as it is.";
-const localePrompt = (concept, locale, boxes) => {
+/** The language edit; on a second attempt it carries what the content review asked to fix. */
+const localePrompt = (concept, locale, boxes, fixes = []) => {
   const texts = textsFor(concept, locale);
   const cleared = boxes.filter((box) => box.role !== "screen").map((box) => `"${concept.texts[box.textIndex].text}"`);
   const screens = boxes.filter((box) => box.role === "screen").map((box) => `- "${concept.texts[box.textIndex].text}" becomes "${texts[box.textIndex].text}"`);
@@ -221,6 +227,7 @@ const localePrompt = (concept, locale, boxes) => {
     "Edit the attached picture. Keep the scene, the people, the light, the provider logos and the layout exactly as they are.",
     cleared.length > 0 ? `Remove these words and leave their space clean, continuing the background, with no letters at all: ${cleared.join(", ")}.` : "",
     screens.length > 0 ? `Replace the words on the screens, exactly, keeping model and company names as written:\n${screens.join("\n")}` : "",
+    fixes.length > 0 ? `A review of the last attempt also asked for these changes:\n${fixes.map((fix) => `- ${fix}`).join("\n")}` : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -318,7 +325,7 @@ for (const concept of concepts) {
     try {
       for (let attempt = 1; attempt <= 2 && !delivered && !report.halted; attempt += 1) {
         const stem = path.join(genDir, `${concept.id}-${locale.toLowerCase()}-${attempt}`);
-        const edited = await picture(`${concept.id}/${locale}/edit`, localePrompt(concept, locale, boxes), [base, ...logos], `${stem}-a.png`);
+        const edited = await picture(`${concept.id}/${locale}/edit`, localePrompt(concept, locale, boxes, content?.fixes ?? []), [base, ...logos], `${stem}-a.png`);
         if (!edited) break;
         let file = edited;
         if (boxes.some((box) => box.role === "screen")) {
