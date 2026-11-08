@@ -6,12 +6,16 @@ import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
+  amuxReviewAllowedOutcomes,
   amuxReviewApprovalHasEvidence,
+  amuxReviewDecisionHold,
   amuxReviewDisplayIsExact,
   amuxReviewTextExceedsDisplay,
   amuxReviewRequestDigest,
   amuxReviewSubjectDigest,
   amuxReviewTargetStatus,
+  amuxReviewPublicationMayOpenPr,
+  amuxV22PrlessReviewRetryAllowed,
   amuxV22ReviewRetryHasVerifiedOutcome,
   amuxV4ReviewEvidenceMatches,
   amuxV4ReviewReportProjection,
@@ -27,6 +31,7 @@ import { readAmuxReviewPullRequest, type AmuxReviewPullRequest } from "@/lib/amu
 import { readAmuxExecutionTaskDetail } from "@/lib/amux/adminExecutionRead";
 import { evaluateLockedAmuxCostAdmission, lockAmuxResourcePolicies } from "@/lib/amux/resourcePolicy";
 import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
+import { ENGINEERING_AGENT_V22_TIER_PENDING_REASON } from "@/lib/engineeringAgentCore";
 import { prisma } from "@/lib/prisma";
 
 export class AmuxReviewRefusal extends Error {
@@ -214,31 +219,52 @@ async function snapshot(
   const baseEligible = safe && task.archivedAt === null &&
     (task.status === "review" || task.status === "blocked") &&
     lastTerminal && activeDelivery === null;
-  const outcomes: AmuxReviewOutcome[] = [];
-  if (baseEligible && task.status === "review" && reviewAttempt) {
-    if (amuxReviewApprovalHasEvidence({ sourceSystem: task.sourceSystem,
+  const decisionHold = amuxReviewDecisionHold({ escalationOpen: safe,
+    archived: task.archivedAt !== null, taskStatus: task.status, lastTerminal,
+    activeDelivery: activeDelivery !== null, reviewAttempt });
+  const inReview = baseEligible && task.status === "review" && reviewAttempt;
+  // A v22 result that reached review with no pull request (owner decision
+  // 2026-11-08). Its publication rows are read, not locked: locking them here
+  // would put an engineering row lock before the audit chain lock the
+  // publisher takes first. A promotion racing the retry can still open a
+  // draft PR, but the moved Task never records it
+  // (reviewPullRequest.ts: not_the_workers_review).
+  const publication = inReview && task.sourceSystem === "admin-idea-v4" &&
+    task.reviewPrNumber === null && lastAttempt !== null ?
+    await tx.engineeringAgentWorkItem.findMany({
+      where: { run: { amuxAttemptId: lastAttempt.id } },
+      select: { kind: true, state: true, reason: true },
+    }) : null;
+  // A twice-rejected run is retryable only with its own audited reject verdict.
+  const rejectedReviewAttemptId = task.sourceSystem === "admin-idea-v4" ?
+    await amuxV52RejectedTwiceReviewAttemptId(tx, task.id, lastAttempt) : null;
+  const outcomes = amuxReviewAllowedOutcomes({
+    eligible: baseEligible,
+    taskStatus: task.status,
+    reviewAttempt,
+    approvalHasEvidence: amuxReviewApprovalHasEvidence({ sourceSystem: task.sourceSystem,
       cardType: task.cardType, taskRole: task.taskRole,
       reviewPrNumber: task.reviewPrNumber,
       artifactAvailable: artifact !== null,
       v4EvidenceVerified: v4Valid, displayTruncated,
-      displayExact })) outcomes.push("approve");
-    outcomes.push("block");
-  }
-  // A twice-rejected run is retryable only with its own audited reject verdict.
-  const rejectedReviewAttemptId = task.sourceSystem === "admin-idea-v4" ?
-    await amuxV52RejectedTwiceReviewAttemptId(tx, task.id, lastAttempt) : null;
-  if (baseEligible && task.status === "blocked") {
-    outcomes.push("block");
-    if (!displayTruncated && displayExact && budget.allowed && dueCorrected &&
-        amuxV22ReviewRetryHasVerifiedOutcome({
-          sourceSystem: task.sourceSystem, attempt: lastAttempt,
-          storedResultAttemptId: latestV4Result?.attemptId ?? null,
-          rejectedReviewAttemptId,
-        }) &&
-        (lastAttempt !== null || escalation.specialty === "planning-review")) {
-      outcomes.push("retry");
-    }
-  }
+      displayExact }),
+    prlessRetryAllowed: publication !== null && amuxV22PrlessReviewRetryAllowed({
+      sourceSystem: task.sourceSystem,
+      cardType: task.cardType, reviewPrNumber: task.reviewPrNumber,
+      attempt: lastAttempt, v4EvidenceVerified: v4Valid,
+      publicationMayOpenPr: amuxReviewPublicationMayOpenPr(publication,
+        ENGINEERING_AGENT_V22_TIER_PENDING_REASON),
+      displayTruncated, displayExact }),
+    blockedRetryVerified: amuxV22ReviewRetryHasVerifiedOutcome({
+      sourceSystem: task.sourceSystem, attempt: lastAttempt,
+      storedResultAttemptId: latestV4Result?.attemptId ?? null,
+      rejectedReviewAttemptId,
+    }) && (lastAttempt !== null || escalation.specialty === "planning-review"),
+    budgetAllowed: budget.allowed,
+    dueCorrected,
+    displayTruncated,
+    displayExact,
+  });
   const reason = normalizeAmuxUntrustedReason(escalation.reason) ?? "(unavailable)";
   const attemptReason = normalizeAmuxUntrustedReason(lastAttempt?.reason);
   const previousBlockReason = normalizeAmuxUntrustedReason(previousBlock?.resolution);
@@ -298,7 +324,7 @@ async function snapshot(
     latestV4Result?.attemptId === lastAttempt.id;
   return { escalation, task, lastAttempt, budget, used, subject, digest, text,
     context, report, displayTruncated, displayExact, outcomes, artifact,
-    lastAttemptResultStored };
+    lastAttemptResultStored, decisionHold };
 }
 
 export async function getAmuxReviewDetail(escalationId: string) {
@@ -307,7 +333,8 @@ export async function getAmuxReviewDetail(escalationId: string) {
   ]);
   const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
   const { escalation, task, lastAttempt, used, digest, text, context, report,
-    displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored } = state;
+    displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored,
+    decisionHold } = state;
   return {
     available: true,
     escalation: {
@@ -323,6 +350,10 @@ export async function getAmuxReviewDetail(escalationId: string) {
       status: task.status,
       revision: task.revision,
       due_parse_state: task.dueParseState,
+      // Whether the card has a recorded pull request at all. The artifact
+      // below is null too when GitHub could not be read, so the screen tells
+      // "no pull request" from "unreadable" by this field.
+      review_pr_number: task.reviewPrNumber,
     },
     last_attempt: lastAttempt ? {
       id: lastAttempt.id,
@@ -347,6 +378,8 @@ export async function getAmuxReviewDetail(escalationId: string) {
       html_url: artifact.htmlUrl,
     } : null,
     allowed_outcomes: outcomes,
+    // Why no decision is open at all; null while the server offers one.
+    decision_hold: decisionHold,
     retry: { used, limit: AMUX_MAX_EXECUTION_ATTEMPTS, remaining: Math.max(0, AMUX_MAX_EXECUTION_ATTEMPTS - used) },
     proposed_transitions: {
       approve: outcomes.includes("approve") ? "done" : null,
