@@ -45,6 +45,7 @@ type SupportCopy = {
   noPhoneValue: string;
   cards: { title: string; body: string; bullets: string[] }[];
   formTitle: string;
+  formJumpLabel?: string;
   formDescription: string;
   typeLabel: string;
   types: Record<"support" | "bug" | "billing" | "feature" | "other", string>;
@@ -165,6 +166,7 @@ const copy: Record<Language, SupportCopy> = {
       }
     ],
     "formTitle": "지원팀에 문의",
+    "formJumpLabel": "문의 작성하기",
     "formDescription": "문의 내용을 보내면 지원팀이 확인합니다. 이메일 상태 안내를 선택하면 접수 번호와 진행 안내를 해당 주소로 받을 수 있습니다.",
     "typeLabel": "문의 유형",
     "types": {
@@ -702,6 +704,11 @@ export function SupportPageContent() {
           <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{page.title}</h1>
           <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{page.description}</p>
           <div className="mt-8 flex flex-wrap gap-3">
+            {page.formJumpLabel ? (
+              <a href="#support-request-form" className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+                {page.formJumpLabel}<ArrowRight className="h-4 w-4" />
+              </a>
+            ) : null}
             <Link href={`/support/help-centre?lang=${encodeURIComponent(lang)}`} className="inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white transition hover:bg-blue-500">
               {page.helpCta}
               <ArrowRight className="h-4 w-4" />
@@ -755,7 +762,7 @@ export function SupportPageContent() {
             <p id="support-message-example" className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{page.messageExample}</p>
           </div>
 
-          <form onSubmit={submit} className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5 shadow-2xl shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <form id="support-request-form" tabIndex={-1} onSubmit={submit} className="scroll-mt-28 rounded-3xl border border-zinc-200 bg-zinc-50 p-5 shadow-2xl shadow-zinc-950/5 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-800 dark:bg-zinc-900/50">
             <label className="mt-6 block text-sm font-bold">
               {page.typeLabel}
               <select
