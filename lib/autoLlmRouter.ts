@@ -25,6 +25,7 @@ import {
     AUTO_LLM_ROUTER_TIMEOUT_MS,
     autoLlmRouterCandidates,
     autoLlmRouterDecisionVersion,
+    autoLlmRouterFailureDetail,
     autoLlmRouterOutputSchema,
     autoLlmRouterProviderOptions,
     autoLlmRouterSession,
@@ -36,16 +37,22 @@ import {
     type AutoLlmRouterCandidate,
     type AutoLlmRouterPick,
     type AutoLlmRouterSession,
+    type AutoLlmRouterFailure,
     type AutoFileGenerationContext,
     withAutoFileCapabilities,
 } from "@/lib/autoLlmRouterCore";
 import { effectiveRouterTimeoutMs, withoutExcludedModels } from "@/lib/autoRouterTunablesCore";
 import { readAutoRouterTunables } from "@/lib/autoRouterTunablesRead";
+import {
+    autoLlmRouterFailureDetail as autoLlmRouterDiagnosticDetail,
+    autoLlmRouterFinishReason,
+} from "@/lib/autoLlmRouterDiagnostics";
 
 export type AutoLlmRouterCallResult = {
-    outcome: "picked" | "invalid" | "error";
+    outcome: "picked" | "invalid" | "error" | "timeout";
     pick: AutoLlmRouterPick | null;
     usage: { inputTokens?: number; outputTokens?: number } | undefined;
+    failure?: AutoLlmRouterFailure;
 };
 
 /**
@@ -69,6 +76,7 @@ type AutoLlmRouterCallInput = {
     traceId?: string;
     cycleId?: string;
     decisionId?: string;
+    source?: "live" | "routing_optimizer" | "rewrite_optimizer";
 };
 
 /** What the call sends, built once so its cost bound is of the same request. */
@@ -100,7 +108,8 @@ export async function callAutoLlmRouter(
     const { rewrite, system, prompt, maxOutputTokens, candidates } = routerRequest(input);
     const timeoutMs = input.timeoutMs ??
         (rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : AUTO_LLM_ROUTER_TIMEOUT_MS);
-    const abortSignal = AbortSignal.timeout(timeoutMs);
+    let abortSignal: AbortSignal | undefined;
+    const startedAt = Date.now();
     let usage: AutoLlmRouterCallResult["usage"];
     let finishReason: string | undefined;
     let stage: "generate" | "output" = "generate";
@@ -109,6 +118,7 @@ export async function callAutoLlmRouter(
     const logFailure = (failure: string, detail: Record<string, unknown> = {}) => console.warn(
         JSON.stringify({
             event: "auto_llm_router_call_failed",
+            source: input.source ?? "unknown",
             traceId: input.traceId,
             cycleId: input.cycleId,
             decisionId: input.decisionId,
@@ -116,15 +126,17 @@ export async function callAutoLlmRouter(
             provider: input.routerModel.provider,
             rewrite,
             timeoutMs,
+            latencyMs: Date.now() - startedAt,
             stage,
             failure,
-            finishReason,
+            finishReason: autoLlmRouterFinishReason(finishReason),
             inputTokens: usage?.inputTokens ?? null,
             outputTokens: usage?.outputTokens ?? null,
             ...detail,
         })
     );
     try {
+        abortSignal = AbortSignal.timeout(timeoutMs);
         const generated = await generateText({
             model: getActiveAiModel(input.routerModel),
             system,
@@ -152,12 +164,15 @@ export async function callAutoLlmRouter(
         if (!pick) {
             const value = output as { modelId?: unknown; requiresFileGeneration?: unknown } | null;
             logFailure("invalid_pick", {
+                failureKind: "invalid_output",
+                outcome: "invalid",
                 modelIdPresent: typeof value?.modelId === "string",
                 modelIdEligible: candidates.some(candidate => candidate.id === value?.modelId),
                 fileIntentType: typeof value?.requiresFileGeneration,
             });
         }
-        return { outcome: pick ? "picked" : "invalid", pick, usage };
+        return { outcome: pick ? "picked" : "invalid", pick, usage,
+            ...(!pick ? { failure: { kind: "invalid_output" as const } } : {}) };
     } catch (error) {
         const structured = NoObjectGeneratedError.isInstance(error);
         const empty = NoOutputGeneratedError.isInstance(error);
@@ -166,19 +181,27 @@ export async function callAutoLlmRouter(
             finishReason = error.finishReason ?? finishReason;
             stage = "output";
         }
-        const failure = abortSignal.aborted ? "timeout"
+        const failure = autoLlmRouterFailureDetail(error, abortSignal?.aborted === true);
+        const failureCode = failure.kind === "timeout" ? "timeout"
             : structured ? (JSONParseError.isInstance(error.cause) ? "output_parse"
                 : TypeValidationError.isInstance(error.cause) ? "output_schema" : "output_invalid")
             : empty ? "empty_output"
             : APICallError.isInstance(error) ? "provider_error" : "call_error";
-        logFailure(failure, {
+        const outcome = failure.kind === "timeout" ? "timeout" : structured || empty ? "invalid" : "error";
+        logFailure(failureCode, {
+            ...autoLlmRouterDiagnosticDetail(error, { timedOut: failure.kind === "timeout", finishReason }),
+            outcome,
             ...(structured ? { outputChars: error.text?.length ?? 0 } : {}),
             ...(APICallError.isInstance(error) ? {
-                statusCode: error.statusCode,
                 retryable: error.isRetryable,
             } : {}),
         });
-        return { outcome: structured || empty ? "invalid" : "error", pick: null, usage };
+        return {
+            outcome,
+            pick: null,
+            usage,
+            failure,
+        };
     }
 }
 
@@ -370,6 +393,7 @@ export async function pickAutoModelWithLlm(input: {
         rewriteCycleId: rewriteGuidance?.cycleId ?? null,
     });
     const call: AutoLlmRouterCallInput = {
+        source: "live",
         traceId: input.traceId,
         routerModel,
         guidance: active.guidance,
@@ -398,7 +422,7 @@ export async function pickAutoModelWithLlm(input: {
         return null;
     }
     const startedAt = Date.now();
-    const { outcome, pick, usage } = await callAutoLlmRouter(call);
+    const { outcome, pick, usage, failure } = await callAutoLlmRouter(call);
     const latencyMs = Date.now() - startedAt;
     if (prices && usage?.inputTokens !== undefined && usage.outputTokens !== undefined) {
         const actual = callCostMicroUsd({
@@ -423,6 +447,8 @@ export async function pickAutoModelWithLlm(input: {
             rewriteKept: Boolean(pick?.rewrite),
             outcome,
             latencyMs,
+            timeoutMs: call.timeoutMs,
+            ...(failure ? { failure } : {}),
         })
     );
 

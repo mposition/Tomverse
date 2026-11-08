@@ -1,7 +1,9 @@
 import type { AmuxRecoveryInspectionIdentity } from "./ownerRecoveryInspectionCore";
 
 export type RecoveryAction = "request_inspection" | "accept_unknown_prior_effects" |
-  "request_safe_stop" | "approve_attempt";
+  "request_safe_stop" | "approve_attempt" | "preapprove_attempt";
+/** The server-quoted cost the owner confirmed for a one-click pre-approval. */
+export type RecoveryPreApprovalReceiptBinding = { preApprovalCostDigest: string };
 export type RecoveryApprovalReceiptBinding = {
   inspectionId: string | null; evidenceId: string | null;
   evidenceDigest: string | null; costDigest: string;
@@ -20,7 +22,7 @@ export type RecoveryRiskApprovalReceiptBinding = RecoveryApprovalReceiptBinding 
 };
 export type RecoveryReceiptBinding = RecoveryApprovalReceiptBinding |
   RecoveryRiskApprovalReceiptBinding | RecoverySafeStopReceiptBinding |
-  RecoveryRiskSafeStopReceiptBinding;
+  RecoveryRiskSafeStopReceiptBinding | RecoveryPreApprovalReceiptBinding;
 export type AmuxPendingRecovery = {
   version: 1; identity: AmuxRecoveryInspectionIdentity & { attemptId: string };
   requestId: string; action: RecoveryAction; expectedReceipt: RecoveryReceiptBinding | null;
@@ -68,6 +70,10 @@ export function bindAmuxPendingRecovery(value: unknown, taskId: string): AmuxPen
         !uuid(receipt.sourceEvidenceId) || !digest(receipt.sourceEvidenceDigest) ||
         ("riskAcceptanceId" in receipt && (!uuid(receipt.riskAcceptanceId) ||
           !digest(receipt.riskAcceptanceDigest)))) return null;
+  } else if (value.action === "preapprove_attempt") {
+    const receipt = value.expectedReceipt;
+    if (!record(receipt) || !keys(receipt, "preApprovalCostDigest") ||
+        !digest(receipt.preApprovalCostDigest)) return null;
   } else if (value.action === "approve_attempt") {
     const receipt = value.expectedReceipt;
     if (!record(receipt)) return null;

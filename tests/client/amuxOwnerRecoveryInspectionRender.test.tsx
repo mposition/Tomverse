@@ -4,9 +4,11 @@ import React, { type ReactNode } from "react";
 import { AmuxRecoveryInspectionView, fetchAmuxRecoveryInspection,
   AMUX_RECOVERY_INSPECTION_TIMEOUT_MS, AmuxHostRecoveryView, fetchAmuxHostRecovery,
   AmuxOwnerRecoveryInspectionPanel, bindAmuxHostRecovery,
-  AMUX_HOST_EVIDENCE_AUTO_READ_MS, AMUX_HOST_EVIDENCE_AUTO_READS } from
+  AMUX_HOST_EVIDENCE_AUTO_READ_MS, AMUX_HOST_EVIDENCE_AUTO_READS, AmuxOneClickRecoveryView,
+  bindAmuxPreApprovalQuote, fetchAmuxPreApprovalQuote, AMUX_PREAPPROVAL_AUTO_READ_MS,
+  AMUX_PREAPPROVAL_AUTO_READS } from
   "@/components/admin/AmuxOwnerRecoveryInspectionPanel";
-import type { AmuxHostRecoveryRead } from "@/components/admin/AmuxOwnerRecoveryInspectionPanel";
+import type { AmuxHostRecoveryRead, AmuxPreApprovalQuoteState } from "@/components/admin/AmuxOwnerRecoveryInspectionPanel";
 import type { AmuxV22RecoveryRead } from "@/lib/amux/v22TaskRecoveryCore";
 import { adminAmuxRecoveryInspectionMessages } from "@/lib/adminMessages/amuxRecoveryInspection";
 import { summarizeAmuxRecoveryUsage, type AmuxOwnerRecoveryInspection } from
@@ -557,7 +559,24 @@ test("advanced app task status remains separate from the immutable approval rece
 
 // Minimal hook harness for the actual Panel, not a second implementation of
 // its request logic. React's installed dispatcher shape is asserted explicitly.
+/** The app-record check reads on its own when the panel mounts (owner
+ * decision 2026-11-08). The harness answers that read-only GET itself and
+ * records it, so each test's stub still sees only the recovery calls. */
+const inspectionReads: string[] = [];
+function answerInspectionReads() {
+  const forward = globalThis.fetch as typeof fetch & { amuxInspectionReads?: true };
+  if (forward.amuxInspectionReads) return;
+  const wrapped = Object.assign(async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).startsWith("/api/admin/amux/execution-view")) {
+      assert.notEqual(init?.method, "POST"); inspectionReads.push(String(url));
+      return Response.json(fixture());
+    }
+    return forward(url, init);
+  }, { amuxInspectionReads: true as const });
+  globalThis.fetch = wrapped as typeof fetch;
+}
 function mountRecoveryPanel(initialIdentity = identity) {
+  answerInspectionReads();
   const internals = (React as unknown as { __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE:
     { H: unknown } }).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
   assert.ok(internals && "H" in internals, "installed React client dispatcher is required");
@@ -565,6 +584,8 @@ function mountRecoveryPanel(initialIdentity = identity) {
   const effects = new Map<number, { deps: unknown[]; cleanup?: () => void }>();
   let cursor = 0, dirty = true, mounted = true, taskIdentity = initialIdentity;
   let hostProps!: Parameters<typeof AmuxHostRecoveryView>[0];
+  let inspectionProps!: Parameters<typeof AmuxRecoveryInspectionView>[0];
+  let oneClickProps: Parameters<typeof AmuxOneClickRecoveryView>[0] | null = null;
   const queued: (() => void)[] = [];
   const dispatcher = {
     useContext: () => ({ locale: "ko", pending: false, setLocale: () => {} }),
@@ -594,6 +615,11 @@ function mountRecoveryPanel(initialIdentity = identity) {
       const tree = AmuxOwnerRecoveryInspectionPanel({ identity: taskIdentity,
         taskStatus: "blocked", onReloadReview: () => {} });
       hostProps = (tree.props.children[1] as React.ReactElement<Parameters<typeof AmuxHostRecoveryView>[0]>).props;
+      inspectionProps = (tree.props.children[0] as React.ReactElement<
+        Parameters<typeof AmuxRecoveryInspectionView>[0]>).props;
+      const oneClick = tree.props.children[2] as React.ReactElement<
+        Parameters<typeof AmuxOneClickRecoveryView>[0]> | false;
+      oneClickProps = oneClick ? oneClick.props : null;
     } finally { internals.H = previous; }
     queued.splice(0).forEach(create => create());
   };
@@ -603,6 +629,7 @@ function mountRecoveryPanel(initialIdentity = identity) {
   };
   render();
   return { flush, get props() { return hostProps; }, get view() { return AmuxHostRecoveryView(hostProps); },
+    get inspection() { return inspectionProps; }, get oneClick() { return oneClickProps; },
     replace: async (next: typeof identity) => { taskIdentity = next; dirty = true; await flush(); },
     unmount: () => { effects.forEach(effect => effect.cleanup?.()); mounted = false; },
   };
@@ -992,6 +1019,169 @@ test("pending host evidence is read back automatically within the owner read lim
   assert.ok(AMUX_HOST_EVIDENCE_AUTO_READ_MS * AMUX_HOST_EVIDENCE_AUTO_READS >= 120_000);
 });
 
+// Owner decision 2026-11-08: one click requests the inspection and a
+// single-use consent; the card then shows waiting, opened or refused.
+const preApprovalQuote = { taskId: identity.taskId, taskRevision: identity.taskRevision,
+  priorAttemptId: identity.attemptId, cost: quote, expiresInMinutes: 30 as const,
+  eligible: true, reason: null, retryWrite: false as const };
+const preApproval = (state: "waiting" | "applied" | "refused" | "expired",
+  reason: string | null = null, ownerRequestId = inspectionRequestId) => ({
+  id: "00000000-0000-4000-8000-000000000020", ownerRequestId, state,
+  requestedAt: "2026-11-08T01:00:00.000Z", expiresAt: "2026-11-08T01:30:00.000Z",
+  costDigest: quote.costDigest, reason,
+  approvalId: state === "applied" ? "00000000-0000-4000-8000-000000000021" : null });
+const oneClickView = (data: AmuxHostRecoveryRead | null, quoteState: AmuxPreApprovalQuoteState =
+  { state: "idle" }, confirmed = false) => AmuxOneClickRecoveryView({
+  m: adminAmuxRecoveryInspectionMessages.ko, data, quote: quoteState, confirmed,
+  onConfirm: () => {}, onStart: () => {}, onApprove: () => {}, onCancel: () => {},
+  busy: false, writesBlocked: false, nowMs: Date.parse("2026-11-08T01:12:30.000Z"),
+  returnTo: "/admin/amux-execution?tab=review" });
+
+test("one click confirms the server quote: Task, revision, attempt, cost and 30-minute expiry", () => {
+  const idle = oneClickView(null);
+  assert.match(textOf(idle), /종료가 확인되면 1회 재실행/);
+  assert.equal(propsOf(idle).some((props) => props["data-testid"] === "admin-amux-one-click-confirmation"), false);
+  const tree = oneClickView(null, { state: "ready", quote: preApprovalQuote });
+  const text = textOf(tree);
+  assert.match(text, /task-1/); assert.match(text, /attempt-1/);
+  assert.match(text, /US\$3\.40/); assert.match(text, /US\$6\.80/); assert.match(text, /30분/);
+  const approve = propsOf(tree).find((props) => props["data-testid"] === "admin-amux-one-click-approve");
+  assert.equal(approve?.disabled, true);
+  const confirmed = propsOf(oneClickView(null, { state: "ready", quote: preApprovalQuote }, true))
+    .find((props) => props["data-testid"] === "admin-amux-one-click-approve");
+  assert.equal(confirmed?.disabled, false);
+  const ineligible = textOf(oneClickView(null, { state: "ready", quote: { ...preApprovalQuote,
+    cost: null, eligible: false, reason: "preapproval_pending" } }));
+  assert.match(ineligible, /이미 원클릭 복구가 대기 중/);
+  // An ineligible quote can be read again once its reason passes.
+  assert.equal(propsOf(oneClickView(null, { state: "ready", quote: { ...preApprovalQuote,
+    cost: null, eligible: false, reason: "preapproval_pending" } })).some((props) =>
+    props["data-testid"] === "admin-amux-one-click-start"), true);
+});
+
+test("one click shows waiting with time left, then the opened or refused result as recorded", () => {
+  const waiting = oneClickView({ ...hostFixture(), state: "pending", evidenceId: null,
+    evidenceDigest: null, cost: null, quote: null, preApproval: preApproval("waiting") });
+  assert.match(textOf(waiting), /종료 확인을 기다리는 중/); assert.match(textOf(waiting), /17:30/);
+  assert.equal(propsOf(waiting).some((props) => props["data-testid"] === "admin-amux-one-click-start"), false);
+  const applied = textOf(oneClickView({ ...hostFixture(), state: "approved",
+    taskRevision: identity.taskRevision + 1, approvalId: "00000000-0000-4000-8000-000000000021",
+    preApproval: preApproval("applied") }));
+  assert.match(applied, /추가 실행 1회가 열렸습니다/);
+  const refused = oneClickView({ ...hostFixture(), preApproval: preApproval("refused",
+    "runtime_observation_unverified") });
+  assert.match(textOf(refused), /실행을 열지 않았습니다/);
+  assert.match(textOf(refused), /worker가 재시작/);
+  assert.equal(propsOf(refused).some((props) => props["data-testid"] === "admin-amux-one-click-start"), true);
+  assert.match(textOf(oneClickView({ ...hostFixture(), preApproval: preApproval("expired",
+    "preapproval_expired") })), /시간 안에 증거가 오지 않아/);
+});
+
+test("the quote binds only this identity and the POST sends the quoted digest, never a client cost", async () => {
+  assert.equal(bindAmuxPreApprovalQuote(preApprovalQuote, identity)?.eligible, true);
+  assert.equal(bindAmuxPreApprovalQuote({ ...preApprovalQuote, taskRevision: 5 }, identity), null);
+  assert.equal(bindAmuxPreApprovalQuote({ ...preApprovalQuote, priorAttemptId: "attempt-2" }, identity), null);
+  assert.equal(bindAmuxPreApprovalQuote({ ...preApprovalQuote, eligible: false }, identity), null);
+  const reads: string[] = [];
+  const loaded = await fetchAmuxPreApprovalQuote({ identity, controller: new AbortController(),
+    isCurrent: () => true, fallback: "unavailable",
+    fetcher: async (url) => { reads.push(String(url)); return Response.json(preApprovalQuote); } });
+  assert.equal(loaded?.state, "ready");
+  assert.equal(reads[0], "/api/admin/amux/execution-recovery?taskId=task-1&view=preapproval_quote");
+  const calls: RequestInit[] = [];
+  const result = await fetchAmuxHostRecovery({ identity, requestId: inspectionRequestId,
+    action: "preapprove_attempt", expectedReceipt: { preApprovalCostDigest: quote.costDigest },
+    controller: new AbortController(), isCurrent: () => true, fallback: "unavailable",
+    fetcher: async (_url, init) => { calls.push(init!); return Response.json({ ...hostFixture(),
+      state: "pending", evidenceId: null, evidenceDigest: null, cost: null, quote: null,
+      eligibility: { ...normalEligibility, approveAttempt: false },
+      preApproval: preApproval("waiting") }); } });
+  assert.equal(result?.state, "ready"); assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(String(calls[0].body)), { action: "preapprove_attempt",
+    taskId: identity.taskId, expectedRevision: identity.taskRevision,
+    priorAttemptId: identity.attemptId, requestId: inspectionRequestId,
+    costDigest: quote.costDigest, acceptRetry: true });
+  // An answer that names another consent cost is not taken as this write.
+  const mismatched = await fetchAmuxHostRecovery({ identity, requestId: inspectionRequestId,
+    action: "preapprove_attempt", expectedReceipt: { preApprovalCostDigest: quote.costDigest },
+    controller: new AbortController(), isCurrent: () => true, fallback: "unavailable",
+    fetcher: async () => Response.json({ ...hostFixture(), state: "pending", evidenceId: null,
+      evidenceDigest: null, cost: null, quote: null,
+      preApproval: { ...preApproval("waiting"), costDigest: "d".repeat(64) } }) });
+  assert.equal(mismatched?.state, "unavailable");
+  // Review: a lost POST read back finds an older consent at the same cost
+  // through the latest-consent fallback; that is not this write's result.
+  const older = await fetchAmuxHostRecovery({ identity, requestId: inspectionRequestId,
+    action: "preapprove_attempt", expectedReceipt: { preApprovalCostDigest: quote.costDigest },
+    controller: new AbortController(), isCurrent: () => true, fallback: "unavailable",
+    fetcher: async () => Response.json({ ...hostFixture(), state: "unverified",
+      preApproval: preApproval("refused", "recovery_cost_changed",
+        "00000000-0000-4000-8000-000000000099") }) });
+  assert.equal(older?.state, "unavailable");
+  assert.equal(older?.state === "unavailable" && older.unknownWrite, true);
+  // A malformed pre-approval in the read is refused outright.
+  assert.equal(bindAmuxHostRecovery({ ...hostFixture(), preApproval: { ...preApproval("applied"),
+    approvalId: null } }, identity, inspectionRequestId), null);
+  const pending: AmuxPendingRecovery = { version: 1, identity: { ...identity },
+    requestId: inspectionRequestId, action: "preapprove_attempt",
+    expectedReceipt: { preApprovalCostDigest: quote.costDigest } };
+  assert.deepEqual(bindAmuxPendingRecovery(pending, identity.taskId), pending);
+  assert.equal(bindAmuxPendingRecovery({ ...pending, expectedReceipt: null }, identity.taskId), null);
+  assert.equal(AMUX_PREAPPROVAL_AUTO_READ_MS * AMUX_PREAPPROVAL_AUTO_READS >= 30 * 60_000, true);
+});
+
+// Owner decision 2026-11-08: "why must a person press app-record check, new
+// Ubuntu evidence and read result as three steps?" The records load by
+// themselves; the one press is the one-click consent.
+test("actual Panel reads app records on open and needs only the one-click button pressed", async t => {
+  recoveryBrowser(t); inspectionReads.length = 0;
+  const posts: Record<string, unknown>[] = []; const quoteReads: string[] = [];
+  const resumeReads: string[] = [];
+  t.mock.method(globalThis, "fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      const body = JSON.parse(String(init.body)); posts.push(body);
+      return Response.json({ ...hostFixture(), requestId: body.requestId, state: "pending",
+        evidenceId: null, evidenceDigest: null, cost: null, quote: null,
+        eligibility: { ...normalEligibility, approveAttempt: false },
+        preApproval: preApproval("waiting", null, body.requestId) });
+    }
+    if (String(url).includes("view=preapproval_quote")) {
+      quoteReads.push(String(url)); return Response.json(preApprovalQuote); }
+    const nonce = new URL(String(url), "https://tomverse.test").searchParams.get("requestId")!;
+    resumeReads.push(nonce);
+    return Response.json({ ...hostFixture(), requestId: nonce, state: "pending",
+      evidenceId: null, evidenceDigest: null, cost: null, quote: null,
+      eligibility: { ...normalEligibility, approveAttempt: false },
+      preApproval: preApproval("waiting") });
+  });
+  const panel = mountRecoveryPanel(); await panel.flush();
+  // Opened, not pressed: the app records are already shown.
+  assert.equal(inspectionReads.length, 1);
+  assert.equal(panel.inspection.state.state, "ready");
+  assert.match(textOf(AmuxRecoveryInspectionView(panel.inspection)), /앱 기록 다시 점검/);
+  // The one press: start, confirm the server quote, approve.
+  assert.ok(panel.oneClick); panel.oneClick.onStart(); await panel.flush();
+  assert.deepEqual(quoteReads, ["/api/admin/amux/execution-recovery?taskId=task-1&view=preapproval_quote"]);
+  panel.oneClick!.onConfirm(true); await panel.flush();
+  panel.oneClick!.onApprove(); await panel.flush();
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].action, "preapprove_attempt");
+  assert.equal(posts[0].costDigest, quote.costDigest);
+  assert.match(textOf(AmuxOneClickRecoveryView(panel.oneClick!)), /종료 확인을 기다리는 중/);
+  // No other write was needed: no separate inspection request or approval.
+  assert.equal(posts.some((body) => body.action === "request_inspection" ||
+    body.action === "approve_attempt"), false);
+  assert.equal(inspectionReads.length, 1);
+  panel.unmount();
+  // Reopened (or reloaded): one fresh-nonce read shows the same waiting consent.
+  const reopened = mountRecoveryPanel(); await reopened.flush();
+  assert.equal(resumeReads.length, 1); assert.notEqual(resumeReads[0], posts[0].requestId);
+  assert.equal(reopened.props.state.state, "ready");
+  assert.match(textOf(AmuxOneClickRecoveryView(reopened.oneClick!)), /종료 확인을 기다리는 중/);
+  assert.equal(posts.length, 1);
+  reopened.unmount();
+});
+
 test("a Task the Ubuntu inspection refuses shows why instead of its request button", () => {
   const internals = (React as unknown as { __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE:
     { H: unknown } }).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
@@ -1011,6 +1201,8 @@ test("a Task the Ubuntu inspection refuses shows why instead of its request butt
   const refused = renderWith(false).props.children[1] as React.ReactElement<Record<string, unknown>>;
   assert.equal(refused.props["data-testid"], "admin-amux-host-recovery-not-applicable");
   assert.match(String(refused.props.children), /no v22 receipt/);
+  // Nor does it offer the one-click consent, which runs through that inspection.
+  assert.equal(renderWith(false).props.children[2], false);
   // The default keeps the Ubuntu inspection for every caller that does not say otherwise.
   const kept = renderWith().props.children[1] as React.ReactElement<Record<string, unknown>>;
   assert.equal(kept.type, AmuxHostRecoveryView);
