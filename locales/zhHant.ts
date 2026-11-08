@@ -1028,6 +1028,7 @@ export const zhHant = {
         imageUnsupported: "此模型無法讀取附加的圖片",
     },
     providerStatus: {
+        lookupUnavailable: "無法重新整理模型狀態。將保留上次確認的結果。",
         allAvailable: "所選供應商皆可用",
         allAvailableBody: "模型供應商回應正常。",
         selectedUnavailableOne: "{model}暫時無法使用",

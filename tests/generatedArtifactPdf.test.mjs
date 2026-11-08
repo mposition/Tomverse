@@ -130,3 +130,46 @@ test("the subset carries only the glyphs the document uses", () => {
 test("the bytes are deterministic, so a replay cannot differ", () => {
   assert.deepEqual(build(REPORT), build(REPORT));
 });
+
+test("a report title is not repeated by an identical opening heading", async () => {
+  const title = "2026년 1분기 국내 커피 프랜차이즈 시장 요약";
+  const text = await textOf(build({
+    filename: "summary.pdf",
+    format: "pdf",
+    title,
+    subtitle: "예시 시장 보고서",
+    blocks: [
+      { type: "heading", level: 1, text: title },
+      { type: "paragraph", text: "시장 동향과 매출을 정리합니다." },
+    ],
+  }));
+  assert.equal(text.split(title).length - 1, 1);
+  assert.ok(text.includes("예시 시장 보고서"));
+  assert.ok(text.includes("시장 동향과 매출을 정리합니다."));
+});
+
+test("Korean report title words do not leave an isolated final syllable", async () => {
+  const title = "2026년 1분기 국내 커피 프랜차이즈 시장 요약";
+  const document = await readPdf(build({
+    filename: "title.pdf", format: "pdf", title,
+    blocks: [{ type: "heading", level: 1, text: title }],
+  }));
+  const content = await (await document.getPage(1)).getTextContent();
+  const lines = content.items.filter(item => "str" in item).map(item => item.str.trim()).filter(Boolean);
+  assert.ok(lines.join("").replaceAll(" ", "").includes(title.replaceAll(" ", "")));
+  assert.ok(lines.every(line => line.length > 1), JSON.stringify(lines));
+  assert.ok(lines.some(line => line.includes("시장 요약")), JSON.stringify(lines));
+  await document.cleanup();
+});
+
+test("matching headings later in a document remain part of its content", async () => {
+  const title = "시장 요약";
+  const text = await textOf(build({
+    filename: "sections.pdf", format: "pdf", title,
+    blocks: [
+      { type: "paragraph", text: "Overview" },
+      { type: "heading", level: 1, text: title },
+    ],
+  }));
+  assert.equal(text.split(title).length - 1, 2);
+});
