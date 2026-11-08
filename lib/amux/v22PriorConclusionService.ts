@@ -60,7 +60,9 @@ export async function readAmuxV22PriorConclusionRows(tx: Prisma.TransactionClien
     select: { ...SEALED, attemptId: true, taskId: true, sourceSha256: true,
       conclusionSha256: true },
   });
-  const rows = done.flatMap((item) => {
+  type PriorRow = { label: string; row: (typeof results)[number];
+    source: "conclusion" | "result" };
+  const rows = done.flatMap((item): PriorRow[] => {
     const row = results.find((result) => result.taskId === item.id);
     if (!row) return [];
     const label = amuxV22PriorLabel(item, localRefOf(item));
