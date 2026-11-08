@@ -212,6 +212,39 @@ const IDEOGRAPHIC_HOST_ANY_CASE = new RegExp(
   "iu",
 );
 
+/**
+ * Our own bare host, the one address a file or a post may name in its words
+ * (owner decision 2026-11-08: a how-to video says and shows "tomverse.app").
+ *
+ * Only the bare host, as a word of its own: `tomverse.app` or
+ * `www.tomverse.app`, in any letter case, with nothing address-like attached.
+ * A scheme, a path, a port, a query, a user, a label in front
+ * (`evil.tomverse.app`) or behind (`tomverse.app.evil.com`) and a hyphenated
+ * look-alike (`my-tomverse.app`) all leave the host in place, so the
+ * expressions above still read the text as an address. The link a post carries
+ * is still the publisher's, from an approved id.
+ *
+ * Matched against the readable form, whose NFKC has already folded the width
+ * and compatibility shapes that name the same host. Letter case is spelled out
+ * per ASCII letter rather than with the `i` flag: a case-insensitive Unicode
+ * match would also fold letters (U+212A KELVIN SIGN to `k`, U+017F to `s`) that
+ * this should not decide, and lowering the whole text first would change what
+ * the case-sensitive ideographic checks above read.
+ */
+const asciiAnyCase = (word: string): string =>
+  word.replace(/[a-z]/g, (letter) => `[${letter}${letter.toUpperCase()}]`);
+// After the host, a Korean particle or Chinese and Japanese text may follow with
+// no space ("tomverse.app에서"): no `.app` name continues in those scripts. In
+// front of it nothing may, because "例子tomverse.app" is another name.
+const CJK_AFTER_HOST = "\\p{Script=Hangul}\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}";
+const OWN_BARE_HOST = new RegExp(
+  `(?<![\\p{L}\\p{N}\\-_.@/:\\\\])(?:${asciiAnyCase("www")}\\.)?${asciiAnyCase("tomverse")}\\.${asciiAnyCase("app")}` +
+    `(?!(?![${CJK_AFTER_HOST}])[\\p{L}\\p{N}]|[\\-_/:@\\\\?#=&%]|\\.[\\p{L}\\p{N}])`,
+  "gu",
+);
+
+const withoutOwnBareHost = (readable: string): string => readable.replace(OWN_BARE_HOST, "Tomverse");
+
 /** Markdown and HTML link syntax, whatever it points at. */
 const LINK_MARKUP = /\[[^\]]*\]\([^)]*\)|<\s*a\b[^>]*>|href\s*=/iu;
 
@@ -513,11 +546,13 @@ export function marketingTextHygiene(raw: string): MarketingHygieneCode[] {
   // been reported above.
   const readable = readableForm(raw);
   if (MENTION.test(readable)) codes.push("mention");
+  // Our own bare host is taken out first; anything else address-like stays.
+  const addressable = withoutOwnBareHost(readable);
   if (
-    URL_LIKE.test(readable) ||
-    IDEOGRAPHIC_HOST_ASCII_LABEL.test(readable) ||
-    IDEOGRAPHIC_HOST_CJK_LABEL.test(readable) ||
-    IDEOGRAPHIC_HOST_ANY_CASE.test(readable)
+    URL_LIKE.test(addressable) ||
+    IDEOGRAPHIC_HOST_ASCII_LABEL.test(addressable) ||
+    IDEOGRAPHIC_HOST_CJK_LABEL.test(addressable) ||
+    IDEOGRAPHIC_HOST_ANY_CASE.test(addressable)
   ) {
     codes.push("url_like");
   }
