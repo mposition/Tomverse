@@ -49,6 +49,33 @@ async function setAppearance(page: Page, width: number, appearance: "classic" | 
   await expect(page.locator(`[data-studio-product="chat"][data-review-appearance="${appearance}"]`)).toBeVisible();
 }
 
+for (const theme of ["light", "dark"] as const) {
+  test(`Korean Chat placeholders meet contrast in ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await prepareGuestPage(page, "ko", "studio", "studio");
+    const account = await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-6-luna"], selectionMode: "auto", autoSelectionOffered: true, language: "ko" });
+    account.theme = theme;
+    await setDeterministicTheme(page, theme);
+    await suppressTransientUi(page);
+    await restoreActiveConversation(page);
+    await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: "http://127.0.0.1:3100" }]);
+    await page.route("**/api/products/chat/capabilities", route => route.fulfill({ json: { autoSelection: { offered: true } } }));
+    await page.goto("/chat?lang=ko");
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    for (const width of [1600, 320]) {
+      await page.setViewportSize({ width, height: 932 });
+      for (const appearance of ["studio", "classic"] as const) {
+        await setAppearance(page, width, appearance);
+        const input = page.getByTestId("chat-textarea");
+        await expect(input).toHaveValue("");
+        const sample = await expectAccessibleContrast(input, `${appearance} Korean placeholder at ${width}px`, "::placeholder");
+        expect(sample.text).toMatch(/[가-힣]/);
+        expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+}
+
 for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const) {
   test(`Chat Studio ${width}px ${theme} preserves draft, Auto, tools and answers across Classic`, { tag: "@ui-risk" }, async ({ page }) => {
     await installChatModelStub(page, { "gpt-6-luna": { kind: "success", chunks: ["The Studio answer completed."] } });
