@@ -47,7 +47,7 @@ type ConsentState = "loading" | "unset" | "accepted" | "declined";
 // across the product as too small to read comfortably at a phone's viewing
 // distance.
 const consentButtonClass =
-  "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2 text-[11px] font-bold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3 @md/notice:text-xs";
+  "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-1 text-[11px] font-bold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3 @md/notice:text-xs";
 
 // A component, not a render-time helper call. The handlers close over the
 // remembered opener (see closePreferences), and `react-hooks/refs` treats
@@ -184,16 +184,16 @@ const consentCopy: Record<
   en: {
     title: "Privacy-safe product analytics",
     body: "With your permission, Tomverse measures product usage and campaign attribution. Prompts, responses, filenames, and file contents are never included.",
-    mobileBody: "Help improve Tomverse. Prompts and file contents are never collected.",
+    mobileBody: "Usage analytics excludes prompts and file content.",
     accept: "Allow analytics",
-    acceptShort: "Allow",
+    acceptShort: "Allow analytics",
     decline: "Decline",
     declineShort: "Decline",
     privacy: "Privacy policy",
     settings: "Analytics settings",
     noticeTitle: "Privacy-safe analytics is on",
     noticeBody: "In this region, Tomverse starts privacy-minimized product analytics with a clear opt-out. Prompts, responses, filenames, and file contents are never included, and advertising storage stays off.",
-    noticeMobileBody: "Analytics is on. Prompts and files are never collected.",
+    noticeMobileBody: "Analytics is on; prompts and files are excluded.",
     keepOn: "Keep analytics on",
     keepOnShort: "Keep",
     turnOff: "Turn off analytics",
