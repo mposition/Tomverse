@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Prisma } from "@prisma/client";
+import { takeAuditChainLock } from "@/lib/adminAudit";
 import { writeModelCatalogEnvSyncSystemAudit } from "@/lib/modelCatalogEnvSyncSystemAudit";
 import {
   MODEL_CATALOG_ENV_SYNC_SCHEMA_VERSION,
@@ -226,6 +227,12 @@ export async function runModelCatalogEnvSync(
   // (Repeatable Read, Serializable) would link to a stale head.
   const { summary, auditLogId } = await prisma.$transaction(
     async (tx) => {
+      // The catalogue writers' lock, first: the operator's profile, price and
+      // draft writes (lib/modelCatalogAdmin.ts) take it before they read, so
+      // between this plan's read and its write no price revision can appear
+      // that would have held the model (heldPricedModels). Taken before any
+      // row lock, in the order every audit writer uses.
+      await takeAuditChainLock(tx);
       // Planned inside the transaction, against what it is about to change.
       const plan = planModelCatalogEnvSync(source.tables, await readTables(tx));
       const summary = summarizeSyncPlan(plan);

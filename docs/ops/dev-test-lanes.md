@@ -120,11 +120,13 @@ revision에 더해 발견 테이블(provider 카탈로그 관찰, 문서 근거,
 - **어떻게:** 아래 환경이 `https://tomverse.app/api/internal/model-catalog/export`를 읽어 자기 DB와 비교합니다. 없는 행은
   만들고, 다른 행은 production 값으로 바꿉니다. 아래 환경에만 있는 행은 지우지 않고 `localOnly`로 셉니다. append-only
   행(가격 revision, work item event)은 없을 때만 넣습니다. 사용자 id는 옮기지 않고, 함께 있는 이메일은 옮깁니다.
-  `ModelCatalogSnapshot`은 옮기지 않습니다.
+  `ModelCatalogSnapshot`은 옮기지 않습니다. 아래 환경의 가격 revision이 production에 없는(또는 내용이 다른) 카탈로그
+  모델은 그 모델의 카탈로그 행과 가격 revision을 모두 그대로 두고 `held`로 셉니다(`heldModels`에 이름이 나옵니다).
+  다른 profile에 맞춘 가격으로 production profile이 실행되지 않게 하려는 것입니다.
 - **쓰기 스위치:** `MODEL_CATALOG_ENV_SYNC_APPLY=true`일 때만 씁니다. 꺼져 있으면 계획(건수)만 로그에 남깁니다. 실제로
   쓴 실행은 감사 체인에 `model_catalog.env_synced` 한 건을 남깁니다(actor `model-catalog-env-sync`).
 - **설정 (Railway 대시보드, 웹 서비스 `Tomverse`):** 세 환경 모두에 같은 `MODEL_CATALOG_EXPORT_SECRET`(32자 이상)을
   둡니다. production은 이 값으로 요청을 확인하고, staging과 dev는 이 값을 보냅니다. 카탈로그 테이블만 읽는 값이며 DB
   자격증명이 아닙니다. 쓰기를 켤 때만 staging과 dev에 `MODEL_CATALOG_ENV_SYNC_APPLY=true`를 더합니다.
 - **지금 한 번 돌리기:** 대상 환경의 `MAINTENANCE_SECRET`로 `POST /api/internal/model-catalog/env-sync`를 호출합니다.
-  응답은 표별 `create`·`update`·`unchanged`·`conflicts`·`localOnly` 건수입니다.
+  응답은 표별 `create`·`update`·`unchanged`·`conflicts`·`localOnly`·`held` 건수입니다.
