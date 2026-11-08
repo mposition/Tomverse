@@ -1053,6 +1053,10 @@ test("one click confirms the server quote: Task, revision, attempt, cost and 30-
   const ineligible = textOf(oneClickView(null, { state: "ready", quote: { ...preApprovalQuote,
     cost: null, eligible: false, reason: "preapproval_pending" } }));
   assert.match(ineligible, /이미 원클릭 복구가 대기 중/);
+  // An ineligible quote can be read again once its reason passes.
+  assert.equal(propsOf(oneClickView(null, { state: "ready", quote: { ...preApprovalQuote,
+    cost: null, eligible: false, reason: "preapproval_pending" } })).some((props) =>
+    props["data-testid"] === "admin-amux-one-click-start"), true);
 });
 
 test("one click shows waiting with time left, then the opened or refused result as recorded", () => {

@@ -442,7 +442,7 @@ export function AmuxOneClickRecoveryView({ m, data, quote, confirmed, onConfirm,
       {pre.state === "refused" && <><p className="font-semibold text-amber-200">{o.refused}</p>{reason(pre.reason)}</>}
       {pre.state === "expired" && <><p className="font-semibold text-amber-200">{o.expired}</p>{reason(pre.reason)}</>}
     </div>}
-    {!waiting && pre?.state !== "applied" && quote.state !== "ready" &&
+    {!waiting && pre?.state !== "applied" && !(ready?.eligible) &&
       <button type="button" className={`${button} mt-3`} onClick={onStart}
         disabled={busy || writesBlocked || quote.state === "loading"}
         data-testid="admin-amux-one-click-start">
@@ -829,6 +829,7 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     queueMicrotask(() => {
       if (disposed) return;
       setPendingStorage(restored); setConfirmed(false); setRiskConfirmed(false); setSafeStopConfirmed(false);
+      setQuote({ state: "idle" }); setOneClickConfirmed(false);
       pendingRecovery.current = restored.state === "pending" ? restored.pending : null;
       hostRequestId.current = restored.state === "pending" ? restored.pending.requestId : resumeRequestId;
       setHost(restored.state === "pending" ? { state: "unavailable", failure: null,
