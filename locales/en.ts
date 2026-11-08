@@ -262,6 +262,8 @@ export const en = {
         onGuestMode: "Guest Mode Enabled",
         guestModeMessage: "As you are in guest mode, all chat information is saved in your web browser and is not recorded on the server.",
         guestModeLimitMessage: "(50 free credits per day, shared across your selected models)",
+        guestCreditsUsed: "Guest credits {used}/{limit} used",
+        guestCreditsShared: "The daily guest credit allowance is shared across your selected models.",
         guestComparisonsRemaining: "~{count} more comparisons today",
         aiAssistant: "AI Assistant",
         you: "You",

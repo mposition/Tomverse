@@ -2409,6 +2409,7 @@ export function ChatPageClient({
   const [guestUsage, setGuestUsage] = useState<{
     used: number;
     limit: number;
+    resetsAt?: string | null;
     // Spendable guest credits and the monthly AI Review trial, both read from
     // the same server buckets that will actually be enforced -- so the rail
     // can distinguish "out of credits" from "trial already used" instead of
@@ -2433,6 +2434,7 @@ export function ChatPageClient({
           setGuestUsage({
             used: data.used,
             limit: data.limit,
+            resetsAt: typeof data.resetsAt === "string" ? data.resetsAt : null,
             creditsAvailable:
               typeof data.creditsAvailable === "number"
                 ? data.creditsAvailable
@@ -10399,6 +10401,7 @@ export function ChatPageClient({
           isGuestMode={isGuestMode}
           guestPreviewMode={isGuestPreviewEntry}
           guestMessageCount={guestMessageCount}
+          guestResetsAt={guestUsage?.resetsAt ?? null}
           maxGuestMessages={MAX_GUEST_MESSAGES}
           isModelSelectionReady={isModelSelectionReady}
           isConversationSelectionResolved={isInitialConversationResolved}

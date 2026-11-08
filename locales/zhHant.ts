@@ -293,6 +293,8 @@ export const zhHant = {
         onGuestMode: "訪客模式已啟用",
         guestModeMessage: "在訪客模式下，所有聊天資訊儲存在你的瀏覽器中，不會記錄到伺服器。",
         guestModeLimitMessage: "（每天 50 免費點數，由所選模型共同分攤）",
+        guestCreditsUsed: "訪客額度已用 {used}/{limit}",
+        guestCreditsShared: "每日訪客額度由所有已選模型共用。",
         guestComparisonsRemaining: "今天還可以比較約 {count} 次",
         aiAssistant: "AI 助理",
         you: "我",

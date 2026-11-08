@@ -282,6 +282,8 @@ export const de = {
         onGuestMode: "Gastmodus aktiviert",
         guestModeMessage: "Im Gastmodus werden Chatdaten im Browser gespeichert und nicht auf dem Server aufgezeichnet.",
         guestModeLimitMessage: "(50 kostenlose Credits pro Tag, aufgeteilt auf Ihre ausgewählten Modelle)",
+        guestCreditsUsed: "Gast-Credits: {used}/{limit} verwendet",
+        guestCreditsShared: "Das tägliche Gast-Credit-Kontingent wird von allen ausgewählten Modellen gemeinsam genutzt.",
         guestComparisonsRemaining: "~{count} weitere Vergleiche heute",
         aiAssistant: "KI-Assistent",
         you: "Sie",
