@@ -9,6 +9,35 @@ test.beforeEach(async ({ page, baseURL }) => {
   await page.context().addCookies([{ name: "__tomverse_e2e_auth", value: "1", url: baseURL! },
     { name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL! }]);
 });
+
+test("@ui-risk mobile plugin header exposes global navigation and the current page", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "The header menu is a mobile entry point.");
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.route("**/api/mcp/connections", route => route.fulfill({ json: { enabled: true, servers: [], connections: [], invocations: [] } }));
+  await page.goto("/plugins?lang=ko");
+  const trigger = page.getByTestId("plugin-navigation-menu");
+  const navigation = page.getByTestId("plugin-mobile-navigation");
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await expect(navigation).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "플러그인", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(navigation.getByRole("link", { name: "Chat", exact: true })).toHaveAttribute("href", "/chat?lang=ko");
+  await expect(navigation.getByRole("link", { name: "Review", exact: true })).toHaveAttribute("href", "/review?lang=ko");
+  await expect(navigation.getByRole("link", { name: "설정", exact: true })).toHaveAttribute("href", "/review?lang=ko&settings=account");
+  await expectNoHorizontalOverflow(page);
+  await page.keyboard.press("Escape");
+  await expect(navigation).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await trigger.press("Enter");
+  await expect(navigation).toBeVisible();
+  await navigation.getByRole("link", { name: "Chat", exact: true }).click();
+  await expect(page).toHaveURL(/\/chat\?lang=ko$/, { timeout: 15_000 });
+  await page.goto("/plugins?lang=ko");
+  await trigger.click();
+  await navigation.getByRole("link", { name: "설정", exact: true }).click();
+  await expect(page).toHaveURL(/\/review(?:\?|$)/, { timeout: 15_000 });
+  await expect(page.getByRole("dialog", { name: /User Settings|사용자 설정/ })).toBeVisible({ timeout: 10_000 });
+});
 test("@ui-risk Chat sends a connector only after an explicit conversation selection", async ({ page }) => {
   await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-5-6-luna"], selectionMode: "manual", messages: [] });
   await restoreActiveConversation(page);
