@@ -437,10 +437,11 @@ test("the v39 DB follow-up and resume reads have five exact reviewed counts", ()
         tableMentions: 3, writeVerbs: 4 },
       { path: migrationPath, table: "AmuxV22ReadOnlyLaunchProof",
         tableMentions: 2, writeVerbs: 4 },
+      // Owner decision 2026-11-08 adds the pre-approval settlement row lock.
       { path: servicePath, table: "AmuxV22TaskRecoveryInspectionRequest",
-        tableMentions: 7, writeVerbs: 4 },
+        tableMentions: 7, writeVerbs: 5 },
       { path: servicePath, table: "AmuxV22TaskRecoveryEvidence",
-        tableMentions: 5, writeVerbs: 4 },
+        tableMentions: 5, writeVerbs: 5 },
     ]
   );
   for (const [path, source] of [[migrationPath, migrationSource], [servicePath, serviceSource]]) {
@@ -1120,6 +1121,16 @@ test("every append-only ledger table is one an exact migration protects", () => 
     "AmuxV22ReadOnlyLaunchProof",
   ]);
   const apiAccessTables = new Set(["AmuxV22ApiModelAccessEvidence"]);
+  const preApprovalSql = readFileSync(
+    new URL(
+      "../prisma/migrations/20261108130000_amux_v22_recovery_preapproval/migration.sql",
+      import.meta.url
+    ), "utf8"
+  );
+  const preApprovalTables = new Set([
+    "AmuxV22TaskRecoveryPreApproval",
+    "AmuxV22TaskRecoveryPreApprovalResult",
+  ]);
   const trackedCheckoutTables = new Set([
     "AmuxIdeaTrackedCheckoutEvidence",
     "AmuxIdeaTrackedCheckoutReadManifest",
@@ -1133,7 +1144,8 @@ test("every append-only ledger table is one an exact migration protects", () => 
   const sessionAnalysisReservationTables =
     new Set(["AmuxIdeaSessionAnalysisReservation"]);
   for (const table of APPEND_ONLY_LEDGER_TABLES) {
-    const sql = recoveryTables.has(table) ? recoverySql :
+    const sql = preApprovalTables.has(table) ? preApprovalSql :
+      recoveryTables.has(table) ? recoverySql :
       riskRetryTables.has(table) ? riskRetrySql :
         apiAccessTables.has(table) ? apiAccessSql :
           trackedCheckoutTables.has(table) ?
