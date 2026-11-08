@@ -144,7 +144,7 @@ test("file routing records the raw model and reason without losing intent when c
 test("router failures preserve known usage and log content-free causes without retrying", async (t) => {
   const { callAutoLlmRouter } = await load();
   const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts")) as typeof import("../../lib/models.ts");
-  const { autoLlmRouterCandidates, AUTO_LLM_ROUTER_TIMEOUT_MS } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts")) as typeof import("../../lib/autoLlmRouterCore.ts");
+  const { AUTO_LLM_ROUTER_TIMEOUT_MS, autoLlmRouterCandidates } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts")) as typeof import("../../lib/autoLlmRouterCore.ts");
   const { APICallError, JSONParseError, NoObjectGeneratedError, NoOutputGeneratedError, TypeValidationError } = require("ai") as typeof import("ai");
   const usage = { inputTokens: 100, outputTokens: 20 };
   const secret = "private-prompt-and-provider-secret";
