@@ -252,11 +252,11 @@ export const adminHomeMessages = defineAdminMessages({
         },
         amuxReview: {
           title: (count: number) =>
-            count === 1 ? "1 development escalation" : `${count} development escalations`,
+            count === 1 ? "1 development card waiting on you" : `${count} development cards waiting on you`,
           happened: (count: number) =>
-            `AMUX handed ${count} ${count === 1 ? "card" : "cards"} back to a person: a review to approve, retry or block, or a blocked attempt.`,
+            `AMUX handed ${count} ${count === 1 ? "card" : "cards"} to a person: a review to approve, retry or block, a worker question, or a stopped run.`,
           screen: "Execution board",
-          where: "Decide each one on the review queue.",
+          where: "Work through them one by one in Waiting on me.",
         },
         amuxHalt: {
           title: (count: number) => (count === 1 ? "A development worker is halted" : `${count} development halts`),
@@ -612,11 +612,11 @@ export const adminHomeMessages = defineAdminMessages({
           where: "그 화면에서 닫거나 개발 보드로 보내요.",
         },
         amuxReview: {
-          title: (count: number) => `개발 에스컬레이션 ${count}건`,
+          title: (count: number) => `내 확인을 기다리는 개발 카드 ${count}장`,
           happened: (count: number) =>
-            `AMUX가 카드 ${count}건을 사람에게 돌려보냈어요. 승인·재시도·차단할 리뷰이거나 막힌 시도예요.`,
+            `AMUX가 카드 ${count}장을 사람에게 넘겼어요. 승인·재시도·차단할 검토, 워커 질문, 멈춘 실행이에요.`,
           screen: "실행 보드",
-          where: "리뷰 대기열에서 하나씩 정해요.",
+          where: "내 확인 대기에서 차례로 처리해요.",
         },
         amuxHalt: {
           title: (count: number) => `개발 워커가 멈춰 있어요 (${count}건)`,

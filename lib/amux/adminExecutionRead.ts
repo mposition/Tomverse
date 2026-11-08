@@ -154,6 +154,8 @@ async function cardSummaries(rows: CardRow[]) {
     briefPresent: Boolean(row.executionBriefDigest || row.v4BriefDigest),
     attentionReason: attentionReason.get(row.id) ?? null,
     ownerQuestion: ownerQuestion.get(row.id) ?? null,
+    /** In the archive drawer; the archive lane also holds finished cards that were never archived. */
+    archived: row.archivedAt !== null,
     updatedAt: row.updatedAt.toISOString(),
   }));
 }

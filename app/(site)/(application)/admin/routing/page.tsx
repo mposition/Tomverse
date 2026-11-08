@@ -71,7 +71,7 @@ export default async function AdminRoutingPage({ searchParams }: PageProps<"/adm
       <p className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-300">
         {m.routingMoved.before}
         <Link
-          href="/admin/amux-execution?tab=review"
+          href="/admin/amux-execution?tab=diagnostics"
           className="font-bold text-blue-300 underline underline-offset-4 hover:text-blue-200"
         >
           {m.routingMoved.link}

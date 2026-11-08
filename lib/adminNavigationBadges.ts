@@ -62,6 +62,16 @@ export type AdminNavigationCounts = {
    */
   openAmuxEscalations: number | null;
   /**
+   * Cards that wait on the owner, as one set (lib/amux/ownerQueueCore.ts): a
+   * card in the board's attention lane, a card with an open worker question in
+   * any lane, and a card with an open escalation, each counted once.
+   *
+   * The Execution entry, its "Waiting on me" tab and the board's "Waiting on me"
+   * column show this one number, so they cannot disagree. Unlike
+   * `openAmuxEscalations` (escalations only) it is a count of cards.
+   */
+  awaitingAmuxOwnerQueue: number | null;
+  /**
    * AMUX orchestrator halts not yet cleared (orchestration policy version 33).
    * The operations-settings entry carries this count; verified no-commit
    * halts can be cleared automatically and other halts need investigation.
@@ -96,6 +106,7 @@ export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   pendingMarketingApprovals: null,
   openProductResearchSuggestions: null,
   openAmuxEscalations: null,
+  awaitingAmuxOwnerQueue: null,
   openAmuxOrchestratorHalts: null,
   awaitingAmuxDecisionMaker: null,
   openFeedback: null,
@@ -152,18 +163,12 @@ export const adminNavigationBadge = (
       return counts.pendingMarketingApprovals;
     case "productResearch":
       return counts.openProductResearchSuggestions;
-    case "amuxEscalations":
-      return counts.openAmuxEscalations;
+    case "amuxOwnerQueue":
+      return counts.awaitingAmuxOwnerQueue;
     case "amuxOrchestratorHalts":
       return counts.openAmuxOrchestratorHalts;
     case "amuxDecisionMaker":
       return counts.awaitingAmuxDecisionMaker;
-    case "amuxOwnerAttention":
-      // Both must be known, like amuxExecution: a figure that left out an
-      // unreadable count would read as less work than there is.
-      return counts.openAmuxEscalations === null || counts.awaitingAmuxDecisionMaker === null
-        ? null
-        : counts.openAmuxEscalations + counts.awaitingAmuxDecisionMaker;
     case "amuxExecution":
       // The Execution entry: escalations plus open orchestrator halts. Unlike
       // the partial sums above, both must be known. A halt stops the

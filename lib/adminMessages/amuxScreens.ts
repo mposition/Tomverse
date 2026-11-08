@@ -56,12 +56,7 @@ export const adminAmuxScreensMessages = defineAdminMessages({
         review: "In review",
         done: "Done",
       },
-      doneHint: "Recently merged by the idea lane. Older finished cards are in the history below.",
-      diagnostics: {
-        title: "Diagnostics are coming",
-        detail: "Until this screen is built, the worker report and the assignment evidence are in the review queue.",
-        link: "Open the review queue",
-      },
+      doneHint: "Recently merged by the idea lane. Older finished cards are in Past work below.",
     },
     release: {
       avatar: "QA and release agent",
@@ -147,12 +142,7 @@ export const adminAmuxScreensMessages = defineAdminMessages({
         review: "검토 중",
         done: "완료",
       },
-      doneHint: "아이디어 레인이 최근 병합한 카드예요. 더 오래된 완료 카드는 아래 이력에 있어요.",
-      diagnostics: {
-        title: "진단은 준비 중이에요",
-        detail: "이 화면이 만들어지기 전까지 워커 보고와 배정 근거는 검토 큐에 있어요.",
-        link: "검토 큐 열기",
-      },
+      doneHint: "아이디어 레인이 최근 병합한 카드예요. 더 오래된 완료 카드는 아래 지난 작업에 있어요.",
     },
     release: {
       avatar: "QA·릴리스 에이전트",

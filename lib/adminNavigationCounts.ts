@@ -8,6 +8,7 @@ import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore
 import { AMUX_ESCALATION_AWAITING_STATUSES } from "@/lib/amux/humanReviewCore";
 import { countOpenAmuxOrchestratorHalts } from "@/lib/amux/orchestratorHaltStore";
 import { countDecisionMakerAttention } from "@/lib/amux/decisionMakerAttention";
+import { countAmuxOwnerQueue } from "@/lib/amux/adminOwnerQueueRead";
 
 export {
   EMPTY_ADMIN_NAVIGATION_COUNTS,
@@ -18,7 +19,7 @@ export {
 /**
  * The only data the Admin Console layout loads on every navigation.
  *
- * Ten counts, one of them a job-health read. Everything else a page needs is
+ * A few counts, one of them a job-health read. Everything else a page needs is
  * loaded by that page's own server component, so moving between workspaces no
  * longer re-runs the whole console's query set -- which is what the single
  * `AdminWorkspace` did on every route, including the routes that used none of
@@ -68,6 +69,7 @@ export async function getAdminNavigationCounts(): Promise<{
     pendingMarketingApprovals,
     openProductResearchSuggestions,
     openAmuxEscalations,
+    awaitingAmuxOwnerQueue,
     openAmuxOrchestratorHalts,
     awaitingAmuxDecisionMaker,
   ] = await Promise.allSettled([
@@ -91,6 +93,8 @@ export async function getAdminNavigationCounts(): Promise<{
     countPendingMarketingApprovals(),
     prisma.productResearchSuggestion.count({ where: { status: "open" } }),
     countAwaitingAmuxEscalations(),
+    // The Execution entry, its "Waiting on me" tab and the board column show this one count.
+    countAmuxOwnerQueue(),
     // Orchestration policy version 20: halts no person has cleared.
     countOpenAmuxOrchestratorHalts(),
     countDecisionMakerAttention(),
@@ -114,6 +118,7 @@ export async function getAdminNavigationCounts(): Promise<{
     pendingMarketingApprovals: settled(pendingMarketingApprovals),
     openProductResearchSuggestions: settled(openProductResearchSuggestions),
     openAmuxEscalations: settled(openAmuxEscalations),
+    awaitingAmuxOwnerQueue: settled(awaitingAmuxOwnerQueue),
     openAmuxOrchestratorHalts: settled(openAmuxOrchestratorHalts),
     awaitingAmuxDecisionMaker: settled(awaitingAmuxDecisionMaker),
   };

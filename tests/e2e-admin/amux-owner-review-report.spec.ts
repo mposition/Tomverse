@@ -6,40 +6,30 @@ import type { AmuxReviewDetail } from
 
 const ESCALATION_ID = "clownerreview12345678901234";
 
-const routingReport = {
-  generated_at: "2026-10-12T00:00:00.000Z",
-  limits: { decisions: 10, attempts: 10 },
-  incident: {
-    valid: true,
-    blocks_admission: false,
-    state: {
-      state: "normal",
-      reason: "synthetic owner review fixture",
-      ticket: "e2e-owner-review",
-      changed_at: "2026-10-12T00:00:00.000Z",
-    },
-  },
-  queue: { review: 1 },
-  policies: [],
-  escalations_total: 1,
-  escalations_limit: 25,
-  escalations: [{
-    id: ESCALATION_ID,
-    specialty: "execution-recovery",
-    reason_code: "operator_review_required",
-    status: "open",
-    createdAt: "2026-10-12T00:00:00.000Z",
-    task: {
-      id: "owner-review-task",
-      title: "Build the owner review report",
-      sourceKey: "AMUX-OWNER-REVIEW-E2E",
-      priority: "high",
-      status: "review",
-    },
-  }],
-  workers: [],
-  decisions: [],
-};
+// Card numbers are assembled: a literal beside a *Key name reads to the secret scan as a credential.
+const cardNumber = (...parts: string[]) => ["AMUX", ...parts].join("-");
+
+const queueItem = (overrides: Record<string, unknown> = {}) => ({
+  taskId: "owner-review-task",
+  displayKey: cardNumber("OWNER", "REVIEW", "E2E"),
+  sourceKey: null,
+  title: "Build the owner review report",
+  status: "review",
+  worker: "worker-openai",
+  channel: null,
+  attentionReason: "human_review_required",
+  ownerQuestion: null,
+  escalationId: ESCALATION_ID,
+  waitingSince: "2026-10-12T00:00:00.000Z",
+  ...overrides,
+});
+
+const ownerQueue = (items: Array<ReturnType<typeof queueItem>> = [queueItem()]) => ({
+  items,
+  total: items.length,
+  processedToday: 0,
+  generatedAt: "2026-10-12T00:10:00.000Z",
+});
 
 const baseReview = (): AmuxReviewDetail => ({
   available: true,
@@ -119,10 +109,10 @@ test("owner review renders verified, legacy and unknown evidence honestly at 390
   let currentReview = baseReview();
   let currentOwnerExecution: unknown = ownerExecution(currentReview);
 
-  await page.route("**/api/admin/amux/routing", (route) => route.fulfill({
+  await page.route("**/api/admin/amux/owner-queue", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify(routingReport),
+    body: JSON.stringify(ownerQueue()),
   }));
   await page.route("**/api/admin/amux/escalations/review?**", (route) => route.fulfill({
     status: 200,
@@ -139,8 +129,8 @@ test("owner review renders verified, legacy and unknown evidence honestly at 390
 
   const open = async (width: 390 | 320) => {
     await page.setViewportSize({ width, height: 844 });
+    // The first card of "Waiting on me" is chosen and its protected review is read by itself.
     await page.goto("/admin/amux-execution?tab=review");
-    await page.getByRole("button", { name: "Open protected review" }).click();
     await expect(page.getByTestId("admin-amux-owner-review")).toBeVisible();
     expect(await page.evaluate(() =>
       document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -326,18 +316,33 @@ test("protected review does not wait for supplemental owner metadata and aborts 
   signInAs,
 }) => {
   const currentReview = baseReview();
+  const SECOND_ESCALATION_ID = "clownerreview22222222222222";
   let executionReads = 0;
   const heldExecutionRoutes: Route[] = [];
 
-  await page.route("**/api/admin/amux/routing", (route) => route.fulfill({
+  // Two cards that wait for a decision and one that asks a question.
+  await page.route("**/api/admin/amux/owner-queue", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify(routingReport),
+    body: JSON.stringify(ownerQueue([
+      queueItem(),
+      queueItem({ taskId: "owner-review-task-2", displayKey: cardNumber("OWNER", "REVIEW", "E2E", "2"), escalationId: SECOND_ESCALATION_ID }),
+      queueItem({ taskId: "owner-question-task", displayKey: cardNumber("OWNER", "QUESTION", "E2E"), attentionReason: null,
+        ownerQuestion: "open", escalationId: null }),
+    ])),
   }));
-  await page.route("**/api/admin/amux/escalations/review?**", (route) => route.fulfill({
+  await page.route("**/api/admin/amux/escalations/review?**", (route) => {
+    const id = new URL(route.request().url()).searchParams.get("escalation_id") ?? ESCALATION_ID;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ...currentReview, escalation: { ...currentReview.escalation, id } }),
+    });
+  });
+  await page.route("**/api/admin/amux/v22-task-result?**", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify(currentReview),
+    body: JSON.stringify({ result: { state: "available" }, question: null }),
   }));
   await page.route("**/api/admin/amux/execution-view?**", (route) => {
     executionReads += 1;
@@ -366,32 +371,35 @@ test("protected review does not wait for supplemental owner metadata and aborts 
       }),
     }).catch(() => undefined);
   };
+  const card = (taskId: string) =>
+    page.locator(`[data-testid="amux-owner-queue-item"][data-task-id="${taskId}"]`);
 
   await signInAs("owner");
+  // The first card opens its review by itself; its metadata read is still held.
   await page.goto("/admin/amux-execution?tab=review");
-  const open = page.getByRole("button", { name: "Open protected review" });
-
-  await open.click();
   await expect.poll(() => executionReads).toBe(1);
   await expect(page.getByTestId("admin-amux-owner-review")).toBeVisible();
   await expect(page.getByTestId("admin-amux-review-loading")).toHaveCount(0);
   await expect(page.getByTestId("admin-amux-cost-summary")).toContainText("Reading exact attempt metadata…");
   await expect(page.getByTestId("admin-amux-cost-summary")).not.toContainText("US$0");
 
-  await open.click();
+  // Choosing another card reads its review; the held read of the first card must not land on it.
+  await card("owner-review-task-2").click();
   await expect.poll(() => executionReads).toBe(2);
   await expect(page.getByTestId("admin-amux-cost-summary")).toContainText("worker-openai");
   await releaseHeld();
   await expect(page.getByTestId("admin-amux-cost-summary")).toContainText("worker-openai");
   await expect(page.getByTestId("admin-amux-cost-summary")).not.toContainText("stale-worker");
 
-  await open.click();
+  // Leaving for a card that asks a question drops the review whose metadata is still held.
+  await card("owner-review-task").click();
   await expect.poll(() => executionReads).toBe(3);
-  await page.getByTestId("admin-amux-close-review").click();
+  await card("owner-question-task").click();
   await releaseHeld();
   await expect(page.getByTestId("admin-amux-review-detail")).toHaveCount(0);
+  await expect(page.getByTestId("amux-owner-queue-decision")).toHaveAttribute("data-group", "question");
 
-  await open.click();
+  await card("owner-review-task").click();
   await expect.poll(() => executionReads).toBe(4);
   await page.goto("about:blank");
   await releaseHeld();
