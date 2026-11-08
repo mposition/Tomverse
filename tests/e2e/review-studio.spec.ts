@@ -39,6 +39,43 @@ async function expectHeaderControlsFit(page: Page) {
   }))).toEqual([]);
 }
 
+for (const [width, theme] of [[1366, "light"], [1600, "dark"]] as const) {
+  test(`desktop Review can scroll to the complete consent notice at ${width}px ${theme}`, async ({ page, baseURL }) => {
+    await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
+    await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+    await prepare(page, width, theme);
+    const panel = page.locator(".review-studio-task");
+    const notice = panel.getByTestId("chat-consent-notice");
+    await expect(notice).toBeVisible();
+    for (const height of [900, 650]) {
+      await page.setViewportSize({ width, height });
+      await panel.evaluate(element => { element.scrollTop = element.scrollHeight; });
+      const metrics = await notice.evaluate(element => {
+        const panel = element.closest(".review-studio-task")!;
+        const panelBox = panel.getBoundingClientRect();
+        const style = getComputedStyle(panel);
+        const availableWidth = panel.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+        const notice = element.getBoundingClientRect();
+        const controls = Array.from(element.querySelectorAll("button"));
+        return {
+          widthRatio: notice.width / availableWidth,
+          controlsUnclipped: controls.every(control => {
+            const box = control.getBoundingClientRect();
+            return box.top >= panelBox.top && box.bottom <= panelBox.bottom && box.right <= panelBox.right &&
+              control.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+          }),
+          fullNoticeInside: notice.top >= panelBox.top && notice.bottom <= panelBox.bottom,
+        };
+      });
+      expect(metrics.widthRatio).toBeGreaterThanOrEqual(0.9);
+      expect(metrics.controlsUnclipped).toBe(true);
+      expect(metrics.fullNoticeInside).toBe(true);
+    }
+    await notice.getByTestId("analytics-consent-decline").click();
+    await expect(notice).toHaveCount(0);
+  });
+}
+
 function storedComparison(models: string[]): QaConversationMessage[] {
   return [
     { id: "layout-question", role: "user", content: "Compare the stored answers." },
