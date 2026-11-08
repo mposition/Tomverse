@@ -407,6 +407,10 @@ run(
     // statement ceiling and never delivered, nothing closed once work started,
     // and the owner's direct answer.
     "tests/integration/amux-idea-card-close.db.test.ts",
+    // Closing a legacy WORKBOARD card (owner decision 2026-11-08): archived with
+    // its status kept, its escalation resolved and one chained audit entry;
+    // a running, changed or other-source card refuses, a held card is busy.
+    "tests/integration/amux-legacy-card.db.test.ts",
     "tests/integration/amux-v22-result-review.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
