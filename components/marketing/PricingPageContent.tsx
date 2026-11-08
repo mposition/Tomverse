@@ -60,7 +60,7 @@ const REVIEW_SIGN_IN_HREF =
   `/auth/signin?callbackUrl=${encodeURIComponent(REVIEW_WORKSPACE_PATH)}`;
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string; checkout: string }>> = {
-  en: { annual: "Annual", save: "Save 20%", checkout: "The fixed local price shown is charged at checkout." },
+  en: { annual: "Annual · billed annually", save: "Save 20%", checkout: "The fixed local price shown is charged once per year at checkout." },
   ko: { annual: "연간", save: "20% 할인", checkout: "표시된 현지통화 고정 금액으로 결제됩니다." },
   zh: { annual: "年付", save: "节省 20%", checkout: "结账时将收取所显示的本地固定价格。" },
   "zh-Hant": { annual: "年付", save: "節省 20%", checkout: "結帳時將收取所顯示的當地固定價格。" },
@@ -1427,6 +1427,12 @@ export function PricingPageContent() {
             const annualPrice =
               billing.formatPlanPrice(planId, "annual") ||
               annualFallback;
+            const billingPlan = billing.config?.plans.find((item) => item.id === planId);
+            const annualMonthlyEquivalent = billingPlan
+              ? billingPlan.displayCurrency && typeof billingPlan.displayAnnualPriceAmount === "number"
+                ? formatBillingAmount(billingPlan.displayAnnualPriceAmount / 12, billingPlan.displayCurrency as BillingCurrency)
+                : formatBillingAmount(billingPlan.annualPriceCents / 100 / 12, billingPlan.currency as BillingCurrency)
+              : null;
             const promotionEligible = Boolean(
               featuredPromotion &&
               featuredPromotion.appliesToPlanIds.includes(planId) &&
@@ -1641,7 +1647,12 @@ export function PricingPageContent() {
                       {annualCopy.save}
                     </span>
                   </div>
-                  <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}</div>
+                  <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}{lang === "en" ? " per year" : ""}</div>
+                  {lang === "en" && annualMonthlyEquivalent ? (
+                    <p className="mt-1 text-sm leading-6" data-testid={`pricing-annual-equivalent-${planId}`}>
+                      Monthly equivalent: {annualMonthlyEquivalent}, billed annually.
+                    </p>
+                  ) : null}
                   <p className={plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}>
                     {annualCopy.checkout}
                   </p>
@@ -1796,6 +1807,11 @@ export function PricingPageContent() {
                     {plan.cta}
                   </UpgradeInterestButton>
                 )}
+                {lang === "en" && planId !== "free" && (ctaState === "signed_out" || ctaState === "upgrade") ? (
+                  <p className="mt-2 text-sm font-semibold leading-6" data-testid={`pricing-billing-choice-${planId}`}>
+                    Choose monthly or annual billing in the next step{ctaState === "signed_out" ? " after signing in" : ""}, before payment.
+                  </p>
+                ) : null}
                 {ctaState === "manage_plan" &&
                 !(
                   planId === "free" &&
