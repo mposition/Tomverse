@@ -21,8 +21,8 @@ import { useModalDialog } from "@/components/useModalDialog";
  * - the approved wording is preserved *verbatim* behind "Details", in a sheet
  *   that is reachable by touch, keyboard and screen reader.
  *
- * The trigger keeps a 44x44 touch target through a pseudo-element rather than
- * by growing the line, so the compressed notice really is one row tall.
+ * The trigger has visible padding and a real 44x44 touch target. The warning
+ * and action can wrap rather than shrinking the text or its touch area.
  */
 export function AiDisclaimerNotice({ testId }: { testId?: string }) {
   const { t } = useLanguage();
@@ -49,7 +49,7 @@ export function AiDisclaimerNotice({ testId }: { testId?: string }) {
       {/* The dock reserves the safe area after the last visible footer row. */}
       <p
         data-testid={testId}
-        className="flex shrink-0 flex-wrap items-center justify-center gap-x-1.5 px-2 pb-[0.4rem] pt-1 text-center text-[11px] leading-4 text-zinc-600 dark:text-zinc-300"
+        className="flex shrink-0 flex-wrap items-center justify-center gap-x-1.5 gap-y-1 px-2 pb-[0.4rem] pt-1 text-center text-xs leading-4 text-zinc-600 dark:text-zinc-300"
       >
         {/* COMPOSER-REFLOW-01. Wrapped, never truncated. What a narrow line
             cut off was the end of the sentence -- "do not enter sensitive
@@ -66,10 +66,7 @@ export function AiDisclaimerNotice({ testId }: { testId?: string }) {
           aria-haspopup="dialog"
           aria-expanded={isOpen}
           aria-controls={isOpen ? dialogId : undefined}
-          // The visible control is one line tall so the notice stays a single
-          // row; the tap target it actually answers to is the 44px box this
-          // pseudo-element paints invisibly around it.
-          className="relative shrink-0 rounded font-bold text-blue-700 underline underline-offset-2 before:absolute before:-inset-x-3 before:-inset-y-[0.9rem] before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-blue-300"
+          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg px-2 py-1 font-bold text-blue-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-blue-300"
         >
           {t("chat.aiDisclaimerDetails")}
         </button>
