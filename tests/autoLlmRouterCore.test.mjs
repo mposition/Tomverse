@@ -8,6 +8,7 @@ import {
   AUTO_LLM_ROUTER_MAX_REASON_CHARS,
   AUTO_LLM_ROUTER_MAX_TOPIC_CHARS,
   autoLlmRouterCandidates,
+  autoLlmRouterFailureDetail,
   autoLlmRouterOutputSchema,
   autoLlmRouterSession,
   autoLlmRouterUserMessage,
@@ -21,6 +22,29 @@ const ids = ["gpt-5-6-luna", "deepseek-v4-flash", "claude-opus-4-8"];
 const candidates = autoLlmRouterCandidates(ids, AVAILABLE_MODELS, {
   "gpt-5-6-luna": 1,
   "deepseek-v4-flash": 1,
+});
+
+test("router diagnostics keep only bounded metadata, never provider or model content", () => {
+  const secret = "private prompt, response body and credential";
+  const error = Object.assign(new Error(secret), {
+    name: "AI_NoObjectGeneratedError", finishReason: "length", text: secret,
+    cause: new Error(secret), response: { body: secret },
+  });
+  assert.deepEqual(autoLlmRouterFailureDetail(error, false), {
+    kind: "structured_output", error: "AI_NoObjectGeneratedError", finishReason: "length", outputChars: secret.length,
+  });
+  assert.deepEqual(autoLlmRouterFailureDetail({ name: secret, finishReason: secret, statusCode: secret }, false), {
+    kind: "unknown", error: "unknown",
+  });
+  assert.deepEqual(autoLlmRouterFailureDetail(secret, false), { kind: "unknown", error: "unknown" });
+  assert.deepEqual(autoLlmRouterFailureDetail({ name: "AI_APICallError", statusCode: 503 }, false), {
+    kind: "provider", error: "AI_APICallError", statusCode: 503,
+  });
+  assert.deepEqual(autoLlmRouterFailureDetail({ name: "AI_APICallError", statusCode: Infinity }, false), {
+    kind: "provider", error: "AI_APICallError",
+  });
+  assert.equal(autoLlmRouterFailureDetail({ name: "AbortError" }, true).kind, "timeout");
+  assert.equal(autoLlmRouterFailureDetail({ name: "AbortError" }, false).kind, "unknown");
 });
 
 test("candidates carry what the choice needs, in the eligible order", () => {
