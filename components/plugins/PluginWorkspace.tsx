@@ -92,7 +92,7 @@ export function PluginWorkspace() {
     (category === "all" || card.provider?.category === category) && (source === "all" || card.provider?.sources.includes(source)) &&
     (tab !== "connected" || inventory.connections.some(conn => conn.serverId === card.id && conn.status !== "disconnected")));
   const selectedProvider = providerId ? mcpProvider(providerId) : undefined;
-  return <div className={styles.shell} data-testid="plugin-workspace">
+  return <div className={styles.shell} lang={lang} data-testid="plugin-workspace">
     <ReviewNavigation product="plugins" onNewChat={() => router.push(`/chat?lang=${lang}`)}
       sidebar={<div className="p-6"><Link href={`/chat?lang=${lang}`}>Chat</Link></div>} />
     <aside className={styles.sidebar} aria-label={c.title}>
