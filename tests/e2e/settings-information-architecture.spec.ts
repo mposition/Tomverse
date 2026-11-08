@@ -611,6 +611,35 @@ test("pending analytics consent leaves memory settings and draft input uncovered
   await expectNoHorizontalOverflow(page);
 });
 
+test("pending analytics consent reserves space below imported conversations", async ({ page, baseURL, isMobile }) => {
+  await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
+  await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
+  await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+  await gotoSettingsDepth(page, "/settings/imports?lang=ko");
+  const slot = page.getByTestId("settings-consent-slot");
+  const notice = slot.getByTestId("chat-consent-notice");
+  await expect(notice).toBeVisible({ timeout: 15_000 });
+  const empty = page.getByTestId("external-import-conversations-empty");
+  await expect(empty).toBeVisible();
+  await empty.scrollIntoViewIfNeeded();
+  const uncovered = await empty.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    const notice = document.querySelector('[data-testid="chat-consent-notice"]')!.getBoundingClientRect();
+    return element.contains(hit) && rect.bottom <= notice.top;
+  });
+  expect(uncovered).toBe(true);
+  await notice.scrollIntoViewIfNeeded();
+  await notice.getByTestId("analytics-consent-decline").click();
+  await expect(notice).toHaveCount(0);
+  const settings = slot.getByTestId("analytics-settings-button");
+  await expect(settings).toBeVisible();
+  expect(await settings.evaluate(element => getComputedStyle(element).position)).not.toBe("fixed");
+  await settings.click();
+  await expect(notice).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
 // The three assistants routes do not share one up-link, and that is the design
 // rather than an inconsistency. A profile goes up to the list it came from and
 // the list goes up to settings, so only the collection carries
