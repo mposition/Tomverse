@@ -100,7 +100,7 @@ action sends a message, creates a paid turn, or silently creates a conversation.
 ## 4. Responsive and accessible shape
 
 - Both product targets are at least 44px tall.
-- Narrow layouts show the short `Chat` and `Review` labels. Their accessible
+- Narrow layouts show short product labels (`Chat` / `Review`; Korean `채팅` / `비교`). Their accessible
   names include the full product name, secondary feature name and description.
 - Wider layouts may show the secondary feature labels: `Smart Adaptive` and
   `Model Compare` (localized).

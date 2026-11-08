@@ -64,14 +64,14 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
     guestChatSignInDescription: "Guest Chat은 이 브라우저에 저장됩니다. 로그인 후 계정에 제공되는 기능을 확인하세요.",
     switchPendingDescription: "현재 작업이 끝난 뒤 제품을 전환할 수 있습니다.",
     chat: {
-      shortLabel: "Chat",
+      shortLabel: "채팅",
       name: "Tomverse Chat",
       feature: "스마트 자동",
       description: "질문 다듬기와 메시지별 자동 모델 선택.",
       open: "Chat 열기",
     },
     review: {
-      shortLabel: "Review",
+      shortLabel: "비교",
       name: "Tomverse Review",
       feature: "모델 비교",
       description: "모델을 직접 선택하고 답변을 나란히 비교.",
