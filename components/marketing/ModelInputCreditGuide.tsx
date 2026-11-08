@@ -12,7 +12,7 @@ export function ModelInputCreditGuide() {
   return (
     <details id="model-input-credit-guide" tabIndex={-1} className="mt-8 scroll-mt-28 rounded-2xl border border-zinc-200 p-5 text-sm leading-6 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-800">
       <summary className="min-h-11 cursor-pointer py-2.5 font-bold">Input size and credit multipliers</summary>
-      <p>The short-request base credits apply at 1×. The multiplier uses estimated total input tokens, including conversation history, extracted file content and system/tool context; it is not a character count or just your latest message.</p>
+      <p>The short-request base credits apply at 1×. The multiplier uses estimated request input tokens, including your conversation history and extracted file content; it is not a character count or just your latest message. Extra internal tool-reservation overhead does not itself increase this credit multiplier.</p>
       <dl className="my-4 space-y-2">
         {bands.map(band => <div key={band.range} data-testid="model-input-credit-band" className="flex flex-wrap justify-between gap-x-4"><dt>{band.range}</dt><dd className="font-bold">{band.multiplier}× base credits</dd></div>)}
       </dl>
