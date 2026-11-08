@@ -20,12 +20,25 @@ process.env.DATABASE_URL ||=
 
 const created: unknown[] = [];
 let mocksInstalled = false;
+let routerError: Error | null = null;
+let tunedTimeoutMs: number | null = null;
+let rewriteOn = false;
 let routerOutput: { reason: string; topic: string; modelId: string; requiresFileGeneration?: boolean } = {
   reason: "short question", topic: "cats", modelId: "deepseek-v4-flash",
 };
 
 const prismaMock = {
-  appSetting: { findUnique: async () => null },
+  appSetting: {
+    findUnique: async ({ where }: { where: { key: string } }) =>
+      where.key === "auto.llmRouterTunables" && tunedTimeoutMs !== null
+        ? { value: JSON.stringify({ routerTimeoutMs: {
+          value: tunedTimeoutMs, previous: 7_000, setAt: "2026-11-04T03:30:29.645Z",
+          cycleId: "tuned-cycle", reason: "Measured latency", before: {
+            decisions: 107, timeoutOrErrorShare: 9 / 107, p90LatencyMs: 5_500,
+          },
+        } }) }
+        : null,
+  },
   autoRouterDecision: {
     findMany: async () => [],
     create: async ({ data }: { data: unknown }) => {
@@ -44,17 +57,17 @@ async function load() {
     mock.module("ai", {
       namedExports: {
         ...realAi,
-        generateText: async () => ({
-          output: routerOutput,
-          usage: { inputTokens: 100, outputTokens: 20 },
-        }),
+        generateText: async () => {
+          if (routerError) throw routerError;
+          return { output: routerOutput, usage: { inputTokens: 100, outputTokens: 20 } };
+        },
       },
     });
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: prismaMock } });
     mock.module(mod("lib/autoLlmRouterSettings.ts"), {
       namedExports: {
         readAutoLlmRouterModelId: async () => "gpt-6-luna",
-        readAutoLlmRouterRewrite: async () => false,
+        readAutoLlmRouterRewrite: async () => rewriteOn,
       },
     });
     mock.module(mod("lib/autoLlmRouterGuidance.ts"), {
@@ -88,6 +101,7 @@ const pick = async (recordDecision?: Promise<boolean>, canPersist = false) => {
     userId: "user-1",
     conversationId: "conv-1",
     traceId: "trace-1",
+    rewriteAllowed: true,
     fileContext: { isAuthenticated: true, canPersist, webSearchRequested: false },
     ...(recordDecision ? { recordDecision } : {}),
   });
@@ -95,6 +109,41 @@ const pick = async (recordDecision?: Promise<boolean>, canPersist = false) => {
   await new Promise((resolve) => setTimeout(resolve, 20));
   return result;
 };
+
+test("live routing uses 7 s by default and preserves tuned deadlines and the rewrite floor", async (t) => {
+  const timeout = t.mock.method(AbortSignal, "timeout");
+  try {
+    for (const [tuned, rewrite, expected] of [
+      [null, false, 7_000],
+      [null, true, 7_000],
+      [5_000, false, 5_000],
+      [5_000, true, 7_000],
+      [8_000, true, 8_000],
+    ] as const) {
+      tunedTimeoutMs = tuned;
+      rewriteOn = rewrite;
+      timeout.mock.resetCalls();
+      assert.equal((await pick())?.modelId, "deepseek-v4-flash");
+      assert.deepEqual(timeout.mock.calls.map((call) => call.arguments[0]), [expected]);
+    }
+  } finally {
+    tunedTimeoutMs = null;
+    rewriteOn = false;
+  }
+});
+
+test("a router timeout or provider error returns no pick and keeps the fallback available", async () => {
+  try {
+    for (const error of [new DOMException("Timed out", "TimeoutError"), new Error("Provider failed")]) {
+      routerError = error;
+      created.length = 0;
+      assert.equal(await pick(), null);
+      assert.equal((created[0] as { outcome: string }).outcome, "error");
+    }
+  } finally {
+    routerError = null;
+  }
+});
 
 test("a chat turn keeps its decision row", async () => {
   created.length = 0;
