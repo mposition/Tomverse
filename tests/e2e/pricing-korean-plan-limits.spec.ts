@@ -28,6 +28,8 @@ for (const scenario of [
       await expect(block).toContainText("1,000,000 토큰");
       await expect(block).toContainText("실제 입력은 위 앱 상한 안에서 처리되며");
     }
+    const attachmentRow = page.getByRole("row").filter({ hasText: "파일 첨부 (허용 시)" });
+    await expect(attachmentRow.getByRole("cell").nth(2)).toHaveText(scenario.proAttachments ? "5개 · 각 10 MiB · 총 25 MiB" : "현재 제공하지 않음");
     await expect(max).toContainText("메시지당 5개 · 파일당 10 MiB · 총 25 MiB");
     await expect(pro).toContainText(scenario.proAttachments ? "메시지당 5개 · 파일당 10 MiB · 총 25 MiB" : "현재 플랜 설정에서 첨부 기능을 제공하지 않습니다.");
     await expect(page.getByTestId("pricing-plan-card-max")).not.toContainText("더 높은 첨부파일 및 맥락 한도");

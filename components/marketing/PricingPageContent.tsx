@@ -696,11 +696,11 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       { question: "출시 할인은 어떻게 적용되나요?", answer: "출시 특가로 Pro 또는 Max 첫 달 동안 50% 할인을 받을 수 있습니다. 이후에는 취소하지 않는 한 정가 월 요금으로 갱신됩니다.", promotionOnly: true },
       { question: "Pro에서 선택할 수 있는 모델이 제한되나요?", answer: "Pro에서 사용할 수 있는 모델은 모델 목록과 선택창에서 확인할 수 있습니다. 선택한 모델과 요청 길이에 따라 크레딧이 차감되며, 플랜 사용량과 기능별 이용 조건이 적용됩니다." },
     ],
-    note: "가격은 선택된 현지통화의 세금 전 고정 금액입니다. Max는 Standard 모델 일일 제한 없음, Premium 사용량은 월 크레딧 및 공정사용 정책이 적용됩니다.",
+    note: "가격은 선택된 현지통화의 세금 전 고정 금액입니다. 플랜별 일일 크레딧 한도와 모델별 운영 안전장치는 현재 사용량 안내를 확인하세요.",
     plans: [
       { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: REVIEW_SIGN_IN_HREF, usage: "월 300 AI 크레딧", features: ["선별된 모델 이용","선별된 고비용 모델 월 최대 30응답","최대 3개 모델 비교","저장한 대화 기록","로그인 후 파일 첨부, 공유 및 다운로드","가벼운 일상 질문부터 시작하기"] },
       { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", cta: "Pro로 업그레이드", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "추천", usage: "월 3,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","모델별 크레딧 차감량에 따라 월 제공량 사용","최대 3개 모델 나란히 비교","파일 첨부 및 Google Drive 파일","대화 공유 및 다운로드"] },
-      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","현재 일일 플랜 크레딧 한도 표시","Premium 사용량은 월 크레딧 및 공정사용 정책 적용","첨부 허용 시 5개 · 각 10 MiB · 총 25 MiB","고급 모델과 긴 문서를 자주 쓰는 경우에 적합"] },
+      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","월 10,000 AI 크레딧 제공","Premium 사용량은 월 크레딧 및 공정사용 정책 적용","첨부 허용 시 5개 · 각 10 MiB · 총 25 MiB","고급 모델과 긴 문서를 자주 쓰는 경우에 적합"] },
     ],
   },
   zh: {
@@ -2249,7 +2249,7 @@ export function PricingPageContent() {
                     <td className="border-b border-zinc-200 px-4 py-4 font-bold dark:border-zinc-800">{row.label}</td>
                     {[row.free, row.pro, row.max].map((value, index) => (
                       <td key={`${row.label}-${index}`} className="border-b border-zinc-200 px-4 py-4 font-semibold text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
-                        {value === "-" ? <Minus className="h-4 w-4 text-zinc-400" /> : value}
+                        {lang === "ko" && row.label === "파일 첨부 (허용 시)" && billing.config?.plans.find((plan) => plan.id === ["free", "pro", "max"][index])?.allowAttachments === false ? "현재 제공하지 않음" : value === "-" ? <Minus className="h-4 w-4 text-zinc-400" /> : value}
                       </td>
                     ))}
                   </tr>
