@@ -2121,7 +2121,7 @@ export const ko = {
         countrySave: "국가 확인",
         marketingOptional: "선택 사항 · 언제든 해제",
         marketingCalloutTitle: "유용한 새 기능을 놓치지 마세요",
-        marketingCalloutBody: "중요한 Tomverse 새 기능과 실제 활용 팁을 가끔 이메일로 알려드립니다. 미리 선택하지 않으며 언제든 끌 수 있습니다.",
+        marketingCalloutBody: "중요한 Tomverse 새 기능과 실제 활용 팁을 가끔 이메일로 알려드립니다. 원할 때 수신을 선택하고, 언제든 해제할 수 있습니다.",
         marketingCalloutAction: "제품 업데이트 받기",
         error: {
             COUNTRY_REQUIRED: "마케팅 이메일을 켜기 전에 거주 국가를 선택해 주세요.",
