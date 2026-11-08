@@ -227,8 +227,9 @@ claim/asset·provenance 거절이 없는 경우에만 이 언어 플래그가 �
 
 입력 위생은 언어 판단이 아니다. 제어문자·양방향 제어문자·zero-width 문자·멘션·URL-like token·
 Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므로 계속 거절한다.
-예외는 자사 도메인 하나다: 경로·scheme·포트·다른 label이 붙지 않은 맨 `tomverse.app`(`www.` 포함)은
-문구와 영상 transcript에 쓸 수 있다(운영자 결정 2026-11-08, 사용설명서 영상의 "Try Review at tomverse.app").
+예외는 자사 도메인 하나다: 경로·scheme·포트·다른 label(`.`이나 `。`로 붙은 것 포함)이 붙지 않은 맨
+`tomverse.app`(`www.`, 대소문자, NFKC로 같아지는 전각 표기 포함)은 문구와 영상 transcript에 쓸 수 있다
+(운영자 결정 2026-11-08, 사용설명서 영상의 "Try Review at tomverse.app". 코드는 `lib/marketingGuardNormalise.ts`의 `OWN_HOST`).
 게시물이 싣는 링크는 여전히 아래 7.3대로 서버가 조립한다.
 
 ### 7.2 사실 검증 (새 문구마다, 템플릿은 템플릿 승인 시)

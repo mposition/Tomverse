@@ -197,7 +197,11 @@ test("our own bare host may be named, and nothing address-like around it", () =>
     "到 tomverse.app 試用 Review。",
     "Review는 tomverse.app에서 써 볼 수 있습니다.",
     "(tomverse.app)",
+    // NFKC folds the full-width stop: the same host.
     "tomverse．app",
+    // A particle, then prose: the boundary the CJK allowance draws.
+    "tomverse.app에서 com",
+    "到 tomverse.app。",
   ]) {
     assert.deepEqual(marketingTextHygiene(text), [], text);
   }
@@ -224,6 +228,14 @@ test("our own bare host may be named, and nothing address-like around it", () =>
     "tomverſe.app.evil.com",
     "例子tomverse.app",
     "tomverse.appé",
+    // A URL parser reads the ideographic stop as a dot: these are other hosts.
+    "例子。tomverse.app",
+    "例子。www.tomverse.app",
+    "tomverse.app。例子",
+    "tomverse.app。evil",
+    // CJK text may follow the host; an address after that text is still one.
+    "tomverse.app에서.com",
+    "tomverse.app例子.com",
   ]) {
     assert.ok(marketingTextHygiene(text).includes("url_like"), `${text} should read as an address`);
   }
