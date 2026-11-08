@@ -292,7 +292,7 @@ export function PrivacyPolicy() {
     return (
         <main className="min-h-screen overflow-y-auto bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
             <MarketingHeader
-                maxWidth="max-w-4xl"
+                maxWidth="max-w-7xl"
                 localizedContentAvailable={localizedContentAvailable}
             />
 
