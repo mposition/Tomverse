@@ -226,12 +226,12 @@ const IDEOGRAPHIC_HOST_ANY_CASE = new RegExp(
  * separates labels here on both sides even though prose also uses it. The link
  * a post carries is still the publisher's, from an approved id.
  *
- * Matched against the readable form, whose NFKC has already folded the width
- * and compatibility shapes that name the same host (`tomverse．app` is this
- * host, and so is allowed). Letter case is spelled out per ASCII letter rather
- * than with the `i` flag: a case-insensitive Unicode match would also fold
- * letters (U+212A KELVIN SIGN to `k`, U+017F to `s`) that this should not
- * decide, and lowering the whole text first would change what the
+ * Matched against the readable form, so every spelling NFKC folds to the host
+ * is the host: `tomverse．app`, and `tomverſe.app` (U+017F folds to `s`). That
+ * is intended -- UTS #46, which browsers apply to a host, maps those the same
+ * way, so they reach this host and no other. Letter case is spelled out per
+ * ASCII letter rather than with the `i` flag, so nothing beyond NFKC is folded
+ * here, and lowering the whole text first would change what the
  * case-sensitive ideographic checks above read.
  *
  * The host is written once here; docs/policy/marketing-automation.md 7.1 names
@@ -242,15 +242,13 @@ const asciiAnyCase = (word: string): string =>
   word.replace(/[a-z]/g, (letter) => `[${letter}${letter.toUpperCase()}]`);
 // The boundaries are lists of what may stand there, not of what may not: a
 // label takes letters, marks, digits and joiners from every script, and the
-// second review found a combining mark (x́tomverse.app, another IDN name)
-// that a deny list had missed. So in front of the host only the start, white
-// space or an opening or separating mark; after it only the end, white space,
-// a closing or separating mark, a stop that ends the text or a word, or Korean,
-// Chinese and Japanese text with no space ("tomverse.app에서"), in which no
-// `.app` name continues -- and an address after that text is read by the
-// expressions above as before. In front of it no letter of any script may
-// stand, because "例子tomverse.app" is another name.
-const CJK_AFTER_HOST = "\\p{Script=Hangul}\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}";
+// reviews found a combining mark (x́tomverse.app) and CJK text
+// (tomverse.app中国/login) that turned the host into another name with a path.
+// So in front of the host only the start, white space or an opening or
+// separating mark; after it only the end, white space, a closing or separating
+// mark, or a stop / ? / ! that ends the text or a word. Korean and Chinese copy
+// puts a space or a mark after the host: "tomverse.app 에서" passes and
+// "tomverse.app에서" is refused.
 const LABEL_STOPS = `.${codePoint(0x3002)}`;
 const OPENING_MARKS = `([{"'${codePoint(0x201c)}${codePoint(0x2018)}${codePoint(0x300c)}${codePoint(0x300e)}${codePoint(0x3010)}${codePoint(0x300a)}${codePoint(0x3008)}`;
 const CLOSING_MARKS = `)\\]}"'${codePoint(0x201d)}${codePoint(0x2019)}${codePoint(0x300d)}${codePoint(0x300f)}${codePoint(0x3011)}${codePoint(0x300b)}${codePoint(0x3009)}`;
@@ -261,7 +259,7 @@ const ENDING_MARKS = `${LABEL_STOPS}?!`;
 const OWN_BARE_HOST = new RegExp(
   `(?<=^|[\\s${OPENING_MARKS}${SEPARATING_MARKS}?!])` +
     `(?:${asciiAnyCase(OWN_HOST.sub)}\\.)?${asciiAnyCase(OWN_HOST.label)}\\.${asciiAnyCase(OWN_HOST.suffix)}` +
-    `(?=$|[\\s${CLOSING_MARKS}${SEPARATING_MARKS}]|[${ENDING_MARKS}](?:$|[\\s${CLOSING_MARKS}])|[${CJK_AFTER_HOST}])`,
+    `(?=$|[\\s${CLOSING_MARKS}${SEPARATING_MARKS}]|[${ENDING_MARKS}](?:$|[\\s${CLOSING_MARKS}]))`,
   "gu",
 );
 
