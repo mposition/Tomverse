@@ -259,6 +259,10 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 
 **대상**: 아래 20개 page, 렌더러 probe 4종(`lib/productResearchScoutRendererProbes.mjs`), 카탈로그. origin은
 `https://tomverse.app` 하나이며, 언어는 browser locale로 정합니다(`lib/productResearchScoutBrowserPolicy.mjs`).
+로그인한 화면은 계정에 저장된 언어가 browser locale보다 우선할 수 있습니다.
+각 viewport에서 실제 문서 언어가 대상 언어와 일치하는 캡처만 제안으로 제출합니다.
+다르면 `language_mismatch`로 건너뛰며, 계정 언어를 바꾸거나 다른 언어의 화면을
+대상 언어의 결함으로 제출하지 않습니다. 화면 목록·접근 권한·요금 한도는 그대로입니다.
 
 | page id | URL | 언어 |
 |---|---|---|
