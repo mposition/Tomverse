@@ -3750,7 +3750,7 @@ export function ChatInput({
           // The min/max heights are in rem, not px, so a reader at 200% text
           // scaling still gets a complete first line instead of a box frozen
           // at one 16px-root line's worth of height.
-          className={`w-full min-w-0 max-h-[5.75rem] min-h-11 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 text-base leading-[1.625rem] text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[12.5rem] md:min-h-16 md:px-1 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
+          className={`w-full min-w-0 max-h-[5.75rem] min-h-11 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 text-base leading-[1.625rem] text-zinc-900 outline-none placeholder:text-zinc-600 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-400 md:max-h-[12.5rem] md:min-h-16 md:px-1 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
         />
         </div>
         {/*
