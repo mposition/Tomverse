@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Activity, ExternalLink } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
-import { getModelUsageProfile } from "@/lib/models";
+import { getModelUsageProfile, modelSupportsImageInput } from "@/lib/models";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { getModelBrand } from "@/lib/modelBranding";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
@@ -33,7 +33,7 @@ const copy = {
   ko: {
     eyebrow: "모델",
     title: "질문에 맞는 모델을 찾아보세요.",
-    description: "추천 활용, 기본 크레딧과 이용에 필요한 플랜을 비교해 보세요. Tomverse Chat과 Review에서 선택할 수 있는 모델을 확인하고, 현재 제공 여부와 사용량은 앱의 모델 선택기에서 다시 확인할 수 있습니다.",
+    description: "이용 시작 플랜, 기본 크레딧과 이미지 입력 지원을 비교해 보세요. 비용 차이가 성능 우열을 뜻하지는 않습니다. 현재 제공 여부와 사용량은 앱의 모델 선택기에서 확인할 수 있습니다.",
     provider: "공급자",
     usageClass: "크레딧 사용 등급",
     baseCharge: "짧은 요청의 기본 크레딧",
@@ -203,7 +203,7 @@ export function ModelsPageContent() {
         <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {ENABLED_MODELS.map((model) => {
             const brand = getModelBrand(model.provider);
-            const tags = getModelExperienceTags(model);
+            const tags = getModelExperienceTags(model).filter((tag) => lang !== "ko" || tag === "reasoning" || tag === "free");
             const status = getModelExperienceStatus(model);
             const usageProfile = getModelUsageProfile(model);
 
@@ -226,8 +226,8 @@ export function ModelsPageContent() {
                   <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">{model.id}</p>
                 </div>
               </div>
-              <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                {t(getModelBestFor(model))}
+              <p data-testid={lang === "ko" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                {lang === "ko" ? `이용 시작: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · 짧은 요청: ${usageProfile.credits} 크레딧 · 이미지 입력: ${modelSupportsImageInput(model) ? "지원" : "미지원"}` : t(getModelBestFor(model))}
               </p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {tags.map((tag) => (
