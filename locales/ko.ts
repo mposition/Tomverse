@@ -1507,7 +1507,7 @@ export const ko = {
         titleImpactStale: "확인한 뒤 잠금 등 상태가 바뀌었습니다. 삭제 내용을 다시 확인해 주세요.",
         deleting: "삭제 중…",
         deleteNote:
-            "선택한 가져오기 항목을 삭제하면 Tomverse에 저장된 해당 사본이 제거됩니다. 원래 서비스에는 영향이 없습니다.",
+            "이 항목을 삭제하면 Tomverse에 저장된 해당 사본이 제거됩니다. 원래 서비스에는 영향이 없습니다.",
         detailTitle: "가져온 내보내기",
         detailNotFound: "이 가져오기를 찾을 수 없습니다.",
         detailConversations: "가져온 대화",
