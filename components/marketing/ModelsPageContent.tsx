@@ -16,6 +16,9 @@ const copy = {
     eyebrow: "Models",
     title: "Find a model for your question.",
     description: "Compare suggested uses, base credits and the plan needed for access. Explore the models you can select in Tomverse Chat and Review, then check current availability and usage in the app’s model selector.",
+    mobileDescription: "Compare models, base credits and access plans for Chat and Review.",
+    mobileCreditNote: "Base credits are for a short request; long inputs and tools can add cost.",
+    mobileUsageDetails: "Credit and availability details",
     provider: "Provider",
     usageClass: "Credit category",
     baseCharge: "Base credits for a short request",
@@ -167,12 +170,22 @@ export function ModelsPageContent() {
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader maxWidth="max-w-6xl" />
 
-      <section className="mx-auto max-w-6xl px-4 py-14 [overflow-wrap:anywhere] sm:px-6 lg:py-20">
+      <section className="mx-auto max-w-6xl px-4 py-8 [overflow-wrap:anywhere] sm:px-6 sm:py-14 lg:py-20">
         <div className="max-w-3xl">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
-          <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{content.title}</h1>
-          <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
-          <p className="mt-5 rounded-2xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200">
+          <h1 className="mt-4 text-3xl font-black leading-tight sm:text-6xl">{content.title}</h1>
+          <p className={`mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${lang === "en" ? "hidden sm:block" : ""}`}>{content.description}</p>
+          {lang === "en" ? (
+            <div className="mt-4 space-y-3 sm:hidden">
+              <p className="text-base leading-7 text-zinc-600 dark:text-zinc-300">{copy.en.mobileDescription}</p>
+              <p className="text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200">{copy.en.mobileCreditNote}</p>
+              <details data-testid="models-mobile-usage-details" className="rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 text-sm leading-6 text-blue-800 dark:text-blue-200">
+                <summary className="min-h-11 cursor-pointer py-2.5 font-bold">{copy.en.mobileUsageDetails}</summary>
+                <p className="pb-3">{content.usageNote}</p>
+              </details>
+            </div>
+          ) : null}
+          <p className={`mt-5 rounded-2xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200 ${lang === "en" ? "hidden sm:block" : ""}`}>
             {content.usageNote}
           </p>
           <Link
@@ -183,16 +196,16 @@ export function ModelsPageContent() {
             aria-label={statusLinkLabel(content.liveStatus, lang)}
             title={statusNewTabCopy[lang]}
             data-testid="models-status-link"
-            className="mt-7 inline-flex max-w-full items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left transition hover:bg-emerald-500/15 [overflow-wrap:anywhere] max-[240px]:flex-col max-[240px]:items-start"
+            className="mt-5 inline-flex max-w-full items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left transition hover:bg-emerald-500/15 sm:mt-7 [overflow-wrap:anywhere] max-[240px]:flex-col max-[240px]:items-start"
           >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 sm:h-10 sm:w-10 text-emerald-600 dark:text-emerald-300">
               <Activity className="h-5 w-5" />
             </span>
             <span className="min-w-0 max-w-full">
               <span className="block text-sm font-bold text-emerald-700 dark:text-emerald-300">
                 {content.liveStatus}
               </span>
-              <span className="mt-0.5 block text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+              <span className={`mt-0.5 text-xs leading-5 text-zinc-600 dark:text-zinc-400 ${lang === "en" ? "hidden sm:block" : "block"}`}>
                 {content.liveStatusDescription}
               </span>
             </span>
@@ -200,7 +213,7 @@ export function ModelsPageContent() {
           </Link>
         </div>
 
-        <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-8 grid grid-cols-1 gap-4 sm:mt-12 sm:grid-cols-2 lg:grid-cols-3">
           {ENABLED_MODELS.map((model) => {
             const brand = getModelBrand(model.provider);
             const tags = getModelExperienceTags(model);
