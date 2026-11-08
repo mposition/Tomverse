@@ -358,6 +358,7 @@ async function runInBackground(input: {
                         rewrite: true,
                         rewriteGuidance,
                         timeoutMs: AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
+                        source: "rewrite_optimizer",
                     });
                     return {
                         value: routed.pick ? { modelId: routed.pick.modelId, rewrite: routed.pick.rewrite } : null,

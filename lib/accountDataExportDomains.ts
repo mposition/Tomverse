@@ -727,6 +727,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator evidence that the owner accepted the unknown effects of the approved FIRST Task's prior attempt, not customer data. The accepter id is the owner and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores Task, attempt and evidence identifiers, fixed cost ceilings and digests, not free text. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxTaskRecoveryPreApproval",
+    publicName: "amux_v22_task_recovery_pre_approvals",
+    prismaModel: "AmuxV22TaskRecoveryPreApproval",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one owner's one-click consent to a single capped AMUX recovery attempt, not customer data. The requester id is the owner and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores Task, attempt and inspection identifiers, a server-computed cost ceiling, digests and an expiry, not free text. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxWorkerLatchEvent",
     publicName: "amux_worker_latch_events",
     prismaModel: "AmuxWorkerLatchEvent",

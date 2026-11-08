@@ -12,11 +12,15 @@ import { amuxV22RecoveryAdminSchema, amuxV22TaskRecoveryEnabled,
   AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV } from "@/lib/amux/v22TaskRecoveryCore";
 import { requestAmuxV22RecoveryInspection, approveAmuxV22TaskRecovery,
   acceptAmuxV22UnknownPriorEffects, readAmuxV22TaskRecovery,
-  requestAmuxV22LegacySafeStop } from
+  requestAmuxV22LegacySafeStop, requestAmuxV22RecoveryPreApproval,
+  readAmuxV22RecoveryPreApprovalQuote } from
   "@/lib/amux/v22TaskRecoveryService";
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const readSchema = z.object({ taskId: z.string().min(1).max(128).regex(/^[A-Za-z0-9:_-]+$/),
   requestId: z.string().uuid() }).strict();
+/** The one-click confirmation reads a server-computed quote; it writes nothing. */
+const quoteSchema = z.object({ taskId: readSchema.shape.taskId,
+  view: z.literal("preapproval_quote") }).strict();
 async function recentOwner() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id || !isAdminSession(session)) return { response:
@@ -45,6 +49,9 @@ export async function GET(request: Request) {
     const auth = await recentOwner(); if ("response" in auth) return auth.response;
     await consumeApiRateLimit(request, auth.session.user.id, "admin-amux-execution-recovery-read", { minute: 20, day: 200 });
     const params = new URL(request.url).searchParams;
+    const quote = quoteSchema.safeParse(Object.fromEntries(params));
+    if (quote.success) return Response.json(await readAmuxV22RecoveryPreApprovalQuote(
+      auth.session, quote.data.taskId), { headers: noStore });
     const parsed = readSchema.safeParse(Object.fromEntries(params));
     if (!parsed.success) return Response.json({ error: "INVALID_REQUEST" }, { status: 400, headers: noStore });
     return Response.json({ ...await readAmuxV22TaskRecovery(auth.session, parsed.data.taskId, parsed.data.requestId),
@@ -68,6 +75,8 @@ export async function POST(request: Request) {
         await acceptAmuxV22UnknownPriorEffects({ ...input, ...body }) :
       body.action === "request_safe_stop" ?
         await requestAmuxV22LegacySafeStop({ ...input, ...body }) :
+      body.action === "preapprove_attempt" ?
+        await requestAmuxV22RecoveryPreApproval({ ...input, ...body }) :
         await approveAmuxV22TaskRecovery({ ...input, ...body });
     // The panel renders the next step from this answer, so it carries the same
     // gates the GET read does; without them the safe-stop control stayed off.
