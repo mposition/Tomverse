@@ -93,7 +93,7 @@ echo ...; date`, because the chain did not match.
      - chips with model marks dropping into a list or floating;
      - a checklist note;
      - a physical photo from the library with exact words set on it;
-     - a numbered steps cover;
+     - an "in N steps" card that shows every step on the one card;
      - a real capture from a pack, cropped large;
      - lots of air.
    - Avoid the rejected looks in `examples/README.md`.
@@ -120,6 +120,9 @@ echo ...; date`, because the chain did not match.
        - ko "사진: AI 생성"
        - zh-Hant and zh-Hans "照片：AI 生成"
      - An AI photo and a product capture never share a card.
+     - Every card is posted on its own. Never put a page marker such as "1/5"
+       or "swipe" on it (owner 2026-11-08: a published card read "1/5" with no
+       other pages).
      - A library photo fills most of a card, so a card on a photo that an
        earlier card or example used looks the same to `make-card.mjs`. To reuse
        one, crop it hard (300 % or more), darken it or turn it. Otherwise choose
