@@ -75,6 +75,7 @@ export const infoPages = {
     }
   },
   "en": {
+    mobileAccordion: true,
     "eyebrow": "FAQ",
     "title": "Frequently asked questions",
     "description": "Find answers about Chat and Review, getting started free, model selection and credits.",
