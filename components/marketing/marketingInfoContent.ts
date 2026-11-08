@@ -1,5 +1,20 @@
 import type { Language } from "@/components/LanguageProvider";
 import type { MarketingInfoCopy } from "./MarketingInfoPage";
+import { chatAttachmentExtensionsByGroup, type ChatAttachmentUiGroup } from "@/lib/chatAttachmentFormats";
+
+const attachmentGroupLabels: Record<ChatAttachmentUiGroup, string> = {
+  image: "Images (static GIF only)",
+  document: "Documents",
+  data: "Data",
+  markup: "Text and markup",
+  code: "Source code (read as text)",
+  archive: "Archives (contents must pass file checks)",
+};
+const signedInAttachmentFormats = Object.entries(chatAttachmentExtensionsByGroup())
+  .filter(([, extensions]) => extensions.length > 0)
+  .map(([group, extensions]) => `${attachmentGroupLabels[group as ChatAttachmentUiGroup]}: ${extensions.map((extension) => `.${extension}`).join(", ")}.`);
+const guestAttachmentFormats = Object.values(chatAttachmentExtensionsByGroup({ guest: true }))
+  .flat().map((extension) => `.${extension}`).join(", ");
 
 export const infoPages = {
   faq: {
@@ -1355,8 +1370,10 @@ export const infoPages = {
       },
       {
         "title": "Files and Google Drive",
-        "body": "Where attachments are available, check supported formats and sizes. Password-protected, damaged or scanned documents without readable text may fail. Try one file or paste the key text.",
+        "body": "Where attachments are available, the supported extensions for signed-in accounts are listed below. Password-protected, damaged or scanned documents without readable text may fail. Try one file or paste the key text.",
         "bullets": [
+          ...signedInAttachmentFormats,
+          `Supported guest formats: ${guestAttachmentFormats}.`,
           "Supported guest attachments: one file per message, up to 5 MB. Google Drive connection requires sign-in.",
           "Signed-in plans with attachments: up to five files, 10 MB each and 25 MB total per request.",
           "Account files are kept with the conversation. Guest files are temporary and are not included in saving, sharing or exports."
