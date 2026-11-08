@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { expectAccessibleContrast } from "./support/ui-audit";
 
 /**
  * Saved memories — /settings/memory and its settings entry point
@@ -333,6 +334,29 @@ test.describe("memory settings", () => {
       ],
     });
     await openMemoryPage(page);
+
+    await expect(page.getByRole("checkbox", { name: "모든 대화에서 기억 사용" })).toBeChecked();
+    await expect(page.getByRole("combobox", { name: "대화 기억 기본값", exact: true })).toHaveAttribute("aria-describedby", "memory-default-mode-description");
+    await expect(page.locator("#memory-default-mode-description")).toContainText("새 대화와 기존 대화");
+    await expect(page.locator("#memory-default-mode-description")).toContainText("대화별로 직접 정한 설정이 우선");
+
+    for (const theme of ["light", "dark"] as const) {
+      await page.locator("html").evaluate((element, value) => {
+        element.classList.toggle("dark", value === "dark");
+      }, theme);
+      const guidance = [
+        page.getByText("끄면 모든 대화에서 기억을 사용하지 않고", { exact: false }),
+        page.getByText("과거 대화에서 추정한 어조·길이·구성 선호", { exact: false }),
+        page.getByText("이 기억의 근거가 되는 내용을 적어주세요", { exact: false }),
+      ];
+      for (const description of guidance) {
+        await expect(description).toBeVisible();
+        await expect(description).toHaveCSS("font-size", "14px");
+        await expect(description).toHaveCSS("line-height", "24px");
+        const sample = await expectAccessibleContrast(description, `${theme} memory guidance`);
+        expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+      }
+    }
 
     await expect(page.getByTestId("memory-active-row")).toHaveCount(1);
     await expect(page.getByTestId("memory-pinned-badge")).toBeVisible();
