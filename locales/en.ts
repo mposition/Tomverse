@@ -1022,6 +1022,7 @@ export const en = {
         imageUnsupported: "This model cannot read the attached image",
     },
     providerStatus: {
+        lookupUnavailable: "Model status could not be refreshed. The last confirmed result is retained.",
         allAvailable: "All selected providers are available",
         allAvailableBody: "Model providers are responding normally.",
         selectedUnavailableOne: "{model} is temporarily unavailable",
@@ -1974,12 +1975,13 @@ export const en = {
         privacyNote: "When you finish an import, Tomverse automatically organises memories from it through an AI provider, at no credit cost. Sensitive content such as health information is not saved as a memory. Memories in use and answer-style preferences are passed as reference material to the Tomverse model answering, and you can view, edit, disable or delete them at any time.",
         disabledNotice: "Editing and adding memories isn't available right now. You can still view and delete the memories already saved.",
         settingsTitle: "Memory usage settings",
-        masterToggleLabel: "Use memories in new chats",
+        masterToggleLabel: "Use memory across all chats",
         masterToggleDescription: "Turned off, no chat uses memories and imported conversations make no new ones. Saved memories are not deleted.",
         styleToggleLabel: "Use answer-style memories",
         styleToggleDescription:
             "Lets answers take into account the tone, length and structure preferences inferred from past conversations.",
-        defaultModeLabel: "Default for new chats",
+        defaultModeLabel: "Conversation memory default",
+        defaultModeDescription: "Applies to new and existing chats that follow the account default. Per-chat choices take precedence, unless memory is turned off for all chats above.",
         defaultModeOn: "Use memory",
         defaultModeOff: "Don't use memory",
         edit: "Edit",
