@@ -145,7 +145,7 @@ export function AmuxWorkerQuestionDm({ dm, options, io }: {
             dm.answer ?? ""}</p>
           <p className="text-zinc-300">{messages.dmRationale}</p>
           <p className="whitespace-pre-wrap break-words">{dm.rationale}</p>
-          {/* §6: what the Decision Maker read, shown before the confirmation. */}
+          {/* docs/policy/amux-decision-maker.md §6: what the Decision Maker read, shown before the confirmation. */}
           <p className="text-zinc-300">{messages.dmSnapshot}</p>
           <p className="break-words" data-testid="amux-worker-question-dm-snapshot">
             {dm.snapshot.state === "none" ? messages.dmCardOnly :

@@ -37,7 +37,7 @@ export type AmuxV22QuestionDm =
   | { state: "not_sent"; reason: AmuxV22QuestionDmNotSentReason }
   /** The relay filed the local card; the Decision Maker has no request for it yet. */
   | { state: "filed" }
-  /** The routing kept the question with the operator (§3), with why. */
+  /** The routing kept the question with the operator (docs/policy/amux-decision-maker.md §3), with why. */
   | { state: "with_operator"; requestId: string; reasons: string[] }
   | { state: "working"; requestId: string }
   | {
@@ -49,7 +49,7 @@ export type AmuxV22QuestionDm =
       rationale: string;
       irreversible: boolean;
       /**
-       * What the Decision Maker read, shown before a confirmation (§6: the
+       * What the Decision Maker read, shown before a confirmation (docs/policy/amux-decision-maker.md §6: the
        * snapshot state, the target SHA and the snapshot's paths; "card only"
        * for `none`). The state and SHA are the ones `shown` names.
        */
@@ -94,7 +94,7 @@ export type AmuxV22QuestionDmDetail = {
   card: { contextPaths: readonly string[]; options: ReadonlyArray<{ paths: readonly string[] }> } | null;
 };
 
-/** The paths the snapshot asked for (§5: the context paths and the paths the options declare), once each, in
+/** The paths the snapshot asked for (docs/policy/amux-decision-maker.md §5: the context paths and the paths the options declare), once each, in
  * card order. Not the sent manifest: a file the broker could not fetch is left out of what was sent, which the
  * card's label says. */
 export const amuxV22QuestionDmSnapshotPaths = (card: NonNullable<AmuxV22QuestionDmDetail["card"]>) =>
