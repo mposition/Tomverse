@@ -1018,6 +1018,7 @@ export const pt = {
         imageUnsupported: "Este modelo não consegue ler a imagem anexada",
     },
     providerStatus: {
+        lookupUnavailable: "Não foi possível atualizar o estado dos modelos. O último resultado confirmado é mantido.",
         allAvailable: "Os provedores selecionados estão disponíveis",
         allAvailableBody: "Os provedores de modelos estão respondendo normalmente.",
         selectedUnavailableOne: "{model} está temporariamente indisponível",
@@ -1957,12 +1958,13 @@ export const pt = {
         privacyNote: "Ao concluir uma importação, a Tomverse organiza automaticamente memórias a partir dela por meio de um provedor de IA, sem desconto de créditos. Conteúdo sensível, como informações de saúde, não é salvo como memória. As memórias em uso e as preferências de estilo de resposta são passadas como material de referência ao modelo da Tomverse que responde, e você pode consultá-las, editá-las, desativá-las ou excluí-las a qualquer momento.",
         disabledNotice: "Editar e adicionar memórias não está disponível no momento. Você ainda pode consultar e excluir as memórias já salvas.",
         settingsTitle: "Configurações de uso da memória",
-        masterToggleLabel: "Usar memórias em novos chats",
+        masterToggleLabel: "Usar a memória em todos os chats",
         masterToggleDescription: "Desativada, nenhum chat usa memórias e as conversas importadas não criam novas. As memórias salvas não são excluídas.",
         styleToggleLabel: "Usar memórias de estilo de resposta",
         styleToggleDescription:
             "Permite que as respostas considerem as preferências de tom, extensão e estrutura deduzidas de conversas anteriores.",
-        defaultModeLabel: "Padrão para novos chats",
+        defaultModeLabel: "Memória padrão dos chats",
+        defaultModeDescription: "Aplica-se a chats novos e existentes que seguem o padrão da conta. As opções de cada chat têm prioridade, exceto quando a memória está desativada para todos os chats acima.",
         defaultModeOn: "Usar memória",
         defaultModeOff: "Não usar memória",
         edit: "Editar",
