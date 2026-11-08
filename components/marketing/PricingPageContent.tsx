@@ -1400,7 +1400,7 @@ export function PricingPageContent() {
           </p>
         ) : null}
 
-        <div id={PRICING_PLANS_ANCHOR} className="mt-14 grid scroll-mt-24 gap-5 lg:grid-cols-3">
+        <div id={PRICING_PLANS_ANCHOR} className={`mt-14 grid scroll-mt-24 gap-5 lg:grid-cols-3 ${lang === "en" ? "lg:gap-y-0" : ""}`}>
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
             const cardPlan: AccountPlanTier =
@@ -1451,7 +1451,9 @@ export function PricingPageContent() {
               data-cta-state={ctaState}
               data-requested-target={isRequestedTarget ? "true" : undefined}
               aria-labelledby={`pricing-plan-name-${planId}`}
-              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm [overflow-wrap:anywhere] ${
+              // English desktop subgrid has eight in-flow rows (eyebrow through
+              // features); keep the span and alignment regression with that structure.
+              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm [overflow-wrap:anywhere] ${lang === "en" ? "lg:row-span-8 lg:grid lg:grid-rows-subgrid" : ""} ${
                 plan.highlighted ? "border-blue-600 bg-blue-700 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
               } ${
@@ -1646,8 +1648,8 @@ export function PricingPageContent() {
                     {annualCopy.checkout}
                   </p>
                 </div>
-              ) : null}
-              <p className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
+              ) : lang === "en" ? <div aria-hidden="true" data-testid="pricing-annual-placeholder" className="hidden lg:block" /> : null}
+              <p data-testid="pricing-plan-usage" className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
               {/*
