@@ -269,7 +269,7 @@ export function EmailNotificationSettings() {
                         </label>
                         <p
                             id="email-country-description"
-                            className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400"
+                            className={`mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400 ${lang === "ko" ? "break-keep [overflow-wrap:anywhere]" : ""}`}
                         >
                             {t("emailNotifications.countryDescription")}
                         </p>
