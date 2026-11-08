@@ -4,10 +4,11 @@ import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
+import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication,
   isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
+import { readAmuxV22QuestionDm } from "@/lib/amux/v22OwnerQuestionDmRead";
 import { readAmuxV22OwnerQuestionForResult } from
   "@/lib/amux/v22OwnerQuestionService";
 import { readAmuxV22TaskResultForOwner } from
@@ -37,7 +38,13 @@ export async function GET(request: Request): Promise<Response> {
     const question = result.state === "available" ?
       await readAmuxV22OwnerQuestionForResult(result.attemptId, result.text) :
       null;
-    return json({ result, question });
+    // An open question says where it stands with the Decision Maker, which
+    // proposes first (owner decision 2026-10-30). Its bodies are for a person
+    // who may judge it (ops:write), as the request drawer's are.
+    const decisionMaker = question?.state !== "open" ? null :
+      hasAdminPermission(session, "ops:write") ?
+        await readAmuxV22QuestionDm(question.id) : { state: "restricted" as const };
+    return json({ result, question, decisionMaker });
   } catch (error) {
     if (isAdminReauthenticationError(error))
       return json({ error: "ADMIN_REAUTHENTICATION_REQUIRED" }, 428);
