@@ -1085,11 +1085,11 @@ export async function settleAmuxV22RecoveryPreApproval(target: { id: string; tas
       const pre = await lockConsent(tx);
       if (!pre) return "missing" as const;
       if (pre.result) return pre.result.outcome === "applied" ? "applied" as const : "refused" as const;
+      // Expiry comes first, with or without evidence, so a consent held back
+      // by a long incident still ends with a recorded result.
+      if (now > pre.expiresAt) throw new BoardImportError("preapproval_expired", 409);
       const evidence = pre.inspection.evidence;
-      if (!evidence) {
-        if (now > pre.expiresAt) throw new BoardImportError("preapproval_expired", 409);
-        return "waiting" as const;
-      }
+      if (!evidence) return "waiting" as const;
       if (pre.inspection.approval) throw new BoardImportError("already_approved", 409);
       if (!evidence.verified)
         throw new BoardImportError(evidence.reason ?? "recovery_evidence_unverified", 409);
@@ -1709,10 +1709,11 @@ async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: D
       throw new BoardImportError("recovery_evidence_unverified", 409);
     // Freshness is its own refusal, so the card can say the evidence expired
     // rather than that it was never verified (owner decision 2026-11-08).
+    if (preApproval && !await auditBound(tx, preApproval.authorizationAuditLogId,
+        "amux.v22.recovery.preapproved", "AmuxV22TaskRecoveryPreApproval", preApproval.id, ownerId))
+      throw new BoardImportError("preapproval_unbound", 409);
     if (preApproval ? evidence.recordedAt < preApproval.requestedAt ||
-        now > preApproval.expiresAt || !await auditBound(tx,
-          preApproval.authorizationAuditLogId, "amux.v22.recovery.preapproved",
-          "AmuxV22TaskRecoveryPreApproval", preApproval.id, ownerId) :
+        now > preApproval.expiresAt :
         !evidenceWithin(evidence.recordedAt, now, manualEvidenceWindowMs(
           inspection.requestKind, !!inspection.riskAcceptanceId)))
       throw new BoardImportError(preApproval ? "preapproval_expired" :

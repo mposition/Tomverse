@@ -1551,3 +1551,16 @@ test("one click: an incident leaves the consent waiting, and a fresh read nonce 
   assert.equal(world.preApprovalResults[0]!.outcome, "applied");
   assert.equal(world.task.status, "todo");
 });
+
+// Review 2026-11-08: a consent held back by an incident past its expiry still
+// ends with a recorded preapproval_expired result.
+test("one click: a consent held back past its expiry is recorded as expired", async () => {
+  reset(); const service = await load(); await preApprove();
+  world.incident = true; await submitEvidence();
+  assert.equal(world.preApprovalResults.length, 0);
+  world.preApprovals[0]!.expiresAt = new Date(now.getTime() - 1);
+  await service.pendingAmuxV22RecoveryInspections("claude-test");
+  assert.equal(world.preApprovalResults.length, 1);
+  assert.equal(world.preApprovalResults[0]!.reason, "preapproval_expired");
+  assert.equal(world.approvals.length, 0); assert.equal(world.task.status, "blocked");
+});
