@@ -315,7 +315,7 @@ export function PrivacyPolicy() {
                             id={bodyKey === "rights" ? "account-deletion" : undefined}
                             className="grid scroll-mt-24 gap-4 py-7 md:grid-cols-[180px_1fr]"
                         >
-                            <h2 className="flex items-center gap-2 text-sm font-semibold">
+                            <h2 className="flex self-start items-center gap-2 text-sm font-semibold">
                                 <Icon className="h-4 w-4 text-blue-500" />
                                 {t(`privacyPolicy.${titleKey}`)}
                             </h2>
