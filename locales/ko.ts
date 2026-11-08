@@ -1846,7 +1846,7 @@ export const ko = {
         importPackage: "외부 설정 가져오기",
         createAction: "어시스턴트 만들기",
         empty: "아직 어시스턴트가 없습니다. 하나 만들어 나만의 지시문을 지정해 보세요.",
-        publishedStatus: "게시됨 — 개정 {revision}, 지식 파일 {files}개",
+        publishedStatus: "계정 전용으로 사용 가능 · 버전 {revision}, 지식 파일 {files}개",
         draftStatus: "초안 — 대화를 시작하려면 먼저 게시하세요",
         newTitle: "새 AI 어시스턴트",
         editTitle: "AI 어시스턴트 편집",
