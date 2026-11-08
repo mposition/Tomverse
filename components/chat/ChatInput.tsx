@@ -155,6 +155,7 @@ import { type ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { readPublicModelStatus } from "@/lib/publicModelStatusClient";
 import { useBodyScrollLock } from "@/components/useBodyScrollLock";
 import { PromptRefinerSuggestionPanel } from "@/components/chat/PromptRefinerSuggestionPanel";
 import {
@@ -1960,15 +1961,11 @@ export function ChatInput({
   };
 
   useEffect(() => {
-    const controller = new AbortController();
-    void fetch("/api/models/status", {
-      signal: controller.signal,
-      cache: "no-store",
-    })
-      .then((response) =>
-        response.ok ? response.json() : discardResponseBody(response).then(() => null)
-      )
+    let cancelled = false;
+    void readPublicModelStatus()
+      .then(result => result.snapshot)
       .then((data: unknown) => {
+        if (cancelled) return;
         if (!data || typeof data !== "object") return;
         const records = (data as { models?: unknown }).models;
         if (!Array.isArray(records)) return;
@@ -2002,7 +1999,7 @@ export function ChatInput({
         setLiveModelStatuses(next);
       })
       .catch(() => {});
-    return () => controller.abort();
+    return () => { cancelled = true; };
   }, [PUBLIC_MODEL_IDS]);
 
   useEffect(() => {
