@@ -144,6 +144,8 @@
 .qtrack { flex: 1; height: 6px; border-radius: 3px; background: var(--grs); overflow: hidden; display: block; }
 .qfill { display: block; height: 100%; border-radius: 3px; }
 .qrow b { font-weight: 600; width: 34px; text-align: right; color: var(--tx); }
+.qnote { flex: 1; min-width: 0; color: var(--fa); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qhint { font-size: 11px; color: var(--fa); line-height: 1.35; }
 
 /* controls */
 .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

@@ -46,13 +46,65 @@ export type AgentOfficeInboxItem = {
 
 const SEVERITY_ORDER: Readonly<Record<InboxSeverity, number>> = { bad: 0, warn: 1, info: 2, unread: 3 };
 
-export function quotaExhaustedNow(
-  quota: { exhausted: boolean; resetAt: string | null } | null | undefined,
-  now: number
-): boolean {
-  if (!quota?.exhausted) return false;
+/**
+ * How old a quota observation may be and still be drawn as the worker's quota
+ * now. The AMUX box probes every five minutes, so a reading older than this
+ * means the probe stopped or never covered the channel.
+ */
+export const AGENT_OFFICE_QUOTA_FRESH_MS = 20 * 60_000;
+
+type QuotaObservation = { remainingPercent: number; exhausted: boolean; resetAt: string | null; observedAt: string };
+
+/**
+ * What the office may say about one worker's quota: a fresh reading is its
+ * quota now; an old one is only a value from back then, drawn greyed with its
+ * time and never used to rest a worker; none means the AMUX server has never
+ * sent this worker's quota.
+ */
+export type AgentOfficeQuotaReading =
+  | { kind: "fresh"; percent: number; exhausted: boolean; resetAt: string | null; observedAt: string }
+  | { kind: "old"; percent: number; observedAt: string }
+  | { kind: "missing" };
+
+export function agentOfficeQuotaReading(quota: QuotaObservation | null | undefined, now: number): AgentOfficeQuotaReading {
+  if (!quota) return { kind: "missing" };
+  const observed = Date.parse(quota.observedAt);
+  if (!Number.isFinite(observed) || now - observed > AGENT_OFFICE_QUOTA_FRESH_MS) {
+    return { kind: "old", percent: quota.remainingPercent, observedAt: quota.observedAt };
+  }
   const reset = quota.resetAt ? Date.parse(quota.resetAt) : NaN;
-  return !Number.isFinite(reset) || reset > now;
+  const exhausted = quota.exhausted && (!Number.isFinite(reset) || reset > now);
+  return { kind: "fresh", percent: exhausted ? 0 : quota.remainingPercent, exhausted, resetAt: quota.resetAt, observedAt: quota.observedAt };
+}
+
+/** Used up now, by a fresh reading only: an old reading never sends a worker to the sleep pod. */
+export function quotaExhaustedNow(quota: QuotaObservation | null | undefined, now: number): boolean {
+  const reading = agentOfficeQuotaReading(quota, now);
+  return reading.kind === "fresh" && reading.exhausted;
+}
+
+/**
+ * One channel's line in the summary: the mean of its fresh readings; with
+ * none fresh, the mean of its old ones and the newest of their times; with no
+ * reading at all, "not collected". A channel with no worker shows nothing.
+ */
+export type AgentOfficeChannelQuota =
+  | { kind: "none" }
+  | { kind: "fresh"; percent: number }
+  | { kind: "old"; percent: number; observedAt: string }
+  | { kind: "missing" };
+
+export function agentOfficeChannelQuota(readings: readonly AgentOfficeQuotaReading[]): AgentOfficeChannelQuota {
+  if (readings.length === 0) return { kind: "none" };
+  const mean = (xs: readonly number[]) => Math.round(xs.reduce((a, b) => a + b, 0) / xs.length);
+  const fresh = readings.flatMap((r) => (r.kind === "fresh" ? [r.percent] : []));
+  if (fresh.length > 0) return { kind: "fresh", percent: mean(fresh) };
+  const old = readings.flatMap((r) => (r.kind === "old" ? [r] : []));
+  if (old.length > 0) {
+    const newest = old.reduce((a, b) => (Date.parse(b.observedAt) > Date.parse(a.observedAt) ? b : a));
+    return { kind: "old", percent: mean(old.map((r) => r.percent)), observedAt: newest.observedAt };
+  }
+  return { kind: "missing" };
 }
 
 export function agentOfficeInbox(input: {
