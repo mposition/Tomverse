@@ -162,6 +162,9 @@ const COMPONENTS_WITHOUT_COPY = new Set([
   // import the locale helpers (docs/policy/trust-safety-compliance-agent.md
   // §5.6 closes their imports), so the page does the choosing.
   "AdminTrustSafetyDigestPanel.tsx",
+  // Renders only the strings its caller passes in `labels`; the screen that
+  // mounts it reads its own catalogue and does the choosing.
+  "AdminCopyWorkBriefButton.tsx",
 ]);
 
 test("every admin component reads its copy from a message catalog", () => {

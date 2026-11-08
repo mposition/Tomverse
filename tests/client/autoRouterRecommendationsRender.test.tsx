@@ -6,10 +6,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   OpenRecommendationsInbox,
   RecommendationControls,
+  recommendationBrief,
   recommendationKey,
   type RecommendationSendState,
 } from "@/components/admin/AdminAutoRouterRecommendations";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
+import { recommendationIdeaText } from "@/lib/autoRouterRecommendationSendCore";
 import { actionableRecommendations } from "@/lib/autoRouterRecommendationsCore";
 
 // Admin › Routing › the optimizer's open recommendations, rendered. The inbox
@@ -130,7 +132,7 @@ test("an item the coding agent opened a PR for can be marked done directly, with
   assert.ok(text(html).includes(m.recommendationStatuses.pr_opened));
 });
 
-test("Send to AMUX replaces the copy button; only an owner can press it, and a sent one shows its idea", () => {
+test("Send to AMUX sits beside Copy brief; only an owner can press send, and a sent one shows its idea", () => {
   const open = actionableRecommendations(cycles[0].summary).find((entry) => entry.index === 1)!;
   const render = (item: typeof open, canSend: boolean) =>
     renderToStaticMarkup(
@@ -141,7 +143,8 @@ test("Send to AMUX replaces the copy button; only an owner can press it, and a s
   const owner = render(open, true);
   assert.ok(text(owner).includes(m.sendToAmux));
   assert.ok(!sendButton(owner).includes('disabled=""'));
-  assert.ok(!owner.includes("admin-auto-router-recommendation-copy"));
+  // Copy brief writes nothing on the server, so every role may press it.
+  assert.ok(owner.indexOf("admin-auto-router-recommendation-send") < owner.indexOf("admin-auto-router-recommendation-copy-brief"));
 
   const ops = render(open, false);
   assert.ok(sendButton(ops).includes('disabled=""'));
@@ -156,6 +159,8 @@ test("Send to AMUX replaces the copy button; only an owner can press it, and a s
   assert.equal(sendButton(html), "");
   assert.ok(text(html).includes(m.recommendationStatuses.sent_to_amux));
   assert.ok(text(html).includes("idea-77"));
+  // Sent but stuck in AMUX, it can still be copied for a local CLI.
+  assert.ok(html.includes('data-testid="admin-auto-router-recommendation-copy-brief"'));
   // AMUX has it: it can still be closed, and is not reopened into the agent's queue from here.
   assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-done"'), 1);
   assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-reopen"'), 0);
@@ -216,4 +221,28 @@ test("a send that did not finish can be sent again or reopened", () => {
   assert.ok(text(html).includes(m.recommendationStatuses.sending_to_amux));
   assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-send"'), 1);
   assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-reopen"'), 1);
+});
+
+test("each recommendation offers Copy brief beside the AMUX button, and the brief is the text the send route builds", () => {
+  const html = renderToStaticMarkup(createElement(OpenRecommendationsInbox, { cycles, busy: false, canSend: false, onSetStatus: noop, onSend: noop }));
+  assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-copy-brief"'), 3);
+  const body = text(html);
+  assert.ok(body.includes(m.copyBrief));
+
+  const [item] = actionableRecommendations(cycles[0].summary).filter((rec) => rec.kind === "code");
+  const brief = recommendationBrief(cycles[0], item, "https://tomverse.app");
+  assert.equal(
+    brief,
+    recommendationIdeaText({
+      recommendation: { kind: "code", text: "CODE-REC-A" },
+      findings: ["answer calls failed for two models"],
+      cycle: { id: "cyc_new", createdAt: "2026-10-20T00:00:00.000Z" },
+      origin: "https://tomverse.app",
+    }),
+  );
+  const ko = adminAutoRouterOptimizerMessages.ko.instruction;
+  assert.ok(brief.startsWith(`# ${ko.heading}\n\nCODE-REC-A`));
+  assert.ok(brief.includes("- answer calls failed for two models"));
+  assert.ok(brief.includes("https://tomverse.app/admin/routing#optimizer-cycle-cyc_new"));
+  assert.ok(brief.endsWith(ko.closing));
 });
