@@ -558,6 +558,7 @@ test.describe("memory settings", () => {
   test("delete-all stays disabled until the exact phrase is typed", async ({
     page,
   }, testInfo) => {
+    // The reported Korean confirmation label must also fit the 320px phone layout.
     if (testInfo.project.name.startsWith("mobile")) await page.setViewportSize({ width: 320, height: 900 });
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
