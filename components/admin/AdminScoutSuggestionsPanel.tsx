@@ -18,11 +18,13 @@ import {
 } from "@/lib/adminScoutDisplay";
 import { adminNetworkFailure, readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
+import { AdminCopyWorkBriefButton } from "@/components/admin/AdminCopyWorkBriefButton";
 import { ScoutAgentAside } from "@/components/admin/ScoutAgentAside";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
 import type { ScoutDaySummary } from "@/lib/productResearchScoutCore";
 import type { ScoutConsoleSuggestion, ScoutConsoleView } from "@/lib/productResearchScoutConsoleRead";
+import { suggestionWorkBrief } from "@/lib/productResearchScoutIdeaText";
 import { scoutSubjectInfo } from "@/lib/productResearchScoutSubjects";
 
 /**
@@ -54,6 +56,20 @@ const BUTTON =
   "inline-flex min-h-11 flex-1 items-center justify-center rounded-lg border px-3.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 sm:flex-none";
 const DISMISS_BUTTON = `${BUTTON} border-zinc-700 text-zinc-300 hover:bg-zinc-800 sm:border-transparent`;
 const SEND_BUTTON = `${BUTTON} border-blue-800 text-blue-300 hover:bg-blue-950`;
+const COPY_BUTTON = `${BUTTON} border-zinc-700 text-zinc-200 hover:bg-zinc-800`;
+
+/**
+ * The text "Send to AMUX" would send (the same suggestionIdeaText), plus the page
+ * and when it is done, for pasting into a local CLI. In Korean, as the AMUX idea is.
+ */
+export function scoutSuggestionBrief(suggestion: ScoutConsoleSuggestion, origin: string): string {
+  const info = scoutSubjectInfo(suggestion.subject);
+  const labels = adminProductResearchScoutMessages.ko;
+  return suggestionWorkBrief(
+    { ...suggestion, url: info.kind === "page" ? `${origin}${info.href}` : null },
+    { url: labels.briefUrl, done: labels.briefDone },
+  );
+}
 const SEGMENT =
   "min-h-9 px-3 text-xs font-medium text-zinc-400 hover:text-zinc-100 aria-pressed:bg-zinc-800 aria-pressed:font-semibold aria-pressed:text-zinc-50";
 
@@ -226,28 +242,36 @@ export function AdminScoutSuggestionsPanel({
               <AdminApiFailureNotice failure={row.failure} returnTo={RETURN_TO} testId="admin-product-research-scout-failure" />
             ) : null}
           </div>
-          {done ? null : (
-            <div className="flex gap-2 sm:shrink-0">
-              <button
-                type="button"
-                className={DISMISS_BUTTON}
-                disabled={busy || !initial.canDismiss}
-                title={initial.canDismiss ? undefined : m.dismissNotAllowed}
-                onClick={() => act(suggestion, "dismiss")}
-              >
-                {row.kind === "busy" && row.action === "dismiss" ? m.dismissing : m.dismiss}
-              </button>
-              <button
-                type="button"
-                className={SEND_BUTTON}
-                disabled={busy || !initial.canSend}
-                title={initial.canSend ? undefined : m.sendNotAllowed}
-                onClick={() => act(suggestion, "send")}
-              >
-                {row.kind === "busy" && row.action === "send" ? m.sending : m.send}
-              </button>
-            </div>
-          )}
+          <div className="flex flex-wrap gap-2 sm:shrink-0">
+            {done ? null : (
+              <>
+                <button
+                  type="button"
+                  className={DISMISS_BUTTON}
+                  disabled={busy || !initial.canDismiss}
+                  title={initial.canDismiss ? undefined : m.dismissNotAllowed}
+                  onClick={() => act(suggestion, "dismiss")}
+                >
+                  {row.kind === "busy" && row.action === "dismiss" ? m.dismissing : m.dismiss}
+                </button>
+                <button
+                  type="button"
+                  className={SEND_BUTTON}
+                  disabled={busy || !initial.canSend}
+                  title={initial.canSend ? undefined : m.sendNotAllowed}
+                  onClick={() => act(suggestion, "send")}
+                >
+                  {row.kind === "busy" && row.action === "send" ? m.sending : m.send}
+                </button>
+              </>
+            )}
+            <AdminCopyWorkBriefButton
+              brief={() => scoutSuggestionBrief(suggestion, window.location.origin)}
+              labels={{ copy: m.copyBrief, copied: m.briefCopied, failed: m.briefCopyFailed }}
+              className={COPY_BUTTON}
+              testId="admin-product-research-scout-copy-brief"
+            />
+          </div>
         </div>
       </li>
     );

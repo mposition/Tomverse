@@ -58,6 +58,11 @@ export const adminProductResearchScoutMessages = defineAdminMessages({
     dismissed: "Dismissed.",
     dismissNotAllowed: "Only an owner or ops administrator can dismiss.",
     sendNotAllowed: "Only an owner can send an idea to AMUX.",
+    copyBrief: "Copy brief",
+    briefCopied: "Copied",
+    briefCopyFailed: "Could not copy to the clipboard. Select the text and copy it by hand.",
+    briefUrl: "Page",
+    briefDone: "Done when: the change above is made, its tests pass, and it is opened as a develop PR.",
     failed: "The action did not complete.",
 
     selected: "{count} selected",
@@ -221,6 +226,11 @@ export const adminProductResearchScoutMessages = defineAdminMessages({
     dismissed: "거절했습니다.",
     dismissNotAllowed: "owner 또는 ops 관리자만 거절할 수 있습니다.",
     sendNotAllowed: "owner만 AMUX로 보낼 수 있습니다.",
+    copyBrief: "작업문 복사",
+    briefCopied: "복사됨",
+    briefCopyFailed: "클립보드에 복사하지 못했습니다. 내용을 직접 선택해 복사하세요.",
+    briefUrl: "관련 URL",
+    briefDone: "완료 기준: 위 제안대로 고치고 관련 테스트가 통과하면 develop PR로 올립니다.",
     failed: "작업을 마치지 못했습니다.",
 
     selected: "{count}건 선택됨",
