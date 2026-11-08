@@ -622,9 +622,15 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 9) are top-level declarations of `lib/marketingGuardCore.ts`, which the
  * receiver's closure loads. No webhook module, event decision or admission
  * condition changes; the bytes moved, so prior signed evidence is stale.
+ *
+ * 2026-11-08: the Guard's hygiene check lets our own bare host `tomverse.app`
+ * through (owner decision of that date,
+ * docs/policy/marketing-automation.md §7.1), in
+ * `lib/marketingGuardNormalise.ts`, which the receiver's closure loads. No webhook module, event decision or admission condition changes; the
+ * bytes moved, so prior signed evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "faf980ddfa735eb1b8a93bc713e847f477f666b9c2be98aee18637d8def0a802";
+  "f2d59af40bc5cf9aae5f3d479915a2b89d54cc64de67d6902087bbd45cc879aa";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
