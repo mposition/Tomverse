@@ -384,6 +384,69 @@ test("fixed unit and complete cgroup proof reject children, foreign units and wr
   assert.equal((await inspectAmuxV22RecoveryUnit(config, { ...options,
     stat: async path => ({ ...await options.stat(path), isFile: () => false }) })).rootOwnedUnit, false);
 });
+test("PrivatePIDs unit: namespace init stands in for MainPID, every other binding still holds", async () => {
+  // Box 2026-11-08: NSpid "3131822 1", MainPID=3131822, process.pid 1, and the
+  // cgroup read from inside the namespace lists only "1".
+  const unit = "tomverse-amux-v22-sidecar@claude-chore.service";
+  const group = `/system.slice/system-tomverse\\x2damux\\x2dv22\\x2dsidecar.slice/${unit}`;
+  const properties = { InvocationID: invocationId, ControlGroup: group,
+    MainPID: "3131822", KillMode: "control-group", Delegate: "no",
+    FragmentPath: "/etc/systemd/system/tomverse-amux-v22-sidecar@.service",
+    DropInPaths: `/etc/systemd/system/${unit}.d/60-journal-proof.conf`, ActiveState: "active",
+    SubState: "running", PrivatePIDs: "yes" };
+  const config = { worker: execute.worker, invocationId };
+  let procs = "1\n";
+  const options = { platform: "linux", pid: 1,
+    run: async (binary, args) => { assert.equal(binary, "/usr/bin/systemctl");
+      assert.equal(args[1], unit); assert.match(args[2], /,PrivatePIDs$/);
+      return { stdout: Object.entries(properties).filter(([, value]) => value !== undefined)
+        .map(([key, value]) => `${key}=${value}`).join("\n") }; },
+    stat: async () => ({ uid: 0, mode: 0o755, isSymbolicLink: () => false,
+      isDirectory: () => true, isFile: () => true }),
+    read: async path => path === "/proc/self/cgroup" ? `0::${group}\n` : procs,
+    list: async () => [] };
+  assert.deepEqual(await inspectAmuxV22RecoveryUnit(config, options), unitProof);
+
+  // Another process inside the namespace is still a live child.
+  procs = "1\n7\n";
+  assert.deepEqual(await inspectAmuxV22RecoveryUnit(config, options),
+    { rootOwnedUnit: true, controlGroupBound: true, processTreeStopped: false });
+  // A member outside the namespace reads as 0: nothing is proven.
+  procs = "1\n0\n";
+  assert.deepEqual(await inspectAmuxV22RecoveryUnit(config, options),
+    { rootOwnedUnit: false, controlGroupBound: false, processTreeStopped: false });
+  procs = "1\n";
+
+  // Not the namespace init, even when the PID happens to equal MainPID.
+  for (const pid of [123, 3131822])
+    assert.equal((await inspectAmuxV22RecoveryUnit(config, { ...options, pid })).rootOwnedUnit, false);
+  // PID 1 without PrivatePIDs (off, or a systemd that omits the property).
+  for (const value of ["no", undefined]) {
+    properties.PrivatePIDs = value;
+    assert.deepEqual(await inspectAmuxV22RecoveryUnit(config, options),
+      { rootOwnedUnit: false, controlGroupBound: false, processTreeStopped: false });
+  }
+  // An unknown value, a dead or host-init MainPID, and the unchanged bindings.
+  for (const [key, value] of [["PrivatePIDs", "true"], ["PrivatePIDs", ""], ["MainPID", "0"],
+    ["MainPID", "1"], ["InvocationID", "f".repeat(32)], ["KillMode", "mixed"], ["Delegate", "yes"],
+    ["ControlGroup", `/system.slice/other.service`]]) {
+    properties.PrivatePIDs = "yes";
+    const before = properties[key]; properties[key] = value;
+    assert.equal((await inspectAmuxV22RecoveryUnit(config, options)).processTreeStopped, false, `${key}=${value}`);
+    properties[key] = before;
+  }
+  properties.PrivatePIDs = "yes";
+  // The process must still sit in the unit's own cgroup.
+  assert.equal((await inspectAmuxV22RecoveryUnit(config, { ...options,
+    read: async path => path === "/proc/self/cgroup" ? "0::/system.slice/other.service\n" : procs }))
+    .controlGroupBound, false);
+  // A duplicated or unrequested property line is refused.
+  const run = options.run;
+  for (const extra of ["\nMainPID=1", "\nUser=root"])
+    assert.equal((await inspectAmuxV22RecoveryUnit(config, { ...options,
+      run: async (...args) => ({ stdout: (await run(...args)).stdout + extra }) })).rootOwnedUnit, false);
+  assert.deepEqual(await inspectAmuxV22RecoveryUnit(config, options), unitProof);
+});
 test("journal proof requires owner, file type, bounds, current ctime and a stable opened inode", async () => {
   const info = { uid: 12, nlink: 1, mode: 0o600, size: 3, ctimeMs: 200,
     dev: 1, ino: 2, isFile: () => true, isSymbolicLink: () => false };

@@ -7,6 +7,7 @@ import { runScheduledOptimizerCycle } from "@/lib/autoRewriteOptimizer";
 import { optimizerOwnProcessOn } from "@/lib/autoRouterOptimizerCore";
 import { renewCodingSnapshotIfUnchanged } from "@/lib/modelCatalog";
 import { SNAPSHOT_RENEWAL_WINDOW_MS } from "@/lib/modelCatalogCore";
+import { runWeeklyModelCatalogEnvSync } from "@/lib/modelCatalogEnvSync";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -150,6 +151,10 @@ export async function POST(request: Request) {
         }).catch(() => undefined);
       }
     }
+    // Sundays only, and only in staging and dev: production's model catalogue
+    // copied down (lib/modelCatalogEnvSync.ts). After the response, so a slow
+    // production read never holds up the cleanup; it reports its own failure.
+    after(() => runWeeklyModelCatalogEnvSync());
     const deleted = await cleanupExpiredData();
     const processedCount = Object.values(deleted).reduce<number>(
       (sum, value) => sum + (typeof value === "number" ? value : 0),
