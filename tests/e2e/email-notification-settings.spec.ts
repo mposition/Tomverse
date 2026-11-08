@@ -67,6 +67,39 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
+test("pending analytics consent leaves notification guidance and controls uncovered", async ({ page, baseURL, isMobile }) => {
+  await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
+  await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
+  await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+  await prepareGuestPage(page, "ko");
+  await mockAuthenticatedApi(page);
+  await page.route("**/api/user/email-preferences", route => route.fulfill({ json: {
+    preferences: preferences(false),
+    country: { selfDeclared: "DE", resolved: "DE", confidence: "high", conflicts: [], needsConfirmation: false, marketingSupported: true },
+  } }));
+  await page.goto("/settings/notifications?lang=ko");
+  const slot = page.getByTestId("settings-consent-slot");
+  const notice = slot.getByTestId("chat-consent-notice");
+  await expect(notice).toBeVisible({ timeout: 15_000 });
+  for (const locator of [page.getByTestId("email-product-updates-opt-in"), page.getByTestId("email-preference-promotions")]) {
+    await locator.scrollIntoViewIfNeeded();
+    await expect(locator).toBeVisible();
+    expect(await locator.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const y = Math.max(0, rect.top) + Math.min(rect.height, innerHeight - Math.max(0, rect.top)) / 2;
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, y);
+      const notice = document.querySelector('[data-testid="chat-consent-notice"]')!.getBoundingClientRect();
+      return element.contains(hit) && rect.bottom <= notice.top;
+    })).toBe(true);
+  }
+  await notice.scrollIntoViewIfNeeded();
+  await notice.getByTestId("analytics-consent-decline").click();
+  await expect(notice).toHaveCount(0);
+  await slot.getByTestId("analytics-settings-button").click();
+  await expect(notice).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
 test("marketing opt-in confirms a country and asks for an email confirmation @ui-risk", async ({
   page,
 }) => {
