@@ -1,9 +1,43 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
-import { AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR,
+import { auditRowActorKind, SYSTEM_AUDIT_ACTOR_METADATA_KEY,
+  AMUX_V22_RECOVERY_CHECKER_AUDIT_ACTOR,
   AMUX_V22_RECOVERY_CONTROLLER_AUDIT_ACTOR,
-  AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
+  AMUX_V22_API_MODEL_ACCESS_AUDIT_ACTOR,
+  AMUX_V22_RECOVERY_PREAPPROVAL_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
+
+/** A system audit row written by the pre-approval actor, not merely by a system. */
+export async function preApprovalSystemAuditBound(tx: Prisma.TransactionClient, auditId: string,
+  action: string, targetType: string, targetId: string) {
+  const row = await tx.adminAuditLog.findUnique({ where: { id: auditId } });
+  const metadata = row?.metadata;
+  return !!row?.entryHash && row.action === action && row.targetType === targetType &&
+    row.targetId === targetId && auditRowActorKind(row) === "system" &&
+    !!metadata && typeof metadata === "object" && !Array.isArray(metadata) &&
+    (metadata as Record<string, unknown>)[SYSTEM_AUDIT_ACTOR_METADATA_KEY] ===
+      AMUX_V22_RECOVERY_PREAPPROVAL_AUDIT_ACTOR;
+}
+
+/** The approval an owner's one-click pre-approval opened, never a new consent. */
+export function recordAmuxV22PreApprovalAppliedAudit(tx: Prisma.TransactionClient,
+  approvalId: string, metadata: Prisma.InputJsonObject) {
+  return writeSystemAuditLog({ tx, systemActor: AMUX_V22_RECOVERY_PREAPPROVAL_AUDIT_ACTOR,
+    action: "amux.v22.recovery.preapproval_applied",
+    targetType: "AmuxV22TaskRecoveryApproval", targetId: approvalId,
+    summary: "Opened one additional capped Task attempt from the owner's own pre-approval after verified stop evidence.",
+    metadata });
+}
+
+/** The one outcome of a pre-approval: applied, or refused with its reason. */
+export function recordAmuxV22PreApprovalSettledAudit(tx: Prisma.TransactionClient,
+  resultId: string, metadata: Prisma.InputJsonObject) {
+  return writeSystemAuditLog({ tx, systemActor: AMUX_V22_RECOVERY_PREAPPROVAL_AUDIT_ACTOR,
+    action: "amux.v22.recovery.preapproval_settled",
+    targetType: "AmuxV22TaskRecoveryPreApprovalResult", targetId: resultId,
+    summary: "Recorded the single outcome of an owner's Task recovery pre-approval.",
+    metadata });
+}
 
 export function recordAmuxV22RecoveryEvidenceAudit(tx: Prisma.TransactionClient,
   evidenceId: string, metadata: Prisma.InputJsonObject) {
