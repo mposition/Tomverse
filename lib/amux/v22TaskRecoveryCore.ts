@@ -37,6 +37,15 @@ export const AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT = 2;
 export const AMUX_V22_READ_ONLY_LAUNCH_SCOPE_VERSION =
   AMUX_V22_READ_ONLY_RETRY_PROTOCOL_VERSION;
 export const AMUX_V22_TASK_RECOVERY_ENABLED_ENV = "TOMVERSE_AMUX_V22_TASK_RECOVERY_ENABLED";
+/** Owner decision 2026-11-08: a person reads inspect evidence before approving
+ * it, so the manual inspect approval accepts evidence up to 15 minutes old.
+ * The database approval guard holds the same window. */
+export const AMUX_V22_RECOVERY_MANUAL_EVIDENCE_WINDOW_MS = 15 * 60_000;
+/** The safe-stop and FIRST-exception evidence keep the worker lease window. */
+export const AMUX_V22_RECOVERY_SAFE_STOP_EVIDENCE_WINDOW_MS = 90_000;
+/** Owner decision 2026-11-08: a one-click pre-approval waits this long for its
+ * evidence. The database fixes expiresAt = requestedAt + 30 minutes. */
+export const AMUX_V22_RECOVERY_PREAPPROVAL_TTL_MS = 30 * 60_000;
 export const AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV =
   "TOMVERSE_AMUX_V22_LEGACY_SAFE_STOP_ENABLED";
 export const AMUX_V22_RECOVERY_CONTROLLER_SECRET_ENV =
@@ -128,6 +137,10 @@ export function currentAmuxV22ReadOnlyApiExecutionFrame(
 }
 export const amuxV22RecoveryAdminSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("request_inspection"), ...identity }).strict(),
+  // One click: request the inspection and consent in advance to one capped
+  // retry at the cost the server quoted. The server recomputes that cost.
+  z.object({ action: z.literal("preapprove_attempt"), ...identity, costDigest: digest,
+    acceptRetry: z.literal(true) }).strict(),
   z.object({ action: z.literal("accept_unknown_prior_effects"), ...identity,
     taskId: z.literal(AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID),
     priorAttemptId: z.literal(AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID),
@@ -397,7 +410,19 @@ export type AmuxV22RecoveryRead = { taskId: string; requestId: string;
       "already_approved" };
   guards: { priorEffects: "unknown"; oldCost: "held";
     readOnlyLaunch: "required"; taskAttemptLimit: 2 };
-  approvalId?: string; retryWrite: false };
+  approvalId?: string;
+  /** A one-click pre-approval bound to this inspection, with its outcome. */
+  preApproval?: AmuxV22RecoveryPreApprovalRead;
+  retryWrite: false };
+export type AmuxV22RecoveryPreApprovalRead = { id: string;
+  state: "waiting" | "applied" | "refused" | "expired";
+  requestedAt: string; expiresAt: string; costDigest: string;
+  reason: string | null; approvalId: string | null };
+/** What the owner confirms before a pre-approval: all of it computed here. */
+export type AmuxV22RecoveryPreApprovalQuote = { taskId: string;
+  taskRevision: number | null; priorAttemptId: string | null;
+  cost: AmuxV22RecoveryCost | null; expiresInMinutes: 30;
+  eligible: boolean; reason: string | null; retryWrite: false };
 export const amuxV22RecoveryDigest = (kind: string, value: unknown) =>
   createHash("sha256").update(`amux-v22-task-recovery-${kind}-v1\n`)
     .update(amuxCanonicalJson(value)).digest("hex");

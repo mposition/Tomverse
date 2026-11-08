@@ -19,13 +19,16 @@ import { AMUX_MAX_EXECUTION_ATTEMPTS, decideAmuxAttemptBudget } from "./executio
 import { AMUX_WORKER_RUNTIME_LEASE_MS } from "./workerRuntime.ts";
 import { recordAmuxV22RecoveryEvidenceAudit,
   recordAmuxV22SafeStopEvidenceAudit, recordAmuxV22ReadOnlyLaunchCheckAudit,
-  recordAmuxV22ReadOnlyLaunchProofAudit } from "./v22TaskRecoverySystemAudit.ts";
+  recordAmuxV22ReadOnlyLaunchProofAudit, recordAmuxV22PreApprovalAppliedAudit,
+  recordAmuxV22PreApprovalSettledAudit, preApprovalSystemAuditBound } from "./v22TaskRecoverySystemAudit.ts";
 import { AMUX_V22_RECOVERY_HOST_SCOPE, AMUX_V22_TASK_RECOVERY_POLICY_VERSION,
   AMUX_V22_TASK_RECOVERY_ENABLED_ENV, AMUX_V22_LEGACY_SAFE_STOP_ENABLED_ENV,
   AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID,
   AMUX_V22_UNKNOWN_PRIOR_HELD_MICROUSD, AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD,
   AMUX_V22_READ_ONLY_RETRY_EXPOSURE_MICROUSD,
   AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED_ENV,
+  AMUX_V22_RECOVERY_MANUAL_EVIDENCE_WINDOW_MS,
+  AMUX_V22_RECOVERY_SAFE_STOP_EVIDENCE_WINDOW_MS, AMUX_V22_RECOVERY_PREAPPROVAL_TTL_MS,
   amuxV22TaskRecoveryEnabled, amuxV22LegacySafeStopEnabled,
   amuxV22ReadOnlyApiExecutorEnabled, configuredAmuxV22ReadOnlyApiMetadata,
   configuredAmuxV22RecoveryProfile, amuxV22SafeStopJournalBinding,
@@ -40,7 +43,8 @@ import { AMUX_V22_RECOVERY_HOST_SCOPE, AMUX_V22_TASK_RECOVERY_POLICY_VERSION,
   type AmuxV22RecoveryAdminInput,
   type AmuxV22RecoveryEvidenceInput, type AmuxV22SafeStopEvidenceInput,
   type AmuxV22ReadOnlyLaunchProofInput,
-  type AmuxV22RecoveryRead } from "./v22TaskRecoveryCore.ts";
+  type AmuxV22RecoveryRead, type AmuxV22RecoveryPreApprovalRead,
+  type AmuxV22RecoveryPreApprovalQuote } from "./v22TaskRecoveryCore.ts";
 import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
 import { amuxV22OneShotRouteSupported, amuxV22RequiredTool,
@@ -422,6 +426,39 @@ function evidenceFresh(recordedAt: Date, now: Date) {
   const age = now.getTime() - recordedAt.getTime();
   return age >= 0 && age <= AMUX_WORKER_RUNTIME_LEASE_MS;
 }
+/** Owner decision 2026-11-08: a person approving inspect evidence by hand has
+ * 15 minutes to read it; the safe-stop and FIRST-exception chain keeps 90 s.
+ * The database approval guard holds the same two windows. */
+function manualEvidenceWindowMs(requestKind: string, riskException: boolean) {
+  return requestKind === "inspect" && !riskException ?
+    AMUX_V22_RECOVERY_MANUAL_EVIDENCE_WINDOW_MS : AMUX_V22_RECOVERY_SAFE_STOP_EVIDENCE_WINDOW_MS;
+}
+function evidenceWithin(recordedAt: Date, now: Date, windowMs: number) {
+  const age = now.getTime() - recordedAt.getTime();
+  return age >= 0 && age <= windowMs;
+}
+/** An approval is owner authorized either by the owner's own approval audit in
+ * its transaction, or by the owner's audited pre-approval for that same
+ * inspection, applied by the pre-approval actor. */
+async function approvalAuditBound(tx: Prisma.TransactionClient, row: {
+  id: string; authorizationAuditLogId: string; approvedByUserId: string;
+  inspectionId: string; preApprovalId: string | null }) {
+  if (!row.preApprovalId) return auditBound(tx, row.authorizationAuditLogId,
+    "amux.v22.recovery.approved", "AmuxV22TaskRecoveryApproval", row.id, row.approvedByUserId);
+  const pre = await tx.amuxV22TaskRecoveryPreApproval.findUnique({
+    where: { id: row.preApprovalId } });
+  return !!pre && pre.inspectionId === row.inspectionId &&
+    pre.requestedByUserId === row.approvedByUserId &&
+    await auditBound(tx, pre.authorizationAuditLogId, "amux.v22.recovery.preapproved",
+      "AmuxV22TaskRecoveryPreApproval", pre.id, pre.requestedByUserId) &&
+    await preApprovalSystemAuditBound(tx, row.authorizationAuditLogId,
+      "amux.v22.recovery.preapproval_applied", "AmuxV22TaskRecoveryApproval", row.id);
+}
+/** A consent still waiting for its evidence, at most one per Task. */
+function waitingPreApproval(tx: Prisma.TransactionClient, taskId: string, now: Date) {
+  return tx.amuxV22TaskRecoveryPreApproval.findFirst({ where: { taskId, result: null,
+    expiresAt: { gt: now } }, orderBy: [{ requestedAt: "desc" }, { id: "desc" }] });
+}
 
 export async function requestAmuxV22RecoveryInspection(input: {
   session: Session; request: Request;
@@ -439,24 +476,119 @@ export async function requestAmuxV22RecoveryInspection(input: {
     }
     const task = await lockRecoveryTask(tx, input.taskId);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
-    const inspectionId = randomUUID();
-    const binding = { inspectionId, taskId: task.id, taskRevision: task.revision,
-      priorAttemptId: attempt.id, priorAttemptTaskRevision: attempt.taskRevision, workerName: attempt.worker,
-      workerInstanceId: attempt.workerInstanceId, workerGeneration: attempt.workerGeneration,
-      targetHost: AMUX_V22_RECOVERY_HOST_SCOPE };
-    const requestDigest = amuxV22RecoveryDigest("inspection", binding);
+    await createInspectionRequest(tx, { session: input.session, request: input.request,
+      ownerId, requestId: input.requestId, task, attempt, now });
+    return readRecoveryInTransaction(tx, ownerId, task.id, input.requestId, now);
+  });
+}
+
+async function createInspectionRequest(tx: Prisma.TransactionClient, input: {
+  session: Session; request: Request; ownerId: string; requestId: string;
+  task: Awaited<ReturnType<typeof lockRecoveryTask>>;
+  attempt: ReturnType<typeof requireBlockedIdentity>; now: Date }) {
+  const { task, attempt } = input;
+  const inspectionId = randomUUID();
+  const binding = { inspectionId, taskId: task.id, taskRevision: task.revision,
+    priorAttemptId: attempt.id, priorAttemptTaskRevision: attempt.taskRevision, workerName: attempt.worker,
+    workerInstanceId: attempt.workerInstanceId, workerGeneration: attempt.workerGeneration,
+    targetHost: AMUX_V22_RECOVERY_HOST_SCOPE };
+  const requestDigest = amuxV22RecoveryDigest("inspection", binding);
+  const auditId = await writeAdminAuditLog({ tx, session: input.session, request: input.request,
+    action: "amux.v22.recovery.requested", targetType: "AmuxV22TaskRecoveryInspectionRequest",
+    targetId: inspectionId, summary: "Requested one fixed, read-only exact Task recovery inspection.",
+    metadata: { ...binding, ownerRequestId: input.requestId, requestDigest,
+      policyVersion: AMUX_V22_TASK_RECOVERY_POLICY_VERSION, executionStarted: false } });
+  await tx.amuxV22TaskRecoveryInspectionRequest.create({ data: {
+    taskId: binding.taskId, taskRevision: binding.taskRevision, priorAttemptId: binding.priorAttemptId,
+    priorAttemptTaskRevision: binding.priorAttemptTaskRevision, workerName: binding.workerName,
+    workerInstanceId: binding.workerInstanceId, workerGeneration: binding.workerGeneration,
+    targetHost: binding.targetHost, requestKind: "inspect",
+    id: inspectionId, ownerRequestId: input.requestId, requestDigest,
+    requestedByUserId: input.ownerId, authorizationAuditLogId: auditId, requestedAt: input.now } });
+  return inspectionId;
+}
+
+/** What the one-click confirmation shows. Every value is computed here from
+ * the current Task, prior attempt and approved catalog; nothing is written. */
+export async function readAmuxV22RecoveryPreApprovalQuote(session: Session,
+  taskId: string): Promise<AmuxV22RecoveryPreApprovalQuote> {
+  await requireOwner(session);
+  requireRecoveryEnabled();
+  return withAutoTransaction(null, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
+    const task = await lockRecoveryTask(tx, taskId);
+    const attempt = task.executionAttempts[0];
+    const base: AmuxV22RecoveryPreApprovalQuote = { taskId, taskRevision: task.revision,
+      priorAttemptId: attempt?.id ?? null, cost: null, expiresInMinutes: 30,
+      eligible: false, reason: null, retryWrite: false };
+    if (taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID) return { ...base, reason: "exact_target_only" };
+    try { requireBlockedIdentity(task, task.revision, attempt?.id ?? ""); }
+    catch { return { ...base, reason: "recovery_identity_changed" }; }
+    if (await waitingPreApproval(tx, task.id, now)) return { ...base, reason: "preapproval_pending" };
+    try { return { ...base, cost: (await currentCost(tx, task)).cost, eligible: true }; }
+    catch (error) {
+      if (error instanceof BoardImportError) return { ...base, reason: error.code };
+      throw error;
+    }
+  });
+}
+
+/** Owner decision 2026-11-08: one click requests the fixed-host inspection and
+ * records the owner's re-authenticated consent to exactly one additional
+ * capped attempt at the cost the server quotes now. It opens nothing here: the
+ * consent is applied once, after verified evidence for this inspection, by the
+ * same checks the manual approval runs, or it expires after 30 minutes. */
+export async function requestAmuxV22RecoveryPreApproval(input: {
+  session: Session; request: Request;
+} & Extract<AmuxV22RecoveryAdminInput, { action: "preapprove_attempt" }>) {
+  const ownerId = await requireOwner(input.session);
+  requireRecoveryEnabled();
+  // The FIRST Task's unknown-risk chain has its own consent steps.
+  if (input.taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID)
+    throw new BoardImportError("exact_target_only", 409);
+  return withAutoTransaction(input.requestId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
+    const existing = await tx.amuxV22TaskRecoveryPreApproval.findUnique({
+      where: { ownerRequestId: input.requestId } });
+    if (existing) {
+      if (existing.requestedByUserId !== ownerId || existing.taskId !== input.taskId ||
+          existing.taskRevision !== input.expectedRevision ||
+          existing.priorAttemptId !== input.priorAttemptId ||
+          existing.costDigest !== input.costDigest)
+        throw new BoardImportError("request_id_reused", 409);
+      return readRecoveryInTransaction(tx, ownerId, input.taskId, input.requestId, now);
+    }
+    if (await tx.amuxV22TaskRecoveryInspectionRequest.findUnique({
+        where: { ownerRequestId: input.requestId } }))
+      throw new BoardImportError("request_id_reused", 409);
+    const task = await lockRecoveryTask(tx, input.taskId);
+    const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
+    if (await waitingPreApproval(tx, task.id, now))
+      throw new BoardImportError("preapproval_pending", 409);
+    const { cost } = await currentCost(tx, task);
+    if (cost.costDigest !== input.costDigest)
+      throw new BoardImportError("recovery_cost_changed", 409);
+    const inspectionId = await createInspectionRequest(tx, { session: input.session,
+      request: input.request, ownerId, requestId: input.requestId, task, attempt, now });
+    const preApprovalId = randomUUID();
+    const expiresAt = new Date(now.getTime() + AMUX_V22_RECOVERY_PREAPPROVAL_TTL_MS);
     const auditId = await writeAdminAuditLog({ tx, session: input.session, request: input.request,
-      action: "amux.v22.recovery.requested", targetType: "AmuxV22TaskRecoveryInspectionRequest",
-      targetId: inspectionId, summary: "Requested one fixed, read-only exact Task recovery inspection.",
-      metadata: { ...binding, ownerRequestId: input.requestId, requestDigest,
-        policyVersion: AMUX_V22_TASK_RECOVERY_POLICY_VERSION, executionStarted: false } });
-    await tx.amuxV22TaskRecoveryInspectionRequest.create({ data: {
-      taskId: binding.taskId, taskRevision: binding.taskRevision, priorAttemptId: binding.priorAttemptId,
-      priorAttemptTaskRevision: binding.priorAttemptTaskRevision, workerName: binding.workerName,
-      workerInstanceId: binding.workerInstanceId, workerGeneration: binding.workerGeneration,
-      targetHost: binding.targetHost, requestKind: "inspect",
-      id: inspectionId, ownerRequestId: input.requestId, requestDigest,
-      requestedByUserId: ownerId, authorizationAuditLogId: auditId, requestedAt: now } });
+      action: "amux.v22.recovery.preapproved", targetType: "AmuxV22TaskRecoveryPreApproval",
+      targetId: preApprovalId,
+      summary: "Pre-approved exactly one additional capped Task attempt, opened only if the fixed-host inspection proves the prior run stopped within 30 minutes.",
+      metadata: { taskId: task.id, taskRevision: task.revision, priorAttemptId: attempt.id,
+        inspectionId, ownerRequestId: input.requestId, ...cost,
+        expiresAt: expiresAt.toISOString(), singleUse: true,
+        policyVersion: AMUX_V22_TASK_RECOVERY_POLICY_VERSION,
+        executionStarted: false, reservationCreated: false } });
+    await tx.amuxV22TaskRecoveryPreApproval.create({ data: { id: preApprovalId,
+      ownerRequestId: input.requestId, inspectionId, taskId: task.id,
+      taskRevision: task.revision, priorAttemptId: attempt.id, costDigest: cost.costDigest,
+      catalogApprovalId: cost.catalogApprovalId, catalogVersion: cost.catalogVersion,
+      pricingVersion: cost.pricingVersion, costReceiptDigest: cost.costReceiptDigest,
+      oldHeldMicroUsd: BigInt(cost.oldHeldMicroUsd),
+      additionalCapMicroUsd: BigInt(cost.additionalCapMicroUsd),
+      worstExposureMicroUsd: BigInt(cost.worstExposureMicroUsd),
+      requestedByUserId: ownerId, authorizationAuditLogId: auditId,
+      requestedAt: now, expiresAt } });
     return readRecoveryInTransaction(tx, ownerId, task.id, input.requestId, now);
   });
 }
@@ -694,6 +826,10 @@ export function pendingAmuxV22RecoveryInspections(workerName: string) {
       workerName: row.workerName, workerInstanceId: row.workerInstanceId,
       workerGeneration: row.workerGeneration, targetHost: row.targetHost,
       requestDigest: row.requestDigest, requestedAt: row.requestedAt.toISOString() })) };
+  }).then(async (pending) => {
+    // After its own read: a waiting consent whose evidence arrived is settled.
+    await sweepAmuxV22RecoveryPreApprovals();
+    return pending;
   });
 }
 
@@ -875,6 +1011,7 @@ export function reportAmuxV22ReadOnlyLaunchProof(input: AmuxV22ReadOnlyLaunchPro
 
 export function reportAmuxV22RecoveryEvidence(input: AmuxV22RecoveryEvidenceInput) {
   requireRecoveryEnabled();
+  let consent: { id: string; taskId: string } | null = null;
   return withAutoTransaction(input.evidenceId, TICK_TRANSACTION_LIMITS, async (tx, now) => {
     const inspection = await tx.amuxV22TaskRecoveryInspectionRequest.findUnique({
       where: { id: input.inspectionId } });
@@ -888,6 +1025,8 @@ export function reportAmuxV22RecoveryEvidence(input: AmuxV22RecoveryEvidenceInpu
           "AmuxV22TaskRecoveryInspectionRequest", inspection.id, inspection.requestedByUserId))
       throw new BoardImportError("inspection_binding_mismatch", 409);
     const evidenceDigest = amuxV22RecoveryDigest("evidence", input);
+    consent = await tx.amuxV22TaskRecoveryPreApproval.findFirst({
+      where: { inspectionId: inspection.id, result: null }, select: { id: true, taskId: true } });
     const existing = await tx.amuxV22TaskRecoveryEvidence.findUnique({ where: { inspectionId: inspection.id } });
     if (existing) {
       if (existing.id !== input.evidenceId || existing.evidenceDigest !== evidenceDigest)
@@ -916,7 +1055,98 @@ export function reportAmuxV22RecoveryEvidence(input: AmuxV22RecoveryEvidenceInpu
       reason, authorizationAuditLogId: auditId, recordedAt: now } });
     return { recorded: true, evidenceId: input.evidenceId, verified: reason === null,
       evidenceDigest, reason, retryWrite: false };
+  }).then(async (recorded) => {
+    // The evidence is durable before any consent is applied. A failure here
+    // leaves the consent waiting; the checker's next poll settles it.
+    const waiting = consent as { id: string; taskId: string } | null;
+    if (waiting) await settleAmuxV22RecoveryPreApprovalQuietly(waiting);
+    return recorded;
   });
+}
+
+/** Applies one owner pre-approval once, or records why it was not. It opens an
+ * approval only through approveRecoveryInTransaction, the checks the owner's
+ * manual approval runs, with the consent's own server-recorded inspection,
+ * evidence and cost: never a client value. A refusal is a separate
+ * transaction, so a failed apply leaves nothing of itself behind. */
+export async function settleAmuxV22RecoveryPreApproval(target: { id: string; taskId: string }):
+  Promise<"waiting" | "applied" | "refused" | "missing"> {
+  requireRecoveryEnabled();
+  const readyContext = await loadAmuxV4TaskReadyContext(target.taskId);
+  const lockConsent = async (tx: Prisma.TransactionClient) => {
+    await tx.$queryRaw`SELECT "id" FROM "AmuxV22TaskRecoveryPreApproval" WHERE "id" = ${target.id}::uuid FOR UPDATE`;
+    const pre = await tx.amuxV22TaskRecoveryPreApproval.findUnique({ where: { id: target.id },
+      include: { result: true, inspection: { include: { evidence: true, approval: true } } } });
+    return pre && pre.taskId === target.taskId ? pre : null;
+  };
+  let refusal: string;
+  try {
+    return await withAutoTransaction(target.id, TICK_TRANSACTION_LIMITS, async (tx, now) => {
+      const pre = await lockConsent(tx);
+      if (!pre) return "missing" as const;
+      if (pre.result) return pre.result.outcome === "applied" ? "applied" as const : "refused" as const;
+      const evidence = pre.inspection.evidence;
+      if (!evidence) {
+        if (now > pre.expiresAt) throw new BoardImportError("preapproval_expired", 409);
+        return "waiting" as const;
+      }
+      if (pre.inspection.approval) throw new BoardImportError("already_approved", 409);
+      if (!evidence.verified)
+        throw new BoardImportError(evidence.reason ?? "recovery_evidence_unverified", 409);
+      if (!await auditBound(tx, pre.authorizationAuditLogId, "amux.v22.recovery.preapproved",
+          "AmuxV22TaskRecoveryPreApproval", pre.id, pre.requestedByUserId))
+        throw new BoardImportError("preapproval_unbound", 409);
+      const approvalId = await approveRecoveryInTransaction(tx, now, pre.requestedByUserId,
+        readyContext, { taskId: pre.taskId, expectedRevision: pre.taskRevision,
+          priorAttemptId: pre.priorAttemptId, requestId: pre.ownerRequestId,
+          inspectionId: pre.inspectionId, evidenceId: evidence.id,
+          evidenceDigest: evidence.evidenceDigest, costDigest: pre.costDigest },
+        { kind: "preapproval", preApproval: pre });
+      await recordPreApprovalResult(tx, now, pre.id, "applied", null, approvalId);
+      return "applied" as const;
+    });
+  } catch (error) {
+    // Only a refusal the checks threw is final. A lost or refused commit is
+    // read back on the next settle before anything is written again.
+    if (!(error instanceof BoardImportError) || error.code === "outcome_unknown" ||
+        error.code === "audit_key_missing") throw error;
+    refusal = /^[a-z0-9_]{1,128}$/.test(error.code) ? error.code : "preapproval_refused";
+  }
+  return withAutoTransaction(target.id, TICK_TRANSACTION_LIMITS, async (tx, now) => {
+    const pre = await lockConsent(tx);
+    if (!pre) return "missing" as const;
+    if (pre.result) return pre.result.outcome === "applied" ? "applied" as const : "refused" as const;
+    await recordPreApprovalResult(tx, now, pre.id, "refused", refusal, null);
+    return "refused" as const;
+  });
+}
+
+async function recordPreApprovalResult(tx: Prisma.TransactionClient, now: Date, preApprovalId: string,
+  outcome: "applied" | "refused", reason: string | null, approvalId: string | null) {
+  const resultId = randomUUID();
+  const auditId = await recordAmuxV22PreApprovalSettledAudit(tx, resultId, {
+    preApprovalId, outcome, reason, approvalId,
+    policyVersion: AMUX_V22_TASK_RECOVERY_POLICY_VERSION,
+    executionStarted: false, reservationCreated: false });
+  await tx.amuxV22TaskRecoveryPreApprovalResult.create({ data: { id: resultId,
+    preApprovalId, outcome, reason, approvalId, authorizationAuditLogId: auditId,
+    recordedAt: now } });
+}
+
+async function settleAmuxV22RecoveryPreApprovalQuietly(target: { id: string; taskId: string }) {
+  try { await settleAmuxV22RecoveryPreApproval(target); }
+  catch { /* The consent stays waiting until a later settle reads it back. */ }
+}
+
+/** One waiting consent whose evidence arrived, or whose time ran out. */
+async function sweepAmuxV22RecoveryPreApprovals() {
+  try {
+    const target = await withAutoTransaction(null, TICK_TRANSACTION_LIMITS, (tx, now) =>
+      tx.amuxV22TaskRecoveryPreApproval.findFirst({ where: { result: null, OR: [
+        { inspection: { evidence: { isNot: null } } }, { expiresAt: { lt: now } }] },
+        orderBy: [{ requestedAt: "asc" }, { id: "asc" }], select: { id: true, taskId: true } }));
+    if (target) await settleAmuxV22RecoveryPreApprovalQuietly(target);
+  } catch { /* The next poll sweeps again. */ }
 }
 
 export function reportAmuxV22LegacySafeStopEvidence(input: AmuxV22SafeStopEvidenceInput) {
@@ -1077,14 +1307,14 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
   const visibleRisk = requestedRisk ?? resumableRisk;
   let inspection = await tx.amuxV22TaskRecoveryInspectionRequest.findFirst({ where: {
     taskId, requestedByUserId: ownerId, ...(approval ? { id: approval.inspectionId } : { ownerRequestId: requestId }) },
-    include: { evidence: true, approval: true } });
+    include: { evidence: true, approval: true, preApproval: { include: { result: true } } } });
   if (!inspection && visibleRisk) inspection = await tx.amuxV22TaskRecoveryInspectionRequest.findFirst({
     where: { taskId, requestedByUserId: ownerId, requestKind: "safe_stop",
       riskAcceptanceId: visibleRisk.id,
       riskAcceptanceDigest: visibleRisk.acceptanceDigest,
       sourceEvidenceId: visibleRisk.sourceEvidenceId,
       sourceEvidenceDigest: visibleRisk.sourceEvidenceDigest },
-    include: { evidence: true, approval: true },
+    include: { evidence: true, approval: true, preApproval: { include: { result: true } } },
     orderBy: [{ requestedAt: "desc" }, { id: "desc" }] });
   const linkedRiskId = visibleRisk?.id ?? inspection?.riskAcceptanceId ??
     approval?.riskAcceptanceId ?? null;
@@ -1188,8 +1418,7 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
   const approved = inspection.approval;
   if (approval && (!approved || approved.id !== approval.id || approved.ownerRequestId !== requestId))
     throw new BoardImportError("recovery_receipt_mismatch", 409);
-  if (approved && (approved.approvedByUserId !== ownerId || !await auditBound(tx,
-      approved.authorizationAuditLogId, "amux.v22.recovery.approved", "AmuxV22TaskRecoveryApproval", approved.id, ownerId)))
+  if (approved && (approved.approvedByUserId !== ownerId || !await approvalAuditBound(tx, approved)))
     throw new BoardImportError("audit_unbound", 503);
   const evidence = inspection.evidence;
   if (approved && (approved.inspectionId !== inspection.id || approved.taskId !== inspection.taskId ||
@@ -1275,7 +1504,10 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
           cost = null;
         }
       }
-      if (evidence?.verified && !evidenceFresh(evidence.recordedAt, now)) {
+      if (evidence?.verified && !(inspection.preApproval && !inspection.preApproval.result &&
+          inspection.preApproval.expiresAt > now) &&
+          !evidenceWithin(evidence.recordedAt, now, manualEvidenceWindowMs(
+            inspection.requestKind, !!risk))) {
         state = "unverified"; reason = "evidence_stale";
       } else if (evidence?.verified && !journalProvenReport(evidence.report) &&
           !await currentRuntime(tx, inspection)) {
@@ -1289,7 +1521,25 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
   if (launchRead && !launchCurrent) launchRead = { ...launchRead,
     state: launchBindingChanged ? "mismatch" : "stale" };
   const exception = !!risk;
-  const approveEligible = !approved && !!evidence?.verified &&
+  const pre = inspection.preApproval;
+  if (pre && (pre.requestedByUserId !== ownerId || !await auditBound(tx,
+      pre.authorizationAuditLogId, "amux.v22.recovery.preapproved",
+      "AmuxV22TaskRecoveryPreApproval", pre.id, ownerId) ||
+      (pre.result && !await preApprovalSystemAuditBound(tx, pre.result.authorizationAuditLogId,
+        "amux.v22.recovery.preapproval_settled", "AmuxV22TaskRecoveryPreApprovalResult",
+        pre.result.id))))
+    throw new BoardImportError("audit_unbound", 503);
+  const preExpired = !!pre && !pre.result && now > pre.expiresAt;
+  const preApproval: AmuxV22RecoveryPreApprovalRead | undefined = pre ? { id: pre.id,
+    state: pre.result ? pre.result.outcome === "applied" ? "applied" :
+      pre.result.reason === "preapproval_expired" ? "expired" : "refused" :
+      preExpired ? "expired" : "waiting",
+    requestedAt: pre.requestedAt.toISOString(), expiresAt: pre.expiresAt.toISOString(),
+    costDigest: pre.costDigest,
+    reason: pre.result?.reason ?? (preExpired ? "preapproval_expired" : null),
+    approvalId: pre.result?.approvalId ?? null } : undefined;
+  // While the consent waits, it alone may use this inspection's evidence.
+  const approveEligible = !approved && !!evidence?.verified && preApproval?.state !== "waiting" &&
     (!exception || (launchCurrent && (!apiExecutor || apiAccessCurrent)));
   // The unknown-risk intent is offered on exactly the source the write path
   // accepts: an unverified legacy inspect report for the approved FIRST Task.
@@ -1327,7 +1577,8 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
     eligibility: { acceptUnknownPriorEffects: riskIntentEligible,
       requestSafeStop: exception && (!evidence?.verified || !launchCurrent),
       approveAttempt: approveEligible, reason: eligibilityReason },
-    ...(approved ? { approvalId: approved.id, currentTask } : {}) };
+    ...(approved ? { approvalId: approved.id, currentTask } : {}),
+    ...(preApproval ? { preApproval } : {}) };
 }
 export async function readAmuxV22TaskRecovery(session: Session, taskId: string, requestId: string) {
   const ownerId = await requireOwner(session);
@@ -1354,12 +1605,43 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
         throw new BoardImportError("request_id_reused", 409);
       return readRecoveryInTransaction(tx, ownerId, input.taskId, input.requestId, now);
     }
+    await approveRecoveryInTransaction(tx, now, ownerId, readyContext, input,
+      { kind: "owner", session: input.session, request: input.request });
+    return readRecoveryInTransaction(tx, ownerId, input.taskId, input.requestId, now);
+  });
+}
+
+type RecoveryApprovalAuthority =
+  | { kind: "owner"; session: Session; request: Request }
+  | { kind: "preapproval"; preApproval: Prisma.AmuxV22TaskRecoveryPreApprovalGetPayload<object> };
+
+/** Every check an approval passes, for the owner's manual approval and for an
+ * owner's pre-approval alike. Only the consent and its freshness differ:
+ * the manual approval is the owner's audit in this transaction over evidence
+ * a person read within its window; a pre-approval is the owner's earlier
+ * audited consent for this exact inspection and cost, over evidence recorded
+ * after it and before it expired. Returns the approval id. */
+async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: Date,
+  ownerId: string, readyContext: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>,
+  input: Omit<Extract<AmuxV22RecoveryAdminInput, { action: "approve_attempt" }>, "action">,
+  authority: RecoveryApprovalAuthority): Promise<string> {
+  {
     const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
     if (incident.blocks_admission) throw new BoardImportError("incident_blocked", 409);
     if (await findOpenAmuxOrchestratorHalt(tx))
       throw new BoardImportError("orchestrator_halted", 409);
     const inspection = await tx.amuxV22TaskRecoveryInspectionRequest.findUnique({ where: { id: input.inspectionId },
-      include: { evidence: true, approval: true } });
+      include: { evidence: true, approval: true, preApproval: { include: { result: true } } } });
+    const preApproval = authority.kind === "preapproval" ? authority.preApproval : null;
+    if (preApproval && (!inspection || inspection.requestKind !== "inspect" ||
+        inspection.riskAcceptanceId || inspection.id !== preApproval.inspectionId ||
+        inspection.preApproval?.id !== preApproval.id || input.riskAcceptanceId ||
+        input.costDigest !== preApproval.costDigest || ownerId !== preApproval.requestedByUserId))
+      throw new BoardImportError("preapproval_scope_refused", 409);
+    // While a one-click consent waits on this inspection, it alone may use it.
+    if (!preApproval && inspection?.preApproval && !inspection.preApproval.result &&
+        inspection.preApproval.expiresAt > now)
+      throw new BoardImportError("preapproval_pending", 409);
     let safeProfileCurrent = true;
     if (inspection?.requestKind === "safe_stop") {
       requireSafeStopEnabled();
@@ -1402,7 +1684,6 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
           !journalProvenReport(evidence?.report) && !await currentRuntime(tx, inspection)) ||
         (inspection.requestKind === "safe_stop" &&
           (fenced.size !== inspection.profileWorkerNames.length || safeOtherWork)) ||
-        !evidenceFresh(evidence.recordedAt, now) ||
         !await auditBound(tx, inspection.authorizationAuditLogId,
           requestAuditAction(inspection.requestKind),
           "AmuxV22TaskRecoveryInspectionRequest", inspection.id, ownerId) ||
@@ -1410,6 +1691,16 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
           evidenceAuditAction(evidence.requestKind),
           "AmuxV22TaskRecoveryEvidence", evidence.id))
       throw new BoardImportError("recovery_evidence_unverified", 409);
+    // Freshness is its own refusal, so the card can say the evidence expired
+    // rather than that it was never verified (owner decision 2026-11-08).
+    if (preApproval ? evidence.recordedAt < preApproval.requestedAt ||
+        now > preApproval.expiresAt || !await auditBound(tx,
+          preApproval.authorizationAuditLogId, "amux.v22.recovery.preapproved",
+          "AmuxV22TaskRecoveryPreApproval", preApproval.id, ownerId) :
+        !evidenceWithin(evidence.recordedAt, now, manualEvidenceWindowMs(
+          inspection.requestKind, !!inspection.riskAcceptanceId)))
+      throw new BoardImportError(preApproval ? "preapproval_expired" :
+        "recovery_evidence_expired", 409);
     const ready = await evaluateAmuxV4TaskReadyInTransaction(tx, task.id, readyContext, null, "blocked");
     // Policy v48: a cost reconfirmation is the one readiness reason the FIRST
     // Task exception may carry, and only when the final consent below covers
@@ -1567,11 +1858,15 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
     const admission = await evaluateLockedAmuxCostAdmission(tx, policies,
       BigInt(approvedCost.additionalCapMicroUsd), now);
     if (!admission.allowed) throw new BoardImportError(admission.reason, 409);
+    // A pre-approval is spent only at the exact server-computed cost it named.
+    if (preApproval && (current.approvalId !== preApproval.catalogApprovalId ||
+        current.receipt.receiptDigest !== preApproval.costReceiptDigest ||
+        approvedCost.additionalCapMicroUsd !== preApproval.additionalCapMicroUsd.toString() ||
+        approvedCost.oldHeldMicroUsd !== preApproval.oldHeldMicroUsd.toString() ||
+        risk || launchProof))
+      throw new BoardImportError("recovery_cost_changed", 409);
     const approvalId = randomUUID();
-    const auditId = await writeAdminAuditLog({ tx, session: input.session, request: input.request,
-      action: "amux.v22.recovery.approved", targetType: "AmuxV22TaskRecoveryApproval", targetId: approvalId,
-      summary: "Approved exactly one additional capped Task attempt while preserving its prior unconfirmed cap.",
-      metadata: { taskId: task.id, inspectionId: inspection.id, evidenceId: evidence.id,
+    const approvalMetadata = { taskId: task.id, inspectionId: inspection.id, evidenceId: evidence.id,
         ownerRequestId: input.requestId, priorAttemptId: input.priorAttemptId,
         beforeRevision: task.revision, afterRevision: task.revision + 1,
         evidenceDigest: evidence.evidenceDigest, ...approvedCost,
@@ -1590,7 +1885,16 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
             apiModelAccessEvidenceDigest: apiModelAccessEvidence.evidenceDigest,
             canonicalModelId: apiModelAccessEvidence.canonicalModelId,
           } : {}) } : {}),
-        policyVersion: AMUX_V22_TASK_RECOVERY_POLICY_VERSION, executionStarted: false, reservationCreated: false } });
+        policyVersion: AMUX_V22_TASK_RECOVERY_POLICY_VERSION, executionStarted: false, reservationCreated: false };
+    const auditId = authority.kind === "owner" ? await writeAdminAuditLog({ tx,
+      session: authority.session, request: authority.request,
+      action: "amux.v22.recovery.approved", targetType: "AmuxV22TaskRecoveryApproval", targetId: approvalId,
+      summary: "Approved exactly one additional capped Task attempt while preserving its prior unconfirmed cap.",
+      metadata: approvalMetadata }) :
+      await recordAmuxV22PreApprovalAppliedAudit(tx, approvalId, { ...approvalMetadata,
+        preApprovalId: preApproval!.id,
+        preApprovalAuditLogId: preApproval!.authorizationAuditLogId,
+        approvedByUserId: ownerId });
     await tx.amuxV22TaskRecoveryApproval.create({ data: { id: approvalId, ownerRequestId: input.requestId,
       inspectionId: inspection.id, evidenceId: evidence.id, taskId: task.id,
       beforeRevision: task.revision, afterRevision: task.revision + 1, priorAttemptId: input.priorAttemptId,
@@ -1617,14 +1921,15 @@ export async function approveAmuxV22TaskRecovery(input: { session: Session; requ
       apiModelAccessEvidenceId: apiModelAccessEvidence?.id ?? null,
       apiModelAccessEvidenceDigest: apiModelAccessEvidence?.evidenceDigest ?? null,
       canonicalModelId: apiModelAccessEvidence?.canonicalModelId ?? null,
+      preApprovalId: preApproval?.id ?? null,
       approvedByUserId: ownerId,
       authorizationAuditLogId: auditId, approvedAt: now } });
     const changed = await tx.amuxWorkItem.updateMany({ where: { id: task.id, revision: task.revision,
       status: "blocked", owner: null, claimedAt: null, v22AssignmentId: null, archivedAt: null },
       data: { status: "todo", revision: { increment: 1 } } });
     if (changed.count !== 1) throw new BoardImportError("recovery_identity_changed", 409);
-    return readRecoveryInTransaction(tx, ownerId, task.id, input.requestId, now);
-  });
+    return approvalId;
+  }
 }
 
 /** Only the approval at this exact Todo revision can exempt its own held prior attempt. */
@@ -1637,8 +1942,7 @@ export async function readAmuxV22RecoveryAuthority(tx: Prisma.TransactionClient,
       evidence: true, apiModelAccessEvidence: true } });
   if (!row) return null;
   if (!row.evidence.verified || row.evidenceDigest !== row.evidence.evidenceDigest ||
-      !await auditBound(tx, row.authorizationAuditLogId, "amux.v22.recovery.approved",
-        "AmuxV22TaskRecoveryApproval", row.id, row.approvedByUserId))
+      !await approvalAuditBound(tx, row))
     throw new BoardImportError("recovery_approval_unbound", 409);
   let readOnlyExecutorKind: "read_only_retry_v1" | "read_only_api_retry_v1" | null = null;
   let apiExecutionFrame: AmuxV22ReadOnlyApiExecutionFrame | null = null;

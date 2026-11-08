@@ -66,6 +66,7 @@ const world = { task: {} as Row, attempt: {} as Row, runtime: {} as Row,
   inspections: [] as Row[], evidence: [] as Row[], approvals: [] as Row[], audits: [] as Row[],
   risks: [] as Row[], launchChecks: [] as Row[], launchProofs: [] as Row[],
   apiModelAccessEvidence: [] as Row[],
+  preApprovals: [] as Row[], preApprovalResults: [] as Row[],
   ready: true, incident: false, cap: "3400000", costAdmission: true, cas: true,
   otherWork: false,
   // null keeps the fixed test receipt. A Date makes the receipt digest depend on
@@ -104,14 +105,38 @@ function reset() {
   world.inspections = []; world.evidence = []; world.approvals = []; world.audits = [];
   world.risks = []; world.launchChecks = []; world.launchProofs = [];
   world.apiModelAccessEvidence = [];
+  world.preApprovals = []; world.preApprovalResults = [];
   world.ready = true; world.incident = false; world.cap = "3400000"; world.costAdmission = true;
   world.cas = true; world.otherWork = false; world.changedOld = 0;
   world.ledgerWrites = 0; world.attemptWrites = 0;
 }
 const matches = (row: Row, where: Row) => Object.entries(where).every(([key, value]) => key === "assignment" ? true : row[key] === value);
+function preApprovalWithResult(row: Row | undefined) {
+  return row ? { ...row, result: world.preApprovalResults.find((item) =>
+    item.preApprovalId === row.id) ?? null } : null;
+}
 function inspectionWithRelations(row: Row | undefined) {
   return row ? { ...row, evidence: world.evidence.find((item) => item.inspectionId === row.id) ?? null,
-    approval: world.approvals.find((item) => item.inspectionId === row.id) ?? null } : null;
+    approval: world.approvals.find((item) => item.inspectionId === row.id) ?? null,
+    preApproval: preApprovalWithResult(world.preApprovals.find((item) =>
+      item.inspectionId === row.id)) } : null;
+}
+/** The where clauses the pre-approval paths use: exact keys, result: null,
+ * expiresAt.gt / .lt, and the sweep's evidence-or-expired OR. */
+function preApprovalMatches(row: Row, where: Row): boolean {
+  return Object.entries(where).every(([key, value]) => {
+    if (key === "result") return value !== null ||
+      !world.preApprovalResults.some((item) => item.preApprovalId === row.id);
+    if (key === "expiresAt") {
+      const bound = value as { gt?: Date; lt?: Date };
+      const at = (row.expiresAt as Date).getTime();
+      return (!bound.gt || at > bound.gt.getTime()) && (!bound.lt || at < bound.lt.getTime());
+    }
+    if (key === "inspection") return world.evidence.some((item) =>
+      item.inspectionId === row.inspectionId);
+    if (key === "OR") return (value as Row[]).some((branch) => preApprovalMatches(row, branch));
+    return row[key] === value;
+  });
 }
 const tx = {
   $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -168,6 +193,23 @@ const tx = {
           item.id === row.apiModelAccessEvidenceId) ?? null } : row ?? null;
     },
     create: async ({ data }: { data: Row }) => { world.approvals.push(data); return data; } },
+  amuxV22TaskRecoveryPreApproval: {
+    findUnique: async ({ where, include }: { where: Row; include?: Row }) => {
+      const row = world.preApprovals.find((item) => matches(item, where));
+      if (!row || !include) return row ?? null;
+      return { ...preApprovalWithResult(row), inspection: inspectionWithRelations(
+        world.inspections.find((item) => item.id === row.inspectionId)) };
+    },
+    findFirst: async ({ where, select }: { where: Row; select?: Row }) => {
+      const row = world.preApprovals.find((item) => preApprovalMatches(item, where));
+      return row && select ? Object.fromEntries(Object.keys(select).map((key) =>
+        [key, row[key]])) : row ?? null;
+    },
+    create: async ({ data }: { data: Row }) => { world.preApprovals.push(data); return data; },
+  },
+  amuxV22TaskRecoveryPreApprovalResult: {
+    create: async ({ data }: { data: Row }) => { world.preApprovalResults.push(data); return data; },
+  },
   amuxV22TaskRecoveryRiskAcceptance: {
     findUnique: async ({ where }: { where: Row }) => world.risks.find((row) => matches(row, where)) ?? null,
     findFirst: async ({ where }: { where: Row }) => world.risks.find((row) => matches(row, where)) ?? null,
@@ -250,14 +292,17 @@ function load() {
       const saved = { task: structuredClone(world.task), inspections: [...world.inspections],
         approvals: [...world.approvals], evidence: [...world.evidence], audits: [...world.audits],
         risks: [...world.risks], launchChecks: [...world.launchChecks], launchProofs: [...world.launchProofs],
-        apiModelAccessEvidence: [...world.apiModelAccessEvidence] };
+        apiModelAccessEvidence: [...world.apiModelAccessEvidence],
+        preApprovals: [...world.preApprovals], preApprovalResults: [...world.preApprovalResults] };
       try { return await callback(tx, now); }
       catch (error) { world.task = saved.task; world.inspections = saved.inspections;
         world.approvals = saved.approvals;
         world.evidence = saved.evidence; world.audits = saved.audits;
         world.risks = saved.risks; world.launchChecks = saved.launchChecks;
         world.launchProofs = saved.launchProofs;
-        world.apiModelAccessEvidence = saved.apiModelAccessEvidence; throw error; }
+        world.apiModelAccessEvidence = saved.apiModelAccessEvidence;
+        world.preApprovals = saved.preApprovals; world.preApprovalResults = saved.preApprovalResults;
+        throw error; }
     },
   } });
   mock.module(mod("lib/amux/incident.ts"), { namedExports: { lockAmuxAdmissionAndReadIncident: async () => ({ blocks_admission: world.incident }) } });
@@ -1310,4 +1355,127 @@ test("v46: a safe stop bound to the live runtime cannot seed a chained re-reques
     sourceEvidenceId: stopEvidenceId, sourceEvidenceDigest: "e".repeat(64),
     requestId: "8a1f3c5e-7b9d-4e2f-a6c8-0d2e4f6a8b1c" }), /safe_stop_source_mismatch/);
   assert.equal(world.inspections.length, before);
+});
+
+// Owner decision 2026-11-08: one click requests the inspection and records a
+// single-use consent; verified evidence applies it with the manual checks.
+async function preApprove(change: { costDigest?: string; taskId?: string } = {}) {
+  const service = await load();
+  const quote = await service.readAmuxV22RecoveryPreApprovalQuote(owner, "task-1234");
+  assert.equal(quote.eligible, true); assert.equal(quote.expiresInMinutes, 30);
+  return service.requestAmuxV22RecoveryPreApproval({ session: owner,
+    request: new Request("https://tomverse.test"), action: "preapprove_attempt",
+    taskId: change.taskId ?? "task-1234", expectedRevision: 8, priorAttemptId: attemptId,
+    requestId, costDigest: change.costDigest ?? quote.cost!.costDigest, acceptRetry: true });
+}
+const actions = () => world.audits.map((row) => row.action);
+
+test("one click: verified evidence after the consent opens exactly one capped attempt", async () => {
+  reset(); const service = await load(); const old = structuredClone(world.attempt);
+  const requested = await preApprove();
+  assert.equal(requested.state, "pending"); assert.equal(requested.preApproval?.state, "waiting");
+  assert.equal(world.task.status, "blocked"); assert.equal(world.approvals.length, 0);
+  const pre = world.preApprovals[0]!;
+  assert.equal((pre.expiresAt as Date).getTime() - (pre.requestedAt as Date).getTime(), 30 * 60_000);
+  assert.equal(pre.additionalCapMicroUsd, BigInt(3_400_000));
+  const pending = await service.pendingAmuxV22RecoveryInspections("claude-test");
+  assert.equal(pending.requests[0]!.inspectionId, requested.inspectionId);
+  const read = await submitEvidence();
+  assert.equal(read.state, "approved"); assert.equal(read.preApproval?.state, "applied");
+  assert.equal(read.preApproval?.approvalId, read.approvalId);
+  assert.equal(world.task.status, "todo"); assert.equal(world.task.revision, 9);
+  assert.equal(world.approvals.length, 1);
+  assert.equal(world.approvals[0]!.preApprovalId, pre.id);
+  assert.equal(world.approvals[0]!.approvedByUserId, "owner-1");
+  assert.equal(world.approvals[0]!.ownerRequestId, requestId);
+  assert.equal(world.preApprovalResults.length, 1);
+  assert.equal(world.preApprovalResults[0]!.outcome, "applied");
+  assert.deepEqual(actions(), ["amux.v22.recovery.requested", "amux.v22.recovery.preapproved",
+    "amux.v22.recovery.inspected", "amux.v22.recovery.preapproval_applied",
+    "amux.v22.recovery.preapproval_settled"]);
+  const applied = world.audits.find((row) => row.action === "amux.v22.recovery.preapproval_applied")!;
+  assert.equal((applied.metadata as Row).systemActor, "amux-v22-recovery-preapproval");
+  assert.equal((applied.metadata as Row).preApprovalId, pre.id);
+  const authority = await service.readAmuxV22RecoveryAuthority(tx as never, "task-1234", 9);
+  assert.equal(authority?.id, read.approvalId);
+  assert.deepEqual(world.attempt, old);
+  assert.equal(world.changedOld + world.ledgerWrites + world.attemptWrites, 0);
+});
+
+test("one click: a consent is used once, and a replayed report or sweep opens nothing more", async () => {
+  reset(); const service = await load(); await preApprove(); await submitEvidence();
+  const audits = world.audits.length;
+  await submitEvidence();
+  await service.pendingAmuxV22RecoveryInspections("claude-test");
+  assert.equal(await service.settleAmuxV22RecoveryPreApproval({
+    id: world.preApprovals[0]!.id as string, taskId: "task-1234" }), "applied");
+  assert.equal(world.approvals.length, 1); assert.equal(world.preApprovalResults.length, 1);
+  assert.equal(world.audits.length, audits); assert.equal(world.task.revision, 9);
+  // A reused request id cannot name another cost.
+  await assert.rejects(service.requestAmuxV22RecoveryPreApproval({ session: owner,
+    request: new Request("https://tomverse.test"), action: "preapprove_attempt",
+    taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId, requestId,
+    costDigest: "0".repeat(64), acceptRetry: true }), /request_id_reused/);
+});
+
+test("one click: an expired consent, a failed proof or a changed revision opens nothing", async () => {
+  for (const scenario of ["expired", "proof", "revision", "cost"] as const) {
+    reset(); await preApprove();
+    if (scenario === "expired") world.preApprovals[0]!.expiresAt = new Date(now.getTime() - 1);
+    if (scenario === "revision") world.task.revision = 9;
+    if (scenario === "cost") world.cap = "3500000";
+    const read = await submitEvidence(scenario === "proof" ? { reason: "terminal_success",
+      proof: { terminalOutcome: "succeeded", sameLiveInvocation: true, noActiveExecution: true,
+        processTreeStopped: true, rootOwnedUnit: true, controlGroupBound: true, journalBound: true,
+        socketTerminal: true, externalEffectsKnown: true, workspaceClean: true } } : {}).catch(() => null);
+    assert.equal(world.approvals.length, 0, scenario);
+    assert.equal(world.task.status, "blocked", scenario);
+    assert.equal(world.preApprovalResults.length, 1, scenario);
+    const result = world.preApprovalResults[0]!;
+    assert.equal(result.outcome, "refused", scenario);
+    assert.equal(result.reason, { expired: "preapproval_expired", proof: "terminal_success",
+      revision: "recovery_identity_changed", cost: "recovery_cost_changed" }[scenario], scenario);
+    assert.equal(actions().at(-1), "amux.v22.recovery.preapproval_settled", scenario);
+    if (read && scenario !== "revision") {
+      assert.equal(read.preApproval?.state, scenario === "expired" ? "expired" : "refused");
+      assert.equal(read.preApproval?.reason, result.reason);
+    }
+  }
+});
+
+test("one click: the server cost binds the consent and the FIRST Task keeps its own steps", async () => {
+  reset(); const service = await load();
+  await assert.rejects(preApprove({ costDigest: "0".repeat(64) }), /recovery_cost_changed/);
+  assert.equal(world.inspections.length, 0); assert.equal(world.preApprovals.length, 0);
+  await assert.rejects(service.requestAmuxV22RecoveryPreApproval({ session: owner,
+    request: new Request("https://tomverse.test"), action: "preapprove_attempt",
+    taskId: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID, expectedRevision: 7,
+    priorAttemptId: AMUX_V22_UNKNOWN_PRIOR_RISK_ATTEMPT_ID, requestId,
+    costDigest: "0".repeat(64), acceptRetry: true }), /exact_target_only/);
+  await preApprove();
+  // A second consent for the same Task waits behind the first.
+  await assert.rejects(service.requestAmuxV22RecoveryPreApproval({ session: owner,
+    request: new Request("https://tomverse.test"), action: "preapprove_attempt",
+    taskId: "task-1234", expectedRevision: 8, priorAttemptId: attemptId,
+    requestId: approvalRequestId, costDigest: world.preApprovals[0]!.costDigest as string,
+    acceptRetry: true }), /preapproval_pending/);
+  const quote = await service.readAmuxV22RecoveryPreApprovalQuote(owner, "task-1234");
+  assert.equal(quote.eligible, false); assert.equal(quote.reason, "preapproval_pending");
+});
+
+test("manual approval: blocked while a consent waits, and inspect evidence lasts 15 minutes", async () => {
+  reset(); const service = await load(); await preApprove();
+  world.preApprovals[0]!.expiresAt = new Date(now.getTime() + 60_000);
+  // The consent alone may use its inspection while it waits.
+  const pending = await service.readAmuxV22TaskRecovery(owner, "task-1234", requestId);
+  assert.equal(pending.eligibility.approveAttempt, false);
+  reset(); await requestInspection(); const input = await approvalInput();
+  world.inspections[0]!.requestedAt = new Date(now.getTime() - 20 * 60_000);
+  world.evidence[0]!.recordedAt = new Date(now.getTime() - 16 * 60_000);
+  await assert.rejects(service.approveAmuxV22TaskRecovery(input), /recovery_evidence_expired/);
+  const stale = await service.readAmuxV22TaskRecovery(owner, "task-1234", requestId);
+  assert.equal(stale.reason, "evidence_stale");
+  world.evidence[0]!.recordedAt = new Date(now.getTime() - 10 * 60_000);
+  const read = await service.approveAmuxV22TaskRecovery(input);
+  assert.equal(read.state, "approved"); assert.equal(world.approvals[0]!.preApprovalId, null);
 });

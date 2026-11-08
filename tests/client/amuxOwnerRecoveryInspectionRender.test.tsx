@@ -4,9 +4,11 @@ import React, { type ReactNode } from "react";
 import { AmuxRecoveryInspectionView, fetchAmuxRecoveryInspection,
   AMUX_RECOVERY_INSPECTION_TIMEOUT_MS, AmuxHostRecoveryView, fetchAmuxHostRecovery,
   AmuxOwnerRecoveryInspectionPanel, bindAmuxHostRecovery,
-  AMUX_HOST_EVIDENCE_AUTO_READ_MS, AMUX_HOST_EVIDENCE_AUTO_READS } from
+  AMUX_HOST_EVIDENCE_AUTO_READ_MS, AMUX_HOST_EVIDENCE_AUTO_READS, AmuxOneClickRecoveryView,
+  bindAmuxPreApprovalQuote, fetchAmuxPreApprovalQuote, AMUX_PREAPPROVAL_AUTO_READ_MS,
+  AMUX_PREAPPROVAL_AUTO_READS } from
   "@/components/admin/AmuxOwnerRecoveryInspectionPanel";
-import type { AmuxHostRecoveryRead } from "@/components/admin/AmuxOwnerRecoveryInspectionPanel";
+import type { AmuxHostRecoveryRead, AmuxPreApprovalQuoteState } from "@/components/admin/AmuxOwnerRecoveryInspectionPanel";
 import type { AmuxV22RecoveryRead } from "@/lib/amux/v22TaskRecoveryCore";
 import { adminAmuxRecoveryInspectionMessages } from "@/lib/adminMessages/amuxRecoveryInspection";
 import { summarizeAmuxRecoveryUsage, type AmuxOwnerRecoveryInspection } from
@@ -990,4 +992,100 @@ test("pending host evidence is read back automatically within the owner read lim
   assert.ok(60_000 / AMUX_HOST_EVIDENCE_AUTO_READ_MS <= 12);
   // Long enough to cover a controller tick (60 s) plus a bridge tick (30 s).
   assert.ok(AMUX_HOST_EVIDENCE_AUTO_READ_MS * AMUX_HOST_EVIDENCE_AUTO_READS >= 120_000);
+});
+
+// Owner decision 2026-11-08: one click requests the inspection and a
+// single-use consent; the card then shows waiting, opened or refused.
+const preApprovalQuote = { taskId: identity.taskId, taskRevision: identity.taskRevision,
+  priorAttemptId: identity.attemptId, cost: quote, expiresInMinutes: 30 as const,
+  eligible: true, reason: null, retryWrite: false as const };
+const preApproval = (state: "waiting" | "applied" | "refused" | "expired",
+  reason: string | null = null) => ({ id: "00000000-0000-4000-8000-000000000020", state,
+  requestedAt: "2026-11-08T01:00:00.000Z", expiresAt: "2026-11-08T01:30:00.000Z",
+  costDigest: quote.costDigest, reason,
+  approvalId: state === "applied" ? "00000000-0000-4000-8000-000000000021" : null });
+const oneClickView = (data: AmuxHostRecoveryRead | null, quoteState: AmuxPreApprovalQuoteState =
+  { state: "idle" }, confirmed = false) => AmuxOneClickRecoveryView({
+  m: adminAmuxRecoveryInspectionMessages.ko, data, quote: quoteState, confirmed,
+  onConfirm: () => {}, onStart: () => {}, onApprove: () => {}, onCancel: () => {},
+  busy: false, writesBlocked: false, nowMs: Date.parse("2026-11-08T01:12:30.000Z"),
+  returnTo: "/admin/amux-execution?tab=review" });
+
+test("one click confirms the server quote: Task, revision, attempt, cost and 30-minute expiry", () => {
+  const idle = oneClickView(null);
+  assert.match(textOf(idle), /종료가 확인되면 1회 재실행/);
+  assert.equal(propsOf(idle).some((props) => props["data-testid"] === "admin-amux-one-click-confirmation"), false);
+  const tree = oneClickView(null, { state: "ready", quote: preApprovalQuote });
+  const text = textOf(tree);
+  assert.match(text, /task-1/); assert.match(text, /attempt-1/);
+  assert.match(text, /US\$3\.40/); assert.match(text, /US\$6\.80/); assert.match(text, /30분/);
+  const approve = propsOf(tree).find((props) => props["data-testid"] === "admin-amux-one-click-approve");
+  assert.equal(approve?.disabled, true);
+  const confirmed = propsOf(oneClickView(null, { state: "ready", quote: preApprovalQuote }, true))
+    .find((props) => props["data-testid"] === "admin-amux-one-click-approve");
+  assert.equal(confirmed?.disabled, false);
+  const ineligible = textOf(oneClickView(null, { state: "ready", quote: { ...preApprovalQuote,
+    cost: null, eligible: false, reason: "preapproval_pending" } }));
+  assert.match(ineligible, /이미 원클릭 복구가 대기 중/);
+});
+
+test("one click shows waiting with time left, then the opened or refused result as recorded", () => {
+  const waiting = oneClickView({ ...hostFixture(), state: "pending", evidenceId: null,
+    evidenceDigest: null, cost: null, quote: null, preApproval: preApproval("waiting") });
+  assert.match(textOf(waiting), /종료 확인을 기다리는 중/); assert.match(textOf(waiting), /17:30/);
+  assert.equal(propsOf(waiting).some((props) => props["data-testid"] === "admin-amux-one-click-start"), false);
+  const applied = textOf(oneClickView({ ...hostFixture(), state: "approved",
+    taskRevision: identity.taskRevision + 1, approvalId: "00000000-0000-4000-8000-000000000021",
+    preApproval: preApproval("applied") }));
+  assert.match(applied, /추가 실행 1회가 열렸습니다/);
+  const refused = oneClickView({ ...hostFixture(), preApproval: preApproval("refused",
+    "runtime_observation_unverified") });
+  assert.match(textOf(refused), /실행을 열지 않았습니다/);
+  assert.match(textOf(refused), /worker가 재시작/);
+  assert.equal(propsOf(refused).some((props) => props["data-testid"] === "admin-amux-one-click-start"), true);
+  assert.match(textOf(oneClickView({ ...hostFixture(), preApproval: preApproval("expired",
+    "preapproval_expired") })), /시간 안에 증거가 오지 않아/);
+});
+
+test("the quote binds only this identity and the POST sends the quoted digest, never a client cost", async () => {
+  assert.equal(bindAmuxPreApprovalQuote(preApprovalQuote, identity)?.eligible, true);
+  assert.equal(bindAmuxPreApprovalQuote({ ...preApprovalQuote, taskRevision: 5 }, identity), null);
+  assert.equal(bindAmuxPreApprovalQuote({ ...preApprovalQuote, priorAttemptId: "attempt-2" }, identity), null);
+  assert.equal(bindAmuxPreApprovalQuote({ ...preApprovalQuote, eligible: false }, identity), null);
+  const reads: string[] = [];
+  const loaded = await fetchAmuxPreApprovalQuote({ identity, controller: new AbortController(),
+    isCurrent: () => true, fallback: "unavailable",
+    fetcher: async (url) => { reads.push(String(url)); return Response.json(preApprovalQuote); } });
+  assert.equal(loaded?.state, "ready");
+  assert.equal(reads[0], "/api/admin/amux/execution-recovery?taskId=task-1&view=preapproval_quote");
+  const calls: RequestInit[] = [];
+  const result = await fetchAmuxHostRecovery({ identity, requestId: inspectionRequestId,
+    action: "preapprove_attempt", expectedReceipt: { preApprovalCostDigest: quote.costDigest },
+    controller: new AbortController(), isCurrent: () => true, fallback: "unavailable",
+    fetcher: async (_url, init) => { calls.push(init!); return Response.json({ ...hostFixture(),
+      state: "pending", evidenceId: null, evidenceDigest: null, cost: null, quote: null,
+      eligibility: { ...normalEligibility, approveAttempt: false },
+      preApproval: preApproval("waiting") }); } });
+  assert.equal(result?.state, "ready"); assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(String(calls[0].body)), { action: "preapprove_attempt",
+    taskId: identity.taskId, expectedRevision: identity.taskRevision,
+    priorAttemptId: identity.attemptId, requestId: inspectionRequestId,
+    costDigest: quote.costDigest, acceptRetry: true });
+  // An answer that names another consent cost is not taken as this write.
+  const mismatched = await fetchAmuxHostRecovery({ identity, requestId: inspectionRequestId,
+    action: "preapprove_attempt", expectedReceipt: { preApprovalCostDigest: quote.costDigest },
+    controller: new AbortController(), isCurrent: () => true, fallback: "unavailable",
+    fetcher: async () => Response.json({ ...hostFixture(), state: "pending", evidenceId: null,
+      evidenceDigest: null, cost: null, quote: null,
+      preApproval: { ...preApproval("waiting"), costDigest: "d".repeat(64) } }) });
+  assert.equal(mismatched?.state, "unavailable");
+  // A malformed pre-approval in the read is refused outright.
+  assert.equal(bindAmuxHostRecovery({ ...hostFixture(), preApproval: { ...preApproval("applied"),
+    approvalId: null } }, identity, inspectionRequestId), null);
+  const pending: AmuxPendingRecovery = { version: 1, identity: { ...identity },
+    requestId: inspectionRequestId, action: "preapprove_attempt",
+    expectedReceipt: { preApprovalCostDigest: quote.costDigest } };
+  assert.deepEqual(bindAmuxPendingRecovery(pending, identity.taskId), pending);
+  assert.equal(bindAmuxPendingRecovery({ ...pending, expectedReceipt: null }, identity.taskId), null);
+  assert.equal(AMUX_PREAPPROVAL_AUTO_READ_MS * AMUX_PREAPPROVAL_AUTO_READS >= 30 * 60_000, true);
 });
