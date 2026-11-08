@@ -2515,7 +2515,9 @@ const checks = [
       );
       const buttonClass = buttonClassMatch ? buttonClassMatch[1] : "";
       const buttonClassUsages = (
-        source.match(/className=\{consentButtonClass\}/g) || []
+        // The builder may append size classes (readable notice), so accept the
+        // bare class or a template literal that starts with it.
+        source.match(/className=\{(?:consentButtonClass|`\$\{consentButtonClass\}[^`]*`)\}/g) || []
       ).length;
       const consentDecisions = (
         source.match(/<ConsentAction\s*\n?\s*kind="(decline|accept)"/g) || []
