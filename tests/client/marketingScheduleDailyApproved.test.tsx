@@ -172,7 +172,8 @@ for (const locale of ["en", "ko"] as const) {
       now += 60 * 1000; // the question stays open a minute
       return true;
     });
-    assert.ok(question.includes("Instagram ko: 11/8, 11/9 (2"), question);
+    // Today's slot shows its real local time; tomorrow's is the usual 10:00.
+    assert.ok(question.includes("Instagram ko: 11/8 13:06, 11/9 (2"), question);
     assert.deepEqual(sent, { refused: m.scheduleDailyPlanChanged });
     assert.ok(!m.scheduleDailyPlanChanged.includes("{"));
 
@@ -201,6 +202,30 @@ for (const locale of ["en", "ko"] as const) {
       "2026-11-10T01:00:00.000Z",
       "2026-11-08T00:00:00.000Z",
     ]);
+  });
+
+  // Seoul 15:00 and Brisbane 16:00 on 8 November: both markets' 10:00 has passed.
+  test(`${locale}: pressed in the afternoon, the confirmation shows today's real local time`, () => {
+    const afternoon = Date.parse("2026-11-08T06:00:00.000Z");
+    const [action] = scheduleDailyApprovedActions(rows(), [], m, () => afternoon);
+    const confirm = asked(action);
+    assert.ok(confirm.includes("Instagram ko: 11/8 15:05, 11/9, 11/10 (3"), confirm);
+    assert.ok(confirm.includes("LinkedIn en: 11/8 16:05 (1"), confirm);
+    assert.ok(!confirm.includes("{"), confirm);
+    assert.deepEqual(timesOf(marketingBatchToSend(action, () => true)), [
+      "2026-11-08T06:05:00.000Z",
+      "2026-11-09T01:00:00.000Z",
+      "2026-11-10T01:00:00.000Z",
+      "2026-11-08T06:05:00.000Z",
+    ]);
+  });
+
+  test(`${locale}: when the days already held could not all be read, the button is disabled and sends nothing`, () => {
+    const [action] = scheduleDailyApprovedActions(rows(), null, m, () => NOW);
+    assert.equal(action.unavailable, m.scheduleDailyTakenIncomplete);
+    assert.ok(!m.scheduleDailyTakenIncomplete.includes("{"));
+    assert.deepEqual(action.batch?.(), []);
+    assert.deepEqual(marketingBatchToSend(action, () => true), { refused: m.scheduleDailyTakenIncomplete });
   });
 
   test(`${locale}: a declined confirmation sends nothing`, () => {

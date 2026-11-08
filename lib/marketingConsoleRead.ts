@@ -202,35 +202,51 @@ export type MarketingConsolePayload = {
    * newest rows the page lists.
    */
   takenPublishDays?: DailyScheduleTakenSlot[];
+  /**
+   * The published section only: true when the read above stopped at its
+   * limit. The list then misses days, so the console does not offer the plan.
+   */
+  takenPublishDaysTruncated?: boolean;
 };
 
-/** Far more than any account's pending and recent days; a cut only ever under-counts the oldest. */
+/**
+ * Far more than the planned accounts' recent and pending days (their weekly
+ * caps bound the first). A read that reaches it is reported, not cut silently.
+ */
 const TAKEN_PUBLISH_DAYS_LIMIT = 500;
 
 /**
- * Days already held: every slot spent in the publisher's rolling week (the
- * last seven UTC days, so the weekly cap can be counted), and every post still
- * waiting in `scheduled` whatever day it holds, because a requeued post keeps
- * its earlier attempt's day and still has to spend a new one.
+ * Days already held on the accounts the plan covers: every slot spent in the
+ * publisher's rolling week (the last seven UTC days, so the weekly cap can be
+ * counted), and every post still waiting in `scheduled` whatever day it holds,
+ * because a requeued post keeps its earlier attempt's day and still has to
+ * spend a new one. One row past the limit is read, so a cut is known: the
+ * caller then withholds the plan instead of planning over a missing day.
  */
-async function readTakenPublishDays(): Promise<DailyScheduleTakenSlot[]> {
+async function readTakenPublishDays(
+  channelIds: readonly string[]
+): Promise<{ slots: DailyScheduleTakenSlot[]; truncated: boolean }> {
+  if (channelIds.length === 0) return { slots: [], truncated: false };
   const since = new Date(
     `${new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}T00:00:00.000Z`
   );
   const posts = await prisma.marketingPost.findMany({
     where: {
+      channelId: { in: [...channelIds] },
       OR: [{ slotDate: { gte: since } }, { status: "scheduled" }],
     },
-    orderBy: { createdAt: "desc" },
-    take: TAKEN_PUBLISH_DAYS_LIMIT,
+    take: TAKEN_PUBLISH_DAYS_LIMIT + 1,
     select: { channelId: true, status: true, slotDate: true, scheduledAt: true },
   });
-  return posts.map((post) => ({
-    channelId: post.channelId,
-    status: post.status,
-    slotDay: post.slotDate?.toISOString().slice(0, 10) ?? null,
-    scheduledAt: post.scheduledAt?.toISOString() ?? null,
-  }));
+  return {
+    truncated: posts.length > TAKEN_PUBLISH_DAYS_LIMIT,
+    slots: posts.slice(0, TAKEN_PUBLISH_DAYS_LIMIT).map((post) => ({
+      channelId: post.channelId,
+      status: post.status,
+      slotDay: post.slotDate?.toISOString().slice(0, 10) ?? null,
+      scheduledAt: post.scheduledAt?.toISOString() ?? null,
+    })),
+  };
 }
 
 const state = (
@@ -577,9 +593,17 @@ export async function readMarketingConsole(
         },
       },
     });
-    const takenPublishDays = await readTakenPublishDays();
+    // Only the accounts the plan can cover: those with an approved post on this page.
+    const taken = await readTakenPublishDays([
+      ...new Set(
+        posts
+          .filter((post) => post.status === "approved" && post.channel.provider !== "manual")
+          .map((post) => post.channel.id)
+      ),
+    ]);
     return {
-      takenPublishDays,
+      takenPublishDays: taken.slots,
+      ...(taken.truncated ? { takenPublishDaysTruncated: true } : {}),
       section,
       availability,
       ordering: "newest",

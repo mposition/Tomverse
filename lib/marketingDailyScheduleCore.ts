@@ -261,6 +261,17 @@ const approvalOrder = (a: DailySchedulePost, b: DailySchedulePost) => {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 };
 
+/**
+ * The slot's local wall clock ("15:05") when it is not the usual 10:00, so the
+ * confirmation can show a today slot that became "as soon as possible"; null
+ * for a slot at 10:00.
+ */
+export const offHourLocalTime = (slot: DailyScheduleSlot, timeZone: string): string | null => {
+  const local = localParts(Date.parse(slot.scheduledAt), timeZone);
+  if (local.hour === MARKETING_DAILY_SLOT_HOUR && local.minute === 0) return null;
+  return `${pad(local.hour)}:${pad(local.minute)}`;
+};
+
 /** The approved posts the publisher would carry: not hand-posted, and on an account it posts to. */
 export const dailySchedulablePosts = (
   posts: readonly DailySchedulePost[]

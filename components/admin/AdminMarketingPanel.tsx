@@ -50,6 +50,7 @@ import { marketingYoutubeChapterBlock, type MarketingVideoChapter } from "@/lib/
 import {
   dailySchedulablePosts,
   MARKETING_DAILY_SCHEDULE_LEAD_MS,
+  offHourLocalTime,
   planDailyMarketingSchedule,
   type DailySchedulePlan,
   type DailySchedulePost,
@@ -89,6 +90,8 @@ export type MarketingConsoleView = {
   experiments?: ExperimentsConsoleView;
   /** The published section only: days each account already holds (lib/marketingConsoleRead.ts). */
   takenPublishDays?: DailyScheduleTakenSlot[];
+  /** True when that read stopped at its limit: the plan would miss days, so it is not offered. */
+  takenPublishDaysTruncated?: boolean;
 };
 
 type LlmView = {
@@ -435,7 +438,11 @@ export function AdminMarketingPanel({
                 <MarketingActionRail
                   actions={[
                     ...scheduleAllApprovedActions(rows, m),
-                    ...scheduleDailyApprovedActions(rows, view.takenPublishDays ?? [], m),
+                    ...scheduleDailyApprovedActions(
+                      rows,
+                      view.takenPublishDaysTruncated ? null : (view.takenPublishDays ?? []),
+                      m
+                    ),
                   ]}
                   section={view.section}
                   onDone={done}
@@ -1871,10 +1878,14 @@ const shortDay = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice
  * person says yes. If the two differ, or a time is no longer far enough ahead,
  * nothing is sent: a page left open, or a question left open, would otherwise
  * send times that have passed.
+ *
+ * `takenOrIncomplete` is null when the days already held could not all be
+ * read: a plan without them could put two posts on one day, so the button is
+ * shown as unavailable and sends nothing.
  */
 export function scheduleDailyApprovedActions(
   rows: Row[],
-  taken: readonly DailyScheduleTakenSlot[],
+  takenOrIncomplete: readonly DailyScheduleTakenSlot[] | null,
   m: Record<string, string>,
   clock: () => number = Date.now
 ): MarketingAction[] {
@@ -1892,6 +1903,8 @@ export function scheduleDailyApprovedActions(
   }));
   const eligible = dailySchedulablePosts(posts);
   if (eligible.length === 0) return [];
+  const incomplete = takenOrIncomplete === null;
+  const taken = takenOrIncomplete ?? [];
   const planAt = (now: number) => planDailyMarketingSchedule({ posts, taken, now });
   const rendered = planAt(clock());
 
@@ -1919,7 +1932,15 @@ export function scheduleDailyApprovedActions(
       .map((account) =>
         m.scheduleDailyAccountLine
           .replace("{account}", labelFor(account.channelId))
-          .replace("{days}", account.slots.map((slot) => shortDay(slot.localDay)).join(", "))
+          .replace(
+            "{days}",
+            account.slots
+              .map((slot) => {
+                const at = offHourLocalTime(slot, account.timeZone);
+                return at === null ? shortDay(slot.localDay) : `${shortDay(slot.localDay)} ${at}`;
+              })
+              .join(", ")
+          )
           .replace("{n}", String(account.slots.length))
       );
     return [
@@ -1947,12 +1968,17 @@ export function scheduleDailyApprovedActions(
       id: "schedule-daily-approved",
       label: m.actScheduleDailyApproved.replace("{n}", String(eligible.length)),
       path: "",
-      unavailable: rendered.slots.length === 0 ? m.scheduleDailyNothingFits : undefined,
+      unavailable: incomplete
+        ? m.scheduleDailyTakenIncomplete
+        : rendered.slots.length === 0
+          ? m.scheduleDailyNothingFits
+          : undefined,
       confirm: () => {
         confirmed = planAt(clock());
         return confirmOf(confirmed);
       },
       stale: () => {
+        if (incomplete) return m.scheduleDailyTakenIncomplete;
         const now = clock();
         const fresh = planAt(now);
         const asked = confirmed ?? fresh;
@@ -1964,6 +1990,7 @@ export function scheduleDailyApprovedActions(
       },
       body: () => null,
       batch: () => {
+        if (incomplete) return [];
         sending = confirmed ?? planAt(clock());
         confirmed = null;
         return sending.slots.flatMap((slot) => {

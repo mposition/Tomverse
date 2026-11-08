@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   MARKETING_LOCAL_POSTING_WINDOW,
   localParts,
+  offHourLocalTime,
   planDailyMarketingSchedule,
   type DailySchedulePost,
   type DailyScheduleTakenSlot,
@@ -157,6 +158,24 @@ test("late in the market's day, today's slot is as soon as possible, then tomorr
     posts: [post("a")],
   });
   assert.deepEqual(times(tomorrow), ["2026-11-09T01:00:00.000Z"]);
+});
+
+test("a slot moved off 10:00 reports its local time; a 10:00 slot reports none", () => {
+  // Seoul 15:00 on 8 November.
+  const plan = planDailyMarketingSchedule({
+    now: Date.parse("2026-11-08T06:00:00.000Z"),
+    taken: [],
+    posts: [post("a"), post("b", { approvedAt: "2026-11-07T01:00:00.000Z" })],
+  });
+  const [account] = plan.accounts;
+  assert.equal(account.timeZone, "Asia/Seoul");
+  assert.deepEqual(
+    account.slots.map((slot) => [slot.localDay, offHourLocalTime(slot, account.timeZone)]),
+    [
+      ["2026-11-08", "15:05"],
+      ["2026-11-09", null],
+    ]
+  );
 });
 
 test("near midnight each market counts its own today, and every time is inside 09:00-20:00 local", () => {
