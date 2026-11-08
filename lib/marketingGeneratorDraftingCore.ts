@@ -33,7 +33,7 @@ import {
 import type { MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Recorded with each run, so a change to what the model is asked is a new version. */
-export const MARKETING_A5_PROMPT_VERSION = "a5-social-v8";
+export const MARKETING_A5_PROMPT_VERSION = "a5-social-v9";
 
 /** Drafts one call may propose for one account. */
 export const MARKETING_A5_MAX_DRAFTS_PER_CALL = 5;
@@ -132,6 +132,7 @@ const SYSTEM_PROMPT = [
   "An asset with longForm true is a long video, such as a tutorial. On youtube its description says what the viewer will learn, in a few lines; Tomverse adds the video's chapter list after your post, so never write a timestamp or a chapter list yourself, and keep such a post under 1,500 characters.",
   "The assets list holds only assets this account has not used yet. Give each post a different asset; when there are fewer assets than posts, write fewer posts rather than carry an asset twice.",
   "An asset's publishedCopies are posts other Tomverse accounts already published with it. Carrying it again is fine, but write the post fresh: a different hook, a different first line and a different angle, and none of their sentences, phrases or structure reused. Only a claim's statement stays word for word.",
+  "An asset with pages is a carousel of that many images, posted together in order; its description is of the whole carousel. Write the post about the whole carousel, name only that asset id for it, and never put another asset in the same post.",
   "When no asset fits the brief's topic, do not skip the post: write it about what an asset you were given shows, using only its description. Whenever the assets list holds at least one asset, write at least one post; return no draft only when the list is empty, since a post without an image or a video is never published. Never write what an asset's description does not support, even to stay on the brief's topic.",
   'Answer with one JSON object and nothing else: {"drafts":[{"renderedText":string,"claimIds":[string],"assetIds":[string],"disclosureFlags":["advertising"]}]}.',
 ].join("\n");
@@ -176,7 +177,7 @@ export function marketingA5AssetsFor(
   accountId?: string,
 ): MarketingGeneratorContextAnswer["assets"] {
   const used = new Set(context.channels.find((account) => account.id === accountId)?.usedAssetIds ?? []);
-  return context.assets.filter(
+  const fits = context.assets.filter(
     (asset) =>
       !used.has(asset.id) &&
       asset.allowedChannels.includes(channel) &&
@@ -184,7 +185,51 @@ export function marketingA5AssetsFor(
       (asset.kind === "video" || (asset.kind === "image" && !VIDEO_ONLY_CHANNELS.has(channel))) &&
       (kind === undefined || asset.kind === kind),
   );
+  // A carousel is offered as its first page only, and only whole: every page
+  // fits here and the platform takes that many images in one post.
+  const fitting = new Set(fits.map((asset) => asset.id));
+  return fits.filter((asset) => {
+    const page = marketingCarouselPage(asset.id);
+    if (!page) return true;
+    if (page.page !== 1 || asset.kind !== "image") return false;
+    if (page.of > (MARKETING_CAROUSEL_MAX_IMAGES[channel] ?? 1)) return false;
+    return marketingCarouselPageIds(page).every((id) => fitting.has(id));
+  });
 }
+
+/**
+ * A carousel (owner 2026-11-08): images posted together, in order, as one post.
+ * Its pages are separate assets, each approved in Admin, named
+ * `<series>-p<page>of<pages>` -- e.g. `media-20261108-assistant-steps-en-card-p1of5`.
+ * The model sees page 1 with the page count; code adds the other pages.
+ */
+const CAROUSEL_PAGE = /^(.+)-p([1-9]\d?)of([2-9]|1\d|20)$/u;
+
+export function marketingCarouselPage(
+  assetId: string,
+): { readonly series: string; readonly page: number; readonly of: number } | null {
+  const match = CAROUSEL_PAGE.exec(assetId);
+  if (!match) return null;
+  const page = Number(match[2]);
+  const of = Number(match[3]);
+  return page <= of ? { series: match[1], page, of } : null;
+}
+
+const marketingCarouselPageIds = (page: { readonly series: string; readonly of: number }) =>
+  Array.from({ length: page.of }, (_, index) => `${page.series}-p${index + 1}of${page.of}`);
+
+/**
+ * How many images one post may carry, per platform. A carousel longer than its
+ * platform's limit is not offered there: X takes four images, so a five-page
+ * carousel never goes to X. A platform not listed takes no carousel.
+ */
+export const MARKETING_CAROUSEL_MAX_IMAGES: Readonly<Record<string, number>> = {
+  instagram: 10,
+  facebook: 10,
+  threads: 10,
+  linkedin: 9,
+  x: 4,
+};
 
 /**
  * How many of an account's days carry a video, per platform: `video` days in
@@ -263,6 +308,8 @@ export function marketingA5Messages(
     assets: marketingA5AssetsFor(context, account.channel, scope.locale, scope.mediaKind, account.id).map((asset) => ({
       id: asset.id,
       kind: asset.kind ?? null,
+      // A carousel's first page stands for the whole carousel.
+      ...(marketingCarouselPage(asset.id) ? { pages: marketingCarouselPage(asset.id)?.of } : {}),
       ...(asset.longForm ? { longForm: true } : {}),
       description: asset.alt?.[scope.locale] ?? null,
       claimIds: asset.claimIds,
@@ -314,6 +361,7 @@ export type MarketingA5Refusal =
   | "draft_has_no_asset"
   | "draft_names_unknown_claim"
   | "draft_names_unknown_asset"
+  | "draft_mixes_carousel"
   | "draft_shape";
 
 /**
@@ -373,6 +421,11 @@ export function readMarketingA5Answer(
     if (proposal.assetIds.length === 0) return drop("draft_has_no_asset");
     if (proposal.claimIds.some((id) => !claimIds.has(id))) return drop("draft_names_unknown_claim");
     if (proposal.assetIds.some((id) => !assetIds.has(id))) return drop("draft_names_unknown_asset");
+    // A carousel is a post of its own: its pages, in order, and nothing else.
+    const named = [...new Set(proposal.assetIds)];
+    const carousel = named.map(marketingCarouselPage).find((page) => page !== null);
+    if (carousel && named.length > 1) return drop("draft_mixes_carousel");
+    const carried = carousel ? marketingCarouselPageIds(carousel) : named;
     // A long-form video's post never carries #Shorts (owner decision 2026-11-07).
     const tagged = marketingHashtagsWithinBounds(proposal.renderedText, account?.channel ?? "", competitorNames, {
       longForm: proposal.assetIds.some((id) => longForm.has(id)),
@@ -386,7 +439,7 @@ export function readMarketingA5Answer(
       renderedText: tagged.text,
       claimIds: [...new Set(proposal.claimIds)],
       // The alt text is the registry's, per locale; the key names that locale.
-      assets: [...new Set(proposal.assetIds)].map((assetId) => ({ assetId, altKey: scope.locale })),
+      assets: carried.map((assetId) => ({ assetId, altKey: scope.locale })),
       // Advertising is the service's flag, not the model's choice: every post
       // from a Tomverse account is one (policy §13), and the intake refuses a
       // draft without it.
