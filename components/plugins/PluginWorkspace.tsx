@@ -6,6 +6,7 @@ import { signIn } from "next-auth/react";
 import { Check, Plus, Puzzle, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { ReviewNavigation } from "@/components/chat/ReviewStudioChrome";
+import { MarketingConsentSlot } from "@/components/analytics/AnalyticsProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { PluginLogo } from "./PluginLogo";
 import { mcpConnectorCopy } from "@/lib/mcpConnectorCopy";
@@ -106,6 +107,7 @@ export function PluginWorkspace() {
       <header className={styles.header}><div><h1>{c.title}</h1><p>{c.subtitle}</p></div>
         <div className={styles.actions}><button type="button" className={styles.iconButton} disabled={busy || loading} onClick={() => { setError(null); void refresh().catch(() => setError(c.error)); }} aria-label={c.refresh}><RefreshCw size={18} /></button>
           <button type="button" className={styles.primary} onClick={() => openAdd()} disabled={!inventory.enabled || signInRequired || busy}><Plus size={18} />{c.add}</button></div></header>
+      <MarketingConsentSlot />
       <div className={styles.toolbar}><label className={styles.search}><Search size={18} aria-hidden="true" /><input aria-label={c.search} placeholder={c.search} value={search} onChange={e => { setSearch(e.target.value); setLimit(24); }} /></label>
         {tab !== "approvals" && <><select className={styles.filter} aria-label={p.category} value={category} onChange={e => { setCategory(e.target.value as typeof category); setLimit(24); }}>
           <option value="all">{p.any}</option>{Object.entries(p.categories).map(([key, value]) => <option key={key} value={key}>{value}</option>)}

@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { prepareGuestPage, mockAuthenticatedApi, expectNoHorizontalOverflow } from "./support/app-fixtures";
-import { installChatModelStub, restoreActiveConversation } from "./support/chat-state-fixtures";
+import { installChatModelStub, restoreActiveConversation, setDeterministicTheme } from "./support/chat-state-fixtures";
 
 test.setTimeout(120_000);
 const tools = [{ name: "search", mode: "read" }, { name: "create_note", mode: "confirm" }];
@@ -9,6 +9,49 @@ test.beforeEach(async ({ page, baseURL }) => {
   await page.context().addCookies([{ name: "__tomverse_e2e_auth", value: "1", url: baseURL! },
     { name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL! }]);
 });
+
+for (const theme of ["light", "dark"] as const) {
+  test(`plugin consent reserves readable space above provider cards in ${theme}`, async ({ page, baseURL, isMobile }) => {
+    await page.setViewportSize({ width: isMobile ? 320 : 1440, height: 900 });
+    const account = await mockAuthenticatedApi(page);
+    account.theme = theme;
+    await setDeterministicTheme(page, theme);
+    await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
+    await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+    let writes = 0;
+    await page.route("**/api/mcp/**", route => {
+      if (route.request().method() !== "GET") writes++;
+      return route.fulfill({ json: { enabled: false, servers: [], connections: [], invocations: [] } });
+    });
+    await page.goto("/plugins?lang=ko");
+    const notice = page.getByTestId("marketing-consent-slot").getByTestId("chat-consent-notice");
+    await expect(notice).toBeVisible();
+    const metrics = await notice.evaluate(element => {
+      const visible = (selector: string) => Array.from(element.querySelectorAll(selector)).filter(node => node.getBoundingClientRect().height > 0);
+      return {
+        fonts: visible("p,a,button").map(node => Number.parseFloat(getComputedStyle(node).fontSize)),
+        explanationBottom: Math.max(...visible("p").map(node => node.getBoundingClientRect().bottom)),
+        actionTop: Math.min(...visible("button").map(node => node.getBoundingClientRect().top)),
+      };
+    });
+    expect(metrics.fonts.length).toBeGreaterThanOrEqual(4);
+    expect(metrics.fonts.every(size => size >= 14)).toBe(true);
+    expect(metrics.actionTop).toBeGreaterThan(metrics.explanationBottom);
+    const github = page.locator('[data-testid="plugin-card"][data-provider="github"] h3');
+    await github.evaluate(element => element.scrollIntoView({ block: "center", behavior: "instant" }));
+    expect(await github.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const notice = document.querySelector('[data-testid="chat-consent-notice"]')!.getBoundingClientRect();
+      return notice.bottom <= rect.top && element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+    })).toBe(true);
+    await notice.scrollIntoViewIfNeeded();
+    expect(await notice.getByRole("link").evaluate(element => element.getClientRects().length)).toBe(1);
+    await notice.getByTestId("analytics-consent-decline").click();
+    await expect(notice).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+    expect(writes).toBe(0);
+  });
+}
 test("@ui-risk Chat sends a connector only after an explicit conversation selection", async ({ page }) => {
   await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-5-6-luna"], selectionMode: "manual", messages: [] });
   await restoreActiveConversation(page);
