@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { repositoryPathRefusal } from "./decisionMakerCore.ts";
+
 /**
  * A v22 worker's question to the owner (operator decision 2026-10-30).
  *
@@ -23,6 +25,10 @@ export const AMUX_V22_OWNER_QUESTION_MAX_CHARS = 2_000;
 export const AMUX_V22_OWNER_UNBLOCKS_MAX_CHARS = 1_000;
 export const AMUX_V22_OWNER_OPTION_LABEL_MAX_CHARS = 300;
 export const AMUX_V22_OWNER_OPTIONS_MAX = 6;
+/** What the worker found, for whoever decides (the Decision Maker reads it on its card). */
+export const AMUX_V22_OWNER_CONTEXT_MAX_CHARS = 2_000;
+/** Repository files the decider should read; they go into the Decision Maker's snapshot. */
+export const AMUX_V22_OWNER_PATHS_MAX = 32;
 export const AMUX_V22_OWNER_ANSWER_MAX_CHARS = 8_000;
 /** An answer is also bounded in UTF-8 bytes: it always goes whole into the
  * resumed prompt, never cut. */
@@ -47,6 +53,10 @@ export type AmuxV22OwnerQuestion = {
   question: string;
   unblocks: string;
   options: Array<{ id: string; label: string }>;
+  /** Optional (2026-11-08): what the worker found and why it is a decision. */
+  context?: string;
+  /** Optional (2026-11-08): repository-relative files the decider should read. */
+  paths?: string[];
 };
 
 const OPTION_ID = /^[a-z][a-z0-9_-]{0,31}$/;
@@ -91,8 +101,79 @@ export function parseAmuxV22OwnerQuestion(resultText: string):
         !label || options.some((seen) => seen.id === option.id)) return null;
     options.push({ id: option.id, label });
   }
-  return { question, unblocks, options };
+  // The context and the paths only help the decider: one that does not fit is
+  // left out, never a reason to lose the question.
+  const context = boundedText(record.context, AMUX_V22_OWNER_CONTEXT_MAX_CHARS);
+  const paths = Array.isArray(record.paths) ? [...new Set(record.paths.filter(
+    (path): path is string => typeof path === "string" && repositoryPathRefusal(path) === null))]
+    .slice(0, AMUX_V22_OWNER_PATHS_MAX) : [];
+  return { question, unblocks, options, ...(context ? { context } : {}),
+    ...(paths.length > 0 ? { paths } : {}) };
 }
+
+/** The local card title, at most this many UTF-16 units (local AMUX's bound). */
+const DM_CARD_TITLE_MAX = 200;
+/** The card context: the card line and the worker's own context. */
+const DM_CARD_CONTEXT_MAX = 4_000;
+
+const clip = (text: string, max: number) => {
+  if (text.length <= max) return text;
+  let out = "";
+  for (const char of text) {
+    if (out.length + char.length > max - 1) break;
+    out += char;
+  }
+  return out + "…";
+};
+
+/**
+ * The typed-ask card the relay files for a v22 question, so the Decision
+ * Maker reads which card asks, what the worker found, and which files to look
+ * at (owner, 2026-11-08: the DM escalated AMUX-AUTOFILE-003 because its card
+ * held a question alone, titled by a Task id, with no context or paths). The
+ * title names the card; the context starts with the card line; the paths are
+ * the worker's and go into the DM's snapshot.
+ */
+export function amuxV22QuestionDmCard(input: { questionId: string; worker: string;
+  providerClass: string; taskId: string; sequence: number; displayKey: string | null;
+  cardTitle: string | null; question: AmuxV22OwnerQuestion }) {
+  const name = input.displayKey ?? `v22 Task ${input.taskId}`;
+  const title = input.cardTitle?.trim() ? `${name} ${input.cardTitle.trim()}` :
+    `${name} question ${input.sequence}`;
+  const cardLine = `Card: ${name}${input.cardTitle?.trim() ? ` "${input.cardTitle.trim()}"` : ""}` +
+    `, question ${input.sequence} from worker ${input.worker}.`;
+  let context = clip([cardLine, input.question.context].filter(Boolean).join("\n\n"),
+    DM_CARD_CONTEXT_MAX);
+  // Local AMUX refuses a typed ask over 16 KiB (a refused card is filed again
+  // every tick and never reaches the Decision Maker), and the routing sends a
+  // card text over 16 KiB to the operator. The optional parts give way: paths
+  // from the end first, then the context down to the card line.
+  const paths = [...(input.question.paths ?? [])];
+  const fixed = { title: clip(title.replace(/\s+/g, " "), DM_CARD_TITLE_MAX),
+    question: input.question.question, unblocks: input.question.unblocks,
+    options: input.question.options };
+  while (amuxV22QuestionCardBytes({ ...fixed, context, paths }) > DM_CARD_BUDGET_BYTES) {
+    if (paths.length > 0) paths.pop();
+    else if (context.length > cardLine.length) context = clip(context, Math.max(cardLine.length, context.length - 500));
+    else break;
+  }
+  return { question_id: input.questionId, worker: input.worker, provider: input.providerClass,
+    ...fixed, context, context_paths: paths };
+}
+
+/**
+ * Both ends bound the card at 16 KiB: local AMUX its typed ask, and the
+ * Decision Maker routing its whole card text (DM_CARD_TEXT_MAX_BYTES). 15 KiB
+ * leaves room for the format, type and tags the card text adds.
+ */
+const DM_CARD_BUDGET_BYTES = 15 * 1_024;
+
+/** The card as the Decision Maker would read it, in UTF-8 bytes. */
+export const amuxV22QuestionCardBytes = (input: { title: string; question: string; unblocks: string;
+  options: AmuxV22OwnerQuestion["options"]; context: string; paths: readonly string[] }) =>
+  Buffer.byteLength(JSON.stringify({ title: input.title, question: input.question, unblocks: input.unblocks,
+    options: input.options.map((option) => ({ id: option.id, label: option.label, effect: "choice_only",
+      paths: [] })), context: input.context, contextPaths: input.paths }), "utf8");
 
 /** The digest the question row keeps instead of the text (the text stays in
  * the encrypted result body). */
@@ -124,8 +205,9 @@ export const AMUX_V22_OWNER_QUESTION_RULES = [
   "Owner questions:",
   "- If you cannot finish without a decision only the owner can make (product behaviour, scope, a choice between real alternatives), do not guess and do not stop with a partial result.",
   "- Instead, finish the run with your work so far and make the very last line of your final message exactly:",
-  `  ${AMUX_V22_OWNER_QUESTION_MARKER} {"question":"<one concrete question ending with ?>","unblocks":"<what the answer lets you finish>","options":[{"id":"a","label":"<option>"}]}`,
+  `  ${AMUX_V22_OWNER_QUESTION_MARKER} {"question":"<one concrete question ending with ?>","unblocks":"<what the answer lets you finish>","options":[{"id":"a","label":"<option>"}],"context":"<what you found: the code involved, how it behaves now, why this is a decision>","paths":["<repository-relative file the decider should read>"]}`,
   "- options may be empty; option ids are lowercase letters, digits, - or _. Ask one question at a time.",
+  "- Give real alternatives as options whenever you can, and fill context and paths: the Decision Maker answers from this line and those files alone, and escalates a question it has no grounds for.",
   "- The Task then waits for the answer and comes back to you with the question, the answer and your previous change. It is not finished until its goal is met.",
 ].join("\n");
 

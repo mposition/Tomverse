@@ -28,6 +28,16 @@
 // Every word the card shows goes into the transcript the Guard judges at
 // submission, with the words inside the captures it used.
 //
+// The Higgsfield image path (owner 2026-11-08, run-higgsfield.mjs) adds
+// `generated:<file>`: a picture an image model made today, taken only from
+// <out-dir>/generated/. It is an AI photo like the library's (the locale's AI
+// line, never beside a capture, provenance ai_generated). Its words are in the
+// picture, not the layout, so such a spec carries `texts`, the approved words a
+// second review read in the picture, and they go into the transcript. The
+// address the band sets ("tomverse.app") is not judged: the Guard refuses any
+// address (hygiene url_like), and that one is ours, fixed by the band code. The
+// transcript and alt must pass the Guard's hygiene check here before submission.
+//
 // Exit codes: 0 written, 2 usage, 1 anything else.
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -48,6 +58,19 @@ const CARD_CHANNELS = {
   "zh-Hant": ["facebook", "instagram", "threads"],
   "zh-Hans": ["rednote"],
 };
+/**
+ * The channels a card on a generated picture goes to (design guide 13 of the
+ * owner's 2026-11-08 instruction, docs/policy/marketing-automation.md §7.6).
+ */
+const GENERATED_CHANNELS = {
+  en: ["facebook", "instagram", "linkedin", "x"],
+  ko: ["instagram", "linkedin"],
+  "zh-Hant": ["facebook", "instagram", "threads"],
+  "zh-Hans": ["rednote"],
+};
+/** The address the band of a generated card sets; not the Guard's to judge (see above). */
+const BAND_ADDRESS = "tomverse.app";
+const GENERATED_NAME = /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:png|jpe?g|webp)$/u;
 /** The line a card with an AI-made photo shows, per locale. */
 const AI_LINE = {
   en: "Photo: AI-generated",
@@ -110,8 +133,15 @@ if (spec.pack) {
       ].map(([name, text]) => [name, { file: pack.images?.[name], text: text ?? "" }]),
     );
 }
+const generatedDir = path.resolve(outDir, "generated");
 const pictureFile = (kind, name) => {
   if (kind === "capture") return captures[name] && packDir ? path.join(packDir, captures[name].file) : null;
+  if (kind === "generated") {
+    // Only a plain file name, inside today's generated/ folder.
+    if (!GENERATED_NAME.test(name)) return null;
+    const file = path.resolve(generatedDir, name);
+    return path.dirname(file) === generatedDir ? file : null;
+  }
   return library[name] ? path.join(libraryDir, library[name].file) : null;
 };
 
@@ -122,18 +152,28 @@ if (/<\s*(script|iframe|object|embed|link|meta|base|frame|input|textarea|select|
   fail("the layout may hold only HTML, CSS and capture: or library: pictures");
 }
 const named = [...layout.matchAll(/(?:src\s*=\s*["']|url\(\s*["']?)([^"')\s]+)/giu)].map((match) => match[1]);
+const PICTURE_REF = /^(capture|library|generated):([a-z0-9][a-z0-9.-]*)$/u;
 const unknown = named.filter((ref) => {
-  const m = /^(capture|library):([a-z0-9-]+)$/u.exec(ref);
+  const m = PICTURE_REF.exec(ref);
   return !m || !pictureFile(m[1], m[2]) || !existsSync(pictureFile(m[1], m[2]));
 });
-if (unknown.length > 0) fail(`the layout names pictures that are not captures or library entries: ${JSON.stringify(unknown)}`);
-const used = [...new Set(named)].map((ref) => ref.split(":"));
+if (unknown.length > 0) fail(`the layout names pictures that are not captures or library entries (or today's generated pictures):${JSON.stringify(unknown)}`);
+const used = [...new Set(named)].map((ref) => [ref.slice(0, ref.indexOf(":")), ref.slice(ref.indexOf(":") + 1)]);
 const usedCaptures = used.filter(([kind]) => kind === "capture").map(([, name]) => name);
-const usedAi = used.filter(([kind, name]) => kind === "library" && AI_PROVENANCES.includes(library[name].provenance));
+const usedGenerated = used.filter(([kind]) => kind === "generated");
+const usedAi = used.filter(([kind, name]) => kind === "generated" || (kind === "library" && AI_PROVENANCES.includes(library[name].provenance)));
 if (usedAi.length > 0 && usedCaptures.length > 0) {
   fail("an AI-made photo and a product capture may not share a card (an AI asset may not depict the product)");
 }
-const body = layout.replace(/(capture|library):([a-z0-9-]+)/gu, (_, kind, name) => pathToFileURL(pictureFile(kind, name)).href);
+const generated = usedGenerated.length > 0;
+const pictureTexts = generated ? spec.texts : [];
+if (generated && (!Array.isArray(pictureTexts) || pictureTexts.length === 0 || !pictureTexts.every((text) => typeof text === "string" && text.trim()))) {
+  fail("a card on a generated picture lists the words in the picture as spec.texts");
+}
+const body = layout.replace(/(capture|library|generated):([a-z0-9][a-z0-9.-]*)/gu, (whole, kind, name) => {
+  const file = pictureFile(kind, name);
+  return file ? pathToFileURL(file).href : whole;
+});
 
 const fonts =
   locale === "zh-Hant"
@@ -143,7 +183,7 @@ const fonts =
       : "'Geist', 'Noto Sans KR', sans-serif";
 const html = `<!doctype html>
 <html lang="${locale}"><head><meta charset="utf-8">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;700;900&family=Noto+Sans+TC:wght@400;500;700;900&family=Noto+Sans+SC:wght@400;500;700;900&family=Noto+Serif+KR:wght@500;700&family=Noto+Serif+TC:wght@500;700&family=Noto+Serif+SC:wght@500;700&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;700;900&family=Noto+Sans+TC:wght@400;500;700;900&family=Noto+Sans+SC:wght@400;500;700;900&family=Noto+Serif+KR:wght@500;700&family=Noto+Serif+TC:wght@500;700&family=Noto+Serif+SC:wght@500;700&display=block">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 1080px; height: 1350px; overflow: hidden; }
@@ -365,8 +405,31 @@ try {
 
 // Every word the card shows, for the Guard at submission: its own lines and
 // the words inside the captures it used.
-const transcript = [...cardLines, ...usedCaptures.map((name) => captures[name].text).filter(Boolean)].join(String.fromCharCode(10));
-const channels = CARD_CHANNELS[locale];
+// A Chinese full stop with a word straight after it reads as a domain
+// ("Luna。Claude", refused 2026-11-08), so it always has a space after it.
+const spaced = (text) => text.replace(/。(?=\S)/gu, "。 ");
+const transcript = spaced(
+  [
+    ...(generated ? cardLines.filter((line) => line !== BAND_ADDRESS) : cardLines),
+    ...usedCaptures.map((name) => captures[name].text).filter(Boolean),
+    ...pictureTexts.map((text) => text.replace(/\s+/gu, " ").trim()),
+  ].join(String.fromCharCode(10)),
+);
+const alt = spaced(spec.alt.trim());
+if (generated) {
+  // The Guard's own hygiene rules, run here so a card is not refused for them
+  // after its pictures were paid for (lib/marketingGuardNormalise.ts; Node
+  // strips the types).
+  let hygiene;
+  try {
+    ({ marketingTextHygiene: hygiene } = await import(pathToFileURL(path.resolve(toolDir, "..", "..", "lib", "marketingGuardNormalise.ts")).href));
+  } catch (error) {
+    fail(`the Guard's hygiene check could not be loaded (Node 22.18 or later runs it): ${error instanceof Error ? error.message : error}`);
+  }
+  const codes = [...new Set([...hygiene(transcript), ...hygiene(alt)])];
+  if (codes.length > 0) fail(`the words would fail the Guard's hygiene check: ${JSON.stringify(codes)}`);
+}
+const channels = (generated ? GENERATED_CHANNELS : CARD_CHANNELS)[locale];
 const ai = usedAi.length > 0;
 const validUntil = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
 writeFileSync(
@@ -388,8 +451,10 @@ writeFileSync(
         claimIds: usedCaptures.length > 0 ? packClaimIds : [],
         validUntil,
         disclosure: Object.fromEntries(channels.map((channel) => [channel, ai ? "caption_disclosure" : "none"])),
+        // An AI picture that shows a Tomverse screen is not the product
+        // interface itself (policy §7.3, owner 2026-11-08): only captures are.
         depictsProductInterface: usedCaptures.length > 0,
-        alt: { [locale]: spec.alt.trim() },
+        alt: { [locale]: alt },
       },
       transcript: { [locale]: transcript },
     },

@@ -402,7 +402,7 @@ export const revertedTimeout = (current: AutoRouterTunables, now: number): AutoR
 /** The analysis model's instruction for proposing a change, appended to the generator's. */
 export const TUNABLE_GENERATOR_RULE = [
     "You may also propose up to two setting changes in settingChanges, only where the evidence above shows the need; otherwise leave it empty.",
-    `routerTimeoutMs: the router's live deadline in milliseconds, ${ROUTER_TIMEOUT_TUNABLE.min}-${ROUTER_TIMEOUT_TUNABLE.max} in steps of ${ROUTER_TIMEOUT_TUNABLE.step}; raise it when routerStats shows timeouts or errors, lower it only when nothing timed out and p90 latency is far below it. Set value; leave modelId and hours null.`,
+    `routerTimeoutMs: the router's live deadline in milliseconds, ${ROUTER_TIMEOUT_TUNABLE.min}-${ROUTER_TIMEOUT_TUNABLE.max} in steps of ${ROUTER_TIMEOUT_TUNABLE.step}; propose a change only with evidence of deadline pressure or ample headroom. routerStats timeout counts record actual timeouts; historical errors may include unclassified timeouts, so errors alone or zero recorded timeouts do not justify changing it. Set value; leave modelId and hours null.`,
     `excludeModel: leave a candidate out of the router's choices for ${MODEL_EXCLUSION_TUNABLE.minHours}-${MODEL_EXCLUSION_TUNABLE.maxHours} hours when its answers in this cycle kept failing (answerStats). Set modelId to the exact candidate id and hours; leave value null.`,
     "Give each a one-sentence reason in Korean. A change outside these rules is not applied.",
 ].join("\n");

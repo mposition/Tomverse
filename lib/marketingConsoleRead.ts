@@ -23,8 +23,10 @@ import { buildExperimentsConsole, type ExperimentsConsoleView } from "@/lib/mark
 import {
   MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS,
   listOpenMarketingCommentAlerts,
+  marketingChannelCaps,
   readMarketingGraduation,
 } from "@/lib/marketingStore";
+import type { DailyScheduleTakenSlot } from "@/lib/marketingDailyScheduleCore";
 import {
   MARKETING_ASSET_READ_LIMIT,
   MARKETING_COMPETITOR_READ_LIMIT,
@@ -193,7 +195,59 @@ export type MarketingConsolePayload = {
   truncated?: boolean;
   /** The experiments section only: what the start form and the stop control need. */
   experiments?: ExperimentsConsoleView;
+  /**
+   * The published section only: the days each account has already spent or
+   * promised, for the "one a day" plan (lib/marketingDailyScheduleCore.ts).
+   * Read apart from the page, because today's post can be older than the
+   * newest rows the page lists.
+   */
+  takenPublishDays?: DailyScheduleTakenSlot[];
+  /**
+   * The published section only: true when the read above stopped at its
+   * limit. The list then misses days, so the console does not offer the plan.
+   */
+  takenPublishDaysTruncated?: boolean;
 };
+
+/**
+ * Far more than the planned accounts' recent and pending days (their weekly
+ * caps bound the first). A read that reaches it is reported, not cut silently.
+ */
+const TAKEN_PUBLISH_DAYS_LIMIT = 500;
+
+/**
+ * Days already held on the accounts the plan covers: every slot spent in the
+ * publisher's rolling week (the last seven UTC days, so the weekly cap can be
+ * counted), and every post still waiting in `scheduled` whatever day it holds,
+ * because a requeued post keeps its earlier attempt's day and still has to
+ * spend a new one. One row past the limit is read, so a cut is known: the
+ * caller then withholds the plan instead of planning over a missing day.
+ */
+async function readTakenPublishDays(
+  channelIds: readonly string[]
+): Promise<{ slots: DailyScheduleTakenSlot[]; truncated: boolean }> {
+  if (channelIds.length === 0) return { slots: [], truncated: false };
+  const since = new Date(
+    `${new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}T00:00:00.000Z`
+  );
+  const posts = await prisma.marketingPost.findMany({
+    where: {
+      channelId: { in: [...channelIds] },
+      OR: [{ slotDate: { gte: since } }, { status: "scheduled" }],
+    },
+    take: TAKEN_PUBLISH_DAYS_LIMIT + 1,
+    select: { channelId: true, status: true, slotDate: true, scheduledAt: true },
+  });
+  return {
+    truncated: posts.length > TAKEN_PUBLISH_DAYS_LIMIT,
+    slots: posts.slice(0, TAKEN_PUBLISH_DAYS_LIMIT).map((post) => ({
+      channelId: post.channelId,
+      status: post.status,
+      slotDay: post.slotDate?.toISOString().slice(0, 10) ?? null,
+      scheduledAt: post.scheduledAt?.toISOString() ?? null,
+    })),
+  };
+}
 
 const state = (
   read: { ok: true; value: boolean } | { ok: false }
@@ -521,12 +575,35 @@ export async function readMarketingConsole(
         errorCode: true,
         outcomeUnknownAt: true,
         publishAttempt: true,
+        // What the "one a day" plan orders and bounds by.
+        approvedAt: true,
+        approvalExpiresAt: true,
         // A hand-posted account's person copies the approved words from here.
         envelope: true,
-        channel: { select: { accountSlug: true, channel: true, provider: true } },
+        channel: {
+          select: {
+            id: true,
+            accountSlug: true,
+            channel: true,
+            provider: true,
+            defaultLocale: true,
+            dailyCapOverride: true,
+            weeklyCapOverride: true,
+          },
+        },
       },
     });
+    // Only the accounts the plan can cover: those with an approved post on this page.
+    const taken = await readTakenPublishDays([
+      ...new Set(
+        posts
+          .filter((post) => post.status === "approved" && post.channel.provider !== "manual")
+          .map((post) => post.channel.id)
+      ),
+    ]);
     return {
+      takenPublishDays: taken.slots,
+      ...(taken.truncated ? { takenPublishDaysTruncated: true } : {}),
       section,
       availability,
       ordering: "newest",
@@ -569,6 +646,13 @@ export async function readMarketingConsole(
         // Only a hand-posted account's words: a person posts them by hand
         // (owner 2026-11-07). The publisher's posts are already on the platform.
         renderedText: post.channel.provider === "manual" ? renderedText(post.envelope) : null,
+        // The account and its market, for the "one a day" plan.
+        channelId: post.channel.id,
+        accountLocale: post.channel.defaultLocale,
+        dailyCap: marketingChannelCaps(post.channel)?.daily ?? null,
+        weeklyCap: marketingChannelCaps(post.channel)?.weekly ?? null,
+        approvedAt: post.approvedAt?.toISOString() ?? null,
+        approvalExpiresAt: post.approvalExpiresAt?.toISOString() ?? null,
       })),
     };
   }

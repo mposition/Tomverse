@@ -347,6 +347,8 @@ async function runInBackground(input: {
                 // rewrite passes admitRouterRewrite exactly as a live one does.
                 rewrite: async (rewriteGuidance, decision) => {
                     const routed = await callAutoLlmRouter({
+                        cycleId: input.cycleId,
+                        decisionId: decision.id,
                         routerModel: input.routerModel,
                         guidance: input.routingGuidance,
                         prompt: decision.routerInput,
