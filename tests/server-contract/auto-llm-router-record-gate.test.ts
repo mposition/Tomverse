@@ -8,6 +8,7 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { APICallError } from "ai";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(ROOT, path)).href;
@@ -139,17 +140,18 @@ test("router failures preserve known usage and log content-free causes without r
     routerModel: AVAILABLE_MODELS.find(model => model.id === "gpt-6-luna")!,
     guidance: "Choose an eligible candidate.", prompt: secret, previousAnswer: null,
     candidates: autoLlmRouterCandidates(["gpt-5-6-luna", "deepseek-v4-flash"], AVAILABLE_MODELS, {}),
-    session: null, traceId: "trace-call", cycleId: "cycle-call", decisionId: "decision-call",
+    session: null, traceId: "trace-call", cycleId: "cycle-call", decisionId: "decision-call", source: "routing_optimizer" as const,
   };
   const cases = [
-    { name: "JSON parsing failure", result: () => { throw parseError; }, outcome: "invalid", failure: "output_parse", usage, detail: { finishReason: "length", outputChars: secret.length } },
-    { name: "schema validation failure", result: () => { throw schemaError; }, outcome: "invalid", failure: "output_schema", usage },
-    { name: "output getter failure", result: () => ({ usage, finishReason: "length", get output() { throw parseError; } }), outcome: "invalid", failure: "output_parse", usage },
-    { name: "empty output getter", result: () => ({ usage, finishReason: "stop", get output() { throw new NoOutputGeneratedError(); } }), outcome: "invalid", failure: "empty_output", usage },
-    { name: "ineligible model", result: () => ({ usage, finishReason: "stop", output: { modelId: secret } }), outcome: "invalid", failure: "invalid_pick", usage, detail: { modelIdPresent: true, modelIdEligible: false } },
-    { name: "invalid file intent", result: () => ({ usage, output: { modelId: "gpt-5-6-luna", requiresFileGeneration: "yes" } }), outcome: "invalid", failure: "invalid_pick", usage, detail: { modelIdEligible: true, fileIntentType: "string" } },
-    { name: "provider HTTP error", result: () => { throw new APICallError({ message: secret, url: `https://example.com/${secret}`, requestBodyValues: { prompt: secret }, responseBody: secret, statusCode: 429, isRetryable: true }); }, outcome: "error", failure: "provider_error", usage: undefined, detail: { statusCode: 429, retryable: true } },
-    { name: "unknown failure", result: () => { throw new Error(secret); }, outcome: "error", failure: "call_error", usage: undefined },
+    { name: "JSON parsing failure", result: () => { throw parseError; }, outcome: "invalid", failure: "output_parse", failureKind: "output_parse", usage, detail: { finishReason: "length", outputChars: secret.length } },
+    { name: "schema validation failure", result: () => { throw schemaError; }, outcome: "invalid", failure: "output_schema", failureKind: "output_validation", usage },
+    { name: "output getter failure", result: () => ({ usage, finishReason: "length", get output() { throw parseError; } }), outcome: "invalid", failure: "output_parse", failureKind: "output_parse", usage },
+    { name: "empty output getter", result: () => ({ usage, finishReason: "stop", get output() { throw new NoOutputGeneratedError(); } }), outcome: "invalid", failure: "empty_output", failureKind: "output_missing", usage },
+    { name: "ineligible model", result: () => ({ usage, finishReason: "stop", output: { modelId: secret } }), outcome: "invalid", failure: "invalid_pick", failureKind: "invalid_output", usage, detail: { modelIdPresent: true, modelIdEligible: false } },
+    { name: "invalid file intent", result: () => ({ usage, output: { modelId: "gpt-5-6-luna", requiresFileGeneration: "yes" } }), outcome: "invalid", failure: "invalid_pick", failureKind: "invalid_output", usage, detail: { modelIdEligible: true, fileIntentType: "string" } },
+    { name: "provider HTTP error", result: () => { throw new APICallError({ message: secret, url: `https://example.com/${secret}`, requestBodyValues: { prompt: secret }, responseBody: secret, statusCode: 429, isRetryable: true }); }, outcome: "error", failure: "provider_error", failureKind: "provider", usage: undefined, detail: { statusCode: 429, retryable: true } },
+    { name: "unrecognized finish reason", result: () => ({ usage, finishReason: secret, output: { modelId: secret } }), outcome: "invalid", failure: "invalid_pick", failureKind: "invalid_output", usage, detail: { finishReason: undefined } },
+    { name: "unknown failure", result: () => { throw new Error(secret); }, outcome: "error", failure: "call_error", failureKind: "unknown", usage: undefined },
   ];
   for (const scenario of cases) {
     await t.test(scenario.name, async () => {
@@ -169,6 +171,9 @@ test("router failures preserve known usage and log content-free causes without r
         const log = JSON.parse(logs[0]);
         assert.equal(log.event, "auto_llm_router_call_failed");
         assert.equal(log.failure, scenario.failure);
+        assert.equal(log.failureKind, scenario.failureKind);
+        assert.equal(log.outcome, scenario.outcome);
+        assert.equal(log.source, "routing_optimizer");
         assert.equal(log.traceId, "trace-call");
         assert.equal(log.cycleId, "cycle-call");
         assert.equal(log.decisionId, "decision-call");
@@ -194,6 +199,7 @@ test("router failures preserve known usage and log content-free causes without r
       assert.equal(result.outcome, "error");
       assert.equal(result.usage, undefined);
       assert.equal(JSON.parse(logs[0]).failure, "timeout");
+      assert.equal(JSON.parse(logs[0]).failureKind, "timeout");
       assert.equal(JSON.parse(logs[0]).timeoutMs, 1);
     } finally {
       clearTimeout(keepAlive);
@@ -225,4 +231,47 @@ test("router failures preserve known usage and log content-free causes without r
       }
     });
   }
+});
+
+test("a provider failure logs its category and trace while preserving the error fallback and decision row", async (t) => {
+  const logs: string[] = [];
+  const warning = mock.method(console, "warn", (value: string) => logs.push(value));
+  t.after(() => warning.mock.restore());
+  created.length = 0;
+  const secret = "private response and credential";
+  generateRouterResult = () => { throw new APICallError({
+    message: secret, url: "https://example.invalid", statusCode: 503,
+    requestBodyValues: { prompt: secret }, responseBody: secret,
+  }); };
+  try {
+    assert.equal(await pick(), null);
+    assert.equal((created[0] as { outcome: string }).outcome, "error");
+    const failure = logs.map((line) => JSON.parse(line)).find((entry) => entry.event === "auto_llm_router_call_failed");
+    assert.equal(failure.source, "live");
+    assert.equal(failure.traceId, "trace-1");
+    assert.equal(failure.routerModelId, "gpt-6-luna");
+    assert.equal(failure.outcome, "error");
+    assert.equal(failure.failureKind, "provider");
+    assert.equal(failure.statusCode, 503);
+    assert.ok(!logs.join("\n").includes(secret));
+    assert.ok(!logs.join("\n").includes("고양이 그려줘"));
+  } finally { generateRouterResult = undefined; }
+});
+
+test("an invalid pick logs separately from a provider failure and keeps its original outcome", async (t) => {
+  const logs: string[] = [];
+  const warning = mock.method(console, "warn", (value: string) => logs.push(value));
+  t.after(() => warning.mock.restore());
+  const original = routerOutput;
+  created.length = 0;
+  routerOutput = { ...original, modelId: "private invalid model response" };
+  try {
+    assert.equal(await pick(), null);
+    assert.equal((created[0] as { outcome: string }).outcome, "invalid");
+    const failure = JSON.parse(logs[0]);
+    assert.equal(failure.outcome, "invalid");
+    assert.equal(failure.failureKind, "invalid_output");
+    assert.equal(failure.source, "live");
+    assert.ok(!logs.join("\n").includes(routerOutput.modelId));
+  } finally { routerOutput = original; }
 });
