@@ -986,6 +986,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "eyebrow": "AI document workflow",
       "title": "Analyze files with multiple AI models",
       "description": "Extract the meeting date, what to bring and the reply deadline from a club notice. Ask for an undecided venue to stay marked as undecided, with a supporting sentence for each item. Readable PDFs, Office documents, supported text and images can be used; interpretation depends on the file and model.",
+      "introCtaLabel": "Start analyzing files",
       "sections": [
         {
           "title": "Supported analysis workflows",
