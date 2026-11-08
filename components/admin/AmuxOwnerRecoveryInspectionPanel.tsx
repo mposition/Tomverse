@@ -12,7 +12,8 @@ import { adminAmuxRecoveryInspectionMessages } from "@/lib/adminMessages/amuxRec
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { bindAmuxRecoveryInspection, type AmuxOwnerRecoveryInspection,
   type AmuxRecoveryInspectionIdentity } from "@/lib/amux/ownerRecoveryInspectionCore";
-import type { AmuxV22RecoveryCost, AmuxV22RecoveryRead } from "@/lib/amux/v22TaskRecoveryCore";
+import type { AmuxV22RecoveryCost, AmuxV22RecoveryPreApprovalQuote,
+  AmuxV22RecoveryRead } from "@/lib/amux/v22TaskRecoveryCore";
 import { clearAmuxAcceptedRiskResume, clearAmuxPendingRecovery,
   readAmuxAcceptedRiskResume, readAmuxPendingRecovery,
   saveAmuxAcceptedRiskResume, saveAmuxPendingRecovery,
@@ -26,6 +27,14 @@ export const AMUX_RECOVERY_INSPECTION_TIMEOUT_MS = 10_000;
  * (12 reads a minute, under the route's 20-a-minute owner read limit). */
 export const AMUX_HOST_EVIDENCE_AUTO_READ_MS = 5_000;
 export const AMUX_HOST_EVIDENCE_AUTO_READS = 36;
+/** A one-click pre-approval waits up to 30 minutes: read back every 15 s
+ * (4 reads a minute) for as long as it waits, plus one read after it ends. */
+export const AMUX_PREAPPROVAL_AUTO_READ_MS = 15_000;
+export const AMUX_PREAPPROVAL_AUTO_READS = 122;
+export type AmuxPreApprovalQuoteState =
+  | { state: "idle" | "loading" }
+  | { state: "unavailable"; failure: AdminApiFailure | null }
+  | { state: "ready"; quote: AmuxV22RecoveryPreApprovalQuote };
 type Messages = AdminMessageShape<(typeof adminAmuxRecoveryInspectionMessages)["en"]>;
 // The Assignment section, for a caller that names no review to return to.
 const AMUX_RECOVERY_DEFAULT_RETURN_TO = "/admin/amux-execution?tab=review";
@@ -110,6 +119,18 @@ const recoveryGuards = (value: unknown): value is AmuxV22RecoveryRead["guards"] 
   record(value) && keys(value, "oldCost,priorEffects,readOnlyLaunch,taskAttemptLimit") &&
   value.priorEffects === "unknown" && value.oldCost === "held" &&
   value.readOnlyLaunch === "required" && value.taskAttemptLimit === 2;
+const recoveryPreApproval = (value: unknown): value is NonNullable<AmuxV22RecoveryRead["preApproval"]> =>
+  record(value) && keys(value, "approvalId,costDigest,expiresAt,id,ownerRequestId,reason,requestedAt,state") &&
+  uuid(value.id) && uuid(value.ownerRequestId) && ["waiting", "applied", "refused", "expired"].includes(String(value.state)) &&
+  typeof value.requestedAt === "string" && Number.isFinite(Date.parse(value.requestedAt)) &&
+  typeof value.expiresAt === "string" && Number.isFinite(Date.parse(value.expiresAt)) &&
+  digest(value.costDigest) && (value.reason === null ||
+    (typeof value.reason === "string" && /^[a-z0-9_]{1,128}$/.test(value.reason))) &&
+  (value.approvalId === null || uuid(value.approvalId)) &&
+  (value.state === "applied") === (value.approvalId !== null);
+const preApprovalReceipt = (value: RecoveryReceiptBinding | undefined): value is
+  { preApprovalCostDigest: string } => Boolean(value && "preApprovalCostDigest" in value &&
+    digest(value.preApprovalCostDigest));
 const approvalReceipt = (value: RecoveryReceiptBinding | undefined): value is RecoveryReceiptBinding &
   { inspectionId: string | null; evidenceId: string | null; evidenceDigest: string | null; costDigest: string } =>
   Boolean(value && "costDigest" in value);
@@ -161,7 +182,8 @@ export function bindAmuxHostRecovery(value: unknown, identity: AmuxRecoveryInspe
       (value.riskAcceptance !== null && !recoveryRiskAcceptance(value.riskAcceptance)) ||
       (value.launchProof !== null && !recoveryLaunchProof(value.launchProof)) ||
       (value.apiModelAccess !== undefined &&
-        !recoveryApiModelAccess(value.apiModelAccess))) return null;
+        !recoveryApiModelAccess(value.apiModelAccess)) ||
+      (value.preApproval !== undefined && !recoveryPreApproval(value.preApproval))) return null;
   if (value.state === "not_visible") return value.inspectionId === null && value.evidenceId === null &&
     value.evidenceDigest === null && value.cost === null && value.quote === null &&
     value.riskAcceptance === null && value.launchProof === null ? value as AmuxHostRecoveryRead : null;
@@ -256,6 +278,9 @@ export async function fetchAmuxHostRecovery({ identity, requestId, action, displ
     if ((unresolvedWrite || action) && (data.state === "not_visible" ||
         (unresolvedAction === "approve_attempt" && data.state !== "approved") ||
         (unresolvedAction === "request_safe_stop" && data.requestKind !== "safe_stop") ||
+        (unresolvedAction === "preapprove_attempt" && (!preApprovalReceipt(receiptBinding) ||
+          data.preApproval?.ownerRequestId !== requestId ||
+          data.preApproval?.costDigest !== receiptBinding.preApprovalCostDigest)) ||
         (unresolvedAction === "accept_unknown_prior_effects" &&
           data.riskAcceptance?.ownerRequestId !== requestId)))
       return unavailable(null, true);
@@ -316,7 +341,11 @@ export async function fetchAmuxHostRecovery({ identity, requestId, action, displ
         sourceEvidenceDigest: displayedSource?.digest, acceptRisk: true,
       } : {}),
       ...(action === "request_safe_stop" ? { sourceEvidenceId: displayedSource?.id,
-        sourceEvidenceDigest: displayedSource?.digest } : {}) };
+        sourceEvidenceDigest: displayedSource?.digest } : {}),
+      ...(action === "preapprove_attempt" && preApprovalReceipt(receiptBinding) ? {
+        costDigest: receiptBinding.preApprovalCostDigest, acceptRetry: true } : {}) };
+    if (action === "preapprove_attempt" && !preApprovalReceipt(receiptBinding))
+      return { state: "changed" };
     if (action === "approve_attempt" && (!displayed || displayed.state !== "verified" ||
         !displayed.cost || !displayed.eligibility.approveAttempt ||
         (Boolean(displayed.riskAcceptance) !== Boolean(displayed.launchProof)) ||
@@ -343,6 +372,108 @@ export async function fetchAmuxHostRecovery({ identity, requestId, action, displ
     return await parse(await read());
   } catch { return isCurrent() ? unavailable(null) : null; }
   finally { clearTimeout(timer); controller.signal.removeEventListener("abort", abort); }
+}
+
+/** The server-computed quote the one-click confirmation shows. Read only. */
+export function bindAmuxPreApprovalQuote(value: unknown,
+  identity: AmuxRecoveryInspectionIdentity): AmuxV22RecoveryPreApprovalQuote | null {
+  if (!record(value) || !keys(value,
+      "cost,eligible,expiresInMinutes,priorAttemptId,reason,retryWrite,taskId,taskRevision") ||
+      value.taskId !== identity.taskId || value.taskRevision !== identity.taskRevision ||
+      value.priorAttemptId !== identity.attemptId || value.retryWrite !== false ||
+      value.expiresInMinutes !== 30 || typeof value.eligible !== "boolean" ||
+      (value.reason !== null && (typeof value.reason !== "string" ||
+        !/^[A-Za-z0-9_]{1,128}$/.test(value.reason))) ||
+      (value.cost !== null && !recoveryCost(value.cost)) ||
+      value.eligible !== (value.cost !== null)) return null;
+  return value as AmuxV22RecoveryPreApprovalQuote;
+}
+export async function fetchAmuxPreApprovalQuote({ identity, controller, isCurrent, fallback,
+  locale = "en", fetcher = adminFetch, timeoutMs = AMUX_RECOVERY_INSPECTION_TIMEOUT_MS }: {
+  identity: AmuxRecoveryInspectionIdentity; controller: AbortController; isCurrent: () => boolean;
+  fallback: string; locale?: "en" | "ko"; fetcher?: typeof adminFetch; timeoutMs?: number;
+}): Promise<AmuxPreApprovalQuoteState | null> {
+  if (!isCurrent() || controller.signal.aborted) return null;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetcher(`/api/admin/amux/execution-recovery?${new URLSearchParams({
+      taskId: identity.taskId, view: "preapproval_quote" })}`,
+      { cache: "no-store", signal: controller.signal, timeoutMs });
+    if (!isCurrent()) return null;
+    if (!response.ok) {
+      const failure = await readAdminApiFailure(response, { fallback, locale });
+      return isCurrent() ? { state: "unavailable", failure } : null;
+    }
+    const quote = bindAmuxPreApprovalQuote(await response.json(), identity);
+    if (!isCurrent()) return null;
+    return quote ? { state: "ready", quote } : { state: "unavailable", failure: null };
+  } catch { return isCurrent() ? { state: "unavailable", failure: null } : null; }
+  finally { clearTimeout(timer); }
+}
+
+const remaining = (expiresAt: string, nowMs: number) => {
+  const seconds = Math.max(0, Math.ceil((Date.parse(expiresAt) - nowMs) / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
+
+/** One click: inspection plus a single-use consent, then the result. */
+export function AmuxOneClickRecoveryView({ m, data, quote, confirmed, onConfirm, onStart,
+  onApprove, onCancel, busy, writesBlocked, nowMs, returnTo }: {
+  m: Messages; data: AmuxHostRecoveryRead | null; quote: AmuxPreApprovalQuoteState;
+  confirmed: boolean; onConfirm: (value: boolean) => void; onStart: () => void;
+  onApprove: () => void; onCancel: () => void; busy: boolean; writesBlocked: boolean;
+  nowMs: number; returnTo: string;
+}) {
+  const o = m.host.oneClick;
+  const pre = data?.preApproval ?? null;
+  const waiting = pre?.state === "waiting";
+  const ready = quote.state === "ready" ? quote.quote : null;
+  const button = "inline-flex min-h-11 items-center justify-center rounded-lg border border-blue-500/40 px-4 py-2 text-sm font-semibold text-blue-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 disabled:opacity-60";
+  const reason = (code: string | null) => code ? <p className="mt-1 break-words text-zinc-300">
+    {o.reason}: {o.reasons[code] ?? code}<span className="sr-only"> ({code})</span></p> : null;
+  return <section className="mt-4 rounded-lg border border-blue-500/30 bg-blue-950/10 p-3"
+    data-testid="admin-amux-one-click-recovery">
+    <h6 className="font-semibold text-zinc-100">{o.title}</h6>
+    <p className="mt-2 text-zinc-300">{o.intro}</p>
+    {pre && <div className="mt-3" role="status" aria-live="polite" data-testid="admin-amux-preapproval-status">
+      {waiting && <p className="font-semibold text-amber-100">{o.waiting} · {o.remaining}{" "}
+        <time dateTime={pre.expiresAt}>{remaining(pre.expiresAt, nowMs)}</time></p>}
+      {pre.state === "applied" && <p className="font-semibold text-emerald-200">{o.applied}</p>}
+      {pre.state === "refused" && <><p className="font-semibold text-amber-200">{o.refused}</p>{reason(pre.reason)}</>}
+      {pre.state === "expired" && <><p className="font-semibold text-amber-200">{o.expired}</p>{reason(pre.reason)}</>}
+    </div>}
+    {!waiting && pre?.state !== "applied" && !(ready?.eligible) &&
+      <button type="button" className={`${button} mt-3`} onClick={onStart}
+        disabled={busy || writesBlocked || quote.state === "loading"}
+        data-testid="admin-amux-one-click-start">
+        {quote.state === "loading" ? <><Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />{o.loadingQuote}</> : o.start}
+      </button>}
+    {quote.state === "unavailable" && !quote.failure && <p className="mt-2 text-amber-200">{o.unavailable}</p>}
+    {quote.state === "unavailable" && quote.failure && <AdminApiFailureNotice failure={quote.failure} returnTo={returnTo} />}
+    {ready && !ready.eligible && <><p className="mt-2 text-amber-200">{o.unavailable}</p>{reason(ready.reason)}</>}
+    {ready?.eligible && ready.cost && <div className="mt-3 border-t border-zinc-700 pt-3"
+      data-testid="admin-amux-one-click-confirmation">
+      <dl className="grid gap-3 break-words sm:grid-cols-2">
+        <div><dt className="font-semibold text-zinc-100">{o.task}</dt><dd>{ready.taskId}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{o.revision}</dt><dd>{ready.taskRevision}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{o.attempt}</dt><dd>{ready.priorAttemptId}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{o.maximum}</dt><dd>{amount(ready.cost.additionalCapMicroUsd, m.unknown)}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{o.worst}</dt><dd>{amount(ready.cost.worstExposureMicroUsd, m.unknown)}</dd></div>
+        <div><dt className="font-semibold text-zinc-100">{o.expires}</dt><dd>{o.minutes(ready.expiresInMinutes)}</dd></div>
+      </dl>
+      <label className="mt-3 flex min-h-11 cursor-pointer items-start gap-3 py-2 text-zinc-100">
+        <input type="checkbox" checked={confirmed} disabled={busy || writesBlocked}
+          onChange={event => onConfirm(event.target.checked)}
+          data-testid="admin-amux-one-click-confirm" className="mt-1 h-4 w-4 shrink-0 accent-blue-500" />
+        <span>{o.confirm}</span>
+      </label>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" className={button} onClick={onApprove}
+          disabled={busy || writesBlocked || !confirmed} data-testid="admin-amux-one-click-approve">{o.approve}</button>
+        <button type="button" className={button} onClick={onCancel} disabled={busy}>{o.cancel}</button>
+      </div>
+    </div>}
+  </section>;
 }
 
 /** On-demand GET only. Each await is fenced against close, replacement and
@@ -679,6 +810,9 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
   const [confirmed, setConfirmed] = useState(false);
   const [riskConfirmed, setRiskConfirmed] = useState(false);
   const [safeStopConfirmed, setSafeStopConfirmed] = useState(false);
+  const [quote, setQuote] = useState<AmuxPreApprovalQuoteState>({ state: "idle" });
+  const [oneClickConfirmed, setOneClickConfirmed] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [pendingStorage, setPendingStorage] = useState<AmuxPendingRecoveryLoad | { state: "loading" }>({ state: "loading" });
   const pendingRecovery = useRef<AmuxPendingRecovery | null>(null);
   const requestId = useRef(0);
@@ -697,6 +831,7 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     queueMicrotask(() => {
       if (disposed) return;
       setPendingStorage(restored); setConfirmed(false); setRiskConfirmed(false); setSafeStopConfirmed(false);
+      setQuote({ state: "idle" }); setOneClickConfirmed(false);
       pendingRecovery.current = restored.state === "pending" ? restored.pending : null;
       hostRequestId.current = restored.state === "pending" ? restored.pending.requestId : resumeRequestId;
       setHost(restored.state === "pending" ? { state: "unavailable", failure: null,
@@ -720,19 +855,36 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     });
     return () => { disposed = true; requestId.current += 1; active.current?.abort(); active.current = null; };
   }, [identity.taskId, identity.taskRevision, identity.attemptId, locale, m.host.unavailable]);
+  // The app-record check is a read: it has its own request fence so it never
+  // waits on, or blocks, a recovery write on the same card.
+  const inspectActive = useRef<AbortController | null>(null);
+  const inspectSeq = useRef(0);
+  // Re-created every render on purpose, like recover below; the mount effect
+  // reaches the latest one through inspectRef.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const inspect = async () => {
-    if (active.current) return;
+    if (inspectActive.current) return;
     const controller = new AbortController();
-    active.current = controller;
-    const current = ++requestId.current;
-    const isCurrent = () => current === requestId.current && active.current === controller;
+    inspectActive.current = controller;
+    const current = ++inspectSeq.current;
+    const isCurrent = () => current === inspectSeq.current && inspectActive.current === controller;
     setState({ state: "loading" });
     const next = await fetchAmuxRecoveryInspection({ identity, taskStatus, controller, isCurrent,
       fallback: m.unavailable, locale });
     if (!isCurrent()) return;
     if (next) setState(next);
-    active.current = null;
+    inspectActive.current = null;
   };
+  // Owner decision 2026-11-08: the app records are read as soon as the
+  // recovery area opens; the button only reads them again.
+  const inspectRef = useRef(inspect);
+  useEffect(() => { inspectRef.current = inspect; }, [inspect]);
+  useEffect(() => {
+    let disposed = false;
+    queueMicrotask(() => { if (!disposed) void inspectRef.current(); });
+    return () => { disposed = true; inspectSeq.current += 1; inspectActive.current?.abort();
+      inspectActive.current = null; };
+  }, [identity.taskId, identity.taskRevision, identity.attemptId, taskStatus]);
   // Re-created every render on purpose; the auto-read timer reaches the latest
   // one through recoverRef, synced by an effect keyed on it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -750,7 +902,9 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     } else if (stored.state !== "empty" || identity.attemptId === null) return;
     const displayed = host.state === "ready" ? host.data : undefined;
     const source = recoverySource(displayed);
+    const quoted = quote.state === "ready" && quote.quote.eligible ? quote.quote.cost : null;
     if (action === "request_inspection" && displayed?.riskAcceptance) return;
+    if (action === "preapprove_attempt" && (!quoted || !oneClickConfirmed)) return;
     if (action === "approve_attempt" && (!displayed || displayed.state !== "verified" ||
         !displayed.cost || !displayed.eligibility.approveAttempt ||
         !bindAmuxHostRecovery(displayed, identity, displayed.requestId))) return;
@@ -765,7 +919,8 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     if (action) {
       const proposed: AmuxPendingRecovery = { version: 1,
         identity: { ...identity, attemptId: identity.attemptId! }, requestId: id, action,
-        expectedReceipt: action === "approve_attempt" ? displayed!.riskAcceptance && displayed!.launchProof ? {
+        expectedReceipt: action === "preapprove_attempt" ?
+          { preApprovalCostDigest: quoted!.costDigest } : action === "approve_attempt" ? displayed!.riskAcceptance && displayed!.launchProof ? {
           inspectionId: displayed!.inspectionId, evidenceId: displayed!.evidenceId,
           evidenceDigest: displayed!.evidenceDigest, costDigest: displayed!.cost!.costDigest,
           riskAcceptanceId: displayed!.riskAcceptance.id,
@@ -797,7 +952,9 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
     const controller = new AbortController(); active.current = controller;
     const current = ++requestId.current;
     const isCurrent = () => current === requestId.current && active.current === controller;
-    setConfirmed(false); setRiskConfirmed(false); setSafeStopConfirmed(false); setHost({ state: "loading" });
+    setConfirmed(false); setRiskConfirmed(false); setSafeStopConfirmed(false);
+    if (action === "preapprove_attempt") { setOneClickConfirmed(false); setQuote({ state: "idle" }); }
+    setHost({ state: "loading" });
     const next = await fetchAmuxHostRecovery({ identity: pending?.identity ?? identity, requestId: id, action, displayed,
       unknownWrite: Boolean(pending && !action), unknownAction: pending?.action,
       expectedReceipt: pending?.expectedReceipt ?? undefined,
@@ -825,11 +982,17 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
         next.data.riskAcceptance.sourceEvidenceId === pendingReceipt.sourceEvidenceId &&
         next.data.riskAcceptance.sourceEvidenceDigest === pendingReceipt.sourceEvidenceDigest;
       const confirmedResult = next.state === "ready" && next.data.state !== "not_visible" &&
-        (pending.action === "approve_attempt" ? next.data.state === "approved" :
+        (pending.action === "preapprove_attempt" ? preApprovalReceipt(pendingReceipt) &&
+          next.data.preApproval?.ownerRequestId === pending.requestId &&
+          next.data.preApproval?.costDigest === pendingReceipt.preApprovalCostDigest :
+         pending.action === "approve_attempt" ? next.data.state === "approved" :
          pending.action === "accept_unknown_prior_effects" ? riskAcceptanceConfirmedResult :
          pending.action === "request_safe_stop" ? safeStopConfirmedResult :
            next.data.state !== "approved");
-      const resume = pending.action === "accept_unknown_prior_effects" ? {
+      // A recorded consent is read back after a reload or reopen with a fresh
+      // nonce, like an accepted risk: the server shows the owner's latest one.
+      const resume = pending.action === "accept_unknown_prior_effects" ||
+        pending.action === "preapprove_attempt" ? {
         version: 1 as const, taskId: pending.identity.taskId,
         priorAttemptId: pending.identity.attemptId } : null;
       const resumeStored = !resume || !confirmedResult || saveAmuxAcceptedRiskResume(resume);
@@ -859,7 +1022,11 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
       (!waitingData.launchProof || waitingData.apiModelAccess?.state === "required")));
   // Keyed by request only: each read passes through "loading", which tears the
   // timer down, so the read budget lives in a ref that survives it.
-  const waitingKey = waitingForHostEvidence ? waitingData!.requestId : null;
+  const waitingForConsent = waitingData?.preApproval?.state === "waiting" &&
+    pendingStorage.state === "empty";
+  const waitingKey = waitingForHostEvidence || waitingForConsent ? waitingData!.requestId : null;
+  const waitingReadMs = waitingForConsent ? AMUX_PREAPPROVAL_AUTO_READ_MS : AMUX_HOST_EVIDENCE_AUTO_READ_MS;
+  const waitingReads = waitingForConsent ? AMUX_PREAPPROVAL_AUTO_READS : AMUX_HOST_EVIDENCE_AUTO_READS;
   const autoReads = useRef<{ requestId: string; reads: number } | null>(null);
   const recoverRef = useRef(recover);
   useEffect(() => { recoverRef.current = recover; }, [recover]);
@@ -869,15 +1036,34 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
       autoReads.current = { requestId: waitingKey, reads: 0 };
     const budget = autoReads.current;
     const timer = setInterval(() => {
-      if (budget.reads >= AMUX_HOST_EVIDENCE_AUTO_READS) { clearInterval(timer); return; }
+      if (budget.reads >= waitingReads) { clearInterval(timer); return; }
       if (active.current) return;
       budget.reads += 1;
       void recoverRef.current();
-    }, AMUX_HOST_EVIDENCE_AUTO_READ_MS);
+    }, waitingReadMs);
     return () => clearInterval(timer);
-  }, [waitingKey]);
+  }, [waitingKey, waitingReadMs, waitingReads]);
+  // The countdown only; reads stay on the timer above.
+  useEffect(() => {
+    if (!waitingForConsent) return;
+    const timer = setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [waitingForConsent]);
+  const startOneClick = async () => {
+    if (active.current || identity.attemptId === null) return;
+    const controller = new AbortController(); active.current = controller;
+    const current = ++requestId.current;
+    const isCurrent = () => current === requestId.current && active.current === controller;
+    setOneClickConfirmed(false); setQuote({ state: "loading" });
+    const next = await fetchAmuxPreApprovalQuote({ identity, controller, isCurrent,
+      fallback: m.host.unavailable, locale });
+    if (!isCurrent()) return;
+    if (next) setQuote(next);
+    active.current = null;
+  };
   const date = (value: string) => formatAestDateTime(value, { seconds: true }) ?? "—";
-  const busy = state.state === "loading" || host.state === "loading";
+  // Only a recovery write waits on another; the read-only record check does not.
+  const busy = host.state === "loading";
   return <><AmuxRecoveryInspectionView m={m} state={state} busy={busy} onInspect={() => void inspect()}
     onReloadReview={onReloadReview} date={date} returnTo={returnTo} />
     {!hostRecovery ? <p className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3 text-sm leading-6 text-zinc-200"
@@ -890,5 +1076,13 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
       onAcceptRisk={() => { if (riskConfirmed) void recover("accept_unknown_prior_effects"); }}
       onSafeStop={() => { if (safeStopConfirmed) void recover("request_safe_stop"); }}
       onApprove={() => { if (confirmed) void recover("approve_attempt"); }}
-      onReloadReview={onReloadReview} canRequest={identity.attemptId !== null} returnTo={returnTo} />}</>;
+      onReloadReview={onReloadReview} canRequest={identity.attemptId !== null} returnTo={returnTo} />}
+    {hostRecovery && identity.attemptId !== null && !(host.state === "ready" && (host.data.recoveryEnabled === false ||
+      host.data.riskAcceptance !== null)) &&
+      <AmuxOneClickRecoveryView m={m} data={host.state === "ready" ? host.data : null} quote={quote}
+        confirmed={oneClickConfirmed} onConfirm={setOneClickConfirmed}
+        onStart={() => void startOneClick()} onCancel={() => { setQuote({ state: "idle" }); setOneClickConfirmed(false); }}
+        onApprove={() => { if (oneClickConfirmed) void recover("preapprove_attempt"); }}
+        busy={busy || quote.state === "loading"} writesBlocked={pendingStorage.state !== "empty"}
+        nowMs={nowMs} returnTo={returnTo} />}</>;
 }
