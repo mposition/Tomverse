@@ -61,9 +61,19 @@ async function readTables(client: Prisma.TransactionClient | typeof prisma): Pro
   return tables;
 }
 
-/** Production's side: every synced table, normalised and digested. */
+/**
+ * Production's side: every synced table, normalised and digested. All reads
+ * share one RepeatableRead snapshot, so a work item and the events that point
+ * at it come from the same moment -- read table by table, an item committed
+ * between two reads would send its events without it, and the receiving
+ * insert would fail on the foreign key.
+ */
 export async function exportModelCatalog(now = new Date()): Promise<ModelCatalogExport> {
-  const tables = await readTables(prisma);
+  const tables = await prisma.$transaction((tx) => readTables(tx), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    timeout: 45_000,
+    maxWait: 10_000,
+  });
   return {
     schemaVersion: MODEL_CATALOG_ENV_SYNC_SCHEMA_VERSION,
     environment: "production",
