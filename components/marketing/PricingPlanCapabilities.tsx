@@ -13,7 +13,7 @@ export function PricingPlanCapabilities({ plan }: { plan: ModelTier }) {
     <details className="mt-5 text-sm leading-6" data-testid={`pricing-capabilities-${plan.toLowerCase()}`}>
       <summary className="cursor-pointer font-bold underline underline-offset-4">View supported models and file limits</summary>
       <div className="mt-3 space-y-3">
-        <p>Signed-in {plan}: up to 5 files per message, 10 MiB per file and 25 MiB combined. Google Drive requires sign-in.</p>
+        <p>Where attachments are enabled for signed-in {plan} accounts: up to 5 files per message, 10 MiB per file and 25 MiB combined. Google Drive requires sign-in.</p>
         <p>Model context ceilings are listed in tokens below. The app’s input limit and available output space can reduce usable context; a plan does not guarantee the full model window. Check current availability in the model selector.</p>
         <ul className="list-inside list-disc space-y-1">
           {models.map((model) => (
