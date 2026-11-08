@@ -83,7 +83,7 @@ function PrivacyCard({
               {m.card.due(row.requestType, formatAestDateTime(row.dueAt, { seconds: true }) ?? "-")}
             </p>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
             <AdminStatusChip tone={STATUS_TONE[row.status] ?? "unknown"}>{statusLabel}</AdminStatusChip>
             {overdue ? <AdminStatusChip tone="bad">{m.card.overdue}</AdminStatusChip> : null}
             {row.legalHold ? <AdminStatusChip tone="warn">{m.card.legalHold}</AdminStatusChip> : null}
