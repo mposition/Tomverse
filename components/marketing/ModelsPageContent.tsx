@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { Activity, ExternalLink } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
-import { getModelUsageProfile } from "@/lib/models";
+import { canUseModelWithPlan, getModelUsageProfile, type ModelTier } from "@/lib/models";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { getModelBrand } from "@/lib/modelBranding";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
@@ -158,10 +159,32 @@ const copy = {
   },
 } satisfies Record<Language, Record<string, string>>;
 
+const filterCopy = {
+  en: { search: "Search model name or ID", allProviders: "All providers", plan: "Available with plan", allPlans: "All plans", results: "Models shown", empty: "No models match these filters.", clear: "Clear filters" },
+  ko: { search: "모델명 또는 ID 검색", allProviders: "모든 공급자", plan: "이용할 플랜", allPlans: "모든 플랜", results: "표시된 모델", empty: "조건에 맞는 모델이 없습니다.", clear: "필터 초기화" },
+  zh: { search: "搜索模型名称或 ID", allProviders: "所有供应商", plan: "可用套餐", allPlans: "所有套餐", results: "显示的模型", empty: "没有符合筛选条件的模型。", clear: "清除筛选" },
+  "zh-Hant": { search: "搜尋模型名稱或 ID", allProviders: "所有供應商", plan: "可用方案", allPlans: "所有方案", results: "顯示的模型", empty: "沒有符合篩選條件的模型。", clear: "清除篩選" },
+  fr: { search: "Rechercher un nom ou ID de modèle", allProviders: "Tous les fournisseurs", plan: "Disponible avec l’offre", allPlans: "Toutes les offres", results: "Modèles affichés", empty: "Aucun modèle ne correspond à ces filtres.", clear: "Effacer les filtres" },
+  de: { search: "Modellname oder ID suchen", allProviders: "Alle Anbieter", plan: "Verfügbar im Tarif", allPlans: "Alle Tarife", results: "Angezeigte Modelle", empty: "Keine Modelle entsprechen diesen Filtern.", clear: "Filter zurücksetzen" },
+  es: { search: "Buscar nombre o ID de modelo", allProviders: "Todos los proveedores", plan: "Disponible con el plan", allPlans: "Todos los planes", results: "Modelos mostrados", empty: "Ningún modelo coincide con estos filtros.", clear: "Borrar filtros" },
+  pt: { search: "Buscar nome ou ID de modelo", allProviders: "Todos os provedores", plan: "Disponível no plano", allPlans: "Todos os planos", results: "Modelos exibidos", empty: "Nenhum modelo corresponde a estes filtros.", clear: "Limpar filtros" },
+} satisfies Record<Language, Record<string, string>>;
+
 export function ModelsPageContent() {
   const { enabledModels: ENABLED_MODELS } = useModelCatalog();
   const { lang, t } = useLanguage();
   const content = copy[lang];
+  const filters = filterCopy[lang];
+  const [query, setQuery] = useState("");
+  const [provider, setProvider] = useState("all");
+  const [plan, setPlan] = useState<ModelTier | "Guest" | "all">("all");
+  const providers = [...new Set(ENABLED_MODELS.map((model) => model.provider))].sort();
+  const search = query.trim().toLowerCase();
+  const filteredModels = ENABLED_MODELS.filter((model) =>
+    (provider === "all" || model.provider === provider) &&
+    (plan === "all" || canUseModelWithPlan(plan, model)) &&
+    (!search || model.name.toLowerCase().includes(search) || model.id.toLowerCase().includes(search))
+  );
 
   return (
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -200,8 +223,31 @@ export function ModelsPageContent() {
           </Link>
         </div>
 
-        <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {ENABLED_MODELS.map((model) => {
+        <div role="search" aria-label={filters.search} className="mt-10 grid min-w-0 gap-4 sm:grid-cols-3">
+          <label className="min-w-0 text-sm font-bold">
+            {filters.search}
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} className="mt-2 min-h-11 w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2 font-normal focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900" />
+          </label>
+          <label className="min-w-0 text-sm font-bold">
+            {content.provider}
+            <select value={provider} onChange={(event) => setProvider(event.target.value)} className="mt-2 min-h-11 w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2 font-normal focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900">
+              <option value="all">{filters.allProviders}</option>
+              {providers.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+          <label className="min-w-0 text-sm font-bold">
+            {filters.plan}
+            <select value={plan} onChange={(event) => setPlan(event.target.value as typeof plan)} className="mt-2 min-h-11 w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2 font-normal focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900">
+              <option value="all">{filters.allPlans}</option>
+              {(["Guest", "Free", "Pro", "Max"] as const).map((value) => <option key={value} value={value}>{t(`modelTiers.${value.toLowerCase()}`)}</option>)}
+            </select>
+          </label>
+          <p role="status" aria-atomic="true" className="self-center text-sm sm:col-span-2">{filters.results}: {filteredModels.length} / {ENABLED_MODELS.length}</p>
+          <button type="button" onClick={() => { setQuery(""); setProvider("all"); setPlan("all"); }} className="min-h-11 rounded-xl border border-zinc-300 px-3 py-2 text-sm font-bold focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-700">{filters.clear}</button>
+        </div>
+        {filteredModels.length === 0 ? <p className="mt-8 text-sm">{filters.empty}</p> : null}
+        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredModels.map((model) => {
             const brand = getModelBrand(model.provider);
             const tags = getModelExperienceTags(model);
             const status = getModelExperienceStatus(model);
@@ -210,6 +256,7 @@ export function ModelsPageContent() {
             return (
             <article
               key={model.id}
+              data-model-id={model.id}
               className="min-w-0 rounded-2xl border border-zinc-200 bg-zinc-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/40 [overflow-wrap:anywhere]"
             >
               <div className="flex items-start gap-3 max-[240px]:flex-wrap">
