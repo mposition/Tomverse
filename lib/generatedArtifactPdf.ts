@@ -162,9 +162,27 @@ const wrap = (
           lineWidth = lineWidth - widthAtBreak;
           lastBreak = -1;
         } else {
-          lines.push(line);
-          line = [];
-          lineWidth = 0;
+          // A forced word split should not leave only "s." (or one letter)
+          // on its final line. Carry a few glyphs with that short tail when
+          // the measured column can fit them; never overflow a narrow cell.
+          let tailLength = 0;
+          while (tailLength < 3 && index + tailLength < characters.length) {
+            const next = characters[index + tailLength]!;
+            if (/\s/u.test(next) || breaksBefore(next.codePointAt(0)!)) break;
+            tailLength += 1;
+          }
+          const carryCount = tailLength > 0 && tailLength < 3 ? 3 - tailLength : 0;
+          const carried = carryCount ? line.slice(-carryCount) : [];
+          if (carryCount > 0 && line.length > carryCount &&
+            glyphsWidth([...carried, ...glyphs.slice(index, index + tailLength)], size, font.unitsPerEm) <= width) {
+            lines.push(line.slice(0, -carryCount));
+            line = carried;
+            lineWidth = glyphsWidth(line, size, font.unitsPerEm);
+          } else {
+            lines.push(line);
+            line = [];
+            lineWidth = 0;
+          }
         }
       }
 
