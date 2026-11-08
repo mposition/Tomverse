@@ -10,6 +10,7 @@ import { getModelBrand } from "@/lib/modelBranding";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
+import { PROVIDER_LABELS } from "./ModelCatalogueSection";
 
 const copy = {
   en: {
@@ -243,7 +244,7 @@ export function ModelsPageContent() {
                 </div>
                 <div>
                   <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-400">{content.provider}</p>
-                  <p className="mt-1 truncate text-sm font-bold capitalize">{model.provider}</p>
+                  <p className="mt-1 truncate text-sm font-bold">{PROVIDER_LABELS[model.provider] ?? model.provider}</p>
                 </div>
                 <div>
                   <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-400">{content.usageClass}</p>
