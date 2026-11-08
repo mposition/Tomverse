@@ -46,6 +46,7 @@ import {
 } from "@/lib/productAnalyticsClient";
 import {
   billingCurrencyFractionDigits,
+  billingMinorToMajor,
   formatBillingAmount,
   formatBillingMinor,
   type BillingCurrency,
@@ -1431,7 +1432,7 @@ export function PricingPageContent() {
             const annualMonthlyEquivalent = billingPlan
               ? billingPlan.displayCurrency && typeof billingPlan.displayAnnualPriceAmount === "number"
                 ? formatBillingAmount(billingPlan.displayAnnualPriceAmount / 12, billingPlan.displayCurrency as BillingCurrency)
-                : formatBillingAmount(billingPlan.annualPriceCents / 100 / 12, billingPlan.currency as BillingCurrency)
+                : formatBillingAmount(billingMinorToMajor(billingPlan.annualPriceCents, billingPlan.currency as BillingCurrency) / 12, billingPlan.currency as BillingCurrency)
               : null;
             const promotionEligible = Boolean(
               featuredPromotion &&
@@ -1650,7 +1651,7 @@ export function PricingPageContent() {
                   <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}{lang === "en" ? " per year" : ""}</div>
                   {lang === "en" && annualMonthlyEquivalent ? (
                     <p className="mt-1 text-sm leading-6" data-testid={`pricing-annual-equivalent-${planId}`}>
-                      Monthly equivalent: {annualMonthlyEquivalent}, billed annually.
+                      Monthly equivalent: about {annualMonthlyEquivalent}, billed annually.
                     </p>
                   ) : null}
                   <p className={plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}>
