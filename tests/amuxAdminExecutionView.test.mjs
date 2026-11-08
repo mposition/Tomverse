@@ -72,8 +72,9 @@ test("a card waiting on the owner opens on the same owner review Assignment host
   // The review is the Assignment component, not a second implementation.
   assert.match(ui, /import \{ AmuxCardOwnerReview \} from "\.\/AdminAmuxRoutingPanel"/);
   assert.match(ui, /const ownerEscalation = canReviewCards \? selected\?\.escalations\[0\] \?\? null : null/);
-  // Opened from a waiting worker question, the card stays on its overview.
-  assert.match(ui, /if \(canReviewCards && result\.escalations\.length > 0 && !preferOverview\)\s*setDetailTab\("ownerReview"\)/);
+  // Opened from a waiting worker question, the card stays on its overview, and
+  // so does a legacy WORKBOARD card, which has no review decision to make.
+  assert.match(ui, /if \(canReviewCards && result\.escalations\.length > 0 && !preferOverview && !result\.legacyCard\)\s*setDetailTab\("ownerReview"\)/);
   // Kept mounted behind `hidden`, so a tab switch cannot drop a decision.
   assert.match(ui, /hidden=\{detailTab !== "ownerReview"\}/);
   // A decision that lands after the owner left the card reloads the board,

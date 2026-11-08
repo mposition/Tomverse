@@ -783,6 +783,8 @@ async function runInBackground(input: {
                 },
                 route: async (guidance, decision) => {
                     const routed = await callAutoLlmRouter({
+                        cycleId: input.cycleId,
+                        decisionId: decision.id,
                         routerModel: input.routerModel,
                         guidance,
                         prompt: decision.routerInput,
@@ -790,6 +792,7 @@ async function runInBackground(input: {
                         candidates: decision.candidates,
                         session: decision.routerSession,
                         timeoutMs: AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
+                        source: "routing_optimizer",
                     });
                     return {
                         value: routed.pick?.modelId ?? null,
