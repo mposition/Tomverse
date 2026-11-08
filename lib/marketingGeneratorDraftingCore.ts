@@ -209,8 +209,14 @@ export function marketingA5AssetsFor(
  * Its pages are separate assets, each approved in Admin, named
  * `<series>-p<page>of<pages>` -- e.g. `media-20261108-assistant-steps-en-card-p1of5`.
  * The model sees page 1 with the page count; code adds the other pages.
+ *
+ * A carousel has 2 to 20 pages (the envelope's asset limit). An id that looks
+ * like a page but is not a well-formed one -- a zero-padded number, a page past
+ * the count, more than 20 pages -- is read as page 0, which is never offered:
+ * it must not slip out as a standalone image.
  */
-const CAROUSEL_PAGE = /^(.+)-p([1-9]\d?)of([2-9]|1\d|20)$/u;
+const CAROUSEL_PAGE = /^(.+)-p(\d+)of(\d+)$/u;
+const CAROUSEL_MAX_PAGES = 20;
 
 export function marketingCarouselPage(
   assetId: string,
@@ -219,7 +225,9 @@ export function marketingCarouselPage(
   if (!match) return null;
   const page = Number(match[2]);
   const of = Number(match[3]);
-  return page <= of ? { series: match[1], page, of } : null;
+  const wellFormed =
+    String(page) === match[2] && String(of) === match[3] && of >= 2 && of <= CAROUSEL_MAX_PAGES && page >= 1 && page <= of;
+  return wellFormed ? { series: match[1], page, of } : { series: match[1], page: 0, of: 0 };
 }
 
 const marketingCarouselPageIds = (page: { readonly series: string; readonly of: number }) =>

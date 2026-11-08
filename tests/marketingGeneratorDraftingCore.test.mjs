@@ -629,3 +629,26 @@ test("a carousel whose pages are not all images, or rest on other claims than pa
     ["media-x-steps-en-card-p1of5"],
   );
 });
+
+test("a carousel past every platform's limit, or a malformed page id, is never offered, not even as a single image", () => {
+  const eleven = carouselContext(carouselPages(11, { allowedChannels: ["instagram", "facebook", "threads", "linkedin", "x"] }));
+  for (const channel of ["instagram", "facebook", "threads", "linkedin", "x"]) {
+    assert.deepEqual(marketingA5AssetsFor(eleven, channel, "en"), [], channel);
+  }
+  const malformed = carouselContext(
+    ["media-x-a-p01of05", "media-x-b-p1of21", "media-x-c-p6of5", "media-x-d-p0of3"].map((id) => ({ ...carouselPages(1)[0], id })),
+  );
+  assert.deepEqual(marketingA5AssetsFor(malformed, "linkedin", "en"), []);
+});
+
+test("a draft that names two carousels is dropped", () => {
+  const second = carouselPages(3).map((asset) => ({ ...asset, id: asset.id.replace("x-steps", "y-tour") }));
+  const both = carouselContext([...carouselPages(5), ...second]);
+  const { drafts, dropped } = readMarketingA5Answer(
+    answer([proposal({ claimIds: [], assetIds: ["media-x-steps-en-card-p1of5", "media-y-tour-en-card-p1of3"] })]),
+    both,
+    SCOPE,
+  );
+  assert.equal(drafts.length, 0);
+  assert.deepEqual(dropped, { draft_mixes_carousel: 1 });
+});
