@@ -62,6 +62,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       techInfoSource: "Source key",
       techInfoEscalation: "Escalation ID",
       questionAlso: "This card also has an open review. Answer the question first; the review follows once the worker is back.",
+      workerReportExcerpt: "From the worker report (the full report is below)",
     },
     group: {
       decide: "Needs your decision",
@@ -74,8 +75,11 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       read: "AMUX could not confirm how this run ended. Read the result before deciding anything.",
       recover: "The work itself stopped before it finished. Check what happened first; retrying blindly can run it twice.",
       decide: "The worker is done or out of options, and this card is set up so a person decides before it moves on.",
+      reviewWithPr: (prNumber: number) =>
+        `The worker finished and pull request #${prNumber} is open. This card needs your review before it moves on.`,
+      reviewNoPr: "The work result is saved, but there is no pull request. It cannot be approved without one, so you can run it again or block it. Check the worker report first: it says whether the tests ran.",
       byReason: {
-        human_review_required: "The worker finished and opened a pull request. This card needs your review before it moves on.",
+        human_review_required: "The worker finished. This card needs your review before it moves on.",
         canonical_deadline_review_required: "The deadline on this card needs a person to look at it.",
         local_card_closed: "The local card for this work was closed, so a person confirms how to settle it.",
         local_card_unlinked: "The local card for this work is no longer linked, so a person confirms how to settle it.",
@@ -158,6 +162,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       techInfoSource: "원본 키",
       techInfoEscalation: "Escalation ID",
       questionAlso: "이 카드에는 열린 검토도 있어요. 먼저 질문에 답해 주세요. 워커가 돌아오면 검토가 이어져요.",
+      workerReportExcerpt: "작업자 보고 앞부분 (전체 보고는 아래에 있어요)",
     },
     group: {
       decide: "결정이 필요해요",
@@ -170,8 +175,11 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       read: "AMUX가 이번 실행이 어떻게 끝났는지 확인하지 못했어요. 결정하기 전에 결과부터 읽어 주세요.",
       recover: "일이 끝나기 전에 작업이 멈췄어요. 무슨 일이 있었는지 먼저 확인해 주세요. 모르는 채 다시 시도하면 같은 일이 두 번 돌 수 있어요.",
       decide: "워커가 일을 끝냈거나 더 할 수 없어서, 사람이 정해야 다음으로 넘어가요.",
+      reviewWithPr: (prNumber: number) =>
+        `워커가 작업을 끝냈고 PR #${prNumber}이 열려 있어요. 이 카드는 사람이 확인해야 다음 단계로 넘어가도록 설정돼 있어요.`,
+      reviewNoPr: "작업 결과는 저장됐지만 PR이 없어요. PR이 없으면 승인할 수 없어서, 다시 실행하거나 차단할 수 있어요. 테스트를 돌렸는지 작업자 보고부터 확인해 주세요.",
       byReason: {
-        human_review_required: "워커가 작업을 끝내고 PR을 만들었어요. 이 카드는 사람이 확인해야 다음 단계로 넘어가도록 설정돼 있어요.",
+        human_review_required: "워커가 작업을 끝냈어요. 이 카드는 사람이 확인해야 다음 단계로 넘어가도록 설정돼 있어요.",
         canonical_deadline_review_required: "이 카드의 마감을 사람이 확인해야 해요.",
         local_card_closed: "이 작업의 로컬 카드가 닫혀서, 어떻게 마무리할지 사람이 확인해야 해요.",
         local_card_unlinked: "이 작업의 로컬 카드 연결이 끊겨서, 어떻게 마무리할지 사람이 확인해야 해요.",

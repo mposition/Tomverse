@@ -58,6 +58,8 @@ export type AmuxReviewDetail = {
     status: string;
     revision: number;
     due_parse_state: string;
+    /** The card's recorded pull request; null when it has none. */
+    review_pr_number?: number | null;
   };
   last_attempt: {
     id: string;
@@ -422,7 +424,8 @@ export function AmuxOwnerReviewView({
   const decisionQuestion = outcomes.includes("approve")
     ? m.ownerQuestionApprove
     : outcomes.includes("retry")
-      ? m.ownerQuestionRetry
+      // From review, retry is offered only for a result with no pull request.
+      ? review.task.status === "review" ? m.ownerQuestionRetryNoPr : m.ownerQuestionRetry
       : outcomes.includes("block")
         ? m.ownerQuestionBlock
         : null;

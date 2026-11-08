@@ -241,3 +241,50 @@ test("the read validator accepts what the route returns and rejects anything els
   assert.equal(isAmuxOwnerQueueRead({ error: "Server error." }), false);
   assert.equal(isAmuxOwnerQueueRead(null), false);
 });
+
+test("a finished run in review with no pull request says so, shows the report and offers retry", () => {
+  // AMUX-FILEGEN-003: an implement Task whose result was saved with no PR.
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({
+    selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      review_report: {
+        scope_and_completion_criteria: "Scope and criteria", approved_execution_brief: null,
+        worker_report: "Added the notice decision.\nNo PR, merge or deploy.\n\nTests blocked: tsx is not installed.",
+        worker_report_verified: true,
+      },
+      allowed_outcomes: ["block", "retry"],
+      proposed_transitions: { block: "blocked", retry: "todo" },
+    }),
+  }));
+  assert.match(html, /The work result is saved, but there is no pull request/);
+  assert.doesNotMatch(html, /opened a pull request/);
+  assert.match(html, /data-testid="amux-owner-queue-report-excerpt"/);
+  assert.match(html, /Tests blocked: tsx is not installed\./);
+  assert.match(html, /<kbd[^>]*>1<\/kbd>Block/);
+  assert.match(html, /<kbd[^>]*>2<\/kbd>Retry/);
+  assert.doesNotMatch(html, /Approve<\/li>/);
+  assert.match(html, /data-testid="admin-amux-select-retry"/);
+  assert.doesNotMatch(html, /data-testid="admin-amux-select-approve"/);
+  assert.match(html, /This result has no pull request\. Should this same task run again\?/);
+});
+
+test("a finished run in review names its pull request, and an unread review claims none", () => {
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const withPr = decision(card, controller({
+    selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: 3501 },
+    }),
+  }));
+  assert.match(withPr, /pull request #3501 is open/);
+  assert.doesNotMatch(withPr, /amux-owner-queue-report-excerpt/);
+  const unread = decision(card, controller());
+  assert.match(unread, /The worker finished\. This card needs your review/);
+  assert.doesNotMatch(unread, /pull request/);
+});

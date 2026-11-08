@@ -48,6 +48,27 @@ const summaryFor = (item: AmuxOwnerQueueItem): AmuxEscalationSummary | null =>
     task: { id: item.taskId, title: item.title ?? "", sourceKey: item.sourceKey, priority: "", status: item.status },
   };
 
+const EXCERPT_LINES = 6;
+const EXCERPT_CHARS = 600;
+
+/** The opening lines of a worker report, so a card with no pull request
+ * shows what the worker said (tests run or not, PR opened or not) in the
+ * "why" box. Whole lines, cut with an ellipsis; the full report stays below. */
+export const workerReportExcerpt = (report: string | null) => {
+  if (!report) return null;
+  const lines = report.split(/\r?\n/).map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
+  if (lines.length === 0) return null;
+  const kept: string[] = [];
+  let length = 0;
+  for (const line of lines.slice(0, EXCERPT_LINES)) {
+    if (kept.length > 0 && length + line.length + 1 > EXCERPT_CHARS) break;
+    kept.push(line.length > EXCERPT_CHARS ? `${line.slice(0, EXCERPT_CHARS)}…` : line);
+    length += line.length + 1;
+  }
+  return kept.length < lines.length ? `${kept.join("\n")}\n…` : kept.join("\n");
+};
+
 /** "N h" in the console's language, counted from the read time. */
 export const useAmuxOwnerQueueElapsed = (generatedAt: string) => {
   const { locale } = useAdminLocale();
@@ -95,11 +116,20 @@ export function AmuxOwnerQueueDecision({
   const group = amuxOwnerQueueGroup(item);
   const reasonLabel = item.attentionReason === null ? null
     : execution.attentionReason[item.attentionReason] ?? execution.attentionReasonFallback;
-  const why = group === "question" ? copy.why.question
-    : (item.attentionReason ? copy.why.byReason[item.attentionReason] : undefined) ?? copy.why[group];
   const summary = summaryFor(item);
   const review = controller.review;
   const reviewMatches = review !== null && summary !== null && review.escalation.id === summary.id;
+  // Once this card's review is read, a finished run in review says whether it
+  // has a pull request; until then the reason's own words make no PR claim.
+  const reviewPr = reviewMatches && review.task.status === "review" &&
+    item.attentionReason === "human_review_required" &&
+    review.task.review_pr_number !== undefined ? review.task.review_pr_number : undefined;
+  const why = group === "question" ? copy.why.question
+    : reviewPr === null ? copy.why.reviewNoPr
+    : typeof reviewPr === "number" ? copy.why.reviewWithPr(reviewPr)
+    : (item.attentionReason ? copy.why.byReason[item.attentionReason] : undefined) ?? copy.why[group];
+  const reportExcerpt = reviewPr === null && reviewMatches
+    ? workerReportExcerpt(review.review_report?.worker_report ?? null) : null;
   const classification = summary === null ? null
     : classifyAmuxOwnerQueueItem(summary, reviewMatches ? review : null);
   const outcomes = reviewMatches ? visibleAmuxOwnerReviewOutcomes(review) : [];
@@ -151,6 +181,14 @@ export function AmuxOwnerQueueDecision({
           {copy.detail.whyStopped}
         </p>
         <p className="mt-1.5 text-sm leading-6 text-zinc-300">{why}</p>
+        {reportExcerpt ? (
+          <div className="mt-3" data-testid="amux-owner-queue-report-excerpt">
+            <p className="text-xs font-bold text-zinc-400">{copy.detail.workerReportExcerpt}</p>
+            <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-sm leading-6 text-zinc-200 [overflow-wrap:anywhere]">
+              {reportExcerpt}
+            </pre>
+          </div>
+        ) : null}
       </div>
 
       {group === "question" ? (

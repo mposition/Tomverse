@@ -165,6 +165,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerDecision: "Genuine owner decision",
     ownerQuestionApprove: "Does the submitted result satisfy the assigned scope and completion criteria?",
     ownerQuestionRetry: "Has the reported blocker been corrected enough to requeue this same task?",
+    ownerQuestionRetryNoPr: "This result has no pull request. Should this same task run again?",
     ownerQuestionBlock: "Should this task remain blocked with this recorded reason?",
     blockWithoutResultNotice: (source: string, target: string) =>
       `No completion or retry evidence is connected. From the connected assignment and permitted decisions, this review shows the ${source} → ${target} block choice. This does not prove that a host process stopped, nor that no process ran, and does not delete, cancel, requeue, or run the Task.`,
@@ -476,6 +477,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerDecision: "실제 운영자 결정",
     ownerQuestionApprove: "제출된 결과가 배정 범위와 완료 기준을 충족합니까?",
     ownerQuestionRetry: "보고된 차단 원인이 이 작업을 다시 대기열에 넣을 만큼 해결됐습니까?",
+    ownerQuestionRetryNoPr: "이 결과에는 PR이 없습니다. 같은 작업을 다시 실행하시겠습니까?",
     ownerQuestionBlock: "기록된 사유로 이 작업을 차단 상태에 유지해야 합니까?",
     blockWithoutResultNotice: (source: string, target: string) => {
       const effect = source === "blocked" && target === "blocked"
