@@ -369,12 +369,18 @@ test("the content review passes only when the words read match the approved word
   assert.match(checkReview(line(reviewOf()), { stage: "content", concept: c, locale: "ko" }).problem, /keys must be exactly/u);
 });
 
-// The picture steps run in Chromium (playwright), where the tool's packages are installed.
+// The picture steps run in Chromium (playwright), where the tool's packages and
+// browser are installed. Importing playwright is not enough: a CI job may have
+// the package from the root install but no browser, so the probe launches one.
 const playwrightReady = (() => {
-  const probe = spawnSync(process.execPath, ["--input-type=module", "-e", "await import('playwright')"], { cwd: tool });
+  const probe = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", "const { chromium } = await import('playwright'); const browser = await chromium.launch(); await browser.close();"],
+    { cwd: tool, timeout: 60_000 },
+  );
   return probe.status === 0;
 })();
-const skip = playwrightReady ? false : "tools/marketing-video packages are not installed";
+const skip = playwrightReady ? false : "tools/marketing-video packages or their Chromium are not installed";
 
 function solidPng(width, height, rgb) {
   const raw = Buffer.alloc((width * 3 + 1) * height);

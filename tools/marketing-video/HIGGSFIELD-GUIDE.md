@@ -28,7 +28,7 @@ Every concept follows these rules, and every review judges against them.
     made-up GPT answer. An answer under no model name (a custom assistant,
     "AI") may be written for the scene.
 11. A drawn Tomverse screen shows only real features, model names and words
-    (policy §7.3, 2026-11-08). It is submitted as not depicting the product
+    (`docs/policy/marketing-automation.md §7.3`, 2026-11-08). It is submitted as not depicting the product
     interface; only real captures are.
 12. Model and company names (GPT, Claude, Gemini, ...) are never translated.
     Rejected 2026-11-08: name tags reading "지피티·클로드" and "克劳德·双子座".
