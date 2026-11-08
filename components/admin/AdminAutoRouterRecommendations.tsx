@@ -1,15 +1,18 @@
 "use client";
 
 import { formatAestDateTime } from "@/lib/adminUiCore";
-import { Check, Loader2, RotateCcw, Send, X } from "lucide-react";
+import { Check, Copy, Loader2, RotateCcw, Send, X } from "lucide-react";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import { AdminCopyWorkBriefButton } from "@/components/admin/AdminCopyWorkBriefButton";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
+import { recommendationIdeaText } from "@/lib/autoRouterRecommendationIdeaText";
 import {
   isRecommendationSendable,
   openRecommendations,
   RECOMMENDATION_SENT_STATUS,
+  reportFindings,
   type ActionableRecommendation,
   type RecommendationStatus,
 } from "@/lib/autoRouterRecommendationsCore";
@@ -27,6 +30,18 @@ export type RecommendationSendState = {
   sendingKey: string | null;
   failure: { key: string; failure: AdminApiFailure } | null;
 };
+
+/**
+ * The idea "Send to AMUX" would send, built the way the send route builds it
+ * (recommendationIdeaText over the stored report), for pasting into a local CLI.
+ */
+export const recommendationBrief = (cycle: RecommendationCycle, item: ActionableRecommendation, origin: string) =>
+  recommendationIdeaText({
+    recommendation: { kind: item.kind, text: item.text },
+    findings: reportFindings(cycle.summary),
+    cycle: { id: cycle.id, createdAt: cycle.createdAt },
+    origin,
+  });
 
 type SetStatus = (cycleId: string, index: number, status: RecommendationStatus) => void;
 type SendToAmux = (cycleId: string, index: number) => void;
@@ -143,6 +158,13 @@ export function RecommendationControls({
             {sending ? m.sendingToAmux : m.sendToAmux}
           </button>
         ) : null}
+        <AdminCopyWorkBriefButton
+          brief={() => recommendationBrief(cycle, item, window.location.origin)}
+          labels={{ copy: m.copyBrief, copied: m.briefCopied, failed: m.briefCopyFailed }}
+          className={buttonClass}
+          testId="admin-auto-router-recommendation-copy-brief"
+          icon={<Copy className="h-3.5 w-3.5" aria-hidden />}
+        />
       </div>
       {refused ? <AdminApiFailureNotice failure={refused} testId="admin-auto-router-recommendation-send-failure" /> : null}
     </div>

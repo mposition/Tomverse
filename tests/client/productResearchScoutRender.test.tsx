@@ -3,11 +3,12 @@ import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { AdminScoutRunsPanel } from "@/components/admin/AdminScoutRunsPanel";
-import { AdminScoutSuggestionsPanel } from "@/components/admin/AdminScoutSuggestionsPanel";
+import { AdminScoutSuggestionsPanel, scoutSuggestionBrief } from "@/components/admin/AdminScoutSuggestionsPanel";
 import { SCOUT_SEND_BATCH, SCOUT_SEND_SPACING_MS, nextScoutSendBatch } from "@/lib/adminScoutDisplay";
 import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
 import { SCOUT_GENERATIONS, SCOUT_PAGES, SCOUT_SIGNED_IN_PAGES } from "@/lib/productResearchScoutBrowserPolicy.mjs";
 import type { ScoutConsoleSuggestion, ScoutConsoleView } from "@/lib/productResearchScoutConsoleRead";
+import { suggestionIdeaText } from "@/lib/productResearchScoutCore";
 import { scoutSubjectInfo } from "@/lib/productResearchScoutSubjects";
 
 /**
@@ -194,4 +195,23 @@ test("the next batch is the most severe, oldest first, and bounded", () => {
 test("only an owner is offered the next batch", () => {
   assert.match(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view()} />), /admin-product-research-scout-select-batch/);
   assert.doesNotMatch(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ canSend: false })} />), /admin-product-research-scout-select-batch/);
+});
+
+test("every suggestion offers Copy brief, even without the right to send, and the brief is the AMUX idea plus page and done line", () => {
+  const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ canSend: false, canDismiss: false })} />);
+  // Only the open group (the one with a high suggestion) draws its rows: s1 and s2.
+  assert.equal((html.match(/data-testid="admin-product-research-scout-copy-brief"/g) ?? []).length, 2);
+  for (const button of html.match(/<button[^>]*data-testid="admin-product-research-scout-copy-brief"[^>]*>/g) ?? []) {
+    assert.doesNotMatch(button, /disabled=""/);
+  }
+
+  const ko = adminProductResearchScoutMessages.ko;
+  const page = suggestion("s1", "pricing.ko", "high", "mobile", "Pricing table is cut at 320px");
+  assert.equal(
+    scoutSuggestionBrief(page, "https://tomverse.app"),
+    [suggestionIdeaText(page), `${ko.briefUrl}: https://tomverse.app/pricing`, ko.briefDone].join("\n"),
+  );
+  // A file or the catalogue has no page to name.
+  const file = suggestion("s4", "pdf.document", "low", "generated_file", "PDF title is body-sized");
+  assert.equal(scoutSuggestionBrief(file, "https://tomverse.app"), [suggestionIdeaText(file), ko.briefDone].join("\n"));
 });
