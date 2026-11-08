@@ -212,6 +212,60 @@ const IDEOGRAPHIC_HOST_ANY_CASE = new RegExp(
   "iu",
 );
 
+/**
+ * Our own bare host, the one address a file or a post may name in its words
+ * (owner decision 2026-11-08: a how-to video says and shows "tomverse.app").
+ *
+ * Only the bare host, as a word of its own: `tomverse.app` or
+ * `www.tomverse.app`, in any letter case, with nothing address-like attached.
+ * A scheme, a path, a port, a query, a user, a label in front
+ * (`evil.tomverse.app`, `例子。tomverse.app`) or behind (`tomverse.app.evil.com`,
+ * `tomverse.app。例子`) and a hyphenated look-alike (`my-tomverse.app`) all leave
+ * the host in place, so the expressions above still read the text as an
+ * address. A URL parser reads the ideographic stop U+3002 as a dot, so it
+ * separates labels here on both sides even though prose also uses it. The link
+ * a post carries is still the publisher's, from an approved id.
+ *
+ * Matched against the readable form, so every spelling NFKC folds to the host
+ * is the host: `tomverse．app`, and `tomverſe.app` (U+017F folds to `s`). That
+ * is intended -- UTS #46, which browsers apply to a host, maps those the same
+ * way, so they reach this host and no other. Letter case is spelled out per
+ * ASCII letter rather than with the `i` flag, so nothing beyond NFKC is folded
+ * here, and lowering the whole text first would change what the
+ * case-sensitive ideographic checks above read.
+ *
+ * The host is written once here; docs/policy/marketing-automation.md 7.1 names
+ * the same exception and changes with it.
+ */
+const OWN_HOST = { sub: "www", label: "tomverse", suffix: "app", replacement: "Tomverse" } as const;
+const asciiAnyCase = (word: string): string =>
+  word.replace(/[a-z]/g, (letter) => `[${letter}${letter.toUpperCase()}]`);
+// The boundaries are lists of what may stand there, not of what may not: a
+// label takes letters, marks, digits and joiners from every script, and the
+// reviews found a combining mark (x́tomverse.app) and CJK text
+// (tomverse.app中国/login) that turned the host into another name with a path.
+// So in front of the host only the start, white space, an opening or
+// separating mark, or the ? / ! that ends a sentence before it; after it only
+// the end, white space, a closing or separating mark, or a stop / ? / ! that
+// ends the text or a word. Korean and Chinese copy
+// puts a space or a mark after the host: "tomverse.app 에서" passes and
+// "tomverse.app에서" is refused.
+const LABEL_STOPS = `.${codePoint(0x3002)}`;
+const OPENING_MARKS = `([{"'${codePoint(0x201c)}${codePoint(0x2018)}${codePoint(0x300c)}${codePoint(0x300e)}${codePoint(0x3010)}${codePoint(0x300a)}${codePoint(0x3008)}`;
+const CLOSING_MARKS = `)\\]}"'${codePoint(0x201d)}${codePoint(0x2019)}${codePoint(0x300d)}${codePoint(0x300f)}${codePoint(0x3011)}${codePoint(0x300b)}${codePoint(0x3009)}`;
+const SEPARATING_MARKS = `,;${codePoint(0x3001)}`;
+// A question or exclamation mark ends a sentence only when nothing follows it;
+// `?` is also where a query starts (tomverse.app?ref=x).
+const ENDING_MARKS = `${LABEL_STOPS}?!`;
+const OWN_BARE_HOST = new RegExp(
+  `(?<=^|[\\s${OPENING_MARKS}${SEPARATING_MARKS}?!])` +
+    `(?:${asciiAnyCase(OWN_HOST.sub)}\\.)?${asciiAnyCase(OWN_HOST.label)}\\.${asciiAnyCase(OWN_HOST.suffix)}` +
+    `(?=$|[\\s${CLOSING_MARKS}${SEPARATING_MARKS}]|[${ENDING_MARKS}](?:$|[\\s${CLOSING_MARKS}]))`,
+  "gu",
+);
+
+const withoutOwnBareHost = (readable: string): string => readable.replace(OWN_BARE_HOST, OWN_HOST.replacement);
+
 /** Markdown and HTML link syntax, whatever it points at. */
 const LINK_MARKUP = /\[[^\]]*\]\([^)]*\)|<\s*a\b[^>]*>|href\s*=/iu;
 
@@ -513,11 +567,13 @@ export function marketingTextHygiene(raw: string): MarketingHygieneCode[] {
   // been reported above.
   const readable = readableForm(raw);
   if (MENTION.test(readable)) codes.push("mention");
+  // Our own bare host is taken out first; anything else address-like stays.
+  const addressable = withoutOwnBareHost(readable);
   if (
-    URL_LIKE.test(readable) ||
-    IDEOGRAPHIC_HOST_ASCII_LABEL.test(readable) ||
-    IDEOGRAPHIC_HOST_CJK_LABEL.test(readable) ||
-    IDEOGRAPHIC_HOST_ANY_CASE.test(readable)
+    URL_LIKE.test(addressable) ||
+    IDEOGRAPHIC_HOST_ASCII_LABEL.test(addressable) ||
+    IDEOGRAPHIC_HOST_CJK_LABEL.test(addressable) ||
+    IDEOGRAPHIC_HOST_ANY_CASE.test(addressable)
   ) {
     codes.push("url_like");
   }
