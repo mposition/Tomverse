@@ -7,14 +7,19 @@ import {
   MODEL_CATALOG_EXPORT_PATH,
   MODEL_CATALOG_SYNC_SOURCE_ORIGIN,
   MODEL_CATALOG_SYNC_TABLES,
+  SYNC_REFERENCES,
   exportDigest,
   isModelCatalogEnvSyncDay,
   normalizeSyncRow,
   planModelCatalogEnvSync,
+  referenceTranslator,
   summarizeSyncPlan,
+  syncRowUpdateData,
+  syncRowWhere,
   validateModelCatalogExport,
   type ModelCatalogExport,
   type SyncRow,
+  type TablePlan,
   type SyncTableSpec,
   type SyncTables,
 } from "@/lib/modelCatalogEnvSyncCore";
@@ -118,22 +123,58 @@ async function fetchProductionExport(secret: string): Promise<ModelCatalogExport
   return validateModelCatalogExport(JSON.parse(body));
 }
 
+/** This environment's id and key fields for one table, read now. */
+async function readKeys(tx: Prisma.TransactionClient, spec: SyncTableSpec): Promise<SyncRow[]> {
+  const select = Object.fromEntries(["id", ...spec.key].map((name) => [name, true]));
+  return delegate(tx, spec).findMany({ select });
+}
+
 /**
- * Retries a write the database rolled back because a concurrent write made
- * its plan stale (serialization failure, or a unique key the plan did not
- * see). Both outcomes are known -- nothing committed -- so a retry re-plans
- * from scratch rather than repeating an unknown write.
+ * Writes one table's part of the plan. A reference to a parent table is
+ * rebound to the ids the parent has now, after it was written: this
+ * environment's own discovery can insert a parent row under the same key, with
+ * its own id, between the plan's read and this write. Likewise a create that
+ * found such a row already there (skipDuplicates) is followed by an update
+ * that brings that row to production's values.
  */
-const RETRYABLE_PRISMA_CODES = new Set(["P2034", "P2002"]);
-export async function applyWithRetry<T>(run: () => Promise<T>, attempts = 3): Promise<T> {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      return await run();
-    } catch (error) {
-      const code =
-        error instanceof Prisma.PrismaClientKnownRequestError ? error.code : undefined;
-      if (!code || !RETRYABLE_PRISMA_CODES.has(code) || attempt >= attempts) throw error;
+async function writeTable(
+  tx: Prisma.TransactionClient,
+  spec: SyncTableSpec,
+  table: TablePlan,
+  source: SyncTables
+) {
+  let creates = table.create;
+  let updates = table.update;
+  const reference = SYNC_REFERENCES[spec.model];
+  if (reference) {
+    const parentSpec = MODEL_CATALOG_SYNC_TABLES.find((item) => item.model === reference.parent)!;
+    const translate = referenceTranslator(reference.parent, source, {
+      [reference.parent]: await readKeys(tx, parentSpec),
+    });
+    const rebind = (row: SyncRow): SyncRow =>
+      Object.prototype.hasOwnProperty.call(row, reference.field)
+        ? { ...row, [reference.field]: translate(row[reference.field]) }
+        : row;
+    creates = creates.map(rebind);
+    updates = updates.map((change) => ({ ...change, data: rebind(change.data) }));
+  }
+  const client = delegate(tx, spec);
+  if (creates.length > 0) {
+    const result = (await client.createMany({
+      data: creates.map((row) => toWrite(spec, row)),
+      skipDuplicates: true,
+    })) as { count?: number };
+    if (!spec.appendOnly && (result.count ?? creates.length) < creates.length) {
+      for (const row of creates) {
+        await client.updateMany({
+          where: syncRowWhere(spec, row),
+          data: toWrite(spec, syncRowUpdateData(spec, row)),
+        });
+      }
     }
+  }
+  for (const change of updates) {
+    await client.updateMany({ where: change.where, data: toWrite(spec, change.data) });
   }
 }
 
@@ -179,13 +220,13 @@ export async function runModelCatalogEnvSync(
     };
   }
 
-  const { summary, auditLogId } = await applyWithRetry(() => prisma.$transaction(
+  // Read Committed, the default, on purpose: the audit writer takes the chain
+  // lock and then reads the chain head, which is only the current head when
+  // each statement sees what committed before it. A transaction-wide snapshot
+  // (Repeatable Read, Serializable) would link to a stale head.
+  const { summary, auditLogId } = await prisma.$transaction(
     async (tx) => {
       // Planned inside the transaction, against what it is about to change.
-      // Serializable: if this environment's own discovery inserts a row the
-      // plan did not see (a work item under the same key with its own id),
-      // the transaction fails and is planned again, instead of writing events
-      // that point at a work item id that was never inserted.
       const plan = planModelCatalogEnvSync(source.tables, await readTables(tx));
       const summary = summarizeSyncPlan(plan);
       if (plan.totals.create === 0 && plan.totals.update === 0) {
@@ -193,15 +234,7 @@ export async function runModelCatalogEnvSync(
       }
       for (const table of plan.tables) {
         const spec = MODEL_CATALOG_SYNC_TABLES.find((item) => item.model === table.model)!;
-        const client = delegate(tx, spec);
-        if (table.create.length > 0) {
-          // No skipDuplicates: a duplicate means the plan is stale, and a
-          // silently skipped row would leave its references dangling.
-          await client.createMany({ data: table.create.map((row) => toWrite(spec, row)) });
-        }
-        for (const change of table.update) {
-          await client.updateMany({ where: change.where, data: toWrite(spec, change.data) });
-        }
+        await writeTable(tx, spec, table, source.tables);
       }
       const auditLogId = await writeModelCatalogEnvSyncSystemAudit(tx, {
         targetId: source.digest,
@@ -216,12 +249,8 @@ export async function runModelCatalogEnvSync(
       });
       return { summary, auditLogId };
     },
-    {
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      timeout: 180_000,
-      maxWait: 30_000,
-    }
-  ));
+    { timeout: 180_000, maxWait: 30_000 }
+  );
   invalidateImageModelCatalog();
   return {
     status: "applied",

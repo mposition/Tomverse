@@ -4,10 +4,14 @@ import test from "node:test";
 
 import {
   MODEL_CATALOG_SYNC_TABLES,
+  SYNC_REFERENCES,
   exportDigest,
   isModelCatalogEnvSyncDay,
   normalizeSyncRow,
   planModelCatalogEnvSync,
+  referenceTranslator,
+  syncRowUpdateData,
+  syncRowWhere,
   validateModelCatalogExport,
 } from "../lib/modelCatalogEnvSyncCore.ts";
 
@@ -225,6 +229,33 @@ test("work items and their events point at this environment's ids", () => {
       ["ev-2", "prod-new-item"],
     ]
   );
+});
+
+test("a reference is rebound to a parent this environment inserted after the plan", () => {
+  const source = emptyTables();
+  source.ModelLifecycleWorkItem = [
+    { id: "prod-item", provider: "openai", apiModel: "gpt-y", action: "add" },
+  ];
+  // Local discovery inserted the same work item under its own id after the plan was read.
+  const fresh = {
+    ModelLifecycleWorkItem: [{ id: "late-local", provider: "openai", apiModel: "gpt-y", action: "add" }],
+  };
+  const translate = referenceTranslator("ModelLifecycleWorkItem", source, fresh);
+  assert.equal(translate("prod-item"), "late-local");
+  // An id that is already this environment's is left alone.
+  assert.equal(translate("some-local-id"), "some-local-id");
+  assert.equal(translate(null), null);
+  assert.deepEqual(SYNC_REFERENCES.ModelLifecycleWorkItemEvent, {
+    field: "workItemId",
+    parent: "ModelLifecycleWorkItem",
+  });
+});
+
+test("an update built from a create row carries neither its key nor its id", () => {
+  const item = spec("ModelLifecycleWorkItem");
+  const row = { id: "p", provider: "openai", apiModel: "m", action: "add", status: "adopted" };
+  assert.deepEqual(syncRowWhere(item, row), { provider: "openai", apiModel: "m", action: "add" });
+  assert.deepEqual(syncRowUpdateData(item, row), { status: "adopted" });
 });
 
 const validExport = () => {

@@ -274,7 +274,7 @@ const specFor = (model: string): SyncTableSpec => {
  * id is turned into the id the same row (same key) has locally, or kept when
  * the row is being created here, since a created row takes the source id.
  */
-const idTranslator = (model: string, source: SyncTables, local: SyncTables) => {
+export const referenceTranslator = (model: string, source: SyncTables, local: SyncTables) => {
   const spec = specFor(model);
   const keyBySourceId = new Map<string, string>();
   for (const row of source[model] ?? []) keyBySourceId.set(String(row.id), syncRowKey(spec, row));
@@ -289,8 +289,8 @@ const idTranslator = (model: string, source: SyncTables, local: SyncTables) => {
 };
 
 export const planModelCatalogEnvSync = (source: SyncTables, local: SyncTables): SyncPlan => {
-  const entryId = idTranslator("ProviderModelCatalogEntry", source, local);
-  const workItemId = idTranslator("ModelLifecycleWorkItem", source, local);
+  const entryId = referenceTranslator("ProviderModelCatalogEntry", source, local);
+  const workItemId = referenceTranslator("ModelLifecycleWorkItem", source, local);
   const remap = (model: string, row: SyncRow): SyncRow =>
     model === "ModelLifecycleWorkItem"
       ? { ...row, catalogEntryId: entryId(row.catalogEntryId) }
@@ -343,6 +343,27 @@ export const planModelCatalogEnvSync = (source: SyncTables, local: SyncTables): 
   }
   return { tables, totals };
 };
+
+/**
+ * The reference each referencing table carries, and the table it points at.
+ * The apply step re-reads the parent's ids after writing it and rebinds these,
+ * because this environment's own discovery may have inserted a parent row
+ * under the same key, with its own id, after the plan was read.
+ */
+export const SYNC_REFERENCES: Readonly<Record<string, { field: string; parent: string }>> = {
+  ModelLifecycleWorkItem: { field: "catalogEntryId", parent: "ProviderModelCatalogEntry" },
+  ModelLifecycleWorkItemEvent: { field: "workItemId", parent: "ModelLifecycleWorkItem" },
+};
+
+/** A row's key fields, the `where` of an update. */
+export const syncRowWhere = (spec: SyncTableSpec, row: SyncRow): SyncRow =>
+  Object.fromEntries(spec.key.map((name) => [name, row[name]]));
+
+/** A row's fields other than its key and its id, the `data` of an update. */
+export const syncRowUpdateData = (spec: SyncTableSpec, row: SyncRow): SyncRow =>
+  Object.fromEntries(
+    Object.entries(row).filter(([name]) => name !== "id" && !spec.key.includes(name))
+  );
 
 /** Counts only: what the report, the response and the audit entry carry. */
 export const summarizeSyncPlan = (plan: SyncPlan) => ({
