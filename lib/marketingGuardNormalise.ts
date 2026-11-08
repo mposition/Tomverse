@@ -244,9 +244,10 @@ const asciiAnyCase = (word: string): string =>
 // label takes letters, marks, digits and joiners from every script, and the
 // reviews found a combining mark (x́tomverse.app) and CJK text
 // (tomverse.app中国/login) that turned the host into another name with a path.
-// So in front of the host only the start, white space or an opening or
-// separating mark; after it only the end, white space, a closing or separating
-// mark, or a stop / ? / ! that ends the text or a word. Korean and Chinese copy
+// So in front of the host only the start, white space, an opening or
+// separating mark, or the ? / ! that ends a sentence before it; after it only
+// the end, white space, a closing or separating mark, or a stop / ? / ! that
+// ends the text or a word. Korean and Chinese copy
 // puts a space or a mark after the host: "tomverse.app 에서" passes and
 // "tomverse.app에서" is refused.
 const LABEL_STOPS = `.${codePoint(0x3002)}`;
