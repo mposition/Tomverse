@@ -535,7 +535,7 @@ export function AmuxRecoveryInspectionView({ m, state, onInspect, onReloadReview
       className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-blue-500/40 px-4 py-2 text-sm font-semibold text-blue-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 disabled:opacity-60">
       {state.state === "loading" ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
         : <RefreshCw aria-hidden="true" className="h-4 w-4" />}
-      {m.inspectAgain}
+      {state.state === "ready" || state.state === "unavailable" ? m.inspectAgain : m.inspect}
     </button>
     <div role="status" aria-live="polite" className="mt-3 text-sm leading-6 text-zinc-300">
       {state.state === "idle" && m.noInspection}

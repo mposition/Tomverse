@@ -160,7 +160,6 @@ BEGIN
       pa."requestedByUserId" = NEW."approvedByUserId" AND pa."ownerRequestId" = NEW."ownerRequestId" AND
       pa."costDigest" = NEW."costDigest" AND pa."additionalCapMicroUsd" = NEW."additionalCapMicroUsd" AND
       pa."oldHeldMicroUsd" = NEW."oldHeldMicroUsd" AND pa."catalogApprovalId" = NEW."catalogApprovalId" AND
-      pa."costReceiptDigest" = NEW."costReceiptDigest" AND
       e."recordedAt" >= pa."requestedAt" AND db_now <= pa."expiresAt" AND
       -- The consent's one result is this approval, written in this transaction:
       -- a refused or earlier-settled consent can never open an approval.

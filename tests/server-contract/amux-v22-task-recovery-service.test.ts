@@ -1564,3 +1564,15 @@ test("one click: a consent held back past its expiry is recorded as expired", as
   assert.equal(world.preApprovalResults[0]!.reason, "preapproval_expired");
   assert.equal(world.approvals.length, 0); assert.equal(world.task.status, "blocked");
 });
+
+// Review r-20261108-104122-945cf1: the receipt digest includes its calculation
+// time, so a consent must still apply when the receipt is recomputed later.
+test("one click: a later, time-stamped receipt at the same cost still applies the consent", async () => {
+  reset(); world.costClock = new Date("2026-10-13T01:00:00.000Z");
+  await preApprove();
+  const consented = world.preApprovals[0]!.costReceiptDigest;
+  const read = await submitEvidence();
+  assert.equal(read.state, "approved"); assert.equal(world.approvals.length, 1);
+  assert.notEqual(world.approvals[0]!.costReceiptDigest, consented);
+  assert.equal(world.approvals[0]!.costDigest, world.preApprovals[0]!.costDigest);
+});

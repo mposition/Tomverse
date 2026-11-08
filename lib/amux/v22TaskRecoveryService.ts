@@ -522,7 +522,10 @@ export async function readAmuxV22RecoveryPreApprovalQuote(session: Session,
       eligible: false, reason: null, retryWrite: false };
     if (taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID) return { ...base, reason: "exact_target_only" };
     try { requireBlockedIdentity(task, task.revision, attempt?.id ?? ""); }
-    catch { return { ...base, reason: "recovery_identity_changed" }; }
+    catch (error) {
+      if (error instanceof BoardImportError) return { ...base, reason: error.code };
+      throw error;
+    }
     if (await waitingPreApproval(tx, task.id, now)) return { ...base, reason: "preapproval_pending" };
     try { return { ...base, cost: (await currentCost(tx, task)).cost, eligible: true }; }
     catch (error) {
@@ -1876,11 +1879,13 @@ async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: D
       BigInt(approvedCost.additionalCapMicroUsd), now);
     if (!admission.allowed) throw new BoardImportError(admission.reason, 409);
     // A pre-approval is spent only at the exact server-computed cost it named.
+    // costDigest (checked above) is the time-independent basis; the receipt
+    // digest carries its calculation time, so it is recorded, not compared.
+    if (preApproval && (risk || launchProof))
+      throw new BoardImportError("preapproval_scope_refused", 409);
     if (preApproval && (current.approvalId !== preApproval.catalogApprovalId ||
-        current.receipt.receiptDigest !== preApproval.costReceiptDigest ||
         approvedCost.additionalCapMicroUsd !== preApproval.additionalCapMicroUsd.toString() ||
-        approvedCost.oldHeldMicroUsd !== preApproval.oldHeldMicroUsd.toString() ||
-        risk || launchProof))
+        approvedCost.oldHeldMicroUsd !== preApproval.oldHeldMicroUsd.toString()))
       throw new BoardImportError("recovery_cost_changed", 409);
     const approvalId = randomUUID();
     // The approval answers the person's open escalation for this Task: it is
