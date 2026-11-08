@@ -624,9 +624,9 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * condition changes; the bytes moved, so prior signed evidence is stale.
  *
  * 2026-11-08: the Guard's hygiene check lets our own bare host `tomverse.app`
- * through (owner decision of that date, docs/policy/marketing-automation.md
- * §7.1), in `lib/marketingGuardNormalise.ts`, which the receiver's closure
- * loads. No webhook module, event decision or admission condition changes; the
+ * through (owner decision of that date,
+ * docs/policy/marketing-automation.md §7.1), in
+ * `lib/marketingGuardNormalise.ts`, which the receiver's closure loads. No webhook module, event decision or admission condition changes; the
  * bytes moved, so prior signed evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
