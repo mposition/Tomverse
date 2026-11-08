@@ -1,9 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock3, Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import { dispatchAppToast } from "@/lib/appToast";
+import { AdminDataTable, type AdminDataColumn } from "@/components/admin/ui/AdminDataTable";
+import { AdminPixelAvatar } from "@/components/admin/ui/AdminPixelAvatar";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { formatAestDateTime, type AdminTone } from "@/lib/adminUiCore";
 import { adminScheduledJobsMessages } from "@/lib/adminMessages/scheduledJobs";
 import { adminFetch } from "@/lib/adminFetch";
 
@@ -22,15 +28,18 @@ type ScheduledJobRow = {
   consecutiveFailures: number;
 };
 
-const dateLabel = (
-  value: string | null,
-  m: { never: string; unknown: string }
-) => {
-  if (!value) return m.never;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? m.unknown
-    : `${date.toISOString().replace("T", " ").slice(0, 16)} UTC`;
+const dateLabel = (value: string | null, never: string, unknown: string) => {
+  if (!value) return never;
+  return formatAestDateTime(value) ?? unknown;
+};
+
+/** A job that never ran is idle, not healthy: nothing has proved it works. */
+const toneOf = (status: string): AdminTone => {
+  if (status === "succeeded") return "ok";
+  if (status === "running") return "info";
+  if (status === "delayed") return "warn";
+  if (status === "failed" || status === "stuck") return "bad";
+  return "idle";
 };
 
 export function AdminScheduledJobsPanel() {
@@ -41,6 +50,7 @@ export function AdminScheduledJobsPanel() {
   }, [m]);
   const [rows, setRows] = useState<ScheduledJobRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,11 +63,10 @@ export function AdminScheduledJobsPanel() {
         throw new Error(data?.error || messagesRef.current.loadFailed);
       }
       setRows(data.jobs);
-    } catch (error) {
-      dispatchAppToast(
-        error instanceof Error ? error.message : messagesRef.current.loadFailed,
-        "error"
-      );
+      setError(null);
+    } catch (loadError) {
+      // A failed read is an alert, never an empty table.
+      setError(loadError instanceof Error ? loadError.message : messagesRef.current.loadFailed);
     } finally {
       setLoading(false);
     }
@@ -71,69 +80,148 @@ export function AdminScheduledJobsPanel() {
   }, [load]);
 
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{m.eyebrow}</p>
-          <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
-          <p className="mt-2 text-sm text-zinc-400">
-            {m.description}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 text-xs font-bold text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+    <AdminScheduledJobsView
+      rows={rows}
+      loading={loading}
+      error={error}
+      onRefresh={() => void load()}
+    />
+  );
+}
+
+/** The hook-free half: what the jobs table shows for a read, a failed read or no rows. */
+export function AdminScheduledJobsView({
+  rows,
+  loading,
+  error,
+  onRefresh,
+}: {
+  rows: ScheduledJobRow[];
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  const m = useAdminMessages(adminScheduledJobsMessages);
+  const label = (value: string | null) => dateLabel(value, m.never, m.unknown);
+  const statusText = (status: string) =>
+    (m.status as Record<string, string>)[status] ?? status;
+
+  const columns: AdminDataColumn<ScheduledJobRow>[] = [
+    {
+      key: "job",
+      header: m.columns.job,
+      render: (row) => (
+        <span className="flex flex-col">
+          <span className={`font-bold ${row.consecutiveFailures > 0 ? "text-red-200" : "text-zinc-100"}`}>
+            {row.name}
+          </span>
+          <code className="text-[11px] text-zinc-500">{row.key}</code>
+        </span>
+      ),
+    },
+    { key: "schedule", header: m.columns.schedule, render: (row) => row.schedule },
+    {
+      key: "lastRun",
+      header: m.columns.lastRun,
+      render: (row) => (
+        <span className="flex flex-col">
+          <span>{label(row.lastRunAt)}</span>
+          {row.lastProcessedCount !== null ? (
+            <span className="text-[11px] text-zinc-500">{m.processed(row.lastProcessedCount)}</span>
+          ) : null}
+        </span>
+      ),
+    },
+    { key: "lastSuccess", header: m.columns.lastSuccess, render: (row) => label(row.lastSuccessAt), hideOnCard: true },
+    { key: "nextRun", header: m.columns.nextRun, render: (row) => label(row.nextScheduledAt), hideOnCard: true },
+    {
+      key: "status",
+      header: m.columns.status,
+      render: (row) => (
+        <span className="flex flex-col items-start gap-1">
+          <AdminStatusChip tone={toneOf(row.status)}>{statusText(row.status)}</AdminStatusChip>
+          {row.consecutiveFailures > 0 ? (
+            <span className="text-[11px] font-bold text-red-300">
+              {m.failedInARow(row.consecutiveFailures)}
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+  ];
+
+  const failing = rows.filter((row) => row.consecutiveFailures > 0 && row.lastError);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-5" data-testid="admin-scheduled-jobs">
+      <AdminTile
+        title={m.title}
+        description={m.description}
+        action={
+          <button
+            type="button"
+            onClick={() => onRefresh()}
+            disabled={loading}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-100 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+            )}
+            {m.refresh}
+          </button>
+        }
+      >
+        {error ? (
+          <AdminStateBlock
+            kind="error"
+            title={error}
+            detail={m.loadFailedDetail}
+            onRetry={() => onRefresh()}
+          />
+        ) : loading && rows.length === 0 ? (
+          <AdminStateBlock kind="loading" />
+        ) : (
+          <AdminDataTable
+            caption={m.title}
+            columns={columns}
+            rows={rows}
+            rowKey={(row) => row.key}
+            cardTitle={(row) => row.name}
+            cardMeta={(row) => `${row.schedule} · ${label(row.lastRunAt)}`}
+            cardAside={(row) => (
+              <AdminStatusChip tone={toneOf(row.status)}>{statusText(row.status)}</AdminStatusChip>
+            )}
+            emptyState={<AdminStateBlock kind="empty" title={m.empty.title} detail={m.empty.detail} />}
+          />
+        )}
+      </AdminTile>
+
+      {failing.map((row) => (
+        <div
+          key={row.key}
+          role="alert"
+          data-testid="scheduled-job-failure"
+          className="flex min-w-0 items-start gap-3 rounded-2xl bg-red-500/10 p-4"
         >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          {m.refresh}
-        </button>
-      </div>
-      <div className="mt-5 grid gap-3 lg:grid-cols-3">
-        {loading && rows.length === 0 ? (
-          <div className="text-sm text-zinc-500">{m.loading}</div>
-        ) : rows.map((row) => {
-          const healthy = !row.delayed && row.status === "succeeded";
-          return (
-            <article
-              key={row.key}
-              className={`rounded-2xl border p-4 ${
-                healthy
-                  ? "border-emerald-500/20 bg-emerald-500/5"
-                  : "border-amber-500/30 bg-amber-500/10"
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-black text-white">{row.name}</h3>
-                  <p className="mt-1 text-xs text-zinc-500">{row.schedule}</p>
-                </div>
-                {healthy ? (
-                  <CheckCircle2 className="h-5 w-5 text-emerald-300" />
-                ) : row.delayed ? (
-                  <AlertTriangle className="h-5 w-5 text-amber-300" />
-                ) : (
-                  <Clock3 className="h-5 w-5 text-blue-300" />
-                )}
-              </div>
-              <dl className="mt-4 grid gap-2 text-xs text-zinc-400">
-                <div><dt className="inline text-zinc-600">{m.status}</dt><dd className="inline font-black text-zinc-200">{row.status}</dd></div>
-                <div><dt className="inline text-zinc-600">{m.lastRun}</dt><dd className="inline">{dateLabel(row.lastRunAt, m)}</dd></div>
-                <div><dt className="inline text-zinc-600">{m.lastSuccess}</dt><dd className="inline">{dateLabel(row.lastSuccessAt, m)}</dd></div>
-                <div><dt className="inline text-zinc-600">{m.nextExpected}</dt><dd className="inline">{dateLabel(row.nextScheduledAt, m)}</dd></div>
-                <div><dt className="inline text-zinc-600">{m.processed}</dt><dd className="inline">{row.lastProcessedCount ?? "-"}</dd></div>
-                <div><dt className="inline text-zinc-600">{m.consecutiveFailures}</dt><dd className="inline">{row.consecutiveFailures}</dd></div>
-              </dl>
-              {row.lastError ? (
-                <p className="mt-3 max-h-24 overflow-auto rounded-xl border border-red-500/20 bg-red-500/5 p-2 text-xs text-red-200">
-                  {row.lastError}
-                </p>
-              ) : null}
-            </article>
-          );
-        })}
-      </div>
-    </section>
+          <AdminPixelAvatar team="sre" unit={3} body={false} tile={48} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-red-200">
+              {m.explainer.title(row.name, row.consecutiveFailures)}
+            </p>
+            <p className="mt-0.5 text-xs text-zinc-400">
+              {m.explainer.detail(label(row.lastFailureAt), label(row.nextScheduledAt))}
+            </p>
+            <div className="mt-3">
+              <AdminTechInfo summary={row.key}>
+                <p className="mb-1 text-zinc-500">{m.explainer.errorSummary}</p>
+                <p className="max-h-24 overflow-auto whitespace-pre-wrap break-words">{row.lastError}</p>
+              </AdminTechInfo>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

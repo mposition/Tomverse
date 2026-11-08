@@ -9,6 +9,7 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 export const adminSlackTemplatesMessages = defineAdminMessages({
   en: {
     loadFailed: "Could not load Slack templates.",
+    loadFailedDetail: "The templates could not be read, so nothing is shown. Try again.",
     saveFailed: "Could not save Slack template.",
     saved: "Slack template saved.",
     testFailed: "Slack test failed.",
@@ -29,15 +30,16 @@ export const adminSlackTemplatesMessages = defineAdminMessages({
     save: "Save",
   },
   ko: {
-    loadFailed: "Slack 템플릿을 불러오지 못했습니다.",
-    saveFailed: "Slack 템플릿을 저장하지 못했습니다.",
-    saved: "Slack 템플릿을 저장했습니다.",
-    testFailed: "Slack 테스트에 실패했습니다.",
-    testSent: "Slack 테스트 메시지를 보냈습니다.",
+    loadFailed: "Slack 템플릿을 불러오지 못했어요.",
+    loadFailedDetail: "템플릿을 읽지 못해서 아무것도 보여 주지 않았어요. 다시 시도해 주세요.",
+    saveFailed: "Slack 템플릿을 저장하지 못했어요.",
+    saved: "Slack 템플릿을 저장했어요.",
+    testFailed: "Slack 테스트에 실패했어요.",
+    testSent: "Slack 테스트 메시지를 보냈어요.",
     eyebrow: "Slack 메시지",
     title: "템플릿과 전송 테스트",
     description:
-      "예약 보고서와 공급자 알림 메시지를 편집한 뒤 관리자 화면에서 안전하게 테스트를 보낼 수 있습니다. 데이터베이스 장애 알림은 별도로 동작하므로 애플리케이션 데이터베이스를 쓸 수 없을 때도 전송됩니다. 모든 Slack 전송은 채널에 알리도록 자동으로 <!channel>로 시작합니다.",
+      "예약 보고서와 공급자 알림 메시지를 편집한 뒤 관리자 화면에서 안전하게 테스트를 보낼 수 있어요. 데이터베이스 장애 알림은 따로 동작해서 앱 데이터베이스를 쓸 수 없을 때도 보내져요. 모든 Slack 전송은 채널에 알리도록 자동으로 <!channel>로 시작해요.",
     daily: (schedule: string) => `매일 ${schedule}`,
     webhooksConfigured: "Webhook 설정됨",
     webhooksIncomplete: "Webhook 설정 미완료",

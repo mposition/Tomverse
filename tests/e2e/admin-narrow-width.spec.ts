@@ -14,7 +14,32 @@ import { expect, test, type Page } from "@playwright/test";
  * bounding box.
  */
 
-const FIXTURE = "/e2e/admin-console-fixture?view=narrow&state=pendingDeletion";
+/**
+ * The security controls are cards, and only an open card draws its form. A
+ * pending deletion opens on the restore card (reason, ticket, restore) and has
+ * no expiry at all; an active account draws the expiry in its AI-restriction
+ * card. Each check names the account state and the card it needs.
+ */
+type FixtureState = "pendingDeletion" | "active";
+type SecurityCard = "restore" | "ai" | "sessions";
+const fixtureUrl = (state: FixtureState) =>
+  `/e2e/admin-console-fixture?view=narrow${state === "active" ? "" : `&state=${state}`}`;
+
+async function openCard(page: Page, card: SecurityCard) {
+  const toggle = page.getByTestId(`admin-security-card-${card}-toggle`);
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
+
+/** Every primary security control, with the account state and card that draw it. */
+const SECURITY_CONTROLS: ReadonlyArray<{ state: FixtureState; card: SecurityCard; testId: string }> = [
+  { state: "pendingDeletion", card: "restore", testId: "admin-security-reason" },
+  { state: "pendingDeletion", card: "restore", testId: "admin-security-ticket" },
+  { state: "pendingDeletion", card: "restore", testId: "admin-security-restore" },
+  { state: "active", card: "ai", testId: "admin-security-until" },
+  { state: "active", card: "ai", testId: "admin-security-toggle-ai" },
+  { state: "active", card: "sessions", testId: "admin-security-revoke-sessions" },
+];
 
 const VIEWPORTS = [
   { name: "320x568", width: 320, height: 568 },
@@ -88,7 +113,7 @@ async function mockAdminPanelData(page: Page) {
   );
 }
 
-async function openFixture(page: Page, rootFontPx: number) {
+async function openFixture(page: Page, rootFontPx: number, state: FixtureState = "pendingDeletion") {
   await page.addInitScript((size) => {
     // Set before first paint so the whole page lays out at this scale, which
     // is what a browser-level text-size setting actually does.
@@ -96,7 +121,7 @@ async function openFixture(page: Page, rootFontPx: number) {
       document.documentElement.style.fontSize = `${size}px`;
     });
   }, rootFontPx);
-  const response = await page.goto(FIXTURE);
+  const response = await page.goto(fixtureUrl(state));
   expect(response?.status()).toBeLessThan(400);
   await expect(page.getByTestId("admin-user-security-controls")).toBeVisible();
   await expect(page.getByTestId("app-toast-viewport")).toHaveAttribute(
@@ -223,7 +248,8 @@ for (const viewport of VIEWPORTS) {
     }) => {
       await mockAdminPanelData(page);
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      await openFixture(page, rootFont.px);
+      await openFixture(page, rootFont.px, "active");
+      await openCard(page, "ai");
 
       const inputs = page.locator('input[type="datetime-local"]');
       // Security controls, the privacy request queue and one readiness
@@ -268,31 +294,29 @@ for (const viewport of VIEWPORTS) {
     }) => {
       await mockAdminPanelData(page);
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      await openFixture(page, rootFont.px);
-
-      for (const testId of [
-        "admin-security-reason",
-        "admin-security-until",
-        "admin-security-ticket",
-        "admin-security-restore",
-        "admin-security-toggle-ai",
-        "admin-security-revoke-sessions",
-      ]) {
-        const control = page.getByTestId(testId);
-        await centreInViewport(control);
-        const box = await control.boundingBox();
-        expect(box, `${testId} has no bounding box`).not.toBeNull();
-        const owns = await page.evaluate(
-          ({ point, id }) => {
-            const element = document.elementFromPoint(point.x, point.y);
-            return Boolean(element?.closest(`[data-testid="${id}"]`));
-          },
-          {
-            point: { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 },
-            id: testId,
-          }
-        );
-        expect(owns, `${testId} is not the element at its own centre`).toBe(true);
+      let openState: FixtureState | null = null;
+      for (const { state, card, testId } of SECURITY_CONTROLS) {
+        if (state !== openState) {
+          await openFixture(page, rootFont.px, state);
+          openState = state;
+        }
+        await openCard(page, card);
+        await expect(page.getByTestId(testId)).toBeVisible();
+        // Centre, measure and hit-test in one step: the panels below fill in
+        // from their mocked reads, and a layout shift between a separate
+        // measurement and the hit test would point at a neighbour instead.
+        const hit = await page.getByTestId(testId).evaluate((element, id) => {
+          element.scrollIntoView({ block: "center", inline: "nearest" });
+          const box = element.getBoundingClientRect();
+          const found = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+          return {
+            owns: Boolean(found?.closest(`[data-testid="${id}"]`)),
+            blocker: found
+              ? `${found.tagName}#${found.getAttribute("data-testid") ?? ""}.${String(found.className).slice(0, 60)}`
+              : "nothing",
+          };
+        }, testId);
+        expect(hit.owns, `${testId} is not the element at its own centre (${hit.blocker})`).toBe(true);
       }
     });
   }
@@ -303,7 +327,9 @@ test("a long error toast wraps instead of widening the page, and blocks no contr
 }) => {
   await mockAdminPanelData(page);
   await page.setViewportSize({ width: 320, height: 568 });
-  await openFixture(page, 16);
+  // The active account's AI-restriction card: reason, expiry and its button.
+  await openFixture(page, 16, "active");
+  await openCard(page, "ai");
 
   await page.evaluate(() => {
     window.dispatchEvent(
@@ -328,7 +354,7 @@ test("a long error toast wraps instead of widening the page, and blocks no contr
   for (const testId of [
     "admin-security-reason",
     "admin-security-until",
-    "admin-security-restore",
+    "admin-security-toggle-ai",
   ]) {
     const control = page.getByTestId(testId);
     await centreInViewport(control);

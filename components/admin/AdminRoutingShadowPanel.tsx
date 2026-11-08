@@ -1,13 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw, Route } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminIntlLocale, type AdminLocale } from "@/lib/adminLocale";
 import { adminRoutingShadowMessages } from "@/lib/adminMessages/routingShadow";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import type { autoRoutingRuntimeReadback } from "@/lib/autoRoutingRuntimeReadback";
+import { AdminKpiCard } from "@/components/admin/ui/AdminKpiCard";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 
 /**
  * The reader for `/api/admin/routing-shadow`.
@@ -33,14 +38,14 @@ import type { autoRoutingRuntimeReadback } from "@/lib/autoRoutingRuntimeReadbac
  *     "nothing was compared" is not that claim.
  */
 
-type GroupAgreement = {
+export type GroupAgreement = {
     key: string;
     decided: number;
     agreed: number;
     agreementRate: number | null;
 };
 
-type ShadowReport = {
+export type ShadowReport = {
     runtime?: ReturnType<typeof autoRoutingRuntimeReadback>;
     windowDays: number;
     since: string;
@@ -118,15 +123,26 @@ export function AdminRoutingRuntimeReadback({ runtime, messages }: {
     };
 
     return (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3" data-testid="admin-routing-runtime-readback">
-            <h3 className="text-sm font-bold text-zinc-200">{messages.title}</h3>
-            <p className="mt-2 text-xs leading-6 text-zinc-400">
+        <div className="flex flex-col gap-2 rounded-xl border border-zinc-800 p-3" data-testid="admin-routing-runtime-readback">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-bold text-zinc-200">{messages.title}</h3>
+                {snapshot ? (
+                    <AdminStatusChip tone={snapshot.readiness.ready ? "ok" : "warn"}>
+                        {snapshot.readiness.ready ? messages.ready : messages.notReady}
+                    </AdminStatusChip>
+                ) : (
+                    <AdminStatusChip tone="unknown" />
+                )}
+            </div>
+            <p className="text-xs leading-6 text-zinc-400">
                 {snapshot ? messages.caveat : messages.unavailable}
             </p>
             {snapshot && (
-                <pre className="mt-3 max-h-[32rem] overflow-auto whitespace-pre-wrap break-all text-xs leading-6 text-zinc-300" data-testid="admin-routing-runtime-snapshot">
-                    {JSON.stringify(snapshot, null, 2)}
-                </pre>
+                <AdminTechInfo summary={snapshot.build.shortCommitSha}>
+                    <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-all leading-6" data-testid="admin-routing-runtime-snapshot">
+                        {JSON.stringify(snapshot, null, 2)}
+                    </pre>
+                </AdminTechInfo>
             )}
         </div>
     );
@@ -138,24 +154,6 @@ const pct = (value: number | null) =>
     value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 const ms = (micros: number) => `${(micros / 1000).toFixed(1)}ms`;
 const readable = (key: string) => key.replaceAll("_", " ");
-
-const Stat = ({
-    label,
-    value,
-    detail,
-}: {
-    label: string;
-    value: string;
-    detail?: string;
-}) => (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
-        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
-            {label}
-        </p>
-        <p className="mt-1 text-lg font-black text-white">{value}</p>
-        {detail && <p className="mt-1 text-xs leading-5 text-zinc-500">{detail}</p>}
-    </div>
-);
 
 const CountList = ({
     label,
@@ -170,18 +168,15 @@ const CountList = ({
     const { locale } = useAdminLocale();
     const entries = Object.entries(counts).sort((left, right) => right[1] - left[1]);
     return (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
-            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
-                {label}
-            </p>
+        <AdminTile title={label}>
             {entries.length === 0 ? (
-                <p className="mt-2 text-sm text-zinc-500">{m.groups.noneInWindow}</p>
+                <p className="text-sm text-zinc-500">{m.groups.noneInWindow}</p>
             ) : (
-                <ul className="mt-2 space-y-1" data-testid={testId}>
+                <ul className="flex flex-col" data-testid={testId}>
                     {entries.map(([key, value]) => (
                         <li
                             key={key}
-                            className="flex items-baseline justify-between gap-3 text-sm"
+                            className="flex items-baseline justify-between gap-3 border-t border-zinc-800 py-2 text-sm first:border-t-0"
                         >
                             <span className="text-zinc-400">{readable(key)}</span>
                             <span className="font-bold text-white">{num(value, locale)}</span>
@@ -189,7 +184,7 @@ const CountList = ({
                     ))}
                 </ul>
             )}
-        </div>
+        </AdminTile>
     );
 };
 
@@ -205,31 +200,28 @@ const GroupTable = ({
     const m = useAdminMessages(adminRoutingShadowMessages);
     const { locale } = useAdminLocale();
     return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
-        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
-            {label}
-        </p>
-        {groups.length === 0 ? (
-            <p className="mt-2 text-sm text-zinc-500">{m.groups.nothingDecided}</p>
-        ) : (
-            <ul className="mt-2 space-y-1" data-testid={testId}>
-                {groups.map((group) => (
-                    <li
-                        key={group.key}
-                        className="flex items-baseline justify-between gap-3 text-sm"
-                    >
-                        <span className="text-zinc-400">{readable(group.key)}</span>
-                        <span className="font-bold text-white">
-                            {pct(group.agreementRate)}{" "}
-                            <span className="font-normal text-zinc-500">
-                                ({num(group.agreed, locale)}/{num(group.decided, locale)})
+        <AdminTile title={label}>
+            {groups.length === 0 ? (
+                <p className="text-sm text-zinc-500">{m.groups.nothingDecided}</p>
+            ) : (
+                <ul className="flex flex-col" data-testid={testId}>
+                    {groups.map((group) => (
+                        <li
+                            key={group.key}
+                            className="flex items-baseline justify-between gap-3 border-t border-zinc-800 py-2 text-sm first:border-t-0"
+                        >
+                            <span className="text-zinc-400">{readable(group.key)}</span>
+                            <span className="font-bold text-white">
+                                {pct(group.agreementRate)}{" "}
+                                <span className="font-normal text-zinc-500">
+                                    ({num(group.agreed, locale)}/{num(group.decided, locale)})
+                                </span>
                             </span>
-                        </span>
-                    </li>
-                ))}
-            </ul>
-        )}
-    </div>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </AdminTile>
     );
 };
 
@@ -270,55 +262,41 @@ export function AdminRoutingShadowPanel() {
     }, [load]);
 
     return (
-        <section
-            className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80 shadow-2xl shadow-black/20"
-            data-testid="admin-routing-shadow-panel"
-        >
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900/60 p-5">
-                <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-sky-200">
-                        <Route className="h-3.5 w-3.5" />
-                        {m.eyebrow}
-                    </div>
-                    <h2 className="mt-3 text-2xl font-black text-white">
-                        {m.title}
-                    </h2>
-                    <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-400">
-                        {m.description}
-                    </p>
-                </div>
-                <button
-                    type="button"
-                    onClick={() => void load()}
-                    disabled={loading}
-                    className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-200 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    data-testid="admin-routing-shadow-refresh"
-                >
-                    {loading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                        <RefreshCw className="h-4 w-4" />
-                    )}
-                    {m.refresh}
-                </button>
-            </div>
-
-            <div className="space-y-4 p-5">
-                {report && <AdminRoutingRuntimeReadback runtime={report.runtime} messages={m.runtime} />}
-                {error && (
-                    <p
-                        className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200"
-                        data-testid="admin-routing-shadow-error"
+        <div className="flex min-w-0 flex-col gap-4" data-testid="admin-routing-shadow-panel">
+            <AdminTile
+                title={m.title}
+                description={m.description}
+                action={
+                    <button
+                        type="button"
+                        onClick={() => void load()}
+                        disabled={loading}
+                        className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-100 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        data-testid="admin-routing-shadow-refresh"
                     >
-                        {error}
-                    </p>
+                        {loading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                        ) : (
+                            <RefreshCw className="h-4 w-4" aria-hidden />
+                        )}
+                        {m.refresh}
+                    </button>
+                }
+            >
+                {report && <AdminRoutingRuntimeReadback runtime={report.runtime} messages={m.runtime} />}
+                {/* A failed read is an alert with a retry, never an empty report. */}
+                {error && (
+                    <div data-testid="admin-routing-shadow-error">
+                        <AdminStateBlock kind="error" title={error} onRetry={() => void load()} />
+                    </div>
                 )}
+                {loading && !report && !error && <AdminStateBlock kind="loading" />}
 
                 {report && report.rows === 0 && (
                     // An empty dashboard reads as "nothing is wrong". This says
                     // which of the two empty states it actually is.
                     <p
-                        className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 text-sm leading-6 text-zinc-300"
+                        className="rounded-xl border border-dashed border-zinc-700 p-3 text-sm leading-6 text-zinc-300"
                         data-testid="admin-routing-shadow-empty"
                     >
                         {m.emptyBefore(report.windowDays)}{" "}
@@ -329,107 +307,99 @@ export function AdminRoutingShadowPanel() {
                     </p>
                 )}
 
-                {report && report.rows > 0 && (
-                    <>
-                        {report.versions.mixed && (
-                            <p
-                                className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100"
-                                data-testid="admin-routing-shadow-mixed-versions"
-                            >
-                                {m.mixedVersions}
-                            </p>
-                        )}
-                        {report.truncated && (
-                            <p className="rounded-xl border border-zinc-700 bg-zinc-900/60 p-3 text-sm text-zinc-300">
-                                {m.truncated}
-                            </p>
-                        )}
-
-                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                            <Stat
-                                label={m.stats.runs}
-                                value={num(report.rows, locale)}
-                                detail={m.stats.lastDays(report.windowDays)}
-                            />
-                            <Stat
-                                label={m.stats.agreement}
-                                value={pct(report.agreementRate)}
-                                detail={m.stats.agreedOfDecided(num(report.agreed, locale), num(report.decided, locale))}
-                            />
-                            <Stat
-                                label={m.stats.noCandidate}
-                                value={num(report.undecided, locale)}
-                                detail={m.stats.noCandidateDetail}
-                            />
-                            <Stat
-                                label={m.stats.decisionLatency}
-                                value={`${ms(report.decisionMicrosP50)} / ${ms(report.decisionMicrosP95)}`}
-                                detail={m.stats.decisionLatencyDetail}
-                            />
-                        </div>
-
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
-                                {m.switches.title}
-                            </p>
-                            {report.switches.length === 0 ? (
-                                <p className="mt-2 text-sm text-zinc-500">
-                                    {m.switches.none}
-                                </p>
-                            ) : (
-                                <ul
-                                    className="mt-2 space-y-1"
-                                    data-testid="admin-routing-shadow-switches"
-                                >
-                                    {report.switches.map((pair) => (
-                                        <li
-                                            key={`${pair.from}->${pair.to}`}
-                                            className="flex items-baseline justify-between gap-3 text-sm"
-                                        >
-                                            <span className="font-mono text-xs text-zinc-400">
-                                                {pair.from} → {pair.to}
-                                            </span>
-                                            <span className="font-bold text-white">
-                                                {num(pair.count, locale)}
-                                            </span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </div>
-
-                        <div className="grid gap-3 lg:grid-cols-2">
-                            <GroupTable
-                                label={m.groups.byTaskKind}
-                                groups={report.byTaskKind}
-                                testId="admin-routing-shadow-by-task"
-                            />
-                            <GroupTable
-                                label={m.groups.byPlan}
-                                groups={report.byPlan}
-                                testId="admin-routing-shadow-by-plan"
-                            />
-                            <CountList
-                                label={m.groups.selectionReasons}
-                                counts={report.selectionReasons}
-                                testId="admin-routing-shadow-selection-reasons"
-                            />
-                            <CountList
-                                label={m.groups.rejections}
-                                counts={report.rejectionReasons}
-                                testId="admin-routing-shadow-rejections"
-                            />
-                        </div>
-                    </>
+                {report && report.rows > 0 && report.versions.mixed && (
+                    <p
+                        className="rounded-xl bg-amber-500/10 p-3 text-sm leading-6 text-amber-200"
+                        data-testid="admin-routing-shadow-mixed-versions"
+                    >
+                        {m.mixedVersions}
+                    </p>
                 )}
+                {report && report.rows > 0 && report.truncated && (
+                    <p className="rounded-xl border border-zinc-700 p-3 text-sm text-zinc-300">
+                        {m.truncated}
+                    </p>
+                )}
+            </AdminTile>
 
-                <p
-                    className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 text-xs leading-6 text-zinc-400"
-                    data-testid="admin-routing-shadow-caveat"
-                >
-                    {m.caveat}
-                </p>
-            </div>
-        </section>
+            {report && report.rows > 0 && (
+                <>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <AdminKpiCard
+                            label={m.stats.runs}
+                            value={num(report.rows, locale)}
+                            detail={m.stats.lastDays(report.windowDays)}
+                        />
+                        <AdminKpiCard
+                            label={m.stats.agreement}
+                            value={pct(report.agreementRate)}
+                            detail={m.stats.agreedOfDecided(num(report.agreed, locale), num(report.decided, locale))}
+                        />
+                        <AdminKpiCard
+                            label={m.stats.noCandidate}
+                            value={num(report.undecided, locale)}
+                            detail={m.stats.noCandidateDetail}
+                        />
+                        <AdminKpiCard
+                            label={m.stats.decisionLatency}
+                            value={`${ms(report.decisionMicrosP50)} / ${ms(report.decisionMicrosP95)}`}
+                            detail={m.stats.decisionLatencyDetail}
+                        />
+                    </div>
+
+                    <AdminTile title={m.switches.title}>
+                        {report.switches.length === 0 ? (
+                            <p className="text-sm text-zinc-500">{m.switches.none}</p>
+                        ) : (
+                            <ul className="flex flex-col" data-testid="admin-routing-shadow-switches">
+                                {report.switches.map((pair) => (
+                                    <li
+                                        key={`${pair.from}->${pair.to}`}
+                                        className="flex items-baseline justify-between gap-3 border-t border-zinc-800 py-2 text-sm first:border-t-0"
+                                    >
+                                        <span className="font-mono text-xs text-zinc-400">
+                                            {pair.from} → {pair.to}
+                                        </span>
+                                        <span className="font-bold text-white">
+                                            {num(pair.count, locale)}
+                                        </span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </AdminTile>
+
+                    <div className="grid gap-4 lg:grid-cols-2">
+                        <GroupTable
+                            label={m.groups.byTaskKind}
+                            groups={report.byTaskKind}
+                            testId="admin-routing-shadow-by-task"
+                        />
+                        <GroupTable
+                            label={m.groups.byPlan}
+                            groups={report.byPlan}
+                            testId="admin-routing-shadow-by-plan"
+                        />
+                        <CountList
+                            label={m.groups.selectionReasons}
+                            counts={report.selectionReasons}
+                            testId="admin-routing-shadow-selection-reasons"
+                        />
+                        <CountList
+                            label={m.groups.rejections}
+                            counts={report.rejectionReasons}
+                            testId="admin-routing-shadow-rejections"
+                        />
+                    </div>
+                </>
+            )}
+
+            <p
+                className="rounded-xl border border-zinc-800 p-3 text-xs leading-6 text-zinc-400"
+                data-testid="admin-routing-shadow-caveat"
+            >
+                {m.caveat}
+            </p>
+        </div>
     );
 }

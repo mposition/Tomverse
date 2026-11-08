@@ -1,12 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, CheckCircle2, Link2, Loader2, ShieldCheck } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminIntlLocale, type AdminLocale } from "@/lib/adminLocale";
+import { adminAuditMessages } from "@/lib/adminMessages/audit";
 import { adminAuditIntegrityMessages } from "@/lib/adminMessages/auditIntegrity";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { adminFetch } from "@/lib/adminFetch";
+import { formatAestDateTime } from "@/lib/adminUiCore";
 
 type Integrity = {
   configured: boolean;
@@ -239,29 +245,39 @@ export function AdminAuditIntegrityPanel() {
     } finally { setEntryLoading(false); }
   };
 
+  const outcome: "valid" | "truncated" | "invalid" | null = integrity
+    ? integrity.truncated
+      ? "truncated"
+      : integrity.valid
+        ? "valid"
+        : "invalid"
+    : null;
+
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-300"><ShieldCheck className="h-5 w-5" /></span>
-          <div><h2 className="font-black text-white">{m.title}</h2><p className="mt-1 text-sm text-zinc-400">{m.description}</p></div>
-        </div>
-        <button type="button" onClick={() => void verify()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-50">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} {m.verifyChain}</button>
-      </div>
+    <AdminTile
+      title={m.title}
+      description={m.description}
+      action={
+        <button
+          type="button"
+          onClick={() => void verify()}
+          disabled={loading}
+          className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <ShieldCheck className="h-4 w-4" aria-hidden />}{" "}
+          {m.verifyChain}
+        </button>
+      }
+    >
+      {!integrity ? <AdminStateBlock kind="empty" title={m.notChecked} detail={m.notCheckedDetail} /> : null}
 
       {integrity ? (
         <div
           data-testid="admin-audit-integrity-result"
           // Three outcomes on one element, so the state is an attribute rather
           // than a second test id: pass, finding, or a walk that did not finish.
-          data-outcome={
-            integrity.truncated
-              ? "truncated"
-              : integrity.valid
-                ? "valid"
-                : "invalid"
-          }
-          className={`mt-4 rounded-2xl border p-3 ${
+          data-outcome={outcome ?? undefined}
+          className={`rounded-2xl border p-4 ${
             integrity.truncated
               ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
               : integrity.valid
@@ -270,9 +286,9 @@ export function AdminAuditIntegrityPanel() {
           }`}
         >
           <div className="flex items-start gap-3">
-            {integrity.valid && !integrity.truncated ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" /> : <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />}
+            {integrity.valid && !integrity.truncated ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" aria-hidden /> : <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />}
             <div className="min-w-0">
-              <p className="font-black">{integrity.message}</p>
+              <p className="font-bold">{m.outcomeTitle[outcome ?? "invalid"]}</p>
               <p className="mt-1 text-xs opacity-80">
                 {/* The counts sit together on purpose. "Checked 110" beside a
                     green verdict once meant 110 entries were fine; with more
@@ -326,9 +342,9 @@ export function AdminAuditIntegrityPanel() {
                   data-testid="admin-audit-integrity-show-entry"
                   onClick={() => void loadEntry(integrity.firstInvalidId as string)}
                   disabled={entryLoading}
-                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-3 text-xs font-bold text-red-100 hover:bg-red-500/20 disabled:opacity-50"
+                  className="inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-3 text-xs font-bold text-red-100 hover:bg-red-500/20 disabled:opacity-50"
                 >
-                  {entryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null} {m.showEntry}
+                  {entryLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null} {m.showEntry}
                 </button>
               ) : null}
               {/* The same row in the audit workspace, which is where an
@@ -339,7 +355,7 @@ export function AdminAuditIntegrityPanel() {
               <a
                 href={`/admin/audit?entry=${encodeURIComponent(integrity.firstInvalidId)}`}
                 data-testid="admin-audit-integrity-open-in-log"
-                className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 px-3 text-xs font-bold text-red-100 hover:bg-red-500/10"
+                className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-red-400/30 px-3 text-xs font-bold text-red-100 hover:bg-red-500/10"
               >
                 {m.openInLog}
               </a>
@@ -348,10 +364,10 @@ export function AdminAuditIntegrityPanel() {
                 data-testid="admin-audit-integrity-diagnose"
                 onClick={() => void diagnose(integrity.firstInvalidId as string)}
                 disabled={diagnosing !== null}
-                className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 px-3 text-xs font-bold text-red-100 hover:bg-red-500/10 disabled:opacity-50"
+                className="inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-xl border border-red-400/30 px-3 text-xs font-bold text-red-100 hover:bg-red-500/10 disabled:opacity-50"
               >
                 {diagnosing === integrity.firstInvalidId ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 ) : null}{" "}
                 {m.whatChanged}
               </button>
@@ -370,7 +386,7 @@ export function AdminAuditIntegrityPanel() {
               data-testid="admin-audit-integrity-unverified-list"
               className="mt-3 rounded-xl border border-red-400/20 bg-black/20 p-3 text-xs"
             >
-              <p className="font-black">
+              <p className="font-bold">
                 {m.unverifiedListTitle}
                 {integrity.unverifiedIdsTruncated > 0
                   ? m.moreNotListed(count(integrity.unverifiedIdsTruncated))
@@ -391,10 +407,10 @@ export function AdminAuditIntegrityPanel() {
                       data-testid="admin-audit-integrity-diagnose-one"
                       onClick={() => void diagnose(auditId)}
                       disabled={diagnosing !== null}
-                      className="inline-flex items-center gap-1 rounded-lg border border-red-400/30 px-2 py-0.5 font-bold text-red-100 hover:bg-red-500/10 disabled:opacity-50"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-red-400/30 px-2 py-0.5 font-bold text-red-100 hover:bg-red-500/10 disabled:opacity-50"
                     >
                       {diagnosing === auditId ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
                       ) : null}
                       {m.whatChangedShort}
                     </button>
@@ -419,7 +435,7 @@ export function AdminAuditIntegrityPanel() {
                 </p>
               ) : (
                 <>
-                  <p className="mt-1 font-black">
+                  <p className="mt-1 font-bold">
                     {m.matchTitle}
                   </p>
                   <ul className="mt-1 space-y-0.5">
@@ -437,7 +453,7 @@ export function AdminAuditIntegrityPanel() {
               {/* Its own finding, because the remedy is not the one a field
                   mismatch calls for: nothing about the entry is wrong. */}
               {diagnosis.result.reproducesUnderOrder === "locale" ? (
-                <p data-testid="admin-audit-integrity-collation" className="mt-2 font-black">
+                <p data-testid="admin-audit-integrity-collation" className="mt-2 font-bold">
                   {m.collation}
                 </p>
               ) : null}
@@ -458,7 +474,7 @@ export function AdminAuditIntegrityPanel() {
           {entry ? (
             <dl data-testid="admin-audit-integrity-entry" className="mt-3 grid gap-x-4 gap-y-1 rounded-xl border border-red-400/20 bg-black/20 p-3 text-xs sm:grid-cols-2">
               {[
-                [m.entry.written, new Date(entry.createdAt).toISOString()],
+                [m.entry.written, formatAestDateTime(entry.createdAt, { seconds: true }) ?? "-"],
                 [m.entry.action, entry.action],
                 [m.entry.target, entry.targetId ? `${entry.targetType} ${entry.targetId}` : entry.targetType],
                 [m.entry.actor, entry.actorEmail || entry.actorUserId || m.entry.unknownAdmin],
@@ -472,6 +488,145 @@ export function AdminAuditIntegrityPanel() {
           ) : null}
         </div>
       ) : null}
+
+      {integrity ? (
+        <AdminTechInfo summary={m.techSummary}>
+          <p className="break-words">{integrity.message}</p>
+        </AdminTechInfo>
+      ) : null}
+    </AdminTile>
+  );
+}
+
+type CardState = "idle" | "ok" | "truncated" | "bad" | "failed";
+
+/**
+ * The verdict at the top of the records tab, drawn from a state. Pure, so each
+ * state can be rendered without a request.
+ */
+export function AdminAuditIntegrityCardView({
+  state,
+  checked,
+  unverified,
+  checkedAt,
+  running,
+  onCheck,
+}: {
+  state: CardState;
+  checked?: string;
+  unverified?: string;
+  checkedAt?: string;
+  running?: boolean;
+  onCheck: () => void;
+}) {
+  const m = useAdminMessages(adminAuditMessages);
+  const tone =
+    state === "ok"
+      ? "border-emerald-500/40 bg-emerald-500/10"
+      : state === "bad" || state === "failed"
+        ? "border-red-500/40 bg-red-500/10"
+        : state === "truncated"
+          ? "border-amber-500/40 bg-amber-500/10"
+          : "border-dashed border-zinc-700 bg-transparent";
+  const detail =
+    state === "ok"
+      ? m.integrityCard.detail.ok(checked ?? "", checkedAt ?? "")
+      : state === "truncated"
+        ? m.integrityCard.detail.truncated(checked ?? "", checkedAt ?? "")
+        : state === "bad"
+          ? m.integrityCard.detail.bad(unverified ?? "", checkedAt ?? "")
+          : state === "failed"
+            ? m.integrityCard.detail.failed
+            : m.integrityCard.detail.idle;
+  return (
+    <section
+      data-testid="admin-audit-integrity-card"
+      data-outcome={state}
+      aria-label={m.integrityCard.title[state]}
+      className={`flex flex-wrap items-center gap-4 rounded-2xl border p-5 ${tone}`}
+    >
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-900">
+        {state === "ok" ? (
+          <Link2 className="h-6 w-6 text-emerald-300" aria-hidden />
+        ) : state === "idle" ? (
+          <Link2 className="h-6 w-6 text-zinc-400" aria-hidden />
+        ) : (
+          <AlertTriangle className="h-6 w-6 text-amber-300" aria-hidden />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <h2 className="text-base font-bold text-white">{m.integrityCard.title[state]}</h2>
+        <p className="mt-0.5 text-sm text-zinc-300">{detail}</p>
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {state === "bad" || state === "truncated" ? (
+          <Link
+            href="/admin/audit?tab=integrity"
+            className="inline-flex min-h-10 items-center rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 hover:bg-zinc-800"
+          >
+            {m.integrityCard.seeDetails}
+          </Link>
+        ) : null}
+        <button
+          type="button"
+          onClick={onCheck}
+          disabled={running}
+          className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {running ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+          {running ? m.integrityCard.checking : m.integrityCard.checkNow}
+        </button>
+      </div>
     </section>
+  );
+}
+
+/**
+ * The integrity result on the records tab.
+ *
+ * Nothing runs when the page opens: the check reads every entry of the chain,
+ * which is not a cost to pay on each visit, and no earlier result is stored.
+ * So the card starts as "not checked yet" and the button runs the same request
+ * the Integrity check tab makes.
+ */
+export function AdminAuditIntegrityCard() {
+  const { locale } = useAdminLocale();
+  const [result, setResult] = useState<{ state: CardState; integrity?: Integrity; checkedAt?: string }>({
+    state: "idle",
+  });
+  const [running, setRunning] = useState(false);
+  const count = (value: number) => value.toLocaleString(adminIntlLocale(locale));
+
+  const check = async () => {
+    setRunning(true);
+    try {
+      const response = await adminFetch("/api/admin/audit-integrity", { cache: "no-store" });
+      const data = (await response.json().catch(() => null)) as { integrity?: Integrity } | null;
+      if (!response.ok || !data?.integrity) {
+        setResult({ state: "failed" });
+        return;
+      }
+      const integrity = data.integrity;
+      setResult({
+        state: integrity.truncated ? "truncated" : integrity.valid ? "ok" : "bad",
+        integrity,
+        checkedAt: formatAestDateTime(new Date()) ?? "-",
+      });
+    } catch {
+      setResult({ state: "failed" });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <AdminAuditIntegrityCardView
+      state={result.state}
+      checked={result.integrity ? count(result.integrity.checkedEntries) : undefined}
+      unverified={result.integrity ? count(result.integrity.invalidEntries) : undefined}
+      checkedAt={result.checkedAt}
+      running={running}
+      onCheck={() => void check()}
+    />
   );
 }

@@ -2,10 +2,15 @@ export const dynamic = "force-dynamic";
 
 import { getServerSession } from "next-auth/next";
 import { AdminHealthScorePanel } from "@/components/admin/AdminHealthScorePanel";
-import { AdminOverviewSummary, type AttentionItem } from "@/components/admin/AdminOverviewSummary";
+import { AdminOverviewSummary } from "@/components/admin/AdminOverviewSummary";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminQuickAccessPanel } from "@/components/admin/AdminQuickAccessPanel";
 import { getAdminRole } from "@/lib/adminAuth";
+import { buildDecisionInbox } from "@/lib/adminDecisionInbox";
+import { loadAdminDecisionInbox } from "@/lib/adminDecisionInboxLoad";
+import { adminHomeTeams } from "@/lib/adminHomeTeams";
+import { adminHomeMessages } from "@/lib/adminMessages/home";
+import { readAgentOfficeLiveRooms } from "@/lib/agentOfficeLiveRead";
 import {
   ADMIN_READ_LIMITS,
   loadAuditRows,
@@ -30,13 +35,14 @@ import { authOptions } from "@/lib/auth";
 import { getBillingPlans } from "@/lib/billingConfig";
 import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore";
 import { prisma } from "@/lib/prisma";
+import { formatAestDateTime } from "@/lib/adminUiCore";
 
 const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
 
 const TABS = adminNavItemTabs("overview");
 
-/** `2026-09-14T02:31:00.000Z` -> `2026-09-14 02:31`, as the rest of the page does. */
-const minuteLabel = (value: Date) => value.toISOString().replace("T", " ").slice(0, 16);
+/** `2026-09-14T02:31:00.000Z` -> `2026-09-14 12:31 AEST`, as the rest of the page does. */
+const minuteLabel = (value: Date) => formatAestDateTime(value) || "-";
 
 const settled = <T,>(result: PromiseSettledResult<T>): T | null =>
   result.status === "fulfilled" ? result.value : null;
@@ -132,7 +138,10 @@ export default async function AdminOverviewPage({
   // strategy this decodes a cookie rather than querying anything, the layout
   // above has already required it, and a role that silently fell back to
   // "readonly" would misreport who is signed in.
-  const adminRole = getAdminRole(await getServerSession(authOptions)) || "readonly";
+  const session = await getServerSession(authOptions);
+  const adminRole = getAdminRole(session) || "readonly";
+  const userName = session?.user?.name?.trim().split(/\s+/)[0] || null;
+  const home = await getAdminMessages(adminHomeMessages);
 
   /**
    * Thirteen independent reads, and one of them failing is not thirteen of them
@@ -149,7 +158,8 @@ export default async function AdminOverviewPage({
    * Each result reaches `adminOverviewFigures()` as `T | null`, and that module
    * refuses to turn a null into a number.
    */
-  const results = await Promise.allSettled([
+  const [results, inboxResult, roomsResult] = await Promise.all([
+    Promise.allSettled([
     loadProviderHealthDashboard(),
     getAdminUserStats(),
     getBillingPlans(),
@@ -176,7 +186,17 @@ export default async function AdminOverviewPage({
       where: { status: "failed", acknowledgedAt: null },
     }),
     loadAuditRows(ADMIN_READ_LIMITS.recentActivity),
+    ]),
+    // The decision inbox and the team strip are read beside the figures, each
+    // on its own: neither failing changes a number above.
+    Promise.allSettled([loadAdminDecisionInbox(adminRole, now)]),
+    Promise.allSettled([readAgentOfficeLiveRooms(now)]),
   ]);
+  const inbox =
+    inboxResult[0].status === "fulfilled"
+      ? inboxResult[0].value
+      : buildDecisionInbox({ queue: null, counts: null, role: adminRole, now });
+  const teams = roomsResult[0].status === "fulfilled" ? adminHomeTeams(roomsResult[0].value) : null;
 
   // Degrading quietly would trade a loud failure for a silent one, so each
   // rejection is reported as itself. `console.warn` with a JSON body is the
@@ -252,57 +272,32 @@ export default async function AdminOverviewPage({
   const detail = (ready: boolean, text: () => string) =>
     ready ? text() : m.summary.unreadableDetail;
 
-  // Hoisted, so the attention list reads the same whether or not the dashboard
-  // came back: no providers to warn about is the honest answer when the read
-  // failed, and the banner above the list is what says the read failed.
+  // The snapshot text keeps an attention list for incident notes: providers
+  // that are not available, and the two counts an operator is asked about.
   const providerRows = dashboard ? dashboard.providers : [];
-  const needsAttention: AttentionItem[] = [
+  const needsAttention: Array<{ title: string; detail: string }> = [
     ...providerRows
       .filter((provider) => provider.status !== "available")
       .map((provider) => ({
-        title: m.attention.providerStatus(
-          provider.displayName,
-          m.providerStatus[provider.status]
-        ),
+        title: m.attention.providerStatus(provider.displayName, m.providerStatus[provider.status]),
         detail: provider.recentErrorCode || provider.fallback.reason,
-        tone: (provider.status === "outage" ? "red" : "amber") as AttentionItem["tone"],
-        href: `/admin/providers/${provider.provider}`,
       })),
     ...providerRows
       .filter((provider) => !provider.apiKeyConfigured)
       .map((provider) => ({
         title: m.attention.apiKeyMissing(provider.displayName),
         detail: m.attention.apiKeyMissingDetail,
-        tone: "zinc" as const,
-        href: `/admin/providers/${provider.provider}`,
       })),
     ...(figures.openFeedbackCount && figures.openFeedbackCount > 0
-      ? [
-          {
-            title: m.attention.openFeedback(figures.openFeedbackCount),
-            detail: m.attention.openFeedbackDetail,
-            tone: "blue" as const,
-            href: "/admin/support?tab=feedback",
-          },
-        ]
+      ? [{ title: m.attention.openFeedback(figures.openFeedbackCount), detail: m.attention.openFeedbackDetail }]
       : []),
     ...(figures.pendingRefundCount && figures.pendingRefundCount > 0
-      ? [
-          {
-            title: m.attention.pendingRefunds(figures.pendingRefundCount),
-            detail: m.attention.pendingRefundsDetail,
-            tone: "amber" as const,
-            href: "/admin/refunds",
-          },
-        ]
+      ? [{ title: m.attention.pendingRefunds(figures.pendingRefundCount), detail: m.attention.pendingRefundsDetail }]
       : []),
   ].slice(0, 6);
 
-  const generatedAtLabel = (
-    dashboard ? dashboard.generatedAt : now.toISOString()
-  )
-    .replace("T", " ")
-    .slice(0, 16);
+  const generatedAtLabel =
+    formatAestDateTime(dashboard ? dashboard.generatedAt : now) || "-";
 
   // The snapshot is pasted into incident notes and tickets, so a figure that
   // was never read has to say so there too. A zero in a pasted report outlives
@@ -337,134 +332,72 @@ export default async function AdminOverviewPage({
       m.report.noAttentionItems,
   ].join("\n");
 
+  const k = home.today.kpi;
   return (
     <div className="flex min-w-0 flex-col gap-5">
       {tabStrip}
-      <AdminQuickAccessPanel />
       <AdminOverviewSummary
-        blockingEnvCount={blockingEnvCount}
-        processStartedAt={minuteLabel(processStartedAt())}
-        generatedAt={generatedAtLabel}
-        adminRole={adminRole}
-        healthScore={health.score}
-        healthScoreIncomplete={health.incomplete}
+        now={now}
+        userName={userName}
         unreadableReads={unreadable.map((read) => m.summary.readName[read])}
         snapshotReport={snapshotReport}
-        operationalKpis={[
+        kpis={[
           {
-            label: m.kpi.users,
+            label: k.users,
             value: shown(figures.totalUsers),
             detail: detail(
               figures.paidUsers !== null && figures.activeSubscriptions !== null,
-              () =>
-                m.kpi.usersDetail(
-                  figures.paidUsers as number,
-                  figures.activeSubscriptions as number
-                )
+              () => k.usersDetail(figures.paidUsers as number, figures.activeSubscriptions as number)
             ),
           },
           {
-            label: m.kpi.workQueue,
-            value: shown(figures.workQueueTotal),
-            detail: detail(
-              figures.openFeedbackCount !== null &&
-                figures.pendingRefundCount !== null,
-              () =>
-                m.kpi.workQueueDetail(
-                  figures.openFeedbackCount as number,
-                  figures.pendingRefundCount as number
-                )
-            ),
-            tone: figures.workQueueTotal && figures.workQueueTotal > 0 ? "amber" : "zinc",
+            label: k.mrr,
+            value: shown(figures.monthlyRevenueCents, (cents) => `$${(cents / 100).toFixed(0)}`),
+            detail: detail(figures.monthlyRevenueCents !== null, () => k.mrrDetail),
           },
           {
-            label: m.kpi.providers,
-            value: figures.providers
-              ? `${figures.providers.available} / ${figures.providers.total}`
-              : null,
-            detail: detail(figures.providers !== null, () =>
-              m.kpi.providersDetail(
-                figures.providers!.limited,
-                figures.providers!.outage
-              )
-            ),
-            tone:
-              figures.providers && figures.providers.outage > 0 ? "amber" : "zinc",
-          },
-          {
-            label: m.kpi.monthlySpend,
+            label: k.spend,
             value: shown(figures.monthSpendMicroUsd, money),
             detail: detail(
               figures.todayUsageCount !== null && figures.monthlyUsageCount !== null,
-              () =>
-                m.kpi.monthlySpendDetail(
-                  figures.todayUsageCount as number,
-                  figures.monthlyUsageCount as number
-                )
+              () => k.spendDetail(figures.todayUsageCount as number, figures.monthlyUsageCount as number)
             ),
           },
-        ]}
-        commercialKpis={[
           {
-            label: m.kpi.estimatedMrr,
-            value: shown(
-              figures.monthlyRevenueCents,
-              (cents) => `$${(cents / 100).toFixed(0)}`
-            ),
-            detail: detail(
-              figures.monthlyRevenueCents !== null,
-              () => m.kpi.estimatedMrrDetail
-            ),
-            tone: "emerald",
-          },
-          {
-            label: m.kpi.paidConversion,
+            label: k.conversion,
             value: percent(figures.paidConversionPercent),
             detail: detail(
               figures.paidUsers !== null && figures.totalUsers !== null,
-              () =>
-                m.kpi.paidConversionDetail(
-                  figures.paidUsers as number,
-                  figures.totalUsers as number
-                )
+              () => k.conversionDetail(figures.paidUsers as number, figures.totalUsers as number)
             ),
-            tone: "blue",
-          },
-          {
-            label: m.kpi.planMix,
-            value:
-              figures.activeProCount !== null && figures.activeMaxCount !== null
-                ? `${figures.activeProCount} / ${figures.activeMaxCount}`
-                : null,
-            detail: detail(figures.activeProCount !== null, () => m.kpi.planMixDetail),
-            tone: "purple",
-          },
-          {
-            label: m.kpi.promoRedemptions,
-            value: shown(figures.promotionRedemptions),
-            detail: detail(
-              figures.promotionRedemptions !== null,
-              () => m.kpi.promoRedemptionsDetail
-            ),
-            tone: "amber",
-          },
-          {
-            label: m.kpi.churnWatch,
-            value: shown(figures.cancelAtPeriodEndCount),
-            detail: detail(figures.refundRatePercent !== null, () =>
-              m.kpi.churnWatchDetail(percent(figures.refundRatePercent) as string)
-            ),
-            tone:
-              figures.cancelAtPeriodEndCount && figures.cancelAtPeriodEndCount > 0
-                ? "amber"
-                : "zinc",
           },
         ]}
-        needsAttention={needsAttention}
-        envChecks={envChecks}
+        inbox={inbox}
+        teams={teams}
+        services={
+          dashboard
+            ? {
+                providers: dashboard.providers.map((provider) => ({
+                  provider: provider.provider,
+                  displayName: provider.displayName,
+                  todayCostMicroUsd: provider.todayCostMicroUsd,
+                  status: provider.status,
+                })),
+                dayBudgetMicroUsd: dashboard.providers.reduce(
+                  (sum, provider) => sum + Math.max(0, provider.dayBudgetMicroUsd),
+                  0
+                ),
+              }
+            : null
+        }
+        alertFailureCount={figures.alertFailureCount}
+        blockingEnvCount={blockingEnvCount}
+        healthScore={health.score}
+        healthScoreIncomplete={health.incomplete}
         recentActivity={auditRows}
         recentActivityLimit={ADMIN_READ_LIMITS.recentActivity}
       />
+      <AdminQuickAccessPanel />
     </div>
   );
 }

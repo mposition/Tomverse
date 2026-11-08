@@ -1,18 +1,15 @@
 "use client";
 
-import type { CSSProperties, ReactNode, RefObject } from "react";
+import type { CSSProperties, RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import AgentOfficeWorld from "@/components/admin/AgentOfficeWorld";
-import AgentOfficeCliMonitor from "@/components/admin/AgentOfficeCliMonitor";
+import AgentOfficeLive from "@/components/admin/AgentOfficeLive";
 import { cx } from "@/components/admin/agentOfficeStyles";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
-import { adminAgentOfficeCliMessages } from "@/lib/adminMessages/agentOfficeCliMonitor";
-import { isAgentOfficeCliWorker, type AgentOfficeCliWorker } from "@/lib/agentOfficeCliMonitorCore";
 import {
   amuxRoomView,
   engineeringLiveDept,
@@ -57,17 +54,13 @@ import {
   type AgentOfficeSeatedRoom,
   type AgentOfficeTeamId,
 } from "@/lib/agentOffice/roster";
-import {
-  AgentOffice,
-  type Agent,
-  type AgentStatus,
-  type DeptStatus,
-  type OfficeCopy,
-  type Snapshot,
-  type StaffSeed,
-} from "@/lib/agentOffice/sim";
+import { AgentOffice, type DeptStatus, type OfficeCopy, type Snapshot, type StaffSeed } from "@/lib/agentOffice/sim";
 import { aestStamp, brisbaneIso } from "@/lib/agentOffice/time";
-import { AMUX_ROOM, DECISION_ROOM, DEPT_ROOMS, REVIEW_ROOM } from "@/lib/agentOffice/world";
+import { REVIEW_DESKS } from "@/lib/agentOffice/floor";
+import { agentOfficeInbox, inboxTotal } from "@/lib/agentOffice/inbox";
+
+/** The record rooms' icons, beside the teams' own (lib/agentOffice/roster.ts). */
+const ROOM_ICON = { amux: "🧩", review: "🔎", decision: "⚖️" } as const;
 
 type View = "live" | "dashboard";
 type Filter = "all" | DeptStatus;
@@ -77,12 +70,6 @@ const OFFICE_PATH = "/admin/office";
 const viewHref = (view: View) => `${OFFICE_PATH}?tab=${view}`;
 
 const FILTERS: readonly Filter[] = ["all", "working", "done", "attention", "blocked"];
-
-/** The colour a person's status pill takes, from the same tones as a room. */
-const AGENT_STATUS_TONE: Record<AgentStatus, DeptStatus> = {
-  working: "working",
-  idle: "waiting",
-};
 
 function PixelEmployee({ hair, shirt, accent }: { hair: string; shirt: string; accent: string }) {
   const style = {
@@ -145,54 +132,29 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
   );
   // The AMUX room is not a team: its workers are drawn from the record, one per desk.
   const amuxView = useMemo(
-    () => amuxRoomView(live.amux, AMUX_ROOM.desks.length, m.real.amux),
+    // Every worker is on the floor or in the roster: no desk limit here (lib/agentOffice/floor.ts).
+    () => amuxRoomView(live.amux, Number.MAX_SAFE_INTEGER, m.real.amux),
     [live, m]
   );
   const reviewView = useMemo(
-    () => reviewRoomView(live.review, REVIEW_ROOM.desks.length, m.real.review),
+    () => reviewRoomView(live.review, REVIEW_DESKS, m.real.review),
     [live, m]
   );
   const decisionView = useMemo(() => decisionRoomView(live.decision, m.real.decision), [live, m]);
-  const quotaView = useMemo(() => reviewQuotaView(live.review, m.real.quota), [live, m]);
   const [engine] = useState(() => new AgentOffice(m, liveDepts));
   // Everyone drawn: the teams' staff and every AMUX worker, reviewer and
   // Decision Maker instance on record. An unread room makes the total a floor.
   const staff = useMemo(() => agentOfficeStaffCount(engine.staff.length, live), [engine, live]);
   const staffText = staff.unknown ? `${staff.total}+` : String(staff.total);
-  const [snap, setSnap] = useState<Snapshot>(() => engine.snapshot());
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  // The camera keeps the selected person in view when zoomed in.
-  const follow = true;
   const [filter, setFilter] = useState<Filter>("all");
   const [toast, setToast] = useState("");
   const toastTimer = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    let raf = 0;
-    let last = performance.now();
-    let acc = 0;
-    const loop = (now: number) => {
-      const dt = (now - last) / 1000;
-      last = now;
-      engine.tick(dt);
-      acc += dt;
-      if (acc >= 0.18) {
-        acc = 0;
-        setSnap(engine.snapshot());
-      }
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [engine]);
-
-  // The paint loop picks the new statuses up on its next snapshot.
-  useEffect(() => {
+  // A fresh reading moves the rooms' colours; nothing else in the engine changes.
+  const snap = useMemo<Snapshot>(() => {
     engine.setLive(liveDepts);
+    return engine.snapshot();
   }, [engine, liveDepts]);
-  useEffect(() => {
-    engine.setStaffCount(staffText);
-  }, [engine, staffText]);
+  const stale = useStaleReading(live.readAt);
 
   // A fresh reading of the live rooms every minute while the tab is visible,
   // and at once when it comes back into view: the page's server component
@@ -220,15 +182,13 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
     toastTimer.current = window.setTimeout(() => setToast(""), 2400);
   }, []);
 
-  const onSelect = useCallback((agent: Agent) => setSelectedId(agent.id), []);
   // A seated figure is not an engine agent: it is named by its room and the
   // name its record gives it, and its profile is re-read from that record.
   const [seated, setSeated] = useState<{ room: AgentOfficeSeatedRoom; name: string } | null>(null);
-  const [cliWorker, setCliWorker] = useState<AgentOfficeCliWorker | null>(null);
   const onSelectSeated = useCallback((room: AgentOfficeSeatedRoom, name: string) => setSeated({ room, name }), []);
   // A room's name opens what its team does, written from its code and policy.
   const [teamInfo, setTeamInfo] = useState<AgentOfficeTeamId | null>(null);
-  const onSelectTeam = useCallback((team: AgentOfficeTeamId) => setTeamInfo(team), []);
+  const onSelectTeam = useCallback((team: string) => setTeamInfo(team as AgentOfficeTeamId), []);
 
   /** To the live office, by address; the panel stays mounted and the day goes on. */
   const goLive = useCallback(() => {
@@ -263,25 +223,16 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
     return () => window.clearTimeout(timer);
   }, [view]);
 
-  const askAgent = useCallback(
-    (agent: Agent) => {
-      engine.command(m.console.ask(agent.name));
-      setSelectedId(null);
-      reveal("agent-office-console");
-    },
-    [engine, m, reveal]
-  );
-
   const teams = useMemo(
     () =>
-      DEPT_ROOMS.map((room) => ({
-        id: room.id,
-        icon: room.icon,
-        name: engine.roomName(room.id),
-        lead: engine.deptLead[room.id],
-        status: snap.deptStatus[room.id] ?? "waiting",
-        task: engine.deptCopy(room.id).task,
-        live: liveDepts[room.id] ?? null,
+      AGENT_OFFICE_DEPTS.map((dept) => ({
+        id: dept.id,
+        icon: dept.icon,
+        name: engine.roomName(dept.id),
+        lead: engine.deptLead[dept.id],
+        status: snap.deptStatus[dept.id] ?? "waiting",
+        task: engine.deptCopy(dept.id).task,
+        live: liveDepts[dept.id] ?? null,
       })),
     [engine, snap.deptStatus, liveDepts]
   );
@@ -297,7 +248,7 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
         rows: liveRowsFor(teams, amuxView, reviewView, decisionView, m),
         notConnected: teams.filter((team) => !team.live).map((team) => `${team.icon} ${team.name}`),
         queue: OPERATOR_QUEUE_KEYS.map((key) => ({ label: m.queue.labels[key], count: live.queue[key] })),
-        quota: quotaView,
+        quota: reviewQuotaView(live.review, m.real.quota),
         unknownCount: m.queue.unknown,
       },
       m.report
@@ -323,9 +274,10 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
   };
-  const selected = selectedId ? engine.agentById.get(selectedId) ?? null : null;
-  // The operator's to-do is the real queues an agent waits on (OPERATOR_QUEUE_KEYS).
-  const todo = operatorQueueTotal(live.queue);
+  // The tab counts what "waiting on you" lists in the live office: the same queues and the AMUX workers.
+  const waiting = inboxTotal(
+    agentOfficeInbox({ queue: live.queue, inbox: live.inbox, amux: live.amux, amuxDetail: live.amuxDetail, now: Date.parse(live.readAt) })
+  );
 
   return (
     <div className={cx("office")} data-testid="agent-office">
@@ -355,38 +307,29 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
               </Link>
               <button
                 type="button"
-                className={cx("todo-tab", todo.total > 0 && "urgent")}
-                onClick={() => reveal("agent-office-approval")}
-                title={todo.unknown ? m.queue.partial : undefined}
+                className={cx("todo-tab", waiting.total > 0 && "urgent")}
+                onClick={() => reveal("agent-office-rail")}
+                title={waiting.unknown ? m.queue.partial : undefined}
               >
-                {m.nav.todo} <i>{todo.unknown ? `${todo.total}+?` : todo.total}</i>
+                {m.nav.todo} <i>{waiting.unknown ? `${waiting.total}+?` : waiting.total}</i>
               </button>
             </div>
           </nav>
 
           {view === "live" ? (
-            <LiveView
+            <AgentOfficeLive
               m={m}
               engine={engine}
-              amuxView={amuxView}
+              live={live}
+              liveDepts={liveDepts}
               reviewView={reviewView}
               decisionView={decisionView}
-              quotaView={quotaView}
-              queue={live.queue}
-              readAt={live.readAt}
-              staffText={staffText}
-              snap={snap}
-              follow={follow}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              onSelectSeated={onSelectSeated}
+              cliMonitorEnabled={cliMonitorEnabled}
+              stale={stale}
               onSelectTeam={onSelectTeam}
+              onSelectSeated={onSelectSeated}
               onCopyReport={copyReport}
               onDownloadReport={downloadReport}
-              cliMonitor={cliWorker && cliMonitorEnabled ? <AgentOfficeCliMonitor key={cliWorker} worker={cliWorker}
-                avatar={<PixelEmployee {...agentOfficeSeatedClothes("amux", Math.max(0,
-                  amuxView.workers.findIndex(worker => worker.name === cliWorker)))} />}
-                onClose={() => setCliWorker(null)} /> : null}
             />
           ) : (
             <DashboardView
@@ -410,15 +353,6 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
         </div>
       </div>
 
-      {selected ? (
-        <ProfileModal
-          m={m}
-          engine={engine}
-          agent={selected}
-          onClose={() => setSelectedId(null)}
-          onAsk={askAgent}
-        />
-      ) : null}
       {seated ? (
         <SeatedProfileModal
           m={m}
@@ -426,9 +360,7 @@ export function AgentOfficePanel({ view, live, cliMonitorEnabled = false }: {
           amuxView={amuxView}
           reviewView={reviewView}
           decisionView={decisionView}
-          quotaView={quotaView}
-          onViewCli={cliMonitorEnabled && seated.room === "amux" && isAgentOfficeCliWorker(seated.name)
-            ? () => { setSeated(null); setCliWorker(seated.name as AgentOfficeCliWorker); goLive(); } : undefined}
+          quotaView={reviewQuotaView(live.review, m.real.quota)}
           onClose={() => setSeated(null)}
         />
       ) : null}
@@ -497,139 +429,6 @@ function LiveDecisionNote({ m }: { m: OfficeCopy }) {
   );
 }
 
-function LiveView({
-  m,
-  engine,
-  amuxView,
-  reviewView,
-  decisionView,
-  quotaView,
-  queue,
-  readAt,
-  staffText,
-  snap,
-  follow,
-  selectedId,
-  onSelect,
-  onSelectSeated,
-  onSelectTeam,
-  onCopyReport,
-  onDownloadReport,
-  cliMonitor,
-}: {
-  m: OfficeCopy;
-  engine: AgentOffice;
-  amuxView: AgentOfficeAmuxView;
-  reviewView: AgentOfficeReviewView;
-  decisionView: AgentOfficeDecisionView;
-  quotaView: AgentOfficeQuotaView;
-  queue: AgentOfficeOperatorQueue;
-  /** When the server read the live rooms (UTC ISO). */
-  readAt: string;
-  /** Everyone drawn, as shown: "30", or "28+" when a room could not be read. */
-  staffText: string;
-  snap: Snapshot;
-  follow: boolean;
-  selectedId: string | null;
-  onSelect: (agent: Agent) => void;
-  onSelectSeated: (room: AgentOfficeSeatedRoom, name: string) => void;
-  onSelectTeam: (team: AgentOfficeTeamId) => void;
-  onCopyReport: () => void;
-  onDownloadReport: () => void;
-  cliMonitor: ReactNode;
-}) {
-  const engineeringLive = engine.liveDept("engineering") !== null;
-  const stale = useStaleReading(readAt);
-
-  return (
-    <>
-      <header className={cx("live-hero")}>
-        <div>
-          <p className={cx("eyebrow")}>{m.live.eyebrowReal(staffText)}</p>
-          <h2 className={cx("office-title")}>
-            {m.company.titlePrefix} <em className={cx("highlight")}>{m.company.titleAccent}</em>
-          </h2>
-          <p>{m.live.leadReal}</p>
-        </div>
-        <div className={cx("live-clock")}>
-          <span>{m.live.clockReal}</span>
-          <b data-testid="agent-office-clock">{aestStamp(readAt)}</b>
-          {/* The one place the screen says how fresh it is: every room line
-              was read at this same moment, so none repeats it. */}
-          {stale ? (
-            <small className={cx("stale")} role="status" data-testid="agent-office-stale">
-              {m.live.stale}
-            </small>
-          ) : (
-            <small>{m.live.realPhase}</small>
-          )}
-        </div>
-      </header>
-
-      <section className={cx("live-bar")}>
-        <button
-          type="button"
-          className={cx("btn btn-ghost")}
-          onClick={onCopyReport}
-          title={m.live.reportHint}
-          data-testid="agent-office-report-copy"
-        >
-          {m.live.reportCopy}
-        </button>
-        <button
-          type="button"
-          className={cx("btn btn-ghost")}
-          onClick={onDownloadReport}
-          title={m.live.reportHint}
-          data-testid="agent-office-report-download"
-        >
-          {m.live.reportDownload}
-        </button>
-        <div className={cx("live-counts")}>
-          <span className={cx("lc done")}>{m.live.done(snap.stats.done)}</span>
-          <span className={cx("lc working")}>{m.live.working(snap.stats.working)}</span>
-          <span className={cx("lc attention")}>{m.live.attention(snap.stats.attention)}</span>
-          <span className={cx("lc blocked")}>{m.live.blocked(snap.stats.blocked)}</span>
-        </div>
-      </section>
-
-      <section className={cx("live-grid", !!cliMonitor && "cli-open")}>
-        <AgentOfficeWorld
-          engine={engine}
-          amux={amuxView}
-          review={reviewView}
-          decision={decisionView}
-          snap={snap}
-          selectedId={selectedId}
-          follow={follow}
-          onSelect={onSelect}
-          onSelectSeated={onSelectSeated}
-          onSelectTeam={onSelectTeam}
-        />
-
-        {cliMonitor || <aside className={cx("live-rail")}>
-          <OperatorConsole m={m} engine={engine} snap={snap} />
-
-          <section className={cx("win rail-card")} id="agent-office-approval">
-            <div className={cx("win-bar")}>
-              <span>{m.approval.windowTitle}</span>
-              <span className={cx("window-controls")} aria-hidden="true">
-                —　▢　✕
-              </span>
-            </div>
-            <div className={cx("win-body approval-body")}>
-              <OperatorQueueList m={m} queue={queue} />
-              {engineeringLive ? <LiveDecisionNote m={m} /> : null}
-            </div>
-          </section>
-
-          <QuotaCard m={m} view={quotaView} />
-        </aside>}
-      </section>
-    </>
-  );
-}
-
 /**
  * The operator's to-do: each queue an agent waits on, its count and the screen
  * where it is acted on. The office decides nothing; an unread count says so
@@ -658,105 +457,6 @@ function OperatorQueueList({ m, queue }: { m: OfficeCopy; queue: AgentOfficeOper
 }
 
 /**
- * The reviewers' account quota, from the review server's own check. Read
- * only: it shows what the server last reported and how old that is.
- */
-function QuotaCard({ m, view }: { m: OfficeCopy; view: AgentOfficeQuotaView }) {
-  return (
-    <section className={cx("win rail-card")} data-testid="agent-office-quota">
-      <div className={cx("win-bar")}>
-        <span>{m.real.quota.windowTitle}</span>
-        <span className={cx("window-controls")} aria-hidden="true">
-          —　▢　✕
-        </span>
-      </div>
-      <div className={cx("win-body quota-body")}>
-        {view.rows.length > 0 ? (
-          <ul className={cx("quota-list")}>
-            {view.rows.map((row) => (
-              <li key={row.id}>
-                <i className={cx("rm-dot", row.status)} aria-hidden="true" />
-                <b>{row.id}</b>
-                <small>{row.vendor}</small>
-                <span className={cx("quota-state")}>{row.label}</span>
-                <span className={cx("quota-amount")}>{row.amount}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {view.note ? <p className={cx("quota-note")}>{view.note}</p> : null}
-      </div>
-    </section>
-  );
-}
-
-function OperatorConsole({ m, engine, snap }: { m: OfficeCopy; engine: AgentOffice; snap: Snapshot }) {
-  const [draft, setDraft] = useState("");
-  const logRef = useRef<HTMLDivElement>(null);
-  const count = snap.chat.length;
-  const lastId = snap.chat.at(-1)?.id;
-
-  useEffect(() => {
-    const el = logRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [count, lastId]);
-
-  const send = (text: string) => {
-    const value = text.trim();
-    if (!value) return;
-    engine.command(value);
-    setDraft("");
-  };
-
-  return (
-    <section className={cx("win rail-card console-card")} id="agent-office-console">
-      <div className={cx("win-bar")}>
-        <span>{m.console.windowTitle}</span>
-        <span className={cx("window-controls")} aria-hidden="true">
-          —　▢　✕
-        </span>
-      </div>
-      <div className={cx("win-body console-body")}>
-        <div className={cx("console-log")} ref={logRef} aria-live="polite" data-testid="agent-office-console-log">
-          {snap.chat.map((entry) => (
-            <div key={entry.id} className={cx("console-line", entry.from)}>
-              <b>{entry.from === "operator" ? m.console.operatorLabel : entry.name}</b>
-              <p>{entry.text}</p>
-              <small>{entry.time}</small>
-            </div>
-          ))}
-        </div>
-
-        <div className={cx("console-quick")}>
-          {m.console.quick.map((item) => (
-            <button type="button" key={item.label} onClick={() => send(item.command)}>
-              {item.label}
-            </button>
-          ))}
-        </div>
-
-        <form
-          className={cx("console-input")}
-          onSubmit={(event) => {
-            event.preventDefault();
-            send(draft);
-          }}
-        >
-          <input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder={m.console.placeholder}
-            aria-label={m.console.inputLabel}
-            data-testid="agent-office-console-input"
-          />
-          <button type="submit">{m.console.send}</button>
-        </form>
-      </div>
-    </section>
-  );
-}
-
-/**
  * The focus contract every aria-modal surface owes (components/useModalDialog.ts):
  * focus moves in, Tab cycles inside, Escape closes, the page behind does not
  * scroll, and focus returns to what opened it.
@@ -765,101 +465,6 @@ function useOfficeDialog(onClose: () => void, initialFocusRef: RefObject<HTMLBut
   const dialogRef = useRef<HTMLElement | null>(null);
   useModalDialog({ open: true, onClose, dialogRef, panelRef: dialogRef, initialFocusRef });
   return dialogRef;
-}
-
-function ProfileModal({
-  m,
-  engine,
-  agent,
-  onClose,
-  onAsk,
-}: {
-  m: OfficeCopy;
-  engine: AgentOffice;
-  agent: Agent;
-  onClose: () => void;
-  onAsk: (agent: Agent) => void;
-}) {
-  const closeRef = useRef<HTMLButtonElement | null>(null);
-  const dialogRef = useOfficeDialog(onClose, closeRef);
-  const dept = agentOfficeDept(agent.deptId);
-  const live = engine.liveDept(agent.deptId);
-  return (
-    <div className={cx("modal-backdrop")} onClick={onClose}>
-      <section
-        ref={dialogRef}
-        className={cx("win team-modal")}
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={m.profile.dialogLabel(agent.name)}
-        data-testid="agent-office-profile"
-      >
-        <div className={cx("win-bar")}>
-          <span>{m.profile.windowTitle}</span>
-          <button ref={closeRef} type="button" className={cx("window-close")} onClick={onClose} aria-label={m.profile.closeIcon}>
-            ✕
-          </button>
-        </div>
-        <div className={cx("win-body employee-profile")}>
-          <div className={cx("profile-top")}>
-            <PixelEmployee hair={agent.hair} shirt={agent.shirt} accent={agent.accent} />
-            <div>
-              <span className={cx("status-pill", AGENT_STATUS_TONE[agent.status])}>{m.agentStatus[agent.status]}</span>
-              <h2>
-                {agent.name}
-                {agent.callsign ? <small> · {agent.callsign}</small> : null}
-              </h2>
-              <p>
-                {agent.role}
-                {dept ? ` · ${engine.roomName(dept.id)}` : null}
-              </p>
-            </div>
-          </div>
-          <div className={cx("profile-task")}>
-            <span className={cx("tiny-label")}>{m.profile.doingNow}</span>
-            <strong>{agent.taskLabel}</strong>
-          </div>
-          <div className={cx("report-box")}>
-            <span className={cx("tiny-label")}>{m.profile.lastWord}</span>
-            <strong>{agent.speech ?? live?.line ?? agent.thoughts[0]}</strong>
-          </div>
-          {live ? (
-            <div className={cx("live-box")} data-testid="agent-office-profile-live">
-              <span className={cx("tiny-label")}>
-                <em className={cx("live-chip")}>{m.real.chip}</em> {m.real.boxLabel}
-              </span>
-              <strong>{live.line}</strong>
-              {live.detail ? <small>{live.detail}</small> : null}
-              <small>{m.real.contentElsewhere}</small>
-            </div>
-          ) : null}
-          {dept ? (
-            <div className={cx("profile-record")} data-testid="agent-office-profile-record">
-              {dept.recordHref ? (
-                <Link href={dept.recordHref}>{m.profile.record}</Link>
-              ) : (
-                <span>{m.profile.noRecord}</span>
-              )}
-              {dept.policy ? (
-                <span>
-                  {m.profile.policy} <code>{dept.policy}</code>
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-          <div className={cx("profile-actions")}>
-            <button type="button" className={cx("btn btn-primary")} onClick={() => onAsk(agent)}>
-              {m.profile.ask}
-            </button>
-            <button type="button" className={cx("text-button")} onClick={onClose}>
-              {m.profile.close}
-            </button>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
 }
 
 /**
@@ -874,7 +479,6 @@ function SeatedProfileModal({
   reviewView,
   decisionView,
   quotaView,
-  onViewCli,
   onClose,
 }: {
   m: OfficeCopy;
@@ -883,10 +487,8 @@ function SeatedProfileModal({
   reviewView: AgentOfficeReviewView;
   decisionView: AgentOfficeDecisionView;
   quotaView: AgentOfficeQuotaView;
-  onViewCli?: () => void;
   onClose: () => void;
 }) {
-  const cliCopy = useAdminMessages(adminAgentOfficeCliMessages);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useOfficeDialog(onClose, closeRef);
   const people: AgentOfficeSeatedView[] =
@@ -959,8 +561,6 @@ function SeatedProfileModal({
             </div>
           ) : null}
           <div className={cx("profile-actions")}>
-            {onViewCli ? <button type="button" className={cx("btn btn-primary")}
-              onClick={onViewCli} data-testid="agent-office-view-cli">{cliCopy.open}</button> : null}
             <button type="button" className={cx("btn btn-primary")} onClick={onClose}>
               {m.profile.close}
             </button>
@@ -1004,7 +604,7 @@ function TeamInfoModal({
   const room = team === "amux" || team === "review" || team === "decision" ? team : null;
   const dept = room ? null : agentOfficeDept(team);
   const name = room ? m.rooms[room] : engine.roomName(team);
-  const icon = room ? { amux: AMUX_ROOM, review: REVIEW_ROOM, decision: DECISION_ROOM }[room].icon : dept?.icon ?? "";
+  const icon = room ? ROOM_ICON[room] : dept?.icon ?? "";
   const recordHref = room
     ? room === "amux"
       ? AGENT_OFFICE_AMUX_RECORD_HREF
@@ -1117,7 +717,7 @@ function liveRowsFor(
     ),
     {
       id: "amux",
-      name: `${AMUX_ROOM.icon} ${m.rooms.amux}`,
+      name: `${ROOM_ICON.amux} ${m.rooms.amux}`,
       status: amuxView.status,
       badge: m.deptStatus[amuxView.status],
       line: amuxView.summary,
@@ -1125,7 +725,7 @@ function liveRowsFor(
     },
     {
       id: "review",
-      name: `${REVIEW_ROOM.icon} ${m.rooms.review}`,
+      name: `${ROOM_ICON.review} ${m.rooms.review}`,
       status: reviewView.status,
       badge: m.deptStatus[reviewView.status],
       line: reviewView.summary,
@@ -1133,7 +733,7 @@ function liveRowsFor(
     },
     {
       id: "decision",
-      name: `${DECISION_ROOM.icon} ${m.rooms.decision}`,
+      name: `${ROOM_ICON.decision} ${m.rooms.decision}`,
       status: decisionView.status,
       badge: m.deptStatus[decisionView.status],
       line: decisionView.summary,

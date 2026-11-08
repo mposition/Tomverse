@@ -85,12 +85,12 @@ test("Execution reads the waiting requests for its board and opens the panel on 
   assert.match(page, /const canJudge = hasAdminPermission\(session, "ops:write"\);/);
   assert.match(page, /if \(!canJudge\) return \{ kind: "restricted" \};/);
   assert.match(page, /decisionMaker=\{decisionMaker\}/);
-  assert.equal(page.match(/\{drawer\}/g)?.length, 2, "cards and assignment each render the panel");
+  assert.equal(page.match(/\{drawer\}/g)?.length, 3, "cards, the review queue and diagnostics each render the panel");
   assert.match(page, /countDecisionMakerAttention\(\)\.catch\(\(\) => null\)/);
 
   const workspace = read("components/admin/AmuxExecutionWorkspace.tsx");
   // The lane's count includes the requests, and a failed read says so.
-  assert.match(workspace, /const laneCount = board\.counts\[lane\] \+ \(attention \? dmTotal : 0\);/);
+  assert.match(workspace, /\(sum, lane\) => sum \+ board\.counts\[lane\] \+ \(lane === "attention" \? dmTotal : 0\)/);
   assert.match(workspace, /attention && decisionMaker === null && <p role="alert"/);
   assert.match(workspace, /\/admin\/amux-execution\?tab=cards&dmRequest=/);
   // The board is the console palette, so the Admin theme remaps it too.

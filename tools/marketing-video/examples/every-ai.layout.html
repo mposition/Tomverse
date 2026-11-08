@@ -1,0 +1,37 @@
+<style>
+  body { background: #f7f8fa; }
+  .serif { font-family: 'Instrument Serif', serif; font-weight: 400; letter-spacing: -0.02em; line-height: 1; }
+  .brand { position: absolute; left: 80px; top: 80px; display: flex; align-items: center; gap: 12px; font-size: 28px; font-weight: 600; }
+  .brand img { width: 40px; height: 40px; }
+  .rows { position: absolute; left: 80px; top: 470px; width: 920px; }
+  .row { display: flex; align-items: center; gap: 20px; height: 104px; border-top: 1px solid #e4e4e7; }
+  .label { width: 190px; flex: none; font-size: 28px; color: rgba(24,24,27,.55); }
+  .chips { display: flex; gap: 12px; }
+  .chip { display: inline-flex; align-items: center; gap: 10px; height: 58px; padding: 0 20px; border-radius: 16px; background: #fff; font-size: 24px; font-weight: 500; white-space: nowrap;
+    box-shadow: 0 0 0 1px rgba(24,24,27,.08), 0 10px 24px -10px rgba(24,24,27,.22); }
+  .chip img { width: 30px; height: 30px; border-radius: 7px; object-fit: contain; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: #155dfb; }
+</style>
+<div class="brand"><img src="library:tomverse-logo"><span>Tomverse</span></div>
+<div class="serif" style="position:absolute;left:80px;top:170px;font-size:124px">Every AI,</div>
+<div class="serif" style="position:absolute;left:80px;top:294px;font-size:124px;font-style:italic;color:#155dfb">one place.</div>
+<div class="rows">
+  <div class="row"><div class="label">Chat</div><div class="chips" style="transform:rotate(-1deg)">
+    <span class="chip"><img src="library:logo-openai"><span>GPT 6 Luna</span></span>
+    <span class="chip"><img src="library:logo-claude"><span>Claude Sonnet 5.5</span></span>
+    <span class="chip"><img src="library:logo-gemini"><span>Gemini Flash</span></span></div></div>
+  <div class="row"><div class="label">Compare</div><div class="chips" style="transform:rotate(1deg)">
+    <span class="chip"><span class="dot"></span><span>Ask three at once</span></span>
+    <span class="chip"><span class="dot"></span><span>Where they differ</span></span></div></div>
+  <div class="row"><div class="label">Images</div><div class="chips" style="transform:rotate(-.5deg)">
+    <span class="chip"><img src="library:logo-openai"><span>GPT Image 2</span></span>
+    <span class="chip"><img src="library:logo-gemini"><span>Nano Banana 2</span></span>
+    <span class="chip"><img src="library:logo-grok"><span>Grok Imagine</span></span></div></div>
+  <div class="row"><div class="label">Web search</div><div class="chips" style="transform:rotate(.8deg)">
+    <span class="chip"><span class="dot"></span><span>Answers with sources</span></span></div></div>
+  <div class="row"><div class="label">Files</div><div class="chips" style="transform:rotate(-1.2deg)">
+    <span class="chip"><span class="dot"></span><span>PDF</span></span><span class="chip"><span class="dot"></span><span>Docs</span></span><span class="chip"><span class="dot"></span><span>Spreadsheets</span></span></div></div>
+  <div class="row"><div class="label">Assistants</div><div class="chips" style="transform:rotate(.6deg)">
+    <span class="chip"><span class="dot"></span><span>Your instructions</span></span><span class="chip"><span class="dot"></span><span>Your files</span></span></div></div>
+</div>
+<div style="position:absolute;left:80px;bottom:80px;font-size:30px;color:rgba(24,24,27,.6)">One workspace for the models you already use.</div>

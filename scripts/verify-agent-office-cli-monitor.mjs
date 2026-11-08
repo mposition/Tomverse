@@ -76,7 +76,7 @@ const open=async(worker="codex-impl")=>{
 const checkTranscriptLayout=async()=>{
   const layout=await page.getByTestId("agent-office-cli-monitor").evaluate(el=>{
     const log=el.querySelector('[role="tabpanel"]');
-    const world=document.querySelector('[data-testid="agent-office-world"]');
+    const world=document.querySelector('[data-testid="agent-office-floor"]');
     const prompts=[...el.querySelectorAll('[data-kind="prompt"] pre')];
     const responses=[...el.querySelectorAll('[data-kind]:not([data-kind="prompt"]) pre')];
     const box=el.getBoundingClientRect(), office=world.getBoundingClientRect();

@@ -100,6 +100,23 @@ test.describe("Admin Console — email campaigns", () => {
     ).toBeVisible();
   });
 
+  test("writing a campaign is its own section and shows one composer at a time", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("owner");
+    await page.goto("/admin/email-campaigns");
+    // The list has no composer open under it.
+    await expect(page.getByTestId("admin-campaign-composer")).toHaveCount(0);
+    await page.getByTestId("admin-campaign-new").click();
+    await expect(page).toHaveURL(/tab=new/);
+    await expect(page.getByTestId("admin-campaign-composer")).toBeVisible();
+    await expect(page.getByTestId("admin-policy-notice-composer")).toBeHidden();
+    await page.getByTestId("admin-campaign-new-notice").click();
+    await expect(page.getByTestId("admin-policy-notice-composer")).toBeVisible();
+    await expect(page.getByTestId("admin-campaign-composer")).toBeHidden();
+  });
+
   test("an empty console says there are none rather than showing nothing", async ({
     page,
     signInAs,
@@ -124,10 +141,13 @@ test.describe("Admin Console — email campaigns", () => {
     const campaignId = await draftCampaign(adminApi(page));
 
     await page.goto("/admin/email-campaigns");
-    const row = page.getByTestId("admin-campaign-row");
-    await expect(row).toHaveCount(1);
+    await expect(page.getByTestId("admin-campaign-row")).toHaveCount(1);
+    // The status is its own column, so read the whole table row.
+    const row = page
+      .getByRole("row")
+      .filter({ has: page.getByTestId("admin-campaign-row") });
     await expect(row).toContainText(TEMPLATE_KEY);
-    await expect(row).toContainText("draft");
+    await expect(row).toContainText(/draft/i);
 
     await row.getByRole("link", { name: TEMPLATE_KEY }).click();
     await expect(page).toHaveURL(
@@ -336,6 +356,13 @@ test.describe("Admin Console — email campaigns", () => {
     await expect(page.getByTestId("admin-campaign-wave-upcoming")).toHaveCount(1);
 
     // The reason is not on the wave and the screen does not pretend it is.
+    // The incident name sits in the closed technical details, so it is in the
+    // page without being on screen until an operator opens it.
+    const technical = page.locator("details", {
+      hasText: "CAMPAIGN_WAVE_REFUSED_AT_SCHEDULE",
+    });
+    await expect(technical).toHaveCount(1);
+    await technical.locator("summary").click();
     await expect(
       page.getByText("CAMPAIGN_WAVE_REFUSED_AT_SCHEDULE")
     ).toBeVisible();

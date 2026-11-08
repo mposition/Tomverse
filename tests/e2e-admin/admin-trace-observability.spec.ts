@@ -23,6 +23,16 @@ import {
  *   - a non-administrator gets the same 404 every admin surface answers.
  */
 
+/** The inbox shows one report in full: choose it from the list first. */
+const openReport = (
+  page: import("@playwright/test").Page,
+  message: string
+) =>
+  page
+    .getByTestId("feedback-list-item")
+    .filter({ hasText: message })
+    .click();
+
 test.describe("trace observability", () => {
   test("a verified report shows its evidence and its shadow diagnosis", async ({
     page,
@@ -30,6 +40,7 @@ test.describe("trace observability", () => {
   }) => {
     await signInAs("owner");
     await page.goto("/admin/support?tab=feedback");
+    await openReport(page, FIXTURE_FEEDBACK.open.message);
 
     const entry = page
       .getByTestId("feedback-entry")
@@ -68,6 +79,7 @@ test.describe("trace observability", () => {
   }) => {
     await signInAs("owner");
     await page.goto("/admin/support?tab=feedback");
+    await openReport(page, FIXTURE_FEEDBACK.slaBreached.message);
 
     const entry = page
       .getByTestId("feedback-entry")
@@ -91,6 +103,7 @@ test.describe("trace observability", () => {
   }) => {
     await signInAs("owner");
     await page.goto("/admin/support?tab=feedback");
+    await openReport(page, FIXTURE_FEEDBACK.open.message);
     await expect(
       page
         .getByTestId("feedback-entry")

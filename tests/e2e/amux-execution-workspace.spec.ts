@@ -131,32 +131,40 @@ test("move button calls one guarded write then refreshes the actual lane",async(
 test("dragging to the queue runs the same guarded card command",async({page,isMobile,browserName})=>{
   const state=await setup(page);
   if (isMobile) {
+    // AMUX Backlog sits under Tomverse Backlog in the same Waiting column, so
+    // the handle travels down, not across. Both ends are on screen before the
+    // touch starts, as a scroll mid-gesture would move the target.
     const handle=page.getByTestId("amux-board-card-"+a.id).getByRole("button",{name:"Drag card to AMUX queue"});
-    await handle.scrollIntoViewIfNeeded();
+    const target=page.getByRole("region",{name:"AMUX Backlog"});
+    await target.evaluate((element)=>element.scrollIntoView({block:"end"}));
     const start=await handle.boundingBox(); expect(start).not.toBeNull();
-    const board=page.getByTestId("amux-board-lanes");
-    const bounds=await board.boundingBox(); expect(bounds).not.toBeNull();
-    const y=start!.y+start!.height/2;
+    const end=await target.boundingBox(); expect(end).not.toBeNull();
+    const from={x:start!.x+start!.width/2,y:start!.y+start!.height/2};
+    const to={x:end!.x+24,y:end!.y+12};
     // Chromium exposes trusted touch movement through CDP. Other engines
     // exercise the same pointer handle without calling a Chromium-only API.
     const touch=browserName==="chromium" ? await page.context().newCDPSession(page) : null;
     if (touch) {
-      await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:start!.x+start!.width/2,y,id:1}]});
-      await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:bounds!.x+bounds!.width-8,y,id:1}]});
-    } else {
-      await page.mouse.move(start!.x+start!.width/2,y); await page.mouse.down();
-      await page.mouse.move(bounds!.x+bounds!.width-8,y,{steps:8});
-    }
-    await expect.poll(()=>board.evaluate(element=>element.scrollLeft)).toBeGreaterThan(110);
-    const target=await page.getByRole("region",{name:"AMUX Backlog"}).boundingBox(); expect(target).not.toBeNull();
-    const left=Math.max(target!.x,bounds!.x+45);
-    const right=Math.min(target!.x+target!.width,bounds!.x+bounds!.width-45);
-    if (touch) {
-      await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:(left+right)/2,y,id:1}]});
+      await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{...from,id:1}]});
+      for (const step of [0.25,0.5,0.75,1]) {
+        await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:from.x+(to.x-from.x)*step,y:from.y+(to.y-from.y)*step,id:1}]});
+      }
       await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]}); await touch.detach();
-    } else { await page.mouse.move((left+right)/2,y,{steps:8}); await page.mouse.up(); }
+    } else {
+      await page.mouse.move(from.x,from.y); await page.mouse.down();
+      await page.mouse.move(to.x,to.y,{steps:8}); await page.mouse.up();
+    }
   } else {
-    await page.getByTestId("amux-board-card-"+a.id).dragTo(page.getByRole("region",{name:"AMUX Backlog"}));
+    // The Waiting column stacks Tomverse Backlog above AMUX Backlog, so the
+    // drop target can sit below the fold, and a scroll in the middle of an
+    // HTML5 drag drops nothing. The target is put at the bottom of the screen
+    // and the card is picked up by its bottom padding (not a button), so
+    // neither end needs a scroll.
+    const source=page.getByTestId("amux-board-card-"+a.id);
+    const target=page.getByRole("region",{name:"AMUX Backlog"});
+    await target.evaluate((element)=>element.scrollIntoView({block:"end"}));
+    const box=await source.boundingBox(); expect(box).not.toBeNull();
+    await source.dragTo(target,{sourcePosition:{x:box!.width/2,y:box!.height-6},targetPosition:{x:24,y:12}});
   }
   await expect(page.getByRole("dialog").getByRole("status")).toContainText("unassigned Todo");
   expect(state.posts()).toBe(1);
@@ -289,7 +297,9 @@ test("Korean board and detail render with the console theme",async({page})=>{
   await setup(page);
   await page.goto("/e2e/admin-console-fixture?view=amux&locale=ko");
   await expect(page.getByRole("region",{name:"AMUX 대기열"})).toBeVisible();
-  await expect(page.getByTestId("amux-execution-workspace")).toHaveCSS("background-color",await palette(page,"--color-zinc-950"));
+  // The redesigned board draws no canvas of its own (it sits on the console
+  // page); its cards carry the console palette, so that is what is checked.
+  await expect(page.getByTestId("amux-board-card-"+a.id)).toHaveCSS("background-color",await palette(page,"--color-zinc-900"));
   await expect(page.getByTestId("amux-execution-workspace")).toHaveCSS("color-scheme","dark");
   await page.screenshot({path:test.info().outputPath("ko-board-desktop.png")});
   await page.getByRole("button",{name:"qa-task-104",exact:true}).click();

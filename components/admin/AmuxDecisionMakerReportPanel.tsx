@@ -1,6 +1,7 @@
 "use client";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { adminAmuxDecisionMakerReportMessages } from "@/lib/adminMessages/amuxDecisionMaker";
 import type {
   DmDeclarationAccuracyInstanceReport,
@@ -10,8 +11,8 @@ import type {
 
 type Messages = (typeof adminAmuxDecisionMakerReportMessages)["en"];
 
-/** A database-clock instant to the minute, in UTC, as the ledger stores it. */
-export const dmReportInstant = (ms: number) => `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+/** A database-clock instant to the minute, in AEST. */
+export const dmReportInstant = (ms: number) => formatAestDateTime(ms) ?? "-";
 
 /**
  * A rate as its numerator over its denominator with the share beside it, or
@@ -59,7 +60,7 @@ export function AmuxDecisionMakerReportView({
 }) {
   return (
     <section
-      className="flex min-w-0 flex-col gap-4 rounded-xl border border-zinc-800 bg-zinc-900 p-5"
+      className="flex min-w-0 flex-col gap-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
       data-testid="amux-decision-maker-report-panel"
     >
       <header className="flex flex-col gap-1.5">

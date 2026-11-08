@@ -7,7 +7,7 @@
   per-page section tabs
 - Severity when violated: release blocker for the redirect table; ordinary
   review for everything else
-- Last reviewed: 2026-10-12
+- Last reviewed: 2026-11-07
 
 ## Scope
 
@@ -15,6 +15,7 @@
 | --- | --- |
 | Route table, groups, aliases, tabs, view roles, redirect map | `lib/adminNavigation.ts` |
 | Icon per entry | `components/admin/adminNavigationIcons.ts` |
+| A tab with no screen yet; a second strip for the screens a tab still holds | `components/admin/AdminTabPlaceholder.tsx`, `components/admin/AdminViewSwitch.tsx` |
 | Badge shape and per-entry derivation (client-safe) | `lib/adminNavigationBadges.ts` |
 | Badge loader (server-only) | `lib/adminNavigationCounts.ts` |
 | Shell, header, breadcrumb, auto-refresh | `components/admin/AdminConsoleShell.tsx` |
@@ -35,44 +36,117 @@
 
 ## The navigation
 
-Seven groups, thirty-two entries. One page, one job. The owner sees all
-thirty-two; every other role sees thirty, because two AMUX entries are
-owner-only (rule 14).
+Eight groups, thirty-two entries, at most six entries to a group (operator
+approval, 2026-11-07). One page, one job. The owner sees all thirty-two; every
+other role sees thirty-one, because Ideas is owner-only (rule 14).
+
+Every tab of every page is declared in `lib/adminNavigation.ts`, including the
+ones whose screen is not built yet, so the screen work that follows changes a
+page and never the table. A tab with no screen draws `AdminTabPlaceholder`
+("Opening soon") rather than an empty list.
 
 | Group | Entry | Route | Sections (`?tab=`) |
 | --- | --- | --- | --- |
-| Command Center | Overview | `/admin/overview` | `summary`, `health` |
-| Command Center | Work queue | `/admin/work-queue` | — |
-| Command Center | Analytics | `/admin/analytics` | `usage`, `product`, `imports`, `ai-review` |
-| Customers | Users | `/admin/users` | — |
-| Customers | Support | `/admin/support` | `feedback`, `privacy` (retired `fixes` falls to `feedback`) |
-| Revenue | Billing | `/admin/billing` | `plans`, `promotions` |
-| Revenue | Refunds | `/admin/refunds` | — |
-| Revenue | Credit ledger | `/admin/credit-ledger` | — |
+| Home | Today | `/admin/overview` | `summary`, `health` |
+| Home | Decisions | `/admin/work-queue` | `all`, `customers`, `agents`, `development`, `system` |
+| Home | Metrics | `/admin/analytics` | `usage`, `product`, `ai-review`, `imports` |
+| Customers & Revenue | Users | `/admin/users` | — (the detail page declares `overview`, `billing`, `security`, `conversations`, `notes`) |
+| Customers & Revenue | Support | `/admin/support` | `feedback`, `autofix`, `privacy` (retired `fixes` falls to `feedback`) |
+| Customers & Revenue | Plans & pricing | `/admin/billing` | `plans`, `prices`, `promotions`, `diagnostics` |
+| Customers & Revenue | Refunds | `/admin/refunds` | — |
+| Customers & Revenue | Credit ledger | `/admin/credit-ledger` | — |
 | AI Platform | Providers | `/admin/providers` | `health`, `usage-cost`, `incidents` |
-| AI Platform | Models | `/admin/models` | `registry`, `discovery` |
-| AI Platform | Routing | `/admin/routing` | — |
-| Operations | Infrastructure | `/admin/infrastructure` | — |
-| Operations | Automation | `/admin/automation` | `jobs`, `webhooks`, `reports` |
-| Operations | Alerts | `/admin/alerts` | `policy`, `templates`, `deliveries` |
-| Operations | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule` |
-| Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
-| Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `competitors`, `comments` |
-| Operations | Product research | `/admin/product-research` | `suggestions`, `runs`, `observations` |
-| Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
-| Operations | SRE agent | `/admin/sre-ops` | — |
-| Operations | QA and release | `/admin/qa-release` | `overview`, `train`, `lane`, `ci-admission` |
-| Operations | Agent digests | `/admin/agent-digests` | `billing-finance-ops` |
-| Operations | Agent office | `/admin/office` | `live`, `dashboard` |
-| Operations | Platform settings | `/admin/platform` | — |
-| AMUX | Backlog (owner only) | `/admin/amux-backlog` | `ideas`, `list`, `portfolio`, `import`, `reconciliation`, `metadata` |
-| AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
-| AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment` |
-| AMUX | Operations settings | `/admin/amux-settings` | `automatic-admission` (owner only), `workers`, `safety`, `decision-maker`, `analysis` (owner only) |
-| Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
-| Governance | Audit log | `/admin/audit` | — |
-| Governance | Retention | `/admin/retention` | — |
-| Governance | Admin access | `/admin/admin-access` | `administrators`, `readiness`, `integrity` |
+| AI Platform | Models | `/admin/models` | `registry`, `discovery`, `defaults`, `catalog` |
+| AI Platform | Routing | `/admin/routing` | `auto`, `optimizer`, `shadow`, `stats` (owner only) |
+| AI Agents | Agents home | `/admin/office` | `dashboard` (Team board, opens first), `live` |
+| AI Agents | Marketing | `/admin/marketing` | `overview`, `queue`, `published`, `accounts`, `reports`, `settings` |
+| AI Agents | Product research | `/admin/product-research` | `suggestions`, `runs`, `observations` |
+| AI Agents | Engineering | `/admin/engineering-agent` | `overview`, `queue`, `runs`, `settings` |
+| AI Agents | SRE | `/admin/sre-ops` | `overview`, `daily`, `settings` |
+| AI Agents | Billing & finance | `/admin/finance-agent` | `overview`, `report`, `settings` |
+| Development | Ideas (owner only) | `/admin/amux-backlog` | `ideas`, `list`, `portfolio` |
+| Development | Execution board | `/admin/amux-execution` | `cards` (owner only), `review`, `diagnostics` |
+| Development | Release | `/admin/release` | `qa`, `ci` |
+| Development | AMUX settings | `/admin/amux-settings` | `automatic-admission` (owner only), `workers`, `decision-maker`, `analysis` (owner only) |
+| Development | Safety & recovery | `/admin/amux-recovery` | `safety`, `reservations` (owner only), `legacy` (owner only) |
+| System | Infrastructure | `/admin/infrastructure` | — |
+| System | Automation | `/admin/automation` | `jobs`, `webhooks`, `reports` |
+| System | Feature flags | `/admin/platform` | `emergency`, `features`, `account-defaults` |
+| Messaging | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule`, `new` |
+| Messaging | Customer mail | `/admin/email-delivery` | `deliveries`, `suppressions` |
+| Messaging | Operator alerts | `/admin/alerts` | `policy`, `templates`, `deliveries`, `mail-test` |
+| Messaging | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
+| Governance | Audit log | `/admin/audit` | `log`, `integrity` |
+| Governance | Retention & deletion | `/admin/retention` | — |
+| Governance | Admin access | `/admin/admin-access` | `administrators`, `readiness` |
+
+Korean labels are in `lib/adminNavigationLocale.ts` (Today = 오늘, Decisions =
+결정함, Metrics = 지표, Agents home = 에이전트 홈, Execution board = 실행 보드,
+Release = 릴리스, Safety & recovery = 안전·복구, Feature flags = 기능 플래그,
+Messaging = 메시징). `tests/adminNavigation.test.mjs` writes the whole table out
+and fails when the code and this list disagree.
+
+### The 2026-11-07 restructuring
+
+The operator approved the eight-group sitemap on 2026-11-07. This step moves
+the menu and keeps every screen; the screens are rebuilt in the steps after it.
+What moved, and what it means for the paragraphs below (which keep the names
+they were written under):
+
+- **Command Center, Customers and Revenue** became Home and Customers &
+  Revenue. Billing is Plans & pricing and its editor follows the URL
+  (`initialTab`): the address names the section the screen shows. Prices and
+  Diagnostics are tabs of their own; Diagnostics holds what sat under the
+  promotion editor.
+- **AI Agents** is a new group. Marketing, Product research, Engineering, SRE
+  and the Agent office moved into it from Operations; QA and release and the
+  billing and finance digest left Agent digests (below). The Agent office
+  opens on its Team board (`?tab=dashboard`); the live office is
+  `?tab=live`, and the ids are the addresses the office itself links.
+- **Development** is the AMUX group plus Release. Backlog is Ideas, Execution
+  is the Execution board (its Assignment tab is the **review queue**,
+  `?tab=review`; **diagnostics** is declared and waits for its screen), and
+  Operations settings is AMUX settings without Execution safety. **Safety &
+  recovery** (`/admin/amux-recovery`) holds the halts (`safety`, readable by
+  every role, cleared by the owner, carrying the `amuxOrchestratorHalts`
+  badge), unused reservations and claims (`reservations`, owner only) and the
+  retired AMUX tools (`legacy`, owner only: Catalog import, Source
+  reconciliation, Card metadata and the three Promotion screens, each a
+  closed section behind its own switch and owner check). The Promotion page is
+  gone as a menu and redirects there.
+- **Release** (`/admin/release`) is QA and release: its `qa` tab still holds
+  the old overview, release train and merge lane as views (`?view=`), and `ci`
+  is CI admission. The Trust and safety digest has no menu yet and keeps
+  `/admin/agent-digests?tab=trust-safety` (listed in `ADMIN_UNLISTED_PAGES`).
+  **Billing & finance** (`/admin/finance-agent`) holds the digest panel
+  Agent digests had.
+- **System** is Infrastructure, Automation and Feature flags. Feature flags
+  draws the emergency stops, the feature switches and the account defaults of
+  the old Platform settings; its default-model block is the **Default models**
+  tab of Models (`?tab=defaults`). It is one panel drawing a part of one
+  state (`view`). The route saves the nine flags together, so a tab sends its
+  own sections' values and reads the rest from the server when Save is
+  pressed (and saves nothing if that read fails): a tab left open cannot write
+  back a stop another operator engaged meanwhile. The old `/admin/platform#default-models` link is moved on in the
+  browser (a hash never reaches the server).
+- **Messaging** is a new group: Email campaigns (writing a campaign is the
+  `new` tab), Customer mail, Operator alerts (the mail path test left
+  Templates for `mail-test`) and Email policy, moved from Governance.
+- **Governance**: the audit integrity check is a tab of the Audit log.
+- **Views.** Where a new tab still holds more than one of the screens it
+  replaced, the screens are views of the tab (`?view=`, `AdminViewSwitch`):
+  Release › QA (overview, train, lane), Marketing › Approvals (drafts, assets, comments),
+  Marketing › Reports & competitors (reports, competitors, experiments),
+  Engineering › Runs & PRs (runs, pull requests). The Approvals tab also holds
+  the assets and the comment alerts. A view is not a tab: it is never in the route table, and the
+  screen work that replaces it edits a page, not the table.
+- **Write roles that now match the routes.** Routing declares
+  `writeRoles: ["owner", "ops"]`, which is what every auto-router route
+  checks (`ops:write`); the Credit ledger writes nothing and declares none.
+
+The paragraphs from here to "Old route → new route" were written under the names the
+entries had before 2026-11-07 (Operations, AMUX, Agent digests, Operations
+settings); the restructuring above says where each went.
 
 **Marketing** is the marketing automation's record: what the Guard sent to a
 person, what went out, which brand accounts exist and what the automation
@@ -121,10 +195,12 @@ sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
 **Agent office** is a pixel office for the eight agent teams and the digest
 desk, after the original AI OFFICE UI by godseng.mom. It shows records and
 decides nothing. It is live only (operator decision, 2026-10-09), and the demo
-engine the original played is gone (operator decision, 2026-10-10): every
-team's staff sit at their desks, nobody moves or speaks a scripted line, the
-console answers questions from the records and declines every order, and the
-office approves nothing. It is the one entry marked `wide` in the route
+engine the original played is gone (operator decision, 2026-10-10). Since the
+live office redesign (owner decision, 2026-11-07) the live section is a summary
+strip, the floor, "waiting on you" with a worker sheet, a roster and a today
+strip; the keyword console is gone. Nobody plays a script: a worker walks only
+when a fresh reading moves it to another place (`lib/agentOffice/floor.ts`),
+and the office approves nothing. It is the one entry marked `wide` in the route
 table: the console drops its reading width there, because the floor is a
 canvas that grows with the screen.
 The facts on it are the record links and the rooms marked LIVE. Each team
@@ -180,21 +256,30 @@ A counting the section does not take (switch off, or a fault) is "not counted",
 never zero, and an administrator who is not the owner sees that the record is
 the owner's, not a number. No request, email, name or legal-hold split reaches
 the office; its record link is the Trust and safety tab of Agent digests.
-Under the teams, the AMUX execution room separates the display-only Ubuntu
-resident roster approved in orchestration policy v27 (thirteen desks, no Devin
-or virtual engineering runner) from the app's dispatch admission catalog.
+Under the teams, the AMUX execution room is an open office with one desk island
+per CLI channel (Claude, Codex, Copilot, Cursor), a lounge, sleep pods and a
+bench. It separates the display-only Ubuntu resident roster approved in
+orchestration policy v27 (no Devin or virtual engineering runner) from the
+app's dispatch admission catalog.
 The roster is labelled as a policy roster, not a live process-health reading;
 it grants no registration, claim or execution authority. Workers absent from
 the usable admission catalog are labelled not admitted, never stopped or
 connected, even if an old runtime row exists. Each admitted worker's
-dispatch state is read from its runtime row. Past thirteen,
-the ones that need a look are drawn first and the room says in words how many
-are not drawn, as it does for a failed read or a missing catalog. Each worker is
-drawn seated with its real state -- the operator's exclusions first, then its
-runtime row read the way AMUX reads it when it hands out work (live while the
-lease has not run out and the status is idle or busy) -- and, while the
-route table has it, a link to the AMUX execution page. Each worker is one row
-of its record, and nothing about the cards they work on is read.
+dispatch state is read from its runtime row -- the operator's exclusions
+first, then its runtime row read the way AMUX reads it when it hands out work
+(live while the lease has not run out and the status is idle or busy). Where a
+worker is drawn follows that state: at its desk while busy or failed (with a
+"!"), in the lounge while free for work, in a sleep pod while its latest quota
+observation says it is used up, on the bench while paused, isolated or blocked,
+and nowhere (a covered desk) while not running. An island's desks grow in
+fours with its workers up to 24; whoever does not fit, or has no island, is
+counted on the floor and listed in the roster, never dropped. For everyone the
+office reads each worker's latest quota observation and its last ten ended
+attempts' outcomes. For the owner only -- the AMUX card list is the owner's --
+it also reads the open attempt with the card it holds (display key and title,
+opened the way the card list opens it) and today's CLI usage priced at API
+rates, shown as such and never as money spent. Nothing else of a card, and no
+prompt or output, is read.
 The room's connection light is green while at least one admitted worker has
 a live idle/busy dispatch bridge. Individual lost/error bridges remain red,
 with a separate warning count and attention status in the dashboard; green
@@ -210,12 +295,14 @@ the latest report in one AppSetting row stamped with the app's receipt time.
 Each reviewer is drawn seated as reviewing, idle or off, and a report older
 than five minutes draws them all as without a report. The same report carries
 each reviewer's account quota as the review server's own check last read it
-(a state and one amount: percent, credits or USD); a quota card in the live
-rail shows it, greyed and dated when the report is old, and says so when a
-server too old to send it reports.
-The operator's to-do -- the tab, the dashboard's operator metric and both
-operator windows -- is the queues where an agent waits on a person: marketing
-posts pending approval, AMUX escalations and AMUX halts nobody has cleared.
+(a state and one amount: percent, credits or USD); a reviewer's profile shows
+it, and says so when a server too old to send it reports.
+The operator's to-do on the dashboard is the queues where an agent waits on a
+person: marketing posts pending approval, AMUX escalations and AMUX halts
+nobody has cleared. The live section's "waiting on you" (and the tab's count)
+adds the Decision Maker items, open v22 worker questions, open plan refusals,
+each AMUX worker in error or lost, and each channel whose resting workers have
+used up their quota, most urgent first.
 They are read with the sidebar badges'
 own count functions (`lib/adminNavigationCounts.ts`), each links to the
 screen where it is acted on, and a count that fails to read is drawn as
@@ -225,17 +312,31 @@ each live team room, the AMUX execution room and the review server -- with
 their states, what needs a look first, and each team's record screen; what an
 agent produced stays on that screen. The status report copies or downloads
 that view as Markdown and is sent nowhere. While the tab is visible the page
-reads again every minute, and a live room whose record changed says so in the
-console in its lead's name. Live leads answer a greeting or a thank-you in
-their own voice with social lines only -- no figure, time, state, activity or
-promise, so the words stay true when a room is silent, off or unread, which a
-test holds -- react on the floor with an emoji for a moment, and otherwise
-keep the record line.
+reads again every minute, and the AMUX room (workers, their detail, today's
+attempts and merges) every fifteen seconds through the read-only
+`GET /api/admin/office/amux`. The today strip rewinds the floor to any five
+minutes since Brisbane midnight, or plays the day: a past floor is drawn from
+execution attempts only (a desk means an attempt covered that moment), and the
+summary, inbox, roster and sheet stay as they are now (`lib/agentOffice/replay.ts`).
+Between two readings the live section notices a new
+merge-lane merge into develop (a celebration), a halt opened or cleared, and a
+worker gone wrong; a sound plays for those only when the operator turned it on
+in this browser. The floor's light follows Brisbane's clock (day, dawn, dusk,
+night).
 Those reads are read-only (the silence anchor is looked up rather than
 created), and a read that fails is drawn as unread, never as a state
 (`lib/agentOfficeLiveRead.ts`, `lib/agentOffice/roster.ts`,
 `tests/agentOffice.test.mjs`). The page writes nothing and carries no badge
-and no `writeRoles`. Its two sections are `?tab=` addresses (rule 2); it
+and no `writeRoles`, with one owner-only exception: the AI briefing (owner
+decision and paid-call approval, 2026-11-07; `lib/agentOfficeBriefing.ts`). Off
+unless `AGENT_OFFICE_BRIEFING_ENABLED` is `true`; the owner asks with a recent
+sign-in; each new briefing is one model call (`AGENT_OFFICE_BRIEFING_MODEL`,
+default `gpt-6-luna`) reserved under a lock against a limit of 40 a Brisbane
+day, one in flight, audited as `agent_office.briefing_requested` before it runs
+and never retried; an answer under five minutes old is shown again. Its only
+writes are its own usage and last-answer settings and that audit entry. The
+model reads counts, states and worker names, never a card title, and may link
+only the screens in `BRIEFING_LINKS`; it approves, sends or changes nothing. Its two sections are `?tab=` addresses (rule 2); it
 draws its own tab strip, as the original did, and those tabs are links, so
 moving between them keeps the panel mounted and brings a fresh reading of
 the LIVE rooms. The console shell owns the page's `h1`, so
@@ -330,6 +431,67 @@ results"), `/admin/users/[userId]` and `/admin/providers/[provider]`.
 
 `/admin` itself is an entry point, not a workspace: it forwards to Overview.
 
+### The agent pages (2026-11-07, redesign step 6)
+
+Every AI agent page wears the same head, `AdminAgentHeader`
+(`components/admin/ui/AdminAgentHeader.tsx`): the team's pixel face, its name,
+a status chip, one line about what it does, a meta line (last run, mode) and
+the **Auto run** state. Auto run is a *reading* that links to the settings tab
+holding the real switch; the head never writes. The switch keeps its own role,
+step-up and audit path, so a person-made "off" is still never turned on by
+automation or by this page, and an unread switch is drawn as unavailable, never
+as off. There is no "Run now" button: no agent has a manual-run route, and the
+redesign adds no paid call or outside send. The tab strip and the route table
+are unchanged.
+
+- **Agents home › Team board** (`?tab=dashboard`, `AdminAgentTeamBoard`,
+  derivations in `lib/adminAgentTeamBoardCore.ts`, reads in
+  `lib/adminAgentTeamBoardRead.ts`). Three totals (waiting on a person, agent
+  cost this month, teams working now) and one card per team: Marketing, Product
+  research, Engineering, SRE, Billing & finance, QA & release, Support triage,
+  Auto router, AMUX workers, Trust & safety. Every figure is the office's own
+  live read of the team (`readAgentOfficeLiveRooms`, read only), so the board
+  and the live floor cannot disagree. A room that could not be read is a dashed
+  "Unavailable" card; a total that depends on one ends in "+?" and says it is a
+  floor. Cost is summed only over teams that keep a cost record (Marketing's
+  generator month against its cap, the router optimizer's month against its
+  cap) and says how many; a team without one says "No cost record", never 0.
+  The live floor is `?tab=live` (`AgentOfficePanel`, not touched here).
+  Trust & safety opens its Agent digests tab.
+- **Marketing**: Overview (waiting posts with their own approve/reject
+  controls, scheduled posts, posts written per Brisbane day, month cost ring,
+  recent generator runs, from `lib/marketingAgentOverviewRead.ts`), Approvals
+  (large preview, caption and the checks that are recorded: the Guard verdict,
+  cited facts, attachments, expiry), and the webhook blocks on Settings only.
+  Approve, reject, schedule and publish are the same routes with the same
+  compare-and-set values as before; an outside post still leaves only after a
+  person approves it. Left out because no record exists: a "next run" time (the
+  generator runs on the Ubuntu box), an AI "ask for a rewrite" action (no
+  route), and check lines that are not recorded.
+- **Product research (Scout)**: a head on every tab, the Suggestions tab keeps
+  its list and bulk actions with a weekly bar and call ring beside it, Runs
+  holds the model and cap controls. Suggestions carry no screenshot and the
+  ledger records calls and tokens, not money, so the ring is today's calls
+  against the daily cap and no monthly figure is invented.
+- **Engineering**: Overview is four numbers (open pull requests, runs in
+  progress, decisions waiting, drafts a person turned down in 30 days), the
+  pull requests the agent bound (those approved and not yet merged are the ones
+  to check; merging is always a person's, in GitHub) and minutes from run start
+  to the first pull request. CI failure to pull request is not recorded, so the
+  chart says what it measures instead.
+- **SRE**: Overview is the state chain and the genesis as before under the
+  head; Daily report lists the kept digests by date and reads one in plain
+  words (`?item=` opens one, otherwise the newest list); Settings states the
+  mode and the contact path (the mode still changes only by the owner's genesis
+  approval on Overview). Uptime, p95 and AI cost are not in the digest and are
+  not drawn.
+- **Billing & finance**: this agent is the model price-deadline digest agent
+  (`docs/policy/billing-finance-ops.md`), not a Stripe-to-ledger reconciler, so
+  the Overview's four numbers are pending prices, nearest deadline, deadlines
+  within 7 days and the newest report, with a 14-day report calendar; Daily
+  report and Settings read the same stored data. The mode is the real switch row
+  (off, on, unreadable) and changes only through the existing control.
+
 ## Old route → new route
 
 Nothing was deleted. Every previously reachable URL still resolves, and it
@@ -337,7 +499,7 @@ resolves to the *section* it named, or its explicitly approved replacement,
 rather than to the first tab of whichever page absorbed it.
 `tests/adminNavigation.test.mjs` fails if a retired route
 loses its redirect route or points at a tab that does not exist, and
-`tests/e2e-admin/admin-shell-navigation.spec.ts` drives all sixteen in a browser.
+`tests/e2e-admin/admin-shell-navigation.spec.ts` drives them in a browser.
 
 | Old route | New destination | Why |
 | --- | --- | --- |
@@ -350,14 +512,32 @@ loses its redirect route or points at a tab that does not exist, and
 | `/admin/webhooks` | `/admin/automation?tab=webhooks` | As above |
 | `/admin/approvals` | `/admin/work-queue` | Two-person approval was retired; the address still opens the queue |
 | `/admin/amux-intake` | `/admin/amux-backlog?tab=ideas` | v4 Ideas replaces the retired legacy JSON intake UI |
-| `/admin/amux-board-import` | `/admin/amux-backlog?tab=import` | As above |
-| `/admin/amux-reconciliation` | `/admin/amux-backlog?tab=reconciliation` | As above |
-| `/admin/amux-backlog-metadata` | `/admin/amux-backlog?tab=metadata` | As above |
-| `/admin/amux-board-recommendation` | `/admin/amux-promotion?tab=recommendation` | As above |
-| `/admin/amux-board-promotion` | `/admin/amux-promotion?tab=promotion` | As above |
-| `/admin/amux-board-auto-promotion` | `/admin/amux-promotion?tab=auto-promotion` | As above |
+| `/admin/amux-board-import` | `/admin/amux-recovery?tab=legacy` | Legacy tools of Safety & recovery (2026-11-07); it was `/admin/amux-backlog?tab=import` |
+| `/admin/amux-reconciliation` | `/admin/amux-recovery?tab=legacy` | As above |
+| `/admin/amux-backlog-metadata` | `/admin/amux-recovery?tab=legacy` | As above |
+| `/admin/amux-board-recommendation` | `/admin/amux-recovery?tab=legacy` | As above |
+| `/admin/amux-board-promotion` | `/admin/amux-recovery?tab=legacy` | As above |
+| `/admin/amux-board-auto-promotion` | `/admin/amux-recovery?tab=legacy` | As above |
 | `/admin/amux-cards` | `/admin/amux-execution?tab=cards` | As above |
 | `/admin/amux-execution?tab=workers` | `/admin/amux-settings?tab=workers` | Workers moved to Operations settings (2026-10-20); the request's other query is kept, its stale `tab` is not |
+| `/admin/amux-promotion` (any `?tab=`) | `/admin/amux-recovery?tab=legacy` | The Promotion page is the Legacy tools tab (2026-11-07) |
+| `/admin/qa-release` | `/admin/release?tab=qa` | QA and release is Release (2026-11-07) |
+| `/admin/qa-release?tab=overview` | `/admin/release?tab=qa` | `ADMIN_QA_RELEASE_LEGACY_TABS` |
+| `/admin/qa-release?tab=train` | `/admin/release?tab=qa&view=train` | As above |
+| `/admin/qa-release?tab=lane` | `/admin/release?tab=qa&view=lane` | As above |
+| `/admin/qa-release?tab=ci-admission` | `/admin/release?tab=ci` | As above |
+| `/admin/agent-digests?tab=qa-release` | `/admin/release?tab=qa` | `ADMIN_AGENT_DIGESTS_LEGACY_TABS` |
+| `/admin/agent-digests?tab=ci-admission` | `/admin/release?tab=ci` | As above |
+| `/admin/agent-digests?tab=billing-finance-ops` | `/admin/finance-agent` | The billing and finance digest is its own agent page |
+| `/admin/agent-digests` (bare, or any other tab) | `/admin/release` | Its first tab was QA; only `?tab=trust-safety` still renders there |
+| `/admin/amux-backlog?tab=import`, `reconciliation`, `metadata` | `/admin/amux-recovery?tab=legacy` | `ADMIN_AMUX_BACKLOG_LEGACY_TABS` |
+| `/admin/amux-backlog?tab=recovery` | `/admin/amux-recovery?tab=reservations` | As above (it opened Ideas from 2026-11-06 until 2026-11-07) |
+| `/admin/amux-backlog?tab=intake` | `/admin/amux-backlog?tab=ideas` | As above |
+| `/admin/amux-settings?tab=safety` | `/admin/amux-recovery?tab=safety` | Execution safety is Safety & recovery; the halt clear's step-up returns there |
+| `/admin/amux-execution?tab=assignment` | `/admin/amux-execution?tab=review` | The review queue under its new name; `halts` now lands on `/admin/amux-recovery?tab=safety` |
+| `/admin/admin-access?tab=integrity` | `/admin/audit?tab=integrity` | The chain check is part of the Audit log |
+| `/admin/marketing?tab=competitors` | `/admin/marketing?tab=reports&view=competitors` | `ADMIN_MARKETING_LEGACY_TABS`; `experiments` opens `?tab=reports&view=experiments`, `assets` `?tab=queue&view=assets`, `comments` `?tab=queue&view=comments` |
+| `/admin/engineering-agent?tab=pull-requests` | `/admin/engineering-agent?tab=runs&view=pull-requests` | Runs & PRs holds both records |
 
 The AMUX redirects decide nothing about access. A role the destination refuses
 is redirected and then gets the destination's 404, as it got one from the old
@@ -538,8 +718,10 @@ never its own `tab`, which the lookup has already consumed.
 
 ### The console theme (2026-10-19)
 
-The console has its own theme, **Dark** (the default) or **Light**, chosen
-in the account menu and kept in the `tomverse_admin_theme` cookie. It never
+The console has its own theme, **Light** (the default since 2026-11-07, when
+the redesign was approved light-first) or **Dark**, chosen in the account menu
+and kept in the `tomverse_admin_theme` cookie; a Dark choice made earlier is
+kept. It never
 moves the product theme, and the product theme never moves it. The layout
 reads the cookie, so the first paint is already in the chosen theme.
 
@@ -554,6 +736,47 @@ text on them stays white. A panel that needs a colour uses a palette class or a
 `var(--color-*)`, never a literal, or Light cannot reach it.
 `tests/adminTheme.test.mjs` keeps the stylesheet equal to its generator and
 every Admin component and page free of `dark:`.
+
+### Shared UI primitives (2026-11-07)
+
+The redesign approved on 2026-11-07 draws every page from one set of parts in
+`components/admin/ui/`, so pages stop shipping their own cards, tables and
+modals (there were five modal implementations and three error styles). A page
+that is redesigned uses these and adds none of its own:
+
+| Part | Use | Rule it carries |
+|---|---|---|
+| `AdminTile` | A section of a page | Title, one-line description, optional action |
+| `AdminKpiCard` | One number, optional trend line | `value: null` renders "Unavailable", never 0; four per page at most |
+| `AdminStatusChip` | A status | Five meanings only: ok, warn, bad, info, idle; `unknown` is dashed and never healthy |
+| `AdminDataTable` | Rows | Below `sm` the same rows render as cards; no horizontal scroll |
+| `AdminConfirmDialog` | Asking before a hard-to-undo action | Facts and effects first, focus on Cancel, says when step-up is needed; the caller performs the write |
+| `AdminWriteButton` | A control that changes something | Locked with the required access named when the role cannot write; a shield when step-up follows |
+| `AdminStateBlock` | Error, empty, loading | A failed read is an alert with a retry, never an empty list |
+| `AdminTechInfo` | Policy versions, ids, raw payloads | Closed by default |
+| `AdminCharts` | Sparkline, bars, donut, ring, gauge | Plain SVG, colours through `var(--color-*)`; draws nothing it cannot read |
+| `AdminPixelAvatar` | An AI team's face | The Agent office figure; character art keeps its colours in both themes |
+| `AdminToggleSwitch` | An on/off setting | A real `<input type="checkbox" role="switch">` with an accessible name, so it submits and toggles like a checkbox; the knob stays white in Light |
+| `AdminFilterChips` | A row of filters that are links | Each chip is a link that keeps the other filters in the URL; the active one is marked with `aria-current` |
+
+The arithmetic behind them (chart geometry, the Brisbane clock) lives in
+`lib/adminUiCore.ts` and the figures in `lib/adminPixelAvatarPalette.ts`;
+`tests/adminUiCore.test.mjs` and `tests/client/adminUiPrimitivesRender.test.tsx`
+cover them. Times in the console read as AEST (Brisbane, UTC+10): the shell's
+"Updated" clock shows `HH:MM AEST`, never UTC.
+
+### AI platform screens (2026-11-07)
+
+Providers, Models and Routing are drawn from the shared parts. Three rules
+carry over from the old screens: the provider usage **Sync now** button lives
+only on Providers > Usage & cost (Status and the provider detail page link to
+it, the sync API is unchanged); a switch an operator turned off is never turned
+back on by automation, and the incident tab says so; the Models > Default
+models tab draws the same saves as before (guest lead, guest lineup with one
+slot per provider), and the logged-in default stays a code constant with no
+admin write. A figure the loaders do not provide (per-provider p95, 7-day
+request trend per model, post-change reaction numbers) is left off the screen
+rather than stored or invented.
 
 ## Language
 
@@ -647,7 +870,7 @@ The safety section distinguishes automatic recovery checks, operator confirmatio
 
 ### AMUX Ideas holds only the idea flow (2026-10-15)
 
-The approved v49 backlog redesign keeps the idea flow alone on **Backlog › Ideas**, which is again the page's first section: entering an idea, building its preview, approving its execution and its plan, and the analysis claim resolution that `?tab=ideas&analysisHoldId=` opens. Strategic portfolio assessment moved to its own **Portfolio assessment** section (`?tab=portfolio`), the release of unused analysis reservations to the opened idea's detail (operator decision 2026-11-06, which retired **Cleanup and recovery** and its `?tab=recovery`, now a redirect to Ideas: an idea waiting for its analysis worker shows one release button when the server finds an unclaimed hold with no usage, and otherwise says why none can be released; the owner's later steps show the button only when a hold left by an earlier preview can still be released; there is no reservation ID to look up), and the monthly analysis budget, the approval of analysis models and the Task worker and model cost catalogue to **Operations settings › Analysis settings** (`?tab=analysis`, owner only like their routes); the Ideas flow links there and only reads what is approved. Each moved panel's refused step-up returns to its new section. Above the idea input, **Decide now** lists only the human steps (execution approval, the next page's transfer, the owner's answer, plan approval) and Task PRs waiting for GitHub review, and **Ideas in progress** shows the newest 20 ideas on the six-step bar; both read one bounded snapshot only for the open Ideas tab after a recent owner sign-in, and a row opens its idea at `?tab=ideas&idea=<requestId>`. The card list stays at `?tab=list`, which every list link already names. The v49 redesign retired no route; the later `?tab=recovery` retirement keeps its redirect.
+The approved v49 backlog redesign keeps the idea flow alone on **Backlog › Ideas**, which is again the page's first section: entering an idea, building its preview, approving its execution and its plan, and the analysis claim resolution that `?tab=ideas&analysisHoldId=` opens. Strategic portfolio assessment moved to its own **Portfolio assessment** section (`?tab=portfolio`), the release of unused analysis reservations to the opened idea's detail (operator decision 2026-11-06, which retired **Cleanup and recovery** and its `?tab=recovery`, now a redirect to Ideas: an idea waiting for its analysis worker shows one release button when the server finds an unclaimed hold with no usage, and otherwise says why none can be released; the owner's later steps show the button only when a hold left by an earlier preview can still be released; there is no reservation ID to look up), and the monthly analysis budget, the approval of analysis models and the Task worker and model cost catalogue to **Operations settings › Analysis settings** (`?tab=analysis`, owner only like their routes); the Ideas flow links there and only reads what is approved. Each moved panel's refused step-up returns to its new section. Above the idea input, **Decide now** lists only the human steps (execution approval, the next page's transfer, the owner's answer, plan approval) and Task PRs waiting for GitHub review, and **Ideas in progress** shows the newest 20 ideas as cards on the five-step bar (idea, execution approval, plan approval, run, PR; an opened idea's detail keeps its six steps), ideas that wait for a person first; both read one bounded snapshot only for the open Ideas tab after a recent owner sign-in, and a row opens its idea at `?tab=ideas&idea=<requestId>`. The card list stays at `?tab=list`, which every list link already names. The v49 redesign retired no route; the later `?tab=recovery` retirement keeps its redirect.
 
 ### AMUX Ideas is a one-stop flow with two decisions (2026-10-16)
 
@@ -676,6 +899,60 @@ engineering agent keeps its four sections, and its old
 `/admin/product-research?tab=observations`, the record it showed in
 production, with the rest of its query
 (`ADMIN_ENGINEERING_AGENT_LEGACY_TABS`). No route was retired.
+
+### The Development screens (2026-11-07)
+
+Step 7 of the redesign draws Ideas, the Execution board, Release, AMUX settings
+and Safety & recovery from the shared parts. It changes what is drawn; every
+approval, decision, budget and halt route, its permission, its step-up and its
+audit record is as it was, and `tests/adminAmuxDevScreens.test.mjs` pins that.
+
+- **Ideas.** The new-idea card (the pixel avatar, the one-stop button and the
+  collapsed steps) leads, with this month's analysis budget as one line under
+  the box (`AmuxAnalysisBudgetMeter`: a read of the existing snapshot route, "sign
+  in again" when the sign-in is stale, "could not be read" when it fails, never an
+  empty bar). Ideas in progress are cards at full width below it. A card whose
+  idea waits for a person is outlined and carries the decision as its cue; it
+  only links to the idea, where the existing approval panels and their blocking
+  dialog are. The card list shows a count per state and each card's kind,
+  priority, portfolio score and state. The counts and the kind, priority and
+  state come from the newest cards' own read (`listAmuxCardsForAdmin`) and say
+  so ("the N most recently changed of M"); an older card shows no state, and a
+  failed read shows "Unavailable", never zero.
+- **Execution board.** The six server lanes are drawn in five columns: Waiting
+  (Tomverse Backlog, AMUX Backlog and Todo as sub-lists, each still a
+  `data-amux-lane` section, and AMUX Backlog still the only drop target), Waiting
+  on you (the attention lane, so its count is the server's), Running, In review
+  and Done (the idea lane's recent merges; older finished cards stay in the
+  history below). A card shows its worker's avatar, its channel (Claude, Codex,
+  Copilot or Cursor, read from the worker's name) and the time since it last
+  changed; the board snapshot carries no per-card cost, so none is drawn. A card
+  stopped by the work itself (a lost run, an unknown outcome, a limit) has a red
+  edge and a link to Safety & recovery. The card dialog, the move panel and the
+  Decision Maker judgment are unchanged. Diagnostics still reads "Opening soon"
+  and points at the review queue, where the worker report and the assignment
+  evidence are.
+- **Release › QA.** It opens on the next train (its AEST time and the time left),
+  today's route (a train counts as departed only when its admission was
+  recorded), production against main, the pull requests picked for the next
+  train, and the note that an operator merges a train with merge-train. The old
+  overview, train and lane views follow. Each read is settled on its own; a read
+  that fails is named, never drawn as nothing. The departure board stays the one
+  fixed-dark file.
+- **Release › CI queue.** The runner budget is drawn as a grid of runners in use,
+  with the warning not to mark a waiting pull request ready again or re-run its
+  CI; how the line works is behind the technical disclosure. Reordering, stopping
+  and the budget controls are unchanged.
+- **AMUX settings › Workers.** Workers are cards grouped by channel, what needs
+  a look first inside each, with a banner when any cannot take work. The turn-on,
+  pause and resume buttons are the registry's own, sent once and read back. No
+  per-worker weekly quota is recorded, so no quota bar is drawn.
+- **Safety & recovery.** An open halt is one big card: what was checked and two
+  choices (clear it and resume, or leave it). Clearing is the existing form with
+  its three confirmations, the halt key and the recent sign-in, owner only, and
+  not offered while the server is checking the halt itself. Cleared halts are the
+  automatic recovery record. Legacy tools open with an "Old tools" note, each
+  still a closed section.
 
 ### Decision Maker requests are judged in Execution (2026-10-19)
 
@@ -711,3 +988,41 @@ change (`POST /api/admin/amux/workers`), sent once and read back; a refusal is
 shown in plain words and an unknown outcome sends nothing more. The drawer
 edits what a worker can do through the existing capability editor. Its copy
 names no policy version, build stage or internal refusal code.
+
+### Home screens: Today, Decisions and Metrics (2026-11-07, redesign step 3)
+
+The three Home entries were redrawn from the approved designs. No loader, route, role, write path or redirect changed; only what is drawn did.
+
+- **Today** (`components/admin/AdminOverviewSummary.tsx`) shows the greeting and how many decisions wait, at most four numbers (users, estimated monthly revenue, AI cost this month, paid conversion), where the decisions are by area, the AI cost today by provider, the service status, "Decide now", and the latest administrator changes. The team strip reads the Agent office's own live read through its `*Tone` functions (`lib/adminHomeTeams.ts`) and shows a tone, never a team's output. The numbers the old page carried that are not on it (plan mix, promotions, churn watch, usage counts, the environment table) live on Metrics and their own screens, or on the health score tab. A figure that could not be read is `null` and draws as unavailable; the health score's link and "ceiling" note stay on this page (`admin-health-score-link`, `admin-health-score-incomplete`).
+- **Health score** keeps the arithmetic of `lib/adminHealthScore.ts` unchanged and draws it as a gauge, a one-line verdict, the reasons points were lost (each with its deduction and the screen that fixes it) and the fastest ways to raise it. There is no 30-day line: the score is computed on demand and no history of it is stored. Unread inputs still deduct nothing and mark the score as a ceiling, and the environment groups, with their headings, stay on this tab.
+- **Decisions** (`lib/adminDecisionInbox.ts`, `lib/adminDecisionInboxLoad.ts`, `components/admin/AdminWorkQueuePanel.tsx`) is one inbox read once: the work queue's rows (with the time each started waiting) plus the sidebar badge counts for the agent and AMUX approvals, which are counted but not listed row by row (marketing drafts, product suggestions, AMUX escalations, orchestrator halts, Decision Maker requests). The area tabs are the same list through a filter. It only reads and links: the decision is made on the screen that owns it, so it has no write, step-up or confirmation. A line whose screen the role cannot open (`adminHrefIsVisibleTo`) is left out. A source that failed is named in a notice and an inbox is never drawn as clear while one is missing. The sidebar's Decisions badge keeps its own, narrower definition (refunds, feedback, privacy requests), so the inbox total can be larger than the badge.
+- **Metrics** (`components/admin/AdminUsageAnalyticsPanel.tsx`, `AdminProductAnalyticsPanel.tsx`, `AdminReviewUseSummary.tsx`) puts the period picker (`?period=`, unchanged) at the top right of the usage tab, with four numbers, the active-accounts line (the previous period dashed where the report's fixed 30-day series can hold both), model share by provider, a weekday-by-hour heatmap in AEST, country share and the footer figures. The model table, weekly and monthly users, new-account return and the distributions are folded under "More detail". The product tab draws the funnel from the ledger's 30-day event counts, sign-up sources and the launch funnel, with the raw event table, Google Analytics delivery and campaign lists folded below. Elements the data does not hold are not drawn (a monthly revenue history, a cohort retention table, a plan donut on the product tab, the review model-agreement matrix): no store or migration was added for them.
+- Shared parts added to `components/admin/ui/`: `AdminLineChart`, `AdminHeatmap`, `AdminFunnel`, `AdminShareList`, `AdminSegmentedLinks`, `AdminProviderMark`. Regression tests: `tests/adminDecisionInbox.test.mjs`, `tests/adminLineChartCore.test.mjs`, `tests/client/adminHomeRender.test.tsx`.
+
+### Customers & Revenue screens (2026-11-07)
+
+The six screens of the group are drawn from the shared parts above and change
+no route, role, step-up or audit behaviour:
+
+- **Users** is a list only (five count cards that filter it, search, one
+  `AdminDataTable`). A customer is `/admin/users/[userId]` with `?tab=`
+  `overview`, `billing`, `security`, `conversations`, `notes` (the
+  `user-detail` entry's tabs); the detail is read once in the browser and kept
+  across sections. The list has no per-user country or last-activity read, so
+  it shows join date and time zone; the credit bar needs the plan's daily
+  limit and is left off without one.
+- **Security** shows the account's state, then the actions as cards (restrict
+  AI, suspend, sign out everywhere, unlink a sign-in, delete). A card opens to
+  the shared reason (required), expiry (only for the two actions that take
+  one) and note. Every card sends the route's existing payload; the
+  confirming button carries the step-up shield. There is no "notify the user"
+  field: the route has none, and adding one would be a new send.
+- **Plans & pricing** has one save bar. Every change goes through the review
+  dialog before the one PATCH; the former saves that skipped the review are
+  gone.
+- **Refunds** approve through `AdminConfirmDialog` with the step-up note. The
+  monthly bars and totals are computed from the rows read, and say so.
+- **Credit ledger** is read-only; its totals describe the rows read, not a
+  period.
+- **Support**'s Auto-fix review tab is the same newest reports as the inquiries
+  tab, seen by the automation's case. It has no store of its own and no write.

@@ -1,7 +1,8 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, X } from "lucide-react";
 import { AlertTriangle, ArrowRight, Bot, Clock, GitPullRequest, GripVertical, MoveRight } from "lucide-react";
 import { AmuxExecutionMovePanel, type AmuxBoardMove } from "./AmuxExecutionMovePanel";
 import { AmuxExecutionDialog } from "./AmuxExecutionDialog";
@@ -9,12 +10,19 @@ import { AmuxCardOwnerReview } from "./AdminAmuxRoutingPanel";
 import { AmuxTaskQuestionSection } from "./AmuxWorkerQuestion";
 import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent } from "react";
 
+import { AdminChannelIcon, adminChannelName } from "@/components/admin/ui/AdminChannelIcon";
+import { AdminPixelAvatar } from "@/components/admin/ui/AdminPixelAvatar";
+import {
+  AMUX_BOARD_COLUMNS, AMUX_WORKER_CHANNELS, amuxBoardCardStuck, amuxElapsed,
+  type AmuxBoardColumn, type AmuxWorkerChannel,
+} from "@/lib/adminAmuxFlow";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxExecutionMessages } from "@/lib/adminMessages/amuxExecution";
+import { adminAmuxScreensMessages } from "@/lib/adminMessages/amuxScreens";
 import { adminAmuxDecisionMakerAttentionMessages } from "@/lib/adminMessages/amuxDecisionMaker";
 import type { DmAttention, DmAttentionItem } from "@/lib/amux/decisionMakerAttention";
 import { AmuxOutcomeObservationForm } from "./AmuxOutcomeObservationForm";
@@ -106,7 +114,7 @@ type Parent = { kind: "root" } | { kind: "unassigned" } |
 const keyOf = (parent: Parent) => parent.kind === "root" || parent.kind === "unassigned" ?
   parent.kind :
   `${parent.kind}:${parent.id}`;
-const date = (value: string) => new Date(value).toLocaleString();
+const date = (value: string) => formatAestDateTime(value, { seconds: true }) ?? "-";
 const USD = (micro: string | null) => micro === null ? null :
   (Number(micro) / 1_000_000).toFixed(4);
 const assessmentValue = (value: unknown) => value && typeof value === "object" &&
@@ -174,6 +182,19 @@ function DecisionMakerAttentionCard({ item, nowMs }: { item: DmAttentionItem; no
 
 const PR_URL = "https://github.com/mposition/Tomverse/pull/";
 
+/** The lanes each board column holds; the lanes themselves are the server's. */
+const COLUMN_LANES: Record<AmuxBoardColumn, AmuxExecutionLane[]> = {
+  waiting: ["tomverse_backlog", "amux_backlog", "todo"],
+  approval: ["attention"],
+  running: ["in_progress"],
+  review: ["in_review"],
+  done: [],
+};
+/** The dot before a column's name. */
+const COLUMN_DOT: Record<AmuxBoardColumn, string> = {
+  waiting: "bg-zinc-500", approval: "bg-amber-500", running: "bg-blue-500", review: "bg-cyan-500", done: "bg-emerald-500",
+};
+
 /**
  * An idea the idea lane runs without cards (lib/amux/ideaLaneBoardCore.ts):
  * display only, with no move, approval or archive control; it opens the
@@ -199,8 +220,13 @@ function IdeaLaneCard({ card }: { card: AmuxIdeaLaneBoardCard }) {
 }
 
 export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false,
-  canReviewCards = false, decisionMaker, laneIdeas }: {
+  canReviewCards = false, decisionMaker, laneIdeas, workerChannels }: {
   initialTaskId?: string | null; canMoveCards?: boolean;
+  /**
+   * Each registered worker's channel, from the registry the page read. Absent
+   * or a worker not in it: no channel badge, never one guessed from a name.
+   */
+  workerChannels?: Record<string, AmuxWorkerChannel> | null;
   /** Whether a card waiting on the owner opens on its owner review. */
   canReviewCards?: boolean;
   /**
@@ -218,6 +244,10 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
 }) {
   const m = useAdminMessages(adminAmuxExecutionMessages);
   const d = useAdminMessages(adminAmuxDecisionMakerAttentionMessages);
+  const screens = useAdminMessages(adminAmuxScreensMessages).board;
+  const { locale } = useAdminLocale();
+  // The clock the card ages are counted against: read when the board was read, not on every render.
+  const [nowMs, setNowMs] = useState<number | null>(null);
   const dmTotal = decisionMaker?.total ?? 0;
   const [view, setView] = useState<"board" | "hierarchy">("board");
   const [board, setBoard] = useState<BoardSnapshot | null>(null);
@@ -264,7 +294,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     try {
       const result = await getJson<BoardSnapshot>("/api/admin/amux/execution-view?view=board_snapshot");
       if (generation === boardGeneration.current) {
-        setBoard(result); setBoardPages({}); setArchive([]);
+        setBoard(result); setBoardPages({}); setArchive([]); setNowMs(Date.now());
       }
     } catch (reason) { if (generation === boardGeneration.current) showError(reason); }
     finally { if (generation === boardGeneration.current) setBoardLoading(false); }
@@ -582,6 +612,132 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     </ul>;
   };
 
+  const elapsedText = (iso: string) => {
+    const elapsed = nowMs === null ? null : amuxElapsed(Date.parse(iso), nowMs);
+    return elapsed === null ? null :
+      new Intl.NumberFormat(locale, { style: "unit", unit: elapsed.unit, unitDisplay: "narrow" }).format(elapsed.value);
+  };
+  const dropProps = (lane: AmuxExecutionLane) => ({
+    onDragOver: (event: ReactDragEvent) => { if (lane === "amux_backlog" && dragCard.current) event.preventDefault(); },
+    onDrop: (event: ReactDragEvent) => {
+      event.preventDefault(); const id = dragCard.current; dragCard.current = null;
+      if (lane === "amux_backlog" && id) openMove(id);
+    },
+  });
+  const renderCard = (card: Card, lane: AmuxExecutionLane) => {
+    const stuck = amuxBoardCardStuck({ lane, attentionReason: card.attentionReason, ownerQuestion: card.ownerQuestion });
+    const asksOwner = lane === "attention" && !stuck;
+    const channel = card.worker ? workerChannels?.[card.worker] ?? null : null;
+    const since = elapsedText(card.updatedAt);
+    return <li key={card.id}
+      className={styles.card + (stuck ? " " + styles.cardStuck : asksOwner ? " " + styles.cardApprove : "")}
+      data-testid={"amux-board-card-" + card.id} data-stuck={stuck ? "true" : undefined}
+      draggable={canMoveCards && lane === "tomverse_backlog" && card.cardType === "task"}
+      onDragStart={(event) => { if (pointerDrag.current) { event.preventDefault(); return; }
+        dragCard.current = card.id;
+        event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", card.id); }}
+      onDragEnd={() => { dragCard.current = null; }}>
+      <div className={styles.identity}>
+        <button type="button" className={styles.cardId}
+          onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
+          {amuxVisibleInspectionText(amuxCardLabel(card))}</button>
+        {channel && <AdminChannelIcon channel={channel} size={18} label={adminChannelName(channel)} />}
+        {card.sev1 && <span className={styles.cardWarning}>SEV1</span>}
+        {canMoveCards && lane === "tomverse_backlog" && card.cardType === "task" &&
+          <button type="button" className={styles.iconButton + " " + styles.dragHandle} aria-label={m.dragToQueue}
+            onPointerDown={(event) => startPointerDrag(event, card.id)}
+            onPointerMove={updatePointerDrag} onPointerUp={finishPointerDrag}
+            onPointerCancel={(event) => finishPointerDrag(event, true)}
+            onLostPointerCapture={(event) => {
+              if (pointerDrag.current?.pointerId === event.pointerId) {
+                pointerDrag.current = null; setPointerTask(null);
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") { pointerDrag.current = null; setPointerTask(null); }
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault(); returnFocusRef.current = event.currentTarget; openMove(card.id);
+              }
+            }}><GripVertical size={14} aria-hidden="true" /></button>}
+        {canMoveCards && lane === "tomverse_backlog" && card.cardType === "task" &&
+          <button type="button" className={styles.iconButton} aria-label={m.moveToQueue}
+            onClick={(event) => { returnFocusRef.current = event.currentTarget; openMove(card.id); }}>
+            <MoveRight size={14} aria-hidden="true" /></button>}
+      </div>
+      {card.attentionReason && <span className={styles.reasonChip + (stuck ? " " + styles.reasonChipStuck : "")}
+        data-testid={"amux-card-attention-reason-" + card.id}>
+        {m.attentionReason[card.attentionReason] ?? m.attentionReasonFallback}</span>}
+      <button type="button" className={styles.cardTitle}
+        onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
+        {amuxVisibleInspectionText(card.title ?? m.protectedTitle)}
+      </button>
+      {card.displayKey && <p className={styles.cardMeta}>
+        {m.taskId}: {amuxVisibleInspectionText(card.id)}</p>}
+      {amuxDistinctSourceKey(card.id, card.sourceKey) && <p className={styles.cardMeta}>
+        {m.sourceKey}: {amuxVisibleInspectionText(card.sourceKey ?? "")}</p>}
+      <p className={styles.cardMeta}>{card.cardType ?? card.kind} · {card.priority.toUpperCase()}
+        {card.taskRole ? " · " + card.taskRole : ""}</p>
+      <p className={styles.cardWorker}>
+        {card.worker ? <AdminPixelAvatar team="amux" tile={30} unit={1.5} body={false} /> : null}
+        <span className={styles.workerName}>{card.worker ?? m.noWorker}</span>
+        {since && <span className={styles.elapsed} title={screens.sinceChange}>{since}</span>}
+      </p>
+      {card.ownerQuestion === "open" && <button type="button" className={styles.reviewButton}
+        data-testid={"amux-card-open-question-" + card.id}
+        onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id, true, true); }}>
+        {m.questionPending}<MoveRight size={14} aria-hidden="true" /></button>}
+      {canReviewCards && card.attentionReason && <button type="button" className={styles.reviewButton}
+        data-testid={"amux-card-open-review-" + card.id}
+        onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
+        {m.openOwnerReview}<MoveRight size={14} aria-hidden="true" /></button>}
+      {stuck && <Link href="/admin/amux-recovery?tab=safety" className={styles.safetyLink}
+        data-testid={"amux-card-safety-link-" + card.id}>{screens.openSafety}</Link>}
+      <p className={styles.cardState + (!card.briefPresent || !card.scoreFresh ? " " + styles.cardWarning : "")}>
+        {card.dependencyCount > 0 ? m.dependencyCount(card.dependencyCount) :
+          card.score !== null ? m.score + " " + card.score + (card.scoreFresh ? "" : " · " + m.stale) :
+            m.scoreUnavailable}
+      </p>
+    </li>;
+  };
+  /** What fills a lane: the Decision Maker requests above its cards, then the cards, then idea-lane display cards. */
+  const laneBody = (snapshot: BoardSnapshot, lane: AmuxExecutionLane) => {
+    const cards = snapshot.lanes.find((item) => item.lane === lane)?.cards ?? [];
+    const matches = filtered(cards);
+    const laneCards = laneCardsFor(lane);
+    const attention = lane === "attention";
+    return <>
+      {attention && decisionMaker === null && <p role="alert" className={styles.dmMore}>{d.unavailable}</p>}
+      {attention && decisionMaker && dmTotal > 0 && <>
+        <h4 className={styles.groupHeading + " " + styles.groupHeadingDm}>
+          <Bot size={14} aria-hidden="true" />{d.groupDm(dmTotal)}</h4>
+        <ol className={styles.cards} data-testid="amux-dm-attention-list">
+          {decisionMaker.items.map((item) =>
+            <DecisionMakerAttentionCard key={item.requestId} item={item} nowMs={decisionMaker.dbNowMs} />)}
+        </ol>
+        {decisionMaker.items.some((item) => item.question === null) && <p className={styles.dmMore}>{d.bodiesHidden}</p>}
+        {dmTotal > decisionMaker.items.length && <p className={styles.dmMore}>
+          {d.more(dmTotal - decisionMaker.items.length)}</p>}
+        {snapshot.counts.attention > 0 && <h4 className={styles.groupHeading + " " + styles.groupHeadingCards}>
+          <AlertTriangle size={14} aria-hidden="true" />{d.groupCards(snapshot.counts.attention)}</h4>}
+      </>}
+      <ol className={styles.cards}>{matches.map((card) => renderCard(card, lane))}</ol>
+      {laneCards.length > 0 && <>
+        <h4 className={styles.groupHeading + " " + styles.groupHeadingLane}>
+          <GitPullRequest size={14} aria-hidden="true" />{m.ideaLane.group(laneCards.length)}</h4>
+        <ol className={styles.cards} data-testid={"amux-lane-ideas-" + lane}>
+          {laneCards.map((card) => <IdeaLaneCard key={card.requestId} card={card} />)}</ol>
+      </>}
+      {matches.length === 0 && laneCards.length === 0 && !(attention && cards.length === 0 && dmTotal > 0) &&
+        <p className={styles.empty}>{cards.length === 0 ? m.empty : m.noMatches}</p>}
+      {(query || workerFilter || priorityFilter) && <p className={styles.hint}>{m.matchCount(matches.length, cards.length)}</p>}
+      {cards.length < snapshot.counts[lane] && <button type="button"
+        disabled={boardBusy !== null || boardLoading} className={styles.button}
+        onClick={() => void loadBoardPage(lane)}>
+        {m.loadMore(cards.length, snapshot.counts[lane])}
+      </button>}
+    </>;
+  };
+
   const selectedBody = cardBody(selected?.body ?? null);
   return <section className={styles.workspace}
     data-testid="amux-execution-workspace">
@@ -589,7 +745,11 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       {amuxVisibleInspectionText(amuxCardLabel(uniqueCards.find((card) => card.id === pointerTask) ?? { id: pointerTask }))} · {m.moveToQueue}
     </div>}
     <div className={styles.header}>
-      <div><h2>{m.boardTitle}</h2><p>{m.boardSubtitle}</p></div>
+      <div><h2>{m.boardTitle}</h2><p>{m.boardSubtitle}</p>
+        <ul className={styles.channels} aria-label={screens.channels}>
+          {AMUX_WORKER_CHANNELS.map((channel) => <li key={channel} className={styles.channel}>
+            <AdminChannelIcon channel={channel} size={16} />{adminChannelName(channel)}</li>)}
+        </ul></div>
       <div className="flex gap-2" role="group" aria-label={m.viewLabel}>
         <button type="button" aria-pressed={view === "board"}
           className={styles.viewButton} onClick={() => setView("board")}>{m.board}</button>
@@ -603,7 +763,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       </div>
     </div>
     <p className="text-xs text-zinc-500">{m.globalAttention} <Link
-      href="/admin/amux-settings?tab=safety" className="underline">{m.haltsLink}</Link></p>
+      href="/admin/amux-recovery?tab=safety" className="underline">{m.haltsLink}</Link></p>
     {view === "board" && <div className={styles.toolbar}>
       <label className={styles.search}>
         <Search size={16} aria-hidden="true" />
@@ -631,7 +791,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       <span>{m.activeTasks} <strong>{board ? board.counts.in_progress : m.unknown}</strong></span>
       <span>{m.awaitingWorker} <strong>{board ? board.counts.amux_backlog : m.unknown}</strong></span>
       <span>{m.awaitingReview} <strong>{board ? board.counts.in_review : m.unknown}</strong></span>
-      <Link href="/admin/amux-settings?tab=safety">{m.haltsLink}</Link>
+      <Link href="/admin/amux-recovery?tab=safety">{m.haltsLink}</Link>
     </div>
     {activation && <details data-testid="amux-v22-activation-diagnostic"
       className="rounded border p-3 text-sm border-zinc-700">
@@ -668,127 +828,51 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     {view === "board" && <>
       {!board ? <p role="status" className={styles.empty}>{boardLoading ? m.loading : m.unavailable}</p> :
         <div ref={boardRef} className={styles.board} aria-label={m.board} data-testid="amux-board-lanes">
-          {AMUX_EXECUTION_VISIBLE_LANES.map((lane) => {
-            const column = board.lanes.find((item) => item.lane === lane);
-            const cards = column?.cards ?? [];
-            const matches = filtered(cards);
-            const laneCards = laneCardsFor(lane);
-            const attention = lane === "attention";
-            const laneCount = board.counts[lane] + (attention ? dmTotal : 0);
-            return <section key={lane} aria-label={m.lane[lane]} data-amux-lane={lane} tabIndex={attention ? -1 : undefined}
-              className={styles.column + (attention ? " " + styles.attentionColumn : "")}
-              onDragOver={(event) => { if (lane === "amux_backlog" && dragCard.current) event.preventDefault(); }}
-              onDrop={(event) => {
-                event.preventDefault(); const id = dragCard.current; dragCard.current = null;
-                if (lane === "amux_backlog" && id) openMove(id);
-              }}>
-              <h3 className={styles.columnHeading}>
-                <span>{m.lane[lane]}</span><span className={styles.count}>{laneCount}</span>
-              </h3>
-              <p className={styles.columnHint}>{m.laneHint[lane]}</p>
-              {attention && decisionMaker === null && <p role="alert" className={styles.dmMore}>{d.unavailable}</p>}
-              {attention && decisionMaker && dmTotal > 0 && <>
-                <h4 className={styles.groupHeading + " " + styles.groupHeadingDm}>
-                  <Bot size={14} aria-hidden="true" />{d.groupDm(dmTotal)}</h4>
-                <ol className={styles.cards} data-testid="amux-dm-attention-list">
-                  {decisionMaker.items.map((item) =>
-                    <DecisionMakerAttentionCard key={item.requestId} item={item} nowMs={decisionMaker.dbNowMs} />)}
-                </ol>
-                {decisionMaker.items.some((item) => item.question === null) && <p className={styles.dmMore}>{d.bodiesHidden}</p>}
-                {dmTotal > decisionMaker.items.length && <p className={styles.dmMore}>
-                  {d.more(dmTotal - decisionMaker.items.length)}</p>}
-                {board.counts.attention > 0 && <h4 className={styles.groupHeading + " " + styles.groupHeadingCards}>
-                  <AlertTriangle size={14} aria-hidden="true" />{d.groupCards(board.counts.attention)}</h4>}
-              </>}
-              <ol className={styles.cards}>{matches.map((card) =>
-                <li key={card.id} className={styles.card + (lane === "attention" ? " " + styles.attention : "")}
-                  data-testid={"amux-board-card-" + card.id}
-                  draggable={canMoveCards && lane === "tomverse_backlog" && card.cardType === "task"}
-                  onDragStart={(event) => { if (pointerDrag.current) { event.preventDefault(); return; }
-                    dragCard.current = card.id;
-                    event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", card.id); }}
-                  onDragEnd={() => { dragCard.current = null; }}>
-                  <div className={styles.identity}>
-                    <button type="button" className={styles.cardId}
-                      onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
-                      {amuxVisibleInspectionText(amuxCardLabel(card))}</button>
-                    {card.sev1 && <span className={styles.cardWarning}>SEV1</span>}
-                    {canMoveCards && lane === "tomverse_backlog" && card.cardType === "task" &&
-                      <button type="button" className={styles.iconButton + " " + styles.dragHandle} aria-label={m.dragToQueue}
-                        onPointerDown={(event) => startPointerDrag(event, card.id)}
-                        onPointerMove={updatePointerDrag} onPointerUp={finishPointerDrag}
-                        onPointerCancel={(event) => finishPointerDrag(event, true)}
-                        onLostPointerCapture={(event) => {
-                          if (pointerDrag.current?.pointerId === event.pointerId) {
-                            pointerDrag.current = null; setPointerTask(null);
-                          }
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Escape") { pointerDrag.current = null; setPointerTask(null); }
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault(); returnFocusRef.current = event.currentTarget; openMove(card.id);
-                          }
-                        }}><GripVertical size={14} aria-hidden="true" /></button>}
-                    {canMoveCards && lane === "tomverse_backlog" && card.cardType === "task" &&
-                      <button type="button" className={styles.iconButton} aria-label={m.moveToQueue}
-                        onClick={(event) => { returnFocusRef.current = event.currentTarget; openMove(card.id); }}>
-                        <MoveRight size={14} aria-hidden="true" /></button>}
-                  </div>
-                  {card.attentionReason && <span className={styles.reasonChip}
-                    data-testid={"amux-card-attention-reason-" + card.id}>
-                    {m.attentionReason[card.attentionReason] ?? m.attentionReasonFallback}</span>}
-                  <button type="button" className={styles.cardTitle}
-                    onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
-                    {amuxVisibleInspectionText(card.title ?? m.protectedTitle)}
-                  </button>
-                  {card.displayKey && <p className={styles.cardMeta}>
-                    {m.taskId}: {amuxVisibleInspectionText(card.id)}</p>}
-                  {amuxDistinctSourceKey(card.id, card.sourceKey) && <p className={styles.cardMeta}>
-                    {m.sourceKey}: {amuxVisibleInspectionText(card.sourceKey ?? "")}</p>}
-                  <p className={styles.cardMeta}>{card.cardType ?? card.kind} · {card.priority.toUpperCase()}
-                    {card.taskRole ? " · " + card.taskRole : ""}</p>
-                  <p className={styles.cardWorker}><ShieldCheck size={14} aria-hidden="true" />
-                    {card.worker ?? m.noWorker}</p>
-                  {card.ownerQuestion === "open" && <button type="button" className={styles.reviewButton}
-                    data-testid={"amux-card-open-question-" + card.id}
-                    onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id, true, true); }}>
-                    {m.questionPending}<MoveRight size={14} aria-hidden="true" /></button>}
-                  {canReviewCards && card.attentionReason && <button type="button" className={styles.reviewButton}
-                    data-testid={"amux-card-open-review-" + card.id}
-                    onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
-                    {m.openOwnerReview}<MoveRight size={14} aria-hidden="true" /></button>}
-                  <p className={styles.cardState + (!card.briefPresent || !card.scoreFresh ? " " + styles.cardWarning : "")}>
-                    {card.dependencyCount > 0 ? m.dependencyCount(card.dependencyCount) :
-                      card.score !== null ? m.score + " " + card.score + (card.scoreFresh ? "" : " · " + m.stale) :
-                        m.scoreUnavailable}
-                  </p>
-                </li>)}</ol>
-              {laneCards.length > 0 && <>
-                <h4 className={styles.groupHeading + " " + styles.groupHeadingLane}>
-                  <GitPullRequest size={14} aria-hidden="true" />{m.ideaLane.group(laneCards.length)}</h4>
-                <ol className={styles.cards} data-testid={"amux-lane-ideas-" + lane}>
-                  {laneCards.map((card) => <IdeaLaneCard key={card.requestId} card={card} />)}</ol>
-              </>}
-              {matches.length === 0 && laneCards.length === 0 && !(attention && cards.length === 0 && dmTotal > 0) &&
-                <p className={styles.empty}>{cards.length === 0 ? m.empty : m.noMatches}</p>}
-              {(query || workerFilter || priorityFilter) && <p className={styles.hint}>{m.matchCount(matches.length, cards.length)}</p>}
-              {cards.length < board.counts[lane] && <button type="button"
-                disabled={boardBusy !== null || boardLoading} className={styles.button}
-                onClick={() => void loadBoardPage(lane)}>
-                {m.loadMore(cards.length, board.counts[lane])}
-              </button>}
-            </section>;
+          {AMUX_BOARD_COLUMNS.map((column) => {
+            const lanes = COLUMN_LANES[column];
+            const total = column === "done" ? laneDone.length : lanes.reduce(
+              (sum, lane) => sum + board.counts[lane] + (lane === "attention" ? dmTotal : 0), 0);
+            const title = screens.columns[column];
+            const heading = <h3 className={styles.columnHeading}>
+              <span className={styles.columnTitle}>
+                <span aria-hidden="true" className={"h-2 w-2 rounded-full " + COLUMN_DOT[column]} />{title}</span>
+              <span className={styles.count}>{total}</span>
+            </h3>;
+            if (column === "done") {
+              return <section key={column} aria-label={title} className={styles.column} data-amux-column={column}>
+                {heading}
+                <p className={styles.columnHint}>{screens.doneHint}</p>
+                <ol className={styles.cards + " " + styles.laneDone} data-testid="amux-lane-ideas-done">
+                  {laneDone.map((card) => <IdeaLaneCard key={card.requestId} card={card} />)}</ol>
+                {laneDone.length === 0 && <p className={styles.empty}>{m.empty}</p>}
+              </section>;
+            }
+            if (lanes.length === 1) {
+              const lane = lanes[0];
+              const attention = lane === "attention";
+              return <section key={column} aria-label={title} data-amux-lane={lane} data-amux-column={column}
+                tabIndex={attention ? -1 : undefined}
+                className={styles.column + (attention ? " " + styles.attentionColumn : "")} {...dropProps(lane)}>
+                {heading}
+                <p className={styles.columnHint}>{m.laneHint[lane]}</p>
+                {laneBody(board, lane)}
+              </section>;
+            }
+            return <div key={column} className={styles.column} data-amux-column={column}>
+              {heading}
+              {lanes.map((lane) => <section key={lane} aria-label={m.lane[lane]} data-amux-lane={lane}
+                className={styles.subLane} {...dropProps(lane)}>
+                <h4 className={styles.subHeading}><span>{m.lane[lane]}</span>
+                  <span className={styles.count}>{board.counts[lane]}</span></h4>
+                <p className={styles.columnHint}>{m.laneHint[lane]}</p>
+                {laneBody(board, lane)}
+              </section>)}
+            </div>;
           })}
         </div>}
       <details className={styles.archive}>
         <summary className="cursor-pointer text-sm font-semibold">{m.archive}
           {board ? ` (${board.counts.archive})` : ""}</summary>
-        {laneDone.length > 0 && <>
-          <h4 className={styles.groupHeading + " " + styles.groupHeadingLane}>
-            <GitPullRequest size={14} aria-hidden="true" />{m.ideaLane.recentMerged(laneDone.length)}</h4>
-          <ol className={styles.cards + " " + styles.laneDone} data-testid="amux-lane-ideas-done">
-            {laneDone.map((card) => <IdeaLaneCard key={card.requestId} card={card} />)}</ol>
-        </>}
         <ul className="mt-3 space-y-2 text-sm">{archive.map((card) => <li key={card.id}>
           <span className="font-mono text-xs" data-testid="amux-archive-card-label">
             {amuxVisibleInspectionText(amuxCardLabel(card))}
@@ -1062,7 +1146,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       {selected.escalations.length > 0 && <section><h4 className="font-semibold">{m.attention}</h4>
         <ul className="text-sm">{selected.escalations.map((item) => <li key={item.id}>
           {item.reason} · {item.status} · {date(item.createdAt)}</li>)}</ul>
-        <Link href={`/admin/amux-execution?tab=assignment&focusEscalation=${encodeURIComponent(selected.escalations[0].id)}`}
+        <Link href={`/admin/amux-execution?tab=review&focusEscalation=${encodeURIComponent(selected.escalations[0].id)}`}
           className="text-sm underline">
           {m.openReview}</Link>
       </section>}

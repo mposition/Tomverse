@@ -109,8 +109,10 @@ test.describe("platform operations", () => {
 
     await page.reload();
     await expect(
+      // The registry is a table now; one row per model.
       page
-        .locator("article")
+        .getByRole("table")
+        .getByRole("row")
         .filter({ hasText: FIXTURE_MODEL.enabled.name })
         .getByText("limited")
         .first()
@@ -200,7 +202,8 @@ test.describe("platform operations", () => {
       .fill(FIXTURE_MODEL.enabled.id);
 
     const row = page
-      .locator("article")
+      .getByRole("table")
+      .getByRole("row")
       .filter({ hasText: FIXTURE_MODEL.enabled.id });
     await expect(row).toHaveCount(1);
     await row.getByRole("button", { name: /^Edit / }).click();
@@ -250,7 +253,8 @@ test.describe("platform operations", () => {
       .fill(FIXTURE_APP_SETTINGS.guestDefaultModelId);
 
     const row = page
-      .locator("article")
+      .getByRole("table")
+      .getByRole("row")
       .filter({ hasText: FIXTURE_APP_SETTINGS.guestDefaultModelId });
     await expect(row).toHaveCount(1);
     await row.getByRole("button", { name: /^Edit / }).click();
@@ -288,7 +292,7 @@ test.describe("platform operations", () => {
   });
 
   test("a platform setting is saved and read back", async ({ page }) => {
-    await page.goto("/admin/platform");
+    await page.goto("/admin/models?tab=defaults");
 
     const guestModel = page.getByLabel("Leading model");
     await expect(guestModel).toHaveValue(
@@ -321,7 +325,7 @@ test.describe("platform operations", () => {
     // own provider's models (one OpenAI, one Anthropic, one Gemini), so it is
     // replaced with another Anthropic model. The seeded lead stays in the
     // lineup, so it travels unchanged with the save.
-    await page.goto("/admin/platform");
+    await page.goto("/admin/models?tab=defaults");
     const secondSlot = page.getByTestId("admin-guest-lineup-slot-1");
     await expect(secondSlot).toHaveValue(GUEST_BRAND_TRIO_MODEL_IDS[1]);
     const save = page.getByTestId("admin-guest-lineup-save");
@@ -394,7 +398,10 @@ test.describe("platform operations", () => {
       .locator("section")
       .filter({ hasText: "Notification delivery log" });
 
-    await expect(log.getByText(FIXTURE_NOTIFICATION.failed.title)).toBeVisible();
+    // The table and the phone cards both render the row; only one is shown.
+    await expect(
+      log.getByText(FIXTURE_NOTIFICATION.failed.title).locator("visible=true")
+    ).toBeVisible();
     await log.getByRole("button", { name: "Acknowledge" }).click();
 
     await expect(log.getByRole("button", { name: "Acknowledge" })).toHaveCount(0);
@@ -422,7 +429,7 @@ test.describe("platform operations", () => {
       .locator("section")
       .filter({ hasText: "Billing event monitor" });
     await expect(
-      monitor.getByText(FIXTURE_WEBHOOK.failed.stripeEventId)
+      monitor.getByText(FIXTURE_WEBHOOK.failed.stripeEventId).first()
     ).toBeVisible();
 
     await monitor.getByRole("button", { name: "Reprocess" }).click();

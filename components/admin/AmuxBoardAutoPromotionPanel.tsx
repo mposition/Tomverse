@@ -7,7 +7,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxBoardAutoPromotionMessages } from "@/lib/adminMessages/amuxBoardAutoPromotion";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
-const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-promotion?tab=auto-promotion");
+const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-recovery?tab=legacy");
 const DAY_MS = 24 * 60 * 60 * 1000;
 // The resume request header. lib/amux/autoPromotionCore.ts owns these values
 // and tests/amuxAutoPromotionCore.test.mjs keeps this copy equal to them; the

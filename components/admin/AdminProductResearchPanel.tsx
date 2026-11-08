@@ -1,6 +1,7 @@
 "use client";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { adminProductResearchMessages } from "@/lib/adminMessages/productResearch";
 import type { ProductResearchConsoleView } from "@/lib/productResearchConsoleRead";
 
@@ -51,10 +52,7 @@ export function AdminProductResearchPanel({ initial }: { initial: ProductResearc
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      <section className="rounded-lg border p-4 border-zinc-800">
-        <h2 className="text-sm font-semibold text-zinc-100">
-          {initial.heading}
-        </h2>
+      <AdminTile title={initial.heading}>
         <p
           className={`mt-2 text-sm ${
             status.tone === "warn"
@@ -68,9 +66,9 @@ export function AdminProductResearchPanel({ initial }: { initial: ProductResearc
           {fill(m.showingSlots, { count: initial.limit })}{" "}
           {fill(m.retention, { days: initial.retentionDays })}
         </p>
-      </section>
+      </AdminTile>
 
-      <section className="min-w-0 overflow-x-auto rounded-lg border border-zinc-800">
+      <AdminTile className="overflow-x-auto">
         <table className="w-full min-w-[48rem] text-left text-sm">
           <thead className="text-xs uppercase bg-zinc-900 text-zinc-400">
             <tr>
@@ -102,12 +100,9 @@ export function AdminProductResearchPanel({ initial }: { initial: ProductResearc
             ))}
           </tbody>
         </table>
-      </section>
+      </AdminTile>
 
-      <section className="min-w-0 rounded-lg border p-4 border-zinc-800">
-        <h2 className="text-sm font-semibold text-zinc-100">
-          {m.latestHeading}
-        </h2>
+      <AdminTile title={m.latestHeading}>
         {initial.latest === null ? (
           // Two different absences. "Nothing was ever recorded" and "the slot
           // that just passed has no observation" look the same on an empty
@@ -196,12 +191,9 @@ export function AdminProductResearchPanel({ initial }: { initial: ProductResearc
             </div>
           </>
         )}
-      </section>
+      </AdminTile>
 
-      <section className="rounded-lg border p-4 border-zinc-800">
-        <h2 className="text-sm font-semibold text-zinc-100">
-          {m.windowsHeading}
-        </h2>
+      <AdminTile title={m.windowsHeading}>
         <p className="mt-1 text-xs text-zinc-500">{m.windowsNote}</p>
 
         <dl className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -244,7 +236,7 @@ export function AdminProductResearchPanel({ initial }: { initial: ProductResearc
             </dd>
           </div>
         </dl>
-      </section>
+      </AdminTile>
     </div>
   );
 }

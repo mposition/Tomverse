@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime, type AdminTone } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Mail, RefreshCw } from "lucide-react";
 
@@ -14,6 +15,11 @@ import { useAdminMessages,
 } from "@/components/admin/AdminLocaleProvider";
 import { adminEmailPolicyMessages } from "@/lib/adminMessages/emailPolicy";
 import { adminFetch } from "@/lib/adminFetch";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 
 /**
  * The jurisdiction policy console.
@@ -66,12 +72,7 @@ type PolicyResponse = {
   selected: (VersionSummary & { profiles: ProfileView[] }) | null;
 };
 
-const dateLabel = (value: string | null) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string | null) => formatAestDateTime(value) ?? "—";
 
 const footerBlockList = (value: unknown) =>
   Array.isArray(value) ? value.map(String) : [];
@@ -83,11 +84,89 @@ const quietHoursLabel = (value: unknown) => {
   return `${String(window.start)}–${String(window.end)} ${String(window.tz ?? "")}`.trim();
 };
 
-const STATUS_STYLE: Record<string, string> = {
-  active: "border-emerald-700 bg-emerald-950/60 text-emerald-300",
-  draft: "border-amber-700 bg-amber-950/60 text-amber-300",
-  superseded: "border-zinc-700 bg-zinc-900 text-zinc-400",
-};
+/** One jurisdiction: its countries, the version in force and the rules it carries. */
+export function AdminEmailPolicyProfileCard({
+  profile,
+  version,
+  status,
+}: {
+  profile: ProfileView;
+  version: string;
+  status: string;
+}) {
+  const messages = useAdminMessages(adminEmailPolicyMessages);
+  const m = messages.policy;
+  const tone: AdminTone = status === "active" ? "ok" : status === "draft" ? "warn" : "idle";
+  const label = m.status[status as keyof typeof m.status] ?? status;
+  return (
+    <article
+      data-testid={`email-policy-profile-${profile.profileKey}`}
+      className="flex min-w-0 flex-col gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
+    >
+      <div className="flex items-center gap-3">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-sm font-bold text-white">
+          {profile.profileKey}
+        </span>
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-bold text-white">
+            {profile.countries.join(" ") || m.profile.fallback}
+          </h3>
+          <p className="truncate text-xs text-zinc-500">{profile.marketingBasis}</p>
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
+        <span>{m.profile.inForce}</span>
+        <span className="font-bold text-zinc-100">{version}</span>
+      </div>
+      <AdminStatusChip tone={tone} className="justify-center">
+        {label}
+      </AdminStatusChip>
+
+      <dl className="space-y-1 text-xs">
+        <div className="flex gap-2">
+          <dt className="w-32 shrink-0 text-zinc-500">{m.profile.unsubscribeCopy}</dt>
+          <dd className="text-zinc-200">
+            {m.profile.businessDays(profile.unsubscribeSlaBusinessDays)}
+            <span className="text-zinc-500">{m.profile.processedImmediately}</span>
+          </dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="w-32 shrink-0 text-zinc-500">{m.profile.consentNotice}</dt>
+          <dd className="text-zinc-200">
+            {profile.consentNoticeIntervalMonths
+              ? m.profile.everyMonths(profile.consentNoticeIntervalMonths)
+              : m.profile.noDuty}
+          </dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="w-32 shrink-0 text-zinc-500">{m.profile.quietHours}</dt>
+          <dd className="text-zinc-200">{quietHoursLabel(profile.quietHours)}</dd>
+        </div>
+      </dl>
+
+      <AdminTechInfo summary={m.profile.techSummary}>
+        <dl className="space-y-1">
+          <div className="flex gap-2">
+            <dt className="w-28 shrink-0 text-zinc-500">{m.profile.subjectPrefix}</dt>
+            <dd className="text-zinc-200">
+              {profile.subjectPrefix ? JSON.stringify(profile.subjectPrefix) : "—"}
+            </dd>
+          </div>
+          <div className="flex gap-2">
+            <dt className="w-28 shrink-0 text-zinc-500">{m.profile.footerBlocks}</dt>
+            <dd className="text-zinc-200">
+              {footerBlockList(profile.footerBlocks).join(", ") || "—"}
+            </dd>
+          </div>
+        </dl>
+        <p className="mt-3 font-sans text-xs font-bold text-zinc-400">{m.profile.sources}</p>
+        <p className="mt-1 whitespace-pre-line font-sans text-xs leading-5 text-zinc-400">
+          {profile.notes}
+        </p>
+      </AdminTechInfo>
+    </article>
+  );
+}
 
 export function AdminEmailPolicyPanel() {
   const messages = useAdminMessages(adminEmailPolicyMessages);
@@ -107,11 +186,13 @@ export function AdminEmailPolicyPanel() {
   const [data, setData] = useState<PolicyResponse | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState<"draft" | "activate" | null>(null);
   const [reason, setReason] = useState("");
 
   const load = useCallback(async (versionId?: string | null) => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       const query = versionId ? `?versionId=${encodeURIComponent(versionId)}` : "";
       const response = await adminFetch(`/api/admin/email-policy${query}`, {
@@ -134,6 +215,8 @@ export function AdminEmailPolicyPanel() {
       setData(payload);
       setSelectedId(payload.selected?.id ?? null);
     } catch (error) {
+      // A failed read is an error block as well as a toast, never an empty list.
+      setLoadFailed(true);
       dispatchAppToast(
         error instanceof Error ? error.message : loadFailedMessage.current,
         "error"
@@ -215,233 +298,149 @@ export function AdminEmailPolicyPanel() {
   };
 
   const selected = data?.selected ?? null;
+  const statusTone = (status: string): AdminTone =>
+    status === "active" ? "ok" : status === "draft" ? "warn" : "idle";
+  const statusLabel = (status: string) =>
+    m.status[status as keyof typeof m.status] ?? status;
 
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
+    <div className="flex min-w-0 flex-col gap-5">
       {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            {messages.eyebrow}
-          </p>
-          <h2 className="mt-2 text-2xl font-black text-white">
-            {m.title}
-          </h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            {m.intro}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => void load(selectedId)}
-            disabled={loading}
-            data-testid="email-policy-refresh"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-sm font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            {m.refresh}
-          </button>
-          <button
-            type="button"
-            onClick={createDraft}
-            disabled={busy !== null}
-            data-testid="email-policy-create-draft"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-sm font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Mail className="h-4 w-4" />
-            {m.seedDraft}
-          </button>
-        </div>
-      </div>
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-[18rem_1fr]">
-        <ol className="space-y-2" data-testid="email-policy-versions">
-          {(data?.versions ?? []).map((version) => (
-            <li key={version.id}>
-              <button
-                type="button"
-                onClick={() => void load(version.id)}
-                aria-current={version.id === selectedId ? "true" : undefined}
-                className={`w-full cursor-pointer rounded-2xl border px-3 py-3 text-left transition ${
-                  version.id === selectedId
-                    ? "border-blue-600 bg-blue-950/40"
-                    : "border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900"
-                }`}
-              >
-                <span className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs text-zinc-300">
-                    {version.version}
+      <AdminTile
+        title={m.title}
+        description={m.intro}
+        action={
+          <>
+            <AdminWriteButton
+              variant="secondary"
+              onClick={() => void load(selectedId)}
+              disabled={loading}
+              data-testid="email-policy-refresh"
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              ) : (
+                <RefreshCw className="h-4 w-4" aria-hidden />
+              )}
+              {m.refresh}
+            </AdminWriteButton>
+            <AdminWriteButton
+              variant="secondary"
+              onClick={createDraft}
+              disabled={busy !== null}
+              data-testid="email-policy-create-draft"
+            >
+              <Mail className="h-4 w-4" aria-hidden />
+              {m.seedDraft}
+            </AdminWriteButton>
+          </>
+        }
+      >
+        {loadFailed && !data ? (
+          <AdminStateBlock
+            kind="error"
+            title={m.toast.loadFailed}
+            detail={m.loadFailedDetail}
+            onRetry={() => void load(selectedId)}
+          />
+        ) : !data ? (
+          <AdminStateBlock kind="loading" />
+        ) : (
+          <ol className="flex flex-wrap gap-2" data-testid="email-policy-versions">
+            {data.versions.map((version) => (
+              <li key={version.id}>
+                <button
+                  type="button"
+                  onClick={() => void load(version.id)}
+                  aria-current={version.id === selectedId ? "true" : undefined}
+                  className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-2xl border px-3 py-2 text-left transition ${
+                    version.id === selectedId
+                      ? "border-blue-500 bg-blue-500/10"
+                      : "border-zinc-800 bg-zinc-950/40 hover:bg-zinc-800"
+                  }`}
+                >
+                  <span className="flex flex-col">
+                    <span className="text-sm font-bold text-zinc-100">{version.version}</span>
+                    <span className="text-xs text-zinc-500">
+                      {m.versionCounts(version.profileCount, version.countryCount)}
+                    </span>
                   </span>
-                  <span
-                    className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${
-                      STATUS_STYLE[version.status] ?? STATUS_STYLE.superseded
-                    }`}
-                  >
-                    {version.status}
-                  </span>
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-zinc-500">
-                  {m.versionCounts(version.profileCount, version.countryCount)}
-                </span>
-              </button>
-            </li>
-          ))}
-          {data && data.versions.length === 0 ? (
-            <li className="rounded-2xl border border-zinc-800 bg-zinc-900/60 px-3 py-4 text-xs leading-5 text-zinc-400">
-              {m.noVersions}
-            </li>
-          ) : null}
-        </ol>
+                  <AdminStatusChip tone={statusTone(version.status)}>
+                    {statusLabel(version.status)}
+                  </AdminStatusChip>
+                </button>
+              </li>
+            ))}
+            {data.versions.length === 0 ? (
+              <li className="w-full">
+                <AdminStateBlock kind="empty" title={m.noVersions} />
+              </li>
+            ) : null}
+          </ol>
+        )}
+      </AdminTile>
 
-        <div>
-          {selected ? (
-            <>
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                <p className="text-sm leading-6 text-zinc-300">
-                  {selected.changeSummary}
+      {selected ? (
+        <>
+          <AdminTile title={selected.version} description={selected.changeSummary}>
+            <dl className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+              {[
+                [m.fields.created, dateLabel(selected.createdAt)],
+                [m.fields.activated, dateLabel(selected.activatedAt)],
+                [m.fields.superseded, dateLabel(selected.supersededAt)],
+                [m.fields.approvedBy, selected.approvedByEmail ?? "—"],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-xl bg-zinc-950/60 px-3 py-2">
+                  <dt className="text-zinc-500">{label}</dt>
+                  <dd className="mt-0.5 break-all text-zinc-200">{value}</dd>
+                </div>
+              ))}
+            </dl>
+
+            {selected.status === "draft" ? (
+              <div className="border-t border-zinc-800 pt-4">
+                <label htmlFor="email-policy-reason" className="text-xs font-bold text-zinc-300">
+                  {m.reasonLabel}
+                </label>
+                <p id="email-policy-reason-help" className="mt-1 text-xs leading-5 text-zinc-500">
+                  {m.reasonHelp}
                 </p>
-                <dl className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-                  {[
-                    [m.fields.created, dateLabel(selected.createdAt)],
-                    [m.fields.activated, dateLabel(selected.activatedAt)],
-                    [m.fields.superseded, dateLabel(selected.supersededAt)],
-                    [m.fields.approvedBy, selected.approvedByEmail ?? "—"],
-                  ].map(([label, value]) => (
-                    <div
-                      key={label}
-                      className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2"
-                    >
-                      <dt className="text-zinc-500">{label}</dt>
-                      <dd className="mt-0.5 break-all text-zinc-200">{value}</dd>
-                    </div>
-                  ))}
-                </dl>
-
-                {selected.status === "draft" ? (
-                  <div className="mt-4 border-t border-zinc-800 pt-4">
-                    <label
-                      htmlFor="email-policy-reason"
-                      className="text-xs font-bold text-zinc-300"
-                    >
-                      {m.reasonLabel}
-                    </label>
-                    <p
-                      id="email-policy-reason-help"
-                      className="mt-1 text-xs leading-5 text-zinc-500"
-                    >
-                      {m.reasonHelp}
-                    </p>
-                    <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                      <input
-                        id="email-policy-reason"
-                        value={reason}
-                        aria-describedby="email-policy-reason-help"
-                        onChange={(event) => setReason(event.target.value)}
-                        maxLength={500}
-                        className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
-                      />
-                      <button
-                        type="button"
-                        onClick={activate}
-                        disabled={busy !== null || reason.trim().length === 0}
-                        data-testid="email-policy-activate"
-                        className="shrink-0 cursor-pointer rounded-xl border border-emerald-700 bg-emerald-950/60 px-4 py-2 text-sm font-bold text-emerald-200 transition hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {m.activate}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="mt-4 grid gap-3 xl:grid-cols-2">
-                {selected.profiles.map((profile) => (
-                  <article
-                    key={profile.profileKey}
-                    data-testid={`email-policy-profile-${profile.profileKey}`}
-                    className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4"
+                <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    id="email-policy-reason"
+                    value={reason}
+                    aria-describedby="email-policy-reason-help"
+                    onChange={(event) => setReason(event.target.value)}
+                    maxLength={500}
+                    className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
+                  />
+                  <AdminWriteButton
+                    onClick={activate}
+                    disabled={busy !== null || reason.trim().length === 0}
+                    data-testid="email-policy-activate"
                   >
-                    <div className="flex items-baseline justify-between gap-3">
-                      <h3 className="font-mono text-sm font-bold text-white">
-                        {profile.profileKey}
-                      </h3>
-                      <span className="text-xs text-zinc-500">
-                        {profile.marketingBasis}
-                      </span>
-                    </div>
-
-                    <dl className="mt-3 space-y-1 text-xs">
-                      <div className="flex gap-2">
-                        <dt className="w-40 shrink-0 text-zinc-500">
-                          {m.profile.subjectPrefix}
-                        </dt>
-                        <dd className="font-mono text-zinc-200">
-                          {profile.subjectPrefix
-                            ? JSON.stringify(profile.subjectPrefix)
-                            : "—"}
-                        </dd>
-                      </div>
-                      <div className="flex gap-2">
-                        <dt className="w-40 shrink-0 text-zinc-500">{m.profile.footerBlocks}</dt>
-                        <dd className="text-zinc-200">
-                          {footerBlockList(profile.footerBlocks).join(", ") || "—"}
-                        </dd>
-                      </div>
-                      <div className="flex gap-2">
-                        <dt className="w-40 shrink-0 text-zinc-500">
-                          {m.profile.unsubscribeCopy}
-                        </dt>
-                        <dd className="text-zinc-200">
-                          {m.profile.businessDays(profile.unsubscribeSlaBusinessDays)}
-                          <span className="text-zinc-500">{m.profile.processedImmediately}</span>
-                        </dd>
-                      </div>
-                      <div className="flex gap-2">
-                        <dt className="w-40 shrink-0 text-zinc-500">{m.profile.consentNotice}</dt>
-                        <dd className="text-zinc-200">
-                          {profile.consentNoticeIntervalMonths
-                            ? m.profile.everyMonths(profile.consentNoticeIntervalMonths)
-                            : m.profile.noDuty}
-                        </dd>
-                      </div>
-                      <div className="flex gap-2">
-                        <dt className="w-40 shrink-0 text-zinc-500">{m.profile.quietHours}</dt>
-                        <dd className="text-zinc-200">
-                          {quietHoursLabel(profile.quietHours)}
-                        </dd>
-                      </div>
-                      <div className="flex gap-2">
-                        <dt className="w-40 shrink-0 text-zinc-500">{m.profile.countries}</dt>
-                        <dd className="break-all font-mono text-zinc-200">
-                          {profile.countries.join(" ") || m.profile.fallback}
-                        </dd>
-                      </div>
-                    </dl>
-
-                    <details className="mt-3">
-                      <summary className="cursor-pointer text-xs font-bold text-blue-300">
-                        {m.profile.sources}
-                      </summary>
-                      <p className="mt-2 whitespace-pre-line text-xs leading-5 text-zinc-400">
-                        {profile.notes}
-                      </p>
-                    </details>
-                  </article>
-                ))}
+                    {m.activate}
+                  </AdminWriteButton>
+                </div>
               </div>
-            </>
-          ) : (
-            <p className="rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 py-6 text-sm leading-6 text-zinc-400">
-              {m.nothingSelected}
-            </p>
-          )}
-        </div>
-      </div>
-    </section>
+            ) : null}
+          </AdminTile>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {selected.profiles.map((profile) => (
+              <AdminEmailPolicyProfileCard
+                key={profile.profileKey}
+                profile={profile}
+                version={selected.version}
+                status={selected.status}
+              />
+            ))}
+          </div>
+        </>
+      ) : data ? (
+        <AdminStateBlock kind="empty" title={m.nothingSelected} />
+      ) : null}
+    </div>
   );
 }

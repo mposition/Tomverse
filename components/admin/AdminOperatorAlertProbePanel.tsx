@@ -4,6 +4,10 @@ import { useState } from "react";
 import { Loader2, Send } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminOperatorAlertProbeMessages } from "@/lib/adminMessages/operatorAlertProbe";
 import { dispatchAppToast } from "@/lib/appToast";
 import type {
@@ -83,33 +87,25 @@ export function AdminOperatorAlertProbePanel() {
   };
 
   return (
-    <section
+    <AdminTile
       data-testid="operator-alert-probe"
-      className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5"
+      title={m.title}
+      description={m.description}
     >
-      <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        {m.eyebrow}
-      </p>
-      <h2 className="mt-2 text-2xl font-black text-white">
-        {m.title}
-      </h2>
-      <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-        {m.description}
-      </p>
       {/* Said on screen, because a control that implies more than it checked is
           worse than no control at all. */}
-      <p className="mt-3 max-w-3xl rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-xs leading-5 text-zinc-400">
+      <p className="rounded-2xl bg-zinc-950/60 px-4 py-3 text-xs leading-5 text-zinc-400">
         {m.caveat}
       </p>
 
-      <div className="mt-5 grid gap-3">
+      <div className="grid gap-3">
         {PATHS.map((entry) => {
           const result = results[entry.path];
           return (
             <div
               key={entry.path}
               data-testid={`operator-alert-probe-${entry.path}`}
-              className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3"
+              className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-3"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -117,15 +113,12 @@ export function AdminOperatorAlertProbePanel() {
                   <p className="mt-1 text-xs leading-5 text-zinc-400">
                     {m.paths[entry.path].description}
                   </p>
-                  <p className="mt-1 font-mono text-[11px] text-zinc-500">
-                    {m.to}{entry.recipient}
-                  </p>
+                  <AdminTechInfo summary={m.to}>{entry.recipient}</AdminTechInfo>
                 </div>
-                <button
-                  type="button"
+                <AdminWriteButton
+                  variant="secondary"
                   onClick={() => run(entry.path)}
                   disabled={running !== null}
-                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {running === entry.path ? (
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -133,7 +126,7 @@ export function AdminOperatorAlertProbePanel() {
                     <Send className="h-4 w-4" aria-hidden />
                   )}
                   {running === entry.path ? m.sending : m.sendTest}
-                </button>
+                </AdminWriteButton>
               </div>
 
               {result ? (
@@ -141,14 +134,12 @@ export function AdminOperatorAlertProbePanel() {
                   data-testid={`operator-alert-probe-result-${entry.path}`}
                   className="mt-3 grid gap-1 border-t border-zinc-800 pt-3 text-xs"
                 >
-                  <div className="flex gap-2">
+                  <div className="flex items-center gap-2">
                     <dt className="w-24 shrink-0 text-zinc-500">{m.result}</dt>
-                    <dd
-                      className={
-                        result.delivered ? "text-emerald-300" : "text-red-300"
-                      }
-                    >
-                      {result.delivered ? m.sent : m.notSent}
+                    <dd>
+                      <AdminStatusChip tone={result.delivered ? "ok" : "bad"}>
+                        {result.delivered ? m.sent : m.notSent}
+                      </AdminStatusChip>
                     </dd>
                   </div>
                   {result.delivered ? (
@@ -189,6 +180,6 @@ export function AdminOperatorAlertProbePanel() {
           );
         })}
       </div>
-    </section>
+    </AdminTile>
   );
 }

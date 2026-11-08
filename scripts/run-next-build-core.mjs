@@ -35,13 +35,27 @@
 /** The directory a failed restore makes unusable, relative to the repo root. */
 export const TURBOPACK_CACHE_DIR = ".next/cache/turbopack";
 
-/** Build child workers on CI and Railway share a bound; explicit limits win. */
+/**
+ * Build child workers on CI and Railway share a bound; explicit limits win.
+ *
+ * The ceiling is 8192 MiB everywhere (owner decision 2026-11-07, "CI·Railway
+ * 8GB"): on 2026-11-07 the TypeScript stage reached 6038 MiB and died at the
+ * former 6144 ceiling in the Admin E2E and UI-risk builds, and develop alone
+ * measured about 6.2 GiB in a local tsc under 6144, so a Railway build of
+ * develop sits on the same edge. GitHub Actions got 8192 first; Railway
+ * follows. If a Railway build then stops at the builder
+ * container's memory instead of V8's heap, lower it there with an explicit
+ * NODE_OPTIONS, which still wins.
+ */
+export const BUILD_HEAP_MIB = 8192;
+
 export const nodeOptionsForBuild = (env) => {
   const configured = env.NODE_OPTIONS ?? "";
   const railwayBuild = Boolean(env.RAILWAY_ENVIRONMENT_ID?.trim());
-  if ((env.GITHUB_ACTIONS !== "true" && !railwayBuild) ||
+  const githubBuild = env.GITHUB_ACTIONS === "true";
+  if ((!githubBuild && !railwayBuild) ||
       /--max[-_]old[-_]space[-_]size(?:=|\s)/.test(configured)) return configured;
-  return `${configured ? `${configured} ` : ""}--max-old-space-size=6144`;
+  return `${configured ? `${configured} ` : ""}--max-old-space-size=${BUILD_HEAP_MIB}`;
 };
 
 const INTERNAL_ERROR_MARKERS = [

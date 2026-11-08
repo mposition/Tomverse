@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -33,7 +34,13 @@ import {
 } from "@/lib/providerRecoveryCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminProviderHealthMessages } from "@/lib/adminMessages/providerHealth";
+import { adminProviderBoardMessages } from "@/lib/adminMessages/providerBoard";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { ProviderStatusOverview } from "@/components/admin/providers/ProviderStatusOverview";
+import { AdminConfirmDialog } from "@/components/admin/ui/AdminConfirmDialog";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminFetch } from "@/lib/adminFetch";
 import {
   shouldIssueAdminPoll,
@@ -80,10 +87,7 @@ const balanceMoney = (amount: number, currency: string) => {
     return `${currency} ${amount.toFixed(4)}`;
   }
 };
-const dateLabel = (value: string | null, fallback: string) => {
-  if (!value) return fallback;
-  return new Date(value).toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string | null, fallback: string) => formatAestDateTime(value) ?? fallback;
 const statusClass: Record<ProviderHealthStatus, string> = {
   available: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
   limited: "border-amber-500/30 bg-amber-500/10 text-amber-300",
@@ -253,34 +257,36 @@ function ProviderVerificationSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
+          <AdminWriteButton
+            variant="secondary"
+            size="sm"
             data-testid={`provider-verify-${provider.provider}`}
             onClick={() => {
               if (busy || !canVerify) return;
               setConfirmingVerification(true);
             }}
+            writable={canRunVerification}
+            requiredRole="ops:write"
             disabled={busy || !canVerify || confirmingVerification}
             aria-describedby={`provider-verification-note-${provider.provider}`}
-            className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
             {verifying ? v.running : v.run}
-          </button>
-          <button
-            type="button"
+          </AdminWriteButton>
+          <AdminWriteButton
+            variant="secondary"
+            size="sm"
             data-testid={`provider-recover-${provider.provider}`}
             onClick={() => {
               if (busy || !canRecover || !lastCheck) return;
               void onRecover(provider.provider, lastCheck.id);
             }}
+            writable={canRunVerification}
+            requiredRole="ops:write"
             disabled={busy || !canRecover || !lastCheck}
             title={recoveryBlockedReason || undefined}
-            className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-bold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-900 disabled:text-zinc-500"
           >
-            <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
             {recovering ? v.recovering : v.recover}
-          </button>
+          </AdminWriteButton>
         </div>
       </div>
 
@@ -295,42 +301,20 @@ function ProviderVerificationSection({
         </p>
       ) : null}
 
-      {confirmingVerification ? (
-        <div
-          role="alertdialog"
-          aria-label={v.confirmAria(provider.displayName)}
-          className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3"
-        >
-          <p className="text-xs font-semibold text-amber-100">
-            {v.confirmTitle(provider.displayName)}
-          </p>
-          <p className="mt-1 text-xs leading-5 text-amber-100/80">
-            {v.confirmDetail(provider.verificationModelId ?? "")}
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              data-testid={`provider-verify-confirm-${provider.provider}`}
-              onClick={() => {
-                if (busy) return;
-                setConfirmingVerification(false);
-                void onVerify(provider.provider);
-              }}
-              disabled={busy}
-              className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-amber-500/40 bg-amber-500/20 px-3 text-xs font-bold text-amber-100 transition hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {v.confirmRun}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmingVerification(false)}
-              className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-300 transition hover:bg-zinc-800"
-            >
-              {v.cancel}
-            </button>
-          </div>
-        </div>
-      ) : null}
+      {/* The same cost warning as before, asked the console's one way. */}
+      <AdminConfirmDialog
+        open={confirmingVerification}
+        title={v.confirmTitle(provider.displayName)}
+        summary={v.confirmDetail(provider.verificationModelId ?? "")}
+        confirmLabel={v.confirmRun}
+        busy={busy}
+        onClose={() => setConfirmingVerification(false)}
+        onConfirm={() => {
+          if (busy) return;
+          setConfirmingVerification(false);
+          void onVerify(provider.provider);
+        }}
+      />
 
       <div
         id={`provider-verification-note-${provider.provider}`}
@@ -1264,6 +1248,7 @@ export function AdminProviderHealthPanel({
   canManageCredits,
   canRunVerification = false,
   providerFilter,
+  latencyByProvider,
 }: {
   initialDashboard: ProviderHealthDashboard;
   canManageCredits: boolean;
@@ -1271,8 +1256,12 @@ export function AdminProviderHealthPanel({
    *  API enforces the same permission independently. */
   canRunVerification?: boolean;
   providerFilter?: AiProvider;
+  /** When given, the banner and one card per provider are drawn above the
+   *  rows, from the same polled dashboard. The detail page leaves it out. */
+  latencyByProvider?: Readonly<Record<string, number | null>>;
 }) {
   const m = useAdminMessages(adminProviderHealthMessages);
+  const board = useAdminMessages(adminProviderBoardMessages);
   const p = m.panel;
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [refreshing, setRefreshing] = useState(false);
@@ -1579,54 +1568,55 @@ export function AdminProviderHealthPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm font-bold text-zinc-200">{p.liveTitle}</p>
-          <p className="mt-1 text-xs text-zinc-500">
-            {p.refreshCadence(dateLabel(dashboard.generatedAt, m.noSuccessYet))}
-          </p>
-          <p
-            className={`mt-1 text-xs ${
-              dashboard.probeCostCapMicroUsd > 0 &&
-              dashboard.probeCostTodayMicroUsd >= dashboard.probeCostCapMicroUsd
-                ? "font-bold text-amber-300"
-                : "text-zinc-500"
-            }`}
+      {latencyByProvider && !providerFilter ? (
+        <ProviderStatusOverview providers={dashboard.providers} latencyByProvider={latencyByProvider} />
+      ) : null}
+      <AdminTile
+        title={latencyByProvider && !providerFilter ? board.keys.title : p.liveTitle}
+        description={latencyByProvider && !providerFilter ? board.keys.description : undefined}
+        action={
+          <button
+            type="button"
+            onClick={() => void refreshDashboard()}
+            disabled={refreshing}
+            className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60"
           >
-            {p.probeSpend(
-              money(dashboard.probeCostTodayMicroUsd),
-              money(dashboard.probeCostCapMicroUsd)
-            )}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void refreshDashboard()}
-          disabled={refreshing}
-          className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60"
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} aria-hidden />
+            {refreshing ? p.refreshing : p.refreshNow}
+          </button>
+        }
+      >
+        <p className="text-xs text-zinc-500">
+          {p.refreshCadence(dateLabel(dashboard.generatedAt, m.noSuccessYet))}
+        </p>
+        <p
+          className={`text-xs ${
+            dashboard.probeCostCapMicroUsd > 0 &&
+            dashboard.probeCostTodayMicroUsd >= dashboard.probeCostCapMicroUsd
+              ? "font-bold text-amber-300"
+              : "text-zinc-500"
+          }`}
         >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-          {refreshing ? p.refreshing : p.refreshNow}
-        </button>
-      </div>
+          {p.probeSpend(
+            money(dashboard.probeCostTodayMicroUsd),
+            money(dashboard.probeCostCapMicroUsd)
+          )}
+        </p>
+      </AdminTile>
       {error && (
-        <div
-          role="alert"
-          className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200"
-        >
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {error}
-          {p.lastSnapshot}
-        </div>
+        <AdminStateBlock
+          kind="error"
+          title={`${error}${p.lastSnapshot}`}
+          onRetry={() => void refreshDashboard()}
+        />
       )}
       {notice && (
-        <div
-          role="status"
-          data-testid="provider-verification-notice"
-          className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-200"
-        >
-          <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
-          {notice}
+        <div data-testid="provider-verification-notice">
+          <AdminStateBlock
+            kind="empty"
+            illustration={<ShieldCheck className="h-5 w-5 shrink-0 text-emerald-300" aria-hidden="true" />}
+            title={notice}
+          />
         </div>
       )}
       {dashboard.providers.map((provider) => (

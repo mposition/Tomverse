@@ -12,6 +12,14 @@ export const adminAuditIntegrityMessages = defineAdminMessages({
     description:
       "New audit entries form a serialized HMAC chain. Verify it before exporting or investigating an incident.",
     verifyChain: "Verify chain",
+    notChecked: "Not verified in this session",
+    notCheckedDetail: "Verifying reads every entry from the first one, so it only runs when you press the button.",
+    techSummary: "the checker's own message",
+    outcomeTitle: {
+      valid: "The record chain is intact",
+      truncated: "The check stopped before the newest records",
+      invalid: "The record chain has a problem",
+    },
     verifiedOf: (verified: string, checked: string) =>
       `Verified ${verified} of ${checked} entries`,
     unverifiedCount: (count: string) => ` · ${count} unverified`,
@@ -58,8 +66,16 @@ export const adminAuditIntegrityMessages = defineAdminMessages({
   ko: {
     title: "관리자 감사 로그 무결성",
     description:
-      "새 감사 항목은 직렬화된 HMAC chain을 이룹니다. 내보내거나 인시던트를 조사하기 전에 검증하세요.",
+      "새 감사 항목은 서로 이어진 HMAC chain을 이뤄요. 내보내거나 사고를 조사하기 전에 검증해 주세요.",
     verifyChain: "Chain 검증",
+    notChecked: "이번에는 아직 검증하지 않았어요",
+    notCheckedDetail: "검증은 첫 항목부터 모두 읽기 때문에 버튼을 누를 때만 실행해요.",
+    techSummary: "검사기가 남긴 원문 메시지",
+    outcomeTitle: {
+      valid: "기록 사슬이 온전해요",
+      truncated: "최신 기록까지 검사하지 못했어요",
+      invalid: "기록 사슬에 문제가 있어요",
+    },
     verifiedOf: (verified: string, checked: string) =>
       `항목 ${checked}건 중 ${verified}건 검증됨`,
     unverifiedCount: (count: string) => ` · 미검증 ${count}건`,

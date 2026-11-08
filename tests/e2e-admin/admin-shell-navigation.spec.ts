@@ -21,51 +21,40 @@ import { adminFixtureDatabase } from "./support/database";
 
 /** Every entry of `ADMIN_NAVIGATION`, in render order. */
 const NAVIGATION = [
-  { group: "Command Center", label: "Overview", href: "/admin/overview" },
-  { group: "Command Center", label: "Work queue", href: "/admin/work-queue" },
-  { group: "Command Center", label: "Analytics", href: "/admin/analytics" },
-  { group: "Customers", label: "Users", href: "/admin/users" },
-  { group: "Customers", label: "Support", href: "/admin/support" },
-  { group: "Revenue", label: "Billing", href: "/admin/billing" },
-  { group: "Revenue", label: "Refunds", href: "/admin/refunds" },
-  { group: "Revenue", label: "Credit ledger", href: "/admin/credit-ledger" },
+  { group: "Home", label: "Today", href: "/admin/overview" },
+  { group: "Home", label: "Decisions", href: "/admin/work-queue" },
+  { group: "Home", label: "Metrics", href: "/admin/analytics" },
+  { group: "Customers & Revenue", label: "Users", href: "/admin/users" },
+  { group: "Customers & Revenue", label: "Support", href: "/admin/support" },
+  { group: "Customers & Revenue", label: "Plans & pricing", href: "/admin/billing" },
+  { group: "Customers & Revenue", label: "Refunds", href: "/admin/refunds" },
+  { group: "Customers & Revenue", label: "Credit ledger", href: "/admin/credit-ledger" },
   { group: "AI Platform", label: "Providers", href: "/admin/providers" },
   { group: "AI Platform", label: "Models", href: "/admin/models" },
   { group: "AI Platform", label: "Routing", href: "/admin/routing" },
-  { group: "Operations", label: "Infrastructure", href: "/admin/infrastructure" },
-  { group: "Operations", label: "Automation", href: "/admin/automation" },
-  { group: "Operations", label: "Alerts", href: "/admin/alerts" },
-  { group: "Operations", label: "Email delivery", href: "/admin/email-delivery" },
-  {
-    group: "Operations",
-    label: "Email campaigns",
-    href: "/admin/email-campaigns",
-  },
-  { group: "Operations", label: "Marketing", href: "/admin/marketing" },
-  {
-    group: "Operations",
-    label: "Product research",
-    href: "/admin/product-research",
-  },
-  {
-    group: "Operations",
-    label: "Engineering agent",
-    href: "/admin/engineering-agent",
-  },
-  { group: "Operations", label: "SRE agent", href: "/admin/sre-ops" },
-  { group: "Operations", label: "QA and release", href: "/admin/qa-release" },
-  { group: "Operations", label: "Agent digests", href: "/admin/agent-digests" },
-  { group: "Operations", label: "Agent office", href: "/admin/office" },
-  { group: "Operations", label: "Platform settings", href: "/admin/platform" },
+  { group: "AI Agents", label: "Agents home", href: "/admin/office" },
+  { group: "AI Agents", label: "Marketing", href: "/admin/marketing" },
+  { group: "AI Agents", label: "Product research", href: "/admin/product-research" },
+  { group: "AI Agents", label: "Engineering", href: "/admin/engineering-agent" },
+  { group: "AI Agents", label: "SRE", href: "/admin/sre-ops" },
+  { group: "AI Agents", label: "Billing & finance", href: "/admin/finance-agent" },
   // Listed to the owner, who is who this describe block signs in as. Every
-  // other role sees Execution and Operations settings (the role checks below).
-  { group: "AMUX", label: "Backlog", href: "/admin/amux-backlog" },
-  { group: "AMUX", label: "Promotion", href: "/admin/amux-promotion" },
-  { group: "AMUX", label: "Execution", href: "/admin/amux-execution" },
-  { group: "AMUX", label: "Operations settings", href: "/admin/amux-settings" },
-  { group: "Governance", label: "Email policy", href: "/admin/email-policy" },
+  // other role sees the execution board, Release, AMUX settings and Safety &
+  // recovery (the role checks below).
+  { group: "Development", label: "Ideas", href: "/admin/amux-backlog" },
+  { group: "Development", label: "Execution board", href: "/admin/amux-execution" },
+  { group: "Development", label: "Release", href: "/admin/release" },
+  { group: "Development", label: "AMUX settings", href: "/admin/amux-settings" },
+  { group: "Development", label: "Safety & recovery", href: "/admin/amux-recovery" },
+  { group: "System", label: "Infrastructure", href: "/admin/infrastructure" },
+  { group: "System", label: "Automation", href: "/admin/automation" },
+  { group: "System", label: "Feature flags", href: "/admin/platform" },
+  { group: "Messaging", label: "Email campaigns", href: "/admin/email-campaigns" },
+  { group: "Messaging", label: "Customer mail", href: "/admin/email-delivery" },
+  { group: "Messaging", label: "Operator alerts", href: "/admin/alerts" },
+  { group: "Messaging", label: "Email policy", href: "/admin/email-policy" },
   { group: "Governance", label: "Audit log", href: "/admin/audit" },
-  { group: "Governance", label: "Retention", href: "/admin/retention" },
+  { group: "Governance", label: "Retention & deletion", href: "/admin/retention" },
   { group: "Governance", label: "Admin access", href: "/admin/admin-access" },
 ] as const;
 
@@ -81,7 +70,7 @@ const LEGACY_ROUTES = [
   {
     from: "/admin/promotions",
     to: "/admin/billing?tab=promotions",
-    heading: "Billing",
+    heading: "Plans & pricing",
   },
   {
     from: "/admin/incidents",
@@ -107,41 +96,80 @@ const LEGACY_ROUTES = [
   {
     from: "/admin/approvals",
     to: "/admin/work-queue",
-    heading: "Work queue",
+    heading: "Decisions",
   },
-  // The eight owner-only AMUX screens, now sections of the AMUX group.
-  { from: "/admin/amux-intake", to: "/admin/amux-backlog?tab=ideas", heading: "Backlog" },
+  // The eight owner-only AMUX screens, now sections of the Development group.
+  { from: "/admin/amux-intake", to: "/admin/amux-backlog?tab=ideas", heading: "Ideas" },
   {
     from: "/admin/amux-board-import",
-    to: "/admin/amux-backlog?tab=import",
-    heading: "Backlog",
+    to: "/admin/amux-recovery?tab=legacy",
+    heading: "Safety & recovery",
   },
   {
     from: "/admin/amux-reconciliation",
-    to: "/admin/amux-backlog?tab=reconciliation",
-    heading: "Backlog",
+    to: "/admin/amux-recovery?tab=legacy",
+    heading: "Safety & recovery",
   },
   {
     from: "/admin/amux-backlog-metadata",
-    to: "/admin/amux-backlog?tab=metadata",
-    heading: "Backlog",
+    to: "/admin/amux-recovery?tab=legacy",
+    heading: "Safety & recovery",
   },
   {
     from: "/admin/amux-board-recommendation",
-    to: "/admin/amux-promotion?tab=recommendation",
-    heading: "Promotion",
+    to: "/admin/amux-recovery?tab=legacy",
+    heading: "Safety & recovery",
   },
   {
     from: "/admin/amux-board-promotion",
-    to: "/admin/amux-promotion?tab=promotion",
-    heading: "Promotion",
+    to: "/admin/amux-recovery?tab=legacy",
+    heading: "Safety & recovery",
   },
   {
     from: "/admin/amux-board-auto-promotion",
-    to: "/admin/amux-promotion?tab=auto-promotion",
-    heading: "Promotion",
+    to: "/admin/amux-recovery?tab=legacy",
+    heading: "Safety & recovery",
   },
-  { from: "/admin/amux-cards", to: "/admin/amux-execution?tab=cards", heading: "Execution" },
+  { from: "/admin/amux-cards", to: "/admin/amux-execution?tab=cards", heading: "Execution board" },
+  // Pages and sections the 2026-11-07 restructuring moved.
+  { from: "/admin/amux-promotion", to: "/admin/amux-recovery?tab=legacy", heading: "Safety & recovery" },
+  { from: "/admin/qa-release", to: "/admin/release?tab=qa", heading: "Release" },
+  { from: "/admin/qa-release?tab=train", to: "/admin/release?tab=qa&view=train", heading: "Release" },
+  { from: "/admin/qa-release?tab=lane", to: "/admin/release?tab=qa&view=lane", heading: "Release" },
+  { from: "/admin/qa-release?tab=ci-admission", to: "/admin/release?tab=ci", heading: "Release" },
+  { from: "/admin/agent-digests?tab=qa-release", to: "/admin/release?tab=qa", heading: "Release" },
+  { from: "/admin/agent-digests?tab=ci-admission", to: "/admin/release?tab=ci", heading: "Release" },
+  {
+    from: "/admin/agent-digests?tab=billing-finance-ops",
+    to: "/admin/finance-agent",
+    heading: "Billing & finance",
+  },
+  { from: "/admin/agent-digests", to: "/admin/release", heading: "Release" },
+  {
+    from: "/admin/amux-backlog?tab=import",
+    to: "/admin/amux-recovery?tab=legacy",
+    heading: "Safety & recovery",
+  },
+  {
+    from: "/admin/amux-backlog?tab=recovery",
+    to: "/admin/amux-recovery?tab=reservations",
+    heading: "Safety & recovery",
+  },
+  {
+    from: "/admin/amux-settings?tab=safety",
+    to: "/admin/amux-recovery?tab=safety",
+    heading: "Safety & recovery",
+  },
+  {
+    from: "/admin/amux-execution?tab=assignment",
+    to: "/admin/amux-execution?tab=review",
+    heading: "Execution board",
+  },
+  {
+    from: "/admin/admin-access?tab=integrity",
+    to: "/admin/audit?tab=integrity",
+    heading: "Audit log",
+  },
 ] as const;
 
 const NOT_FOUND_HEADING = "We couldn't find that page";
@@ -219,13 +247,13 @@ test.describe("admin console shell", () => {
     });
   }
 
-  test("the global search workspace is titled Global search, not Overview", async ({
+  test("the global search workspace is titled Global search, not Today", async ({
     page,
   }) => {
     await page.goto(SEARCH_VIEW.href);
 
     // The old shell fell through to the first navigation entry for any route
-    // without a sidebar item, so this page was headed "Overview".
+    // without a sidebar item, so this page was headed "Today".
     await expect(consoleHeading(page)).toHaveText(SEARCH_VIEW.heading);
     await expect(
       page.getByRole("heading", {
@@ -242,16 +270,14 @@ test.describe("admin console shell", () => {
 
       await expect(page).toHaveURL(legacy.to);
       await expect(consoleHeading(page)).toHaveText(legacy.heading);
-      // A destination that names a tab opens that section. A destination
-      // with no tab, such as the work queue after two-person approval was
-      // retired, has no section strip to mark current.
+      // A destination that names a tab opens that section. One with no tab
+      // opens the page's first section, which the strip marks without the
+      // address saying so.
       const tab = new URL(legacy.to, "https://example.invalid").searchParams.get(
         "tab"
       );
       const tabStrip = page.getByRole("navigation", { name: /sections$/ });
-      if (tab === null) {
-        await expect(tabStrip).toHaveCount(0);
-      } else {
+      if (tab !== null) {
         await expect(tabStrip.locator('a[aria-current="page"]')).toHaveAttribute(
           "href",
           new RegExp(`tab=${tab}$`)
@@ -276,7 +302,7 @@ test.describe("admin console shell", () => {
     page,
   }) => {
     await page.goto("/admin/overview");
-    await expect(consoleHeading(page)).toHaveText("Overview");
+    await expect(consoleHeading(page)).toHaveText("Today");
 
     const response = await page.goto("/admin/not-a-real-section");
 
@@ -345,7 +371,7 @@ test.describe("admin console shell", () => {
   }) => {
     await page.goto("/admin/overview");
     const navigation = sidebarNav(page);
-    const revenue = navigation.getByRole("button", { name: "Revenue" });
+    const revenue = navigation.getByRole("button", { name: "Customers & Revenue" });
 
     await expect(revenue).toHaveAttribute("aria-expanded", "true");
     await expect(navigation.getByRole("link", { name: "Refunds" })).toBeVisible();
@@ -615,22 +641,22 @@ test.describe("admin console shell", () => {
     await expect(consoleHeading(page)).toHaveText("Routing");
     await expect(page.getByTestId("admin-amux-routing-panel")).toHaveCount(0);
 
-    const moved = page.getByRole("link", { name: "AMUX › Execution" });
-    await expect(moved).toHaveAttribute("href", "/admin/amux-execution?tab=assignment");
+    const moved = page.getByRole("link", { name: "Execution board › Review queue" });
+    await expect(moved).toHaveAttribute("href", "/admin/amux-execution?tab=review");
     await moved.click();
 
-    await expect(page).toHaveURL("/admin/amux-execution?tab=assignment");
-    await expect(consoleHeading(page)).toHaveText("Execution");
+    await expect(page).toHaveURL("/admin/amux-execution?tab=review");
+    await expect(consoleHeading(page)).toHaveText("Execution board");
     await expect(page.getByTestId("admin-amux-routing-panel")).toBeVisible();
   });
 
-  test("the owner opens Execution on Cards and sees every AMUX section", async ({
+  test("the owner opens the execution board on Board and sees every Development section", async ({
     page,
   }) => {
     await page.goto("/admin/amux-execution");
-    const strip = page.getByRole("navigation", { name: "Execution sections" });
-    // Cards and Assignment; Workers, recovery and Decision Maker are settings sections.
-    await expect(strip.getByRole("link")).toHaveCount(2);
+    const strip = page.getByRole("navigation", { name: "Execution board sections" });
+    // Board, Review queue and Diagnostics; Workers and Decision Maker are AMUX settings sections.
+    await expect(strip.getByRole("link")).toHaveCount(3);
     await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(0);
@@ -644,48 +670,52 @@ test.describe("admin console shell", () => {
     // One heading per page: the panel's title no longer competes with it.
     await expect(consoleHeading(page)).toHaveCount(1);
 
-    // Backlog opens on Ideas; the card list is its own section.
+    // Ideas opens on Ideas; the card list is its own section.
     await page.goto("/admin/amux-backlog");
     const backlog = page.getByRole("navigation", { name: "Backlog sections" });
-    await expect(backlog.getByRole("link")).toHaveCount(6);
+    await expect(backlog.getByRole("link")).toHaveCount(3);
     await expect(backlog.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=ideas$/);
     await page.goto("/admin/amux-backlog?tab=list");
     await expect(page.getByTestId("amux-backlog-list")).toBeVisible();
-    // Catalog import's code latch ships closed, so its chip reads off in any
-    // environment; the chip is read from that latch, not written.
-    await expect(
-      backlog.getByRole("link", { name: /^Catalog import, Preview · apply off$/ })
-    ).toBeVisible();
 
+    // Safety & recovery: halts, reservations and the legacy tools. Catalog
+    // import's code latch ships closed, so its chip reads off in any
+    // environment; the chip is read from that latch, not written.
     await page.goto("/admin/amux-promotion");
-    await expect(
-      page.getByRole("navigation", { name: "Promotion sections" }).getByRole("link")
-    ).toHaveCount(3);
+    await expect(page).toHaveURL("/admin/amux-recovery?tab=legacy");
+    const recovery = page.getByRole("navigation", { name: "Safety and recovery sections" });
+    await expect(recovery.getByRole("link")).toHaveCount(3);
+    await expect(page.locator("#amux-legacy-import")).toBeVisible();
   });
 });
 
-test.describe("the AMUX group by role", () => {
-  for (const url of ["/admin/amux-backlog?tab=ideas", "/admin/amux-backlog?tab=intake&sourceKey=legacy-a",
-    "/admin/amux-backlog?tab=recovery&sourceKey=legacy-a"]) {
-    test(`Backlog replaces legacy JSON intake with Ideas at ${url}`, async ({ page, signInAs }) => {
+test.describe("the Development group by role", () => {
+  for (const url of ["/admin/amux-backlog?tab=ideas", "/admin/amux-backlog?tab=intake&sourceKey=legacy-a"]) {
+    test(`Ideas replaces legacy JSON intake with Ideas at ${url}`, async ({ page, signInAs }) => {
       await signInAs("owner");
       await page.goto(url);
-      await expect(consoleHeading(page)).toHaveText("Backlog");
+      await expect(consoleHeading(page)).toHaveText("Ideas");
       const strip = page.getByRole("navigation", { name: "Backlog sections" });
-      await expect(strip.getByRole("link")).toHaveCount(6);
+      await expect(strip.getByRole("link")).toHaveCount(3);
       await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=ideas/);
       await expect(strip.locator('a[href*="tab=intake"]')).toHaveCount(0);
-      await expect(strip.locator('a[href*="tab=recovery"]')).toHaveCount(0);
       await expect(page.getByTestId("amux-v4-idea-input")).toBeVisible();
       await expect(page.getByTestId("amux-intake-panel")).toHaveCount(0);
       await expect(page.getByTestId("amux-local-intake-panel")).toHaveCount(0);
-      if (url.includes("tab=intake") || url.includes("tab=recovery")) {
+      if (url.includes("tab=intake")) {
         await expect(page).toHaveURL(/\/admin\/amux-backlog\?tab=ideas&sourceKey=legacy-a$/);
       }
     });
   }
 
-  test("another role sees Execution and Operations settings, opening Execution on Assignment", async ({
+  test("Cleanup and recovery's old address opens Reservations & claims in Safety & recovery", async ({ page, signInAs }) => {
+    await signInAs("owner");
+    await page.goto("/admin/amux-backlog?tab=recovery&sourceKey=legacy-a");
+    await expect(page).toHaveURL("/admin/amux-recovery?tab=reservations&sourceKey=legacy-a");
+    await expect(consoleHeading(page)).toHaveText("Safety & recovery");
+  });
+
+  test("another role sees the execution board, Release, AMUX settings and Safety & recovery, opening the board on its review queue", async ({
     page,
     signInAs,
   }) => {
@@ -693,30 +723,32 @@ test.describe("the AMUX group by role", () => {
     await page.goto("/admin/overview");
     const navigation = sidebarNav(page);
 
-    await expect(navigation.getByRole("button", { name: "AMUX" })).toBeVisible();
+    await expect(navigation.getByRole("button", { name: "Development" })).toBeVisible();
     await expect(navigation.locator('a[href="/admin/amux-execution"]')).toHaveCount(1);
+    await expect(navigation.locator('a[href="/admin/release"]')).toHaveCount(1);
     await expect(navigation.locator('a[href="/admin/amux-settings"]')).toHaveCount(1);
-    // Not advertised: these answer 404 to this role.
+    await expect(navigation.locator('a[href="/admin/amux-recovery"]')).toHaveCount(1);
+    // Not advertised: this answers 404 to this role.
     await expect(navigation.locator('a[href="/admin/amux-backlog"]')).toHaveCount(0);
     await expect(navigation.locator('a[href="/admin/amux-promotion"]')).toHaveCount(0);
 
     await page.goto("/admin/amux-execution");
-    await expect(consoleHeading(page)).toHaveText("Execution");
-    const strip = page.getByRole("navigation", { name: "Execution sections" });
-    // Assignment remains here; workers, safety and switches belong to Operations settings.
-    await expect(strip.getByRole("link")).toHaveCount(1);
+    await expect(consoleHeading(page)).toHaveText("Execution board");
+    const strip = page.getByRole("navigation", { name: "Execution board sections" });
+    // The review queue and diagnostics remain here; workers and switches belong to AMUX settings.
+    await expect(strip.getByRole("link")).toHaveCount(2);
     await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(0);
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
       "href",
-      /tab=assignment$/
+      /tab=review$/
     );
     await expect(page.getByTestId("admin-amux-routing-panel")).toBeVisible();
     await expect(page.getByTestId("amux-card-list-panel")).toHaveCount(0);
   });
 
-  test("Workers sits in Operations settings, shows the list to every role, and offers changes to the owner only", async ({
+  test("Workers sits in AMUX settings, shows the list to every role, and offers changes to the owner only", async ({
     page,
     signInAs,
   }) => {
@@ -724,7 +756,7 @@ test.describe("the AMUX group by role", () => {
     // Nothing is clicked here: a change is a write.
     await signInAs("readonly");
     await page.goto("/admin/amux-settings?tab=workers");
-    const strip = page.getByRole("navigation", { name: "AMUX operations settings sections" });
+    const strip = page.getByRole("navigation", { name: "AMUX settings sections" });
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=workers$/);
     // Streaming may retain a hidden page copy during the role transition.
     const panel = page.getByTestId("amux-workers-overview").filter({ visible: true });
@@ -786,10 +818,12 @@ test.describe("the AMUX group by role", () => {
     const palette = await openCommandPalette(page);
     const amux = palette
       .locator("section")
-      .filter({ has: page.getByRole("heading", { name: "AMUX", exact: true }) });
-    await expect(amux.getByRole("option")).toHaveCount(2);
-    await expect(amux.getByRole("option", { name: /^Execution/ })).toBeVisible();
-    await expect(amux.getByRole("option", { name: /^Operations settings/ })).toBeVisible();
+      .filter({ has: page.getByRole("heading", { name: "Development", exact: true }) });
+    await expect(amux.getByRole("option")).toHaveCount(4);
+    await expect(amux.getByRole("option", { name: /^Execution board/ })).toBeVisible();
+    await expect(amux.getByRole("option", { name: /^Release/ })).toBeVisible();
+    await expect(amux.getByRole("option", { name: /^AMUX settings/ })).toBeVisible();
+    await expect(amux.getByRole("option", { name: /^Safety & recovery/ })).toBeVisible();
   });
 
   for (const url of [
@@ -798,6 +832,9 @@ test.describe("the AMUX group by role", () => {
     "/admin/amux-backlog?tab=recovery",
     "/admin/amux-intake",
     "/admin/amux-promotion?tab=promotion",
+    "/admin/amux-recovery?tab=legacy",
+    "/admin/amux-recovery?tab=reservations",
+    "/admin/routing?tab=stats",
     "/admin/amux-execution?tab=cards",
     // A retired address redirects first and is refused where it lands.
     "/admin/amux-cards",

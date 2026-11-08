@@ -1,36 +1,43 @@
-// Renders one 4:5 image card from a source pack and writes the asset file the
-// submission needs:
-//   node make-card.mjs <job/sources/<asset-id>/pack.json> <spec.json> <out-dir>
-// The layout is the one the owner approved on 2026-11-03 (Canva DAHZ2Rm5gVc,
-// "r2b"): the real question in a pill, two headline lines, three real answer
-// cards fanned out, the real analysis summary under a callout band, the logo
-// and a call to action. Brand colours only (#ffffff, #18181b, #155dfb,
-// #eff6ff, #f7f8fa, #e4e4e7).
+// Renders one 4:5 image card (1080x1350) that the job designed and wrote, and
+// writes the asset file the submission needs:
+//   node make-card.mjs <spec.json> <out-dir>
 //
-// Every word on the card comes from the pack: spec.json picks a headline pair,
-// a callout and a call to action from the lines the pack carries, which are
-// the approved short's own on-screen lines. A line the pack does not carry is
-// refused, so the job cannot put new words on a card.
+// Owner 2026-11-07: the job researches the market's ads and designs each card
+// itself, words included, in the style the owner approved (examples/), and a
+// person sees every card in Admin before anything is posted. So the words are
+// the job's; what this file keeps is what the job cannot be trusted to keep.
 //
-// A Simplified Chinese card for RedNote (owner 2026-11-07) is made from a
-// zh-Hant pack with `"locale": "zh-Hans"` in the spec: the spec still names the
-// pack's own lines, and every line the card draws is that line converted to
-// Simplified by OpenCC, character for character -- no new words. The captures
-// are the pack's pictures, unchanged, so the words inside them stay as they
-// were taken.
+// spec.json: {"id", "locale", "layout": "<HTML fragment, relative to the
+// spec>", "alt": "<alt text>", "pack"?: "job/sources/<id>/pack.json"}. The
+// fragment is a <style> block and the card's elements. Pictures are named as
+// `capture:<name>` (a real screen capture from the pack) or `library:<name>`
+// (library/library.json: the logo, model marks, photos), in an img src or a
+// CSS url(), and are nothing else.
 //
-// Exit codes: 0 written, 2 usage, 1 anything else (a line that does not fit,
-// a missing image, a refused spec).
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// It refuses the card when:
+//  - a picture is not a capture or a library entry, anything else is fetched,
+//    or the layout carries script, frames, form fields or CSS-generated text;
+//  - a colour drawn is not a brand colour (pictures themselves excepted);
+//  - a line lies outside the card or is clipped by its box;
+//  - an AI-made library photo is used without the locale's AI line visibly on
+//    the card, or together with a product capture (an AI asset may not show
+//    the product);
+//  - a versioned model name is not one features.json lists;
+//  - the card looks like a card of an earlier day (a difference hash of the
+//    picture, so new words on an old look fail).
+// Every word the card shows goes into the transcript the Guard judges at
+// submission, with the words inside the captures it used.
+//
+// Exit codes: 0 written, 2 usage, 1 anything else.
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import * as OpenCC from "opencc-js/t2cn";
 import { chromium } from "playwright";
 
-const [packPath, specPath, outDir] = process.argv.slice(2);
-if (!packPath || !specPath || !outDir) {
-  console.error("usage: node make-card.mjs <pack.json> <spec.json> <out-dir>");
+const [specPath, outDir] = process.argv.slice(2);
+if (!specPath || !outDir) {
+  console.error("usage: node make-card.mjs <spec.json> <out-dir>");
   process.exit(2);
 }
 
@@ -41,43 +48,92 @@ const CARD_CHANNELS = {
   "zh-Hant": ["facebook", "instagram", "threads"],
   "zh-Hans": ["rednote"],
 };
+/** The line a card with an AI-made photo shows, per locale. */
+const AI_LINE = {
+  en: "Photo: AI-generated",
+  ko: "사진: AI 생성",
+  "zh-Hant": "照片：AI 生成",
+  "zh-Hans": "照片：AI 生成",
+};
+/** #ffffff #18181b #155dfb #eff6ff #f7f8fa #e4e4e7, as the browser reports them. */
+const BRAND_RGB = ["255,255,255", "24,24,27", "21,93,251", "239,246,255", "247,248,250", "228,228,231"];
+/**
+ * How many of 256 hash bits must differ from every earlier day's card. Measured
+ * 2026-11-07: the retired layout with only its words changed differed by 32;
+ * four cards of different composition differed from it and each other by 92-144.
+ */
+const MIN_HASH_DISTANCE = 64;
+const LOOKBACK_DAYS = 30;
+const AI_PROVENANCES = ["ai_generated", "ai_modified"];
+/** A model family followed, within a few words, by a version number. */
+const MODEL_MENTION = /\b(?:GPT|Claude|Gemini|Grok|Llama|Mistral|Qwen|DeepSeek|Kimi|Nano Banana)\b[^,.;:!?\n]{0,20}?\d/gu;
 
 const fail = (message) => {
   console.error(JSON.stringify({ step: "make-card", error: message }));
   process.exit(1);
 };
 
-const pack = JSON.parse(readFileSync(packPath, "utf8"));
 const spec = JSON.parse(readFileSync(specPath, "utf8"));
-const packDir = path.dirname(path.resolve(packPath));
-
-// The card's locale: the pack's, or Simplified made from a Traditional pack.
-const locale = spec.locale ?? pack.locale;
-if (locale !== pack.locale && !(locale === "zh-Hans" && pack.locale === "zh-Hant")) {
-  fail(`a ${locale} card cannot be made from a ${pack.locale} pack`);
-}
-const toSimplified = OpenCC.Converter({ from: "tw", to: "cn" });
-/** A pack line as this card draws it. */
-const draw = (line) => (locale === pack.locale ? line : toSimplified(line));
-
+const locale = spec.locale;
 if (!CARD_CHANNELS[locale]) fail(`no card channels for locale ${locale}`);
 if (!/^media-[a-z0-9][a-z0-9-]{0,99}$/u.test(spec.id ?? "")) fail("spec.id is not a media asset id");
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-if (!pack.headlines.some((pair) => same(pair, spec.headline))) fail("spec.headline is not one of the pack's lines");
-if (!pack.callouts.includes(spec.callout)) fail("spec.callout is not one of the pack's lines");
-if (!pack.ctas.includes(spec.cta)) fail("spec.cta is not one of the pack's lines");
-const question = pack.question.map(draw);
-const headline = spec.headline.map(draw);
-const callout = draw(spec.callout);
-const cta = draw(spec.cta);
+if (typeof spec.alt !== "string" || spec.alt.trim().length < 20) fail("spec.alt must describe the card");
 
-const image = (name) => {
-  const file = path.join(packDir, pack.images[name]);
-  if (!existsSync(file)) fail(`missing image ${name}: ${file}`);
-  return pathToFileURL(file).href;
+const toolDir = path.dirname(fileURLToPath(import.meta.url));
+const libraryDir = path.join(toolDir, "library");
+const library = JSON.parse(readFileSync(path.join(libraryDir, "library.json"), "utf8"));
+const KNOWN_MODELS = JSON.parse(readFileSync(path.join(toolDir, "features.json"), "utf8")).features.flatMap((feature) => feature.models ?? []);
+
+// The pack's captures, if the card uses a pack: `captures` ({name: {file,
+// text}}), or the first packs' fixed five pictures.
+let captures = {};
+let packDir = null;
+// A card that shows a pack's captures rests on the same claims as the approved
+// short they came from, as cards did before (2026-11-04).
+let packClaimIds = [];
+if (spec.pack) {
+  const packPath = path.resolve(spec.pack);
+  const pack = JSON.parse(readFileSync(packPath, "utf8"));
+  packDir = path.dirname(packPath);
+  const sourceAsset = path.join(packDir, pack.videoAsset ?? "");
+  if (!pack.videoAsset || !existsSync(sourceAsset)) fail("the pack names no source asset file to take its claims from");
+  packClaimIds = [...(JSON.parse(readFileSync(sourceAsset, "utf8")).asset?.claimIds ?? [])];
+  captures =
+    pack.captures ??
+    Object.fromEntries(
+      [
+        ["left", pack.captureText?.[0]],
+        ["center", pack.captureText?.[1]],
+        ["right", pack.captureText?.[2]],
+        ["summary", pack.summaryText],
+        ["logo", ""],
+      ].map(([name, text]) => [name, { file: pack.images?.[name], text: text ?? "" }]),
+    );
+}
+const pictureFile = (kind, name) => {
+  if (kind === "capture") return captures[name] && packDir ? path.join(packDir, captures[name].file) : null;
+  return library[name] ? path.join(libraryDir, library[name].file) : null;
 };
-const escape = (text) =>
-  String(text).replace(/[&<>"]/gu, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+
+const layoutPath = path.resolve(path.dirname(path.resolve(specPath)), spec.layout ?? "");
+if (!spec.layout || !existsSync(layoutPath)) fail("spec.layout names no layout file");
+const layout = readFileSync(layoutPath, "utf8");
+if (/<\s*(script|iframe|object|embed|link|meta|base|frame|input|textarea|select|option|button|video|audio|canvas|use|image|foreignobject)\b|\son[a-z]+\s*=|javascript:|@import|<\s*svg[^>]*\shref|xlink:href/iu.test(layout)) {
+  fail("the layout may hold only HTML, CSS and capture: or library: pictures");
+}
+const named = [...layout.matchAll(/(?:src\s*=\s*["']|url\(\s*["']?)([^"')\s]+)/giu)].map((match) => match[1]);
+const unknown = named.filter((ref) => {
+  const m = /^(capture|library):([a-z0-9-]+)$/u.exec(ref);
+  return !m || !pictureFile(m[1], m[2]) || !existsSync(pictureFile(m[1], m[2]));
+});
+if (unknown.length > 0) fail(`the layout names pictures that are not captures or library entries: ${JSON.stringify(unknown)}`);
+const used = [...new Set(named)].map((ref) => ref.split(":"));
+const usedCaptures = used.filter(([kind]) => kind === "capture").map(([, name]) => name);
+const usedAi = used.filter(([kind, name]) => kind === "library" && AI_PROVENANCES.includes(library[name].provenance));
+if (usedAi.length > 0 && usedCaptures.length > 0) {
+  fail("an AI-made photo and a product capture may not share a card (an AI asset may not depict the product)");
+}
+const body = layout.replace(/(capture|library):([a-z0-9-]+)/gu, (_, kind, name) => pathToFileURL(pictureFile(kind, name)).href);
 
 const fonts =
   locale === "zh-Hant"
@@ -85,127 +141,255 @@ const fonts =
     : locale === "zh-Hans"
       ? "'Geist', 'Noto Sans SC', sans-serif"
       : "'Geist', 'Noto Sans KR', sans-serif";
-
 const html = `<!doctype html>
 <html lang="${locale}"><head><meta charset="utf-8">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@500;700;800&family=Noto+Sans+KR:wght@500;700;900&family=Noto+Sans+TC:wght@500;700;900&family=Noto+Sans+SC:wght@500;700;900&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;700;900&family=Noto+Sans+TC:wght@400;500;700;900&family=Noto+Sans+SC:wght@400;500;700;900&family=Noto+Serif+KR:wght@500;700&family=Noto+Serif+TC:wght@500;700&family=Noto+Serif+SC:wght@500;700&display=block">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 1080px; height: 1350px; background: #ffffff; overflow: hidden; }
-  body { position: relative; font-family: ${fonts}; color: #18181b; }
-  .abs { position: absolute; }
-  .pill { left: 56px; top: 64px; width: 968px; height: 140px; border-radius: 70px; background: #f7f8fa; border: 2px solid #e4e4e7; }
-  .q { left: 98px; top: 104px; font-size: 44px; font-weight: 800; color: #155dfb; }
-  .question { left: 152px; top: 78px; width: 836px; height: 112px; display: flex; flex-direction: column; justify-content: center;
-    font-size: 33px; font-weight: 700; line-height: 1.3; }
-  .head { left: 60px; width: 960px; font-size: 108px; font-weight: 800; line-height: 1.08; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; }
-  .h1 { top: 222px; } .h2 { top: 338px; color: #155dfb; }
-  .band { left: 36px; top: 508px; width: 1008px; height: 730px; border-radius: 48px; background: #eff6ff; }
-  .card { width: 400px; height: 559px; object-fit: cover; }
-  .left { left: 14px; top: 505px; transform: rotate(-7deg); }
-  .right { left: 666px; top: 505px; transform: rotate(7deg); }
-  .center { left: 340px; top: 470px; }
-  .summary { left: 250px; top: 890px; width: 760px; height: 361px; object-fit: cover; transform: rotate(-2deg); }
-  .callout { left: 300px; top: 862px; width: 600px; height: 72px; border-radius: 36px; background: #155dfb; color: #ffffff;
-    transform: rotate(-2deg); display: flex; align-items: center; justify-content: center; padding: 0 28px;
-    font-size: 36px; font-weight: 800; white-space: nowrap; overflow: hidden; }
-  .logo { left: 60px; top: 1258px; width: 56px; height: 56px; }
-  .brand { left: 128px; top: 1264px; font-family: 'Geist', sans-serif; font-size: 38px; font-weight: 800; }
-  .cta { right: 60px; top: 1266px; width: 600px; text-align: right; font-size: 32px; font-weight: 800; color: #155dfb; white-space: nowrap; overflow: hidden; }
+  html, body { width: 1080px; height: 1350px; overflow: hidden; }
+  body { position: relative; font-family: ${fonts}; color: #18181b; background: #ffffff; -webkit-font-smoothing: antialiased; }
 </style></head><body>
-  <div class="abs pill"></div>
-  <div class="abs q">Q</div>
-  <div class="abs question" data-fit="22">${question.map((line) => `<div>${escape(line)}</div>`).join("")}</div>
-  <div class="abs head h1" data-fit="64">${escape(headline[0])}</div>
-  <div class="abs head h2" data-fit="64">${escape(headline[1])}</div>
-  <div class="abs band"></div>
-  <img class="abs card left" src="${image("left")}">
-  <img class="abs card right" src="${image("right")}">
-  <img class="abs card center" src="${image("center")}">
-  <img class="abs summary" src="${image("summary")}">
-  <div class="abs callout" data-fit="24">${escape(callout)}</div>
-  <img class="abs logo" src="${image("logo")}">
-  <div class="abs brand">Tomverse</div>
-  <div class="abs cta" data-fit="22">${escape(cta)}</div>
+${body}
 </body></html>`;
 
 mkdirSync(outDir, { recursive: true });
 const htmlPath = path.join(outDir, `${spec.id}.html`);
 writeFileSync(htmlPath, html);
+const pngPath = path.join(outDir, `${spec.id}.png`);
 
+/** The picture's 256-bit difference hash, as a 0/1 string (16 rows of 16 neighbour comparisons). */
+async function differenceHash(page, file) {
+  const data = readFileSync(file).toString("base64");
+  return page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const canvas = Object.assign(document.createElement("canvas"), { width: 17, height: 16 });
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, 17, 16);
+    const px = ctx.getImageData(0, 0, 17, 16).data;
+    const grey = (x, y) => { const i = (y * 17 + x) * 4; return px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114; };
+    let bits = "";
+    for (let y = 0; y < 16; y += 1) for (let x = 0; x < 16; x += 1) bits += grey(x, y) > grey(x + 1, y) ? "1" : "0";
+    return bits;
+  }, data);
+}
+
+/** Cards that earlier days made (job/<yyyymmdd>/media-*-card*.png within the lookback, never today's) and the examples. */
+function earlierCards(today) {
+  const jobDir = path.dirname(path.resolve(outDir));
+  const cutoff = Number(new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10).replaceAll("-", ""));
+  const found = [];
+  for (const day of existsSync(jobDir) ? readdirSync(jobDir) : []) {
+    if (!/^\d{8}$/u.test(day) || day === today || Number(day) < cutoff) continue;
+    const dir = path.join(jobDir, day);
+    if (!statSync(dir).isDirectory()) continue;
+    for (const file of readdirSync(dir)) if (/^media-.*-card(-\d+)?\.png$/u.test(file)) found.push(path.join(dir, file));
+  }
+  // The approved examples are style, not cards to copy.
+  const examples = path.join(toolDir, "examples");
+  for (const file of existsSync(examples) ? readdirSync(examples) : []) if (file.endsWith(".png")) found.push(path.join(examples, file));
+  return found;
+}
+
+let cardLines = [];
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1080, height: 1350 }, deviceScaleFactor: 1 });
+  const fetched = [];
+  const allowedUrls = new Set(used.map(([kind, name]) => pathToFileURL(pictureFile(kind, name)).href));
+  await page.route("**/*", (route) => {
+    const url = route.request().url();
+    const ok =
+      url === pathToFileURL(htmlPath).href ||
+      allowedUrls.has(url) ||
+      url.startsWith("https://fonts.googleapis.com/") ||
+      url.startsWith("https://fonts.gstatic.com/");
+    if (!ok) fetched.push(url);
+    return ok ? route.continue() : route.abort();
+  });
   await page.goto(pathToFileURL(htmlPath).href, { waitUntil: "networkidle", timeout: 60_000 });
   await page.evaluate(() => document.fonts.ready);
-  // Shrink each line until it fits its box; a line that cannot fit at its floor is refused.
-  const overflowing = await page.evaluate(() => {
-    const bad = [];
-    for (const el of document.querySelectorAll("[data-fit]")) {
-      const floor = Number(el.dataset.fit);
-      let size = parseFloat(getComputedStyle(el).fontSize);
-      // A one-line box overflows only sideways (a tall glyph is not a wrap);
-      // the question's two lines must also fit its height.
-      const wraps = el.classList.contains("question");
-      const over = () => el.scrollWidth > el.clientWidth + 1 || (wraps && el.scrollHeight > el.clientHeight + 1);
-      while (over() && size > floor) {
-        size -= 2;
-        el.style.fontSize = `${size}px`;
+  if (fetched.length > 0) fail(`the layout fetched something else: ${JSON.stringify(fetched)}`);
+
+  const found = await page.evaluate(([brand, aiLine]) => {
+    const texts = [];
+    const cut = [];
+    const generated = [];
+    const colours = new Set();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (!node.textContent.trim() || node.parentElement.closest("style")) continue;
+      const style = getComputedStyle(node.parentElement);
+      if (style.visibility === "hidden" || style.display === "none") continue;
+      texts.push(node.textContent);
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) {
+        if (rect.width === 0) continue;
+        if (rect.left < -1 || rect.top < -1 || rect.right > 1081 || rect.bottom > 1351) cut.push(node.textContent);
       }
-      if (over()) bad.push(el.textContent);
+      const owner = node.parentElement;
+      if (owner.scrollWidth > owner.clientWidth + 2 && getComputedStyle(owner).overflowX !== "visible") cut.push(node.textContent);
     }
-    return bad;
-  });
-  if (overflowing.length > 0) fail(`lines do not fit: ${JSON.stringify(overflowing)}`);
-  // The two headline lines share one size, the smaller of the two fitted.
-  await page.evaluate(() => {
-    const heads = [...document.querySelectorAll(".head")];
-    const size = Math.min(...heads.map((el) => parseFloat(getComputedStyle(el).fontSize)));
-    for (const el of heads) el.style.fontSize = `${size}px`;
-  });
-  await page.screenshot({ path: path.join(outDir, `${spec.id}.png`), type: "png" });
+    for (const el of [document.documentElement, ...document.querySelectorAll("body, body *")]) {
+      for (const pseudo of ["::before", "::after", "::marker"]) {
+        const content = getComputedStyle(el, pseudo).content;
+        if (content && content !== "none" && content !== "normal" && content !== '""') generated.push(content);
+      }
+      const style = getComputedStyle(el);
+      if (style.display === "list-item") generated.push("list-item");
+      // The root's own text colour is the browser's black and draws nothing; its background does.
+      const props = el === document.documentElement ? ["backgroundColor", "backgroundImage"] : ["color", "backgroundColor", "backgroundImage", "boxShadow", "textShadow", "filter"];
+      if (el instanceof SVGElement) props.push("fill", "stroke");
+      for (const side of ["Top", "Right", "Bottom", "Left"]) if (parseFloat(style[`border${side}Width`]) > 0) props.push(`border${side}Color`);
+      if (style.outlineStyle !== "none" && parseFloat(style.outlineWidth) > 0) props.push("outlineColor");
+      for (const prop of props) {
+        for (const m of String(style[prop]).matchAll(/rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+))?\s*\)/gu)) {
+          if (m[4] !== undefined && Number(m[4]) === 0) continue;
+          const rgb = `${m[1]},${m[2]},${m[3]}`;
+          if (!brand.includes(rgb)) colours.add(`${rgb} ${el.tagName} ${prop}`);
+        }
+        if (/\b(?:hsla?|lab|lch|oklab|oklch|color)\(/u.test(String(style[prop]))) colours.add(String(style[prop]));
+      }
+    }
+    // What a reader reads as one phrase: the text of the nearest box that is
+    // not inline, so "GPT <span>7</span>" is read as "GPT 7".
+    const phrases = new Map();
+    const smallest = new Map();
+    const phraseWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (phraseWalker.nextNode()) {
+      const node = phraseWalker.currentNode;
+      // Spaces between inline pieces are kept: "<b>the</b> <b>only</b>" reads
+      // "the only", not "theonly".
+      if (node.parentElement.closest("style")) continue;
+      let box = node.parentElement;
+      while (box !== document.body && getComputedStyle(box).display === "inline") box = box.parentElement;
+      phrases.set(box, `${phrases.get(box) ?? ""}${node.textContent}`);
+      const size = parseFloat(getComputedStyle(node.parentElement).fontSize);
+      smallest.set(box, Math.min(smallest.get(box) ?? size, size));
+    }
+    // Where the AI line sits, for the pixel check below: the box whose text
+    // is exactly the line, every piece of it at least 14 px, inside the card.
+    let aiBox = null;
+    if (aiLine !== null) {
+      for (const [box, text] of phrases) {
+        if (text.replace(/\s+/gu, " ").trim() !== aiLine || smallest.get(box) < 14) continue;
+        const rect = box.getBoundingClientRect();
+        if (rect.width > 0 && rect.left >= 0 && rect.top >= 0 && rect.right <= 1080 && rect.bottom <= 1350) {
+          box.dataset.aiLine = "1";
+          aiBox = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+          break;
+        }
+      }
+    }
+    return { texts, cut, generated, colours: [...colours], phrases: [...phrases.values()], aiBox };
+  }, [BRAND_RGB, usedAi.length > 0 ? AI_LINE[locale] : null]);
+
+  const normal = (text) => text.replace(/\s+/gu, " ").trim();
+  if (found.generated.length > 0) fail(`CSS may not draw text: ${JSON.stringify(found.generated)}`);
+  if (found.texts.length === 0) fail("the card shows no words");
+  if (found.cut.length > 0) fail(`lines cut off or outside the card: ${JSON.stringify(found.cut)}`);
+  if (found.colours.length > 0) fail(`colours outside the brand palette: ${JSON.stringify(found.colours)}`);
+  if (usedAi.length > 0) {
+    // Seen, not merely present: the card's pixels where the line sits must
+    // change visibly when the line is hidden -- whatever colour, opacity,
+    // filter or cover the layout gave it.
+    const aiMessage = `a card with an AI-made photo shows the line "${AI_LINE[locale]}" where it can be read: its own element, at least 14 px, inside the card and visible`;
+    if (!found.aiBox) fail(aiMessage);
+    const clip = { x: Math.floor(found.aiBox.x), y: Math.floor(found.aiBox.y), width: Math.ceil(found.aiBox.width), height: Math.ceil(found.aiBox.height) };
+    const shown = await page.screenshot({ clip, type: "png" });
+    // Only the letters go: the box's background, border and anything else stay,
+    // so a coloured box behind invisible letters does not count as the line.
+    await page.evaluate(() => {
+      const style = document.createElement("style");
+      style.id = "ai-line-off";
+      style.textContent = "[data-ai-line], [data-ai-line] * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; }";
+      document.head.append(style);
+    });
+    const hidden = await page.screenshot({ clip, type: "png" });
+    await page.evaluate(() => document.getElementById("ai-line-off").remove());
+    const changed = await page.evaluate(async ([a, b]) => {
+      const pixels = async (b64) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${b64}`;
+        await img.decode();
+        const canvas = Object.assign(document.createElement("canvas"), { width: img.width, height: img.height });
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        return ctx.getImageData(0, 0, img.width, img.height).data;
+      };
+      const [pa, pb] = [await pixels(a), await pixels(b)];
+      let differing = 0;
+      for (let i = 0; i < pa.length; i += 4) {
+        if (Math.abs(pa[i] - pb[i]) + Math.abs(pa[i + 1] - pb[i + 1]) + Math.abs(pa[i + 2] - pb[i + 2]) > 60) differing += 1;
+      }
+      return differing / (pa.length / 4);
+    }, [shown.toString("base64"), hidden.toString("base64")]);
+    if (changed < 0.03) fail(aiMessage);
+  }
+  // A versioned model name must be one features.json lists, so a card cannot
+  // name a model Tomverse does not offer ("GPT 7"). A bare family name
+  // ("GPT, Claude, Gemini") is fine. Read per phrase, so a name split across
+  // inline elements is read whole.
+  for (const text of found.phrases.map(normal)) {
+    for (const match of text.matchAll(MODEL_MENTION)) {
+      // The listed name, then a boundary and no further version: "GPT 6 Luna"
+      // passes, "GPT 6 Lunax" and "GPT 6 Luna 999" do not.
+      const listed = (name) =>
+        text.startsWith(name, match.index) && !/^(?:[\p{L}\p{N}]|\s*[\d.]+)/u.test(text.slice(match.index + name.length));
+      if (!KNOWN_MODELS.some(listed)) {
+        fail(`"${match[0]}" is not a model name in features.json`);
+      }
+    }
+  }
+  await page.screenshot({ path: pngPath, type: "png" });
+
+  const today = path.basename(path.resolve(outDir));
+  const mine = await differenceHash(page, pngPath);
+  for (const earlier of earlierCards(today)) {
+    const theirs = await differenceHash(page, earlier);
+    let distance = 0;
+    for (let i = 0; i < mine.length; i += 1) if (mine[i] !== theirs[i]) distance += 1;
+    if (distance < MIN_HASH_DISTANCE) {
+      fail(`looks like ${path.basename(earlier)} (hash distance ${distance} < ${MIN_HASH_DISTANCE}): change the composition and the pictures, not only the words`);
+    }
+  }
+  // Phrase by phrase, as a reader reads them: inline pieces joined as they
+  // stand ("<span>cheap</span>er" reads "cheaper"), boxes on their own lines.
+  cardLines = found.phrases.map(normal).filter(Boolean);
 } finally {
   await browser.close();
 }
 
-// Every word the card shows, in reading order, for the Guard at submission --
-// the captures' own text included (the answers' model names, numbers and
-// wording are on the card too), so a person approving it sees the Guard's
-// codes for all of it. The captures' text is what the pictures show, so it is
-// never converted.
-if (!Array.isArray(pack.captureText) || pack.captureText.length !== 3) {
-  fail("pack.captureText must hold the left, center and right captures' text");
-}
-const transcript = [
-  ...question,
-  ...headline,
-  ...pack.captureText,
-  callout,
-  pack.summaryText,
-  "Tomverse",
-  cta.replace(/\s*→\s*$/u, ""),
-].join(" ");
+// Every word the card shows, for the Guard at submission: its own lines and
+// the words inside the captures it used.
+const transcript = [...cardLines, ...usedCaptures.map((name) => captures[name].text).filter(Boolean)].join(String.fromCharCode(10));
 const channels = CARD_CHANNELS[locale];
+const ai = usedAi.length > 0;
 const validUntil = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
-// The card reuses the approved short's words and captures, so it rests on the
-// same claims: a post that carries it declares them and the Guard judges them
-// again at submission and at every post.
-const sourceAsset = path.join(packDir, pack.videoAsset ?? "");
-if (!pack.videoAsset || !existsSync(sourceAsset)) fail("the pack names no source asset file to take its claims from");
-const claimIds = [...(JSON.parse(readFileSync(sourceAsset, "utf8")).asset?.claimIds ?? [])];
 writeFileSync(
   path.join(outDir, `${spec.id}.asset.json`),
   JSON.stringify(
     {
       asset: {
         id: spec.id,
-        provenance: "capture",
+        // The library's photos are model-made pictures with our words set on
+        // them, so the asset is AI generated (lib/marketingAssets.ts).
+        provenance: ai ? "ai_generated" : usedCaptures.length > 0 ? "capture" : "operator_upload",
         allowedChannels: channels,
-        claimIds,
+        // A card with captures keeps its source short's claims. A card without
+        // them declares none: a feature claim needs its FAQ paragraph verbatim
+        // in the words (the Guard's feature_not_public), which neither the card
+        // nor a post carrying it could hold; its stated facts go to a person
+        // through the Guard's undeclared_fact. The owner decides on 2026-11-07
+        // whether the Guard should check an asset's feature gate instead.
+        claimIds: usedCaptures.length > 0 ? packClaimIds : [],
         validUntil,
-        disclosure: Object.fromEntries(channels.map((channel) => [channel, "none"])),
-        depictsProductInterface: true,
-        alt: { [locale]: draw(pack.cardAlt) },
+        disclosure: Object.fromEntries(channels.map((channel) => [channel, ai ? "caption_disclosure" : "none"])),
+        depictsProductInterface: usedCaptures.length > 0,
+        alt: { [locale]: spec.alt.trim() },
       },
       transcript: { [locale]: transcript },
     },
@@ -213,4 +397,4 @@ writeFileSync(
     2,
   ),
 );
-console.log(JSON.stringify({ made: spec.id, png: path.join(outDir, `${spec.id}.png`) }));
+console.log(JSON.stringify({ made: spec.id, png: pngPath, pictures: used.map((pair) => pair.join(":")) }));

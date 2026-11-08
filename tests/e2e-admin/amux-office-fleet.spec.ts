@@ -32,7 +32,7 @@ test("the AMUX floor shows the resident roster, not obsolete runtime workers", a
     })),
   });
   await signInAs("owner");
-  await page.goto("/admin/office");
+  await page.goto("/admin/office?tab=live");
   await page.getByRole("button", { name: "Decline", exact: true }).click();
   const workers = page.getByTestId("agent-office-amux-person");
   await expect(workers).toHaveCount(13);
@@ -42,11 +42,9 @@ test("the AMUX floor shows the resident roster, not obsolete runtime workers", a
   for (const prefix of ["cursor-", "copilot-"]) {
     expect(labels.filter((label) => label?.startsWith(prefix))).toHaveLength(3);
   }
-  await expect(page.getByTestId("agent-office-amux-note")).toContainText("policy v27");
   // Historical runtime rows cannot grant an unadmitted resident a green light.
   const cursor = workers.filter({ hasText: "cursor-worker" });
   await expect(cursor).toHaveAttribute("data-worker-state", /^(not_admitted|catalog_unknown)$/);
-  await expect(page.getByTestId("agent-office-amux-connection")).toHaveAttribute("data-connection-state", "waiting");
 
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
@@ -57,6 +55,6 @@ test("the AMUX floor shows the resident roster, not obsolete runtime workers", a
       return boxes.some((a, i) => boxes.some((b, j) => i < j && a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top));
     });
     expect(overlaps).toBe(false);
-    await page.getByTestId("agent-office-world").screenshot({ path: `test-results-admin/agent-office-amux-${viewport.width}.png` });
+    await page.getByTestId("agent-office-floor").screenshot({ path: `test-results-admin/agent-office-amux-${viewport.width}.png` });
   }
 });

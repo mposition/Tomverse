@@ -1,9 +1,9 @@
 "use client";
 
+import { formatAestDateTime, type AdminTone } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
-  Bell,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -12,6 +12,12 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminDataTable } from "@/components/admin/ui/AdminDataTable";
+import { AdminKpiCard } from "@/components/admin/ui/AdminKpiCard";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminNotificationsMessages } from "@/lib/adminMessages/notifications";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminFetch } from "@/lib/adminFetch";
@@ -75,21 +81,10 @@ const readNavigationState = (searchParams: URLSearchParams) => {
   return { status, page, cursor: cursors[page], cursors };
 };
 
-const dateLabel = (value: string) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
+const dateLabel = (value: string) => formatAestDateTime(value) ?? "-";
 
-const statusClass = (status: string) => {
-  if (status === "sent") {
-    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
-  }
-  if (status === "skipped") {
-    return "border-zinc-700 bg-zinc-900 text-zinc-400";
-  }
-  return "border-red-500/30 bg-red-500/10 text-red-200";
-};
+const statusTone = (status: string): AdminTone =>
+  status === "sent" ? "ok" : status === "skipped" ? "idle" : "bad";
 
 const escapeCsv = (value: unknown) => {
   const text = String(value ?? "");
@@ -120,6 +115,7 @@ export function AdminNotificationsPanel() {
   );
   const [pageIndex, setPageIndex] = useState(initialNavigation.page);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const requestVersion = useRef(0);
 
@@ -146,6 +142,7 @@ export function AdminNotificationsPanel() {
     async (status: StatusFilter, cursor: string | null, targetPage: number) => {
       const version = ++requestVersion.current;
       setLoading(true);
+      setLoadFailed(false);
       try {
         const params = new URLSearchParams({
           take: String(PAGE_SIZE),
@@ -173,14 +170,10 @@ export function AdminNotificationsPanel() {
         setFilteredCount(data.filteredCount || 0);
         setStats(data.stats);
         setPageIndex(targetPage);
-      } catch (error) {
+      } catch {
         if (version !== requestVersion.current) return;
-        dispatchAppToast(
-          error instanceof Error
-            ? error.message
-            : messagesRef.current.loadFailed,
-          "error"
-        );
+        // A failed read is an error block, never an empty list.
+        setLoadFailed(true);
       } finally {
         if (version === requestVersion.current) setLoading(false);
       }
@@ -308,37 +301,45 @@ export function AdminNotificationsPanel() {
   };
 
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            {m.eyebrow}
-          </p>
-          <h2 className="mt-2 text-2xl font-black text-white">
-            {m.title}
-          </h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            {m.description(PAGE_SIZE)}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <span className="inline-flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-xs font-bold text-zinc-200">
-            {m.total(stats.total)}
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-200">
-            <Bell className="h-3.5 w-3.5" />
-            {m.sent(stats.sent)}
-          </span>
-          <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-bold text-red-200">
-            {m.failed(stats.failed)}
-          </span>
-          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">
-            {m.unacknowledged(stats.unacknowledged)}
-          </span>
-        </div>
+    <div className="flex min-w-0 flex-col gap-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <AdminKpiCard label={m.kpi.total} value={loadFailed ? null : stats.total} onRetry={refresh} />
+        <AdminKpiCard label={m.kpi.sent} value={loadFailed ? null : stats.sent} onRetry={refresh} />
+        <AdminKpiCard
+          label={m.kpi.failed}
+          value={loadFailed ? null : stats.failed}
+          tone={stats.failed > 0 ? "bad" : "neutral"}
+          onRetry={refresh}
+        />
+        <AdminKpiCard
+          label={m.kpi.unacknowledged}
+          value={loadFailed ? null : stats.unacknowledged}
+          tone={stats.unacknowledged > 0 ? "warn" : "neutral"}
+          onRetry={refresh}
+        />
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+      <AdminTile
+        title={m.title}
+        description={m.description(PAGE_SIZE)}
+        action={
+          <>
+            <AdminWriteButton variant="secondary" size="sm" onClick={refresh} disabled={loading}>
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} aria-hidden />
+              {m.refresh}
+            </AdminWriteButton>
+            <AdminWriteButton
+              variant="secondary"
+              size="sm"
+              onClick={exportCsv}
+              disabled={items.length === 0}
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              {m.exportPage}
+            </AdminWriteButton>
+          </>
+        }
+      >
         <div className="flex flex-wrap gap-2">
           {STATUSES.map((status) => (
             <button
@@ -346,137 +347,147 @@ export function AdminNotificationsPanel() {
               type="button"
               onClick={() => selectStatus(status)}
               disabled={loading && statusFilter === status}
-              className={`cursor-pointer rounded-xl border px-3 py-2 text-xs font-black capitalize transition disabled:cursor-wait ${
+              aria-pressed={statusFilter === status}
+              className={`min-h-9 cursor-pointer rounded-full border px-3.5 text-xs font-bold transition disabled:cursor-wait ${
                 statusFilter === status
-                  ? "border-blue-500/40 bg-blue-500/20 text-blue-100"
-                  : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white"
+                  ? "border-zinc-100 bg-zinc-100 text-zinc-950"
+                  : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
               }`}
             >
               {m.filter[status]} {statusCounts[status]}
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={loading}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-wait disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            {m.refresh}
-          </button>
-          <button
-            type="button"
-            onClick={exportCsv}
-            disabled={items.length === 0}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Download className="h-3.5 w-3.5" />
-            {m.exportPage}
-          </button>
-        </div>
-      </div>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
-        <span>
-          {m.showing(pageStart, pageEnd, filteredCount, m.filter[statusFilter])}
-        </span>
-        <span>{m.page(pageIndex + 1)}</span>
-      </div>
-
-      <div className="relative mt-5 grid min-h-32 gap-3">
-        {loading ? (
-          <div className="absolute inset-0 z-10 flex items-start justify-center rounded-2xl bg-zinc-950/70 pt-8 text-sm font-bold text-zinc-300 backdrop-blur-sm">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {m.loading}
-          </div>
-        ) : null}
-        {items.length === 0 ? (
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            {m.empty}
-          </div>
+        {loadFailed ? (
+          <AdminStateBlock
+            kind="error"
+            title={m.loadFailed}
+            detail={m.loadFailedDetail}
+            onRetry={refresh}
+          />
         ) : (
-          items.map((row) => (
-            <article
-              key={row.id}
-              className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4"
-            >
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(row.status)}`}
-                    >
-                      {row.status}
-                    </span>
-                    <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-bold uppercase text-blue-200">
+          <div className="relative flex min-w-0 flex-col gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
+              <span>{m.showing(pageStart, pageEnd, filteredCount, m.filter[statusFilter])}</span>
+              <span>{m.page(pageIndex + 1)}</span>
+            </div>
+            {loading ? (
+              <div
+                role="status"
+                className="absolute inset-0 z-10 flex items-start justify-center rounded-2xl bg-zinc-950/70 pt-8 text-sm font-bold text-zinc-300"
+              >
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> {m.loading}
+              </div>
+            ) : null}
+            <AdminDataTable
+              caption={m.tableCaption}
+              rows={items}
+              rowKey={(row) => row.id}
+              emptyState={<AdminStateBlock kind="empty" title={m.empty} />}
+              columns={[
+                {
+                  key: "when",
+                  header: m.columns.when,
+                  render: (row) => (
+                    <span className="whitespace-nowrap text-xs text-zinc-400">{dateLabel(row.createdAt)}</span>
+                  ),
+                },
+                {
+                  key: "channel",
+                  header: m.columns.channel,
+                  render: (row) => (
+                    <span className="rounded-full bg-zinc-800 px-2.5 py-1 text-xs font-bold uppercase text-zinc-200">
                       {row.channel}
                     </span>
-                    <span className="text-xs text-zinc-500">
-                      {dateLabel(row.createdAt)} UTC
-                    </span>
-                  </div>
-                  <h3 className="mt-3 text-sm font-bold text-white">{row.title}</h3>
-                  {row.detail ? (
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">
-                      {row.detail}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="grid gap-1 text-xs text-zinc-500 md:min-w-64">
-                  <span>
-                    {m.target}{row.targetType || "-"} {row.targetId || ""}
+                  ),
+                },
+                {
+                  key: "message",
+                  header: m.columns.message,
+                  render: (row) => (
+                    <div className="min-w-0">
+                      <p className="font-bold text-white">{row.title}</p>
+                      {row.detail ? (
+                        <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-zinc-300">{row.detail}</p>
+                      ) : null}
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {m.target}
+                        {row.targetType || "-"} {row.targetId || ""}
+                      </p>
+                      {row.error ? (
+                        <p className="mt-1 text-xs text-red-300">
+                          {m.error}
+                          {row.error}
+                        </p>
+                      ) : null}
+                    </div>
+                  ),
+                },
+                {
+                  key: "status",
+                  header: m.columns.status,
+                  render: (row) => (
+                    <AdminStatusChip tone={statusTone(row.status)}>
+                      {m.statusLabel[row.status as keyof typeof m.statusLabel] ?? row.status}
+                    </AdminStatusChip>
+                  ),
+                },
+                {
+                  key: "action",
+                  header: m.columns.action,
+                  render: (row) =>
+                    row.acknowledgedAt ? (
+                      <span className="text-xs text-zinc-400">
+                        {m.ack}
+                        {dateLabel(row.acknowledgedAt)} / {row.acknowledgedByEmail || m.adminFallback}
+                      </span>
+                    ) : row.status === "failed" ? (
+                      <AdminWriteButton
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => acknowledge(row.id)}
+                        disabled={busyId === row.id}
+                      >
+                        {busyId === row.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                        ) : (
+                          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                        )}
+                        {m.acknowledge}
+                      </AdminWriteButton>
+                    ) : (
+                      <span className="text-xs text-zinc-600">-</span>
+                    ),
+                },
+              ]}
+              footer={
+                <>
+                  <AdminWriteButton
+                    variant="secondary"
+                    size="sm"
+                    onClick={goPrevious}
+                    disabled={pageIndex === 0 || loading}
+                  >
+                    <ChevronLeft className="h-4 w-4" aria-hidden /> {m.previous}
+                  </AdminWriteButton>
+                  <span className="flex-1 text-center text-xs font-bold text-zinc-500">
+                    {pageStart}-{pageEnd} / {filteredCount}
                   </span>
-                  <span>{m.error}{row.error || "-"}</span>
-                  <span>
-                    {m.ack}
-                    {row.acknowledgedAt
-                      ? `${dateLabel(row.acknowledgedAt)} / ${row.acknowledgedByEmail || m.adminFallback}`
-                      : "-"}
-                  </span>
-                  {!row.acknowledgedAt && row.status === "failed" ? (
-                    <button
-                      type="button"
-                      onClick={() => acknowledge(row.id)}
-                      disabled={busyId === row.id}
-                      className="mt-2 inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {busyId === row.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                      )}
-                      {m.acknowledge}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </article>
-          ))
+                  <AdminWriteButton
+                    variant="secondary"
+                    size="sm"
+                    onClick={goNext}
+                    disabled={!nextCursor || loading}
+                  >
+                    {m.next} <ChevronRight className="h-4 w-4" aria-hidden />
+                  </AdminWriteButton>
+                </>
+              }
+            />
+          </div>
         )}
-      </div>
-
-      <div className="mt-5 flex items-center justify-between gap-3 border-t border-zinc-800 pt-4">
-        <button
-          type="button"
-          onClick={goPrevious}
-          disabled={pageIndex === 0 || loading}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <ChevronLeft className="h-4 w-4" /> {m.previous}
-        </button>
-        <span className="text-xs font-bold text-zinc-500">
-          {pageStart}-{pageEnd} / {filteredCount}
-        </span>
-        <button
-          type="button"
-          onClick={goNext}
-          disabled={!nextCursor || loading}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {m.next} <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
-    </section>
+      </AdminTile>
+    </div>
   );
 }

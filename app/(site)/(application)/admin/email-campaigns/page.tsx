@@ -1,11 +1,15 @@
 export const dynamic = "force-dynamic";
 
 import { AdminCampaignSchedulePanel } from "@/components/admin/AdminCampaignSchedulePanel";
-import { AdminCampaignComposer } from "@/components/admin/AdminCampaignComposer";
+import {
+  AdminCampaignComposer,
+  AdminCampaignNewTab,
+} from "@/components/admin/AdminCampaignComposer";
 import { AdminEmailCampaignsPanel } from "@/components/admin/AdminEmailCampaignsPanel";
 import { AdminPolicyNoticeComposer } from "@/components/admin/AdminPolicyNoticeComposer";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import {
   listAdminCampaigns,
   listCampaignSchedule,
@@ -45,6 +49,9 @@ const LIMIT = 100;
  *
  * Only the open section is loaded. Neither read is expensive, but a page that
  * loads both teaches the next section added here to do the same.
+ *
+ * Writing a campaign has its own section (`?tab=new`, 2026-11-07): the two
+ * composers used to sit open above the campaign list.
  */
 export default async function AdminEmailCampaignsPage({
   searchParams,
@@ -68,34 +75,39 @@ export default async function AdminEmailCampaignsPage({
       />
       {tab.id === "schedule" ? (
         <AdminCampaignSchedulePanel
-          rows={await listCampaignSchedule({ limit: LIMIT })}
+          rows={await listCampaignSchedule({ limit: LIMIT }).catch(() => null)}
           limit={LIMIT}
         />
+      ) : tab.id === "new" ? (
+        <AdminCampaignNewTab
+          notice={
+            <AdminPolicyNoticeComposer
+              mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
+              campaignsEnabled={campaignsEnabled}
+              templateKey={POLICY_CHANGE_NOTICE_TEMPLATE}
+              locales={SUPPORTED_LANGUAGES}
+              effectiveDate={POLICY_CHANGE_NOTICE_EFFECTIVE_DATE}
+              owedBefore={formatAestDateTime(CHANGE_NOTICE_OWED_BEFORE) ?? CHANGE_NOTICE_OWED_BEFORE}
+              wordingApproved={SUPPORTED_LANGUAGES.every((language) =>
+                isPolicyChangeNoticeWordingApproved(language, appUrl())
+              )}
+            />
+          }
+          product={
+            <AdminCampaignComposer
+              mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
+              campaignsEnabled={campaignsEnabled}
+              starterContent={assistantKnowledgeCampaignContent({
+                includePackageImport: packageImportAvailable,
+              })}
+            />
+          }
+        />
       ) : (
-        <>
-          <AdminPolicyNoticeComposer
-            mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
-            campaignsEnabled={campaignsEnabled}
-            templateKey={POLICY_CHANGE_NOTICE_TEMPLATE}
-            locales={SUPPORTED_LANGUAGES}
-            effectiveDate={POLICY_CHANGE_NOTICE_EFFECTIVE_DATE}
-            owedBefore={`${CHANGE_NOTICE_OWED_BEFORE.slice(0, 16).replace("T", " ")} UTC`}
-            wordingApproved={SUPPORTED_LANGUAGES.every((language) =>
-              isPolicyChangeNoticeWordingApproved(language, appUrl())
-            )}
-          />
-          <AdminCampaignComposer
-            mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
-            campaignsEnabled={campaignsEnabled}
-            starterContent={assistantKnowledgeCampaignContent({
-              includePackageImport: packageImportAvailable,
-            })}
-          />
-          <AdminEmailCampaignsPanel
-            rows={await listAdminCampaigns({ limit: LIMIT })}
-            limit={LIMIT}
-          />
-        </>
+        <AdminEmailCampaignsPanel
+          rows={await listAdminCampaigns({ limit: LIMIT }).catch(() => null)}
+          limit={LIMIT}
+        />
       )}
     </div>
   );

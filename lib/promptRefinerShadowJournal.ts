@@ -798,13 +798,14 @@ export function runPromptRefinerShadowHarness(input: {
     io.mkdirSync(dirname(paths.journal), { recursive: true });
     let lockDescriptor: number;
     try {
-        lockDescriptor = io.openSync(paths.lock, "wx", 0o600);
+        lockDescriptor = io.openSync(/*turbopackIgnore: true*/ paths.lock, "wx", 0o600);
     } catch {
         return fail("lock_unavailable_no_stale_recovery");
     }
     try {
         const anyExisting =
-            io.existsSync(paths.journal) || io.existsSync(paths.witness);
+            io.existsSync(/*turbopackIgnore: true*/ paths.journal) ||
+            io.existsSync(/*turbopackIgnore: true*/ paths.witness);
         if (input.resume) {
             if (!anyExisting) fail("resume_journal_missing");
         } else if (anyExisting) {

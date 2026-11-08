@@ -157,7 +157,11 @@ test.describe("model registry lifecycle filter", () => {
     await page.getByRole("button", { name: "Clear filters" }).click();
 
     await expect(lifecycleFilter(page)).toHaveValue("operational");
-    await expect(page.getByTestId("model-registry-provider-filter")).toHaveValue("all");
+    // The provider filter is a row of chips; "All" is the pressed one.
+    await expect(page.getByTestId("model-registry-provider-chip-all")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
     await expect(
       page.getByPlaceholder("Search name, model ID, API ID, provider, or purpose")
     ).toHaveValue("");

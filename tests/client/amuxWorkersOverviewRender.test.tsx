@@ -182,12 +182,23 @@ test("three summary cards count the groups, and a card selects its group", () =>
   (pressed.onClick as () => void)();
 });
 
-test("the table puts what needs a look first and omits the kept workers by default", () => {
+test("workers are grouped by channel, and the kept workers are omitted by default", () => {
   const tree = render();
-  const groups = propsOf(tree).map((props) => String(props["data-testid"] ?? "")).filter((id) => id.startsWith("amux-workers-group-"));
-  assert.deepEqual(groups, ["amux-workers-group-attention", "amux-workers-group-assignable", "amux-workers-group-waiting", "amux-workers-group-paused"]);
+  const channels = propsOf(tree).map((props) => String(props["data-testid"] ?? "")).filter((id) => id.startsWith("amux-workers-channel-"));
+  assert.deepEqual(channels, ["amux-workers-channel-claude", "amux-workers-channel-codex", "amux-workers-channel-copilot", "amux-workers-channel-cursor"]);
   assert.equal(byTestId(tree, "amux-worker-row-copilot-chore").length, 0);
   assert.equal(byTestId(render({ filter: "retired" }), "amux-worker-row-copilot-chore").length, 1);
+});
+
+test("a worker that cannot take work raises one banner, and its button shows only those workers", () => {
+  const calls: Record<string, unknown[]> = {};
+  const tree = render({ calls });
+  assert.equal(byTestId(tree, "amux-workers-banner").length, 1);
+  assert.match(textOf(byTestId(tree, "amux-workers-banner")[0]!.children as ReactNode), /1 worker cannot take work/);
+  (byTestId(tree, "amux-workers-banner-show")[0]!.onClick as () => void)();
+  assert.deepEqual(calls.filter, [["attention"]]);
+  // The attention card carries its group, so the screen can draw it red.
+  assert.equal(byTestId(tree, "amux-worker-row-claude-chore")[0]!["data-group"], "attention");
 });
 
 test("each row says its status and one sentence of why, without internal codes", () => {

@@ -1,0 +1,9 @@
+{
+  "tomverse-logo": { "file": "tomverse-logo.png", "provenance": "operator_upload", "shows": "the Tomverse logo mark (square)" },
+  "logo-openai": { "file": "chatgpt.png", "provenance": "operator_upload", "shows": "OpenAI mark, for GPT model chips (owner allowed model logos 2026-11-07)" },
+  "logo-claude": { "file": "claude.png", "provenance": "operator_upload", "shows": "Claude (Anthropic) mark, for Claude model chips" },
+  "logo-gemini": { "file": "gemini.png", "provenance": "operator_upload", "shows": "Gemini (Google) mark, for Gemini and Nano Banana chips" },
+  "logo-grok": { "file": "grok.png", "provenance": "operator_upload", "shows": "Grok (xAI) mark, for Grok chips" },
+  "photo-receipt": { "file": "photo-receipt.jpg", "provenance": "ai_generated", "shows": "1080x1350 photo: a blank white thermal receipt (x 338-745, y 285-1075) on a pale blue surface; made with Canva AI" },
+  "photo-laptop": { "file": "photo-laptop.jpg", "provenance": "ai_generated", "shows": "1080x1350 photo: top-down silver laptop with a glowing blue screen (y 378-940) and two blank sticky notes on white; made with Canva AI" }
+}

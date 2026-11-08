@@ -56,7 +56,7 @@ export function AmuxAutoAdmissionControlView({
   return (
     <section className="mx-auto w-full min-w-0 max-w-6xl p-4"
       data-testid="amux-v22-promotion-control" aria-busy={busy}>
-      <div className="space-y-5 rounded-2xl border p-5 text-sm border-zinc-700 bg-zinc-900 text-zinc-100 md:p-7">
+      <div className="space-y-5 rounded-2xl border p-5 text-sm border-zinc-800 bg-zinc-900 text-zinc-100 md:p-7">
         <div className="space-y-2">
           <h2 className="text-[22px] font-semibold leading-snug">{m.title}</h2>
           <p className="leading-6 text-zinc-400">{m.description}</p>

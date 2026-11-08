@@ -1,20 +1,8 @@
 ﻿"use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useEffect, useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  CreditCard,
-  Database,
-  Globe2,
-  Loader2,
-  Plus,
-  RefreshCw,
-  Save,
-  TicketPercent,
-  Trash2,
-  WalletCards,
-} from "lucide-react";
+import { Info, Loader2, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import type {
   BillingPlanConfig,
   BillingPromotionConfig,
@@ -35,10 +23,23 @@ import {
   billingMinorToMajor,
   type BillingCurrency,
 } from "@/lib/billingMarkets";
+import type { AdminMessageShape } from "@/lib/adminLocale";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminBillingMessages } from "@/lib/adminMessages/billing";
 import { publishPromotionDraftState } from "@/lib/promotionDiagnosticsEvents";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminConfirmDialog } from "@/components/admin/ui/AdminConfirmDialog";
+import {
+  AdminDataTable,
+  type AdminDataColumn,
+} from "@/components/admin/ui/AdminDataTable";
+import { AdminSaveBar } from "@/components/admin/ui/AdminSaveBar";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminSwitch } from "@/components/admin/ui/AdminSwitch";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminFetch } from "@/lib/adminFetch";
 
 type BillingConfigPayload = {
@@ -56,14 +57,30 @@ type BillingConfigPayload = {
   priceCatalogSource?: BillingPriceCatalogSource;
 };
 
+/** How many accounts sit on each plan; `null` when the count could not be read. */
+export type BillingSubscriberCounts = {
+  free: number | null;
+  pro: number | null;
+  max: number | null;
+};
+
 type Props = BillingConfigPayload & {
-  paidUserCount: number;
-  activeSubscriptionCount: number;
+  /** Whether this role may save: the same `billing:write` the PATCH route checks. */
+  canWrite: boolean;
+  subscribers: BillingSubscriberCounts;
+  /**
+   * The page's `?tab=` is the section: the panel follows `initialTab` and
+   * draws no tab strip of its own, so the address and the screen cannot
+   * disagree (2026-11-07).
+   */
   initialTab?: "plans" | "prices" | "promotions";
+  /** Drawn under the promotion codes, above the save bar (the risk monitor). */
+  afterPromotions?: React.ReactNode;
 };
 
 type EditablePlan = BillingPlanConfig;
 type EditablePromotion = BillingPromotionConfig;
+type Copy = AdminMessageShape<typeof adminBillingMessages.en>;
 type AdminBillingResponse = BillingConfigPayload & {
   error?: string;
   /**
@@ -76,16 +93,16 @@ type AdminBillingResponse = BillingConfigPayload & {
 
 const PROMOTION_POLICY_REFUSAL_CODE = "PROMOTION_FIXED_AMOUNT_BLOCKED";
 
-const PLAN_ACCENTS: Record<EditablePlan["id"], string> = {
-  free: "from-emerald-500/20 to-emerald-500/5 border-emerald-500/30",
-  pro: "from-blue-500/20 to-blue-500/5 border-blue-500/30",
-  max: "from-purple-500/20 to-purple-500/5 border-purple-500/30",
+const PLAN_DOT: Record<EditablePlan["id"], string> = {
+  free: "bg-zinc-400",
+  pro: "bg-blue-500",
+  max: "bg-violet-500",
 };
 
 const dollars = (cents: number) =>
   (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
 
-const money = (cents: number) => `$${dollars(cents)}`;
+const numberText = (value: number) => value.toLocaleString("en-US");
 
 const toCents = (value: string) => {
   const parsed = Number(value);
@@ -113,11 +130,6 @@ const toDateInputValue = (value: string | null) => {
 
 const fromDateInputValue = (value: string) =>
   value ? new Date(`${value}T00:00:00.000Z`).toISOString() : null;
-
-const statusPill = (active: boolean) =>
-  active
-    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-    : "border-zinc-700 bg-zinc-900 text-zinc-400";
 
 /**
  * The same shape the endpoint judges a promotion write from, so the panel and
@@ -157,6 +169,121 @@ const newPromotion = (): EditablePromotion => ({
   isActive: true,
 });
 
+const PLAN_VALUE_FIELDS = [
+  "monthlyPriceCents",
+  "annualPriceCents",
+  "dailyMessageLimit",
+  "monthlyMessageLimit",
+  "maxModels",
+] as const;
+const PLAN_FLAG_FIELDS = [
+  "isActive",
+  "allowAttachments",
+  "allowSharing",
+  "allowDownloads",
+] as const;
+
+/**
+ * What differs between the stored plan and the draft, one short line each
+ * ("Monthly credits 6,000 → 8,000"). Stripe IDs are named but never quoted:
+ * they are internal identifiers, not something to read out in a summary.
+ */
+export function planChangeLines(
+  baseline: EditablePlan | undefined,
+  draft: EditablePlan,
+  m: Copy["plan"]
+): string[] {
+  if (!baseline) return [];
+  const lines: string[] = [];
+  for (const key of PLAN_VALUE_FIELDS) {
+    if (baseline[key] === draft[key]) continue;
+    const isPrice = key === "monthlyPriceCents" || key === "annualPriceCents";
+    const show = (value: number) =>
+      isPrice ? `US$ ${dollars(value)}` : numberText(value);
+    lines.push(m.change(m.changeLabel[key], show(baseline[key]), show(draft[key])));
+  }
+  for (const key of PLAN_FLAG_FIELDS) {
+    if (baseline[key] === draft[key]) continue;
+    const show = (value: boolean) => (value ? m.on : m.off);
+    lines.push(m.change(m.changeLabel[key], show(baseline[key]), show(draft[key])));
+  }
+  if (
+    (baseline.stripeProductId || null) !== (draft.stripeProductId || null) ||
+    (baseline.stripePriceId || null) !== (draft.stripePriceId || null) ||
+    (baseline.stripeAnnualPriceId || null) !== (draft.stripeAnnualPriceId || null)
+  ) {
+    lines.push(m.stripeIdsChanged);
+  }
+  return lines;
+}
+
+/** One line per added, removed or edited promotion code. */
+export function promotionChangeLines(
+  baselines: readonly EditablePromotion[],
+  drafts: readonly EditablePromotion[],
+  m: Copy
+): string[] {
+  const p = m.promotion;
+  const show = (value: unknown): string => {
+    if (value === null || value === undefined || value === "") return p.unset;
+    if (typeof value === "boolean") return value ? m.plan.on : m.plan.off;
+    if (typeof value === "number") return numberText(value);
+    if (Array.isArray(value)) return value.length ? value.join(", ") : p.unset;
+    return String(value);
+  };
+  const fields: Array<{
+    label: string;
+    read: (promotion: EditablePromotion) => unknown;
+  }> = [
+    { label: p.code, read: (x) => x.code },
+    { label: p.discountPercent, read: (x) => x.discountPercent },
+    {
+      label: p.fixedDiscountUsd,
+      read: (x) =>
+        x.discountAmountCents === null || x.discountAmountCents === undefined
+          ? null
+          : `US$ ${dollars(x.discountAmountCents)}`,
+    },
+    { label: p.maxRedemptions, read: (x) => x.maxRedemptions },
+    { label: p.durationMonths, read: (x) => x.durationMonths },
+    { label: p.fulfillment, read: (x) => x.fulfillmentType },
+    { label: p.passDurationDays, read: (x) => x.accessDurationDays },
+    { label: p.starts, read: (x) => toDateInputValue(x.startsAt) },
+    { label: p.ends, read: (x) => toDateInputValue(x.endsAt) },
+    { label: p.eligiblePlans, read: (x) => x.appliesToPlanIds },
+    { label: p.allowAnnualStacking, read: (x) => x.allowAnnualStacking },
+    { label: p.active, read: (x) => x.isActive },
+  ];
+  const lines: string[] = [];
+  for (const draft of drafts) {
+    const baseline = baselines.find((item) => item.id === draft.id);
+    if (!baseline) {
+      lines.push(p.added(draft.code));
+      continue;
+    }
+    const changes = fields.flatMap((field) => {
+      const from = field.read(baseline);
+      const to = field.read(draft);
+      return JSON.stringify(from) === JSON.stringify(to)
+        ? []
+        : [m.plan.change(field.label, show(from), show(to))];
+    });
+    if (
+      (baseline.stripeCouponId || null) !== (draft.stripeCouponId || null) ||
+      (baseline.stripePromotionCodeId || null) !== (draft.stripePromotionCodeId || null)
+    ) {
+      changes.push(p.stripeIdsChanged);
+    }
+    if (changes.length > 0) lines.push(p.changed(baseline.code, changes.join(", ")));
+  }
+  for (const baseline of baselines) {
+    if (!drafts.some((item) => item.id === baseline.id)) {
+      lines.push(p.removed(baseline.code));
+    }
+  }
+  return lines;
+}
+
 function Field({
   label,
   children,
@@ -176,65 +303,138 @@ function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={`w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 ${props.className || ""}`}
+      className={`w-full min-w-0 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:opacity-60 ${props.className || ""}`}
     />
   );
 }
 
-function PlanEditor({
+function PlanCard({
   plan,
+  baseline,
+  subscribers,
   onChange,
 }: {
   plan: EditablePlan;
+  baseline: EditablePlan | undefined;
+  subscribers: number | null;
   onChange: (plan: EditablePlan) => void;
 }) {
   const m = useAdminMessages(adminBillingMessages).plan;
   const hasStripeIds = Boolean(plan.stripeProductId && plan.stripePriceId);
-  const annualSavings = plan.monthlyPriceCents > 0
-    ? Math.max(0, 100 - Math.round((plan.annualPriceCents / (plan.monthlyPriceCents * 12)) * 100))
-    : 0;
+  const annualSavings =
+    plan.monthlyPriceCents > 0
+      ? Math.max(
+          0,
+          100 -
+            Math.round(
+              (plan.annualPriceCents / (plan.monthlyPriceCents * 12)) * 100
+            )
+        )
+      : 0;
+  const changes = planChangeLines(baseline, plan, m);
 
   return (
-    <article className={`rounded-3xl border bg-gradient-to-br p-5 ${PLAN_ACCENTS[plan.id]}`}>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-xl font-black text-white">{plan.name}</h3>
-            <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusPill(plan.isActive)}`}>
-              {plan.isActive ? m.active : m.hidden}
-            </span>
-          </div>
-          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-            {plan.id} / {plan.tier}
+    <AdminTile
+      as="article"
+      data-testid={`billing-plan-${plan.id}`}
+      data-changed={changes.length > 0 ? "true" : undefined}
+      className={changes.length > 0 ? "ring-2 ring-blue-500" : ""}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden
+            className={`h-3 w-3 shrink-0 rounded-sm ${PLAN_DOT[plan.id]}`}
+          />
+          <h3 className="truncate text-lg font-bold text-white">{plan.name}</h3>
+        </div>
+        {plan.id === "free" ? (
+          <AdminStatusChip tone="idle">{m.noPayment}</AdminStatusChip>
+        ) : hasStripeIds ? (
+          <AdminStatusChip tone="ok">{m.stripeConnected}</AdminStatusChip>
+        ) : (
+          <AdminStatusChip tone="warn">{m.priceIdNeeded}</AdminStatusChip>
+        )}
+      </div>
+
+      <div>
+        <p className="text-3xl font-bold tabular-nums tracking-tight text-white">
+          US$ {dollars(plan.monthlyPriceCents)}{" "}
+          <span className="text-sm font-medium text-zinc-500">{m.perMonth}</span>
+        </p>
+        {plan.id !== "free" ? (
+          <p className="mt-1 text-xs text-zinc-500">
+            {m.annualLine(dollars(plan.annualPriceCents), annualSavings)}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 rounded-xl bg-zinc-950 p-3">
+        <div className="min-w-0">
+          <p className="text-xs text-zinc-500">
+            {plan.id === "free" ? m.users : m.subscribers}
+          </p>
+          <p
+            className={`mt-1 tabular-nums ${
+              subscribers === null
+                ? "text-sm text-zinc-400"
+                : "text-lg font-bold text-white"
+            }`}
+          >
+            {subscribers === null ? m.unreadCount : numberText(subscribers)}
           </p>
         </div>
-        <label className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs font-semibold text-zinc-300">
-          {m.active}
-          <input
-            type="checkbox"
-            checked={plan.isActive}
-            onChange={(event) => onChange({ ...plan, isActive: event.target.checked })}
-            className="h-4 w-4 accent-blue-500"
+        <Field label={m.monthlyCredits}>
+          <TextInput
+            type="number"
+            min="0"
+            value={plan.monthlyMessageLimit}
+            onChange={(event) =>
+              onChange({
+                ...plan,
+                monthlyMessageLimit: Number(event.target.value) || 0,
+              })
+            }
+            className="px-2 font-bold tabular-nums"
           />
-        </label>
+        </Field>
+        <Field label={m.comparedModels}>
+          <TextInput
+            type="number"
+            min="1"
+            max="10"
+            value={plan.maxModels}
+            onChange={(event) =>
+              onChange({ ...plan, maxModels: Number(event.target.value) || 1 })
+            }
+            className="px-2 font-bold tabular-nums"
+          />
+        </Field>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
-          <p className="text-xs font-semibold text-zinc-500">{m.monthly}</p>
-          <p className="mt-1 text-lg font-black text-white">{money(plan.monthlyPriceCents)}</p>
-        </div>
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
-          <p className="text-xs font-semibold text-zinc-500">{m.annual}</p>
-          <p className="mt-1 text-lg font-black text-white">{money(plan.annualPriceCents)}</p>
-        </div>
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
-          <p className="text-xs font-semibold text-zinc-500">{m.annualSave}</p>
-          <p className="mt-1 text-lg font-black text-white">{annualSavings}%</p>
-        </div>
+      <div className="flex flex-col">
+        <AdminSwitch
+          label={m.active}
+          checked={plan.isActive}
+          onChange={(isActive) => onChange({ ...plan, isActive })}
+        />
+        {(
+          [
+            ["allowAttachments", m.features.allowAttachments],
+            ["allowSharing", m.features.allowSharing],
+            ["allowDownloads", m.features.allowDownloads],
+          ] as const
+        ).map(([key, label]) => (
+          <AdminSwitch
+            key={key}
+            label={label}
+            checked={plan[key]}
+            onChange={(next) => onChange({ ...plan, [key]: next })}
+          />
+        ))}
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field label={m.monthlyPriceUsd}>
           <TextInput
             type="number"
@@ -257,104 +457,78 @@ function PlanEditor({
             }
           />
         </Field>
-        <Field label={m.dailyCredits}>
-          <TextInput
-            type="number"
-            min="0"
-            value={plan.dailyMessageLimit}
-            onChange={(event) =>
-              onChange({ ...plan, dailyMessageLimit: Number(event.target.value) || 0 })
-            }
-          />
-        </Field>
-        <Field label={m.monthlyCredits}>
-          <TextInput
-            type="number"
-            min="0"
-            value={plan.monthlyMessageLimit}
-            onChange={(event) =>
-              onChange({ ...plan, monthlyMessageLimit: Number(event.target.value) || 0 })
-            }
-          />
-        </Field>
-        <Field label={m.maxModels}>
-          <TextInput
-            type="number"
-            min="1"
-            max="10"
-            value={plan.maxModels}
-            onChange={(event) =>
-              onChange({ ...plan, maxModels: Number(event.target.value) || 1 })
-            }
-          />
-        </Field>
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
-          <p className="text-xs font-semibold text-zinc-500">{m.stripeStatus}</p>
-          <p className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${statusPill(hasStripeIds)}`}>
-            {hasStripeIds ? m.linked : m.priceIdNeeded}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-3">
-        <Field label={m.stripeProductId}>
-          <TextInput
-            value={plan.stripeProductId || ""}
-            onChange={(event) =>
-              onChange({ ...plan, stripeProductId: event.target.value || null })
-            }
-            placeholder="prod_..."
-          />
-        </Field>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={m.stripeMonthlyPriceId}>
+        <div className="sm:col-span-2">
+          <Field label={m.dailyCredits}>
             <TextInput
-              value={plan.stripePriceId || ""}
+              type="number"
+              min="0"
+              value={plan.dailyMessageLimit}
               onChange={(event) =>
-                onChange({ ...plan, stripePriceId: event.target.value || null })
+                onChange({
+                  ...plan,
+                  dailyMessageLimit: Number(event.target.value) || 0,
+                })
               }
-              placeholder="price_..."
-            />
-          </Field>
-          <Field label={m.stripeAnnualPriceId}>
-            <TextInput
-              value={plan.stripeAnnualPriceId || ""}
-              onChange={(event) =>
-                onChange({ ...plan, stripeAnnualPriceId: event.target.value || null })
-              }
-              placeholder="price_..."
             />
           </Field>
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2">
-        {[
-          ["allowAttachments", m.features.allowAttachments],
-          ["allowSharing", m.features.allowSharing],
-          ["allowDownloads", m.features.allowDownloads],
-        ].map(([key, label]) => (
-          <label
-            key={key}
-            className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs font-semibold text-zinc-300"
-          >
-            <input
-              type="checkbox"
-              checked={Boolean(plan[key as keyof EditablePlan])}
-              onChange={(event) =>
-                onChange({ ...plan, [key]: event.target.checked })
-              }
-              className="h-4 w-4 accent-blue-500"
-            />
-            {label}
-          </label>
-        ))}
-      </div>
-    </article>
+      {plan.id !== "free" ? (
+        <AdminTechInfo summary={m.stripeIdsSummary}>
+          <div className="flex flex-col gap-3 font-sans">
+            <Field label={m.stripeProductId}>
+              <TextInput
+                value={plan.stripeProductId || ""}
+                onChange={(event) =>
+                  onChange({ ...plan, stripeProductId: event.target.value || null })
+                }
+                placeholder="prod_..."
+              />
+            </Field>
+            <Field label={m.stripeMonthlyPriceId}>
+              <TextInput
+                value={plan.stripePriceId || ""}
+                onChange={(event) =>
+                  onChange({ ...plan, stripePriceId: event.target.value || null })
+                }
+                placeholder="price_..."
+              />
+            </Field>
+            <Field label={m.stripeAnnualPriceId}>
+              <TextInput
+                value={plan.stripeAnnualPriceId || ""}
+                onChange={(event) =>
+                  onChange({
+                    ...plan,
+                    stripeAnnualPriceId: event.target.value || null,
+                  })
+                }
+                placeholder="price_..."
+              />
+            </Field>
+          </div>
+        </AdminTechInfo>
+      ) : null}
+
+      {changes.length > 0 ? (
+        <div
+          data-testid={`billing-plan-${plan.id}-changes`}
+          className="flex flex-col gap-1 rounded-xl bg-blue-500/10 px-3 py-2 text-xs text-blue-300"
+        >
+          {changes.map((line) => (
+            <p key={line} className="flex items-start gap-1.5">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              {m.changedNote(line)}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </AdminTile>
   );
 }
 
-function PromotionEditor({
+function PromotionCard({
   promotion,
   baseline,
   refusal,
@@ -386,14 +560,14 @@ function PromotionEditor({
     : null;
 
   return (
-    <article className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+    <AdminTile as="article">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-lg font-black text-white">{promotion.code}</h3>
-            <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusPill(promotion.isActive)}`}>
+            <h3 className="text-lg font-bold text-white">{promotion.code}</h3>
+            <AdminStatusChip tone={promotion.isActive ? "ok" : "idle"}>
               {promotion.isActive ? m.active : m.paused}
-            </span>
+            </AdminStatusChip>
           </div>
           <p className="mt-1 text-xs text-zinc-500">
             {m.redeemed(
@@ -403,30 +577,25 @@ function PromotionEditor({
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-300">
-            {m.active}
-            <input
-              type="checkbox"
-              checked={promotion.isActive}
-              onChange={(event) =>
-                onChange({ ...promotion, isActive: event.target.checked })
-              }
-              className="h-4 w-4 accent-blue-500"
-            />
-          </label>
+        <div className="flex shrink-0 items-center gap-3">
+          <AdminSwitch
+            label={m.active}
+            checked={promotion.isActive}
+            onChange={(isActive) => onChange({ ...promotion, isActive })}
+            className="w-auto"
+          />
           <button
             type="button"
             onClick={onDelete}
-            className="rounded-xl border border-red-500/30 p-2 text-red-300 hover:bg-red-500/10"
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-red-300 hover:bg-red-500/15"
             aria-label={m.deletePromotion}
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash2 className="h-4 w-4" aria-hidden />
           </button>
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-3">
         <Field label={m.code}>
           <TextInput
             value={promotion.code}
@@ -481,13 +650,13 @@ function PromotionEditor({
         <p
           data-testid="promotion-policy-refusal"
           role="status"
-          className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold leading-5 text-red-200"
+          className="rounded-xl bg-red-500/10 px-3 py-2 text-xs font-semibold leading-5 text-red-300"
         >
           {refusal}
         </p>
       ) : null}
 
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-3">
         <Field label={m.fulfillment}>
           <select
             value={promotion.fulfillmentType}
@@ -504,7 +673,7 @@ function PromotionEditor({
                     : null,
               });
             }}
-            className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500"
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
           >
             <option value="stripe_subscription">{m.stripeSubscription}</option>
             <option value="internal_pass">{m.internalPass}</option>
@@ -573,16 +742,17 @@ function PromotionEditor({
       </div>
 
       {promotion.fulfillmentType === "internal_pass" ? (
-        <p className="mt-3 rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs font-semibold leading-5 text-blue-200">
+        <p className="rounded-xl bg-blue-500/10 px-3 py-2 text-xs font-semibold leading-5 text-blue-300">
           {m.internalPassNote}
         </p>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-zinc-400">{m.eligiblePlans}</span>
         {(["pro", "max"] as const).map((planId) => (
           <label
             key={planId}
-            className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-semibold uppercase text-zinc-300"
+            className="flex items-center gap-2 rounded-full border border-zinc-700 px-3 py-1.5 text-xs font-semibold uppercase text-zinc-300"
           >
             <input
               type="checkbox"
@@ -600,30 +770,21 @@ function PromotionEditor({
             {planId}
           </label>
         ))}
-        <label className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-100">
-          <input
-            type="checkbox"
-            checked={promotion.allowAnnualStacking}
-            onChange={(event) =>
-              onChange({
-                ...promotion,
-                allowAnnualStacking: event.target.checked,
-              })
-            }
-            className="h-4 w-4 accent-amber-500"
-          />
-          {m.allowAnnualStacking}
-        </label>
       </div>
-      <p className="mt-2 text-xs leading-5 text-zinc-500">
-        {m.stackingNote}
-      </p>
 
-      <details className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-        <summary className="cursor-pointer text-sm font-bold text-zinc-200">
-          {m.stripeCouponLinkage}
-        </summary>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div>
+        <AdminSwitch
+          label={m.allowAnnualStacking}
+          checked={promotion.allowAnnualStacking}
+          onChange={(allowAnnualStacking) =>
+            onChange({ ...promotion, allowAnnualStacking })
+          }
+        />
+        <p className="mt-1 text-xs leading-5 text-zinc-500">{m.stackingNote}</p>
+      </div>
+
+      <AdminTechInfo summary={m.stripeCouponLinkage}>
+        <div className="grid gap-3 font-sans md:grid-cols-2">
           <Field label={m.stripeCouponId}>
             <TextInput
               value={promotion.stripeCouponId || ""}
@@ -646,25 +807,30 @@ function PromotionEditor({
             />
           </Field>
         </div>
-      </details>
-    </article>
+      </AdminTechInfo>
+    </AdminTile>
   );
 }
 
 const LOCALIZED_PLAN_CURRENCIES = ["AUD", "CNY", "EUR", "KRW"] as const;
+type LocalizedPlanCurrency = (typeof LOCALIZED_PLAN_CURRENCIES)[number];
 const CREDIT_PACK_IDS = ["starter_500", "project_1500", "power_4000"] as const;
 
 function LocalizedPriceEditor({
   catalog,
+  updatedAt,
+  source,
   onChange,
 }: {
   catalog: BillingPriceCatalog;
+  updatedAt: string | null;
+  source: BillingPriceCatalogSource | undefined;
   onChange: (catalog: BillingPriceCatalog) => void;
 }) {
   const m = useAdminMessages(adminBillingMessages).prices;
   const updatePlanPrice = (
     planId: "pro" | "max",
-    currency: (typeof LOCALIZED_PLAN_CURRENCIES)[number],
+    currency: LocalizedPlanCurrency,
     interval: "monthly" | "annual",
     value: string
   ) => {
@@ -700,92 +866,115 @@ function LocalizedPriceEditor({
     });
   };
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-black text-white">{m.subscriptionTitle}</h3>
-        <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-400">
-          {m.subscriptionDescription}
-        </p>
-      </div>
-      <div className="overflow-x-auto rounded-2xl border border-zinc-800">
-        <table className="min-w-[860px] w-full text-left text-sm">
-          <thead className="bg-zinc-900 text-xs uppercase tracking-[0.12em] text-zinc-500">
-            <tr>
-              <th className="px-4 py-3">{m.currency}</th>
-              <th className="px-4 py-3">{m.proMonthly}</th>
-              <th className="px-4 py-3">{m.proAnnual}</th>
-              <th className="px-4 py-3">{m.maxMonthly}</th>
-              <th className="px-4 py-3">{m.maxAnnual}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-800">
-            {LOCALIZED_PLAN_CURRENCIES.map((currency) => (
-              <tr key={currency} className="bg-zinc-950/60">
-                <td className="px-4 py-3 font-black text-white">{currency}</td>
-                {(["pro", "max"] as const).flatMap((planId) =>
-                  (["monthly", "annual"] as const).map((interval) => (
-                    <td key={`${planId}-${interval}`} className="px-3 py-3">
-                      <TextInput
-                        type="number"
-                        min="0"
-                        step={currency === "KRW" ? "1" : "0.01"}
-                        value={priceInputValue(
-                          catalog.plans[planId][currency][interval],
-                          currency
-                        )}
-                        onChange={(event) =>
-                          updatePlanPrice(
-                            planId,
-                            currency,
-                            interval,
-                            event.target.value
-                          )
-                        }
-                        aria-label={m.priceInputLabel(planId, interval, currency)}
-                      />
-                    </td>
-                  ))
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+  const planHeaders: Record<string, string> = {
+    "pro-monthly": m.proMonthly,
+    "pro-annual": m.proAnnual,
+    "max-monthly": m.maxMonthly,
+    "max-annual": m.maxAnnual,
+  };
+  const planColumns: AdminDataColumn<LocalizedPlanCurrency>[] = [
+    {
+      key: "currency",
+      header: m.currency,
+      render: (currency) => (
+        <span className="font-bold text-white">{currency}</span>
+      ),
+    },
+    ...(["pro", "max"] as const).flatMap((planId) =>
+      (["monthly", "annual"] as const).map(
+        (interval): AdminDataColumn<LocalizedPlanCurrency> => ({
+          key: `${planId}-${interval}`,
+          header: planHeaders[`${planId}-${interval}`],
+          render: (currency) => (
+            <TextInput
+              type="number"
+              min="0"
+              step={currency === "KRW" ? "1" : "0.01"}
+              value={priceInputValue(
+                catalog.plans[planId][currency][interval],
+                currency
+              )}
+              onChange={(event) =>
+                updatePlanPrice(planId, currency, interval, event.target.value)
+              }
+              aria-label={m.priceInputLabel(planId, interval, currency)}
+              className="min-w-24"
+            />
+          ),
+        })
+      )
+    ),
+  ];
+  const packColumns: AdminDataColumn<BillingCurrency>[] = [
+    {
+      key: "currency",
+      header: m.currency,
+      render: (currency) => (
+        <span className="font-bold text-white">{currency}</span>
+      ),
+    },
+    ...CREDIT_PACK_IDS.map(
+      (packId): AdminDataColumn<BillingCurrency> => ({
+        key: packId,
+        header: m.creditPacks[packId],
+        render: (currency) => (
+          <TextInput
+            type="number"
+            min="0.01"
+            step={currency === "KRW" ? "1" : "0.01"}
+            value={priceInputValue(catalog.creditPacks[packId][currency], currency)}
+            onChange={(event) =>
+              updatePackPrice(packId, currency, event.target.value)
+            }
+            aria-label={m.packInputLabel(m.creditPacks[packId], currency)}
+            className="min-w-24"
+          />
+        ),
+      })
+    ),
+  ];
+  const savedAt = formatAestDateTime(updatedAt);
 
-      <div>
-        <h3 className="text-lg font-black text-white">{m.creditPackTitle}</h3>
-        <p className="mt-1 text-sm text-zinc-400">
-          {m.creditPackDescription}
+  return (
+    <div className="flex flex-col gap-5">
+      {source && source !== "stored" ? (
+        <p
+          data-testid="price-catalog-fallback-notice"
+          role="status"
+          className="rounded-2xl bg-amber-500/10 px-4 py-3 text-xs font-semibold leading-5 text-amber-300"
+        >
+          {source === "created_from_default"
+            ? m.fallbackCreated
+            : m.fallbackUnreadable}
         </p>
-      </div>
-      <div className="grid gap-4 xl:grid-cols-3">
-        {CREDIT_PACK_IDS.map(
-          (packId) => (
-            <article key={packId} className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
-              <h4 className="font-black text-white">{m.creditPacks[packId]}</h4>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                {BILLING_CURRENCIES.map((currency) => (
-                  <Field key={currency} label={m.checkoutAmount(currency)}>
-                    <TextInput
-                      type="number"
-                      min="0.01"
-                      step={currency === "KRW" ? "1" : "0.01"}
-                      value={priceInputValue(
-                        catalog.creditPacks[packId][currency],
-                        currency
-                      )}
-                      onChange={(event) =>
-                        updatePackPrice(packId, currency, event.target.value)
-                      }
-                    />
-                  </Field>
-                ))}
-              </div>
-            </article>
-          )
-        )}
-      </div>
+      ) : null}
+      <AdminTile
+        title={m.subscriptionTitle}
+        description={m.subscriptionDescription}
+        action={
+          savedAt ? (
+            <span className="text-xs text-zinc-500">{m.lastSaved(savedAt)}</span>
+          ) : null
+        }
+      >
+        <AdminDataTable
+          caption={m.subscriptionTitle}
+          columns={planColumns}
+          rows={LOCALIZED_PLAN_CURRENCIES}
+          rowKey={(currency) => currency}
+        />
+      </AdminTile>
+      <AdminTile
+        title={m.creditPackTitle}
+        description={m.creditPackDescription}
+      >
+        <AdminDataTable
+          caption={m.creditPackTitle}
+          columns={packColumns}
+          rows={BILLING_CURRENCIES}
+          rowKey={(currency) => currency}
+        />
+      </AdminTile>
     </div>
   );
 }
@@ -796,9 +985,10 @@ export function BillingAdminPanel({
   priceCatalog,
   priceCatalogUpdatedAt,
   priceCatalogSource,
-  paidUserCount,
-  activeSubscriptionCount,
+  canWrite,
+  subscribers,
   initialTab = "plans",
+  afterPromotions,
 }: Props) {
   const m = useAdminMessages(adminBillingMessages);
   const [draftPlans, setDraftPlans] = useState<EditablePlan[]>(plans);
@@ -819,9 +1009,8 @@ export function BillingAdminPanel({
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isValidatingStripe, setIsValidatingStripe] = useState(false);
-  const [showSaveReview, setShowSaveReview] = useState(false);
-  const [activeTab, setActiveTab] =
-    useState<"plans" | "prices" | "promotions">(initialTab);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const activeTab = initialTab;
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [stripeValidation, setStripeValidation] = useState<
     Array<{
@@ -878,6 +1067,10 @@ export function BillingAdminPanel({
   );
   useEffect(() => {
     publishPromotionDraftState({ dirtyPromotionIds });
+    // The draft lives in this panel. When the operator leaves for a tab that
+    // does not draw it (Diagnostics), nothing is dirty any more, and a stale
+    // list would keep blocking that tab's diagnostics for a draft that is gone.
+    return () => publishPromotionDraftState({ dirtyPromotionIds: [] });
   }, [dirtyPromotionIds]);
 
   const dirtyPriceCount = useMemo(
@@ -887,6 +1080,7 @@ export function BillingAdminPanel({
         : 1,
     [baselinePriceCatalog, draftPriceCatalog]
   );
+  const dirtyCount = dirtyPlanCount + dirtyPriceCount + dirtyPromotionCount;
   /**
    * The fixed-amount edits this draft would be refused for, keyed by promotion.
    *
@@ -962,21 +1156,22 @@ export function BillingAdminPanel({
     return warnings;
   }, [draftPlans, draftPromotions, m]);
 
-  const totals = useMemo(() => {
-    const paidPlans = draftPlans.filter((plan) => plan.id !== "free");
-    const activePromotions = draftPromotions.filter((promotion) => promotion.isActive);
-    return {
-      paidPlanTypeCount: paidPlans.length,
-      linkedPlanCount: paidPlans.filter(
-        (plan) => plan.stripePriceId || plan.stripeAnnualPriceId
-      ).length,
-      activePromotionCount: activePromotions.length,
-      monthlyRevenueSample: paidPlans.reduce(
-        (sum, plan) => sum + plan.monthlyPriceCents,
-        0
-      ),
-    };
-  }, [draftPlans, draftPromotions]);
+  /** What the review dialog lists, one line per thing that would be saved. */
+  const reviewLines = useMemo(() => {
+    const planLines = draftPlans.flatMap((plan) => {
+      const lines = planChangeLines(
+        baselinePlans.find((item) => item.id === plan.id),
+        plan,
+        m.plan
+      );
+      return lines.length > 0 ? [`${plan.name}: ${lines.join(", ")}`] : [];
+    });
+    return [
+      ...planLines,
+      ...(dirtyPriceCount > 0 ? [m.review.pricesChanged] : []),
+      ...promotionChangeLines(baselinePromotions, draftPromotions, m),
+    ];
+  }, [baselinePlans, baselinePromotions, dirtyPriceCount, draftPlans, draftPromotions, m]);
 
   const applyResponse = (data: BillingConfigPayload) => {
     setDraftPlans(data.plans);
@@ -987,7 +1182,14 @@ export function BillingAdminPanel({
     setBaselinePriceCatalog(data.priceCatalog);
     setDraftPriceCatalogUpdatedAt(data.priceCatalogUpdatedAt);
     setCatalogSource(data.priceCatalogSource);
-    setLastSyncedAt(new Date().toLocaleTimeString());
+    setLastSyncedAt(formatAestDateTime(new Date(), { seconds: true }) ?? "-");
+  };
+
+  /** Puts every draft back to what was last saved. Local only: nothing is sent. */
+  const revert = () => {
+    setDraftPlans(baselinePlans);
+    setDraftPromotions(baselinePromotions);
+    setDraftPriceCatalog(baselinePriceCatalog);
   };
 
   const refresh = async () => {
@@ -1011,6 +1213,7 @@ export function BillingAdminPanel({
   const save = async () => {
     if (isSaving) return;
     if (promotionRefusals.size > 0) {
+      setReviewOpen(false);
       dispatchAppToast(
         m.toasts.nothingSaved(Array.from(promotionRefusals.values())[0]),
         "error"
@@ -1018,7 +1221,7 @@ export function BillingAdminPanel({
       return;
     }
     setIsSaving(true);
-    setShowSaveReview(false);
+    setReviewOpen(false);
     try {
       const response = await adminFetch("/api/admin/billing", {
         method: "PATCH",
@@ -1047,12 +1250,13 @@ export function BillingAdminPanel({
     }
   };
 
-  const requestSave = () => {
-    if (dirtyPlanCount + dirtyPromotionCount + dirtyPriceCount > 0 && !showSaveReview) {
-      setShowSaveReview(true);
-      return;
-    }
-    save();
+  /**
+   * The only way to a save: the save bar opens this review, and the review's
+   * confirm button runs `save`. There is no other button that calls it.
+   */
+  const requestReview = () => {
+    if (!canWrite || isSaving || isRefreshing || dirtyCount === 0) return;
+    setReviewOpen(true);
   };
 
   const validateStripeIds = async () => {
@@ -1098,315 +1302,198 @@ export function BillingAdminPanel({
     }
   };
 
-  return (
-    <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80 shadow-2xl shadow-black/20">
-      <div className="border-b border-zinc-800 bg-zinc-900/60 p-5">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">
-              <CreditCard className="h-3.5 w-3.5" />
-              {m.header.eyebrow}
-            </div>
-            <h2 className="mt-3 text-2xl font-black text-white">
-              {m.header.title}
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              {m.header.description}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={refresh}
-              disabled={isRefreshing || isSaving}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              {m.header.reloadDb}
-            </button>
-            <button
-              type="button"
-              onClick={requestSave}
-              disabled={isSaving || isRefreshing}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              {m.header.saveToDb}
-            </button>
-          </div>
-        </div>
+  const stripeStatusChip = (status: string) => (
+    <AdminStatusChip tone={status === "ok" ? "ok" : "bad"}>{status}</AdminStatusChip>
+  );
+  const reviewShown = reviewLines.slice(0, 10);
+  const hasIssues = promotionRefusals.size > 0 || stripeWarnings.length > 0;
 
-        <div className="mt-5 grid gap-3 md:grid-cols-4">
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">{m.stats.paidUsers}</p>
-            <p className="mt-2 text-2xl font-black text-white">{paidUserCount}</p>
-            <p className="mt-1 text-xs font-semibold text-zinc-500">
-              {m.stats.activeStripe(activeSubscriptionCount)}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">{m.stats.stripeLinked}</p>
-            <p className="mt-2 text-2xl font-black text-white">
-              {totals.linkedPlanCount}/{totals.paidPlanTypeCount}
-            </p>
-            <p className="mt-1 text-xs font-semibold text-zinc-500">
-              {m.stats.paidPlanTypes}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">{m.stats.activePromos}</p>
-            <p className="mt-2 text-2xl font-black text-white">{totals.activePromotionCount}</p>
-          </div>
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">{m.stats.dbSync}</p>
-            <p className="mt-2 flex items-center gap-2 text-sm font-bold text-emerald-300">
-              <Database className="h-4 w-4" />
-              {lastSyncedAt ? m.stats.synced(lastSyncedAt) : m.stats.loadedOnOpen}
-            </p>
-          </div>
+  return (
+    <div className="flex min-w-0 flex-col gap-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-zinc-500">
+          {lastSyncedAt ? m.toolbar.synced(lastSyncedAt) : m.toolbar.loadedOnOpen}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={isRefreshing || isSaving}
+            className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-100 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRefreshing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+            )}
+            {m.toolbar.reload}
+          </button>
+          <AdminWriteButton
+            variant="secondary"
+            size="sm"
+            writable={canWrite}
+            requiredRole="billing:write"
+            onClick={validateStripeIds}
+            disabled={isValidatingStripe}
+          >
+            {isValidatingStripe ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+            )}
+            {m.toolbar.validateStripe}
+          </AdminWriteButton>
         </div>
-        <div className="mt-5 grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-200/80">
-              {m.unsaved.title}
-            </p>
-            <p className="mt-2 text-sm font-bold text-blue-100">
-              {m.unsaved.summary(dirtyPlanCount, dirtyPriceCount, dirtyPromotionCount)}
-            </p>
-            <p className="mt-1 text-xs leading-5 text-blue-100/70">
-              {m.unsaved.note}
-            </p>
-          </div>
-          <div className={`rounded-2xl border p-4 ${
-            promotionRefusals.size > 0
-              ? "border-red-500/30 bg-red-500/10"
-              : stripeWarnings.length > 0
-                ? "border-amber-500/30 bg-amber-500/10"
-                : "border-emerald-500/20 bg-emerald-500/10"
-          }`}>
-            <p className={`text-xs font-black uppercase tracking-[0.16em] ${
-              promotionRefusals.size > 0
-                ? "text-red-200/80"
-                : stripeWarnings.length > 0
-                  ? "text-amber-200/80"
-                  : "text-emerald-200/80"
-            }`}>
-              {m.validation.title}
-            </p>
-            {promotionRefusals.size > 0 ? (
+      </div>
+
+      {hasIssues ? (
+        <AdminTile
+          title={m.validation.title}
+          action={
+            <AdminStatusChip tone={promotionRefusals.size > 0 ? "bad" : "warn"}>
+              {promotionRefusals.size + stripeWarnings.length}
+            </AdminStatusChip>
+          }
+        >
+          {promotionRefusals.size > 0 ? (
+            <div>
+              <p className="text-xs font-bold text-red-300">
+                {m.validation.refusalsHeading}
+              </p>
               <ul
                 data-testid="promotion-policy-refusal-summary"
-                className="mt-2 space-y-1 text-xs leading-5 text-red-100"
+                className="mt-1 space-y-1 text-xs leading-5 text-red-300"
               >
                 {Array.from(promotionRefusals.values()).map((message) => (
                   <li key={message}>- {message}</li>
                 ))}
               </ul>
-            ) : stripeWarnings.length > 0 ? (
-              <ul className="mt-2 space-y-1 text-xs leading-5 text-amber-100">
+            </div>
+          ) : null}
+          {stripeWarnings.length > 0 ? (
+            <div>
+              <p className="text-xs font-bold text-amber-300">
+                {m.validation.warningsHeading}
+              </p>
+              <ul className="mt-1 space-y-1 text-xs leading-5 text-amber-300">
                 {stripeWarnings.slice(0, 5).map((warning) => (
                   <li key={warning}>- {warning}</li>
                 ))}
-                {stripeWarnings.length > 5 ? <li>- {m.validation.plusMore(stripeWarnings.length - 5)}</li> : null}
+                {stripeWarnings.length > 5 ? (
+                  <li>- {m.validation.plusMore(stripeWarnings.length - 5)}</li>
+                ) : null}
               </ul>
-            ) : (
-              <p className="mt-2 text-sm font-bold text-emerald-100">
-                {m.validation.ready}
-              </p>
-            )}
-          </div>
-        </div>
-        {showSaveReview ? (
-          <div className="mt-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" />
-                <div>
-                  <p className="text-sm font-bold text-amber-100">
-                    {m.review.title}
-                  </p>
-                  <p className="mt-1 text-xs leading-5 text-amber-100/80">
-                    {m.review.description}
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowSaveReview(false)}
-                  className="cursor-pointer rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
-                >
-                  {m.review.keepEditing}
-                </button>
-                <button
-                  type="button"
-                  onClick={save}
-                  disabled={isSaving}
-                  className="cursor-pointer rounded-xl bg-amber-500 px-3 py-2 text-xs font-bold text-zinc-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {m.review.publish}
-                </button>
-              </div>
             </div>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-5 py-4">
-        <div className="inline-flex rounded-2xl border border-zinc-800 bg-zinc-900 p-1">
-          {[
-            ["plans", m.tabs.plans, WalletCards],
-            ["prices", m.tabs.prices, Globe2],
-            ["promotions", m.tabs.promotions, TicketPercent],
-          ].map(([value, label, Icon]) => {
-            const active = activeTab === value;
-            const TypedIcon = Icon as typeof WalletCards;
-            return (
-              <button
-                key={value as string}
-                type="button"
-                onClick={() =>
-                  setActiveTab(value as "plans" | "prices" | "promotions")
-                }
-                className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition ${
-                  active
-                    ? "bg-blue-600 text-white shadow-lg shadow-blue-950/30"
-                    : "text-zinc-400 hover:text-white"
-                }`}
-              >
-                <TypedIcon className="h-4 w-4" />
-                {label as string}
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            {m.toolbar.connected}
-          </div>
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={isRefreshing || isSaving}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            {m.toolbar.reload}
-          </button>
-          <button
-            type="button"
-            onClick={validateStripeIds}
-            disabled={isValidatingStripe}
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-xs font-bold text-purple-100 hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isValidatingStripe ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-            {m.toolbar.validateStripe}
-          </button>
-          <button
-            type="button"
-            onClick={requestSave}
-            disabled={isSaving || isRefreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            {m.toolbar.saveChanges}
-          </button>
-        </div>
-      </div>
-
-      {stripeValidation.length > 0 ? (
-        <div className="border-b border-zinc-800 px-5 py-4">
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-              {m.stripeValidation.title}
-            </p>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {stripeValidation.map((result) => (
-                <div key={result.planId} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
-                  <div className="font-black text-white">{result.name}</div>
-                  <div className="mt-1 text-zinc-400">
-                    {m.stripeValidation.result(result.product, result.monthlyPrice, result.annualPrice)}
-                  </div>
-                  {result.errors.length > 0 ? (
-                    <div className="mt-1 truncate text-red-300">{result.errors[0]}</div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+          ) : null}
+        </AdminTile>
       ) : null}
 
-      <div className="p-5">
-        {activeTab === "plans" ? (
-          <div className="grid gap-5 xl:grid-cols-3">
-            {draftPlans.map((plan, index) => (
-              <PlanEditor
-                key={plan.id}
-                plan={plan}
-                onChange={(nextPlan) =>
-                  setDraftPlans((current) =>
-                    current.map((item, itemIndex) =>
-                      itemIndex === index ? nextPlan : item
-                    )
+      {stripeValidation.length > 0 ? (
+        <AdminTile
+          title={m.stripeValidation.title}
+          description={m.stripeValidation.description}
+        >
+          <AdminDataTable
+            caption={m.stripeValidation.title}
+            rows={stripeValidation}
+            rowKey={(result) => result.planId}
+            cardTitle={(result) => result.name}
+            cardMeta={(result) => result.errors[0] || null}
+            cardAside={(result) => stripeStatusChip(result.product)}
+            columns={[
+              {
+                key: "plan",
+                header: m.stripeValidation.plan,
+                render: (result) => (
+                  <span className="font-bold text-white">{result.name}</span>
+                ),
+              },
+              {
+                key: "product",
+                header: m.stripeValidation.product,
+                render: (result) => stripeStatusChip(result.product),
+              },
+              {
+                key: "monthly",
+                header: m.stripeValidation.monthly,
+                render: (result) => stripeStatusChip(result.monthlyPrice),
+              },
+              {
+                key: "annual",
+                header: m.stripeValidation.annual,
+                render: (result) => stripeStatusChip(result.annualPrice),
+              },
+              {
+                key: "error",
+                header: m.stripeValidation.firstError,
+                hideOnCard: true,
+                render: (result) => (
+                  <span className="block max-w-xs truncate text-xs text-red-300">
+                    {result.errors[0] || ""}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </AdminTile>
+      ) : null}
+
+      {activeTab === "plans" ? (
+        <div className="grid gap-4 lg:grid-cols-3">
+          {draftPlans.map((plan, index) => (
+            <PlanCard
+              key={plan.id}
+              plan={plan}
+              baseline={baselinePlans.find((item) => item.id === plan.id)}
+              subscribers={subscribers[plan.id]}
+              onChange={(nextPlan) =>
+                setDraftPlans((current) =>
+                  current.map((item, itemIndex) =>
+                    itemIndex === index ? nextPlan : item
                   )
-                }
-              />
-            ))}
-          </div>
-        ) : activeTab === "prices" ? (
-          <div>
-            {catalogSource && catalogSource !== "stored" ? (
-              <p
-                data-testid="price-catalog-fallback-notice"
-                role="status"
-                className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-semibold leading-5 text-amber-100"
-              >
-                {catalogSource === "created_from_default"
-                  ? m.prices.fallbackCreated
-                  : m.prices.fallbackUnreadable}
-              </p>
-            ) : null}
-            <LocalizedPriceEditor
-              catalog={draftPriceCatalog}
-              onChange={setDraftPriceCatalog}
+                )
+              }
             />
-          </div>
-        ) : (
-          <div>
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-lg font-black text-white">{m.promotions.title}</h3>
-                <p className="mt-1 text-sm text-zinc-400">
-                  {m.promotions.description}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDraftPromotions((current) => [...current, newPromotion()])
-                  }
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900"
-                >
-                  <Plus className="h-4 w-4" />
-                  {m.promotions.addCode}
-                </button>
-                <button
-                  type="button"
-                  onClick={save}
-                  disabled={isSaving || isRefreshing}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  {m.header.saveToDb}
-                </button>
-              </div>
+          ))}
+        </div>
+      ) : activeTab === "prices" ? (
+        <LocalizedPriceEditor
+          catalog={draftPriceCatalog}
+          updatedAt={draftPriceCatalogUpdatedAt}
+          source={catalogSource}
+          onChange={setDraftPriceCatalog}
+        />
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-base font-bold text-white">{m.promotions.title}</h2>
+              <p className="mt-0.5 text-sm text-zinc-400">
+                {m.promotions.description}
+              </p>
             </div>
+            <AdminWriteButton
+              variant="secondary"
+              writable={canWrite}
+              requiredRole="billing:write"
+              onClick={() =>
+                setDraftPromotions((current) => [...current, newPromotion()])
+              }
+            >
+              <Plus className="h-4 w-4" aria-hidden />
+              {m.promotions.addCode}
+            </AdminWriteButton>
+          </div>
+          {draftPromotions.length === 0 ? (
+            <AdminStateBlock
+              kind="empty"
+              title={m.promotions.emptyTitle}
+              detail={m.promotions.emptyDetail}
+            />
+          ) : (
             <div className="grid gap-4 xl:grid-cols-2">
               {draftPromotions.map((promotion, index) => (
-                <PromotionEditor
+                <PromotionCard
                   key={promotion.id}
                   promotion={promotion}
                   baseline={
@@ -1430,37 +1517,57 @@ export function BillingAdminPanel({
                 />
               ))}
             </div>
+          )}
+          {afterPromotions}
+        </div>
+      )}
+
+      {dirtyCount > 0 ? (
+        <AdminSaveBar
+          regionLabel={m.saveBar.region}
+          title={m.saveBar.title(dirtyCount)}
+          detail={m.saveBar.detail}
+          revertLabel={m.saveBar.revert}
+          reviewLabel={m.saveBar.review}
+          onRevert={revert}
+          onReview={requestReview}
+          busy={isSaving || isRefreshing}
+          writable={canWrite}
+          requiredRole="billing:write"
+        />
+      ) : null}
+
+      <AdminConfirmDialog
+        open={reviewOpen}
+        title={m.review.title}
+        summary={
+          <div className="flex flex-col gap-1">
+            <p className="font-bold">
+              {m.review.summary(dirtyPlanCount, dirtyPriceCount, dirtyPromotionCount)}
+            </p>
+            <p className="text-xs text-zinc-400">{m.review.liveNote}</p>
+            {hasIssues ? (
+              <p className="text-xs text-amber-300">
+                {m.review.warningsNote(
+                  promotionRefusals.size + stripeWarnings.length
+                )}
+              </p>
+            ) : null}
           </div>
-        )}
-      </div>
-      <div className="flex flex-col gap-3 border-t border-zinc-800 bg-zinc-900/60 p-5 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm font-bold text-white">{m.footer.title}</p>
-          <p className="mt-1 text-xs text-zinc-400">
-            {m.footer.description}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={isRefreshing || isSaving}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            {m.header.reloadDb}
-          </button>
-          <button
-            type="button"
-            onClick={save}
-            disabled={isSaving || isRefreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {m.header.saveToDb}
-          </button>
-        </div>
-      </div>
-    </section>
+        }
+        effects={[
+          ...reviewShown,
+          ...(reviewLines.length > reviewShown.length
+            ? [m.review.more(reviewLines.length - reviewShown.length)]
+            : []),
+        ]}
+        confirmLabel={m.review.confirm}
+        busy={isSaving}
+        onConfirm={() => {
+          void save();
+        }}
+        onClose={() => setReviewOpen(false)}
+      />
+    </div>
   );
 }

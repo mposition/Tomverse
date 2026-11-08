@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { formatAestClock, formatAestDateTime } from "@/lib/adminUiCore";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { shouldIssueAdminPoll, type AdminPollTrigger } from "@/lib/adminPollTick";
@@ -94,7 +97,7 @@ const fill = (template: string, values: Record<string, string | number>) =>
 
 const clock = (iso: string) => {
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return Number.isNaN(date.getTime()) ? iso : formatAestClock(date);
 };
 
 const PULL_URL = "https://github.com/mposition/Tomverse/pull/";
@@ -109,7 +112,7 @@ const FIX_BADGE: Record<CiFixState, string> = {
   exhausted: "bg-rose-400/15 text-rose-300",
 };
 const COMMIT_URL = "https://github.com/mposition/Tomverse/commit/";
-const PAGE_PATH = "/admin/qa-release?tab=ci-admission";
+const PAGE_PATH = "/admin/release?tab=ci";
 
 type Kind = "develop" | "main" | "hotfix";
 const kindOf = (entry: Pick<CiAdmissionQueueEntry, "base" | "head">): Kind =>
@@ -621,15 +624,35 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
   const draggedEntry = drag ? byNumber.get(drag.number) : undefined;
 
   return (
-    <section className="flex flex-col gap-5 rounded-2xl border border-zinc-800 bg-zinc-900 p-4 sm:p-6" data-testid="ci-admission-section">
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-lg font-bold text-zinc-100">{m.title}</h2>
-        <span data-testid="ci-admission-mode">{modePill}</span>
-        <button type="button" className={`${button} ml-auto`} disabled={!canWrite || busy} onClick={() => void send({ action: "evaluate" })}>
-          {m.evaluate}
-        </button>
+    <AdminTile
+      className="gap-5 sm:p-6"
+      data-testid="ci-admission-section"
+      title={m.title}
+      action={
+        <>
+          <span data-testid="ci-admission-mode">{modePill}</span>
+          <button type="button" className={button} disabled={!canWrite || busy} onClick={() => void send({ action: "evaluate" })}>
+            {m.evaluate}
+          </button>
+        </>
+      }
+    >
+      {/* The runners at a glance, and the one thing not to do while a pull request waits. */}
+      <div className="flex flex-col gap-3 rounded-xl bg-zinc-950/50 p-4 sm:flex-row sm:items-center sm:gap-6" data-testid="ci-admission-runner-grid">
+        <div className="flex min-w-0 flex-col gap-2">
+          <div role="img" aria-label={fill(m.gridLabel, { used, capacity: state.capacity })} className="flex flex-wrap gap-1">
+            {Array.from({ length: Math.max(1, state.capacity) }, (_, index) => (
+              <span key={index} aria-hidden="true" className={`h-3.5 w-3.5 rounded-[4px] ${index < used ? "bg-blue-600" : "border border-dashed border-zinc-700"}`} />
+            ))}
+          </div>
+          <p className="text-sm font-bold text-zinc-100">{fill(m.gridLabel, { used, capacity: state.capacity })}</p>
+          <p className="text-xs text-zinc-500">{m.gridHint}</p>
+        </div>
+        <p className="rounded-xl bg-amber-500/10 px-4 py-3 text-sm text-amber-200 sm:max-w-sm" data-testid="ci-admission-no-rerun">{m.noRerun}</p>
       </div>
-      <p className="-mt-2 text-[13px] text-zinc-400">{m.note}</p>
+      <AdminTechInfo summary={m.howItWorks}>
+        <p className="font-sans text-[13px] leading-6 text-zinc-400">{m.note}</p>
+      </AdminTechInfo>
       {!view.configured && view.mode !== "off" ? <p className="text-sm text-amber-300">{m.notConfigured}</p> : null}
 
       {/* Slots */}
@@ -944,7 +967,7 @@ export function CiAdmissionSection({ initial, canWrite }: { initial: View; canWr
           </ul>
         )}
       </div>
-    </section>
+    </AdminTile>
   );
 }
 
@@ -972,7 +995,7 @@ function SaturationRecord({ record, capacity }: { record: CiAdmissionState["satu
             key={hour.hour}
             className={`min-w-0 flex-1 rounded-sm ${hour.full > 0 ? "bg-rose-400" : hour.queued > 0 ? "bg-amber-300" : "bg-emerald-400/70"}`}
             style={{ height: `${Math.max(8, Math.min(100, Math.round((hour.peak / capacity) * 100)))}%` }}
-            title={fill(m.saturationHour, { hour: `${hour.hour.slice(5, 10)} ${hour.hour.slice(11, 13)}:00 UTC`, peak: hour.peak, full: hour.full, samples: hour.samples })}
+            title={fill(m.saturationHour, { hour: formatAestDateTime(`${hour.hour}:00:00Z`) ?? hour.hour, peak: hour.peak, full: hour.full, samples: hour.samples })}
           />
         ))}
       </ol>

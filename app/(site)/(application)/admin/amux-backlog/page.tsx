@@ -5,8 +5,6 @@ import { getServerSession } from "next-auth/next";
 
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxBacklogListPanel } from "@/components/admin/AmuxBacklogListPanel";
-import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadataPanel";
-import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
 import { AmuxIdeaInbox, AmuxIdeaProgressPanel } from "@/components/admin/AmuxIdeaProgressPanel";
 import { AmuxIdeaDetailSummary } from "@/components/admin/AmuxIdeaDetailSummary";
@@ -15,8 +13,7 @@ import { AmuxAnalysisClaimResolutionPanel } from
 import { amuxAnalysisClaimRecoveryHoldId } from
   "@/lib/amux/ideaAnalysisClaimRecoveryCore";
 import { AmuxPortfolioPanel } from "@/components/admin/AmuxPortfolioPanel";
-import { AmuxReconciliationPanel } from "@/components/admin/AmuxReconciliationPanel";
-import { amuxSwitchedTabStatuses, amuxTabChips } from "@/lib/adminAmuxTabStatus";
+import { amuxTabChips } from "@/lib/adminAmuxTabStatus";
 import {
   AMUX_V4_IDEA_READBACK_ENV,
   AMUX_V4_IDEA_SUBMISSION_ENV,
@@ -63,10 +60,16 @@ import { amuxIdeaLaneEnabled } from "@/lib/amux/ideaLaneCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { hasRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { amuxBacklogPage, amuxBacklogSearch } from "@/lib/amux/adminBacklogListCore";
+import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
 import { readAmuxBacklogList } from "@/lib/amux/adminBacklogRead";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
-import { adminNavItemTabs, adminRedirectTarget, resolveAdminTab } from "@/lib/adminNavigation";
+import {
+  ADMIN_AMUX_BACKLOG_LEGACY_TABS,
+  adminNavItemTabs,
+  adminRedirectTarget,
+  resolveAdminTab,
+} from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { amuxIdeaProgressFailureLog } from "@/lib/amux/ideaProgressCore";
@@ -82,9 +85,10 @@ const TABS = adminNavItemTabs("amux-backlog");
 /**
  * The AMUX backlog: what enters it and what is recorded about each card.
  *
- * Import, reconciliation and metadata used to be unlisted owner-only routes.
- * The retired JSON intake UI now redirects to Ideas, which performs an input
- * check and has an independently gated submission path. Neither action collects GitHub
+ * Ideas, the card list and the portfolio assessment. Import, reconciliation and
+ * metadata moved to Safety & recovery › Legacy tools (2026-11-07), and the
+ * retired JSON intake UI redirects to Ideas, which performs an input check and
+ * has an independently gated submission path. Neither action collects GitHub
  * content or authorizes external transfer.
  * Only the open section is rendered.
  *
@@ -101,11 +105,12 @@ export default async function AdminAmuxBacklogPage({
   const query = await searchParams;
   const requestedTab = Array.isArray(query.tab) ? query.tab[0] : query.tab;
   // Retired sections keep their addresses (Admin IA redirect rule): legacy
-  // intake and Cleanup and recovery, whose one panel became the release
-  // button on an idea's detail (operator decision 2026-11-06), open Ideas.
-  if (requestedTab === "intake" || requestedTab === "recovery") {
-    redirect(adminRedirectTarget("/admin/amux-backlog?tab=ideas", query));
-  }
+  // intake opens Ideas; import, reconciliation and metadata are Legacy tools,
+  // and Cleanup and recovery -- whose one panel became the release button on
+  // an idea's detail (operator decision 2026-11-06) -- opens Reservations &
+  // claims, both in Safety & recovery.
+  const legacy = requestedTab === undefined ? undefined : ADMIN_AMUX_BACKLOG_LEGACY_TABS[requestedTab];
+  if (legacy) redirect(adminRedirectTarget(legacy, query));
   // Expiration of a transfer preview must not hide recovery of its paid claim.
   // This mounts the existing exact-ID GET/owner decision panel; it does not
   // reconstruct a preview, reserve a budget or dispatch an analysis.
@@ -115,6 +120,18 @@ export default async function AdminAmuxBacklogPage({
   const search = amuxBacklogSearch(query.cardNumber);
   const backlogList = tab.id === "list" && search.valid && hasRecentAdminAuthentication(session)
     ? await readAmuxBacklogList(search.search, amuxBacklogPage(query.page)) : null;
+  // The counts and each card's kind, priority and state come from the newest
+  // cards' own read, only once the paged list itself was readable. A failed
+  // read is drawn as unavailable, never as zero.
+  const cardSummary = backlogList === null ? null : await listAmuxCardsForAdmin().then((read) => ({
+    total: read.total,
+    limit: read.limit,
+    cards: read.rows.map(({ id, status, kind, priority }) => ({ id, status, kind, priority })),
+  })).catch((error: unknown) => {
+    console.warn(JSON.stringify({ subsystem: "amux", event: "backlog_card_summary_read_failed",
+      name: error instanceof Error ? error.name : null }));
+    return null;
+  });
   const m = await getAdminMessages(adminAmuxWorkspaceMessages);
   const ideaMessages = await getAdminMessages(adminAmuxIdeaProgressMessages);
   // Ideas: the decide-now inbox and the progress list read the same snapshot,
@@ -155,8 +172,7 @@ export default async function AdminAmuxBacklogPage({
     transferConfirmWritePermitted(process.env[AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV]) &&
     transferConfirmReadPermitted(process.env[AMUX_V4_TRANSFER_CONFIRM_READ_ENV]);
   const chips = amuxTabChips(
-    { ...amuxSwitchedTabStatuses(["import", "reconciliation", "metadata"]),
-      ideas: ideaSubmissionAvailable ? "server_switch_on" : "read_only" },
+    { ideas: ideaSubmissionAvailable ? "server_switch_on" : "read_only" },
     m.status
   );
 
@@ -176,7 +192,7 @@ export default async function AdminAmuxBacklogPage({
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
       {tab.id === "list" ? (
-        <AmuxBacklogListPanel data={backlogList} search={search.search} valid={search.valid} />
+        <AmuxBacklogListPanel data={backlogList} search={search.search} valid={search.valid} summary={cardSummary} />
       ) : tab.id === "ideas" ? (
         <>
         {recoveryHoldId ? <AmuxAnalysisClaimResolutionPanel
@@ -222,12 +238,6 @@ export default async function AdminAmuxBacklogPage({
       ) : tab.id === "portfolio" ? (
         <AmuxPortfolioPanel writeAvailable={amuxV4PortfolioWriteEnabled(
           process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])} />
-      ) : tab.id === "import" ? (
-        <AmuxBoardImportPanel />
-      ) : tab.id === "reconciliation" ? (
-        <AmuxReconciliationPanel />
-      ) : tab.id === "metadata" ? (
-        <AmuxBacklogMetadataPanel />
       ) : null}
     </div>
   );

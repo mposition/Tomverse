@@ -6,6 +6,8 @@ import { getServerSession } from "next-auth/next";
 
 import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AdminTabPlaceholder } from "@/components/admin/AdminTabPlaceholder";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { AmuxExecutionSupportingRecords } from "@/components/admin/AmuxExecutionSupportingRecords";
 import { AmuxCardDisplayKeyBackfillPanel } from "@/components/admin/AmuxCardDisplayKeyBackfillPanel";
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
@@ -16,12 +18,14 @@ import type { DmAdminRequestDetailView } from "@/components/admin/AmuxDecisionMa
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminAmuxScreensMessages } from "@/lib/adminMessages/amuxScreens";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { ADMIN_AMUX_EXECUTION_LEGACY_TABS, adminRedirectTarget, adminNavItemTabs, resolveAdminTabFor } from "@/lib/adminNavigation";
 import {
   EMPTY_ADMIN_NAVIGATION_COUNTS,
   countAwaitingAmuxEscalations,
 } from "@/lib/adminNavigationCounts";
+import { readBoardWorkerChannels } from "@/lib/amux/adminBoardWorkerChannels";
 import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
 import { readAmuxCliUsageSummaryForAdmin } from "@/lib/amux/adminCliUsageSummary";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
@@ -34,17 +38,21 @@ import { authOptions } from "@/lib/auth";
 const TABS = adminNavItemTabs("amux-execution");
 
 /**
- * What AMUX is running: the cards and why each was assigned where it was.
+ * What AMUX is running: the board of cards and why each was assigned where it
+ * was.
  *
- * Cards is the owner-only list that used to live at `/admin/amux-cards`.
- * Assignment is the panel that used to sit on `/admin/routing` beside Chat
- * shadow routing; it opens to every admin role, as it did there, and its
- * decisions still take `ops:write` in every route they call.
+ * The board (`?tab=cards`) is the owner-only list that used to live at
+ * `/admin/amux-cards`. The review queue (`?tab=review`, once Assignment) is
+ * the panel that used to sit on `/admin/routing` beside Chat shadow routing;
+ * it opens to every admin role, as it did there, and its decisions still take
+ * `ops:write` in every route they call. Diagnostics is declared and waits for
+ * its screen; the worker performance and the decision log it will hold are in
+ * the review queue's panel until then.
  *
- * The owner opens on Cards and everyone else on Assignment, because each opens
- * on the first section they may see. A non-owner who names `?tab=cards` gets
- * a 404 rather than Assignment in its place, which is what the old address
- * answered them.
+ * The owner opens on the board and everyone else on the review queue, because
+ * each opens on the first section they may see. A non-owner who names
+ * `?tab=cards` gets a 404 rather than the review queue in its place, which is
+ * what the old address answered them.
  */
 export default async function AdminAmuxExecutionPage({
   searchParams,
@@ -74,8 +82,9 @@ export default async function AdminAmuxExecutionPage({
     return read.detail === null ? { kind: "not_found" } : { kind: "detail", detail: read.detail };
   };
 
-  const [m, openAmuxEscalations, awaitingAmuxDecisionMaker, dmView] = await Promise.all([
+  const [m, screens, openAmuxEscalations, awaitingAmuxDecisionMaker, dmView] = await Promise.all([
     getAdminMessages(adminAmuxWorkspaceMessages),
+    getAdminMessages(adminAmuxScreensMessages),
     // The tabs' badges. A failed count shows no badge rather than a zero.
     countAwaitingAmuxEscalations().catch(() => null),
     countDecisionMakerAttention().catch(() => null),
@@ -89,7 +98,7 @@ export default async function AdminAmuxExecutionPage({
     // owner authorization again; other administrators only inspect it.
     cards: isOwner ? undefined : "read_only",
     // The same permission every escalation, proposal and review route checks.
-    assignment: hasAdminPermission(session, "ops:write") ? undefined : "read_only",
+    review: hasAdminPermission(session, "ops:write") ? undefined : "read_only",
   };
 
   const tabs = (
@@ -97,7 +106,7 @@ export default async function AdminAmuxExecutionPage({
       basePath="/admin/amux-execution"
       tabs={TABS}
       activeTabId={tab.id}
-      label="Execution sections"
+      label="Execution board sections"
       query={query}
       role={role}
       counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxEscalations, awaitingAmuxDecisionMaker }}
@@ -109,12 +118,14 @@ export default async function AdminAmuxExecutionPage({
     // Authorization for the section, decided here and not by the route
     // table's `viewRoles`, exactly as the page it replaced decided it.
     if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-    const [{ rows, total, limit }, usage, decisionMaker, laneIdeas] = await Promise.all([
+    const [{ rows, total, limit }, usage, decisionMaker, laneIdeas, workerChannels] = await Promise.all([
       listAmuxCardsForAdmin(),
       readAmuxCliUsageSummaryForAdmin().catch(() => null),
       readDecisionMakerAttentionForAdmin({ withBodies: canJudge }).catch(() => null),
       // Display rows beside the cards; a failed read shows none (the Ideas tab has them).
       readAmuxIdeaLaneBoardForOwner(session.user.id).catch(() => null),
+      // The channel of each card's worker is the class it was registered with; unread: no badges.
+      readBoardWorkerChannels(),
     ]);
     return (
       <div className="flex min-w-0 flex-col gap-5">
@@ -126,13 +137,32 @@ export default async function AdminAmuxExecutionPage({
             {m.testCardIntake}
           </Link>
         ) : null}
-        <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} laneIdeas={laneIdeas} initialTaskId={typeof query.taskId === "string" &&
+        <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} laneIdeas={laneIdeas}
+          workerChannels={workerChannels} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
         <AmuxExecutionSupportingRecords>
           <AmuxCardListPanel rows={rows} total={total} limit={limit} />
           <AmuxCardDisplayKeyBackfillPanel />
           <AmuxCliUsagePanel view={usage} />
         </AmuxExecutionSupportingRecords>
+      </div>
+    );
+  }
+
+  if (tab.id === "diagnostics") {
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        {drawer}
+        <AdminTabPlaceholder />
+        {/* Until its own screen is built, the evidence diagnostics will draw from is in the review queue. */}
+        <AdminTile title={screens.board.diagnostics.title} description={screens.board.diagnostics.detail}
+          data-testid="amux-diagnostics-pointer">
+          <Link href="/admin/amux-execution?tab=review"
+            className="inline-flex min-h-10 w-fit items-center rounded-xl border border-zinc-700 px-4 text-sm font-bold text-zinc-100 hover:bg-zinc-800">
+            {screens.board.diagnostics.link}
+          </Link>
+        </AdminTile>
       </div>
     );
   }

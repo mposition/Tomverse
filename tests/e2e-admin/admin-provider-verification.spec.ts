@@ -44,8 +44,10 @@ const workspace = (page: import("@playwright/test").Page) =>
 
 const verifyButton = (page: import("@playwright/test").Page) =>
   workspace(page).getByTestId(`provider-verify-${PROVIDER}`);
+// The cost confirmation is the console's one confirm dialog, which sits in a
+// portal outside `main`, so it is resolved from the page and by its role.
 const confirmButton = (page: import("@playwright/test").Page) =>
-  workspace(page).getByTestId(`provider-verify-confirm-${PROVIDER}`);
+  page.getByRole("dialog").getByRole("button", { name: "Confirm and run" });
 const recoverButton = (page: import("@playwright/test").Page) =>
   workspace(page).getByTestId(`provider-recover-${PROVIDER}`);
 const resultCard = (page: import("@playwright/test").Page) =>
@@ -213,7 +215,7 @@ test("a verification is not sent until the billed call is confirmed", async ({
   await expect(confirmButton(page)).toBeVisible();
   expect(posts).toHaveLength(0);
   await expect(
-    verificationSection(page).getByText(
+    page.getByRole("dialog").getByText(
       "This sends a real, billed request to Perplexity."
     )
   ).toBeVisible();
@@ -243,7 +245,8 @@ test("cancelling the confirmation sends nothing", async ({ page, signInAs }) => 
   );
 
   await verifyButton(page).click();
-  await verificationSection(page)
+  await page
+    .getByRole("dialog")
     .getByRole("button", { name: "Cancel", exact: true })
     .click();
   await expect(confirmButton(page)).toBeHidden();

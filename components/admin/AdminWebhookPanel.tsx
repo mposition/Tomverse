@@ -1,8 +1,15 @@
 "use client";
 
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, RefreshCw, Webhook } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminDataTable, type AdminDataColumn } from "@/components/admin/ui/AdminDataTable";
+import { AdminKpiCard } from "@/components/admin/ui/AdminKpiCard";
+import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
+import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
+import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminWebhooksMessages } from "@/lib/adminMessages/webhooks";
 import { adminFetch } from "@/lib/adminFetch";
@@ -18,18 +25,7 @@ type WebhookRow = {
   replayedAt?: string | null;
 };
 
-const dateLabel = (value: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-};
-
-const statusClass = (status: string) => {
-  if (status === "processed") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
-  if (status === "failed") return "border-red-500/30 bg-red-500/10 text-red-200";
-  return "border-amber-500/30 bg-amber-500/10 text-amber-200";
-};
+const dateLabel = (value: string | null) => formatAestDateTime(value) ?? "-";
 
 export function AdminWebhookPanel() {
   const m = useAdminMessages(adminWebhooksMessages);
@@ -37,8 +33,10 @@ export function AdminWebhookPanel() {
   useEffect(() => {
     messagesRef.current = m;
   }, [m]);
-  const [rows, setRows] = useState<WebhookRow[]>([]);
+  // `null` until the first read: an unread list is not an empty one.
+  const [rows, setRows] = useState<WebhookRow[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [reprocessingId, setReprocessingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -52,11 +50,9 @@ export function AdminWebhookPanel() {
         throw new Error(data?.error || messagesRef.current.loadFailed);
       }
       setRows(data.webhooks);
-    } catch (error) {
-      dispatchAppToast(
-        error instanceof Error ? error.message : messagesRef.current.loadFailed,
-        "error"
-      );
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : messagesRef.current.loadFailed);
     } finally {
       setLoading(false);
     }
@@ -67,8 +63,6 @@ export function AdminWebhookPanel() {
       void load();
     });
   }, [load]);
-
-  const failedCount = rows.filter((row) => row.status === "failed").length;
 
   const reprocess = useCallback(async (row: WebhookRow) => {
     if (!row.stripeEventId) return;
@@ -84,12 +78,12 @@ export function AdminWebhookPanel() {
         throw new Error(data?.error || m.reprocessFailed);
       }
       setRows((current) =>
-        current.map((item) => (item.id === data.webhook?.id ? data.webhook : item))
+        (current ?? []).map((item) => (item.id === data.webhook?.id ? data.webhook : item))
       );
       dispatchAppToast(m.reprocessed, "success");
-    } catch (error) {
+    } catch (reprocessError) {
       dispatchAppToast(
-        error instanceof Error ? error.message : m.reprocessFailed,
+        reprocessError instanceof Error ? reprocessError.message : m.reprocessFailed,
         "error"
       );
     } finally {
@@ -98,83 +92,180 @@ export function AdminWebhookPanel() {
   }, [m]);
 
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            {m.eyebrow}
-          </p>
-          <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            {m.description}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={load}
-          disabled={loading}
-          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-sm font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          {m.refresh}
-        </button>
-      </div>
+    <AdminWebhookView
+      rows={rows}
+      loading={loading}
+      error={error}
+      reprocessingId={reprocessingId}
+      onRefresh={() => void load()}
+      onReprocess={(row) => void reprocess(row)}
+    />
+  );
+}
 
-      <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="inline-flex items-center gap-2 text-sm font-bold text-white">
-            <Webhook className="h-4 w-4 text-blue-300" />
-            {m.recentEvents}
-          </div>
-          <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${failedCount ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"}`}>
-            {m.failedCount(failedCount)}
-          </span>
-        </div>
-        <div className="mt-4 grid gap-2">
-          {rows.slice(0, 8).map((row) => (
-            <div key={row.id} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`rounded-full border px-2 py-0.5 font-black ${statusClass(row.status)}`}>
-                    {row.status}
-                  </span>
-                  <span className="font-black text-white">{row.eventType}</span>
-                  <span className="text-zinc-600">{dateLabel(row.receivedAt)} UTC</span>
-                  {row.replayedAt ? (
-                    <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 font-black text-blue-200">
-                      {m.replayed}
-                    </span>
-                  ) : null}
-                </div>
-                {row.status === "failed" && row.stripeEventId ? (
-                  <button
-                    type="button"
-                    onClick={() => void reprocess(row)}
-                    disabled={reprocessingId === row.id}
-                    className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2 py-1 font-black text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {reprocessingId === row.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    )}
-                    {m.reprocess}
-                  </button>
-                ) : null}
-              </div>
-              <p className="mt-1 break-all text-zinc-500">
-                {row.stripeEventId || row.id}
-              </p>
-              {row.error ? <p className="mt-1 text-red-200">{row.error}</p> : null}
-            </div>
-          ))}
-          {!loading && rows.length === 0 ? (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-500">
-              {m.empty}
-            </div>
-          ) : null}
-        </div>
+/** The hook-free half: counts, the event table, and the states around them. */
+export function AdminWebhookView({
+  rows,
+  loading,
+  error,
+  reprocessingId,
+  onRefresh,
+  onReprocess,
+}: {
+  /** `null` until the first read: an unread list is not an empty one. */
+  rows: WebhookRow[] | null;
+  loading: boolean;
+  error: string | null;
+  reprocessingId: string | null;
+  onRefresh: () => void;
+  onReprocess: (row: WebhookRow) => void;
+}) {
+  const m = useAdminMessages(adminWebhooksMessages);
+  const list = rows ?? [];
+  const failedCount = list.filter((row) => row.status === "failed").length;
+  const processedCount = list.filter((row) => row.status === "processed").length;
+  const waitingCount = list.length - failedCount - processedCount;
+
+  const statusChip = (row: WebhookRow) => (
+    <span className="flex flex-wrap items-center gap-1.5">
+      <AdminStatusChip
+        tone={row.status === "processed" ? "ok" : row.status === "failed" ? "bad" : "warn"}
+      >
+        {(m.status as Record<string, string>)[row.status] ?? row.status}
+      </AdminStatusChip>
+      {row.replayedAt ? <AdminStatusChip tone="info">{m.replayed}</AdminStatusChip> : null}
+    </span>
+  );
+
+  const columns: AdminDataColumn<WebhookRow>[] = [
+    {
+      key: "event",
+      header: m.columns.event,
+      render: (row) => (
+        <span className="flex min-w-0 flex-col">
+          <span className="font-bold text-zinc-100">{row.eventType}</span>
+          <span className="break-all text-[11px] text-zinc-500">{row.stripeEventId || row.id}</span>
+          {row.error ? <span className="mt-1 text-xs text-red-300">{row.error}</span> : null}
+        </span>
+      ),
+    },
+    { key: "received", header: m.columns.received, render: (row) => dateLabel(row.receivedAt) },
+    { key: "status", header: m.columns.status, render: statusChip },
+    {
+      key: "action",
+      header: <span className="sr-only">{m.reprocess}</span>,
+      align: "right",
+      render: (row) =>
+        row.status === "failed" && row.stripeEventId ? (
+          <AdminWriteButton
+            variant="ghost"
+            size="sm"
+            onClick={() => onReprocess(row)}
+            disabled={reprocessingId === row.id}
+          >
+            {reprocessingId === row.id ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+            )}
+            {m.reprocess}
+          </AdminWriteButton>
+        ) : null,
+    },
+  ];
+
+  return (
+    <div className="flex min-w-0 flex-col gap-5" data-testid="admin-webhooks">
+      {rows !== null || error ? (
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <AdminKpiCard
+          label={m.stats.received}
+          value={rows === null ? null : list.length}
+          detail={m.stats.receivedDetail(list.length)}
+          onRetry={error ? () => onRefresh() : undefined}
+        />
+        <AdminKpiCard
+          label={m.stats.processed}
+          value={rows === null ? null : processedCount}
+          onRetry={error ? () => onRefresh() : undefined}
+        />
+        <AdminKpiCard
+          label={m.stats.failed}
+          value={rows === null ? null : failedCount}
+          detail={failedCount > 0 ? m.stats.failedDetail : undefined}
+          tone={failedCount > 0 ? "bad" : "neutral"}
+          onRetry={error ? () => onRefresh() : undefined}
+        />
+        <AdminKpiCard
+          label={m.stats.waiting}
+          value={rows === null ? null : waitingCount}
+          tone={waitingCount > 0 ? "warn" : "neutral"}
+          onRetry={error ? () => onRefresh() : undefined}
+        />
       </div>
-    </section>
+      ) : null}
+
+      <AdminTile
+        title={m.title}
+        description={m.description}
+        action={
+          <button
+            type="button"
+            onClick={() => onRefresh()}
+            disabled={loading}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-100 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+            )}
+            {m.refresh}
+          </button>
+        }
+      >
+        {error && rows === null ? (
+          <AdminStateBlock
+            kind="error"
+            title={error}
+            detail={m.loadFailedDetail}
+            onRetry={() => onRefresh()}
+          />
+        ) : rows === null ? (
+          <AdminStateBlock kind="loading" />
+        ) : (
+          <AdminDataTable
+            caption={m.recentEvents}
+            columns={columns}
+            rows={list.slice(0, 8)}
+            rowKey={(row) => row.id}
+            cardTitle={(row) => row.eventType}
+            cardMeta={(row) => (
+              <span className="flex flex-col gap-1">
+                <span className="break-all">{row.stripeEventId || row.id}</span>
+                <span>{dateLabel(row.receivedAt)}</span>
+                {row.error ? <span className="text-red-300">{row.error}</span> : null}
+              </span>
+            )}
+            cardAside={(row) => (
+              <span className="flex flex-col items-end gap-2">
+                {statusChip(row)}
+                {row.status === "failed" && row.stripeEventId ? (
+                  <AdminWriteButton
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onReprocess(row)}
+                    disabled={reprocessingId === row.id}
+                  >
+                    {m.reprocess}
+                  </AdminWriteButton>
+                ) : null}
+              </span>
+            )}
+            emptyState={<AdminStateBlock kind="empty" title={m.empty.title} detail={m.empty.detail} />}
+          />
+        )}
+      </AdminTile>
+    </div>
   );
 }
