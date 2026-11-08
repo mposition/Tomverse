@@ -107,14 +107,15 @@ jobs:
       # needs to scan base..head. It duplicates Secret History Scan's PR run on
       # purpose: fast-gate is the only required check, so this keeps secret
       # scanning on the merge-blocking path. The token is the job's own
-      # read-only GITHUB_TOKEN.
+      # read-only GITHUB_TOKEN. The script, not gitleaks-action, since
+      # 2026-11-08: the action could only download from the release web path,
+      # which returned 504 for hours; see scripts/ci/gitleaks-scan.sh. It
+      # writes no PR comments and uploads no artifact here, as before.
       - name: Scan pull-request commits for secrets
         timeout-minutes: 5
-        uses: gitleaks/gitleaks-action@v3
+        run: scripts/ci/gitleaks-scan.sh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: "false"
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
