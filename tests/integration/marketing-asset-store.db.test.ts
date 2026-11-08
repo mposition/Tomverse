@@ -572,7 +572,8 @@ test("a short without chapters is not long-form, and a video without chapters re
 
 test("the Guard reads chapter titles with the transcript: a title it rejects writes nothing", async () => {
   const rejected = await postSubmission(
-    tutorial([CHAPTERS[0], { ...CHAPTERS[1], title: { ...CHAPTERS[1].title, en: "Try it at tomverse.app" } }, CHAPTERS[2]]),
+    // Our bare host passes (owner 2026-11-08); a path makes it a destination, which the Guard refuses.
+    tutorial([CHAPTERS[0], { ...CHAPTERS[1], title: { ...CHAPTERS[1].title, en: "Try it at tomverse.app/pricing" } }, CHAPTERS[2]]),
   );
   assert.equal(rejected.status, 422);
   assert.equal(rejected.body.code, "transcript_guard_rejected");

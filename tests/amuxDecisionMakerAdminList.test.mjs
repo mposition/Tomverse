@@ -31,6 +31,7 @@ import { DM_CLOSING_EVENT_KINDS } from "../lib/amux/decisionMakerRequestCore.ts"
 import {
   DecisionMakerAdminReadError,
   listDecisionMakerRequestsForAdmin,
+  readDecisionMakerCardDetailForAdmin,
   readDecisionMakerRequestDetailForAdmin,
   readDecisionMakerSwitchesForAdmin,
 } from "../lib/amux/decisionMakerAdminRead.ts";
@@ -140,9 +141,9 @@ test("the list is three statements, each store reading its own tables, and its b
   });
   // The request store chooses the newest requests before aggregating, at the panel's limit,
   // and the other two read exactly those ids.
-  assert.match(sent[0].sql, /recent AS MATERIALIZED \(\s*SELECT \* FROM "AmuxDecisionMakerRequest"\s*WHERE \$::text IS NULL OR "id" = \$::text\s*ORDER BY "createdAt" DESC, "id" DESC\s*LIMIT \$/);
+  assert.match(sent[0].sql, /recent AS MATERIALIZED \(\s*SELECT \* FROM "AmuxDecisionMakerRequest"\s*WHERE \(\$::text IS NULL OR "id" = \$::text\)\s*AND \(\$::text IS NULL OR "cardId" = \$::text\)\s*ORDER BY "createdAt" DESC, "id" DESC\s*LIMIT \$/);
   // No request id narrows it: the newest, at the panel's limit.
-  assert.deepEqual(sent[0].values, [null, null, DM_ADMIN_REQUEST_LIST_LIMIT]);
+  assert.deepEqual(sent[0].values, [null, null, null, null, DM_ADMIN_REQUEST_LIST_LIMIT]);
   assert.deepEqual(sent[1].values, [[REQUEST_ID]]);
   assert.deepEqual(sent[2].values, [[REQUEST_ID]]);
   // Each statement names only its own store's tables.
@@ -625,7 +626,7 @@ test("one request's detail is five statements, each store reading its own tables
     isolation: "read",
   });
   // The ledger read is the list's own, narrowed to the one id.
-  assert.deepEqual(sent[0].values, [REQUEST_ID, REQUEST_ID, 1]);
+  assert.deepEqual(sent[0].values, [REQUEST_ID, REQUEST_ID, null, null, 1]);
   assert.equal(detail.card.question, "Should the cache key include the locale?");
   assert.equal(detail.answer, "Use the model id only.");
   assert.equal(detail.rationale, "The locale is already in the path.");
@@ -700,5 +701,27 @@ test("a request nobody recorded is null after one statement, and an id that is n
     readDecisionMakerRequestDetailForAdmin(none.tx, "not-a-request"),
     (error) => error instanceof DecisionMakerAdminReadError && error.code === "invalid_input",
   );
+  assert.equal(none.sent.length, 0);
+});
+
+test("a card's newest request is the same five statements, narrowed to the card, and a card with none is null after one", async () => {
+  const { tx, sent } = detailTx();
+  const detail = await readDecisionMakerCardDetailForAdmin(tx, "card-41");
+  assert.equal(sent.length, 5);
+  assert.ok(sent.length + 2 <= AMUX_DB_BOUNDARIES.decisionMakerRequestDetailRead.prismaCallCeiling);
+  // The ledger read narrowed to the card, newest first, one row.
+  assert.deepEqual(sent[0].values, [null, null, "card-41", "card-41", 1]);
+  assert.equal(detail.row.requestId, REQUEST_ID);
+  assert.equal(detail.rationale, "The locale is already in the path.");
+  assert.equal(detail.shown.rationaleDigest, DIGEST("3"));
+  const missing = detailTx({ ledger: [] });
+  assert.equal(await readDecisionMakerCardDetailForAdmin(missing.tx, "card-41"), null);
+  assert.equal(missing.sent.length, 1);
+  // A row of another card is a ledger nobody can read.
+  const other = detailTx({ ledger: [listRow({ cardId: "card-42" })] });
+  await assert.rejects(readDecisionMakerCardDetailForAdmin(other.tx, "card-41"), /state_unreadable/);
+  // A card id that is not a ledger identifier is refused before any statement.
+  const none = detailTx();
+  await assert.rejects(readDecisionMakerCardDetailForAdmin(none.tx, "card 41; --"), /invalid_input/);
   assert.equal(none.sent.length, 0);
 });

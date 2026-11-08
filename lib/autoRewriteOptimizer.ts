@@ -347,6 +347,8 @@ async function runInBackground(input: {
                 // rewrite passes admitRouterRewrite exactly as a live one does.
                 rewrite: async (rewriteGuidance, decision) => {
                     const routed = await callAutoLlmRouter({
+                        cycleId: input.cycleId,
+                        decisionId: decision.id,
                         routerModel: input.routerModel,
                         guidance: input.routingGuidance,
                         prompt: decision.routerInput,
@@ -356,7 +358,19 @@ async function runInBackground(input: {
                         rewrite: true,
                         rewriteGuidance,
                         timeoutMs: AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
+                        source: "rewrite_optimizer",
                     });
+                    if (routed.failure) {
+                        console.info(JSON.stringify({
+                            event: "auto_router_optimizer_call_failed",
+                            kind: "rewrite",
+                            decisionId: decision.id,
+                            modelId: input.routerModel.id,
+                            outcome: routed.outcome,
+                            timeoutMs: AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
+                            failure: routed.failure,
+                        }));
+                    }
                     return {
                         value: routed.pick ? { modelId: routed.pick.modelId, rewrite: routed.pick.rewrite } : null,
                         costMicroUsd: cost(input.routerPrices, routed.usage),

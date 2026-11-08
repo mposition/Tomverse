@@ -169,7 +169,8 @@ test("a link, an id the context did not offer, or a shape the intake refuses dro
   const { drafts, dropped } = readMarketingA5Answer(
     answer([
       proposal({ renderedText: "See https://tomverse.app now." }),
-      proposal({ renderedText: "Visit tomverse.app today." }),
+      // Our bare host passes the Guard (owner 2026-11-08); with a path it is a destination.
+      proposal({ renderedText: "Visit tomverse.app/pricing today." }),
       proposal({ renderedText: "Go to www.example.org." }),
       proposal({ claimIds: ["claim_invented"] }),
       proposal({ claimIds: ["claim_ko_only"] }),

@@ -8,6 +8,7 @@ import {
   AUTO_LLM_ROUTER_MAX_REASON_CHARS,
   AUTO_LLM_ROUTER_MAX_TOPIC_CHARS,
   autoLlmRouterCandidates,
+  autoLlmRouterFailureDetail,
   autoLlmRouterOutputSchema,
   autoLlmRouterSession,
   autoLlmRouterUserMessage,
@@ -21,6 +22,29 @@ const ids = ["gpt-5-6-luna", "deepseek-v4-flash", "claude-opus-4-8"];
 const candidates = autoLlmRouterCandidates(ids, AVAILABLE_MODELS, {
   "gpt-5-6-luna": 1,
   "deepseek-v4-flash": 1,
+});
+
+test("router diagnostics keep only bounded metadata, never provider or model content", () => {
+  const secret = "private prompt, response body and credential";
+  const error = Object.assign(new Error(secret), {
+    name: "AI_NoObjectGeneratedError", finishReason: "length", text: secret,
+    cause: new Error(secret), response: { body: secret },
+  });
+  assert.deepEqual(autoLlmRouterFailureDetail(error, false), {
+    kind: "structured_output", error: "AI_NoObjectGeneratedError", finishReason: "length", outputChars: secret.length,
+  });
+  assert.deepEqual(autoLlmRouterFailureDetail({ name: secret, finishReason: secret, statusCode: secret }, false), {
+    kind: "unknown", error: "unknown",
+  });
+  assert.deepEqual(autoLlmRouterFailureDetail(secret, false), { kind: "unknown", error: "unknown" });
+  assert.deepEqual(autoLlmRouterFailureDetail({ name: "AI_APICallError", statusCode: 503 }, false), {
+    kind: "provider", error: "AI_APICallError", statusCode: 503,
+  });
+  assert.deepEqual(autoLlmRouterFailureDetail({ name: "AI_APICallError", statusCode: Infinity }, false), {
+    kind: "provider", error: "AI_APICallError",
+  });
+  assert.equal(autoLlmRouterFailureDetail({ name: "AbortError" }, true).kind, "timeout");
+  assert.equal(autoLlmRouterFailureDetail({ name: "AbortError" }, false).kind, "unknown");
 });
 
 test("candidates carry what the choice needs, in the eligible order", () => {
@@ -261,10 +285,10 @@ test("a conversation with attachments anywhere is never rewritten", async () => 
   assert.equal(withRouterRewrite(emptyList, "Fix the parser.")[0].content, "Fix the parser.");
 });
 
-test("the live router deadline is 5 s and stays below the rewrite and replay deadlines", async () => {
+test("the live router deadline is 7 s with at least as much time for rewriting and more for replay", async () => {
   const { AUTO_LLM_ROUTER_TIMEOUT_MS, AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS, AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS } =
     await import("../lib/autoLlmRouterCore.ts");
-  assert.equal(AUTO_LLM_ROUTER_TIMEOUT_MS, 5_000);
+  assert.equal(AUTO_LLM_ROUTER_TIMEOUT_MS, 7_000);
   assert.ok(AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS >= AUTO_LLM_ROUTER_TIMEOUT_MS);
   assert.ok(AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS > AUTO_LLM_ROUTER_TIMEOUT_MS);
 });

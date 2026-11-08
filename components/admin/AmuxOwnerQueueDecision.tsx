@@ -23,6 +23,7 @@ import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue"
 import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { amuxElapsed } from "@/lib/adminAmuxFlow";
 import { amuxVisibleInspectionText } from "@/lib/amux/adminExecutionViewCore";
+import { amuxReviewUsageOutcomeUnknown } from "@/lib/amux/ownerRecoveryCore";
 import {
   amuxOwnerQueueGroup,
   type AmuxOwnerQueueGroup,
@@ -47,6 +48,27 @@ const summaryFor = (item: AmuxOwnerQueueItem): AmuxEscalationSummary | null =>
     createdAt: item.waitingSince,
     task: { id: item.taskId, title: item.title ?? "", sourceKey: item.sourceKey, priority: "", status: item.status },
   };
+
+const EXCERPT_LINES = 6;
+const EXCERPT_CHARS = 600;
+
+/** The opening lines of a worker report, so a card with no pull request
+ * shows what the worker said (tests run or not, PR opened or not) in the
+ * "why" box. Whole lines, cut with an ellipsis; the full report stays below. */
+export const workerReportExcerpt = (report: string | null) => {
+  if (!report) return null;
+  const lines = report.split(/\r?\n/).map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
+  if (lines.length === 0) return null;
+  const kept: string[] = [];
+  let length = 0;
+  for (const line of lines.slice(0, EXCERPT_LINES)) {
+    if (kept.length > 0 && length + line.length + 1 > EXCERPT_CHARS) break;
+    kept.push(line.length > EXCERPT_CHARS ? `${line.slice(0, EXCERPT_CHARS)}…` : line);
+    length += line.length + 1;
+  }
+  return kept.length < lines.length ? `${kept.join("\n")}\n…` : kept.join("\n");
+};
 
 /** "N h" in the console's language, counted from the read time. */
 export const useAmuxOwnerQueueElapsed = (generatedAt: string) => {
@@ -95,14 +117,42 @@ export function AmuxOwnerQueueDecision({
   const group = amuxOwnerQueueGroup(item);
   const reasonLabel = item.attentionReason === null ? null
     : execution.attentionReason[item.attentionReason] ?? execution.attentionReasonFallback;
-  const why = group === "question" ? copy.why.question
-    : (item.attentionReason ? copy.why.byReason[item.attentionReason] : undefined) ?? copy.why[group];
   const summary = summaryFor(item);
   const review = controller.review;
   const reviewMatches = review !== null && summary !== null && review.escalation.id === summary.id;
+  // Once this card's review is read, a finished run in review says whether it
+  // has a pull request; until then the reason's own words make no PR claim.
+  const reviewPr = reviewMatches && review.task.status === "review" &&
+    item.attentionReason === "human_review_required" ? review.task.review_pr_number : undefined;
+  const usageUnknown = reviewMatches && review.last_attempt !== null &&
+    amuxReviewUsageOutcomeUnknown({ taskStatus: review.task.status,
+      lastAttemptReason: review.review_context.last_attempt_reason,
+      lastAttemptOutcome: review.last_attempt.outcome,
+      lastAttemptToStatus: review.last_attempt.to_status,
+      lastAttemptEndedAt: review.last_attempt.ended_at });
   const classification = summary === null ? null
     : classifyAmuxOwnerQueueItem(summary, reviewMatches ? review : null);
   const outcomes = reviewMatches ? visibleAmuxOwnerReviewOutcomes(review) : [];
+  // The words follow the choices actually shown, not the PR alone: a verified
+  // non-code Task is approved without one, and a spent budget, an unverified
+  // result or pending publication leaves no retry.
+  const noPrWhy = outcomes.includes("approve") ? copy.why.reviewNoPrApprovable
+    : outcomes.includes("retry") ? copy.why.reviewNoPr : copy.why.reviewNoPrBlockOnly;
+  // A blocked card's escalation keeps only execution_blocked; the attempt's
+  // own reason, once the review is read, says what actually stopped it.
+  const blockedAttemptReason = reviewMatches && review.task.status === "blocked" &&
+    item.attentionReason === "execution_blocked" ?
+    review.review_context.last_attempt_reason : null;
+  const blockedWhy = blockedAttemptReason !== null &&
+    Object.hasOwn(copy.why.byAttemptReason, blockedAttemptReason) ?
+    copy.why.byAttemptReason[blockedAttemptReason] : null;
+  const why = group === "question" ? copy.why.question
+    : blockedWhy !== null ? blockedWhy
+    : reviewPr === null ? noPrWhy
+    : typeof reviewPr === "number" ? copy.why.reviewWithPr(reviewPr)
+    : (item.attentionReason ? copy.why.byReason[item.attentionReason] : undefined) ?? copy.why[group];
+  const reportExcerpt = reviewMatches && (reviewPr === null || blockedAttemptReason === "reported_result")
+    ? workerReportExcerpt(review.review_report?.worker_report ?? null) : null;
   const showRecoverySteps = group !== "question" && summary !== null &&
     (group === "recover" || group === "read" || classification === "technical_recovery");
   const decisionOpen = classification === "owner_decision";
@@ -151,6 +201,19 @@ export function AmuxOwnerQueueDecision({
           {copy.detail.whyStopped}
         </p>
         <p className="mt-1.5 text-sm leading-6 text-zinc-300">{why}</p>
+        {usageUnknown && !outcomes.includes("approve") && !outcomes.includes("retry") ? (
+          <p className="mt-1.5 text-sm leading-6 text-zinc-300" data-testid="amux-owner-queue-usage-unknown">
+            {copy.why.reviewUsageUnknown}
+          </p>
+        ) : null}
+        {reportExcerpt ? (
+          <div className="mt-3" data-testid="amux-owner-queue-report-excerpt">
+            <p className="text-xs font-bold text-zinc-400">{copy.detail.workerReportExcerpt}</p>
+            <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-sm leading-6 text-zinc-200 [overflow-wrap:anywhere]">
+              {reportExcerpt}
+            </pre>
+          </div>
+        ) : null}
       </div>
 
       {group === "question" ? (

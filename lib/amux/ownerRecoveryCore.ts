@@ -46,9 +46,23 @@ const expiredWithStoredResult = (input: OwnerRecoveryInput) =>
   input.lastAttemptResultStored === true && input.lastAttemptEndedAt !== null &&
   input.lastAttemptOutcome === "expired" && input.lastAttemptToStatus === "blocked";
 
+/** A v22 run that finished and settled into review while its usage receipt
+ * was never reported: settlement records `usage_outcome_unknown` on the
+ * attempt. Its result is known; only its cost is not (2026-11-08,
+ * AMUX-AGENTOPS-001, where this hid even Block). Block runs nothing, so it
+ * opens; approve and retry still wait for the usage. */
+export const amuxReviewUsageOutcomeUnknown = (input: {
+  taskStatus: string; lastAttemptReason: string | null;
+  lastAttemptOutcome: string | null; lastAttemptToStatus: string | null;
+  lastAttemptEndedAt: string | null;
+}) => input.taskStatus === "review" && input.lastAttemptEndedAt !== null &&
+  input.lastAttemptOutcome === "succeeded" && input.lastAttemptToStatus === "review" &&
+  input.lastAttemptReason === "usage_outcome_unknown";
+
 const exactReason = (input: OwnerRecoveryInput) => {
   if (expiredWithStoredResult(input)) return null;
-  const reasons = [input.escalationReason, input.lastAttemptReason];
+  const reasons = [input.escalationReason,
+    amuxReviewUsageOutcomeUnknown(input) ? null : input.lastAttemptReason];
   if (reasons.includes("execution_lease_expired"))
     return "execution_lease_expired" as const;
   if (reasons.includes("local_card_done")) return "local_card_done" as const;
@@ -94,6 +108,7 @@ export const amuxOwnerRecoveryPreparation = (
     expiredWithStoredResult(input)
   );
   const executionOutcomeKnown = ambiguousReason === null && protectedTerminalOutcome;
+  const usageOutcomeUnknown = executionOutcomeKnown && amuxReviewUsageOutcomeUnknown(input);
   const noAttemptHumanReviewContext =
     input.taskStatus === "blocked" &&
     input.escalationReason === "human_review_required" &&
@@ -119,13 +134,13 @@ export const amuxOwnerRecoveryPreparation = (
   const decisionContextReady = input.assignmentConnected &&
     (executionOutcomeKnown || noAttemptHumanReviewContext);
   const approvalExecutionSourceReady = input.assignmentConnected &&
-    executionOutcomeKnown && input.taskStatus === "review" &&
+    executionOutcomeKnown && !usageOutcomeUnknown && input.taskStatus === "review" &&
     input.lastAttemptOutcome === "succeeded" &&
     input.lastAttemptToStatus === "review" &&
     Number.isSafeInteger(input.taskRevision) &&
     Number.isSafeInteger(input.lastAttemptTaskRevision) &&
     (input.lastAttemptTaskRevision as number) < input.taskRevision;
-  const retryPreviewReady = input.serverAllowsRetry &&
+  const retryPreviewReady = input.serverAllowsRetry && !usageOutcomeUnknown &&
     executionOutcomeKnown && decisionContextReady && outputState === "verified";
 
   return {

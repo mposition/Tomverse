@@ -2613,6 +2613,8 @@ model AdminAuditLog {
   amuxV22RecoveryEvidence AmuxV22TaskRecoveryEvidence[] @relation("AmuxV22RecoveryEvidenceAudit")
   amuxV22RecoveryApprovals AmuxV22TaskRecoveryApproval[] @relation("AmuxV22RecoveryApprovalAudit")
   amuxV22RiskAcceptances AmuxV22TaskRecoveryRiskAcceptance[] @relation("AmuxV22RiskAcceptanceAudit")
+  amuxV22RecoveryPreApprovals AmuxV22TaskRecoveryPreApproval[] @relation("AmuxV22RecoveryPreApprovalAudit")
+  amuxV22RecoveryPreApprovalResults AmuxV22TaskRecoveryPreApprovalResult[] @relation("AmuxV22RecoveryPreApprovalResultAudit")
   amuxV22ReadOnlyLaunchChecks AmuxV22ReadOnlyLaunchCheck[] @relation("AmuxV22ReadOnlyLaunchCheckAudit")
   amuxV22ReadOnlyLaunchProofs AmuxV22ReadOnlyLaunchProof[] @relation("AmuxV22ReadOnlyLaunchProofAudit")
   amuxV22ApiModelAccessEvidence AmuxV22ApiModelAccessEvidence[] @relation("AmuxV22ApiModelAccessEvidenceAudit")
@@ -4574,7 +4576,7 @@ model AutoRouterDecision {
   rewrite        String?
   /// The conversation topic the call wrote, read back by the next turn.
   sessionTopic   String?
-  /// picked | invalid | error
+  /// picked | invalid | error | timeout (older errors may include timeouts)
   outcome        String
   latencyMs      Int
   inputTokens    Int?
@@ -7821,6 +7823,7 @@ model AmuxWorkItem {
   v22LaneDecisions AmuxV22LaneDecision[]
   v22RecoveryInspections AmuxV22TaskRecoveryInspectionRequest[]
   v22RecoveryRiskAcceptances AmuxV22TaskRecoveryRiskAcceptance[] @relation("AmuxV22RiskAcceptanceTask")
+  v22RecoveryPreApprovals AmuxV22TaskRecoveryPreApproval[] @relation("AmuxV22RecoveryPreApprovalTask")
   v22ReadOnlyLaunchChecks AmuxV22ReadOnlyLaunchCheck[] @relation("AmuxV22ReadOnlyLaunchCheckTask")
   v22ApiModelAccessEvidence AmuxV22ApiModelAccessEvidence[] @relation("AmuxV22ApiModelAccessEvidenceTask")
 
@@ -7921,6 +7924,7 @@ model AmuxExecutionAttempt {
   engineeringAgentRun EngineeringAgentRun?
   v22RecoveryInspections AmuxV22TaskRecoveryInspectionRequest[]
   v22RecoveryRiskAcceptances AmuxV22TaskRecoveryRiskAcceptance[] @relation("AmuxV22RiskAcceptanceAttempt")
+  v22RecoveryPreApprovals AmuxV22TaskRecoveryPreApproval[] @relation("AmuxV22RecoveryPreApprovalAttempt")
   v22ReadOnlyLaunchChecks AmuxV22ReadOnlyLaunchCheck[] @relation("AmuxV22ReadOnlyLaunchCheckAttempt")
   v22ApiModelAccessEvidence AmuxV22ApiModelAccessEvidence[] @relation("AmuxV22ApiModelAccessEvidenceAttempt")
 }
@@ -11066,6 +11070,7 @@ model AmuxV22TaskRecoveryInspectionRequest {
   authorizationAuditLog AdminAuditLog @relation("AmuxV22RecoveryInspectionAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22TaskRecoveryInspectionReque_authorizationAuditLogId_fkey")
   evidence AmuxV22TaskRecoveryEvidence?
   approval AmuxV22TaskRecoveryApproval?
+  preApproval AmuxV22TaskRecoveryPreApproval?
   @@index([workerName, requestedAt])
   @@index([taskId, requestedAt])
   @@index([requestKind, requestedAt], map: "AmuxV22RecoveryRequest_requestKind_requestedAt_idx")
@@ -11136,6 +11141,8 @@ model AmuxV22TaskRecoveryApproval {
   apiModelAccessEvidenceId String? @unique @db.Uuid
   apiModelAccessEvidenceDigest String?
   canonicalModelId         String?
+  /// Set when the owner's one-click pre-approval opened this approval.
+  preApprovalId            String? @unique @db.Uuid
   approvedByUserId         String
   authorizationAuditLogId  String @unique
   approvedAt              DateTime
@@ -11145,8 +11152,58 @@ model AmuxV22TaskRecoveryApproval {
   riskAcceptance AmuxV22TaskRecoveryRiskAcceptance? @relation("AmuxV22RecoveryApprovalRiskAcceptance", fields: [riskAcceptanceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22RecoveryApproval_riskAcceptanceId_fkey")
   launchProof AmuxV22ReadOnlyLaunchProof? @relation("AmuxV22RecoveryApprovalLaunchProof", fields: [launchProofId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22RecoveryApproval_launchProofId_fkey")
   apiModelAccessEvidence AmuxV22ApiModelAccessEvidence? @relation("AmuxV22RecoveryApprovalApiModelAccess", fields: [apiModelAccessEvidenceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22RecoveryApproval_apiModelAccessEvidenceId_fkey")
+  preApproval AmuxV22TaskRecoveryPreApproval? @relation("AmuxV22RecoveryApprovalPreApproval", fields: [preApprovalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  preApprovalResult AmuxV22TaskRecoveryPreApprovalResult? @relation("AmuxV22RecoveryPreApprovalResultApproval")
   assignment AmuxV22WorkerAssignment?
   @@index([taskId, afterRevision])
+}
+
+/// Owner decision 2026-11-08: the owner's one-click, re-authenticated consent
+/// to one additional capped attempt, opened only when the checker's evidence
+/// for its own inspection request verifies within 30 minutes.
+model AmuxV22TaskRecoveryPreApproval {
+  id                      String   @id @db.Uuid
+  ownerRequestId          String   @unique @db.Uuid
+  inspectionId            String   @unique @db.Uuid
+  taskId                  String
+  taskRevision            Int
+  priorAttemptId          String
+  costDigest              String
+  catalogApprovalId       String
+  catalogVersion          String
+  pricingVersion          String
+  costReceiptDigest       String
+  oldHeldMicroUsd         BigInt
+  additionalCapMicroUsd   BigInt
+  worstExposureMicroUsd   BigInt
+  requestedByUserId       String
+  authorizationAuditLogId String   @unique
+  requestedAt             DateTime
+  expiresAt               DateTime
+
+  inspection AmuxV22TaskRecoveryInspectionRequest @relation(fields: [inspectionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  task AmuxWorkItem @relation("AmuxV22RecoveryPreApprovalTask", fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  priorAttempt AmuxExecutionAttempt @relation("AmuxV22RecoveryPreApprovalAttempt", fields: [priorAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22RecoveryPreApprovalAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approval AmuxV22TaskRecoveryApproval? @relation("AmuxV22RecoveryApprovalPreApproval")
+  result AmuxV22TaskRecoveryPreApprovalResult?
+
+  @@index([taskId, requestedAt])
+}
+
+/// The one outcome of a pre-approval, written once by the system.
+model AmuxV22TaskRecoveryPreApprovalResult {
+  id                      String   @id @db.Uuid
+  preApprovalId           String   @unique @db.Uuid
+  outcome                 String
+  reason                  String?
+  approvalId              String?  @unique @db.Uuid
+  authorizationAuditLogId String   @unique(map: "AmuxV22RecoveryPreApprovalResult_audit_key")
+  recordedAt              DateTime
+
+  preApproval AmuxV22TaskRecoveryPreApproval @relation(fields: [preApprovalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approval AmuxV22TaskRecoveryApproval? @relation("AmuxV22RecoveryPreApprovalResultApproval", fields: [approvalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22RecoveryPreApprovalResultAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22RecoveryPreApprovalResult_audit_fkey")
 }
 
 /// Policy v39: one owner's explicit acceptance of the historical UNKNOWN risk.

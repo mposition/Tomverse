@@ -257,6 +257,9 @@ run(
     // A run the v52 review rejected twice may be retried by the owner; the
     // retry reaches the claim and its first rejection returns once more.
     "tests/integration/amuxV22ReviewRejectedTwiceRetry.db.test.mjs",
+    // A v22 result in review with no pull request may be run again by the
+    // owner; the proposal and decision guards accept review -> retry -> todo.
+    "tests/integration/amuxV22PrlessReviewRetry.db.test.mjs",
     "tests/integration/amuxV22AutoPromotion.db.test.mjs",
     "tests/integration/amuxV22TaskPatchSchema.db.test.mjs",
     "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
@@ -269,6 +272,9 @@ run(
     // A restarted sidecar's journal proves a prior run stopped; the evidence
     // guard admits that reason only with every stop proof and a clean checkout.
     "tests/integration/amuxV22RecoveryJournalEvidence.db.test.mjs",
+    // Owner decision 2026-11-08: one-click recovery opens one approval only from
+    // an exact, unexpired, owner-audited pre-approval after its evidence.
+    "tests/integration/amuxV22RecoveryPreApproval.db.test.mjs",
     "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
     "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
     // The shared AgentDigestItem table: closed agent and kind lists, the
@@ -404,6 +410,10 @@ run(
     // statement ceiling and never delivered, nothing closed once work started,
     // and the owner's direct answer.
     "tests/integration/amux-idea-card-close.db.test.ts",
+    // Closing a legacy WORKBOARD card (owner decision 2026-11-08): archived with
+    // its status kept, its escalation resolved and one chained audit entry;
+    // a running, changed or other-source card refuses, a held card is busy.
+    "tests/integration/amux-legacy-card.db.test.ts",
     "tests/integration/amux-v22-result-review.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its

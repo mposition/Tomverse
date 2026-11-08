@@ -19,7 +19,7 @@ import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminFetch } from "@/lib/adminFetch";
-import { amuxOwnerRecoveryPreparation } from "@/lib/amux/ownerRecoveryCore";
+import { amuxOwnerRecoveryPreparation, amuxReviewUsageOutcomeUnknown } from "@/lib/amux/ownerRecoveryCore";
 import { amuxReviewReadError } from "@/lib/amux/reviewReadErrorCore";
 import { AmuxOwnerRecoveryInspectionPanel } from "./AmuxOwnerRecoveryInspectionPanel";
 
@@ -58,6 +58,12 @@ export type AmuxReviewDetail = {
     status: string;
     revision: number;
     due_parse_state: string;
+    /** False for a card the recovery inspections do not apply to (not a v4 Task). */
+    recovery_inspectable?: boolean;
+    /** False for a Task the Ubuntu inspection refuses (made before v22). */
+    host_recovery_available?: boolean;
+    /** The card's recorded pull request; null when it has none. */
+    review_pr_number?: number | null;
   };
   last_attempt: {
     id: string;
@@ -93,6 +99,8 @@ export type AmuxReviewDetail = {
     html_url: string;
   } | null;
   allowed_outcomes: ReviewOutcome[];
+  /** Why the server offers no decision at all; null while it offers one. */
+  decision_hold?: string | null;
   retry: { used: number; limit: number; remaining: number };
   proposed_transitions: Partial<Record<ReviewOutcome, string>>;
 };
@@ -298,6 +306,16 @@ const isOutcomeUnknown = (review: ReviewDetail) => {
   // only its settlement was lost (owner decision 2026-11-07).
   if (attemptOutcome === "expired" && review.last_attempt?.result_stored === true &&
       review.last_attempt.to_status === "blocked") return false;
+  // A finished run in review with only its usage unreported: the run's own
+  // outcome is known (amuxReviewUsageOutcomeUnknown); its retry and approve
+  // stay closed in the recovery preparation.
+  if (review.last_attempt && amuxReviewUsageOutcomeUnknown({
+    taskStatus: review.task.status,
+    lastAttemptReason: review.review_context.last_attempt_reason,
+    lastAttemptOutcome: review.last_attempt.outcome,
+    lastAttemptToStatus: review.last_attempt.to_status,
+    lastAttemptEndedAt: review.last_attempt.ended_at,
+  })) return false;
   const attemptReason = review.review_context.last_attempt_reason?.toLowerCase() ?? "";
   return attemptOutcome === "expired" || attemptOutcome.includes("unknown") ||
     attemptReason.includes("outcome_unknown");
@@ -422,7 +440,9 @@ export function AmuxOwnerReviewView({
   const decisionQuestion = outcomes.includes("approve")
     ? m.ownerQuestionApprove
     : outcomes.includes("retry")
-      ? m.ownerQuestionRetry
+      // From review, retry is offered only for a result with no pull request.
+      ? review.task.status === "review" && review.task.review_pr_number === null
+        ? m.ownerQuestionRetryNoPr : m.ownerQuestionRetry
       : outcomes.includes("block")
         ? m.ownerQuestionBlock
         : null;
@@ -587,19 +607,31 @@ export function AmuxOwnerReviewView({
         <p className="mt-3 text-xs leading-5 text-zinc-500">{m.costBoundary}</p>
       </section>
 
-      {(unknown || technicalOnly) && (
+      {/* With no choice to make, the recovery tools are the only way on: the
+          queue's "check the result first" step points here (AMUX-UICONTRACT-002). */}
+      {(unknown || technicalOnly || outcomes.length === 0) && (
         <section className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5" data-testid="admin-amux-technical-recovery">
           <div className="flex items-center gap-2 text-amber-100">
             <Wrench aria-hidden="true" className="h-5 w-5" />
             <h5 className="font-bold">{m.technicalRecovery}</h5>
           </div>
           <p className="mt-3 text-sm leading-6 text-amber-100/90">{m.recoveryPreparationIntro}</p>
-          {canInspectCards && <AmuxOwnerRecoveryInspectionPanel
+          {review.decision_hold && m.decisionHold[review.decision_hold] ? (
+            <div className="mt-4 rounded-lg border border-amber-300/30 bg-zinc-950/40 p-4"
+              data-testid="admin-amux-decision-hold">
+              <p className="text-xs font-bold uppercase tracking-wide text-amber-200">{m.decisionHoldTitle}</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-200">{m.decisionHold[review.decision_hold]}</p>
+            </div>
+          ) : null}
+          {canInspectCards && review.task.recovery_inspectable === false &&
+            <p className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3 text-sm leading-6 text-zinc-200"
+              data-testid="admin-amux-recovery-not-inspectable">{m.recoveryNotInspectable}</p>}
+          {canInspectCards && review.task.recovery_inspectable !== false && <AmuxOwnerRecoveryInspectionPanel
             key={`${review.task.id}:${review.task.revision}:${review.last_attempt?.id ?? "none"}`}
             identity={{ taskId: review.task.id, taskRevision: review.task.revision,
               attemptId: review.last_attempt?.id ?? null }}
             taskStatus={review.task.status} onReloadReview={onReread}
-            returnTo={reviewReturnPath} />}
+            returnTo={reviewReturnPath} hostRecovery={review.task.host_recovery_available !== false} />}
           <div className="mt-4 rounded-lg border border-amber-300/20 bg-zinc-950/40 p-4">
             <p className="text-xs font-bold uppercase tracking-wide text-amber-200">{m.recoveryWhyStopped}</p>
             <p className="mt-2 text-sm leading-6 text-zinc-200">

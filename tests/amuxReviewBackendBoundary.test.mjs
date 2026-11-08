@@ -38,7 +38,11 @@ test("retry is bounded, planning correction is revision-proven, and approval nee
   assert.match(service, /escalation\.openedTaskRevision !== null/);
   assert.match(service, /task\.revision > escalation\.openedTaskRevision/);
   assert.match(service, /task\.dueParseState === "valid"/);
-  assert.match(service, /!displayTruncated && displayExact && budget\.allowed && dueCorrected &&\s*amuxV22ReviewRetryHasVerifiedOutcome\(/);
+  // The retry gate itself (display, budget, due date) is the pure
+  // amuxReviewAllowedOutcomes, tested in amuxReviewApprovalCore.test.mjs.
+  assert.match(service, /blockedRetryVerified: amuxV22ReviewRetryHasVerifiedOutcome\(/);
+  assert.match(service, /budgetAllowed: budget\.allowed,\s*dueCorrected,\s*displayTruncated,\s*displayExact,\s*\}\);/);
+  assert.match(service, /prlessRetryAllowed: publication !== null && amuxV22PrlessReviewRetryAllowed\(/);
   // The stored-result exception reads the Task's own latest v22 result row,
   // fetched in the same snapshot transaction the decision writer re-runs.
   assert.match(service, /attempt: lastAttempt,\s*storedResultAttemptId: latestV4Result\?\.attemptId \?\? null,/);

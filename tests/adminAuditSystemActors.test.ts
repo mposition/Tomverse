@@ -133,6 +133,8 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-v22-recovery-checker",
     "amux-v22-recovery-controller",
     "amux-v22-api-model-access",
+    // Owner decision 2026-11-08: applies the owner's own one-click recovery consent.
+    "amux-v22-recovery-preapproval",
     "auto-router-optimizer",
     "auto-router-rec-agent",
     "amux-v4-intake",
@@ -364,6 +366,23 @@ test("the v42 model-access actor can write only its content-free evidence", () =
     "amux.v22.recovery.approved", "AmuxV22TaskRecoveryApproval"), false);
   assert.equal(systemAuditActionAllowed("amux-v22-api-model-access",
     "amux.v22.recovery.api_model_access_observed", "AdminAuditLog"), false);
+});
+
+test("the pre-approval actor writes only the approval its consent opened and its result", () => {
+  const actor = "amux-v22-recovery-preapproval";
+  assert.equal(systemAuditActionAllowed(actor, "amux.v22.recovery.preapproval_applied",
+    "AmuxV22TaskRecoveryApproval"), true);
+  assert.equal(systemAuditActionAllowed(actor, "amux.v22.recovery.preapproval_settled",
+    "AmuxV22TaskRecoveryPreApprovalResult"), true);
+  // It cannot record an owner approval, a consent, or evidence.
+  assert.equal(systemAuditActionAllowed(actor, "amux.v22.recovery.approved",
+    "AmuxV22TaskRecoveryApproval"), false);
+  assert.equal(systemAuditActionAllowed(actor, "amux.v22.recovery.preapproved",
+    "AmuxV22TaskRecoveryPreApproval"), false);
+  assert.equal(systemAuditActionAllowed(actor, "amux.v22.recovery.inspected",
+    "AmuxV22TaskRecoveryEvidence"), false);
+  assert.equal(systemAuditActionAllowed(actor, "amux.v22.recovery.preapproval_applied",
+    "AmuxV22TaskRecoveryPreApprovalResult"), false);
 });
 
 test("only a top-level key of an object claims the marker", () => {

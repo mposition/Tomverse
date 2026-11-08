@@ -62,6 +62,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       techInfoSource: "Source key",
       techInfoEscalation: "Escalation ID",
       questionAlso: "This card also has an open review. Answer the question first; the review follows once the worker is back.",
+      workerReportExcerpt: "From the worker report (the full report is below)",
     },
     group: {
       decide: "Needs your decision",
@@ -74,8 +75,24 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       read: "AMUX could not confirm how this run ended. Read the result before deciding anything.",
       recover: "The work itself stopped before it finished. Check what happened first; retrying blindly can run it twice.",
       decide: "The worker is done or out of options, and this card is set up so a person decides before it moves on.",
+      reviewWithPr: (prNumber: number) =>
+        `The worker finished and pull request #${prNumber} is open. This card needs your review before it moves on.`,
+      reviewNoPr: "The work result is saved, but there is no pull request, so it cannot be approved. You can run it again or block it. Check the worker report first: it says whether the tests ran.",
+      reviewNoPrBlockOnly: "The work result is saved, but there is no pull request, so it cannot be approved, and it cannot be run again right now. You can block it. Check the worker report first.",
+      reviewNoPrApprovable: "The work result is saved with no pull request; this kind of task is approved on its verified result. Check the worker report before deciding.",
+      reviewUsageUnknown: "The run finished, but its usage was never reported, so it cannot be approved or run again yet. You can still block it.",
+      // A blocked run's own attempt reason, which the escalation stores only
+      // as execution_blocked (storedAmuxEscalationReasonCode).
+      byAttemptReason: {
+        reported_result: "The worker ended the run and reported it as blocked itself, so no pull request was prepared. Read its report: retry once the blocker is fixed, or block it.",
+        review_server_unknown: "The code review server returned no verdict for this run, so it stopped here.",
+        review_history_unavailable: "The earlier code review history could not be read, so this run stopped here.",
+        changed_paths_unavailable: "The files this run changed could not be checked, so it stopped here.",
+        grade_receipt_unavailable: "This run touched a contract path and could not move to a higher grade, so it stopped here.",
+        grade_binding_unverified: "This run touched a contract path and could not move to a higher grade, so it stopped here.",
+      } as Record<string, string>,
       byReason: {
-        human_review_required: "The worker finished and opened a pull request. This card needs your review before it moves on.",
+        human_review_required: "The worker finished. This card needs your review before it moves on.",
         canonical_deadline_review_required: "The deadline on this card needs a person to look at it.",
         local_card_closed: "The local card for this work was closed, so a person confirms how to settle it.",
         local_card_unlinked: "The local card for this work is no longer linked, so a person confirms how to settle it.",
@@ -158,6 +175,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       techInfoSource: "원본 키",
       techInfoEscalation: "Escalation ID",
       questionAlso: "이 카드에는 열린 검토도 있어요. 먼저 질문에 답해 주세요. 워커가 돌아오면 검토가 이어져요.",
+      workerReportExcerpt: "작업자 보고 앞부분 (전체 보고는 아래에 있어요)",
     },
     group: {
       decide: "결정이 필요해요",
@@ -170,8 +188,22 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       read: "AMUX가 이번 실행이 어떻게 끝났는지 확인하지 못했어요. 결정하기 전에 결과부터 읽어 주세요.",
       recover: "일이 끝나기 전에 작업이 멈췄어요. 무슨 일이 있었는지 먼저 확인해 주세요. 모르는 채 다시 시도하면 같은 일이 두 번 돌 수 있어요.",
       decide: "워커가 일을 끝냈거나 더 할 수 없어서, 사람이 정해야 다음으로 넘어가요.",
+      reviewWithPr: (prNumber: number) =>
+        `워커가 작업을 끝냈고 PR #${prNumber}이 열려 있어요. 이 카드는 사람이 확인해야 다음 단계로 넘어가도록 설정돼 있어요.`,
+      reviewNoPr: "작업 결과는 저장됐지만 PR이 없어서 승인할 수 없어요. 다시 실행하거나 차단할 수 있어요. 테스트를 돌렸는지 작업자 보고부터 확인해 주세요.",
+      reviewNoPrBlockOnly: "작업 결과는 저장됐지만 PR이 없어서 승인할 수 없고, 지금은 다시 실행할 수도 없어요. 차단할 수 있어요. 작업자 보고부터 확인해 주세요.",
+      reviewNoPrApprovable: "작업 결과가 PR 없이 저장됐어요. 이 종류의 작업은 검증된 결과로 승인해요. 결정하기 전에 작업자 보고를 확인해 주세요.",
+      reviewUsageUnknown: "실행은 끝났지만 사용량 기록이 들어오지 않아서, 아직 승인하거나 다시 실행할 수 없어요. 차단은 할 수 있어요.",
+      byAttemptReason: {
+        reported_result: "워커가 실행을 끝내면서 스스로 막혔다고 보고해서 PR을 준비하지 않았어요. 보고를 읽고, 막힌 원인이 풀렸으면 다시 시도하고 아니면 차단해 주세요.",
+        review_server_unknown: "코드 검토 서버가 이 실행의 판정을 돌려주지 않아서 여기서 멈췄어요.",
+        review_history_unavailable: "이전 코드 검토 기록을 읽지 못해서 이 실행이 여기서 멈췄어요.",
+        changed_paths_unavailable: "이 실행이 바꾼 파일을 확인하지 못해서 여기서 멈췄어요.",
+        grade_receipt_unavailable: "이 실행이 계약 경로를 건드렸는데 더 높은 등급으로 넘기지 못해서 여기서 멈췄어요.",
+        grade_binding_unverified: "이 실행이 계약 경로를 건드렸는데 더 높은 등급으로 넘기지 못해서 여기서 멈췄어요.",
+      } as Record<string, string>,
       byReason: {
-        human_review_required: "워커가 작업을 끝내고 PR을 만들었어요. 이 카드는 사람이 확인해야 다음 단계로 넘어가도록 설정돼 있어요.",
+        human_review_required: "워커가 작업을 끝냈어요. 이 카드는 사람이 확인해야 다음 단계로 넘어가도록 설정돼 있어요.",
         canonical_deadline_review_required: "이 카드의 마감을 사람이 확인해야 해요.",
         local_card_closed: "이 작업의 로컬 카드가 닫혀서, 어떻게 마무리할지 사람이 확인해야 해요.",
         local_card_unlinked: "이 작업의 로컬 카드 연결이 끊겨서, 어떻게 마무리할지 사람이 확인해야 해요.",

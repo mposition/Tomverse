@@ -10,7 +10,6 @@ import { writeAutoRouterOptimizerSystemAudit } from "@/lib/autoRouterOptimizerSy
 import { callAutoLlmRouter } from "@/lib/autoLlmRouter";
 import {
     AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
-    AUTO_LLM_ROUTER_TIMEOUT_MS,
     autoLlmRouterCandidates,
     resolveAutoLlmRouterModel,
     type AutoLlmRouterCandidate,
@@ -65,8 +64,6 @@ import { resolveModelPricing } from "@/lib/modelPricing";
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, type AiModel, type ModelTier } from "@/lib/models";
 import { OPTIMIZER_LOCK } from "@/lib/autoRouterOptimizerLock";
 import { applyCycleTunableChanges, revertTunedTimeoutIfWorse } from "@/lib/autoRouterTunables";
-import { effectiveRouterTimeoutMs } from "@/lib/autoRouterTunablesCore";
-import { readAutoRouterTunables } from "@/lib/autoRouterTunablesRead";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -337,9 +334,7 @@ async function readRouterStats(now: Date): Promise<RouterStats | null> {
             take: ROUTER_STATS_MAX_ROWS,
             select: { outcome: true, pickedModelId: true, ruleModelId: true, latencyMs: true },
         });
-        // Timeouts are counted against the deadline in force, tuned or not.
-        const timeoutMs = effectiveRouterTimeoutMs(await readAutoRouterTunables(), AUTO_LLM_ROUTER_TIMEOUT_MS);
-        return summarizeRouterDecisions(rows, timeoutMs);
+        return summarizeRouterDecisions(rows);
     } catch {
         return null;
     }
@@ -781,6 +776,8 @@ async function runInBackground(input: {
                 },
                 route: async (guidance, decision) => {
                     const routed = await callAutoLlmRouter({
+                        cycleId: input.cycleId,
+                        decisionId: decision.id,
                         routerModel: input.routerModel,
                         guidance,
                         prompt: decision.routerInput,
@@ -788,7 +785,19 @@ async function runInBackground(input: {
                         candidates: decision.candidates,
                         session: decision.routerSession,
                         timeoutMs: AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
+                        source: "routing_optimizer",
                     });
+                    if (routed.failure) {
+                        console.info(JSON.stringify({
+                            event: "auto_router_optimizer_call_failed",
+                            kind: "route",
+                            decisionId: decision.id,
+                            modelId: input.routerModel.id,
+                            outcome: routed.outcome,
+                            timeoutMs: AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
+                            failure: routed.failure,
+                        }));
+                    }
                     return {
                         value: routed.pick?.modelId ?? null,
                         costMicroUsd: cost(input.routerPrices, routed.usage),

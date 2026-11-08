@@ -954,3 +954,57 @@ test("an owner metadata timeout resolves unavailable instead of leaving loading 
   assert.equal(controller.signal.aborted, true);
   assert.equal(AMUX_OWNER_EXECUTION_READ_TIMEOUT_MS, 10_000);
 });
+
+test("a card the recovery inspections do not apply to says so instead of offering their buttons", () => {
+  const stopped = review({
+    task: { ...review().task, status: "blocked" },
+    last_attempt: { ...review().last_attempt!, outcome: "expired", to_status: "blocked" },
+    review_context: { ...review().review_context, result_sha256: null, last_attempt_reason: "usage_outcome_unknown" },
+    review_report: { ...review().review_report!, worker_report: null, worker_report_verified: false },
+  });
+  const panel = (tree: ReactNode) => propsOf(tree).filter((props) => "identity" in props && "returnTo" in props);
+  const legacy = render({ ...stopped, task: { ...stopped.task, recovery_inspectable: false } });
+  assert.equal(byTestId(legacy, "admin-amux-technical-recovery").length, 1);
+  assert.equal(panel(legacy).length, 0);
+  assert.equal(byTestId(legacy, "admin-amux-recovery-not-inspectable").length, 1);
+  assert.match(textOf(legacy), /not a v4 Task/);
+  // A v4 Task, or a server that does not send the flag, keeps the inspections.
+  for (const task of [{ ...stopped.task, recovery_inspectable: true }, stopped.task]) {
+    const tree = render({ ...stopped, task });
+    assert.equal(panel(tree).length, 1);
+    assert.equal(panel(tree)[0]!.hostRecovery, true);
+    assert.equal(byTestId(tree, "admin-amux-recovery-not-inspectable").length, 0);
+  }
+  // A pre-v22 Task keeps the app record inspection but not the Ubuntu one.
+  const preV22 = render({ ...stopped, task: { ...stopped.task, recovery_inspectable: true,
+    host_recovery_available: false } });
+  assert.equal(panel(preV22).length, 1);
+  assert.equal(panel(preV22)[0]!.hostRecovery, false);
+});
+
+test("a review the server offers no decision on always shows the recovery tools and why", () => {
+  // AMUX-UICONTRACT-002: an expired run with its stored result is a known
+  // outcome, so the recovery section was hidden while the server offered
+  // nothing (a delivery still queued or leased), and no button was left.
+  const held = review({
+    task: { ...review().task, status: "blocked" },
+    last_attempt: { ...review().last_attempt!, outcome: "expired",
+      to_status: "blocked", result_stored: true },
+    review_context: { ...review().review_context,
+      escalation_reason: "execution_lease_expired",
+      last_attempt_reason: "outcome_unknown" },
+    allowed_outcomes: [],
+    proposed_transitions: {},
+    decision_hold: "delivery_pending",
+  });
+  assert.deepEqual(visibleAmuxOwnerReviewOutcomes(held), []);
+  const tree = render(held);
+  assert.equal(byTestId(tree, "admin-amux-technical-recovery").length, 1);
+  assert.equal(byTestId(tree, "admin-amux-no-owner-decision").length, 1);
+  assert.match(textOf(byTestId(tree, "admin-amux-decision-hold")[0]?.children as ReactNode),
+    /work delivery for this card is still waiting or leased/);
+  // An unknown hold code adds no sentence; the recovery tools still show.
+  const unknownHold = render({ ...held, decision_hold: "something_else" });
+  assert.equal(byTestId(unknownHold, "admin-amux-technical-recovery").length, 1);
+  assert.equal(byTestId(unknownHold, "admin-amux-decision-hold").length, 0);
+});
