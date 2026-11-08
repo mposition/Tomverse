@@ -44,15 +44,27 @@ test("without the owner's access the column offers no review button, and Decisio
     decisionMakerRows={[<li key="a" data-testid="dm-a">A</li>, <li key="b" data-testid="dm-b">B</li>]} />);
   assert.doesNotMatch(html, /amux-card-open-review/);
   assert.ok(html.indexOf("amux-dm-attention-list") < html.indexOf("amux-board-card-task-1"));
-  // A Decision Maker request is a decision: 2 here plus the card's own.
-  assert.match(html, /data-testid="amux-attention-group-decision"[^>]*>3</);
-  assert.match(html, /3 cards on one screen/);
+  // The counts are of cards, the same queue the tab and the sidebar badge count;
+  // the Decision Maker requests are listed above them, not added to a group.
+  assert.match(html, /data-testid="amux-attention-group-decision"[^>]*>1</);
+  assert.match(html, /1 cards on one screen/);
 });
 
 test("counts of cards the board has not loaded yet are marked as partial, not shown as the whole", () => {
   const html = renderToStaticMarkup(<AmuxBoardAttentionLane cards={[attentionCard(1)]} countedCards={[attentionCard(1)]}
     cardTotal={14} decisionMakerTotal={0} decisionMakerRows={[]} canReviewCards onOpen={() => {}} />);
   assert.match(html, /data-partial="true">1\+</);
+});
+
+test("with the owner queue read, the column shows the tab's own count and groups", () => {
+  // A question card in another lane is in the queue too: the column says 3, as the tab badge does.
+  const html = renderToStaticMarkup(<AmuxBoardAttentionLane cards={[attentionCard(1)]} countedCards={[attentionCard(1)]}
+    cardTotal={1} decisionMakerTotal={0} decisionMakerRows={[]} canReviewCards onOpen={() => {}}
+    ownerQueue={{ total: 3, groups: { decide: 1, question: 1, recover: 1, read: 0 }, partial: false }} />);
+  assert.match(html, /3 cards on one screen/);
+  assert.match(html, /data-testid="amux-attention-group-question"[^>]*>1</);
+  assert.match(html, /data-testid="amux-attention-group-recovery"[^>]*>1</);
+  assert.doesNotMatch(html, /data-partial="true"/);
 });
 
 const past = (n: number, over: Partial<PastWorkCard> = {}): PastWorkCard => ({

@@ -51,11 +51,10 @@ export type AdminNavBadgeKey =
   | "emailCampaigns"
   | "marketing"
   | "productResearch"
-  | "amuxEscalations"
+  | "amuxOwnerQueue"
   | "amuxOrchestratorHalts"
   | "amuxExecution"
-  | "amuxDecisionMaker"
-  | "amuxOwnerAttention";
+  | "amuxDecisionMaker";
 
 export type AdminNavTab = {
   id: string;
@@ -736,14 +735,15 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "amux-execution",
     label: "Execution board",
     href: "/admin/amux-execution",
-    description: "AMUX cards and their execution state, the review queue, and diagnostics",
+    description: "AMUX cards and their execution state, the cards waiting on you, and diagnostics",
     group: "Development",
     // Assignment decisions take `ops:write` (every /api/admin/amux/escalations
     // route checks it); the owner-only board writes nothing.
     writeRoles: ["owner", "ops"],
-    // Halts belong to Safety & recovery, so this counts what waits on a
-    // person here: escalations and Decision Maker requests.
-    badge: "amuxOwnerAttention",
+    // Halts belong to Safety & recovery, so this counts what waits on the
+    // owner here: the cards of "Waiting on me". The sidebar entry, that tab and
+    // the board's column read the one count (lib/amux/ownerQueueCore.ts).
+    badge: "amuxOwnerQueue",
     aliases: [
       "amux",
       "board",
@@ -755,6 +755,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "human review",
       "review",
       "review queue",
+      "waiting on me",
+      "owner queue",
+      "worker question",
       "diagnostics",
       "worker performance",
       "decision log",
@@ -770,9 +773,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       },
       {
         id: "review",
-        label: "Review queue",
-        description: "Why AMUX assigned the work, and escalations waiting on a person",
-        badge: "amuxEscalations",
+        label: "Waiting on me",
+        description: "Every card that waits on you, one after another: decisions, worker questions and recoveries",
+        badge: "amuxOwnerQueue",
       },
       {
         id: "diagnostics",

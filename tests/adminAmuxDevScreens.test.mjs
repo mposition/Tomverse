@@ -93,7 +93,7 @@ test("the board groups the server lanes into five columns without changing a lan
 
 test("the diagnostics tab draws the usage coverage and the assignment evidence, and the owner alone sees the estimates", () => {
   const page = read("app/(site)/(application)/admin/amux-execution/page.tsx");
-  const diagnostics = page.slice(page.indexOf('tab.id === "diagnostics"'), page.indexOf("<AdminAmuxRoutingPanel"));
+  const diagnostics = page.slice(page.indexOf('tab.id === "diagnostics"'), page.indexOf("<AmuxOwnerQueueScreen"));
   assert.equal(diagnostics.includes("AdminTabPlaceholder"), false, "the placeholder is gone");
   assert.ok(diagnostics.includes("<AmuxDiagnosticsPanel workerChannels={workerChannels} />"));
   assert.ok(diagnostics.includes("<AmuxCliUsagePanel view={usage}"));
@@ -107,10 +107,10 @@ test("the diagnostics tab draws the usage coverage and the assignment evidence, 
   assert.ok(panel.includes('kind="error"'), "a failed read is an error block, never an empty list");
   // The human review queue and its detail stay in the review panel, not in diagnostics.
   assert.equal(/AmuxOwnerReviewQueueView|AmuxOwnerReviewDetail|useAmuxOwnerReview/.test(panel), false);
+  // The review tab is the owner queue now; the old panel shell that mixed both is gone.
+  assert.ok(page.includes("<AmuxOwnerQueueScreen"));
   const review = read("components/admin/AdminAmuxRoutingPanel.tsx");
-  const reviewPanel = review.slice(review.indexOf("export function AdminAmuxRoutingPanel"));
-  assert.ok(reviewPanel.includes("<AmuxOwnerReviewQueueView"));
-  assert.equal(/admin-amux-incident-state|report\.policies|report\.workers|report\.decisions/.test(reviewPanel), false, "the diagnostics left the review panel");
+  assert.equal(review.includes("export function AdminAmuxRoutingPanel"), false);
 });
 
 test("the incident band runs above the tab strip of every tab, and a failed read says it could not check", () => {

@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   FileText,
   Loader2,
-  RefreshCw,
   Wrench,
 } from "lucide-react";
 
@@ -29,16 +28,6 @@ import { AmuxOwnerRecoveryInspectionPanel } from "./AmuxOwnerRecoveryInspectionP
 const AMUX_REVIEW_CLIENT_TIMEOUT_MS = 45_000;
 export const AMUX_OWNER_EXECUTION_READ_TIMEOUT_MS = 10_000;
 
-type Metric = { value: number; observed: boolean };
-type MetricEvidence = {
-  value: number | null;
-  raw_value: number | null;
-  confidence: number | null;
-  observed: boolean | null;
-  source: string | null;
-  sample_size: number | null;
-  observed_at: string | null;
-} | null;
 export type AmuxEscalationSummary = {
   id: string;
   specialty: string | null;
@@ -53,103 +42,6 @@ export type AmuxEscalationSummary = {
     status: string;
   };
 };
-type AmuxReport = {
-  generated_at: string;
-  limits: { decisions: number; attempts: number };
-  incident: {
-    valid: boolean;
-    blocks_admission: boolean;
-    state: {
-      state: "normal" | "frozen";
-      reason: string;
-      ticket: string;
-      changed_at: string;
-    };
-  };
-  queue: Record<string, number>;
-  policies: Array<{
-    scope: string;
-    key: string;
-    displayName: string;
-    active: boolean;
-    wipLimit: number | null;
-    capacityPoints: number | null;
-    costBudgetMicrousd: string | null;
-    budgetWindowStartsAt: string | null;
-    budgetWindowEndsAt: string | null;
-  }>;
-  escalations_total?: number;
-  escalations_limit?: number;
-  escalations: AmuxEscalationSummary[];
-  workers: Array<{
-    name: string;
-    status: string;
-    dispatch_ready: boolean;
-    generation: number;
-    heartbeat_at: string;
-    outcomes: {
-      total: number;
-      calibratable_total: number;
-      succeeded: number;
-      failed: number;
-      blocked: number;
-      expired: number;
-      average_latency_ms: number | null;
-    };
-  }>;
-  decisions: Array<{
-    id: string;
-    task: {
-      id: string;
-      title: string;
-      kind: string;
-      priority: string;
-      status: string;
-    };
-    worker: string;
-    scheduler_score: number;
-    scoring_version: string;
-    task_revision: number;
-    created_at: string;
-    evidence: {
-      scheduler: Record<string, number>;
-      planning: {
-        due_at: string | null;
-        precision: string | null;
-        source: string | null;
-        capacity_weight: number | null;
-        incident_admission: string | null;
-      };
-      routing: {
-        scoring_version: string | null;
-        preferred_worker: string | null;
-        selected_worker: string | null;
-        preferred_score: number | null;
-        selected_score: number | null;
-        candidate_count: number;
-        provider: string | null;
-        operationally_allowed: boolean | null;
-        provider_exhausted: boolean | null;
-        metrics: Record<string, Metric>;
-      };
-      telemetry: {
-        history_sample_size: number | null;
-        predicted_success: MetricEvidence;
-        expected_speed: MetricEvidence;
-        low_rework: MetricEvidence;
-        low_human_attention: MetricEvidence;
-        cost_efficiency: MetricEvidence;
-        quota: {
-          metric: MetricEvidence;
-          state: string | null;
-          provider_exhausted: boolean | null;
-          reset_at: string | null;
-        };
-      };
-    };
-  }>;
-};
-
 type ReviewOutcome = "approve" | "retry" | "block";
 export type AmuxReviewDetail = {
   available: boolean;
@@ -1722,107 +1614,5 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
         </div>
       )}
     </>
-  );
-}
-
-export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCards = false }: {
-  focusEscalationId?: string | null;
-  canInspectCards?: boolean;
-} = {}) {
-  const m = useAdminMessages(adminAmuxRoutingMessages);
-  const [report, setReport] = useState<AmuxReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const loadRef = useRef<() => Promise<void>>(async () => {});
-  // A committed decision reloads the report, which no longer lists it.
-  const reviewer = useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: () => void loadRef.current() });
-  const { review, reviewBusy, pendingDecision, closeReview, openReview } = reviewer;
-  const openedFocus = useRef<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await adminFetch("/api/admin/amux/routing", {
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        await discardResponseBody(response);
-        throw new Error(String(response.status));
-      }
-      setReport((await response.json()) as AmuxReport);
-    } catch {
-      setError(m.loadFailed);
-    } finally {
-      setLoading(false);
-    }
-  }, [m]);
-  useEffect(() => { loadRef.current = load; }, [load]);
-
-  useEffect(() => {
-    queueMicrotask(() => void load());
-  }, [load]);
-
-  useEffect(() => {
-    if (!report || !focusEscalationId || pendingDecision ||
-        openedFocus.current === focusEscalationId) return;
-    openedFocus.current = focusEscalationId;
-    queueMicrotask(() => void openReview(focusEscalationId));
-  }, [report, focusEscalationId, pendingDecision, openReview]);
-
-  return (
-    <section
-      className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900"
-      data-testid="admin-amux-routing-panel"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 p-5">
-        <div>
-          <h2 className="text-xl font-bold text-white">{m.escalations}</h2>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-400">
-            {m.resolutionAvailability}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => { closeReview(); void load(); }}
-          disabled={loading || Boolean(pendingDecision)}
-          className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-200 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-          data-testid="admin-amux-routing-refresh"
-        >
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
-          {m.refresh}
-        </button>
-      </div>
-
-      <div className="space-y-5 p-5">
-        {error && (
-          <p className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-            {error}
-          </p>
-        )}
-
-        <AmuxPendingDecisionNotice controller={reviewer} />
-
-        {report && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-            <AmuxOwnerReviewQueueView
-              m={m}
-              escalations={report.escalations}
-              escalationsTotal={report.escalations_total}
-              currentReview={review}
-              canInspectCards={canInspectCards}
-              reviewBusy={reviewBusy}
-              writesFrozen={Boolean(pendingDecision)}
-              onOpenReview={(escalationId) => void openReview(escalationId)}
-            />
-            <AmuxOwnerReviewDetail controller={reviewer} />
-          </div>
-        )}
-      </div>
-    </section>
   );
 }

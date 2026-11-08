@@ -1,3 +1,4 @@
+import { amuxOwnerQueueGroup, type AmuxOwnerQueueGroup } from "./amux/ownerQueueCore.ts";
 import { amuxCardStatusGroup, amuxElapsed, type AmuxCardStatusGroup } from "./adminAmuxFlow.ts";
 import { formatAestDateTime, type AdminTone } from "./adminUiCore.ts";
 
@@ -14,15 +15,13 @@ import { formatAestDateTime, type AdminTone } from "./adminUiCore.ts";
 export const AMUX_ATTENTION_GROUPS = ["decision", "question", "recovery", "read"] as const;
 export type AmuxAttentionGroup = (typeof AMUX_ATTENTION_GROUPS)[number];
 
-/** The work itself stopped; there is nothing to decide until it is recovered. */
-const RECOVERY_REASONS: ReadonlySet<string> = new Set([
-  "execution_blocked",
-  "execution_lease_expired",
-  "cli_execution_error",
-]);
-
-/** The result is not known; the owner has to read what happened first. */
-const READ_REASONS: ReadonlySet<string> = new Set(["usage_outcome_unknown"]);
+/** The board's names for the owner queue's groups (lib/amux/ownerQueueCore.ts). */
+export const AMUX_ATTENTION_GROUP_OF: Record<AmuxOwnerQueueGroup, AmuxAttentionGroup> = {
+  decide: "decision",
+  question: "question",
+  recover: "recovery",
+  read: "read",
+};
 
 /**
  * The group a board card waiting on the owner counts in.
@@ -38,12 +37,15 @@ export function amuxAttentionGroup(card: {
   attentionReason: string | null;
   ownerQuestion: "open" | "answered" | null;
 }): AmuxAttentionGroup {
-  if (card.ownerQuestion === "open") return "question";
-  const reason = card.attentionReason;
-  if (reason === null) return "read";
-  if (RECOVERY_REASONS.has(reason)) return "recovery";
-  if (READ_REASONS.has(reason)) return "read";
-  return "decision";
+  // The "Waiting on me" tab files the same card under the same group.
+  return AMUX_ATTENTION_GROUP_OF[amuxOwnerQueueGroup(card)];
+}
+
+/** The owner queue's group counts under the board's names. */
+export function amuxAttentionCountsFromQueue(
+  groups: Record<AmuxOwnerQueueGroup, number>
+): Record<AmuxAttentionGroup, number> {
+  return { decision: groups.decide, question: groups.question, recovery: groups.recover, read: groups.read };
 }
 
 /**

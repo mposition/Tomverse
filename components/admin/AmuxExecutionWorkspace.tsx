@@ -7,7 +7,7 @@ import { Bot, Columns3, GitPullRequest, GripVertical, List, MoveRight, Network }
 import { AmuxExecutionMovePanel, type AmuxBoardMove } from "./AmuxExecutionMovePanel";
 import { AmuxExecutionDialog } from "./AmuxExecutionDialog";
 import { AmuxCardOwnerReview } from "./AdminAmuxRoutingPanel";
-import { AmuxBoardAttentionLane, AMUX_ATTENTION_LANE_ROWS } from "./AmuxBoardAttentionLane";
+import { AmuxBoardAttentionLane, AMUX_ATTENTION_LANE_ROWS, type AmuxBoardOwnerQueue } from "./AmuxBoardAttentionLane";
 import { AmuxBoardPastWork } from "./AmuxBoardPastWork";
 import { AmuxCardListPanel } from "./AmuxCardListPanel";
 import { AmuxTaskQuestionSection } from "./AmuxWorkerQuestion";
@@ -228,8 +228,10 @@ function IdeaLaneCard({ card }: { card: AmuxIdeaLaneBoardCard }) {
 }
 
 export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false,
-  canReviewCards = false, decisionMaker, laneIdeas, workerChannels, cardList }: {
+  canReviewCards = false, decisionMaker, laneIdeas, workerChannels, cardList, ownerQueue }: {
   initialTaskId?: string | null; canMoveCards?: boolean;
+  /** The "Waiting on me" queue's count and groups, read by the page; null: not read. */
+  ownerQueue?: AmuxBoardOwnerQueue | null;
   /**
    * Each registered worker's channel, from the registry the page read. Absent
    * or a worker not in it: no channel badge, never one guessed from a name.
@@ -722,11 +724,11 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     const matches = filtered(cards);
     const laneCards = laneCardsFor(lane);
     const attention = lane === "attention";
-    const attentionTotal = snapshot.counts.attention + dmTotal;
+    const attentionTotal = Math.max(snapshot.counts.attention, ownerQueue?.total ?? 0) + dmTotal;
     return <>
       {attention && attentionTotal > 0 && <AmuxBoardAttentionLane cards={matches} countedCards={cards}
         cardTotal={snapshot.counts.attention} decisionMakerTotal={dmTotal} canReviewCards={canReviewCards}
-        workerChannels={workerChannels} onOpen={openFromLane}
+        workerChannels={workerChannels} onOpen={openFromLane} ownerQueue={ownerQueue}
         decisionMakerRows={decisionMaker ? decisionMaker.items.slice(0, AMUX_ATTENTION_LANE_ROWS).map((item) =>
           <DecisionMakerAttentionCard key={item.requestId} item={item} nowMs={decisionMaker.dbNowMs} />) : []}
         decisionMakerNote={<>

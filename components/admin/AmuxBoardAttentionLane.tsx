@@ -1,4 +1,5 @@
 "use client";
+import type { AmuxOwnerQueueGroup } from "@/lib/amux/ownerQueueCore";
 
 import type { ReactNode } from "react";
 import Link from "next/link";
@@ -7,7 +8,7 @@ import { ArrowRight, Eye, Gavel, MessageSquare, MoveRight, Wrench } from "lucide
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AdminChannelIcon, adminChannelName } from "@/components/admin/ui/AdminChannelIcon";
 import {
-  AMUX_ATTENTION_GROUPS, amuxAttentionCounts, amuxAttentionGroup, type AmuxAttentionGroup,
+  AMUX_ATTENTION_GROUPS, amuxAttentionCounts, amuxAttentionCountsFromQueue, amuxAttentionGroup, type AmuxAttentionGroup,
 } from "@/lib/adminAmuxBoardView";
 import { amuxBoardCardStuck, type AmuxWorkerChannel } from "@/lib/adminAmuxFlow";
 import { adminAmuxBoardViewsMessages } from "@/lib/adminMessages/amuxBoardViews";
@@ -31,6 +32,14 @@ const GROUP_ICON: Record<AmuxAttentionGroup, typeof Gavel> = {
 };
 
 /** The most rows the column shows; the rest are one click away in the tab. */
+/** The owner queue summary the page passes down (lib/amux/adminOwnerQueueRead.ts). */
+export type AmuxBoardOwnerQueue = {
+  total: number;
+  groups: Record<AmuxOwnerQueueGroup, number>;
+  /** The groups count only the cards read, fewer than `total`. */
+  partial: boolean;
+};
+
 export const AMUX_ATTENTION_LANE_ROWS = 5;
 
 /**
@@ -44,8 +53,14 @@ export const AMUX_ATTENTION_LANE_ROWS = 5;
  */
 export function AmuxBoardAttentionLane({
   cards, countedCards, cardTotal, decisionMakerTotal, decisionMakerRows, decisionMakerNote, canReviewCards,
-  workerChannels, onOpen,
+  workerChannels, onOpen, ownerQueue,
 }: {
+  /**
+   * The "Waiting on me" queue as the page read it: the same count the tab and
+   * the sidebar badge show, and its groups. Absent or null (not read): the
+   * counts fall back to the cards the board loaded, marked partial.
+   */
+  ownerQueue?: AmuxBoardOwnerQueue | null;
   /** The attention-lane cards the board loaded, after the search and filters. */
   cards: readonly AttentionLaneCard[];
   /** Every attention-lane card loaded, before the search and filters: the four counts are of these. */
@@ -64,13 +79,15 @@ export function AmuxBoardAttentionLane({
   const v = useAdminMessages(adminAmuxBoardViewsMessages).attention;
   const m = useAdminMessages(adminAmuxExecutionMessages);
   const screens = useAdminMessages(adminAmuxScreensMessages).board;
-  const counts = amuxAttentionCounts(countedCards, decisionMakerTotal);
-  // Cards the board has not loaded yet are in no count: say so rather than show a smaller number as the whole.
-  const partial = countedCards.length < cardTotal;
-  const total = cardTotal + decisionMakerTotal;
+  // One number: the tab, the sidebar badge and this column count the same queue.
+  // Decision Maker requests are listed here but are not cards in that queue.
+  const counts = ownerQueue ? amuxAttentionCountsFromQueue(ownerQueue.groups) : amuxAttentionCounts(countedCards);
+  // Cards not read yet are in no count: say so rather than show a smaller number as the whole.
+  const partial = ownerQueue ? ownerQueue.partial : countedCards.length < cardTotal;
+  const total = ownerQueue ? ownerQueue.total : cardTotal;
   const room = Math.max(0, AMUX_ATTENTION_LANE_ROWS - decisionMakerRows.length);
   const shownCards = cards.slice(0, room);
-  const hidden = Math.max(0, total - decisionMakerRows.length - shownCards.length);
+  const hidden = Math.max(0, total - shownCards.length) + Math.max(0, decisionMakerTotal - decisionMakerRows.length);
   return <div className="flex flex-col gap-2" data-testid="amux-attention-lane">
     <Link href="/admin/amux-execution?tab=review" prefetch={false} data-testid="amux-attention-open-tab"
       className="flex min-h-12 items-center gap-3 rounded-xl bg-amber-600 px-3 py-2 text-white hover:bg-amber-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">

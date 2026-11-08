@@ -4,9 +4,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 
-import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
+import { AmuxOwnerQueueScreen } from "@/components/admin/AmuxOwnerQueueScreen";
 import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
 import { AmuxDiagnosticsPanel } from "@/components/admin/AmuxDiagnosticsPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
@@ -19,13 +19,12 @@ import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxBoardViewsMessages } from "@/lib/adminMessages/amuxBoardViews";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { ADMIN_AMUX_EXECUTION_LEGACY_TABS, adminRedirectTarget, adminNavItemTabs, resolveAdminTabFor } from "@/lib/adminNavigation";
-import {
-  EMPTY_ADMIN_NAVIGATION_COUNTS,
-  countAwaitingAmuxEscalations,
-} from "@/lib/adminNavigationCounts";
+import { EMPTY_ADMIN_NAVIGATION_COUNTS } from "@/lib/adminNavigationCounts";
 import { readBoardWorkerChannels } from "@/lib/amux/adminBoardWorkerChannels";
 import { readAmuxIncidentBandState } from "@/lib/amux/adminIncidentRead";
 import { listAmuxCardsForExecutionList } from "@/lib/amux/adminExecutionCardList";
+import { countAmuxOwnerQueue, readAmuxOwnerQueue } from "@/lib/amux/adminOwnerQueueRead";
+import { amuxOwnerQueueGroupCounts } from "@/lib/amux/ownerQueueCore";
 import { readAmuxCliUsageSummaryForAdmin } from "@/lib/amux/adminCliUsageSummary";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerRequestDetailForAdmin } from "@/lib/amux/decisionMakerAdminRead";
@@ -83,11 +82,11 @@ export default async function AdminAmuxExecutionPage({
     return read.detail === null ? { kind: "not_found" } : { kind: "detail", detail: read.detail };
   };
 
-  const [m, views, openAmuxEscalations, awaitingAmuxDecisionMaker, dmView, incident] = await Promise.all([
+  const [m, views, awaitingAmuxOwnerQueue, awaitingAmuxDecisionMaker, dmView, incident] = await Promise.all([
     getAdminMessages(adminAmuxWorkspaceMessages),
     getAdminMessages(adminAmuxBoardViewsMessages),
     // The tabs' badges. A failed count shows no badge rather than a zero.
-    countAwaitingAmuxEscalations().catch(() => null),
+    countAmuxOwnerQueue().catch(() => null),
     countDecisionMakerAttention().catch(() => null),
     dmRequested === null ? null : readDmRequest(dmRequested),
     // The incident band on every tab. null: the read failed, which the band says.
@@ -115,7 +114,7 @@ export default async function AdminAmuxExecutionPage({
         label="Execution board sections"
         query={query}
         role={role}
-        counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxEscalations, awaitingAmuxDecisionMaker }}
+        counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, awaitingAmuxOwnerQueue, awaitingAmuxDecisionMaker }}
         chips={amuxTabChips(statuses, m.status)}
       />
     </>
@@ -125,7 +124,7 @@ export default async function AdminAmuxExecutionPage({
     // Authorization for the section, decided here and not by the route
     // table's `viewRoles`, exactly as the page it replaced decided it.
     if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-    const [cardList, decisionMaker, laneIdeas, workerChannels] = await Promise.all([
+    const [cardList, decisionMaker, laneIdeas, workerChannels, ownerQueueRead] = await Promise.all([
       // The List view's rows. A failed read shows that view's error, never an empty table.
       listAmuxCardsForExecutionList().catch(() => null),
       readDecisionMakerAttentionForAdmin({ withBodies: canJudge }).catch(() => null),
@@ -133,7 +132,14 @@ export default async function AdminAmuxExecutionPage({
       readAmuxIdeaLaneBoardForOwner(session.user.id).catch(() => null),
       // The channel of each card's worker is the class it was registered with; unread: no badges.
       readBoardWorkerChannels(),
+      // The "Waiting on me" column counts the tab's own queue; a failed read falls back to the loaded cards.
+      readAmuxOwnerQueue().catch(() => null),
     ]);
+    const ownerQueue = ownerQueueRead === null ? null : {
+      total: ownerQueueRead.total,
+      groups: amuxOwnerQueueGroupCounts(ownerQueueRead.items),
+      partial: ownerQueueRead.items.length < ownerQueueRead.total,
+    };
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
@@ -145,7 +151,7 @@ export default async function AdminAmuxExecutionPage({
           </Link>
         ) : null}
         <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} laneIdeas={laneIdeas}
-          workerChannels={workerChannels} cardList={cardList} initialTaskId={typeof query.taskId === "string" &&
+          workerChannels={workerChannels} cardList={cardList} ownerQueue={ownerQueue} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
       </div>
     );
@@ -174,7 +180,7 @@ export default async function AdminAmuxExecutionPage({
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
       {drawer}
-      <AdminAmuxRoutingPanel canInspectCards={isOwner} focusEscalationId={
+      <AmuxOwnerQueueScreen canInspectCards={isOwner} focusEscalationId={
         typeof query.focusEscalation === "string" &&
         /^c[a-z0-9]{20,}$/i.test(query.focusEscalation) ?
           query.focusEscalation : null} />

@@ -641,13 +641,12 @@ test.describe("admin console shell", () => {
     await expect(consoleHeading(page)).toHaveText("Routing");
     await expect(page.getByTestId("admin-amux-routing-panel")).toHaveCount(0);
 
-    const moved = page.getByRole("link", { name: "Execution board › Review queue" });
-    await expect(moved).toHaveAttribute("href", "/admin/amux-execution?tab=review");
+    const moved = page.getByRole("link", { name: "Execution board › Diagnostics" });
+    await expect(moved).toHaveAttribute("href", "/admin/amux-execution?tab=diagnostics");
     await moved.click();
 
-    await expect(page).toHaveURL("/admin/amux-execution?tab=review");
+    await expect(page).toHaveURL("/admin/amux-execution?tab=diagnostics");
     await expect(consoleHeading(page)).toHaveText("Execution board");
-    await expect(page.getByTestId("admin-amux-routing-panel")).toBeVisible();
   });
 
   test("the owner opens the execution board on Board and sees every Development section", async ({
@@ -655,7 +654,7 @@ test.describe("admin console shell", () => {
   }) => {
     await page.goto("/admin/amux-execution");
     const strip = page.getByRole("navigation", { name: "Execution board sections" });
-    // Board, Review queue and Diagnostics; Workers and Decision Maker are AMUX settings sections.
+    // Board, Waiting on me and Diagnostics; Workers and Decision Maker are AMUX settings sections.
     await expect(strip.getByRole("link")).toHaveCount(3);
     await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(0);
@@ -738,7 +737,7 @@ test.describe("the Development group by role", () => {
     await page.goto("/admin/amux-execution");
     await expect(consoleHeading(page)).toHaveText("Execution board");
     const strip = page.getByRole("navigation", { name: "Execution board sections" });
-    // The review queue and diagnostics remain here; workers and switches belong to AMUX settings.
+    // Waiting on me and diagnostics remain here; workers and switches belong to AMUX settings.
     await expect(strip.getByRole("link")).toHaveCount(2);
     await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(0);
@@ -747,7 +746,7 @@ test.describe("the Development group by role", () => {
       "href",
       /tab=review$/
     );
-    await expect(page.getByTestId("admin-amux-routing-panel")).toBeVisible();
+    await expect(page.getByTestId("amux-owner-queue-root")).toBeVisible();
     await expect(page.getByTestId("amux-card-list-panel")).toHaveCount(0);
   });
 
