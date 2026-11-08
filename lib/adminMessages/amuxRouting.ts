@@ -50,6 +50,8 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerReviewIntro:
       "Compare the assigned work with the submitted evidence before choosing any server-permitted decision.",
     assignedWork: "Original assigned work",
+    recoveryNotInspectable:
+      "This card is not a v4 Task, so the app record inspection and the Ubuntu inspection do not apply to it. A legacy WORKBOARD card is remade as a new idea or closed on the Overview tab of its card detail on the execution board.",
     assignmentNotConnected:
       "The original assignment is not connected to this review. This does not prove it never existed.",
     approvedBrief: "Approved execution brief",
@@ -364,6 +366,8 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerReviewIntro:
       "서버가 허용한 결정을 선택하기 전에 배정된 작업과 제출된 근거를 대조하세요.",
     assignedWork: "원래 배정된 작업",
+    recoveryNotInspectable:
+      "이 카드는 v4 Task가 아니어서 앱 기록 점검과 Ubuntu 검사 대상이 아닙니다. 옛 작업판(WORKBOARD) 카드는 실행 보드 카드 상세의 개요 탭에서 새 아이디어로 다시 만들거나 닫습니다.",
     assignmentNotConnected:
       "원래 배정 내용이 이 검토에 연결돼 있지 않습니다. 애초에 존재하지 않았다는 뜻은 아닙니다.",
     approvedBrief: "승인된 실행 브리프",

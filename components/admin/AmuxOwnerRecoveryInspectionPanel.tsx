@@ -796,8 +796,10 @@ export function AmuxHostRecoveryView({ m, state, confirmed, onConfirm, onRequest
 }
 
 export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloadReview,
-  returnTo = AMUX_RECOVERY_DEFAULT_RETURN_TO }: {
+  returnTo = AMUX_RECOVERY_DEFAULT_RETURN_TO, hostRecovery = true }: {
   identity: AmuxRecoveryInspectionIdentity; taskStatus: string; onReloadReview: () => void;
+  /** False for a Task the Ubuntu inspection refuses (no v22 receipt, role or grade): it says so instead. */
+  hostRecovery?: boolean;
   /** The screen a refused step-up returns to: the review this panel sits in. */
   returnTo?: string;
 }) {
@@ -1064,6 +1066,8 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
   const busy = host.state === "loading";
   return <><AmuxRecoveryInspectionView m={m} state={state} busy={busy} onInspect={() => void inspect()}
     onReloadReview={onReloadReview} date={date} returnTo={returnTo} />
+    {!hostRecovery ? <p className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3 text-sm leading-6 text-zinc-200"
+      data-testid="admin-amux-host-recovery-not-applicable">{m.host.notApplicable}</p> :
     <AmuxHostRecoveryView m={m} state={host} busy={busy} confirmed={confirmed} onConfirm={setConfirmed}
       riskConfirmed={riskConfirmed} onRiskConfirm={setRiskConfirmed}
       safeStopConfirmed={safeStopConfirmed} onSafeStopConfirm={setSafeStopConfirmed}
@@ -1072,8 +1076,8 @@ export function AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus, onReloa
       onAcceptRisk={() => { if (riskConfirmed) void recover("accept_unknown_prior_effects"); }}
       onSafeStop={() => { if (safeStopConfirmed) void recover("request_safe_stop"); }}
       onApprove={() => { if (confirmed) void recover("approve_attempt"); }}
-      onReloadReview={onReloadReview} canRequest={identity.attemptId !== null} returnTo={returnTo} />
-    {identity.attemptId !== null && !(host.state === "ready" && (host.data.recoveryEnabled === false ||
+      onReloadReview={onReloadReview} canRequest={identity.attemptId !== null} returnTo={returnTo} />}
+    {hostRecovery && identity.attemptId !== null && !(host.state === "ready" && (host.data.recoveryEnabled === false ||
       host.data.riskAcceptance !== null)) &&
       <AmuxOneClickRecoveryView m={m} data={host.state === "ready" ? host.data : null} quote={quote}
         confirmed={oneClickConfirmed} onConfirm={setOneClickConfirmed}

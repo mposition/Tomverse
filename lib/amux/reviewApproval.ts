@@ -29,6 +29,7 @@ import { amuxV52RejectedTwiceReviewAttemptId } from "@/lib/amux/v52ReviewRejecti
 import { normalizeAmuxUntrustedReason, openAmuxHumanEscalation, publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
 import { readAmuxReviewPullRequest, type AmuxReviewPullRequest } from "@/lib/amux/reviewGitHub";
 import { readAmuxExecutionTaskDetail } from "@/lib/amux/adminExecutionRead";
+import { isAmuxRecoveryInspectableCard, isAmuxV22RecoverableTask } from "@/lib/amux/legacyCardCore";
 import { evaluateLockedAmuxCostAdmission, lockAmuxResourcePolicies } from "@/lib/amux/resourcePolicy";
 import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
 import { ENGINEERING_AGENT_V22_TIER_PENDING_REASON } from "@/lib/engineeringAgentCore";
@@ -350,6 +351,10 @@ export async function getAmuxReviewDetail(escalationId: string) {
       status: task.status,
       revision: task.revision,
       due_parse_state: task.dueParseState,
+      // The two recovery inspections read evidence only a v4 Task has.
+      recovery_inspectable: isAmuxRecoveryInspectableCard(task),
+      // The Ubuntu inspection also needs the v22 receipt, role and grade (lockRecoveryTask).
+      host_recovery_available: isAmuxV22RecoverableTask(task),
       // Whether the card has a recorded pull request at all. The artifact
       // below is null too when GitHub could not be read, so the screen tells
       // "no pull request" from "unreadable" by this field.

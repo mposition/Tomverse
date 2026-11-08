@@ -1181,3 +1181,29 @@ test("actual Panel reads app records on open and needs only the one-click button
   assert.equal(posts.length, 1);
   reopened.unmount();
 });
+
+test("a Task the Ubuntu inspection refuses shows why instead of its request button", () => {
+  const internals = (React as unknown as { __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE:
+    { H: unknown } }).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const dispatcher = {
+    useContext: () => ({ locale: "en", pending: false, setLocale: () => {} }),
+    useState: (initial: unknown) => [typeof initial === "function" ? initial() : initial, () => {}],
+    useRef: (initial: unknown) => ({ current: initial }),
+    useEffect: () => {},
+  };
+  const renderWith = (hostRecovery?: boolean) => {
+    const previous = internals.H; internals.H = dispatcher;
+    try {
+      return AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus: "blocked", onReloadReview: () => {},
+        ...(hostRecovery === undefined ? {} : { hostRecovery }) });
+    } finally { internals.H = previous; }
+  };
+  const refused = renderWith(false).props.children[1] as React.ReactElement<Record<string, unknown>>;
+  assert.equal(refused.props["data-testid"], "admin-amux-host-recovery-not-applicable");
+  assert.match(String(refused.props.children), /no v22 receipt/);
+  // Nor does it offer the one-click consent, which runs through that inspection.
+  assert.equal(renderWith(false).props.children[2], false);
+  // The default keeps the Ubuntu inspection for every caller that does not say otherwise.
+  const kept = renderWith().props.children[1] as React.ReactElement<Record<string, unknown>>;
+  assert.equal(kept.type, AmuxHostRecoveryView);
+});

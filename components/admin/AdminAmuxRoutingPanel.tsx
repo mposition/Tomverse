@@ -58,6 +58,10 @@ export type AmuxReviewDetail = {
     status: string;
     revision: number;
     due_parse_state: string;
+    /** False for a card the recovery inspections do not apply to (not a v4 Task). */
+    recovery_inspectable?: boolean;
+    /** False for a Task the Ubuntu inspection refuses (made before v22). */
+    host_recovery_available?: boolean;
     /** The card's recorded pull request; null when it has none. */
     review_pr_number?: number | null;
   };
@@ -619,12 +623,15 @@ export function AmuxOwnerReviewView({
               <p className="mt-2 text-sm leading-6 text-zinc-200">{m.decisionHold[review.decision_hold]}</p>
             </div>
           ) : null}
-          {canInspectCards && <AmuxOwnerRecoveryInspectionPanel
+          {canInspectCards && review.task.recovery_inspectable === false &&
+            <p className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3 text-sm leading-6 text-zinc-200"
+              data-testid="admin-amux-recovery-not-inspectable">{m.recoveryNotInspectable}</p>}
+          {canInspectCards && review.task.recovery_inspectable !== false && <AmuxOwnerRecoveryInspectionPanel
             key={`${review.task.id}:${review.task.revision}:${review.last_attempt?.id ?? "none"}`}
             identity={{ taskId: review.task.id, taskRevision: review.task.revision,
               attemptId: review.last_attempt?.id ?? null }}
             taskStatus={review.task.status} onReloadReview={onReread}
-            returnTo={reviewReturnPath} />}
+            returnTo={reviewReturnPath} hostRecovery={review.task.host_recovery_available !== false} />}
           <div className="mt-4 rounded-lg border border-amber-300/20 bg-zinc-950/40 p-4">
             <p className="text-xs font-bold uppercase tracking-wide text-amber-200">{m.recoveryWhyStopped}</p>
             <p className="mt-2 text-sm leading-6 text-zinc-200">
