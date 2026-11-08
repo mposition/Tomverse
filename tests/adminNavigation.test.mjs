@@ -963,46 +963,56 @@ test("Routing is the router, its optimizers, its shadow comparison and the owner
   assert.match(page, /<AdminRoutingShadowPanel \/>/);
   assert.match(page, /<AutoRouterTab canWrite=\{canWrite\} \/>/);
   assert.match(page, /href="\/admin\/amux-execution\?tab=review"/);
-  assert.match(readPage("amux-execution"), /<AdminAmuxRoutingPanel canInspectCards=\{isOwner\} focusEscalationId=/);
+  assert.match(readPage("amux-execution"), /<AmuxOwnerQueueScreen canInspectCards=\{isOwner\} focusEscalationId=/);
 });
 
 test("execution board and Safety & recovery count distinct actions without duplicating halts", () => {
   const execution = ADMIN_NAVIGATION.find((item) => item.id === "amux-execution");
   const settings = ADMIN_NAVIGATION.find((item) => item.id === "amux-settings");
   const recovery = ADMIN_NAVIGATION.find((item) => item.id === "amux-recovery");
-  // The board counts what waits on a person there: escalations (the review
-  // queue) and Decision Maker requests (the board's attention lane).
-  assert.equal(execution.badge, "amuxOwnerAttention");
-  assert.equal(execution.tabs.find((tab) => tab.id === "review").badge, "amuxEscalations");
+  // The entry and its "Waiting on me" tab show one number: the cards that wait
+  // on the owner (lib/amux/ownerQueueCore.ts). Decision Maker requests keep the
+  // Board tab's own chip.
+  assert.equal(execution.badge, "amuxOwnerQueue");
+  assert.equal(execution.tabs.find((tab) => tab.id === "review").badge, "amuxOwnerQueue");
+  assert.equal(execution.tabs.find((tab) => tab.id === "review").label, "Waiting on me");
   assert.equal(execution.tabs.find((tab) => tab.id === "cards").badge, "amuxDecisionMaker");
   // Halts moved to Safety & recovery with execution safety, and only there.
   assert.equal(settings.badge, undefined);
   assert.equal(recovery.badge, "amuxOrchestratorHalts");
   assert.equal(recovery.tabs.find((tab) => tab.id === "safety").badge, "amuxOrchestratorHalts");
-  const counts = { ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxEscalations: 3, openAmuxOrchestratorHalts: 2,
-    awaitingAmuxDecisionMaker: 4 };
-  assert.equal(adminNavigationBadge(execution.badge, counts), 7);
+  const counts = { ...EMPTY_ADMIN_NAVIGATION_COUNTS, awaitingAmuxOwnerQueue: 14, openAmuxEscalations: 3,
+    openAmuxOrchestratorHalts: 2, awaitingAmuxDecisionMaker: 4 };
+  // One count for the sidebar entry and the tab; neither is a sum of other counts.
+  assert.equal(adminNavigationBadge(execution.badge, counts), 14);
+  assert.equal(
+    adminNavigationBadge(execution.tabs.find((tab) => tab.id === "review").badge, counts),
+    adminNavigationBadge(execution.badge, counts),
+  );
   assert.equal(adminNavigationBadge("amuxDecisionMaker", counts), 4);
-  assert.equal(adminNavigationBadge(execution.badge, { ...counts, awaitingAmuxDecisionMaker: null }), null);
+  assert.equal(adminNavigationBadge(execution.badge, { ...counts, awaitingAmuxDecisionMaker: null }), 14);
   assert.equal(adminNavigationBadge(recovery.badge, counts), 2);
   assert.equal(adminNavigationBadge(recovery.badge, { ...counts, openAmuxOrchestratorHalts: null }), null);
-  assert.equal(adminNavigationBadge(execution.badge, { ...counts, openAmuxEscalations: null }), null);
+  // An unread count is no badge, never zero.
+  assert.equal(adminNavigationBadge(execution.badge, { ...counts, awaitingAmuxOwnerQueue: null }), null);
+  assert.equal(adminNavigationBadge(execution.badge, { ...counts, awaitingAmuxOwnerQueue: 0 }), 0);
   assert.equal(adminNavigationBadge(recovery.badge, EMPTY_ADMIN_NAVIGATION_COUNTS), null);
-  // One status list for the count and for the list it points at.
+  // One definition of the set for the count and for the list it points at: the
+  // layout badge, the page's tab badge and the list all go through
+  // amuxOwnerQueueWhere, so a card counted is a card listed.
   const loader = loaderSource();
-  const report = readFileSync(join(process.cwd(), "lib", "amux", "explainability.ts"), "utf8");
-  const sameWhere =
-    /where: \{ status: \{ in: \[\.\.\.AMUX_ESCALATION_AWAITING_STATUSES\] \} \}/;
-  assert.match(loader.slice(loader.indexOf("amuxHumanEscalation.count(")), sameWhere);
-  assert.match(report.slice(report.indexOf("amuxHumanEscalation.findMany(")), sameWhere);
+  const queueRead = readFileSync(join(process.cwd(), "lib", "amux", "adminOwnerQueueRead.ts"), "utf8");
+  assert.match(loader, /countAmuxOwnerQueue\(\)/);
+  assert.match(queueRead, /prisma\.amuxWorkItem\.count\(\{ where: amuxOwnerQueueWhere\(\) \}\)/);
+  assert.match(queueRead, /const where = amuxOwnerQueueWhere\(\);/);
+  assert.match(queueRead, /findMany\(\{\s*where, orderBy/);
+  assert.match(queueRead, /take: AMUX_OWNER_QUEUE_LIMIT/);
   // The list is bounded and says so: its total counts the same set as the badge.
-  assert.match(report.slice(report.indexOf("amuxHumanEscalation.count(")), sameWhere);
-  assert.match(report, /take: AMUX_ESCALATION_LIST_LIMIT/);
-  assert.match(report, /escalations_total: escalationsTotal/);
+  assert.match(queueRead, /return \{ items, total, processedToday/);
   // The page's tab badge turns a failed read into no badge.
   assert.match(
     readPage("amux-execution"),
-    /countAwaitingAmuxEscalations\(\)\.catch\(\(\) => null\)/
+    /countAmuxOwnerQueue\(\)\.catch\(\(\) => null\)/
   );
   assert.match(
     readPage("amux-recovery"),

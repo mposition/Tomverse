@@ -88,7 +88,7 @@ test("the board groups the server lanes into five columns without changing a lan
 
 test("the diagnostics tab keeps its placeholder and points at the review queue's evidence", () => {
   const page = read("app/(site)/(application)/admin/amux-execution/page.tsx");
-  const diagnostics = page.slice(page.indexOf('tab.id === "diagnostics"'), page.indexOf("<AdminAmuxRoutingPanel"));
+  const diagnostics = page.slice(page.indexOf('tab.id === "diagnostics"'), page.indexOf("<AmuxOwnerQueueScreen"));
   assert.ok(diagnostics.includes("<AdminTabPlaceholder />"));
   assert.ok(diagnostics.includes('href="/admin/amux-execution?tab=review"'));
 });

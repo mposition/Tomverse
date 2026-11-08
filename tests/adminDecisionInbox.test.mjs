@@ -62,7 +62,7 @@ test("an agent or AMUX approval is one counted line with its count and no start 
     counts: counts({
       pendingMarketingApprovals: 3,
       openProductResearchSuggestions: 0,
-      openAmuxEscalations: 2,
+      awaitingAmuxOwnerQueue: 2,
       openAmuxOrchestratorHalts: 1,
       awaitingAmuxDecisionMaker: 0,
     }),
@@ -113,7 +113,7 @@ test("a work queue that failed to load is flagged, and its failed sources are pa
 
 test("a line whose screen the role cannot open is left out of the list and of the count", () => {
   // The Decision Maker board is the owner's; the review queue is every role's.
-  const input = { awaitingAmuxDecisionMaker: 2, openAmuxEscalations: 1 };
+  const input = { awaitingAmuxDecisionMaker: 2, awaitingAmuxOwnerQueue: 1 };
   const owner = buildDecisionInbox({ queue: queue([]), counts: counts(input), role: "owner", now });
   const support = buildDecisionInbox({ queue: queue([]), counts: counts(input), role: "support", now });
   assert.equal(owner.items.some((item) => item.kind === "amuxDecisionMaker"), true);

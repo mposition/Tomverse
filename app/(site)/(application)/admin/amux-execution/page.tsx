@@ -4,7 +4,6 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 
-import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminTabPlaceholder } from "@/components/admin/AdminTabPlaceholder";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
@@ -12,6 +11,7 @@ import { AmuxExecutionSupportingRecords } from "@/components/admin/AmuxExecution
 import { AmuxCardDisplayKeyBackfillPanel } from "@/components/admin/AmuxCardDisplayKeyBackfillPanel";
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
+import { AmuxOwnerQueueScreen } from "@/components/admin/AmuxOwnerQueueScreen";
 import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
 import { AmuxDecisionMakerRequestDrawer } from "@/components/admin/AmuxDecisionMakerRequestDrawer";
 import type { DmAdminRequestDetailView } from "@/components/admin/AmuxDecisionMakerRequestDetailPanel";
@@ -21,12 +21,10 @@ import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxScreensMessages } from "@/lib/adminMessages/amuxScreens";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { ADMIN_AMUX_EXECUTION_LEGACY_TABS, adminRedirectTarget, adminNavItemTabs, resolveAdminTabFor } from "@/lib/adminNavigation";
-import {
-  EMPTY_ADMIN_NAVIGATION_COUNTS,
-  countAwaitingAmuxEscalations,
-} from "@/lib/adminNavigationCounts";
+import { EMPTY_ADMIN_NAVIGATION_COUNTS } from "@/lib/adminNavigationCounts";
 import { readBoardWorkerChannels } from "@/lib/amux/adminBoardWorkerChannels";
 import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
+import { countAmuxOwnerQueue } from "@/lib/amux/adminOwnerQueueRead";
 import { readAmuxCliUsageSummaryForAdmin } from "@/lib/amux/adminCliUsageSummary";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerRequestDetailForAdmin } from "@/lib/amux/decisionMakerAdminRead";
@@ -82,11 +80,11 @@ export default async function AdminAmuxExecutionPage({
     return read.detail === null ? { kind: "not_found" } : { kind: "detail", detail: read.detail };
   };
 
-  const [m, screens, openAmuxEscalations, awaitingAmuxDecisionMaker, dmView] = await Promise.all([
+  const [m, screens, awaitingAmuxOwnerQueue, awaitingAmuxDecisionMaker, dmView] = await Promise.all([
     getAdminMessages(adminAmuxWorkspaceMessages),
     getAdminMessages(adminAmuxScreensMessages),
     // The tabs' badges. A failed count shows no badge rather than a zero.
-    countAwaitingAmuxEscalations().catch(() => null),
+    countAmuxOwnerQueue().catch(() => null),
     countDecisionMakerAttention().catch(() => null),
     dmRequested === null ? null : readDmRequest(dmRequested),
   ]);
@@ -109,7 +107,7 @@ export default async function AdminAmuxExecutionPage({
       label="Execution board sections"
       query={query}
       role={role}
-      counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxEscalations, awaitingAmuxDecisionMaker }}
+      counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, awaitingAmuxOwnerQueue, awaitingAmuxDecisionMaker }}
       chips={amuxTabChips(statuses, m.status)}
     />
   );
@@ -171,7 +169,7 @@ export default async function AdminAmuxExecutionPage({
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
       {drawer}
-      <AdminAmuxRoutingPanel canInspectCards={isOwner} focusEscalationId={
+      <AmuxOwnerQueueScreen canInspectCards={isOwner} focusEscalationId={
         typeof query.focusEscalation === "string" &&
         /^c[a-z0-9]{20,}$/i.test(query.focusEscalation) ?
           query.focusEscalation : null} />
