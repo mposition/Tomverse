@@ -10,6 +10,7 @@ import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxCardsMessages } from "@/lib/adminMessages/amuxCards";
 import { adminAmuxDecisionMakerJudgmentMessages } from "@/lib/adminMessages/amuxDecisionMaker";
+import { dmAdminRequestDetailHref } from "@/lib/amux/decisionMakerAdminHrefs";
 import { DM_DEFAULT_DECLARATION_ACCURACY } from "@/lib/amux/decisionMakerJudgmentCore";
 import type { AmuxV22QuestionDm } from "@/lib/amux/v22OwnerQuestionDmCore";
 
@@ -96,10 +97,6 @@ export async function readAmuxTaskQuestion(taskId: string,
 
 const JUDGMENT_PATH = "/api/admin/amux/decision-maker/judgments";
 
-/** The request's side panel over AMUX › Execution, where it can be edited or rejected. */
-export const amuxWorkerQuestionDmHref = (requestId: string) =>
-  `/admin/amux-execution?dmRequest=${encodeURIComponent(requestId)}`;
-
 /** "Confirm as proposed": the judgment route's confirmation on the values Admin showed,
  * with the declaration accuracy left unjudged, as the request drawer's default. */
 export const amuxWorkerQuestionDmConfirmBody = (dm: Extract<AmuxV22QuestionDm, { state: "proposal" }>) =>
@@ -173,7 +170,7 @@ export function AmuxWorkerQuestionDm({ dm, options, io }: {
               }}>
               {state.phase === "sending" ? messages.dmConfirming : messages.dmConfirm}
             </button>
-            <a className="text-sky-300 underline" href={amuxWorkerQuestionDmHref(dm.requestId)}>
+            <a className="text-sky-300 underline" href={dmAdminRequestDetailHref(dm.requestId)}>
               {messages.dmOpenDetail}</a>
           </div>
         </div>
