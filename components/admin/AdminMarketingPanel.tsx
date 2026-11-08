@@ -441,7 +441,9 @@ export function AdminMarketingPanel({
                     ...scheduleDailyApprovedActions(
                       rows,
                       view.takenPublishDaysTruncated ? null : (view.takenPublishDays ?? []),
-                      m
+                      m,
+                      Date.now,
+                      () => readDailyScheduleLatest(channel)
                     ),
                   ]}
                   section={view.section}
@@ -1863,6 +1865,48 @@ export function scheduleAllApprovedActions(rows: Row[], m: Record<string, string
 
 const nullableIso = (value: unknown): string | null => (typeof value === "string" ? value : null);
 
+/** The published rows and the days already held, as the server has them now. */
+export type DailyScheduleLatest = {
+  readonly rows: Row[];
+  /** null when the days already held could not all be read. */
+  readonly taken: readonly DailyScheduleTakenSlot[] | null;
+};
+
+/**
+ * Reads the published section again, through the same route the page
+ * refreshes from, and narrows it by the same channel filter. null when the
+ * read failed: the caller then sends nothing.
+ */
+async function readDailyScheduleLatest(channel: string): Promise<DailyScheduleLatest | null> {
+  try {
+    const response = await adminFetch("/api/admin/marketing?section=published", { cache: "no-store" });
+    if (!response.ok) {
+      await discardResponseBody(response);
+      return null;
+    }
+    const latest = (await response.json()) as MarketingConsoleView;
+    return {
+      rows: channel ? latest.rows.filter((row) => str(row.channel) === channel) : latest.rows,
+      taken: latest.takenPublishDaysTruncated ? null : (latest.takenPublishDays ?? []),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const dailySchedulePostsOf = (rows: readonly Row[]): DailySchedulePost[] =>
+  rows.map((row) => ({
+    id: str(row.id),
+    status: str(row.status),
+    provider: str(row.provider),
+    channelId: str(row.channelId),
+    accountLocale: str(row.accountLocale),
+    approvedAt: nullableIso(row.approvedAt),
+    approvalExpiresAt: nullableIso(row.approvalExpiresAt),
+    dailyCap: typeof row.dailyCap === "number" ? row.dailyCap : null,
+    weeklyCap: typeof row.weeklyCap === "number" ? row.weeklyCap : null,
+  }));
+
 /** "2026-11-09" as "11/9": the market's own date, short. */
 const shortDay = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
 
@@ -1882,25 +1926,22 @@ const shortDay = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice
  * `takenOrIncomplete` is null when the days already held could not all be
  * read: a plan without them could put two posts on one day, so the button is
  * shown as unavailable and sends nothing.
+ *
+ * The rows and days were read with the page, and another tab may have
+ * scheduled or published on the same accounts since. So after the person says
+ * yes, `reload` reads both again and the plan is rebuilt from them; if it is
+ * not the plan the person confirmed, or the read fails, nothing is sent and
+ * the page is read again for the next press.
  */
 export function scheduleDailyApprovedActions(
   rows: Row[],
   takenOrIncomplete: readonly DailyScheduleTakenSlot[] | null,
   m: Record<string, string>,
-  clock: () => number = Date.now
+  clock: () => number = Date.now,
+  reload: (() => Promise<DailyScheduleLatest | null>) | null = null
 ): MarketingAction[] {
   const byId = new Map(rows.map((row) => [str(row.id), row]));
-  const posts: DailySchedulePost[] = rows.map((row) => ({
-    id: str(row.id),
-    status: str(row.status),
-    provider: str(row.provider),
-    channelId: str(row.channelId),
-    accountLocale: str(row.accountLocale),
-    approvedAt: nullableIso(row.approvedAt),
-    approvalExpiresAt: nullableIso(row.approvalExpiresAt),
-    dailyCap: typeof row.dailyCap === "number" ? row.dailyCap : null,
-    weeklyCap: typeof row.weeklyCap === "number" ? row.weeklyCap : null,
-  }));
+  const posts = dailySchedulePostsOf(rows);
   const eligible = dailySchedulablePosts(posts);
   if (eligible.length === 0) return [];
   const incomplete = takenOrIncomplete === null;
@@ -1977,10 +2018,21 @@ export function scheduleDailyApprovedActions(
         confirmed = planAt(clock());
         return confirmOf(confirmed);
       },
-      stale: () => {
+      stale: async () => {
         if (incomplete) return m.scheduleDailyTakenIncomplete;
+        let latest: DailyScheduleLatest = { rows, taken };
+        if (reload) {
+          const read = await reload();
+          if (read === null) return m.scheduleDailyRecheckFailed;
+          if (read.taken === null) return m.scheduleDailyTakenIncomplete;
+          latest = read;
+        }
         const now = clock();
-        const fresh = planAt(now);
+        const fresh = planDailyMarketingSchedule({
+          posts: dailySchedulePostsOf(latest.rows),
+          taken: latest.taken ?? [],
+          now,
+        });
         const asked = confirmed ?? fresh;
         if (fresh.slots.length === 0) return m.scheduleDailyNothingFits;
         const tooSoon = asked.slots.some(

@@ -51,7 +51,7 @@ const asked = (action: MarketingAction) =>
   typeof action.confirm === "function" ? action.confirm({}) : String(action.confirm);
 
 /** The scheduledAt of each request a press would send. */
-const timesOf = (sent: ReturnType<typeof marketingBatchToSend>) =>
+const timesOf = (sent: Awaited<ReturnType<typeof marketingBatchToSend>>) =>
   sent !== null && !("refused" in sent)
     ? sent.map((request) => (request.body as { scheduledAt: string }).scheduledAt)
     : sent;
@@ -154,11 +154,11 @@ for (const locale of ["en", "ko"] as const) {
   const AFTERNOON = Date.parse("2026-11-08T04:00:30.000Z");
   const seoulRows = () => [row("a"), row("b", { approvedAt: "2026-11-07T01:00:00.000Z" })];
 
-  test(`${locale}: a page left open plans from the moment the button is pressed`, () => {
+  test(`${locale}: a page left open plans from the moment the button is pressed`, async () => {
     let now = AFTERNOON;
     const [action] = scheduleDailyApprovedActions(seoulRows(), [], m, () => now);
     now += 2 * 60 * 1000;
-    const sent = marketingBatchToSend(action, () => true);
+    const sent = await marketingBatchToSend(action, () => true);
     // Planned at the press (13:02:30 + 5 min), not at the render (13:06).
     assert.deepEqual(timesOf(sent), ["2026-11-08T04:08:00.000Z", "2026-11-09T01:00:00.000Z"]);
   });
@@ -167,7 +167,7 @@ for (const locale of ["en", "ko"] as const) {
     let now = AFTERNOON;
     const [action] = scheduleDailyApprovedActions(seoulRows(), [], m, () => now);
     let question = "";
-    const sent = marketingBatchToSend(action, (text) => {
+    const sent = await marketingBatchToSend(action, (text) => {
       question = text;
       now += 60 * 1000; // the question stays open a minute
       return true;
@@ -178,7 +178,7 @@ for (const locale of ["en", "ko"] as const) {
     assert.ok(!m.scheduleDailyPlanChanged.includes("{"));
 
     // Pressing again asks about the new plan, and that is what goes.
-    const again = marketingBatchToSend(action, () => true);
+    const again = await marketingBatchToSend(action, () => true);
     assert.deepEqual(timesOf(again), ["2026-11-08T04:07:00.000Z", "2026-11-09T01:00:00.000Z"]);
     const seen: string[] = [];
     if (again === null || "refused" in again) throw new Error("expected requests");
@@ -189,10 +189,10 @@ for (const locale of ["en", "ko"] as const) {
     assert.deepEqual(seen, ["2026-11-08T04:07:00.000Z", "2026-11-09T01:00:00.000Z"]);
   });
 
-  test(`${locale}: a plan that does not move with the clock survives a slow confirmation`, () => {
+  test(`${locale}: a plan that does not move with the clock survives a slow confirmation`, async () => {
     let now = NOW;
     const [action] = scheduleDailyApprovedActions(rows(), [], m, () => now);
-    const sent = marketingBatchToSend(action, () => {
+    const sent = await marketingBatchToSend(action, () => {
       now += 3 * 60 * 1000;
       return true;
     });
@@ -205,14 +205,14 @@ for (const locale of ["en", "ko"] as const) {
   });
 
   // Seoul 15:00 and Brisbane 16:00 on 8 November: both markets' 10:00 has passed.
-  test(`${locale}: pressed in the afternoon, the confirmation shows today's real local time`, () => {
+  test(`${locale}: pressed in the afternoon, the confirmation shows today's real local time`, async () => {
     const afternoon = Date.parse("2026-11-08T06:00:00.000Z");
     const [action] = scheduleDailyApprovedActions(rows(), [], m, () => afternoon);
     const confirm = asked(action);
     assert.ok(confirm.includes("Instagram ko: 11/8 15:05, 11/9, 11/10 (3"), confirm);
     assert.ok(confirm.includes("LinkedIn en: 11/8 16:05 (1"), confirm);
     assert.ok(!confirm.includes("{"), confirm);
-    assert.deepEqual(timesOf(marketingBatchToSend(action, () => true)), [
+    assert.deepEqual(timesOf(await marketingBatchToSend(action, () => true)), [
       "2026-11-08T06:05:00.000Z",
       "2026-11-09T01:00:00.000Z",
       "2026-11-10T01:00:00.000Z",
@@ -220,17 +220,55 @@ for (const locale of ["en", "ko"] as const) {
     ]);
   });
 
-  test(`${locale}: when the days already held could not all be read, the button is disabled and sends nothing`, () => {
+  test(`${locale}: when the days already held could not all be read, the button is disabled and sends nothing`, async () => {
     const [action] = scheduleDailyApprovedActions(rows(), null, m, () => NOW);
     assert.equal(action.unavailable, m.scheduleDailyTakenIncomplete);
     assert.ok(!m.scheduleDailyTakenIncomplete.includes("{"));
     assert.deepEqual(action.batch?.(), []);
-    assert.deepEqual(marketingBatchToSend(action, () => true), { refused: m.scheduleDailyTakenIncomplete });
+    assert.deepEqual(await marketingBatchToSend(action, () => true), { refused: m.scheduleDailyTakenIncomplete });
   });
 
-  test(`${locale}: a declined confirmation sends nothing`, () => {
+  // Another tab scheduled a post on the same account for 9 Nov after this page was read.
+  test(`${locale}: the plan is checked against the days held now, and a changed one sends nothing`, async () => {
+    const reads: number[] = [];
+    const [action] = scheduleDailyApprovedActions(rows(), [], m, () => NOW, async () => {
+      reads.push(NOW);
+      return {
+        rows: rows(),
+        taken: [{ channelId: "ig-ko", status: "scheduled", slotDay: null, scheduledAt: "2026-11-09T01:00:00.000Z" }],
+      };
+    });
+    let question = "";
+    const sent = await marketingBatchToSend(action, (text) => {
+      question = text;
+      return true;
+    });
+    assert.ok(question.includes("Instagram ko: 11/8, 11/9, 11/10 (3"), question);
+    assert.equal(reads.length, 1, "read again after the yes, before anything is sent");
+    assert.deepEqual(sent, { refused: m.scheduleDailyPlanChanged });
+  });
+
+  test(`${locale}: a re-read that fails, or comes back cut, sends nothing`, async () => {
+    const [failed] = scheduleDailyApprovedActions(rows(), [], m, () => NOW, async () => null);
+    assert.deepEqual(await marketingBatchToSend(failed, () => true), { refused: m.scheduleDailyRecheckFailed });
+    assert.ok(!m.scheduleDailyRecheckFailed.includes("{"));
+    const [cut] = scheduleDailyApprovedActions(rows(), [], m, () => NOW, async () => ({ rows: rows(), taken: null }));
+    assert.deepEqual(await marketingBatchToSend(cut, () => true), { refused: m.scheduleDailyTakenIncomplete });
+  });
+
+  test(`${locale}: a re-read that shows the same days sends the confirmed plan`, async () => {
+    const [action] = scheduleDailyApprovedActions(rows(), [], m, () => NOW, async () => ({ rows: rows(), taken: [] }));
+    assert.deepEqual(timesOf(await marketingBatchToSend(action, () => true)), [
+      "2026-11-08T01:00:00.000Z",
+      "2026-11-09T01:00:00.000Z",
+      "2026-11-10T01:00:00.000Z",
+      "2026-11-08T00:00:00.000Z",
+    ]);
+  });
+
+  test(`${locale}: a declined confirmation sends nothing`, async () => {
     const [action] = scheduleDailyApprovedActions(rows(), [], m, () => NOW);
-    assert.equal(marketingBatchToSend(action, () => false), null);
+    assert.equal(await marketingBatchToSend(action, () => false), null);
   });
 
   test(`${locale}: the "publish all now" button is unchanged beside it`, () => {
