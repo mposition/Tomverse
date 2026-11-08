@@ -125,10 +125,6 @@ export function AmuxOwnerQueueDecision({
   const reviewPr = reviewMatches && review.task.status === "review" &&
     item.attentionReason === "human_review_required" &&
     review.task.review_pr_number !== undefined ? review.task.review_pr_number : undefined;
-  const why = group === "question" ? copy.why.question
-    : reviewPr === null ? copy.why.reviewNoPr
-    : typeof reviewPr === "number" ? copy.why.reviewWithPr(reviewPr)
-    : (item.attentionReason ? copy.why.byReason[item.attentionReason] : undefined) ?? copy.why[group];
   const reportExcerpt = reviewPr === null && reviewMatches
     ? workerReportExcerpt(review.review_report?.worker_report ?? null) : null;
   const usageUnknown = reviewMatches && review.last_attempt !== null &&
@@ -140,6 +136,15 @@ export function AmuxOwnerQueueDecision({
   const classification = summary === null ? null
     : classifyAmuxOwnerQueueItem(summary, reviewMatches ? review : null);
   const outcomes = reviewMatches ? visibleAmuxOwnerReviewOutcomes(review) : [];
+  // The words follow the choices actually shown, not the PR alone: a verified
+  // non-code Task is approved without one, and a spent budget, an unverified
+  // result or pending publication leaves no retry.
+  const noPrWhy = outcomes.includes("approve") ? copy.why.reviewNoPrApprovable
+    : outcomes.includes("retry") ? copy.why.reviewNoPr : copy.why.reviewNoPrBlockOnly;
+  const why = group === "question" ? copy.why.question
+    : reviewPr === null ? noPrWhy
+    : typeof reviewPr === "number" ? copy.why.reviewWithPr(reviewPr)
+    : (item.attentionReason ? copy.why.byReason[item.attentionReason] : undefined) ?? copy.why[group];
   const showRecoverySteps = group !== "question" && summary !== null &&
     (group === "recover" || group === "read" || classification === "technical_recovery");
   const decisionOpen = classification === "owner_decision";

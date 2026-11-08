@@ -314,3 +314,21 @@ test("a finished review run whose usage was never reported still offers the serv
   assert.match(html, /its usage was never reported/);
   assert.doesNotMatch(html, /data-testid="admin-amux-select-retry"/);
 });
+
+test("the no-PR words follow the choices shown: approvable, retryable or block only", () => {
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const noPrTask = { id: "task-1", title: "Tidy", status: "review", revision: 8,
+    due_parse_state: "valid", review_pr_number: null };
+  // A verified design Task is approved on its result without a PR.
+  const approvable = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, { task: noPrTask }) }));
+  assert.match(approvable, /this kind of task is approved on its verified result/);
+  assert.doesNotMatch(approvable, /so it cannot be approved/);
+  // No retry left (budget spent, publication pending): block only.
+  const blockOnly = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, { task: noPrTask, allowed_outcomes: ["block"],
+      proposed_transitions: { block: "blocked" } }) }));
+  assert.match(blockOnly, /cannot be run again right now\. You can block it\./);
+  assert.doesNotMatch(blockOnly, /You can run it again/);
+});

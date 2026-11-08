@@ -77,7 +77,9 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       decide: "The worker is done or out of options, and this card is set up so a person decides before it moves on.",
       reviewWithPr: (prNumber: number) =>
         `The worker finished and pull request #${prNumber} is open. This card needs your review before it moves on.`,
-      reviewNoPr: "The work result is saved, but there is no pull request. It cannot be approved without one; the choices below are the ones left (run it again, or block it). Check the worker report first: it says whether the tests ran.",
+      reviewNoPr: "The work result is saved, but there is no pull request, so it cannot be approved. You can run it again or block it. Check the worker report first: it says whether the tests ran.",
+      reviewNoPrBlockOnly: "The work result is saved, but there is no pull request, so it cannot be approved, and it cannot be run again right now. You can block it. Check the worker report first.",
+      reviewNoPrApprovable: "The work result is saved with no pull request; this kind of task is approved on its verified result. Check the worker report before deciding.",
       reviewUsageUnknown: "The run finished, but its usage was never reported, so it cannot be approved or run again yet. You can still block it.",
       byReason: {
         human_review_required: "The worker finished. This card needs your review before it moves on.",
@@ -178,7 +180,9 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       decide: "워커가 일을 끝냈거나 더 할 수 없어서, 사람이 정해야 다음으로 넘어가요.",
       reviewWithPr: (prNumber: number) =>
         `워커가 작업을 끝냈고 PR #${prNumber}이 열려 있어요. 이 카드는 사람이 확인해야 다음 단계로 넘어가도록 설정돼 있어요.`,
-      reviewNoPr: "작업 결과는 저장됐지만 PR이 없어요. PR이 없으면 승인할 수 없어요. 아래에 남은 선택지(다시 실행, 차단)에서 골라 주세요. 테스트를 돌렸는지 작업자 보고부터 확인해 주세요.",
+      reviewNoPr: "작업 결과는 저장됐지만 PR이 없어서 승인할 수 없어요. 다시 실행하거나 차단할 수 있어요. 테스트를 돌렸는지 작업자 보고부터 확인해 주세요.",
+      reviewNoPrBlockOnly: "작업 결과는 저장됐지만 PR이 없어서 승인할 수 없고, 지금은 다시 실행할 수도 없어요. 차단할 수 있어요. 작업자 보고부터 확인해 주세요.",
+      reviewNoPrApprovable: "작업 결과가 PR 없이 저장됐어요. 이 종류의 작업은 검증된 결과로 승인해요. 결정하기 전에 작업자 보고를 확인해 주세요.",
       reviewUsageUnknown: "실행은 끝났지만 사용량 기록이 들어오지 않아서, 아직 승인하거나 다시 실행할 수 없어요. 차단은 할 수 있어요.",
       byReason: {
         human_review_required: "워커가 작업을 끝냈어요. 이 카드는 사람이 확인해야 다음 단계로 넘어가도록 설정돼 있어요.",

@@ -435,7 +435,8 @@ export function AmuxOwnerReviewView({
     ? m.ownerQuestionApprove
     : outcomes.includes("retry")
       // From review, retry is offered only for a result with no pull request.
-      ? review.task.status === "review" ? m.ownerQuestionRetryNoPr : m.ownerQuestionRetry
+      ? review.task.status === "review" && review.task.review_pr_number === null
+        ? m.ownerQuestionRetryNoPr : m.ownerQuestionRetry
       : outcomes.includes("block")
         ? m.ownerQuestionBlock
         : null;
