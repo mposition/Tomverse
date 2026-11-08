@@ -241,9 +241,9 @@ test("a price revision an operator commits while the copy waits holds the model"
   // Wait until the copy is actually waiting for the lock, then let the
   // operator commit: the copy must plan after that commit, not before.
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const [{ waiting }] = await prisma.$queryRaw<{ waiting: bigint }[]>`
-      SELECT count(*)::bigint AS waiting FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`;
-    if (waiting > 0n) break;
+    const [{ waiting }] = await prisma.$queryRaw<{ waiting: number }[]>`
+      SELECT count(*)::int AS waiting FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`;
+    if (Number(waiting) > 0) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   release();
