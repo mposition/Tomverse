@@ -157,21 +157,42 @@ function utf8Prefix(text: string, maxBytes: number): string {
   return out;
 }
 
-/** The notes a conclusion leaves for one dependent: those naming its key or id, and `*`. */
+/** The idea-scoped card reference a brief names its sibling cards by
+ * (`c<chunk>:card-<n>`, lib/amux/ideaDerivationService.ts), or null. */
+export const amuxV22CardLocalRef = (value: string | null | undefined) =>
+  typeof value === "string" && /^c\d{1,4}:card-\d{1,5}$/.test(value) ? value : null;
+
+/** How a prerequisite is named in the section: its display key (or id), and
+ * the brief's local reference beside it when the card has one. */
+export const amuxV22PriorLabel = (item: { id: string; displayKey: string | null },
+  localRef: string | null) => {
+  const key = item.displayKey ?? item.id;
+  const ref = amuxV22CardLocalRef(localRef);
+  return ref ? `${key} (${ref})` : key;
+};
+
+/** The notes a conclusion leaves for one dependent: those naming its key, id
+ * or the brief's local reference, and `*`. */
 export function amuxV22HandoffNotesFor(conclusion: Pick<AmuxV22Conclusion, "handoff">,
-  dependent: { id: string; displayKey: string | null }): string | null {
+  dependent: { id: string; displayKey: string | null; localRef?: string | null }): string | null {
   const key = dependent.displayKey?.toLowerCase() ?? null;
+  const ref = amuxV22CardLocalRef(dependent.localRef)?.toLowerCase() ?? null;
   const notes = conclusion.handoff.filter((entry) => entry.task === "*" ||
-    entry.task === dependent.id || (key !== null && entry.task.toLowerCase() === key))
+    entry.task === dependent.id || (key !== null && entry.task.toLowerCase() === key) ||
+    (ref !== null && entry.task.toLowerCase() === ref))
     .map((entry) => entry.note);
   return notes.length > 0 ? notes.join("\n") : null;
 }
 
 export type AmuxV22PriorConclusionEntry = {
-  /** The prerequisite's display key, or its id. */
+  /** The prerequisite's display key (or id), with its local reference when known. */
   label: string;
+  /** The conclusion's findings, or for a `result` entry the result text. */
   findings: string;
   note: string | null;
+  /** `result`: the prerequisite's newest result has no conclusion line, so its
+   * text stands in, cut to the entry's share like any other. Default conclusion. */
+  source?: "conclusion" | "result";
 };
 
 /**
@@ -194,8 +215,12 @@ export function buildAmuxV22PriorConclusionSection(input: {
   if (count === 0) return null;
   const share = Math.floor((budget - headBytes) / count) - 1;
   const blocks = input.entries.slice(0, count).map((entry) => {
-    const text = [`From ${entry.label}:`, `Findings: ${entry.findings}`,
-      ...(entry.note ? [`Note for this Task: ${entry.note}`] : [])].join("\n");
+    const text = entry.source === "result" ?
+      [`From ${entry.label}:`,
+        "Result (this Task recorded no conclusion line; its final report follows):",
+        entry.findings].join("\n") :
+      [`From ${entry.label}:`, `Findings: ${entry.findings}`,
+        ...(entry.note ? [`Note for this Task: ${entry.note}`] : [])].join("\n");
     const cut = utf8Prefix(text, share);
     return cut === text ? cut : utf8Prefix(cut, share - 13) + " [truncated]";
   });

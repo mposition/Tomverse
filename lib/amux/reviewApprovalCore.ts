@@ -179,6 +179,105 @@ export const amuxV22ReviewRetryHasVerifiedOutcome = (input: {
     typeof input.attempt.id === "string" && input.attempt.id.length > 0 &&
     input.storedResultAttemptId === input.attempt.id);
 
+/** Publication work that has opened, or may still open, the attempt's pull
+ * request: a publish item that is waiting, in flight or published, and a
+ * draft whose tier the publisher has not read yet. A refused, failed or
+ * expired publish, and a draft kept private, open nothing. */
+export const AMUX_REVIEW_PUBLICATION_PENDING_STATES = Object.freeze([
+  "queued", "claimed", "needs_lookup", "outcome_unknown", "published",
+] as const);
+export const amuxReviewPublicationMayOpenPr = (items: ReadonlyArray<{
+  kind: string; state: string; reason: string | null;
+}>, tierPendingReason: string) => items.some((item) =>
+  (item.kind === "publish" &&
+    (AMUX_REVIEW_PUBLICATION_PENDING_STATES as readonly string[]).includes(item.state)) ||
+  (item.kind === "t2_draft" && item.state === "open" && item.reason === tierPendingReason));
+
+/**
+ * A v22 Task in review with no pull request may be run again by the owner
+ * (owner decision 2026-11-08, AMUX-FILEGEN-003): its patch stayed private or
+ * it left no change, so an implement Task could only be blocked. The result
+ * must be this exact attempt's stored, readable result (the same evidence
+ * that shows the worker report as verified), and no publication work may
+ * still open a pull request for it; the attempt budget is checked by the
+ * caller. A run whose usage receipt was never reported
+ * (`usage_outcome_unknown`) is not retried: the claim would hold every
+ * Task on that worker until it is, as the blocked path refuses it too.
+ * Approval is unchanged: an implement Task still needs its PR.
+ */
+export const amuxV22PrlessReviewRetryAllowed = (input: {
+  sourceSystem: string | null;
+  cardType: string | null;
+  reviewPrNumber: number | null;
+  attempt: { v22AssignmentId: string | null; outcome: string | null;
+    toStatus: string | null; reason: string | null } | null;
+  v4EvidenceVerified: boolean;
+  publicationMayOpenPr: boolean;
+  displayTruncated: boolean;
+  displayExact: boolean;
+}) => input.sourceSystem === "admin-idea-v4" && input.cardType === "task" &&
+  input.reviewPrNumber === null && input.attempt !== null &&
+  input.attempt.v22AssignmentId !== null &&
+  input.attempt.outcome === "succeeded" && input.attempt.toStatus === "review" &&
+  input.attempt.reason !== "usage_outcome_unknown" &&
+  input.v4EvidenceVerified && !input.publicationMayOpenPr &&
+  !input.displayTruncated && input.displayExact;
+
+/**
+ * The outcomes the server offers for one escalation, from the evidence the
+ * caller read. Review: approve on its evidence, always block, and retry only
+ * for a v22 result with no pull request. Blocked: block, and retry on a
+ * verified outcome. Every retry needs an exact display, a budget left and a
+ * valid due date.
+ */
+export const amuxReviewAllowedOutcomes = (input: {
+  eligible: boolean;
+  taskStatus: string;
+  reviewAttempt: boolean;
+  approvalHasEvidence: boolean;
+  prlessRetryAllowed: boolean;
+  blockedRetryVerified: boolean;
+  budgetAllowed: boolean;
+  dueCorrected: boolean;
+  displayTruncated: boolean;
+  displayExact: boolean;
+}): AmuxReviewOutcome[] => {
+  if (!input.eligible) return [];
+  const retryable = !input.displayTruncated && input.displayExact &&
+    input.budgetAllowed && input.dueCorrected;
+  if (input.taskStatus === "review") {
+    if (!input.reviewAttempt) return [];
+    return [
+      ...(input.approvalHasEvidence ? ["approve" as const] : []),
+      "block",
+      ...(retryable && input.prlessRetryAllowed ? ["retry" as const] : []),
+    ];
+  }
+  if (input.taskStatus === "blocked") {
+    return ["block",
+      ...(retryable && input.blockedRetryVerified ? ["retry" as const] : [])];
+  }
+  return [];
+};
+
+/** Why the server offers no decision at all for an escalation, so the owner
+ * review can say what holds it instead of an empty list (AMUX-UICONTRACT-002,
+ * 2026-11-08). Display only: the outcomes stay amuxReviewAllowedOutcomes'. */
+export type AmuxReviewDecisionHold =
+  | "escalation_closed" | "card_archived" | "task_status"
+  | "attempt_running" | "delivery_pending" | "review_attempt_mismatch";
+export const amuxReviewDecisionHold = (input: {
+  escalationOpen: boolean; archived: boolean; taskStatus: string;
+  lastTerminal: boolean; activeDelivery: boolean; reviewAttempt: boolean;
+}): AmuxReviewDecisionHold | null =>
+  !input.escalationOpen ? "escalation_closed" :
+  input.archived ? "card_archived" :
+  input.taskStatus !== "review" && input.taskStatus !== "blocked" ? "task_status" :
+  !input.lastTerminal ? "attempt_running" :
+  input.activeDelivery ? "delivery_pending" :
+  input.taskStatus === "review" && !input.reviewAttempt ? "review_attempt_mismatch" :
+  null;
+
 export type AmuxReviewSubject = {
   escalation_id: string;
   task_id: string;
@@ -266,6 +365,9 @@ export const amuxReviewTargetStatus = (
   if (source === "review") {
     if (outcome === "approve") return "done";
     if (outcome === "block") return "blocked";
+    // Offered only for a v22 result with no pull request
+    // (amuxV22PrlessReviewRetryAllowed); the proposal CHECK admits it.
+    if (outcome === "retry") return "todo";
     return null;
   }
   if (outcome === "retry") return "todo";

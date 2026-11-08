@@ -28,7 +28,8 @@ import { applyAmuxPlanRefusalDmDecision, readAmuxPlanRefusalSyncRows,
   readOpenAmuxPlanRefusalOfCard, recordAmuxPlanRefusalLocalCard,
   recordAmuxPlanRefusalLocalCardClosed } from "./ideaSessionPlanRefusalService.ts";
 import { amuxDatabaseDiagnosticCode } from "./readFailureCore.ts";
-import { parseAmuxV22OwnerQuestion } from "./v22OwnerQuestionCore.ts";
+import { readAmuxCardTitle } from "./adminExecutionRead.ts";
+import { amuxV22QuestionDmCard, parseAmuxV22OwnerQuestion } from "./v22OwnerQuestionCore.ts";
 import { AMUX_V22_PROVIDERS, amuxV22Provider } from "./v22WorkerClaimCore.ts";
 import { answerAmuxV22OwnerQuestionInTransaction } from
   "./v22OwnerQuestionService.ts";
@@ -89,7 +90,12 @@ export async function isAmuxV22QuestionCard(
 
 type PendingRow = AmuxV22SealedRow & { questionId: string; taskId: string;
   attemptId: string; worker: string; sequence: number; sourceSha256: string;
-  provider: string | null };
+  provider: string | null;
+  // The asking card, so its local card is titled and introduced by it.
+  displayKey: string | null; cardTitle: string; sourceSystem: string;
+  sourceSnapshot: Prisma.JsonValue; v4TitleCiphertext: Uint8Array<ArrayBuffer> | null;
+  v4TitleKeyId: string | null; v4TitleKeyVersion: number | null;
+  v4TitleDigest: string | null; v4TitleDigestKeyId: string | null };
 
 /** Open questions with no local card yet, with their run's result rows, and
  * cards of questions no longer open that the relay has not closed. */
@@ -99,7 +105,9 @@ export async function readAmuxV22QuestionSyncRows(tx: Prisma.TransactionClient,
     SELECT q."id" AS "questionId", q."taskId", q."attemptId", q."worker",
       q."sequence", r."ideaId", r."ciphertext", r."keyId", r."keyVersion",
       r."digest", r."digestKeyId", r."sourceSha256", r."bodyPurgedAt",
-      g."provider"
+      g."provider", w."displayKey", w."title" AS "cardTitle", w."sourceSystem",
+      w."sourceSnapshot", w."v4TitleCiphertext", w."v4TitleKeyId",
+      w."v4TitleKeyVersion", w."v4TitleDigest", w."v4TitleDigestKeyId"
     FROM "AmuxV22TaskQuestion" q
     JOIN "AmuxV22TaskResult" r
       ON r."attemptId" = q."attemptId" AND r."taskId" = q."taskId"
@@ -146,11 +154,15 @@ export async function openAmuxV22QuestionCards(pending: PendingRow[]) {
     catch { continue; }
     const question = text ? parseAmuxV22OwnerQuestion(text) : null;
     if (!question) continue;
-    cards.push({ question_id: row.questionId, worker: row.worker,
-      provider: AMUX_V22_PROVIDERS[provider].providerClass,
-      title: `v22 Task ${row.taskId} question ${row.sequence}`,
-      question: question.question, unblocks: question.unblocks,
-      options: question.options });
+    // The card's own title; a sealed one that cannot be opened leaves the key alone.
+    const cardTitle = await readAmuxCardTitle({ id: row.taskId, title: row.cardTitle,
+      sourceSystem: row.sourceSystem, sourceSnapshot: row.sourceSnapshot,
+      v4TitleCiphertext: row.v4TitleCiphertext, v4TitleKeyId: row.v4TitleKeyId,
+      v4TitleKeyVersion: row.v4TitleKeyVersion, v4TitleDigest: row.v4TitleDigest,
+      v4TitleDigestKeyId: row.v4TitleDigestKeyId }).catch(() => null);
+    cards.push(amuxV22QuestionDmCard({ questionId: row.questionId, worker: row.worker,
+      providerClass: AMUX_V22_PROVIDERS[provider].providerClass, taskId: row.taskId,
+      sequence: row.sequence, displayKey: row.displayKey, cardTitle, question }));
   }
   return cards;
 }

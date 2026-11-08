@@ -263,7 +263,7 @@ test("a conversation with attachments anywhere is never rewritten", async () => 
   assert.equal(withRouterRewrite(emptyList, "Fix the parser.")[0].content, "Fix the parser.");
 });
 
-test("the live router deadline is 7 s, no longer than rewrite and below replay", async () => {
+test("the live router deadline is 7 s with at least as much time for rewriting and more for replay", async () => {
   const { AUTO_LLM_ROUTER_TIMEOUT_MS, AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS, AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS } =
     await import("../lib/autoLlmRouterCore.ts");
   assert.equal(AUTO_LLM_ROUTER_TIMEOUT_MS, 7_000);
