@@ -95,6 +95,8 @@ export type AmuxReviewDetail = {
     html_url: string;
   } | null;
   allowed_outcomes: ReviewOutcome[];
+  /** Why the server offers no decision at all; null while it offers one. */
+  decision_hold?: string | null;
   retry: { used: number; limit: number; remaining: number };
   proposed_transitions: Partial<Record<ReviewOutcome, string>>;
 };
@@ -601,13 +603,22 @@ export function AmuxOwnerReviewView({
         <p className="mt-3 text-xs leading-5 text-zinc-500">{m.costBoundary}</p>
       </section>
 
-      {(unknown || technicalOnly) && (
+      {/* With no choice to make, the recovery tools are the only way on: the
+          queue's "check the result first" step points here (AMUX-UICONTRACT-002). */}
+      {(unknown || technicalOnly || outcomes.length === 0) && (
         <section className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5" data-testid="admin-amux-technical-recovery">
           <div className="flex items-center gap-2 text-amber-100">
             <Wrench aria-hidden="true" className="h-5 w-5" />
             <h5 className="font-bold">{m.technicalRecovery}</h5>
           </div>
           <p className="mt-3 text-sm leading-6 text-amber-100/90">{m.recoveryPreparationIntro}</p>
+          {review.decision_hold && m.decisionHold[review.decision_hold] ? (
+            <div className="mt-4 rounded-lg border border-amber-300/30 bg-zinc-950/40 p-4"
+              data-testid="admin-amux-decision-hold">
+              <p className="text-xs font-bold uppercase tracking-wide text-amber-200">{m.decisionHoldTitle}</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-200">{m.decisionHold[review.decision_hold]}</p>
+            </div>
+          ) : null}
           {canInspectCards && <AmuxOwnerRecoveryInspectionPanel
             key={`${review.task.id}:${review.task.revision}:${review.last_attempt?.id ?? "none"}`}
             identity={{ taskId: review.task.id, taskRevision: review.task.revision,

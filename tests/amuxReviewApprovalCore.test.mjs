@@ -8,6 +8,7 @@ import {
   amuxReviewAllowedOutcomes,
   amuxReviewApprovalReadiness,
   amuxReviewApprovalHasEvidence,
+  amuxReviewDecisionHold,
   amuxReviewDisplayIsExact,
   amuxReviewTextExceedsDisplay,
   amuxReviewProposalExpiry,
@@ -417,4 +418,20 @@ test("proposal TTL is exactly 24 hours", () => {
   const issued = new Date("2026-09-21T00:00:00.000Z");
   assert.equal(AMUX_REVIEW_PROPOSAL_TTL_MS, 86_400_000);
   assert.equal(amuxReviewProposalExpiry(issued).toISOString(), "2026-09-22T00:00:00.000Z");
+});
+
+test("the decision hold names what keeps every outcome closed, first cause first", () => {
+  const open = { escalationOpen: true, archived: false, taskStatus: "blocked",
+    lastTerminal: true, activeDelivery: false, reviewAttempt: false };
+  assert.equal(amuxReviewDecisionHold(open), null);
+  assert.equal(amuxReviewDecisionHold({ ...open, taskStatus: "review", reviewAttempt: true }), null);
+  assert.equal(amuxReviewDecisionHold({ ...open, activeDelivery: true }), "delivery_pending");
+  assert.equal(amuxReviewDecisionHold({ ...open, lastTerminal: false, activeDelivery: true }),
+    "attempt_running");
+  assert.equal(amuxReviewDecisionHold({ ...open, archived: true, activeDelivery: true }),
+    "card_archived");
+  assert.equal(amuxReviewDecisionHold({ ...open, escalationOpen: false, archived: true }),
+    "escalation_closed");
+  assert.equal(amuxReviewDecisionHold({ ...open, taskStatus: "todo" }), "task_status");
+  assert.equal(amuxReviewDecisionHold({ ...open, taskStatus: "review" }), "review_attempt_mismatch");
 });

@@ -260,6 +260,24 @@ export const amuxReviewAllowedOutcomes = (input: {
   return [];
 };
 
+/** Why the server offers no decision at all for an escalation, so the owner
+ * review can say what holds it instead of an empty list (AMUX-UICONTRACT-002,
+ * 2026-11-08). Display only: the outcomes stay amuxReviewAllowedOutcomes'. */
+export type AmuxReviewDecisionHold =
+  | "escalation_closed" | "card_archived" | "task_status"
+  | "attempt_running" | "delivery_pending" | "review_attempt_mismatch";
+export const amuxReviewDecisionHold = (input: {
+  escalationOpen: boolean; archived: boolean; taskStatus: string;
+  lastTerminal: boolean; activeDelivery: boolean; reviewAttempt: boolean;
+}): AmuxReviewDecisionHold | null =>
+  !input.escalationOpen ? "escalation_closed" :
+  input.archived ? "card_archived" :
+  input.taskStatus !== "review" && input.taskStatus !== "blocked" ? "task_status" :
+  !input.lastTerminal ? "attempt_running" :
+  input.activeDelivery ? "delivery_pending" :
+  input.taskStatus === "review" && !input.reviewAttempt ? "review_attempt_mismatch" :
+  null;
+
 export type AmuxReviewSubject = {
   escalation_id: string;
   task_id: string;

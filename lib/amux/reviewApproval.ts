@@ -8,6 +8,7 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   amuxReviewAllowedOutcomes,
   amuxReviewApprovalHasEvidence,
+  amuxReviewDecisionHold,
   amuxReviewDisplayIsExact,
   amuxReviewTextExceedsDisplay,
   amuxReviewRequestDigest,
@@ -218,6 +219,9 @@ async function snapshot(
   const baseEligible = safe && task.archivedAt === null &&
     (task.status === "review" || task.status === "blocked") &&
     lastTerminal && activeDelivery === null;
+  const decisionHold = amuxReviewDecisionHold({ escalationOpen: safe,
+    archived: task.archivedAt !== null, taskStatus: task.status, lastTerminal,
+    activeDelivery: activeDelivery !== null, reviewAttempt });
   const inReview = baseEligible && task.status === "review" && reviewAttempt;
   // A v22 result that reached review with no pull request (owner decision
   // 2026-11-08). Its publication rows are read, not locked: locking them here
@@ -320,7 +324,7 @@ async function snapshot(
     latestV4Result?.attemptId === lastAttempt.id;
   return { escalation, task, lastAttempt, budget, used, subject, digest, text,
     context, report, displayTruncated, displayExact, outcomes, artifact,
-    lastAttemptResultStored };
+    lastAttemptResultStored, decisionHold };
 }
 
 export async function getAmuxReviewDetail(escalationId: string) {
@@ -329,7 +333,8 @@ export async function getAmuxReviewDetail(escalationId: string) {
   ]);
   const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
   const { escalation, task, lastAttempt, used, digest, text, context, report,
-    displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored } = state;
+    displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored,
+    decisionHold } = state;
   return {
     available: true,
     escalation: {
@@ -373,6 +378,8 @@ export async function getAmuxReviewDetail(escalationId: string) {
       html_url: artifact.htmlUrl,
     } : null,
     allowed_outcomes: outcomes,
+    // Why no decision is open at all; null while the server offers one.
+    decision_hold: decisionHold,
     retry: { used, limit: AMUX_MAX_EXECUTION_ATTEMPTS, remaining: Math.max(0, AMUX_MAX_EXECUTION_ATTEMPTS - used) },
     proposed_transitions: {
       approve: outcomes.includes("approve") ? "done" : null,
