@@ -234,14 +234,14 @@ export function AccountDataDownload() {
 
       <section className="mt-6">
         <h2 className="text-sm font-bold">{t("accountDataExport.historyTitle")}</h2>
-        <p className="mt-1 text-sm leading-6 text-zinc-500">
+        <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
           {t("accountDataExport.historyDescription")}
         </p>
 
         {history === null ? (
           <p className="mt-3 text-sm text-zinc-500">{t("accountDataExport.historyLoading")}</p>
         ) : history.length === 0 ? (
-          <p className="mt-3 text-sm text-zinc-500" data-testid="account-data-export-history-empty">
+          <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400" data-testid="account-data-export-history-empty">
             {t("accountDataExport.historyEmpty")}
           </p>
         ) : (

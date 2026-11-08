@@ -1028,6 +1028,7 @@ export const zhHant = {
         imageUnsupported: "此模型無法讀取附加的圖片",
     },
     providerStatus: {
+        lookupUnavailable: "無法重新整理模型狀態。將保留上次確認的結果。",
         allAvailable: "所選供應商皆可用",
         allAvailableBody: "模型供應商回應正常。",
         selectedUnavailableOne: "{model}暫時無法使用",
@@ -1940,12 +1941,13 @@ export const zhHant = {
         privacyNote: "完成匯入後，Tomverse 會透過 AI 供應商自動從中整理記憶，不扣除額度。健康資訊等敏感內容不會儲存為記憶。使用中的記憶與回答風格會作為參考資料傳給產生回答的 Tomverse 模型，您可以隨時查看、修改、停用或刪除。",
         disabledNotice: "目前無法修改或新增記憶。已儲存的記憶仍可查看和刪除。",
         settingsTitle: "記憶使用設定",
-        masterToggleLabel: "在新對話中使用記憶",
+        masterToggleLabel: "在所有對話中使用記憶",
         masterToggleDescription: "關閉後，所有對話都不使用記憶，匯入的對話也不會產生新的記憶。已儲存的記憶不會被刪除。",
         styleToggleLabel: "使用回答風格記憶",
         styleToggleDescription:
             "讓回答參考從過去對話中推論出的語氣、長度與結構偏好。",
-        defaultModeLabel: "新對話預設值",
+        defaultModeLabel: "對話記憶預設值",
+        defaultModeDescription: "適用於遵循帳戶預設設定的新對話和現有對話。對話中的個別設定優先，但上方關閉所有對話的記憶後，全部停止使用。",
         defaultModeOn: "使用記憶",
         defaultModeOff: "不使用記憶",
         edit: "編輯",
