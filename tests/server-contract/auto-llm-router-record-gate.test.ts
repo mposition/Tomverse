@@ -19,11 +19,10 @@ process.env.DATABASE_URL ||=
   "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1";
 
 const created: unknown[] = [];
+const settlementWrites: unknown[][] = [];
 let mocksInstalled = false;
-let generationError: unknown;
-let parsingError: unknown;
-let generationDelayMs = 0;
-const requests: Array<{ maxRetries: number }> = [];
+let generateRouterResult: (() => unknown) | undefined;
+const routerRequests: Record<string, unknown>[] = [];
 let routerOutput: { reason: string; topic: string; modelId: string; requiresFileGeneration?: boolean } = {
   reason: "short question", topic: "cats", modelId: "deepseek-v4-flash",
 };
@@ -38,7 +37,10 @@ const prismaMock = {
     },
   },
   $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
-    fn({ $executeRaw: async () => 0 }),
+    fn({ $executeRaw: async (...args: unknown[]) => {
+      settlementWrites.push(args.slice(1));
+      return 0;
+    } }),
 };
 
 async function load() {
@@ -48,15 +50,10 @@ async function load() {
     mock.module("ai", {
       namedExports: {
         ...realAi,
-        generateText: async (options: { maxRetries: number }) => {
-          requests.push(options);
-          if (generationDelayMs) await new Promise((resolve) => setTimeout(resolve, generationDelayMs));
-          if (generationError) throw generationError;
-          return {
-            get output() {
-              if (parsingError) throw parsingError;
-              return routerOutput;
-            },
+        generateText: async (options: Record<string, unknown>) => {
+          routerRequests.push(options);
+          return generateRouterResult ? generateRouterResult() : {
+            output: routerOutput,
             usage: { inputTokens: 100, outputTokens: 20 },
           };
         },
@@ -143,100 +140,108 @@ test("file routing records the raw model and reason without losing intent when c
   } finally { routerOutput = original; }
 });
 
-test("live API failures retain fallback and record content-free diagnostics with the trace and actual deadline", async () => {
-  const { APICallError } = require("ai");
-  const warnings: string[] = [];
-  const logger = mock.method(console, "warn", (line: string) => warnings.push(line));
-  generationError = new APICallError({
-    message: "private provider response", url: "https://example.com/private",
-    requestBodyValues: { prompt: "private prompt" }, responseBody: "private response", statusCode: 503,
+test("router failures preserve known usage and log content-free causes without retrying", async (t) => {
+  const { callAutoLlmRouter } = await load();
+  const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts")) as typeof import("../../lib/models.ts");
+  const { AUTO_LLM_ROUTER_TIMEOUT_MS, autoLlmRouterCandidates } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts")) as typeof import("../../lib/autoLlmRouterCore.ts");
+  const { APICallError, JSONParseError, NoObjectGeneratedError, NoOutputGeneratedError, TypeValidationError } = require("ai") as typeof import("ai");
+  const usage = { inputTokens: 100, outputTokens: 20 };
+  const secret = "private-prompt-and-provider-secret";
+  const response = { id: "response-1", timestamp: new Date(), modelId: "router" };
+  const structuredError = (cause: Error, finishReason: "stop" | "length" = "stop") => new NoObjectGeneratedError({
+    cause, message: secret, text: secret, response,
+    usage: usage as ConstructorParameters<typeof NoObjectGeneratedError>[0]["usage"], finishReason,
   });
-  created.length = 0;
-  requests.length = 0;
-  try {
-    assert.equal(await pick(), null);
-    assert.equal(requests.length, 1);
-    assert.equal(requests[0].maxRetries, 0);
-    assert.equal((created[0] as { outcome: string }).outcome, "error");
-    const log = JSON.parse(warnings[0]);
-    assert.equal(warnings.length, 1);
-    assert.equal(log.event, "auto_llm_router_call_failed");
-    assert.equal(log.traceId, "trace-1");
-    assert.equal(log.timeoutMs, 5_000);
-    assert.equal(log.failureKind, "api");
-    assert.equal(log.statusCode, 503);
-    assert.ok(!warnings[0].includes("private"));
-    assert.ok(!warnings[0].includes("고양이"));
-  } finally { generationError = undefined; logger.mock.restore(); }
-});
-
-test("optimizer parsing failures record cycle and decision ids and keep the existing error result", async () => {
-  const { NoObjectGeneratedError, JSONParseError } = require("ai");
-  const warnings: string[] = [];
-  const logger = mock.method(console, "warn", (line: string) => warnings.push(line));
-  parsingError = new NoObjectGeneratedError({
-    cause: new JSONParseError({ text: "private output", cause: new SyntaxError("private") }),
-    text: "private output", finishReason: "length", response: {}, usage: {},
+  const parseError = structuredError(new JSONParseError({ text: secret, cause: new Error(secret) }), "length");
+  const schemaError = structuredError(new TypeValidationError({ value: secret, cause: new Error(secret) }));
+  const input = {
+    routerModel: AVAILABLE_MODELS.find(model => model.id === "gpt-6-luna")!,
+    guidance: "Choose an eligible candidate.", prompt: secret, previousAnswer: null,
+    candidates: autoLlmRouterCandidates(["gpt-5-6-luna", "deepseek-v4-flash"], AVAILABLE_MODELS, {}),
+    session: null, traceId: "trace-call", cycleId: "cycle-call", decisionId: "decision-call",
+  };
+  const cases = [
+    { name: "JSON parsing failure", result: () => { throw parseError; }, outcome: "invalid", failure: "output_parse", usage, detail: { finishReason: "length", outputChars: secret.length } },
+    { name: "schema validation failure", result: () => { throw schemaError; }, outcome: "invalid", failure: "output_schema", usage },
+    { name: "output getter failure", result: () => ({ usage, finishReason: "length", get output() { throw parseError; } }), outcome: "invalid", failure: "output_parse", usage },
+    { name: "empty output getter", result: () => ({ usage, finishReason: "stop", get output() { throw new NoOutputGeneratedError(); } }), outcome: "invalid", failure: "empty_output", usage },
+    { name: "ineligible model", result: () => ({ usage, finishReason: "stop", output: { modelId: secret } }), outcome: "invalid", failure: "invalid_pick", usage, detail: { modelIdPresent: true, modelIdEligible: false } },
+    { name: "invalid file intent", result: () => ({ usage, output: { modelId: "gpt-5-6-luna", requiresFileGeneration: "yes" } }), outcome: "invalid", failure: "invalid_pick", usage, detail: { modelIdEligible: true, fileIntentType: "string" } },
+    { name: "provider HTTP error", result: () => { throw new APICallError({ message: secret, url: `https://example.com/${secret}`, requestBodyValues: { prompt: secret }, responseBody: secret, statusCode: 429, isRetryable: true }); }, outcome: "error", failure: "provider_error", usage: undefined, detail: { statusCode: 429, retryable: true } },
+    { name: "unknown failure", result: () => { throw new Error(secret); }, outcome: "error", failure: "call_error", usage: undefined },
+  ];
+  for (const scenario of cases) {
+    await t.test(scenario.name, async () => {
+      const logs: string[] = [];
+      const logger = mock.method(console, "warn", (line: string) => { logs.push(line); });
+      generateRouterResult = scenario.result;
+      routerRequests.length = 0;
+      try {
+        const result = await callAutoLlmRouter(input);
+        assert.equal(result.outcome, scenario.outcome);
+        assert.equal(result.pick, null);
+        assert.deepEqual(result.usage, scenario.usage);
+        assert.equal(routerRequests.length, 1);
+        assert.equal(routerRequests[0].maxRetries, 0);
+        assert.equal(logs.length, 1);
+        assert.ok(!logs[0].includes(secret));
+        const log = JSON.parse(logs[0]);
+        assert.equal(log.event, "auto_llm_router_call_failed");
+        assert.equal(log.failure, scenario.failure);
+        assert.equal(log.traceId, "trace-call");
+        assert.equal(log.cycleId, "cycle-call");
+        assert.equal(log.decisionId, "decision-call");
+        assert.equal(log.timeoutMs, AUTO_LLM_ROUTER_TIMEOUT_MS);
+        for (const [key, value] of Object.entries(scenario.detail ?? {})) assert.equal(log[key], value);
+      } finally {
+        generateRouterResult = undefined;
+        logger.mock.restore();
+      }
+    });
+  }
+  await t.test("an expired call is identified from its actual abort signal", async () => {
+    const logs: string[] = [];
+    const logger = mock.method(console, "warn", (line: string) => { logs.push(line); });
+    generateRouterResult = () => new Promise((_, reject) => {
+      const signal = routerRequests.at(-1)!.abortSignal as AbortSignal;
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+    // AbortSignal.timeout is unref'ed; keep the test alive until it fires.
+    const keepAlive = setTimeout(() => {}, 1_000);
+    try {
+      const result = await callAutoLlmRouter({ ...input, timeoutMs: 1 });
+      assert.equal(result.outcome, "error");
+      assert.equal(result.usage, undefined);
+      assert.equal(JSON.parse(logs[0]).failure, "timeout");
+      assert.equal(JSON.parse(logs[0]).timeoutMs, 1);
+    } finally {
+      clearTimeout(keepAlive);
+      generateRouterResult = undefined;
+      logger.mock.restore();
+    }
   });
-  try {
-    const { callAutoLlmRouter } = await load();
-    const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
-    const result = await callAutoLlmRouter({
-      routerModel: AVAILABLE_MODELS.find((model: { id: string }) => model.id === "gpt-6-luna"),
-      guidance: "private guidance", prompt: "private prompt", previousAnswer: null,
-      candidates: [], session: null, rewrite: true, timeoutMs: 15_000,
-      cycleId: "cycle-1", decisionId: "decision-1",
+  for (const knownUsage of [true, false]) {
+    await t.test(knownUsage ? "invalid output settles reported usage in both provider periods" : "unknown usage retains the full provider hold", async () => {
+      const logger = mock.method(console, "warn", () => {});
+      created.length = 0;
+      settlementWrites.length = 0;
+      generateRouterResult = () => { throw knownUsage ? schemaError : new Error(secret); };
+      try {
+        assert.equal(await pick(), null);
+        assert.equal(settlementWrites.length, knownUsage ? 2 : 0);
+        const row = created[0] as { outcome: string; inputTokens: number | null; outputTokens: number | null };
+        assert.equal(row.outcome, knownUsage ? "invalid" : "error");
+        assert.equal(row.inputTokens, knownUsage ? 100 : null);
+        assert.equal(row.outputTokens, knownUsage ? 20 : null);
+        if (knownUsage) {
+          assert.ok(Number(settlementWrites[0][0]) < 0, "only the unused reservation is returned");
+          assert.equal(settlementWrites[0][0], settlementWrites[1][0]);
+          assert.deepEqual(settlementWrites.map(values => values[2]), ["provider-cost-day", "provider-cost-month"]);
+        }
+      } finally {
+        generateRouterResult = undefined;
+        logger.mock.restore();
+      }
     });
-    assert.deepEqual(result, { outcome: "error", pick: null, usage: undefined });
-    const log = JSON.parse(warnings[0]);
-    assert.equal(warnings.length, 1);
-    assert.equal(log.cycleId, "cycle-1");
-    assert.equal(log.decisionId, "decision-1");
-    assert.equal(log.timeoutMs, 15_000);
-    assert.equal(log.rewriteAsked, true);
-    assert.equal(log.failureKind, "response_parse");
-    assert.equal(log.finishReason, "length");
-    assert.equal(log.outputChars, 14);
-    assert.ok(!warnings[0].includes("private"));
-  } finally { parsingError = undefined; logger.mock.restore(); }
-});
-
-test("an out-of-candidate pick is logged separately from an exception and still falls back", async () => {
-  const original = routerOutput;
-  const warnings: string[] = [];
-  const logger = mock.method(console, "warn", (line: string) => warnings.push(line));
-  routerOutput = { ...original, modelId: "not-a-candidate" };
-  created.length = 0;
-  try {
-    assert.equal(await pick(), null);
-    assert.equal((created[0] as { outcome: string }).outcome, "invalid");
-    assert.equal(warnings.length, 1);
-    assert.equal(JSON.parse(warnings[0]).failureKind, "invalid_pick");
-  } finally { routerOutput = original; logger.mock.restore(); }
-});
-
-test("an expired call deadline is logged as a timeout even if the provider throws a generic error", async () => {
-  const warnings: string[] = [];
-  const logger = mock.method(console, "warn", (line: string) => warnings.push(line));
-  generationError = new Error("private provider cancellation");
-  generationDelayMs = 20;
-  try {
-    const { callAutoLlmRouter } = await load();
-    const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
-    const result = await callAutoLlmRouter({
-      routerModel: AVAILABLE_MODELS.find((model: { id: string }) => model.id === "gpt-6-luna"),
-      guidance: "", prompt: "private prompt", previousAnswer: null,
-      candidates: [], session: null, timeoutMs: 1,
-    });
-    assert.equal(result.outcome, "error");
-    assert.equal(warnings.length, 1);
-    const log = JSON.parse(warnings[0]);
-    assert.equal(log.failureKind, "timeout");
-    assert.equal(log.timeoutMs, 1);
-    assert.ok(!warnings[0].includes("private"));
-  } finally {
-    generationError = undefined;
-    generationDelayMs = 0;
-    logger.mock.restore();
   }
 });

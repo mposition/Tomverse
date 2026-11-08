@@ -104,6 +104,15 @@ export type MarketingAction = {
    * its own check and its own audit entry. `describe` receives the batch's result.
    */
   batch?: () => readonly MarketingBatchRequest[];
+  /**
+   * Asked after the confirmation and before `batch`. A sentence means what the
+   * person just confirmed is no longer what would be sent (a plan built from
+   * the clock or from data read with the page went stale while the question
+   * was open): nothing is sent, the sentence is shown instead, and the page is
+   * read again so the next press starts from what is there now. It may read
+   * the server, so it may answer later.
+   */
+  stale?: () => string | null | Promise<string | null>;
 };
 
 export type MarketingBatchRequest = { readonly path: string; readonly body: unknown };
@@ -153,6 +162,23 @@ export const sendMarketingBatch = async (
     failed += 1;
   }
   return stopped(false);
+};
+
+/**
+ * What a batch control sends once pressed: `null` when the person declined the
+ * confirmation, a refusal when the confirmed plan went stale, or the requests.
+ * The confirmation is asked first, then `stale`, then `batch`, so the requests
+ * are built only after the person said yes to the plan they describe.
+ */
+export const marketingBatchToSend = async (
+  action: MarketingAction,
+  ask: (question: string) => boolean
+): Promise<readonly MarketingBatchRequest[] | { readonly refused: string } | null> => {
+  if (!action.batch) return null;
+  if (action.confirm && !ask(confirmText(action, {}))) return null;
+  const refused = (await action.stale?.()) ?? null;
+  if (refused) return { refused };
+  return action.batch();
 };
 
 type Failure = {
@@ -310,8 +336,22 @@ export function MarketingActionRail({
     (action: MarketingAction) => {
       if (action.unavailable) return;
       if (action.batch) {
-        if (action.confirm && !window.confirm(confirmText(action, {}))) return;
-        void sendBatch(action, action.batch());
+        void (async () => {
+          // Held while `stale` reads the server, so a second press cannot start another.
+          setBusy(action.id);
+          const next = await marketingBatchToSend(action, (question) => window.confirm(question)).catch(
+            () => ({ refused: m.actionFailed })
+          );
+          setBusy(null);
+          if (next === null) return;
+          if ("refused" in next) {
+            setDone(null);
+            setFailure({ message: next.refused, requiresReauthentication: false });
+            onDone();
+            return;
+          }
+          void sendBatch(action, next);
+        })();
         return;
       }
       if (action.fields && action.fields.length > 0) {
@@ -332,7 +372,7 @@ export function MarketingActionRail({
       if (action.confirm && !window.confirm(confirmText(action, {}))) return;
       void send(action, action.body({}));
     },
-    [open, send, sendBatch]
+    [m.actionFailed, onDone, open, send, sendBatch]
   );
 
   // Kept while there is a result to read: a batch can leave a list with no actions.

@@ -991,3 +991,27 @@ test("pending host evidence is read back automatically within the owner read lim
   // Long enough to cover a controller tick (60 s) plus a bridge tick (30 s).
   assert.ok(AMUX_HOST_EVIDENCE_AUTO_READ_MS * AMUX_HOST_EVIDENCE_AUTO_READS >= 120_000);
 });
+
+test("a Task the Ubuntu inspection refuses shows why instead of its request button", () => {
+  const internals = (React as unknown as { __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE:
+    { H: unknown } }).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const dispatcher = {
+    useContext: () => ({ locale: "en", pending: false, setLocale: () => {} }),
+    useState: (initial: unknown) => [typeof initial === "function" ? initial() : initial, () => {}],
+    useRef: (initial: unknown) => ({ current: initial }),
+    useEffect: () => {},
+  };
+  const renderWith = (hostRecovery?: boolean) => {
+    const previous = internals.H; internals.H = dispatcher;
+    try {
+      return AmuxOwnerRecoveryInspectionPanel({ identity, taskStatus: "blocked", onReloadReview: () => {},
+        ...(hostRecovery === undefined ? {} : { hostRecovery }) });
+    } finally { internals.H = previous; }
+  };
+  const refused = renderWith(false).props.children[1] as React.ReactElement<Record<string, unknown>>;
+  assert.equal(refused.props["data-testid"], "admin-amux-host-recovery-not-applicable");
+  assert.match(String(refused.props.children), /no v22 receipt/);
+  // The default keeps the Ubuntu inspection for every caller that does not say otherwise.
+  const kept = renderWith().props.children[1] as React.ReactElement<Record<string, unknown>>;
+  assert.equal(kept.type, AmuxHostRecoveryView);
+});

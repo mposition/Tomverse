@@ -11,6 +11,10 @@ let adminSession = false;
 let recent = false;
 let rateLimited = false;
 let reads = 0;
+let opsWrite = true;
+let resultState: string | undefined;
+let questionState = "open";
+const dmReads: string[] = [];
 
 mock.module("next-auth/next", { namedExports: {
   getServerSession: async () => session,
@@ -19,6 +23,7 @@ mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
 mock.module(mod("lib/adminAuth.ts"), { namedExports: {
   getAdminRole: () => role,
   isAdminSession: () => adminSession,
+  hasAdminPermission: (_session: unknown, permission: string) => permission === "ops:write" && opsWrite,
 } });
 mock.module(mod("lib/adminReauthentication.ts"), { namedExports: {
   assertRecentAdminAuthentication: async () => {
@@ -38,7 +43,16 @@ mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
 mock.module(mod("lib/amux/v22TaskResultStore.ts"), { namedExports: {
   readAmuxV22TaskResultForOwner: async () => {
     reads += 1;
-    return { text: "private result" };
+    return { text: "private result", state: resultState, attemptId: "attempt-1" };
+  },
+} });
+mock.module(mod("lib/amux/v22OwnerQuestionService.ts"), { namedExports: {
+  readAmuxV22OwnerQuestionForResult: async () => ({ id: "question-1", state: questionState }),
+} });
+mock.module(mod("lib/amux/v22OwnerQuestionDmRead.ts"), { namedExports: {
+  readAmuxV22QuestionDm: async (questionId: string) => {
+    dmReads.push(questionId);
+    return { state: "cannot_answer", requestId: "request-1", reason: "Needs the owner." };
   },
 } });
 
@@ -69,4 +83,29 @@ test("private Task result requires owner, recent sign-in and rate admission", as
   assert.equal(result.status, 200);
   assert.equal(result.headers.get("cache-control"), "private, no-store, max-age=0");
   assert.equal(reads, 1);
+});
+
+test("an open question carries its Decision Maker state, with bodies only for ops:write", async () => {
+  const { GET } = await route;
+  session = { user: { id: "owner" } };
+  role = "owner";
+  adminSession = true;
+  recent = true;
+  rateLimited = false;
+  resultState = "available";
+  questionState = "open";
+  opsWrite = true;
+  const open = await (await GET(new Request(url))).json();
+  assert.deepEqual(open.decisionMaker, { state: "cannot_answer", requestId: "request-1", reason: "Needs the owner." });
+  assert.deepEqual(dmReads, ["question-1"]);
+  opsWrite = false;
+  const restricted = await (await GET(new Request(url))).json();
+  assert.deepEqual(restricted.decisionMaker, { state: "restricted" });
+  assert.equal(dmReads.length, 1);
+  // A question no longer open has nothing left for the Decision Maker.
+  opsWrite = true;
+  questionState = "answered";
+  const answered = await (await GET(new Request(url))).json();
+  assert.equal(answered.decisionMaker, null);
+  assert.equal(dmReads.length, 1);
 });
