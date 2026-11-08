@@ -887,7 +887,8 @@ export const infoPages = {
       },
       {
         "title": "Security and data handling",
-        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details."
+        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. Read the privacy policy for processing, retention and deletion details.",
+        "link": { "label": "Read the privacy policy", "href": "/privacy" }
       },
       {
         "title": "AI limitations and service status",
