@@ -44,6 +44,10 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     dmConfirming: "Confirming…",
     dmConfirmed: "Confirmed. The relay applies this answer on its next sync (about 30 seconds) and sends the Task back to the same worker.",
     dmOpenDetail: "Edit or reject it in the request",
+    dmSnapshot: "Repository snapshot",
+    dmCardOnly: "Card only: no repository snapshot was sent.",
+    dmSnapshotAt: (state: string, sha: string) => `${state} at ${sha}`,
+    dmSnapshotPaths: "Snapshot paths",
     dmDirect: "Or answer yourself",
     dmReasons: {
       kill_switch_on: "the kill switch is on",
@@ -129,6 +133,10 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     dmConfirming: "확인하는 중…",
     dmConfirmed: "확인했어요. 릴레이가 다음 동기화(30초 안팎)에 이 답을 적용하고 Task를 같은 워커에게 돌려보냅니다.",
     dmOpenDetail: "요청에서 고쳐 확인하거나 거절하기",
+    dmSnapshot: "저장소 스냅샷",
+    dmCardOnly: "카드만: 저장소 스냅샷을 보내지 않았습니다.",
+    dmSnapshotAt: (state: string, sha: string) => `${state}, ${sha}`,
+    dmSnapshotPaths: "스냅샷 경로",
     dmDirect: "또는 직접 답하기",
     dmReasons: {
       kill_switch_on: "kill switch가 켜져 있음",

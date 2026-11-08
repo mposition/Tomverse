@@ -48,6 +48,12 @@ export type AmuxV22QuestionDm =
       optionId: string | null;
       rationale: string;
       irreversible: boolean;
+      /**
+       * What the Decision Maker read, shown before a confirmation (§6: the
+       * snapshot state, the target SHA and the snapshot's paths; "card only"
+       * for `none`). The state and SHA are the ones `shown` names.
+       */
+      snapshot: { state: DmShownProposal["snapshotState"]; targetSha: string | null; paths: string[] };
       shown: DmShownProposal;
     }
   /** The Decision Maker said it cannot answer (an escalation), with its reason. */
@@ -84,7 +90,13 @@ export type AmuxV22QuestionDmDetail = {
   rationale: string | null;
   escalationReason: string | null;
   shown: DmShownProposal | null;
+  /** The card as routed; the snapshot's files are its context paths and the paths its options declare. */
+  card: { contextPaths: readonly string[]; options: ReadonlyArray<{ paths: readonly string[] }> } | null;
 };
+
+/** The snapshot's paths (§5: the context paths and the paths the options declare), once each, in card order. */
+export const amuxV22QuestionDmSnapshotPaths = (card: NonNullable<AmuxV22QuestionDmDetail["card"]>) =>
+  [...new Set([...card.contextPaths, ...card.options.flatMap((option) => option.paths)])];
 
 /** The state of a filed question from its card's newest request; null: no request yet. */
 export const amuxV22QuestionDmOfDetail = (detail: AmuxV22QuestionDmDetail | null): AmuxV22QuestionDm => {
@@ -99,8 +111,10 @@ export const amuxV22QuestionDmOfDetail = (detail: AmuxV22QuestionDmDetail | null
     case "running":
       return { state: "working", requestId };
     case "proposal":
-      // A proposal whose bodies are not all there cannot be confirmed as shown.
-      return detail.shown !== null && detail.rationale !== null
+      // A proposal whose bodies are not all there cannot be confirmed as shown,
+      // nor one whose snapshot paths cannot be listed beside it.
+      return detail.shown !== null && detail.rationale !== null &&
+        (detail.card !== null || detail.shown.snapshotState === "none")
         ? {
             state: "proposal",
             requestId,
@@ -108,6 +122,11 @@ export const amuxV22QuestionDmOfDetail = (detail: AmuxV22QuestionDmDetail | null
             optionId: detail.optionId,
             rationale: detail.rationale,
             irreversible: detail.shown.irreversible,
+            snapshot: {
+              state: detail.shown.snapshotState,
+              targetSha: detail.shown.snapshotTargetSha,
+              paths: detail.card === null ? [] : amuxV22QuestionDmSnapshotPaths(detail.card),
+            },
             shown: detail.shown,
           }
         : { state: "failed", requestId, status: "proposal_unreadable" };

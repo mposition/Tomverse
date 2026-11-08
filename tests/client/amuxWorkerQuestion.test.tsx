@@ -106,8 +106,10 @@ const REQUEST_ID = "0b6f2a3e-5d1c-4e8f-9a7b-2c3d4e5f6a7b";
 const proposal = (irreversible = false) => ({
   state: "proposal" as const, requestId: REQUEST_ID, answer: null, optionId: "b",
   rationale: "The verified entry is the one the router already reads.", irreversible,
+  snapshot: { state: "none" as const, targetSha: null, paths: ["lib/amux/fileRetry.ts"] },
   shown: { ...SHOWN, irreversible },
 });
+const SHA = "0123456789abcdef0123456789abcdef01234567";
 
 test("a Decision Maker proposal shows its answer, why, one confirm button and the direct answer as the other way", () => {
   for (const locale of ["en", "ko"] as const) {
@@ -131,6 +133,27 @@ test("a Decision Maker proposal shows its answer, why, one confirm button and th
   const marked = renderToStaticMarkup(<AmuxWorkerQuestionBox taskId={TASK_ID} question={question()}
     decisionMaker={proposal(true)} />);
   assert.match(marked, /data-testid="amux-worker-question-dm-irreversible"/);
+});
+
+test("before the confirm button the card shows the snapshot the Decision Maker read, or says card only", () => {
+  for (const locale of ["en", "ko"] as const) {
+    const m = adminAmuxCardsMessages[locale];
+    assert.ok(m.dmSnapshot && m.dmCardOnly && m.dmSnapshotPaths && m.dmSnapshotAt("develop", SHA).includes(SHA));
+  }
+  const m = adminAmuxCardsMessages.en;
+  const cardOnly = renderToStaticMarkup(<AmuxWorkerQuestionBox taskId={TASK_ID} question={question()}
+    decisionMaker={proposal()} />);
+  assert.ok(cardOnly.includes(m.dmCardOnly));
+  assert.doesNotMatch(cardOnly, /amux-worker-question-dm-snapshot-paths/);
+  assert.ok(cardOnly.indexOf("amux-worker-question-dm-snapshot") < cardOnly.indexOf("amux-worker-question-dm-confirm"));
+  const atHead = { ...proposal(), snapshot: { state: "worker_head" as const, targetSha: SHA,
+    paths: ["lib/amux/fileRetry.ts", "lib/amux/retryModel.ts"] } };
+  const html = renderToStaticMarkup(<AmuxWorkerQuestionBox taskId={TASK_ID} question={question()}
+    decisionMaker={atHead} />);
+  assert.ok(html.includes(m.dmSnapshotAt("worker_head", SHA)));
+  assert.ok(html.includes(
+    `data-testid="amux-worker-question-dm-snapshot-paths"><li>lib/amux/fileRetry.ts</li><li>lib/amux/retryModel.ts</li>`));
+  assert.ok(html.indexOf("amux-worker-question-dm-snapshot-paths") < html.indexOf("amux-worker-question-dm-confirm"));
 });
 
 test("without a proposal the card says in one line why, offers no confirm, and keeps the answer form", () => {
@@ -176,6 +199,9 @@ test("reading a question carries its Decision Maker state; a proposal missing wh
   assert.deepEqual(read, { kind: "question", question: question(), decisionMaker: proposal() });
   assert.deepEqual(amuxWorkerQuestionDmFrom({ decisionMaker: { state: "proposal", requestId: REQUEST_ID } }),
     { state: "unavailable" });
+  const withoutSnapshot: Record<string, unknown> = { ...proposal() };
+  delete withoutSnapshot.snapshot;
+  assert.deepEqual(amuxWorkerQuestionDmFrom({ decisionMaker: withoutSnapshot }), { state: "unavailable" });
   assert.equal(amuxWorkerQuestionDmFrom({ decisionMaker: { state: "auto_applied" } }), null);
   assert.equal(amuxWorkerQuestionDmFrom({ decisionMaker: null }), null);
   assert.deepEqual(amuxWorkerQuestionDmFrom({ decisionMaker: { state: "filed" } }), { state: "filed" });

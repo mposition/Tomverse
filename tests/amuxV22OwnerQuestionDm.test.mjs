@@ -38,7 +38,9 @@ const row = (overrides = {}) => ({
 });
 const detail = (overrides = {}, extra = {}) => ({
   dbNowMs: NOW, row: row(overrides), answer: null, optionId: null, rationale: null,
-  escalationReason: null, shown: null, ...extra,
+  escalationReason: null, shown: null,
+  card: { contextPaths: ["lib/amux/fileRetry.ts"], options: [{ paths: [] }, { paths: ["lib/amux/fileRetry.ts", "lib/amux/retryModel.ts"] }] },
+  ...extra,
 });
 
 test("a question with no local card says the first thing that holds it", () => {
@@ -71,12 +73,24 @@ test("a proposal is confirmable only with its rationale and the values a confirm
   const proposal = { resultKind: "proposal", outputKind: "select", irreversible: false };
   assert.deepEqual(amuxV22QuestionDmOfDetail(detail(proposal, { optionId: "b", rationale: "Keeps the trailer small.", shown: SHOWN })), {
     state: "proposal", requestId: REQUEST_ID, answer: null, optionId: "b", rationale: "Keeps the trailer small.",
-    irreversible: false, shown: SHOWN,
+    irreversible: false, snapshot: { state: "none", targetSha: null, paths: ["lib/amux/fileRetry.ts", "lib/amux/retryModel.ts"] },
+    shown: SHOWN,
   });
   assert.deepEqual(amuxV22QuestionDmOfDetail(detail(proposal, { optionId: "b", rationale: "Why.", shown: null })),
     { state: "failed", requestId: REQUEST_ID, status: "proposal_unreadable" });
   assert.deepEqual(amuxV22QuestionDmOfDetail(detail(proposal, { optionId: "b", rationale: null, shown: SHOWN })),
     { state: "failed", requestId: REQUEST_ID, status: "proposal_unreadable" });
+  // The snapshot shown is the one the confirmation names; its paths are the card's, once each.
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const atHead = amuxV22QuestionDmOfDetail(detail(proposal, { rationale: "Why.",
+    shown: { ...SHOWN, snapshotState: "worker_head", snapshotTargetSha: sha, snapshotManifestDigest: "b".repeat(64) } }));
+  assert.deepEqual(atHead.snapshot, { state: "worker_head", targetSha: sha,
+    paths: ["lib/amux/fileRetry.ts", "lib/amux/retryModel.ts"] });
+  // A snapshot whose paths cannot be listed (the card text is gone) is not confirmable here; card only still is.
+  assert.deepEqual(amuxV22QuestionDmOfDetail(detail(proposal, { rationale: "Why.", card: null,
+    shown: { ...SHOWN, snapshotState: "develop", snapshotTargetSha: sha } })),
+  { state: "failed", requestId: REQUEST_ID, status: "proposal_unreadable" });
+  assert.equal(amuxV22QuestionDmOfDetail(detail(proposal, { rationale: "Why.", card: null, shown: SHOWN })).state, "proposal");
   // The irreversible mark the card warns about is the one the confirmation names.
   const marked = amuxV22QuestionDmOfDetail(detail(proposal, { rationale: "Why.", shown: { ...SHOWN, irreversible: true } }));
   assert.equal(marked.irreversible, true);

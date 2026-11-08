@@ -61,9 +61,11 @@ export const amuxWorkerQuestionDmFrom = (body: unknown): AmuxV22QuestionDm | nul
   if (typeof state !== "string" || !DM_STATES.has(state)) return null;
   // A proposal without what a confirmation must name is shown as unreadable, never as confirmable.
   if (state === "proposal") {
-    const p = dm as { requestId?: unknown; rationale?: unknown; shown?: unknown };
+    const p = dm as { requestId?: unknown; rationale?: unknown; shown?: unknown; snapshot?: unknown };
+    const snapshot = p.snapshot as { state?: unknown; paths?: unknown } | null | undefined;
     if (typeof p.requestId !== "string" || typeof p.rationale !== "string" ||
-        !p.shown || typeof p.shown !== "object") return { state: "unavailable" };
+        !p.shown || typeof p.shown !== "object" || !snapshot || typeof snapshot.state !== "string" ||
+        !Array.isArray(snapshot.paths)) return { state: "unavailable" };
   }
   return dm as AmuxV22QuestionDm;
 };
@@ -141,6 +143,19 @@ export function AmuxWorkerQuestionDm({ dm, options, io }: {
             dm.answer ?? ""}</p>
           <p className="text-zinc-300">{messages.dmRationale}</p>
           <p className="whitespace-pre-wrap break-words">{dm.rationale}</p>
+          {/* §6: what the Decision Maker read, shown before the confirmation. */}
+          <p className="text-zinc-300">{messages.dmSnapshot}</p>
+          <p className="break-words" data-testid="amux-worker-question-dm-snapshot">
+            {dm.snapshot.state === "none" ? messages.dmCardOnly :
+              messages.dmSnapshotAt(dm.snapshot.state, dm.snapshot.targetSha ?? "")}</p>
+          {dm.snapshot.state !== "none" && dm.snapshot.paths.length > 0 && (
+            <>
+            <p className="text-zinc-300">{messages.dmSnapshotPaths}</p>
+            <ul className="font-mono text-xs" data-testid="amux-worker-question-dm-snapshot-paths">
+              {dm.snapshot.paths.map((path) => <li key={path}>{path}</li>)}
+            </ul>
+            </>
+          )}
           {dm.irreversible && <p className="font-semibold text-red-300"
             data-testid="amux-worker-question-dm-irreversible">{messages.dmIrreversible}</p>}
           <div className="mt-1 flex flex-wrap items-center gap-3">
