@@ -23,8 +23,10 @@ import { buildExperimentsConsole, type ExperimentsConsoleView } from "@/lib/mark
 import {
   MARKETING_COMMENT_ALERT_UNHANDLED_LIMIT_MS,
   listOpenMarketingCommentAlerts,
+  marketingChannelCaps,
   readMarketingGraduation,
 } from "@/lib/marketingStore";
+import type { DailyScheduleTakenSlot } from "@/lib/marketingDailyScheduleCore";
 import {
   MARKETING_ASSET_READ_LIMIT,
   MARKETING_COMPETITOR_READ_LIMIT,
@@ -193,7 +195,39 @@ export type MarketingConsolePayload = {
   truncated?: boolean;
   /** The experiments section only: what the start form and the stop control need. */
   experiments?: ExperimentsConsoleView;
+  /**
+   * The published section only: the days each account has already spent or
+   * promised, for the "one a day" plan (lib/marketingDailyScheduleCore.ts).
+   * Read apart from the page, because today's post can be older than the
+   * newest rows the page lists.
+   */
+  takenPublishDays?: DailyScheduleTakenSlot[];
 };
+
+/** Far more than any account's pending and recent days; a cut only ever under-counts the oldest. */
+const TAKEN_PUBLISH_DAYS_LIMIT = 500;
+
+/**
+ * Days already held: a claimed slot from yesterday (UTC) on, and every post
+ * still waiting in `scheduled` whatever its time, since an overdue one will
+ * spend the next free day.
+ */
+async function readTakenPublishDays(): Promise<DailyScheduleTakenSlot[]> {
+  const since = new Date(`${new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}T00:00:00.000Z`);
+  const posts = await prisma.marketingPost.findMany({
+    where: {
+      OR: [{ slotDate: { gte: since } }, { status: "scheduled", slotDate: null }],
+    },
+    orderBy: { createdAt: "desc" },
+    take: TAKEN_PUBLISH_DAYS_LIMIT,
+    select: { channelId: true, slotDate: true, scheduledAt: true },
+  });
+  return posts.map((post) => ({
+    channelId: post.channelId,
+    slotDay: post.slotDate?.toISOString().slice(0, 10) ?? null,
+    scheduledAt: post.scheduledAt?.toISOString() ?? null,
+  }));
+}
 
 const state = (
   read: { ok: true; value: boolean } | { ok: false }
@@ -521,12 +555,27 @@ export async function readMarketingConsole(
         errorCode: true,
         outcomeUnknownAt: true,
         publishAttempt: true,
+        // What the "one a day" plan orders and bounds by.
+        approvedAt: true,
+        approvalExpiresAt: true,
         // A hand-posted account's person copies the approved words from here.
         envelope: true,
-        channel: { select: { accountSlug: true, channel: true, provider: true } },
+        channel: {
+          select: {
+            id: true,
+            accountSlug: true,
+            channel: true,
+            provider: true,
+            defaultLocale: true,
+            dailyCapOverride: true,
+            weeklyCapOverride: true,
+          },
+        },
       },
     });
+    const takenPublishDays = await readTakenPublishDays();
     return {
+      takenPublishDays,
       section,
       availability,
       ordering: "newest",
@@ -569,6 +618,12 @@ export async function readMarketingConsole(
         // Only a hand-posted account's words: a person posts them by hand
         // (owner 2026-11-07). The publisher's posts are already on the platform.
         renderedText: post.channel.provider === "manual" ? renderedText(post.envelope) : null,
+        // The account and its market, for the "one a day" plan.
+        channelId: post.channel.id,
+        accountLocale: post.channel.defaultLocale,
+        dailyCap: marketingChannelCaps(post.channel)?.daily ?? null,
+        approvedAt: post.approvedAt?.toISOString() ?? null,
+        approvalExpiresAt: post.approvalExpiresAt?.toISOString() ?? null,
       })),
     };
   }
