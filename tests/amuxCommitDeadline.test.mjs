@@ -336,6 +336,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // retry from review; no commit-deadline marker, classifier or deferred
   // trigger changes.
   "20261108090000_amux_review_prless_retry",
+  // Owner decision 2026-11-08: one-click recovery pre-approval ledgers and the
+  // approval guard body; deferred guards on its own new tables only, no
+  // commit-deadline marker or classifier changes.
+  "20261108130000_amux_v22_recovery_preapproval",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

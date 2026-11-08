@@ -792,6 +792,7 @@ async function runInBackground(input: {
                         candidates: decision.candidates,
                         session: decision.routerSession,
                         timeoutMs: AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
+                        source: "routing_optimizer",
                     });
                     return {
                         value: routed.pick?.modelId ?? null,
