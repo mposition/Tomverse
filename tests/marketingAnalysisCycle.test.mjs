@@ -263,10 +263,10 @@ test("when this week has no plan, a third call plans it and the brief carries wh
   const planInput = JSON.parse(seen.calls[2].messages[1].content);
   assert.deepEqual(planInput.brief, { topicId: "side-by-side-answers", claimIds: ["claim.review-three-models"] });
   assert.deepEqual(
-    planInput.accounts.map((account) => [account.accountSlug, account.weeklyCap, account.assets.map((asset) => asset.id)]),
+    planInput.accounts.map((account) => [account.accountSlug, "weeklyCap" in account, account.assets.map((asset) => asset.id)]),
     [
-      ["instagram-3", 4, ["asset.short-ko"]],
-      ["facebook-3", 5, []],
+      ["instagram-3", false, ["asset.short-ko"]],
+      ["facebook-3", false, []],
     ],
   );
   // The 2026-11-01 run is a Sunday in Brisbane: the week began on the Monday before.
@@ -279,7 +279,8 @@ test("when this week has no plan, a third call plans it and the brief carries wh
   assert.deepEqual(
     strategy.accounts.map((plan) => [plan.accountSlug, plan.posts, plan.days, plan.claimIds, plan.assetIds]),
     [
-      ["instagram-3", 4, ["tue", "thu", "sat", "sun"], ["claim.review-three-models"], ["asset.short-ko"]],
+      // No policy weekly cap since 2026-11-08: every distinct day named is kept.
+      ["instagram-3", 5, ["tue", "thu", "sat", "sun", "mon"], ["claim.review-three-models"], ["asset.short-ko"]],
       ["facebook-3", 2, ["mon", "wed"], ["claim.review-three-models"], []],
     ],
   );
