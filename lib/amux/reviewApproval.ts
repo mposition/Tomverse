@@ -353,8 +353,9 @@ export async function getAmuxReviewDetail(escalationId: string) {
       due_parse_state: task.dueParseState,
       // The two recovery inspections read evidence only a v4 Task has.
       recovery_inspectable: isAmuxRecoveryInspectableCard(task),
-      // The Ubuntu inspection also needs the v22 receipt, role and grade (lockRecoveryTask).
-      host_recovery_available: isAmuxV22RecoverableTask(task),
+      // The Ubuntu inspection also needs the v22 receipt, role and grade, and
+      // refuses an archived card (lockRecoveryTask).
+      host_recovery_available: task.archivedAt === null && isAmuxV22RecoverableTask(task),
       // Whether the card has a recorded pull request at all. The artifact
       // below is null too when GitHub could not be read, so the screen tells
       // "no pull request" from "unreadable" by this field.

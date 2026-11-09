@@ -9,15 +9,29 @@ import {
   type MarketingAnalysisView,
   type MarketingWeeklyStrategy,
 } from "@/lib/marketingAnalysisCore";
+import { readExperimentSnapshot } from "@/lib/marketingExperimentState";
 import { readMarketingMeasurement } from "@/lib/marketingMeasurement";
-import { marketingWeekWindow, type MarketingMeasurement } from "@/lib/marketingMeasurementCore";
+import {
+  marketingWeekWindow,
+  type MarketingMeasurement,
+  type MarketingMeasurementWindow,
+} from "@/lib/marketingMeasurementCore";
+import { MARKETING_TOUCH_EVENT } from "@/lib/marketingTouchCore";
+import {
+  marketingWeeklyExperiments,
+  summarizeMarketingFunnel,
+  type MarketingFunnel,
+  type MarketingFunnelCounts,
+  type MarketingWeeklyExperiment,
+} from "@/lib/marketingWeeklyFunnelCore";
 
 /**
  * The weekly marketing report (owner request 2026-11-03; the A1 weekly report
  * `docs/policy/marketing-automation.md` §3 and §10.3 describe): one Brisbane week on one page -- the
  * week's posts and the 120-day metrics counted for it, the analysis and
- * brief written in it, the plan made for it, and what the market reports and
- * experiments recorded. Assembled when read, from the tables that already
+ * brief written in it, the plan made for it, what the market reports and
+ * experiments recorded, and (2026-11-09) the traffic and conversion funnel
+ * per account against the week before. Assembled when read, from the tables that already
  * hold each part; nothing is stored and nothing is written.
  */
 
@@ -55,10 +69,117 @@ export type MarketingWeeklyReport = {
     readonly factsKept: number | null;
     readonly factsDropped: number | null;
   };
-  readonly experiments: { readonly results: number };
+  readonly experiments: {
+    readonly results: number;
+    /**
+     * The landing experiments the week saw, with exposures and conversions
+     * per arm (counted from each experiment's start: there is no weekly
+     * counter). Null when they could not be read.
+     */
+    readonly entries: readonly MarketingWeeklyExperiment[] | null;
+  };
+  /** Posts → touches → attributed sign-ups → first use → paid, per account, against the week before. */
+  readonly funnel: MarketingFunnel;
   /** Whether the week's stored KPI report exists (written after the week ends). */
   readonly weeklyKpiRecorded: boolean;
 };
+
+const settle = async <T>(read: () => Promise<T>): Promise<T | null> => {
+  try {
+    return await read();
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The funnel's counts for one window (lib/marketingWeeklyFunnelCore.ts): the
+ * posts each account published, the touches by the account slug their link
+ * carried in `utm_content` (lib/marketingLinks.ts sets it), and the sign-ups
+ * attributed to such a touch (the snapshot's `touch_utm_content`), with how
+ * many of those accounts now have a conversation and a paid transaction.
+ * Aggregates only: no user id or event leaves the query. Each part fails on
+ * its own and reads as null.
+ */
+export async function readMarketingFunnelCounts(
+  db: Pick<PrismaClient, "$queryRaw">,
+  window: MarketingMeasurementWindow,
+): Promise<MarketingFunnelCounts> {
+  const [published, touches, signups] = await Promise.all([
+    settle(() =>
+      db.$queryRaw<Array<{ accountSlug: string; count: number }>>(Prisma.sql`
+        SELECT c."accountSlug", count(*)::int AS "count"
+        FROM "MarketingPost" p JOIN "MarketingChannel" c ON c."id" = p."channelId"
+        WHERE p."publishedAt" >= ${window.start} AND p."publishedAt" < ${window.end}
+        GROUP BY 1
+      `),
+    ),
+    settle(() =>
+      db.$queryRaw<Array<{ account: string | null; count: number }>>(Prisma.sql`
+        SELECT "properties"->>'utm_content' AS "account", count(*)::int AS "count"
+        FROM "ProductAnalyticsEvent"
+        WHERE "eventName" = ${MARKETING_TOUCH_EVENT}
+          AND "occurredAt" >= ${window.start} AND "occurredAt" < ${window.end}
+        GROUP BY 1
+      `),
+    ),
+    settle(() =>
+      db.$queryRaw<Array<{ account: string | null; signups: number; firstUse: number; paid: number }>>(Prisma.sql`
+        SELECT s."account", count(*)::int AS "signups",
+               (count(*) FILTER (WHERE s."used"))::int AS "firstUse",
+               (count(*) FILTER (WHERE s."paid"))::int AS "paid"
+        FROM (
+          SELECT e."properties"->>'touch_utm_content' AS "account",
+                 EXISTS (SELECT 1 FROM "Conversation" v WHERE v."userId" = e."userId") AS "used",
+                 EXISTS (
+                   SELECT 1 FROM "BillingTransaction" b WHERE b."userId" = e."userId" AND b."status" = 'paid'
+                 ) AS "paid"
+          FROM "ProductAnalyticsEvent" e
+          WHERE e."eventName" = 'signup_completed'
+            AND e."properties"->>'touch_attribution' = 'attributed'
+            AND e."occurredAt" >= ${window.start} AND e."occurredAt" < ${window.end}
+        ) s
+        GROUP BY 1
+      `),
+    ),
+  ]);
+  return { published, touches, signups };
+}
+
+/** The landing experiments a week saw: the stored one if it overlapped, and the results recorded in it. */
+async function readWeeklyExperiments(
+  db: Pick<PrismaClient, "$queryRaw" | "appSetting">,
+  window: MarketingMeasurementWindow,
+): Promise<MarketingWeeklyExperiment[] | null> {
+  return settle(async () => {
+    const [snapshot, results] = await Promise.all([
+      readExperimentSnapshot(db),
+      db.$queryRaw<Array<{ payload: unknown }>>(Prisma.sql`
+        SELECT "payload" FROM "MarketingReport"
+        WHERE "kind" = 'experiment_result' AND "createdAt" >= ${window.start} AND "createdAt" < ${window.end}
+        ORDER BY "createdAt"
+      `),
+    ]);
+    const config = snapshot.config;
+    return marketingWeeklyExperiments({
+      window,
+      stored:
+        config && snapshot.counts
+          ? {
+              experimentId: config.experimentId,
+              bundleId: config.bundleId,
+              variantId: config.variantId,
+              status: config.status,
+              startsAt: config.startsAt,
+              endsAt: config.endsAt,
+              stoppedAt: config.stoppedAt,
+              counts: snapshot.counts,
+            }
+          : null,
+      results: results.map((row) => row.payload),
+    });
+  });
+}
 
 const isoDate = (date: Date) => new Date(date.getTime() + 10 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
@@ -66,13 +187,16 @@ const isoDate = (date: Date) => new Date(date.getTime() + 10 * 60 * 60 * 1000).t
 export const marketingLastFullWeekStart = (now: number): string => marketingStrategyWeek(now - 7 * DAY_MS).start;
 
 export async function readMarketingWeeklyReport(
-  db: Pick<PrismaClient, "$queryRaw" | "marketingCompetitor">,
+  db: Pick<PrismaClient, "$queryRaw" | "marketingCompetitor" | "appSetting">,
   weekStart: string,
   now: number = Date.now(),
 ): Promise<MarketingWeeklyReport | null> {
   const window = marketingWeekWindow(weekStart);
   if (!window || !marketingWeekReadable(window.start, now)) return null;
-  const [measurement, analyses, strategies, intel, experiments, kpi] = await Promise.all([
+  const previousWindow = { start: new Date(window.start.getTime() - 7 * DAY_MS), end: window.start };
+  // The week before is compared only while it can still be read whole.
+  const previousReadable = marketingWeekReadable(previousWindow.start, now);
+  const [measurement, analyses, strategies, intel, experiments, kpi, funnelNow, funnelBefore, experimentEntries] = await Promise.all([
     readMarketingMeasurement(db, window),
     db.$queryRaw<Array<{ payload: unknown; briefReportId: string; createdAt: Date }>>(Prisma.sql`
       SELECT "payload", "briefReportId", "createdAt" FROM "MarketingAnalysis"
@@ -101,6 +225,9 @@ export async function readMarketingWeeklyReport(
       SELECT count(*)::int AS "count" FROM "MarketingReport"
       WHERE "kind" = 'weekly_kpi' AND "periodStart" = ${window.start}
     `),
+    readMarketingFunnelCounts(db, window),
+    previousReadable ? readMarketingFunnelCounts(db, previousWindow) : Promise.resolve(null),
+    readWeeklyExperiments(db, window),
   ]);
 
   let analysis: MarketingWeeklyReport["analysis"] = null;
@@ -134,7 +261,12 @@ export async function readMarketingWeeklyReport(
       factsKept: intel[0]?.kept ?? null,
       factsDropped: intel[0]?.dropped ?? null,
     },
-    experiments: { results: experiments[0]?.count ?? 0 },
+    experiments: { results: experiments[0]?.count ?? 0, entries: experimentEntries },
+    funnel: summarizeMarketingFunnel({
+      accounts: measurement.accounts.map((account) => account.accountSlug),
+      current: funnelNow,
+      previous: funnelBefore,
+    }),
     weeklyKpiRecorded: (kpi[0]?.count ?? 0) > 0,
   };
 }

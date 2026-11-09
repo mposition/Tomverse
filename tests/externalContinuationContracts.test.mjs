@@ -1024,7 +1024,7 @@ test("a Chat continuation never becomes a Smart Adaptive image turn", () => {
     assert.match(chat, /continuationBridge: \{ select: \{ id: true \} \},/);
     const eligible = chat.slice(
         chat.indexOf("const autoImageTurnEligible ="),
-        chat.indexOf("const autoImageDecisionPromise")
+        chat.indexOf("const imageRouting =")
     );
     assert.match(eligible, /!conversationRouting\?\.continuationBridge &&/);
 });
