@@ -58,10 +58,10 @@ test("a provider's quota is the smallest share AMUX measured across its windows"
   assert.deepEqual(amuxQuotaFromUsage(body, "gemini"), { state: "unknown" });
   assert.deepEqual(amuxQuotaFromUsage(body, "devin"), { state: "unknown" });
   assert.deepEqual(amuxQuotaFromUsage(body, "nobody"), { state: "unknown" });
-  // The whole body unavailable or stale is unknown for everyone.
-  assert.deepEqual(amuxQuotaFromUsage(usage({ available: false }), "claude"), { state: "unknown" });
-  assert.deepEqual(amuxQuotaFromUsage(usage({ stale: true }), "codex"), { state: "unknown" });
+  // No body, or one without provider rows, is unknown for everyone.
   assert.deepEqual(amuxQuotaFromUsage(null, "claude"), { state: "unknown" });
+  assert.deepEqual(amuxQuotaFromUsage({ available: true }, "codex"), { state: "unknown" });
+  assert.deepEqual(amuxQuotaFromUsage({ available: true, providers: "codex" }, "codex"), { state: "unknown" });
   // One stale provider, or one window it could not read, is not partial evidence.
   const stale = usage();
   stale.providers[0] = { ...stale.providers[0], stale: true };
@@ -87,6 +87,44 @@ test("a provider's quota is the smallest share AMUX measured across its windows"
   const odd = usage();
   odd.providers[2] = { ...odd.providers[2], windows: [{ remaining_percent: 140 }] };
   assert.deepEqual(amuxQuotaFromUsage(odd, "copilot"), { state: "unknown" });
+});
+
+test("a stale or failed Claude reading holds Claude only, never the other providers", () => {
+  // 2026-11-09: Anthropic answered 429 and AMUX served its last Claude reading.
+  // The top level is the legacy copy of Claude's body, so it carried the stale
+  // marker too -- and the old check held Codex, which was measured and fresh.
+  const claudeStale = usage({
+    stale: true, stale_reason: "Anthropic paused usage refreshes (HTTP 429). amux will retry automatically.",
+    cache_age_s: 4564,
+  });
+  claudeStale.providers[0] = {
+    ...claudeStale.providers[0], stale: true, cache_age_s: 4564,
+    stale_reason: "Anthropic paused usage refreshes (HTTP 429). amux will retry automatically.",
+  };
+  assert.deepEqual(amuxQuotaFromUsage(claudeStale, "claude"), { state: "unknown" });
+  assert.deepEqual(amuxQuotaFromUsage(claudeStale, "codex"), { state: "available", remainingPercent: 46 });
+  assert.deepEqual(amuxQuotaFromUsage(claudeStale, "copilot"), { state: "available", remainingPercent: 28.9 });
+
+  // With no reading to fall back on, a failed Claude probe makes the top level
+  // `available: false`; the other rows beside it are still today's.
+  const claudeDown = {
+    available: false, cause: "rate_limited", cache_managed: true,
+    reason: "Anthropic paused usage refreshes (HTTP 429). amux will retry automatically.",
+    providers: usage().providers.map((row) => (row.id === "claude"
+      ? { id: "claude", available: false, measured: false, cause: "rate_limited", windows: [] }
+      : row)),
+  };
+  assert.deepEqual(amuxQuotaFromUsage(claudeDown, "claude"), { state: "unknown" });
+  assert.deepEqual(amuxQuotaFromUsage(claudeDown, "codex"), { state: "available", remainingPercent: 46 });
+
+  // A row's own stale marker still holds that provider, whatever the top level says.
+  const codexStale = usage();
+  codexStale.providers[1] = { ...codexStale.providers[1], stale: true };
+  assert.deepEqual(amuxQuotaFromUsage(codexStale, "codex"), { state: "unknown" });
+  assert.deepEqual(amuxQuotaFromUsage(codexStale, "claude"), { state: "available", remainingPercent: 3 });
+  const codexFailed = usage();
+  codexFailed.providers[1] = { id: "codex", available: false, measured: false, cause: "probe_failed", windows: [] };
+  assert.deepEqual(amuxQuotaFromUsage(codexFailed, "codex"), { state: "unknown" });
 });
 
 test("only AMUX on this machine is read, and its certificate is verified, never waved through", async () => {
