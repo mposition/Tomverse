@@ -21,7 +21,7 @@ import {
   drainDueMarketingApprovals,
   resumeMarketingChannelToApproval,
   createMarketingChannel,
-  lowerMarketingChannelCaps,
+  changeMarketingChannelCaps,
   markMarketingPostReusable,
   marketingRecordManualPublishAuditMetadata,
   recordManualMarketingPostPublication,
@@ -745,43 +745,82 @@ test("autonomous resume refuses an audit action that fails the store check", asy
   );
 });
 
-test("lower-caps refuses an effective increase before issuing UPDATE", async () => {
-  let updates = 0;
-  const row = {
-    id: "channel-1",
-    channel: "linkedin",
-    status: "approval_mode",
-    connectionGeneration: 1,
-    scopesDigest: DIGEST,
-    policyVersion: 1,
-    graduationEpoch: 0,
-    graduatedAt: null,
-    graduationSnapshot: null,
-    pausedAt: null,
-    pausedFromMode: null,
-    pauseReasonCode: null,
-    lastResumeAuditLogId: null,
-    dailyCapOverride: 0,
-    weeklyCapOverride: 2,
-  };
-  await assert.rejects(
-    lowerMarketingChannelCaps(
-      {
-        $queryRaw: async () => [row],
-        marketingChannel: {
-          updateMany: async () => {
-            updates += 1;
-            return { count: 1 };
-          },
-        },
-      },
-      { id: row.id, dailyCapOverride: 1, weeklyCapOverride: 2 },
-    ),
-    (error) =>
-      error instanceof MarketingStoreRefusedError &&
-      error.code === "cap_change_raises_limit",
+const capsRow = (overrides = {}) => ({
+  id: "channel-1",
+  channel: "linkedin",
+  status: "approval_mode",
+  connectionGeneration: 1,
+  scopesDigest: DIGEST,
+  policyVersion: 1,
+  graduationEpoch: 0,
+  graduatedAt: null,
+  graduationSnapshot: null,
+  pausedAt: null,
+  pausedFromMode: null,
+  pauseReasonCode: null,
+  lastResumeAuditLogId: null,
+  dailyCapOverride: 0,
+  weeklyCapOverride: 2,
+  ...overrides,
+});
+
+const capsDatabase = (row, writes) => ({
+  $queryRaw: async () => [row],
+  marketingChannel: {
+    updateMany: async (args) => {
+      writes.push(args);
+      return { count: 1 };
+    },
+  },
+});
+
+test("a cap change that raises or clears a cap is refused under the kill switch, before issuing UPDATE", async () => {
+  for (const change of [
+    { dailyCapOverride: 1, weeklyCapOverride: 2 },
+    // Null is no cap, which is above every number.
+    { dailyCapOverride: 0, weeklyCapOverride: null },
+  ]) {
+    const writes = [];
+    await assert.rejects(
+      changeMarketingChannelCaps(capsDatabase(capsRow(), writes), { id: "channel-1", ...change }, { raiseAllowed: false }),
+      (error) =>
+        error instanceof MarketingStoreRefusedError &&
+        error.code === "cap_change_raises_limit",
+    );
+    assert.equal(writes.length, 0);
+  }
+
+  // Lowering is an operator narrowing something: never refused.
+  const writes = [];
+  await changeMarketingChannelCaps(
+    capsDatabase(capsRow(), writes),
+    { id: "channel-1", dailyCapOverride: 0, weeklyCapOverride: 1 },
+    { raiseAllowed: false },
   );
-  assert.equal(updates, 0);
+  assert.deepEqual(writes[0].data, { dailyCapOverride: 0, weeklyCapOverride: 1 });
+});
+
+test("with no policy cap, an operator may raise or clear an account cap", async () => {
+  // Owner decision 2026-11-08: the policy sets none, so an override is the
+  // account's only cap and null clears it.
+  const writes = [];
+  await changeMarketingChannelCaps(
+    capsDatabase(capsRow(), writes),
+    { id: "channel-1", dailyCapOverride: 50, weeklyCapOverride: null },
+    { raiseAllowed: true },
+  );
+  assert.deepEqual(writes[0].data, { dailyCapOverride: 50, weeklyCapOverride: null });
+  assert.deepEqual(writes[0].where, { id: "channel-1", dailyCapOverride: 0, weeklyCapOverride: 2 });
+
+  // RedNote has no API posting route: there is no cap to set at all.
+  await assert.rejects(
+    changeMarketingChannelCaps(
+      capsDatabase(capsRow({ channel: "rednote", dailyCapOverride: null, weeklyCapOverride: null }), []),
+      { id: "channel-1", dailyCapOverride: 1, weeklyCapOverride: null },
+      { raiseAllowed: true },
+    ),
+    (error) => error instanceof MarketingStoreRefusedError && error.code === "manual_channel_has_no_caps",
+  );
 });
 
 test("every refusal the store can raise has an HTTP meaning", () => {
@@ -3480,7 +3519,7 @@ const manualInput = (row, audit, overrides = {}) => ({
  * Answers what a record reads: the row, the clock, the counts, the channel and
  * the post's key. `failAt` makes that numbered update (1-4) match no row.
  */
-const manualDatabase = ({ row, audit, writes = [], today = 0, week = 0, failAt = null }) => {
+const manualDatabase = ({ row, audit, writes = [], today = 0, week = 0, failAt = null, caps = { daily: null, weekly: null } }) => {
   let updates = 0;
   return {
     $queryRaw: async (query) => {
@@ -3492,7 +3531,7 @@ const manualDatabase = ({ row, audit, writes = [], today = 0, week = 0, failAt =
     },
     adminAuditLog: auditReader(audit),
     marketingChannel: {
-      findUnique: async () => ({ channel: "x", dailyCapOverride: null, weeklyCapOverride: null }),
+      findUnique: async () => ({ channel: "x", dailyCapOverride: caps.daily, weeklyCapOverride: caps.weekly }),
     },
     marketingPost: {
       findUnique: async () => ({ logicalKey: "logical-1" }),
@@ -3580,14 +3619,15 @@ test("a hand-posted post is recorded as verified by an operator, through the led
   assert.equal(writes[0].where.historyVersion, row.historyVersion);
 });
 
-test("a record over the cap is made, and the overage comes back as a warning", async () => {
-  // X is 2 a day and 10 a week; two and ten are already counted.
+test("a record over an operator's cap is made, and the overage comes back as a warning", async () => {
+  // The account is capped at 2 a day and 10 a week; two and ten are already counted.
+  const caps = { daily: 2, weekly: 10 };
   const row = manualPost();
   const audit = manualAudit(row);
   const writes = [];
   const result = await withAuditKey(() =>
     recordManualMarketingPostPublication(
-      manualDatabase({ row, audit, writes, today: 2, week: 10 }),
+      manualDatabase({ row, audit, writes, today: 2, week: 10, caps }),
       manualInput(row, audit),
     ),
   );
@@ -3597,11 +3637,20 @@ test("a record over the cap is made, and the overage comes back as a warning", a
   // One below the cap is not a warning.
   const within = await withAuditKey(() =>
     recordManualMarketingPostPublication(
-      manualDatabase({ row, audit, today: 1, week: 9 }),
+      manualDatabase({ row, audit, today: 1, week: 9, caps }),
       manualInput(row, audit),
     ),
   );
   assert.deepEqual(within.warnings, []);
+
+  // No cap (the policy sets none since 2026-11-08): nothing to warn about.
+  const uncapped = await withAuditKey(() =>
+    recordManualMarketingPostPublication(
+      manualDatabase({ row, audit, today: 40, week: 200 }),
+      manualInput(row, audit),
+    ),
+  );
+  assert.deepEqual(uncapped.warnings, []);
 });
 
 test("only an unchanged approved post of a hand-posted account can be recorded", async () => {
