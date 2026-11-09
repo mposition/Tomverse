@@ -27,11 +27,12 @@ import { MarketingWebhookProduction } from "@/components/admin/MarketingWebhookP
 import { adminMarketingMessages } from "@/lib/adminMessages/marketing";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import {
-  MARKETING_CHANNEL_CAPS,
+  MARKETING_CHANNELS,
   MARKETING_LOCALES,
   MARKETING_PAUSE_REASON_CODES,
   MARKETING_PROVIDERS,
   MARKETING_RESUME_REASON_CODES,
+  marketingChannelPostsByApi,
 } from "@/lib/marketingAutomationSchema";
 import {
   MARKETING_CONSOLE_SWITCH_CONTROLS,
@@ -1319,7 +1320,7 @@ function MarketingAccountCreate({
         name: "channel",
         label: m.fieldChannel,
         kind: "select",
-        options: Object.keys(MARKETING_CHANNEL_CAPS),
+        options: MARKETING_CHANNELS,
       },
       {
         name: "provider",
@@ -1795,17 +1796,6 @@ const TEMPLATE_SOURCE = new Set(["approved", "scheduled", "published", "verified
  * backlog, so they are exactly the states where the drain that clears it must
  * be reachable.
  */
-/**
- * Whether the publisher has a cap to lower on this channel.
- *
- * Read from the same table the store reads, through a guard rather than an
- * index expression: the row’s channel arrives as a `string` from a payload,
- * and indexing a closed record with it is the shape that needs a cast.
- */
-const channelHasCaps = (channel: string): boolean =>
-  Object.hasOwn(MARKETING_CHANNEL_CAPS, channel) &&
-  MARKETING_CHANNEL_CAPS[channel as keyof typeof MARKETING_CHANNEL_CAPS] !== null;
-
 const MARKETING_STOPPED_ACCOUNT_STATUSES = new Set([
   "paused",
   "disconnected",
@@ -1894,6 +1884,14 @@ async function readDailyScheduleLatest(channel: string): Promise<DailyScheduleLa
   }
 }
 
+/** The read's `postingCaps`: null when the publisher does not post here; a null cap inside is no cap. */
+const postingCapsOf = (value: unknown): DailySchedulePost["caps"] => {
+  if (value === null || typeof value !== "object") return null;
+  const cap = (field: unknown) => (typeof field === "number" ? field : null);
+  const caps = value as { daily?: unknown; weekly?: unknown };
+  return { daily: cap(caps.daily), weekly: cap(caps.weekly) };
+};
+
 const dailySchedulePostsOf = (rows: readonly Row[]): DailySchedulePost[] =>
   rows.map((row) => ({
     id: str(row.id),
@@ -1903,8 +1901,7 @@ const dailySchedulePostsOf = (rows: readonly Row[]): DailySchedulePost[] =>
     accountLocale: str(row.accountLocale),
     approvedAt: nullableIso(row.approvedAt),
     approvalExpiresAt: nullableIso(row.approvalExpiresAt),
-    dailyCap: typeof row.dailyCap === "number" ? row.dailyCap : null,
-    weeklyCap: typeof row.weeklyCap === "number" ? row.weeklyCap : null,
+    caps: postingCapsOf(row.postingCaps),
   }));
 
 /** "2026-11-09" as "11/9": the market's own date, short. */
@@ -2477,7 +2474,7 @@ function accountActions(row: Row, m: Record<string, string>): MarketingAction[] 
       // answers `manual_channel_has_no_caps` every time. The channel is in
       // the payload, so the screen can say so before the click instead of
       // after it.
-      unavailable: channelHasCaps(str(row.channel))
+      unavailable: marketingChannelPostsByApi(str(row.channel))
         ? undefined
         : m.capsManualChannel,
       fields: [

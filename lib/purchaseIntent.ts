@@ -85,6 +85,7 @@ const RETURN_TO_QUERY_KEYS = new Set<string>([
   "ctaLocation",
   "intent",
   "target",
+  "billingInterval",
   "pack",
   ...UTM_KEYS,
 ]);
@@ -110,6 +111,7 @@ export const normalizeCreditPackId = (value: unknown) =>
 export const normalizePurchaseLanguage = (value: unknown) =>
   oneOf(APP_LANGUAGES, value);
 const normalizeTrigger = (value: unknown) => oneOf(PURCHASE_TRIGGERS, value);
+const normalizeBillingInterval = (value: unknown) => oneOf(["monthly", "annual"] as const, value);
 
 /**
  * A CTA's own identity, used for analytics and for deciding which pack a
@@ -127,6 +129,7 @@ export const normalizeCtaLocation = (value: unknown): string | null => {
 export type PurchaseIntent = {
   intent: PurchaseIntentType | null;
   targetPlan: PurchaseTargetPlan | null;
+  billingInterval?: "monthly" | "annual";
   packId: PurchaseCreditPackId | null;
   trigger: (typeof PURCHASE_TRIGGERS)[number] | null;
   ctaLocation: string | null;
@@ -171,6 +174,9 @@ export function parsePurchaseIntent(
   return {
     intent: normalizePurchaseIntentType(params.get("intent")),
     targetPlan: normalizePurchaseTargetPlan(params.get("target")),
+    ...(params.get("intent") === "subscription" && normalizeBillingInterval(params.get("billingInterval"))
+      ? { billingInterval: normalizeBillingInterval(params.get("billingInterval"))! }
+      : {}),
     packId: normalizeCreditPackId(params.get("pack")),
     trigger: normalizeTrigger(params.get("trigger")),
     ctaLocation: normalizeCtaLocation(params.get("ctaLocation")),
@@ -190,6 +196,7 @@ export function buildPricingIntentHref({
   lang,
   intent,
   targetPlan,
+  billingInterval,
   packId,
   trigger,
   ctaLocation,
@@ -199,6 +206,7 @@ export function buildPricingIntentHref({
   lang: string;
   intent?: PurchaseIntentType | null;
   targetPlan?: PurchaseTargetPlan | null;
+  billingInterval?: "monthly" | "annual" | null;
   packId?: PurchaseCreditPackId | null;
   trigger?: string | null;
   ctaLocation?: string | null;
@@ -212,6 +220,8 @@ export function buildPricingIntentHref({
   if (normalizedIntent) params.set("intent", normalizedIntent);
   const normalizedTarget = normalizePurchaseTargetPlan(targetPlan);
   if (normalizedTarget) params.set("target", normalizedTarget);
+  const interval = normalizeBillingInterval(billingInterval);
+  if (normalizedIntent === "subscription" && interval) params.set("billingInterval", interval);
   const normalizedPack = normalizeCreditPackId(packId);
   if (normalizedPack) params.set("pack", normalizedPack);
   const normalizedTrigger = normalizeTrigger(trigger);
