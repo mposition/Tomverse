@@ -9,6 +9,29 @@ import { estimateTextTokens } from "../lib/chatTokenEstimate.ts";
 const fix = (overrides = {}) => ({ latitude: -27.4697701, longitude: 153.0251234,
   accuracy: 10, timestamp: Date.now(), ...overrides });
 
+test("reload resets app activation and suppression without reading until a location-dependent turn", async () => {
+  let reads = 0;
+  const reader = async () => { reads++; return fix(); };
+  const beforeReload = createChatLocationSession(reader);
+  beforeReload.setIdentity("account:a");
+  await beforeReload.enable("account:a");
+  beforeReload.disable();
+  const intent = { turnId: "nearby", requiresLocation: async () => true };
+  assert.equal(await beforeReload.readForTurn("account:a", undefined, intent), null);
+  assert.equal(reads, 1);
+
+  const afterReload = createChatLocationSession(reader);
+  afterReload.setIdentity("account:a");
+  assert.equal(afterReload.isEnabled("account:a"), false);
+  assert.equal(await afterReload.readForTurn("account:a"), null);
+  assert.equal(await afterReload.readForTurn("account:a", undefined, {
+    turnId: "ordinary", requiresLocation: async () => false,
+  }), null);
+  assert.equal(reads, 1);
+  assert.ok(await afterReload.readForTurn("account:a", undefined, intent));
+  assert.equal(reads, 2);
+});
+
 test("semantic location need requests permission once and later turns use the existing grant", async () => {
   const reads = []; let analyses = 0;
   const session = createChatLocationSession(async permission => { reads.push(permission); return fix(); });
