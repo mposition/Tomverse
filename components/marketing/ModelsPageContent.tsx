@@ -39,7 +39,7 @@ const copy = {
     usageClass: "크레딧 사용 등급",
     baseCharge: "짧은 요청의 기본 크레딧",
     creditUnit: "크레딧",
-    usageNote: "크레딧 사용 등급은 요금제와 별개입니다. 긴 대화와 파일은 입력 크기에 따라 기본 크레딧의 1.5배, 2배 또는 3배를 사용할 수 있습니다. 추천 활용과 태그는 비교를 돕는 참고이며 성능 순위가 아닙니다. EU는 공급자 기반 지역을 뜻하며 데이터 저장 위치를 보장하지 않습니다. 게스트 이용 모델에도 사용 한도가 적용됩니다.",
+    usageNote: "비용은 ‘짧은 요청의 기본 크레딧’ 숫자로 비교하세요. 숫자가 클수록 같은 짧은 요청의 기본 비용이 높으며, 요금제나 성능 순위가 아닙니다. 긴 대화와 파일은 입력 크기에 따라 기본 크레딧의 1.5배, 2배 또는 3배를 사용할 수 있습니다. ‘추론’은 모델 기능 태그이며 비용 단계가 아닙니다. 추천 활용과 태그는 비교를 돕는 참고입니다. EU는 공급자 기반 지역을 뜻하며 데이터 저장 위치를 보장하지 않습니다. 게스트 이용 모델에도 사용 한도가 적용됩니다.",
     status: "상태",
     enabled: "사용 가능",
     liveStatus: "실시간 서비스 상태 보기",
@@ -292,12 +292,12 @@ export function ModelsPageContent() {
                   <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-400">{content.provider}</p>
                   <p className="mt-1 truncate text-sm font-bold capitalize">{model.provider}</p>
                 </div>
-                <div>
+                {lang !== "ko" ? <div>
                   <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-400">{content.usageClass}</p>
                   <p className="mt-1 text-sm font-bold">
                     {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)}
                   </p>
-                </div>
+                </div> : null}
                 <div>
                   <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-400">{content.baseCharge}</p>
                   <CreditCostBadge
