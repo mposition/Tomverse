@@ -37,7 +37,7 @@ test("the prompt versions moved with the Korean instructions", () => {
   assert.equal(MARKETING_ANALYSIS_PROMPT_VERSION, "analysis-v3");
   assert.equal(MARKETING_A3_PROMPT_VERSION, "a3-web-search-v4");
   assert.equal(MARKETING_MORNING_PROMPT_VERSION, "morning-v2");
-  assert.equal(MARKETING_STRATEGY_PROMPT_VERSION, "strategy-v3");
+  assert.equal(MARKETING_STRATEGY_PROMPT_VERSION, "strategy-v4");
 });
 
 test("the self-analysis answers in Korean, at lengths its schema keeps", () => {

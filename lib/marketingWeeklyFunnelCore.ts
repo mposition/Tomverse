@@ -14,7 +14,7 @@
  * Pure, so it is tested without a database. Imports nothing.
  */
 
-/** Attributed sign-ups below which a row's conversion rates are held (policy §10.3). */
+/** Attributed sign-ups below which a row's conversion rates are held (docs/policy/marketing-automation.md §10.3). */
 export const MARKETING_FUNNEL_MIN_SIGNUPS = 10;
 
 /** One account's (or the unmatched remainder's) counted rows for a window. */
@@ -55,7 +55,7 @@ export type MarketingFunnelStep = {
 export type MarketingFunnelRow = MarketingFunnelStep & {
   /** An account slug, `*` for the whole week, or `other` for touches no account's link carried. */
   readonly key: string;
-  /** Fewer than ten attributed sign-ups: no decision rests on its rates (policy §10.3). */
+  /** Fewer than ten attributed sign-ups: no decision rests on its rates (docs/policy/marketing-automation.md §10.3). */
   readonly held: boolean;
   /** The same row in the week before; null when that week cannot be read whole. */
   readonly previous: MarketingFunnelStep | null;

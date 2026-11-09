@@ -33,7 +33,7 @@ import { marketingChannelPostsByApi } from "./marketingAutomationSchema.ts";
 import type { MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Recorded with each plan, so a change to what the model is asked is a new version. */
-export const MARKETING_STRATEGY_PROMPT_VERSION = "strategy-v3";
+export const MARKETING_STRATEGY_PROMPT_VERSION = "strategy-v4";
 
 /** An account as the plan is offered it: where it posts and what it may carry. */
 export type MarketingStrategyAccount = {
