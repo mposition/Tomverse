@@ -34,6 +34,9 @@ test("the jail has no network, binds only the checkout writable and rebuilds the
     assert.ok(!/\/cli\b|\/home\b|\/journal\b|^\/var\/lib\/?$|^\/root|tomverse-bridge/.test(arg), arg);
   }
   assert.ok(!args.includes("--share-net") && !args.some((arg) => /^--(bind|dev-bind)-try$/.test(arg)));
+  // No /proc: the unit's would expose the CLI's own environ and root, and the
+  // unit's ProtectKernelTunables= stops a fresh one from mounting.
+  assert.ok(!args.includes("--proc") && !args.includes("/proc"));
   // Tools see the checkout's ignored temp dir as HOME and TMPDIR.
   assert.equal(args[at("--setenv", "HOME") + 2], paths.tmpPath);
   assert.equal(args[at("--setenv", "TMPDIR") + 2], paths.tmpPath);
@@ -99,7 +102,9 @@ test("a command in the real jail reaches no network and writes only the checkout
     const tmpPath = join(worktreePath, "node_modules", ".cache", "amux-tmp");
     const jail = await createAmuxV22ShellJail({ worktreePath, tmpPath, homePath });
     const out = execFileSync(jail.jailPath, ["-c", [
-      "cat /proc/net/dev | tail -n +3 | cut -d: -f1 | tr -d ' ' | tr '\\n' ,; echo",
+      `node -p 'Object.keys(require("os").networkInterfaces()).join()'`,
+      `node -e 'require("net").connect(443, "140.82.112.3").on("error", (e) => console.log(e.code))'`,
+      "ls /proc >/dev/null 2>&1 && echo proc-open || echo proc-absent",
       `(echo x > ${root}/outside) 2>/dev/null && echo outside-open || echo outside-refused`,
       "(echo x > .git/x) 2>/dev/null && echo git-open || echo git-refused",
       "(echo x > /tmp/x) 2>/dev/null && echo tmp-open || echo tmp-refused",
@@ -107,7 +112,8 @@ test("a command in the real jail reaches no network and writes only the checkout
       "echo x > inside && echo inside-ok", "echo token=${COPILOT_GITHUB_TOKEN-unset}"].join("\n")],
     { cwd: worktreePath, encoding: "utf8",
       env: { PATH: "/usr/bin:/bin", COPILOT_GITHUB_TOKEN: "gho_synthetic", TERM: "dumb" } });
-    assert.deepEqual(out.trim().split("\n"), ["lo,", "outside-refused", "git-refused",
+    assert.deepEqual(out.trim().split("\n"), ["lo", "ENETUNREACH", "proc-absent",
+      "outside-refused", "git-refused",
       "tmp-refused", "home-refused", "inside-ok", "token=unset"]);
     assert.equal(await readFile(join(worktreePath, "inside"), "utf8"), "x\n");
     await jail.cleanup();
