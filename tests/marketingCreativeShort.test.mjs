@@ -146,6 +146,32 @@ test("a line is spoken in the locale's fixed voice and counted in characters", a
   assert.ok(existsSync(out));
 });
 
+test("a call whose price lookup crosses Brisbane midnight is refused before it is created or written", async () => {
+  // The run fixes its day at the start; the ledger reads the clock again at admission.
+  const jobDir = tempJob();
+  let now = DAY;
+  const { cli, calls } = fakeCli();
+  const crossing = (args) => {
+    const answer = cli(args);
+    if (args[1] === "cost") now = "20261111";
+    return answer;
+  };
+  const refused = await makeMedia({ request: clip(), out: join(jobDir, "c.mp4"), jobDir, env: capEnv(), cli: crossing, fetchBytes: async () => MP4, day: DAY, today: () => now });
+  assert.equal(refused.reason, "day_changed");
+  assert.deepEqual(calls.filter((call) => call === "generate create"), []);
+  assert.deepEqual(readLedger(creativeLedgerPath(jobDir, DAY)).entries, []);
+
+  const { fetchImpl, calls: sent } = fakeFetch({ status: 200 });
+  const line = await speakLine({ locale: "en", text: "Ask once.", out: join(jobDir, "en.mp3"), jobDir, env: capEnv(), fetchImpl, day: DAY, today: () => "20261111" });
+  assert.equal(line.reason, "day_changed");
+  assert.equal(sent.length, 0);
+  assert.deepEqual(readLedger(voiceLedgerPath(jobDir, DAY)).entries, []);
+
+  // On the same day both are admitted as before.
+  const same = await makeMedia({ request: clip(), out: join(jobDir, "d.mp4"), jobDir, env: capEnv(), cli: fakeCli().cli, fetchBytes: async () => MP4, day: DAY, today: () => DAY });
+  assert.equal(same.ok, true);
+});
+
 test("no key, no cap, no voice for the locale, or past the character cap: nothing is sent", async () => {
   const jobDir = tempJob();
   for (const [args, reason] of [
@@ -267,9 +293,12 @@ test("both pack shapes are read the same way, and a pack's topic comes from its 
   assert.deepEqual(current, { assetId: "media-20261108-images-zh-hant-short", locale: "zh-Hant", topic: "images", captures: { answer: { file: "answer.png", text: "answer words" } }, videoAsset: "src.asset.json" });
   const first = normalizePack({ assetId: "media-20261101-review-compare-en-short", locale: "en", topic: "review-compare", videoAsset: "v.json", images: { left: "left.png", center: "center.png", right: "right.png", summary: "summary.png", logo: "logo.png" }, captureText: ["A", "B", "C"], summaryText: "S" });
   assert.equal(first.topic, "review-compare");
-  assert.deepEqual(Object.keys(first.captures), ["left", "center", "right", "summary", "logo"]);
+  assert.deepEqual(Object.keys(first.captures), ["left", "center", "right", "summary"]);
   assert.equal(first.captures.right.text, "C");
   assert.equal(first.captures.summary.text, "S");
+  // A logo is not a product screen: a pack with only a logo has no capture.
+  assert.equal(normalizePack({ assetId: "media-x-en-short", locale: "en", images: { logo: "logo.png" }, captureText: [] }), null);
+  assert.equal(normalizePack({ assetId: "media-x-en-short", locale: "en", captures: { logo: { file: "logo.png", text: "" } } }), null);
   assert.equal(normalizePack({ assetId: "media-x-short", locale: "fr", captures: { a: { file: "a.png" } } }), null);
   assert.equal(normalizePack({ assetId: "media-x-short", locale: "en", captures: {} }), null);
 });
@@ -323,8 +352,8 @@ test("the asset file is AI-origin with a disclosure on every channel, and zh-Han
   for (const locale of ["en", "ko", "zh-Hant", "zh-Hans"]) {
     const { asset, transcript } = creativeAsset({ id: `media-20261110-creative-${locale.toLowerCase()}-short`, locale, words: words(locale), today: new Date("2026-11-10T00:00:00Z") });
     assert.equal(marketingAssetSchema.safeParse(asset).success, true, locale);
-    assert.equal(asset.provenance, "ai_modified");
-    assert.equal(asset.depictsProductInterface, false);
+    assert.equal(asset.provenance, "capture_with_ai_media");
+    assert.equal(asset.depictsProductInterface, true);
     assert.ok(Object.values(asset.disclosure).every((value) => value !== "none"));
     assert.deepEqual(asset.allowedChannels, locale === "zh-Hans" ? ["rednote"] : ["instagram", "youtube", "tiktok", "x"]);
     assert.ok(transcript[locale].includes(AI_LINE[locale]));

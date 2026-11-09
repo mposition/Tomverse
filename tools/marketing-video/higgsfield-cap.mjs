@@ -116,9 +116,13 @@ export const unsettled = (ledger) => ledger.entries.filter((entry) => entry.stat
 /**
  * Admits one call, or refuses it. On admission the entry is in the ledger
  * (status "sent") before anything leaves the box.
+ *
+ * `today`, when given, reads the current Brisbane day at the moment of
+ * admission: a run that fixed its day at the start is refused once the day has
+ * changed, since the call would bill the new day to the old day's ledger.
  * @returns {{ok: true, entry: object, file: string} | {ok: false, reason: string, detail?: object}}
  */
-export function admit({ jobDir, day = brisbaneDay(), env = process.env, request, label, cost: priced, lockWaitMs, policy = IMAGE_POLICY, file: ledgerFile }) {
+export function admit({ jobDir, day = brisbaneDay(), env = process.env, request, label, cost: priced, lockWaitMs, policy = IMAGE_POLICY, file: ledgerFile, today }) {
   const problem = policy.problem(request);
   if (problem) return { ok: false, reason: problem };
   // The price quoted, never less than the policy's known least price of a call.
@@ -127,11 +131,13 @@ export function admit({ jobDir, day = brisbaneDay(), env = process.env, request,
   if (cap === null) return { ok: false, reason: "no_daily_cap" };
   const file = ledgerFile ?? ledgerPath(jobDir, day);
   // From reading the total to writing the entry, no other run touches the ledger.
-  const held = withLock(file, () => admitLocked({ file, cap, cost, request, label }), lockWaitMs);
+  const held = withLock(file, () => admitLocked({ file, cap, cost, request, label, day, today }), lockWaitMs);
   return held.locked ? { ok: false, reason: "ledger_locked" } : held.value;
 }
 
-function admitLocked({ file, cap, cost, request, label }) {
+function admitLocked({ file, cap, cost, request, label, day, today }) {
+  // Checked last before the entry is written: the price lookup before it may cross midnight.
+  if (today && today() !== day) return { ok: false, reason: "day_changed", detail: { day } };
   const ledger = readLedger(file);
   const open = unsettled(ledger);
   if (open.length > 0) return { ok: false, reason: "unknown_outcome_pending", detail: { entries: open.map((entry) => entry.id) } };
