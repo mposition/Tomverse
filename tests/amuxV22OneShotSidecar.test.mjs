@@ -772,6 +772,35 @@ test("Ubuntu socket parent must be private",
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+test("a Codex implement run gets the base's locked packages and a writable temp dir in its checkout", async () => {
+  const codex = { ...config, provider: "openai", binaryPath: "/opt/tomverse-amux-v22/codex",
+    claudeConfigDir: "/var/lib/tomverse-amux-v22-codex-impl/cli" };
+  const output = [{ type: "turn.started" },
+    { type: "item.completed", item: { type: "agent_message", text: "Done." } },
+    { type: "turn.completed", usage: { input_tokens: 9, cached_input_tokens: 0,
+      output_tokens: 3 } }].map((event) => JSON.stringify(event)).join("\n") + "\n";
+  const runHome = async (_provider, value) => ({
+    config: { ...value, homePath: "/run-home", claudeConfigDir: "/run-home/codex" },
+    cleanup: async () => {} });
+  for (const [role, deps, expectedTmp] of [
+    ["implement", { ok: true, installed: true }, join(config.worktreePath, "node_modules", ".cache", "amux-tmp")],
+    ["implement", { ok: false, reason: "install_failed" }, undefined],
+    ["investigate", null, undefined],
+  ]) {
+    const seen = [];
+    const fake = fakeSpawn(output);
+    await runAmuxV22OneShot({ ...request, role, modelId: "gpt-6-luna" }, codex, {
+      syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null,
+      createRunHome: runHome,
+      ensureDependencies: async (worktree, home) => { seen.push([worktree, home]); return deps; },
+    }).catch(() => {});
+    assert.equal(fake.calls.length, 1, role);
+    // npm runs from the sidecar's own home, never the CLI's fresh run home.
+    assert.deepEqual(seen, deps ? [[config.worktreePath, config.homePath]] : []);
+    assert.equal(fake.calls[0].spawnOptions.env.TMPDIR, expectedTmp);
+  }
+});
+
 test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Codex receipt", async () => {
   const codex = { ...config, provider: "openai", binaryPath: "/opt/tomverse-amux-v22/codex",
     claudeConfigDir: "/var/lib/tomverse-amux-v22-codex-impl/cli" };
