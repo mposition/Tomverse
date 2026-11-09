@@ -15,7 +15,8 @@ name: PR Fast Gate
 # Two Playwright tiers run here, in two jobs: build-and-e2e runs the @smoke
 # contract set, and ui-risk runs the @ui-risk layout/accessibility set
 # (UI-008) as a matrix over both Chromium projects, desktop in three shards
-# and mobile in two.
+# and mobile in two -- on pull requests into main only since 2026-11-09; on a
+# develop pull request its shards skip every step and report success.
 # Neither tier is the full suite -- see .github/audits/ui-test-tiers.md for
 # what runs where.
 #
@@ -1058,9 +1059,22 @@ jobs:
       NEXTAUTH_URL: http://127.0.0.1:3100
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
     steps:
+      # Pull requests into main only (owner decision 2026-11-09, before the
+      # repository goes private). These five shards were ~33% of all Actions
+      # minutes, run on every push to every develop pull request. A develop
+      # pull request now starts the shards, skips every step and reports
+      # success, so fast-gate's all-must-pass stays as it is; a release pull
+      # request into main runs them in full, beside e2e.yml's unfiltered
+      # Chromium regression. A layout regression is then caught at the release
+      # train rather than before the develop merge -- UI contracts are
+      # reversible (AGENTS.md), so they gate the release, not each change.
+      # The condition is on the checkout and the scope step: with no scope
+      # output, every later step's `code == 'true'` is false.
+      #
       # Full history so the scope check below can diff against the PR base --
       # the same reason build-and-e2e needs it.
       - name: Checkout
+        if: github.event.pull_request.base.ref == 'main'
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -1071,6 +1085,7 @@ jobs:
       # than shared because this repository has no composite action to share it
       # through; if a third job needs it, extract it then.
       - name: Determine whether this PR can change what the app renders
+        if: github.event.pull_request.base.ref == 'main'
         id: scope
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

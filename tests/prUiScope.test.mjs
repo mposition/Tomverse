@@ -110,6 +110,23 @@ test("each browser job decides with the script and gates its expensive steps on 
     }
 });
 
+test("the high-risk UI shards run only on pull requests into main", () => {
+    // Owner decision 2026-11-09: a develop pull request starts the shards and
+    // skips every step, so fast-gate still sees success from each of them.
+    const job = load("pr-fast-gate.yml").jobs["ui-risk"];
+    const [checkout, scope, ...rest] = job.steps;
+    assert.equal(checkout.name, "Checkout");
+    assert.equal(scope.id, "scope");
+    for (const step of [checkout, scope]) {
+        assert.equal(step.if, "github.event.pull_request.base.ref == 'main'", step.name);
+    }
+    for (const step of rest) {
+        assert.match(String(step.if), /steps\.scope\.outputs\.code == 'true'|^failure\(\)$/, step.name);
+    }
+    // The job itself is not skipped: fast-gate fails a skipped upstream job.
+    assert.equal(job.if, "github.event_name != 'pull_request' || !github.event.pull_request.draft");
+});
+
 // The admin suite asks a narrower question (scripts/admin-e2e-scope.mjs, with
 // its own test in tests/adminE2EScope.test.mjs) inside the same shell.
 test("the admin suite still reports on every change and runs all when its own workflow changes", () => {
