@@ -267,9 +267,12 @@ test("both pack shapes are read the same way, and a pack's topic comes from its 
   assert.deepEqual(current, { assetId: "media-20261108-images-zh-hant-short", locale: "zh-Hant", topic: "images", captures: { answer: { file: "answer.png", text: "answer words" } }, videoAsset: "src.asset.json" });
   const first = normalizePack({ assetId: "media-20261101-review-compare-en-short", locale: "en", topic: "review-compare", videoAsset: "v.json", images: { left: "left.png", center: "center.png", right: "right.png", summary: "summary.png", logo: "logo.png" }, captureText: ["A", "B", "C"], summaryText: "S" });
   assert.equal(first.topic, "review-compare");
-  assert.deepEqual(Object.keys(first.captures), ["left", "center", "right", "summary", "logo"]);
+  assert.deepEqual(Object.keys(first.captures), ["left", "center", "right", "summary"]);
   assert.equal(first.captures.right.text, "C");
   assert.equal(first.captures.summary.text, "S");
+  // A logo is not a product screen: a pack with only a logo has no capture.
+  assert.equal(normalizePack({ assetId: "media-x-en-short", locale: "en", images: { logo: "logo.png" }, captureText: [] }), null);
+  assert.equal(normalizePack({ assetId: "media-x-en-short", locale: "en", captures: { logo: { file: "logo.png", text: "" } } }), null);
   assert.equal(normalizePack({ assetId: "media-x-short", locale: "fr", captures: { a: { file: "a.png" } } }), null);
   assert.equal(normalizePack({ assetId: "media-x-short", locale: "en", captures: {} }), null);
 });
