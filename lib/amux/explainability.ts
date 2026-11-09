@@ -218,7 +218,8 @@ export async function getAmuxExplainabilityReport() {
       },
     }),
     prisma.amuxHumanEscalation.findMany({
-      where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } },
+      // An archived card's escalation is not shown, as in Waiting on me.
+      where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] }, task: { archivedAt: null } },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: AMUX_ESCALATION_LIST_LIMIT,
       select: {
@@ -232,7 +233,8 @@ export async function getAmuxExplainabilityReport() {
       },
     }),
     prisma.amuxHumanEscalation.count({
-      where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } },
+      // An archived card's escalation is not shown, as in Waiting on me.
+      where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] }, task: { archivedAt: null } },
     }),
   ]);
 

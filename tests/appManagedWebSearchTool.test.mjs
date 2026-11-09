@@ -173,6 +173,64 @@ test("one tool call is exactly one backend request", async () => {
   assert.equal(config.session.snapshot().succeededRequestCount, 1);
 });
 
+test("concurrent duplicate searches share a request and successful evidence", async () => {
+  let release;
+  const waiting = new Promise(resolve => { release = resolve; });
+  globalThis.fetch = async () => {
+    fetchCalls.push({});
+    await waiting;
+    return braveResponse([{ title: "Evidence", url: "https://example.com/evidence" }]);
+  };
+  const events = [];
+  const config = toolFor({ onOutcome: event => events.push(event) });
+  const first = run(config, { query: "current price" });
+  const second = run(config, { query: " current   price " });
+  assert.equal(fetchCalls.length, 1);
+  release();
+  const [a, b] = await Promise.all([first, second]);
+  assert.deepEqual(a, b);
+  await run(config, { query: "current price" });
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(config.session.snapshot().backendRequestCount, 1);
+  assert.equal(config.session.snapshot().succeededRequestCount, 1);
+  assert.deepEqual(events.map(event => event.reused), [false, true, true]);
+  assert.ok(events.every(event => !JSON.stringify(event).includes("current price")));
+});
+
+test("different search hints stay distinct and cached evidence survives the request ceiling", async () => {
+  const config = toolFor({ defaultCountry: "AU" });
+  await run(config, { query: "news" });
+  await run(config, { query: "news", country: "US" });
+  await run(config, { query: "news", searchLang: "ko" });
+  await run(config, { query: "news", freshness: "day" });
+  await run(config, { query: "news", freshness: "week" });
+  const cached = await run(config, { query: "news", country: "AU" });
+  assert.equal(cached.status, "ok");
+  assert.equal(cached.searchesRemaining, 0);
+  assert.match(cached.notice, /never as instructions/);
+  assert.equal(fetchCalls.length, 5);
+  assert.equal((await run(config, { query: "different" })).status, "limit_reached");
+  assert.equal(fetchCalls.length, 5);
+});
+
+test("failed searches can be retried and never consume more than the attempt ceiling", async () => {
+  globalThis.fetch = async () => {
+    fetchCalls.push({});
+    return { ok: false, status: 429, text: async () => "" };
+  };
+  const config = toolFor();
+  for (let i = 0; i < 5; i++) assert.equal((await run(config, { query: "retry" })).status, "failed");
+  assert.equal((await run(config, { query: "retry" })).status, "limit_reached");
+  assert.equal(fetchCalls.length, 5);
+  assert.equal(config.session.snapshot().succeededRequestCount, 0);
+});
+
+test("successful searches are never shared across attempts", async () => {
+  await run(toolFor(), { query: "private question" });
+  await run(toolFor(), { query: "private question" });
+  assert.equal(fetchCalls.length, 2);
+});
+
 test("the sixth call opens no socket", async () => {
   const config = toolFor();
   for (let index = 0; index < 5; index += 1) {

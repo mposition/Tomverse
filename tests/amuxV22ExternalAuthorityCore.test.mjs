@@ -45,6 +45,12 @@ test("one-shot tool roles reject command, network and duplicate capabilities", (
     "Read,Read", "Read, Write", ""]) {
     assert.throws(() => assertAmuxV22LocalCliTools(unsafe), /v22 CLI role/);
   }
+  // Bash passes only for a jailed implement shell; nothing else widens.
+  assert.doesNotThrow(() => assertAmuxV22LocalCliTools("Read,Grep,Glob,Edit,Write,Bash",
+    { jailedShell: true }));
+  for (const unsafe of ["Read,WebFetch", "Read,PowerShell", "Read,Bash,Bash", "Read, Bash"])
+    assert.throws(() => assertAmuxV22LocalCliTools(unsafe, { jailedShell: true }),
+      /v22 CLI role/);
 });
 
 test("a lost PR response requires exact unique branch/base/head readback", () => {
