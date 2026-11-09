@@ -8,12 +8,12 @@ import {
   CHIP,
   NEUTRAL_CHIP,
   SEVERITY_CHIP,
-  SCOUT_SEND_SPACING_MS,
   SEVERITY_RANK,
   STATE_CHIP,
   fill,
   localTime,
   nextScoutSendBatch,
+  runScoutSuggestionBatch,
   scoutState,
 } from "@/lib/adminScoutDisplay";
 import { adminNetworkFailure, readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
@@ -158,12 +158,12 @@ export function AdminScoutSuggestionsPanel({
       return failure;
     }
     const body = (await response.json().catch(() => ({}))) as { status?: string; amuxIdeaId?: string | null };
-    if (body.status !== "completed" && body.status !== "sent" && body.status !== "dismissed") {
+    if (body.status !== "completed" && body.status !== "sent" && body.status !== "dismissed" && body.status !== "unchanged") {
       const failure: AdminApiFailure = { message: m.failed, tone: "error", requiresReauthentication: false, approvalId: null };
       setRows((current) => ({ ...current, [suggestion.id]: { kind: "failed", failure } }));
       return failure;
     }
-    const message = body.status === "completed" ? m.completed
+    const message = body.status === "unchanged" ? m.unchanged : body.status === "completed" ? m.completed
       : body.status === "sent" ? fill(m.sent, { ideaId: body.amuxIdeaId ?? "-" }) : m.dismissed;
     setRows((current) => ({ ...current, [suggestion.id]: { kind: "done", message } }));
     setSelected((current) => {
@@ -176,19 +176,10 @@ export function AdminScoutSuggestionsPanel({
 
   const runBulk = async (action: Action) => {
     const queue = initial.open.filter((row) => selected.has(row.id) && rows[row.id]?.kind !== "done");
-    let done = 0;
-    setBulk({ kind: "running", action, done, total: queue.length });
-    for (const [index, row] of queue.entries()) {
-      if (action === "send" && index > 0) await new Promise((resolve) => setTimeout(resolve, SCOUT_SEND_SPACING_MS));
-      const failure = await act(row, action);
-      if (failure) {
-        setBulk({ kind: "finished", done, total: queue.length, failure });
-        return;
-      }
-      done += 1;
-      setBulk({ kind: "running", action, done, total: queue.length });
-    }
-    setBulk({ kind: "finished", done, total: queue.length, failure: null });
+    setBulk({ kind: "running", action, done: 0, total: queue.length });
+    const result = await runScoutSuggestionBatch(queue, action, (row) => act(row, action),
+      (done) => setBulk({ kind: "running", action, done, total: queue.length }));
+    setBulk({ kind: "finished", ...result });
   };
 
   const toggle = (ids: readonly string[], on: boolean) =>
