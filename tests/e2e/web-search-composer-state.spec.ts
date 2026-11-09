@@ -167,8 +167,8 @@ test("full support is one compact line with no 'Unsupported 0' row", { tag: "@ui
 
   await expect(chip(page)).toHaveAttribute("data-tone", "neutral");
   await expect(chip(page)).toHaveAttribute("data-unsupported-count", "0");
-  await expectChipLabel(page, { full: "Web search on", compact: "Web search" });
-  // The words "web search" appear once, not twice.
+  await expectChipLabel(page, { full: "Web search on", compact: "Web on" });
+  // The feature label appears once without a redundant readiness summary.
   await expect(chip(page)).not.toContainText("Use web search");
   await expect(page.getByTestId("web-search-readiness-summary")).toHaveCount(0);
   await expect(page.getByTestId("web-search-exception-toggle")).toHaveCount(0);
@@ -326,7 +326,7 @@ test("a Google-only selection is not blocked", { tag: "@ui-risk" }, async ({
   ).toHaveCount(0);
   await expectChipLabel(page, {
     full: "Web search on",
-    compact: "Web search",
+    compact: "Web on",
   });
 });
 

@@ -15,6 +15,7 @@ import {
 import { withDisplayCurrency } from "@/lib/billingCurrency";
 import { getPublicCreditPackCatalog } from "@/lib/creditPacks";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
+import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 
 const isDatabaseDisabledForE2e = isE2EFixtureMode;
 
@@ -32,7 +33,7 @@ export async function GET(req: Request) {
         },
       };
       return NextResponse.json(
-        await withDisplayCurrency(fallbackConfig, req),
+        { ...await withDisplayCurrency(fallbackConfig, req), appInputTokenLimit: chatUserMaxInputTokens() },
         { headers: { "Cache-Control": "no-store, max-age=0" } }
       );
     }
@@ -47,7 +48,7 @@ export async function GET(req: Request) {
       { minute: 60, day: 2_000 }
     );
     const config = await getPublicBillingConfig();
-    return NextResponse.json(await withDisplayCurrency(config, req), {
+    return NextResponse.json({ ...await withDisplayCurrency(config, req), appInputTokenLimit: chatUserMaxInputTokens() }, {
       headers: { "Cache-Control": "no-store, max-age=0" },
     });
   } catch (error) {
