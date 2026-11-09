@@ -10,16 +10,19 @@ import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
 
+type MarketingInfoLink = {
+  label: string;
+  href: string;
+  external?: boolean;
+};
+
 export type MarketingInfoSection = {
   lang?: Language;
   title: string;
   body: string;
   bullets?: string[];
-  link?: {
-    label: string;
-    href: string;
-    external?: boolean;
-  };
+  link?: MarketingInfoLink;
+  links?: MarketingInfoLink[];
 };
 
 export type MarketingInfoCopy = {
@@ -86,7 +89,9 @@ export function MarketingInfoPage({
               </div>
             ) : null}
             <div className="mt-12 grid gap-5">
-              {page.sections.map((section) => (
+              {page.sections.map((section) => {
+                const links = [...(section.link ? [section.link] : []), ...(section.links ?? [])];
+                return (
                 <article key={section.title} lang={section.lang} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
                   <h2 className="text-xl font-black">{section.title}</h2>
                   <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{section.body}</p>
@@ -100,19 +105,21 @@ export function MarketingInfoPage({
                       ))}
                     </ul>
                   )}
-                  {section.link ? (
-                    <Link
-                      href={pageHref(section.link.href)}
-                      target={section.link.external ? "_blank" : undefined}
-                      rel={section.link.external ? "noopener noreferrer" : undefined}
-                      className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
+                  {links.length > 0 ? <div className="mt-5 flex flex-wrap gap-x-5 gap-y-3">
+                    {links.map(link => <Link
+                      key={link.href}
+                      href={pageHref(link.href)}
+                      target={link.external ? "_blank" : undefined}
+                      rel={link.external ? "noopener noreferrer" : undefined}
+                      className="inline-flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
                     >
-                      {section.link.label}
+                      {link.label}
                       <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  ) : null}
+                    </Link>)}
+                  </div> : null}
                 </article>
-              ))}
+                );
+              })}
             </div>
 
             {page.cta && (
