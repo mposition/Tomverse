@@ -782,9 +782,11 @@ export function AnalyticsProvider({
 
 
   const isPluginRoute = pathname === "/plugins";
-  const readableNotice = (((noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
+  const readableNotice = ((((noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
     (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ||
-    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute)) || isPrivacyRoute;
+    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute)) || isPrivacyRoute) || (((noticePath.at(-1) === "support" || noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
+    (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ||
+    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute));
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot
