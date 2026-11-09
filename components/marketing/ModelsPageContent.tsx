@@ -195,10 +195,10 @@ export function ModelsPageContent() {
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader maxWidth="max-w-6xl" />
 
-      <section className="mx-auto max-w-6xl px-4 py-8 [overflow-wrap:anywhere] sm:px-6 sm:py-14 lg:py-20">
+      <section lang={lang} className={`mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-14 lg:py-20 ${lang === "ko" ? "break-keep break-words" : "[overflow-wrap:anywhere]"}`}>
         <div className="max-w-3xl">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
-          <h1 className="mt-4 text-3xl font-black leading-tight sm:text-6xl">{content.title}</h1>
+          <h1 className={`mt-4 font-black leading-tight ${lang === "ko" ? "max-w-[18ch] text-balance text-3xl sm:text-5xl lg:text-6xl" : "text-3xl sm:text-6xl"}`}>{content.title}</h1>
           <p className={`mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${lang === "ko" ? "hidden sm:block" : ""}`}>{content.description}</p>
           {lang === "ko" ? (
             <div className="mt-4 space-y-3 sm:hidden">
