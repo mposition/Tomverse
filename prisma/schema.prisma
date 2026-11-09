@@ -2217,6 +2217,21 @@ model PerplexityAsyncJob {
   @@index([reservationId])
 }
 
+/// Content-free operational timings; swept after seven days. No user identity or text.
+model ResponseLatencySample {
+  id        String   @id
+  source    String
+  product   String
+  mode      String
+  modelId   String?
+  provider  String?
+  outcome   String
+  timings   Json
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 model AppSetting {
   key       String   @id
   value     String

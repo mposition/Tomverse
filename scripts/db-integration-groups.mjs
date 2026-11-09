@@ -100,7 +100,7 @@ const LANE_RULES = [
   // finance ops, digests, Auto router optimizer), moved on 2026-10-19.
   [
     "operations",
-    /^(qa-release-|billing-finance-ops-|agent-digest-|auto-router-optimizer|chat-refiner-initial-auto-release)/,
+    /^(qa-release-|billing-finance-ops-|agent-digest-|auto-router-optimizer|chat-refiner-initial-auto-release|response-latency)/,
   ],
   // The remaining agents and the review machinery around them: marketing,
   // Prompt Refiner shadow runs, and AI Review telemetry and feedback. Below

@@ -84,6 +84,7 @@ const prismaStub = {
   // failed step rather than a crash — so the run still finishes and the two
   // tests that read `failedSteps` are the ones that notice.
   comparisonReviewRun: { deleteMany: async () => ({ count: 31 }) },
+  responseLatencySample: { deleteMany: async () => ({ count: 35 }) },
   providerErrorEvent: { deleteMany: async () => ({ count: 6 }) },
   productAnalyticsEvent: { deleteMany: async () => ({ count: 7 }) },
   notificationDelivery: { deleteMany: async () => ({ count: 8 }) },
