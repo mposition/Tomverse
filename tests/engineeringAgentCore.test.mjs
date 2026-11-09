@@ -7,6 +7,7 @@ import test from "node:test";
 
 import {
   AMUX_SETTLEMENT_FOR_OUTCOME,
+  OWNER_QUEUE_LIMITS,
   OWNER_QUEUE_TOTAL,
   PUBLISH_STATES,
   PUBLISH_TERMINAL_STATES,
@@ -478,40 +479,19 @@ test("shadow claims but never publishes; a freeze stops claims and publishing, n
 
 /* Owner queues --------------------------------------------------------- */
 
-test("the owner queue total is five", () => {
-  assert.equal(OWNER_QUEUE_TOTAL, 5);
+test("the owner queues hold eight pull requests and eight decisions", () => {
+  // Owner decision 2026-11-09.
+  assert.deepEqual({ ...OWNER_QUEUE_LIMITS }, { pr: 8, decision: 8 });
+  assert.equal(OWNER_QUEUE_TOTAL, 16);
 });
 
-test("either full queue stops the claim, and the first T1 fortnight allows one PR", () => {
-  const now = at("2026-10-20T00:00:00Z");
-  assert.equal(
-    decideOwnerQueues({ openPrBindings: 1, pendingDecisions: 0, t1StartedAt: null, now })
-      .claimAllowed,
-    true,
-  );
-  assert.equal(
-    decideOwnerQueues({
-      openPrBindings: 1,
-      pendingDecisions: 0,
-      t1StartedAt: new Date(now.getTime() - 3 * DAY),
-      now,
-    }).claimAllowed,
-    false,
-  );
-  assert.equal(
-    decideOwnerQueues({
-      openPrBindings: 1,
-      pendingDecisions: 0,
-      t1StartedAt: new Date(now.getTime() - 14 * DAY),
-      now,
-    }).claimAllowed,
-    true,
-  );
-  assert.equal(
-    decideOwnerQueues({ openPrBindings: 0, pendingDecisions: 3, t1StartedAt: null, now })
-      .claimAllowed,
-    false,
-  );
+test("either full queue stops the claim at its limit and not before", () => {
+  const verdict = (openPrBindings, pendingDecisions) =>
+    decideOwnerQueues({ openPrBindings, pendingDecisions });
+  assert.deepEqual(verdict(7, 7), { prFull: false, decisionFull: false, claimAllowed: true });
+  assert.deepEqual(verdict(8, 0), { prFull: true, decisionFull: false, claimAllowed: false });
+  assert.deepEqual(verdict(0, 8), { prFull: false, decisionFull: true, claimAllowed: false });
+  assert.deepEqual(verdict(9, 9), { prFull: true, decisionFull: true, claimAllowed: false });
 });
 
 /* Halt and circuit ----------------------------------------------------- */
