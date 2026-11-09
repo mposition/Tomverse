@@ -12,6 +12,11 @@ import {
   type AmuxOwnerReviewController,
 } from "@/components/admin/AdminAmuxRoutingPanel";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import {
+  AmuxLegacyCardPanel,
+  useAmuxLegacyCardRead,
+  type AmuxLegacyCardRead,
+} from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxTaskQuestionSection } from "@/components/admin/AmuxWorkerQuestion";
 import { AdminChannelIcon } from "@/components/admin/ui/AdminChannelIcon";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
@@ -93,7 +98,7 @@ export const useAmuxOwnerQueueElapsed = (generatedAt: string) => {
  */
 export function AmuxOwnerQueueDecision({
   item, controller, canInspectCards, index, total, generatedAt, navLocked, advance,
-  onAdvanceChange, onPrevious, onNext, onAnswered,
+  onAdvanceChange, onPrevious, onNext, onAnswered, initialLegacyCard = null,
 }: {
   item: AmuxOwnerQueueItem;
   controller: AmuxOwnerReviewController;
@@ -109,6 +114,8 @@ export function AmuxOwnerQueueDecision({
   onPrevious: (() => void) | null;
   onNext: (() => void) | null;
   onAnswered: () => void;
+  /** The legacy panel shown before this card's own read lands (tests). */
+  initialLegacyCard?: AmuxLegacyCardRead | null;
 }) {
   const copy = useAdminMessages(adminAmuxOwnerQueueMessages);
   const execution = useAdminMessages(adminAmuxExecutionMessages);
@@ -133,11 +140,20 @@ export function AmuxOwnerQueueDecision({
   const classification = summary === null ? null
     : classifyAmuxOwnerQueueItem(summary, reviewMatches ? review : null);
   const outcomes = reviewMatches ? visibleAmuxOwnerReviewOutcomes(review) : [];
+  // A card no review decision opens on (a legacy WORKBOARD card or a pre-v22
+  // Task) is remade or closed here, from the card detail read the execution
+  // board uses, so the owner does not open the full card first. Owner only.
+  const legacyRead = useAmuxLegacyCardRead(item.taskId,
+    canInspectCards && group !== "question" && summary !== null, initialLegacyCard);
+  const legacyCard = legacyRead?.view ? { revision: legacyRead.revision, view: legacyRead.view } : null;
+  // Once the review is read, the legacy panel stands in for a decision only when none is open.
+  const legacyOnly = legacyCard !== null && outcomes.length === 0;
   // The words follow the choices actually shown, not the PR alone: a verified
   // non-code Task is approved without one, and a spent budget, an unverified
   // result or pending publication leaves no retry.
   const noPrWhy = outcomes.includes("approve") ? copy.why.reviewNoPrApprovable
-    : outcomes.includes("retry") ? copy.why.reviewNoPr : copy.why.reviewNoPrBlockOnly;
+    : outcomes.includes("retry") ? copy.why.reviewNoPr
+    : outcomes.includes("block") ? copy.why.reviewNoPrBlockOnly : copy.why.reviewNoPrNone;
   // A blocked card's escalation keeps only execution_blocked; the attempt's
   // own reason, once the review is read, says what actually stopped it.
   const blockedAttemptReason = reviewMatches && review.task.status === "blocked" &&
@@ -147,13 +163,14 @@ export function AmuxOwnerQueueDecision({
     Object.hasOwn(copy.why.byAttemptReason, blockedAttemptReason) ?
     copy.why.byAttemptReason[blockedAttemptReason] : null;
   const why = group === "question" ? copy.why.question
+    : legacyOnly ? copy.why.legacyCard
     : blockedWhy !== null ? blockedWhy
     : reviewPr === null ? noPrWhy
     : typeof reviewPr === "number" ? copy.why.reviewWithPr(reviewPr)
     : (item.attentionReason ? copy.why.byReason[item.attentionReason] : undefined) ?? copy.why[group];
   const reportExcerpt = reviewMatches && (reviewPr === null || blockedAttemptReason === "reported_result")
     ? workerReportExcerpt(review.review_report?.worker_report ?? null) : null;
-  const showRecoverySteps = group !== "question" && summary !== null &&
+  const showRecoverySteps = group !== "question" && summary !== null && !legacyOnly &&
     (group === "recover" || group === "read" || classification === "technical_recovery");
   const decisionOpen = classification === "owner_decision";
   const waiting = elapsed(item.waitingSince);
@@ -216,6 +233,15 @@ export function AmuxOwnerQueueDecision({
         ) : null}
       </div>
 
+      {legacyCard !== null ? (
+        <AmuxLegacyCardPanel key={item.taskId + ":" + legacyCard.revision} taskId={item.taskId}
+          revision={legacyCard.revision} view={legacyCard.view} canAct={canInspectCards}
+          reauthReturnPath={item.escalationId === null ? undefined
+            : `/admin/amux-execution?focusEscalation=${encodeURIComponent(item.escalationId)}`}
+          // A closed card leaves the queue; a recreate that did not close keeps it here with its message.
+          onChanged={(closed) => { if (closed) onAnswered(); }} />
+      ) : null}
+
       {group === "question" ? (
         <>
           {/* Reads and answers through the existing routes; only the owner may. */}
@@ -269,7 +295,9 @@ export function AmuxOwnerQueueDecision({
                 <span className="ml-2 text-xs font-normal text-zinc-400">{copy.detail.choicesHint}</span>
               </p>
               {outcomes.length === 0 ? (
-                <p className="mt-2 text-sm text-zinc-400">{copy.detail.choicesNone}</p>
+                <p className="mt-2 text-sm text-zinc-400" data-testid="amux-owner-queue-choices-none">
+                  {legacyOnly ? copy.detail.choicesLegacy : copy.detail.choicesNone}
+                </p>
               ) : (
                 <>
                   <ul className="mt-2 flex flex-wrap gap-2">
