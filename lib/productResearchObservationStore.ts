@@ -24,6 +24,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { isCheckViolationDatabaseError } from "@/lib/databaseError";
 import { prisma } from "@/lib/prisma";
 import { OBSERVATION_RETENTION_DAYS } from "@/lib/productResearchObservationCore.mjs";
 
@@ -64,10 +65,16 @@ const isUniqueViolation = (error: unknown) =>
   typeof (error as { code?: unknown })?.code === "string" &&
   (error as { code: string }).code === "P2002";
 
-/** A CHECK or a trigger refused the row: the window, the shape, a value. */
+/**
+ * A CHECK or a trigger refused the row: the window, the shape, a value.
+ *
+ * The window trigger raises `check_violation`, which the pg adapter does not
+ * map, so in production it arrives as P2039 carrying SQLSTATE 23514 -- not
+ * P2004. Read by code alone, that refusal answered 500 instead of 409.
+ */
 const isConstraintViolation = (error: unknown) =>
-  typeof (error as { code?: unknown })?.code === "string" &&
-  ["P2004", "P2010"].includes((error as { code: string }).code);
+  isCheckViolationDatabaseError(error) ||
+  (typeof (error as { code?: unknown })?.code === "string" && (error as { code: string }).code === "P2010");
 
 /**
  * Records one slot.
