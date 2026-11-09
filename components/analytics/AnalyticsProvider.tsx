@@ -31,6 +31,7 @@ import {
 import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { CHAT_WORKSPACE_PATH, REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+import { marketingLocaleFor } from "@/lib/marketingLocale";
 
 const isChatWorkspacePath = (pathname: string | null) =>
   pathname === CHAT_WORKSPACE_PATH || pathname === REVIEW_WORKSPACE_PATH;
@@ -774,13 +775,16 @@ export function AnalyticsProvider({
   // Everywhere else (and before a
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
+  const noticePath = pathname?.split("/").filter(Boolean) ?? [];
 
 
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
 
 
   const isPluginRoute = pathname === "/plugins";
-  const readableNotice = (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute);
+  const readableNotice = (noticePath.at(-1) === "pricing" &&
+    (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ||
+    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute);
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot
