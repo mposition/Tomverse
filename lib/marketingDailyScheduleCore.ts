@@ -2,11 +2,12 @@
  * One approved post a day per account (owner request 2026-11-08).
  *
  * The console's "publish all now" gives every approved post the same time, so
- * the publisher picks them up run after run and defers all but one per account
- * with `daily_cap_reached`: nobody can tell what goes out when. This plans the
- * same posts one day apart instead. It only chooses times. Each time is still
- * sent through the post's own schedule route, with its own checks and audit
- * entry, and the publisher's caps, kill switch and digest checks are unchanged.
+ * nobody can tell what goes out when. This plans the same posts one day apart
+ * instead. The policy has no posting cap since 2026-11-08; one a day is this
+ * plan's own pacing, and an account cap an operator set is still kept. It only
+ * chooses times. Each time is still sent through the post's own schedule
+ * route, with its own checks and audit entry, and the publisher's account
+ * caps, kill switch and digest checks are unchanged.
  *
  * Pure and deterministic: no clock, no network. The caller passes `now`.
  *
@@ -54,10 +55,11 @@ export type DailySchedulePost = {
   readonly accountLocale: string;
   readonly approvedAt: string | null;
   readonly approvalExpiresAt: string | null;
-  /** The account's daily cap in force; null for an account the publisher does not post to. */
-  readonly dailyCap: number | null;
-  /** The account's rolling seven-day cap in force; null as for `dailyCap`. */
-  readonly weeklyCap: number | null;
+  /**
+   * The account's caps in force (`marketingChannelCaps`): null for an account
+   * the publisher does not post to; a null cap inside is no cap.
+   */
+  readonly caps: { readonly daily: number | null; readonly weekly: number | null } | null;
 };
 
 /**
@@ -272,7 +274,10 @@ export const offHourLocalTime = (slot: DailyScheduleSlot, timeZone: string): str
   return `${pad(local.hour)}:${pad(local.minute)}`;
 };
 
-/** The approved posts the publisher would carry: not hand-posted, and on an account it posts to. */
+/**
+ * The approved posts the publisher would carry: not hand-posted, on an account
+ * it posts to, and not one an operator capped at zero.
+ */
 export const dailySchedulablePosts = (
   posts: readonly DailySchedulePost[]
 ): DailySchedulePost[] =>
@@ -280,10 +285,9 @@ export const dailySchedulablePosts = (
     (post) =>
       post.status === "approved" &&
       post.provider !== "manual" &&
-      typeof post.dailyCap === "number" &&
-      post.dailyCap > 0 &&
-      typeof post.weeklyCap === "number" &&
-      post.weeklyCap > 0
+      post.caps !== null &&
+      post.caps.daily !== 0 &&
+      post.caps.weekly !== 0
   );
 
 /**
@@ -318,7 +322,12 @@ export function planDailyMarketingSchedule(input: {
 
   const accounts: DailyScheduleAccountPlan[] = [];
   for (const [channelId, posts] of byAccount) {
-    const caps: Caps = { daily: posts[0].dailyCap as number, weekly: posts[0].weeklyCap as number };
+    // No cap counts as an endless one: every comparison below then has room.
+    const accountCaps = posts[0].caps;
+    const caps: Caps = {
+      daily: accountCaps?.daily ?? Number.POSITIVE_INFINITY,
+      weekly: accountCaps?.weekly ?? Number.POSITIVE_INFINITY,
+    };
     const timeZone = marketingTimeZoneFor(posts[0].accountLocale);
     const counts = takenDays(
       input.taken.filter((slot) => slot.channelId === channelId),
