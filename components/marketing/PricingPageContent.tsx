@@ -938,6 +938,7 @@ export function PricingPageContent() {
   // static HTML intact and cannot produce a hydration mismatch, and it is the
   // pattern UpgradeCtaLink already uses for the same reason.
   const [pageIntent, setPageIntent] = useState<PurchaseIntent | null>(null);
+  const [subscriptionInterval, setSubscriptionInterval] = useState<"monthly" | "annual">("monthly");
   const [billingOutcome, setBillingOutcome] = useState<BillingOutcome | null>(
     null
   );
@@ -1029,6 +1030,7 @@ export function PricingPageContent() {
     // the shape the repo's React Compiler lint rejects.
     queueMicrotask(() => {
       setPageIntent(intent);
+      if (intent.billingInterval) setSubscriptionInterval(intent.billingInterval);
       if (outcome) setBillingOutcome(outcome);
     });
     if (!outcome) return;
@@ -1221,13 +1223,14 @@ export function PricingPageContent() {
           lang,
           intent: "subscription",
           targetPlan,
+          billingInterval: lang === "ko" ? subscriptionInterval : undefined,
           trigger: pageIntent?.trigger,
           ctaLocation: `pricing_plan_card_${targetPlan}`,
           utm: pageIntent?.utm,
           anchor: PRICING_PLANS_ANCHOR,
         })
       ),
-    [lang, pageIntent]
+    [lang, pageIntent, subscriptionInterval]
   );
 
   const trackCreditPackCtaClick = useCallback(
@@ -1402,6 +1405,19 @@ export function PricingPageContent() {
           </p>
         ) : null}
 
+        {lang === "ko" && (account.status === "unauthenticated" || (account.status === "authenticated" && !account.hasActiveSubscription)) ? (
+          <fieldset className="mt-10 rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
+            <legend className="px-2 text-sm font-bold">신규 구독 결제 주기</legend>
+            <div className="flex flex-wrap gap-4">
+              {(["monthly", "annual"] as const).map((interval) => (
+                <label key={interval} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-bold">
+                  <input type="radio" name="subscription-billing-interval" value={interval} checked={subscriptionInterval === interval} onChange={() => setSubscriptionInterval(interval)} className="h-4 w-4 accent-blue-600" />
+                  {interval === "annual" ? "연간 결제" : "월간 결제"}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
         <div id={PRICING_PLANS_ANCHOR} className="mt-14 grid scroll-mt-24 gap-5 lg:grid-cols-3">
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
@@ -1803,12 +1819,19 @@ export function PricingPageContent() {
                 ) : (
                   <UpgradeInterestButton
                     plan={plan.name === "Max" ? "Max" : "Pro"}
+                    initialBillingInterval={lang === "ko" ? subscriptionInterval : undefined}
                     trigger={pageIntent?.trigger || undefined}
                     className={`inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold transition ${planCtaSurface(plan.highlighted)}`}
                   >
                     {plan.cta}
                   </UpgradeInterestButton>
                 )}
+                {lang === "ko" && planId !== "free" && (ctaState === "signed_out" || ctaState === "upgrade") ? (
+                  <p data-testid={`pricing-selected-billing-${planId}`} className="mt-3 text-sm font-bold leading-6">
+                    {subscriptionInterval === "annual" ? `연 ${annualPrice} 일괄 결제` : `${salePrice ? "첫 달 " : "월 "}${salePrice || displayPrice} 결제`}
+                    <span className="mt-1 block font-normal">할인 적용과 최종 결제 조건은 다음 확인창에서 확인하세요.</span>
+                  </p>
+                ) : null}
                 {lang === "en" && planId !== "free" && (ctaState === "signed_out" || ctaState === "upgrade") ? (
                   <p className="mt-2 text-sm font-semibold leading-6" data-testid={`pricing-billing-choice-${planId}`}>
                     Choose monthly or annual billing in the next step{ctaState === "signed_out" ? " after signing in" : ""}, before payment.
