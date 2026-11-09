@@ -169,6 +169,7 @@ const copy: Record<Language, SupportCopy> = {
       }
     ],
     "formTitle": "지원팀에 문의",
+    "formJumpLabel": "문의 작성하기",
     "formDescription": "문의 내용을 보내면 지원팀이 확인합니다. 이메일 상태 안내를 선택하면 접수 번호와 진행 안내를 해당 주소로 받을 수 있습니다.",
     "attachmentHelp": "이 양식에는 파일을 첨부할 수 없습니다. 스크린샷이 필요하면 지원 이메일에 첨부해 보내주세요.",
     "typeLabel": "문의 유형",
@@ -771,7 +772,7 @@ export function SupportPageContent() {
             <p id="support-message-example" className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{page.messageExample}</p>
           </div>
 
-          <form aria-labelledby={page.formJumpLabel ? "support-request-title" : undefined} onSubmit={submit} className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5 shadow-2xl shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <form id="support-request-form" aria-labelledby={page.formJumpLabel ? "support-request-title" : undefined} onSubmit={submit} className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5 shadow-2xl shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-900/50">
             {page.formJumpLabel && <h2 id="support-request-title" tabIndex={-1} className="scroll-mt-28 text-2xl font-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">{page.formTitle}</h2>}
             <label className="mt-6 block text-sm font-bold">
               {page.typeLabel}
