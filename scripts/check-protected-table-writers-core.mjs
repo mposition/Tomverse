@@ -2478,7 +2478,7 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentRun",
-    tableMentions: 6,
+    tableMentions: 5,
     writeVerbs: 18,
     reason:
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, including a read-only v22 run lock after its AMUX attempt and card, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
@@ -2594,6 +2594,70 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 76,
     reason:
       "The migration creates EngineeringAgentRequest and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20261109200000_engineering_agent_owner_queue_run_guard/migration.sql",
+    table: "EngineeringAgentRun",
+    tableMentions: 15,
+    writeVerbs: 2,
+    reason:
+      "This migration only replaces the run guard's body (owner decision 2026-11-09): the owner queue caps become 8 and 8 and the first T1 window is removed. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons, and the exact SQL counts remain pinned. Its EngineeringAgentRun mentions are the guarded table itself, its messages, and the active-run count.",
+  },
+  {
+    path: "prisma/migrations/20261109200000_engineering_agent_owner_queue_run_guard/migration.sql",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "This migration only replaces the run guard's body (owner decision 2026-11-09): the owner queue caps become 8 and 8 and the first T1 window is removed. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons, and the exact SQL counts remain pinned. Its EngineeringAgentWorkItem mentions count unsettled publish items and open decisions.",
+  },
+  {
+    path: "prisma/migrations/20261109200000_engineering_agent_owner_queue_run_guard/migration.sql",
+    table: "EngineeringAgentBinding",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "This migration only replaces the run guard's body (owner decision 2026-11-09): the owner queue caps become 8 and 8 and the first T1 window is removed. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons, and the exact SQL counts remain pinned. Its EngineeringAgentBinding mention counts the open pull requests the queue holds.",
+  },
+  {
+    path: "prisma/migrations/20261109200100_engineering_agent_owner_queue_work_item_guard/migration.sql",
+    table: "EngineeringAgentRun",
+    tableMentions: 2,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-11-09): a promoted v22 draft's publish item is counted against the pull request cap of 8, with no first T1 window. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentRun mentions read the producing run, locked, and count active runs.",
+  },
+  {
+    path: "prisma/migrations/20261109200100_engineering_agent_owner_queue_work_item_guard/migration.sql",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 27,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-11-09): a promoted v22 draft's publish item is counted against the pull request cap of 8, with no first T1 window. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentWorkItem mentions are the guarded table itself: the promoted draft and the run's products are read from it.",
+  },
+  {
+    path: "prisma/migrations/20261109200100_engineering_agent_owner_queue_work_item_guard/migration.sql",
+    table: "EngineeringAgentApproval",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-11-09): a promoted v22 draft's publish item is counted against the pull request cap of 8, with no first T1 window. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentApproval mention is the unchanged T2 decision read.",
+  },
+  {
+    path: "prisma/migrations/20261109200100_engineering_agent_owner_queue_work_item_guard/migration.sql",
+    table: "EngineeringAgentCapability",
+    tableMentions: 2,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-11-09): a promoted v22 draft's publish item is counted against the pull request cap of 8, with no first T1 window. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentCapability mentions are the unchanged consumed-capability reads.",
+  },
+  {
+    path: "prisma/migrations/20261109200100_engineering_agent_owner_queue_work_item_guard/migration.sql",
+    table: "EngineeringAgentBinding",
+    tableMentions: 1,
+    writeVerbs: 6,
+    reason:
+      "This migration only replaces the work item guard's body (owner decision 2026-11-09): a promoted v22 draft's publish item is counted against the pull request cap of 8, with no first T1 window. It writes no row and creates no table or trigger; its write verbs are the guard's TG_OP comparisons and the words in its comments, and the exact SQL counts remain pinned. Its EngineeringAgentBinding mention counts the open pull requests the queue holds.",
   },
   {
     path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
@@ -3868,6 +3932,18 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 21,
     reason:
       "The engineering agent triggers read their sibling tables, AMUX and AppSetting's mode row, all with EXECUTE over a name built from TG_TABLE_SCHEMA, for the reason the permission ledger gives: an unqualified name resolves through the session search path, where a temporary table of the same name answers for the real one, and a hard-coded public. is wrong under ?schema=. Every function pins search_path to pg_catalog, pg_temp. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261109200000_engineering_agent_owner_queue_run_guard/migration.sql",
+    count: 3,
+    reason:
+      "The replaced run guard keeps the original's three reads: the attempt and its card, the mode and freeze settings, and the owner queue counts (open pull requests, open decisions, active runs; the first T1 run is no longer read). All are EXECUTE over a TG_TABLE_SCHEMA-qualified constant name quoted with %I, because the function pins search_path to pg_catalog, pg_temp; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261109200100_engineering_agent_owner_queue_work_item_guard/migration.sql",
+    count: 7,
+    reason:
+      "The replaced work item guard keeps the previous version's reads; the pull request queue read counts open pull requests and active runs and no longer reads the first T1 run. All are EXECUTE over a TG_TABLE_SCHEMA-qualified constant name quoted with %I, because the function pins search_path to pg_catalog, pg_temp; every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql",
