@@ -35,7 +35,7 @@ const LEGACY_CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 type CardFacts = AmuxLegacyCardFacts & {
   id: string; displayKey: string | null; revision: number; archivedAt: Date | null;
-  activeDelivery: boolean; liveAttempt: boolean;
+  activeDelivery: boolean; liveAttempt: boolean; openEscalation: boolean;
 };
 
 /**
@@ -50,6 +50,8 @@ async function readCardFacts(client: Prisma.TransactionClient | typeof prisma, t
           AND d."status" IN ('queued', 'leased')) AS "activeDelivery",
         EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
           AND a."endedAt" IS NULL) AS "liveAttempt",
+        EXISTS (SELECT 1 FROM "AmuxHumanEscalation" e WHERE e."taskId" = w."id"
+          AND e."status" IN ('open', 'acknowledged')) AS "openEscalation",
         (SELECT json_build_object('endedAt', a."endedAt", 'outcome', a."outcome", 'reason', a."reason")
           FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
           ORDER BY a."taskRevision" DESC, a."startedAt" DESC, a."id" DESC LIMIT 1) AS "lastAttempt"
@@ -62,6 +64,8 @@ async function readCardFacts(client: Prisma.TransactionClient | typeof prisma, t
           AND d."status" IN ('queued', 'leased')) AS "activeDelivery",
         EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
           AND a."endedAt" IS NULL) AS "liveAttempt",
+        EXISTS (SELECT 1 FROM "AmuxHumanEscalation" e WHERE e."taskId" = w."id"
+          AND e."status" IN ('open', 'acknowledged')) AS "openEscalation",
         (SELECT json_build_object('endedAt', a."endedAt", 'outcome', a."outcome", 'reason', a."reason")
           FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
           ORDER BY a."taskRevision" DESC, a."startedAt" DESC, a."id" DESC LIMIT 1) AS "lastAttempt"
@@ -77,6 +81,8 @@ export type AmuxLegacyCardView = {
    * body this view was built from and its facts, so nothing is saved from it.
    */
   closeRefusal: Exclude<AmuxLegacyCardCloseRefusal, "not_legacy"> | null;
+  /** Archived already: a close only resolves its open escalation. */
+  alreadyArchived: boolean;
   /** The idea a recreate would save, or why it would refuse. */
   idea: { state: "ready"; title: string; text: string; truncated: boolean } |
     { state: "refused"; code: string };
@@ -90,7 +96,7 @@ export type AmuxLegacyCardView = {
  */
 export async function readAmuxLegacyCardView(card: {
   id: string; revision: number; displayKey: string | null; sourceSystem: string | null;
-  body: string | null; brief: string | null;
+  title: string | null; body: string | null; brief: string | null;
 }): Promise<AmuxLegacyCardView | null> {
   if (card.sourceSystem !== "admin-idea-v4" && card.sourceSystem !== "tomverse_private_workboard") return null;
   const facts = await readCardFacts(prisma, card.id, false);
@@ -99,7 +105,8 @@ export async function readAmuxLegacyCardView(card: {
   const refusal = amuxLegacyCardCloseRefusal(facts, card.revision);
   return { kind,
     closeRefusal: refusal === "not_legacy" ? null : refusal,
-    idea: legacyIdea({ id: card.id, displayKey: card.displayKey, description: card.body,
+    alreadyArchived: facts.archivedAt !== null,
+    idea: legacyIdea({ id: card.id, displayKey: card.displayKey, title: card.title, description: card.body,
       executionBrief: card.brief, kind, taskRole: facts.taskRole }) };
 }
 
@@ -114,7 +121,7 @@ function legacyIdea(card: Parameters<typeof amuxLegacyCardIdeaText>[0]): AmuxLeg
 }
 
 export type AmuxLegacyCardCloseResult =
-  | { outcome: "closed"; archivedAt: string; escalationsResolved: number; auditId: string }
+  | { outcome: "closed"; archivedAt: string; alreadyArchived: boolean; escalationsResolved: number; auditId: string }
   | { outcome: "not_found" }
   | { outcome: "refused"; reason: AmuxLegacyCardCloseRefusal };
 
@@ -150,29 +157,38 @@ export async function closeAmuxLegacyCardForOwner(input: {
     if (!card) return { outcome: "not_found" as const };
     const refusal = amuxLegacyCardCloseRefusal(card, input.revision);
     if (refusal) return { outcome: "refused" as const, reason: refusal };
-    const moved = await tx.amuxWorkItem.updateMany({
-      where: { id: card.id, revision: card.revision, archivedAt: null },
-      data: { archivedAt: now, revision: { increment: 1 } },
-    });
-    if (moved.count !== 1) return { outcome: "refused" as const, reason: "changed" as const };
+    // A card archived elsewhere keeps its archive and revision; only its open
+    // escalation is resolved (an archived card is no longer in the owner queue).
+    const alreadyArchived = card.archivedAt !== null;
+    if (!alreadyArchived) {
+      const moved = await tx.amuxWorkItem.updateMany({
+        where: { id: card.id, revision: card.revision, archivedAt: null },
+        data: { archivedAt: now, revision: { increment: 1 } },
+      });
+      if (moved.count !== 1) return { outcome: "refused" as const, reason: "changed" as const };
+    }
     const kind = amuxLegacyCardKind(card)!;
     const label = kind === "workboard" ? "a legacy WORKBOARD card" : "a pre-v22 Task with no recovery path";
+    const closedAs = alreadyArchived ? `Resolved on ${label} that was already archived` : `Closed as ${label}`;
     const resolution = input.ideaId ?
-      `Closed as ${label}; recreated as AMUX idea ${input.ideaId}.` :
-      `Closed as ${label} by the owner.`;
+      `${closedAs}; recreated as AMUX idea ${input.ideaId}.` :
+      `${closedAs} by the owner.`;
     const resolved = await tx.amuxHumanEscalation.updateMany({
       where: { taskId: card.id, status: { in: ["open", "acknowledged"] } },
       data: { status: "resolved", resolutionOutcome: "block", resolution,
         resolvedById: actorUserId, resolvedByEmail: input.session.user?.email ?? null, resolvedAt: now },
     });
-    const archivedAt = now.toISOString();
+    // None left to resolve: another path resolved it first, so nothing is written.
+    if (alreadyArchived && resolved.count === 0) return { outcome: "refused" as const, reason: "already_closed" as const };
+    const archivedAt = (card.archivedAt ?? now).toISOString();
     const auditId = await writeAdminAuditLog({ tx, session: input.session, request: input.request,
       action: "amux.legacy_card.closed", targetType: "AmuxWorkItem", targetId: card.id,
-      summary: input.ideaId ? `Closed ${label} after recreating it as a new AMUX idea.` : `Closed ${label}.`,
+      summary: `${alreadyArchived ? `Resolved the open escalation of archived ${label.replace(/^an? /, "")}` :
+        `Closed ${label}`}${input.ideaId ? " after recreating it as a new AMUX idea" : ""}.`,
       metadata: { kind, displayKey: card.displayKey, status: card.status, revision: card.revision,
-        archivedAt, escalationsResolved: resolved.count,
+        archivedAt, alreadyArchived, escalationsResolved: resolved.count,
         ...(input.ideaId ? { recreatedIdeaId: input.ideaId } : {}) } });
-    return { outcome: "closed" as const, archivedAt, escalationsResolved: resolved.count, auditId };
+    return { outcome: "closed" as const, archivedAt, alreadyArchived, escalationsResolved: resolved.count, auditId };
   }, { maxWait: 5_000, timeout: 15_000 }).catch((error: unknown) => {
     if (amuxDatabaseDiagnosticCode(error) === "55P03") throw new AmuxLegacyCardOwnerError("busy");
     throw error;

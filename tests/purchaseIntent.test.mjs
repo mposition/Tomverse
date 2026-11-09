@@ -49,6 +49,17 @@ test("a credit-pack href keeps the pack the visitor actually clicked", () => {
   assert.equal(url.hash, "#credit-packs");
 });
 
+test("subscription billing choice survives sign-in and rejects unknown intervals", () => {
+  for (const billingInterval of ["monthly", "annual"]) {
+    const href = buildPricingIntentHref({ lang: "ko", intent: "subscription", targetPlan: "pro", billingInterval, anchor: "plans" });
+    const signIn = new URL(buildPurchaseSignInHref(href), "https://tomverse.app");
+    const callback = new URL(signIn.searchParams.get("callbackUrl"), "https://tomverse.app");
+    assert.equal(parsePurchaseIntent(callback.search).billingInterval, billingInterval);
+  }
+  assert.equal(parsePurchaseIntent("?intent=subscription&billingInterval=weekly").billingInterval, undefined);
+  assert.equal(parsePurchaseIntent("?intent=credit_pack&billingInterval=annual").billingInterval, undefined);
+});
+
 test("an unrecognised plan, pack, or anchor is dropped rather than echoed", () => {
   assert.equal(
     buildPricingIntentHref({
