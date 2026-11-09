@@ -8,7 +8,7 @@ import test from "node:test";
 import { amuxCliPricedModelId, estimateAmuxCliApiCost, makeAmuxCliUsageReceipt } from
   "../lib/amux/cliUsageLedgerCore.ts";
 import { AmuxV22ChannelAuthRefused, amuxV22ChannelArgs, amuxV22ChannelEnv,
-  amuxV22ChannelPreflight, createAmuxV22ChannelRunHome,
+  amuxV22ChannelPreflight, amuxV22OutputName, amuxV22OutputShape, createAmuxV22ChannelRunHome,
   parseAmuxV22ChannelOutput } from
   "../lib/amux/v22ChannelRun.mjs";
 import { v22ExecutionReceiptVerified, v22ExecutionSourceForProvider } from
@@ -331,4 +331,29 @@ test("a sign-in the run must not use is refused before any run home is made", as
   await refused("openai", "auth.json", "not json");
   await refused("github-copilot", "auth-token", "not-a-token");
   assert.deepEqual(await readdir(home), []);
+});
+
+test("a refused stream names why, and its shape keeps only event names", () => {
+  const reason = (provider, text, role = "implement") =>
+    parseAmuxV22ChannelOutput(provider, text, { exitCode: 0, role }).reason;
+  assert.equal(reason("openai", ""), "empty");
+  assert.equal(reason("openai", "not json\n"), "non_object_line");
+  assert.equal(reason("openai", jsonl({ type: "turn.started" })), "no_terminal_event");
+  assert.equal(reason("openai", jsonl({ type: "item.completed", item: { type: "web_search" } },
+    { type: "turn.completed", usage: {} })), "item:web_search");
+  assert.equal(reason("openai", jsonl({ type: "item.started", item: { type: "a b; rm" } })), "item:?");
+  assert.equal(reason("github-copilot", jsonl({ type: "tool.execution_start",
+    data: { toolName: "web_fetch" } })), "tool:web_fetch");
+  assert.equal(reason("cursor", jsonl({ type: "assistant", message: { content: [] } })), "no_result");
+  assert.equal(reason("other", jsonl({ type: "x" })), "provider");
+  for (const bad of ["", "has space", "x".repeat(49), "sk-proj/abc", 7, null]) assert.equal(amuxV22OutputName(bad), "?");
+  assert.equal(amuxV22OutputName("item.completed"), "item.completed");
+  const long = Array.from({ length: 70 }, (_, i) => JSON.stringify({ type: i % 2 ? "a" : "b" })).join("\n");
+  const shape = amuxV22OutputShape(`${long}\nnot json\n{"type":"x y","item":{"type":"secret text"}}\n`);
+  assert.equal(shape.split(" ").length, 61);
+  assert.match(shape, /^b a b a .* a \+12$/);
+  // The names past the cap (a non-JSON line, a type with text in it) never show.
+  assert.ok(!shape.includes("secret") && !shape.includes("x y"));
+  assert.equal(amuxV22OutputShape('{"type":"item.completed","item":{"type":"agent_message","text":"secret"}}\n["x"]\nnope'),
+    "item.completed:agent_message non_json*2");
 });

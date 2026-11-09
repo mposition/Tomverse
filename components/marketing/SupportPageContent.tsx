@@ -45,7 +45,9 @@ type SupportCopy = {
   noPhoneValue: string;
   cards: { title: string; body: string; bullets: string[] }[];
   formTitle: string;
+  formJumpLabel?: string;
   formDescription: string;
+  attachmentHelp?: string;
   typeLabel: string;
   types: Record<"support" | "bug" | "billing" | "feature" | "other", string>;
   emailInput: string;
@@ -98,12 +100,14 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "Tell us the page or device",
           "Describe expected behavior",
-          "Share screenshots when helpful"
+          "Send screenshot inquiries to support@tomverse.app"
         ]
       }
     ],
     "formTitle": "Contact support",
+    "formJumpLabel": "Contact support",
     "formDescription": "Your request goes to the support team. If you choose email updates, the receipt reference and progress updates go to that address.",
+    "attachmentHelp": "This form cannot attach files. If your inquiry needs a screenshot, attach it to an email to our support address.",
     "typeLabel": "Request type",
     "types": {
       "support": "General support",
@@ -160,12 +164,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "페이지 또는 기기를 알려주세요",
           "기대한 동작을 설명해주세요",
-          "필요하면 스크린샷을 함께 보내주세요"
+          "스크린샷이 필요한 문의는 지원 이메일로 보내주세요"
         ]
       }
     ],
     "formTitle": "지원팀에 문의",
     "formDescription": "문의 내용을 보내면 지원팀이 확인합니다. 이메일 상태 안내를 선택하면 접수 번호와 진행 안내를 해당 주소로 받을 수 있습니다.",
+    "attachmentHelp": "이 양식에는 파일을 첨부할 수 없습니다. 스크린샷이 필요하면 지원 이메일에 첨부해 보내주세요.",
     "typeLabel": "문의 유형",
     "types": {
       "support": "일반 지원",
@@ -700,13 +705,18 @@ export function SupportPageContent() {
             {page.eyebrow}
           </p>
           <h1 className={`mt-4 font-black leading-tight ${lang === "ko" ? "text-balance text-3xl sm:text-5xl lg:text-6xl" : "text-4xl sm:text-6xl"}`}>{page.title}</h1>
+          {page.formJumpLabel ? (
+            <a href="#support-request-title" className="mt-5 inline-flex min-h-12 items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+              {page.formJumpLabel}<ArrowRight className="h-4 w-4" />
+            </a>
+          ) : null}
           <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{page.description}</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link href={`/support/help-centre?lang=${encodeURIComponent(lang)}`} className="inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white transition hover:bg-blue-500">
               {page.helpCta}
               <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link href={`${REVIEW_WORKSPACE_PATH}?lang=${encodeURIComponent(lang)}`} className="inline-flex h-12 items-center gap-2 rounded-xl border border-zinc-300 px-5 text-sm font-bold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">
+            <Link href={`${REVIEW_WORKSPACE_PATH}?lang=${encodeURIComponent(lang)}`} className={page.formJumpLabel ? "inline-flex min-h-12 items-center text-sm font-semibold text-blue-600 underline underline-offset-4 hover:text-blue-500 dark:text-blue-300" : "inline-flex h-12 items-center gap-2 rounded-xl border border-zinc-300 px-5 text-sm font-bold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"}>
               {page.appCta}
             </Link>
           </div>
@@ -750,12 +760,19 @@ export function SupportPageContent() {
         <div className="mt-12 grid grid-cols-1 gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
           <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
             <LifeBuoy className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-            <h2 className="mt-4 text-2xl font-black">{page.formTitle}</h2>
+            {!page.formJumpLabel && <h2 className="mt-4 text-2xl font-black">{page.formTitle}</h2>}
             <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{page.formDescription}</p>
+            {page.attachmentHelp ? (
+              <p className="mt-4 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                {page.attachmentHelp}{" "}
+                <a href={`mailto:${page.emailValue}`} data-testid="support-screenshot-email" className="font-bold text-blue-600 underline underline-offset-4 dark:text-blue-300">{page.emailValue}</a>
+              </p>
+            ) : null}
             <p id="support-message-example" className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{page.messageExample}</p>
           </div>
 
-          <form onSubmit={submit} className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5 shadow-2xl shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <form aria-labelledby={page.formJumpLabel ? "support-request-title" : undefined} onSubmit={submit} className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5 shadow-2xl shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-900/50">
+            {page.formJumpLabel && <h2 id="support-request-title" tabIndex={-1} className="scroll-mt-28 text-2xl font-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">{page.formTitle}</h2>}
             <label className="mt-6 block text-sm font-bold">
               {page.typeLabel}
               <select

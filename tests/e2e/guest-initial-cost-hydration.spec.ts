@@ -577,7 +577,9 @@ test.describe("guest initial cost hydration", () => {
       .toHaveText("Auto");
     await expect(page.getByTestId("composer-model-select")).toHaveAccessibleName(/Auto.*Smart Adaptive/);
     await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
-    await page.getByRole("button", { name: "Choose AI models" }).click();
+    // The mobile header summary also carries "Choose AI models" in its name;
+    // this step opens the composer picker it controls.
+    await page.getByTestId("composer-model-select").click();
     const dialog = page.locator("#chat-input-popover");
     await expect(dialog.getByTestId("auto-routing-toggle").getByRole("switch"))
       .toHaveAttribute("aria-checked", "true");

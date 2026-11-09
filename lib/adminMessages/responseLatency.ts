@@ -3,6 +3,9 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 export const adminResponseLatencyMessages = defineAdminMessages({
   en: {
     title: (days: number) => `Response latency · ${days} days`,
+    currentTitle: (days: number) => `Current response latency · ${days} days`,
+    currentNote: "Latest stored measurements, independent of optimizer cycles. Refresh to include new samples.",
+    refresh: "Refresh measurements",
     unavailable: "Timing evidence is unavailable.",
     measurements: (count: number) => `${count} measurements`,
     latestOnly: "Latest samples only",
@@ -27,6 +30,9 @@ export const adminResponseLatencyMessages = defineAdminMessages({
   },
   ko: {
     title: (days: number) => `응답 지연시간 · ${days}일`,
+    currentTitle: (days: number) => `현재 응답 지연시간 · ${days}일`,
+    currentNote: "최적화 회차와 관계없이 최근 저장된 측정값을 표시합니다. 새 표본을 포함하려면 새로고침하세요.",
+    refresh: "측정값 새로고침",
     unavailable: "지연시간 근거를 불러올 수 없습니다.",
     measurements: (count: number) => `측정 ${count}건`,
     latestOnly: "최신 표본만 포함",
