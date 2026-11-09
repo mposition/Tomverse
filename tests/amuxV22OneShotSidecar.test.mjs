@@ -277,9 +277,15 @@ test("the one-shot request and CLI command have bounded capabilities", () => {
     "an ordinary run has no dollar stop (owner decision 2026-10-25)");
   assert.equal(args.includes("--max-turns"), false,
     "an ordinary run has no turn limit (owner decision 2026-11-06)");
-  assert.equal(args[args.indexOf("--tools") + 1],
-    "Read,Grep,Glob,Edit,Write");
-  assert.equal(args.some((arg) => arg.includes("Bash")), false);
+  // Owner request 2026-11-09: implement gets Bash, which the sidecar runs
+  // in the jail; the read roles keep their read tools only.
+  assert.equal(args[args.indexOf("--tools") + 1], "Read,Grep,Glob,Edit,Write,Bash");
+  assert.equal(args[args.indexOf("--allowedTools") + 1], "Read,Grep,Glob,Edit,Write,Bash");
+  for (const role of ["design", "investigate", "review"]) {
+    const read = amuxV22ClaudeArgs({ ...request, role });
+    assert.equal(read[read.indexOf("--tools") + 1], "Read,Grep,Glob", role);
+    assert.equal(read.some((arg) => arg.includes("Bash")), false, role);
+  }
 });
 
 test("read-only retry is validated and closed before the CLI child starts", async () => {
@@ -522,7 +528,7 @@ test("implement refuses a dirty baseline before CLI and holds a patch only in me
 test("unknown output and deadline never become success or retry", async () => {
   const malformed = fakeSpawn("not-json");
   const malformedResult = await runAmuxV22OneShot(request, config, {
-    syntheticPlatform: true, spawnChild: malformed.spawnChild,
+    syntheticPlatform: true, spawnChild: malformed.spawnChild, logInvalidOutput: () => {},
   });
   assert.deepEqual({ kind: malformedResult.kind,
     failure: malformedResult.failure },
@@ -530,7 +536,7 @@ test("unknown output and deadline never become success or retry", async () => {
 
   const wrongShape = fakeSpawn("{}");
   const wrongShapeResult = await runAmuxV22OneShot(request, config, {
-    syntheticPlatform: true, spawnChild: wrongShape.spawnChild,
+    syntheticPlatform: true, spawnChild: wrongShape.spawnChild, logInvalidOutput: () => {},
   });
   assert.deepEqual({ kind: wrongShapeResult.kind,
     failure: wrongShapeResult.failure },
@@ -771,6 +777,148 @@ test("Ubuntu socket parent must be private",
         join(root, "worker.sock")), /unsafe/);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+
+test("a Codex implement run gets the base's locked packages and a writable temp dir in its checkout", async () => {
+  const codex = { ...config, provider: "openai", binaryPath: "/opt/tomverse-amux-v22/codex",
+    claudeConfigDir: "/var/lib/tomverse-amux-v22-codex-impl/cli" };
+  const output = [{ type: "turn.started" },
+    { type: "item.completed", item: { type: "agent_message", text: "Done." } },
+    { type: "turn.completed", usage: { input_tokens: 9, cached_input_tokens: 0,
+      output_tokens: 3 } }].map((event) => JSON.stringify(event)).join("\n") + "\n";
+  const runHome = async (_provider, value) => ({
+    config: { ...value, homePath: "/run-home", claudeConfigDir: "/run-home/codex" },
+    cleanup: async () => {} });
+  for (const [role, deps, expectedTmp] of [
+    ["implement", { ok: true }, join(config.worktreePath, "node_modules", ".cache", "amux-tmp")],
+    ["implement", { ok: false, reason: "install_failed" }, undefined],
+    ["investigate", null, undefined],
+  ]) {
+    const seen = [];
+    const fake = fakeSpawn(output);
+    await runAmuxV22OneShot({ ...request, role, modelId: "gpt-6-luna" }, codex, {
+      syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null,
+      createRunHome: runHome,
+      ensureDependencies: async (worktree, home) => { seen.push([worktree, home]); return deps; },
+    }).catch(() => {});
+    assert.equal(fake.calls.length, 1, role);
+    // npm runs from the sidecar's own home, never the CLI's fresh run home.
+    assert.deepEqual(seen, deps ? [[config.worktreePath, config.homePath]] : []);
+    assert.equal(fake.calls[0].spawnOptions.env.TMPDIR, expectedTmp);
+  }
+});
+
+test("Claude and Copilot implement runs get the jailed shell; read roles and a missing jail get none", async () => {
+  // Owner request 2026-11-09: implement only. The jail (v22ShellJail.mjs) is
+  // named in the CLI environment the way each CLI was measured to take it.
+  const tmp = join(config.worktreePath, "node_modules", ".cache", "amux-tmp");
+  const jail = (made) => async (paths) => { made.push(paths);
+    return { binPath: "/home/run/shell-1/bin", prefixPath: "/home/run/shell-1/claude-shell-prefix",
+      cleanup: async () => { made.push("cleaned"); } }; };
+  const claudeOut = JSON.stringify(usage);
+  for (const role of ["implement", "design", "investigate", "review"]) {
+    const made = [];
+    const fake = fakeSpawn(claudeOut);
+    await runAmuxV22OneShot({ ...request, role }, config, { syntheticPlatform: true,
+      spawnChild: fake.spawnChild, createShellJail: jail(made),
+      ensureDependencies: async () => ({ ok: true, installed: false }) });
+    const { env } = fake.calls[0].spawnOptions;
+    const tools = fake.calls[0].args[fake.calls[0].args.indexOf("--tools") + 1];
+    if (role === "implement") {
+      assert.deepEqual(made, [{ worktreePath: config.worktreePath, tmpPath: tmp,
+        homePath: config.homePath }, "cleaned"]);
+      assert.equal(env.CLAUDE_CODE_SHELL_PREFIX, "/home/run/shell-1/claude-shell-prefix");
+      assert.equal(env.CLAUDE_CODE_TMPDIR, tmp);
+      assert.match(tools, /,Bash$/);
+    } else {
+      assert.deepEqual(made, [], role);
+      assert.equal(env.CLAUDE_CODE_SHELL_PREFIX, undefined, role);
+      assert.equal(tools.includes("Bash"), false, role);
+    }
+    assert.equal(env.PATH, "/usr/bin:/bin");
+  }
+  // No jail, no run: Bash would otherwise run open.
+  for (const createShellJail of [async () => null, async () => { throw new Error("x"); }]) {
+    const fake = fakeSpawn(claudeOut);
+    const result = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+      spawnChild: fake.spawnChild, createShellJail });
+    assert.deepEqual([result.kind, result.cliStarted, result.failure],
+      ["failed", false, "shell_jail_unavailable"]);
+    assert.equal(fake.calls.length, 0);
+  }
+  // Copilot finds the jail as `bash` first on PATH; the run home holds it.
+  const copilot = { ...config, provider: "github-copilot",
+    binaryPath: "/opt/tomverse-amux-v22/copilot",
+    claudeConfigDir: "/var/lib/tomverse-amux-v22-copilot-impl/cli" };
+  const copilotOut = [{ type: "assistant.message", data: { model: "gpt-6-luna",
+    toolRequests: [], content: "Done." } }, { type: "result", exitCode: 0 }]
+    .map((event) => JSON.stringify(event)).join("\n") + "\n";
+  for (const role of ["implement", "investigate"]) {
+    const made = [];
+    let homeCleaned = 0;
+    const fake = fakeSpawn(copilotOut);
+    await runAmuxV22OneShot({ ...request, role, modelId: "gpt-6-luna" }, copilot, {
+      syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null,
+      createShellJail: jail(made), ensureDependencies: async () => ({ ok: false }),
+      createRunHome: async (_provider, value) => ({
+        config: { ...value, homePath: "/run-home", claudeConfigDir: "/run-home/.config" },
+        copilotToken: `gho_${"a".repeat(36)}`, cleanup: async () => { homeCleaned += 1; } }) });
+    const { env } = fake.calls[0].spawnOptions;
+    const args = fake.calls[0].args;
+    assert.equal(homeCleaned, 1);
+    if (role === "implement") {
+      assert.equal(made[0].homePath, "/run-home");
+      assert.equal(made.at(-1), "cleaned");
+      assert.equal(env.PATH, "/home/run/shell-1/bin:/usr/bin:/bin");
+      assert.equal(env.SHELL, "/home/run/shell-1/bin/bash");
+      // The jail's temp dir exists even when the package install failed.
+      assert.equal(env.TMPDIR, tmp);
+      assert.ok(args.includes("bash") && args.includes("read_bash"));
+    } else {
+      assert.deepEqual(made, []);
+      assert.equal(env.PATH, "/usr/bin:/bin");
+      assert.equal(env.SHELL, undefined);
+      assert.ok(!args.includes("bash"));
+    }
+  }
+});
+
+test("a refused CLI stream leaves one journal line with its reason and event names, never its text", async () => {
+  const codex = { ...config, provider: "openai", binaryPath: "/opt/tomverse-amux-v22/codex",
+    claudeConfigDir: "/var/lib/tomverse-amux-v22-codex-impl/cli" };
+  const secret = "sk-proj-SYNTHETIC-never-logged";
+  const output = [
+    { type: "thread.started", thread_id: secret }, { type: "turn.started" },
+    { type: "item.completed", item: { type: "reasoning", text: secret } },
+    { type: "item.completed", item: { type: "reasoning", text: secret } },
+    { type: "item.completed", item: { type: "collab_tool_call", prompt: secret } },
+    { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+  ].map((event) => JSON.stringify(event)).join("\n") + "\n";
+  const lines = [];
+  const result = await runAmuxV22OneShot({ ...request, modelId: "gpt-6-luna" }, codex,
+    { syntheticPlatform: true, spawnChild: fakeSpawn(output).spawnChild,
+      channelPreflight: () => null, logInvalidOutput: (line) => lines.push(line),
+      createRunHome: async (_provider, value) => ({
+        config: { ...value, homePath: "/run-home", claudeConfigDir: "/run-home/codex" },
+        cleanup: async () => {} }) });
+  assert.deepEqual({ kind: result.kind, failure: result.failure },
+    { kind: "outcome_unknown", failure: "invalid_result" });
+  assert.equal(result.usageReceipt, undefined);
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0], `amux v22 invalid_result attempt=${request.attemptId} provider=openai ` +
+    `exit=0 bytes=${Buffer.byteLength(output)} reason=item:collab_tool_call shape=thread.started ` +
+    "turn.started item.completed:reasoning*2 item.completed:collab_tool_call turn.completed");
+  assert.ok(!lines[0].includes("SYNTHETIC"));
+  // A Claude stream that is not its result object says so too; logging never
+  // changes the outcome, even when it throws.
+  const claude = [];
+  const notJson = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    spawnChild: fakeSpawn("not-json").spawnChild, logInvalidOutput: (line) => claude.push(line) });
+  assert.equal(notJson.failure, "invalid_result");
+  assert.match(claude[0], /provider=anthropic exit=0 bytes=8 reason=non_json shape=non_json$/);
+  const thrown = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    spawnChild: fakeSpawn("{}").spawnChild, logInvalidOutput: () => { throw new Error("x"); } });
+  assert.equal(thrown.failure, "invalid_result");
+});
 
 test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Codex receipt", async () => {
   const codex = { ...config, provider: "openai", binaryPath: "/opt/tomverse-amux-v22/codex",

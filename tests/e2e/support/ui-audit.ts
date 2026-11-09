@@ -263,9 +263,10 @@ type RawContrastSample = Omit<ContrastSample, "required" | "passes"> & { selecto
  */
 async function measureContrastSamples(
   locator: Locator,
-  selfOnly: boolean
+  selfOnly: boolean,
+  pseudoElement: "::placeholder" | null = null
 ): Promise<RawContrastSample[]> {
-  return locator.evaluate((root, only) => {
+  return locator.evaluate((root, { only, pseudoElement }) => {
     type Rgba = [number, number, number, number];
     const canvas = document.createElement("canvas");
     canvas.width = 1;
@@ -341,10 +342,11 @@ async function measureContrastSamples(
         }
       }
 
-      const style = getComputedStyle(element);
+      const style = getComputedStyle(element, pseudoElement);
       const colour = toRgba(style.color);
+      const textOpacity = pseudoElement ? Number.parseFloat(style.opacity || "1") : 1;
       const foreground = over(
-        [colour[0], colour[1], colour[2], colour[3] * inheritedOpacity],
+        [colour[0], colour[1], colour[2], colour[3] * inheritedOpacity * textOpacity],
         background
       );
 
@@ -365,7 +367,7 @@ async function measureContrastSamples(
 
       return {
         selector: describe(element),
-        text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
+        text: (pseudoElement ? element.getAttribute("placeholder") ?? "" : element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
         fontSizePx,
         fontWeight,
         isLargeText,
@@ -423,7 +425,7 @@ async function measureContrastSamples(
       results.push(measure(element));
     }
     return results;
-  }, selfOnly);
+  }, { only: selfOnly, pseudoElement });
 }
 
 const withVerdict = (sample: RawContrastSample, fallbackLabel: string): ContrastSample => {
@@ -438,9 +440,10 @@ const withVerdict = (sample: RawContrastSample, fallbackLabel: string): Contrast
 
 export async function measureContrast(
   locator: Locator,
-  label: string
+  label: string,
+  pseudoElement: "::placeholder" | null = null
 ): Promise<ContrastSample> {
-  const [sample] = await measureContrastSamples(locator, true);
+  const [sample] = await measureContrastSamples(locator, true, pseudoElement);
   return withVerdict(sample, label);
 }
 
@@ -462,8 +465,8 @@ export function formatContrastSample(label: string, sample: ContrastSample) {
   )} bg=${rgb(sample.background)} ${sample.fontSizePx}px/${sample.fontWeight} "${sample.text}"`;
 }
 
-export async function expectAccessibleContrast(locator: Locator, label: string) {
-  const sample = await measureContrast(locator, label);
+export async function expectAccessibleContrast(locator: Locator, label: string, pseudoElement: "::placeholder" | null = null) {
+  const sample = await measureContrast(locator, label, pseudoElement);
   expect(sample.passes, formatContrastSample(label, sample)).toBe(true);
   return sample;
 }

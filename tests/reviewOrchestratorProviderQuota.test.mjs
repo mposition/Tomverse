@@ -108,6 +108,9 @@ test("Copilot headless probe handles framed responses and sends no session or mo
         spawnChild: (command, args, opts) => {
           assert.equal(command, "copilot");
           assert.equal(args.includes("--headless") && args.includes("--stdio"), true);
+          // Copilot CLI 1.0.107 exits 1 on `--no-remote`; `--no-remote-export` is still accepted.
+          assert.equal(args.includes("--no-remote"), false);
+          assert.equal(args.includes("--no-remote-export"), true);
           assert.equal(opts.env.REVIEW_ORCH_SECRET_PROBE, undefined);
           assert.equal(args.includes("fake-token"), false);
           return spawn(process.execPath, [resolve("tests/fixtures/review-orchestrator/fake-quota-server.mjs")], {
