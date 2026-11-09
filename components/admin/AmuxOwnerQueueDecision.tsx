@@ -168,7 +168,12 @@ export function AmuxOwnerQueueDecision({
   const blockedWhy = blockedAttemptReason !== null &&
     Object.hasOwn(copy.why.byAttemptReason, blockedAttemptReason) ?
     copy.why.byAttemptReason[blockedAttemptReason] : null;
+  // A done or todo card whose earlier attempt left its escalation open has no
+  // review decision and nothing to recover: closing that escalation is the one
+  // action, the same as the card detail's overview shows.
+  const settledCard = group !== "question" && isAmuxSettledCardWithOpenEscalation(item);
   const why = group === "question" ? copy.why.question
+    : settledCard ? (item.status === "done" ? copy.why.settledDone : copy.why.settledTodo)
     : legacyOnly ? copy.why.legacyCard
     : blockedWhy !== null ? blockedWhy
     : reviewPr === null ? noPrWhy
@@ -176,7 +181,7 @@ export function AmuxOwnerQueueDecision({
     : (item.attentionReason ? copy.why.byReason[item.attentionReason] : undefined) ?? copy.why[group];
   const reportExcerpt = reviewMatches && (reviewPr === null || blockedAttemptReason === "reported_result")
     ? workerReportExcerpt(review.review_report?.worker_report ?? null) : null;
-  const showRecoverySteps = group !== "question" && summary !== null && !legacyOnly &&
+  const showRecoverySteps = group !== "question" && summary !== null && !legacyOnly && !settledCard &&
     (group === "recover" || group === "read" || classification === "technical_recovery");
   const decisionOpen = classification === "owner_decision";
   const waiting = elapsed(item.waitingSince);
@@ -224,7 +229,12 @@ export function AmuxOwnerQueueDecision({
           {copy.detail.whyStopped}
         </p>
         <p className="mt-1.5 text-sm leading-6 text-zinc-300">{why}</p>
-        {usageUnknown && !outcomes.includes("approve") && !outcomes.includes("retry") ? (
+        {settledCard && canInspectCards ? (
+          <p className="mt-1.5 text-sm leading-6 text-zinc-300" data-testid="amux-owner-queue-settled-action">
+            {copy.why.settledAction}
+          </p>
+        ) : null}
+        {usageUnknown && !settledCard && !outcomes.includes("approve") && !outcomes.includes("retry") ? (
           <p className="mt-1.5 text-sm leading-6 text-zinc-300" data-testid="amux-owner-queue-usage-unknown">
             {copy.why.reviewUsageUnknown}
           </p>
@@ -238,6 +248,15 @@ export function AmuxOwnerQueueDecision({
           </div>
         ) : null}
       </div>
+
+      {/* Straight under "why", like the legacy panel: the owner closes the
+          leftover escalation here; the review below is reading only. */}
+      {settledCard && canInspectCards && item.escalationId !== null ? (
+        <AmuxSettledCardEscalationPanel key={item.taskId + ":" + item.escalationId} taskId={item.taskId}
+          escalationId={item.escalationId} canAct={canInspectCards}
+          reauthReturnPath={`/admin/amux-execution?tab=review&focusEscalation=${encodeURIComponent(item.escalationId)}`}
+          onChanged={onAnswered} />
+      ) : null}
 
       {legacyCard !== null ? (
         <AmuxLegacyCardPanel key={item.taskId + ":" + legacyCard.revision} taskId={item.taskId}
@@ -294,7 +313,7 @@ export function AmuxOwnerQueueDecision({
 
           <AmuxPendingDecisionNotice controller={controller} />
 
-          {reviewMatches ? (
+          {reviewMatches && !settledCard ? (
             <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4" data-testid="amux-owner-queue-choices">
               <p className="text-sm font-bold text-zinc-100">
                 {copy.detail.choices}
@@ -322,19 +341,10 @@ export function AmuxOwnerQueueDecision({
 
           {/* The previous card's review stays in the controller until this card's read starts. */}
           {controller.selectedEscalationId === summary.id
-            ? <AmuxOwnerReviewDetail controller={controller} showClose={false} />
+            ? <AmuxOwnerReviewDetail controller={controller} showClose={false} hideTechnicalRecovery={settledCard} />
             : <p role="status" className="text-sm text-zinc-400">{execution.loading}</p>}
         </>
       )}
-
-      {/* A done or todo card whose earlier attempt left its escalation open
-          has no review decision; the owner closes that escalation here. */}
-      {canInspectCards && item.escalationId !== null && isAmuxSettledCardWithOpenEscalation(item) ? (
-        <AmuxSettledCardEscalationPanel key={item.taskId + ":" + item.escalationId} taskId={item.taskId}
-          escalationId={item.escalationId} canAct={canInspectCards}
-          reauthReturnPath={`/admin/amux-execution?tab=review&focusEscalation=${encodeURIComponent(item.escalationId)}`}
-          onChanged={onAnswered} />
-      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800 pt-3">
         <label className="inline-flex min-h-9 cursor-pointer items-center gap-2 text-sm text-zinc-200">
