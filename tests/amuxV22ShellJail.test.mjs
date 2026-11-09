@@ -93,6 +93,7 @@ const bwrapUsable = () => {
 test("a command in the real jail reaches no network and writes only the checkout", {
   skip: bwrapUsable() }, async () => {
   const root = await mkdtemp(join(tmpdir(), "amux-v22-jail-"));
+  let jail;
   try {
     const worktreePath = join(root, "worktree");
     const homePath = join(root, "home");
@@ -100,10 +101,12 @@ test("a command in the real jail reaches no network and writes only the checkout
     await mkdir(homePath);
     await writeFile(join(homePath, "secret"), "canary");
     const tmpPath = join(worktreePath, "node_modules", ".cache", "amux-tmp");
-    const jail = await createAmuxV22ShellJail({ worktreePath, tmpPath, homePath });
+    jail = await createAmuxV22ShellJail({ worktreePath, tmpPath, homePath });
+    // bash alone: a CI runner's node lives outside /usr, which the jail leaves
+    // out (on the AMUX box node is /usr/bin/node).
     const out = execFileSync(jail.jailPath, ["-c", [
-      `node -p 'Object.keys(require("os").networkInterfaces()).join()'`,
-      `node -e 'require("net").connect(443, "140.82.112.3").on("error", (e) => console.log(e.code))'`,
+      "(exec 3<>/dev/tcp/140.82.112.3/443) 2>/dev/null && echo tcp-open || echo tcp-refused",
+      "(exec 3<>/dev/tcp/1.1.1.1/53) 2>/dev/null && echo dns-open || echo dns-refused",
       "ls /proc >/dev/null 2>&1 && echo proc-open || echo proc-absent",
       `(echo x > ${root}/outside) 2>/dev/null && echo outside-open || echo outside-refused`,
       "(echo x > .git/x) 2>/dev/null && echo git-open || echo git-refused",
@@ -112,10 +115,13 @@ test("a command in the real jail reaches no network and writes only the checkout
       "echo x > inside && echo inside-ok", "echo token=${COPILOT_GITHUB_TOKEN-unset}"].join("\n")],
     { cwd: worktreePath, encoding: "utf8",
       env: { PATH: "/usr/bin:/bin", COPILOT_GITHUB_TOKEN: "gho_synthetic", TERM: "dumb" } });
-    assert.deepEqual(out.trim().split("\n"), ["lo", "ENETUNREACH", "proc-absent",
+    assert.deepEqual(out.trim().split("\n"), ["tcp-refused", "dns-refused", "proc-absent",
       "outside-refused", "git-refused",
       "tmp-refused", "home-refused", "inside-ok", "token=unset"]);
     assert.equal(await readFile(join(worktreePath, "inside"), "utf8"), "x\n");
-    await jail.cleanup();
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    // The launcher's directory stays read-only until its own cleanup runs.
+    await jail?.cleanup();
+    await rm(root, { recursive: true, force: true });
+  }
 });
