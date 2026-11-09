@@ -696,6 +696,8 @@ export const pt = {
         aiReviewResponsesRequired: "Conclua primeiro pelo menos duas respostas de modelos à mesma pergunta.",
         aiReviewRun: "Executar revisão cruzada",
         aiReviewRunning: "Revisando as respostas...",
+        aiReviewSecondaryPending: "A primeira revisão está pronta. Concluindo a revisão restante...",
+        aiReviewPartialInterrupted: "A primeira revisão está disponível, mas não foi possível confirmar o resultado final. Verifique o status da revisão antes de iniciar outra execução.",
         aiReviewSecondaryReviewer: "Revisor 2",
         aiReviewSourceGrounding: "Ancoragem nas fontes",
         aiReviewSourceGroundingDescription: "Percentual do texto citado que pode ser associado diretamente às fontes vinculadas. Não mede exatidão factual, confiabilidade das fontes nem confiança do modelo.",
