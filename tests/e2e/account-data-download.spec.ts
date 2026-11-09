@@ -128,6 +128,10 @@ for (const theme of ["light", "dark"] as const) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await notice.getByTestId("analytics-consent-decline").click();
     await expect(notice).toHaveCount(0);
+    const settingsButton = page.getByTestId("settings-consent-slot").getByTestId("analytics-settings-button");
+    await expect(settingsButton).toBeVisible();
+    await settingsButton.click();
+    await expect(notice).toBeVisible();
   });
 }
 
