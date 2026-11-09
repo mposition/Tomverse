@@ -964,6 +964,8 @@ run(
     "tests/integration/mcp-connector.db.test.ts",
     "tests/integration/mcp-oauth.db.test.ts",
     "tests/integration/mcp-migration.db.test.ts",
+    // Product Research completion extends its CHECK without changing existing decisions.
+    "tests/integration/product-research-completion.db.test.ts",
     // Release C1: what the database refuses about a profile version snapshot.
     "tests/integration/assistant-profile-schema.db.test.ts",
     "tests/integration/assistant-profile-service.db.test.ts",
