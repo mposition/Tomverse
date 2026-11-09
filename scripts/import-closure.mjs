@@ -12,8 +12,8 @@
 //   source extension, then `index.*`, and a `.js` specifier also tries `.ts`.
 //   `@/x` is the repository root (tsconfig `paths`), and `@tomverse/<name>`
 //   is the whole `packages/<name>/` tree.
-// - A string literal that names a repository path -- `"lib/x.ts"`,
-//   `"prisma/migrations/..."`, `new URL("../../lib/x.ts", import.meta.url)` --
+// - A string literal that names a repository path -- `"lib/<file>.ts"`,
+//   `"prisma/migrations/..."`, `new URL("../../lib/<file>.ts", import.meta.url)` --
 //   counts as reached as well, file or directory prefix. That is how a test
 //   that reads a source file or a migration with `readFileSync` is covered.
 // - A literal `"/api/<segment>/<segment>"` (a fetch from a page) reaches
