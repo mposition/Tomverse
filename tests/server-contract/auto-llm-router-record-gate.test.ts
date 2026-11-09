@@ -24,6 +24,8 @@ const settlementWrites: unknown[][] = [];
 let mocksInstalled = false;
 let generateRouterResult: (() => unknown) | undefined;
 const routerRequests: Record<string, unknown>[] = [];
+const holds: number[] = [];
+let budgetAllowed = true;
 let routerFailure: unknown = null;
 let outputFailure: unknown = null;
 let waitForAbort = false;
@@ -84,7 +86,10 @@ async function load() {
       },
     });
     mock.module(mod("lib/chatSecurity.ts"), {
-      namedExports: { holdChatUsageBucket: async () => true },
+      namedExports: { holdChatUsageBucket: async (...args: unknown[]) => {
+        holds.push(args[5] as number);
+        return budgetAllowed;
+      } },
     });
     mock.module(mod("lib/activeAiModel.ts"), {
       namedExports: { getActiveAiModel: () => ({}) },
@@ -93,7 +98,7 @@ async function load() {
   return import(mod("lib/autoLlmRouter.ts"));
 }
 
-const pick = async (recordDecision?: Promise<boolean>, canPersist = false) => {
+const pick = async (recordDecision?: Promise<boolean>, canPersist = false, extra: Record<string, unknown> = {}) => {
   const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts")) as {
     AVAILABLE_MODELS: Array<{ id: string }>;
   };
@@ -111,11 +116,108 @@ const pick = async (recordDecision?: Promise<boolean>, canPersist = false) => {
     traceId: "trace-1",
     fileContext: { isAuthenticated: true, canPersist, webSearchRequested: false },
     ...(recordDecision ? { recordDecision } : {}),
+    ...extra,
   });
   // The row write is not awaited by the turn.
   await new Promise((resolve) => setTimeout(resolve, 20));
   return result;
 };
+
+test("combined routing returns both decisions in one reserved call and preserves image record gating", async () => {
+  const context = {
+    modelId: "gpt-6-luna",
+    candidates: [{ id: "gpt-image-2", name: "Image", latency: "fast", credits: { standard: 8 } }],
+    previousImagePrompt: null, attachedPhoto: false, prompt: "Message: Draw a cat",
+    maxOutputTokens: 400, timeoutMs: 8000,
+  };
+  const image = { image: true, modelId: "gpt-image-2", preset: "standard", prompt: "", edit: false };
+  const original = generateRouterResult;
+  generateRouterResult = () => ({ output: { ...routerOutput, imageIntent: image }, usage: { inputTokens: 200, outputTokens: 60 } });
+  try {
+    created.length = 0;
+    routerRequests.length = 0;
+    holds.length = 0;
+    let decision: { image: boolean } | undefined;
+    const result = await pick(undefined, false, {
+      imageIntent: Promise.resolve(context),
+      onImageDecision: (value: { image: boolean }) => { decision = value; },
+      recordDecision: async () => !decision?.image,
+    });
+    assert.equal(result?.modelId, routerOutput.modelId);
+    assert.equal(decision?.image, true);
+    assert.equal(routerRequests.length, 1);
+    assert.equal(routerRequests[0].maxOutputTokens, 600);
+    const { autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
+    const { resolveModelPricing } = require(resolve(ROOT, "lib/modelPricing.ts"));
+    const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
+    const prices = resolveModelPricing(AVAILABLE_MODELS.find((model: { id: string }) => model.id === "gpt-6-luna"));
+    const expectedHold = autoLlmRouterWorstCaseMicroUsd({
+      ...routerRequests[0],
+      inputUsdPerMillionTokens: prices.inputUsdPerMillionTokens,
+      outputUsdPerMillionTokens: prices.outputUsdPerMillionTokens,
+    });
+    assert.deepEqual(holds, [expectedHold, expectedHold], "day and month reserve the exact combined request bound");
+    assert.match(String(routerRequests[0].system), /imageIntent/);
+    assert.match(String(routerRequests[0].prompt), /Draw a cat/);
+    assert.equal(created.length, 0);
+  } finally { generateRouterResult = original; }
+});
+
+test("a refused combined budget never calls the provider or reports an image decision", async () => {
+  budgetAllowed = false;
+  routerRequests.length = 0;
+  let accepted = false;
+  try {
+    assert.equal(await pick(undefined, false, {
+      imageIntent: Promise.resolve({ modelId: "gpt-6-luna", candidates: [], previousImagePrompt: null, attachedPhoto: false, prompt: "test", maxOutputTokens: 400, timeoutMs: 8000 }),
+      onImageDecision: () => { accepted = true; },
+    }), null);
+    assert.equal(routerRequests.length, 0);
+    assert.equal(accepted, false);
+  } finally { budgetAllowed = true; }
+});
+
+test("combined image output keeps edit and follow-up admission rules", async () => {
+  const { callAutoLlmRouter } = await load();
+  const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
+  const imageIntent = {
+    modelId: "gpt-6-luna", candidates: [{ id: "gpt-image-2", name: "Image", latency: "fast", credits: { standard: 8 } }],
+    previousImagePrompt: null as string | null, attachedPhoto: false,
+    prompt: "Message: Draw a cat", maxOutputTokens: 400, timeoutMs: 8000,
+  };
+  const base = {
+    routerModel: AVAILABLE_MODELS.find((model: { id: string }) => model.id === "gpt-6-luna"),
+    guidance: "", prompt: "Draw a cat", previousAnswer: null, session: null,
+    candidates: [{ id: routerOutput.modelId }], imageIntent,
+  };
+  const original = generateRouterResult;
+  try {
+    for (const [attachedPhoto, previous, output, expected] of [
+      [false, null, { image: false }, { image: false }],
+      [false, null, { image: true, prompt: "unasked rewrite", edit: true }, { image: true, prompt: null, edit: false }],
+      [true, null, { image: true, edit: false }, { image: false }],
+      [true, null, { image: true, edit: true, prompt: "ignored" }, { image: true, prompt: null, edit: true }],
+      [false, "a cat", { image: true, prompt: "a blue cat" }, { image: true, prompt: "a blue cat", edit: false }],
+      [false, "a cat", { image: true, prompt: "x".repeat(1501) }, { image: false }],
+    ] as const) {
+      generateRouterResult = () => ({ output: { ...routerOutput, imageIntent: { modelId: "gpt-image-2", preset: "standard", ...output } } });
+      const result = await callAutoLlmRouter({ ...base, imageIntent: { ...imageIntent, attachedPhoto, previousImagePrompt: previous } } as never);
+      for (const [key, value] of Object.entries(expected)) assert.equal((result.imageDecision as Record<string, unknown>)[key], value);
+    }
+  } finally { generateRouterResult = original; }
+});
+
+test("combined routing does not claim an image decision after provider failure", async () => {
+  routerFailure = new Error("failure");
+  let accepted = false;
+  try {
+    assert.equal(await pick(undefined, false, {
+      imageIntent: Promise.resolve({ modelId: "gpt-6-luna", candidates: [], previousImagePrompt: null, attachedPhoto: false, prompt: "test", maxOutputTokens: 400, timeoutMs: 8000 }),
+      onImageDecision: () => { accepted = true; },
+    }), null);
+    assert.equal(accepted, false, "the caller must retain the standalone fallback");
+  } finally { routerFailure = null; }
+});
 
 test("a chat turn keeps its decision row", async () => {
   created.length = 0;

@@ -21,6 +21,7 @@ import {
 } from "@/lib/models";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { PricingCreditExample } from "./PricingCreditExample";
+import { PricingPlanCapabilities } from "./PricingPlanCapabilities";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { usePricingAccount } from "@/components/marketing/usePricingAccount";
@@ -47,6 +48,7 @@ import {
 } from "@/lib/productAnalyticsClient";
 import {
   billingCurrencyFractionDigits,
+  billingMinorToMajor,
   formatBillingAmount,
   formatBillingMinor,
   type BillingCurrency,
@@ -61,7 +63,7 @@ const REVIEW_SIGN_IN_HREF =
   `/auth/signin?callbackUrl=${encodeURIComponent(REVIEW_WORKSPACE_PATH)}`;
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string; checkout: string }>> = {
-  en: { annual: "Annual", save: "Save 20%", checkout: "The fixed local price shown is charged at checkout." },
+  en: { annual: "Annual · billed annually", save: "Save 20%", checkout: "The fixed local price shown is charged once per year at checkout." },
   ko: { annual: "연간", save: "20% 할인", checkout: "표시된 현지통화 고정 금액으로 결제됩니다." },
   zh: { annual: "年付", save: "节省 20%", checkout: "结账时将收取所显示的本地固定价格。" },
   "zh-Hant": { annual: "年付", save: "節省 20%", checkout: "結帳時將收取所顯示的當地固定價格。" },
@@ -353,7 +355,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Buy an additional credit pack for a temporary project or a busier month. Fixed local pricing is shown and checkout is available after sign-in.",
     availableFor: "Available on",
     oneTime: "One-time purchase",
-    validity: "Valid for 12 months",
+    validity: "Valid for {days} days",
     credits: "credits",
     policyTitle: "How additional credits work",
     policies: [
@@ -381,7 +383,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "이번 달 작업량이 많거나 일시적인 프로젝트가 있을 때 추가 크레딧 팩을 구매할 수 있습니다. 현지통화 고정 가격이 표시되며 로그인 후 결제할 수 있습니다.",
     availableFor: "구매 가능 플랜",
     oneTime: "일회성 구매",
-    validity: "12개월 유효",
+    validity: "{days}일 유효",
     credits: "크레딧",
     policyTitle: "추가 크레딧 이용 방식",
     policies: [
@@ -409,7 +411,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "当本月工作量增加或有临时项目时，可购买额外积分包。页面显示本地固定价格，登录后可结账。",
     availableFor: "适用方案",
     oneTime: "一次性购买",
-    validity: "有效期 12 个月",
+    validity: "有效期 {days} 天",
     credits: "积分",
     policyTitle: "额外积分的使用方式",
     policies: [
@@ -433,7 +435,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "當本月工作量增加或有臨時專案時，可以購買額外的點數包。頁面會顯示當地固定價格，登入後即可結帳。",
     availableFor: "適用方案",
     oneTime: "一次性購買",
-    validity: "有效期 12 個月",
+    validity: "有效期 {days} 天",
     credits: "點數",
     policyTitle: "額外點數的使用方式",
     policies: [
@@ -457,7 +459,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Achetez un pack pour un projet temporaire ou un mois plus chargé. Le prix local fixe est affiché et l’achat est disponible après connexion.",
     availableFor: "Disponible avec",
     oneTime: "Achat unique",
-    validity: "Valable 12 mois",
+    validity: "Valable {days} jours",
     credits: "crédits",
     policyTitle: "Fonctionnement des crédits supplémentaires",
     policies: [
@@ -481,7 +483,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Kaufen Sie ein Paket für ein vorübergehendes Projekt oder einen arbeitsreichen Monat. Der lokale Festpreis wird angezeigt; Kauf nach Anmeldung.",
     availableFor: "Verfügbar für",
     oneTime: "Einmalkauf",
-    validity: "12 Monate gültig",
+    validity: "{days} Tage gültig",
     credits: "Credits",
     policyTitle: "So funktionieren zusätzliche Credits",
     policies: [
@@ -505,7 +507,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Compra un paquete para un proyecto temporal o un mes con más trabajo. Se muestra el precio local fijo y la compra requiere iniciar sesión.",
     availableFor: "Disponible en",
     oneTime: "Compra única",
-    validity: "Válido 12 meses",
+    validity: "Válido {days} días",
     credits: "créditos",
     policyTitle: "Cómo funcionan los créditos adicionales",
     policies: [
@@ -529,7 +531,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Compre um pacote para um projeto temporário ou um mês mais intenso. O preço local fixo é exibido e a compra fica disponível após o login.",
     availableFor: "Disponível no",
     oneTime: "Compra única",
-    validity: "Válido por 12 meses",
+    validity: "Válido por {days} dias",
     credits: "créditos",
     policyTitle: "Como funcionam os créditos adicionais",
     policies: [
@@ -607,7 +609,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Model access", free: "Selected models", pro: "All available models · Pro usage limits", max: "All available models · largest monthly allowance" },
         { label: "Multi-model comparison", free: "Up to 3 models", pro: "Up to 3 models", max: "Up to 3 models" },
-        { label: "File attachments", free: "Images, PDFs, Office, Drive", pro: "Images, PDFs, Office, Drive", max: "Higher file and context limits" },
+        { label: "File attachments (where enabled)", free: "5 files · 10 MiB each · 25 MiB total", pro: "5 files · 10 MiB each · 25 MiB total", max: "5 files · 10 MiB each · 25 MiB total" },
         { label: "Conversation sharing", free: "Share and download", pro: "Share and download", max: "Share and download" },
         { label: "AI credits", free: "300/month", pro: "3,000/month", max: "10,000/month" },
       ],
@@ -664,7 +666,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         cta: "Upgrade to Max",
         href: REVIEW_WORKSPACE_PATH,
         usage: "10,000 monthly AI credits",
-        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Higher attachment and context limits","For frequent advanced-model and long-document work"],
+        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Where attachments are enabled: 5 files per message · 10 MiB each · 25 MiB combined","For frequent advanced-model and long-document work"],
       },
     ],
   },
@@ -1428,6 +1430,12 @@ export function PricingPageContent() {
             const annualPrice =
               billing.formatPlanPrice(planId, "annual") ||
               annualFallback;
+            const billingPlan = billing.config?.plans.find((item) => item.id === planId);
+            const annualMonthlyEquivalent = billingPlan
+              ? billingPlan.displayCurrency && typeof billingPlan.displayAnnualPriceAmount === "number"
+                ? formatBillingAmount(billingPlan.displayAnnualPriceAmount / 12, billingPlan.displayCurrency as BillingCurrency)
+                : formatBillingAmount(billingMinorToMajor(billingPlan.annualPriceCents, billingPlan.currency as BillingCurrency) / 12, billingPlan.currency as BillingCurrency)
+              : null;
             const promotionEligible = Boolean(
               featuredPromotion &&
               featuredPromotion.appliesToPlanIds.includes(planId) &&
@@ -1631,7 +1639,7 @@ export function PricingPageContent() {
                 </div>
               )}
               {planId !== "free" ? (
-                <div className={`mt-3 rounded-2xl border p-3 text-xs font-bold leading-5 ${
+                <div className={`mt-3 rounded-2xl border p-3 text-sm font-bold leading-6 ${
                   plan.highlighted
                     ? "border-white/20 bg-white/10 text-blue-50"
                     : "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300"
@@ -1642,8 +1650,13 @@ export function PricingPageContent() {
                       {annualCopy.save}
                     </span>
                   </div>
-                  <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}</div>
-                  <p className={plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}>
+                  <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}{lang === "en" ? " per year" : ""}</div>
+                  {lang === "en" && annualMonthlyEquivalent ? (
+                    <p className="mt-1 text-sm leading-6" data-testid={`pricing-annual-equivalent-${planId}`}>
+                      Monthly equivalent: about {annualMonthlyEquivalent}, billed annually.
+                    </p>
+                  ) : null}
+                  <p data-testid="pricing-annual-checkout-note" className={plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}>
                     {annualCopy.checkout}
                   </p>
                 </div>
@@ -1798,6 +1811,11 @@ export function PricingPageContent() {
                     {plan.cta}
                   </UpgradeInterestButton>
                 )}
+                {lang === "en" && planId !== "free" && (ctaState === "signed_out" || ctaState === "upgrade") ? (
+                  <p className="mt-2 text-sm font-semibold leading-6" data-testid={`pricing-billing-choice-${planId}`}>
+                    Choose monthly or annual billing in the next step{ctaState === "signed_out" ? " after signing in" : ""}, before payment.
+                  </p>
+                ) : null}
                 {ctaState === "manage_plan" &&
                 !(
                   planId === "free" &&
@@ -1814,6 +1832,7 @@ export function PricingPageContent() {
                   </p>
                 ) : null}
               </div>
+              {lang === "en" ? <PricingPlanCapabilities plan={cardPlan} /> : null}
               <ul className="mt-8 space-y-3">
                 {plan.features.map((feature) => (
                   // UI-005. The bullet's icon is `shrink-0` and the label was a
@@ -2002,7 +2021,7 @@ export function PricingPageContent() {
                     {creditPackGuide.packDescriptions[pack.id]}
                   </p>
                   <p className="mt-4 min-w-0 break-words border-t border-zinc-200 pt-3 text-xs font-bold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                    {creditPackGuide.validity}
+                    {creditPackGuide.validity.replace("{days}", String(pack.validityDays))}
                   </p>
                   {lang === "en" ? <PricingCreditExample credits={pack.credits} testId={`pricing-credit-example-pack-${pack.id}`} /> : null}
                   {/* Per-pack CTA. The pack the visitor clicked is what the
