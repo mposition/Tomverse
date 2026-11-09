@@ -151,7 +151,11 @@ test("combined routing returns both decisions in one reserved call and preserves
     const { resolveModelPricing } = require(resolve(ROOT, "lib/modelPricing.ts"));
     const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
     const prices = resolveModelPricing(AVAILABLE_MODELS.find((model: { id: string }) => model.id === "gpt-6-luna"));
-    const expectedHold = autoLlmRouterWorstCaseMicroUsd({ ...routerRequests[0], ...prices });
+    const expectedHold = autoLlmRouterWorstCaseMicroUsd({
+      ...routerRequests[0],
+      inputUsdPerMillionTokens: prices.inputUsdPerMillionTokens,
+      outputUsdPerMillionTokens: prices.outputUsdPerMillionTokens,
+    });
     assert.deepEqual(holds, [expectedHold, expectedHold], "day and month reserve the exact combined request bound");
     assert.match(String(routerRequests[0].system), /imageIntent/);
     assert.match(String(routerRequests[0].prompt), /Draw a cat/);
