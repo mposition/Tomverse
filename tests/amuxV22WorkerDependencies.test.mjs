@@ -47,6 +47,28 @@ test("a worker checkout gets its locked packages once per lockfile, from the sid
     const changed = await ensureAmuxV22WorktreeDependencies(root, "/var/lib/sidecar-home", { run });
     assert.deepEqual(changed, { ok: true, installed: true });
     assert.equal(calls.length, 4);
+
+    // A new base that changes only the schema (or the Prisma config) keeps
+    // the packages but regenerates the client.
+    await mkdir(join(root, "prisma"), { recursive: true });
+    await writeFile(join(root, "prisma", "schema.prisma"), "model A { id Int @id }\n");
+    const schema = await ensureAmuxV22WorktreeDependencies(root, "/var/lib/sidecar-home", { run });
+    assert.deepEqual(schema, { ok: true, installed: true });
+    assert.deepEqual(calls.slice(4).map((call) => call.binary), ["node"]);
+    await writeFile(join(root, "prisma.config.ts"), "export default {};\n");
+    await ensureAmuxV22WorktreeDependencies(root, "/var/lib/sidecar-home", { run });
+    assert.deepEqual(calls.slice(5).map((call) => call.binary), ["node"]);
+    const settled = await ensureAmuxV22WorktreeDependencies(root, "/var/lib/sidecar-home", { run });
+    assert.deepEqual(settled, { ok: true, installed: false });
+    assert.equal(calls.length, 6);
+
+    // A client that failed to generate is retried alone on the next run.
+    await writeFile(join(root, "prisma", "schema.prisma"), "model B { id Int @id }\n");
+    const failing = await ensureAmuxV22WorktreeDependencies(root, "/var/lib/sidecar-home", {
+      run: async () => { throw Object.assign(new Error("generate"), { code: 1 }); } });
+    assert.deepEqual(failing, { ok: false, reason: "install_failed" });
+    await ensureAmuxV22WorktreeDependencies(root, "/var/lib/sidecar-home", { run });
+    assert.deepEqual(calls.slice(6).map((call) => call.binary), ["node"]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
