@@ -35,6 +35,9 @@ const copy = {
     eyebrow: "모델",
     title: "질문에 맞는 모델을 찾아보세요.",
     description: "추천 활용, 기본 크레딧과 이용에 필요한 플랜을 비교해 보세요. Tomverse Chat과 Review에서 선택할 수 있는 모델을 확인하고, 현재 제공 여부와 사용량은 앱의 모델 선택기에서 다시 확인할 수 있습니다.",
+    mobileDescription: "Chat과 Review의 모델, 기본 크레딧과 이용 플랜을 비교하세요.",
+    mobileCreditNote: "모델별 ‘짧은 요청의 기본 크레딧’ 숫자로 기본 비용을 비교하세요.",
+    mobileUsageDetails: "크레딧·이용 안내 자세히 보기",
     provider: "공급자",
     usageClass: "크레딧 사용 등급",
     baseCharge: "짧은 요청의 기본 크레딧",
@@ -176,6 +179,7 @@ export function ModelsPageContent() {
   const content = copy[lang];
   const filters = filterCopy[lang];
   const [query, setQuery] = useState("");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [provider, setProvider] = useState("all");
   const [plan, setPlan] = useState<ModelTier | "Guest" | "all">("all");
   const providers = [...new Set(ENABLED_MODELS.map((model) => model.provider))].sort();
@@ -190,12 +194,22 @@ export function ModelsPageContent() {
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader maxWidth="max-w-6xl" />
 
-      <section className="mx-auto max-w-6xl px-4 py-14 [overflow-wrap:anywhere] sm:px-6 lg:py-20">
+      <section className="mx-auto max-w-6xl px-4 py-8 [overflow-wrap:anywhere] sm:px-6 sm:py-14 lg:py-20">
         <div className="max-w-3xl">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
-          <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{content.title}</h1>
-          <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
-          <p className="mt-5 rounded-2xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200">
+          <h1 className="mt-4 text-3xl font-black leading-tight sm:text-6xl">{content.title}</h1>
+          <p className={`mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${lang === "ko" ? "hidden sm:block" : ""}`}>{content.description}</p>
+          {lang === "ko" ? (
+            <div className="mt-4 space-y-3 sm:hidden">
+              <p className="text-base leading-7 text-zinc-600 dark:text-zinc-300">{copy.ko.mobileDescription}</p>
+              <p className="text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200">{copy.ko.mobileCreditNote}</p>
+              <details data-testid="models-mobile-usage-details" className="rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 text-sm leading-6 text-blue-800 dark:text-blue-200">
+                <summary className="min-h-11 cursor-pointer py-2.5 font-bold">{copy.ko.mobileUsageDetails}</summary>
+                <p className="pb-3">{content.usageNote}</p>
+              </details>
+            </div>
+          ) : null}
+          <p className={`mt-5 rounded-2xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200 ${lang === "ko" ? "hidden sm:block" : ""}`}>
             {content.usageNote}
           </p>
           <Link
@@ -206,7 +220,7 @@ export function ModelsPageContent() {
             aria-label={statusLinkLabel(content.liveStatus, lang)}
             title={statusNewTabCopy[lang]}
             data-testid="models-status-link"
-            className="mt-7 inline-flex max-w-full items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left transition hover:bg-emerald-500/15 [overflow-wrap:anywhere] max-[240px]:flex-col max-[240px]:items-start"
+            className="mt-5 inline-flex max-w-full items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left transition hover:bg-emerald-500/15 sm:mt-7 [overflow-wrap:anywhere] max-[240px]:flex-col max-[240px]:items-start"
           >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
               <Activity className="h-5 w-5" />
@@ -223,7 +237,15 @@ export function ModelsPageContent() {
           </Link>
         </div>
 
-        <div role="search" aria-label={filters.search} className="mt-10 grid min-w-0 gap-4 sm:grid-cols-3">
+        {lang === "ko" ? (
+          <button type="button" data-testid="models-mobile-filters-toggle" aria-expanded={mobileFiltersOpen}
+            aria-controls="models-catalog-filters" onClick={() => setMobileFiltersOpen((open) => !open)}
+            className="mt-5 flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-zinc-300 px-3 py-2 text-left text-sm font-bold dark:border-zinc-700 sm:hidden">
+            {filters.search}<span aria-hidden="true">{mobileFiltersOpen ? "−" : "+"}</span>
+          </button>
+        ) : null}
+        <div id="models-catalog-filters" role="search" aria-label={filters.search}
+          className={`mt-5 min-w-0 gap-4 sm:mt-10 sm:grid-cols-3 ${lang === "ko" && !mobileFiltersOpen ? "hidden sm:grid" : "grid"}`}>
           <label className="min-w-0 text-sm font-bold">
             {filters.search}
             <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} className="mt-2 min-h-11 w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2 font-normal focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900" />
@@ -246,7 +268,7 @@ export function ModelsPageContent() {
           <button type="button" onClick={() => { setQuery(""); setProvider("all"); setPlan("all"); }} className="min-h-11 rounded-xl border border-zinc-300 px-3 py-2 text-sm font-bold focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-700">{filters.clear}</button>
         </div>
         {filteredModels.length === 0 ? <p className="mt-8 text-sm">{filters.empty}</p> : null}
-        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-5 grid grid-cols-1 gap-4 sm:mt-12 sm:grid-cols-2 lg:grid-cols-3">
           {filteredModels.map((model) => {
             const brand = getModelBrand(model.provider);
             const tags = getModelExperienceTags(model).filter((tag) => lang !== "en" || tag === "reasoning" || tag === "free");
