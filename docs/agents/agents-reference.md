@@ -1473,7 +1473,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `tests/marketingPublishAdmission.test.ts`(운영자 2026-10-31). 승인 모드 계정의 `recoveryContractAvailable`은 참입니다 — 결과를
   모르는 게시물은 `outcome_unknown`으로 남아 사람이 해결하고, 승인 모드 계정은 멈추지 않습니다(Zernio는 우리 요청 키로 조회할 수
   없음, amendment 4). 자율 모드는 S0가 채널별 계약을 확정하기 전까지 그대로 읽을 수 없음입니다(docs/policy/marketing-automation.md §8.1). `platformBudgetAvailable`은
-  채널에 §7.6 일/주 상한이 있는지이고, 실제 개수는 claim이 같은 트랜잭션에서 셉니다. 상한이 없는 채널(RedNote)은 사람이 올립니다.
+  채널에 API 게시 경로가 있는지입니다(정책 일/주 상한은 2026-11-08에 없앴고, 운영자가 건 계정 상한만 claim이 같은 트랜잭션에서 셉니다). API 게시 경로가 없는 채널(RedNote)은 사람이 올립니다.
   승인 게시에 남은 조건은 Admin 게시 스위치(기본 꺼짐)와 가격 대체 알림 수신처(`priceFallbackAlertReady`)입니다.
   판정 모듈 `lib/marketingAutomationAccess.ts`는 Prompt Refiner closure 안이라 고치지 않고, 입력만 이 파일에서 채웁니다.
 - **S3c1(LLM 비용 원장 표와 결정적 핵심)**: `lib/marketingLlmBudgetCore.ts`,
