@@ -42,6 +42,7 @@ import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
 import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
+import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
 import { getImageModel, imageModelOwner } from "@/lib/imageModelRegistry";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
@@ -1622,7 +1623,7 @@ export function ChatMessageList({
                               <li>{t("chat.fileErrorHelpRetry")}</li>
                             </ul>
                             <Link
-                              href="/support/help-centre"
+                              href={helpCentreHref(lang)}
                               className="mt-2 inline-flex font-bold text-blue-600 underline underline-offset-2 dark:text-blue-400"
                             >
                               {t("chat.fileErrorHelpLink")}
