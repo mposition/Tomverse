@@ -10,7 +10,7 @@ cache-mode: read
 # The Rust workspace (crates/amux-core, apps/tomverse-orchestrator) had no CI
 # lane, so its tests only ever ran on a developer's machine. A regression test
 # nobody runs is not a defence: this lane makes the workspace's own tests a
-# check on every change.
+# check on every change that can affect them (scripts/rust-vendor-scope.mjs).
 #
 # It has no path filter on purpose. This job is a required check, and a
 # path-filtered workflow reports nothing at all on a pull request that does not
@@ -92,8 +92,11 @@ jobs:
 
       # The base the change is measured against: the pull request's base, or the
       # push's previous head. Anything that cannot be fetched or diffed -- a new
-      # branch, a force push, workflow_dispatch -- runs the vendored server.
-      - name: Decide whether the vendored AMUX server is in scope
+      # branch, a force push, workflow_dispatch -- runs both. Since 2026-11-09 the
+      # same diff also decides the root workspace (crates/, the orchestrator),
+      # which most changes do not touch; see scripts/rust-vendor-scope.mjs. The
+      # job still runs and reports either way, so the required check never waits.
+      - name: Decide whether the root workspace and the vendored AMUX server are in scope
         id: scope
         env:
           EVENT: ${{ github.event_name }}
@@ -128,6 +131,7 @@ jobs:
       # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
       - name: Restore the downloaded crates
         id: crates_cache
+        if: steps.scope.outputs.workspace == 'true' || steps.scope.outputs.vendor == 'true'
         uses: actions/cache/restore@v5
         with:
           path: |
@@ -140,9 +144,11 @@ jobs:
       # does not touch. Formatting is its own decision.
 
       - name: Build
+        if: steps.scope.outputs.workspace == 'true'
         run: cargo build --workspace --locked
 
       - name: Test
+        if: steps.scope.outputs.workspace == 'true'
         run: cargo test --workspace --locked
 
       - name: Build vendored AMUX server
