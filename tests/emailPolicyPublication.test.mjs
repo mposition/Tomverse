@@ -231,13 +231,15 @@ test("a consent copy version that makes no promise has changed the promise in ev
 });
 
 test("approval records remain explicit and separate from current observations", () => {
-  assert.deepEqual(Object.keys(APPROVED_AMENDED_DIGESTS).sort(), [...AMENDED_DOCUMENTS].sort());
-  for (const path of AMENDED_DOCUMENTS) {
-    const approved = APPROVED_AMENDED_DIGESTS[path];
-    assert.ok(approved.length > 0, `${path}: no approval history`);
-    assert.equal(new Set(approved).size, approved.length);
-    for (const digest of approved) assert.match(digest, /^[a-f0-9]{64}$/);
-  }
+  // These approvals are independent evidence, never derived from the current
+  // page. An observation update cannot silently widen this legal gate.
+  assert.deepEqual(APPROVED_AMENDED_DIGESTS["/privacy"], [
+    "eed140cd012feb7df346aa65b3e34cd589a77173c06bdf11c5262800cf7612f8",
+    "0a598b218b4cc0db14a71bfa49c2b067a46fb2756519cd5879fe3d3311270817",
+  ]);
+  assert.deepEqual(APPROVED_AMENDED_DIGESTS["/terms"], [
+    "5a2e6339c29b7b8892add806418f5d24b2681a58a426808531ff639e617a4709",
+  ]);
   assert.equal(AMENDED_DOCUMENT_EVIDENCE["/privacy"].date, "2026-11-16");
   // A future effective date is not a lastmod (lib/sitemapContentDates.ts).
   assert.equal(SITEMAP_CONTENT_EVIDENCE["/privacy"], undefined);
