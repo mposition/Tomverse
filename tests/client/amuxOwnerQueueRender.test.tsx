@@ -6,6 +6,7 @@ import type {
   AmuxOwnerReviewController,
   AmuxReviewDetail,
 } from "@/components/admin/AdminAmuxRoutingPanel";
+import { readAmuxLegacyCardForTask, type AmuxLegacyCardRead } from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxOwnerQueueDecision } from "@/components/admin/AmuxOwnerQueueDecision";
 import { AmuxOwnerQueueView, isAmuxOwnerQueueRead } from "@/components/admin/AmuxOwnerQueueScreen";
 import type { AmuxOwnerQueueItem, AmuxOwnerQueueRead } from "@/lib/amux/ownerQueueCore";
@@ -157,11 +158,12 @@ const reviewFor = (escalationId: string, overrides: Partial<AmuxReviewDetail> = 
   ...overrides,
 });
 
-const decision = (card: AmuxOwnerQueueItem, ctl: AmuxOwnerReviewController, canInspectCards = true) =>
+const decision = (card: AmuxOwnerQueueItem, ctl: AmuxOwnerReviewController, canInspectCards = true,
+  legacy: AmuxLegacyCardRead | null = null) =>
   renderToStaticMarkup(
     <AmuxOwnerQueueDecision item={card} controller={ctl} canInspectCards={canInspectCards} index={1} total={4}
       generatedAt="2026-11-08T03:00:00.000Z" navLocked={false} advance onAdvanceChange={() => {}}
-      onPrevious={null} onNext={() => {}} onAnswered={() => {}} />);
+      onPrevious={null} onNext={() => {}} onAnswered={() => {}} initialLegacyCard={legacy} />);
 
 test("a decision card explains why it stopped, offers the next-card checkbox on and links to the full card", () => {
   const html = decision(items[0], controller());
@@ -375,4 +377,111 @@ test("a blocked card says what its own attempt reason was, not only 'blocked bef
     }),
   }));
   assert.match(other, /The run was blocked before it could finish/);
+});
+
+test("a done or todo card left with an earlier attempt's escalation offers its close, to the owner", () => {
+  const card = item({ status: "done", attentionReason: "usage_outcome_unknown" });
+  for (const shown of [card, item({ status: "todo", attentionReason: "usage_outcome_unknown" })]) {
+    const html = decision(shown, controller());
+    assert.match(html, /data-testid="amux-settled-card-escalation"/);
+    assert.match(html, /data-testid="amux-settled-card-escalation-close"/);
+  }
+  // Not for a viewer who is not the owner, and not for a card that still waits on a decision.
+  assert.doesNotMatch(decision(card, controller(), false), /amux-settled-card-escalation/);
+  assert.doesNotMatch(decision(item({}), controller()), /amux-settled-card-escalation/);
+});
+
+const preV22Legacy: AmuxLegacyCardRead = { revision: 9, view: { kind: "pre_v22_task", closeRefusal: null,
+  alreadyArchived: false, idea: { state: "ready", title: "Can the PR check be reused?", truncated: false,
+    text: "Can the PR check be reused?\n\n원래 카드: AMUX-GITHUB-002" } } };
+
+test("a legacy card with no decision is remade or closed right under the why box, with no second click", () => {
+  // The panel used to be only on the board's card overview, one more click away.
+  const card = item({ status: "review", displayKey: "AMUX-GITHUB-002" });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 9, due_parse_state: "valid",
+        review_pr_number: null, recovery_inspectable: true, host_recovery_available: false },
+      allowed_outcomes: [], proposed_transitions: {},
+    }) }), true, preV22Legacy);
+  assert.match(html, /data-testid="amux-legacy-card"/);
+  assert.match(html, /Task made before v22/);
+  assert.match(html, /data-testid="amux-legacy-card-recreate"/);
+  assert.match(html, /data-testid="amux-legacy-card-close"/);
+  // The panel sits right below the why box, before the review parts.
+  const why = html.indexOf('data-testid="amux-owner-queue-why"');
+  const panel = html.indexOf('data-testid="amux-legacy-card"');
+  const choices = html.indexOf('data-testid="amux-owner-queue-choices"');
+  assert.ok(why >= 0 && why < panel && panel < choices);
+  // The why box and the choices point at the panel: no false "you can block it", no recovery steps.
+  assert.match(html, /No review decision can open on this card/);
+  assert.doesNotMatch(html, /You can block it/);
+  assert.match(html, /data-testid="amux-owner-queue-choices-none"[^>]*>[^<]*legacy card panel above/);
+  assert.doesNotMatch(html, /No choice is open for this card yet/);
+  assert.doesNotMatch(html, /amux-owner-queue-recovery-steps/);
+  // Its Ubuntu inspection is not offered; the note points at the panel.
+  assert.match(html, /data-testid="admin-amux-host-recovery-not-applicable">This Task is archived, or has no v22 receipt/);
+  assert.match(html, /in the legacy card panel on this screen/);
+  assert.doesNotMatch(html, /Request Ubuntu inspection/);
+  assert.doesNotMatch(html, /admin-amux-one-click-recovery/);
+});
+
+test("a legacy panel is the owner's only, and a card with an open choice keeps its decision words", () => {
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const ctl = controller({ selectedEscalationId: escalationId, review: reviewFor(escalationId, {
+    task: { id: "task-1", title: "Tidy", status: "review", revision: 8, due_parse_state: "valid",
+      host_recovery_available: false } }) });
+  // A card the Ubuntu inspection can take is a v22 Task, so its detail is never read for the panel.
+  assert.doesNotMatch(decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId) }), true, preV22Legacy), /data-testid="amux-legacy-card"/);
+  // Nor before this card's own review is read.
+  assert.doesNotMatch(decision(card, controller(), true, preV22Legacy), /data-testid="amux-legacy-card"/);
+  // Not the owner: the panel is never read or shown.
+  assert.doesNotMatch(decision(card, ctl, false, preV22Legacy), /data-testid="amux-legacy-card"/);
+  // A question is answered first; its legacy panel waits.
+  assert.doesNotMatch(decision(items[1], controller(), true, preV22Legacy), /data-testid="amux-legacy-card"/);
+  // With an allowed choice the panel shows, but the decision words stay.
+  const open = decision(card, ctl, true, preV22Legacy);
+  assert.match(open, /data-testid="amux-legacy-card"/);
+  assert.match(open, /<kbd[^>]*>1<\/kbd>Approve/);
+  assert.doesNotMatch(open, /No review decision can open on this card/);
+});
+
+test("a no-PR card with no choice at all does not say it can be blocked", () => {
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8, due_parse_state: "valid",
+        review_pr_number: null },
+      allowed_outcomes: [], proposed_transitions: {},
+    }) }));
+  assert.match(html, /no decision is open for this card right now/);
+  assert.doesNotMatch(html, /You can block it/);
+  assert.match(html, /No choice is open for this card yet/);
+  assert.doesNotMatch(html, /data-testid="amux-legacy-card"/);
+});
+
+test("the legacy panel reads the execution board's card detail and keeps only a legacy view", async () => {
+  const sent: string[] = [];
+  const answer = (body: unknown, status = 200) => (async (url: RequestInfo | URL) => {
+    sent.push(String(url));
+    return Response.json(body, { status });
+  }) as unknown as typeof fetch;
+  assert.deepEqual(await readAmuxLegacyCardForTask("task 1", answer({ id: "task 1", revision: 9,
+    legacyCard: preV22Legacy.view })), preV22Legacy);
+  assert.deepEqual(sent, ["/api/admin/amux/execution-view?view=detail&taskId=task%201"]);
+  // Another card's answer, a malformed view or a failure: no panel.
+  assert.equal(await readAmuxLegacyCardForTask("task-1", answer({ id: "task-2", revision: 9,
+    legacyCard: preV22Legacy.view })), null);
+  assert.deepEqual(await readAmuxLegacyCardForTask("task-1", answer({ id: "task-1", revision: 9,
+    legacyCard: null })), { revision: 9, view: null });
+  assert.deepEqual(await readAmuxLegacyCardForTask("task-1", answer({ id: "task-1", revision: 9,
+    legacyCard: { kind: "something_else", closeRefusal: null, idea: { state: "refused", code: "x" } } })),
+  { revision: 9, view: null });
+  assert.equal(await readAmuxLegacyCardForTask("task-1", answer({ error: "not_found" }, 404)), null);
+  assert.equal(await readAmuxLegacyCardForTask("task-1",
+    (async () => { throw new Error("offline"); }) as unknown as typeof fetch), null);
 });

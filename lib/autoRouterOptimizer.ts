@@ -1,4 +1,5 @@
 import "server-only";
+import { readResponseLatencyEvidence } from "@/lib/responseLatencyStore";
 
 import { generateText, jsonSchema, Output } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
@@ -257,7 +258,9 @@ export const asSession = (value: unknown): AutoLlmRouterSession | null => {
 
 async function loadDecisions(): Promise<OptimizerDecision[]> {
     const rows = await prisma.autoRouterDecision.findMany({
-        where: { outcome: "picked" },
+        // Combined routing carries image context which is deliberately not
+        // stored in decision rows. Do not replay those rows as text-only calls.
+        where: { outcome: "picked", NOT: { version: { contains: "+image-intent-v1" } } },
         orderBy: { createdAt: "desc" },
         take: AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
         select: {
@@ -687,11 +690,12 @@ async function runInBackground(input: {
     // cycle is recorded and only when it passes its range and evidence.
     let proposedSettingChanges: unknown[] = [];
     try {
-        const [candidatesFor, routerStats, catalogueIds, unreliableModels] = await Promise.all([
+        const [candidatesFor, routerStats, catalogueIds, unreliableModels, responseLatency] = await Promise.all([
             autoCandidateMenu(input.models),
             readRouterStats(new Date()),
             optimizerCatalogueIds(),
             readUnreliableAnswerModels(),
+            readResponseLatencyEvidence(),
         ]);
         const result = await runOptimizerCycle(
             {
@@ -700,6 +704,7 @@ async function runInBackground(input: {
                 routerStats,
                 catalogueIds,
                 unreliableModels,
+                responseLatency,
             },
             {
                 budgetMicroUsd: input.budgetMicroUsd,
@@ -878,6 +883,7 @@ async function runInBackground(input: {
                     judgeFailed: result.judgeFailed,
                     answerStats: result.answerStats,
                     unreliableModels,
+                    responseLatency,
                 },
                 spentMicroUsd: result.spentMicroUsd,
                 finishedAt: new Date(),
