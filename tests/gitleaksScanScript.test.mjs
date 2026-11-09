@@ -57,7 +57,12 @@ test("the scan keeps the action's flags, ranges and exit mapping", () => {
   assert.match(script, /^readonly EXIT_CODE_LEAKS_DETECTED=2$/mu);
   assert.ok(script.includes('"--exit-code=${EXIT_CODE_LEAKS_DETECTED}"'));
   assert.ok(script.includes('LOG_OPTS="--no-merges --first-parent ${merge_base}..${head}"'));
-  assert.ok(script.includes('LOG_OPTS="--no-merges --first-parent ${first}^..${last}"'));
+  // A push scans every commit it added. --first-parent here scanned 0 commits
+  // on main (its first-parent line is all merges), and the event's commits
+  // array is capped at 20, so neither may come back.
+  const push = script.slice(script.indexOf("    push)\n"), script.indexOf("    schedule | workflow_dispatch)"));
+  assert.ok(push.includes('LOG_OPTS="--no-merges ${before}..${after}"'));
+  assert.doesNotMatch(push, /--first-parent|\.commits/u);
   assert.match(script, /schedule \| workflow_dispatch\)\n\s+;;/u, "scheduled and manual runs scan the whole history");
   assert.match(script, /\*\)\n\s+echo "::error::The \[\$\{GITHUB_EVENT_NAME:-\}\] event is not supported[^\n]*\n\s+exit 1/u);
   // Leaks fail the step; a gitleaks error keeps its own code.

@@ -53,6 +53,7 @@
 .modelStamp { flex: 1 1 0; min-width: 0; background: var(--launch-panel); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 8px; position: relative; z-index: 1; }
 .modelStamp strong { font-size: 1.625rem; line-height: 1.15; }
 .modelStamp span { font-size: .75rem; line-height: 1.5; color: var(--launch-muted); }
+.mobileModelNote { display: none; }
 .stamp0 { transform: rotate(-7deg); }
 .stamp1 { transform: rotate(3deg); margin-top: -10px; }
 .stamp2 { transform: rotate(7deg); margin-top: 32px; }
@@ -227,6 +228,7 @@
   .hero { padding-top: 28px; }
   .heroTitle { font-size: min(16cqw, 3.8rem); line-height: 1.15; letter-spacing: -.045em; }
   .heroTitle span:last-child { font-size: min(18cqw, 4.1rem); letter-spacing: -.055em; }
+  .homepage:lang(ko) .heroTitle span:last-child { font-size: min(14cqw, 3.5rem); overflow-wrap: normal; }
   .heroContent { margin-top: 28px; gap: 36px; }
   .heroStory { padding-top: 0; }
   .heroStory > p:first-child { font-size: 1rem; line-height: 1.6; }
@@ -234,10 +236,12 @@
   .heroStory .action { width: 100%; }
   .heroAccess { font-size: .75rem; }
   .modelArt { min-height: 0; padding-top: 0; }
-  .modelStamps { gap: 12px; padding: 16px 2px 0; }
+  .modelStamps { align-items: stretch; flex-wrap: wrap; gap: 8px; padding: 16px 2px 0; }
+  .modelStamps .modelStamp { flex-basis: 4.5rem; transform: none; animation: none; margin-top: 0; color: #fafafa; text-align: center; }
   .modelStamp { padding: 16px 10px; border-radius: 12px; }
   .modelStamp strong { font-size: 1rem; }
-  .modelStamp span { font-size: .6875rem; }
+  .modelStamp span { display: none; }
+  .mobileModelNote { display: block; position: relative; z-index: 1; margin: 12px 0 0; padding: 4px; background: var(--launch-surface); color: var(--launch-secondary); font-size: .875rem; line-height: 1.5; text-align: center; }
   .stamp1 { margin-top: -6px; }
   .stamp2 { margin-top: 14px; }
   .rails { left: -6px; top: 16px; transform: scale(.5); }
@@ -249,7 +253,8 @@
   .chatPreview h2 { font-size: 1.375rem; }
   .previewBody { font-size: .875rem; }
   .previewFollowup { font-size: .8125rem; }
-  .heroDemo { margin: 16px 0 0; }
+  .heroDemo { margin: 16px 0 0; color: #d4d4d8; font-size: .875rem; line-height: 1.5; }
+  .heroDemo .motionToggle { color: inherit; }
   .ribbonWrap { margin-top: 8px; padding-block: 24px 36px; }
   .ribbon { font-size: 1.5625rem; gap: 24px; padding: 12px 24px; width: max-content; }
   .section { padding-block: 64px; scroll-margin-top: 80px; }
