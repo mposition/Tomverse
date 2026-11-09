@@ -66,8 +66,6 @@ on:
       - "app/api/admin/feedback/**"
       - "tests/integration/**"
       - "scripts/run-db-integration-tests.mjs"
-      - "scripts/db-integration-scope.mjs"
-      - "scripts/import-closure.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/credit-finance-db-integration.yml"

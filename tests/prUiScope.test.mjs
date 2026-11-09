@@ -95,12 +95,10 @@ const load = (name) =>
 test("each browser job decides with the script and gates its expensive steps on it", () => {
     const fastGate = load("pr-fast-gate.yml");
     const parity = load("review-parity-shadow.yml");
-    const admin = load("admin-console-e2e.yml");
     for (const [label, job] of [
         ["build-and-e2e", fastGate.jobs["build-and-e2e"]],
         ["ui-risk", fastGate.jobs["ui-risk"]],
         ["review-parity", parity.jobs["review-parity"]],
-        ["admin-console-e2e-shard", admin.jobs["admin-console-e2e-shard"]],
     ]) {
         const scope = job.steps.find((step) => step.id === "scope");
         assert.ok(scope, `${label} has a scope step`);
@@ -112,6 +110,8 @@ test("each browser job decides with the script and gates its expensive steps on 
     }
 });
 
+// The admin suite asks a narrower question (scripts/admin-e2e-scope.mjs, with
+// its own test in tests/adminE2EScope.test.mjs) inside the same shell.
 test("the admin suite still reports on every change and runs all when its own workflow changes", () => {
     const admin = load("admin-console-e2e.yml");
     // A required check: never path-filtered at the workflow level.
@@ -120,7 +120,10 @@ test("the admin suite still reports on every change and runs all when its own wo
     const shard = admin.jobs["admin-console-e2e-shard"];
     const scope = shard.steps.find((step) => step.id === "scope");
     assert.match(scope.run, /grep -qx '\.github\/workflows\/admin-console-e2e\.yml'/);
-    assert.match(scope.run, /node scripts\/pr-ui-scope\.mjs --all/);
+    assert.match(scope.run, /node scripts\/admin-e2e-scope\.mjs --all/);
+    assert.match(scope.run, /\| node scripts\/admin-e2e-scope\.mjs$/m);
+    // Every fallback in the shell writes code=true itself.
+    assert.equal((scope.run.match(/echo "code=true" >> "\$GITHUB_OUTPUT"/g) ?? []).length, 2);
     // Every step after the scope decision that installs, builds or tests is gated.
     const after = shard.steps.slice(shard.steps.indexOf(scope) + 1);
     for (const step of after) {

@@ -74,7 +74,7 @@ export const edgesOf = (root, file) => {
     const key = `${root}\0${file}`;
     const cached = edgeCache.get(key);
     if (cached) return cached;
-    const edges = { files: [], reads: [], trees: [], prefixes: [], api: [] };
+    const edges = { files: [], reads: [], scripts: [], trees: [], prefixes: [], api: [] };
     edgeCache.set(key, edges);
     let text;
     try {
@@ -89,7 +89,8 @@ export const edgesOf = (root, file) => {
             // A named file is read, not run -- except a script, which is
             // named to be spawned. Following every file a comment or a
             // source-reading test mentions would join every closure into one.
-            if (executed || resolved.startsWith("scripts/")) edges.files.push(resolved);
+            if (executed) edges.files.push(resolved);
+            else if (resolved.startsWith("scripts/")) edges.scripts.push(resolved);
             else edges.reads.push(resolved);
             return;
         }
@@ -122,22 +123,39 @@ export const edgesOf = (root, file) => {
 };
 
 /**
- * @param {{ skip?: (file: string) => boolean, followApiLiterals?: boolean }} [options]
+ * @param {{ skip?: (file: string) => boolean, followApiLiterals?: boolean, followNamedScripts?: boolean }} [options]
  *   `skip` names files that are never reached, and so never followed.
  *   `followApiLiterals` follows a page's `"/api/..."` fetches into the route
  *   handlers under app/api/ -- for a suite that drives the running app.
- * @returns {{ files: Set<string>, prefixes: Set<string> }} every reached file,
- * and the directory prefixes (ending in "/") reached as a whole.
+ *   `followNamedScripts` (default on) follows a scripts/ file named in a
+ *   string, as a test spawning it would run it; off, it is only reached.
+ * @returns {{ files: Set<string>, prefixes: Set<string>, named: Set<string> }}
+ * every reached file; the directory prefixes (ending in "/") reached as a
+ * whole; and, of those two, what was only named in a string rather than
+ * imported (a file in `files` that is also imported is not in `named`).
  */
-export const importClosure = (root, entries, { skip = () => false, followApiLiterals = false } = {}) => {
+export const importClosure = (
+    root,
+    entries,
+    { skip = () => false, followApiLiterals = false, followNamedScripts = true } = {}
+) => {
     const files = new Set();
     const prefixes = new Set();
     const trees = new Set();
+    const named = new Set();
+    const name = (file) => {
+        if (skip(file) || files.has(file)) return;
+        files.add(file);
+        named.add(file);
+    };
     const queue = [];
+    const imported = new Set();
     const reach = (path) => {
         const file = clean(path);
-        if (file.startsWith("../") || files.has(file) || skip(file)) return;
+        if (file.startsWith("../") || imported.has(file) || skip(file)) return;
+        imported.add(file);
         files.add(file);
+        named.delete(file);
         if (SOURCE.test(file) || STYLE.test(file)) queue.push(file);
     };
     const reachTree = (dir) => {
@@ -154,19 +172,31 @@ export const importClosure = (root, entries, { skip = () => false, followApiLite
     while (queue.length > 0) {
         const edges = edgesOf(root, queue.pop());
         for (const file of edges.files) reach(file);
-        for (const file of edges.reads) if (!skip(file)) files.add(file);
+        for (const file of edges.reads) name(file);
+        for (const file of edges.scripts) {
+            if (followNamedScripts) reach(file);
+            else name(file);
+        }
         for (const dir of edges.trees) reachTree(dir);
         for (const prefix of edges.prefixes) prefixes.add(prefix);
         if (followApiLiterals) for (const dir of edges.api) reachTree(dir);
     }
-    return { files, prefixes };
+    for (const prefix of prefixes) if (!trees.has(prefix)) named.add(prefix);
+    return { files, prefixes, named };
 };
 
-/** Whether a changed path is in a closure: a reached file or under a reached tree. */
-export const reaches = (closure, path) => {
+/**
+ * Whether a changed path is in a closure: a reached file or under a reached
+ * tree. `importedOnly(path)` true counts only what was imported, not what was
+ * merely named -- for a suite that drives a built app, which runs what its
+ * bundle imports and never a document a comment points at.
+ */
+export const reaches = (closure, path, { importedOnly = () => false } = {}) => {
     const file = clean(path);
-    if (closure.files.has(file)) return true;
-    for (const prefix of closure.prefixes) if (file.startsWith(prefix)) return true;
+    const strict = importedOnly(file);
+    const counts = (entry) => !strict || !closure.named?.has(entry);
+    if (closure.files.has(file) && counts(file)) return true;
+    for (const prefix of closure.prefixes) if (file.startsWith(prefix) && counts(prefix)) return true;
     return false;
 };
 
