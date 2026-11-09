@@ -53,7 +53,8 @@ test("Korean consent identifies the collected statistics and their purpose", asy
   await expect(notice).toContainText("개선합니다");
   const accept = notice.getByRole("button", { name: "사용 통계 허용", exact: true });
   await expect(accept).toBeVisible();
-  if (isMobile) await expect(accept).toHaveText("통계 허용", { useInnerText: true });
+  // /plugins renders the readable (full-label) notice at every width.
+  await expect(accept).toHaveText("사용 통계 허용", { useInnerText: true });
   expect(events).toBe(0);
   await accept.click();
   await expect(notice).toBeHidden();
