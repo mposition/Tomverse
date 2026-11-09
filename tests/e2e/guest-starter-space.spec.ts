@@ -29,7 +29,11 @@ for (const appearance of ["classic", "studio"] as const) for (const theme of ["l
     });
     expect(metrics.textarea.height).toBeGreaterThanOrEqual(44);
     expect(metrics.input.height).toBeLessThanOrEqual(164);
-    expect(metrics.surface.height).toBeGreaterThanOrEqual(240);
+    // The surface must hold the whole first card (asserted below). At 320x568
+    // it is about 220px once the empty Chat header drops the guest badge row;
+    // the more-suggestions row stays in the dock so a 200% text surface is not
+    // covered by it (chat-starter-catalog.spec.ts).
+    expect(metrics.surface.height).toBeGreaterThanOrEqual(200);
     expect(metrics.first.top).toBeGreaterThanOrEqual(metrics.surface.top);
     expect(metrics.first.bottom).toBeLessThanOrEqual(metrics.surface.bottom);
     expect(metrics.surface.bottom).toBeLessThanOrEqual(metrics.dock.top);
