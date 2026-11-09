@@ -12,9 +12,19 @@ import {
   launchFailure,
   originOf,
   retriesWithoutSandbox,
+  scoutPageLanguageMatches,
 } from "../lib/productResearchScoutBrowserPolicy.mjs";
 
 const allowedOrigins = [SCOUT_PAGE_ORIGIN];
+
+test("page evidence must match its declared language in every viewport", () => {
+  for (const [expected, actual] of [["en", "en"], ["en", "en-AU"], ["ko", "ko-KR"], ["ko", " KO "]]) {
+    assert.equal(scoutPageLanguageMatches(expected, actual), true);
+  }
+  for (const [expected, actual] of [["en", "ko"], ["ko", "en"], ["en", ""], ["en", null], ["fr", "fr"], ["en", "english"]]) {
+    assert.equal(scoutPageLanguageMatches(expected, actual), false);
+  }
+});
 
 test("the page table is the policy's twenty pages, in order, with unique ids", () => {
   // docs/policy/product-research-agent.md §12. Change it together with the policy's table.
