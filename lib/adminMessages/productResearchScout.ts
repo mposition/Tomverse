@@ -4,7 +4,7 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 export const adminProductResearchScoutMessages = defineAdminMessages({
   en: {
     intro:
-      "Each day the Scout looks at 20 public pages, 4 generated file types and the model catalogue, and, with a test account, the signed-in screens and real generations. A model suggests what to improve. You only choose what to send and what to drop.",
+      "Each day the Scout looks at 20 public pages, 4 generated file types and the model catalogue, and, with a test account, the signed-in screens and real generations. A model suggests what to improve. Send suggestions to AMUX, dismiss them or mark verified work completed.",
     stateOn: "Scout on",
     stateJudgingOff: "Judging off",
     stateOff: "Scout off",
@@ -51,6 +51,14 @@ export const adminProductResearchScoutMessages = defineAdminMessages({
     evidenceLabel: "What the model saw",
     selectRow: "Select: {title}",
     dismiss: "Dismiss",
+    complete: "Mark completed",
+    completing: "Completing…",
+    completed: "Completed.",
+    completeHint: "Mark completed after implementation and verification.",
+    completeNotAllowed: "Only an owner or ops administrator can mark a suggestion completed.",
+    completedHeading: "Completed {count}",
+    completedShowing: "Showing the newest {shown} of {total} completed suggestions.",
+    bulkComplete: "Complete {count}",
     send: "Send to AMUX",
     sending: "Sending…",
     dismissing: "Dismissing…",
@@ -173,7 +181,7 @@ export const adminProductResearchScoutMessages = defineAdminMessages({
   },
   ko: {
     intro:
-      "Scout가 매일 공개 페이지 20개, 생성 파일 4종, 모델 카탈로그를 살펴보고, 테스트 계정이 있으면 로그인 화면과 실제 생성 결과도 살펴봅니다. 개선할 점은 모델이 제안하고, 운영자는 보낼 것과 버릴 것만 고르면 됩니다.",
+      "Scout가 매일 공개 페이지 20개, 생성 파일 4종, 모델 카탈로그를 살펴보고, 테스트 계정이 있으면 로그인 화면과 실제 생성 결과도 살펴봅니다. 모델의 개선 제안을 AMUX로 보내거나 거절하고, 구현과 검증을 마친 제안은 완료 처리할 수 있습니다.",
     stateOn: "Scout 켜짐",
     stateJudgingOff: "판정 꺼짐",
     stateOff: "Scout 꺼짐",
@@ -219,6 +227,14 @@ export const adminProductResearchScoutMessages = defineAdminMessages({
     evidenceLabel: "모델이 본 것",
     selectRow: "선택: {title}",
     dismiss: "거절",
+    complete: "완료 처리",
+    completing: "완료 처리 중…",
+    completed: "완료했습니다.",
+    completeHint: "구현과 검증을 마친 제안을 완료 처리합니다.",
+    completeNotAllowed: "owner 또는 ops 관리자만 완료 처리할 수 있습니다.",
+    completedHeading: "완료 {count}건",
+    completedShowing: "완료 {total}건 중 최근 {shown}건을 표시합니다.",
+    bulkComplete: "{count}건 완료 처리",
     send: "AMUX로 보내기",
     sending: "보내는 중…",
     dismissing: "거절하는 중…",

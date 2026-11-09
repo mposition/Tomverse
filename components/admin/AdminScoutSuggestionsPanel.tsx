@@ -29,7 +29,7 @@ import { scoutSubjectInfo } from "@/lib/productResearchScoutSubjects";
 
 /**
  * The Scout's open suggestions (docs/policy/product-research-agent.md §10),
- * laid out for one decision each: drop it or send it to AMUX as an idea.
+ * laid out for one decision each: complete it, drop it or send it to AMUX.
  *
  * The top row answers "is it working and what is waiting" at a glance. The
  * list is grouped by the page or file a suggestion is about, the groups that
@@ -39,7 +39,7 @@ import { scoutSubjectInfo } from "@/lib/productResearchScoutSubjects";
  */
 const RETURN_TO = "/admin/product-research?tab=suggestions";
 
-type Action = "dismiss" | "send";
+type Action = "dismiss" | "send" | "complete";
 
 type RowState =
   | { readonly kind: "idle" }
@@ -56,6 +56,7 @@ const BUTTON =
   "inline-flex min-h-11 flex-1 items-center justify-center rounded-lg border px-3.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 sm:flex-none";
 const DISMISS_BUTTON = `${BUTTON} border-zinc-700 text-zinc-300 hover:bg-zinc-800 sm:border-transparent`;
 const SEND_BUTTON = `${BUTTON} border-blue-800 text-blue-300 hover:bg-blue-950`;
+const COMPLETE_BUTTON = `${BUTTON} border-emerald-800 text-emerald-300 hover:bg-emerald-950`;
 const COPY_BUTTON = `${BUTTON} border-zinc-700 text-zinc-200 hover:bg-zinc-800`;
 
 /**
@@ -157,7 +158,13 @@ export function AdminScoutSuggestionsPanel({
       return failure;
     }
     const body = (await response.json().catch(() => ({}))) as { status?: string; amuxIdeaId?: string | null };
-    const message = body.status === "sent" || body.amuxIdeaId ? fill(m.sent, { ideaId: body.amuxIdeaId ?? "-" }) : m.dismissed;
+    if (body.status !== "completed" && body.status !== "sent" && body.status !== "dismissed") {
+      const failure: AdminApiFailure = { message: m.failed, tone: "error", requiresReauthentication: false, approvalId: null };
+      setRows((current) => ({ ...current, [suggestion.id]: { kind: "failed", failure } }));
+      return failure;
+    }
+    const message = body.status === "completed" ? m.completed
+      : body.status === "sent" ? fill(m.sent, { ideaId: body.amuxIdeaId ?? "-" }) : m.dismissed;
     setRows((current) => ({ ...current, [suggestion.id]: { kind: "done", message } }));
     setSelected((current) => {
       const next = new Set(current);
@@ -193,7 +200,7 @@ export function AdminScoutSuggestionsPanel({
       }
       return next;
     });
-  const selectable = (row: ScoutConsoleSuggestion) => rows[row.id]?.kind !== "done" && (initial.canDismiss || initial.canSend);
+  const selectable = (row: ScoutConsoleSuggestion) => rows[row.id]?.kind !== "done" && (initial.canDismiss || initial.canSend || initial.canComplete);
   const batch = nextScoutSendBatch(visible.filter(selectable));
 
   const renderRow = (suggestion: ScoutConsoleSuggestion, showSubject: boolean) => {
@@ -245,6 +252,15 @@ export function AdminScoutSuggestionsPanel({
           <div className="flex flex-wrap gap-2 sm:shrink-0">
             {done ? null : (
               <>
+                <button
+                  type="button"
+                  className={COMPLETE_BUTTON}
+                  disabled={busy || !initial.canComplete}
+                  title={initial.canComplete ? m.completeHint : m.completeNotAllowed}
+                  onClick={() => act(suggestion, "complete")}
+                >
+                  {row.kind === "busy" && row.action === "complete" ? m.completing : m.complete}
+                </button>
                 <button
                   type="button"
                   className={DISMISS_BUTTON}
@@ -464,6 +480,19 @@ export function AdminScoutSuggestionsPanel({
           : fill(m.shownAll, { count: initial.open.length, dismissed: initial.counts.dismissed, sent: initial.counts.sent })}
       </p>
 
+      <details className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3" data-testid="admin-product-research-scout-completed">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-200">{fill(m.completedHeading, { count: initial.counts.completed })}</summary>
+        <p className="mt-2 text-xs text-zinc-400">{fill(m.completedShowing, { shown: initial.completed.length, total: initial.counts.completed })}</p>
+        <ul className="mt-2 divide-y divide-zinc-800">
+          {initial.completed.map((row) => (
+            <li key={row.id} className="py-2 text-sm text-zinc-300">
+              <p>{row.title}</p>
+              <p className="text-xs text-zinc-400">{subjectLabel(row.subject)}{row.completedAt ? <> · <time dateTime={row.completedAt} suppressHydrationWarning>{localTime(row.completedAt, locale, { today: m.todayWord, tomorrow: m.tomorrowWord })}</time></> : null}</p>
+            </li>
+          ))}
+        </ul>
+      </details>
+
       {selectedCount > 0 || bulk.kind !== "idle" ? (
         <div
           className="sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border border-blue-500/60 bg-zinc-900 px-4 py-3 shadow-lg sm:flex-row sm:items-center"
@@ -490,7 +519,7 @@ export function AdminScoutSuggestionsPanel({
             ) : null}
           </div>
           {selectedCount > 0 ? (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 className="min-h-11 px-3 text-sm font-medium text-zinc-400 hover:text-zinc-100 disabled:opacity-50 sm:min-h-9"
@@ -501,6 +530,15 @@ export function AdminScoutSuggestionsPanel({
                 }}
               >
                 {m.clearSelection}
+              </button>
+              <button
+                type="button"
+                className={COMPLETE_BUTTON}
+                disabled={bulk.kind === "running" || !initial.canComplete}
+                title={initial.canComplete ? m.completeHint : m.completeNotAllowed}
+                onClick={() => runBulk("complete")}
+              >
+                {fill(m.bulkComplete, { count: selectedCount })}
               </button>
               <button
                 type="button"
