@@ -192,7 +192,9 @@ test("long input applies the configured credit multiplier", () => {
   const premium = getModel("gpt-5-5");
   assert.equal(getInputCreditMultiplier(16_000), 1);
   assert.equal(getInputCreditMultiplier(16_001), 1.5);
+  assert.equal(getInputCreditMultiplier(50_000), 1.5);
   assert.equal(getInputCreditMultiplier(50_001), 2);
+  assert.equal(getInputCreditMultiplier(100_000), 2);
   assert.equal(getInputCreditMultiplier(100_001), 3);
   // gpt-5-5 now carries an explicit 16-credit weight; 2x at 60,000 tokens.
   assert.equal(getWeightedUsageCredits(premium, 60_000), 32);
