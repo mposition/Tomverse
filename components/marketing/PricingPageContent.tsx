@@ -352,7 +352,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Buy an additional credit pack for a temporary project or a busier month. Fixed local pricing is shown and checkout is available after sign-in.",
     availableFor: "Available on",
     oneTime: "One-time purchase",
-    validity: "Valid for 12 months",
+    validity: "Valid for {days} days",
     credits: "credits",
     policyTitle: "How additional credits work",
     policies: [
@@ -380,7 +380,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "이번 달 작업량이 많거나 일시적인 프로젝트가 있을 때 추가 크레딧 팩을 구매할 수 있습니다. 현지통화 고정 가격이 표시되며 로그인 후 결제할 수 있습니다.",
     availableFor: "구매 가능 플랜",
     oneTime: "일회성 구매",
-    validity: "12개월 유효",
+    validity: "{days}일 유효",
     credits: "크레딧",
     policyTitle: "추가 크레딧 이용 방식",
     policies: [
@@ -408,7 +408,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "当本月工作量增加或有临时项目时，可购买额外积分包。页面显示本地固定价格，登录后可结账。",
     availableFor: "适用方案",
     oneTime: "一次性购买",
-    validity: "有效期 12 个月",
+    validity: "有效期 {days} 天",
     credits: "积分",
     policyTitle: "额外积分的使用方式",
     policies: [
@@ -432,7 +432,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "當本月工作量增加或有臨時專案時，可以購買額外的點數包。頁面會顯示當地固定價格，登入後即可結帳。",
     availableFor: "適用方案",
     oneTime: "一次性購買",
-    validity: "有效期 12 個月",
+    validity: "有效期 {days} 天",
     credits: "點數",
     policyTitle: "額外點數的使用方式",
     policies: [
@@ -456,7 +456,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Achetez un pack pour un projet temporaire ou un mois plus chargé. Le prix local fixe est affiché et l’achat est disponible après connexion.",
     availableFor: "Disponible avec",
     oneTime: "Achat unique",
-    validity: "Valable 12 mois",
+    validity: "Valable {days} jours",
     credits: "crédits",
     policyTitle: "Fonctionnement des crédits supplémentaires",
     policies: [
@@ -480,7 +480,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Kaufen Sie ein Paket für ein vorübergehendes Projekt oder einen arbeitsreichen Monat. Der lokale Festpreis wird angezeigt; Kauf nach Anmeldung.",
     availableFor: "Verfügbar für",
     oneTime: "Einmalkauf",
-    validity: "12 Monate gültig",
+    validity: "{days} Tage gültig",
     credits: "Credits",
     policyTitle: "So funktionieren zusätzliche Credits",
     policies: [
@@ -504,7 +504,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Compra un paquete para un proyecto temporal o un mes con más trabajo. Se muestra el precio local fijo y la compra requiere iniciar sesión.",
     availableFor: "Disponible en",
     oneTime: "Compra única",
-    validity: "Válido 12 meses",
+    validity: "Válido {days} días",
     credits: "créditos",
     policyTitle: "Cómo funcionan los créditos adicionales",
     policies: [
@@ -528,7 +528,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Compre um pacote para um projeto temporário ou um mês mais intenso. O preço local fixo é exibido e a compra fica disponível após o login.",
     availableFor: "Disponível no",
     oneTime: "Compra única",
-    validity: "Válido por 12 meses",
+    validity: "Válido por {days} dias",
     credits: "créditos",
     policyTitle: "Como funcionam os créditos adicionais",
     policies: [
@@ -1630,7 +1630,7 @@ export function PricingPageContent() {
                 </div>
               )}
               {planId !== "free" ? (
-                <div className={`mt-3 rounded-2xl border p-3 text-xs font-bold leading-5 ${
+                <div className={`mt-3 rounded-2xl border p-3 text-sm font-bold leading-6 ${
                   plan.highlighted
                     ? "border-white/20 bg-white/10 text-blue-50"
                     : "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300"
@@ -1642,7 +1642,7 @@ export function PricingPageContent() {
                     </span>
                   </div>
                   <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}</div>
-                  <p className={plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}>
+                  <p data-testid="pricing-annual-checkout-note" className={plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}>
                     {annualCopy.checkout}
                   </p>
                 </div>
@@ -2000,7 +2000,7 @@ export function PricingPageContent() {
                     {creditPackGuide.packDescriptions[pack.id]}
                   </p>
                   <p className="mt-4 min-w-0 break-words border-t border-zinc-200 pt-3 text-xs font-bold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                    {creditPackGuide.validity}
+                    {creditPackGuide.validity.replace("{days}", String(pack.validityDays))}
                   </p>
                   {/* Per-pack CTA. The pack the visitor clicked is what the
                       modal opens on, and what a sign-in detour carries back,
