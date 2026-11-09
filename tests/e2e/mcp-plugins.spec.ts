@@ -49,6 +49,10 @@ for (const theme of ["light", "dark"] as const) {
     expect(await notice.getByRole("link").evaluate(element => element.getClientRects().length)).toBe(1);
     await notice.getByTestId("analytics-consent-decline").click();
     await expect(notice).toHaveCount(0);
+    const settingsButton = page.getByTestId("marketing-consent-slot").getByTestId("analytics-settings-button");
+    await expect(settingsButton).toBeVisible();
+    await settingsButton.click();
+    await expect(notice).toBeVisible();
     await expectNoHorizontalOverflow(page);
     expect(writes).toBe(0);
   });

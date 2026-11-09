@@ -775,7 +775,8 @@ export function AnalyticsProvider({
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
-  const readableNotice = pathname === "/plugins";
+  const isPluginRoute = pathname === "/plugins";
+  const readableNotice = isSettingsRoute || isPluginRoute;
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot
@@ -814,8 +815,8 @@ export function AnalyticsProvider({
   // pill are mutually exclusive -- one needs `consent === "unset"` or the
   // preferences panel open, the other needs a settled choice and the panel
   // closed -- so the slot never has to hold both.
-  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute || readableNotice;
-  const settingsInlineSlot = readableNotice ? marketingConsentSlot : isSettingsRoute ? settingsConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
+  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute || isPluginRoute;
+  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : isPluginRoute ? marketingConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
 
   // REAUDIT-P1-01. Chat and Review share a workspace where the bottom-right corner is
   // never free: the last model panel's follow-up form ends there, and below it
@@ -933,8 +934,8 @@ export function AnalyticsProvider({
                 aria-label={promptCopy.title}
                 data-testid="chat-consent-notice"
                 className={
-                  inlineSlot === marketingConsentSlot
-                    ? // The marketing slot already supplies the page gutter, so
+                  inlineSlot === marketingConsentSlot || inlineSlot === settingsConsentSlot
+                    ? // These slots already supply the page gutter, so
                       // the card spans it and never needs its own max-width.
                       "rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-0.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
                     : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
