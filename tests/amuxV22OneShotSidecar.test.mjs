@@ -783,7 +783,7 @@ test("a Codex implement run gets the base's locked packages and a writable temp 
     config: { ...value, homePath: "/run-home", claudeConfigDir: "/run-home/codex" },
     cleanup: async () => {} });
   for (const [role, deps, expectedTmp] of [
-    ["implement", { ok: true, installed: true }, join(config.worktreePath, "node_modules", ".cache", "amux-tmp")],
+    ["implement", { ok: true }, join(config.worktreePath, "node_modules", ".cache", "amux-tmp")],
     ["implement", { ok: false, reason: "install_failed" }, undefined],
     ["investigate", null, undefined],
   ]) {
