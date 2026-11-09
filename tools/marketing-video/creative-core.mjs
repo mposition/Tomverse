@@ -232,14 +232,11 @@ const DISCLOSURE = Object.freeze({ instagram: "caption_disclosure", youtube: "pl
  * The asset file submit-asset.mjs sends. Real captures mixed with AI shots,
  * voice and music.
  *
- * Provenance: `ai_modified` with `depictsProductInterface: false`, as the
- * owner-approved receipt pilot was submitted (2026-11-09). The schema has no
- * provenance for "real captures, unchanged, plus AI shots, voice and music":
- * an AI origin may claim the interface only as `capture_with_ai_presenter`,
- * whose one AI part is a presenter (lib/marketingAssets.ts, policy §7.3). A
- * provenance of its own needs a migration and the owner's decision; until then
- * the conservative reading holds (not presented as the product interface, AI
- * disclosure on every channel).
+ * Provenance: `capture_with_ai_media` with `depictsProductInterface: true`
+ * (owner decision 2026-11-09): the product screens are real captures from an
+ * approved short, unchanged, and the run makes no film without one; the shots,
+ * the voice and the music are AI-made, so it is of AI origin and disclosed on
+ * every channel (lib/marketingAssets.ts, policy §7.3).
  *
  * What the Guard reads is still the whole film, as make-card.mjs does for a
  * card with captures: the words inside the captures it shows go into the
@@ -253,13 +250,13 @@ export function creativeAsset({ id, locale, words, captureWords = [], claimIds =
   return {
     asset: {
       id,
-      provenance: "ai_modified",
+      provenance: "capture_with_ai_media",
       allowedChannels: [...channels],
       alt: { [locale]: words.alt },
       claimIds: [...new Set(claimIds)],
       validUntil,
       disclosure: Object.fromEntries(channels.map((channel) => [channel, DISCLOSURE[channel]])),
-      depictsProductInterface: false,
+      depictsProductInterface: true,
     },
     transcript: { [locale]: [words.lines.join(" "), [...words.screen, "tomverse.app"].join("\n"), ...(inside.length > 0 ? [inside.join("\n")] : [])].join("\n\n") },
   };
