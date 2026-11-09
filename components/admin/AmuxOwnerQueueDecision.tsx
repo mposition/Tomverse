@@ -143,8 +143,12 @@ export function AmuxOwnerQueueDecision({
   // A card no review decision opens on (a legacy WORKBOARD card or a pre-v22
   // Task) is remade or closed here, from the card detail read the execution
   // board uses, so the owner does not open the full card first. Owner only.
+  // The card detail is read only once this card's review says the card is not
+  // a v22 Task the Ubuntu inspection can take (an archived card is no longer
+  // in this queue), so an ordinary v22 card costs no second detail read.
   const legacyRead = useAmuxLegacyCardRead(item.taskId,
-    canInspectCards && group !== "question" && summary !== null, initialLegacyCard);
+    canInspectCards && group !== "question" && reviewMatches &&
+      review.task.host_recovery_available === false, initialLegacyCard);
   const legacyCard = legacyRead?.view ? { revision: legacyRead.revision, view: legacyRead.view } : null;
   // Once the review is read, the legacy panel stands in for a decision only when none is open.
   const legacyOnly = legacyCard !== null && outcomes.length === 0;
@@ -237,7 +241,7 @@ export function AmuxOwnerQueueDecision({
         <AmuxLegacyCardPanel key={item.taskId + ":" + legacyCard.revision} taskId={item.taskId}
           revision={legacyCard.revision} view={legacyCard.view} canAct={canInspectCards}
           reauthReturnPath={item.escalationId === null ? undefined
-            : `/admin/amux-execution?focusEscalation=${encodeURIComponent(item.escalationId)}`}
+            : `/admin/amux-execution?tab=review&focusEscalation=${encodeURIComponent(item.escalationId)}`}
           // A closed card leaves the queue; a recreate that did not close keeps it here with its message.
           onChanged={(closed) => { if (closed) onAnswered(); }} />
       ) : null}

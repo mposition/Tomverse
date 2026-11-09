@@ -1055,7 +1055,9 @@ assignment decisions) belong to Diagnostics.
   pre-v22 Task (`amuxLegacyCardKind`, `lib/amux/legacyCardCore.ts`) show the execution
   board's legacy card panel (`AmuxLegacyCardPanel`: recreate as a new idea, or
   close) right under "Why it stopped", read for the owner from the same card
-  detail the board opens (`execution-view?view=detail`) and written through
+  detail the board opens (`execution-view?view=detail`, read only once the
+  card's review reports `host_recovery_available: false`, so an ordinary v22
+  card costs no second detail read) and written through
   the existing `POST /api/admin/amux/legacy-card`. With no choice open, the why
   box and the choices point at that panel instead of the recovery steps. An
   archived card (opened from the archive) offers no Ubuntu inspection.

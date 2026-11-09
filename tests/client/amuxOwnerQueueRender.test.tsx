@@ -418,7 +418,14 @@ test("a legacy card with no decision is remade or closed right under the why box
 test("a legacy panel is the owner's only, and a card with an open choice keeps its decision words", () => {
   const card = item({ status: "review" });
   const escalationId = card.escalationId!;
-  const ctl = controller({ selectedEscalationId: escalationId, review: reviewFor(escalationId) });
+  const ctl = controller({ selectedEscalationId: escalationId, review: reviewFor(escalationId, {
+    task: { id: "task-1", title: "Tidy", status: "review", revision: 8, due_parse_state: "valid",
+      host_recovery_available: false } }) });
+  // A card the Ubuntu inspection can take is a v22 Task, so its detail is never read for the panel.
+  assert.doesNotMatch(decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId) }), true, preV22Legacy), /data-testid="amux-legacy-card"/);
+  // Nor before this card's own review is read.
+  assert.doesNotMatch(decision(card, controller(), true, preV22Legacy), /data-testid="amux-legacy-card"/);
   // Not the owner: the panel is never read or shown.
   assert.doesNotMatch(decision(card, ctl, false, preV22Legacy), /data-testid="amux-legacy-card"/);
   // A question is answered first; its legacy panel waits.
