@@ -293,12 +293,13 @@ export function normalizePack(raw) {
             ["center", raw.captureText?.[1]],
             ["right", raw.captureText?.[2]],
             ["summary", raw.summaryText],
-            ["logo", ""],
           ].map(([name, text]) => [name, { file: raw.images?.[name], text }]),
         );
+  // A capture is a real product screen. The logo is not one (the film takes it from the library),
+  // so a pack with only a logo left has no screen and is not usable.
   const captures = Object.fromEntries(
     Object.entries(source)
-      .filter(([name, entry]) => /^[A-Za-z0-9_-]{1,40}$/u.test(name) && typeof entry?.file === "string" && /^[A-Za-z0-9_.-]+\.(?:png|jpe?g|webp)$/iu.test(entry.file))
+      .filter(([name, entry]) => /^[A-Za-z0-9_-]{1,40}$/u.test(name) && name.toLowerCase() !== "logo" &&typeof entry?.file === "string" && /^[A-Za-z0-9_.-]+\.(?:png|jpe?g|webp)$/iu.test(entry.file))
       .map(([name, entry]) => [name, { file: entry.file, text: Array.isArray(entry.text) ? entry.text.join(" ") : String(entry.text ?? "") }]),
   );
   if (Object.keys(captures).length === 0) return null;
