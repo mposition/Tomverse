@@ -59,7 +59,7 @@ export function AiDisclaimerNotice({ testId, readable = false }: { testId?: stri
             wraps only when it does not fit, so a phone at default zoom keeps
             one row; below that it takes the lines it needs and "Details"
             moves under it instead of squeezing it. */}
-        <span className="min-w-0">{t("chat.aiDisclaimerShort")}</span>
+        <span className="min-w-0 flex-[1_1_12rem]">{t("chat.aiDisclaimerShort")}</span>
         <button
           type="button"
           data-testid="chat-ai-disclaimer-details"
