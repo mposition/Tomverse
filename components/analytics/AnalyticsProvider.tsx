@@ -776,16 +776,14 @@ export function AnalyticsProvider({
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
   const noticePath = pathname?.split("/").filter(Boolean) ?? [];
-  const isMarketingHomePath = noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null);
+
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
 
 
   const isPluginRoute = pathname === "/plugins";
-  const readableNotice = ((((noticePath.at(-1) === "faq" || noticePath.at(-1) === "support" || noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
+  const readableNotice = (((noticePath.at(-1) === "ai-for-file-analysis" || noticePath.at(-1) === "faq" || noticePath.at(-1) === "support" || noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
     (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ||
-    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute)) || isMarketingHomePath) || (((noticePath.at(-1) === "support" || noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
-    (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ||
-    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute));
+    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute)) || (noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null));
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot
