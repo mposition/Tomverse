@@ -774,6 +774,8 @@ export function AnalyticsProvider({
   // Everywhere else (and before a
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
+
+
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
 
 

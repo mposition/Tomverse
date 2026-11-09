@@ -1973,7 +1973,7 @@ export function MobileChatShell({
           composerPortalHost
         )}
 
-      <AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" />
+      <AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" readable={currentProduct === "chat"} />
       <div ref={setBottomConsentSlot} data-testid="composer-consent-slot" className="shrink-0 empty:hidden" />
       </div>
       </>
