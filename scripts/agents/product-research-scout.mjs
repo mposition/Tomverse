@@ -35,6 +35,7 @@ import {
   originOf,
   retriesWithoutSandbox,
   scoutWalkTarget,
+  scoutPageLanguageMatches,
   signedInAccess,
 } from "../../lib/productResearchScoutBrowserPolicy.mjs";
 import { SCOUT_PAGE_TIMEOUT_MS, generateFile, generateImage, officePackage, pdfFirstPage, screenshot } from "../../lib/productResearchScoutGeneration.mjs";
@@ -149,7 +150,9 @@ async function capturePage(browser, rules, target, { cookies = [] } = {}) {
       await page.waitForTimeout(SETTLE_MS);
       if (rules.stops.length > 0) return { stopped: rules.stops[0].stop };
       if (cookies.length > 0 && isSignedOutPath(page.url())) return { error: "signed_out" };
-      documentLang ??= await page.evaluate(() => document.documentElement.lang).catch(() => null);
+      const capturedLanguage = await page.evaluate(() => document.documentElement.lang).catch(() => null);
+      if (!scoutPageLanguageMatches(target.lang, capturedLanguage)) return { error: "language_mismatch" };
+      documentLang ??= capturedLanguage;
       const base64 = await screenshot(page);
       if (base64) images.push({ label: viewport.label, mediaType: "image/jpeg", base64 });
     } catch (error) {

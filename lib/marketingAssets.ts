@@ -22,10 +22,12 @@
  * second. So provenance is recorded per asset, the disclosure is recorded per
  * channel rather than globally -- the platforms do not agree on what they
  * require -- and an asset that is AI generated or AI modified cannot be marked
- * as depicting the product interface. The one AI-origin provenance that may is
- * a video whose product screens are all real captures and whose only AI part is
- * a human presenter (owner decision 2026-11-07): the screens are the product,
- * and the presenter is disclosed like any other AI-made content.
+ * as depicting the product interface. The AI-origin provenances that may are
+ * videos whose product screens are all real captures, unchanged: one whose only
+ * AI part is a human presenter (owner decision 2026-11-07), and one whose AI
+ * parts are shots that show no product screen, a voice and music (owner
+ * decision 2026-11-09). The screens are the product, and the AI parts are
+ * disclosed like any other AI-made content.
  *
  * Alt text is per locale and lives here rather than in a post, because it is a
  * property of the asset: the same picture needs the same description whichever
@@ -54,8 +56,11 @@ import {
  * designed graphic. `ai_generated` was produced by a model; `ai_modified` began
  * as one of the first two and was changed by one. `capture_with_ai_presenter`
  * is a video whose product screens are real captures, unchanged, with a
- * model-made human presenter added (owner decision 2026-11-07). The last three
- * are the ones a disclosure rule cares about.
+ * model-made human presenter added (owner decision 2026-11-07).
+ * `capture_with_ai_media` is a video whose product screens are real captures,
+ * unchanged, cut with model-made shots that show no product screen, a
+ * model-made voice and music (owner decision 2026-11-09). The last four are the
+ * ones a disclosure rule cares about.
  */
 export const MARKETING_ASSET_PROVENANCES = Object.freeze([
   "capture",
@@ -63,6 +68,7 @@ export const MARKETING_ASSET_PROVENANCES = Object.freeze([
   "ai_generated",
   "ai_modified",
   "capture_with_ai_presenter",
+  "capture_with_ai_media",
 ] as const);
 export type MarketingAssetProvenance =
   (typeof MARKETING_ASSET_PROVENANCES)[number];
@@ -72,6 +78,7 @@ export const AI_ORIGIN_PROVENANCES = Object.freeze([
   "ai_generated",
   "ai_modified",
   "capture_with_ai_presenter",
+  "capture_with_ai_media",
 ] as const);
 
 /**
@@ -82,6 +89,26 @@ export const AI_ORIGIN_PROVENANCES = Object.freeze([
  * database's (MarketingAsset_presenter_check).
  */
 export const AI_PRESENTER_PROVENANCE = "capture_with_ai_presenter" satisfies MarketingAssetProvenance;
+
+/**
+ * A captured video cut with AI media (owner decision 2026-11-09): the product
+ * screens are captures, unchanged; what is AI-made is shots that show no
+ * product screen, the voice and the music. Video only, like the presenter one
+ * (lib/marketingAssetSubmission.ts, MarketingAsset_ai_media_check).
+ */
+export const AI_MEDIA_PROVENANCE = "capture_with_ai_media" satisfies MarketingAssetProvenance;
+
+/**
+ * The AI-origin provenances that may depict the product interface, because
+ * every screen in them is a capture. Both are a video's.
+ */
+export const AI_CAPTURE_VIDEO_PROVENANCES = Object.freeze([
+  AI_PRESENTER_PROVENANCE,
+  AI_MEDIA_PROVENANCE,
+] as const);
+
+export const isAiCaptureVideoProvenance = (provenance: string): boolean =>
+  (AI_CAPTURE_VIDEO_PROVENANCES as readonly string[]).includes(provenance);
 
 /**
  * Whether an asset of this provenance is of AI origin. The schema below and the
@@ -144,8 +171,8 @@ export const marketingAssetSchema = z
      * or recordings. An AI origin cannot claim this: a generated picture of our
      * UI is a drawing, not the interface. §7.3 lets such a drawing out only as
      * a disclosed AI image whose screen shows real features and copy, declared
-     * `false` here. The exception is `capture_with_ai_presenter`, whose screens
-     * are captures.
+     * `false` here. The exceptions are `capture_with_ai_presenter` and
+     * `capture_with_ai_media`, whose screens are captures.
      */
     depictsProductInterface: z.boolean(),
   })
@@ -155,7 +182,7 @@ export const marketingAssetSchema = z
 
     if (
       aiOrigin &&
-      asset.provenance !== AI_PRESENTER_PROVENANCE &&
+      !isAiCaptureVideoProvenance(asset.provenance) &&
       asset.depictsProductInterface
     ) {
       context.addIssue({
