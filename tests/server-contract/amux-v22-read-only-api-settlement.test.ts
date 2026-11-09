@@ -60,7 +60,6 @@ function makeWorld(outcome: Outcome) {
     questionAnswerClears: 0,
     questionCancels: 0,
     escalations: [] as Array<Record<string, unknown>>,
-    superseded: [] as Array<{ input: Record<string, unknown>; openedBefore: number }>,
   };
 }
 
@@ -95,10 +94,6 @@ mock.module(mod("lib/amux/delivery.ts"), { namedExports: {
   cancelPendingAmuxWorkDelivery: async () => undefined,
 } });
 mock.module(mod("lib/amux/escalation.ts"), { namedExports: {
-  resolveSupersededAmuxRecoveryEscalations: async (_tx: unknown, input: Record<string, unknown>) => {
-    world.superseded.push({ input, openedBefore: world.escalations.length });
-    return [];
-  },
   openAmuxHumanEscalation: async (_tx: unknown, input: Record<string, unknown>) => {
     world.escalations.push(input);
   },
@@ -947,23 +942,4 @@ test("a question whose run fails is cancelled, never left holding the Task", asy
   assert.equal(result.settled, true);
   assert.notEqual(world.attemptUpdateData?.reason, "owner_question");
   assert.equal(world.questionCancels, 1);
-});
-
-test("every settlement supersedes an earlier attempt's recovery escalation before opening its own", async () => {
-  for (const outcome of ["succeeded", "failed"] as const) {
-    world = makeWorld(outcome);
-    const result = await (await execution).settleAmuxV22TaskExecution(
-      await settlementInput(outcome));
-    assert.equal(result.settled, true);
-    assert.equal(world.superseded.length, 1);
-    // Bound to the settling attempt: escalations opened below its revision
-    // (or before it started) belong to an earlier attempt.
-    assert.deepEqual(world.superseded[0]?.input, { taskId, attemptId,
-      attemptTaskRevision: 5,
-      attemptStartedAt: new Date("2026-10-13T11:59:00.000Z"), now });
-    // Resolved first, so this run's own escalation is opened fresh with its reason.
-    assert.equal(world.superseded[0]?.openedBefore, 0);
-    // Review (succeeded) and blocked (failed) each open their own escalation.
-    assert.equal(world.escalations.length, 1);
-  }
 });

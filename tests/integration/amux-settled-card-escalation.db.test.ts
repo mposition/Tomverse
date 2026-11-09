@@ -3,16 +3,15 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import type { Session } from "next-auth";
 
-import { AMUX_V22_SETTLEMENT_RESOLVER, resolveSupersededAmuxRecoveryEscalations } from "@/lib/amux/escalation";
 import { AmuxLegacyCardOwnerError } from "@/lib/amux/legacyCardOwnerService";
 import { closeAmuxSettledCardEscalationsForOwner } from "@/lib/amux/settledCardEscalationService";
 import { prisma } from "@/lib/prisma";
 
-// AMUX-FILEREQ-004 (2026-11-09) against PostgreSQL: an earlier attempt's
-// recovery escalation is resolved when a later attempt settles, with one
-// system audit entry, and the owner closes one already left open on a done
-// card, with one administrator audit entry, in the same transaction. Only the
-// seed turns triggers off, because a card's history is not what is under test.
+// AMUX-FILEREQ-004 (2026-11-09) against PostgreSQL: the owner closes the
+// escalation an earlier attempt left open on a done or todo card, with one
+// administrator audit entry in the same transaction, and the card is left as
+// it was. Only the seed turns triggers off, because a card's history is not
+// what is under test.
 
 const testRaw = process.env.TEST_DATABASE_URL?.trim();
 if (!testRaw || process.env.DATABASE_URL?.trim() !== testRaw) {
@@ -46,7 +45,7 @@ let counter = 0;
 
 /**
  * One card with at most one open escalation (the partial unique index allows
- * one). Neither path reads the card's source, so a plain card stands in for a
+ * one). The close does not read the card's source, so a plain card stands in for a
  * v4 Task, whose encrypted body is not what is under test.
  */
 async function seedCard(input: { status: string; revision?: number;
@@ -60,9 +59,9 @@ async function seedCard(input: { status: string; revision?: number;
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
     await tx.$executeRaw`
-      INSERT INTO "AmuxWorkItem" ("id", "title", "description", "status", "revision", "sourceSystem", "sourceKey",
-        "sourceVersion", "sourceDigest", "sourceSnapshot", "createdAt", "updatedAt")
-      VALUES (${id}, ${"card " + id.slice(-16)}, 'synthetic', ${input.status}, ${revision},
+      INSERT INTO "AmuxWorkItem" ("id", "title", "description", "executionBrief", "executionBriefDigest", "status",
+        "revision", "sourceSystem", "sourceKey", "sourceVersion", "sourceDigest", "sourceSnapshot", "createdAt", "updatedAt")
+      VALUES (${id}, ${"card " + id.slice(-16)}, 'synthetic', 'synthetic brief', ${digest}, ${input.status}, ${revision},
         'tomverse_private_workboard', ${`SC-${randomUUID().slice(0, 8).toUpperCase()}-${counter}`}, '1', ${digest},
         ${JSON.stringify({ synthetic: true })}::jsonb, now(), now())`;
     if (input.escalation !== null) {
@@ -98,61 +97,14 @@ const auditsOf = (taskId: string, action: string) => prisma.adminAuditLog.findMa
   where: { action, targetId: taskId } });
 const escalationOf = (id: string) => prisma.amuxHumanEscalation.findUniqueOrThrow({ where: { id } });
 
-const supersede = (taskId: string, attemptTaskRevision: number, attemptStartedAt = new Date()) =>
-  prisma.$transaction(async (tx) => {
-    const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`
-      SELECT date_trunc('milliseconds', clock_timestamp() AT TIME ZONE 'UTC') AS "now"`;
-    return resolveSupersededAmuxRecoveryEscalations(tx, { taskId, attemptId: `attempt-${randomUUID()}`,
-      attemptTaskRevision, attemptStartedAt, now });
-  });
-
-test("a later attempt's settlement resolves the earlier attempt's recovery escalation as retry, with one system audit", async () => {
-  const { id, escalationId } = await seedCard({ status: "doing" });
-  assert.deepEqual(await supersede(id, 5), [escalationId]);
-  const row = await escalationOf(escalationId);
-  assert.equal(row.status, "resolved");
-  assert.equal(row.resolutionOutcome, "retry");
-  assert.equal(row.resolvedById, AMUX_V22_SETTLEMENT_RESOLVER);
-  assert.match(row.resolution ?? "", /^Superseded: a later attempt \(attempt-/);
-  const audits = await auditsOf(id, "amux.human_escalation.superseded");
-  assert.equal(audits.length, 1);
-  assert.equal(audits[0]!.actorUserId, null);
-  assert.ok(audits[0]!.entryHash, "the system writer chains the entry");
-  assert.deepEqual((audits[0]!.metadata as Record<string, unknown>).escalation_ids, [escalationId]);
-  // Nothing is left, so a second settlement writes nothing.
-  assert.deepEqual(await supersede(id, 5), []);
-  assert.equal((await auditsOf(id, "amux.human_escalation.superseded")).length, 1);
-});
-
-test("an escalation of the settling attempt itself, or a person's review, is left open", async () => {
-  const current = await seedCard({ status: "doing", escalation: { specialty: "execution-recovery", openedTaskRevision: 5 } });
-  const review = await seedCard({ status: "doing", escalation: { specialty: "code-review", openedTaskRevision: 3 } });
-  for (const card of [current, review]) {
-    assert.deepEqual(await supersede(card.id, 5), []);
-    assert.equal((await escalationOf(card.escalationId)).status, "open");
-    assert.equal((await auditsOf(card.id, "amux.human_escalation.superseded")).length, 0);
-  }
-});
-
-test("a row from before the revision column is judged by the clock", async () => {
-  const startedAt = new Date();
-  const older = await seedCard({ status: "doing",
-    escalation: { specialty: "execution-recovery", openedTaskRevision: null, createdAt: new Date(startedAt.getTime() - 60_000) } });
-  const later = await seedCard({ status: "doing",
-    escalation: { specialty: "execution-recovery", openedTaskRevision: null, createdAt: new Date(startedAt.getTime() + 60_000) } });
-  assert.deepEqual(await supersede(older.id, 5, startedAt), [older.escalationId]);
-  assert.deepEqual(await supersede(later.id, 5, startedAt), []);
-  assert.equal((await escalationOf(later.escalationId)).status, "open");
-});
-
-test("the owner closes a done card's leftover escalation once; the card stays done at its revision", async () => {
-  const { id, escalationId } = await seedCard({ status: "done" });
+for (const status of ["done", "todo"]) test(`the owner closes a ${status} card's leftover escalation once; the card stays ${status} at its revision`, async () => {
+  const { id, escalationId } = await seedCard({ status });
   const result = await closeAmuxSettledCardEscalationsForOwner({ session: owner(), request: request(),
     taskId: id, escalationId });
   assert.equal(result.outcome, "closed");
   const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id },
     select: { status: true, revision: true, archivedAt: true } });
-  assert.deepEqual(card, { status: "done", revision: 6, archivedAt: null });
+  assert.deepEqual(card, { status, revision: 6, archivedAt: null });
   const row = await escalationOf(escalationId);
   assert.equal(row.status, "resolved");
   assert.equal(row.resolutionOutcome, "retry");
@@ -168,12 +120,16 @@ test("the owner closes a done card's leftover escalation once; the card stays do
   assert.equal((await auditsOf(id, "amux.settled_card.escalation_closed")).length, 1);
 });
 
-test("a card that is not done, holds work, or shows another escalation refuses without writing", async () => {
+test("a card in review, blocked or doing, one with queued work, or another escalation refuses without writing", async () => {
+  const review = await seedCard({ status: "review" });
   const blocked = await seedCard({ status: "blocked" });
-  const queued = await seedCard({ status: "done", delivery: true });
+  const doing = await seedCard({ status: "doing" });
+  const queued = await seedCard({ status: "todo", delivery: true });
   const other = await seedCard({ status: "done" });
   const cases: Array<[{ id: string; escalationId: string }, string, string]> = [
-    [blocked, blocked.escalationId, "not_done"],
+    [review, review.escalationId, "decision_available"],
+    [blocked, blocked.escalationId, "decision_available"],
+    [doing, doing.escalationId, "running"],
     [queued, queued.escalationId, "running"],
     [other, "esc-not-this-one", "changed"],
   ];

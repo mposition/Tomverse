@@ -8,7 +8,7 @@ import {
   requestAmuxSettledCardEscalationClose,
 } from "@/components/admin/AmuxSettledCardEscalationPanel";
 
-// A done card whose earlier attempt left its escalation open (AMUX-FILEREQ-004):
+// A card that moved on while an earlier attempt's escalation stayed open (AMUX-FILEREQ-004):
 // what the owner sees, and how each answer of the close route is read.
 
 const html = (canAct = true) => renderToStaticMarkup(
@@ -17,8 +17,8 @@ const html = (canAct = true) => renderToStaticMarkup(
 test("the owner sees why nothing else opens and the one close", () => {
   const out = html();
   assert.match(out, /data-testid="amux-settled-card-escalation"/);
-  assert.match(out, /This Task is done: a later attempt finished it\./);
-  assert.match(out, /The card stays done with its status, results and history\./);
+  assert.match(out, /no review decision opens on this card/);
+  assert.match(out, /The card keeps its status, results and history\./);
   assert.match(out, /data-testid="amux-settled-card-escalation-close"/);
 });
 
@@ -44,8 +44,8 @@ test("the request posts the shown escalation with the owner's confirmation and r
 
   const call = (fetcher: typeof fetch) => requestAmuxSettledCardEscalationClose({ taskId: "t1",
     escalationId: "e1", fetcher });
-  assert.deepEqual(await call(answer(409, { error: "not_closable", reason: "not_done" })),
-    { kind: "refused", reason: "not_done" });
+  assert.deepEqual(await call(answer(409, { error: "not_closable", reason: "decision_available" })),
+    { kind: "refused", reason: "decision_available" });
   assert.deepEqual(await call(answer(409, { error: "busy" })), { kind: "refused", reason: "busy" });
   assert.deepEqual(await call(answer(428, { error: "ADMIN_REAUTHENTICATION_REQUIRED" })), { kind: "reauth" });
   // An unknown outcome is never read as a refusal: it may have written.

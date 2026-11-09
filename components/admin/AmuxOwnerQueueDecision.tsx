@@ -295,8 +295,8 @@ export function AmuxOwnerQueueDecision({
         </>
       )}
 
-      {/* A done card whose earlier attempt left its escalation open has no
-          review decision; the owner closes that escalation here. */}
+      {/* A done or todo card whose earlier attempt left its escalation open
+          has no review decision; the owner closes that escalation here. */}
       {canInspectCards && item.escalationId !== null && isAmuxSettledCardWithOpenEscalation(item) ? (
         <AmuxSettledCardEscalationPanel key={item.taskId + ":" + item.escalationId} taskId={item.taskId}
           escalationId={item.escalationId} canAct={canInspectCards}

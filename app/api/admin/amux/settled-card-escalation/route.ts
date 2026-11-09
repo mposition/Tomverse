@@ -12,13 +12,13 @@ import { closeAmuxSettledCardEscalationsForOwner } from "@/lib/amux/settledCardE
 import { authOptions } from "@/lib/auth";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
-// The owner closes the escalations a done card still holds
+// The owner closes the escalations a done or todo card still holds
 // (lib/amux/settledCardEscalationCore.ts):
 //
 //   { taskId, escalationId, ownerConfirmed: true }
 //
 // `escalationId` is the open escalation the owner was shown. Only the
-// escalations change; the card stays done with its history.
+// escalations change; the card keeps its status and history.
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: noStore });

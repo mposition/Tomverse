@@ -11,9 +11,9 @@ import {
 } from "./settledCardEscalationCore.ts";
 
 /**
- * The owner closes the escalations a done card still holds
+ * The owner closes the escalations a done or todo card still holds
  * (settledCardEscalationCore.ts). Only the escalations change: they are
- * resolved as superseded by the later attempt (`retry`); the card's status,
+ * resolved as answered by the recovery that sent the card on (`retry`); the card's status,
  * revision, archive and every ledger stay. One person's audit entry through
  * the administrator writer in the same transaction, the way the legacy card
  * close writes its own (legacyCardOwnerService.ts).
@@ -68,7 +68,7 @@ export async function closeAmuxSettledCardEscalationsForOwner(input: {
     const resolved = await tx.amuxHumanEscalation.updateMany({
       where: { id: { in: card.openEscalationIds }, taskId: card.id, status: { in: ["open", "acknowledged"] } },
       data: { status: "resolved", resolutionOutcome: "retry",
-        resolution: "Closed by the owner on a done Task: a later attempt finished it, so this escalation from an earlier attempt was left open.",
+        resolution: `Closed by the owner on a ${card.status} Task: the recovery that sent it on answered this escalation from an earlier attempt, which was left open.`,
         resolvedById: actorUserId, resolvedByEmail: input.session.user?.email ?? null, resolvedAt: now },
     });
     // A row that left open or acknowledged between the read and the write
@@ -76,7 +76,7 @@ export async function closeAmuxSettledCardEscalationsForOwner(input: {
     if (resolved.count !== card.openEscalationIds.length) throw new Error("escalations_changed");
     const auditId = await writeAdminAuditLog({ tx, session: input.session, request: input.request,
       action: "amux.settled_card.escalation_closed", targetType: "AmuxWorkItem", targetId: card.id,
-      summary: "Closed the escalations an earlier attempt left open on a done AMUX Task.",
+      summary: `Closed the escalations an earlier attempt left open on a ${card.status} AMUX Task.`,
       metadata: { displayKey: card.displayKey, status: card.status, revision: card.revision,
         escalationIds: card.openEscalationIds, escalationsResolved: resolved.count } });
     return { outcome: "closed" as const, escalationsResolved: resolved.count, auditId };

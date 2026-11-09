@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
-// The owner closes a done card's leftover escalation
+// The owner closes a done or todo card's leftover escalation
 // (app/api/admin/amux/settled-card-escalation): who may act, what refuses
 // before the close runs, and how each answer of the close is returned.
 
@@ -59,7 +59,7 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
         if (world.outcome === "throw") throw new Error("database gone");
         if (world.outcome === "not_found") return { outcome: "not_found" };
         return world.outcome === "closed" ? { outcome: "closed", escalationsResolved: 1, auditId: "a1" } :
-          { outcome: "refused", reason: "not_done" };
+          { outcome: "refused", reason: "decision_available" };
       } } });
   }
   return import(mod("app/api/admin/amux/settled-card-escalation/route.ts"));
@@ -105,7 +105,7 @@ test("a refusal, a missing card, a held card and an unknown outcome each answer 
   reset(); world.outcome = "refused";
   let response = await POST(post(valid));
   assert.equal(response.status, 409);
-  assert.deepEqual(await response.json(), { error: "not_closable", reason: "not_done" });
+  assert.deepEqual(await response.json(), { error: "not_closable", reason: "decision_available" });
   reset(); world.outcome = "not_found";
   assert.equal((await POST(post(valid))).status, 404);
   reset(); world.outcome = "busy";
