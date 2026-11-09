@@ -1018,6 +1018,7 @@ export const fr = {
         imageUnsupported: "Ce modèle ne peut pas lire l'image jointe",
     },
     providerStatus: {
+        lookupUnavailable: "L’état des modèles n’a pas pu être actualisé. Le dernier résultat confirmé est conservé.",
         allAvailable: "Les fournisseurs sélectionnés sont disponibles",
         allAvailableBody: "Les fournisseurs de modèles répondent normalement.",
         selectedUnavailableOne: "{model} est temporairement indisponible",
@@ -1957,12 +1958,13 @@ export const fr = {
         privacyNote: "Lorsque vous terminez une importation, Tomverse en tire automatiquement des souvenirs via un fournisseur d'IA, sans débit de crédits. Les contenus sensibles, comme les informations de santé, ne sont pas enregistrés comme souvenirs. Les souvenirs utilisés et les préférences de style de réponse sont transmis comme références au modèle Tomverse qui répond, et vous pouvez les consulter, modifier, désactiver ou supprimer à tout moment.",
         disabledNotice: "La modification et l'ajout de souvenirs ne sont pas disponibles pour le moment. Vous pouvez toujours consulter et supprimer les souvenirs déjà enregistrés.",
         settingsTitle: "Réglages d'utilisation de la mémoire",
-        masterToggleLabel: "Utiliser les souvenirs dans les nouvelles discussions",
+        masterToggleLabel: "Utiliser la mémoire dans toutes les discussions",
         masterToggleDescription: "Désactivée, aucune discussion n'utilise de souvenirs et les conversations importées n'en créent pas de nouveaux. Les souvenirs enregistrés ne sont pas supprimés.",
         styleToggleLabel: "Utiliser les souvenirs de style de réponse",
         styleToggleDescription:
             "Permet aux réponses de tenir compte des préférences de ton, de longueur et de structure déduites des conversations passées.",
-        defaultModeLabel: "Valeur par défaut des nouvelles discussions",
+        defaultModeLabel: "Mémoire par défaut des discussions",
+        defaultModeDescription: "S’applique aux nouvelles discussions et aux discussions existantes qui suivent le réglage du compte. Le choix de chaque discussion prévaut, sauf si la mémoire est désactivée pour toutes les discussions ci-dessus.",
         defaultModeOn: "Utiliser la mémoire",
         defaultModeOff: "Ne pas utiliser la mémoire",
         edit: "Modifier",

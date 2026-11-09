@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { prepareGuestPage, mockAuthenticatedApi, expectNoHorizontalOverflow } from "./support/app-fixtures";
 import { installChatModelStub, restoreActiveConversation } from "./support/chat-state-fixtures";
+import { expectAccessibleContrast } from "./support/ui-audit";
 
 test.setTimeout(120_000);
 const tools = [{ name: "search", mode: "read" }, { name: "create_note", mode: "confirm" }];
@@ -126,7 +127,8 @@ test("@ui-risk disabled preview and add dialog remain accessible without exposin
   await page.screenshot({ path: test.info().outputPath("plugins-disabled.png"), fullPage: true });
 });
 
-test("@ui-risk provider catalog searches both directories without presenting listings as live connections", async ({ page }) => {
+test("@ui-risk provider catalog searches both directories without presenting listings as live connections", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 800 });
   let requests = 0;
   await page.route("**/api/mcp/**", route => {
     if (route.request().method() !== "GET") requests++;
@@ -137,6 +139,20 @@ test("@ui-risk provider catalog searches both directories without presenting lis
   await search.fill("Figma");
   const card = page.getByTestId("plugin-card").filter({ has: page.getByRole("heading", { name: "Figma", exact: true }) });
   await expect(card).toBeVisible();
+  for (const theme of ["light", "dark"] as const) {
+    await page.locator("html").evaluate((element, value) => element.classList.toggle("dark", value === "dark"), theme);
+    const category = card.locator("p").first();
+    const setup = card.getByText("서버 설정 필요", { exact: true });
+    await expect(category).toHaveCSS("font-size", "14px");
+    await expect(setup).toHaveCSS("font-size", "13px");
+    const badges = card.locator("span").filter({ hasText: /^(Codex|Claude Code)$/ });
+    expect(await badges.count()).toBeGreaterThan(0);
+    for (const badge of await badges.all()) await expect(badge).toHaveCSS("font-size", "12px");
+    for (const text of [category, setup, ...await badges.all()]) {
+      const sample = await expectAccessibleContrast(text, `${theme} plugin card text`);
+      expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+    }
+  }
   await expect(card.locator("img")).toHaveAttribute("src", "/plugins/providers/figma.png");
   await expect(card.getByRole("button", { name: "연결", exact: true })).toHaveCount(0);
   await card.getByRole("button", { name: "상세 정보" }).click();
