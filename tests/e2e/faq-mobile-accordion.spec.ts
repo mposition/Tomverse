@@ -30,7 +30,7 @@ for (const theme of ["light", "dark"] as const) {
       const button = article.getByRole("button");
       await expect(button).toHaveAttribute("aria-expanded", "false");
       await button.click();
-      await expect(article.locator("p")).toBeVisible();
+      for (const paragraph of await article.locator("p").all()) await expect(paragraph).toBeVisible();
     }
     expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeGreaterThan(collapsedHeight + 500);
     await page.addStyleTag({ content: "html { font-size: 200%; }" });
@@ -45,7 +45,7 @@ test("desktop FAQ keeps every answer expanded without redundant toggle controls"
   const articles = page.getByRole("article");
   await expect(articles).toHaveCount(infoPages.faq.en.sections.length);
   for (const article of await articles.all()) {
-    await expect(article.locator("p")).toBeVisible();
+    for (const paragraph of await article.locator("p").all()) await expect(paragraph).toBeVisible();
     await expect(article.getByRole("button")).toHaveCount(0);
   }
 });

@@ -10,17 +10,24 @@ import { AiReviewDemo } from "./AiReviewDemo";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
+import { useMarketingChatEntry } from "./MarketingChatAvailability";
+import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
+
+type MarketingInfoLink = {
+  label: string;
+  href: string;
+  external?: boolean;
+};
 
 export type MarketingInfoSection = {
+  id?: string;
   lang?: Language;
   title: string;
   body: string;
   bullets?: string[];
-  link?: {
-    label: string;
-    href: string;
-    external?: boolean;
-  };
+  guestTrialLinks?: { available: string; unavailable: string; chat: string; review: string; models: string };
+  link?: MarketingInfoLink;
+  links?: MarketingInfoLink[];
 };
 
 export type MarketingInfoCopy = {
@@ -28,6 +35,8 @@ export type MarketingInfoCopy = {
   title: string;
   description: string;
   updated?: string;
+  introCtaLabel?: string;
+  sectionNavLabel?: string;
   mobileAccordion?: boolean;
   sections: MarketingInfoSection[];
   cta?: {
@@ -44,6 +53,7 @@ export function MarketingInfoPage({
   template?: "chatgpt-vs-claude" | "ai-answer-review";
 }) {
   const { lang } = useLanguage();
+  const { guestTrialAvailable, reviewHref } = useMarketingChatEntry();
   const localizedPage = content[lang];
   const page = localizedPage ?? content.en;
   const sectionId = useId();
@@ -77,8 +87,26 @@ export function MarketingInfoPage({
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{page.eyebrow}</p>
           <h1 className={`mt-4 text-4xl font-black leading-tight sm:text-6xl ${page.mobileAccordion ? "[overflow-wrap:anywhere]" : ""}`}>{page.title}</h1>
           <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{page.description}</p>
+          {page.introCtaLabel && page.cta ? (
+            <Link href={pageHref(page.cta.href)} onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "marketing_info_intro" })}
+              data-testid="marketing-info-intro-cta"
+              className="mt-6 inline-flex min-h-12 max-w-full items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white transition hover:bg-blue-500">
+              {page.introCtaLabel}<ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+            </Link>
+          ) : null}
           {page.updated && <p className="mt-4 text-sm font-semibold text-zinc-500 dark:text-zinc-400">{page.updated}</p>}
         </div>
+
+        {page.sectionNavLabel ? (
+          <nav aria-label={page.sectionNavLabel} className="mt-8 rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
+            <p className="text-sm font-bold">{page.sectionNavLabel}</p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {page.sections.filter((section) => section.id).map((section) => (
+                <a key={section.id} href={`#${section.id}`} className="inline-flex min-h-11 min-w-0 items-center rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:text-blue-300 dark:hover:bg-zinc-900">{section.title}</a>
+              ))}
+            </div>
+          </nav>
+        ) : null}
 
         {template === "chatgpt-vs-claude" ? (
           <ChatGptVsClaudeGuide />
@@ -90,8 +118,10 @@ export function MarketingInfoPage({
               </div>
             ) : null}
             <div className={`mt-12 grid ${page.mobileAccordion ? "grid-cols-1 gap-3 sm:gap-5" : "gap-5"}`}>
-              {page.sections.map((section, index) => (
-                <article key={section.title} lang={section.lang} className={`rounded-2xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40 ${page.mobileAccordion ? "min-w-0 p-4 [overflow-wrap:anywhere] sm:p-6" : "p-6"}`}>
+              {page.sections.map((section, index) => {
+                const links = [...(section.link ? [section.link] : []), ...(section.links ?? [])];
+                return (
+                <article key={section.title} id={section.id} tabIndex={section.id ? -1 : undefined} lang={section.lang} className={`scroll-mt-28 focus-visible:outline-2 focus-visible:outline-blue-600 rounded-2xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40 ${page.mobileAccordion ? "min-w-0 p-4 [overflow-wrap:anywhere] sm:p-6" : "p-6"}`}>
                   <h2 className="text-xl font-black">
                     {page.mobileAccordion ? <>
                       <span className="hidden sm:inline">{section.title}</span>
@@ -110,6 +140,16 @@ export function MarketingInfoPage({
                   </h2>
                   <div id={`${sectionId}-${index}`} className={page.mobileAccordion && !expandedSections.has(section.title) ? "hidden sm:block" : undefined}>
                   <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{section.body}</p>
+                  {section.guestTrialLinks ? (
+                    <div data-testid="faq-guest-trial-links" className="mt-5 space-y-3 text-sm leading-6">
+                      <p>{guestTrialAvailable ? section.guestTrialLinks.available : section.guestTrialLinks.unavailable}</p>
+                      <div className="flex flex-wrap gap-3">
+                        {guestTrialAvailable ? <Link href={marketingProductEntryHref("chat", lang)} className="inline-flex min-h-11 items-center font-bold text-blue-700 underline underline-offset-4 dark:text-blue-300">{section.guestTrialLinks.chat}</Link> : null}
+                        <Link href={reviewHref} className="inline-flex min-h-11 items-center font-bold text-blue-700 underline underline-offset-4 dark:text-blue-300">{section.guestTrialLinks.review}</Link>
+                        <Link href={localizedPath(lang, "/models")} className="inline-flex min-h-11 items-center font-bold text-blue-700 underline underline-offset-4 dark:text-blue-300">{section.guestTrialLinks.models}</Link>
+                      </div>
+                    </div>
+                  ) : null}
                   {section.bullets && (
                     <ul className="mt-5 grid gap-3">
                       {section.bullets.map((bullet) => (
@@ -120,20 +160,22 @@ export function MarketingInfoPage({
                       ))}
                     </ul>
                   )}
-                  {section.link ? (
-                    <Link
-                      href={pageHref(section.link.href)}
-                      target={section.link.external ? "_blank" : undefined}
-                      rel={section.link.external ? "noopener noreferrer" : undefined}
-                      className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
+                  {links.length > 0 ? <div className="mt-5 flex flex-wrap gap-x-5 gap-y-3">
+                    {links.map(link => <Link
+                      key={link.href}
+                      href={pageHref(link.href)}
+                      target={link.external ? "_blank" : undefined}
+                      rel={link.external ? "noopener noreferrer" : undefined}
+                      className="inline-flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
                     >
-                      {section.link.label}
+                      {link.label}
                       <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  ) : null}
+                    </Link>)}
+                  </div> : null}
                   </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
 
             {page.cta && (
