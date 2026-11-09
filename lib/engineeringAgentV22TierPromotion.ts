@@ -105,9 +105,8 @@ const livePorts: Ports = {
   stillPending: async (item) => (await prisma.engineeringAgentWorkItem.count({
     where: { id: item.workItemId, state: "open",
       reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON } })) === 1,
-  // A pending draft comes only from a run that started under `t1`.
   prQueueFull: async () =>
-    (await readEngineeringAgentOwnerQueues(prisma, "t1")).prFull,
+    (await readEngineeringAgentOwnerQueues(prisma)).prFull,
   reissue: (input) => runEngineeringAgentTransaction(prisma,
     (tx) => reissueEngineeringAgentV22Capability(tx, input)),
   expireLapsed: (workItemId, reason) => runEngineeringAgentTransaction(prisma,
