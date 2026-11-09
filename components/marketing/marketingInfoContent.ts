@@ -606,7 +606,7 @@ export const infoPages = {
         },
         {
           title: "Additional credit packs",
-          body: "An additional credit pack is a one-time purchase that is separate from a subscription and its monthly credits. Additional credits expire 12 months (365 days) after purchase, are not transferable, and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry. A pack increases only the credit balance available for usage: it does not upgrade the plan or increase model access, features, daily limits, plan-specific higher-cost model limits, fair-use limits, or other safeguards.",
+          body: "An additional credit pack is a one-time purchase that is separate from a subscription and its monthly credits. Additional credits expire 365 days after purchase, are not transferable, and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry. A pack increases only the credit balance available for usage: it does not upgrade the plan or increase model access, features, daily limits, plan-specific higher-cost model limits, fair-use limits, or other safeguards.",
         },
         {
           title: "Monthly and annual subscriptions; automatic renewal",
@@ -667,7 +667,7 @@ export const infoPages = {
         },
         {
           title: "추가 크레딧 팩",
-          body: "추가 크레딧 팩은 구독 및 구독에 포함된 월 크레딧과 분리된 일회성 구매 상품입니다. 추가 크레딧은 구매일로부터 12개월(365일) 후 만료되며 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다. 추가 크레딧은 사용 가능한 크레딧 잔액만 늘리며, 플랜을 업그레이드하거나 모델 접근권한, 기능, 일일 제한, 플랜별 고비용 모델 제한, 공정사용 한도 또는 기타 안전장치를 늘리지 않습니다.",
+          body: "추가 크레딧 팩은 구독 및 구독에 포함된 월 크레딧과 분리된 일회성 구매 상품입니다. 추가 크레딧은 구매일로부터 365일 후 만료되며 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다. 추가 크레딧은 사용 가능한 크레딧 잔액만 늘리며, 플랜을 업그레이드하거나 모델 접근권한, 기능, 일일 제한, 플랜별 고비용 모델 제한, 공정사용 한도 또는 기타 안전장치를 늘리지 않습니다.",
         },
         {
           title: "월간·연간 구독과 자동 갱신",
@@ -711,7 +711,7 @@ export const infoPages = {
         { title: "营销邮件同意", body: "您的同意在您撤回之前一直有效，没有固定的到期时间。您可以随时在邮件设置中，或通过任何营销邮件中的退订链接撤回同意，无需登录。撤回同意不会停止登录验证码、账单收据或服务通知的发送。" },
         { title: "第三方 AI 提供商和输出", body: "Tomverse 会把提示词和所选上下文发送给第三方 AI 提供商并显示其响应。AI 输出可能不准确、不完整、过时、不安全或不适合你的情况，也不构成法律、医疗、金融、安全或其他专业建议。" },
         { title: "方案、AI 积分和公平使用", body: "Free、Pro 和 Max 适用价格页及账户页显示的功能和月度积分额度。积分消耗因模型、推理方式和输入规模而异。月度积分在每个自然月开始时按 UTC 重置，不结转、不可转让且无现金价值。公平使用、防滥用、模型、提供商成本、文件和上下文限制仍然适用。" },
-        { title: "附加积分包", body: "附加积分包是与订阅及其月度积分分开的单次购买。附加积分自购买之日起 12 个月（365 天）后到期，不可转让，也不可兑换现金。Tomverse 先扣除可用的月度方案积分，再按最早到期顺序扣除附加积分。积分包只增加可用积分余额，不会升级方案，也不会增加模型访问、功能、每日限制、方案特定的高成本模型限制、公平使用限制或其他保障。" },
+        { title: "附加积分包", body: "附加积分包是与订阅及其月度积分分开的单次购买。附加积分自购买之日起 365 天后到期，不可转让，也不可兑换现金。Tomverse 先扣除可用的月度方案积分，再按最早到期顺序扣除附加积分。积分包只增加可用积分余额，不会升级方案，也不会增加模型访问、功能、每日限制、方案特定的高成本模型限制、公平使用限制或其他保障。" },
         { title: "月付、年付和自动续订", body: "Pro 和 Max 是由 Stripe 处理的定期订阅。月付按月预付并每月续订；年付按年预付并每年续订。除非你在下次续订前取消，否则即授权 Stripe 按结账时显示的金额和币种向已保存的付款方式收费。" },
         { title: "促销和年付折扣", body: "促销仅适用于该代码披露的方案、计费周期、期限、兑换上限和到期日。除非特定促销明确允许，否则不与年付折扣叠加。限时促销结束后，订阅会按已披露的常规价格续订，除非取消。折扣本身没有现金价值。" },
         { title: "取消和付费访问结束", body: "你可以在账户的账单控制中安排取消。取消会停止下一次自动续订，通常不会立即终止访问。付费功能持续到当前月度或年度周期结束，之后账户转为可用的 Free 方案。没有提前解约费，单纯取消不会自动产生按比例退款。取消或降级订阅本身不会删除仍有效的附加积分；积分保留至标示的到期日，但只能在账户届时方案的模型访问、功能、每日限制和保障范围内使用。" },
@@ -748,7 +748,7 @@ export const infoPages = {
         },
         {
           title: "Monthly credits and additional credits",
-          body: "AI credits are a service allowance, not stored money. Monthly plan credits reset each calendar month in UTC, do not roll over, and remain tied to the applicable plan period. Additional credits are a separate one-time purchase, expire 12 months (365 days) after purchase, and do not reset with the monthly allowance. Both balances are non-transferable and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry.",
+          body: "AI credits are a service allowance, not stored money. Monthly plan credits reset each calendar month in UTC, do not roll over, and remain tied to the applicable plan period. Additional credits are a separate one-time purchase, expire 365 days after purchase, and do not reset with the monthly allowance. Both balances are non-transferable and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry.",
         },
         {
           title: "Plan cancellation and additional-credit access",
@@ -806,7 +806,7 @@ export const infoPages = {
         },
         {
           title: "월 크레딧과 추가 크레딧",
-          body: "AI 크레딧은 예치금이 아닌 서비스 사용 한도입니다. 월 플랜 크레딧은 매월 1일 00:00 UTC에 초기화되고 이월되지 않으며 해당 플랜 기간에 귀속됩니다. 추가 크레딧은 월 크레딧과 분리된 일회성 구매분으로, 구매일로부터 12개월(365일) 후 만료되고 월 초기화 때 사라지지 않습니다. 두 잔액 모두 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다.",
+          body: "AI 크레딧은 예치금이 아닌 서비스 사용 한도입니다. 월 플랜 크레딧은 매월 1일 00:00 UTC에 초기화되고 이월되지 않으며 해당 플랜 기간에 귀속됩니다. 추가 크레딧은 월 크레딧과 분리된 일회성 구매분으로, 구매일로부터 365일 후 만료되고 월 초기화 때 사라지지 않습니다. 두 잔액 모두 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다.",
         },
         {
           title: "플랜 해지 후 추가 크레딧 이용",
@@ -849,7 +849,7 @@ export const infoPages = {
         { title: "可能退款或更正账单的情况", body: "我们会审查重复、未授权或错误收费；付费方案或购买的积分包未交付；重大服务故障；或法律要求退款的情况。其他请求可根据收费时间、计费周期或积分包、已使用的付费权益及提交的事实，酌情批准全部或部分退款。", bullets: ["重复、未授权或错误收费", "未提供付费访问或购买的积分，或发生重大服务故障", "适用消费者法要求的救济"] },
         { title: "通常不退款的情况", body: "除非法律要求，改变主意、忘记在续订前取消、对有效 AI 回答的风格或内容不满意、正常取消后的未使用时间、未使用月度积分，或正确发放后仅未使用的附加积分，通常不予退款。提交请求不保证批准，也不会自动取消订阅或积分包权益。" },
         { title: "月付和年付取消", body: "账户区域取消会停止下一次续订。月付通常持续到当前付费月结束，年付持续到当前付费年结束。取消本身不会自动按比例退款。批准退款时，当前系统会取消付费订阅并把账户转为 Free。" },
-        { title: "月度积分和附加积分", body: "AI 积分是服务额度，不是储值资金。月度方案积分按 UTC 在每个自然月开始时重置，不结转，并归属于相应方案周期。附加积分是独立的一次性购买，自购买之日起 12 个月（365 天）后到期，不会随月度额度重置。两种余额均不可转让或兑换现金。Tomverse 先扣除可用月度方案积分，再按最早到期顺序扣除附加积分。" },
+        { title: "月度积分和附加积分", body: "AI 积分是服务额度，不是储值资金。月度方案积分按 UTC 在每个自然月开始时重置，不结转，并归属于相应方案周期。附加积分是独立的一次性购买，自购买之日起 365 天后到期，不会随月度额度重置。两种余额均不可转让或兑换现金。Tomverse 先扣除可用月度方案积分，再按最早到期顺序扣除附加积分。" },
         { title: "取消方案后的附加积分", body: "取消或降级 Pro、Max 本身不会删除仍有效的附加积分。即使账户转为 Free，积分仍保留至标示的到期日。附加积分只增加用量，不会解锁更高方案、模型、文件或其他功能，也不会提高每日限制、方案特定的高成本模型限制、公平使用限制或其他保障；只能在账户当前方案的权限和限制内使用。" },
         { title: "附加积分的全额退款、部分退款和拒付", body: "附加积分的全部或部分退款获批时，Tomverse 会按相应比例撤销购买权益，并先收回该购买中尚未使用的积分。已经使用而无法收回的积分及相关资助用量可记为积分债务，并在未来月度积分或附加积分购买可用前优先抵扣。拒付或付款争议可触发相同的临时撤销，并在争议未解决期间临时限制 AI 使用。若争议最终对购买者有利，系统会在记录范围内恢复或清除相关临时撤销和债务。本规则不限制法律不得排除的权利或救济。" },
         { title: "促销购买", body: "获批退款不超过促销后实际支付的金额；原价差额和折扣本身不退款。零元促销没有现金退款价值。除法律要求或 Tomverse 账单错误外，不保证重新发放已使用或已退款的促销代码。" },
