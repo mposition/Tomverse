@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
@@ -13,7 +14,6 @@ import {
   ENGINEERING_AGENT_V22_PROMOTED_REASON,
   ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
   ENGINEERING_AGENT_WORK_ITEM_KINDS,
-  FIRST_T1_WINDOW_DAYS,
   HALT_VALUES,
   OWNER_QUEUE_LIMITS,
   PARTIAL_REGISTRATION_DECISION_CAUSE_PREFIX,
@@ -44,10 +44,29 @@ const promotionSql = readFileSync(
   new URL("../prisma/migrations/20261029120000_engineering_agent_v22_tier_promotion/migration.sql", import.meta.url),
   "utf8",
 ).replace(/\r\n/g, "\n");
+const migration = (name) =>
+  readFileSync(new URL(`../prisma/migrations/${name}/migration.sql`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+const ownerQueueRunSql = migration("20261109200000_engineering_agent_owner_queue_run_guard");
+const ownerQueueWorkItemSql = migration("20261109200100_engineering_agent_owner_queue_work_item_guard");
 const outcomeSql = readFileSync(
   new URL("../prisma/migrations/20261007010000_engineering_agent_private_result/migration.sql", import.meta.url),
   "utf8",
 ).replace(/\r\n/g, "\n");
+
+/** Every trigger function a migration writes, name -> body between the dollar quotes. */
+const functionBodies = (text) =>
+  new Map(
+    [...text.matchAll(/CREATE OR REPLACE FUNCTION "(\w+)"\(\)\n[\s\S]*?\nAS \$\$([\s\S]*?)\$\$;/g)].map((m) => [m[1], m[2]]),
+  );
+/** Each function as the latest migration that writes it leaves it, in migration order. */
+const latestFunctions = () => {
+  const latest = new Map();
+  for (const text of [sql, promotionSql, ownerQueueRunSql, ownerQueueWorkItemSql]) {
+    for (const [name, body] of functionBodies(text)) latest.set(name, body);
+  }
+  return latest;
+};
+const LIMIT = /-- limit: ([A-Z_0-9]+(?:\.\w+)?)\n\s*\w+ CONSTANT INTEGER := (\d+);/g;
 
 const pairs = (text) => [...text.matchAll(/\('([a-z_0-9]+)',\s*'([a-z_0-9]+)'\)/g)].map((m) => `${m[1]}->${m[2]}`);
 const quoted = (text) => [...text.matchAll(/'([a-z_0-9]+)'/g)].map((m) => m[1]);
@@ -142,24 +161,29 @@ test("a work item is created in its kind's initial state and nowhere else", () =
 });
 
 test("every cap the database counts is the number the code holds", () => {
-  const limits = new Map(
-    [...sql.matchAll(/-- limit: ([A-Z_0-9]+(?:\.\w+)?)\n\s*\w+ CONSTANT INTEGER := (\d+);/g)].map((m) => [
-      m[1],
-      Number(m[2]),
-    ]),
-  );
-  assert.deepEqual(
-    Object.fromEntries(limits),
-    {
-      "OWNER_QUEUE_LIMITS.pr": OWNER_QUEUE_LIMITS.pr,
-      "OWNER_QUEUE_LIMITS.prDuringFirstT1Days": OWNER_QUEUE_LIMITS.prDuringFirstT1Days,
-      FIRST_T1_WINDOW_DAYS,
-      "OWNER_QUEUE_LIMITS.decision": OWNER_QUEUE_LIMITS.decision,
-      "REGISTRATION_CAPS.perRound": REGISTRATION_CAPS.perRound,
-      "REGISTRATION_CAPS.perUtcDay": REGISTRATION_CAPS.perUtcDay,
-      "REGISTRATION_CAPS.unpromoted": REGISTRATION_CAPS.unpromoted,
-    },
-  );
+  // Read from each trigger function's latest body: a later migration that
+  // replaces a function replaces its caps.
+  const expected = {
+    "OWNER_QUEUE_LIMITS.pr": OWNER_QUEUE_LIMITS.pr,
+    "OWNER_QUEUE_LIMITS.decision": OWNER_QUEUE_LIMITS.decision,
+    "REGISTRATION_CAPS.perRound": REGISTRATION_CAPS.perRound,
+    "REGISTRATION_CAPS.perUtcDay": REGISTRATION_CAPS.perUtcDay,
+    "REGISTRATION_CAPS.unpromoted": REGISTRATION_CAPS.unpromoted,
+  };
+  const latest = latestFunctions();
+  const seen = new Set();
+  for (const [name, body] of latest) {
+    for (const match of body.matchAll(LIMIT)) {
+      assert.ok(match[1] in expected, `${name} counts an unknown cap ${match[1]}`);
+      assert.equal(Number(match[2]), expected[match[1]], `${name} ${match[1]}`);
+      seen.add(match[1]);
+    }
+  }
+  assert.deepEqual(sorted(seen), sorted(Object.keys(expected)));
+  // The run guard and the work item guard count the same pull request cap.
+  for (const name of ["engineering_agent_run_guard", "engineering_agent_work_item_guard"]) {
+    assert.match(latest.get(name), /-- limit: OWNER_QUEUE_LIMITS\.pr\n/, name);
+  }
 });
 
 test("every string the database matches on is the string the code holds", () => {
@@ -212,7 +236,7 @@ test("the migration writes no row and holds no user content column", () => {
   assert.doesNotMatch(sql, /"(?:title|body|message|content|prompt|email)"\s+TEXT/i);
 });
 
-test("the promotion guard keeps every transition and counts the caps the code holds", () => {
+test("the promotion guard keeps every transition", () => {
   const guard = (text) =>
     /CREATE OR REPLACE FUNCTION "engineering_agent_work_item_guard"\(\)\n[\s\S]*?\nAS \$\$\n([\s\S]*?)\n\$\$;/.exec(text)[1];
   // Only the insert rule changes: every transition block is the original's.
@@ -221,17 +245,6 @@ test("the promotion guard keeps every transition and counts the caps the code ho
       (m) => `${m[1]} ${sorted(pairs(m[2])).join(",")}`,
     );
   assert.deepEqual(blocks(guard(promotionSql)), blocks(guard(sql)));
-  const limits = Object.fromEntries(
-    [...promotionSql.matchAll(/-- limit: ([A-Z_0-9]+(?:\.\w+)?)\n\s*\w+ CONSTANT INTEGER := (\d+);/g)].map((m) => [
-      m[1],
-      Number(m[2]),
-    ]),
-  );
-  assert.deepEqual(limits, {
-    "OWNER_QUEUE_LIMITS.pr": OWNER_QUEUE_LIMITS.pr,
-    "OWNER_QUEUE_LIMITS.prDuringFirstT1Days": OWNER_QUEUE_LIMITS.prDuringFirstT1Days,
-    FIRST_T1_WINDOW_DAYS,
-  });
   const reason = /-- reason: ENGINEERING_AGENT_V22_PROMOTED_REASON\n\s*promoted_reason CONSTANT TEXT := '([^']*)';/.exec(
     promotionSql,
   );
@@ -242,6 +255,35 @@ test("the promotion guard keeps every transition and counts the caps the code ho
   }
 });
 
+test("the owner-queue migrations change only the caps and drop the first T1 window", () => {
+  const blocks = (text) =>
+    [...text.matchAll(/-- transitions: (\w+ \w+)\n([\s\S]*?)-- end transitions/g)].map(
+      (m) => `${m[1]} ${sorted(pairs(m[2])).join(",")}`,
+    );
+  const digest = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+  for (const [name, before, after] of [
+    ["engineering_agent_run_guard", sql, ownerQueueRunSql],
+    ["engineering_agent_work_item_guard", promotionSql, ownerQueueWorkItemSql],
+  ]) {
+    const previous = functionBodies(before).get(name);
+    const next = functionBodies(after).get(name);
+    assert.deepEqual([...functionBodies(after).keys()], [name], "one function per migration");
+    assert.deepEqual(blocks(next), blocks(previous), `${name} keeps every transition`);
+    assert.doesNotMatch(next, /first_t1|t1_started|effective_pr_limit/, `${name} has no first-T1 window`);
+    // The deploy guard replaces only the exact body the previous migration wrote.
+    const header = new RegExp(
+      `^-- baseline-check: replace-function-if-body-sha256 "${name}" "([0-9a-f]{64})" "([0-9a-f]{64})"$`,
+      "m",
+    ).exec(after);
+    assert.ok(header, `${name} pins the body it replaces`);
+    assert.deepEqual([header[1], header[2]], [digest(previous), digest(next)], name);
+    assert.match(after, /RETURNS TRIGGER\nLANGUAGE plpgsql\nSET search_path = pg_catalog, pg_temp\nAS \$\$/, name);
+    assert.doesNotMatch(after, /INSERT INTO|\bnow\(\)/i, name);
+    for (const match of next.matchAll(/(%(?:1\$)?I\.)?"((?:EngineeringAgent|Amux|AppSetting|AdminAuditLog)\w*)"/g)) {
+      assert.ok(match[1], `${name} names "${match[2]}" without the trigger's schema`);
+    }
+  }
+});
 
 test("every reason a v22 draft is written with fits the column's CHECK", () => {
   // A digit in "t1_evidence_unavailable" made every v22 draft write refuse.

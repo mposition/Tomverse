@@ -429,10 +429,15 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
 const realImageIntent = require(resolve(ROOT, "lib/chatImageIntent.ts")) as typeof import("../../lib/chatImageIntent");
 mock.module(mod("lib/chatImageIntent.ts"), { namedExports: {
   ...realImageIntent,
-  detectChatTurnImage: async () => {
-    imageIntentCalls += 1;
-    return forcedImageIntent ? { image: true, prompt: "Synthetic image request.", preset: "standard", modelIds: [] }
-      : { image: false };
+  createChatTurnImageRouting: (input: unknown) => {
+    if (input) imageIntentCalls += 1;
+    return {
+      context: undefined,
+      accept: () => {},
+      resolve: async () => input && forcedImageIntent
+        ? { image: true, prompt: "Synthetic image request.", preset: "standard", modelId: null, edit: false }
+        : { image: false },
+    };
   },
 } });
 

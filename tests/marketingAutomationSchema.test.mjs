@@ -6,7 +6,7 @@
 //   * the strict schemas refuse what they are meant to refuse -- unknown keys,
 //     free sentences where a token belongs, a link to somewhere that is not us;
 //   * every constant that is duplicated in SQL still matches the SQL. The
-//     posting caps, the retention periods and the post status whitelist all live
+//     API posting channels, the retention periods and the post status whitelist all live
 //     in plpgsql as well, because a trigger cannot import TypeScript, and a
 //     duplicate nothing compares is a duplicate that drifts;
 //   * no schema field is an untyped string. That is a property of the source,
@@ -22,7 +22,7 @@ import {
   AI_VISIBILITY_ACCURACY_FLAGS,
   AI_VISIBILITY_SEARCH_MODES,
   MARKETING_CHANNELS,
-  MARKETING_CHANNEL_CAPS,
+  MARKETING_API_POSTING_CHANNELS,
   MARKETING_CHANNEL_STATUSES,
   MARKETING_DELETION_METHODS,
   MARKETING_DISPATCHED_STATUSES,
@@ -141,18 +141,49 @@ test("the statuses that require a provider request key are the dispatched ones",
   );
 });
 
-test("the posting caps in the trigger are the caps in the module", () => {
-  const body = MIGRATION.split('CASE NEW."channel"')[1].split("END CASE;")[0];
-  const fromSql = {};
-  for (const match of body.matchAll(
-    /WHEN '([a-z]+)' THEN daily_cap := (NULL|\d+); weekly_cap := (NULL|\d+);/g,
-  )) {
-    fromSql[match[1]] =
-      match[2] === "NULL"
-        ? null
-        : { daily: Number(match[2]), weekly: Number(match[3]) };
-  }
-  assert.deepEqual(fromSql, { ...MARKETING_CHANNEL_CAPS });
+/** The caps trigger as the latest migration that replaced it writes it. */
+const CAPS_TRIGGER_SQL = readFileSync(
+  new URL(
+    "../prisma/migrations/20261108130000_marketing_channel_caps_removed/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+test("the caps trigger knows the module's API posting channels and no policy cap", () => {
+  // Owner decision 2026-11-08: no policy cap. The trigger only tells a channel
+  // the publisher posts to (any override, NULL is no cap) from RedNote, which
+  // has no API route and takes no override at all.
+  const body = CAPS_TRIGGER_SQL.split('CASE NEW."channel"')[1].split("END CASE;")[0];
+  const [open, rest] = body.split("THEN");
+  const posted = [...open.matchAll(/'([a-z]+)'/g)].map((match) => match[1]);
+  assert.deepEqual(
+    posted.sort(),
+    MARKETING_CHANNELS.filter((channel) => MARKETING_API_POSTING_CHANNELS[channel]).sort(),
+  );
+  assert.match(rest, /^\s*RETURN NEW;\s*WHEN 'rednote'\s*$/);
+  assert.deepEqual(
+    MARKETING_CHANNELS.filter((channel) => !MARKETING_API_POSTING_CHANNELS[channel]),
+    ["rednote"],
+  );
+  assert.doesNotMatch(CAPS_TRIGGER_SQL, /daily_cap|weekly_cap/);
+  assert.match(CAPS_TRIGGER_SQL, /CREATE OR REPLACE FUNCTION "marketing_channel_caps_are_lower_only"\(\)/);
+});
+
+test("the caps migration pins the body it replaces, which is the original trigger's", async () => {
+  const { createHash } = await import("node:crypto");
+  const sha = (text) => createHash("sha256").update(text.replaceAll("\r\n", "\n")).digest("hex");
+  const bodyOf = (sql) => {
+    const start = sql.indexOf('FUNCTION "marketing_channel_caps_are_lower_only"()');
+    assert.notEqual(start, -1);
+    const bodyStart = sql.indexOf("AS $$", start) + "AS $$".length;
+    return sql.slice(bodyStart, sql.indexOf("$$ LANGUAGE", bodyStart));
+  };
+  const header = CAPS_TRIGGER_SQL.split("\n")[0].trim();
+  assert.equal(
+    header,
+    `-- baseline-check: replace-function-if-body-sha256 "marketing_channel_caps_are_lower_only" "${sha(bodyOf(MIGRATION))}" "${sha(bodyOf(CAPS_TRIGGER_SQL))}"`,
+  );
 });
 
 test("both retention CASE blocks in the migration match the retention table", () => {

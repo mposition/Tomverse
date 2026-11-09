@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { SettingsExitBar } from "@/components/settings/SettingsExitBar";
+import { SettingsConsentSlot } from "@/components/analytics/AnalyticsProvider";
 
 /**
  * Route shell for every /settings/** screen.
@@ -24,6 +25,7 @@ export default function SettingsLayout({
         <div className="flex min-h-dvh flex-col bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
             <SettingsExitBar />
             <div className="flex-1">{children}</div>
+            <SettingsConsentSlot />
         </div>
     );
 }
