@@ -124,7 +124,15 @@ test("the high-risk UI shards run only on pull requests into main", () => {
         assert.match(String(step.if), /steps\.scope\.outputs\.code == 'true'|^failure\(\)$/, step.name);
     }
     // The job itself is not skipped: fast-gate fails a skipped upstream job.
-    assert.equal(job.if, "github.event_name != 'pull_request' || !github.event.pull_request.draft");
+    // develop and main keep different draft conditions (main also runs drafts
+    // into develop and release drafts); either is the workflow's own.
+    assert.ok(
+        [
+            "github.event_name != 'pull_request' || !github.event.pull_request.draft",
+            "github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')",
+        ].includes(job.if),
+        job.if
+    );
 });
 
 // The admin suite asks a narrower question (scripts/admin-e2e-scope.mjs, with

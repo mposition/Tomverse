@@ -78,6 +78,9 @@ test("every page the specs open is under an entry", () => {
 
 test("the pages left out are pages no spec opens", () => {
     assert.doesNotMatch(specText, /\/admin\/chat-e2e/);
+    // The E04 fixture page lives on develop only; a selective release into main
+    // carries the entry without the page, so there it matches nothing.
+    if (!existsSync(resolve(ROOT, "app/(site)/(application)/admin/chat-e2e/page.tsx"))) return;
     for (const pattern of NOT_VISITED) {
         assert.ok(walk(ROOT, "app/(site)/(application)/admin").some((file) => pattern.test(file)), `${pattern} still matches a page`);
     }
