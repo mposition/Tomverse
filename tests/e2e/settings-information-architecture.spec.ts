@@ -582,6 +582,35 @@ async function gotoSettingsDepth(page: Page, path: string) {
   await page.goto(path);
 }
 
+test("pending analytics consent leaves memory settings and draft input uncovered", async ({ page, baseURL, isMobile }) => {
+  await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
+  await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
+  await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+  await gotoSettingsDepth(page, "/settings/memory?lang=ko");
+  const slot = page.getByTestId("settings-consent-slot");
+  const notice = slot.getByTestId("chat-consent-notice");
+  await expect(notice).toBeVisible({ timeout: 15_000 });
+  const draft = page.getByTestId("memory-create-statement");
+  for (const locator of [page.getByTestId("memory-style-toggle").locator(".."), page.getByTestId("memory-default-mode"), draft]) {
+    await locator.scrollIntoViewIfNeeded();
+    await expect(locator).toBeVisible();
+    expect(await locator.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const notice = document.querySelector('[data-testid="chat-consent-notice"]')!.getBoundingClientRect();
+      return element.contains(hit) && rect.bottom <= notice.top;
+    })).toBe(true);
+  }
+  await draft.fill("Keep this unsaved memory draft while choosing analytics.");
+  await notice.scrollIntoViewIfNeeded();
+  await notice.getByTestId("analytics-consent-decline").click();
+  await expect(notice).toHaveCount(0);
+  await expect(draft).toHaveValue("Keep this unsaved memory draft while choosing analytics.");
+  await slot.getByTestId("analytics-settings-button").click();
+  await expect(notice).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
 test("pending analytics consent reserves space below imported conversations", async ({ page, baseURL, isMobile }) => {
   await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
   await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
