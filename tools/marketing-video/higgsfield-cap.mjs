@@ -29,8 +29,8 @@ export function brisbaneDay(now = new Date()) {
 }
 
 /** The cap in credits, or null when calls must be refused (unset, empty, zero, negative, not a number). */
-export function dailyCap(env = process.env) {
-  const raw = env[CAP_ENV];
+export function dailyCap(env = process.env, name = CAP_ENV) {
+  const raw = env[name];
   if (typeof raw !== "string" || !/^\d+(?:\.\d+)?$/u.test(raw.trim())) return null;
   const value = Number(raw.trim());
   return Number.isFinite(value) && value > 0 ? value : null;
@@ -52,6 +52,14 @@ export function requestProblem(request) {
   }
   return null;
 }
+
+/**
+ * What a ledger admits: which requests (`problem` answers null for an allowed
+ * one), the least a call is counted at, and the environment variable holding
+ * the daily cap. The image path's is the default; the creative short job
+ * (hf-media-core.mjs) has its own, with its own ledger file and cap.
+ */
+export const IMAGE_POLICY = Object.freeze({ problem: requestProblem, minCost: HF_IMAGE_COST, capEnv: CAP_ENV });
 
 export const ledgerPath = (jobDir, day) => path.join(jobDir, `higgsfield-ledger-${day}.json`);
 
@@ -110,14 +118,14 @@ export const unsettled = (ledger) => ledger.entries.filter((entry) => entry.stat
  * (status "sent") before anything leaves the box.
  * @returns {{ok: true, entry: object, file: string} | {ok: false, reason: string, detail?: object}}
  */
-export function admit({ jobDir, day = brisbaneDay(), env = process.env, request, label, cost: priced, lockWaitMs }) {
-  const problem = requestProblem(request);
+export function admit({ jobDir, day = brisbaneDay(), env = process.env, request, label, cost: priced, lockWaitMs, policy = IMAGE_POLICY, file: ledgerFile }) {
+  const problem = policy.problem(request);
   if (problem) return { ok: false, reason: problem };
-  // The price Higgsfield quoted, never less than the known price of a picture.
-  const cost = Math.max(HF_IMAGE_COST, Number.isFinite(priced) ? priced : 0);
-  const cap = dailyCap(env);
+  // The price quoted, never less than the policy's known least price of a call.
+  const cost = Math.max(policy.minCost, Number.isFinite(priced) ? priced : 0);
+  const cap = dailyCap(env, policy.capEnv);
   if (cap === null) return { ok: false, reason: "no_daily_cap" };
-  const file = ledgerPath(jobDir, day);
+  const file = ledgerFile ?? ledgerPath(jobDir, day);
   // From reading the total to writing the entry, no other run touches the ledger.
   const held = withLock(file, () => admitLocked({ file, cap, cost, request, label }), lockWaitMs);
   return held.locked ? { ok: false, reason: "ledger_locked" } : held.value;
