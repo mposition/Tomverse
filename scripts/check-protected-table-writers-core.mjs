@@ -3332,6 +3332,14 @@ export const RAW_SQL_ALLOWLIST = [
       "Adds the capture_with_ai_presenter provenance (owner decision 2026-11-07): it replaces the provenance and disclosure checks, adds the check that keeps the value to videos, and drops the disclosure function the replaced check used. The write verbs are the three ALTER TABLE statements, their two DROP CONSTRAINT actions and the DROP FUNCTION; it writes no row.",
   },
   {
+    path: "prisma/migrations/20261109160000_marketing_asset_ai_media_provenance/migration.sql",
+    table: "MarketingAsset",
+    tableMentions: 3,
+    writeVerbs: 6,
+    reason:
+      "Adds the capture_with_ai_media provenance (owner decision 2026-11-09): it replaces the provenance and disclosure checks, adds the check that keeps the value to videos, and drops the disclosure function the replaced check used. The write verbs are the three ALTER TABLE statements, their two DROP CONSTRAINT actions and the DROP FUNCTION; it writes no row.",
+  },
+  {
     path: "lib/marketingLlmBudgetStore.ts",
     table: "MarketingLlmCall",
     tableMentions: 23,

@@ -246,7 +246,7 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 - 모델은 URL을 쓰지 않는다. 승인된 경로 목록의 id만 고르고, 서버가 URL API로 조립해
   origin을 확인한 뒤 UTM을 붙인다.
 - 캡션 링크를 걸 수 없는 채널(Instagram·TikTok)은 계정별 고정 프로필 링크 UTM을 쓴다.
-- 자산은 승인된 자산 목록의 id만 쓴다. 출처(캡처·운영자 업로드·AI 생성·AI 변형·AI 진행자를 더한 캡처 영상)와 채널별 AI 표시 결정을 함께 둔다.
+- 자산은 승인된 자산 목록의 id만 쓴다. 출처(캡처·운영자 업로드·AI 생성·AI 변형·AI 진행자를 더한 캡처 영상·AI 장면·음성·음악을 섞은 캡처 영상)와 채널별 AI 표시 결정을 함께 둔다.
   **AI가 그린 제품 화면(운영자 결정 2026-11-08):** AI 생성 이미지는 Tomverse 화면을 그림으로 보여 줄 수 있다.
   조건은 넷이다. 화면에 보이는 기능·모델 이름·버튼·문구는 실제 제품에 있는 것만 쓴다(`tools/marketing-video/features.json`과 제품 문구).
   실제 모델 이름 아래 보이는 답변은 기록된 실제 답변에서만 인용한다. 이미지 위에 그 언어의 AI 생성 표기를 두고 채널마다 `none`이 아닌 AI 표시를 한다.
@@ -255,6 +255,8 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
   실제 제품 화면 녹화 위에 AI 진행자(사람)만 더한 영상은
   `capture_with_ai_presenter`로 제출하며 AI 출처로 표시한다(채널마다 `none`이 아닌 AI 표시, YouTube `containsSyntheticMedia`).
   이 출처는 영상에만 쓰고 제품 화면을 담을 수 있다. 캡처로 제출하는 화면을 AI가 만들거나 바꾸는 것은 계속 금지다(운영자 결정 2026-11-07).
+  실제 제품 화면 캡처를 바꾸지 않고 제품 화면이 없는 AI 장면·AI 음성·AI 음악과 섞은 영상은 `capture_with_ai_media`로
+  제출한다. 규칙은 같다: AI 출처로 표시하고, 영상에만 쓰며, 제품 화면을 담을 수 있다(운영자 결정 2026-11-09).
 - 승인된 자산 목록은 사람이 쓰는 `docs/marketing/asset-registry.json`과, 미디어 CLI(AMUX 박스의 Claude Code)가 제출하고
   사람이 Admin에서 승인한 `MarketingAsset` 행을 합친 것이다(2026-10-31 운영자). CLI는 파일을 R2에 올리고 제출만 하며,
   게시 키를 갖지 않는다. 영상·이미지가 말하는 것(locale별 대본·화면 문구, 롱폼 영상의 YouTube 챕터 제목, §7.6)은 제출과 함께 오고, 행을 만들기 전에 초안 접수와

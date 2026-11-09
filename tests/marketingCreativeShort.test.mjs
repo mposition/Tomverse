@@ -326,8 +326,8 @@ test("the asset file is AI-origin with a disclosure on every channel, and zh-Han
   for (const locale of ["en", "ko", "zh-Hant", "zh-Hans"]) {
     const { asset, transcript } = creativeAsset({ id: `media-20261110-creative-${locale.toLowerCase()}-short`, locale, words: words(locale), today: new Date("2026-11-10T00:00:00Z") });
     assert.equal(marketingAssetSchema.safeParse(asset).success, true, locale);
-    assert.equal(asset.provenance, "ai_modified");
-    assert.equal(asset.depictsProductInterface, false);
+    assert.equal(asset.provenance, "capture_with_ai_media");
+    assert.equal(asset.depictsProductInterface, true);
     assert.ok(Object.values(asset.disclosure).every((value) => value !== "none"));
     assert.deepEqual(asset.allowedChannels, locale === "zh-Hans" ? ["rednote"] : ["instagram", "youtube", "tiktok", "x"]);
     assert.ok(transcript[locale].includes(AI_LINE[locale]));
