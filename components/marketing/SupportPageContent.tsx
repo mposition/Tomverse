@@ -700,12 +700,12 @@ export function SupportPageContent() {
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader maxWidth="max-w-6xl" />
 
-      <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20">
+      <section lang={lang} className={`mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20 ${lang === "ko" ? "break-keep break-words" : ""}`}>
         <div className="max-w-3xl">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">
             {page.eyebrow}
           </p>
-          <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{page.title}</h1>
+          <h1 className={`mt-4 font-black leading-tight ${lang === "ko" ? "text-balance text-3xl sm:text-5xl lg:text-6xl" : "text-4xl sm:text-6xl"}`}>{page.title}</h1>
           {page.formJumpLabel ? (
             <a href="#support-request-title" className="mt-5 inline-flex min-h-12 items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
               {page.formJumpLabel}<ArrowRight className="h-4 w-4" />
@@ -723,7 +723,7 @@ export function SupportPageContent() {
           </div>
         </div>
 
-        <div className="mt-10 grid gap-3 sm:grid-cols-3">
+        <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-3">
           {[
             [Mail, page.emailLabel, page.emailValue],
             [Clock3, page.responseLabel, page.responseValue],
@@ -740,7 +740,7 @@ export function SupportPageContent() {
           })}
         </div>
 
-        <div className="mt-12 grid gap-5 lg:grid-cols-3">
+        <div className="mt-12 grid grid-cols-1 gap-5 lg:grid-cols-3">
           {page.cards.map((card) => (
             <article key={card.title} className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
               <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-400" />
@@ -758,7 +758,7 @@ export function SupportPageContent() {
           ))}
         </div>
 
-        <div className="mt-12 grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
+        <div className="mt-12 grid grid-cols-1 gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
           <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
             <LifeBuoy className="h-6 w-6 text-blue-600 dark:text-blue-400" />
             {!page.formJumpLabel && <h2 className="mt-4 text-2xl font-black">{page.formTitle}</h2>}
