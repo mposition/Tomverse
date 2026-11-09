@@ -325,6 +325,7 @@ async function openChat(page: Page, options: {
   historyPageFailureOnCursorRead?: number;
   holdHistoryPageFailure?: boolean;
   holdContextBundleOnce?: boolean;
+  /** From this first-page read on, every first page is malformed until healFirstHistoryPage(). */
   malformedFirstHistoryPageOnRead?: number;
   malformedDraftRead?: boolean;
   invalidDraftAttachmentRead?: boolean;
@@ -451,6 +452,7 @@ async function openChat(page: Page, options: {
   let visibleConversations = conversations;
   let historyCursorReadCount = 0;
   let firstHistoryPageReadCount = 0;
+  let firstHistoryPageHealed = false;
   let historyPageFailureStarted = false;
   let contextBundleResponseSettled = false;
   let releaseHistoryPageFailure = () => {};
@@ -854,7 +856,8 @@ async function openChat(page: Page, options: {
     }
     if (method === "GET") historyReads.push(url.pathname + url.search);
     if (method === "GET" && row.id === CONVERSATION && !url.searchParams.has("cursor") &&
-        ++firstHistoryPageReadCount === options.malformedFirstHistoryPageOnRead) {
+        options.malformedFirstHistoryPageOnRead !== undefined && !firstHistoryPageHealed &&
+        ++firstHistoryPageReadCount >= options.malformedFirstHistoryPageOnRead) {
       return route.fulfill({ json: {
         ...payload(row), messages: null,
         messagePage: { hasMore: false, nextCursor: null },
@@ -994,6 +997,9 @@ async function openChat(page: Page, options: {
     releaseContextBundle,
     historyPageFailureStarted: () => historyPageFailureStarted,
     releaseHistoryPageFailure,
+    // The workspace reads the first page more than once on open; a later read
+    // must not replace the malformed one before the test has seen its error.
+    healFirstHistoryPage: () => { firstHistoryPageHealed = true; },
     detail: (id: string) => payload(conversations.find((row) => row.id === id)!),
     hidePreviousAccount: () => {
       visibleConversations = accountBConversations;
@@ -3281,6 +3287,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(state.writes.filter((write) => write.method === "POST" &&
       write.path === `/api/conversations/${CONVERSATION}/messages`)).toHaveLength(0);
 
+    state.healFirstHistoryPage();
     await page.getByTestId("chat-history-load-retry").click();
     await expect(message(page, FIRST_ANSWER)).toBeVisible();
     await expect(page.getByTestId("chat-textarea")).toHaveValue("Wait for valid first page.");

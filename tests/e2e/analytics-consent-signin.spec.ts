@@ -431,7 +431,7 @@ for (const { mode, country } of CONSENT_MODES) {
           mode === "opt_in"
             ? lang === "en"
               ? ["Decline", "Allow analytics"]
-              : ["거부", "분석 허용"]
+              : ["거부", "사용 통계 허용"]
             : lang === "en"
               ? ["Turn off analytics", "Keep analytics on"]
               : ["분석 끄기", "분석 유지"];

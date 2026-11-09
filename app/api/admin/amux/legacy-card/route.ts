@@ -51,7 +51,7 @@ const body = z.object({
 
 const closed = (result: AmuxLegacyCardCloseResult) =>
   result.outcome === "closed" ? { closed: true, archivedAt: result.archivedAt,
-    escalationsResolved: result.escalationsResolved } :
+    alreadyArchived: result.alreadyArchived, escalationsResolved: result.escalationsResolved } :
     { closed: false, reason: result.outcome === "refused" ? result.reason : "not_found" };
 
 function failure(error: unknown): Response {
