@@ -125,6 +125,103 @@ function MeasurementSends({ x, m }: { x: MarketingWeeklyReport["measurement"]; m
   );
 }
 
+/** A rate as a percentage with one decimal, or "none" when there is nothing to divide by. */
+const percentOrNone = (rate: number | null, none: string) =>
+  rate === null ? none : `${(Math.round(rate * 1000) / 10).toFixed(1)}%`;
+
+const countOrNone = (value: number | null, none: string) => (value === null ? none : String(value));
+
+const signed = (value: number, suffix = "") => `${value > 0 ? "+" : ""}${value}${suffix}`;
+
+/** The funnel table: one row per account, the week's total first, against the week before. */
+function MarketingWeeklyFunnel({ funnel, m }: { funnel: MarketingWeeklyReport["funnel"]; m: Messages }) {
+  const label = (key: string) => (key === "*" ? m.funnelTotal : key === "other" ? m.funnelOther : key);
+  const change = (value: number | null, suffix = "") =>
+    funnel.previousAvailable ? (
+      <span className="block text-[11px] text-zinc-500">
+        {m.funnelChange.replace("{change}", value === null ? m.none : signed(value, suffix))}
+      </span>
+    ) : null;
+  const parts = {
+    published: m.funnelPartPublished,
+    touches: m.funnelPartTouches,
+    signups: m.funnelPartSignups,
+  } as const;
+  return (
+    <>
+      <p className="text-xs text-zinc-400">{m.funnelLead}</p>
+      {funnel.unread.length > 0 ? (
+        <p className="text-xs text-amber-300" data-testid="marketing-weekly-funnel-unread">
+          {m.funnelUnread.replace("{parts}", funnel.unread.map((part) => parts[part]).join(", "))}
+        </p>
+      ) : null}
+      {funnel.previousAvailable ? null : (
+        <p className="text-xs text-sky-300" data-testid="marketing-weekly-funnel-no-previous">
+          {m.funnelPreviousUnavailable}
+        </p>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[860px] border-collapse" data-testid="marketing-weekly-funnel-table">
+          <thead>
+            <tr className="border-b border-zinc-800">
+              <th className={HEAD}>{m.colAccount}</th>
+              <th className={HEAD}>{m.colPosts}</th>
+              <th className={HEAD}>{m.colTouches}</th>
+              <th className={HEAD}>{m.colSignups}</th>
+              <th className={HEAD}>{m.colFirstUse}</th>
+              <th className={HEAD}>{m.colPaid}</th>
+              <th className={HEAD}>{m.colTouchesPerPost}</th>
+              <th className={HEAD}>{m.colSignupRate}</th>
+              <th className={HEAD}>{m.colFirstUseRate}</th>
+              <th className={HEAD}>{m.colPaidRate}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {funnel.rows.map((row) => (
+              <tr key={row.key} className="border-b border-zinc-800/60" data-testid={`marketing-weekly-funnel-row-${row.key}`}>
+                <td className={`${CELL} font-mono text-xs`}>{label(row.key)}</td>
+                <td className={CELL}>
+                  {row.key === "other" ? m.none : countOrNone(row.published, m.none)}
+                  {row.key === "other" ? null : change(row.change.published)}
+                </td>
+                <td className={CELL}>
+                  {countOrNone(row.touches, m.none)}
+                  {change(row.change.touches)}
+                </td>
+                <td className={CELL}>
+                  {countOrNone(row.signups, m.none)}
+                  {change(row.change.signups)}
+                </td>
+                <td className={CELL}>{countOrNone(row.firstUse, m.none)}</td>
+                <td className={CELL}>
+                  {countOrNone(row.paid, m.none)}
+                  {change(row.change.paid)}
+                </td>
+                <td className={CELL}>{row.touchesPerPost === null ? m.none : (Math.round(row.touchesPerPost * 10) / 10).toFixed(1)}</td>
+                <td className={CELL}>
+                  {percentOrNone(row.signupRate, m.none)}
+                  {change(row.change.signupRatePoints === null ? null : Math.round(row.change.signupRatePoints * 10) / 10, "pp")}
+                </td>
+                <td className={CELL}>
+                  {percentOrNone(row.firstUseRate, m.none)}
+                  {row.held && row.firstUseRate !== null ? <span className="block text-[11px] text-sky-300">{m.held}</span> : null}
+                </td>
+                <td className={CELL}>
+                  {percentOrNone(row.paidRate, m.none)}
+                  {row.held && row.paidRate !== null ? <span className="block text-[11px] text-sky-300">{m.held}</span> : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-zinc-500">{m.funnelHeld}</p>
+      <p className="text-xs text-zinc-500">{m.funnelNote}</p>
+      <p className="text-[11px] text-zinc-500">{m.funnelSources}</p>
+    </>
+  );
+}
+
 export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyReport }) {
   const m = useAdminMessages(adminMarketingReportsMessages);
   const x = report.measurement;
@@ -223,7 +320,7 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
       </Section>
 
       <Section title={m.secFunnel} testId="marketing-weekly-funnel">
-        <p className="text-sm text-zinc-400">{m.funnelNotConnected}</p>
+        <MarketingWeeklyFunnel funnel={report.funnel} m={m} />
       </Section>
 
       <Section title={m.secAnalysis} testId="marketing-weekly-analysis">
@@ -264,6 +361,35 @@ export function MarketingWeeklyReportView({ report }: { report: MarketingWeeklyR
             ? m.noExperiments
             : m.experimentsSummary.replace("{count}", String(report.experiments.results))}
         </p>
+        {report.experiments.entries === null ? (
+          <p className="text-sm text-amber-300">{m.experimentsUnread}</p>
+        ) : report.experiments.entries.length === 0 ? (
+          <p className="text-sm text-zinc-400">{m.noExperimentInWeek}</p>
+        ) : (
+          <ul className="grid gap-2" data-testid="marketing-weekly-experiment-arms">
+            {report.experiments.entries.map((entry) => (
+              <li key={entry.experimentId} className="text-xs text-zinc-400">
+                <p className="font-mono text-zinc-300">{entry.experimentId}</p>
+                <p>
+                  {m.experimentSpan
+                    .replace("{bundle}", entry.bundleId ?? m.none)
+                    .replace("{status}", entry.status)
+                    .replace("{start}", entry.startsAt.slice(0, 10))
+                    .replace("{end}", entry.endsAt.slice(0, 10))}
+                </p>
+                {entry.arms.map((arm) => (
+                  <p key={arm.arm}>
+                    {m.experimentArms
+                      .replace("{arm}", arm.arm)
+                      .replace("{conversions}", String(arm.conversions))
+                      .replace("{exposures}", String(arm.exposures))
+                      .replace("{rate}", percentOrNone(arm.rate, m.none))}
+                  </p>
+                ))}
+              </li>
+            ))}
+          </ul>
+        )}
       </Section>
     </div>
   );
@@ -286,7 +412,11 @@ export function MarketingWeeklyReportCard() {
         return;
       }
       const report = (await response.json()) as MarketingWeeklyReport;
-      setLoad(report?.measurement && typeof report.weekStart === "string" ? { status: "ready", report } : { status: "failed" });
+      setLoad(
+        report?.measurement && report.funnel && typeof report.weekStart === "string"
+          ? { status: "ready", report }
+          : { status: "failed" },
+      );
     } catch {
       setLoad({ status: "failed" });
     }

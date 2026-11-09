@@ -1,5 +1,18 @@
 import { expect, test } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { helpCentreHref } from "../../lib/localizedHelpHref";
+
+for (const [language, title] of [["en", "Help Centre"], ["ko", "도움말 센터"]] as const) {
+  test(`help centre app link and localized route resolve in ${language}`, async ({ page }) => {
+    await prepareGuestPage(page, language);
+    const response = await page.goto(helpCentreHref(language));
+    expect(response?.status()).toBe(200);
+    await expect(page.locator("html")).toHaveAttribute("lang", language);
+    await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
+    const localized = await page.request.get(`/${language}/support/help-centre`);
+    expect(localized.status()).toBe(200);
+  });
+}
 
 test("desktop exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
