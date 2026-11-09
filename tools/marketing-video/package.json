@@ -17,6 +17,7 @@
     "@remotion/bundler": "4.0.536",
     "@remotion/cli": "4.0.536",
     "@remotion/renderer": "4.0.536",
+    "esbuild": "0.28.1",
     "playwright": "1.63.0",
     "react": "19.1.1",
     "react-dom": "19.1.1",

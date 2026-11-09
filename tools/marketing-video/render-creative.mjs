@@ -8,8 +8,18 @@
 // The entry that registers the composition is written here, not by the model.
 // A final render is mastered to -14 LUFS. Exit 0 rendered, 2 usage or a path
 // outside the run, 3 the film's code refused, 1 anything else.
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+//
+// The film is a model's code, so it is bundled and rendered in a sandbox: this
+// script runs itself again under bubblewrap with no network (loopback only,
+// for the renderer's own page server), an environment of PATH, HOME and LANG
+// only, and the home folders that hold logins and keys hidden. Without
+// bubblewrap on Linux it refuses; elsewhere (a developer's machine) it runs
+// only with CREATIVE_RENDER_UNSANDBOXED=1, and with the same bare environment.
+import { spawnSync } from "node:child_process";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { bundle } from "@remotion/bundler";
 import { renderMedia, renderStill, selectComposition } from "@remotion/renderer";
@@ -18,6 +28,30 @@ import { checkFilmSource } from "./creative-core.mjs";
 import { master } from "./ffmpeg-tools.mjs";
 
 export const FPS = 30;
+const INSIDE = "CREATIVE_RENDER_SANDBOX";
+/** Home entries that hold logins, keys and the job's secrets; hidden from the render. */
+export const HIDDEN = [".config/tomverse", ".config/higgsfield", ".config/gh", ".claude", ".claude.json", ".codex", ".copilot", ".cursor", ".amux", ".ssh", ".gnupg", ".netrc", ".npmrc", ".git-credentials", ".aws", ".docker"];
+
+if (process.env[INSIDE] !== "inside") {
+  const home = os.homedir();
+  const bare = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, LANG: process.env.LANG ?? "C.UTF-8", [INSIDE]: "inside" };
+  const self = [fileURLToPath(import.meta.url), ...process.argv.slice(2)];
+  let ran;
+  if (process.platform === "linux") {
+    const hide = HIDDEN.map((entry) => path.join(home, entry)).filter((entry) => existsSync(entry)).flatMap((entry) => (lstatSync(entry).isDirectory() ? ["--tmpfs", entry] : ["--ro-bind", "/dev/null", entry]));
+    ran = spawnSync("bwrap", ["--dev-bind", "/", "/", "--unshare-net", "--die-with-parent", "--new-session", ...hide, process.execPath, ...self], { stdio: "inherit", env: bare });
+  } else if (process.env.CREATIVE_RENDER_UNSANDBOXED === "1") {
+    ran = spawnSync(process.execPath, self, { stdio: "inherit", env: { ...bare, SystemRoot: process.env.SystemRoot ?? "" } });
+  } else {
+    console.log(JSON.stringify({ step: "render-creative", error: "no sandbox here: run on the Linux box (bubblewrap), or set CREATIVE_RENDER_UNSANDBOXED=1 on a developer's machine" }));
+    process.exit(1);
+  }
+  if (ran.error) {
+    console.log(JSON.stringify({ step: "render-creative", error: `the sandbox did not start: ${ran.error.message}` }));
+    process.exit(1);
+  }
+  process.exit(ran.status ?? 1);
+}
 const usage = () => {
   console.error("usage: node render-creative.mjs <run-dir> <locale> --stills [count] | --out <run-dir>/out/<file>.mp4");
   process.exit(2);
@@ -29,7 +63,7 @@ const run = path.resolve(runArg);
 const inside = (file) => !path.relative(run, file).startsWith("..") && !path.isAbsolute(path.relative(run, file));
 if (!/^[a-zA-Z-]{2,7}$/u.test(locale)) usage();
 
-const problems = checkFilmSource(path.join(run, "film"));
+const problems = await checkFilmSource(path.join(run, "film"));
 if (problems.length > 0) {
   console.log(JSON.stringify({ step: "render-creative", refused: problems }));
   process.exit(3);

@@ -172,7 +172,15 @@ its topic, and submits each for approval in Admin:
    `job/creative/<run>/film/` and looks at stills it renders with
    `render-creative.mjs`; it can write only there and run only that command.
    `render-creative.mjs` refuses code that imports anything but react, remotion
-   and its own files, or uses the network, Node, randomness or the clock.
+   and its own files (every import read by esbuild's parser, so no webpack
+   loader or comment trick passes), or names the network, Node, randomness or
+   the clock. It then bundles and renders in a bubblewrap sandbox: no network
+   but loopback, only PATH, HOME and LANG in the environment, and the home
+   folders with logins and keys (`~/.config/tomverse`, `~/.claude`, `~/.ssh`,
+   ...) hidden. Without bubblewrap on Linux it refuses.
+   Only packs of shorts that `job/approved.json` lists as approved and valid
+   today are used, and a locale whose narration needs more than 40 s is
+   dropped rather than cut.
 6. review (`CREATIVE-REVIEW.md`): a separate call scores every locale's stills
    against the earlier films: pass, fix (one more build) or reject.
 7. render, master to -14 LUFS, check 1080x1920 / 10-60 s / sound, write the

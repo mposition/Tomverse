@@ -31,7 +31,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkFilmSource, checkFinal, checkPlan, creativeAsset, jsonLine } from "./creative-core.mjs";
+import { checkFilmSource, checkFinal, checkPlan, creativeAsset, jsonLine, usablePacks } from "./creative-core.mjs";
 import { speakLine, VOICE_CAP_ENV, voiceLedgerPath } from "./el-voice-core.mjs";
 import { levelVoice, probe, seconds as lengthOf, stills } from "./ffmpeg-tools.mjs";
 import { brisbaneDay, dailyCap, readLedger, spent } from "./higgsfield-cap.mjs";
@@ -122,13 +122,15 @@ function claude(name, prompt, { tools, allowed, maxTurns, timeoutMinutes = 30 })
 const listed = node(["list-approved.mjs"]);
 if (listed.status !== 0) halt("list_approved_failed");
 
-/** The capture packs on the box (job/sources/<asset-id>/pack.json), real screens of approved shorts. */
+/** The capture packs on the box (job/sources/<asset-id>/pack.json) whose short is approved now and valid. */
 const sourcesDir = path.join("job", "sources");
-const packs = (existsSync(sourcesDir) ? readdirSync(sourcesDir) : [])
+const onBox = (existsSync(sourcesDir) ? readdirSync(sourcesDir) : [])
   .map((id) => path.join(sourcesDir, id, "pack.json"))
   .filter((file) => existsSync(file))
   .map((file) => ({ file, dir: path.dirname(file), ...JSON.parse(readFileSync(file, "utf8")) }))
   .filter((pack) => pack.topic && pack.locale && pack.images);
+const packs = usablePacks(onBox, JSON.parse(readFileSync(path.join("job", "approved.json"), "utf8")), date);
+for (const pack of onBox) if (!packs.includes(pack)) report.dropped.push({ step: "packs", reason: `${pack.assetId ?? pack.file}: not approved now` });
 if (packs.length === 0) halt("no_capture_packs");
 
 const historyPath = path.join(creativeDir, "history.json");
@@ -225,6 +227,7 @@ const music = await paid({ model: "elevenlabs_music_v2_5", force_instrumental: t
 if (!music.ok) report.failed.push({ step: "music", reason: music.reason });
 
 // 5. Voice, line by line, each levelled to the same loudness.
+const MAX_SECONDS = 40;
 const props = {};
 for (const locale of [...locales]) {
   const words = plan.locales[locale];
@@ -245,11 +248,17 @@ for (const locale of [...locales]) {
     report.dropped.push({ step: `voice ${locale}`, reason: "a line could not be made" });
     continue;
   }
-  // Long enough for the narration with a breath between lines and the end card, never past 40 s.
+  // Long enough for the narration with a breath between lines and the end card.
+  // Past 40 s the locale is refused rather than cut: a cut drops the end card.
   const needed = Math.ceil(lines.reduce((sum, line) => sum + line.seconds, 0) + 0.35 * (lines.length - 1) + 2.5);
+  if (needed > MAX_SECONDS) {
+    locales.splice(locales.indexOf(locale), 1);
+    report.dropped.push({ step: `voice ${locale}`, reason: `the narration needs ${needed} s, more than ${MAX_SECONDS}` });
+    continue;
+  }
   props[locale] = {
     locale,
-    seconds: Math.min(40, Math.max(plan.seconds, needed)),
+    seconds: Math.max(plan.seconds, needed),
     lines,
     screen: words.screen,
     captures: captures[locale],
@@ -266,7 +275,7 @@ if (locales.length === 0) halt("no_locale_left");
 // 6-7. Build, then review; one more build on "fix".
 const renderAll = () => {
   for (const locale of locales) {
-    const rendered = node(["render-creative.mjs", runDir, locale, "--stills", "12"]);
+    const rendered = node(["render-creative.mjs", runDir, locale, "--stills", "12"], modelEnv());
     if (rendered.status !== 0) return `${locale}: ${rendered.stdout.trim().split("\n").at(-1)}`;
   }
   return null;
@@ -292,7 +301,7 @@ let verdict = null;
 let notes = null;
 for (let round = 1; round <= 2; round += 1) {
   claude(`build-${round}`, buildPrompt(notes), { tools: "Read,Write,Edit,Bash", allowed: buildAllowed, maxTurns: 150, timeoutMinutes: 90 });
-  const problems = checkFilmSource(path.join(runDir, "film"));
+  const problems = await checkFilmSource(path.join(runDir, "film"));
   if (problems.length > 0) {
     report.dropped.push({ step: `build ${round}`, reason: problems.join("; ") });
     halt("film_refused");
@@ -316,7 +325,7 @@ if (verdict?.verdict !== "pass") {
 for (const locale of locales) {
   const id = `media-${run}-creative-${locale.toLowerCase()}-short`;
   const out = path.join(runDir, "out", `${id}.mp4`);
-  const rendered = node(["render-creative.mjs", runDir, locale, "--out", out]);
+  const rendered = node(["render-creative.mjs", runDir, locale, "--out", out], modelEnv());
   if (rendered.status !== 0) {
     report.failed.push({ id, step: "render", status: rendered.status });
     continue;

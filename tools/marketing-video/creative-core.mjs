@@ -6,12 +6,16 @@
 //  - checkPlan: the plan's shape and limits, the AI line on screen in every
 //    locale, a capture pack that exists, and a logline not used before.
 //  - checkFilmSource: the film may import only react, remotion and its own
-//    files, and holds nothing that reaches the network or the machine.
+//    files (read by a parser), and holds nothing that reaches the network or
+//    the machine. render-creative.mjs also renders it in a sandbox.
+//  - usablePacks: capture packs of shorts approved now and still valid.
 //  - checkFinal: a 1080x1920 video of 10-60 s with sound.
 //  - creativeAsset: the registry entry, written here rather than by a model:
 //    AI origin, a disclosure on every channel, zh-Hans to RedNote only.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+
+import { build } from "esbuild";
 
 import { LOCALES } from "./concepts-core.mjs";
 
@@ -87,18 +91,77 @@ export function checkPlan(answer, { packs, history = [] }) {
 
 /** Import specifiers the film may use; anything else (and every package) is refused. */
 const ALLOWED_IMPORTS = new Set(["react", "remotion"]);
+const LOCAL_IMPORT = /^\.\/([A-Za-z0-9_-]+)(\.tsx?)?$/u;
+/**
+ * A second, cruder layer after the parser: words that have no place in a film
+ * drawn from props. The boundary that holds is the parser (every import, in
+ * any syntax) and render-creative.mjs's sandbox (no network, no secrets).
+ */
 const FORBIDDEN = [
-  [/\bfetch\s*\(/u, "fetch"],
-  [/XMLHttpRequest|WebSocket|EventSource|navigator\.sendBeacon/u, "a network API"],
-  [/\beval\s*\(|new\s+Function\b|\bimport\s*\(/u, "eval, new Function or a dynamic import"],
-  [/\brequire\s*\(|\bprocess\.|__dirname|child_process/u, "Node APIs"],
-  [/https?:\/\/|\/\/[a-z0-9-]+\.[a-z]/iu, "a URL"],
-  [/document\.cookie|localStorage|sessionStorage|indexedDB/u, "browser storage"],
-  [/Math\.random\s*\(|Date\.now\s*\(|new\s+Date\s*\(/u, "randomness or the clock (a frame must be a pure function of time)"],
+  [/\bfetch\b/u, "fetch"],
+  [/XMLHttpRequest|WebSocket|EventSource|sendBeacon|RTCPeerConnection|\bWorker\b/u, "a network or worker API"],
+  [/\beval\b|\bFunction\s*\(|new\s+Function\b|\bimport\s*\(|import\.meta/u, "eval, Function, a dynamic import or import.meta"],
+  [/\brequire\b|\bprocess\b|__dirname|__filename|__webpack|__non_webpack|child_process|\bmodule\.|\bglobalThis\b|\bwindow\b|\bdocument\b/u, "Node, webpack or page globals"],
+  [/https?:\/\/|\/\/[a-z0-9-]+\.[a-z]|\bnew\s+URL\b/iu, "a URL"],
+  [/localStorage|sessionStorage|indexedDB|\bcookie\b/u, "browser storage"],
+  [/Math\.random\s*\(|Date\.now\s*\(|new\s+Date\s*\(|performance\.now/u, "randomness or the clock (a frame must be a pure function of time)"],
 ];
 
+/**
+ * Every import of every file in the film, read by esbuild's parser (static,
+ * re-export, side-effect, dynamic and require, comments and all), so no
+ * spelling slips past: a bare `react` or `remotion`, or `./Name` that is a
+ * .ts/.tsx file in the film folder. A webpack loader (`!`), a package, a path
+ * out of the folder and every dynamic form are refused. verbatimModuleSyntax
+ * keeps an unused import visible instead of dropping it unread.
+ */
+async function importProblems(dir, names) {
+  // esbuild wants absolute paths back from a plugin; the runner passes a relative folder.
+  const filmDir = path.resolve(dir);
+  const problems = [];
+  const plugin = {
+    name: "film-imports",
+    setup(builder) {
+      // esbuild takes a Go regular expression: no `u` flag.
+      builder.onResolve({ filter: /.*/ }, (args) => {
+        if (args.kind === "entry-point") return { path: args.path };
+        const from = path.basename(args.importer);
+        const refuse = (why) => {
+          problems.push(`${from}: ${why}`);
+          return { path: args.path, external: true };
+        };
+        if (args.kind !== "import-statement") return refuse(`${args.kind} of ${args.path} (static imports only)`);
+        if (ALLOWED_IMPORTS.has(args.path)) return { path: args.path, external: true };
+        const local = LOCAL_IMPORT.exec(args.path);
+        if (!local) return refuse(`imports ${args.path} (only react, remotion and ./ files)`);
+        const file = (local[2] ? [args.path] : [`${args.path}.tsx`, `${args.path}.ts`]).map((name) => path.join(filmDir, name)).find((candidate) => existsSync(candidate));
+        if (!file) return refuse(`imports ${args.path}, which is not a file in film/`);
+        return { path: file };
+      });
+    },
+  };
+  try {
+    await build({
+      entryPoints: names.map((name) => path.join(filmDir, name)),
+      bundle: true,
+      write: false,
+      outdir: path.join(filmDir, ".check"),
+      format: "esm",
+      platform: "browser",
+      jsx: "transform",
+      logLevel: "silent",
+      tsconfigRaw: { compilerOptions: { verbatimModuleSyntax: true } },
+      plugins: [plugin],
+    });
+  } catch (error) {
+    const first = error?.errors?.[0];
+    problems.push(first ? `${path.basename(first.location?.file ?? "film")}:${first.location?.line ?? 0}: ${first.text}` : `the film does not compile: ${String(error?.message ?? error).slice(0, 200)}`);
+  }
+  return problems;
+}
+
 /** Problems with the film's code (film/*.tsx, *.ts), or [] when it may be rendered. */
-export function checkFilmSource(filmDir) {
+export async function checkFilmSource(filmDir) {
   const problems = [];
   let files = [];
   try {
@@ -107,25 +170,23 @@ export function checkFilmSource(filmDir) {
     return ["there is no film folder"];
   }
   if (!files.includes("Film.tsx")) problems.push("film/Film.tsx is missing");
+  const sources = [];
   for (const name of files) {
     const full = path.join(filmDir, name);
-    if (statSync(full).isDirectory()) {
-      problems.push(`${name}: the film folder holds files only`);
+    if (lstatSync(full).isDirectory() || !lstatSync(full).isFile()) {
+      problems.push(`${name}: the film folder holds plain files only`);
       continue;
     }
     if (!/^[A-Za-z0-9_-]+\.(?:tsx|ts)$/u.test(name)) {
       problems.push(`${name}: only .tsx and .ts files`);
       continue;
     }
+    sources.push(name);
     const source = readFileSync(full, "utf8");
-    for (const match of source.matchAll(/\b(?:import|export)\b[^'"`;]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]/gu)) {
-      const spec = match[1] ?? match[2];
-      const local = /^\.\/[A-Za-z0-9_-]+(?:\.tsx?)?$/u.test(spec);
-      if (!local && !ALLOWED_IMPORTS.has(spec)) problems.push(`${name}: imports ${spec} (only react, remotion and ./ files)`);
-    }
     for (const [pattern, what] of FORBIDDEN) if (pattern.test(source)) problems.push(`${name}: uses ${what}`);
   }
-  return problems;
+  if (problems.length > 0 || sources.length === 0) return problems;
+  return importProblems(filmDir, sources);
 }
 
 /** Problems with a finished file, from ffprobe's JSON (-show_streams -show_format), or []. */
@@ -139,6 +200,18 @@ export function checkFinal(probe) {
   if (!audio) problems.push("no sound");
   if (!(seconds >= 10 && seconds <= 60)) problems.push("not 10-60 seconds long");
   return problems;
+}
+
+/**
+ * The packs whose short is approved now and still valid (job/approved.json,
+ * as list-approved.mjs wrote it this run): a pack left on the box from a short
+ * that was never approved, retired or expired is not a source.
+ * @param approved {Array<{id: string, validUntil?: string}>}
+ * @param date {string} today, YYYY-MM-DD (Brisbane)
+ */
+export function usablePacks(packs, approved, date) {
+  const valid = new Set((Array.isArray(approved) ? approved : []).filter((asset) => typeof asset?.id === "string" && (!asset.validUntil || asset.validUntil >= date)).map((asset) => asset.id));
+  return packs.filter((pack) => typeof pack.assetId === "string" && valid.has(pack.assetId));
 }
 
 /** Where a locale's creative short may go: zh-Hans is RedNote's (Simplified). */

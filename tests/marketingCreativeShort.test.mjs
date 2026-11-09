@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import { marketingAssetSchema } from "../lib/marketingAssets.ts";
-import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset } from "../tools/marketing-video/creative-core.mjs";
+import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, usablePacks } from "../tools/marketing-video/creative-core.mjs";
 import { speakLine, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
 import { admit, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
 import { creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
@@ -215,28 +215,71 @@ test("a concept or logline used before is refused", () => {
   assert.match(checkPlan(answer(plan()), { packs: PACKS, history }).refusal, /used before/u);
 });
 
-test("the film may import only react, remotion and its own files, and stay a pure function of time", () => {
+test("the film may import only react, remotion and its own files, and stay a pure function of time", async () => {
   const dir = mkdtempSync(join(tmpdir(), "film-"));
   const film = join(dir, "film");
   mkdirSync(film);
   const write = (source) => writeFileSync(join(film, "Film.tsx"), source);
-  write(`import React from "react";\nimport { AbsoluteFill, random } from "remotion";\nimport { Card } from "./Card";\nexport const Film = () => <AbsoluteFill />;`);
-  assert.deepEqual(checkFilmSource(film), []);
+  writeFileSync(join(film, "Card.tsx"), `import React from "react";\nexport const Card = () => <div />;`);
+  write(`import React from "react";\nimport { AbsoluteFill, random } from "remotion";\nimport { Card } from "./Card";\nexport const Film = () => <AbsoluteFill><Card /></AbsoluteFill>;`);
+  assert.deepEqual(await checkFilmSource(film), []);
+  assert.deepEqual(await checkFilmSource(relative(process.cwd(), film)), [], "a relative folder, as the runner passes");
   for (const [source, pattern] of [
     [`import fs from "fs";`, /imports fs/u],
     [`import x from "@remotion/google-fonts/Lobster";`, /imports @remotion/u],
+    [`import { Gone } from "./Gone";`, /not a file in film/u],
+    [`import { Up } from "../entry";`, /imports \.\.\/entry/u],
     [`fetch("/x");`, /fetch/u],
     [`const u = "https://evil.example/a.png";`, /a URL/u],
     [`const n = Math.random();`, /randomness/u],
     [`const m = await import("./x");`, /dynamic import/u],
-    [`process.env.X;`, /Node APIs/u],
+    [`process.env.X;`, /Node, webpack or page globals/u],
   ]) {
     write(source);
-    assert.match(checkFilmSource(film).join("\n"), pattern, source);
+    assert.match((await checkFilmSource(film)).join("\n"), pattern, source);
   }
   write(`export const Film = () => null;`);
   writeFileSync(join(film, "run.sh"), "rm -rf /");
-  assert.match(checkFilmSource(film).join("\n"), /only \.tsx and \.ts/u);
+  assert.match((await checkFilmSource(film)).join("\n"), /only \.tsx and \.ts/u);
+});
+
+test("the film's imports are read by a parser: comments, webpack loaders, re-exports and unused imports do not slip past", async () => {
+  const film = join(mkdtempSync(join(tmpdir(), "film-")), "film");
+  mkdirSync(film);
+  writeFileSync(join(film, "Loader.ts"), `export default function loader() { return ""; }`);
+  const check = async (source) => {
+    writeFileSync(join(film, "Film.tsx"), source);
+    return (await checkFilmSource(film)).join("\n");
+  };
+  // The review's case: a comment between `from` and the string, and a webpack inline loader.
+  assert.match(await check(`import x from /*comment*/ "!!./Loader.ts!./Film.tsx";\nexport const Film = () => null;`), /imports !!\.\/Loader\.ts!\.\/Film\.tsx/u);
+  assert.match(await check(`import x from\n  // a line comment\n  "!./Loader.ts";\nexport const Film = () => null;`), /imports !\.\/Loader\.ts/u);
+  // Kept although nothing uses it (verbatimModuleSyntax).
+  assert.match(await check(`import unused from "node:fs";\nexport const Film = () => null;`), /imports node:fs/u);
+  assert.match(await check(`export * from "left-pad";\nexport const Film = () => null;`), /imports left-pad/u);
+  assert.match(await check(`import "fs";\nexport const Film = () => null;`), /imports fs/u);
+  assert.match(await check(`const fs = globalThis["req" + "uire"]("fs");\nexport const Film = () => null;`), /globals/u);
+  assert.match(await check(`export const Film = ( => null;`), /Film\.tsx:1/u);
+});
+
+test("captures come only from shorts approved now and still valid", () => {
+  const packs = [
+    { assetId: "media-a-en-short", topic: "t", locale: "en" },
+    { assetId: "media-b-ko-short", topic: "t", locale: "ko" },
+    { assetId: "media-c-zh-hant-short", topic: "t", locale: "zh-Hant" },
+    { topic: "t", locale: "en" },
+  ];
+  const approved = [{ id: "media-a-en-short", validUntil: "2027-01-30" }, { id: "media-c-zh-hant-short", validUntil: "2026-11-09" }];
+  assert.deepEqual(usablePacks(packs, approved, "2026-11-09").map((pack) => pack.assetId), ["media-a-en-short", "media-c-zh-hant-short"]);
+  assert.deepEqual(usablePacks(packs, approved, "2026-11-10").map((pack) => pack.assetId), ["media-a-en-short"]);
+  assert.deepEqual(usablePacks(packs, null, "2026-11-10"), []);
+});
+
+test("off the Linux box, the renderer refuses to run the film without its sandbox", { skip: process.platform === "linux" }, () => {
+  const tool = resolve("tools/marketing-video");
+  const ran = spawnSync(process.execPath, [join(tool, "render-creative.mjs"), tmpdir(), "en", "--stills"], { encoding: "utf8", env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot ?? "" } });
+  assert.equal(ran.status, 1);
+  assert.match(JSON.parse(ran.stdout.trim().split("\n").at(-1)).error, /no sandbox here/u);
 });
 
 test("a finished file is 1080x1920, 10-60 s, with sound", () => {
