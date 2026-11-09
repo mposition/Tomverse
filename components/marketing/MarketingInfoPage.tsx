@@ -34,6 +34,7 @@ export type MarketingInfoCopy = {
   title: string;
   description: string;
   updated?: string;
+  introCtaLabel?: string;
   sectionNavLabel?: string;
   sections: MarketingInfoSection[];
   cta?: {
@@ -82,6 +83,13 @@ export function MarketingInfoPage({
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{page.eyebrow}</p>
           <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{page.title}</h1>
           <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{page.description}</p>
+          {page.introCtaLabel && page.cta ? (
+            <Link href={pageHref(page.cta.href)} onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "marketing_info_intro" })}
+              data-testid="marketing-info-intro-cta"
+              className="mt-6 inline-flex min-h-12 max-w-full items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white transition hover:bg-blue-500">
+              {page.introCtaLabel}<ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+            </Link>
+          ) : null}
           {page.updated && <p className="mt-4 text-sm font-semibold text-zinc-500 dark:text-zinc-400">{page.updated}</p>}
         </div>
 
