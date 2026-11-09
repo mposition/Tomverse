@@ -206,7 +206,7 @@ const consentCopy: Record<
     settings: "Analytics settings",
     noticeTitle: "Privacy-safe analytics is on",
     noticeBody: "In this region, Tomverse starts privacy-minimized product analytics with a clear opt-out. Prompts, responses, filenames, and file contents are never included, and advertising storage stays off.",
-    noticeMobileBody: "Analytics is on; prompts and files are excluded.",
+    noticeMobileBody: "Usage analytics is on; prompts and file content are excluded.",
     keepOn: "Keep analytics on",
     keepOnShort: "Keep",
     turnOff: "Turn off analytics",

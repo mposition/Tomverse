@@ -42,16 +42,19 @@ export const isAmuxV22RecoverableTask = (card: Pick<AmuxLegacyCardFacts,
 const UNKNOWN_OUTCOMES = new Set(["expired", "outcome_unknown"]);
 const UNKNOWN_REASONS = new Set(["usage_outcome_unknown", "outcome_unknown"]);
 
-export function amuxLegacyCardKind(card: AmuxLegacyCardFacts): AmuxLegacyCardKind | null {
-  if (card.sourceSystem === BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM) return "workboard";
-  if (card.sourceSystem !== "admin-idea-v4" || card.cardType !== "task" || isAmuxV22RecoverableTask(card)) return null;
-  if (card.status !== "blocked" && card.status !== "review") return null;
+function preV22Task(card: AmuxLegacyCardFacts) {
+  if (isAmuxV22RecoverableTask(card)) return false;
+  if (card.status !== "blocked" && card.status !== "review") return false;
   const attempt = card.lastAttempt;
   // A run still open is not an unknown outcome yet; the close refuses it as running.
-  if (attempt === null) return "pre_v22_task";
-  if (attempt.endedAt === null) return "pre_v22_task";
-  return UNKNOWN_OUTCOMES.has(attempt.outcome ?? "") || UNKNOWN_REASONS.has(attempt.reason ?? "") ?
-    "pre_v22_task" : null;
+  if (attempt === null || attempt.endedAt === null) return true;
+  return UNKNOWN_OUTCOMES.has(attempt.outcome ?? "") || UNKNOWN_REASONS.has(attempt.reason ?? "");
+}
+
+export function amuxLegacyCardKind(card: AmuxLegacyCardFacts): AmuxLegacyCardKind | null {
+  if (card.sourceSystem === BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM) return "workboard";
+  if (card.sourceSystem !== "admin-idea-v4" || card.cardType !== "task") return null;
+  return preV22Task(card) ? "pre_v22_task" : null;
 }
 
 /**
@@ -84,7 +87,7 @@ export type AmuxLegacyCardCloseRefusal =
 
 export function amuxLegacyCardCloseRefusal(card: AmuxLegacyCardFacts & {
   archivedAt: Date | null; revision: number; activeDelivery: boolean; liveAttempt: boolean;
-  /** An open or acknowledged escalation still keeps the card in the owner queue. */
+  /** An open or acknowledged escalation is still on the card. */
   openEscalation: boolean;
 }, shownRevision: number): AmuxLegacyCardCloseRefusal | null {
   if (amuxLegacyCardKind(card) === null) return "not_legacy";
@@ -97,6 +100,11 @@ export function amuxLegacyCardCloseRefusal(card: AmuxLegacyCardFacts & {
   if (card.activeDelivery || card.liveAttempt || card.status === "doing") return "running";
   return null;
 }
+
+const LEGACY_KIND_LABELS: Record<AmuxLegacyCardKind, string> = {
+  workboard: "옛 작업판에서 이관한 카드",
+  pre_v22_task: "v22 이전에 만든 Task",
+};
 
 const LABELS: Record<string, string> = {
   problem: "문제",
@@ -197,8 +205,7 @@ export function amuxLegacyCardIdeaText(card: {
     body = lines.slice(first).map((line) => line.trimEnd());
   }
   if (!title) return { ok: false, code: "no_assigned_work" };
-  const footer = `원래 카드: ${card.displayKey ?? card.id} (${card.kind === "pre_v22_task" ?
-    "v22 이전에 만든 Task" : "옛 작업판에서 이관한 카드"}를 새 아이디어로 다시 만듦)`;
+  const footer = `원래 카드: ${card.displayKey ?? card.id} (${LEGACY_KIND_LABELS[card.kind ?? "workboard"]}를 새 아이디어로 다시 만듦)`;
   const role = card.taskRole ? ROLE_LABELS[card.taskRole] ?? card.taskRole : null;
   const nature = role ? [`작업 성격: ${role}${NON_CODE_ROLES.has(card.taskRole!) ?
     " (코드 수정이 아닌 작업입니다. 결과는 보고서로 남기고 코드를 바꾸지 않습니다)" : ""}`] : [];

@@ -108,6 +108,7 @@ test("Korean consent identifies the collected statistics and their purpose", asy
 
 test("mobile analytics consent stays compact with one-row actions", async ({
   page,
+  baseURL,
 }, testInfo) => {
   test.skip(
     !testInfo.project.name.startsWith("mobile"),
@@ -119,9 +120,10 @@ test("mobile analytics consent stays compact with one-row actions", async ({
     {
       name: "__tomverse_e2e_analytics",
       value: "1",
-      url: "http://127.0.0.1:3100",
+      url: baseURL!,
     },
   ]);
+  await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
   await prepareGuestPage(page, "en");
   await page.route("**/api/analytics/events", (route) =>
     route.fulfill({ status: 202, body: "" })
