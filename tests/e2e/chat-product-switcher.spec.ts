@@ -7,6 +7,40 @@ import {
 } from "./support/app-fixtures";
 import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage, restoreActiveConversation } from "./support/chat-state-fixtures";
 
+for (const width of [320, 1440]) {
+  test(`Korean product captions explain brand names without clipping at ${width}px`, async ({ page, baseURL }, info) => {
+    test.skip(info.project.name !== "desktop-chromium", "Explicit phone and desktop viewports.");
+    await page.setViewportSize({ width, height: 1000 });
+    await prepareGuestPage(page, "ko", "studio", "studio");
+    await mockAuthenticatedApi(page, { productKey: "chat", language: "ko", selectedModels: ["gpt-6-luna"], selectionMode: "auto", autoSelectionOffered: true });
+    await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL! }]);
+    await page.route("**/api/products/chat/capabilities", route => route.fulfill({ json: { autoSelection: { offered: true } } }));
+    await page.goto("/chat?lang=ko");
+    const switcher = page.locator('[data-testid="chat-input"]:visible').getByTestId("chat-product-switcher");
+    await expect(switcher).toBeVisible();
+    await expect(switcher).toContainText("채팅");
+    await expect(switcher).toContainText("모델 비교");
+    expect(await switcher.locator("a").evaluateAll(links => links.every(link => {
+      const box = link.getBoundingClientRect();
+      const range = document.createRange(); range.selectNodeContents(link);
+      return Array.from(range.getClientRects()).every(rect => rect.left >= box.left - 1 && rect.right <= box.right + 1 && rect.top >= box.top - 1 && rect.bottom <= box.bottom + 1);
+    }))).toBe(true);
+    if (width > 768) await expect(page.locator(".chat-command-bar .review-brand strong")).toContainText("채팅");
+    await expect(switcher.getByTestId("chat-product-review")).toHaveAttribute("href", "/review?lang=ko");
+    await switcher.getByTestId("chat-product-review").click();
+    await expect(page).toHaveURL(/\/review\?lang=ko/, { timeout: 15_000 });
+    const navigation = page.locator(".review-navigation:visible");
+    await expect(navigation).toContainText("채팅");
+    await expect(navigation).toContainText("모델 비교");
+    expect(await navigation.locator(".review-product-caption").evaluateAll(captions => captions.every(caption => {
+      const box = caption.getBoundingClientRect();
+      const target = caption.closest("a,button")!.getBoundingClientRect();
+      return box.left >= target.left - 1 && box.right <= target.right + 1 && box.bottom <= target.bottom + 1;
+    }))).toBe(true);
+    await expectNoHorizontalOverflow(page);
+  });
+}
+
 async function openProductSwitcher(page: Page) {
   const mobileMenu = page.getByTestId("mobile-sidebar-open");
   if (await mobileMenu.isVisible()) {

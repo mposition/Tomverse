@@ -11,7 +11,7 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 |---|---|---|---|---|
 | PR static | `pr-fast-gate.yml` | `npm run check:accent-tokens` (UI-012 역할 token 강제) | 모든 PR | 예 |
 | PR contract | `pr-fast-gate.yml` | `npm run test:e2e:smoke` (`--grep=@smoke`, `desktop-chromium`) | 모든 PR | 예 |
-| PR high-risk UI | `pr-fast-gate.yml` | `npm run test:e2e:ui-risk:shard -- --shard=i/N` (`--grep=@ui-risk`, `desktop-chromium` 3 shard + `mobile-chromium` 2 shard = 5 job) | 모든 PR | 예 |
+| PR high-risk UI | `pr-fast-gate.yml` | `npm run test:e2e:ui-risk:shard -- --shard=i/N` (`--grep=@ui-risk`, `desktop-chromium` 3 shard + `mobile-chromium` 2 shard = 5 job) | `main`으로 가는 PR (2026-11-09부터; develop PR에서는 shard가 step을 모두 건너뛰고 success를 보고) | 예 (release PR) |
 | Main regression | `e2e.yml` | `npm run test:e2e:chromium` (필터 없음) | `main` push | 아니오 |
 | Nightly visual | `nightly-visual-regression.yml` | `npm run test:e2e:visual -- --retries=0` | 매일 | 아니오 |
 | Nightly full | `daily-security-audit.yml` | `npm run test:e2e:run` (chromium + webkit, 필터 없음) | 매일 | 아니오 |

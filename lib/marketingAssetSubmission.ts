@@ -79,6 +79,11 @@ export const marketingAssetSubmissionSchema = z
     if (submission.asset.provenance === "capture_with_ai_presenter" && submission.kind !== "video") {
       context.addIssue({ code: "custom", message: "capture_with_ai_presenter is a video's provenance" });
     }
+    // Captures cut with AI shots, voice and music: a video's too (owner decision
+    // 2026-11-09; AI_MEDIA_PROVENANCE, MarketingAsset_ai_media_check).
+    if (submission.asset.provenance === "capture_with_ai_media" && submission.kind !== "video") {
+      context.addIssue({ code: "custom", message: "capture_with_ai_media is a video's provenance" });
+    }
     if (!Object.hasOwn(MARKETING_ASSET_CONTENT_TYPES[submission.kind], submission.contentType)) {
       context.addIssue({ code: "custom", message: `${submission.contentType} is not a ${submission.kind} type` });
     }
