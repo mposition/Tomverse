@@ -22,7 +22,6 @@ const GUARDED = [
     "orchestrator-rust.yml",
     "pr-fast-gate.yml",
     "review-parity-shadow.yml",
-    "secret-history-scan.yml",
 ];
 const EXEMPT = new Map([]);
 
@@ -55,6 +54,9 @@ for (const name of GUARDED) {
             assert.ok(
                 condition === RUN_UNLESS_DRAFT ||
                     condition === `always() && (${RUN_UNLESS_DRAFT})` ||
+                    // An opt-in lane behind a default-off repository variable.
+                    (/^vars\.[A-Z0-9_]+ == 'on' && \(/.test(condition) &&
+                        condition.endsWith(`(${RUN_UNLESS_DRAFT})`)) ||
                     // A rollup that exists only for branch protection runs on
                     // ready pull requests and never on pushes.
                     condition === PULL_REQUEST_ROLLUP,
