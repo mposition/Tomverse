@@ -275,31 +275,35 @@ export const MARKETING_LOCALES = ["en", "ko", "zh-Hant", "zh-Hans"] as const;
 export type MarketingLocale = (typeof MARKETING_LOCALES)[number];
 
 /**
- * Posts per account per day and per week
- * (docs/policy/marketing-automation.md §7.6). These are code constants and an
- * operator override may only lower them; the database repeats the table and a
- * trigger refuses an override above it.
+ * Whether the publisher posts to a channel through an API
+ * (docs/policy/marketing-automation.md §7.6).
  *
- * RedNote is `null` rather than a number because it has no API posting route
- * at all. A cap of zero would read as "throttled to nothing", and any positive
- * number would be a rate for something that never happens; `null` says the
- * publisher does not post here, and the trigger refuses an override outright.
+ * There is no policy posting cap (owner decision 2026-11-08: remove the limit
+ * on how many posts go out). Every post is still approved by a person in Admin
+ * before it goes (§7.4), and each platform's own limits still apply. An
+ * operator may set an account's own daily or weekly cap
+ * (`MarketingChannel.dailyCapOverride` / `weeklyCapOverride`); empty is no cap.
+ *
+ * RedNote is `false` because it has no API posting route at all: the publisher
+ * never posts there, so an account cap would throttle nothing, and the
+ * database refuses one outright. "Not posted by the publisher" and "no cap"
+ * are different facts and are never written as the same value.
  */
-export const MARKETING_CHANNEL_CAPS: Readonly<
-  Record<
-    MarketingChannel,
-    { readonly daily: number; readonly weekly: number } | null
-  >
-> = {
-  linkedin: { daily: 1, weekly: 3 },
-  x: { daily: 2, weekly: 10 },
-  facebook: { daily: 1, weekly: 5 },
-  instagram: { daily: 1, weekly: 4 },
-  threads: { daily: 2, weekly: 7 },
-  youtube: { daily: 1, weekly: 2 },
-  tiktok: { daily: 1, weekly: 5 },
-  rednote: null,
+export const MARKETING_API_POSTING_CHANNELS: Readonly<Record<MarketingChannel, boolean>> = {
+  linkedin: true,
+  x: true,
+  facebook: true,
+  instagram: true,
+  threads: true,
+  youtube: true,
+  tiktok: true,
+  rednote: false,
 };
+
+/** `MARKETING_API_POSTING_CHANNELS` for a channel name read from a row or a payload. */
+export const marketingChannelPostsByApi = (channel: string): boolean =>
+  Object.hasOwn(MARKETING_API_POSTING_CHANNELS, channel) &&
+  MARKETING_API_POSTING_CHANNELS[channel as MarketingChannel];
 
 /**
  * Channels that may never reach autonomous mode
