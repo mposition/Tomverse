@@ -114,6 +114,14 @@ export function useAuthConsentSlotRef(): AuthConsentSlotSetter {
   return register || (() => {});
 }
 
+const SettingsConsentSlotContext = createContext<AuthConsentSlotSetter | null>(null);
+
+/** Reserve document space for consent throughout the settings route shell. */
+export function SettingsConsentSlot() {
+  const register = useContext(SettingsConsentSlotContext);
+  return <div ref={register} data-testid="settings-consent-slot" className="px-4 py-2 empty:hidden" />;
+}
+
 // Marketing pages register a slot directly under the sticky header. Before
 // FINAL-F001 the notice stayed a bottom-anchored viewport-fixed card there,
 // which at <=360px wide viewports landed exactly on the hero's primary CTA:
@@ -188,16 +196,16 @@ const consentCopy: Record<
   en: {
     title: "Privacy-safe product analytics",
     body: "With your permission, Tomverse measures product usage and campaign attribution. Prompts, responses, filenames, and file contents are never included.",
-    mobileBody: "Help improve Tomverse. Prompts and file contents are never collected.",
+    mobileBody: "Usage analytics excludes prompts and file content.",
     accept: "Allow analytics",
-    acceptShort: "Allow",
+    acceptShort: "Allow analytics",
     decline: "Decline",
     declineShort: "Decline",
     privacy: "Privacy policy",
     settings: "Analytics settings",
     noticeTitle: "Privacy-safe analytics is on",
     noticeBody: "In this region, Tomverse starts privacy-minimized product analytics with a clear opt-out. Prompts, responses, filenames, and file contents are never included, and advertising storage stays off.",
-    noticeMobileBody: "Analytics is on. Prompts and files are never collected.",
+    noticeMobileBody: "Analytics is on; prompts and files are excluded.",
     keepOn: "Keep analytics on",
     keepOnShort: "Keep",
     turnOff: "Turn off analytics",
@@ -396,6 +404,7 @@ export function AnalyticsProvider({
   const [authConsentSlot, setAuthConsentSlot] = useState<HTMLDivElement | null>(
     null
   );
+  const [settingsConsentSlot, setSettingsConsentSlot] = useState<HTMLDivElement | null>(null);
   const [marketingConsentSlot, setMarketingConsentSlot] =
     useState<HTMLDivElement | null>(null);
   const lifecycleCheckedRef = useRef(false);
@@ -760,17 +769,21 @@ export function AnalyticsProvider({
   // notice portals there instead of floating fixed over the viewport --
   // that slot reserves real layout space, so it can never cover composer
   // controls at any width. On /auth/signin the sign-in page registers a
-  // similar slot right after the login card, and marketing routes register
-  // one under the sticky header (FINAL-F001). Everywhere else (and before a
+  // similar slot right after the login card, settings reserves a footer slot,
+  // and marketing routes register one under the sticky header (FINAL-F001).
+  // Everywhere else (and before a
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
+  const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
   const readableNotice = pathname === CHAT_WORKSPACE_PATH;
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot
       : pathname === "/auth/signin"
         ? authConsentSlot
-        : marketingConsentSlot;
+        : isSettingsRoute
+          ? settingsConsentSlot
+          : marketingConsentSlot;
 
   const showConsentPrompt =
     !disabled &&
@@ -801,8 +814,8 @@ export function AnalyticsProvider({
   // pill are mutually exclusive -- one needs `consent === "unset"` or the
   // preferences panel open, the other needs a settled choice and the panel
   // closed -- so the slot never has to hold both.
-  const settingsUsesInlineSlot = pathname === "/auth/signin";
-  const settingsInlineSlot = settingsUsesInlineSlot ? authConsentSlot : null;
+  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute;
+  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
 
   // REAUDIT-P1-01. Chat and Review share a workspace where the bottom-right corner is
   // never free: the last model panel's follow-up form ends there, and below it
@@ -897,6 +910,7 @@ export function AnalyticsProvider({
   return (
     <ChatConsentSlotContext.Provider value={setChatConsentSlot}>
       <AuthConsentSlotContext.Provider value={setAuthConsentSlot}>
+        <SettingsConsentSlotContext.Provider value={setSettingsConsentSlot}>
         <MarketingConsentSlotContext.Provider value={setMarketingConsentSlot}>
         {children}
         {disabled ? null : (
@@ -975,6 +989,7 @@ export function AnalyticsProvider({
           </button>
         ) : null}
         </MarketingConsentSlotContext.Provider>
+        </SettingsConsentSlotContext.Provider>
       </AuthConsentSlotContext.Provider>
     </ChatConsentSlotContext.Provider>
   );
