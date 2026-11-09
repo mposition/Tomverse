@@ -5,6 +5,7 @@ export const workspaceWelcomeCopy = {
     starter: {
         title: "What you can do here",
         hint: "Pick one to fill the box below. Nothing is sent until you press send.",
+        scrollMore: "More suggestions",
         lockedSignIn: "Sign in to use this",
         lockedPlan: "Needs the {plan} plan",
         lockedSignInShort: "Sign in required",
@@ -63,6 +64,7 @@ export const workspaceWelcomeCopy = {
     starter: {
         title: "여기서 할 수 있는 일",
         hint: "하나를 고르면 아래 입력란이 채워집니다. 보내기를 누르기 전에는 아무것도 전송되지 않습니다.",
+        scrollMore: "아래 추천 질문 보기",
         lockedSignIn: "로그인하면 사용할 수 있습니다",
         lockedPlan: "{plan} 플랜이 필요합니다",
         lockedSignInShort: "로그인 필요",
@@ -121,6 +123,7 @@ export const workspaceWelcomeCopy = {
     starter: {
         title: "在这里可以做什么",
         hint: "选择一张卡片即可填入下方输入框。在你点击发送之前不会发出任何内容。",
+        scrollMore: "查看更多建议",
         lockedSignIn: "登录后可使用",
         lockedPlan: "需要 {plan} 方案",
         lockedSignInShort: "需要登录",
@@ -179,6 +182,7 @@ export const workspaceWelcomeCopy = {
     starter: {
         title: "在這裡可以做什麼",
         hint: "選擇一張卡片即可填入下方輸入框。在你按下傳送之前不會發出任何內容。",
+        scrollMore: "查看更多建議",
         lockedSignIn: "登入後可使用",
         lockedPlan: "需要 {plan} 方案",
         lockedSignInShort: "需要登入",
@@ -237,6 +241,7 @@ export const workspaceWelcomeCopy = {
     starter: {
         title: "Was hier möglich ist",
         hint: "Wählen Sie eine Karte, um das Feld unten zu füllen. Gesendet wird erst, wenn Sie auf Senden klicken.",
+        scrollMore: "Weitere Vorschläge",
         lockedSignIn: "Zum Verwenden anmelden",
         lockedPlan: "Erfordert den Tarif {plan}",
         lockedSignInShort: "Anmeldung nötig",
@@ -295,6 +300,7 @@ export const workspaceWelcomeCopy = {
     starter: {
         title: "Ce que vous pouvez faire ici",
         hint: "Choisissez une carte pour remplir le champ ci-dessous. Rien n'est envoyé tant que vous n'appuyez pas sur envoyer.",
+        scrollMore: "Voir plus de suggestions",
         lockedSignIn: "Connectez-vous pour l'utiliser",
         lockedPlan: "Nécessite le forfait {plan}",
         lockedSignInShort: "Connexion requise",
@@ -353,6 +359,7 @@ export const workspaceWelcomeCopy = {
     starter: {
         title: "Lo que puedes hacer aquí",
         hint: "Elige una tarjeta para rellenar el campo de abajo. No se envía nada hasta que pulses enviar.",
+        scrollMore: "Ver más sugerencias",
         lockedSignIn: "Inicia sesión para usarlo",
         lockedPlan: "Requiere el plan {plan}",
         lockedSignInShort: "Requiere iniciar sesión",
@@ -411,6 +418,7 @@ export const workspaceWelcomeCopy = {
     starter: {
         title: "O que você pode fazer aqui",
         hint: "Escolha um cartão para preencher o campo abaixo. Nada é enviado até você tocar em enviar.",
+        scrollMore: "Ver mais sugestões",
         lockedSignIn: "Entre na conta para usar",
         lockedPlan: "Requer o plano {plan}",
         lockedSignInShort: "Requer login",
