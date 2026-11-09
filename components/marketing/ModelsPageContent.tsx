@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Activity, ExternalLink } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
+import { ModelInputCreditGuide } from "./ModelInputCreditGuide";
 import { canUseModelWithPlan, getModelUsageProfile, modelSupportsImageInput, type ModelTier } from "@/lib/models";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { getModelBrand } from "@/lib/modelBranding";
@@ -34,7 +35,7 @@ const copy = {
   ko: {
     eyebrow: "모델",
     title: "질문에 맞는 모델을 찾아보세요.",
-    description: "추천 활용, 기본 크레딧과 이용에 필요한 플랜을 비교해 보세요. Tomverse Chat과 Review에서 선택할 수 있는 모델을 확인하고, 현재 제공 여부와 사용량은 앱의 모델 선택기에서 다시 확인할 수 있습니다.",
+    description: "이용 시작 플랜, 기본 크레딧과 이미지 입력 지원을 비교해 보세요. 비용 차이가 성능 우열을 뜻하지는 않습니다. 현재 제공 여부와 사용량은 앱의 모델 선택기에서 확인할 수 있습니다.",
     mobileDescription: "Chat과 Review의 모델, 기본 크레딧과 이용 플랜을 비교하세요.",
     mobileCreditNote: "모델별 ‘짧은 요청의 기본 크레딧’ 숫자로 기본 비용을 비교하세요.",
     mobileUsageDetails: "크레딧·이용 안내 자세히 보기",
@@ -194,10 +195,10 @@ export function ModelsPageContent() {
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader maxWidth="max-w-6xl" />
 
-      <section className="mx-auto max-w-6xl px-4 py-8 [overflow-wrap:anywhere] sm:px-6 sm:py-14 lg:py-20">
+      <section lang={lang} className={`mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-14 lg:py-20 ${lang === "ko" ? "break-keep break-words" : "[overflow-wrap:anywhere]"}`}>
         <div className="max-w-3xl">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
-          <h1 className="mt-4 text-3xl font-black leading-tight sm:text-6xl">{content.title}</h1>
+          <h1 className={`mt-4 font-black leading-tight ${lang === "ko" ? "max-w-[18ch] text-balance text-3xl sm:text-5xl lg:text-6xl" : "text-3xl sm:text-6xl"}`}>{content.title}</h1>
           <p className={`mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${lang === "ko" ? "hidden sm:block" : ""}`}>{content.description}</p>
           {lang === "ko" ? (
             <div className="mt-4 space-y-3 sm:hidden">
@@ -271,7 +272,7 @@ export function ModelsPageContent() {
         <div className="mt-5 grid grid-cols-1 gap-4 sm:mt-12 sm:grid-cols-2 lg:grid-cols-3">
           {filteredModels.map((model) => {
             const brand = getModelBrand(model.provider);
-            const tags = getModelExperienceTags(model).filter((tag) => lang !== "en" || tag === "reasoning" || tag === "free");
+            const tags = getModelExperienceTags(model).filter((tag) => (lang !== "ko" && lang !== "en") || tag === "reasoning" || tag === "free");
             const status = getModelExperienceStatus(model);
             const usageProfile = getModelUsageProfile(model);
 
@@ -295,8 +296,8 @@ export function ModelsPageContent() {
                   <p className="break-words text-sm font-semibold leading-5 text-zinc-600 dark:text-zinc-300">{model.id}</p>
                 </div>
               </div>
-              <p data-testid={lang === "en" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                {lang === "en" ? `Access from: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · Short request: ${usageProfile.credits} credits · Image input: ${modelSupportsImageInput(model) ? "supported" : "not supported"} · Catalog context maximum: ${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "not listed"}` : t(getModelBestFor(model))}
+              <p data-testid={lang === "ko" || lang === "en" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                {lang === "ko" ? `이용 시작: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · 짧은 요청: ${usageProfile.credits} 크레딧 · 이미지 입력: ${modelSupportsImageInput(model) ? "지원" : "미지원"}` : lang === "en" ? `Access from: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · Short request: ${usageProfile.credits} credits · Image input: ${modelSupportsImageInput(model) ? "supported" : "not supported"} · Catalog context maximum: ${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "not listed"}` : t(getModelBestFor(model))}
               </p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {tags.map((tag) => (
@@ -329,6 +330,7 @@ export function ModelsPageContent() {
                     label={`${content.baseCharge}: ${usageProfile.credits} ${content.creditUnit}`}
                     testId="model-page-credit-cost"
                   />
+                  {lang === "en" && <a href="#model-input-credit-guide" className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold text-blue-700 underline underline-offset-4 dark:text-blue-300">Input size and credit multipliers</a>}
                 </div>
                 <div>
                   <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.status}</p>
@@ -339,6 +341,7 @@ export function ModelsPageContent() {
             );
           })}
         </div>
+        {lang === "en" && <ModelInputCreditGuide />}
       </section>
       <MarketingFooter maxWidth="max-w-6xl" />
     </main>
