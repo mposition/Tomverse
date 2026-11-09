@@ -151,7 +151,13 @@ for (const id of existsSync(sourcesDir) ? readdirSync(sourcesDir) : []) {
     report.dropped.push({ step: "packs", reason: `${id}: ${pack ? "no source asset file to take its claims from" : "no locale or no capture file"}` });
     continue;
   }
-  onBox.push({ ...pack, file, dir, claimIds });
+  // Only captures whose picture is on the box: a pack with none cannot give a film its real screens.
+  const present = Object.entries(pack.captures).filter(([, capture]) => existsSync(path.join(dir, capture.file)));
+  if (present.length === 0) {
+    report.dropped.push({ step: "packs", reason: `${id}: none of its capture files is on the box` });
+    continue;
+  }
+  onBox.push({ ...pack, captures: Object.fromEntries(present), file, dir, claimIds });
 }
 const packs = usablePacks(onBox, JSON.parse(readFileSync(path.join("job", "approved.json"), "utf8")), date);
 for (const pack of onBox) if (!packs.includes(pack)) report.dropped.push({ step: "packs", reason: `${pack.assetId}: not approved now` });
@@ -210,7 +216,12 @@ for (const locale of locales) {
     captureWords[locale].push(text);
     return [{ name, file: posix(path.relative(pub, to)) }];
   });
+  // Before anything is paid for: a locale without a real screen is not made.
+  if (captures[locale].length === 0) report.dropped.push({ step: `captures ${locale}`, reason: "no capture file left" });
 }
+for (const locale of [...locales]) if (captures[locale].length === 0) locales.splice(locales.indexOf(locale), 1);
+report.locales = locales;
+if (locales.length === 0) halt("no_capture_left");
 copyFileSync(path.join("library", "tomverse-logo.png"), path.join(pub, "brand", "logo.png"));
 
 // 2. AI shots: a start frame, then a clip from it.
