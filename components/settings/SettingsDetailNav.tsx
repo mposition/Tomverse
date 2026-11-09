@@ -94,7 +94,7 @@ export function SettingsDetailNav({
             )}
             <ol
                 data-testid="settings-breadcrumb"
-                className="mt-2 hidden flex-wrap items-center gap-1.5 text-xs text-zinc-400 md:flex dark:text-zinc-500"
+                className="mt-2 hidden flex-wrap items-center gap-1.5 text-xs text-zinc-600 md:flex dark:text-zinc-400"
             >
                 {trail.map((ancestor) => (
                     <li

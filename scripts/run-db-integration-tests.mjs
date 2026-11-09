@@ -912,6 +912,7 @@ run(
     // that a guest run lands at all (it produces no ComparisonReview row), and
     // that the 90-day purge reaches only what it should.
     "tests/integration/comparison-review-run-telemetry.db.test.ts",
+    "tests/integration/response-latency.db.test.ts",
     // The per-item feedback contract: the unique index really is the
     // idempotency key, a verdict is scoped to one person, and both cascades
     // are the deletion path the data-domain registry claims.
