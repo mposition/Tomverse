@@ -1,6 +1,8 @@
 import "server-only";
 
 import { generateText, Output } from "ai";
+import { createReviewAttemptQueue } from "@/lib/comparisonReviewAttempts";
+import { recordResponseLatency } from "@/lib/responseLatencyStore";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
@@ -194,6 +196,8 @@ export const runComparisonReview = async (
   options: {
     traceId: string;
     candidates?: AiModel[];
+    /** Called only after the primary output was validated and its usage settled. */
+    onPrimary?: (run: ComparisonReviewRun) => void;
     /**
      * What the operational record needs that the review itself does not.
      *
@@ -210,6 +214,11 @@ export const runComparisonReview = async (
     };
   }
 ): Promise<ComparisonReviewRun> => {
+  const startedAt = performance.now();
+  let firstReviewMs: number | undefined;
+  let completed = false;
+  let secondaryCompleted = false;
+  let primaryModel: AiModel | null = null;
   const { traceId } = options;
   const candidates =
     options.candidates ??
@@ -542,90 +551,122 @@ export const runComparisonReview = async (
     }
   };
 
-  let primaryAttempt: ReviewAttempt | null = null;
-  // Whether ANY attempt actually sent something. A run where every candidate
-  // refused locally -- out of credits, over a limit, longer than the context
-  // window -- says nothing about reviewer health and must not be counted as a
-  // provider failure. `failed` and `refused_before_provider` are different
-  // outcomes precisely so this case is visible as itself
-  // (docs/policy/ai-review-m5-quality-contract.md §7).
-  let reachedProvider = false;
-  for (const candidate of candidates) {
-    const outcome = await attemptReview(candidate);
-    if (outcome.record.status === "completed" || outcome.record.status === "failed") {
-      reachedProvider = true;
+  const attempts = createReviewAttemptQueue(candidates, attemptReview,
+    process.env.COMPARISON_REVIEW_PARALLEL_ENABLED === "true");
+  try {
+    let primaryAttempt: ReviewAttempt | null = null;
+    // Whether ANY attempt actually sent something. A run where every candidate
+    // refused locally -- out of credits, over a limit, longer than the context
+    // window -- says nothing about reviewer health and must not be counted as a
+    // provider failure. `failed` and `refused_before_provider` are different
+    // outcomes precisely so this case is visible as itself
+    // (docs/policy/ai-review-m5-quality-contract.md §7).
+    let reachedProvider = false;
+    for (const candidate of candidates) {
+      const outcome = await attempts.run(candidate);
+      if (outcome.record.status === "completed" || outcome.record.status === "failed") {
+        reachedProvider = true;
+      }
+      // The record is the LAST candidate tried, not the first: when a reviewer
+      // is skipped and the next one succeeds, the run's story is the one that
+      // ran. Each skipped candidate is still visible in its own structured log
+      // line and in the provider health counters.
+      recorder?.noteAttempt("primary", outcome.record);
+      primaryAttempt = outcome.attempt;
+      if (primaryAttempt) break;
     }
-    // The record is the LAST candidate tried, not the first: when a reviewer
-    // is skipped and the next one succeeds, the run's story is the one that
-    // ran. Each skipped candidate is still visible in its own structured log
-    // line and in the provider health counters.
-    recorder?.noteAttempt("primary", outcome.record);
-    primaryAttempt = outcome.attempt;
-    if (primaryAttempt) break;
-  }
-  if (!primaryAttempt) {
+    if (!primaryAttempt) {
+      await recorder?.finish(
+        comparisonReviewRunOutcome({
+          primaryCompleted: false,
+          secondaryCompleted: false,
+          reachedProvider,
+        }),
+        "COMPARISON_REVIEW_FAILED"
+      );
+      throw new ComparisonReviewFailedError();
+    }
+
+    // The second reviewer still runs with exactly the same inputs and budget.
+    // An optional observer lets the UI use the completed primary while it waits.
+    firstReviewMs = Math.round(performance.now() - startedAt);
+    primaryModel = primaryAttempt.candidate;
+    try { options.onPrimary?.({
+      result: {
+        primary: { reviewerModelId: primaryAttempt.candidate.id, result: primaryAttempt.result },
+        secondary: null,
+        agreement: null,
+      },
+      responseMap: reviewPrompt.responseMap,
+      reviewerModelId: primaryAttempt.candidate.id,
+      usageCredits: primaryAttempt.usageCredits,
+    }); } catch {
+      console.warn(JSON.stringify({ event: "comparison_review_progress_failed", traceId }));
+    }
+
+    let secondaryAttempt: ReviewAttempt | null = null;
+    for (const candidate of candidates) {
+      if (candidate.id === primaryAttempt.candidate.id) continue;
+      const outcome = await attempts.run(candidate);
+      recorder?.noteAttempt("secondary", outcome.record);
+      secondaryAttempt = outcome.attempt;
+      if (secondaryAttempt) break;
+    }
+
+    const dualResult: DualComparisonReviewResult = {
+      primary: {
+        reviewerModelId: primaryAttempt.candidate.id,
+        result: primaryAttempt.result,
+      },
+      secondary: secondaryAttempt
+        ? {
+            reviewerModelId: secondaryAttempt.candidate.id,
+            result: secondaryAttempt.result,
+          }
+        : null,
+      agreement: secondaryAttempt
+        ? computeReviewAgreement(primaryAttempt.result, secondaryAttempt.result)
+        : null,
+    };
+
+    // Grounding is recorded from the PRIMARY reviewer's own stats, which is the
+    // result the dialog opens on. It is an exact-quote match rate and nothing
+    // more: it says the reviewer's quotes exist in the answers they were
+    // attributed to, never that the review's conclusions are correct
+    // (lib/sourceGrounding.ts).
+    recorder?.noteGrounding({
+      totalCitations: primaryAttempt.result.groundingStats.totalCitations,
+      verifiedCitations: primaryAttempt.result.groundingStats.verifiedCitations,
+      level:
+        primaryAttempt.result.groundingStats.totalCitations > 0
+          ? primaryAttempt.result.confidence
+          : null,
+    });
     await recorder?.finish(
       comparisonReviewRunOutcome({
-        primaryCompleted: false,
-        secondaryCompleted: false,
-        reachedProvider,
-      }),
-      "COMPARISON_REVIEW_FAILED"
+        primaryCompleted: true,
+        secondaryCompleted: Boolean(secondaryAttempt),
+        reachedProvider: true,
+      })
     );
-    throw new ComparisonReviewFailedError();
-  }
 
-  let secondaryAttempt: ReviewAttempt | null = null;
-  for (const candidate of candidates) {
-    if (candidate.id === primaryAttempt.candidate.id) continue;
-    const outcome = await attemptReview(candidate);
-    recorder?.noteAttempt("secondary", outcome.record);
-    secondaryAttempt = outcome.attempt;
-    if (secondaryAttempt) break;
-  }
-
-  const dualResult: DualComparisonReviewResult = {
-    primary: {
+    completed = true;
+    secondaryCompleted = Boolean(secondaryAttempt);
+    return {
+      result: dualResult,
+      responseMap: reviewPrompt.responseMap,
       reviewerModelId: primaryAttempt.candidate.id,
-      result: primaryAttempt.result,
-    },
-    secondary: secondaryAttempt
-      ? {
-          reviewerModelId: secondaryAttempt.candidate.id,
-          result: secondaryAttempt.result,
-        }
-      : null,
-    agreement: secondaryAttempt
-      ? computeReviewAgreement(primaryAttempt.result, secondaryAttempt.result)
-      : null,
-  };
-
-  // Grounding is recorded from the PRIMARY reviewer's own stats, which is the
-  // result the dialog opens on. It is an exact-quote match rate and nothing
-  // more: it says the reviewer's quotes exist in the answers they were
-  // attributed to, never that the review's conclusions are correct
-  // (lib/sourceGrounding.ts).
-  recorder?.noteGrounding({
-    totalCitations: primaryAttempt.result.groundingStats.totalCitations,
-    verifiedCitations: primaryAttempt.result.groundingStats.verifiedCitations,
-    level:
-      primaryAttempt.result.groundingStats.totalCitations > 0
-        ? primaryAttempt.result.confidence
-        : null,
-  });
-  await recorder?.finish(
-    comparisonReviewRunOutcome({
-      primaryCompleted: true,
-      secondaryCompleted: Boolean(secondaryAttempt),
-      reachedProvider: true,
-    })
-  );
-
-  return {
-    result: dualResult,
-    responseMap: reviewPrompt.responseMap,
-    reviewerModelId: primaryAttempt.candidate.id,
-    usageCredits:
-      primaryAttempt.usageCredits + (secondaryAttempt?.usageCredits || 0),
-  };
+      usageCredits:
+        primaryAttempt.usageCredits + (secondaryAttempt?.usageCredits || 0),
+    };
+  } finally {
+    await attempts.drain();
+    void recordResponseLatency(`${traceId}:review`, {
+      source: "server", product: "review", mode: "cross_review",
+      modelId: primaryModel?.id ?? null, provider: primaryModel?.provider ?? null,
+      outcome: completed ? secondaryCompleted ? "completed" : "primary_only" : "failed",
+      timings: { ...(firstReviewMs === undefined ? {} : { firstReviewMs }),
+        reviewMs: Math.round(performance.now() - startedAt) },
+    });
+  }
 };

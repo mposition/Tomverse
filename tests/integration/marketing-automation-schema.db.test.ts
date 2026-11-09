@@ -7,7 +7,6 @@ import { Prisma } from "@prisma/client";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 
-import { MARKETING_CHANNEL_CAPS } from "@/lib/marketingAutomationSchema";
 import {
   guardDraft,
   sealMarketingFacts,
@@ -31,7 +30,7 @@ import {
   updateMarketingChannel,
   MARKETING_RESUME_AUTONOMOUS_ACTION,
   MARKETING_S2B1_ACTIONS,
-  lowerMarketingChannelCaps,
+  changeMarketingChannelCaps,
   resumeMarketingChannelToApproval,
   runMarketingTransaction,
 } from "@/lib/marketingStore";
@@ -706,24 +705,23 @@ test("an account that never went live cannot be paused into a resume", async () 
   );
 });
 
-test("a cap override may only lower the policy cap", async () => {
+test("with no policy cap, an override is any non-negative cap and null clears it", async () => {
+  // Owner decision 2026-11-08 (migration 20261108130000).
   const row = await channel();
-  const caps = MARKETING_CHANNEL_CAPS.linkedin;
-  assert.ok(caps);
-
-  await refused(
-    prisma.marketingChannel.update({
-      where: { id: row.id },
-      data: { dailyCapOverride: caps.daily + 1 },
-    }),
-    /above the policy cap/,
-  );
-
+  const raised = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { dailyCapOverride: 50, weeklyCapOverride: 300 },
+  });
+  assert.deepEqual([raised.dailyCapOverride, raised.weeklyCapOverride], [50, 300]);
   const lowered = await prisma.marketingChannel.update({
     where: { id: row.id },
-    data: { dailyCapOverride: 0 },
+    data: { dailyCapOverride: 0, weeklyCapOverride: null },
   });
-  assert.equal(lowered.dailyCapOverride, 0);
+  assert.deepEqual([lowered.dailyCapOverride, lowered.weeklyCapOverride], [0, null]);
+  await refused(
+    prisma.marketingChannel.update({ where: { id: row.id }, data: { dailyCapOverride: -1 } }),
+    /cap_overrides_non_negative/,
+  );
 });
 
 test("a manual channel has no cap to override", async () => {
@@ -2065,21 +2063,28 @@ test("approval-mode resume expires every due approved or scheduled post in its t
   assert.equal((audit.metadata as Record<string, unknown>).systemActor, "marketing-guard");
 });
 
-test("the S2b1 cap writer refuses an effective increase before the DB trigger", async () => {
+test("the S2b1 cap writer refuses an increase only while raising is not allowed", async () => {
   const account = await approvedChannel();
-  await lowerMarketingChannelCaps(prisma, {
-    id: account.id,
-    dailyCapOverride: 0,
-    weeklyCapOverride: 2,
-  });
+  await changeMarketingChannelCaps(
+    prisma,
+    { id: account.id, dailyCapOverride: 0, weeklyCapOverride: 2 },
+    { raiseAllowed: false },
+  );
   await refusedByStore(
-    lowerMarketingChannelCaps(prisma, {
-      id: account.id,
-      dailyCapOverride: 1,
-      weeklyCapOverride: 2,
-    }),
+    changeMarketingChannelCaps(
+      prisma,
+      { id: account.id, dailyCapOverride: 1, weeklyCapOverride: 2 },
+      { raiseAllowed: false },
+    ),
     "cap_change_raises_limit",
   );
+  await changeMarketingChannelCaps(
+    prisma,
+    { id: account.id, dailyCapOverride: null, weeklyCapOverride: null },
+    { raiseAllowed: true },
+  );
+  const after = await prisma.marketingChannel.findUniqueOrThrow({ where: { id: account.id } });
+  assert.deepEqual([after.dailyCapOverride, after.weeklyCapOverride], [null, null]);
 });
 
 // ---------------------------------------------------------------------------
@@ -2696,10 +2701,12 @@ test("a crashed worker's slot is renewed on a one-a-day channel, not refused", a
   );
 });
 
-test("a second post on a one-a-day channel is refused the same day", async () => {
+test("a second post on an account an operator capped at one a day is refused the same day", async () => {
   // The other half of the same rule: renewal is exempt from the cap, a new
-  // spend is not.
+  // spend is not. The policy has no cap since 2026-11-08; this one is the
+  // operator's.
   const { account } = await accountWithDuePost();
+  await prisma.marketingChannel.update({ where: { id: account.id }, data: { dailyCapOverride: 1 } });
   const first = await runMarketingTransaction(
     prisma,
     (tx) =>
@@ -3612,10 +3619,12 @@ test("a hand-posted post is recorded through the ledger's own triggers and spend
 
 test("a record over the day's cap is made and says so", async () => {
   const { account, postId, historyVersion } = await manualApprovedPost();
+  // The policy has no cap since 2026-11-08; this one is the operator's.
+  await prisma.marketingChannel.update({ where: { id: account.id }, data: { dailyCapOverride: 2 } });
   const [{ day }] = await prisma.$queryRaw<Array<{ day: string }>>(
     Prisma.sql`SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS "day"`,
   );
-  // X allows two a day: two posts already hold today.
+  // Two a day: two posts already hold today.
   for (let index = 0; index < 2; index += 1) {
     await post(account.id, { slotDate: new Date(`${day}T00:00:00.000Z`) });
   }

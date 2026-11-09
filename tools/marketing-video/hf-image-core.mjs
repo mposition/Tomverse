@@ -18,8 +18,9 @@
 //  4. `generate create` without waiting, so the job id is known and recorded
 //     at once; if create answers no id, the call stays unknown with no id
 //     and blocks the day; more than one id blocks the day too;
-//  5. `generate wait <id>`; a timeout leaves the entry unknown with its id,
-//     for step 1 of the next call.
+//  5. `generate wait <id> --timeout 20m` (the CLI's own flag: an unknown flag
+//     makes it exit at once, which stopped the first run on 2026-11-09); a
+//     timeout leaves the entry unknown with its id, for step 1 of the next call.
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
@@ -81,12 +82,16 @@ export function outcomeOf(value) {
   return "unknown";
 }
 
-/** The first https picture URL in a finished job. */
+/**
+ * The full-size picture of a finished job: its `result_url` (the CLI's
+ * `generate get/wait --json`, seen on the box 2026-11-09). Never the first URL
+ * in the answer: `min_result_url` (a small webp preview) comes before it, and
+ * `params.medias` holds the uploaded reference pictures.
+ */
 export function resultUrlOf(value) {
-  for (const node of walk(value)) {
-    if (typeof node === "string" && /^https:\/\/\S+$/u.test(node) && !/\/requests\/|status|cancel/u.test(node)) return node;
-  }
-  return null;
+  const job = Array.isArray(value) ? value[0] : value?.job ?? value;
+  const url = job?.result_url;
+  return typeof url === "string" && /^https:\/\/\S+$/u.test(url) ? url : null;
 }
 
 /** The credits `generate cost --json` answered, or null. */
@@ -169,7 +174,7 @@ export async function makeImage({ prompt, references = [], out, label, jobDir, e
   const [jobId] = ids;
   settle(file, entry.id, { status: "unknown", jobId });
 
-  const waited = cli(["generate", "wait", jobId, "--json", "--wait-timeout", "20m"], { timeoutMs: 21 * 60_000 });
+  const waited = cli(["generate", "wait", jobId, "--timeout", "20m", "--quiet", "--json"], { timeoutMs: 21 * 60_000 });
   let job = null;
   try {
     job = waited.status === 0 ? parseJson(waited.stdout) : null;
