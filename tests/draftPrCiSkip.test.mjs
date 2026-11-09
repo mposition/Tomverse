@@ -57,6 +57,12 @@ for (const name of GUARDED) {
                     // An opt-in lane behind a default-off repository variable.
                     (/^vars\.[A-Z0-9_]+ == 'on' && \(/.test(condition) &&
                         condition.endsWith(`(${RUN_UNLESS_DRAFT})`)) ||
+                    // A job its workflow's scope job can leave out: the scope
+                    // job itself carries the plain condition, so a draft
+                    // still runs nothing.
+                    (/^(needs\.scope\.outputs\.any == 'true'|contains\(fromJSON\(needs\.scope\.outputs\.lanes\), '[a-z0-9-]+'\)) && \(/.test(condition) &&
+                        condition.endsWith(`(${RUN_UNLESS_DRAFT})`) &&
+                        [job.needs].flat().includes("scope")) ||
                     // A rollup that exists only for branch protection runs on
                     // ready pull requests and never on pushes.
                     condition === PULL_REQUEST_ROLLUP,
