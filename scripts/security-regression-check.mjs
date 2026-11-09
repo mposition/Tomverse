@@ -3599,15 +3599,16 @@ const checks = [
     // 2026-09-28: the weekly full-history scan failed while Railway was waiting
     // on d07ae95 and both production deployments were SKIPPED. The push scan
     // of that commit had passed. continue-on-error is only for the events
-    // that scan history without being the release verdict. A pull request or
-    // a push to main still fails the suite.
+    // that scan history without being the release verdict. A push to main
+    // still fails the suite. Pull requests are scanned by PR Fast Gate's
+    // required job since 2026-11-09, so this workflow has no PR trigger.
     name: "A scheduled secret-history scan cannot skip the production deploy",
     file: ".github/workflows/secret-history-scan.yml",
     test: (source) => {
       const jobsAt = source.indexOf("\njobs:");
       const job = jobsAt < 0 ? "" : source.slice(jobsAt);
       return (
-        source.includes("pull_request:") &&
+        !source.includes("pull_request:") &&
         source.includes("push:") &&
         source.includes("branches: [main]") &&
         source.includes('cron: "45 22 * * 0"') &&
