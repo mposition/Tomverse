@@ -296,7 +296,7 @@ export function normalizePack(raw) {
   // so a pack with only a logo left has no screen and is not usable.
   const captures = Object.fromEntries(
     Object.entries(source)
-      .filter(([name, entry]) => /^[A-Za-z0-9_-]{1,40}$/u.test(name) && name.toLowerCase() !== "logo" &&typeof entry?.file === "string" && /^[A-Za-z0-9_.-]+\.(?:png|jpe?g|webp)$/iu.test(entry.file))
+      .filter(([name, entry]) => /^[A-Za-z0-9_-]{1,40}$/u.test(name) && name.toLowerCase() !== "logo" && typeof entry?.file === "string" && /^[A-Za-z0-9_.-]+\.(?:png|jpe?g|webp)$/iu.test(entry.file))
       .map(([name, entry]) => [name, { file: entry.file, text: Array.isArray(entry.text) ? entry.text.join(" ") : String(entry.text ?? "") }]),
   );
   if (Object.keys(captures).length === 0) return null;

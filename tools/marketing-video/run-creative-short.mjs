@@ -226,12 +226,9 @@ copyFileSync(path.join("library", "tomverse-logo.png"), path.join(pub, "brand", 
 
 // 2. AI shots: a start frame, then a clip from it.
 // Every paid call is admitted against the day the run started: its ledgers and caps are that day's.
-// Past Brisbane midnight a call would bill the next day to this day's ledger, while a run started
-// after midnight spends a new day's cap -- so once the day changes, nothing more is paid for.
-const DAY_CHANGED = { ok: false, reason: "the Brisbane day changed during the run; no more spending" };
-const sameDay = () => brisbaneDay() === day;
-const paid = (request, out, label) =>
-  sameDay() ? makeMedia({ request, out, label: `${run}:${label}`, jobDir: "job", day }) : Promise.resolve(DAY_CHANGED);
+// Past Brisbane midnight the ledger refuses it (`today`, read at admission, "day_changed"), since it
+// would bill the next day to this day's ledger while a run started after midnight spends a new cap.
+const paid = (request, out, label) => makeMedia({ request, out, label: `${run}:${label}`, jobDir: "job", day, today: brisbaneDay });
 const shots = [];
 for (const shot of plan.shots) {
   const frame = await paid({ model: "gpt_image_2_6", aspect_ratio: "9:16", count: 1, prompt: shot.image }, path.join(runDir, "raw", `${shot.id}.png`), `${shot.id}-frame`);
@@ -281,7 +278,7 @@ for (const locale of [...locales]) {
   const lines = [];
   for (const [index, text] of words.lines.entries()) {
     const raw = path.join(runDir, "raw", `vo-${locale}-${index + 1}.mp3`);
-    const spoken = sameDay() ? await speakLine({ locale, text, out: raw, jobDir: "job", day, label: `${run}:${locale}-${index + 1}` }) : DAY_CHANGED;
+    const spoken = await speakLine({ locale, text, out: raw, jobDir: "job", day, today: brisbaneDay, label: `${run}:${locale}-${index + 1}` });
     if (!spoken.ok) {
       report.failed.push({ step: `voice ${locale} ${index + 1}`, reason: spoken.reason });
       break;
