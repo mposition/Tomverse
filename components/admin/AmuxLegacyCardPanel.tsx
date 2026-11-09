@@ -14,6 +14,8 @@ import { amuxIdeaLaneBoardHref } from "@/lib/amux/ideaLaneBoardCore";
 export type AmuxLegacyCardView = {
   kind: "workboard" | "pre_v22_task";
   closeRefusal: string | null;
+  /** Archived already but still in the owner queue: a close only resolves its escalation. */
+  alreadyArchived?: boolean;
   idea: { state: "ready"; title: string; text: string; truncated: boolean } |
     { state: "refused"; code: string };
 };
@@ -74,6 +76,7 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
   // After a close the shown view is stale: the card is in the archive now.
   const done = outcome?.kind === "closed" || (outcome?.kind === "recreated" && outcome.closed);
   const blocked = view.closeRefusal !== null;
+  const archived = view.alreadyArchived === true;
 
   const run = async (action: Action) => {
     setBusy(true);
@@ -87,7 +90,7 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
   return <section className="space-y-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-4"
     data-testid="amux-legacy-card">
     <h4 className="font-semibold">{m.title[view.kind]}</h4>
-    <p className="text-sm leading-6">{m.intro[view.kind]} {m.closeEffect}</p>
+    <p className="text-sm leading-6">{m.intro[view.kind]} {archived ? m.closeEffectArchived : m.closeEffect}</p>
     {blocked && <p role="status" className="text-sm font-semibold text-amber-200"
       data-testid="amux-legacy-card-not-closable">{m.notClosable} {reasonText(m, view.closeRefusal)}</p>}
     {ready ? <details className="rounded border border-zinc-700 p-2 text-sm">
@@ -106,7 +109,8 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
           disabled={busy} onClick={() => setConfirming("close")}
           data-testid="amux-legacy-card-close">{m.close}</button>
       </> : <div className="space-y-2" role="group" aria-label={m.title[view.kind]}>
-        <p className="text-sm font-semibold">{confirming === "recreate" ? m.confirmRecreate : m.confirmClose}</p>
+        <p className="text-sm font-semibold">{confirming === "recreate" ? (archived ? m.confirmRecreateArchived : m.confirmRecreate) :
+          archived ? m.confirmCloseArchived : m.confirmClose}</p>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="min-h-11 rounded-lg border border-blue-500/50 px-3 py-2 font-semibold"
             disabled={busy} onClick={() => void run(confirming)}
@@ -121,7 +125,7 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
       {outcome.kind === "recreated" && <p>{m.recreated(outcome.closed)}{!outcome.closed && outcome.reason ?
         ` (${reasonText(m, outcome.reason)})` : ""} <Link className="underline"
         href={amuxIdeaLaneBoardHref(outcome.requestId)}>{m.openIdea}</Link></p>}
-      {outcome.kind === "closed" && <p>{m.closedDone}</p>}
+      {outcome.kind === "closed" && <p>{archived ? m.closedDoneArchived : m.closedDone}</p>}
       {outcome.kind === "refused" && <p>{outcome.error === "idea_refused" ? m.ideaRefused : m.notClosable}{" "}
         {reasonText(m, outcome.reason ?? outcome.error)}</p>}
       {outcome.kind === "reauth" && <Link className="underline" href={adminRecentAuthenticationHref(
