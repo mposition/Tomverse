@@ -29,13 +29,16 @@ const cursorLogin = (now, expiresIn = 24 * HOUR) => JSON.stringify({
   accessToken: jwt(now + expiresIn), refreshToken: "synthetic-operator-refresh-secret" });
 const jsonl = (...events) => events.map((event) => JSON.stringify(event)).join("\n") + "\n";
 
-test("a read role gets no write tool; Copilot never gets a shell; Cursor never writes", () => {
+test("a read role gets no write tool; Copilot's shell is implement-only; Cursor never writes", () => {
   for (const role of ["design", "investigate", "review"]) {
     const codex = amuxV22ChannelArgs("openai", request(role), "/w");
     assert.deepEqual(codex.slice(codex.indexOf("--sandbox"), codex.indexOf("--sandbox") + 2),
       ["--sandbox", "read-only"]);
     const copilot = amuxV22ChannelArgs("github-copilot", request(role), "/w");
     assert.ok(!copilot.includes("edit") && !copilot.includes("create"));
+    // A read role has no shell tool (owner request 2026-11-09 covers implement only).
+    for (const tool of ["bash", "read_bash", "stop_bash", "list_bash", "shell"])
+      assert.ok(!copilot.includes(tool), `${role} ${tool}`);
     assert.deepEqual(amuxV22ChannelArgs("cursor", request(role), "/w").slice(3, 5),
       ["--mode", "ask"]);
   }
@@ -58,8 +61,14 @@ test("a read role gets no write tool; Copilot never gets a shell; Cursor never w
   assert.ok(codex.includes("--ignore-rules"));
   assert.ok(!codex.some((part) => /bypass|dangerously|yolo/.test(part)));
   const copilot = amuxV22ChannelArgs("github-copilot", request("implement"), "/w");
-  assert.ok(copilot.includes("edit") && copilot.includes("create") &&
-    !copilot.includes("shell") && !copilot.includes("bash"));
+  assert.ok(copilot.includes("edit") && copilot.includes("create"));
+  // Implement's shell tools, as Copilot 1.0.94 names them; the sidecar puts
+  // the shell in the jail (v22ShellJail.mjs). Nothing wider is offered.
+  const tools = copilot.slice(copilot.indexOf("--available-tools") + 1,
+    copilot.indexOf("--allow-all-tools"));
+  assert.deepEqual(tools, ["view", "glob", "grep", "edit", "create", "bash", "read_bash",
+    "stop_bash", "list_bash"]);
+  assert.ok(!copilot.includes("--allow-all-paths") && !copilot.includes("--allow-url"));
   assert.throws(() => amuxV22ChannelArgs("cursor", request("implement"), "/w"),
     /read roles only/);
   // The prompt arrives on stdin: argv carries no task text.
@@ -192,7 +201,15 @@ test("a tool outside the role's list makes the run unknown, never trusted", () =
   const copilot = (toolName, role) => parseAmuxV22ChannelOutput("github-copilot", jsonl(
     { type: "tool.execution_start", data: { toolName, model: "m" } },
     { type: "result", exitCode: 0 }), { exitCode: 0, role });
-  assert.equal(copilot("bash", "implement").valid, false);
+  // The shell is an implement tool: its events no longer make the run
+  // unknown there, and still do for every read role.
+  for (const tool of ["bash", "read_bash", "stop_bash", "list_bash"]) {
+    assert.equal(copilot(tool, "implement").valid, true, tool);
+    for (const role of ["design", "investigate", "review"])
+      assert.equal(copilot(tool, role).valid, false, `${role} ${tool}`);
+  }
+  assert.equal(copilot("web_fetch", "implement").valid, false);
+  assert.equal(copilot("shell", "implement").valid, false);
   assert.equal(copilot("edit", "investigate").valid, false);
   assert.equal(copilot("edit", "implement").valid, true);
   // An empty final answer is not a success (as for Cursor).
