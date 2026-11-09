@@ -531,6 +531,11 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
   `sensitive_review_required`, 거절)는 저장하지 않습니다
   (`lib/memoryExtractionPersistence.ts`). `candidate`와
   `manual_review_required`는 이 결정 전에 만들어진 행에만 남는 상태입니다.
+- 이 규칙은 **자동 추출**에 적용됩니다. 기존 직접 추가 경로
+  (`createManualMemory`, `lib/memoryService.ts`)는 hard reject와 서술형 재작성
+  요구를 거부하고, 그 밖의 검증을 통과한 직접 입력은 민감 표시가 있어도
+  `active`로 저장합니다. 민감 표시는 분류용 metadata이며 저장·답변 사용을
+  차단하지 않습니다. 설정의 상단 고지와 직접 추가 안내는 이 차이를 명시합니다.
 - 추출 v9부터 LLM이 값·극성을 뺀 주제 `canonicalKey`를 제안하고, 서버가 형식을
   검증해 `conflictKey`에 보관합니다. **같은 주제는 최신 대화가 이깁니다**: 새
   후보가 활성 기억과 같은 conflict group이면, 근거 메시지의 원래 시각
