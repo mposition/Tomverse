@@ -777,12 +777,11 @@ export function AnalyticsProvider({
   // original fixed corner overlay is used instead.
   const noticePath = pathname?.split("/").filter(Boolean) ?? [];
 
-
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
 
 
   const isPluginRoute = pathname === "/plugins";
-  const readableNotice = (noticePath.at(-1) === "pricing" &&
+  const readableNotice = ((noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
     (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ||
     (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute);
   const inlineSlot =
