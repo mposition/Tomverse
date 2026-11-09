@@ -4,6 +4,7 @@ export type ChatWorkspaceProduct = "chat" | "review";
 
 type ProductCopy = {
   shortLabel: string;
+  shortDescription?: string;
   name: string;
   feature: string;
   description: string;
@@ -68,6 +69,7 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
       name: "Tomverse Chat",
       feature: "스마트 자동",
       description: "질문 다듬기와 메시지별 자동 모델 선택.",
+      shortDescription: "채팅",
       open: "Chat 열기",
     },
     review: {
@@ -75,6 +77,7 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
       name: "Tomverse Review",
       feature: "모델 비교",
       description: "모델을 직접 선택하고 답변을 나란히 비교.",
+      shortDescription: "모델 비교",
       open: "Review 열기",
     },
   },

@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, openModelPickerCatalogue, prepareGuestPage, type QaConversationMessage } from "./support/app-fixtures";
 import { finishControlledStream, installChatModelStub, mockUserUsage, pushControlledChunk, restoreActiveConversation, setDeterministicTheme, suppressTransientUi, THREE_MODELS, waitForControlledStream } from "./support/chat-state-fixtures";
-import { expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
+import { expectAccessibleContrast, expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
 
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => { test.skip(info.project.name !== "desktop-chromium", "Explicit desktop and phone viewports use one browser engine."); });
@@ -37,6 +37,64 @@ async function expectHeaderControlsFit(page: Page) {
     return box.left < -1 || box.right > innerWidth + 1 || text.left < box.left - 1 || text.right > box.right + 1
       ? [button.textContent || button.getAttribute("aria-label")] : [];
   }))).toEqual([]);
+}
+
+for (const [width, theme] of [[1366, "light"], [1600, "dark"]] as const) {
+  test(`desktop Review can scroll to the complete consent notice at ${width}px ${theme}`, async ({ page, baseURL }) => {
+    await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
+    await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+    await prepare(page, width, theme);
+    const panel = page.locator(".review-studio-task");
+    const notice = panel.getByTestId("chat-consent-notice");
+    await expect(notice).toBeVisible();
+    for (const height of [900, 650]) {
+      await page.setViewportSize({ width, height });
+      await panel.evaluate(element => { element.scrollTop = element.scrollHeight; });
+      const metrics = await notice.evaluate(element => {
+        const panel = element.closest(".review-studio-task")!;
+        const panelBox = panel.getBoundingClientRect();
+        const style = getComputedStyle(panel);
+        const availableWidth = panel.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+        const notice = element.getBoundingClientRect();
+        const controls = Array.from(element.querySelectorAll("button"));
+        return {
+          widthRatio: notice.width / availableWidth,
+          controlsUnclipped: controls.every(control => {
+            const box = control.getBoundingClientRect();
+            return box.top >= panelBox.top && box.bottom <= panelBox.bottom && box.right <= panelBox.right &&
+              control.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+          }),
+          fullNoticeInside: notice.top >= panelBox.top && notice.bottom <= panelBox.bottom,
+        };
+      });
+      expect(metrics.widthRatio).toBeGreaterThanOrEqual(0.9);
+      expect(metrics.controlsUnclipped).toBe(true);
+      expect(metrics.fullNoticeInside).toBe(true);
+    }
+    await notice.getByTestId("analytics-consent-decline").click();
+    await expect(notice).toHaveCount(0);
+  });
+}
+
+
+for (const theme of ["light", "dark"] as const) {
+  test(`Studio guidance and placeholder meet text contrast at desktop and phone sizes in ${theme}`, async ({ page }) => {
+    await prepare(page, 1600, theme);
+    for (const locator of [page.locator(".review-canvas-intro small:visible"), page.locator(".review-extra-starters button:visible").filter({ hasText: "코드" })]) {
+      await expect(locator).toBeVisible();
+      const sample = await expectAccessibleContrast(locator, "Studio secondary guidance");
+      expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const width of [1600, 320]) {
+      await page.setViewportSize({ width, height: 932 });
+      const input = page.getByTestId("chat-textarea");
+      await expect(input).toBeVisible();
+      await expect(input).toHaveValue("");
+      const sample = await expectAccessibleContrast(input, `Studio placeholder at ${width}px`, "::placeholder");
+      expect(sample.text).not.toBe("");
+      expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+    }
+  });
 }
 
 for (const width of [320, 430]) test(`mobile provider selection keeps checkmarks and borders at ${width}px`, async ({ page }) => {
@@ -659,5 +717,38 @@ for (const [width, theme] of [[1600, "light"], [430, "dark"]] as const) {
     await expect(page.getByTestId("chat-textarea")).toBeDisabled();
     await finishControlledStream(page, "studio-history");
     await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+  });
+}
+
+for (const [width, theme] of [[320, "light"], [430, "dark"]] as const) {
+  test(`phone Review reserves navigation space above the safe area at ${width}px ${theme}`, async ({ page }) => {
+    await prepare(page, width, theme);
+    await page.addStyleTag({ content: "nextjs-portal { display:none!important; }" });
+    const input = page.getByTestId("chat-textarea");
+    const navigation = page.locator(".review-navigation");
+    for (const height of [932, 568]) {
+      await page.setViewportSize({ width, height });
+      await expect(navigation).toBeVisible();
+      const workspace = await page.locator(".review-workspace-section").boundingBox();
+      const nav = await navigation.boundingBox();
+      expect(workspace!.y + workspace!.height).toBeLessThanOrEqual(nav!.y);
+      expect(nav!.y + nav!.height).toBeLessThanOrEqual(height);
+      for (const locator of [input, page.getByTestId("chat-send-button"), page.getByTestId("chat-ai-disclaimer")]) {
+        await locator.scrollIntoViewIfNeeded();
+        await expect(locator).toBeVisible();
+        expect(await locator.evaluate(element => {
+          const rect = element.getBoundingClientRect();
+          const workspace = document.querySelector(".review-workspace-section")!.getBoundingClientRect();
+          const navigation = document.querySelector(".review-navigation")!.getBoundingClientRect();
+          return rect.top >= workspace.top - 1 && rect.bottom <= workspace.bottom + 1 && rect.bottom <= navigation.top;
+        })).toBe(true);
+      }
+      await input.fill("Keep this mobile Review draft.");
+      await expect(navigation).toBeHidden();
+      await input.blur();
+      await expect(navigation).toBeVisible();
+      await expect(input).toHaveValue("Keep this mobile Review draft.");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    }
   });
 }
