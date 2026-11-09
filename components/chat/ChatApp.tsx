@@ -40,6 +40,7 @@ import {
 } from "@/lib/chatKeyboardPolicy";
 import type { WebSearchMode, WebSearchToggleMode } from "@/lib/appDefaults";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { createClientLatency } from "@/lib/responseLatencyClient";
 import { decideBundleStaleRecovery } from "@/lib/chatContextBundleRecovery";
 import { parseChatStreamTrailer } from "@/lib/webSearchStreamTrailer";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
@@ -242,6 +243,7 @@ type ChatAppProps = {
    */
   sendEcho?: SendEcho | null;
   promptPayload?: {
+    submittedAtMonotonicMs?: number;
     id: string;
     text: string;
     chatId: string;
@@ -1500,7 +1502,8 @@ function ChatAppComponent({
     promptRefinerDecision?: PromptRefinerProductChatDecision,
     guestAutoCapability?: string,
     /** Answer with an image instead of text; see the branch below. */
-    imageTurn?: ChatImageTurnRequest | null
+    imageTurn?: ChatImageTurnRequest | null,
+    submittedAtMonotonicMs?: number,
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1630,6 +1633,8 @@ function ChatAppComponent({
     // Opening the run here, on the key, is what lets a panel that mounts later
     // for this same conversation show it as still generating and stop it.
     const controller = beginChatRuntimeRun(runKey);
+    const latency = createClientLatency(submittedAtMonotonicMs);
+    let latencyCompleted = false;
 
     let requestTraceId: string | null = null;
     /*
@@ -1900,6 +1905,7 @@ function ChatAppComponent({
         if (isGuestMode && guestAutoCapability) {
           guestAutoRequestStarted = true;
         }
+        latency.dispatched();
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: {
@@ -1963,6 +1969,7 @@ function ChatAppComponent({
         // the first-response budget is absolute from the moment the request
         // was issued, so server-side attachment extraction and the provider's
         // own thinking time share it instead of chaining two full budgets.
+        latency.headers(res);
         liveness.noteHeaders();
         requestTraceId = res.headers.get("X-Request-ID");
         // §13.4: the server's own count, taken from the response rather than
@@ -2279,6 +2286,7 @@ function ChatAppComponent({
         reader: response.body.getReader(),
         liveness,
         onProgress: (progress) => {
+          latency.content(progress.displayText);
           assistantText = progress.displayText;
           setAssistantMessage(
             assistantMessageId,
@@ -2312,6 +2320,7 @@ function ChatAppComponent({
       // header named the model that was asked first, and it is no longer true.
       const retryingWithModelId = streamed.retryingWithModelId;
       const serverStallCode = streamed.serverStallCode;
+      latencyCompleted = !serverStallCode && Boolean(assistantText.trim());
       const searchMetadataJson = streamed.searchMetadataJson;
       const trailer = parseChatStreamTrailer(searchMetadataJson);
       const searchMetadata =
@@ -2675,6 +2684,9 @@ function ChatAppComponent({
       }	
     } finally {
 	  liveness.stop();
+      latency.finish(latencyCompleted ? "completed" :
+        controller.signal.aborted && classifyChatAbort(getChatRuntimeAbortCause(runKey, controller)).kind !== "timeout"
+          ? "cancelled" : "failed");
 
       endChatRuntimeRun(runKey, controller);
       // A guest answer can finish while no panel is mounted on this
@@ -3048,7 +3060,8 @@ function ChatAppComponent({
           promptPayload.guestAutoCapability,
           promptPayload.imageTurnsByModel
             ? promptPayload.imageTurnsByModel[modelId]
-            : promptPayload.imageTurn
+            : promptPayload.imageTurn,
+          promptPayload.submittedAtMonotonicMs,
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });

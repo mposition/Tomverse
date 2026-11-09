@@ -692,6 +692,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
  * and persistence for itself.
  */
 type GlobalSubmitOptions = {
+  submittedAtMonotonicMs?: number;
   /** The image-intent call already answered for this exact draft. */
   imageIntentChecked?: boolean;
   /** Answer this send with an image in the conversation (lib/chatImageTurn.ts). */
@@ -1757,6 +1758,7 @@ export function ChatPageClient({
   const sendEchoRef = useRef<PendingSendEcho | null>(null);
   const [sendEcho, setSendEcho] = useState<PendingSendEcho | null>(null);
   const [promptPayload, setPromptPayload] = useState<{
+    submittedAtMonotonicMs?: number;
     id: string;
     text: string;
     chatId: string;
@@ -5798,6 +5800,7 @@ export function ChatPageClient({
   const handleGlobalSubmit = async (
     options?: GlobalSubmitOptions
   ): Promise<void> => {
+    const submittedAtMonotonicMs = options?.submittedAtMonotonicMs ?? performance.now();
     if (promptRefinerMode === "e2e_fixture") {
       // This mode only exercises a no-cost pre-send proposal. It cannot
       // authorize any Chat dispatch, including after conversation switches,
@@ -5822,7 +5825,7 @@ export function ChatPageClient({
         [...selectedModels.slice(0, Math.max(0, maxSelectableModels - 1)), panelId];
       flushSync(() => mutateModelSettings(currentChatIdRef.current, panels,
         disabledPanels.filter(id => id !== panelId)));
-      return handleGlobalSubmitRef.current({ reviewRouteChecked: true,
+      return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true,
         imageIntentChecked: true, imageTurnsByModel: plan.turns, overrideModelIds: plan.panelIds });
     }
     const professionalImageRouting = mountedSurface === "workspace" &&
@@ -5880,14 +5883,14 @@ export function ChatPageClient({
         reviewWorkspaceRef.current.imagePromptMode !== routeRequestedKind ||
         (liveProviders.length > 0 && !sameStringList(providers, liveProviders))) return;
       if (!decision) {
-        if (professionalImageRouting) return handleGlobalSubmitRef.current({ reviewRouteChecked: true, imageIntentChecked: true });
+        if (professionalImageRouting) return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true });
         reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return;
       }
       if (decision.kind === "blocked") {
         reviewWorkspace.setError(t(imageGenerationEnabled ? "chat.imageGenerationPlanGateBody" : "chat.imageGenerationDisabledNotice")); return;
       }
       if (professionalImageRouting && decision.kind === "text") {
-        return handleGlobalSubmitRef.current({ reviewRouteChecked: true, imageIntentChecked: true });
+        return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true });
       }
       const chosen = decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []);
       if (decision.kind === "image") {
@@ -5907,7 +5910,7 @@ export function ChatPageClient({
         reviewWorkspace.setImageRequest(false);
         reviewWorkspace.setUnsupportedProviders([]);
         flushSync(() => mutateModelSettings(currentChatIdRef.current, plan.panelIds, []));
-        return handleGlobalSubmitRef.current({ ...options, reviewRouteChecked: true,
+        return handleGlobalSubmitRef.current({ ...options, submittedAtMonotonicMs, reviewRouteChecked: true,
           imageIntentChecked: true, imageTurnsByModel: plan.turns });
       }
       if (!chosen.length || decision.choices.some(choice => !choice.modelId)) {
@@ -5927,7 +5930,7 @@ export function ChatPageClient({
       if (owner !== identityNamespaceKey(identityNamespaceRef.current) ||
         epoch !== submitIdentityFenceRef.current.epoch || ticket !== conversationSelectionTicketRef.current ||
         !sameStringList(chosen, latestModelSettingsRef.current.models)) return;
-      return handleGlobalSubmitRef.current({ ...options, reviewRouteChecked: true, imageIntentChecked: true });
+      return handleGlobalSubmitRef.current({ ...options, submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true });
     }
     // A restored Guest `auto` value is an intent, not routing authority. The
     // background capability read will either confirm it or return the UI to
@@ -5987,6 +5990,7 @@ export function ChatPageClient({
       // confirmation).
       return handleGlobalSubmitRef.current({
         imageIntentChecked: true,
+        submittedAtMonotonicMs,
         imageTurnDecision,
       });
     }
@@ -6126,6 +6130,7 @@ export function ChatPageClient({
       }
       return handleGlobalSubmitRef.current({
         ...options,
+        submittedAtMonotonicMs,
         preparedBlankChat: {
           conversationId: preparedConversationId,
           selectionTicket: expectedSelectionTicket,
@@ -6163,6 +6168,7 @@ export function ChatPageClient({
       const sendAuthority = blankAutoPreparation.sendAuthority;
       return handleGlobalSubmitRef.current({
         ...options,
+        submittedAtMonotonicMs,
         preparedBlankChat: {
           conversationId: preparedConversationId,
           selectionTicket: blankAutoPreparation.selectionTicket,
@@ -6264,7 +6270,7 @@ export function ChatPageClient({
         }
         resetPromptRefinerState();
       }
-      await runGlobalSubmit(options, owner);
+      await runGlobalSubmit(options, owner, submittedAtMonotonicMs);
     } finally {
       const preparedBlank = options?.preparedBlankChat;
       if (
@@ -6300,7 +6306,8 @@ export function ChatPageClient({
 
   const runGlobalSubmit = async (
     options: GlobalSubmitOptions | undefined,
-    submitOwner: PendingSubmissionOwner
+    submitOwner: PendingSubmissionOwner,
+    submittedAtMonotonicMs: number,
   ) => {
     const submitOwnerIsCurrent = () => {
       const current = submitIdentityFenceRef.current;
@@ -7367,6 +7374,7 @@ export function ChatPageClient({
       setSendEcho(null);
       setPromptPayload({
         id: comparisonId,
+        submittedAtMonotonicMs,
         text: authoredPrompt,
         chatId: activeChatId,
         userMessageId: userMsgId,

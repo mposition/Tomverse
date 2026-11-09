@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { setDeterministicTheme } from "./support/chat-state-fixtures";
 
 import {
   mockAuthenticatedApi,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import { expectAccessibleContrast } from "./support/ui-audit";
 
 const preferences = (productUpdatesPending: boolean) => [
   { purpose: "security", enabled: true, locked: true, confirmation: null },
@@ -21,6 +23,82 @@ const preferences = (productUpdatesPending: boolean) => [
   { purpose: "newsletter", enabled: false, locked: false, confirmation: "off" },
   { purpose: "promotions", enabled: false, locked: false, confirmation: "off" },
 ];
+
+for (const theme of ["light", "dark"] as const) {
+  test(`notification switch thumb stays inside its track and changes sides in ${theme}`, async ({ page, isMobile }) => {
+    await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
+    await prepareGuestPage(page, "ko");
+    const account = await mockAuthenticatedApi(page);
+    account.theme = theme;
+    await setDeterministicTheme(page, theme);
+    let serviceEnabled = true;
+    const writes: unknown[] = [];
+    await page.route("**/api/user/email-preferences", async route => {
+      if (route.request().method() === "PATCH") {
+        const body = route.request().postDataJSON();
+        writes.push(body);
+        serviceEnabled = body.enabled;
+      }
+      await route.fulfill({ json: {
+        preferences: preferences(false).map(row => row.purpose === "service_status" ? { ...row, enabled: serviceEnabled } : row),
+        country: { selfDeclared: "DE", resolved: "DE", confidence: "high", conflicts: [], needsConfirmation: false, marketingSupported: true },
+      } });
+    });
+    await page.goto("/settings/notifications?lang=ko");
+    const service = page.getByTestId("email-preference-service_status-toggle");
+    const newsletter = page.getByTestId("email-preference-newsletter-toggle");
+    const expectSide = async (control: typeof service, on: boolean) => {
+      await expect(control).toHaveAttribute("aria-checked", String(on));
+      await expect.poll(() => control.evaluate((element, enabled) => {
+        const track = element.getBoundingClientRect();
+        const thumb = element.querySelector("span")!.getBoundingClientRect();
+        const inset = enabled ? track.right - thumb.right : thumb.left - track.left;
+        return thumb.top >= track.top && thumb.bottom <= track.bottom && inset >= 1 && inset <= 3;
+      }, on)).toBe(true);
+    };
+    await expectSide(service, true);
+    await expectSide(newsletter, false);
+    expect(writes).toEqual([]);
+    await service.click();
+    await expectSide(service, false);
+    await service.click();
+    await expectSide(service, true);
+    expect(writes).toEqual([{ purpose: "service_status", enabled: false }, { purpose: "service_status", enabled: true }]);
+  });
+}
+
+test("pending analytics consent leaves notification guidance and controls uncovered", async ({ page, baseURL, isMobile }) => {
+  await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
+  await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
+  await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+  await prepareGuestPage(page, "ko");
+  await mockAuthenticatedApi(page);
+  await page.route("**/api/user/email-preferences", route => route.fulfill({ json: {
+    preferences: preferences(false),
+    country: { selfDeclared: "DE", resolved: "DE", confidence: "high", conflicts: [], needsConfirmation: false, marketingSupported: true },
+  } }));
+  await page.goto("/settings/notifications?lang=ko");
+  const slot = page.getByTestId("settings-consent-slot");
+  const notice = slot.getByTestId("chat-consent-notice");
+  await expect(notice).toBeVisible({ timeout: 15_000 });
+  for (const locator of [page.getByTestId("email-product-updates-opt-in"), page.getByTestId("email-preference-promotions")]) {
+    await locator.scrollIntoViewIfNeeded();
+    await expect(locator).toBeVisible();
+    expect(await locator.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const y = Math.max(0, rect.top) + Math.min(rect.height, innerHeight - Math.max(0, rect.top)) / 2;
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, y);
+      const notice = document.querySelector('[data-testid="chat-consent-notice"]')!.getBoundingClientRect();
+      return element.contains(hit) && rect.bottom <= notice.top;
+    })).toBe(true);
+  }
+  await notice.scrollIntoViewIfNeeded();
+  await notice.getByTestId("analytics-consent-decline").click();
+  await expect(notice).toHaveCount(0);
+  await slot.getByTestId("analytics-settings-button").click();
+  await expect(notice).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
 
 test("marketing opt-in confirms a country and asks for an email confirmation @ui-risk", async ({
   page,
@@ -73,6 +151,22 @@ test("marketing opt-in confirms a country and asks for an email confirmation @ui
   await expect(countrySelect).toBeVisible();
   await expect(optIn).toBeVisible();
   await expect(page.getByTestId("email-withdraw-all")).toHaveCount(0);
+
+  for (const theme of ["light", "dark"] as const) {
+    await page.locator("html").evaluate((element, value) => {
+      element.classList.toggle("dark", value === "dark");
+    }, theme);
+    const descriptions = [
+      page.locator("#email-country-description"),
+      page.getByTestId("email-preference-security").getByText("끌 수 없습니다", { exact: false }),
+      page.getByTestId("email-preference-billing").getByText("끌 수 없습니다", { exact: false }),
+    ];
+    for (const description of descriptions) {
+      await expect(description).toBeVisible();
+      const sample = await expectAccessibleContrast(description, `${theme} notification guidance`);
+      expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+    }
+  }
 
   // The value-focused CTA is prominent, but it cannot bypass the same country
   // requirement as the granular switch.

@@ -269,7 +269,7 @@ export function EmailNotificationSettings() {
                         </label>
                         <p
                             id="email-country-description"
-                            className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400"
+                            className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400"
                         >
                             {t("emailNotifications.countryDescription")}
                         </p>
@@ -394,7 +394,7 @@ export function EmailNotificationSettings() {
                                         )}
                                     </p>
                                     {preference.locked ? (
-                                        <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                                        <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-400">
                                             {t("emailNotifications.lockedNote")}
                                         </p>
                                     ) : null}
@@ -530,10 +530,10 @@ export function EmailNotificationSettings() {
                                         }`}
                                     >
                                         <span
-                                            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                                            className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
                                                 preference.enabled
-                                                    ? "translate-x-[22px]"
-                                                    : "translate-x-0.5"
+                                                    ? "translate-x-5"
+                                                    : "translate-x-0"
                                             }`}
                                         />
                                     </button>
