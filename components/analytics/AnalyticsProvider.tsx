@@ -47,7 +47,7 @@ type ConsentState = "loading" | "unset" | "accepted" | "declined";
 // across the product as too small to read comfortably at a phone's viewing
 // distance.
 const consentButtonClass =
-  "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-1 text-[11px] font-bold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3 @md/notice:text-xs";
+  "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2 font-bold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3";
 
 // A component, not a render-time helper call. The handlers close over the
 // remembered opener (see closePreferences), and `react-hooks/refs` treats
@@ -58,11 +58,13 @@ function ConsentAction({
   onClick,
   label,
   shortLabel,
+  readable = false,
 }: {
   kind: "decline" | "accept";
   onClick: () => void;
   label: string;
   shortLabel: string;
+  readable?: boolean;
 }) {
   return (
     <button
@@ -72,10 +74,12 @@ function ConsentAction({
       // The accessible name is always the full label; only the visible text
       // shortens in a narrow container, and it is a substring of that name.
       aria-label={label}
-      className={consentButtonClass}
+      className={`${consentButtonClass} ${readable ? "text-sm" : "text-[11px] @md/notice:text-xs"}`}
     >
-      <span className="@md/notice:hidden">{shortLabel}</span>
-      <span className="hidden @md/notice:inline">{label}</span>
+      {readable ? label : <>
+        <span className="@md/notice:hidden">{shortLabel}</span>
+        <span className="hidden @md/notice:inline">{label}</span>
+      </>}
     </button>
   );
 }
@@ -771,6 +775,8 @@ export function AnalyticsProvider({
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
+  const isPluginRoute = pathname === "/plugins";
+  const readableNotice = isSettingsRoute || isPluginRoute;
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot
@@ -809,8 +815,8 @@ export function AnalyticsProvider({
   // pill are mutually exclusive -- one needs `consent === "unset"` or the
   // preferences panel open, the other needs a settled choice and the panel
   // closed -- so the slot never has to hold both.
-  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute;
-  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
+  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute || isPluginRoute;
+  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : isPluginRoute ? marketingConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
 
   // REAUDIT-P1-01. Chat and Review share a workspace where the bottom-right corner is
   // never free: the last model panel's follow-up form ends there, and below it
@@ -852,7 +858,7 @@ export function AnalyticsProvider({
     // container cannot query its own size, and keeping it inside the card
     // leaves the card's own padding/margins untouched.
     <div className="@container/notice">
-      <div className="flex flex-wrap items-center gap-1.5 @md/notice:justify-between @md/notice:gap-3">
+      <div className={readableNotice ? "flex flex-col items-stretch gap-3" : "flex flex-wrap items-center gap-1.5 @md/notice:justify-between @md/notice:gap-3"}>
         {/*
           The copy keeps a real minimum width so it can never be crushed to an
           unreadable sliver (the audit measured 34.6px at 320px), but the
@@ -862,21 +868,21 @@ export function AnalyticsProvider({
           102px against its 80px contract.
         */}
         <div className="min-w-[6rem] flex-1">
-          <p className="text-[11px] leading-4 text-zinc-600 dark:text-zinc-300 @md/notice:hidden">
+          <p className={`${readableNotice ? "text-sm leading-6" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-300 @md/notice:hidden`}>
             {promptCopy.mobileBody}{" "}
             <Link
               href="/privacy"
-              className="font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+              className={`${readableNotice ? "inline-block whitespace-nowrap" : ""} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
             >
               {copy.privacy}
             </Link>
           </p>
           <div className="hidden @md/notice:block">
-            <p className="text-xs font-bold text-zinc-900 dark:text-zinc-50">{promptCopy.title}</p>
-            <p className="mt-0.5 text-[11px] leading-4 text-zinc-600 dark:text-zinc-400">{promptCopy.body}</p>
+            <p className={`${readableNotice ? "text-sm" : "text-xs"} font-bold text-zinc-900 dark:text-zinc-50`}>{promptCopy.title}</p>
+            <p className={`mt-0.5 ${readableNotice ? "text-sm leading-6" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-400`}>{promptCopy.body}</p>
             <Link
               href="/privacy"
-              className="mt-0.5 inline-flex text-[11px] font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+              className={`mt-0.5 inline-flex ${readableNotice ? "text-sm" : "text-[11px]"} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
             >
               {copy.privacy}
             </Link>
@@ -888,12 +894,14 @@ export function AnalyticsProvider({
             onClick={decline}
             label={promptCopy.decline}
             shortLabel={promptCopy.declineShort}
+            readable={readableNotice}
           />
           <ConsentAction
             kind="accept"
             onClick={accept}
             label={promptCopy.accept}
             shortLabel={promptCopy.acceptShort}
+            readable={readableNotice}
           />
         </div>
       </div>
@@ -926,8 +934,8 @@ export function AnalyticsProvider({
                 aria-label={promptCopy.title}
                 data-testid="chat-consent-notice"
                 className={
-                  inlineSlot === marketingConsentSlot
-                    ? // The marketing slot already supplies the page gutter, so
+                  inlineSlot === marketingConsentSlot || inlineSlot === settingsConsentSlot
+                    ? // These slots already supply the page gutter, so
                       // the card spans it and never needs its own max-width.
                       "rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-0.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
                     : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
