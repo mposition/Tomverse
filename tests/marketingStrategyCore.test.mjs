@@ -106,7 +106,7 @@ test("paid advertising is a proposal: complete ones are kept, cut to their store
   );
   assert.equal(read.paidAds.length, 3);
   assert.equal(read.paidAds[0].platform.length, 80);
-  assert.equal(read.promptVersion, "strategy-v3");
+  assert.equal(read.promptVersion, "strategy-v4");
   const none = readMarketingWeeklyStrategy(answer([plan()]), { week: WEEK, accounts: ACCOUNTS, claims: CLAIMS });
   assert.deepEqual(none.paidAds, []);
 });
