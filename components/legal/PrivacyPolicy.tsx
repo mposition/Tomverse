@@ -315,7 +315,7 @@ export function PrivacyPolicy() {
                             id={bodyKey === "rights" ? "account-deletion" : undefined}
                             className="grid scroll-mt-24 gap-4 py-7 md:grid-cols-[180px_1fr]"
                         >
-                            <h2 className="flex items-center gap-2 text-sm font-semibold">
+                            <h2 className="flex self-start items-center gap-2 text-sm font-semibold">
                                 <Icon className="h-4 w-4 text-blue-500" />
                                 {t(`privacyPolicy.${titleKey}`)}
                             </h2>
@@ -328,7 +328,9 @@ export function PrivacyPolicy() {
                                 With it, only the table scrolls.
                             */}
                             <div className="min-w-0 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
-                                <p>{t(`privacyPolicy.${bodyKey}`)}</p>
+                                {bodyKey === "location" ? t("privacyPolicy.location").split("\n\n").map((paragraph, index) => (
+                                    <p key={paragraph} className={index ? "mt-4" : undefined}>{paragraph}</p>
+                                )) : <p>{t(`privacyPolicy.${bodyKey}`)}</p>}
                                 {bodyKey === "rights" && (
                                     <div className="mt-5 space-y-3">
                                         <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{t("auth.deleteAccount")}</h3>
