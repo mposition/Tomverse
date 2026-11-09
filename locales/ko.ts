@@ -734,6 +734,8 @@ export const ko = {
         aiReviewPerMonth: "회/월",
         aiReviewRun: "교차검토 실행",
         aiReviewRunning: "답변을 검토하는 중...",
+        aiReviewSecondaryPending: "첫 번째 검토가 준비되었습니다. 나머지 검토를 마무리하는 중입니다...",
+        aiReviewPartialInterrupted: "첫 번째 검토는 확인할 수 있지만 최종 결과는 확인하지 못했습니다. 다시 실행하기 전에 검토 상태를 확인해 주세요.",
         aiReviewPreparing: "최근 비교 가능한 답변을 준비하는 중...",
         aiReviewPrepareFailed: "교차검토를 준비하지 못했습니다.",
         aiReviewFailed: "교차검토를 완료하지 못했습니다. 예약 크레딧은 환불되었습니다.",
