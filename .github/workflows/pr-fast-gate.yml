@@ -104,9 +104,9 @@ jobs:
       # its own job until 2026-10-03; a ~15-second scan held a whole runner
       # and its checkout per pull request against the account's concurrent-job
       # ceiling, and this job already checks out the full history gitleaks
-      # needs to scan base..head. It duplicates Secret History Scan's PR run on
-      # purpose: fast-gate is the only required check, so this keeps secret
-      # scanning on the merge-blocking path. The token is the job's own
+      # needs to scan base..head. It is the only pull-request secret scan since
+      # 2026-11-09, when Secret History Scan dropped its duplicate PR run; this
+      # keeps secret scanning on the merge-blocking path. The token is the job's own
       # read-only GITHUB_TOKEN. The script, not gitleaks-action, since
       # 2026-11-08: the action could only download from the release web path,
       # which returned 504 for hours; see scripts/ci/gitleaks-scan.sh. It

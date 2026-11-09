@@ -19,6 +19,13 @@ name: Review Parity (shadow)
 #
 # The manifest check runs first and without a browser: if the baseline has
 # silently shrunk, that is worth knowing even when the tests themselves pass.
+#
+# Off by default since 2026-11-09 (owner decision: cut CI minutes before the
+# repository goes private). It was ~170 runs a week, each with its own
+# production build, for a signal nothing gates on. The job runs only while the
+# repository variable REVIEW_PARITY_SHADOW is 'on'; set it to resume the
+# promotion measurement. The trigger stays pull_request, so the job remains a
+# PR-scope cache writer only (.github/audits/actions-cache-poisoning-audit-2026-10-03.md).
 
 on:
   pull_request:
@@ -33,7 +40,7 @@ concurrency:
 
 jobs:
   review-parity:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
+    if: vars.REVIEW_PARITY_SHADOW == 'on' && (github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop'))
     name: Review parity baseline (shadow, non-blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 20
