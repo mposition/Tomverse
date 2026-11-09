@@ -53,11 +53,19 @@ export function decideAmuxV22ExternalAuthority(input: {
 
 const LOCAL_CLI_TOOLS = new Set(["Read", "Grep", "Glob", "Edit", "Write"]);
 
-/** Reject an accidental CLI role expansion to Bash, MCP, browser or network. */
-export function assertAmuxV22LocalCliTools(value: string): void {
+/**
+ * Reject an accidental CLI role expansion to Bash, MCP, browser or network.
+ * Bash passes only for a run whose shell the sidecar puts in the
+ * no-network, checkout-only jail (lib/amux/v22ShellJail.mjs): the implement
+ * role, owner request 2026-11-09. Every other role and the read-only retry
+ * stay without a shell.
+ */
+export function assertAmuxV22LocalCliTools(value: string,
+  { jailedShell = false }: { jailedShell?: boolean } = {}): void {
   const tools = value.split(",");
   if (tools.length === 0 || tools.some((tool) =>
-    !LOCAL_CLI_TOOLS.has(tool) || tool.trim() !== tool)) {
+    !(LOCAL_CLI_TOOLS.has(tool) || (jailedShell && tool === "Bash")) ||
+    tool.trim() !== tool)) {
     throw new Error("v22 CLI role includes an external-capable tool");
   }
   if (new Set(tools).size !== tools.length) {
