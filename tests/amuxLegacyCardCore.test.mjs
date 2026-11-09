@@ -178,3 +178,18 @@ test("a close refuses a running, closed, changed or non-legacy card", () => {
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, liveAttempt: true }, 3), "running");
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, status: "doing" }, 3), "running");
 });
+
+test("an archived v22 Task is not a legacy card: archived cards leave the owner queue instead", () => {
+  // Owner decision 2026-11-09: an archived card no longer shows in Waiting on me,
+  // so no third kind remakes it there.
+  const v22 = v4Task({ status: "review", v22ReceiptId: "r", taskRole: "implement", executionGrade: "advanced",
+    lastAttempt: { endedAt: "2026-10-30T00:00:00.000Z", outcome: "succeeded", reason: "usage_outcome_unknown" } });
+  assert.equal(amuxLegacyCardKind({ ...v22, archivedAt: new Date(), openEscalation: true }), null);
+  assert.equal(amuxLegacyCardCloseRefusal({ ...v22, archivedAt: new Date(), revision: 9, activeDelivery: false,
+    liveAttempt: false, openEscalation: true }, 9), "not_legacy");
+  // Each kind names itself in the remade idea's footer.
+  const pre = amuxLegacyCardIdeaText({ ...card(JSON.stringify({ problem: "Do X." })), kind: "pre_v22_task" });
+  assert.ok((pre.ok ? pre.text : "").includes("(v22 이전에 만든 Task를 새 아이디어로 다시 만듦)"));
+  const board = amuxLegacyCardIdeaText(card(JSON.stringify({ problem: "Do X." })));
+  assert.ok((board.ok ? board.text : "").includes("(옛 작업판에서 이관한 카드를 새 아이디어로 다시 만듦)"));
+});

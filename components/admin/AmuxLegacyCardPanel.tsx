@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useAdminMessages } from "./AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
@@ -14,7 +14,7 @@ import { amuxIdeaLaneBoardHref } from "@/lib/amux/ideaLaneBoardCore";
 export type AmuxLegacyCardView = {
   kind: "workboard" | "pre_v22_task";
   closeRefusal: string | null;
-  /** Archived already but still in the owner queue: a close only resolves its escalation. */
+  /** Archived already with an escalation still open: a close only resolves that escalation. */
   alreadyArchived?: boolean;
   idea: { state: "ready"; title: string; text: string; truncated: boolean } |
     { state: "refused"; code: string };
@@ -62,11 +62,64 @@ export async function requestAmuxLegacyCardAction(input: {
 
 const reasonText = (m: Messages, code: string | null) => code ? m.reason[code] ?? code : null;
 
-export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged, fetcher }: {
+const LEGACY_KINDS: ReadonlySet<string> = new Set(["workboard", "pre_v22_task"]);
+
+const isLegacyCardView = (value: unknown): value is AmuxLegacyCardView => {
+  if (typeof value !== "object" || value === null) return false;
+  const view = value as Record<string, unknown>;
+  const idea = view.idea as Record<string, unknown> | null | undefined;
+  return typeof view.kind === "string" && LEGACY_KINDS.has(view.kind) &&
+    (view.closeRefusal === null || typeof view.closeRefusal === "string") &&
+    typeof idea === "object" && idea !== null && (idea.state === "ready" ?
+      typeof idea.title === "string" && typeof idea.text === "string" : idea.state === "refused");
+};
+
+/** A card's legacy panel and the revision it was read at; `view` is null for any other card. */
+export type AmuxLegacyCardRead = { revision: number; view: AmuxLegacyCardView | null };
+
+/**
+ * The legacy panel of one card, from the same owner-only card detail read the
+ * execution board opens (`/api/admin/amux/execution-view?view=detail`). Null
+ * when it could not be read: the caller then shows no panel. Read only.
+ */
+export async function readAmuxLegacyCardForTask(taskId: string,
+  fetcher: typeof adminFetch = adminFetch): Promise<AmuxLegacyCardRead | null> {
+  try {
+    const response = await fetcher(
+      `/api/admin/amux/execution-view?view=detail&taskId=${encodeURIComponent(taskId)}`, { cache: "no-store" });
+    if (!response.ok) return null;
+    const body = await response.json() as Record<string, unknown> | null;
+    if (!body || body.id !== taskId || !Number.isSafeInteger(body.revision)) return null;
+    return { revision: body.revision as number, view: isLegacyCardView(body.legacyCard) ? body.legacyCard : null };
+  } catch { return null; }
+}
+
+/**
+ * Reads the legacy panel of the card on screen when `enabled` (the owner).
+ * A read for an earlier card is dropped: only the answer for `taskId` is kept.
+ * `initial` is what is shown before the read lands.
+ */
+export function useAmuxLegacyCardRead(taskId: string, enabled: boolean,
+  initial: AmuxLegacyCardRead | null = null, fetcher?: typeof adminFetch): AmuxLegacyCardRead | null {
+  const [read, setRead] = useState<{ taskId: string; read: AmuxLegacyCardRead | null }>({ taskId, read: initial });
+  useEffect(() => {
+    if (!enabled) return;
+    let current = true;
+    void readAmuxLegacyCardForTask(taskId, fetcher).then((result) => {
+      if (current) setRead({ taskId, read: result });
+    });
+    return () => { current = false; };
+  }, [taskId, enabled, fetcher]);
+  return enabled && read.taskId === taskId ? read.read : null;
+}
+
+export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged, fetcher, reauthReturnPath }: {
   taskId: string; revision: number; view: AmuxLegacyCardView; canAct: boolean;
-  /** Reloads the board and the card after a write. */
-  onChanged: () => void;
+  /** Reloads the board and the card after a write; `closed` says whether the card left the owner queue. */
+  onChanged: (closed: boolean) => void;
   fetcher?: typeof adminFetch;
+  /** Where a fresh sign-in returns; the execution board's card by default. */
+  reauthReturnPath?: string;
 }) {
   const m = useAdminMessages(adminAmuxLegacyCardMessages);
   const [confirming, setConfirming] = useState<Action | null>(null);
@@ -84,7 +137,8 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
     const result = await requestAmuxLegacyCardAction({ action, taskId, revision, fetcher });
     setOutcome(result);
     setBusy(false);
-    if (result.kind === "recreated" || result.kind === "closed") onChanged();
+    if (result.kind === "recreated" || result.kind === "closed")
+      onChanged(result.kind === "closed" || result.closed);
   };
 
   return <section className="space-y-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-4"
@@ -128,7 +182,7 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
       {outcome.kind === "closed" && <p>{archived ? m.closedDoneArchived : m.closedDone}</p>}
       {outcome.kind === "refused" && <p>{outcome.error === "idea_refused" ? m.ideaRefused : m.notClosable}{" "}
         {reasonText(m, outcome.reason ?? outcome.error)}</p>}
-      {outcome.kind === "reauth" && <Link className="underline" href={adminRecentAuthenticationHref(
+      {outcome.kind === "reauth" && <Link className="underline" href={adminRecentAuthenticationHref(reauthReturnPath ??
         "/admin/amux-execution?tab=cards&taskId=" + encodeURIComponent(taskId))}>{m.reauth}</Link>}
       {outcome.kind === "unknown" && <p>{m.failed}</p>}
     </div>}

@@ -892,9 +892,11 @@ jobs:
         timeout-minutes: 10
         run: npm run verify:package-build-matrix
 
+      # 2026-11-09: the step took 2m59s-4m31s on eight passing PR runs and one run
+      # timed out at 5m with all 196 mobile tests passed (5.1m) before test:pwa ran.
       - name: Native UI and PWA contracts
         if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 5
+        timeout-minutes: 8
         run: |
           npm --workspace @tomverse/mobile run test:ui
           npm run test:pwa
