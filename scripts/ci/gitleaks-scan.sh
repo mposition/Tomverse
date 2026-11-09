@@ -17,8 +17,13 @@
 #                       (the action took the first and last commit of the PR's
 #                       first API page, 30 commits, so a longer PR lost its
 #                       newest commits; this is the same range without the cap)
-#   push                --no-merges --first-parent commits[0]^..commits[-1],
-#                       or the one commit when the push carried one
+#   push                --no-merges before..after: every commit the push
+#                       added. The action's --first-parent commits[0]^..
+#                       commits[-1] scanned 0 commits on main, whose
+#                       first-parent line is all merges (--no-merges drops
+#                       them), and the event's commits array stops at 20.
+#                       A new ref or an unknown old tip scans all history
+#                       up to after.
 #   schedule, dispatch  the whole history
 # with the action's flags (--redact, --exit-code=2, SARIF to results.sarif).
 # gitleaks finds .gitleaks.toml and .gitleaksignore in the working directory
@@ -109,19 +114,27 @@ scan_range() {
       LOG_OPTS="--no-merges --first-parent ${merge_base}..${head}"
       ;;
     push)
-      local count first last
-      count="$(jq '.commits | length' "$GITHUB_EVENT_PATH")"
+      local before after zero count
+      before="$(jq -r '.before' "$GITHUB_EVENT_PATH")"
+      after="$(jq -r '.after' "$GITHUB_EVENT_PATH")"
+      zero="0000000000000000000000000000000000000000"
+      if [ "$after" = "$zero" ]; then
+        echo "No commits to scan (the push deleted the ref)"
+        exit 0
+      fi
+      if [ "$before" = "$zero" ] || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+        # A new ref, or a force push whose old tip is not in this clone:
+        # there is no old tip to subtract, so scan everything up to the new one.
+        echo "::warning::No usable previous tip for this push; scanning all history up to ${after}."
+        LOG_OPTS="--no-merges ${after}"
+        return 0
+      fi
+      count="$(git rev-list --no-merges --count "${before}..${after}")"
       if [ "$count" -eq 0 ]; then
         echo "No commits to scan"
         exit 0
       fi
-      first="$(jq -r '.commits[0].id' "$GITHUB_EVENT_PATH")"
-      last="$(jq -r '.commits[-1].id' "$GITHUB_EVENT_PATH")"
-      if [ "$first" = "$last" ]; then
-        LOG_OPTS="-1"
-      else
-        LOG_OPTS="--no-merges --first-parent ${first}^..${last}"
-      fi
+      LOG_OPTS="--no-merges ${before}..${after}"
       ;;
     schedule | workflow_dispatch)
       ;;
