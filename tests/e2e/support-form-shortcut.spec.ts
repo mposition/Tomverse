@@ -7,9 +7,9 @@ test("Korean support offers a first-screen keyboard shortcut to the form", async
   await expect(shortcut).toBeInViewport();
   await shortcut.focus();
   await shortcut.press("Enter");
-  await expect(page).toHaveURL(/#support-request-form$/);
+  await expect(page).toHaveURL(/#support-request-title$/);
   const form = page.locator("#support-request-form");
-  await expect(form).toBeFocused();
+  await expect(page.locator("#support-request-title")).toBeFocused();
   const type = form.getByRole("combobox");
   await expect(type).toBeInViewport();
   expect(await type.evaluate((node) => node.getBoundingClientRect().top)).toBeGreaterThanOrEqual(64);

@@ -457,6 +457,18 @@ function mergedByKindOf(
   return mergedBy?.type === "Bot" ? "bot" : mergedBy?.type === "User" ? "user" : "unknown";
 }
 
+/**
+ * Whether the agent's own branch still exists. Read by prefix, so a deleted
+ * branch is an empty list rather than a 404 that a transport fault could
+ * imitate; only an exact `refs/heads/<ref>` entry counts as present.
+ */
+export async function readEngineeringAgentBranchPresent(ref: string, deps: Deps = {}): Promise<boolean> {
+  if (!/^agent\/engineering\/[0-9]{1,20}$/.test(ref)) throw new EngineeringAgentGitHubReadError("invalid_input");
+  const page = await githubPage(`/git/matching-refs/heads/${ref}?per_page=100`, withDefaults(deps));
+  if (!Array.isArray(page.body) || page.hasNext) throw new EngineeringAgentGitHubReadError("invalid_response");
+  return page.body.some((entry) => record(entry)?.ref === `refs/heads/${ref}`);
+}
+
 export async function readEngineeringAgentPullMerge(
   prNumber: number,
   deps: Deps = {},
