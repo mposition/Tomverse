@@ -3,9 +3,10 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 import {
   MARKETING_S2B1_ACTIONS,
-  lowerMarketingChannelCaps,
+  changeMarketingChannelCaps,
 } from "@/lib/marketingStore";
 import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 
 type RouteContext = { params: Promise<{ channelId: string }> };
 
@@ -17,12 +18,17 @@ const schema = z
   .strict();
 
 /**
- * POST: the operator lowers a brand account's posting caps.
+ * POST: the operator sets or clears a brand account's own posting caps.
  *
- * Lowering only, which is what the action is named. There is no route that
- * raises one -- the plan's inventory has none -- so raising a cap back is not
- * something this slice can do, and an operator should know that before they
- * lower one (policy section 7.4).
+ * The policy has no cap (owner decision 2026-11-08), so these are the only
+ * ones; null is no cap. Lowering is never gated, as with every operator
+ * restriction. Raising or clearing one lets more posts out, so the store
+ * refuses it while the kill switch is on (policy section 6.1).
+ *
+ * The audit action is still `marketing_account.lower_caps`: the name predates
+ * raising and clearing, and keeping it puts every cap change, old and new,
+ * under one action in the audit chain. (It also sits in the table the signed
+ * webhook pipeline fingerprint reads, which a rename would make stale.)
  */
 export async function POST(req: Request, context: RouteContext) {
   const { channelId } = await context.params;
@@ -31,7 +37,7 @@ export async function POST(req: Request, context: RouteContext) {
     action: MARKETING_S2B1_ACTIONS.accountLowerCaps,
     targetType: "MarketingChannel",
     targetId: channelId,
-    summary: "Lowered a brand account's posting caps.",
+    summary: "Changed a brand account's posting caps.",
     gate: "operator_restriction",
     bucket: "admin-marketing-account-caps",
     schema,
@@ -40,11 +46,16 @@ export async function POST(req: Request, context: RouteContext) {
       weeklyCapOverride: body.weeklyCapOverride,
     }),
     run: async (tx, { body }) => {
-      await lowerMarketingChannelCaps(tx, {
-        id: channelId,
-        dailyCapOverride: body.dailyCapOverride,
-        weeklyCapOverride: body.weeklyCapOverride,
-      });
+      const killSwitch = process.env[MARKETING_AUTOMATION_KILL_SWITCH_ENV];
+      await changeMarketingChannelCaps(
+        tx,
+        {
+          id: channelId,
+          dailyCapOverride: body.dailyCapOverride,
+          weeklyCapOverride: body.weeklyCapOverride,
+        },
+        { raiseAllowed: !(typeof killSwitch === "string" && killSwitch.trim() !== "") },
+      );
       return { id: channelId };
     },
   });

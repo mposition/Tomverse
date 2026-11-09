@@ -24,10 +24,11 @@ import { suggestionIdeaText, suggestionSendRequestId } from "@/lib/productResear
 import { sendScoutSuggestion } from "@/lib/productResearchScoutSend";
 import { closeSuggestion, readSuggestion } from "@/lib/productResearchScoutStore";
 
-// The operator's two actions on a Scout suggestion
+// The operator's actions on an open Scout suggestion
 // (docs/policy/product-research-agent.md §10):
 //
 //   { "action": "dismiss" }   owner or ops
+//   { "action": "complete" }  owner or ops, after implementation and verification
 //   { "action": "send" }      owner
 //
 // Sending makes an AMUX idea from the suggestion through the same intake the
@@ -82,7 +83,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
     } catch {
       return json({ error: "invalid_request" }, 400);
     }
-    if (body.action !== "dismiss" && body.action !== "send") return json({ error: "invalid_action" }, 400);
+    if (body.action !== "dismiss" && body.action !== "send" && body.action !== "complete") return json({ error: "invalid_action" }, 400);
 
     const session = await admin(body.action === "send" ? ["owner"] : ["owner", "ops"]);
     if (session instanceof NextResponse) return session;
@@ -96,6 +97,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
     if (body.action === "dismiss") {
       const closed = await closeSuggestion({ session, request, id: suggestionId, next: { status: "dismissed" } });
       return json({ status: closed ? "dismissed" : "unchanged" });
+    }
+
+    if (body.action === "complete") {
+      await consumeApiRateLimit(request, session.user!.id!, "admin-product-research-suggestion-complete", { minute: 60, day: 500 });
+      const closed = await closeSuggestion({ session, request, id: suggestionId, next: { status: "completed" } });
+      return closed ? json({ status: "completed" }) : json({ error: "suggestion_changed" }, 409);
     }
 
     const requestId = suggestionSendRequestId(suggestion.id);
