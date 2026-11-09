@@ -680,14 +680,16 @@ export const resolveEngineeringAgentSwitches = (
 /* Owner queues                                                               */
 /* ------------------------------------------------------------------------- */
 
-/** Proposed values; the owner-facing total is fixed by the policy at 5 (§12). */
+/**
+ * Owner decision 2026-11-09 (§12): 8 pull requests and 8 decisions, with no
+ * first-T1 window. An active run counts in both, so 8 runs can be active at
+ * once. The run and work item guards hold the same numbers.
+ */
 export const OWNER_QUEUE_LIMITS = {
-  pr: 2,
-  prDuringFirstT1Days: 1,
-  decision: 3,
+  pr: 8,
+  decision: 8,
 } as const;
 export const OWNER_QUEUE_TOTAL = OWNER_QUEUE_LIMITS.pr + OWNER_QUEUE_LIMITS.decision;
-export const FIRST_T1_WINDOW_DAYS = 14;
 export const QUEUE_TTL_DAYS = { pr: 14, decision: 7 } as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -701,18 +703,9 @@ export type QueueReading = {
    * outcomes and partial registrations.
    */
   pendingDecisions: number;
-  /**
-   * When the first run that started under mode `t1` started (the earliest
-   * EngineeringAgentRun whose `modeAtStart` is `t1`), or null if none has.
-   * That is never earlier than the mode change, so the window it opens is
-   * never shorter than the policy's.
-   */
-  t1StartedAt: Date | null;
-  now: Date;
 };
 
 export type QueueVerdict = {
-  prLimit: number;
   prFull: boolean;
   decisionFull: boolean;
   /** A card is claimed only when both queues have room (policy §2.1, §12). */
@@ -720,16 +713,9 @@ export type QueueVerdict = {
 };
 
 export const decideOwnerQueues = (reading: QueueReading): QueueVerdict => {
-  const inFirstWindow =
-    reading.t1StartedAt !== null &&
-    reading.now.getTime() - reading.t1StartedAt.getTime() <
-      FIRST_T1_WINDOW_DAYS * DAY_MS;
-  const prLimit = inFirstWindow
-    ? OWNER_QUEUE_LIMITS.prDuringFirstT1Days
-    : OWNER_QUEUE_LIMITS.pr;
-  const prFull = reading.openPrBindings >= prLimit;
+  const prFull = reading.openPrBindings >= OWNER_QUEUE_LIMITS.pr;
   const decisionFull = reading.pendingDecisions >= OWNER_QUEUE_LIMITS.decision;
-  return { prLimit, prFull, decisionFull, claimAllowed: !prFull && !decisionFull };
+  return { prFull, decisionFull, claimAllowed: !prFull && !decisionFull };
 };
 
 /* ------------------------------------------------------------------------- */

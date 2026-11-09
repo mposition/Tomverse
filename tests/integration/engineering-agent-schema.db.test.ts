@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { OWNER_QUEUE_LIMITS } from "@/lib/engineeringAgentCore";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for the engineering agent's state tables
@@ -18,10 +19,9 @@ import { prisma } from "@/lib/prisma";
 // purpose, to show the database holds the line by itself.
 //
 // The file runs under mode `t1`: a publish item comes only from a run that
-// started under t1, so the first T1 window is open throughout and the pull
-// request queue holds one. Every test therefore works one pull request at a
-// time and closes what it opens -- runs ended, publish items settled,
-// bindings pruned -- before the next begins.
+// started under t1. The owner queues are shared by every test, so each test
+// closes what it opens -- runs ended, publish items settled, bindings pruned
+// -- before the next begins.
 
 const requireDedicatedDatabase = () => {
   const testRaw = process.env.TEST_DATABASE_URL?.trim();
@@ -800,7 +800,9 @@ test("a partial registration is an owner decision, resolved only after a person 
 });
 
 test("a temporary table of the same name does not stand in for the real one", async () => {
-  const open = [await newItem("decision"), await newItem("decision"), await newItem("decision")];
+  // A full decision queue, which an empty temporary table would hide.
+  const open = [];
+  while (open.length < OWNER_QUEUE_LIMITS.decision) open.push(await newItem("decision"));
   const { task, attempt } = await amuxAttempt();
   await refused(
     prisma.$transaction(async (tx) => {
@@ -884,28 +886,38 @@ test("a request's end is kept, so a retry never starts over", async () => {
 });
 
 test("no run starts while the owner queue is full, counting what running work may still produce", async () => {
-  // Three open owner items fill the decision queue: two here, and a draft,
-  // which is the product of its own run.
-  const open = [await newItem("decision"), await newItem("state_mismatch"), await newProduct("t2_draft")];
+  // Open owner items fill the decision queue, one of them a draft, which is
+  // the product of its own run.
+  const open = [await newItem("state_mismatch"), await newProduct("t2_draft")];
+  while (open.length < OWNER_QUEUE_LIMITS.decision) open.push(await newItem("decision"));
   await refused(newRun(), "a full decision queue refuses a new run");
   for (const item of open) await setState(item.id, item.kind === "state_mismatch" ? "resolved" : "expired");
 
-  // Inside the first T1 window the pull request queue holds one: an active
-  // run may still produce a pull request, and so may an unsettled publish item.
-  const running = await newRun();
-  await refused(newRun(), "an active run holds the one place");
-  await endRun(running.id);
+  // An active run takes a place in both queues, for the pull request or the
+  // decision it may still produce; so does an unsettled publish item.
+  const running = [];
+  while (running.length < OWNER_QUEUE_LIMITS.pr) running.push(await newRun());
+  await refused(newRun(), "active runs fill the queue");
+  await endRun(running.pop()!.id);
   const pending = await newProduct("publish");
-  await refused(newRun(), "an unsettled publish item holds the one place");
+  await refused(newRun(), "an unsettled publish item holds the place a run left");
   await retirePublish(pending.id);
-  await endRun((await newRun()).id);
+  running.push(await newRun());
+  for (const run of running) await endRun(run.id);
 });
 
-test("inside the first T1 window one open pull request fills the queue", async () => {
-  const { run, binding } = await publishedRun();
-  assert.equal(run.modeAtStart, "t1");
-  await endRun(run.id);
-  await refused(newRun(), "one open pull request fills the first T1 window");
-  await retireBinding(binding.id);
+test("open pull requests fill the queue, and no first-T1 window holds it to one", async () => {
+  // Every run in this file starts under t1 within minutes of the first, so
+  // a window would refuse the second pull request.
+  const bindings = [];
+  while (bindings.length < OWNER_QUEUE_LIMITS.pr) {
+    const { run, binding } = await publishedRun();
+    assert.equal(run.modeAtStart, "t1");
+    await endRun(run.id);
+    bindings.push(binding);
+  }
+  await refused(newRun(), "open pull requests fill the queue");
+  await retireBinding(bindings.pop()!.id);
   await endRun((await newRun()).id);
+  for (const binding of bindings) await retireBinding(binding.id);
 });
