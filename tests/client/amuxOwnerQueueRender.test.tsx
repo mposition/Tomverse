@@ -379,6 +379,18 @@ test("a blocked card says what its own attempt reason was, not only 'blocked bef
   assert.match(other, /The run was blocked before it could finish/);
 });
 
+test("a done or todo card left with an earlier attempt's escalation offers its close, to the owner", () => {
+  const card = item({ status: "done", attentionReason: "usage_outcome_unknown" });
+  for (const shown of [card, item({ status: "todo", attentionReason: "usage_outcome_unknown" })]) {
+    const html = decision(shown, controller());
+    assert.match(html, /data-testid="amux-settled-card-escalation"/);
+    assert.match(html, /data-testid="amux-settled-card-escalation-close"/);
+  }
+  // Not for a viewer who is not the owner, and not for a card that still waits on a decision.
+  assert.doesNotMatch(decision(card, controller(), false), /amux-settled-card-escalation/);
+  assert.doesNotMatch(decision(item({}), controller()), /amux-settled-card-escalation/);
+});
+
 const preV22Legacy: AmuxLegacyCardRead = { revision: 9, view: { kind: "pre_v22_task", closeRefusal: null,
   alreadyArchived: false, idea: { state: "ready", title: "Can the PR check be reused?", truncated: false,
     text: "Can the PR check be reused?\n\n원래 카드: AMUX-GITHUB-002" } } };
