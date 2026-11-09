@@ -781,9 +781,9 @@ export function AnalyticsProvider({
 
 
   const isPluginRoute = pathname === "/plugins";
-  const readableNotice = ((((noticePath.at(-1) === "ai-for-file-analysis" || noticePath.at(-1) === "faq" || noticePath.at(-1) === "support" || noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
+  const readableNotice = (((((noticePath.at(-1) === "ai-for-file-analysis" || noticePath.at(-1) === "faq" || noticePath.at(-1) === "support" || noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
     (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ||
-    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute)) || (noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null))) || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "faq");
+    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute)) || (noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null))) || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "privacy")) || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "faq");
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot
@@ -876,7 +876,7 @@ export function AnalyticsProvider({
         */}
         <div className="min-w-[6rem] flex-1">
           <p className={`${readableNotice ? "text-sm leading-6" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-300 @md/notice:hidden`}>
-            {((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "faq") ? promptCopy.body : (promptCopy.mobileBody)}{" "}
+            {((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "faq") ? promptCopy.body : (((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "privacy") ? promptCopy.body : (promptCopy.mobileBody))}{" "}
             <Link
               href="/privacy"
               className={`${((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "faq") ? "mt-1 block w-fit max-w-full whitespace-nowrap" : (readableNotice ? "inline-block whitespace-nowrap" : "")} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
