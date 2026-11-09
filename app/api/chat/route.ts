@@ -2242,13 +2242,16 @@ async function handleChatPost(
                       onImageDecision: imageRouting.accept,
                       // An image turn is not a routing decision a chat model
                       // answered; its row would teach the router the wrong thing.
-                      recordDecision: () => imageRouting.resolve().then(
-                          (decision) => !decision.image
-                      ),
+                      recordDecision: (pick) => pick?.requiresFileGeneration
+                          ? Promise.resolve(true)
+                          : imageRouting.resolve().then((decision) => !decision.image),
                   })
             : null;
         finishRoutingTiming();
-        const autoImageDecision = await imageRouting.resolve();
+        const detectedImageDecision = await imageRouting.resolve();
+        // A document about images is still a file request, not an image turn.
+        const autoImageDecision = llmPick?.requiresFileGeneration
+            ? { image: false as const } : detectedImageDecision;
         const autoSelection = applyLlmModelPick(
             deterministicAutoSelection,
             llmPick?.modelId ?? null,
