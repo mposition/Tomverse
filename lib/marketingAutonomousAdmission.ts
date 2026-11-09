@@ -46,7 +46,7 @@ import {
   type ReadResult,
 } from "@/lib/marketingAutomationAccess";
 import { marketingPriceAlertReadyInput } from "@/lib/marketingPriceAlertCore";
-import { MARKETING_CHANNEL_CAPS, MARKETING_NO_AUTONOMY_CHANNELS } from "@/lib/marketingAutomationSchema";
+import { MARKETING_NO_AUTONOMY_CHANNELS, marketingChannelPostsByApi } from "@/lib/marketingAutomationSchema";
 import {
   insertAutonomousScheduledMarketingPost,
   marketingHealthIsFresh,
@@ -203,11 +203,13 @@ const admissionDecisionsFrom = (
     // §8.1), which no channel has yet, so it stays unreadable there.
     recoveryContractAvailable:
       subject.status === "approval_mode" ? { ok: true, value: true } : unreadable,
-    // The platform budget is the channel's daily and weekly cap (owner,
+    // The platform budget is the account's daily and weekly cap (owner,
     // 2026-10-31, D3; docs/policy/marketing-automation.md §7.6), which the
-    // claim counts in this transaction after this answer. A channel with no
-    // cap is posted by hand, so it has no budget to publish against.
-    platformBudgetAvailable: { ok: true, value: (MARKETING_CHANNEL_CAPS[subject.channel] ?? null) !== null },
+    // claim counts in this transaction after this answer. The policy has no
+    // cap since 2026-11-08, so only an operator's account cap can use it up,
+    // and the claim refuses then. A channel with no API posting route is posted
+    // by hand, so it has no budget to publish against.
+    platformBudgetAvailable: { ok: true, value: marketingChannelPostsByApi(subject.channel) },
     autoPublishEnabled: {
       ok: true,
       value: marketingAutomationEnabledFromValue(

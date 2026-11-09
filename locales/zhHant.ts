@@ -757,6 +757,8 @@ export const zhHant = {
         aiReviewResponsesRequired: "請先針對同一問題完成至少兩個模型的回答。",
         aiReviewRun: "執行交叉審閱",
         aiReviewRunning: "正在審閱答案…",
+        aiReviewSecondaryPending: "第一份審閱已完成，正在完成其餘審閱…",
+        aiReviewPartialInterrupted: "目前可以查看第一份審閱，但尚未確認最終結果。重新執行前，請先確認審閱狀態。",
         aiReviewSecondaryReviewer: "審閱者 2",
         aiReviewSourceGrounding: "來源支撐度",
         aiReviewSourceGroundingDescription: "引用文字中可直接與所連結來源對應的比例。它不衡量事實準確性、來源可靠性或模型信賴度。",

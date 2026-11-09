@@ -696,6 +696,8 @@ export const fr = {
         aiReviewResponsesRequired: "Terminez d'abord au moins deux réponses de modèles à la même question.",
         aiReviewRun: "Lancer la contre-analyse",
         aiReviewRunning: "Analyse des réponses en cours...",
+        aiReviewSecondaryPending: "La première analyse est prête. Finalisation de l’analyse restante...",
+        aiReviewPartialInterrupted: "La première analyse est disponible, mais le résultat final n’a pas pu être confirmé. Vérifiez l’état de l’analyse avant de relancer le traitement.",
         aiReviewSecondaryReviewer: "Relecteur 2",
         aiReviewSourceGrounding: "Ancrage dans les sources",
         aiReviewSourceGroundingDescription: "Part du texte cité que l'on peut rattacher directement aux sources liées. Cette mesure ne dit rien de l'exactitude des faits, de la fiabilité des sources ni de la confiance du modèle.",

@@ -762,6 +762,8 @@ export const zh = {
         aiReviewResponsesRequired: "请先针对同一问题完成至少两个模型的回答。",
         aiReviewRun: "运行交叉审阅",
         aiReviewRunning: "正在审阅答案…",
+        aiReviewSecondaryPending: "第一份审阅已完成，正在完成其余审阅…",
+        aiReviewPartialInterrupted: "目前可以查看第一份审阅，但尚未确认最终结果。请先检查审阅状态，再重新运行。",
         aiReviewSecondaryReviewer: "审阅者 2",
         aiReviewSourceGrounding: "来源支撑度",
         aiReviewSourceGroundingDescription: "引用文本中可直接与所链接来源对应的比例。它不衡量事实准确性、来源可靠性或模型置信度。",
