@@ -63,9 +63,12 @@ export type ScoutConsoleView = {
   readonly counts: SuggestionCounts;
   /** The open suggestions, newest first; only on the Suggestions section. */
   readonly open: readonly ScoutConsoleSuggestion[];
+  /** Recently completed suggestions, retained separately from declined ones. */
+  readonly completed: readonly { readonly id: string; readonly title: string; readonly subject: string; readonly completedAt: string | null }[];
   /** One row per UTC day, newest first; only on the Runs section. */
   readonly days: readonly ScoutDaySummary[];
   readonly canDismiss: boolean;
+  readonly canComplete: boolean;
   readonly canSend: boolean;
   /** Choosing the model and the cap is a spending decision: owner only. */
   readonly canConfigure: boolean;
@@ -74,13 +77,14 @@ export type ScoutConsoleView = {
 export async function readScoutConsole(session: Session | null, section: ScoutConsoleSection): Promise<ScoutConsoleView> {
   const role = getAdminRole(session);
   const now = new Date();
-  const [settings, modelOptions, usageToday, counts, calls, open] = await Promise.all([
+  const [settings, modelOptions, usageToday, counts, calls, open, completed] = await Promise.all([
     readScoutSettings(),
     scoutModelOptions(),
     scoutUsageToday(),
     suggestionCounts(),
     scoutRecentCalls(SCOUT_CONSOLE_DAYS),
     section === "suggestions" ? listSuggestions("open") : Promise.resolve([]),
+    section === "suggestions" ? listSuggestions("completed") : Promise.resolve([]),
   ]);
   return {
     enabled: isProductResearchRouteEnabled(process.env, PRODUCT_RESEARCH_SCOUT_SWITCH_ENV),
@@ -102,8 +106,10 @@ export async function readScoutConsole(session: Session | null, section: ScoutCo
       evidence: row.evidence,
       suggestion: row.suggestion,
     })),
+    completed: completed.map((row) => ({ id: row.id, title: row.title, subject: row.subject, completedAt: row.statusChangedAt?.toISOString() ?? null })),
     days: section === "runs" ? scoutDays(calls, now, SCOUT_CONSOLE_DAYS) : [],
     canDismiss: role === "owner" || role === "ops",
+    canComplete: role === "owner" || role === "ops",
     canSend: role === "owner",
     canConfigure: role === "owner",
   };

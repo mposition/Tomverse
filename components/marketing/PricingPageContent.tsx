@@ -20,6 +20,9 @@ import {
   getTypicalShortRequestCapacities,
 } from "@/lib/models";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
+import { PricingKoreanPlanLimits } from "./PricingKoreanPlanLimits";
+import { PricingCreditExample } from "./PricingCreditExample";
+import { PricingPlanCapabilities } from "./PricingPlanCapabilities";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { usePricingAccount } from "@/components/marketing/usePricingAccount";
@@ -46,6 +49,7 @@ import {
 } from "@/lib/productAnalyticsClient";
 import {
   billingCurrencyFractionDigits,
+  billingMinorToMajor,
   formatBillingAmount,
   formatBillingMinor,
   type BillingCurrency,
@@ -60,8 +64,8 @@ const REVIEW_SIGN_IN_HREF =
   `/auth/signin?callbackUrl=${encodeURIComponent(REVIEW_WORKSPACE_PATH)}`;
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string; checkout: string }>> = {
-  en: { annual: "Annual", save: "Save 20%", checkout: "The fixed local price shown is charged at checkout." },
-  ko: { annual: "연간", save: "20% 할인", checkout: "표시된 현지통화 고정 금액으로 결제됩니다." },
+  en: { annual: "Annual · billed annually", save: "Save 20%", checkout: "The fixed local price shown is charged once per year at checkout." },
+  ko: { annual: "연간", save: "20% 할인", checkout: "최종 결제 통화와 금액은 결제 화면에서 확인하세요." },
   zh: { annual: "年付", save: "节省 20%", checkout: "结账时将收取所显示的本地固定价格。" },
   "zh-Hant": { annual: "年付", save: "節省 20%", checkout: "結帳時將收取所顯示的當地固定價格。" },
   fr: { annual: "Annuel", save: "-20 %", checkout: "Le prix local fixe affiché est facturé au paiement." },
@@ -352,7 +356,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Buy an additional credit pack for a temporary project or a busier month. Fixed local pricing is shown and checkout is available after sign-in.",
     availableFor: "Available on",
     oneTime: "One-time purchase",
-    validity: "Valid for 12 months",
+    validity: "Valid for {days} days",
     credits: "credits",
     policyTitle: "How additional credits work",
     policies: [
@@ -377,10 +381,10 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
   ko: {
     eyebrow: "일회성 추가 상품",
     title: "플랜 변경 없이 크레딧만 더 필요하신가요?",
-    description: "이번 달 작업량이 많거나 일시적인 프로젝트가 있을 때 추가 크레딧 팩을 구매할 수 있습니다. 현지통화 고정 가격이 표시되며 로그인 후 결제할 수 있습니다.",
+    description: "이번 달 작업량이 많거나 일시적인 프로젝트가 있을 때 추가 크레딧 팩을 구매할 수 있습니다. 통화 코드와 고정 가격을 확인하고 로그인 후 결제할 수 있습니다.",
     availableFor: "구매 가능 플랜",
     oneTime: "일회성 구매",
-    validity: "12개월 유효",
+    validity: "{days}일 유효",
     credits: "크레딧",
     policyTitle: "추가 크레딧 이용 방식",
     policies: [
@@ -408,7 +412,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "当本月工作量增加或有临时项目时，可购买额外积分包。页面显示本地固定价格，登录后可结账。",
     availableFor: "适用方案",
     oneTime: "一次性购买",
-    validity: "有效期 12 个月",
+    validity: "有效期 {days} 天",
     credits: "积分",
     policyTitle: "额外积分的使用方式",
     policies: [
@@ -432,7 +436,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "當本月工作量增加或有臨時專案時，可以購買額外的點數包。頁面會顯示當地固定價格，登入後即可結帳。",
     availableFor: "適用方案",
     oneTime: "一次性購買",
-    validity: "有效期 12 個月",
+    validity: "有效期 {days} 天",
     credits: "點數",
     policyTitle: "額外點數的使用方式",
     policies: [
@@ -456,7 +460,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Achetez un pack pour un projet temporaire ou un mois plus chargé. Le prix local fixe est affiché et l’achat est disponible après connexion.",
     availableFor: "Disponible avec",
     oneTime: "Achat unique",
-    validity: "Valable 12 mois",
+    validity: "Valable {days} jours",
     credits: "crédits",
     policyTitle: "Fonctionnement des crédits supplémentaires",
     policies: [
@@ -480,7 +484,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Kaufen Sie ein Paket für ein vorübergehendes Projekt oder einen arbeitsreichen Monat. Der lokale Festpreis wird angezeigt; Kauf nach Anmeldung.",
     availableFor: "Verfügbar für",
     oneTime: "Einmalkauf",
-    validity: "12 Monate gültig",
+    validity: "{days} Tage gültig",
     credits: "Credits",
     policyTitle: "So funktionieren zusätzliche Credits",
     policies: [
@@ -504,7 +508,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Compra un paquete para un proyecto temporal o un mes con más trabajo. Se muestra el precio local fijo y la compra requiere iniciar sesión.",
     availableFor: "Disponible en",
     oneTime: "Compra única",
-    validity: "Válido 12 meses",
+    validity: "Válido {days} días",
     credits: "créditos",
     policyTitle: "Cómo funcionan los créditos adicionales",
     policies: [
@@ -528,7 +532,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
     description: "Compre um pacote para um projeto temporário ou um mês mais intenso. O preço local fixo é exibido e a compra fica disponível após o login.",
     availableFor: "Disponível no",
     oneTime: "Compra única",
-    validity: "Válido por 12 meses",
+    validity: "Válido por {days} dias",
     credits: "créditos",
     policyTitle: "Como funcionam os créditos adicionais",
     policies: [
@@ -606,7 +610,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Model access", free: "Selected models", pro: "All available models · Pro usage limits", max: "All available models · largest monthly allowance" },
         { label: "Multi-model comparison", free: "Up to 3 models", pro: "Up to 3 models", max: "Up to 3 models" },
-        { label: "File attachments", free: "Images, PDFs, Office, Drive", pro: "Images, PDFs, Office, Drive", max: "Higher file and context limits" },
+        { label: "File attachments (where enabled)", free: "5 files · 10 MiB each · 25 MiB total", pro: "5 files · 10 MiB each · 25 MiB total", max: "5 files · 10 MiB each · 25 MiB total" },
         { label: "Conversation sharing", free: "Share and download", pro: "Share and download", max: "Share and download" },
         { label: "AI credits", free: "300/month", pro: "3,000/month", max: "10,000/month" },
       ],
@@ -663,7 +667,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         cta: "Upgrade to Max",
         href: REVIEW_WORKSPACE_PATH,
         usage: "10,000 monthly AI credits",
-        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Higher attachment and context limits","For frequent advanced-model and long-document work"],
+        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Where attachments are enabled: 5 files per message · 10 MiB each · 25 MiB combined","For frequent advanced-model and long-document work"],
       },
     ],
   },
@@ -684,7 +688,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "모델 접근", free: "선별된 모델", pro: "모든 사용 가능 모델 · Pro 사용량 적용", max: "모든 사용 가능 모델 · 가장 큰 월 제공량" },
         { label: "다중 모델 비교", free: "최대 3개 모델", pro: "최대 3개 모델", max: "최대 3개 모델" },
-        { label: "파일 첨부", free: "이미지, PDF, Office, Drive", pro: "이미지, PDF, Office, Drive", max: "더 높은 파일 및 맥락 한도" },
+        { label: "파일 첨부 (허용 시)", free: "5개 · 각 10 MiB · 총 25 MiB", pro: "5개 · 각 10 MiB · 총 25 MiB", max: "5개 · 각 10 MiB · 총 25 MiB" },
         { label: "대화 공유", free: "공유 및 다운로드", pro: "공유 및 다운로드", max: "공유 및 다운로드" },
         { label: "AI 크레딧", free: "월 300", pro: "월 3,000", max: "월 10,000" },
       ],
@@ -695,11 +699,11 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       { question: "출시 할인은 어떻게 적용되나요?", answer: "출시 특가로 Pro 또는 Max 첫 달 동안 50% 할인을 받을 수 있습니다. 이후에는 취소하지 않는 한 정가 월 요금으로 갱신됩니다.", promotionOnly: true },
       { question: "Pro에서 선택할 수 있는 모델이 제한되나요?", answer: "Pro에서 사용할 수 있는 모델은 모델 목록과 선택창에서 확인할 수 있습니다. 선택한 모델과 요청 길이에 따라 크레딧이 차감되며, 플랜 사용량과 기능별 이용 조건이 적용됩니다." },
     ],
-    note: "가격은 선택된 현지통화의 세금 전 고정 금액입니다. Max는 Standard 모델 일일 제한 없음, Premium 사용량은 월 크레딧 및 공정사용 정책이 적용됩니다.",
+    note: "가격은 함께 표시된 통화의 세금 전 고정 금액입니다. 플랜별 일일 크레딧 한도와 모델별 운영 안전장치는 현재 사용량 안내를 확인하세요.",
     plans: [
       { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: REVIEW_SIGN_IN_HREF, usage: "월 300 AI 크레딧", features: ["선별된 모델 이용","선별된 고비용 모델 월 최대 30응답","최대 3개 모델 비교","저장한 대화 기록","로그인 후 파일 첨부, 공유 및 다운로드","가벼운 일상 질문부터 시작하기"] },
       { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", cta: "Pro로 업그레이드", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "추천", usage: "월 3,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","모델별 크레딧 차감량에 따라 월 제공량 사용","최대 3개 모델 나란히 비교","파일 첨부 및 Google Drive 파일","대화 공유 및 다운로드"] },
-      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","Standard 모델 일일 제한 없음","Premium 사용량은 월 크레딧 및 공정사용 정책 적용","더 높은 첨부파일 및 맥락 한도","고급 모델과 긴 문서를 자주 쓰는 경우에 적합"] },
+      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","월 10,000 AI 크레딧 제공","Premium 사용량은 월 크레딧 및 공정사용 정책 적용","첨부 허용 시 5개 · 각 10 MiB · 총 25 MiB","고급 모델과 긴 문서를 자주 쓰는 경우에 적합"] },
     ],
   },
   zh: {
@@ -936,6 +940,7 @@ export function PricingPageContent() {
   // static HTML intact and cannot produce a hydration mismatch, and it is the
   // pattern UpgradeCtaLink already uses for the same reason.
   const [pageIntent, setPageIntent] = useState<PurchaseIntent | null>(null);
+  const [subscriptionInterval, setSubscriptionInterval] = useState<"monthly" | "annual">("monthly");
   const [billingOutcome, setBillingOutcome] = useState<BillingOutcome | null>(
     null
   );
@@ -1027,6 +1032,7 @@ export function PricingPageContent() {
     // the shape the repo's React Compiler lint rejects.
     queueMicrotask(() => {
       setPageIntent(intent);
+      if (intent.billingInterval) setSubscriptionInterval(intent.billingInterval);
       if (outcome) setBillingOutcome(outcome);
     });
     if (!outcome) return;
@@ -1163,6 +1169,12 @@ export function PricingPageContent() {
       }).format(new Date(new Date(featuredPromotion.endsAt).getTime() - 1))
     : null;
 
+  const withCurrencyCode = (price: string, currency: string) => lang === "ko" ? `${price} ${currency}` : price;
+  const planPriceCurrency = (planId: "free" | "pro" | "max", interval: "monthly" | "annual") => {
+    const plan = billing.config?.plans.find(item => item.id === planId);
+    const displayAmount = interval === "annual" ? plan?.displayAnnualPriceAmount : plan?.displayMonthlyPriceAmount;
+    return plan?.displayCurrency && typeof displayAmount === "number" ? plan.displayCurrency : plan?.currency || "USD";
+  };
   const formatSalePrice = (
     planId: "free" | "pro" | "max",
     fallbackUsd: number,
@@ -1174,19 +1186,19 @@ export function PricingPageContent() {
       const digits = billingCurrencyFractionDigits(
         plan.displayCurrency as BillingCurrency
       );
-      return formatBillingAmount(
+      return withCurrencyCode(formatBillingAmount(
         plan.displayMonthlyPriceAmount * discountMultiplier,
         plan.displayCurrency as BillingCurrency,
         undefined,
         digits
-      );
+      ), plan.displayCurrency);
     }
-    return new Intl.NumberFormat("en-US", {
+    return withCurrencyCode(new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
       maximumFractionDigits: 1,
       minimumFractionDigits: 0,
-    }).format(fallbackUsd * discountMultiplier);
+    }).format(fallbackUsd * discountMultiplier), "USD");
   };
 
   // Where Stripe returns a credit-pack purchase. The server re-validates this
@@ -1219,13 +1231,14 @@ export function PricingPageContent() {
           lang,
           intent: "subscription",
           targetPlan,
+          billingInterval: lang === "ko" ? subscriptionInterval : undefined,
           trigger: pageIntent?.trigger,
           ctaLocation: `pricing_plan_card_${targetPlan}`,
           utm: pageIntent?.utm,
           anchor: PRICING_PLANS_ANCHOR,
         })
       ),
-    [lang, pageIntent]
+    [lang, pageIntent, subscriptionInterval]
   );
 
   const trackCreditPackCtaClick = useCallback(
@@ -1339,7 +1352,7 @@ export function PricingPageContent() {
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader />
 
-      <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
+      <section lang={lang} className={`mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20 ${lang === "ko" ? "break-keep break-words" : ""}`}>
         <div className="mx-auto max-w-4xl text-center">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className={`mt-4 text-4xl font-bold leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
@@ -1400,11 +1413,25 @@ export function PricingPageContent() {
           </p>
         ) : null}
 
+        {lang === "ko" && (account.status === "unauthenticated" || (account.status === "authenticated" && !account.hasActiveSubscription)) ? (
+          <fieldset className="mt-10 rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
+            <legend className="px-2 text-sm font-bold">신규 구독 결제 주기</legend>
+            <div className="flex flex-wrap gap-4">
+              {(["monthly", "annual"] as const).map((interval) => (
+                <label key={interval} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-bold">
+                  <input type="radio" name="subscription-billing-interval" value={interval} checked={subscriptionInterval === interval} onChange={() => setSubscriptionInterval(interval)} className="h-4 w-4 accent-blue-600" />
+                  {interval === "annual" ? "연간 결제" : "월간 결제"}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
         <div id={PRICING_PLANS_ANCHOR} className="mt-14 grid scroll-mt-24 gap-5 lg:grid-cols-3">
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
             const cardPlan: AccountPlanTier =
               plan.name === "Max" ? "Max" : plan.name === "Pro" ? "Pro" : "Free";
+            const publicPlan = billing.config?.plans.find((item) => item.id === planId);
             const ctaState = resolvePlanCtaState({
               sessionStatus: account.status,
               currentPlan: account.plan,
@@ -1421,12 +1448,18 @@ export function PricingPageContent() {
             // identification is not carried by colour alone.
             const isRequestedTarget =
               planId !== "free" && pageIntent?.targetPlan === planId;
-            const displayPrice =
-              billing.formatPlanPrice(planId) || plan.price;
+            const displayPrice = withCurrencyCode(
+              billing.formatPlanPrice(planId) || plan.price, planPriceCurrency(planId, "monthly"));
             const annualFallback = planId === "max" ? "$240" : planId === "pro" ? "$144" : "$0";
-            const annualPrice =
+            const annualPrice = withCurrencyCode(
               billing.formatPlanPrice(planId, "annual") ||
-              annualFallback;
+              annualFallback, planPriceCurrency(planId, "annual"));
+            const billingPlan = billing.config?.plans.find((item) => item.id === planId);
+            const annualMonthlyEquivalent = billingPlan
+              ? billingPlan.displayCurrency && typeof billingPlan.displayAnnualPriceAmount === "number"
+                ? formatBillingAmount(billingPlan.displayAnnualPriceAmount / 12, billingPlan.displayCurrency as BillingCurrency)
+                : formatBillingAmount(billingMinorToMajor(billingPlan.annualPriceCents, billingPlan.currency as BillingCurrency) / 12, billingPlan.currency as BillingCurrency)
+              : null;
             const promotionEligible = Boolean(
               featuredPromotion &&
               featuredPromotion.appliesToPlanIds.includes(planId) &&
@@ -1451,7 +1484,7 @@ export function PricingPageContent() {
               data-cta-state={ctaState}
               data-requested-target={isRequestedTarget ? "true" : undefined}
               aria-labelledby={`pricing-plan-name-${planId}`}
-              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm [overflow-wrap:anywhere] ${
+              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border ${lang === "ko" ? "p-5 sm:p-6" : "p-6"} shadow-sm [overflow-wrap:anywhere] ${
                 plan.highlighted ? "border-blue-600 bg-blue-700 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
               } ${
@@ -1630,7 +1663,7 @@ export function PricingPageContent() {
                 </div>
               )}
               {planId !== "free" ? (
-                <div className={`mt-3 rounded-2xl border p-3 text-xs font-bold leading-5 ${
+                <div className={`mt-3 rounded-2xl border p-3 text-sm font-bold leading-6 ${
                   plan.highlighted
                     ? "border-white/20 bg-white/10 text-blue-50"
                     : "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300"
@@ -1641,15 +1674,22 @@ export function PricingPageContent() {
                       {annualCopy.save}
                     </span>
                   </div>
-                  <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}</div>
-                  <p className={plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}>
-                    {annualCopy.checkout}
+                  <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}{lang === "en" ? " per year" : ""}</div>
+                  {lang === "en" && annualMonthlyEquivalent ? (
+                    <p className="mt-1 text-sm leading-6" data-testid={`pricing-annual-equivalent-${planId}`}>
+                      Monthly equivalent: about {annualMonthlyEquivalent}, billed annually.
+                    </p>
+                  ) : null}
+                  <p data-testid="pricing-annual-checkout-note" className={plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}>
+                    {lang === "ko" ? `표시 통화: ${planPriceCurrency(planId, "annual")}. ${annualCopy.checkout}` : annualCopy.checkout}
                   </p>
                 </div>
               ) : null}
               <p className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
+              {lang === "ko" ? <PricingKoreanPlanLimits plan={cardPlan} dailyCredits={publicPlan?.dailyMessageLimit ?? null} allowAttachments={publicPlan?.allowAttachments} appInputTokenLimit={billing.config?.appInputTokenLimit ?? null} /> : null}
+              {lang === "en" ? <PricingCreditExample credits={billing.planLimits(planId).monthlyCredits} testId={`pricing-credit-example-plan-${planId}`} /> : null}
               {/*
                 The plan CTA is chosen by resolvePlanCtaState(), not by the
                 card's own name. Every card used to render the same "Upgrade"
@@ -1790,12 +1830,24 @@ export function PricingPageContent() {
                 ) : (
                   <UpgradeInterestButton
                     plan={plan.name === "Max" ? "Max" : "Pro"}
+                    initialBillingInterval={lang === "ko" ? subscriptionInterval : undefined}
                     trigger={pageIntent?.trigger || undefined}
                     className={`inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold transition ${planCtaSurface(plan.highlighted)}`}
                   >
                     {plan.cta}
                   </UpgradeInterestButton>
                 )}
+                {lang === "ko" && planId !== "free" && (ctaState === "signed_out" || ctaState === "upgrade") ? (
+                  <p data-testid={`pricing-selected-billing-${planId}`} className="mt-3 text-sm font-bold leading-6">
+                    {subscriptionInterval === "annual" ? `연 ${annualPrice} 일괄 결제` : `${salePrice ? "첫 달 " : "월 "}${salePrice || displayPrice} 결제`}
+                    <span className="mt-1 block font-normal">할인 적용과 최종 결제 조건은 다음 확인창에서 확인하세요.</span>
+                  </p>
+                ) : null}
+                {lang === "en" && planId !== "free" && (ctaState === "signed_out" || ctaState === "upgrade") ? (
+                  <p className="mt-2 text-sm font-semibold leading-6" data-testid={`pricing-billing-choice-${planId}`}>
+                    Choose monthly or annual billing in the next step{ctaState === "signed_out" ? " after signing in" : ""}, before payment.
+                  </p>
+                ) : null}
                 {ctaState === "manage_plan" &&
                 !(
                   planId === "free" &&
@@ -1812,6 +1864,7 @@ export function PricingPageContent() {
                   </p>
                 ) : null}
               </div>
+              {lang === "en" ? <PricingPlanCapabilities plan={cardPlan} /> : null}
               <ul className="mt-8 space-y-3">
                 {plan.features.map((feature) => (
                   // UI-005. The bullet's icon is `shrink-0` and the label was a
@@ -1990,18 +2043,19 @@ export function PricingPageContent() {
                     <span className="text-sm text-zinc-500 dark:text-zinc-400">{creditPackGuide.credits}</span>
                   </p>
                   <p className="mt-1 text-xl font-black text-accent-promotion-700 dark:text-accent-promotion-300">
-                    {formatBillingMinor(
+                    {withCurrencyCode(formatBillingMinor(
                       pack.priceMinor,
                       pack.currency as BillingCurrency,
                       promotionDateLocale[lang]
-                    )}
+                    ), pack.currency)}
                   </p>
                   <p className="mt-4 min-w-0 flex-1 break-words text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                     {creditPackGuide.packDescriptions[pack.id]}
                   </p>
                   <p className="mt-4 min-w-0 break-words border-t border-zinc-200 pt-3 text-xs font-bold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                    {creditPackGuide.validity}
+                    {creditPackGuide.validity.replace("{days}", String(pack.validityDays))}
                   </p>
+                  {lang === "en" ? <PricingCreditExample credits={pack.credits} testId={`pricing-credit-example-pack-${pack.id}`} /> : null}
                   {/* Per-pack CTA. The pack the visitor clicked is what the
                       modal opens on, and what a sign-in detour carries back,
                       so the choice is never made twice. */}
@@ -2071,6 +2125,7 @@ export function PricingPageContent() {
                 <p className="mt-3 min-w-0 break-words text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                   {creditGuide.description}
                 </p>
+                {lang === "en" ? <p data-testid="pricing-category-capacity-note" className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">The category examples below use the illustrative base rates shown here. Current model-specific credit costs can differ; check each model’s base credits before choosing.</p> : null}
               </div>
               <span className="w-fit min-w-0 break-words rounded-full border border-accent-promotion-500/30 bg-accent-promotion-500/10 px-4 py-2 text-xs font-bold text-accent-promotion-700 dark:text-accent-promotion-300">
                 {creditGuide.typicalLabel}
@@ -2246,7 +2301,7 @@ export function PricingPageContent() {
                     <td className="border-b border-zinc-200 px-4 py-4 font-bold dark:border-zinc-800">{row.label}</td>
                     {[row.free, row.pro, row.max].map((value, index) => (
                       <td key={`${row.label}-${index}`} className="border-b border-zinc-200 px-4 py-4 font-semibold text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
-                        {value === "-" ? <Minus className="h-4 w-4 text-zinc-400" /> : value}
+                        {lang === "ko" && row.label === "파일 첨부 (허용 시)" && billing.config?.plans.find((plan) => plan.id === ["free", "pro", "max"][index])?.allowAttachments === false ? "현재 제공하지 않음" : value === "-" ? <Minus className="h-4 w-4 text-zinc-400" /> : value}
                       </td>
                     ))}
                   </tr>

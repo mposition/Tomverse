@@ -251,6 +251,73 @@ const turnImage = async (plan: { tier: string } | null) => {
   });
 };
 
+const combinedTurn = async () => {
+  const { createChatTurnImageRouting } = await load();
+  return createChatTurnImageRouting({
+    userId: "user-1", conversationId: "conv-1", text: "Draw a cat",
+    plan: { tier: "Pro" } as never, traceId: "combined-test",
+    request: new Request("https://tomverse.test/api/chat"),
+  }, true);
+};
+
+test("combined routing prepares gated context without a paid call and reuses its decision", async () => {
+  reset();
+  const routing = await combinedTurn();
+  const context = await routing.context;
+  assert.equal(context?.modelId, "gpt-6-luna");
+  assert.ok(context?.candidates.length);
+  assert.equal(calls.length + reserved.length, 0);
+  const decision = { image: true as const, modelId: "gpt-image-2", preset: "standard" as const, prompt: null, edit: false };
+  routing.accept(decision);
+  assert.deepEqual(await routing.resolve(), decision);
+  assert.deepEqual(await routing.resolve(), decision);
+  assert.equal(calls.length + reserved.length, 0);
+});
+
+test("a skipped or failed combined router falls back to one standalone image call", async () => {
+  reset();
+  const routing = await combinedTurn();
+  await routing.context;
+  const [first, second] = await Promise.all([routing.resolve(), routing.resolve()]);
+  assert.equal(first.image, true);
+  assert.deepEqual(second, first);
+  assert.equal(calls.length, 1);
+  assert.equal(reserved.length, 1);
+});
+
+test("combined routing keeps image access and previous-image lock gates", async () => {
+  reset();
+  accessRefused = true;
+  const denied = await combinedTurn();
+  assert.equal(await denied.context, null);
+  assert.deepEqual(await denied.resolve(), { image: false });
+  assert.equal(calls.length + reserved.length, 0);
+  reset();
+  conversationPassword = "stored-hash";
+  recentMessages = [{ id: "a1", role: "assistant", content: "[Image generated] secret" }];
+  previousGenerationPrompt = "secret design";
+  const locked = await combinedTurn();
+  const context = await locked.context;
+  assert.equal(context?.previousImagePrompt, null);
+  assert.doesNotMatch(context!.prompt, /secret design/);
+});
+
+test("combined routing is disabled unless explicitly enabled", async () => {
+  const { combinedChatImageIntentEnabled } = await load();
+  const original = process.env.CHAT_AUTO_COMBINED_INTENT_ENABLED;
+  try {
+    delete process.env.CHAT_AUTO_COMBINED_INTENT_ENABLED;
+    assert.equal(combinedChatImageIntentEnabled(), false);
+    process.env.CHAT_AUTO_COMBINED_INTENT_ENABLED = "false";
+    assert.equal(combinedChatImageIntentEnabled(), false);
+    process.env.CHAT_AUTO_COMBINED_INTENT_ENABLED = "true";
+    assert.equal(combinedChatImageIntentEnabled(), true);
+  } finally {
+    if (original === undefined) delete process.env.CHAT_AUTO_COMBINED_INTENT_ENABLED;
+    else process.env.CHAT_AUTO_COMBINED_INTENT_ENABLED = original;
+  }
+});
+
 for (const tier of ["Free", "Pro", "Max"]) test(`an Auto turn's image decision is made for an eligible ${tier} account`, async () => {
   reset();
   const decision = await turnImage({ tier });
