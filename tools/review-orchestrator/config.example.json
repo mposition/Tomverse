@@ -88,7 +88,6 @@
         "--no-custom-instructions",
         "--no-ask-user",
         "--no-auto-update",
-        "--no-remote",
         "--no-remote-export",
         "--disallow-temp-dir",
         "--secret-env-vars", "COPILOT_GITHUB_TOKEN",

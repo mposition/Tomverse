@@ -158,7 +158,7 @@ export async function closeAmuxLegacyCardForOwner(input: {
     const refusal = amuxLegacyCardCloseRefusal(card, input.revision);
     if (refusal) return { outcome: "refused" as const, reason: refusal };
     // A card archived elsewhere keeps its archive and revision; only its open
-    // escalation is resolved, which is what still lists it in the owner queue.
+    // escalation is resolved (an archived card is no longer in the owner queue).
     const alreadyArchived = card.archivedAt !== null;
     if (!alreadyArchived) {
       const moved = await tx.amuxWorkItem.updateMany({

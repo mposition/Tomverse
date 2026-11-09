@@ -6,6 +6,42 @@ shows it in Admin's optimizer panel. There is no extra model call on a user turn
 new optimizer schedule, budget increase or automatic setting change introduced
 by this feature. Existing optimizer enablement and promotion controls still apply.
 
+The **Current response latency** section in Admin > Routing > Auto Router
+Optimizer reads the latest seven-day evidence on page load and on **Refresh
+measurements**, even when there are no cycles or automation is off. It uses the
+existing admin read permission and rate limit, makes no model call, and does not
+start an optimizer cycle. Per-cycle evidence remains a historical snapshot.
+
+## Smart Adaptive first response
+
+Application-managed search asks the answer model to issue independent queries
+in the same step and to stop once it has sufficient evidence. Dependent follow-up
+searches, source citations and the five-request ceiling remain available. Exact
+duplicates within an attempt share an in-flight request or reuse its successful
+result; locale and freshness hints are part of the key. Failed requests remain
+retryable within the existing attempt ceiling. Counters and settlement count
+actual backend requests, not duplicate tool calls. Nothing is shared across turns.
+
+`CHAT_AUTO_COMBINED_INTENT_ENABLED=true` opts eligible Auto Chat turns into one
+structured router call for model choice, file intent, optional rewrite and image
+intent. **It defaults off.** The same image plan, account, Admin, edit and locked
+conversation checks prepare the context. Existing image model/preset, follow-up
+and edit validators apply. A file request still takes precedence over image
+intent. A skipped, refused or failed combined call retains the standalone image
+classifier; manual Chat keeps its existing path. The actual combined prompt and
+output ceiling are reserved under the existing provider budgets, with unknown
+usage retaining the hold. No budget or user credit price changes.
+The standalone fallback can add latency after a failed combined call; include
+these failures in p95 comparisons before enabling the switch.
+
+Combined decisions carry `+image-intent-v1` in their version. Their image context
+is not stored in router decisions, so the optimizer excludes them from text-only
+replay; normal session memory and aggregate routing diagnostics remain available.
+Before enabling this switch, compare routing/image accuracy and latency against
+the legacy path using approved evaluation traffic, including text, files, image
+generation, photo analysis/editing and image follow-ups. Local mocked tests check
+admission and orchestration, not model answer quality or production p50/p95 gains.
+
 ## Immediate changes
 
 - Chat loads the billing plan and model catalogue concurrently, before using

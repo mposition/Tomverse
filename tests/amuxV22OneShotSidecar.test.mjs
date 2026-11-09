@@ -528,7 +528,7 @@ test("implement refuses a dirty baseline before CLI and holds a patch only in me
 test("unknown output and deadline never become success or retry", async () => {
   const malformed = fakeSpawn("not-json");
   const malformedResult = await runAmuxV22OneShot(request, config, {
-    syntheticPlatform: true, spawnChild: malformed.spawnChild,
+    syntheticPlatform: true, spawnChild: malformed.spawnChild, logInvalidOutput: () => {},
   });
   assert.deepEqual({ kind: malformedResult.kind,
     failure: malformedResult.failure },
@@ -536,7 +536,7 @@ test("unknown output and deadline never become success or retry", async () => {
 
   const wrongShape = fakeSpawn("{}");
   const wrongShapeResult = await runAmuxV22OneShot(request, config, {
-    syntheticPlatform: true, spawnChild: wrongShape.spawnChild,
+    syntheticPlatform: true, spawnChild: wrongShape.spawnChild, logInvalidOutput: () => {},
   });
   assert.deepEqual({ kind: wrongShapeResult.kind,
     failure: wrongShapeResult.failure },
@@ -880,6 +880,44 @@ test("Claude and Copilot implement runs get the jailed shell; read roles and a m
       assert.ok(!args.includes("bash"));
     }
   }
+});
+
+test("a refused CLI stream leaves one journal line with its reason and event names, never its text", async () => {
+  const codex = { ...config, provider: "openai", binaryPath: "/opt/tomverse-amux-v22/codex",
+    claudeConfigDir: "/var/lib/tomverse-amux-v22-codex-impl/cli" };
+  const secret = "sk-proj-SYNTHETIC-never-logged";
+  const output = [
+    { type: "thread.started", thread_id: secret }, { type: "turn.started" },
+    { type: "item.completed", item: { type: "reasoning", text: secret } },
+    { type: "item.completed", item: { type: "reasoning", text: secret } },
+    { type: "item.completed", item: { type: "collab_tool_call", prompt: secret } },
+    { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+  ].map((event) => JSON.stringify(event)).join("\n") + "\n";
+  const lines = [];
+  const result = await runAmuxV22OneShot({ ...request, modelId: "gpt-6-luna" }, codex,
+    { syntheticPlatform: true, spawnChild: fakeSpawn(output).spawnChild,
+      channelPreflight: () => null, logInvalidOutput: (line) => lines.push(line),
+      createRunHome: async (_provider, value) => ({
+        config: { ...value, homePath: "/run-home", claudeConfigDir: "/run-home/codex" },
+        cleanup: async () => {} }) });
+  assert.deepEqual({ kind: result.kind, failure: result.failure },
+    { kind: "outcome_unknown", failure: "invalid_result" });
+  assert.equal(result.usageReceipt, undefined);
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0], `amux v22 invalid_result attempt=${request.attemptId} provider=openai ` +
+    `exit=0 bytes=${Buffer.byteLength(output)} reason=item:collab_tool_call shape=thread.started ` +
+    "turn.started item.completed:reasoning*2 item.completed:collab_tool_call turn.completed");
+  assert.ok(!lines[0].includes("SYNTHETIC"));
+  // A Claude stream that is not its result object says so too; logging never
+  // changes the outcome, even when it throws.
+  const claude = [];
+  const notJson = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    spawnChild: fakeSpawn("not-json").spawnChild, logInvalidOutput: (line) => claude.push(line) });
+  assert.equal(notJson.failure, "invalid_result");
+  assert.match(claude[0], /provider=anthropic exit=0 bytes=8 reason=non_json shape=non_json$/);
+  const thrown = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+    spawnChild: fakeSpawn("{}").spawnChild, logInvalidOutput: () => { throw new Error("x"); } });
+  assert.equal(thrown.failure, "invalid_result");
 });
 
 test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Codex receipt", async () => {

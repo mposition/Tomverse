@@ -34,8 +34,8 @@ export type SuggestionArea = (typeof SUGGESTION_AREAS)[number];
 export const SUGGESTION_SEVERITIES = ["low", "medium", "high"] as const;
 export type SuggestionSeverity = (typeof SUGGESTION_SEVERITIES)[number];
 
-/** open: waiting for the operator; dismissed: not worth doing; sent: an AMUX idea was made from it. */
-export const SUGGESTION_STATUSES = ["open", "dismissed", "sent"] as const;
+/** open: waiting; dismissed: declined; sent: an AMUX idea; completed: implemented and verified by the operator. */
+export const SUGGESTION_STATUSES = ["open", "dismissed", "sent", "completed"] as const;
 export type SuggestionStatus = (typeof SUGGESTION_STATUSES)[number];
 
 /** A model call is recorded started before it runs and settled after. */

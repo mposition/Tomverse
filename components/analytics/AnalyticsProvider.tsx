@@ -199,14 +199,14 @@ const consentCopy: Record<
     body: "With your permission, Tomverse measures product usage and campaign attribution. Prompts, responses, filenames, and file contents are never included.",
     mobileBody: "Usage analytics excludes prompts and file content.",
     accept: "Allow analytics",
-    acceptShort: "Allow analytics",
+    acceptShort: "Allow",
     decline: "Decline",
     declineShort: "Decline",
     privacy: "Privacy policy",
     settings: "Analytics settings",
     noticeTitle: "Privacy-safe analytics is on",
     noticeBody: "In this region, Tomverse starts privacy-minimized product analytics with a clear opt-out. Prompts, responses, filenames, and file contents are never included, and advertising storage stays off.",
-    noticeMobileBody: "Analytics is on; prompts and files are excluded.",
+    noticeMobileBody: "Usage analytics is on; prompts and file content are excluded.",
     keepOn: "Keep analytics on",
     keepOnShort: "Keep",
     turnOff: "Turn off analytics",
@@ -777,12 +777,11 @@ export function AnalyticsProvider({
   // original fixed corner overlay is used instead.
   const noticePath = pathname?.split("/").filter(Boolean) ?? [];
 
-
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
 
 
   const isPluginRoute = pathname === "/plugins";
-  const readableNotice = (noticePath.at(-1) === "pricing" &&
+  const readableNotice = ((noticePath.at(-1) === "ai-for-file-analysis" || noticePath.at(-1) === "faq" || noticePath.at(-1) === "support" || noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
     (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ||
     (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute);
   const inlineSlot =
