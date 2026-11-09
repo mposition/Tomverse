@@ -76,7 +76,7 @@ import {
   type MarketingReportKind,
   type MarketingResumeReasonCode,
   type MarketingVerificationMethod,
-  MARKETING_CHANNEL_CAPS,
+  marketingChannelPostsByApi,
   MARKETING_PAUSE_REASON_CODES,
   MARKETING_REMOVAL_EVIDENCE,
   MARKETING_VERIFICATION_METHODS,
@@ -513,24 +513,28 @@ export const MARKETING_CLAIM_LEASE_MS = 15 * 60 * 1000;
  *   one-row model cannot express without counting one post twice.
  */
 
-/** The caps in force for an account: the policy's, unless an operator lowered them. */
+/**
+ * An account's posting caps. `null` in either field is no cap: the policy sets
+ * none (owner decision 2026-11-08), so the only caps are the ones an operator
+ * put on the account.
+ */
+export type MarketingPostingCaps = {
+  readonly daily: number | null;
+  readonly weekly: number | null;
+};
+
+/**
+ * The caps in force for an account, or `null` for a channel the publisher does
+ * not post to at all (RedNote). That `null` is not "no cap": it is "no slot to
+ * take", and the claim says so with `channel_posts_by_hand`.
+ */
 export const marketingChannelCaps = (channel: {
   readonly channel: string;
   readonly dailyCapOverride: number | null;
   readonly weeklyCapOverride: number | null;
-}): { readonly daily: number; readonly weekly: number } | null => {
-  const policy =
-    MARKETING_CHANNEL_CAPS[channel.channel as MarketingChannelName] ?? null;
-  // A channel with no policy cap is one that is posted by hand. An override
-  // cannot create a cap where the policy has none, because there is no
-  // automated posting to cap.
-  if (policy === null) return null;
-  const lower = (cap: number, override: number | null) =>
-    override === null ? cap : Math.min(cap, override);
-  return {
-    daily: lower(policy.daily, channel.dailyCapOverride),
-    weekly: lower(policy.weekly, channel.weeklyCapOverride),
-  };
+}): MarketingPostingCaps | null => {
+  if (!marketingChannelPostsByApi(channel.channel)) return null;
+  return { daily: channel.dailyCapOverride, weekly: channel.weeklyCapOverride };
 };
 
 export const MARKETING_REQUEUE_ACTION = "marketing_post.requeue_after_failure";
@@ -1966,13 +1970,23 @@ export async function resumeMarketingChannelToAutonomous(
   return { expiredPostIds };
 }
 
-export async function lowerMarketingChannelCaps(
+/**
+ * Set or clear an account's own posting caps (null clears one: no cap).
+ *
+ * The policy has no cap (owner decision 2026-11-08), so these are the only
+ * ones. Lowering one is an operator narrowing something and is never refused.
+ * Raising or clearing one lets more posts out, so it is refused while the kill
+ * switch is on, like every other action that restarts publishing; the caller
+ * says whether it is.
+ */
+export async function changeMarketingChannelCaps(
   database: MarketingDatabase,
   rawInput: {
     id: string;
     dailyCapOverride: number | null;
     weeklyCapOverride: number | null;
   },
+  options: { readonly raiseAllowed: boolean },
 ) {
   const input = {
     id: String(rawInput.id),
@@ -1992,21 +2006,21 @@ export async function lowerMarketingChannelCaps(
     }
   }
   const row = await lockMarketingChannel(database, input.id);
-  const policy = MARKETING_CHANNEL_CAPS[row.channel];
-  if (!policy) {
+  if (!marketingChannelPostsByApi(row.channel)) {
     throw new MarketingStoreRefusedError(
       "manual_channel_has_no_caps",
       "A manual channel has no publisher cap to override",
     );
   }
-  const oldDaily = row.dailyCapOverride ?? policy.daily;
-  const oldWeekly = row.weeklyCapOverride ?? policy.weekly;
-  const newDaily = input.dailyCapOverride ?? policy.daily;
-  const newWeekly = input.weeklyCapOverride ?? policy.weekly;
-  if (newDaily > oldDaily || newWeekly > oldWeekly) {
+  const effective = (cap: number | null) => cap ?? Number.POSITIVE_INFINITY;
+  if (
+    !options.raiseAllowed &&
+    (effective(input.dailyCapOverride) > effective(row.dailyCapOverride) ||
+      effective(input.weeklyCapOverride) > effective(row.weeklyCapOverride))
+  ) {
     throw new MarketingStoreRefusedError(
       "cap_change_raises_limit",
-      "This action may only lower effective posting caps",
+      "Raising or clearing a posting cap is refused while the kill switch is on",
     );
   }
   if (
@@ -3322,8 +3336,8 @@ export async function claimDueMarketingPost(
     weeklyCapOverride: channel.weeklyCapOverride,
   });
   if (caps === null) {
-    // A channel the policy gives no cap is one that is posted by hand. There
-    // is no number to count against, so there is no slot to take.
+    // A channel with no API posting route is posted by hand, so there is no
+    // slot to take. (An account with no cap is `{ daily: null, ... }`, not this.)
     return { claimed: false, reason: "channel_posts_by_hand" };
   }
 
@@ -3368,10 +3382,12 @@ export async function claimDueMarketingPost(
     );
     usedToday = Number(used[0]?.today ?? 0);
     usedWeek = Number(used[0]?.week ?? 0);
-    if (usedToday >= caps.daily) {
+    // Only an operator's account cap can refuse; with none, the post still
+    // takes its day so the count stays true if a cap is set later.
+    if (caps.daily !== null && usedToday >= caps.daily) {
       return { claimed: false, reason: "daily_cap_reached" };
     }
-    if (usedWeek >= caps.weekly) {
+    if (caps.weekly !== null && usedWeek >= caps.weekly) {
       return { claimed: false, reason: "weekly_cap_reached" };
     }
   }
@@ -4860,7 +4876,8 @@ export async function recordManualMarketingPostPublication(
   }
   const caps = marketingChannelCaps(channel);
   const warnings: MarketingManualPublishCapWarning[] = [];
-  if (caps !== null) {
+  // Only an account with a cap an operator set has anything to warn about.
+  if (caps !== null && (caps.daily !== null || caps.weekly !== null)) {
     // Counted the way the claim counts, without this row, so the answer is what
     // the claim would have decided for the same slot.
     const used = await database.$queryRaw<Array<{ today: bigint; week: bigint }>>(
@@ -4874,8 +4891,12 @@ export async function recordManualMarketingPostPublication(
           AND "id" <> ${input.id}
       `,
     );
-    if (Number(used[0]?.today ?? 0) >= caps.daily) warnings.push("daily_cap_exceeded");
-    if (Number(used[0]?.week ?? 0) >= caps.weekly) warnings.push("weekly_cap_exceeded");
+    if (caps.daily !== null && Number(used[0]?.today ?? 0) >= caps.daily) {
+      warnings.push("daily_cap_exceeded");
+    }
+    if (caps.weekly !== null && Number(used[0]?.week ?? 0) >= caps.weekly) {
+      warnings.push("weekly_cap_exceeded");
+    }
   }
 
   const identity = await database.marketingPost.findUnique({

@@ -81,7 +81,9 @@ visible instead of being papered over by adjacent coverage.
 
 ## Promotion criteria
 
-The workflow runs on every PR and blocks nothing. It becomes a required check
+The workflow blocks nothing. Since 2026-11-09 its job runs only while the
+repository variable `REVIEW_PARITY_SHADOW` is `on` (default off, to save CI
+minutes); while it is on, it runs on every ready PR. It becomes a required check
 only after all of:
 
 1. 20 consecutive green runs on develop-bound PRs;

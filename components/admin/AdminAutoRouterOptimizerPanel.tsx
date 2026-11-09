@@ -1,6 +1,8 @@
 "use client";
 
 import { formatAestDateTime } from "@/lib/adminUiCore";
+import { ResponseLatencyEvidenceView } from "@/components/admin/ResponseLatencyEvidenceView";
+import type { ResponseLatencyEvidence } from "@/lib/responseLatencyCore";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { AdminConfirmDialog } from "@/components/admin/ui/AdminConfirmDialog";
@@ -32,6 +34,7 @@ import {
 } from "@/lib/autoRouterRecommendationsCore";
 
 type Summary = {
+  responseLatency?: ResponseLatencyEvidence;
   evaluated: number;
   unchanged: number;
   candidateWins: number;
@@ -72,6 +75,7 @@ type Cycle = {
 };
 
 type OptimizerState = {
+  responseLatency?: ResponseLatencyEvidence;
   optimizerModelId: string | null;
   automation: { daily: boolean; autoPromote: boolean };
   options: { id: string; name: string; provider: string }[];
@@ -128,6 +132,7 @@ export function AdminAutoRouterOptimizerPanel({
   const [draft, setDraft] = useState(OFF);
   const [automation, setAutomation] = useState({ daily: false, autoPromote: false });
   const [busy, setBusy] = useState(false);
+  const [refreshingLatency, setRefreshingLatency] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [failure, setFailure] = useState<AdminApiFailure | null>(null);
   const [sendState, setSendState] = useState<RecommendationSendState>({ sendingKey: null, failure: null });
@@ -138,17 +143,25 @@ export function AdminAutoRouterOptimizerPanel({
     setAutomation(next.automation);
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (timingsOnly = false) => {
+    if (timingsOnly) setRefreshingLatency(true);
     try {
       const response = await adminFetch(ENDPOINT);
       if (!response.ok) {
         setFailure(await readAdminApiFailure(response, { fallback: m.loadFailed, locale: apiLocale }));
         return;
       }
-      apply((await response.json()) as OptimizerState);
+      const next = (await response.json()) as OptimizerState;
+      if (timingsOnly) {
+        setState(previous => previous ? { ...previous, responseLatency: next.responseLatency } : next);
+      } else {
+        apply(next);
+      }
       setFailure(null);
     } catch {
       setFailure(describeAdminApiFailure({ status: 0, fallback: m.loadFailed, locale: apiLocale }));
+    } finally {
+      if (timingsOnly) setRefreshingLatency(false);
     }
   }, [apiLocale, apply, m.loadFailed]);
 
@@ -284,6 +297,7 @@ export function AdminAutoRouterOptimizerPanel({
         </AdminWriteButton>
       </div>
       <p className="text-xs text-zinc-500">{m.costNote}</p>
+      <ResponseLatencyEvidenceView evidence={state?.responseLatency} current refreshing={refreshingLatency} onRefresh={() => void load(true)} />
 
       <fieldset className="flex flex-wrap items-center gap-4" data-testid="admin-auto-router-optimizer-automation">
         <legend className="mb-2 text-xs font-bold text-zinc-300">{m.automationTitle}</legend>
@@ -443,6 +457,7 @@ export function AdminAutoRouterOptimizerPanel({
                 {m.towardLoser}
               </p>
             ) : null}
+            <ResponseLatencyEvidenceView evidence={cycle.summary?.responseLatency} />
             {cycle.summary?.report ? (
               <div className="mt-2 rounded-xl border border-zinc-800 p-3" data-testid="admin-auto-router-optimizer-report">
                 <p className="text-xs font-bold text-zinc-300">{m.reportTitle}</p>

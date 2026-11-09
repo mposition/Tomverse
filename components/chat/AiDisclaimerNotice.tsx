@@ -24,7 +24,7 @@ import { useModalDialog } from "@/components/useModalDialog";
  * The trigger has visible padding and a real 44x44 touch target. The warning
  * and action can wrap rather than shrinking the text or its touch area.
  */
-export function AiDisclaimerNotice({ testId }: { testId?: string }) {
+export function AiDisclaimerNotice({ testId, readable = false }: { testId?: string; readable?: boolean }) {
   const { t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const dialogId = useId();
@@ -49,7 +49,7 @@ export function AiDisclaimerNotice({ testId }: { testId?: string }) {
       {/* The dock reserves the safe area after the last visible footer row. */}
       <p
         data-testid={testId}
-        className="flex shrink-0 flex-wrap items-center justify-center gap-x-1.5 gap-y-1 px-2 pb-[0.4rem] pt-1 text-center text-xs leading-4 text-zinc-600 dark:text-zinc-300"
+        className={`flex shrink-0 flex-wrap items-center justify-center gap-x-1.5 gap-y-1 px-2 pb-[0.4rem] pt-1 text-center ${readable ? "text-sm leading-5" : "text-xs leading-4"} text-zinc-600 dark:text-zinc-300`}
       >
         {/* COMPOSER-REFLOW-01. Wrapped, never truncated. What a narrow line
             cut off was the end of the sentence -- "do not enter sensitive
@@ -109,7 +109,7 @@ export function AiDisclaimerNotice({ testId }: { testId?: string }) {
             </div>
             {/* The approved wording, unchanged -- the short line above is an
                 additional summary, never a replacement. */}
-            <p className="mt-1 text-[13px] leading-6 text-zinc-700 dark:text-zinc-200">
+            <p className={`mt-1 ${readable ? "text-sm" : "text-[13px]"} leading-6 text-zinc-700 dark:text-zinc-200`}>
               {t("chat.aiDisclaimer")}
             </p>
           </div>

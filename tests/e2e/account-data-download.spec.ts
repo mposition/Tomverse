@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { setDeterministicTheme } from "./support/chat-state-fixtures";
 import { expectAccessibleContrast } from "./support/ui-audit";
 
 /**
@@ -90,6 +91,49 @@ const openDataSettings = async (page: Page) => {
   await page.goto("/settings/data");
   await expect(page.getByTestId("account-data-export-panel")).toBeVisible();
 };
+
+for (const theme of ["light", "dark"] as const) {
+  test(`settings consent uses readable text with actions below its explanation in ${theme}`, async ({ page, baseURL, isMobile }) => {
+    await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
+    await prepareGuestPage(page, "ko");
+    const account = await mockAuthenticatedApi(page);
+    account.theme = theme;
+    await setDeterministicTheme(page, theme);
+    await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
+    await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+    await mockExportApi(page);
+    await openDataSettings(page);
+    // The development-only Next toolbar occupies the footer's first button.
+    await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
+    const notice = page.getByTestId("settings-consent-slot").getByTestId("chat-consent-notice");
+    await expect(notice).toBeVisible({ timeout: 15_000 });
+    await notice.scrollIntoViewIfNeeded();
+    const metrics = await notice.evaluate(element => {
+      const visible = (selector: string) => Array.from(element.querySelectorAll(selector)).filter(node => node.getBoundingClientRect().height > 0);
+      const paragraphs = visible("p");
+      const buttons = visible("button");
+      return {
+        fonts: visible("p,a,button").map(node => Number.parseFloat(getComputedStyle(node).fontSize)),
+        explanationBottom: Math.max(...paragraphs.map(node => node.getBoundingClientRect().bottom)),
+        actionTop: Math.min(...buttons.map(node => node.getBoundingClientRect().top)),
+        targets: buttons.map(node => ({ width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height })),
+        position: getComputedStyle(element).position,
+      };
+    });
+    expect(metrics.fonts.length).toBeGreaterThanOrEqual(4);
+    expect(metrics.fonts.every(size => size >= 14)).toBe(true);
+    expect(metrics.actionTop).toBeGreaterThan(metrics.explanationBottom);
+    expect(metrics.targets.every(box => box.width >= 44 && box.height >= 44)).toBe(true);
+    expect(metrics.position).not.toBe("fixed");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await notice.getByTestId("analytics-consent-decline").click();
+    await expect(notice).toHaveCount(0);
+    const settingsButton = page.getByTestId("settings-consent-slot").getByTestId("analytics-settings-button");
+    await expect(settingsButton).toBeVisible();
+    await settingsButton.click();
+    await expect(notice).toBeVisible();
+  });
+}
 
 test.describe("account data download", () => {
   test("the settings list reaches the page", async ({ page }) => {
