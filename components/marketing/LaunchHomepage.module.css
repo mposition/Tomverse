@@ -228,6 +228,7 @@
   .hero { padding-top: 28px; }
   .heroTitle { font-size: min(16cqw, 3.8rem); line-height: 1.15; letter-spacing: -.045em; }
   .heroTitle span:last-child { font-size: min(18cqw, 4.1rem); letter-spacing: -.055em; }
+  .homepage:lang(ko) .heroTitle span:last-child { font-size: min(14cqw, 3.5rem); overflow-wrap: normal; }
   .heroContent { margin-top: 28px; gap: 36px; }
   .heroStory { padding-top: 0; }
   .heroStory > p:first-child { font-size: 1rem; line-height: 1.6; }
