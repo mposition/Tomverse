@@ -109,13 +109,14 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // (docs/policy/marketing-privacy-dpia-checklist.md). The owner approved that
   // historical version on 2026-11-05. Later observations may differ; they need
   // their own approval before this gate permits release-note publication.
+  // Current observed copy is evidence only; its digest is not a new approval.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "dcc06eff07488f71ccfb2a4ae4ad456afa6c0af08669cfd0b7fb04cad1b1bd9d",
+    contentSha256: "1ce458cefc818d5506a84046fbb29b985ff62a652a573a6290133959dbbbb7fc",
   },
   "/terms": {
     date: "2026-11-16",
-    contentSha256: "5a2e6339c29b7b8892add806418f5d24b2681a58a426808531ff639e617a4709",
+    contentSha256: "c3dfd8bbb90a8da7f3f81c43d74b973abe205331b5d13938d64569404c456ffb",
   },
 };
 
