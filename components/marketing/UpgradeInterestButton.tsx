@@ -313,7 +313,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     appliedAtCheckout: "결제 시 적용",
     dueToday: "오늘 결제 금액",
     localPriceNote: (amount) =>
-      `표시된 현지통화 고정 금액 ${amount}(으)로 결제됩니다.`,
+      `표시 금액: ${amount}. 최종 결제 통화와 금액은 결제 화면에서 확인하세요.`,
     renewalNote: (interval, amount) =>
       interval === "annual"
         ? `연간 결제는 연 ${amount}로 매년 갱신됩니다.`
