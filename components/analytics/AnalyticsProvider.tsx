@@ -778,8 +778,10 @@ export function AnalyticsProvider({
   const noticePath = pathname?.split("/").filter(Boolean) ?? [];
   const isMarketingHomePath = noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null);
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
+
+
   const isPluginRoute = pathname === "/plugins";
-  const readableNotice = isMarketingHomePath || isSettingsRoute || isPluginRoute;
+  const readableNotice = isMarketingHomePath || pathname === CHAT_WORKSPACE_PATH || isSettingsRoute || isPluginRoute;
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot

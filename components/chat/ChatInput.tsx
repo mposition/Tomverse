@@ -4862,8 +4862,8 @@ export function ChatInput({
           // the same supporting-text role, which already measures above AA.
           // The previous zinc-400/zinc-500 pair composited to 2.62:1 on the
           // light composer surface and 3.67:1 on the dark one -- both below
-          // the 4.5:1 this 11-12px, 400-weight body text requires.
-          className="mt-1.5 px-2 text-center text-[11px] leading-4 text-zinc-600 dark:text-zinc-300 md:text-xs"
+          // the 4.5:1 this supporting body text requires.
+          className={`mt-1.5 px-2 text-center ${currentProduct === "chat" ? "text-sm leading-5" : "text-[11px] leading-4 md:text-xs"} text-zinc-600 dark:text-zinc-300`}
         >
           {t("chat.aiDisclaimer")}
         </p>
