@@ -119,6 +119,7 @@ export function ChatProductSwitcherView({
               )}
               <span className="min-w-0 max-w-full whitespace-normal break-words leading-tight">
                 {item.shortLabel}
+                {item.shortDescription && <span aria-hidden="true" className="block text-xs leading-none">{item.shortDescription}</span>}
               </span>
             </Link>
           );

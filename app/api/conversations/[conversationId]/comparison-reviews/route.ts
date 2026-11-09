@@ -1,4 +1,5 @@
 export const dynamic = "force-dynamic";
+import { withReviewProgress, type PublishReviewProgress } from "@/lib/comparisonReviewProgress";
 
 import { randomUUID } from "node:crypto";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
@@ -285,6 +286,14 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ conversationId: string }> }
 ) {
+  return withReviewProgress(request, publish => runPost(request, context, publish));
+}
+
+async function runPost(
+  request: Request,
+  context: { params: Promise<{ conversationId: string }> },
+  publish: PublishReviewProgress,
+): Promise<Response> {
   const traceId = randomUUID();
   let freeQuota: ComparisonReviewQuotaReservation | null = null;
   let completed = false;
@@ -307,7 +316,7 @@ export async function POST(
       session.user.id,
       conversationId
     );
-    if ("response" in authorization) return authorization.response;
+    if ("response" in authorization) return authorization.response ?? jsonError("Authentication required.", "AUTH_REQUIRED", 401, traceId);
     const payload = await readLimitedJson(
       request,
       16 * 1024,
@@ -446,6 +455,7 @@ export async function POST(
         },
         {
           traceId,
+          onPrimary: primary => publish({ ...primary, persisted: false, cached: false }),
           telemetry: {
             subjectKind: "account",
             conversationId,
