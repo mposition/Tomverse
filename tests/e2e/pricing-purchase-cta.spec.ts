@@ -441,6 +441,7 @@ test.describe("credit-pack purchase from the pricing page", { tag: "@ui-risk" },
     await creditCta.click();
 
     await expect(page.getByTestId("credit-pack-modal")).toBeVisible();
+    await expect(page.getByTestId("credit-pack-modal").getByText("Valid for 365 days", { exact: true })).toHaveCount(2);
     // The reported failure was a navigation to /chat instead of a modal.
     expect(page.url()).toBe(urlBefore);
     expect(new URL(page.url()).pathname).toBe("/pricing");
