@@ -98,7 +98,7 @@ export const adminMarketingMessages = defineAdminMessages({
       "The configuration version could not be read, so no switch can be changed from here right now.",
     switchAutonomousNeedsBoth: "Needs drafts and publishing both on first.",
     capsManualChannel:
-      "This channel is posted by hand, so there is no publisher cap to lower.",
+      "This channel is posted by hand, so there is no publisher cap to set.",
     drainDone: "Expired {count}. Nothing else is due.",
     drainMore: "Expired {count}. More are still due -- run it again.",
     actApprove: "Approve",
@@ -206,7 +206,7 @@ export const adminMarketingMessages = defineAdminMessages({
       "Nothing here can check this either. Say it only if you have looked.",
     hintIdentityChange:
       "This is an identity change: the account returns to approval mode and loses its graduation.",
-    hintCapEmpty: "Leave empty for the policy default. Caps may only go down.",
+    hintCapEmpty: "Leave empty for no cap. Raising or clearing a cap is refused while the kill switch is on.",
     hintOptional: "Optional.",
     hintCommaSeparated: "Comma separated.",
     hintLocalesChange:
@@ -486,7 +486,7 @@ export const adminMarketingMessages = defineAdminMessages({
     reportColFailed: "Failed",
     reportNoRows: "None",
     outcomeUnknown: "outcome unknown since",
-    noCap: "policy default",
+    noCap: "no cap",
     notPaused: "no",
     none: "-",
   },
@@ -586,7 +586,7 @@ export const adminMarketingMessages = defineAdminMessages({
       "설정 버전을 읽지 못해 지금은 여기서 스위치를 바꿀 수 없습니다.",
     switchAutonomousNeedsBoth: "초안 접수와 게시가 모두 켜져야 켤 수 있습니다.",
     capsManualChannel:
-      "이 채널은 사람이 직접 올리므로 내릴 publisher 상한이 없습니다.",
+      "이 채널은 사람이 직접 올리므로 정할 publisher 상한이 없습니다.",
     drainDone: "{count}건 만료했습니다. 더 남은 것은 없습니다.",
     drainMore: "{count}건 만료했습니다. 아직 남아 있으니 한 번 더 실행하세요.",
     actApprove: "승인",
@@ -694,7 +694,7 @@ export const adminMarketingMessages = defineAdminMessages({
       "이것도 여기서는 확인할 수 없습니다. 직접 봤을 때만 체크하세요.",
     hintIdentityChange:
       "identity 변경입니다. 계정이 승인 모드로 돌아가고 graduation을 잃습니다.",
-    hintCapEmpty: "비우면 정책 기본값입니다. 상한은 내리는 방향으로만 바꿀 수 있습니다.",
+    hintCapEmpty: "비우면 상한이 없습니다. kill switch가 켜져 있는 동안에는 상한을 올리거나 없앨 수 없습니다.",
     hintOptional: "선택 사항입니다.",
     hintCommaSeparated: "쉼표로 구분합니다.",
     hintLocalesChange:
@@ -964,7 +964,7 @@ export const adminMarketingMessages = defineAdminMessages({
     reportColFailed: "실패",
     reportNoRows: "없음",
     outcomeUnknown: "결과 불명, ",
-    noCap: "정책 기본값",
+    noCap: "상한 없음",
     notPaused: "아니오",
     none: "-",
   },
