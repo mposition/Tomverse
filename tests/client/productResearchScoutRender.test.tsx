@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { AdminScoutRunsPanel } from "@/components/admin/AdminScoutRunsPanel";
 import { AdminScoutSuggestionsPanel, scoutSuggestionBrief } from "@/components/admin/AdminScoutSuggestionsPanel";
-import { SCOUT_SEND_BATCH, SCOUT_SEND_SPACING_MS, nextScoutSendBatch } from "@/lib/adminScoutDisplay";
+import { SCOUT_SEND_BATCH, SCOUT_SEND_SPACING_MS, nextScoutSendBatch, runScoutSuggestionBatch } from "@/lib/adminScoutDisplay";
 import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
 import { SCOUT_GENERATIONS, SCOUT_PAGES, SCOUT_SIGNED_IN_PAGES } from "@/lib/productResearchScoutBrowserPolicy.mjs";
 import type { ScoutConsoleSuggestion, ScoutConsoleView } from "@/lib/productResearchScoutConsoleRead";
@@ -45,7 +45,8 @@ const view = (overrides: Partial<ScoutConsoleView> = {}): ScoutConsoleView => ({
     kept: 38,
   },
   nextRunAt: "2026-10-19T18:00:00.000Z",
-  counts: { open: 4, dismissed: 1, sent: 0 },
+  counts: { open: 4, dismissed: 1, sent: 0, completed: 0 },
+  completed: [],
   open: [
     suggestion("s1", "pricing.ko", "high", "mobile", "Pricing table is cut at 320px"),
     suggestion("s2", "pricing.ko", "low", "accessibility", "Check icons have no name"),
@@ -54,6 +55,7 @@ const view = (overrides: Partial<ScoutConsoleView> = {}): ScoutConsoleView => ({
   ],
   days: [],
   canDismiss: true,
+  canComplete: true,
   canSend: true,
   canConfigure: true,
   ...overrides,
@@ -129,8 +131,23 @@ test("judging off and switched off are said above the list, with the way to the 
 });
 
 test("a list cut at its limit says so", () => {
-  const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ counts: { open: 412, dismissed: 3, sent: 9 } })} />);
+  const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ counts: { open: 412, dismissed: 3, sent: 9, completed: 2 } })} />);
   assert.match(html, /Showing the newest 4 of 412 open suggestions\./);
+});
+
+test("completed suggestions are retained separately and completion controls follow the operator role", () => {
+  const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({
+    counts: { open: 4, dismissed: 1, sent: 0, completed: 1 },
+    completed: [{ id: "done-1", title: "Deployed contrast fix", subject: "pricing.ko", completedAt: "2026-11-09T07:55:00.000Z" }],
+  })} />);
+  assert.match(html, /Completed 1/);
+  assert.match(html, /Deployed contrast fix/);
+  assert.match(html, /Showing the newest 1 of 1 completed suggestions/);
+  assert.match(html, />Mark completed<\/button>/);
+  const reader = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ canComplete: false })} />);
+  const buttons = reader.match(/<button[^>]*>Mark completed<\/button>/g) ?? [];
+  assert.equal(buttons.length, 2);
+  for (const button of buttons) assert.match(button, /disabled=""/);
 });
 
 test("runs and cost: the model, the cap, today's use and seven days, the form an owner's alone", () => {
@@ -195,6 +212,28 @@ test("the next batch is the most severe, oldest first, and bounded", () => {
 test("only an owner is offered the next batch", () => {
   assert.match(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view()} />), /admin-product-research-scout-select-batch/);
   assert.doesNotMatch(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ canSend: false })} />), /admin-product-research-scout-select-batch/);
+});
+
+test("selected completion handles each selected row once and reports progress without AMUX pacing", async () => {
+  const handled: string[] = [];
+  const progress: number[] = [];
+  const result = await runScoutSuggestionBatch(["one", "two", "three"], "complete", async (id) => {
+    handled.push(id);
+    return null;
+  }, (done) => progress.push(done), async () => { assert.fail("completion must not schedule an AMUX send"); });
+  assert.deepEqual(handled, ["one", "two", "three"]);
+  assert.deepEqual(progress, [1, 2, 3]);
+  assert.deepEqual(result, { done: 3, total: 3, failure: null });
+});
+
+test("a failed or unknown completion stops the batch before untouched selections", async () => {
+  const handled: string[] = [];
+  const result = await runScoutSuggestionBatch(["one", "two", "three"], "complete", async (id) => {
+    handled.push(id);
+    return id === "two" ? "outcome_unknown" : null;
+  }, () => {});
+  assert.deepEqual(handled, ["one", "two"]);
+  assert.deepEqual(result, { done: 1, total: 3, failure: "outcome_unknown" });
 });
 
 test("every suggestion offers Copy brief, even without the right to send, and the brief is the AMUX idea plus page and done line", () => {
