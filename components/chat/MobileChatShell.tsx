@@ -1132,6 +1132,28 @@ export function MobileChatShell({
   // Whether the new-chat welcome copy is on screen. The composer is not part
   // of it: it stays in the bottom dock in every state.
   const showWelcomeSurface = showsWelcomeSurface && selectedModels.length > 0;
+  const starterScrollButton = useRef<HTMLButtonElement>(null);
+  const [starterScroll, setStarterScroll] = useState({ overflow: false, more: false });
+  useEffect(() => {
+    if (!showWelcomeSurface || !conversationDropSurface || !starterGallery) return;
+    const surface = conversationDropSurface;
+    const update = () => {
+      const button = starterScrollButton.current;
+      const hintHeight = button ? button.offsetHeight + Number.parseFloat(getComputedStyle(button).marginBottom) : 0;
+      const next = {
+        overflow: Boolean(surface.querySelector('[data-testid="chat-starter-card"]')) &&
+          surface.scrollHeight > surface.clientHeight + hintHeight + 1,
+        more: surface.scrollTop + surface.clientHeight < surface.scrollHeight - 1,
+      };
+      setStarterScroll(previous => previous.overflow === next.overflow && previous.more === next.more ? previous : next);
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(surface);
+    if (surface.firstElementChild) observer.observe(surface.firstElementChild);
+    surface.addEventListener("scroll", update, { passive: true });
+    const frame = requestAnimationFrame(update);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); surface.removeEventListener("scroll", update); };
+  }, [showWelcomeSurface, conversationDropSurface, starterGallery]);
   // UX-026. The single condition the tab strip and its panels both read, so a
   // tab can never be rendered without the panel its `aria-controls` names.
   const showModelTabs = !singleTranscript && !showsWelcomeSurface && selectedModels.length > 1;
@@ -1637,7 +1659,7 @@ export function MobileChatShell({
         // into view by the browser instead.
         style={{ minHeight: `${MIN_CONVERSATION_AREA_REM}rem` }}
         className={`relative flex min-h-0 flex-1 flex-col bg-zinc-50 dark:bg-zinc-950 ${
-          showWelcomeSurface ? "overflow-y-auto overscroll-contain" : "overflow-hidden"
+          showWelcomeSurface ? "overflow-y-auto overscroll-contain scroll-pb-4 [scrollbar-gutter:stable]" : "overflow-hidden"
         }`}
         onTouchStart={(event) => {
           const touch = event.touches[0];
@@ -1780,6 +1802,17 @@ export function MobileChatShell({
         data-testid="mobile-bottom-dock"
         className="flex w-full shrink-0 flex-col pb-[env(safe-area-inset-bottom)]"
       >
+      {showWelcomeSurface && starterGallery && starterScroll.overflow && <button
+        ref={starterScrollButton}
+        type="button"
+        data-testid="starter-scroll-more"
+        aria-disabled={!starterScroll.more}
+        onClick={() => {
+          if (starterScroll.more) conversationDropSurface?.scrollTo({ top: conversationDropSurface.scrollHeight,
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        }}
+        className="mx-3 mb-1 flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 aria-disabled:text-zinc-400 dark:text-zinc-200 dark:hover:bg-zinc-800 dark:aria-disabled:text-zinc-500"
+      ><ChevronDown className="h-4 w-4" aria-hidden="true" />{t("chatStarter.scrollMore")}</button>}
       {/*
         The Deep Research expansion offer, above the comparison rail and
         directly under the answers it is about. One card for the whole
