@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
 
-const testUrl = process.env.RESPONSE_LATENCY_TEST_DATABASE_URL;
-test("latency migration supports idempotent writes and seven-day retention", { skip: !testUrl }, async () => {
-  const url = new URL(testUrl!);
-  assert.ok(["127.0.0.1", "localhost"].includes(url.hostname), "Use an isolated local database");
-  process.env.DATABASE_URL = testUrl;
-  process.env.DIRECT_URL = testUrl;
+test("latency migration supports idempotent writes and seven-day retention", async () => {
+  assert.equal(process.env.NODE_ENV, "test", "Use the DB integration runner");
+  const testUrl = process.env.TEST_DATABASE_URL?.trim();
+  assert.ok(testUrl, "TEST_DATABASE_URL must name a dedicated test database");
+  assert.equal(process.env.DATABASE_URL, testUrl, "The runner must bind the test database");
+  const url = new URL(testUrl);
+  const marker = `${decodeURIComponent(url.pathname.slice(1))}_${url.searchParams.get("schema") || ""}`;
+  assert.match(marker, /(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i);
   delete process.env.E2E_DISABLE_DATABASE;
   const { prisma } = await import("../../lib/prisma");
   const { recordResponseLatency, purgeResponseLatencySamples } = await import("../../lib/responseLatencyStore");

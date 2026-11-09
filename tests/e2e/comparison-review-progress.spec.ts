@@ -43,7 +43,7 @@ for (const finalizes of [true, false]) {
     if (finalizes) {
       await expect(dialog.getByRole("tab", { name: /검토자 2/ })).toBeVisible();
     } else {
-      await expect(dialog.getByText(/The first review is available, but the final result could not be confirmed/)).toBeVisible();
+      await expect(dialog.getByTestId("comparison-review-error")).toContainText("다시 실행하기 전에 검토 상태를 확인해 주세요.");
       await expect(dialog.locator('[data-testid="ai-review-workspace"]:visible')).toBeVisible();
       await expect(dialog.getByRole("tab", { name: /검토자 2/ })).toHaveCount(0);
     }
