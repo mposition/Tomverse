@@ -775,6 +775,8 @@ export function AnalyticsProvider({
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
+  const isPluginRoute = pathname === "/plugins";
+  const readableNotice = isSettingsRoute || isPluginRoute;
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot
@@ -813,8 +815,8 @@ export function AnalyticsProvider({
   // pill are mutually exclusive -- one needs `consent === "unset"` or the
   // preferences panel open, the other needs a settled choice and the panel
   // closed -- so the slot never has to hold both.
-  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute;
-  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
+  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute || isPluginRoute;
+  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : isPluginRoute ? marketingConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
 
   // REAUDIT-P1-01. Chat and Review share a workspace where the bottom-right corner is
   // never free: the last model panel's follow-up form ends there, and below it
@@ -856,7 +858,7 @@ export function AnalyticsProvider({
     // container cannot query its own size, and keeping it inside the card
     // leaves the card's own padding/margins untouched.
     <div className="@container/notice">
-      <div className={isSettingsRoute ? "flex flex-col items-stretch gap-3" : "flex flex-wrap items-center gap-1.5 @md/notice:justify-between @md/notice:gap-3"}>
+      <div className={readableNotice ? "flex flex-col items-stretch gap-3" : "flex flex-wrap items-center gap-1.5 @md/notice:justify-between @md/notice:gap-3"}>
         {/*
           The copy keeps a real minimum width so it can never be crushed to an
           unreadable sliver (the audit measured 34.6px at 320px), but the
@@ -866,21 +868,21 @@ export function AnalyticsProvider({
           102px against its 80px contract.
         */}
         <div className="min-w-[6rem] flex-1">
-          <p className={`${isSettingsRoute ? "text-sm leading-6" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-300 @md/notice:hidden`}>
+          <p className={`${readableNotice ? "text-sm leading-6" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-300 @md/notice:hidden`}>
             {promptCopy.mobileBody}{" "}
             <Link
               href="/privacy"
-              className="font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+              className={`${readableNotice ? "inline-block whitespace-nowrap" : ""} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
             >
               {copy.privacy}
             </Link>
           </p>
           <div className="hidden @md/notice:block">
-            <p className={`${isSettingsRoute ? "text-sm" : "text-xs"} font-bold text-zinc-900 dark:text-zinc-50`}>{promptCopy.title}</p>
-            <p className={`mt-0.5 ${isSettingsRoute ? "text-sm leading-6" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-400`}>{promptCopy.body}</p>
+            <p className={`${readableNotice ? "text-sm" : "text-xs"} font-bold text-zinc-900 dark:text-zinc-50`}>{promptCopy.title}</p>
+            <p className={`mt-0.5 ${readableNotice ? "text-sm leading-6" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-400`}>{promptCopy.body}</p>
             <Link
               href="/privacy"
-              className={`mt-0.5 inline-flex ${isSettingsRoute ? "text-sm" : "text-[11px]"} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
+              className={`mt-0.5 inline-flex ${readableNotice ? "text-sm" : "text-[11px]"} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
             >
               {copy.privacy}
             </Link>
@@ -892,14 +894,14 @@ export function AnalyticsProvider({
             onClick={decline}
             label={promptCopy.decline}
             shortLabel={promptCopy.declineShort}
-            readable={isSettingsRoute}
+            readable={readableNotice}
           />
           <ConsentAction
             kind="accept"
             onClick={accept}
             label={promptCopy.accept}
             shortLabel={promptCopy.acceptShort}
-            readable={isSettingsRoute}
+            readable={readableNotice}
           />
         </div>
       </div>
