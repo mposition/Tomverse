@@ -235,8 +235,10 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 3. **앱이 LLM을 한 번 부릅니다**(`lib/productResearchScoutLlm.ts`, support-triage와 같은 방식). 입력은 그 대상의 이미지와
    신호, 그리고 같은 대상에 이미 낸 제안 제목들(반복을 막기 위해서)이고, 출력은 제안 최대 5개(제목·영역·심각도·근거·제안)의
    JSON입니다. 판정 경계는 `lib/productResearchScoutCore.ts`가 검사합니다.
-4. 제안은 `ProductResearchSuggestion` 표에 쌓이고, Admin › 제품 리서치 › "개선 제안" 탭에서 운영자가 **거절**하거나
-   **AMUX로 보내기**를 누릅니다(한 건씩 또는 골라서 한꺼번에). Admin 아이디어 입력과 같은 입구로 들어갑니다. session intake가
+4. 제안은 `ProductResearchSuggestion` 표에 쌓이고, Admin › 제품 리서치 › "개선 제안" 탭에서 운영자가 **거절**, **완료 처리**,
+   **AMUX로 보내기**를 누릅니다(한 건씩 또는 골라서 한꺼번에). owner·ops가 구현과 검증을 마친 열린 제안을 완료 처리하면
+   `completed`로 보존하고 완료 목록에 표시합니다. 거절과 구분하며 상태 변경과 사람 감사 기록은 같은 트랜잭션입니다.
+   배포나 PR 병합만으로 자동 완료하지 않습니다. AMUX 전송은 Admin 아이디어 입력과 같은 입구로 들어갑니다. session intake가
    켜져 있으면 `mposition/Tomverse`를 참조로 삼는 session 아이디어가 되어 분석·카드·worker로 이어지고(이 저장소가 operating
    scope에 있어야 합니다), 꺼져 있으면 v4 owner 아이디어가 됩니다. 보낸 뒤의 분석·카드는 AMUX intake 규칙을 따릅니다.
    그 옆의 **작업문 복사**는 같은 아이디어 문구(`suggestionIdeaText`)에 page URL과 완료 기준을 붙여 클립보드에만 넣습니다.
@@ -259,6 +261,10 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 
 **대상**: 아래 20개 page, 렌더러 probe 4종(`lib/productResearchScoutRendererProbes.mjs`), 카탈로그. origin은
 `https://tomverse.app` 하나이며, 언어는 browser locale로 정합니다(`lib/productResearchScoutBrowserPolicy.mjs`).
+로그인한 화면은 계정에 저장된 언어가 browser locale보다 우선할 수 있습니다.
+각 viewport에서 실제 문서 언어가 대상 언어와 일치하는 캡처만 제안으로 제출합니다.
+다르면 `language_mismatch`로 건너뛰며, 계정 언어를 바꾸거나 다른 언어의 화면을
+대상 언어의 결함으로 제출하지 않습니다. 화면 목록·접근 권한·요금 한도는 그대로입니다.
 
 | page id | URL | 언어 |
 |---|---|---|

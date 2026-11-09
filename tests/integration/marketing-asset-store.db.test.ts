@@ -298,6 +298,25 @@ test("the database refuses what the store never sends: a changed file, an AI pic
   );
 });
 
+// A row written straight to the table, past the store: what the database alone refuses.
+const insertAsset = (id: string, kind: "image" | "video", provenance: string, disclosure: string, depicts: boolean) =>
+  prisma.$executeRawUnsafe(
+    `INSERT INTO "MarketingAsset" ("id", "kind", "provenance", "allowedChannels", "disclosure", "alt", "claimIds",
+       "validUntil", "depictsProductInterface", "r2Key", "contentType", "bytes", "sha256", "durationSeconds",
+       "transcript", "status", "updatedAt")
+     VALUES ($1, $2, $3, ARRAY['youtube'], $4::jsonb, '{"en":"A screen."}', ARRAY[]::TEXT[],
+       '2099-01-01', $5, 'marketing-assets/' || $1 || CASE $2 WHEN 'image' THEN '/original.png' ELSE '/original.mp4' END,
+       CASE $2 WHEN 'image' THEN 'image/png' ELSE 'video/mp4' END, 10, $6,
+       CASE $2 WHEN 'image' THEN NULL ELSE 5 END,
+       CASE $2 WHEN 'image' THEN '{}'::jsonb ELSE '{"en":"Hello."}'::jsonb END, 'submitted', now())`,
+    id,
+    kind,
+    provenance,
+    JSON.stringify({ youtube: disclosure }),
+    depicts,
+    SHA,
+  );
+
 test("a captured video with an AI presenter is stored, approved and published as AI-made; AI screens and presenter images are not", async () => {
   // Owner decision 2026-11-07: the product screens are captures, the only AI
   // part is the presenter. It may show the product; it is of AI origin.
@@ -342,23 +361,7 @@ test("a captured video with an AI presenter is stored, approved and published as
   assert.equal(image.body.code, "invalid_request");
 
   // And the database refuses what the store never sends.
-  const insert = (id: string, kind: "image" | "video", provenance: string, disclosure: string, depicts: boolean) =>
-    prisma.$executeRawUnsafe(
-      `INSERT INTO "MarketingAsset" ("id", "kind", "provenance", "allowedChannels", "disclosure", "alt", "claimIds",
-         "validUntil", "depictsProductInterface", "r2Key", "contentType", "bytes", "sha256", "durationSeconds",
-         "transcript", "status", "updatedAt")
-       VALUES ($1, $2, $3, ARRAY['youtube'], $4::jsonb, '{"en":"A screen."}', ARRAY[]::TEXT[],
-         '2099-01-01', $5, 'marketing-assets/' || $1 || CASE $2 WHEN 'image' THEN '/original.png' ELSE '/original.mp4' END,
-         CASE $2 WHEN 'image' THEN 'image/png' ELSE 'video/mp4' END, 10, $6,
-         CASE $2 WHEN 'image' THEN NULL ELSE 5 END,
-         CASE $2 WHEN 'image' THEN '{}'::jsonb ELSE '{"en":"Hello."}'::jsonb END, 'submitted', now())`,
-      id,
-      kind,
-      provenance,
-      JSON.stringify({ youtube: disclosure }),
-      depicts,
-      SHA,
-    );
+  const insert = insertAsset;
   await assert.rejects(
     insert("media-presenter-image", "image", "capture_with_ai_presenter", "platform_label", false),
     refusedBy("MarketingAsset_presenter_check"),
@@ -375,6 +378,37 @@ test("a captured video with an AI presenter is stored, approved and published as
   }
   // The same video disclosed is stored, as the route stored the first.
   await insert("media-presenter-direct", "video", "capture_with_ai_presenter", "platform_label", true);
+});
+
+test("a captured video cut with AI shots, voice and music is stored and approved as AI-made; an image or an undisclosed one is not", async () => {
+  // Owner decision 2026-11-09: the product screens are captures; the shots,
+  // the voice and the music are AI-made. It may show the product; it is of AI origin.
+  const film = submission({
+    asset: {
+      ...submission().asset,
+      provenance: "capture_with_ai_media",
+      disclosure: { youtube: "platform_label", instagram: "platform_label_and_caption" },
+    },
+  });
+  const accepted = await postSubmission(film);
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+  await tx((client) => confirmMarketingAssetUpload(client, { assetId: ID, bytes: 12_000_000 }));
+  await decide("approved");
+  const location = (await readApprovedMarketingAssetLocation(prisma, ID))!;
+  assert.equal(location.provenance, "capture_with_ai_media");
+  assert.equal(isAiOriginProvenance(location.provenance), true, "the publisher tells YouTube it is synthetic media");
+  const registry = (await readMarketingAssetRegistry(prisma))!;
+  assert.equal(registry.assets.find((asset) => asset.id === ID)?.depictsProductInterface, true);
+
+  await assert.rejects(
+    insertAsset("media-ai-media-image", "image", "capture_with_ai_media", "platform_label", false),
+    refusedBy("MarketingAsset_ai_media_check"),
+  );
+  await assert.rejects(
+    insertAsset("media-ai-media-undisclosed", "video", "capture_with_ai_media", "none", true),
+    refusedBy("MarketingAsset_disclosure_check"),
+  );
+  await insertAsset("media-ai-media-direct", "video", "capture_with_ai_media", "platform_label", true);
 });
 
 test("what the video says passes the Guard before a row exists: a rejection writes nothing and names codes, not words", async () => {
