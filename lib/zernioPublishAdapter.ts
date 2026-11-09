@@ -90,8 +90,8 @@ export type ZernioAdapterPorts = {
   readonly baseUrl: string;
   /**
    * An approved asset id to what a post needs from it: a public HTTPS URL, its
-   * kind, and whether it is of AI origin (`ai_generated`, `ai_modified` or
-   * `capture_with_ai_presenter`, which YouTube must be told). Null for an id that is not an approved asset.
+   * kind, and whether it is of AI origin (`ai_generated`, `ai_modified`,
+   * `capture_with_ai_presenter` or `capture_with_ai_media`, which YouTube must be told). Null for an id that is not an approved asset.
    *
    * A port because resolving one needs the object store, and this file may not
    * hold that credential either. Zernio accepts a public HTTPS URL directly as
