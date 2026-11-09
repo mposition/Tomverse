@@ -51,14 +51,14 @@ const POLICY = Object.freeze({ problem: voiceRequestProblem, minCost: 1, capEnv:
  * Speaks one line in the locale's voice and writes the MP3 to `out`.
  * @returns {Promise<{ok: true, requestId: string|null, chars: number, out: string} | {ok: false, reason: string, detail?: object}>}
  */
-export async function speakLine({ locale, text, out, jobDir, label, env = process.env, fetchImpl = fetch, day = brisbaneDay(), timeoutMs = 120_000 }) {
+export async function speakLine({ locale, text, out, jobDir, label, env = process.env, fetchImpl = fetch, day = brisbaneDay(), today, timeoutMs = 120_000 }) {
   const voice = Object.hasOwn(VOICES, locale) ? VOICES[locale] : null;
   if (!voice) return { ok: false, reason: "locale_has_no_voice" };
   const key = env.ELEVENLABS_API_KEY;
   if (typeof key !== "string" || key.trim() === "") return { ok: false, reason: "no_api_key" };
   const request = { model: VOICE_MODEL, voice_id: voice, text };
   const file = voiceLedgerPath(jobDir, day);
-  const admitted = admit({ jobDir, day, env, request, label, cost: text.length, policy: POLICY, file });
+  const admitted = admit({ jobDir, day, env, request, label, cost: text.length, policy: POLICY, file, today });
   if (!admitted.ok) return admitted;
   const { entry } = admitted;
 
