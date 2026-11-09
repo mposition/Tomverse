@@ -1,0 +1,48 @@
+import { defineAdminMessages } from "@/lib/adminLocale";
+
+export const adminAmuxSettledCardEscalationMessages = defineAdminMessages({
+  en: {
+    title: "Finished card with a leftover escalation",
+    intro: "This Task is done: a later attempt finished it. An earlier attempt stopped and opened this escalation, and it was left open, so no review decision can open here. Close it to take the card out of the owner queue.",
+    effect: "Closing resolves the leftover escalation as superseded by the later attempt. The card stays done with its status, results and history.",
+    close: "Close only",
+    confirmClose: "Close this done card's leftover escalation?",
+    confirm: "Confirm",
+    cancel: "Cancel",
+    working: "Working…",
+    closed: "Closed the leftover escalation. The card stays done.",
+    reauth: "Sign in again to continue",
+    notClosable: "This escalation cannot be closed now:",
+    failed: "The action did not complete. Reload the card to see what happened before trying again.",
+    reason: {
+      not_done: "the card is no longer done",
+      no_open_escalation: "it has no open escalation left",
+      changed: "the card changed since it was shown; reload it",
+      running: "work for this card is queued or running",
+      not_found: "the card was not found",
+      busy: "a worker holds the card right now; try again in a moment",
+    } as Record<string, string>,
+  },
+  ko: {
+    title: "남은 escalation이 있는 완료 카드",
+    intro: "이 Task는 완료됐습니다. 나중 시도가 끝냈습니다. 그 전 시도가 멈추며 연 escalation이 열린 채 남아 있어, 여기서는 검토 결정이 열리지 않습니다. 닫으면 카드가 확인 대기에서 빠집니다.",
+    effect: "닫으면 남은 escalation을 나중 시도로 대체된 것으로 해결합니다. 카드는 상태, 결과, 이력 그대로 완료로 남습니다.",
+    close: "닫기만",
+    confirmClose: "이 완료 카드에 남은 escalation을 닫을까요?",
+    confirm: "확인",
+    cancel: "취소",
+    working: "처리 중…",
+    closed: "남은 escalation을 닫았습니다. 카드는 완료로 남습니다.",
+    reauth: "계속하려면 다시 로그인하세요",
+    notClosable: "지금은 이 escalation을 닫을 수 없습니다:",
+    failed: "작업이 끝나지 않았습니다. 다시 시도하기 전에 카드를 새로 읽어 결과를 확인하세요.",
+    reason: {
+      not_done: "카드가 더 이상 완료 상태가 아닙니다",
+      no_open_escalation: "남은 escalation이 없습니다",
+      changed: "보여 준 뒤 카드가 바뀌었습니다. 새로 읽으세요",
+      running: "이 카드의 작업이 대기 중이거나 실행 중입니다",
+      not_found: "카드를 찾지 못했습니다",
+      busy: "지금 작업자가 카드를 잡고 있습니다. 잠시 뒤 다시 시도하세요",
+    } as Record<string, string>,
+  },
+});

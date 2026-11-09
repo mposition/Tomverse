@@ -376,3 +376,13 @@ test("a blocked card says what its own attempt reason was, not only 'blocked bef
   }));
   assert.match(other, /The run was blocked before it could finish/);
 });
+
+test("a done card left with an earlier attempt's escalation offers only its close, to the owner", () => {
+  const card = item({ status: "done", attentionReason: "usage_outcome_unknown" });
+  const html = decision(card, controller());
+  assert.match(html, /data-testid="amux-settled-card-escalation"/);
+  assert.match(html, /data-testid="amux-settled-card-escalation-close"/);
+  // Not for a viewer who is not the owner, and not for a card that still waits on a decision.
+  assert.doesNotMatch(decision(card, controller(), false), /amux-settled-card-escalation/);
+  assert.doesNotMatch(decision(item({}), controller()), /amux-settled-card-escalation/);
+});

@@ -12,6 +12,7 @@ import { AmuxBoardPastWork } from "./AmuxBoardPastWork";
 import { AmuxCardListPanel } from "./AmuxCardListPanel";
 import { AmuxTaskQuestionSection } from "./AmuxWorkerQuestion";
 import { AmuxLegacyCardPanel, type AmuxLegacyCardView } from "./AmuxLegacyCardPanel";
+import { AmuxSettledCardEscalationPanel } from "./AmuxSettledCardEscalationPanel";
 import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
 import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent } from "react";
@@ -451,7 +452,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         // A card waiting on the owner opens where the owner acts on it.
         // A worker question is answered on the overview, where it is shown.
         // A legacy WORKBOARD card has no review decision; it opens on its recreate and close.
-        if (canReviewCards && result.escalations.length > 0 && !preferOverview && !result.legacyCard)
+        // A done card left with an escalation has no decision either; it opens on its close.
+        if (canReviewCards && result.escalations.length > 0 && !preferOverview && !result.legacyCard &&
+            result.status !== "done")
           setDetailTab("ownerReview");
       }
     } catch (reason) { if (request === detailRequest.current)
@@ -1000,6 +1003,13 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         taskId={selected.id} revision={selected.revision} view={selected.legacyCard} canAct={canReviewCards}
         // The board moves the card to the archive; the panel keeps its answer and the idea link.
         onChanged={() => void refreshBoard()} />}
+      {ownerEscalation && selected.status === "done" && <AmuxSettledCardEscalationPanel
+        key={selected.id + ":" + ownerEscalation.id} taskId={selected.id} escalationId={ownerEscalation.id}
+        canAct={canReviewCards} onChanged={() => {
+          void refreshBoard();
+          if (new URL(window.location.href).searchParams.get("taskId") === selected.id)
+            void openCard(selected.id, false, true);
+        }} />}
       {selected.ownerQuestion && <AmuxTaskQuestionSection key={selected.id + ":" + selected.revision}
         taskId={selected.id} canAnswer={canReviewCards} onAnswered={() => {
           void refreshBoard();

@@ -12,6 +12,7 @@ import {
   type AmuxOwnerReviewController,
 } from "@/components/admin/AdminAmuxRoutingPanel";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
 import { AmuxTaskQuestionSection } from "@/components/admin/AmuxWorkerQuestion";
 import { AdminChannelIcon } from "@/components/admin/ui/AdminChannelIcon";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
@@ -24,6 +25,7 @@ import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { amuxElapsed } from "@/lib/adminAmuxFlow";
 import { amuxVisibleInspectionText } from "@/lib/amux/adminExecutionViewCore";
 import { amuxReviewUsageOutcomeUnknown } from "@/lib/amux/ownerRecoveryCore";
+import { isAmuxSettledCardWithOpenEscalation } from "@/lib/amux/settledCardEscalationCore";
 import {
   amuxOwnerQueueGroup,
   type AmuxOwnerQueueGroup,
@@ -292,6 +294,15 @@ export function AmuxOwnerQueueDecision({
             : <p role="status" className="text-sm text-zinc-400">{execution.loading}</p>}
         </>
       )}
+
+      {/* A done card whose earlier attempt left its escalation open has no
+          review decision; the owner closes that escalation here. */}
+      {canInspectCards && item.escalationId !== null && isAmuxSettledCardWithOpenEscalation(item) ? (
+        <AmuxSettledCardEscalationPanel key={item.taskId + ":" + item.escalationId} taskId={item.taskId}
+          escalationId={item.escalationId} canAct={canInspectCards}
+          reauthReturnPath={`/admin/amux-execution?focusEscalation=${encodeURIComponent(item.escalationId)}`}
+          onChanged={onAnswered} />
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800 pt-3">
         <label className="inline-flex min-h-9 cursor-pointer items-center gap-2 text-sm text-zinc-200">

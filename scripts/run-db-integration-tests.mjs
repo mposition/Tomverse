@@ -415,6 +415,10 @@ run(
     // its status kept, its escalation resolved and one chained audit entry;
     // a running, changed or other-source card refuses, a held card is busy.
     "tests/integration/amux-legacy-card.db.test.ts",
+    // AMUX-FILEREQ-004 (2026-11-09): a later attempt resolves the recovery
+    // escalation an earlier one left open, and the owner closes one already
+    // left on a done card; each with one chained audit entry.
+    "tests/integration/amux-settled-card-escalation.db.test.ts",
     "tests/integration/amux-v22-result-review.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its

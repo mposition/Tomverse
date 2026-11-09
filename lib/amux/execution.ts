@@ -26,7 +26,7 @@ import {
   decideAmuxAttemptBudget,
   settlementDestinationForBudget,
 } from "@/lib/amux/executionBudgetCore";
-import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
+import { openAmuxHumanEscalation, resolveSupersededAmuxRecoveryEscalations } from "@/lib/amux/escalation";
 import {
   AMUX_DEFAULT_REVIEW_SPECIALTY,
   amuxBridgeSettleReason,
@@ -1363,8 +1363,10 @@ export async function settleAmuxV22TaskExecution(input: {
   // GitHub outside any route budget (lib/engineeringAgentV22TierPromotion.ts).
   // + 6: an applied investigate conclusion writes its own system audit (4)
   // and a result put to Decision Maker review its row (1), with one spare.
+  // + 6: an earlier attempt's recovery escalation this run supersedes is
+  // read, resolved and audited (4).
   const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 44 + 6 };
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 44 + 6 + 6 };
   const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
   const resultReviewDm = amuxV22ResultReviewDmEnabled();
   const publicationEligible = v22PublishPreflightEligible({
@@ -1738,6 +1740,12 @@ export async function settleAmuxV22TaskExecution(input: {
         workerName: input.worker, instanceId: input.instanceId,
         generation: input.generation, status: "busy",
       }, data: { status: "idle", dispatchReady: false } });
+      // This run answers the recovery question an earlier attempt left open:
+      // resolve it before opening this run's own, so a done card leaves the
+      // owner queue and a review or block carries its current reason.
+      await resolveSupersededAmuxRecoveryEscalations(tx, { taskId: task.id,
+        attemptId: attempt.id, attemptTaskRevision: attempt.taskRevision,
+        attemptStartedAt: attempt.startedAt, now });
       // An open owner question waits for its answer, not for a person to
       // recover the Task; only a question over the limit opens escalation.
       const humanReview = next === "review" && (!reviewRequired ||
@@ -1834,8 +1842,9 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
   for (const candidate of candidates) {
     const changed = await withAmuxDbBoundary(
       { ...AMUX_DB_BOUNDARIES.executionRecoveryWrite,
+        // + 6: an earlier attempt's recovery escalation is superseded (4).
         prismaCallCeiling:
-          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 11 },
+          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 11 + 6 },
       async (tx, context) => {
         const now = context.dbNow;
         const runtime = await lockRuntime(tx, candidate.worker);
@@ -1870,6 +1879,11 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
             workerName: attempt.worker, instanceId: attempt.workerInstanceId,
             generation: attempt.workerGeneration, status: "busy",
           }, data: { status: "error", dispatchReady: false } });
+        // The expired run was the retry of any recovery an earlier attempt
+        // asked for; its own unknown outcome opens a fresh escalation.
+        await resolveSupersededAmuxRecoveryEscalations(tx, { taskId: task.id,
+          attemptId: attempt.id, attemptTaskRevision: attempt.taskRevision,
+          attemptStartedAt: attempt.startedAt, now });
         await openAmuxHumanEscalation(tx, { taskId: task.id,
           specialty: "execution-recovery", reason: "execution_lease_expired",
           openedBy: "system:amux-v22-execution-reaper" });
