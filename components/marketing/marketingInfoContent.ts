@@ -1,5 +1,20 @@
 import type { Language } from "@/components/LanguageProvider";
 import type { MarketingInfoCopy } from "./MarketingInfoPage";
+import { chatAttachmentExtensionsByGroup, type ChatAttachmentUiGroup } from "@/lib/chatAttachmentFormats";
+
+const attachmentGroupLabels: Record<ChatAttachmentUiGroup, string> = {
+  image: "Images (static GIF only)",
+  document: "Documents",
+  data: "Data",
+  markup: "Text and markup",
+  code: "Source code (read as text)",
+  archive: "Archives (contents must pass file checks)",
+};
+const signedInAttachmentFormats = Object.entries(chatAttachmentExtensionsByGroup())
+  .filter(([, extensions]) => extensions.length > 0)
+  .map(([group, extensions]) => `${attachmentGroupLabels[group as ChatAttachmentUiGroup]}: ${extensions.map((extension) => `.${extension}`).join(", ")}.`);
+const guestAttachmentFormats = Object.values(chatAttachmentExtensionsByGroup({ guest: true }))
+  .flat().map((extension) => `.${extension}`).join(", ");
 
 export const infoPages = {
   faq: {
@@ -1323,8 +1338,10 @@ export const infoPages = {
     "eyebrow": "Help Centre",
     "title": "Help Centre",
     "description": "From starting Chat and Review to models, files, saving and sharing: choose your task and find what to check on screen.",
+    "sectionNavLabel": "Jump to a topic",
     "sections": [
       {
+        "id": "getting-started",
         "title": "Getting started",
         "body": "The same question can produce different answers. In Tomverse Review, read up to three model answers side by side and use AI Review to examine agreements, differences and missing conditions with quotes. Decide which answer to explore and what to ask next.",
         "bullets": [
@@ -1338,6 +1355,7 @@ export const infoPages = {
         }
       },
       {
+        "id": "sign-in",
         "title": "Sign-in and account access",
         "body": "If sign-in does not return you to Tomverse, try again in the same browser. If the problem continues, send support the sign-in method and the error shown.",
         "bullets": [
@@ -1346,6 +1364,7 @@ export const infoPages = {
         ]
       },
       {
+        "id": "models-and-credits",
         "title": "Models and credits",
         "body": "The amount shown before sending is a base credit estimate. It adds the selected models’ base costs; the final usage may change when file content and long conversation history are processed.",
         "bullets": [
@@ -1359,9 +1378,12 @@ export const infoPages = {
         }
       },
       {
+        "id": "files-and-drive",
         "title": "Files and Google Drive",
-        "body": "Where attachments are available, check supported formats and sizes. Password-protected, damaged or scanned documents without readable text may fail. Try one file or paste the key text.",
+        "body": "Where attachments are available, the supported extensions for signed-in accounts are listed below. Password-protected, damaged or scanned documents without readable text may fail. Try one file or paste the key text.",
         "bullets": [
+          ...signedInAttachmentFormats,
+          `Supported guest formats: ${guestAttachmentFormats}.`,
           "Supported guest attachments: one file per message, up to 5 MB. Google Drive connection requires sign-in.",
           "Signed-in plans with attachments: up to five files, 10 MB each and 25 MB total per request.",
           "Account files are kept with the conversation. Guest files are temporary and are not included in saving, sharing or exports."
@@ -1372,10 +1394,12 @@ export const infoPages = {
         }
       },
       {
+        "id": "answer-errors",
         "title": "When an answer does not arrive",
         "body": "Models can be temporarily limited or fail to answer. Check the reason and service status, then try a suggested alternative once if needed. If the problem continues, send support the trace ID and model name."
       },
       {
+        "id": "saving-sharing-data",
         "title": "Saving, sharing and data",
         "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details.",
         "bullets": [
@@ -1387,6 +1411,7 @@ export const infoPages = {
         "link": { "label": "Read the workspace guide", "href": "/support/help-centre/chat-workspace" }
       },
       {
+        "id": "contact-support",
         "title": "Contact support",
         "body": "If the problem continues, include your account email, approximate time, product and model, attachment details and the on-screen trace ID. Use the form or email; do not send passwords or card numbers."
       }
