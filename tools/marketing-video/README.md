@@ -184,7 +184,7 @@ its topic, and submits each for approval in Admin:
 6. review (`CREATIVE-REVIEW.md`): a separate call scores every locale's stills
    against the earlier films: pass, fix (one more build) or reject.
 7. render, master to -14 LUFS, check 1080x1920 / 10-60 s / sound, write the
-   asset file in code (`ai_modified`, a disclosure on every channel, zh-Hans to
+   asset file in code (`capture_with_ai_media`, showing the product interface, a disclosure on every channel, zh-Hans to
    RedNote only) and submit with `submit-asset.mjs`.
 
 Phase 1 limits: the real screens come from the approved shorts' capture packs
