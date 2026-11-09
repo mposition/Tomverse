@@ -376,6 +376,8 @@ test.describe("pricing plan CTAs by authentication state and plan", { tag: "@ui-
     );
     await expect(ctaState(page, "pro")).toContainText("Upgrade to Pro");
     await expect(ctaState(page, "max")).toContainText("Upgrade to Max");
+    await expect(page.getByTestId("pricing-billing-choice-pro")).toHaveText("Choose monthly or annual billing in the next step, before payment.");
+    await expect(page.getByTestId("pricing-billing-choice-max")).toBeVisible();
 
     const creditCta = page.getByTestId("credit-pack-section-cta");
     await expect(creditCta).toHaveAttribute("data-cta-state", "authenticated");
@@ -391,6 +393,8 @@ test.describe("pricing plan CTAs by authentication state and plan", { tag: "@ui-
       hasActiveSubscription: true,
     });
     await gotoPricing(page);
+    await expect(page.getByTestId("pricing-billing-choice-pro")).toHaveCount(0);
+    await expect(page.getByTestId("pricing-billing-choice-max")).toHaveCount(0);
 
     await expect(ctaState(page, "pro")).toHaveAttribute(
       "data-cta-state",
@@ -504,6 +508,7 @@ test.describe("credit-pack purchase from the pricing page", { tag: "@ui-risk" },
     await creditCta.click();
 
     await expect(page.getByTestId("credit-pack-modal")).toBeVisible();
+    await expect(page.getByTestId("credit-pack-modal").getByText("Valid for 365 days", { exact: true })).toHaveCount(2);
     // The reported failure was a navigation to /chat instead of a modal.
     expect(page.url()).toBe(urlBefore);
     expect(new URL(page.url()).pathname).toBe("/pricing");

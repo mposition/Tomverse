@@ -328,7 +328,9 @@ export function PrivacyPolicy() {
                                 With it, only the table scrolls.
                             */}
                             <div className="min-w-0 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
-                                <p>{t(`privacyPolicy.${bodyKey}`)}</p>
+                                {bodyKey === "location" ? t("privacyPolicy.location").split("\n\n").map((paragraph, index) => (
+                                    <p key={paragraph} className={index ? "mt-4" : undefined}>{paragraph}</p>
+                                )) : <p>{t(`privacyPolicy.${bodyKey}`)}</p>}
                                 {bodyKey === "rights" && (
                                     <div className="mt-5 space-y-3">
                                         <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">{t("auth.deleteAccount")}</h3>

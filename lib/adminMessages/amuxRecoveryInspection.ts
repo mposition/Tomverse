@@ -33,7 +33,7 @@ export const adminAmuxRecoveryInspectionMessages = defineAdminMessages({
     hostBoundary: "This check reads the app only. It does not inspect Ubuntu processes or local receipts. A verified host check and a separate recovery approval are required before this expired attempt can be retried.",
     noAction: "No task was started, no halt was cleared, and no cost was settled by this check.",
     host: {
-      notApplicable: "This Task has no v22 receipt, task role or execution grade, so the Ubuntu inspection does not apply to it. Remake it as a new idea or close it on the Overview tab of its card detail on the execution board.",
+      notApplicable: "This Task is archived, or has no v22 receipt, task role or execution grade, so the Ubuntu inspection does not apply to it. Remake it as a new idea or close it in the legacy card panel on this screen.",
       title: "Inspect the previous task program on Ubuntu",
       intro: "Request the fixed read-only checker for this exact task revision and attempt. App records above and Ubuntu evidence below are separate checks.",
       request: "Request Ubuntu inspection", requestAgain: "Request new Ubuntu evidence",
@@ -183,7 +183,7 @@ export const adminAmuxRecoveryInspectionMessages = defineAdminMessages({
     hostBoundary: "이번 점검은 앱 기록만 읽습니다. Ubuntu 프로세스와 로컬 영수증은 검사하지 않습니다. 만료된 실행을 재시도하려면 서버 점검 근거와 별도의 복구 승인이 필요합니다.",
     noAction: "이번 점검으로 작업을 시작하거나 정지를 해제하거나 비용을 정산하지 않았습니다.",
     host: {
-      notApplicable: "이 Task에는 v22 접수 기록·작업 역할·실행 등급이 없어 Ubuntu 검사 대상이 아닙니다. 실행 보드 카드 상세의 개요 탭에서 새 아이디어로 다시 만들거나 닫으세요.",
+      notApplicable: "이 Task는 보관됐거나 v22 접수 기록·작업 역할·실행 등급이 없어서 Ubuntu 검사 대상이 아닙니다. 이 화면의 옛 카드 패널에서 새 아이디어로 다시 만들거나 닫으세요.",
       title: "Ubuntu의 이전 작업 프로그램 검사",
       intro: "이 작업의 정확한 revision과 이전 실행을 고정된 읽기 전용 점검기로 검사합니다. 위의 앱 기록 점검과 아래의 Ubuntu 증거는 별도 검사입니다.",
       request: "Ubuntu 검사 요청", requestAgain: "새 Ubuntu 증거 요청",
