@@ -9,6 +9,8 @@ import { AiReviewDemo } from "./AiReviewDemo";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
+import { useMarketingChatEntry } from "./MarketingChatAvailability";
+import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
 
 type MarketingInfoLink = {
   label: string;
@@ -22,6 +24,7 @@ export type MarketingInfoSection = {
   title: string;
   body: string;
   bullets?: string[];
+  guestTrialLinks?: { available: string; unavailable: string; chat: string; review: string; models: string };
   link?: MarketingInfoLink;
   links?: MarketingInfoLink[];
 };
@@ -47,6 +50,7 @@ export function MarketingInfoPage({
   template?: "chatgpt-vs-claude" | "ai-answer-review";
 }) {
   const { lang } = useLanguage();
+  const { guestTrialAvailable, reviewHref } = useMarketingChatEntry();
   const localizedPage = content[lang];
   const page = localizedPage ?? content.en;
   const pageHref = (href: string) => {
@@ -108,6 +112,16 @@ export function MarketingInfoPage({
                 <article key={section.title} id={section.id} tabIndex={section.id ? -1 : undefined} lang={section.lang} className="scroll-mt-28 rounded-2xl border border-zinc-200 bg-zinc-50 p-6 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-800 dark:bg-zinc-900/40">
                   <h2 className="text-xl font-black">{section.title}</h2>
                   <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{section.body}</p>
+                  {section.guestTrialLinks ? (
+                    <div data-testid="faq-guest-trial-links" className="mt-5 space-y-3 text-sm leading-6">
+                      <p>{guestTrialAvailable ? section.guestTrialLinks.available : section.guestTrialLinks.unavailable}</p>
+                      <div className="flex flex-wrap gap-3">
+                        {guestTrialAvailable ? <Link href={marketingProductEntryHref("chat", lang)} className="inline-flex min-h-11 items-center font-bold text-blue-700 underline underline-offset-4 dark:text-blue-300">{section.guestTrialLinks.chat}</Link> : null}
+                        <Link href={reviewHref} className="inline-flex min-h-11 items-center font-bold text-blue-700 underline underline-offset-4 dark:text-blue-300">{section.guestTrialLinks.review}</Link>
+                        <Link href={localizedPath(lang, "/models")} className="inline-flex min-h-11 items-center font-bold text-blue-700 underline underline-offset-4 dark:text-blue-300">{section.guestTrialLinks.models}</Link>
+                      </div>
+                    </div>
+                  ) : null}
                   {section.bullets && (
                     <ul className="mt-5 grid gap-3">
                       {section.bullets.map((bullet) => (
