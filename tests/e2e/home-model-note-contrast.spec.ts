@@ -10,7 +10,7 @@ for (const theme of ["light", "dark"] as const) {
     await prepareGuestPage(page, "ko");
     await setDeterministicTheme(page, theme);
     await page.goto("/ko");
-    const notes = page.getByText("한곳에서 선택", { exact: true });
+    const notes = page.getByText("한곳에서 선택", { exact: true }).filter({ visible: true });
     await expect(notes).toHaveCount(3, { timeout: 30_000 });
     for (const note of await notes.all()) {
       await expect(note).toBeVisible();
@@ -18,5 +18,10 @@ for (const theme of ["light", "dark"] as const) {
       expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
       console.log(`${theme} model note contrast: ${sample.ratio.toFixed(2)}:1`);
     }
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileNote = page.getByTestId("launch-mobile-model-note");
+    await expect(mobileNote).toBeVisible();
+    const mobileSample = await expectAccessibleContrast(mobileNote, `${theme} mobile model note`);
+    expect(mobileSample.ratio).toBeGreaterThanOrEqual(4.5);
   });
 }
