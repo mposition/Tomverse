@@ -32,7 +32,7 @@ test("the mobile dock reserves the bottom safe-area inset once", () => {
     assert.ok(wrapper, "the dock wrapper's className was not found");
     assert.equal(wrapper[1].split(INSET).length - 1, 1);
     const notice = read("components/chat/AiDisclaimerNotice.tsx");
-    const row = /<p\s+data-testid=\{testId\}\s+className="([^"]*)"/.exec(notice);
+    const row = /<p\s+data-testid=\{testId\}\s+className=[{`"]+([^`"]*)/.exec(notice);
     assert.ok(row, "the notice row was not found");
     assert.equal(row[1].includes(INSET), false);
 });
@@ -40,7 +40,8 @@ test("the mobile dock reserves the bottom safe-area inset once", () => {
 test("the mobile dock ends with the disclaimer and optional consent after the bar composer", () => {
     const shell = read("components/chat/MobileChatShell.tsx");
     const dockOpen = shell.indexOf('data-testid="mobile-bottom-dock"');
-    const notice = shell.indexOf('<AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" />');
+    const noticeTag = '<AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" readable={currentProduct === "chat"} />';
+    const notice = shell.indexOf(noticeTag);
     const composer = shell.indexOf("<ChatInput", dockOpen);
     assert.ok(dockOpen > 0 && composer > dockOpen && notice > composer, "the notice no longer follows the dock's composer");
     // The dock's composer is the bar variant, the one whose padding this pins.
@@ -48,5 +49,5 @@ test("the mobile dock ends with the disclaimer and optional consent after the ba
     // The wrapper owns the inset; rows above the footer must not duplicate it.
     assert.equal(shell.slice(dockOpen, notice).split(INSET).length - 1, 1);
     // Consent follows the disclaimer, inside the same safe-area reservation.
-    assert.match(shell.slice(notice), /^<AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" \/>\s*<div ref=\{setBottomConsentSlot\} data-testid="composer-consent-slot"[^>]* \/>\s*<\/div>/);
+    assert.match(shell.slice(notice), /^<AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" readable=\{currentProduct === "chat"\} \/>\s*<div ref=\{setBottomConsentSlot\} data-testid="composer-consent-slot"[^>]* \/>\s*<\/div>/);
 });

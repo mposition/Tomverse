@@ -31,6 +31,7 @@ const world = {
   sendPathIdeas: [] as Array<{ requestId: string; idea: string; sessionDisplay: string }>,
   closes: [] as Array<{ taskId: string; revision: number; ideaId: string | null }>,
   closeOutcome: "closed" as "closed" | "refused" | "busy",
+  archived: false,
   writeOn: "true",
 };
 const reset = () => {
@@ -39,7 +40,7 @@ const reset = () => {
     description: JSON.stringify({ problem: "The renewal date is hidden. Users ask support.",
       completionCriteria: ["The date shows"] }), executionBrief: null, revision: 4 };
   world.refusal = null; world.kind = "workboard"; world.readBack = [{ status: "absent" }]; world.submits = []; world.sendPathIdeas = [];
-  world.closes = []; world.closeOutcome = "closed"; world.writeOn = "true";
+  world.closes = []; world.closeOutcome = "closed"; world.writeOn = "true"; world.archived = false;
 };
 
 let installed = false;
@@ -103,7 +104,8 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
         world.closes.push(input);
         if (world.closeOutcome === "busy") throw new FakeOwnerError("busy");
         return world.closeOutcome === "closed" ?
-          { outcome: "closed", archivedAt: "2026-11-08T09:00:00.000Z", escalationsResolved: 1, auditId: "a1" } :
+          { outcome: "closed", archivedAt: "2026-11-08T09:00:00.000Z", alreadyArchived: world.archived,
+            escalationsResolved: 1, auditId: "a1" } :
           { outcome: "refused", reason: "running" };
       } } });
   }
@@ -184,7 +186,7 @@ test("a recreate saves the idea under the card's derived request id, then closes
   const requestId = amuxLegacyCardRecreateRequestId("cmlegacy0001",
     ["The renewal date is hidden.", "", world.card!.description].join("\n"));
   assert.deepEqual(await response.json(), { status: "recreated", ideaId: "idea-1", requestId, closed: true,
-    archivedAt: "2026-11-08T09:00:00.000Z", escalationsResolved: 1 });
+    archivedAt: "2026-11-08T09:00:00.000Z", alreadyArchived: false, escalationsResolved: 1 });
   assert.deepEqual(world.submits, [requestId]);
   assert.match(world.sendPathIdeas[0]!.idea, /^The renewal date is hidden\./);
   assert.equal(world.sendPathIdeas[0]!.sessionDisplay, "Legacy WORKBOARD card");
@@ -222,9 +224,14 @@ test("close only archives without an idea; a held card answers busy", async () =
   const response = await POST(post(close));
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: "closed", closed: true, archivedAt: "2026-11-08T09:00:00.000Z",
-    escalationsResolved: 1 });
+    alreadyArchived: false, escalationsResolved: 1 });
   assert.equal(world.sendPathIdeas.length, 0);
   assert.equal(world.closes[0]!.ideaId, null);
+  // An archived card still in the owner queue goes through the same close, which says so.
+  reset(); world.archived = true;
+  const archived = await POST(post(close));
+  assert.equal(archived.status, 200);
+  assert.equal((await archived.json() as { alreadyArchived: boolean }).alreadyArchived, true);
   reset(); world.closeOutcome = "busy";
   const busy = await POST(post(close));
   assert.equal(busy.status, 409);
