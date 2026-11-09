@@ -184,6 +184,10 @@ A refused, failed or identity-stale write leaves the confirmed Auto UI intact.
   fine-pointer context row uses a 32px control on desktop. Each action has one
   accessible name and remains operable when the action row wraps on a narrow
   screen.
+- The mobile header picker uses the localized model-selection action label,
+  including while Auto is active. It opens the picker; it does not toggle Auto.
+  The composer retains the Smart Adaptive switch and the header's accessible
+  summary continues to report the active mode.
 - The badge's icon is `aria-hidden`; the model name is text.
 
 ## 7. Non-negotiable requirements

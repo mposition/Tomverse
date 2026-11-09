@@ -23,8 +23,7 @@ const post = (id: string, overrides: Partial<DailySchedulePost> = {}): DailySche
   accountLocale: "ko",
   approvedAt: "2026-11-07T00:00:00.000Z",
   approvalExpiresAt: "2026-11-30T00:00:00.000Z",
-  dailyCap: 1,
-  weeklyCap: 7,
+  caps: { daily: 1, weekly: 7 },
   ...overrides,
 });
 
@@ -93,14 +92,31 @@ test("a post already scheduled for today fills a one-a-day account's today", () 
   assert.deepEqual(times(plan), ["2026-11-09T01:00:00.000Z"]);
 });
 
+test("with no cap, the plan still paces one a day, and today is used whatever went out", () => {
+  // The policy has no cap since 2026-11-08 (owner); one a day is the plan's own pacing.
+  const plan = planDailyMarketingSchedule({
+    now: EARLY,
+    taken: [
+      { channelId: "x-en", status: "verified", slotDay: "2026-11-08", scheduledAt: null },
+      { channelId: "x-en", status: "verified", slotDay: "2026-11-08", scheduledAt: null },
+      { channelId: "x-en", status: "verified", slotDay: "2026-11-08", scheduledAt: null },
+    ],
+    posts: ["a", "b", "c"].map((id, n) =>
+      post(id, { channelId: "x-en", accountLocale: "en", caps: { daily: null, weekly: null }, approvedAt: `2026-11-07T0${n}:00:00.000Z` })
+    ),
+  });
+  assert.deepEqual(times(plan), ["2026-11-08T00:00:00.000Z", "2026-11-09T00:00:00.000Z", "2026-11-10T00:00:00.000Z"]);
+  assert.deepEqual(plan.expired, []);
+});
+
 test("an account with room left today still uses today", () => {
   // X allows two a day; one went out this morning.
   const plan = planDailyMarketingSchedule({
     now: EARLY,
     taken: [{ channelId: "x-en", status: "verified", slotDay: "2026-11-08", scheduledAt: null }],
     posts: [
-      post("a", { channelId: "x-en", accountLocale: "en", dailyCap: 2 }),
-      post("b", { channelId: "x-en", accountLocale: "en", dailyCap: 2, approvedAt: "2026-11-07T01:00:00.000Z" }),
+      post("a", { channelId: "x-en", accountLocale: "en", caps: { daily: 2, weekly: 7 } }),
+      post("b", { channelId: "x-en", accountLocale: "en", caps: { daily: 2, weekly: 7 }, approvedAt: "2026-11-07T01:00:00.000Z" }),
     ],
   });
   assert.deepEqual(times(plan), ["2026-11-08T00:00:00.000Z", "2026-11-09T00:00:00.000Z"]);
@@ -254,7 +270,8 @@ test("hand-posted accounts, accounts the publisher does not post to and posts no
     taken: [],
     posts: [
       post("manual", { provider: "manual", channelId: "manual-acct" }),
-      post("rednote", { channelId: "rn", dailyCap: null }),
+      post("rednote", { channelId: "rn", caps: null }),
+      post("zero", { channelId: "zero", caps: { daily: 0, weekly: null } }),
       post("scheduled", { status: "scheduled" }),
       post("verified", { status: "verified" }),
       post("ok"),
@@ -266,7 +283,7 @@ test("hand-posted accounts, accounts the publisher does not post to and posts no
 });
 
 const linkedin = (id: string, n: number, overrides: Partial<DailySchedulePost> = {}) =>
-  post(id, { channelId: "li-en", accountLocale: "en", weeklyCap: 3, approvedAt: `2026-11-07T0${n}:00:00.000Z`, ...overrides });
+  post(id, { channelId: "li-en", accountLocale: "en", caps: { daily: 1, weekly: 3 }, approvedAt: `2026-11-07T0${n}:00:00.000Z`, ...overrides });
 
 test("the rolling seven-day cap is kept: a fourth post on a three-a-week account waits for the week to clear", () => {
   const plan = planDailyMarketingSchedule({
