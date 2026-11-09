@@ -128,7 +128,9 @@ test("the PostgreSQL 16 compatibility job runs its suites on 16 and stays out of
     );
     assert.ok(
         /credit-finance-db-result:[\s\S]*?needs: \[[^\]]*\bcredit-finance-db-postgres16\b[^\]]*\]/.test(workflow) &&
-            workflow.includes('test "$POSTGRES16_RESULT" = "success"'),
+            // Since 2026-11-09 a skip passes only when the scope job left the
+            // job out (scripts/db-integration-scope.mjs).
+            workflow.includes('passed "$POSTGRES16_RESULT" postgres16'),
         "the required result job must fail when the PostgreSQL 16 job does"
     );
 });
