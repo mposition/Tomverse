@@ -5,6 +5,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+/// Seconds to wait after a successful reading before asking again. The usage
+/// endpoint allows each account only a few reads an hour, shared with every
+/// Claude Code process on the same login. At 60 s this cache alone asked up to
+/// 60 times an hour, and from 2026-10-28 about a quarter of its reads came back
+/// 429 (most of them on 2026-11-09). review-orchestrator's own Claude probe
+/// learned the same lesson and waits 5 minutes (tools/review-orchestrator/README.md).
+/// A 5-hour window barely moves in 5 minutes, and the background reserve
+/// tolerates readings up to 10 minutes old (`RESERVE_MAX_AGE` in api/usage.rs).
+pub(super) const FRESH_REREAD_S: i64 = 300;
+
 #[derive(Default, Serialize, Deserialize)]
 pub(super) struct UsageCache {
     credential: String,
@@ -72,7 +82,7 @@ impl UsageCache {
                 self.failures = 0;
                 self.failure = None;
                 self.http_status = None;
-                self.retry_at = now + 60;
+                self.retry_at = now + FRESH_REREAD_S;
                 tracing::info!(target:"amux::usage_probe", provider="claude", verdict="fresh", observed_at=now, retry_at=self.retry_at, "subscription usage recorded");
             }
             failure => {
@@ -219,12 +229,20 @@ mod tests {
         c.record(UsageProbe::Http(429), 1120, None);
         assert_eq!(c.retry_at, 1360);
         c.record(good(), 1360, None);
-        assert_eq!(c.retry_at, 1420);
+        assert_eq!(c.retry_at, 1660);
         assert_eq!(c.failures, 0);
         assert!(matches!(
             c.reading(),
             UsageProbe::Snapshot { failure: None, .. }
         ));
+    }
+    #[test]
+    fn a_fresh_reading_is_not_reread_for_five_minutes() {
+        let mut c = UsageCache::default();
+        c.record(good(), 1000, None);
+        assert!(!c.ready(1000 + FRESH_REREAD_S - 1));
+        assert!(c.ready(1000 + FRESH_REREAD_S));
+        assert!(FRESH_REREAD_S >= 300, "the endpoint 429s at one read a minute");
     }
     #[test]
     fn cold_failure_never_invents_a_percentage_and_corrupt_disk_recovers() {
