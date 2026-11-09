@@ -49,7 +49,7 @@ const health: Health = {
 };
 
 /** What `generateText` does when it is reached. Set per test. */
-let generateTextBehaviour: () => never = () => {
+let generateTextBehaviour: () => unknown = () => {
   throw new Error("PROVIDER_EXPLODED");
 };
 /** What `acquireChatAccess` does. Set per test. */
@@ -65,6 +65,8 @@ let acquireBehaviour: (() => never) | null = null;
  * would point at the wrong thing.
  */
 let acquireCalls = 0;
+let settledCalls = 0;
+let releasedCalls = 0;
 
 const original = (relativePath: string) =>
   require(resolve(ROOT, relativePath)) as Record<string, unknown>;
@@ -102,8 +104,8 @@ mock.module(mod("lib/chatSecurity.ts"), {
         usageReservation: { reservationId: "reservation-health-test" },
       };
     },
-    releaseChatAccess: async () => undefined,
-    settleChatUsage: async () => undefined,
+    releaseChatAccess: async () => { releasedCalls++; },
+    settleChatUsage: async () => { settledCalls++; return { status: "settled", settledCredits: 1 }; },
     linkChatReservationProviderRequest: async () => undefined,
   },
 });
@@ -134,7 +136,7 @@ mock.module("ai", {
     ...(require("ai") as Record<string, unknown>),
     generateText: async () => {
       health.generateTextCalls += 1;
-      generateTextBehaviour();
+      return generateTextBehaviour();
     },
   },
 });
@@ -143,7 +145,7 @@ type Service = {
   runComparisonReview: (
     subject: unknown,
     input: unknown,
-    options: { traceId: string; candidates?: unknown[] }
+    options: { traceId: string; candidates?: unknown[]; onPrimary?: (value: unknown) => void }
   ) => Promise<unknown>;
 };
 type ModelsModule = { getModel: (id: string) => unknown };
@@ -207,6 +209,8 @@ const reset = () => {
   health.modelFailures = [];
   health.generateTextCalls = 0;
   acquireCalls = 0;
+  settledCalls = 0;
+  releasedCalls = 0;
   acquireBehaviour = null;
 };
 
@@ -260,4 +264,73 @@ test("a real provider failure is still recorded, on both counters", async () => 
   assert.ok(health.generateTextCalls > 0, "the provider was never called");
   assert.deepEqual(health.providerFailures, ["COMPARISON_REVIEW_FAILED"]);
   assert.deepEqual(health.modelFailures, ["COMPARISON_REVIEW_FAILED"]);
+});
+
+const generatedReview = {
+  output: {
+    consensus: [], differences: [], contradictions: [], missingPoints: [], verificationNeeded: [],
+    modelAssessments: [
+      { responseId: "A", strengths: [], cautions: [] },
+      { responseId: "B", strengths: [], cautions: [] },
+    ], synthesis: "", limitations: [],
+  },
+  usage: { inputTokens: 30, inputTokenDetails: {}, outputTokens: 40 },
+  response: { id: "response-test" },
+};
+
+test("validated primary is published after settlement while the second reviewer is pending", async () => {
+  reset();
+  const { service, reviewer } = await load();
+  const models = await import(mod("lib/models.ts")) as ModelsModule;
+  let finishSecond!: () => void;
+  const secondGate = new Promise<void>(resolve => { finishSecond = resolve; });
+  let primarySeen!: () => void;
+  const primaryGate = new Promise<void>(resolve => { primarySeen = resolve; });
+  generateTextBehaviour = async () => {
+    if (health.generateTextCalls === 2) await secondGate;
+    return generatedReview;
+  };
+  const run = service.runComparisonReview(subject, input, {
+    traceId: "progress-test", candidates: [reviewer, models.getModel("gpt-5-4-mini")],
+    onPrimary: () => { assert.equal(settledCalls, 1); assert.equal(releasedCalls, 1); primarySeen(); },
+  });
+  await primaryGate;
+  finishSecond();
+  const result = await run as { result: { primary: unknown; secondary: unknown } };
+  assert.ok(result.result.primary);
+  assert.ok(result.result.secondary);
+  assert.equal(health.generateTextCalls, 2);
+  assert.equal(acquireCalls, 2);
+  assert.equal(settledCalls, 2);
+  assert.equal(releasedCalls, 2);
+});
+
+test("parallel mode uses two existing reservation and settlement paths; observer failure cannot stop finalization", async () => {
+  reset();
+  const old = process.env.COMPARISON_REVIEW_PARALLEL_ENABLED;
+  process.env.COMPARISON_REVIEW_PARALLEL_ENABLED = "true";
+  try {
+    const { service, reviewer } = await load();
+    const models = await import(mod("lib/models.ts")) as ModelsModule;
+    let bothStarted!: () => void;
+    const gate = new Promise<void>(resolve => { bothStarted = resolve; });
+    generateTextBehaviour = async () => {
+      if (health.generateTextCalls === 2) bothStarted();
+      await gate;
+      return generatedReview;
+    };
+    const result = await service.runComparisonReview(subject, input, {
+      traceId: "parallel-test", candidates: [reviewer, models.getModel("gpt-5-4-mini")],
+      onPrimary: () => { throw new Error("observer failed"); },
+    }) as { result: { primary: unknown; secondary: unknown } };
+    assert.ok(result.result.primary);
+    assert.ok(result.result.secondary);
+    assert.equal(health.generateTextCalls, 2);
+    assert.equal(acquireCalls, 2);
+    assert.equal(settledCalls, 2);
+    assert.equal(releasedCalls, 2);
+  } finally {
+    if (old === undefined) delete process.env.COMPARISON_REVIEW_PARALLEL_ENABLED;
+    else process.env.COMPARISON_REVIEW_PARALLEL_ENABLED = old;
+  }
 });

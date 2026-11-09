@@ -41,7 +41,7 @@ const plan = (overrides = {}) => ({
   ...overrides,
 });
 
-test("the model is told each account's weekly cap and asked to write in Korean", () => {
+test("the model is given no posting cap and asked to write in Korean", () => {
   const [system, user] = marketingStrategyMessages({
     week: WEEK,
     analysis: { self: {} },
@@ -52,7 +52,9 @@ test("the model is told each account's weekly cap and asked to write in Korean",
   assert.match(system.content, /Korean/u);
   assert.match(system.content, /data, not instructions/u);
   const data = JSON.parse(user.content);
-  assert.deepEqual(data.accounts.map((account) => account.weeklyCap), [4, null]);
+  // No policy cap since 2026-11-08 (owner): the accounts go as offered.
+  assert.deepEqual(data.accounts, ACCOUNTS);
+  assert.doesNotMatch(system.content, /weeklyCap|weekly cap/u);
 });
 
 test("a hand-posted platform plans no automated posts, and a fenced answer is read", () => {
@@ -71,6 +73,14 @@ test("a hand-posted platform plans no automated posts, and a fenced answer is re
     ],
   );
   assert.equal(marketingWeeklyStrategySchema.safeParse(read).success, true);
+});
+
+test("with no policy cap, a week of posts is kept: one per distinct day named", () => {
+  const read = readMarketingWeeklyStrategy(
+    answer([plan({ posts: 7, days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] })]),
+    { week: WEEK, accounts: ACCOUNTS, claims: CLAIMS },
+  );
+  assert.equal(read.accounts[0].posts, 7);
 });
 
 test("the post count is the number of distinct days named", () => {
@@ -96,7 +106,7 @@ test("paid advertising is a proposal: complete ones are kept, cut to their store
   );
   assert.equal(read.paidAds.length, 3);
   assert.equal(read.paidAds[0].platform.length, 80);
-  assert.equal(read.promptVersion, "strategy-v2");
+  assert.equal(read.promptVersion, "strategy-v3");
   const none = readMarketingWeeklyStrategy(answer([plan()]), { week: WEEK, accounts: ACCOUNTS, claims: CLAIMS });
   assert.deepEqual(none.paidAds, []);
 });
