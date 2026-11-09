@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Activity, ExternalLink } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
+import { ModelInputCreditGuide } from "./ModelInputCreditGuide";
 import { canUseModelWithPlan, getModelUsageProfile, modelSupportsImageInput, type ModelTier } from "@/lib/models";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { getModelBrand } from "@/lib/modelBranding";
@@ -329,6 +330,7 @@ export function ModelsPageContent() {
                     label={`${content.baseCharge}: ${usageProfile.credits} ${content.creditUnit}`}
                     testId="model-page-credit-cost"
                   />
+                  {lang === "en" && <a href="#model-input-credit-guide" className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold text-blue-700 underline underline-offset-4 dark:text-blue-300">Input size and credit multipliers</a>}
                 </div>
                 <div>
                   <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.status}</p>
@@ -339,6 +341,7 @@ export function ModelsPageContent() {
             );
           })}
         </div>
+        {lang === "en" && <ModelInputCreditGuide />}
       </section>
       <MarketingFooter maxWidth="max-w-6xl" />
     </main>
