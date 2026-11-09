@@ -649,8 +649,8 @@ export async function readMarketingConsole(
         // The account and its market, for the "one a day" plan.
         channelId: post.channel.id,
         accountLocale: post.channel.defaultLocale,
-        dailyCap: marketingChannelCaps(post.channel)?.daily ?? null,
-        weeklyCap: marketingChannelCaps(post.channel)?.weekly ?? null,
+        // null: the publisher does not post to this account; a null cap inside is no cap.
+        postingCaps: marketingChannelCaps(post.channel),
         approvedAt: post.approvedAt?.toISOString() ?? null,
         approvalExpiresAt: post.approvalExpiresAt?.toISOString() ?? null,
       })),
