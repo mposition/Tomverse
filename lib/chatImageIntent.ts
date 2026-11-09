@@ -26,7 +26,9 @@ import {
     chatImageModelCandidates,
     parseChatImageIntentOutput,
     type ChatImageDecision,
+    type ChatImageIntentContext,
 } from "@/lib/chatImageIntentCore";
+import type { AiModel } from "@/lib/models";
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { imageEditEnabled } from "@/lib/imageEditSource";
 import { IMAGE_QUALITY_BY_PRESET, type ImagePreset } from "@/lib/imageGenerationPricing";
@@ -125,7 +127,7 @@ export async function readPreviousImagePrompt(
     }
 }
 
-export async function detectChatImageRequest(input: {
+type ChatImageRequestInput = {
     text: string;
     traceId: string;
     /** The Chat conversation the message is sent in, for follow-ups. */
@@ -138,12 +140,19 @@ export async function detectChatImageRequest(input: {
      * it, among the models that can, and never asks without the edit switch.
      */
     attachedPhoto?: boolean;
-}): Promise<ChatImageDecision> {
-    if (!chatImageIntentPrompt(input.text)) return NOT_IMAGE;
+};
+
+type PreparedChatImageIntent = ChatImageIntentContext & {
+    model: AiModel;
+    prices: { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number };
+};
+
+async function prepareChatImageRequest(input: ChatImageRequestInput): Promise<PreparedChatImageIntent | null> {
+    if (!chatImageIntentPrompt(input.text)) return null;
     const attachedPhoto = input.attachedPhoto === true;
-    if (attachedPhoto && !imageEditEnabled()) return NOT_IMAGE;
+    if (attachedPhoto && !imageEditEnabled()) return null;
     const configured = await chatImageTriageModelId();
-    if (!configured) return NOT_IMAGE;
+    if (!configured) return null;
 
     let model;
     let candidates;
@@ -178,9 +187,9 @@ export async function detectChatImageRequest(input: {
             });
         }
     } catch {
-        return NOT_IMAGE;
+        return null;
     }
-    if (!model || candidates.length === 0) return NOT_IMAGE;
+    if (!model || candidates.length === 0) return null;
 
     let prices: { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number };
     try {
@@ -190,7 +199,7 @@ export async function detectChatImageRequest(input: {
             outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
         };
     } catch {
-        return NOT_IMAGE;
+        return null;
     }
     // An attached photo is what the message is about; the previous image is not.
     const previous =
@@ -205,6 +214,16 @@ export async function detectChatImageRequest(input: {
     const timeoutMs = previous
         ? CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS
         : CHAT_IMAGE_INTENT_TIMEOUT_MS;
+    return { model, modelId: model.id, prices, candidates, previousImagePrompt: previous, attachedPhoto, prompt, maxOutputTokens, timeoutMs };
+}
+
+export async function detectChatImageRequest(input: ChatImageRequestInput): Promise<ChatImageDecision> {
+    const prepared = await prepareChatImageRequest(input);
+    return prepared ? runPreparedChatImageRequest(prepared, input.traceId) : NOT_IMAGE;
+}
+
+async function runPreparedChatImageRequest(prepared: PreparedChatImageIntent, traceId: string): Promise<ChatImageDecision> {
+    const { model, prices, candidates, previousImagePrompt: previous, attachedPhoto, prompt, maxOutputTokens, timeoutMs } = prepared;
     const worstCase = autoLlmRouterWorstCaseMicroUsd({
         system: CHAT_IMAGE_INTENT_SYSTEM,
         prompt,
@@ -216,7 +235,7 @@ export async function detectChatImageRequest(input: {
         console.info(
             JSON.stringify({
                 event: "chat_image_intent_skipped",
-                traceId: input.traceId,
+                traceId,
                 modelId: model.id,
                 reason: worstCase === null ? "unpriced" : "provider_budget",
             })
@@ -270,7 +289,7 @@ export async function detectChatImageRequest(input: {
     console.info(
         JSON.stringify({
             event: "chat_image_intent",
-            traceId: input.traceId,
+            traceId,
             modelId: model.id,
             outcome,
             imageModelId: decision.image ? decision.modelId : null,
@@ -295,7 +314,7 @@ export async function detectChatImageRequest(input: {
  * image flag, the account's operational access, then the Admin switch inside
  * detectChatImageRequest. Never throws.
  */
-export async function detectChatTurnImage(input: {
+type ChatTurnImageInput = {
     userId: string;
     conversationId: string;
     text: string;
@@ -305,12 +324,14 @@ export async function detectChatTurnImage(input: {
     request: Request;
     /** The message being sent carries a photo (see detectChatImageRequest). */
     attachedPhoto?: boolean;
-}): Promise<ChatImageDecision> {
+};
+
+async function prepareChatTurnImage(input: ChatTurnImageInput): Promise<PreparedChatImageIntent | null> {
     try {
-        if (!input.plan || !planAllowsFeature(input.plan, "imageGeneration")) return NOT_IMAGE;
-        if (!(await isImageGenerationEnabledCached())) return NOT_IMAGE;
+        if (!input.plan || !planAllowsFeature(input.plan, "imageGeneration")) return null;
+        if (!(await isImageGenerationEnabledCached())) return null;
         await assertUserOperationalAccess(input.userId);
-        return await detectChatImageRequest({
+        return await prepareChatImageRequest({
             text: input.text,
             traceId: input.traceId,
             userId: input.userId,
@@ -320,6 +341,39 @@ export async function detectChatTurnImage(input: {
         });
     } catch {
         // A routing aid must not fail the turn; the turn is then chat.
+        return null;
+    }
+}
+
+export async function detectChatTurnImage(input: ChatTurnImageInput): Promise<ChatImageDecision> {
+    try {
+        const prepared = await prepareChatTurnImage(input);
+        return prepared ? await runPreparedChatImageRequest(prepared, input.traceId) : NOT_IMAGE;
+    } catch {
         return NOT_IMAGE;
     }
+}
+
+/** The combined path is opt-in until routing/image quality is measured. */
+export const combinedChatImageIntentEnabled = () => process.env.CHAT_AUTO_COMBINED_INTENT_ENABLED === "true";
+
+/**
+ * Legacy starts immediately beside routing. Combined prepares the same gated
+ * context, then runs the standalone classifier only if routing did not return
+ * an image decision (disabled router, budget refusal, invalid output or error).
+ */
+export function createChatTurnImageRouting(input: ChatTurnImageInput | null, combined: boolean) {
+    const prepared = input && combined ? prepareChatTurnImage(input) : undefined;
+    let decision: ChatImageDecision | undefined;
+    let fallback = !input ? Promise.resolve(NOT_IMAGE)
+        : !combined ? detectChatTurnImage(input) : undefined;
+    return {
+        context: prepared,
+        accept: (value: ChatImageDecision) => { decision = value; },
+        resolve: (): Promise<ChatImageDecision> => {
+            if (decision) return Promise.resolve(decision);
+            return fallback ??= prepared!.then(value => value
+                ? runPreparedChatImageRequest(value, input!.traceId) : NOT_IMAGE).catch(() => NOT_IMAGE);
+        },
+    };
 }

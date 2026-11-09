@@ -125,7 +125,7 @@ test("closing archives the card, keeps its status, resolves its escalation and c
   const id = await seedCard();
   const view = await readAmuxLegacyCardView({ id, revision: 4, displayKey: null,
     sourceSystem: "tomverse_private_workboard", body: (await prisma.amuxWorkItem.findUnique({
-      where: { id }, select: { description: true } }))!.description, brief: null });
+      where: { id }, select: { description: true } }))!.description, brief: null, title: null });
   assert.equal(view?.closeRefusal, null);
   assert.equal(view?.idea.state, "ready");
 
@@ -154,10 +154,54 @@ test("closing archives the card, keeps its status, resolves its escalation and c
   assert.equal((await auditsOf(id)).length, 1);
 });
 
+test("an archived card still in the owner queue resolves only its escalation, once, with its audit entry", async () => {
+  const id = await seedCard({ archived: true });
+  const before = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id },
+    select: { revision: true, archivedAt: true } });
+  // Only its approved brief is readable: the recreate is built from it.
+  const view = await readAmuxLegacyCardView({ id, revision: 4, displayKey: "AMUX-WORKBOARD-061",
+    sourceSystem: "tomverse_private_workboard", title: "Starter guidance stays visible", body: null,
+    brief: "Keep the starter guidance sentence visible on the first screen." });
+  assert.equal(view?.closeRefusal, null);
+  assert.equal(view?.alreadyArchived, true);
+  assert.equal(view?.idea.state === "ready" && view.idea.title, "Starter guidance stays visible");
+
+  const result = await closeAmuxLegacyCardForOwner({ session: owner(), request: request(), taskId: id,
+    revision: 4, ideaId: null });
+  assert.equal(result.outcome, "closed");
+  assert.equal(result.outcome === "closed" && result.alreadyArchived, true);
+  assert.equal(result.outcome === "closed" && result.archivedAt, before.archivedAt!.toISOString());
+  // The archive and the revision stay as they were.
+  assert.deepEqual(await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id },
+    select: { revision: true, archivedAt: true } }), before);
+  const escalations = await prisma.amuxHumanEscalation.findMany({ where: { taskId: id } });
+  assert.deepEqual(escalations.map((row) => [row.status, row.resolutionOutcome, row.resolvedById]),
+    [["resolved", "block", OWNER_ID]]);
+  assert.match(escalations[0]!.resolution ?? "", /already archived/);
+  const audits = await auditsOf(id);
+  assert.equal(audits.length, 1);
+  assert.ok(audits[0]!.entryHash);
+  assert.equal((audits[0]!.metadata as Record<string, unknown>).alreadyArchived, true);
+  assert.equal((audits[0]!.metadata as Record<string, unknown>).escalationsResolved, 1);
+
+  // Nothing left open: the next close and the view say already closed, with no write.
+  assert.deepEqual(await closeAmuxLegacyCardForOwner({ session: owner(), request: request(), taskId: id,
+    revision: 4, ideaId: null }), { outcome: "refused", reason: "already_closed" });
+  assert.equal((await auditsOf(id)).length, 1);
+  assert.equal((await readAmuxLegacyCardView({ id, revision: 4, displayKey: null,
+    sourceSystem: "tomverse_private_workboard", body: "x", brief: null, title: null }))?.closeRefusal,
+    "already_closed");
+  // An archived card with no open escalation was never in the queue: refused at once.
+  const quiet = await seedCard({ archived: true, escalation: false });
+  assert.deepEqual(await closeAmuxLegacyCardForOwner({ session: owner(), request: request(), taskId: quiet,
+    revision: 4, ideaId: null }), { outcome: "refused", reason: "already_closed" });
+  assert.equal((await auditsOf(quiet)).length, 0);
+});
+
 test("a queued delivery, a changed revision or another source refuses without any write", async () => {
   const running = await seedCard({ delivery: true });
   assert.equal((await readAmuxLegacyCardView({ id: running, revision: 4, displayKey: null,
-    sourceSystem: "tomverse_private_workboard", body: "x", brief: null }))?.closeRefusal,
+    sourceSystem: "tomverse_private_workboard", body: "x", brief: null, title: null }))?.closeRefusal,
   "running");
   const stale = await seedCard();
   const intake = await seedCard({ sourceSystem: "local-agent-intake" });
@@ -213,7 +257,7 @@ test("a pre-v22 Task with no recovery path closes the same way; a v22 Task does 
     scopeOut: ["Change code"], completionCriteria: ["A report"] });
   const preV22 = await seedV4Task({ receipt: false });
   const view = await readAmuxLegacyCardView({ id: preV22, revision: 4, displayKey: "AMUX-GITHUB-002",
-    sourceSystem: "admin-idea-v4", body, brief: null });
+    sourceSystem: "admin-idea-v4", body, brief: null, title: null });
   assert.equal(view?.kind, "pre_v22_task");
   assert.equal(view?.closeRefusal, null);
   assert.match(view?.idea.state === "ready" ? view.idea.text : "", /작업 성격: 조사 \(코드 수정이 아닌 작업/);
@@ -231,7 +275,7 @@ test("a pre-v22 Task with no recovery path closes the same way; a v22 Task does 
   // A Task the Ubuntu inspection takes keeps the v22 recovery path: no view, and the close refuses.
   const v22 = await seedV4Task({ receipt: true });
   assert.equal(await readAmuxLegacyCardView({ id: v22, revision: 4, displayKey: null,
-    sourceSystem: "admin-idea-v4", body, brief: null }), null);
+    sourceSystem: "admin-idea-v4", body, brief: null, title: null }), null);
   assert.deepEqual(await closeAmuxLegacyCardForOwner({ session: owner(), request: request(), taskId: v22,
     revision: 4, ideaId: null }), { outcome: "refused", reason: "not_legacy" });
 });
@@ -240,6 +284,6 @@ test("a view built from a body whose card moved on refuses as changed, so nothin
   const id = await seedCard();
   // The detail read built the body at revision 3; the card is at 4 by the time its facts are read.
   const view = await readAmuxLegacyCardView({ id, revision: 3, displayKey: null,
-    sourceSystem: "tomverse_private_workboard", body: "x", brief: null });
+    sourceSystem: "tomverse_private_workboard", body: "x", brief: null, title: null });
   assert.equal(view?.closeRefusal, "changed");
 });

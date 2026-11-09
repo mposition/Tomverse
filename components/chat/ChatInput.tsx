@@ -260,7 +260,7 @@ export function ChatInputWebSearchChipView({
       data-tone={tone}
       data-supported-count={isAutoMode ? undefined : state.supportedCount}
       data-unsupported-count={isAutoMode ? undefined : state.unsupportedCount}
-      className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold max-[360px]:gap-1 max-[360px]:pl-2 max-[360px]:pr-0.5 ${hasManualException ? "max-[360px]:max-w-full" : "max-[360px]:max-w-[4.75rem]"} ${isMobileShell ? "h-8" : "h-9"} ${
+      className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold max-[360px]:gap-1 max-[360px]:pl-2 max-[360px]:pr-0.5 ${isMobileShell ? "h-8" : "h-9"} ${
         tone === "blocked"
           ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
           : tone === "warning"
@@ -3052,7 +3052,7 @@ export function ChatInput({
               ref={modelMenuButtonRef}
               type="button"
               onClick={(event) => toggleModelPicker(event.currentTarget)}
-              className="flex h-11 min-w-0 max-w-[4.75rem] touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:max-w-[8.5rem] md:[@media(pointer:fine)]:h-9"
+              className="flex h-11 min-w-0 max-w-[4rem] touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:max-w-[8.5rem] md:[@media(pointer:fine)]:h-9"
               data-testid="composer-model-select"
               title={isAutoMode ? autoCopy.activeSummary : activeModelNames.join(", ")}
               aria-label={
@@ -3114,6 +3114,32 @@ export function ChatInput({
   // reserve the home-indicator space twice, once above the footer notices.
   // (Above md the bar's md:py-4/md:pb-4 applies and no inset was ever added.) The
   // dock's bottom edge is the only place the inset belongs.
+  const separateStudioPicker = isStudio && (!isMobileShell || isReviewProduct);
+  const compactGuestHelp = isMobileShell && currentProduct === "chat" && showProductSwitcher;
+  const guestQuickStartInfo = isGuestMode && showGuestQuickStart && (
+    <div
+      data-testid="guest-quick-start"
+      className={compactGuestHelp ? "ml-auto flex items-center" : "mb-2 flex items-center gap-1.5 px-1"}
+    >
+      <span className={compactGuestHelp ? "sr-only" : "min-w-0 flex-1 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400"}>
+        {currentProduct === "chat"
+          ? chatProductUiCopy[lang].tryGuestChat
+          : t("chat.guestQuickLine")}
+      </span>
+      <FeatureHelpPopover
+        title={t("chat.guestQuickLineHelp")}
+        description={currentProduct === "chat"
+          ? chatProductUiCopy[lang].guestChatDescription
+          : t("chat.guestQuickLineHelpBody")}
+        buttonLabel={t("chat.guestQuickLineHelp")}
+        learnMoreLabel={helpCopy.learnMore}
+        topic="guest_trial"
+        align="right"
+        testId="guest-quick-start-help"
+      />
+    </div>
+  );
+
   return (
       <div data-chat-composer={currentProduct === "chat" ? workspaceAppearance : undefined} data-review-composer={review?.appearance === "studio" ? "studio" : undefined} className={variant === "floating"
         ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
@@ -3225,6 +3251,7 @@ export function ChatInput({
                   </span>
                 </div>
               )}
+              {compactGuestHelp && guestQuickStartInfo}
             </div>
           )}
           {isDragActive && (
@@ -3271,29 +3298,7 @@ export function ChatInput({
               </button>
             </div>
           )}
-          {isGuestMode && showGuestQuickStart && (
-            <div
-              data-testid="guest-quick-start"
-              className="mb-2 flex items-center gap-1.5 px-1"
-            >
-              <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
-                {currentProduct === "chat"
-                  ? chatProductUiCopy[lang].tryGuestChat
-                  : t("chat.guestQuickLine")}
-              </span>
-              <FeatureHelpPopover
-                title={t("chat.guestQuickLineHelp")}
-                description={currentProduct === "chat"
-                  ? chatProductUiCopy[lang].guestChatDescription
-                  : t("chat.guestQuickLineHelpBody")}
-                buttonLabel={t("chat.guestQuickLineHelp")}
-                learnMoreLabel={helpCopy.learnMore}
-                topic="guest_trial"
-                align="right"
-                testId="guest-quick-start-help"
-              />
-            </div>
-          )}
+          {!compactGuestHelp && guestQuickStartInfo}
           {isNewConversation && !value.trim() && attachments.length === 0 && personalizedPrompt && (
             <div className="mb-2 flex max-w-full flex-wrap gap-2">
               <button
@@ -3747,7 +3752,7 @@ export function ChatInput({
           // The min/max heights are in rem, not px, so a reader at 200% text
           // scaling still gets a complete first line instead of a box frozen
           // at one 16px-root line's worth of height.
-          className={`w-full min-w-0 max-h-[5.75rem] min-h-11 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 text-base leading-[1.625rem] text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[12.5rem] md:min-h-16 md:px-1 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
+          className={`w-full min-w-0 max-h-[5.75rem] min-h-11 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 text-base leading-[1.625rem] text-zinc-900 outline-none placeholder:text-zinc-600 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-400 md:max-h-[12.5rem] md:min-h-16 md:px-1 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
         />
         </div>
         {/*
@@ -3800,7 +3805,7 @@ export function ChatInput({
           </button>
           {showWebSearchInFooter && webSearchChip}
           {isStudio && !webSearchState.isVisible && <button type="button" data-testid="composer-web-search-shortcut" className="review-search-shortcut" onClick={() => onWebSearchModeChange?.("always")}><Globe2 className="h-4 w-4" aria-hidden="true" />{t("chat.toolsWebSearch")}</button>}
-          {!isStudio && (review && footerModelPicker ? <div data-testid="composer-review-models" className="flex min-w-0">
+          {!separateStudioPicker && (review && footerModelPicker ? <div data-testid="composer-review-models" className="flex min-w-0">
             {footerModelPicker}
             <span className="sr-only">{activeSelectedModelObjects.map(model => <span key={model.id} className="sr-only" data-testid="composer-review-selected-model" data-model-id={model.id}>{model.name}</span>)}</span>
           </div> : footerModelPicker)}
@@ -3920,7 +3925,7 @@ export function ChatInput({
           )}
         </div>
 
-          {isStudio && footerModelPicker && <div className="basis-full">{footerModelPicker}</div>}
+          {separateStudioPicker && footerModelPicker && <div className="basis-full">{footerModelPicker}</div>}
           {isMenuOpen && (
             <ComposerMenuPortal>
             <>
@@ -4862,8 +4867,8 @@ export function ChatInput({
           // the same supporting-text role, which already measures above AA.
           // The previous zinc-400/zinc-500 pair composited to 2.62:1 on the
           // light composer surface and 3.67:1 on the dark one -- both below
-          // the 4.5:1 this 11-12px, 400-weight body text requires.
-          className="mt-1.5 px-2 text-center text-[11px] leading-4 text-zinc-600 dark:text-zinc-300 md:text-xs"
+          // the 4.5:1 this supporting body text requires.
+          className={`mt-1.5 px-2 text-center ${currentProduct === "chat" ? "text-sm leading-5" : "text-[11px] leading-4 md:text-xs"} text-zinc-600 dark:text-zinc-300`}
         >
           {t("chat.aiDisclaimer")}
         </p>
