@@ -681,3 +681,36 @@ for (const [width, theme] of [[1600, "light"], [430, "dark"]] as const) {
     await expect(page.getByTestId("chat-textarea")).toBeEnabled();
   });
 }
+
+for (const [width, theme] of [[320, "light"], [430, "dark"]] as const) {
+  test(`phone Review reserves navigation space above the safe area at ${width}px ${theme}`, async ({ page }) => {
+    await prepare(page, width, theme);
+    await page.addStyleTag({ content: "nextjs-portal { display:none!important; }" });
+    const input = page.getByTestId("chat-textarea");
+    const navigation = page.locator(".review-navigation");
+    for (const height of [932, 568]) {
+      await page.setViewportSize({ width, height });
+      await expect(navigation).toBeVisible();
+      const workspace = await page.locator(".review-workspace-section").boundingBox();
+      const nav = await navigation.boundingBox();
+      expect(workspace!.y + workspace!.height).toBeLessThanOrEqual(nav!.y);
+      expect(nav!.y + nav!.height).toBeLessThanOrEqual(height);
+      for (const locator of [input, page.getByTestId("chat-send-button"), page.getByTestId("chat-ai-disclaimer")]) {
+        await locator.scrollIntoViewIfNeeded();
+        await expect(locator).toBeVisible();
+        expect(await locator.evaluate(element => {
+          const rect = element.getBoundingClientRect();
+          const workspace = document.querySelector(".review-workspace-section")!.getBoundingClientRect();
+          const navigation = document.querySelector(".review-navigation")!.getBoundingClientRect();
+          return rect.top >= workspace.top - 1 && rect.bottom <= workspace.bottom + 1 && rect.bottom <= navigation.top;
+        })).toBe(true);
+      }
+      await input.fill("Keep this mobile Review draft.");
+      await expect(navigation).toBeHidden();
+      await input.blur();
+      await expect(navigation).toBeVisible();
+      await expect(input).toHaveValue("Keep this mobile Review draft.");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    }
+  });
+}
