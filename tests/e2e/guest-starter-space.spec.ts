@@ -12,6 +12,9 @@ for (const appearance of ["classic", "studio"] as const) for (const theme of ["l
     await prepareGuestPage(page, "en", "classic", appearance);
     await setDeterministicTheme(page, theme);
     await suppressTransientUi(page);
+    // The readable (stacked) consent notice occupies the dock on /chat; this test
+    // measures starter space, not the notice, so settle the choice up front.
+    await page.addInitScript(() => window.localStorage.setItem("tomverse_analytics_consent_v1", "accepted"));
     await page.context().addCookies([
       { name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL! },
       { name: "__tomverse_e2e_chat_starter", value: "1", url: baseURL! },
