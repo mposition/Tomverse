@@ -26,7 +26,9 @@ export function copilotQuota(provider, { spawnChild = spawn, sourceEnv = process
   if (provider.passEnv?.includes("COPILOT_GITHUB_TOKEN") && !token) return Promise.resolve(UNKNOWN);
   return new Promise((resolve) => {
     const args = ["--headless", "--stdio", "--no-auto-update",
-      "--disable-builtin-mcps", "--no-custom-instructions", "--no-remote", "--no-remote-export"];
+      "--disable-builtin-mcps", "--no-custom-instructions", "--no-remote-export"];
+    // Not `--no-remote`: Copilot CLI 1.0.107 removed it and exits 1 on it. The probe
+    // sends no prompt and is killed when it answers, so remote control has nothing to reach.
     // Match the SDK: disabling automatic login also disables stored CLI auth.
     if (token) args.push("--no-auto-login", "--auth-token-env", "COPILOT_GITHUB_TOKEN", "--secret-env-vars", "COPILOT_GITHUB_TOKEN");
     const child = spawnChild(provider.command, args, {

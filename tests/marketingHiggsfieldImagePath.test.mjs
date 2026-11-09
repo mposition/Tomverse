@@ -82,10 +82,23 @@ test("the ledger adds every admitted call and refuses the one that would pass th
 });
 
 /** A fake Higgsfield CLI: answers by subcommand and records every call. */
+// `higgsfield generate wait --help` on the box (2026-11-09): these flags and no
+// others; an unknown one makes the CLI exit 1 at once.
+const WAIT_FLAGS = new Set(["--timeout", "--interval", "--quiet", "-q", "--json", "--no-color"]);
+const WAIT_VALUED = new Set(["--timeout", "--interval"]);
+function unknownWaitFlag(args) {
+  for (let index = 3; index < args.length; index += 1) {
+    if (!WAIT_FLAGS.has(args[index])) return args[index];
+    if (WAIT_VALUED.has(args[index])) index += 1;
+  }
+  return null;
+}
+
 function fakeCli(script) {
   const calls = [];
   const cli = (args) => {
     calls.push(args);
+    if (args[1] === "wait" && unknownWaitFlag(args)) return { status: 1, stdout: "", stderr: `unknown flag: ${unknownWaitFlag(args)}`, timedOut: false };
     const answer = script[args[1]];
     const value = typeof answer === "function" ? answer(args, calls) : answer;
     return value ?? { status: 1, stdout: "", stderr: "unexpected", timedOut: false };
@@ -101,17 +114,52 @@ test("a picture is priced, recorded, created, waited for and written", async () 
     const fake = fakeCli({
       cost: ok({ credits: 0.25 }),
       create: ok([{ id: "job-a", status: "queued" }]),
-      wait: ok([{ id: "job-a", status: "completed", result: { images: [{ url: "https://cdn.example/a.png" }] } }]),
+      // The shape `generate get --json` answered on the box (2026-11-09): the
+      // small preview and the uploaded references come before the picture.
+      wait: ok({
+        created_at: "2026-11-08T19:02:48.25575Z",
+        display_name: "GPT Image 2.6",
+        id: "job-a",
+        job_type: "gpt_image_2_6",
+        min_result_url: "https://cdn.example/hf_job-a_min.webp",
+        params: { aspect_ratio: "4:5", medias: [{ data: { type: "media_input", url: "https://cdn.example/reference.png" }, role: "image" }], quality: "low" },
+        result_url: "https://cdn.example/hf_job-a.png",
+        status: "completed",
+      }),
     });
     const out = join(jobDir, "a.png");
-    const made = await makeImage({ prompt: "scene", out, label: "c1/en/make", jobDir, day: DAY, env: capEnv("1"), cli: fake.cli, fetchBytes: async () => PNG });
+    const fetched = [];
+    const fetchBytes = async (url) => (fetched.push(url), PNG);
+    const made = await makeImage({ prompt: "scene", out, label: "c1/en/make", jobDir, day: DAY, env: capEnv("1"), cli: fake.cli, fetchBytes });
     assert.deepEqual({ ok: made.ok, jobId: made.jobId }, { ok: true, jobId: "job-a" });
     assert.ok(existsSync(out));
+    assert.deepEqual(fetched, ["https://cdn.example/hf_job-a.png"], "the full-size picture, not the preview or a reference");
+    const wait = fake.calls.find((args) => args[1] === "wait");
+    assert.deepEqual(wait.slice(0, 5), ["generate", "wait", "job-a", "--timeout", "20m"]);
     const [entry] = readLedger(ledgerPath(jobDir, DAY)).entries;
     assert.deepEqual({ status: entry.status, jobId: entry.jobId, cost: entry.cost, label: entry.label }, { status: "done", jobId: "job-a", cost: 0.25, label: "c1/en/make" });
     const create = fake.calls.find((args) => args[1] === "create");
     assert.deepEqual(create.slice(0, 7), ["generate", "create", "gpt_image_2_6", "--prompt", create[4], "--aspect_ratio", "4:5"]);
     assert.ok(!create.includes("--wait"), "create returns the job id at once; waiting is a separate call");
+  } finally {
+    rmSync(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("a finished job with only a preview or reference URLs writes nothing, and its cost stays counted", async () => {
+  const jobDir = tempJob();
+  try {
+    const fake = fakeCli({
+      cost: ok({ credits: 0.25 }),
+      create: ok({ id: "job-p" }),
+      wait: ok({ id: "job-p", min_result_url: "https://cdn.example/hf_job-p_min.webp", params: { medias: [{ data: { url: "https://cdn.example/reference.png" } }] }, status: "completed" }),
+    });
+    const out = join(jobDir, "p.png");
+    const made = await makeImage({ prompt: "scene", out, label: "c1/en/make", jobDir, day: DAY, env: capEnv("1"), cli: fake.cli, fetchBytes: async () => PNG });
+    assert.equal(made.reason, "no_result_url");
+    assert.equal(existsSync(out), false);
+    const [entry] = readLedger(ledgerPath(jobDir, DAY)).entries;
+    assert.deepEqual({ status: entry.status, cost: entry.cost }, { status: "done", cost: 0.25 });
   } finally {
     rmSync(jobDir, { recursive: true, force: true });
   }

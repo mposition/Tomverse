@@ -5,7 +5,7 @@ import { after, before, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { SYSTEM_AUDIT_ACTOR_METADATA_KEY } from "@/lib/adminAuditSystemActors";
-import { unknownOutcomeDecisionCauseKey } from "@/lib/engineeringAgentCore";
+import { OWNER_QUEUE_LIMITS, unknownOutcomeDecisionCauseKey } from "@/lib/engineeringAgentCore";
 import {
   ENGINEERING_AGENT_AUDIT_ACTIONS,
   EngineeringAgentStoreRefusedError,
@@ -53,8 +53,8 @@ import { prisma } from "@/lib/prisma";
 // TEST_DATABASE_URL means this file was not executed, not that it passed.
 //
 // It does not depend on file order: engineering-agent-schema.db.test.ts may
-// run first and leave the first T1 window open (one pull request at a time),
-// so every test here closes what it opens -- runs ended, publish items
+// run first, and the owner queues are shared, so every test here closes what
+// it opens -- runs ended, publish items
 // settled, bindings pruned, decisions acknowledged -- before the next starts.
 
 const requireDedicatedDatabase = () => {
@@ -291,7 +291,6 @@ const promotionInput = (pending: Awaited<ReturnType<typeof pendingDraftFor>>) =>
 
 test("a v22 draft settled before its tier is promoted to its run's one publish item", async () => {
   const pending = await pendingDraftFor("promoted patch");
-  // Started now: once the first is promoted, no run starts in the first T1 window.
   const waiting = await pendingDraftFor("waiting patch");
   assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
     where: { id: pending.draft.id } })).reason, "tier_pending");
@@ -333,12 +332,20 @@ test("a v22 draft settled before its tier is promoted to its run's one publish i
     expectedTreeId: sha1("tree"),
   })), /a run has one product/);
 
-  // The first T1 window holds one pull request: a second promotion waits.
+  // With the promoted publish item and active runs in every other place,
+  // the pull request queue is full: a second promotion waits.
+  const fillers = [];
+  while (fillers.length < OWNER_QUEUE_LIMITS.pr - 1) fillers.push(await startRun());
   await assert.rejects(inTx((tx) =>
     resolveEngineeringAgentV22Product(tx, promotionInput(waiting))),
   /the owner queue is full/);
   assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
     where: { id: waiting.draft.id } })).reason, "tier_pending");
+  for (const run of fillers) {
+    await inTx((tx) => endEngineeringAgentRun(tx, {
+      runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "none",
+    }));
+  }
 
   const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, {
     workItemId: resolved.publishWorkItemId, mode: "write", leaseMs: 60_000,
@@ -1081,16 +1088,21 @@ test("turning the mode on from off passes the armed gate; turning it off and fre
 });
 
 test("the owner-queue reading agrees with the run trigger", async () => {
-  // Mode t1, and a t1 run already started in this database: the first T1
-  // window allows one pull request, and an active run counts as one.
-  assert.equal((await readEngineeringAgentOwnerQueues(prisma, "t1")).claimAllowed, true);
-  const run = await startRun();
-  const full = await readEngineeringAgentOwnerQueues(prisma, "t1");
+  // An active run counts in both queues; with every place taken by one, the
+  // reading and the trigger both say full.
+  const runs = [];
+  while (runs.length < OWNER_QUEUE_LIMITS.pr) {
+    assert.equal((await readEngineeringAgentOwnerQueues(prisma)).claimAllowed, true);
+    runs.push(await startRun());
+  }
+  const full = await readEngineeringAgentOwnerQueues(prisma);
   assert.equal(full.claimAllowed, false, "the reading says full");
   // The trigger refuses with its own message, not a store code.
   await assert.rejects(startRun(), /owner queue is full/);
-  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "none" }));
-  assert.equal((await readEngineeringAgentOwnerQueues(prisma, "t1")).claimAllowed, true);
+  for (const run of runs) {
+    await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "none" }));
+  }
+  assert.equal((await readEngineeringAgentOwnerQueues(prisma)).claimAllowed, true);
 });
 
 test("the armed gate opens on the services' own finishes and a person's monitor record, and a person clears a halt", async () => {
