@@ -577,7 +577,9 @@ test.describe("guest initial cost hydration", () => {
       .toHaveText("Auto");
     await expect(page.getByTestId("composer-model-select")).toHaveAccessibleName(/Auto.*Smart Adaptive/);
     await expect(page.getByTestId("request-credit-estimate")).toHaveCount(0);
-    await page.getByRole("button", { name: "Choose AI models" }).click();
+    // The mobile header summary also carries "Choose AI models" in its name;
+    // this step opens the composer picker it controls.
+    await page.getByTestId("composer-model-select").click();
     const dialog = page.locator("#chat-input-popover");
     await expect(dialog.getByTestId("auto-routing-toggle").getByRole("switch"))
       .toHaveAttribute("aria-checked", "true");
@@ -854,6 +856,33 @@ test.describe("guest initial cost hydration", () => {
         .toBe("manual");
       expect(requests).toHaveLength(1);
     } finally { releaseCapability(); }
+  });
+
+  test("Guest Auto header opens model selection without toggling the composer mode", async ({ page, baseURL }, info) => {
+    test.skip(!info.project.name.startsWith("mobile"), "Mobile header interaction.");
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL! }]);
+    await page.route("**/api/products/chat/capabilities", route => route.fulfill({ json: {
+      autoSelection: { offered: true }, guestAutoCapability: "qa-header-mode-separation", guestAuto: { attachmentSupport: "manual_only" },
+    } }));
+    await page.goto("/chat?lang=en");
+    const header = page.getByTestId("mobile-header-model-summary");
+    const mode = page.getByTestId("composer-auto-routing-toggle");
+    await expect(mode).toHaveAttribute("aria-checked", "true");
+    await expect(header).toContainText("Choose AI models");
+    await expect(header).toHaveAccessibleName(/Choose AI models.*Smart Adaptive/);
+    await expect(mode).toHaveAccessibleName("Smart Adaptive");
+    await header.click();
+    const picker = page.locator("#chat-input-popover");
+    await expect(picker).toBeVisible();
+    await expect(picker.getByTestId("auto-routing-toggle").getByRole("switch")).toHaveAttribute("aria-checked", "true");
+    await expect(mode).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
+    await expect(picker).toBeHidden();
+    await mode.click();
+    await expect(mode).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   });
 
   test("Guest Auto manual choice survives a local conversation reload", async ({ page }) => {
