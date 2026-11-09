@@ -920,7 +920,7 @@ export function MobileChatShell({
   const isAutoMode = selectionMode === "auto";
   const autoCopy = autoRoutingCopy[lang];
   const modelSummaryLabel = isAutoMode
-    ? `${autoCopy.activeSummary}. ${summaryCopy.openPicker}.`
+    ? `${t("chat.modelSelect")}. ${autoCopy.activeSummary}.`
     : summaryCopy.accessibleName({
         primaryModelName: modelSummary.primary?.name ?? null,
         extraActiveCount: modelSummary.extraActiveCount,
@@ -1344,7 +1344,7 @@ export function MobileChatShell({
                   data-testid="mobile-header-auto-mode"
                   className="min-w-0 truncate"
                 >
-                  {autoCopy.label}
+                  {t("chat.modelSelect")}
                 </span>
               </>
             ) : isMultiModelConversation ? (
