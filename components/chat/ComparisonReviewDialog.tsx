@@ -20,6 +20,7 @@ import { useGuestVerification } from "@/components/chat/GuestVerificationProvide
 import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { ComparisonReviewWorkspace } from "@/components/chat/ComparisonReviewWorkspace";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { readReviewProgress, REVIEW_STREAM_TYPE } from "@/lib/comparisonReviewProgress";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import {
   toSourceGrounding,
@@ -629,6 +630,7 @@ export function ComparisonReviewDialog({
     }
     setRunning(true);
     setError("");
+    let receivedPrimary = false;
     trackProductEvent(
       "comparison_review_started",
       setup.responses?.length || 0,
@@ -638,7 +640,7 @@ export function ComparisonReviewDialog({
       const sendGuestRun = (turnstileToken?: string) =>
         fetch("/api/chat/comparison-review", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", Accept: REVIEW_STREAM_TYPE },
           cache: "no-store",
           body: JSON.stringify({
             question: guestSource!.question,
@@ -657,7 +659,7 @@ export function ComparisonReviewDialog({
             `/api/conversations/${conversationId}/comparison-reviews`,
             {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", Accept: REVIEW_STREAM_TYPE },
               body: JSON.stringify({
                 promptMessageId: setup.promptMessageId,
                 assistantMessageIds: setup.assistantMessageIds,
@@ -676,7 +678,13 @@ export function ComparisonReviewDialog({
           response = await sendGuestRun(token);
         }
       }
-      const data = (await response.json().catch(() => ({}))) as
+      const data = (await readReviewProgress(response, value => {
+        const primary = value as ComparisonReview;
+        if (!primary?.result?.primary || !Array.isArray(primary.responseMap)) return;
+        receivedPrimary = true;
+        setReview(primary);
+        setActiveReviewer("primary");
+      })) as
         | ComparisonReview
         | { error?: string; traceId?: string; code?: string };
       if (!response.ok || !("result" in data)) {
@@ -723,12 +731,13 @@ export function ComparisonReviewDialog({
         { review_mode: mode }
       );
       setError(
-        runError instanceof Error ? runError.message : t("chat.aiReviewFailed")
+        receivedPrimary ? t("chat.aiReviewPartialInterrupted") :
+          runError instanceof Error ? runError.message : t("chat.aiReviewFailed")
       );
       // The failed run released its idempotency claim server-side, so a real
       // retry needs a real new key rather than re-presenting one the server
       // may still be holding.
-      idempotencyKeyRef.current = crypto.randomUUID();
+      if (!receivedPrimary) idempotencyKeyRef.current = crypto.randomUUID();
     } finally {
       setRunning(false);
     }
@@ -796,6 +805,12 @@ export function ComparisonReviewDialog({
               const activeResult = activeEntry.result;
               return (
                 <div className="space-y-4">
+                  {running && (
+                    <p role="status" data-testid="ai-review-secondary-pending" className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+                      <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+                      {t("chat.aiReviewSecondaryPending")}
+                    </p>
+                  )}
                   <div
                     data-testid="ai-review-result"
                     className="space-y-5 rounded-2xl border border-tomverse-review-border bg-tomverse-review-surface p-4 sm:p-5"
@@ -918,7 +933,7 @@ export function ComparisonReviewDialog({
                         responseMap={review.responseMap}
                         source={guestSource ?? setup?.source}
                         renderActions={(item) => <>
-                          {item.section === "verificationNeeded" && (
+                          {item.section === "verificationNeeded" && !running && (isGuestReview || review.persisted !== false) && (
                             isGuestReview || review.webVerificationAvailable === false ? (
                               <p data-testid={isGuestReview ? "ai-review-verify-guest-locked" : "ai-review-verify-unavailable"} className="mb-3 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
                                 <Lock size={16} />{t(isGuestReview ? "chat.guestAiReviewVerifySignIn" : "chat.aiReviewWebUnavailable")}
