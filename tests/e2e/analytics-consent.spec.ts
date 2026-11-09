@@ -27,7 +27,10 @@ test("English consent scopes excluded content to product analytics", async ({ pa
     await expect(notice).toContainText("Prompts, responses, filenames, and file contents are never included.", { useInnerText: true });
   }
   const accept = notice.getByRole("button", { name: "Allow analytics", exact: true });
-  await expect(accept).toHaveText("Allow analytics", { useInnerText: true });
+  // The accessible name stays the full label; a compact phone notice shows
+  // the short one so copy and actions keep one row inside the 80px contract
+  // (marketing-consent-hero, analytics-consent-signin).
+  await expect(accept).toHaveText(isMobile ? "Allow" : "Allow analytics", { useInnerText: true });
   expect(events).toBe(0);
   await accept.click();
   await expect(notice).toBeHidden();
@@ -93,7 +96,7 @@ test("mobile analytics consent stays compact with one-row actions", async ({
 
   const decline = banner.getByRole("button", { name: "Decline" });
   const accept = banner.getByRole("button", { name: "Allow analytics" });
-  await expect(accept).toHaveText("Allow analytics", { useInnerText: true });
+  await expect(accept).toHaveText("Allow", { useInnerText: true });
   const [bannerBox, declineBox, acceptBox] = await Promise.all([
     banner.boundingBox(),
     decline.boundingBox(),
