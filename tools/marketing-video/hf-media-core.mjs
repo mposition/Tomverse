@@ -97,7 +97,7 @@ export function isMedia(bytes, model) {
  * Makes one image, clip or music bed and writes it to `out`.
  * @returns {Promise<{ok: true, jobId: string, cost: number, out: string} | {ok: false, reason: string, detail?: object}>}
  */
-export async function makeMedia({ request, out, label, jobDir, env = process.env, cli = cliRunner(env), fetchBytes = defaultFetch, day = brisbaneDay() }) {
+export async function makeMedia({ request, out, label, jobDir, env = process.env, cli = cliRunner(env), fetchBytes = defaultFetch, day = brisbaneDay(), today }) {
   const problem = creativeRequestProblem(request);
   if (problem) return { ok: false, reason: problem };
   const file = creativeLedgerPath(jobDir, day);
@@ -120,7 +120,7 @@ export async function makeMedia({ request, out, label, jobDir, env = process.env
   const ceiling = CALL_CEILING[request.model];
   if (cost > ceiling) return { ok: false, reason: "cost_above_call_ceiling", detail: { cost, ceiling } };
 
-  const admitted = admit({ jobDir, day, env, request, label, cost, policy: policyFor(request.model), file });
+  const admitted = admit({ jobDir, day, env, request, label, cost, policy: policyFor(request.model), file, today });
   if (!admitted.ok) return admitted;
   const { entry } = admitted;
 
