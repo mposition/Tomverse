@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { Check, Plus, Puzzle, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
+import { Check, Menu, Plus, Puzzle, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { ReviewNavigation } from "@/components/chat/ReviewStudioChrome";
 import { MarketingConsentSlot } from "@/components/analytics/AnalyticsProvider";
@@ -11,6 +11,7 @@ import { useModalDialog } from "@/components/useModalDialog";
 import { PluginLogo } from "./PluginLogo";
 import { mcpConnectorCopy } from "@/lib/mcpConnectorCopy";
 import { mcpProviderCopy } from "@/lib/mcpProviderCopy";
+import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { mcpProvider, type McpProvider, type McpProviderCategory } from "@/lib/mcpProviderCatalog";
 import { PLUGIN_PROVIDERS, EMPTY_PLUGIN_INVENTORY, readPluginInventory, type PluginInventory, type PluginServer, type PluginConnection } from "@/lib/mcpConnectorClientContract";
 import "@/components/chat/review-studio.css";
@@ -19,7 +20,7 @@ import styles from "./pluginWorkspace.module.css";
 const featuredProviders = ["github", "railway", "slack", "notion", "linear", "figma", "canva", "atlassian", "sentry", "cloudflare"];
 
 export function PluginWorkspace() {
-  const { lang } = useLanguage(); const c = mcpConnectorCopy[lang]; const p = mcpProviderCopy[lang]; const router = useRouter();
+  const { lang, t } = useLanguage(); const c = mcpConnectorCopy[lang]; const p = mcpProviderCopy[lang]; const n = reviewWorkspaceCopy[lang]; const router = useRouter();
   const [inventory, setInventory] = useState<PluginInventory>(EMPTY_PLUGIN_INVENTORY);
   const [loading, setLoading] = useState(true), [signInRequired, setSignInRequired] = useState(false);
   const [error, setError] = useState<string | null>(null), [busy, setBusy] = useState(false), [notice, setNotice] = useState<string | null>(null);
@@ -104,7 +105,25 @@ export function PluginWorkspace() {
       <p className={styles.help}>{c.setupNotice}</p>
     </aside>
     <main className={styles.main}>
-      <header className={styles.header}><div><h1>{c.title}</h1><p>{c.subtitle}</p></div>
+      <header className={styles.header}>
+        <details className={styles.mobileNavigation} onKeyDown={event => {
+          if (event.key === "Escape") {
+            event.currentTarget.open = false;
+            event.currentTarget.querySelector("summary")?.focus();
+          }
+        }} onBlur={event => {
+          if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+        }}>
+          <summary data-testid="plugin-navigation-menu" aria-label={t("sidebar.expand")}><Menu size={20} aria-hidden="true" /><span>Tomverse</span></summary>
+          <nav aria-label="Tomverse" data-testid="plugin-mobile-navigation">
+            <Link href={`/review?lang=${lang}`}>{n.newTask}</Link>
+            <Link href={`/review?lang=${lang}`}>Review</Link>
+            <Link href={`/chat?lang=${lang}`}>Chat</Link>
+            <Link href={`/plugins?lang=${lang}`} aria-current="page">{c.title}</Link>
+            <Link href={`/review?lang=${lang}&settings=account`}>{n.settings}</Link>
+          </nav>
+        </details>
+        <div><h1>{c.title}</h1><p>{c.subtitle}</p></div>
         <div className={styles.actions}><button type="button" className={styles.iconButton} disabled={busy || loading} onClick={() => { setError(null); void refresh().catch(() => setError(c.error)); }} aria-label={c.refresh}><RefreshCw size={18} /></button>
           <button type="button" className={styles.primary} onClick={() => openAdd()} disabled={!inventory.enabled || signInRequired || busy}><Plus size={18} />{c.add}</button></div></header>
       <MarketingConsentSlot />

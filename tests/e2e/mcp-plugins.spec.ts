@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { prepareGuestPage, mockAuthenticatedApi, expectNoHorizontalOverflow } from "./support/app-fixtures";
 import { installChatModelStub, restoreActiveConversation, setDeterministicTheme } from "./support/chat-state-fixtures";
+import { expectAccessibleContrast } from "./support/ui-audit";
 
 test.setTimeout(120_000);
 const tools = [{ name: "search", mode: "read" }, { name: "create_note", mode: "confirm" }];
@@ -52,6 +53,35 @@ for (const theme of ["light", "dark"] as const) {
     expect(writes).toBe(0);
   });
 }
+
+test("@ui-risk mobile plugin header exposes global navigation and the current page", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "The header menu is a mobile entry point.");
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.route("**/api/mcp/connections", route => route.fulfill({ json: { enabled: true, servers: [], connections: [], invocations: [] } }));
+  await page.goto("/plugins?lang=ko");
+  const trigger = page.getByTestId("plugin-navigation-menu");
+  const navigation = page.getByTestId("plugin-mobile-navigation");
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await expect(navigation).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "플러그인", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(navigation.getByRole("link", { name: "Chat", exact: true })).toHaveAttribute("href", "/chat?lang=ko");
+  await expect(navigation.getByRole("link", { name: "Review", exact: true })).toHaveAttribute("href", "/review?lang=ko");
+  await expect(navigation.getByRole("link", { name: "설정", exact: true })).toHaveAttribute("href", "/review?lang=ko&settings=account");
+  await expectNoHorizontalOverflow(page);
+  await page.keyboard.press("Escape");
+  await expect(navigation).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await trigger.press("Enter");
+  await expect(navigation).toBeVisible();
+  await navigation.getByRole("link", { name: "Chat", exact: true }).click();
+  await expect(page).toHaveURL(/\/chat\?lang=ko$/, { timeout: 15_000 });
+  await page.goto("/plugins?lang=ko");
+  await trigger.click();
+  await navigation.getByRole("link", { name: "설정", exact: true }).click();
+  await expect(page).toHaveURL(/\/review(?:\?|$)/, { timeout: 15_000 });
+  await expect(page.getByRole("dialog", { name: /User Settings|사용자 설정/ })).toBeVisible({ timeout: 10_000 });
+});
 test("@ui-risk Chat sends a connector only after an explicit conversation selection", async ({ page }) => {
   await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-5-6-luna"], selectionMode: "manual", messages: [] });
   await restoreActiveConversation(page);
@@ -140,7 +170,8 @@ test("@ui-risk disabled preview and add dialog remain accessible without exposin
   await page.screenshot({ path: test.info().outputPath("plugins-disabled.png"), fullPage: true });
 });
 
-test("@ui-risk provider catalog searches both directories without presenting listings as live connections", async ({ page }) => {
+test("@ui-risk provider catalog searches both directories without presenting listings as live connections", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 800 });
   let requests = 0;
   await page.route("**/api/mcp/**", route => {
     if (route.request().method() !== "GET") requests++;
@@ -151,6 +182,20 @@ test("@ui-risk provider catalog searches both directories without presenting lis
   await search.fill("Figma");
   const card = page.getByTestId("plugin-card").filter({ has: page.getByRole("heading", { name: "Figma", exact: true }) });
   await expect(card).toBeVisible();
+  for (const theme of ["light", "dark"] as const) {
+    await page.locator("html").evaluate((element, value) => element.classList.toggle("dark", value === "dark"), theme);
+    const category = card.locator("p").first();
+    const setup = card.getByText("서버 설정 필요", { exact: true });
+    await expect(category).toHaveCSS("font-size", "14px");
+    await expect(setup).toHaveCSS("font-size", "13px");
+    const badges = card.locator("span").filter({ hasText: /^(Codex|Claude Code)$/ });
+    expect(await badges.count()).toBeGreaterThan(0);
+    for (const badge of await badges.all()) await expect(badge).toHaveCSS("font-size", "12px");
+    for (const text of [category, setup, ...await badges.all()]) {
+      const sample = await expectAccessibleContrast(text, `${theme} plugin card text`);
+      expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+    }
+  }
   await expect(card.locator("img")).toHaveAttribute("src", "/plugins/providers/figma.png");
   await expect(card.getByRole("button", { name: "연결", exact: true })).toHaveCount(0);
   await card.getByRole("button", { name: "상세 정보" }).click();
