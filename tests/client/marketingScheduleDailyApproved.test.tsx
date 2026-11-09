@@ -28,8 +28,7 @@ const row = (id: string, overrides: Record<string, unknown> = {}) => ({
   channelId: "ig-ko",
   accountSlug: "tomverse-ko",
   accountLocale: "ko",
-  dailyCap: 1,
-  weeklyCap: 4,
+  postingCaps: { daily: 1, weekly: 4 },
   approvedAt: "2026-11-07T00:00:00.000Z",
   approvalExpiresAt: "2026-11-30T00:00:00.000Z",
   envelopeDigest: id.repeat(64).slice(0, 64),
@@ -42,7 +41,7 @@ const rows = () => [
   row("b", { approvedAt: "2026-11-07T01:00:00.000Z" }),
   row("c", { approvedAt: "2026-11-07T02:00:00.000Z" }),
   row("d", { channel: "linkedin", channelId: "li-en", accountSlug: "tomverse-en", accountLocale: "en" }),
-  row("m", { provider: "manual", channelId: "manual", dailyCap: null }),
+  row("m", { provider: "manual", channelId: "manual", postingCaps: null }),
   row("s", { status: "scheduled" }),
 ];
 
