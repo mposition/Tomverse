@@ -115,6 +115,14 @@ export function useAuthConsentSlotRef(): AuthConsentSlotSetter {
   return register || (() => {});
 }
 
+const SettingsConsentSlotContext = createContext<AuthConsentSlotSetter | null>(null);
+
+/** Reserve document space for consent throughout the settings route shell. */
+export function SettingsConsentSlot() {
+  const register = useContext(SettingsConsentSlotContext);
+  return <div ref={register} data-testid="settings-consent-slot" className="px-4 py-2 empty:hidden" />;
+}
+
 // Marketing pages register a slot directly under the sticky header. Before
 // FINAL-F001 the notice stayed a bottom-anchored viewport-fixed card there,
 // which at <=360px wide viewports landed exactly on the hero's primary CTA:
@@ -189,7 +197,7 @@ const consentCopy: Record<
   en: {
     title: "Privacy-safe product analytics",
     body: "With your permission, Tomverse measures product usage and campaign attribution. Prompts, responses, filenames, and file contents are never included.",
-    mobileBody: "Help improve Tomverse. Prompts and file contents are never collected.",
+    mobileBody: "Usage analytics excludes prompts and file content.",
     accept: "Allow analytics",
     acceptShort: "Allow",
     decline: "Decline",
@@ -198,7 +206,7 @@ const consentCopy: Record<
     settings: "Analytics settings",
     noticeTitle: "Privacy-safe analytics is on",
     noticeBody: "In this region, Tomverse starts privacy-minimized product analytics with a clear opt-out. Prompts, responses, filenames, and file contents are never included, and advertising storage stays off.",
-    noticeMobileBody: "Analytics is on. Prompts and files are never collected.",
+    noticeMobileBody: "Usage analytics is on; prompts and file content are excluded.",
     keepOn: "Keep analytics on",
     keepOnShort: "Keep",
     turnOff: "Turn off analytics",
@@ -206,10 +214,10 @@ const consentCopy: Record<
   },
   ko: {
     title: "개인정보를 보호하는 제품 분석",
-    body: "동의하면 Tomverse가 제품 사용과 캠페인 유입을 측정합니다. 프롬프트, 응답, 파일명 및 파일 내용은 절대 포함하지 않습니다.",
-    mobileBody: "Tomverse 개선에 동의하시겠어요? 질문과 파일 내용은 수집하지 않습니다.",
-    accept: "분석 허용",
-    acceptShort: "허용",
+    body: "동의하면 기능 사용·유입 경로 통계를 수집해 Tomverse를 개선합니다. 프롬프트, 응답, 파일명 및 파일 내용은 포함하지 않습니다.",
+    mobileBody: "기능 사용·유입 경로 통계를 수집해 제품을 개선합니다. 질문·파일 내용은 제외합니다.",
+    accept: "사용 통계 허용",
+    acceptShort: "통계 허용",
     decline: "거부",
     declineShort: "거부",
     privacy: "개인정보 처리방침",
@@ -397,6 +405,7 @@ export function AnalyticsProvider({
   const [authConsentSlot, setAuthConsentSlot] = useState<HTMLDivElement | null>(
     null
   );
+  const [settingsConsentSlot, setSettingsConsentSlot] = useState<HTMLDivElement | null>(null);
   const [marketingConsentSlot, setMarketingConsentSlot] =
     useState<HTMLDivElement | null>(null);
   const lifecycleCheckedRef = useRef(false);
@@ -761,19 +770,28 @@ export function AnalyticsProvider({
   // notice portals there instead of floating fixed over the viewport --
   // that slot reserves real layout space, so it can never cover composer
   // controls at any width. On /auth/signin the sign-in page registers a
-  // similar slot right after the login card, and marketing routes register
-  // one under the sticky header (FINAL-F001). Everywhere else (and before a
+  // similar slot right after the login card, settings reserves a footer slot,
+  // and marketing routes register one under the sticky header (FINAL-F001).
+  // Everywhere else (and before a
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
   const noticePath = pathname?.split("/").filter(Boolean) ?? [];
-  const readableNotice = noticePath.at(-1) === "support" &&
-    (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null));
+
+  const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
+
+
+  const isPluginRoute = pathname === "/plugins";
+  const readableNotice = (((noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
+    (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ||
+    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute)) || (noticePath.at(-1) === "support" && (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null)));
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot
       : pathname === "/auth/signin"
         ? authConsentSlot
-        : marketingConsentSlot;
+        : isSettingsRoute
+          ? settingsConsentSlot
+          : marketingConsentSlot;
 
   const showConsentPrompt =
     !disabled &&
@@ -804,8 +822,8 @@ export function AnalyticsProvider({
   // pill are mutually exclusive -- one needs `consent === "unset"` or the
   // preferences panel open, the other needs a settled choice and the panel
   // closed -- so the slot never has to hold both.
-  const settingsUsesInlineSlot = pathname === "/auth/signin";
-  const settingsInlineSlot = settingsUsesInlineSlot ? authConsentSlot : null;
+  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute || isPluginRoute;
+  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : isPluginRoute ? marketingConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
 
   // REAUDIT-P1-01. Chat and Review share a workspace where the bottom-right corner is
   // never free: the last model panel's follow-up form ends there, and below it
@@ -858,7 +876,7 @@ export function AnalyticsProvider({
         */}
         <div className="min-w-[6rem] flex-1">
           <p className={`${readableNotice ? "text-sm leading-6" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-300 @md/notice:hidden`}>
-            {readableNotice ? promptCopy.body : promptCopy.mobileBody}{" "}
+            {(noticePath.at(-1) === "support" && (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ? promptCopy.body : promptCopy.mobileBody}{" "}
             <Link
               href="/privacy"
               className={`${readableNotice ? "inline-block whitespace-nowrap" : ""} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
@@ -900,6 +918,7 @@ export function AnalyticsProvider({
   return (
     <ChatConsentSlotContext.Provider value={setChatConsentSlot}>
       <AuthConsentSlotContext.Provider value={setAuthConsentSlot}>
+        <SettingsConsentSlotContext.Provider value={setSettingsConsentSlot}>
         <MarketingConsentSlotContext.Provider value={setMarketingConsentSlot}>
         {children}
         {disabled ? null : (
@@ -922,8 +941,8 @@ export function AnalyticsProvider({
                 aria-label={promptCopy.title}
                 data-testid="chat-consent-notice"
                 className={
-                  inlineSlot === marketingConsentSlot
-                    ? // The marketing slot already supplies the page gutter, so
+                  inlineSlot === marketingConsentSlot || inlineSlot === settingsConsentSlot
+                    ? // These slots already supply the page gutter, so
                       // the card spans it and never needs its own max-width.
                       "rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-0.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
                     : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
@@ -978,6 +997,7 @@ export function AnalyticsProvider({
           </button>
         ) : null}
         </MarketingConsentSlotContext.Provider>
+        </SettingsConsentSlotContext.Provider>
       </AuthConsentSlotContext.Provider>
     </ChatConsentSlotContext.Provider>
   );

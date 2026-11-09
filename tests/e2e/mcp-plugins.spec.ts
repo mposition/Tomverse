@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { prepareGuestPage, mockAuthenticatedApi, expectNoHorizontalOverflow } from "./support/app-fixtures";
-import { installChatModelStub, restoreActiveConversation } from "./support/chat-state-fixtures";
+import { installChatModelStub, restoreActiveConversation, setDeterministicTheme } from "./support/chat-state-fixtures";
+import { expectAccessibleContrast } from "./support/ui-audit";
 
 test.setTimeout(120_000);
 const tools = [{ name: "search", mode: "read" }, { name: "create_note", mode: "confirm" }];
@@ -9,6 +10,53 @@ test.beforeEach(async ({ page, baseURL }) => {
   await page.context().addCookies([{ name: "__tomverse_e2e_auth", value: "1", url: baseURL! },
     { name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL! }]);
 });
+
+for (const theme of ["light", "dark"] as const) {
+  test(`plugin consent reserves readable space above provider cards in ${theme}`, async ({ page, baseURL, isMobile }) => {
+    await page.setViewportSize({ width: isMobile ? 320 : 1440, height: 900 });
+    const account = await mockAuthenticatedApi(page);
+    account.theme = theme;
+    await setDeterministicTheme(page, theme);
+    await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
+    await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+    let writes = 0;
+    await page.route("**/api/mcp/**", route => {
+      if (route.request().method() !== "GET") writes++;
+      return route.fulfill({ json: { enabled: false, servers: [], connections: [], invocations: [] } });
+    });
+    await page.goto("/plugins?lang=ko");
+    const notice = page.getByTestId("marketing-consent-slot").getByTestId("chat-consent-notice");
+    await expect(notice).toBeVisible();
+    const metrics = await notice.evaluate(element => {
+      const visible = (selector: string) => Array.from(element.querySelectorAll(selector)).filter(node => node.getBoundingClientRect().height > 0);
+      return {
+        fonts: visible("p,a,button").map(node => Number.parseFloat(getComputedStyle(node).fontSize)),
+        explanationBottom: Math.max(...visible("p").map(node => node.getBoundingClientRect().bottom)),
+        actionTop: Math.min(...visible("button").map(node => node.getBoundingClientRect().top)),
+      };
+    });
+    expect(metrics.fonts.length).toBeGreaterThanOrEqual(4);
+    expect(metrics.fonts.every(size => size >= 14)).toBe(true);
+    expect(metrics.actionTop).toBeGreaterThan(metrics.explanationBottom);
+    const github = page.locator('[data-testid="plugin-card"][data-provider="github"] h3');
+    await github.evaluate(element => element.scrollIntoView({ block: "center", behavior: "instant" }));
+    expect(await github.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const notice = document.querySelector('[data-testid="chat-consent-notice"]')!.getBoundingClientRect();
+      return notice.bottom <= rect.top && element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+    })).toBe(true);
+    await notice.scrollIntoViewIfNeeded();
+    expect(await notice.getByRole("link").evaluate(element => element.getClientRects().length)).toBe(1);
+    await notice.getByTestId("analytics-consent-decline").click();
+    await expect(notice).toHaveCount(0);
+    const settingsButton = page.getByTestId("marketing-consent-slot").getByTestId("analytics-settings-button");
+    await expect(settingsButton).toBeVisible();
+    await settingsButton.click();
+    await expect(notice).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    expect(writes).toBe(0);
+  });
+}
 
 test("@ui-risk mobile plugin header exposes global navigation and the current page", async ({ page, isMobile }) => {
   test.skip(!isMobile, "The header menu is a mobile entry point.");
@@ -126,7 +174,8 @@ test("@ui-risk disabled preview and add dialog remain accessible without exposin
   await page.screenshot({ path: test.info().outputPath("plugins-disabled.png"), fullPage: true });
 });
 
-test("@ui-risk provider catalog searches both directories without presenting listings as live connections", async ({ page }) => {
+test("@ui-risk provider catalog searches both directories without presenting listings as live connections", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 800 });
   let requests = 0;
   await page.route("**/api/mcp/**", route => {
     if (route.request().method() !== "GET") requests++;
@@ -137,6 +186,20 @@ test("@ui-risk provider catalog searches both directories without presenting lis
   await search.fill("Figma");
   const card = page.getByTestId("plugin-card").filter({ has: page.getByRole("heading", { name: "Figma", exact: true }) });
   await expect(card).toBeVisible();
+  for (const theme of ["light", "dark"] as const) {
+    await page.locator("html").evaluate((element, value) => element.classList.toggle("dark", value === "dark"), theme);
+    const category = card.locator("p").first();
+    const setup = card.getByText("서버 설정 필요", { exact: true });
+    await expect(category).toHaveCSS("font-size", "14px");
+    await expect(setup).toHaveCSS("font-size", "13px");
+    const badges = card.locator("span").filter({ hasText: /^(Codex|Claude Code)$/ });
+    expect(await badges.count()).toBeGreaterThan(0);
+    for (const badge of await badges.all()) await expect(badge).toHaveCSS("font-size", "12px");
+    for (const text of [category, setup, ...await badges.all()]) {
+      const sample = await expectAccessibleContrast(text, `${theme} plugin card text`);
+      expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
+    }
+  }
   await expect(card.locator("img")).toHaveAttribute("src", "/plugins/providers/figma.png");
   await expect(card.getByRole("button", { name: "연결", exact: true })).toHaveCount(0);
   await card.getByRole("button", { name: "상세 정보" }).click();

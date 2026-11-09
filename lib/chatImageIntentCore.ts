@@ -82,6 +82,17 @@ export type ChatImageDecision =
           edit: boolean;
       };
 
+/** Prepared under the same image gates for standalone and combined routing. */
+export type ChatImageIntentContext = {
+    modelId: string;
+    candidates: readonly ChatImageModelCandidate[];
+    previousImagePrompt: string | null;
+    attachedPhoto: boolean;
+    prompt: string;
+    maxOutputTokens: number;
+    timeoutMs: number;
+};
+
 /**
  * The longest follow-up rewrite accepted. The call is told this limit; a
  * rewrite over it is refused, never cut -- the end of the prompt is where

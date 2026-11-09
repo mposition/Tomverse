@@ -3747,7 +3747,7 @@ export function ChatInput({
           // The min/max heights are in rem, not px, so a reader at 200% text
           // scaling still gets a complete first line instead of a box frozen
           // at one 16px-root line's worth of height.
-          className={`w-full min-w-0 max-h-[5.75rem] min-h-11 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 text-base leading-[1.625rem] text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[12.5rem] md:min-h-16 md:px-1 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
+          className={`w-full min-w-0 max-h-[5.75rem] min-h-11 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 text-base leading-[1.625rem] text-zinc-900 outline-none placeholder:text-zinc-600 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-400 md:max-h-[12.5rem] md:min-h-16 md:px-1 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
         />
         </div>
         {/*
@@ -4862,8 +4862,8 @@ export function ChatInput({
           // the same supporting-text role, which already measures above AA.
           // The previous zinc-400/zinc-500 pair composited to 2.62:1 on the
           // light composer surface and 3.67:1 on the dark one -- both below
-          // the 4.5:1 this 11-12px, 400-weight body text requires.
-          className="mt-1.5 px-2 text-center text-[11px] leading-4 text-zinc-600 dark:text-zinc-300 md:text-xs"
+          // the 4.5:1 this supporting body text requires.
+          className={`mt-1.5 px-2 text-center ${currentProduct === "chat" ? "text-sm leading-5" : "text-[11px] leading-4 md:text-xs"} text-zinc-600 dark:text-zinc-300`}
         >
           {t("chat.aiDisclaimer")}
         </p>
