@@ -8,7 +8,7 @@ import test from "node:test";
 import { amuxCliPricedModelId, estimateAmuxCliApiCost, makeAmuxCliUsageReceipt } from
   "../lib/amux/cliUsageLedgerCore.ts";
 import { AmuxV22ChannelAuthRefused, amuxV22ChannelArgs, amuxV22ChannelEnv,
-  amuxV22ChannelPreflight, createAmuxV22ChannelRunHome,
+  amuxV22ChannelPreflight, amuxV22OutputName, amuxV22OutputShape, createAmuxV22ChannelRunHome,
   parseAmuxV22ChannelOutput } from
   "../lib/amux/v22ChannelRun.mjs";
 import { v22ExecutionReceiptVerified, v22ExecutionSourceForProvider } from
@@ -29,13 +29,16 @@ const cursorLogin = (now, expiresIn = 24 * HOUR) => JSON.stringify({
   accessToken: jwt(now + expiresIn), refreshToken: "synthetic-operator-refresh-secret" });
 const jsonl = (...events) => events.map((event) => JSON.stringify(event)).join("\n") + "\n";
 
-test("a read role gets no write tool; Copilot never gets a shell; Cursor never writes", () => {
+test("a read role gets no write tool; Copilot's shell is implement-only; Cursor never writes", () => {
   for (const role of ["design", "investigate", "review"]) {
     const codex = amuxV22ChannelArgs("openai", request(role), "/w");
     assert.deepEqual(codex.slice(codex.indexOf("--sandbox"), codex.indexOf("--sandbox") + 2),
       ["--sandbox", "read-only"]);
     const copilot = amuxV22ChannelArgs("github-copilot", request(role), "/w");
     assert.ok(!copilot.includes("edit") && !copilot.includes("create"));
+    // A read role has no shell tool (owner request 2026-11-09 covers implement only).
+    for (const tool of ["bash", "read_bash", "stop_bash", "list_bash", "shell"])
+      assert.ok(!copilot.includes(tool), `${role} ${tool}`);
     assert.deepEqual(amuxV22ChannelArgs("cursor", request(role), "/w").slice(3, 5),
       ["--mode", "ask"]);
   }
@@ -58,8 +61,14 @@ test("a read role gets no write tool; Copilot never gets a shell; Cursor never w
   assert.ok(codex.includes("--ignore-rules"));
   assert.ok(!codex.some((part) => /bypass|dangerously|yolo/.test(part)));
   const copilot = amuxV22ChannelArgs("github-copilot", request("implement"), "/w");
-  assert.ok(copilot.includes("edit") && copilot.includes("create") &&
-    !copilot.includes("shell") && !copilot.includes("bash"));
+  assert.ok(copilot.includes("edit") && copilot.includes("create"));
+  // Implement's shell tools, as Copilot 1.0.94 names them; the sidecar puts
+  // the shell in the jail (v22ShellJail.mjs). Nothing wider is offered.
+  const tools = copilot.slice(copilot.indexOf("--available-tools") + 1,
+    copilot.indexOf("--allow-all-tools"));
+  assert.deepEqual(tools, ["view", "glob", "grep", "edit", "create", "bash", "read_bash",
+    "stop_bash", "list_bash"]);
+  assert.ok(!copilot.includes("--allow-all-paths") && !copilot.includes("--allow-url"));
   assert.throws(() => amuxV22ChannelArgs("cursor", request("implement"), "/w"),
     /read roles only/);
   // The prompt arrives on stdin: argv carries no task text.
@@ -192,7 +201,15 @@ test("a tool outside the role's list makes the run unknown, never trusted", () =
   const copilot = (toolName, role) => parseAmuxV22ChannelOutput("github-copilot", jsonl(
     { type: "tool.execution_start", data: { toolName, model: "m" } },
     { type: "result", exitCode: 0 }), { exitCode: 0, role });
-  assert.equal(copilot("bash", "implement").valid, false);
+  // The shell is an implement tool: its events no longer make the run
+  // unknown there, and still do for every read role.
+  for (const tool of ["bash", "read_bash", "stop_bash", "list_bash"]) {
+    assert.equal(copilot(tool, "implement").valid, true, tool);
+    for (const role of ["design", "investigate", "review"])
+      assert.equal(copilot(tool, role).valid, false, `${role} ${tool}`);
+  }
+  assert.equal(copilot("web_fetch", "implement").valid, false);
+  assert.equal(copilot("shell", "implement").valid, false);
   assert.equal(copilot("edit", "investigate").valid, false);
   assert.equal(copilot("edit", "implement").valid, true);
   // An empty final answer is not a success (as for Cursor).
@@ -314,4 +331,29 @@ test("a sign-in the run must not use is refused before any run home is made", as
   await refused("openai", "auth.json", "not json");
   await refused("github-copilot", "auth-token", "not-a-token");
   assert.deepEqual(await readdir(home), []);
+});
+
+test("a refused stream names why, and its shape keeps only event names", () => {
+  const reason = (provider, text, role = "implement") =>
+    parseAmuxV22ChannelOutput(provider, text, { exitCode: 0, role }).reason;
+  assert.equal(reason("openai", ""), "empty");
+  assert.equal(reason("openai", "not json\n"), "non_object_line");
+  assert.equal(reason("openai", jsonl({ type: "turn.started" })), "no_terminal_event");
+  assert.equal(reason("openai", jsonl({ type: "item.completed", item: { type: "web_search" } },
+    { type: "turn.completed", usage: {} })), "item:web_search");
+  assert.equal(reason("openai", jsonl({ type: "item.started", item: { type: "a b; rm" } })), "item:?");
+  assert.equal(reason("github-copilot", jsonl({ type: "tool.execution_start",
+    data: { toolName: "web_fetch" } })), "tool:web_fetch");
+  assert.equal(reason("cursor", jsonl({ type: "assistant", message: { content: [] } })), "no_result");
+  assert.equal(reason("other", jsonl({ type: "x" })), "provider");
+  for (const bad of ["", "has space", "x".repeat(49), "sk-proj/abc", 7, null]) assert.equal(amuxV22OutputName(bad), "?");
+  assert.equal(amuxV22OutputName("item.completed"), "item.completed");
+  const long = Array.from({ length: 70 }, (_, i) => JSON.stringify({ type: i % 2 ? "a" : "b" })).join("\n");
+  const shape = amuxV22OutputShape(`${long}\nnot json\n{"type":"x y","item":{"type":"secret text"}}\n`);
+  assert.equal(shape.split(" ").length, 61);
+  assert.match(shape, /^b a b a .* a \+12$/);
+  // The names past the cap (a non-JSON line, a type with text in it) never show.
+  assert.ok(!shape.includes("secret") && !shape.includes("x y"));
+  assert.equal(amuxV22OutputShape('{"type":"item.completed","item":{"type":"agent_message","text":"secret"}}\n["x"]\nnope'),
+    "item.completed:agent_message non_json*2");
 });
