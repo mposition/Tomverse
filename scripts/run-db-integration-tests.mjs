@@ -813,6 +813,10 @@ run(
     "tests/integration/marketing-retention.db.test.ts",
     // A1's weekly KPI (S3g): the ended week reported once, also under two runs at once.
     "tests/integration/marketing-weekly-kpi.db.test.ts",
+    // The weekly report's funnel counts (2026-11-09): posts by publishedAt,
+    // touches by the utm_content account, attributed sign-ups with how many of
+    // those accounts used the product and paid.
+    "tests/integration/marketing-weekly-funnel.db.test.ts",
     // The LLM cost ledger's own rules (S3c1), in plain SQL against a scratch
     // schema: born reserved, five transitions, evidence set once, the
     // reservation clock checked rather than recomputed, reasons paired to
