@@ -14,9 +14,9 @@ for (const country of ["DE", "AU"]) {
     const notice = page.getByTestId("chat-consent-notice");
     await expect(notice).toBeVisible({ timeout: 30_000 });
     await expect(notice).toContainText("프롬프트, 응답, 파일명 및 파일 내용", { useInnerText: true });
-    await expect(notice).toContainText(country === "DE" ? "제품 사용과 캠페인 유입을 측정합니다" : "개인정보를 최소화한 제품 분석", { useInnerText: true });
+    await expect(notice).toContainText(country === "DE" ? "동의하면 기능 사용·유입 경로 통계를 수집해 Tomverse를 개선합니다." : "개인정보를 최소화한 제품 분석", { useInnerText: true });
     const accept = notice.getByTestId("analytics-consent-accept");
-    await expect(accept).toHaveText(country === "DE" ? "분석 허용" : "분석 유지");
+    await expect(accept).toHaveText(country === "DE" ? "사용 통계 허용" : "분석 유지");
     if (mobile) {
       const layout = await notice.evaluate(node => {
         const p = node.querySelector("p")!;

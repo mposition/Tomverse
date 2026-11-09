@@ -68,7 +68,6 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     t1Note:
       "T1 publishing is not set from here. The policy requires person-only approval evidence before T1, and the switch waits for it.",
     prQueue: "Pull request queue: {occupied} of {limit}",
-    prQueueWindow: "Pull request queue: {occupied} of {limit} (first T1 window of {days} days)",
     decisionQueue: "Decision queue: {occupied} of {limit}",
     queueNote: "Active runs count in both, for what they may still produce. A full queue claims nothing new.",
     done: "Done.",
@@ -145,7 +144,6 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     t1Note:
       "T1 게시는 여기서 켜지 않습니다. 정책이 T1 전에 사람 전용 승인 증거를 요구하며, 이 스위치는 그것을 기다립니다.",
     prQueue: "Pull request 대기열: {occupied}/{limit}",
-    prQueueWindow: "Pull request 대기열: {occupied}/{limit} (첫 T1 기간 {days}일)",
     decisionQueue: "결정 대기열: {occupied}/{limit}",
     queueNote: "활성 run은 아직 만들 수 있는 산출물 때문에 두 대기열 모두에 셉니다. 대기열이 차면 새 작업을 claim하지 않습니다.",
     done: "처리했습니다.",

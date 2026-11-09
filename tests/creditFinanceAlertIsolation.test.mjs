@@ -76,8 +76,9 @@ test("the alert job takes only the lane results and never runs the tree under te
     const job = workflow.jobs["report-red-lane"];
     assert.ok(job, "report-red-lane job is missing");
     // Both jobs that run the tree under test: the PostgreSQL 16 job going red
-    // on its own must still raise the release-lane alert.
-    assert.deepEqual(job.needs, ["credit-finance-db", "credit-finance-db-postgres16"]);
+    // on its own must still raise the release-lane alert. The scope job too:
+    // its failure skips every lane, which must not pass quietly either.
+    assert.deepEqual(job.needs, ["scope", "credit-finance-db", "credit-finance-db-postgres16"]);
     // Fires when either needed job failed: needs.*.result covers both above.
     assert.match(job.if, /contains\(join\(needs\.\*\.result, ','\), 'failure'\)/);
     assert.match(job.if, /github\.event_name != 'pull_request'/);
