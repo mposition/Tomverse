@@ -31,6 +31,7 @@ import {
 import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { CHAT_WORKSPACE_PATH, REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+import { marketingLocaleFor } from "@/lib/marketingLocale";
 
 const isChatWorkspacePath = (pathname: string | null) =>
   pathname === CHAT_WORKSPACE_PATH || pathname === REVIEW_WORKSPACE_PATH;
@@ -47,7 +48,7 @@ type ConsentState = "loading" | "unset" | "accepted" | "declined";
 // across the product as too small to read comfortably at a phone's viewing
 // distance.
 const consentButtonClass =
-  "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-1 text-[11px] font-bold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3 @md/notice:text-xs";
+  "inline-flex min-h-11 min-w-11 items-center justify-center whitespace-nowrap rounded-lg border border-zinc-300 bg-white px-2 font-bold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3";
 
 // A component, not a render-time helper call. The handlers close over the
 // remembered opener (see closePreferences), and `react-hooks/refs` treats
@@ -58,11 +59,13 @@ function ConsentAction({
   onClick,
   label,
   shortLabel,
+  readable = false,
 }: {
   kind: "decline" | "accept";
   onClick: () => void;
   label: string;
   shortLabel: string;
+  readable?: boolean;
 }) {
   return (
     <button
@@ -72,10 +75,12 @@ function ConsentAction({
       // The accessible name is always the full label; only the visible text
       // shortens in a narrow container, and it is a substring of that name.
       aria-label={label}
-      className={consentButtonClass}
+      className={`${consentButtonClass} ${readable ? "text-sm" : "text-[11px] @md/notice:text-xs"}`}
     >
-      <span className="@md/notice:hidden">{shortLabel}</span>
-      <span className="hidden @md/notice:inline">{label}</span>
+      {readable ? label : <>
+        <span className="@md/notice:hidden">{shortLabel}</span>
+        <span className="hidden @md/notice:inline">{label}</span>
+      </>}
     </button>
   );
 }
@@ -108,6 +113,14 @@ const AuthConsentSlotContext = createContext<AuthConsentSlotSetter | null>(null)
 export function useAuthConsentSlotRef(): AuthConsentSlotSetter {
   const register = useContext(AuthConsentSlotContext);
   return register || (() => {});
+}
+
+const SettingsConsentSlotContext = createContext<AuthConsentSlotSetter | null>(null);
+
+/** Reserve document space for consent throughout the settings route shell. */
+export function SettingsConsentSlot() {
+  const register = useContext(SettingsConsentSlotContext);
+  return <div ref={register} data-testid="settings-consent-slot" className="px-4 py-2 empty:hidden" />;
 }
 
 // Marketing pages register a slot directly under the sticky header. Before
@@ -186,14 +199,14 @@ const consentCopy: Record<
     body: "With your permission, Tomverse measures product usage and campaign attribution. Prompts, responses, filenames, and file contents are never included.",
     mobileBody: "Usage analytics excludes prompts and file content.",
     accept: "Allow analytics",
-    acceptShort: "Allow analytics",
+    acceptShort: "Allow",
     decline: "Decline",
     declineShort: "Decline",
     privacy: "Privacy policy",
     settings: "Analytics settings",
     noticeTitle: "Privacy-safe analytics is on",
     noticeBody: "In this region, Tomverse starts privacy-minimized product analytics with a clear opt-out. Prompts, responses, filenames, and file contents are never included, and advertising storage stays off.",
-    noticeMobileBody: "Analytics is on; prompts and files are excluded.",
+    noticeMobileBody: "Usage analytics is on; prompts and file content are excluded.",
     keepOn: "Keep analytics on",
     keepOnShort: "Keep",
     turnOff: "Turn off analytics",
@@ -392,6 +405,7 @@ export function AnalyticsProvider({
   const [authConsentSlot, setAuthConsentSlot] = useState<HTMLDivElement | null>(
     null
   );
+  const [settingsConsentSlot, setSettingsConsentSlot] = useState<HTMLDivElement | null>(null);
   const [marketingConsentSlot, setMarketingConsentSlot] =
     useState<HTMLDivElement | null>(null);
   const lifecycleCheckedRef = useRef(false);
@@ -756,16 +770,28 @@ export function AnalyticsProvider({
   // notice portals there instead of floating fixed over the viewport --
   // that slot reserves real layout space, so it can never cover composer
   // controls at any width. On /auth/signin the sign-in page registers a
-  // similar slot right after the login card, and marketing routes register
-  // one under the sticky header (FINAL-F001). Everywhere else (and before a
+  // similar slot right after the login card, settings reserves a footer slot,
+  // and marketing routes register one under the sticky header (FINAL-F001).
+  // Everywhere else (and before a
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
+  const noticePath = pathname?.split("/").filter(Boolean) ?? [];
+
+  const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
+
+
+  const isPluginRoute = pathname === "/plugins";
+  const readableNotice = (((((noticePath.at(-1) === "ai-for-file-analysis" || noticePath.at(-1) === "faq" || noticePath.at(-1) === "support" || noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
+    (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ||
+    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute)) || (noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null))) || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "privacy")) || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "models") || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "faq") || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "support");
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot
       : pathname === "/auth/signin"
         ? authConsentSlot
-        : marketingConsentSlot;
+        : isSettingsRoute
+          ? settingsConsentSlot
+          : marketingConsentSlot;
 
   const showConsentPrompt =
     !disabled &&
@@ -796,8 +822,8 @@ export function AnalyticsProvider({
   // pill are mutually exclusive -- one needs `consent === "unset"` or the
   // preferences panel open, the other needs a settled choice and the panel
   // closed -- so the slot never has to hold both.
-  const settingsUsesInlineSlot = pathname === "/auth/signin";
-  const settingsInlineSlot = settingsUsesInlineSlot ? authConsentSlot : null;
+  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute || isPluginRoute;
+  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : isPluginRoute ? marketingConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
 
   // REAUDIT-P1-01. Chat and Review share a workspace where the bottom-right corner is
   // never free: the last model panel's follow-up form ends there, and below it
@@ -839,7 +865,7 @@ export function AnalyticsProvider({
     // container cannot query its own size, and keeping it inside the card
     // leaves the card's own padding/margins untouched.
     <div className="@container/notice">
-      <div className="flex flex-wrap items-center gap-1.5 @md/notice:justify-between @md/notice:gap-3">
+      <div className={readableNotice ? "flex flex-col items-stretch gap-3" : "flex flex-wrap items-center gap-1.5 @md/notice:justify-between @md/notice:gap-3"}>
         {/*
           The copy keeps a real minimum width so it can never be crushed to an
           unreadable sliver (the audit measured 34.6px at 320px), but the
@@ -849,21 +875,21 @@ export function AnalyticsProvider({
           102px against its 80px contract.
         */}
         <div className="min-w-[6rem] flex-1">
-          <p className="text-[11px] leading-4 text-zinc-600 dark:text-zinc-300 @md/notice:hidden">
-            {promptCopy.mobileBody}{" "}
+          <p className={`${readableNotice ? "text-sm leading-6" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-300 @md/notice:hidden`}>
+            {(["faq", "models", "support", "privacy"].includes((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/"))) ? promptCopy.body : (promptCopy.mobileBody)}{" "}
             <Link
               href="/privacy"
-              className="font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+              className={`${readableNotice ? "inline-block whitespace-nowrap" : ""} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
             >
               {copy.privacy}
             </Link>
           </p>
           <div className="hidden @md/notice:block">
-            <p className="text-xs font-bold text-zinc-900 dark:text-zinc-50">{promptCopy.title}</p>
-            <p className="mt-0.5 text-[11px] leading-4 text-zinc-600 dark:text-zinc-400">{promptCopy.body}</p>
+            <p className={`${readableNotice ? "text-sm" : "text-xs"} font-bold text-zinc-900 dark:text-zinc-50`}>{promptCopy.title}</p>
+            <p className={`mt-0.5 ${readableNotice ? "text-sm leading-6" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-400`}>{promptCopy.body}</p>
             <Link
               href="/privacy"
-              className="mt-0.5 inline-flex text-[11px] font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+              className={`mt-0.5 inline-flex ${readableNotice ? "text-sm" : "text-[11px]"} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
             >
               {copy.privacy}
             </Link>
@@ -875,12 +901,14 @@ export function AnalyticsProvider({
             onClick={decline}
             label={promptCopy.decline}
             shortLabel={promptCopy.declineShort}
+            readable={readableNotice}
           />
           <ConsentAction
             kind="accept"
             onClick={accept}
             label={promptCopy.accept}
             shortLabel={promptCopy.acceptShort}
+            readable={readableNotice}
           />
         </div>
       </div>
@@ -890,6 +918,7 @@ export function AnalyticsProvider({
   return (
     <ChatConsentSlotContext.Provider value={setChatConsentSlot}>
       <AuthConsentSlotContext.Provider value={setAuthConsentSlot}>
+        <SettingsConsentSlotContext.Provider value={setSettingsConsentSlot}>
         <MarketingConsentSlotContext.Provider value={setMarketingConsentSlot}>
         {children}
         {disabled ? null : (
@@ -912,8 +941,8 @@ export function AnalyticsProvider({
                 aria-label={promptCopy.title}
                 data-testid="chat-consent-notice"
                 className={
-                  inlineSlot === marketingConsentSlot
-                    ? // The marketing slot already supplies the page gutter, so
+                  inlineSlot === marketingConsentSlot || inlineSlot === settingsConsentSlot
+                    ? // These slots already supply the page gutter, so
                       // the card spans it and never needs its own max-width.
                       "rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-0.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
                     : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
@@ -968,6 +997,7 @@ export function AnalyticsProvider({
           </button>
         ) : null}
         </MarketingConsentSlotContext.Provider>
+        </SettingsConsentSlotContext.Provider>
       </AuthConsentSlotContext.Provider>
     </ChatConsentSlotContext.Provider>
   );
