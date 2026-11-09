@@ -19,8 +19,11 @@ const paths = { worktreePath: W, tmpPath: `${W}/node_modules/.cache/amux-tmp`,
 
 test("the jail has no network, binds only the checkout writable and rebuilds the environment", () => {
   const args = amuxV22ShellJailArgs(paths);
-  for (const flag of ["--unshare-net", "--unshare-user", "--unshare-pid", "--disable-userns",
+  for (const flag of ["--unshare-net", "--unshare-user", "--unshare-pid",
     "--die-with-parent", "--clearenv"]) assert.ok(args.includes(flag), flag);
+  // --disable-userns writes /proc/sys, read-only under the worker unit's
+  // ProtectKernelTunables=; with it no command started (2026-11-09).
+  assert.ok(!args.includes("--disable-userns"));
   // Every writable bind is the checkout itself.
   const writable = args.flatMap((arg, i) => arg === "--bind" || arg === "--dev-bind" ?
     [args[i + 1]] : []);
