@@ -203,10 +203,10 @@ test.describe("assistant profile settings", () => {
         const draft = page.getByTestId("assistant-profile-p-draft");
         await expect(draft).toBeVisible();
         await expect(draft).toContainText(/Draft|초안/);
-        await expect(draft).not.toContainText(/revision 0|개정 0/);
+        await expect(draft).not.toContainText(/revision 0|개정 0|버전 0/);
 
         await expect(page.getByTestId("assistant-profile-p-published")).toContainText(
-            /Published|게시됨/
+            /Published|계정 전용으로 사용 가능/
         );
     });
 

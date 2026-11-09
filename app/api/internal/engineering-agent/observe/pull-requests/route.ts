@@ -5,6 +5,7 @@ import { z } from "zod";
 import { observeAmuxIdeaLaneMerges } from "@/lib/amux/ideaLaneService";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { engineeringAgentAmuxAdapterPermittedNow } from "@/lib/engineeringAgentAmuxAdapter";
+import { releaseEngineeringAgentBindings } from "@/lib/engineeringAgentBindingRelease";
 import { observeEngineeringAgentPullRequests } from "@/lib/engineeringAgentPrObserver";
 import {
   engineeringAgentErrorResponse,
@@ -27,7 +28,9 @@ export async function POST(request: Request) {
   try {
     await readLimitedJson(request, 64, requestSchema);
     const observed = await observeEngineeringAgentPullRequests();
-    return engineeringAgentJson({ observed, lane: await observeAmuxIdeaLaneMerges() }, 200);
+    // After the observer, so a merge it records this round is released too.
+    const released = await releaseEngineeringAgentBindings();
+    return engineeringAgentJson({ observed, released, lane: await observeAmuxIdeaLaneMerges() }, 200);
   } catch (error) {
     return engineeringAgentErrorResponse("observe_pull_requests", error);
   }

@@ -298,7 +298,7 @@ export async function POST(req: Request) {
               ? undefined
               : {
                   name: `Tomverse ${pack.name}`,
-                  description: `${pack.credits.toLocaleString("en-US")} additional AI credits · valid for 12 months`,
+                  description: `${pack.credits.toLocaleString("en-US")} additional AI credits · valid for ${pack.validityDays} days`,
                   metadata: { packId: pack.id },
                 },
           },

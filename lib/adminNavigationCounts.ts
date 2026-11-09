@@ -37,11 +37,13 @@ const settled = <T>(result: PromiseSettledResult<T>): T | null =>
  * AMUX escalations waiting on a person, with the same `where` the routing
  * report lists them by (`lib/amux/explainability.ts`), so the Execution badge
  * and the Assignment section count one set. Exported because the Execution
- * page puts the same number on its Assignment tab.
+ * page puts the same number on its Assignment tab. An escalation on an
+ * archived card is left out, as Waiting on me leaves the card out (owner
+ * decision 2026-11-09): the agent office links this count to that tab.
  */
 export const countAwaitingAmuxEscalations = () =>
   prisma.amuxHumanEscalation.count({
-    where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } },
+    where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] }, task: { archivedAt: null } },
   });
 
 /** Marketing drafts waiting on a person's approval (docs/policy/marketing-automation.md §6). */
