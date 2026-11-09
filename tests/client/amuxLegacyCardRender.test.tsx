@@ -36,9 +36,9 @@ test("a pre-v22 Task says why it has no recovery path", () => {
   assert.match(out, /data-testid="amux-legacy-card-recreate"/);
 });
 
-test("an archived card still in the owner queue says the close only resolves its escalation", () => {
+test("an archived card with an open escalation says the close only resolves that escalation", () => {
   const out = html({ ...ready, alreadyArchived: true });
-  assert.match(out, /already archived, but an open escalation still lists it in the owner queue/);
+  assert.match(out, /already archived, but an escalation on it is still open/);
   assert.doesNotMatch(out, /Closing archives the card/);
   assert.match(out, /data-testid="amux-legacy-card-recreate"/);
   assert.match(out, /data-testid="amux-legacy-card-close"/);
