@@ -813,6 +813,10 @@ run(
     "tests/integration/marketing-retention.db.test.ts",
     // A1's weekly KPI (S3g): the ended week reported once, also under two runs at once.
     "tests/integration/marketing-weekly-kpi.db.test.ts",
+    // The weekly report's funnel counts (2026-11-09): posts by publishedAt,
+    // touches by the utm_content account, attributed sign-ups with how many of
+    // those accounts used the product and paid.
+    "tests/integration/marketing-weekly-funnel.db.test.ts",
     // The LLM cost ledger's own rules (S3c1), in plain SQL against a scratch
     // schema: born reserved, five transitions, evidence set once, the
     // reservation clock checked rather than recomputed, reasons paired to
@@ -912,6 +916,7 @@ run(
     // that a guest run lands at all (it produces no ComparisonReview row), and
     // that the 90-day purge reaches only what it should.
     "tests/integration/comparison-review-run-telemetry.db.test.ts",
+    "tests/integration/response-latency.db.test.ts",
     // The per-item feedback contract: the unique index really is the
     // idempotency key, a verdict is scoped to one person, and both cascades
     // are the deletion path the data-domain registry claims.
@@ -961,6 +966,8 @@ run(
     "tests/integration/mcp-connector.db.test.ts",
     "tests/integration/mcp-oauth.db.test.ts",
     "tests/integration/mcp-migration.db.test.ts",
+    // Product Research completion extends its CHECK without changing existing decisions.
+    "tests/integration/product-research-completion.db.test.ts",
     // Release C1: what the database refuses about a profile version snapshot.
     "tests/integration/assistant-profile-schema.db.test.ts",
     "tests/integration/assistant-profile-service.db.test.ts",
