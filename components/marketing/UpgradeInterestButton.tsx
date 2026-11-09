@@ -313,7 +313,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     appliedAtCheckout: "결제 시 적용",
     dueToday: "오늘 결제 금액",
     localPriceNote: (amount) =>
-      `표시된 현지통화 고정 금액 ${amount}(으)로 결제됩니다.`,
+      `표시 금액: ${amount}. 최종 결제 통화와 금액은 결제 화면에서 확인하세요.`,
     renewalNote: (interval, amount) =>
       interval === "annual"
         ? `연간 결제는 연 ${amount}로 매년 갱신됩니다.`
@@ -759,11 +759,13 @@ export function UpgradeInterestButton({
   className,
   children,
   trigger,
+  initialBillingInterval,
 }: {
   plan: "Pro" | "Max";
   className: string;
   children: ReactNode;
   trigger?: PurchaseAnalyticsTrigger;
+  initialBillingInterval?: BillingInterval;
 }) {
   const { lang, t } = useLanguage();
   const router = useRouter();
@@ -777,11 +779,11 @@ export function UpgradeInterestButton({
   const [appliedPromotion, setAppliedPromotion] =
     useState<BillingPromotion | null>(null);
   const [billingInterval, setBillingInterval] =
-    useState<BillingInterval>("monthly");
+    useState<BillingInterval>(initialBillingInterval ?? "monthly");
   const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
   const [purchaseAnalyticsContext, setPurchaseAnalyticsContext] =
     useState<PurchaseAnalyticsContext | null>(null);
-  const billingIntervalRef = useRef<BillingInterval>("monthly");
+  const billingIntervalRef = useRef<BillingInterval>(initialBillingInterval ?? "monthly");
   const autoPromotionRequestRef = useRef(0);
   const inputId = useId();
   const planId = plan === "Max" ? "max" : "pro";
@@ -1168,6 +1170,15 @@ export function UpgradeInterestButton({
       <button
         type="button"
         onClick={() => {
+          const selectedInterval = initialBillingInterval ?? billingInterval;
+          if (selectedInterval !== billingInterval) {
+            autoPromotionRequestRef.current++;
+            billingIntervalRef.current = selectedInterval;
+            setBillingInterval(selectedInterval);
+            setAppliedPromoCode(null);
+            setAppliedPromotion(null);
+            setIsValidatingPromotion(false);
+          }
           trackProductEvent("plan_selected", 0, {
             cta_location: `upgrade_${planId}`,
             plan_id: planId,
@@ -1180,7 +1191,7 @@ export function UpgradeInterestButton({
           if (billingConfig?.featuredPromotion) {
             void applyFeaturedPromotion(
               billingConfig.featuredPromotion,
-              billingInterval,
+              selectedInterval,
               billingMarketForRequest(billingConfig, planId)
             );
           }
