@@ -15,7 +15,7 @@ import "server-only";
  * rather than requests and cannot see two tool calls issued in one step. Not
  * the description below, which is advice a model may ignore. Not the provider's
  * project quota, which is a property of an account rather than of a turn. The
- * sixth `execute` on one session returns `query_limit_reached` having opened no
+ * sixth distinct request returns `query_limit_reached` having opened no
  * socket, and that is the sentence the cost reservation rests on.
  *
  * ## What the model is told about the results
@@ -70,9 +70,11 @@ const SEARCH_TOOL_DESCRIPTION =
   "releases, schedules, standings, anything dated -- or when the user asks " +
   "for sources. Do not use it for questions you can already answer, for " +
   "arithmetic, or for rewriting text the user gave you. Write one focused " +
-  "query per call, in the language the sources are likely to be in, and call " +
-  "it again with a different query if the first results do not answer the " +
-  `question. At most ${APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest} searches ` +
+  "query per call, in the language the sources are likely to be in. Issue " +
+  "independent queries together in the same step. Reuse results already " +
+  "received; search again only to resolve a specific missing fact or conflict. " +
+  "Once the evidence answers the question, write the answer. " +
+  `At most ${APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest} searches ` +
   "are available for this answer; when they run out, answer from what you " +
   "already found and say what you could not confirm.";
 
@@ -194,12 +196,16 @@ export const buildAppManagedWebSearchTool = (input: {
     queryLength: number;
     resultCount: number;
     durationMs: number;
+    reused: boolean;
   }) => void;
 }): AppManagedWebSearchToolConfig => {
   const session = createAppManagedSearchSession({
     backend: input.backend,
     maxQueries: input.maxQueries,
   });
+  // Attempt-local single flight: identical concurrent calls share one backend
+  // request and one settlement. Only successful results remain reusable.
+  const requests = new Map<string, Promise<AppManagedSearchToolResult>>();
 
   return {
     session,
@@ -211,7 +217,8 @@ export const buildAppManagedWebSearchTool = (input: {
           const startedAt = Date.now();
           const report = (
             result: AppManagedSearchToolResult,
-            queryLength: number
+            queryLength: number,
+            reused = false
           ) => {
             input.onOutcome?.({
               status: result.status,
@@ -219,6 +226,7 @@ export const buildAppManagedWebSearchTool = (input: {
               queryLength,
               resultCount: result.results?.length ?? 0,
               durationMs: Date.now() - startedAt,
+              reused,
             });
             return result;
           };
@@ -240,6 +248,26 @@ export const buildAppManagedWebSearchTool = (input: {
             );
           }
 
+          const request: WebSearchBackendRequest = {
+            query: validated.query,
+            ...(raw.country || input.defaultCountry
+              ? { country: raw.country ?? input.defaultCountry }
+              : {}),
+            ...(raw.searchLang || input.defaultSearchLang
+              ? { searchLang: raw.searchLang ?? input.defaultSearchLang }
+              : {}),
+            ...(raw.freshness ? { freshness: raw.freshness } : {}),
+            ...(input.signal ? { signal: input.signal } : {}),
+          };
+          const key = JSON.stringify([
+            request.query, request.country, request.searchLang, request.freshness,
+          ]);
+          const existing = requests.get(key);
+          if (existing) {
+            const result = await existing;
+            return report({ ...result, searchesRemaining: session.remaining() }, validated.query.length, true);
+          }
+
           const claim = session.claim();
           if (!claim.ok) {
             session.recordRefusal("query_limit_reached");
@@ -257,47 +285,36 @@ export const buildAppManagedWebSearchTool = (input: {
             );
           }
 
-          const request: WebSearchBackendRequest = {
-            query: validated.query,
-            ...(raw.country || input.defaultCountry
-              ? { country: raw.country ?? input.defaultCountry }
-              : {}),
-            ...(raw.searchLang || input.defaultSearchLang
-              ? { searchLang: raw.searchLang ?? input.defaultSearchLang }
-              : {}),
-            ...(raw.freshness ? { freshness: raw.freshness } : {}),
-            ...(input.signal ? { signal: input.signal } : {}),
-          };
-
-          const outcome = await runWebSearchBackendRequest(
-            input.backend,
-            request
-          );
-          if (!outcome.ok) {
-            session.recordFailure(outcome.failure);
-            return report(
-              {
+          const pending = (async (): Promise<AppManagedSearchToolResult> => {
+            const outcome = await runWebSearchBackendRequest(input.backend, request);
+            if (!outcome.ok) {
+              session.recordFailure(outcome.failure);
+              return {
                 status: "failed",
                 query: validated.query,
                 reason: outcome.failure,
                 searchesRemaining: session.remaining(),
-              },
-              validated.query.length
-            );
-          }
-
-          session.recordSuccess(outcome.results);
-          return report(
-            {
+              };
+            }
+            session.recordSuccess(outcome.results);
+            return {
               status: "ok",
               query: validated.query,
               searchesRemaining: session.remaining(),
               results: outcome.results,
               notice: resultNotice(new Date()),
               ...(outcome.truncated ? { truncated: true } : {}),
-            },
-            validated.query.length
-          );
+            };
+          })();
+          requests.set(key, pending);
+          try {
+            const result = await pending;
+            if (result.status !== "ok") requests.delete(key);
+            return report({ ...result, searchesRemaining: session.remaining() }, validated.query.length);
+          } catch (error) {
+            requests.delete(key);
+            throw error;
+          }
         },
       }),
     },

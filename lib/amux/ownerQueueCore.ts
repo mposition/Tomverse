@@ -19,21 +19,22 @@ export const AMUX_OWNER_QUEUE_GROUPS = ["decide", "question", "recover", "read"]
 export type AmuxOwnerQueueGroup = (typeof AMUX_OWNER_QUEUE_GROUPS)[number];
 
 /**
- * Which cards wait on the owner, whatever column they sit in:
+ * Which cards wait on the owner, whatever column they sit in, among the cards
+ * that are not archived:
  *
- * - a card in the board's attention lane (blocked, or an open escalation on a
- *   card that is not archived),
+ * - a blocked card (the board's attention lane),
  * - a card whose worker question is open, in any lane,
- * - a card with an open escalation, even one that has since been archived: the
- *   routing report and the old badge counted it, and a thing that waits on a
- *   person is not hidden by filing the card away.
+ * - a card with an open escalation.
  *
- * It is a set of cards, so a card in two of these is one card.
+ * An archived card is left out even while an escalation on it is open: the
+ * review decision and the Ubuntu inspection both refuse an archived card, so
+ * the queue only showed cards nothing could be pressed on (owner decision
+ * 2026-11-09). It is a set of cards, so a card in two of these is one card.
  */
 export const amuxOwnerQueueWhere = (): Prisma.AmuxWorkItemWhereInput => ({
   OR: [
     { archivedAt: null, status: "blocked" },
-    { humanEscalations: { some: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } } } },
+    { archivedAt: null, humanEscalations: { some: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } } } },
     { archivedAt: null, v22OwnerQuestions: { some: { state: "open" } } },
   ],
 });
