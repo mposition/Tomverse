@@ -12,9 +12,7 @@
 import "server-only";
 
 import {
-  FIRST_T1_WINDOW_DAYS,
   OWNER_QUEUE_LIMITS,
-  decideOwnerQueues,
   killSwitchEngaged,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
 } from "@/lib/engineeringAgentCore";
@@ -76,7 +74,7 @@ export type EngineeringAgentConsolePayload = {
     mode: string;
     frozen: boolean;
     killSwitch: boolean;
-    pullRequests: { occupied: number; limit: number; firstT1Window: boolean };
+    pullRequests: { occupied: number; limit: number };
     decisions: { occupied: number; limit: number };
   };
 };
@@ -194,40 +192,22 @@ export async function readEngineeringAgentConsole(
   }
 
   const switches = await readEngineeringAgentSwitches(prisma);
-  const [bindings, pendingPublish, activeRuns, openOwnerItems, firstT1] = await Promise.all([
+  const [bindings, pendingPublish, activeRuns, openOwnerItems] = await Promise.all([
     prisma.engineeringAgentBinding.count({ where: { state: { in: ["open", "closed"] }, supersededAt: null } }),
     prisma.engineeringAgentWorkItem.count({
       where: { kind: "publish", state: { in: ["queued", "claimed", "needs_lookup", "outcome_unknown"] } },
     }),
     prisma.engineeringAgentRun.count({ where: { status: "active" } }),
     prisma.engineeringAgentWorkItem.count({ where: { kind: { in: [...ownerKinds] }, state: "open" } }),
-    prisma.engineeringAgentRun.findFirst({
-      where: { modeAtStart: "t1" },
-      orderBy: { startedAt: "asc" },
-      select: { startedAt: true },
-    }),
   ]);
-  const queues = decideOwnerQueues({
-    openPrBindings: bindings + pendingPublish + activeRuns,
-    pendingDecisions: openOwnerItems + activeRuns,
-    t1StartedAt: firstT1?.startedAt ?? null,
-    now: new Date(),
-  });
   return {
     ...base,
     settings: {
       mode: switches.mode,
       frozen: switches.frozen,
       killSwitch: killSwitchEngaged(process.env[ENGINEERING_AGENT_KILL_SWITCH_ENV]),
-      pullRequests: {
-        occupied: bindings + pendingPublish + activeRuns,
-        limit: queues.prLimit,
-        firstT1Window: queues.prLimit === OWNER_QUEUE_LIMITS.prDuringFirstT1Days && firstT1 !== null,
-      },
+      pullRequests: { occupied: bindings + pendingPublish + activeRuns, limit: OWNER_QUEUE_LIMITS.pr },
       decisions: { occupied: openOwnerItems + activeRuns, limit: OWNER_QUEUE_LIMITS.decision },
     },
   };
 }
-
-/** Days in the first T1 window, for the screen's explanation. */
-export const ENGINEERING_AGENT_FIRST_T1_WINDOW_DAYS = FIRST_T1_WINDOW_DAYS;
