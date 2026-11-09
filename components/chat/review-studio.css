@@ -83,6 +83,9 @@
 .review-studio-task>h2 { font-size:1.375rem; font-weight:700; margin:0 0 16px; letter-spacing:-.04em; }
 .review-studio-task>div { padding:0; }
 .review-studio-task>[data-testid="composer-consent-slot"]:not(:empty) { margin-top:auto; padding-top:16px; }
+[data-studio-product="review"] .review-studio-task { scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:var(--review-muted) transparent; scroll-padding-bottom:16px; }
+[data-studio-product="review"] .review-studio-task>[data-testid="composer-consent-slot"]:not(:empty) { padding:16px 0 0; }
+[data-studio-product="review"] .review-studio-task [data-testid="chat-consent-notice"] { margin:0; max-width:none; }
 .review-studio-composer-slot { display:flex; flex:1; flex-direction:column; }
 .review-studio-composer-slot>[data-review-composer="studio"] { display:flex; flex:1; flex-direction:column; }
 .review-studio-composer-slot [data-testid="chat-input"] { flex:1; }
