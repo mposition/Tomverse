@@ -192,6 +192,9 @@ test("Copilot probe uses only the run's token and the connect/getQuota exchange"
   assert.deepEqual(methods, ["connect", undefined, "ping", "account.getQuota"]);
   const [{ args, options }] = cli.started;
   assert.ok(args.includes("--no-auto-login") && args.includes("--headless"));
+  // Copilot CLI 1.0.107 exits 1 on `--no-remote`; `--no-remote-export` is still accepted.
+  assert.equal(args.includes("--no-remote"), false);
+  assert.equal(args.includes("--no-remote-export"), true);
   assert.equal(options.env.COPILOT_GITHUB_TOKEN, token);
   assert.equal(JSON.stringify(result).includes(token), false);
   assert.equal(home.homes[0].cleaned, true);

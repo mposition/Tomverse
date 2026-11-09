@@ -6,6 +6,48 @@ test.beforeEach(async ({ page }) => {
   await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
 });
 
+for (const language of ["en", "ko"] as const) for (const appearance of ["classic", "studio"] as const) {
+  test(`320px ${language} ${appearance} Chat consent keeps actions and privacy link on complete lines`, async ({ page, baseURL }, info) => {
+    test.skip(info.project.name !== "desktop-chromium", "Explicit phone viewport coverage.");
+    await page.setViewportSize({ width: 320, height: 568 });
+    await prepareGuestPage(page, language, appearance, appearance);
+    await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-6-luna"], selectionMode: "auto", autoSelectionOffered: true, language });
+    await page.context().addCookies([
+      { name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL! },
+      { name: "__tomverse_e2e_analytics", value: "1", url: baseURL! },
+    ]);
+    await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+    await page.route("**/api/products/chat/capabilities", route => route.fulfill({ json: { autoSelection: { offered: true } } }));
+    await page.route("**/api/analytics/events", route => route.fulfill({ status: 202, body: "" }));
+    await page.goto(`/chat?lang=${language}`);
+    // The development-only Next toolbar occupies the first footer action.
+    await page.addStyleTag({ content: "nextjs-portal { display:none!important; }" });
+    const notice = page.getByTestId("chat-consent-notice");
+    await expect(notice).toBeVisible({ timeout: 15_000 });
+    await notice.scrollIntoViewIfNeeded();
+    const metrics = await notice.evaluate(element => {
+      const visible = (selector: string) => Array.from(element.querySelectorAll(selector)).filter(node => node.getBoundingClientRect().height > 0);
+      const buttons = visible("button");
+      return {
+        paragraphBottom: Math.max(...visible("p").map(node => node.getBoundingClientRect().bottom)),
+        actionTop: Math.min(...buttons.map(node => node.getBoundingClientRect().top)),
+        lines: buttons.map(node => { const range = document.createRange(); range.selectNodeContents(node); return range.getClientRects().length; }),
+        targets: buttons.map(node => ({ width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height })),
+        links: visible("a").map(node => node.getClientRects().length),
+      };
+    });
+    expect(metrics.actionTop).toBeGreaterThan(metrics.paragraphBottom);
+    expect(metrics.lines).toEqual([1, 1]);
+    expect(metrics.links).toEqual([1]);
+    expect(metrics.targets.every(box => box.width >= 44 && box.height >= 44)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    const decline = notice.getByTestId("analytics-consent-decline");
+    await decline.click();
+    await expect(notice).toBeHidden();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+  });
+}
+
 test("English consent scopes excluded content to product analytics", async ({ page, baseURL, isMobile }) => {
   await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
   await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
@@ -27,7 +69,10 @@ test("English consent scopes excluded content to product analytics", async ({ pa
     await expect(notice).toContainText("Prompts, responses, filenames, and file contents are never included.", { useInnerText: true });
   }
   const accept = notice.getByRole("button", { name: "Allow analytics", exact: true });
-  await expect(accept).toHaveText("Allow analytics", { useInnerText: true });
+  // The accessible name stays the full label; a compact phone notice shows
+  // the short one so copy and actions keep one row inside the 80px contract
+  // (marketing-consent-hero, analytics-consent-signin).
+  await expect(accept).toHaveText(isMobile ? "Allow" : "Allow analytics", { useInnerText: true });
   expect(events).toBe(0);
   await accept.click();
   await expect(notice).toBeHidden();
@@ -53,7 +98,8 @@ test("Korean consent identifies the collected statistics and their purpose", asy
   await expect(notice).toContainText("개선합니다");
   const accept = notice.getByRole("button", { name: "사용 통계 허용", exact: true });
   await expect(accept).toBeVisible();
-  if (isMobile) await expect(accept).toHaveText("통계 허용", { useInnerText: true });
+  // /plugins renders the readable (full-label) notice at every width.
+  await expect(accept).toHaveText("사용 통계 허용", { useInnerText: true });
   expect(events).toBe(0);
   await accept.click();
   await expect(notice).toBeHidden();
@@ -62,6 +108,7 @@ test("Korean consent identifies the collected statistics and their purpose", asy
 
 test("mobile analytics consent stays compact with one-row actions", async ({
   page,
+  baseURL,
 }, testInfo) => {
   test.skip(
     !testInfo.project.name.startsWith("mobile"),
@@ -73,9 +120,10 @@ test("mobile analytics consent stays compact with one-row actions", async ({
     {
       name: "__tomverse_e2e_analytics",
       value: "1",
-      url: "http://127.0.0.1:3100",
+      url: baseURL!,
     },
   ]);
+  await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
   await prepareGuestPage(page, "en");
   await page.route("**/api/analytics/events", (route) =>
     route.fulfill({ status: 202, body: "" })
@@ -92,7 +140,7 @@ test("mobile analytics consent stays compact with one-row actions", async ({
 
   const decline = banner.getByRole("button", { name: "Decline" });
   const accept = banner.getByRole("button", { name: "Allow analytics" });
-  await expect(accept).toHaveText("Allow analytics", { useInnerText: true });
+  await expect(accept).toHaveText("Allow", { useInnerText: true });
   const [bannerBox, declineBox, acceptBox] = await Promise.all([
     banner.boundingBox(),
     decline.boundingBox(),

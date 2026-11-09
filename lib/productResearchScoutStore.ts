@@ -1,7 +1,7 @@
 /**
  * Storage for the product-research scout's suggestions (owner direction
  * 2026-10-19, LLM-first). One table, written by the scout route and changed by
- * the operator's dismiss and send-to-AMUX actions in Admin.
+ * the operator's dismiss, complete and send-to-AMUX actions in Admin.
  */
 import "server-only";
 
@@ -70,11 +70,11 @@ export async function insertSuggestions(input: {
 
 export const SUGGESTION_LIST_LIMIT = 300;
 
-/** Open suggestions first by severity then newest; the rest newest first. */
+/** Open suggestions first by severity, then creation; completions by decision time. */
 export async function listSuggestions(status: SuggestionStatus): Promise<StoredSuggestion[]> {
   const rows = await prisma.productResearchSuggestion.findMany({
     where: { status },
-    orderBy: { createdAt: "desc" },
+    orderBy: status === "completed" ? { statusChangedAt: "desc" } : { createdAt: "desc" },
     take: SUGGESTION_LIST_LIMIT,
   });
   if (status !== "open") return rows;
@@ -90,6 +90,7 @@ export const SUGGESTION_AUDIT_TARGET = "product_research_suggestion";
 export const SUGGESTION_AUDIT_ACTIONS = {
   dismissed: "product_research.suggestion.dismissed",
   sent: "product_research.suggestion.sent",
+  completed: "product_research.suggestion.completed",
 } as const;
 
 /**
@@ -101,7 +102,7 @@ export async function closeSuggestion(input: {
   readonly session: Session;
   readonly request: Request;
   readonly id: string;
-  readonly next: { readonly status: "dismissed" } | { readonly status: "sent"; readonly amuxIdeaId: string };
+  readonly next: { readonly status: "dismissed" | "completed" } | { readonly status: "sent"; readonly amuxIdeaId: string };
 }): Promise<boolean> {
   return prisma.$transaction(async (tx) => {
     const updated = await tx.productResearchSuggestion.updateMany({
@@ -119,7 +120,9 @@ export async function closeSuggestion(input: {
       action: SUGGESTION_AUDIT_ACTIONS[input.next.status],
       targetType: SUGGESTION_AUDIT_TARGET,
       targetId: input.id,
-      summary: input.next.status === "sent" ? "Scout suggestion sent to AMUX as an idea" : "Scout suggestion dismissed",
+      summary: input.next.status === "sent" ? "Scout suggestion sent to AMUX as an idea"
+        : input.next.status === "completed" ? "Scout suggestion completed after implementation and verification"
+          : "Scout suggestion dismissed",
       metadata: input.next.status === "sent" ? { amuxIdeaId: input.next.amuxIdeaId } : {},
       tx,
     });
@@ -127,10 +130,10 @@ export async function closeSuggestion(input: {
   });
 }
 
-export type SuggestionCounts = { readonly open: number; readonly dismissed: number; readonly sent: number };
+export type SuggestionCounts = { readonly open: number; readonly dismissed: number; readonly sent: number; readonly completed: number };
 
 export async function suggestionCounts(): Promise<SuggestionCounts> {
   const groups = await prisma.productResearchSuggestion.groupBy({ by: ["status"], _count: { _all: true } });
   const count = (status: SuggestionStatus) => groups.find((group) => group.status === status)?._count._all ?? 0;
-  return { open: count("open"), dismissed: count("dismissed"), sent: count("sent") };
+  return { open: count("open"), dismissed: count("dismissed"), sent: count("sent"), completed: count("completed") };
 }
