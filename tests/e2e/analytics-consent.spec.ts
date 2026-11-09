@@ -6,6 +6,60 @@ test.beforeEach(async ({ page }) => {
   await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
 });
 
+test("English consent scopes excluded content to product analytics", async ({ page, baseURL, isMobile }) => {
+  await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
+  await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
+  await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+  await prepareGuestPage(page, "en");
+  let events = 0;
+  await page.route("**/api/analytics/events", route => {
+    events += 1;
+    return route.fulfill({ status: 202, body: "" });
+  });
+  await page.route("https://www.googletagmanager.com/**", route => route.fulfill({ contentType: "application/javascript", body: "" }));
+  await page.goto("/chatgpt-vs-claude?lang=en");
+  const notice = page.getByRole("region", { name: "Privacy-safe product analytics" });
+  await expect(notice).toBeVisible({ timeout: 15_000 });
+  if (isMobile) {
+    await expect(notice).toContainText("Usage analytics excludes prompts and file content.", { useInnerText: true });
+  } else {
+    await expect(notice).toContainText("Tomverse measures product usage and campaign attribution.", { useInnerText: true });
+    await expect(notice).toContainText("Prompts, responses, filenames, and file contents are never included.", { useInnerText: true });
+  }
+  const accept = notice.getByRole("button", { name: "Allow analytics", exact: true });
+  await expect(accept).toHaveText("Allow analytics", { useInnerText: true });
+  expect(events).toBe(0);
+  await accept.click();
+  await expect(notice).toBeHidden();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("tomverse_analytics_consent_v1"))).toBe("accepted");
+});
+
+test("Korean consent identifies the collected statistics and their purpose", async ({ page, baseURL, isMobile }) => {
+  await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });
+  await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
+  await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+  await prepareGuestPage(page, "ko");
+  let events = 0;
+  await page.route("**/api/analytics/events", route => {
+    events += 1;
+    return route.fulfill({ status: 202, body: "" });
+  });
+  await page.route("https://www.googletagmanager.com/**", route => route.fulfill({ contentType: "application/javascript", body: "" }));
+  await page.route("**/api/mcp/connections", route => route.fulfill({ json: { enabled: false, servers: [], connections: [], invocations: [] } }));
+  await page.goto("/plugins?lang=ko");
+  const notice = page.getByRole("region", { name: "개인정보를 보호하는 제품 분석" });
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText("기능 사용·유입 경로 통계");
+  await expect(notice).toContainText("개선합니다");
+  const accept = notice.getByRole("button", { name: "사용 통계 허용", exact: true });
+  await expect(accept).toBeVisible();
+  if (isMobile) await expect(accept).toHaveText("통계 허용", { useInnerText: true });
+  expect(events).toBe(0);
+  await accept.click();
+  await expect(notice).toBeHidden();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("tomverse_analytics_consent_v1"))).toBe("accepted");
+});
+
 test("mobile analytics consent stays compact with one-row actions", async ({
   page,
   baseURL,
@@ -40,6 +94,7 @@ test("mobile analytics consent stays compact with one-row actions", async ({
 
   const decline = banner.getByRole("button", { name: "Decline" });
   const accept = banner.getByRole("button", { name: "Allow analytics" });
+  await expect(accept).toHaveText("Allow analytics", { useInnerText: true });
   const [bannerBox, declineBox, acceptBox] = await Promise.all([
     banner.boundingBox(),
     decline.boundingBox(),

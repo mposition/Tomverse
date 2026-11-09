@@ -1,6 +1,8 @@
 "use client";
 
 import { formatAestDateTime } from "@/lib/adminUiCore";
+import { ResponseLatencyEvidenceView } from "@/components/admin/ResponseLatencyEvidenceView";
+import type { ResponseLatencyEvidence } from "@/lib/responseLatencyCore";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { AdminConfirmDialog } from "@/components/admin/ui/AdminConfirmDialog";
@@ -32,6 +34,7 @@ import {
 } from "@/lib/autoRouterRecommendationsCore";
 
 type Summary = {
+  responseLatency?: ResponseLatencyEvidence;
   evaluated: number;
   unchanged: number;
   candidateWins: number;
@@ -443,6 +446,7 @@ export function AdminAutoRouterOptimizerPanel({
                 {m.towardLoser}
               </p>
             ) : null}
+            <ResponseLatencyEvidenceView evidence={cycle.summary?.responseLatency} />
             {cycle.summary?.report ? (
               <div className="mt-2 rounded-xl border border-zinc-800 p-3" data-testid="admin-auto-router-optimizer-report">
                 <p className="text-xs font-bold text-zinc-300">{m.reportTitle}</p>
