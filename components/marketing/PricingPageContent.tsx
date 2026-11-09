@@ -1630,7 +1630,7 @@ export function PricingPageContent() {
                 </div>
               )}
               {planId !== "free" ? (
-                <div className={`mt-3 rounded-2xl border p-3 text-xs font-bold leading-5 ${
+                <div className={`mt-3 rounded-2xl border p-3 text-sm font-bold leading-6 ${
                   plan.highlighted
                     ? "border-white/20 bg-white/10 text-blue-50"
                     : "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300"
@@ -1642,7 +1642,7 @@ export function PricingPageContent() {
                     </span>
                   </div>
                   <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}</div>
-                  <p className={plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}>
+                  <p data-testid="pricing-annual-checkout-note" className={plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}>
                     {annualCopy.checkout}
                   </p>
                 </div>
