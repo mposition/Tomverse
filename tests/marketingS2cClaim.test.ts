@@ -31,7 +31,6 @@ import {
   marketingPublishAdapterAvailable,
   resolveMarketingPublishAdapter,
 } from "@/lib/marketingPublishAdapter";
-import { MARKETING_CHANNEL_CAPS } from "@/lib/marketingAutomationSchema";
 
 const CHANNEL_ID = "chn_linkedin_en";
 const POST_ID = "post-due-1";
@@ -225,36 +224,26 @@ test("the adapter module holds no credential and cannot reach outward", async ()
 // The caps
 // ---------------------------------------------------------------------------
 
-test("an operator's override lowers a cap and cannot raise one", () => {
-  const policy = MARKETING_CHANNEL_CAPS.linkedin;
-  assert.ok(policy);
+test("the only caps are an operator's; the policy sets none", () => {
+  // Owner decision 2026-11-08: no policy cap. Null is no cap.
   assert.deepEqual(
     marketingChannelCaps({
       channel: "linkedin",
       dailyCapOverride: null,
       weeklyCapOverride: null,
     }),
-    { daily: policy.daily, weekly: policy.weekly },
-  );
-  assert.deepEqual(
-    marketingChannelCaps({
-      channel: "linkedin",
-      dailyCapOverride: 99,
-      weeklyCapOverride: 99,
-    }),
-    { daily: policy.daily, weekly: policy.weekly },
-    "an override above the policy cap is not a cap, it is a request",
+    { daily: null, weekly: null },
   );
   assert.deepEqual(
     marketingChannelCaps({
       channel: "x",
-      dailyCapOverride: 1,
+      dailyCapOverride: 99,
       weeklyCapOverride: 2,
     }),
-    { daily: 1, weekly: 2 },
+    { daily: 99, weekly: 2 },
   );
-  // RedNote is posted by hand: no policy cap, and an override cannot invent
-  // one, because there is no automated posting to cap.
+  // RedNote is posted by hand: no slot at all, which is not the same as no
+  // cap, and an override cannot invent one.
   assert.equal(
     marketingChannelCaps({
       channel: "rednote",
@@ -364,11 +353,23 @@ test("the channel is locked before the counts are read", async () => {
   );
 });
 
-test("a claim is refused at the day and the week cap", async () => {
-  const policy = MARKETING_CHANNEL_CAPS.linkedin;
-  assert.ok(policy);
+test("with no cap, a claim is taken however many posts the day and week hold", async () => {
+  const { database, seen } = fakeDatabase({ today: 40, week: 200 });
+  const result = await claimDueMarketingPost(asTransaction(database), {
+    channelId: CHANNEL_ID,
+    claimToken: TOKEN,
+    resolveAdmission: admits,
+  });
+  assert.ok(result.claimed, "no policy cap since 2026-11-08");
+  // Still counted, so the slot is true if an operator sets a cap later.
+  assert.equal(seen.sql.some((statement) => statement.includes("count(*) FILTER")), true);
+});
 
-  const atDay = fakeDatabase({ today: policy.daily });
+test("a claim is refused at an operator's day and week cap", async () => {
+  const policy = { daily: 1, weekly: 3 };
+  const capped = channelRow({ dailyCapOverride: policy.daily, weeklyCapOverride: policy.weekly });
+
+  const atDay = fakeDatabase({ channel: capped, today: policy.daily });
   assert.deepEqual(
     await claimDueMarketingPost(asTransaction(atDay.database), {
       channelId: CHANNEL_ID,
@@ -379,7 +380,7 @@ test("a claim is refused at the day and the week cap", async () => {
   );
   assert.equal(atDay.seen.updates.length, 0, "a refused claim writes nothing");
 
-  const atWeek = fakeDatabase({ week: policy.weekly });
+  const atWeek = fakeDatabase({ channel: capped, week: policy.weekly });
   assert.deepEqual(
     await claimDueMarketingPost(asTransaction(atWeek.database), {
       channelId: CHANNEL_ID,
@@ -575,9 +576,9 @@ test("renewing a slot the post already holds is not a new spend", async () => {
   // same row. That row *is* today's one post. Counting it against the cap
   // refused its own renewal, so the only recovery path for a crashed worker
   // never succeeded.
-  const policy = MARKETING_CHANNEL_CAPS.linkedin;
-  assert.ok(policy);
+  const policy = { daily: 1, weekly: 3 };
   const { database, seen } = fakeDatabase({
+    channel: channelRow({ dailyCapOverride: policy.daily, weeklyCapOverride: policy.weekly }),
     dueSlotDay: "2026-09-23",
     // The day is already at its cap -- with this very row in it.
     today: policy.daily,
@@ -757,10 +758,9 @@ test("the S2c actions are their own two names", () => {
 });
 
 test("a manual account is never claimed, whatever its platform's caps say", async () => {
-  // X has caps (2 a day, 10 a week), so the caps check alone never held a manual
+  // X is posted through the API, so the caps check alone never held a manual
   // X account back: its due post was claimed, failed in the adapter for want of
   // an account reference, and three of those paused the account.
-  assert.ok(MARKETING_CHANNEL_CAPS.x);
   for (const channel of ["x", "rednote", "linkedin"]) {
     const { database, seen } = fakeDatabase({
       channel: { ...channelRow({ channel, status: "approval_mode" }), provider: "manual" } as ChannelRow,
