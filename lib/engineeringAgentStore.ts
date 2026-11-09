@@ -487,8 +487,7 @@ export async function requireEngineeringAgentRunAdmission(tx: EngineeringAgentTr
   await requireSwitch(tx, "claimAllowed");
   await lockEngineeringAgentHalt(tx);
   if (engineeringAgentHalted(await readEngineeringAgentHaltState(tx))) refuse("halted");
-  const { mode } = await readEngineeringAgentSwitches(tx);
-  if (!(await readEngineeringAgentOwnerQueues(tx, mode)).claimAllowed) refuse("owner_queue_full");
+  if (!(await readEngineeringAgentOwnerQueues(tx)).claimAllowed) refuse("owner_queue_full");
 }
 
 /* ------------------------------------------------------------------------- */
@@ -505,10 +504,9 @@ export async function requireEngineeringAgentRunAdmission(tx: EngineeringAgentTr
  */
 export async function readEngineeringAgentOwnerQueues(
   db: PrismaClient | Prisma.TransactionClient,
-  mode: EffectiveSwitches["mode"],
 ): Promise<QueueVerdict> {
   const rows = await db.$queryRaw<
-    Array<{ openPrs: bigint; pendingDecisions: bigint; activeRuns: bigint; t1Started: Date | null; now: Date }>
+    Array<{ openPrs: bigint; pendingDecisions: bigint; activeRuns: bigint }>
   >`
     SELECT
       (SELECT count(*) FROM "EngineeringAgentBinding" b
@@ -518,18 +516,13 @@ export async function readEngineeringAgentOwnerQueues(
         AS "openPrs",
       (SELECT count(*) FROM "EngineeringAgentWorkItem" w
         WHERE w."kind" IN ('t2_draft', 'decision', 'state_mismatch') AND w."state" = 'open') AS "pendingDecisions",
-      (SELECT count(*) FROM "EngineeringAgentRun" r WHERE r."status" = 'active') AS "activeRuns",
-      (SELECT min(r."startedAt") FROM "EngineeringAgentRun" r WHERE r."modeAtStart" = 't1') AS "t1Started",
-      clock_timestamp() AT TIME ZONE 'UTC' AS "now"
+      (SELECT count(*) FROM "EngineeringAgentRun" r WHERE r."status" = 'active') AS "activeRuns"
   `;
   const row = rows[0];
   const activeRuns = Number(row.activeRuns);
   return decideOwnerQueues({
     openPrBindings: Number(row.openPrs) + activeRuns,
     pendingDecisions: Number(row.pendingDecisions) + activeRuns,
-    // The trigger opens the first T1 window with the first run under `t1`.
-    t1StartedAt: row.t1Started ?? (mode === "t1" ? row.now : null),
-    now: row.now,
   });
 }
 
