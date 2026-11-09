@@ -879,7 +879,7 @@ export function AnalyticsProvider({
         */}
         <div className="min-w-[6rem] flex-1">
           <p className={`${readableNotice ? "text-sm leading-6" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-300 @md/notice:hidden`}>
-            {readableNotice ? promptCopy.body : promptCopy.mobileBody}{" "}
+            {isPrivacyRoute ? promptCopy.body : promptCopy.mobileBody}{" "}
             <Link
               href="/privacy"
               className={`${readableNotice ? "inline-block whitespace-nowrap" : ""} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
