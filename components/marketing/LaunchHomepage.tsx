@@ -43,10 +43,11 @@ function HeroPreview({ copy, motionLabel, motionDisabled, onMotionToggle }: {
       </div>
       <span className={styles.oneSculpture} aria-hidden="true">ONE</span>
       <div className={styles.modelStamps} aria-hidden="true">
-        {modelNames.map((model, i) => <div key={model} className={`${styles.modelStamp} ${styles[`stamp${i}`]}`}>
+        {modelNames.map((model, i) => <div key={model} data-testid="launch-model-stamp" className={`${styles.modelStamp} ${styles[`stamp${i}`]}`}>
           <strong>{model}</strong><span>{copy.modelNote}</span>
         </div>)}
       </div>
+      <p className={styles.mobileModelNote} data-testid="launch-mobile-model-note">{copy.modelNote}</p>
       <div className={styles.chatPreview}>
         <div className={styles.chatPreviewHeader}><strong>Tomverse Chat</strong><span>Smart Adaptive</span></div>
         <p className={styles.previewQuestion}>{copy.question}</p>
