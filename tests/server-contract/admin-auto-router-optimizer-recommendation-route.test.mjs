@@ -12,6 +12,20 @@ const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path))
 class Reauthentication extends Error {}
 
 let session, permitted, recentAuthError, rateLimitCalls, setCalls, setResult;
+let latencyReads = 0;
+let latencyEvidence = { status: "available", windowDays: 7, truncated: false, sampleCount: 0, omittedGroups: 0, groups: [] };
+mock.module(mod("lib/responseLatencyStore.ts"), {
+  namedExports: { readResponseLatencyEvidence: async () => { latencyReads++; return latencyEvidence; } },
+});
+mock.module(mod("lib/autoRouterTunablesRead.ts"), {
+  namedExports: {
+    readAutoRouterTunables: async () => ({ routerTimeoutMs: null, excluded: [], timeoutRevertedAt: null }),
+    readSettingAutoApply: async () => false,
+  },
+});
+mock.module(mod("lib/autoRouterRecAgent.ts"), {
+  namedExports: { readRecAgentEnabled: async () => false },
+});
 
 mock.module("next-auth/next", { namedExports: { getServerSession: async () => session } });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
@@ -84,6 +98,30 @@ test.beforeEach(() => {
   rateLimitCalls = [];
   setCalls = [];
   setResult = { ok: true, changed: true };
+  latencyReads = 0;
+});
+
+test("reading current measurements needs no optimizer cycle or write permission", async () => {
+  permitted = [];
+  const req = new Request("https://tomverse.test/api/admin/auto-llm-router/optimizer");
+  let response = await route.GET(req);
+  assert.equal(response.status, 200);
+  let body = await response.json();
+  assert.deepEqual(body.cycles, []);
+  assert.deepEqual(body.responseLatency, latencyEvidence);
+  latencyEvidence = { status: "unavailable", windowDays: 7 };
+  response = await route.GET(req);
+  body = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(body.responseLatency, latencyEvidence);
+  assert.equal(latencyReads, 2, "each refresh reads current evidence");
+  assert.equal(setCalls.length, 0);
+});
+
+test("anonymous reads do not access latency measurements", async () => {
+  session = null;
+  assert.equal((await route.GET(new Request("https://tomverse.test/api/admin/auto-llm-router/optimizer"))).status, 404);
+  assert.equal(latencyReads, 0);
 });
 
 test("a visitor who is not an administrator does not learn the action exists", async () => {
