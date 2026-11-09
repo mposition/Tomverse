@@ -198,7 +198,7 @@ const consentCopy: Record<
     body: "With your permission, Tomverse measures product usage and campaign attribution. Prompts, responses, filenames, and file contents are never included.",
     mobileBody: "Usage analytics excludes prompts and file content.",
     accept: "Allow analytics",
-    acceptShort: "Allow analytics",
+    acceptShort: "Allow",
     decline: "Decline",
     declineShort: "Decline",
     privacy: "Privacy policy",
