@@ -65,13 +65,23 @@ export function readAmuxCa(caFile) {
  * its windows, as AMUX measured them. Anything AMUX did not measure, marks
  * stale, or does not list is unknown -- assignment needs evidence.
  *
+ * Availability and staleness are read from the provider's own row only. The
+ * body's top-level fields (`available`, `stale`, `stale_reason`, `cache_age_s`,
+ * `limits`, ...) are the legacy shape of Claude's probe -- a failed Claude probe
+ * makes the top level `available: false` with every other row still beside it --
+ * so they speak for Claude alone: a Claude 429 must not hold Codex. The Claude
+ * row carries the same verdict. AMUX keeps no fallback reading for any other
+ * provider -- each row is probed afresh every cache refresh and reads
+ * `available: false` when that probe fails -- and stamps a served Claude
+ * fallback's `stale` onto the Claude row (crates/amux-server/src/api/usage.rs).
+ *
  * Where AMUX reports credit beside the windows (Cursor's `credit_usd`, from
  * its credit grants), the rule is cursor-quota.mjs's: a spent pool stays
  * usable while credit is left, and credit that was not read proves nothing.
  */
 export function amuxQuotaFromUsage(body, providerId) {
-  if (!body || typeof body !== "object" || body.available !== true || body.stale === true) return UNKNOWN;
-  const providers = Array.isArray(body.providers) ? body.providers : [];
+  if (!body || typeof body !== "object" || !Array.isArray(body.providers)) return UNKNOWN;
+  const providers = body.providers;
   const entry = providers.find((row) => row && typeof row === "object" && row.id === providerId);
   if (!entry || entry.available !== true || entry.measured !== true || entry.stale === true) return UNKNOWN;
   const windows = Array.isArray(entry.windows) ? entry.windows : [];

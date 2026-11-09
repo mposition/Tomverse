@@ -80,6 +80,24 @@ export const SCOUT_SEND_BATCH = 10;
 /** Sends are spaced so a long selection stays inside the send route's five a minute. */
 export const SCOUT_SEND_SPACING_MS = 13_000;
 
+/** Stop a selected batch on the first unknown/failed result; only AMUX sends need spacing. */
+export async function runScoutSuggestionBatch<T, Failure>(
+  rows: readonly T[],
+  action: "complete" | "dismiss" | "send",
+  act: (row: T) => Promise<Failure | null>,
+  progress: (done: number) => void,
+  wait: (milliseconds: number) => Promise<void> = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+): Promise<{ done: number; total: number; failure: Failure | null }> {
+  let done = 0;
+  for (const [index, row] of rows.entries()) {
+    if (action === "send" && index > 0) await wait(SCOUT_SEND_SPACING_MS);
+    const failure = await act(row);
+    if (failure) return { done, total: rows.length, failure };
+    progress(++done);
+  }
+  return { done, total: rows.length, failure: null };
+}
+
 /** The next batch to send: most severe first, and oldest first within a severity, so nothing waits for ever. */
 export function nextScoutSendBatch<T extends { readonly id: string; readonly severity: string; readonly createdAt: string }>(
   rows: readonly T[],

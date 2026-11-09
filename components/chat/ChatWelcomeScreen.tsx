@@ -79,7 +79,7 @@ export function ChatWelcomeScreen({
     >
       <div
         data-testid="chat-welcome-group"
-        className="my-auto flex w-full max-w-2xl flex-col items-center py-6"
+        className="my-auto flex w-full max-w-2xl flex-col items-center py-2 sm:py-6"
       >
         <p
           data-testid="chat-welcome-greeting"
