@@ -116,7 +116,7 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   },
   "/terms": {
     date: "2026-11-16",
-    contentSha256: "5a2e6339c29b7b8892add806418f5d24b2681a58a426808531ff639e617a4709",
+    contentSha256: "c3dfd8bbb90a8da7f3f81c43d74b973abe205331b5d13938d64569404c456ffb",
   },
 };
 
