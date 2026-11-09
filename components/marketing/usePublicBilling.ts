@@ -27,6 +27,7 @@ type BillingPlan = {
   displayExchangeRate?: number;
   monthlyMessageLimit?: number;
   dailyMessageLimit?: number;
+  allowAttachments?: boolean;
 };
 
 /**
@@ -65,6 +66,7 @@ export type FeaturedBillingPromotion = {
 };
 
 type BillingConfig = {
+  appInputTokenLimit?: number;
   plans: BillingPlan[];
   creditPacks?: PublicCreditPack[];
   featuredPromotion?: FeaturedBillingPromotion | null;

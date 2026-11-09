@@ -333,7 +333,7 @@ export async function heartbeatEngineeringAgentWorker(input: {
   const switches = await readEngineeringAgentSwitches(prisma);
   const [halt, queues] = await Promise.all([
     readEngineeringAgentHaltState(prisma),
-    readEngineeringAgentOwnerQueues(prisma, switches.mode),
+    readEngineeringAgentOwnerQueues(prisma),
   ]);
   const dispatchReady =
     input.dispatchReady && switches.claimAllowed && !engineeringAgentHalted(halt) && queues.claimAllowed;

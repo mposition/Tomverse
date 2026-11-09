@@ -698,6 +698,8 @@ export const de = {
         aiReviewResponsesRequired: "Schließe zuerst mindestens zwei Modellantworten auf dieselbe Frage ab.",
         aiReviewRun: "Gegenprüfung starten",
         aiReviewRunning: "Antworten werden geprüft …",
+        aiReviewSecondaryPending: "Die erste Prüfung ist fertig. Die verbleibende Prüfung wird abgeschlossen …",
+        aiReviewPartialInterrupted: "Die erste Prüfung ist verfügbar, aber das endgültige Ergebnis konnte nicht bestätigt werden. Prüfe den Status, bevor du einen weiteren Durchlauf startest.",
         aiReviewSecondaryReviewer: "Prüfer 2",
         aiReviewSourceGrounding: "Quellenabdeckung",
         aiReviewSourceGroundingDescription: "Anteil des zitierten Textes, der sich direkt den verlinkten Quellen zuordnen lässt. Der Wert misst weder sachliche Richtigkeit noch Verlässlichkeit der Quellen oder Modellsicherheit.",
