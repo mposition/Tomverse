@@ -1149,9 +1149,13 @@ function ChatAppComponent({
           if (getChatRuntimeRevision(loadKey) !== revisionAtStart || isChatRuntimeStreaming(loadKey)) {
             settleChatRuntimeLoad(loadKey, requestId, { loaded: true });
           } else if (loadFailed) {
-            // Let a later re-run retry instead of pinning the view to a failed
-            // load, which would leave the loading placeholder up for good.
-            settledViewKeyRef.current = null;
+            // The panel shows the load error with a retry button, and only
+            // that button (or a different key) starts the next load. Clearing
+            // settledViewKeyRef here let any unrelated dependency change --
+            // getModel after /api/models/status, for one -- re-read the
+            // history silently, so the error could vanish before it was ever
+            // shown and a send could run against a history the user never saw
+            // fail.
             releaseChatRuntimeLoad(loadKey, requestId);
           } else {
             settleChatRuntimeLoad(loadKey, requestId, { loaded: true });
@@ -3200,6 +3204,7 @@ function ChatAppComponent({
                 type="button"
                 data-testid="chat-history-load-retry"
                 onClick={() => {
+                  settledViewKeyRef.current = null;
                   setHistoryLoadRetry((current) => current + 1);
                 }}
                 className="min-h-11 rounded-lg border border-zinc-300 px-4 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100"
