@@ -1,34 +1,19 @@
-export const englishLocationNotice = [
-  {
-    title: "Use and turn off",
-    items: [
-      "Current location is off by default.",
-      "Turn it off from the composer or + tools menu.",
-      "You can provide a place manually instead.",
-      "Turning location off or denying access suppresses further automatic requests for the current session.",
-    ],
-  },
-  {
-    title: "Permission requests",
-    paragraphs: [
-      "For a location-dependent question, the app can automatically request browser or device permission before answering.",
-      "If you have already allowed access, it reads a fresh position without asking again, including after reload.",
-      "A short analysis of your question by the configured routing AI model decides whether to request location; it receives no device position.",
-      "The permission choice stays in this tab's memory and resets on reload or account change.",
-      "Browser and device settings control the lasting permission.",
-    ],
-  },
-  {
-    title: "Sending and retention",
-    paragraphs: [
-      "If you turn it on and grant browser or device permission, we read a fresh approximate position when you send a message and include it with that request to your selected AI providers.",
-      "We do not track your location in the background or create a separate location history.",
-      "An AI answer may mention a place; that answer follows the normal chat retention, export and sharing settings.",
-    ],
-  },
+const englishLocationParagraphs = [
+  "Browser or device permission and Tomverse’s location state are separate. Your browser or device may retain an Allow permission across reloads. Tomverse starts with location inactive; its enabled state and automatic-request suppression are kept only in this tab’s memory and reset on reload or account change. Reloading alone does not read a position.",
+  "If you turn location on, we read a fresh approximate position when you send each message and include it with that request to your selected AI providers. While location is inactive, sending a location-dependent question can also trigger an automatic permission request before answering. A short analysis by the configured routing AI model decides whether location is needed; it receives no device position. If your browser or device has retained Allow, that request can read a fresh position without another prompt, including after reload.",
+  "Turning location off in the composer or + tools menu blocks further reads and automatic requests for the current session, even if browser permission remains Allow. Denying access also suppresses automatic requests for that session. Reload or account change resets this suppression; use browser or device settings to revoke lasting permission.",
+  "We do not track location in the background or create a separate location history. An answer may mention a place and follows normal chat retention, export and sharing settings. You can provide a place manually instead."
 ] as const;
 
-// Keep the existing locale key available as plain text without duplicating copy.
-export const englishLocationBody = englishLocationNotice
-  .flatMap<string>(section => "items" in section ? [...section.items] : [...section.paragraphs])
-  .join(" ");
+export const englishLocationBody = englishLocationParagraphs.join("\n\n");
+
+export const englishLocationNotice = [
+  { title: "Use and turn off", items: [
+    "Tomverse starts with location inactive.",
+    "Turning location off in the composer or + tools menu blocks further reads and automatic requests for the current session, even if browser permission remains Allow.",
+    "Denying access also suppresses automatic requests for that session.",
+    "You can provide a place manually instead.",
+  ] },
+  { title: "Permission requests", paragraphs: [englishLocationParagraphs[0], englishLocationParagraphs[2]] },
+  { title: "Sending and retention", paragraphs: [englishLocationParagraphs[1], englishLocationParagraphs[3]] },
+] as const;

@@ -735,6 +735,8 @@ export const en = {
         aiReviewPerMonth: "reviews/month",
         aiReviewRun: "Run cross-review",
         aiReviewRunning: "Reviewing answers...",
+        aiReviewSecondaryPending: "The first review is ready. Finishing the remaining review...",
+        aiReviewPartialInterrupted: "The first review is available, but the final result could not be confirmed. Check the review status before starting another run.",
         aiReviewPreparing: "Preparing the latest comparable answers...",
         aiReviewPrepareFailed: "The comparison review could not be prepared.",
         aiReviewFailed: "The comparison review could not be completed. Reserved credits were refunded.",

@@ -117,6 +117,21 @@ test("no assigned work refuses; an approved brief is carried along", () => {
   assert.match(withBrief.ok ? withBrief.text : "", /승인된 실행 브리프:\nKeep the API stable\./);
 });
 
+test("a card whose only readable work is its approved brief is remade from the brief under its title", () => {
+  const brief = "Keep the starter guidance sentence visible on the first screen. Do not move the composer.";
+  const titled = amuxLegacyCardIdeaText(card(null, { executionBrief: brief, title: "Starter guidance stays visible" }));
+  assert.equal(titled.ok && titled.title, "Starter guidance stays visible");
+  assert.match(titled.ok ? titled.text : "", /^Starter guidance stays visible\n\n승인된 실행 브리프:\nKeep the starter/);
+  assert.match(titled.ok ? titled.text : "", /원래 카드: AMUX-WORKBOARD-061/);
+  assert.equal(inspect(titled.ok ? titled.text : "").ok, true);
+  // Without a title, the brief's first sentence is the title.
+  const untitled = amuxLegacyCardIdeaText(card("  ", { executionBrief: brief }));
+  assert.equal(untitled.ok && untitled.title, "Keep the starter guidance sentence visible on the first screen.");
+  // Neither work nor brief still refuses, whatever the title.
+  assert.deepEqual(amuxLegacyCardIdeaText(card(null, { title: "Only a title" })),
+    { ok: false, code: "no_assigned_work" });
+});
+
 test("an over-long card keeps its head within the idea limit and still passes the gate", () => {
   const long = "가".repeat(5_000);
   const built = amuxLegacyCardIdeaText(card(JSON.stringify({ problem: `Long work. ${long}` })));
@@ -144,7 +159,7 @@ test("the recreate request id is a stable v4 UUID per card and idea text", () =>
 
 test("a close refuses a running, closed, changed or non-legacy card", () => {
   const base = { ...v4Task(), sourceSystem: "tomverse_private_workboard", archivedAt: null, revision: 3,
-    status: "review", activeDelivery: false, liveAttempt: false };
+    status: "review", activeDelivery: false, liveAttempt: false, openEscalation: false };
   assert.equal(amuxLegacyCardCloseRefusal(base, 3), null);
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, status: "blocked" }, 3), null);
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, sourceSystem: "admin-idea-v4" }, 3), null);
@@ -152,8 +167,29 @@ test("a close refuses a running, closed, changed or non-legacy card", () => {
     executionGrade: "advanced" }, 3), "not_legacy");
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, sourceSystem: "local-agent-intake" }, 3), "not_legacy");
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, archivedAt: new Date() }, 3), "already_closed");
+  // An archived card still in the owner queue closes: only its escalation is resolved.
+  const archivedOpen = { ...base, archivedAt: new Date(), openEscalation: true };
+  assert.equal(amuxLegacyCardCloseRefusal(archivedOpen, 3), null);
+  assert.equal(amuxLegacyCardCloseRefusal(archivedOpen, 2), "changed");
+  assert.equal(amuxLegacyCardCloseRefusal({ ...archivedOpen, activeDelivery: true }, 3), "running");
+  assert.equal(amuxLegacyCardCloseRefusal({ ...archivedOpen, sourceSystem: "local-agent-intake" }, 3), "not_legacy");
   assert.equal(amuxLegacyCardCloseRefusal(base, 2), "changed");
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, activeDelivery: true }, 3), "running");
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, liveAttempt: true }, 3), "running");
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, status: "doing" }, 3), "running");
+});
+
+test("an archived v22 Task is not a legacy card: archived cards leave the owner queue instead", () => {
+  // Owner decision 2026-11-09: an archived card no longer shows in Waiting on me,
+  // so no third kind remakes it there.
+  const v22 = v4Task({ status: "review", v22ReceiptId: "r", taskRole: "implement", executionGrade: "advanced",
+    lastAttempt: { endedAt: "2026-10-30T00:00:00.000Z", outcome: "succeeded", reason: "usage_outcome_unknown" } });
+  assert.equal(amuxLegacyCardKind({ ...v22, archivedAt: new Date(), openEscalation: true }), null);
+  assert.equal(amuxLegacyCardCloseRefusal({ ...v22, archivedAt: new Date(), revision: 9, activeDelivery: false,
+    liveAttempt: false, openEscalation: true }, 9), "not_legacy");
+  // Each kind names itself in the remade idea's footer.
+  const pre = amuxLegacyCardIdeaText({ ...card(JSON.stringify({ problem: "Do X." })), kind: "pre_v22_task" });
+  assert.ok((pre.ok ? pre.text : "").includes("(v22 이전에 만든 Task를 새 아이디어로 다시 만듦)"));
+  const board = amuxLegacyCardIdeaText(card(JSON.stringify({ problem: "Do X." })));
+  assert.ok((board.ok ? board.text : "").includes("(옛 작업판에서 이관한 카드를 새 아이디어로 다시 만듦)"));
 });

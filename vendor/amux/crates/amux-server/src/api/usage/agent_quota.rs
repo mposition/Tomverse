@@ -219,7 +219,9 @@ fn copilot_probe_process(token: Option<&str>) -> tokio::process::Command {
         "--no-auto-update",
         "--disable-builtin-mcps",
         "--no-custom-instructions",
-        "--no-remote",
+        // Not `--no-remote`: Copilot CLI 1.0.107 removed it and exits 1 on it.
+        // This probe sends no prompt and is killed within PROBE_TIMEOUT, so
+        // remote control has nothing to reach on either version.
         "--no-remote-export",
     ];
     if token.is_some() {
@@ -743,6 +745,10 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
         assert!(args.contains("--headless --stdio --no-auto-update"));
+        // Copilot CLI 1.0.107 exits 1 on `--no-remote` (the probe read
+        // probe_failed from 2026-11-09); `--no-remote-export` is still accepted.
+        assert!(!args.split_whitespace().any(|arg| arg == "--no-remote"));
+        assert!(args.split_whitespace().any(|arg| arg == "--no-remote-export"));
         assert!(!args.contains("--no-auto-login"));
         assert!(!args.contains("--auth-token-env"));
         assert!(!args.contains("--prompt"));
@@ -759,6 +765,7 @@ mod tests {
             .join(" ");
         assert!(args.contains("--headless --stdio --no-auto-update"));
         assert!(args.contains("--no-auto-login"));
+        assert!(!args.split_whitespace().any(|arg| arg == "--no-remote"));
         assert!(args.contains("--auth-token-env COPILOT_GITHUB_TOKEN"));
         assert!(!args.contains("secret-fixture"));
         assert!(!args.contains("--prompt"));

@@ -1,0 +1,48 @@
+import { defineAdminMessages } from "@/lib/adminLocale";
+
+export const adminAmuxSettledCardEscalationMessages = defineAdminMessages({
+  en: {
+    title: "Leftover escalation from an earlier attempt",
+    intro: "An earlier attempt of this Task stopped and opened this escalation. The card was then sent on by a recovery, so it is done or waiting to run again, but the escalation was left open and no review decision opens on this card. Close it to take the card out of the owner queue.",
+    effect: "Closing resolves the leftover escalation as answered by that recovery. The card keeps its status, results and history.",
+    close: "Close only",
+    confirmClose: "Close this card's leftover escalation?",
+    confirm: "Confirm",
+    cancel: "Cancel",
+    working: "Working…",
+    closed: "Closed the leftover escalation. The card keeps its status.",
+    reauth: "Sign in again to continue",
+    notClosable: "This escalation cannot be closed now:",
+    failed: "The action did not complete. Reload the card to see what happened before trying again.",
+    reason: {
+      decision_available: "the card is in review or blocked now, where its review decision uses this escalation",
+      no_open_escalation: "it has no open escalation left",
+      changed: "the card changed since it was shown; reload it",
+      running: "work for this card is queued or running",
+      not_found: "the card was not found",
+      busy: "a worker holds the card right now; try again in a moment",
+    } as Record<string, string>,
+  },
+  ko: {
+    title: "이전 시도가 남긴 escalation",
+    intro: "이 Task의 이전 시도가 멈추며 이 escalation을 열었습니다. 그 뒤 복구로 카드가 다음 단계로 넘어가 완료됐거나 다시 실행을 기다리지만, escalation은 열린 채 남아 이 카드에서는 검토 결정이 열리지 않습니다. 닫으면 카드가 확인 대기에서 빠집니다.",
+    effect: "닫으면 남은 escalation을 그 복구로 답한 것으로 해결합니다. 카드는 상태, 결과, 이력 그대로 남습니다.",
+    close: "닫기만",
+    confirmClose: "이 카드에 남은 escalation을 닫을까요?",
+    confirm: "확인",
+    cancel: "취소",
+    working: "처리 중…",
+    closed: "남은 escalation을 닫았습니다. 카드 상태는 그대로입니다.",
+    reauth: "계속하려면 다시 로그인하세요",
+    notClosable: "지금은 이 escalation을 닫을 수 없습니다:",
+    failed: "작업이 끝나지 않았습니다. 다시 시도하기 전에 카드를 새로 읽어 결과를 확인하세요.",
+    reason: {
+      decision_available: "카드가 지금 검토 또는 차단 상태라 검토 결정이 이 escalation을 씁니다",
+      no_open_escalation: "남은 escalation이 없습니다",
+      changed: "보여 준 뒤 카드가 바뀌었습니다. 새로 읽으세요",
+      running: "이 카드의 작업이 대기 중이거나 실행 중입니다",
+      not_found: "카드를 찾지 못했습니다",
+      busy: "지금 작업자가 카드를 잡고 있습니다. 잠시 뒤 다시 시도하세요",
+    } as Record<string, string>,
+  },
+});

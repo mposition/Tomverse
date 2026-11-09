@@ -79,8 +79,11 @@ test("the queue is the attention lane, open questions in any lane and open escal
   const [lane, escalation, question] = where.OR;
   // The attention lane: blocked, not archived.
   assert.deepEqual(lane, { archivedAt: null, status: "blocked" });
-  // An open or acknowledged escalation counts even on an archived card.
-  assert.deepEqual(escalation, { humanEscalations: { some: { status: { in: ["open", "acknowledged"] } } } });
+  // An open or acknowledged escalation, on a card that is not archived: an
+  // archived card is not shown even with one still open (owner decision 2026-11-09).
+  assert.deepEqual(escalation, { archivedAt: null,
+    humanEscalations: { some: { status: { in: ["open", "acknowledged"] } } } });
+  for (const term of where.OR) assert.equal(term.archivedAt, null);
   // An open worker question, in any lane, on a card that is not archived.
   assert.deepEqual(question, { archivedAt: null, v22OwnerQuestions: { some: { state: "open" } } });
   // The lane clause of the board is the same lane the first term names.
@@ -132,6 +135,12 @@ test("the screen decides nothing itself: every write is the existing review and 
   assert.match(decision, /<AmuxPendingDecisionNotice /);
   // The only read it adds.
   assert.match(screen, /adminFetch\("\/api\/admin\/amux\/owner-queue"/);
+  // A legacy card is remade or closed through the existing legacy card panel,
+  // read from the card detail the execution board uses, for the owner only.
+  assert.match(decision, /<AmuxLegacyCardPanel /);
+  assert.match(decision, /useAmuxLegacyCardRead\(item\.taskId,\s*canInspectCards && /);
+  assert.match(read("components/admin/AmuxLegacyCardPanel.tsx"),
+    /\/api\/admin\/amux\/execution-view\?view=detail&taskId=/);
 });
 
 test("a key never skips a confirmation: numbers pick, Enter is not bound, typing is left alone", () => {
