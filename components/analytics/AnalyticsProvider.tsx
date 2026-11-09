@@ -47,7 +47,7 @@ type ConsentState = "loading" | "unset" | "accepted" | "declined";
 // across the product as too small to read comfortably at a phone's viewing
 // distance.
 const consentButtonClass =
-  "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2 font-bold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3";
+  "inline-flex min-h-11 min-w-11 items-center justify-center whitespace-nowrap rounded-lg border border-zinc-300 bg-white px-2 font-bold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3";
 
 // A component, not a render-time helper call. The handlers close over the
 // remembered opener (see closePreferences), and `react-hooks/refs` treats
@@ -775,8 +775,10 @@ export function AnalyticsProvider({
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
+
+
   const isPluginRoute = pathname === "/plugins";
-  const readableNotice = isSettingsRoute || isPluginRoute;
+  const readableNotice = (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute);
   const inlineSlot =
     isChatWorkspacePath(pathname)
       ? chatConsentSlot
