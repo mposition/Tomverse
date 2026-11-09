@@ -31,7 +31,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkFilmSource, checkFinal, checkPlan, creativeAsset, jsonLine, usablePacks } from "./creative-core.mjs";
+import { checkFilmSource, checkFinal, checkPlan, creativeAsset, jsonLine, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
 import { speakLine, VOICE_CAP_ENV, voiceLedgerPath } from "./el-voice-core.mjs";
 import { levelVoice, probe, seconds as lengthOf, stills } from "./ffmpeg-tools.mjs";
 import { brisbaneDay, dailyCap, readLedger, spent } from "./higgsfield-cap.mjs";
@@ -122,15 +122,39 @@ function claude(name, prompt, { tools, allowed, maxTurns, timeoutMinutes = 30 })
 const listed = node(["list-approved.mjs"]);
 if (listed.status !== 0) halt("list_approved_failed");
 
-/** The capture packs on the box (job/sources/<asset-id>/pack.json) whose short is approved now and valid. */
+/**
+ * The capture packs on the box (job/sources/<asset-id>/pack.json), either
+ * shape (creative-core normalizePack), whose short is approved now and valid,
+ * and whose source asset file gives the claims its captures rest on (as
+ * make-card.mjs requires).
+ */
 const sourcesDir = path.join("job", "sources");
-const onBox = (existsSync(sourcesDir) ? readdirSync(sourcesDir) : [])
-  .map((id) => path.join(sourcesDir, id, "pack.json"))
-  .filter((file) => existsSync(file))
-  .map((file) => ({ file, dir: path.dirname(file), ...JSON.parse(readFileSync(file, "utf8")) }))
-  .filter((pack) => pack.topic && pack.locale && pack.images);
+const onBox = [];
+for (const id of existsSync(sourcesDir) ? readdirSync(sourcesDir) : []) {
+  const file = path.join(sourcesDir, id, "pack.json");
+  if (!existsSync(file)) continue;
+  let pack = null;
+  try {
+    pack = normalizePack(JSON.parse(readFileSync(file, "utf8")));
+  } catch {
+    // unreadable: dropped below
+  }
+  const dir = path.dirname(file);
+  const sourceAsset = pack?.videoAsset ? path.join(dir, pack.videoAsset) : null;
+  let claimIds = null;
+  try {
+    claimIds = sourceAsset ? [...(JSON.parse(readFileSync(sourceAsset, "utf8")).asset?.claimIds ?? [])] : null;
+  } catch {
+    claimIds = null;
+  }
+  if (!pack || !claimIds) {
+    report.dropped.push({ step: "packs", reason: `${id}: ${pack ? "no source asset file to take its claims from" : "no locale or no capture file"}` });
+    continue;
+  }
+  onBox.push({ ...pack, file, dir, claimIds });
+}
 const packs = usablePacks(onBox, JSON.parse(readFileSync(path.join("job", "approved.json"), "utf8")), date);
-for (const pack of onBox) if (!packs.includes(pack)) report.dropped.push({ step: "packs", reason: `${pack.assetId ?? pack.file}: not approved now` });
+for (const pack of onBox) if (!packs.includes(pack)) report.dropped.push({ step: "packs", reason: `${pack.assetId}: not approved now` });
 if (packs.length === 0) halt("no_capture_packs");
 
 const historyPath = path.join(creativeDir, "history.json");
@@ -141,7 +165,7 @@ mkdirSync(sheetsDir, { recursive: true });
 // 1. Plan.
 const notesDir = path.join("job", "research-notes");
 const newestNotes = existsSync(notesDir) ? readdirSync(notesDir).filter((file) => /^\d{8}\.json$/u.test(file)).sort().at(-1) : undefined;
-const packLines = packs.map((pack) => `- topic ${pack.topic}, locale ${pack.locale}: ${posix(pack.file)} (pictures: ${Object.keys(pack.images).join(", ")})`);
+const packLines = packs.map((pack) => `- topic ${pack.topic}, locale ${pack.locale}: ${posix(pack.file)} (pictures: ${Object.keys(pack.captures).join(", ")})`);
 const planPrompt = [
   readFileSync("CREATIVE-PLAN.md", "utf8"),
   `## Today\n\n- Date: ${date}\n- Newest research notes: ${newestNotes ? `job/research-notes/${newestNotes}` : "none"}\n- Facts you may state: features.json`,
@@ -168,16 +192,22 @@ report.locales = locales;
 writeFileSync(path.join(runDir, "plan.json"), JSON.stringify(plan, null, 2));
 
 // Real captures of the topic, per locale, and the logo.
+// The words inside them and their short's claims go into the asset file.
 const captures = {};
+const captureWords = {};
+const sourceClaims = {};
 for (const locale of locales) {
   const pack = packs.find((candidate) => candidate.topic === plan.topic && candidate.locale === locale);
   const into = path.join(pub, "capture", locale);
   mkdirSync(into, { recursive: true });
-  captures[locale] = Object.entries(pack.images).flatMap(([name, file]) => {
+  captureWords[locale] = [];
+  sourceClaims[locale] = pack.claimIds;
+  captures[locale] = Object.entries(pack.captures).flatMap(([name, { file, text }]) => {
     const from = path.join(pack.dir, file);
     if (!existsSync(from)) return [];
     const to = path.join(into, `${name}${path.extname(file)}`);
     copyFileSync(from, to);
+    captureWords[locale].push(text);
     return [{ name, file: posix(path.relative(pub, to)) }];
   });
 }
@@ -313,11 +343,13 @@ for (let round = 1; round <= 2; round += 1) {
   }
   const answer = claude(`review-${round}`, reviewPrompt(), { tools: "Read", allowed: [`Read(./job/creative/${run}/review/**)`, "Read(./job/creative/sheets/**)"], maxTurns: 60 });
   verdict = jsonLine(answer, "review");
-  if (verdict?.verdict !== "fix") break;
-  notes = String(verdict.notes ?? "").slice(0, 4000);
+  // A "pass" with a score under 8 (or a missing one) is not a pass: it goes back as a fix.
+  const low = verdict?.verdict === "pass" && !reviewPassed(verdict);
+  if (verdict?.verdict !== "fix" && !low) break;
+  notes = `${low ? `Every score must be 8 or more; it was ${JSON.stringify(verdict.scores ?? null)}. ` : ""}${String(verdict.notes ?? "")}`.slice(0, 4000);
 }
-if (verdict?.verdict !== "pass") {
-  report.dropped.push({ step: "review", reason: verdict ? `${verdict.verdict}: ${String(verdict.notes ?? "").slice(0, 300)}` : "no verdict" });
+if (!reviewPassed(verdict)) {
+  report.dropped.push({ step: "review", reason: verdict ? `${verdict.verdict} ${JSON.stringify(verdict.scores ?? null)}: ${String(verdict.notes ?? "").slice(0, 300)}` : "no verdict" });
   halt("review_did_not_pass");
 }
 
@@ -335,7 +367,7 @@ for (const locale of locales) {
     report.failed.push({ id, step: "check", problems });
     continue;
   }
-  writeFileSync(path.join(runDir, "out", `${id}.asset.json`), JSON.stringify(creativeAsset({ id, locale, words: plan.locales[locale] }), null, 2));
+  writeFileSync(path.join(runDir, "out", `${id}.asset.json`), JSON.stringify(creativeAsset({ id, locale, words: plan.locales[locale], captureWords: captureWords[locale], claimIds: sourceClaims[locale] }), null, 2));
   const submitted = node(["submit-asset.mjs", out, path.join(runDir, "out", `${id}.asset.json`)]);
   if (submitted.status === 0) report.submitted.push(id);
   else if (submitted.status === 3) report.refused.push({ id, guard: jsonLine(submitted.stdout, "guardCodes") ?? submitted.stdout.trim().slice(0, 300) });

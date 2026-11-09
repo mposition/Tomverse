@@ -6,7 +6,7 @@ import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import { marketingAssetSchema } from "../lib/marketingAssets.ts";
-import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, usablePacks } from "../tools/marketing-video/creative-core.mjs";
+import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, normalizePack, reviewPassed, usablePacks } from "../tools/marketing-video/creative-core.mjs";
 import { speakLine, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
 import { admit, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
 import { creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
@@ -260,6 +260,36 @@ test("the film's imports are read by a parser: comments, webpack loaders, re-exp
   assert.match(await check(`import "fs";\nexport const Film = () => null;`), /imports fs/u);
   assert.match(await check(`const fs = globalThis["req" + "uire"]("fs");\nexport const Film = () => null;`), /globals/u);
   assert.match(await check(`export const Film = ( => null;`), /Film\.tsx:1/u);
+});
+
+test("both pack shapes are read the same way, and a pack's topic comes from its short when it names none", () => {
+  const current = normalizePack({ assetId: "media-20261108-images-zh-hant-short", locale: "zh-Hant", videoAsset: "src.asset.json", captures: { answer: { file: "answer.png", text: "answer words" }, bad: { file: "../escape.png", text: "x" } } });
+  assert.deepEqual(current, { assetId: "media-20261108-images-zh-hant-short", locale: "zh-Hant", topic: "images", captures: { answer: { file: "answer.png", text: "answer words" } }, videoAsset: "src.asset.json" });
+  const first = normalizePack({ assetId: "media-20261101-review-compare-en-short", locale: "en", topic: "review-compare", videoAsset: "v.json", images: { left: "left.png", center: "center.png", right: "right.png", summary: "summary.png", logo: "logo.png" }, captureText: ["A", "B", "C"], summaryText: "S" });
+  assert.equal(first.topic, "review-compare");
+  assert.deepEqual(Object.keys(first.captures), ["left", "center", "right", "summary", "logo"]);
+  assert.equal(first.captures.right.text, "C");
+  assert.equal(first.captures.summary.text, "S");
+  assert.equal(normalizePack({ assetId: "media-x-short", locale: "fr", captures: { a: { file: "a.png" } } }), null);
+  assert.equal(normalizePack({ assetId: "media-x-short", locale: "en", captures: {} }), null);
+});
+
+test("a review passes only with the verdict pass and every score 8 or more", () => {
+  const scores = { creative: 9, craft: 8, readability: 8, truth: 10, disclosure: 9 };
+  assert.equal(reviewPassed({ verdict: "pass", scores }), true);
+  assert.equal(reviewPassed({ verdict: "pass", scores: { ...scores, craft: 7 } }), false);
+  assert.equal(reviewPassed({ verdict: "pass", scores: { creative: 9 } }), false);
+  assert.equal(reviewPassed({ verdict: "pass", scores: { ...scores, truth: "10" } }), false);
+  assert.equal(reviewPassed({ verdict: "pass" }), false);
+  assert.equal(reviewPassed({ verdict: "fix", scores }), false);
+  assert.equal(reviewPassed(null), false);
+});
+
+test("the asset carries the words inside the captures it shows and its source short's claims", () => {
+  const { asset, transcript } = creativeAsset({ id: "media-20261110-creative-en-short", locale: "en", words: words("en"), captureWords: ["GPT 6 Luna  says\nhello", "", "AGREE 7"], claimIds: ["claim-a", "claim-a"], today: new Date("2026-11-10T00:00:00Z") });
+  assert.equal(marketingAssetSchema.safeParse(asset).success, true);
+  assert.deepEqual(asset.claimIds, ["claim-a"]);
+  assert.ok(transcript.en.endsWith("GPT 6 Luna says hello\nAGREE 7"));
 });
 
 test("captures come only from shorts approved now and still valid", () => {

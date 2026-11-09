@@ -230,24 +230,78 @@ const DISCLOSURE = Object.freeze({ instagram: "caption_disclosure", youtube: "pl
 
 /**
  * The asset file submit-asset.mjs sends. Real captures mixed with AI shots,
- * voice and music: `ai_modified`, and so not marked as depicting the product
- * interface (lib/marketingAssets.ts allows that only for an AI presenter).
+ * voice and music.
+ *
+ * Provenance: `ai_modified` with `depictsProductInterface: false`, as the
+ * owner-approved receipt pilot was submitted (2026-11-09). The schema has no
+ * provenance for "real captures, unchanged, plus AI shots, voice and music":
+ * an AI origin may claim the interface only as `capture_with_ai_presenter`,
+ * whose one AI part is a presenter (lib/marketingAssets.ts, policy §7.3). A
+ * provenance of its own needs a migration and the owner's decision; until then
+ * the conservative reading holds (not presented as the product interface, AI
+ * disclosure on every channel).
+ *
+ * What the Guard reads is still the whole film, as make-card.mjs does for a
+ * card with captures: the words inside the captures it shows go into the
+ * transcript, and the claims of the approved short they came from go with it.
  */
-export function creativeAsset({ id, locale, words, today = new Date() }) {
+export function creativeAsset({ id, locale, words, captureWords = [], claimIds = [], today = new Date() }) {
   const channels = CHANNELS[locale];
   if (!channels) throw new Error(`no channels for ${locale}`);
   const validUntil = new Date(today.getTime() + 90 * 86_400_000).toISOString().slice(0, 10);
+  const inside = captureWords.map((text) => String(text).replace(/\s+/gu, " ").trim()).filter(Boolean);
   return {
     asset: {
       id,
       provenance: "ai_modified",
       allowedChannels: [...channels],
       alt: { [locale]: words.alt },
-      claimIds: [],
+      claimIds: [...new Set(claimIds)],
       validUntil,
       disclosure: Object.fromEntries(channels.map((channel) => [channel, DISCLOSURE[channel]])),
       depictsProductInterface: false,
     },
-    transcript: { [locale]: `${words.lines.join(" ")}\n\n${[...words.screen, "tomverse.app"].join("\n")}` },
+    transcript: { [locale]: [words.lines.join(" "), [...words.screen, "tomverse.app"].join("\n"), ...(inside.length > 0 ? [inside.join("\n")] : [])].join("\n\n") },
   };
+}
+
+/** The scores CREATIVE-REVIEW.md asks for; a pass needs every one at 8 or more. */
+export const REVIEW_SCORES = Object.freeze(["creative", "craft", "readability", "truth", "disclosure"]);
+/** Whether the review call's answer passes the film: the verdict and every score, checked here. */
+export function reviewPassed(review) {
+  if (review?.verdict !== "pass" || !review.scores || typeof review.scores !== "object") return false;
+  return REVIEW_SCORES.every((key) => Number.isFinite(review.scores[key]) && review.scores[key] >= 8 && review.scores[key] <= 10);
+}
+
+const PACK_LOCALE = /-(?:en|ko|zh-hant|zh-hans)$/u;
+/** A pack's topic: its own, or its short's id without date, locale and `-short` (as the daily job names topics). */
+export const packTopic = (assetId) => String(assetId).replace(/^media-(?:\d{8}-)?/u, "").replace(/-short$/u, "").replace(PACK_LOCALE, "");
+
+/**
+ * Either pack shape as one: `captures` ({name: {file, text}}, JOB.md), or the
+ * first packs' `images` with `captureText`/`summaryText` (make-card.mjs reads
+ * both the same way). Null for a pack with no locale or no capture file.
+ */
+export function normalizePack(raw) {
+  if (!raw || typeof raw.assetId !== "string" || !LOCALES.includes(raw.locale)) return null;
+  const source =
+    raw.captures && typeof raw.captures === "object"
+      ? raw.captures
+      : Object.fromEntries(
+          [
+            ["left", raw.captureText?.[0]],
+            ["center", raw.captureText?.[1]],
+            ["right", raw.captureText?.[2]],
+            ["summary", raw.summaryText],
+            ["logo", ""],
+          ].map(([name, text]) => [name, { file: raw.images?.[name], text }]),
+        );
+  const captures = Object.fromEntries(
+    Object.entries(source)
+      .filter(([name, entry]) => /^[A-Za-z0-9_-]{1,40}$/u.test(name) && typeof entry?.file === "string" && /^[A-Za-z0-9_.-]+\.(?:png|jpe?g|webp)$/iu.test(entry.file))
+      .map(([name, entry]) => [name, { file: entry.file, text: Array.isArray(entry.text) ? entry.text.join(" ") : String(entry.text ?? "") }]),
+  );
+  if (Object.keys(captures).length === 0) return null;
+  const topic = typeof raw.topic === "string" && raw.topic.trim() ? raw.topic.trim() : packTopic(raw.assetId);
+  return { assetId: raw.assetId, locale: raw.locale, topic, captures, videoAsset: typeof raw.videoAsset === "string" ? raw.videoAsset : null };
 }
