@@ -50,6 +50,41 @@ async function setAppearance(page: Page, width: number, appearance: "classic" | 
 }
 
 for (const theme of ["light", "dark"] as const) {
+  test(`short Korean Chat exposes a scroll action and the complete last starter in ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await prepareGuestPage(page, "ko", "studio", "studio");
+    const account = await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-6-luna"], selectionMode: "auto", autoSelectionOffered: true, language: "ko" });
+    account.theme = theme;
+    await mockUserUsage(page, { plan: "Max" });
+    await setDeterministicTheme(page, theme);
+    await suppressTransientUi(page);
+    await restoreActiveConversation(page);
+    await page.context().addCookies([
+      { name: "__tomverse_e2e_chat_workspace", value: "1", url: "http://127.0.0.1:3100" },
+      { name: "__tomverse_e2e_chat_starter", value: "1", url: "http://127.0.0.1:3100" },
+    ]);
+    await page.route("**/api/products/chat/capabilities", route => route.fulfill({ json: { autoSelection: { offered: true } } }));
+    await page.goto("/chat?lang=en");
+    const more = page.getByTestId("starter-scroll-more");
+    await expect(more).toBeVisible();
+    await expect(more).toHaveAccessibleName("아래 추천 질문 보기");
+    await expect(more).toBeEnabled();
+    await more.click();
+    await expect(more).toBeDisabled();
+    await expect(more).toBeFocused();
+    const last = page.getByTestId("chat-starter-card").last();
+    expect(await last.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const surface = document.querySelector('[data-testid="mobile-conversation-surface"]')!.getBoundingClientRect();
+      const dock = document.querySelector('[data-testid="mobile-bottom-dock"]')!.getBoundingClientRect();
+      return rect.top >= surface.top && rect.bottom <= surface.bottom && rect.bottom <= dock.top &&
+        element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+    })).toBe(true);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+    const inputHeight = await page.getByTestId("chat-textarea").evaluate(element => element.getBoundingClientRect().height);
+    expect(inputHeight).toBe(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  });
   for (const lang of ["ko", "en"] as const) test(`${lang === "ko" ? "Korean" : "English"} Chat guidance and placeholders meet contrast in ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 1000 });
     await prepareGuestPage(page, lang, "studio", "studio");
