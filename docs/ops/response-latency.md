@@ -31,6 +31,8 @@ intent. A skipped, refused or failed combined call retains the standalone image
 classifier; manual Chat keeps its existing path. The actual combined prompt and
 output ceiling are reserved under the existing provider budgets, with unknown
 usage retaining the hold. No budget or user credit price changes.
+The standalone fallback can add latency after a failed combined call; include
+these failures in p95 comparisons before enabling the switch.
 
 Combined decisions carry `+image-intent-v1` in their version. Their image context
 is not stored in router decisions, so the optimizer excludes them from text-only
