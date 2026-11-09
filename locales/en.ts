@@ -518,7 +518,7 @@ export const en = {
         webSearchChipOn: "Web search on",
         webSearchChipPartial: "Web search · {supported}/{total} supported",
         webSearchChipUnavailable: "Web search unavailable",
-        webSearchChipOnCompact: "Web search",
+        webSearchChipOnCompact: "Web on",
         webSearchChipPartialCompact: "Web search {supported}/{total}",
         webSearchChipUnavailableCompact: "No web search",
         webSearchChipDetails: "Show web search details",
