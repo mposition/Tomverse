@@ -33,7 +33,7 @@ import { marketingChannelPostsByApi } from "./marketingAutomationSchema.ts";
 import type { MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Recorded with each plan, so a change to what the model is asked is a new version. */
-export const MARKETING_STRATEGY_PROMPT_VERSION = "strategy-v3";
+export const MARKETING_STRATEGY_PROMPT_VERSION = "strategy-v4";
 
 /** An account as the plan is offered it: where it posts and what it may carry. */
 export type MarketingStrategyAccount = {
@@ -59,6 +59,8 @@ const PROMPT = [
   "needs lists what the operator must prepare or decide this week for the plan to work (for example an asset to make or approve). avoid lists what this week's posts must not do. Posts never name a competitor, never compare prices with anyone, never say free without its condition and never claim availability in mainland China; every post goes to a person for approval before it is published.",
   "paidAds: judge whether paid advertising would help this week (for example a small test to reach the Australian English market, or boosting a post that carries an approved video). If it would, propose up to three, each with the platform, the objective, a suggested budget range in AUD with its duration, and why it is worth it now; if not, leave paidAds empty. A proposal is for the operator to decide: nothing is spent by this plan, and ads are never placed automatically.",
   "Use only the data: no account, claim, asset, metric or result that is not in it.",
+  // Under the stored schema's limits, so a long Korean answer is not refused whole.
+  "Length, in Korean characters: headline at most 200, rationale at most 600, goal at most 400, each role at most 150, each angle at most 250, each format at most 80, each need or avoid at most 150; in paidAds, platform at most 40, objective at most 150, budget at most 100, why at most 300.",
   'Answer with one JSON object and nothing else: {"headline":string,"rationale":string,"goal":string,"accounts":[{"accountSlug":string,"role":string,"angle":string,"format":string,"posts":number,"days":[string],"claimIds":[string],"assetIds":[string]}],"needs":[string],"avoid":[string],"paidAds":[{"platform":string,"objective":string,"budget":string,"why":string}]}.',
 ].join("\n");
 

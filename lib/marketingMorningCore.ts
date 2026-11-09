@@ -28,7 +28,7 @@ import {
 import type { MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Recorded with each report, so a change to what the model is asked is a new version. */
-export const MARKETING_MORNING_PROMPT_VERSION = "morning-v1";
+export const MARKETING_MORNING_PROMPT_VERSION = "morning-v2";
 
 /** The Brisbane calendar date (UTC+10, no daylight saving) of `now`. */
 export const marketingBrisbaneDate = (now: number): string =>
@@ -92,6 +92,8 @@ const PROMPT = [
   `adjust lists up to four changes: action is one of ${MARKETING_MORNING_ACTIONS.join(", ")}; what is what to change; why rests on the numbers (for example the Guard codes most drafts carry, or rejections).`,
   "marketChanges lists up to three competitor price changes between the two market reports that need an action or a decision: competitorId copied exactly from the competitors list, change says what changed, action says what Tomverse should do (or that nothing is needed). A price missing from the newer report may only have been missed by the collector: say it needs checking, not that it was removed. Leave it empty when nothing changed.",
   'Answer with one JSON object and nothing else: {"verdict":string,"decisions":[{"title":string,"why":string,"section":string}],"worked":string,"adjust":[{"action":string,"what":string,"why":string}],"marketChanges":[{"competitorId":string,"change":string,"action":string}]}.',
+  // Under the stored schema's limits, so a long Korean answer is not refused whole.
+  "Length, in Korean characters: verdict at most 400, each title at most 80, each why at most 300, worked at most 500, each what at most 120, each change or action at most 200.",
 ].join("\n");
 
 /** The messages for the morning report: a fixed instruction, and everything else as data. */
