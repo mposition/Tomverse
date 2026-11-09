@@ -46,6 +46,7 @@ type SupportCopy = {
   cards: { title: string; body: string; bullets: string[] }[];
   formTitle: string;
   formDescription: string;
+  attachmentHelp?: string;
   typeLabel: string;
   types: Record<"support" | "bug" | "billing" | "feature" | "other", string>;
   emailInput: string;
@@ -160,12 +161,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "페이지 또는 기기를 알려주세요",
           "기대한 동작을 설명해주세요",
-          "필요하면 스크린샷을 함께 보내주세요"
+          "스크린샷이 필요한 문의는 지원 이메일로 보내주세요"
         ]
       }
     ],
     "formTitle": "지원팀에 문의",
     "formDescription": "문의 내용을 보내면 지원팀이 확인합니다. 이메일 상태 안내를 선택하면 접수 번호와 진행 안내를 해당 주소로 받을 수 있습니다.",
+    "attachmentHelp": "이 양식에는 파일을 첨부할 수 없습니다. 스크린샷이 필요하면 지원 이메일에 첨부해 보내주세요.",
     "typeLabel": "문의 유형",
     "types": {
       "support": "일반 지원",
@@ -752,6 +754,12 @@ export function SupportPageContent() {
             <LifeBuoy className="h-6 w-6 text-blue-600 dark:text-blue-400" />
             <h2 className="mt-4 text-2xl font-black">{page.formTitle}</h2>
             <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{page.formDescription}</p>
+            {page.attachmentHelp ? (
+              <p className="mt-4 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                {page.attachmentHelp}{" "}
+                <a href={`mailto:${page.emailValue}`} data-testid="support-screenshot-email" className="font-bold text-blue-600 underline underline-offset-4 dark:text-blue-300">{page.emailValue}</a>
+              </p>
+            ) : null}
             <p id="support-message-example" className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{page.messageExample}</p>
           </div>
 

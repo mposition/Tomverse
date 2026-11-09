@@ -20,6 +20,7 @@ import {
   getTypicalShortRequestCapacities,
 } from "@/lib/models";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
+import { PricingPlanCapabilities } from "./PricingPlanCapabilities";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { usePricingAccount } from "@/components/marketing/usePricingAccount";
@@ -46,6 +47,7 @@ import {
 } from "@/lib/productAnalyticsClient";
 import {
   billingCurrencyFractionDigits,
+  billingMinorToMajor,
   formatBillingAmount,
   formatBillingMinor,
   type BillingCurrency,
@@ -60,7 +62,7 @@ const REVIEW_SIGN_IN_HREF =
   `/auth/signin?callbackUrl=${encodeURIComponent(REVIEW_WORKSPACE_PATH)}`;
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string; checkout: string }>> = {
-  en: { annual: "Annual", save: "Save 20%", checkout: "The fixed local price shown is charged at checkout." },
+  en: { annual: "Annual · billed annually", save: "Save 20%", checkout: "The fixed local price shown is charged once per year at checkout." },
   ko: { annual: "연간", save: "20% 할인", checkout: "표시된 현지통화 고정 금액으로 결제됩니다." },
   zh: { annual: "年付", save: "节省 20%", checkout: "结账时将收取所显示的本地固定价格。" },
   "zh-Hant": { annual: "年付", save: "節省 20%", checkout: "結帳時將收取所顯示的當地固定價格。" },
@@ -606,7 +608,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Model access", free: "Selected models", pro: "All available models · Pro usage limits", max: "All available models · largest monthly allowance" },
         { label: "Multi-model comparison", free: "Up to 3 models", pro: "Up to 3 models", max: "Up to 3 models" },
-        { label: "File attachments", free: "Images, PDFs, Office, Drive", pro: "Images, PDFs, Office, Drive", max: "Higher file and context limits" },
+        { label: "File attachments (where enabled)", free: "5 files · 10 MiB each · 25 MiB total", pro: "5 files · 10 MiB each · 25 MiB total", max: "5 files · 10 MiB each · 25 MiB total" },
         { label: "Conversation sharing", free: "Share and download", pro: "Share and download", max: "Share and download" },
         { label: "AI credits", free: "300/month", pro: "3,000/month", max: "10,000/month" },
       ],
@@ -663,7 +665,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         cta: "Upgrade to Max",
         href: REVIEW_WORKSPACE_PATH,
         usage: "10,000 monthly AI credits",
-        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Higher attachment and context limits","For frequent advanced-model and long-document work"],
+        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Where attachments are enabled: 5 files per message · 10 MiB each · 25 MiB combined","For frequent advanced-model and long-document work"],
       },
     ],
   },
@@ -1427,6 +1429,12 @@ export function PricingPageContent() {
             const annualPrice =
               billing.formatPlanPrice(planId, "annual") ||
               annualFallback;
+            const billingPlan = billing.config?.plans.find((item) => item.id === planId);
+            const annualMonthlyEquivalent = billingPlan
+              ? billingPlan.displayCurrency && typeof billingPlan.displayAnnualPriceAmount === "number"
+                ? formatBillingAmount(billingPlan.displayAnnualPriceAmount / 12, billingPlan.displayCurrency as BillingCurrency)
+                : formatBillingAmount(billingMinorToMajor(billingPlan.annualPriceCents, billingPlan.currency as BillingCurrency) / 12, billingPlan.currency as BillingCurrency)
+              : null;
             const promotionEligible = Boolean(
               featuredPromotion &&
               featuredPromotion.appliesToPlanIds.includes(planId) &&
@@ -1641,7 +1649,12 @@ export function PricingPageContent() {
                       {annualCopy.save}
                     </span>
                   </div>
-                  <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}</div>
+                  <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}{lang === "en" ? " per year" : ""}</div>
+                  {lang === "en" && annualMonthlyEquivalent ? (
+                    <p className="mt-1 text-sm leading-6" data-testid={`pricing-annual-equivalent-${planId}`}>
+                      Monthly equivalent: about {annualMonthlyEquivalent}, billed annually.
+                    </p>
+                  ) : null}
                   <p data-testid="pricing-annual-checkout-note" className={plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}>
                     {annualCopy.checkout}
                   </p>
@@ -1796,6 +1809,11 @@ export function PricingPageContent() {
                     {plan.cta}
                   </UpgradeInterestButton>
                 )}
+                {lang === "en" && planId !== "free" && (ctaState === "signed_out" || ctaState === "upgrade") ? (
+                  <p className="mt-2 text-sm font-semibold leading-6" data-testid={`pricing-billing-choice-${planId}`}>
+                    Choose monthly or annual billing in the next step{ctaState === "signed_out" ? " after signing in" : ""}, before payment.
+                  </p>
+                ) : null}
                 {ctaState === "manage_plan" &&
                 !(
                   planId === "free" &&
@@ -1812,6 +1830,7 @@ export function PricingPageContent() {
                   </p>
                 ) : null}
               </div>
+              {lang === "en" ? <PricingPlanCapabilities plan={cardPlan} /> : null}
               <ul className="mt-8 space-y-3">
                 {plan.features.map((feature) => (
                   // UI-005. The bullet's icon is `shrink-0` and the label was a
