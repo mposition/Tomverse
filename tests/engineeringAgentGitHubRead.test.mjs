@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   ENGINEERING_AGENT_GITHUB_READ_TOKEN_ENV,
   EngineeringAgentGitHubReadError,
+  readEngineeringAgentBranchPresent,
   readEngineeringAgentDevelopChecks,
   readEngineeringAgentDevelopHead,
   readEngineeringAgentGitBlob,
@@ -52,6 +53,27 @@ test("v22 publication pins a read-only develop head, never a caller URL", async 
   await assert.rejects(readEngineeringAgentDevelopHead({ env, fetchImpl:
     fakeFetch({ "/commits/develop": () => ({ sha: "not-a-commit" }) }).fetchImpl }),
   /invalid_response/);
+});
+
+test("the agent's branch counts as present only on an exact ref, read by prefix", async () => {
+  const ref = "agent/engineering/240130630815";
+  const route = `/git/matching-refs/heads/${ref}`;
+  const exact = [{ ref: `refs/heads/${ref}0` }, { ref: `refs/heads/${ref}` }];
+  const { fetchImpl, seen } = fakeFetch({ [route]: () => exact });
+  assert.equal(await readEngineeringAgentBranchPresent(ref, { env, fetchImpl }), true);
+  assert.equal(seen[0].init.method, "GET");
+  assert.equal(await readEngineeringAgentBranchPresent(ref, { env,
+    fetchImpl: fakeFetch({ [route]: () => [{ ref: `refs/heads/${ref}0` }] }).fetchImpl }), false);
+  assert.equal(await readEngineeringAgentBranchPresent(ref, { env,
+    fetchImpl: fakeFetch({ [route]: () => [] }).fetchImpl }), false);
+  // A failed read, a partial list or a foreign name is never "gone".
+  await assert.rejects(readEngineeringAgentBranchPresent(ref, { env, fetchImpl: fakeFetch({}).fetchImpl }), /http_error/);
+  await assert.rejects(readEngineeringAgentBranchPresent(ref, { env,
+    fetchImpl: fakeFetch({ [route]: () => ({ body: [], link: NEXT }) }).fetchImpl }), /invalid_response/);
+  await assert.rejects(readEngineeringAgentBranchPresent(ref, { env,
+    fetchImpl: fakeFetch({ [route]: () => ({ ref }) }).fetchImpl }), /invalid_response/);
+  for (const foreign of ["main", "develop", "agent/engineering/../main", "agent/engineering/1?x=1"])
+    await assert.rejects(readEngineeringAgentBranchPresent(foreign, { env, fetchImpl }), /invalid_input/);
 });
 
 test("v22 base tree is complete, self-consistent and read from the fixed repo", async () => {

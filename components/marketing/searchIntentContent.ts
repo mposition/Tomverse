@@ -1,6 +1,15 @@
 import type { Language } from "@/components/LanguageProvider";
 import type { MarketingInfoCopy } from "./MarketingInfoPage";
 import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+import { chatAttachmentExtensionsByGroup, type ChatAttachmentUiGroup } from "@/lib/chatAttachmentFormats";
+
+const attachmentGroupLabels: Record<ChatAttachmentUiGroup, string> = {
+  image: "Images (static GIF only)", document: "Documents", data: "Data",
+  markup: "Text and markup", code: "Source code (read as text)", archive: "ZIP (contents are validated)",
+};
+const attachmentFormatBullets = Object.entries(chatAttachmentExtensionsByGroup())
+  .filter(([, extensions]) => extensions.length > 0)
+  .map(([group, extensions]) => `${attachmentGroupLabels[group as ChatAttachmentUiGroup]}: ${extensions.map((extension) => `.${extension}`).join(", ")}.`);
 
 export const SEARCH_INTENT_SLUGS = [
   "compare-ai-models",
@@ -999,15 +1008,20 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "Prepare files for better results",
-          "body": "Use clear, non-corrupted files and ask a specific question. Password-protected, scanned, malformed, or very large documents may not contain extractable text. Check important numbers, citations, formulas, and conclusions against the original file."
+          "body": "Signed-in attachment formats are listed below. Choose an image-capable model for image attachments. Document text may be extracted before it is sent, so an accepted upload extension does not mean every model supports the original file natively. Use clear, non-corrupted files and ask a specific question. Password-protected, scanned, malformed, or very large documents may not contain extractable text. Check important numbers, citations, formulas, and conclusions against the original file.",
+          "bullets": attachmentFormatBullets
         },
         {
-          "title": "Security boundaries",
-          "body": "Where guest attachments are offered, you can send one supported image or readable document up to 5 MiB. Signed-in accounts with attachment access can send up to five files per message, 10 MiB each and 25 MiB combined. Google Drive requires sign-in. The selected AI providers process the required file content; upload only material you are allowed to use."
+          "title": "Upload limits",
+          "body": "Limits apply where attachments are available for your account or guest session.",
+          "bullets": [
+            "Guest: 1 supported file per message, up to 5 MiB per file and 5 MiB total.",
+            "Signed-in account with attachment access: up to 5 files per message, 10 MiB per file and 25 MiB total."
+          ]
         },
         {
-          "title": "Retention and provider processing",
-          "body": "Attachments sent from a signed-in account are kept with the conversation and scheduled for deletion when that conversation or account is deleted. Guest files are temporary, scoped to the session and removed automatically; they are not included in saved conversations, shares or exports. Provider-side processing follows each provider’s terms."
+          "title": "Security, retention and provider processing",
+          "body": "Google Drive requires sign-in. The selected AI providers process the required file content; upload only material you are allowed to use. Attachments sent from a signed-in account are kept with the conversation and scheduled for deletion when that conversation or account is deleted. Guest files are temporary, scoped to the session and removed automatically; they are not included in saved conversations, shares or exports. Provider-side processing follows each provider’s terms."
         }
       ],
       "cta": {

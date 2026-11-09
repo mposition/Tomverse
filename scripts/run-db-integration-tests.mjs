@@ -414,6 +414,10 @@ run(
     // its status kept, its escalation resolved and one chained audit entry;
     // a running, changed or other-source card refuses, a held card is busy.
     "tests/integration/amux-legacy-card.db.test.ts",
+    // AMUX-FILEREQ-004 (2026-11-09): the owner closes the escalation an
+    // earlier attempt left open on a done or todo card, with one chained
+    // audit entry; review, blocked and running cards refuse.
+    "tests/integration/amux-settled-card-escalation.db.test.ts",
     "tests/integration/amux-v22-result-review.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
@@ -964,6 +968,8 @@ run(
     "tests/integration/mcp-connector.db.test.ts",
     "tests/integration/mcp-oauth.db.test.ts",
     "tests/integration/mcp-migration.db.test.ts",
+    // Product Research completion extends its CHECK without changing existing decisions.
+    "tests/integration/product-research-completion.db.test.ts",
     // Release C1: what the database refuses about a profile version snapshot.
     "tests/integration/assistant-profile-schema.db.test.ts",
     "tests/integration/assistant-profile-service.db.test.ts",

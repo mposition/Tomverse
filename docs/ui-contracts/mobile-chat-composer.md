@@ -446,3 +446,5 @@ A change is `NO-GO` for commercial release, regardless of whether other tests pa
   rather than the visible one;
 - a web-search capability, credit or security warning was removed without an accessible replacement;
 - the required regression coverage above is missing from the change.
+
+Mobile Chat keeps the guest-trial help action beside product navigation instead of reserving a separate onboarding row. Its full explanation remains in the existing help popover. Studio uses the same inline mobile model picker as Classic; desktop Studio and Review keep their own picker placement. Short-phone welcome padding is compact, while its content scrolls above the bottom dock. On an empty Chat new chat the header shows no guest badge row, because that help action already explains the trial; the badge returns with the first message, and Review keeps it. Regression: `tests/e2e/guest-starter-space.spec.ts`.

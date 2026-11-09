@@ -1027,10 +1027,11 @@ waits on a person, one after another. The assignment statistics that used to
 fill the tab (incident mode, active queue, planning policy, worker evidence,
 assignment decisions) belong to Diagnostics.
 
-- **What is in it.** One set of cards, each counted once
-  (`amuxOwnerQueueWhere`, `lib/amux/ownerQueueCore.ts`): a card in the board's
-  attention lane, a card whose worker question is open in any lane, and a card
-  with an open escalation. It is read by `GET /api/admin/amux/owner-queue`
+- **What is in it.** One set of cards that are not archived, each counted once
+  (`amuxOwnerQueueWhere`, `lib/amux/ownerQueueCore.ts`): a blocked card, a
+  card whose worker question is open in any lane, and a card with an open
+  escalation. An archived card is not shown, even with an escalation still
+  open (owner decision 2026-11-09); it stays in the board's archive. It is read by `GET /api/admin/amux/owner-queue`
   (read only, any admin role, rate limited, no migration). The list holds the
   newest 100 and says so when the queue is longer; the total is the whole set.
 - **One number.** The sidebar entry, this tab and the board's "Waiting on me"
@@ -1050,6 +1051,16 @@ assignment decisions) belong to Diagnostics.
   "unknown outcome means no retry" rule. A lost run or an unknown outcome reads
   "check the result first, then decide" and links to Safety & recovery; the
   screen adds no run button and no write route.
+- **Cards no decision opens on** (2026-11-09). A legacy WORKBOARD card and a
+  pre-v22 Task (`amuxLegacyCardKind`, `lib/amux/legacyCardCore.ts`) show the execution
+  board's legacy card panel (`AmuxLegacyCardPanel`: recreate as a new idea, or
+  close) right under "Why it stopped", read for the owner from the same card
+  detail the board opens (`execution-view?view=detail`, read only once the
+  card's review reports `host_recovery_available: false`, so an ordinary v22
+  card costs no second detail read) and written through
+  the existing `POST /api/admin/amux/legacy-card`. With no choice open, the why
+  box and the choices point at that panel instead of the recovery steps. An
+  archived card (opened from the archive) offers no Ubuntu inspection.
 - **Keys.** J and K move between cards, a number picks a choice (it never
   prepares or confirms it), typing in a field is left alone. While a decision
   is being read or recorded the list and the keys do not leave the card. "Move

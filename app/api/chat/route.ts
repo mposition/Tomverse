@@ -60,7 +60,7 @@ import {
 } from "@/lib/routingShadow";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
-import { detectChatTurnImage } from "@/lib/chatImageIntent";
+import { combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
 import {
     latestUserTurnHasAttachments,
     latestUserTurnHasImageAttachment,
@@ -2193,8 +2193,8 @@ async function handleChatPost(
             // is the one attachment the image turn can use: it may be edited.
             (!latestUserTurnHasAttachments(autoRoutingMessages) ||
                 latestUserTurnHasImageAttachment(autoRoutingMessages));
-        const autoImageDecisionPromise = autoImageTurnEligible
-            ? detectChatTurnImage({
+        const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
+            ? {
                   userId: session!.user!.id!,
                   conversationId: conversationId!,
                   text: profileTextFor(autoRoutingMessages),
@@ -2202,8 +2202,8 @@ async function handleChatPost(
                   traceId,
                   request: req,
                   attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages),
-              })
-            : Promise.resolve({ image: false } as const);
+              }
+            : null, deterministicAutoSelection.routed && combinedChatImageIntentEnabled());
         // Per prompt: a small model reads this message and reorders the
         // Router's eligible set. Off unless Admin › Routing names a router
         // model; a missing decision keeps the ordinary Auto choice and recovery.
@@ -2238,15 +2238,20 @@ async function handleChatPost(
                       traceId,
                       rewriteAllowed: !turnCarriesAttachments(autoRoutingMessages),
                       fileContext: fileRoutingContext,
+                      imageIntent: imageRouting.context,
+                      onImageDecision: imageRouting.accept,
                       // An image turn is not a routing decision a chat model
                       // answered; its row would teach the router the wrong thing.
-                      recordDecision: autoImageDecisionPromise.then(
-                          (decision) => !decision.image
-                      ),
+                      recordDecision: (pick) => pick?.requiresFileGeneration
+                          ? Promise.resolve(true)
+                          : imageRouting.resolve().then((decision) => !decision.image),
                   })
             : null;
         finishRoutingTiming();
-        const autoImageDecision = await autoImageDecisionPromise;
+        const detectedImageDecision = await imageRouting.resolve();
+        // A document about images is still a file request, not an image turn.
+        const autoImageDecision = llmPick?.requiresFileGeneration
+            ? { image: false as const } : detectedImageDecision;
         const autoSelection = applyLlmModelPick(
             deterministicAutoSelection,
             llmPick?.modelId ?? null,

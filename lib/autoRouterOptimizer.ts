@@ -258,7 +258,9 @@ export const asSession = (value: unknown): AutoLlmRouterSession | null => {
 
 async function loadDecisions(): Promise<OptimizerDecision[]> {
     const rows = await prisma.autoRouterDecision.findMany({
-        where: { outcome: "picked" },
+        // Combined routing carries image context which is deliberately not
+        // stored in decision rows. Do not replay those rows as text-only calls.
+        where: { outcome: "picked", NOT: { version: { contains: "+image-intent-v1" } } },
         orderBy: { createdAt: "desc" },
         take: AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
         select: {
