@@ -267,6 +267,73 @@ const eventNames = (harness: PricingHarness) =>
 const eventsNamed = (harness: PricingHarness, name: string) =>
   harness.events.filter((event) => event.event_name === name);
 
+test.describe("Korean pricing billing selector", () => {
+  test("annual selection survives the sign-in callback without starting checkout", async ({ page }) => {
+    await preparePricingPage(page, { plan: null, language: "ko" });
+    await gotoPricing(page, "?lang=ko");
+    await page.getByRole("radio", { name: "연간 결제", exact: true }).check();
+    await expect(page.getByTestId("pricing-selected-billing-pro")).toContainText("연 $144 일괄 결제");
+    await expect(page.getByTestId("pricing-selected-billing-max")).toContainText("연 $240 일괄 결제");
+    const link = ctaState(page, "pro").getByRole("link");
+    const signIn = new URL((await link.getAttribute("href"))!, page.url());
+    const callback = signIn.searchParams.get("callbackUrl")!;
+    expect(new URL(callback, page.url()).searchParams.get("billingInterval")).toBe("annual");
+    await page.goto(callback);
+    await expect(page.getByRole("radio", { name: "연간 결제", exact: true })).toBeChecked();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+
+  test("selected annual cycle seeds and reseeds the confirmation before a mocked request", async ({ page }) => {
+    await preparePricingPage(page, { plan: "Free", language: "ko" });
+    const requests: Record<string, unknown>[] = [];
+    await page.route("**/api/billing/checkout", async (route) => {
+      requests.push(route.request().postDataJSON());
+      await route.fulfill(json({ error: "Synthetic checkout refusal" }, 503));
+    });
+    await gotoPricing(page, "?lang=ko");
+    await page.getByRole("radio", { name: "연간 결제", exact: true }).check();
+    await ctaState(page, "pro").getByRole("button").click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByTestId("checkout-due-today")).toHaveText(/^\$144(?:\.0{1,2})?$/);
+    await dialog.getByRole("button", { name: /^월간/ }).click();
+    await expect(dialog.getByTestId("checkout-due-today")).toHaveText(/^\$15(?:\.0{1,2})?$/);
+    await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+    await ctaState(page, "pro").getByRole("button").click();
+    await expect(dialog.getByTestId("checkout-due-today")).toHaveText(/^\$144(?:\.0{1,2})?$/);
+    expect(requests).toHaveLength(0);
+    await dialog.getByRole("button", { name: /결제 계속하기/ }).click();
+    await expect.poll(() => requests.length).toBe(1);
+    expect(requests[0]).toMatchObject({ planId: "pro", billingInterval: "annual", language: "ko" });
+  });
+
+  test("existing subscriptions cannot select a new billing cycle", async ({ page }) => {
+    await preparePricingPage(page, { plan: "Pro", hasActiveSubscription: true, language: "ko" });
+    await gotoPricing(page, "?lang=ko&intent=subscription&billingInterval=annual");
+    await expect(ctaState(page, "max")).toHaveAttribute("data-cta-state", "change_plan");
+    await expect(page.getByRole("group", { name: "신규 구독 결제 주기" })).toHaveCount(0);
+    await expect(page.getByTestId("pricing-selected-billing-max")).toHaveCount(0);
+  });
+
+  test("monthly selection quotes Max and reaches only the mocked monthly checkout", async ({ page }) => {
+    await preparePricingPage(page, { plan: "Free", language: "ko" });
+    const requests: Record<string, unknown>[] = [];
+    await page.route("**/api/billing/checkout", async (route) => {
+      requests.push(route.request().postDataJSON());
+      await route.fulfill(json({ error: "Synthetic checkout refusal" }, 503));
+    });
+    await gotoPricing(page, "?lang=ko");
+    await page.getByRole("radio", { name: "연간 결제", exact: true }).check();
+    await page.getByRole("radio", { name: "월간 결제", exact: true }).check();
+    await expect(page.getByTestId("pricing-selected-billing-max")).toContainText("월 $25 결제");
+    await ctaState(page, "max").getByRole("button").click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByTestId("checkout-due-today")).toHaveText(/^\$25(?:\.0{1,2})?$/);
+    await dialog.getByRole("button", { name: /결제 계속하기/ }).click();
+    await expect.poll(() => requests.length).toBe(1);
+    expect(requests[0]).toMatchObject({ planId: "max", billingInterval: "monthly", language: "ko" });
+  });
+});
+
 test.describe("pricing plan CTAs by authentication state and plan", { tag: "@ui-risk" }, () => {
   test("a signed-out visitor is offered sign-in on every paid plan", async ({
     page,
@@ -309,6 +376,8 @@ test.describe("pricing plan CTAs by authentication state and plan", { tag: "@ui-
     );
     await expect(ctaState(page, "pro")).toContainText("Upgrade to Pro");
     await expect(ctaState(page, "max")).toContainText("Upgrade to Max");
+    await expect(page.getByTestId("pricing-billing-choice-pro")).toHaveText("Choose monthly or annual billing in the next step, before payment.");
+    await expect(page.getByTestId("pricing-billing-choice-max")).toBeVisible();
 
     const creditCta = page.getByTestId("credit-pack-section-cta");
     await expect(creditCta).toHaveAttribute("data-cta-state", "authenticated");
@@ -324,6 +393,8 @@ test.describe("pricing plan CTAs by authentication state and plan", { tag: "@ui-
       hasActiveSubscription: true,
     });
     await gotoPricing(page);
+    await expect(page.getByTestId("pricing-billing-choice-pro")).toHaveCount(0);
+    await expect(page.getByTestId("pricing-billing-choice-max")).toHaveCount(0);
 
     await expect(ctaState(page, "pro")).toHaveAttribute(
       "data-cta-state",
@@ -437,6 +508,7 @@ test.describe("credit-pack purchase from the pricing page", { tag: "@ui-risk" },
     await creditCta.click();
 
     await expect(page.getByTestId("credit-pack-modal")).toBeVisible();
+    await expect(page.getByTestId("credit-pack-modal").getByText("Valid for 365 days", { exact: true })).toHaveCount(2);
     // The reported failure was a navigation to /chat instead of a modal.
     expect(page.url()).toBe(urlBefore);
     expect(new URL(page.url()).pathname).toBe("/pricing");

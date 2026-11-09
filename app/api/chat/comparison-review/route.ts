@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { randomUUID } from "node:crypto";
+import { withReviewProgress, type PublishReviewProgress } from "@/lib/comparisonReviewProgress";
 import {
   runComparisonReview,
   ComparisonReviewerUnavailableError,
@@ -66,6 +67,10 @@ const jsonError = (
   );
 
 export async function POST(request: Request) {
+  return withReviewProgress(request, publish => runPost(request, publish));
+}
+
+async function runPost(request: Request, publish: PublishReviewProgress) {
   const traceId = randomUUID();
   let quota: ComparisonReviewQuotaReservation | null = null;
   let idempotency: GuestIdempotencyClaim | null = null;
@@ -115,6 +120,10 @@ export async function POST(request: Request) {
     );
     quota = await reserveGuestComparisonReview(access.subjectKey);
 
+    const headers = new Headers({ "Cache-Control": "no-store" });
+    if (access.setCookie) headers.append("Set-Cookie", access.setCookie);
+    if (turnstileGrantCookie) headers.append("Set-Cookie", turnstileGrantCookie);
+
     const run = await runComparisonReview(
       { access, reviewerPlan: "Free" },
       {
@@ -126,6 +135,13 @@ export async function POST(request: Request) {
       },
       {
         traceId,
+        onPrimary: primary => publish({
+          ...primary,
+          guest: true,
+          persisted: false,
+          cached: false,
+          webVerificationAvailable: false,
+        }, headers),
         // Guest runs are the majority of first AI Reviews and produce no
         // ComparisonReview row at all, so without this they are invisible to
         // every reliability number the feature has.
@@ -137,10 +153,6 @@ export async function POST(request: Request) {
       }
     );
     completed = true;
-
-    const headers = new Headers({ "Cache-Control": "no-store" });
-    if (access.setCookie) headers.append("Set-Cookie", access.setCookie);
-    if (turnstileGrantCookie) headers.append("Set-Cookie", turnstileGrantCookie);
 
     // The same DTO shape the signed-in route returns, minus the fields that
     // only exist because that one persists: no row id, no createdAt. `guest`

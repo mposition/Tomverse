@@ -56,6 +56,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       choices: "Choices",
       choicesHint: "The server shows only the choices it allows for this card.",
       choicesNone: "No choice is open for this card yet.",
+      choicesLegacy: "No review decision opens for this card. Remake or close it in the legacy card panel above.",
       keyHint: "Pressing a number only picks the choice. You still confirm it below.",
       noReview: "This card has no open review. Open its full detail to see what is blocking it.",
       techInfoTask: "Task ID",
@@ -79,6 +80,8 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
         `The worker finished and pull request #${prNumber} is open. This card needs your review before it moves on.`,
       reviewNoPr: "The work result is saved, but there is no pull request, so it cannot be approved. You can run it again or block it. Check the worker report first: it says whether the tests ran.",
       reviewNoPrBlockOnly: "The work result is saved, but there is no pull request, so it cannot be approved, and it cannot be run again right now. You can block it. Check the worker report first.",
+      reviewNoPrNone: "The work result is saved, but there is no pull request, and no decision is open for this card right now. Open its full detail to see what holds it.",
+      legacyCard: "No review decision can open on this card. Remake it as a new idea or close it in the panel just below.",
       reviewNoPrApprovable: "The work result is saved with no pull request; this kind of task is approved on its verified result. Check the worker report before deciding.",
       reviewUsageUnknown: "The run finished, but its usage was never reported, so it cannot be approved or run again yet. You can still block it.",
       // A blocked run's own attempt reason, which the escalation stores only
@@ -169,6 +172,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       choices: "고를 수 있는 결정",
       choicesHint: "서버가 이 카드에 허용한 선택만 보여요.",
       choicesNone: "이 카드는 아직 고를 수 있는 결정이 없어요.",
+      choicesLegacy: "이 카드는 검토 결정이 열리지 않아요. 위의 옛 카드 패널에서 다시 만들거나 닫아 주세요.",
       keyHint: "숫자 키는 선택만 해요. 확인은 아래에서 한 번 더 해야 해요.",
       noReview: "이 카드에는 열린 검토가 없어요. 무엇이 막고 있는지는 카드 상세에서 볼 수 있어요.",
       techInfoTask: "Task ID",
@@ -192,6 +196,8 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
         `워커가 작업을 끝냈고 PR #${prNumber}이 열려 있어요. 이 카드는 사람이 확인해야 다음 단계로 넘어가도록 설정돼 있어요.`,
       reviewNoPr: "작업 결과는 저장됐지만 PR이 없어서 승인할 수 없어요. 다시 실행하거나 차단할 수 있어요. 테스트를 돌렸는지 작업자 보고부터 확인해 주세요.",
       reviewNoPrBlockOnly: "작업 결과는 저장됐지만 PR이 없어서 승인할 수 없고, 지금은 다시 실행할 수도 없어요. 차단할 수 있어요. 작업자 보고부터 확인해 주세요.",
+      reviewNoPrNone: "작업 결과는 저장됐지만 PR이 없고, 지금은 이 카드에 고를 수 있는 결정이 없어요. 무엇이 막고 있는지 카드 상세에서 확인해 주세요.",
+      legacyCard: "이 카드는 검토 결정이 열리지 않는 카드예요. 바로 아래 패널에서 새 아이디어로 다시 만들거나 닫아 주세요.",
       reviewNoPrApprovable: "작업 결과가 PR 없이 저장됐어요. 이 종류의 작업은 검증된 결과로 승인해요. 결정하기 전에 작업자 보고를 확인해 주세요.",
       reviewUsageUnknown: "실행은 끝났지만 사용량 기록이 들어오지 않아서, 아직 승인하거나 다시 실행할 수 없어요. 차단은 할 수 있어요.",
       byAttemptReason: {
