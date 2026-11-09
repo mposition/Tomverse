@@ -16,6 +16,12 @@ for (const theme of ["light", "dark"] as const) {
     const firstCard = page.getByRole("article").first();
     await expect(firstCard).toBeVisible();
     expect(await firstCard.evaluate((node) => node.getBoundingClientRect().top + scrollY)).toBeLessThan(800);
+    const filters = page.locator("#models-catalog-filters");
+    await expect(filters).toBeHidden();
+    await page.getByTestId("models-mobile-filters-toggle").click();
+    await expect(filters.getByRole("searchbox")).toBeVisible();
+    await page.getByTestId("models-mobile-filters-toggle").click();
+    await expect(filters).toBeHidden();
     await details.locator("summary").focus();
     await details.locator("summary").press("Enter");
     await expect(details).toHaveAttribute("open", "");

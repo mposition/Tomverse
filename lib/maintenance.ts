@@ -46,6 +46,7 @@ const STALE_COST_ADJUSTMENT_AFTER_MS = 45 * 60 * 1000;
 const STALE_ATTEMPT_BACKLOG_AFTER_MS = 60 * 60 * 1000;
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
 import { purgeExpiredComparisonReviewRuns } from "@/lib/comparisonReviewRunTelemetry";
+import { purgeResponseLatencySamples } from "@/lib/responseLatencyStore";
 import { purgeExpiredAccountDataExportRequests } from "@/lib/accountDataExportTickets";
 import { compactAgedContextManifests } from "@/lib/routingManifestRetention";
 import { deleteExpiredContextBundleConsumptions } from "@/lib/chatContextBundleService";
@@ -821,6 +822,7 @@ export async function cleanupExpiredData() {
   const comparisonReviewRuns = await step("comparison_review_runs", () =>
     purgeExpiredComparisonReviewRuns(now)
   );
+  await step("response_latency_samples", () => purgeResponseLatencySamples(now));
 
   const promotionRiskIdentifiers = await step("promotion_risk_identifiers", () =>
     prisma.billingPromotionRedemption.updateMany({

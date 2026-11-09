@@ -99,7 +99,38 @@ export const isUniqueConstraintDatabaseError = (error: unknown) => {
   );
 };
 
-const MISSING_SCHEMA_PRISMA_CODES = new Set(["P2021", "P2022"]);
+/**
+ * Whether a database error carries this SQLSTATE, wherever Prisma put it.
+ *
+ * `databaseErrorMetadata` reads `error.cause`, which is not enough: for a code
+ * @prisma/adapter-pg does not map (23514 check_violation is one), Prisma throws
+ * a `P2039` with no `cause`, and the code sits at
+ * `meta.driverAdapterError.cause.originalCode`. Walked structurally so a change
+ * in how deeply the adapter wraps it does not hide the code.
+ */
+export const hasDatabaseSqlstate = (error: unknown, wanted: string): boolean => {
+  const seen = new Set<unknown>();
+  const queue: unknown[] = [error];
+  while (queue.length > 0 && seen.size < 16) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    if (record.code === wanted || record.originalCode === wanted) return true;
+    queue.push(record.cause, record.meta, record.driverAdapterError);
+  }
+  return false;
+};
+
+/**
+ * A CHECK constraint, or a trigger raising `check_violation`, refused the row.
+ * P2004 is Prisma's own name for it; through the pg adapter it arrives as
+ * P2039 carrying SQLSTATE 23514.
+ */
+export const isCheckViolationDatabaseError = (error: unknown) =>
+  databaseErrorMetadata(error).errorCode === "P2004" || hasDatabaseSqlstate(error, "23514");
+
+const MISSING_SCHEMA_PRISMA_CODES =new Set(["P2021", "P2022"]);
 const MISSING_SCHEMA_DRIVER_KINDS = new Set([
   "TableDoesNotExist",
   "ColumnNotFound",
