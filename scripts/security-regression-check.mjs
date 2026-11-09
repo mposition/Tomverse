@@ -2515,7 +2515,7 @@ const checks = [
       );
       const buttonClass = buttonClassMatch ? buttonClassMatch[1] : "";
       const buttonClassUsages = (
-        source.match(/className=\{consentButtonClass\}/g) || []
+        source.match(/className=\{`\$\{consentButtonClass\}[ `]/g) || []
       ).length;
       const consentDecisions = (
         source.match(/<ConsentAction\s*\n?\s*kind="(decline|accept)"/g) || []

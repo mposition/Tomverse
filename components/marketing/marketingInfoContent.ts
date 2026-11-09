@@ -30,11 +30,16 @@ export const infoPages = {
       },
       {
         "title": "모델을 여러 개 쓰면 크레딧도 늘어나나요?",
-        "body": "선택한 모델의 사용량이 각각 반영됩니다. 모델별 기본 크레딧과 긴 문맥·파일에 따른 적용 범위를 확인하고, 필요한 모델 수만 선택하세요. AI Review는 실행 전에 별도 예상 크레딧을 확인할 수 있습니다."
+        "body": "선택한 모델의 사용량이 각각 반영됩니다. 모델별 기본 크레딧과 긴 문맥·파일에 따른 적용 범위를 확인하고, 필요한 모델 수만 선택하세요. AI Review는 실행 전에 별도 예상 크레딧을 확인할 수 있습니다.",
+        "link": { "label": "모델별 크레딧 확인", "href": "/models" }
       },
       {
         "title": "파일을 첨부하면 어디에서 처리하나요?",
-        "body": "선택한 AI 제공자는 답변에 필요한 파일 또는 발췌 내용을 처리합니다. 잠금과 비공개 저장은 접근 제어에 관한 기능이며 공급자 처리를 없애는 기능은 아닙니다. 최신 보관·삭제 범위는 안전 안내와 개인정보 처리방침에서 확인하세요."
+        "body": "선택한 AI 제공자는 답변에 필요한 파일 또는 발췌 내용을 처리합니다. 잠금과 비공개 저장은 접근 제어에 관한 기능이며 공급자 처리를 없애는 기능은 아닙니다. 최신 보관·삭제 범위는 안전 안내와 개인정보 처리방침에서 확인하세요.",
+        "links": [
+          { "label": "안전한 데이터 처리", "href": "/safety/security-privacy" },
+          { "label": "개인정보 처리방침", "href": "/privacy" }
+        ]
       },
       {
         "title": "무료 AI 하나를 쓰고 있는데, Tomverse가 필요한가요?",
@@ -1372,7 +1377,14 @@ export const infoPages = {
       },
       {
         "title": "Saving, sharing and data",
-        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details."
+        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details.",
+        "bullets": [
+          "Save: sign in, start a new Chat or Review conversation, and send a question. It saves automatically. Guest chats stay in this browser; signing in alone does not import them.",
+          "Find it again: open History or the sidebar menu, then choose the conversation from the list.",
+          "Share: open More actions beside the conversation in that list, choose Share, read the notice, then choose Create share link. The link is copied to your clipboard. You must be signed in and have access to sharing. Conversations continued from an imported original cannot be shared publicly.",
+          "Lock: use More actions > Lock Chat, enter an 8 to 128 character password, then choose OK. Use Unlock with that password before sharing a locked chat."
+        ],
+        "link": { "label": "Read the workspace guide", "href": "/support/help-centre/chat-workspace" }
       },
       {
         "title": "Contact support",

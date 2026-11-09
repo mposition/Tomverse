@@ -106,8 +106,9 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // and the comment-monitoring and GA4 User-ID notices (2026-11-03). On
   // 2026-11-04 the operator confirmed the comment section's facts and
   // lib/privacyNoticeStatus.ts says so, so the page now renders that section
-  // (docs/policy/marketing-privacy-dpia-checklist.md). The owner approved this
-  // version on 2026-11-05; see the approved list above.
+  // (docs/policy/marketing-privacy-dpia-checklist.md). The owner approved that
+  // historical version on 2026-11-05. Later observations may differ; they need
+  // their own approval before this gate permits release-note publication.
   "/privacy": {
     date: "2026-11-16",
     contentSha256: "0a598b218b4cc0db14a71bfa49c2b067a46fb2756519cd5879fe3d3311270817",

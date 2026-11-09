@@ -734,6 +734,8 @@ export const ko = {
         aiReviewPerMonth: "회/월",
         aiReviewRun: "교차검토 실행",
         aiReviewRunning: "답변을 검토하는 중...",
+        aiReviewSecondaryPending: "첫 번째 검토가 준비되었습니다. 나머지 검토를 마무리하는 중입니다...",
+        aiReviewPartialInterrupted: "첫 번째 검토는 확인할 수 있지만 최종 결과는 확인하지 못했습니다. 다시 실행하기 전에 검토 상태를 확인해 주세요.",
         aiReviewPreparing: "최근 비교 가능한 답변을 준비하는 중...",
         aiReviewPrepareFailed: "교차검토를 준비하지 못했습니다.",
         aiReviewFailed: "교차검토를 완료하지 못했습니다. 예약 크레딧은 환불되었습니다.",
@@ -1658,7 +1660,7 @@ export const ko = {
         pageDescription:
             "Tomverse가 보관 중인 계정 데이터 전체가 담긴 파일 하나입니다. 무엇이 들어 있고 무엇이 빠져 있는지, 그 이유까지 파일 안에 적혀 있습니다.",
         securityNote:
-            "내려받으려면 최근에 다시 로그인해야 합니다. 발급된 링크는 한 번만 쓸 수 있고 5분 뒤 만료되므로, 링크가 다른 곳으로 새어나가도 이미 사용된 상태입니다.",
+            "내려받으려면 최근에 다시 로그인해야 합니다. 링크는 한 번만 사용할 수 있으며 발급 후 5분 뒤 만료됩니다. 사용 전에는 다른 사람에게 공유하지 마세요.",
         prepareDownload: "다운로드 준비",
         requestAgain: "새로 준비하기",
         downloadNow: "파일 내려받기",
@@ -1847,7 +1849,7 @@ export const ko = {
         importPackage: "외부 설정 가져오기",
         createAction: "어시스턴트 만들기",
         empty: "아직 어시스턴트가 없습니다. 하나 만들어 나만의 지시문을 지정해 보세요.",
-        publishedStatus: "게시됨 — 개정 {revision}, 지식 파일 {files}개",
+        publishedStatus: "계정 전용으로 사용 가능 · 버전 {revision}, 지식 파일 {files}개",
         draftStatus: "초안 — 대화를 시작하려면 먼저 게시하세요",
         newTitle: "새 AI 어시스턴트",
         editTitle: "AI 어시스턴트 편집",
@@ -1956,7 +1958,7 @@ export const ko = {
         pageTitle: "계정 장기 기억",
         pageDescription: "가져온 대화에서 자동으로 정리된 기억과 직접 추가한 기억을 수정·고정·삭제할 수 있습니다.",
         signInRequired: "계정 장기 기억을 관리하려면 로그인하세요.",
-        privacyNote: "가져오기를 완료하면 Tomverse가 AI 공급자를 통해 그 대화에서 기억을 자동으로 정리하며, 크레딧은 차감되지 않습니다. 건강 정보처럼 민감한 내용은 기억으로 저장하지 않습니다. 사용 중인 기억과 답변 스타일은 현재 선택한 Tomverse 모델의 답변 생성에 참고 자료로 전달되며, 언제든지 조회·수정·비활성화·삭제할 수 있습니다.",
+        privacyNote: "가져오기를 완료하면 Tomverse가 AI 공급자를 통해 그 대화에서 기억을 자동으로 정리하며, 크레딧은 차감되지 않습니다. 자동 정리에서는 건강 정보처럼 민감한 내용을 기억으로 저장하지 않습니다. 직접 추가한 내용은 민감한 정보여도 검증을 통과하면 저장되어 답변에 사용될 수 있습니다. 사용 중인 기억과 답변 스타일은 현재 선택한 Tomverse 모델의 답변 생성에 참고 자료로 전달되며, 언제든지 조회·수정·비활성화·삭제할 수 있습니다.",
         disabledNotice: "기억 수정·작성은 지금 사용할 수 없습니다. 이미 저장된 기억은 계속 조회하고 삭제할 수 있습니다.",
         settingsTitle: "기억 사용 설정",
         masterToggleLabel: "모든 대화에서 기억 사용",
@@ -1992,7 +1994,7 @@ export const ko = {
         evidenceViewSource: "출처 대화 보기",
         createTitle: "기억 직접 추가",
         createDescription:
-            "기억할 사실이나 선호를 서술형 문장으로 직접 추가합니다. 직접 추가한 기억은 바로 사용됩니다.",
+            "기억할 사실이나 선호를 서술형 문장으로 직접 추가합니다. 민감한 정보도 검증을 통과하면 저장되어 답변에 사용될 수 있습니다. ‘민감한 정보로 표시’는 분류 표시이며, 저장이나 답변 사용을 막지 않습니다.",
         createKindLabel: "종류",
         kindGroupFactual: "사실·선호",
         kindGroupStyle: "답변 스타일",
@@ -2123,7 +2125,7 @@ export const ko = {
         countrySave: "국가 확인",
         marketingOptional: "선택 사항 · 언제든 해제",
         marketingCalloutTitle: "유용한 새 기능을 놓치지 마세요",
-        marketingCalloutBody: "중요한 Tomverse 새 기능과 실제 활용 팁을 가끔 이메일로 알려드립니다. 미리 선택하지 않으며 언제든 끌 수 있습니다.",
+        marketingCalloutBody: "중요한 Tomverse 새 기능과 실제 활용 팁을 가끔 이메일로 알려드립니다. 원할 때 수신을 선택하고, 언제든 해제할 수 있습니다.",
         marketingCalloutAction: "제품 업데이트 받기",
         error: {
             COUNTRY_REQUIRED: "마케팅 이메일을 켜기 전에 거주 국가를 선택해 주세요.",
