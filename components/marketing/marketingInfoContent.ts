@@ -1372,7 +1372,14 @@ export const infoPages = {
       },
       {
         "title": "Saving, sharing and data",
-        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details."
+        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details.",
+        "bullets": [
+          "Save: sign in, start a new Chat or Review conversation, and send a question. It saves automatically. Guest chats stay in this browser; signing in alone does not import them.",
+          "Find it again: open History or the sidebar menu, then choose the conversation from the list.",
+          "Share: open More actions beside the conversation in that list, choose Share, read the notice, then choose Create share link. The link is copied to your clipboard. You must be signed in and have access to sharing. Conversations continued from an imported original cannot be shared publicly.",
+          "Lock: use More actions > Lock Chat, enter an 8 to 128 character password, then choose OK. Use Unlock with that password before sharing a locked chat."
+        ],
+        "link": { "label": "Read the workspace guide", "href": "/support/help-centre/chat-workspace" }
       },
       {
         "title": "Contact support",
