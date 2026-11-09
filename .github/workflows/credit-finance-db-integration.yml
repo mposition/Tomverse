@@ -66,6 +66,8 @@ on:
       - "app/api/admin/feedback/**"
       - "tests/integration/**"
       - "scripts/run-db-integration-tests.mjs"
+      - "scripts/db-integration-scope.mjs"
+      - "scripts/import-closure.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/credit-finance-db-integration.yml"
@@ -85,6 +87,12 @@ on:
   # test the filter would have matched only by luck. On a release branch the
   # question is whether the branch is green, which does not depend on what the
   # last push happened to touch.
+  #
+  # Since 2026-11-09 a develop push runs the lanes its diff reaches through
+  # what the suites import (the `scope` job below), which answers the 08-21
+  # case -- a route change reaches the suites that import the route -- without
+  # running all fourteen jobs for a documentation merge. A push to main still
+  # runs every lane.
   push:
     branches:
       - main
@@ -99,8 +107,63 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  credit-finance-db:
+  # Which lanes the change can reach (since 2026-11-09, CI minutes before the
+  # repository goes private). scripts/db-integration-scope.mjs follows each
+  # lane's suites through what they import and runs a lane only when a changed
+  # file is reached -- the list the pull_request filter above says would not
+  # drift. A lane outside the list starts and skips its install and suites,
+  # so every check still reports. A pull request into main, a push to main,
+  # a manual run, and anything that cannot be diffed run every lane: main is
+  # where this suite guards production, so it stays whole there.
+  scope:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    name: Decide which database lanes this change reaches
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      lanes: ${{ steps.scope.outputs.lanes }}
+      any: ${{ steps.scope.outputs.any }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Decide which lanes the change reaches
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          REF: ${{ github.ref }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -uo pipefail
+          all() {
+            echo "$1; running every lane."
+            node scripts/db-integration-scope.mjs --all
+            exit 0
+          }
+          case "$EVENT" in
+            pull_request)
+              [ "$BASE_REF" = "main" ] && all "A pull request into main"
+              base="$PR_BASE_SHA" ;;
+            push)
+              [ "$REF" = "refs/heads/main" ] && all "A push to main"
+              base="$PUSH_BEFORE" ;;
+            *) all "A $EVENT run" ;;
+          esac
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+            || ! git fetch --no-tags --depth=1 origin "$base" \
+            || ! changed=$(git diff --no-renames --name-only "$base" HEAD); then
+            all "Could not diff against the base"
+          fi
+          [ -z "$changed" ] && all "The diff reported no changed paths"
+          printf '%s\n' "$changed" | node scripts/db-integration-scope.mjs
+
+  credit-finance-db:
+    needs: scope
+    if: needs.scope.outputs.any == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     name: Credit and finance PostgreSQL scenarios (${{ matrix.group }})
     # CI_RUNNER_OVERFLOW (repository variable): `on` moves this heavy job to an
     # Ubicloud runner while GitHub's 40-job limit is the bottleneck; fork pull
@@ -185,19 +248,23 @@ jobs:
 
     steps:
       - name: Checkout
+        if: contains(fromJSON(needs.scope.outputs.lanes), matrix.group)
         uses: actions/checkout@v6
 
       - name: Setup Node.js
+        if: contains(fromJSON(needs.scope.outputs.lanes), matrix.group)
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
+        if: contains(fromJSON(needs.scope.outputs.lanes), matrix.group)
         run: npm ci
 
       - name: Run financial DB integration tests
         id: scenarios
+        if: contains(fromJSON(needs.scope.outputs.lanes), matrix.group)
         run: npm run test:db:integration
 
       # No alert step here, and no secret anywhere in this job. This job
@@ -213,7 +280,8 @@ jobs:
   # place the 16 branch is observed. It runs one file, which installs the
   # migration into a throwaway schema itself, and holds no secret.
   ops-observer-pg16:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.lanes), 'ops-observer-pg16') && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     name: Ops observer transaction bounds (PostgreSQL 16)
     # CI_RUNNER_OVERFLOW (repository variable): `on` moves this heavy job to an
     # Ubicloud runner while GitHub's 40-job limit is the bottleneck; fork pull
@@ -263,7 +331,8 @@ jobs:
   # A separate job with a literal image rather than a matrix expression, so
   # the job's shape is the same as the lanes'.
   credit-finance-db-postgres16:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: scope
+    if: contains(fromJSON(needs.scope.outputs.lanes), 'postgres16') && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     name: Support-triage suites on PostgreSQL 16
     # CI_RUNNER_OVERFLOW (repository variable): `on` moves this heavy job to an
     # Ubicloud runner while GitHub's 40-job limit is the bottleneck; fork pull
@@ -344,7 +413,9 @@ jobs:
     # Either job going red is the lane going red: the PostgreSQL 16 job runs
     # suites the lanes also run, and a release branch must not go quietly red
     # on it.
-    needs: [credit-finance-db, credit-finance-db-postgres16]
+    # The scope job too: if it fails, every lane is skipped, and a release
+    # branch must not go quietly unchecked either.
+    needs: [scope, credit-finance-db, credit-finance-db-postgres16]
     # One condition with no `||`: either needed job's failure, joined over
     # needs.*.result, so this job stays a push-only job by the draft-skip rule.
     if: always() && contains(join(needs.*.result, ','), 'failure') && github.event_name != 'pull_request'
@@ -411,21 +482,30 @@ jobs:
   credit-finance-db-result:
     name: Credit and finance PostgreSQL scenarios
     runs-on: ubuntu-latest
-    needs: [credit-finance-db, ops-observer-pg16, credit-finance-db-postgres16]
+    needs: [scope, credit-finance-db, ops-observer-pg16, credit-finance-db-postgres16]
     if: always() && github.event_name == 'pull_request' && !github.event.pull_request.draft
     steps:
       - name: Require every lane to have passed
         env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          LANES: ${{ needs.scope.outputs.lanes }}
           RESULT: ${{ needs.credit-finance-db.result }}
           PG16_RESULT: ${{ needs.ops-observer-pg16.result }}
           POSTGRES16_RESULT: ${{ needs.credit-finance-db-postgres16.result }}
         run: |
+          echo "Scope result: $SCOPE_RESULT, lanes: $LANES"
+          # The scope must have decided: a failed scope skips every lane.
+          test "$SCOPE_RESULT" = "success"
+          # A job passes by succeeding, or by being skipped because the scope
+          # left it out. Any other skip means something stopped it, which is
+          # not the same as the suite agreeing.
+          passed() {
+            [ "$1" = "success" ] && return 0
+            [ "$1" = "skipped" ] && ! printf '%s' "$LANES" | grep -q "\"$2\""
+          }
           echo "Matrix result: $RESULT"
+          if [ "$LANES" = "[]" ]; then test "$RESULT" = "skipped" || test "$RESULT" = "success"; else test "$RESULT" = "success"; fi
           echo "PostgreSQL 16 bounds result: $PG16_RESULT"
-          test "$PG16_RESULT" = "success"
+          passed "$PG16_RESULT" ops-observer-pg16
           echo "Support-triage PostgreSQL 16 result: $POSTGRES16_RESULT"
-          test "$POSTGRES16_RESULT" = "success"
-          # `success` is the only pass. `skipped` included: the matrix is not
-          # conditional, so a skip means something stopped it from running and
-          # that is not the same as the suite agreeing.
-          test "$RESULT" = "success"
+          passed "$POSTGRES16_RESULT" postgres16
