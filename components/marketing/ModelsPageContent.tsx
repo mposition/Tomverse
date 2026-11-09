@@ -34,7 +34,7 @@ const copy = {
   ko: {
     eyebrow: "모델",
     title: "질문에 맞는 모델을 찾아보세요.",
-    description: "추천 활용, 기본 크레딧과 이용에 필요한 플랜을 비교해 보세요. Tomverse Chat과 Review에서 선택할 수 있는 모델을 확인하고, 현재 제공 여부와 사용량은 앱의 모델 선택기에서 다시 확인할 수 있습니다.",
+    description: "이용 시작 플랜, 기본 크레딧과 이미지 입력 지원을 비교해 보세요. 비용 차이가 성능 우열을 뜻하지는 않습니다. 현재 제공 여부와 사용량은 앱의 모델 선택기에서 확인할 수 있습니다.",
     mobileDescription: "Chat과 Review의 모델, 기본 크레딧과 이용 플랜을 비교하세요.",
     mobileCreditNote: "모델별 ‘짧은 요청의 기본 크레딧’ 숫자로 기본 비용을 비교하세요.",
     mobileUsageDetails: "크레딧·이용 안내 자세히 보기",
@@ -271,7 +271,7 @@ export function ModelsPageContent() {
         <div className="mt-5 grid grid-cols-1 gap-4 sm:mt-12 sm:grid-cols-2 lg:grid-cols-3">
           {filteredModels.map((model) => {
             const brand = getModelBrand(model.provider);
-            const tags = getModelExperienceTags(model).filter((tag) => lang !== "en" || tag === "reasoning" || tag === "free");
+            const tags = getModelExperienceTags(model).filter((tag) => (lang !== "ko" && lang !== "en") || tag === "reasoning" || tag === "free");
             const status = getModelExperienceStatus(model);
             const usageProfile = getModelUsageProfile(model);
 
@@ -295,8 +295,8 @@ export function ModelsPageContent() {
                   <p className="break-words text-sm font-semibold leading-5 text-zinc-600 dark:text-zinc-300">{model.id}</p>
                 </div>
               </div>
-              <p data-testid={lang === "en" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                {lang === "en" ? `Access from: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · Short request: ${usageProfile.credits} credits · Image input: ${modelSupportsImageInput(model) ? "supported" : "not supported"} · Catalog context maximum: ${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "not listed"}` : t(getModelBestFor(model))}
+              <p data-testid={lang === "ko" || lang === "en" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                {lang === "ko" ? `이용 시작: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · 짧은 요청: ${usageProfile.credits} 크레딧 · 이미지 입력: ${modelSupportsImageInput(model) ? "지원" : "미지원"}` : lang === "en" ? `Access from: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · Short request: ${usageProfile.credits} credits · Image input: ${modelSupportsImageInput(model) ? "supported" : "not supported"} · Catalog context maximum: ${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "not listed"}` : t(getModelBestFor(model))}
               </p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {tags.map((tag) => (
