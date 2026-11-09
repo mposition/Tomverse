@@ -95,10 +95,12 @@ const load = (name) =>
 test("each browser job decides with the script and gates its expensive steps on it", () => {
     const fastGate = load("pr-fast-gate.yml");
     const parity = load("review-parity-shadow.yml");
+    const admin = load("admin-console-e2e.yml");
     for (const [label, job] of [
         ["build-and-e2e", fastGate.jobs["build-and-e2e"]],
         ["ui-risk", fastGate.jobs["ui-risk"]],
         ["review-parity", parity.jobs["review-parity"]],
+        ["admin-console-e2e-shard", admin.jobs["admin-console-e2e-shard"]],
     ]) {
         const scope = job.steps.find((step) => step.id === "scope");
         assert.ok(scope, `${label} has a scope step`);
@@ -108,6 +110,23 @@ test("each browser job decides with the script and gates its expensive steps on 
         const gated = job.steps.filter((step) => step.if === "steps.scope.outputs.code == 'true'");
         assert.ok(gated.some((step) => /npm ci/.test(String(step.run))), `${label} gates the install`);
     }
+});
+
+test("the admin suite still reports on every change and runs all when its own workflow changes", () => {
+    const admin = load("admin-console-e2e.yml");
+    // A required check: never path-filtered at the workflow level.
+    assert.equal(admin.on.pull_request.paths, undefined);
+    assert.equal(admin.on.pull_request["paths-ignore"], undefined);
+    const shard = admin.jobs["admin-console-e2e-shard"];
+    const scope = shard.steps.find((step) => step.id === "scope");
+    assert.match(scope.run, /grep -qx '\.github\/workflows\/admin-console-e2e\.yml'/);
+    assert.match(scope.run, /node scripts\/pr-ui-scope\.mjs --all/);
+    // Every step after the scope decision that installs, builds or tests is gated.
+    const after = shard.steps.slice(shard.steps.indexOf(scope) + 1);
+    for (const step of after) {
+        assert.match(String(step.if), /steps\.scope\.outputs\.code == 'true'/, step.name);
+    }
+    assert.equal(admin.jobs["admin-console-e2e"].needs.includes("admin-console-e2e-shard"), true);
 });
 
 test("the PR-commit secret scan stays on the required check's path", () => {
