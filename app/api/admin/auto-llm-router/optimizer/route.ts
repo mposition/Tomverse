@@ -22,6 +22,7 @@ import { readRecAgentEnabled } from "@/lib/autoRouterRecAgent";
 import { setRecommendationStatus, updateRecAgentSwitch } from "@/lib/autoRouterRecommendations";
 import { RECOMMENDATION_STATUSES } from "@/lib/autoRouterRecommendationsCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
+import { readResponseLatencyEvidence } from "@/lib/responseLatencyStore";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 
 /**
@@ -56,16 +57,18 @@ const modelOptions = async () =>
     .map((model) => ({ id: model.id, name: model.name, provider: model.provider }));
 
 const stateResponse = async () => {
-  const [state, options, tunables, settingAutoApply, recAgentEnabled] = await Promise.all([
+  const [state, options, tunables, settingAutoApply, recAgentEnabled, responseLatency] = await Promise.all([
     readAutoRouterOptimizerState(),
     modelOptions(),
     readAutoRouterTunables(),
     readSettingAutoApply(),
     readRecAgentEnabled(),
+    readResponseLatencyEvidence(),
   ]);
   return NextResponse.json({
     ...state,
     options,
+    responseLatency,
     settings: {
       autoApply: settingAutoApply,
       routerTimeoutMs: tunables.routerTimeoutMs,

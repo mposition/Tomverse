@@ -181,8 +181,14 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 - provider id(다르면 `amuxProvider`)와 같은 AMUX provider의 창들 중 **가장 적게 남은
   비율**이 잔액입니다. Claude는 5시간·주간·모델별 주간 창, Codex는 7일 창, Copilot은
   account entitlement 창입니다. 0이면 배정을 보류합니다.
-- AMUX가 측정하지 않았거나(`measured`가 아님), 사용할 수 없거나, stale이거나, 읽을 수 없는
-  창이 하나라도 있거나, 응답이 없으면 `unknown`으로 보류합니다.
+- 그 provider 항목을 AMUX가 측정하지 않았거나(`measured`가 아님), 사용할 수 없거나, stale이거나,
+  읽을 수 없는 창이 하나라도 있거나, 응답이나 `providers[]`가 없으면 `unknown`으로 보류합니다.
+- 판정은 **provider 항목만** 봅니다. 응답 최상위의 `available`·`stale`·`stale_reason`·`cache_age_s`·
+  `limits` 등은 Claude probe 결과를 그대로 둔 옛 필드라 Claude에만 해당합니다. Claude 사용량 조회가
+  429로 멈춰도 Claude만 보류되고 Codex·Copilot 같은 다른 검토자는 계속 배정됩니다. AMUX는 Claude
+  외 공급자에는 이전 값을 대신 내보내지 않습니다: 캐시를 갱신할 때마다(60초) 새로 읽고, 실패하면 그
+  항목이 `available: false`가 됩니다. Claude의 이전 값을 내보낼 때는 Claude 항목에도 `stale`이
+  붙습니다(`crates/amux-server/src/api/usage.rs`).
 - AMUX가 공급사 항목에 `credit_usd`를 보고하면(Cursor의 크레딧 grant 잔액) Cursor probe와 같은
   규칙을 씁니다: 포함 사용량이 소진돼도 크레딧이 남아 있으면 배정하고, 크레딧 0이면 보류하며,
   크레딧을 못 읽었으면 소진으로 봅니다. `status`와 Agent office에 크레딧 금액도 함께 보입니다.
