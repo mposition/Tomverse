@@ -60,7 +60,7 @@ import {
 } from "@/lib/routingShadow";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
-import { detectChatTurnImage } from "@/lib/chatImageIntent";
+import { combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
 import {
     latestUserTurnHasAttachments,
     latestUserTurnHasImageAttachment,
@@ -108,6 +108,8 @@ import {
     type DispatchInstrumentation,
 } from "@/lib/routingDispatchInstrumentation";
 import { logChatTurnTiming } from "@/lib/chatTurnTiming";
+import { createServerLatency } from "@/lib/responseLatencyServer";
+import { createResponseLatencyToken } from "@/lib/responseLatencyToken";
 import type {
     RoutingAttemptErrorClass,
     RoutingAttemptOutcome,
@@ -1151,6 +1153,7 @@ async function handleChatPost(
     // CHAT-LATENCY-01. The start of every server-side duration this turn
     // reports (lib/chatTurnTiming.ts).
     const requestReceivedAt = Date.now();
+    const latency = createServerLatency(traceId);
     let mcpConnector: Awaited<ReturnType<typeof buildMcpChatTools>> | null = null;
     // One timing line per turn, whichever path ends it: the stream's
     // settlement or the request failure path below. Shared, so a turn that
@@ -1563,9 +1566,11 @@ async function handleChatPost(
         // Auto's inputs, gathered before the model is resolved because the
         // model is what Auto decides. The plan is carried forward to the
         // access check below so this is not a second query.
-        const accountPlan = session?.user?.id
-            ? await getUserBillingPlan(session.user.id)
-            : null;
+        // Independent reads share a wait; all authorization still precedes dispatch.
+        const [accountPlan, runtimeModels] = await Promise.all([
+            session?.user?.id ? getUserBillingPlan(session.user.id) : Promise.resolve(null),
+            getRuntimeModels({ includeCatalogDeleted: true }),
+        ]);
         let earlyAccess: ChatAccess | null = null;
         let guestVerificationComplete = false;
         let guestCapabilityPayload: GuestChatAutoAuthorityPayload | null = null;
@@ -1586,7 +1591,6 @@ async function handleChatPost(
         // not the model that was requested, and the outer catch records
         // provider health about the one that was actually called.
         dispatchModelIdForLog = requestedModelId;
-        const runtimeModels = await getRuntimeModels({ includeCatalogDeleted: true });
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
         const catalogModel = runtimeModelMap.get(requestedModelId);
         if (catalogModel && !catalogModel.enabled) {
@@ -1980,6 +1984,7 @@ async function handleChatPost(
                 .map((candidate) => runtimeModelMap.get(candidate.modelId))
                 .filter((model): model is AiModel => Boolean(model));
             conversationProductKey = "chat";
+            latency.dimensions.product = "chat";
         }
         // Router profiling, estimates, shadow and provider formatting all read
         // this same view. Ownership/source verification and storage read messages.
@@ -2188,8 +2193,8 @@ async function handleChatPost(
             // is the one attachment the image turn can use: it may be edited.
             (!latestUserTurnHasAttachments(autoRoutingMessages) ||
                 latestUserTurnHasImageAttachment(autoRoutingMessages));
-        const autoImageDecisionPromise = autoImageTurnEligible
-            ? detectChatTurnImage({
+        const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
+            ? {
                   userId: session!.user!.id!,
                   conversationId: conversationId!,
                   text: profileTextFor(autoRoutingMessages),
@@ -2197,8 +2202,8 @@ async function handleChatPost(
                   traceId,
                   request: req,
                   attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages),
-              })
-            : Promise.resolve({ image: false } as const);
+              }
+            : null, deterministicAutoSelection.routed && combinedChatImageIntentEnabled());
         // Per prompt: a small model reads this message and reorders the
         // Router's eligible set. Off unless Admin › Routing names a router
         // model; a missing decision keeps the ordinary Auto choice and recovery.
@@ -2215,6 +2220,8 @@ async function handleChatPost(
                 fileRoutingContext
             ).filter(candidate => candidate.canCreateFiles).map(candidate => candidate.id)
             : [];
+        const finishRoutingTiming = latency.stage("routingMs");
+        latency.dimensions.mode = deterministicAutoSelection.routed ? "auto" : "manual";
         const llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
                       prompt: profileTextFor(autoRoutingMessages),
@@ -2231,14 +2238,17 @@ async function handleChatPost(
                       traceId,
                       rewriteAllowed: !turnCarriesAttachments(autoRoutingMessages),
                       fileContext: fileRoutingContext,
+                      imageIntent: imageRouting.context,
+                      onImageDecision: imageRouting.accept,
                       // An image turn is not a routing decision a chat model
                       // answered; its row would teach the router the wrong thing.
                       recordDecision: (pick) => pick?.requiresFileGeneration
                           ? Promise.resolve(true)
-                          : autoImageDecisionPromise.then((decision) => !decision.image),
+                          : imageRouting.resolve().then((decision) => !decision.image),
                   })
             : null;
-        const detectedImageDecision = await autoImageDecisionPromise;
+        finishRoutingTiming();
+        const detectedImageDecision = await imageRouting.resolve();
         // A document about images is still a file request, not an image turn.
         const autoImageDecision = llmPick?.requiresFileGeneration
             ? { image: false as const } : detectedImageDecision;
@@ -2660,6 +2670,8 @@ async function handleChatPost(
             // once the row exists, its own productKey is the only source --
             // never the surface the request came from.
             conversationProductKey = conversation?.productKey ?? null;
+            latency.dimensions.product = conversationProductKey === "chat" || conversationProductKey === "review"
+                ? conversationProductKey : "unknown";
             conversationRecoveryEpoch = conversation?.chatRecoveryEpoch ?? null;
             conversationProfileVersionId =
                 conversation?.assistantProfileVersionId ?? null;
@@ -2926,6 +2938,7 @@ async function handleChatPost(
             // it (§10). The query is the raw prompt, the same text the
             // preparation step scored — not the attachment-augmented message
             // assembled below, which would retrieve differently.
+            const finishContextTiming = latency.stage("contextMs");
             const turnContext = await buildChatTurnContext({
                 userId: session.user.id,
                 query: latestUserPromptText(messages),
@@ -2943,6 +2956,7 @@ async function handleChatPost(
                 // priced one way and sent the other.
                 conversationMode: conversationMemoryMode,
             });
+            finishContextTiming();
             const verification = verifyChatContextBundle(contextBundle, {
                 subjectKey: session.user.id,
                 conversationId: conversationId ?? null,
@@ -5026,6 +5040,7 @@ async function handleChatPost(
         }
         const initialAttemptAbortController = new AbortController();
         await recordDispatchStarted(dispatchRecord);
+        latency.provider();
         const result = await beginProviderCall(
             modelConfig.provider,
             modelConfig.id,
@@ -5334,6 +5349,7 @@ async function handleChatPost(
             // ended, and its timing is still a fact worth one line.
             if (!turnTimingLogged) {
                 turnTimingLogged = true;
+                latency.finish(outcome, dispatched.modelId, dispatched.provider);
                 logChatTurnTiming({
                     traceId,
                     modelId: dispatched.modelId,
@@ -7171,6 +7187,7 @@ async function handleChatPost(
                     // token recorded for it would feed the Router's TTFT
                     // signal a time for an answer nobody was sent.
                     firstVisibleTokenAt ??= new Date();
+                    latency.content();
                     // Checkpoint only bytes the browser was successfully
                     // offered. The writer coalesces chunks and applies owner,
                     // revision and database-clock lease CAS.
@@ -7312,6 +7329,9 @@ async function handleChatPost(
         if (!durableAttempt) {
             headers.set("Cache-Control", "no-cache, no-transform");
         }
+        const latencyToken = createResponseLatencyToken(traceId, latency.dimensions.product,
+            latency.dimensions.mode === "auto" ? "auto" : latency.dimensions.mode === "manual" ? "manual" : "unknown");
+        if (latencyToken) headers.set("X-Response-Latency-Token", latencyToken);
         // §13.4: how many memories this answer was given, counted by the
         // server. A header rather than something in the stream, because the
         // stream is the answer itself and the count has to be available
@@ -7504,6 +7524,7 @@ async function handleChatPost(
         // credits) is not a turn and writes no timing line.
         if ((dispatchRecord || usageReservation) && !turnTimingLogged) {
             turnTimingLogged = true;
+            latency.finish("failed_before_stream", dispatchModelIdForLog ?? null, dispatchProviderForLog ?? null);
             logChatTurnTiming({
                 traceId,
                 modelId: dispatchModelIdForLog ?? null,
