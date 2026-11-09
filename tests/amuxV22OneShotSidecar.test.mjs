@@ -277,9 +277,15 @@ test("the one-shot request and CLI command have bounded capabilities", () => {
     "an ordinary run has no dollar stop (owner decision 2026-10-25)");
   assert.equal(args.includes("--max-turns"), false,
     "an ordinary run has no turn limit (owner decision 2026-11-06)");
-  assert.equal(args[args.indexOf("--tools") + 1],
-    "Read,Grep,Glob,Edit,Write");
-  assert.equal(args.some((arg) => arg.includes("Bash")), false);
+  // Owner request 2026-11-09: implement gets Bash, which the sidecar runs
+  // in the jail; the read roles keep their read tools only.
+  assert.equal(args[args.indexOf("--tools") + 1], "Read,Grep,Glob,Edit,Write,Bash");
+  assert.equal(args[args.indexOf("--allowedTools") + 1], "Read,Grep,Glob,Edit,Write,Bash");
+  for (const role of ["design", "investigate", "review"]) {
+    const read = amuxV22ClaudeArgs({ ...request, role });
+    assert.equal(read[read.indexOf("--tools") + 1], "Read,Grep,Glob", role);
+    assert.equal(read.some((arg) => arg.includes("Bash")), false, role);
+  }
 });
 
 test("read-only retry is validated and closed before the CLI child starts", async () => {
@@ -783,7 +789,7 @@ test("a Codex implement run gets the base's locked packages and a writable temp 
     config: { ...value, homePath: "/run-home", claudeConfigDir: "/run-home/codex" },
     cleanup: async () => {} });
   for (const [role, deps, expectedTmp] of [
-    ["implement", { ok: true, installed: true }, join(config.worktreePath, "node_modules", ".cache", "amux-tmp")],
+    ["implement", { ok: true }, join(config.worktreePath, "node_modules", ".cache", "amux-tmp")],
     ["implement", { ok: false, reason: "install_failed" }, undefined],
     ["investigate", null, undefined],
   ]) {
@@ -798,6 +804,81 @@ test("a Codex implement run gets the base's locked packages and a writable temp 
     // npm runs from the sidecar's own home, never the CLI's fresh run home.
     assert.deepEqual(seen, deps ? [[config.worktreePath, config.homePath]] : []);
     assert.equal(fake.calls[0].spawnOptions.env.TMPDIR, expectedTmp);
+  }
+});
+
+test("Claude and Copilot implement runs get the jailed shell; read roles and a missing jail get none", async () => {
+  // Owner request 2026-11-09: implement only. The jail (v22ShellJail.mjs) is
+  // named in the CLI environment the way each CLI was measured to take it.
+  const tmp = join(config.worktreePath, "node_modules", ".cache", "amux-tmp");
+  const jail = (made) => async (paths) => { made.push(paths);
+    return { binPath: "/home/run/shell-1/bin", prefixPath: "/home/run/shell-1/claude-shell-prefix",
+      cleanup: async () => { made.push("cleaned"); } }; };
+  const claudeOut = JSON.stringify(usage);
+  for (const role of ["implement", "design", "investigate", "review"]) {
+    const made = [];
+    const fake = fakeSpawn(claudeOut);
+    await runAmuxV22OneShot({ ...request, role }, config, { syntheticPlatform: true,
+      spawnChild: fake.spawnChild, createShellJail: jail(made),
+      ensureDependencies: async () => ({ ok: true, installed: false }) });
+    const { env } = fake.calls[0].spawnOptions;
+    const tools = fake.calls[0].args[fake.calls[0].args.indexOf("--tools") + 1];
+    if (role === "implement") {
+      assert.deepEqual(made, [{ worktreePath: config.worktreePath, tmpPath: tmp,
+        homePath: config.homePath }, "cleaned"]);
+      assert.equal(env.CLAUDE_CODE_SHELL_PREFIX, "/home/run/shell-1/claude-shell-prefix");
+      assert.equal(env.CLAUDE_CODE_TMPDIR, tmp);
+      assert.match(tools, /,Bash$/);
+    } else {
+      assert.deepEqual(made, [], role);
+      assert.equal(env.CLAUDE_CODE_SHELL_PREFIX, undefined, role);
+      assert.equal(tools.includes("Bash"), false, role);
+    }
+    assert.equal(env.PATH, "/usr/bin:/bin");
+  }
+  // No jail, no run: Bash would otherwise run open.
+  for (const createShellJail of [async () => null, async () => { throw new Error("x"); }]) {
+    const fake = fakeSpawn(claudeOut);
+    const result = await runAmuxV22OneShot(request, config, { syntheticPlatform: true,
+      spawnChild: fake.spawnChild, createShellJail });
+    assert.deepEqual([result.kind, result.cliStarted, result.failure],
+      ["failed", false, "shell_jail_unavailable"]);
+    assert.equal(fake.calls.length, 0);
+  }
+  // Copilot finds the jail as `bash` first on PATH; the run home holds it.
+  const copilot = { ...config, provider: "github-copilot",
+    binaryPath: "/opt/tomverse-amux-v22/copilot",
+    claudeConfigDir: "/var/lib/tomverse-amux-v22-copilot-impl/cli" };
+  const copilotOut = [{ type: "assistant.message", data: { model: "gpt-6-luna",
+    toolRequests: [], content: "Done." } }, { type: "result", exitCode: 0 }]
+    .map((event) => JSON.stringify(event)).join("\n") + "\n";
+  for (const role of ["implement", "investigate"]) {
+    const made = [];
+    let homeCleaned = 0;
+    const fake = fakeSpawn(copilotOut);
+    await runAmuxV22OneShot({ ...request, role, modelId: "gpt-6-luna" }, copilot, {
+      syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null,
+      createShellJail: jail(made), ensureDependencies: async () => ({ ok: false }),
+      createRunHome: async (_provider, value) => ({
+        config: { ...value, homePath: "/run-home", claudeConfigDir: "/run-home/.config" },
+        copilotToken: `gho_${"a".repeat(36)}`, cleanup: async () => { homeCleaned += 1; } }) });
+    const { env } = fake.calls[0].spawnOptions;
+    const args = fake.calls[0].args;
+    assert.equal(homeCleaned, 1);
+    if (role === "implement") {
+      assert.equal(made[0].homePath, "/run-home");
+      assert.equal(made.at(-1), "cleaned");
+      assert.equal(env.PATH, "/home/run/shell-1/bin:/usr/bin:/bin");
+      assert.equal(env.SHELL, "/home/run/shell-1/bin/bash");
+      // The jail's temp dir exists even when the package install failed.
+      assert.equal(env.TMPDIR, tmp);
+      assert.ok(args.includes("bash") && args.includes("read_bash"));
+    } else {
+      assert.deepEqual(made, []);
+      assert.equal(env.PATH, "/usr/bin:/bin");
+      assert.equal(env.SHELL, undefined);
+      assert.ok(!args.includes("bash"));
+    }
   }
 });
 
