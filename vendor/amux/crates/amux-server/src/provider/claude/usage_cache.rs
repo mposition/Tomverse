@@ -178,7 +178,7 @@ mod tests {
         let stale = cache
             .lock()
             .await
-            .refresh(&path, 1060, || async { (UsageProbe::Http(429), None) })
+            .refresh(&path, 1000 + FRESH_REREAD_S, || async { (UsageProbe::Http(429), None) })
             .await;
         assert!(matches!(
             stale,
