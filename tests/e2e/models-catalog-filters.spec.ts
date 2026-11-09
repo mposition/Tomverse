@@ -14,6 +14,8 @@ for (const [locale, labels] of [
     await prepareGuestPage(page, locale);
     await page.route("**/api/models/catalog", (route) => route.fulfill({ json: { models } }));
     await page.goto(`/models?lang=${locale}`);
+    const mobileFilters = page.getByTestId("models-mobile-filters-toggle");
+    if (await mobileFilters.isVisible()) await mobileFilters.click();
     const cards = page.locator("article[data-model-id]");
     await expect(cards).toHaveCount(3);
     const search = page.getByRole("searchbox", { name: labels.search });
