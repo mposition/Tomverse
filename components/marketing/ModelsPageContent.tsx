@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Activity, ExternalLink } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
-import { canUseModelWithPlan, getModelUsageProfile, type ModelTier } from "@/lib/models";
+import { canUseModelWithPlan, getModelUsageProfile, modelSupportsImageInput, type ModelTier } from "@/lib/models";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { getModelBrand } from "@/lib/modelBranding";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
@@ -16,7 +16,7 @@ const copy = {
   en: {
     eyebrow: "Models",
     title: "Find a model for your question.",
-    description: "Compare suggested uses, base credits and the plan needed for access. Explore the models you can select in Tomverse Chat and Review, then check current availability and usage in the app’s model selector.",
+    description: "Compare access plans, base credits, image input and catalog context limits. These are model-specific catalog facts, not a ranking of task performance; a higher credit cost does not prove a stronger answer. Check current availability in the app’s model selector.",
     provider: "Provider",
     usageClass: "Credit category",
     baseCharge: "Base credits for a short request",
@@ -249,7 +249,7 @@ export function ModelsPageContent() {
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredModels.map((model) => {
             const brand = getModelBrand(model.provider);
-            const tags = getModelExperienceTags(model);
+            const tags = getModelExperienceTags(model).filter((tag) => lang !== "en" || tag === "reasoning" || tag === "free");
             const status = getModelExperienceStatus(model);
             const usageProfile = getModelUsageProfile(model);
 
@@ -273,8 +273,8 @@ export function ModelsPageContent() {
                   <p className="break-words text-sm font-semibold leading-5 text-zinc-600 dark:text-zinc-300">{model.id}</p>
                 </div>
               </div>
-              <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                {t(getModelBestFor(model))}
+              <p data-testid={lang === "en" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                {lang === "en" ? `Access from: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · Short request: ${usageProfile.credits} credits · Image input: ${modelSupportsImageInput(model) ? "supported" : "not supported"} · Catalog context maximum: ${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "not listed"}` : t(getModelBestFor(model))}
               </p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {tags.map((tag) => (
