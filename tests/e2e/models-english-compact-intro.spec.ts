@@ -37,5 +37,5 @@ test("desktop English catalog keeps complete usage and region guidance", async (
   await page.goto("/models?lang=en");
   await expect(page.getByTestId("models-mobile-usage-details")).toBeHidden();
   await expect(page.getByText(/Credit categories are separate from subscription plans/).last()).toBeVisible();
-  await expect(page.getByText(/Compare suggested uses, base credits and the plan needed/)).toBeVisible();
+  await expect(page.getByText(/Compare access plans, base credits, image input and catalog context limits/)).toBeVisible();
 });
