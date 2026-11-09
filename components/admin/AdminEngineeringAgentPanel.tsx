@@ -21,7 +21,6 @@ const returnPathFor = (section: string) =>
   section === "pull-requests"
     ? "/admin/engineering-agent?tab=runs&view=pull-requests"
     : `/admin/engineering-agent?tab=${section}`;
-const FIRST_T1_WINDOW_DAYS = 14;
 
 type Notice = { tone: "ok" | "error"; text: string } | null;
 
@@ -335,16 +334,10 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
             <dd>{initial.settings.killSwitch ? m.engaged : m.notEngaged}</dd>
           </dl>
           <p className="text-sm text-zinc-300">
-            {initial.settings.pullRequests.firstT1Window
-              ? fill(m.prQueueWindow, {
-                  occupied: initial.settings.pullRequests.occupied,
-                  limit: initial.settings.pullRequests.limit,
-                  days: FIRST_T1_WINDOW_DAYS,
-                })
-              : fill(m.prQueue, {
-                  occupied: initial.settings.pullRequests.occupied,
-                  limit: initial.settings.pullRequests.limit,
-                })}
+            {fill(m.prQueue, {
+              occupied: initial.settings.pullRequests.occupied,
+              limit: initial.settings.pullRequests.limit,
+            })}
             <br />
             {fill(m.decisionQueue, {
               occupied: initial.settings.decisions.occupied,
