@@ -99,12 +99,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "Tell us the page or device",
           "Describe expected behavior",
-          "Share screenshots when helpful"
+          "Send screenshot inquiries to support@tomverse.app"
         ]
       }
     ],
     "formTitle": "Contact support",
     "formDescription": "Your request goes to the support team. If you choose email updates, the receipt reference and progress updates go to that address.",
+    "attachmentHelp": "This form cannot attach files. If your inquiry needs a screenshot, attach it to an email to our support address.",
     "typeLabel": "Request type",
     "types": {
       "support": "General support",
