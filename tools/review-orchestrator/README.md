@@ -344,6 +344,17 @@ $RO status
     `plugins`·`.copilot/`·`.mcp.json`도 base 버전으로 되돌립니다.
   - `--max-ai-credits 50`은 검토 한 건의 상한입니다. 월 credit(Pro+ 3,900, flex 포함 7,000)은
     GitHub의 Copilot 사용량 화면에서 봅니다.
+  - **CLI 1.0.107은 `--no-remote`를 없앴습니다.** 이 옵션을 주면 `error: --no-remote was removed`를
+    내고 exit 1로 끝나므로 검토는 `unknown`이 됩니다. 2026-11-09 재부팅 때 AMUX 계정(`tommy`)의 CLI가
+    `--no-auto-update`를 주었는데도 1.0.107로 바뀌어, AMUX의 Copilot 잔량 조회가 그때부터 실패했습니다.
+    잔량 조회(AMUX `agent_quota.rs`, `copilot-quota.mjs`, `lib/amux/v22ChannelQuota.mjs`)와 검토 실행
+    인자(`config.example.json`) 모두에서 이 옵션을 뺐고 `--no-remote-export`는 남겼습니다. 같은 날
+    `review` 계정의 CLI도 `copilot update`로 1.0.107이 되었습니다. 1.0.107에서 들어오는 원격 연결은
+    `~/.copilot/config.json`의 `ahpEnvironment.acceptRemoteConnections`와 `/environments`로 관리하므로,
+    `review` 계정 설정에 이 값이 `true`로 켜져 있지 않은지 확인합니다. 서버 설정
+    (`/home/review/.config/review-orchestrator/config.json`)의 검토 인자에 `--no-remote`가 남아 있으면
+    Copilot 검토가 모두 `unknown`이 되므로 함께 뺍니다. 1.0.91 이하로 되돌린 CLI에서는 이 옵션이 다시
+    필요한지 확인하지 않았습니다.
 
 ## 서버 업데이트 (drain)
 
