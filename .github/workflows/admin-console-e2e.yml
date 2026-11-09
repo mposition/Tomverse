@@ -167,12 +167,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # Since 2026-11-09 (CI minutes, before the repository goes private): the
-      # same decision PR Fast Gate's required Chromium smoke already uses,
-      # scripts/pr-ui-scope.mjs, so a change that cannot reach the app -- docs,
-      # Rust, other workflows, unit tests -- skips the build and the suite. The
-      # job still runs and reports, so the required check never waits. A change
-      # to this workflow, or a base that cannot be fetched or diffed, runs all.
+      # Since 2026-11-09 (CI minutes, before the repository goes private): a
+      # change runs the build and the suite only when it can reach what the
+      # suite exercises -- the admin pages, the two auth pages it opens, their
+      # API routes and the layouts above them (scripts/admin-e2e-scope.mjs).
+      # A marketing or chat change skips. The job still runs and reports, so
+      # the required check never waits. A change to this workflow, or a base
+      # that cannot be fetched or diffed, runs all.
       - name: Determine whether this change can reach the admin console
         id: scope
         env:
@@ -199,9 +200,9 @@ jobs:
             exit 0
           fi
           if printf '%s\n' "$changed" | grep -qx '.github/workflows/admin-console-e2e.yml'; then
-            node scripts/pr-ui-scope.mjs --all
+            node scripts/admin-e2e-scope.mjs --all
           else
-            printf '%s\n' "$changed" | node scripts/pr-ui-scope.mjs
+            printf '%s\n' "$changed" | node scripts/admin-e2e-scope.mjs
           fi
 
       - name: Setup Node.js

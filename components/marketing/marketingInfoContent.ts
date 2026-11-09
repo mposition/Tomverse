@@ -1338,8 +1338,10 @@ export const infoPages = {
     "eyebrow": "Help Centre",
     "title": "Help Centre",
     "description": "From starting Chat and Review to models, files, saving and sharing: choose your task and find what to check on screen.",
+    "sectionNavLabel": "Jump to a topic",
     "sections": [
       {
+        "id": "getting-started",
         "title": "Getting started",
         "body": "The same question can produce different answers. In Tomverse Review, read up to three model answers side by side and use AI Review to examine agreements, differences and missing conditions with quotes. Decide which answer to explore and what to ask next.",
         "bullets": [
@@ -1353,6 +1355,7 @@ export const infoPages = {
         }
       },
       {
+        "id": "sign-in",
         "title": "Sign-in and account access",
         "body": "If sign-in does not return you to Tomverse, try again in the same browser. If the problem continues, send support the sign-in method and the error shown.",
         "bullets": [
@@ -1361,6 +1364,7 @@ export const infoPages = {
         ]
       },
       {
+        "id": "models-and-credits",
         "title": "Models and credits",
         "body": "The amount shown before sending is a base credit estimate. It adds the selected models’ base costs; the final usage may change when file content and long conversation history are processed.",
         "bullets": [
@@ -1374,6 +1378,7 @@ export const infoPages = {
         }
       },
       {
+        "id": "files-and-drive",
         "title": "Files and Google Drive",
         "body": "Where attachments are available, the supported extensions for signed-in accounts are listed below. Password-protected, damaged or scanned documents without readable text may fail. Try one file or paste the key text.",
         "bullets": [
@@ -1389,10 +1394,12 @@ export const infoPages = {
         }
       },
       {
+        "id": "answer-errors",
         "title": "When an answer does not arrive",
         "body": "Models can be temporarily limited or fail to answer. Check the reason and service status, then try a suggested alternative once if needed. If the problem continues, send support the trace ID and model name."
       },
       {
+        "id": "saving-sharing-data",
         "title": "Saving, sharing and data",
         "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details.",
         "bullets": [
@@ -1404,6 +1411,7 @@ export const infoPages = {
         "link": { "label": "Read the workspace guide", "href": "/support/help-centre/chat-workspace" }
       },
       {
+        "id": "contact-support",
         "title": "Contact support",
         "body": "If the problem continues, include your account email, approximate time, product and model, attachment details and the on-screen trace ID. Use the form or email; do not send passwords or card numbers."
       }
