@@ -84,9 +84,13 @@ export type AmuxLegacyCardCloseRefusal =
 
 export function amuxLegacyCardCloseRefusal(card: AmuxLegacyCardFacts & {
   archivedAt: Date | null; revision: number; activeDelivery: boolean; liveAttempt: boolean;
+  /** An open or acknowledged escalation still keeps the card in the owner queue. */
+  openEscalation: boolean;
 }, shownRevision: number): AmuxLegacyCardCloseRefusal | null {
   if (amuxLegacyCardKind(card) === null) return "not_legacy";
-  if (card.archivedAt !== null) return "already_closed";
+  // A card archived elsewhere (a closed local card) can still hold an open
+  // escalation; its close then only resolves that, so the queue lets it go.
+  if (card.archivedAt !== null && !card.openEscalation) return "already_closed";
   if (card.revision !== shownRevision) return "changed";
   // A queued or leased delivery, an open attempt or a card a worker is doing
   // is still running: archiving it would fence the worker's settlement.
@@ -162,14 +166,22 @@ const NON_CODE_ROLES = new Set(["investigate", "design", "review", "verify", "op
 export function amuxLegacyCardIdeaText(card: {
   displayKey: string | null; id: string; description: string | null; executionBrief: string | null;
   kind?: AmuxLegacyCardKind; taskRole?: string | null;
+  /** The card's own title, the idea's title when only the approved brief is readable. */
+  title?: string | null;
 }): AmuxLegacyCardIdea {
   const raw = card.description?.trim() ?? "";
-  if (!raw) return { ok: false, code: "no_assigned_work" };
+  const brief = card.executionBrief?.trim() ?? "";
+  if (!raw && !brief) return { ok: false, code: "no_assigned_work" };
   let parsed: unknown = null;
   try { parsed = JSON.parse(raw); } catch { parsed = null; }
   let title: string;
   let body: string[];
-  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+  if (!raw) {
+    // No assigned work of its own: the approved brief below is the work, under
+    // the card's title, or the brief's first sentence when it has none.
+    title = amuxFirstSentence(card.title ?? "") || amuxFirstSentence(brief);
+    body = [];
+  } else if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
     const record = parsed as Record<string, unknown>;
     const problem = typeof record.problem === "string" ? record.problem.trim() : "";
     body = asLines(record);
@@ -185,13 +197,13 @@ export function amuxLegacyCardIdeaText(card: {
     body = lines.slice(first).map((line) => line.trimEnd());
   }
   if (!title) return { ok: false, code: "no_assigned_work" };
-  const brief = card.executionBrief?.trim();
   const footer = `원래 카드: ${card.displayKey ?? card.id} (${card.kind === "pre_v22_task" ?
     "v22 이전에 만든 Task" : "옛 작업판에서 이관한 카드"}를 새 아이디어로 다시 만듦)`;
   const role = card.taskRole ? ROLE_LABELS[card.taskRole] ?? card.taskRole : null;
   const nature = role ? [`작업 성격: ${role}${NON_CODE_ROLES.has(card.taskRole!) ?
     " (코드 수정이 아닌 작업입니다. 결과는 보고서로 남기고 코드를 바꾸지 않습니다)" : ""}`] : [];
-  const head = [title, "", ...nature, ...(nature.length ? [""] : []), ...body, ...(brief ? ["", "승인된 실행 브리프:", brief] : [])].join("\n").trim();
+  const head = [title, "", ...nature, ...(nature.length ? [""] : []), ...body,
+    ...(brief ? [...(body.length ? [""] : []), "승인된 실행 브리프:", brief] : [])].join("\n").trim();
   const room = AMUX_IDEA_INPUT_MAX_BYTES - Buffer.byteLength(`\n\n…\n\n${footer}`, "utf8");
   const cut = cutToBytes(head, room);
   const truncated = cut !== head;
