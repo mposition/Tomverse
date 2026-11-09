@@ -20,6 +20,7 @@ import {
   getTypicalShortRequestCapacities,
 } from "@/lib/models";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
+import { PricingCreditExample } from "./PricingCreditExample";
 import { PricingPlanCapabilities } from "./PricingPlanCapabilities";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
@@ -938,6 +939,7 @@ export function PricingPageContent() {
   // static HTML intact and cannot produce a hydration mismatch, and it is the
   // pattern UpgradeCtaLink already uses for the same reason.
   const [pageIntent, setPageIntent] = useState<PurchaseIntent | null>(null);
+  const [subscriptionInterval, setSubscriptionInterval] = useState<"monthly" | "annual">("monthly");
   const [billingOutcome, setBillingOutcome] = useState<BillingOutcome | null>(
     null
   );
@@ -1029,6 +1031,7 @@ export function PricingPageContent() {
     // the shape the repo's React Compiler lint rejects.
     queueMicrotask(() => {
       setPageIntent(intent);
+      if (intent.billingInterval) setSubscriptionInterval(intent.billingInterval);
       if (outcome) setBillingOutcome(outcome);
     });
     if (!outcome) return;
@@ -1221,13 +1224,14 @@ export function PricingPageContent() {
           lang,
           intent: "subscription",
           targetPlan,
+          billingInterval: lang === "ko" ? subscriptionInterval : undefined,
           trigger: pageIntent?.trigger,
           ctaLocation: `pricing_plan_card_${targetPlan}`,
           utm: pageIntent?.utm,
           anchor: PRICING_PLANS_ANCHOR,
         })
       ),
-    [lang, pageIntent]
+    [lang, pageIntent, subscriptionInterval]
   );
 
   const trackCreditPackCtaClick = useCallback(
@@ -1402,6 +1406,19 @@ export function PricingPageContent() {
           </p>
         ) : null}
 
+        {lang === "ko" && (account.status === "unauthenticated" || (account.status === "authenticated" && !account.hasActiveSubscription)) ? (
+          <fieldset className="mt-10 rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
+            <legend className="px-2 text-sm font-bold">신규 구독 결제 주기</legend>
+            <div className="flex flex-wrap gap-4">
+              {(["monthly", "annual"] as const).map((interval) => (
+                <label key={interval} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-bold">
+                  <input type="radio" name="subscription-billing-interval" value={interval} checked={subscriptionInterval === interval} onChange={() => setSubscriptionInterval(interval)} className="h-4 w-4 accent-blue-600" />
+                  {interval === "annual" ? "연간 결제" : "월간 결제"}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
         <div id={PRICING_PLANS_ANCHOR} className="mt-14 grid scroll-mt-24 gap-5 lg:grid-cols-3">
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
@@ -1663,6 +1680,7 @@ export function PricingPageContent() {
               <p className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
+              {lang === "en" ? <PricingCreditExample credits={billing.planLimits(planId).monthlyCredits} testId={`pricing-credit-example-plan-${planId}`} /> : null}
               {/*
                 The plan CTA is chosen by resolvePlanCtaState(), not by the
                 card's own name. Every card used to render the same "Upgrade"
@@ -1803,12 +1821,19 @@ export function PricingPageContent() {
                 ) : (
                   <UpgradeInterestButton
                     plan={plan.name === "Max" ? "Max" : "Pro"}
+                    initialBillingInterval={lang === "ko" ? subscriptionInterval : undefined}
                     trigger={pageIntent?.trigger || undefined}
                     className={`inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold transition ${planCtaSurface(plan.highlighted)}`}
                   >
                     {plan.cta}
                   </UpgradeInterestButton>
                 )}
+                {lang === "ko" && planId !== "free" && (ctaState === "signed_out" || ctaState === "upgrade") ? (
+                  <p data-testid={`pricing-selected-billing-${planId}`} className="mt-3 text-sm font-bold leading-6">
+                    {subscriptionInterval === "annual" ? `연 ${annualPrice} 일괄 결제` : `${salePrice ? "첫 달 " : "월 "}${salePrice || displayPrice} 결제`}
+                    <span className="mt-1 block font-normal">할인 적용과 최종 결제 조건은 다음 확인창에서 확인하세요.</span>
+                  </p>
+                ) : null}
                 {lang === "en" && planId !== "free" && (ctaState === "signed_out" || ctaState === "upgrade") ? (
                   <p className="mt-2 text-sm font-semibold leading-6" data-testid={`pricing-billing-choice-${planId}`}>
                     Choose monthly or annual billing in the next step{ctaState === "signed_out" ? " after signing in" : ""}, before payment.
@@ -2021,6 +2046,7 @@ export function PricingPageContent() {
                   <p className="mt-4 min-w-0 break-words border-t border-zinc-200 pt-3 text-xs font-bold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
                     {creditPackGuide.validity.replace("{days}", String(pack.validityDays))}
                   </p>
+                  {lang === "en" ? <PricingCreditExample credits={pack.credits} testId={`pricing-credit-example-pack-${pack.id}`} /> : null}
                   {/* Per-pack CTA. The pack the visitor clicked is what the
                       modal opens on, and what a sign-in detour carries back,
                       so the choice is never made twice. */}
@@ -2090,6 +2116,7 @@ export function PricingPageContent() {
                 <p className="mt-3 min-w-0 break-words text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                   {creditGuide.description}
                 </p>
+                {lang === "en" ? <p data-testid="pricing-category-capacity-note" className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">The category examples below use the illustrative base rates shown here. Current model-specific credit costs can differ; check each model’s base credits before choosing.</p> : null}
               </div>
               <span className="w-fit min-w-0 break-words rounded-full border border-accent-promotion-500/30 bg-accent-promotion-500/10 px-4 py-2 text-xs font-bold text-accent-promotion-700 dark:text-accent-promotion-300">
                 {creditGuide.typicalLabel}
