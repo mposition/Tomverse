@@ -178,7 +178,7 @@ for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const)
     await expect(page.locator('[data-review-appearance="studio"][data-studio-product="chat"]')).toBeVisible();
     if (width > 768) {
       await page.getByTestId("chat-textarea").fill("새로 출시할 서비스의 첫 사용자 인터뷰를 준비하고 싶어요.");
-      await page.getByTestId("chat-command-bar").getByText("Chat", { exact: true }).click();
+      await page.getByTestId("chat-command-bar").locator(".review-brand strong").click();
     }
     await expect.poll(() => page.locator("img").evaluateAll(nodes => nodes.filter(node => node instanceof HTMLImageElement && node.getClientRects().length > 0 && (!node.complete || !node.naturalWidth)).map(node => node.getAttribute("src"))), { timeout: 30_000 }).toEqual([]);
     await page.evaluate(() => document.fonts.ready);
