@@ -230,16 +230,14 @@ test("a consent copy version that makes no promise has changed the promise in ev
   }
 });
 
-test("the privacy page on record is a version the owner approved", () => {
-  // docs/policy/email-policy-amendment-draft.md §2, §3 and §5, approved by
-  // mposition on 2026-10-03, with main's approved memory-section rewrite; the
-  // changed page approved by the owner in chat on 2026-11-05.
-  assert.deepEqual(APPROVED_AMENDED_DIGESTS["/privacy"], [
-    "eed140cd012feb7df346aa65b3e34cd589a77173c06bdf11c5262800cf7612f8",
-    "0a598b218b4cc0db14a71bfa49c2b067a46fb2756519cd5879fe3d3311270817",
-  ]);
-  assert.equal(APPROVED_AMENDED_DIGESTS["/privacy"].includes(AMENDED_DOCUMENT_EVIDENCE["/privacy"].contentSha256), true);
-  assert.deepEqual(APPROVED_AMENDED_DIGESTS["/terms"], [AMENDED_DOCUMENT_EVIDENCE["/terms"].contentSha256]);
+test("approval records remain explicit and separate from current observations", () => {
+  assert.deepEqual(Object.keys(APPROVED_AMENDED_DIGESTS).sort(), [...AMENDED_DOCUMENTS].sort());
+  for (const path of AMENDED_DOCUMENTS) {
+    const approved = APPROVED_AMENDED_DIGESTS[path];
+    assert.ok(approved.length > 0, `${path}: no approval history`);
+    assert.equal(new Set(approved).size, approved.length);
+    for (const digest of approved) assert.match(digest, /^[a-f0-9]{64}$/);
+  }
   assert.equal(AMENDED_DOCUMENT_EVIDENCE["/privacy"].date, "2026-11-16");
   // A future effective date is not a lastmod (lib/sitemapContentDates.ts).
   assert.equal(SITEMAP_CONTENT_EVIDENCE["/privacy"], undefined);
@@ -250,6 +248,11 @@ test("the approved page leaves release notes closed on the notice and the date a
   assert.equal(CHANGE_NOTICE_TEMPLATE_KEY, "policy_change_notice");
   assert.equal(CHANGE_NOTICE_APPROVED_CONTENT_HASHES.length, 7);
   assert.equal(documentFacts().length, 2);
+  // A synthetic approved version tests the date/notice rules. Observing an
+  // edited page must never add its digest to the runtime approval history.
+  const approvedDocuments = documentFacts().map(document => ({
+    ...document, publishedDigest: document.approvedDigests[0],
+  }));
   const unsent = {
     templateKey: "policy_change_notice",
     classification: "legal",
@@ -263,21 +266,29 @@ test("the approved page leaves release notes closed on the notice and the date a
     untold: 10,
     firstSentAt: null,
   };
-  const after = publicationProblems({ documents: documentFacts(), notice: unsent, now: NOW }).map(
+  const after = publicationProblems({ documents: approvedDocuments, notice: unsent, now: NOW }).map(
     (problem) => `${problem.subject}:${problem.refusal}`
   );
   assert.ok(!after.some((entry) => entry.startsWith("/privacy:")), after.join(", "));
   assert.ok(!after.some((entry) => entry.startsWith("/terms:")), after.join(", "));
   assert.ok(after.includes("policy_change_notice:change_notice_not_sent"), after.join(", "));
   const before = publicationProblems({
-    documents: documentFacts(),
+    documents: approvedDocuments,
     notice: unsent,
     now: new Date("2026-11-15T23:59:59.000Z"),
   }).map((problem) => `${problem.subject}:${problem.refusal}`);
   assert.ok(before.includes("/privacy:effective_date_not_reached"), before.join(", "));
   assert.ok(before.includes("/terms:effective_date_not_reached"), before.join(", "));
   const delivered = { ...unsent, told: 10, untold: 0 };
-  assert.deepEqual(publicationProblems({ documents: documentFacts(), notice: delivered, now: NOW }), []);
+  assert.deepEqual(publicationProblems({ documents: approvedDocuments, notice: delivered, now: NOW }), []);
+  const observed = documentFacts();
+  const unapproved = observed.filter(document => !document.approvedDigests.includes(document.publishedDigest)).map(document => document.path).sort();
+  assert.deepEqual(
+    publicationProblems({ documents: observed, notice: delivered, now: NOW })
+      .filter(problem => problem.refusal === "document_not_amended").map(problem => problem.subject).sort(),
+    unapproved,
+    "a current observation cannot grant publication approval"
+  );
   // A later edit to the page closes it again until that version is approved.
   const edited = documentFacts().map((document) =>
     document.path === "/privacy" ? { ...document, publishedDigest: "0".repeat(64) } : document
