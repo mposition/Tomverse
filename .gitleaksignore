@@ -1910,3 +1910,20 @@ ef19bafeab994f19af5c9a244d416a394c2105f6:tests/amuxV19SessionAnalysisResultRoute
 0037915e8b8e455172d375f0c1613b4020f7acc4:docs/ops/mcp-provider-inventory.json:sourcegraph-access-token:5880
 0037915e8b8e455172d375f0c1613b4020f7acc4:docs/ops/mcp-provider-inventory.json:sourcegraph-access-token:5890
 0037915e8b8e455172d375f0c1613b4020f7acc4:docs/ops/mcp-provider-inventory.json:sourcegraph-access-token:5908
+
+# Daily Security Audit run 42541214260 (2026-11-09): 5 findings, none a
+# credential. All five sit on feature/release branches, not on main.
+#
+# tests/e2e-admin/amux-owner-review-report.spec.ts:327 is an AMUX card display
+# number (displayKey) in a mocked owner queue. The two
+# tests/marketingSeoProposalDiagnosis.test.mjs lines (88, 90) are invented
+# token shapes fed to the SEO diagnosis redactor to prove it masks them; the
+# same commit exists twice (develop branch and its release cherry-pick).
+# Values are intentionally not repeated here.
+#
+# Scope: exactly these fingerprints (commit, path, rule, line) -- nothing wider.
+a264ed7037ff8bbaecb3aff531a182f2a7d4ebbd:tests/e2e-admin/amux-owner-review-report.spec.ts:generic-api-key:327
+634cc3097c5d46a6eb30fc97c8a18c3a1b971cf6:tests/marketingSeoProposalDiagnosis.test.mjs:aws-access-token:90
+634cc3097c5d46a6eb30fc97c8a18c3a1b971cf6:tests/marketingSeoProposalDiagnosis.test.mjs:github-pat:88
+6913c67d88d315c295a751d3ecc8598c05664164:tests/marketingSeoProposalDiagnosis.test.mjs:aws-access-token:90
+6913c67d88d315c295a751d3ecc8598c05664164:tests/marketingSeoProposalDiagnosis.test.mjs:github-pat:88
