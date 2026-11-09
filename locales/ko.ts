@@ -734,6 +734,8 @@ export const ko = {
         aiReviewPerMonth: "회/월",
         aiReviewRun: "교차검토 실행",
         aiReviewRunning: "답변을 검토하는 중...",
+        aiReviewSecondaryPending: "첫 번째 검토가 준비되었습니다. 나머지 검토를 마무리하는 중입니다...",
+        aiReviewPartialInterrupted: "첫 번째 검토는 확인할 수 있지만 최종 결과는 확인하지 못했습니다. 다시 실행하기 전에 검토 상태를 확인해 주세요.",
         aiReviewPreparing: "최근 비교 가능한 답변을 준비하는 중...",
         aiReviewPrepareFailed: "교차검토를 준비하지 못했습니다.",
         aiReviewFailed: "교차검토를 완료하지 못했습니다. 예약 크레딧은 환불되었습니다.",
@@ -1658,7 +1660,7 @@ export const ko = {
         pageDescription:
             "Tomverse가 보관 중인 계정 데이터 전체가 담긴 파일 하나입니다. 무엇이 들어 있고 무엇이 빠져 있는지, 그 이유까지 파일 안에 적혀 있습니다.",
         securityNote:
-            "내려받으려면 최근에 다시 로그인해야 합니다. 발급된 링크는 한 번만 쓸 수 있고 5분 뒤 만료되므로, 링크가 다른 곳으로 새어나가도 이미 사용된 상태입니다.",
+            "내려받으려면 최근에 다시 로그인해야 합니다. 링크는 한 번만 사용할 수 있으며 발급 후 5분 뒤 만료됩니다. 사용 전에는 다른 사람에게 공유하지 마세요.",
         prepareDownload: "다운로드 준비",
         requestAgain: "새로 준비하기",
         downloadNow: "파일 내려받기",
@@ -1847,7 +1849,7 @@ export const ko = {
         importPackage: "외부 설정 가져오기",
         createAction: "어시스턴트 만들기",
         empty: "아직 어시스턴트가 없습니다. 하나 만들어 나만의 지시문을 지정해 보세요.",
-        publishedStatus: "게시됨 — 개정 {revision}, 지식 파일 {files}개",
+        publishedStatus: "계정 전용으로 사용 가능 · 버전 {revision}, 지식 파일 {files}개",
         draftStatus: "초안 — 대화를 시작하려면 먼저 게시하세요",
         newTitle: "새 AI 어시스턴트",
         editTitle: "AI 어시스턴트 편집",

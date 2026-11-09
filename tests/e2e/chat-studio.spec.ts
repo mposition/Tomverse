@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
-import { installChatModelStub, restoreActiveConversation, setDeterministicTheme, suppressTransientUi } from "./support/chat-state-fixtures";
+import { installChatModelStub, mockUserUsage, restoreActiveConversation, setDeterministicTheme, suppressTransientUi } from "./support/chat-state-fixtures";
 import { expectAccessibleContrast, expectInsideVisibleViewport, expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
 
 test.use({ hasTouch: true });
@@ -50,17 +50,17 @@ async function setAppearance(page: Page, width: number, appearance: "classic" | 
 }
 
 for (const theme of ["light", "dark"] as const) {
-  test(`English Chat guidance and placeholders meet contrast in ${theme}`, async ({ page }) => {
+  for (const lang of ["ko", "en"] as const) test(`${lang === "ko" ? "Korean" : "English"} Chat guidance and placeholders meet contrast in ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 1000 });
-    await prepareGuestPage(page, "en", "studio", "studio");
-    const account = await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-6-luna"], selectionMode: "auto", autoSelectionOffered: true, language: "en" });
+    await prepareGuestPage(page, lang, "studio", "studio");
+    const account = await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-6-luna"], selectionMode: "auto", autoSelectionOffered: true, language: lang });
     account.theme = theme;
     await setDeterministicTheme(page, theme);
     await suppressTransientUi(page);
     await restoreActiveConversation(page);
     await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: "http://127.0.0.1:3100" }]);
     await page.route("**/api/products/chat/capabilities", route => route.fulfill({ json: { autoSelection: { offered: true } } }));
-    await page.goto("/chat?lang=en");
+    await page.goto(`/chat?lang=${lang}`);
     await expect(page.getByTestId("chat-textarea")).toBeVisible();
     const guidance = page.locator(".chat-studio-description:visible");
     await expect(guidance).toBeVisible();
@@ -71,11 +71,46 @@ for (const theme of ["light", "dark"] as const) {
         await setAppearance(page, width, appearance);
         const input = page.getByTestId("chat-textarea");
         await expect(input).toHaveValue("");
-        const sample = await expectAccessibleContrast(input, `${appearance} placeholder at ${width}px`, "::placeholder");
-        expect(sample.text).not.toBe("");
+        const sample = await expectAccessibleContrast(input, `${appearance} ${lang} placeholder at ${width}px`, "::placeholder");
+        if (lang === "ko") expect(sample.text).toMatch(/[가-힣]/);
+        else expect(sample.text).not.toBe("");
         expect(sample.ratio).toBeGreaterThanOrEqual(4.5);
       }
     }
+  });
+
+  test(`short English Chat exposes a scroll action and the complete last starter in ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await prepareGuestPage(page, "en", "studio", "studio");
+    const account = await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-6-luna"], selectionMode: "auto", autoSelectionOffered: true, language: "en" });
+    account.theme = theme;
+    await mockUserUsage(page, { plan: "Max" });
+    await setDeterministicTheme(page, theme);
+    await suppressTransientUi(page);
+    await restoreActiveConversation(page);
+    await page.context().addCookies([
+      { name: "__tomverse_e2e_chat_workspace", value: "1", url: "http://127.0.0.1:3100" },
+      { name: "__tomverse_e2e_chat_starter", value: "1", url: "http://127.0.0.1:3100" },
+    ]);
+    await page.route("**/api/products/chat/capabilities", route => route.fulfill({ json: { autoSelection: { offered: true } } }));
+    await page.goto("/chat?lang=en");
+    const more = page.getByTestId("starter-scroll-more");
+    await expect(more).toBeVisible();
+    await expect(more).toHaveAccessibleName("More suggestions");
+    await expect(more).toBeEnabled();
+    await more.click();
+    await expect(more).toBeDisabled();
+    await expect(more).toBeFocused();
+    const last = page.getByTestId("chat-starter-card").last();
+    expect(await last.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const surface = document.querySelector('[data-testid="mobile-conversation-surface"]')!.getBoundingClientRect();
+      const dock = document.querySelector('[data-testid="mobile-bottom-dock"]')!.getBoundingClientRect();
+      return rect.top >= surface.top && rect.bottom <= surface.bottom && rect.bottom <= dock.top &&
+        element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+    })).toBe(true);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   });
 }
 
