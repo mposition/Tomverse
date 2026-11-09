@@ -139,3 +139,49 @@ The design guide every call follows is `HIGGSFIELD-GUIDE.md`.
   a call whose outcome is unknown blocks the next until its job id shows it.
 - `HIGGSFIELD_BIN` and `CLAUDE_BIN` name other binaries (a `.mjs` is run with
   node), for a dry run with stand-ins.
+
+## The creative short job (off by default, run by hand)
+
+Owner direction 2026-11-09: a different, creative short every time, made with
+Higgsfield and ElevenLabs instead of a reused template. `run-creative-short.mjs`
+(started by `run-creative-short.sh`) is off unless `MARKETING_CREATIVE_SHORT=on`
+in the box's env file; no cron starts it yet.
+
+One run makes one 15-40 s 9:16 film in every locale that has a capture pack of
+its topic, and submits each for approval in Admin:
+
+1. plan (`CREATIVE-PLAN.md`): a Claude call with Read on research notes,
+   `features.json`, the capture packs and earlier films' stills writes a new
+   concept, up to 3 AI shots, a music prompt and the words per locale.
+   `creative-core.mjs` checks it (limits, the AI line on screen, a pack of the
+   topic, a concept never used before) before anything is paid for.
+2. shots and music (`hf-media-core.mjs`): a 9:16 `gpt_image_2_6` frame, a 5 s
+   `kling3_0` std clip from it, one `elevenlabs_music_v2_5` instrumental bed.
+   Same safeguards as the image path, its own daily ledger
+   `job/creative-ledger-<yyyymmdd>.json` under
+   `MARKETING_CREATIVE_SHORT_DAILY_CREDIT_CAP`, and a ceiling per call.
+3. shot check (`CREATIVE-SHOTS.md`): a separate call reads 4 stills a second of
+   each clip and keeps a clean span (no false writing, broken hands or logos).
+4. voice (`el-voice-core.mjs`): each narration line through the ElevenLabs API
+   in the locale's fixed voice (en Killian, ko Apollo, zh-Hant 阿夢, zh-Hans Qiao
+   Feng), levelled to -16 LUFS. ElevenLabs bills characters: a daily ledger
+   `job/creative-voice-ledger-<yyyymmdd>.json` under
+   `MARKETING_CREATIVE_SHORT_DAILY_VOICE_CHARS`; a line with no answer blocks the
+   rest of the day. The key is `ELEVENLABS_API_KEY`.
+5. build (`CREATIVE-BUILD.md`): a Claude call writes the film's Remotion code in
+   `job/creative/<run>/film/` and looks at stills it renders with
+   `render-creative.mjs`; it can write only there and run only that command.
+   `render-creative.mjs` refuses code that imports anything but react, remotion
+   and its own files, or uses the network, Node, randomness or the clock.
+6. review (`CREATIVE-REVIEW.md`): a separate call scores every locale's stills
+   against the earlier films: pass, fix (one more build) or reject.
+7. render, master to -14 LUFS, check 1080x1920 / 10-60 s / sound, write the
+   asset file in code (`ai_modified`, a disclosure on every channel, zh-Hans to
+   RedNote only) and submit with `submit-asset.mjs`.
+
+Phase 1 limits: the real screens come from the approved shorts' capture packs
+(`job/sources/`), so a film is about a topic one of them shows; recording new
+screens per film is the next step. The report is one JSON line;
+`job/creative/history.json` and `job/creative/sheets/<run>/` let the next run
+avoid repeating it. For a dry run, `CLAUDE_BIN` and `HIGGSFIELD_BIN` name
+stand-ins.

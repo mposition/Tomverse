@@ -1,0 +1,270 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import test from "node:test";
+
+import { marketingAssetSchema } from "../lib/marketingAssets.ts";
+import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset } from "../tools/marketing-video/creative-core.mjs";
+import { speakLine, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
+import { admit, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
+import { creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
+
+/**
+ * The creative short job (owner 2026-11-09: a different, creative ad every
+ * time, made with Higgsfield and ElevenLabs). Money leaves only through two
+ * capped, deterministic callers that no model runs: Higgsfield clips, frames
+ * and music under MARKETING_CREATIVE_SHORT_DAILY_CREDIT_CAP, and ElevenLabs
+ * lines in a fixed voice per locale under MARKETING_CREATIVE_SHORT_DAILY_VOICE_CHARS.
+ * The model's plan and film code pass checks before anything is paid for or
+ * rendered, and the asset file is written by code. No test here calls a paid
+ * service: the CLI and fetch are fakes.
+ */
+
+const DAY = "20261110";
+const JOB = "8d3c6a1e-1111-4222-8333-944455556666";
+const tempJob = () => mkdtempSync(join(tmpdir(), "creative-"));
+const capEnv = (credits = "40", chars = "3000") => ({ MARKETING_CREATIVE_SHORT_DAILY_CREDIT_CAP: credits, MARKETING_CREATIVE_SHORT_DAILY_VOICE_CHARS: chars, ELEVENLABS_API_KEY: "test-key" });
+const image = (extra = {}) => ({ model: "gpt_image_2_6", aspect_ratio: "9:16", count: 1, prompt: "a quiet harbour at dawn, no text", ...extra });
+const clip = (extra = {}) => ({ model: "kling3_0", aspect_ratio: "9:16", duration: 5, mode: "std", sound: "off", start_image: JOB, prompt: "slow push-in", ...extra });
+const music = (extra = {}) => ({ model: "elevenlabs_music_v2_5", force_instrumental: true, duration: 26, prompt: "warm lo-fi, 90 bpm", ...extra });
+const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypisom"), Buffer.alloc(16)]);
+const MP3 = Buffer.concat([Buffer.from("ID3"), Buffer.alloc(20)]);
+
+/** A fake Higgsfield CLI: prices at `cost`, creates one job, finishes it. Records every command. */
+function fakeCli({ cost = 7.5, created = [JOB], status = "completed" } = {}) {
+  const calls = [];
+  const cli = (args) => {
+    calls.push(args.slice(0, 2).join(" "));
+    if (args[1] === "cost") return { status: 0, stdout: JSON.stringify({ credits: cost }) };
+    if (args[1] === "create") return { status: 0, stdout: JSON.stringify(created) };
+    if (args[1] === "wait" || args[1] === "get") return { status: 0, stdout: JSON.stringify({ id: JOB, status, result_url: "https://cdn.example/x" }) };
+    return { status: 1, stdout: "" };
+  };
+  return { cli, calls };
+}
+
+test("only the fixed frame, clip and music requests may be sent", () => {
+  assert.equal(creativeRequestProblem(image()), null);
+  assert.equal(creativeRequestProblem(clip()), null);
+  assert.equal(creativeRequestProblem(music()), null);
+  assert.equal(creativeRequestProblem(image({ aspect_ratio: "4:5" })), "aspect_ratio_not_allowed");
+  assert.equal(creativeRequestProblem(image({ count: 2 })), "count_not_allowed");
+  assert.equal(creativeRequestProblem(image({ quality: "max" })), "field_not_allowed:quality");
+  assert.equal(creativeRequestProblem(clip({ mode: "pro" })), "mode_not_allowed");
+  assert.equal(creativeRequestProblem(clip({ duration: 10 })), "duration_not_allowed");
+  assert.equal(creativeRequestProblem(clip({ sound: "on" })), "sound_not_allowed");
+  assert.equal(creativeRequestProblem(clip({ start_image: "./frame.png" })), "start_image_not_a_job_id");
+  assert.equal(creativeRequestProblem(music({ duration: 60 })), "duration_not_allowed");
+  assert.equal(creativeRequestProblem(music({ force_instrumental: false })), "force_instrumental_not_allowed");
+  assert.equal(creativeRequestProblem(music({ lyrics: "la" })), "field_not_allowed:lyrics");
+  assert.equal(creativeRequestProblem({ ...clip(), use_unlim: true }), "use_unlim_not_allowed");
+  assert.equal(creativeRequestProblem({ model: "veo3", prompt: "x" }), "model_not_allowed");
+});
+
+test("without the creative cap nothing is priced or created", async () => {
+  const jobDir = tempJob();
+  const { cli, calls } = fakeCli();
+  const result = await makeMedia({ request: clip(), out: join(jobDir, "c.mp4"), jobDir, env: {}, cli, fetchBytes: async () => MP4, day: DAY });
+  assert.equal(result.reason, "no_daily_cap");
+  assert.ok(!calls.includes("generate create"));
+});
+
+test("a clip is priced, recorded before it is created, and written; the image path's ledger is untouched", async () => {
+  const jobDir = tempJob();
+  const { cli, calls } = fakeCli();
+  const out = join(jobDir, "c.mp4");
+  const result = await makeMedia({ request: clip(), out, jobDir, env: capEnv(), cli, fetchBytes: async () => MP4, day: DAY });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ["generate cost", "generate create", "generate wait"]);
+  const entries = readLedger(creativeLedgerPath(jobDir, DAY)).entries;
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].status, "done");
+  assert.equal(entries[0].cost, 7.5);
+  assert.ok(existsSync(out));
+  assert.ok(!existsSync(ledgerPath(jobDir, DAY)));
+});
+
+test("a price above the call's ceiling, or past the day's cap, is refused before anything is created", async () => {
+  const jobDir = tempJob();
+  const dear = fakeCli({ cost: 20 });
+  const refused = await makeMedia({ request: clip(), out: join(jobDir, "a.mp4"), jobDir, env: capEnv(), cli: dear.cli, fetchBytes: async () => MP4, day: DAY });
+  assert.equal(refused.reason, "cost_above_call_ceiling");
+  assert.ok(!dear.calls.includes("generate create"));
+
+  const env = capEnv("10");
+  const first = await makeMedia({ request: clip(), out: join(jobDir, "b.mp4"), jobDir, env, cli: fakeCli().cli, fetchBytes: async () => MP4, day: DAY });
+  assert.equal(first.ok, true);
+  const second = fakeCli();
+  const over = await makeMedia({ request: clip(), out: join(jobDir, "c.mp4"), jobDir, env, cli: second.cli, fetchBytes: async () => MP4, day: DAY });
+  assert.equal(over.reason, "daily_cap_reached");
+  assert.ok(!second.calls.includes("generate create"));
+});
+
+test("a create with no job id blocks the creative ledger for the day", async () => {
+  const jobDir = tempJob();
+  const lost = await makeMedia({ request: music(), out: join(jobDir, "m.mp3"), jobDir, env: capEnv(), cli: fakeCli({ cost: 3.8, created: [] }).cli, fetchBytes: async () => MP3, day: DAY });
+  assert.equal(lost.reason, "create_outcome_unknown");
+  const next = fakeCli({ cost: 0.25 });
+  const blocked = await makeMedia({ request: image(), out: join(jobDir, "i.png"), jobDir, env: capEnv(), cli: next.cli, fetchBytes: async () => null, day: DAY });
+  assert.equal(blocked.reason, "unknown_outcome_pending");
+  assert.ok(!next.calls.includes("generate create"));
+});
+
+test("the image path's admit keeps its own rules by default", () => {
+  const jobDir = tempJob();
+  const refused = admit({ jobDir, day: DAY, env: { MARKETING_HIGGSFIELD_DAILY_CREDIT_CAP: "5" }, request: image(), cost: 0.25 });
+  assert.equal(refused.reason, "aspect_ratio_not_allowed");
+  const creativeCapOnly = admit({ jobDir, day: DAY, env: capEnv(), request: { model: "gpt_image_2_6", aspect_ratio: "4:5", count: 1, prompt: "x" }, cost: 0.25 });
+  assert.equal(creativeCapOnly.reason, "no_daily_cap");
+});
+
+/** A fake fetch for ElevenLabs. */
+function fakeFetch(answer) {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    if (answer === "throw") throw new Error("socket hang up");
+    return { status: answer.status, headers: new Map([["request-id", "req-1"]]), arrayBuffer: async () => answer.body ?? MP3 };
+  };
+  return { fetchImpl, calls };
+}
+
+test("a line is spoken in the locale's fixed voice and counted in characters", async () => {
+  const jobDir = tempJob();
+  const { fetchImpl, calls } = fakeFetch({ status: 200 });
+  const out = join(jobDir, "ko.mp3");
+  const result = await speakLine({ locale: "ko", text: "한 번 묻고, 다른 점을 보세요.", out, jobDir, env: capEnv(), fetchImpl, day: DAY });
+  assert.equal(result.ok, true);
+  assert.ok(calls[0].url.includes(VOICES.ko));
+  assert.equal(JSON.parse(calls[0].init.body).model_id, "eleven_v4");
+  assert.equal(calls[0].init.headers["xi-api-key"], "test-key");
+  const [entry] = readLedger(voiceLedgerPath(jobDir, DAY)).entries;
+  assert.equal(entry.cost, "한 번 묻고, 다른 점을 보세요.".length);
+  assert.equal(entry.status, "done");
+  assert.ok(existsSync(out));
+});
+
+test("no key, no cap, no voice for the locale, or past the character cap: nothing is sent", async () => {
+  const jobDir = tempJob();
+  for (const [args, reason] of [
+    [{ locale: "en", env: { ...capEnv(), ELEVENLABS_API_KEY: "" } }, "no_api_key"],
+    [{ locale: "en", env: { ELEVENLABS_API_KEY: "k" } }, "no_daily_cap"],
+    [{ locale: "ja", env: capEnv() }, "locale_has_no_voice"],
+    [{ locale: "en", env: capEnv("40", "5") }, "daily_cap_reached"],
+  ]) {
+    const { fetchImpl, calls } = fakeFetch({ status: 200 });
+    const result = await speakLine({ text: "Ask once.", out: join(jobDir, "x.mp3"), jobDir, fetchImpl, day: DAY, ...args });
+    assert.equal(result.reason, reason);
+    assert.equal(calls.length, 0);
+  }
+});
+
+test("a line with no answer may have been charged: it blocks every later line that day; a 4xx does not", async () => {
+  const lostDir = tempJob();
+  const lost = await speakLine({ locale: "en", text: "Ask once.", out: join(lostDir, "a.mp3"), jobDir: lostDir, env: capEnv(), fetchImpl: fakeFetch("throw").fetchImpl, day: DAY });
+  assert.equal(lost.reason, "outcome_unknown");
+  const after = fakeFetch({ status: 200 });
+  const blocked = await speakLine({ locale: "en", text: "Again.", out: join(lostDir, "b.mp3"), jobDir: lostDir, env: capEnv(), fetchImpl: after.fetchImpl, day: DAY });
+  assert.equal(blocked.reason, "unknown_outcome_pending");
+  assert.equal(after.calls.length, 0);
+
+  const refusedDir = tempJob();
+  const refused = await speakLine({ locale: "en", text: "Ask once.", out: join(refusedDir, "a.mp3"), jobDir: refusedDir, env: capEnv(), fetchImpl: fakeFetch({ status: 422 }).fetchImpl, day: DAY });
+  assert.equal(refused.reason, "refused_by_elevenlabs");
+  const next = await speakLine({ locale: "en", text: "Ask once.", out: join(refusedDir, "b.mp3"), jobDir: refusedDir, env: capEnv(), fetchImpl: fakeFetch({ status: 200 }).fetchImpl, day: DAY });
+  assert.equal(next.ok, true);
+});
+
+const PACKS = [
+  { topic: "review-compare", locale: "en" },
+  { topic: "review-compare", locale: "ko" },
+  { topic: "review-compare", locale: "zh-Hant" },
+];
+const words = (locale) => ({ lines: ["One.", "Two.", "Three."], screen: ["Hook", AI_LINE[locale]], alt: "What it shows." });
+const plan = (extra = {}) => ({
+  concept: "Night market",
+  logline: "Three stalls shout different prices; Tomverse shows where they differ.",
+  topic: "review-compare",
+  seconds: 24,
+  shots: [{ id: "s1", image: "a night market stall, no text", motion: "slow dolly" }],
+  music: "warm synth, 100 bpm",
+  locales: { en: words("en"), ko: words("ko"), "zh-Hant": words("zh-Hant"), "zh-Hans": words("zh-Hans") },
+  ...extra,
+});
+const answer = (value) => JSON.stringify({ creative: value });
+
+test("a plan is made only for locales with a capture pack, and must show the AI line", () => {
+  const ok = checkPlan(answer(plan()), { packs: PACKS });
+  assert.deepEqual(ok.locales, ["en", "ko", "zh-Hant"]);
+  const noLine = plan();
+  noLine.locales.ko = { ...words("ko"), screen: ["Hook"] };
+  assert.match(checkPlan(answer(noLine), { packs: PACKS }).refusal, /ko: screen must include the AI line/u);
+  assert.match(checkPlan(answer(plan({ topic: "images" })), { packs: PACKS }).refusal, /no capture pack/u);
+  assert.match(checkPlan(answer(plan({ shots: [1, 2, 3, 4].map((n) => ({ id: `s${n}`, image: "x", motion: "y" })) })), { packs: PACKS }).refusal, /at most 3/u);
+  assert.match(checkPlan(answer(plan({ seconds: 60 })), { packs: PACKS }).refusal, /seconds/u);
+  const url = plan();
+  url.locales.en = { ...words("en"), lines: ["Visit www.example.com", "Two.", "Three."] };
+  assert.match(checkPlan(answer(url), { packs: PACKS }).refusal, /web address/u);
+  assert.match(checkPlan("no json here", { packs: PACKS }).refusal, /no \{"creative"/u);
+});
+
+test("a concept or logline used before is refused", () => {
+  const history = [{ concept: "Night  Market!", logline: "something else" }];
+  assert.match(checkPlan(answer(plan()), { packs: PACKS, history }).refusal, /used before/u);
+});
+
+test("the film may import only react, remotion and its own files, and stay a pure function of time", () => {
+  const dir = mkdtempSync(join(tmpdir(), "film-"));
+  const film = join(dir, "film");
+  mkdirSync(film);
+  const write = (source) => writeFileSync(join(film, "Film.tsx"), source);
+  write(`import React from "react";\nimport { AbsoluteFill, random } from "remotion";\nimport { Card } from "./Card";\nexport const Film = () => <AbsoluteFill />;`);
+  assert.deepEqual(checkFilmSource(film), []);
+  for (const [source, pattern] of [
+    [`import fs from "fs";`, /imports fs/u],
+    [`import x from "@remotion/google-fonts/Lobster";`, /imports @remotion/u],
+    [`fetch("/x");`, /fetch/u],
+    [`const u = "https://evil.example/a.png";`, /a URL/u],
+    [`const n = Math.random();`, /randomness/u],
+    [`const m = await import("./x");`, /dynamic import/u],
+    [`process.env.X;`, /Node APIs/u],
+  ]) {
+    write(source);
+    assert.match(checkFilmSource(film).join("\n"), pattern, source);
+  }
+  write(`export const Film = () => null;`);
+  writeFileSync(join(film, "run.sh"), "rm -rf /");
+  assert.match(checkFilmSource(film).join("\n"), /only \.tsx and \.ts/u);
+});
+
+test("a finished file is 1080x1920, 10-60 s, with sound", () => {
+  const good = { streams: [{ codec_type: "video", width: 1080, height: 1920 }, { codec_type: "audio" }], format: { duration: "24.1" } };
+  assert.deepEqual(checkFinal(good), []);
+  assert.deepEqual(checkFinal({ ...good, streams: [good.streams[0]] }), ["no sound"]);
+  assert.deepEqual(checkFinal({ ...good, format: { duration: "75" } }), ["not 10-60 seconds long"]);
+});
+
+test("the asset file is AI-origin with a disclosure on every channel, and zh-Hans goes to RedNote only", () => {
+  for (const locale of ["en", "ko", "zh-Hant", "zh-Hans"]) {
+    const { asset, transcript } = creativeAsset({ id: `media-20261110-creative-${locale.toLowerCase()}-short`, locale, words: words(locale), today: new Date("2026-11-10T00:00:00Z") });
+    assert.equal(marketingAssetSchema.safeParse(asset).success, true, locale);
+    assert.equal(asset.provenance, "ai_modified");
+    assert.equal(asset.depictsProductInterface, false);
+    assert.ok(Object.values(asset.disclosure).every((value) => value !== "none"));
+    assert.deepEqual(asset.allowedChannels, locale === "zh-Hans" ? ["rednote"] : ["instagram", "youtube", "tiktok", "x"]);
+    assert.ok(transcript[locale].includes(AI_LINE[locale]));
+    assert.ok(transcript[locale].includes("tomverse.app"));
+  }
+});
+
+test("the job does nothing while its switch is off, and stops before spending without its caps", () => {
+  const tool = resolve("tools/marketing-video");
+  const runOff = spawnSync(process.execPath, [join(tool, "run-creative-short.mjs")], { encoding: "utf8", env: { PATH: process.env.PATH } });
+  assert.equal(runOff.status, 0);
+  assert.equal(JSON.parse(runOff.stdout.trim().split("\n").at(-1)).halted, "switch_off");
+  const noCap = spawnSync(process.execPath, [join(tool, "run-creative-short.mjs")], { encoding: "utf8", env: { PATH: process.env.PATH, MARKETING_CREATIVE_SHORT: "on" } });
+  assert.equal(noCap.status, 1);
+  assert.equal(JSON.parse(noCap.stdout.trim().split("\n").at(-1)).halted, "no_credit_cap");
+});
