@@ -198,6 +198,18 @@ test("workers are grouped by channel, and the kept workers are omitted by defaul
   assert.equal(byTestId(render({ filter: "retired" }), "amux-worker-row-copilot-chore").length, 1);
 });
 
+test("every class a worker can be registered with has a channel section, so an Antigravity worker is listed", () => {
+  const registrations = [...REGISTRATIONS, reg("antigravity-impl", "requested")];
+  const registry = buildAmuxWorkerRegistryAdminView({ registrations, latches: new Map(), observations: new Map(), writesLatch: true });
+  const capabilities = buildAmuxWorkerCapabilityAdminView({ registrations, current: new Map(), writesLatch: true });
+  const overview = buildAmuxWorkerOverview({ registry, capabilities, live: LIVE, nowMs: NOW })!;
+  for (const filter of ["all", "waiting"] as const) {
+    const tree = render({ overview, filter });
+    assert.equal(byTestId(tree, "amux-workers-channel-antigravity").length, 1, filter);
+    assert.equal(byTestId(tree, "amux-worker-row-antigravity-impl").length, 1, filter);
+  }
+});
+
 test("a worker that cannot take work raises one banner, and its button shows only those workers", () => {
   const calls: Record<string, unknown[]> = {};
   const tree = render({ calls });
