@@ -931,7 +931,8 @@ export const infoPages = {
       },
       {
         "title": "AI limitations and service status",
-        "body": "Answers come from the selected external AI models and can be wrong or incomplete. AI Review compares those answers. External checks and web search are separate actions; see the service-status page for current availability."
+        "body": "Answers come from the selected external AI models and can be wrong or incomplete. AI Review compares those answers. External checks and web search are separate actions; see the service-status page for current availability.",
+        "bodyLinks": [{ "text": "service-status page", "href": "/status?lang=en" }]
       }
     ]
   },
