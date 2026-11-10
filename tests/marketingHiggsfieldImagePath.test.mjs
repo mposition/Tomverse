@@ -382,6 +382,16 @@ const reviewOf = (extra = {}) => ({
 });
 const line = (value) => `Here it is.\n${JSON.stringify(value)}\n`;
 
+test("a review may list up to 10 fixes of up to 500 characters; more is refused", () => {
+  const c = concept("c1");
+  const at = { stage: "guide", concept: c, locale: "en" };
+  const fixes = (count, length) => Array.from({ length: count }, () => "x".repeat(length));
+  // The first box run (2026-11-10) lost two reviews whose fixes ran past 300 characters.
+  assert.equal(checkReview(line(reviewOf({ verdict: "fix", fixes: fixes(10, 500) })), at).review.fixes.length, 10);
+  assert.match(checkReview(line(reviewOf({ verdict: "fix", fixes: fixes(11, 20) })), at).problem, /at most 10 strings of 500/u);
+  assert.match(checkReview(line(reviewOf({ verdict: "fix", fixes: fixes(1, 501) })), at).problem, /at most 10 strings of 500/u);
+});
+
 test("a guide review of the agreed shape is kept; pass, fix and reject are read", () => {
   const c = concept("c1");
   assert.equal(checkReview(line(reviewOf()), { stage: "guide", concept: c, locale: "en" }).review.verdict, "pass");
@@ -473,6 +483,45 @@ async function pixelAt(file, x, y) {
   }
 }
 
+test("set words never break inside a word, so a narrow box shrinks the type instead", { skip }, async () => {
+  const { textBreakCss } = await import("../tools/marketing-video/compose-core.mjs");
+  const { chromium } = await import("playwright");
+  // The first box run (2026-11-10) set "Gemini Flash" as "Gemin / i Flash" and
+  // "일주일" as "일 / 주일". Each case puts a sentence in a box narrower than
+  // one word and counts the lines that word sits on.
+  const cases = [
+    { locale: "ko", text: "일주일 동안 빗속 등산을 가는데 뭘 챙겨야 할까요?", word: "일주일" },
+    { locale: "ko", text: "Gemini Flash", word: "Gemini" },
+    { locale: "zh-Hans", text: "Gemini Flash", word: "Gemini" },
+    { locale: "zh-Hant", text: "下雨天健行一週，該帶什麼？用 Gemini Flash", word: "Gemini" },
+  ];
+  const linesOf = (page, css, { text, word }) =>
+    page.evaluate(
+      ([cssText, textIn, wordIn]) => {
+        document.body.innerHTML = `<div id="b" style="width:70px;font:40px sans-serif;line-height:1.25;${cssText}"></div>`;
+        const box = document.getElementById("b");
+        box.textContent = textIn;
+        const start = textIn.indexOf(wordIn);
+        const range = document.createRange();
+        range.setStart(box.firstChild, start);
+        range.setEnd(box.firstChild, start + wordIn.length);
+        return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+      },
+      [css, text, word],
+    );
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    for (const sample of cases) {
+      assert.equal(await linesOf(page, textBreakCss(sample.locale), sample), 1, `${sample.locale}: "${sample.word}" stays on one line`);
+    }
+    // The old rule broke the word, which is what the box run showed.
+    assert.ok((await linesOf(page, "word-break: keep-all; overflow-wrap: anywhere;", cases[1])) > 1);
+  } finally {
+    await browser.close();
+  }
+});
+
 test("a flat mark is painted over with the real logo where the review put it, and nowhere else", { skip }, async () => {
   const { setLogos } = await import("../tools/marketing-video/compose-core.mjs");
   const dir = mkdtempSync(join(tmpdir(), "hf-logo-"));
@@ -510,10 +559,13 @@ function generatedDay() {
   writeFileSync(join(root, "outside.png"), solidPng(64, 64, [1, 2, 3]));
   return { root, day };
 }
+// make-card runs as the box runs it: on a Node that cannot import a .ts file
+// (the first box run, 2026-11-10), so the Guard's hygiene check must load anyway.
+const WITHOUT_TS = process.features.typescript ? ["--no-experimental-strip-types"] : [];
 const makeCard = (day, spec, layout) => {
   writeFileSync(join(day, "card.layout.html"), layout);
   writeFileSync(join(day, "card.spec.json"), JSON.stringify({ id: `media-${DAY}-chat-en-card`, locale: "en", layout: "card.layout.html", alt: "A commuter on a train picks a model on a phone.", ...spec }));
-  return spawnSync(process.execPath, [join(tool, "make-card.mjs"), join(day, "card.spec.json"), day], { encoding: "utf8", cwd: tool });
+  return spawnSync(process.execPath, [...WITHOUT_TS, join(tool, "make-card.mjs"), join(day, "card.spec.json"), day], { encoding: "utf8", cwd: tool });
 };
 
 test("a generated card gets the band, its words in the transcript, and no address for the Guard", { skip }, async () => {
@@ -573,7 +625,7 @@ test("Chinese words are spaced after a full stop and pass the Guard's hygiene ch
   try {
     writeFileSync(join(day, "card.layout.html"), bandLayout({ picture: "c1-en-final.png", locale: "zh-Hans", dark: true }));
     writeFileSync(join(day, "card.spec.json"), JSON.stringify({ id: `media-${DAY}-chat-zh-hans-card`, locale: "zh-Hans", layout: "card.layout.html", alt: "通勤者在火车上用手机选择模型。下方是 Tomverse 标志与网址。", texts: ["选 GPT 6 Luna。Claude 也行"] }));
-    const run = spawnSync(process.execPath, [join(tool, "make-card.mjs"), join(day, "card.spec.json"), day], { encoding: "utf8", cwd: tool });
+    const run = spawnSync(process.execPath, [...WITHOUT_TS, join(tool, "make-card.mjs"), join(day, "card.spec.json"), day], { encoding: "utf8", cwd: tool });
     assert.equal(run.status, 0, run.stderr);
     const asset = JSON.parse(readFileSync(join(day, `media-${DAY}-chat-zh-hans-card.asset.json`), "utf8"));
     assert.match(asset.transcript["zh-Hans"], /Luna。 Claude/u);

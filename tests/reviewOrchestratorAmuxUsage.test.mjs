@@ -7,6 +7,8 @@ import { createServer as createTlsServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AMUX_STALE_MAX_S,
+  AMUX_STALE_MIN_REMAINING_PERCENT,
   AMUX_USAGE_CACHE_MS,
   AMUX_USAGE_MAX_BYTES,
   AMUX_USAGE_TIMEOUT_MS,
@@ -125,6 +127,47 @@ test("a stale or failed Claude reading holds Claude only, never the other provid
   const codexFailed = usage();
   codexFailed.providers[1] = { id: "codex", available: false, measured: false, cause: "probe_failed", windows: [] };
   assert.deepEqual(amuxQuotaFromUsage(codexFailed, "codex"), { state: "unknown" });
+});
+
+test("a recent stale reading with room to spare still assigns; old, undated or tight ones do not", () => {
+  // 2026-11-09: AMUX's Claude reads kept answering 429 while the account had
+  // 92% of its weekly window left, so every Claude review waited.
+  const now = Date.UTC(2026, 10, 9, 13, 0, 0);
+  const at = (ageS, windows) => {
+    const body = usage();
+    body.providers[0] = {
+      ...body.providers[0], stale: true, observed_at: now / 1000 - ageS,
+      ...(windows ? { windows } : {}),
+    };
+    return body;
+  };
+  const roomy = [
+    { kind: "session", remaining_percent: 64 },
+    { kind: "weekly_all", remaining_percent: 92 },
+  ];
+  assert.equal(AMUX_STALE_MAX_S, 1800);
+  assert.equal(AMUX_STALE_MIN_REMAINING_PERCENT, 20);
+  assert.deepEqual(amuxQuotaFromUsage(at(600, roomy), "claude", now), { state: "available", remainingPercent: 64 });
+  assert.deepEqual(amuxQuotaFromUsage(at(AMUX_STALE_MAX_S, roomy), "claude", now),
+    { state: "available", remainingPercent: 64 });
+  // Older than the bound, or dated in the future: no longer evidence.
+  assert.deepEqual(amuxQuotaFromUsage(at(AMUX_STALE_MAX_S + 1, roomy), "claude", now), { state: "unknown" });
+  assert.deepEqual(amuxQuotaFromUsage(at(-60, roomy), "claude", now), { state: "unknown" });
+  // A window near its end might have run out since: the default fixture's
+  // weekly window has 3% left, and a tight session window counts the same.
+  assert.deepEqual(amuxQuotaFromUsage(at(60), "claude", now), { state: "unknown" });
+  assert.deepEqual(amuxQuotaFromUsage(at(60, [{ remaining_percent: AMUX_STALE_MIN_REMAINING_PERCENT - 0.1 },
+    { remaining_percent: 92 }]), "claude", now), { state: "unknown" });
+  assert.deepEqual(amuxQuotaFromUsage(at(60, [{ remaining_percent: AMUX_STALE_MIN_REMAINING_PERCENT }]), "claude", now),
+    { state: "available", remainingPercent: AMUX_STALE_MIN_REMAINING_PERCENT });
+  // Undated stale readings stay unknown.
+  const undated = at(60, roomy);
+  delete undated.providers[0].observed_at;
+  assert.deepEqual(amuxQuotaFromUsage(undated, "claude", now), { state: "unknown" });
+  undated.providers[0].observed_at = "1794229000";
+  assert.deepEqual(amuxQuotaFromUsage(undated, "claude", now), { state: "unknown" });
+  // A fresh reading needs no date.
+  assert.deepEqual(amuxQuotaFromUsage(usage(), "claude", now), { state: "available", remainingPercent: 3 });
 });
 
 test("only AMUX on this machine is read, and its certificate is verified, never waved through", async () => {

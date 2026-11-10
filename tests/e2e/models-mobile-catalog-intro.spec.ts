@@ -15,7 +15,9 @@ for (const theme of ["light", "dark"] as const) {
     await expect(details).not.toHaveAttribute("open");
     const firstCard = page.getByRole("article").first();
     await expect(firstCard).toBeVisible();
-    expect(await firstCard.evaluate((node) => node.getBoundingClientRect().top + scrollY)).toBeLessThan(800);
+    // The analytics notice above the page is shown once and its copy is explicit by design (#3571, #3592); measure the catalogue's own intro.
+    const consentHeight = await page.getByTestId("marketing-consent-slot").evaluate(node => node.getBoundingClientRect().height);
+    expect(await firstCard.evaluate((node) => node.getBoundingClientRect().top + scrollY) - consentHeight).toBeLessThan(800);
     const filters = page.locator("#models-catalog-filters");
     await expect(filters).toBeHidden();
     await page.getByTestId("models-mobile-filters-toggle").click();

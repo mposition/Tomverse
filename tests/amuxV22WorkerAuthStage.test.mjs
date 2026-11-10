@@ -8,6 +8,8 @@ import {
   AMUX_V22_CLAUDE_AUTH_MIN_REMAINING_MS, AMUX_V22_CLAUDE_REFRESH_PLACEHOLDER,
   inspectAmuxV22ClaudeAuth, inspectAmuxV22WorkerAuth, stageAmuxV22WorkerAuth,
 } from "../lib/amux/v22WorkerAuthStage.mjs";
+import { AMUX_V19_CURSOR_REFRESH_PLACEHOLDER, inspectAmuxV19ChannelAuth } from
+  "../lib/amux/ideaV19CliChannelHost.mjs";
 
 const NOW = Date.UTC(2026, 10, 6, 8, 0, 0);
 const ACCESS = "sk-ant-oat01-" + "a".repeat(40);
@@ -43,9 +45,55 @@ test("an expired, short-lived or malformed Claude login is refused", () => {
     login({ expiresAt: NOW + AMUX_V22_CLAUDE_AUTH_MIN_REMAINING_MS }), NOW));
 });
 
-test("only the three worker providers are staged", () => {
-  assert.throws(() => inspectAmuxV22WorkerAuth("cursor", login(), NOW), /worker sign-in/);
+test("only the four worker providers are staged", () => {
   assert.throws(() => inspectAmuxV22WorkerAuth("__proto__", login(), NOW), /worker sign-in/);
+  assert.throws(() => inspectAmuxV22WorkerAuth("api-key", login(), NOW), /worker sign-in/);
+});
+
+const jwt = (exp) => ["e30", Buffer.from(JSON.stringify({ exp })).toString("base64url"),
+  "c2ln"].join(".");
+const CURSOR_EXP = Math.floor(NOW / 1000) + 12 * 24 * 60 * 60;
+const CURSOR_REFRESH = "cursor-refresh-" + "r".repeat(40);
+const cursorLogin = (exp = CURSOR_EXP) =>
+  Buffer.from(JSON.stringify({ accessToken: jwt(exp), refreshToken: CURSOR_REFRESH }), "utf8");
+
+test("the Cursor copy keeps the access token and its expiry but never the refresh secret", () => {
+  const { copy, expiresAt } = inspectAmuxV22WorkerAuth("cursor", cursorLogin(), NOW);
+  const text = copy.toString("utf8");
+  assert.equal(expiresAt, CURSOR_EXP * 1000);
+  assert.equal(JSON.parse(text).accessToken, jwt(CURSOR_EXP));
+  assert.equal(JSON.parse(text).refreshToken, AMUX_V19_CURSOR_REFRESH_PLACEHOLDER);
+  assert.equal(text.includes(CURSOR_REFRESH), false);
+  // Within six hours of expiry the v19 rule refuses it, as the run would.
+  assert.throws(() => inspectAmuxV22WorkerAuth("cursor",
+    cursorLogin(Math.floor(NOW / 1000) + 60 * 60), NOW));
+});
+
+test("the Cursor copy lands where the sidecar run and quota read it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "amux-v22-auth-"));
+  const home = join(root, "home");
+  const stateRoot = join(root, "state");
+  const cli = join(stateRoot, "tomverse-amux-v22-cursor-impl", "cli");
+  await mkdir(join(home, ".config", "cursor"), { recursive: true });
+  await mkdir(cli, { recursive: true });
+  await writeFile(join(home, ".config", "cursor", "auth.json"), cursorLogin());
+  const staged = await stageAmuxV22WorkerAuth({ provider: "cursor", worker: "cursor-impl",
+    home, stateRoot, now: NOW });
+  assert.equal(staged.expiresAt, CURSOR_EXP * 1000);
+  assert.deepEqual(await readdir(cli), ["cursor"]);
+  assert.deepEqual(await readdir(join(cli, "cursor")), ["auth.json"]);
+  const bytes = await readFile(join(cli, "cursor", "auth.json"));
+  assert.equal(bytes.toString("utf8").includes(CURSOR_REFRESH), false);
+  // createAmuxV22ChannelRunHome and the quota probe both re-inspect it.
+  assert.doesNotThrow(() => inspectAmuxV19ChannelAuth("cursor", bytes, NOW));
+  if (process.platform !== "win32") {
+    assert.equal((await stat(join(cli, "cursor"))).mode & 0o777, 0o700);
+    assert.equal((await stat(join(cli, "cursor", "auth.json"))).mode & 0o777, 0o600);
+  }
+  // A second run replaces the copy in the existing directory.
+  await stageAmuxV22WorkerAuth({ provider: "cursor", worker: "cursor-impl",
+    home, stateRoot, now: NOW });
+  assert.deepEqual(await readdir(join(cli, "cursor")), ["auth.json"]);
 });
 
 async function box() {

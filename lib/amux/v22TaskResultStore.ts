@@ -4,7 +4,7 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { sealAmuxContent, type AmuxContentKeys } from
   "@/lib/amux/ideaCrypto";
@@ -68,6 +68,8 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
   const attempt = locked[0];
   if (!attempt || attempt.worker !== input.worker || attempt.endedAt ||
       !attempt.v22AssignmentId) throw new AmuxV22TaskResultError("binding_mismatch");
+  // The attempt row, then the audit chain, then the Task (lib/adminAudit.ts).
+  await takeAuditChainLock(tx);
   const taskRows = await tx.$queryRaw<Array<{ id: string; sourceSystem: string | null;
     sourceSnapshot: Prisma.JsonValue | null; status: string; owner: string | null;
     v22AssignmentId: string | null }>>`

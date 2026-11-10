@@ -98,6 +98,9 @@ test("retry requeue checks the current cost cap in resource-before-task lock ord
   const costCheck = resolve.indexOf("evaluateLockedAmuxCostAdmission(");
   const taskCas = resolve.indexOf("tx.amuxWorkItem.updateMany(");
   assert.ok(resourceLock >= 0 && resourceLock < taskLock && taskLock < costCheck && costCheck < taskCas);
+  // The audit chain lock comes after the resource locks and before the Task
+  // row (lib/adminAudit.ts takeAuditChainLock).
+  assert.match(service, /async function lockTaskAndEscalation\(tx: Client, escalationId: string\) \{\s+await takeAuditChainLock\(tx\);/);
   assert.match(resolve, /state\.task\.projectKey !== retryPlanning\.task\.projectKey/);
   assert.match(resolve, /state\.task\.estimatedCostMicrousd !== retryPlanning\.task\.estimatedCostMicrousd/);
   assert.match(resolve, /AMUX_REVIEW_COST_GUARD_BLOCKED/);

@@ -285,8 +285,8 @@ const guideCopy: Record<Language, GuideCopy> = {
       },
       {
         "task": "Rewriting a message",
-        "gpt": "Whether kindness preserves the original intent and refusal",
-        "claude": "Whether kindness preserves the original intent and refusal",
+        "gpt": "Whether the rewrite stays polite while preserving the original intent and any refusal",
+        "claude": "Whether the rewrite stays polite while preserving the original intent and any refusal",
         "decision": "Check the intent against the original draft"
       },
       {
@@ -1337,8 +1337,20 @@ export function ChatGptVsClaudeGuide() {
 
       <section id="task-comparison" className="scroll-mt-24">
         <SectionHeading icon={Scale} title={copy.resultsTitle} body={copy.resultsBody} />
-        <div className="mt-7 overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
-          <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+        <div data-testid="comparison-task-cards" className="mt-7 grid grid-cols-1 gap-4 lg:hidden">
+          {copy.tasks.map(row => (
+            <article key={row.task} className="min-w-0 break-words rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <h3 className="text-lg font-bold">{row.task}</h3>
+              <dl className="mt-4 space-y-4 text-sm leading-7">
+                {[[copy.gptHeader, row.gpt], [copy.claudeHeader, row.claude], [copy.decisionHeader, row.decision]].map(([label, value]) => (
+                  <div key={label}><dt className="font-bold text-zinc-900 dark:text-zinc-100">{label}</dt><dd className="mt-1 text-zinc-600 dark:text-zinc-300">{value}</dd></div>
+                ))}
+              </dl>
+            </article>
+          ))}
+        </div>
+        <div className="mt-7 hidden overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 lg:block">
+          <table data-testid="comparison-task-table" className="w-full min-w-[900px] border-collapse text-left text-sm">
             <thead className="bg-zinc-950 text-white">
               <tr>
                 {[copy.taskHeader, copy.gptHeader, copy.claudeHeader, copy.decisionHeader].map((header) => (
