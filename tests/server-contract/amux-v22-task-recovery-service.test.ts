@@ -67,6 +67,7 @@ const world = { task: {} as Row, attempt: {} as Row, runtime: {} as Row,
   risks: [] as Row[], launchChecks: [] as Row[], launchProofs: [] as Row[],
   apiModelAccessEvidence: [] as Row[],
   preApprovals: [] as Row[], preApprovalResults: [] as Row[], escalations: [] as Row[],
+  usageAcceptances: [] as Row[],
   ready: true, incident: false, cap: "3400000", costAdmission: true, cas: true,
   otherWork: false,
   // null keeps the fixed test receipt. A Date makes the receipt digest depend on
@@ -106,6 +107,7 @@ function reset() {
   world.risks = []; world.launchChecks = []; world.launchProofs = [];
   world.apiModelAccessEvidence = [];
   world.preApprovals = []; world.preApprovalResults = []; world.escalations = [];
+  world.usageAcceptances = [];
   world.ready = true; world.incident = false; world.cap = "3400000"; world.costAdmission = true;
   world.cas = true; world.otherWork = false; world.changedOld = 0;
   world.ledgerWrites = 0; world.attemptWrites = 0;
@@ -138,15 +140,40 @@ function preApprovalMatches(row: Row, where: Row): boolean {
     return row[key] === value;
   });
 }
+// Every recovery transaction that writes an audit entry takes the audit chain
+// lock after any resource policy and worker runtime lock and before the Task
+// row, and locks no new runtime or attempt row after it (lib/adminAudit.ts
+// takeAuditChainLock); withAutoTransaction below checks it.
+let lockLog: string[] = [];
+function assertAuditBeforeTask(log: string[]) {
+  if (!log.includes("write")) return;
+  const audit = log.indexOf("audit");
+  const task = log.indexOf("task");
+  if (task >= 0) {
+    assert.ok(audit >= 0 && audit < task && log.slice(audit, task).every((step) => step === "audit"),
+      `audit chain lock, then the Task row: ${log.join(" > ")}`);
+  }
+  if (audit < 0) return;
+  const before = new Set(log.slice(0, audit));
+  for (const step of log.slice(audit)) {
+    assert.ok(!(step.startsWith("runtime:") || step.startsWith("attempt:")) || before.has(step),
+      `${step} is first locked after the audit chain: ${log.join(" > ")}`);
+  }
+}
 const tx = {
   $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join("");
+    if (sql.includes('FROM "AmuxWorkItem"') && sql.includes("FOR UPDATE")) lockLog.push("task");
+    if (sql.includes('FROM "AmuxWorkerRuntime"') && /FOR (SHARE|UPDATE)/.test(sql)) {
+      for (const name of [values[0]].flat()) lockLog.push(`runtime:${String(name)}`);
+    }
     if (sql.includes("AS present")) return [{ present: world.otherWork }];
     if (sql.includes('FROM "AmuxWorkerRuntime"')) {
       const workerNames = Array.isArray(values[0]) ? values[0] : [values[0]];
       return [world.runtime, world.retryRuntime].filter((row) =>
         workerNames.includes(row.workerName));
     }
+    if (sql.includes('FROM "AmuxExecutionAttempt"') && /FOR (NO KEY UPDATE|UPDATE|SHARE)/.test(sql)) lockLog.push(`attempt:${String(values[0])}`);
     if (sql.includes('FROM "AmuxExecutionAttempt"')) return [{ id: attemptId }];
     if (sql.includes("unnest(request")) return Array.isArray(values[0]) &&
       values[0].includes("claude-test") ? [{ workerName: "claude-test" }] : [];
@@ -164,6 +191,8 @@ const tx = {
     _sum: { reservedCostMicrousd: BigInt(3_400_000) } }), update: async () => { world.changedOld++; },
     create: async () => { world.attemptWrites++; } },
   amuxCostLedgerEntry: { create: async () => { world.ledgerWrites++; }, createMany: async () => { world.ledgerWrites++; } },
+  amuxV22AttemptUsageAcceptance: { createMany: async ({ data }: { data: Row[] }) => {
+    world.usageAcceptances.push(...data); return { count: data.length }; } },
   adminAuditLog: { findUnique: async ({ where }: { where: Row }) => world.audits.find((row) => matches(row, where)) ?? null },
   amuxV22TaskRecoveryInspectionRequest: {
     findUnique: async ({ where, include }: { where: Row; include?: Row }) => {
@@ -296,10 +325,13 @@ function load() {
   mock.module(mod("lib/adminAuth.ts"), { namedExports: { isAdminSession: () => true, getAdminRole: () => "owner" } });
   mock.module(mod("lib/adminReauthentication.ts"), { namedExports: { assertRecentAdminAuthentication: async () => {} } });
   mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+    takeAuditChainLock: async () => { lockLog.push("audit"); },
     writeAdminAuditLog: async (input: Row) => {
+      lockLog.push("write");
       const id = `audit-${world.audits.length}`;
       world.audits.push({ ...input, id, actorUserId: "owner-1", entryHash: "d".repeat(64) }); return id;
     }, writeSystemAuditLog: async (input: Row) => {
+      lockLog.push("write");
       const id = `audit-${world.audits.length}`;
       world.audits.push({ ...input, id, actorUserId: null, actorEmail: null, ipAddress: null, userAgent: null,
         metadata: { ...(input.metadata as Row), systemActor: input.systemActor }, entryHash: "d".repeat(64) }); return id;
@@ -314,15 +346,18 @@ function load() {
         risks: [...world.risks], launchChecks: [...world.launchChecks], launchProofs: [...world.launchProofs],
         apiModelAccessEvidence: [...world.apiModelAccessEvidence],
         preApprovals: [...world.preApprovals], preApprovalResults: [...world.preApprovalResults],
+        usageAcceptances: [...world.usageAcceptances],
         escalations: structuredClone(world.escalations) };
-      try { return await callback(tx, now); }
-      catch (error) { world.task = saved.task; world.inspections = saved.inspections;
+      lockLog = [];
+      try { const result = await callback(tx, now); assertAuditBeforeTask(lockLog); return result; }
+      catch (error) { assertAuditBeforeTask(lockLog); world.task = saved.task; world.inspections = saved.inspections;
         world.approvals = saved.approvals;
         world.evidence = saved.evidence; world.audits = saved.audits;
         world.risks = saved.risks; world.launchChecks = saved.launchChecks;
         world.launchProofs = saved.launchProofs;
         world.apiModelAccessEvidence = saved.apiModelAccessEvidence;
         world.preApprovals = saved.preApprovals; world.preApprovalResults = saved.preApprovalResults;
+        world.usageAcceptances = saved.usageAcceptances;
         world.escalations = saved.escalations;
         throw error; }
     },
@@ -353,7 +388,8 @@ function load() {
     },
   } });
   mock.module(mod("lib/amux/resourcePolicy.ts"), { namedExports: {
-    lockAmuxResourcePolicies: async () => [], evaluateLockedAmuxCostAdmission: async () => ({
+    lockAmuxResourcePolicies: async () => { lockLog.push("resource"); return []; },
+    evaluateLockedAmuxCostAdmission: async () => ({
       allowed: world.costAdmission, reason: "cost_budget_exhausted" }),
   } });
   mock.module(mod("lib/amux/workerRuntime.ts"), { namedExports: { AMUX_WORKER_RUNTIME_LEASE_MS: 90_000 } });
@@ -540,6 +576,15 @@ test("inspection and approval use real stored IDs, preserve old unknown spend, a
   assert.equal(world.approvals.length, 1); assert.equal(world.audits.length, 3);
   assert.deepEqual(await service.approveAmuxV22TaskRecovery(input), read);
   assert.equal(world.approvals.length, 1); assert.equal(world.audits.length, 3);
+  // Owner decision 2026-11-10: the approval accepts the Task's earlier
+  // unknown-usage attempt, named in its own audit, and changes no cost.
+  const approved = world.audits.find((row) => row.action === "amux.v22.recovery.approved")!;
+  assert.deepEqual((approved.metadata as Row).acceptedUnknownUsageAttemptIds, [attemptId]);
+  assert.equal(world.usageAcceptances.length, 1);
+  assert.equal(world.usageAcceptances[0]!.attemptId, attemptId);
+  assert.equal(world.usageAcceptances[0]!.source, "recovery_approval");
+  assert.equal(world.usageAcceptances[0]!.acceptedByUserId, "owner-1");
+  assert.equal(world.usageAcceptances[0]!.authorizationAuditLogId, approved.id);
 });
 test("inspection replay is exact and a reused ID cannot name another revision", async () => {
   reset(); const service = await load(); await requestInspection(); await requestInspection();
@@ -1418,6 +1463,11 @@ test("one click: verified evidence after the consent opens exactly one capped at
   const applied = world.audits.find((row) => row.action === "amux.v22.recovery.preapproval_applied")!;
   assert.equal((applied.metadata as Row).systemActor, "amux-v22-recovery-preapproval");
   assert.equal((applied.metadata as Row).preApprovalId, pre.id);
+  // The applied consent accepts the earlier unknown-usage attempt for its owner.
+  assert.deepEqual((applied.metadata as Row).acceptedUnknownUsageAttemptIds, [attemptId]);
+  assert.deepEqual(world.usageAcceptances.map((row) => [row.attemptId, row.source,
+    row.acceptedByUserId, row.authorizationAuditLogId]),
+  [[attemptId, "recovery_approval", "owner-1", applied.id]]);
   const authority = await service.readAmuxV22RecoveryAuthority(tx as never, "task-1234", 9);
   assert.equal(authority?.id, read.approvalId);
   assert.deepEqual(world.attempt, old);
