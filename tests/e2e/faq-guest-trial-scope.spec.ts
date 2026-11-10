@@ -5,6 +5,17 @@ test("Korean FAQ links to current guest limits without rewriting Chat to Review"
   await page.setViewportSize({ width: info.project.name.includes("mobile") ? 320 : 1440, height: 900 });
   await prepareGuestPage(page, "ko");
   await page.goto("/faq?lang=ko");
+  // Phones collapse FAQ answers behind toggles (#3602, #3608); open them all.
+  await expect(page.getByRole("article").first()).toBeVisible({ timeout: 30_000 });
+  for (const article of await page.getByRole("article").all()) {
+    const toggle = article.getByRole("button");
+    if (!(await toggle.isVisible())) continue;
+    // A click before hydration is lost, so retry until the answer opens.
+    await expect(async () => {
+      if (await toggle.getAttribute("aria-expanded") === "false") await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "true", { timeout: 1_000 });
+    }).toPass({ timeout: 30_000 });
+  }
   const existingEntry = page.getByTestId("marketing-header-app-cta");
   await expect(existingEntry).toHaveAttribute("data-session-state", "unauthenticated");
   const guestChatAvailable = new URL((await existingEntry.getAttribute("href"))!, page.url()).pathname === "/chat";

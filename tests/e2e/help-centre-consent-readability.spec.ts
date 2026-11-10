@@ -18,7 +18,10 @@ for (const path of ["/support/help-centre?lang=en", "/en/support/help-centre"]) 
     const accept = notice.getByRole("button", { name: "Allow analytics", exact: true });
     const decline = notice.getByRole("button", { name: "Decline", exact: true });
     expect(await body.evaluate(node => parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(14);
-    await expect(body).toContainText("Usage analytics excludes prompts and file content. Privacy policy");
+    // The Help Centre shows the full consent body (#3581,
+    // help-centre-analytics-scope), not the compact phone summary.
+    await expect(body).toContainText("Prompts, responses, filenames, and file contents are never included", { useInnerText: true });
+    await expect(body).toContainText("Privacy policy");
     expect((await accept.boundingBox())!.y).toBeGreaterThan((await body.boundingBox())!.y + (await body.boundingBox())!.height);
     expect(await privacy.evaluate(node => { const range = document.createRange(); range.selectNodeContents(node); return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size; })).toBe(1);
     await expectAccessibleContrast(body, "Consent body");
