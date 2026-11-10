@@ -214,7 +214,7 @@ async function prepareChatImageRequest(input: ChatImageRequestInput): Promise<Pr
     const timeoutMs = previous
         ? CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS
         : CHAT_IMAGE_INTENT_TIMEOUT_MS;
-    return { model, modelId: model.id, prices, candidates, previousImagePrompt: previous, attachedPhoto, prompt, maxOutputTokens, timeoutMs };
+    return { model, modelId: model.id, prices, candidates, previousImagePrompt: previous, attachedPhoto, prompt, message: chatImageIntentPrompt(input.text), maxOutputTokens, timeoutMs };
 }
 
 export async function detectChatImageRequest(input: ChatImageRequestInput): Promise<ChatImageDecision> {
