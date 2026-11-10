@@ -115,11 +115,13 @@ type AuditChainEntry = {
  * nothing; what it buys is that every writer takes this lock before any row
  * lock, which is the only ordering there is.
  *
- * AMUX has three locks that come before this one, because execution admission
- * and settlement take them first and write their system audit last: the
- * admission lock (`lockAmuxAdmissionAndReadIncident`), a Task's resource
- * policy locks (`lockAmuxResourcePolicies`) and worker runtime rows. An AMUX
- * writer takes those it needs, then this lock, then the Task and other rows.
+ * AMUX has four locks that come before this one: the admission lock
+ * (`lockAmuxAdmissionAndReadIncident`), a Task's resource policy locks
+ * (`lockAmuxResourcePolicies`), worker runtime rows and execution attempt
+ * rows. Every AMUX writer, owner or system, takes those it needs, then this
+ * lock, then the Task (`AmuxWorkItem`), its escalations, deliveries and other
+ * rows. Execution start, settlement, heartbeat, delivery and the v22 claim
+ * take this lock inside their Task lock helper.
  */
 export async function takeAuditChainLock(
   client: Prisma.TransactionClient,

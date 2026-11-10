@@ -7,6 +7,8 @@ import type { Session } from "next-auth";
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { createAmuxReviewProposal, getAmuxReviewDetail, resolveAmuxReview } from "@/lib/amux/reviewApproval";
 import { acceptAmuxV22AttemptUnknownUsage } from "@/lib/amux/v22AttemptUsageAcceptance";
+import { settleAmuxExecution, startAmuxExecution } from "@/lib/amux/execution";
+import { heartbeatAmuxWorkerRuntime, registerAmuxWorkerRuntime } from "@/lib/amux/workerRuntime";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL, committed fixtures, two writers on one Task at once.
@@ -16,7 +18,9 @@ import { prisma } from "@/lib/prisma";
 // resolution used to lock the Task row and take the audit lock only when it
 // appended its entry, so the two could each hold what the other waited for and
 // PostgreSQL aborted one with 40P01. Every admin writer now takes the audit
-// lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+// lock before the Task row (lib/adminAudit.ts takeAuditChainLock), and so does
+// every system writer: execution settlement locks its resource, runtime and
+// attempt rows, then the audit chain, then the Task.
 
 // The admin role is read from the environment at each call.
 const ownerUserId = `amux-lock-order-owner-${randomUUID()}`;
@@ -51,8 +55,12 @@ const requireDedicatedDatabase = () => {
 requireDedicatedDatabase();
 
 const fixtureTaskIds: string[] = [];
+const fixtureWorkers: string[] = [];
 
 after(async () => {
+  if (fixtureWorkers.length > 0) {
+    await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: { in: fixtureWorkers } } });
+  }
   if (fixtureTaskIds.length > 0) {
     await prisma.amuxWorkItem.updateMany({
       where: { id: { in: fixtureTaskIds } },
@@ -169,4 +177,66 @@ test("an acceptance and a review resolution on one Task both finish without a de
     where: { proposalId: proposal.id },
   });
   assert.equal(decision.outcome, "block");
+});
+
+/** Holds the audit chain in a third transaction until released. */
+const holdAuditChain = async () => {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  let holding!: () => void;
+  const held = new Promise<void>((resolve) => { holding = resolve; });
+  const blocker = prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    holding();
+    await released;
+  }, { timeout: 30_000 });
+  await held;
+  return async () => { release(); await blocker; };
+};
+
+test("an execution settlement and an acceptance on one running Task both finish without a deadlock", async () => {
+  const taskId = `amux-lock-order-run-${randomUUID()}`;
+  const worker = `amux-lock-order-worker-${randomUUID()}`;
+  const instanceId = randomUUID();
+  const base = new Date();
+  await prisma.amuxWorkItem.create({ data: {
+    id: taskId, title: "AMUX audit lock order execution fixture", status: "todo",
+    kind: "code", priority: "p1", pinned: false, drag: 0,
+    owner: worker, claimedAt: base, revision: 1,
+  } });
+  fixtureTaskIds.push(taskId);
+  fixtureWorkers.push(worker);
+  const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+  await heartbeatAmuxWorkerRuntime({ workerName: worker, instanceId,
+    generation: runtime.generation, status: "idle", dispatchReady: true,
+    now: new Date(base.getTime() + 100) });
+  const started = await startAmuxExecution({ taskId, worker, instanceId,
+    generation: runtime.generation, expectedRevision: 1, now: new Date(base.getTime() + 200) });
+  if (!started.started) assert.fail(`execution did not start: ${started.reason}`);
+
+  // The acceptance queues on the chain first, the settlement second. Before
+  // the settlement took the audit chain ahead of its Task row, it held the
+  // Task while it waited, and the acceptance then waited for that Task.
+  const releaseChain = await holdAuditChain();
+  const request = new Request("http://localhost/api/admin/amux/usage", { method: "POST" });
+  const acceptance = settle(acceptAmuxV22AttemptUnknownUsage({
+    session, request, taskId, attemptId: started.attemptId,
+  }));
+  await untilWaiting(1);
+  const settlement = settle(settleAmuxExecution({
+    attemptId: started.attemptId, worker, instanceId, generation: runtime.generation,
+    taskRevision: started.taskRevision, outcome: "succeeded", toStatus: "done",
+    actualCostMicrousd: BigInt(0), now: new Date(base.getTime() + 300),
+  }));
+  await untilWaiting(2);
+  await releaseChain();
+
+  const [accepted, settled] = await Promise.all([acceptance, settlement]);
+  assert.equal(accepted.ok, false);
+  assert.equal((accepted as { error: { code?: string } }).error.code, "task_unavailable",
+    String((accepted as { error: unknown }).error));
+  assert.ok(settled.ok, settled.ok ? "" : String(settled.error));
+  assert.equal(settled.value.settled, true);
+  const task = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+  assert.equal(task.status, "done");
 });

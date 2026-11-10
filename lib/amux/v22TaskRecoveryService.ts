@@ -741,10 +741,10 @@ export async function requestAmuxV22LegacySafeStop(input: {
       profileConfigDigest: configured.profileConfigDigest,
       workerInstanceId: liveRuntime.instanceId,
       workerGeneration: liveRuntime.generation };
+    const priorLocked = await lockPriorAttempt(tx, input.priorAttemptId);
     await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
-    if (!await lockPriorAttempt(tx, input.priorAttemptId))
-      throw new BoardImportError("safe_stop_source_mismatch", 409);
+    if (!priorLocked) throw new BoardImportError("safe_stop_source_mismatch", 409);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
     if (task.taskRole !== "investigate")
       throw new BoardImportError("safe_stop_legacy_not_read_only", 409);
@@ -1243,10 +1243,11 @@ export function reportAmuxV22LegacySafeStopEvidence(input: AmuxV22SafeStopEviden
       configured.workerNames.length === profile.workerNames.length &&
       configured.workerNames.every((name, index) => name === profile.workerNames[index]);
     const runtimeMatches = await lockSafeStopProfileRuntime(tx, profile);
-    // Audit chain after the runtime rows and before the Task (lib/adminAudit.ts).
+    const priorLocked = await lockPriorAttempt(tx, inspection.priorAttemptId);
+    // Audit chain after the runtime and attempt rows and before the Task
+    // (lib/adminAudit.ts).
     await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, inspection.taskId);
-    const priorLocked = await lockPriorAttempt(tx, inspection.priorAttemptId);
     let reason: string | null = amuxV22SafeStopProofReason(input);
     try { requireBlockedIdentity(task, inspection.taskRevision, inspection.priorAttemptId); }
     catch { reason = "safe_stop_identity_changed"; }

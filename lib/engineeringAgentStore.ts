@@ -140,9 +140,9 @@ export async function runEngineeringAgentTransaction<T>(
     timeout?: number;
     isolationLevel?: Prisma.TransactionIsolationLevel;
     /**
-     * AMUX row locks the work needs, taken first: every AMUX row lock comes
-     * before the audit chain (§11). Only lockEngineeringAgentMismatchAmuxRows
-     * is passed here.
+     * AMUX row locks the work needs, taken first, in AMUX's order: the attempt
+     * before the audit chain, the card and delivery after it (§11). Only
+     * lockEngineeringAgentMismatchAmuxRows is passed here.
      */
     beforeAuditLock?: (tx: Prisma.TransactionClient) => Promise<void>;
   },
@@ -1471,9 +1471,11 @@ export type EngineeringAgentObservedMerge = {
 };
 
 /**
- * The AMUX rows a mismatch concerns -- its run's attempt, its card, then its
- * delivery, in AMUX's own order -- locked before the audit chain (§11). Passed to
- * runEngineeringAgentTransaction as `beforeAuditLock`; it writes nothing.
+ * The AMUX rows a mismatch concerns, in AMUX's own order (§11): its run's
+ * attempt, then the audit chain, then its card and its delivery
+ * (lib/adminAudit.ts takeAuditChainLock). Passed to
+ * runEngineeringAgentTransaction as `beforeAuditLock`; it writes nothing, and
+ * the transaction's own audit lock after it is re-entrant.
  */
 export async function lockEngineeringAgentMismatchAmuxRows(
   tx: Prisma.TransactionClient,
@@ -1489,6 +1491,7 @@ export async function lockEngineeringAgentMismatchAmuxRows(
   const run = await tx.engineeringAgentRun.findUnique({ where: { id: runId }, select: { amuxAttemptId: true, cardId: true } });
   if (!run) return;
   await tx.$queryRaw`SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR UPDATE`;
+  await takeAuditChainLock(tx);
   await tx.$queryRaw`SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${run.cardId} FOR UPDATE`;
   await tx.$queryRaw`SELECT "attemptId" FROM "AmuxWorkDelivery" WHERE "attemptId" = ${run.amuxAttemptId} FOR UPDATE`;
 }

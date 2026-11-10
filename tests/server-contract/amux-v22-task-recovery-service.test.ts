@@ -142,7 +142,7 @@ function preApprovalMatches(row: Row, where: Row): boolean {
 }
 // Every recovery transaction that writes an audit entry takes the audit chain
 // lock after any resource policy and worker runtime lock and before the Task
-// row, and locks no new runtime row after it (lib/adminAudit.ts
+// row, and locks no new runtime or attempt row after it (lib/adminAudit.ts
 // takeAuditChainLock); withAutoTransaction below checks it.
 let lockLog: string[] = [];
 function assertAuditBeforeTask(log: string[]) {
@@ -156,7 +156,7 @@ function assertAuditBeforeTask(log: string[]) {
   if (audit < 0) return;
   const before = new Set(log.slice(0, audit));
   for (const step of log.slice(audit)) {
-    assert.ok(!step.startsWith("runtime:") || before.has(step),
+    assert.ok(!(step.startsWith("runtime:") || step.startsWith("attempt:")) || before.has(step),
       `${step} is first locked after the audit chain: ${log.join(" > ")}`);
   }
 }
@@ -173,6 +173,7 @@ const tx = {
       return [world.runtime, world.retryRuntime].filter((row) =>
         workerNames.includes(row.workerName));
     }
+    if (sql.includes('FROM "AmuxExecutionAttempt"') && sql.includes("FOR UPDATE")) lockLog.push(`attempt:${String(values[0])}`);
     if (sql.includes('FROM "AmuxExecutionAttempt"')) return [{ id: attemptId }];
     if (sql.includes("unnest(request")) return Array.isArray(values[0]) &&
       values[0].includes("claude-test") ? [{ workerName: "claude-test" }] : [];

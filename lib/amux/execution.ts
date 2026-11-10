@@ -7,7 +7,7 @@ import { amuxV22ResultReviewDmEnabled, amuxV22ResultReviewKind } from
   "@/lib/amux/v22ResultReviewCore";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
@@ -252,6 +252,9 @@ const lockTask = async (
   tx: Prisma.TransactionClient,
   taskId: string,
 ): Promise<TaskLockRow | null> => {
+  // Every caller locks its runtime, attempt and resource rows first; the audit
+  // chain comes after them and before the Task (lib/adminAudit.ts).
+  await takeAuditChainLock(tx);
   const rows = await tx.$queryRaw<TaskLockRow[]>`
     SELECT
       "id",
