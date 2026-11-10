@@ -74,6 +74,8 @@ export type AmuxReviewDetail = {
     /** The server holds this attempt's own final v22 result. */
     result_stored?: boolean;
   } | null;
+  /** Ended runs whose CLI usage is unknown and not accepted; each holds its worker. */
+  unknown_usage_attempts?: Array<{ id: string; worker: string; started_at: string }>;
   review_content: { text: string; digest: string;
     truncated: boolean; display_mismatch?: boolean } | null;
   review_context: {

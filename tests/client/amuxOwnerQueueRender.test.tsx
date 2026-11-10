@@ -485,3 +485,31 @@ test("the legacy panel reads the execution board's card detail and keeps only a 
   assert.equal(await readAmuxLegacyCardForTask("task-1",
     (async () => { throw new Error("offline"); }) as unknown as typeof fetch), null);
 });
+
+// Owner decision 2026-11-10: a run whose CLI usage was never fully reported
+// holds its worker; the queue says so and the owner may accept it as unknown,
+// with the cost explicitly not treated as zero.
+test("a run with unknown usage shows that it holds its worker, and only the owner gets the acceptance", () => {
+  const card = items[3];
+  const escalationId = card.escalationId!;
+  const ctl = controller({ selectedEscalationId: escalationId, review: reviewFor(escalationId, {
+    task: { id: "task-4", title: "Measure", status: "blocked", revision: 8, due_parse_state: "valid" },
+    last_attempt: { id: "attempt-4", task_revision: 7, outcome: "blocked", to_status: "blocked",
+      ended_at: "2026-11-09T08:18:00.000Z" },
+    unknown_usage_attempts: [{ id: "attempt-4", worker: "codex-chore", started_at: "2026-11-09T08:18:00.000Z" }],
+    allowed_outcomes: ["block"], proposed_transitions: { block: "blocked" },
+  }) });
+  const owner = decision(card, ctl);
+  assert.match(owner, /data-testid="amux-owner-queue-unknown-usage"/);
+  assert.match(owner, /codex-chore/);
+  assert.match(owner, /takes no other Task until the usage is settled or accepted/);
+  assert.match(owner, /data-testid="amux-attempt-usage-accept"[^>]*>Accept this run&#x27;s usage as unknown</);
+  assert.match(owner, /The cost is not treated as zero/);
+  const reader = decision(card, ctl, false);
+  assert.match(reader, /data-testid="amux-owner-queue-unknown-usage"/);
+  assert.doesNotMatch(reader, /data-testid="amux-attempt-usage-accept"/);
+  // No unknown run, no panel.
+  const settled = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, { unknown_usage_attempts: [] }) }));
+  assert.doesNotMatch(settled, /data-testid="amux-owner-queue-unknown-usage"/);
+});
