@@ -879,7 +879,7 @@ export function AnalyticsProvider({
             {(["faq", "models", "support", "privacy", "terms"].includes((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/"))) ? promptCopy.body : (promptCopy.mobileBody)}{" "}
             <Link
               href="/privacy"
-              className={`${readableNotice ? "inline-block whitespace-nowrap" : ""} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
+              className={`${((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "faq") ? "mt-1 block w-fit max-w-full whitespace-nowrap" : (readableNotice ? "inline-block whitespace-nowrap" : "")} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
             >
               {copy.privacy}
             </Link>
