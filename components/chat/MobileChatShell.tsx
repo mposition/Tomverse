@@ -1227,8 +1227,14 @@ export function MobileChatShell({
   // margin plus min-height (~30px) for an empty strip. One boolean decides
   // whether the row exists at all; hiding it with CSS would keep the same
   // reserved box and leave the badges in the accessibility tree.
+  //
+  // An empty Chat new chat leaves the guest badge out: the composer already
+  // explains the guest trial beside Chat/Review, and at 320x568 the badge's
+  // 44px row was what cut the first starter card off. The badge returns with
+  // the first message, and Review keeps it on its welcome surface.
+  const showGuestBadge = isGuestMode && !(showWelcomeSurface && currentProduct === "chat");
   const hasHeaderStatus =
-    isGuestMode ||
+    showGuestBadge ||
     isCurrentLocked ||
     isCurrentShared ||
     (isAnyWorkingOrError && selectedModels.length > 1);
@@ -1438,7 +1444,7 @@ export function MobileChatShell({
           data-testid="mobile-header-status-row"
           className="mt-1.5 flex min-h-6 max-w-full gap-1.5 overflow-x-auto overscroll-x-contain"
         >
-          {isGuestMode && (
+          {showGuestBadge && (
             <button
               type="button"
               onClick={() => setModeSheet("guest")}
