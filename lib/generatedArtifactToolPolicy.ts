@@ -281,6 +281,9 @@ const GENERATE_PROMPT = [
   "  do not announce a file you are not about to produce.",
   "- Put real values in. Never invent data the conversation does not contain;",
   "  if something is unknown, leave it empty and say so.",
+  "  When the user requests a fictional example or permits assumptions, supply",
+  "  clearly labeled illustrative inputs and worked figures instead of deferring",
+  "  every number. Keep assumptions distinct from actual or sourced data.",
   "- Spreadsheets hold plain values only. There is no formula field, and a",
   "  string that looks like a formula is stored as text.",
   `- Limits: ${ARTIFACT_LIMITS.maxWorksheets} worksheets, ` +
