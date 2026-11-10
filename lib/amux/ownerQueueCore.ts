@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { AMUX_ESCALATION_AWAITING_STATUSES } from "./humanReviewCore.ts";
+import type { AmuxWorkerProviderClass } from "./workerRegistryCore.ts";
 
 /**
  * The owner queue ("Waiting on me"): every card that waits on the owner, from
@@ -49,7 +50,7 @@ export type AmuxOwnerQueueItem = {
   status: string;
   worker: string | null;
   /** Channel of the worker, from the class it was registered with. */
-  channel: "claude" | "codex" | "copilot" | "cursor" | null;
+  channel: AmuxWorkerProviderClass | null;
   /** Why a person is asked: the newest open escalation's reason code. */
   attentionReason: string | null;
   ownerQuestion: "open" | "answered" | null;

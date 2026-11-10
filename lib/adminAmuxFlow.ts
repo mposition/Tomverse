@@ -1,3 +1,4 @@
+import type { AmuxWorkerProviderClass } from "./amux/workerRegistryCore.ts";
 import type { AmuxIdeaProgressStage } from "./amux/ideaProgressCore.ts";
 import { qaReleaseTrainNextDepartureMs } from "./qaReleaseTrainCore.ts";
 
@@ -43,14 +44,15 @@ export function amuxIdeaFlowSteps(
   }));
 }
 
-export type AmuxWorkerChannel = "claude" | "codex" | "copilot" | "cursor";
-export const AMUX_WORKER_CHANNELS: readonly AmuxWorkerChannel[] = ["claude", "codex", "copilot", "cursor"];
+/** Every class a worker can be registered with is a channel, so no registered worker goes undrawn. */
+export type AmuxWorkerChannel = AmuxWorkerProviderClass;
+export const AMUX_WORKER_CHANNELS: readonly AmuxWorkerChannel[] = ["claude", "codex", "copilot", "cursor", "antigravity"];
 
 /**
  * Each registered worker's channel (the CLI it runs), from the class it was
  * registered with. A name says nothing about it (the registry registers the two
- * independently), so a worker that is not registered, or whose class is not one
- * of the four channels, has none and is drawn without a badge.
+ * independently), so a worker that is not registered has none and is drawn
+ * without a badge.
  */
 export function amuxWorkerChannels(
   rows: ReadonlyArray<{ workerName: string; providerClass: string }>
