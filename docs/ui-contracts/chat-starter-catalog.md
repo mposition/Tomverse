@@ -287,7 +287,7 @@ composer · AI 고지 · 동의 안내            하단 dock (대화 중과 같
   둡니다. 관측되는 넘침이 없으면 버튼 공간도 없습니다.
 - **모양은 셸이 아니라 갤러리 자신의 폭이 정한다.** `@container/starters`의
   `rem` 기준 container query로 30rem 이상은 줄바꿈 칩, 그 아래는 2열 타일,
-  18rem 아래는 1열이다. `ChatPageClient`가 한 요소를 두 셸에 넘기므로 셸 prop이나
+  18.5rem 아래는 1열이다(320px 휴대폰의 288px 갤러리는 1열이어서 첫 카드가 4줄로 늘지 않는다). `ChatPageClient`가 한 요소를 두 셸에 넘기므로 셸 prop이나
   `layout === "mobile"`로 분기하지 않는다. 텍스트 배율이 커지면 같은 규칙으로 좁은
   모양이 된다.
 - **미리보기 줄은 hover·focus에 반응하는 보조 표시다.** 기본은 `hint`이고, 카드에
