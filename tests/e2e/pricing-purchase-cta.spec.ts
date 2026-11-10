@@ -272,8 +272,8 @@ test.describe("Korean pricing billing selector", () => {
     await preparePricingPage(page, { plan: null, language: "ko" });
     await gotoPricing(page, "?lang=ko");
     await page.getByRole("radio", { name: "연간 결제", exact: true }).check();
-    await expect(page.getByTestId("pricing-selected-billing-pro")).toContainText("연 $144 일괄 결제");
-    await expect(page.getByTestId("pricing-selected-billing-max")).toContainText("연 $240 일괄 결제");
+    await expect(page.getByTestId("pricing-selected-billing-pro")).toContainText("연 $144 USD 일괄 결제");
+    await expect(page.getByTestId("pricing-selected-billing-max")).toContainText("연 $240 USD 일괄 결제");
     const link = ctaState(page, "pro").getByRole("link");
     const signIn = new URL((await link.getAttribute("href"))!, page.url());
     const callback = signIn.searchParams.get("callbackUrl")!;
@@ -324,7 +324,7 @@ test.describe("Korean pricing billing selector", () => {
     await gotoPricing(page, "?lang=ko");
     await page.getByRole("radio", { name: "연간 결제", exact: true }).check();
     await page.getByRole("radio", { name: "월간 결제", exact: true }).check();
-    await expect(page.getByTestId("pricing-selected-billing-max")).toContainText("월 $25 결제");
+    await expect(page.getByTestId("pricing-selected-billing-max")).toContainText("월 $25 USD 결제");
     await ctaState(page, "max").getByRole("button").click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByTestId("checkout-due-today")).toHaveText(/^\$25(?:\.0{1,2})?$/);
