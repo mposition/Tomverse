@@ -1,5 +1,16 @@
 import type { Language } from "@/lib/language";
 
+export const reviewUsageExplanation: Record<Language, string> = {
+  en: "Credits used this calendar month (UTC): {used} / monthly limit {limit}. The percentage is rounded and capped at 100%. Open plan settings for balances and reset times.",
+  ko: "이번 달(UTC 기준) 사용 크레딧 {used} / 월간 한도 {limit}. 비율은 반올림하며 100%까지 표시합니다. 플랜 설정에서 잔액과 초기화 시각을 확인하세요.",
+  zh: "本自然月（UTC）已用积分：{used} / 每月上限 {limit}。百分比四舍五入，最高显示 100%。在套餐设置中查看余额和重置时间。",
+  "zh-Hant": "本曆月（UTC）已用點數：{used} / 每月上限 {limit}。百分比四捨五入，最高顯示 100%。請在方案設定查看餘額與重設時間。",
+  fr: "Crédits utilisés ce mois civil (UTC) : {used} / limite mensuelle {limit}. Le pourcentage est arrondi et plafonné à 100 %. Ouvrez les réglages du forfait pour les soldes et dates de réinitialisation.",
+  de: "Verbrauchte Credits in diesem Kalendermonat (UTC): {used} / Monatslimit {limit}. Der Prozentsatz wird gerundet und bei 100 % begrenzt. Guthaben und Rücksetzzeiten finden Sie in den Tarifeinstellungen.",
+  es: "Créditos usados este mes natural (UTC): {used} / límite mensual {limit}. El porcentaje se redondea y se limita al 100 %. Abra los ajustes del plan para ver saldos y fechas de reinicio.",
+  pt: "Créditos usados neste mês civil (UTC): {used} / limite mensal {limit}. A porcentagem é arredondada e limitada a 100%. Abra as configurações do plano para ver saldos e datas de reinício.",
+};
+
 export const reviewReorderHint: Record<Language, string> = {
   en: "Drag a model card or answer header onto another answer to change the order.",
   ko: "모델 카드나 답변 헤더를 다른 답변 위로 드래그해 순서를 바꾸세요.",
