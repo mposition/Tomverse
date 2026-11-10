@@ -17,9 +17,14 @@ import { z } from "zod";
 const root = resolve(import.meta.dirname, "..");
 const baseline = execFileSync("git", ["rev-parse", process.argv[2] ?? "origin/develop"], { cwd: root, encoding: "utf8" }).trim();
 const baselineSource = execFileSync("git", ["show", `${baseline}:lib/autoLlmRouter.ts`], { cwd: root, encoding: "utf8" });
-const temporary = mkdtempSync(join(root, "lib", ".smart-latency-baseline-"));
+// Keep interrupted runs outside the application's TypeScript/lint inputs while
+// retaining normal resolution of the installed SDK and the project's aliases.
+const temporary = mkdtempSync(join(root, "node_modules", ".smart-latency-baseline-"));
 const baselineFile = join(temporary, "router.ts");
-writeFileSync(baselineFile, baselineSource);
+// tsx deliberately does not expand project aliases inside node_modules. Resolve
+// this baseline module's imports explicitly; its request-building code is intact.
+writeFileSync(baselineFile, baselineSource.replace(/from (["'])@\/([^"']+)\1/g,
+  (_match, _quote, path) => `from ${JSON.stringify(resolve(root, `${path}.ts`))}`));
 
 process.env.E2E_DISABLE_DATABASE = "true";
 process.env.DATABASE_URL = "postgresql://offline:offline@127.0.0.1:1/offline";
