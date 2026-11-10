@@ -224,7 +224,7 @@ test("compact combined output distinguishes a chat decision from missing image o
     for (const [imageIntent, expected] of [[null, { image: false }], [undefined, undefined], [{}, undefined]] as const) {
       generateRouterResult = () => ({ output: { ...routerOutput, imageIntent } });
       let decision: unknown;
-      await pick(undefined, true, {
+      await pick(undefined, {
         imageIntent: Promise.resolve({ modelId: "gpt-6-luna", candidates: [], previousImagePrompt: null,
           attachedPhoto: false, prompt: "test", maxOutputTokens: 400, timeoutMs: 8000 }),
         onImageDecision: (value: unknown) => { decision = value; },
@@ -246,7 +246,7 @@ test("combined routing shares only an identical message and retains conditional 
       [message, "a cat with a red hat", false], [message, null, true],
     ] as const) {
       routerRequests.length = 0;
-      await pick(undefined, true, { prompt: message,
+      await pick(undefined, { prompt: message,
         imageIntent: Promise.resolve({ modelId: "gpt-6-luna", candidates, previousImagePrompt: previous,
           attachedPhoto, prompt: chatImageIntentUserMessage(imageMessage, candidates, previous, attachedPhoto),
           message: imageMessage, maxOutputTokens: previous ? 2500 : 400, timeoutMs: previous ? 12000 : 8000 }),
