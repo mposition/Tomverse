@@ -19,6 +19,8 @@ const suggestionTitle = (page: Page) => page.getByText(TITLE, { exact: true });
 const suggestionCard = (page: Page) =>
   suggestionTitle(page).locator("xpath=ancestor::div[contains(@class, 'rounded-2xl')][1]");
 
+// The mobile shell needs a coarse pointer (useIsMobileShell), not just a narrow viewport.
+test.use({ hasTouch: true });
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => {
   test.skip(info.project.name !== "desktop-chromium", "Explicit desktop and mobile viewport coverage.");
