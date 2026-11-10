@@ -110,7 +110,12 @@ await refused(() => { task.sourceSystem = "workboard"; }, "not_a_v22_implement_t
 await refused(() => { task.reviewPrNumber = 43; }, "review_pr_mismatch");
 await refused(() => { task.reviewPrNumber = null; }, "review_pr_mismatch");
 // A number on the card that differs is a mismatch whatever a binding holds.
-await refused(() => { task.reviewPrNumber = 43; boundBinding = true; }, "review_pr_mismatch");
+await refused(() => { task.reviewPrNumber = 43; boundBinding = true; }, "review_pr_mismatch", { bindingId: "binding" });
+// With no number on the card, a caller that names no binding completes nothing.
+await refused(() => { task.reviewPrNumber = null; boundBinding = true; }, "review_pr_mismatch");
+// A named binding that is no longer the current one for this PR and attempt
+// (superseded by a re-bind, say) completes nothing either.
+await refused(() => { task.reviewPrNumber = null; boundBinding = false; }, "review_pr_mismatch", { bindingId: "binding" });
 
 // A v22 implement Task's row cannot hold the number; the engineering binding
 // of this card's attempt holds it, and the merge of that pull request
@@ -118,8 +123,9 @@ await refused(() => { task.reviewPrNumber = 43; boundBinding = true; }, "review_
 reset();
 task.reviewPrNumber = null;
 boundBinding = true;
-assert.deepEqual(await run(), { completed: true, taskRevision: 9 });
-assert.deepEqual(bindingQuery, [42, "card", "attempt"]);
+assert.deepEqual(await run({ bindingId: "binding" }), { completed: true, taskRevision: 9 });
+assert.deepEqual(bindingQuery, ["binding", 42, 42, "card", "attempt"]);
+assert.equal(writes.find(([kind]) => kind === "audit")[1].metadata.binding_id, "binding");
 const heldWrite = writes.find(([kind]) => kind === "task")[1];
 assert.deepEqual(heldWrite.where, { id: "card", status: "review", owner: null, archivedAt: null, revision: 8, reviewPrNumber: null });
 assert.deepEqual(heldWrite.data, { status: "done", revision: { increment: 1 }, v4TerminalAt: dbNow });

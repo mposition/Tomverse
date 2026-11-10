@@ -59,7 +59,11 @@ type AttemptRow = {
  * to `done`, `v4TerminalAt` on the DB clock, and the open review escalation
  * resolved as approved, with one system audit entry. The number must be the
  * one recorded on the card for its latest attempt, so a merge of some other
- * pull request never completes it.
+ * pull request never completes it. A v22 implement Task's row cannot hold the
+ * number (lib/amux/reviewPullRequest.ts amuxV22ImplementTask); for it the
+ * caller names the engineering binding whose approval and merge it observed,
+ * and that binding must still be the current one for this PR on a run of the
+ * card's latest attempt, read under its row lock.
  */
 export async function completeAmuxV22ReviewOnObservedMerge(
   input: {
@@ -69,6 +73,8 @@ export async function completeAmuxV22ReviewOnObservedMerge(
     mergeCommitSha: string;
     approvalReviewId: number;
     changedFiles?: string[] | null;
+    /** The engineering binding whose approval and merge the caller observed. */
+    bindingId?: string | null;
   },
   attachment?: AmuxAttachment<AmuxReviewMergeObservedFact>,
 ): Promise<
@@ -112,19 +118,25 @@ export async function completeAmuxV22ReviewOnObservedMerge(
       // (lib/amux/reviewPullRequest.ts amuxV22ImplementTask), so the number
       // is the one the engineering binding of this card's attempt holds:
       // written with the publisher's result, in the same transaction as the
-      // review record. A merge of any other pull request still completes
-      // nothing.
+      // review record. It must be the very binding whose approval the caller
+      // observed, still current, locked here after the card (engineering rows
+      // come after every AMUX row): a re-bind under a new snapshot supersedes
+      // it and voids that approval (engineering-agent.md §9-10). A merge of
+      // any other pull request still completes nothing.
+      let heldByBinding: string | null = null;
       if (task.reviewPrNumber !== input.prNumber) {
-        const bound = task.reviewPrNumber === null
+        const bound = task.reviewPrNumber === null && typeof input.bindingId === "string"
           ? await tx.$queryRaw<Array<{ id: string }>>`
               SELECT b."id" FROM "EngineeringAgentBinding" b
               JOIN "EngineeringAgentRun" r ON r."id" = b."runId"
-              WHERE b."prNumber" = ${input.prNumber} AND b."supersededAt" IS NULL
+              WHERE b."id" = ${input.bindingId} AND b."prNumber" = ${input.prNumber}
+                AND b."supersededAt" IS NULL AND b."currentPrNumber" = ${input.prNumber}
                 AND r."cardId" = ${input.taskId} AND r."amuxAttemptId" = ${input.attemptId}
-              LIMIT 1
+              FOR UPDATE OF b
             `
           : [];
-        if (bound.length === 0) {
+        heldByBinding = bound[0]?.id ?? null;
+        if (heldByBinding === null) {
           return { completed: false as const, reason: "review_pr_mismatch" as const };
         }
       }
@@ -197,6 +209,7 @@ export async function completeAmuxV22ReviewOnObservedMerge(
           pr_number: input.prNumber,
           merge_commit_sha: input.mergeCommitSha,
           approval_review_id: input.approvalReviewId,
+          ...(heldByBinding === null ? {} : { binding_id: heldByBinding }),
           previous_revision: task.revision,
           next_revision: taskRevision,
         },

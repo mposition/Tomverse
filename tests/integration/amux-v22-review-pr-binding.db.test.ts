@@ -54,6 +54,7 @@ async function seedPublishedTask(prNumber: number) {
   const taskId = randomUUID();
   const attemptId = randomUUID();
   const runId = String((runCounter += 1));
+  const bindingId = randomUUID();
   seededIdeas.push(ideaId);
   seededTasks.push(taskId);
   seededRuns.push(runId);
@@ -96,12 +97,12 @@ async function seedPublishedTask(prNumber: number) {
     await tx.$executeRaw`
       INSERT INTO "EngineeringAgentBinding" ("id", "runId", "prNumber", "headSha", "verifiedHeadSha", "ref",
         "snapshot", "currentPrNumber", "updatedAt")
-      VALUES (${randomUUID()}, ${runId}, ${prNumber}, ${"c".repeat(40)}, ${"c".repeat(40)},
+      VALUES (${bindingId}, ${runId}, ${prNumber}, ${"c".repeat(40)}, ${"c".repeat(40)},
         ${`agent/engineering/${runId}`},
         ${JSON.stringify({ baseSha: "b".repeat(40), diffDigest: digest, treeId: "d".repeat(40), invalidatedReviewIds: [] })}::jsonb,
         ${prNumber}, ${now})`;
   });
-  return { taskId, attemptId, runId };
+  return { taskId, attemptId, runId, bindingId };
 }
 
 const taskOf = (id: string) => prisma.amuxWorkItem.findUniqueOrThrow({ where: { id },
@@ -174,11 +175,13 @@ test("a v22 implement Task's pull request is recorded on its binding, and that p
   assert.equal((recorded.metadata as Record<string, unknown>).pr_number, prNumber);
 
   // A merge of some other pull request completes nothing.
-  const merge = (number: number) => completeAmuxV22ReviewOnObservedMerge({
+  const merge = (number: number, bindingId: string | null = seed.bindingId) => completeAmuxV22ReviewOnObservedMerge({
     taskId: seed.taskId, attemptId: seed.attemptId, prNumber: number, mergeCommitSha: "e".repeat(40),
-    approvalReviewId: 7,
+    approvalReviewId: 7, bindingId,
   });
   assert.deepEqual(await merge(prNumber + 1), { completed: false, reason: "review_pr_mismatch" });
+  // The observed binding must be named: a caller that names none completes nothing.
+  assert.deepEqual(await merge(prNumber, null), { completed: false, reason: "review_pr_mismatch" });
   assert.equal((await taskOf(seed.taskId)).status, "review");
 
   // The merge of the bound pull request completes the card, terminal, and
@@ -196,27 +199,35 @@ test("a v22 implement Task's pull request is recorded on its binding, and that p
   assert.equal(done.status, "done");
   assert.equal(done.reviewPrNumber, null);
   assert.ok(done.v4TerminalAt);
+  const completedAudit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { targetId: seed.taskId, action: "amux.v22.review.merge_observed" }, select: { metadata: true } });
+  assert.equal((completedAudit.metadata as Record<string, unknown>).binding_id, seed.bindingId);
   const escalation = await prisma.amuxHumanEscalation.findFirstOrThrow({ where: { taskId: seed.taskId } });
   assert.equal(escalation.status, "resolved");
   assert.equal(escalation.resolutionOutcome, "approve");
 });
 
-test("a superseded binding, or one for another attempt, does not complete the card", async () => {
+test("a superseded binding, or one for another card's attempt, does not complete the card", async () => {
   const prNumber = 900_000 + Math.floor(Math.random() * 90_000);
   const seed = await seedPublishedTask(prNumber);
+  // A re-bind under a new snapshot supersedes the binding whose approval was
+  // observed (engineering-agent.md §9-10): naming the old one completes nothing.
   await asReplica((tx) => tx.$executeRaw`
-    UPDATE "EngineeringAgentBinding" SET "supersededAt" = NOW(), "currentPrNumber" = NULL WHERE "runId" = ${seed.runId}`);
-  const merge = (attemptId: string) => completeAmuxV22ReviewOnObservedMerge({
-    taskId: seed.taskId, attemptId, prNumber, mergeCommitSha: "e".repeat(40), approvalReviewId: 7,
-  });
-  assert.deepEqual(await merge(seed.attemptId), { completed: false, reason: "review_pr_mismatch" });
+    UPDATE "EngineeringAgentBinding" SET "supersededAt" = NOW(), "currentPrNumber" = NULL WHERE "id" = ${seed.bindingId}`);
+  assert.deepEqual(
+    await completeAmuxV22ReviewOnObservedMerge({
+      taskId: seed.taskId, attemptId: seed.attemptId, prNumber, mergeCommitSha: "e".repeat(40), approvalReviewId: 7,
+      bindingId: seed.bindingId,
+    }),
+    { completed: false, reason: "review_pr_mismatch" },
+  );
 
   const other = await seedPublishedTask(prNumber + 1);
-  // The other card's binding holds a different number, for a different attempt.
+  // Another card's current binding, for its own attempt, does not complete this card.
   assert.deepEqual(
     await completeAmuxV22ReviewOnObservedMerge({
       taskId: seed.taskId, attemptId: seed.attemptId, prNumber: prNumber + 1, mergeCommitSha: "e".repeat(40),
-      approvalReviewId: 7,
+      approvalReviewId: 7, bindingId: other.bindingId,
     }),
     { completed: false, reason: "review_pr_mismatch" },
   );
