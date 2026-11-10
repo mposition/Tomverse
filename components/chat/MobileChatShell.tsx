@@ -206,6 +206,7 @@ type MobileChatShellProps = {
   identityKey: string | null;
   guestPreviewMode?: boolean;
   guestMessageCount: number;
+  guestResetsAt?: string | null;
   maxGuestMessages: number;
   isModelSelectionReady: boolean;
   /**
@@ -503,6 +504,7 @@ export function MobileChatShell({
   identityKey,
   guestPreviewMode = false,
   guestMessageCount,
+  guestResetsAt,
   maxGuestMessages,
   isModelSelectionReady,
   isConversationSelectionResolved,
@@ -1375,7 +1377,7 @@ export function MobileChatShell({
                   data-testid="mobile-header-auto-mode"
                   className="min-w-0 truncate"
                 >
-                  {t("chat.modelSelect")}
+                  {lang === "ko" ? summaryCopy.openPicker : t("chat.modelSelect")}
                 </span>
               </>
             ) : isMultiModelConversation ? (
@@ -1452,7 +1454,7 @@ export function MobileChatShell({
               className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full bg-blue-500/10 px-2 text-[11px] font-semibold text-blue-600 dark:text-blue-300"
             >
               <Sparkles className="h-3 w-3" />
-              {t("modelTiers.guest")} {guestMessageCount}/{maxGuestMessages}
+              {t("chat.guestCreditsUsed").replace("{used}", String(guestMessageCount)).replace("{limit}", String(maxGuestMessages))}
             </button>
           )}
           {isCurrentLocked && (
@@ -2104,6 +2106,7 @@ export function MobileChatShell({
         mode={modeSheet}
         onClose={() => setModeSheet(null)}
         guestMessageCount={guestMessageCount}
+        guestResetsAt={guestResetsAt}
         maxGuestMessages={maxGuestMessages}
         activeModelCount={selectedModels.length}
       />
