@@ -4,6 +4,44 @@ import { createHmac, randomUUID } from "node:crypto";
 import { clientLatencyBodySchema, latencyDistribution, summarizeResponseLatency, type ResponseLatencySample } from "../lib/responseLatencyCore";
 import { createResponseLatencyToken, verifyResponseLatencyToken } from "../lib/responseLatencyToken";
 import { createClientLatency } from "../lib/responseLatencyClient";
+import { createLatencyStages } from "../lib/responseLatencyStages";
+
+test("stage observations keep overlapping work separate and stop exactly once", async () => {
+  let time = 0;
+  const recorder = createLatencyStages({}, () => time);
+  const context = recorder.stage("contextPrepareMs");
+  time = 20;
+  const draft = recorder.stage("draftPrepareMs");
+  time = 50; context();
+  time = 70; draft(); context();
+  assert.deepEqual({ ...recorder.timings }, { contextPrepareMs: 50, draftPrepareMs: 50 });
+  await assert.rejects(recorder.measure("refinerPrepareMs", async () => { time = 100; throw Error("refused"); }));
+  assert.equal(recorder.timings.refinerPrepareMs, 30);
+});
+
+test("full send reports separate preparation, headers, first content, stream end and finalization", async () => {
+  const original = globalThis.fetch;
+  let time = 100;
+  let body: Record<string, unknown> = {};
+  globalThis.fetch = async (_url, init) => { body = JSON.parse(String(init?.body)); return new Response(null, { status: 204 }); };
+  try {
+    const recorder = createClientLatency(0, { contextPrepareMs: 50, draftPrepareMs: 50 }, () => time);
+    const location = recorder.stage("locationMs");
+    time = 130; location(); recorder.dispatched();
+    time = 200; recorder.headers(new Response(null, { headers: { "X-Response-Latency-Token": "proof" } }));
+    recorder.content(" ");
+    time = 300; recorder.content("answer");
+    time = 400; recorder.content("longer answer"); recorder.streamEnded();
+    time = 420; recorder.finish("completed");
+    assert.ok(clientLatencyBodySchema.safeParse(body).success);
+    assert.deepEqual(body, { token: "proof", outcome: "completed", prepareMs: 130, firstContentMs: 300, completionMs: 420,
+      stages: { contextPrepareMs: 50, draftPrepareMs: 50, locationMs: 30, responseHeadersMs: 70,
+        dispatchToContentMs: 170, contentToEndMs: 100, clientFinalizeMs: 20 } });
+    for (const stages of [{ prompt: "private" }, { contextPrepareMs: -1 }, { modelSyncMs: 421 }, { routingMs: 4 }]) {
+      assert.equal(clientLatencyBodySchema.safeParse({ ...body, stages }).success, false);
+    }
+  } finally { globalThis.fetch = original; }
+});
 
 test("distributions distinguish missing data from zero and separate product/source cohorts", () => {
   assert.deepEqual(latencyDistribution([]), { count: 0, p50Ms: null, p95Ms: null });

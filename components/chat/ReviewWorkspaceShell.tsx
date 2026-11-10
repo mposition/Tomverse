@@ -371,6 +371,7 @@ export async function ReviewWorkspaceShell({
         guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
         chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
+        chatLocationIntentEnabled={process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED === "true"}
         chatImageEditEnabled={chatImageEditEnabled}
         voiceInputEnabled={voiceInputEnabled}
         voiceConversationEnabled={voiceConversationEnabled}

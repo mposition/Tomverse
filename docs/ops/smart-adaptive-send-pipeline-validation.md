@@ -1,0 +1,118 @@
+# Smart Adaptive send pipeline
+
+Goal-Step: response-latency/send-pipeline
+
+## Observed problem
+
+The post-#3675 production snapshot at 2026-11-10 06:14:27 UTC had only
+two complete browser reports before deployment and three afterwards. For the
+two GPT 6 Luna requests that each used four application-managed searches,
+submit-to-first-content was 23.703s before and 21.508s after; completion was
+25.414s and 23.270s. These were different questions, one sample per side.
+Preparation increased from 1.904s to 5.375s, offsetting 3.471s of the 5.666s
+improvement between dispatch and first content. This is observational evidence,
+not a controlled quality or performance comparison.
+
+The previous browser sample stored preparation as one number. Code inspection
+found context pricing and draft flushing serialized before Refiner preparation,
+durable question persistence and location acquisition. A disabled location-intent
+feature still incurred an authenticated HTTP request per new source message.
+The production location-intent switch was absent at inspection, so a location
+LLM call cannot explain that snapshot's preparation delay.
+
+## Changes
+
+- Prepare context and flush the captured draft concurrently. Both must settle
+  before the identity/conversation/model fence, Refiner, question consumption or
+  Chat dispatch. A stale or failed preparation releases any prepared draft.
+- Pass the server's location-intent availability through both web shells. When
+  disabled, skip automatic intent HTTP requests. Manually enabled location still
+  reads a fresh position. When enabled, retain semantic classification, guest
+  verification, per-source deduplication, consent, revocation and freshness.
+- Add bounded numeric stages to the existing signed, best-effort timing report
+  and Admin response-latency table. No migration or content logging is required.
+
+| Observation | Boundary |
+| --- | --- |
+| submitHandoffMs | Submit to entry into the owned preparation path, including earlier intent/new-chat work |
+| attachmentPrepareMs | Attachment preview preparation |
+| conversationPrepareMs | Conversation preparation within the owned path |
+| modelSyncMs | Model-settings send barrier |
+| preflightMs | Existing comparison admission step (single Chat has no network preflight) |
+| contextPrepareMs / draftPrepareMs | Independent, overlapping context preparation and draft flush |
+| refinerPrepareMs | Existing automatic Refiner preparation, when applicable |
+| messageSaveMs | Durable question save, receipt recovery and local reconciliation |
+| panelHandoffMs | Prepared payload to panel run, including its model-settings barrier |
+| locationMs | Location analysis plus device/human permission wait |
+| locationIntentMs | Nested intent HTTP request and verification; absent when no new analysis was needed |
+| responseHeadersMs | Latest dispatch to response headers |
+| dispatchToContentMs | Latest dispatch to first nonempty visible content |
+| contentToEndMs | First content to consumed stream end |
+| clientFinalizeMs | Stream end to client handler completion |
+| beforeRoutingMs / routingMs / afterRoutingMs | Server entry to router, routing, routing end to provider dispatch |
+| contextMs | Nested server context verification build, when a bundle is present |
+| providerToContentMs | Provider dispatch to first content, including model thinking and tool/search rounds |
+
+The existing `app_managed_web_search` events correlate by trace ID and expose
+tool-call index, batch size, backend duration and reuse without query text. Use
+those to separate backend search latency from the intervening model/tool rounds.
+Native provider-internal searches have no equivalent per-query observation.
+
+The table reports p50/p95 and count separately for each stage. Do not sum
+overlapping durations or subtract unrelated percentiles. First content still
+means UI state update, not browser paint. Server settlement still means the
+start of settlement, not completion. Old clients remain accepted and absent
+stages stay unknown. Pre-stream refusals without a signed token remain outside
+the browser report; use existing route rejection logs for those requests.
+
+## Controlled comparison
+
+Local PowerShell in the repository: `node --import tsx scripts/smart-adaptive-send-benchmark.mjs`.
+No production credentials, database, network or paid model calls are used.
+The baseline reproduces serial context/draft preparation; the candidate imports
+the production preparation helper. Both return identical context/draft values,
+call each dependency once, and retain identical subsequent save, enabled-location,
+provider/search and stream delays. Forty pairs alternate execution order.
+
+| Metric | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| First content p50 | 216.27ms | 170.66ms | -21.1% |
+| First content p95 | 230.38ms | 184.27ms | -20.0% |
+| Completion p50 | 247.01ms | 201.80ms | -18.3% |
+| Completion p95 | 261.50ms | 215.08ms | -17.8% |
+
+These are fixture results, not projected production savings. Context and draft
+delays are synthetic (30–34ms and 50–56ms); timer scheduling also contributes.
+Real savings depend on their overlap. If the draft was already flushed, that
+part saves little or nothing. No routing prompt, model, tool/search limit, memory,
+answer length or Refiner decision was weakened to obtain these results.
+
+## Location activation and subsequent comparison
+
+The owner separately requested production location-intent activation during this
+work. Existing review r-20261025-104233-cbed73 was accepted; the unchanged
+location route/provider contracts passed all eight tests. The existing flag
+`TOMVERSE_CHAT_LOCATION_INTENT_ENABLED=true` was applied without changing budgets
+or providers. Deployment `e4a003c8-da12-4c97-9377-2906e08a0a8a` became successful
+at 2026-11-10 06:44:05 UTC (16:44:05 AEST). Runtime readback confirmed the flag
+and `/api/health` returned 200. Its code remains main commit
+`f2fafdfbeab3a6346beb4cf9d39e491b58e3262d`; it does not contain this PR.
+
+This activation adds a semantic intent wait to eligible sends and changes the
+comparison cohort. Compare this PR before/after only with location intent enabled
+on both sides, matching model, source, outcome, search usage and permission state.
+Keep first-permission interactions separate from already-enabled/denied location.
+The small earlier location-off snapshot cannot establish this change's live gain.
+
+## Verification
+
+- Preparation tests execute overlapping jobs and the actual stale/failure cleanup.
+- Timing tests cover strict numeric allowlists, old-client compatibility, signed
+  proof/origin enforcement, nested timings, replay and telemetry failure isolation.
+- Browser regression exercises real submit/stream reporting and existing
+  model-change/draft fences; location tests retain automatic/manual/denied flows.
+- Existing route contracts cover selection, fallback, guest credit/auth boundaries,
+  tools and full artifact streaming. The unrelated ART-FORMAT-01 TODO remains.
+
+No performance-code merge or deployment is included. Production speed and
+semantic answer quality were not remeasured with paid model calls in this task.

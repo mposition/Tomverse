@@ -27,6 +27,9 @@ import { VoiceConversationControl } from "@/components/chat/VoiceConversationCon
 import type { VoiceAnswerReceipt } from "@/components/chat/voiceConversationClient";
 import { TomverseWordmark } from "@/components/chat/TomverseWordmark";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { prepareChatSendInputs } from "@/lib/chatSendPreparation";
+import { boundedLatencyMs, createLatencyStages } from "@/lib/responseLatencyStages";
+import type { ClientLatencyStages } from "@/lib/responseLatencyCore";
 import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
@@ -770,6 +773,7 @@ export function ChatPageClient({
   guestBrandTrioModelIds = GUEST_BRAND_TRIO_MODEL_IDS,
   imageGenerationEnabled = false,
   chatImageIntentEnabled = false,
+  chatLocationIntentEnabled = true,
   chatImageEditEnabled = false,
   reviewEasyAvailable = false,
   voiceInputEnabled = false,
@@ -803,6 +807,7 @@ export function ChatPageClient({
    * triage on.
    */
   chatImageIntentEnabled?: boolean;
+  chatLocationIntentEnabled?: boolean;
   /** A send with a photo may be an edit of it (IMAGE_EDIT_ENABLED). */
   chatImageEditEnabled?: boolean;
   reviewEasyAvailable?: boolean;
@@ -1761,6 +1766,8 @@ export function ChatPageClient({
   const [sendEcho, setSendEcho] = useState<PendingSendEcho | null>(null);
   const [promptPayload, setPromptPayload] = useState<{
     submittedAtMonotonicMs?: number;
+    preparationTimings?: ClientLatencyStages;
+    preparationReadyAtMonotonicMs?: number;
     id: string;
     text: string;
     chatId: string;
@@ -6313,6 +6320,7 @@ export function ChatPageClient({
     submitOwner: PendingSubmissionOwner,
     submittedAtMonotonicMs: number,
   ) => {
+    const preparation = createLatencyStages({ submitHandoffMs: boundedLatencyMs(performance.now() - submittedAtMonotonicMs) });
     const submitOwnerIsCurrent = () => {
       const current = submitIdentityFenceRef.current;
       const ownerKey = submitOwner.identityKey ?? "unresolved";
@@ -6511,7 +6519,7 @@ export function ChatPageClient({
     ));
     const promptAttachments = isOverrideSend
       ? []
-      : await cloneAttachmentPreviews(sendInputAttachments);
+      : await preparation.measure("attachmentPrepareMs", () => cloneAttachmentPreviews(sendInputAttachments));
 	if (!chatOriginStillCurrent()) return;
 	
 	// Manual Guest sends have one known model and retain the client-side hint.
@@ -6525,6 +6533,7 @@ export function ChatPageClient({
       }
     }
 
+    const finishConversationPreparation = preparation.stage("conversationPrepareMs");
 	let activeChatId = currentChatId;
     let pendingCreatedConversationAdoption = Boolean(
       suppliedPreparedDraft || continuesPendingCreatedDraft
@@ -6738,9 +6747,10 @@ export function ChatPageClient({
     }
     }
     
+    finishConversationPreparation();
     if (activeChatId) {
       if (!isGuestMode) {
-        const modelSettingsReady = await ensureModelSettingsReady(activeChatId);
+        const modelSettingsReady = await preparation.measure("modelSyncMs", () => ensureModelSettingsReady(activeChatId!));
         if (!modelSettingsReady) return;
       }
       const comparisonId = Date.now().toString();
@@ -6836,6 +6846,7 @@ export function ChatPageClient({
       */
       const imageTurnSend = (Boolean(imageTurn) && activeModelIds.length === 1) ||
         (Boolean(options?.imageTurnsByModel) && activeModelIds.every(id => Object.hasOwn(options!.imageTurnsByModel!, id)));
+      const finishPreflight = preparation.stage("preflightMs");
       const preflight = imageTurnSend
         ? { allowed: true as const, admissionToken: null, contextBundle: null }
         : await runComparisonPreflight({
@@ -6848,6 +6859,7 @@ export function ChatPageClient({
               ? { webSearchMode: options.webSearchOverride }
               : {}),
           });
+      finishPreflight();
       if (!preflight.allowed || !chatSendIsCurrent()) return;
       // The comparison preflight prices the whole set and hands back one
       // bundle for it. A single-model send never had a preparation step, so
@@ -6857,36 +6869,35 @@ export function ChatPageClient({
         activeModelIds.length >= 2
           ? ("comparison" as const)
           : ("single" as const);
-      const contextBundle =
-        imageTurnSend
-          ? null
-          : contextLayout === "comparison"
-          ? preflight.contextBundle
-          : await prepareChatContextBundle({
+      // Context pricing does not depend on the draft revision. Flush the draft
+      // alongside that read; message consumption and paid Refiner/Chat work
+      // remain behind both results and the unchanged identity/selection fence.
+      const preparedInputs = await prepareChatSendInputs({
+        context: () => imageTurnSend ? Promise.resolve(null)
+          : contextLayout === "comparison" ? Promise.resolve(preflight.contextBundle)
+          : preparation.measure("contextPrepareMs", () => prepareChatContextBundle({
               conversationId: isGuestMode ? null : activeChatId,
               modelIds: activeModelIds,
-               prompt: authoredPrompt,
-            });
-	  if (!chatSendIsCurrent()) return;
-      let preparedDraft: Awaited<ReturnType<typeof prepareDraftSend>> = suppliedPreparedDraft;
-      if (draftSendCapture) {
-        preparedDraft = await prepareDraftSend(draftSendCapture);
-        if (!preparedDraft) {
-          if (chatSendIsCurrent()) {
-            showToast(t("chat.questionSaveFailed"), "info");
-          }
-          return;
-        }
-        if (!chatSendIsCurrent()) {
-          abortPreparedDraft(preparedDraft);
-          return;
-        }
+              prompt: authoredPrompt,
+            })),
+        draft: () => draftSendCapture
+          ? preparation.measure("draftPrepareMs", () => prepareDraftSend(draftSendCapture))
+          : Promise.resolve(suppliedPreparedDraft),
+        isCurrent: chatSendIsCurrent,
+        abortDraft: abortPreparedDraft,
+      });
+      if (!preparedInputs) return;
+      const { contextBundle, preparedDraft } = preparedInputs;
+      if (draftSendCapture && !preparedDraft) {
+        showToast(t("chat.questionSaveFailed"), "info");
+        return;
       }
 
       let promptRefinerDecisionForSend = explicitPromptRefinerDecision;
       let userRequestId = explicitPromptRefinerClientRequestId ??
         crypto.randomUUID();
       if (requestAutoPrepare && preparedDraft && promptRefinerProductScope) {
+        const finishRefinerPreparation = preparation.stage("refinerPrepareMs");
         try {
           const response = await fetch("/api/chat/prompt-refiner/prepare", {
             method: "POST",
@@ -6914,7 +6925,7 @@ export function ChatPageClient({
           // One attempt only. Transport and malformed responses fall back to
           // the authored original and never trigger another Refiner or Chat
           // request from this send path.
-        }
+        } finally { finishRefinerPreparation(); }
         if (!chatSendIsCurrent()) {
           abortPreparedDraft(preparedDraft);
           return;
@@ -6948,6 +6959,7 @@ export function ChatPageClient({
         return;
       }
       let savedAttachments: ChatAttachment[] = promptAttachments;
+      const finishMessageSave = preparation.stage("messageSaveMs");
       let sendCurrentAfterMessageSave = true;
       let messageWasSaved = false;
       if (!isGuestMode) {
@@ -7249,6 +7261,7 @@ export function ChatPageClient({
         }
       }
 
+      finishMessageSave();
       // Last await boundary: an intervening model/account/conversation change
       // must not publish a payload to another panel or discard the draft.
       if (!sendCurrentAfterMessageSave || !chatSendIsCurrent(!messageWasSaved)) return;
@@ -7379,6 +7392,8 @@ export function ChatPageClient({
       setPromptPayload({
         id: comparisonId,
         submittedAtMonotonicMs,
+        preparationTimings: { ...preparation.timings },
+        preparationReadyAtMonotonicMs: performance.now(),
         text: authoredPrompt,
         chatId: activeChatId,
         userMessageId: userMsgId,
@@ -10513,6 +10528,7 @@ export function ChatPageClient({
           }
           onSubmit={handleComposerSubmit}
           onBeforeModelSend={ensureModelSettingsReadyForChatApp}
+          chatLocationIntentEnabled={chatLocationIntentEnabled}
           // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
           conversationSelectionTicket={conversationSelectionTicketRef.current}
           identityEpoch={identityEpoch}
@@ -10692,6 +10708,7 @@ export function ChatPageClient({
           onWebSearchSuggestionDismiss={handleWebSearchSuggestionDismiss}
           onSubmit={handleComposerSubmit}
           onBeforeModelSend={ensureModelSettingsReadyForChatApp}
+          chatLocationIntentEnabled={chatLocationIntentEnabled}
           // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
           conversationSelectionTicket={conversationSelectionTicketRef.current}
           identityEpoch={identityEpoch}
