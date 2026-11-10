@@ -62,7 +62,7 @@ export const AUTO_ROUTER_LIMITED_RELEASE_APPROVAL:
     targetServiceId: "f0a4f7f4-a476-4726-87a6-9114f8da8147",
     maxRolloutPercent: 100,
     eligiblePlans: Object.freeze(["Free", "Pro", "Max"] as const),
-    expiresAt: "2026-11-10T00:00:00Z",
+    expiresAt: "2026-12-10T00:00:00Z",
     evidenceRef:
       "docs/ops/tomverse-chat-auto-router-limited-release-v1-approval.md#approved-evidence",
     knownLimitations:
