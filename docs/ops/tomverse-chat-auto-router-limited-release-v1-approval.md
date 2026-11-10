@@ -14,7 +14,7 @@ targetEnvironmentId: 4ffdeab7-a1fb-4ec1-bf4a-4dd2818ba668
 targetServiceId: f0a4f7f4-a476-4726-87a6-9114f8da8147
 maxRolloutPercent: 100
 eligiblePlans: [Free, Pro, Max]
-expiresAt: 2026-11-10T00:00:00Z
+expiresAt: 2026-12-10T00:00:00Z
 evidenceRef: "docs/ops/tomverse-chat-auto-router-limited-release-v1-approval.md#approved-evidence"
 knownLimitations: "Routing uses neutral scores and answer quality is unproven; representative Shadow evidence and the full durable Chat cancellation, stream-failure, failure-matrix, and operational-latency coverage remain incomplete; deployments without readable source fail closed; future main SHAs require separate approval; the earlier UI 21 and PostgreSQL provenance 42 checks were not rerun for the final RC."
 activationAuthority: operator_runtime_selector
@@ -80,7 +80,9 @@ authenticated Free, Pro, and Max Chat users who explicitly select Auto,
 including eligible users who join during the release. Guests, Review, manual
 selection, the ordinary model and product filters, entitlement, credit,
 provider-budget, moderation, context, capability, and kill-switch boundaries
-remain unchanged. The approval expires at `2026-11-10T00:00:00Z`.
+remain unchanged. The approval expires at `2026-12-10T00:00:00Z`. It first
+expired at `2026-11-10T00:00:00Z`; on 2026-11-10 the owner extended it in chat
+by 30 days with every other term unchanged.
 
 Production activation is limited to these settings:
 
