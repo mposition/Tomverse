@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Session } from "next-auth";
 import type { Prisma } from "@prisma/client";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import {
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
@@ -710,6 +710,7 @@ export async function commitAutoGrant(
 ) {
   const itemBindingsDigest = boardPromotionItemBindingsDigest([grant.item]);
   return withAutoTransaction(grant.grantId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
+    await takeAuditChainLock(tx);
     const existing = await tx.amuxRecommendationAutoGrant.findUnique({ where: { id: grant.grantId } });
     if (existing) {
       if (existing.workItemId !== grant.item.cardId || existing.requestDigest !== requestDigest) {
@@ -790,6 +791,7 @@ export async function commitAutoPromotion(
   if (!worker.ok) throw new BoardImportError(worker.code, 409, body.consumptionId);
   const actor = autoHumanActor(session, request);
   const outcome = await withAutoTransaction(body.consumptionId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
+    await takeAuditChainLock(tx);
     const existing = await tx.amuxRecommendationAutoConsumption.findUnique({ where: { id: body.consumptionId } });
     if (existing) {
       if (
@@ -866,6 +868,7 @@ export async function commitSystemAutoPromotion(input: {
   | { promoted: false; reason: "no_grant" }
 > {
   return withAutoTransaction(input.consumptionId, TICK_TRANSACTION_LIMITS, async (tx, now, recordReceipt) => {
+    await takeAuditChainLock(tx);
     await requireAutoOpen(tx, input.consumptionId);
     const grant = await tx.amuxRecommendationAutoGrant.findFirst({
       where: {
@@ -935,6 +938,7 @@ const expireDueGrantsOneByOne = async (
   for (let index = 0; index < AUTO_EXPIRE_BATCH; index += 1) {
     if (!hasRoom()) return;
     const moved = await withAutoTransaction(null, limitsFor(actor), async (tx, now, recordReceipt) => {
+      await takeAuditChainLock(tx);
       const due = await tx.amuxRecommendationAutoGrant.findFirst({
         where: { status: "active", expiresAt: { lte: now } },
         orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
@@ -1253,6 +1257,7 @@ const writeAutoHaltLocked = async (
 
 export async function commitAutoHaltFromReadback(input: { actor: AutoActor; haltId: string }) {
   return withAutoTransaction(input.haltId, limitsFor(input.actor), async (tx, now) => {
+    await takeAuditChainLock(tx);
     const decision = await readAutoHaltLocked(tx, now, null);
     return writeAutoHaltLocked(tx, now, input.actor, input.haltId, decision);
   });
@@ -1271,6 +1276,7 @@ export async function recordAutoOutcomeUnknown(input: {
 }) {
   const haltId = input.haltId ?? randomUUID();
   return withAutoTransaction(input.consumptionId, limitsFor(input.actor), async (tx, now, recordReceipt) => {
+    await takeAuditChainLock(tx);
     const mark = await readAutoOutcomeUnknownLocked(tx, input);
     const halt = await readAutoHaltLocked(
       tx,
@@ -1322,6 +1328,7 @@ export async function resumeAutoPromotion(input: { session: Session; request: Re
 
 export async function commitAutoResume(session: Session, request: Request, haltId: string) {
   return withAutoTransaction(haltId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
+    await takeAuditChainLock(tx);
     const halt = await tx.amuxRecommendationAutoHalt.findUnique({
       where: { id: haltId },
       select: { id: true, clearedAt: true, violationCode: true },

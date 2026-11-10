@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Session } from "next-auth";
 import { Prisma } from "@prisma/client";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   BOARD_IMPORT_EXPIRY_MS,
   BOARD_IMPORT_STATEMENT_TIMEOUT,
@@ -259,6 +259,8 @@ export async function applyAmuxReconciliation(input: {
     return await prisma.$transaction(
       async (tx) => {
         await tx.$executeRaw`SELECT set_config('statement_timeout', ${BOARD_IMPORT_STATEMENT_TIMEOUT}, true)`;
+        // Audit chain before any card row (lib/adminAudit.ts takeAuditChainLock).
+        await takeAuditChainLock(tx);
         return commitAmuxReconciliation(tx, { ...input, runId });
       },
       { maxWait: 5_000, timeout: 20_000 },

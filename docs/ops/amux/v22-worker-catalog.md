@@ -80,6 +80,15 @@ each `/var/lib/tomverse-amux-v22-<worker>/cli` in `ReadWritePaths`. A refused
 login leaves the current copy unchanged and the unit fails; check it with
 `journalctl -u tomverse-amux-v22-auth-stage.service`.
 
+Cursor (`cursor:<worker>`, from `~/.config/cursor/auth.json` to
+`<worker>/cli/cursor/auth.json`, added 2026-11-10) keeps the access token and
+the v19 channel's fixed refresh placeholder, and is staged only with at least
+6 h left. The operator's Cursor login is long-lived (about 60 days) and is
+renewed only by the operator's own Cursor CLI use; after it expires the copy
+is refused until the operator signs in again. The Cursor sidecar runs the CLI
+from a root-owned copy under `/opt/tomverse-amux-v22/` (measured 2026-11-10,
+Cursor 2026.11.05: a read-only install signs in with the cut-down copy).
+
 The bridge asks its fixed worker socket at most every five minutes, after
 renewing active execution leases. It forwards only the worker, provider,
 remaining/confidence basis points, exhaustion, source, observed/reset times

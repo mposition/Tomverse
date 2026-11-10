@@ -3,7 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
@@ -177,6 +177,9 @@ const lockTask = async (
   tx: Prisma.TransactionClient,
   taskId: string,
 ): Promise<TaskLockRow | null> => {
+  // The runtime and attempt rows come first; then the audit chain, then the
+  // Task and its delivery (lib/adminAudit.ts takeAuditChainLock).
+  await takeAuditChainLock(tx);
   const rows = await tx.$queryRaw<TaskLockRow[]>`
     SELECT
       "id",
@@ -661,6 +664,9 @@ export async function pullAmuxWorkDelivery(input: {
         };
       }
 
+      // The audit chain before the Task this statement locks (SKIP LOCKED never
+      // waits for the attempt row; lib/adminAudit.ts takeAuditChainLock).
+      await takeAuditChainLock(tx);
       const rows = await tx.$queryRaw<DeliveryLockRow[]>`
       SELECT
         r."leaseExpiresAt" AS "runtimeLeaseExpiresAt",

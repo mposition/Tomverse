@@ -33,6 +33,7 @@
 .heroContent { display: grid; grid-template-columns: minmax(0, 560fr) minmax(0, 690fr); gap: 60px; margin-top: 56px; align-items: start; }
 .heroStory { padding-top: 16px; max-width: 560px; }
 .heroStory > p:first-child { font-size: 1.1875rem; line-height: 1.55; }
+.mobileHeroText, .mobileHeroDetails { display: none; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .heroStory .actions { margin-block: 24px; }
 .action { min-height: 52px; width: 224px; max-width: 100%; padding: 14px 20px 14px 24px; border-radius: 100px; background: var(--launch-brand); color: #fff; display: inline-flex; justify-content: space-between; align-items: center; gap: 12px; font-size: .9375rem; line-height: 1.4; font-weight: 700; text-decoration: none; transition: transform .2s ease, background .2s ease; }
@@ -52,7 +53,7 @@
 .modelStamps { position: relative; display: flex; align-items: start; justify-content: space-between; gap: 24px; padding: 18px 20px 0 12px; }
 .modelStamp { flex: 1 1 0; min-width: 0; background: var(--launch-panel); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 8px; position: relative; z-index: 1; }
 .modelStamp strong { font-size: 1.625rem; line-height: 1.15; }
-.modelStamp span { font-size: .75rem; line-height: 1.5; color: var(--launch-muted); }
+.modelStamp span { font-size: .75rem; line-height: 1.5; color: #d4d4d8; }
 .mobileModelNote { display: none; }
 .stamp0 { transform: rotate(-7deg); }
 .stamp1 { transform: rotate(3deg); margin-top: -10px; }
@@ -66,7 +67,7 @@
 .previewBody { font-size: .875rem; color: #52525b; }
 .previewFollowup { font-size: .8125rem; font-weight: 700; color: var(--launch-brand); }
 .heroDemo { font-size: .6875rem; color: var(--launch-muted); margin: 14px 40px 0 62px; line-height: 1.5; display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; }
-.motionToggle { min-height: 44px; border: 0; padding: 8px 0; background: transparent; color: #d4d4d8; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.motionToggle { min-height: 44px; min-width: 44px; border: 1px solid #71717a; border-radius: 10px; padding: 8px 12px; background: transparent; color: #d4d4d8; font: inherit; font-size: .875rem; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .ribbonWrap { margin-top: 18px; padding-block: 30px 54px; }
 .ribbon { display: flex; width: 112%; margin-left: -4%; gap: 40px; background: var(--launch-brand); padding: 16px 48px; transform: rotate(-3deg); color: #fafafa; font-size: 2.625rem; font-weight: 800; line-height: 1.1; white-space: nowrap; }
 .ribbon span { flex: none; }
@@ -228,6 +229,11 @@
   .hero { padding-top: 28px; }
   .heroTitle { font-size: min(16cqw, 3.8rem); line-height: 1.15; letter-spacing: -.045em; }
   .heroTitle span:last-child { font-size: min(18cqw, 4.1rem); letter-spacing: -.055em; }
+  .homepage:lang(en) .heroTitle { font-size: min(11cqw, 2.5rem); line-height: 1.14; letter-spacing: -.035em; }
+  .homepage:lang(en) .heroTitle span:last-child { font-size: min(12cqw, 2.75rem); letter-spacing: -.035em; }
+  .desktopHeroText { display: none; }
+  .mobileHeroText { display: inline; }
+  .mobileHeroDetails { display: block; margin-top: 20px !important; font-size: 1rem; line-height: 1.6; }
   .homepage:lang(ko) .heroTitle span:last-child { font-size: min(14cqw, 3.5rem); overflow-wrap: normal; }
   .heroContent { margin-top: 28px; gap: 36px; }
   .heroStory { padding-top: 0; }

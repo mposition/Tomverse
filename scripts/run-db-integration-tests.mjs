@@ -255,6 +255,9 @@ run(
     // An owner retry of a named Claude CLI failure reaches the claim; its
     // partial receipt still holds the worker for every other Task.
     "tests/integration/amuxV22CliFailureRetryClaim.db.test.mjs",
+    // An owner-accepted unknown-usage attempt (alone or with an owner retry)
+    // leaves the worker usage gate; any other unknown attempt still holds it.
+    "tests/integration/amuxV22AttemptUsageAcceptance.db.test.mjs",
     // A run the v52 review rejected twice may be retried by the owner; the
     // retry reaches the claim and its first rejection returns once more.
     "tests/integration/amuxV22ReviewRejectedTwiceRetry.db.test.mjs",
@@ -322,6 +325,9 @@ run(
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
+    // An owner usage acceptance and a review resolution on one Task at once
+    // both finish: each takes the audit chain lock before the Task row.
+    "tests/integration/amux-review-audit-lock-order.db.test.ts",
     "tests/integration/amuxV4PrlessReviewGuard.db.test.mjs",
     // Explicit intake registration writes one backlog card, one body-free
     // draft, one consumed approval and one audit row, and leaves execution

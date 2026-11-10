@@ -282,6 +282,8 @@ export const de = {
         onGuestMode: "Gastmodus aktiviert",
         guestModeMessage: "Im Gastmodus werden Chatdaten im Browser gespeichert und nicht auf dem Server aufgezeichnet.",
         guestModeLimitMessage: "(50 kostenlose Credits pro Tag, aufgeteilt auf Ihre ausgewählten Modelle)",
+        guestCreditsUsed: "Gast-Credits: {used}/{limit} verwendet",
+        guestCreditsShared: "Das tägliche Gast-Credit-Kontingent wird von allen ausgewählten Modellen gemeinsam genutzt.",
         guestComparisonsRemaining: "~{count} weitere Vergleiche heute",
         aiAssistant: "KI-Assistent",
         you: "Sie",
@@ -1676,6 +1678,9 @@ export const de = {
         historyDescription: "Jede Anfrage, jeder Download und jede Ablehnung für dieses Konto, neunzig Tage lang aufbewahrt. Eine Ablehnung bedeutet, dass ein Download-Link für Ihr Konto vorgelegt und zurückgewiesen wurde.",
         historyEmpty: "Sie haben Ihre Kontodaten noch nicht heruntergeladen.",
         historyLoading: "Wird geladen...",
+        refusedExpired: "Das System hat den Download abgelehnt, weil der Link abgelaufen ist. Erstellen Sie einen neuen Link.",
+        refusedUsed: "Das System hat einen erneuten Download über einen bereits verwendeten Einmallink abgelehnt.",
+        refusedAccountMismatch: "Das System hat den Download abgelehnt, weil das anfragende Konto nicht der Eigentümer des Links war.",
         refusedNote: "Ein Link wurde vorgelegt, nachdem er abgelaufen war, bereits benutzt worden war oder zu einem anderen Konto gehörte.",
         status: {
             ...en.accountDataExport.status,

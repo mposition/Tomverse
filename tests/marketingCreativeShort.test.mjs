@@ -6,9 +6,9 @@ import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import { marketingAssetSchema } from "../lib/marketingAssets.ts";
-import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, normalizePack, reviewPassed, usablePacks } from "../tools/marketing-video/creative-core.mjs";
+import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, normalizePack, reviewPassed, usablePacks } from "../tools/marketing-video/creative-core.mjs";
 import { speakLine, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
-import { admit, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
+import { admit, downloadResult, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
 import { creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
 
 /**
@@ -144,6 +144,29 @@ test("a line is spoken in the locale's fixed voice and counted in characters", a
   assert.equal(entry.cost, "한 번 묻고, 다른 점을 보세요.".length);
   assert.equal(entry.status, "done");
   assert.ok(existsSync(out));
+});
+
+test("a paid result's download is tried again and never throws", async () => {
+  // 2026-11-10: a thrown fetch after the music was paid for ended the first run before its report.
+  let tries = 0;
+  const flaky = async () => {
+    tries += 1;
+    if (tries === 1) throw new Error("other side closed");
+    if (tries === 2) return { ok: false, status: 503 };
+    return { ok: true, arrayBuffer: async () => MP3 };
+  };
+  assert.deepEqual(await downloadResult("https://cdn.example/m.mp3", { maxBytes: 1024, waitMs: 1, fetchImpl: flaky }), MP3);
+  assert.equal(tries, 3);
+  const down = async () => { throw new Error("ECONNRESET"); };
+  assert.equal(await downloadResult("https://cdn.example/m.mp3", { maxBytes: 1024, waitMs: 1, fetchImpl: down }), null);
+  const big = async () => ({ ok: true, arrayBuffer: async () => Buffer.alloc(2048) });
+  assert.equal(await downloadResult("https://cdn.example/m.mp3", { maxBytes: 1024, waitMs: 1, fetchImpl: big }), null);
+
+  // A download that throws leaves the job settled and the run going: a refusal, not a crash.
+  const jobDir = tempJob();
+  const result = await makeMedia({ request: music(), out: join(jobDir, "m.mp3"), jobDir, env: capEnv(), cli: fakeCli({ cost: 3.8 }).cli, fetchBytes: down, day: DAY });
+  assert.equal(result.reason, "result_not_the_media");
+  assert.equal(readLedger(creativeLedgerPath(jobDir, DAY)).entries[0].status, "done");
 });
 
 test("a call whose price lookup crosses Brisbane midnight is refused before it is created or written", async () => {
@@ -369,4 +392,16 @@ test("the job does nothing while its switch is off, and stops before spending wi
   const noCap = spawnSync(process.execPath, [join(tool, "run-creative-short.mjs")], { encoding: "utf8", env: { PATH: process.env.PATH, MARKETING_CREATIVE_SHORT: "on" } });
   assert.equal(noCap.status, 1);
   assert.equal(JSON.parse(noCap.stdout.trim().split("\n").at(-1)).halted, "no_credit_cap");
+});
+
+test("model file rules are absolute, so a cd in the model's shell cannot move them", async () => {
+  const posixResolve = (file) => `/home/tommy/job-checkout/tools/marketing-video/${file}`;
+  assert.equal(fileRule("Edit", "job/creative/20261110-2/film/**", posixResolve, "/"), "Edit(//home/tommy/job-checkout/tools/marketing-video/job/creative/20261110-2/film/**)");
+  const backslash = String.fromCharCode(92);
+  const windowsResolve = (file) => ["C:", "work", "tools", "marketing-video", ...file.split("/")].join(backslash);
+  assert.equal(fileRule("Read", "job/sources/**", windowsResolve, backslash), "Read(//c/work/tools/marketing-video/job/sources/**)");
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /(?:Read|Edit|Write)\(\.\//u, "no relative file rule is left");
+  assert.doesNotMatch(source, /`Write\(/u, "Write rules match nothing; Edit covers Write");
 });

@@ -12,6 +12,7 @@ type ModeInfoSheetProps = {
   onClose: () => void;
   guestMessageCount?: number;
   maxGuestMessages?: number;
+  guestResetsAt?: string | null;
   activeModelCount?: number;
 };
 
@@ -20,9 +21,10 @@ export function ModeInfoSheet({
   onClose,
   guestMessageCount = 0,
   maxGuestMessages = APP_DEFAULTS.maxGuestMessages,
+  guestResetsAt,
   activeModelCount = 1,
 }: ModeInfoSheetProps) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -36,6 +38,13 @@ export function ModeInfoSheet({
   });
 
   if (!mode) return null;
+
+  const resetDate = guestResetsAt ? new Date(guestResetsAt) : null;
+  const resetLabel = resetDate && Number.isFinite(resetDate.getTime())
+    ? t("usage.dailyResetAt")
+      .replace("{time}", new Intl.DateTimeFormat(lang, { dateStyle: "short", timeStyle: "short" }).format(resetDate))
+      .replace("{timeZone}", Intl.DateTimeFormat().resolvedOptions().timeZone)
+    : null;
 
   const remainingComparisons = Math.max(
     0,
@@ -77,8 +86,10 @@ export function ModeInfoSheet({
           {t("chat.guestModeMessage")}
         </p>
         <p className="mt-1 text-sm font-semibold text-blue-600 dark:text-blue-400">
-          {t("chat.guestModeLimitMessage")} · {guestMessageCount}/{maxGuestMessages}
+          {t("chat.guestCreditsUsed").replace("{used}", String(guestMessageCount)).replace("{limit}", String(maxGuestMessages))}
         </p>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{t("chat.guestCreditsShared")}</p>
+        {resetLabel && <p data-testid="guest-usage-reset" className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{resetLabel}</p>}
         <p className="mt-1 text-sm text-blue-500 dark:text-blue-300">
           {t("chat.guestComparisonsRemaining").replace("{count}", String(remainingComparisons))}
         </p>

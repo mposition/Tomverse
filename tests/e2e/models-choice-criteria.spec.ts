@@ -18,6 +18,8 @@ test("Korean model descriptions use per-model facts instead of shared performanc
     await expect(card.getByText("글쓰기", { exact: true })).toHaveCount(0);
     await expect(card.getByText("분석", { exact: true })).toHaveCount(0);
   }
-  await expect(page.getByText(/비용 차이가 성능 우열을 뜻하지는 않습니다/)).toBeVisible();
+  // The note is part of the full introduction, which phones collapse (#3546).
+  if (info.project.name.includes("mobile")) await expect(page.getByText(/비용 차이가 성능 우열을 뜻하지는 않습니다/)).toBeAttached();
+  else await expect(page.getByText(/비용 차이가 성능 우열을 뜻하지는 않습니다/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

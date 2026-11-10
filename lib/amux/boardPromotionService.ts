@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Session } from "next-auth";
 import type { Prisma } from "@prisma/client";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { SYSTEM_AUDIT_ACTOR_METADATA_KEY } from "@/lib/adminAuditSystemActors";
 import {
@@ -113,6 +113,8 @@ const withPromotionTransaction = async <T>(
     return await prisma.$transaction(
       async (tx) => {
         await tx.$executeRaw`SELECT set_config('statement_timeout', ${BOARD_IMPORT_STATEMENT_TIMEOUT}, true)`;
+        // Audit chain before any card row (lib/adminAudit.ts takeAuditChainLock).
+        await takeAuditChainLock(tx);
         return run(tx, await databaseNow(tx));
       },
       { maxWait: 5_000, timeout: 20_000 },

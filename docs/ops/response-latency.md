@@ -1,5 +1,8 @@
 # Chat and Review latency
 
+For submit-to-stream stage definitions and the controlled preparation comparison,
+see [Smart Adaptive send pipeline](smart-adaptive-send-pipeline-validation.md).
+
 The existing Auto Router Optimizer now receives content-free timing evidence in
 its existing generator call. It stores that evidence with its cycle report and
 shows it in Admin's optimizer panel. There is no extra model call on a user turn,
@@ -14,8 +17,12 @@ start an optimizer cycle. Per-cycle evidence remains a historical snapshot.
 
 ## Smart Adaptive first response
 
-Application-managed search asks the answer model to issue independent queries
-in the same step and to stop once it has sufficient evidence. Dependent follow-up
+Application-managed search accepts a single query or an array of up to five
+independent queries in one `web_search` call. Array entries execute concurrently
+and return ordered, per-query results (including failures and source notices).
+Country, language and freshness apply to the whole batch; use separate calls
+when those hints differ. The answer model is asked to batch independent queries
+and stop once it has sufficient evidence. Dependent follow-up
 searches, source citations and the five-request ceiling remain available. Exact
 duplicates within an attempt share an in-flight request or reuse its successful
 result; locale and freshness hints are part of the key. Failed requests remain
@@ -34,13 +41,40 @@ usage retaining the hold. No budget or user credit price changes.
 The standalone fallback can add latency after a failed combined call; include
 these failures in p95 comparisons before enabling the switch.
 
-Combined decisions carry `+image-intent-v1` in their version. Their image context
-is not stored in router decisions, so the optimizer excludes them from text-only
+Combined decisions now carry `+image-intent-v2` in their version. Ordinary chat
+returns `imageIntent: null` instead of generating unused image fields. An exact
+shared message is sent once; distinct bounded image text is retained. Follow-up
+and photo-edit instructions are included when their prepared context is present;
+otherwise the prompt explicitly prohibits a rewrite/edit. Models, reasoning
+effort, output limits, validators and fallback remain the same.
+Their image context is not stored in router decisions, so both routing and
+rewrite optimizers exclude all `+image-intent-` versions from text-only
 replay; normal session memory and aggregate routing diagnostics remain available.
 Before enabling this switch, compare routing/image accuracy and latency against
 the legacy path using approved evaluation traffic, including text, files, image
 generation, photo analysis/editing and image follow-ups. Local mocked tests check
 admission and orchestration, not model answer quality or production p50/p95 gains.
+
+Search logs now include content-free `toolCallIndex`, `batchSize` and `reused`
+fields. Use these with the request's trace and model to distinguish tool round
+trips from actual backend requests. A batch is not guaranteed: the model still
+decides which queries are independent and may request dependent follow-ups.
+
+### Reproducible local comparison
+
+On the local PC, PowerShell, in this repository, after `npm ci`, run:
+
+```powershell
+node --conditions=react-server --experimental-test-module-mocks --import tsx scripts/smart-adaptive-latency-benchmark.mjs 02f3f0c195cbbee4396a8307cd7d913bce74ec85
+```
+
+No production credentials, database access or paid calls are used. The script
+reads the baseline from Git, briefly writes a temporary baseline module locally,
+and removes it on completion. It compares the real tool executor under controlled
+search/model transport delays, verifies identical source coverage and settled
+request counts, and measures actual before/after router prompt tokens. It does
+not measure model reasoning, answer quality, batch adoption or production speed.
+The run and limits are recorded in [the comparison report](smart-adaptive-search-batching-validation.md).
 
 ## Immediate changes
 

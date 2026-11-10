@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { getAdminRole } from "@/lib/adminAuth";
 import {
   amuxReviewAllowedOutcomes,
   amuxReviewApprovalHasEvidence,
@@ -34,6 +35,7 @@ import { evaluateLockedAmuxCostAdmission, lockAmuxResourcePolicies } from "@/lib
 import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
 import { ENGINEERING_AGENT_V22_TIER_PENDING_REASON } from "@/lib/engineeringAgentCore";
 import { prisma } from "@/lib/prisma";
+import { amuxV22TaskUnknownUsageAttemptIds, recordAmuxV22UsageAcceptances } from "@/lib/amux/v22AttemptUsageAcceptance";
 
 export class AmuxReviewRefusal extends Error {
   constructor(public readonly code: string, public readonly status = 409) {
@@ -101,7 +103,11 @@ const dbNow = async (tx: Client) => {
   return rows[0].now;
 };
 
+/** Every caller writes its admin audit entry last, so the audit chain lock is
+ * taken here, before the Task row (lib/adminAudit.ts takeAuditChainLock). A
+ * retry's resource policy locks come before this, as in execution admission. */
 async function lockTaskAndEscalation(tx: Client, escalationId: string) {
+  await takeAuditChainLock(tx);
   const identity = await tx.amuxHumanEscalation.findUnique({
     where: { id: escalationId },
     select: { taskId: true },
@@ -336,6 +342,13 @@ export async function getAmuxReviewDetail(escalationId: string) {
   const { escalation, task, lastAttempt, used, digest, text, context, report,
     displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored,
     decisionHold } = state;
+  // The Task's ended runs whose CLI usage is unknown and not yet accepted:
+  // each holds its worker in the v22 usage gate (owner decision 2026-11-10).
+  const unknownUsageIds = task.sourceSystem === "admin-idea-v4" ?
+    await prisma.$transaction((tx) => amuxV22TaskUnknownUsageAttemptIds(tx, task.id)) : [];
+  const unknownUsageAttempts = unknownUsageIds.length ? await prisma.amuxExecutionAttempt.findMany({
+    where: { id: { in: unknownUsageIds } }, orderBy: [{ startedAt: "asc" }, { id: "asc" }],
+    select: { id: true, worker: true, startedAt: true } }) : [];
   return {
     available: true,
     escalation: {
@@ -371,6 +384,8 @@ export async function getAmuxReviewDetail(escalationId: string) {
       // attempt with one finished; only its settlement was lost.
       result_stored: lastAttemptResultStored,
     } : null,
+    unknown_usage_attempts: unknownUsageAttempts.map((attempt) => ({ id: attempt.id,
+      worker: attempt.worker, started_at: attempt.startedAt.toISOString() })),
     review_content: { text, digest, truncated: displayTruncated,
       display_mismatch: !displayExact },
     review_context: context,
@@ -640,6 +655,14 @@ export async function resolveAmuxReview(input: {
     });
     if (closed.count !== 1) return refuse("AMUX_REVIEW_ESCALATION_CONFLICT");
     const decisionId = proposal.decisionId;
+    // An owner's retry of a v4 Task accepts that the Task's earlier attempts'
+    // unknown usage stays unknown (owner decision 2026-11-10), so the retry is
+    // not refused its worker by an older attempt of its own. The route admits
+    // only the re-authenticated owner to a v4 review; the role is checked
+    // again here because this releases the worker usage gate.
+    const acceptedUnknownUsageAttemptIds = proposal.outcome === "retry" &&
+        state.task.sourceSystem === "admin-idea-v4" && getAdminRole(input.session) === "owner" ?
+      await amuxV22TaskUnknownUsageAttemptIds(tx, taskId) : [];
     const auditLogId = await writeAdminAuditLog({
       session: input.session,
       request: input.request,
@@ -656,6 +679,8 @@ export async function resolveAmuxReview(input: {
         review_base_sha: proposal.reviewBaseSha,
         previous_revision: proposal.taskRevision,
         next_revision: proposal.taskRevision + 1,
+        ...(acceptedUnknownUsageAttemptIds.length ?
+          { accepted_unknown_usage_attempt_ids: acceptedUnknownUsageAttemptIds } : {}),
       },
       tx,
     });
@@ -671,6 +696,9 @@ export async function resolveAmuxReview(input: {
         auditLogId,
       },
     });
+    await recordAmuxV22UsageAcceptances(tx, { taskId,
+      attemptIds: acceptedUnknownUsageAttemptIds, source: "review_retry",
+      acceptedByUserId: actorId, auditLogId, now });
     if (proposal.outcome === "block" && state.budget.allowed) {
       // A block records the current reason without making a recoverable task
       // impossible to revisit. The old escalation/decision remain immutable;
