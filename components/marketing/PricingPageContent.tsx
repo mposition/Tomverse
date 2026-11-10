@@ -1501,10 +1501,10 @@ export function PricingPageContent() {
               data-cta-state={ctaState}
               data-requested-target={isRequestedTarget ? "true" : undefined}
               aria-labelledby={`pricing-plan-name-${planId}`}
-              // Desktop subgrid has nine in-flow rows, including the credit example (en)
-              // or the plan limits (ko), from eyebrow through features; keep the span
-              // aligned with this structure.
-              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border ${lang === "ko" ? "p-5 sm:p-6" : "p-6"} shadow-sm [overflow-wrap:anywhere] ${lang === "en" || lang === "ko" ? "lg:row-span-9 lg:grid lg:grid-rows-subgrid" : ""} ${
+              // Desktop subgrid has nine in-flow rows (ko, with the plan limits) or ten
+              // (en, with the credit example and the capabilities details), from eyebrow
+              // through features; keep the span aligned with this structure.
+              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border ${lang === "ko" ? "p-5 sm:p-6" : "p-6"} shadow-sm [overflow-wrap:anywhere] ${lang === "en" ? "lg:row-span-10 lg:grid lg:grid-rows-subgrid" : lang === "ko" ? "lg:row-span-9 lg:grid lg:grid-rows-subgrid" : ""} ${
                 plan.highlighted ? "border-blue-600 bg-blue-700 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
               } ${

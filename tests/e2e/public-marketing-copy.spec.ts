@@ -292,6 +292,9 @@ test("FAQ explains both products and French Knowledge identifies its English med
   await page.goto("/ko/faq");
   const productQuestion = infoPages.faq.ko.sections[0];
   await expect(page.getByRole("heading", { name: productQuestion.title, exact: true })).toBeVisible();
+  // At 320px the FAQ sections are a collapsed accordion; open the first one.
+  const productToggle = page.getByRole("button", { name: productQuestion.title, exact: true });
+  if ((await productToggle.getAttribute("aria-expanded")) !== "true") await productToggle.click();
   await expect(page.getByText(productQuestion.body, { exact: true })).toBeVisible();
   expect(productQuestion.body).toContain("Chat");
   expect(productQuestion.body).toContain("Review");
