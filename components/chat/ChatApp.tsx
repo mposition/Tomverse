@@ -41,6 +41,8 @@ import {
 import type { WebSearchMode, WebSearchToggleMode } from "@/lib/appDefaults";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { createClientLatency } from "@/lib/responseLatencyClient";
+import { boundedLatencyMs } from "@/lib/responseLatencyStages";
+import type { ClientLatencyStages } from "@/lib/responseLatencyCore";
 import { decideBundleStaleRecovery } from "@/lib/chatContextBundleRecovery";
 import { parseChatStreamTrailer } from "@/lib/webSearchStreamTrailer";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
@@ -221,6 +223,7 @@ function guestTranscriptWithCarriedAnswers(
 }
 
 type ChatAppProps = {
+  chatLocationIntentEnabled?: boolean;
   voiceHistoryRevision?: number;
   /** Product chrome that owns this panel's account and purchase returns. */
   currentProduct?: ChatWorkspaceProduct;
@@ -244,6 +247,8 @@ type ChatAppProps = {
   sendEcho?: SendEcho | null;
   promptPayload?: {
     submittedAtMonotonicMs?: number;
+    preparationTimings?: ClientLatencyStages;
+    preparationReadyAtMonotonicMs?: number;
     id: string;
     text: string;
     chatId: string;
@@ -469,6 +474,7 @@ const interpolateModelOnlyLabel = (template: string, modelName: string) =>
     template.replace("{model}", modelName);
 
 function ChatAppComponent({
+  chatLocationIntentEnabled = true,
   voiceHistoryRevision,
   currentProduct = "review",
   modelId,
@@ -1504,6 +1510,8 @@ function ChatAppComponent({
     /** Answer with an image instead of text; see the branch below. */
     imageTurn?: ChatImageTurnRequest | null,
     submittedAtMonotonicMs?: number,
+    preparationTimings?: ClientLatencyStages,
+    preparationReadyAtMonotonicMs?: number,
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1633,7 +1641,12 @@ function ChatAppComponent({
     // Opening the run here, on the key, is what lets a panel that mounts later
     // for this same conversation show it as still generating and stop it.
     const controller = beginChatRuntimeRun(runKey);
-    const latency = createClientLatency(submittedAtMonotonicMs);
+    const latency = createClientLatency(submittedAtMonotonicMs, {
+      ...preparationTimings,
+      ...(preparationReadyAtMonotonicMs === undefined ? {} : {
+        panelHandoffMs: boundedLatencyMs(performance.now() - preparationReadyAtMonotonicMs),
+      }),
+    });
     let latencyCompleted = false;
 
     let requestTraceId: string | null = null;
@@ -1895,10 +1908,15 @@ function ChatAppComponent({
         // Human permission and guest verification happen before provider wait
         // time starts. The same source turn is continued after either prompt.
         liveness.stop();
-        const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal, {
+        const finishLocation = latency.stage("locationMs");
+        const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal, chatLocationIntentEnabled ? {
           turnId: sourceUserMessageId,
-          requiresLocation: () => requestChatLocationIntent(String(userMessage.content ?? ""), fetch, { turnstileToken }),
-        });
+          requiresLocation: async () => {
+            const finishIntent = latency.stage("locationIntentMs");
+            try { return await requestChatLocationIntent(String(userMessage.content ?? ""), fetch, { turnstileToken }); }
+            finally { finishIntent(); }
+          },
+        } : undefined).finally(finishLocation);
         controller.signal.throwIfAborted();
         liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
         onDispatchStarted?.();
@@ -2314,6 +2332,7 @@ function ChatAppComponent({
           );
         },
       });
+      latency.streamEnded();
       assistantText = streamed.displayText;
       // Set when the server announced a model change mid-response. Kept so the
       // finished message can say which model actually answered -- the routed
@@ -2705,6 +2724,7 @@ function ChatAppComponent({
     onResponseComplete,
     onPromptRefinerExecution,
     persistGuestTranscript,
+    chatLocationIntentEnabled,
     pollDeepResearchJob,
     runGuestChatRequest,
     sessionUserId,
@@ -3062,6 +3082,8 @@ function ChatAppComponent({
             ? promptPayload.imageTurnsByModel[modelId]
             : promptPayload.imageTurn,
           promptPayload.submittedAtMonotonicMs,
+          promptPayload.preparationTimings,
+          promptPayload.preparationReadyAtMonotonicMs,
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });

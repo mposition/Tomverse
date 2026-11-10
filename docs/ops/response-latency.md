@@ -1,5 +1,8 @@
 # Chat and Review latency
 
+For submit-to-stream stage definitions and the controlled preparation comparison,
+see [Smart Adaptive send pipeline](smart-adaptive-send-pipeline-validation.md).
+
 The existing Auto Router Optimizer now receives content-free timing evidence in
 its existing generator call. It stores that evidence with its cycle report and
 shows it in Admin's optimizer panel. There is no extra model call on a user turn,

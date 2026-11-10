@@ -2236,7 +2236,10 @@ async function handleChatPost(
                       userId: session?.user?.id ?? null,
                       conversationId: conversationId ?? null,
                       traceId,
-                      rewriteAllowed: !turnCarriesAttachments(autoRoutingMessages),
+                      // Atomic Refiner consume restores this exact preview
+                      // before provider dispatch. A second rewrite would be
+                      // discarded, including an explicit keep-original choice.
+                      rewriteAllowed: !refinerPreview && !turnCarriesAttachments(autoRoutingMessages),
                       fileContext: fileRoutingContext,
                       imageIntent: imageRouting.context,
                       onImageDecision: imageRouting.accept,
@@ -2289,7 +2292,7 @@ async function handleChatPost(
             !guestAutoSelection?.routed &&
             autoSelection.routed &&
             llmPick?.rewrite &&
-            !refinerExecution?.applied
+            !refinerPreview
         ) {
             const rewritten = withRouterRewrite(executionMessages, llmPick.rewrite);
             if (rewritten !== executionMessages) {
