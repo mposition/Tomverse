@@ -392,6 +392,8 @@ Primary tests:
 - `tests/e2e/chat-keyboard-policy.spec.ts`
 - `tests/e2e/chat-tools.spec.ts`
 - `tests/e2e/web-search-composer-state.spec.ts`
+- `tests/e2e/contextual-model-suggestion-layout.spec.ts` (the model suggestion card
+  lays out by its own column, not the viewport, and keeps the send button on screen)
 - `tests/e2e/comparison-action-rail.spec.ts`
 - `tests/e2e/guest-turnstile-verification.spec.ts` (the verification sheet vs. the composer)
 - `tests/e2e/guest-attachment-ai-review-flow.spec.ts` (the guest journey, 320/390/desktop)
