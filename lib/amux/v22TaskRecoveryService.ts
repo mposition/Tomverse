@@ -1042,6 +1042,12 @@ export function reportAmuxV22RecoveryEvidence(input: AmuxV22RecoveryEvidenceInpu
       return { recorded: true, evidenceId: existing.id, verified: existing.verified,
         evidenceDigest, reason: existing.reason, retryWrite: false };
     }
+    // Lock order (lib/adminAudit.ts takeAuditChainLock): the worker runtime
+    // row read below, then the audit chain, then the Task, as the owner's
+    // inspection request takes them.
+    await tx.$queryRaw`SELECT "workerName" FROM "AmuxWorkerRuntime"
+      WHERE "workerName" = ${inspection.workerName} FOR SHARE`;
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, inspection.taskId);
     let reason = amuxV22RecoveryProofReason(input, task.taskRole!);
     try { requireBlockedIdentity(task, inspection.taskRevision, inspection.priorAttemptId); }
@@ -1219,6 +1225,8 @@ export function reportAmuxV22LegacySafeStopEvidence(input: AmuxV22SafeStopEviden
       configured.workerNames.length === profile.workerNames.length &&
       configured.workerNames.every((name, index) => name === profile.workerNames[index]);
     const runtimeMatches = await lockSafeStopProfileRuntime(tx, profile);
+    // Audit chain after the runtime rows and before the Task (lib/adminAudit.ts).
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, inspection.taskId);
     const priorLocked = await lockPriorAttempt(tx, inspection.priorAttemptId);
     let reason: string | null = amuxV22SafeStopProofReason(input);
