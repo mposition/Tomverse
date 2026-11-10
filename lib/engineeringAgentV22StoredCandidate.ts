@@ -103,10 +103,13 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
       !(await ports.readConsent(first.taskId)))
     return { ok: false, reason: "publication_not_authorized" };
   const patch = await ports.readPatch(attemptId, first.taskId);
-  if (!patch || patch.baseSha !== first.baseSha || !patch.files)
+  if (!patch || patch.baseSha !== first.baseSha)
     return { ok: false, reason: "patch_unavailable" };
-  const candidate = await ports.loadCandidate({ baseSha: first.baseSha,
-    files: patch.files });
+  // Evidence over the sidecar's file limits carries the patch text only; the
+  // loader then rebuilds the changed files from the pinned base blobs.
+  const candidate = await ports.loadCandidate(patch.files ?
+    { baseSha: first.baseSha, files: patch.files } :
+    { baseSha: first.baseSha, patchText: patch.text });
   if (!candidate.ok) return { ok: false, reason: candidate.reason };
   const tierEvidence = await ports.readTier(candidate);
   const current = await ports.readSnapshot(attemptId);

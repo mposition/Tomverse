@@ -83,9 +83,10 @@ test("stored v22 patch refuses while the separate publication latch is closed", 
   assert.equal(patchReads, 0);
 });
 
-test("stored v22 patch refuses missing files, base drift and candidate errors", async () => {
-  for (const wrong of [null, { ...patch, files: null },
-    { ...patch, baseSha: "e".repeat(40) }]) {
+test("stored v22 patch refuses a missing patch, base drift and candidate errors", async () => {
+  // A patch with no file bytes goes to the loader as text instead
+  // (engineeringAgentV22PatchRebuild.test.mjs).
+  for (const wrong of [null, { ...patch, baseSha: "e".repeat(40) }]) {
     assert.deepEqual(await loadEngineeringAgentV22StoredCandidate(attemptId,
       ports({ readPatch: async () => wrong,
         loadCandidate: async () => { throw new Error("must not load"); } })),
