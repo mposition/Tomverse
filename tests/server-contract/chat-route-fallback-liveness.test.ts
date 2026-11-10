@@ -77,12 +77,13 @@ let pinnedResponse: Response | null = null;
 let pinnedInputs: readonly object[] | null = null;
 const routerInputs: Array<Parameters<typeof import("../../lib/autoModelSelection").selectAutoModel>[0]> = [];
 const llmRouterInputs: Array<Parameters<typeof import("../../lib/autoLlmRouter").pickAutoModelWithLlm>[0]> = [];
+let llmRouterRewrite: string | null = null;
 const realLlmRouter = require(resolve(ROOT, "lib/autoLlmRouter.ts")) as typeof import("../../lib/autoLlmRouter");
 mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
   ...realLlmRouter,
   pickAutoModelWithLlm: async (input: Parameters<typeof realLlmRouter.pickAutoModelWithLlm>[0]) => {
     llmRouterInputs.push(input);
-    return null;
+    return llmRouterRewrite ? { modelId: input.ruleModelId, rewrite: llmRouterRewrite } : null;
   },
 } });
 const shadowInputs: Array<import("../../lib/routingShadow").RoutingShadowInput> = [];
@@ -2769,8 +2770,9 @@ for (const decision of ["accepted", "kept_original", undefined] as const) {
     refinerConsumes = 0;
     conversationSelectionMode = "auto";
     llmRouterInputs.length = 0;
+    llmRouterRewrite = "A second rewrite that cannot replace a bound Refiner choice.";
     try {
-      const { body, streamError } = await ask("answers", "claimed", 200, false,
+      const { body, streamError, response } = await ask("answers", "claimed", 200, false,
         [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" }], true, true, decision);
       assert.equal(streamError, null);
       assert.ok(body.includes(ANSWER));
@@ -2778,11 +2780,13 @@ for (const decision of ["accepted", "kept_original", undefined] as const) {
       assert.equal(llmRouterInputs[0].rewriteAllowed, decision === undefined);
       const expected = decision === "accepted" ? REFINER_PROMPT : "이 질문에 답해 줘";
       assert.equal(llmRouterInputs[0].prompt, expected);
+      assert.equal(response.headers.get("X-Chat-Auto-Rewrite"), decision ? null
+        : Buffer.from(llmRouterRewrite).toString("base64url"));
       const text = (content: unknown) => typeof content === "string" ? content
         : (content as Array<{ type: string; text?: string }>).filter(part => part.type === "text").map(part => part.text).join("");
-      for (const attempt of attempts) assert.equal(text(attempt.messages.at(-1)!.content), expected);
+      for (const attempt of attempts) assert.equal(text(attempt.messages.at(-1)!.content), decision ? expected : llmRouterRewrite);
       assert.equal(refinerConsumes, decision ? 1 : 0);
-    } finally { refinerMode = null; }
+    } finally { refinerMode = null; llmRouterRewrite = null; }
   });
 }
 

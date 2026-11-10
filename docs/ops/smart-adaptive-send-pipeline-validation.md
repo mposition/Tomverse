@@ -118,6 +118,18 @@ The small earlier location-off snapshot cannot establish this change's live gain
 - Existing route contracts cover selection, fallback, guest credit/auth boundaries,
   tools and full artifact streaming. The unrelated ART-FORMAT-01 TODO remains.
 
+Final local results: 122 route/timing contracts passed with that one existing
+TODO; 34 preparation/latency/location unit and render checks, 20 Auto UI render
+checks and eight location route/provider contracts passed. Browser checks passed
+five send/fence scenarios plus 14 enabled-location and two disabled-location
+desktop/mobile scenarios. The disabled browser lane was explicitly run with
+`E2E_CHAT_LOCATION_INTENT_ENABLED=false`; the default Playwright lane enables
+intent and skips that dedicated test. Production build and targeted ESLint passed.
+Independent review r-20261110-070954-d034a5 accepted the final runtime changes,
+following r-20261110-065304-50d126. The follow-up test supplies a Router rewrite
+even when forbidden and verifies both execution bytes and response provenance;
+all three adversarial cases passed. It changes no reviewed runtime boundary.
+
 No performance-code merge or deployment is included. Production speed and
 semantic answer quality were not remeasured with paid model calls in this task.
 
