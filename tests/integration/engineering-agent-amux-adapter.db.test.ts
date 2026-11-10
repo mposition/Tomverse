@@ -26,6 +26,7 @@ import {
   ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   ENGINEERING_AGENT_AMUX_WORKER,
   engineeringAgentAmuxAdapterPermittedNow,
+  recordEngineeringAgentBoundReviewPullRequest,
   recordEngineeringAgentPublisherResult,
   registerEngineeringAgentWorker,
   engineeringPublishResultAttachment,
@@ -1108,7 +1109,8 @@ test("a closed adapter records a publisher's pull request on the engineering sid
     runEngineeringAgentTransaction(prisma, work);
   await setMode("t1");
   try {
-    const fixture = await readyWorkerWithCard({ requiresHumanReview: true });
+    // A card that did not ask for review, as a v22 card is.
+    const fixture = await readyWorkerWithCard();
     const runId = nextRunId();
     const started = await startWithRun(fixture, runId);
     const { workItemId } = await inTx((tx) =>
@@ -1190,6 +1192,37 @@ test("a closed adapter records a publisher's pull request on the engineering sid
     // Never on the card: the number did not reach AMUX.
     const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
     assert.equal(card.reviewPrNumber, null);
+
+    // The observer's round puts the bound number on the card once the adapter
+    // is open again, through the same AMUX writer and its checks: the card is
+    // marked for review, and the mismatch stays open for a person.
+    const bound = { cardId: fixture.taskId, attemptId: started.attemptId, worker: fixture.worker, prNumber };
+    await assert.rejects(
+      withExecutionApi(() => recordEngineeringAgentBoundReviewPullRequest(bound)),
+      (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === "adapter_closed",
+    );
+    await setMode("t1");
+    assert.deepEqual(
+      await withExecutionApi(() => recordEngineeringAgentBoundReviewPullRequest({ ...bound, worker: "someone-else" })),
+      { recorded: false, reason: "not_the_workers_review" },
+    );
+    assert.deepEqual(await withExecutionApi(() => recordEngineeringAgentBoundReviewPullRequest(bound)), {
+      recorded: true,
+      taskRevision: card.revision + 1,
+      changed: true,
+    });
+    const marked = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+    assert.deepEqual(
+      [marked.status, marked.reviewPrNumber, marked.requiresHumanReview, marked.reviewSpecialty],
+      ["review", prNumber, true, "code-review"],
+    );
+    assert.deepEqual(await withExecutionApi(() => recordEngineeringAgentBoundReviewPullRequest(bound)), {
+      recorded: true,
+      taskRevision: card.revision + 1,
+      changed: false,
+    });
+    assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state, "open");
+    await setMode("off");
 
     // A person who sees the pull request merged on GitHub may close it without
     // changing the agent's mode (owner decision 2026-11-06), but only on a merge
