@@ -7262,6 +7262,7 @@ fn overlap_row(
 fn append_overlap_log(
     conn: &rusqlite::Connection,
     card_id: &str,
+    stamp: &str,
     line: &str,
     assets: &[String],
     now: i64,
@@ -7270,7 +7271,7 @@ fn append_overlap_log(
     let Some(mut card) = bs::get_issue(conn, card_id)? else {
         return Err(rusqlite::Error::QueryReturnedNoRows);
     };
-    card.log = Some(bs::append_log(card.log.as_deref(), &hhmm(), line));
+    card.log = Some(bs::append_log(card.log.as_deref(), stamp, line));
     card.updated = now;
     card.rev += 1;
     card.version += 1;
@@ -7478,8 +7479,9 @@ fn record_overlap_on_conn(
             if elected.evidence.is_empty() { "(none)".into() } else { elected.evidence.join(", ") },
             if elected.assets.is_empty() { "(none)".into() } else { elected.assets.join(", ") },
         );
-        append_overlap_log(conn, &input.card_id, &line, &elected.assets, now, &mut events)?;
-        append_overlap_log(conn, &input.peer_card_id, &line, &elected.assets, now, &mut events)?;
+        let stamp = hhmm();
+        append_overlap_log(conn, &input.card_id, &stamp, &line, &elected.assets, now, &mut events)?;
+        append_overlap_log(conn, &input.peer_card_id, &stamp, &line, &elected.assets, now, &mut events)?;
         tracing::info!(marker = "board_overlap_lineage_recorded", coordination = %coordination_id,
             owner_card = %elected.owner_card_id, owner_session = %elected.owner_session,
             reporter_card = %input.card_id, resolution = %elected.resolution,
