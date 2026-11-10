@@ -189,9 +189,10 @@ const wrap = (
       line.push(glyph);
       lineWidth += advance;
 
-      // A space is an opportunity *after* it; a Korean syllable is one before
-      // the next character, which is the same index once this one is pushed.
-      if (character === " " || (!keepWords && breaksBefore(codePoint))) {
+      // Keep closing punctuation with its preceding Korean/CJK syllable.
+      // Remember an earlier break so the pair moves together without overflow.
+      const nextCloses = /[.,!?;:%)\]}〉》」』】、。，！？：；…]/u.test(characters[index + 1] ?? "");
+      if (character === " " || (!keepWords && breaksBefore(codePoint) && !nextCloses)) {
         lastBreak = line.length;
         widthAtBreak = lineWidth;
       }
