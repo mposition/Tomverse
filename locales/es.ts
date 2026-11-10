@@ -293,6 +293,8 @@ export const es = {
         onGuestMode: "Modo invitado activado",
         guestModeMessage: "En modo invitado, la información del chat se guarda en tu navegador y no se registra en el servidor.",
         guestModeLimitMessage: "(50 créditos gratis por día, compartidos entre tus modelos seleccionados)",
+        guestCreditsUsed: "Créditos de invitado usados: {used}/{limit}",
+        guestCreditsShared: "El límite diario de créditos de invitado se comparte entre los modelos seleccionados.",
         guestComparisonsRemaining: "~{count} comparaciones más hoy",
         aiAssistant: "Asistente de IA",
         you: "Tú",
@@ -1673,6 +1675,9 @@ export const es = {
         historyDescription: "Cada solicitud, descarga y rechazo de esta cuenta, conservados durante noventa días. Un rechazo significa que se presentó un enlace de descarga de tu cuenta y no se aceptó.",
         historyEmpty: "Todavía no has descargado los datos de tu cuenta.",
         historyLoading: "Cargando...",
+        refusedExpired: "El sistema rechazó la descarga porque el enlace había caducado. Prepare un enlace nuevo.",
+        refusedUsed: "El sistema rechazó otra descarga con un enlace de un solo uso ya utilizado.",
+        refusedAccountMismatch: "El sistema rechazó la descarga porque la cuenta solicitante no era propietaria del enlace.",
         refusedNote: "Se presentó un enlace después de haber caducado, después de haberse usado ya, o que pertenecía a otra cuenta.",
         status: {
             ...en.accountDataExport.status,

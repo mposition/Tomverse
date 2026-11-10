@@ -84,6 +84,7 @@ type DraftFixture = {
 function installControlledChatFetch(options: {
   routedModelId?: string;
   responseErrorCode?: string;
+  timingToken?: string;
   responseErrorOnceCode?: string;
   responseErrorOnceDetails?: Record<string, unknown>;
   durableAttemptResponse?: boolean;
@@ -233,6 +234,7 @@ function installControlledChatFetch(options: {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "X-Request-ID": "qa-unified-chat-trace",
+        ...(options.timingToken ? { "X-Response-Latency-Token": options.timingToken } : {}),
         ...(options.routedModelId ? { "X-Chat-Routed-Model": options.routedModelId } : {}),
       },
     });
@@ -295,6 +297,7 @@ async function openChat(page: Page, options: {
   selectedModels?: string[];
   routedModelId?: string;
   responseErrorCode?: string;
+  timingToken?: string;
   responseErrorOnceCode?: string;
   responseErrorOnceDetails?: Record<string, unknown>;
   durableAttemptResponse?: boolean;
@@ -936,6 +939,7 @@ async function openChat(page: Page, options: {
     });
   });
   await page.addInitScript(installControlledChatFetch, {
+    timingToken: options.timingToken,
     routedModelId: options.routedModelId,
     responseErrorCode: options.responseErrorCode,
     responseErrorOnceCode: options.responseErrorOnceCode,
@@ -4329,6 +4333,43 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await page.getByTestId("stop-this-response").click();
     await expect(page.getByTestId("chat-textarea")).toBeEnabled();
     expect(await page.evaluate(() => (window as unknown as { __unifiedChatControls: Array<{ aborted: boolean }> }).__unifiedChatControls[0].aborted)).toBe(true);
+    expect(await requests(page)).toHaveLength(1);
+  });
+
+  test("send timing covers the real preparation and stream without changing the answer", async ({ page }) => {
+    await openChat(page, { timingToken: "fixture-timing-proof", initialSelectionMode: "auto", autoSelectionOffered: true });
+    const reports: Array<Record<string, unknown>> = [];
+    await page.route("**/api/chat/timing", async route => {
+      reports.push(route.request().postDataJSON());
+      await route.fulfill({ status: 204 });
+    });
+    const state = { contextStarted: false, released: false };
+    let release = () => {};
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    await page.route("**/api/chat/context", async route => {
+      state.contextStarted = true;
+      await gate;
+      state.released = true;
+      await route.fallback();
+    });
+    await submitComposer(page, "Preserve the exact question and its full answer.", DESKTOP_VIEWPORT.width);
+    await expect.poll(() => state.contextStarted).toBe(true);
+    expect(await requests(page)).toHaveLength(0);
+    release();
+    await drive(page, 0, "push", "The same complete answer.");
+    await expect(message(page, "The same complete answer.")).toBeVisible();
+    await drive(page, 0, "finish");
+    await expect.poll(() => reports.length).toBe(1);
+    expect(reports[0]).toMatchObject({ outcome: "completed", token: "fixture-timing-proof" });
+    const stages = reports[0].stages as Record<string, number>;
+    for (const key of ["contextPrepareMs", "draftPrepareMs", "modelSyncMs", "messageSaveMs", "panelHandoffMs",
+      "locationMs", "responseHeadersMs", "dispatchToContentMs", "contentToEndMs", "clientFinalizeMs"]) {
+      expect(stages[key], key).toBeGreaterThanOrEqual(0);
+    }
+    expect(reports[0].firstContentMs).toBeGreaterThanOrEqual(reports[0].prepareMs as number);
+    expect(reports[0].completionMs).toBeGreaterThanOrEqual(reports[0].firstContentMs as number);
+    expect(JSON.stringify(reports)).not.toContain("Preserve the exact");
+    expect(JSON.stringify(reports)).not.toContain("The same complete answer");
     expect(await requests(page)).toHaveLength(1);
   });
 

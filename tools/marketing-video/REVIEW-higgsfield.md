@@ -47,4 +47,5 @@ Answer with exactly one line of JSON and nothing else:
 
 - `verdict`: `pass` (ready), `fix` (one edit can mend it; list each change in
   `fixes` as a plain instruction to the image model) or `reject` (start over).
-- `fixes`: at most 8 short instructions; empty on `pass`.
+- `fixes`: at most 8 instructions, each one sentence of at most 200
+  characters, most important first; empty on `pass`.

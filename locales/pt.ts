@@ -293,6 +293,8 @@ export const pt = {
         onGuestMode: "Modo convidado ativado",
         guestModeMessage: "No modo convidado, as informações do chat são salvas no navegador e não são registradas no servidor.",
         guestModeLimitMessage: "(50 créditos grátis por dia, compartilhados entre os modelos selecionados)",
+        guestCreditsUsed: "Créditos de visitante usados: {used}/{limit}",
+        guestCreditsShared: "O limite diário de créditos de visitante é partilhado entre os modelos selecionados.",
         guestComparisonsRemaining: "~{count} comparações a mais hoje",
         aiAssistant: "Assistente de IA",
         you: "Você",
@@ -1673,6 +1675,9 @@ export const pt = {
         historyDescription: "Cada solicitação, download e recusa desta conta, guardados por noventa dias. Uma recusa significa que um link de download da sua conta foi apresentado e rejeitado.",
         historyEmpty: "Você ainda não baixou os dados da sua conta.",
         historyLoading: "Carregando...",
+        refusedExpired: "O sistema recusou o download porque o link expirou. Prepare um novo link.",
+        refusedUsed: "O sistema recusou outro download com um link de uso único já utilizado.",
+        refusedAccountMismatch: "O sistema recusou o download porque a conta solicitante não era proprietária do link.",
         refusedNote: "Um link foi apresentado depois de expirado, depois de já ter sido usado, ou pertencia a outra conta.",
         status: {
             ...en.accountDataExport.status,

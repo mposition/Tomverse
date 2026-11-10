@@ -557,7 +557,9 @@ test.describe("memory settings", () => {
 
   test("delete-all stays disabled until the exact phrase is typed", async ({
     page,
-  }) => {
+  }, testInfo) => {
+    // The reported Korean confirmation label must also fit the 320px phone layout.
+    if (testInfo.project.name.startsWith("mobile")) await page.setViewportSize({ width: 320, height: 900 });
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     const api = await mockMemoryApi(page, {
@@ -571,6 +573,12 @@ test.describe("memory settings", () => {
     await confirmation.fill("delete all memories");
     await expect(submit).toBeDisabled();
     await confirmation.fill("DELETE ALL MEMORIES");
+    await expect(submit).toBeDisabled();
+    await confirmation.fill("모든기억삭제");
+    await expect(submit).toBeDisabled();
+    expect(api.deleteAllBodies).toHaveLength(0);
+    await expect(confirmation).toHaveAccessibleName("확인을 위해 모든 기억 삭제를 입력하세요");
+    await confirmation.fill("모든 기억 삭제");
     await expect(submit).toBeEnabled();
 
     await submit.click();
@@ -595,7 +603,7 @@ test.describe("memory settings", () => {
 
     await page
       .getByTestId("memory-delete-all-confirmation")
-      .fill("DELETE ALL MEMORIES");
+      .fill("모든 기억 삭제");
     await page.getByTestId("memory-delete-all").click();
 
     await expect(page.getByTestId("memory-delete-all-error")).toContainText(
@@ -603,6 +611,24 @@ test.describe("memory settings", () => {
     );
     expect(api.deleteAllBodies).toHaveLength(0);
     await expect(page.getByTestId("memory-active-row")).toHaveCount(1);
+  });
+
+  test("delete-all retains the English challenge outside Korean", async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page);
+    const api = await mockMemoryApi(page, { rows: [memoryRow("active-1")] });
+    await openMemoryPage(page);
+    const confirmation = page.getByTestId("memory-delete-all-confirmation");
+    const submit = page.getByTestId("memory-delete-all");
+    await expect(confirmation).toHaveAccessibleName("Type DELETE ALL MEMORIES to confirm");
+    await confirmation.fill("모든 기억 삭제");
+    await expect(submit).toBeDisabled();
+    expect(api.deleteAllBodies).toHaveLength(0);
+    await confirmation.fill("DELETE ALL MEMORIES");
+    await expect(submit).toBeEnabled();
+    await submit.click();
+    await expect(page.getByTestId("memory-delete-all-done")).toBeVisible();
+    expect(api.deleteAllBodies).toEqual([{ confirm: true, confirmationText: "DELETE ALL MEMORIES" }]);
   });
 
   test("signed-out visitors are asked to sign in", async ({ page }) => {

@@ -28,6 +28,7 @@ import {
 import {
   getModelPickerDescription,
   getModelPickerFeatures,
+  getModelPickerSearchLabel,
   getModelPickerUsageBand,
   modelMatchesCapability,
   modelPickerCopy,
@@ -505,7 +506,9 @@ export function ModelCatalogue({
                                   className="inline-flex items-center gap-1 text-[11px] font-bold text-zinc-500 dark:text-zinc-300"
                                 >
                                   <Icon className="h-3 w-3" aria-hidden="true" />
-                                  {featureLabels[feature]}
+                                  {feature === "search"
+                                    ? getModelPickerSearchLabel(model, lang, searchBackendReadiness)
+                                    : featureLabels[feature]}
                                 </span>
                               );
                             })}

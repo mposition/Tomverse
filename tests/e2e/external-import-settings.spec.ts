@@ -918,6 +918,8 @@ test.describe("external import settings", () => {
 
     await page.goto("/settings/imports");
     await expect(page.getByTestId("external-import-disabled")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "가져오기 기록", exact: true })).toBeVisible();
+    await expect(page.getByText("이 항목을 삭제하면 Tomverse에 저장된 해당 사본이 제거됩니다. 원래 서비스에는 영향이 없습니다.", { exact: true })).toBeVisible();
     await expect(
       page.getByTestId("external-import-file-input")
     ).toHaveCount(0);
@@ -1106,6 +1108,7 @@ test.describe("external import settings", () => {
     // Snapshot deletion is a two-step arm, then returns to the imports page.
     const deleteButton = page.getByTestId("external-viewer-delete");
     await deleteButton.click();
+    await expect(page.getByText("이 항목을 삭제하면 Tomverse에 저장된 해당 사본이 제거됩니다. 원래 서비스에는 영향이 없습니다.", { exact: true })).toBeVisible();
     await deleteButton.click();
     await expect.poll(() => api.snapshotDeleteCount).toBe(1);
     await expect(page).toHaveURL(/\/settings\/imports$/);

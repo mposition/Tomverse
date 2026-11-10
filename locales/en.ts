@@ -1,3 +1,4 @@
+import { englishLocationBody } from "./privacyLocation";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 
@@ -262,6 +263,8 @@ export const en = {
         onGuestMode: "Guest Mode Enabled",
         guestModeMessage: "As you are in guest mode, all chat information is saved in your web browser and is not recorded on the server.",
         guestModeLimitMessage: "(50 free credits per day, shared across your selected models)",
+        guestCreditsUsed: "Guest credits {used}/{limit} used",
+        guestCreditsShared: "The daily guest credit allowance is shared across your selected models.",
         guestComparisonsRemaining: "~{count} more comparisons today",
         aiAssistant: "AI Assistant",
         you: "You",
@@ -1685,6 +1688,9 @@ export const en = {
             "Every request, download and refusal on this account, kept for ninety days. A refusal means a download link for your account was presented and turned away.",
         historyLoading: "Loading...",
         historyEmpty: "You have not downloaded your account data yet.",
+        refusedExpired: "The system refused this download because the link expired. Prepare a new link.",
+        refusedUsed: "The system refused a repeat download using an already-used, single-use link.",
+        refusedAccountMismatch: "The system refused this download because the requesting account did not own the link.",
         refusedNote:
             "A link was presented after it had expired, had already been used, or belonged to a different account.",
         status: {
@@ -2201,7 +2207,7 @@ export const en = {
     },
     privacyPolicy: {
         locationTitle: "Optional current location",
-        location: "Browser or device permission and Tomverse’s location state are separate. Your browser or device may retain an Allow permission across reloads. Tomverse starts with location inactive; its enabled state and automatic-request suppression are kept only in this tab’s memory and reset on reload or account change. Reloading alone does not read a position.\n\nIf you turn location on, we read a fresh approximate position when you send each message and include it with that request to your selected AI providers. While location is inactive, sending a location-dependent question can also trigger an automatic permission request before answering. A short analysis by the configured routing AI model decides whether location is needed; it receives no device position. If your browser or device has retained Allow, that request can read a fresh position without another prompt, including after reload.\n\nTurning location off in the composer or + tools menu blocks further reads and automatic requests for the current session, even if browser permission remains Allow. Denying access also suppresses automatic requests for that session. Reload or account change resets this suppression; use browser or device settings to revoke lasting permission.\n\nWe do not track location in the background or create a separate location history. An answer may mention a place and follows normal chat retention, export and sharing settings. You can provide a place manually instead.",
+        location: englishLocationBody,
         title: "Privacy Policy",
         effective: "Effective: November 16, 2026",
         intro: "Tomverse processes personal information and chat data only as needed to provide the service.",
