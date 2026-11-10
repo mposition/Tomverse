@@ -418,13 +418,17 @@ const transcript = spaced(
 const alt = spaced(spec.alt.trim());
 if (generated) {
   // The Guard's own hygiene rules, run here so a card is not refused for them
-  // after its pictures were paid for (lib/marketingGuardNormalise.ts; Node
-  // strips the types).
+  // after its pictures were paid for (lib/marketingGuardNormalise.ts, which
+  // imports nothing). esbuild strips its types, so any Node runs it: the box's
+  // Node could not import a .ts file itself (first run, 2026-11-10).
   let hygiene;
   try {
-    ({ marketingTextHygiene: hygiene } = await import(pathToFileURL(path.resolve(toolDir, "..", "..", "lib", "marketingGuardNormalise.ts")).href));
+    const { transform } = await import("esbuild");
+    const source = readFileSync(path.resolve(toolDir, "..", "..", "lib", "marketingGuardNormalise.ts"), "utf8");
+    const { code } = await transform(source, { loader: "ts", format: "esm" });
+    ({ marketingTextHygiene: hygiene } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`));
   } catch (error) {
-    fail(`the Guard's hygiene check could not be loaded (Node 22.18 or later runs it): ${error instanceof Error ? error.message : error}`);
+    fail(`the Guard's hygiene check could not be loaded: ${error instanceof Error ? error.message : error}`);
   }
   const codes = [...new Set([...hygiene(transcript), ...hygiene(alt)])];
   if (codes.length > 0) fail(`the words would fail the Guard's hygiene check: ${JSON.stringify(codes)}`);
