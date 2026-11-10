@@ -199,7 +199,7 @@ export function ModelsPageContent() {
 
   return (
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <MarketingHeader maxWidth="max-w-6xl" />
+      <MarketingHeader maxWidth="max-w-6xl" showMobileEntry />
 
       <section lang={lang} className={`mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-14 lg:py-20 ${lang === "ko" ? "break-keep break-words" : "[overflow-wrap:anywhere]"}`}>
         <div className="max-w-3xl">
