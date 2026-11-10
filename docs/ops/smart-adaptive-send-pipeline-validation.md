@@ -29,6 +29,10 @@ LLM call cannot explain that snapshot's preparation delay.
   disabled, skip automatic intent HTTP requests. Manually enabled location still
   reads a fresh position. When enabled, retain semantic classification, guest
   verification, per-source deduplication, consent, revocation and freshness.
+- Do not ask the Router to rewrite a turn with an already validated Refiner
+  preview, including keep-original. Atomic Refiner consumption restores that
+  exact execution view before dispatch, so the second rewrite was discarded.
+  Keep model selection, file/image classification and ordinary Router rewriting.
 - Add bounded numeric stages to the existing signed, best-effort timing report
   and Admin response-latency table. No migration or content logging is required.
 
@@ -116,3 +120,68 @@ The small earlier location-off snapshot cannot establish this change's live gain
 
 No performance-code merge or deployment is included. Production speed and
 semantic answer quality were not remeasured with paid model calls in this task.
+
+## Deeper critical-path review
+
+Read-only Railway HTTP logs and content-free Refiner execution receipts resolved
+the previously unknown preparation segment. At 06:11 and 06:12 UTC:
+
+| Observation | Request A | Request B |
+| --- | ---: | ---: |
+| Browser preparation | 5.375s | 5.011s |
+| Refiner prepare HTTP duration | 4.261s | 3.954s |
+| Refiner admission before provider (receipt timestamps) | 0.375s | 0.337s |
+| Refiner provider to verified completion (receipt timestamps) | 3.711s | 3.460s |
+| Context prepare HTTP duration | 0.081s | 0.100s |
+| Disabled location-intent HTTP duration | 0.036s | 0.037s |
+
+These are temporally corresponding requests in the earlier snapshot, not new
+controlled runs. The Refiner receipts were `suggested`, model ID
+`gpt-5-6-luna`, 286 input tokens each, zero cached input tokens, and 90/209
+output tokens including 55/173 reasoning tokens. No source text was read.
+Most of this delay is the existing medium-reasoning Refiner generation, not
+context retrieval or the disabled location endpoint. The preparation overlap
+fix alone is therefore unlikely to produce a large perceptual change.
+
+For the four-search post-deploy request, the first-content path was 21.508s:
+5.375s browser preparation, 3.426s server pre-provider work, 12.517s from provider
+dispatch to first content, and approximately 0.190s of remaining cross-boundary
+overhead. These are one request's durations, not subtracted percentiles.
+Routing occupied 2.725s inside server pre-provider work. The three search tool
+calls had backend critical waits of approximately 1.200s, 1.062s (two queries
+in parallel), and 1.167s. The remaining approximately 9.1s inside provider-to-first
+content includes model/tool round trips, transport and processing; it cannot
+be labeled pure model reasoning from these logs. Completion followed first
+content by another 1.762s. Search orchestration remains a larger target than
+the roughly 0.1s context preparation endpoint.
+
+The deeper review also found the discarded Router rewrite described above.
+Removing that task uses the existing no-rewrite prompt/schema and its existing
+200-token routing output ceiling instead of the 900-token rewrite ceiling.
+Those are ceilings, not measured token savings. The request still selects a
+model and checks file/image intent; the final Refiner execution bytes remain
+unchanged. Routed accepted, keep-original and ordinary turns are exercised
+through primary failure and fallback, in addition to the existing view tests.
+
+### Structural alternatives
+
+| Approach | Critical path and quality trade-off | Decision |
+| --- | --- | --- |
+| Independent Refiner and location-intent calls in parallel | Changes `F + L` to `max(F,L)` while retaining each model, prompt and result. Maximum theoretical saving is `min(F,L)`, not an observed result. | Preferred next structural experiment. Prime only the semantic decision; defer permission/GPS until the saved turn is current. Preserve identity cancellation, exact-source binding and one call per turn. Account for spend if a later save fails. Guest one-use verification must finish before either dependent request. |
+| Search preparation in the existing Router call | Have the Router propose independent grounded-search queries, then execute them together after ordinary access/credit admission and supply the results to the answering model. This may avoid repeated answer-model planning round trips; it adds no separate planner call. | High-impact candidate for search-heavy turns. Keep the same search backend, shared per-attempt query ceiling, untrusted-source treatment and provenance. Retain answering-model follow-up tools for genuinely dependent queries. Compare source relevance/completeness and added Router latency before adopting. Do not pre-spend search budget before admission. |
+| One structured preparation call for refinement, routing, image/file and location intent | Removes repeated reading and model round trips. A larger combined prompt/output may offset the gain, and decisions can interfere. | Strong candidate for a separate evaluated adapter. Do not silently change the currently approved Refiner model/config pin or merge its budget ledger with the Router. |
+| Faster Refiner model or lower reasoning | May shorten the observed 3.5–3.7s provider segment, but equal quality is unproven. | Compare as a candidate; do not activate from a latency hypothesis. |
+| Speculative refinement while typing | Can hide submit latency but sends unsent text and spends on abandoned drafts. | Exclude from this change; user-input privacy and spending behavior would change. |
+| Stream a raw answer before refinement or shorten search/answer limits | Improves apparent start time by changing the answer path or amount of work. | Exclude: cannot claim preservation of the current result. |
+| Cache arbitrary previous answers or refined prompts | Can remove calls, but source/conversation/consent changes and audit attribution must be resolved. | No broad cache added. Existing exact-query search deduplication remains. |
+
+For the combined candidate, use the same synthetic multilingual questions,
+histories, attachment metadata, tool fixtures and allowed model pool. Include
+follow-ups, abstention/keep-original, local-vs-explicit-place questions, denied
+location, file/image ambiguity, stale scope, injection, citations and tool
+failures. Compare final answer correctness and completeness, routing/file/image/
+location decisions, credit/consent invariants, errors and cost as well as both
+latency percentiles. Set non-inferiority criteria before running blinded paired
+answer evaluation. Mock timing or schema tests alone cannot establish semantic
+equivalence. A paid evaluation and production activation are separate actions;
+neither was performed for these alternatives.

@@ -2,14 +2,17 @@ import type { ClientLatencyStages } from "./responseLatencyCore";
 import { boundedLatencyMs, createLatencyStages } from "./responseLatencyStages";
 
 /** No content, identity, model strings or wall-clock timestamps leave the browser. */
-export function createClientLatency(startedAt = performance.now(), initialStages: ClientLatencyStages = {}, now = () => performance.now()) {
+export function createClientLatency(startedAt?: number, initialStages: ClientLatencyStages = {}, now = () => performance.now()) {
+  const started = startedAt ?? now();
   let prepareMs = 0;
   let firstContentMs: number | null = null;
   let token: string | null = null;
-  const stages = createLatencyStages(initialStages, now);
+  // Older/restored payloads may lack the submit clock. Their carried stages
+  // cannot be compared to this new run's clock; retain only new observations.
+  const stages = createLatencyStages(startedAt === undefined ? {} : initialStages, now);
   let dispatchedAt: number | null = null;
   let streamEndedAt: number | null = null;
-  const elapsed = () => boundedLatencyMs(now() - startedAt);
+  const elapsed = () => boundedLatencyMs(now() - started);
   return {
     stage: stages.stage,
     dispatched() { prepareMs = elapsed(); dispatchedAt = now(); },

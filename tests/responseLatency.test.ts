@@ -40,6 +40,12 @@ test("full send reports separate preparation, headers, first content, stream end
     for (const stages of [{ prompt: "private" }, { contextPrepareMs: -1 }, { modelSyncMs: 421 }, { routingMs: 4 }]) {
       assert.equal(clientLatencyBodySchema.safeParse({ ...body, stages }).success, false);
     }
+    const restored = createClientLatency(undefined, { contextPrepareMs: 5_000 }, () => time);
+    restored.dispatched();
+    restored.headers(new Response(null, { headers: { "X-Response-Latency-Token": "proof" } }));
+    time += 10; restored.content("restored answer"); restored.finish("completed");
+    assert.ok(clientLatencyBodySchema.safeParse(body).success);
+    assert.equal((body.stages as Record<string, number>).contextPrepareMs, undefined);
   } finally { globalThis.fetch = original; }
 });
 

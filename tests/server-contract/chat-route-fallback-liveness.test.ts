@@ -76,6 +76,15 @@ let invalidateRefinerAfterPreview = false;
 let pinnedResponse: Response | null = null;
 let pinnedInputs: readonly object[] | null = null;
 const routerInputs: Array<Parameters<typeof import("../../lib/autoModelSelection").selectAutoModel>[0]> = [];
+const llmRouterInputs: Array<Parameters<typeof import("../../lib/autoLlmRouter").pickAutoModelWithLlm>[0]> = [];
+const realLlmRouter = require(resolve(ROOT, "lib/autoLlmRouter.ts")) as typeof import("../../lib/autoLlmRouter");
+mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
+  ...realLlmRouter,
+  pickAutoModelWithLlm: async (input: Parameters<typeof realLlmRouter.pickAutoModelWithLlm>[0]) => {
+    llmRouterInputs.push(input);
+    return null;
+  },
+} });
 const shadowInputs: Array<import("../../lib/routingShadow").RoutingShadowInput> = [];
 
 const realPinnedRoute = require(resolve(ROOT, "lib/pinnedDeploymentRoute.ts")) as typeof import("../../lib/pinnedDeploymentRoute");
@@ -2753,6 +2762,29 @@ for (const [mode, decision] of [
     conversationSelectionMode = "auto";
   }
 });
+
+for (const decision of ["accepted", "kept_original", undefined] as const) {
+  test(`Auto Router requests a rewrite only without a bound Refiner view (${decision ?? "ordinary"})`, async () => {
+    refinerMode = decision ? "auto" : null;
+    refinerConsumes = 0;
+    conversationSelectionMode = "auto";
+    llmRouterInputs.length = 0;
+    try {
+      const { body, streamError } = await ask("answers", "claimed", 200, false,
+        [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" }], true, true, decision);
+      assert.equal(streamError, null);
+      assert.ok(body.includes(ANSWER));
+      assert.equal(llmRouterInputs.length, 1);
+      assert.equal(llmRouterInputs[0].rewriteAllowed, decision === undefined);
+      const expected = decision === "accepted" ? REFINER_PROMPT : "이 질문에 답해 줘";
+      assert.equal(llmRouterInputs[0].prompt, expected);
+      const text = (content: unknown) => typeof content === "string" ? content
+        : (content as Array<{ type: string; text?: string }>).filter(part => part.type === "text").map(part => part.text).join("");
+      for (const attempt of attempts) assert.equal(text(attempt.messages.at(-1)!.content), expected);
+      assert.equal(refinerConsumes, decision ? 1 : 0);
+    } finally { refinerMode = null; }
+  });
+}
 
 test("an accepted Refiner decision stops safely when durable dispatch-start recording fails", async () => {
   refinerMode = "explicit";

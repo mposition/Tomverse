@@ -131,7 +131,7 @@ export default defineConfig({
       E2E_DISABLE_DATABASE: "true",
       // Location specs mock intent decisions; exercise the enabled client path.
       // The isolated server blocks external network and has no router setting.
-      TOMVERSE_CHAT_LOCATION_INTENT_ENABLED: "true",
+      TOMVERSE_CHAT_LOCATION_INTENT_ENABLED: process.env.E2E_CHAT_LOCATION_INTENT_ENABLED ?? "true",
       // The assistant knowledge flag lives in `AppSetting`, which the line
       // above removes -- so without this the panel never renders and the
       // specs that mock its endpoint assert against nothing. Safe only in
