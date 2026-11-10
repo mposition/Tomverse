@@ -14,7 +14,7 @@ const world = {
   role: "owner" as string, reauth: true, task: { id: "task-1", sourceSystem: "admin-idea-v4" } as Row | null,
   unknown: ["attempt-1"] as string[], acceptances: [] as Row[], audits: [] as Row[],
   attempt: { worker: "codex-impl", outcome: "blocked", reason: "usage_outcome_unknown",
-    reservedCostMicrousd: 4_100_000n, settledCostMicrousd: null, costConfirmed: false,
+    reservedCostMicrousd: BigInt(4_100_000), settledCostMicrousd: null, costConfirmed: false,
     cliUsageEvents: [] as Row[] },
   locked: [] as unknown[], txOpen: false, chainLocked: 0, order: [] as string[],
 };
