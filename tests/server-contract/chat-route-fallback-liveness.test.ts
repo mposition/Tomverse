@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 import * as aiModule from "ai";
+import { MockLanguageModelV4 } from "ai/test";
+import { parseChatStreamTrailer, splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
 import {
   PromptRefinerChatExecutionError,
   validatePromptRefinerChatExecution,
@@ -78,7 +80,11 @@ let pinnedInputs: readonly object[] | null = null;
 const routerInputs: Array<Parameters<typeof import("../../lib/autoModelSelection").selectAutoModel>[0]> = [];
 const llmRouterInputs: Array<Parameters<typeof import("../../lib/autoLlmRouter").pickAutoModelWithLlm>[0]> = [];
 let llmRouterRewrite: string | null = null;
+let paidRouterCalls = 0;
 let llmSearchQueries: string[] | undefined;
+let llmSearchModelId: string | undefined;
+let llmSearchFileIntent: boolean | undefined;
+let pairedSearchModel: MockLanguageModelV4 | undefined;
 let forceAppManagedSearch = false;
 let forceNativeSearch = false;
 let refusePresearchAdmission = false;
@@ -99,6 +105,13 @@ mock.module(mod("lib/webSearchBackendAdapter.ts"), { namedExports: {
   runWebSearchBackendRequest: async (_backend: unknown, request: { query: string }) => {
     assert.equal(ledger.accessAcquisitions, 1, "search cannot precede credit admission");
     presearchCalls.push(request);
+    if (pairedSearchModel) {
+      const followUp = request.query === "dependent fact";
+      assert.ok(followUp || request.query === "one fact");
+      return { ok: true, results: [{ title: followUp ? "Follow-up source" : "Initial source",
+        url: followUp ? "https://example.com/follow-up" : "https://example.com/initial",
+        snippet: followUp ? "The verified total is 42." : "The initial count is 17." }] };
+    }
     if (failPresearchBackend === "all" || (failPresearchBackend === "partial" && request.query === "another fact")) return { ok: false, failure: "backend_timeout" };
     return { ok: true, results: [{ title: "Search evidence", url: "https://example.com/evidence", snippet: "Verified fixture fact." }] };
   },
@@ -108,7 +121,11 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
   ...realLlmRouter,
   pickAutoModelWithLlm: async (input: Parameters<typeof realLlmRouter.pickAutoModelWithLlm>[0]) => {
     llmRouterInputs.push(input);
-    return llmRouterRewrite || llmSearchQueries ? { modelId: input.ruleModelId, rewrite: llmRouterRewrite, searchQueries: llmSearchQueries } : null;
+    if (!llmRouterRewrite && !llmSearchQueries) return null;
+    if (input.verifyPreparedContext && !(await input.verifyPreparedContext())) return null;
+    paidRouterCalls++;
+    return { modelId: llmSearchModelId ?? input.ruleModelId,
+      rewrite: llmRouterRewrite, searchQueries: llmSearchQueries, requiresFileGeneration: llmSearchFileIntent };
   },
 } });
 const shadowInputs: Array<import("../../lib/routingShadow").RoutingShadowInput> = [];
@@ -464,36 +481,37 @@ mock.module(mod("lib/apiSecurity.ts"), {
 });
 
 let contextConsumeSucceeds = true;
-let contextVerification: "ok" | "stale" | "expired" | "invalid_signature" = "ok";
+type TestContextVerification = "ok" | "stale" | "expired" | "invalid_signature";
+let contextVerification: TestContextVerification = "ok";
+let contextSequence: TestContextVerification[] = [];
+const contextReads: { query: string }[] = [];
 mock.module(mod("lib/chatTurnContext.ts"), {
   namedExports: {
-    buildChatTurnContext: async () => ({
-      fingerprint: "verified-context-fingerprint",
-      fingerprintInput: {},
-      systemPrompt: null,
-      memoryTokens: 0,
-      profileTokens: 0,
-      memory: {
-        prompt: { text: null, usedCount: 0 },
-        truncatedByBudget: false,
-      },
-      profile: { knowledgeChunkCount: 0 },
-    }),
+    buildChatTurnContext: async (input: { query: string }) => {
+      contextReads.push(input);
+      return {
+        fingerprint: "verified-context-fingerprint",
+        fingerprintInput: {},
+        systemPrompt: null,
+        memoryTokens: 0,
+        profileTokens: 0,
+        memory: {
+          prompt: { text: null, usedCount: 0 },
+          truncatedByBudget: false,
+        },
+        profile: { knowledgeChunkCount: 0 },
+      };
+    },
   },
 });
 mock.module(mod("lib/chatContextBundleService.ts"), {
   namedExports: {
-    verifyChatContextBundle: () => contextVerification !== "ok"
-      ? { ok: false, reason: contextVerification }
-      : ({
-          ok: true,
-          payload: {
-            bundleId: "context-bundle-one",
-            expiresAtMs: Date.now() + 60_000,
-            memoryTokens: 0,
-            profileTokens: 0,
-          },
-        }),
+    verifyChatContextBundle: () => {
+      const verification = contextSequence.shift() ?? contextVerification;
+      if (verification !== "ok") return { ok: false, reason: verification };
+      return { ok: true, payload: { bundleId: "context-bundle-one", expiresAtMs: Date.now() + 60_000,
+        memoryTokens: 0, profileTokens: 0 } };
+    },
     consumeContextBundle: async () =>
       contextConsumeSucceeds
         ? { consumed: true }
@@ -513,6 +531,7 @@ type Attempt = {
   /** Whether its stream was cancelled, and with what. */
   cancelledWith: unknown;
   messages: Array<{ role: string; content: unknown }>;
+  toolNames: string[];
   /** What reached the provider-facing abort signal. */
   providerAbortedWith: unknown;
   /** The provider signal state at the exact reader-cancel boundary. */
@@ -553,7 +572,7 @@ let throwGuestProviderUnknown = false;
 mock.module("ai", {
   namedExports: {
     ...aiModule,
-    streamText: (options: Record<string, unknown>) => {
+    streamText: (options: Parameters<typeof aiModule.streamText>[0]) => {
       const index = attempts.length;
       if (throwAfterPresearch) throw new Error("POST_PRESEARCH_PROVIDER_FAILURE");
       if (index > 0 && throwBeforeFallbackStreamReturn) {
@@ -565,11 +584,15 @@ mock.module("ai", {
         onError: options.onError as Attempt["onError"],
         cancelledWith: null,
         messages: options.messages as Attempt["messages"],
+        toolNames: Object.keys(options.tools ?? {}),
         providerAbortedWith: null,
         providerAbortedBeforeReaderCancel: false,
       };
       attempts.push(attempt);
       attemptLifecycle.push(`${index}:provider_start`);
+      if (pairedSearchModel) {
+        return aiModule.streamText({ ...options, model: pairedSearchModel });
+      }
       if (activeSession === null) guestLifecycle.push("provider");
       if (throwGuestProviderUnknown) {
         throw new Error("GUEST_PROVIDER_UNKNOWN_TEST_FAILURE");
@@ -723,10 +746,11 @@ const closedInstrumentationAttempts: Array<
   Omit<InstrumentationAttemptRow, "state"> & { outcome: string }
 > = [];
 
-const conversationRow = () => ({
+let contextConversationAccess: "owned" | "locked" | "missing" = "owned";
+const conversationRow = () => contextConversationAccess === "missing" ? null : ({
   id: CONVERSATION_ID,
   userId: USER_ID,
-  password: null,
+  password: contextConversationAccess === "locked" ? "fixture-locked" : null,
   selectedModels: JSON.stringify(selectedConversationModels),
   kind: "chat",
   productKey: conversationProductKey,
@@ -3583,6 +3607,72 @@ test("Guest Auto provider unknown retains the converted hold and confirms its re
 });
 
 
+test("a saved GPT 6 Luna question uses the same sources with presearch off and on, saving one SDK tool round trip", async () => {
+  const oldFlag = process.env.CHAT_ROUTER_PRESEARCH_ENABLED;
+  const oldBrave = process.env.BRAVE_SEARCH_API_KEY;
+  const oldEnv = process.env.APP_ENV;
+  process.env.APP_ENV = "dev"; // Normal dev Auto cohort, without a fault-injection header.
+  process.env.BRAVE_SEARCH_API_KEY = "synthetic-never-sent";
+  llmSearchQueries = ["one fact"];
+  llmSearchModelId = "gpt-6-luna";
+  llmSearchFileIntent = false;
+  const answer = "The initial count is 17. The verified total is 42.";
+  const outcomes = [];
+  try {
+    for (const enabled of [false, true]) {
+      process.env.CHAT_ROUTER_PRESEARCH_ENABLED = String(enabled);
+      presearchCalls.length = 0;
+      const steps: Array<{ hasInitial: boolean; hasFollowUp: boolean; backendCalls: number }> = [];
+      // The provider chooses its next tool call from the evidence it actually
+      // received. The real AI SDK drives the route's registered search tool.
+      pairedSearchModel = new MockLanguageModelV4({ doStream: async ({ prompt }) => {
+        const facts = JSON.stringify(prompt);
+        const hasInitial = facts.includes("The initial count is 17.");
+        const hasFollowUp = facts.includes("The verified total is 42.");
+        steps.push({ hasInitial, hasFollowUp, backendCalls: presearchCalls.length });
+        return { stream: new ReadableStream({ start(controller) {
+          if (!hasFollowUp) {
+            controller.enqueue({ type: "tool-call", toolCallId: `search_${steps.length}`, toolName: "web_search",
+              input: JSON.stringify({ query: hasInitial ? ["one fact", "dependent fact"] : "one fact" }) });
+          } else {
+            controller.enqueue({ type: "text-start", id: "answer" });
+            controller.enqueue({ type: "text-delta", id: "answer", delta: answer });
+            controller.enqueue({ type: "text-end", id: "answer" });
+          }
+          controller.enqueue({ type: "finish", finishReason: { unified: hasFollowUp ? "stop" : "tool-calls", raw: "fixture" },
+            usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 5, text: 5, reasoning: 0 } } });
+          controller.close();
+        } }) };
+      } });
+      const { body, streamError } = await ask("answers", "claimed", 200, false, undefined, true, false, undefined, "always");
+      assert.equal(streamError, null);
+      assert.equal(attempts.length, 1);
+      assert.equal(attempts[0].modelId, llmSearchModelId);
+      assert.equal(llmRouterInputs.at(-1)?.searchPlan, enabled);
+      assert.equal(steps.length, enabled ? 2 : 3);
+      assert.deepEqual(steps[0], { hasInitial: enabled, hasFollowUp: false, backendCalls: enabled ? 1 : 0 });
+      assert.equal(presearchCalls.length, 2, "the repeated initial query and presearch share one session");
+      assert.ok(attempts[0].toolNames.includes("create_document") && attempts[0].toolNames.includes("web_search"));
+      const { displayText, searchMetadataJson } = splitSearchMetadataTrailer(body);
+      const metadata = parseChatStreamTrailer(searchMetadataJson)?.searchMetadata as
+        { queryCount: number; citations: Array<{ url: string }> };
+      assert.equal(metadata.queryCount, 2);
+      const sources = metadata.citations.map(source => source.url).sort();
+      assert.deepEqual(sources, ["https://example.com/follow-up", "https://example.com/initial"]);
+      const answerText = splitStreamKeepaliveSignal(displayText).text;
+      assert.equal(answerText, answer);
+      outcomes.push({ answer: answerText, sources, tools: attempts[0].toolNames.sort() });
+    }
+    assert.deepEqual(outcomes[0], outcomes[1]);
+  } finally {
+    pairedSearchModel = undefined; llmSearchQueries = undefined; llmSearchModelId = undefined; llmSearchFileIntent = undefined;
+    if (oldFlag === undefined) delete process.env.CHAT_ROUTER_PRESEARCH_ENABLED; else process.env.CHAT_ROUTER_PRESEARCH_ENABLED = oldFlag;
+    if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
+    if (oldEnv === undefined) delete process.env.APP_ENV; else process.env.APP_ENV = oldEnv;
+  }
+});
+
 test("router presearch stays behind admission, preserves search recovery policy and retains incurred cost on failure", async () => {
   const oldFlag = process.env.CHAT_ROUTER_PRESEARCH_ENABLED;
   const oldBrave = process.env.BRAVE_SEARCH_API_KEY;
@@ -3590,11 +3680,16 @@ test("router presearch stays behind admission, preserves search recovery policy 
   process.env.BRAVE_SEARCH_API_KEY = "synthetic-never-sent";
   forceAppManagedSearch = true;
   llmSearchQueries = ["one fact", "another fact"];
+  llmSearchModelId = "gpt-6-luna";
+  llmSearchFileIntent = false;
   try {
     presearchCalls.length = 0;
     await ask("answers", "claimed", 200, false, undefined, true, true, undefined, "always");
     assert.equal(presearchCalls.length, 2);
     assert.equal(attempts.length, 1, "the existing search-turn fallback restriction remains in force");
+    assert.equal(attempts[0].modelId, "gpt-6-luna");
+    assert.ok(attempts[0].toolNames.includes("web_search"));
+    assert.ok(attempts[0].toolNames.includes("create_document"), "ordinary text turns keep the file tool");
     assert.ok(!attempts[0].messages.some(message => message.role === "tool"));
     const question = attempts[0].messages.find(message => message.role === "user")!;
     assert.ok(Array.isArray(question.content));
@@ -3602,6 +3697,19 @@ test("router presearch stays behind admission, preserves search recovery policy 
     assert.ok(JSON.stringify(question.content).includes("Verified fixture fact."));
     assert.ok(JSON.stringify(question.content).includes("untrusted quoted material"));
     assert.equal(attempts[0].messages.filter(message => message.role === "user").length, 1);
+
+    // Even if an inconsistent Router returns queries for a file request or omits
+    // file intent, the answering model retains search and file execution itself.
+    for (const unresolvedOrFile of [undefined, true]) {
+      llmSearchFileIntent = unresolvedOrFile;
+      presearchCalls.length = 0;
+      await ask("answers", "claimed", 200, false, undefined, true, true, undefined, "always");
+      assert.equal(presearchCalls.length, 0);
+      assert.equal(attempts[0].modelId, "gpt-6-luna");
+      assert.ok(attempts[0].toolNames.includes("create_document"));
+      assert.ok(attempts[0].toolNames.includes("web_search"));
+    }
+    llmSearchFileIntent = false;
 
     presearchCalls.length = 0;
     refusePresearchAdmission = true;
@@ -3639,6 +3747,75 @@ test("router presearch stays behind admission, preserves search recovery policy 
   } finally {
     if (oldFlag === undefined) delete process.env.CHAT_ROUTER_PRESEARCH_ENABLED; else process.env.CHAT_ROUTER_PRESEARCH_ENABLED = oldFlag;
     if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
-    failPresearchBackend = false; turnLocation = undefined; forceNativeSearch = false; forceAppManagedSearch = false; llmSearchQueries = undefined; refusePresearchAdmission = false; throwAfterPresearch = false;
+    failPresearchBackend = false; turnLocation = undefined; forceNativeSearch = false; forceAppManagedSearch = false; llmSearchQueries = undefined; llmSearchModelId = undefined; llmSearchFileIntent = undefined; refusePresearchAdmission = false; throwAfterPresearch = false;
   }
+});
+
+
+test("a stale priced context is rejected before paid Auto routing; recovery routes the saved question only once", async () => {
+  llmRouterRewrite = "Fresh Router rewrite.";
+  paidRouterCalls = 0;
+  refinerMode = "auto";
+  refinerConsumes = 0;
+  contextReads.length = 0;
+  try {
+    contextSequence = ["stale"];
+    const refused = await ask("answers", "claimed", 409, true, undefined, true, true, "accepted");
+    assert.equal(JSON.parse(refused.body).code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.equal(paidRouterCalls, 0);
+    assert.equal(refinerConsumes, 0);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(contextReads.length, 1);
+    await ask("answers", "claimed", 200, true, undefined, true, true, "accepted");
+    assert.equal(paidRouterCalls, 1);
+    assert.equal(contextReads.length, 3, "fresh retry checks before Router and again at the original boundary");
+    assert.ok(contextReads.every(read => read.query === "이 질문에 답해 줘"));
+    assert.equal(refinerConsumes, 1);
+  } finally { contextSequence = []; refinerMode = null; llmRouterRewrite = null; }
+});
+
+test("drift during paid routing still fails the final context check and a disabled Router builds context once", async () => {
+  llmRouterRewrite = "Candidate.";
+  paidRouterCalls = 0;
+  contextReads.length = 0;
+  try {
+    contextSequence = ["ok", "stale"];
+    const refused = await ask("answers", "claimed", 409, true);
+    assert.equal(JSON.parse(refused.body).code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.equal(paidRouterCalls, 1);
+    assert.equal(contextReads.length, 2);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+    llmRouterRewrite = null;
+    contextReads.length = 0;
+    await ask("answers", "claimed", 200, true);
+    assert.equal(contextReads.length, 1);
+    llmRouterRewrite = "Candidate.";
+    contextReads.length = 0;
+    await ask("answers", "claimed", 200, false);
+    assert.equal(contextReads.length, 0);
+  } finally { contextSequence = []; llmRouterRewrite = null; }
+});
+
+
+test("pre-Router context checks never load memory for a locked or missing owned conversation", async () => {
+  llmRouterRewrite = "Candidate.";
+  try {
+    for (const [scope, expectedStatus, code] of [
+      ["locked", 423, "CONVERSATION_LOCKED"], ["missing", 403, "CONVERSATION_FORBIDDEN"],
+    ] as const) {
+      contextConversationAccess = scope;
+      contextReads.length = 0;
+      paidRouterCalls = 0;
+      const result = await ask("answers", "claimed", expectedStatus, true);
+      assert.equal(JSON.parse(result.body).code, code);
+      assert.equal(contextReads.length, 0);
+      assert.equal(paidRouterCalls, 0);
+      assert.equal(ledger.accessAcquisitions, 0);
+      assert.equal(attempts.length, 0);
+    }
+  } finally { contextConversationAccess = "owned"; llmRouterRewrite = null; }
 });

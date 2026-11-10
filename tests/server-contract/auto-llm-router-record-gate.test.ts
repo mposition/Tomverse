@@ -539,6 +539,7 @@ test("router search preparation uses one priced call and malformed suggestions p
       assert.equal(routerRequests.length, 1);
       assert.equal(routerRequests[0].maxOutputTokens, 440);
       assert.match(String(routerRequests[0].system), /searchQueries/);
+      assert.equal(result?.requiresFileGeneration, false);
       assert.equal(result?.modelId, routerOutput.modelId);
       assert.deepEqual(result?.searchQueries, typeof queries[0] === "string" && queries.length <= 2 ? queries : []);
       const { autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
@@ -555,4 +556,18 @@ test("router search preparation uses one priced call and malformed suggestions p
     assert.equal(routerRequests[0].maxOutputTokens, 200);
     assert.doesNotMatch(String(routerRequests[0].system), /searchQueries/);
   } finally { generateRouterResult = original; }
+});
+
+
+test("a context refusal precedes the live Router hold and provider; no eligible choice skips the check", async () => {
+  const holdsBefore = holds.length;
+  const callsBefore = routerRequests.length;
+  let readCount = 0;
+  const verifyPreparedContext = async () => { readCount++; return false; };
+  assert.equal(await pick(undefined, { eligibleModelIds: ["deepseek-v4-flash"], verifyPreparedContext }), null);
+  assert.equal(readCount, 0);
+  assert.equal(await pick(undefined, { verifyPreparedContext }), null);
+  assert.equal(readCount, 1);
+  assert.equal(holds.length, holdsBefore);
+  assert.equal(routerRequests.length, callsBefore);
 });
