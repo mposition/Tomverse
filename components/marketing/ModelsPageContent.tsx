@@ -12,6 +12,7 @@ import { getModelBrand } from "@/lib/modelBranding";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
+import { PROVIDER_LABELS } from "./ModelCatalogueSection";
 
 const copy = {
   en: {
@@ -50,7 +51,7 @@ const copy = {
     status: "상태",
     enabled: "사용 가능",
     liveStatus: "실시간 서비스 상태 보기",
-    liveStatusDescription: "현재 제공자 가용성과 서비스 영향 장애를 확인하세요.",
+    liveStatusDescription: "모델 제공사의 운영 상태와 서비스에 영향을 주는 장애를 확인하세요.",
 
     limited: "제공 제한",
     unavailable: "현재 이용 불가",
@@ -316,7 +317,7 @@ export function ModelsPageContent() {
                 </div>
                 <div>
                   <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.provider}</p>
-                  <p className="mt-1 truncate text-sm font-bold capitalize">{model.provider}</p>
+                  <p className="mt-1 truncate text-sm font-bold">{PROVIDER_LABELS[model.provider] ?? model.provider}</p>
                 </div>
                 {lang !== "ko" ? <div>
                   <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.usageClass}</p>

@@ -19,6 +19,7 @@ const guestAttachmentFormats = Object.values(chatAttachmentExtensionsByGroup({ g
 export const infoPages = {
   faq: {
   "ko": {
+    mobileAccordion: true,
     "eyebrow": "FAQ",
     "title": "자주 묻는 질문",
     "description": "Chat과 Review의 차이, 무료 시작, 모델 선택과 크레딧 등 사용 전 궁금한 점을 확인하세요.",
@@ -133,6 +134,7 @@ export const infoPages = {
       },
       {
         "title": "Where are attached files processed?",
+        bodyLinks: [{ text: "safety information", href: "/safety" }, { text: "privacy policy", href: "/privacy" }],
         "body": "The selected AI provider processes the file or excerpts needed to answer. Locks and private storage control access; they do not remove provider processing. See the safety information and privacy policy for current retention and deletion details."
       },
       {

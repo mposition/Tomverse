@@ -1673,6 +1673,9 @@ export const es = {
         historyDescription: "Cada solicitud, descarga y rechazo de esta cuenta, conservados durante noventa días. Un rechazo significa que se presentó un enlace de descarga de tu cuenta y no se aceptó.",
         historyEmpty: "Todavía no has descargado los datos de tu cuenta.",
         historyLoading: "Cargando...",
+        refusedExpired: "El sistema rechazó la descarga porque el enlace había caducado. Prepare un enlace nuevo.",
+        refusedUsed: "El sistema rechazó otra descarga con un enlace de un solo uso ya utilizado.",
+        refusedAccountMismatch: "El sistema rechazó la descarga porque la cuenta solicitante no era propietaria del enlace.",
         refusedNote: "Se presentó un enlace después de haber caducado, después de haberse usado ya, o que pertenecía a otra cuenta.",
         status: {
             ...en.accountDataExport.status,
