@@ -114,6 +114,8 @@ workspace only in agy's default `request-review` mode: a read outside it
 asks, and print mode refuses the ask. This was measured on agy 1.5.4 with a
 canary beside the sign-in copy, and all three reads were denied. The parser
 therefore refuses a stream whose `init` reports any other `permission_mode`.
+No quota reading exists for Antigravity yet (no measured agy endpoint), so
+its sidecar answers `quota_unavailable`.
 
 The bridge asks its fixed worker socket at most every five minutes, after
 renewing active execution leases. It forwards only the worker, provider,

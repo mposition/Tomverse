@@ -254,6 +254,10 @@ test("the stream settles from its result; a tool outside the role's list is neve
   [step({ step_type: "user_input" }), init, result()]])
     assert.deepEqual(parseAmuxV22ChannelOutput("antigravity", jsonl(...events),
       { exitCode: 0, role: "implement" }), { valid: false, reason: "permission_mode" });
+  // An unknown role is never trusted with the write tools.
+  for (const role of ["operate", undefined])
+    assert.deepEqual(parseAmuxV22ChannelOutput("antigravity", jsonl(init, result()),
+      { exitCode: 0, role }), { valid: false, reason: "role" });
   // A line that is not a JSON object is refused before any field is read.
   for (const line of ["not json", "[1]", "null"])
     assert.deepEqual(parseAmuxV22ChannelOutput("antigravity",
