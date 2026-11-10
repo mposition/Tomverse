@@ -16,6 +16,9 @@ Judge, as a demanding creative director and a careful editor:
 4. Truth: Tomverse appears only as real screens, not redrawn and with no words
    added inside them. The words on screen are only the listed ones. AI shots
    show no text, logo, interface or real person, and no broken hands or shapes.
+   Tone: no picture or line can read as death, suicide, loss, illness or
+   danger (empty shoes or clothes, an empty chair, a lone figure at an edge,
+   stairs into fog), even as a metaphor. If one can, the verdict is `reject`.
 5. Disclosure: the AI line is plainly visible while an AI shot is on screen and
    on the end card. The end card has the logo and tomverse.app.
 6. Every locale: the right language and script (zh-Hans Simplified, zh-Hant
