@@ -69,6 +69,7 @@ The worker profiles hold copies of the operator's own CLI logins, refreshed by
 running as the operator user. Each copy keeps only the access credential;
 the refresh secret is replaced, so a worker CLI can never rotate the
 operator's login. The operator's own CLI use keeps the source fresh.
+Antigravity is the one exception (below).
 
 Claude (`anthropic:<worker>`, from `~/.claude/.credentials.json` to
 `<worker>/cli/.credentials.json`) is staged only with at least 2 h left on the
@@ -88,6 +89,33 @@ renewed only by the operator's own Cursor CLI use; after it expires the copy
 is refused until the operator signs in again. The Cursor sidecar runs the CLI
 from a root-owned copy under `/opt/tomverse-amux-v22/` (measured 2026-11-10,
 Cursor 2026.11.05: a read-only install signs in with the cut-down copy).
+
+Antigravity (`antigravity:<worker>`, from
+`~/.gemini/antigravity-cli/antigravity-oauth-token` to
+`<worker>/cli/antigravity/antigravity-oauth-token`, owner decision 2026-11-10)
+keeps the refresh token, and drops only the account e-mail. Google's access
+token lasts an hour, so a copy without it could not finish a Task. agy
+refreshes inside the run home, and the operator's own login stays as it was
+(measured on agy 1.5.4 with an expired copy). Google refresh tokens are not
+rotated by a refresh. The refresh token stays with the CLI process: the
+implement shell runs in the sidecar's jail, which has no run home.
+
+The Antigravity sidecar runs agy (a single Go binary) from a root-owned copy
+under `/opt/tomverse-amux-v22/`, with `AGY_CLI_DISABLE_AUTO_UPDATE=true` (agy
+ignores `1`). Each run home holds a custom agent (`amux-v22-read` or
+`amux-v22-implement`) whose `tools` list is the role's tools. In agy 1.5.4
+that list is the only limit applied before a tool runs: `search_web` ran
+under a permission deny. Session `--settings` deny URL and MCP actions, and
+for a read role commands and writes too. A checkout with `.agents/` or
+`.gemini/` is refused before the CLI starts, and again after the base sync.
+The file tools run in the CLI process, not in the jail. They stay inside the
+workspace only in agy's default `request-review` mode: a read outside it
+(absolute path, `../`, or a committed symlink, which agy resolves first)
+asks, and print mode refuses the ask. This was measured on agy 1.5.4 with a
+canary beside the sign-in copy, and all three reads were denied. The parser
+therefore refuses a stream whose `init` reports any other `permission_mode`.
+No quota reading exists for Antigravity yet (no measured agy endpoint), so
+its sidecar answers `quota_unavailable`.
 
 The bridge asks its fixed worker socket at most every five minutes, after
 renewing active execution leases. It forwards only the worker, provider,

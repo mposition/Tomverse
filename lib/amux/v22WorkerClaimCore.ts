@@ -43,7 +43,9 @@ export const amuxV22TaskWritesPatch = (taskRole: string | null | undefined) =>
  * TOMVERSE_AMUX_V22_MULTI_PROVIDER is `enabled`. Every route is priced from
  * Admin › Models by its model ID, so a model missing there holds the route.
  * Cursor's print mode cannot be kept from its shell once it may write, so a
- * Cursor worker takes the read roles only (`implement: false`).
+ * Cursor worker takes the read roles only (`implement: false`): Cursor
+ * 2026.11.05 also runs `miniSweAgentBashArgs` execs as a fixed `/bin/sh -c`
+ * with the CLI's own environment, which no PATH jail reaches.
  */
 // The CLI usage receipt's model grammar has no colon, so neither does a route.
 const ANY_MODEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
@@ -56,6 +58,10 @@ export const AMUX_V22_PROVIDERS = Object.freeze({
     model: ANY_MODEL, implement: true }),
   cursor: Object.freeze({ providerClass: "cursor", cli: "cursor",
     model: ANY_MODEL, implement: false }),
+  // Owner decision 2026-11-10: Antigravity implements. Its shell is found on
+  // PATH (agy 1.5.4, measured on the box), so the sidecar's jail holds it.
+  antigravity: Object.freeze({ providerClass: "antigravity", cli: "antigravity",
+    model: ANY_MODEL, implement: true }),
 });
 export type AmuxV22Provider = keyof typeof AMUX_V22_PROVIDERS;
 export const AMUX_V22_MULTI_PROVIDER_ENV = "TOMVERSE_AMUX_V22_MULTI_PROVIDER";

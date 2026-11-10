@@ -107,6 +107,7 @@ const PROVIDER_LABELS: Readonly<Record<AmuxWorkerProviderClass, string>> = Objec
   codex: "OpenAI",
   cursor: "Cursor",
   copilot: "GitHub Copilot",
+  antigravity: "Google Antigravity",
 });
 
 export const amuxWorkerProviderLabel = (providerClass: AmuxWorkerProviderClass): string =>

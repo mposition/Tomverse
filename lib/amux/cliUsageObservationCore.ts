@@ -15,7 +15,7 @@ export type AmuxCliTokenCounts = {
 
 export type AmuxCliUsageObservation = {
   version: 1;
-  cli: "codex" | "claude" | "copilot" | "cursor";
+  cli: "codex" | "claude" | "copilot" | "cursor" | "antigravity";
   completeness: AmuxCliUsageCompleteness;
   /** Null means no trustworthy numeric report, never zero spend. */
   observed: AmuxCliTokenCounts | null;
@@ -256,11 +256,13 @@ export function inspectClaudeCliResultUsage(raw: unknown, options: {
  * their own JSON; the v22 sidecar reads them (lib/amux/v22ChannelRun.mjs) and
  * hands the numbers over. Semantics measured for v19 on 2026-10-20: Copilot
  * input includes cache reads (no separate count is kept, so all of it is
- * priced as uncached input), Cursor input excludes them. Neither has a
+ * priced as uncached input), Cursor input excludes them. Antigravity's
+ * `result` (agy 1.5.4, measured 2026-11-10) excludes them as Cursor's does.
+ * None has a
  * measured cache-write rule, so a nonzero write is an unknown usage; at zero
  * the inclusion question cannot change a price and is recorded as false.
  */
-export function amuxSubscriptionCliUsageObservation(cli: "copilot" | "cursor", input: {
+export function amuxSubscriptionCliUsageObservation(cli: "copilot" | "cursor" | "antigravity", input: {
   counts: { inputTokens: number; outputTokens: number; cacheReadTokens: number;
     cacheWriteTokens: number } | null;
   servedModelId: string | null;

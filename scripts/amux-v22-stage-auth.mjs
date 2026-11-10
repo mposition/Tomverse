@@ -2,7 +2,7 @@
 // Copies the operator's CLI logins into the fixed v22 worker profiles on the
 // AMUX box (run by tomverse-amux-v22-auth-stage.timer as the operator user).
 // usage: amux-v22-stage-auth.mjs [--check] <provider>:<worker> ...
-// provider: anthropic | openai | github-copilot | cursor. No secret is ever printed.
+// provider: anthropic | openai | github-copilot | cursor | antigravity. No secret is ever printed.
 import { stageAmuxV22WorkerAuth } from "../lib/amux/v22WorkerAuthStage.mjs";
 
 const args = process.argv.slice(2);
