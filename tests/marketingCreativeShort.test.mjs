@@ -8,7 +8,7 @@ import test from "node:test";
 import { marketingAssetSchema } from "../lib/marketingAssets.ts";
 import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, normalizePack, reviewPassed, usablePacks } from "../tools/marketing-video/creative-core.mjs";
 import { speakLine, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
-import { admit, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
+import { admit, downloadResult, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
 import { creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
 
 /**
@@ -144,6 +144,29 @@ test("a line is spoken in the locale's fixed voice and counted in characters", a
   assert.equal(entry.cost, "한 번 묻고, 다른 점을 보세요.".length);
   assert.equal(entry.status, "done");
   assert.ok(existsSync(out));
+});
+
+test("a paid result's download is tried again and never throws", async () => {
+  // 2026-11-10: a thrown fetch after the music was paid for ended the first run before its report.
+  let tries = 0;
+  const flaky = async () => {
+    tries += 1;
+    if (tries === 1) throw new Error("other side closed");
+    if (tries === 2) return { ok: false, status: 503 };
+    return { ok: true, arrayBuffer: async () => MP3 };
+  };
+  assert.deepEqual(await downloadResult("https://cdn.example/m.mp3", { maxBytes: 1024, waitMs: 1, fetchImpl: flaky }), MP3);
+  assert.equal(tries, 3);
+  const down = async () => { throw new Error("ECONNRESET"); };
+  assert.equal(await downloadResult("https://cdn.example/m.mp3", { maxBytes: 1024, waitMs: 1, fetchImpl: down }), null);
+  const big = async () => ({ ok: true, arrayBuffer: async () => Buffer.alloc(2048) });
+  assert.equal(await downloadResult("https://cdn.example/m.mp3", { maxBytes: 1024, waitMs: 1, fetchImpl: big }), null);
+
+  // A download that throws leaves the job settled and the run going: a refusal, not a crash.
+  const jobDir = tempJob();
+  const result = await makeMedia({ request: music(), out: join(jobDir, "m.mp3"), jobDir, env: capEnv(), cli: fakeCli({ cost: 3.8 }).cli, fetchBytes: down, day: DAY });
+  assert.equal(result.reason, "result_not_the_media");
+  assert.equal(readLedger(creativeLedgerPath(jobDir, DAY)).entries[0].status, "done");
 });
 
 test("a call whose price lookup crosses Brisbane midnight is refused before it is created or written", async () => {

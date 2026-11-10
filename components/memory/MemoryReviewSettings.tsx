@@ -264,7 +264,7 @@ function MemoryRowHeader({ row }: { row: MemoryRowView }) {
 }
 
 export function MemoryReviewSettings() {
-    const { t } = useLanguage();
+    const { lang, t } = useLanguage();
     const [settingsState, setSettingsState] = useState<SettingsState>({
         kind: "loading",
     });
@@ -303,6 +303,9 @@ export function MemoryReviewSettings() {
         "reauth" | "generic" | null
     >(null);
     const [deleteAllText, setDeleteAllText] = useState("");
+    const deleteAllConfirmation = lang === "ko"
+        ? t("memoryReview.deleteAllTitle")
+        : DELETE_ALL_CONFIRMATION;
     const [deleteAllBusy, setDeleteAllBusy] = useState(false);
     const [deleteAllError, setDeleteAllError] = useState<
         "reauth" | "generic" | null
@@ -575,6 +578,7 @@ export function MemoryReviewSettings() {
     }, []);
 
     const deleteAll = useCallback(async () => {
+        if (deleteAllBusy || deleteAllText.trim() !== deleteAllConfirmation) return;
         setDeleteAllBusy(true);
         setDeleteAllError(null);
         const result = await callApi("/api/memories/delete-all", {
@@ -595,7 +599,7 @@ export function MemoryReviewSettings() {
         setDeleteAllError(
             result.failure.status === 428 ? "reauth" : "generic"
         );
-    }, [loadMemories]);
+    }, [deleteAllBusy, deleteAllText, deleteAllConfirmation, loadMemories]);
 
     const groups = useMemo(() => {
         if (listState.kind !== "ready") {
@@ -1235,7 +1239,7 @@ export function MemoryReviewSettings() {
                 <label className="mt-3 block">
                     <span className="text-xs font-semibold text-red-700 dark:text-red-200">
                         {interpolate(t("memoryReview.deleteAllConfirmLabel"), {
-                            phrase: DELETE_ALL_CONFIRMATION,
+                            phrase: deleteAllConfirmation,
                         })}
                     </span>
                     <input
@@ -1256,7 +1260,7 @@ export function MemoryReviewSettings() {
                     data-testid="memory-delete-all"
                     disabled={
                         deleteAllBusy ||
-                        deleteAllText.trim() !== DELETE_ALL_CONFIRMATION
+                        deleteAllText.trim() !== deleteAllConfirmation
                     }
                     onClick={() => void deleteAll()}
                 >

@@ -37,6 +37,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "eyebrow": "AI model comparison",
       "title": "Compare AI models, then cross-review their answers",
       "description": "The most useful model depends on the task, prompt, context, and current version. Tomverse sends one question to multiple models, then AI Review helps organize where their completed answers agree, conflict, omit details, or need verification.",
+      "introCtaLabel": "Start comparing",
       "sections": [
         {
           "title": "Why compare more than one model?",

@@ -23,7 +23,7 @@ export function cursorCreditCentsFromBalance(body) {
 }
 
 /**
- * Cursor CLI 2026.10.01 /usage schema. An exhausted included pool pauses this
+ * Cursor CLI 2026.10.01 /usage schema. An exhausted included plan (both pools) pauses this
  * provider only when the account has no credit left to spend after it
  * (`creditCents`, from GetCreditGrantsBalance): with credit, Cursor keeps
  * serving the CLI. A credit balance that could not be read leaves an exhausted
@@ -35,15 +35,19 @@ export function cursorQuotaFromUsage(body, creditCents = null) {
   if (["totalPercentUsed", "autoPercentUsed", "apiPercentUsed"].some((key) =>
     row[key] !== undefined && (!Number.isFinite(row[key]) || row[key] < 0)) ||
     (row.remaining !== undefined && !Number.isFinite(row.remaining))) return UNKNOWN;
-  const percentages = [row.totalPercentUsed, row.autoPercentUsed, row.apiPercentUsed]
-    .filter((value) => Number.isFinite(value) && value >= 0);
+  // A full Cursor-models pool (auto) goes on in the other-models pool (api),
+  // so the less-used pool is what is left; total blends the two and counts
+  // only when neither is sent (owner report 2026-11-10: auto 100%, api 14%).
+  const pools = [row.autoPercentUsed, row.apiPercentUsed].filter((value) => Number.isFinite(value));
+  const poolUsed = pools.length > 0 ? Math.min(...pools) :
+    Number.isFinite(row.totalPercentUsed) ? row.totalPercentUsed : null;
   const hasAmount = Number.isFinite(row.remaining);
-  if (percentages.length === 0 && !hasAmount) return UNKNOWN;
-  const planExhausted = (hasAmount && row.remaining <= 0) || percentages.some((value) => value >= 100);
+  if (poolUsed === null && !hasAmount) return UNKNOWN;
+  const planExhausted = (hasAmount && row.remaining <= 0) || (poolUsed !== null && poolUsed >= 100);
   const hasCredit = Number.isFinite(creditCents) && creditCents > 0;
   const state = planExhausted && !hasCredit ? "exhausted" : "available";
   const credit = Number.isFinite(creditCents) ? { creditUsd: creditCents / 100 } : {};
-  const used = percentages.length > 0 ? Math.max(...percentages) :
+  const used = poolUsed !== null ? poolUsed :
     Number.isFinite(row.limit) && row.limit > 0 ? 100 * (1 - row.remaining / row.limit) : null;
   if (used !== null) {
     return { state, remainingPercent: planExhausted ? 0 : Math.max(0, Math.min(100, 100 - used)), ...credit };

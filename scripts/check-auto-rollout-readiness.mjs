@@ -23,7 +23,10 @@ import {
 } from "../lib/autoRolloutReadiness.ts";
 import { autoCohortConfig, decideAutoCohort } from "../lib/autoCohort.ts";
 import {
+  AUTO_ROUTER_LIMITED_RELEASE_SELECTOR_ENV,
+  AUTO_ROUTER_LIMITED_RELEASE_SELECTOR_VALUE,
   autoRouterLimitedReleaseApprovalProblems,
+  resolveAutoRouterLimitedRelease,
 } from "../lib/autoRouterLimitedRelease.ts";
 import {
   AUTO_ROUTER_LIMITED_RELEASE_APPROVAL,
@@ -59,13 +62,25 @@ console.log(
     (state.ready ? "" : ` — outstanding: ${state.outstanding.join(", ")}`)
 );
 
-const limitedReleaseProblems = autoRouterLimitedReleaseApprovalProblems();
+const checkedAt = Date.now();
+const limitedReleaseProblems = autoRouterLimitedReleaseApprovalProblems(
+  AUTO_ROUTER_LIMITED_RELEASE_APPROVAL, () => checkedAt,
+);
+// An expired historical approval is not live authority. It must not stop
+// unrelated builds when its runtime selector is off. An explicitly selected
+// exception, malformed approval, or broken expiry refusal still fails this gate.
+const expiredInactiveApproval =
+  AUTO_ROUTER_LIMITED_RELEASE_APPROVAL.status === "approved" &&
+  limitedReleaseProblems.length === 1 &&
+  limitedReleaseProblems[0] === "expiresAt is expired" &&
+  process.env[AUTO_ROUTER_LIMITED_RELEASE_SELECTOR_ENV] !==
+    AUTO_ROUTER_LIMITED_RELEASE_SELECTOR_VALUE;
 console.log(
   `Limited release approval: ${AUTO_ROUTER_LIMITED_RELEASE_APPROVAL.status}`
 );
 if (
   AUTO_ROUTER_LIMITED_RELEASE_APPROVAL.status === "approved" &&
-  limitedReleaseProblems.length > 0
+  limitedReleaseProblems.length > 0 && !expiredInactiveApproval
 ) {
   console.log("\nLimited release approval problems:");
   for (const problem of limitedReleaseProblems) console.log(`  - ${problem}`);
@@ -74,6 +89,23 @@ if (
       "an incomplete or expired record must fail closed."
   );
   process.exit(1);
+}
+
+if (expiredInactiveApproval) {
+  // Force only the selector in a read-only probe. Expiry is checked before
+  // deployment credentials, source digests or any dispatch can be reached.
+  const expiredProbe = resolveAutoRouterLimitedRelease({
+    environment: {
+      [AUTO_ROUTER_LIMITED_RELEASE_SELECTOR_ENV]:
+        AUTO_ROUTER_LIMITED_RELEASE_SELECTOR_VALUE,
+    },
+    now: () => checkedAt,
+  });
+  if (expiredProbe.admitted || expiredProbe.reason !== "approval_expired") {
+    console.error("Expired limited-release approval did not fail closed.");
+    process.exit(1);
+  }
+  console.log("Limited release is expired and inactive; runtime expiry refusal verified. No approval was renewed.");
 }
 
 // What the configuration would do if the gates were open. Printed rather than
