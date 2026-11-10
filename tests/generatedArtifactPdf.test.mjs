@@ -71,6 +71,36 @@ test("the file is a PDF a reader will accept", async () => {
   await document.cleanup();
 });
 
+test("explicit PDF number columns group numbers, preserve zero and align right edges", async () => {
+  const spec = { filename: "amounts.pdf", format: "pdf", blocks: [{
+    type: "table", columns: ["Item", "Amount"], pdfNumberColumns: [1],
+    rows: [["Zero", 0], ["Small", 1250], ["Large", 10000], ["Refund", -1250.25], ["Identifier", "001250"]],
+  }] };
+  const document = await readPdf(build(spec));
+  const content = await (await document.getPage(1)).getTextContent();
+  const values = ["0", "1,250", "10,000", "-1,250.25", "001250"];
+  const edges = values.map(value => {
+    const item = content.items.find(item => item.str === value);
+    assert.ok(item, `missing exact value ${value}`);
+    assert.ok(item.transform[4] >= 56);
+    return item.transform[4] + item.width;
+  });
+  assert.ok(Math.max(...edges) - Math.min(...edges) < 0.05, JSON.stringify(edges));
+  assert.ok(Math.abs(edges[0] - (595.28 - 56 - 4)) < 0.05);
+  await document.cleanup();
+  const original = await textOf(build({ ...spec, blocks: [{ ...spec.blocks[0], pdfNumberColumns: undefined }] }));
+  assert.ok(original.includes("1250"));
+  assert.ok(!original.includes("1,250"));
+});
+
+test("PDF number column indices are bounded, integral and unique", () => {
+  for (const pdfNumberColumns of [[-1], [2], [0.5], [0, 0], [Infinity]]) {
+    assert.equal(admitDocumentSpec({ filename: "amounts.pdf", format: "pdf", blocks: [{
+      type: "table", columns: ["Item", "Amount"], rows: [["A", 0]], pdfNumberColumns,
+    }] }).ok, false, JSON.stringify(pdfNumberColumns));
+  }
+});
+
 test("an independent reader gets the Korean text back, not blanks", async () => {
   const text = await textOf(build(REPORT));
   for (const expected of [

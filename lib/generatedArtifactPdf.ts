@@ -356,6 +356,13 @@ const listBlock = (
 const cellText = (value: unknown): string =>
   value === null || value === undefined ? "" : String(value);
 
+const pdfNumberFormat = new Intl.NumberFormat("en-US", { maximumSignificantDigits: 21 });
+type TableBlock = Extract<ArtifactDocumentBlock, { type: "table" }>;
+const tableCellText = (block: TableBlock, column: number, value: unknown): string =>
+  block.pdfNumberColumns?.includes(column) && typeof value === "number"
+    ? pdfNumberFormat.format(value)
+    : cellText(value);
+
 const tableBlock = (
   builder: PageBuilder,
   font: LoadedFont,
@@ -389,7 +396,9 @@ const tableBlock = (
         builder.textAt(
           line,
           { ...style, grey: header ? 0 : 0.1 },
-          MARGIN + columnOffsets[column] + padding,
+          MARGIN + columnOffsets[column] + (block.pdfNumberColumns?.includes(column)
+            ? columnWidths[column] - padding - glyphsWidth(line, style.size, font.unitsPerEm)
+            : padding),
           top - padding - (lineIndex + 1) * style.leading + 3
         );
       });
@@ -402,7 +411,7 @@ const tableBlock = (
   drawRow(rowFor(block.columns), true);
   for (const row of block.rows) {
     drawRow(
-      rowFor(block.columns.map((_, index) => cellText(row[index] ?? null))),
+      rowFor(block.columns.map((_, index) => tableCellText(block, index, row[index] ?? null))),
       false
     );
   }
@@ -551,7 +560,7 @@ export const renderDocumentPdf = (spec: DocumentSpec): Uint8Array => {
         break;
       case "table":
         block.columns.forEach(record);
-        block.rows.forEach((row) => row.forEach((value) => record(cellText(value))));
+        block.rows.forEach((row) => row.forEach((value, column) => record(tableCellText(block, column, value))));
         break;
       default:
         break;
