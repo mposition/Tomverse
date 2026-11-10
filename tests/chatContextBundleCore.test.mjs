@@ -7,8 +7,11 @@ import {
     decideBundleStaleRecovery,
     issueContextBundle,
     memoryStateFingerprint,
+    pricedMemoryRetrievalHash,
     verifyContextBundle,
 } from "../lib/chatContextBundleCore.ts";
+import { selectMemoryContext } from "../lib/memoryRetrievalScoring.ts";
+import { buildMemoryContextPrompt } from "../lib/memoryContextPrompt.ts";
 import { issueAdmissionToken, verifyAdmissionToken } from "../lib/chatAdmissionCore.ts";
 
 /**
@@ -405,4 +408,38 @@ test("consumption is counted per model, so a comparison is not self-blocking", (
         bundleConsumptionKey("bundle-1", "gpt-5-6-luna"),
         bundleConsumptionKey("bundle-1", "gpt-5-6-luna")
     );
+});
+
+
+test("clock-driven score drift preserves the priced prompt; content, order, deletion and version changes still invalidate it", () => {
+    const memories = ["red", "blue"].map(id => ({ id, kind: "preference", statement: `Prefer ${id}.`,
+        conflictKey: null, confidence: 0.9, importance: 0, pinned: true, searchTerms: [],
+        effectiveAt: NOW, expiresAt: null, sourceIds: [],
+    }));
+    const select = (elapsedMs, entries = memories) => selectMemoryContext({ memories: entries, query: "",
+        now: new Date(NOW.getTime() + elapsedMs), styleEnabled: true });
+    // An otherwise unchanged 3.573-second interval crosses a rounded-score
+    // boundary. The clock remains well within one signed bundle's lifetime.
+    const first = select(74_000);
+    const later = select(77_573);
+    assert.notEqual(first.signature, later.signature);
+    const identity = selected => pricedMemoryRetrievalHash(selected.map(row => row.memory.id), buildMemoryContextPrompt({ selected }).text);
+    const binding = fingerprintInput({ retrievalHash: identity(first.selected) });
+    const token = issueContextBundle(payload(binding), SECRET);
+    const verify = changes => verifyContextBundle(token, verifyOptions({ currentFingerprint: contextFingerprint({ ...binding, ...changes }) }));
+    assert.equal(verify({ retrievalHash: identity(later.selected) }).ok, true);
+    for (const changed of [later.selected.toReversed(), later.selected.slice(1),
+        select(0, memories.map(row => ({ ...row, statement: row.statement + " Changed." }))).selected]) {
+        assert.deepEqual(verify({ retrievalHash: identity(changed) }), { ok: false, reason: "stale" });
+    }
+    const expiring = memories.map(row => ({ ...row, expiresAt: row.id === "red" ? new Date(NOW.getTime() + 75_000) : null }));
+    assert.equal(identity(select(74_000, expiring).selected), identity(first.selected));
+    assert.deepEqual(verify({ retrievalHash: identity(select(77_573, expiring).selected) }), { ok: false, reason: "stale" });
+    // Legacy nonempty hashes do not get a permissive verification fallback.
+    const oldToken = issueContextBundle(payload({ ...binding, retrievalHash: "previous-ranked-result-hash" }), SECRET);
+    assert.deepEqual(verifyContextBundle(oldToken, verifyOptions({ currentFingerprint: contextFingerprint(binding) })), { ok: false, reason: "stale" });
+    for (const changes of [{ retrievalVersion: 2 }, { memoryVersion: "new" }, { styleVersion: "new" },
+        { profileVersion: "profile:3" }, { knowledgeHash: "changed" }, { promptVersion: "next" }]) {
+        assert.deepEqual(verify(changes), { ok: false, reason: "stale" });
+    }
 });

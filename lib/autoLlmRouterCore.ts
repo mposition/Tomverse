@@ -421,7 +421,8 @@ export type AutoLlmRouterPick = {
     topic: string | null;
     /** Admitted by admitRouterRewrite; null when none was asked for or kept. */
     rewrite: string | null;
-    requiresFileGeneration?: true;
+    /** Omitted by legacy responses. Only explicit false can admit presearch. */
+    requiresFileGeneration?: boolean;
 };
 
 const cut = (value: unknown, max: number) => {
@@ -455,7 +456,7 @@ export const parseAutoLlmRouterOutput = (
         reason: cut(reason, AUTO_LLM_ROUTER_MAX_REASON_CHARS),
         topic: cut(topic, AUTO_LLM_ROUTER_MAX_TOPIC_CHARS),
         rewrite: rewriteOf === null ? null : admitRouterRewrite(rewrite, rewriteOf),
-        ...(requiresFileGeneration === true ? { requiresFileGeneration: true as const } : {}),
+        ...(typeof requiresFileGeneration === "boolean" ? { requiresFileGeneration } : {}),
     };
 };
 
