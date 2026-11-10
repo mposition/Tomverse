@@ -875,6 +875,7 @@ export function AnalyticsProvider({
           102px against its 80px contract.
         */}
         <div className="min-w-[6rem] flex-1">
+          {pathname === "/privacy" ? <p data-testid="privacy-consent-mobile-title" className="mb-1 text-sm font-bold text-zinc-900 dark:text-zinc-50 @md/notice:hidden">{promptCopy.title}</p> : null}
           <p className={`${readableNotice ? "text-sm leading-6 [overflow-wrap:anywhere]" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-300 @md/notice:hidden`}>
             {(noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null) || ["faq", "models", "support", "support/help-centre", "privacy", "about", "pricing", "terms", "safety", "ai-for-file-analysis"].includes((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/"))) ? promptCopy.body : (promptCopy.mobileBody)}{" "}
             <Link

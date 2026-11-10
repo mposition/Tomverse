@@ -13,6 +13,10 @@ for (const path of ["/privacy?lang=en"]) for (const theme of ["light", "dark"] a
     await page.goto(path);
     const notice = page.getByTestId("chat-consent-notice");
     await expect(notice).toBeVisible({ timeout: 30_000 });
+    const title = notice.getByTestId("privacy-consent-mobile-title");
+    await expect(title).toBeVisible();
+    await expect(title).toHaveText("Privacy-safe product analytics");
+    await expectAccessibleContrast(title, "Consent purpose heading");
     const body = notice.locator("p:visible").last();
     const privacy = notice.getByRole("link", { name: "Privacy policy" });
     const accept = notice.getByRole("button", { name: "Allow analytics", exact: true });
