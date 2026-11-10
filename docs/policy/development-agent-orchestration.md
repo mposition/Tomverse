@@ -1483,8 +1483,9 @@ v27의 여섯 세션은 이 일곱 곳이 모두 걸려 아직 제품 배정에 
 | `codex` | Codex CLI | 검증 | v23·v27의 기존 세션 역할 그대로 |
 | `cursor` | Cursor CLI | 미검증 | `implementation`(v27 절 1과 같음) |
 | `copilot` | GitHub Copilot CLI | 미검증 | `implementation`(v27 절 1과 같음) |
+| `antigravity` | Antigravity CLI (Google) | 미검증 | `implementation`(운영자 결정 2026-11-10) |
 
-`cursor`와 `copilot`은 v27 절 1처럼 `contract`와 `review`, 계약 경로를 바꾸는 작업을 맡지 않는다.
+`cursor`, `copilot`, `antigravity`는 v27 절 1처럼 `contract`와 `review`, 계약 경로를 바꾸는 작업을 맡지 않는다. `antigravity`는 운영자 결정(2026-11-10)으로 추가했다. v22 구현을 맡고, 구현 셸은 Copilot과 같은 sidecar jail에서 돈다(migration `20261110200000_amux_antigravity_worker_class`).
 
 ### 3. worker 등록부 — 사람이 정하는 원하는 상태
 

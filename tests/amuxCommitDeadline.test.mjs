@@ -344,6 +344,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // its deferred guard on its own new table; no commit-deadline marker or
   // classifier changes.
   "20261110100000_amux_v22_attempt_usage_acceptance",
+  // Owner decision 2026-11-10: the antigravity worker class widens five CHECK
+  // constraints; no commit-deadline marker, classifier or deferred trigger
+  // changes.
+  "20261110200000_amux_antigravity_worker_class",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
