@@ -35,6 +35,8 @@ const copy = {
     limited: "Limited availability",
     unavailable: "Currently unavailable",
     minimumPlan: "Access starts with",
+    mobileMinimumPlan: "Access",
+    mobileBaseCharge: "Base credits",
   },
   ko: {
     eyebrow: "모델",
@@ -305,14 +307,14 @@ export function ModelsPageContent() {
               </p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-white px-2 py-1 text-[11px] font-bold text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:text-zinc-400 dark:ring-zinc-800">
+                  <span key={tag} className="rounded-full bg-white px-2 py-1 text-xs font-bold text-zinc-500 ring-1 ring-zinc-200 sm:text-[11px] dark:bg-zinc-950 dark:text-zinc-400 dark:ring-zinc-800">
                     {t(`modelTags.${tag}`)}
                   </span>
                 ))}
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3 max-[240px]:grid-cols-1">
                 <div>
-                  <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.minimumPlan}</p>
+                  <p data-testid="model-access-label" className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{lang === "en" ? <><span className="sm:hidden">{copy.en.mobileMinimumPlan}</span><span className="hidden sm:inline">{content.minimumPlan}</span></> : content.minimumPlan}</p>
                   <p className="mt-1 text-sm font-bold">{t(`modelTiers.${model.minimumPlan.toLowerCase()}`)}</p>
                 </div>
                 <div>
@@ -326,7 +328,7 @@ export function ModelsPageContent() {
                   </p>
                 </div> : null}
                 <div>
-                  <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.baseCharge}</p>
+                  <p data-testid="model-base-charge-label" className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{lang === "en" ? <><span className="sm:hidden">{copy.en.mobileBaseCharge}</span><span className="hidden sm:inline">{content.baseCharge}</span></> : content.baseCharge}</p>
                   <CreditCostBadge
                     credits={usageProfile.credits}
                     size="md"
