@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import {
   AMUX_SYSTEM_AUDIT_ACTOR,
   type AmuxClaimAuditRefusalReason,
@@ -593,6 +593,9 @@ export async function claimUnownedTodo(
       };
     }
 
+    // Resource policies above, then the audit chain, then the Task row
+    // (lib/adminAudit.ts takeAuditChainLock).
+    await takeAuditChainLock(tx);
     const claim = await tx.amuxWorkItem.updateMany({
       where: {
         id: input.taskId,

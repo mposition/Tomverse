@@ -132,6 +132,17 @@ const inkFor = (hex) => {
 const escapeHtml = (text) => text.replace(/[&<>"']/gu, (ch) => `&#${ch.charCodeAt(0)};`);
 
 /** Sets the locale's approved words in the boxes of `roles`. Returns how many boxes were set. */
+/**
+ * Where a line may break. Never inside a word: a word that does not fit makes
+ * the type smaller instead (the first box run, 2026-11-10, broke "Gemini Flash"
+ * as "Gemin / i Flash" and "일주일" as "일 / 주일", and every language version
+ * failed its content review). Korean breaks only at spaces; Chinese may break
+ * between Han characters, and its Latin words (model names) stay whole.
+ */
+export function textBreakCss(locale) {
+  return `word-break: ${locale.startsWith("zh") ? "normal" : "keep-all"}; overflow-wrap: normal;`;
+}
+
 export async function setTexts({ input, review, concept, locale, roles, out }) {
   if (!FONT_FAMILY[locale]) throw new Error(`no fonts for ${locale}`);
   const texts = textsFor(concept, locale);
@@ -163,7 +174,7 @@ export async function setTexts({ input, review, concept, locale, roles, out }) {
   html, body { width: ${size.width}px; height: ${size.height}px; overflow: hidden; }
   body { position: relative; font-family: ${FONT_FAMILY[locale]}; -webkit-font-smoothing: antialiased; }
   #bg { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .box { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.15em 0.4em; line-height: 1.25; word-break: keep-all; overflow-wrap: anywhere; transform-origin: center; }
+  .box { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.15em 0.4em; line-height: 1.25; ${textBreakCss(locale)} transform-origin: center; }
 </style></head><body><img id="bg" src="${dataUrl(input)}">${items}</body></html>`;
   const png = await withPage(async (page) => {
     await page.setViewportSize(size);

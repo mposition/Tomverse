@@ -437,11 +437,12 @@ test("the v39 DB follow-up and resume reads have five exact reviewed counts", ()
         tableMentions: 3, writeVerbs: 4 },
       { path: migrationPath, table: "AmuxV22ReadOnlyLaunchProof",
         tableMentions: 2, writeVerbs: 4 },
-      // Owner decision 2026-11-08 adds the pre-approval settlement row lock.
+      // Owner decision 2026-11-08 adds the pre-approval settlement row lock;
+      // owner decision 2026-11-10 locks the ended prior attempt FOR SHARE.
       { path: servicePath, table: "AmuxV22TaskRecoveryInspectionRequest",
-        tableMentions: 7, writeVerbs: 5 },
+        tableMentions: 7, writeVerbs: 4 },
       { path: servicePath, table: "AmuxV22TaskRecoveryEvidence",
-        tableMentions: 5, writeVerbs: 5 },
+        tableMentions: 5, writeVerbs: 4 },
     ]
   );
   for (const [path, source] of [[migrationPath, migrationSource], [servicePath, serviceSource]]) {

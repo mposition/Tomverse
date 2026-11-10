@@ -65,7 +65,7 @@ const REVIEW_SIGN_IN_HREF =
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string; checkout: string }>> = {
   en: { annual: "Annual · billed annually", save: "Save 20%", checkout: "The fixed local price shown is charged once per year at checkout." },
-  ko: { annual: "연간", save: "20% 할인", checkout: "표시된 현지통화 고정 금액으로 결제됩니다." },
+  ko: { annual: "연간", save: "20% 할인", checkout: "최종 결제 통화와 금액은 결제 화면에서 확인하세요." },
   zh: { annual: "年付", save: "节省 20%", checkout: "结账时将收取所显示的本地固定价格。" },
   "zh-Hant": { annual: "年付", save: "節省 20%", checkout: "結帳時將收取所顯示的當地固定價格。" },
   fr: { annual: "Annuel", save: "-20 %", checkout: "Le prix local fixe affiché est facturé au paiement." },
@@ -381,7 +381,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
   ko: {
     eyebrow: "일회성 추가 상품",
     title: "플랜 변경 없이 크레딧만 더 필요하신가요?",
-    description: "이번 달 작업량이 많거나 일시적인 프로젝트가 있을 때 추가 크레딧 팩을 구매할 수 있습니다. 현지통화 고정 가격이 표시되며 로그인 후 결제할 수 있습니다.",
+    description: "이번 달 작업량이 많거나 일시적인 프로젝트가 있을 때 추가 크레딧 팩을 구매할 수 있습니다. 통화 코드와 고정 가격을 확인하고 로그인 후 결제할 수 있습니다.",
     availableFor: "구매 가능 플랜",
     oneTime: "일회성 구매",
     validity: "{days}일 유효",
@@ -699,7 +699,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       { question: "출시 할인은 어떻게 적용되나요?", answer: "출시 특가로 Pro 또는 Max 첫 달 동안 50% 할인을 받을 수 있습니다. 이후에는 취소하지 않는 한 정가 월 요금으로 갱신됩니다.", promotionOnly: true },
       { question: "Pro에서 선택할 수 있는 모델이 제한되나요?", answer: "Pro에서 사용할 수 있는 모델은 모델 목록과 선택창에서 확인할 수 있습니다. 선택한 모델과 요청 길이에 따라 크레딧이 차감되며, 플랜 사용량과 기능별 이용 조건이 적용됩니다." },
     ],
-    note: "가격은 선택된 현지통화의 세금 전 고정 금액입니다. 플랜별 일일 크레딧 한도와 모델별 운영 안전장치는 현재 사용량 안내를 확인하세요.",
+    note: "가격은 함께 표시된 통화의 세금 전 고정 금액입니다. 플랜별 일일 크레딧 한도와 모델별 운영 안전장치는 현재 사용량 안내를 확인하세요.",
     plans: [
       { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: REVIEW_SIGN_IN_HREF, usage: "월 300 AI 크레딧", features: ["선별된 모델 이용","선별된 고비용 모델 월 최대 30응답","최대 3개 모델 비교","저장한 대화 기록","로그인 후 파일 첨부, 공유 및 다운로드","가벼운 일상 질문부터 시작하기"] },
       { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", cta: "Pro로 업그레이드", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "추천", usage: "월 3,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","모델별 크레딧 차감량에 따라 월 제공량 사용","최대 3개 모델 나란히 비교","파일 첨부 및 Google Drive 파일","대화 공유 및 다운로드"] },
@@ -1169,6 +1169,12 @@ export function PricingPageContent() {
       }).format(new Date(new Date(featuredPromotion.endsAt).getTime() - 1))
     : null;
 
+  const withCurrencyCode = (price: string, currency: string) => lang === "ko" ? `${price} ${currency}` : price;
+  const planPriceCurrency = (planId: "free" | "pro" | "max", interval: "monthly" | "annual") => {
+    const plan = billing.config?.plans.find(item => item.id === planId);
+    const displayAmount = interval === "annual" ? plan?.displayAnnualPriceAmount : plan?.displayMonthlyPriceAmount;
+    return plan?.displayCurrency && typeof displayAmount === "number" ? plan.displayCurrency : plan?.currency || "USD";
+  };
   const formatSalePrice = (
     planId: "free" | "pro" | "max",
     fallbackUsd: number,
@@ -1180,19 +1186,19 @@ export function PricingPageContent() {
       const digits = billingCurrencyFractionDigits(
         plan.displayCurrency as BillingCurrency
       );
-      return formatBillingAmount(
+      return withCurrencyCode(formatBillingAmount(
         plan.displayMonthlyPriceAmount * discountMultiplier,
         plan.displayCurrency as BillingCurrency,
         undefined,
         digits
-      );
+      ), plan.displayCurrency);
     }
-    return new Intl.NumberFormat("en-US", {
+    return withCurrencyCode(new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
       maximumFractionDigits: 1,
       minimumFractionDigits: 0,
-    }).format(fallbackUsd * discountMultiplier);
+    }).format(fallbackUsd * discountMultiplier), "USD");
   };
 
   // Where Stripe returns a credit-pack purchase. The server re-validates this
@@ -1350,7 +1356,24 @@ export function PricingPageContent() {
         <div className="mx-auto max-w-4xl text-center">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className={`mt-4 text-4xl font-bold leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
-          <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
+          <p className={`mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${lang === "en" ? "hidden sm:block" : ""}`}>{content.description}</p>
+          {lang === "en" && <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300 sm:hidden">Compare monthly prices and AI credits, then open a plan’s purchase options.</p>}
+          {lang === "en" && <section aria-label="Quick plan comparison" data-testid="pricing-mobile-plan-summary" className="mt-7 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-left dark:border-zinc-800 dark:bg-zinc-900/40 sm:hidden">
+            <h2 className="px-1 text-lg font-bold">Compare plans at a glance</h2>
+            <p className="mt-2 px-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">Regular monthly prices. Annual billing and offers are in plan options.</p>
+            <ul className="mt-3 divide-y divide-zinc-200 dark:divide-zinc-800">
+              {content.plans.map(plan => {
+                const planId = plan.name.toLowerCase() as "free" | "pro" | "max";
+                return <li key={planId} className="flex min-w-0 flex-wrap items-center justify-between gap-2 py-3">
+                  <div className="min-w-0 flex-1 basis-32">
+                    <h3 className="text-base font-bold">{plan.name} <span className="ml-1 text-sm">{billing.formatPlanPrice(planId) || plan.price}</span></h3>
+                    <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{billing.planLimits(planId).monthlyCredits.toLocaleString("en-US")} monthly credits</p>
+                  </div>
+                  <a href={`#pricing-plan-name-${planId}`} aria-label={`View ${plan.name} plan options`} className="inline-flex min-h-11 shrink-0 items-center rounded-lg bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">View options</a>
+                </li>;
+              })}
+            </ul>
+          </section>}
           {featuredPromotion ? (
           <div className="mx-auto mt-6 max-w-3xl overflow-hidden rounded-3xl border border-accent-promotion-400/40 bg-gradient-to-br from-accent-promotion-400/15 via-blue-500/10 to-transparent p-1 text-left shadow-2xl shadow-accent-promotion-950/10">
             <div className="rounded-[1.35rem] bg-white/80 px-5 py-4 backdrop-blur dark:bg-zinc-950/75">
@@ -1420,7 +1443,7 @@ export function PricingPageContent() {
             </div>
           </fieldset>
         ) : null}
-        <div id={PRICING_PLANS_ANCHOR} className="mt-14 grid scroll-mt-24 gap-5 lg:grid-cols-3">
+        <div id={PRICING_PLANS_ANCHOR} className={`mt-14 grid scroll-mt-24 gap-5 lg:grid-cols-3 ${lang === "en" || lang === "ko" ? "lg:gap-y-0" : ""}`}>
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
             const cardPlan: AccountPlanTier =
@@ -1442,12 +1465,12 @@ export function PricingPageContent() {
             // identification is not carried by colour alone.
             const isRequestedTarget =
               planId !== "free" && pageIntent?.targetPlan === planId;
-            const displayPrice =
-              billing.formatPlanPrice(planId) || plan.price;
+            const displayPrice = withCurrencyCode(
+              billing.formatPlanPrice(planId) || plan.price, planPriceCurrency(planId, "monthly"));
             const annualFallback = planId === "max" ? "$240" : planId === "pro" ? "$144" : "$0";
-            const annualPrice =
+            const annualPrice = withCurrencyCode(
               billing.formatPlanPrice(planId, "annual") ||
-              annualFallback;
+              annualFallback, planPriceCurrency(planId, "annual"));
             const billingPlan = billing.config?.plans.find((item) => item.id === planId);
             const annualMonthlyEquivalent = billingPlan
               ? billingPlan.displayCurrency && typeof billingPlan.displayAnnualPriceAmount === "number"
@@ -1478,7 +1501,10 @@ export function PricingPageContent() {
               data-cta-state={ctaState}
               data-requested-target={isRequestedTarget ? "true" : undefined}
               aria-labelledby={`pricing-plan-name-${planId}`}
-              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border ${lang === "ko" ? "p-5 sm:p-6" : "p-6"} shadow-sm [overflow-wrap:anywhere] ${
+              // Desktop subgrid has nine in-flow rows, including the credit example (en)
+              // or the plan limits (ko), from eyebrow through features; keep the span
+              // aligned with this structure.
+              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border ${lang === "ko" ? "p-5 sm:p-6" : "p-6"} shadow-sm [overflow-wrap:anywhere] ${lang === "en" || lang === "ko" ? "lg:row-span-9 lg:grid lg:grid-rows-subgrid" : ""} ${
                 plan.highlighted ? "border-blue-600 bg-blue-700 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
               } ${
@@ -1527,7 +1553,7 @@ export function PricingPageContent() {
                   </span>
                 )}
               </div>
-              <h2 id={`pricing-plan-name-${planId}`} className={`mt-4 text-3xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h2>
+              <h2 id={`pricing-plan-name-${planId}`} tabIndex={lang === "en" ? -1 : undefined} className={`mt-4 scroll-mt-24 text-3xl font-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${displayHeadingClass(lang)}`}>{plan.name}</h2>
               <p className={`mt-3 min-h-14 text-sm leading-6 ${plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>
                 {plan.description}
               </p>
@@ -1675,11 +1701,11 @@ export function PricingPageContent() {
                     </p>
                   ) : null}
                   <p data-testid="pricing-annual-checkout-note" className={plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}>
-                    {annualCopy.checkout}
+                    {lang === "ko" ? `표시 통화: ${planPriceCurrency(planId, "annual")}. ${annualCopy.checkout}` : annualCopy.checkout}
                   </p>
                 </div>
-              ) : null}
-              <p className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
+              ) : lang === "en" || lang === "ko" ? <div aria-hidden="true" data-testid="pricing-annual-placeholder" className="hidden lg:block" /> : null}
+              <p data-testid="pricing-plan-usage" className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
               {lang === "ko" ? <PricingKoreanPlanLimits plan={cardPlan} dailyCredits={publicPlan?.dailyMessageLimit ?? null} allowAttachments={publicPlan?.allowAttachments} appInputTokenLimit={billing.config?.appInputTokenLimit ?? null} /> : null}
@@ -2037,11 +2063,11 @@ export function PricingPageContent() {
                     <span className="text-sm text-zinc-500 dark:text-zinc-400">{creditPackGuide.credits}</span>
                   </p>
                   <p className="mt-1 text-xl font-black text-accent-promotion-700 dark:text-accent-promotion-300">
-                    {formatBillingMinor(
+                    {withCurrencyCode(formatBillingMinor(
                       pack.priceMinor,
                       pack.currency as BillingCurrency,
                       promotionDateLocale[lang]
-                    )}
+                    ), pack.currency)}
                   </p>
                   <p className="mt-4 min-w-0 flex-1 break-words text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                     {creditPackGuide.packDescriptions[pack.id]}

@@ -13,11 +13,8 @@ for (const country of ["DE", "AU"]) {
     await page.goto("/support?lang=en");
     const notice = page.getByTestId("chat-consent-notice");
     await expect(notice).toBeVisible();
-    if (mobile) {
-      await expect(notice).toContainText(country === "DE" ? "Usage analytics excludes prompts and file content." : "Usage analytics is on; prompts and file content are excluded.", { useInnerText: true });
-    } else {
-      await expect(notice).toContainText("Prompts, responses, filenames, and file contents are never included", { useInnerText: true });
-    }
+    // Support shows the full consent or notice body on phones too (#3568).
+    await expect(notice).toContainText("Prompts, responses, filenames, and file contents are never included", { useInnerText: true });
     await notice.getByTestId("analytics-consent-decline").click();
     await expect(notice).toBeHidden();
     await expect.poll(() => page.evaluate(() => localStorage.getItem("tomverse_analytics_consent_v1"))).toBe("declined");

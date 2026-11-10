@@ -110,6 +110,11 @@ The bottom dock reserves the bottom safe-area inset once, after the last visible
 footer row. Neither the composer bar nor the disclaimer reserves it again, so
 the optional analytics notice stays inside the dock's safe area.
 
+The mobile disclosure summary and Details text are at least 12px at the default
+text size. Details has a real 44×44px minimum button box with visible padding;
+the row may wrap without truncating the warning. Its full approved disclosure
+remains in the existing keyboard- and touch-accessible sheet.
+
 ## Non-negotiable invariants
 
 - The textarea owns a dedicated row.
@@ -392,6 +397,8 @@ Primary tests:
 - `tests/e2e/chat-keyboard-policy.spec.ts`
 - `tests/e2e/chat-tools.spec.ts`
 - `tests/e2e/web-search-composer-state.spec.ts`
+- `tests/e2e/contextual-model-suggestion-layout.spec.ts` (the model suggestion card
+  lays out by its own column, not the viewport, and keeps the send button on screen)
 - `tests/e2e/comparison-action-rail.spec.ts`
 - `tests/e2e/guest-turnstile-verification.spec.ts` (the verification sheet vs. the composer)
 - `tests/e2e/guest-attachment-ai-review-flow.spec.ts` (the guest journey, 320/390/desktop)
@@ -447,4 +454,4 @@ A change is `NO-GO` for commercial release, regardless of whether other tests pa
 - a web-search capability, credit or security warning was removed without an accessible replacement;
 - the required regression coverage above is missing from the change.
 
-Mobile Chat keeps the guest-trial help action beside product navigation instead of reserving a separate onboarding row. Its full explanation remains in the existing help popover. Studio uses the same inline mobile model picker as Classic; desktop Studio and Review keep their own picker placement. Short-phone welcome padding is compact, while its content scrolls above the bottom dock. Regression: `tests/e2e/guest-starter-space.spec.ts`.
+Mobile Chat keeps the guest-trial help action beside product navigation instead of reserving a separate onboarding row. Its full explanation remains in the existing help popover. Studio uses the same inline mobile model picker as Classic; desktop Studio and Review keep their own picker placement. Short-phone welcome padding is compact, while its content scrolls above the bottom dock. On an empty Chat new chat the header shows no guest badge row, because that help action already explains the trial; the badge returns with the first message, and Review keeps it. Regression: `tests/e2e/guest-starter-space.spec.ts`.

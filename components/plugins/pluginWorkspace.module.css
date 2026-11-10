@@ -71,3 +71,7 @@
 .dialog :is(input,select) { width:100%; min-width:0; min-height:44px; padding:10px; border:1px solid var(--plugin-border); border-radius:8px; background:var(--plugin-bg); color:inherit; }
 @media(max-width:1250px) { .shell { grid-template-columns:80px 190px minmax(0,1fr); }.sidebar { padding-inline:14px; }.columns { grid-template-columns:minmax(0,1fr); }.detail { position:static; }.grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:767px) { .shell { display:block; }.sidebar { display:none; }.main { padding:24px 16px 116px; }.header h1 { font-size:1.625rem; }.header .actions { width:100%; }.header .primary { flex:1; }.toolbar { margin-top:20px; }.search { max-width:none; flex-basis:100%; }.mobileTabs { display:flex; flex-wrap:wrap; gap:6px; width:100%; }.mobileTabs button { flex:1; font-size:.8125rem; }.mobileTabs button[aria-pressed="true"] { background:var(--plugin-selected); color:var(--plugin-accent); }.grid { grid-template-columns:minmax(0,1fr); }.shell :global(.review-navigation) { position:fixed; height:68px; top:auto; margin:0; }.shell :global(.review-navigation button),.shell :global(.review-navigation a) { border:0; }.dialog { padding:18px; } }
+
+@media (max-width: 767px) {
+  .shell:lang(ko) .mobileTabs button { word-break: keep-all; overflow-wrap: normal; }
+}
