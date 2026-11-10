@@ -879,7 +879,7 @@ export function AnalyticsProvider({
             {(noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null) || ["faq", "models", "support", "support/help-centre", "privacy", "about", "terms"].includes((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/"))) ? promptCopy.body : (promptCopy.mobileBody)}{" "}
             <Link
               href="/privacy"
-              className={`${(["about", "faq"].includes((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/"))) ? "mt-1 block w-fit max-w-full whitespace-nowrap" : (readableNotice ? "inline-block whitespace-nowrap" : "")} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
+              className={`${((["about", "faq"].includes((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/"))) || (pathname === "/privacy" && lang === "en")) ? "mt-1 block w-fit max-w-full whitespace-nowrap" : (readableNotice ? "inline-block whitespace-nowrap" : "")} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
             >
               {copy.privacy}
             </Link>
