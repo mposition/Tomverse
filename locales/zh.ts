@@ -298,6 +298,8 @@ export const zh = {
         onGuestMode: "访客模式已启用",
         guestModeMessage: "在访客模式下，所有聊天信息保存在你的浏览器中，不会记录到服务器。",
         guestModeLimitMessage: "（每天 50 免费积分，由所选模型共同分摊）",
+        guestCreditsUsed: "访客额度已用 {used}/{limit}",
+        guestCreditsShared: "每日访客额度由所有已选模型共享。",
         guestComparisonsRemaining: "今天还可以比较约 {count} 次",
         aiAssistant: "AI 助手",
         you: "我",
@@ -1665,6 +1667,9 @@ export const zh = {
         historyDescription: "本账户的每一次请求、下载与拒绝，保留九十天。「已拒绝」表示有人出示了你账户的下载链接但未被接受。",
         historyEmpty: "你还没有下载过账户数据。",
         historyLoading: "加载中…",
+        refusedExpired: "链接已过期，系统拒绝了下载请求。请生成新链接。",
+        refusedUsed: "该一次性链接已使用，系统拒绝了重复下载请求。",
+        refusedAccountMismatch: "请求账户不是链接所有者，系统拒绝了下载请求。",
         refusedNote: "出示的链接已过期、已被使用过，或属于其他账户。",
         status: {
             ...en.accountDataExport.status,

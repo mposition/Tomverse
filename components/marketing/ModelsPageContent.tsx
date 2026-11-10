@@ -12,12 +12,16 @@ import { getModelBrand } from "@/lib/modelBranding";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
+import { PROVIDER_LABELS } from "./ModelCatalogueSection";
 
 const copy = {
   en: {
     eyebrow: "Models",
     title: "Find a model for your question.",
     description: "Compare access plans, base credits, image input and catalog context limits. These are model-specific catalog facts, not a ranking of task performance; a higher credit cost does not prove a stronger answer. Check current availability in the app’s model selector.",
+    mobileDescription: "Compare models, base credits and access plans for Chat and Review.",
+    mobileCreditNote: "Base credits are for a short request; long inputs and tools can add cost.",
+    mobileUsageDetails: "Credit and availability details",
     provider: "Provider",
     usageClass: "Credit category",
     baseCharge: "Base credits for a short request",
@@ -31,6 +35,8 @@ const copy = {
     limited: "Limited availability",
     unavailable: "Currently unavailable",
     minimumPlan: "Access starts with",
+    mobileMinimumPlan: "Access",
+    mobileBaseCharge: "Base credits",
   },
   ko: {
     eyebrow: "모델",
@@ -47,7 +53,7 @@ const copy = {
     status: "상태",
     enabled: "사용 가능",
     liveStatus: "실시간 서비스 상태 보기",
-    liveStatusDescription: "현재 제공자 가용성과 서비스 영향 장애를 확인하세요.",
+    liveStatusDescription: "모델 제공사의 운영 상태와 서비스에 영향을 주는 장애를 확인하세요.",
 
     limited: "제공 제한",
     unavailable: "현재 이용 불가",
@@ -199,18 +205,18 @@ export function ModelsPageContent() {
         <div className="max-w-3xl">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className={`mt-4 font-black leading-tight ${lang === "ko" ? "max-w-[18ch] text-balance text-3xl sm:text-5xl lg:text-6xl" : "text-3xl sm:text-6xl"}`}>{content.title}</h1>
-          <p className={`mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${lang === "ko" ? "hidden sm:block" : ""}`}>{content.description}</p>
-          {lang === "ko" ? (
+          <p className={`mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${lang === "ko" || lang === "en" ? "hidden sm:block" : ""}`}>{content.description}</p>
+          {lang === "ko" || lang === "en" ? (
             <div className="mt-4 space-y-3 sm:hidden">
-              <p className="text-base leading-7 text-zinc-600 dark:text-zinc-300">{copy.ko.mobileDescription}</p>
-              <p className="text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200">{copy.ko.mobileCreditNote}</p>
+              <p className="text-base leading-7 text-zinc-600 dark:text-zinc-300">{copy[lang].mobileDescription}</p>
+              <p className="text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200">{copy[lang].mobileCreditNote}</p>
               <details data-testid="models-mobile-usage-details" className="rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 text-sm leading-6 text-blue-800 dark:text-blue-200">
-                <summary className="min-h-11 cursor-pointer py-2.5 font-bold">{copy.ko.mobileUsageDetails}</summary>
+                <summary className="min-h-11 cursor-pointer py-2.5 font-bold">{copy[lang].mobileUsageDetails}</summary>
                 <p className="pb-3">{content.usageNote}</p>
               </details>
             </div>
           ) : null}
-          <p className={`mt-5 rounded-2xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200 ${lang === "ko" ? "hidden sm:block" : ""}`}>
+          <p className={`mt-5 rounded-2xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200 ${lang === "ko" || lang === "en" ? "hidden sm:block" : ""}`}>
             {content.usageNote}
           </p>
           <Link
@@ -223,14 +229,14 @@ export function ModelsPageContent() {
             data-testid="models-status-link"
             className="mt-5 inline-flex max-w-full items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left transition hover:bg-emerald-500/15 sm:mt-7 [overflow-wrap:anywhere] max-[240px]:flex-col max-[240px]:items-start"
           >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 sm:h-10 sm:w-10 text-emerald-600 dark:text-emerald-300">
               <Activity className="h-5 w-5" />
             </span>
             <span className="min-w-0 max-w-full">
               <span className="block text-sm font-bold text-emerald-700 dark:text-emerald-300">
                 {content.liveStatus}
               </span>
-              <span className="mt-0.5 block text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+              <span className={`mt-0.5 text-xs leading-5 text-zinc-600 dark:text-zinc-400 ${lang === "en" ? "hidden sm:block" : "block"}`}>
                 {content.liveStatusDescription}
               </span>
             </span>
@@ -238,7 +244,7 @@ export function ModelsPageContent() {
           </Link>
         </div>
 
-        {lang === "ko" ? (
+        {lang === "ko" || lang === "en" ? (
           <button type="button" data-testid="models-mobile-filters-toggle" aria-expanded={mobileFiltersOpen}
             aria-controls="models-catalog-filters" onClick={() => setMobileFiltersOpen((open) => !open)}
             className="mt-5 flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-zinc-300 px-3 py-2 text-left text-sm font-bold dark:border-zinc-700 sm:hidden">
@@ -246,7 +252,7 @@ export function ModelsPageContent() {
           </button>
         ) : null}
         <div id="models-catalog-filters" role="search" aria-label={filters.search}
-          className={`mt-5 min-w-0 gap-4 sm:mt-10 sm:grid-cols-3 ${lang === "ko" && !mobileFiltersOpen ? "hidden sm:grid" : "grid"}`}>
+          className={`mt-5 min-w-0 gap-4 sm:mt-10 sm:grid-cols-3 ${(lang === "ko" || lang === "en") && !mobileFiltersOpen ? "hidden sm:grid" : "grid"}`}>
           <label className="min-w-0 text-sm font-bold">
             {filters.search}
             <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} className="mt-2 min-h-11 w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2 font-normal focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900" />
@@ -280,7 +286,7 @@ export function ModelsPageContent() {
             <article
               key={model.id}
               data-model-id={model.id}
-              className="min-w-0 rounded-2xl border border-zinc-200 bg-zinc-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/40 [overflow-wrap:anywhere]"
+              className={`min-w-0 rounded-2xl border border-zinc-200 bg-zinc-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/40 [overflow-wrap:anywhere] ${lang === "en" ? "sm:row-span-4 sm:grid sm:grid-rows-subgrid sm:gap-y-0" : ""}`}
             >
               <div className="flex items-start gap-3 max-[240px]:flex-wrap">
                 <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${brand.className} text-base font-bold text-white shadow-sm ring-1 ring-zinc-200/70 dark:ring-zinc-800`}>
@@ -299,21 +305,21 @@ export function ModelsPageContent() {
               <p data-testid={lang === "ko" || lang === "en" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                 {lang === "ko" ? `이용 시작: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · 짧은 요청: ${usageProfile.credits} 크레딧 · 이미지 입력: ${modelSupportsImageInput(model) ? "지원" : "미지원"}` : lang === "en" ? `Access from: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · Short request: ${usageProfile.credits} credits · Image input: ${modelSupportsImageInput(model) ? "supported" : "not supported"} · Catalog context maximum: ${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "not listed"}` : t(getModelBestFor(model))}
               </p>
-              <div className="mt-3 flex flex-wrap gap-1.5">
+              <div className="mt-3 flex flex-wrap content-start items-start gap-1.5">
                 {tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-white px-2 py-1 text-[11px] font-bold text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:text-zinc-400 dark:ring-zinc-800">
+                  <span key={tag} className="rounded-full bg-white px-2 py-1 text-xs font-bold text-zinc-500 ring-1 ring-zinc-200 sm:text-[11px] dark:bg-zinc-950 dark:text-zinc-400 dark:ring-zinc-800">
                     {t(`modelTags.${tag}`)}
                   </span>
                 ))}
               </div>
-              <div className="mt-5 grid grid-cols-2 gap-3 max-[240px]:grid-cols-1">
+              <div className="mt-5 grid grid-cols-2 gap-3 self-start max-[240px]:grid-cols-1">
                 <div>
-                  <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.minimumPlan}</p>
+                  <p data-testid="model-access-label" className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{lang === "en" ? <><span className="sm:hidden">{copy.en.mobileMinimumPlan}</span><span className="hidden sm:inline">{content.minimumPlan}</span></> : content.minimumPlan}</p>
                   <p className="mt-1 text-sm font-bold">{t(`modelTiers.${model.minimumPlan.toLowerCase()}`)}</p>
                 </div>
                 <div>
                   <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.provider}</p>
-                  <p className="mt-1 truncate text-sm font-bold capitalize">{model.provider}</p>
+                  <p className="mt-1 truncate text-sm font-bold">{PROVIDER_LABELS[model.provider] ?? model.provider}</p>
                 </div>
                 {lang !== "ko" ? <div>
                   <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.usageClass}</p>
@@ -322,7 +328,7 @@ export function ModelsPageContent() {
                   </p>
                 </div> : null}
                 <div>
-                  <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.baseCharge}</p>
+                  <p data-testid="model-base-charge-label" className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{lang === "en" ? <><span className="sm:hidden">{copy.en.mobileBaseCharge}</span><span className="hidden sm:inline">{content.baseCharge}</span></> : content.baseCharge}</p>
                   <CreditCostBadge
                     credits={usageProfile.credits}
                     size="md"
