@@ -483,6 +483,45 @@ async function pixelAt(file, x, y) {
   }
 }
 
+test("set words never break inside a word, so a narrow box shrinks the type instead", { skip }, async () => {
+  const { textBreakCss } = await import("../tools/marketing-video/compose-core.mjs");
+  const { chromium } = await import("playwright");
+  // The first box run (2026-11-10) set "Gemini Flash" as "Gemin / i Flash" and
+  // "일주일" as "일 / 주일". Each case puts a sentence in a box narrower than
+  // one word and counts the lines that word sits on.
+  const cases = [
+    { locale: "ko", text: "일주일 동안 빗속 등산을 가는데 뭘 챙겨야 할까요?", word: "일주일" },
+    { locale: "ko", text: "Gemini Flash", word: "Gemini" },
+    { locale: "zh-Hans", text: "Gemini Flash", word: "Gemini" },
+    { locale: "zh-Hant", text: "下雨天健行一週，該帶什麼？用 Gemini Flash", word: "Gemini" },
+  ];
+  const linesOf = (page, css, { text, word }) =>
+    page.evaluate(
+      ([cssText, textIn, wordIn]) => {
+        document.body.innerHTML = `<div id="b" style="width:70px;font:40px sans-serif;line-height:1.25;${cssText}"></div>`;
+        const box = document.getElementById("b");
+        box.textContent = textIn;
+        const start = textIn.indexOf(wordIn);
+        const range = document.createRange();
+        range.setStart(box.firstChild, start);
+        range.setEnd(box.firstChild, start + wordIn.length);
+        return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+      },
+      [css, text, word],
+    );
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    for (const sample of cases) {
+      assert.equal(await linesOf(page, textBreakCss(sample.locale), sample), 1, `${sample.locale}: "${sample.word}" stays on one line`);
+    }
+    // The old rule broke the word, which is what the box run showed.
+    assert.ok((await linesOf(page, "word-break: keep-all; overflow-wrap: anywhere;", cases[1])) > 1);
+  } finally {
+    await browser.close();
+  }
+});
+
 test("a flat mark is painted over with the real logo where the review put it, and nowhere else", { skip }, async () => {
   const { setLogos } = await import("../tools/marketing-video/compose-core.mjs");
   const dir = mkdtempSync(join(tmpdir(), "hf-logo-"));
