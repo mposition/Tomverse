@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
@@ -137,19 +137,38 @@ function readOnlyRetryExecutorKind(protocolCapabilities: string[]) {
       configuredAmuxV22ReadOnlyApiMetadata()) return AMUX_V22_READ_ONLY_API_EXECUTOR_KIND;
   return null;
 }
+/** A writer reads the runtime FOR SHARE, and takes that lock before the audit
+ * chain (lockRecoveryRuntimesForShare). The read-back that only renders the
+ * recovery card reads it without a lock: inside a writer it runs after the
+ * audit append, where a new runtime lock would invert the order. */
 async function currentRuntime(tx: Prisma.TransactionClient, inspection: {
   workerName: string; workerInstanceId: string; workerGeneration: number },
-  requiredReadOnlyExecutor?: "read_only_retry_v1" | "read_only_api_retry_v1") {
-  const rows = await tx.$queryRaw<Array<{
-    instanceId: string; generation: number; protocolCapabilities: string[];
-  }>>`SELECT "instanceId", "generation", "protocolCapabilities" FROM "AmuxWorkerRuntime"
-    WHERE "workerName" = ${inspection.workerName} FOR SHARE`;
+  requiredReadOnlyExecutor?: "read_only_retry_v1" | "read_only_api_retry_v1",
+  options: { lock: boolean } = { lock: true }) {
+  type RuntimeRow = { instanceId: string; generation: number; protocolCapabilities: string[] };
+  const rows = options.lock ? await tx.$queryRaw<RuntimeRow[]>`SELECT "instanceId", "generation",
+    "protocolCapabilities" FROM "AmuxWorkerRuntime"
+    WHERE "workerName" = ${inspection.workerName} FOR SHARE` :
+    await tx.$queryRaw<RuntimeRow[]>`SELECT "instanceId", "generation",
+    "protocolCapabilities" FROM "AmuxWorkerRuntime"
+    WHERE "workerName" = ${inspection.workerName}`;
   const runtime = rows[0];
   return runtime && runtime.instanceId === inspection.workerInstanceId &&
     runtime.generation === inspection.workerGeneration &&
     (!requiredReadOnlyExecutor ||
       readOnlyRetryExecutorKind(runtime.protocolCapabilities) === requiredReadOnlyExecutor) ?
     runtime : null;
+}
+
+/** Worker runtime rows a writer will read FOR SHARE, locked before the audit
+ * chain (lib/adminAudit.ts takeAuditChainLock): a heartbeat locks its runtime
+ * row and then appends its audit entry. */
+async function lockRecoveryRuntimesForShare(tx: Prisma.TransactionClient,
+  workerNames: readonly string[]) {
+  const names = [...new Set(workerNames)].sort();
+  if (names.length === 0) return;
+  await tx.$queryRaw`SELECT "workerName" FROM "AmuxWorkerRuntime"
+    WHERE "workerName" = ANY(${names}::text[]) ORDER BY "workerName" FOR SHARE`;
 }
 
 function apiExecutionBinding(input: {
@@ -249,9 +268,16 @@ export async function readTaskApprovedCostReceipt(tx: Prisma.TransactionClient,
   return taskRow && typeof taskRow === "object" && !Array.isArray(taskRow) &&
     "costReceipt" in taskRow ? taskRow.costReceipt : null;
 }
-async function lockPriorAttempt(tx: Prisma.TransactionClient, attemptId: string) {
+/** The prior (ended) attempt, locked before the audit chain. FOR SHARE, not
+ * FOR UPDATE: a writer that already holds the audit chain inserts rows that
+ * reference this attempt (a usage acceptance, a review proposal), and their
+ * foreign key check (FOR KEY SHARE) and the proposal guard trigger (FOR SHARE)
+ * would wait behind an exclusive lock while this transaction waits for that
+ * writer's audit chain. Recovery never updates the attempt; a share lock still
+ * keeps every writer that does out. Exported for the lock-order DB test. */
+export async function lockPriorAttempt(tx: Prisma.TransactionClient, attemptId: string) {
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
-    SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${attemptId} FOR UPDATE`;
+    SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${attemptId} FOR SHARE`;
   return rows.length === 1;
 }
 async function safeStopOtherWorkPresent(tx: Prisma.TransactionClient,
@@ -475,6 +501,7 @@ export async function requestAmuxV22RecoveryInspection(input: {
         throw new BoardImportError("request_id_reused", 409);
       return readRecoveryInTransaction(tx, ownerId, input.taskId, input.requestId, now);
     }
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
     await createInspectionRequest(tx, { session: input.session, request: input.request,
@@ -563,6 +590,7 @@ export async function requestAmuxV22RecoveryPreApproval(input: {
     if (await tx.amuxV22TaskRecoveryInspectionRequest.findUnique({
         where: { ownerRequestId: input.requestId } }))
       throw new BoardImportError("request_id_reused", 409);
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
     if (await waitingPreApproval(tx, task.id, now))
@@ -617,7 +645,14 @@ export async function acceptAmuxV22UnknownPriorEffects(input: {
         throw new BoardImportError("request_id_reused", 409);
       return readRecoveryInTransaction(tx, ownerId, input.taskId, input.requestId, now);
     }
+    // The risk acceptance's guard trigger locks the prior attempt FOR UPDATE
+    // at insert, after the audit chain. The writers that lock that ended
+    // attempt before the chain (safe stop, its evidence, an engineering
+    // mismatch) all take this admission lock first, so none holds it here;
+    // writers that reference it after the chain (a review proposal, a usage
+    // acceptance) wait for the chain like this one.
     await lockAmuxAdmissionAndReadIncident(tx, now);
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
     // The blocked revision and the prior attempt's revision are bound separately
@@ -719,9 +754,10 @@ export async function requestAmuxV22LegacySafeStop(input: {
       profileConfigDigest: configured.profileConfigDigest,
       workerInstanceId: liveRuntime.instanceId,
       workerGeneration: liveRuntime.generation };
+    const priorLocked = await lockPriorAttempt(tx, input.priorAttemptId);
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
-    if (!await lockPriorAttempt(tx, input.priorAttemptId))
-      throw new BoardImportError("safe_stop_source_mismatch", 409);
+    if (!priorLocked) throw new BoardImportError("safe_stop_source_mismatch", 409);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
     if (task.taskRole !== "investigate")
       throw new BoardImportError("safe_stop_legacy_not_read_only", 409);
@@ -1038,6 +1074,11 @@ export function reportAmuxV22RecoveryEvidence(input: AmuxV22RecoveryEvidenceInpu
       return { recorded: true, evidenceId: existing.id, verified: existing.verified,
         evidenceDigest, reason: existing.reason, retryWrite: false };
     }
+    // Lock order (lib/adminAudit.ts takeAuditChainLock): the worker runtime
+    // row read below, then the audit chain, then the Task, as the owner's
+    // inspection request takes them.
+    await lockRecoveryRuntimesForShare(tx, [inspection.workerName]);
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, inspection.taskId);
     let reason = amuxV22RecoveryProofReason(input, task.taskRole!);
     try { requireBlockedIdentity(task, inspection.taskRevision, inspection.priorAttemptId); }
@@ -1215,8 +1256,11 @@ export function reportAmuxV22LegacySafeStopEvidence(input: AmuxV22SafeStopEviden
       configured.workerNames.length === profile.workerNames.length &&
       configured.workerNames.every((name, index) => name === profile.workerNames[index]);
     const runtimeMatches = await lockSafeStopProfileRuntime(tx, profile);
-    const task = await lockRecoveryTask(tx, inspection.taskId);
     const priorLocked = await lockPriorAttempt(tx, inspection.priorAttemptId);
+    // Audit chain after the runtime and attempt rows and before the Task
+    // (lib/adminAudit.ts).
+    await takeAuditChainLock(tx);
+    const task = await lockRecoveryTask(tx, inspection.taskId);
     let reason: string | null = amuxV22SafeStopProofReason(input);
     try { requireBlockedIdentity(task, inspection.taskRevision, inspection.priorAttemptId); }
     catch { reason = "safe_stop_identity_changed"; }
@@ -1518,7 +1562,7 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
               profile.profileConfigDigest !== scope.profileConfigDigest) ||
           !amuxV22ReadOnlyLaunchScopeMatchesIntent(nominalScope.data, scope) ||
           amuxV22ReadOnlyLaunchScopeDigest(nominalScope.data) !== launchCheck.launchScopeDigest ||
-          !await currentRuntime(tx, launchCheck, executorKind) || fenced.size > 0;
+          !await currentRuntime(tx, launchCheck, executorKind, { lock: false }) || fenced.size > 0;
         if (launchBindingChanged) {
           launchCurrent = false;
           cost = null;
@@ -1530,7 +1574,7 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
             inspection.requestKind, !!inspection.riskAcceptanceId))) {
         state = "unverified"; reason = "evidence_stale";
       } else if (evidence?.verified && !journalProvenReport(evidence.report) &&
-          !await currentRuntime(tx, inspection)) {
+          !await currentRuntime(tx, inspection, undefined, { lock: false })) {
         state = "unverified"; reason = "runtime_observation_unverified";
       }
     } catch {
@@ -1651,6 +1695,16 @@ async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: D
     if (incident.blocks_admission) throw new BoardImportError("incident_blocked", 409);
     if (await findOpenAmuxOrchestratorHalt(tx))
       throw new BoardImportError("orchestrator_halted", 409);
+    // Lock order, as in execution admission and settlement: admission, the
+    // Task's resource policies, worker runtime, then the audit chain (taken
+    // below, before the Task row; lib/adminAudit.ts takeAuditChainLock). The
+    // policies are named from an unlocked read and checked again once the
+    // Task row is locked.
+    const planned = await tx.amuxWorkItem.findUnique({ where: { id: input.taskId },
+      select: { projectKey: true, teamKey: true } });
+    if (!planned) throw new BoardImportError("recovery_task_unavailable", 409);
+    const plannedResources = amuxResourceRefs(planned);
+    await lockAmuxResourcePolicies(tx, plannedResources);
     const inspection = await tx.amuxV22TaskRecoveryInspectionRequest.findUnique({ where: { id: input.inspectionId },
       include: { evidence: true, approval: true, preApproval: { include: { result: true } } } });
     const preApproval = authority.kind === "preapproval" ? authority.preApproval : null;
@@ -1679,8 +1733,20 @@ async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: D
         configured.workerNames.every((name, index) => name === profile.workerNames[index]) &&
         await lockSafeStopProfileRuntime(tx, profile);
     }
+    // The runtimes this approval reads below: an inspection's worker, and the
+    // FIRST Task's read-only launch worker (named by the launch proof).
+    const plannedLaunchProof = input.launchProofId ?
+      await tx.amuxV22ReadOnlyLaunchProof.findUnique({ where: { id: input.launchProofId } }) : null;
+    const plannedLaunchCheck = plannedLaunchProof ?
+      await tx.amuxV22ReadOnlyLaunchCheck.findUnique({ where: { id: plannedLaunchProof.launchCheckId } }) : null;
+    await lockRecoveryRuntimesForShare(tx, [
+      ...(inspection?.requestKind === "inspect" ? [inspection.workerName] : []),
+      ...(plannedLaunchCheck ? [plannedLaunchCheck.workerName] : [])]);
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
+    if (JSON.stringify(amuxResourceRefs(task)) !== JSON.stringify(plannedResources))
+      throw new BoardImportError("recovery_identity_changed", 409);
     const evidence = inspection?.evidence;
     const inspectReport = amuxV22RecoveryEvidenceSchema.safeParse(evidence?.report);
     const safeReport = amuxV22SafeStopEvidenceSchema.safeParse(evidence?.report);
