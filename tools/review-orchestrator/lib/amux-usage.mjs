@@ -19,6 +19,10 @@ export const AMUX_USAGE_CACHE_MS = 60_000;
  */
 export const AMUX_USAGE_TIMEOUT_MS = 25_000;
 export const AMUX_USAGE_MAX_BYTES = 1024 * 1024;
+/** How old a stale reading AMUX served may be and still assign work. */
+export const AMUX_STALE_MAX_S = 30 * 60;
+/** A stale reading assigns work only while every window keeps this much. */
+export const AMUX_STALE_MIN_REMAINING_PERCENT = 20;
 // URL.hostname keeps IPv6 brackets, so "[::1]" is the loopback's spelling here.
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -62,8 +66,9 @@ export function readAmuxCa(caFile) {
 
 /**
  * One provider's quota from AMUX's usage body: the smallest remaining share of
- * its windows, as AMUX measured them. Anything AMUX did not measure, marks
- * stale, or does not list is unknown -- assignment needs evidence.
+ * its windows, as AMUX measured them. Anything AMUX did not measure or does
+ * not list, and any stale reading outside the bounds below, is unknown --
+ * assignment needs evidence.
  *
  * Availability and staleness are read from the provider's own row only. The
  * body's top-level fields (`available`, `stale`, `stale_reason`, `cache_age_s`,
@@ -75,21 +80,34 @@ export function readAmuxCa(caFile) {
  * `available: false` when that probe fails -- and stamps a served Claude
  * fallback's `stale` onto the Claude row (crates/amux-server/src/api/usage.rs).
  *
+ * A stale row is AMUX's last good reading, served while the live read fails.
+ * It still counts when AMUX dated it (`observed_at`, seconds) at most
+ * AMUX_STALE_MAX_S ago and every window had at least
+ * AMUX_STALE_MIN_REMAINING_PERCENT left: subscription windows move slowly, and
+ * Anthropic's usage endpoint answers 429 for long stretches (2026-11-09) while
+ * the account itself is far from its limit. Older, undated or nearly spent
+ * stale readings stay unknown.
+ *
  * Where AMUX reports credit beside the windows (Cursor's `credit_usd`, from
  * its credit grants), the rule is cursor-quota.mjs's: a spent pool stays
  * usable while credit is left, and credit that was not read proves nothing.
  */
-export function amuxQuotaFromUsage(body, providerId) {
+export function amuxQuotaFromUsage(body, providerId, now = Date.now()) {
   if (!body || typeof body !== "object" || !Array.isArray(body.providers)) return UNKNOWN;
   const providers = body.providers;
   const entry = providers.find((row) => row && typeof row === "object" && row.id === providerId);
-  if (!entry || entry.available !== true || entry.measured !== true || entry.stale === true) return UNKNOWN;
+  if (!entry || entry.available !== true || entry.measured !== true) return UNKNOWN;
   const windows = Array.isArray(entry.windows) ? entry.windows : [];
   const remaining = windows
     .map((window) => window?.remaining_percent)
     .filter((value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100);
   if (remaining.length === 0 || remaining.length !== windows.length) return UNKNOWN;
   const remainingPercent = Math.min(...remaining);
+  if (entry.stale === true) {
+    const ageS = typeof entry.observed_at === "number" ? now / 1000 - entry.observed_at : NaN;
+    if (!Number.isFinite(ageS) || ageS < 0 || ageS > AMUX_STALE_MAX_S ||
+        remainingPercent < AMUX_STALE_MIN_REMAINING_PERCENT) return UNKNOWN;
+  }
   const credit = typeof entry.credit_usd === "number" && Number.isFinite(entry.credit_usd) && entry.credit_usd >= 0
     ? entry.credit_usd : null;
   const state = remainingPercent > 0 || (credit !== null && credit > 0) ? "available" : "exhausted";
@@ -179,8 +197,8 @@ export async function amuxQuota(provider, usageUrl, { now = Date.now(), read = r
   const entry = reads.get(key) ?? { at: -Infinity, body: null, inflight: null };
   reads.set(key, entry);
   const providerId = provider.amuxProvider ?? provider.id;
-  if (entry.inflight) return amuxQuotaFromUsage(await entry.inflight, providerId);
-  if (now >= entry.at && now - entry.at < AMUX_USAGE_CACHE_MS) return amuxQuotaFromUsage(entry.body, providerId);
+  if (entry.inflight) return amuxQuotaFromUsage(await entry.inflight, providerId, now);
+  if (now >= entry.at && now - entry.at < AMUX_USAGE_CACHE_MS) return amuxQuotaFromUsage(entry.body, providerId, now);
   entry.inflight = read(url, { ca: url.protocol === "https:" ? readAmuxCa(caFile) : undefined })
     .catch(() => null)
     .then((body) => {
@@ -191,5 +209,5 @@ export async function amuxQuota(provider, usageUrl, { now = Date.now(), read = r
     .finally(() => {
       entry.inflight = null;
     });
-  return amuxQuotaFromUsage(await entry.inflight, providerId);
+  return amuxQuotaFromUsage(await entry.inflight, providerId, now);
 }
