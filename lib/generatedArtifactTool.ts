@@ -248,7 +248,9 @@ const HANDLERS: Record<ArtifactKind, KindHandler> = {
       "attach it to your reply. Use this for reports, letters, summaries, " +
       "proposals and any prose document the user wants as a file. You supply " +
       "the content as a flow of blocks (headings, paragraphs, lists, tables, " +
-      "quotes, code); the application writes the file. Never write file " +
+      "quotes, code); the application writes the file. For PDF tables, set " +
+      "pdfColumnWeights to match the content: give description columns more " +
+      "space than short item labels and amounts (for example [1, 4, 1]). Never write file " +
       "bytes, base64 or a download link yourself.",
   },
   presentation: {

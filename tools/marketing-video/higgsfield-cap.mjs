@@ -24,6 +24,28 @@ export const HF_IMAGE_COST = 0.25;
 export const CAP_ENV = "MARKETING_HIGGSFIELD_DAILY_CREDIT_CAP";
 
 /** The Brisbane day as yyyymmdd (the job runs at 05:00 Brisbane, the previous UTC day). */
+/**
+ * Downloads a paid job's result, or null. The job is already paid for, so a
+ * failed download costs nothing to try again: a network error or a non-OK
+ * answer is retried, and nothing here throws -- a thrown fetch once ended a run
+ * after its music was paid for, before it could write its report (2026-11-10).
+ */
+export async function downloadResult(url, { maxBytes, attempts = 3, waitMs = 2000, fetchImpl = fetch } = {}) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetchImpl(url);
+      if (response.ok) {
+        const bytes = Buffer.from(await response.arrayBuffer());
+        return bytes.length > maxBytes ? null : bytes;
+      }
+    } catch {
+      // a network error: tried again below
+    }
+    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, waitMs * attempt));
+  }
+  return null;
+}
+
 export function brisbaneDay(now = new Date()) {
   return now.toLocaleDateString("en-CA", { timeZone: "Australia/Brisbane" }).replaceAll("-", "");
 }

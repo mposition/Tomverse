@@ -1685,6 +1685,9 @@ export const en = {
             "Every request, download and refusal on this account, kept for ninety days. A refusal means a download link for your account was presented and turned away.",
         historyLoading: "Loading...",
         historyEmpty: "You have not downloaded your account data yet.",
+        refusedExpired: "The system refused this download because the link expired. Prepare a new link.",
+        refusedUsed: "The system refused a repeat download using an already-used, single-use link.",
+        refusedAccountMismatch: "The system refused this download because the requesting account did not own the link.",
         refusedNote:
             "A link was presented after it had expired, had already been used, or belonged to a different account.",
         status: {

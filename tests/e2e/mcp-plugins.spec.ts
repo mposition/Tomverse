@@ -169,7 +169,10 @@ test("@ui-risk disabled preview and add dialog remain accessible without exposin
   await page.route("**/api/mcp/connections", route => route.fulfill({ json: { enabled: false, servers: [], connections: [], invocations: [] } }));
   await page.goto("/plugins?lang=ko");
   await expect(page.getByRole("button", { name: "MCP 연결 추가" })).toBeDisabled();
-  await expect(page.getByText("현재 환경에서는 Connector Preview가 꺼져 있습니다.")).toBeVisible();
+  await expect(page.getByText("현재 환경에서는 연결 미리보기가 꺼져 있습니다.")).toBeVisible();
+  await expect(page.getByText("대화 전체와 메모리를 자동 공유하지 않습니다.", { exact: false }).first()).toBeAttached();
+  await expect(page.getByText("도구 메타데이터만으로 권한이 부여되지는 않습니다.", { exact: false }).first()).toBeAttached();
+  await expect(page.getByText("저장된 인증 정보를 지웁니다.", { exact: false }).first()).toBeAttached();
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: test.info().outputPath("plugins-disabled.png"), fullPage: true });
 });

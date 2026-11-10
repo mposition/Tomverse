@@ -1871,6 +1871,39 @@ domains:
       text or any customer's prompt or file. Rows are never changed or removed
       by the application; the database refuses both.
 
+  - domain: amuxAttemptUsageAcceptance
+    prismaModel: AmuxV22AttemptUsageAcceptance
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence that the owner accepted one ended AMUX attempt's CLI
+        usage as unknown (owner decision 2026-11-10), by itself or with an
+        owner-approved retry, written under the audit entry of the same
+        transaction. The row names the administrator who accepted and the
+        attempt, and is retained for security investigation, cost
+        reconciliation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "acceptedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      acceptedByUserId is the operator id of the owner who accepted and
+      intentionally has no User foreign key. The row stores Task, attempt and
+      audit identifiers and a closed source, not free text or any customer's
+      prompt or file. Rows are never changed or removed by the application;
+      the database refuses both.
+
   - domain: amuxWorkerLatchEvent
     prismaModel: AmuxWorkerLatchEvent
     userLinkageRole: actor
