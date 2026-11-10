@@ -38,7 +38,7 @@ import { localizedPath } from "@/lib/seo";
  * had already fallen one behind the catalogue; a derived count cannot.
  */
 
-const PROVIDER_LABELS: Record<AiProvider, string> = {
+export const PROVIDER_LABELS: Record<AiProvider, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
   google: "Google",
