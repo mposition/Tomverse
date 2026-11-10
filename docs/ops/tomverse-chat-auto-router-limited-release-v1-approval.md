@@ -80,9 +80,9 @@ authenticated Free, Pro, and Max Chat users who explicitly select Auto,
 including eligible users who join during the release. Guests, Review, manual
 selection, the ordinary model and product filters, entitlement, credit,
 provider-budget, moderation, context, capability, and kill-switch boundaries
-remain unchanged. The approval expires at `2026-12-10T00:00:00Z`.
-mposition extended it from `2026-11-10T00:00:00Z` in chat on 2026-11-10
-(AEST), with every other field unchanged.
+remain unchanged. The approval expires at `2026-12-10T00:00:00Z`. It first
+expired at `2026-11-10T00:00:00Z`; on 2026-11-10 (AEST) mposition extended it in
+chat by 30 days with every other term unchanged.
 
 Production activation is limited to these settings:
 
