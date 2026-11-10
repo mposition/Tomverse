@@ -134,6 +134,7 @@ export const infoPages = {
       },
       {
         "title": "Where are attached files processed?",
+        bodyLinks: [{ text: "safety information", href: "/safety" }, { text: "privacy policy", href: "/privacy" }],
         "body": "The selected AI provider processes the file or excerpts needed to answer. Locks and private storage control access; they do not remove provider processing. See the safety information and privacy policy for current retention and deletion details."
       },
       {
