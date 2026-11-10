@@ -1,5 +1,7 @@
 import type { Language } from "@/components/LanguageProvider";
 import type { MarketingInfoCopy } from "./MarketingInfoPage";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { GUEST_MAX_ATTACHMENTS_PER_MESSAGE, GUEST_MAX_ATTACHMENT_BYTES } from "@/lib/guestAttachmentPolicy";
 import { chatAttachmentExtensionsByGroup, type ChatAttachmentUiGroup } from "@/lib/chatAttachmentFormats";
 
 const attachmentGroupLabels: Record<ChatAttachmentUiGroup, string> = {
@@ -114,7 +116,13 @@ export const infoPages = {
       },
       {
         "title": "What can I try without an account?",
-        "body": "Try Review without an account. Guest Chat is available where the product is offered. Guest models and usage have limits; check the on-screen requirements for saving, sharing and files."
+        "body": `Try Review without signing in and compare up to ${APP_DEFAULTS.maxGuestSelectedModels} eligible guest models. You can also try Chat when guest access is offered on the start screen.`,
+        "bullets": [
+          `The default guest allowance is ${APP_DEFAULTS.maxGuestMessages} credits per UTC day and ${APP_DEFAULTS.maxGuestMonthlyCredits} per UTC month, shared across selected models. Model and tool choices affect credit use; the workspace shows your current balance and limits.`,
+          "Guest conversations stay in this browser. Sign in to save conversations to your account or create share links.",
+          `Guests can attach ${GUEST_MAX_ATTACHMENTS_PER_MESSAGE} supported local file per message, up to ${GUEST_MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB. Guest uploads are temporary and are not included in saving, sharing or exports.`,
+          "Sign in to connect Google Drive. Available file types and tools are shown in the workspace."
+        ]
       },
       {
         "title": "Can I choose a model myself with Smart Adaptive?",
