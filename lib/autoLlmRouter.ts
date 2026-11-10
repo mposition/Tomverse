@@ -361,8 +361,8 @@ const routerPrices = (model: AiModel) => {
  *
  * Returns null -- and the turn keeps the deterministic choice -- when the
  * feature is off, there is nothing to choose between, or the call fails,
- * times out or answers outside the candidate set. It never throws: routing
- * must not be the reason a turn fails.
+ * times out or answers outside the candidate set. A request context guard may
+ * refuse the turn independently before the Router spends its budget.
  *
  * Every call is kept as one `AutoRouterDecision` row: the labelled data a
  * Tomverse-trained triage will learn from. The write is not awaited by the
@@ -386,6 +386,9 @@ export async function pickAutoModelWithLlm(input: {
      * conversation): the call then does not ask for one at all.
      */
     rewriteAllowed?: boolean;
+    /** Request-side freshness check, only for a priced live Router candidate.
+     * A refusal prevents both the Router budget hold and the provider call. */
+    verifyPreparedContext?: () => Promise<boolean>;
     searchPlan?: boolean;
     fileContext?: AutoFileGenerationContext;
     imageIntent?: Promise<ChatImageIntentContext | null>;
@@ -397,7 +400,7 @@ export async function pickAutoModelWithLlm(input: {
      * session memory hold only turns a chat model answered. Absent is true.
      */
     recordDecision?: Promise<boolean> | ((pick: AutoLlmRouterPick | null) => Promise<boolean>);
-}): Promise<{ modelId: string; rewrite: string | null; requiresFileGeneration?: true; searchQueries?: string[] } | null> {
+}): Promise<{ modelId: string; rewrite: string | null; requiresFileGeneration?: boolean; searchQueries?: string[] } | null> {
     const [configuredModelId, tunables] = await Promise.all([
         readAutoLlmRouterModelId(), readAutoRouterTunables(),
     ]);
@@ -459,6 +462,7 @@ export async function pickAutoModelWithLlm(input: {
     const prices = routerPrices(routerModel);
     const request = routerRequest(call);
     const worstCase = prices ? autoLlmRouterWorstCaseMicroUsd({ ...request, ...prices }) : null;
+    if (worstCase !== null && input.verifyPreparedContext && !(await input.verifyPreparedContext())) return null;
     const reservedAt = new Date();
     if (worstCase === null || !(await reserveRouterCost(routerModel.provider, worstCase, reservedAt))) {
         console.info(
@@ -553,6 +557,6 @@ export async function pickAutoModelWithLlm(input: {
         modelId: pick.modelId,
         rewrite: pick.rewrite,
         ...(searchQueries ? { searchQueries } : {}),
-        ...(pick.requiresFileGeneration ? { requiresFileGeneration: true as const } : {}),
+        ...(pick.requiresFileGeneration !== undefined ? { requiresFileGeneration: pick.requiresFileGeneration } : {}),
     } : null;
 }

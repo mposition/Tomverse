@@ -6,6 +6,7 @@ import type { AssistantMemoryPolicy } from "@/lib/assistantProfileVersioning";
 import {
     contextFingerprint,
     memoryStateFingerprint,
+    pricedMemoryRetrievalHash,
     type ContextBundleFingerprintInput,
 } from "@/lib/chatContextBundleCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
@@ -227,7 +228,8 @@ export async function buildChatMemoryContext(input: {
         memoryVersion,
         styleVersion,
         profileVersion: null,
-        retrievalHash: retrieval.resultHash,
+        retrievalHash: prompt.text === null ? retrieval.resultHash : pricedMemoryRetrievalHash(
+            retrieval.selected.map(({ memory }) => memory.id), prompt.text),
         retrievalVersion: retrieval.algorithmVersion,
         promptVersion: prompt.promptVersion,
         knowledgeHash: "none",
