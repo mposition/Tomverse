@@ -95,7 +95,9 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product
   const { lang } = useLanguage(); const c = reviewWorkspaceCopy[lang];
   const productLabel = (key: ChatWorkspaceProduct) => {
     const item = chatProductUiCopy[lang][key];
-    return <span className={item.shortDescription ? "review-product-label" : undefined}>{item.shortLabel}{item.shortDescription && <small className="review-product-caption" aria-hidden="true">{item.shortDescription}</small>}</span>;
+    // A caption that repeats the label (Korean Chat: 채팅 / 채팅) says nothing.
+    const caption = item.shortDescription && item.shortDescription !== item.shortLabel ? item.shortDescription : null;
+    return <span className={caption ? "review-product-label" : undefined}>{item.shortLabel}{caption && <small className="review-product-caption" aria-hidden="true">{caption}</small>}</span>;
   };
   const [open, setOpen] = useState(false);
   const keyboardInset = useKeyboardInset();

@@ -11,9 +11,11 @@ Review lets the user choose models directly and compare answers side by side.
 The product switcher must keep that distinction visible without presenting
 Smart Adaptive as a third product.
 
-Korean controls keep the Chat and Review product names and add short visible
+Korean controls show the short labels `채팅` / `비교` and add short visible
 explanations (chat and model comparison). The same captions appear in the
-switcher, Studio title and navigation. Existing accessible product names and
+switcher, Studio title and navigation, except where a caption would repeat its
+label: the Korean Chat link shows `채팅` once, while the Studio title keeps
+`Chat` with its `채팅` caption. Existing accessible product names and
 localized feature descriptions remain available; captions do not change routes
 or selection behavior.
 
