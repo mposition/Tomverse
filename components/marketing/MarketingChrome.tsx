@@ -279,8 +279,8 @@ function LegacyMarketingHeader({
   const { status: sessionStatus } = useSession();
   const entry = useMarketingChatEntry();
   const navigationItems = [
-    { label: "Chat", href: entry.chatHref },
-    { label: "Review", href: REVIEW_PRODUCT_PATH },
+    { label: lang === "ko" ? "채팅" : "Chat", href: entry.chatHref },
+    { label: lang === "ko" ? "리뷰" : "Review", href: REVIEW_PRODUCT_PATH },
     ...labels.topMenu.slice(1),
   ];
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -597,7 +597,7 @@ const launchChrome = {
     products: "제품", help: "도움말", policies: "정책", guides: "활용 가이드",
     models: "모델 살펴보기", pricing: "요금제", helpCentre: "도움말 센터", faq: "자주 묻는 질문", support: "고객 지원",
     status: "서비스 상태", safety: "안전과 데이터 처리", privacy: "개인정보 처리방침", terms: "이용약관", refund: "환불 정책",
-    login: "로그인", start: "Chat 시작하기", back: "Chat으로 돌아가기", navigation: "주요 메뉴",
+    login: "로그인", start: "채팅 시작하기", back: "채팅으로 돌아가기", navigation: "주요 메뉴",
     description: "여러 AI를 한곳에서 사용하고, 질문에 맞는 모델을 선택하며, 서로 다른 답변의 관점을 비교하는 AI 작업 공간입니다.",
     caution: "중요한 판단 전 AI 답변을 직접 확인하세요.",
   },
@@ -670,8 +670,8 @@ function LaunchMarketingHeader({
   const menuRef = useRef<HTMLElement>(null);
   const chatHref = entry.chatAvailable ? suppliedChatHref ?? entry.chatHref : entry.chatHref;
   const items = [
-    { label: "Chat", href: chatHref, key: "chat" },
-    { label: "Review", href: reviewInfoHref ?? localizedPath(lang, REVIEW_PRODUCT_PATH), key: "review" },
+    { label: lang === "ko" ? "채팅" : "Chat", href: chatHref, key: "chat" },
+    { label: lang === "ko" ? "리뷰" : "Review", href: reviewInfoHref ?? localizedPath(lang, REVIEW_PRODUCT_PATH), key: "review" },
     { label: copy.pricing, href: "/pricing", key: "pricing" },
     { label: copy.models, href: "/models", key: "models" },
   ];

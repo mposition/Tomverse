@@ -293,6 +293,8 @@ export const zhHant = {
         onGuestMode: "訪客模式已啟用",
         guestModeMessage: "在訪客模式下，所有聊天資訊儲存在你的瀏覽器中，不會記錄到伺服器。",
         guestModeLimitMessage: "（每天 50 免費點數，由所選模型共同分攤）",
+        guestCreditsUsed: "訪客額度已用 {used}/{limit}",
+        guestCreditsShared: "每日訪客額度由所有已選模型共用。",
         guestComparisonsRemaining: "今天還可以比較約 {count} 次",
         aiAssistant: "AI 助理",
         you: "我",
@@ -1660,6 +1662,9 @@ export const zhHant = {
         historyDescription: "本帳戶的每一次請求、下載與拒絕，保留九十天。「已拒絕」表示有人出示了你帳戶的下載連結但未被接受。",
         historyEmpty: "你還沒有下載過帳戶資料。",
         historyLoading: "載入中…",
+        refusedExpired: "連結已過期，系統拒絕了下載請求。請產生新連結。",
+        refusedUsed: "此一次性連結已使用，系統拒絕了重複下載請求。",
+        refusedAccountMismatch: "提出請求的帳戶並非連結擁有者，系統拒絕了下載請求。",
         refusedNote: "出示的連結已過期、已被使用過，或屬於其他帳戶。",
         status: {
             ...en.accountDataExport.status,

@@ -20,6 +20,27 @@ const send = async (page: Page, text: string) => {
   return payload;
 };
 
+test("disabled location intent skips analysis while manual location still refreshes", { tag: "@ui-risk" }, async ({ page }) => {
+  test.skip(process.env.E2E_CHAT_LOCATION_INTENT_ENABLED !== "false", "Run with E2E_CHAT_LOCATION_INTENT_ENABLED=false");
+  const moveTo = await provideGeolocation(page, { latitude: -27.47, longitude: 153.025, accuracy: 150 });
+  await openChat(page);
+  let analyses = 0;
+  await page.route("**/api/chat/location-intent", route => {
+    analyses++;
+    return route.fulfill({ json: { requiresLocation: true } });
+  });
+  expect((await send(page, "Where am I?")).currentLocation).toBeUndefined();
+  expect(analyses).toBe(0);
+  await page.getByTestId("composer-tools-button").click();
+  await page.getByTestId("tools-location-row").click();
+  await expect(page.getByTestId("tools-location-row")).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  expect((await send(page, "What is nearby?")).currentLocation.latitude).toBe(-27.47);
+  await moveTo({ latitude: -33.869, longitude: 151.209, accuracy: 150 });
+  expect((await send(page, "What is nearby now?")).currentLocation.latitude).toBe(-33.869);
+  expect(analyses).toBe(0);
+});
+
 test("a guest receives the verification cookie before location analysis and the original answer", { tag: "@ui-risk" }, async ({ page, context }) => {
   await provideGeolocation(page, { latitude: -27.47, longitude: 153.025, accuracy: 150 });
   await prepareGuestPage(page, "en");

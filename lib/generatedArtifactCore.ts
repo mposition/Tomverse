@@ -441,6 +441,9 @@ const blockSchema = z.discriminatedUnion("type", [
         .array(z.string().max(ARTIFACT_LIMITS.maxTitleLength))
         .min(1)
         .max(ARTIFACT_LIMITS.maxDocumentTableColumns),
+      pdfColumnWeights: z.array(z.number().min(1).max(20))
+        .min(1).max(ARTIFACT_LIMITS.maxDocumentTableColumns).optional()
+        .describe("PDF only: one relative width per column, from 1 to 20. Give long descriptions more space than short labels or amounts, e.g. [1, 4, 1]. Omit for equal widths."),
       rows: z
         .array(
           z
@@ -449,7 +452,11 @@ const blockSchema = z.discriminatedUnion("type", [
         )
         .max(ARTIFACT_LIMITS.maxDocumentTableRows),
     })
-    .strict(),
+    .strict()
+    .refine(block => !block.pdfColumnWeights || block.pdfColumnWeights.length === block.columns.length, {
+      message: "pdfColumnWeights must contain exactly one weight per table column.",
+      path: ["pdfColumnWeights"],
+    }),
   z.object({ type: z.literal("divider") }).strict(),
   z.object({ type: z.literal("pageBreak") }).strict(),
 ]);

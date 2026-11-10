@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     await recordResponseLatency(`${proof.id}:client`, {
       product: proof.product, mode: proof.mode, modelId: null, provider: null,
       source: "client", outcome: body.outcome,
-      timings: { prepareMs: body.prepareMs, completionMs: body.completionMs,
+      timings: { ...body.stages, prepareMs: body.prepareMs, completionMs: body.completionMs,
         ...(body.firstContentMs === null ? {} : { firstContentMs: body.firstContentMs }) },
     });
     return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });

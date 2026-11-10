@@ -2762,6 +2762,7 @@ model AdminAuditLog {
   amuxV22RiskAcceptances AmuxV22TaskRecoveryRiskAcceptance[] @relation("AmuxV22RiskAcceptanceAudit")
   amuxV22RecoveryPreApprovals AmuxV22TaskRecoveryPreApproval[] @relation("AmuxV22RecoveryPreApprovalAudit")
   amuxV22RecoveryPreApprovalResults AmuxV22TaskRecoveryPreApprovalResult[] @relation("AmuxV22RecoveryPreApprovalResultAudit")
+  amuxV22AttemptUsageAcceptances AmuxV22AttemptUsageAcceptance[] @relation("AmuxV22AttemptUsageAcceptanceAudit")
   amuxV22ReadOnlyLaunchChecks AmuxV22ReadOnlyLaunchCheck[] @relation("AmuxV22ReadOnlyLaunchCheckAudit")
   amuxV22ReadOnlyLaunchProofs AmuxV22ReadOnlyLaunchProof[] @relation("AmuxV22ReadOnlyLaunchProofAudit")
   amuxV22ApiModelAccessEvidence AmuxV22ApiModelAccessEvidence[] @relation("AmuxV22ApiModelAccessEvidenceAudit")
@@ -8076,6 +8077,7 @@ model AmuxExecutionAttempt {
   v22RecoveryInspections AmuxV22TaskRecoveryInspectionRequest[]
   v22RecoveryRiskAcceptances AmuxV22TaskRecoveryRiskAcceptance[] @relation("AmuxV22RiskAcceptanceAttempt")
   v22RecoveryPreApprovals AmuxV22TaskRecoveryPreApproval[] @relation("AmuxV22RecoveryPreApprovalAttempt")
+  v22UsageAcceptance AmuxV22AttemptUsageAcceptance? @relation("AmuxV22AttemptUsageAcceptanceAttempt")
   v22ReadOnlyLaunchChecks AmuxV22ReadOnlyLaunchCheck[] @relation("AmuxV22ReadOnlyLaunchCheckAttempt")
   v22ApiModelAccessEvidence AmuxV22ApiModelAccessEvidence[] @relation("AmuxV22ApiModelAccessEvidenceAttempt")
 }
@@ -11612,6 +11614,26 @@ model AmuxV22TaskRecoveryPreApprovalResult {
   preApproval AmuxV22TaskRecoveryPreApproval @relation(fields: [preApprovalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   approval AmuxV22TaskRecoveryApproval? @relation("AmuxV22RecoveryPreApprovalResultApproval", fields: [approvalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   authorizationAuditLog AdminAuditLog @relation("AmuxV22RecoveryPreApprovalResultAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22RecoveryPreApprovalResult_audit_fkey")
+}
+
+/// Owner decision 2026-11-10: the owner accepted that one ended v22 attempt's
+/// CLI usage stays unknown, by itself or with an owner-approved retry of its
+/// Task. The usage gate (lib/amux/v22WorkerUsageGate.ts) leaves the attempt
+/// out; its reserved cap, cost and usage rows are unchanged. Append-only.
+model AmuxV22AttemptUsageAcceptance {
+  id                      String   @id @db.Uuid
+  attemptId               String   @unique
+  taskId                  String
+  /// owner_accept | recovery_approval | review_retry
+  source                  String
+  acceptedByUserId        String
+  authorizationAuditLogId String
+  acceptedAt              DateTime
+
+  attempt               AmuxExecutionAttempt @relation("AmuxV22AttemptUsageAcceptanceAttempt", fields: [attemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog        @relation("AmuxV22AttemptUsageAcceptanceAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([taskId])
 }
 
 /// Policy v39: one owner's explicit acceptance of the historical UNKNOWN risk.

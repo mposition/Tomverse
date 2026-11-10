@@ -125,6 +125,8 @@ const HALT = {
   harmlessNoise: [
     "amux v22 quota source unavailable for claude-chore",
     "amux v22 quota observation recorded for claude-chore",
+    // An unknown quota write warns instead of halting (quota_write_unknown_warning).
+    "amux wsl bridge warn: quota observation write for claude-chore outcome unknown (timeout); the next probe reports afresh, not halted",
     "amux wsl bridge warn: owned queue answered 503 amux_database_busy; no new assignment this tick, not halted",
     "amux wsl bridge warn: worker register answered 503 amux_database_busy; registering again next tick",
     "amux wsl bridge warn: execution heartbeat for attempt 7f9c2d10-1111-4222-8333-944455556666 answered 503 amux_database_busy; kept, not halted",
@@ -358,6 +360,26 @@ test("the --worker scope lines above are the ones the bridge prints", () => {
   assert.match(filled[0], pattern(formats[0]));
   assert.match(filled[1], pattern(formats[0]));
   assert.match(filled[2], pattern(formats[1]));
+});
+
+test("the unknown quota write warning above is the one the bridge prints", () => {
+  // Fixed to quota_write_unknown_warning: the line ends in "not halted", so a
+  // later approved halt in the same run is still restarted.
+  const bridge = readFileSync(
+    new URL("../apps/tomverse-orchestrator/src/wsl_bridge.rs", import.meta.url),
+    "utf8"
+  );
+  const format =
+    "amux wsl bridge warn: quota observation write for {name} outcome unknown ({}); the next probe reports afresh, not halted";
+  assert.ok(bridge.includes(`"${format}"`), format);
+  const filled = HALT.harmlessNoise.find((line) => line.includes("quota observation write"));
+  const pattern = new RegExp(
+    `^${format
+      .replace(/[.*+?^$()|[\]\\]/g, "\\$&")
+      .replace("{name}", "[A-Za-z0-9_.-]+")
+      .replace("{}", "[a-z0-9_]+")}$`
+  );
+  assert.match(filled, pattern);
 });
 
 for (const [name, lines, reason] of [
