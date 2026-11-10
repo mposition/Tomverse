@@ -1,0 +1,172 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { after, test } from "node:test";
+
+import type { Session } from "next-auth";
+
+import { takeAuditChainLock } from "@/lib/adminAudit";
+import { createAmuxReviewProposal, getAmuxReviewDetail, resolveAmuxReview } from "@/lib/amux/reviewApproval";
+import { acceptAmuxV22AttemptUnknownUsage } from "@/lib/amux/v22AttemptUsageAcceptance";
+import { prisma } from "@/lib/prisma";
+
+// Real PostgreSQL, committed fixtures, two writers on one Task at once.
+//
+// The owner's acceptance of an attempt's unknown usage takes the audit chain
+// lock and then the Task row (lib/amux/v22AttemptUsageAcceptance.ts). A review
+// resolution used to lock the Task row and take the audit lock only when it
+// appended its entry, so the two could each hold what the other waited for and
+// PostgreSQL aborted one with 40P01. Every admin writer now takes the audit
+// lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+
+// The admin role is read from the environment at each call.
+const ownerUserId = `amux-lock-order-owner-${randomUUID()}`;
+const ownerEmail = `${ownerUserId}@example.test`;
+process.env.ADMIN_USER_IDS = ownerUserId;
+process.env.ADMIN_EMAILS = ownerEmail;
+process.env.ADMIN_OWNER_EMAILS = ownerEmail;
+
+const session = {
+  user: { id: ownerUserId, email: ownerEmail, authenticatedAt: new Date().toISOString() },
+  expires: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+} as Session;
+
+const requireDedicatedDatabase = () => {
+  const testRaw = process.env.TEST_DATABASE_URL?.trim();
+  if (!testRaw || process.env.DATABASE_URL?.trim() !== testRaw) {
+    throw new Error("REFUSE: AMUX lock-order DB tests require DATABASE_URL=TEST_DATABASE_URL");
+  }
+  const url = new URL(testRaw);
+  const databaseName = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+  const schemaName = url.searchParams.get("schema");
+  const dedicatedSchema = schemaName === "tomverse_amux_test";
+  const canonicalCiDatabase =
+    databaseName === "tomverse_test" &&
+    (schemaName === null || schemaName === "public") &&
+    ["127.0.0.1", "localhost"].includes(url.hostname);
+  if ((!dedicatedSchema && !canonicalCiDatabase) || url.hostname.startsWith("pooled.")) {
+    throw new Error("REFUSE: AMUX lock-order DB tests require a direct dedicated test database");
+  }
+};
+
+requireDedicatedDatabase();
+
+const fixtureTaskIds: string[] = [];
+
+after(async () => {
+  if (fixtureTaskIds.length > 0) {
+    await prisma.amuxWorkItem.updateMany({
+      where: { id: { in: fixtureTaskIds } },
+      data: { archivedAt: new Date() },
+    });
+  }
+  await prisma.$disconnect();
+});
+
+const blockedFixture = async () => {
+  const task = await prisma.amuxWorkItem.create({
+    data: {
+      id: `amux-lock-order-${randomUUID()}`,
+      title: "AMUX audit lock order fixture",
+      status: "blocked",
+      kind: "code",
+      priority: "p2",
+      revision: 3,
+      dueParseState: "valid",
+      dueAt: new Date("2026-09-23T00:00:00.000Z"),
+      duePrecision: "instant",
+      dueSource: "classification",
+      dueRaw: "2026-09-23T00:00:00.000Z",
+    },
+  });
+  fixtureTaskIds.push(task.id);
+  const escalation = await prisma.amuxHumanEscalation.create({
+    data: {
+      taskId: task.id,
+      specialty: "planning-review",
+      reason: "Planning input requires human review.",
+      openedBy: "system:amux-task-sync",
+      openedTaskRevision: 2,
+    },
+  });
+  return { task, escalation };
+};
+
+/** Backends of this database waiting on a lock that is not granted. */
+const waitingBackends = async () => {
+  const rows = await prisma.$queryRaw<Array<{ waiting: bigint }>>`
+    SELECT count(*)::bigint AS "waiting" FROM pg_locks
+    WHERE NOT granted AND pid <> pg_backend_pid()
+  `;
+  return Number(rows[0]?.waiting ?? 0);
+};
+
+const untilWaiting = async (count: number) => {
+  const deadline = Date.now() + 10_000;
+  while (await waitingBackends() < count) {
+    if (Date.now() > deadline) throw new Error(`expected ${count} lock waiters`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+};
+
+const settle = <T>(promise: Promise<T>) => promise.then(
+  (value) => ({ ok: true as const, value }),
+  (error: unknown) => ({ ok: false as const, error }),
+);
+
+test("an acceptance and a review resolution on one Task both finish without a deadlock", async () => {
+  const fixture = await blockedFixture();
+  const request = new Request("http://localhost/api/internal/amux/review", { method: "POST" });
+  const detail = await getAmuxReviewDetail(fixture.escalation.id);
+  assert.ok(detail.allowed_outcomes.includes("block"));
+  const { proposal } = await createAmuxReviewProposal({
+    escalationId: fixture.escalation.id,
+    outcome: "block",
+    expectedSubjectDigest: detail.review_content.digest,
+    session,
+    request,
+  });
+
+  // A third writer holds the audit chain, so both writers queue on it in a
+  // known order: the acceptance first, then the review. When it lets go the
+  // acceptance runs first and asks for the Task row. Before the fix the
+  // review held that row while it waited for the chain: a deadlock.
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  let holding!: () => void;
+  const held = new Promise<void>((resolve) => { holding = resolve; });
+  const blocker = prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    holding();
+    await released;
+  }, { timeout: 30_000 });
+  await held;
+
+  const acceptance = settle(acceptAmuxV22AttemptUnknownUsage({
+    session, request, taskId: fixture.task.id, attemptId: `attempt-${randomUUID()}`,
+  }));
+  await untilWaiting(1);
+  const review = settle(resolveAmuxReview({
+    escalationId: fixture.escalation.id,
+    proposalId: proposal.id,
+    idempotencyKey: `amux-lock-order-${randomUUID()}`,
+    resolution: "Keep blocked while correcting the source.",
+    session,
+    request,
+  }));
+  await untilWaiting(2);
+  release();
+  await blocker;
+
+  const [accepted, resolved] = await Promise.all([acceptance, review]);
+  // The fixture is not a v4 Task, so the acceptance is refused -- after it
+  // has taken both locks, which is all this test needs of it.
+  assert.equal(accepted.ok, false);
+  assert.equal((accepted as { error: { code?: string } }).error.code, "task_unavailable",
+    String((accepted as { error: unknown }).error));
+  assert.ok(resolved.ok, resolved.ok ? "" : String(resolved.error));
+  assert.equal(resolved.value.task_status, "blocked");
+  const decision = await prisma.amuxReviewDecision.findUniqueOrThrow({
+    where: { proposalId: proposal.id },
+  });
+  assert.equal(decision.outcome, "block");
+});

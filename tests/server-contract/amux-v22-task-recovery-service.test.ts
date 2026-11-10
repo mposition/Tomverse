@@ -300,6 +300,7 @@ function load() {
   mock.module(mod("lib/adminAuth.ts"), { namedExports: { isAdminSession: () => true, getAdminRole: () => "owner" } });
   mock.module(mod("lib/adminReauthentication.ts"), { namedExports: { assertRecentAdminAuthentication: async () => {} } });
   mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+    takeAuditChainLock: async () => {},
     writeAdminAuditLog: async (input: Row) => {
       const id = `audit-${world.audits.length}`;
       world.audits.push({ ...input, id, actorUserId: "owner-1", entryHash: "d".repeat(64) }); return id;

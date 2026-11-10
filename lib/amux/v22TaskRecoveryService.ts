@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
@@ -475,6 +475,7 @@ export async function requestAmuxV22RecoveryInspection(input: {
         throw new BoardImportError("request_id_reused", 409);
       return readRecoveryInTransaction(tx, ownerId, input.taskId, input.requestId, now);
     }
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
     await createInspectionRequest(tx, { session: input.session, request: input.request,
@@ -563,6 +564,7 @@ export async function requestAmuxV22RecoveryPreApproval(input: {
     if (await tx.amuxV22TaskRecoveryInspectionRequest.findUnique({
         where: { ownerRequestId: input.requestId } }))
       throw new BoardImportError("request_id_reused", 409);
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
     if (await waitingPreApproval(tx, task.id, now))
@@ -618,6 +620,7 @@ export async function acceptAmuxV22UnknownPriorEffects(input: {
       return readRecoveryInTransaction(tx, ownerId, input.taskId, input.requestId, now);
     }
     await lockAmuxAdmissionAndReadIncident(tx, now);
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
     // The blocked revision and the prior attempt's revision are bound separately
@@ -719,6 +722,7 @@ export async function requestAmuxV22LegacySafeStop(input: {
       profileConfigDigest: configured.profileConfigDigest,
       workerInstanceId: liveRuntime.instanceId,
       workerGeneration: liveRuntime.generation };
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     if (!await lockPriorAttempt(tx, input.priorAttemptId))
       throw new BoardImportError("safe_stop_source_mismatch", 409);
@@ -1651,6 +1655,16 @@ async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: D
     if (incident.blocks_admission) throw new BoardImportError("incident_blocked", 409);
     if (await findOpenAmuxOrchestratorHalt(tx))
       throw new BoardImportError("orchestrator_halted", 409);
+    // Lock order, as in execution admission and settlement: admission, the
+    // Task's resource policies, worker runtime, then the audit chain (taken
+    // below, before the Task row; lib/adminAudit.ts takeAuditChainLock). The
+    // policies are named from an unlocked read and checked again once the
+    // Task row is locked.
+    const planned = await tx.amuxWorkItem.findUnique({ where: { id: input.taskId },
+      select: { projectKey: true, teamKey: true } });
+    if (!planned) throw new BoardImportError("recovery_task_unavailable", 409);
+    const plannedResources = amuxResourceRefs(planned);
+    await lockAmuxResourcePolicies(tx, plannedResources);
     const inspection = await tx.amuxV22TaskRecoveryInspectionRequest.findUnique({ where: { id: input.inspectionId },
       include: { evidence: true, approval: true, preApproval: { include: { result: true } } } });
     const preApproval = authority.kind === "preapproval" ? authority.preApproval : null;
@@ -1679,8 +1693,11 @@ async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: D
         configured.workerNames.every((name, index) => name === profile.workerNames[index]) &&
         await lockSafeStopProfileRuntime(tx, profile);
     }
+    await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
+    if (JSON.stringify(amuxResourceRefs(task)) !== JSON.stringify(plannedResources))
+      throw new BoardImportError("recovery_identity_changed", 409);
     const evidence = inspection?.evidence;
     const inspectReport = amuxV22RecoveryEvidenceSchema.safeParse(evidence?.report);
     const safeReport = amuxV22SafeStopEvidenceSchema.safeParse(evidence?.report);
