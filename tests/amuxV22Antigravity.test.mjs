@@ -339,6 +339,30 @@ test("an Antigravity implement run gets the jail first on PATH and the prompt on
   assert.deepEqual([outcome.kind, outcome.cliStarted, outcome.failure],
     ["failed", false, "shell_jail_unavailable"]);
   assert.equal(fake.calls.length, 0);
+  // The base sync may check out a commit that adds .gemini/: the check runs
+  // again on that tree, and the CLI never starts beside it.
+  for (const provider of ["antigravity", "github-copilot"]) {
+    const checked = [];
+    const cleaned = [];
+    const synced = fakeSpawn(output);
+    let tree = "before";
+    const refused = await runAmuxV22OneShot({ ...request,
+      modelId: provider === "antigravity" ? MODEL : "gpt-6-luna" }, { ...config, provider }, {
+      syntheticPlatform: true, spawnChild: synced.spawnChild,
+      syncBase: async () => { tree = "after"; return { ok: true, baseSha: "b".repeat(40) }; },
+      channelPreflight: () => { checked.push(tree); return tree === "after" ?
+        "project_cli_config_present" : null; },
+      ensureDependencies: async () => ({ ok: true, installed: false }),
+      createShellJail: async () => ({ binPath: "/run-home/shell-1/bin",
+        prefixPath: "/run-home/shell-1/prefix", cleanup: async () => { cleaned.push("jail"); } }),
+      createRunHome: async (_provider, value) => ({ config: { ...value, homePath: "/run-home" },
+        copilotToken: `gho_${"a".repeat(36)}`, cleanup: async () => { cleaned.push("home"); } }) });
+    assert.deepEqual(checked, ["before", "after"], provider);
+    assert.deepEqual([refused.kind, refused.cliStarted, refused.failure],
+      ["failed", false, "project_cli_config_present"], provider);
+    assert.equal(synced.calls.length, 0, provider);
+    assert.deepEqual(cleaned.sort(), ["home", "jail"], provider);
+  }
   // The environment helper alone: no jail means the plain PATH.
   assert.equal(amuxV22CliEnv("antigravity", config, { config: { ...config, homePath: "/h" } }).PATH,
     "/usr/bin:/bin");
