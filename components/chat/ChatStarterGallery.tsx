@@ -200,7 +200,7 @@ export function ChatStarterGallery({
         {previewed ? t(previewed.entry.outcomeKey) : t("chatStarter.hint")}
       </p>
       <ul
-        className="mx-0 mb-0 mt-3 grid list-none grid-cols-2 gap-2 p-0 @max-[18rem]/starters:grid-cols-1 @min-[30rem]/starters:flex @min-[30rem]/starters:flex-wrap @min-[30rem]/starters:justify-center"
+        className="mx-0 mb-0 mt-3 grid list-none grid-cols-2 gap-2 p-0 @max-[18.5rem]/starters:grid-cols-1 @min-[30rem]/starters:flex @min-[30rem]/starters:flex-wrap @min-[30rem]/starters:justify-center"
         onMouseLeave={() => setPreviewId(null)}
       >
         {cards.map(({ entry, availability }) => {
