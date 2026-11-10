@@ -112,7 +112,7 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // Current observed copy is evidence only; its digest is not a new approval.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "c298a485e443f905478de48a16c8ae8efcb582c3e067db6344a05f5cdff1a849",
+    contentSha256: "1ce458cefc818d5506a84046fbb29b985ff62a652a573a6290133959dbbbb7fc",
   },
   "/terms": {
     date: "2026-11-16",

@@ -140,7 +140,8 @@ test("mobile analytics consent stays compact with one-row actions", async ({
 
   const decline = banner.getByRole("button", { name: "Decline" });
   const accept = banner.getByRole("button", { name: "Allow analytics" });
-  await expect(accept).toHaveText("Allow", { useInnerText: true });
+  // Home uses the readable notice (#3558), which shows the full label.
+  await expect(accept).toHaveText("Allow analytics", { useInnerText: true });
   const [bannerBox, declineBox, acceptBox] = await Promise.all([
     banner.boundingBox(),
     decline.boundingBox(),
@@ -150,7 +151,8 @@ test("mobile analytics consent stays compact with one-row actions", async ({
   expect(bannerBox).not.toBeNull();
   expect(declineBox).not.toBeNull();
   expect(acceptBox).not.toBeNull();
-  expect(bannerBox!.height).toBeLessThanOrEqual(80);
+  // Home's readable notice (#3558, #3597) puts the actions on their own row: ~108px.
+  expect(bannerBox!.height).toBeLessThanOrEqual(120);
   expect(Math.abs(declineBox!.y - acceptBox!.y)).toBeLessThanOrEqual(1);
   expect(declineBox!.x + declineBox!.width).toBeLessThan(acceptBox!.x);
 
