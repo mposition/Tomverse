@@ -218,6 +218,57 @@ test("combined routing does not claim an image decision after provider failure",
   } finally { routerFailure = null; }
 });
 
+test("compact combined output distinguishes a chat decision from missing image output", async () => {
+  const original = generateRouterResult;
+  try {
+    for (const [imageIntent, expected] of [[null, { image: false }], [undefined, undefined], [{}, undefined]] as const) {
+      generateRouterResult = () => ({ output: { ...routerOutput, imageIntent } });
+      let decision: unknown;
+      await pick(undefined, true, {
+        imageIntent: Promise.resolve({ modelId: "gpt-6-luna", candidates: [], previousImagePrompt: null,
+          attachedPhoto: false, prompt: "test", maxOutputTokens: 400, timeoutMs: 8000 }),
+        onImageDecision: (value: unknown) => { decision = value; },
+      });
+      assert.deepEqual(decision, expected);
+    }
+  } finally { generateRouterResult = original; }
+});
+
+test("combined routing shares only an identical message and retains conditional image context", async () => {
+  const original = generateRouterResult;
+  const { chatImageIntentUserMessage } = require(resolve(ROOT, "lib/chatImageIntentCore.ts"));
+  const candidates = [{ id: "gpt-image-2", name: "Image", latency: "fast", credits: { standard: 8 } }];
+  const message = "Summarize current Australian weather from official sources.";
+  generateRouterResult = () => ({ output: { ...routerOutput, imageIntent: null } });
+  try {
+    for (const [imageMessage, previous, attachedPhoto] of [
+      [message, null, false], ["bounded image message", null, false],
+      [message, "a cat with a red hat", false], [message, null, true],
+    ] as const) {
+      routerRequests.length = 0;
+      await pick(undefined, true, { prompt: message,
+        imageIntent: Promise.resolve({ modelId: "gpt-6-luna", candidates, previousImagePrompt: previous,
+          attachedPhoto, prompt: chatImageIntentUserMessage(imageMessage, candidates, previous, attachedPhoto),
+          message: imageMessage, maxOutputTokens: previous ? 2500 : 400, timeoutMs: previous ? 12000 : 8000 }),
+      });
+      const request = routerRequests[0];
+      const prompt = String(request.prompt);
+      const system = String(request.system);
+      assert.equal(prompt.split(message).length - 1, 1, "the routing message occurs only once");
+      if (imageMessage !== message) assert.ok(prompt.includes(imageMessage), "a different bounded image message is retained");
+      assert.ok(prompt.includes("standard 8"), "model prices and presets survive");
+      assert.equal(system.includes("1500 characters"), previous !== null);
+      assert.equal(system.includes("resize, move, remove"), attachedPhoto);
+      if (previous) assert.ok(prompt.includes(previous));
+      if (attachedPhoto) assert.ok(prompt.includes("Attached photo:"));
+      assert.ok(system.includes("requiresFileGeneration=true"));
+      assert.ok(system.includes("imageIntent=null"));
+      const responseFormat = await (request.output as { responseFormat: Promise<{ schema: { properties: { imageIntent: { anyOf: unknown[] } } } }> }).responseFormat;
+      assert.deepEqual(responseFormat.schema.properties.imageIntent.anyOf[1], { type: "null" });
+    }
+  } finally { generateRouterResult = original; }
+});
+
 test("a chat turn keeps its decision row", async () => {
   created.length = 0;
   const result = await pick();
