@@ -247,8 +247,9 @@ export const AMUX_DB_BOUNDARIES = {
   },
   reviewPullRequest: {
     operation: "review_pull_request",
-    // setup + task lock + latest attempt + update + canonical audit + fence
-    prismaCallCeiling: 10,
+    // setup + audit chain lock + task lock + latest attempt + update +
+    // canonical audit + fence
+    prismaCallCeiling: 11,
     isolation: "mutation",
   },
   // engineering-agent.md version 5, item 1. setup + audit chain lock + task

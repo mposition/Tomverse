@@ -67,6 +67,9 @@ export async function recordAmuxReviewPullRequest(
   return withAmuxDbBoundary(
     amuxBoundaryWithAttachment(AMUX_DB_BOUNDARIES.reviewPullRequest, attachment),
     async (tx, context) => {
+      // Audit chain before the Task row (lib/adminAudit.ts takeAuditChainLock):
+      // a review proposal on this card holds the chain while it waits for it.
+      await takeAuditChainLock(tx);
       const tasks = await tx.$queryRaw<TaskRow[]>`
         SELECT "id", "status", "owner", "revision", "archivedAt", "requiresHumanReview", "reviewPrNumber"
         FROM "AmuxWorkItem"

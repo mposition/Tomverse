@@ -10,6 +10,7 @@ import { acceptAmuxV22AttemptUnknownUsage } from "@/lib/amux/v22AttemptUsageAcce
 import { settleAmuxExecution, startAmuxExecution } from "@/lib/amux/execution";
 import { heartbeatAmuxWorkerRuntime, registerAmuxWorkerRuntime } from "@/lib/amux/workerRuntime";
 import { lockPriorAttempt } from "@/lib/amux/v22TaskRecoveryService";
+import { recordAmuxReviewPullRequest } from "@/lib/amux/reviewPullRequest";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL, committed fixtures, two writers on one Task at once.
@@ -281,4 +282,48 @@ test("an ended attempt locked before the audit chain does not block a proposal t
     where: { id: proposed.value.proposal.id }, select: { attemptId: true } });
   assert.equal(row.attemptId, attempt.id);
   assert.ok(stopped.ok, stopped.ok ? "" : String(stopped.error));
+});
+
+test("a worker's review pull request and an owner's review proposal on one card both finish", async () => {
+  // The worker's record of its review pull request locked the card and took
+  // the audit chain only for its entry; a proposal holds the chain while it
+  // waits for the card.
+  const task = await prisma.amuxWorkItem.create({ data: {
+    id: `amux-lock-order-review-${randomUUID()}`, title: "AMUX audit lock order review fixture",
+    status: "review", kind: "code", priority: "p2", revision: 3,
+    requiresHumanReview: true, reviewSpecialty: "code-review",
+  } });
+  fixtureTaskIds.push(task.id);
+  const now = new Date();
+  const worker = "lock-order-review-worker";
+  const attempt = await prisma.amuxExecutionAttempt.create({ data: {
+    id: `amux-lock-order-review-attempt-${randomUUID()}`, taskId: task.id, worker,
+    workerInstanceId: "lock-order-review-instance", workerGeneration: 1,
+    taskRevision: task.revision - 1, attemptNumber: 1, heartbeatAt: now, startedAt: now,
+    endedAt: now, outcome: "succeeded", toStatus: "review", endedBy: worker,
+  } });
+  const escalation = await prisma.amuxHumanEscalation.create({ data: {
+    taskId: task.id, specialty: "code-review", reason: "Completed attempt requires PR review.",
+    openedBy: "worker", openedTaskRevision: task.revision,
+  } });
+  const request = new Request("http://localhost/api/internal/amux/review", { method: "POST" });
+  const detail = await getAmuxReviewDetail(escalation.id);
+  const outcome = detail.allowed_outcomes.find((item) => item !== "approve");
+  assert.ok(outcome, `no PR-free outcome in ${detail.allowed_outcomes.join(",")}`);
+
+  const releaseChain = await holdAuditChain();
+  const proposal = settle(createAmuxReviewProposal({
+    escalationId: escalation.id, outcome, expectedSubjectDigest: detail.review_content.digest,
+    session, request,
+  }));
+  await untilWaiting(1);
+  const recorded = settle(recordAmuxReviewPullRequest({
+    taskId: task.id, attemptId: attempt.id, worker, prNumber: 4242,
+  }));
+  await untilWaiting(2);
+  await releaseChain();
+
+  const [proposed, pr] = await Promise.all([proposal, recorded]);
+  assert.ok(proposed.ok, proposed.ok ? "" : String(proposed.error));
+  assert.ok(pr.ok, pr.ok ? "" : String(pr.error));
 });
