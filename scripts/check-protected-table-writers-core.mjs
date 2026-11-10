@@ -1364,6 +1364,15 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The replaced capability guard keeps its one SELECT EXISTS read of the person's audit row of the same transaction. It replaces the capability guard body (owner decision 2026-10-26: every provider class may run v22) and widens three CHECK constraints; its write verbs are the trigger's TG_OP comparison, the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
   },
+  ...["AmuxWorkerRegistryEvent", "AmuxCliUsageEvent"].map((table) => ({
+    path: "prisma/migrations/20261110200000_amux_antigravity_worker_class/migration.sql",
+    table,
+    tableMentions: 1,
+    writeVerbs: 9,
+    reason:
+      `The one mention is the ALTER TABLE that replaces ${table}'s CHECKs to admit the antigravity worker class (owner decision 2026-11-10).` +
+      " The migration only replaces five CHECK constraints (registry class, the two CLI model tables' CLI, and the usage ledger's source and shape); its write verbs are the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
+  })),
   {
     path: "prisma/migrations/20261106200000_amux_cli_usage_failure_kind/migration.sql",
     table: "AmuxCliUsageEvent",

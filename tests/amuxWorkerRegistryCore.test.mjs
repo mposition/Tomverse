@@ -56,8 +56,9 @@ const change = (workerName, desiredState, roleCeiling, expectedRevision, provide
   return parsed;
 };
 
-test("the class table is section 2's: two verified classes, two unverified at implementation", () => {
-  assert.deepEqual([...AMUX_WORKER_PROVIDER_CLASSES], ["claude", "codex", "cursor", "copilot"]);
+test("the class table is section 2's: two verified classes, three unverified at implementation", () => {
+  // Owner decision 2026-11-10 added antigravity.
+  assert.deepEqual([...AMUX_WORKER_PROVIDER_CLASSES], ["claude", "codex", "cursor", "copilot", "antigravity"]);
   assert.deepEqual([...AMUX_WORKER_ROLE_CEILINGS], ["chore", "implementation", "contract"]);
   assert.deepEqual(
     Object.fromEntries(Object.entries(AMUX_WORKER_PROVIDER_CLASS_TABLE).map(([name, row]) => [name, [row.verified, row.maxRole]])),
@@ -66,6 +67,7 @@ test("the class table is section 2's: two verified classes, two unverified at im
       codex: [true, "contract"],
       cursor: [false, "implementation"],
       copilot: [false, "implementation"],
+      antigravity: [false, "implementation"],
     },
   );
   assert.ok(Object.isFrozen(AMUX_WORKER_PROVIDER_CLASS_TABLE));
