@@ -62,7 +62,15 @@ test("Copilot quota is the premium entitlement with its own reset", () => {
   assertObservation(normalizeAmuxV22CopilotQuota({ quotaSnapshots: { premium_interactions:
     { isUnlimitedEntitlement: true, entitlementRequests: -1, resetDate } } }, at),
   "github-copilot", 10_000, reset);
-  for (const bad of [{ ...row, resetDate: undefined }, { ...row, resetDate: "2026-11-01T00:00:00Z" },
+  // Copilot CLI 1.0.94 sends the read's own moment as resetDate: the next
+  // monthly reset (1st, 00:00 UTC) stands in for one that is not ahead.
+  for (const stale of ["2026-11-07T16:00:00-08:00", "2026-11-01T00:00:00Z", at])
+    assertObservation(normalizeAmuxV22CopilotQuota({ quotaSnapshots: { premium_interactions:
+      { ...row, resetDate: stale } } }, at), "github-copilot", 2555, "2026-12-01T00:00:00.000Z");
+  assert.equal(normalizeAmuxV22CopilotQuota({ quotaSnapshots: { premium_interactions:
+    { ...row, resetDate: "2026-12-31T23:00:00Z" } } }, "2026-12-31T23:30:00.000Z").reset_at,
+  "2027-01-01T00:00:00.000Z");
+  for (const bad of [{ ...row, resetDate: undefined }, { ...row, resetDate: "not a date" },
     { ...row, remainingPercentage: 101 }, { ...row, entitlementRequests: 0 },
     { ...row, usedRequests: undefined }, { isUnlimitedEntitlement: true, resetDate }])
     assert.equal(normalizeAmuxV22CopilotQuota({ quotaSnapshots: { premium_interactions: bad } }, at),
