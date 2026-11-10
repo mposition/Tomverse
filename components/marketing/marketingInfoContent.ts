@@ -1384,7 +1384,7 @@ export const infoPages = {
           "Compare model access and allowances on the pricing page."
         ],
         "link": {
-          "label": "Try first, choose as needed",
+          "label": "Compare plans and credits",
           "href": "/pricing"
         }
       },
