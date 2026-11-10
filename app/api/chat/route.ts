@@ -2290,9 +2290,12 @@ async function handleChatPost(
                     durationMs: Math.round(performance.now() - started), outcome: verification.ok ? "valid" : verification.reason }));
                 if (verification.ok) return true;
                 // This rejected turn exits before the usual eligibility counters.
-                void recordMemoryCounter("chat_memory_eligible");
-                void recordMemoryCounter("context_bundle_presented");
-                earlyContextRefusal = await refuseContext(verification.reason);
+                const [response] = await Promise.all([
+                    refuseContext(verification.reason),
+                    recordMemoryCounter("chat_memory_eligible"),
+                    recordMemoryCounter("context_bundle_presented"),
+                ]);
+                earlyContextRefusal = response;
                 return false;
             } : undefined;
         const finishRoutingTiming = latency.stage("routingMs");

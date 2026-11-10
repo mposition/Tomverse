@@ -7,7 +7,6 @@ import { resolve } from "node:path";
 
 import * as aiModule from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { splitStreamKeepaliveSignal } from "@/lib/chatStreamKeepalive";
 import { parseChatStreamTrailer, splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
 import {
   PromptRefinerChatExecutionError,
@@ -574,7 +573,7 @@ let throwGuestProviderUnknown = false;
 mock.module("ai", {
   namedExports: {
     ...aiModule,
-    streamText: (options: Record<string, unknown>) => {
+    streamText: (options: Parameters<typeof aiModule.streamText>[0]) => {
       const index = attempts.length;
       if (throwAfterPresearch) throw new Error("POST_PRESEARCH_PROVIDER_FAILURE");
       if (index > 0 && throwBeforeFallbackStreamReturn) {
@@ -593,7 +592,7 @@ mock.module("ai", {
       attempts.push(attempt);
       attemptLifecycle.push(`${index}:provider_start`);
       if (pairedSearchModel) {
-        return aiModule.streamText({ ...options, model: pairedSearchModel } as Parameters<typeof aiModule.streamText>[0]);
+        return aiModule.streamText({ ...options, model: pairedSearchModel });
       }
       if (activeSession === null) guestLifecycle.push("provider");
       if (throwGuestProviderUnknown) {

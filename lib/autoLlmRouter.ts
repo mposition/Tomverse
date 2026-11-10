@@ -364,10 +364,11 @@ const routerPrices = (model: AiModel) => {
  * times out or answers outside the candidate set. A request context guard may
  * refuse the turn independently before the Router spends its budget.
  *
- * Every call is kept as one `AutoRouterDecision` row: the labelled data a
+ * Eligible provider calls can produce one `AutoRouterDecision` row: the labelled data a
  * Tomverse-trained triage will learn from. The write is not awaited by the
  * turn, and a failed write is logged, not raised. The log line carries ids,
- * counts and timings only, never the prompt.
+ * counts and timings only, never the prompt. A pre-dispatch context refusal
+ * has no model decision to record.
  */
 export async function pickAutoModelWithLlm(input: {
     prompt: string;
