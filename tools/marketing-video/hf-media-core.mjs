@@ -20,7 +20,7 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { admit, brisbaneDay, resolveUnsettled, settle } from "./higgsfield-cap.mjs";
+import { admit, brisbaneDay, downloadResult, resolveUnsettled, settle } from "./higgsfield-cap.mjs";
 import { cliRunner, costOf, isPicture, jobIdsOf, outcomeOf, parseJson, resultUrlOf } from "./hf-image-core.mjs";
 
 export const CREATIVE_CAP_ENV = "MARKETING_CREATIVE_SHORT_DAILY_CREDIT_CAP";
@@ -157,7 +157,8 @@ export async function makeMedia({ request, out, label, jobDir, env = process.env
 
   const url = resultUrlOf(job);
   if (!url) return { ok: false, reason: "no_result_url", detail: { jobId } };
-  const bytes = await fetchBytes(url);
+  // A stand-in fetch may throw too; the job is settled either way, so the run goes on.
+  const bytes = await fetchBytes(url).catch(() => null);
   if (!isMedia(bytes, request.model)) return { ok: false, reason: "result_not_the_media", detail: { jobId } };
   writeFileSync(out, bytes);
   return { ok: true, jobId, cost, out };
@@ -166,9 +167,4 @@ export async function makeMedia({ request, out, label, jobDir, env = process.env
 /** The reasons that mean a request was submitted (and may have been charged); every other refusal sent nothing. */
 export const SENT_REASONS = new Set(["create_outcome_unknown", "more_than_one_job", "wait_outcome_unknown", "job_failed", "no_result_url", "result_not_the_media"]);
 
-async function defaultFetch(url) {
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  const bytes = Buffer.from(await response.arrayBuffer());
-  return bytes.length > 80 * 1024 * 1024 ? null : bytes;
-}
+const defaultFetch = (url) => downloadResult(url, { maxBytes: 80 * 1024 * 1024 });

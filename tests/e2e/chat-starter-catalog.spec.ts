@@ -278,9 +278,11 @@ test.describe("Chat starter catalogue", () => {
       await route.fallback();
     });
 
-    await openWelcome(page);
+    await page.goto("/review?lang=en");
+    await expect(page.getByTestId("chat-empty-state")).toBeVisible();
 
     const textarea = page.getByTestId("chat-textarea");
+    await expect(page.getByTestId("chat-starter-preview")).toHaveText("Choose a prompt to fill the message box. Nothing is sent until you press send.");
     await expect(textarea).toHaveValue("");
 
     const runnable = page.locator('[data-starter-state="available"]').first();

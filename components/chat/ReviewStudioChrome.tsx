@@ -14,7 +14,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
-import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
+import { reviewUsageExplanation, reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { storeAndApplyThemePreference } from "@/lib/theme";
 import { openAccountSettings } from "@/lib/accountSettingsEvents";
 import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
@@ -36,9 +36,9 @@ export function ReviewModeSwitcher({ review, locked = false, composer = false, c
   const { lang } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
   const unavailableId = useId();
-  if (compact) return <><select data-testid="composer-review-mode" aria-label={c.mode} aria-describedby={!review.easyAvailable ? unavailableId : undefined} value={review.mode} disabled={locked || review.pending || review.ready === false} onChange={event => review.setMode(event.target.value === "easy" ? "easy" : "professional")} className="h-11 w-32 min-w-0 max-w-full cursor-pointer rounded-lg border-0 bg-zinc-100 px-2 text-xs font-medium text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-100 md:[@media(pointer:fine)]:h-8"><option value="easy" disabled={!review.easyAvailable}>Easy</option><option value="professional">Professional</option></select>{!review.easyAvailable && <span id={unavailableId} className="sr-only">{c.unavailable}</span>}</>;
+  if (compact) return <><select data-testid="composer-review-mode" aria-label={c.mode} aria-describedby={!review.easyAvailable ? unavailableId : undefined} value={review.mode} disabled={locked || review.pending || review.ready === false} onChange={event => review.setMode(event.target.value === "easy" ? "easy" : "professional")} className="h-11 w-32 min-w-0 max-w-full cursor-pointer rounded-lg border-0 bg-zinc-100 px-2 text-xs font-medium text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-100 md:[@media(pointer:fine)]:h-8"><option value="easy" disabled={!review.easyAvailable}>{c.easy}</option><option value="professional">{c.professional}</option></select>{!review.easyAvailable && <span id={unavailableId} className="sr-only">{c.unavailable}</span>}</>;
   return <div className={`review-mode${composer ? " review-composer-mode" : ""}`} data-testid={composer ? "composer-review-mode" : undefined} role="group" aria-label={c.mode}>
-    {(["easy", "professional"] as const).map(mode => <button key={mode} type="button" aria-pressed={review.mode === mode} disabled={locked || review.pending || review.ready === false || (mode === "easy" && !review.easyAvailable)} title={mode === "easy" && !review.easyAvailable ? c.unavailable : undefined} onClick={() => review.setMode(mode)}>{mode === "easy" ? "Easy" : "Professional"}</button>)}
+    {(["easy", "professional"] as const).map(mode => <button key={mode} type="button" aria-pressed={review.mode === mode} disabled={locked || review.pending || review.ready === false || (mode === "easy" && !review.easyAvailable)} title={mode === "easy" && !review.easyAvailable ? c.unavailable : undefined} onClick={() => review.setMode(mode)}>{c[mode]}</button>)}
   </div>;
 }
 
@@ -59,13 +59,21 @@ export function ReviewCommandBar({ review, locked = false, view, setView, showMo
 }
 
 function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace: WorkspaceAppearanceControls; disabled: boolean; testId: string }) {
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
   const { data: session } = useSession();
   const usage = useUserUsage(Boolean(session?.user));
   const percent = usage ? usagePercent(usage.usage.creditsMonth, usage.limits.creditsMonth) : null;
+  const usageDescriptionId = useId();
+  const usageDescription = usage && percent !== null
+    ? reviewUsageExplanation[lang]
+      .replace("{used}", usage.usage.creditsMonth.toLocaleString(lang))
+      .replace("{limit}", usage.limits.creditsMonth.toLocaleString(lang))
+    : c.settings;
+  const usageLabel = `${t("sidebar.currentUsage")} ${percent === null ? "—" : `${percent}%`}`;
   return <>
-    <button type="button" className="review-credit-button" onClick={() => openAccountSettings("plan")} aria-label={`${c.settings}${percent === null ? "" : ` · ${percent}%`}`}><BarChart3 size={17} /><span>{percent === null ? "—" : `${percent}%`}</span></button>
+    <span id={usageDescriptionId} className="sr-only">{usageDescription}</span>
+    <button type="button" className="review-credit-button" data-testid="workspace-usage" onClick={() => openAccountSettings("plan")} aria-label={`${usageLabel} · ${c.settings}`} aria-describedby={usageDescriptionId} title={usageDescription}><BarChart3 size={17} aria-hidden="true" /><span>{usageLabel}</span></button>
     <button type="button" className="review-icon-button" aria-label={c.color} onClick={() => {
       const dark = document.documentElement.classList.contains("dark") || (!document.documentElement.classList.contains("light") && matchMedia("(prefers-color-scheme: dark)").matches);
       storeAndApplyThemePreference(dark ? "light" : "dark");

@@ -162,9 +162,27 @@ const wrap = (
           lineWidth = lineWidth - widthAtBreak;
           lastBreak = -1;
         } else {
-          lines.push(line);
-          line = [];
-          lineWidth = 0;
+          // A forced word split should not leave only "s." (or one letter)
+          // on its final line. Carry a few glyphs with that short tail when
+          // the measured column can fit them; never overflow a narrow cell.
+          let tailLength = 0;
+          while (tailLength < 3 && index + tailLength < characters.length) {
+            const next = characters[index + tailLength]!;
+            if (/\s/u.test(next) || breaksBefore(next.codePointAt(0)!)) break;
+            tailLength += 1;
+          }
+          const carryCount = tailLength > 0 && tailLength < 3 ? 3 - tailLength : 0;
+          const carried = carryCount ? line.slice(-carryCount) : [];
+          if (carryCount > 0 && line.length > carryCount &&
+            glyphsWidth([...carried, ...glyphs.slice(index, index + tailLength)], size, font.unitsPerEm) <= width) {
+            lines.push(line.slice(0, -carryCount));
+            line = carried;
+            lineWidth = glyphsWidth(line, size, font.unitsPerEm);
+          } else {
+            lines.push(line);
+            line = [];
+            lineWidth = 0;
+          }
         }
       }
 
@@ -345,12 +363,20 @@ const tableBlock = (
 ) => {
   const style = STYLES.tableCell;
   const columnCount = block.columns.length;
-  const columnWidth = CONTENT_WIDTH / columnCount;
   const padding = 4;
+  const weights = block.pdfColumnWeights ?? Array<number>(columnCount).fill(1);
+  const totalWeight = weights.reduce((total, weight) => total + weight, 0);
+  // Reserve a drawable cell even when one column receives a very small weight.
+  const minimumWidth = padding * 2 + style.size;
+  const remainingWidth = CONTENT_WIDTH - minimumWidth * columnCount;
+  const columnWidths = weights.map(weight => minimumWidth + remainingWidth * weight / totalWeight);
+  const columnOffsets = columnWidths.map((_, index) =>
+    columnWidths.slice(0, index).reduce((total, width) => total + width, 0)
+  );
 
   const rowFor = (values: readonly string[]) =>
-    values.map((value) =>
-      wrap(font, value, style.size, columnWidth - padding * 2)
+    values.map((value, column) =>
+      wrap(font, value, style.size, columnWidths[column] - padding * 2)
     );
 
   const drawRow = (cells: Glyph[][][], header: boolean) => {
@@ -363,7 +389,7 @@ const tableBlock = (
         builder.textAt(
           line,
           { ...style, grey: header ? 0 : 0.1 },
-          MARGIN + column * columnWidth + padding,
+          MARGIN + columnOffsets[column] + padding,
           top - padding - (lineIndex + 1) * style.leading + 3
         );
       });
