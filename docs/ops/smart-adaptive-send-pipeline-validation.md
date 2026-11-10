@@ -319,8 +319,9 @@ revision and its owner are confirmed, before conversation creation. An
 outstanding draft write must finish first. It defaults to off and also requires
 `TOMVERSE_CHAT_LOCATION_INTENT_ENABLED`. The follow-up Refiner parallelism
 switch is independent. An abandoned send can spend an admitted location call
-even if the conversation or question is never saved. Check the location call
-volume and budget alongside latency when comparing deployments.
+even if the conversation or question is never saved. An explicit resend
+after a failed question save can admit another classifier call for the new
+send. Count those attempts when comparing call volume, budget and latency.
 
 Use the browser's submit-to-first-content and completion metrics for the
 10-second target. Report the fraction at or below 10,000 ms and p50/p95,

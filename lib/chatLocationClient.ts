@@ -56,21 +56,22 @@ export function prepareFreshChatLocationIntent(scope: string, accountId: string,
   });
   const reader: SavedTurnLocationReader = {
     async readForSavedTurn(currentScope, currentText, signal, record) {
+      if (controller.signal.aborted || currentScope !== scope) return false;
       const neededAt = performance.now();
-      const cancel = () => controller.abort();
-      signal.addEventListener("abort", cancel, { once: true });
-      if (signal.aborted) cancel();
-      try {
-        const prepared = await pending;
-        if (controller.signal.aborted) return false;
-        if (!prepared || start === undefined || end === undefined) return null;
-        const decision = prepared.read(currentScope, currentText);
-        if (typeof decision !== "boolean") return false;
+      // Once saved, readForTurn owns per-consumer cancellation. Keep the
+      // shared semantic decision available to a reconnect on this message.
+      const prepared = await pending;
+      if (controller.signal.aborted) return false;
+      if (!prepared || start === undefined || end === undefined) return null;
+      const decision = prepared.read(currentScope, text);
+      if (typeof decision !== "boolean") return false;
+      // With the owner and generation confirmed, a different saved question
+      // can use its own lookup without repeating the original classifier.
+      if (currentText !== text) return null;
+      if (!signal.aborted) {
         record(end - start, outcome === "classified" ? Math.max(0, Math.min(end, neededAt) - start) : undefined);
-        return outcome === "not_dispatched" ? null : decision;
-      } finally {
-        signal.removeEventListener("abort", cancel);
       }
+      return outcome === "not_dispatched" ? null : decision;
     },
   };
   return {

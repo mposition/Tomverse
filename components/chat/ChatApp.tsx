@@ -1916,8 +1916,8 @@ function ChatAppComponent({
             const prepared = preparedLocationIntent && "readForSavedTurn" in preparedLocationIntent
               ? await preparedLocationIntent.readForSavedTurn(panelIdentityKey, source, controller.signal, latency.freshLocation)
               : preparedLocationIntent?.read(panelIdentityKey, source);
-            controller.signal.throwIfAborted();
             if (typeof prepared === "boolean") return prepared;
+            controller.signal.throwIfAborted();
             const finishIntent = latency.stage("locationIntentMs");
             try { return await requestChatLocationIntent(source, fetch, { turnstileToken }); }
             finally { finishIntent(); }
