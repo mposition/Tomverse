@@ -176,7 +176,14 @@ jobs:
     # 1) became merge latency. The sixth shard costs one more duplicated build
     # (~1.5 runner-minutes); the weights on the run step below are what make
     # the split even, since equal counts were never even work.
-    timeout-minutes: 40
+    #
+    # Fifty since 2026-11-11. By then the suite had grown back into the
+    # ceiling: the slowest shard took 38m, 39m and 39m on the three green
+    # main pull requests before #3701, and #3701's shard 3 was cancelled at
+    # 40m while still passing tests (1381 done, none failed). The ceiling only
+    # stops a hung run, so raising it costs nothing on a healthy one; a
+    # seventh shard would add another duplicated build to every run instead.
+    timeout-minutes: 50
     strategy:
       # A failing shard must not cancel its siblings. Their results are the
       # evidence for what else broke, and cancelling them turns one red spec
