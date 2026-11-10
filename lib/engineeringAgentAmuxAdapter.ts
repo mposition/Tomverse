@@ -593,28 +593,3 @@ export async function recordEngineeringAgentPublisherResult(input: {
   if (recorded.recorded) return recorded;
   return settleWithoutCard(recorded.reason);
 }
-
-/**
- * Puts a bound pull request's number on its card when the publish result's own
- * write did not (AMUX refused it, or the adapter was closed). The publish item
- * is already settled and bound, so this calls the same AMUX writer with no
- * attachment: it re-checks the card under its lock (in review, this run's
- * attempt still the latest and the same worker's, no other number) and writes
- * nothing otherwise. The refused write was known to have written nothing, so
- * trying it again is not a blind retry. The open `review_pr` state mismatch is
- * not closed by this; a person still resolves it (§11).
- */
-export async function recordEngineeringAgentBoundReviewPullRequest(input: {
-  cardId: string;
-  attemptId: string;
-  worker: string;
-  prNumber: number;
-}) {
-  await requireOpen();
-  return recordAmuxReviewPullRequest({
-    taskId: input.cardId,
-    attemptId: input.attemptId,
-    worker: input.worker,
-    prNumber: input.prNumber,
-  });
-}

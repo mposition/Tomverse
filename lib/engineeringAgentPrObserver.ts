@@ -3,7 +3,6 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 
 import { completeAmuxV22ReviewOnObservedMerge } from "@/lib/amux/reviewMergeObserved";
-import { recordEngineeringAgentBoundReviewPullRequest } from "@/lib/engineeringAgentAmuxAdapter";
 import {
   EngineeringAgentGitHubReadError,
   readEngineeringAgentPullObservation,
@@ -65,13 +64,7 @@ type Approval = { verdict: string; reviewId?: number; observedAt?: string } | nu
 const BINDING_SELECT = {
   id: true, runId: true, prNumber: true, verifiedHeadSha: true, snapshot: true, createdAt: true,
   approvalObservation: true,
-  run: {
-    select: {
-      cardId: true, amuxAttemptId: true,
-      attempt: { select: { worker: true } },
-      card: { select: { status: true, reviewPrNumber: true } },
-    },
-  },
+  run: { select: { cardId: true, amuxAttemptId: true } },
 } as const;
 
 async function* watchedBindings() {
@@ -96,15 +89,6 @@ export async function observeEngineeringAgentPullRequests(
 ): Promise<Array<{ bindingId: string; outcome: EngineeringAgentPrObserverOutcome }>> {
   const results: Array<{ bindingId: string; outcome: EngineeringAgentPrObserverOutcome }> = [];
   for await (const binding of watchedBindings()) {
-    // A published pull request whose number never reached its card (the
-    // publish result's write was refused): try that write again, before the
-    // merge needs the number to complete the card. AMUX re-checks everything.
-    const run = binding.run;
-    if (run?.card?.status === "review" && run.card.reviewPrNumber === null && run.attempt) {
-      await recordEngineeringAgentBoundReviewPullRequest({
-        cardId: run.cardId, attemptId: run.amuxAttemptId, worker: run.attempt.worker, prNumber: binding.prNumber,
-      });
-    }
     let pull: EngineeringAgentPullObservation;
     try {
       pull = await ports.read(binding.prNumber);

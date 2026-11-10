@@ -49,16 +49,6 @@ mock.module(mod("lib/amux/reviewMergeObserved.ts"), {
   },
 });
 
-let rerecordResult = { recorded: true, taskRevision: 3, changed: true };
-mock.module(mod("lib/engineeringAgentAmuxAdapter.ts"), {
-  namedExports: {
-    recordEngineeringAgentBoundReviewPullRequest: async (input) => {
-      calls.push(["rerecord", input]);
-      return rerecordResult;
-    },
-  },
-});
-
 const { observeEngineeringAgentPullRequests } = await import(mod("lib/engineeringAgentPrObserver.ts"));
 
 const binding = (overrides = {}) => ({
@@ -149,34 +139,6 @@ for (const approval of [null, { verdict: "approved", reviewId: 9, observedAt: "2
   if (approval === null) {
     assert.deepEqual(recorded()[0][2].observation, { verdict: "not_approved", reason: "merged_without_approval",
       observedAt: "2026-10-15T05:40:00.000Z" });
-  }
-}
-
-// A card in review whose number never arrived gets the binding's number again, before the read;
-// the round then goes on as usual. A card that has its number, or is not in review, is left alone.
-{
-  const attemptRun = (card) => ({ cardId: "card", amuxAttemptId: "attempt", attempt: { worker: "ubuntu-1" }, card });
-  assert.deepEqual(await run([binding({ run: attemptRun({ status: "review", reviewPrNumber: null }) })], async () => pull()),
-    [{ bindingId: "binding", outcome: "approved" }]);
-  assert.deepEqual(recorded()[0], ["rerecord", { cardId: "card", attemptId: "attempt", worker: "ubuntu-1", prNumber: 42 }]);
-  assert.equal(recorded()[1][0], "observe");
-
-  // A refusal changes nothing else, and a failed GitHub read still follows the write.
-  rerecordResult = { recorded: false, reason: "not_the_workers_review" };
-  assert.deepEqual(await run([binding({ run: attemptRun({ status: "review", reviewPrNumber: null }) })],
-    async () => { throw new ReadError("http_error"); }), [{ bindingId: "binding", outcome: "unreadable" }]);
-  assert.deepEqual(recorded().map(([kind]) => kind), ["rerecord"]);
-  rerecordResult = { recorded: true, taskRevision: 3, changed: true };
-
-  // Merged in the same round: the number goes on first, so the completion can match it.
-  completeResult = { completed: true, taskRevision: 9 };
-  assert.deepEqual(await run([binding({ approvalObservation: approved, run: attemptRun({ status: "review", reviewPrNumber: null }) })],
-    async () => pull(merged)), [{ bindingId: "binding", outcome: "completed" }]);
-  assert.deepEqual(recorded().map(([kind]) => kind).slice(0, 2), ["rerecord", "complete"]);
-
-  for (const card of [{ status: "review", reviewPrNumber: 42 }, { status: "done", reviewPrNumber: null }]) {
-    await run([binding({ run: attemptRun(card) })], async () => pull({ reviews: [] }));
-    assert.deepEqual(recorded(), []);
   }
 }
 
