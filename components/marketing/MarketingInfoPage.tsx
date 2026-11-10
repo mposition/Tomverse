@@ -25,6 +25,7 @@ export type MarketingInfoSection = {
   title: string;
   body: string;
   bodyLinks?: { text: string; href: string }[];
+  formatGroups?: Array<{ label: string; extensions: string[] }>;
   bullets?: string[];
   guestTrialLinks?: { available: string; unavailable: string; chat: string; review: string; models: string };
   link?: MarketingInfoLink;
@@ -167,6 +168,21 @@ export function MarketingInfoPage({
                       </div>
                     </div>
                   ) : null}
+                  {section.formatGroups && <div className="mt-5" data-testid="attachment-format-groups">
+                    <ul className="hidden gap-3 text-sm leading-6 text-zinc-700 sm:grid dark:text-zinc-200">
+                      {section.formatGroups.map(group => <li key={group.label}><strong>{group.label}:</strong> {group.extensions.join(", ")}</li>)}
+                    </ul>
+                    <div className="grid gap-3 sm:hidden">
+                      {section.formatGroups.map(group => <details key={group.label} data-testid="attachment-format-details" className="min-w-0 rounded-lg border border-zinc-200 p-3 text-sm leading-6 [overflow-wrap:anywhere] dark:border-zinc-700">
+                        <summary className="min-h-11 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600">
+                          <span className="font-bold">{group.label}</span>
+                          <span className="block">{group.extensions.slice(0, 3).join(", ")}{group.extensions.length > 3 ? ` · +${group.extensions.length - 3}` : ""}</span>
+                          <span className="block font-semibold text-blue-700 dark:text-blue-300">See all formats</span>
+                        </summary>
+                        <p className="mt-2 text-zinc-700 dark:text-zinc-200">{group.extensions.join(", ")}</p>
+                      </details>)}
+                    </div>
+                  </div>}
                   {section.bullets && (
                     <ul className="mt-5 grid gap-3">
                       {section.bullets.map((bullet) => (
