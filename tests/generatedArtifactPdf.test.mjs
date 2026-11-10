@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { admitDocumentSpec } from "../lib/generatedArtifactCore.ts";
 import { renderDocumentPdf } from "../lib/generatedArtifactPdf.ts";
-import { loadPdfFont, PDF_FONT_NAME } from "../lib/generatedArtifactFont.ts";
+import { glyphFor, loadPdfFont, PDF_FONT_NAME } from "../lib/generatedArtifactFont.ts";
 
 // docs/policy/generated-artifacts.md sections 3 and 4.
 //
@@ -71,6 +71,36 @@ test("the file is a PDF a reader will accept", async () => {
   await document.cleanup();
 });
 
+test("explicit PDF number columns group numbers, preserve zero and align right edges", async () => {
+  const spec = { filename: "amounts.pdf", format: "pdf", blocks: [{
+    type: "table", columns: ["Item", "Amount"], pdfNumberColumns: [1],
+    rows: [["Zero", 0], ["Small", 1250], ["Large", 10000], ["Refund", -1250.25], ["Identifier", "001250"]],
+  }] };
+  const document = await readPdf(build(spec));
+  const content = await (await document.getPage(1)).getTextContent();
+  const values = ["0", "1,250", "10,000", "-1,250.25", "001250"];
+  const edges = values.map(value => {
+    const item = content.items.find(item => item.str === value);
+    assert.ok(item, `missing exact value ${value}`);
+    assert.ok(item.transform[4] >= 56);
+    return item.transform[4] + item.width;
+  });
+  assert.ok(Math.max(...edges) - Math.min(...edges) < 0.05, JSON.stringify(edges));
+  assert.ok(Math.abs(edges[0] - (595.28 - 56 - 4)) < 0.05);
+  await document.cleanup();
+  const original = await textOf(build({ ...spec, blocks: [{ ...spec.blocks[0], pdfNumberColumns: undefined }] }));
+  assert.ok(original.includes("1250"));
+  assert.ok(!original.includes("1,250"));
+});
+
+test("PDF number column indices are bounded, integral and unique", () => {
+  for (const pdfNumberColumns of [[-1], [2], [0.5], [0, 0], [Infinity]]) {
+    assert.equal(admitDocumentSpec({ filename: "amounts.pdf", format: "pdf", blocks: [{
+      type: "table", columns: ["Item", "Amount"], rows: [["A", 0]], pdfNumberColumns,
+    }] }).ok, false, JSON.stringify(pdfNumberColumns));
+  }
+});
+
 test("an independent reader gets the Korean text back, not blanks", async () => {
   const text = await textOf(build(REPORT));
   for (const expected of [
@@ -129,6 +159,45 @@ test("the subset carries only the glyphs the document uses", () => {
 
 test("the bytes are deterministic, so a replay cannot differ", () => {
   assert.deepEqual(build(REPORT), build(REPORT));
+});
+
+for (const kind of ["paragraph", "table"]) {
+  for (const suffix of ["s", "s."]) {
+    test(`${kind} avoids a one/two-character forced word tail (${suffix})`, async () => {
+      const font = loadPdfFont();
+      const size = kind === "table" ? 9.5 : 10.5;
+      const width = kind === "table" ? (595.28 - 112) / 3 - 8 : 595.28 - 112;
+      const advance = font.advances[glyphFor(font, "W".codePointAt(0))] * size / font.unitsPerEm;
+      const word = "W".repeat(Math.floor(width / advance) * 2) + suffix;
+      const block = kind === "table"
+        ? { type: "table", columns: ["Item", "Description", "Amount"], rows: [["A", word, 0]] }
+        : { type: "paragraph", text: word };
+      const document = await readPdf(build({ filename: "word-tail.pdf", format: "pdf", blocks: [block] }));
+      const content = await (await document.getPage(1)).getTextContent();
+      const lines = content.items.filter(item => /^[Ws.]+$/.test(item.str ?? ""));
+      assert.ok(lines.length >= 2);
+      assert.equal(lines.map(line => line.str).join(""), word);
+      assert.ok(lines.at(-1).str.length >= 3, JSON.stringify(lines.map(line => line.str)));
+      for (const line of lines) {
+        assert.ok(line.width <= width + 0.1);
+        assert.ok(line.transform[4] >= 56);
+        assert.ok(line.transform[4] + line.width <= 595.28 - 56 + 0.1);
+      }
+      await document.cleanup();
+    });
+  }
+}
+
+test("forced tail balancing never overflows a very narrow table cell", async () => {
+  const word = "W".repeat(40) + "s";
+  const document = await readPdf(build({ filename: "narrow.pdf", format: "pdf", blocks: [{
+    type: "table", columns: Array.from({ length: 20 }, () => ""), rows: [[word]],
+  }] }));
+  const content = await (await document.getPage(1)).getTextContent();
+  const lines = content.items.filter(item => /^[Ws]+$/.test(item.str ?? ""));
+  assert.equal(lines.map(line => line.str).join(""), word);
+  for (const line of lines) assert.ok(line.width <= (595.28 - 112) / 20 - 8 + 0.1);
+  await document.cleanup();
 });
 
 test("a report title is not repeated by an identical opening heading", async () => {

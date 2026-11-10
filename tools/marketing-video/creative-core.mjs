@@ -32,6 +32,17 @@ const URL_LIKE = /https?:|www\.|\b[a-z0-9-]+\.(?:com|net|org|ai|io|co)\b/iu;
 const isText = (value, max) => typeof value === "string" && value.trim().length > 0 && value.length <= max;
 export const compact = (text) => String(text ?? "").toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "");
 
+/**
+ * A Claude CLI file rule anchored at an absolute path ("//abs/path"; on Windows "//c/..."). A
+ * relative "./path" rule is read against the shell's current directory, which a `cd` in the
+ * model's first Bash command moves: run 20261110-2 lost every Write to film/ that way. Edit rules
+ * also cover Write; a Write(path) rule matches nothing.
+ */
+export function fileRule(tool, file, resolve = path.resolve, sep = path.sep) {
+  const absolute = resolve(file).split(sep).join("/").replace(/^([A-Za-z]):/u, (_, drive) => `/${drive.toLowerCase()}`);
+  return `${tool}(/${absolute})`;
+}
+
 /** The JSON object on the first line of `text` that has `key`, or null. */
 export function jsonLine(text, key) {
   for (const line of String(text ?? "").split(/\r?\n/u)) {

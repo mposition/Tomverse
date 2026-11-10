@@ -6,7 +6,7 @@ import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import { marketingAssetSchema } from "../lib/marketingAssets.ts";
-import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, normalizePack, reviewPassed, usablePacks } from "../tools/marketing-video/creative-core.mjs";
+import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, normalizePack, reviewPassed, usablePacks } from "../tools/marketing-video/creative-core.mjs";
 import { speakLine, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
 import { admit, downloadResult, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
 import { creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
@@ -392,4 +392,16 @@ test("the job does nothing while its switch is off, and stops before spending wi
   const noCap = spawnSync(process.execPath, [join(tool, "run-creative-short.mjs")], { encoding: "utf8", env: { PATH: process.env.PATH, MARKETING_CREATIVE_SHORT: "on" } });
   assert.equal(noCap.status, 1);
   assert.equal(JSON.parse(noCap.stdout.trim().split("\n").at(-1)).halted, "no_credit_cap");
+});
+
+test("model file rules are absolute, so a cd in the model's shell cannot move them", async () => {
+  const posixResolve = (file) => `/home/tommy/job-checkout/tools/marketing-video/${file}`;
+  assert.equal(fileRule("Edit", "job/creative/20261110-2/film/**", posixResolve, "/"), "Edit(//home/tommy/job-checkout/tools/marketing-video/job/creative/20261110-2/film/**)");
+  const backslash = String.fromCharCode(92);
+  const windowsResolve = (file) => ["C:", "work", "tools", "marketing-video", ...file.split("/")].join(backslash);
+  assert.equal(fileRule("Read", "job/sources/**", windowsResolve, backslash), "Read(//c/work/tools/marketing-video/job/sources/**)");
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /(?:Read|Edit|Write)\(\.\//u, "no relative file rule is left");
+  assert.doesNotMatch(source, /`Write\(/u, "Write rules match nothing; Edit covers Write");
 });

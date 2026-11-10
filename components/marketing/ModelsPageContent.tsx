@@ -12,6 +12,7 @@ import { getModelBrand } from "@/lib/modelBranding";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
+import { PROVIDER_LABELS } from "./ModelCatalogueSection";
 
 const copy = {
   en: {
@@ -34,6 +35,8 @@ const copy = {
     limited: "Limited availability",
     unavailable: "Currently unavailable",
     minimumPlan: "Access starts with",
+    mobileMinimumPlan: "Access",
+    mobileBaseCharge: "Base credits",
   },
   ko: {
     eyebrow: "모델",
@@ -283,7 +286,7 @@ export function ModelsPageContent() {
             <article
               key={model.id}
               data-model-id={model.id}
-              className="min-w-0 rounded-2xl border border-zinc-200 bg-zinc-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/40 [overflow-wrap:anywhere]"
+              className={`min-w-0 rounded-2xl border border-zinc-200 bg-zinc-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/40 [overflow-wrap:anywhere] ${lang === "en" ? "sm:row-span-4 sm:grid sm:grid-rows-subgrid sm:gap-y-0" : ""}`}
             >
               <div className="flex items-start gap-3 max-[240px]:flex-wrap">
                 <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${brand.className} text-base font-bold text-white shadow-sm ring-1 ring-zinc-200/70 dark:ring-zinc-800`}>
@@ -302,21 +305,21 @@ export function ModelsPageContent() {
               <p data-testid={lang === "ko" || lang === "en" ? "model-selection-criteria" : undefined} className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                 {lang === "ko" ? `이용 시작: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · 짧은 요청: ${usageProfile.credits} 크레딧 · 이미지 입력: ${modelSupportsImageInput(model) ? "지원" : "미지원"}` : lang === "en" ? `Access from: ${t(`modelTiers.${model.minimumPlan.toLowerCase()}`)} · Short request: ${usageProfile.credits} credits · Image input: ${modelSupportsImageInput(model) ? "supported" : "not supported"} · Catalog context maximum: ${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "not listed"}` : t(getModelBestFor(model))}
               </p>
-              <div className="mt-3 flex flex-wrap gap-1.5">
+              <div className="mt-3 flex flex-wrap content-start items-start gap-1.5">
                 {tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-white px-2 py-1 text-[11px] font-bold text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:text-zinc-400 dark:ring-zinc-800">
+                  <span key={tag} className="rounded-full bg-white px-2 py-1 text-xs font-bold text-zinc-500 ring-1 ring-zinc-200 sm:text-[11px] dark:bg-zinc-950 dark:text-zinc-400 dark:ring-zinc-800">
                     {t(`modelTags.${tag}`)}
                   </span>
                 ))}
               </div>
-              <div className="mt-5 grid grid-cols-2 gap-3 max-[240px]:grid-cols-1">
+              <div className="mt-5 grid grid-cols-2 gap-3 self-start max-[240px]:grid-cols-1">
                 <div>
-                  <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.minimumPlan}</p>
+                  <p data-testid="model-access-label" className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{lang === "en" ? <><span className="sm:hidden">{copy.en.mobileMinimumPlan}</span><span className="hidden sm:inline">{content.minimumPlan}</span></> : content.minimumPlan}</p>
                   <p className="mt-1 text-sm font-bold">{t(`modelTiers.${model.minimumPlan.toLowerCase()}`)}</p>
                 </div>
                 <div>
                   <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.provider}</p>
-                  <p className="mt-1 truncate text-sm font-bold capitalize">{model.provider}</p>
+                  <p className="mt-1 truncate text-sm font-bold">{PROVIDER_LABELS[model.provider] ?? model.provider}</p>
                 </div>
                 {lang !== "ko" ? <div>
                   <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.usageClass}</p>
@@ -325,7 +328,7 @@ export function ModelsPageContent() {
                   </p>
                 </div> : null}
                 <div>
-                  <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.baseCharge}</p>
+                  <p data-testid="model-base-charge-label" className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{lang === "en" ? <><span className="sm:hidden">{copy.en.mobileBaseCharge}</span><span className="hidden sm:inline">{content.baseCharge}</span></> : content.baseCharge}</p>
                   <CreditCostBadge
                     credits={usageProfile.credits}
                     size="md"

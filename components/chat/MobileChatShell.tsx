@@ -1,5 +1,7 @@
 "use client";
 
+import type { PreparedChatLocationIntent } from "@tomverse/chat-core";
+
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
 import { ChatCommandBar, ReviewCommandBar } from "./ReviewStudioChrome";
@@ -113,6 +115,10 @@ import type { PromptRefinerProductChatDecision } from
 import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
 
 type PromptPayload = {
+  submittedAtMonotonicMs?: number;
+  preparationTimings?: import("@/lib/responseLatencyCore").ClientLatencyStages;
+  preparationReadyAtMonotonicMs?: number;
+  preparedLocationIntent?: PreparedChatLocationIntent;
   id: string;
   text: string;
   chatId: string;
@@ -206,6 +212,7 @@ type MobileChatShellProps = {
   identityKey: string | null;
   guestPreviewMode?: boolean;
   guestMessageCount: number;
+  guestResetsAt?: string | null;
   maxGuestMessages: number;
   isModelSelectionReady: boolean;
   /**
@@ -411,6 +418,7 @@ type MobileChatShellProps = {
   onRequestUndoToast: (message: string, undo: () => void) => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
+  chatLocationIntentEnabled?: boolean;
   conversationSelectionTicket: number;
   identityEpoch: number;
   onSavedQuestionNotSent: (
@@ -503,6 +511,7 @@ export function MobileChatShell({
   identityKey,
   guestPreviewMode = false,
   guestMessageCount,
+  guestResetsAt,
   maxGuestMessages,
   isModelSelectionReady,
   isConversationSelectionResolved,
@@ -572,6 +581,7 @@ export function MobileChatShell({
   onRequestUndoToast,
   onSubmit,
   onBeforeModelSend,
+  chatLocationIntentEnabled,
   conversationSelectionTicket,
   identityEpoch,
   onSavedQuestionNotSent,
@@ -1452,7 +1462,7 @@ export function MobileChatShell({
               className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full bg-blue-500/10 px-2 text-[11px] font-semibold text-blue-600 dark:text-blue-300"
             >
               <Sparkles className="h-3 w-3" />
-              {t("modelTiers.guest")} {guestMessageCount}/{maxGuestMessages}
+              {t("chat.guestCreditsUsed").replace("{used}", String(guestMessageCount)).replace("{limit}", String(maxGuestMessages))}
             </button>
           )}
           {isCurrentLocked && (
@@ -1752,6 +1762,7 @@ export function MobileChatShell({
                   isGuestMode={isGuestMode}
                   webSearchMode={webSearchMode}
                   onBeforeSend={onBeforeModelSend}
+                  chatLocationIntentEnabled={chatLocationIntentEnabled}
                   conversationSelectionTicket={conversationSelectionTicket}
                   identityEpoch={identityEpoch}
                   onSavedQuestionNotSent={onSavedQuestionNotSent}
@@ -2104,6 +2115,7 @@ export function MobileChatShell({
         mode={modeSheet}
         onClose={() => setModeSheet(null)}
         guestMessageCount={guestMessageCount}
+        guestResetsAt={guestResetsAt}
         maxGuestMessages={maxGuestMessages}
         activeModelCount={selectedModels.length}
       />

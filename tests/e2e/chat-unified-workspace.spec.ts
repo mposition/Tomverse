@@ -84,6 +84,7 @@ type DraftFixture = {
 function installControlledChatFetch(options: {
   routedModelId?: string;
   responseErrorCode?: string;
+  timingToken?: string;
   responseErrorOnceCode?: string;
   responseErrorOnceDetails?: Record<string, unknown>;
   durableAttemptResponse?: boolean;
@@ -233,6 +234,7 @@ function installControlledChatFetch(options: {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "X-Request-ID": "qa-unified-chat-trace",
+        ...(options.timingToken ? { "X-Response-Latency-Token": options.timingToken } : {}),
         ...(options.routedModelId ? { "X-Chat-Routed-Model": options.routedModelId } : {}),
       },
     });
@@ -295,6 +297,7 @@ async function openChat(page: Page, options: {
   selectedModels?: string[];
   routedModelId?: string;
   responseErrorCode?: string;
+  timingToken?: string;
   responseErrorOnceCode?: string;
   responseErrorOnceDetails?: Record<string, unknown>;
   durableAttemptResponse?: boolean;
@@ -342,9 +345,13 @@ async function openChat(page: Page, options: {
   autoConversationCreateServerErrorAfterCommit?: boolean;
   draftFailurePlan?: Array<{ method: string; scopeKey: string }>;
   chatAppearance?: "classic" | "studio";
+  parallelPreparation?: boolean;
 } = {}) {
   await prepareGuestPage(page, "en", "classic", options.chatAppearance ?? "classic");
   await mockAuthenticatedApi(page, { selectedModels: [MODEL_A] });
+  if (options.parallelPreparation) await page.context().addCookies([{
+    name: "__tomverse_e2e_parallel_preparation", value: "1", url: "http://127.0.0.1",
+  }]);
   const userSettingsWrites: Array<Record<string, unknown>> = [];
   if (options.accountDefaults) {
     await page.route("**/api/user/settings**", async (route) => {
@@ -936,6 +943,7 @@ async function openChat(page: Page, options: {
     });
   });
   await page.addInitScript(installControlledChatFetch, {
+    timingToken: options.timingToken,
     routedModelId: options.routedModelId,
     responseErrorCode: options.responseErrorCode,
     responseErrorOnceCode: options.responseErrorOnceCode,
@@ -4329,6 +4337,103 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await page.getByTestId("stop-this-response").click();
     await expect(page.getByTestId("chat-textarea")).toBeEnabled();
     expect(await page.evaluate(() => (window as unknown as { __unifiedChatControls: Array<{ aborted: boolean }> }).__unifiedChatControls[0].aborted)).toBe(true);
+    expect(await requests(page)).toHaveLength(1);
+  });
+
+  for (const changeSelection of [false, true]) {
+    test(`Refiner and location decisions overlap without early GPS or stale dispatch (${changeSelection ? "changed" : "retained"})`, async ({ page }, testInfo) => {
+      const parallel = process.env.E2E_CHAT_PARALLEL_PREPARATION_ENABLED !== "false";
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const scopeId = "44444444-4444-4444-8444-444444444444";
+      let scopeRead = false; let refinerStarted = false; let intentStarted = false; let intentCount = 0;
+      let release = () => {};
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      await page.addInitScript(() => {
+        Object.defineProperty(window, "__qaLocationReads", { value: 0, writable: true });
+        Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
+          getCurrentPosition: (success: PositionCallback) => {
+            const state = window as unknown as { __qaLocationReads: number };
+            state.__qaLocationReads++;
+            success({ coords: { latitude: -27.47, longitude: 153.025, accuracy: 150 }, timestamp: Date.now() } as GeolocationPosition);
+          },
+        } });
+      });
+      await page.route("**/api/chat/prompt-refiner/scope", route => {
+        scopeRead = true;
+        return route.fulfill({ json: { scopeId, epoch: 1 } });
+      });
+      await page.route("**/api/chat/prompt-refiner/prepare", async route => {
+        refinerStarted = true; await gate;
+        await route.fulfill({ json: { outcome: "original_fallback", reason: "no_change" } });
+      });
+      const state = await openChat(page, { viewport, parallelPreparation: true, initialSelectionMode: "auto", autoSelectionOffered: true });
+      await page.route("**/api/chat/location-intent", async route => {
+        intentStarted = true; intentCount++;
+        expect(route.request().postDataJSON().text).toBe("What is near me?");
+        await gate;
+        await route.fulfill({ json: { requiresLocation: true } });
+      });
+      await expect.poll(() => scopeRead).toBe(true);
+      await submitComposer(page, "What is near me?", viewport.width);
+      await expect.poll(() => refinerStarted).toBe(true);
+      if (parallel) await expect.poll(() => intentStarted).toBe(true);
+      else expect(intentStarted).toBe(false);
+      const locationReads = () => page.evaluate(() => (window as unknown as { __qaLocationReads: number }).__qaLocationReads);
+      expect(await locationReads()).toBe(0);
+      expect(await requests(page)).toHaveLength(0);
+      expect(state.writes.filter(write => write.method === "POST" && write.path.endsWith("/messages"))).toHaveLength(0);
+      if (changeSelection) await chooseModel(page, MODEL_B);
+      release();
+      if (changeSelection) {
+        await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+        expect(await requests(page)).toHaveLength(0);
+        expect(await locationReads()).toBe(0);
+      } else {
+        await drive(page, 0, "push", "The complete location answer.");
+        await drive(page, 0, "finish");
+        const payload = (await requests(page))[0];
+        expect(payload.currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+        expect(intentCount).toBe(1);
+        expect(await locationReads()).toBe(1);
+        expect(state.writes.filter(write => write.method === "POST" && write.path.endsWith("/messages"))).toHaveLength(1);
+      }
+    });
+  }
+
+  test("send timing covers the real preparation and stream without changing the answer", async ({ page }) => {
+    await openChat(page, { timingToken: "fixture-timing-proof", initialSelectionMode: "auto", autoSelectionOffered: true });
+    const reports: Array<Record<string, unknown>> = [];
+    await page.route("**/api/chat/timing", async route => {
+      reports.push(route.request().postDataJSON());
+      await route.fulfill({ status: 204 });
+    });
+    const state = { contextStarted: false, released: false };
+    let release = () => {};
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    await page.route("**/api/chat/context", async route => {
+      state.contextStarted = true;
+      await gate;
+      state.released = true;
+      await route.fallback();
+    });
+    await submitComposer(page, "Preserve the exact question and its full answer.", DESKTOP_VIEWPORT.width);
+    await expect.poll(() => state.contextStarted).toBe(true);
+    expect(await requests(page)).toHaveLength(0);
+    release();
+    await drive(page, 0, "push", "The same complete answer.");
+    await expect(message(page, "The same complete answer.")).toBeVisible();
+    await drive(page, 0, "finish");
+    await expect.poll(() => reports.length).toBe(1);
+    expect(reports[0]).toMatchObject({ outcome: "completed", token: "fixture-timing-proof" });
+    const stages = reports[0].stages as Record<string, number>;
+    for (const key of ["contextPrepareMs", "draftPrepareMs", "modelSyncMs", "messageSaveMs", "panelHandoffMs",
+      "locationMs", "responseHeadersMs", "dispatchToContentMs", "contentToEndMs", "clientFinalizeMs"]) {
+      expect(stages[key], key).toBeGreaterThanOrEqual(0);
+    }
+    expect(reports[0].firstContentMs).toBeGreaterThanOrEqual(reports[0].prepareMs as number);
+    expect(reports[0].completionMs).toBeGreaterThanOrEqual(reports[0].firstContentMs as number);
+    expect(JSON.stringify(reports)).not.toContain("Preserve the exact");
+    expect(JSON.stringify(reports)).not.toContain("The same complete answer");
     expect(await requests(page)).toHaveLength(1);
   });
 

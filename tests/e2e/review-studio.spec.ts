@@ -551,7 +551,8 @@ for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const)
     test(`Review inline images ${mode} ${appearance} ${width}px ${theme}`, { tag: "@ui-risk" }, async ({ page }) => {
       const calls = await installInlineImageAnswers(page);
       await prepare(page, width, theme, THREE_MODELS, 3, [], true);
-      if (mode === "Professional") await page.getByTestId("composer-review-mode").getByRole("button", { name: mode, exact: true }).click();
+      // The Korean control label is 전문가 (fe9b56d80).
+      if (mode === "Professional") await page.getByTestId("composer-review-mode").getByRole("button", { name: "전문가", exact: true }).click();
       if (appearance === "classic") await page.evaluate(() => {
         localStorage.setItem("tomverse_review_appearance", "classic");
         window.dispatchEvent(new Event("tomverse:review-preferences"));

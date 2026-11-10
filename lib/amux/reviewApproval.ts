@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole } from "@/lib/adminAuth";
 import {
   amuxReviewAllowedOutcomes,
@@ -103,7 +103,11 @@ const dbNow = async (tx: Client) => {
   return rows[0].now;
 };
 
+/** Every caller writes its admin audit entry last, so the audit chain lock is
+ * taken here, before the Task row (lib/adminAudit.ts takeAuditChainLock). A
+ * retry's resource policy locks come before this, as in execution admission. */
 async function lockTaskAndEscalation(tx: Client, escalationId: string) {
+  await takeAuditChainLock(tx);
   const identity = await tx.amuxHumanEscalation.findUnique({
     where: { id: escalationId },
     select: { taskId: true },

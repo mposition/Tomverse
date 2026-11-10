@@ -262,6 +262,8 @@ export const ko = {
         onGuestMode: "게스트 모드 활성화",
         guestModeMessage: "게스트 모드에서는 모든 대화 정보가 웹 브라우저에 저장되며 서버에는 기록되지 않습니다.",
         guestModeLimitMessage: "(하루 무료 50 크레딧, 선택한 모델 전체에서 공유)",
+        guestCreditsUsed: "게스트 크레딧 {used}/{limit} 사용",
+        guestCreditsShared: "일일 게스트 크레딧 한도는 선택한 모델 전체에서 공유됩니다.",
         guestComparisonsRemaining: "오늘 약 {count}번 더 비교할 수 있어요",
         aiAssistant: "AI 어시스턴트",
         you: "나",

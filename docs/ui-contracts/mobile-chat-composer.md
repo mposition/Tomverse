@@ -110,6 +110,11 @@ The bottom dock reserves the bottom safe-area inset once, after the last visible
 footer row. Neither the composer bar nor the disclaimer reserves it again, so
 the optional analytics notice stays inside the dock's safe area.
 
+The mobile disclosure summary and Details text are at least 12px at the default
+text size. Details has a real 44×44px minimum button box with visible padding;
+the row may wrap without truncating the warning. Its full approved disclosure
+remains in the existing keyboard- and touch-accessible sheet.
+
 ## Non-negotiable invariants
 
 - The textarea owns a dedicated row.

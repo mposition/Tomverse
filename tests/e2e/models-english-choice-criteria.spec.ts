@@ -17,6 +17,8 @@ test("English model choices use individual catalog facts without invented task r
     await expect(criteria).toContainText(`Catalog context maximum: ${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "not listed"}`);
     for (const label of ["Writing", "Analysis", "Fast"]) await expect(card.getByText(label, { exact: true })).toHaveCount(0);
   }
-  await expect(page.getByText(/higher credit cost does not prove a stronger answer/)).toBeVisible();
+  // The note is part of the full introduction, which phones collapse (#3546).
+  if (info.project.name.includes("mobile")) await expect(page.getByText(/higher credit cost does not prove a stronger answer/)).toBeAttached();
+  else await expect(page.getByText(/higher credit cost does not prove a stronger answer/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
 import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { allocateAmuxCardDisplayKey } from "@/lib/amux/cardDisplayKeyAllocator";
 import { AMUX_CARD_DISPLAY_PATH_PREFIX } from "@/lib/amux/cardDisplayKeyCore";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
@@ -155,6 +155,8 @@ export async function PUT(request: Request) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // Audit chain before the Task rows (lib/adminAudit.ts takeAuditChainLock).
+      await takeAuditChainLock(tx);
       let created = 0;
       let updated = 0;
       const busy: string[] = [];

@@ -1443,7 +1443,7 @@ export function PricingPageContent() {
             </div>
           </fieldset>
         ) : null}
-        <div id={PRICING_PLANS_ANCHOR} className={`mt-14 grid scroll-mt-24 gap-5 lg:grid-cols-3 ${lang === "ko" ? "lg:gap-y-0" : ""}`}>
+        <div id={PRICING_PLANS_ANCHOR} className={`mt-14 grid scroll-mt-24 gap-5 lg:grid-cols-3 ${lang === "en" || lang === "ko" ? "lg:gap-y-0" : ""}`}>
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
             const cardPlan: AccountPlanTier =
@@ -1501,9 +1501,10 @@ export function PricingPageContent() {
               data-cta-state={ctaState}
               data-requested-target={isRequestedTarget ? "true" : undefined}
               aria-labelledby={`pricing-plan-name-${planId}`}
-              // Korean desktop subgrid has nine in-flow rows, including the plan limits,
-              // from eyebrow through features; keep the span aligned with this structure.
-              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border ${lang === "ko" ? "p-5 sm:p-6" : "p-6"} shadow-sm [overflow-wrap:anywhere] ${lang === "ko" ? "lg:row-span-9 lg:grid lg:grid-rows-subgrid" : ""} ${
+              // Desktop subgrid has nine in-flow rows, including the credit example (en)
+              // or the plan limits (ko), from eyebrow through features; keep the span
+              // aligned with this structure.
+              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border ${lang === "ko" ? "p-5 sm:p-6" : "p-6"} shadow-sm [overflow-wrap:anywhere] ${lang === "en" || lang === "ko" ? "lg:row-span-9 lg:grid lg:grid-rows-subgrid" : ""} ${
                 plan.highlighted ? "border-blue-600 bg-blue-700 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
               } ${
@@ -1703,7 +1704,7 @@ export function PricingPageContent() {
                     {lang === "ko" ? `표시 통화: ${planPriceCurrency(planId, "annual")}. ${annualCopy.checkout}` : annualCopy.checkout}
                   </p>
                 </div>
-              ) : lang === "ko" ? <div aria-hidden="true" data-testid="pricing-annual-placeholder" className="hidden lg:block" /> : null}
+              ) : lang === "en" || lang === "ko" ? <div aria-hidden="true" data-testid="pricing-annual-placeholder" className="hidden lg:block" /> : null}
               <p data-testid="pricing-plan-usage" className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>

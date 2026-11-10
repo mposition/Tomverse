@@ -4,7 +4,7 @@ export const workspaceWelcomeCopy = {
     greeting: "Welcome back. What can I help with?",
     starter: {
         title: "What you can do here",
-        hint: "Pick one to fill the box below. Nothing is sent until you press send.",
+        hint: "Choose a prompt to fill the message box. Nothing is sent until you press send.",
         scrollMore: "More suggestions",
         lockedSignIn: "Sign in to use this",
         lockedPlan: "Needs the {plan} plan",
