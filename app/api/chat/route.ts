@@ -7598,14 +7598,16 @@ async function handleChatPost(
                     dispatchProviderForLog === "perplexity"
                         ? await consumePerplexityUsage(traceId)
                         : null;
+                const presearchSnapshot = presearchForSettlement?.session.snapshot();
                 await settleChatUsage(usageReservation, {
                     inputTokens: 0,
                     outputTokens: 0,
                     outcome: "failed",
-                    ...(presearchForSettlement && presearchForSettlement.session.snapshot().backendRequestCount > 0 ? {
-                        searchBackendRequestCount: presearchForSettlement.session.snapshot().succeededRequestCount,
-                        // A thrown/aborted backend response can have unknown cost.
-                        searchQueriesObserved: false,
+                    ...(presearchSnapshot && presearchSnapshot.backendRequestCount > 0 ? {
+                        searchBackendRequestCount: presearchSnapshot.succeededRequestCount,
+                        // Successful responses have exact cost. A thrown/aborted
+                        // backend response may have been served: retain its hold.
+                        searchQueriesObserved: presearchSnapshot.succeededRequestCount === presearchSnapshot.backendRequestCount,
                     } : {}),
                 }, {
                     providerUsageSnapshot,

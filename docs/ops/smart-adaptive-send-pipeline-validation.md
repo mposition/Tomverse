@@ -214,8 +214,10 @@ activate them or change the production location-intent switch enabled earlier.
   still runs only from the saved, current turn. A manually granted or suppressed
   session makes no speculative intent call. Guests and image turns retain their
   existing path. A failed/stale preparation uses the existing saved-turn path.
-  An abandoned send may have spent its one already-admitted location intent call;
-  no retry is scheduled by preparation. No typing-time calls are added.
+  An abandoned send may have spent its already-admitted location intent call;
+  no retry is scheduled by preparation. A stale or failed prepared decision may
+  cause the saved-turn path to classify again; one call holds only for an
+  unchanged, successful preparation. No typing-time calls are added.
 - `CHAT_ROUTER_PRESEARCH_ENABLED=true`: the existing Router call can return zero
   to two validated independent queries on authenticated text Auto turns with web
   search enabled. The extra 240 output-token ceiling and prompt are included in
@@ -230,12 +232,14 @@ activate them or change the production location-intent switch enabled earlier.
   At least three slots remain for dependent facts. The answer model receives the
   results as a matched tool-call/tool-result pair, with untrusted-source notices,
   and retains every normal tool. Empty/invalid plans and errors use normal tools.
-  Evidence must fit the existing 6,000-token search allowance; it is never
+  Presearch evidence uses at most 2,400 of the existing 6,000 result tokens,
+  leaving three-fifths for follow-up evidence; it is never
   truncated or added above the reservation. Oversized results remain in the
   attempt's exact-query cache for the ordinary tool path. No search evidence is
   inherited by a replacement attempt, and existing search-turn recovery policy
   is unchanged. An outer failure retains incurred/uncertain backend cost even
-  before an answer-model stream exists. Manifests include the tool payload digests.
+  before an answer-model stream exists: all-successful reads settle the exact
+  count; incomplete backend responses conservatively retain the hold. Manifests include the tool payload digests.
 
 `locationIntentMs` and `refinerPrepareMs` now overlap for eligible parallel turns;
 never add them to estimate elapsed time. `presearchMs` is inside server pre-provider

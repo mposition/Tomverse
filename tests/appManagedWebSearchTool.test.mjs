@@ -592,10 +592,10 @@ test("failed presearch remains recoverable through the ordinary tool without an 
   assert.equal(config.session.snapshot().backendRequestCount, 2);
 });
 
-test("oversized evidence is not injected or truncated and never widens the input allowance", async () => {
+test("presearch leaves the remaining three-fifths input allowance for follow-ups without truncating evidence", async () => {
   const config = toolFor();
   const original = config.search;
-  config.search = async input => ({ ...(await original(input)), unexpected: "가".repeat(10000) });
+  config.search = async input => ({ ...(await original(input)), unexpected: "x".repeat(10000) });
   assert.deepEqual(await presearch(config), []);
   assert.equal(fetchCalls.length, 2);
   await run(config, { query: "one" });

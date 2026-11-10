@@ -83,6 +83,7 @@ let forceAppManagedSearch = false;
 let forceNativeSearch = false;
 let refusePresearchAdmission = false;
 let throwAfterPresearch = false;
+let failPresearchBackend = false;
 const presearchCalls: unknown[] = [];
 const presearchSettlements: Record<string, unknown>[] = [];
 const realSearchCapability = require(resolve(ROOT, "lib/webSearchCapability.ts")) as typeof import("../../lib/webSearchCapability");
@@ -98,6 +99,7 @@ mock.module(mod("lib/webSearchBackendAdapter.ts"), { namedExports: {
   runWebSearchBackendRequest: async (_backend: unknown, request: { query: string }) => {
     assert.equal(ledger.accessAcquisitions, 1, "search cannot precede credit admission");
     presearchCalls.push(request);
+    if (failPresearchBackend) return { ok: false, failure: "backend_timeout" };
     return { ok: true, results: [{ title: "Search evidence", url: "https://example.com/evidence", snippet: "Verified fixture fact." }] };
   },
 } });
@@ -3662,21 +3664,26 @@ test("router presearch stays behind admission, preserves search recovery policy 
     assert.equal(presearchCalls.length, 2);
     assert.equal(presearchSettlements.length, 1);
     assert.equal(presearchSettlements[0].searchBackendRequestCount, 2);
+    assert.equal(presearchSettlements[0].searchQueriesObserved, true);
+    failPresearchBackend = true; presearchCalls.length = 0; presearchSettlements.length = 0;
+    await ask("answers", "claimed", 500, false, undefined, true, true, undefined, "always");
+    assert.equal(presearchCalls.length, 2);
+    assert.equal(presearchSettlements[0].searchBackendRequestCount, 0);
     assert.equal(presearchSettlements[0].searchQueriesObserved, false);
-    throwAfterPresearch = false;
+    failPresearchBackend = false; throwAfterPresearch = false;
 
     for (const condition of ["off", "disabled", "native", "location"] as const) {
       presearchCalls.length = 0;
       process.env.CHAT_ROUTER_PRESEARCH_ENABLED = condition === "disabled" ? "false" : "true";
       forceAppManagedSearch = condition !== "native";
       forceNativeSearch = condition === "native";
-      turnLocation = condition === "location" ? { latitude: -27.47, longitude: 153.025, accuracy: 150, timestamp: Date.now() } : null;
+      turnLocation = condition === "location" ? { latitude: -27.47, longitude: 153.025, accuracy: 150, timestamp: Date.now() } : undefined;
       await ask("answers", "claimed", 200, false, undefined, true, true, undefined, condition === "off" ? "off" : "always");
       assert.equal(presearchCalls.length, 0, condition);
     }
   } finally {
     if (oldFlag === undefined) delete process.env.CHAT_ROUTER_PRESEARCH_ENABLED; else process.env.CHAT_ROUTER_PRESEARCH_ENABLED = oldFlag;
     if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
-    turnLocation = null; forceNativeSearch = false; forceAppManagedSearch = false; llmSearchQueries = undefined; refusePresearchAdmission = false; throwAfterPresearch = false;
+    failPresearchBackend = false; turnLocation = undefined; forceNativeSearch = false; forceAppManagedSearch = false; llmSearchQueries = undefined; refusePresearchAdmission = false; throwAfterPresearch = false;
   }
 });

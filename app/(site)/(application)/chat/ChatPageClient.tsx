@@ -6905,8 +6905,8 @@ export function ChatPageClient({
       // their existing single-use verification sequence.
       const locationPreparation = chatParallelPreparationEnabled && chatLocationIntentEnabled &&
         requestAutoPrepare && preparedDraft && promptRefinerProductScope && !imageTurnSend
-        ? preparation.measure("locationIntentMs", () => chatLocationSession.prepareIntent(
-            identityKey, authoredPrompt, () => requestChatLocationIntent(authoredPrompt, fetch)))
+        ? chatLocationSession.prepareIntent(identityKey, authoredPrompt,
+            () => preparation.measure("locationIntentMs", () => requestChatLocationIntent(authoredPrompt, fetch)))
         : Promise.resolve(undefined);
 
       let promptRefinerDecisionForSend = explicitPromptRefinerDecision;

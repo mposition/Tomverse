@@ -1,8 +1,13 @@
 import "server-only";
 import type { ModelMessage } from "ai";
 import type { AppManagedWebSearchToolConfig } from "./appManagedWebSearchTool";
-import { parseRouterSearchQueries } from "./chatRouterSearchPlan";
+import { parseRouterSearchQueries, ROUTER_SEARCH_MAX_QUERIES } from "./chatRouterSearchPlan";
+import { APP_MANAGED_SEARCH_LIMITS } from "./webSearchBackends";
 import { createTokenEstimateAccumulator, toReservedInputTokens, WEB_SEARCH_INPUT_TOKEN_OVERHEAD } from "./chatTokenEstimate";
+
+// Presearch owns at most its two-of-five share of the existing result allowance.
+const PRESEARCH_INPUT_TOKENS = Math.floor(WEB_SEARCH_INPUT_TOKEN_OVERHEAD *
+  ROUTER_SEARCH_MAX_QUERIES / APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest);
 
 /** Reuse the attempt's admitted tool, counter, result cache and sources. */
 export async function prepareRouterSearch(input: {
@@ -27,7 +32,7 @@ export async function prepareRouterSearch(input: {
     estimate.addText(JSON.stringify(messages));
     // Never widen the existing input reservation or truncate evidence to make
     // it fit. The ordinary tool remains available and reuses successful reads.
-    return toReservedInputTokens(estimate.breakdown()) <= WEB_SEARCH_INPUT_TOKEN_OVERHEAD ? messages : [];
+    return toReservedInputTokens(estimate.breakdown()) <= PRESEARCH_INPUT_TOKENS ? messages : [];
   } catch {
     // The existing tool loop can recover; there is no automatic paid retry.
     return [];

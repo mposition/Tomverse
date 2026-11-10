@@ -6,7 +6,7 @@ import { prepareRouterSearch } from "../lib/chatRouterPresearch.ts";
 import { latencyDistribution } from "../lib/responseLatencyCore.ts";
 
 // Offline orchestration experiment, not an LLM quality or production benchmark.
-// Every fetch is replaced. Same evidence, search budget and final text per pair.
+// Every fetch is replaced. Same evidence and search budget; generation is a timed fixture.
 const rounds = 40;
 const rows = { before: [], after: [] };
 const originalFetch = globalThis.fetch;

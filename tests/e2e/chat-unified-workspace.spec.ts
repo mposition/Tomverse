@@ -4341,7 +4341,9 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
   });
 
   for (const changeSelection of [false, true]) {
-    test(`Refiner and location decisions overlap without early GPS or stale dispatch (${changeSelection ? "changed" : "retained"})`, async ({ page }) => {
+    test(`Refiner and location decisions overlap without early GPS or stale dispatch (${changeSelection ? "changed" : "retained"})`, async ({ page }, testInfo) => {
+      const parallel = process.env.E2E_CHAT_PARALLEL_PREPARATION_ENABLED !== "false";
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
       const scopeId = "44444444-4444-4444-8444-444444444444";
       let scopeRead = false; let refinerStarted = false; let intentStarted = false; let intentCount = 0;
       let release = () => {};
@@ -4364,7 +4366,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
         refinerStarted = true; await gate;
         await route.fulfill({ json: { outcome: "original_fallback", reason: "no_change" } });
       });
-      const state = await openChat(page, { parallelPreparation: true, initialSelectionMode: "auto", autoSelectionOffered: true });
+      const state = await openChat(page, { viewport, parallelPreparation: true, initialSelectionMode: "auto", autoSelectionOffered: true });
       await page.route("**/api/chat/location-intent", async route => {
         intentStarted = true; intentCount++;
         expect(route.request().postDataJSON().text).toBe("What is near me?");
@@ -4372,8 +4374,10 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
         await route.fulfill({ json: { requiresLocation: true } });
       });
       await expect.poll(() => scopeRead).toBe(true);
-      await submitComposer(page, "What is near me?", DESKTOP_VIEWPORT.width);
-      await expect.poll(() => refinerStarted && intentStarted).toBe(true);
+      await submitComposer(page, "What is near me?", viewport.width);
+      await expect.poll(() => refinerStarted).toBe(true);
+      if (parallel) await expect.poll(() => intentStarted).toBe(true);
+      else expect(intentStarted).toBe(false);
       const locationReads = () => page.evaluate(() => (window as unknown as { __qaLocationReads: number }).__qaLocationReads);
       expect(await locationReads()).toBe(0);
       expect(await requests(page)).toHaveLength(0);

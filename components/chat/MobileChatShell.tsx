@@ -118,7 +118,7 @@ type PromptPayload = {
   submittedAtMonotonicMs?: number;
   preparationTimings?: import("@/lib/responseLatencyCore").ClientLatencyStages;
   preparationReadyAtMonotonicMs?: number;
-    preparedLocationIntent?: PreparedChatLocationIntent;
+  preparedLocationIntent?: PreparedChatLocationIntent;
   id: string;
   text: string;
   chatId: string;
