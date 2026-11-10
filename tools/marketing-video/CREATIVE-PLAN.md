@@ -39,6 +39,13 @@ competitor's ad (docs/policy/marketing-automation.md §2).
 - An AI shot never shows a screen, a user interface, text, a logo or a real,
   identifiable person; the code adds the words. Never ask for purple, violet
   or magenta.
+- The mood stays warm and alive (owner 2026-11-11). Never a picture that can
+  read as death, suicide, loss, illness or danger: empty shoes or clothes left
+  behind, an empty chair or bed, a lone figure at an edge, a cliff, a drop or
+  stairs vanishing into fog, a grave, a hospital, a funeral colour. When the
+  story is about people (parents, a family, a friend), show those people,
+  generated and not identifiable, present and doing something together, faces
+  allowed. A metaphor is fine only when nobody could take it the wrong way.
 - The product appears only as the pack's real screens, which the film may
   crop, frame, move and mask, never redraw.
 - `music`: a prompt for an instrumental bed (genre, tempo, instruments, mood,
