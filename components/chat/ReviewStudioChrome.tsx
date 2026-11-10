@@ -14,7 +14,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
-import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
+import { reviewUsageExplanation, reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { storeAndApplyThemePreference } from "@/lib/theme";
 import { openAccountSettings } from "@/lib/accountSettingsEvents";
 import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
@@ -59,13 +59,21 @@ export function ReviewCommandBar({ review, locked = false, view, setView, showMo
 }
 
 function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace: WorkspaceAppearanceControls; disabled: boolean; testId: string }) {
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
   const { data: session } = useSession();
   const usage = useUserUsage(Boolean(session?.user));
   const percent = usage ? usagePercent(usage.usage.creditsMonth, usage.limits.creditsMonth) : null;
+  const usageDescriptionId = useId();
+  const usageDescription = usage && percent !== null
+    ? reviewUsageExplanation[lang]
+      .replace("{used}", usage.usage.creditsMonth.toLocaleString(lang))
+      .replace("{limit}", usage.limits.creditsMonth.toLocaleString(lang))
+    : c.settings;
+  const usageLabel = `${t("sidebar.currentUsage")} ${percent === null ? "—" : `${percent}%`}`;
   return <>
-    <button type="button" className="review-credit-button" onClick={() => openAccountSettings("plan")} aria-label={`${c.settings}${percent === null ? "" : ` · ${percent}%`}`}><BarChart3 size={17} /><span>{percent === null ? "—" : `${percent}%`}</span></button>
+    <span id={usageDescriptionId} className="sr-only">{usageDescription}</span>
+    <button type="button" className="review-credit-button" data-testid="workspace-usage" onClick={() => openAccountSettings("plan")} aria-label={`${usageLabel} · ${c.settings}`} aria-describedby={usageDescriptionId} title={usageDescription}><BarChart3 size={17} aria-hidden="true" /><span>{usageLabel}</span></button>
     <button type="button" className="review-icon-button" aria-label={c.color} onClick={() => {
       const dark = document.documentElement.classList.contains("dark") || (!document.documentElement.classList.contains("light") && matchMedia("(prefers-color-scheme: dark)").matches);
       storeAndApplyThemePreference(dark ? "light" : "dark");
