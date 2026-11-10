@@ -58,6 +58,21 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
+test("plugin cards explain capabilities before opening details", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.route("**/api/mcp/**", route => route.fulfill({ json: { enabled: false, servers: [], connections: [], invocations: [] } }));
+  await page.goto("/plugins?lang=ko");
+  const search = page.getByRole("textbox", { name: "플러그인 검색" });
+  await expect(page.getByTestId("plugin-card").first()).toBeVisible();
+  for (const [provider, explanation] of [["Aiven", "데이터베이스·스트리밍"], ["Airwallex", "결제 API 문서"], ["GitHub", "저장소·이슈·PR"]]) {
+    await search.fill(provider);
+    const card = page.getByTestId("plugin-card").filter({ has: page.getByRole("heading", { name: provider, exact: true }) });
+    await expect(card.getByTestId("plugin-capability")).toContainText(explanation);
+    await expect(card.getByTestId("plugin-capability")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  }
+});
+
 test("@ui-risk mobile plugin header exposes global navigation and the current page", async ({ page, isMobile }) => {
   test.skip(!isMobile, "The header menu is a mobile entry point.");
   await page.setViewportSize({ width: 320, height: 800 });

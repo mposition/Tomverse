@@ -11,6 +11,7 @@ import { useModalDialog } from "@/components/useModalDialog";
 import { PluginLogo } from "./PluginLogo";
 import { mcpConnectorCopy } from "@/lib/mcpConnectorCopy";
 import { mcpProviderCopy } from "@/lib/mcpProviderCopy";
+import { mcpProviderSummary } from "@/lib/mcpProviderSummary";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { mcpProvider, type McpProvider, type McpProviderCategory } from "@/lib/mcpProviderCatalog";
 import { PLUGIN_PROVIDERS, EMPTY_PLUGIN_INVENTORY, readPluginInventory, type PluginInventory, type PluginServer, type PluginConnection } from "@/lib/mcpConnectorClientContract";
@@ -161,7 +162,8 @@ export function PluginWorkspace() {
             const conn = inventory.connections.find(conn => conn.serverId === card.id && conn.status !== "disconnected");
             return <article key={card.id} className={styles.card} data-testid="plugin-card" data-provider={card.provider?.id || card.id}>
               <div className={styles.identity}><PluginLogo name={card.name} providerId={card.provider?.id} /><h3>{card.name}</h3></div>
-              <p className={styles.help}>{card.server?.origin || (card.provider ? p.categories[card.provider.category] : c.customDescription)}</p>
+              <p className={styles.help} data-testid="plugin-capability">{card.provider ? mcpProviderSummary(card.provider, lang) : c.customDescription}</p>
+              {card.server?.origin ? <p className={styles.help}>{card.server.origin}</p> : null}
               {card.provider && <div className={styles.badges}><span>{p[card.provider.kind]}</span>{card.provider.sources.map(source => <span key={source}>{source === "openai" ? "Codex" : "Claude Code"}</span>)}</div>}
               <div className={styles.cardFooter}><span>{conn ? conn.status === "connected" ? c.connected : c.expired : card.server ? c.disconnected : c.serverSetup}</span>
                 <button type="button" disabled={busy || (!card.server && !card.provider)} onClick={() => conn ? choose(conn) : card.server ? openAdd(card.id) : chooseProvider(card.provider!)}>{conn ? c.manage : card.server ? c.connect : p.details}</button></div>
