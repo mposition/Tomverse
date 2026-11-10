@@ -1,0 +1,199 @@
+# Smart Adaptive send pipeline
+
+Goal-Step: response-latency/send-pipeline
+
+## Observed problem
+
+The post-#3675 production snapshot at 2026-11-10 06:14:27 UTC had only
+two complete browser reports before deployment and three afterwards. For the
+two GPT 6 Luna requests that each used four application-managed searches,
+submit-to-first-content was 23.703s before and 21.508s after; completion was
+25.414s and 23.270s. These were different questions, one sample per side.
+Preparation increased from 1.904s to 5.375s, offsetting 3.471s of the 5.666s
+improvement between dispatch and first content. This is observational evidence,
+not a controlled quality or performance comparison.
+
+The previous browser sample stored preparation as one number. Code inspection
+found context pricing and draft flushing serialized before Refiner preparation,
+durable question persistence and location acquisition. A disabled location-intent
+feature still incurred an authenticated HTTP request per new source message.
+The production location-intent switch was absent at inspection, so a location
+LLM call cannot explain that snapshot's preparation delay.
+
+## Changes
+
+- Prepare context and flush the captured draft concurrently. Both must settle
+  before the identity/conversation/model fence, Refiner, question consumption or
+  Chat dispatch. A stale or failed preparation releases any prepared draft.
+- Pass the server's location-intent availability through both web shells. When
+  disabled, skip automatic intent HTTP requests. Manually enabled location still
+  reads a fresh position. When enabled, retain semantic classification, guest
+  verification, per-source deduplication, consent, revocation and freshness.
+- Do not ask the Router to rewrite a turn with an already validated Refiner
+  preview, including keep-original. Atomic Refiner consumption restores that
+  exact execution view before dispatch, so the second rewrite was discarded.
+  Keep model selection, file/image classification and ordinary Router rewriting.
+- Add bounded numeric stages to the existing signed, best-effort timing report
+  and Admin response-latency table. No migration or content logging is required.
+
+| Observation | Boundary |
+| --- | --- |
+| submitHandoffMs | Submit to entry into the owned preparation path, including earlier intent/new-chat work |
+| attachmentPrepareMs | Attachment preview preparation |
+| conversationPrepareMs | Conversation preparation within the owned path |
+| modelSyncMs | Model-settings send barrier |
+| preflightMs | Existing comparison admission step (single Chat has no network preflight) |
+| contextPrepareMs / draftPrepareMs | Independent, overlapping context preparation and draft flush |
+| refinerPrepareMs | Existing automatic Refiner preparation, when applicable |
+| messageSaveMs | Durable question save, receipt recovery and local reconciliation |
+| panelHandoffMs | Prepared payload to panel run, including its model-settings barrier |
+| locationMs | Location analysis plus device/human permission wait |
+| locationIntentMs | Nested intent HTTP request and verification; absent when no new analysis was needed |
+| responseHeadersMs | Latest dispatch to response headers |
+| dispatchToContentMs | Latest dispatch to first nonempty visible content |
+| contentToEndMs | First content to consumed stream end |
+| clientFinalizeMs | Stream end to client handler completion |
+| beforeRoutingMs / routingMs / afterRoutingMs | Server entry to router, routing, routing end to provider dispatch |
+| contextMs | Nested server context verification build, when a bundle is present |
+| providerToContentMs | Provider dispatch to first content, including model thinking and tool/search rounds |
+
+The existing `app_managed_web_search` events correlate by trace ID and expose
+tool-call index, batch size, backend duration and reuse without query text. Use
+those to separate backend search latency from the intervening model/tool rounds.
+Native provider-internal searches have no equivalent per-query observation.
+
+The table reports p50/p95 and count separately for each stage. Do not sum
+overlapping durations or subtract unrelated percentiles. First content still
+means UI state update, not browser paint. Server settlement still means the
+start of settlement, not completion. Old clients remain accepted and absent
+stages stay unknown. Pre-stream refusals without a signed token remain outside
+the browser report; use existing route rejection logs for those requests.
+
+## Controlled comparison
+
+Local PowerShell in the repository: `node --import tsx scripts/smart-adaptive-send-benchmark.mjs`.
+No production credentials, database, network or paid model calls are used.
+The baseline reproduces serial context/draft preparation; the candidate imports
+the production preparation helper. Both return identical context/draft values,
+call each dependency once, and retain identical subsequent save, enabled-location,
+provider/search and stream delays. Forty pairs alternate execution order.
+
+| Metric | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| First content p50 | 216.27ms | 170.66ms | -21.1% |
+| First content p95 | 230.38ms | 184.27ms | -20.0% |
+| Completion p50 | 247.01ms | 201.80ms | -18.3% |
+| Completion p95 | 261.50ms | 215.08ms | -17.8% |
+
+These are fixture results, not projected production savings. Context and draft
+delays are synthetic (30–34ms and 50–56ms); timer scheduling also contributes.
+Real savings depend on their overlap. If the draft was already flushed, that
+part saves little or nothing. No routing prompt, model, tool/search limit, memory,
+answer length or Refiner decision was weakened to obtain these results.
+
+## Location activation and subsequent comparison
+
+The owner separately requested production location-intent activation during this
+work. Existing review r-20261025-104233-cbed73 was accepted; the unchanged
+location route/provider contracts passed all eight tests. The existing flag
+`TOMVERSE_CHAT_LOCATION_INTENT_ENABLED=true` was applied without changing budgets
+or providers. Deployment `e4a003c8-da12-4c97-9377-2906e08a0a8a` became successful
+at 2026-11-10 06:44:05 UTC (16:44:05 AEST). Runtime readback confirmed the flag
+and `/api/health` returned 200. Its code remains main commit
+`f2fafdfbeab3a6346beb4cf9d39e491b58e3262d`; it does not contain this PR.
+
+This activation adds a semantic intent wait to eligible sends and changes the
+comparison cohort. Compare this PR before/after only with location intent enabled
+on both sides, matching model, source, outcome, search usage and permission state.
+Keep first-permission interactions separate from already-enabled/denied location.
+The small earlier location-off snapshot cannot establish this change's live gain.
+
+## Verification
+
+- Preparation tests execute overlapping jobs and the actual stale/failure cleanup.
+- Timing tests cover strict numeric allowlists, old-client compatibility, signed
+  proof/origin enforcement, nested timings, replay and telemetry failure isolation.
+- Browser regression exercises real submit/stream reporting and existing
+  model-change/draft fences; location tests retain automatic/manual/denied flows.
+- Existing route contracts cover selection, fallback, guest credit/auth boundaries,
+  tools and full artifact streaming. The unrelated ART-FORMAT-01 TODO remains.
+
+Final local results: 122 route/timing contracts passed with that one existing
+TODO; 34 preparation/latency/location unit and render checks, 20 Auto UI render
+checks and eight location route/provider contracts passed. Browser checks passed
+five send/fence scenarios plus 14 enabled-location and two disabled-location
+desktop/mobile scenarios. The disabled browser lane was explicitly run with
+`E2E_CHAT_LOCATION_INTENT_ENABLED=false`; the default Playwright lane enables
+intent and skips that dedicated test. Production build and targeted ESLint passed.
+Independent review r-20261110-070954-d034a5 accepted the final runtime changes,
+following r-20261110-065304-50d126. The follow-up test supplies a Router rewrite
+even when forbidden and verifies both execution bytes and response provenance;
+all three adversarial cases passed. It changes no reviewed runtime boundary.
+
+No performance-code merge or deployment is included. Production speed and
+semantic answer quality were not remeasured with paid model calls in this task.
+
+## Deeper critical-path review
+
+Read-only Railway HTTP logs and content-free Refiner execution receipts resolved
+the previously unknown preparation segment. At 06:11 and 06:12 UTC:
+
+| Observation | Request A | Request B |
+| --- | ---: | ---: |
+| Browser preparation | 5.375s | 5.011s |
+| Refiner prepare HTTP duration | 4.261s | 3.954s |
+| Refiner admission before provider (receipt timestamps) | 0.375s | 0.337s |
+| Refiner provider to verified completion (receipt timestamps) | 3.711s | 3.460s |
+| Context prepare HTTP duration | 0.081s | 0.100s |
+| Disabled location-intent HTTP duration | 0.036s | 0.037s |
+
+These are temporally corresponding requests in the earlier snapshot, not new
+controlled runs. The Refiner receipts were `suggested`, model ID
+`gpt-5-6-luna`, 286 input tokens each, zero cached input tokens, and 90/209
+output tokens including 55/173 reasoning tokens. No source text was read.
+Most of this delay is the existing medium-reasoning Refiner generation, not
+context retrieval or the disabled location endpoint. The preparation overlap
+fix alone is therefore unlikely to produce a large perceptual change.
+
+For the four-search post-deploy request, the first-content path was 21.508s:
+5.375s browser preparation, 3.426s server pre-provider work, 12.517s from provider
+dispatch to first content, and approximately 0.190s of remaining cross-boundary
+overhead. These are one request's durations, not subtracted percentiles.
+Routing occupied 2.725s inside server pre-provider work. The three search tool
+calls had backend critical waits of approximately 1.200s, 1.062s (two queries
+in parallel), and 1.167s. The remaining approximately 9.1s inside provider-to-first
+content includes model/tool round trips, transport and processing; it cannot
+be labeled pure model reasoning from these logs. Completion followed first
+content by another 1.762s. Search orchestration remains a larger target than
+the roughly 0.1s context preparation endpoint.
+
+The deeper review also found the discarded Router rewrite described above.
+Removing that task uses the existing no-rewrite prompt/schema and its existing
+200-token routing output ceiling instead of the 900-token rewrite ceiling.
+Those are ceilings, not measured token savings. The request still selects a
+model and checks file/image intent; the final Refiner execution bytes remain
+unchanged. Routed accepted, keep-original and ordinary turns are exercised
+through primary failure and fallback, in addition to the existing view tests.
+
+### Structural alternatives
+
+| Approach | Critical path and quality trade-off | Decision |
+| --- | --- | --- |
+| Independent Refiner and location-intent calls in parallel | Changes `F + L` to `max(F,L)` while retaining each model, prompt and result. Maximum theoretical saving is `min(F,L)`, not an observed result. | Preferred next structural experiment. Prime only the semantic decision; defer permission/GPS until the saved turn is current. Preserve identity cancellation, exact-source binding and one call per turn. Account for spend if a later save fails. Guest one-use verification must finish before either dependent request. |
+| Search preparation in the existing Router call | Have the Router propose independent grounded-search queries, then execute them together after ordinary access/credit admission and supply the results to the answering model. This may avoid repeated answer-model planning round trips; it adds no separate planner call. | High-impact candidate for search-heavy turns. Keep the same search backend, shared per-attempt query ceiling, untrusted-source treatment and provenance. Retain answering-model follow-up tools for genuinely dependent queries. Compare source relevance/completeness and added Router latency before adopting. Do not pre-spend search budget before admission. |
+| One structured preparation call for refinement, routing, image/file and location intent | Removes repeated reading and model round trips. A larger combined prompt/output may offset the gain, and decisions can interfere. | Strong candidate for a separate evaluated adapter. Do not silently change the currently approved Refiner model/config pin or merge its budget ledger with the Router. |
+| Faster Refiner model or lower reasoning | May shorten the observed 3.5–3.7s provider segment, but equal quality is unproven. | Compare as a candidate; do not activate from a latency hypothesis. |
+| Speculative refinement while typing | Can hide submit latency but sends unsent text and spends on abandoned drafts. | Exclude from this change; user-input privacy and spending behavior would change. |
+| Stream a raw answer before refinement or shorten search/answer limits | Improves apparent start time by changing the answer path or amount of work. | Exclude: cannot claim preservation of the current result. |
+| Cache arbitrary previous answers or refined prompts | Can remove calls, but source/conversation/consent changes and audit attribution must be resolved. | No broad cache added. Existing exact-query search deduplication remains. |
+
+For the combined candidate, use the same synthetic multilingual questions,
+histories, attachment metadata, tool fixtures and allowed model pool. Include
+follow-ups, abstention/keep-original, local-vs-explicit-place questions, denied
+location, file/image ambiguity, stale scope, injection, citations and tool
+failures. Compare final answer correctness and completeness, routing/file/image/
+location decisions, credit/consent invariants, errors and cost as well as both
+latency percentiles. Set non-inferiority criteria before running blinded paired
+answer evaluation. Mock timing or schema tests alone cannot establish semantic
+equivalence. A paid evaluation and production activation are separate actions;
+neither was performed for these alternatives.

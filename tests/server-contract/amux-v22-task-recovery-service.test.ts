@@ -67,6 +67,7 @@ const world = { task: {} as Row, attempt: {} as Row, runtime: {} as Row,
   risks: [] as Row[], launchChecks: [] as Row[], launchProofs: [] as Row[],
   apiModelAccessEvidence: [] as Row[],
   preApprovals: [] as Row[], preApprovalResults: [] as Row[], escalations: [] as Row[],
+  usageAcceptances: [] as Row[],
   ready: true, incident: false, cap: "3400000", costAdmission: true, cas: true,
   otherWork: false,
   // null keeps the fixed test receipt. A Date makes the receipt digest depend on
@@ -106,6 +107,7 @@ function reset() {
   world.risks = []; world.launchChecks = []; world.launchProofs = [];
   world.apiModelAccessEvidence = [];
   world.preApprovals = []; world.preApprovalResults = []; world.escalations = [];
+  world.usageAcceptances = [];
   world.ready = true; world.incident = false; world.cap = "3400000"; world.costAdmission = true;
   world.cas = true; world.otherWork = false; world.changedOld = 0;
   world.ledgerWrites = 0; world.attemptWrites = 0;
@@ -164,6 +166,8 @@ const tx = {
     _sum: { reservedCostMicrousd: BigInt(3_400_000) } }), update: async () => { world.changedOld++; },
     create: async () => { world.attemptWrites++; } },
   amuxCostLedgerEntry: { create: async () => { world.ledgerWrites++; }, createMany: async () => { world.ledgerWrites++; } },
+  amuxV22AttemptUsageAcceptance: { createMany: async ({ data }: { data: Row[] }) => {
+    world.usageAcceptances.push(...data); return { count: data.length }; } },
   adminAuditLog: { findUnique: async ({ where }: { where: Row }) => world.audits.find((row) => matches(row, where)) ?? null },
   amuxV22TaskRecoveryInspectionRequest: {
     findUnique: async ({ where, include }: { where: Row; include?: Row }) => {
@@ -314,6 +318,7 @@ function load() {
         risks: [...world.risks], launchChecks: [...world.launchChecks], launchProofs: [...world.launchProofs],
         apiModelAccessEvidence: [...world.apiModelAccessEvidence],
         preApprovals: [...world.preApprovals], preApprovalResults: [...world.preApprovalResults],
+        usageAcceptances: [...world.usageAcceptances],
         escalations: structuredClone(world.escalations) };
       try { return await callback(tx, now); }
       catch (error) { world.task = saved.task; world.inspections = saved.inspections;
@@ -323,6 +328,7 @@ function load() {
         world.launchProofs = saved.launchProofs;
         world.apiModelAccessEvidence = saved.apiModelAccessEvidence;
         world.preApprovals = saved.preApprovals; world.preApprovalResults = saved.preApprovalResults;
+        world.usageAcceptances = saved.usageAcceptances;
         world.escalations = saved.escalations;
         throw error; }
     },
@@ -540,6 +546,15 @@ test("inspection and approval use real stored IDs, preserve old unknown spend, a
   assert.equal(world.approvals.length, 1); assert.equal(world.audits.length, 3);
   assert.deepEqual(await service.approveAmuxV22TaskRecovery(input), read);
   assert.equal(world.approvals.length, 1); assert.equal(world.audits.length, 3);
+  // Owner decision 2026-11-10: the approval accepts the Task's earlier
+  // unknown-usage attempt, named in its own audit, and changes no cost.
+  const approved = world.audits.find((row) => row.action === "amux.v22.recovery.approved")!;
+  assert.deepEqual((approved.metadata as Row).acceptedUnknownUsageAttemptIds, [attemptId]);
+  assert.equal(world.usageAcceptances.length, 1);
+  assert.equal(world.usageAcceptances[0]!.attemptId, attemptId);
+  assert.equal(world.usageAcceptances[0]!.source, "recovery_approval");
+  assert.equal(world.usageAcceptances[0]!.acceptedByUserId, "owner-1");
+  assert.equal(world.usageAcceptances[0]!.authorizationAuditLogId, approved.id);
 });
 test("inspection replay is exact and a reused ID cannot name another revision", async () => {
   reset(); const service = await load(); await requestInspection(); await requestInspection();
@@ -1418,6 +1433,11 @@ test("one click: verified evidence after the consent opens exactly one capped at
   const applied = world.audits.find((row) => row.action === "amux.v22.recovery.preapproval_applied")!;
   assert.equal((applied.metadata as Row).systemActor, "amux-v22-recovery-preapproval");
   assert.equal((applied.metadata as Row).preApprovalId, pre.id);
+  // The applied consent accepts the earlier unknown-usage attempt for its owner.
+  assert.deepEqual((applied.metadata as Row).acceptedUnknownUsageAttemptIds, [attemptId]);
+  assert.deepEqual(world.usageAcceptances.map((row) => [row.attemptId, row.source,
+    row.acceptedByUserId, row.authorizationAuditLogId]),
+  [[attemptId, "recovery_approval", "owner-1", applied.id]]);
   const authority = await service.readAmuxV22RecoveryAuthority(tx as never, "task-1234", 9);
   assert.equal(authority?.id, read.approvalId);
   assert.deepEqual(world.attempt, old);

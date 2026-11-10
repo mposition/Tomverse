@@ -866,6 +866,10 @@ const REGISTRY = {
     reason:
       "The durable board lifecycle: backlog, todo, doing, review, done, blocked, cancelled. Backlog is catalog-only and cannot be dispatched; the scheduler and execution boundary still select only literal todo. A separately approved promotion, not this schema migration, may move a card from backlog to todo. The database remains the complete closed vocabulary.",
   },
+  AmuxV22AttemptUsageAcceptance_source_check: {
+    owner: "database",
+    reason: "owner_accept, recovery_approval, review_retry: which owner act accepted an attempt's unknown usage (owner decision 2026-11-10). The server sets it in the transaction of that act's audit, and the row's guard checks the audit each value names; no request carries it.",
+  },
   AmuxV22LaneDecision_lane_check: {
     owner: "list",
     module: "lib/amux/v22WorkerClaimCore.ts",

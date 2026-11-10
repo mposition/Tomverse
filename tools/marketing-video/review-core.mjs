@@ -16,6 +16,8 @@
 import { MODEL_FAMILIES } from "./concepts-core.mjs";
 
 export const VERDICTS = ["pass", "fix", "reject"];
+export const MAX_FIXES = 10;
+export const MAX_FIX_LENGTH = 500;
 export const BOX_ROLES = ["headline", "screen", "cta"];
 
 const isNumber = (value, min, max) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
@@ -51,8 +53,12 @@ export function checkReview(answerText, { stage, concept, locale }) {
   if (Object.keys(answer).sort().join(",") !== keys) return { problem: `keys must be exactly ${keys}` };
   if (answer.id !== concept.id) return { problem: `id must be ${concept.id}` };
   if (!VERDICTS.includes(answer.verdict)) return { problem: `verdict is one of ${VERDICTS.join(", ")}` };
-  if (!Array.isArray(answer.fixes) || answer.fixes.length > 8 || !answer.fixes.every((fix) => typeof fix === "string" && fix.trim() && fix.length <= 300)) {
-    return { problem: "fixes: at most 8 strings of 300 characters" };
+  // The prompt asks for at most 8 one-sentence fixes; this is the hard limit,
+  // wide enough for a reviewer that writes a little more (the first box run,
+  // 2026-11-10, lost two reviews at 300 characters) and still small enough that
+  // an edit prompt stays under the 8000 characters higgsfield-cap.mjs allows.
+  if (!Array.isArray(answer.fixes) || answer.fixes.length > MAX_FIXES || !answer.fixes.every((fix) => typeof fix === "string" && fix.trim() && fix.length <= MAX_FIX_LENGTH)) {
+    return { problem: `fixes: at most ${MAX_FIXES} strings of ${MAX_FIX_LENGTH} characters` };
   }
   if (answer.verdict === "fix" && answer.fixes.length === 0) return { problem: "a fix verdict lists what to fix" };
 

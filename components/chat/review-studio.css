@@ -145,7 +145,11 @@
 :is([data-chat-composer="studio"], [data-review-composer="studio"]) :is([data-testid="composer-actions-row"], [data-testid="composer-primary-tools"], [data-testid="composer-submit-actions"]) { gap:4px; }
 @media(max-width:767px) and (min-width:241px) {
   /* Tools, web-search chip and model picker share the row with voice/Send: they shrink (chip label truncates) instead of pushing the submit actions onto a second row. */
-  [data-chat-composer="studio"] [data-testid="composer-primary-tools"] { flex:1 1 0; flex-wrap:nowrap; }
+  /* ...but only while the row is at least 15rem wide. The query is in rem, so at 200% text (a 32px root) on a 320px phone the row wraps as in Classic, instead of squeezing the chip label to nothing (#3577). */
+  [data-chat-composer="studio"] [data-testid="composer-actions-row"] { container:composer-actions / inline-size; }
+  @container composer-actions (min-width:15rem) {
+    [data-chat-composer="studio"] [data-testid="composer-primary-tools"] { flex:1 1 0; flex-wrap:nowrap; }
+  }
 }
 [data-review-appearance="studio"] [data-testid="desktop-image-workspace"] { border-radius:28px; background:var(--review-canvas); }
 [data-review-appearance="studio"] [data-testid="desktop-image-workspace"]>div:last-child { width:100%; }

@@ -89,6 +89,8 @@ export type ChatImageIntentContext = {
     previousImagePrompt: string | null;
     attachedPhoto: boolean;
     prompt: string;
+    /** Exact bounded message, to share it with the combined router when equal. */
+    message?: string;
     maxOutputTokens: number;
     timeoutMs: number;
 };
@@ -141,16 +143,26 @@ export const CHAT_IMAGE_ROUTING_CRITERIA = [
     "Give simple requests a cheaper or faster model and complex ones a stronger, pricier model. Use only a preset the chosen model lists.",
 ].join("\n");
 
-export const CHAT_IMAGE_INTENT_SYSTEM = [
+export const buildChatImageIntentSystem = (options: {
+    combined?: boolean;
+    followUp?: boolean;
+    attachedPhoto?: boolean;
+} = {}) => [
     "You route messages sent to a chat assistant that cannot draw.",
     "A separate image generator exists. Decide whether this message asks for a new image to be created and, if it does, which image model and preset should make it.",
     "",
     CHAT_IMAGE_ROUTING_CRITERIA,
     "",
-    "A \"Previous image\" section, when present, is the prompt that made the last image in this conversation. A message that asks to change, redo or vary that image -- its colour, style, subject, details, composition or quality, e.g. \"make it bluer\", \"now as a watercolour\", \"add a hat\", \"regenerate this image in high quality\" -- is image=true: a new image is made from a new prompt. Then write prompt: the complete prompt for the new image, the previous prompt with the change applied, in the previous prompt's language, at most 1500 characters -- shorten the unchanged parts if needed, never the change. In every other case prompt is an empty string.",
-    "An \"Attached photo\" section, when present, means the user sent a photo with this message and the listed models can edit it. A message that asks to change that photo -- resize, move, remove, add or recolour something in it, change its style or background, while keeping the rest -- is image=true and edit=true; the message itself is the edit instruction, so prompt is an empty string. A question about the photo, or a request to describe, analyse, translate or read it, is image=false. Without that section edit is always false.",
-    "When image=false, fill modelId and preset with any listed value; they are ignored.",
+    options.followUp === false ? "No previous image is available. Set prompt to an empty string." :
+        "A \"Previous image\" section, when present, is the prompt that made the last image in this conversation. A message that asks to change, redo or vary that image -- its colour, style, subject, details, composition or quality, e.g. \"make it bluer\", \"now as a watercolour\", \"add a hat\", \"regenerate this image in high quality\" -- is image=true: a new image is made from a new prompt. Then write prompt: the complete prompt for the new image, the previous prompt with the change applied, in the previous prompt's language, at most 1500 characters -- shorten the unchanged parts if needed, never the change. In every other case prompt is an empty string.",
+    options.attachedPhoto === false ? "No editable photo is attached. Set edit to false." :
+        "An \"Attached photo\" section, when present, means the user sent a photo with this message and the listed models can edit it. A message that asks to change that photo -- resize, move, remove, add or recolour something in it, change its style or background, while keeping the rest -- is image=true and edit=true; the message itself is the edit instruction, so prompt is an empty string. A question about the photo, or a request to describe, analyse, translate or read it, is image=false. Without that section edit is always false.",
+    options.combined
+        ? "Return imageIntent=null when image=false; do not choose unused image fields. When image=true return the imageIntent object. These image rules apply only to imageIntent, not the chat modelId or rewrite."
+        : "When image=false, fill modelId and preset with any listed value; they are ignored.",
 ].join("\n");
+
+export const CHAT_IMAGE_INTENT_SYSTEM = buildChatImageIntentSystem();
 
 /** The message the model sees: trimmed and capped. Empty means no call. */
 export const chatImageIntentPrompt = (text: string): string =>
@@ -162,7 +174,9 @@ export const chatImageIntentUserMessage = (
     candidates: readonly ChatImageModelCandidate[],
     previousImagePrompt: string | null = null,
     /** The message carries a photo the listed models can edit. */
-    attachedPhoto = false
+    attachedPhoto = false,
+    /** Combined routing shares the exact same message from its JSON input. */
+    sharedMessage = false
 ): string =>
     [
         "Image models (credits per 1024x1024 image, by preset):",
@@ -185,8 +199,7 @@ export const chatImageIntentUserMessage = (
         ...(attachedPhoto
             ? ["Attached photo:", "The user attached a photo to this message.", ""]
             : []),
-        "Message:",
-        chatImageIntentPrompt(text),
+        ...(sharedMessage ? ["Message: use the message field in the routing JSON above."] : ["Message:", chatImageIntentPrompt(text)]),
     ].join("\n");
 
 export const chatImageIntentOutputSchema = (

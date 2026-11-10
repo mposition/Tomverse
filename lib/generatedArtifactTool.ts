@@ -251,7 +251,9 @@ const HANDLERS: Record<ArtifactKind, KindHandler> = {
       "quotes, code); the application writes the file. For PDF amount or numeric " +
       "table columns, set pdfNumberColumns to their zero-based indices and supply " +
       "numeric cells as numbers for grouped, right-aligned display. Keep identifiers " +
-      "and exact authored strings as strings. Never write file " +
+      "and exact authored strings as strings. For PDF tables, set " +
+      "pdfColumnWeights to match the content: give description columns more " +
+      "space than short item labels and amounts (for example [1, 4, 1]). Never write file " +
       "bytes, base64 or a download link yourself.",
   },
   presentation: {
