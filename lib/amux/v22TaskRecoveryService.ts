@@ -137,19 +137,38 @@ function readOnlyRetryExecutorKind(protocolCapabilities: string[]) {
       configuredAmuxV22ReadOnlyApiMetadata()) return AMUX_V22_READ_ONLY_API_EXECUTOR_KIND;
   return null;
 }
+/** A writer reads the runtime FOR SHARE, and takes that lock before the audit
+ * chain (lockRecoveryRuntimesForShare). The read-back that only renders the
+ * recovery card reads it without a lock: inside a writer it runs after the
+ * audit append, where a new runtime lock would invert the order. */
 async function currentRuntime(tx: Prisma.TransactionClient, inspection: {
   workerName: string; workerInstanceId: string; workerGeneration: number },
-  requiredReadOnlyExecutor?: "read_only_retry_v1" | "read_only_api_retry_v1") {
-  const rows = await tx.$queryRaw<Array<{
-    instanceId: string; generation: number; protocolCapabilities: string[];
-  }>>`SELECT "instanceId", "generation", "protocolCapabilities" FROM "AmuxWorkerRuntime"
-    WHERE "workerName" = ${inspection.workerName} FOR SHARE`;
+  requiredReadOnlyExecutor?: "read_only_retry_v1" | "read_only_api_retry_v1",
+  options: { lock: boolean } = { lock: true }) {
+  type RuntimeRow = { instanceId: string; generation: number; protocolCapabilities: string[] };
+  const rows = options.lock ? await tx.$queryRaw<RuntimeRow[]>`SELECT "instanceId", "generation",
+    "protocolCapabilities" FROM "AmuxWorkerRuntime"
+    WHERE "workerName" = ${inspection.workerName} FOR SHARE` :
+    await tx.$queryRaw<RuntimeRow[]>`SELECT "instanceId", "generation",
+    "protocolCapabilities" FROM "AmuxWorkerRuntime"
+    WHERE "workerName" = ${inspection.workerName}`;
   const runtime = rows[0];
   return runtime && runtime.instanceId === inspection.workerInstanceId &&
     runtime.generation === inspection.workerGeneration &&
     (!requiredReadOnlyExecutor ||
       readOnlyRetryExecutorKind(runtime.protocolCapabilities) === requiredReadOnlyExecutor) ?
     runtime : null;
+}
+
+/** Worker runtime rows a writer will read FOR SHARE, locked before the audit
+ * chain (lib/adminAudit.ts takeAuditChainLock): a heartbeat locks its runtime
+ * row and then appends its audit entry. */
+async function lockRecoveryRuntimesForShare(tx: Prisma.TransactionClient,
+  workerNames: readonly string[]) {
+  const names = [...new Set(workerNames)].sort();
+  if (names.length === 0) return;
+  await tx.$queryRaw`SELECT "workerName" FROM "AmuxWorkerRuntime"
+    WHERE "workerName" = ANY(${names}::text[]) ORDER BY "workerName" FOR SHARE`;
 }
 
 function apiExecutionBinding(input: {
@@ -1045,8 +1064,7 @@ export function reportAmuxV22RecoveryEvidence(input: AmuxV22RecoveryEvidenceInpu
     // Lock order (lib/adminAudit.ts takeAuditChainLock): the worker runtime
     // row read below, then the audit chain, then the Task, as the owner's
     // inspection request takes them.
-    await tx.$queryRaw`SELECT "workerName" FROM "AmuxWorkerRuntime"
-      WHERE "workerName" = ${inspection.workerName} FOR SHARE`;
+    await lockRecoveryRuntimesForShare(tx, [inspection.workerName]);
     await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, inspection.taskId);
     let reason = amuxV22RecoveryProofReason(input, task.taskRole!);
@@ -1530,7 +1548,7 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
               profile.profileConfigDigest !== scope.profileConfigDigest) ||
           !amuxV22ReadOnlyLaunchScopeMatchesIntent(nominalScope.data, scope) ||
           amuxV22ReadOnlyLaunchScopeDigest(nominalScope.data) !== launchCheck.launchScopeDigest ||
-          !await currentRuntime(tx, launchCheck, executorKind) || fenced.size > 0;
+          !await currentRuntime(tx, launchCheck, executorKind, { lock: false }) || fenced.size > 0;
         if (launchBindingChanged) {
           launchCurrent = false;
           cost = null;
@@ -1542,7 +1560,7 @@ async function readRecoveryInTransaction(tx: Prisma.TransactionClient, ownerId: 
             inspection.requestKind, !!inspection.riskAcceptanceId))) {
         state = "unverified"; reason = "evidence_stale";
       } else if (evidence?.verified && !journalProvenReport(evidence.report) &&
-          !await currentRuntime(tx, inspection)) {
+          !await currentRuntime(tx, inspection, undefined, { lock: false })) {
         state = "unverified"; reason = "runtime_observation_unverified";
       }
     } catch {
@@ -1701,6 +1719,15 @@ async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: D
         configured.workerNames.every((name, index) => name === profile.workerNames[index]) &&
         await lockSafeStopProfileRuntime(tx, profile);
     }
+    // The runtimes this approval reads below: an inspection's worker, and the
+    // FIRST Task's read-only launch worker (named by the launch proof).
+    const plannedLaunchProof = input.launchProofId ?
+      await tx.amuxV22ReadOnlyLaunchProof.findUnique({ where: { id: input.launchProofId } }) : null;
+    const plannedLaunchCheck = plannedLaunchProof ?
+      await tx.amuxV22ReadOnlyLaunchCheck.findUnique({ where: { id: plannedLaunchProof.launchCheckId } }) : null;
+    await lockRecoveryRuntimesForShare(tx, [
+      ...(inspection?.requestKind === "inspect" ? [inspection.workerName] : []),
+      ...(plannedLaunchCheck ? [plannedLaunchCheck.workerName] : [])]);
     await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);
