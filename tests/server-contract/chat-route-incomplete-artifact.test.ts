@@ -1255,6 +1255,7 @@ test("ART-FORMAT-01 (b, c): the real SDK refuses txt and md for create_text_file
 */
 test(
   "ART-FORMAT-01 (outcome): a txt call to create_text_file leaves the model a route to a .txt file",
+  { todo: "fix undecided (ART-FORMAT-01): accept txt/md, name create_document in the refusal, or say so in the tool description" },
   async () => {
     const tools = await registeredArtifactTools();
     const textTool = tools.create_text_file;

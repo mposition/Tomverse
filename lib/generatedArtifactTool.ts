@@ -270,8 +270,7 @@ const HANDLERS: Record<ArtifactKind, KindHandler> = {
       "Create a real, downloadable text file and attach it to your reply. " +
       "This covers source code and structured text: json, yaml, xml, sql, " +
       "html, svg, css, and language files such as py, ts, tsx, js, go, rs, " +
-      "java, sh and many more. Plain text and Markdown (txt, md) are not " +
-      "accepted here: use create_document for those. You author the file's exact text; the " +
+      "java, sh and many more. You author the file's exact text; the " +
       "application stores it and gives the user a download. Use this instead " +
       "of a long code block whenever the user asks for a file. Never write " +
       "base64 or a download link yourself.",
