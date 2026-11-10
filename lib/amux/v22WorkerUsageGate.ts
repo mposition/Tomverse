@@ -38,6 +38,15 @@ import { AMUX_V52_REVIEW_REJECTED_TWICE_REASON } from "./v52ReviewCore.ts";
  * The same holds for a finished run the v52 review server rejected twice
  * (outcome succeeded, reason review_server_rejected_twice, with its reject
  * record), which the owner may also retry (owner decision 2026-11-07).
+ *
+ * An attempt the owner accepted as unknown is left out for every Task (owner
+ * decision 2026-11-10; lib/amux/v22AttemptUsageAcceptance.ts): by itself from
+ * the card's execution history, or with a recovery approval, one-click
+ * pre-approval or review retry of its Task, which accepts all of that Task's
+ * earlier unknown attempts. Before this only archiving released one, and
+ * Admin archives only every card at once, so from 2026-11-09 19:54 AEST the
+ * three implement workers stayed refused. The attempt's cap, cost and usage
+ * rows are unchanged; only this gate stops counting it.
  */
 export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
   workerName: string, priorAttemptId: string | null, taskId: string): Promise<boolean> {
@@ -50,6 +59,8 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
       AND a."endedAt" IS NOT NULL
       AND w."sourceSystem" = 'admin-idea-v4'
       AND w."archivedAt" IS NULL
+      AND NOT EXISTS (SELECT 1 FROM "AmuxV22AttemptUsageAcceptance" x
+        WHERE x."attemptId" = a."id")
       AND (NOT EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" u
            WHERE u."attemptId" = a."id")
         OR EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" u
