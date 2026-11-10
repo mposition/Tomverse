@@ -325,6 +325,9 @@ run(
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
+    // An owner usage acceptance and a review resolution on one Task at once
+    // both finish: each takes the audit chain lock before the Task row.
+    "tests/integration/amux-review-audit-lock-order.db.test.ts",
     "tests/integration/amuxV4PrlessReviewGuard.db.test.mjs",
     // Explicit intake registration writes one backlog card, one body-free
     // draft, one consumed approval and one audit row, and leaves execution

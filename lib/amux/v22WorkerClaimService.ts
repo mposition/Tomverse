@@ -3,7 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR } from
   "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
@@ -112,6 +112,13 @@ async function claimCandidate(taskId: string, assignmentId: string,
       if (incident.blocks_admission) throw new BoardImportError("incident_blocked", 409);
       const halt = await findOpenAmuxOrchestratorHalt(tx);
       if (halt) throw new BoardImportError("orchestrator_halted", 409);
+      // Lock order (lib/adminAudit.ts takeAuditChainLock): worker runtimes,
+      // then the audit chain, then the Task. The route is chosen below, so
+      // every runtime row is locked here; the admission lock above already
+      // serializes claims, and the chosen worker's row is locked again below.
+      await tx.$queryRaw`SELECT "workerName" FROM "AmuxWorkerRuntime"
+        ORDER BY "workerName" FOR UPDATE`;
+      await takeAuditChainLock(tx);
       const locked = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${taskId} FOR UPDATE`;
       if (locked.length !== 1) throw new BoardImportError("not_unassigned_todo", 409);

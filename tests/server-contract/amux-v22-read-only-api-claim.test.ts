@@ -89,6 +89,7 @@ mock.module(mod("lib/prisma.ts"), { namedExports: {
   prisma: { $transaction: async (work: (client: unknown) => unknown) => work(tx) },
 } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+  takeAuditChainLock: async () => {},
   writeSystemAuditLog: async (input: { metadata?: Record<string, unknown> }) => {
     assignedRoutePrice = input.metadata?.routePrice;
     return "assignment-audit";

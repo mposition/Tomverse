@@ -21,6 +21,7 @@ const guestAttachmentFormats = Object.values(chatAttachmentExtensionsByGroup({ g
 export const infoPages = {
   faq: {
   "ko": {
+    "keepWords": true,
     mobileAccordion: true,
     "eyebrow": "FAQ",
     "title": "자주 묻는 질문",

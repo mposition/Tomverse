@@ -145,6 +145,7 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
     }),
 } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+  takeAuditChainLock: async () => {},
   writeSystemAuditLog: async () => { auditWrites += 1; return "audit-one"; },
 } });
 mock.module(mod("lib/amux/incident.ts"), { namedExports: {
