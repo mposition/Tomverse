@@ -134,7 +134,8 @@ async function writeRewriteOptimizerAutomation(
  */
 export async function loadRewriteDecisions(): Promise<RewriteOptimizerDecision[]> {
     const rows = await prisma.autoRouterDecision.findMany({
-        where: { outcome: "picked", version: { contains: "+rewrite" }, routerContext: { not: null } },
+        where: { outcome: "picked", version: { contains: "+rewrite" }, routerContext: { not: null },
+            NOT: { version: { contains: "+image-intent-" } } },
         orderBy: { createdAt: "desc" },
         take: AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX * SAMPLE_READ_FACTOR,
         select: {

@@ -3317,8 +3317,14 @@ export function ChatInput({
             contextualSuggestion &&
             contextualModel &&
             contextualProfile && (
-              <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-900/60 dark:bg-amber-950/20">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              // The card sits inside whatever column holds the composer: the
+              // full-width dock, a phone, or desktop Studio's ~330px left
+              // column. Its row layout keys off that column (`@container`),
+              // not the viewport -- a viewport `sm:` breakpoint put the
+              // buttons beside the text in a 330px column, squeezing the copy
+              // to one word per line and pushing the send button off-screen.
+              <div className="@container mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/60 dark:bg-amber-950/20">
+                <div className="flex flex-col gap-2 @lg:flex-row @lg:items-center @lg:gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-zinc-900 dark:text-white">
                       {t(
@@ -3327,7 +3333,7 @@ export function ChatInput({
                           : "modelFinder.contextualTitleDeep"
                       )}
                     </p>
-                    <p className="mt-1 text-[11px] leading-5 text-zinc-600 dark:text-zinc-300">
+                    <p className="mt-0.5 text-[11px] leading-4 text-zinc-600 dark:text-zinc-300">
                       {t("modelFinder.contextualCreditNotice")
                         .replace(
                           "{category}",
@@ -3338,7 +3344,7 @@ export function ChatInput({
                         .replace("{credits}", String(contextualProfile.credits))}
                     </p>
                   </div>
-                  <div className="flex shrink-0 gap-2">
+                  <div className="flex min-w-0 flex-wrap gap-2 @lg:shrink-0 @lg:flex-nowrap">
                     <button
                       type="button"
                       onClick={() => {
@@ -3354,7 +3360,7 @@ export function ChatInput({
                           }
                         );
                       }}
-                      className="rounded-xl bg-amber-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-amber-500"
+                      className="max-w-full whitespace-normal break-words rounded-xl bg-amber-600 px-3 py-1.5 text-left text-[11px] font-bold text-white hover:bg-amber-500"
                     >
                       {t("modelFinder.contextualUse").replace(
                         "{model}",
@@ -3366,7 +3372,7 @@ export function ChatInput({
                       onClick={() =>
                         setDismissedSuggestionKey(contextualSuggestion.key)
                       }
-                      className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-[11px] font-bold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-zinc-950 dark:text-amber-200"
+                      className="max-w-full whitespace-normal break-words rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-left text-[11px] font-bold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-zinc-950 dark:text-amber-200"
                     >
                       {t("modelFinder.contextualContinue")}
                     </button>

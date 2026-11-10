@@ -4649,6 +4649,9 @@ async function handleChatPost(
                                   queryLength: event.queryLength,
                                   resultCount: event.resultCount,
                                   durationMs: event.durationMs,
+                                  reused: event.reused,
+                                  toolCallIndex: event.toolCallIndex,
+                                  batchSize: event.batchSize,
                                   timestamp: new Date().toISOString(),
                               })
                           );

@@ -1356,7 +1356,24 @@ export function PricingPageContent() {
         <div className="mx-auto max-w-4xl text-center">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className={`mt-4 text-4xl font-bold leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
-          <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
+          <p className={`mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${lang === "en" ? "hidden sm:block" : ""}`}>{content.description}</p>
+          {lang === "en" && <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300 sm:hidden">Compare monthly prices and AI credits, then open a plan’s purchase options.</p>}
+          {lang === "en" && <section aria-label="Quick plan comparison" data-testid="pricing-mobile-plan-summary" className="mt-7 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-left dark:border-zinc-800 dark:bg-zinc-900/40 sm:hidden">
+            <h2 className="px-1 text-lg font-bold">Compare plans at a glance</h2>
+            <p className="mt-2 px-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">Regular monthly prices. Annual billing and offers are in plan options.</p>
+            <ul className="mt-3 divide-y divide-zinc-200 dark:divide-zinc-800">
+              {content.plans.map(plan => {
+                const planId = plan.name.toLowerCase() as "free" | "pro" | "max";
+                return <li key={planId} className="flex min-w-0 flex-wrap items-center justify-between gap-2 py-3">
+                  <div className="min-w-0 flex-1 basis-32">
+                    <h3 className="text-base font-bold">{plan.name} <span className="ml-1 text-sm">{billing.formatPlanPrice(planId) || plan.price}</span></h3>
+                    <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{billing.planLimits(planId).monthlyCredits.toLocaleString("en-US")} monthly credits</p>
+                  </div>
+                  <a href={`#pricing-plan-name-${planId}`} aria-label={`View ${plan.name} plan options`} className="inline-flex min-h-11 shrink-0 items-center rounded-lg bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">View options</a>
+                </li>;
+              })}
+            </ul>
+          </section>}
           {featuredPromotion ? (
           <div className="mx-auto mt-6 max-w-3xl overflow-hidden rounded-3xl border border-accent-promotion-400/40 bg-gradient-to-br from-accent-promotion-400/15 via-blue-500/10 to-transparent p-1 text-left shadow-2xl shadow-accent-promotion-950/10">
             <div className="rounded-[1.35rem] bg-white/80 px-5 py-4 backdrop-blur dark:bg-zinc-950/75">
@@ -1533,7 +1550,7 @@ export function PricingPageContent() {
                   </span>
                 )}
               </div>
-              <h2 id={`pricing-plan-name-${planId}`} className={`mt-4 text-3xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h2>
+              <h2 id={`pricing-plan-name-${planId}`} tabIndex={lang === "en" ? -1 : undefined} className={`mt-4 scroll-mt-24 text-3xl font-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${displayHeadingClass(lang)}`}>{plan.name}</h2>
               <p className={`mt-3 min-h-14 text-sm leading-6 ${plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>
                 {plan.description}
               </p>
