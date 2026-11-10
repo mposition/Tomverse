@@ -107,7 +107,13 @@ ignores `1`). Each run home holds a custom agent (`amux-v22-read` or
 that list is the only limit applied before a tool runs: `search_web` ran
 under a permission deny. Session `--settings` deny URL and MCP actions, and
 for a read role commands and writes too. A checkout with `.agents/` or
-`.gemini/` is refused before the CLI starts.
+`.gemini/` is refused before the CLI starts, and again after the base sync.
+The file tools run in the CLI process, not in the jail. They stay inside the
+workspace only in agy's default `request-review` mode: a read outside it
+(absolute path, `../`, or a committed symlink, which agy resolves first)
+asks, and print mode refuses the ask. This was measured on agy 1.5.4 with a
+canary beside the sign-in copy, and all three reads were denied. The parser
+therefore refuses a stream whose `init` reports any other `permission_mode`.
 
 The bridge asks its fixed worker socket at most every five minutes, after
 renewing active execution leases. It forwards only the worker, provider,

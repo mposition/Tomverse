@@ -171,7 +171,8 @@ test("the stager copies the operator's Antigravity login with its refresh token,
   const copy = JSON.parse(inspected.copy.toString("utf8"));
   assert.ok(copy.token.refresh_token.startsWith("1//synthetic-refresh-"));
   assert.equal(copy.id_token_email, undefined);
-  assert.equal(inspected.expiresAt, Date.parse("2026-11-10T10:40:30.969839658Z"));
+  // The copy refreshes itself, so it carries no expiry to report.
+  assert.equal(inspected.expiresAt, null);
   // Google's access token lasts an hour: an expired one is still staged.
   assert.ok(inspectAmuxV22WorkerAuth("antigravity", Buffer.from(login()),
     Date.parse("2026-12-01T00:00:00Z")).copy.length > 0);
@@ -247,6 +248,17 @@ test("the stream settles from its result; a tool outside the role's list is neve
     { valid: false, reason: "event:tool_use" });
   assert.deepEqual(parseAmuxV22ChannelOutput("antigravity", jsonl(init),
     { exitCode: 0, role: "implement" }), { valid: false, reason: "no_result" });
+  // The file tools stay in the workspace only in request-review mode.
+  for (const events of [[result()], [{ ...init, init: { ...init.init, permission_mode: "auto" } },
+    result()], [{ ...init, init: { ...init.init, permission_mode: "always-proceed" } }, result()],
+  [step({ step_type: "user_input" }), init, result()]])
+    assert.deepEqual(parseAmuxV22ChannelOutput("antigravity", jsonl(...events),
+      { exitCode: 0, role: "implement" }), { valid: false, reason: "permission_mode" });
+  // A line that is not a JSON object is refused before any field is read.
+  for (const line of ["not json", "[1]", "null"])
+    assert.deepEqual(parseAmuxV22ChannelOutput("antigravity",
+      `${JSON.stringify(init)}\n${line}\n${JSON.stringify(result())}\n`,
+      { exitCode: 0, role: "implement" }), { valid: false, reason: "non_object_line" });
   // A finished run that failed is a known failure, not an unknown outcome.
   const failed = parseAmuxV22ChannelOutput("antigravity", jsonl(init,
     result({ status: "ERROR", response: "" })), { exitCode: 1, role: "implement" });
