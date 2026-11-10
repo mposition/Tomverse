@@ -230,7 +230,8 @@ activate them or change the production location-intent switch enabled earlier.
   The same tool/session handles presearch and all later model queries: five
   searches total, exact-query reuse, the same backend, sources, notices and billing.
   At least three slots remain for dependent facts. The answer model receives the
-  results as a matched tool-call/tool-result pair, with untrusted-source notices,
+  results as application-collected, untrusted reference text appended to the
+  unchanged question parts, with source notices,
   and retains every normal tool. Empty/invalid plans and errors use normal tools.
   Presearch evidence uses at most 2,400 of the existing 6,000 result tokens,
   leaving three-fifths for follow-up evidence; it is never
@@ -239,7 +240,10 @@ activate them or change the production location-intent switch enabled earlier.
   inherited by a replacement attempt, and existing search-turn recovery policy
   is unchanged. An outer failure retains incurred/uncertain backend cost even
   before an answer-model stream exists: all-successful reads settle the exact
-  count; incomplete backend responses conservatively retain the hold. Manifests include the tool payload digests.
+  count; incomplete backend responses conservatively retain the hold. Manifests include the evidence text digests. No synthetic assistant tool
+  history or provider reasoning signatures are fabricated. This also supports
+  providers whose Chat Completions endpoint rejects inserted tool calls
+  ([DeepSeek documentation](https://api-docs.deepseek.com/guides/tool_calls/)).
 
 `locationIntentMs` and `refinerPrepareMs` now overlap for eligible parallel turns;
 never add them to estimate elapsed time. `presearchMs` is inside server pre-provider

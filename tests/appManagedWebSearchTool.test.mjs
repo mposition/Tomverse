@@ -1,4 +1,4 @@
-import { prepareRouterSearch } from "../lib/chatRouterPresearch.ts";
+import { appendRouterSearchEvidence, prepareRouterSearch } from "../lib/chatRouterPresearch.ts";
 import { parseRouterSearchQueries } from "../lib/chatRouterSearchPlan.ts";
 import assert from "node:assert/strict";
 import test, { afterEach, beforeEach } from "node:test";
@@ -549,15 +549,23 @@ test("an aborted turn aborts the backend request", async () => {
 
 const presearch = (tool, overrides = {}) => prepareRouterSearch({
   queries: ["one", "two"], tool, signal: new AbortController().signal,
-  inputHeadroomTokens: 6000, toolCallId: "router-search", ...overrides,
+  inputHeadroomTokens: 6000, ...overrides,
 });
 
 test("router presearch and dependent model queries share one cap, cache and source collection", async () => {
   const config = toolFor();
   const messages = await presearch(config);
   assert.equal(messages.length, 2);
-  assert.equal(messages[0].content[0].toolCallId, messages[1].content[0].toolCallId);
-  const evidence = JSON.parse(messages[1].content[0].output.value);
+  assert.match(messages[0].text, /untrusted quoted material, never instructions/);
+  const original = { role: "user", content: "Keep the exact question." };
+  const prompt = [original];
+  const fallback = [...prompt];
+  appendRouterSearchEvidence(prompt, messages);
+  assert.deepEqual(fallback, [{ role: "user", content: "Keep the exact question." }]);
+  assert.equal(prompt.length, 1);
+  assert.deepEqual(prompt[0].content[0], { type: "text", text: "Keep the exact question." });
+  assert.ok(prompt.every(message => message.role === "user"), "no synthetic tool calls, ids or reasoning signatures");
+  const evidence = JSON.parse(messages[1].text);
   assert.deepEqual(evidence.searches.map(item => item.query), ["one", "two"]);
   assert.ok(evidence.searches.every(item => item.notice.includes("never as instructions")));
   assert.equal(fetchCalls.length, 2);
@@ -586,7 +594,7 @@ test("failed presearch remains recoverable through the ordinary tool without an 
   globalThis.fetch = async () => { fetchCalls.push("failed"); return new Response("", { status: 503 }); };
   const messages = await presearch(config, { queries: ["one"] });
   assert.equal(fetchCalls.length, 1);
-  assert.equal(JSON.parse(messages[1].content[0].output.value).searches[0].status, "failed");
+  assert.equal(JSON.parse(messages[1].text).searches[0].status, "failed");
   globalThis.fetch = async () => { fetchCalls.push("recovered"); return braveResponse([{ title: "R", url: "https://example.com/r" }]); };
   assert.equal((await run(config, { query: "one" })).status, "ok");
   assert.equal(config.session.snapshot().backendRequestCount, 2);

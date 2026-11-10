@@ -39,8 +39,8 @@ const run = async (parallel, round) => {
   let evidence;
   if (parallel) {
     const messages = await prepareRouterSearch({ queries: ["one", "two"], tool,
-      signal: new AbortController().signal, inputHeadroomTokens: 6000, toolCallId: "fixture" });
-    evidence = JSON.parse(messages[1].content[0].output.value);
+      signal: new AbortController().signal, inputHeadroomTokens: 6000 });
+    evidence = JSON.parse(messages[1].text);
   } else {
     calls.modelPasses++; await delay(45); // Model asks for the initial batched search.
     evidence = await tool.search({ query: ["one", "two"] });

@@ -1,4 +1,4 @@
-import { prepareRouterSearch } from "@/lib/chatRouterPresearch";
+import { appendRouterSearchEvidence, prepareRouterSearch } from "@/lib/chatRouterPresearch";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
@@ -4953,9 +4953,8 @@ async function handleChatPost(
                     signal: req.signal,
                     inputHeadroomTokens: contextInputTokens - reservationOnlyInputTokens -
                         toReservedInputTokens(inputEstimate.breakdown()) - TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
-                    toolCallId: `router_search_${traceId}`,
                 });
-                formattedMessages.push(...evidence);
+                appendRouterSearchEvidence(formattedMessages, evidence);
             } finally { finishPresearch(); }
         }
         const { messages: sdkMessages, instructions: sdkInstructions } =
@@ -4966,8 +4965,6 @@ async function handleChatPost(
                 ? message.content.map((part) =>
                       part.type === "text"
                           ? { type: "text" as const, text: part.text }
-                          : part.type === "tool-call" || part.type === "tool-result"
-                            ? { type: "text" as const, text: JSON.stringify(part) }
                           : part.type === "file"
                             ? {
                                   type: "file" as const,

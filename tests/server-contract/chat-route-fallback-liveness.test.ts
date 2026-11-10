@@ -3650,7 +3650,12 @@ test("router presearch stays behind admission, preserves search recovery policy 
     await ask("answers", "claimed", 200, false, undefined, true, true, undefined, "always");
     assert.equal(presearchCalls.length, 2);
     assert.equal(attempts.length, 1, "the existing search-turn fallback restriction remains in force");
-    assert.ok(attempts[0].messages.some(message => message.role === "tool"));
+    assert.ok(!attempts[0].messages.some(message => message.role === "tool"));
+    const question = attempts[0].messages.find(message => message.role === "user")!;
+    assert.ok(Array.isArray(question.content));
+    assert.deepEqual(question.content[0], { type: "text", text: "이 질문에 답해 줘" });
+    assert.ok(JSON.stringify(question.content).includes("Verified fixture fact."));
+    assert.ok(JSON.stringify(question.content).includes("untrusted quoted material"));
     assert.equal(attempts[0].messages.filter(message => message.role === "user").length, 1);
 
     presearchCalls.length = 0;
