@@ -1,5 +1,9 @@
 # Review Studio
 
+Korean mode controls display `간편` / `전문가` for Easy / Professional; persisted
+values remain `easy` / `professional`. Korean product links display `채팅` / `비교`
+while their accessible names retain the Tomverse Chat / Review brands and roles.
+
 Owner approved Concept B on 2026-10-20: Figma file
 `fM4d8G9lqL8xZjFk22IQwC`, desktop frame `14:2`, mobile frame `14:4`.
 

@@ -48,9 +48,9 @@ const ALLOWED = [
     {
         fragment: 'deleteAllConfirmLabel: "확인을 위해 {phrase}를 입력하세요"',
         reason:
-            "`{phrase}` is DELETE_ALL_CONFIRMATION in components/memory/MemoryReviewSettings.tsx, " +
-            "a fixed English constant identical in every locale. It ends in a sound with no " +
-            "final consonant, so 를 is correct and stays correct as long as the constant does.",
+            "In Korean, `{phrase}` is the fixed memoryReview.deleteAllTitle value 모든 기억 삭제. " +
+            "It ends in a vowel, so 를 is correct. Other locales retain the English challenge. " +
+            "Recheck this exception if the Korean title or confirmation phrase changes.",
     },
 ];
 

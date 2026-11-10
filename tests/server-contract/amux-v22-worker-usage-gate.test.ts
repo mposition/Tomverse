@@ -104,3 +104,29 @@ test("an unarchived unknown-usage attempt still refuses the assignment", async (
   assert.equal(await amuxV22WorkerUsageUnverified(tx, "claude-chore", "prior", "task-a"), true);
   assert.deepEqual(calls[0].values.slice(0, 3), ["claude-chore", "prior", "task-a"]);
 });
+
+// Owner decision 2026-11-10: an attempt the owner accepted as unknown (alone,
+// or with an owner-approved retry of its Task) no longer holds its worker.
+test("an attempt with an owner usage acceptance is left out for every Task", async () => {
+  const { amuxV22WorkerUsageUnverified } = await import(mod("lib/amux/v22WorkerUsageGate.ts"));
+  const { calls, tx } = capture([]);
+  await amuxV22WorkerUsageUnverified(tx, "codex-impl", null, "task-a");
+  const { sql } = calls[0];
+  assert.match(sql, /AND NOT EXISTS \(SELECT 1 FROM "AmuxV22AttemptUsageAcceptance" x WHERE x\."attemptId" = a\."id"\)/);
+  // The acceptance is not tied to the claimed Task: it sits outside the
+  // owner-retry exemption, which binds only the Task's own attempt.
+  assert.ok(sql.indexOf('"AmuxV22AttemptUsageAcceptance"') < sql.indexOf("AND NOT COALESCE("));
+});
+
+test("the Task's unknown-usage list uses the gate's rule and skips accepted attempts", async () => {
+  const { amuxV22TaskUnknownUsageAttemptIds } = await import(mod("lib/amux/v22AttemptUsageAcceptance.ts"));
+  const { calls, tx } = capture([{ id: "attempt-1" }, { id: "attempt-2" }]);
+  assert.deepEqual(await amuxV22TaskUnknownUsageAttemptIds(tx as never, "task-a"),
+    ["attempt-1", "attempt-2"]);
+  const { sql, values } = calls[0];
+  assert.deepEqual(values, ["task-a"]);
+  assert.match(sql, /WHERE a\."taskId" = \? AND a\."endedAt" IS NOT NULL AND w\."sourceSystem" = 'admin-idea-v4'/);
+  assert.match(sql, /NOT EXISTS \(SELECT 1 FROM "AmuxCliUsageEvent" u WHERE u\."attemptId" = a\."id"\)/);
+  assert.match(sql, /u\."completeness" <> 'reported_complete'/);
+  assert.match(sql, /AND NOT EXISTS \(SELECT 1 FROM "AmuxV22AttemptUsageAcceptance" x WHERE x\."attemptId" = a\."id"\)/);
+});
