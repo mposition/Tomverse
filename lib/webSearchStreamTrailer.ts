@@ -7,6 +7,7 @@ import {
   parseChatStreamArtifacts,
   type ChatStreamArtifact,
 } from "@/lib/generatedArtifactCore";
+import type { ArtifactUnavailableNotice } from "@/lib/generatedArtifactToolPolicy";
 
 // A provider-executed search tool call only resolves once the whole
 // streamText() turn settles (tool-result/source parts only exist in the
@@ -51,6 +52,7 @@ export type ChatStreamTrailer = {
    * is exactly right for a turn that had none.
    */
   artifacts?: ChatStreamArtifact[];
+  artifactUnavailable?: ArtifactUnavailableNotice;
 };
 
 export function buildChatStreamTrailerChunk(trailer: ChatStreamTrailer): string {
@@ -81,7 +83,8 @@ export function parseChatStreamTrailer(
   if (
     !("searchMetadata" in record) &&
     !("completion" in record) &&
-    !("artifacts" in record)
+    !("artifacts" in record) &&
+    !("artifactUnavailable" in record)
   ) {
     return { searchMetadata: parsed };
   }
@@ -91,6 +94,23 @@ export function parseChatStreamTrailer(
       ? (completion as Record<string, unknown>)
       : null;
   const artifacts = parseChatStreamArtifacts(record.artifacts);
+  const notice = record.artifactUnavailable;
+  const noticeRecord = notice && typeof notice === "object" && !Array.isArray(notice)
+    ? (notice as Record<string, unknown>)
+    : null;
+  const artifactUnavailable: ArtifactUnavailableNotice | null =
+    noticeRecord &&
+    (noticeRecord.reason === "model_unverified" ||
+      noticeRecord.reason === "native_search_conflict")
+      ? {
+          reason: noticeRecord.reason,
+          ...(noticeRecord.reason === "model_unverified" &&
+          typeof noticeRecord.suggestedModelId === "string" &&
+          noticeRecord.suggestedModelId.length > 0
+            ? { suggestedModelId: noticeRecord.suggestedModelId }
+            : {}),
+        }
+      : null;
   return {
     searchMetadata: record.searchMetadata ?? null,
     ...(completionRecord && isChatCompletionStatus(completionRecord.status)
@@ -104,6 +124,7 @@ export function parseChatStreamTrailer(
         }
       : {}),
     ...(artifacts ? { artifacts } : {}),
+    ...(artifactUnavailable ? { artifactUnavailable } : {}),
   };
 }
 

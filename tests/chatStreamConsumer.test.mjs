@@ -573,3 +573,22 @@ test("a settled turn leaves no timer armed, on every path", async () => {
   // `finally` is then a no-op rather than the thing that saves it.
   assert.equal(timedOut.pendingCount(), 0);
 });
+
+
+test("consumer exposes only validated artifact unavailable notices from a fragmented trailer", async () => {
+  for (const reason of ["model_unverified", "native_search_conflict", "unknown"]) {
+    const notice = { reason, ...(reason === "model_unverified" ? { suggestedModelId: "first" } : {}) };
+    const wire = "Answer" + buildChatStreamTrailerChunk({ searchMetadata: null, artifactUnavailable: notice });
+    const reader = new ReadableStream({
+      start(controller) {
+        for (const character of wire) controller.enqueue(new TextEncoder().encode(character));
+        controller.close();
+      },
+    }).getReader();
+    const result = await consumeChatStream({ reader,
+      liveness: { noteKeepalive() {}, noteVisibleChunk() {} }, onProgress() {},
+    });
+    assert.equal(result.displayText, "Answer");
+    assert.deepEqual(result.artifactUnavailable, reason === "unknown" ? undefined : notice);
+  }
+});

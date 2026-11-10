@@ -208,3 +208,29 @@ test("an old client reading a new trailer still gets its citations", () => {
   assert.deepEqual(parsed.searchMetadata, execution);
   assert.equal(parsed.completion.status, "incomplete");
 });
+
+
+test("artifact unavailable notices round trip and validate optional model suggestions", () => {
+  for (const notice of [
+    { reason: "model_unverified", suggestedModelId: "first" },
+    { reason: "model_unverified" },
+    { reason: "native_search_conflict" },
+  ]) {
+    const { searchMetadataJson } = splitSearchMetadataTrailer(buildChatStreamTrailerChunk({
+      searchMetadata: null, artifactUnavailable: notice,
+    }));
+    assert.deepEqual(parseChatStreamTrailer(searchMetadataJson).artifactUnavailable, notice);
+  }
+  for (const notice of [null, [], "model_unverified", {}, { reason: "unknown" }]) {
+    const trailer = parseChatStreamTrailer(JSON.stringify({ artifactUnavailable: notice }));
+    assert.deepEqual(trailer, { searchMetadata: null });
+  }
+  for (const suggestedModelId of [null, 123, "", {}]) {
+    assert.deepEqual(parseChatStreamTrailer(JSON.stringify({ artifactUnavailable: {
+      reason: "model_unverified", suggestedModelId,
+    } })).artifactUnavailable, { reason: "model_unverified" });
+  }
+  assert.deepEqual(parseChatStreamTrailer(JSON.stringify({ artifactUnavailable: {
+    reason: "native_search_conflict", suggestedModelId: "first",
+  } })).artifactUnavailable, { reason: "native_search_conflict" });
+});

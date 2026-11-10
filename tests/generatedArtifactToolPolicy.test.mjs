@@ -5,6 +5,7 @@ import { APP_DEFAULTS } from "../lib/appDefaults.ts";
 import { ENABLED_MODELS } from "../lib/models.ts";
 import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
 import {
+  artifactUnavailableNotice,
   ARTIFACT_TOOL_CAPABILITIES,
   getArtifactToolSupport,
   nativeSearchBlocksArtifactTool,
@@ -387,4 +388,22 @@ test("the prompt never states a bare per-answer file limit", () => {
   // The old wording was "3 files per answer", which is the sentence a model
   // read as "you cannot make ten documents".
   assert.equal(/\d+ files per answer/.test(prompt), false);
+});
+
+
+test("artifact unavailable notices require a file request and an actionable off reason", () => {
+  const input = { requiresFileGeneration: true, fileCapableModelIds: ["first", "second"] };
+  for (const mode of ["generate", "sign_in_required", "off"]) {
+    for (const offReason of [undefined, "model_unverified", "native_search_conflict", "no_conversation", "not_a_chat_conversation"]) {
+      const candidate = { ...plan(), mode, offReason };
+      assert.equal(artifactUnavailableNotice(candidate, { ...input, requiresFileGeneration: false }), null);
+      const expected = mode !== "off" ? null
+        : offReason === "model_unverified" ? { reason: offReason, suggestedModelId: "first" }
+        : offReason === "native_search_conflict" ? { reason: offReason } : null;
+      assert.deepEqual(artifactUnavailableNotice(candidate, input), expected);
+    }
+  }
+  assert.deepEqual(artifactUnavailableNotice({ ...plan(), mode: "off", offReason: "model_unverified" }, {
+    ...input, fileCapableModelIds: [],
+  }), { reason: "model_unverified" });
 });

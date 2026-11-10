@@ -116,6 +116,35 @@ export type ArtifactToolPlan = {
   systemPrompt: string;
 };
 
+export type ArtifactUnavailableNotice = {
+  reason: "model_unverified" | "native_search_conflict";
+  suggestedModelId?: string;
+};
+
+/** A structured notice only for a file request blocked by model capabilities. */
+export const artifactUnavailableNotice = (
+  plan: ArtifactToolPlan,
+  input: {
+    requiresFileGeneration: boolean;
+    fileCapableModelIds: readonly string[];
+  }
+): ArtifactUnavailableNotice | null => {
+  if (
+    !input.requiresFileGeneration ||
+    plan.mode !== "off" ||
+    (plan.offReason !== "model_unverified" &&
+      plan.offReason !== "native_search_conflict")
+  ) return null;
+
+  const suggestedModelId = input.fileCapableModelIds[0];
+  return {
+    reason: plan.offReason,
+    ...(plan.offReason === "model_unverified" && suggestedModelId
+      ? { suggestedModelId }
+      : {}),
+  };
+};
+
 export type ArtifactToolPlanInput = {
   modelId: string;
   provider: string;

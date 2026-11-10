@@ -31,7 +31,7 @@ import { mcpProgressFromStream, type McpProgressState } from "@/lib/mcpConnector
 import { splitStreamKeepaliveSignal } from "@/lib/chatStreamKeepalive";
 import { splitArtifactProgressSignal } from "@/lib/generatedArtifactProgressSignal";
 import { splitRoutingRetrySignal } from "@/lib/routingRetrySignal";
-import { splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
+import { parseChatStreamTrailer, splitSearchMetadataTrailer, type ChatStreamTrailer } from "@/lib/webSearchStreamTrailer";
 import type { ChatTimeoutErrorCode } from "@/lib/chatStreamLiveness";
 
 export type ChatStreamProgress = {
@@ -46,6 +46,7 @@ export type ChatStreamProgress = {
 };
 
 export type ChatStreamResult = ChatStreamProgress & {
+  artifactUnavailable?: ChatStreamTrailer["artifactUnavailable"];
   /** The trailer's raw JSON, for `parseChatStreamTrailer`. */
   searchMetadataJson: string | null;
   /**
@@ -151,8 +152,10 @@ export const consumeChatStream = async (input: {
       splitArtifactProgressSignal(finalKeepalive.text).text
     );
 
+  const artifactUnavailable = parseChatStreamTrailer(searchMetadataJson)?.artifactUnavailable;
   return {
     displayText: chatStreamDisplayText(rawStreamText),
+    ...(artifactUnavailable ? { artifactUnavailable } : {}),
     retryingWithModelId,
     isGeneratingArtifact,
     generatingArtifactFormat,
