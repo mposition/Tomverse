@@ -298,6 +298,8 @@ export const zh = {
         onGuestMode: "访客模式已启用",
         guestModeMessage: "在访客模式下，所有聊天信息保存在你的浏览器中，不会记录到服务器。",
         guestModeLimitMessage: "（每天 50 免费积分，由所选模型共同分摊）",
+        guestCreditsUsed: "访客额度已用 {used}/{limit}",
+        guestCreditsShared: "每日访客额度由所有已选模型共享。",
         guestComparisonsRemaining: "今天还可以比较约 {count} 次",
         aiAssistant: "AI 助手",
         you: "我",
