@@ -535,7 +535,7 @@ test("router search preparation uses one priced call and malformed suggestions p
     for (const queries of [["one", "two"], ["one", "two", "three"], [42]]) {
       routerRequests.length = 0; holds.length = 0;
       generateRouterResult = () => ({ output: { ...routerOutput, searchQueries: queries }, usage: { inputTokens: 100, outputTokens: 30 } });
-      const result = await pick(undefined, false, { searchPlan: true });
+      const result = await pick(undefined, { searchPlan: true });
       assert.equal(routerRequests.length, 1);
       assert.equal(routerRequests[0].maxOutputTokens, 440);
       assert.match(String(routerRequests[0].system), /searchQueries/);
