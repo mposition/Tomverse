@@ -220,6 +220,7 @@ export const ENGINEERING_AGENT_AUDIT_ACTIONS = Object.freeze({
   workItemExpired: "engineering_agent.work_item_expired",
   capabilityIssued: "engineering_agent.capability_issued",
   t2Decided: "engineering_agent.t2_decision",
+  v22DraftRejudged: "engineering_agent.v22_draft_rejudged",
   decisionAcknowledged: "engineering_agent.decision_acknowledged",
   bindingRecorded: "engineering_agent.binding_recorded",
   bindingReplaced: "engineering_agent.binding_replaced",
@@ -1409,6 +1410,56 @@ export async function decideEngineeringAgentT2Draft(
   });
   await tx.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: input.decision } });
   return { approvalId: approval.id, auditLogId };
+}
+
+/**
+ * A person asks for a v22 draft's tier to be read again: a draft the tier
+ * round kept private (its patch could not be read as a candidate then, say)
+ * becomes `tier_pending` again, so the publisher's next round judges it with
+ * the code it runs now. Nothing is published here; that round repeats every
+ * gate (the switch, the v22 latch, the card's public PR consent, the queue
+ * room, the tier). Only an open v22 draft from a run that started under `t1`
+ * qualifies, bound to the digest and base the person saw. The route has
+ * checked the permission and the step-up.
+ */
+export async function rejudgeEngineeringAgentV22Draft(
+  tx: EngineeringAgentTransaction,
+  input: {
+    session: Session;
+    request?: Request;
+    workItemId: string;
+    patchDigest: string;
+    baseSha: string;
+  },
+): Promise<{ auditLogId: string }> {
+  humanActorId(input.session);
+  const item = await lockWorkItem(tx, input.workItemId);
+  if (item.kind !== "t2_draft" || item.state !== "open") refuse("draft_not_open");
+  if (item.patchDigest !== input.patchDigest || item.baseSha !== input.baseSha) refuse("draft_changed");
+  const draft = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: item.id },
+    select: { reason: true, patchBody: true,
+      run: { select: { modeAtStart: true, amuxAttemptId: true,
+        card: { select: { sourceSystem: true } } } } },
+  });
+  if (!draft.run || draft.run.card.sourceSystem !== "admin-idea-v4" ||
+      !draft.run.amuxAttemptId || draft.run.modeAtStart !== "t1" ||
+      draft.patchBody === null) refuse("draft_not_v22");
+  if (draft.reason === ENGINEERING_AGENT_V22_TIER_PENDING_REASON) refuse("draft_already_pending");
+  const auditLogId = await writeAdminAuditLog({
+    session: input.session,
+    request: input.request,
+    action: ENGINEERING_AGENT_AUDIT_ACTIONS.v22DraftRejudged,
+    targetType: "engineering_agent_work_item",
+    targetId: item.id,
+    summary: `${ENGINEERING_AGENT_AUDIT_ACTIONS.v22DraftRejudged} ${item.id}`,
+    metadata: { previousReason: draft.reason, patchDigest: input.patchDigest,
+      baseSha: input.baseSha },
+    tx,
+  });
+  await tx.engineeringAgentWorkItem.update({ where: { id: item.id },
+    data: { reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON } });
+  return { auditLogId };
 }
 
 /** A person has seen a decision item. The route has checked permission and step-up. */

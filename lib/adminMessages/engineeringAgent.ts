@@ -22,6 +22,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     patch: "Patch (text only; nothing here is applied or run)",
     approve: "Approve",
     reject: "Reject",
+    rejudge: "Judge again",
     acknowledge: "Acknowledge",
     mismatchNote:
       "A state mismatch halts the agent until a person acts. Both sides are locked and read again before any action; neither is corrected to match the other.",
@@ -76,6 +77,8 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     signInAgain: "Sign in again to continue",
     reauthenticationRequired: "This needs a recent sign-in.",
     confirmApprove: "Approve this draft? It binds to the digest and base shown.",
+    confirmRejudge:
+      "Have the next publisher round read this draft again? Nothing is published here; every switch, the card consent and the tier are checked again.",
     confirmReject: "Reject this draft?",
   },
   ko: {
@@ -98,6 +101,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     patch: "Patch (텍스트만 표시하며, 여기서 적용하거나 실행하지 않습니다)",
     approve: "승인",
     reject: "거절",
+    rejudge: "다시 판정",
     acknowledge: "확인",
     mismatchNote:
       "상태 불일치는 사람이 조치할 때까지 에이전트를 정지시킵니다. 어떤 조치든 양쪽을 잠그고 다시 읽은 뒤에만 실행되며, 한쪽을 다른 쪽에 맞춰 고치지 않습니다.",
@@ -152,6 +156,8 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     signInAgain: "다시 로그인하고 계속하기",
     reauthenticationRequired: "최근 로그인이 필요합니다.",
     confirmApprove: "이 초안을 승인할까요? 표시된 digest와 base에 결속됩니다.",
+    confirmRejudge:
+      "다음 게시 라운드가 이 초안을 다시 판정하게 할까요? 여기서는 아무것도 게시하지 않으며, 스위치·카드 공개 동의·tier를 모두 다시 확인합니다.",
     confirmReject: "이 초안을 거절할까요?",
   },
 });
