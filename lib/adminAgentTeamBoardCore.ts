@@ -10,7 +10,7 @@
  * rule 8). Nothing here names what a team produced.
  */
 import type { adminAgentPageMessages } from "@/lib/adminMessages/agentPage";
-import type { AgentOfficeLiveRooms } from "@/lib/agentOffice/live";
+import { routingCapReached, routingGateRejected, type AgentOfficeLiveRooms } from "@/lib/agentOffice/live";
 import type { AdminPixelTeam } from "@/lib/adminPixelAvatarPalette";
 import type { AdminTone } from "@/lib/adminUiCore";
 
@@ -253,8 +253,11 @@ export function teamBoardCards(
       const rest: Partial<Draft> = { cost, lastAt: state.last?.createdAt ?? null };
       if (state.last === null) return make("idle", status.preparing, "idle", a.routingNone, rest);
       if (state.last.status === "running") return make("info", status.working, "running", a.routingRunning, rest);
+      if (routingCapReached(state)) return make("warn", status.needsLook, "running", a.routingCap, rest);
       if (state.last.status === "passed") return make("ok", status.watching, "running", a.routingPassed, rest);
-      return make("warn", status.needsLook, "running", a.routingFailed, rest);
+      // The gate turning a proposal down is the cycle working as designed.
+      if (routingGateRejected(state.last)) return make("ok", status.watching, "running", a.routingKept, rest);
+      return make("warn", status.needsLook, "running", state.last.status === "error" ? a.routingError : a.routingFailed, rest);
     })(),
     amux: (() => {
       const state = rooms.amux;

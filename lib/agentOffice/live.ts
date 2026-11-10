@@ -49,6 +49,7 @@
  */
 
 import type { DeptStatus } from "@/lib/agentOffice/sim";
+import type { OptimizerFailure } from "@/lib/autoRouterOptimizerCore";
 import { aestStamp } from "@/lib/agentOffice/time";
 
 export type AgentOfficeSlotState = "ok" | "failed" | "missing" | "duplicate";
@@ -970,28 +971,67 @@ export function routingCapReached(state: Extract<AgentOfficeRoutingState, { kind
 }
 
 /**
- * The routing room's colour. A read that failed, a failed or errored latest
- * cycle and a spend cap reached need a look; a cycle running is working; a
- * passed one is done; no cycle on record is waiting.
+ * For each code a `failed` cycle can carry: true when the promotion gate
+ * judged the proposal and turned it down, so the current guidance simply
+ * stays; false when the cycle stopped before it could judge. A Record, so a
+ * new optimizer failure code cannot compile until it is sorted here.
+ */
+const ROUTING_GATE_REJECTION: Readonly<Record<OptimizerFailure, boolean>> = {
+  candidate_invalid: true,
+  too_few_cases: true,
+  too_many_unrouted: true,
+  too_few_decided: true,
+  evidence_below: true,
+  win_share_below: true,
+  credits_above: true,
+  // The cycle ran out of its own budget mid-run: nothing was judged, and a
+  // recurring one means the cycle cannot finish within its budget.
+  budget_exhausted: false,
+};
+
+type RoutingLast = NonNullable<Extract<AgentOfficeRoutingState, { kind: "observed" }>["last"]>;
+
+/**
+ * Whether the latest cycle is the gate's normal "no": a failed cycle with a
+ * known gate code. An unknown or missing code is not assumed to be one.
+ */
+export function routingGateRejected(last: Pick<RoutingLast, "status" | "failure">): boolean {
+  if (last.status !== "failed" || last.failure === null) return false;
+  return Object.hasOwn(ROUTING_GATE_REJECTION, last.failure) && ROUTING_GATE_REJECTION[last.failure as OptimizerFailure];
+}
+
+/**
+ * The routing room's colour. A read that failed, an errored latest cycle, a
+ * failed one that stopped before judging and a spend cap reached need a look;
+ * a cycle running is working; a passed one, and one whose proposal the gate
+ * turned down (the current guidance stays, as designed), is done; no cycle on
+ * record is waiting.
  */
 export function routingTone(state: AgentOfficeRoutingState): DeptStatus {
   if (state.kind === "unread") return "attention";
   if (routingCapReached(state)) return "attention";
   if (!state.last) return "waiting";
   if (state.last.status === "running") return "working";
-  if (state.last.status === "passed") return "done";
+  if (state.last.status === "passed" || routingGateRejected(state.last)) return "done";
   return "attention";
 }
 
 type RoutingCopy = {
-  badges: Record<AgentOfficeRoutingCycleStatus | "none" | "unread" | "cap", string>;
+  badges: Record<AgentOfficeRoutingCycleStatus | "rejected" | "none" | "unread" | "cap", string>;
   targets: Record<AgentOfficeRoutingTarget, string>;
   unread: string;
   none: string;
   running: (target: string, time: string) => string;
   passed: (target: string, time: string) => string;
-  failed: (target: string, time: string, code: string) => string;
-  error: (target: string, time: string, code: string) => string;
+  /** The gate turned the proposal down and the current guidance stays. */
+  rejected: (target: string, time: string) => string;
+  /** Failed without a gate verdict (stopped mid-run, or an unknown code). */
+  failed: (target: string, time: string) => string;
+  error: (target: string, time: string) => string;
+  /** The optimizer screen's sentence for each failure code; a code it lacks is shown as itself. */
+  reasons: Readonly<Record<string, string>>;
+  /** Where the full reason and comparisons are. */
+  whereToLook: string;
   /** The cap that is reached, then what has been spent against it. */
   capReached: (cap: "day" | "month") => string;
   spend: (spent: string, cap: string, period: "day" | "month") => string;
@@ -1010,26 +1050,31 @@ export function routingLiveDept(state: AgentOfficeRoutingState, copy: RoutingCop
   const last = state.last;
   const target = last ? copy.targets[last.target] : "";
   const time = last ? aestStamp(last.status === "running" ? last.createdAt : (last.finishedAt ?? last.createdAt)) : "";
-  const code = last?.failure ?? "unknown";
+  const rejected = last ? routingGateRejected(last) : false;
   const line = !last
     ? copy.none
     : last.status === "running"
       ? copy.running(target, time)
       : last.status === "passed"
         ? copy.passed(target, time)
-        : last.status === "failed"
-          ? copy.failed(target, time, code)
-          : copy.error(target, time, code);
+        : rejected
+          ? copy.rejected(target, time)
+          : last.status === "failed"
+            ? copy.failed(target, time)
+            : copy.error(target, time);
 
   const facts: string[] = [];
   if (cap) facts.push(copy.capReached(cap));
+  if (last && (last.status === "failed" || last.status === "error")) {
+    facts.push(labelOrCode(copy.reasons, last.failure ?? "unknown"), copy.whereToLook);
+  }
   facts.push(copy.spend(usd(state.spentTodayMicroUsd), usd(state.dayCapMicroUsd), "day"));
   facts.push(copy.spend(usd(state.spentMonthMicroUsd), usd(state.monthCapMicroUsd), "month"));
   facts.push(state.lastPromotedAt ? copy.lastPromotion(aestStamp(state.lastPromotedAt)) : copy.noPromotion);
 
   return {
     status,
-    badge: cap ? copy.badges.cap : last ? copy.badges[last.status] : copy.badges.none,
+    badge: cap ? copy.badges.cap : rejected ? copy.badges.rejected : last ? copy.badges[last.status] : copy.badges.none,
     line,
     detail: facts.join(" · "),
     revision: last ? `${last.status}@${last.createdAt}@${last.finishedAt ?? ""}` : "none",
