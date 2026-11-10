@@ -4,8 +4,15 @@ import test from "node:test";
 import type { ReactNode } from "react";
 
 import {
+  AMUX_CLI_MODEL_LINK_NONE,
   AmuxCliModelIssueChips,
+  AmuxCliModelLinkForm,
   AmuxWorkerCapabilityEditor,
+  amuxCliModelLinkOffered,
+  runAmuxCliModelLink,
+  type AmuxCliModelLinkChange,
+  type AmuxCliModelLinkIo,
+  type AmuxCliModelLinkUpdate,
   runAmuxWorkerCapabilityEdit,
   runAmuxWorkerCapabilityImport,
   type AmuxWorkerCapabilityImport,
@@ -20,7 +27,7 @@ import {
 } from "@/lib/amux/workerCapabilityCore";
 import { AMUX_WORKER_REGISTRY_V31_SEED } from "@/lib/amux/workerRegistryCore";
 import { amuxWorkerCapabilityFormFromRow, type AmuxWorkerCapabilityForm } from "@/lib/amux/workerCapabilityEditCore";
-import { buildAmuxCliModelCatalogAdminView } from "@/lib/amux/cliModelCatalogCore";
+import { amuxCliModelStatus, buildAmuxCliModelCatalogAdminView } from "@/lib/amux/cliModelCatalogCore";
 
 // The fixtures' names start with their CLI; the registry no longer reads it from them.
 const amuxWorkerProviderClassOf = (name: string) =>
@@ -228,4 +235,186 @@ test("with no listed names for its CLI, the model stays a text input while it is
     assert.equal(input.maxLength, 160, model);
     assert.equal(input.value, model);
   }
+});
+
+// ---------------------------------------------------------------------------
+// The price link: a CLI model name linked to the Admin › Models entry that
+// prices it (owner decision 2026-10-27). The production case of 2026-11-10:
+// the Cursor workers' names match no entry, so each is "no price".
+
+const SEEN = "2026-11-10T00:00:00.000Z";
+const cursorCatalog = (links: Array<{ cliModel: string; pricedModelId: string | null }> = []) =>
+  buildAmuxCliModelCatalogAdminView({
+    observed: ["auto", "composer-2.5", "grok-4.7-high"].map((cliModel) => ({
+      cli: "cursor", cliModel, displayName: null, listed: true, lastSeenAt: SEEN,
+    })),
+    links: links.map((link) => ({ cli: "cursor" as const, ...link })),
+    registry: [
+      { id: "grok-4-7", name: "Grok 4.7", apiModel: "grok-4.7", provider: "xai",
+        catalogDeleted: false, enabled: true, status: "enabled", replacementModelId: null },
+      { id: "composer-2", name: "Composer 2", apiModel: "composer-2", provider: "cursor",
+        catalogDeleted: false, enabled: false, status: "disabled", replacementModelId: null },
+      { id: "grok-4-6", name: "Grok 4.6", apiModel: "grok-4.6", provider: "xai",
+        catalogDeleted: true, enabled: true, status: "enabled", replacementModelId: "grok-4-7" },
+      { id: "claude-sonnet-5", name: "Claude Sonnet 5", apiModel: "claude-sonnet-5", provider: "anthropic",
+        catalogDeleted: false, enabled: true, status: "enabled", replacementModelId: null },
+    ],
+  });
+
+const renderLink = (
+  cliModels: ReturnType<typeof cursorCatalog>,
+  cliModel: string,
+  choice: string | null = null,
+  extra: Partial<{ busy: boolean; writesLatch: boolean }> = {},
+) => {
+  const saved: AmuxCliModelLinkChange[] = [];
+  const tree = AmuxCliModelLinkForm({
+    m, cliModels, cli: "cursor", cliModel, choice,
+    busy: extra.busy ?? false, writesLatch: extra.writesLatch ?? true,
+    onChoose: () => {}, onSave: (change) => saved.push(change),
+  });
+  const submit = () => {
+    const form = propsOf(tree).find((props) => props["data-testid"] === "amux-cli-model-link")!;
+    (form.onSubmit as (event: { preventDefault: () => void }) => void)({ preventDefault: () => {} });
+  };
+  return { tree, saved, submit };
+};
+const optionValues = (tree: ReactNode) => {
+  const select = byTestId(tree, "amux-cli-model-link-select")[0]!;
+  return propsOf(select.children as ReactNode).filter((props) => "value" in props).map((props) => props.value);
+};
+
+test("each Cursor name with no price is offered the link form, with every entry not retired, the usable ones first", () => {
+  const catalog = cursorCatalog();
+  for (const cliModel of ["auto", "composer-2.5", "grok-4.7-high"]) {
+    assert.deepEqual(amuxCliModelStatus(catalog, "cursor", cliModel).issues, ["unpriced"], cliModel);
+    assert.equal(amuxCliModelLinkOffered(catalog, "cursor", cliModel), true, cliModel);
+    const { tree } = renderLink(catalog, cliModel);
+    // Unchosen first, the enabled entries, then the disabled one, then unlink; the retired one is not offered.
+    assert.deepEqual(optionValues(tree), ["", "claude-sonnet-5", "grok-4-7", "composer-2", AMUX_CLI_MODEL_LINK_NONE]);
+    assert.equal(textOf(byTestId(tree, "amux-cli-model-link-current")[0]!.children as ReactNode), m.link.currentNone);
+    assert.equal(byTestId(tree, "amux-cli-model-link-save")[0]!.disabled, true, "nothing is chosen yet");
+  }
+  assert.match(textOf(byTestId(renderLink(catalog, "auto").tree, "amux-cli-model-link-select")[0]!.children as ReactNode), /Composer 2 \(composer-2\) · off/);
+  // A priced, unlinked model is not offered the form.
+  assert.equal(amuxCliModelLinkOffered(CATALOG, "claude", "claude-sonnet-5"), false);
+  assert.equal(amuxCliModelLinkOffered(catalog, "cursor", null), false);
+});
+
+test("linking grok-4.7-high to Grok 4.7 sends one change, and once recorded the no-price chip is gone", () => {
+  const { tree, saved, submit } = renderLink(cursorCatalog(), "grok-4.7-high", "grok-4-7");
+  assert.equal(byTestId(tree, "amux-cli-model-link-save")[0]!.disabled, false);
+  submit();
+  assert.deepEqual(saved, [{ cli: "cursor", cliModel: "grok-4.7-high", pricedModelId: "grok-4-7" }]);
+  // Held while busy or with writes off.
+  for (const extra of [{ busy: true }, { writesLatch: false }]) {
+    const held = renderLink(cursorCatalog(), "grok-4.7-high", "grok-4-7", extra);
+    assert.equal(byTestId(held.tree, "amux-cli-model-link-save")[0]!.disabled, true);
+    held.submit();
+    assert.deepEqual(held.saved, []);
+  }
+  const linked = cursorCatalog([{ cliModel: "grok-4.7-high", pricedModelId: "grok-4-7" }]);
+  assert.deepEqual(amuxCliModelStatus(linked, "cursor", "grok-4.7-high").issues, []);
+  assert.equal(AmuxCliModelIssueChips({ m, cliModels: linked, cli: "cursor", model: "grok-4.7-high" }), null);
+  // The form stays for a linked name, shows the link, and holds a save of the same value.
+  assert.equal(amuxCliModelLinkOffered(linked, "cursor", "grok-4.7-high"), true);
+  const again = renderLink(linked, "grok-4.7-high");
+  assert.equal(textOf(byTestId(again.tree, "amux-cli-model-link-current")[0]!.children as ReactNode), "Linked now to Grok 4.7 (grok-4-7).");
+  assert.equal(byTestId(again.tree, "amux-cli-model-link-select")[0]!.value, "grok-4-7");
+  assert.equal(optionValues(again.tree).includes(""), false);
+  assert.equal(byTestId(again.tree, "amux-cli-model-link-save")[0]!.disabled, true);
+  // The others are still unpriced until linked.
+  assert.deepEqual(amuxCliModelStatus(linked, "cursor", "auto").issues, ["unpriced"]);
+});
+
+test("unlinking sends a null price and says AMUX then hands it no Tasks", () => {
+  const linked = cursorCatalog([{ cliModel: "composer-2.5", pricedModelId: "grok-4-7" }]);
+  const { tree, saved, submit } = renderLink(linked, "composer-2.5", AMUX_CLI_MODEL_LINK_NONE);
+  assert.equal(byTestId(tree, "amux-cli-model-link-none-help").length, 1);
+  submit();
+  assert.deepEqual(saved, [{ cli: "cursor", cliModel: "composer-2.5", pricedModelId: null }]);
+  const held = cursorCatalog([{ cliModel: "composer-2.5", pricedModelId: null }]);
+  const shown = renderLink(held, "composer-2.5");
+  assert.equal(byTestId(shown.tree, "amux-cli-model-link-select")[0]!.value, AMUX_CLI_MODEL_LINK_NONE);
+  assert.equal(textOf(byTestId(shown.tree, "amux-cli-model-link-current")[0]!.children as ReactNode), m.link.currentHeld);
+  // A link to an entry retired since stays visible as what is recorded.
+  const stale = cursorCatalog([{ cliModel: "auto", pricedModelId: "grok-4-6" }]);
+  assert.equal(optionValues(renderLink(stale, "auto").tree).at(-2), "grok-4-6");
+});
+
+const LINK: AmuxCliModelLinkChange = { cli: "cursor", cliModel: "grok-4.7-high", pricedModelId: "grok-4-7" };
+const linkReceipt = (change: AmuxCliModelLinkChange) =>
+  json(200, { action: "amux.cli_model.link", eventId: "e-1", ...change });
+const runLink = async (
+  answer: (change: AmuxCliModelLinkChange) => Promise<Response>,
+  readResult: AmuxWorkerCapabilityAdminView | null = VIEW,
+) => {
+  const updates: AmuxCliModelLinkUpdate[] = [];
+  const posted: AmuxCliModelLinkChange[] = [];
+  let reads = 0;
+  const io: AmuxCliModelLinkIo = {
+    post: async (change) => { posted.push(change); return answer(change); },
+    read: async () => { reads += 1; return readResult; },
+    failureOf: async () => FAILURE,
+    networkFailure: () => FAILURE,
+  };
+  const saved = await runAmuxCliModelLink(LINK, io, (changes) => updates.push(changes));
+  const last = <K extends keyof AmuxCliModelLinkUpdate>(key: K) => [...updates].reverse().find((changes) => key in changes)?.[key];
+  return { saved, posted, reads, last };
+};
+
+test("a link is sent once, receipt-checked, and the catalog is read back", async () => {
+  const done = await runLink((change) => Promise.resolve(linkReceipt(change)));
+  assert.equal(done.saved, true);
+  assert.deepEqual(done.posted, [LINK]);
+  assert.equal(done.reads, 1);
+  assert.equal(done.last("notice"), "done");
+  assert.equal(done.last("view"), VIEW);
+  assert.equal(done.last("pending"), false);
+});
+
+for (const [label, answer] of [
+  ["a receipt for another name", () => Promise.resolve(linkReceipt({ ...LINK, cliModel: "auto" }))],
+  ["a receipt with another price", () => Promise.resolve(linkReceipt({ ...LINK, pricedModelId: null }))],
+  ["a receipt for another action", () => Promise.resolve(json(200, { ...LINK, action: "amux.worker.capability", eventId: "e" }))],
+  ["an unknown outcome", () => Promise.resolve(json(503, { error: "outcome_unknown" }))],
+  ["a gateway error", () => Promise.resolve(json(502, {}))],
+  ["no answer", () => Promise.reject(new TypeError("fetch failed"))],
+] as const) {
+  test(`a link with ${label}: the outcome is unknown, it is read back and not sent again`, async () => {
+    const { saved, posted, reads, last } = await runLink(answer);
+    assert.equal(saved, false);
+    assert.equal(posted.length, 1);
+    assert.equal(reads, 1);
+    assert.equal(last("notice"), "outcome_unknown");
+  });
+}
+
+test("a refused link says why; a stale step-up or a failed write is a failure that wrote nothing", async () => {
+  for (const code of ["model_not_found", "no_change", "capability_writes_off"] as const) {
+    const { saved, posted, last } = await runLink(() => Promise.resolve(json(409, { error: code })));
+    assert.equal(saved, false, code);
+    assert.equal(posted.length, 1, code);
+    assert.equal(last("notice"), "stopped", code);
+    assert.equal(last("refusal"), code);
+    assert.ok(m.link.refused[code], code);
+  }
+  for (const response of [
+    () => json(428, { code: "ADMIN_REAUTHENTICATION_REQUIRED" }),
+    () => json(403, { error: "Forbidden." }),
+    () => json(503, { error: "cli_model_link_failed" }),
+  ]) {
+    const { last } = await runLink(() => Promise.resolve(response()));
+    assert.equal(last("notice"), "stopped");
+    assert.equal(last("failure"), FAILURE);
+  }
+  const unread = await runLink((change) => Promise.resolve(linkReceipt(change)), null);
+  assert.equal(unread.saved, false);
+  assert.equal(unread.last("notice"), "unread");
+});
+
+test("the link copy has the same keys in English and Korean", () => {
+  const keys = (value: object): string[] => Object.entries(value).flatMap(([key, child]) =>
+    child !== null && typeof child === "object" ? keys(child).map((sub) => `${key}.${sub}`) : [key]);
+  assert.deepEqual(keys(adminAmuxWorkerCapabilityMessages.ko.link).sort(), keys(m.link).sort());
 });
