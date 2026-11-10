@@ -56,6 +56,7 @@ type SupportCopy = {
   traceInput: string;
   messageInput: string;
   messageExample: string;
+  messageHelp?: string;
   submit: string;
   sending: string;
   success: string;
@@ -121,6 +122,7 @@ const copy: Record<Language, SupportCopy> = {
     "emailUpdatesNote": "A receipt and status updates will go to this address. Uncheck to receive no status emails.",
     "traceInput": "Trace ID or reference number, optional",
     "messageInput": "Tell us what happened and what you expected.",
+    "messageHelp": "Describe your issue in at least {min} characters.",
     "submit": "Send request",
     "sending": "Sending...",
     "success": "Support request sent.",
@@ -848,7 +850,7 @@ export function SupportPageContent() {
                     "{count}",
                     String(messageState.remaining)
                   )
-                : t("feedback.messageHelp").replaceAll(
+                : (page.messageHelp ?? t("feedback.messageHelp")).replaceAll(
                     "{min}",
                     String(FEEDBACK_MESSAGE_MIN_LENGTH)
                   )}

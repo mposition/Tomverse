@@ -90,6 +90,22 @@ test.describe("support page email updates consent", () => {
     await expect(toast).toContainText(/receipt and status updates/i);
   });
 
+  test("support message guidance describes an issue while retaining the minimum length", async ({ page }) => {
+    const feedback = await mockFeedbackApi(page);
+    const hint = page.getByTestId("support-message-hint");
+    await expect(hint).toContainText("Describe your issue in at least 5 characters.");
+    await expect(hint).not.toContainText(/feedback/i);
+    await page.getByLabel(/email address/i).fill("reporter@example.com");
+    const message = page.getByLabel(/tell us what happened/i);
+    await message.fill("abcd");
+    await expect(page.getByTestId("support-submit")).toBeDisabled();
+    await expect(hint).toContainText("Add 1 more");
+    await message.fill("abcde");
+    await expect(page.getByTestId("support-submit")).toBeEnabled();
+    await expect(hint).toContainText("Describe your issue");
+    expect(feedback.requests).toHaveLength(0);
+  });
+
   test("unchecking consent still submits, without promising emails", async ({
     page,
   }) => {
