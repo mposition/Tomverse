@@ -2,11 +2,11 @@ import { expect, test } from "@playwright/test";
 import { prepareGuestPage } from "./support/app-fixtures";
 
 for (const currency of ["USD", "AUD"] as const) {
-  test(`mobile plan summary uses current ${currency} prices and credits`, async ({ page, baseURL }) => {
+  test(`mobile plan summary uses current ${currency} prices and credits`, async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 900 });
     await prepareGuestPage(page, "en");
-    await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
-    await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
+    // No analytics cookie: pricing renders the stacked readable consent notice,
+    // which would push the plan rows out of this 900px-tall viewport.
     const plans = [
       { id: "free", name: "Free", monthlyPriceCents: 0, annualPriceCents: 0, currency: "USD", monthlyMessageLimit: 450, displayCurrency: currency, displayMonthlyPriceAmount: 0 },
       { id: "pro", name: "Pro", monthlyPriceCents: 1500, annualPriceCents: 14400, currency: "USD", monthlyMessageLimit: 3456, displayCurrency: currency, displayMonthlyPriceAmount: currency === "USD" ? 15 : 20 },

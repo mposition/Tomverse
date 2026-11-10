@@ -128,7 +128,9 @@ test("mobile analytics consent stays compact with one-row actions", async ({
   await page.route("**/api/analytics/events", (route) =>
     route.fulfill({ status: 202, body: "" })
   );
-  await page.goto("/");
+  // "/" renders the stacked, readable notice (home-english-consent-readability);
+  // the compact one-row notice applies to the other marketing routes.
+  await page.goto("/chatgpt-vs-claude?lang=en");
 
   const banner = page.getByRole("region", {
     name: "Privacy-safe product analytics",
