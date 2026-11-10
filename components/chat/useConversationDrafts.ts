@@ -1351,13 +1351,32 @@ export function useConversationDrafts(
   );
 
   const abortDraftSend = useCallback((prepared: PreparedDraftSend) => {
-    if (pendingConsumesRef.current.get(prepared.key)?.token === prepared.token) {
+    const ownedPendingConsume =
+      pendingConsumesRef.current.get(prepared.key)?.token === prepared.token;
+    if (ownedPendingConsume) {
       pendingConsumesRef.current.delete(prepared.key);
     }
     const meta = syncMetaRef.current.get(prepared.key);
+    if (!identityFenceIsCurrent(prepared.identityKey, prepared.identityEpoch)) {
+      // A returned under a fresh epoch while this send was still being
+      // prepared (the draft is now flushed alongside the context read), and
+      // that epoch's hydration froze its own metadata because this consume
+      // was pending. The send was refused before any Message transaction, so
+      // nothing will consume the row: release only the fresh object, never
+      // the detached one the old continuation captured.
+      const fence = identityFenceRef.current;
+      if (ownedPendingConsume && meta?.frozen &&
+          fence.identityKey === prepared.identityKey &&
+          meta.identityKey === fence.identityKey &&
+          meta.identityEpoch === fence.epoch) {
+        meta.frozen = false;
+        if (meta.persistedGeneration !== meta.generation) scheduleSave(prepared.key);
+        bumpSyncRevision();
+      }
+      return;
+    }
     if (!meta || meta.scopeKey !== prepared.scopeKey ||
         meta.revision !== prepared.revision ||
-        !identityFenceIsCurrent(prepared.identityKey, prepared.identityEpoch) ||
         meta.identityKey !== prepared.identityKey ||
         meta.identityEpoch !== prepared.identityEpoch) return;
     meta.frozen = false;
