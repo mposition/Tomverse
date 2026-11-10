@@ -17,5 +17,5 @@ npm ci --no-audit --no-fund --silent
 npx --yes remotion browser ensure >/dev/null
 mkdir -p job
 export PATH="$HOME/.local/bin:$PATH"
-node run-creative-short.mjs | tee -a "job/creative-$(date -u +%Y%m%d).log"
+node run-creative-short.mjs 2>&1 | tee -a "job/creative-$(date -u +%Y%m%d).log"
 exit "${PIPESTATUS[0]}"
