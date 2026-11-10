@@ -26,6 +26,7 @@ import {
   ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   ENGINEERING_AGENT_AMUX_WORKER,
   engineeringAgentAmuxAdapterPermittedNow,
+  recordEngineeringAgentMismatchReviewPullRequest,
   recordEngineeringAgentPublisherResult,
   registerEngineeringAgentWorker,
   engineeringPublishResultAttachment,
@@ -1266,6 +1267,147 @@ test("a closed adapter records a publisher's pull request on the engineering sid
     );
   } finally {
     // Whatever stopped the test, nothing of it stays open to halt the next one.
+    for (const fixture of closedAdapterFixtures) await closeClosedAdapterFixture(fixture);
+    await setMode("shadow");
+  }
+});
+
+test("a person records a bound pull request's number on its card, which closes the review_pr mismatch", async () => {
+  const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const inTx = <T>(work: Parameters<typeof runEngineeringAgentTransaction<T>>[1]) =>
+    runEngineeringAgentTransaction(prisma, work);
+  await setMode("t1");
+  try {
+    // A card that did not ask for review, as a v22 card is.
+    const fixture = await readyWorkerWithCard();
+    const runId = nextRunId();
+    const started = await startWithRun(fixture, runId);
+    const { workItemId } = await inTx((tx) =>
+      openEngineeringAgentWorkItem(tx, {
+        kind: "publish",
+        causeKey: `publish:${runId}:record-bound`,
+        runId,
+        patchBody: "patch",
+        patchDigest: sha256("patch"),
+        baseSha: sha1(runId),
+        expectedTreeId: sha1("tree"),
+      }),
+    );
+    closedAdapterFixtures.push({ runId, workItemId });
+    await inTx((tx) =>
+      issueEngineeringAgentCapability(tx, {
+        workItemId,
+        capability: {
+          baseSha: sha1(runId),
+          patchDigest: sha256("patch"),
+          expectedTreeId: sha1("tree"),
+          commit: {
+            identity: { name: "Tomverse Engineering Agent", email: "engineering-agent@users.noreply.github.com" },
+            baseCommitterDate: "1759000000 +1000",
+            runId,
+            cardRef: fixture.taskId,
+          },
+        },
+      }),
+    );
+    const settled = await withAmuxRouteBudget(
+      () =>
+        settleAmuxExecution(
+          {
+            attemptId: started.attemptId,
+            worker: fixture.worker,
+            instanceId: fixture.instanceId,
+            generation: fixture.generation,
+            taskRevision: started.taskRevision,
+            outcome: "succeeded",
+            toStatus: "review",
+            actualCostMicrousd: null,
+          },
+          engineeringRunEndAttachment({ runId, outcome: "t1_queued", halt: "none" }),
+        ),
+      ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+    );
+    assert.equal(settled.settled, true);
+    const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+
+    // The number never reached the card: the result arrived while the adapter was closed.
+    await setMode("off");
+    const prNumber = 900_000 + Math.floor(Math.random() * 90_000);
+    const result = await withExecutionApi(() =>
+      recordEngineeringAgentPublisherResult({
+        workItemId,
+        fencingToken: claim.fencingToken,
+        outcome: "confirmed",
+        pullRequest: {
+          prNumber,
+          headSha: sha1("head"),
+          verifiedHeadSha: sha1("head"),
+          snapshot: { baseSha: sha1(runId), diffDigest: sha256("diff"), treeId: sha1("tree"), invalidatedReviewIds: [] },
+        },
+      }),
+    );
+    assert.equal(result.recorded === false ? result.reason : null, "adapter_closed");
+    const mismatch = await prisma.engineeringAgentWorkItem.findFirstOrThrow({
+      where: { kind: "state_mismatch", causeKey: `review_pr:${workItemId}` },
+    });
+    const before = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+    assert.deepEqual(
+      [before.status, before.reviewPrNumber, before.requiresHumanReview, before.reviewSpecialty],
+      ["review", null, false, null],
+    );
+
+    const person = {
+      user: { id: `eng-adapter-owner-${randomUUID()}`, email: "owner@example.test" },
+      expires: new Date(Date.now() + 3_600_000).toISOString(),
+    } as Session;
+    const refusedWith = (code: string) => (error: unknown) =>
+      error instanceof EngineeringAgentStoreRefusedError && error.code === code;
+    const recordBound = () =>
+      withExecutionApi(() => recordEngineeringAgentMismatchReviewPullRequest({ session: person, workItemId: mismatch.id }));
+
+    // An adapter call: refused while the agent is off, with nothing written.
+    await assert.rejects(recordBound(), refusedWith("adapter_closed"));
+    // The engineering side alone cannot take this action: it needs AMUX's write.
+    await assert.rejects(
+      runEngineeringAgentTransaction(
+        prisma,
+        (tx) => resolveEngineeringAgentStateMismatch(tx, { session: person, workItemId: mismatch.id, action: "record_bound_review_pr" }),
+        { beforeAuditLock: (tx) => lockEngineeringAgentMismatchAmuxRows(tx, mismatch.id) },
+      ),
+      refusedWith("bound_review_pr_not_recorded"),
+    );
+    assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state, "open");
+    assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } })).reviewPrNumber, null);
+
+    await setMode("t1");
+    const acted = await recordBound();
+    assert.equal(acted.resolved, true);
+    assert.equal(acted.reviewPrRecorded, true);
+    const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+    assert.deepEqual(
+      [card.status, card.reviewPrNumber, card.requiresHumanReview, card.reviewSpecialty, card.revision],
+      ["review", prNumber, true, "code-review", before.revision + 1],
+    );
+    assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state, "resolved");
+    const personAudit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: acted.auditLogId } });
+    assert.equal(personAudit.action, "engineering_agent.mismatch_acted");
+    assert.deepEqual(
+      [
+        (personAudit.metadata as Record<string, unknown>).action,
+        (personAudit.metadata as Record<string, unknown>).prNumber,
+        (personAudit.metadata as Record<string, unknown>).cardId,
+      ],
+      ["record_bound_review_pr", prNumber, fixture.taskId],
+    );
+    const amuxAudit = await prisma.adminAuditLog.findFirstOrThrow({
+      where: { action: "amux.review.pull_request_recorded", targetId: fixture.taskId },
+    });
+    assert.equal((amuxAudit.metadata as Record<string, unknown>).marked_human_review, true);
+
+    // Once closed it stays closed, and the card keeps its one number.
+    await assert.rejects(recordBound(), refusedWith("mismatch_not_open"));
+    assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } })).revision, card.revision);
+  } finally {
     for (const fixture of closedAdapterFixtures) await closeClosedAdapterFixture(fixture);
     await setMode("shadow");
   }

@@ -223,6 +223,15 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                           });
                         })
                       : null}
+                    {item.causeKey.startsWith("review_pr:")
+                      ? button(`${item.id}:record-pr`, m.mismatchRecordReviewPr, () => {
+                          if (!window.confirm(m.confirmMismatchRecordReviewPr)) return;
+                          void post(`${item.id}:record-pr`, "/api/admin/engineering-agent/mismatches", {
+                            workItemId: item.id,
+                            action: "record_bound_review_pr",
+                          });
+                        })
+                      : null}
                     {button(`${item.id}:leave`, m.mismatchLeaveOpen, () =>
                       void post(`${item.id}:leave`, "/api/admin/engineering-agent/mismatches", {
                         workItemId: item.id,

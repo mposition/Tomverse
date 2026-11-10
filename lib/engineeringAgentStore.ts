@@ -1492,6 +1492,7 @@ export async function acknowledgeEngineeringAgentDecision(
 export const ENGINEERING_AGENT_MISMATCH_CONSOLE_ACTIONS = [
   "close_domain_after_verified_no_write",
   "close_after_observed_merge",
+  "record_bound_review_pr",
   "leave_open",
   "mode_off",
   "escalate_incident",
@@ -1564,7 +1565,11 @@ export async function lockEngineeringAgentMismatchAmuxRows(
  * and leaves the rest to the incident. A C item may also close once GitHub
  * reports its own pull request merged (owner decision 2026-11-06): the merge
  * is recorded on the binding, so the approval observer does not raise it
- * again, and the agent stays on.
+ * again, and the agent stays on. Or a person has AMUX put the run's bound
+ * number on the card (owner decision 2026-11-11): that runs only as the
+ * attachment of AMUX's review pull request writer
+ * (recordEngineeringAgentMismatchReviewPullRequest), which passes the number
+ * it recorded as `boundReviewPr`; called any other way the action is refused.
  */
 export async function resolveEngineeringAgentStateMismatch(
   tx: EngineeringAgentTransaction,
@@ -1574,6 +1579,8 @@ export async function resolveEngineeringAgentStateMismatch(
     workItemId: string;
     action: MismatchAction;
     observedMerge?: EngineeringAgentObservedMerge | null;
+    /** What AMUX's writer recorded on the card in this same transaction. */
+    boundReviewPr?: { taskId: string; attemptId: string; prNumber: number } | null;
   },
 ): Promise<{ auditLogId: string; resolved: boolean }> {
   humanActorId(input.session);
@@ -1602,7 +1609,7 @@ export async function resolveEngineeringAgentStateMismatch(
   const runId = (await mismatchRunId(tx, item)) ?? refuse("mismatch_without_run");
   const run = await tx.engineeringAgentRun.findUniqueOrThrow({
     where: { id: runId },
-    select: { id: true, status: true, amuxAttemptId: true },
+    select: { id: true, status: true, amuxAttemptId: true, cardId: true },
   });
   // The same locks the transaction took first; held already, so no wait.
   const attempts = await tx.$queryRaw<Array<{ endedAt: Date | null }>>`
@@ -1621,7 +1628,7 @@ export async function resolveEngineeringAgentStateMismatch(
   // The merge must be of this run's own current pull request, as read now.
   const observed = input.observedMerge ?? null;
   const currentBindings =
-    kind === "C" && input.action === "close_after_observed_merge"
+    kind === "C" && (input.action === "close_after_observed_merge" || input.action === "record_bound_review_pr")
       ? await tx.engineeringAgentBinding.findMany({
           where: { runId: run.id, supersededAt: null },
           select: { id: true, prNumber: true },
@@ -1636,6 +1643,17 @@ export async function resolveEngineeringAgentStateMismatch(
     currentBindings[0]!.prNumber === observed.prNumber
       ? currentBindings[0]!
       : null;
+  // The number AMUX took must be this run's one current binding's, on this
+  // run's own card and attempt; the binding is locked so it cannot be
+  // superseded before the commit.
+  const bound = input.action === "record_bound_review_pr" ? (input.boundReviewPr ?? null) : null;
+  let boundBinding: { id: string; prNumber: number } | null = null;
+  if (bound !== null && currentBindings.length === 1 && run.cardId === bound.taskId && run.amuxAttemptId === bound.attemptId) {
+    const binding = await lockBinding(tx, currentBindings[0]!.id);
+    if (binding.supersededAt === null && binding.runId === run.id && binding.prNumber === bound.prNumber) {
+      boundBinding = { id: binding.id, prNumber: binding.prNumber };
+    }
+  }
   const verdict = decideMismatchAction({
     kind,
     action: input.action,
@@ -1649,6 +1667,7 @@ export async function resolveEngineeringAgentStateMismatch(
     workItemTerminal: publishItem?.state === "published",
     lookupVerifiedNoWrite: consumed === 0,
     mergeObserved: mergedBinding !== null,
+    boundReviewPrRecorded: boundBinding !== null,
     // One item per cause (its key is unique), so a cause cannot recur here.
     recurrences: 0,
   });
@@ -1712,6 +1731,7 @@ export async function resolveEngineeringAgentStateMismatch(
       resolved: verdict.resolves,
       runId: run.id,
       ...(mergedBinding ? { prNumber: mergedBinding.prNumber, mergeCommitSha: observed!.mergeCommitSha } : {}),
+      ...(boundBinding ? { prNumber: boundBinding.prNumber, cardId: run.cardId } : {}),
     },
     tx,
   });
