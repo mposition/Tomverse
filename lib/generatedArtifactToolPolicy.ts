@@ -25,6 +25,7 @@ import {
   XLSX_MEDIA_TYPE,
   type TurnAttachmentDescriptor,
 } from "@/lib/messageAttachmentCore";
+import { AVAILABLE_MODELS } from "@/lib/models";
 
 /* ------------------------------------------------------------------------ */
 /* Model capability                                                           */
@@ -205,6 +206,17 @@ export const nativeSearchBlocksArtifactTool = (input: {
 const formatList = (kind: Parameters<typeof formatIdsOfKind>[0]) =>
   formatIdsOfKind(kind).join(", ");
 
+// Only recommend models available to every signed-in and guest user. This
+// notice has no plan context, so suggesting a paid-tier model could be useless.
+const FILE_CAPABLE_MODEL_NAMES = AVAILABLE_MODELS.filter(
+  (model) =>
+    model.enabled &&
+    model.minimumPlan === "Guest" &&
+    getArtifactToolSupport(model.id) === "verified",
+)
+  .slice(0, 3)
+  .map((model) => model.name);
+
 /**
  * The instructions that go with the tools.
  *
@@ -324,7 +336,7 @@ const offPrompt = (reason: ArtifactToolOffReason, autoRouted = false): string =>
       : reason === "model_unverified"
         ? autoRouted
           ? "(choosing a model for this request themselves instead of Auto, one that can create files)."
-          : "(choosing a different model)."
+          : `(choosing a different model, such as ${FILE_CAPABLE_MODEL_NAMES.join(", ")}).`
         : "(starting the request again from a saved conversation).",
     "",
     "Do not write a file path, a download link, base64, or code that claims to",
