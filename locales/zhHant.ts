@@ -1660,6 +1660,9 @@ export const zhHant = {
         historyDescription: "本帳戶的每一次請求、下載與拒絕，保留九十天。「已拒絕」表示有人出示了你帳戶的下載連結但未被接受。",
         historyEmpty: "你還沒有下載過帳戶資料。",
         historyLoading: "載入中…",
+        refusedExpired: "連結已過期，系統拒絕了下載請求。請產生新連結。",
+        refusedUsed: "此一次性連結已使用，系統拒絕了重複下載請求。",
+        refusedAccountMismatch: "提出請求的帳戶並非連結擁有者，系統拒絕了下載請求。",
         refusedNote: "出示的連結已過期、已被使用過，或屬於其他帳戶。",
         status: {
             ...en.accountDataExport.status,
