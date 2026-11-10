@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 
+import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { SYSTEM_AUDIT_ACTOR_METADATA_KEY } from "@/lib/adminAuditSystemActors";
@@ -20,6 +21,7 @@ import {
   claimNextEngineeringAgentPublishWork,
   decideEngineeringAgentT2Draft,
   endEngineeringAgentRun,
+  rejudgeEngineeringAgentV22Draft,
   heartbeatEngineeringAgentRun,
   issueEngineeringAgentCapability,
   moveEngineeringAgentBinding,
@@ -105,8 +107,35 @@ const waitingWithoutCapability = (workItemId: string) =>
 const refusedWith = async (promise: Promise<unknown>, code: string) =>
   assert.rejects(promise, (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === code, code);
 
-const amuxAttempt = async () => {
-  const task = await prisma.amuxWorkItem.create({
+/** A v4 idea Task (its run is a v22 run), seeded with triggers off as the
+ * v22 result-review suite seeds one; its sealed fields are synthetic. */
+const seedV4Task = async () => {
+  const id = randomUUID();
+  const digest = "a".repeat(64);
+  const cipher = Buffer.from("synthetic-only", "utf8");
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+    await tx.$executeRaw`
+      INSERT INTO "AmuxWorkItem" ("id", "title", "status", "revision", "sourceSystem", "sourceKey",
+        "sourceVersion", "sourceDigest", "sourceSnapshot", "cardType", "parentFeatureNodeId",
+        "v4TitleCiphertext", "v4TitleKeyId", "v4TitleKeyVersion", "v4TitleDigest", "v4TitleDigestKeyId",
+        "v4BodyCiphertext", "v4BodyKeyId", "v4BodyKeyVersion", "v4BodyDigest", "v4BodyDigestKeyId",
+        "v4BriefCiphertext", "v4BriefKeyId", "v4BriefKeyVersion", "v4BriefDigest", "v4BriefDigestKeyId",
+        "v4SourceApprovalId", "v22ReceiptId", "taskRole", "executionGrade", "displayKey", "createdAt", "updatedAt")
+      VALUES (${id}, 'AMUX Task', 'review', 2, 'admin-idea-v4', ${id.toUpperCase()}, '1', ${digest},
+        ${JSON.stringify({ schemaVersion: "amux-v4", ideaId: randomUUID(), approvalId: randomUUID() })}::jsonb,
+        'task', ${randomUUID()}, ${cipher}, 'synthetic', 1, ${digest}, 'synthetic', ${cipher},
+        'synthetic', 1, ${digest}, 'synthetic', ${cipher}, 'synthetic', 1, ${digest}, 'synthetic',
+        ${randomUUID()}, ${randomUUID()}::uuid, 'implement', 'routine',
+        ${`AMUX-EA${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}-001`}, ${now}, ${now})`;
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
+  });
+  return prisma.amuxWorkItem.findUniqueOrThrow({ where: { id } });
+};
+
+const amuxAttempt = async (v4 = false) => {
+  const task = v4 ? await seedV4Task() : await prisma.amuxWorkItem.create({
     data: {
       id: `eng-agent-card-${randomUUID()}`,
       title: "Engineering agent store fixture",
@@ -119,12 +148,13 @@ const amuxAttempt = async () => {
       reviewPrNumber: 1706,
     },
   });
-  fixtureTaskIds.push(task.id);
+  // A v4 Task is left as seeded: archiving it would run the v22 triggers.
+  if (!v4) fixtureTaskIds.push(task.id);
   const now = new Date();
   // An attempt still running: a run on an attempt AMUX has already ended is
   // an orphaned run, and that halts the agent (§11) -- which is not what these
   // tests are about.
-  const attempt = await prisma.amuxExecutionAttempt.create({
+  const create = (tx: Prisma.TransactionClient) => tx.amuxExecutionAttempt.create({
     data: {
       id: `eng-agent-attempt-${randomUUID()}`,
       taskId: task.id,
@@ -138,11 +168,18 @@ const amuxAttempt = async () => {
       leaseExpiresAt: new Date(now.getTime() + 60 * 60_000),
     },
   });
+  // A v4 Task's attempt is bound to a worker assignment this suite has none of.
+  const attempt = v4 ? await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+    const row = await create(tx);
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
+    return row;
+  }) : await create(prisma);
   return { task, attempt };
 };
 
-const startRun = async () => {
-  const { task, attempt } = await amuxAttempt();
+const startRun = async (v4 = false) => {
+  const { task, attempt } = await amuxAttempt(v4);
   const runId = nextRunId();
   const started = await inTx((tx) =>
     recordEngineeringAgentRunStart(tx, {
@@ -268,8 +305,8 @@ const commitFields = (runId: string, cardRef: string) => ({
 });
 
 /** A run whose patch settled as a `tier_pending` draft, the run then ended as settlement ends it. */
-const pendingDraftFor = async (seed: string) => {
-  const run = await startRun();
+const pendingDraftFor = async (seed: string, v4 = false) => {
+  const run = await startRun(v4);
   const patch = { text: seed, sha256: sha256(seed), baseSha: sha1("base") };
   const draft = await inTx((tx) => openEngineeringAgentV22Product(tx, {
     runId: run.runId, patch, tierPending: true,
@@ -366,6 +403,47 @@ test("a v22 draft settled before its tier is promoted to its run's one publish i
     session: owner, workItemId: waiting.draft.id, decision: "rejected",
     patchDigest: waiting.patch.sha256, baseSha: waiting.patch.baseSha,
   }));
+});
+
+test("a person sends a kept v22 draft back to the tier round, once, bound to what they saw", async () => {
+  const v22 = await pendingDraftFor("kept v22 patch", true);
+  const legacy = await pendingDraftFor("kept legacy patch");
+  for (const pending of [v22, legacy]) {
+    assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+      { ...promotionInput(pending), reason: "patch_unavailable", candidate: null })),
+    { kept: true });
+  }
+  const input = { session: owner, workItemId: v22.draft.id,
+    patchDigest: v22.patch.sha256, baseSha: v22.patch.baseSha };
+  await refusedWith(inTx((tx) => rejudgeEngineeringAgentV22Draft(tx,
+    { ...input, patchDigest: sha256("other") })), "draft_changed");
+  await refusedWith(inTx((tx) => rejudgeEngineeringAgentV22Draft(tx, {
+    session: owner, workItemId: legacy.draft.id,
+    patchDigest: legacy.patch.sha256, baseSha: legacy.patch.baseSha,
+  })), "draft_not_v22");
+
+  const { auditLogId } = await inTx((tx) => rejudgeEngineeringAgentV22Draft(tx, input));
+  const pending = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: v22.draft.id } });
+  assert.deepEqual([pending.state, pending.reason], ["open", "tier_pending"]);
+  const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: auditLogId } });
+  assert.deepEqual([audit.action, audit.actorUserId, audit.targetId],
+    [ENGINEERING_AGENT_AUDIT_ACTIONS.v22DraftRejudged, owner.user.id, v22.draft.id]);
+  assert.equal((audit.metadata as Record<string, unknown>).previousReason,
+    "patch_unavailable");
+  // Pending again, it is the tier round's to judge, not the person's twice.
+  await refusedWith(inTx((tx) => rejudgeEngineeringAgentV22Draft(tx, input)),
+    "draft_already_pending");
+  assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+    { ...promotionInput(v22), candidate: null })), { kept: true });
+  for (const kept of [v22, legacy]) {
+    await inTx((tx) => decideEngineeringAgentT2Draft(tx, {
+      session: owner, workItemId: kept.draft.id, decision: "rejected",
+      patchDigest: kept.patch.sha256, baseSha: kept.patch.baseSha,
+    }));
+  }
+  await refusedWith(inTx((tx) => rejudgeEngineeringAgentV22Draft(tx, input)),
+    "draft_not_open");
 });
 
 test("a T2 draft promoted for the owner's review opens a review item only a review-draft publisher writes", async () => {

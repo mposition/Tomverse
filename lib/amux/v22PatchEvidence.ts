@@ -16,18 +16,24 @@ export function v22PublishFilesSha256(files: readonly V22PublishFile[]): string 
   return createHash("sha256").update(JSON.stringify(files)).digest("hex");
 }
 
-/** Sparse file evidence is never publication authority by itself. */
-export function encodeV22PatchEvidence(text: string,
-  files?: readonly V22PublishFile[]): Buffer {
-  if (!text.startsWith("diff --git ") || detectSecrets(text).length)
-    throw new Error("invalid_patch_evidence");
-  if (!files) {
-    const bytes = Buffer.from(text, "utf8");
-    if (bytes.length < 1 || bytes.length > MAX_PATCH_BYTES ||
-        text.includes("\0")) throw new Error("invalid_patch_evidence");
-    return bytes;
-  }
-  if (files.length < 1 || files.length > 5)
+type V22PublishFileLimits = Readonly<{ maxFiles: number;
+  maxFileBytes: number; maxTotalBytes: number }>;
+
+/** What the sidecar may store beside the patch text (its capture limits). */
+export const V22_STORED_FILE_LIMITS: V22PublishFileLimits = Object.freeze({
+  maxFiles: 5, maxFileBytes: MAX_FILE_BYTES, maxTotalBytes: MAX_FILE_BYTES });
+
+/** What the app may rebuild from a stored patch and its pinned base blobs.
+ * The patch text itself stays within the 64 KiB evidence limit, and the
+ * tier gate still judges file count and size (`PUSH_LIMITS`) for T1. */
+export const V22_CANDIDATE_FILE_LIMITS: V22PublishFileLimits = Object.freeze({
+  maxFiles: 20, maxFileBytes: 200 * 1024, maxTotalBytes: 2 * 1024 * 1024 });
+
+/** Canonical paths and base64, UTF-8 text with no NUL and no secret. Throws
+ * `invalid_patch_evidence`; returns copies of the checked fields. */
+export function checkV22PublishFiles(files: readonly V22PublishFile[],
+  limits: V22PublishFileLimits): V22PublishFile[] {
+  if (files.length < 1 || files.length > limits.maxFiles)
     throw new Error("invalid_patch_evidence");
   const seen = new Set<string>();
   let aggregate = 0;
@@ -40,10 +46,11 @@ export function encodeV22PatchEvidence(text: string,
     const bytes = Buffer.from(file.bytesBase64, "base64");
     try {
       if (bytes.toString("base64") !== file.bytesBase64 ||
-          bytes.length < 1 || bytes.length > MAX_FILE_BYTES)
+          bytes.length < 1 || bytes.length > limits.maxFileBytes)
         throw new Error("invalid_patch_evidence");
       aggregate += bytes.length;
-      if (aggregate > MAX_FILE_BYTES) throw new Error("invalid_patch_evidence");
+      if (aggregate > limits.maxTotalBytes)
+        throw new Error("invalid_patch_evidence");
       const content = utf8.decode(bytes);
       if (content.includes("\0") || detectSecrets(content).length)
         throw new Error("invalid_patch_evidence");
@@ -51,6 +58,21 @@ export function encodeV22PatchEvidence(text: string,
         bytesBase64: file.bytesBase64 });
     } finally { bytes.fill(0); }
   }
+  return checked;
+}
+
+/** Sparse file evidence is never publication authority by itself. */
+export function encodeV22PatchEvidence(text: string,
+  files?: readonly V22PublishFile[]): Buffer {
+  if (!text.startsWith("diff --git ") || detectSecrets(text).length)
+    throw new Error("invalid_patch_evidence");
+  if (!files) {
+    const bytes = Buffer.from(text, "utf8");
+    if (bytes.length < 1 || bytes.length > MAX_PATCH_BYTES ||
+        text.includes("\0")) throw new Error("invalid_patch_evidence");
+    return bytes;
+  }
+  const checked = checkV22PublishFiles(files, V22_STORED_FILE_LIMITS);
   const encoded = Buffer.from(JSON.stringify({ version: 1, text,
     files: checked }), "utf8");
   if (encoded.length > MAX_PATCH_BYTES) {

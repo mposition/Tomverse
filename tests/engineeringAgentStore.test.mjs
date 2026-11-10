@@ -159,6 +159,7 @@ const RECORDS_WHAT_HAPPENED = [
   "endEngineeringAgentRun",
   "settleEngineeringAgentWorkItem",
   "decideEngineeringAgentT2Draft",
+  "rejudgeEngineeringAgentV22Draft",
   "acknowledgeEngineeringAgentDecision",
   "setEngineeringAgentSwitch",
   "recordEngineeringAgentBinding",

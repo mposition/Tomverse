@@ -85,6 +85,16 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
     });
   };
 
+  const rejudge = (item: EngineeringAgentOwnerItemView) => {
+    if (!item.patchDigest || !item.baseSha) return;
+    if (!window.confirm(m.confirmRejudge)) return;
+    void post(`${item.id}:rejudge`, "/api/admin/engineering-agent/rejudge", {
+      workItemId: item.id,
+      patchDigest: item.patchDigest,
+      baseSha: item.baseSha,
+    });
+  };
+
   const button = (key: string, label: string, onClick: () => void, tone: "primary" | "danger" | "plain" = "plain") => (
     <button
       type="button"
@@ -192,6 +202,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                   <div className="mt-3 flex flex-wrap gap-2">
                     {button(`${item.id}:approved`, m.approve, () => decide(item, "approved"), "primary")}
                     {button(`${item.id}:rejected`, m.reject, () => decide(item, "rejected"), "danger")}
+                    {item.rejudgeable ? button(`${item.id}:rejudge`, m.rejudge, () => rejudge(item)) : null}
                   </div>
                 ) : null}
                 {initial.canWrite && item.kind === "state_mismatch" ? (

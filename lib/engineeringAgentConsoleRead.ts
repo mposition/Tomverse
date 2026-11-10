@@ -15,6 +15,7 @@ import {
   OWNER_QUEUE_LIMITS,
   killSwitchEngaged,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
+  ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
 } from "@/lib/engineeringAgentCore";
 import { readEngineeringAgentSwitches } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
@@ -35,6 +36,8 @@ export type EngineeringAgentOwnerItemView = {
   patchBody: string | null;
   patchDigest: string | null;
   baseSha: string | null;
+  /** A v22 draft the tier round kept private, which a person may send back. */
+  rejudgeable: boolean;
 };
 
 export type EngineeringAgentRunView = {
@@ -103,6 +106,8 @@ export async function readEngineeringAgentConsole(
           patchBody: true,
           patchDigest: true,
           baseSha: true,
+          run: { select: { modeAtStart: true, amuxAttemptId: true,
+            card: { select: { sourceSystem: true } } } },
         },
       }),
       prisma.engineeringAgentWorkItem.groupBy({
@@ -115,8 +120,12 @@ export async function readEngineeringAgentConsole(
     return {
       ...base,
       queue: {
-        items: items.map((item) => ({
+        items: items.map(({ run, ...item }) => ({
           ...item,
+          rejudgeable: item.kind === "t2_draft" && item.patchBody !== null &&
+            item.reason !== ENGINEERING_AGENT_V22_TIER_PENDING_REASON &&
+            run?.card.sourceSystem === "admin-idea-v4" &&
+            run.modeAtStart === "t1" && !!run.amuxAttemptId,
           kind: item.kind as EngineeringAgentOwnerItemView["kind"],
           createdAt: item.createdAt.toISOString(),
           // Only a draft's patch is shown; a person reads it before deciding.

@@ -200,19 +200,24 @@ export const checkListing = (entries: readonly TreeEntry[]): ListingCheck => {
 
 /** v22's bounded sparse transport: compute a result listing from app-read
  * GitHub base entries and complete replacement bytes for existing regular
- * files. This never parses or applies the worker's patch. The Publisher must
- * still apply that patch independently and match this exact root before push. */
+ * files. This function never parses or applies the worker's patch (bytes
+ * rebuilt from a stored patch come from engineeringAgentV22PatchApply). The
+ * Publisher must still apply that patch independently and match this exact
+ * root before push. `maxFiles` defaults to `PUSH_LIMITS.maxFiles`; the tier
+ * gate judges the count for T1 either way. */
 export const resultListingFromModifiedBlobs = (input: {
   base: readonly TreeEntry[];
   baseRootTreeId: string;
   files: readonly { path: string; mode: "100644"; bytes: Uint8Array }[];
+  maxFiles?: number;
 }): { ok: true; result: TreeEntry[]; rootTreeId: string;
   changedBlobs: ReadonlyMap<string, Uint8Array> } |
   { ok: false; reason: "base_invalid" | "files_invalid" | "result_invalid" } => {
   const checked = checkListing(input.base);
   if (!checked.ok || checked.rootTreeId !== input.baseRootTreeId)
     return { ok: false, reason: "base_invalid" };
-  if (input.files.length < 1 || input.files.length > PUSH_LIMITS.maxFiles)
+  if (input.files.length < 1 ||
+      input.files.length > (input.maxFiles ?? PUSH_LIMITS.maxFiles))
     return { ok: false, reason: "files_invalid" };
   const entries = new Map(input.base.map((entry) => [entry.path, { ...entry }]));
   const seen = new Set<string>();

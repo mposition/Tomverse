@@ -10,8 +10,15 @@ import { AdminPixelAvatar } from "@/components/admin/ui/AdminPixelAvatar";
 import { AMUX_WORKER_CHANNELS } from "@/lib/adminAmuxFlow";
 import {
   AmuxCliModelIssueChips,
+  AmuxCliModelLinkForm,
   AmuxWorkerCapabilityEditor,
+  amuxCliModelLinkOffered,
+  runAmuxCliModelLink,
   runAmuxWorkerCapabilityEdit,
+  type AmuxCliModelLinkChange,
+  type AmuxCliModelLinkIo,
+  type AmuxCliModelLinkState,
+  type AmuxCliModelLinkUpdate,
   type AmuxWorkerCapabilityIo,
   type AmuxWorkerCapabilityNotice,
   type AmuxWorkerCapabilityRefusalNotice,
@@ -79,6 +86,8 @@ import {
 
 const REGISTRY_PATH = "/api/admin/amux/workers";
 const AMUX_WORKER_CAPABILITY_PATH = "/api/admin/amux/workers/capabilities";
+const AMUX_CLI_MODEL_LINK_PATH = "/api/admin/amux/cli-models";
+const NO_LINK: AmuxCliModelLinkState = { choice: null, busy: false, notice: null, refusal: null, failure: null };
 
 type Messages = (typeof adminAmuxWorkersMessages)["en"];
 type CapabilityMessages = (typeof adminAmuxWorkerCapabilityMessages)["en"];
@@ -261,6 +270,9 @@ export function AmuxWorkersOverviewView({
   onCopy,
   cliModels,
   onFix,
+  cliModelLink,
+  onLinkChoose,
+  onLinkSave,
   onRegister,
 }: {
   m: Messages;
@@ -301,6 +313,10 @@ export function AmuxWorkersOverviewView({
   cliModels?: AmuxCliModelCatalogAdminView | null;
   /** Opens a worker's details with its editor, from a model chip. */
   onFix?: (row: AmuxWorkerOverviewRow) => void;
+  /** The open drawer's model-price link form; absent where it is not offered. */
+  cliModelLink?: AmuxCliModelLinkState;
+  onLinkChoose?: (value: string) => void;
+  onLinkSave?: (change: AmuxCliModelLinkChange) => void;
   /** Registers a new worker the owner named, with the CLI it runs. */
   onRegister?: (request: AmuxWorkerRegistrationRequest) => void;
 }) {
@@ -426,6 +442,10 @@ export function AmuxWorkersOverviewView({
     const command = amuxWorkerEnableCommand(row.workerName);
     const form = editing !== null && editing.workerName === row.workerName ? editing : null;
     const canEdit = canChange && overview.capabilitiesReadable && row.capability !== null && row.desiredState !== "retired";
+    // The price link is the owner's, for a model that shows an issue or is linked already.
+    const link = cliModelLink ?? NO_LINK;
+    const linkModel = canChange && models !== null && onLinkChoose !== undefined && onLinkSave !== undefined &&
+      amuxCliModelLinkOffered(models, row.providerClass, usedModel(row)) ? usedModel(row)! : null;
     return (
       <div className="fixed inset-0 z-50 flex justify-end" data-testid="amux-worker-drawer-layer">
         <button
@@ -498,6 +518,31 @@ export function AmuxWorkersOverviewView({
                 </dd>
               </dl>
               <p className="text-sm text-zinc-300">{row.mode === "v22" ? m.drawer.v22On : m.drawer.v22Off}</p>
+              {linkModel !== null ? (
+                <AmuxCliModelLinkForm
+                  m={cm}
+                  cliModels={models!}
+                  cli={row.providerClass}
+                  cliModel={linkModel}
+                  choice={link.choice}
+                  busy={link.busy || capabilityBusy || busy}
+                  writesLatch={writesLatch}
+                  onChoose={onLinkChoose!}
+                  onSave={onLinkSave!}
+                />
+              ) : null}
+              {link.notice === "done" ? <p role="status" className="text-sm" data-testid="amux-cli-model-link-done">{cm.link.done}</p> : null}
+              {link.notice === "stopped" ? <p role="status" className="text-sm" data-testid="amux-cli-model-link-stopped">{cm.link.stopped}</p> : null}
+              {link.notice === "outcome_unknown" ? (
+                <p role="alert" className="text-sm text-amber-300" data-testid="amux-cli-model-link-outcome-unknown">{cm.link.outcomeUnknown}</p>
+              ) : null}
+              {link.notice === "unread" ? (
+                <p role="alert" className="text-sm text-amber-300" data-testid="amux-cli-model-link-unread">{cm.link.unread}</p>
+              ) : null}
+              {link.refusal ? (
+                <p role="alert" className="text-sm text-red-300" data-testid="amux-cli-model-link-refused">{cm.link.refused[link.refusal]}</p>
+              ) : null}
+              {link.failure ? <AdminApiFailureNotice failure={link.failure} /> : null}
               {form !== null && row.capability !== null ? (
                 <AmuxWorkerCapabilityEditor
                   m={cm}
@@ -807,6 +852,7 @@ export function AmuxWorkersOverviewPanel({
   const [capabilityRefusal, setCapabilityRefusal] = useState<AmuxWorkerCapabilityRefusalNotice>(null);
   const [capabilityFailure, setCapabilityFailure] = useState<AdminApiFailure | null>(null);
   const [copied, setCopied] = useState(false);
+  const [link, setLink] = useState<AmuxCliModelLinkState>(NO_LINK);
   const returnFocus = useRef<HTMLElement | null>(null);
 
   const overview = useMemo(
@@ -876,9 +922,33 @@ export function AmuxWorkersOverviewPanel({
     networkFailure: () => adminNetworkFailure(locale),
   };
 
+  const applyLink = (changes: AmuxCliModelLinkUpdate) => {
+    if ("view" in changes) applyCapability({ view: changes.view ?? null });
+    setLink((state) => ({
+      ...state,
+      ...("pending" in changes ? { busy: changes.pending === true } : {}),
+      ...("notice" in changes ? { notice: changes.notice ?? null } : {}),
+      ...("refusal" in changes ? { refusal: changes.refusal ?? null } : {}),
+      ...("failure" in changes ? { failure: changes.failure ?? null } : {}),
+    }));
+  };
+
+  const linkIo: AmuxCliModelLinkIo = {
+    post: (change) =>
+      adminFetch(AMUX_CLI_MODEL_LINK_PATH, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(change),
+      }),
+    read: capabilityIo.read,
+    failureOf: (response) => readAdminApiFailure(response, { fallback: cm.link.failed, locale }),
+    networkFailure: () => adminNetworkFailure(locale),
+  };
+
   const closeDrawer = () => {
     setOpenWorker(null);
     setEditing(null);
+    setLink(NO_LINK);
     setCapabilityNotice(null);
     setCapabilityRefusal(null);
     setCapabilityFailure(null);
@@ -932,6 +1002,7 @@ export function AmuxWorkersOverviewPanel({
         }
         setOpenWorker(workerName);
         setEditing(null);
+        setLink(NO_LINK);
         setCapabilityNotice(null);
         setCapabilityRefusal(null);
         setCapabilityFailure(null);
@@ -978,10 +1049,22 @@ export function AmuxWorkersOverviewPanel({
           returnFocus.current = document.activeElement;
         }
         setOpenWorker(row.workerName);
+        setLink(NO_LINK);
         setCapabilityNotice(null);
         setCapabilityRefusal(null);
         setCapabilityFailure(null);
         setEditing(row.capability === null ? null : amuxWorkerCapabilityFormFromRow(row.capability));
+      }}
+      cliModelLink={link}
+      onLinkChoose={(value) => setLink((state) => ({ ...state, choice: value }))}
+      onLinkSave={(change) => {
+        if (link.busy) return;
+        void runAmuxCliModelLink(change, linkIo, applyLink).then((saved) => {
+          if (saved) {
+            setLink((state) => ({ ...state, choice: null }));
+            router.refresh();
+          }
+        });
       }}
       onRegister={(request) => {
         setLastRun("change");
