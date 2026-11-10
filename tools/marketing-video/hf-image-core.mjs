@@ -24,7 +24,7 @@
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
-import { admit, brisbaneDay, HF_ASPECT_RATIO, HF_MODEL, ledgerPath, requestProblem, resolveUnsettled, settle } from "./higgsfield-cap.mjs";
+import { admit, brisbaneDay, downloadResult, HF_ASPECT_RATIO, HF_MODEL, ledgerPath, requestProblem, resolveUnsettled, settle } from "./higgsfield-cap.mjs";
 
 /** A picture is priced at 0.25 credits (owner's trial); twice that is a sign the request is not the one priced. */
 export const HF_MAX_CALL_COST = 0.5;
@@ -188,7 +188,7 @@ export async function makeImage({ prompt, references = [], out, label, jobDir, e
 
   const url = resultUrlOf(job);
   if (!url) return { ok: false, reason: "no_result_url", detail: { jobId } };
-  const bytes = await fetchBytes(url);
+  const bytes = await fetchBytes(url).catch(() => null);
   if (!isPicture(bytes)) return { ok: false, reason: "result_not_a_picture", detail: { jobId } };
   writeFileSync(out, bytes);
   return { ok: true, jobId, cost, out };
@@ -203,9 +203,4 @@ export function isPicture(bytes) {
   return png || jpeg || webp;
 }
 
-async function defaultFetch(url) {
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  const bytes = Buffer.from(await response.arrayBuffer());
-  return bytes.length > 40 * 1024 * 1024 ? null : bytes;
-}
+const defaultFetch = (url) => downloadResult(url, { maxBytes: 40 * 1024 * 1024 });

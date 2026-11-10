@@ -415,7 +415,7 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
   if (!card) return null;
   const [summary] = await cardSummaries([card]);
   const [usage, reviews, result, feedbackAttempts, feedbackUsage, feedbackDecisions,
-    feedbackObservations, sourceApproval] = await Promise.all([
+    feedbackObservations, sourceApproval, usageAcceptances] = await Promise.all([
     prisma.amuxCliUsageEvent.findMany({ where: { taskId },
       orderBy: { createdAt: "desc" }, take: 20,
       select: { id: true, attemptId: true, provider: true,
@@ -455,7 +455,18 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
         id: card.v4SourceApprovalId }, select: { state: true, action: true,
         registeredWorkItemId: true, confirmationSnapshot: true } }) :
       Promise.resolve(null),
+    card.sourceSystem === "admin-idea-v4" ?
+      prisma.amuxV22AttemptUsageAcceptance.findMany({ where: { taskId },
+        select: { attemptId: true, source: true, acceptedAt: true } }) : [],
   ]);
+  // An ended v4 attempt with no complete usage report holds its worker in the
+  // v22 usage gate until the owner accepts it (owner decision 2026-11-10).
+  const acceptanceByAttempt = new Map(usageAcceptances.map((row) => [row.attemptId, row]));
+  const usageUnknown = (attempt: { id: string; endedAt: Date | null }) => {
+    if (card.sourceSystem !== "admin-idea-v4" || !attempt.endedAt) return false;
+    const events = feedbackUsage.filter((event) => event.attemptId === attempt.id);
+    return events.length === 0 || events.some((event) => event.completeness !== "reported_complete");
+  };
   let body: string | null = card.description;
   let brief: string | null = card.executionBrief;
   if (card.sourceSystem === "admin-idea-v4") {
@@ -534,6 +545,11 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
     dependencies: card.dependencies.map((edge) => edge.dependency),
     dependents: card.dependents.map((edge) => edge.task),
     attempts: card.executionAttempts.map((attempt) => ({ ...attempt,
+      usageUnknown: usageUnknown(attempt),
+      usageAcceptance: (() => {
+        const row = acceptanceByAttempt.get(attempt.id);
+        return row ? { source: row.source, acceptedAt: row.acceptedAt.toISOString() } : null;
+      })(),
       reason: normalizeAmuxUntrustedReason(attempt.reason),
       startedAt: attempt.startedAt.toISOString(),
       endedAt: attempt.endedAt?.toISOString() ?? null,

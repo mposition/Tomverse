@@ -8,6 +8,7 @@ import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { OWNER_TRANSACTION_LIMITS, TICK_TRANSACTION_LIMITS, withAutoTransaction } from "./autoPromotionService.ts";
 import { BoardImportError } from "./boardImportCore.ts";
+import { amuxV22TaskUnknownUsageAttemptIds, recordAmuxV22UsageAcceptances } from "./v22AttemptUsageAcceptance.ts";
 import { lockAmuxAdmissionAndReadIncident } from "./incident.ts";
 import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { calculateCurrentApprovedAmuxV4TaskCost } from "./v4TaskCostCatalogApprovalService.ts";
@@ -1895,7 +1896,13 @@ async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: D
     const openEscalations = (await tx.amuxHumanEscalation.findMany({ where: { taskId: task.id,
       status: { in: ["open", "acknowledged"] } }, select: { id: true },
       orderBy: { createdAt: "asc" } })).map((row) => row.id);
-    const approvalMetadata = { taskId: task.id, resolvedEscalationIds: openEscalations, inspectionId: inspection.id, evidenceId: evidence.id,
+    // The owner's retry also accepts that the Task's earlier attempts' unknown
+    // usage stays unknown (owner decision 2026-11-10), so its own older
+    // attempt no longer refuses the retry its worker, nor any other Task. The
+    // held cap above is unchanged.
+    const acceptedUnknownUsageAttemptIds = await amuxV22TaskUnknownUsageAttemptIds(tx, task.id);
+    const approvalMetadata = { taskId: task.id, resolvedEscalationIds: openEscalations,
+        acceptedUnknownUsageAttemptIds, inspectionId: inspection.id, evidenceId: evidence.id,
         ownerRequestId: input.requestId, priorAttemptId: input.priorAttemptId,
         beforeRevision: task.revision, afterRevision: task.revision + 1,
         evidenceDigest: evidence.evidenceDigest, ...approvedCost,
@@ -1953,6 +1960,9 @@ async function approveRecoveryInTransaction(tx: Prisma.TransactionClient, now: D
       preApprovalId: preApproval?.id ?? null,
       approvedByUserId: ownerId,
       authorizationAuditLogId: auditId, approvedAt: now } });
+    await recordAmuxV22UsageAcceptances(tx, { taskId: task.id,
+      attemptIds: acceptedUnknownUsageAttemptIds, source: "recovery_approval",
+      acceptedByUserId: ownerId, auditLogId: auditId, now });
     const changed = await tx.amuxWorkItem.updateMany({ where: { id: task.id, revision: task.revision,
       status: "blocked", owner: null, claimedAt: null, v22AssignmentId: null, archivedAt: null },
       data: { status: "todo", revision: { increment: 1 } } });

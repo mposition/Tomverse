@@ -74,6 +74,8 @@ export type AmuxReviewDetail = {
     /** The server holds this attempt's own final v22 result. */
     result_stored?: boolean;
   } | null;
+  /** Ended runs whose CLI usage is unknown and not accepted; each holds its worker. */
+  unknown_usage_attempts?: Array<{ id: string; worker: string; started_at: string }>;
   review_content: { text: string; digest: string;
     truncated: boolean; display_mismatch?: boolean } | null;
   review_context: {
@@ -409,6 +411,7 @@ export function AmuxOwnerReviewView({
   onRetryReadConfirmed,
   onReread,
   reviewReturnPath = amuxAssignmentReviewReturnPath(review.escalation.id),
+  hideTechnicalRecovery = false,
 }: {
   m: RoutingMessages;
   review: ReviewDetail;
@@ -426,6 +429,9 @@ export function AmuxOwnerReviewView({
   onReread: () => void;
   /** Where a step-up refused inside this review returns the operator. */
   reviewReturnPath?: string;
+  /** A done or todo card with a leftover escalation: closing it is the one
+   * action, so the recovery tools (Ubuntu inspection, one-click) stay hidden. */
+  hideTechnicalRecovery?: boolean;
 }) {
   const outcomes = visibleAmuxOwnerReviewOutcomes(review);
   const report = review.review_report;
@@ -609,7 +615,7 @@ export function AmuxOwnerReviewView({
 
       {/* With no choice to make, the recovery tools are the only way on: the
           queue's "check the result first" step points here (AMUX-UICONTRACT-002). */}
-      {(unknown || technicalOnly || outcomes.length === 0) && (
+      {!hideTechnicalRecovery && (unknown || technicalOnly || outcomes.length === 0) && (
         <section className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5" data-testid="admin-amux-technical-recovery">
           <div className="flex items-center gap-2 text-amber-100">
             <Wrench aria-hidden="true" className="h-5 w-5" />
@@ -1446,8 +1452,10 @@ export function AmuxPendingDecisionNotice({ controller, returnPath }: {
 }
 
 /** One escalation's review: read state, the owner view and the decision form. */
-export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose = true }: {
+export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose = true, hideTechnicalRecovery = false }: {
   controller: AmuxOwnerReviewController;
+  /** Passed to the review view: no recovery tools for a settled card. */
+  hideTechnicalRecovery?: boolean;
   /** Where a step-up refused inside this review returns. */
   reviewReturnPath?: string;
   /** Assignment closes a review in place; a card dialog closes the card instead. */
@@ -1550,6 +1558,7 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
                 number={number}
                 onReread={() => void openReview(review.escalation.id)}
                 reviewReturnPath={returnPath}
+                hideTechnicalRecovery={hideTechnicalRecovery}
                 onRetryReadConfirmed={(confirmed) => {
                   setRetryReadConfirmed(confirmed);
                   setProposal(null);

@@ -82,6 +82,9 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       reviewNoPrBlockOnly: "The work result is saved, but there is no pull request, so it cannot be approved, and it cannot be run again right now. You can block it. Check the worker report first.",
       reviewNoPrNone: "The work result is saved, but there is no pull request, and no decision is open for this card right now. Open its full detail to see what holds it.",
       legacyCard: "No review decision can open on this card. Remake it as a new idea or close it in the panel just below.",
+      settledDone: "The work is already done; only the escalation an earlier attempt left is still open.",
+      settledTodo: "The card is waiting to run again; only the escalation an earlier attempt left is still open.",
+      settledAction: "Press \"Close only\" just below and the card leaves this queue. Its status, results and history stay.",
       reviewNoPrApprovable: "The work result is saved with no pull request; this kind of task is approved on its verified result. Check the worker report before deciding.",
       reviewUsageUnknown: "The run finished, but its usage was never reported, so it cannot be approved or run again yet. You can still block it.",
       // A blocked run's own attempt reason, which the escalation stores only
@@ -198,6 +201,9 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       reviewNoPrBlockOnly: "작업 결과는 저장됐지만 PR이 없어서 승인할 수 없고, 지금은 다시 실행할 수도 없어요. 차단할 수 있어요. 작업자 보고부터 확인해 주세요.",
       reviewNoPrNone: "작업 결과는 저장됐지만 PR이 없고, 지금은 이 카드에 고를 수 있는 결정이 없어요. 무엇이 막고 있는지 카드 상세에서 확인해 주세요.",
       legacyCard: "이 카드는 검토 결정이 열리지 않는 카드예요. 바로 아래 패널에서 새 아이디어로 다시 만들거나 닫아 주세요.",
+      settledDone: "작업은 이미 끝났고, 이전 시도가 남긴 escalation만 열려 있어요.",
+      settledTodo: "카드는 다시 실행을 기다리고 있고, 이전 시도가 남긴 escalation만 열려 있어요.",
+      settledAction: "바로 아래에서 \"닫기만\"을 누르면 확인 대기에서 빠져요. 카드 상태, 결과, 이력은 그대로예요.",
       reviewNoPrApprovable: "작업 결과가 PR 없이 저장됐어요. 이 종류의 작업은 검증된 결과로 승인해요. 결정하기 전에 작업자 보고를 확인해 주세요.",
       reviewUsageUnknown: "실행은 끝났지만 사용량 기록이 들어오지 않아서, 아직 승인하거나 다시 실행할 수 없어요. 차단은 할 수 있어요.",
       byAttemptReason: {
