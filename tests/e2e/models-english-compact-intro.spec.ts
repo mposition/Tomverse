@@ -13,7 +13,9 @@ for (const theme of ["light", "dark"] as const) {
     await expect(page.getByTestId("chat-consent-notice")).toBeVisible({ timeout: 30_000 });
     const first = page.getByRole("article").first();
     await expect(first).toBeVisible();
-    expect(await first.evaluate(node => node.getBoundingClientRect().top + scrollY)).toBeLessThan(800);
+    // The analytics notice above the page is shown once and its copy is explicit by design (#3571, #3592); measure the catalogue's own intro.
+    const consentHeight = await page.getByTestId("marketing-consent-slot").evaluate(node => node.getBoundingClientRect().height);
+    expect(await first.evaluate(node => node.getBoundingClientRect().top + scrollY) - consentHeight).toBeLessThan(800);
     const details = page.getByTestId("models-mobile-usage-details");
     await expect(details).not.toHaveAttribute("open", "");
     await details.locator("summary").focus();

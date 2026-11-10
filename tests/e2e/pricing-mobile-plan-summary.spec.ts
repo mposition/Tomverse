@@ -32,8 +32,10 @@ for (const currency of ["USD", "AUD"] as const) {
     const heading = page.locator("#pricing-plan-name-max");
     await expect(heading).toBeFocused(); await expect(heading).toBeInViewport();
     await expect(page.getByTestId("pricing-cta-max")).toBeVisible();
-    await page.keyboard.press("Tab");
-    expect(await page.getByTestId("pricing-cta-max").evaluate(node => node.contains(document.activeElement))).toBe(true);
+    // The card's credit-cost link (#3550) may come before its checkout action.
+    const cta = page.getByTestId("pricing-cta-max");
+    for (let step = 0; step < 3 && !(await cta.evaluate(node => node.contains(document.activeElement))); step++) await page.keyboard.press("Tab");
+    expect(await cta.evaluate(node => node.contains(document.activeElement))).toBe(true);
     expect(checkouts).toBe(0);
     await page.evaluate(() => { document.documentElement.style.fontSize = "32px"; });
     expect(await summary.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
