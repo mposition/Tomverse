@@ -1,3 +1,4 @@
+import { prepareRouterSearch } from "@/lib/chatRouterPresearch";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
@@ -400,6 +401,8 @@ import {
     ACTIVE_ESTIMATOR_VERSION,
     createTokenEstimateAccumulator,
     getCalibration,
+    toReservedInputTokens,
+    TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
 } from "@/lib/chatTokenEstimate";
 import { createShadowAccumulator } from "@/lib/tokenEstimateShadow";
 import {
@@ -1336,6 +1339,7 @@ async function handleChatPost(
      * somebody remembered to set (lib/chatFailureLayer.ts).
      */
     let providerCall: ProviderCallRecord | null = null;
+    let presearchForSettlement: ReturnType<typeof buildAppManagedWebSearchTool> | null = null;
     /**
      * Who this turn was for, hoisted for the catch.
      *
@@ -2241,6 +2245,9 @@ async function handleChatPost(
                       // discarded, including an explicit keep-original choice.
                       rewriteAllowed: !refinerPreview && !turnCarriesAttachments(autoRoutingMessages),
                       fileContext: fileRoutingContext,
+                      searchPlan: process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true" &&
+                          Boolean(session?.user?.id) && webSearchMode === "always" && !currentLocation &&
+                          !turnCarriesAttachments(autoRoutingMessages),
                       imageIntent: imageRouting.context,
                       onImageDecision: imageRouting.accept,
                       // An image turn is not a routing decision a chat model
@@ -4928,17 +4935,39 @@ async function handleChatPost(
          * and in one place, because doing it per-source is what broke twice.
          * See lib/chatProviderPrompt.ts.
          */
+        // Fallback gets the original execution view and its own admitted tool.
+        // Primary presearch must not leak another attempt's sources or budget.
+        const fallbackSdkMessages = splitProviderInstructions(
+            locationCacheBreakpoint ? uncachedLocationMessages : formattedMessages
+        ).messages;
+        if (process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true" &&
+            access.kind !== "guest" && autoSelection.routed &&
+            llmPick?.modelId === modelConfig.id && llmPick.searchQueries?.length &&
+            appManagedSearchTool && !currentLocation && !mcpConnector && !artifactToolConfig) {
+            presearchForSettlement = appManagedSearchTool;
+            const finishPresearch = latency.stage("presearchMs");
+            try {
+                const evidence = await prepareRouterSearch({
+                    queries: llmPick.searchQueries,
+                    tool: appManagedSearchTool,
+                    signal: req.signal,
+                    inputHeadroomTokens: contextInputTokens - reservationOnlyInputTokens -
+                        toReservedInputTokens(inputEstimate.breakdown()) - TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
+                    toolCallId: `router_search_${traceId}`,
+                });
+                formattedMessages.push(...evidence);
+            } finally { finishPresearch(); }
+        }
         const { messages: sdkMessages, instructions: sdkInstructions } =
             splitProviderInstructions(formattedMessages);
-        const fallbackSdkMessages = locationCacheBreakpoint
-            ? splitProviderInstructions(uncachedLocationMessages).messages
-            : sdkMessages;
         const manifestMessages = formattedMessages.map((message) => ({
             role: message.role,
             parts: Array.isArray(message.content)
                 ? message.content.map((part) =>
                       part.type === "text"
                           ? { type: "text" as const, text: part.text }
+                          : part.type === "tool-call" || part.type === "tool-result"
+                            ? { type: "text" as const, text: JSON.stringify(part) }
                           : part.type === "file"
                             ? {
                                   type: "file" as const,
@@ -7573,6 +7602,11 @@ async function handleChatPost(
                     inputTokens: 0,
                     outputTokens: 0,
                     outcome: "failed",
+                    ...(presearchForSettlement && presearchForSettlement.session.snapshot().backendRequestCount > 0 ? {
+                        searchBackendRequestCount: presearchForSettlement.session.snapshot().succeededRequestCount,
+                        // A thrown/aborted backend response can have unknown cost.
+                        searchQueriesObserved: false,
+                    } : {}),
                 }, {
                     providerUsageSnapshot,
                 });

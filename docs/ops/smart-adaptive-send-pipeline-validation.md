@@ -47,13 +47,14 @@ LLM call cannot explain that snapshot's preparation delay.
 | refinerPrepareMs | Existing automatic Refiner preparation, when applicable |
 | messageSaveMs | Durable question save, receipt recovery and local reconciliation |
 | panelHandoffMs | Prepared payload to panel run, including its model-settings barrier |
-| locationMs | Location analysis plus device/human permission wait |
-| locationIntentMs | Nested intent HTTP request and verification; absent when no new analysis was needed |
+| locationMs | Remaining location wait after the durable save, including device/human permission |
+| locationIntentMs | Semantic intent HTTP time; overlaps Refiner when prepared early, otherwise nested in locationMs; absent when no analysis was needed |
 | responseHeadersMs | Latest dispatch to response headers |
 | dispatchToContentMs | Latest dispatch to first nonempty visible content |
 | contentToEndMs | First content to consumed stream end |
 | clientFinalizeMs | Stream end to client handler completion |
 | beforeRoutingMs / routingMs / afterRoutingMs | Server entry to router, routing, routing end to provider dispatch |
+| presearchMs | Router-proposed search through the admitted attempt tool, before answer-model dispatch |
 | contextMs | Nested server context verification build, when a bundle is present |
 | providerToContentMs | Provider dispatch to first content, including model thinking and tool/search rounds |
 
@@ -179,8 +180,8 @@ through primary failure and fallback, in addition to the existing view tests.
 
 | Approach | Critical path and quality trade-off | Decision |
 | --- | --- | --- |
-| Independent Refiner and location-intent calls in parallel | Changes `F + L` to `max(F,L)` while retaining each model, prompt and result. Maximum theoretical saving is `min(F,L)`, not an observed result. | Preferred next structural experiment. Prime only the semantic decision; defer permission/GPS until the saved turn is current. Preserve identity cancellation, exact-source binding and one call per turn. Account for spend if a later save fails. Guest one-use verification must finish before either dependent request. |
-| Search preparation in the existing Router call | Have the Router propose independent grounded-search queries, then execute them together after ordinary access/credit admission and supply the results to the answering model. This may avoid repeated answer-model planning round trips; it adds no separate planner call. | High-impact candidate for search-heavy turns. Keep the same search backend, shared per-attempt query ceiling, untrusted-source treatment and provenance. Retain answering-model follow-up tools for genuinely dependent queries. Compare source relevance/completeness and added Router latency before adopting. Do not pre-spend search budget before admission. |
+| Independent Refiner and location-intent calls in parallel | Changes `F + L` to `max(F,L)` while retaining each model, prompt and result. Maximum theoretical saving is `min(F,L)`, not an observed result. | Implemented behind `CHAT_PARALLEL_PREPARATION_ENABLED`. Prime only the semantic decision; defer permission/GPS until the saved turn is current. Preserve identity cancellation, exact-source binding and one call per turn. Account for spend if a later save fails. Guest one-use verification must finish before either dependent request. |
+| Search preparation in the existing Router call | Have the Router propose independent grounded-search queries, then execute them together after ordinary access/credit admission and supply the results to the answering model. This may avoid repeated answer-model planning round trips; it adds no separate planner call. | Implemented behind `CHAT_ROUTER_PRESEARCH_ENABLED`. Keep the same search backend, shared per-attempt query ceiling, untrusted-source treatment and provenance. Retain answering-model follow-up tools for genuinely dependent queries. Compare source relevance/completeness and added Router latency before adopting. Do not pre-spend search budget before admission. |
 | One structured preparation call for refinement, routing, image/file and location intent | Removes repeated reading and model round trips. A larger combined prompt/output may offset the gain, and decisions can interfere. | Strong candidate for a separate evaluated adapter. Do not silently change the currently approved Refiner model/config pin or merge its budget ledger with the Router. |
 | Faster Refiner model or lower reasoning | May shorten the observed 3.5–3.7s provider segment, but equal quality is unproven. | Compare as a candidate; do not activate from a latency hypothesis. |
 | Speculative refinement while typing | Can hide submit latency but sends unsent text and spends on abandoned drafts. | Exclude from this change; user-input privacy and spending behavior would change. |
@@ -197,3 +198,87 @@ latency percentiles. Set non-inferiority criteria before running blinded paired
 answer evaluation. Mock timing or schema tests alone cannot establish semantic
 equivalence. A paid evaluation and production activation are separate actions;
 neither was performed for these alternatives.
+
+
+## Parallel preparation and Router presearch implementation
+
+Both switches are default-off server environment variables. This PR does not
+activate them or change the production location-intent switch enabled earlier.
+
+- `CHAT_PARALLEL_PREPARATION_ENABLED=true`: on authenticated Auto follow-ups
+  already eligible for automatic Refiner preparation, start the existing
+  location-intent call alongside that Refiner call, after context/draft admission.
+  Keep the same authored text, models and prompts. Wait for both decisions before
+  durable question save. The prepared boolean is tied to the location session's
+  identity, generation and exact authored text; it cannot contain a fix or request permission. GPS
+  still runs only from the saved, current turn. A manually granted or suppressed
+  session makes no speculative intent call. Guests and image turns retain their
+  existing path. A failed/stale preparation uses the existing saved-turn path.
+  An abandoned send may have spent its one already-admitted location intent call;
+  no retry is scheduled by preparation. No typing-time calls are added.
+- `CHAT_ROUTER_PRESEARCH_ENABLED=true`: the existing Router call can return zero
+  to two validated independent queries on authenticated text Auto turns with web
+  search enabled. The extra 240 output-token ceiling and prompt are included in
+  that call's existing provider cost hold. No separate planner call is created.
+  Only the final selected model's actually dispatchable application-managed tool
+  executes the plan, after the ordinary credit/admission boundary. Native search,
+  guests, files/artifacts, MCP, consented-location, search-off and unrouted turns
+  keep their paths. The Router does not receive device coordinates; the answering
+  model retains location-aware search after the usual consent boundary.
+  The same tool/session handles presearch and all later model queries: five
+  searches total, exact-query reuse, the same backend, sources, notices and billing.
+  At least three slots remain for dependent facts. The answer model receives the
+  results as a matched tool-call/tool-result pair, with untrusted-source notices,
+  and retains every normal tool. Empty/invalid plans and errors use normal tools.
+  Evidence must fit the existing 6,000-token search allowance; it is never
+  truncated or added above the reservation. Oversized results remain in the
+  attempt's exact-query cache for the ordinary tool path. No search evidence is
+  inherited by a replacement attempt, and existing search-turn recovery policy
+  is unchanged. An outer failure retains incurred/uncertain backend cost even
+  before an answer-model stream exists. Manifests include the tool payload digests.
+
+`locationIntentMs` and `refinerPrepareMs` now overlap for eligible parallel turns;
+never add them to estimate elapsed time. `presearchMs` is inside server pre-provider
+work; compare submit-to-content and completion totals, not that stage in isolation.
+The Router still has to produce correct queries: unchanged answering models and
+retained tools do not by themselves prove semantic non-inferiority.
+
+### Controlled comparison of both changes
+
+Local PC, PowerShell, repository root. Read-only fixture execution; no production
+credentials, network, database or paid model calls:
+
+```powershell
+node --conditions=react-server --import tsx scripts/smart-adaptive-parallel-benchmark.mjs
+```
+
+Forty alternating paired runs used the real location-session preparation and
+presearch/tool code with fixed delays and intercepted backend responses. Both
+variants use the same execution text, two initial independent searches, one
+**dependent** follow-up search, three sources, and one Refiner/location/Router
+call. The candidate removes one simulated answer-model planning pass; the fixture
+also charges it an additional 5ms for the longer Router output.
+
+| End-to-end fixture metric | Serial baseline | Both improvements |
+| --- | ---: | ---: |
+| First content p50 | 334.76ms | 246.29ms |
+| First content p95 | 340.64ms | 259.24ms |
+| Completion p50 | 366.01ms | 277.23ms |
+| Completion p95 | 371.37ms | 289.20ms |
+
+These establish orchestration savings under the stated delays, not production
+percentages or equal LLM answer quality. Real gains depend on actual Router output
+latency, query relevance, whether the first answering-model pass was avoidable,
+permission state, and follow-up searches. Do not combine these values with the
+previous context/draft benchmark or the tiny production snapshot.
+
+
+Local follow-up verification covers the real Router request and its exact cost
+hold, malformed/disabled plans, shared search caps and reuse, input headroom,
+failures and abortion, route admission/settlement, native/location exclusions,
+and the existing signed timing and selection contracts (192 passing checks).
+The two new controlled-browser scenarios prove simultaneous semantic requests,
+no permission/GPS before durable save, one intent call on the accepted turn, and
+no save/dispatch/GPS when model selection changes. Five existing send/timing/fence
+scenarios also pass. Build and targeted lint pass. Full provider semantic quality
+and production p50/p95 still require a separately authorized matched evaluation.

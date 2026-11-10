@@ -1,5 +1,7 @@
 "use client";
 
+import type { PreparedChatLocationIntent } from "@tomverse/chat-core";
+
 import type { ReactNode } from "react";
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
@@ -96,6 +98,7 @@ type PromptPayload = {
   submittedAtMonotonicMs?: number;
   preparationTimings?: import("@/lib/responseLatencyCore").ClientLatencyStages;
   preparationReadyAtMonotonicMs?: number;
+    preparedLocationIntent?: PreparedChatLocationIntent;
   id: string;
   text: string;
   chatId: string;

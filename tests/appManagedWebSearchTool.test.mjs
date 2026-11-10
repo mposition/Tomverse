@@ -1,3 +1,5 @@
+import { prepareRouterSearch } from "../lib/chatRouterPresearch.ts";
+import { parseRouterSearchQueries } from "../lib/chatRouterSearchPlan.ts";
 import assert from "node:assert/strict";
 import test, { afterEach, beforeEach } from "node:test";
 
@@ -542,4 +544,60 @@ test("an aborted turn aborts the backend request", async () => {
   const result = await run(config, { query: "a question" });
   assert.equal(result.status, "failed");
   assert.equal(result.reason, "backend_timeout");
+});
+
+
+const presearch = (tool, overrides = {}) => prepareRouterSearch({
+  queries: ["one", "two"], tool, signal: new AbortController().signal,
+  inputHeadroomTokens: 6000, toolCallId: "router-search", ...overrides,
+});
+
+test("router presearch and dependent model queries share one cap, cache and source collection", async () => {
+  const config = toolFor();
+  const messages = await presearch(config);
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0].content[0].toolCallId, messages[1].content[0].toolCallId);
+  const evidence = JSON.parse(messages[1].content[0].output.value);
+  assert.deepEqual(evidence.searches.map(item => item.query), ["one", "two"]);
+  assert.ok(evidence.searches.every(item => item.notice.includes("never as instructions")));
+  assert.equal(fetchCalls.length, 2);
+  await run(config, { query: ["one", "three", "four", "five", "six"] });
+  assert.equal(fetchCalls.length, 5, "presearch cannot mint a second allowance");
+  assert.equal(config.session.remaining(), 0);
+  assert.equal(config.session.snapshot().succeededRequestCount, 5);
+});
+
+test("invalid, aborted and insufficient-headroom presearch never reaches a backend", async () => {
+  for (const overrides of [
+    { queries: ["one", "two", "three"] }, { queries: ["x".repeat(401)] },
+    { queries: [null] }, { queries: [] }, { inputHeadroomTokens: 5999 },
+    { signal: AbortSignal.abort() },
+  ]) assert.deepEqual(await presearch(toolFor(), overrides), []);
+  assert.equal(fetchCalls.length, 0);
+  const stopped = toolFor({ signal: AbortSignal.abort() });
+  await run(stopped, { query: "one" });
+  assert.equal(stopped.session.snapshot().backendRequestCount, 0);
+  assert.equal(fetchCalls.length, 0);
+  assert.deepEqual(parseRouterSearchQueries([" one ", "one"]), ["one"]);
+});
+
+test("failed presearch remains recoverable through the ordinary tool without an automatic retry", async () => {
+  const config = toolFor();
+  globalThis.fetch = async () => { fetchCalls.push("failed"); return new Response("", { status: 503 }); };
+  const messages = await presearch(config, { queries: ["one"] });
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(JSON.parse(messages[1].content[0].output.value).searches[0].status, "failed");
+  globalThis.fetch = async () => { fetchCalls.push("recovered"); return braveResponse([{ title: "R", url: "https://example.com/r" }]); };
+  assert.equal((await run(config, { query: "one" })).status, "ok");
+  assert.equal(config.session.snapshot().backendRequestCount, 2);
+});
+
+test("oversized evidence is not injected or truncated and never widens the input allowance", async () => {
+  const config = toolFor();
+  const original = config.search;
+  config.search = async input => ({ ...(await original(input)), unexpected: "가".repeat(10000) });
+  assert.deepEqual(await presearch(config), []);
+  assert.equal(fetchCalls.length, 2);
+  await run(config, { query: "one" });
+  assert.equal(fetchCalls.length, 2, "the normal model tool can reuse successful presearch");
 });

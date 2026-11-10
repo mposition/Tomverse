@@ -1,4 +1,6 @@
 "use client";
+
+import type { PreparedChatLocationIntent } from "@tomverse/chat-core";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
@@ -249,6 +251,7 @@ type ChatAppProps = {
     submittedAtMonotonicMs?: number;
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
+    preparedLocationIntent?: PreparedChatLocationIntent;
     id: string;
     text: string;
     chatId: string;
@@ -1508,6 +1511,7 @@ function ChatAppComponent({
     submittedAtMonotonicMs?: number,
     preparationTimings?: ClientLatencyStages,
     preparationReadyAtMonotonicMs?: number,
+    preparedLocationIntent?: PreparedChatLocationIntent,
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1908,6 +1912,8 @@ function ChatAppComponent({
         const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal, chatLocationIntentEnabled ? {
           turnId: sourceUserMessageId,
           requiresLocation: async () => {
+            const prepared = preparedLocationIntent?.read(panelIdentityKey, String(userMessage.content ?? ""));
+            if (typeof prepared === "boolean") return prepared;
             const finishIntent = latency.stage("locationIntentMs");
             try { return await requestChatLocationIntent(String(userMessage.content ?? ""), fetch, { turnstileToken }); }
             finally { finishIntent(); }
@@ -3080,6 +3086,7 @@ function ChatAppComponent({
           promptPayload.submittedAtMonotonicMs,
           promptPayload.preparationTimings,
           promptPayload.preparationReadyAtMonotonicMs,
+          promptPayload.preparedLocationIntent,
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });

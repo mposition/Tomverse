@@ -174,6 +174,7 @@ const resultNotice = (now: Date) =>
 
 export type AppManagedWebSearchToolConfig = {
   tools: ToolSet;
+  search: (input: z.infer<typeof searchToolInputSchema>) => Promise<AppManagedSearchToolResult | AppManagedSearchBatchResult>;
   /** The counter and collected sources. Read after the turn settles. */
   session: AppManagedSearchSession;
 };
@@ -218,136 +219,137 @@ export const buildAppManagedWebSearchTool = (input: {
   const requests = new Map<string, Promise<AppManagedSearchToolResult>>();
   let toolCallIndex = 0;
 
-  return {
-    session,
-    tools: {
-      [APP_MANAGED_WEB_SEARCH_TOOL_NAME]: tool({
-        description: SEARCH_TOOL_DESCRIPTION,
-        inputSchema: searchToolInputSchema,
-        execute: async (raw): Promise<AppManagedSearchToolResult | AppManagedSearchBatchResult> => {
-          const startedAt = Date.now();
-          const callIndex = ++toolCallIndex;
-          const batchSize = Array.isArray(raw?.query) ? raw.query.length : 1;
-          const report = (
-            result: AppManagedSearchToolResult,
-            queryLength: number,
-            reused = false
-          ) => {
-            input.onOutcome?.({
-              status: result.status,
-              ...(result.reason ? { reason: result.reason } : {}),
-              queryLength,
-              resultCount: result.results?.length ?? 0,
-              durationMs: Date.now() - startedAt,
-              reused,
-              toolCallIndex: callIndex,
-              batchSize,
-            });
-            return result;
-          };
+  const search: AppManagedWebSearchToolConfig["search"] = async (raw) => {
+    const startedAt = Date.now();
+    const callIndex = ++toolCallIndex;
+    const batchSize = Array.isArray(raw?.query) ? raw.query.length : 1;
+    const report = (
+      result: AppManagedSearchToolResult,
+      queryLength: number,
+      reused = false
+    ) => {
+      input.onOutcome?.({
+        status: result.status,
+        ...(result.reason ? { reason: result.reason } : {}),
+        queryLength,
+        resultCount: result.results?.length ?? 0,
+        durationMs: Date.now() - startedAt,
+        reused,
+        toolCallIndex: callIndex,
+        batchSize,
+      });
+      return result;
+    };
 
-          if (Array.isArray(raw?.query) && (batchSize === 0 || batchSize > APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest)) {
-            session.recordRefusal("invalid_query");
-            return report({ status: "invalid_query", reason: "invalid_batch_size", searchesRemaining: session.remaining() }, 0);
-          }
+    if (Array.isArray(raw?.query) && (batchSize === 0 || batchSize > APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest)) {
+      session.recordRefusal("invalid_query");
+      return report({ status: "invalid_query", reason: "invalid_batch_size", searchesRemaining: session.remaining() }, 0);
+    }
 
-          const runQuery = async (query: unknown): Promise<AppManagedSearchToolResult> => {
-            // Validation first, and deliberately before the claim: a query this
-            // application will not send costs nothing, so spending one of the
-            // turn's five on it would be charging for a request that never
-            // existed. The model can rewrite and try again at no cost.
-            const validated = validateSearchQuery(query);
-            if (!validated.ok) {
-              session.recordRefusal("invalid_query");
-              return report(
-                {
-                  status: "invalid_query",
-                  reason: validated.reason,
-                  searchesRemaining: session.remaining(),
-                },
-                typeof query === "string" ? query.length : 0
-              );
-            }
-
-            const request: WebSearchBackendRequest = {
-              query: validated.query,
-              ...(raw.country || input.defaultCountry
-                ? { country: raw.country ?? input.defaultCountry }
-                : {}),
-              ...(raw.searchLang || input.defaultSearchLang
-                ? { searchLang: raw.searchLang ?? input.defaultSearchLang }
-                : {}),
-              ...(raw.freshness ? { freshness: raw.freshness } : {}),
-              ...(input.signal ? { signal: input.signal } : {}),
-            };
-            const key = JSON.stringify([
-              request.query, request.country, request.searchLang, request.freshness,
-            ]);
-            const existing = requests.get(key);
-            if (existing) {
-              const result = await existing;
-              return report({ ...result, searchesRemaining: session.remaining() }, validated.query.length, true);
-            }
-
-            const claim = session.claim();
-            if (!claim.ok) {
-              session.recordRefusal("query_limit_reached");
-              // No socket is opened on this path. That is the property the whole
-              // reservation rests on, and `tests/appManagedWebSearchTool` asserts
-              // it by counting fetches rather than by reading this branch.
-              return report(
-                {
-                  status: "limit_reached",
-                  query: validated.query,
-                  reason: "query_limit_reached",
-                  searchesRemaining: 0,
-                },
-                validated.query.length
-              );
-            }
-
-            const pending = (async (): Promise<AppManagedSearchToolResult> => {
-              const outcome = await runWebSearchBackendRequest(input.backend, request);
-              if (!outcome.ok) {
-                session.recordFailure(outcome.failure);
-                return {
-                  status: "failed",
-                  query: validated.query,
-                  reason: outcome.failure,
-                  searchesRemaining: session.remaining(),
-                };
-              }
-              session.recordSuccess(outcome.results);
-              return {
-                status: "ok",
-                query: validated.query,
-                searchesRemaining: session.remaining(),
-                results: outcome.results,
-                notice: resultNotice(new Date()),
-                ...(outcome.truncated ? { truncated: true } : {}),
-              };
-            })();
-            requests.set(key, pending);
-            try {
-              const result = await pending;
-              if (result.status !== "ok") requests.delete(key);
-              return report({ ...result, searchesRemaining: session.remaining() }, validated.query.length);
-            } catch (error) {
-              requests.delete(key);
-              throw error;
-            }
-          };
-          if (!Array.isArray(raw?.query)) return runQuery(raw?.query);
-          // Claims happen synchronously before the first await, across this
-          // batch AND other concurrent calls. The existing attempt cap applies.
-          const searches = await Promise.all(raw.query.map(runQuery));
-          return {
-            status: "batch",
+    const runQuery = async (query: unknown): Promise<AppManagedSearchToolResult> => {
+      // Validation first, and deliberately before the claim: a query this
+      // application will not send costs nothing, so spending one of the
+      // turn's five on it would be charging for a request that never
+      // existed. The model can rewrite and try again at no cost.
+      const validated = validateSearchQuery(query);
+      if (!validated.ok) {
+        session.recordRefusal("invalid_query");
+        return report(
+          {
+            status: "invalid_query",
+            reason: validated.reason,
             searchesRemaining: session.remaining(),
-            searches: searches.map(result => ({ ...result, searchesRemaining: session.remaining() })),
+          },
+          typeof query === "string" ? query.length : 0
+        );
+      }
+
+      const request: WebSearchBackendRequest = {
+        query: validated.query,
+        ...(raw.country || input.defaultCountry
+          ? { country: raw.country ?? input.defaultCountry }
+          : {}),
+        ...(raw.searchLang || input.defaultSearchLang
+          ? { searchLang: raw.searchLang ?? input.defaultSearchLang }
+          : {}),
+        ...(raw.freshness ? { freshness: raw.freshness } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      };
+      const key = JSON.stringify([
+        request.query, request.country, request.searchLang, request.freshness,
+      ]);
+      const existing = requests.get(key);
+      if (existing) {
+        const result = await existing;
+        return report({ ...result, searchesRemaining: session.remaining() }, validated.query.length, true);
+      }
+
+      if (input.signal?.aborted) return report({
+        status: "failed", reason: "backend_timeout", searchesRemaining: session.remaining(),
+      }, validated.query.length);
+      const claim = session.claim();
+      if (!claim.ok) {
+        session.recordRefusal("query_limit_reached");
+        // No socket is opened on this path. That is the property the whole
+        // reservation rests on, and `tests/appManagedWebSearchTool` asserts
+        // it by counting fetches rather than by reading this branch.
+        return report(
+          {
+            status: "limit_reached",
+            query: validated.query,
+            reason: "query_limit_reached",
+            searchesRemaining: 0,
+          },
+          validated.query.length
+        );
+      }
+
+      const pending = (async (): Promise<AppManagedSearchToolResult> => {
+        const outcome = await runWebSearchBackendRequest(input.backend, request);
+        if (!outcome.ok) {
+          session.recordFailure(outcome.failure);
+          return {
+            status: "failed",
+            query: validated.query,
+            reason: outcome.failure,
+            searchesRemaining: session.remaining(),
           };
-        },
-      }),
-    },
+        }
+        session.recordSuccess(outcome.results);
+        return {
+          status: "ok",
+          query: validated.query,
+          searchesRemaining: session.remaining(),
+          results: outcome.results,
+          notice: resultNotice(new Date()),
+          ...(outcome.truncated ? { truncated: true } : {}),
+        };
+      })();
+      requests.set(key, pending);
+      try {
+        const result = await pending;
+        if (result.status !== "ok") requests.delete(key);
+        return report({ ...result, searchesRemaining: session.remaining() }, validated.query.length);
+      } catch (error) {
+        requests.delete(key);
+        throw error;
+      }
+    };
+    if (!Array.isArray(raw?.query)) return runQuery(raw?.query);
+    // Claims happen synchronously before the first await, across this
+    // batch AND other concurrent calls. The existing attempt cap applies.
+    const searches = await Promise.all(raw.query.map(runQuery));
+    return {
+      status: "batch",
+      searchesRemaining: session.remaining(),
+      searches: searches.map(result => ({ ...result, searchesRemaining: session.remaining() })),
+    };
   };
+  return { session, search, tools: {
+    [APP_MANAGED_WEB_SEARCH_TOOL_NAME]: tool({
+      description: SEARCH_TOOL_DESCRIPTION,
+      inputSchema: searchToolInputSchema,
+      execute: search,
+    }),
+  } };
 };
