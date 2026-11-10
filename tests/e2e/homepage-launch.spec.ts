@@ -288,15 +288,24 @@ for (const width of [320, 390, 1440]) {
   });
 }
 
-test("hero motion can be turned off without hiding its content", async ({ page }) => {
+test("hero motion can be turned off without hiding its content", async ({ page }, testInfo) => {
   await prepareGuestPage(page, "en");
+  if (testInfo.project.name.startsWith("mobile")) await page.setViewportSize({ width: 320, height: 800 });
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/");
   const hero = page.locator("section[aria-labelledby='landing-hero-title']");
   const control = page.getByTestId("launch-motion-toggle");
+  await expect(control).toHaveAccessibleName("Pause animation");
+  expect(await control.evaluate(node => parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(14);
+  const target = (await control.boundingBox())!;
+  expect(target.width).toBeGreaterThanOrEqual(44);
+  expect(target.height).toBeGreaterThanOrEqual(44);
+  await control.focus();
+  await expect(control).toBeFocused();
   await expect.poll(() => hero.evaluate(element => element.getAnimations({ subtree: true }).length)).toBeGreaterThan(0);
   await control.click();
   await expect(control).toHaveAttribute("aria-pressed", "true");
+  await expect(control).toHaveAccessibleName("Resume animation");
   expect(await hero.evaluate(element => element.getAnimations({ subtree: true }).length)).toBe(0);
   await expect(page.getByTestId("landing-hero-title")).toBeVisible();
   await expect(hero.getByRole("heading", { level: 2 })).toBeVisible();
