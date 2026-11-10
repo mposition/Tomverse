@@ -6,7 +6,8 @@ test("file-analysis introduction and workflow card have distinct useful content"
   await prepareGuestPage(page, "en");
   await page.goto("/ai-for-file-analysis");
   const intro = page.getByRole("heading", { level: 1 }).locator("..").locator("p").nth(1);
-  const workflow = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Supported analysis workflows", exact: true }) });
+  // #3619 retitled the workflow card as a worked example.
+  const workflow = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Example: analyze a club notice", exact: true }) });
   await expect(intro).toContainText("PDFs, Office documents, text and images");
   expect((await intro.textContent())!.trim()).not.toBe((await workflow.locator("p").textContent())!.trim());
   await expect(workflow.getByRole("listitem")).toHaveCount(3);
