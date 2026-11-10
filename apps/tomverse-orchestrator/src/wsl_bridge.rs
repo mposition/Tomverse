@@ -1099,6 +1099,21 @@ fn api_model_access_read_deferrable(error: &anyhow::Error) -> bool {
     is_database_busy(error) || crate::tomverse_api::is_selection_read_recoverable(error)
 }
 
+/// The warning for a quota observation POST whose outcome is unknown
+/// (transport error, timeout, unreadable answer or failed lookup). This is not
+/// a halt: an observation is a usage snapshot with its own observation_id, the
+/// route refuses a replay of that id (409), and nothing is dispatched, settled
+/// or charged by it. Recorded or not, the next five-minute probe reports
+/// afresh under a new id, so the bridge keeps serving and never reposts. Only
+/// external or destructive writes must be verified before any retry. The line
+/// ends in "not halted", the form the auto-restart reads as harmless.
+fn quota_write_unknown_warning(name: &str, error: &anyhow::Error) -> String {
+    format!(
+        "amux wsl bridge warn: quota observation write for {name} outcome unknown ({}); the next probe reports afresh, not halted",
+        bridge_error_class(error)
+    )
+}
+
 /// Records why the bridge halted. The first cause wins: whatever followed it
 /// happened in a bridge that had already stopped taking new work.
 ///
@@ -3202,7 +3217,9 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                         Ok(Some(observation)) => match api.worker_quota_record_once(&observation).await {
                             Ok(true) => println!("amux v22 quota observation recorded for {name}"),
                             Ok(false) => eprintln!("amux v22 quota observation refused for {name}"),
-                            Err(_) => { halted = true; note_halt(&mut halt_cause, "quota_write_unknown"); break; }
+                            // An unknown quota write never halts: see
+                            // quota_write_unknown_warning.
+                            Err(error) => eprintln!("{}", quota_write_unknown_warning(&name, &error)),
                         },
                         _ => eprintln!("amux v22 quota source unavailable for {name}"),
                     }
@@ -6790,6 +6807,38 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
         assert!(!deferral.contains("halted = true"));
         assert!(!deferral.contains("v22_sidecar_api_model_access"));
         assert!(!deferral.contains("record_once"));
+    }
+
+    #[test]
+    fn an_unknown_quota_write_warns_with_its_class_and_does_not_halt() {
+        use crate::tomverse_api::UnacceptedStatus;
+        use reqwest::StatusCode;
+        let lookup = anyhow::anyhow!("quota outcome unknown or conflicting lookup");
+        let line = quota_write_unknown_warning("codex-chore", &lookup);
+        assert_eq!(
+            line,
+            "amux wsl bridge warn: quota observation write for codex-chore outcome unknown (other); the next probe reports afresh, not halted"
+        );
+        let refused_lookup = anyhow::Error::new(UnacceptedStatus { status: StatusCode::BAD_GATEWAY })
+            .context("quota outcome unknown; lookup unavailable");
+        assert!(quota_write_unknown_warning("claude-review", &refused_lookup)
+            .contains("for claude-review outcome unknown (http_502);"));
+        // The auto-restart counts a warning as harmless only when it ends so.
+        assert!(line.ends_with(", not halted"));
+        assert!(!line.contains("halt noted"));
+    }
+
+    #[test]
+    fn the_quota_write_never_halts_the_bridge() {
+        let source = include_str!("wsl_bridge.rs");
+        let start = source.find("match api.worker_quota_record_once(&observation).await").unwrap();
+        let block = &source[start..start + source[start..].find("quota source unavailable").unwrap()];
+        assert!(block.contains("Err(error) => eprintln!(\"{}\", quota_write_unknown_warning(&name, &error))"));
+        assert!(!block.contains("halted = true"));
+        assert!(!block.contains("note_halt"));
+        assert!(!block.contains("break"));
+        let cause = ["quota", "write", "unknown"].join("_");
+        assert!(!source.contains(&format!("\"{cause}\"")), "no halt cause is left for an unknown quota write");
     }
 }
 
