@@ -391,6 +391,46 @@ test("a done or todo card left with an earlier attempt's escalation offers its c
   assert.doesNotMatch(decision(item({}), controller()), /amux-settled-card-escalation/);
 });
 
+test("a done card's leftover escalation reads like its card detail: close right under why, no recovery", () => {
+  // AMUX-FILEREQ-004 (2026-11-10): the close sat under the recovery steps,
+  // "no choice", the Ubuntu inspection and one-click recovery, out of sight.
+  const card = item({ status: "done", displayKey: "AMUX-FILEREQ-004", attentionReason: "usage_outcome_unknown" });
+  const escalationId = card.escalationId!;
+  const settledReview = reviewFor(escalationId, {
+    task: { id: "task-1", title: "Tidy", status: "done", revision: 12, due_parse_state: "valid",
+      review_pr_number: null, recovery_inspectable: true, host_recovery_available: true },
+    last_attempt: { id: "attempt-3", task_revision: 9, outcome: "expired", to_status: "blocked", ended_at: null },
+    review_context: { title: "Tidy", description: "Scope text", result_sha256: null,
+      escalation_reason: "usage_outcome_unknown", last_attempt_reason: "usage_outcome_unknown",
+      previous_block_reason: null },
+    allowed_outcomes: [], proposed_transitions: {},
+  });
+  for (const ctl of [controller(), controller({ selectedEscalationId: escalationId, review: settledReview })]) {
+    const html = decision(card, ctl);
+    const why = html.indexOf('data-testid="amux-owner-queue-why"');
+    const panel = html.indexOf('data-testid="amux-settled-card-escalation"');
+    assert.ok(why >= 0 && why < panel);
+    // Nothing but the why box comes between: the panel is the next block.
+    assert.doesNotMatch(html.slice(why, panel), /amux-owner-queue-(?:recovery-steps|choices)|admin-amux-/);
+    assert.match(html, /The work is already done; only the escalation an earlier attempt left is still open/);
+    assert.match(html, /data-testid="amux-owner-queue-settled-action"/);
+    // Words that do not fit this card stay out.
+    assert.doesNotMatch(html, /could not confirm how this run ended|cannot be approved or run again yet/);
+    assert.doesNotMatch(html, /amux-owner-queue-recovery-steps|amux-owner-queue-choices|amux-owner-queue-usage-unknown/);
+    assert.doesNotMatch(html, /admin-amux-technical-recovery|Request Ubuntu inspection|admin-amux-one-click-recovery/);
+  }
+  // The protected review stays below the panel as reading: the worker report is still there.
+  const read = decision(card, controller({ selectedEscalationId: escalationId, review: settledReview }));
+  assert.ok(read.indexOf('data-testid="amux-settled-card-escalation"') < read.indexOf('data-testid="admin-amux-worker-report"'));
+  // A todo card says it waits to run again; a viewer who is not the owner gets no close instruction.
+  assert.match(decision(item({ status: "todo", attentionReason: "usage_outcome_unknown" }), controller()),
+    /The card is waiting to run again; only the escalation an earlier attempt left is still open/);
+  assert.doesNotMatch(decision(card, controller(), false), /amux-owner-queue-settled-action/);
+  // A blocked card with the same reason keeps its recovery steps.
+  assert.match(decision(item({ status: "blocked", attentionReason: "usage_outcome_unknown" }), controller()),
+    /data-testid="amux-owner-queue-recovery-steps"/);
+});
+
 const preV22Legacy: AmuxLegacyCardRead = { revision: 9, view: { kind: "pre_v22_task", closeRefusal: null,
   alreadyArchived: false, idea: { state: "ready", title: "Can the PR check be reused?", truncated: false,
     text: "Can the PR check be reused?\n\n원래 카드: AMUX-GITHUB-002" } } };
