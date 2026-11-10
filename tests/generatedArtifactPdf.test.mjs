@@ -173,3 +173,41 @@ test("matching headings later in a document remain part of its content", async (
   }));
   assert.equal(text.split(title).length - 1, 2);
 });
+
+test("weighted PDF tables give descriptions space without changing values or crossing the page margin", async () => {
+  const spec = { filename: "table.pdf", format: "pdf", blocks: [{
+    type: "table", columns: ["Item", "Description", "Amount"],
+    rows: [["A1", "Interoperability documentation and implementation", "$25"]],
+  }] };
+  const positions = async (value) => {
+    const document = await readPdf(build(value));
+    const content = await (await document.getPage(1)).getTextContent();
+    const items = content.items.filter(item => "str" in item && item.str.trim());
+    for (const item of items) {
+      assert.ok(item.transform[4] >= 56 - 0.1);
+      assert.ok(item.transform[4] + item.width <= 595.28 - 56 + 0.1);
+    }
+    await document.cleanup();
+    return items;
+  };
+  const equal = await positions(spec);
+  const weighted = await positions({ ...spec, blocks: [{ ...spec.blocks[0], pdfColumnWeights: [1, 4, 1] }] });
+  const x = (items, value) => items.find(item => item.str === value).transform[4];
+  assert.ok(x(weighted, "Description") < x(equal, "Description"));
+  assert.ok(x(weighted, "Amount") > x(equal, "Amount"));
+  assert.ok(weighted.some(item => item.str.includes("Interoperability")), "long word remains whole");
+  const dataLines = items => new Set(items.filter(item => item.transform[5] < items[0].transform[5]).map(item => item.transform[5])).size;
+  assert.ok(dataLines(weighted) < dataLines(equal));
+  const text = weighted.map(item => item.str).join(" ");
+  for (const value of ["A1", "Interoperability", "documentation", "implementation", "$25"]) assert.ok(text.includes(value));
+});
+
+test("PDF table weights reject incomplete, nonpositive, unbounded and nonfinite input", () => {
+  for (const weights of [[1], [1, 0], [1, 21], [1, Infinity], [1, NaN]]) {
+    const admission = admitDocumentSpec({ filename: "table.pdf", format: "pdf", blocks: [{
+      type: "table", columns: ["A", "B"], rows: [["a", "b"]], pdfColumnWeights: weights,
+    }] });
+    assert.equal(admission.ok, false, JSON.stringify(weights));
+    assert.equal(admission.code, "SCHEMA_INVALID");
+  }
+});

@@ -1776,6 +1776,25 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The additive one-click recovery migration (owner decision 2026-11-08) creates the append-only pre-approval and result ledgers, their guards and the approval's preApprovalId column, and replaces the approval guard body. It seeds and mutates no row; the write verbs are DDL, trigger events and guard predicates.",
   })),
+  ...[
+    ["AdminAuditLog", 3],
+    ["AmuxV22TaskRecoveryApproval", 2],
+  ].map(([table, tableMentions]) => ({
+    path: "prisma/migrations/20261110100000_amux_v22_attempt_usage_acceptance/migration.sql",
+    table,
+    tableMentions,
+    writeVerbs: 10,
+    reason:
+      "The additive usage-acceptance migration (owner decision 2026-11-10) creates the append-only acceptance table, its foreign key to the audit row and a guard that only reads the audit and recovery-approval rows of the same transaction. It seeds and mutates no row; the write verbs are DDL, trigger events and guard predicates.",
+  })),
+  {
+    path: "lib/amux/v22AttemptUsageAcceptance.ts",
+    table: "AmuxCliUsageEvent",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason:
+      "Reads whether an attempt's CLI usage was ever fully reported, with the worker usage gate's rule. The one write verb is the constant SELECT FOR UPDATE that locks the Task row; it writes no usage row.",
+  },
   {
     path: "lib/adminAuditSystemActors.ts",
     table: "AmuxV22TaskRecoveryEvidence",

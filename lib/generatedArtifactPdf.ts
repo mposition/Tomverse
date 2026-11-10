@@ -345,12 +345,20 @@ const tableBlock = (
 ) => {
   const style = STYLES.tableCell;
   const columnCount = block.columns.length;
-  const columnWidth = CONTENT_WIDTH / columnCount;
   const padding = 4;
+  const weights = block.pdfColumnWeights ?? Array<number>(columnCount).fill(1);
+  const totalWeight = weights.reduce((total, weight) => total + weight, 0);
+  // Reserve a drawable cell even when one column receives a very small weight.
+  const minimumWidth = padding * 2 + style.size;
+  const remainingWidth = CONTENT_WIDTH - minimumWidth * columnCount;
+  const columnWidths = weights.map(weight => minimumWidth + remainingWidth * weight / totalWeight);
+  const columnOffsets = columnWidths.map((_, index) =>
+    columnWidths.slice(0, index).reduce((total, width) => total + width, 0)
+  );
 
   const rowFor = (values: readonly string[]) =>
-    values.map((value) =>
-      wrap(font, value, style.size, columnWidth - padding * 2)
+    values.map((value, column) =>
+      wrap(font, value, style.size, columnWidths[column] - padding * 2)
     );
 
   const drawRow = (cells: Glyph[][][], header: boolean) => {
@@ -363,7 +371,7 @@ const tableBlock = (
         builder.textAt(
           line,
           { ...style, grey: header ? 0 : 0.1 },
-          MARGIN + column * columnWidth + padding,
+          MARGIN + columnOffsets[column] + padding,
           top - padding - (lineIndex + 1) * style.leading + 3
         );
       });
