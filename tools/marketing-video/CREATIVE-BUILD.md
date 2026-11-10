@@ -11,6 +11,9 @@ and run one command:
 
     node render-creative.mjs {{RUN}} <locale> --stills [count]
 
+Run it as written, from the directory you start in; never `cd` (the paths
+above are relative to it). Use Read, not the shell, to look at files.
+
 It checks your code, renders `count` evenly spaced stills (half size) to
 `{{RUN}}/review/<locale>/` and prints their paths, or prints why it refused or
 failed. Look at the stills with the Read tool.
