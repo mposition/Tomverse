@@ -994,12 +994,12 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "metadataDescription": "Use multiple AI models to summarize and analyze supported PDFs, Office documents, text files, and images in Tomverse.",
       "eyebrow": "AI document workflow",
       "title": "Analyze files with multiple AI models",
-      "description": "Extract the meeting date, what to bring and the reply deadline from a club notice. Ask for an undecided venue to stay marked as undecided, with a supporting sentence for each item. Readable PDFs, Office documents, supported text and images can be used; interpretation depends on the file and model.",
+      "description": "Compare how multiple AI models interpret supported PDFs, Office documents, text and images. Check summaries and extracted details against the original file.",
       "introCtaLabel": "Start analyzing files",
       "sections": [
         {
           "title": "Supported analysis workflows",
-          "body": "Extract the meeting date, what to bring and the reply deadline from a club notice. Ask for an undecided venue to stay marked as undecided, with a supporting sentence for each item. Readable PDFs, Office documents, supported text and images can be used; interpretation depends on the file and model.",
+          "body": "For a club notice, ask each model to extract the following and include a supporting sentence for every result.",
           "bullets": [
             "Extract dates, items to bring and reply deadlines",
             "Compare whether a summary keeps the original dates and conditions",
