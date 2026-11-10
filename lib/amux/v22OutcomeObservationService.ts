@@ -3,7 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
@@ -51,8 +51,6 @@ export async function recordAmuxV22Outcome(input: {
     reasonCode: parsed.reasonCode,
   })).digest("hex");
   return prisma.$transaction(async (tx) => {
-    // Audit chain before the Task row (lib/adminAudit.ts takeAuditChainLock).
-    await takeAuditChainLock(tx);
     const locked = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${parsed.taskId} FOR UPDATE
     `;
