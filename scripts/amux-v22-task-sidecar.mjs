@@ -23,7 +23,7 @@ for (const name of ["DATABASE_URL", "DIRECT_URL", "TOMVERSE_AMUX_SYNC_SECRET",
 // The CLI this sidecar runs (a v19 channel name); Claude when unset. Another
 // provider reuses the binary and config-directory variables for its own CLI.
 const provider = process.env.TOMVERSE_AMUX_V22_PROVIDER ?? "anthropic";
-if (!["anthropic", "openai", "github-copilot", "cursor"].includes(provider))
+if (!["anthropic", "openai", "github-copilot", "cursor", "antigravity"].includes(provider))
   throw new Error("invalid sidecar provider");
 const config = { ...amuxV22SidecarLaunchConfigFromEnvironment(process.env), provider };
 const socketPath = process.env.TOMVERSE_AMUX_V22_SIDECAR_SOCKET;
