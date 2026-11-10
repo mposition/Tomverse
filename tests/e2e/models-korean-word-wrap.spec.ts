@@ -11,11 +11,12 @@ for (const width of [320, 1440]) for (const theme of ["light", "dark"] as const)
     await page.goto("/models?lang=ko");
     const title = page.getByRole("heading", { level: 1 });
     expect(await renderedWordLineCount(title, "찾아보세요.")).toBe(1);
-    const intro = title.locator("..").locator("p").nth(1);
-    expect(await renderedWordLineCount(intro, "있습니다.")).toBe(1);
-    expect(await renderedWordLineCount(intro, "사용량은")).toBe(1);
+    // Phones show the short introduction; the full one is hidden below sm (#3546).
+    const intro = width === 320 ? page.getByTestId("models-mobile-usage-details").locator("..").locator("p").first() : title.locator("..").locator("p").nth(1);
+    for (const word of width === 320 ? ["크레딧과", "비교하세요."] : ["있습니다.", "사용량은"]) expect(await renderedWordLineCount(intro, word)).toBe(1);
     const description = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Claude Fable 5", exact: true }) }).locator("p.mt-4");
-    expect(await renderedWordLineCount(description, "문서")).toBe(1);
+    // The card text is the per-model criteria line (#3556).
+    expect(await renderedWordLineCount(description, "크레딧")).toBe(1);
     if (width === 320) {
       await page.evaluate(() => { document.documentElement.style.fontSize = "32px"; });
       await intro.evaluate(node => { node.textContent += ` https://example.com/${"long".repeat(30)}`; });

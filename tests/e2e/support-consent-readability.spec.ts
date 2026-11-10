@@ -18,7 +18,8 @@ for (const path of ["/support?lang=en", "/en/support"]) for (const theme of ["li
     const accept = notice.getByRole("button", { name: "Allow analytics", exact: true });
     const decline = notice.getByRole("button", { name: "Decline", exact: true });
     expect(await body.evaluate(node => parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(14);
-    await expect(body).toContainText("Usage analytics excludes prompts and file content. Privacy policy");
+    // Support shows the full consent body on phones too (#3568).
+    await expect(body).toContainText("Prompts, responses, filenames, and file contents are never included. Privacy policy");
     expect((await accept.boundingBox())!.y).toBeGreaterThan((await body.boundingBox())!.y + (await body.boundingBox())!.height);
     expect(await privacy.evaluate(node => { const range = document.createRange(); range.selectNodeContents(node); return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size; })).toBe(1);
     await expectAccessibleContrast(body, "Consent body");

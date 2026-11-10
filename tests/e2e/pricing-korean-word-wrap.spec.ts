@@ -14,7 +14,7 @@ for (const width of [320, 1440]) for (const theme of ["light", "dark"] as const)
     const free = page.getByTestId("pricing-plan-card-free");
     expect(await renderedWordLineCount(free.locator("li").filter({ hasText: "다운로드" }), "다운로드")).toBe(1);
     const pro = page.getByTestId("pricing-plan-card-pro");
-    expect(await renderedWordLineCount(pro.getByText("표시된 현지통화 고정 금액으로 결제됩니다.", { exact: true }), "결제됩니다.")).toBe(1);
+    expect(await renderedWordLineCount(pro.getByTestId("pricing-annual-checkout-note"), "확인하세요.")).toBe(1);
     if (width === 320) {
       await page.evaluate(() => { document.documentElement.style.fontSize = "32px"; });
       await intro.evaluate(node => { node.textContent += ` https://example.com/${"long".repeat(30)}`; });

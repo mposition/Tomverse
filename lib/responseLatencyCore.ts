@@ -1,7 +1,27 @@
 import { z } from "zod";
 
 const duration = z.number().int().min(0).max(3_600_000);
+export const clientLatencyStagesSchema = z.object({
+  submitHandoffMs: duration.optional(),
+  attachmentPrepareMs: duration.optional(),
+  conversationPrepareMs: duration.optional(),
+  modelSyncMs: duration.optional(),
+  preflightMs: duration.optional(),
+  contextPrepareMs: duration.optional(),
+  draftPrepareMs: duration.optional(),
+  refinerPrepareMs: duration.optional(),
+  messageSaveMs: duration.optional(),
+  panelHandoffMs: duration.optional(),
+  locationMs: duration.optional(),
+  locationIntentMs: duration.optional(),
+  responseHeadersMs: duration.optional(),
+  dispatchToContentMs: duration.optional(),
+  contentToEndMs: duration.optional(),
+  clientFinalizeMs: duration.optional(),
+}).strict();
+export type ClientLatencyStages = z.infer<typeof clientLatencyStagesSchema>;
 export const responseLatencyTimingsSchema = z.object({
+  ...clientLatencyStagesSchema.shape,
   prepareMs: duration.optional(),
   firstContentMs: duration.optional(),
   completionMs: duration.optional(),
@@ -9,6 +29,9 @@ export const responseLatencyTimingsSchema = z.object({
   routingMs: duration.optional(),
   contextMs: duration.optional(),
   preProviderMs: duration.optional(),
+  beforeRoutingMs: duration.optional(),
+  afterRoutingMs: duration.optional(),
+  providerToContentMs: duration.optional(),
   firstReviewMs: duration.optional(),
   reviewMs: duration.optional(),
 }).strict();
@@ -32,8 +55,10 @@ export const clientLatencyBodySchema = z.object({
   prepareMs: duration,
   firstContentMs: duration.nullable(),
   completionMs: duration,
+  stages: clientLatencyStagesSchema.optional(),
 }).strict().refine(value => value.prepareMs <= value.completionMs &&
-  (value.firstContentMs === null || (value.firstContentMs >= value.prepareMs && value.firstContentMs <= value.completionMs)),
+  (value.firstContentMs === null || (value.firstContentMs >= value.prepareMs && value.firstContentMs <= value.completionMs)) &&
+  Object.values(value.stages ?? {}).every(ms => ms <= value.completionMs),
   "Timing events must follow submission order.");
 
 export function latencyDistribution(values: number[]) {
@@ -76,6 +101,7 @@ export const RESPONSE_LATENCY_ANALYSIS_RULE =
   "Review firstReviewMs and reviewMs start at service entry and exclude route persistence. Sample count counts measurements, not unique requests. " +
   "server firstContentMs starts at API receipt and settlementMs is not completion. " +
   "Parallel timings overlap: never sum them or subtract unrelated percentiles. Missing measurements are unknown. " +
+  "contextPrepareMs and draftPrepareMs run together. locationIntentMs is nested within locationMs, which also includes device and human permission waits. " +
   "Report sample counts; small samples cannot prove a model is faster. Keep failed/cancelled/primary-only outcomes visible. " +
   "Recommend concrete code or setting experiments that reduce waiting while preserving selected models, both reviewers, " +
   "grounding, tools, memory, authorization, credits and quality. Distinguish earlier display from faster final completion. " +

@@ -93,6 +93,9 @@ const interpolate = (template: string, values: Record<string, string | number>) 
 const FOCUS_DRAG_TYPE = "application/x-tomverse-review-model";
 
 type PromptPayload = {
+  submittedAtMonotonicMs?: number;
+  preparationTimings?: import("@/lib/responseLatencyCore").ClientLatencyStages;
+  preparationReadyAtMonotonicMs?: number;
   id: string;
   text: string;
   chatId: string;
@@ -374,6 +377,7 @@ export type DesktopChatShellProps = {
   }) => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
+  chatLocationIntentEnabled?: boolean;
   conversationSelectionTicket: number;
   identityEpoch: number;
   onSavedQuestionNotSent: (
@@ -535,6 +539,7 @@ export function DesktopChatShell({
   onWebSearchSuggestionDismiss,
   onSubmit,
   onBeforeModelSend,
+  chatLocationIntentEnabled,
   conversationSelectionTicket,
   identityEpoch,
   onSavedQuestionNotSent,
@@ -1438,6 +1443,7 @@ export function DesktopChatShell({
                   isGuestMode={isGuestMode}
                   webSearchMode={webSearchMode}
                   onBeforeSend={onBeforeModelSend}
+                  chatLocationIntentEnabled={chatLocationIntentEnabled}
                   conversationSelectionTicket={conversationSelectionTicket}
                   identityEpoch={identityEpoch}
                   onSavedQuestionNotSent={onSavedQuestionNotSent}
