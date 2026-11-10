@@ -2,7 +2,8 @@
  * What a Scout subject id names, for the Admin view: `pricing.ko` is the
  * Korean pricing page, `pdf.document` a PDF from a fixed specification,
  * `generated.pdf` one the product made for a real prompt, `catalogue` the model
- * catalogue. The id is what the walker sent and the suggestion stored; the
+ * catalogue, `issue.881` an open GitHub issue the issue-backlog subject
+ * triaged. The id is what the walker sent and the suggestion stored; the
  * labels themselves live in the Admin messages.
  */
 import { SCOUT_GENERATIONS, SCOUT_PAGES, SCOUT_SIGNED_IN_PAGES } from "@/lib/productResearchScoutBrowserPolicy.mjs";
@@ -11,10 +12,14 @@ export type ScoutSubjectInfo =
   | { readonly kind: "page"; readonly page: string; readonly lang: string; readonly path: string; readonly href: string }
   | { readonly kind: "file"; readonly format: string }
   | { readonly kind: "catalogue" }
+  | { readonly kind: "issue"; readonly number: string; readonly href: string }
   | { readonly kind: "other" };
 
 export function scoutSubjectInfo(subject: string): ScoutSubjectInfo {
   if (subject === "catalogue") return { kind: "catalogue" };
+  // The issue-backlog subject stores one suggestion per open GitHub issue (lib/productResearchScoutIssuesCore.ts).
+  const issue = /^issue.([1-9][0-9]{0,5})$/.exec(subject);
+  if (issue) return { kind: "issue", number: issue[1], href: `https://github.com/mposition/Tomverse/issues/${issue[1]}` };
   const page = ([...SCOUT_PAGES, ...SCOUT_SIGNED_IN_PAGES] as readonly { id: string; path: string; lang: string }[]).find(
     (entry) => entry.id === subject,
   );

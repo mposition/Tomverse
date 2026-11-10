@@ -9,7 +9,9 @@
 // 0-step report finds. When the app has a test account (§14) it also sees the
 // signed-in screens and makes real files and an image, within the cap an owner
 // set. Each subject goes to the app's scout route on its own; the app calls the
-// model and stores the suggestions.
+// model and stores the suggestions. Last, it asks the app's issues route to
+// triage the newest issue-backlog observation, which the app reads itself (the
+// route is 404 unless the app's PRODUCT_RESEARCH_SCOUT_ISSUE_TRIAGE_ENABLED is set).
 //
 // Variables: PRODUCT_RESEARCH_SCOUT_ENABLED (unset or empty: nothing runs),
 // PRODUCT_RESEARCH_SCOUT_INGEST_URL and PRODUCT_RESEARCH_SCOUT_INGEST_SECRET;
@@ -364,8 +366,32 @@ async function walkCatalogue() {
   });
 }
 
+// ---------------------------------------------------------------- issue backlog
+
+/** No body: the app reads the newest observation itself. 404 means the app has the subject off. */
+async function walkIssues() {
+  if (outDir || capReached) return;
+  try {
+    const response = await fetch(`${ingestUrl}/issues`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ingestSecret}` },
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    });
+    if (response.status === 404) return;
+    const answer = await response.json().catch(() => ({}));
+    outcomes.sent += 1;
+    const outcome = scoutSendOutcome(answer);
+    if (outcome === "judged") outcomes.stored += Number(answer.stored) || 0;
+    else outcomes[outcome] += 1;
+  } catch (error) {
+    // Unknown outcome: the app may have stored it. Not repeated.
+    outcomes.failed += 1;
+    console.warn(JSON.stringify({ event: "product_research_scout_send_unknown", subject: "issue-backlog", error: errorCode(error) }));
+  }
+}
+
 const startedAt = Date.now();
-for (const [name, step] of [["pages", walkPages], ["files", walkFiles], ["catalogue", walkCatalogue]]) {
+for (const [name, step] of [["pages", walkPages], ["files", walkFiles], ["catalogue", walkCatalogue], ["issues", walkIssues]]) {
   try {
     await step();
   } catch (error) {
