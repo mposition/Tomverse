@@ -10,7 +10,10 @@ test("Korean models compare actual base credits and separate reasoning capabilit
   await page.goto("/models?lang=ko");
   const cards = page.getByRole("article");
   await expect(cards).toHaveCount(2);
-  await expect(page.getByText(/숫자가 클수록 같은 짧은 요청의 기본 비용이 높으며/)).toBeVisible();
+  // Phones keep the note in the usage details (#3546); open them first.
+  const details = page.getByTestId("models-mobile-usage-details");
+  if (await details.isVisible()) await details.locator("summary").click();
+  await expect(page.getByText(/숫자가 클수록 같은 짧은 요청의 기본 비용이 높으며/).filter({ visible: true })).toBeVisible();
   await expect(page.getByText("크레딧 사용 등급", { exact: true })).toHaveCount(0);
   for (const model of models) {
     const card = cards.filter({ has: page.getByRole("heading", { name: model.name, exact: true }) });
