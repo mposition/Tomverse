@@ -45,6 +45,7 @@ import { z } from "zod";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import type { EngineeringAgentSystemAuditActor } from "@/lib/adminAuditSystemActors";
 import type { AmuxAttachedTransaction } from "@/lib/amux/dbBoundary";
+import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
   amuxV22EngineeringPublicationEnabled } from
   "@/lib/amux/v22TaskExecutionCore";
@@ -1490,6 +1491,9 @@ export async function lockEngineeringAgentMismatchAmuxRows(
   if (runId === null) return;
   const run = await tx.engineeringAgentRun.findUnique({ where: { id: runId }, select: { amuxAttemptId: true, cardId: true } });
   if (!run) return;
+  // The AMUX admission lock first, as every other writer that locks an ended
+  // attempt before the audit chain takes it (lib/adminAudit.ts lock order).
+  await lockAmuxAdmissionAndReadIncident(tx);
   // FOR SHARE: a writer holding the audit chain may insert a row that
   // references this attempt, and its foreign key check and guard triggers must
   // not wait behind this lock (lib/amux/v22TaskRecoveryService.ts lockPriorAttempt).

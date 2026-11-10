@@ -645,12 +645,13 @@ export async function acceptAmuxV22UnknownPriorEffects(input: {
         throw new BoardImportError("request_id_reused", 409);
       return readRecoveryInTransaction(tx, ownerId, input.taskId, input.requestId, now);
     }
+    // The risk acceptance's guard trigger locks the prior attempt FOR UPDATE
+    // at insert, after the audit chain. The writers that lock that ended
+    // attempt before the chain (safe stop, its evidence, an engineering
+    // mismatch) all take this admission lock first, so none holds it here;
+    // writers that reference it after the chain (a review proposal, a usage
+    // acceptance) wait for the chain like this one.
     await lockAmuxAdmissionAndReadIncident(tx, now);
-    // The risk acceptance's guard trigger locks this attempt FOR UPDATE when
-    // the row is inserted, after the audit chain. Take that lock first, before
-    // the chain, so the trigger finds it held (lib/adminAudit.ts lock order).
-    await tx.$queryRaw`SELECT "id" FROM "AmuxExecutionAttempt"
-      WHERE "id" = ${input.priorAttemptId} FOR UPDATE`;
     await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);

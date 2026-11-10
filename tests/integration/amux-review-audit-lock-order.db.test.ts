@@ -100,11 +100,12 @@ const blockedFixture = async () => {
   return { task, escalation };
 };
 
-/** Backends of this database waiting on a lock that is not granted. */
+/** Backends of this database waiting on an advisory lock (the audit chain). */
 const waitingBackends = async () => {
   const rows = await prisma.$queryRaw<Array<{ waiting: bigint }>>`
     SELECT count(*)::bigint AS "waiting" FROM pg_locks
-    WHERE NOT granted AND pid <> pg_backend_pid()
+    WHERE NOT granted AND locktype = 'advisory' AND pid <> pg_backend_pid()
+      AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
   `;
   return Number(rows[0]?.waiting ?? 0);
 };
