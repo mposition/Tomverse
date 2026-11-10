@@ -11,6 +11,8 @@
 
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
+
 import {
   OWNER_QUEUE_LIMITS,
   killSwitchEngaged,
@@ -18,6 +20,17 @@ import {
   ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
 } from "@/lib/engineeringAgentCore";
 import { readEngineeringAgentSwitches } from "@/lib/engineeringAgentStore";
+import {
+  ENGINEERING_AGENT_PATCH_FILE_LIMIT,
+  engineeringAgentItemPullRequest,
+  engineeringAgentMismatchPublishItemId,
+  engineeringAgentPatchFiles,
+  type EngineeringAgentItemPullRequest,
+  type EngineeringAgentPatchFile,
+} from "@/lib/engineeringAgentOwnerItemContextCore";
+import { readAmuxCardTitle } from "@/lib/amux/adminExecutionRead";
+import type { AmuxV22QuestionDm } from "@/lib/amux/v22OwnerQuestionDmCore";
+import { readAmuxDmLocalCardState } from "@/lib/amux/v22OwnerQuestionDmRead";
 import { prisma } from "@/lib/prisma";
 
 export const ENGINEERING_AGENT_CONSOLE_SECTIONS = ["queue", "runs", "pull-requests", "settings"] as const;
@@ -38,6 +51,57 @@ export type EngineeringAgentOwnerItemView = {
   baseSha: string | null;
   /** A v22 draft the tier round kept private, which a person may send back. */
   rejudgeable: boolean;
+  /** What the item is about, for the person deciding it. Null: no run to read. */
+  context: EngineeringAgentOwnerItemContext | null;
+};
+
+export type EngineeringAgentOwnerItemContext = {
+  card: {
+    id: string;
+    displayKey: string | null;
+    /** Null when a v4 card's title could not be opened. */
+    title: string | null;
+    status: string;
+    taskRole: string | null;
+    requiresHumanReview: boolean;
+  };
+  run: {
+    id: string;
+    status: string;
+    outcome: string | null;
+    worker: string;
+    attemptOutcome: string | null;
+    attemptReason: string | null;
+    startedAt: string;
+    endedAt: string | null;
+  };
+  pullRequests: EngineeringAgentItemPullRequest[];
+  /** The draft's changed files, at most ENGINEERING_AGENT_PATCH_FILE_LIMIT; `fileCount` is all of them. */
+  files: EngineeringAgentPatchFile[];
+  fileCount: number;
+  /** The cross-vendor review of the run's commit, when one was recorded. */
+  review: {
+    verdict: string;
+    authorVendor: string;
+    reviewerVendors: string[];
+    touchesContract: boolean;
+    createdAt: string;
+  } | null;
+  /**
+   * The Decision Maker's review of the run's result. Not filed: the result
+   * was never put to it (only a result without a patch is, today).
+   */
+  dm:
+    | { filed: false }
+    | {
+        filed: true;
+        kind: string;
+        state: string;
+        decision: string | null;
+        answerSource: string | null;
+        /** Its newest request; `restricted` without ops:write. */
+        detail: AmuxV22QuestionDm;
+      };
 };
 
 export type EngineeringAgentRunView = {
@@ -84,9 +148,134 @@ export type EngineeringAgentConsolePayload = {
 
 const ownerKinds = ["t2_draft", "decision", "state_mismatch"] as const;
 
+const contextRunSelect = {
+  id: true,
+  status: true,
+  outcome: true,
+  startedAt: true,
+  endedAt: true,
+  attempt: {
+    select: {
+      worker: true,
+      outcome: true,
+      reason: true,
+      v52ReviewRecord: {
+        select: { verdict: true, authorVendor: true, reviewerVendors: true, touchesContract: true, createdAt: true },
+      },
+      v22ResultReview: {
+        select: { kind: true, state: true, decision: true, answerSource: true, localCardId: true },
+      },
+    },
+  },
+  card: {
+    select: {
+      id: true, title: true, displayKey: true, status: true, taskRole: true, requiresHumanReview: true,
+      sourceSystem: true, sourceSnapshot: true, v4TitleCiphertext: true, v4TitleKeyId: true,
+      v4TitleKeyVersion: true, v4TitleDigest: true, v4TitleDigestKeyId: true,
+    },
+  },
+  bindings: {
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { prNumber: true, state: true, supersededAt: true, approvalObservation: true, mergeObservation: true },
+  },
+} satisfies Prisma.EngineeringAgentRunSelect;
+
+/**
+ * The context of each item, keyed by item id. A mismatch about a published
+ * item has no run of its own; its run is the published item's.
+ */
+async function readOwnerItemContexts(
+  items: Array<{ id: string; kind: string; causeKey: string; runId: string | null; patchBody: string | null }>,
+  canReadDm: boolean,
+): Promise<Map<string, EngineeringAgentOwnerItemContext>> {
+  const publishIds = items
+    .map((item) => (item.runId === null ? engineeringAgentMismatchPublishItemId(item.causeKey) : null))
+    .filter((id): id is string => id !== null);
+  const publishRuns = publishIds.length
+    ? await prisma.engineeringAgentWorkItem.findMany({ where: { id: { in: publishIds } }, select: { id: true, runId: true } })
+    : [];
+  const runIdOf = (item: (typeof items)[number]) =>
+    item.runId ??
+    publishRuns.find((row) => row.id === engineeringAgentMismatchPublishItemId(item.causeKey))?.runId ??
+    null;
+  const runIds = [...new Set(items.map(runIdOf).filter((id): id is string => id !== null))];
+  const runs = runIds.length
+    ? await prisma.engineeringAgentRun.findMany({ where: { id: { in: runIds } }, select: contextRunSelect })
+    : [];
+  const titles = new Map(
+    await Promise.all(runs.map(async (run) => [run.id, await readAmuxCardTitle(run.card)] as const)),
+  );
+  const dmStates = new Map(
+    await Promise.all(
+      runs.map(async (run) => {
+        const cardId = run.attempt.v22ResultReview?.localCardId ?? null;
+        const state: AmuxV22QuestionDm = !canReadDm
+          ? { state: "restricted" }
+          : cardId === null
+            ? { state: "filed" }
+            : await readAmuxDmLocalCardState(cardId);
+        return [run.id, state] as const;
+      }),
+    ),
+  );
+
+  const contexts = new Map<string, EngineeringAgentOwnerItemContext>();
+  for (const item of items) {
+    const run = runs.find((row) => row.id === runIdOf(item));
+    if (!run) continue;
+    const files = item.kind === "t2_draft" && item.patchBody !== null ? engineeringAgentPatchFiles(item.patchBody) : [];
+    const review = run.attempt.v52ReviewRecord;
+    const resultReview = run.attempt.v22ResultReview;
+    contexts.set(item.id, {
+      card: {
+        id: run.card.id,
+        displayKey: run.card.displayKey,
+        title: titles.get(run.id) ?? null,
+        status: run.card.status,
+        taskRole: run.card.taskRole,
+        requiresHumanReview: run.card.requiresHumanReview,
+      },
+      run: {
+        id: run.id,
+        status: run.status,
+        outcome: run.outcome,
+        worker: run.attempt.worker,
+        attemptOutcome: run.attempt.outcome,
+        attemptReason: run.attempt.reason,
+        startedAt: run.startedAt.toISOString(),
+        endedAt: run.endedAt?.toISOString() ?? null,
+      },
+      pullRequests: run.bindings.map(engineeringAgentItemPullRequest),
+      files: files.slice(0, ENGINEERING_AGENT_PATCH_FILE_LIMIT),
+      fileCount: files.length,
+      review: review
+        ? {
+            verdict: review.verdict,
+            authorVendor: review.authorVendor,
+            reviewerVendors: review.reviewerVendors,
+            touchesContract: review.touchesContract,
+            createdAt: review.createdAt.toISOString(),
+          }
+        : null,
+      dm: resultReview
+        ? {
+            filed: true,
+            kind: resultReview.kind,
+            state: resultReview.state,
+            decision: resultReview.decision,
+            answerSource: resultReview.answerSource,
+            detail: dmStates.get(run.id) ?? { state: "unavailable" },
+          }
+        : { filed: false },
+    });
+  }
+  return contexts;
+}
+
 export async function readEngineeringAgentConsole(
   section: EngineeringAgentConsoleSection,
   canWrite: boolean,
+  canReadDm = false,
 ): Promise<EngineeringAgentConsolePayload> {
   const base = { section, canWrite, limit: ENGINEERING_AGENT_CONSOLE_LIMIT };
 
@@ -117,11 +306,13 @@ export async function readEngineeringAgentConsole(
       }),
     ]);
     const total = (kind: string) => grouped.find((row) => row.kind === kind)?._count._all ?? 0;
+    const contexts = await readOwnerItemContexts(items, canReadDm);
     return {
       ...base,
       queue: {
         items: items.map(({ run, ...item }) => ({
           ...item,
+          context: contexts.get(item.id) ?? null,
           rejudgeable: item.kind === "t2_draft" && item.patchBody !== null &&
             item.reason !== ENGINEERING_AGENT_V22_TIER_PENDING_REASON &&
             run?.card.sourceSystem === "admin-idea-v4" &&
