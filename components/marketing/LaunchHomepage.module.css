@@ -53,7 +53,7 @@
 .modelStamps { position: relative; display: flex; align-items: start; justify-content: space-between; gap: 24px; padding: 18px 20px 0 12px; }
 .modelStamp { flex: 1 1 0; min-width: 0; background: var(--launch-panel); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 8px; position: relative; z-index: 1; }
 .modelStamp strong { font-size: 1.625rem; line-height: 1.15; }
-.modelStamp span { font-size: .75rem; line-height: 1.5; color: var(--launch-muted); }
+.modelStamp span { font-size: .75rem; line-height: 1.5; color: #d4d4d8; }
 .mobileModelNote { display: none; }
 .stamp0 { transform: rotate(-7deg); }
 .stamp1 { transform: rotate(3deg); margin-top: -10px; }

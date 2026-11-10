@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { ArrowRight, CheckCircle2, ChevronDown } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
@@ -24,6 +24,7 @@ export type MarketingInfoSection = {
   lang?: Language;
   title: string;
   body: string;
+  bodyLinks?: { text: string; href: string }[];
   bullets?: string[];
   guestTrialLinks?: { available: string; unavailable: string; chat: string; review: string; models: string };
   link?: MarketingInfoLink;
@@ -44,6 +45,21 @@ export type MarketingInfoCopy = {
     href: string;
   };
 };
+
+function sectionBody(section: MarketingInfoSection, pageHref: (href: string) => string): ReactNode {
+  if (!section.bodyLinks?.length) return section.body;
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const [index, link] of section.bodyLinks.entries()) {
+    const start = section.body.indexOf(link.text, cursor);
+    if (start < 0) continue;
+    parts.push(section.body.slice(cursor, start));
+    parts.push(<Link key={index} href={pageHref(link.href)} className="font-semibold text-blue-600 underline underline-offset-4 dark:text-blue-300">{link.text}</Link>);
+    cursor = start + link.text.length;
+  }
+  parts.push(section.body.slice(cursor));
+  return parts;
+}
 
 export function MarketingInfoPage({
   content,
@@ -139,7 +155,7 @@ export function MarketingInfoPage({
                     </> : section.title}
                   </h2>
                   <div id={`${sectionId}-${index}`} className={page.mobileAccordion && !expandedSections.has(section.title) ? "hidden sm:block" : undefined}>
-                  <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{section.body}</p>
+                  <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{sectionBody(section, pageHref)}</p>
                   {section.guestTrialLinks ? (
                     <div data-testid="faq-guest-trial-links" className="mt-5 space-y-3 text-sm leading-6">
                       <p>{guestTrialAvailable ? section.guestTrialLinks.available : section.guestTrialLinks.unavailable}</p>
