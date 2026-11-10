@@ -293,6 +293,8 @@ export const pt = {
         onGuestMode: "Modo convidado ativado",
         guestModeMessage: "No modo convidado, as informações do chat são salvas no navegador e não são registradas no servidor.",
         guestModeLimitMessage: "(50 créditos grátis por dia, compartilhados entre os modelos selecionados)",
+        guestCreditsUsed: "Créditos de visitante usados: {used}/{limit}",
+        guestCreditsShared: "O limite diário de créditos de visitante é partilhado entre os modelos selecionados.",
         guestComparisonsRemaining: "~{count} comparações a mais hoje",
         aiAssistant: "Assistente de IA",
         you: "Você",
