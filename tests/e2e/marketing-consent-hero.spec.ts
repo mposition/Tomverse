@@ -138,12 +138,13 @@ for (const viewport of MARKETING_VIEWPORTS) {
       .evaluate((el) => el.getBoundingClientRect().width);
     expect(bodyWidth, "consent body copy keeps a readable measure").toBeGreaterThan(130);
 
-    // The home route renders the stacked, readable notice (see
-    // home-english-consent-readability.spec.ts), so the 80px phone height
-    // contract of the compact marketing notice no longer applies here; the
-    // notice must still stay in flow and leave the CTA tappable (checked above).
+    // The height contract the audit set for phones: a notice that eats more
+    // than 80px of a 568px-tall screen is competing with the page it sits on.
     const heightBox = await notice.boundingBox();
     expect(heightBox, "notice bounding box").not.toBeNull();
+    if (heightBox && viewport.width < 768) {
+      expect(heightBox.height, "phone notice stays within 80px").toBeLessThanOrEqual(80);
+    }
   });
 }
 
