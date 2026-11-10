@@ -9,6 +9,7 @@ import { createAmuxReviewProposal, getAmuxReviewDetail, resolveAmuxReview } from
 import { acceptAmuxV22AttemptUnknownUsage } from "@/lib/amux/v22AttemptUsageAcceptance";
 import { settleAmuxExecution, startAmuxExecution } from "@/lib/amux/execution";
 import { heartbeatAmuxWorkerRuntime, registerAmuxWorkerRuntime } from "@/lib/amux/workerRuntime";
+import { lockPriorAttempt } from "@/lib/amux/v22TaskRecoveryService";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL, committed fixtures, two writers on one Task at once.
@@ -239,4 +240,44 @@ test("an execution settlement and an acceptance on one running Task both finish 
   assert.equal(settled.value.settled, true);
   const task = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
   assert.equal(task.status, "done");
+});
+
+test("an ended attempt locked before the audit chain does not block a proposal that references it", async () => {
+  // A recovery safe stop locks the Task's ended prior attempt and then waits
+  // for the audit chain. A review proposal holds the chain and inserts a row
+  // that references that attempt; its foreign key check takes FOR KEY SHARE
+  // and its guard trigger FOR SHARE. The prior attempt is locked FOR SHARE,
+  // which blocks neither; FOR UPDATE would, and the two would deadlock.
+  const fixture = await blockedFixture();
+  const now = new Date();
+  const attempt = await prisma.amuxExecutionAttempt.create({ data: {
+    id: `amux-lock-order-attempt-${randomUUID()}`, taskId: fixture.task.id,
+    worker: "lock-order-fixture-worker", workerInstanceId: "lock-order-fixture-instance",
+    workerGeneration: 1, taskRevision: fixture.task.revision - 1, attemptNumber: 1,
+    heartbeatAt: now, startedAt: now, endedAt: now, outcome: "blocked",
+    toStatus: "blocked", endedBy: "lock-order-fixture-worker",
+  } });
+  const request = new Request("http://localhost/api/internal/amux/review", { method: "POST" });
+  const detail = await getAmuxReviewDetail(fixture.escalation.id);
+  assert.ok(detail.allowed_outcomes.includes("block"));
+
+  const releaseChain = await holdAuditChain();
+  const proposal = settle(createAmuxReviewProposal({
+    escalationId: fixture.escalation.id, outcome: "block",
+    expectedSubjectDigest: detail.review_content.digest, session, request,
+  }));
+  await untilWaiting(1);
+  const safeStopOrder = settle(prisma.$transaction(async (tx) => {
+    assert.equal(await lockPriorAttempt(tx, attempt.id), true);
+    await takeAuditChainLock(tx);
+  }, { timeout: 30_000 }));
+  await untilWaiting(2);
+  await releaseChain();
+
+  const [proposed, stopped] = await Promise.all([proposal, safeStopOrder]);
+  assert.ok(proposed.ok, proposed.ok ? "" : String(proposed.error));
+  const row = await prisma.amuxReviewProposal.findUniqueOrThrow({
+    where: { id: proposed.value.proposal.id }, select: { attemptId: true } });
+  assert.equal(row.attemptId, attempt.id);
+  assert.ok(stopped.ok, stopped.ok ? "" : String(stopped.error));
 });

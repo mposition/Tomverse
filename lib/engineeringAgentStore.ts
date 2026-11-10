@@ -1490,7 +1490,11 @@ export async function lockEngineeringAgentMismatchAmuxRows(
   if (runId === null) return;
   const run = await tx.engineeringAgentRun.findUnique({ where: { id: runId }, select: { amuxAttemptId: true, cardId: true } });
   if (!run) return;
-  await tx.$queryRaw`SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR UPDATE`;
+  // FOR SHARE: a writer holding the audit chain may insert a row that
+  // references this attempt, and its foreign key check and guard triggers must
+  // not wait behind this lock (lib/amux/v22TaskRecoveryService.ts lockPriorAttempt).
+  // Resolving a mismatch never updates the attempt.
+  await tx.$queryRaw`SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR SHARE`;
   await takeAuditChainLock(tx);
   await tx.$queryRaw`SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${run.cardId} FOR UPDATE`;
   await tx.$queryRaw`SELECT "attemptId" FROM "AmuxWorkDelivery" WHERE "attemptId" = ${run.amuxAttemptId} FOR UPDATE`;
@@ -1547,7 +1551,7 @@ export async function resolveEngineeringAgentStateMismatch(
   });
   // The same locks the transaction took first; held already, so no wait.
   const attempts = await tx.$queryRaw<Array<{ endedAt: Date | null }>>`
-    SELECT "endedAt" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR UPDATE
+    SELECT "endedAt" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR SHARE
   `;
   const attemptEnded = attempts[0]?.endedAt != null;
   const runItems = await tx.engineeringAgentWorkItem.findMany({

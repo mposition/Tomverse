@@ -938,7 +938,7 @@ const expireDueGrantsOneByOne = async (
   for (let index = 0; index < AUTO_EXPIRE_BATCH; index += 1) {
     if (!hasRoom()) return;
     const moved = await withAutoTransaction(null, limitsFor(actor), async (tx, now, recordReceipt) => {
-    await takeAuditChainLock(tx);
+      await takeAuditChainLock(tx);
       const due = await tx.amuxRecommendationAutoGrant.findFirst({
         where: { status: "active", expiresAt: { lte: now } },
         orderBy: [{ expiresAt: "asc" }, { id: "asc" }],

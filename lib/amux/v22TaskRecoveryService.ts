@@ -268,9 +268,16 @@ export async function readTaskApprovedCostReceipt(tx: Prisma.TransactionClient,
   return taskRow && typeof taskRow === "object" && !Array.isArray(taskRow) &&
     "costReceipt" in taskRow ? taskRow.costReceipt : null;
 }
-async function lockPriorAttempt(tx: Prisma.TransactionClient, attemptId: string) {
+/** The prior (ended) attempt, locked before the audit chain. FOR SHARE, not
+ * FOR UPDATE: a writer that already holds the audit chain inserts rows that
+ * reference this attempt (a usage acceptance, a review proposal), and their
+ * foreign key check (FOR KEY SHARE) and the proposal guard trigger (FOR SHARE)
+ * would wait behind an exclusive lock while this transaction waits for that
+ * writer's audit chain. Recovery never updates the attempt; a share lock still
+ * keeps every writer that does out. Exported for the lock-order DB test. */
+export async function lockPriorAttempt(tx: Prisma.TransactionClient, attemptId: string) {
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
-    SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${attemptId} FOR UPDATE`;
+    SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${attemptId} FOR SHARE`;
   return rows.length === 1;
 }
 async function safeStopOtherWorkPresent(tx: Prisma.TransactionClient,
@@ -639,6 +646,11 @@ export async function acceptAmuxV22UnknownPriorEffects(input: {
       return readRecoveryInTransaction(tx, ownerId, input.taskId, input.requestId, now);
     }
     await lockAmuxAdmissionAndReadIncident(tx, now);
+    // The risk acceptance's guard trigger locks this attempt FOR UPDATE when
+    // the row is inserted, after the audit chain. Take that lock first, before
+    // the chain, so the trigger finds it held (lib/adminAudit.ts lock order).
+    await tx.$queryRaw`SELECT "id" FROM "AmuxExecutionAttempt"
+      WHERE "id" = ${input.priorAttemptId} FOR UPDATE`;
     await takeAuditChainLock(tx);
     const task = await lockRecoveryTask(tx, input.taskId);
     const attempt = requireBlockedIdentity(task, input.expectedRevision, input.priorAttemptId);

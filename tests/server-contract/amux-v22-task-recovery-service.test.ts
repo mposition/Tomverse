@@ -173,7 +173,7 @@ const tx = {
       return [world.runtime, world.retryRuntime].filter((row) =>
         workerNames.includes(row.workerName));
     }
-    if (sql.includes('FROM "AmuxExecutionAttempt"') && sql.includes("FOR UPDATE")) lockLog.push(`attempt:${String(values[0])}`);
+    if (sql.includes('FROM "AmuxExecutionAttempt"') && /FOR (NO KEY UPDATE|UPDATE|SHARE)/.test(sql)) lockLog.push(`attempt:${String(values[0])}`);
     if (sql.includes('FROM "AmuxExecutionAttempt"')) return [{ id: attemptId }];
     if (sql.includes("unnest(request")) return Array.isArray(values[0]) &&
       values[0].includes("claude-test") ? [{ workerName: "claude-test" }] : [];
