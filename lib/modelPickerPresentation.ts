@@ -1,5 +1,5 @@
 import type { AiModel } from "@/lib/models";
-import { modelWebSearchIsDispatchable } from "@/lib/webSearchCapability";
+import { getWebSearchCapability, modelWebSearchIsDispatchable, type WebSearchModelRef } from "@/lib/webSearchCapability";
 import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 
 export type ModelPickerLanguage = "en" | "ko" | "zh" | "zh-Hant" | "fr" | "de" | "es" | "pt";
@@ -497,6 +497,25 @@ export const getModelPickerFeatures = (
   if (model.id.includes("code") || model.id === "codestral") features.push("code");
   if (model.inputCapabilities?.image) features.push("image");
   return features.slice(0, 2);
+};
+
+export const getModelPickerSearchLabel = (
+  model: WebSearchModelRef,
+  language: ModelPickerLanguage,
+  readiness: WebSearchBackendReadiness
+): string | null => {
+  if (!modelWebSearchIsDispatchable(model, readiness)) return null;
+  const capability = getWebSearchCapability(model);
+  const route = capability.support === "app-managed"
+    ? "Tomverse (Brave)"
+    : capability.support === "search-model"
+      ? "Perplexity"
+      : capability.provider === "openai"
+        ? "OpenAI"
+        : capability.provider === "anthropic"
+          ? "Anthropic"
+          : "Google";
+  return `${modelPickerFeatureLabels[language].search} · ${route}`;
 };
 
 export const getModelPickerUsageBand = (credits: number): Exclude<ModelPickerUsageBand, "all"> => {
