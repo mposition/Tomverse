@@ -69,10 +69,9 @@ test("English consent scopes excluded content to product analytics", async ({ pa
     await expect(notice).toContainText("Prompts, responses, filenames, and file contents are never included.", { useInnerText: true });
   }
   const accept = notice.getByRole("button", { name: "Allow analytics", exact: true });
-  // The accessible name stays the full label; a compact phone notice shows
-  // the short one so copy and actions keep one row inside the 80px contract
-  // (marketing-consent-hero, analytics-consent-signin).
-  await expect(accept).toHaveText(isMobile ? "Allow" : "Allow analytics", { useInnerText: true });
+  // The comparison guide uses the readable notice on phones too
+  // (b34166509), which shows the full label.
+  await expect(accept).toHaveText("Allow analytics", { useInnerText: true });
   expect(events).toBe(0);
   await accept.click();
   await expect(notice).toBeHidden();
@@ -134,8 +133,9 @@ test("mobile analytics consent stays compact with one-row actions", async ({
     name: "Privacy-safe product analytics",
   });
   await expect(banner).toBeVisible();
+  // Home shows the full consent body (2b85de037).
   await expect(banner).toContainText(
-    "Usage analytics excludes prompts and file content."
+    "Prompts, responses, filenames, and file contents are never included."
   );
 
   const decline = banner.getByRole("button", { name: "Decline" });
@@ -151,8 +151,9 @@ test("mobile analytics consent stays compact with one-row actions", async ({
   expect(bannerBox).not.toBeNull();
   expect(declineBox).not.toBeNull();
   expect(acceptBox).not.toBeNull();
-  // Home's readable notice (#3558, #3597) puts the actions on their own row: ~108px.
-  expect(bannerBox!.height).toBeLessThanOrEqual(120);
+  // Home's readable notice (#3558, #3597) puts the actions on their own row,
+  // and shows the full body (2b85de037): about 177px at 320px.
+  expect(bannerBox!.height).toBeLessThanOrEqual(200);
   expect(Math.abs(declineBox!.y - acceptBox!.y)).toBeLessThanOrEqual(1);
   expect(declineBox!.x + declineBox!.width).toBeLessThan(acceptBox!.x);
 

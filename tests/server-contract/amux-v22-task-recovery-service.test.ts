@@ -140,15 +140,40 @@ function preApprovalMatches(row: Row, where: Row): boolean {
     return row[key] === value;
   });
 }
+// Every recovery transaction that writes an audit entry takes the audit chain
+// lock after any resource policy and worker runtime lock and before the Task
+// row, and locks no new runtime or attempt row after it (lib/adminAudit.ts
+// takeAuditChainLock); withAutoTransaction below checks it.
+let lockLog: string[] = [];
+function assertAuditBeforeTask(log: string[]) {
+  if (!log.includes("write")) return;
+  const audit = log.indexOf("audit");
+  const task = log.indexOf("task");
+  if (task >= 0) {
+    assert.ok(audit >= 0 && audit < task && log.slice(audit, task).every((step) => step === "audit"),
+      `audit chain lock, then the Task row: ${log.join(" > ")}`);
+  }
+  if (audit < 0) return;
+  const before = new Set(log.slice(0, audit));
+  for (const step of log.slice(audit)) {
+    assert.ok(!(step.startsWith("runtime:") || step.startsWith("attempt:")) || before.has(step),
+      `${step} is first locked after the audit chain: ${log.join(" > ")}`);
+  }
+}
 const tx = {
   $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join("");
+    if (sql.includes('FROM "AmuxWorkItem"') && sql.includes("FOR UPDATE")) lockLog.push("task");
+    if (sql.includes('FROM "AmuxWorkerRuntime"') && /FOR (SHARE|UPDATE)/.test(sql)) {
+      for (const name of [values[0]].flat()) lockLog.push(`runtime:${String(name)}`);
+    }
     if (sql.includes("AS present")) return [{ present: world.otherWork }];
     if (sql.includes('FROM "AmuxWorkerRuntime"')) {
       const workerNames = Array.isArray(values[0]) ? values[0] : [values[0]];
       return [world.runtime, world.retryRuntime].filter((row) =>
         workerNames.includes(row.workerName));
     }
+    if (sql.includes('FROM "AmuxExecutionAttempt"') && /FOR (NO KEY UPDATE|UPDATE|SHARE)/.test(sql)) lockLog.push(`attempt:${String(values[0])}`);
     if (sql.includes('FROM "AmuxExecutionAttempt"')) return [{ id: attemptId }];
     if (sql.includes("unnest(request")) return Array.isArray(values[0]) &&
       values[0].includes("claude-test") ? [{ workerName: "claude-test" }] : [];
@@ -300,10 +325,13 @@ function load() {
   mock.module(mod("lib/adminAuth.ts"), { namedExports: { isAdminSession: () => true, getAdminRole: () => "owner" } });
   mock.module(mod("lib/adminReauthentication.ts"), { namedExports: { assertRecentAdminAuthentication: async () => {} } });
   mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+    takeAuditChainLock: async () => { lockLog.push("audit"); },
     writeAdminAuditLog: async (input: Row) => {
+      lockLog.push("write");
       const id = `audit-${world.audits.length}`;
       world.audits.push({ ...input, id, actorUserId: "owner-1", entryHash: "d".repeat(64) }); return id;
     }, writeSystemAuditLog: async (input: Row) => {
+      lockLog.push("write");
       const id = `audit-${world.audits.length}`;
       world.audits.push({ ...input, id, actorUserId: null, actorEmail: null, ipAddress: null, userAgent: null,
         metadata: { ...(input.metadata as Row), systemActor: input.systemActor }, entryHash: "d".repeat(64) }); return id;
@@ -320,8 +348,9 @@ function load() {
         preApprovals: [...world.preApprovals], preApprovalResults: [...world.preApprovalResults],
         usageAcceptances: [...world.usageAcceptances],
         escalations: structuredClone(world.escalations) };
-      try { return await callback(tx, now); }
-      catch (error) { world.task = saved.task; world.inspections = saved.inspections;
+      lockLog = [];
+      try { const result = await callback(tx, now); assertAuditBeforeTask(lockLog); return result; }
+      catch (error) { assertAuditBeforeTask(lockLog); world.task = saved.task; world.inspections = saved.inspections;
         world.approvals = saved.approvals;
         world.evidence = saved.evidence; world.audits = saved.audits;
         world.risks = saved.risks; world.launchChecks = saved.launchChecks;
@@ -359,7 +388,8 @@ function load() {
     },
   } });
   mock.module(mod("lib/amux/resourcePolicy.ts"), { namedExports: {
-    lockAmuxResourcePolicies: async () => [], evaluateLockedAmuxCostAdmission: async () => ({
+    lockAmuxResourcePolicies: async () => { lockLog.push("resource"); return []; },
+    evaluateLockedAmuxCostAdmission: async () => ({
       allowed: world.costAdmission, reason: "cost_budget_exhausted" }),
   } });
   mock.module(mod("lib/amux/workerRuntime.ts"), { namedExports: { AMUX_WORKER_RUNTIME_LEASE_MS: 90_000 } });

@@ -140,13 +140,13 @@ for (const viewport of MARKETING_VIEWPORTS) {
 
     // The audit set 80px for phones. Home now uses the readable notice
     // (#3558, #3597): 14px copy with the actions on a row of their own, which
-    // measures ~108px at 320px. 120px keeps the notice from growing further
+    // with the full body (2b85de037) measures ~177px at 320px. 200px keeps the notice from growing further
     // while it competes with the page it sits on; the CTA check above is the
     // part that must never regress.
     const heightBox = await notice.boundingBox();
     expect(heightBox, "notice bounding box").not.toBeNull();
     if (heightBox && viewport.width < 768) {
-      expect(heightBox.height, "phone notice stays within 120px").toBeLessThanOrEqual(120);
+      expect(heightBox.height, "phone notice stays within 200px").toBeLessThanOrEqual(200);
     }
   });
 }

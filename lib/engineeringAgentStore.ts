@@ -45,6 +45,7 @@ import { z } from "zod";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import type { EngineeringAgentSystemAuditActor } from "@/lib/adminAuditSystemActors";
 import type { AmuxAttachedTransaction } from "@/lib/amux/dbBoundary";
+import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
   amuxV22EngineeringPublicationEnabled } from
   "@/lib/amux/v22TaskExecutionCore";
@@ -140,9 +141,9 @@ export async function runEngineeringAgentTransaction<T>(
     timeout?: number;
     isolationLevel?: Prisma.TransactionIsolationLevel;
     /**
-     * AMUX row locks the work needs, taken first: every AMUX row lock comes
-     * before the audit chain (§11). Only lockEngineeringAgentMismatchAmuxRows
-     * is passed here.
+     * AMUX row locks the work needs, taken first, in AMUX's order: the attempt
+     * before the audit chain, the card and delivery after it (§11). Only
+     * lockEngineeringAgentMismatchAmuxRows is passed here.
      */
     beforeAuditLock?: (tx: Prisma.TransactionClient) => Promise<void>;
   },
@@ -219,6 +220,7 @@ export const ENGINEERING_AGENT_AUDIT_ACTIONS = Object.freeze({
   workItemExpired: "engineering_agent.work_item_expired",
   capabilityIssued: "engineering_agent.capability_issued",
   t2Decided: "engineering_agent.t2_decision",
+  v22DraftRejudged: "engineering_agent.v22_draft_rejudged",
   decisionAcknowledged: "engineering_agent.decision_acknowledged",
   bindingRecorded: "engineering_agent.binding_recorded",
   bindingReplaced: "engineering_agent.binding_replaced",
@@ -1410,6 +1412,56 @@ export async function decideEngineeringAgentT2Draft(
   return { approvalId: approval.id, auditLogId };
 }
 
+/**
+ * A person asks for a v22 draft's tier to be read again: a draft the tier
+ * round kept private (its patch could not be read as a candidate then, say)
+ * becomes `tier_pending` again, so the publisher's next round judges it with
+ * the code it runs now. Nothing is published here; that round repeats every
+ * gate (the switch, the v22 latch, the card's public PR consent, the queue
+ * room, the tier). Only an open v22 draft from a run that started under `t1`
+ * qualifies, bound to the digest and base the person saw. The route has
+ * checked the permission and the step-up.
+ */
+export async function rejudgeEngineeringAgentV22Draft(
+  tx: EngineeringAgentTransaction,
+  input: {
+    session: Session;
+    request?: Request;
+    workItemId: string;
+    patchDigest: string;
+    baseSha: string;
+  },
+): Promise<{ auditLogId: string }> {
+  humanActorId(input.session);
+  const item = await lockWorkItem(tx, input.workItemId);
+  if (item.kind !== "t2_draft" || item.state !== "open") refuse("draft_not_open");
+  if (item.patchDigest !== input.patchDigest || item.baseSha !== input.baseSha) refuse("draft_changed");
+  const draft = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: item.id },
+    select: { reason: true, patchBody: true,
+      run: { select: { modeAtStart: true, amuxAttemptId: true,
+        card: { select: { sourceSystem: true } } } } },
+  });
+  if (!draft.run || draft.run.card.sourceSystem !== "admin-idea-v4" ||
+      !draft.run.amuxAttemptId || draft.run.modeAtStart !== "t1" ||
+      draft.patchBody === null) refuse("draft_not_v22");
+  if (draft.reason === ENGINEERING_AGENT_V22_TIER_PENDING_REASON) refuse("draft_already_pending");
+  const auditLogId = await writeAdminAuditLog({
+    session: input.session,
+    request: input.request,
+    action: ENGINEERING_AGENT_AUDIT_ACTIONS.v22DraftRejudged,
+    targetType: "engineering_agent_work_item",
+    targetId: item.id,
+    summary: `${ENGINEERING_AGENT_AUDIT_ACTIONS.v22DraftRejudged} ${item.id}`,
+    metadata: { previousReason: draft.reason, patchDigest: input.patchDigest,
+      baseSha: input.baseSha },
+    tx,
+  });
+  await tx.engineeringAgentWorkItem.update({ where: { id: item.id },
+    data: { reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON } });
+  return { auditLogId };
+}
+
 /** A person has seen a decision item. The route has checked permission and step-up. */
 export async function acknowledgeEngineeringAgentDecision(
   tx: EngineeringAgentTransaction,
@@ -1471,9 +1523,11 @@ export type EngineeringAgentObservedMerge = {
 };
 
 /**
- * The AMUX rows a mismatch concerns -- its run's attempt, its card, then its
- * delivery, in AMUX's own order -- locked before the audit chain (§11). Passed to
- * runEngineeringAgentTransaction as `beforeAuditLock`; it writes nothing.
+ * The AMUX rows a mismatch concerns, in AMUX's own order (§11): its run's
+ * attempt, then the audit chain, then its card and its delivery
+ * (lib/adminAudit.ts takeAuditChainLock). Passed to
+ * runEngineeringAgentTransaction as `beforeAuditLock`; it writes nothing, and
+ * the transaction's own audit lock after it is re-entrant.
  */
 export async function lockEngineeringAgentMismatchAmuxRows(
   tx: Prisma.TransactionClient,
@@ -1488,7 +1542,15 @@ export async function lockEngineeringAgentMismatchAmuxRows(
   if (runId === null) return;
   const run = await tx.engineeringAgentRun.findUnique({ where: { id: runId }, select: { amuxAttemptId: true, cardId: true } });
   if (!run) return;
-  await tx.$queryRaw`SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR UPDATE`;
+  // The AMUX admission lock first, as every other writer that locks an ended
+  // attempt before the audit chain takes it (lib/adminAudit.ts lock order).
+  await lockAmuxAdmissionAndReadIncident(tx);
+  // FOR SHARE: a writer holding the audit chain may insert a row that
+  // references this attempt, and its foreign key check and guard triggers must
+  // not wait behind this lock (lib/amux/v22TaskRecoveryService.ts lockPriorAttempt).
+  // Resolving a mismatch never updates the attempt.
+  await tx.$queryRaw`SELECT "id" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR SHARE`;
+  await takeAuditChainLock(tx);
   await tx.$queryRaw`SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${run.cardId} FOR UPDATE`;
   await tx.$queryRaw`SELECT "attemptId" FROM "AmuxWorkDelivery" WHERE "attemptId" = ${run.amuxAttemptId} FOR UPDATE`;
 }
@@ -1544,7 +1606,7 @@ export async function resolveEngineeringAgentStateMismatch(
   });
   // The same locks the transaction took first; held already, so no wait.
   const attempts = await tx.$queryRaw<Array<{ endedAt: Date | null }>>`
-    SELECT "endedAt" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR UPDATE
+    SELECT "endedAt" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR SHARE
   `;
   const attemptEnded = attempts[0]?.endedAt != null;
   const runItems = await tx.engineeringAgentWorkItem.findMany({

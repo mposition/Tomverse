@@ -31,7 +31,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkFilmSource, checkFinal, checkPlan, creativeAsset, jsonLine, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
+import { checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
 import { speakLine, VOICE_CAP_ENV, voiceLedgerPath } from "./el-voice-core.mjs";
 import { levelVoice, probe, seconds as lengthOf, stills } from "./ffmpeg-tools.mjs";
 import { brisbaneDay, dailyCap, readLedger, spent } from "./higgsfield-cap.mjs";
@@ -185,7 +185,7 @@ const planPrompt = [
   `## Capture packs\n\n${packLines.join("\n")}`,
   `## Earlier creative shorts (never repeat one)\n\n${history.map((entry) => `- ${entry.date}: ${entry.concept} -- ${entry.logline} (stills: job/creative/sheets/${entry.run}/)`).join("\n") || "- none yet"}`,
 ].join("\n\n");
-const planRead = ["Read(./job/research-notes/**)", "Read(./features.json)", "Read(./job/sources/**)", "Read(./job/creative/sheets/**)"];
+const planRead = ["job/research-notes/**", "features.json", "job/sources/**", "job/creative/sheets/**"].map((file) => fileRule("Read", file));
 let checked = null;
 let refusal = null;
 for (let attempt = 1; attempt <= 2 && !checked?.plan; attempt += 1) {
@@ -259,7 +259,7 @@ if (shots.length > 0) {
     readFileSync("CREATIVE-SHOTS.md", "utf8"),
     `## Clips\n\n${shots.map((shot) => `- ${shot.id}: stills in job/creative/${run}/review/shots/${shot.id}/ (t001 = 0.00 s, 4 a second). Meant to show: ${shot.about}`).join("\n")}`,
   ].join("\n\n");
-  const answer = claude("shots", shotPrompt, { tools: "Read", allowed: [`Read(./job/creative/${run}/review/shots/**)`], maxTurns: 40 });
+  const answer = claude("shots", shotPrompt, { tools: "Read", allowed: [fileRule("Read", `job/creative/${run}/review/shots/**`)], maxTurns: 40 });
   const verdicts = Array.isArray(jsonLine(answer, "shots")) ? jsonLine(answer, "shots") : [];
   kept = shots.flatMap((shot) => {
     const verdict = verdicts.find((candidate) => candidate?.id === shot.id);
@@ -343,9 +343,8 @@ const reviewPrompt = () => [
   `## Earlier films\n\n${history.map((entry) => `- ${entry.concept}: job/creative/sheets/${entry.run}/`).join("\n") || "- none yet"}`,
 ].join("\n\n");
 const buildAllowed = [
-  `Read(./job/creative/${run}/**)`,
-  `Write(./job/creative/${run}/film/**)`,
-  `Edit(./job/creative/${run}/film/**)`,
+  fileRule("Read", `job/creative/${run}/**`),
+  fileRule("Edit", `job/creative/${run}/film/**`),
   `Bash(node render-creative.mjs ${posix(runDir)} *)`,
 ];
 let verdict = null;
@@ -362,7 +361,7 @@ for (let round = 1; round <= 2; round += 1) {
     report.dropped.push({ step: `build ${round}`, reason: renderProblem });
     halt("film_did_not_render");
   }
-  const answer = claude(`review-${round}`, reviewPrompt(), { tools: "Read", allowed: [`Read(./job/creative/${run}/review/**)`, "Read(./job/creative/sheets/**)"], maxTurns: 60 });
+  const answer = claude(`review-${round}`, reviewPrompt(), { tools: "Read", allowed: [fileRule("Read", `job/creative/${run}/review/**`), fileRule("Read", "job/creative/sheets/**")], maxTurns: 60 });
   verdict = jsonLine(answer, "review");
   // A "pass" with a score under 8 (or a missing one) is not a pass: it goes back as a fix.
   const low = verdict?.verdict === "pass" && !reviewPassed(verdict);

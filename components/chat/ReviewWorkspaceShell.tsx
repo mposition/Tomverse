@@ -302,6 +302,13 @@ export async function ReviewWorkspaceShell({
     });
   }
 
+  // Loopback-only browser fixture. All scope/prepare responses are mocked;
+  // this capability hint cannot authorize the server's Refiner endpoint.
+  if (fixtureMode && productSurface === "chat" &&
+      (await cookies()).get("__tomverse_e2e_parallel_preparation")?.value === "1") {
+    promptRefinerProductRelease = { explicitEnabled: false, autoEnabled: true };
+  }
+
   if (productSurface === "chat" && !fixtureMode) {
     try {
       const session = await getServerSession(authOptions);
@@ -371,6 +378,8 @@ export async function ReviewWorkspaceShell({
         guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
         chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
+        chatLocationIntentEnabled={process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED === "true"}
+        chatParallelPreparationEnabled={process.env.CHAT_PARALLEL_PREPARATION_ENABLED === "true"}
         chatImageEditEnabled={chatImageEditEnabled}
         voiceInputEnabled={voiceInputEnabled}
         voiceConversationEnabled={voiceConversationEnabled}

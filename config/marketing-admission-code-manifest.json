@@ -6,13 +6,13 @@
     "lib/marketingFacts.ts",
     "lib/marketingStore.ts"
   ],
-  "digest": "8c2e6727c7e2b991ec503316d1516ec602e85a5eb00ba9f3ba760de5058de59f",
-  "totalSizeBytes": 664373,
+  "digest": "33913565c6070926649ab20048efbb2cc652423c64fda24782581fcee7c2a753",
+  "totalSizeBytes": 664873,
   "files": [
     {
       "path": "lib/adminAudit.ts",
-      "sizeBytes": 12899,
-      "sha256": "60b4bb88fe9a4e8e357afe78f375fd18e5a42cd233de92ab3ed83df331886180"
+      "sizeBytes": 13399,
+      "sha256": "480238f789b768c66828126db2e9c5af4ceb1654979145f42335b18c7da36c73"
     },
     {
       "path": "lib/adminAuditIntegrityCore.ts",

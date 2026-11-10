@@ -3,11 +3,15 @@
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import type { adminAmuxWorkerCapabilityMessages } from "@/lib/adminMessages/amuxWorkerCapability";
 import {
+  AMUX_CLI_MODEL_LINK_AUDIT_ACTION,
+  AMUX_CLI_MODEL_LINK_REFUSALS,
   amuxCliModelHasChoices,
   amuxCliModelOptions,
   amuxCliModelStatus,
   type AmuxCliModelCatalogAdminView,
   type AmuxCliModelIssue,
+  type AmuxCliModelLinkRefusal,
+  type AmuxTomverseModelSummary,
 } from "@/lib/amux/cliModelCatalogCore";
 import {
   AMUX_WORKER_CAPABILITY_REFUSALS,
@@ -370,4 +374,227 @@ export async function runAmuxWorkerCapabilityEdit(
     },
   );
   return notice === "done";
+}
+
+// ---------------------------------------------------------------------------
+// Linking a CLI model name to the Admin › Models entry that prices it
+// (owner decision 2026-10-27; POST /api/admin/amux/cli-models).
+
+/** The select's value for "link to nothing": the name is held from pricing. */
+export const AMUX_CLI_MODEL_LINK_NONE = "__none__";
+
+export type AmuxCliModelLinkChange = { cli: string; cliModel: string; pricedModelId: string | null };
+export type AmuxCliModelLinkRefusalCode = AmuxCliModelLinkRefusal | "capability_writes_off";
+
+/** The owner's link, as the select shows it: "" when none is recorded. */
+export function amuxCliModelLinkCurrentValue(view: AmuxCliModelCatalogAdminView, cli: string, cliModel: string): string {
+  const entry = view.entries.find((row) => row.cli === cli && row.cliModel === cliModel) ?? null;
+  if (entry === null || entry.link === null) return "";
+  return entry.link.pricedModelId ?? AMUX_CLI_MODEL_LINK_NONE;
+}
+
+/**
+ * The Admin › Models entries a name may be linked to: every entry not retired
+ * (the store refuses a retired one), the usable ones first. A recorded link to
+ * an entry since retired stays, so the select shows what is recorded.
+ */
+export function amuxCliModelLinkChoices(
+  view: AmuxCliModelCatalogAdminView,
+  current: string,
+): AmuxTomverseModelSummary[] {
+  const live = view.models.filter((model) => model.availability !== "retired");
+  const ordered = [
+    ...live.filter((model) => model.availability === "available"),
+    ...live.filter((model) => model.availability !== "available"),
+  ];
+  if (current.length > 0 && current !== AMUX_CLI_MODEL_LINK_NONE && !ordered.some((model) => model.id === current)) {
+    const recorded = view.models.find((model) => model.id === current);
+    if (recorded) ordered.push(recorded);
+  }
+  return ordered;
+}
+
+/** Whether a worker's model offers the link form: it shows an issue, or the owner linked it. */
+export function amuxCliModelLinkOffered(view: AmuxCliModelCatalogAdminView, cli: string, cliModel: string | null): boolean {
+  if (cliModel === null || cliModel.length === 0) return false;
+  return amuxCliModelStatus(view, cli, cliModel).issues.length > 0 || amuxCliModelLinkCurrentValue(view, cli, cliModel) !== "";
+}
+
+/**
+ * Where a worker's model takes its price from, with the owner's choice of the
+ * Admin › Models entry to link it to, or none. Hook-free: the choice is held
+ * by the caller. Saving is held until the choice differs from what is recorded.
+ */
+export function AmuxCliModelLinkForm({
+  m,
+  cliModels,
+  cli,
+  cliModel,
+  choice,
+  busy,
+  writesLatch,
+  onChoose,
+  onSave,
+}: {
+  m: Messages;
+  cliModels: AmuxCliModelCatalogAdminView;
+  cli: string;
+  cliModel: string;
+  /** The owner's pick; null while it is what is recorded. */
+  choice: string | null;
+  busy: boolean;
+  writesLatch: boolean;
+  onChoose: (value: string) => void;
+  onSave: (change: AmuxCliModelLinkChange) => void;
+}) {
+  const current = amuxCliModelLinkCurrentValue(cliModels, cli, cliModel);
+  const value = choice ?? current;
+  const choices = amuxCliModelLinkChoices(cliModels, current);
+  const status = amuxCliModelStatus(cliModels, cli, cliModel);
+  const changed = value.length > 0 && value !== current;
+  const id = `amux-cli-model-link-${cli}-${cliModel}`;
+  const priced = status.priced === null ? "" : `${status.priced.name} (${status.priced.id})`;
+  const now = status.source === "link" ? m.link.currentLink(priced)
+    : status.source === "exact" ? m.link.currentExact(priced)
+    : current === AMUX_CLI_MODEL_LINK_NONE ? m.link.currentHeld
+    : m.link.currentNone;
+  return (
+    <form
+      className="flex flex-col gap-2 rounded-md border p-3 border-zinc-600"
+      data-testid="amux-cli-model-link"
+      aria-labelledby={`${id}-title`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (changed && !busy && writesLatch) {
+          onSave({ cli, cliModel, pricedModelId: value === AMUX_CLI_MODEL_LINK_NONE ? null : value });
+        }
+      }}
+    >
+      <h5 id={`${id}-title`} className="text-sm font-semibold text-zinc-100">{m.link.title(cliModel)}</h5>
+      <p className="text-xs text-zinc-400">{m.link.help}</p>
+      <p className="text-sm text-zinc-300" data-testid="amux-cli-model-link-current">{now}</p>
+      <label className="flex flex-col gap-1 text-sm text-zinc-200" htmlFor={`${id}-select`}>
+        {m.link.field}
+        <select
+          id={`${id}-select`}
+          className={inputClass}
+          value={value}
+          disabled={busy}
+          onChange={(event) => onChoose(event.target.value)}
+          data-testid="amux-cli-model-link-select"
+        >
+          {current.length === 0 ? <option value="">{m.link.choose}</option> : null}
+          {choices.map((model) => (
+            <option key={model.id} value={model.id}>
+              {`${model.name} (${model.id})${model.availability === "available" ? "" : ` · ${m.issueShort[model.availability]}`}`}
+            </option>
+          ))}
+          <option value={AMUX_CLI_MODEL_LINK_NONE}>{m.link.none}</option>
+        </select>
+      </label>
+      {value === AMUX_CLI_MODEL_LINK_NONE && changed ? (
+        <p className="text-xs text-amber-300" data-testid="amux-cli-model-link-none-help">{m.link.noneHelp}</p>
+      ) : null}
+      <button
+        type="submit"
+        className={`${buttonClass} w-fit`}
+        disabled={busy || !writesLatch || !changed}
+        data-testid="amux-cli-model-link-save"
+      >
+        {busy ? m.saving : m.link.save}
+      </button>
+    </form>
+  );
+}
+
+/** The link form's state on one drawer, held by the panel. */
+export type AmuxCliModelLinkState = {
+  choice: string | null;
+  busy: boolean;
+  notice: AmuxWorkerCapabilityNotice;
+  refusal: AmuxCliModelLinkRefusalCode | null;
+  failure: AdminApiFailure | null;
+};
+
+export type AmuxCliModelLinkUpdate = Partial<{
+  pending: boolean;
+  notice: AmuxWorkerCapabilityNotice;
+  refusal: AmuxCliModelLinkRefusalCode | null;
+  failure: AdminApiFailure | null;
+  view: AmuxWorkerCapabilityAdminView | null;
+}>;
+
+export type AmuxCliModelLinkIo = {
+  post: (change: AmuxCliModelLinkChange) => Promise<Response>;
+  read: () => Promise<AmuxWorkerCapabilityAdminView | null>;
+  failureOf: (response: Response) => Promise<AdminApiFailure>;
+  networkFailure: () => AdminApiFailure;
+};
+
+const LINK_REFUSAL_CODES: ReadonlySet<string> = new Set(["capability_writes_off", ...AMUX_CLI_MODEL_LINK_REFUSALS]);
+
+/** A 2xx proves only what its body says: this name's link, as sent. */
+const isLinkReceipt = async (response: Response, change: AmuxCliModelLinkChange): Promise<boolean> => {
+  try {
+    const body = (await response.json()) as Record<string, unknown> | null;
+    return (
+      body !== null &&
+      typeof body === "object" &&
+      body.action === AMUX_CLI_MODEL_LINK_AUDIT_ACTION &&
+      typeof body.eventId === "string" &&
+      body.eventId.length > 0 &&
+      body.cli === change.cli &&
+      body.cliModel === change.cliModel &&
+      body.pricedModelId === change.pricedModelId
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Records one link, sent once, with the capability edit's rules: a verified
+ * receipt; a refusal or a pre-transaction status that wrote nothing; any other
+ * answer is an unknown outcome and nothing more is sent. The catalog is read
+ * back (with the capabilities) before anything is released. True when the
+ * link was recorded and read back.
+ */
+export async function runAmuxCliModelLink(
+  change: AmuxCliModelLinkChange,
+  io: AmuxCliModelLinkIo,
+  update: (changes: AmuxCliModelLinkUpdate) => void,
+): Promise<boolean> {
+  update({ pending: true, notice: null, refusal: null, failure: null });
+  try {
+    let outcome: "done" | "stopped" | "outcome_unknown";
+    let response: Response | null = null;
+    try {
+      response = await io.post(change);
+    } catch {
+      update({ failure: io.networkFailure() });
+    }
+    if (response === null) {
+      outcome = "outcome_unknown";
+    } else if (response.ok) {
+      outcome = (await isLinkReceipt(response, change)) ? "done" : "outcome_unknown";
+    } else {
+      const error = await refusalError(response);
+      if (response.status === 409 && typeof error === "string" && LINK_REFUSAL_CODES.has(error)) {
+        update({ refusal: error as AmuxCliModelLinkRefusalCode });
+        outcome = "stopped";
+      } else if (NO_WRITE_STATUSES.has(response.status) || response.status === 409 ||
+                 (response.status === 503 && error === "cli_model_link_failed")) {
+        update({ failure: await io.failureOf(response) });
+        outcome = "stopped";
+      } else {
+        outcome = "outcome_unknown";
+      }
+    }
+    const view = await io.read();
+    const notice: AmuxWorkerCapabilityNotice = view === null ? "unread" : outcome;
+    update({ view, notice });
+    return notice === "done";
+  } finally {
+    update({ pending: false });
+  }
 }

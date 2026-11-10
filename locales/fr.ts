@@ -293,6 +293,8 @@ export const fr = {
         onGuestMode: "Mode invité activé",
         guestModeMessage: "En mode invité, les données du chat sont enregistrées dans votre navigateur et non sur le serveur.",
         guestModeLimitMessage: "(50 crédits gratuits par jour, partagés entre vos modèles sélectionnés)",
+        guestCreditsUsed: "Crédits invités utilisés : {used}/{limit}",
+        guestCreditsShared: "Le quota quotidien de crédits invités est partagé entre les modèles sélectionnés.",
         guestComparisonsRemaining: "~{count} comparaisons de plus aujourd'hui",
         aiAssistant: "Assistant IA",
         you: "Vous",
@@ -1673,6 +1675,9 @@ export const fr = {
         historyDescription: "Chaque demande, téléchargement et refus sur ce compte, conservés quatre-vingt-dix jours. Un refus signifie qu'un lien de téléchargement pour votre compte a été présenté puis rejeté.",
         historyEmpty: "Vous n'avez pas encore téléchargé les données de votre compte.",
         historyLoading: "Chargement...",
+        refusedExpired: "Le système a refusé ce téléchargement car le lien a expiré. Préparez un nouveau lien.",
+        refusedUsed: "Le système a refusé un nouveau téléchargement avec un lien à usage unique déjà utilisé.",
+        refusedAccountMismatch: "Le système a refusé ce téléchargement car le compte demandeur ne possédait pas le lien.",
         refusedNote: "Un lien a été présenté alors qu'il avait expiré, avait déjà servi, ou appartenait à un autre compte.",
         status: {
             ...en.accountDataExport.status,

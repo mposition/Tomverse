@@ -527,3 +527,32 @@ test("an invalid pick logs separately from a provider failure and keeps its orig
     assert.ok(!logs.join("\n").includes(routerOutput.modelId));
   } finally { routerOutput = original; }
 });
+
+
+test("router search preparation uses one priced call and malformed suggestions preserve the model pick", async () => {
+  const original = generateRouterResult;
+  try {
+    for (const queries of [["one", "two"], ["one", "two", "three"], [42]]) {
+      routerRequests.length = 0; holds.length = 0;
+      generateRouterResult = () => ({ output: { ...routerOutput, searchQueries: queries }, usage: { inputTokens: 100, outputTokens: 30 } });
+      const result = await pick(undefined, { searchPlan: true });
+      assert.equal(routerRequests.length, 1);
+      assert.equal(routerRequests[0].maxOutputTokens, 440);
+      assert.match(String(routerRequests[0].system), /searchQueries/);
+      assert.equal(result?.modelId, routerOutput.modelId);
+      assert.deepEqual(result?.searchQueries, typeof queries[0] === "string" && queries.length <= 2 ? queries : []);
+      const { autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
+      const { resolveModelPricing } = require(resolve(ROOT, "lib/modelPricing.ts"));
+      const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
+      const prices = resolveModelPricing(AVAILABLE_MODELS.find((model: { id: string }) => model.id === "gpt-6-luna"));
+      const expected = autoLlmRouterWorstCaseMicroUsd({ ...routerRequests[0],
+        inputUsdPerMillionTokens: prices.inputUsdPerMillionTokens, outputUsdPerMillionTokens: prices.outputUsdPerMillionTokens });
+      assert.deepEqual(holds, [expected, expected]);
+    }
+    routerRequests.length = 0;
+    const result = await pick();
+    assert.equal(result?.searchQueries, undefined);
+    assert.equal(routerRequests[0].maxOutputTokens, 200);
+    assert.doesNotMatch(String(routerRequests[0].system), /searchQueries/);
+  } finally { generateRouterResult = original; }
+});

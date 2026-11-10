@@ -17,7 +17,9 @@ for (const language of ["ko", "en"] as const) for (const width of [320, 1440]) f
     await expect(page.locator("html")).toHaveClass(new RegExp(theme));
     const fields = language === "ko"
       ? ["이용 시작 플랜", "공급자", "짧은 요청의 기본 크레딧", "상태"]
-      : ["Access starts with", "Provider", "Credit category", "Base credits for a short request", "Status"];
+      : width < 640
+        ? ["Access", "Provider", "Credit category", "Base credits", "Status"]
+        : ["Access starts with", "Provider", "Credit category", "Base credits for a short request", "Status"];
     if (language === "ko") await expect(card.getByText("크레딧 사용 등급", { exact: true })).toHaveCount(0);
     for (const text of [model.id, ...fields]) {
       const label = card.getByText(text, { exact: true });

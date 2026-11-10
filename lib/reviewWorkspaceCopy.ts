@@ -1,5 +1,16 @@
 import type { Language } from "@/lib/language";
 
+export const reviewUsageExplanation: Record<Language, string> = {
+  en: "Credits used this calendar month (UTC): {used} / monthly limit {limit}. The percentage is rounded and capped at 100%. Open plan settings for balances and reset times.",
+  ko: "이번 달(UTC 기준) 사용 크레딧 {used} / 월간 한도 {limit}. 비율은 반올림하며 100%까지 표시합니다. 플랜 설정에서 잔액과 초기화 시각을 확인하세요.",
+  zh: "本自然月（UTC）已用积分：{used} / 每月上限 {limit}。百分比四舍五入，最高显示 100%。在套餐设置中查看余额和重置时间。",
+  "zh-Hant": "本曆月（UTC）已用點數：{used} / 每月上限 {limit}。百分比四捨五入，最高顯示 100%。請在方案設定查看餘額與重設時間。",
+  fr: "Crédits utilisés ce mois civil (UTC) : {used} / limite mensuelle {limit}. Le pourcentage est arrondi et plafonné à 100 %. Ouvrez les réglages du forfait pour les soldes et dates de réinitialisation.",
+  de: "Verbrauchte Credits in diesem Kalendermonat (UTC): {used} / Monatslimit {limit}. Der Prozentsatz wird gerundet und bei 100 % begrenzt. Guthaben und Rücksetzzeiten finden Sie in den Tarifeinstellungen.",
+  es: "Créditos usados este mes natural (UTC): {used} / límite mensual {limit}. El porcentaje se redondea y se limita al 100 %. Abra los ajustes del plan para ver saldos y fechas de reinicio.",
+  pt: "Créditos usados neste mês civil (UTC): {used} / limite mensal {limit}. A porcentagem é arredondada e limitada a 100%. Abra as configurações do plano para ver saldos e datas de reinício.",
+};
+
 export const reviewReorderHint: Record<Language, string> = {
   en: "Drag a model card or answer header onto another answer to change the order.",
   ko: "모델 카드나 답변 헤더를 다른 답변 위로 드래그해 순서를 바꾸세요.",
@@ -23,6 +34,7 @@ export const reviewFocusHint: Record<Language, string> = {
 };
 
 const en = {
+  easy: "Easy", professional: "Professional",
   newTask: "New task", history: "History", help: "Help", settings: "Settings", credits: "Credits",
   appearance: "Workspace appearance", color: "Switch light / dark", mode: "Review mode", write: "Write", results: "Results",
   question: "What would you like to compare?", welcome: "Ask once.\nThree perspectives.", intro: "Answers, images and files. Compare different perspectives in one workspace.",
@@ -37,8 +49,9 @@ type Copy = typeof en;
 export const reviewWorkspaceCopy: Record<Language, Copy> = {
   en,
   ko: {
-    newTask: "새 작업", history: "기록", help: "도움말", settings: "설정", credits: "크레딧", appearance: "화면 스타일", color: "Light / Dark 전환", mode: "Review 모드", write: "작성", results: "결과",
-    question: "무엇을 비교할까요?", welcome: "질문은 한 번.\n관점은 세 가지.", intro: "답변, 이미지, 파일까지.\n여러 공급자의 결과를 한 공간에서 비교하세요.", providers: "함께 답할 공급자", automatic: "질문마다 모델 자동 선택", models: "선택한 모델", choose: "모델 선택", compare: "비교 시작", cost: "질문마다 모델과 크레딧이 달라집니다. 기존 플랜 한도 내에서 선택합니다.", newReview: "새로운 Review", start: "이런 작업부터 시작해 보세요", seedHint: "선택하면 입력창에 추가됩니다", documents: "같은 자료,\n다른 해석.", documentHint: "PDF · 문서 분석", images: "한 문장으로, 여러 이미지.", imageHint: "이 창에서 이미지 생성", research: "답변의 근거까지 확인.", researchHint: "웹 검색 · Deep Research", code: "코드 · 오류 해결", files: "문서 · 스프레드시트 만들기", focus: "집중 보기", sideBySide: "나란히 비교", edit: "질문 수정", unavailable: "아직 이 계정에서 Easy를 사용할 수 없습니다. Professional을 이용해 주세요.", routing: "공급자별로 적합한 모델을 선택하고 있습니다…", failed: "모델 선택에 실패했습니다. 입력 내용은 보존됩니다. 다시 시도해 주세요.", unsupported: "해당 공급자는 이미지 생성 모델이 제공되지 않습니다.", noText: "해당 공급자에서 사용할 수 있는 텍스트 모델이 없습니다.", close: "닫기", providerLimit: "공급자를 최대 {count}개 선택하세요", paused: "일시 중지",
+    easy: "간편", professional: "전문가",
+    newTask: "새 작업", history: "기록", help: "도움말", settings: "설정", credits: "크레딧", appearance: "화면 스타일", color: "Light / Dark 전환", mode: "비교 모드", write: "작성", results: "결과",
+    question: "무엇을 비교할까요?", welcome: "질문은 한 번.\n관점은 세 가지.", intro: "답변, 이미지, 파일까지.\n여러 공급자의 결과를 한 공간에서 비교하세요.", providers: "함께 답할 공급자", automatic: "질문마다 모델 자동 선택", models: "선택한 모델", choose: "모델 선택", compare: "비교 시작", cost: "질문마다 모델과 크레딧이 달라집니다. 기존 플랜 한도 내에서 선택합니다.", newReview: "새로운 Review", start: "이런 작업부터 시작해 보세요", seedHint: "선택하면 입력창에 추가됩니다", documents: "같은 자료,\n다른 해석.", documentHint: "PDF · 문서 분석", images: "한 문장으로, 여러 이미지.", imageHint: "이 창에서 이미지 생성", research: "답변의 근거까지 확인.", researchHint: "웹 검색 · Deep Research", code: "코드 · 오류 해결", files: "문서 · 스프레드시트 만들기", focus: "집중 보기", sideBySide: "나란히 비교", edit: "질문 수정", unavailable: "아직 이 계정에서 간편 모드를 사용할 수 없습니다. 전문가 모드를 이용해 주세요.", routing: "공급자별로 적합한 모델을 선택하고 있습니다…", failed: "모델 선택에 실패했습니다. 입력 내용은 보존됩니다. 다시 시도해 주세요.", unsupported: "해당 공급자는 이미지 생성 모델이 제공되지 않습니다.", noText: "해당 공급자에서 사용할 수 있는 텍스트 모델이 없습니다.", close: "닫기", providerLimit: "공급자를 최대 {count}개 선택하세요", paused: "일시 중지",
   },
   zh: { ...en, newTask: "新任务", history: "历史", help: "帮助", settings: "设置", credits: "积分", appearance: "工作区样式", color: "切换浅色/深色", mode: "Review 模式", write: "编写", results: "结果", question: "您想比较什么？", welcome: "一次提问。\n三种视角。", intro: "在同一工作区比较回答、图片和文件。", providers: "参与的提供商", automatic: "为每个问题自动选择模型", models: "已选模型", choose: "选择模型", compare: "开始比较", cost: "模型和积分随问题变化，并遵守现有套餐限制。", newReview: "全新 Review", start: "从一个想法开始", seedHint: "选择以添加到提示词", documents: "相同资料。\n不同解读。", documentHint: "PDF · 文档分析", images: "一句提示，多张图片。", imageHint: "在此工作区生成图片", research: "查看回答背后的来源。", researchHint: "网络搜索 · 深度研究", code: "代码 · 排错", files: "创建文档 · 电子表格", focus: "专注", sideBySide: "并排比较", edit: "修改问题", unavailable: "此账户暂不支持 Easy，请使用 Professional。", routing: "正在为各提供商选择模型…", failed: "模型选择失败，提示词已保留，请重试。", unsupported: "此提供商不提供图片生成模型。", noText: "此提供商没有可用的文本模型。", close: "关闭", providerLimit: "最多选择 {count} 个提供商", paused: "已暂停" },
   "zh-Hant": { ...en, newTask: "新任務", history: "歷史", help: "說明", settings: "設定", credits: "點數", appearance: "工作區樣式", color: "切換淺色/深色", mode: "Review 模式", write: "編寫", results: "結果", question: "您想比較什麼？", welcome: "一次提問。\n三種觀點。", intro: "在同一工作區比較回答、圖片和檔案。", providers: "參與的供應商", automatic: "為每個問題自動選擇模型", models: "已選模型", choose: "選擇模型", compare: "開始比較", cost: "模型和點數會依問題而異，並遵守現有方案限制。", newReview: "全新 Review", start: "從一個想法開始", seedHint: "選擇以加入提示詞", documents: "相同資料。\n不同解讀。", documentHint: "PDF · 文件分析", images: "一句提示，多張圖片。", imageHint: "在此工作區產生圖片", research: "查看回答背後的來源。", researchHint: "網路搜尋 · 深度研究", code: "程式碼 · 排錯", files: "建立文件 · 試算表", focus: "專注", sideBySide: "並排比較", edit: "修改問題", unavailable: "此帳戶暫不支援 Easy，請使用 Professional。", routing: "正在為各供應商選擇模型…", failed: "模型選擇失敗，提示詞已保留，請重試。", unsupported: "此供應商不提供圖片生成模型。", noText: "此供應商沒有可用的文字模型。", close: "關閉", providerLimit: "最多選擇 {count} 個供應商", paused: "已暫停" },

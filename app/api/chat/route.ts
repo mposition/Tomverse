@@ -1,3 +1,4 @@
+import { appendRouterSearchEvidence, prepareRouterSearch } from "@/lib/chatRouterPresearch";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
@@ -400,6 +401,8 @@ import {
     ACTIVE_ESTIMATOR_VERSION,
     createTokenEstimateAccumulator,
     getCalibration,
+    toReservedInputTokens,
+    TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
 } from "@/lib/chatTokenEstimate";
 import { createShadowAccumulator } from "@/lib/tokenEstimateShadow";
 import {
@@ -1336,6 +1339,7 @@ async function handleChatPost(
      * somebody remembered to set (lib/chatFailureLayer.ts).
      */
     let providerCall: ProviderCallRecord | null = null;
+    let presearchForSettlement: ReturnType<typeof buildAppManagedWebSearchTool> | null = null;
     /**
      * Who this turn was for, hoisted for the catch.
      *
@@ -2236,8 +2240,14 @@ async function handleChatPost(
                       userId: session?.user?.id ?? null,
                       conversationId: conversationId ?? null,
                       traceId,
-                      rewriteAllowed: !turnCarriesAttachments(autoRoutingMessages),
+                      // Atomic Refiner consume restores this exact preview
+                      // before provider dispatch. A second rewrite would be
+                      // discarded, including an explicit keep-original choice.
+                      rewriteAllowed: !refinerPreview && !turnCarriesAttachments(autoRoutingMessages),
                       fileContext: fileRoutingContext,
+                      searchPlan: process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true" &&
+                          Boolean(session?.user?.id) && webSearchMode === "always" && !currentLocation &&
+                          !turnCarriesAttachments(autoRoutingMessages),
                       imageIntent: imageRouting.context,
                       onImageDecision: imageRouting.accept,
                       // An image turn is not a routing decision a chat model
@@ -2289,7 +2299,7 @@ async function handleChatPost(
             !guestAutoSelection?.routed &&
             autoSelection.routed &&
             llmPick?.rewrite &&
-            !refinerExecution?.applied
+            !refinerPreview
         ) {
             const rewritten = withRouterRewrite(executionMessages, llmPick.rewrite);
             if (rewritten !== executionMessages) {
@@ -4925,11 +4935,30 @@ async function handleChatPost(
          * and in one place, because doing it per-source is what broke twice.
          * See lib/chatProviderPrompt.ts.
          */
+        // Fallback gets the original execution view and its own admitted tool.
+        // Primary presearch must not leak another attempt's sources or budget.
+        const fallbackSdkMessages = splitProviderInstructions(
+            locationCacheBreakpoint ? uncachedLocationMessages : formattedMessages
+        ).messages;
+        if (process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true" &&
+            access.kind !== "guest" && autoSelection.routed &&
+            llmPick?.modelId === modelConfig.id && llmPick.searchQueries?.length &&
+            appManagedSearchTool && !currentLocation && !mcpConnector && !artifactToolConfig) {
+            presearchForSettlement = appManagedSearchTool;
+            const finishPresearch = latency.stage("presearchMs");
+            try {
+                const evidence = await prepareRouterSearch({
+                    queries: llmPick.searchQueries,
+                    tool: appManagedSearchTool,
+                    signal: req.signal,
+                    inputHeadroomTokens: contextInputTokens - reservationOnlyInputTokens -
+                        toReservedInputTokens(inputEstimate.breakdown()) - TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
+                });
+                appendRouterSearchEvidence(formattedMessages, evidence);
+            } finally { finishPresearch(); }
+        }
         const { messages: sdkMessages, instructions: sdkInstructions } =
             splitProviderInstructions(formattedMessages);
-        const fallbackSdkMessages = locationCacheBreakpoint
-            ? splitProviderInstructions(uncachedLocationMessages).messages
-            : sdkMessages;
         const manifestMessages = formattedMessages.map((message) => ({
             role: message.role,
             parts: Array.isArray(message.content)
@@ -7550,10 +7579,17 @@ async function handleChatPost(
                     dispatchProviderForLog === "perplexity"
                         ? await consumePerplexityUsage(traceId)
                         : null;
+                const presearchSnapshot = presearchForSettlement?.session.snapshot();
                 await settleChatUsage(usageReservation, {
                     inputTokens: 0,
                     outputTokens: 0,
                     outcome: "failed",
+                    ...(presearchSnapshot && presearchSnapshot.backendRequestCount > 0 ? {
+                        searchBackendRequestCount: presearchSnapshot.succeededRequestCount,
+                        // Successful responses have exact cost. A thrown/aborted
+                        // backend response may have been served: retain its hold.
+                        searchQueriesObserved: presearchSnapshot.succeededRequestCount === presearchSnapshot.backendRequestCount,
+                    } : {}),
                 }, {
                     providerUsageSnapshot,
                 });

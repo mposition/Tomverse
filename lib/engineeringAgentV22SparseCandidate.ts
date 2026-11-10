@@ -2,7 +2,8 @@ import { resultListingFromModifiedBlobs, toPolicyChanges,
   verifyResultListing, type TreeEntry } from
   "@/lib/engineeringAgentTreeVerify";
 import type { V22PublishFile } from "@/lib/amux/v22PatchEvidence";
-import { encodeV22PatchEvidence } from "@/lib/amux/v22PatchEvidence";
+import { V22_CANDIDATE_FILE_LIMITS, checkV22PublishFiles } from
+  "@/lib/amux/v22PatchEvidence";
 
 /** A verified change set, not permission to publish. The existing credential,
  * source-slice, policy-named-test and version gates still decide T1/T2. */
@@ -15,17 +16,16 @@ export function verifyEngineeringAgentV22SparseCandidate(input: {
 }): { ok: true; expectedTreeId: string;
   changes: Extract<ReturnType<typeof toPolicyChanges>, { ok: true }>["entries"] } |
   { ok: false; reason: string } {
-  let guarded: Buffer;
-  try { guarded = encodeV22PatchEvidence("diff --git a/x b/x\n",
-    input.files); }
+  // Stored file bytes (at most five) and bytes rebuilt from a stored patch
+  // pass the same path, text and secret checks.
+  try { checkV22PublishFiles(input.files, V22_CANDIDATE_FILE_LIMITS); }
   catch { return { ok: false, reason: "files_invalid" }; }
-  guarded.fill(0);
   const files = input.files.map((file) => ({ path: file.path,
     mode: file.mode, bytes: Buffer.from(file.bytesBase64, "base64") }));
   try {
   const sparse = resultListingFromModifiedBlobs({
     base: input.base, baseRootTreeId: input.baseRootTreeId,
-    files,
+    files, maxFiles: V22_CANDIDATE_FILE_LIMITS.maxFiles,
   });
   if (!sparse.ok) return { ok: false, reason: sparse.reason };
   const verified = verifyResultListing({

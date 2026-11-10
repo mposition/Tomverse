@@ -464,9 +464,10 @@ test.describe("AI and security disclaimer", { tag: "@ui-risk" }, () => {
 
     await expect(disclaimer(page)).toContainText("AI answers can be inaccurate");
     await expect(disclaimer(page)).toContainText("Do not enter sensitive data");
-    // One line, not four.
+    // One row, not four. Details is a real 44px button with visible padding
+    // (#3626, mobile-disclaimer-readability), so the row is 48px tall.
     const box = await disclaimer(page).boundingBox();
-    expect(box!.height).toBeLessThanOrEqual(32);
+    expect(box!.height).toBeLessThanOrEqual(48);
 
     await details(page).click();
     const sheet = page.getByTestId("chat-ai-disclaimer-sheet");
