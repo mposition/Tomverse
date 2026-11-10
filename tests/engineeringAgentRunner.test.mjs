@@ -4,8 +4,11 @@ import { dirname, join, normalize } from "node:path";
 import test from "node:test";
 
 import {
+  GITHUB_LIST_MAX_PAGES,
   haltOf,
+  nextPageUrl,
   observeUnbound,
+  readGitHubList,
   runRunnerCycle,
 } from "../scripts/engineering-agent-runner-core.mjs";
 import { superviseCycle, SUPERVISED_ENV } from "../scripts/engineering-agent-supervisor.mjs";
@@ -240,6 +243,50 @@ test("a first page of more is judged for what it holds, and never read as the wh
   const round = await runRunnerCycle(ports(app, { refs: [], pulls: page, refsComplete: true, pullsComplete: false }));
   assert.equal(round.halt, "unbound_app_pr");
   assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_pr" });
+});
+
+test("a GitHub list is read page after page, so more than 100 open pull requests still decide the round", async () => {
+  const origin = "https://api.github.com/repos/mposition/Tomverse";
+  const linkTo = (page) => `<${origin}/pulls?state=open&per_page=100&page=${page}>; rel="next", <${origin}/pulls?page=9>; rel="last"`;
+  const pages = {
+    [`${origin}/pulls?state=open&per_page=100`]: { status: 200, link: linkTo(2), body: [{ number: 1 }] },
+    [`${origin}/pulls?state=open&per_page=100&page=2`]: { status: 200, link: linkTo(3), body: [{ number: 2 }] },
+    [`${origin}/pulls?state=open&per_page=100&page=3`]: { status: 200, link: `<${origin}/pulls?page=1>; rel="first"`, body: [{ number: 3 }] },
+  };
+  const fetched = [];
+  const fetchPage = async (url) => {
+    fetched.push(url);
+    return pages[url] ?? null;
+  };
+  const first = `${origin}/pulls?state=open&per_page=100`;
+  assert.deepEqual(await readGitHubList(fetchPage, first, { origin }), {
+    items: [{ number: 1 }, { number: 2 }, { number: 3 }],
+    complete: true,
+  });
+  assert.equal(fetched.length, 3);
+
+  // The page limit keeps what was read and says it is not the whole list.
+  assert.deepEqual(await readGitHubList(fetchPage, first, { origin, maxPages: 2 }), {
+    items: [{ number: 1 }, { number: 2 }],
+    complete: false,
+  });
+  // A failed page makes the whole list unread, never a shorter whole list.
+  const failing = async (url) => (url === first ? pages[first] : null);
+  assert.equal(await readGitHubList(failing, first, { origin }), null);
+  const notAList = async (url) => (url === first ? pages[first] : { status: 200, link: null, body: { message: "x" } });
+  assert.equal(await readGitHubList(notAList, first, { origin }), null);
+  // The read token goes with every page, so a next link off the API origin is not followed.
+  const offOrigin = async () => ({ status: 200, link: '<https://evil.example/pulls?page=2>; rel="next"', body: [{ number: 1 }] });
+  assert.deepEqual(await readGitHubList(offOrigin, first, { origin }), { items: [{ number: 1 }], complete: false });
+  // No ref under the prefix is a 404: the empty, whole list.
+  const notFound = async () => ({ status: 404, link: null, body: { message: "Not Found" } });
+  assert.deepEqual(await readGitHubList(notFound, first, { origin, notFoundIsEmpty: true }), { items: [], complete: true });
+  assert.equal(await readGitHubList(notFound, first, { origin }), null);
+
+  assert.equal(nextPageUrl(null), null);
+  assert.equal(nextPageUrl(`<${origin}/a?page=1>; rel="prev", <${origin}/a?page=3>; rel="next"`), `${origin}/a?page=3`);
+  assert.equal(nextPageUrl(`<${origin}/a?page=1>; rel="first"`), null);
+  assert.equal(GITHUB_LIST_MAX_PAGES >= 2, true);
 });
 
 test("the app's records must not move while GitHub is read, or nothing is judged", async () => {

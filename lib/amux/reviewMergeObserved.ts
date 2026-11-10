@@ -85,7 +85,9 @@ export async function completeAmuxV22ReviewOnObservedMerge(
   const boundary = amuxBoundaryWithAttachment(
     AMUX_DB_BOUNDARIES.reviewMergeObserved, attachment);
   return withAmuxDbBoundary(
-    { ...boundary, prismaCallCeiling: boundary.prismaCallCeiling + 2 },
+    // +2 the assignment and its audit entry; +1 the binding that holds a v22
+    // implement Task's review pull request number.
+    { ...boundary, prismaCallCeiling: boundary.prismaCallCeiling + 3 },
     async (tx, context) => {
       // The audit chain's lock comes before the card's row lock, as in the
       // writers that read the card after taking it; the other order can wait
@@ -106,8 +108,25 @@ export async function completeAmuxV22ReviewOnObservedMerge(
       if (task.sourceSystem !== "admin-idea-v4" || task.cardType !== "task" || !amuxV22TaskWritesPatch(task.taskRole)) {
         return { completed: false as const, reason: "not_a_v22_implement_task" as const };
       }
+      // A v22 implement Task's row cannot hold its review pull request number
+      // (lib/amux/reviewPullRequest.ts amuxV22ImplementTask), so the number
+      // is the one the engineering binding of this card's attempt holds:
+      // written with the publisher's result, in the same transaction as the
+      // review record. A merge of any other pull request still completes
+      // nothing.
       if (task.reviewPrNumber !== input.prNumber) {
-        return { completed: false as const, reason: "review_pr_mismatch" as const };
+        const bound = task.reviewPrNumber === null
+          ? await tx.$queryRaw<Array<{ id: string }>>`
+              SELECT b."id" FROM "EngineeringAgentBinding" b
+              JOIN "EngineeringAgentRun" r ON r."id" = b."runId"
+              WHERE b."prNumber" = ${input.prNumber} AND b."supersededAt" IS NULL
+                AND r."cardId" = ${input.taskId} AND r."amuxAttemptId" = ${input.attemptId}
+              LIMIT 1
+            `
+          : [];
+        if (bound.length === 0) {
+          return { completed: false as const, reason: "review_pr_mismatch" as const };
+        }
       }
       const attempts = await tx.$queryRaw<AttemptRow[]>`
         SELECT "id", "outcome", "toStatus", "endedAt", "v22AssignmentId"
@@ -149,7 +168,7 @@ export async function completeAmuxV22ReviewOnObservedMerge(
 
       const moved = await tx.amuxWorkItem.updateMany({
         where: { id: task.id, status: "review", owner: null, archivedAt: null, revision: task.revision,
-          reviewPrNumber: input.prNumber },
+          reviewPrNumber: task.reviewPrNumber },
         // The card becomes terminal here, once, on the DB clock; dependents,
         // result retention and content purge all wait on this timestamp.
         data: { status: "done", revision: { increment: 1 }, v4TerminalAt: context.dbNow },

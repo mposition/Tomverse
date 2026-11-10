@@ -9,6 +9,7 @@ import {
   withAmuxDbBoundary,
   type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
+import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 
 /** What an attachment to the review pull request record sees. */
 export type AmuxReviewPullRequestFact = {
@@ -33,7 +34,21 @@ type TaskRow = {
   archivedAt: Date | null;
   requiresHumanReview: boolean;
   reviewPrNumber: number | null;
+  sourceSystem: string | null;
+  cardType: string | null;
+  taskRole: string | null;
 };
+
+/**
+ * A v22 `implement` Task: the card the engineering publisher opens a pull
+ * request for after its attempt settled to `review`, and the one an observed
+ * approval and merge completes (lib/amux/reviewMergeObserved.ts). Its row can
+ * never carry a review pull request number: the v4 plaintext exclusion keeps
+ * `reviewSpecialty` null, the human review shape check then keeps
+ * `requiresHumanReview` false, and the review PR check needs it true.
+ */
+export const amuxV22ImplementTask = (task: Pick<TaskRow, "sourceSystem" | "cardType" | "taskRole">) =>
+  task.sourceSystem === "admin-idea-v4" && task.cardType === "task" && amuxV22TaskWritesPatch(task.taskRole);
 
 type AttemptRow = {
   id: string;
@@ -71,7 +86,8 @@ export async function recordAmuxReviewPullRequest(
       // a review proposal on this card holds the chain while it waits for it.
       await takeAuditChainLock(tx);
       const tasks = await tx.$queryRaw<TaskRow[]>`
-        SELECT "id", "status", "owner", "revision", "archivedAt", "requiresHumanReview", "reviewPrNumber"
+        SELECT "id", "status", "owner", "revision", "archivedAt", "requiresHumanReview", "reviewPrNumber",
+               "sourceSystem", "cardType", "taskRole"
         FROM "AmuxWorkItem"
         WHERE "id" = ${input.taskId}
         FOR UPDATE
@@ -85,7 +101,15 @@ export async function recordAmuxReviewPullRequest(
       }
       // A review pull request belongs to a card a person reviews (the card's
       // CHECK says so too); on any other card there is nothing to attach it to.
-      if (!task.requiresHumanReview) {
+      // A v22 implement Task is reviewed through its pull request, but its row
+      // cannot hold the number (amuxV22ImplementTask). The attachment's
+      // binding holds it instead -- the engineering publisher's, written in
+      // this transaction -- and the merge observer completes the card from
+      // that binding. Refusing it opened a state mismatch for every pull
+      // request the publisher opened, which halted the whole agent until a
+      // person closed it (2026-10-30 #3147, 2026-11-11 #3702).
+      const heldByAttachment = !task.requiresHumanReview && amuxV22ImplementTask(task) && attachment !== undefined;
+      if (!task.requiresHumanReview && !heldByAttachment) {
         return { recorded: false as const, reason: "review_not_required" as const };
       }
       const attempts = await tx.$queryRaw<AttemptRow[]>`
@@ -111,7 +135,27 @@ export async function recordAmuxReviewPullRequest(
       }
 
       let taskRevision = task.revision;
-      const changed = task.reviewPrNumber === null;
+      const changed = task.reviewPrNumber === null && !heldByAttachment;
+      if (heldByAttachment) {
+        // The card itself does not change; the entry says which pull request
+        // its review is now waiting on, and that the binding holds it.
+        await writeSystemAuditLog({
+          systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+          action: "amux.review.pull_request_recorded",
+          targetType: "AmuxWorkItem",
+          targetId: task.id,
+          summary: `Recorded the review pull request of AMUX task ${task.id} on its engineering binding.`,
+          metadata: {
+            pr_number: input.prNumber,
+            worker: input.worker,
+            attempt_id: input.attemptId,
+            held_by: "engineering_binding",
+            previous_revision: task.revision,
+            next_revision: task.revision,
+          },
+          tx,
+        });
+      }
       if (changed) {
         const moved = await tx.amuxWorkItem.updateMany({
           where: { id: task.id, status: "review", owner: null, archivedAt: null, revision: task.revision, reviewPrNumber: null },

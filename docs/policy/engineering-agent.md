@@ -652,6 +652,15 @@ Publisher의 실제 적용 tree hash 대조는 그대로다. tier 라운드가 �
   외에, **GitHub가 그 항목 자신의 현재 PR을 병합으로 보고하면** 사람이 닫을 수 있다(운영자
   결정 2026-11-06). 이때 병합 관측을 바인딩에 기록해 승인 관측기가 같은 PR을 다시 올리지
   않게 하고, 에이전트 모드는 바꾸지 않는다. GitHub를 읽지 못하면 닫지 않는다.
+- v22 `implement` Task(v4 카드)의 행은 review PR 번호를 가질 수 없다. v4 평문 제외 CHECK가
+  `reviewSpecialty`를 null로 두고, 사람 검토 형태 CHECK가 그래서 `requiresHumanReview`를
+  false로 두며, review PR CHECK는 그것이 true여야 번호를 받는다. 그래서 publisher가 연 PR의
+  번호는 같은 트랜잭션에서 쓰는 **engineering 바인딩이 보유**하고, AMUX는 카드를 바꾸지 않고
+  감사 항목 하나(`held_by: engineering_binding`)만 남긴다(`lib/amux/reviewPullRequest.ts`).
+  병합 관측은 그 카드의 attempt에 묶인 현재 바인딩의 PR일 때만 카드를 끝낸다
+  (`lib/amux/reviewMergeObserved.ts`). 이전에는 `review_not_required`로 거절되어 게시한 PR마다
+  C형 불일치가 열리고 에이전트 전체가 멈췄다(2026-10-30 #3147, 2026-11-11 #3702). 다른
+  카드의 거절은 그대로다.
 - patch 본문은 크기 상한과 **두 번의 secret 검사**(초안 측 1회, 본 앱 저장 전 1회)를
   통과해야 저장된다. 탐지되면 저장하지 않는다. 본 앱은 patch를 텍스트로만 저장·표시한다.
   결정 후 보존 기간이 지나면 **본문만 지우고 digest와 결정 기록은 남긴다.** 등록 제안은

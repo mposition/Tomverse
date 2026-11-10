@@ -95,6 +95,48 @@ export const observeUnbound = async ({ refs, pulls, known, commitDigestAt, refsC
 
 const knownShape = (json) => Array.isArray(json?.bindings) && Array.isArray(json?.consumed);
 
+/** How many pages one GitHub list is followed for (100 a page). */
+export const GITHUB_LIST_MAX_PAGES = 10;
+
+/** The `rel="next"` URL of a `Link` header, or null. */
+export const nextPageUrl = (link) => {
+  if (typeof link !== "string") return null;
+  for (const part of link.split(",")) {
+    const match = /^\s*<([^>]*)>\s*;(.*)$/.exec(part);
+    if (match && /\brel="?next"?/i.test(match[2])) return match[1];
+  }
+  return null;
+};
+
+/**
+ * One GitHub list read whole, page after page (§12). The repository's open
+ * pull requests passed 100 on 2026-11-08 and a first-page-only read left every
+ * round undetermined for 18 hours, so the next page is followed -- only while
+ * it stays under `origin` (the read token goes with each page), and for at
+ * most `maxPages`. `fetchPage(url)` -> { status, link, body } or null when the
+ * request failed. Returns { items, complete } or null: a page that is not a
+ * list, or a failed request, makes the whole list unread, never a shorter
+ * list; a list longer than the page limit, or a next link off `origin`, is
+ * what was read, marked incomplete.
+ */
+export const readGitHubList = async (fetchPage, firstUrl, { origin, maxPages = GITHUB_LIST_MAX_PAGES, notFoundIsEmpty = false }) => {
+  const items = [];
+  let url = firstUrl;
+  for (let page = 0; page < maxPages; page += 1) {
+    const response = await fetchPage(url);
+    if (response === null) return null;
+    // No ref under the prefix is answered 404: that is the list, empty.
+    if (page === 0 && notFoundIsEmpty && response.status === 404) return { items: [], complete: true };
+    if (response.status < 200 || response.status >= 300 || !Array.isArray(response.body)) return null;
+    items.push(...response.body);
+    const next = nextPageUrl(response.link);
+    if (next === null) return { items, complete: true };
+    if (!next.startsWith(`${origin}/`)) return { items, complete: false };
+    url = next;
+  }
+  return { items, complete: false };
+};
+
 /**
  * One cycle. `ports`:
  *   app(path, body) -> { status, json }          the engineering routes
