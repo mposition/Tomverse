@@ -1611,10 +1611,17 @@ export async function resolveEngineeringAgentStateMismatch(
     where: { id: runId },
     select: { id: true, status: true, amuxAttemptId: true, cardId: true },
   });
-  // The same locks the transaction took first; held already, so no wait.
-  const attempts = await tx.$queryRaw<Array<{ endedAt: Date | null }>>`
-    SELECT "endedAt" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR SHARE
-  `;
+  // Only A's detection reads the attempt. From the route it is the same lock
+  // the transaction took first, held already, so no wait. A C action may run
+  // as the AMUX review pull request writer's attachment, after the card's
+  // lock, where taking the attempt would go against AMUX's order: it is not
+  // read for C.
+  const attempts =
+    kind === "A"
+      ? await tx.$queryRaw<Array<{ endedAt: Date | null }>>`
+          SELECT "endedAt" FROM "AmuxExecutionAttempt" WHERE "id" = ${run.amuxAttemptId} FOR SHARE
+        `
+      : [];
   const attemptEnded = attempts[0]?.endedAt != null;
   const runItems = await tx.engineeringAgentWorkItem.findMany({
     where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },

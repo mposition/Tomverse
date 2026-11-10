@@ -164,9 +164,10 @@ const WORKER_REGISTER_PRISMA_CALLS = 2;
 // two to spare.
 const PUBLISH_RESULT_PRISMA_CALLS = 17;
 // A person's record of the bound number: the writer's audit-chain lock, then
-// the mismatch action (item and publish reads, run lock, item lock, run,
-// attempt, run items, capability count, bindings, binding lock, resolution and
-// the person's audit entry) -- about eighteen, and four to spare.
+// the mismatch action (item and publish reads, run lock, item lock, run, run
+// items, capability count, bindings, binding lock, resolution and the
+// person's audit entry; a C action does not read the attempt) -- about
+// seventeen, and five to spare.
 const MISMATCH_REVIEW_PR_PRISMA_CALLS = 22;
 
 /** A run is created in the transaction that starts its AMUX attempt (§11). */
