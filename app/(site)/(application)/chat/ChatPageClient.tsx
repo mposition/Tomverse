@@ -1,5 +1,9 @@
 ﻿"use client";
 
+import { requestChatLocationIntent } from "@tomverse/api-client";
+import { chatLocationSession } from "@/lib/chatLocationClient";
+import type { PreparedChatLocationIntent } from "@tomverse/chat-core";
+
 import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 
@@ -774,6 +778,7 @@ export function ChatPageClient({
   imageGenerationEnabled = false,
   chatImageIntentEnabled = false,
   chatLocationIntentEnabled = true,
+  chatParallelPreparationEnabled = false,
   chatImageEditEnabled = false,
   reviewEasyAvailable = false,
   voiceInputEnabled = false,
@@ -808,6 +813,7 @@ export function ChatPageClient({
    */
   chatImageIntentEnabled?: boolean;
   chatLocationIntentEnabled?: boolean;
+  chatParallelPreparationEnabled?: boolean;
   /** A send with a photo may be an edit of it (IMAGE_EDIT_ENABLED). */
   chatImageEditEnabled?: boolean;
   reviewEasyAvailable?: boolean;
@@ -1766,6 +1772,7 @@ export function ChatPageClient({
     submittedAtMonotonicMs?: number;
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
+    preparedLocationIntent?: PreparedChatLocationIntent;
     id: string;
     text: string;
     chatId: string;
@@ -6891,6 +6898,15 @@ export function ChatPageClient({
         return;
       }
 
+      // Only the semantic call overlaps Refiner. Device permission and GPS
+      // stay in ChatApp, after the question is durably saved. Guests retain
+      // their existing single-use verification sequence.
+      const locationPreparation = chatParallelPreparationEnabled && chatLocationIntentEnabled &&
+        requestAutoPrepare && preparedDraft && promptRefinerProductScope && !imageTurnSend
+        ? chatLocationSession.prepareIntent(identityKey, authoredPrompt,
+            () => preparation.measure("locationIntentMs", () => requestChatLocationIntent(authoredPrompt, fetch)))
+        : Promise.resolve(undefined);
+
       let promptRefinerDecisionForSend = explicitPromptRefinerDecision;
       let userRequestId = explicitPromptRefinerClientRequestId ??
         crypto.randomUUID();
@@ -6928,6 +6944,11 @@ export function ChatPageClient({
           abortPreparedDraft(preparedDraft);
           return;
         }
+      }
+      const preparedLocationIntent = await locationPreparation;
+      if (!chatSendIsCurrent()) {
+        if (preparedDraft) abortPreparedDraft(preparedDraft);
+        return;
       }
       let userMsgId = userRequestId;
 
@@ -7392,6 +7413,7 @@ export function ChatPageClient({
         submittedAtMonotonicMs,
         preparationTimings: { ...preparation.timings },
         preparationReadyAtMonotonicMs: performance.now(),
+        preparedLocationIntent,
         text: authoredPrompt,
         chatId: activeChatId,
         userMessageId: userMsgId,
