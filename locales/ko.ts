@@ -1491,7 +1491,7 @@ export const ko = {
         importCompleted: "가져오기 완료: 대화 {count}개가 계정에 저장되었습니다.",
         startAnother: "다른 내보내기 가져오기",
         errorGeneric: "문제가 발생했습니다. 다시 시도해 주세요.",
-        historyTitle: "가져온 내보내기",
+        historyTitle: "가져오기 기록",
         historyEmpty: "아직 가져온 항목이 없습니다.",
         historyConversations: "대화 {count}개",
         statusCompleted: "완료",
@@ -1509,7 +1509,7 @@ export const ko = {
         titleImpactStale: "확인한 뒤 잠금 등 상태가 바뀌었습니다. 삭제 내용을 다시 확인해 주세요.",
         deleting: "삭제 중…",
         deleteNote:
-            "삭제하면 Tomverse에 가져온 사본만 제거되며, 원래 서비스에는 영향이 없습니다.",
+            "이 항목을 삭제하면 Tomverse에 저장된 해당 사본이 제거됩니다. 원래 서비스에는 영향이 없습니다.",
         detailTitle: "가져온 내보내기",
         detailNotFound: "이 가져오기를 찾을 수 없습니다.",
         detailConversations: "가져온 대화",
@@ -1671,11 +1671,14 @@ export const ko = {
         requestFailed: "다운로드를 준비하지 못했습니다. 다시 시도해 주세요.",
         historyTitle: "다운로드 기록",
         historyDescription:
-            "이 계정의 모든 요청·다운로드·거부 기록이며 90일간 보관됩니다. 거부는 이 계정의 다운로드 링크가 제시되었다가 거절되었다는 뜻입니다.",
+            "이 계정의 모든 요청·다운로드·거부 기록이며 90일간 보관됩니다. 거부는 시스템이 이 계정의 링크를 통한 다운로드 요청을 허용하지 않았다는 뜻입니다. 이 기록만으로 누가 시도했는지는 알 수 없습니다.",
         historyLoading: "불러오는 중...",
         historyEmpty: "아직 계정 데이터를 내려받은 적이 없습니다.",
+        refusedExpired: "링크가 만료되어 시스템이 다운로드 요청을 거절했습니다. 새 링크를 준비해 주세요.",
+        refusedUsed: "이미 사용된 일회용 링크를 다시 사용하려는 다운로드 요청을 시스템이 거절했습니다.",
+        refusedAccountMismatch: "요청한 계정이 링크 소유 계정과 달라 시스템이 다운로드를 거절했습니다.",
         refusedNote:
-            "이미 만료되었거나, 이미 사용되었거나, 다른 계정의 링크가 제시되었습니다.",
+            "시스템이 다운로드 요청을 거절했습니다. 구체적인 사유는 기록되지 않았습니다.",
         status: {
             issued: "링크 발급됨",
             downloaded: "내려받음",

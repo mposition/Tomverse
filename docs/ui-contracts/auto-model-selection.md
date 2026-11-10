@@ -176,6 +176,9 @@ A refused, failed or identity-stale write leaves the confirmed Auto UI intact.
   never in colour alone — the same rule `ModelSelectionBadge` follows.
 - The mode change is announced through a polite live region, so a screen reader
   is told what happened rather than re-reading the control.
+- In Korean mobile Chat, the header model-picker button says `모델 선택기 열기`
+  while the composer switch retains `스마트 자동`; one opens the picker and
+  the other changes the mode. The existing accessible Auto summary is retained.
 - The composer switch is separate from the model-picker trigger. Its target is
   at least 44px high on coarse-pointer surfaces, including tablets; the approved
   fine-pointer context row uses a 32px control on desktop. Each action has one

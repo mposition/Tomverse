@@ -999,7 +999,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "introCtaLabel": "Start analyzing files",
       "sections": [
         {
-          "title": "Supported analysis workflows",
+          "title": "Example: analyze a club notice",
           "body": "For a club notice, ask each model to extract the following and include a supporting sentence for every result.",
           "bullets": [
             "Extract dates, items to bring and reply deadlines",
