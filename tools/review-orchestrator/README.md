@@ -189,6 +189,11 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
   외 공급자에는 이전 값을 대신 내보내지 않습니다: 캐시를 갱신할 때마다(60초) 새로 읽고, 실패하면 그
   항목이 `available: false`가 됩니다. Claude의 이전 값을 내보낼 때는 Claude 항목에도 `stale`이
   붙습니다(`crates/amux-server/src/api/usage.rs`).
+- `stale` 항목도 **AMUX가 읽은 시각(`observed_at`, 초)이 30분 이내이고 모든 창이 20% 이상 남았으면**
+  그 값으로 배정합니다(`AMUX_STALE_MAX_S`, `AMUX_STALE_MIN_REMAINING_PERCENT`). 구독 창은 천천히
+  움직이는데, Anthropic 사용량 API는 계정에 여유가 많아도 오래 429를 냅니다(2026-11-09, 주간 92%
+  남은 채로 Claude 검토가 몇 시간 보류됨). 30분보다 오래됐거나, 읽은 시각이 없거나 숫자가 아니거나,
+  어느 창이든 20% 미만이면 `unknown`으로 보류합니다.
 - AMUX가 공급사 항목에 `credit_usd`를 보고하면(Cursor의 크레딧 grant 잔액) Cursor probe와 같은
   규칙을 씁니다: 포함 사용량이 소진돼도 크레딧이 남아 있으면 배정하고, 크레딧 0이면 보류하며,
   크레딧을 못 읽었으면 소진으로 봅니다. `status`와 Agent office에 크레딧 금액도 함께 보입니다.

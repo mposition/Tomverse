@@ -175,11 +175,14 @@ async function picture(label, prompt, references, out) {
   return null;
 }
 
+// A flat mark is painted over with its real file after the reviews (step 7), so
+// its drawn shape is never worth an edit; image models cannot draw some marks
+// (the first box run, 2026-11-10, spent three refines on the Claude mark).
+const FLAT_MARKS =
+  "A provider mark on a flat surface facing the viewer (`flat: true`) is painted over with its real file afterwards: report it in `logoBoxes` with its true `shapeOk`, but its shape is never a reason for `fix` or `reject`; judge only that it is there, in a sensible place and size. Only a mark on a tilted or curved surface must match its file.";
 const STAGE_RULES = {
-  guide:
-    "Judge rules 1-11 of the guide one by one. Look hard at hands and fingers (rule 5), at every logo against its real file, and at every word on the picture against `texts`. On `fix`, write each change so an image model can make it in one edit.",
-  content:
-    "Read every piece of text in the picture exactly as it is written, character by character, and list it in `readTexts`, one string per text, in reading order, even where it is wrong. Do not correct what you read. Then check the facts, the logos and the hands again. A script compares your `readTexts` with `texts`.",
+  guide: `Judge rules 1-11 of the guide one by one. Look hard at hands and fingers (rule 5), at every logo against its real file, and at every word on the picture against \`texts\`. ${FLAT_MARKS} On \`fix\`, write each change so an image model can make it in one edit.`,
+  content: `Read every piece of text in the picture exactly as it is written, character by character, and list it in \`readTexts\`, one string per text, in reading order, even where it is wrong. Do not correct what you read. Then check the facts, the logos and the hands again. ${FLAT_MARKS} A script compares your \`readTexts\` with \`texts\`.`,
 };
 const ANSWER_SHAPE = {
   guide: '`{"id":"<concept id>","verdict":"pass|fix|reject","fixes":["..."],"logoBoxes":[...],"textBoxes":[...]}`',

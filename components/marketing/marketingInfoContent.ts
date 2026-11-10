@@ -102,6 +102,7 @@ export const infoPages = {
     }
   },
   "en": {
+    mobileAccordion: true,
     "eyebrow": "FAQ",
     "title": "Frequently asked questions",
     "description": "Find answers about Chat and Review, getting started free, model selection and credits.",
@@ -915,7 +916,8 @@ export const infoPages = {
       },
       {
         "title": "Security and data handling",
-        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. See the safety information for data-handling details."
+        "body": "Your selected AI provider processes the question and material needed to answer. Locks control access to saved conversations; sharing creates a read-only link to the content at that time. Read the privacy policy for processing, retention and deletion details.",
+        "link": { "label": "Read the privacy policy", "href": "/privacy" }
       },
       {
         "title": "AI limitations and service status",
@@ -1404,7 +1406,7 @@ export const infoPages = {
       {
         "id": "answer-errors",
         "title": "When an answer does not arrive",
-        "body": "Models can be temporarily limited or fail to answer. Check the reason and service status, then try a suggested alternative once if needed. If the problem continues, send support the trace ID and model name.",
+        "body": "Models can be temporarily limited or fail to answer. Check the reason and service status, then try a suggested alternative once if needed. If a Trace ID appears beneath the failed answer’s error message, select and copy its value for support. You can also choose Report this error on the error card; the report includes the available trace ID and model context automatically.",
         "link": { "label": "View service status", "href": "/status" }
       },
       {
@@ -1422,7 +1424,7 @@ export const infoPages = {
       {
         "id": "contact-support",
         "title": "Contact support",
-        "body": "If the problem continues, include your account email, approximate time, product and model, attachment details and the on-screen trace ID. Use the form or email; do not send passwords or card numbers."
+        "body": "If the problem continues, include your account email, approximate time and time zone, product and model, attachment details and any on-screen trace ID. In Report this error, open See the error details that will be attached, then choose Copy diagnostic details to copy the available error context. If no ID is shown, you can still contact support: include the exact error message, browser and steps that led to it, plus a screenshot with sensitive information removed if useful. Use the form or email; do not send passwords or card numbers."
       }
     ],
     "cta": {
