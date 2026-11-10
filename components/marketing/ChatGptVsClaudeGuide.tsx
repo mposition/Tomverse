@@ -285,8 +285,8 @@ const guideCopy: Record<Language, GuideCopy> = {
       },
       {
         "task": "Rewriting a message",
-        "gpt": "Whether kindness preserves the original intent and refusal",
-        "claude": "Whether kindness preserves the original intent and refusal",
+        "gpt": "Whether the rewrite stays polite while preserving the original intent and any refusal",
+        "claude": "Whether the rewrite stays polite while preserving the original intent and any refusal",
         "decision": "Check the intent against the original draft"
       },
       {
