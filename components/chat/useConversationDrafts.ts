@@ -1149,8 +1149,18 @@ export function useConversationDrafts(
       }
       const key = capture.key;
       const releasePendingConsume = () => {
-        if (pendingConsumesRef.current.get(key)?.token === capture.token) {
-          pendingConsumesRef.current.delete(key);
+        if (pendingConsumesRef.current.get(key)?.token !== capture.token) return;
+        pendingConsumesRef.current.delete(key);
+        // A returning epoch's hydration froze its fresh metadata only because
+        // this detached capture owned the draft. Now that the owner is gone,
+        // hand the draft back to the current epoch without writing for it.
+        const fence = identityFenceRef.current;
+        const fresh = syncMetaRef.current.get(key);
+        if (fresh && fresh !== meta && fresh.frozen &&
+            fresh.identityKey === fence.identityKey &&
+            fresh.identityEpoch === fence.epoch) {
+          fresh.frozen = false;
+          bumpSyncRevision();
         }
       };
       const meta = syncMetaRef.current.get(key);
@@ -1228,6 +1238,7 @@ export function useConversationDrafts(
       };
     },
     [
+      bumpSyncRevision,
       cancelPersistRetry,
       durableSyncEnabled,
       identityFenceIsCurrent,
