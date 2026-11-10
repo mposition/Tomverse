@@ -57,6 +57,13 @@ const halt = (reason, code = 1) => {
   report.halted = reason;
   finish(code);
 };
+// Whatever goes wrong after money may have been spent, the report and its spend are written.
+const crashed = (error) => {
+  report.failed.push({ step: "run", reason: String(error?.stack ?? error).slice(0, 600) });
+  halt("crashed");
+};
+process.on("uncaughtException", crashed);
+process.on("unhandledRejection", crashed);
 
 // 0. The switch, the caps and the keys, before anything else.
 if (env.MARKETING_CREATIVE_SHORT !== "on") halt("switch_off", 0);
