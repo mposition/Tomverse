@@ -269,10 +269,10 @@ also charges it an additional 5ms for the longer Router output.
 
 | End-to-end fixture metric | Serial baseline | Both improvements |
 | --- | ---: | ---: |
-| First content p50 | 334.76ms | 246.29ms |
-| First content p95 | 340.64ms | 259.24ms |
-| Completion p50 | 366.01ms | 277.23ms |
-| Completion p95 | 371.37ms | 289.20ms |
+| First content p50 | 342.46ms | 251.78ms |
+| First content p95 | 407.25ms | 315.27ms |
+| Completion p50 | 372.86ms | 282.64ms |
+| Completion p95 | 454.96ms | 343.03ms |
 
 These establish orchestration savings under the stated delays, not production
 percentages or equal LLM answer quality. Real gains depend on actual Router output
@@ -284,9 +284,28 @@ previous context/draft benchmark or the tiny production snapshot.
 Local follow-up verification covers the real Router request and its exact cost
 hold, malformed/disabled plans, shared search caps and reuse, input headroom,
 failures and abortion, route admission/settlement, native/location exclusions,
-and the existing signed timing and selection contracts (192 passing checks).
+and the existing signed timing and selection contracts (193 passing checks).
 The two new controlled-browser scenarios prove simultaneous semantic requests,
 no permission/GPS before durable save, one intent call on the accepted turn, and
 no save/dispatch/GPS when model selection changes. Five existing send/timing/fence
 scenarios also pass. Build and targeted lint pass. Full provider semantic quality
 and production p50/p95 still require a separately authorized matched evaluation.
+
+
+Independent review `r-20261110-074257-2c1b88` accepted the initial follow-up.
+After the provider-history compatibility fix, review
+`r-20261110-080106-5da3b5` accepted runtime commit `e60e70bf6`. The remaining
+partial-backend-failure case is covered by the final local test, and the full
+6,000-token precheck intentionally preserves the follow-up allowance even though
+presearch injects at most 2,400 tokens. External snippets are verified to remain
+literal data without triggering additional deterministic work. This is not an
+LLM prompt-injection evaluation: before activation, include malicious-source
+cases in the matched semantic quality evaluation because reference data is
+carried in user-content parts for cross-provider compatibility.
+
+Browser verification covers 22 cases: seven desktop send/timing/fence cases,
+nine mobile send/location cases, four desktop/mobile serial-path cases with
+`E2E_CHAT_PARALLEL_PREPARATION_ENABLED=false`, and two disabled-location/manual
+refresh cases. The final controlled-delay run above was made locally alongside
+a build; scheduling jitter affects its absolute times and p95. No production
+speed or semantic quality conclusion is drawn from these synthetic milliseconds.

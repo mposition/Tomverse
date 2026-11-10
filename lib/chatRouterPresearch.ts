@@ -32,6 +32,7 @@ export async function prepareRouterSearch(input: {
   inputHeadroomTokens: number;
 }): Promise<SearchEvidencePart[]> {
   const queries = parseRouterSearchQueries(input.queries);
+  // Require the full existing allowance so the follow-up share is reserved too.
   if (!queries.length || input.signal.aborted || input.inputHeadroomTokens < WEB_SEARCH_INPUT_TOKEN_OVERHEAD) return [];
   try {
     const result = await input.tool.search({ query: queries });

@@ -83,7 +83,7 @@ let forceAppManagedSearch = false;
 let forceNativeSearch = false;
 let refusePresearchAdmission = false;
 let throwAfterPresearch = false;
-let failPresearchBackend = false;
+let failPresearchBackend: false | "all" | "partial" = false;
 const presearchCalls: unknown[] = [];
 const presearchSettlements: Record<string, unknown>[] = [];
 const realSearchCapability = require(resolve(ROOT, "lib/webSearchCapability.ts")) as typeof import("../../lib/webSearchCapability");
@@ -99,7 +99,7 @@ mock.module(mod("lib/webSearchBackendAdapter.ts"), { namedExports: {
   runWebSearchBackendRequest: async (_backend: unknown, request: { query: string }) => {
     assert.equal(ledger.accessAcquisitions, 1, "search cannot precede credit admission");
     presearchCalls.push(request);
-    if (failPresearchBackend) return { ok: false, failure: "backend_timeout" };
+    if (failPresearchBackend === "all" || (failPresearchBackend === "partial" && request.query === "another fact")) return { ok: false, failure: "backend_timeout" };
     return { ok: true, results: [{ title: "Search evidence", url: "https://example.com/evidence", snippet: "Verified fixture fact." }] };
   },
 } });
@@ -3670,10 +3670,15 @@ test("router presearch stays behind admission, preserves search recovery policy 
     assert.equal(presearchSettlements.length, 1);
     assert.equal(presearchSettlements[0].searchBackendRequestCount, 2);
     assert.equal(presearchSettlements[0].searchQueriesObserved, true);
-    failPresearchBackend = true; presearchCalls.length = 0; presearchSettlements.length = 0;
+    failPresearchBackend = "all"; presearchCalls.length = 0; presearchSettlements.length = 0;
     await ask("answers", "claimed", 500, false, undefined, true, true, undefined, "always");
     assert.equal(presearchCalls.length, 2);
     assert.equal(presearchSettlements[0].searchBackendRequestCount, 0);
+    assert.equal(presearchSettlements[0].searchQueriesObserved, false);
+    failPresearchBackend = "partial"; presearchCalls.length = 0; presearchSettlements.length = 0;
+    await ask("answers", "claimed", 500, false, undefined, true, true, undefined, "always");
+    assert.equal(presearchCalls.length, 2);
+    assert.equal(presearchSettlements[0].searchBackendRequestCount, 1);
     assert.equal(presearchSettlements[0].searchQueriesObserved, false);
     failPresearchBackend = false; throwAfterPresearch = false;
 
