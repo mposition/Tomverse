@@ -794,7 +794,7 @@ test("the Prisma-call limit is not presented as an SQL statement-count guarantee
   );
   assert.match(
     dbBoundarySource,
-    /executionHeartbeat: \{[\s\S]*?prismaCallCeiling: 10/,
+    /executionHeartbeat: \{[\s\S]*?prismaCallCeiling: 11/,
   );
   const heartbeat = executionSource
     .split("async function heartbeatAmuxExecutionBound(")[1]

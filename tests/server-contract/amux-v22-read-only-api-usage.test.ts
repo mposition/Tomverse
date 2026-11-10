@@ -16,6 +16,7 @@ let routeCacheWrite = 400_000;
 let legacyAssignment = false;
 
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+  takeAuditChainLock: async () => {},
   writeSystemAuditLog: async (input: Record<string, unknown>) => {
     auditCalls += 1;
     auditInput = input;

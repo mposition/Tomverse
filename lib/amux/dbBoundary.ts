@@ -145,7 +145,8 @@ export const AMUX_DB_BOUNDARIES = {
   },
   // 18: the one-open-card-per-worker count added a read to the success path.
   // 19: the permanent safe-stop fence read (orchestration policy version 37).
-  claim: { operation: "claim", prismaCallCeiling: 19, isolation: "mutation" },
+  // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+  claim: { operation: "claim", prismaCallCeiling: 20, isolation: "mutation" },
   // A refusal audit changes no ownership or status, so an admitted claim's
   // refusal takes no admission lock and leaves no receipt (policy version 20).
   claimRefusal: {
@@ -161,8 +162,9 @@ export const AMUX_DB_BOUNDARIES = {
   },
   deliveryPull: {
     operation: "delivery_pull",
-    // setup + runtime fence + candidate + update + canonical audit + fence
-    prismaCallCeiling: 9,
+    // setup + runtime fence + audit chain lock + candidate + update +
+    // canonical audit + fence
+    prismaCallCeiling: 10,
     isolation: "mutation",
   },
   deliveryKeyRead: {
@@ -173,28 +175,33 @@ export const AMUX_DB_BOUNDARIES = {
   },
   deliveryAck: {
     operation: "delivery_ack",
-    prismaCallCeiling: 11,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    prismaCallCeiling: 12,
     isolation: "mutation",
   },
   executionStart: {
     operation: "execution_start",
-    prismaCallCeiling: 30,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    prismaCallCeiling: 31,
     isolation: "mutation",
   },
   executionHeartbeat: {
     operation: "execution_heartbeat",
-    // setup + three fenced reads + update + four canonical-audit calls + fence
-    prismaCallCeiling: 10,
+    // setup + three fenced reads + audit chain lock + update + four
+    // canonical-audit calls + fence
+    prismaCallCeiling: 11,
     isolation: "mutation",
   },
   executionSettle: {
     operation: "execution_settle",
-    prismaCallCeiling: 26,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    prismaCallCeiling: 27,
     isolation: "mutation",
   },
   v52ReviewRecord: {
     operation: "v52_review_record",
-    prismaCallCeiling: 20,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    prismaCallCeiling: 21,
     isolation: "mutation",
   },
   executionRecoveryRead: {
@@ -204,7 +211,8 @@ export const AMUX_DB_BOUNDARIES = {
   },
   executionRecoveryWrite: {
     operation: "execution_recovery_write",
-    prismaCallCeiling: 21,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    prismaCallCeiling: 22,
     isolation: "mutation",
   },
   quotaObservationSweep: {
@@ -233,13 +241,15 @@ export const AMUX_DB_BOUNDARIES = {
   },
   ownershipRecoveryWrite: {
     operation: "ownership_recovery_write",
-    prismaCallCeiling: 9,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    prismaCallCeiling: 10,
     isolation: "mutation",
   },
   reviewPullRequest: {
     operation: "review_pull_request",
-    // setup + task lock + latest attempt + update + canonical audit + fence
-    prismaCallCeiling: 10,
+    // setup + audit chain lock + task lock + latest attempt + update +
+    // canonical audit + fence
+    prismaCallCeiling: 11,
     isolation: "mutation",
   },
   // engineering-agent.md version 5, item 1. setup + audit chain lock + task

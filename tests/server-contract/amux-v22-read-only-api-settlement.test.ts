@@ -80,6 +80,7 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
     }),
 } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+  takeAuditChainLock: async () => {},
   writeSystemAuditLog: async (input: { action: string }) => {
     if (input.action === "amux.cli_usage.recorded") world.usageAudits += 1;
     if (input.action === "amux.v22.execution.settled")

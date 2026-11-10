@@ -7,7 +7,8 @@ import { pathToFileURL } from "node:url";
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
 mock.module(mod("lib/adminAudit.ts"), {
-  namedExports: { writeSystemAuditLog: async () => {} },
+  namedExports: {
+  takeAuditChainLock: async () => {}, writeSystemAuditLog: async () => {} },
 });
 
 const { recordAmuxV22TaskResult, v22TaskResultSha256 } =
