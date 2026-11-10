@@ -78,12 +78,21 @@ test("Copilot quota is the premium entitlement with its own reset", () => {
   assert.equal(normalizeAmuxV22CopilotQuota({ quotaSnapshots: { chat: row } }, at), null);
 });
 
-test("Cursor quota is the included plan, exhausted even when credit grants remain", () => {
+test("Cursor quota is the less-used plan pool, exhausted only when both are full", () => {
   const end = String(now + 10 * 86_400_000);
   const reset = new Date(Number(end)).toISOString();
   assertObservation(normalizeAmuxV22CursorQuota({ billingCycleEnd: end,
     planUsage: { totalPercentUsed: 30, autoPercentUsed: 12.5, apiPercentUsed: 41 } }, at),
-  "cursor", 5900, reset);
+  "cursor", 8750, reset);
+  // The 2026-11-10 account: Cursor models full, other models 14% used -> still served.
+  assertObservation(normalizeAmuxV22CursorQuota({ billingCycleEnd: end, planUsage: { limit: 2000,
+    autoPercentUsed: 100, apiPercentUsed: 13.91111111111111, totalPercentUsed: 96.01481481481483 } }, at),
+  "cursor", 8608, reset);
+  assertObservation(normalizeAmuxV22CursorQuota({ billingCycleEnd: end,
+    planUsage: { autoPercentUsed: 100, apiPercentUsed: 100, totalPercentUsed: 100 } }, at),
+  "cursor", 0, reset);
+  assertObservation(normalizeAmuxV22CursorQuota({ billingCycleEnd: end,
+    planUsage: { totalPercentUsed: 41 } }, at), "cursor", 5900, reset);
   assertObservation(normalizeAmuxV22CursorQuota({ billingCycleEnd: Number(end),
     planUsage: { remaining: 500, limit: 2000 } }, at), "cursor", 2500, reset);
   assertObservation(normalizeAmuxV22CursorQuota({ billingCycleEnd: end, creditGrantsBalance:

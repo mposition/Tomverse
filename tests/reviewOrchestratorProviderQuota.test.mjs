@@ -12,10 +12,15 @@ const snapshot = (remainingPercentage, usedRequests = 100 - remainingPercentage)
     entitlementRequests: 100, isUnlimitedEntitlement: false } },
 });
 
-test("Cursor current-period account usage blocks an exhausted pool and unrecognized responses", () => {
+test("Cursor current-period account usage blocks an exhausted plan and unrecognized responses", () => {
   assert.deepEqual(cursorQuotaFromUsage({ planUsage: { remaining: 1000, limit: 2000, totalPercentUsed: 50 } }),
     { state: "available", remainingPercent: 50 });
+  // One full pool goes on in the other (owner report 2026-11-10: Cursor models 100%, other 14%).
   assert.deepEqual(cursorQuotaFromUsage({ planUsage: { remaining: 1000, apiPercentUsed: 100, autoPercentUsed: 50 } }),
+    { state: "available", remainingPercent: 50 });
+  assert.deepEqual(cursorQuotaFromUsage({ planUsage: { autoPercentUsed: 100, apiPercentUsed: 14, totalPercentUsed: 96 } }),
+    { state: "available", remainingPercent: 86 });
+  assert.deepEqual(cursorQuotaFromUsage({ planUsage: { autoPercentUsed: 100, apiPercentUsed: 100, totalPercentUsed: 100 } }),
     { state: "exhausted", remainingPercent: 0 });
   assert.deepEqual(cursorQuotaFromUsage({ planUsage: { remaining: 0, limit: 2000 } }),
     { state: "exhausted", remainingPercent: 0 });
