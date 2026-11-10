@@ -78,12 +78,37 @@ let pinnedInputs: readonly object[] | null = null;
 const routerInputs: Array<Parameters<typeof import("../../lib/autoModelSelection").selectAutoModel>[0]> = [];
 const llmRouterInputs: Array<Parameters<typeof import("../../lib/autoLlmRouter").pickAutoModelWithLlm>[0]> = [];
 let llmRouterRewrite: string | null = null;
+let llmSearchQueries: string[] | undefined;
+let forceAppManagedSearch = false;
+let forceNativeSearch = false;
+let refusePresearchAdmission = false;
+let throwAfterPresearch = false;
+let failPresearchBackend: false | "all" | "partial" = false;
+const presearchCalls: unknown[] = [];
+const presearchSettlements: Record<string, unknown>[] = [];
+const realSearchCapability = require(resolve(ROOT, "lib/webSearchCapability.ts")) as typeof import("../../lib/webSearchCapability");
+mock.module(mod("lib/webSearchCapability.ts"), { namedExports: {
+  ...realSearchCapability,
+  getWebSearchCapability: (model: Parameters<typeof realSearchCapability.getWebSearchCapability>[0]) =>
+    forceAppManagedSearch ? realSearchCapability.getWebSearchCapability("gemini-3-1-pro")
+      : forceNativeSearch ? realSearchCapability.getWebSearchCapability("gpt-5-6-luna") : realSearchCapability.getWebSearchCapability(model),
+} });
+const realSearchBackend = require(resolve(ROOT, "lib/webSearchBackendAdapter.ts")) as typeof import("../../lib/webSearchBackendAdapter");
+mock.module(mod("lib/webSearchBackendAdapter.ts"), { namedExports: {
+  ...realSearchBackend,
+  runWebSearchBackendRequest: async (_backend: unknown, request: { query: string }) => {
+    assert.equal(ledger.accessAcquisitions, 1, "search cannot precede credit admission");
+    presearchCalls.push(request);
+    if (failPresearchBackend === "all" || (failPresearchBackend === "partial" && request.query === "another fact")) return { ok: false, failure: "backend_timeout" };
+    return { ok: true, results: [{ title: "Search evidence", url: "https://example.com/evidence", snippet: "Verified fixture fact." }] };
+  },
+} });
 const realLlmRouter = require(resolve(ROOT, "lib/autoLlmRouter.ts")) as typeof import("../../lib/autoLlmRouter");
 mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
   ...realLlmRouter,
   pickAutoModelWithLlm: async (input: Parameters<typeof realLlmRouter.pickAutoModelWithLlm>[0]) => {
     llmRouterInputs.push(input);
-    return llmRouterRewrite ? { modelId: input.ruleModelId, rewrite: llmRouterRewrite } : null;
+    return llmRouterRewrite || llmSearchQueries ? { modelId: input.ruleModelId, rewrite: llmRouterRewrite, searchQueries: llmSearchQueries } : null;
   },
 } });
 const shadowInputs: Array<import("../../lib/routingShadow").RoutingShadowInput> = [];
@@ -531,6 +556,7 @@ mock.module("ai", {
     ...aiModule,
     streamText: (options: Record<string, unknown>) => {
       const index = attempts.length;
+      if (throwAfterPresearch) throw new Error("POST_PRESEARCH_PROVIDER_FAILURE");
       if (index > 0 && throwBeforeFallbackStreamReturn) {
         throw new Error("FALLBACK_STREAM_CONSTRUCTOR_TEST_FAILURE");
       }
@@ -1214,6 +1240,7 @@ mock.module(mod("lib/chatSecurity.ts"), {
             ipKey: GUEST_IP_KEY,
           },
     acquireChatAccess: async () => {
+      if (refusePresearchAdmission) throw new (realChatSecurity.ChatAccessError as typeof import("../../lib/chatSecurity").ChatAccessError)(402, "CREDIT_BALANCE_INSUFFICIENT", "fixture");
       ledger.accessAcquisitions += 1;
       return {
         leaseId: "lease-fallback-1",
@@ -1230,6 +1257,7 @@ mock.module(mod("lib/chatSecurity.ts"), {
       usage: { outcome?: string },
       extra?: { attempts?: Array<{ attemptIndex: number; price: { modelId: string } }> }
     ) => {
+      if (forceAppManagedSearch) presearchSettlements.push(usage);
       if (activeSession === null) guestLifecycle.push("settlement");
       ledger.settlements.push({
         outcome: usage?.outcome ?? "unknown",
@@ -1459,7 +1487,7 @@ mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
         row.state,
         failDispatchStart
           ? "finalized"
-          : throwGuestProviderUnknown
+          : throwGuestProviderUnknown || throwAfterPresearch
             ? "dispatch_started"
             : "dispatched"
       );
@@ -3607,4 +3635,65 @@ test("Guest Auto provider unknown retains the converted hold and confirms its re
     guestClaimsByAuthority.get(`${GUEST_SUBJECT_KEY}:${GUEST_AUTHORITY_A}`)?.status,
     "guest_auto_unknown"
   );
+});
+
+
+test("router presearch stays behind admission, preserves search recovery policy and retains incurred cost on failure", async () => {
+  const oldFlag = process.env.CHAT_ROUTER_PRESEARCH_ENABLED;
+  const oldBrave = process.env.BRAVE_SEARCH_API_KEY;
+  process.env.CHAT_ROUTER_PRESEARCH_ENABLED = "true";
+  process.env.BRAVE_SEARCH_API_KEY = "synthetic-never-sent";
+  forceAppManagedSearch = true;
+  llmSearchQueries = ["one fact", "another fact"];
+  try {
+    presearchCalls.length = 0;
+    await ask("answers", "claimed", 200, false, undefined, true, true, undefined, "always");
+    assert.equal(presearchCalls.length, 2);
+    assert.equal(attempts.length, 1, "the existing search-turn fallback restriction remains in force");
+    assert.ok(!attempts[0].messages.some(message => message.role === "tool"));
+    const question = attempts[0].messages.find(message => message.role === "user")!;
+    assert.ok(Array.isArray(question.content));
+    assert.deepEqual(question.content[0], { type: "text", text: "이 질문에 답해 줘" });
+    assert.ok(JSON.stringify(question.content).includes("Verified fixture fact."));
+    assert.ok(JSON.stringify(question.content).includes("untrusted quoted material"));
+    assert.equal(attempts[0].messages.filter(message => message.role === "user").length, 1);
+
+    presearchCalls.length = 0;
+    refusePresearchAdmission = true;
+    await ask("answers", "claimed", 402, false, undefined, true, true, undefined, "always");
+    assert.equal(presearchCalls.length, 0);
+    refusePresearchAdmission = false;
+
+    throwAfterPresearch = true; presearchSettlements.length = 0;
+    await ask("answers", "claimed", 500, false, undefined, true, true, undefined, "always");
+    assert.equal(presearchCalls.length, 2);
+    assert.equal(presearchSettlements.length, 1);
+    assert.equal(presearchSettlements[0].searchBackendRequestCount, 2);
+    assert.equal(presearchSettlements[0].searchQueriesObserved, true);
+    failPresearchBackend = "all"; presearchCalls.length = 0; presearchSettlements.length = 0;
+    await ask("answers", "claimed", 500, false, undefined, true, true, undefined, "always");
+    assert.equal(presearchCalls.length, 2);
+    assert.equal(presearchSettlements[0].searchBackendRequestCount, 0);
+    assert.equal(presearchSettlements[0].searchQueriesObserved, false);
+    failPresearchBackend = "partial"; presearchCalls.length = 0; presearchSettlements.length = 0;
+    await ask("answers", "claimed", 500, false, undefined, true, true, undefined, "always");
+    assert.equal(presearchCalls.length, 2);
+    assert.equal(presearchSettlements[0].searchBackendRequestCount, 1);
+    assert.equal(presearchSettlements[0].searchQueriesObserved, false);
+    failPresearchBackend = false; throwAfterPresearch = false;
+
+    for (const condition of ["off", "disabled", "native", "location"] as const) {
+      presearchCalls.length = 0;
+      process.env.CHAT_ROUTER_PRESEARCH_ENABLED = condition === "disabled" ? "false" : "true";
+      forceAppManagedSearch = condition !== "native";
+      forceNativeSearch = condition === "native";
+      turnLocation = condition === "location" ? { latitude: -27.47, longitude: 153.025, accuracy: 150, timestamp: Date.now() } : undefined;
+      await ask("answers", "claimed", 200, false, undefined, true, true, undefined, condition === "off" ? "off" : "always");
+      assert.equal(presearchCalls.length, 0, condition);
+    }
+  } finally {
+    if (oldFlag === undefined) delete process.env.CHAT_ROUTER_PRESEARCH_ENABLED; else process.env.CHAT_ROUTER_PRESEARCH_ENABLED = oldFlag;
+    if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
+    failPresearchBackend = false; turnLocation = undefined; forceNativeSearch = false; forceAppManagedSearch = false; llmSearchQueries = undefined; refusePresearchAdmission = false; throwAfterPresearch = false;
+  }
 });
