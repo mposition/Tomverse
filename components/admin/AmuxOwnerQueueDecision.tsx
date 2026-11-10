@@ -18,12 +18,14 @@ import {
   type AmuxLegacyCardRead,
 } from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
+import { AmuxTaskUnknownUsageList } from "@/components/admin/AmuxAttemptUsageAcceptance";
 import { AmuxTaskQuestionSection } from "@/components/admin/AmuxWorkerQuestion";
 import { AdminChannelIcon } from "@/components/admin/ui/AdminChannelIcon";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { adminIntlLocale } from "@/lib/adminLocale";
+import { formatAestDateTime } from "@/lib/adminUiCore";
 import { adminAmuxExecutionMessages } from "@/lib/adminMessages/amuxExecution";
 import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue";
 import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
@@ -238,6 +240,11 @@ export function AmuxOwnerQueueDecision({
           <p className="mt-1.5 text-sm leading-6 text-zinc-300" data-testid="amux-owner-queue-usage-unknown">
             {copy.why.reviewUsageUnknown}
           </p>
+        ) : null}
+        {reviewMatches && review.unknown_usage_attempts?.length ? (
+          <AmuxTaskUnknownUsageList taskId={item.taskId} attempts={review.unknown_usage_attempts}
+            canAccept={canInspectCards}
+            date={(value) => formatAestDateTime(value, { seconds: false }) ?? "-"} />
         ) : null}
         {reportExcerpt ? (
           <div className="mt-3" data-testid="amux-owner-queue-report-excerpt">
