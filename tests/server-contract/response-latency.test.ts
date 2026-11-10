@@ -91,3 +91,32 @@ test("telemetry outages do not break responses and are not represented as zero l
     assert.deepEqual(await evidence(), { status: "unavailable", windowDays: 7 });
   } finally { unavailable = false; }
 });
+
+test("bounded optional stages are stored; content and server timing impersonation are refused", async () => {
+  const { POST, createToken } = await load();
+  const id = randomUUID();
+  const body = { token: createToken(id, "chat", "auto"), outcome: "completed", prepareMs: 10, firstContentMs: 20, completionMs: 30,
+    stages: { contextPrepareMs: 7, draftPrepareMs: 6, dispatchToContentMs: 10 } };
+  for (const stages of [{ prompt: "never store" }, { routingMs: 1 }, { locationMs: 31 }]) {
+    assert.equal((await POST(request({ ...body, stages }))).status, 400);
+  }
+  assert.equal((await POST(request(body))).status, 204);
+  assert.deepEqual((samples.get(`${id}:client`) as { timings: unknown }).timings,
+    { ...body.stages, prepareMs: 10, firstContentMs: 20, completionMs: 30 });
+});
+
+test("server stages separate routing from admission and provider/tool waiting", async () => {
+  const { createServerLatency } = await import(url("lib/responseLatencyServer.ts"));
+  const id = randomUUID();
+  let time = 0;
+  const timing = createServerLatency(id, () => time);
+  time = 10; const stopRouting = timing.stage("routingMs");
+  time = 40; stopRouting();
+  time = 55; timing.provider();
+  time = 100; timing.content();
+  time = 120; timing.content(); timing.finish("completed", "model", "provider");
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.deepEqual((samples.get(`${id}:server`) as { timings: unknown }).timings,
+    { beforeRoutingMs: 10, routingMs: 30, preProviderMs: 55, afterRoutingMs: 15,
+      firstContentMs: 100, providerToContentMs: 45, settlementMs: 120 });
+});
