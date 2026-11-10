@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
@@ -72,8 +72,11 @@ export async function acceptAmuxV22AttemptUnknownUsage(input: {
 }) {
   const ownerId = await requireOwner(input.session);
   return prisma.$transaction(async (tx) => {
-    // The Task lock serializes this with a recovery approval or review retry
-    // that would accept the same attempt.
+    // The audit chain lock comes before the Task row, as in the portfolio
+    // assessment and score writers, so the two cannot deadlock. The Task lock
+    // serializes this with a recovery approval or review retry that would
+    // accept the same attempt.
+    await takeAuditChainLock(tx);
     await tx.$queryRaw`SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${input.taskId} FOR UPDATE`;
     const task = await tx.amuxWorkItem.findUnique({ where: { id: input.taskId },
       select: { id: true, sourceSystem: true } });

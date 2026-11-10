@@ -16,17 +16,20 @@ const world = {
   attempt: { worker: "codex-impl", outcome: "blocked", reason: "usage_outcome_unknown",
     reservedCostMicrousd: 4_100_000n, settledCostMicrousd: null, costConfirmed: false,
     cliUsageEvents: [] as Row[] },
-  locked: [] as unknown[], txOpen: false,
+  locked: [] as unknown[], txOpen: false, chainLocked: 0, order: [] as string[],
 };
 function reset() {
   world.role = "owner"; world.reauth = true;
   world.task = { id: "task-1", sourceSystem: "admin-idea-v4" };
   world.unknown = ["attempt-1"]; world.acceptances = []; world.audits = []; world.locked = [];
+  world.chainLocked = 0; world.order = [];
 }
 const tx = {
   $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join("?");
-    if (sql.includes("FOR UPDATE")) { world.locked.push(values[0]); return [{ id: values[0] }]; }
+    if (sql.includes("FOR UPDATE")) {
+      world.order.push("task"); world.locked.push(values[0]); return [{ id: values[0] }];
+    }
     if (sql.includes("clock_timestamp")) return [{ now: new Date("2026-11-10T00:00:00.000Z") }];
     if (sql.includes('"AmuxV22AttemptUsageAcceptance" x')) return world.unknown.map((id) => ({ id }));
     throw new Error(`unexpected SQL: ${sql}`);
@@ -53,6 +56,9 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   },
 } } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+  takeAuditChainLock: async (client: unknown) => {
+    assert.equal(client, tx); world.order.push("audit-chain"); world.chainLocked += 1;
+  },
   writeAdminAuditLog: async (input: Row) => {
     assert.equal(input.tx, tx, "the audit uses the caller's transaction");
     const id = `audit-${world.audits.length + 1}`;
@@ -79,6 +85,8 @@ test("the owner's acceptance is audited with the attempt's unchanged cost and re
     taskId: "task-1", attemptId: "attempt-1" });
   assert.equal(result.accepted, true); assert.equal(result.alreadyAccepted, false);
   assert.deepEqual(world.locked, ["task-1"]);
+  // The audit chain lock comes before the Task row (review r-20261110-000809-a46dad).
+  assert.deepEqual(world.order, ["audit-chain", "task"]);
   assert.equal(world.audits.length, 1);
   const audit = world.audits[0]!;
   assert.equal(audit.action, AMUX_V22_USAGE_ACCEPTED_ACTION);
