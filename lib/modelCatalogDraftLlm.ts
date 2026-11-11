@@ -35,7 +35,11 @@ const MAX_OUTPUT_TOKENS = 2_000;
 const TIMEOUT_MS = 90_000;
 const PAGE_TIMEOUT_MS = 10_000;
 const PAGE_MAX_BYTES = 2_000_000;
-const PAGE_TEXT_CHARS = 40_000;
+// Provider guides run long and keep per-image token tables near the end:
+// OpenAI's image-generation guide is about 101,000 characters as text, with
+// the table at about 99,000. Three pages at this size are roughly 90,000
+// input tokens, under a cent per draft on a standard model.
+const PAGE_TEXT_CHARS = 120_000;
 export const MAX_DRAFT_SOURCES = 3;
 
 export type DraftPage = { url: string; text: string };
@@ -107,7 +111,7 @@ export const fetchOfficialPage = async (provider: string, url: string): Promise<
 const IMAGE_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["options", "thinkingCapMicroUsd"],
+  required: ["options", "outputUsdPerMTok", "thinkingCapMicroUsd", "noPriceReason"],
   properties: {
     options: {
       type: "array",
@@ -115,15 +119,22 @@ const IMAGE_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["quality", "size", "outputCostMicroUsd"],
+        required: ["quality", "size", "outputCostMicroUsd", "outputTokens"],
         properties: {
           quality: { type: "string", enum: ["low", "medium", "high"] },
           size: { type: "string", enum: ["1024x1024", "1536x1024", "1024x1536"] },
-          outputCostMicroUsd: { type: "integer" },
+          // A per-image price the pages state, in micro-USD.
+          outputCostMicroUsd: { type: ["integer", "null"] },
+          // Output tokens per image the pages state for this quality and size.
+          outputTokens: { type: ["integer", "null"] },
         },
       },
     },
+    // The image output token rate the pages state, USD per million tokens.
+    outputUsdPerMTok: { type: ["number", "null"] },
     thinkingCapMicroUsd: { type: ["integer", "null"] },
+    // Why no per-image cost can be read, when options is empty.
+    noPriceReason: { type: ["string", "null"] },
   },
 } as const;
 
@@ -169,6 +180,14 @@ Use only facts stated in the pages. Prices are USD. If a value is not stated, us
 (for thinking cost caps: null; for terms permitting resale or coding-agent use: false).
 For URLs, answer only with a URL that appears in the list of fetched pages.`;
 
+const IMAGE_TASK = `image generation price list (per image, by quality and size).
+For each quality and size of this model, give the per-image price the pages state as outputCostMicroUsd, and the
+output tokens per image the pages state for that quality and size as outputTokens; give null for either one the pages
+do not state for this model. Give the image output token rate as outputUsdPerMTok, or null.
+Never estimate a token count: a table for another model or an earlier model is not this model's count.
+If no option has a stated per-image price or stated token count, return no options and say in one sentence, in
+noPriceReason, what the pages state instead (for example "only per-token rates, no tokens per image").`;
+
 const pagesPrompt = (pages: readonly DraftPage[]) =>
   pages.map((page) => `<page url="${page.url}">${page.text}</page>`).join("\n");
 
@@ -191,22 +210,58 @@ export type CatalogDraftLlm = {
 export const floorCredits = (outputCostMicroUsd: number, thinkingCapMicroUsd: number) =>
   Math.ceil((outputCostMicroUsd + IMAGE_PROMPT_BUDGET_MICRO_USD + thinkingCapMicroUsd) / IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD);
 
+const positive = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+
+/**
+ * One image's output cost in micro-USD from what the pages state: a per-image
+ * price, or output tokens per image times the output token rate (tokens times
+ * USD per million is micro-USD). Code multiplies, not the model. When both are
+ * stated the larger one stands, so a stale per-image line cannot undercut the
+ * token arithmetic. Null when neither is stated.
+ */
+export const imageOptionCostMicroUsd = (
+  statedCostMicroUsd: unknown,
+  outputTokens: unknown,
+  outputUsdPerMTok: unknown
+): number | null => {
+  const stated = positive(statedCostMicroUsd);
+  const tokens = positive(outputTokens);
+  const rate = positive(outputUsdPerMTok);
+  const fromTokens = tokens !== null && rate !== null ? Math.ceil(tokens * rate) : null;
+  if (stated === null && fromTokens === null) return null;
+  return Math.ceil(Math.max(stated ?? 0, fromTokens ?? 0));
+};
+
 /** Turn the model's image answer into a price revision draft, or refuse it. */
 export const imageDraftFromAnswer = (
   answer: unknown,
   sources: readonly string[],
   apiModelId: string
 ): unknown => {
-  const value = answer as { options?: { quality: string; size: string; outputCostMicroUsd: number }[]; thinkingCapMicroUsd?: number | null };
-  if (!value || !Array.isArray(value.options) || value.options.length === 0) throw new DraftRefusal("draft_rejected", "no_options");
-  const thinkingCap = typeof value.thinkingCapMicroUsd === "number" ? value.thinkingCapMicroUsd : null;
-  const prices = value.options.map((option) => ({
+  const value = answer as {
+    options?: { quality: string; size: string; outputCostMicroUsd?: number | null; outputTokens?: number | null }[];
+    outputUsdPerMTok?: number | null;
+    thinkingCapMicroUsd?: number | null;
+    noPriceReason?: string | null;
+  } | null;
+  const thinkingCap = typeof value?.thinkingCapMicroUsd === "number" ? value.thinkingCapMicroUsd : null;
+  const rate = positive(value?.outputUsdPerMTok);
+  const options = (Array.isArray(value?.options) ? value.options : []).flatMap((option) => {
+    const cost = imageOptionCostMicroUsd(option.outputCostMicroUsd, option.outputTokens, rate);
+    return cost === null ? [] : [{ quality: option.quality, size: option.size, cost }];
+  });
+  if (options.length === 0) {
+    const reason = typeof value?.noPriceReason === "string" ? value.noPriceReason.replace(/\s+/g, " ").trim().slice(0, 300) : "";
+    throw new DraftRefusal("draft_rejected", reason ? `no_options: ${reason}` : "no_options");
+  }
+  const prices = options.map((option) => ({
     quality: option.quality,
     size: option.size,
-    outputCostMicroUsd: option.outputCostMicroUsd,
+    outputCostMicroUsd: option.cost,
     // Unknown thinking cap: the floor cannot be computed, so the draft carries
     // the output-only floor and the judge will refuse it (unbounded worst case).
-    credits: Math.max(1, floorCredits(option.outputCostMicroUsd, thinkingCap ?? 0)),
+    credits: Math.max(1, floorCredits(option.cost, thinkingCap ?? 0)),
   }));
   const parsed = imagePriceListSchema.safeParse(prices);
   if (!parsed.success) throw new DraftRefusal("draft_rejected", "invalid_prices");
@@ -291,7 +346,7 @@ export const catalogDraftLlmFromEnv = async (
       model: getActiveAiModel(model),
       system: SYSTEM,
       prompt: [
-        `Provider: ${provider}. Model id: ${apiModelId}. Fill the ${kind === "image" ? "image generation price list (per image, by quality and size)" : "coding model row"}.`,
+        `Provider: ${provider}. Model id: ${apiModelId}. Fill the ${kind === "image" ? IMAGE_TASK : "coding model row"}.`,
         `Fetched pages: ${pages.map((page) => page.url).join(", ")}`,
         pagesPrompt(pages),
       ].join("\n"),
