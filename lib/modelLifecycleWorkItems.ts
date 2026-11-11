@@ -1858,17 +1858,37 @@ export async function reconcileVanishedDiscoveryItems(): Promise<{
         else result.refused += batch.length;
     }
     for (const batch of batches(changes.reopen)) {
-        const moved = await transitionWorkItems({
-            workItemIds: batch.map((item) => item.id),
-            to: "discovered",
-            actorEmail: MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR,
-            eventDecision: {
-                decision: "reopen",
-                operatorReason: "Automatic: the provider lists this ID again.",
-            },
+        // Rechecked under lock: the queue was read outside any transaction, and
+        // an item reopened and excluded again by a person in between is theirs.
+        // The row carries whoever excluded it last (`reviewerEmail`).
+        const moved = await prisma.$transaction(async (tx) => {
+            const ours = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+                SELECT "id"
+                FROM "ModelLifecycleWorkItem"
+                WHERE "id" IN (${Prisma.join(batch.map((item) => item.id))})
+                  AND "status" = 'closed_no_action'
+                  AND "reviewerEmail" = ${MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR}
+                ORDER BY "id"
+                FOR UPDATE
+            `);
+            if (ours.length === 0) return { ok: true as const, updated: 0 };
+            return transitionWorkItems(
+                {
+                    workItemIds: ours.map((row) => row.id),
+                    to: "discovered",
+                    actorEmail: MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR,
+                    eventDecision: {
+                        decision: "reopen",
+                        operatorReason: "Automatic: the provider lists this ID again.",
+                    },
+                },
+                { tx }
+            );
         });
-        if (moved.ok) result.reopened += moved.updated;
-        else result.refused += batch.length;
+        if (moved.ok) {
+            result.reopened += moved.updated;
+            result.refused += batch.length - moved.updated;
+        } else result.refused += batch.length;
     }
     return result;
 }
