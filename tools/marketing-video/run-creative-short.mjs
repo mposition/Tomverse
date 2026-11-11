@@ -1,8 +1,15 @@
 // The creative short job (owner 2026-11-09: "a different, creative ad every
 // time", made with Higgsfield and ElevenLabs, not a reused template):
 //   node run-creative-short.mjs
+//   node run-creative-short.mjs --rebuild <run>
 // Off unless MARKETING_CREATIVE_SHORT=on. Run by hand for now (phase 1): no
 // cron starts it.
+//
+// --rebuild (owner 2026-11-11) takes a run that stopped at the review and
+// builds its film again from the reviewer's last notes, with that run's plan,
+// shots, music and voice: steps 1-5 do not run, so nothing is paid for. It
+// gives REBUILD_ROUNDS more build-and-review rounds; a run its reviewer
+// rejected is not rebuilt.
 //
 // Deterministic: it runs each model call with only the tools that call needs,
 // checks every answer before acting on it, spends only through hf-media-core.mjs
@@ -31,7 +38,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, stillsIn, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
+import { answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, lastBuild, stillsIn, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
 import { speakLine, VOICE_CAP_ENV, voiceLedgerPath } from "./el-voice-core.mjs";
 import { levelVoice, probe, seconds as lengthOf, stills } from "./ffmpeg-tools.mjs";
 import { brisbaneDay, dailyCap, readLedger, spent } from "./higgsfield-cap.mjs";
@@ -81,9 +88,13 @@ const modelEnv = () => {
 };
 
 const creativeDir = path.join("job", "creative");
+const REBUILD_ROUNDS = 3;
+const rebuildAt = process.argv.indexOf("--rebuild");
+const rebuild = rebuildAt === -1 ? null : String(process.argv[rebuildAt + 1] ?? "");
+if (rebuild !== null && !(/^\d{8}(?:-\d+)?$/u.test(rebuild) && existsSync(path.join(creativeDir, rebuild, "plan.json")))) halt("no_such_run");
 mkdirSync(creativeDir, { recursive: true });
-let run = day;
-for (let n = 2; existsSync(path.join(creativeDir, run)); n += 1) run = `${day}-${n}`;
+let run = rebuild ?? day;
+if (rebuild === null) for (let n = 2; existsSync(path.join(creativeDir, run)); n += 1) run = `${day}-${n}`;
 report.run = run;
 const runDir = path.join(creativeDir, run);
 const pub = path.join(runDir, "public");
@@ -113,16 +124,7 @@ function claude(name, prompt, { tools, allowed, maxTurns, timeoutMinutes = 30 })
     { encoding: "utf8", env: modelEnv(), timeout: timeoutMinutes * 60_000, maxBuffer: 128 * 1024 * 1024 },
   );
   writeFileSync(path.join(runDir, "calls", `${name}.jsonl`), out.stdout ?? "");
-  let answer = null;
-  for (const line of String(out.stdout ?? "").split(/\r?\n/u)) {
-    try {
-      const event = JSON.parse(line);
-      if (event.type === "result" && typeof event.result === "string") answer = event.result;
-    } catch {
-      // not an event
-    }
-  }
-  return answer;
+  return answerOf(out.stdout);
 }
 
 // The approved list first, as the daily job: captures come only from packs of approved shorts.
@@ -175,6 +177,40 @@ const history = existsSync(historyPath) ? JSON.parse(readFileSync(historyPath, "
 const sheetsDir = path.join(creativeDir, "sheets");
 mkdirSync(sheetsDir, { recursive: true });
 const earlierStills = (entry) => stillsIn(path.join(sheetsDir, entry.run), 4).join(", ") || "none kept";
+/** What the builder is told after a review: a "pass" with a score under 8 (or a missing one) is not a pass. */
+const notesFrom = (review) => {
+  const low = review?.verdict === "pass" && !reviewPassed(review);
+  return `${low ? `Every score must be 8 or more; it was ${JSON.stringify(review.scores ?? null)}. ` : ""}${String(review?.notes ?? "")}`.slice(0, 4000);
+};
+
+// A rebuild: the run's plan, captures, shots, music and voice as they are; only build and review
+// again, from the last review's notes. Nothing below step 5 is paid for, and this never reaches step 1.
+if (rebuild !== null) {
+  const plan = JSON.parse(readFileSync(path.join(runDir, "plan.json"), "utf8"));
+  report.concept = plan.concept;
+  report.topic = plan.topic;
+  const before = lastBuild(path.join(runDir, "calls"));
+  if (before.review?.verdict === "reject") {
+    report.dropped.push({ step: "rebuild", reason: `its reviewer rejected it: ${String(before.review.notes ?? "").slice(0, 300)}` });
+    halt("rejected_before");
+  }
+  const captureWords = {};
+  const sourceClaims = {};
+  const locales = Object.keys(plan.locales ?? {}).filter((locale) => {
+    const pack = packs.find((candidate) => candidate.topic === plan.topic && candidate.locale === locale);
+    if (!pack || !existsSync(path.join(pub, `props-${locale}.json`))) {
+      report.dropped.push({ step: `rebuild ${locale}`, reason: pack ? "the run made no props for it" : "its capture pack is not approved now" });
+      return false;
+    }
+    captureWords[locale] = Object.values(pack.captures).map((capture) => capture.text);
+    sourceClaims[locale] = pack.claimIds;
+    return true;
+  });
+  report.locales = locales;
+  if (locales.length === 0) halt("no_locale_left");
+  const notes = before.review && !reviewPassed(before.review) ? notesFrom(before.review) : null;
+  await finishFilm({ plan, locales, captureWords, sourceClaims, firstRound: before.rounds + 1, rounds: REBUILD_ROUNDS, notes });
+}
 
 // 1. Plan.
 const notesDir = path.join("job", "research-notes");
@@ -324,83 +360,88 @@ for (const locale of [...locales]) {
 report.locales = locales;
 if (locales.length === 0) halt("no_locale_left");
 
-// 6-7. Build, then review; one more build on "fix".
-const renderAll = () => {
+// 6-8. Build, then review (one more build on "fix"), then render, check and submit. A new run
+// comes here after step 5; a rebuild comes here straight away. Every way out ends the process.
+await finishFilm({ plan, locales, captureWords, sourceClaims, firstRound: 1, rounds: 2, notes: null });
+
+async function finishFilm({ plan, locales, captureWords, sourceClaims, firstRound, rounds, notes: firstNotes }) {
+  const renderAll = () => {
+    for (const locale of locales) {
+      const rendered = node(["render-creative.mjs", runDir, locale, "--stills", "12"], modelEnv());
+      if (rendered.status !== 0) return `${locale}: ${rendered.stdout.trim().split("\n").at(-1)}`;
+    }
+    return null;
+  };
+  const buildPrompt = (notes) => [
+    readFileSync("CREATIVE-BUILD.md", "utf8").replaceAll("{{RUN}}", posix(runDir)),
+    `## The plan\n\n\`\`\`json\n${JSON.stringify(plan, null, 2)}\n\`\`\``,
+    `## The props per locale\n\n${locales.map((locale) => `- ${locale}: job/creative/${run}/public/props-${locale}.json`).join("\n")}`,
+    notes ? `## The reviewer asked for these changes\n\n${notes}` : "",
+  ].join("\n\n");
+  const reviewPrompt = () => [
+    readFileSync("CREATIVE-REVIEW.md", "utf8"),
+    `## This film\n\n${plan.concept}: ${plan.logline}\n\n${locales.map((locale) => `- ${locale}: stills ${stillsIn(path.join(runDir, "review", locale)).join(", ")}; words ${JSON.stringify(plan.locales[locale].screen)}`).join("\n")}`,
+    `## Earlier films\n\n${history.map((entry) => `- ${entry.concept}: ${earlierStills(entry)}`).join("\n") || "- none yet"}`,
+  ].join("\n\n");
+  const buildAllowed = [
+    fileRule("Read", `job/creative/${run}/**`),
+    fileRule("Edit", `job/creative/${run}/film/**`),
+    `Bash(node render-creative.mjs ${posix(runDir)} *)`,
+  ];
+  let verdict = null;
+  let notes = firstNotes;
+  for (let round = firstRound; round < firstRound + rounds; round += 1) {
+    claude(`build-${round}`, buildPrompt(notes), { tools: "Read,Write,Edit,Bash", allowed: buildAllowed, maxTurns: 150, timeoutMinutes: 90 });
+    const problems = await checkFilmSource(path.join(runDir, "film"));
+    if (problems.length > 0) {
+      report.dropped.push({ step: `build ${round}`, reason: problems.join("; ") });
+      halt("film_refused");
+    }
+    const renderProblem = renderAll();
+    if (renderProblem) {
+      report.dropped.push({ step: `build ${round}`, reason: renderProblem });
+      halt("film_did_not_render");
+    }
+    const answer = claude(`review-${round}`, reviewPrompt(), { tools: "Read", allowed: [fileRule("Read", `job/creative/${run}/review/**`), fileRule("Read", "job/creative/sheets/**")], maxTurns: 60 });
+    verdict = jsonLine(answer, "review");
+    // A "pass" with a score under 8 (or a missing one) is not a pass: it goes back as a fix.
+    const low = verdict?.verdict === "pass" && !reviewPassed(verdict);
+    if (verdict?.verdict !== "fix" && !low) break;
+    notes = notesFrom(verdict);
+  }
+  if (!reviewPassed(verdict)) {
+    report.dropped.push({ step: "review", reason: verdict ? `${verdict.verdict} ${JSON.stringify(verdict.scores ?? null)}: ${String(verdict.notes ?? "").slice(0, 300)}` : "no verdict" });
+    halt("review_did_not_pass");
+  }
+
+  // 8. Render, check, submit.
   for (const locale of locales) {
-    const rendered = node(["render-creative.mjs", runDir, locale, "--stills", "12"], modelEnv());
-    if (rendered.status !== 0) return `${locale}: ${rendered.stdout.trim().split("\n").at(-1)}`;
+    const id = `media-${run}-creative-${locale.toLowerCase()}-short`;
+    const out = path.join(runDir, "out", `${id}.mp4`);
+    const rendered = node(["render-creative.mjs", runDir, locale, "--out", out], modelEnv());
+    if (rendered.status !== 0) {
+      report.failed.push({ id, step: "render", status: rendered.status });
+      continue;
+    }
+    const problems = checkFinal(probe(out));
+    if (problems.length > 0) {
+      report.failed.push({ id, step: "check", problems });
+      continue;
+    }
+    writeFileSync(path.join(runDir, "out", `${id}.asset.json`), JSON.stringify(creativeAsset({ id, locale, words: plan.locales[locale], captureWords: captureWords[locale], claimIds: sourceClaims[locale] }), null, 2));
+    const submitted = node(["submit-asset.mjs", out, path.join(runDir, "out", `${id}.asset.json`)]);
+    if (submitted.status === 0) report.submitted.push(id);
+    else if (submitted.status === 3) report.refused.push({ id, guard: jsonLine(submitted.stdout, "guardCodes") ?? submitted.stdout.trim().slice(0, 300) });
+    else report.failed.push({ id, step: "submit", status: submitted.status, detail: submitted.stderr.trim().slice(0, 300) });
   }
-  return null;
-};
-const buildPrompt = (notes) => [
-  readFileSync("CREATIVE-BUILD.md", "utf8").replaceAll("{{RUN}}", posix(runDir)),
-  `## The plan\n\n\`\`\`json\n${JSON.stringify(plan, null, 2)}\n\`\`\``,
-  `## The props per locale\n\n${locales.map((locale) => `- ${locale}: job/creative/${run}/public/props-${locale}.json`).join("\n")}`,
-  notes ? `## The reviewer asked for these changes\n\n${notes}` : "",
-].join("\n\n");
-const reviewPrompt = () => [
-  readFileSync("CREATIVE-REVIEW.md", "utf8"),
-  `## This film\n\n${plan.concept}: ${plan.logline}\n\n${locales.map((locale) => `- ${locale}: stills ${stillsIn(path.join(runDir, "review", locale)).join(", ")}; words ${JSON.stringify(plan.locales[locale].screen)}`).join("\n")}`,
-  `## Earlier films\n\n${history.map((entry) => `- ${entry.concept}: ${earlierStills(entry)}`).join("\n") || "- none yet"}`,
-].join("\n\n");
-const buildAllowed = [
-  fileRule("Read", `job/creative/${run}/**`),
-  fileRule("Edit", `job/creative/${run}/film/**`),
-  `Bash(node render-creative.mjs ${posix(runDir)} *)`,
-];
-let verdict = null;
-let notes = null;
-for (let round = 1; round <= 2; round += 1) {
-  claude(`build-${round}`, buildPrompt(notes), { tools: "Read,Write,Edit,Bash", allowed: buildAllowed, maxTurns: 150, timeoutMinutes: 90 });
-  const problems = await checkFilmSource(path.join(runDir, "film"));
-  if (problems.length > 0) {
-    report.dropped.push({ step: `build ${round}`, reason: problems.join("; ") });
-    halt("film_refused");
-  }
-  const renderProblem = renderAll();
-  if (renderProblem) {
-    report.dropped.push({ step: `build ${round}`, reason: renderProblem });
-    halt("film_did_not_render");
-  }
-  const answer = claude(`review-${round}`, reviewPrompt(), { tools: "Read", allowed: [fileRule("Read", `job/creative/${run}/review/**`), fileRule("Read", "job/creative/sheets/**")], maxTurns: 60 });
-  verdict = jsonLine(answer, "review");
-  // A "pass" with a score under 8 (or a missing one) is not a pass: it goes back as a fix.
-  const low = verdict?.verdict === "pass" && !reviewPassed(verdict);
-  if (verdict?.verdict !== "fix" && !low) break;
-  notes = `${low ? `Every score must be 8 or more; it was ${JSON.stringify(verdict.scores ?? null)}. ` : ""}${String(verdict.notes ?? "")}`.slice(0, 4000);
-}
-if (!reviewPassed(verdict)) {
-  report.dropped.push({ step: "review", reason: verdict ? `${verdict.verdict} ${JSON.stringify(verdict.scores ?? null)}: ${String(verdict.notes ?? "").slice(0, 300)}` : "no verdict" });
-  halt("review_did_not_pass");
-}
 
-// 8. Render, check, submit.
-for (const locale of locales) {
-  const id = `media-${run}-creative-${locale.toLowerCase()}-short`;
-  const out = path.join(runDir, "out", `${id}.mp4`);
-  const rendered = node(["render-creative.mjs", runDir, locale, "--out", out], modelEnv());
-  if (rendered.status !== 0) {
-    report.failed.push({ id, step: "render", status: rendered.status });
-    continue;
-  }
-  const problems = checkFinal(probe(out));
-  if (problems.length > 0) {
-    report.failed.push({ id, step: "check", problems });
-    continue;
-  }
-  writeFileSync(path.join(runDir, "out", `${id}.asset.json`), JSON.stringify(creativeAsset({ id, locale, words: plan.locales[locale], captureWords: captureWords[locale], claimIds: sourceClaims[locale] }), null, 2));
-  const submitted = node(["submit-asset.mjs", out, path.join(runDir, "out", `${id}.asset.json`)]);
-  if (submitted.status === 0) report.submitted.push(id);
-  else if (submitted.status === 3) report.refused.push({ id, guard: jsonLine(submitted.stdout, "guardCodes") ?? submitted.stdout.trim().slice(0, 300) });
-  else report.failed.push({ id, step: "submit", status: submitted.status, detail: submitted.stderr.trim().slice(0, 300) });
+  // What the next plan and review see of this one: its stills and its concept.
+  const sheet = path.join(sheetsDir, run);
+  mkdirSync(sheet, { recursive: true });
+  const firstLocale = locales.includes("en") ? "en" : locales[0];
+  for (const file of readdirSync(path.join(runDir, "review", firstLocale))) copyFileSync(path.join(runDir, "review", firstLocale, file), path.join(sheet, file));
+  history.push({ date, run, concept: plan.concept, logline: plan.logline, topic: plan.topic, locales, submitted: report.submitted });
+  writeFileSync(historyPath, JSON.stringify(history, null, 2));
+  rmSync(path.join(runDir, "raw"), { recursive: true, force: true });
+  finish(report.submitted.length > 0 ? 0 : 1);
 }
-
-// What the next plan and review see of this one: its stills and its concept.
-const sheet = path.join(sheetsDir, run);
-mkdirSync(sheet, { recursive: true });
-const firstLocale = locales.includes("en") ? "en" : locales[0];
-for (const file of readdirSync(path.join(runDir, "review", firstLocale))) copyFileSync(path.join(runDir, "review", firstLocale, file), path.join(sheet, file));
-history.push({ date, run, concept: plan.concept, logline: plan.logline, topic: plan.topic, locales, submitted: report.submitted });
-writeFileSync(historyPath, JSON.stringify(history, null, 2));
-rmSync(path.join(runDir, "raw"), { recursive: true, force: true });
-finish(report.submitted.length > 0 ? 0 : 1);
