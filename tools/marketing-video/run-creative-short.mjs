@@ -189,6 +189,8 @@ if (rebuild !== null) {
   const plan = JSON.parse(readFileSync(path.join(runDir, "plan.json"), "utf8"));
   report.concept = plan.concept;
   report.topic = plan.topic;
+  // A run that reached the end is in history and its files went to Admin under their ids: never again.
+  if (history.some((entry) => entry.run === run)) halt("already_finished");
   const before = lastBuild(path.join(runDir, "calls"));
   if (before.review?.verdict === "reject") {
     report.dropped.push({ step: "rebuild", reason: `its reviewer rejected it: ${String(before.review.notes ?? "").slice(0, 300)}` });

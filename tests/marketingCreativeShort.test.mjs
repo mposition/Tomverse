@@ -445,6 +445,7 @@ test("a rebuild reuses the run's paid media: it never reaches a paid step, and a
   const branch = source.slice(start, end);
   assert.doesNotMatch(branch, /paid\(|speakLine\(|makeMedia\(/u);
   assert.match(branch, /halt\("rejected_before"\)/u);
+  assert.ok(branch.includes('history.some((entry) => entry.run === run)) halt("already_finished")'), "a finished run is never rebuilt");
   assert.match(branch, /await finishFilm\(/u);
   const shell = await readFile(new URL("../tools/marketing-video/run-creative-short.sh", import.meta.url), "utf8");
   assert.match(shell, /node run-creative-short\.mjs "\$@"/u, "the shell passes --rebuild on");
