@@ -534,7 +534,7 @@ test("router search preparation uses one priced call and malformed suggestions p
   try {
     for (const queries of [["one", "two"], ["one", "two", "three"], [42]]) {
       routerRequests.length = 0; holds.length = 0;
-      generateRouterResult = () => ({ output: { ...routerOutput, searchQueries: queries }, usage: { inputTokens: 100, outputTokens: 30 } });
+      generateRouterResult = () => ({ output: { ...routerOutput, requiresFileGeneration: false, searchQueries: queries }, usage: { inputTokens: 100, outputTokens: 30 } });
       const result = await pick(undefined, { searchPlan: true });
       assert.equal(routerRequests.length, 1);
       assert.equal(routerRequests[0].maxOutputTokens, 440);
@@ -582,7 +582,7 @@ test("fresh location prices the authored 8k and reuses its dated search decision
   try {
     generateRouterResult = () => ({ output: { ...routerOutput, requiresLocation: true }, usage: { inputTokens: 8, outputTokens: 2 } });
     holds.length = 0; routerRequests.length = 0;
-    const chosen = await pick(undefined, true, { prompt: text, locationFusion, searchPlan: true });
+    const chosen = await pick(undefined, { prompt: text, locationFusion, searchPlan: true });
     assert.equal(chosen?.requiresLocation, true);
     assert.equal(routerRequests.length, 1);
     assert.match(String(routerRequests[0].system), /CURRENT DEVICE LOCATION/);
@@ -597,7 +597,7 @@ test("fresh location prices the authored 8k and reuses its dated search decision
       inputUsdPerMillionTokens: prices.inputUsdPerMillionTokens, outputUsdPerMillionTokens: prices.outputUsdPerMillionTokens });
     assert.deepEqual(holds, [worst, worst]);
     t.mock.timers.setTime(Date.parse("2026-11-11T00:00:02Z"));
-    const resumed = await pick(undefined, true, { prompt: text, searchPlan: true, locationFusion: {
+    const resumed = await pick(undefined, { prompt: text, searchPlan: true, locationFusion: {
       ...locationFusion, resume: { traceId: "first", routerDigest: digest[0], pick: chosen },
     } });
     assert.deepEqual(resumed, chosen);
