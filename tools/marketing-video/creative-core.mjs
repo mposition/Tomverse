@@ -43,6 +43,17 @@ export function fileRule(tool, file, resolve = path.resolve, sep = path.sep) {
   return `${tool}(/${absolute})`;
 }
 
+/**
+ * The stills in `dir` as posix paths, sorted, at most about `keep` of them spread evenly. The plan
+ * and review calls have Read only, which cannot list a folder, so every still they are to look at
+ * is named in the prompt (run 20261111's review saw none and gave no verdict).
+ */
+export function stillsIn(dir, keep = Infinity) {
+  const files = existsSync(dir) ? readdirSync(dir).filter((file) => /\.(?:png|jpe?g)$/u.test(file)).sort() : [];
+  const step = Math.max(1, Math.ceil(files.length / keep));
+  return files.filter((_, index) => index % step === 0).map((file) => path.join(dir, file).split(path.sep).join("/"));
+}
+
 /** The JSON object on the first line of `text` that has `key`, or null. */
 export function jsonLine(text, key) {
   for (const line of String(text ?? "").split(/\r?\n/u)) {

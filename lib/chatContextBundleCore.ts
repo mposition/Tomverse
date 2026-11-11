@@ -134,6 +134,13 @@ export function memoryStateFingerprint(input: {
     return `${input.activeCount}:${input.latestUpdatedAtMs}`;
 }
 
+/** Bind the ordered result and actual priced block, regardless of small changes
+ * in ranking scores that leave both the selected rows and rendered text intact. */
+export function pricedMemoryRetrievalHash(orderedIds: readonly string[], rendered: string): string {
+    return "rendered-v1:" + createHash("sha256")
+        .update(JSON.stringify([orderedIds, rendered]), "utf8").digest("hex");
+}
+
 /** The comparable value. Order is fixed so two identical states agree. */
 export function contextFingerprint(
     input: ContextBundleFingerprintInput

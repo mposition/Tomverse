@@ -31,7 +31,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
+import { checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, stillsIn, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
 import { speakLine, VOICE_CAP_ENV, voiceLedgerPath } from "./el-voice-core.mjs";
 import { levelVoice, probe, seconds as lengthOf, stills } from "./ffmpeg-tools.mjs";
 import { brisbaneDay, dailyCap, readLedger, spent } from "./higgsfield-cap.mjs";
@@ -174,6 +174,7 @@ const historyPath = path.join(creativeDir, "history.json");
 const history = existsSync(historyPath) ? JSON.parse(readFileSync(historyPath, "utf8")) : [];
 const sheetsDir = path.join(creativeDir, "sheets");
 mkdirSync(sheetsDir, { recursive: true });
+const earlierStills = (entry) => stillsIn(path.join(sheetsDir, entry.run), 4).join(", ") || "none kept";
 
 // 1. Plan.
 const notesDir = path.join("job", "research-notes");
@@ -183,7 +184,7 @@ const planPrompt = [
   readFileSync("CREATIVE-PLAN.md", "utf8"),
   `## Today\n\n- Date: ${date}\n- Newest research notes: ${newestNotes ? `job/research-notes/${newestNotes}` : "none"}\n- Facts you may state: features.json`,
   `## Capture packs\n\n${packLines.join("\n")}`,
-  `## Earlier creative shorts (never repeat one)\n\n${history.map((entry) => `- ${entry.date}: ${entry.concept} -- ${entry.logline} (stills: job/creative/sheets/${entry.run}/)`).join("\n") || "- none yet"}`,
+  `## Earlier creative shorts (never repeat one)\n\n${history.map((entry) => `- ${entry.date}: ${entry.concept} -- ${entry.logline} (stills: ${earlierStills(entry)})`).join("\n") || "- none yet"}`,
 ].join("\n\n");
 const planRead = ["job/research-notes/**", "features.json", "job/sources/**", "job/creative/sheets/**"].map((file) => fileRule("Read", file));
 let checked = null;
@@ -339,8 +340,8 @@ const buildPrompt = (notes) => [
 ].join("\n\n");
 const reviewPrompt = () => [
   readFileSync("CREATIVE-REVIEW.md", "utf8"),
-  `## This film\n\n${plan.concept}: ${plan.logline}\n\n${locales.map((locale) => `- ${locale}: stills in job/creative/${run}/review/${locale}/; words ${JSON.stringify(plan.locales[locale].screen)}`).join("\n")}`,
-  `## Earlier films\n\n${history.map((entry) => `- ${entry.concept}: job/creative/sheets/${entry.run}/`).join("\n") || "- none yet"}`,
+  `## This film\n\n${plan.concept}: ${plan.logline}\n\n${locales.map((locale) => `- ${locale}: stills ${stillsIn(path.join(runDir, "review", locale)).join(", ")}; words ${JSON.stringify(plan.locales[locale].screen)}`).join("\n")}`,
+  `## Earlier films\n\n${history.map((entry) => `- ${entry.concept}: ${earlierStills(entry)}`).join("\n") || "- none yet"}`,
 ].join("\n\n");
 const buildAllowed = [
   fileRule("Read", `job/creative/${run}/**`),
