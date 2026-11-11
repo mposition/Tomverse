@@ -373,15 +373,32 @@ export const storeCatalogDraft = async (input: {
   category: StoredCatalogCategory;
   modelId: string;
   draft: unknown;
+  /**
+   * A runtime image model's request profile, saved with the draft only while
+   * the row has no valid one and no price revision, so the operator does not
+   * have to save a profile before applying the draft.
+   */
+  imageProfile?: unknown;
   session: Session;
   request?: Request;
 }) =>
   prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
+    let profile: Prisma.InputJsonValue | undefined;
+    if (input.category === "image" && input.imageProfile !== undefined && imageFullProfileSchema.safeParse(input.imageProfile).success) {
+      const before = await tx.modelCatalogEntry.findUnique({
+        where: { category_modelId: { category: "image", modelId: input.modelId } },
+      });
+      const priced = (await tx.modelCatalogPriceRevision.count({ where: { category: "image", modelId: input.modelId } })) > 0;
+      if (!imageFullProfileSchema.safeParse(before?.profile).success && !priced) {
+        profile = input.imageProfile as Prisma.InputJsonValue;
+      }
+    }
     const data = {
       draft: input.draft as Prisma.InputJsonValue,
       draftSource: "llm",
       draftCreatedAt: new Date(),
+      ...(profile === undefined ? {} : { profile }),
     };
     await tx.modelCatalogEntry.upsert({
       where: { category_modelId: { category: input.category, modelId: input.modelId } },
@@ -395,7 +412,7 @@ export const storeCatalogDraft = async (input: {
       targetType: "ModelCatalogEntry",
       targetId: `${input.category}:${input.modelId}`,
       summary: `Stored an LLM draft for ${input.category} model ${input.modelId}.`,
-      metadata: { category: input.category, modelId: input.modelId },
+      metadata: { category: input.category, modelId: input.modelId, profileSaved: profile !== undefined },
       tx,
     });
   });

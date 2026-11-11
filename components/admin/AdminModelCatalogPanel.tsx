@@ -129,8 +129,8 @@ export function AdminModelCatalogPanel() {
     });
   }, []);
 
-  const send = async (method: "PATCH" | "POST", body: unknown, timeoutMs?: number) => {
-    setNotice(null);
+  const send = async (method: "PATCH" | "POST", body: unknown, timeoutMs?: number, savedNotice: string = m.saved) => {
+    setNotice(timeoutMs ? m.drafting : null);
     let response: Response;
     try {
       response = await adminFetch("/api/admin/model-catalog", {
@@ -150,7 +150,7 @@ export function AdminModelCatalogPanel() {
       setNotice(m.refused(payload?.error ?? String(response.status), (payload?.reasons ?? []).join(", ") || (payload?.detail ?? "")));
       return false;
     }
-    setNotice(m.saved);
+    setNotice(savedNotice);
     await load();
     return true;
   };
@@ -307,15 +307,28 @@ export function AdminModelCatalogPanel() {
           detail={board.loadFailedDetail}
           onRetry={() => void load()}
         />
-      ) : notice ? (
-        <p
+      ) : null}
+      {/* Fixed to the viewport: the buttons sit far below the panel top, and a
+          notice up there went unseen. */}
+      {notice ? (
+        <div
           role="status"
-          className={`rounded-2xl px-4 py-3 text-sm font-bold ${
-            notice === m.saved ? "bg-emerald-500/10 text-emerald-300" : "bg-amber-500/10 text-amber-300"
+          aria-live="polite"
+          className={`fixed bottom-4 left-1/2 z-50 flex w-[min(92vw,40rem)] -translate-x-1/2 items-start gap-3 rounded-2xl border bg-zinc-900 px-4 py-3 text-sm font-bold shadow-xl ${
+            notice === m.drafting
+              ? "border-zinc-600 text-zinc-200"
+              : notice.startsWith(m.refused("", ""))
+                ? "border-amber-500/40 text-amber-300"
+                : "border-emerald-500/40 text-emerald-300"
           }`}
         >
-          {notice}
-        </p>
+          <span className="min-w-0 flex-1 break-words">{notice}</span>
+          {notice === m.drafting ? null : (
+            <button type="button" className="shrink-0 text-xs text-zinc-400 underline" onClick={() => setNotice(null)}>
+              {m.dismiss}
+            </button>
+          )}
+        </div>
       ) : null}
       {loading && !report ? <AdminStateBlock kind="loading" /> : null}
 
@@ -501,7 +514,7 @@ export function AdminModelCatalogPanel() {
                     provider: draftForm.provider.trim(),
                     apiModelId: draftForm.apiModelId.trim(),
                     sourceUrls: draftForm.sources.split("\n").map((line) => line.trim()).filter(Boolean),
-                  }, DRAFT_REQUEST_TIMEOUT_MS)
+                  }, DRAFT_REQUEST_TIMEOUT_MS, m.draftSaved(draftForm.modelId.trim()))
                 }
               >
                 {m.submit}

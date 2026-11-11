@@ -356,6 +356,41 @@ test("a stored draft is audited, applied in one step, and cleared", async () => 
   );
 });
 
+test("an image draft saves the runtime profile only while the row has none and no price", async () => {
+  const modelId = "catalog-draft-profile";
+  const profile = {
+    provider: "openai",
+    apiModelId: "gpt-image-draft-profile",
+    name: "gpt-image-draft-profile",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["low", "medium", "high"],
+    latencyClass: "balanced",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+  };
+  const draft = {
+    pricingVersion: "draft-profile-v1",
+    prices: [{ quality: "medium", size: "1024x1024", credits: 50, outputCostMicroUsd: 6_000 }],
+    verification,
+  };
+  await storeCatalogDraft({ category: "image", modelId, draft, imageProfile: profile, session });
+  const saved = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.equal((saved?.profile as { apiModelId?: string } | null)?.apiModelId, "gpt-image-draft-profile");
+  // Applying needs no separate profile save.
+  await applyCatalogDraft({ category: "image", modelId, session });
+  // Once priced, a later draft for a different request profile leaves the profile alone.
+  await storeCatalogDraft({
+    category: "image",
+    modelId,
+    draft: { ...draft, pricingVersion: "draft-profile-v2" },
+    imageProfile: { ...profile, apiModelId: "gpt-image-draft-dearer" },
+    session,
+  });
+  const after = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.equal((after?.profile as { apiModelId?: string } | null)?.apiModelId, "gpt-image-draft-profile");
+});
+
 test("the database refuses a category it has no policy for", async () => {
   await assert.rejects(
     prisma.modelCatalogEntry.create({ data: { category: "video", modelId: "veo-x" } }),

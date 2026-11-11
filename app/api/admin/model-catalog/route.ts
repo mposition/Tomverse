@@ -35,6 +35,7 @@ import {
   MODEL_CATALOG_DRAFT_LLM_MODEL_ENV,
 } from "@/lib/modelCatalogDraftLlm";
 import { prisma } from "@/lib/prisma";
+import { runtimeImageProfileTemplate } from "@/lib/runtimeImageProviders";
 
 // The dynamic model catalogue (image and coding; chat is a read-only view of
 // the model registry; video has no activation policy yet). Every write commits
@@ -206,7 +207,13 @@ export async function POST(req: Request) {
       body.category === "image"
         ? await llm.draftImagePrices({ provider: body.provider, apiModelId: body.apiModelId, pages })
         : await llm.draftCodingProfile({ provider: body.provider, apiModelId: body.apiModelId, pages });
-    await storeCatalogDraft({ category: body.category, modelId: body.modelId, draft, session, request: req });
+    // A runtime image model gets its request profile from the same form, so
+    // the operator can apply the draft without saving a profile first.
+    const imageProfile =
+      body.category === "image" && !IMAGE_MODEL_REGISTRY.some((model) => model.id === body.modelId)
+        ? runtimeImageProfileTemplate(body.provider, body.apiModelId)
+        : undefined;
+    await storeCatalogDraft({ category: body.category, modelId: body.modelId, draft, imageProfile, session, request: req });
     return NextResponse.json({ ok: true, draft });
   } catch (error) {
     return refusalResponse(error) ?? NextResponse.json({ error: "Catalog action failed." }, { status: 500 });
