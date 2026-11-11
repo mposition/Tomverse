@@ -1612,19 +1612,22 @@ async function handleChatPost(
         // for its successor -- the operator-named replacement chain first, then
         // the app default -- and everything below (plan access, availability,
         // Auto's own pick, credits) runs as usual. A model the user picked
-        // themselves is still refused with the replacement named, below.
+        // themselves is still refused with the replacement named, below. A
+        // Guest Auto turn counts too: its capability is verified further down,
+        // and a request that fails that check is refused there either way.
         // One primary-key read, and only on this path.
         const autoConversationWithRetiredModel =
             catalogModel !== undefined &&
             !catalogModel.enabled &&
-            Boolean(conversationId) &&
-            Boolean(session?.user?.id) &&
-            (
-                await prisma.conversation.findFirst({
-                    where: { id: conversationId!, userId: session!.user!.id },
-                    select: { selectionMode: true },
-                })
-            )?.selectionMode === "auto";
+            (Boolean(guestAutoCapability) ||
+                (Boolean(conversationId) &&
+                    Boolean(session?.user?.id) &&
+                    (
+                        await prisma.conversation.findFirst({
+                            where: { id: conversationId!, userId: session!.user!.id },
+                            select: { selectionMode: true },
+                        })
+                    )?.selectionMode === "auto"));
         if (catalogModel && autoConversationWithRetiredModel) {
             const retired = catalogModel;
             const standIn = resolveRetiredModelSuccessor(
@@ -2866,9 +2869,13 @@ async function handleChatPost(
                 !autoRouted &&
                 selectedConversationModels.length > 0 &&
                 !selectedConversationModels.includes(requestedModelId) &&
+                // The stored list, not the filtered one: the filter above keeps
+                // enabled models only, and the retired id is disabled.
                 !(
                     retiredModelIdSubstituted !== null &&
-                    selectedConversationModels.includes(retiredModelIdSubstituted)
+                    parseStoredModelIds(conversation.selectedModels).includes(
+                        retiredModelIdSubstituted
+                    )
                 )
             ) {
                 console.warn(JSON.stringify({
