@@ -143,7 +143,7 @@ impl ProviderRegistry {
     }
 }
 
-/// The registry every deployment starts from: all seven known providers,
+/// The registry every deployment starts from: all eight known providers,
 /// registered by default. Opt-OUT, not opt-in — a capability nobody is
 /// enrolled in is decoration (ethos rule 1; the `CC_MCP` incident).
 pub fn default_registry() -> ProviderRegistry {
@@ -155,6 +155,7 @@ pub fn default_registry() -> ProviderRegistry {
     reg.register(Arc::new(static_providers::OllamaAdapter::default()));
     reg.register(Arc::new(static_providers::CursorAdapter));
     reg.register(Arc::new(static_providers::CopilotAdapter));
+    reg.register(Arc::new(static_providers::AntigravityAdapter));
     reg
 }
 
@@ -247,7 +248,7 @@ mod tests {
             Compaction::Automatic,
             "Claude owns compaction inside its agent loop; amux must not inject reminders"
         );
-        for p in ["gemini", "codex", "cursor", "copilot"] {
+        for p in ["gemini", "codex", "cursor", "copilot", "antigravity"] {
             if let Some(a) = reg.resolve(p) {
                 assert_eq!(
                     a.compaction(),
@@ -261,10 +262,10 @@ mod tests {
     }
 
     #[test]
-    fn default_registry_registers_all_seven() {
+    fn default_registry_registers_all_eight() {
         let reg = default_registry();
-        assert_eq!(reg.len(), 7);
-        for id in ["claude-code", "gemini", "codex", "devin", "ollama", "cursor", "copilot"] {
+        assert_eq!(reg.len(), 8);
+        for id in ["claude-code", "gemini", "codex", "devin", "ollama", "cursor", "copilot", "antigravity"] {
             assert!(
                 reg.get(&ProviderId::new(id)).is_some(),
                 "default registry missing {id}"
@@ -361,6 +362,12 @@ mod tests {
         // usage() is unknown and models() reads the static catalog: no probe,
         // no binary needed, so this runs the same on a host without copilot.
         conformance(&static_providers::CopilotAdapter).await;
+    }
+
+    #[tokio::test]
+    async fn conformance_antigravity() {
+        // usage() is unknown and models() reads the static catalog: no probe.
+        conformance(&static_providers::AntigravityAdapter).await;
     }
 
     #[test]

@@ -133,7 +133,7 @@ test("the relay card is what the local AMUX files without a redeploy", () => {
   const bound = (name) => Number(new RegExp(`const ${name}: usize = ([\\d_]+);`).exec(source)[1].replaceAll("_", ""));
   assert.equal(AMUX_IDEA_CARD_CLOSE_QUESTION_MAX, bound("QUESTION_MAX"));
   assert.equal(AMUX_IDEA_CARD_CLOSE_TITLE_MAX, bound("TITLE_MAX"));
-  assert.ok(new RegExp(`V22_PROVIDERS: \\[&str; 4\\] = \\[[^\\]]*"${AMUX_IDEA_CARD_CLOSE_DM_PROVIDER}"`).test(source));
+  assert.ok(new RegExp(`V22_PROVIDERS: \\[&str; 5\\] = \\[[^\\]]*"${AMUX_IDEA_CARD_CLOSE_DM_PROVIDER}"`).test(source));
   assert.match(AMUX_IDEA_CARD_CLOSE_DM_WORKER, /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/);
 
   const id = "00000000-0000-4000-8000-00000000000a";

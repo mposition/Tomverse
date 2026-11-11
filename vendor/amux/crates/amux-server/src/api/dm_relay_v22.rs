@@ -52,7 +52,7 @@ pub fn question_tag(question_id: &str) -> String {
 /// `AMUX_V22_PROVIDERS`), and the tag that names one on a question card: a
 /// v22 worker may have no local session for the relay's scan to read its
 /// provider from.
-pub const V22_PROVIDERS: [&str; 4] = ["claude", "codex", "copilot", "cursor"];
+pub const V22_PROVIDERS: [&str; 5] = ["claude", "codex", "copilot", "cursor", "antigravity"];
 pub const V22_PROVIDER_TAG_PREFIX: &str = "v22-provider-";
 
 fn is_question_id(value: &str) -> bool {
