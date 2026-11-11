@@ -641,6 +641,14 @@ fn shape_all_providers(
         }),
         shape_cursor_provider(cursor_probe),
         shape_copilot_provider(copilot_probe),
+        // Antigravity is registered as a provider; its quota is not probed
+        // here, so the row stays visible with the numbers unknown.
+        json!({
+            "id": "antigravity", "label": "Antigravity", "available": true,
+            "measured": false, "n_considered": 0, "metered": true,
+            "summary": "Antigravity account usage is not probed by this server",
+            "windows": [],
+        }),
     ];
     if let Some(obj) = body.as_object_mut() {
         let measured = providers.iter()
@@ -1896,7 +1904,7 @@ mod tests {
             ProviderProbe::Unavailable { cause: "cli_missing", reason: "Copilot CLI is not installed.".into() },
         );
         let providers = body["providers"].as_array().unwrap();
-        assert_eq!(providers.len(), 7, "claude, codex, gemini, devin, ollama, cursor, copilot");
+        assert_eq!(providers.len(), 8, "claude, codex, gemini, devin, ollama, cursor, copilot, antigravity");
         assert_eq!(providers.iter().filter(|p| p["available"] == false).count(), 5);
         assert_eq!(
             providers.iter().find(|p| p["id"] == "ollama").unwrap()["available"],

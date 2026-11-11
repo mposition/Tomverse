@@ -356,8 +356,10 @@ lazy_re!(RE_CURSOR_APPROVAL, r"(?i)waiting for approval\.\.\.|run this command\?
 // ~/.copilot/config.json, so a worker should not park here; this is the
 // fallback that makes it read as waiting if it ever does.
 lazy_re!(RE_COPILOT_TRUST, r"(?i)confirm folder trust|do you trust the files in this folder");
-// agy's first-run setup headings, each alone on its line (see scan_antigravity).
-lazy_re!(RE_AGY_SETUP, r"(?m)^\s*(?:Choose your color scheme:|Terms of Service & Data Use)\s*$");
+// agy's first-run setup headings at the start of a line (see scan_antigravity).
+// The colour picker draws a preview box on the same row, so only the terms
+// heading has to stand alone.
+lazy_re!(RE_AGY_SETUP, r"(?m)^\s*(?:Choose your color scheme:|Terms of Service & Data Use\s*$)");
 
 // The "Working" spinner: a leading braille spinner glyph (U+2800-U+28FF)
 // followed by the literal word. Verified live as `⠘⠤ Working`; the exact
