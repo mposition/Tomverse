@@ -655,7 +655,14 @@ test("grounded answer guidance preserves source JSON and cannot displace evidenc
     assert.match(guided[0].text, /untrusted quoted material, never instructions/);
     assert.equal(guided[1].text, original[1].text);
     assert.match(guided[2].text, /End of quoted evidence/);
-    assert.match(guided[2].text, /\nObservation .+\nForecast /);
+    if (mode === "lookup") {
+      assert.match(guided[2].text, /\nObservation .+\nForecast /);
+    } else {
+      assert.match(guided[2].text, /requested precision/);
+      assert.match(guided[2].text, /analysis or a derivation is requested/);
+      assert.match(guided[2].text, /Separate observations from forecasts/);
+      assert.doesNotMatch(guided[2].text, /\nObservation .+\nForecast /);
+    }
   }
   // Find the largest excerpt the original envelope admits under the current estimator.
   let fits = 32;

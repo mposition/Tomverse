@@ -31,11 +31,12 @@ For an answer-generation comparison, toggle `CHAT_CONCISE_GROUNDED_ANSWER_ENABLE
 It defaults off. Keep presearch enabled, and keep the answer model and its
 thinking settings the same in both arms. When the primary search returns
 sources, the app marks them as quoted data, includes their original JSON,
-then supplies the answer instructions. When both observations and forecasts
-are relevant, the answer should start with two labelled lines in the user's
-language. Each cites its own source. Calculations, comparisons and explanations
-retain the detail the user requested. The model can still search to resolve
-incomplete or conflicting evidence.
+then supplies the answer instructions. A direct weather lookup that has both
+observations and forecasts should start with two labelled lines in the user's
+language. Each cites its own source. Comparisons use the requested units and
+precision and link each value to its source. Analysis and derivations retain
+the detail the user requested. The model can still search to resolve incomplete
+or conflicting evidence.
 
 Pair the same question and saved history. Verify that the answer provider
 received the same model, ordered evidence and source URLs in each pair.

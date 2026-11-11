@@ -3947,7 +3947,7 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     const lastPart = Array.isArray(userContent) ? userContent.at(-1)?.text ?? "" : "";
     assert.equal(lastPart.includes("End of quoted evidence"), withEvidence && scenario !== "answer flag off", scenario);
     assert.equal(lastPart.includes("For other lookups"), ["grounded", "lookup flag off"].includes(scenario), scenario);
-    assert.equal(lastPart.includes("For comparisons and calculations"), ["complex", "unclassified"].includes(scenario), scenario);
+    assert.equal(lastPart.includes("For a direct comparison or calculation"), ["complex", "unclassified"].includes(scenario), scenario);
     assert.equal(attempts[0].preparesStep, ["grounded", "answer flag off"].includes(scenario), scenario);
   }
 });
