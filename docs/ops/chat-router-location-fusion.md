@@ -96,3 +96,24 @@ calls. A consent resume reuses a decision and does not produce a second paid
 Router call. Record separately any missing signed client timing, manual location
 grants, search corpus replays and changes in the answer-model mix. Report the
 number of completed searches at or below 10s as well as the p50 and p95.
+
+### Existing-turn real-model comparison (2026-11-11)
+
+One Chromium worker sent each Korean follow-up five times per arm in alternating
+order against the same production build, with the same saved neutral history.
+Only the existing-turn switch varied. The classifier, router and answer models
+were real; the search adapter replayed identical official BOM and NASA evidence.
+The answer model pool was GPT 6 Luna and Qwen 3.8 Flash. These are controlled
+browser measurements, not production percentiles. Each cell is p50 / p95 seconds
+from Send; with five samples per arm and question, p95 is the maximum.
+
+| Question | First text OFF | First text ON | Complete OFF | Complete ON | Complete within 10s OFF → ON |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Brisbane weather | 8.11 / 8.77 | 6.23 / 9.14 | 14.02 / 19.61 | 12.93 / 16.65 | 0/5 → 0/5 |
+| Voyager UTC launch dates and difference | 7.40 / 10.45 | 6.43 / 8.09 | 10.96 / 13.12 | 9.63 / 12.09 | 2/5 → 4/5 |
+| Both questions (equal weights) | 7.82 / 10.45 | 6.23 / 9.14 | 11.95 / 19.61 | 12.09 / 16.65 | 2/10 → 4/10 |
+
+Standalone location calls fell from ten to zero; both arms made ten router and
+ten answer-model calls. Nine of ten pairs selected the same answer model. Eight
+of ten paired completions improved, but pooled median completion did not. This
+change alone did not meet the 10s completion p95 target for either question.
