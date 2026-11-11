@@ -17,8 +17,9 @@ import {
   OWNER_QUEUE_LIMITS,
   killSwitchEngaged,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
+  unknownOutcomeDecisionWorkItemId,
 } from "@/lib/engineeringAgentCore";
-import { readEngineeringAgentSwitches } from "@/lib/engineeringAgentStore";
+import { engineeringAgentPullRequestResumable, readEngineeringAgentSwitches } from "@/lib/engineeringAgentStore";
 import {
   ENGINEERING_AGENT_PATCH_FILE_LIMIT,
   ENGINEERING_AGENT_CARD_ITEM_KINDS,
@@ -55,6 +56,11 @@ export type EngineeringAgentOwnerItemView = {
   baseSha: string | null;
   /** A v22 draft the tier round kept private, which a person may send back. */
   rejudgeable: boolean;
+  /**
+   * An unknown outcome whose last lookup read a branch and no pull request:
+   * a person may approve that the publisher open it (§10).
+   */
+  pullRequestResumable: boolean;
   /** What the item is about, for the person deciding it. Null: no run to read. */
   context: EngineeringAgentOwnerItemContext | null;
 };
@@ -346,6 +352,16 @@ export async function readEngineeringAgentConsole(
     ]);
     const total = (kind: string) => grouped.find((row) => row.kind === kind)?._count._all ?? 0;
     const contexts = await readOwnerItemContexts(items, canReadDm);
+    const publishIds = [...new Set(items.flatMap((item) => {
+      const id = item.kind === "decision" ? unknownOutcomeDecisionWorkItemId(item.causeKey) : null;
+      return id === null ? [] : [id];
+    }))];
+    const resumable = new Set(
+      (publishIds.length === 0 ? [] : await prisma.engineeringAgentWorkItem.findMany({
+        where: { id: { in: publishIds } },
+        select: { id: true, kind: true, state: true, reason: true },
+      })).filter(engineeringAgentPullRequestResumable).map((row) => row.id),
+    );
     return {
       ...base,
       queue: {
@@ -353,6 +369,8 @@ export async function readEngineeringAgentConsole(
           ...item,
           context: contexts.get(item.id) ?? null,
           rejudgeable: engineeringAgentDraftRejudgeable(item, run),
+          pullRequestResumable: item.kind === "decision" &&
+            resumable.has(unknownOutcomeDecisionWorkItemId(item.causeKey) ?? ""),
           kind: item.kind as EngineeringAgentOwnerItemView["kind"],
           createdAt: item.createdAt.toISOString(),
           // Only a draft's patch is shown; a person reads it before deciding.

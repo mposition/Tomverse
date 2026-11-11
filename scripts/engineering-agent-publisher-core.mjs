@@ -12,7 +12,9 @@
 //
 // An answer this service does not know is never guessed: it reports nothing
 // and the claim's lease passes into a lookup (§10). It never retries a write,
-// never deletes a branch and never merges.
+// never deletes a branch and never merges. The one write a lookup claim may
+// make is the pull request a lost answer left unopened, and only once a person
+// approved it for that item (§10): never a push.
 //
 // Imports: node builtins and the dependency-free core only (§8).
 
@@ -30,6 +32,20 @@ import { detectSecrets } from "../lib/engineeringAgentSecretPatterns.ts";
 const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 const requestKey = () => randomUUID().replace(/-/g, "");
 const SHA1 = /^[0-9a-f]{40}$/;
+
+/**
+ * How often a read that follows our own write is taken again while GitHub has
+ * not yet shown that write, and how long apart. Only reads repeat: a ref read
+ * right after a push can answer 404 for a moment (AMUX-FILEGEN-003, 2026-11-11),
+ * and taking that as a moved branch left a pushed branch without its pull
+ * request.
+ */
+export const READ_AFTER_WRITE_ATTEMPTS = 5;
+export const READ_AFTER_WRITE_PAUSE_MS = 2_000;
+const realPause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A lookup's reason for a branch at the allowed commit with no pull request: what a person may approve resuming. */
+export const BRANCH_WITHOUT_PULL_REQUEST_REASON = "branch_without_pull_request";
 
 /** The PR's title: computed from the run, nothing free (§9-8). */
 export const publisherPrTitle = (runId) => `engineering-agent: run ${runId}`;
@@ -81,13 +97,20 @@ export const expectedPublishCommit = (work, baseCommitterDate) =>
  * request, both read completely, is "no prior write"; exactly one open pull
  * request into develop, carrying this run's marker, whose head commit is the
  * one the consumed capability describes, is the result; anything else is for
- * a person.
+ * a person. A branch with no pull request is told apart by its commit
+ * (`headCommitObject` is then the branch's): at the allowed commit it is
+ * `branch_without_pull_request`, the one case a person may approve resuming.
  */
 export const decideLookup = ({ runId, branch, consumed, branchOid, pulls, headCommitObject }) => {
   // (The branch must also be at the pull request's head: a found result binds
   // one commit, and a branch that moved is not that commit.)
   if (branchOid === null && pulls.length === 0) return { outcome: "lookup_no_prior_write" };
   if (consumed === null) return { outcome: "lookup_impossible", reason: "write_without_capability" };
+  if (pulls.length === 0) {
+    if (headCommitObject === null) return { outcome: "lookup_impossible", reason: "pull_request_count" };
+    if (sha256(headCommitObject) !== consumed.commitDigest) return { outcome: "lookup_impossible", reason: "commit_not_allowed" };
+    return { outcome: "lookup_impossible", reason: BRANCH_WITHOUT_PULL_REQUEST_REASON, branchOid };
+  }
   if (pulls.length !== 1) return { outcome: "lookup_impossible", reason: "pull_request_count" };
   const [pull] = pulls;
   if (
@@ -122,6 +145,7 @@ export const decideLookup = ({ runId, branch, consumed, branchOid, pulls, headCo
  *     commitObjectAt(sha) -> string | null,
  *     dispose(),
  *   }
+ *   pause(ms)                                       optional; between reads that wait for our own write
  * Returns { finishedNormally, halt, reason } for the dead-man signal.
  */
 export async function runPublisherCycle(ports) {
@@ -147,7 +171,7 @@ export async function runPublisherCycle(ports) {
       workItemId: work.workItemId,
       fencingToken: String(work.fencingToken),
       outcome,
-      ...(extra.reason ? { reason: extra.reason } : {}),
+      ...(typeof extra.reason === "string" ? { reason: extra.reason } : {}),
       pullRequest: extra.pullRequest ?? null,
     });
     // An unknown answer is not retried (§10): the status route is the way to ask.
@@ -159,6 +183,22 @@ export async function runPublisherCycle(ports) {
   };
   // No result: the claim's lease passes and the next round looks (§10).
   const leave = (reason) => ({ finishedNormally: false, halt, reason });
+  // A read taken again, a few times, while it does not yet show our own write.
+  const pause = typeof ports.pause === "function" ? ports.pause : realPause;
+  const readUntil = async (read, shown) => {
+    let value = await read();
+    for (let attempt = 1; attempt < READ_AFTER_WRITE_ATTEMPTS && !shown(value); attempt += 1) {
+      await pause(READ_AFTER_WRITE_PAUSE_MS);
+      value = await read();
+    }
+    return value;
+  };
+  // Only `true` is a review item: anything else is the ordinary pull request.
+  const review = work.ownerReview === true;
+  const titled = review ?
+    { title: publisherReviewPrTitle(work.runId), body: publisherReviewPrBody(work.runId, work.cardRef) } :
+    { title: publisherPrTitle(work.runId), body: publisherPrBody(work.runId, work.cardRef) };
+  const titleCarriesSecret = () => detectSecrets(titled.title).length > 0 || detectSecrets(titled.body).length > 0;
 
   let token = null;
   let workspace = null;
@@ -195,14 +235,34 @@ export async function runPublisherCycle(ports) {
       if (snapshot.unreadable) return leave(snapshot.unreadable);
       return report(outcome, { pullRequest: snapshot.pullRequest });
     };
+    // The one pull request creation, for the branch at `headSha`: never
+    // repeated. A 4xx is a definite refusal; any other answer, or a pull
+    // request that does not show, is for the next lookup.
+    const openPull = async ({ headSha, outcome, rejected, treeId }) => {
+      const created = await github.createPull({ ...titled, head: work.branch, draft: review });
+      if (created.status === "rejected") return await report(rejected.outcome, rejected);
+      let pull = null;
+      if (created.status === "created") {
+        const find = async () =>
+          (await github.pullsForHead(work.branch)).find((candidate) => candidate.number === created.number) ?? null;
+        pull = await readUntil(find, (found) => found !== null);
+      }
+      if (pull === null) return leave("pull_request_outcome_unknown");
+      // The branch is read again: the pull request, the branch and the pushed
+      // commit must be one commit before anything is bound.
+      if ((await github.branchOid(work.branch)) !== headSha) return leave("pull_request_head_changed");
+      return await reportSnapshot(outcome, await snapshotOf(pull, treeId, headSha));
+    };
 
     if (work.mode === "lookup") {
       const branchOid = await github.branchOid(work.branch);
       const pulls = await github.pullsForHead(work.branch);
       let headCommitObject = null;
-      if (pulls.length === 1 && SHA1.test(pulls[0].headSha)) {
+      // The commit read is the pull request's head, or with no pull request the branch's.
+      const readSha = pulls.length === 1 ? pulls[0].headSha : pulls.length === 0 && work.consumed !== null ? branchOid : null;
+      if (typeof readSha === "string" && SHA1.test(readSha)) {
         workspace = await ports.workspace(null);
-        headCommitObject = await workspace.commitObjectAt(pulls[0].headSha);
+        headCommitObject = await workspace.commitObjectAt(readSha);
       }
       const decision = decideLookup({
         runId: work.runId,
@@ -212,6 +272,25 @@ export async function runPublisherCycle(ports) {
         pulls,
         headCommitObject,
       });
+      if (
+        decision.outcome === "lookup_impossible" &&
+        decision.reason === BRANCH_WITHOUT_PULL_REQUEST_REASON &&
+        work.resumePullRequest === true
+      ) {
+        // A person approved opening the pull request for this branch (§10),
+        // and this claim carries that approval once. The branch was just read
+        // at the commit the consumed capability allows, with no pull request
+        // for it; nothing is pushed.
+        if (typeof work.cardRef !== "string" || titleCarriesSecret()) {
+          return await report("lookup_impossible", { reason: "content_check_failed" });
+        }
+        return await openPull({
+          headSha: decision.branchOid,
+          outcome: "lookup_found_result",
+          rejected: { outcome: "lookup_impossible", reason: "pull_request_create_rejected" },
+          treeId: work.consumed.expectedTreeId,
+        });
+      }
       if (decision.outcome !== "lookup_found_result") return await report(decision.outcome, decision);
       return await reportSnapshot(
         "lookup_found_result",
@@ -220,17 +299,7 @@ export async function runPublisherCycle(ports) {
     }
 
     // A write claim. Everything before the push can only refuse.
-    // Only `true` is a review item: anything else is the ordinary pull request.
-    const review = work.ownerReview === true;
-    const titled = review ?
-      { title: publisherReviewPrTitle(work.runId), body: publisherReviewPrBody(work.runId, work.cardRef) } :
-      { title: publisherPrTitle(work.runId), body: publisherPrBody(work.runId, work.cardRef) };
-    if (
-      sha256(work.patchBody) !== work.patchDigest ||
-      detectSecrets(work.patchBody).length > 0 ||
-      detectSecrets(titled.title).length > 0 ||
-      detectSecrets(titled.body).length > 0
-    ) {
+    if (sha256(work.patchBody) !== work.patchDigest || detectSecrets(work.patchBody).length > 0 || titleCarriesSecret()) {
       return await report("revalidation_refused", { reason: "content_check_failed" });
     }
     workspace = await ports.workspace(work.baseSha);
@@ -264,24 +333,21 @@ export async function runPublisherCycle(ports) {
 
     // The first public write.
     const pushed = await workspace.push(built.commitSha, work.branch, token.token);
-    const remote = await github.branchOid(work.branch);
+    // A branch not shown yet is read again; a branch at another commit is not.
+    const remote = await readUntil(() => github.branchOid(work.branch), (oid) => oid !== null);
     if (remote !== built.commitSha) {
-      // Pushed and then changed, or not pushed and the answer lost: a person
-      // or the next lookup decides, never a second push.
-      return leave(pushed ? "branch_changed_after_push" : "push_outcome_unknown");
+      // Pushed and then changed, pushed and still not shown, or not pushed and
+      // the answer lost: a person or the next lookup decides, never a second push.
+      if (!pushed) return leave("push_outcome_unknown");
+      return leave(remote === null ? "push_not_shown" : "branch_changed_after_push");
     }
 
-    const created = await github.createPull({ ...titled, head: work.branch, draft: review });
-    if (created.status === "rejected") return await report("pr_create_rejected");
-    let pull = null;
-    if (created.status === "created") {
-      pull = (await github.pullsForHead(work.branch)).find((candidate) => candidate.number === created.number) ?? null;
-    }
-    if (pull === null) return leave("pull_request_outcome_unknown");
-    // The branch is read again: the pull request, the branch and the pushed
-    // commit must be one commit before anything is bound.
-    if ((await github.branchOid(work.branch)) !== built.commitSha) return leave("pull_request_head_changed");
-    return await reportSnapshot("confirmed", await snapshotOf(pull, work.expectedTreeId, built.commitSha));
+    return await openPull({
+      headSha: built.commitSha,
+      outcome: "confirmed",
+      rejected: { outcome: "pr_create_rejected" },
+      treeId: work.expectedTreeId,
+    });
   } catch (error) {
     return leave(error instanceof Error ? error.message.slice(0, 64) : "cycle_failed");
   } finally {

@@ -261,8 +261,20 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                     )}
                   </div>
                 ) : null}
+                {item.kind === "decision" && item.pullRequestResumable ? (
+                  <p className="mt-2 text-sm text-zinc-400">{m.resumePullRequestNote}</p>
+                ) : null}
                 {initial.canWrite && item.kind === "decision" ? (
-                  <div className="mt-3">
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {item.pullRequestResumable
+                      ? button(`${item.id}:resume`, m.resumePullRequest, () => {
+                          if (!window.confirm(m.confirmResumePullRequest)) return;
+                          void send(`${item.id}:resume`, {
+                            url: "/api/admin/engineering-agent/acknowledgements",
+                            body: { workItemId: item.id, resumePullRequest: true },
+                          });
+                        }, "primary")
+                      : null}
                     {button(`${item.id}:ack`, m.acknowledge, () =>
                       void post(`${item.id}:ack`, "/api/admin/engineering-agent/acknowledgements", { workItemId: item.id }),
                     )}

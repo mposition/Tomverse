@@ -161,6 +161,8 @@ const RECORDS_WHAT_HAPPENED = [
   "decideEngineeringAgentT2Draft",
   "rejudgeEngineeringAgentV22Draft",
   "acknowledgeEngineeringAgentDecision",
+  // A person's approval; the claim that carries it reads the switches.
+  "approveEngineeringAgentPullRequestResume",
   "setEngineeringAgentSwitch",
   "recordEngineeringAgentBinding",
   "replaceEngineeringAgentBinding",
