@@ -15,8 +15,9 @@ const attachmentGroupLabels: Record<ChatAttachmentUiGroup, string> = {
 const signedInAttachmentFormats = Object.entries(chatAttachmentExtensionsByGroup())
   .filter(([, extensions]) => extensions.length > 0)
   .map(([group, extensions]) => `${attachmentGroupLabels[group as ChatAttachmentUiGroup]}: ${extensions.map((extension) => `.${extension}`).join(", ")}.`);
-const guestAttachmentFormats = Object.values(chatAttachmentExtensionsByGroup({ guest: true }))
-  .flat().map((extension) => `.${extension}`).join(", ");
+const guestAttachmentExtensions = new Set(Object.values(chatAttachmentExtensionsByGroup({ guest: true })).flat());
+const signedInOnlyAttachmentFormats = Object.values(chatAttachmentExtensionsByGroup()).flat()
+  .filter(extension => !guestAttachmentExtensions.has(extension)).map(extension => `.${extension}`);
 
 export const infoPages = {
   faq: {
@@ -1401,12 +1402,20 @@ export const infoPages = {
       {
         "id": "files-and-drive",
         "title": "Files and Google Drive",
-        "body": "Where attachments are available, the supported extensions for signed-in accounts are listed below. Password-protected, damaged or scanned documents without readable text may fail. Try one file or paste the key text.",
+        comparisonTable: {
+          caption: "Attachment access and limits",
+          headers: ["Feature", "Guest", "Signed in"],
+          rows: [
+            ["Files per message", String(GUEST_MAX_ATTACHMENTS_PER_MESSAGE), "Up to 5"],
+            ["Per-file size", `${GUEST_MAX_ATTACHMENT_BYTES / (1024 * 1024)} MiB`, "10 MiB"],
+            ["Total per message", `${GUEST_MAX_ATTACHMENT_BYTES / (1024 * 1024)} MiB`, "25 MiB"],
+            ["Google Drive", "Unavailable", "Sign-in required"],
+          ],
+        },
+        "body": "Where attachments are available, compare the limits and Google Drive access first, then check the supported formats listed once below. Password-protected, damaged or scanned documents without readable text may fail. Try one file or paste the key text.",
         "bullets": [
           ...signedInAttachmentFormats,
-          `Supported guest formats: ${guestAttachmentFormats}.`,
-          "Supported guest attachments: one file per message, up to 5 MB. Google Drive connection requires sign-in.",
-          "Signed-in plans with attachments: up to five files, 10 MB each and 25 MB total per request.",
+          signedInOnlyAttachmentFormats.length ? `Not available to guests: ${signedInOnlyAttachmentFormats.join(", ")}.` : "Guest and signed-in accounts support the same listed formats.",
           "Account files are kept with the conversation. Guest files are temporary and are not included in saving, sharing or exports."
         ],
         "link": {

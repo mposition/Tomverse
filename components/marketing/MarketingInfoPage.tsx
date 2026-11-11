@@ -30,6 +30,7 @@ export type MarketingInfoSection = {
   guestTrialLinks?: { available: string; unavailable: string; chat: string; review: string; models: string };
   link?: MarketingInfoLink;
   links?: MarketingInfoLink[];
+  comparisonTable?: { caption: string; headers: string[]; rows: string[][] };
 };
 
 export type MarketingInfoCopy = {
@@ -160,6 +161,14 @@ export function MarketingInfoPage({
                   </h2>
                   <div id={`${sectionId}-${index}`} className={page.mobileAccordion && !expandedSections.has(section.title) ? "hidden sm:block" : undefined}>
                   <p className={`mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300 ${readableBody ? "max-w-[80ch] sm:text-base" : ""}`}>{sectionBody(section, pageHref)}</p>
+                  {section.comparisonTable ? <table className="mt-5 w-full table-fixed border-collapse text-left text-sm leading-6 [overflow-wrap:anywhere]">
+                    <caption className="mb-2 text-left font-bold">{section.comparisonTable.caption}</caption>
+                    <thead><tr>{section.comparisonTable.headers.map(header => <th key={header} scope="col" className="border-b border-zinc-300 p-2 align-top dark:border-zinc-700">{header}</th>)}</tr></thead>
+                    <tbody>{section.comparisonTable.rows.map(row => <tr key={row[0]}>
+                      <th scope="row" className="border-b border-zinc-200 p-2 align-top font-semibold dark:border-zinc-800">{row[0]}</th>
+                      {row.slice(1).map((cell, index) => <td key={index} className="border-b border-zinc-200 p-2 align-top dark:border-zinc-800">{cell}</td>)}
+                    </tr>)}</tbody>
+                  </table> : null}
                   {section.guestTrialLinks ? (
                     <div data-testid="faq-guest-trial-links" className="mt-5 space-y-3 text-sm leading-6">
                       <p>{guestTrialAvailable ? section.guestTrialLinks.available : section.guestTrialLinks.unavailable}</p>

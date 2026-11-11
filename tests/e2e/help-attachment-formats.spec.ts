@@ -9,8 +9,16 @@ test("help centre shows supported extensions and limits without horizontal overf
   for (const extension of Object.values(chatAttachmentExtensionsByGroup()).flat()) {
     expect(copy).toContain(`.${extension}`);
   }
-  await expect(section.getByText(/Supported guest formats:/)).toBeVisible();
-  await expect(section.getByText(/one file per message, up to 5 MB/)).toBeVisible();
-  await expect(section.getByText(/five files, 10 MB each and 25 MB total/)).toBeVisible();
+  const table = section.getByRole("table", { name: "Attachment access and limits" });
+  await expect(table).toBeVisible();
+  const rows = [["Files per message", ["1", "Up to 5"]], ["Per-file size", ["5 MiB", "10 MiB"]], ["Total per message", ["5 MiB", "25 MiB"]], ["Google Drive", ["Unavailable", "Sign-in required"]]] as const;
+  for (const [name, values] of rows) {
+    const row = table.getByRole("row").filter({ has: page.getByRole("rowheader", { name, exact: true }) });
+    await expect(row.getByRole("cell")).toHaveText([...values]);
+  }
+  expect((await table.boundingBox())!.y).toBeLessThan((await section.getByRole("listitem").first().boundingBox())!.y);
+  await expect(section.getByText(/Supported guest formats:/)).toHaveCount(0);
+  expect(copy.match(/\.pdf\b/g)).toHaveLength(1);
+  expect(copy.match(/\.json\b/g)).toHaveLength(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
