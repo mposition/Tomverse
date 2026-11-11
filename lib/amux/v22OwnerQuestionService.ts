@@ -13,16 +13,19 @@ import { AMUX_V22_OWNER_QUESTION_RULES, AMUX_V22_RESUME_PROMPT_MAX_BYTES,
   amuxV22ResumeMinimumBytes, normalizeAmuxV22OwnerAnswer,
   parseAmuxV22OwnerQuestion, type AmuxV22OwnerAnswerSource } from
   "./v22OwnerQuestionCore.ts";
-import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from "./v22ExternalAuthorityCore.ts";
+import { AMUX_V22_WORKER_AUTHORITY_NOTICE, AMUX_V22_WORKSPACE_NOTICE_IMPLEMENT } from
+  "./v22ExternalAuthorityCore.ts";
 import { openAmuxV22TaskPatchRow, openAmuxV22TaskResultRow } from
   "./v22TaskResultStore.ts";
 
 /** What a resumed prompt holds beside its resume section and its brief: the
- * Task and attempt lines (bounded), the notice twice and the question rules.
+ * Task and attempt lines (bounded), the notice twice, the workspace notice
+ * (its longest, implement form) and the question rules.
  * The sealed brief's ciphertext length stands in for the brief: it is never
  * shorter than the text. */
 const PROMPT_FIXED_BYTES = 512 +
   2 * Buffer.byteLength(AMUX_V22_WORKER_AUTHORITY_NOTICE, "utf8") +
+  Buffer.byteLength(AMUX_V22_WORKSPACE_NOTICE_IMPLEMENT, "utf8") + 1 +
   Buffer.byteLength(AMUX_V22_OWNER_QUESTION_RULES, "utf8");
 
 /** The question a Task's newest result asked, for the owner's result view. */

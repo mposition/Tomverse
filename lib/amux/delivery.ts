@@ -16,7 +16,7 @@ import { AMUX_V22_DELIVERY_BASE_SHA_ENV, AMUX_V22_TASK_EXECUTION_ENV,
   amuxV22DeliveryBudgetMicrousd,
   amuxV22TaskExecutionEnabled } from
   "@/lib/amux/v22TaskExecutionCore";
-import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from
+import { AMUX_V22_WORKER_AUTHORITY_NOTICE, amuxV22WorkspaceNotice } from
   "@/lib/amux/v22ExternalAuthorityCore";
 import { AMUX_V22_OWNER_QUESTION_RULES, AMUX_V22_RESUME_PROMPT_MAX_BYTES,
   buildAmuxV22ResumeSection } from "@/lib/amux/v22OwnerQuestionCore";
@@ -575,8 +575,13 @@ export async function pullAmuxWorkDelivery(input: {
         reviewFeedbackJobId = await amuxV52ReviewFeedbackJobId(tx,
           delivery.taskId);
       }
+      // The fixed HTTPS executor of a read-only API retry has no checkout,
+      // so only a CLI run is told about its workspace.
+      const workspace = readOnlyRetry?.executorKind ===
+        AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ? "" :
+        `${amuxV22WorkspaceNotice(amuxV22ExecutionRole(assignment.role))}\n`;
       const head = `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
-        `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n`;
+        `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n` + workspace;
       // An investigate (or verify) run ends with a structured conclusion.
       const conclusionRules = conclusionMode !== "off" &&
         amuxV22ExecutionRole(assignment.role) === "investigate" ?
