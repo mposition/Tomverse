@@ -362,15 +362,24 @@ export const combinedChatImageIntentEnabled = () => process.env.CHAT_AUTO_COMBIN
  * context, then runs the standalone classifier only if routing did not return
  * an image decision (disabled router, budget refusal, invalid output or error).
  */
-export function createChatTurnImageRouting(input: ChatTurnImageInput | null, combined: boolean) {
-    const prepared = input && combined ? prepareChatTurnImage(input) : undefined;
+export function createChatTurnImageRouting(input: ChatTurnImageInput | null, combined: boolean, savedDecision?: ChatImageDecision) {
+    const prepared = input && (combined || savedDecision?.image) ? prepareChatTurnImage(input) : undefined;
     let decision: ChatImageDecision | undefined;
-    let fallback = !input ? Promise.resolve(NOT_IMAGE)
+    let fallback = !input || savedDecision ? Promise.resolve(NOT_IMAGE)
         : !combined ? detectChatTurnImage(input) : undefined;
     return {
-        context: prepared,
+        context: combined ? prepared : undefined,
         accept: (value: ChatImageDecision) => { decision = value; },
         resolve: (): Promise<ChatImageDecision> => {
+            if (savedDecision?.image) {
+                return prepared ? prepared.then(context => {
+                    if (!context || !context.candidates.some(candidate =>
+                        (!savedDecision.modelId || candidate.id === savedDecision.modelId) &&
+                        (!savedDecision.preset || candidate.credits[savedDecision.preset] !== undefined))) return NOT_IMAGE;
+                    return savedDecision;
+                }) : Promise.resolve(NOT_IMAGE);
+            }
+            if (savedDecision) return Promise.resolve(savedDecision);
             if (decision) return Promise.resolve(decision);
             return fallback ??= prepared!.then(value => value
                 ? runPreparedChatImageRequest(value, input!.traceId) : NOT_IMAGE).catch(() => NOT_IMAGE);

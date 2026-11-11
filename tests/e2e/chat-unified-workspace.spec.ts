@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { GUEST_BRAND_TRIO_MODEL_IDS } from "../../lib/appDefaults";
 import { buildRoutingRetryChunk } from "../../lib/routingRetrySignal";
+import { buildChatStreamTrailerChunk } from "../../lib/webSearchStreamTrailer";
 import {
   expectNoHorizontalOverflow,
   createQaPdfBuffer,
@@ -82,6 +83,7 @@ type DraftFixture = {
 };
 
 function installControlledChatFetch(options: {
+  useChatNetworkFixture?: boolean;
   routedModelId?: string;
   responseErrorCode?: string;
   timingToken?: string;
@@ -104,6 +106,12 @@ function installControlledChatFetch(options: {
   window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+    if (!options.useChatNetworkFixture && method === "POST" && /\/api\/chat\/router-location($|\?)/.test(url)) {
+      const response = await window.fetch("/api/chat", init);
+      const headers = new Headers(response.headers);
+      headers.set("X-Chat-Router-Location-Version", "1");
+      return new Response(response.body, { status: response.status, headers });
+    }
     const isReceipt = /\/api\/conversations\/[^/]+\/messages\/receipt(?:$|\?)/.test(url);
     const isMessageSave = !isReceipt && /\/api\/conversations\/[^/]+\/messages(?:$|\?)/.test(url);
     if (method === "POST" && (
@@ -127,7 +135,7 @@ function installControlledChatFetch(options: {
         headers: new Headers(response.headers),
       });
     }
-    if (method !== "POST" || !/\/api\/chat($|\?)/.test(url)) {
+    if (options.useChatNetworkFixture || method !== "POST" || !/\/api\/chat($|\?)/.test(url)) {
       return originalFetch(input, init);
     }
     const request = JSON.parse(String(init?.body ?? "{}")) as RecordedRequest;
@@ -287,6 +295,7 @@ async function attachDraftFile(page: Page) {
 }
 
 async function openChat(page: Page, options: {
+  useChatNetworkFixture?: boolean;
   viewport?: { width: number; height: number };
   messages?: QaConversationMessage[];
   disabledPanels?: string[];
@@ -943,6 +952,7 @@ async function openChat(page: Page, options: {
     });
   });
   await page.addInitScript(installControlledChatFetch, {
+    useChatNetworkFixture: options.useChatNetworkFixture,
     timingToken: options.timingToken,
     routedModelId: options.routedModelId,
     responseErrorCode: options.responseErrorCode,
@@ -1135,6 +1145,28 @@ async function switchToFixtureAccountA(
 }
 
 const message = (page: Page, text: string) => page.getByTestId("chat-message").filter({ hasText: text });
+
+const fusionEnabled = process.env.E2E_CHAT_ROUTER_LOCATION_FUSION_ENABLED === "true" &&
+  process.env.E2E_CHAT_LOCATION_INTENT_ENABLED !== "false" &&
+  process.env.E2E_CHAT_FRESH_LOCATION_PREPARATION_ENABLED !== "true";
+const savedChatPaths = /\/api\/chat(?:\/router-location)?$/;
+const routerLocationHeaders = { "X-Chat-Router-Location-Version": "1" };
+
+async function installFusionLocationDevice(page: Page, denied = false) {
+  await page.addInitScript(deny => {
+    const state = window as typeof window & { __qaFusionGpsReads: number };
+    state.__qaFusionGpsReads = 0;
+    Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
+      getCurrentPosition(success: PositionCallback, failure: PositionErrorCallback) {
+        state.__qaFusionGpsReads++;
+        if (deny) failure({ code: 1 } as GeolocationPositionError);
+        else success({ coords: { latitude: -27.47, longitude: 153.025, accuracy: 100 },
+          timestamp: Date.now() } as GeolocationPosition);
+      },
+    } });
+  }, denied);
+  return () => page.evaluate(() => (window as typeof window & { __qaFusionGpsReads: number }).__qaFusionGpsReads);
+}
 
 test.describe("E02 authenticated follow-up and reconnect", () => {
   test("a follow-up transport failure keeps newer input through reconnect and reload", async ({ page }, testInfo) => {
@@ -4339,6 +4371,212 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(await page.evaluate(() => (window as unknown as { __unifiedChatControls: Array<{ aborted: boolean }> }).__unifiedChatControls[0].aborted)).toBe(true);
     expect(await requests(page)).toHaveLength(1);
   });
+
+  for (const decision of ["negative", "positive", "denied", "missing", "unsupported", "legacy404"] as const) {
+    test(`a saved fresh Router location ${decision} decision preserves the question and final answer`, async ({ page }, testInfo) => {
+      test.skip(process.env.E2E_CHAT_LOCATION_INTENT_ENABLED === "false", "Requires location intent");
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const gpsReads = await installFusionLocationDevice(page, decision === "denied");
+      const state = await openChat(page, { fresh: true, viewport, autoSelectionOffered: true,
+        useChatNetworkFixture: true, holdMessageSaveResponseAfterCommit: true });
+      const question = "Which evidence should I review?";
+      const answer = "The complete answer for this saved question.";
+      const sourceUrl = "https://example.test/saved-routing-evidence";
+      const trailer = buildChatStreamTrailerChunk({ searchMetadata: {
+        requested: true, supported: true, executed: true, provider: "openai", queryCount: 1,
+        citations: [{ url: sourceUrl, title: "Saved turn evidence" }],
+      } });
+      const posts: RecordedRequest[] = [];
+      const paths: string[] = [];
+      let lookups = 0;
+      let answerCalls = 0;
+      const needsLocation = decision !== "negative";
+      const fallbackToChat = decision === "unsupported" || decision === "legacy404";
+      await page.route("**/api/chat/location-intent", async route => {
+        const intent = route.request().postDataJSON();
+        expect(intent.text).toBe(question);
+        lookups++;
+        await route.fulfill({ json: { requiresLocation: needsLocation,
+          ...(intent.freshAccountId ? { preparationOutcome: "classified" } : {}) } });
+      });
+      await page.route(savedChatPaths, async route => {
+        const body: RecordedRequest = route.request().postDataJSON();
+        posts.push(body);
+        paths.push(new URL(route.request().url()).pathname);
+        if (body.routerLocationFusion && decision === "legacy404") {
+          await route.fulfill({ status: 404, contentType: "text/html", body: "Not found" });
+          return;
+        }
+        if (body.routerLocationFusion && !body.routerLocationContinuation && decision !== "negative") {
+          await route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
+            json: decision === "unsupported" ? { requiresLocation: null }
+              : { requiresLocation: decision === "missing" ? null : true, continuation: "fixture-continuation" } });
+        } else {
+          answerCalls++;
+          await route.fulfill({ headers: body.routerLocationFusion ? routerLocationHeaders : {},
+            contentType: "text/plain; charset=utf-8", body: answer + trailer });
+        }
+      });
+      await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+      await submitComposer(page, question, viewport.width);
+      await expect.poll(state.messageSaveCommitted).toBe(true);
+      expect(posts).toHaveLength(0);
+      if (process.env.E2E_CHAT_FRESH_LOCATION_PREPARATION_ENABLED !== "true") expect(lookups).toBe(0);
+      expect(await gpsReads()).toBe(0);
+      state.releaseMessageSaveResponse();
+      await expect(message(page, answer)).toBeVisible();
+      await expect(page.getByTestId("search-citation-item").getByRole("link")).toHaveAttribute("href", sourceUrl);
+      expect(answerCalls).toBe(1);
+      const resumed = fusionEnabled && decision !== "negative";
+      expect(posts).toHaveLength(resumed ? 2 : 1);
+      expect(paths).toEqual(fusionEnabled
+        ? ["/api/chat/router-location", ...(resumed ? [fallbackToChat ? "/api/chat" : "/api/chat/router-location"] : [])]
+        : ["/api/chat"]);
+      expect(posts[0].routerLocationFusion).toBe(fusionEnabled ? true : undefined);
+      const last = posts.at(-1)!;
+      expect(last.messages?.at(-1)?.content).toBe(question);
+      expect(lookups).toBe(!fusionEnabled || fallbackToChat || decision === "missing" ? 1 : 0);
+      expect(await gpsReads()).toBe(needsLocation ? 1 : 0);
+      if (needsLocation && decision !== "denied") expect(last.currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+      else expect(last.currentLocation).toBeUndefined();
+      if (resumed) {
+        expect(posts[0].currentLocation).toBeUndefined();
+        const { routerLocationFusion, ...original } = posts[0];
+        const continued = { ...last };
+        delete continued.routerLocationFusion;
+        delete continued.routerLocationContinuation;
+        delete continued.currentLocation;
+        expect(routerLocationFusion).toBe(true);
+        expect(last.routerLocationFusion).toBe(fallbackToChat ? undefined : true);
+        expect(last.routerLocationContinuation).toBe(fallbackToChat ? undefined : "fixture-continuation");
+        expect(continued).toEqual(original);
+      }
+    });
+  }
+
+  for (const failure of ["handled404", "unknownVersion", "invalidDecision", "resume404", "resumeTransport"] as const) {
+    test(`a Router location ${failure} failure does not retry paid Chat`, async ({ page }, testInfo) => {
+      test.skip(!fusionEnabled, "Requires Router location fusion");
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const gpsReads = await installFusionLocationDevice(page);
+      await openChat(page, { fresh: true, viewport, autoSelectionOffered: true, useChatNetworkFixture: true });
+      const paths: string[] = [];
+      let standalone = 0;
+      await page.route("**/api/chat/location-intent", route => {
+        standalone++;
+        return route.fulfill({ json: { requiresLocation: false } });
+      });
+      const afterPermission = failure.startsWith("resume");
+      await page.route(savedChatPaths, async route => {
+        paths.push(new URL(route.request().url()).pathname);
+        if (afterPermission && paths.length === 1) {
+          return route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
+            json: { requiresLocation: true, continuation: "only-saved-request" } });
+        }
+        if (failure === "resumeTransport") return route.abort("connectionreset");
+        if (failure === "invalidDecision") return route.fulfill({
+          headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" }, json: { requiresLocation: true },
+        });
+        return route.fulfill({ status: failure === "unknownVersion" ? 200 : 404,
+          headers: failure === "handled404" ? routerLocationHeaders : {},
+          json: { error: "The request could not continue." } });
+      });
+      await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+      await submitComposer(page, "Where is a station near me?", viewport.width);
+      await expect(page.getByTestId("chat-recovery-notice")).toBeVisible();
+      expect(paths).toEqual(afterPermission ? ["/api/chat/router-location", "/api/chat/router-location"] : ["/api/chat/router-location"]);
+      expect(standalone).toBe(0);
+      expect(await gpsReads()).toBe(afterPermission ? 1 : 0);
+    });
+  }
+
+  test("a late positive Router location decision after navigation cannot request GPS or resume the saved turn", async ({ page }, testInfo) => {
+    test.skip(!fusionEnabled, "Requires Router location fusion");
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const gpsReads = await installFusionLocationDevice(page);
+    await openChat(page, { fresh: true, viewport, autoSelectionOffered: true, useChatNetworkFixture: true });
+    const held = Promise.withResolvers<void>();
+    let chatCalls = 0;
+    await page.route("**/api/chat/router-location", async route => {
+      chatCalls++;
+      await held.promise;
+      await route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
+        json: { requiresLocation: true, continuation: "stale" } });
+    });
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    await submitComposer(page, "Where is the nearest station?", viewport.width);
+    await expect.poll(() => chatCalls).toBe(1);
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    const served = page.waitForResponse(response => new URL(response.url()).pathname === "/api/chat/router-location");
+    held.resolve();
+    await served;
+    await chooseConversation(page, "qa-chat-created");
+    await expect(page.getByTestId("stop-this-response")).toHaveCount(0);
+    expect(chatCalls).toBe(1);
+    expect(await gpsReads()).toBe(0);
+  });
+
+  test("stopping a saved Router location turn during device permission prevents its continuation", async ({ page }, testInfo) => {
+    test.skip(!fusionEnabled, "Requires Router location fusion");
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
+        getCurrentPosition(success: PositionCallback) {
+          Object.assign(window, { __qaGrantSavedLocation: () =>
+            success({ coords: { latitude: -27.47, longitude: 153.025, accuracy: 100 },
+              timestamp: Date.now() } as GeolocationPosition) });
+        },
+      } });
+    });
+    await openChat(page, { fresh: true, viewport, autoSelectionOffered: true, useChatNetworkFixture: true });
+    const posts: RecordedRequest[] = [];
+    await page.route("**/api/chat/router-location", route => {
+      posts.push(route.request().postDataJSON());
+      return route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
+        json: { requiresLocation: true, continuation: "cancelled" } });
+    });
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    await submitComposer(page, "What is nearby?", viewport.width);
+    await page.waitForFunction(() => "__qaGrantSavedLocation" in window);
+    await page.getByTestId("stop-this-response").click();
+    await page.evaluate(() => (window as typeof window & { __qaGrantSavedLocation: () => void }).__qaGrantSavedLocation());
+    await expect(page.getByTestId("stop-this-response")).toHaveCount(0);
+    expect(posts).toHaveLength(1);
+    expect(posts[0].currentLocation).toBeUndefined();
+  });
+
+  for (const suppressed of [false, true]) {
+    test(`a fresh Router location turn honors previously ${suppressed ? "disabled" : "enabled"} manual location`, async ({ page }, testInfo) => {
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const gpsReads = await installFusionLocationDevice(page);
+      await openChat(page, { fresh: true, viewport, autoSelectionOffered: true, useChatNetworkFixture: true });
+      const posts: RecordedRequest[] = [];
+      let standalone = 0;
+      await page.route("**/api/chat/location-intent", route => {
+        standalone++;
+        return route.fulfill({ json: { requiresLocation: true } });
+      });
+      await page.route("**/api/chat", route => {
+        posts.push(route.request().postDataJSON());
+        return route.fulfill({ contentType: "text/plain", body: "Here is the requested answer." });
+      });
+      await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+      await page.getByTestId("composer-tools-button").click();
+      await page.getByTestId("tools-location-row").click();
+      await expect(page.getByTestId("tools-location-row")).toHaveAttribute("aria-checked", "true");
+      await page.keyboard.press("Escape");
+      if (suppressed) await page.getByTestId("chat-location-disable").click();
+      await submitComposer(page, "What is near me?", viewport.width);
+      await expect(message(page, "Here is the requested answer.")).toBeVisible();
+      expect(posts).toHaveLength(1);
+      expect(posts[0].routerLocationFusion).toBeUndefined();
+      expect(standalone).toBe(0);
+      expect(await gpsReads()).toBe(suppressed ? 1 : 2);
+      if (suppressed) expect(posts[0].currentLocation).toBeUndefined();
+      else expect(posts[0].currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+    });
+  }
 
   for (const changeSelection of [false, true]) {
     test(`Refiner and location decisions overlap without early GPS or stale dispatch (${changeSelection ? "changed" : "retained"})`, async ({ page }, testInfo) => {

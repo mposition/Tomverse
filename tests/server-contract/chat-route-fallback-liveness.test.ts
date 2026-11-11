@@ -81,6 +81,11 @@ const routerInputs: Array<Parameters<typeof import("../../lib/autoModelSelection
 const llmRouterInputs: Array<Parameters<typeof import("../../lib/autoLlmRouter").pickAutoModelWithLlm>[0]> = [];
 let llmRouterRewrite: string | null = null;
 let paidRouterCalls = 0;
+let fusedLocationRequired: boolean | undefined;
+let fusionPayload: Record<string, unknown> | undefined;
+let fusionReceipt: { requestDigest: string; expiresAt: Date; consumedAt?: Date } | null = null;
+let fusionRouterDigest = "a".repeat(64);
+let priorFusionMessage = false;
 let llmSearchQueries: string[] | undefined;
 let llmSearchModelId: string | undefined;
 let llmSearchFileIntent: boolean | undefined;
@@ -121,6 +126,12 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
   ...realLlmRouter,
   pickAutoModelWithLlm: async (input: Parameters<typeof realLlmRouter.pickAutoModelWithLlm>[0]) => {
     llmRouterInputs.push(input);
+    if (input.locationFusion) {
+      input.locationFusion.onRouterDigest(fusionRouterDigest);
+      if (input.locationFusion.resume) return input.locationFusion.resume.pick;
+      paidRouterCalls++;
+      return { modelId: input.ruleModelId, rewrite: null, requiresLocation: fusedLocationRequired };
+    }
     if (!llmRouterRewrite && !llmSearchQueries) return null;
     if (input.verifyPreparedContext && !(await input.verifyPreparedContext())) return null;
     paidRouterCalls++;
@@ -757,9 +768,24 @@ const conversationRow = () => contextConversationAccess === "missing" ? null : (
   productKey: conversationProductKey,
   selectionMode: conversationSelectionMode,
   chatRecoveryEpoch: 0,
+  messages: [{ id: SOURCE_USER_MESSAGE_ID }, ...(priorFusionMessage ? [{ id: "prior" }] : [])],
+  routerLocationPreparations: fusionReceipt ? [fusionReceipt] : [],
 });
 
 const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
+  chatRouterLocationPreparation: {
+    create: ({ data }: { data: NonNullable<typeof fusionReceipt> }) => {
+      assert.equal(fusionReceipt, null);
+      fusionReceipt = data;
+      return data;
+    },
+    updateMany: ({ where, data }: { where: { requestDigest: string; expiresAt: { gt: Date } }; data: { consumedAt: Date } }) => {
+      if (!fusionReceipt || fusionReceipt.consumedAt || where.requestDigest !== fusionReceipt.requestDigest ||
+        fusionReceipt.expiresAt <= where.expiresAt.gt) return { count: 0 };
+      fusionReceipt.consumedAt = data.consumedAt;
+      return { count: 1 };
+    },
+  },
   conversation: {
     findUnique: () => conversationRow(),
     findFirst: () => conversationRow(),
@@ -1249,6 +1275,7 @@ const ledger = {
 mock.module(mod("lib/chatSecurity.ts"), {
   namedExports: {
     ...realChatSecurity,
+    assertUserOperationalAccess: async (userId: string) => { assert.equal(userId, USER_ID); },
     identifyChatCaller: (_request: Request, userId?: string | null) =>
       userId
         ? {
@@ -1665,12 +1692,12 @@ const ask = async (
   routerInputs.length = 0;
   shadowInputs.length = 0;
 
-  const { POST } = await loadRoute();
+  const { POST } = fusionPayload ? await import(mod("app/api/chat/router-location/route.ts")) as RouteModule : await loadRoute();
   const requestAbortController = new AbortController();
   abortActiveRequest = () =>
     requestAbortController.abort("client stopped during fallback transition");
   const response = await POST(
-    new Request("http://127.0.0.1:3100/api/chat", {
+    new Request(fusionPayload ? "http://127.0.0.1:3100/api/chat/router-location" : "http://127.0.0.1:3100/api/chat", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1686,6 +1713,7 @@ const ask = async (
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
         webSearchMode,
+        ...fusionPayload,
         ...(turnLocation ? { currentLocation: turnLocation } : {}),
         ...(includeSourceUserMessageId
           ? { sourceUserMessageId: SOURCE_USER_MESSAGE_ID }
@@ -3662,7 +3690,7 @@ test("Guest Auto provider unknown retains the converted hold and confirms its re
 });
 
 
-test("a saved GPT 6 Luna question uses the same sources with presearch off and on, saving one SDK tool round trip", async () => {
+async function compareSavedSearch(repeatsInitialSearch: boolean) {
   const oldFlag = process.env.CHAT_ROUTER_PRESEARCH_ENABLED;
   const oldBrave = process.env.BRAVE_SEARCH_API_KEY;
   const oldEnv = process.env.APP_ENV;
@@ -3671,7 +3699,7 @@ test("a saved GPT 6 Luna question uses the same sources with presearch off and o
   llmSearchQueries = ["one fact"];
   llmSearchModelId = "gpt-6-luna";
   llmSearchFileIntent = false;
-  const answer = "The initial count is 17. The verified total is 42.";
+  const answer = "The initial count is 17 [source](https://example.com/initial). The verified total is 42.";
   const outcomes = [];
   try {
     for (const enabled of [false, true]) {
@@ -3688,7 +3716,8 @@ test("a saved GPT 6 Luna question uses the same sources with presearch off and o
         return { stream: new ReadableStream({ start(controller) {
           if (!hasFollowUp) {
             controller.enqueue({ type: "tool-call", toolCallId: `search_${steps.length}`, toolName: "web_search",
-              input: JSON.stringify({ query: hasInitial ? ["one fact", "dependent fact"] : "one fact" }) });
+              input: JSON.stringify({ query: hasInitial && (!repeatsInitialSearch || steps.length > 1)
+                ? ["one fact", "dependent fact"] : "one fact" }) });
           } else {
             controller.enqueue({ type: "text-start", id: "answer" });
             controller.enqueue({ type: "text-delta", id: "answer", delta: answer });
@@ -3705,7 +3734,8 @@ test("a saved GPT 6 Luna question uses the same sources with presearch off and o
       assert.equal(attempts.length, 1);
       assert.equal(attempts[0].modelId, llmSearchModelId);
       assert.equal(llmRouterInputs.at(-1)?.searchPlan, enabled);
-      assert.equal(steps.length, enabled ? 2 : 3);
+      const modelUsesInitialResults = enabled && !repeatsInitialSearch;
+      assert.equal(steps.length, modelUsesInitialResults ? 2 : 3);
       assert.deepEqual(steps[0], { hasInitial: enabled, hasFollowUp: false, backendCalls: enabled ? 1 : 0 });
       assert.equal(presearchCalls.length, 2, "the repeated initial query and presearch share one session");
       assert.ok(attempts[0].toolNames.includes("create_document") && attempts[0].toolNames.includes("web_search"));
@@ -3717,6 +3747,16 @@ test("a saved GPT 6 Luna question uses the same sources with presearch off and o
       assert.deepEqual(sources, ["https://example.com/follow-up", "https://example.com/initial"]);
       const answerText = splitStreamKeepaliveSignal(displayText).text;
       assert.equal(answerText, answer);
+      assert.deepEqual(timingLines[0].search, {
+        flagEnabled: enabled, planOffered: enabled, plannedQueries: enabled ? 1 : 0, selectionEligible: true,
+        presearchEntered: enabled, presearchBackendRequests: enabled ? 1 : 0,
+        evidenceInjected: enabled, injectedSources: enabled ? 1 : 0,
+        modelCalls: steps.length, modelCallsWithSearchResults: modelUsesInitialResults ? 1 : 2,
+        finishedSteps: steps.length, toolOnlySearchSteps: modelUsesInitialResults ? 1 : 2,
+        searchToolCalls: modelUsesInitialResults ? 1 : 2, searchStepsAfterResults: enabled && repeatsInitialSearch ? 2 : 1,
+        answerBackendRequests: enabled ? 1 : 2, successfulBackendRequests: 2,
+        returnedSources: 2, sourceCards: 2, mentionedSources: 1, mentionedInjectedSources: enabled ? 1 : 0,
+      });
       outcomes.push({ answer: answerText, sources, tools: attempts[0].toolNames.sort() });
     }
     assert.deepEqual(outcomes[0], outcomes[1]);
@@ -3726,7 +3766,11 @@ test("a saved GPT 6 Luna question uses the same sources with presearch off and o
     if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
     if (oldEnv === undefined) delete process.env.APP_ENV; else process.env.APP_ENV = oldEnv;
   }
-});
+}
+for (const repeatsInitialSearch of [false, true]) {
+  test(`a saved GPT 6 Luna question uses the same sources with presearch off and on (repeats initial search: ${repeatsInitialSearch})`,
+    () => compareSavedSearch(repeatsInitialSearch));
+}
 
 test("router presearch stays behind admission, preserves search recovery policy and retains incurred cost on failure", async () => {
   const oldFlag = process.env.CHAT_ROUTER_PRESEARCH_ENABLED;
@@ -3873,4 +3917,88 @@ test("pre-Router context checks never load memory for a locked or missing owned 
       assert.equal(attempts.length, 0);
     }
   } finally { contextConversationAccess = "owned"; llmRouterRewrite = null; }
+});
+
+test("fresh Router location continues a negative inline and resumes one paid pick exactly once after consent", async () => {
+  const env = { ...process.env };
+  process.env.CHAT_ROUTER_LOCATION_FUSION_ENABLED = "true";
+  process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED = "true";
+  delete process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED;
+  fusionPayload = { routerLocationFusion: true };
+  paidRouterCalls = 0;
+  try {
+    fusionPayload = {};
+    const invalid = await ask("answers", "claimed", 400);
+    assert.equal(invalid.response.headers.get("X-Chat-Router-Location-Version"), "1");
+    assert.equal(JSON.parse(invalid.body).code, "INVALID_ROUTER_LOCATION_REQUEST");
+    fusionPayload.routerLocationFusion = true;
+    for (const [name, disabled] of [
+      ["CHAT_ROUTER_LOCATION_FUSION_ENABLED", "false"],
+      ["TOMVERSE_CHAT_LOCATION_INTENT_ENABLED", "false"],
+      ["CHAT_FRESH_LOCATION_PREPARATION_ENABLED", "true"],
+    ]) {
+      const previous = process.env[name];
+      process.env[name] = disabled;
+      assert.deepEqual(JSON.parse((await ask("answers")).body), { requiresLocation: null });
+      if (previous === undefined) delete process.env[name]; else process.env[name] = previous;
+    }
+    priorFusionMessage = true;
+    assert.deepEqual(JSON.parse((await ask("answers")).body), { requiresLocation: null });
+    assert.equal(paidRouterCalls, 0);
+    priorFusionMessage = false;
+    await ask("answers", "claimed", 409, false, [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "unsaved text" }]);
+    assert.equal(fusionReceipt, null);
+    assert.equal(paidRouterCalls, 0);
+    fusedLocationRequired = false;
+    const negative = await ask("answers");
+    assert.notEqual(negative.response.headers.get("X-Chat-Response-Mode"), "router-location");
+    assert.equal(ledger.accessAcquisitions, 1);
+    assert.equal(paidRouterCalls, 1);
+    fusionReceipt = null;
+    fusedLocationRequired = true;
+    const positive = await ask("answers");
+    assert.equal(positive.response.headers.get("X-Chat-Response-Mode"), "router-location");
+    assert.equal(positive.response.headers.get("X-Chat-Router-Location-Version"), "1");
+    assert.ok(positive.response.headers.get("X-Request-ID"));
+    const { requiresLocation, continuation } = JSON.parse(positive.body);
+    assert.equal(requiresLocation, true);
+    assert.ok(continuation);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(paidRouterCalls, 2);
+    await ask("answers", "claimed", 409);
+    assert.equal(paidRouterCalls, 2, "replayed initial request cannot dispatch another Router");
+    fusionPayload.routerLocationContinuation = continuation;
+    turnLocation = { latitude: -27.47, longitude: 153.025, accuracy: 150, timestamp: Date.now() };
+    fusionRouterDigest = "b".repeat(64);
+    await ask("answers", "claimed", 409);
+    assert.equal(ledger.accessAcquisitions, 0);
+    fusionRouterDigest = "a".repeat(64);
+    const resumed = await ask("answers");
+    assert.notEqual(resumed.response.headers.get("X-Chat-Response-Mode"), "router-location");
+    assert.equal(resumed.response.headers.get("X-Chat-Router-Location-Version"), "1");
+    assert.equal(ledger.accessAcquisitions, 1);
+    assert.ok(JSON.stringify(attempts[0].messages).includes("-27.47"));
+    await ask("answers", "claimed", 409);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(paidRouterCalls, 2, "neither resume nor replay spends on the Router");
+    fusionReceipt = null;
+    turnLocation = undefined;
+    fusedLocationRequired = undefined;
+    delete fusionPayload.routerLocationContinuation;
+    const unresolved = JSON.parse((await ask("answers")).body);
+    assert.equal(unresolved.requiresLocation, null);
+    assert.ok(unresolved.continuation);
+    fusionPayload.routerLocationContinuation = unresolved.continuation;
+    await ask("answers");
+    assert.equal(ledger.accessAcquisitions, 1);
+    assert.ok(!JSON.stringify(attempts[0].messages).includes("-27.47"));
+    assert.equal(paidRouterCalls, 3, "the saved lookup can decline permission without repeating the Router");
+  } finally {
+    for (const name of ["CHAT_ROUTER_LOCATION_FUSION_ENABLED", "TOMVERSE_CHAT_LOCATION_INTENT_ENABLED", "CHAT_FRESH_LOCATION_PREPARATION_ENABLED"]) {
+      if (env[name] === undefined) delete process.env[name]; else process.env[name] = env[name];
+    }
+    turnLocation = undefined; fusionReceipt = null; fusionPayload = undefined; priorFusionMessage = false;
+    fusedLocationRequired = undefined; fusionRouterDigest = "a".repeat(64);
+  }
 });

@@ -1,4 +1,5 @@
 import { appendRouterSearchEvidence, prepareRouterSearch } from "@/lib/chatRouterPresearch";
+import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
@@ -61,6 +62,9 @@ import {
 } from "@/lib/routingShadow";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
+import { chatRouterLocationFusionEnabled } from "@/lib/chatRouterLocationFusionEnabled";
+import { openRouterLocation, routerLocationDigest, sealRouterLocation, type RouterLocationContinuation } from "@/lib/chatRouterLocationContinuation";
+import { claimRouterLocation, consumeRouterLocation, routerLocationRefused, routerLocationResponse, type RouterLocationClaim } from "@/lib/chatRouterLocationPreparation";
 import { combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
 import {
     latestUserTurnHasAttachments,
@@ -221,6 +225,7 @@ import {
     assertModelAccess,
     assertChatRequestSize,
     ChatAccessError,
+    assertUserOperationalAccess,
     chatErrorResponse,
     createChatBudget,
     getChatBudgetReservedCostMicroUsd,
@@ -1340,6 +1345,7 @@ async function handleChatPost(
      */
     let providerCall: ProviderCallRecord | null = null;
     let presearchForSettlement: ReturnType<typeof buildAppManagedWebSearchTool> | null = null;
+    let searchObservation: ChatSearchObservation | undefined;
     /**
      * Who this turn was for, hoisted for the catch.
      *
@@ -1400,6 +1406,22 @@ async function handleChatPost(
             guestAutoCapability,
             guestClientTurnId,
         } = validateChatPayload(body);
+        const fusionBody = body as Record<string, unknown>;
+        const wantsFusion = fusionBody.routerLocationFusion === true;
+        if (!wantsFusion && new URL(req.url).pathname === "/api/chat/router-location") {
+            throw new ChatAccessError(400, "INVALID_ROUTER_LOCATION_REQUEST", "A router-location request is required.");
+        }
+        const resumeToken = fusionBody.routerLocationContinuation;
+        const refuseFusion = () => {
+            if (resumeToken !== undefined) throw routerLocationRefused();
+            return routerLocationResponse(null, traceId);
+        };
+        if (resumeToken !== undefined && !wantsFusion) throw routerLocationRefused();
+        if (wantsFusion && (!chatRouterLocationFusionEnabled() || !process.env.NEXTAUTH_SECRET ||
+            !session?.user?.id || !conversationId || !assistantMessageId || !sourceUserMessageId ||
+            promptRefinerDecision || deepResearchDepth || admissionToken || mcpConnectionId || turnstileToken || guestAutoCapability ||
+            (currentLocation && resumeToken === undefined) || requestMessages.length !== 1 ||
+            requestMessages[0].role !== "user" || turnCarriesAttachments(requestMessages))) return refuseFusion();
         if (mcpConnectionId && (!mcpPreviewEnabled() || !session?.user?.id)) {
             throw new ChatAccessError(403, "MCP_CONNECTOR_UNAVAILABLE", "Sign in and enable the connector preview to use a selected plugin.");
         }
@@ -1501,6 +1523,7 @@ async function handleChatPost(
             }),
             session?.user?.id ?? null,
         ) === "entered";
+        if (wantsFusion && pinnedDeploymentEntered) return refuseFusion();
         // The pinned experiment owns a separate placement/budget refusal
         // pipeline. It has no preview-before-reserve seam, so a Refiner
         // decision cannot enter it without risking a consumed decision on a
@@ -1798,7 +1821,12 @@ async function handleChatPost(
                       // a miss here simply reads as "not an Auto conversation".
                       where: { id: conversationId, userId: session.user.id },
                       select: {
-                          ...(contextBundle ? { password: true, kind: true, memoryMode: true, assistantProfileVersionId: true } : {}),
+                          ...(contextBundle || wantsFusion ? { password: true, kind: true, memoryMode: true, assistantProfileVersionId: true } : {}),
+                          ...(wantsFusion ? {
+                              selectedModels: true, disabledPanels: true, chatRecoveryEpoch: true,
+                              messages: { select: { id: true }, take: 2 },
+                              routerLocationPreparations: { where: { sourceUserMessageId, assistantMessageId }, select: { requestDigest: true }, take: 1 },
+                          } as const : {}),
                           selectionMode: true,
                           routerModelId: true,
                           routerChallengerTurns: true,
@@ -2198,17 +2226,6 @@ async function handleChatPost(
             // is the one attachment the image turn can use: it may be edited.
             (!latestUserTurnHasAttachments(autoRoutingMessages) ||
                 latestUserTurnHasImageAttachment(autoRoutingMessages));
-        const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
-            ? {
-                  userId: session!.user!.id!,
-                  conversationId: conversationId!,
-                  text: profileTextFor(autoRoutingMessages),
-                  plan: accountPlan,
-                  traceId,
-                  request: req,
-                  attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages),
-              }
-            : null, deterministicAutoSelection.routed && combinedChatImageIntentEnabled());
         // Per prompt: a small model reads this message and reorders the
         // Router's eligible set. Off unless Admin › Routing names a router
         // model; a missing decision keeps the ordinary Auto choice and recovery.
@@ -2298,12 +2315,47 @@ async function handleChatPost(
                 earlyContextRefusal = response;
                 return false;
             } : undefined;
+        let fusion: { key: RouterLocationClaim; requestDigest: string; expiresAt: number; resume: RouterLocationContinuation | null } | null = null;
+        if (wantsFusion && conversationId && sourceUserMessageId && assistantMessageId && session?.user?.id) {
+            const userId = session.user.id;
+            if (!conversationRouting) throw routerLocationRefused();
+            if (!hasConversationUnlockGrant(req, userId, conversationId, conversationRouting.password ?? null)) return conversationLockedResponse();
+            if (resumeToken === undefined && conversationRouting.routerLocationPreparations?.length) throw routerLocationRefused();
+            if (!deterministicAutoSelection.routed || !autoImageTurnEligible || !isChatConversationKind(conversationRouting.kind) ||
+                conversationRouting.messages?.length !== 1 || conversationRouting.messages[0].id !== sourceUserMessageId) return refuseFusion();
+            await assertUserOperationalAccess(userId);
+            await verifyDurableChatSourceMessage({ userId, conversationId, sourceUserMessageId, messages });
+            if (verifyPreparedContext && !(await verifyPreparedContext())) return earlyContextRefusal!;
+            const originalRequest = { ...fusionBody };
+            delete originalRequest.currentLocation;
+            delete originalRequest.routerLocationContinuation;
+            const key = { conversationId, sourceUserMessageId, assistantMessageId };
+            const requestDigest = routerLocationDigest({
+                userId, key, originalRequest, tier: accountPlan?.tier, selectedModels: conversationRouting.selectedModels,
+                disabledPanels: conversationRouting.disabledPanels, recoveryEpoch: conversationRouting.chatRecoveryEpoch,
+                profile: conversationRouting.assistantProfileVersionId, memory: conversationRouting.memoryMode,
+                selection: deterministicAutoSelection.modelId, eligible: deterministicAutoSelection.record.eligibleModelIds,
+                prices: deterministicAutoSelection.candidateCreditsByModelId, versions: deterministicAutoSelection.versions,
+                cohort: deterministicAutoSelection.cohort, combinedImage: combinedChatImageIntentEnabled(),
+                presearch: process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true",
+            });
+            const resume = resumeToken === undefined ? null : openRouterLocation(resumeToken, requestDigest, process.env.NEXTAUTH_SECRET!);
+            if (resumeToken !== undefined && (!resume || conversationRouting.routerLocationPreparations?.[0]?.requestDigest !== requestDigest)) throw routerLocationRefused();
+            const expiresAt = resume?.expiresAt ?? await claimRouterLocation(key, requestDigest);
+            fusion = { key, requestDigest, expiresAt, resume };
+        }
+        const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
+            ? { userId: session!.user!.id!, conversationId: conversationId!, text: profileTextFor(autoRoutingMessages),
+                plan: accountPlan, traceId, request: req, attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages) }
+            : null, deterministicAutoSelection.routed && combinedChatImageIntentEnabled(), fusion?.resume?.image);
+        let fusionRouterDigest: string | null = null;
         const finishRoutingTiming = latency.stage("routingMs");
         latency.dimensions.mode = deterministicAutoSelection.routed ? "auto" : "manual";
-        const allowRouterSearchPlan = deterministicAutoSelection.routed &&
-            process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true" &&
+        const routerSearchPlanCandidate = deterministicAutoSelection.routed &&
             Boolean(session?.user?.id) && webSearchMode === "always" && !currentLocation &&
             !mcpConnectionId && !turnCarriesAttachments(autoRoutingMessages);
+        const presearchFlagEnabled = process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true";
+        const allowRouterSearchPlan = routerSearchPlanCandidate && presearchFlagEnabled;
         const llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
                       prompt: profileTextFor(autoRoutingMessages),
@@ -2322,9 +2374,11 @@ async function handleChatPost(
                       // before provider dispatch. A second rewrite would be
                       // discarded, including an explicit keep-original choice.
                       rewriteAllowed: !refinerPreview && !turnCarriesAttachments(autoRoutingMessages),
-                      verifyPreparedContext,
+                      verifyPreparedContext: fusion ? undefined : verifyPreparedContext,
+                      ...(fusion ? { locationFusion: { authoredText: messages[0].content, resume: fusion.resume,
+                          onRouterDigest: (value: string) => { fusionRouterDigest = value; } } } : {}),
                       fileContext: fileRoutingContext,
-                      searchPlan: allowRouterSearchPlan,
+                      searchPlan: fusion?.resume?.searchPlan ?? allowRouterSearchPlan,
                       imageIntent: imageRouting.context,
                       onImageDecision: imageRouting.accept,
                       // An image turn is not a routing decision a chat model
@@ -2335,6 +2389,7 @@ async function handleChatPost(
                   })
             : null;
         finishRoutingTiming();
+        if (fusion?.resume && fusion.resume.routerDigest !== fusionRouterDigest) throw routerLocationRefused();
         if (earlyContextRefusal) return earlyContextRefusal;
         const detectedImageDecision = await imageRouting.resolve();
         // A document about images is still a file request, not an image turn.
@@ -2441,7 +2496,7 @@ async function handleChatPost(
         };
         // A Refiner preview is tentative until the same view is atomically
         // revalidated and consumed after deterministic preflight refusals.
-        if (!refinerPreview) recordAutoSelection();
+        if (!refinerPreview && !fusion) recordAutoSelection();
         const routedCatalogModel = autoRouted
             ? runtimeModelMap.get(effectiveModelId)
             : requestedModelConfig;
@@ -3063,6 +3118,16 @@ async function handleChatPost(
           bundle use, no credit, lease or usage hold -- so there is nothing to
           return. The client makes the image under this turn's answer id.
         */
+        if (fusion) {
+            if (fusion.resume) {
+                if (fusion.resume.image.image && !autoImageDecision.image) throw routerLocationRefused();
+                await consumeRouterLocation(fusion.key, fusion.requestDigest);
+            } else if (llmPick?.requiresLocation !== false) {
+                const continuation = sealRouterLocation({ requestDigest: fusion.requestDigest, routerDigest: fusionRouterDigest,
+                    traceId, searchPlan: allowRouterSearchPlan, pick: llmPick, image: autoImageDecision, expiresAt: fusion.expiresAt }, process.env.NEXTAUTH_SECRET!);
+                return routerLocationResponse(llmPick?.requiresLocation === true ? true : null, traceId, continuation);
+            }
+        }
         if (autoImageDecision.image) {
             console.info(JSON.stringify({ event: "chat_auto_image_turn", traceId }));
             return new Response(
@@ -4964,10 +5029,17 @@ async function handleChatPost(
         ).messages;
         // File-capable models offer artifact tools on ordinary text turns too.
         // Require an explicit non-file decision and retain those tools for the answer.
-        if (allowRouterSearchPlan &&
-            access.kind !== "guest" && autoSelection.routed &&
-            llmPick?.modelId === modelConfig.id && llmPick.requiresFileGeneration === false &&
-            llmPick.searchQueries?.length && appManagedSearchTool && !mcpConnector) {
+        const searchSelectionEligible = access.kind !== "guest" && autoSelection.routed &&
+            llmPick?.modelId === modelConfig.id && llmPick.requiresFileGeneration === false;
+        if (routerSearchPlanCandidate && appManagedSearchTool && !mcpConnector) {
+            searchObservation = createChatSearchObservation({
+                flagEnabled: presearchFlagEnabled, planOffered: allowRouterSearchPlan,
+                plannedQueries: allowRouterSearchPlan ? llmPick?.searchQueries?.length ?? 0 : 0,
+                selectionEligible: searchSelectionEligible, snapshot: appManagedSearchTool.session.snapshot,
+            });
+        }
+        if (allowRouterSearchPlan && searchSelectionEligible &&
+            llmPick?.searchQueries?.length && appManagedSearchTool && !mcpConnector) {
             presearchForSettlement = appManagedSearchTool;
             const finishPresearch = latency.stage("presearchMs");
             try {
@@ -4978,7 +5050,8 @@ async function handleChatPost(
                     inputHeadroomTokens: contextInputTokens - reservationOnlyInputTokens -
                         toReservedInputTokens(inputEstimate.breakdown()) - TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
                 });
-                appendRouterSearchEvidence(formattedMessages, evidence);
+                const injected = appendRouterSearchEvidence(formattedMessages, evidence);
+                searchObservation?.presearch(injected);
             } finally { finishPresearch(); }
         }
         const { messages: sdkMessages, instructions: sdkInstructions } =
@@ -5124,6 +5197,7 @@ async function handleChatPost(
                             : undefined,
                     ...generationSettings,
                     ...(combinedToolConfig ?? {}),
+                    ...searchObservation?.sdk,
                     ...(mcpConnector ? {
                         maxRetries: 0,
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
@@ -5407,6 +5481,7 @@ async function handleChatPost(
                 turnTimingLogged = true;
                 latency.finish(outcome, dispatched.modelId, dispatched.provider);
                 logChatTurnTiming({
+                    search: searchObservation?.summary(outcome === "completed" ? generatedText : null),
                     traceId,
                     modelId: dispatched.modelId,
                     provider: dispatched.provider,
@@ -6716,6 +6791,7 @@ async function handleChatPost(
                                 ...webSearchExecution.citations, ...mcpConnector.sources(),
                             ]);
                         }
+                        searchObservation?.sourceCards(webSearchExecution.citations.length);
                         // A provider that hit its output ceiling returns HTTP
                         // 200 with real text and a `length` finish reason.
                         // Recorded so the answer is never presented as
@@ -7582,6 +7658,7 @@ async function handleChatPost(
             turnTimingLogged = true;
             latency.finish("failed_before_stream", dispatchModelIdForLog ?? null, dispatchProviderForLog ?? null);
             logChatTurnTiming({
+                search: searchObservation?.summary(null),
                 traceId,
                 modelId: dispatchModelIdForLog ?? null,
                 provider: dispatchProviderForLog ?? null,

@@ -590,3 +590,34 @@ test("a context refusal precedes the live Router hold and provider; no eligible 
   assert.equal(holds.length, holdsBefore);
   assert.equal(routerRequests.length, callsBefore);
 });
+
+test("fresh location uses the authored 8k input, priced with the complete Router call, and a resume spends nothing", async () => {
+  const original = generateRouterResult;
+  const text = "a".repeat(7_992) + "near me?overflow";
+  const digest: string[] = [];
+  const locationFusion = { authoredText: text, resume: null, onRouterDigest: (value: string) => { digest.push(value); } };
+  try {
+    generateRouterResult = () => ({ output: { ...routerOutput, requiresLocation: true }, usage: { inputTokens: 8, outputTokens: 2 } });
+    holds.length = 0; routerRequests.length = 0;
+    const chosen = await pick(undefined, true, { prompt: text, locationFusion });
+    assert.equal(chosen?.requiresLocation, true);
+    assert.equal(routerRequests.length, 1);
+    assert.match(String(routerRequests[0].system), /CURRENT DEVICE LOCATION/);
+    assert.match(String(routerRequests[0].prompt), /near me\?/);
+    assert.ok(!String(routerRequests[0].prompt).includes("overflow"));
+    const { autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
+    const { resolveModelPricing } = require(resolve(ROOT, "lib/modelPricing.ts"));
+    const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
+    const prices = resolveModelPricing(AVAILABLE_MODELS.find((model: { id: string }) => model.id === "gpt-6-luna"));
+    const worst = autoLlmRouterWorstCaseMicroUsd({ ...routerRequests[0],
+      inputUsdPerMillionTokens: prices.inputUsdPerMillionTokens, outputUsdPerMillionTokens: prices.outputUsdPerMillionTokens });
+    assert.deepEqual(holds, [worst, worst]);
+    const resumed = await pick(undefined, true, { prompt: text, locationFusion: {
+      ...locationFusion, resume: { traceId: "first", routerDigest: digest[0], pick: chosen },
+    } });
+    assert.deepEqual(resumed, chosen);
+    assert.deepEqual(digest, [digest[0], digest[0]]);
+    assert.equal(routerRequests.length, 1);
+    assert.equal(holds.length, 2);
+  } finally { generateRouterResult = original; }
+});

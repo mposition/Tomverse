@@ -88,6 +88,8 @@ export const createChatLocationSession = (readPosition: ChatLocationReader) => {
   };
   const isEnabled = (scope: string | null) =>
     scope !== null && scope === identity && state.enabled;
+  const canPrepareIntent = (scope: string | null) =>
+    Boolean(scope && scope === identity && !state.enabled && !state.pending && !automaticSuppressed);
   const read = (requestPermission: boolean): Promise<ChatLocation | null> => {
     if (inFlight) return inFlight;
     const capturedGeneration = generation;
@@ -121,6 +123,7 @@ export const createChatLocationSession = (readPosition: ChatLocationReader) => {
     },
     setIdentity,
     isEnabled,
+    canPrepareIntent,
     prepareIntent: async (scope: string | null, sourceText: string, requiresLocation: () => Promise<boolean>): Promise<PreparedChatLocationIntent | undefined> => {
       if (!scope || scope !== identity || state.enabled || automaticSuppressed) return undefined;
       const capturedGeneration = generation;

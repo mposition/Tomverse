@@ -119,6 +119,7 @@ type PromptPayload = {
   preparationTimings?: import("@/lib/responseLatencyCore").ClientLatencyStages;
   preparationReadyAtMonotonicMs?: number;
   preparedLocationIntent?: PreparedChatLocationIntent;
+  routerLocationTurnIsCurrent?: () => boolean;
   id: string;
   text: string;
   chatId: string;
