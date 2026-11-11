@@ -6,7 +6,7 @@ import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import { marketingAssetSchema } from "../lib/marketingAssets.ts";
-import { AI_LINE, answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, lastBuild, normalizePack, reviewPassed, stillsIn, usablePacks } from "../tools/marketing-video/creative-core.mjs";
+import { AI_LINE, answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, lastBuild, normalizePack, packOfRun, reviewPassed, stillsIn, usablePacks } from "../tools/marketing-video/creative-core.mjs";
 import { speakLine, VOICE_CAP_ENV, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
 import { admit, downloadResult, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
 import { CREATIVE_CAP_ENV, creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
@@ -455,4 +455,25 @@ test("a rebuild reuses the run's paid media: it never reaches a paid step, and a
     assert.equal(out.status, 1);
     assert.equal(JSON.parse(out.stdout.trim().split("\n").at(-1)).halted, "no_such_run");
   }
+});
+
+test("a rebuild takes words and claims only from the approved pack whose files the run copied", () => {
+  const root = mkdtempSync(join(tmpdir(), "creative-packof-"));
+  const packDir = (name, bytes) => {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "answer.png"), bytes);
+    return { topic: "review-compare", locale: "ko", dir, claimIds: [`claim-${name}`], captures: { answer: { file: "answer.png", text: `words ${name}` } } };
+  };
+  const a = packDir("a", "picture A");
+  const b = packDir("b", "picture B");
+  const copied = join(root, "run", "capture", "ko");
+  mkdirSync(copied, { recursive: true });
+  writeFileSync(join(copied, "answer.png"), "picture A");
+  assert.deepEqual(packOfRun(copied, [b, a], "review-compare", "ko"), { pack: a, words: ["words a"] });
+  assert.equal(packOfRun(copied, [b], "review-compare", "ko"), null, "A no longer approved: B's words are never put on A's pictures");
+  assert.equal(packOfRun(copied, [a], "review-compare", "en"), null);
+  assert.equal(packOfRun(join(root, "none"), [a], "review-compare", "ko"), null);
+  writeFileSync(join(copied, "extra.png"), "x");
+  assert.equal(packOfRun(copied, [a], "review-compare", "ko"), null, "the copied set must be the pack's set exactly");
 });

@@ -38,7 +38,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, lastBuild, stillsIn, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
+import { answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, lastBuild, packOfRun, stillsIn, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
 import { speakLine, VOICE_CAP_ENV, voiceLedgerPath } from "./el-voice-core.mjs";
 import { levelVoice, probe, seconds as lengthOf, stills } from "./ffmpeg-tools.mjs";
 import { brisbaneDay, dailyCap, readLedger, spent } from "./higgsfield-cap.mjs";
@@ -197,13 +197,14 @@ if (rebuild !== null) {
   const captureWords = {};
   const sourceClaims = {};
   const locales = Object.keys(plan.locales ?? {}).filter((locale) => {
-    const pack = packs.find((candidate) => candidate.topic === plan.topic && candidate.locale === locale);
-    if (!pack || !existsSync(path.join(pub, `props-${locale}.json`))) {
-      report.dropped.push({ step: `rebuild ${locale}`, reason: pack ? "the run made no props for it" : "its capture pack is not approved now" });
+    // The pack whose files the run copied, approved now; never another pack of the same topic.
+    const source = packOfRun(path.join(pub, "capture", locale), packs, plan.topic, locale);
+    if (!source || !existsSync(path.join(pub, `props-${locale}.json`))) {
+      report.dropped.push({ step: `rebuild ${locale}`, reason: source ? "the run made no props for it" : "no pack approved now holds the run's captures" });
       return false;
     }
-    captureWords[locale] = Object.values(pack.captures).map((capture) => capture.text);
-    sourceClaims[locale] = pack.claimIds;
+    captureWords[locale] = source.words;
+    sourceClaims[locale] = source.pack.claimIds;
     return true;
   });
   report.locales = locales;
