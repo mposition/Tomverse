@@ -450,7 +450,7 @@ export function ExternalImportManagement() {
                     <h1 className="text-lg font-bold">
                         {t("externalImport.pageTitle")}
                     </h1>
-                    <p className="mt-2 text-sm leading-6 text-zinc-500">
+                    <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                         {t("externalImport.signInRequired")}
                     </p>
                     <Link
@@ -488,7 +488,7 @@ export function ExternalImportManagement() {
                 <h1 className="mt-3 text-xl font-bold">
                     {t("externalImport.pageTitle")}
                 </h1>
-                <p className="mt-1 text-sm leading-6 text-zinc-500">
+                <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                     {t("externalImport.pageDescription")}
                 </p>
             </div>
@@ -497,7 +497,7 @@ export function ExternalImportManagement() {
                 className={sectionClass}
                 data-testid="external-import-privacy-note"
             >
-                <p className="text-sm leading-6 text-zinc-500">
+                <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                     {t("externalImport.privacyNote")}
                 </p>
             </section>
@@ -509,7 +509,7 @@ export function ExternalImportManagement() {
                 >
                     <div className="flex items-start gap-3">
                         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" />
-                        <p className="text-sm leading-6 text-zinc-500">
+                        <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                             {t("externalImport.disabledNotice")}
                         </p>
                     </div>
@@ -524,7 +524,7 @@ export function ExternalImportManagement() {
                             <h2 className="text-sm font-bold">
                                 {t("externalImport.capacityTitle")}
                             </h2>
-                            <div className="mt-2 grid gap-1 text-sm leading-6 text-zinc-500">
+                            <div className="mt-2 grid gap-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                                 <p>
                                     {interpolate(
                                         t("externalImport.capacityUsage"),
@@ -598,7 +598,7 @@ export function ExternalImportManagement() {
                                 className={sectionClass}
                                 data-testid="external-import-no-server-data"
                             >
-                                <p className="text-sm leading-6 text-zinc-500">
+                                <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                                     {t("externalImport.noServerDataYet")}
                                 </p>
                             </section>
@@ -646,7 +646,7 @@ export function ExternalImportManagement() {
                               the file all the same.
                             */
                             <p
-                                className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+                                className="mt-2 text-xs leading-5 text-zinc-600 dark:text-zinc-300"
                                 data-testid="external-import-export-locked-note"
                             >
                                 {t("externalImport.exportLockedNote")}
@@ -661,19 +661,19 @@ export function ExternalImportManagement() {
                         </p>
                     )}
                     {conversationsState.kind === "loading" && (
-                        <div className="mt-3 flex items-center gap-2 text-sm text-zinc-500">
+                        <div className="mt-3 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
                             <Loader2 className="h-4 w-4 animate-spin" />
                         </div>
                     )}
                     {conversationsState.kind === "error" && (
-                        <p className="mt-3 text-sm leading-6 text-zinc-500">
+                        <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                             {t("externalImport.errorGeneric")}
                         </p>
                     )}
                     {conversationsState.kind === "ready" &&
                         conversationsState.rows.length === 0 && (
                             <p
-                                className="mt-3 text-sm leading-6 text-zinc-500"
+                                className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300"
                                 data-testid="external-import-conversations-empty"
                             >
                                 {t("externalImport.conversationsEmpty")}
@@ -748,23 +748,23 @@ export function ExternalImportManagement() {
                 <h2 className="text-sm font-bold">
                     {t("externalImport.historyTitle")}
                 </h2>
-                <p className="mt-1 text-sm leading-6 text-zinc-500">
+                <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                     {t("externalImport.deleteNote")}
                 </p>
                 {historyState.kind === "loading" && (
-                    <div className="mt-3 flex items-center gap-2 text-sm text-zinc-500">
+                    <div className="mt-3 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
                         <Loader2 className="h-4 w-4 animate-spin" />
                     </div>
                 )}
                 {historyState.kind === "error" && (
-                    <p className="mt-3 text-sm leading-6 text-zinc-500">
+                    <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                         {t("externalImport.errorGeneric")}
                     </p>
                 )}
                 {historyState.kind === "ready" &&
                     finishedHistory.length === 0 && (
                         <p
-                            className="mt-3 text-sm leading-6 text-zinc-500"
+                            className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300"
                             data-testid="external-import-history-empty"
                         >
                             {t("externalImport.historyEmpty")}
@@ -781,13 +781,13 @@ export function ExternalImportManagement() {
                                 <div className="min-w-0">
                                     <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                                         {providerLabel(row.provider)}
-                                        <span className="ml-2 text-xs font-medium text-zinc-500">
+                                        <span className="ml-2 text-xs font-medium text-zinc-600 dark:text-zinc-300">
                                             {new Date(
                                                 row.createdAt
                                             ).toLocaleDateString()}
                                         </span>
                                     </p>
-                                    <p className="mt-0.5 text-xs leading-5 text-zinc-500">
+                                    <p className="mt-0.5 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
                                         {IMPORT_STATUS_KEYS[row.status]
                                             ? t(IMPORT_STATUS_KEYS[row.status])
                                             : row.status}
@@ -891,11 +891,11 @@ function UnfinishedImportCard({
         >
             <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 {providerLabel(row.provider)}
-                <span className="ml-2 text-xs font-medium text-zinc-500">
+                <span className="ml-2 text-xs font-medium text-zinc-600 dark:text-zinc-300">
                     {new Date(row.createdAt).toLocaleDateString()}
                 </span>
             </p>
-            <p className="mt-0.5 text-xs leading-5 text-zinc-500">
+            <p className="mt-0.5 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
                 {expired
                     ? t("externalImport.statusExpired")
                     : IMPORT_STATUS_KEYS[row.status]
@@ -917,7 +917,7 @@ function UnfinishedImportCard({
             ) : (
                 !resumable && (
                     <p
-                        className="mt-1 text-xs leading-5 text-zinc-500"
+                        className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300"
                         data-testid="external-import-not-resumable"
                     >
                         {t("externalImport.inProgressNotResumable")}
@@ -1000,7 +1000,7 @@ function ConversationRow({
                         {t("externalImport.lockedBadge")}
                     </span>
                 ) : null}
-                <span className="mt-0.5 block text-xs leading-5 text-zinc-500">
+                <span className="mt-0.5 block text-xs leading-5 text-zinc-600 dark:text-zinc-300">
                     {providerLabel(row.provider)}
                     {" · "}
                     {interpolate(t("externalImport.messagesCount"), {
@@ -1051,7 +1051,7 @@ function LineageGroupRow({
                 <div className="mt-1 pl-4">
                     <button
                         type="button"
-                        className="text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+                        className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100"
                         data-testid="external-import-lineage-toggle"
                         aria-expanded={expanded}
                         onClick={onToggleExpanded}
