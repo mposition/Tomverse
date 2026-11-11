@@ -4709,6 +4709,49 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(await gpsReads()).toBe(0);
   });
 
+  test("an existing Auto turn drops a late positive decision while a manual selection change is pending", async ({ page }, testInfo) => {
+    test.skip(!existingFusionEnabled, "Requires existing Router location fusion");
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const gpsReads = await countDeviceLocationReads(page);
+    await openChat(page, { viewport, initialSelectionMode: "auto", autoSelectionOffered: true, useChatNetworkFixture: true });
+    const decision = Promise.withResolvers<void>();
+    const manualPatch = Promise.withResolvers<void>();
+    let aliasCalls = 0;
+    let manualPatchStarted = false;
+    await page.route("**/api/chat/router-location", async route => {
+      aliasCalls++;
+      await decision.promise;
+      await route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
+        json: { requiresLocation: true, continuation: "stale" } });
+    });
+    await page.route(`**/api/conversations/${CONVERSATION}`, async route => {
+      if (route.request().method() === "PATCH" && route.request().postDataJSON()?.selectionMode === "manual") {
+        manualPatchStarted = true;
+        await manualPatch.promise;
+      }
+      await route.fallback();
+    });
+    const toggle = page.getByTestId("composer-auto-routing-toggle");
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await submitComposer(page, "Where is the nearest station?", viewport.width);
+    await expect.poll(() => aliasCalls).toBe(1);
+    try {
+      await toggle.click();
+      await expect.poll(() => manualPatchStarted).toBe(true);
+      await expect(toggle).toHaveAttribute("aria-checked", "true");
+      const served = page.waitForResponse(response => new URL(response.url()).pathname === "/api/chat/router-location");
+      decision.resolve();
+      await served;
+      await expect(page.getByTestId("stop-this-response")).toHaveCount(0);
+      expect(await gpsReads()).toBe(0);
+      expect(aliasCalls).toBe(1);
+    } finally {
+      decision.resolve();
+      manualPatch.resolve();
+    }
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+  });
+
   test("stopping a saved Router location turn during device permission prevents its continuation", async ({ page }, testInfo) => {
     test.skip(!fusionEnabled, "Requires Router location fusion");
     const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
