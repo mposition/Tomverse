@@ -27,7 +27,13 @@ import {
   SNAPSHOT_RENEWAL_WINDOW_MS,
   stalePricingVersions,
 } from "../lib/modelCatalogCore.ts";
-import { codingDraftFromAnswer, draftPricingVersion, imageDraftFromAnswer, pageToText } from "../lib/modelCatalogDraftLlm.ts";
+import {
+  codingDraftFromAnswer,
+  draftPricingVersion,
+  imageDraftFromAnswer,
+  imageOptionCostMicroUsd,
+  pageToText,
+} from "../lib/modelCatalogDraftLlm.ts";
 
 const NOW = new Date("2026-10-19T12:00:00Z");
 const enabledSeed = IMAGE_MODEL_REGISTRY.find((model) => model.disabledReason === null);
@@ -436,6 +442,53 @@ test("an LLM image answer becomes a price revision draft at the policy floor", (
   assert.throws(() => imageDraftFromAnswer({ options: [] }, [], "x"));
 });
 
+test("an image answer with only token counts is priced by code, not by the model", () => {
+  // OpenAI's table for models before gpt-image-2: high 1024x1024 is 4,160
+  // output tokens; at US$30 per million that is 124,800 micro-USD.
+  const draft = imageDraftFromAnswer(
+    {
+      options: [
+        { quality: "high", size: "1024x1024", outputCostMicroUsd: null, outputTokens: 4_160 },
+        { quality: "low", size: "1024x1024", outputCostMicroUsd: null, outputTokens: null },
+      ],
+      outputUsdPerMTok: 30,
+      thinkingCapMicroUsd: 0,
+      noPriceReason: null,
+    },
+    ["https://developers.openai.com/api/docs/guides/image-generation"],
+    "gpt-image-1.5"
+  );
+  // The option with neither a price nor a token count is dropped, not guessed.
+  assert.equal(draft.prices.length, 1);
+  assert.equal(draft.prices[0].outputCostMicroUsd, 124_800);
+});
+
+test("a per-image cost takes the larger of the stated price and the token arithmetic", () => {
+  assert.equal(imageOptionCostMicroUsd(100_000, 4_160, 30), 124_800);
+  assert.equal(imageOptionCostMicroUsd(130_000, 4_160, 30), 130_000);
+  assert.equal(imageOptionCostMicroUsd(null, 4_160, null), null);
+  assert.equal(imageOptionCostMicroUsd(null, null, 30), null);
+  assert.equal(imageOptionCostMicroUsd(null, 1_120, 30.5), 34_160);
+  assert.equal(imageOptionCostMicroUsd(-5, 0, 30), null);
+});
+
+test("an image answer without a usable price says why", () => {
+  const answer = {
+    options: [{ quality: "high", size: "1024x1024", outputCostMicroUsd: null, outputTokens: null }],
+    outputUsdPerMTok: 30,
+    thinkingCapMicroUsd: null,
+    noPriceReason: "Only per-token rates,\n no tokens per image.",
+  };
+  assert.throws(
+    () => imageDraftFromAnswer(answer, [], "gpt-image-2.5-flare"),
+    (error) => error.code === "draft_rejected" && error.detail === "no_options: Only per-token rates, no tokens per image."
+  );
+  assert.throws(
+    () => imageDraftFromAnswer({ ...answer, noPriceReason: null }, [], "x"),
+    (error) => error.detail === "no_options"
+  );
+});
+
 test("an LLM coding answer cannot cite a page it did not fetch", () => {
   const sources = ["https://developers.openai.com/pricing", "https://platform.openai.com/docs/guides/your-data"];
   const answer = {
@@ -529,7 +582,7 @@ test("page text preserves bodies of tags that only start with script or style", 
 
 test("page text keeps ordinary whitespace normalization and the input budget", () => {
   assert.equal(pageToText("<p> one&nbsp; \n two </p>"), "one two");
-  assert.equal(pageToText("a".repeat(40_001)).length, 40_000);
+  assert.equal(pageToText("a".repeat(120_001)).length, 120_000);
 });
 
 test("a draft's pricing version fits the revision schema for any API model id", () => {
