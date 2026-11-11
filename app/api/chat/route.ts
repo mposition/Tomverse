@@ -1798,6 +1798,7 @@ async function handleChatPost(
                       // a miss here simply reads as "not an Auto conversation".
                       where: { id: conversationId, userId: session.user.id },
                       select: {
+                          ...(contextBundle ? { password: true, kind: true, memoryMode: true, assistantProfileVersionId: true } : {}),
                           selectionMode: true,
                           routerModelId: true,
                           routerChallengerTurns: true,
@@ -2224,8 +2225,85 @@ async function handleChatPost(
                 fileRoutingContext
             ).filter(candidate => candidate.canCreateFiles).map(candidate => candidate.id)
             : [];
+        // The early and final checks both rebuild from the same authored query.
+        // A user can revoke memory or change the profile while the Router runs:
+        // only the later, freshly rebuilt context may reach the answer model.
+        const checkPricedContext = async (token: string, userId: string, profileVersionId: string | null, memoryMode: string | null) => {
+            const turnContext = await buildChatTurnContext({
+                userId,
+                query: latestUserPromptText(messages),
+                profileVersionId,
+                plan: accountPlan?.tier ?? null,
+                conversationMode: memoryMode,
+            });
+            const verification = verifyChatContextBundle(token, {
+                subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
+                currentFingerprint: turnContext.fingerprint,
+            });
+            return { turnContext, verification };
+        };
+        const refuseContext = async (refusalReason: Extract<ReturnType<typeof verifyChatContextBundle>, { ok: false }>["reason"]) => {
+            const drifted =
+                refusalReason === "stale" ||
+                refusalReason === "expired";
+            contextRefusalReasonForLog = drifted ? refusalReason : null;
+            // Awaited rather than fired and forgotten: the response is
+            // about to be returned, and a refusal that is never counted
+            // is exactly the observation §22 wants. One upsert, on a path
+            // that is rare by construction.
+            await recordMemoryCounter(
+                drifted ? "context_bundle_stale" : "context_bundle_rejected"
+            );
+            return drifted
+                ? tracedJsonError(
+                      "The conversation context changed while this message was being sent.",
+                      "CHAT_CONTEXT_BUNDLE_STALE",
+                      409,
+                      traceId,
+                      { requiresPreflight: true }
+                  )
+                : tracedJsonError(
+                      "Invalid chat context.",
+                      "INVALID_CONTEXT_BUNDLE",
+                      400,
+                      traceId
+                  );
+        };
+        let earlyContextRefusal: Response | undefined;
+        const ownerIdForContext = session?.user?.id;
+        const verifyPreparedContext = contextBundle && ownerIdForContext && conversationId && assistantMessageId && conversationRouting
+            ? async () => {
+                // The earlier routing row is owner-scoped. Do not inspect memory
+                // or profile knowledge for a locked or non-Chat conversation.
+                if (!hasConversationUnlockGrant(req, ownerIdForContext, conversationId, conversationRouting.password ?? null)) {
+                    earlyContextRefusal = conversationLockedResponse();
+                    return false;
+                }
+                if (!isChatConversationKind(conversationRouting.kind)) {
+                    earlyContextRefusal = conversationKindNotSupportedResponse();
+                    return false;
+                }
+                const started = performance.now();
+                const { verification } = await checkPricedContext(contextBundle, ownerIdForContext,
+                    conversationRouting.assistantProfileVersionId ?? null, conversationRouting.memoryMode ?? null);
+                console.info(JSON.stringify({ event: "chat_router_context_precheck", traceId,
+                    durationMs: Math.round(performance.now() - started), outcome: verification.ok ? "valid" : verification.reason }));
+                if (verification.ok) return true;
+                // This rejected turn exits before the usual eligibility counters.
+                const [response] = await Promise.all([
+                    refuseContext(verification.reason),
+                    recordMemoryCounter("chat_memory_eligible"),
+                    recordMemoryCounter("context_bundle_presented"),
+                ]);
+                earlyContextRefusal = response;
+                return false;
+            } : undefined;
         const finishRoutingTiming = latency.stage("routingMs");
         latency.dimensions.mode = deterministicAutoSelection.routed ? "auto" : "manual";
+        const allowRouterSearchPlan = deterministicAutoSelection.routed &&
+            process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true" &&
+            Boolean(session?.user?.id) && webSearchMode === "always" && !currentLocation &&
+            !mcpConnectionId && !turnCarriesAttachments(autoRoutingMessages);
         const llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
                       prompt: profileTextFor(autoRoutingMessages),
@@ -2244,10 +2322,9 @@ async function handleChatPost(
                       // before provider dispatch. A second rewrite would be
                       // discarded, including an explicit keep-original choice.
                       rewriteAllowed: !refinerPreview && !turnCarriesAttachments(autoRoutingMessages),
+                      verifyPreparedContext,
                       fileContext: fileRoutingContext,
-                      searchPlan: process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true" &&
-                          Boolean(session?.user?.id) && webSearchMode === "always" && !currentLocation &&
-                          !turnCarriesAttachments(autoRoutingMessages),
+                      searchPlan: allowRouterSearchPlan,
                       imageIntent: imageRouting.context,
                       onImageDecision: imageRouting.accept,
                       // An image turn is not a routing decision a chat model
@@ -2258,6 +2335,7 @@ async function handleChatPost(
                   })
             : null;
         finishRoutingTiming();
+        if (earlyContextRefusal) return earlyContextRefusal;
         const detectedImageDecision = await imageRouting.resolve();
         // A document about images is still a file request, not an image turn.
         const autoImageDecision = llmPick?.requiresFileGeneration
@@ -2949,66 +3027,10 @@ async function handleChatPost(
             // preparation step scored — not the attachment-augmented message
             // assembled below, which would retrieve differently.
             const finishContextTiming = latency.stage("contextMs");
-            const turnContext = await buildChatTurnContext({
-                userId: session.user.id,
-                query: latestUserPromptText(messages),
-                // Policy: docs/policy/external-conversation-import-and-memory.md.
-                // §10: bound into the fingerprint, so a profile republished or
-                // detached between preflight and send is a stale bundle rather
-                // than a turn that answers as a different assistant.
-                profileVersionId: conversationProfileVersionId,
-                plan: accountPlan?.tier ?? null,
-                // §8.1 invariant 1: this conversation's own mode decides, with
-                // `inherit` falling back to the account default. Read here
-                // rather than trusted from the client, and read on the chat
-                // side as well as the preflight side so a mode changed between
-                // the two is caught by the freshness check instead of being
-                // priced one way and sent the other.
-                conversationMode: conversationMemoryMode,
-            });
+            const { turnContext, verification } = await checkPricedContext(contextBundle, session.user.id,
+                conversationProfileVersionId, conversationMemoryMode);
             finishContextTiming();
-            const verification = verifyChatContextBundle(contextBundle, {
-                subjectKey: session.user.id,
-                conversationId: conversationId ?? null,
-                modelId: requestedModelId,
-                currentFingerprint: turnContext.fingerprint,
-            });
-            if (!verification.ok) {
-                // Two different failures with two different meanings. Drift is
-                // expected and recoverable — the user approved a memory while
-                // the send was in flight — so it names the recovery. Everything
-                // else is a token that never described this request: a bad
-                // signature, another subject, a model that was not priced. That
-                // is a client defect or tampering, and answering it with
-                // "re-preflight" would invite a retry loop against a token that
-                // can never pass.
-                const refusalReason = verification.reason;
-                const drifted =
-                    refusalReason === "stale" ||
-                    refusalReason === "expired";
-                contextRefusalReasonForLog = drifted ? refusalReason : null;
-                // Awaited rather than fired and forgotten: the response is
-                // about to be returned, and a refusal that is never counted
-                // is exactly the observation §22 wants. One upsert, on a path
-                // that is rare by construction.
-                await recordMemoryCounter(
-                    drifted ? "context_bundle_stale" : "context_bundle_rejected"
-                );
-                return drifted
-                    ? tracedJsonError(
-                          "The conversation context changed while this message was being sent.",
-                          "CHAT_CONTEXT_BUNDLE_STALE",
-                          409,
-                          traceId,
-                          { requiresPreflight: true }
-                      )
-                    : tracedJsonError(
-                          "Invalid chat context.",
-                          "INVALID_CONTEXT_BUNDLE",
-                          400,
-                          traceId
-                      );
-            }
+            if (!verification.ok) return await refuseContext(verification.reason);
             verifiedContext = {
                 bundleId: verification.payload.bundleId,
                 expiresAt: new Date(verification.payload.expiresAtMs),
@@ -4940,10 +4962,12 @@ async function handleChatPost(
         const fallbackSdkMessages = splitProviderInstructions(
             locationCacheBreakpoint ? uncachedLocationMessages : formattedMessages
         ).messages;
-        if (process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true" &&
+        // File-capable models offer artifact tools on ordinary text turns too.
+        // Require an explicit non-file decision and retain those tools for the answer.
+        if (allowRouterSearchPlan &&
             access.kind !== "guest" && autoSelection.routed &&
-            llmPick?.modelId === modelConfig.id && llmPick.searchQueries?.length &&
-            appManagedSearchTool && !currentLocation && !mcpConnector && !artifactToolConfig) {
+            llmPick?.modelId === modelConfig.id && llmPick.requiresFileGeneration === false &&
+            llmPick.searchQueries?.length && appManagedSearchTool && !mcpConnector) {
             presearchForSettlement = appManagedSearchTool;
             const finishPresearch = latency.stage("presearchMs");
             try {
