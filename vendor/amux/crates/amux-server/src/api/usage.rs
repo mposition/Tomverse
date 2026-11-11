@@ -1882,6 +1882,8 @@ mod tests {
         assert_eq!(provider("cursor")["measured"], false);
         assert_eq!(provider("copilot")["metered"], true);
         assert_eq!(provider("copilot")["measured"], false);
+        assert_eq!(provider("antigravity")["metered"], true);
+        assert_eq!(provider("antigravity")["measured"], false);
         assert_eq!(body["n_considered"], 9);
         let wire = serde_json::to_string(&body).unwrap();
         assert!(!wire.contains("must-never-reach-settings"), "account identity leaked: {wire}");
