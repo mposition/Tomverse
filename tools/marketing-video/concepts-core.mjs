@@ -130,7 +130,14 @@ export function checkConcepts(answer, { feature, history = [], day, toolDir }) {
     devices.add(compact(concept.device));
     if (used.has(compact(concept.device))) return `${at}: the device was used in the last 14 days`;
     if (!isText(concept.prompt_en, 200, 6000)) return `${at}: prompt_en is 200-6000 characters`;
-    if (/tomverse/iu.test(concept.prompt_en)) return `${at}: prompt_en never names Tomverse (the model would draw a logo or address)`;
+    // The image model draws any "Tomverse" it reads, even in "no Tomverse logo"
+    // or "Tomverse blue". The refusal quotes where the word is, so the retry can
+    // drop it (the 2026-11-11 box run lost its day to this rule).
+    const named = /tomverse/iu.exec(concept.prompt_en);
+    if (named) {
+      const around = concept.prompt_en.slice(Math.max(0, named.index - 40), named.index + 48).replace(/\s+/gu, " ");
+      return `${at}: prompt_en must not contain the word "Tomverse" anywhere, not even as "no Tomverse logo" or "Tomverse blue" (write "#155dfb blue"; the band adds the logo). Found in: "...${around}..."`;
+    }
     if (/\b(?:purple|violet|magenta|lavender|lilac|fuchsia)\b/iu.test(concept.prompt_en)) return `${at}: the one accent colour is #155dfb blue (no purple, violet or magenta)`;
     if (URL_LIKE.test(concept.prompt_en) || /lorem/iu.test(concept.prompt_en)) return `${at}: prompt_en holds an address or placeholder text`;
 
