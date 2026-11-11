@@ -6,7 +6,7 @@ import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import { marketingAssetSchema } from "../lib/marketingAssets.ts";
-import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, normalizePack, reviewPassed, usablePacks } from "../tools/marketing-video/creative-core.mjs";
+import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, normalizePack, reviewPassed, stillsIn, usablePacks } from "../tools/marketing-video/creative-core.mjs";
 import { speakLine, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
 import { admit, downloadResult, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
 import { creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
@@ -404,4 +404,17 @@ test("model file rules are absolute, so a cd in the model's shell cannot move th
   const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(source, /(?:Read|Edit|Write)\(\.\//u, "no relative file rule is left");
   assert.doesNotMatch(source, /`Write\(/u, "Write rules match nothing; Edit covers Write");
+});
+
+test("a Read-only call is handed every still by name, since Read cannot list a folder", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "creative-stills-"));
+  for (const name of ["f-02-3.8s.png", "f-01-1.3s.png", "notes.txt", "f-03-6.3s.jpg", "f-04-8.8s.png"]) writeFileSync(join(dir, name), "x");
+  const posixDir = dir.split(/[\\/]/u).join("/");
+  assert.deepEqual(stillsIn(dir), ["f-01-1.3s.png", "f-02-3.8s.png", "f-03-6.3s.jpg", "f-04-8.8s.png"].map((name) => `${posixDir}/${name}`));
+  assert.deepEqual(stillsIn(dir, 2), [`${posixDir}/f-01-1.3s.png`, `${posixDir}/f-03-6.3s.jpg`]);
+  assert.deepEqual(stillsIn(join(dir, "missing")), []);
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /stills in job\/creative\/\$\{run\}\/review\/\$\{locale\}\/;/u, "the review prompt names files, not a folder");
+  assert.doesNotMatch(source, /job\/creative\/sheets\/\$\{entry\.run\}\//u, "earlier films are named by file too");
 });

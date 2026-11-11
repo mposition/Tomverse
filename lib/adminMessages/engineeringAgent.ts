@@ -107,6 +107,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
       "A state mismatch halts the agent until a person acts. Both sides are locked and read again before any action; neither is corrected to match the other.",
     mismatchClose: "Close the run (nothing was written)",
     mismatchCloseMerged: "Close: the pull request merged",
+    mismatchRecordReviewPr: "Record the pull request number on the card",
     mismatchLeaveOpen: "Leave open",
     mismatchModeOff: "Turn the agent off",
     mismatchEscalate: "Escalate as an incident",
@@ -115,6 +116,8 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     confirmMismatchEscalate: "Escalate this mismatch as an incident? The agent's mode is set to off.",
     confirmMismatchCloseMerged:
       "Close this mismatch because its pull request merged? GitHub is read now; the merge is recorded on the binding and the agent stays on. Refused unless GitHub reports this item's own pull request merged.",
+    confirmMismatchRecordReviewPr:
+      "Record this run's published pull request number on its AMUX card and close the mismatch? AMUX takes it only while the card waits in review on this run's attempt with no other number; the card is then marked for human review. Refused while the agent is off.",
     status: "Status",
     outcome: "Outcome",
     halt: "Halt",
@@ -264,6 +267,7 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
       "상태 불일치는 사람이 조치할 때까지 에이전트를 정지시킵니다. 어떤 조치든 양쪽을 잠그고 다시 읽은 뒤에만 실행되며, 한쪽을 다른 쪽에 맞춰 고치지 않습니다.",
     mismatchClose: "run 종료(쓰기 없음 확인됨)",
     mismatchCloseMerged: "닫기: PR 병합됨",
+    mismatchRecordReviewPr: "카드에 PR 번호 기록",
     mismatchLeaveOpen: "열어 두기",
     mismatchModeOff: "에이전트 끄기",
     mismatchEscalate: "사고로 격상",
@@ -272,6 +276,8 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     confirmMismatchEscalate: "이 불일치를 사고로 격상할까요? 에이전트 모드가 off로 바뀝니다.",
     confirmMismatchCloseMerged:
       "PR이 병합되었으므로 이 불일치를 닫을까요? 지금 GitHub를 읽어 병합을 바인딩에 기록하고, 에이전트는 켜진 채로 둡니다. GitHub가 이 항목의 PR을 병합으로 보고하지 않으면 거절됩니다.",
+    confirmMismatchRecordReviewPr:
+      "이 run이 게시한 PR 번호를 AMUX 카드에 기록하고 불일치를 닫을까요? 카드가 이 run의 시도로 review에서 기다리고 다른 번호가 없을 때만 AMUX가 받으며, 그러면 카드는 사람 검토 대상으로 표시됩니다. 에이전트가 꺼져 있으면 거절됩니다.",
     status: "상태",
     outcome: "결과",
     halt: "정지",

@@ -380,6 +380,7 @@ export async function ReviewWorkspaceShell({
         chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
         chatLocationIntentEnabled={process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED === "true"}
         chatParallelPreparationEnabled={process.env.CHAT_PARALLEL_PREPARATION_ENABLED === "true"}
+        chatFreshLocationPreparationEnabled={process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED === "true"}
         chatImageEditEnabled={chatImageEditEnabled}
         voiceInputEnabled={voiceInputEnabled}
         voiceConversationEnabled={voiceConversationEnabled}

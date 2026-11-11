@@ -48,7 +48,8 @@ LLM call cannot explain that snapshot's preparation delay.
 | messageSaveMs | Durable question save, receipt recovery and local reconciliation |
 | panelHandoffMs | Prepared payload to panel run, including its model-settings barrier |
 | locationMs | Remaining location wait after the durable save, including device/human permission |
-| locationIntentMs | Semantic intent HTTP time; overlaps Refiner when prepared early, otherwise nested in locationMs; absent when no analysis was needed |
+| locationIntentMs | Semantic intent HTTP time. It can overlap new conversation preparation or Refiner. |
+| freshLocationOverlapMs | Time an early intent request spent in flight before the saved turn needed its result. Present when a new conversation reuses that result. |
 | responseHeadersMs | Latest dispatch to response headers |
 | dispatchToContentMs | Latest dispatch to first nonempty visible content |
 | contentToEndMs | First content to consumed stream end |
@@ -224,8 +225,12 @@ activate them or change the production location-intent switch enabled earlier.
   that call's existing provider cost hold. No separate planner call is created.
   Only the final selected model's actually dispatchable application-managed tool
   executes the plan, after the ordinary credit/admission boundary. Native search,
-  guests, files/artifacts, MCP, consented-location, search-off and unrouted turns
-  keep their paths. The Router does not receive device coordinates; the answering
+  guests, turns with attachments, artifact requests, MCP, consented-location,
+  search-off and unrouted turns keep their paths. A file-capable answer model
+  may still presearch for an ordinary text question when the Router explicitly
+  marks it as not requesting a file. Missing or unclear file intent does not
+  admit presearch. The normal file and search tools remain available to the
+  answering model. The Router does not receive device coordinates; the answering
   model retains location-aware search after the usual consent boundary.
   The same tool/session handles presearch and all later model queries: five
   searches total, exact-query reuse, the same backend, sources, notices and billing.
@@ -309,3 +314,36 @@ nine mobile send/location cases, four desktop/mobile serial-path cases with
 refresh cases. The final controlled-delay run above was made locally alongside
 a build; scheduling jitter affects its absolute times and p95. No production
 speed or semantic quality conclusion is drawn from these synthetic milliseconds.
+
+### First submission in a new Smart Adaptive chat
+
+`CHAT_FRESH_LOCATION_PREPARATION_ENABLED` lets a signed-in blank Auto Chat
+start its existing semantic location request as soon as the submitted draft
+revision and its owner are confirmed, before conversation creation. An
+outstanding draft write must finish first. It defaults to off and also requires
+`TOMVERSE_CHAT_LOCATION_INTENT_ENABLED`. The follow-up Refiner parallelism
+switch is independent. An abandoned send can spend an admitted location call
+even if the conversation or question is never saved. An explicit resend
+after a failed question save can admit another classifier call for the new
+send. Count those attempts when comparing call volume, budget and latency.
+
+Use the browser's submit-to-first-content and completion metrics for the
+10-second target. Report the fraction at or below 10,000 ms and p50/p95,
+separately for fresh and follow-up, search and non-search. Match the question,
+location permission state and model selection conditions. Report missing
+browser measurements and failed sends. For a reused fresh decision,
+`freshLocationOverlapMs` is the observed portion of the semantic lookup
+before the saved turn asks for the result. It can overlap several other
+stages. Compare end-to-end times per send to assess the actual change.
+
+A combined Router/location call remains a candidate for new text turns.
+The standalone classifier reads up to 8,000 characters of the authored
+message. The Router reads up to 4,000 characters of its execution view and
+may also receive history, file/image instructions and search planning. A
+combined evaluation needs the original location input and a saved-turn
+continuation for a positive decision, so the browser can obtain consent
+before location-aware search. A routed negative should continue without
+another model call. Include named cities, nearby requests, quoted examples
+and a decisive instruction near the end of a long prompt in the comparison.
+Measure the combined Router's actual duration, model choice, resulting
+sources and answer quality alongside the calls it removes.

@@ -55,13 +55,17 @@ export const SCOUT_GENERATION_PERMIT_PREFIX = "permit.";
  * A day's cap is not a failure: once the route says the cap is reached the
  * walker stops capturing and counts the rest as capped.
  */
-export type ScoutSendOutcome = "judged" | "modelOff" | "capped" | "refused" | "failed";
+export type ScoutSendOutcome = "judged" | "modelOff" | "capped" | "skipped" | "refused" | "failed";
+
+/** The issue-backlog route's answers when there was nothing to ask about today: not a failure. */
+const NOTHING_TO_JUDGE = ["no_observation", "no_recent_observation", "nothing_to_triage"];
 
 export function scoutSendOutcome(answer: unknown): ScoutSendOutcome {
   const value = (answer ?? {}) as { judged?: unknown; reason?: unknown; refused?: unknown };
   if (value.judged === true) return "judged";
   if (value.reason === "model_off") return "modelOff";
   if (value.reason === "daily_cap_reached") return "capped";
+  if (typeof value.reason === "string" && NOTHING_TO_JUDGE.includes(value.reason)) return "skipped";
   if (typeof value.refused === "string") return "refused";
   return "failed";
 }

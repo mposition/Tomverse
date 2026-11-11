@@ -120,6 +120,7 @@ export const MISMATCH_ACTIONS = [
   "retry_lookup",
   "close_domain_after_verified_no_write",
   "close_after_observed_merge",
+  "record_bound_review_pr",
   "leave_open",
   "mode_off",
   "escalate_incident",
@@ -131,7 +132,9 @@ const ALLOWED_ACTIONS: Readonly<Record<MismatchKind, readonly MismatchAction[]>>
   B: ["leave_open", "escalate_incident"],
   // Owner decision 2026-11-06: a C item whose pull request a person sees
   // merged on GitHub may close without turning the agent off.
-  C: ["leave_open", "close_after_observed_merge", "escalate_incident"],
+  // Owner decision 2026-11-11: a person may also put the run's bound pull
+  // request number on the card through AMUX's own writer, which closes it.
+  C: ["leave_open", "close_after_observed_merge", "record_bound_review_pr", "escalate_incident"],
   D: ["retry_lookup", "close_domain_after_verified_no_write", "escalate_incident"],
 };
 
@@ -157,6 +160,11 @@ export type ActionInput = {
   lookupVerifiedNoWrite: boolean;
   /** GitHub reports the item's own bound pull request merged, read just now. */
   mergeObserved: boolean;
+  /**
+   * AMUX's review pull request writer, in this same transaction, took the
+   * number of the item's own current binding for the card's latest attempt.
+   */
+  boundReviewPrRecorded: boolean;
   recurrences: number;
 };
 
@@ -202,22 +210,28 @@ export const decideMismatchAction = (input: ActionInput): ActionVerdict => {
   if (input.action === "close_after_observed_merge" && !input.mergeObserved) {
     return deny("merge_not_observed");
   }
+  if (input.action === "record_bound_review_pr" && !input.boundReviewPrRecorded) {
+    return deny("bound_review_pr_not_recorded");
+  }
   // Closing the domain side is a normal transition, which resolves A and D; so
-  // does escalation, and for C a merge GitHub reports. A lookup resolves only
+  // does escalation, and for C a merge GitHub reports or the bound number
+  // recorded on the card. A lookup resolves only
   // through the transition its result leads to, never by itself.
   return {
     allowed: true,
     resolves:
       input.action === "escalate_incident" ||
       input.action === "close_domain_after_verified_no_write" ||
-      input.action === "close_after_observed_merge",
+      input.action === "close_after_observed_merge" ||
+      input.action === "record_bound_review_pr",
   };
 };
 
 /**
  * How a B item ends once AMUX reaches a terminal state: equal conclusions close
- * it, different ones turn it into C. C closes only by escalation, or by a
- * person once GitHub reports its pull request merged.
+ * it, different ones turn it into C. C closes only by escalation, by a person
+ * once GitHub reports its pull request merged, or by a person who has AMUX
+ * record the bound number on the card.
  */
 export const resolveBOnAmuxTerminal = (input: {
   amuxSettlement: Settlement;

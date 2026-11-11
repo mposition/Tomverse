@@ -4,6 +4,21 @@ import { setDeterministicTheme } from "./support/chat-state-fixtures";
 import { expectAccessibleContrast } from "./support/ui-audit";
 
 for (const theme of ["light", "dark"] as const) {
+  test(`English home example disclosure is readable at desktop and mobile widths in ${theme}`, async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    await setDeterministicTheme(page, theme);
+    await page.goto("/en");
+    const note = page.locator('figure[aria-label="Tomverse Chat"] figcaption > span');
+    for (const width of [1440, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      await note.scrollIntoViewIfNeeded();
+      await expect(note).toContainText("Illustrative example, not a model evaluation or customer conversation.");
+      expect(await note.evaluate(node => Number.parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(14);
+      await expectAccessibleContrast(note, `${theme} ${width}px illustrative disclosure`);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    }
+  });
+
   test(`Korean home model notes retain readable contrast in ${theme}`, async ({ page }) => {
     test.setTimeout(90_000);
     await page.setViewportSize({ width: 1440, height: 1000 });

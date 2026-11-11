@@ -179,6 +179,8 @@ export const adminProductResearchScoutMessages = defineAdminMessages({
       "generated-image": "Real generation · Image",
     },
     catalogue: "Model catalogue",
+    issue: "Issue #{number}",
+    openIssue: "Open the issue",
   },
   ko: {
     intro:
@@ -356,5 +358,7 @@ export const adminProductResearchScoutMessages = defineAdminMessages({
       "generated-image": "실제 생성 · 이미지",
     },
     catalogue: "모델 카탈로그",
+    issue: "이슈 #{number}",
+    openIssue: "이슈 열기",
   },
 });
