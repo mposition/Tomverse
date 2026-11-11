@@ -40,7 +40,9 @@ export function qwenLookupStep(model: AiModel) {
   const lookup = createOpenAI({ ...runtimeConfiguration(model), fetch: (url, init) => {
     // The SDK serializes the body; leave an unfamiliar request untouched.
     if (typeof init?.body !== "string") return fetch(url, init);
-    const body = JSON.parse(init.body);
+    let body;
+    try { body = JSON.parse(init.body); } catch { return fetch(url, init); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return fetch(url, init);
     return fetch(url, { ...init, body: JSON.stringify({ ...body, enable_thinking: false }) });
   } }).chat(model.apiModel);
   // Later tool calls and fallbacks use their ordinary provider defaults.
