@@ -104,8 +104,8 @@ mock.module(mod("lib/promptRefinerVnextOneShotAuditReadback.ts"), { namedExports
     return true;
   },
 } });
-mock.module(mod("lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts"), {
-  namedExports: { readPromptRefinerVnextOneShotPrice: async () => {
+mock.module(mod("lib/promptRefinerProductPriceReadback.ts"), {
+  namedExports: { readPromptRefinerProductPrice: async () => {
     priceReadCount += 1;
     return { pricePinMatchesRegistry: priceMatches,
       problems: priceMatches ? [] : ["price_pin_mismatch"] };

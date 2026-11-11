@@ -95,18 +95,22 @@ export async function PATCH(
         );
       }
     }
+    // Checked against what this save writes: registryInputToData() is the
+    // exact conversion the update below stores, and it writes an omitted price,
+    // cap or replacement as null rather than keeping the stored value.
+    const saved = registryInputToData(body, actor(session));
     const pinRefusal = codePinnedModelRefusal({
       modelId,
       status: body.status,
       publiclyListed: body.publiclyListed,
-      replacementModelId: body.replacementModelId,
+      replacementModelId: saved.replacementModelId ?? null,
       provider: body.provider,
       apiModel: body.apiModel,
-      maxOutputTokens: body.maxOutputTokens,
-      reservationOutputTokens: body.reservationOutputTokens,
-      inputUsdPerMillionTokens: body.inputUsdPerMillionTokens,
-      outputUsdPerMillionTokens: body.outputUsdPerMillionTokens,
-      cachedInputPriceMultiplier: body.cachedInputPriceMultiplier,
+      maxOutputTokens: saved.maxOutputTokens ?? null,
+      reservationOutputTokens: saved.reservationOutputTokens ?? null,
+      inputUsdPerMillionTokens: saved.inputUsdPerMillionTokens ?? null,
+      outputUsdPerMillionTokens: saved.outputUsdPerMillionTokens ?? null,
+      cachedInputPriceMultiplier: saved.cachedInputPriceMultiplier ?? null,
     });
     if (pinRefusal) {
       return NextResponse.json(
