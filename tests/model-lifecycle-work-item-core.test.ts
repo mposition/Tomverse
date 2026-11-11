@@ -777,11 +777,12 @@ test("only an adopted, served add stalled before rollout can be closed as rolled
     "../lib/modelLifecycleWorkItemCore.ts"
   );
   assert.deepEqual([...ROLLOUT_FINISHABLE_STATUSES].sort(), ["rollout_pending", "validation_pending"]);
-  const base = { action: "add", status: "validation_pending", servedByTomverse: true };
+  const base = { action: "add", status: "validation_pending", servedLive: true };
   assert.equal(isRolloutFinishable(base), true);
   assert.equal(isRolloutFinishable({ ...base, status: "rollout_pending" }), true);
-  // Not served yet: the validations are real work, not a stale record.
-  assert.equal(isRolloutFinishable({ ...base, servedByTomverse: false }), false);
+  // Registered but not live (disabled, unlisted, or not yet enabled): the
+  // validations are real work, not a stale record.
+  assert.equal(isRolloutFinishable({ ...base, servedLive: false }), false);
   // Undecided, notice owed, closed, or a retirement: other paths own these.
   for (const status of ["discovered", "approved", "communication_pending", "completed", "closed_no_action"]) {
     assert.equal(isRolloutFinishable({ ...base, status }), false, status);
@@ -793,8 +794,15 @@ test("vanished families are excluded whole, and only automatic exclusions reopen
   const { vanishedDiscoveryChanges, MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR } = await import(
     "../lib/modelLifecycleWorkItemCore.ts"
   );
-  const item = (id: string, familyKey: string, availability: string, actorEmail?: string | null) => ({
+  const item = (
+    id: string,
+    familyKey: string,
+    availability: string,
+    actorEmail?: string | null,
+    action = "add"
+  ) => ({
     id,
+    action,
     familyKey,
     availability,
     exclusion: actorEmail === undefined ? null : { actorEmail },
@@ -808,6 +816,8 @@ test("vanished families are excluded whole, and only automatic exclusions reopen
       item("b2", "beta", "current"),
       // A failed or missing scan is not evidence of absence.
       item("c1", "gamma", "unknown"),
+      // A retirement the reconciliation opened is never auto-excluded.
+      item("r1", "rho", "stale", undefined, "retire"),
     ],
     excluded: [
       item("d1", "delta", "current", MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR),
@@ -815,6 +825,7 @@ test("vanished families are excluded whole, and only automatic exclusions reopen
       // A person's exclusion is theirs, even when the model is listed again.
       item("e1", "epsilon", "current", "admin@tomverse.app"),
       item("f1", "phi", "stale", MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR),
+      item("g1", "gimel", "current", MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR, "retire"),
     ],
   });
   assert.deepEqual(exclude.map((entry) => entry.id), ["a1", "a2"]);

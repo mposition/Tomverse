@@ -1384,6 +1384,10 @@ export async function listModelDiscoveryQueue(options?: {
     const servedFamilies = new Set(
         servedApiModels.map(decisionIdentity)
     );
+    // Live, not merely registered: what a rollout can be recorded against.
+    const liveFamilies = new Set(
+        servedModels.map((model) => decisionIdentity(model.apiModel))
+    );
     const familyCounts = new Map<string, number>();
     for (const row of rows) {
         const family = decisionIdentity(row.apiModel);
@@ -1470,7 +1474,7 @@ export async function listModelDiscoveryQueue(options?: {
         const rolloutFinishable = isRolloutFinishable({
             action: row.action,
             status: row.status,
-            servedByTomverse,
+            servedLive: liveFamilies.has(familyKey),
         });
         // A retirement is about a model Tomverse serves, so its own line will
         // always contain it. Asking whether it is superseded would answer yes

@@ -171,16 +171,19 @@ export const ROLLOUT_FINISHABLE_STATUSES: ReadonlySet<WorkItemStatus> = new Set(
 
 /**
  * Whether an operator can close this item as rolled out in one step: an `add`
- * whose model the registry (or image ledger) already serves, stalled after
- * adoption. The person still decides; this only says the button applies.
+ * whose model is live -- enabled, publicly listed and not disabled in the
+ * registry, or an enabled image model -- stalled after adoption. A registry row
+ * alone is not enough: `completed` is terminal, and a disabled or unlisted row
+ * has not rolled out. The person still decides; this only says the button
+ * applies.
  */
 export const isRolloutFinishable = (item: {
     action: string;
     status: string;
-    servedByTomverse: boolean;
+    servedLive: boolean;
 }) =>
     item.action === "add" &&
-    item.servedByTomverse &&
+    item.servedLive &&
     ROLLOUT_FINISHABLE_STATUSES.has(item.status as WorkItemStatus);
 
 /**
@@ -196,6 +199,9 @@ export const MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR = "model-discovery-auto-exclude"
 /**
  * Families to exclude and to reopen, from the queue's own reading.
  *
+ * Only `add` candidates: a retirement opened by the registry reconciliation is
+ * about a model that vanished on purpose, and may owe users a notice.
+ *
  * Exclude: every undecided member is `stale` (absent from a successful scan;
  * `unknown`, a failed or missing scan, never counts). Reopen: a family this
  * actor excluded that the provider lists again -- only the members this actor
@@ -204,6 +210,7 @@ export const MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR = "model-discovery-auto-exclude"
 export const vanishedDiscoveryChanges = <
     T extends {
         id: string;
+        action: string;
         familyKey: string;
         availability: string;
         exclusion?: { actorEmail: string | null } | null;
@@ -221,12 +228,14 @@ export const vanishedDiscoveryChanges = <
         }
         return [...families.values()];
     };
-    const exclude = byFamily(input.undecided)
+    const exclude = byFamily(input.undecided.filter((item) => item.action === "add"))
         .filter((members) => members.every((item) => item.availability === "stale"))
         .flat();
     const reopen = byFamily(
         input.excluded.filter(
-            (item) => item.exclusion?.actorEmail === MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR
+            (item) =>
+                item.action === "add" &&
+                item.exclusion?.actorEmail === MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR
         )
     )
         .filter((members) => members.some((item) => item.availability === "current"))
