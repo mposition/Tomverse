@@ -3,18 +3,22 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 
 import { CODE_PINNED_MODELS, codePinnedModelRefusal } from "../lib/codePinnedModels.ts";
+import { PROMPT_REFINER_PRODUCT_PRICE_PIN } from "../lib/promptRefinerProductPricePin.ts";
 import { PROMPT_REFINER_EXECUTION_MODEL_PIN } from "../lib/promptRefinerExecutionContract.ts";
 import { PROMPT_REFINER_VNEXT_PRICE_PIN } from "../lib/promptRefinerQualityEvaluationVnextExecutionContract.ts";
 
 // 2026-11-11: disabling the price-pinned model closed Chat for every account.
-test("every Prompt Refiner pin is protected, and follows the pin when it moves", () => {
+test("the product pin Chat runs on is protected; evaluation pins are not", () => {
   const pinned = new Set(CODE_PINNED_MODELS.map((pin) => pin.modelId));
-  assert.ok(pinned.has(PROMPT_REFINER_VNEXT_PRICE_PIN.modelId));
-  assert.ok(pinned.has(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId));
+  assert.ok(pinned.has(PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId));
+  assert.equal(PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId, "gpt-6-luna");
+  // The evaluation records stay on gpt-5-6-luna and must not block its retirement.
+  assert.equal(pinned.has(PROMPT_REFINER_VNEXT_PRICE_PIN.modelId), false);
+  assert.equal(pinned.has(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId), false);
 });
 
 test("a pinned model may be edited, but nothing the Chat price readback refuses", () => {
-  const id = PROMPT_REFINER_VNEXT_PRICE_PIN.modelId;
+  const id = PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId;
   const untouched = {
     modelId: id,
     status: "enabled",
@@ -30,10 +34,10 @@ test("a pinned model may be edited, but nothing the Chat price readback refuses"
     assert.match(codePinnedModelRefusal({ ...untouched, status }) ?? "", /changing its status/, status);
   }
   assert.match(codePinnedModelRefusal({ ...untouched, publiclyListed: false }) ?? "", /unlisting/);
-  assert.match(codePinnedModelRefusal({ ...untouched, replacementModelId: "gpt-6-luna" }) ?? "", /replacement/);
+  assert.match(codePinnedModelRefusal({ ...untouched, replacementModelId: "gpt-6-1-luna" }) ?? "", /replacement/);
   assert.match(codePinnedModelRefusal({ ...untouched, outputUsdPerMillionTokens: 1 }) ?? "", /price/);
   // Identity and the contract's output floor (review r-20261111-101129-ba58bd).
-  const pin = PROMPT_REFINER_VNEXT_PRICE_PIN;
+  const pin = PROMPT_REFINER_PRODUCT_PRICE_PIN;
   assert.equal(
     codePinnedModelRefusal({ ...untouched, provider: pin.provider, apiModel: pin.apiModelId, maxOutputTokens: 4_096, reservationOutputTokens: null }),
     null

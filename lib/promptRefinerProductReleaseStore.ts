@@ -43,8 +43,8 @@ import {
 } from "@/lib/promptRefinerVnextOneShotGateEvidence";
 import { promptRefinerVnextOneShotAuditReceiptIsValid } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
-import { readPromptRefinerVnextOneShotPrice } from
-  "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
+import { readPromptRefinerProductPrice } from
+  "@/lib/promptRefinerProductPriceReadback";
 import {
   V4_STAGE_ID,
   V5_STAGE_ID,
@@ -151,7 +151,7 @@ async function exactStageEvidence(tx: Tx, target: EvidenceTarget) {
     return releaseDrift("critical_safety_failure",
       "prompt_refiner_product_candidate_source_drift");
   }
-  const price = await readPromptRefinerVnextOneShotPrice(tx);
+  const price = await readPromptRefinerProductPrice(tx);
   if (!price.pricePinMatchesRegistry || price.problems.length !== 0) {
     return releaseDrift("unknown_dispatch_or_cost",
       "prompt_refiner_product_price_evidence_unavailable");

@@ -29,8 +29,8 @@ import { initializePromptRefinerProductAutoGuard } from
   "@/lib/promptRefinerProductOperationalGuard";
 import { promptRefinerVnextOneShotAuditReceiptIsValid } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
-import { readPromptRefinerVnextOneShotPrice } from
-  "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
+import { readPromptRefinerProductPrice } from
+  "@/lib/promptRefinerProductPriceReadback";
 
 type Tx = Prisma.TransactionClient;
 
@@ -150,7 +150,7 @@ export async function inspectChatRefinerInitialAutoRelease(
       !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, product, keys)) {
     return closed("invalid", "activation_pair_audit_invalid");
   }
-  const price = await readPromptRefinerVnextOneShotPrice(tx);
+  const price = await readPromptRefinerProductPrice(tx);
   if (!price.pricePinMatchesRegistry || price.problems.length !== 0) {
     return closed("invalid", "price_pin_invalid");
   }
@@ -184,7 +184,7 @@ export async function activateChatRefinerInitialAutoRelease(input: {
   }
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
-    const price = await readPromptRefinerVnextOneShotPrice(tx);
+    const price = await readPromptRefinerProductPrice(tx);
     if (!price.pricePinMatchesRegistry || price.problems.length !== 0) {
       throw new Error("chat_refiner_initial_auto_activation_price_invalid");
     }

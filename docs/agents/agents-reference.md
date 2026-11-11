@@ -802,6 +802,9 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`가 함께 움직입니다.
   한쪽만 바꾸지 않습니다. 같은 날 trio의 Anthropic 자리는
   `claude-haiku-5-5`로 옮겼습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다.
+  Prompt Refiner 제품 가격 pin은 2026-11-11에 `gpt-6-luna`로 옮겼습니다
+  (`lib/promptRefinerProductPricePin.ts`). 코드가 고정해서 쓰는 모델은
+  `lib/codePinnedModels.ts`에 두고, Admin은 그 모델의 끄기·비공개·대체를 거부합니다.
 - **기본 모델을 가리키는 DB 컬럼 기본값은 없습니다**(2026-10-12). `UserSettings.defaultModel`과
   `Conversation.selectedModels`는 NOT NULL이지만 `@default`가 없어서, 기본 모델 변경에
   migration이 필요하지 않습니다. 대신 모든 쓰기 경로가 값을 직접 넣습니다 —

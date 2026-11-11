@@ -39,7 +39,7 @@ class BudgetError extends Error {
 
 mock.module(mod("lib/activeAiModel.ts"), { namedExports: {
   getActiveAiModel: () => ({ provider: "openai.responses",
-    modelId: "gpt-5.6-luna" }),
+    modelId: "gpt-6-luna" }),
 } });
 mock.module(mod("lib/promptRefinerAutoBudgetHold.ts"), { namedExports: {
   PromptRefinerAutoBudgetError: BudgetError,
@@ -111,7 +111,7 @@ mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
 } });
 mock.module(mod("lib/modelRegistry.ts"), { namedExports: {
   getEnabledRuntimeModel: async () => ({ provider: "openai",
-    apiModel: "gpt-5.6-luna" }),
+    apiModel: "gpt-6-luna" }),
 } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   conversation: { findFirst: async () => ({ selectionMode: "auto" }) },
@@ -123,8 +123,8 @@ mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
     return release;
   },
 } });
-mock.module(mod("lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts"), {
-  namedExports: { readPromptRefinerVnextOneShotPrice: async () => ({
+mock.module(mod("lib/promptRefinerProductPriceReadback.ts"), {
+  namedExports: { readPromptRefinerProductPrice: async () => ({
     pricePinMatchesRegistry: true, problems: [],
   }) },
 });

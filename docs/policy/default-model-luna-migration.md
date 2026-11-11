@@ -152,7 +152,10 @@ Anthropic 자리는 fallback 목록으로 채워졌습니다. 기본값 이전�
 범위입니다 — `DEFAULT_MODEL_ID` · `GUEST_DEFAULT_MODEL_ID` · trio · Prisma 컬럼
 기본값이 함께 움직였고(`prisma/migrations/20261012090000_default_model_gpt_6_luna`),
 기존 사용자의 저장값과 기존 대화의 선택은 다시 쓰지 않으며 reconciliation도 돌리지
-않습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다.
+않습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다. 2026-11-11에 이 모델을
+Admin에서 끄자 Prompt Refiner 제품 가격 pin이 이 모델을 가리키고 있어 Chat이
+닫혔고, 같은 날 그 pin을 `gpt-6-luna`로 옮겼습니다(`lib/promptRefinerProductPricePin.ts`).
+그 배포와 Chat 활성화 재기록 뒤에는 `gpt-5-6-luna`를 은퇴시킬 수 있습니다.
 
 - 컴파일된 가격: `gpt-6-luna`는 OpenAI 공개 Standard 요율(272K 이하 입력
   US$0.10 · 캐시 US$0.01 · 캐시 쓰기 US$0.125 · 출력 US$0.50, 초과 시 입력 x2 ·
