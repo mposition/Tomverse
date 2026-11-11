@@ -2119,10 +2119,12 @@ export const zhHant = {
         },
         purpose: {
             security: {
+                requiredReason: "用於保護帳戶的必要通知，無法關閉。",
                 title: "安全與帳戶",
                 description: "登入驗證碼、密碼與登入方式變更、安全提醒。",
             },
             billing: {
+                requiredReason: "有關付款與訂閱紀錄的必要通知，無法關閉。",
                 title: "帳單",
                 description: "收據、付款失敗、訂閱變更。",
             },

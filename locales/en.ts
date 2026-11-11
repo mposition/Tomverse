@@ -2158,10 +2158,12 @@ export const en = {
         },
         purpose: {
             security: {
+                requiredReason: "Required to protect your account. This cannot be turned off.",
                 title: "Security and account",
                 description: "Sign-in codes, password and login-method changes, security alerts.",
             },
             billing: {
+                requiredReason: "Required for payment and subscription records. This cannot be turned off.",
                 title: "Billing",
                 description: "Receipts, failed payments, subscription changes.",
             },
