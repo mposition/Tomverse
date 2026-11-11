@@ -224,8 +224,12 @@ activate them or change the production location-intent switch enabled earlier.
   that call's existing provider cost hold. No separate planner call is created.
   Only the final selected model's actually dispatchable application-managed tool
   executes the plan, after the ordinary credit/admission boundary. Native search,
-  guests, files/artifacts, MCP, consented-location, search-off and unrouted turns
-  keep their paths. The Router does not receive device coordinates; the answering
+  guests, turns with attachments, artifact requests, MCP, consented-location,
+  search-off and unrouted turns keep their paths. A file-capable answer model
+  may still presearch for an ordinary text question when the Router explicitly
+  marks it as not requesting a file. Missing or unclear file intent does not
+  admit presearch. The normal file and search tools remain available to the
+  answering model. The Router does not receive device coordinates; the answering
   model retains location-aware search after the usual consent boundary.
   The same tool/session handles presearch and all later model queries: five
   searches total, exact-query reuse, the same backend, sources, notices and billing.

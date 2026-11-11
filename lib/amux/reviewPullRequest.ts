@@ -3,6 +3,7 @@ import "server-only";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
+import { AMUX_DEFAULT_REVIEW_SPECIALTY } from "@/lib/amux/humanReviewCore";
 import {
   AMUX_DB_BOUNDARIES,
   amuxBoundaryWithAttachment,
@@ -21,7 +22,6 @@ export type AmuxReviewPullRequestFact = {
 
 export type AmuxReviewPullRequestRefusal =
   | "task_not_in_review"
-  | "review_not_required"
   | "not_the_workers_review"
   | "review_pr_conflict";
 
@@ -32,6 +32,7 @@ type TaskRow = {
   revision: number;
   archivedAt: Date | null;
   requiresHumanReview: boolean;
+  reviewSpecialty: string | null;
   reviewPrNumber: number | null;
 };
 
@@ -53,6 +54,13 @@ type AttemptRow = {
  * request never lands on a later attempt's review. It opens no approval and
  * moves no status: the human review of the card stays AMUX's, and a later
  * board sync may still carry the number as it always has.
+ *
+ * A card that reached review without asking for one (a v22 card, whose
+ * attempt settles through its own path) is marked for human review when its
+ * first number is written, by the same rule the attempt settlement uses:
+ * AmuxWorkItem_review_pr_check needs requiresHumanReview with a stored number,
+ * and AmuxWorkItem_human_review_shape_check needs a specialty with that flag,
+ * so the default specialty fills a missing one and an existing one is kept.
  */
 export async function recordAmuxReviewPullRequest(
   input: { taskId: string; attemptId: string; worker: string; prNumber: number },
@@ -71,7 +79,7 @@ export async function recordAmuxReviewPullRequest(
       // a review proposal on this card holds the chain while it waits for it.
       await takeAuditChainLock(tx);
       const tasks = await tx.$queryRaw<TaskRow[]>`
-        SELECT "id", "status", "owner", "revision", "archivedAt", "requiresHumanReview", "reviewPrNumber"
+        SELECT "id", "status", "owner", "revision", "archivedAt", "requiresHumanReview", "reviewSpecialty", "reviewPrNumber"
         FROM "AmuxWorkItem"
         WHERE "id" = ${input.taskId}
         FOR UPDATE
@@ -82,11 +90,6 @@ export async function recordAmuxReviewPullRequest(
       }
       if (task.revision >= AMUX_MAX_EXPECTED_REVISION) {
         return { recorded: false as const, reason: "task_not_in_review" as const };
-      }
-      // A review pull request belongs to a card a person reviews (the card's
-      // CHECK says so too); on any other card there is nothing to attach it to.
-      if (!task.requiresHumanReview) {
-        return { recorded: false as const, reason: "review_not_required" as const };
       }
       const attempts = await tx.$queryRaw<AttemptRow[]>`
         SELECT "id", "worker", "outcome", "toStatus", "endedAt"
@@ -113,9 +116,17 @@ export async function recordAmuxReviewPullRequest(
       let taskRevision = task.revision;
       const changed = task.reviewPrNumber === null;
       if (changed) {
+        // The number is only written once, so only that write can mark the card.
+        const marksHumanReview = !task.requiresHumanReview;
         const moved = await tx.amuxWorkItem.updateMany({
           where: { id: task.id, status: "review", owner: null, archivedAt: null, revision: task.revision, reviewPrNumber: null },
-          data: { reviewPrNumber: input.prNumber, revision: { increment: 1 } },
+          data: {
+            reviewPrNumber: input.prNumber,
+            ...(marksHumanReview
+              ? { requiresHumanReview: true, reviewSpecialty: task.reviewSpecialty ?? AMUX_DEFAULT_REVIEW_SPECIALTY }
+              : {}),
+            revision: { increment: 1 },
+          },
         });
         if (moved.count !== 1) throw new Error("AMUX task changed while recording its review pull request");
         taskRevision = task.revision + 1;
@@ -128,6 +139,7 @@ export async function recordAmuxReviewPullRequest(
           metadata: {
             pr_number: input.prNumber,
             worker: input.worker,
+            marked_human_review: marksHumanReview,
             previous_revision: task.revision,
             next_revision: taskRevision,
           },

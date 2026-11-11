@@ -742,6 +742,18 @@ Node crypto)입니다.
   fingerprint를 담고, chat은 지금 보는 context의 fingerprint를 계산해 비교합니다.
   bundle이 "아직 신선함"을 스스로 주장하면 그것을 들고 있는 client만큼만
   신뢰할 수 있습니다.
+- 검색된 memory 블록의 지문은 `rendered-v1` 구분자와 함께 선택된 memory ID의
+  순서와 실제 §9.1 프롬프트 바이트를 결속합니다. 시간에 따라 변하는 내부 순위
+  점수는 같은 블록의 가격을 바꾸지 않습니다. 선택, 순서, 렌더링, 활성 memory·style
+  상태, profile·knowledge, retrieval·prompt 버전 변경은 기존대로 다시 검증합니다.
+  점수 알고리즘과 저장된 검색어 버전은 그대로입니다. 비어 있는 결과의 지문도
+  그대로입니다. 배포 중 이전 방식으로 서명한 비어 있지 않은 블록은 한 번의 409와
+  통상 재준비로 갱신됩니다 (번들 TTL 5분).
+- 인증된 저장 Auto 턴이 번들을 제시하고 유료 LLM Router 후보가 있는 경우, 소유자·잠금·
+  대화 종류를 확인하고 Router 비용 예약 전에 같은 원문으로 전체 지문을 한 번 더 계산합니다.
+  정상 후보 턴에는 이 읽기 비용이 추가되며 내용 없는 `chat_router_context_precheck`
+  이벤트의 `durationMs`에 기록합니다. 최종 컨텍스트 조회·검증은 Router 중 변경도 잡도록
+  그대로 수행하고, nonce는 기존 위치에서만 원자적으로 소비합니다.
 - **memory mode `off`는 없는 context가 아니라 다른 context입니다.** fingerprint에
   포함하며, 없는 값으로 취급하면 memory 가격으로 예약된 요청이 memory 없이
   실행됩니다.

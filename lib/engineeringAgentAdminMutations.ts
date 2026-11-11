@@ -37,6 +37,12 @@ export async function runEngineeringAgentAdminMutation<TBody, TResult>(spec: {
   beforeAuditLock?: (tx: Prisma.TransactionClient, body: TBody) => Promise<void>;
   /** A read outside the transaction (a GitHub observation), after authentication and the body. */
   beforeTransaction?: (body: TBody) => Promise<void>;
+  /**
+   * An action that runs inside another writer's transaction instead (an AMUX
+   * writer with the action attached, which takes its own locks in AMUX's
+   * order). Returns null for a body the engineering transaction handles.
+   */
+  runInOwnWriter?: (context: { body: TBody; session: Session }) => Promise<TResult> | null;
 }): Promise<Response> {
   try {
     const session = await getServerSession(authOptions);
@@ -54,15 +60,19 @@ export async function runEngineeringAgentAdminMutation<TBody, TResult>(spec: {
     await consumeApiRateLimit(spec.request, session.user.id, spec.bucket, { minute: 20, day: 200 });
     const body = await readLimitedJson(spec.request, 4 * 1024, spec.schema);
     await spec.beforeTransaction?.(body);
-    const result = await runEngineeringAgentTransaction(
-      prisma,
-      (tx) => spec.run(tx, { body, session }),
-      {
-        maxWait: 5_000,
-        timeout: 20_000,
-        beforeAuditLock: spec.beforeAuditLock ? (tx) => spec.beforeAuditLock!(tx, body) : undefined,
-      },
-    );
+    const inOwnWriter = spec.runInOwnWriter?.({ body, session }) ?? null;
+    const result =
+      inOwnWriter !== null
+        ? await inOwnWriter
+        : await runEngineeringAgentTransaction(
+            prisma,
+            (tx) => spec.run(tx, { body, session }),
+            {
+              maxWait: 5_000,
+              timeout: 20_000,
+              beforeAuditLock: spec.beforeAuditLock ? (tx) => spec.beforeAuditLock!(tx, body) : undefined,
+            },
+          );
     return NextResponse.json({ ok: true, result });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);

@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 
 import { runEngineeringAgentAdminMutation } from "@/lib/engineeringAgentAdminMutations";
+import { recordEngineeringAgentMismatchReviewPullRequest } from "@/lib/engineeringAgentAmuxAdapter";
 import { readEngineeringAgentPullMerge } from "@/lib/engineeringAgentGitHubRead";
 import {
   ENGINEERING_AGENT_MISMATCH_CONSOLE_ACTIONS,
@@ -15,7 +16,9 @@ import { prisma } from "@/lib/prisma";
 // A person's action on a state mismatch (docs/policy/engineering-agent.md
 // §11): both sides locked -- AMUX's rows first, in AMUX's order, then the
 // engineering rows -- and read again before the action runs. Neither side is
-// corrected to match the other.
+// corrected to match the other. Recording the bound number on the card is a
+// person's action too, but its AMUX write is the review pull request writer's:
+// that writer's transaction carries the action (owner decision 2026-11-11).
 
 const schema = z
   .object({
@@ -80,6 +83,10 @@ export async function POST(request: Request) {
     beforeTransaction: async (body) => {
       if (body.action === "close_after_observed_merge") observedMerge = await observeMerge(body.workItemId);
     },
+    runInOwnWriter: ({ body, session }) =>
+      body.action === "record_bound_review_pr"
+        ? recordEngineeringAgentMismatchReviewPullRequest({ session, request, workItemId: body.workItemId })
+        : null,
     run: (tx, { body, session }) =>
       resolveEngineeringAgentStateMismatch(tx, {
         session,
