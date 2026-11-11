@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Activity, ExternalLink } from "lucide-react";
+import { Activity, ChevronDown, ExternalLink } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { ModelInputCreditGuide } from "./ModelInputCreditGuide";
@@ -170,8 +170,8 @@ const copy = {
 } satisfies Record<Language, Record<string, string>>;
 
 const filterCopy = {
-  en: { search: "Search model name or ID", allProviders: "All providers", plan: "Available with plan", allPlans: "All plans", results: "Models shown", empty: "No models match these filters.", clear: "Clear filters" },
-  ko: { search: "모델명 또는 ID 검색", allProviders: "모든 공급자", plan: "이용할 플랜", allPlans: "모든 플랜", results: "표시된 모델", empty: "조건에 맞는 모델이 없습니다.", clear: "필터 초기화" },
+  en: { search: "Search model name or ID", toggle: "Search and filter models", allProviders: "All providers", plan: "Available with plan", allPlans: "All plans", results: "Models shown", empty: "No models match these filters.", clear: "Clear filters" },
+  ko: { search: "모델명 또는 ID 검색", toggle: "모델 검색·필터", allProviders: "모든 공급자", plan: "이용할 플랜", allPlans: "모든 플랜", results: "표시된 모델", empty: "조건에 맞는 모델이 없습니다.", clear: "필터 초기화" },
   zh: { search: "搜索模型名称或 ID", allProviders: "所有供应商", plan: "可用套餐", allPlans: "所有套餐", results: "显示的模型", empty: "没有符合筛选条件的模型。", clear: "清除筛选" },
   "zh-Hant": { search: "搜尋模型名稱或 ID", allProviders: "所有供應商", plan: "可用方案", allPlans: "所有方案", results: "顯示的模型", empty: "沒有符合篩選條件的模型。", clear: "清除篩選" },
   fr: { search: "Rechercher un nom ou ID de modèle", allProviders: "Tous les fournisseurs", plan: "Disponible avec l’offre", allPlans: "Toutes les offres", results: "Modèles affichés", empty: "Aucun modèle ne correspond à ces filtres.", clear: "Effacer les filtres" },
@@ -248,7 +248,7 @@ export function ModelsPageContent() {
           <button type="button" data-testid="models-mobile-filters-toggle" aria-expanded={mobileFiltersOpen}
             aria-controls="models-catalog-filters" onClick={() => setMobileFiltersOpen((open) => !open)}
             className="mt-5 flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-zinc-300 px-3 py-2 text-left text-sm font-bold dark:border-zinc-700 sm:hidden">
-            {filters.search}<span aria-hidden="true">{mobileFiltersOpen ? "−" : "+"}</span>
+            {filterCopy[lang].toggle}<ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 transition-transform ${mobileFiltersOpen ? "rotate-180" : ""}`} />
           </button>
         ) : null}
         <div id="models-catalog-filters" role="search" aria-label={filters.search}
