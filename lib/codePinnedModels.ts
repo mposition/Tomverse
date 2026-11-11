@@ -43,14 +43,14 @@ export const CODE_PINNED_MODELS: readonly CodePinnedModel[] = Object.freeze([
 /**
  * Why this registry change must be refused, or null.
  *
- * The price readback that gates Chat refuses a pinned row that is not enabled,
- * not public, remapped to a replacement, priced from registry columns instead
- * of the code catalogue, pointed at another provider or upstream id, or capped
- * below the contract's output tokens
- * (lib/promptRefinerProductPriceReadback.ts). Each of
- * those is refused here, against the values the save would leave. Everything
- * else -- name, purpose, sort order -- stays editable. Move the pin in code
- * first.
+ * The price readback that gates Chat (lib/promptRefinerProductPriceReadback.ts)
+ * refuses a pinned row that is not enabled, not public, remapped to a
+ * replacement, pointed at another provider or upstream id, capped below the
+ * contract's output tokens, or carrying its own price columns -- an override
+ * that turns the resolved price's costSource from "registry" (the catalogue
+ * price the pin names) into "model_registry_override". Each of those is refused
+ * here, against the values the save would leave. Everything else -- name,
+ * purpose, sort order -- stays editable. Move the pin in code first.
  */
 export const codePinnedModelRefusal = (input: {
     modelId: string;

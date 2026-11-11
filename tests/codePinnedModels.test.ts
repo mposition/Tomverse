@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
 
 import { CODE_PINNED_MODELS, codePinnedModelRefusal } from "../lib/codePinnedModels.ts";
 import { PROMPT_REFINER_PRODUCT_PRICE_PIN } from "../lib/promptRefinerProductPricePin.ts";
@@ -51,11 +54,34 @@ test("a pinned model may be edited, but nothing the Chat price readback refuses"
   assert.equal(codePinnedModelRefusal({ modelId: "not-pinned-model", status: "disabled" }), null);
 });
 
-test("every Admin path that switches a model off asks the pin check first", () => {
+// Every writer that can switch a registry row's status, listing, mapping or
+// price. Review r-20261111-102757-237c36 found the incident route missing.
+test("every path that can switch a model off asks the pin check first", () => {
   const perModel = readFileSync("app/api/admin/models/[modelId]/route.ts", "utf8");
-  // PATCH (status) and DELETE (catalogue removal).
-  assert.equal(perModel.match(/codePinnedModelRefusal\(/g)?.length, 2);
+  // PATCH (status, listing, mapping, price, caps) and DELETE (catalogue removal).
+  assert.equal(perModel.split("codePinnedModelRefusal(").length - 1, 2);
+  // Omitted fields are checked at their stored value, not skipped.
+  assert.ok(perModel.includes("maxOutputTokens: kept(body.maxOutputTokens, stored?.maxOutputTokens)"));
   const registry = readFileSync("app/api/admin/models/route.ts", "utf8");
-  // Adoption that replaces (and disables) an existing model.
-  assert.match(registry, /codePinnedRefusal: codePinnedModelRefusal\(\{ modelId: replacesModelId/);
+  assert.ok(registry.includes("codePinnedRefusal: codePinnedModelRefusal({ modelId: replacesModelId"));
+  const incidents = readFileSync("app/api/admin/incidents/route.ts", "utf8");
+  assert.ok(incidents.includes("pinnedLeftAsIs = scopedModels.filter"));
+  assert.ok(incidents.includes("const targetModels = scopedModels.filter((model) => !pinnedLeftAsIs.includes(model))"));
+  const reconciliation = readFileSync("lib/providerModelCatalogReconciliation.ts", "utf8");
+  assert.ok(reconciliation.includes("provider_model_catalog_pinned_model_kept"));
+  // No other registry status writer appeared without a decision about pins.
+  const { execFileSync } = require("node:child_process");
+  const writers = execFileSync(
+    "git",
+    ["grep", "-l", "-E", "modelRegistryEntry[.](update|updateMany|upsert)[(]", "--", "app", "lib"],
+    { encoding: "utf8" }
+  ).trim().split("\n").map((file) => file.trim())
+    .filter((file) => !file.includes(".test.")).sort();
+  assert.deepEqual(writers, [
+    "app/api/admin/incidents/route.ts",
+    "app/api/admin/models/[modelId]/route.ts",
+    "app/api/admin/models/route.ts",
+    "lib/modelRegistry.ts",
+    "lib/providerModelCatalogReconciliation.ts",
+  ], "a new registry writer must decide whether pinned models need the pin check");
 });
