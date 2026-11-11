@@ -12,7 +12,9 @@ test("English model choices use individual catalog facts without invented task r
     const card = page.getByRole("article").filter({ has: page.getByRole("heading", { name: model.name, exact: true }) });
     const criteria = card.getByTestId("model-selection-criteria");
     await expect(criteria).toContainText(`Access from: ${model.minimumPlan}`);
-    await expect(criteria).toContainText(`Short request: ${model.creditWeight} credits`);
+    const creditUnit = model.creditWeight === 1 ? "credit" : "credits";
+    await expect(criteria).toContainText(`Short request: ${model.creditWeight} ${creditUnit} ·`);
+    await expect(card.getByTestId("model-page-credit-cost")).toHaveAttribute("aria-label", `Base credits for a short request: ${model.creditWeight} ${creditUnit}`);
     await expect(criteria).toContainText(`Image input: ${index === 0 ? "not supported" : "supported"}`);
     await expect(criteria).toContainText(`Catalog context maximum: ${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString("en-US")} tokens` : "not listed"}`);
     for (const label of ["Writing", "Analysis", "Fast"]) await expect(card.getByText(label, { exact: true })).toHaveCount(0);
