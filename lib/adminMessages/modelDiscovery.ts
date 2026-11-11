@@ -42,6 +42,11 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
         `'${validation}' complete. ${remaining} validations remaining.`,
       validationNoneRemaining: (validation: string) =>
         `'${validation}' complete. No validations remaining.`,
+      rolloutFailed: "Could not close the rollout.",
+      rolloutFinished: (completed: number, awaitingNotice: number) =>
+        awaitingNotice
+          ? `Closed ${completed} as rolled out. ${awaitingNotice} still owe users a notice.`
+          : `Closed ${completed} as rolled out.`,
     },
     header: {
       title: "Awaiting review",
@@ -79,6 +84,11 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       other: "Other",
     },
     dialog: {
+      rolloutTitle: "Close as rolled out",
+      rolloutDescription: (items: number) =>
+        `${items} adopted items whose model Tomverse already serves. Any validations still listed are recorded as done with this note.`,
+      rolloutConfirm: "Rollout complete",
+      rolloutNote: "What did you confirm?",
       excludeTitle: (families: number, items: number) =>
         `Exclude ${families} model families (${items} items)`,
       reopenTitle: (families: number, items: number) =>
@@ -111,6 +121,7 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
     bulk: {
       selected: (count: number) => `${count} families selected`,
       excludeSelected: "Exclude selected",
+      finishRolloutSelected: (items: number) => `Rollout complete (${items})`,
       reopenSelected: "Review selected again",
     },
     table: {
@@ -127,6 +138,7 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       supersededBy: (model: string) => `Later version in service: ${model}`,
       days: (days: number) => `${days}d`,
       recordValidationTitle: "Record this validation as complete",
+      finishRollout: "Rollout complete",
       adopt: "Adopt",
       imageDraft: "Catalog draft",
       noImageAdapter: (provider: string) => `No image adapter (${provider})`,
@@ -184,6 +196,11 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
         `'${validation}' 완료. 남은 검증 ${remaining}건.`,
       validationNoneRemaining: (validation: string) =>
         `'${validation}' 완료. 남은 검증이 없습니다.`,
+      rolloutFailed: "롤아웃을 완료로 닫지 못했습니다.",
+      rolloutFinished: (completed: number, awaitingNotice: number) =>
+        awaitingNotice
+          ? `${completed}건을 롤아웃 완료로 닫았습니다. ${awaitingNotice}건은 사용자 공지가 남아 있습니다.`
+          : `${completed}건을 롤아웃 완료로 닫았습니다.`,
     },
     header: {
       title: "검토 대기",
@@ -220,6 +237,11 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       other: "기타",
     },
     dialog: {
+      rolloutTitle: "롤아웃 완료로 닫기",
+      rolloutDescription: (items: number) =>
+        `Tomverse가 이미 서비스하는 채택 항목 ${items}건입니다. 남은 검증은 이 메모와 함께 완료로 기록됩니다.`,
+      rolloutConfirm: "롤아웃 완료",
+      rolloutNote: "무엇을 확인했나요?",
       excludeTitle: (families: number, items: number) =>
         `모델 패밀리 ${families}개 제외 (항목 ${items}건)`,
       reopenTitle: (families: number, items: number) =>
@@ -252,6 +274,7 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
     bulk: {
       selected: (count: number) => `패밀리 ${count}개 선택됨`,
       excludeSelected: "선택 항목 제외",
+      finishRolloutSelected: (items: number) => `롤아웃 완료 (${items})`,
       reopenSelected: "선택 항목 재검토",
     },
     table: {
@@ -268,6 +291,7 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       supersededBy: (model: string) => `상위 버전 서비스 중: ${model}`,
       days: (days: number) => `${days}일`,
       recordValidationTitle: "이 검증을 완료로 기록합니다",
+      finishRollout: "롤아웃 완료",
       adopt: "채택",
       imageDraft: "카탈로그 초안",
       noImageAdapter: (provider: string) => `이미지 어댑터 없음 (${provider})`,

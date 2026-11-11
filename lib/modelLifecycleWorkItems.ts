@@ -24,6 +24,7 @@ import {
     type ModelObservation,
     type SuppressedCandidate,
     ADOPTION_RECORD_STATUSES,
+    isRolloutFinishable,
     workItemDecisionRecordRefusal,
     workItemDecisionTarget,
     workItemTimestampField,
@@ -785,6 +786,88 @@ export async function transitionWorkItem(
     return { ok: true, status: result.status };
 }
 
+/**
+ * Closes adopted items whose model is already live, in one step, by a person.
+ *
+ * The walk is the same one an operator could make with three requests --
+ * validations ticked, `rollout_pending`, `completed` -- in one transaction, so a
+ * refusal halfway leaves every item where it was. An item that owes users a
+ * notice stops at `communication_pending`, as the state machine requires. The
+ * caller checks `isRolloutFinishable` against the queue first.
+ */
+export async function finishServedRollouts(
+    tx: Prisma.TransactionClient,
+    input: { workItemIds: readonly string[]; actorEmail: string; note: string; now?: Date }
+): Promise<
+    | { ok: true; completed: number; awaitingNotice: number }
+    | Extract<BulkWorkItemTransitionResult, { ok: false }>
+> {
+    const now = input.now ?? new Date();
+    const ids = Array.from(new Set(input.workItemIds)).sort();
+    const rows = await tx.$queryRaw<
+        Array<{
+            id: string;
+            status: string;
+            pendingValidations: Prisma.JsonValue | null;
+            communicationRequired: boolean;
+        }>
+    >(Prisma.sql`
+        SELECT "id", "status", "pendingValidations", "communicationRequired"
+        FROM "ModelLifecycleWorkItem"
+        WHERE "id" IN (${Prisma.join(ids)})
+        ORDER BY "id"
+        FOR UPDATE
+    `);
+    for (const row of rows) {
+        const pending = stringList(row.pendingValidations);
+        if (pending.length === 0) continue;
+        await tx.modelLifecycleWorkItem.update({
+            where: { id: row.id },
+            data: { pendingValidations: [] },
+        });
+        await tx.modelLifecycleWorkItemEvent.create({
+            data: {
+                workItemId: row.id,
+                occurredAt: now,
+                actorEmail: input.actorEmail,
+                fromStatus: row.status,
+                toStatus: row.status,
+                note: `Validation satisfied: ${pending.join(", ")}. ${input.note}`,
+            },
+        });
+    }
+    const steps: Array<{ ids: string[]; to: WorkItemStatus }> = [
+        {
+            ids: rows.filter((row) => row.status === "validation_pending").map((row) => row.id),
+            to: "rollout_pending",
+        },
+        {
+            ids: rows.filter((row) => !row.communicationRequired).map((row) => row.id),
+            to: "completed",
+        },
+        {
+            ids: rows.filter((row) => row.communicationRequired).map((row) => row.id),
+            to: "communication_pending",
+        },
+    ];
+    for (const step of steps) {
+        if (step.ids.length === 0) continue;
+        const moved = await transitionWorkItemsInTransaction(tx, {
+            workItemIds: step.ids,
+            to: step.to,
+            actorEmail: input.actorEmail,
+            note: input.note,
+            now,
+        });
+        if (!moved.ok) return moved;
+    }
+    return {
+        ok: true,
+        completed: steps[1].ids.length,
+        awaitingNotice: steps[2].ids.length,
+    };
+}
+
 export type OpenWorkItem = {
     id: string;
     provider: string;
@@ -805,6 +888,8 @@ export type ModelDiscoveryQueueItem = OpenWorkItem & {
     servedByTomverse: boolean;
     /** The served model that is a later generation of this one's line. */
     supersededBy: string | null;
+    /** Adopted, already served, stalled before rollout (`isRolloutFinishable`). */
+    rolloutFinishable: boolean;
     /** Verifications still owed before this item may be rolled out. */
     pendingValidations: string[];
     familyKey: string;
@@ -1380,11 +1465,18 @@ export async function listModelDiscoveryQueue(options?: {
             .find((value): value is string => Boolean(value)) ?? null;
         const familyKey = decisionIdentity(row.apiModel);
         const servedByTomverse = servedFamilies.has(familyKey);
+        const rolloutFinishable = isRolloutFinishable({
+            action: row.action,
+            status: row.status,
+            servedByTomverse,
+        });
         // A retirement is about a model Tomverse serves, so its own line will
         // always contain it. Asking whether it is superseded would answer yes
-        // about itself and bury the one item in this queue that is urgent.
+        // about itself and bury the one item in this queue that is urgent. An
+        // adopted item whose model is live is the same case: its successor
+        // would be itself.
         const supersededBy =
-            row.action === "retire"
+            row.action === "retire" || rolloutFinishable
                 ? null
                 : supersedingServedModel(row.apiModel, servedApiModels);
         const assessment = assessModelLifecycleItem({
@@ -1407,6 +1499,7 @@ export async function listModelDiscoveryQueue(options?: {
                 waveByGenerationFamily.get(
                     modelGenerationFamily(row.apiModel).family
                 ) ?? [],
+            rolloutFinishable,
         });
         return {
             id: row.id,
@@ -1424,6 +1517,7 @@ export async function listModelDiscoveryQueue(options?: {
             lifecycle,
             servedByTomverse,
             supersededBy,
+            rolloutFinishable,
             pendingValidations: stringList(row.pendingValidations),
             familyKey,
             familySize: familyCounts.get(familyKey) ?? 1,

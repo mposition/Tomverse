@@ -158,6 +158,31 @@ export const REOPENABLE_WORK_ITEM_STATUSES: ReadonlySet<WorkItemStatus> = new Se
     "closed_no_action",
 ]);
 
+/**
+ * Where an adopted model's item stalls once the model is live: adoption walks
+ * it to `validation_pending` and nothing in the discovery queue walked it on.
+ * 26 production items sat there for up to 50 days (cleared by hand
+ * 2026-11-11), each read as "a later version is served" -- itself.
+ */
+export const ROLLOUT_FINISHABLE_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
+    "validation_pending",
+    "rollout_pending",
+]);
+
+/**
+ * Whether an operator can close this item as rolled out in one step: an `add`
+ * whose model the registry (or image ledger) already serves, stalled after
+ * adoption. The person still decides; this only says the button applies.
+ */
+export const isRolloutFinishable = (item: {
+    action: string;
+    status: string;
+    servedByTomverse: boolean;
+}) =>
+    item.action === "add" &&
+    item.servedByTomverse &&
+    ROLLOUT_FINISHABLE_STATUSES.has(item.status as WorkItemStatus);
+
 export type WorkItemTransitionInput = {
     from: WorkItemStatus;
     to: WorkItemStatus;

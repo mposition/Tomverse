@@ -771,3 +771,20 @@ test("a half-written sighting is dropped rather than halved", () => {
     [{ provider: "groq", apiModel: "llama-4.2-70b" }]
   );
 });
+
+test("only an adopted, served add stalled before rollout can be closed as rolled out", async () => {
+  const { isRolloutFinishable, ROLLOUT_FINISHABLE_STATUSES } = await import(
+    "../lib/modelLifecycleWorkItemCore.ts"
+  );
+  assert.deepEqual([...ROLLOUT_FINISHABLE_STATUSES].sort(), ["rollout_pending", "validation_pending"]);
+  const base = { action: "add", status: "validation_pending", servedByTomverse: true };
+  assert.equal(isRolloutFinishable(base), true);
+  assert.equal(isRolloutFinishable({ ...base, status: "rollout_pending" }), true);
+  // Not served yet: the validations are real work, not a stale record.
+  assert.equal(isRolloutFinishable({ ...base, servedByTomverse: false }), false);
+  // Undecided, notice owed, closed, or a retirement: other paths own these.
+  for (const status of ["discovered", "approved", "communication_pending", "completed", "closed_no_action"]) {
+    assert.equal(isRolloutFinishable({ ...base, status }), false, status);
+  }
+  assert.equal(isRolloutFinishable({ ...base, action: "retire" }), false);
+});
