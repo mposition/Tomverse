@@ -62,6 +62,11 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    (`evidence_unavailable`). 선택지는 `approve`(done, `v4TerminalAt`), `retry`(시도
    예산 안에서 todo, 넘으면 blocked), `block`(blocked, 사람 escalation 유지)이다. 세 단어가 아닌 답은 사람에게
    넘긴다. 사람이 먼저 답하면 검토 행은 취소된다. 카드를 올리는 것이 DM 호출을 부르므로 켜는 것은 운영자 몫이다.
+   엔지니어링 에이전트의 T2 초안(운영자 결정 2026-11-11, `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW=enabled`, 기본 꺼짐)도
+   같은 tick 마지막에 `engineering-t2-review` 카드로 올라간다. 초안 id가 질문 id이고 `EngineeringAgentDmReview`가
+   카드를 기록한다. 카드에는 파일 목록 전체와 들어가는 만큼의 파일 diff(통째로)를 싣고 빠진 파일 수를 적는다. 선택지는
+   `apply`(사람이 직접 적용)·`reject`이며 **조언일 뿐**이다. Admin 결정 대기 화면에 답과 근거를 보여 줄 뿐 초안을
+   승인·거절·적용하지 않고, 확정된 답은 세션에 전달되지 않으며 DM 승인자(§2-1)도 적용하지 않는다.
 3. **investigate 결론(`TOMVERSE_AMUX_V22_CONCLUSION`, 기본 `off`, `prompt`·`auto`).** investigate(verify 포함)
    실행은 마지막 줄에 `AMUX_CONCLUSION:` JSON(`verdict` `proceed`·`replan`·`stop`·`needs_owner`, `findings`,
    `handoff`, `evidence`)을 낸다. 앱은 결과 저장 때 형식만 검사해 verdict와 digest를 남긴다. `auto`에서

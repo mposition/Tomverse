@@ -88,11 +88,13 @@ export type EngineeringAgentOwnerItemContext = {
     createdAt: string;
   } | null;
   /**
-   * The Decision Maker's review of the run's result. Not filed: the result
-   * was never put to it (only a result without a patch is, today).
+   * The Decision Maker's review of the run's result, or for a T2 draft its
+   * advice on the patch (kind `t2_advice`; lib/engineeringAgentT2DmReviewService.ts).
+   * Not filed: nothing was put to it yet.
    */
   dm:
-    | { filed: false }
+    /** `unfilable`: a T2 draft whose patch did not fit a card, recorded once. */
+    | { filed: false; unfilable?: boolean }
     | {
         filed: true;
         kind: string;
@@ -219,6 +221,27 @@ async function readOwnerItemContexts(
     ),
   );
 
+  // A T2 draft's advice card (TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW).
+  const draftIds = items.filter((item) => item.kind === "t2_draft").map((item) => item.id);
+  const advice = draftIds.length
+    ? await prisma.engineeringAgentDmReview.findMany({
+        where: { workItemId: { in: draftIds } },
+        select: { workItemId: true, localCardId: true, unfilableAt: true, localCardClosedAt: true },
+      })
+    : [];
+  const adviceStates = new Map(
+    await Promise.all(
+      advice.flatMap((row) => {
+        const cardId = row.localCardId;
+        if (cardId === null) return [];
+        return [(async () => {
+          const state: AmuxV22QuestionDm = !canReadDm ? { state: "restricted" } : await readAmuxDmLocalCardState(cardId);
+          return [row.workItemId, state] as const;
+        })()];
+      }),
+    ),
+  );
+
   const contexts = new Map<string, EngineeringAgentOwnerItemContext>();
   for (const item of items) {
     const run = runs.find((row) => row.id === runIdOf(item));
@@ -226,6 +249,7 @@ async function readOwnerItemContexts(
     const files = item.kind === "t2_draft" && item.patchBody !== null ? engineeringAgentPatchFiles(item.patchBody) : [];
     const review = run.attempt.v52ReviewRecord;
     const resultReview = run.attempt.v22ResultReview;
+    const draftAdvice = item.kind === "t2_draft" ? advice.find((row) => row.workItemId === item.id) : undefined;
     contexts.set(item.id, {
       card: {
         id: run.card.id,
@@ -257,7 +281,18 @@ async function readOwnerItemContexts(
             createdAt: review.createdAt.toISOString(),
           }
         : null,
-      dm: resultReview
+      dm: draftAdvice?.unfilableAt
+        ? { filed: false, unfilable: true }
+        : draftAdvice
+        ? {
+            filed: true,
+            kind: "t2_advice",
+            state: draftAdvice.localCardClosedAt ? "closed" : "open",
+            decision: null,
+            answerSource: null,
+            detail: adviceStates.get(item.id) ?? { state: "unavailable" },
+          }
+        : resultReview
         ? {
             filed: true,
             kind: resultReview.kind,
