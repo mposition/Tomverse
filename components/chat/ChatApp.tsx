@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChatPanelLocationIntent } from "@/lib/chatLocationClient";
+import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
@@ -253,7 +253,7 @@ type ChatAppProps = {
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
     preparedLocationIntent?: ChatPanelLocationIntent;
-    routerLocationTurnIsCurrent?: () => boolean;
+    routerLocationTurn?: RouterLocationTurn;
     id: string;
     text: string;
     chatId: string;
@@ -1518,7 +1518,7 @@ function ChatAppComponent({
     preparationTimings?: ClientLatencyStages,
     preparationReadyAtMonotonicMs?: number,
     preparedLocationIntent?: ChatPanelLocationIntent,
-    routerLocationTurnIsCurrent?: () => boolean,
+    routerLocationTurn?: RouterLocationTurn,
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1916,11 +1916,11 @@ function ChatAppComponent({
         // Human permission and guest verification happen before provider wait
         // time starts. The same source turn is continued after either prompt.
         liveness.stop();
-        const fuseLocation = !recoverWithSavedLocation && routerLocationTurnIsCurrent && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
+        const fuseLocation = !recoverWithSavedLocation && routerLocationTurn && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
           !deepResearchDepth && !reviewProvider && !isGuestMode && chatLocationIntentEnabled &&
           chatLocationSession.canPrepareIntent(panelIdentityKey);
         const checkLocationTurn = () => {
-          if ((fuseLocation || recoverWithSavedLocation) && routerLocationTurnIsCurrent && !routerLocationTurnIsCurrent()) controller.abort();
+          if ((fuseLocation || recoverWithSavedLocation) && routerLocationTurn && !routerLocationTurn.isCurrent()) controller.abort();
           controller.signal.throwIfAborted();
         };
         checkLocationTurn();
@@ -2007,8 +2007,9 @@ function ChatAppComponent({
           body: JSON.stringify({ ...requestBody, ...fields }),
           signal: controller.signal,
         });
+        const fusionFields = { routerLocationFusion: true, ...(routerLocationTurn?.scope === "existing" ? { routerLocationScope: "existing" } : {}) };
         let res = fuseLocation
-          ? await post(ROUTER_LOCATION_ROUTE, { routerLocationFusion: true })
+          ? await post(ROUTER_LOCATION_ROUTE, fusionFields)
           : await post("/api/chat", locationFields(turnLocation));
         const locationRequest = fuseLocation ? await readRouterLocationRequest(res) : null;
         if (locationRequest) {
@@ -2020,7 +2021,7 @@ function ChatAppComponent({
           liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
           if (locationRequest.continuation) {
             res = await post(ROUTER_LOCATION_ROUTE, { ...locationFields(fix),
-              routerLocationFusion: true, routerLocationContinuation: locationRequest.continuation });
+              ...fusionFields, routerLocationContinuation: locationRequest.continuation });
             await requireRouterLocationVersion(res);
           } else {
             res = await post("/api/chat", locationFields(fix));
@@ -3134,7 +3135,7 @@ function ChatAppComponent({
           promptPayload.preparationTimings,
           promptPayload.preparationReadyAtMonotonicMs,
           promptPayload.preparedLocationIntent,
-          promptPayload.routerLocationTurnIsCurrent,
+          promptPayload.routerLocationTurn,
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });

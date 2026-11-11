@@ -607,3 +607,25 @@ test("fresh location prices the authored 8k and reuses its dated search decision
     assert.equal(holds.length, 2);
   } finally { generateRouterResult = original; }
 });
+
+test("follow-up location and execution decisions share one request but keep their input texts distinct", async t => {
+  const original = generateRouterResult;
+  const log = t.mock.method(console, "info", () => {});
+  const authored = "What is the forecast in Brisbane?";
+  const previousAnswer = "I can check restaurants near your device.";
+  try {
+    generateRouterResult = () => ({ output: { ...routerOutput, requiresLocation: false }, usage: { inputTokens: 100, outputTokens: 20 } });
+    routerRequests.length = 0;
+    const result = await pick(undefined, true, {
+      prompt: "Summarize the latest forecast.", previousAnswer,
+      locationFusion: { scope: "existing", authoredText: authored, resume: null, searchUtcDate: "2026-11-11", onRouterDigest: () => {} },
+    });
+    assert.equal(routerRequests.length, 1);
+    assert.equal(result?.requiresLocation, false);
+    assert.ok(String(routerRequests[0].prompt).includes(JSON.stringify({ authoredMessage: authored })));
+    assert.ok(String(routerRequests[0].prompt).includes(previousAnswer));
+    const event = log.mock.calls.map(call => JSON.parse(String(call.arguments[0]))).find(entry => entry.event === "chat_auto_llm_router");
+    assert.equal(event?.routerLocationScope, "existing");
+    assert.ok(!JSON.stringify(event).includes(authored));
+  } finally { generateRouterResult = original; }
+});
