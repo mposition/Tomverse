@@ -1736,6 +1736,7 @@ export function ChatPageClient({
     token: string;
     identityKey: string | null;
     identityEpoch: number;
+    selectionModeRequest: number;
     originConversationId: string | null;
     recovery?: "message-receipt-unknown";
   };
@@ -6287,6 +6288,7 @@ export function ChatPageClient({
       token: crypto.randomUUID(),
       identityKey,
       identityEpoch: submitFence.epoch,
+      selectionModeRequest: selectionModeRequestSeqRef.current,
       // Preparing Smart Adaptive creates and selects the owned Chat before
       // this recursive submit starts, but the user's send still originated
       // from the blank workspace. Treating that just-created id as an
@@ -6957,7 +6959,6 @@ export function ChatPageClient({
         !historyForFusion.some(message => message.attachments?.length);
       const fusionScope = fuseExistingTurn ? "existing" : canFuseLocation && chatRouterLocationFusion &&
         submitOwner.originConversationId === null && suppliedPreparedDraft && !requestAutoPrepare && !explicitPromptRefinerDecision ? "fresh" : null;
-      const fusionModeRequest = selectionModeRequestSeqRef.current;
       const locationPreparation = !freshLocation && !fuseExistingTurn && chatParallelPreparationEnabled && chatLocationIntentEnabled &&
         requestAutoPrepare && preparedDraft && promptRefinerProductScope && !imageTurnSend
         ? chatLocationSession.prepareIntent(identityKey, authoredPrompt,
@@ -7474,7 +7475,8 @@ export function ChatPageClient({
         ...(fusionScope && identityKey && messageWasSaved && savedAttachments.length === 0
           ? { routerLocationTurn: { scope: fusionScope, isCurrent: () =>
             workspaceMountedRef.current && activeChatIdentityIs(identityKey, submitOwner.identityEpoch) &&
-            committedAutoSendScopeRef.current?.selectionMode === "auto" && selectionModeRequestSeqRef.current === fusionModeRequest &&
+            committedAutoSendScopeRef.current?.selectionMode === "auto" &&
+            selectionModeRequestSeqRef.current === submitOwner.selectionModeRequest &&
             chatPreparedSendIsCurrent({
               identityKey, currentIdentityKey: identityNamespaceKey(identityNamespaceRef.current),
               conversationId: activeChatId, currentConversationId: currentChatIdRef.current,
