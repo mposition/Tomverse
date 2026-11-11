@@ -29,6 +29,14 @@ def main():
     real_run = subprocess.run
     real_tmux = os.environ.get("TMUX")
     os.environ["TMUX"] = "/tmp/tmux-test/default,1,0"
+    # AMUX-4602 made an env file the proof of a lane, so the control needs one;
+    # without it the control failed and every negative case passed vacuously.
+    import tempfile
+    real_home = os.environ.get("AMUX_HOME")
+    fake_home = tempfile.mkdtemp(prefix="asg-test-")
+    os.makedirs(os.path.join(fake_home, "sessions"))
+    open(os.path.join(fake_home, "sessions", "mixpeek-research.env"), "w").close()
+    os.environ["AMUX_HOME"] = fake_home
 
     # CONTROL FIRST: an amux-prefixed pane name DOES resolve, so a matcher that
     # silently always returns "" cannot hide behind an all-negative suite.
@@ -70,10 +78,13 @@ def main():
         failures.append(f"outside a pane the most recent tmux session must not be claimed: got {got!r}")
 
     subprocess.run = real_run
-    if real_tmux is None:
-        os.environ.pop("TMUX", None)
-    else:
-        os.environ["TMUX"] = real_tmux
+    for key, value in (("TMUX", real_tmux), ("AMUX_HOME", real_home)):
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    import shutil
+    shutil.rmtree(fake_home, ignore_errors=True)
 
     # GUARD_VERSION must have moved off the pre-fix baseline, or every already-
     # installed copy on this machine reads as current and never re-syncs (the
