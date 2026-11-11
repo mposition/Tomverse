@@ -366,6 +366,12 @@ test("sources must be the provider's own https documentation", () => {
   assert.equal(isOfficialSourceUrl("google", "https://aistudio.google.com/docsx/pricing"), false);
   assert.equal(isOfficialSourceUrl("google", "https://aistudio.google.com/docs/../apps/x"), false);
   assert.equal(isOfficialSourceUrl("google", "https://ai.google.dev/gemini-api/docs/pricing"), true);
+  // QwenCloud: pricing path and the docs host only.
+  assert.equal(isOfficialSourceUrl("qwen", "https://www.qwencloud.com/pricing/api?region=ap-southeast-1"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://docs.qwencloud.com/developer-guides/getting-started/model-prices"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://www.qwencloud.com/models"), false);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwencloud.com/pricing/api"), false);
+  assert.equal(isOfficialSourceUrl("openai", "https://www.qwencloud.com/pricing/api"), false);
 });
 
 test("the registry lookups read the active catalogue and fall back to the seed", () => {
