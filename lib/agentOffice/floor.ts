@@ -26,6 +26,19 @@ export const AGENT_OFFICE_CHANNELS = ["claude", "codex", "copilot", "cursor"] as
 export type AgentOfficeChannel = (typeof AGENT_OFFICE_CHANNELS)[number];
 
 /**
+ * The quota card's rows: every island channel, then the channels that have
+ * no island on the floor yet (Antigravity since 2026-11-11). Its workers
+ * still sit in the roster and the shared zones; only the card reads them.
+ */
+export const AGENT_OFFICE_QUOTA_CHANNELS = [...AGENT_OFFICE_CHANNELS, "antigravity"] as const;
+export type AgentOfficeQuotaChannel = (typeof AGENT_OFFICE_QUOTA_CHANNELS)[number];
+
+/** A worker's quota-card row from its provider label, or null. */
+export function agentOfficeQuotaChannel(provider: string): AgentOfficeQuotaChannel | null {
+  return agentOfficeChannel(provider) ?? (provider === "antigravity" ? "antigravity" : null);
+}
+
+/**
  * A worker's channel from its provider label (lib/agentOfficeAmuxState.ts
  * labels provider classes as the display roster does). A provider with no
  * island is null: it is listed in the roster and counted on the floor.
