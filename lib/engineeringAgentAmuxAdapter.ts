@@ -603,8 +603,8 @@ export async function recordEngineeringAgentPublisherResult(input: {
 }
 
 /**
- * A person's action on an open `review_pr` state mismatch (engineering-agent.md
- * §11, owner decision 2026-11-11): AMUX's review pull request writer puts the
+ * A person's action on an open `review_pr` state mismatch
+ * (docs/policy/engineering-agent.md §11, owner decision 2026-11-11): AMUX's review pull request writer puts the
  * run's one current binding's number on the card, and the mismatch is
  * resolved in that same transaction. The writer locks the audit chain and the
  * card and re-checks it (in review, this run's attempt still the latest and
