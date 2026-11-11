@@ -147,6 +147,11 @@ export function AdminModelCatalogPanel() {
       | { error?: string; reasons?: string[]; detail?: string | null }
       | null;
     if (!response.ok) {
+      // The route answers 404 only when the admin session is gone or expired.
+      if (response.status === 404) {
+        setNotice(m.sessionExpired);
+        return false;
+      }
       setNotice(m.refused(payload?.error ?? String(response.status), (payload?.reasons ?? []).join(", ") || (payload?.detail ?? "")));
       return false;
     }
