@@ -6957,6 +6957,7 @@ export function ChatPageClient({
         !historyForFusion.some(message => message.attachments?.length);
       const fusionScope = fuseExistingTurn ? "existing" : canFuseLocation && chatRouterLocationFusion &&
         submitOwner.originConversationId === null && suppliedPreparedDraft && !requestAutoPrepare && !explicitPromptRefinerDecision ? "fresh" : null;
+      const fusionModeRequest = selectionModeRequestSeqRef.current;
       const locationPreparation = !freshLocation && !fuseExistingTurn && chatParallelPreparationEnabled && chatLocationIntentEnabled &&
         requestAutoPrepare && preparedDraft && promptRefinerProductScope && !imageTurnSend
         ? chatLocationSession.prepareIntent(identityKey, authoredPrompt,
@@ -7472,7 +7473,8 @@ export function ChatPageClient({
         preparedLocationIntent: (messageWasSaved && freshLocation) ? freshLocation.handoff() : preparedLocationIntent,
         ...(fusionScope && identityKey && messageWasSaved && savedAttachments.length === 0
           ? { routerLocationTurn: { scope: fusionScope, isCurrent: () =>
-            workspaceMountedRef.current && activeChatIdentityIs(identityKey, submitOwner.identityEpoch) && selectionModeRef.current === "auto" &&
+            workspaceMountedRef.current && activeChatIdentityIs(identityKey, submitOwner.identityEpoch) &&
+            committedAutoSendScopeRef.current?.selectionMode === "auto" && selectionModeRequestSeqRef.current === fusionModeRequest &&
             chatPreparedSendIsCurrent({
               identityKey, currentIdentityKey: identityNamespaceKey(identityNamespaceRef.current),
               conversationId: activeChatId, currentConversationId: currentChatIdRef.current,
