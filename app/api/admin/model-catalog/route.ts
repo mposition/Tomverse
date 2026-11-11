@@ -26,7 +26,7 @@ import {
   storeCatalogDraft,
   updateCatalogEntry,
 } from "@/lib/modelCatalogAdmin";
-import { defaultPriceSources, judgeVideoModel, MODEL_ID_PATTERN, STORED_CATALOG_CATEGORIES } from "@/lib/modelCatalogCore";
+import { defaultPriceSources, imageFullProfileSchema, judgeVideoModel, MODEL_ID_PATTERN, STORED_CATALOG_CATEGORIES } from "@/lib/modelCatalogCore";
 import {
   catalogDraftLlmFromEnv,
   DraftRefusal,
@@ -199,6 +199,16 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
+    // A runtime image model gets its request profile from the same form, so
+    // the operator can apply the draft without saving a profile first.
+    const imageProfile =
+      body.category === "image" && !IMAGE_MODEL_REGISTRY.some((model) => model.id === body.modelId)
+        ? runtimeImageProfileTemplate(body.provider, body.apiModelId)
+        : undefined;
+    // Checked before the paid call, so a bad form fails for free.
+    if (imageProfile !== undefined && !imageFullProfileSchema.safeParse(imageProfile).success) {
+      return NextResponse.json({ error: "invalid_profile", detail: body.provider }, { status: 400 });
+    }
     const sourceUrls = body.sourceUrls.length > 0 ? body.sourceUrls : defaultPriceSources(body.provider);
     if (sourceUrls.length === 0) return NextResponse.json({ error: "no_default_source", detail: body.provider }, { status: 422 });
     const pages = [];
@@ -207,12 +217,6 @@ export async function POST(req: Request) {
       body.category === "image"
         ? await llm.draftImagePrices({ provider: body.provider, apiModelId: body.apiModelId, pages })
         : await llm.draftCodingProfile({ provider: body.provider, apiModelId: body.apiModelId, pages });
-    // A runtime image model gets its request profile from the same form, so
-    // the operator can apply the draft without saving a profile first.
-    const imageProfile =
-      body.category === "image" && !IMAGE_MODEL_REGISTRY.some((model) => model.id === body.modelId)
-        ? runtimeImageProfileTemplate(body.provider, body.apiModelId)
-        : undefined;
     await storeCatalogDraft({ category: body.category, modelId: body.modelId, draft, imageProfile, session, request: req });
     return NextResponse.json({ ok: true, draft });
   } catch (error) {
