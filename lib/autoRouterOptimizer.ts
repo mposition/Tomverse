@@ -51,6 +51,7 @@ import {
     guidanceRejection,
     optimizerAnswerOptions,
     optimizerCallFailureDetail,
+    traceOptimizerCall,
     summarizeRouterDecisions,
     unreliableAnswerModels,
     syntheticCaseViews,
@@ -631,19 +632,8 @@ async function runInBackground(input: {
     // A failed call costs nothing in the cycle's count and otherwise leaves no
     // trace; its shape is logged so a failed cycle names its cause. Never the
     // content: synthetic messages and answers appear in logs by length only.
-    const traced = async <T>(kind: OptimizerCallKind, run: () => Promise<T>) => {
-        try {
-            return await run();
-        } catch (error) {
-            console.warn(JSON.stringify({
-                event: "auto_router_optimizer_call_failed",
-                cycleId: input.cycleId,
-                kind,
-                ...optimizerCallFailureDetail(error),
-            }));
-            throw error;
-        }
-    };
+    const traced = <T>(kind: OptimizerCallKind, run: () => Promise<T>, model = kind === "route" ? input.routerModel : input.optimizerModel) =>
+        traceOptimizerCall({ event: "auto_router_optimizer_call_failed", cycleId: input.cycleId, kind, modelId: model.id, provider: model.provider }, run);
     // `generated.output` throws when the text does not parse as the schema --
     // after the call was paid. Read here, outside `traced`, it used to make
     // the call count as failed with no log and no cost; now the cost stays
@@ -830,7 +820,7 @@ async function runInBackground(input: {
                         model: getActiveAiModel(model),
                         abortSignal: AbortSignal.timeout(timeoutMs),
                         ...options,
-                    }));
+                    }), model);
                     if (!generated.text.trim()) {
                         console.warn(JSON.stringify({
                             event: "auto_router_optimizer_answer_empty",

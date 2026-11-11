@@ -39,6 +39,7 @@ import {
     callCostMicroUsd,
     optimizerAnswerOptions,
     optimizerCallFailureDetail,
+    traceOptimizerCall,
     optimizerCycleView,
     parseJudgeWinner,
     promotedRouterGuidance,
@@ -233,19 +234,8 @@ async function runInBackground(input: {
 }): Promise<OptimizerRunOutcome> {
     // As in the routing cycle: a failed call is logged by shape and rethrown
     // (it then costs nothing in the cycle's count); content never reaches a log.
-    const traced = async <T>(kind: OptimizerCallKind, run: () => Promise<T>) => {
-        try {
-            return await run();
-        } catch (error) {
-            console.warn(JSON.stringify({
-                event: "auto_rewrite_optimizer_call_failed",
-                cycleId: input.cycleId,
-                kind,
-                ...optimizerCallFailureDetail(error),
-            }));
-            throw error;
-        }
-    };
+    const traced = <T>(kind: OptimizerCallKind, run: () => Promise<T>, model = kind === "route" ? input.routerModel : input.optimizerModel) =>
+        traceOptimizerCall({ event: "auto_rewrite_optimizer_call_failed", cycleId: input.cycleId, kind, modelId: model.id, provider: model.provider }, run);
     // An output that does not parse was still paid for: it reads as null and
     // the cost stays counted.
     const outputOf = (
@@ -392,7 +382,7 @@ async function runInBackground(input: {
                         model: getActiveAiModel(model),
                         abortSignal: AbortSignal.timeout(timeoutMs),
                         ...options,
-                    }));
+                    }), model);
                     return {
                         value: generated.text,
                         costMicroUsd: cost(prices, generated.usage),
