@@ -62,6 +62,9 @@ if (!runArg || !locale || !["--stills", "--out"].includes(mode ?? "")) usage();
 const run = path.resolve(runArg);
 const inside = (file) => !path.relative(run, file).startsWith("..") && !path.isAbsolute(path.relative(run, file));
 if (!/^[a-zA-Z-]{2,7}$/u.test(locale)) usage();
+// Checked before bundling: usage() exits, which would skip the bundle cleanup.
+const out = mode === "--out" ? path.resolve(value ?? "") : null;
+if (out !== null && (!value || !inside(out) || !out.endsWith(".mp4"))) usage();
 
 const problems = await checkFilmSource(path.join(run, "film"));
 if (problems.length > 0) {
@@ -99,9 +102,12 @@ registerRoot(Root);
 `,
 );
 
+// bundle() copies the run's public media into a fresh temp folder and never
+// removes it: 65 left behind filled the box's /tmp quota (EDQUOT, 2026-11-11).
+let serveUrl = null;
 try {
   const inputProps = JSON.parse(readFileSync(path.join(run, "public", `props-${locale}.json`), "utf8"));
-  const serveUrl = await bundle({ entryPoint: entry, publicDir: path.join(run, "public") });
+  serveUrl = await bundle({ entryPoint: entry, publicDir: path.join(run, "public") });
   const composition = await selectComposition({ serveUrl, id: "Creative", inputProps });
 
   if (mode === "--stills") {
@@ -118,8 +124,6 @@ try {
     }
     console.log(JSON.stringify({ step: "render-creative", locale, stills: files }));
   } else {
-    const out = path.resolve(value ?? "");
-    if (!value || !inside(out) || !out.endsWith(".mp4")) usage();
     mkdirSync(path.dirname(out), { recursive: true });
     const raw = `${out}.raw.mp4`;
     await renderMedia({ composition, serveUrl, codec: "h264", outputLocation: raw, inputProps });
@@ -130,5 +134,9 @@ try {
 } catch (error) {
   // The error's first line only: a bundling error names the film's file and line.
   console.log(JSON.stringify({ step: "render-creative", error: String(error?.message ?? error).split("\n").slice(0, 6).join("\n") }));
-  process.exit(1);
+  process.exitCode = 1;
+} finally {
+  if (serveUrl) rmSync(serveUrl, { recursive: true, force: true });
 }
+// Exit now: a browser Remotion left open must not keep a failed render alive.
+if (process.exitCode) process.exit(process.exitCode);
