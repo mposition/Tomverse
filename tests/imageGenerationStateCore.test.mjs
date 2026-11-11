@@ -170,6 +170,7 @@ test("a failed settlement is its own failure phase, not a provider failure", () 
   // write for it was lost. Both refund; only one is the provider's problem.
   assert.ok(IMAGE_GENERATION_FAILURE_PHASES.includes("settlement_failed"));
   assert.ok(IMAGE_GENERATION_FAILURE_PHASES.includes("provider_failed"));
+  assert.ok(IMAGE_GENERATION_FAILURE_PHASES.includes("provider_output_invalid"));
   assert.notEqual("settlement_failed", "provider_failed");
 });
 
