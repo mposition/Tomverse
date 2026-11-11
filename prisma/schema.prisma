@@ -1552,7 +1552,7 @@ model ChatResponseAttempt {
   @@index([sourceUserMessageId])
 }
 
-/// One Router call per fresh saved answer while its location decision can be resumed.
+/// One Router call per fresh saved question while its location decision can be resumed.
 /// The browser holds the sealed decision. This row contains only its binding and expiry.
 model ChatRouterLocationPreparation {
   conversationId      String
@@ -1564,7 +1564,7 @@ model ChatRouterLocationPreparation {
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@id([conversationId, sourceUserMessageId, assistantMessageId])
+  @@id([conversationId, sourceUserMessageId])
   @@index([expiresAt])
 }
 

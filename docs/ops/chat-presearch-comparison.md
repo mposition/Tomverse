@@ -21,3 +21,6 @@ Each row shows the selected answer model and whether the router offered a plan, 
 `sourceCards` counts citations in the normalized response metadata. `mentionedSources` counts distinct returned source URLs literally present in the answer text, including Markdown links. `mentionedInjectedSources` restricts the latter count to injected sources. Numeric markers, paraphrases and source entailment require separate answer review. Whether one search depends on a previous fact also requires a controlled fixture or a review of the paired answers.
 
 The report gives equal-weight paired distributions for authorized, completed and selection-eligible turns and a second view restricted to the same selected model. Each metric includes both arms only when both measurements are present. `firstMs` and `completionMs` use signed browser observations. Server first enqueue and server settlement have their own fields. Negative `onMinusOff` values mean the ON value was smaller. Percentiles use nearest rank. Review the per-arm outcome, missing events, mismatched flags and client coverage alongside the aggregate. An injected result can lead to the same number of model calls in both arms.
+
+For each browser metric, `within10s` reports the number of OFF and ON observations
+at or below 10,000 ms and the shared denominator `observedPairs`.

@@ -1634,7 +1634,7 @@ const ask = async (
   behaviour: "answers" | "silent" | "partial" | "completion_wait",
   claimMode: "claimed" | "reattach" | "reattach-completed" | "conflict" = "claimed",
   expectedStatus = 200,
-  withContextBundle = false,
+  withContextBundle: boolean | string = false,
   requestMessages: Array<Record<string, unknown>> = [
     { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
   ],
@@ -1718,7 +1718,7 @@ const ask = async (
         ...(includeSourceUserMessageId
           ? { sourceUserMessageId: SOURCE_USER_MESSAGE_ID }
           : {}),
-        ...(withContextBundle ? { contextBundle: "signed-test-bundle" } : {}),
+        ...(withContextBundle ? { contextBundle: typeof withContextBundle === "string" ? withContextBundle : "signed-test-bundle" } : {}),
         ...(refinerDecision ? { promptRefinerDecision: { suggestionId: REFINER_SUGGESTION_ID,
           scopeId: REFINER_SCOPE_ID, epoch: 1, decision: refinerDecision } } : {}),
       }),
@@ -3919,7 +3919,7 @@ test("pre-Router context checks never load memory for a locked or missing owned 
   } finally { contextConversationAccess = "owned"; llmRouterRewrite = null; }
 });
 
-test("fresh Router location continues a negative inline and resumes one paid pick exactly once after consent", async () => {
+test("fresh Router location continues a negative inline and resumes one paid pick exactly once after consent", async t => {
   const env = { ...process.env };
   process.env.CHAT_ROUTER_LOCATION_FUSION_ENABLED = "true";
   process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED = "true";
@@ -3955,6 +3955,7 @@ test("fresh Router location continues a negative inline and resumes one paid pic
     assert.equal(ledger.accessAcquisitions, 1);
     assert.equal(paidRouterCalls, 1);
     fusionReceipt = null;
+    t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-10T23:59:58Z") });
     fusedLocationRequired = true;
     const positive = await ask("answers");
     assert.equal(positive.response.headers.get("X-Chat-Response-Mode"), "router-location");
@@ -3969,12 +3970,14 @@ test("fresh Router location continues a negative inline and resumes one paid pic
     await ask("answers", "claimed", 409);
     assert.equal(paidRouterCalls, 2, "replayed initial request cannot dispatch another Router");
     fusionPayload.routerLocationContinuation = continuation;
+    t.mock.timers.setTime(Date.parse("2026-11-11T00:00:02Z"));
     turnLocation = { latitude: -27.47, longitude: 153.025, accuracy: 150, timestamp: Date.now() };
     fusionRouterDigest = "b".repeat(64);
     await ask("answers", "claimed", 409);
     assert.equal(ledger.accessAcquisitions, 0);
     fusionRouterDigest = "a".repeat(64);
     const resumed = await ask("answers");
+    assert.equal(llmRouterInputs.at(-1)?.locationFusion?.searchUtcDate, "2026-11-10");
     assert.notEqual(resumed.response.headers.get("X-Chat-Response-Mode"), "router-location");
     assert.equal(resumed.response.headers.get("X-Chat-Router-Location-Version"), "1");
     assert.equal(ledger.accessAcquisitions, 1);
@@ -4000,5 +4003,58 @@ test("fresh Router location continues a negative inline and resumes one paid pic
     }
     turnLocation = undefined; fusionReceipt = null; fusionPayload = undefined; priorFusionMessage = false;
     fusedLocationRequired = undefined; fusionRouterDigest = "a".repeat(64);
+  }
+});
+
+test("only confirmed context drift after a fusion claim opts the one re-quote into ordinary saved Chat", async () => {
+  const oldFusion = process.env.CHAT_ROUTER_LOCATION_FUSION_ENABLED;
+  const oldLocation = process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED;
+  const oldFresh = process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED;
+  process.env.CHAT_ROUTER_LOCATION_FUSION_ENABLED = "true";
+  process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED = "true";
+  delete process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED;
+  try {
+    paidRouterCalls = 0;
+    fusionPayload = { routerLocationFusion: true };
+    fusedLocationRequired = false;
+    contextSequence = ["stale"];
+    const early = JSON.parse((await ask("answers", "claimed", 409, "original-quote")).body);
+    assert.equal(early.code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.equal(early.details.routerLocationRecovery, undefined);
+    assert.equal(fusionReceipt, null);
+    assert.equal(paidRouterCalls, 0);
+    contextSequence = ["ok", "stale"];
+    const late = JSON.parse((await ask("answers", "claimed", 409, "priced-before-change")).body);
+    assert.equal(late.code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.equal(late.details.routerLocationRecovery, "saved");
+    assert.ok(fusionReceipt);
+    assert.equal(paidRouterCalls, 1);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(durableClaimCalls, 0);
+    await ask("answers", "claimed", 409, "updated-quote");
+    assert.equal(paidRouterCalls, 1, "a second fusion claim is still refused");
+    fusionPayload = undefined;
+    llmRouterRewrite = "Re-evaluated under the refreshed quote.";
+    contextSequence = ["ok", "ok"];
+    const recovered = await ask("answers", "claimed", 200, "updated-quote");
+    assert.ok(recovered.body.includes(ANSWER));
+    assert.equal(paidRouterCalls, 2);
+    assert.equal(ledger.accessAcquisitions, 1);
+
+    fusionPayload = { routerLocationFusion: true };
+    fusionReceipt = null;
+    contextConsumeSucceeds = false;
+    const collision = JSON.parse((await ask("answers", "claimed", 409, "used-quote")).body);
+    assert.equal(collision.details.refusalReason, "already_consumed");
+    assert.equal(collision.details.routerLocationRecovery, "saved");
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(durableClaimCalls, 1);
+  } finally {
+    for (const [key, value] of [["CHAT_ROUTER_LOCATION_FUSION_ENABLED", oldFusion],
+      ["TOMVERSE_CHAT_LOCATION_INTENT_ENABLED", oldLocation], ["CHAT_FRESH_LOCATION_PREPARATION_ENABLED", oldFresh]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    contextSequence = []; contextConsumeSucceeds = true; llmRouterRewrite = null;
+    fusionPayload = undefined; fusionReceipt = null; fusedLocationRequired = undefined;
   }
 });

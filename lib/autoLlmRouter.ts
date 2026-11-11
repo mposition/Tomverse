@@ -90,6 +90,7 @@ type AutoLlmRouterCallInput = {
     imageIntent?: ChatImageIntentContext | null;
     searchPlan?: boolean;
     locationText?: string;
+    searchUtcDate?: string;
 };
 
 /** What the call sends, built once so its cost bound is of the same request. */
@@ -119,7 +120,7 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
             combined: true,
             followUp: imageIntent.previousImagePrompt !== null,
             attachedPhoto: imageIntent.attachedPhoto,
-        }) : "") + (input.searchPlan ? "\n\n" + routerSearchInstructions(new Date().toISOString().slice(0, 10)) : "") +
+        }) : "") + (input.searchPlan ? "\n\n" + routerSearchInstructions(input.searchUtcDate ?? new Date().toISOString().slice(0, 10)) : "") +
             (authored ? "\n\nFor requiresLocation, use the full authoredMessage if supplied, otherwise message. " + CHAT_LOCATION_INTENT_PROMPT : ""),
         prompt: autoLlmRouterUserMessage(
             input.prompt,
@@ -407,6 +408,7 @@ export async function pickAutoModelWithLlm(input: {
     verifyPreparedContext?: () => Promise<boolean>;
     locationFusion?: {
         authoredText: string;
+        searchUtcDate: string;
         resume: RouterLocationContinuation | null;
         onRouterDigest: (digest: string) => void;
     };
@@ -478,6 +480,7 @@ export async function pickAutoModelWithLlm(input: {
         rewriteGuidance: rewriteGuidance?.guidance,
         imageIntent,
         searchPlan: input.searchPlan,
+        searchUtcDate: input.searchPlan ? input.locationFusion?.searchUtcDate ?? new Date().toISOString().slice(0, 10) : undefined,
         locationText: input.locationFusion?.authoredText,
         // A rewrite needs its own longer deadline; a tuned one only ever adds to it.
         timeoutMs: Math.max(rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : timeoutMs, timeoutMs, imageIntent?.timeoutMs ?? 0),

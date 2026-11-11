@@ -2259,7 +2259,8 @@ async function handleChatPost(
             });
             return { turnContext, verification };
         };
-        const refuseContext = async (refusalReason: Extract<ReturnType<typeof verifyChatContextBundle>, { ok: false }>["reason"]) => {
+        const refuseContext = async (refusalReason: Extract<ReturnType<typeof verifyChatContextBundle>, { ok: false }>["reason"],
+            claimedInitialFusion = false) => {
             const drifted =
                 refusalReason === "stale" ||
                 refusalReason === "expired";
@@ -2277,7 +2278,7 @@ async function handleChatPost(
                       "CHAT_CONTEXT_BUNDLE_STALE",
                       409,
                       traceId,
-                      { requiresPreflight: true }
+                      { requiresPreflight: true, ...(claimedInitialFusion ? { routerLocationRecovery: "saved" } : {}) }
                   )
                 : tracedJsonError(
                       "Invalid chat context.",
@@ -2315,7 +2316,7 @@ async function handleChatPost(
                 earlyContextRefusal = response;
                 return false;
             } : undefined;
-        let fusion: { key: RouterLocationClaim; requestDigest: string; expiresAt: number; resume: RouterLocationContinuation | null } | null = null;
+        let fusion: { key: RouterLocationClaim; requestDigest: string; expiresAt: number; searchUtcDate: string; resume: RouterLocationContinuation | null } | null = null;
         if (wantsFusion && conversationId && sourceUserMessageId && assistantMessageId && session?.user?.id) {
             const userId = session.user.id;
             if (!conversationRouting) throw routerLocationRefused();
@@ -2342,7 +2343,10 @@ async function handleChatPost(
             const resume = resumeToken === undefined ? null : openRouterLocation(resumeToken, requestDigest, process.env.NEXTAUTH_SECRET!);
             if (resumeToken !== undefined && (!resume || conversationRouting.routerLocationPreparations?.[0]?.requestDigest !== requestDigest)) throw routerLocationRefused();
             const expiresAt = resume?.expiresAt ?? await claimRouterLocation(key, requestDigest);
-            fusion = { key, requestDigest, expiresAt, resume };
+            // Consent can cross UTC midnight; reconstruct the dated search
+            // prompt the Router actually read when verifying its digest.
+            const searchUtcDate = resume?.searchUtcDate ?? new Date().toISOString().slice(0, 10);
+            fusion = { key, requestDigest, expiresAt, searchUtcDate, resume };
         }
         const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
             ? { userId: session!.user!.id!, conversationId: conversationId!, text: profileTextFor(autoRoutingMessages),
@@ -2375,7 +2379,7 @@ async function handleChatPost(
                       // discarded, including an explicit keep-original choice.
                       rewriteAllowed: !refinerPreview && !turnCarriesAttachments(autoRoutingMessages),
                       verifyPreparedContext: fusion ? undefined : verifyPreparedContext,
-                      ...(fusion ? { locationFusion: { authoredText: messages[0].content, resume: fusion.resume,
+                      ...(fusion ? { locationFusion: { authoredText: messages[0].content, resume: fusion.resume, searchUtcDate: fusion.searchUtcDate,
                           onRouterDigest: (value: string) => { fusionRouterDigest = value; } } } : {}),
                       fileContext: fileRoutingContext,
                       searchPlan: fusion?.resume?.searchPlan ?? allowRouterSearchPlan,
@@ -3085,7 +3089,7 @@ async function handleChatPost(
             const { turnContext, verification } = await checkPricedContext(contextBundle, session.user.id,
                 conversationProfileVersionId, conversationMemoryMode);
             finishContextTiming();
-            if (!verification.ok) return await refuseContext(verification.reason);
+            if (!verification.ok) return await refuseContext(verification.reason, Boolean(fusion && !fusion.resume));
             verifiedContext = {
                 bundleId: verification.payload.bundleId,
                 expiresAt: new Date(verification.payload.expiresAtMs),
@@ -3124,7 +3128,8 @@ async function handleChatPost(
                 await consumeRouterLocation(fusion.key, fusion.requestDigest);
             } else if (llmPick?.requiresLocation !== false) {
                 const continuation = sealRouterLocation({ requestDigest: fusion.requestDigest, routerDigest: fusionRouterDigest,
-                    traceId, searchPlan: allowRouterSearchPlan, pick: llmPick, image: autoImageDecision, expiresAt: fusion.expiresAt }, process.env.NEXTAUTH_SECRET!);
+                    traceId, searchPlan: allowRouterSearchPlan, searchUtcDate: fusion.searchUtcDate,
+                    pick: llmPick, image: autoImageDecision, expiresAt: fusion.expiresAt }, process.env.NEXTAUTH_SECRET!);
                 return routerLocationResponse(llmPick?.requiresLocation === true ? true : null, traceId, continuation);
             }
         }
@@ -3301,6 +3306,7 @@ async function handleChatPost(
                     {
                         requiresPreflight: true,
                         refusalReason: "already_consumed",
+                        ...(fusion && !fusion.resume ? { routerLocationRecovery: "saved" } : {}),
                     }
                 );
             }

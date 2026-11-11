@@ -52,8 +52,15 @@ function metrics(rows) {
   return Object.fromEntries(keys.map(key => {
     const value = row => row[key] ?? row.search[key];
     const observed = rows.filter(r => Number.isFinite(value(r.off)) && Number.isFinite(value(r.on)));
+    const target = key === "firstMs" || key === "completionMs" ? {
+      within10s: {
+        observedPairs: observed.length,
+        off: observed.filter(row => value(row.off) <= 10_000).length,
+        on: observed.filter(row => value(row.on) <= 10_000).length,
+      },
+    } : {};
     return [key, { off: distribution(observed.map(r => value(r.off))), on: distribution(observed.map(r => value(r.on))),
-      onMinusOff: distribution(observed.map(r => value(r.on) - value(r.off))) }];
+      onMinusOff: distribution(observed.map(r => value(r.on) - value(r.off))), ...target }];
   }));
 }
 

@@ -16,6 +16,7 @@ const decision = z.object({
   routerDigest: z.string().length(64).nullable(),
   traceId: z.string().min(1).max(160),
   searchPlan: z.boolean(),
+  searchUtcDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   pick: pick.nullable(),
   image: z.discriminatedUnion("image", [
     z.object({ image: z.literal(false) }).strict(),

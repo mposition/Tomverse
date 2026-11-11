@@ -6,7 +6,7 @@ test("a consent continuation conceals its execution view, expires and is bound t
   const request = { userId: "owner", source: "saved", answer: "answer", query: "Where am I?", bundle: "quote", candidates: ["A", "B"] };
   const digest = routerLocationDigest(request);
   const decision = { requestDigest: digest, routerDigest: routerLocationDigest(["guidance", "candidates"]), traceId: "original",
-    expiresAt: 2_000, searchPlan: true, image: { image: false as const },
+    expiresAt: 2_000, searchPlan: true, searchUtcDate: "2026-11-10", image: { image: false as const },
     pick: { modelId: "A", rewrite: "private rewrite", searchQueries: ["private query"], requiresLocation: true } };
   const opaque = sealRouterLocation(decision, "test-secret");
   assert.deepEqual(openRouterLocation(opaque, digest, "test-secret", 1_999), decision);

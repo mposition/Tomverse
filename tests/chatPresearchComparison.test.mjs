@@ -36,6 +36,12 @@ test("paired comparisons count actual dispatches, keep missing signed timings an
   assert.equal(report.fewerModelCallsPairs, 1);
   assert.deepEqual(report.matched.modelCalls.onMinusOff, { count: 2, p50: -1, p95: 0 });
   assert.deepEqual(report.matched.firstMs.onMinusOff, { count: 1, p50: -1000, p95: -1000 });
+  assert.deepEqual(report.matched.firstMs.within10s, { observedPairs: 1, off: 1, on: 1 });
+  const slowEnd = timing(0), onTarget = timing(1);
+  slowEnd.timings.completionMs = 10_001;
+  onTarget.timings.completionMs = 10_000;
+  assert.deepEqual(comparePresearch(pairs, logs, [slowEnd, onTarget, timing(2)]).matched.completionMs.within10s,
+    { observedPairs: 1, off: 0, on: 1 });
   assert.equal(report.matched.serverFirstMs.off.count, 2);
   assert.equal(report.rows[1].on.firstMs, null);
   assert.equal(report.rows[2].on.issue, "flag_mismatch");

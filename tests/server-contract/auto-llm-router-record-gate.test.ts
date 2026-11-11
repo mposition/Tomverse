@@ -591,18 +591,21 @@ test("a context refusal precedes the live Router hold and provider; no eligible 
   assert.equal(routerRequests.length, callsBefore);
 });
 
-test("fresh location uses the authored 8k input, priced with the complete Router call, and a resume spends nothing", async () => {
+test("fresh location prices the authored 8k and reuses its dated search decision across UTC midnight", async t => {
   const original = generateRouterResult;
   const text = "a".repeat(7_992) + "near me?overflow";
   const digest: string[] = [];
-  const locationFusion = { authoredText: text, resume: null, onRouterDigest: (value: string) => { digest.push(value); } };
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-10T23:59:58Z") });
+  const searchUtcDate = new Date().toISOString().slice(0, 10);
+  const locationFusion = { authoredText: text, searchUtcDate, resume: null, onRouterDigest: (value: string) => { digest.push(value); } };
   try {
     generateRouterResult = () => ({ output: { ...routerOutput, requiresLocation: true }, usage: { inputTokens: 8, outputTokens: 2 } });
     holds.length = 0; routerRequests.length = 0;
-    const chosen = await pick(undefined, true, { prompt: text, locationFusion });
+    const chosen = await pick(undefined, true, { prompt: text, locationFusion, searchPlan: true });
     assert.equal(chosen?.requiresLocation, true);
     assert.equal(routerRequests.length, 1);
     assert.match(String(routerRequests[0].system), /CURRENT DEVICE LOCATION/);
+    assert.match(String(routerRequests[0].system), /2026-11-10/);
     assert.match(String(routerRequests[0].prompt), /near me\?/);
     assert.ok(!String(routerRequests[0].prompt).includes("overflow"));
     const { autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
@@ -612,7 +615,8 @@ test("fresh location uses the authored 8k input, priced with the complete Router
     const worst = autoLlmRouterWorstCaseMicroUsd({ ...routerRequests[0],
       inputUsdPerMillionTokens: prices.inputUsdPerMillionTokens, outputUsdPerMillionTokens: prices.outputUsdPerMillionTokens });
     assert.deepEqual(holds, [worst, worst]);
-    const resumed = await pick(undefined, true, { prompt: text, locationFusion: {
+    t.mock.timers.setTime(Date.parse("2026-11-11T00:00:02Z"));
+    const resumed = await pick(undefined, true, { prompt: text, searchPlan: true, locationFusion: {
       ...locationFusion, resume: { traceId: "first", routerDigest: digest[0], pick: chosen },
     } });
     assert.deepEqual(resumed, chosen);

@@ -6,7 +6,7 @@ CREATE TABLE "ChatRouterLocationPreparation" (
     "expiresAt" TIMESTAMP(3) NOT NULL,
     "consumedAt" TIMESTAMP(3),
     CONSTRAINT "ChatRouterLocationPreparation_pkey"
-        PRIMARY KEY ("conversationId", "sourceUserMessageId", "assistantMessageId"),
+        PRIMARY KEY ("conversationId", "sourceUserMessageId"),
     CONSTRAINT "ChatRouterLocationPreparation_conversationId_fkey"
         FOREIGN KEY ("conversationId") REFERENCES "Conversation"("id")
         ON DELETE CASCADE ON UPDATE CASCADE

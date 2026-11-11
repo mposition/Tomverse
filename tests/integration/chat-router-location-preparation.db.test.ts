@@ -21,11 +21,14 @@ test("a saved answer admits one concurrent preparation and one unexpired resume"
     assert.equal(claims.filter(row => row.status === "fulfilled").length, 1);
     const rejected = claims.find(row => row.status === "rejected");
     assert.equal(rejected?.reason.code, "CHAT_ROUTER_LOCATION_UNAVAILABLE");
+    const otherAnswer = { ...key, assistantMessageId: randomUUID() };
+    await assert.rejects(claimRouterLocation(otherAnswer, requestDigest), { code: "CHAT_ROUTER_LOCATION_UNAVAILABLE" });
+    await assert.rejects(consumeRouterLocation(otherAnswer, requestDigest), { code: "CHAT_ROUTER_LOCATION_UNAVAILABLE" });
     await assert.rejects(consumeRouterLocation(key, "changed"), { code: "CHAT_ROUTER_LOCATION_UNAVAILABLE" });
     const resumes = await Promise.allSettled([consumeRouterLocation(key, requestDigest), consumeRouterLocation(key, requestDigest)]);
     assert.equal(resumes.filter(row => row.status === "fulfilled").length, 1);
     assert.equal(resumes.find(row => row.status === "rejected")?.reason.code, "CHAT_ROUTER_LOCATION_UNAVAILABLE");
-    const expired = { ...key, assistantMessageId: randomUUID() };
+    const expired = { ...key, sourceUserMessageId: randomUUID(), assistantMessageId: randomUUID() };
     await prisma.chatRouterLocationPreparation.create({ data: { ...expired, requestDigest, expiresAt: new Date(0) } });
     await assert.rejects(consumeRouterLocation(expired, requestDigest), { code: "CHAT_ROUTER_LOCATION_UNAVAILABLE" });
     await prisma.conversation.delete({ where: { id: conversationId } });
