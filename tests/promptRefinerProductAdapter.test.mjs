@@ -10,7 +10,7 @@ import { PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST } from
 
 const languageModel = Object.freeze({
   provider: "openai.responses",
-  modelId: "gpt-5.6-luna",
+  modelId: "gpt-6-luna",
 });
 
 test("fractional route deadlines reach the real SDK model boundary exactly once", async () => {

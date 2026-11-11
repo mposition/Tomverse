@@ -1,5 +1,6 @@
 import "server-only";
 
+import { codePinnedModelRefusal } from "@/lib/codePinnedModels";
 import { prisma } from "@/lib/prisma";
 import { recordAutoDisableWorkItem } from "@/lib/modelLifecycleWorkItems";
 import { countStoredModelUsage } from "@/lib/modelUsageFootprint";
@@ -80,6 +81,19 @@ export async function reconcileCatalogWithRegistry(input: {
     });
 
     for (const item of plan.disable) {
+      // A model the code calls by id stays on: switching it off closes Chat for
+      // everyone (lib/codePinnedModels.ts), and a scan that misses it once
+      // more is weaker evidence than that outage. Somebody has to look.
+      if (codePinnedModelRefusal({ modelId: item.modelId, status: "disabled" })) {
+        console.warn(JSON.stringify({
+          event: "provider_model_catalog_pinned_model_kept",
+          provider: result.provider,
+          modelId: item.modelId,
+          apiModel: item.apiModel,
+          consecutiveMissing: item.consecutiveMissing,
+        }));
+        continue;
+      }
       // Read before the transaction: it is three counts over tables this
       // transaction does not touch, and holding a write transaction open
       // across them would make a nightly scan contend with live traffic.

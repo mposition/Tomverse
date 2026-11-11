@@ -11,13 +11,9 @@
  * it. Add an entry whenever code requires a specific model id to be enabled.
  */
 import {
-    PROMPT_REFINER_EXECUTION_MODEL_PIN,
-    PROMPT_REFINER_MAX_OUTPUT_TOKENS,
-} from "@/lib/promptRefinerExecutionContract";
-import {
-    PROMPT_REFINER_VNEXT_MAX_OUTPUT_TOKENS,
-    PROMPT_REFINER_VNEXT_PRICE_PIN,
-} from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
+    PROMPT_REFINER_PRODUCT_MAX_OUTPUT_TOKENS,
+    PROMPT_REFINER_PRODUCT_PRICE_PIN,
+} from "@/lib/promptRefinerProductPricePin";
 
 export type CodePinnedModel = Readonly<{
     modelId: string;
@@ -28,34 +24,33 @@ export type CodePinnedModel = Readonly<{
     pinnedBy: string;
 }>;
 
+/**
+ * Only pins a live product path depends on. The vNext evaluation pin and the v1
+ * shadow execution pin (both gpt-5-6-luna) are evaluation records used by
+ * owner-only Admin routes, which fail closed on their own when the model goes;
+ * listing them would stop that model from ever retiring.
+ */
 export const CODE_PINNED_MODELS: readonly CodePinnedModel[] = Object.freeze([
     {
-        modelId: PROMPT_REFINER_VNEXT_PRICE_PIN.modelId,
-        provider: PROMPT_REFINER_VNEXT_PRICE_PIN.provider,
-        apiModelId: PROMPT_REFINER_VNEXT_PRICE_PIN.apiModelId,
-        minOutputTokens: PROMPT_REFINER_VNEXT_MAX_OUTPUT_TOKENS,
-        pinnedBy: "the Prompt Refiner price pin (Chat release readiness depends on it)",
-    },
-    {
-        modelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId,
-        provider: PROMPT_REFINER_EXECUTION_MODEL_PIN.provider,
-        apiModelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId,
-        minOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
-        pinnedBy: "the Prompt Refiner execution contract",
+        modelId: PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId,
+        provider: PROMPT_REFINER_PRODUCT_PRICE_PIN.provider,
+        apiModelId: PROMPT_REFINER_PRODUCT_PRICE_PIN.apiModelId,
+        minOutputTokens: PROMPT_REFINER_PRODUCT_MAX_OUTPUT_TOKENS,
+        pinnedBy: "the Prompt Refiner product price pin (Chat release readiness depends on it)",
     },
 ]);
 
 /**
  * Why this registry change must be refused, or null.
  *
- * The price readback that gates Chat refuses a pinned row that is not enabled,
- * not public, remapped to a replacement, priced from registry columns instead
- * of the code catalogue, pointed at another provider or upstream id, or capped
- * below the contract's output tokens
- * (lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts). Each of
- * those is refused here, against the values the save would leave. Everything
- * else -- name, purpose, sort order -- stays editable. Move the pin in code
- * first.
+ * The price readback that gates Chat (lib/promptRefinerProductPriceReadback.ts)
+ * refuses a pinned row that is not enabled, not public, remapped to a
+ * replacement, pointed at another provider or upstream id, capped below the
+ * contract's output tokens, or carrying its own price columns -- an override
+ * that turns the resolved price's costSource from "registry" (the catalogue
+ * price the pin names) into "model_registry_override". Each of those is refused
+ * here, against the values the save would leave. Everything else -- name,
+ * purpose, sort order -- stays editable. Move the pin in code first.
  */
 export const codePinnedModelRefusal = (input: {
     modelId: string;
