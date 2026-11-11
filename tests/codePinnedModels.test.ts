@@ -32,6 +32,16 @@ test("a pinned model may be edited, but nothing the Chat price readback refuses"
   assert.match(codePinnedModelRefusal({ ...untouched, publiclyListed: false }) ?? "", /unlisting/);
   assert.match(codePinnedModelRefusal({ ...untouched, replacementModelId: "gpt-6-luna" }) ?? "", /replacement/);
   assert.match(codePinnedModelRefusal({ ...untouched, outputUsdPerMillionTokens: 1 }) ?? "", /price/);
+  // Identity and the contract's output floor (review r-20261111-101129-ba58bd).
+  const pin = PROMPT_REFINER_VNEXT_PRICE_PIN;
+  assert.equal(
+    codePinnedModelRefusal({ ...untouched, provider: pin.provider, apiModel: pin.apiModelId, maxOutputTokens: 4_096, reservationOutputTokens: null }),
+    null
+  );
+  assert.match(codePinnedModelRefusal({ ...untouched, provider: "anthropic" }) ?? "", /provider or upstream/);
+  assert.match(codePinnedModelRefusal({ ...untouched, apiModel: "something-else" }) ?? "", /provider or upstream/);
+  assert.match(codePinnedModelRefusal({ ...untouched, maxOutputTokens: 1 }) ?? "", /output below/);
+  assert.match(codePinnedModelRefusal({ ...untouched, reservationOutputTokens: 4_095 }) ?? "", /output below/);
   assert.match(codePinnedModelRefusal({ modelId: id, catalogDeleted: true }) ?? "", /Move the pin/);
   // Anything not pinned is the registry's own business.
   assert.equal(codePinnedModelRefusal({ modelId: "not-pinned-model", status: "disabled" }), null);

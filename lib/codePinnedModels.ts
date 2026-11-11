@@ -10,18 +10,37 @@
  * Read from the constants themselves, so moving a pin moves the protection with
  * it. Add an entry whenever code requires a specific model id to be enabled.
  */
-import { PROMPT_REFINER_EXECUTION_MODEL_PIN } from "@/lib/promptRefinerExecutionContract";
-import { PROMPT_REFINER_VNEXT_PRICE_PIN } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
+import {
+    PROMPT_REFINER_EXECUTION_MODEL_PIN,
+    PROMPT_REFINER_MAX_OUTPUT_TOKENS,
+} from "@/lib/promptRefinerExecutionContract";
+import {
+    PROMPT_REFINER_VNEXT_MAX_OUTPUT_TOKENS,
+    PROMPT_REFINER_VNEXT_PRICE_PIN,
+} from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 
-export type CodePinnedModel = Readonly<{ modelId: string; pinnedBy: string }>;
+export type CodePinnedModel = Readonly<{
+    modelId: string;
+    provider: string;
+    apiModelId: string;
+    /** The output cap and reservation the pin's contract needs at least. */
+    minOutputTokens: number;
+    pinnedBy: string;
+}>;
 
 export const CODE_PINNED_MODELS: readonly CodePinnedModel[] = Object.freeze([
     {
         modelId: PROMPT_REFINER_VNEXT_PRICE_PIN.modelId,
+        provider: PROMPT_REFINER_VNEXT_PRICE_PIN.provider,
+        apiModelId: PROMPT_REFINER_VNEXT_PRICE_PIN.apiModelId,
+        minOutputTokens: PROMPT_REFINER_VNEXT_MAX_OUTPUT_TOKENS,
         pinnedBy: "the Prompt Refiner price pin (Chat release readiness depends on it)",
     },
     {
         modelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId,
+        provider: PROMPT_REFINER_EXECUTION_MODEL_PIN.provider,
+        apiModelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId,
+        minOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
         pinnedBy: "the Prompt Refiner execution contract",
     },
 ]);
@@ -30,16 +49,23 @@ export const CODE_PINNED_MODELS: readonly CodePinnedModel[] = Object.freeze([
  * Why this registry change must be refused, or null.
  *
  * The price readback that gates Chat refuses a pinned row that is not enabled,
- * not public, remapped to a replacement, or priced from registry columns
- * instead of the code catalogue (lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts).
- * Each of those is refused here. Everything else -- name, purpose, sort order --
- * stays editable. Move the pin in code first.
+ * not public, remapped to a replacement, priced from registry columns instead
+ * of the code catalogue, pointed at another provider or upstream id, or capped
+ * below the contract's output tokens
+ * (lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts). Each of
+ * those is refused here, against the values the save would leave. Everything
+ * else -- name, purpose, sort order -- stays editable. Move the pin in code
+ * first.
  */
 export const codePinnedModelRefusal = (input: {
     modelId: string;
     status?: string;
     catalogDeleted?: boolean;
     publiclyListed?: boolean;
+    provider?: string;
+    apiModel?: string;
+    maxOutputTokens?: number | null;
+    reservationOutputTokens?: number | null;
     replacementModelId?: string | null;
     inputUsdPerMillionTokens?: number | null;
     outputUsdPerMillionTokens?: number | null;
@@ -47,6 +73,8 @@ export const codePinnedModelRefusal = (input: {
 }): string | null => {
     const pins = CODE_PINNED_MODELS.filter((pin) => pin.modelId === input.modelId);
     if (pins.length === 0) return null;
+    const belowCap = (value: number | null | undefined) =>
+        typeof value === "number" && pins.some((pin) => value < pin.minOutputTokens);
     const change =
         input.catalogDeleted === true
             ? "removing it from the catalogue"
@@ -56,6 +84,11 @@ export const codePinnedModelRefusal = (input: {
                 ? "unlisting it"
                 : input.replacementModelId
                   ? "pointing it at a replacement"
+                  : (input.provider !== undefined && pins.some((pin) => pin.provider !== input.provider)) ||
+                      (input.apiModel !== undefined && pins.some((pin) => pin.apiModelId !== input.apiModel))
+                    ? "changing its provider or upstream model id"
+                  : belowCap(input.maxOutputTokens) || belowCap(input.reservationOutputTokens)
+                    ? "capping its output below the contract"
                   : [input.inputUsdPerMillionTokens, input.outputUsdPerMillionTokens,
                      input.cachedInputPriceMultiplier].some((value) => typeof value === "number")
                     ? "overriding its price"
