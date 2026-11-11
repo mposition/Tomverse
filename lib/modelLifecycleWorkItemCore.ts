@@ -158,6 +158,91 @@ export const REOPENABLE_WORK_ITEM_STATUSES: ReadonlySet<WorkItemStatus> = new Se
     "closed_no_action",
 ]);
 
+/**
+ * Where an adopted model's item stalls once the model is live: adoption walks
+ * it to `validation_pending` and nothing in the discovery queue walked it on.
+ * 26 production items sat there for up to 50 days (cleared by hand
+ * 2026-11-11), each read as "a later version is served" -- itself.
+ */
+export const ROLLOUT_FINISHABLE_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
+    "validation_pending",
+    "rollout_pending",
+]);
+
+/**
+ * Whether an operator can close this item as rolled out in one step: an `add`
+ * whose model is live -- enabled, publicly listed and not disabled in the
+ * registry, or an enabled image model -- stalled after adoption. A registry row
+ * alone is not enough: `completed` is terminal, and a disabled or unlisted row
+ * has not rolled out. The person still decides; this only says the button
+ * applies.
+ */
+export const isRolloutFinishable = (item: {
+    action: string;
+    status: string;
+    servedLive: boolean;
+}) =>
+    item.action === "add" &&
+    item.servedLive &&
+    ROLLOUT_FINISHABLE_STATUSES.has(item.status as WorkItemStatus);
+
+/**
+ * The one automatic decision this queue makes. Owner approval 2026-11-11: a
+ * family whose every ID is gone from its provider's latest successful scan is
+ * excluded without a person, and reopened by the same actor when the provider
+ * lists it again -- the queue otherwise never refiles an excluded ID, so a
+ * broken scan would hide a candidate for good. Everything else stays "automation
+ * may create, never decide".
+ */
+export const MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR = "model-discovery-auto-exclude" as const;
+
+/**
+ * Families to exclude and to reopen, from the queue's own reading.
+ *
+ * Only `add` candidates: a retirement opened by the registry reconciliation is
+ * about a model that vanished on purpose, and may owe users a notice.
+ *
+ * Exclude: every undecided member is `stale` (absent from a successful scan;
+ * `unknown`, a failed or missing scan, never counts). Reopen: a family this
+ * actor excluded that the provider lists again -- only the members this actor
+ * excluded, never a person's exclusion.
+ */
+export const vanishedDiscoveryChanges = <
+    T extends {
+        id: string;
+        action: string;
+        familyKey: string;
+        availability: string;
+        exclusion?: { actorEmail: string | null } | null;
+    },
+>(input: {
+    undecided: readonly T[];
+    excluded: readonly T[];
+}): { exclude: T[]; reopen: T[] } => {
+    const byFamily = (items: readonly T[]) => {
+        const families = new Map<string, T[]>();
+        for (const item of items) {
+            const members = families.get(item.familyKey);
+            if (members) members.push(item);
+            else families.set(item.familyKey, [item]);
+        }
+        return [...families.values()];
+    };
+    const exclude = byFamily(input.undecided.filter((item) => item.action === "add"))
+        .filter((members) => members.every((item) => item.availability === "stale"))
+        .flat();
+    const reopen = byFamily(
+        input.excluded.filter(
+            (item) =>
+                item.action === "add" &&
+                item.exclusion?.actorEmail === MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR
+        )
+    )
+        .filter((members) => members.some((item) => item.availability === "current"))
+        .flat();
+    return { exclude, reopen };
+};
+
 export type WorkItemTransitionInput = {
     from: WorkItemStatus;
     to: WorkItemStatus;
