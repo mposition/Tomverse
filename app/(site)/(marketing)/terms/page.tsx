@@ -10,5 +10,5 @@ export const metadata = createPageMetadata({
 });
 
 export default function TermsPage() {
-  return <MarketingInfoPage content={infoPages.terms} />;
+  return <MarketingInfoPage content={infoPages.terms} readableBody />;
 }
