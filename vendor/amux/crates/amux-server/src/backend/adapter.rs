@@ -356,6 +356,8 @@ lazy_re!(RE_CURSOR_APPROVAL, r"(?i)waiting for approval\.\.\.|run this command\?
 // ~/.copilot/config.json, so a worker should not park here; this is the
 // fallback that makes it read as waiting if it ever does.
 lazy_re!(RE_COPILOT_TRUST, r"(?i)confirm folder trust|do you trust the files in this folder");
+// agy's first-run setup headings, each alone on its line (see scan_antigravity).
+lazy_re!(RE_AGY_SETUP, r"(?m)^\s*(?:Choose your color scheme:|Terms of Service & Data Use)\s*$");
 
 // The "Working" spinner: a leading braille spinner glyph (U+2800-U+28FF)
 // followed by the literal word. Verified live as `⠘⠤ Working`; the exact
@@ -438,6 +440,7 @@ impl TerminalAdapter {
             "ollama" => scan_codex(&clean, &self.provider),
             "cursor" => scan_cursor(&clean),
             "copilot" => scan_copilot(&clean),
+            "antigravity" => scan_antigravity(&clean),
             // Unknown provider: no pattern knowledge, no invented events
             // (Invariant 8 / Invariant 20's rule generalized: never report
             // what was not observed through a pattern we actually hold).
@@ -1494,6 +1497,28 @@ fn scan_copilot(clean: &str) -> Vec<WorkerEvent> {
     Vec::new()
 }
 
+/// Google Antigravity CLI (`agy` 1.5.4). Observed in a scratch tmux pane on
+/// the server with a throwaway HOME (2026-11-11), no prompt sent. One state
+/// is mapped:
+///
+/// - the first-run setup, the colour-scheme picker and then Google's
+///   "Terms of Service & Data Use" screen (a data-sharing checkbox and
+///   [Done]), is `setup_prompt`. A person answers it once per account; amux
+///   never does. The tail is 30 lines because the picker alone is 26 rows.
+///
+/// UNVERIFIED, stated rather than guessed at: the ready composer after setup,
+/// a turn in progress, approval panels, quota banners and a crashed process.
+/// None of those screens is mapped, so they report nothing.
+fn scan_antigravity(clean: &str) -> Vec<WorkerEvent> {
+    if RE_AGY_SETUP.is_match(&last_n_raw_lines(clean, 30)) {
+        return vec![WorkerEvent::Waiting(WaitReason {
+            reason: "setup_prompt".to_string(),
+            detail: Some("antigravity first-run setup: colour scheme and terms".to_string()),
+        })];
+    }
+    Vec::new()
+}
+
 /// Is Copilot's current status row the Working row? The same reading
 /// `scan_copilot` uses, so the turn `generating()` starts and the idle footer
 /// that ends it come from one parse; the trust dialog outranks both.
@@ -2467,6 +2492,51 @@ CLAUDE-POSTFIX-COMPLETE
     // not a production worker. Box rules are shortened and right padding
     // trimmed; the words are verbatim. See `scan_copilot` for what is and is
     // not mapped.
+
+    // agy 1.5.4's first launch in a scratch tmux pane (220x50), 2026-11-11:
+    // the colour-scheme picker, then the terms screen after one Enter.
+    const FX_AGY_COLOR: &str = "\
+    \u{2584}\u{2580}\u{2580}\u{2584}
+
+Welcome to Antigravity CLI!
+
+Choose your color scheme:        \u{256d}\u{2500}\u{2500}\u{2500}\u{256e}
+                                 \u{2502} > you: add a greeting function \u{2502}
+  > terminal                     \u{2502}                                 \u{2502}
+    light                        \u{2502}   \u{2699} tool: write_file main.go     \u{2502}
+    dark                         \u{2570}\u{2500}\u{2500}\u{2500}\u{256f}
+
+    [Next]
+
+  \u{2191}/\u{2193} Navigate \u{b7} enter Confirm
+                                                                  Gemini 4 Argon \u{b7} medium";
+    const FX_AGY_TERMS: &str = "\
+Terms of Service & Data Use
+AI coding agents are known to have certain security risks, including autonomous code execution, data exfiltration, prompt injection and supply chain risks. Ensure that you monitor and verify all actions taken by the
+agent.
+----------------------------------------------------------------------------------------------------------------
+  > [x] Yes, I agree to help improve Antigravity CLI by allowing
+      Google to collect and use my Interactions data,
+      subject to the Google Antigravity CLI Terms of Service
+      and Google Privacy Policy.
+    [Previous]      [Done]
+  \u{2191}/\u{2193} Navigate \u{b7} enter Toggle
+                                                                  Gemini 4 Argon \u{b7} medium";
+
+    #[test]
+    fn antigravity_first_run_setup_is_a_setup_prompt() {
+        for fx in [FX_AGY_COLOR, FX_AGY_TERMS] {
+            assert_eq!(waiting_reasons(&adapter("antigravity").scan(fx)), vec!["setup_prompt"], "{fx}");
+            assert!(!adapter("antigravity").generating(fx));
+        }
+        // The same words inside a transcript line are not the screen's heading.
+        let quoted = "> you: what does \"Terms of Service & Data Use\" cover?\n";
+        assert!(adapter("antigravity").scan(quoted).is_empty());
+        // Unmapped screens report nothing rather than a guess.
+        assert!(adapter("antigravity").scan("some other agy screen\n> \n").is_empty());
+        // Another provider never reads agy's setup.
+        assert!(waiting_reasons(&adapter("cursor").scan(FX_AGY_TERMS)).is_empty());
+    }
 
     const FX_COPILOT_TRUST: &str = "\
 ╭──────────────────────────────────────────────────────╮
