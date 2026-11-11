@@ -2,8 +2,9 @@
  * The Scout's issue-backlog subject, without IO (docs/policy/product-research-agent.md §10).
  *
  * The observation agent records the open GitHub issues of mposition/Tomverse
- * every night with deterministic verdicts and, by its own policy (§2.3), does
- * not recommend anything. This subject hands the newest observation to the
+ * every night with deterministic verdicts and, by its own policy
+ * (docs/policy/product-research-agent.md §2, condition 3), does not recommend
+ * anything. This subject hands the newest observation to the
  * Scout's model, which proposes one of close / proceed / wait for each issue.
  * The operator decides with the existing dismiss / send-to-AMUX buttons.
  *
