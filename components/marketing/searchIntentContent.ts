@@ -6,9 +6,9 @@ const attachmentGroupLabels: Record<ChatAttachmentUiGroup, string> = {
   image: "Images (static GIF only)", document: "Documents", data: "Data",
   markup: "Text and markup", code: "Source code (read as text)", archive: "ZIP (contents are validated)",
 };
-const attachmentFormatBullets = Object.entries(chatAttachmentExtensionsByGroup())
+const attachmentFormatGroups = Object.entries(chatAttachmentExtensionsByGroup())
   .filter(([, extensions]) => extensions.length > 0)
-  .map(([group, extensions]) => `${attachmentGroupLabels[group as ChatAttachmentUiGroup]}: ${extensions.map((extension) => `.${extension}`).join(", ")}.`);
+  .map(([group, extensions]) => ({ label: attachmentGroupLabels[group as ChatAttachmentUiGroup], extensions: extensions.map(extension => `.${extension}`) }));
 
 export const SEARCH_INTENT_SLUGS = [
   "compare-ai-models",
@@ -1010,7 +1010,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         {
           "title": "Prepare files for better results",
           "body": "Signed-in attachment formats are listed below. Choose an image-capable model for image attachments. Document text may be extracted before it is sent, so an accepted upload extension does not mean every model supports the original file natively. Use clear, non-corrupted files and ask a specific question. Password-protected, scanned, malformed, or very large documents may not contain extractable text. Check important numbers, citations, formulas, and conclusions against the original file.",
-          "bullets": attachmentFormatBullets
+          formatGroups: attachmentFormatGroups
         },
         {
           "title": "Upload limits",
