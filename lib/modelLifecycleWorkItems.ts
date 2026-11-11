@@ -24,6 +24,9 @@ import {
     type ModelObservation,
     type SuppressedCandidate,
     ADOPTION_RECORD_STATUSES,
+    MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR,
+    isRolloutFinishable,
+    vanishedDiscoveryChanges,
     workItemDecisionRecordRefusal,
     workItemDecisionTarget,
     workItemTimestampField,
@@ -880,6 +883,138 @@ export async function transitionWorkItem(
     return { ok: true, status: result.status };
 }
 
+/**
+ * Closes adopted items whose model is already live, in one step, by a person.
+ *
+ * The walk is the same one an operator could make with three requests --
+ * validations ticked, `rollout_pending`, `completed` -- in one transaction, so a
+ * refusal halfway leaves every item where it was. An item that owes users a
+ * notice stops at `communication_pending`, as the state machine requires. The
+ * caller checks `isRolloutFinishable` against the queue first, and this checks
+ * liveness again under lock: the live registry rows are held FOR SHARE until
+ * commit, so a disable or delist racing this call waits for it or is seen by
+ * it -- `completed` is terminal and must not be recorded against a model that
+ * stopped being served. Registry before work items, the adoption path's order.
+ */
+export async function finishServedRollouts(
+    tx: Prisma.TransactionClient,
+    input: { workItemIds: readonly string[]; actorEmail: string; note: string; now?: Date }
+): Promise<
+    | { ok: true; completed: number; awaitingNotice: number }
+    | Extract<BulkWorkItemTransitionResult, { ok: false }>
+    | { ok: false; refusal: { code: "not_live"; message: string; workItemId: string } }
+> {
+    const now = input.now ?? new Date();
+    const ids = Array.from(new Set(input.workItemIds)).sort();
+    const liveRegistry = await tx.$queryRaw<Array<{ apiModel: string }>>(Prisma.sql`
+        SELECT "apiModel"
+        FROM "ModelRegistryEntry"
+        WHERE "enabled" = true
+          AND "publiclyListed" = true
+          AND "status" <> 'disabled'
+          AND "catalogDeleted" = false
+        ORDER BY "id"
+        FOR SHARE
+    `);
+    const decisionIdentity = createModelDecisionIdentityResolver(
+        providerAliasEvidence(
+            await tx.providerModelCatalogEntry.findMany({
+                select: { apiModel: true, metadata: true },
+            })
+        )
+    );
+    const liveFamilies = new Set(
+        [
+            ...liveRegistry.map((row) => row.apiModel),
+            ...listImageModels()
+                .filter((model) => model.disabledReason === null)
+                .map((model) => model.apiModelId),
+        ].map(decisionIdentity)
+    );
+    const rows = await tx.$queryRaw<
+        Array<{
+            id: string;
+            apiModel: string;
+            action: string;
+            status: string;
+            pendingValidations: Prisma.JsonValue | null;
+            communicationRequired: boolean;
+        }>
+    >(Prisma.sql`
+        SELECT "id", "apiModel", "action", "status", "pendingValidations", "communicationRequired"
+        FROM "ModelLifecycleWorkItem"
+        WHERE "id" IN (${Prisma.join(ids)})
+        ORDER BY "id"
+        FOR UPDATE
+    `);
+    const notLive = rows.find(
+        (row) =>
+            !isRolloutFinishable({
+                action: row.action,
+                status: row.status,
+                servedLive: liveFamilies.has(decisionIdentity(row.apiModel)),
+            })
+    );
+    if (notLive || rows.length !== ids.length) {
+        return {
+            ok: false,
+            refusal: {
+                code: "not_live",
+                message: "The model is no longer live, or the item moved, so it cannot be closed as rolled out.",
+                workItemId: notLive?.id ?? ids.find((id) => !rows.some((row) => row.id === id))!,
+            },
+        };
+    }
+    for (const row of rows) {
+        const pending = stringList(row.pendingValidations);
+        if (pending.length === 0) continue;
+        await tx.modelLifecycleWorkItem.update({
+            where: { id: row.id },
+            data: { pendingValidations: [] },
+        });
+        await tx.modelLifecycleWorkItemEvent.create({
+            data: {
+                workItemId: row.id,
+                occurredAt: now,
+                actorEmail: input.actorEmail,
+                fromStatus: row.status,
+                toStatus: row.status,
+                note: `Validation satisfied: ${pending.join(", ")}. ${input.note}`,
+            },
+        });
+    }
+    const steps: Array<{ ids: string[]; to: WorkItemStatus }> = [
+        {
+            ids: rows.filter((row) => row.status === "validation_pending").map((row) => row.id),
+            to: "rollout_pending",
+        },
+        {
+            ids: rows.filter((row) => !row.communicationRequired).map((row) => row.id),
+            to: "completed",
+        },
+        {
+            ids: rows.filter((row) => row.communicationRequired).map((row) => row.id),
+            to: "communication_pending",
+        },
+    ];
+    for (const step of steps) {
+        if (step.ids.length === 0) continue;
+        const moved = await transitionWorkItemsInTransaction(tx, {
+            workItemIds: step.ids,
+            to: step.to,
+            actorEmail: input.actorEmail,
+            note: input.note,
+            now,
+        });
+        if (!moved.ok) return moved;
+    }
+    return {
+        ok: true,
+        completed: steps[1].ids.length,
+        awaitingNotice: steps[2].ids.length,
+    };
+}
+
 export type OpenWorkItem = {
     id: string;
     provider: string;
@@ -900,6 +1035,8 @@ export type ModelDiscoveryQueueItem = OpenWorkItem & {
     servedByTomverse: boolean;
     /** The served model that is a later generation of this one's line. */
     supersededBy: string | null;
+    /** Adopted, already served, stalled before rollout (`isRolloutFinishable`). */
+    rolloutFinishable: boolean;
     /** Verifications still owed before this item may be rolled out. */
     pendingValidations: string[];
     familyKey: string;
@@ -1394,6 +1531,10 @@ export async function listModelDiscoveryQueue(options?: {
     const servedFamilies = new Set(
         servedApiModels.map(decisionIdentity)
     );
+    // Live, not merely registered: what a rollout can be recorded against.
+    const liveFamilies = new Set(
+        servedModels.map((model) => decisionIdentity(model.apiModel))
+    );
     const familyCounts = new Map<string, number>();
     for (const row of rows) {
         const family = decisionIdentity(row.apiModel);
@@ -1477,14 +1618,21 @@ export async function listModelDiscoveryQueue(options?: {
             .find((value): value is string => Boolean(value)) ?? null;
         const familyKey = decisionIdentity(row.apiModel);
         const servedByTomverse = servedFamilies.has(familyKey);
+        const rolloutFinishable = isRolloutFinishable({
+            action: row.action,
+            status: row.status,
+            servedLive: liveFamilies.has(familyKey),
+        });
         // A proposal of the new-provider research is about a provider no scan
         // reads, so its analysis is the one stored when it was filed.
         const research = newProviderResearchAnalysis(row.evidence);
         // A retirement is about a model Tomverse serves, so its own line will
         // always contain it. Asking whether it is superseded would answer yes
-        // about itself and bury the one item in this queue that is urgent.
+        // about itself and bury the one item in this queue that is urgent. An
+        // adopted item whose model is live is the same case: its successor
+        // would be itself.
         const supersededBy =
-            row.action === "retire" || research
+            row.action === "retire" || rolloutFinishable || research
                 ? null
                 : supersedingServedModel(row.apiModel, servedApiModels);
         const assessment = research ? researchAssessment(research) : assessModelLifecycleItem({
@@ -1507,6 +1655,7 @@ export async function listModelDiscoveryQueue(options?: {
                 waveByGenerationFamily.get(
                     modelGenerationFamily(row.apiModel).family
                 ) ?? [],
+            rolloutFinishable,
         });
         return {
             id: row.id,
@@ -1524,6 +1673,7 @@ export async function listModelDiscoveryQueue(options?: {
             lifecycle,
             servedByTomverse,
             supersededBy,
+            rolloutFinishable,
             pendingValidations: stringList(row.pendingValidations),
             familyKey,
             familySize: familyCounts.get(familyKey) ?? 1,
@@ -1763,6 +1913,91 @@ export async function summariseLifecycleChanges(since: Date): Promise<{
         transitions: events.length - discovered - records,
         completed,
     };
+}
+
+/**
+ * The daily run's one automatic decision (owner approval 2026-11-11): excludes
+ * families every ID of which is gone from its provider's latest successful scan,
+ * and reopens the ones it excluded once the provider lists them again. Run after
+ * the scan has recorded today's sightings. Each batch is its own transaction; a
+ * batch the state machine refuses (somebody moved an item meanwhile) is skipped
+ * and counted, never forced.
+ */
+export async function reconcileVanishedDiscoveryItems(): Promise<{
+    excluded: number;
+    reopened: number;
+    refused: number;
+}> {
+    const [undecided, excluded] = await Promise.all([
+        listModelDiscoveryQueue({ view: "excludable" }),
+        listModelDiscoveryQueue({ view: "excluded" }),
+    ]);
+    // A family read in part cannot be judged whole.
+    if (undecided.truncated || excluded.truncated) {
+        return { excluded: 0, reopened: 0, refused: 0 };
+    }
+    const changes = vanishedDiscoveryChanges({
+        undecided: undecided.items,
+        excluded: excluded.items,
+    });
+    const result = { excluded: 0, reopened: 0, refused: 0 };
+    const batches = <T>(items: readonly T[]) => {
+        const out: T[][] = [];
+        for (let i = 0; i < items.length; i += MAX_BULK_WORK_ITEM_TRANSITIONS) {
+            out.push(items.slice(i, i + MAX_BULK_WORK_ITEM_TRANSITIONS));
+        }
+        return out;
+    };
+    for (const batch of batches(changes.exclude)) {
+        const moved = await transitionWorkItems({
+            workItemIds: batch.map((item) => item.id),
+            to: "closed_no_action",
+            actorEmail: MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR,
+            eventDecision: {
+                decision: "exclude",
+                reasonCode: "other",
+                operatorReason:
+                    "Automatic: no longer in the provider's latest successful scan. Reopened automatically if it is listed again.",
+                analysisSnapshots: new Map(batch.map((item) => [item.id, item.analysisKo])),
+            },
+        });
+        if (moved.ok) result.excluded += moved.updated;
+        else result.refused += batch.length;
+    }
+    for (const batch of batches(changes.reopen)) {
+        // Rechecked under lock: the queue was read outside any transaction, and
+        // an item reopened and excluded again by a person in between is theirs.
+        // The row carries whoever excluded it last (`reviewerEmail`).
+        const moved = await prisma.$transaction(async (tx) => {
+            const ours = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+                SELECT "id"
+                FROM "ModelLifecycleWorkItem"
+                WHERE "id" IN (${Prisma.join(batch.map((item) => item.id))})
+                  AND "status" = 'closed_no_action'
+                  AND "reviewerEmail" = ${MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR}
+                ORDER BY "id"
+                FOR UPDATE
+            `);
+            if (ours.length === 0) return { ok: true as const, updated: 0 };
+            return transitionWorkItems(
+                {
+                    workItemIds: ours.map((row) => row.id),
+                    to: "discovered",
+                    actorEmail: MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR,
+                    eventDecision: {
+                        decision: "reopen",
+                        operatorReason: "Automatic: the provider lists this ID again.",
+                    },
+                },
+                { tx }
+            );
+        });
+        if (moved.ok) {
+            result.reopened += moved.updated;
+            result.refused += batch.length - moved.updated;
+        } else result.refused += batch.length;
+    }
+    return result;
 }
 
 export type { Prisma };

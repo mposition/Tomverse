@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import {
   countOpenWorkItems,
   listLifecycleReportWorkItems,
+  reconcileVanishedDiscoveryItems,
   summariseLifecycleChanges,
 } from "@/lib/modelLifecycleWorkItems";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
@@ -65,6 +66,13 @@ export async function POST(request: Request) {
         return undefined;
       }
     );
+    // After the scan has recorded today's sightings: excludes candidates whose
+    // every ID left the provider's catalogue, reopens the ones that came back
+    // (owner approval 2026-11-11). Degradable: the queue just stays as it was.
+    const vanished = await reconcileVanishedDiscoveryItems().catch((error) => {
+      console.error("Vanished discovery item reconciliation failed:", error);
+      return undefined;
+    });
     // After the scan, so the models it just queued have their documentation
     // read the same morning. Degradable like everything below: a documentation
     // host that is down costs the adoption form its prefill, never the scan its
@@ -142,6 +150,8 @@ export async function POST(request: Request) {
       registryHeld: reconciliation?.held.length ?? 0,
       docEvidenceAttempted: docEvidence?.attempted ?? null,
       docEvidenceParsed: docEvidence?.byStatus.parsed ?? null,
+      vanishedExcluded: vanished?.excluded ?? null,
+      vanishedReopened: vanished?.reopened ?? null,
       newProviderResearch: research?.status ?? null,
       newProviderResearchFiled: research?.status === "ran" ? research.created.length : null,
     };
