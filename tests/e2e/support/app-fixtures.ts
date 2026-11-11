@@ -684,7 +684,10 @@ export async function mockAuthenticatedApi(
     }>;
   } = {}
 ): Promise<AuthenticatedQaState> {
-  await page.route("**/api/chat/location-intent", route => route.fulfill(json({ requiresLocation: false })));
+  await page.route("**/api/chat/location-intent", route => route.fulfill(json({
+    requiresLocation: false,
+    ...(route.request().postDataJSON()?.freshAccountId ? { preparationOutcome: "classified" } : {}),
+  })));
   await page.addInitScript((showSidebarTour) => {
     // Existing shell contracts exercise Classic; Studio suites explicitly seed
     // their appearance. Preserve that seed regardless of init-script order.

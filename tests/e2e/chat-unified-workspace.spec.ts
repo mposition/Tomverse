@@ -85,6 +85,7 @@ function installControlledChatFetch(options: {
   routedModelId?: string;
   responseErrorCode?: string;
   timingToken?: string;
+  timedAnswer?: string;
   responseErrorOnceCode?: string;
   responseErrorOnceDetails?: Record<string, unknown>;
   durableAttemptResponse?: boolean;
@@ -221,6 +222,11 @@ function installControlledChatFetch(options: {
           control.aborted = true;
           try { controller.error(new DOMException("Aborted", "AbortError")); } catch { /* Settled. */ }
         };
+        const timedAnswer = options.timedAnswer;
+        if (timedAnswer) {
+          setTimeout(() => control.push(timedAnswer), 40);
+          setTimeout(() => control.finish(), 80);
+        }
         if (signal?.aborted) abort();
         else signal?.addEventListener("abort", abort, { once: true });
       },
@@ -298,6 +304,7 @@ async function openChat(page: Page, options: {
   routedModelId?: string;
   responseErrorCode?: string;
   timingToken?: string;
+  timedAnswer?: string;
   responseErrorOnceCode?: string;
   responseErrorOnceDetails?: Record<string, unknown>;
   durableAttemptResponse?: boolean;
@@ -944,6 +951,7 @@ async function openChat(page: Page, options: {
   });
   await page.addInitScript(installControlledChatFetch, {
     timingToken: options.timingToken,
+    timedAnswer: options.timedAnswer,
     routedModelId: options.routedModelId,
     responseErrorCode: options.responseErrorCode,
     responseErrorOnceCode: options.responseErrorOnceCode,
@@ -1135,6 +1143,60 @@ async function switchToFixtureAccountA(
 }
 
 const message = (page: Page, text: string) => page.getByTestId("chat-message").filter({ hasText: text });
+
+function makeGate() {
+  let release = () => {};
+  const promise = new Promise<void>(resolve => { release = resolve; });
+  return { promise, release };
+}
+
+async function countDeviceLocationReads(page: Page) {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "__qaLocationReads", { value: 0, writable: true });
+    Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
+      getCurrentPosition: (success: PositionCallback) => {
+        (window as unknown as { __qaLocationReads: number }).__qaLocationReads++;
+        success({ coords: { latitude: -27.47, longitude: 153.025, accuracy: 150 }, timestamp: Date.now() } as GeolocationPosition);
+      },
+    } });
+  });
+  return () => page.evaluate(() => (window as unknown as { __qaLocationReads: number }).__qaLocationReads);
+}
+
+const freshQuestion = "What is near me?";
+const locationIntentOff = process.env.E2E_CHAT_LOCATION_INTENT_ENABLED === "false";
+const freshLocationEarly = !locationIntentOff && process.env.E2E_CHAT_FRESH_LOCATION_PREPARATION_ENABLED !== "false";
+
+async function prepareGatedFreshSend(page: Page, viewport: { width: number; height: number }) {
+  const locationReads = await countDeviceLocationReads(page);
+  const state = await openChat(page, { fresh: true, autoSelectionOffered: true, viewport,
+    holdMessageSaveResponseAfterCommit: true });
+  const create = makeGate();
+  const intent = makeGate();
+  let createStarted = false;
+  const intentBodies: unknown[] = [];
+  await page.route("**/api/products/chat/conversations", async route => {
+    if (route.request().method() === "POST") { createStarted = true; await create.promise; }
+    await route.fallback();
+  });
+  await page.route("**/api/chat/location-intent", async route => {
+    const body = route.request().postDataJSON();
+    intentBodies.push(body);
+    await intent.promise;
+    await route.fulfill({ json: { requiresLocation: true,
+      ...(body.freshAccountId ? { preparationOutcome: "classified" } : {}) } });
+  });
+  await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+  // A draft edit alone must not start semantic work. The normalized, frozen
+  // message is the only text the classifier may receive after Send.
+  await page.getByTestId("chat-textarea").fill(`  ${freshQuestion}\n`);
+  expect(intentBodies).toHaveLength(0);
+  await page.getByTestId("chat-send-button").click();
+  await expect.poll(() => createStarted).toBe(true);
+  if (freshLocationEarly) await expect.poll(() => intentBodies.length).toBe(1);
+  else expect(intentBodies).toHaveLength(0);
+  return { state, create, intent, intentBodies, locationReads };
+}
 
 test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
   test("draft sync failure is visible and retry keeps the local question", async ({ page }) => {
@@ -3811,6 +3873,13 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       autoSelectionOffered: true,
       holdBlankChatCapability: true,
     });
+    let manualIntentCalls = 0;
+    await page.route("**/api/chat/location-intent", async route => {
+      manualIntentCalls++;
+      expect(route.request().postDataJSON().freshAccountId).toBeUndefined();
+      expect(state.messageSaveCommitted()).toBe(true);
+      await route.fulfill({ json: { requiresLocation: false } });
+    });
     await expect.poll(state.blankChatCapabilityStarted).toBe(true);
     await chooseModel(page, MODEL_B);
     state.releaseBlankChatCapability();
@@ -3827,6 +3896,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       write.method === "PATCH" && write.body.selectionMode === "auto"
     )).toHaveLength(0);
     expect((await requests(page))[0]?.modelId).toBe(MODEL_B);
+    expect(manualIntentCalls).toBe(locationIntentOff ? 0 : 1);
     await drive(page, 0, "finish");
   });
 
@@ -4081,11 +4151,19 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
 
   for (const autoSelectionOffered of [false, true]) {
     test(`a failed first Message save retries the same created Chat and never copies or deletes the new-scope draft (${autoSelectionOffered ? "Auto" : "manual"})`, async ({ page }) => {
+      const locationReads = await countDeviceLocationReads(page);
       const state = await openChat(page, {
         fresh: true,
         autoSelectionOffered,
         messageSaveFailureOnce: true,
         messageSaveFailureStatus: 409,
+      });
+      const intentRequests: Array<{ freshAccountId?: string }> = [];
+      await page.route("**/api/chat/location-intent", async route => {
+        const body = route.request().postDataJSON();
+        intentRequests.push(body);
+        await route.fulfill({ json: { requiresLocation: true,
+          ...(body.freshAccountId ? { preparationOutcome: "classified" } : {}) } });
       });
       if (autoSelectionOffered) {
         await expect(page.getByTestId("composer-auto-routing-toggle"))
@@ -4101,6 +4179,8 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       )).toBeVisible();
       await expect(page.getByTestId("chat-textarea")).toHaveValue(prompt);
       expect(await persistentChatPostCount(page)).toBe(0);
+      expect(intentRequests).toHaveLength(autoSelectionOffered && freshLocationEarly ? 1 : 0);
+      expect(await locationReads()).toBe(0);
 
       const draftWritesAfterFailure = state.writes.filter((write) =>
         write.path.includes("/api/products/chat/drafts/")
@@ -4115,6 +4195,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       await drive(page, 0, "push", "One answer after the Message retry.");
       await drive(page, 0, "finish");
       await expect(message(page, "One answer after the Message retry.")).toBeVisible();
+      expect(await locationReads()).toBe(locationIntentOff ? 0 : 1);
 
       const creates = state.writes.filter((write) =>
         write.method === "POST" && write.path === "/api/products/chat/conversations"
@@ -4259,6 +4340,144 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(await requests(page)).toHaveLength(1);
   });
 
+  test("a fresh Auto send overlaps semantic intent with create and saves the question before requesting GPS", async ({ page }, testInfo) => {
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const { state, create, intent, intentBodies, locationReads } = await prepareGatedFreshSend(page, viewport);
+    expect(state.messageSaveStarted()).toBe(false);
+    expect(await locationReads()).toBe(0);
+    expect(await requests(page)).toHaveLength(0);
+    create.release();
+    await expect.poll(state.messageSaveCommitted).toBe(true);
+    expect(state.messageSaveResponseSettledCount()).toBe(0);
+    expect(await locationReads()).toBe(0);
+    expect(await requests(page)).toHaveLength(0);
+    // The actual save transaction can finish with semantic intent still pending.
+    // A positive decision alone cannot enable the device before acknowledgement.
+    if (freshLocationEarly) {
+      const responded = page.waitForResponse(response => new URL(response.url()).pathname === "/api/chat/location-intent");
+      intent.release();
+      await responded;
+      expect(await locationReads()).toBe(0);
+    }
+    state.releaseMessageSaveResponse();
+    if (!locationIntentOff && !freshLocationEarly) await expect.poll(() => intentBodies.length).toBe(1);
+    intent.release();
+    await drive(page, 0, "push", "The complete fresh answer.");
+    await expect(message(page, "The complete fresh answer.")).toBeVisible();
+    await drive(page, 0, "finish");
+    const [payload] = await requests(page);
+    expect(payload.messages?.at(-1)?.content).toBe(freshQuestion);
+    const saved = state.conversations.find(row => row.id === "qa-chat-created");
+    expect(saved?.messages.filter(row => row.role === "user").map(row => row.content)).toEqual([freshQuestion]);
+    expect(intentBodies).toEqual(locationIntentOff ? [] : [{ text: freshQuestion,
+      ...(freshLocationEarly ? { freshAccountId: "qa-user" } : {}) }]);
+    expect(await locationReads()).toBe(locationIntentOff ? 0 : 1);
+    if (locationIntentOff) expect(payload.currentLocation).toBeUndefined();
+    else expect(payload.currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+  });
+
+  for (const change of ["conversation", "account", "model"] as const) {
+    test(`a fresh Auto send abandoned by a ${change} change cannot send coordinates or a question`, async ({ page }, testInfo) => {
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const { state, create, intent, intentBodies, locationReads } = await prepareGatedFreshSend(page, viewport);
+      if (change === "conversation") await chooseConversation(page, SECOND_CONVERSATION);
+      if (change === "account") await switchToFixtureAccountB(page, state);
+      if (change === "model") await chooseModel(page, MODEL_B);
+      const response = page.waitForResponse(value => new URL(value.url()).pathname === "/api/products/chat/conversations" && value.request().method() === "POST");
+      create.release(); intent.release(); state.releaseMessageSaveResponse();
+      await response;
+      await expect(page.getByTestId("chat-textarea")).not.toHaveAttribute("readonly", "");
+      expect(state.messageSaveStarted()).toBe(false);
+      expect(await locationReads()).toBe(0);
+      expect(await persistentChatPostCount(page)).toBe(0);
+      expect(intentBodies).toHaveLength(freshLocationEarly ? 1 : 0);
+    });
+  }
+
+  for (const outcome of ["not_dispatched", "unknown"] as const) {
+    test(`a fresh Auto send continues after ${outcome} location preparation`, async ({ page }, testInfo) => {
+      test.skip(!freshLocationEarly, "Requires the fresh location classifier");
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const locationReads = await countDeviceLocationReads(page);
+      const state = await openChat(page, { fresh: true, autoSelectionOffered: true, viewport,
+        holdMessageSaveResponseAfterCommit: true });
+      const paths: string[] = [];
+      await page.route("**/api/chat/location-intent", async route => {
+        const body = route.request().postDataJSON();
+        expect(body.text).toBe(freshQuestion);
+        if (body.freshAccountId) {
+          paths.push("fresh");
+          return outcome === "not_dispatched"
+            ? route.fulfill({ json: { requiresLocation: false, preparationOutcome: outcome } })
+            : route.abort("connectionreset");
+        }
+        paths.push("saved");
+        expect(state.messageSaveCommitted()).toBe(true);
+        return route.fulfill({ json: { requiresLocation: true } });
+      });
+      await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+      await submitComposer(page, freshQuestion, viewport.width);
+      await expect.poll(state.messageSaveCommitted).toBe(true);
+      expect(paths).toEqual(["fresh"]);
+      expect(await locationReads()).toBe(0);
+      state.releaseMessageSaveResponse();
+      await drive(page, 0, "push", "The question was answered.");
+      await drive(page, 0, "finish");
+      await expect(message(page, "The question was answered.")).toBeVisible();
+      expect(paths).toEqual(outcome === "not_dispatched" ? ["fresh", "saved"] : ["fresh"]);
+      expect(await locationReads()).toBe(outcome === "not_dispatched" ? 1 : 0);
+      const [payload] = await requests(page);
+      if (outcome === "not_dispatched") expect(payload.currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+      else expect(payload.currentLocation).toBeUndefined();
+    });
+  }
+
+  test("fresh Auto first content and completion include the real browser handoff with controlled endpoint delays", async ({ page }, testInfo) => {
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const answer = "The complete controlled fresh answer.";
+    const state = await openChat(page, { fresh: true, viewport, autoSelectionOffered: true,
+      timedAnswer: answer, timingToken: "fresh-timing-proof" });
+    const reports: Array<Record<string, unknown>> = [];
+    let intentCalls = 0; let creates = 0;
+    await page.route("**/api/chat/timing", async route => {
+      reports.push(route.request().postDataJSON());
+      await route.fulfill({ status: 204 });
+    });
+    await page.route("**/api/products/chat/conversations", async route => {
+      if (route.request().method() === "POST") { creates++; await new Promise(resolve => setTimeout(resolve, 350)); }
+      await route.fallback();
+    });
+    await page.route("**/api/chat/location-intent", async route => {
+      const body = route.request().postDataJSON();
+      expect(body.text).toBe(freshQuestion);
+      intentCalls++;
+      await new Promise(resolve => setTimeout(resolve, 420));
+      await route.fulfill({ json: { requiresLocation: false,
+        ...(body.freshAccountId ? { preparationOutcome: "classified" } : {}) } });
+    });
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    await submitComposer(page, freshQuestion, viewport.width);
+    await expect(message(page, answer)).toBeVisible();
+    await expect.poll(() => reports.length).toBe(1);
+    expect(state.messageSaveCommitted()).toBe(true);
+    expect(creates).toBe(1);
+    expect(intentCalls).toBe(locationIntentOff ? 0 : 1);
+    const dispatched = await requests(page);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0].messages?.at(-1)?.content).toBe(freshQuestion);
+    expect(reports[0].outcome).toBe("completed");
+    const { firstContentMs, completionMs, stages } = reports[0] as {
+      firstContentMs: number; completionMs: number; stages: Record<string, number> };
+    expect(firstContentMs).toBeGreaterThan(0);
+    expect(completionMs).toBeGreaterThanOrEqual(firstContentMs);
+    if (freshLocationEarly) expect(stages.freshLocationOverlapMs).toBeGreaterThan(0);
+    else expect(stages.freshLocationOverlapMs).toBeUndefined();
+    await testInfo.attach("fresh-send-latency", { contentType: "application/json",
+      body: JSON.stringify({ freshLocationEarly, locationIntentOff, repeat: testInfo.repeatEachIndex,
+        firstContentMs, completionMs, overlapMs: stages.freshLocationOverlapMs ?? null,
+        creates, intentCalls, dispatches: dispatched.length }) });
+  });
+
   for (const changeSelection of [false, true]) {
     test(`Refiner and location decisions overlap without early GPS or stale dispatch (${changeSelection ? "changed" : "retained"})`, async ({ page }, testInfo) => {
       const parallel = process.env.E2E_CHAT_PARALLEL_PREPARATION_ENABLED !== "false";
@@ -4267,16 +4486,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       let scopeRead = false; let refinerStarted = false; let intentStarted = false; let intentCount = 0;
       let release = () => {};
       const gate = new Promise<void>(resolve => { release = resolve; });
-      await page.addInitScript(() => {
-        Object.defineProperty(window, "__qaLocationReads", { value: 0, writable: true });
-        Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
-          getCurrentPosition: (success: PositionCallback) => {
-            const state = window as unknown as { __qaLocationReads: number };
-            state.__qaLocationReads++;
-            success({ coords: { latitude: -27.47, longitude: 153.025, accuracy: 150 }, timestamp: Date.now() } as GeolocationPosition);
-          },
-        } });
-      });
+      const locationReads = await countDeviceLocationReads(page);
       await page.route("**/api/chat/prompt-refiner/scope", route => {
         scopeRead = true;
         return route.fulfill({ json: { scopeId, epoch: 1 } });
@@ -4297,7 +4507,6 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       await expect.poll(() => refinerStarted).toBe(true);
       if (parallel) await expect.poll(() => intentStarted).toBe(true);
       else expect(intentStarted).toBe(false);
-      const locationReads = () => page.evaluate(() => (window as unknown as { __qaLocationReads: number }).__qaLocationReads);
       expect(await locationReads()).toBe(0);
       expect(await requests(page)).toHaveLength(0);
       expect(state.writes.filter(write => write.method === "POST" && write.path.endsWith("/messages"))).toHaveLength(0);
