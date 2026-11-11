@@ -28,7 +28,7 @@ export async function consumeRouterLocation(key: RouterLocationClaim, requestDig
   if (result.count !== 1) throw routerLocationRefused();
 }
 
-export const routerLocationResponse = (requiresLocation: true | null, traceId: string, continuation?: string) =>
-  Response.json({ requiresLocation, ...(continuation ? { continuation } : {}) }, {
+export const routerLocationResponse = (requiresLocation: true | null, traceId: string, details?: { continuation: string } | { locationRateLimited: true }) =>
+  Response.json({ requiresLocation, ...details }, {
     headers: { "X-Chat-Response-Mode": "router-location", "Cache-Control": "private, no-store", "X-Request-ID": traceId },
   });

@@ -4449,7 +4449,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(await requests(page)).toHaveLength(1);
   });
 
-  for (const decision of ["negative", "positive", "denied", "missing", "unsupported", "legacy404"] as const) {
+  for (const decision of ["negative", "positive", "denied", "missing", "unsupported", "legacy404", "rateLimited"] as const) {
     test(`a saved fresh Router location ${decision} decision preserves the question and final answer`, async ({ page }, testInfo) => {
       test.skip(process.env.E2E_CHAT_LOCATION_INTENT_ENABLED === "false", "Requires location intent");
       const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
@@ -4467,8 +4467,8 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       const paths: string[] = [];
       const lookupKinds: string[] = [];
       let answerCalls = 0;
-      const needsLocation = decision !== "negative";
-      const fallbackToChat = decision === "unsupported" || decision === "legacy404";
+      const needsLocation = decision !== "negative" && decision !== "rateLimited";
+      const fallbackToChat = decision === "unsupported" || decision === "legacy404" || decision === "rateLimited";
       await page.route("**/api/chat/location-intent", async route => {
         const intent = route.request().postDataJSON();
         expect(intent.text).toBe(question);
@@ -4486,7 +4486,8 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
         }
         if (body.routerLocationFusion && !body.routerLocationContinuation && decision !== "negative") {
           await route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
-            json: decision === "unsupported" ? { requiresLocation: null }
+            json: decision === "rateLimited" ? { requiresLocation: null, locationRateLimited: true }
+              : decision === "unsupported" ? { requiresLocation: null }
               : { requiresLocation: decision === "missing" ? null : true, continuation: "fixture-continuation" } });
         } else {
           answerCalls++;
@@ -4513,7 +4514,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       const last = posts.at(-1)!;
       expect(last.messages?.at(-1)?.content).toBe(question);
       expect(lookupKinds).toEqual(freshLocationEarly ? ["fresh"]
-        : !fusionEnabled || fallbackToChat || decision === "missing" ? ["saved"] : []);
+        : !fusionEnabled || decision === "unsupported" || decision === "legacy404" || decision === "missing" ? ["saved"] : []);
       expect(await gpsReads()).toBe(needsLocation ? 1 : 0);
       if (needsLocation && decision !== "denied") expect(last.currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
       else expect(last.currentLocation).toBeUndefined();
@@ -4531,6 +4532,45 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       }
     });
   }
+
+  test("a Router location limit honors a manual grant made while routing without another classifier", async ({ page }, testInfo) => {
+    test.skip(!fusionEnabled, "Requires Router location fusion");
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const gpsReads = await countDeviceLocationReads(page);
+    await openChat(page, { fresh: true, viewport, autoSelectionOffered: true, useChatNetworkFixture: true });
+    const waiting = makeGate();
+    const posts: RecordedRequest[] = [];
+    let lookups = 0;
+    await page.route("**/api/chat/location-intent", route => {
+      lookups++;
+      return route.fulfill({ json: { requiresLocation: true } });
+    });
+    await page.route(savedChatPaths, async route => {
+      posts.push(route.request().postDataJSON());
+      if (posts.length === 1) {
+        await waiting.promise;
+        return route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
+          json: { requiresLocation: null, locationRateLimited: true } });
+      }
+      return route.fulfill({ contentType: "text/plain", body: "Answered with the manual grant." });
+    });
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    await submitComposer(page, "Which station is nearby?", viewport.width);
+    await expect.poll(() => posts.length).toBe(1);
+    expect(await gpsReads()).toBe(0);
+    await page.getByTestId("composer-tools-button").click();
+    await page.getByTestId("tools-location-row").click();
+    await expect(page.getByTestId("tools-location-row")).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
+    waiting.release();
+    await expect(message(page, "Answered with the manual grant.")).toBeVisible();
+    expect(lookups).toBe(0);
+    expect(await gpsReads()).toBe(2);
+    expect(posts).toHaveLength(2);
+    expect(posts[0].currentLocation).toBeUndefined();
+    expect(posts[1].routerLocationFusion).toBeUndefined();
+    expect(posts[1].currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+  });
 
   for (const recovery of ["unclaimed", "claimed", "already_consumed"] as const) {
     test(`a Router location stale quote recovers once after ${recovery} refusal`, async ({ page }, testInfo) => {

@@ -51,6 +51,12 @@ export async function readRouterLocationRequest(response: Response) {
     throw new Error("Invalid router location decision");
   }
   const continuation = "continuation" in body ? body.continuation : undefined;
+  if ("locationRateLimited" in body) {
+    if (body.locationRateLimited !== true || body.requiresLocation !== null || continuation !== undefined) {
+      throw new Error("Invalid router location rate limit");
+    }
+    return { requiresLocation: false as const, continuation: undefined };
+  }
   if ((continuation !== undefined && (typeof continuation !== "string" || !continuation.trim())) ||
       (body.requiresLocation && !continuation)) throw new Error("Invalid router location continuation");
   return { requiresLocation: body.requiresLocation, continuation };

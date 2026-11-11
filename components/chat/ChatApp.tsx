@@ -1920,12 +1920,12 @@ function ChatAppComponent({
           controller.signal.throwIfAborted();
         };
         checkLocationTurn();
-        const readLocation = (routerRequiresLocation = false) => {
+        const readLocation = (routerDecision: boolean | null = null) => {
           const finishLocation = latency.stage("locationMs");
-          return chatLocationSession.readForTurn(panelIdentityKey, controller.signal, chatLocationIntentEnabled ? {
+          return chatLocationSession.readForTurn(panelIdentityKey, controller.signal, chatLocationIntentEnabled && routerDecision !== false ? {
             turnId: sourceUserMessageId,
             requiresLocation: async () => {
-              if (routerRequiresLocation) return true;
+              if (routerDecision === true) return true;
               const source = String(userMessage.content ?? "");
               const prepared = preparedLocationIntent && "readForSavedTurn" in preparedLocationIntent
                 ? await preparedLocationIntent.readForSavedTurn(panelIdentityKey, source, controller.signal, latency.freshLocation)
@@ -2011,7 +2011,7 @@ function ChatAppComponent({
           hasRouterLocationContinuation = Boolean(locationRequest.continuation);
           checkLocationTurn();
           liveness.stop();
-          const fix = await readLocation(locationRequest.requiresLocation === true);
+          const fix = await readLocation(locationRequest.requiresLocation);
           checkLocationTurn();
           liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
           if (locationRequest.continuation) {

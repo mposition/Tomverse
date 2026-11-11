@@ -63,6 +63,7 @@ import {
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import { chatRouterLocationFusionEnabled } from "@/lib/chatRouterLocationFusionEnabled";
+import { consumeChatLocationIntentLimit } from "@/lib/chatLocationIntentRateLimit";
 import { openRouterLocation, routerLocationDigest, sealRouterLocation, type RouterLocationContinuation } from "@/lib/chatRouterLocationContinuation";
 import { claimRouterLocation, consumeRouterLocation, routerLocationRefused, routerLocationResponse, type RouterLocationClaim } from "@/lib/chatRouterLocationPreparation";
 import { combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
@@ -2343,6 +2344,16 @@ async function handleChatPost(
             const resume = resumeToken === undefined ? null : openRouterLocation(resumeToken, requestDigest, process.env.NEXTAUTH_SECRET!);
             if (resumeToken !== undefined && (!resume || conversationRouting.routerLocationPreparations?.[0]?.requestDigest !== requestDigest)) throw routerLocationRefused();
             const expiresAt = resume?.expiresAt ?? await claimRouterLocation(key, requestDigest);
+            if (!resume) {
+                try {
+                    await consumeChatLocationIntentLimit(req, identifyChatCaller(req, userId).subjectKey);
+                } catch (error) {
+                    if (apiSecurityResponse(error)?.status !== 429) throw error;
+                    // Neither Router nor image classification has started. Keep
+                    // ordinary Chat available without another semantic lookup.
+                    return routerLocationResponse(null, traceId, { locationRateLimited: true });
+                }
+            }
             // Consent can cross UTC midnight; reconstruct the dated search
             // prompt the Router actually read when verifying its digest.
             const searchUtcDate = resume?.searchUtcDate ?? new Date().toISOString().slice(0, 10);
@@ -3130,7 +3141,7 @@ async function handleChatPost(
                 const continuation = sealRouterLocation({ requestDigest: fusion.requestDigest, routerDigest: fusionRouterDigest,
                     traceId, searchPlan: allowRouterSearchPlan, searchUtcDate: fusion.searchUtcDate,
                     pick: llmPick, image: autoImageDecision, expiresAt: fusion.expiresAt }, process.env.NEXTAUTH_SECRET!);
-                return routerLocationResponse(llmPick?.requiresLocation === true ? true : null, traceId, continuation);
+                return routerLocationResponse(llmPick?.requiresLocation === true ? true : null, traceId, { continuation });
             }
         }
         if (autoImageDecision.image) {

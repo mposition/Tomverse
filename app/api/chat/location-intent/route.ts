@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
+import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
+import { consumeChatLocationIntentLimit } from "@/lib/chatLocationIntentRateLimit";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { assertUserOperationalAccess, ChatAccessError, identifyChatCaller } from "@/lib/chatSecurity";
 import { detectChatLocationIntent, type ChatLocationIntentOutcome } from "@/lib/chatLocationIntent";
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
     }
     const caller = identifyChatCaller(request, userId ?? null);
     if (caller.setCookie) cookies.push(caller.setCookie);
-    await consumeApiRateLimit(request, caller.subjectKey, "chat-location-intent", { minute: 30, day: 2_000 });
+    await consumeChatLocationIntentLimit(request, caller.subjectKey);
     if (userId) await assertUserOperationalAccess(userId);
     const grant = userId ? undefined : await ensureGuestVerified(request, input.turnstileToken, "guest_chat");
     if (grant) cookies.push(grant);

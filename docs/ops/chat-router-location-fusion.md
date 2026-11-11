@@ -31,7 +31,10 @@ sealed Router selection with any permitted location. Declining permission
 continues the answer without coordinates. An omitted location decision can
 use the standalone classifier. Current authorization, context and routing
 inputs are rechecked on resume. A content-free database claim permits a
-single resume within five minutes. Expired claims are removed by the existing
+single resume within five minutes and binds the first saved question even if
+a caller supplies another answer ID. Both location paths share the same
+account and IP limits. A confirmed limit refusal lets ordinary Chat continue
+without another automatic location lookup. Expired claims are removed by the existing
 maintenance job; deleting the conversation cascades to its claims.
 
 In a mixed deployment, an initial 404 from an older build lacking the

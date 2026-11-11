@@ -445,6 +445,8 @@ mock.module(mod("lib/guestChatAutoSelection.ts"), {
 
 let durableAttemptAdmissionRefused = false;
 let durableAttemptAdmissionCalls = 0;
+let locationIntentLimitCalls = 0;
+let locationIntentLimitRefused = false;
 class TestApiSecurityError extends Error {
   constructor(
     readonly status: number,
@@ -471,10 +473,21 @@ mock.module(mod("lib/apiSecurity.ts"), {
         : null,
     assertMessageCapacity: async () => undefined,
     consumeApiRateLimit: async (
-      _request: Request,
-      _userId: string,
-      scope: string
+      request: Request,
+      subject: string,
+      scope: string,
+      limits: { minute: number; day: number },
+      options?: { skipIpBucket?: boolean },
     ) => {
+      if (scope === "chat-location-intent") {
+        locationIntentLimitCalls++;
+        assert.equal(subject, `user:${"c".repeat(64)}`);
+        assert.deepEqual(limits, { minute: 30, day: 2_000 });
+        assert.ok(request instanceof Request);
+        assert.ok(!options?.skipIpBucket);
+        if (locationIntentLimitRefused) throw new TestApiSecurityError(429, "API_RATE_LIMITED", "Too many requests.");
+        return;
+      }
       if (scope !== "chat-durable-attempt") return;
       durableAttemptAdmissionCalls += 1;
       if (durableAttemptAdmissionRefused) {
@@ -3926,6 +3939,7 @@ test("fresh Router location continues a negative inline and resumes one paid pic
   delete process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED;
   fusionPayload = { routerLocationFusion: true };
   paidRouterCalls = 0;
+  locationIntentLimitCalls = 0;
   try {
     fusionPayload = {};
     const invalid = await ask("answers", "claimed", 400);
@@ -3949,6 +3963,19 @@ test("fresh Router location continues a negative inline and resumes one paid pic
     await ask("answers", "claimed", 409, false, [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "unsaved text" }]);
     assert.equal(fusionReceipt, null);
     assert.equal(paidRouterCalls, 0);
+    assert.equal(locationIntentLimitCalls, 0);
+    locationIntentLimitRefused = true;
+    const limited = await ask("answers");
+    assert.deepEqual(JSON.parse(limited.body), { requiresLocation: null, locationRateLimited: true });
+    assert.equal(paidRouterCalls, 0);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(locationIntentLimitCalls, 1);
+    await ask("answers", "claimed", 409);
+    assert.equal(locationIntentLimitCalls, 1, "rejected initial probes cannot consume additional quota");
+    fusionReceipt = null;
+    locationIntentLimitRefused = false;
     fusedLocationRequired = false;
     const negative = await ask("answers");
     assert.notEqual(negative.response.headers.get("X-Chat-Response-Mode"), "router-location");
@@ -3985,6 +4012,7 @@ test("fresh Router location continues a negative inline and resumes one paid pic
     await ask("answers", "claimed", 409);
     assert.equal(ledger.accessAcquisitions, 0);
     assert.equal(paidRouterCalls, 2, "neither resume nor replay spends on the Router");
+    assert.equal(locationIntentLimitCalls, 3, "only the limited, negative and positive initial requests enter location admission");
     fusionReceipt = null;
     turnLocation = undefined;
     fusedLocationRequired = undefined;
@@ -4003,6 +4031,7 @@ test("fresh Router location continues a negative inline and resumes one paid pic
     }
     turnLocation = undefined; fusionReceipt = null; fusionPayload = undefined; priorFusionMessage = false;
     fusedLocationRequired = undefined; fusionRouterDigest = "a".repeat(64);
+    locationIntentLimitRefused = false; locationIntentLimitCalls = 0;
   }
 });
 
@@ -4017,10 +4046,12 @@ test("only confirmed context drift after a fusion claim opts the one re-quote in
     paidRouterCalls = 0;
     fusionPayload = { routerLocationFusion: true };
     fusedLocationRequired = false;
+    locationIntentLimitCalls = 0;
     contextSequence = ["stale"];
     const early = JSON.parse((await ask("answers", "claimed", 409, "original-quote")).body);
     assert.equal(early.code, "CHAT_CONTEXT_BUNDLE_STALE");
     assert.equal(early.details.routerLocationRecovery, undefined);
+    assert.equal(locationIntentLimitCalls, 0);
     assert.equal(fusionReceipt, null);
     assert.equal(paidRouterCalls, 0);
     contextSequence = ["ok", "stale"];
