@@ -25,13 +25,16 @@ type FloorCopy = AdminMessageShape<AgentOfficeFloorCopy>;
 import { isAgentOfficeCliWorker, type AgentOfficeCliWorker } from "@/lib/agentOfficeCliMonitorCore";
 import {
   AGENT_OFFICE_CHANNELS,
+  AGENT_OFFICE_QUOTA_CHANNELS,
   agentOfficeChannel,
+  agentOfficeQuotaChannel,
   agentOfficeFloorLayout,
   brisbaneHour,
   floorLightAt,
   workerNeedsLook,
   workerPlace,
   type AgentOfficeChannel,
+  type AgentOfficeQuotaChannel,
   type FloorLight,
 } from "@/lib/agentOffice/floor";
 import {
@@ -61,7 +64,7 @@ const WORKERS_HREF = "/admin/amux-settings?tab=workers";
 const SAFETY_HREF = "/admin/amux-recovery?tab=safety";
 const CARDS_HREF = "/admin/amux-execution?tab=cards";
 /** A floor worker with what the office may say about its quota. */
-type LiveWorker = FloorWorker & { quota: AgentOfficeQuotaReading };
+type LiveWorker = FloorWorker & { quota: AgentOfficeQuotaReading; quotaChannel: AgentOfficeQuotaChannel | null };
 const QUOTA_FRESH_MINUTES = AGENT_OFFICE_QUOTA_FRESH_MS / 60_000;
 
 const RUNNING: readonly AgentOfficeAmuxWorkerState[] = ["ready", "idle", "busy", "starting", "error", "lost", "paused", "isolated", "blocked"];
@@ -250,6 +253,7 @@ export default function AgentOfficeLive({
         return {
           name: w.name,
           channel: agentOfficeChannel(w.provider),
+          quotaChannel: agentOfficeQuotaChannel(w.provider),
           state: w.state,
           label: m.real.amux.states[w.state],
           quota,
@@ -621,9 +625,9 @@ function Kpis({
   }));
   const costTotal = costByChannel.reduce((a, b) => a + b.micro, 0);
   const costMax = Math.max(1, ...costByChannel.map((x) => x.micro));
-  const channelQuota = AGENT_OFFICE_CHANNELS.map((ch) => ({
+  const channelQuota = AGENT_OFFICE_QUOTA_CHANNELS.map((ch) => ({
     ch,
-    q: agentOfficeChannelQuota(workers.filter((w) => w.channel === ch).map((w) => w.quota)),
+    q: agentOfficeChannelQuota(workers.filter((w) => w.quotaChannel === ch).map((w) => w.quota)),
   }));
   return (
     <section className={s.kpis} aria-label={f.inbox.title}>
@@ -694,7 +698,7 @@ function Kpis({
           <div className={s.kl}>{f.kpi.quota}</div>
           {channelQuota.map(({ ch, q }) => (
             <div key={ch} className={s.qrow} data-quota={q.kind}>
-              <span>{f.channels[ch]}</span>
+              <span>{f.quotaChannels[ch]}</span>
               {q.kind === "fresh" ? (
                 <>
                   <span className={s.qtrack}>

@@ -1897,10 +1897,11 @@ struct HttpLocal {
 }
 
 /// The providers a v22 CLI sidecar reads its own sign-in's quota for (Codex,
-/// Copilot and Cursor since 2026-11-08; Claude before). The sidecar names its
+/// Copilot and Cursor since 2026-11-08, Antigravity since 2026-11-11; Claude
+/// before). The sidecar names its
 /// own provider; the quota route then refuses a reading whose provider is not
 /// the worker's configured one (worker_provider_mismatch).
-const V22_QUOTA_PROVIDERS: [&str; 4] = ["anthropic", "openai", "github-copilot", "cursor"];
+const V22_QUOTA_PROVIDERS: [&str; 5] = ["anthropic", "openai", "github-copilot", "cursor", "antigravity"];
 
 pub fn parse_v22_quota_response(value: serde_json::Value, request_id: &str,
     worker: &str, now: i64) -> Result<Option<crate::tomverse_api::AmuxWorkerQuota>> {
@@ -1981,7 +1982,7 @@ mod quota_tests {
     fn quota_accepts_each_cli_provider_with_the_same_checks() {
         let id = "00000000-0000-4000-8000-000000000001";
         let now = chrono::DateTime::parse_from_rfc3339("2026-10-12T00:00:01Z").unwrap().timestamp();
-        for provider in ["openai", "github-copilot", "cursor"] {
+        for provider in ["openai", "github-copilot", "cursor", "antigravity"] {
             let mut body = evidence();
             body["worker"] = serde_json::json!("codex-chore");
             body["observation"]["provider"] = serde_json::json!(provider);
@@ -2024,10 +2025,11 @@ async fn v22_sidecar_quota(socket_path: &str, worker: &str) -> Result<Option<cra
         if response.len() > 4096 { bail!("quota response exceeds limit"); }
         parse_v22_quota_response(serde_json::from_slice(&response)?, &request_id, worker, unix_now())
     };
-    // Codex and Copilot answer from a CLI started for the read (bounded at
-    // ten seconds in the sidecar). One worker's bridge asks at most every
-    // five minutes, well inside its 90-second runtime lease.
-    tokio::time::timeout(Duration::from_secs(15), operation).await.context("quota probe timeout")?
+    // Codex, Copilot and Antigravity answer from a CLI started for the read
+    // (bounded at ten seconds in the sidecar, twenty for agy, which took nine
+    // from a fresh run home). One worker's bridge asks at most every five
+    // minutes, well inside its 90-second runtime lease.
+    tokio::time::timeout(Duration::from_secs(30), operation).await.context("quota probe timeout")?
 }
 
 #[cfg(not(unix))]
