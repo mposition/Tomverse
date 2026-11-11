@@ -249,8 +249,10 @@ const isEditable = (target: EventTarget | null) => {
  * recorded only by those parts and their routes: this screen reads, selects and
  * moves on, and never skips a confirmation.
  */
-export function AmuxOwnerQueueScreen({ canInspectCards, focusEscalationId = null }: {
+export function AmuxOwnerQueueScreen({ canInspectCards, canWriteEngineering = false, focusEscalationId = null }: {
   canInspectCards: boolean;
+  /** `engineering-agent:write`: a card's engineering items offer their buttons. */
+  canWriteEngineering?: boolean;
   /** A step-up that came back here names the escalation it was working on. */
   focusEscalationId?: string | null;
 }) {
@@ -340,6 +342,14 @@ export function AmuxOwnerQueueScreen({ canInspectCards, focusEscalationId = null
     queueMicrotask(() => void openReview(escalationId));
   }, [escalationId, selectedEscalationId, pendingDecision, pendingDecisionChecked, openReview, closeReview]);
 
+  // An engineering action on the card: read the queue and this card's review
+  // again, staying on the card (its own escalation may have moved on).
+  const refreshCard = useCallback(() => {
+    void loadRef.current();
+    const id = opened.current;
+    if (id !== null) queueMicrotask(() => void openReview(id));
+  }, [openReview]);
+
   const select = useCallback((taskId: string) => { if (!navLocked) setSelectedId(taskId); }, [navLocked]);
   const step = useCallback((delta: 1 | -1) => {
     if (selectedIndex < 0) return;
@@ -383,7 +393,7 @@ export function AmuxOwnerQueueScreen({ canInspectCards, focusEscalationId = null
       generatedAt={read.generatedAt} navLocked={navLocked} advance={advance} onAdvanceChange={setAdvance}
       onPrevious={selectedIndex > 0 ? () => step(-1) : null}
       onNext={selectedIndex >= 0 && selectedIndex < visible.length - 1 ? () => step(1) : null}
-      onAnswered={decided} />
+      onAnswered={decided} canWriteEngineering={canWriteEngineering} onEngineeringChanged={refreshCard} />
   );
 
   return (

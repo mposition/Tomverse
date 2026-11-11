@@ -175,3 +175,19 @@ test("the tab keeps its address and takes the new name in both languages", () =>
   assert.equal(ko.label, "내 확인 대기");
   assert.match(ko.description, /한곳에서 차례로/);
 });
+
+test("each card carries its open engineering items, and a failed engineering read leaves the queue as it was", async () => {
+  const { amuxOwnerQueueWithEngineeringItems } = await import("../lib/amux/ownerQueueCore.ts");
+  const queue = { items: [card("a"), card("b")], total: 2, processedToday: 0, generatedAt: "2026-11-11T00:00:00.000Z" };
+  const item = { id: "item-1", kind: "t2_draft" };
+  const attached = amuxOwnerQueueWithEngineeringItems(queue, new Map([["a", [item]]]));
+  assert.deepEqual(attached.items.map((row) => row.engineeringItems), [[item], []]);
+  assert.equal(attached.total, 2);
+  assert.equal(amuxOwnerQueueWithEngineeringItems(queue, null), queue);
+  const route = read("app/api/admin/amux/owner-queue/route.ts");
+  assert.match(route, /readEngineeringAgentCardItems\(read\.items\.map\(\(item\) => item\.taskId\)\)\.catch\(/);
+  assert.match(route, /amuxOwnerQueueWithEngineeringItems\(read, engineering\)/);
+  // The buttons follow the engineering write permission, decided on the server.
+  const page = read("app/(site)/(application)/admin/amux-execution/page.tsx");
+  assert.match(page, /canWriteEngineering=\{hasAdminPermission\(session, "engineering-agent:write"\)\}/);
+});

@@ -106,3 +106,82 @@ test("the read writes nothing and shows Decision Maker bodies only to ops:write"
   assert.match(panel, /function OwnerItemContext\(/);
   assert.doesNotMatch(panel.slice(panel.indexOf("function OwnerItemContext(")), /<button|adminFetch|dangerouslySetInnerHTML/);
 });
+
+// Operator, 2026-11-11: an owner queue card with an open T2 draft or state
+// mismatch decides it on the card, with the console's own rule and buttons.
+import {
+  engineeringAgentCardItems,
+  engineeringAgentDraftRejudgeable,
+} from "../lib/engineeringAgentOwnerItemContextCore.ts";
+
+const v22Run = (over = {}) => ({
+  cardId: "card-a", modeAtStart: "t1", amuxAttemptId: "attempt-1", card: { sourceSystem: "admin-idea-v4" }, ...over,
+});
+const draft = (over = {}) => ({
+  id: "item-1", kind: "t2_draft", state: "open", reason: "patch_unavailable", causeKey: "run:1",
+  createdAt: new Date("2026-11-11T01:00:00.000Z"), patchBody: "diff --git a/lib/a.ts b/lib/a.ts\n@@ -1 +1 @@\n-a\n+b\n",
+  patchDigest: "d".repeat(64), baseSha: "b".repeat(40), run: v22Run(), ...over,
+});
+
+test("a draft may be judged again only as a kept v22 patch of a v4 idea card started in T1", () => {
+  assert.equal(engineeringAgentDraftRejudgeable(draft(), v22Run()), true);
+  assert.equal(engineeringAgentDraftRejudgeable(draft({ patchBody: null }), v22Run()), false);
+  assert.equal(engineeringAgentDraftRejudgeable(draft({ reason: "tier_pending" }), v22Run()), false);
+  assert.equal(engineeringAgentDraftRejudgeable(draft({ kind: "state_mismatch" }), v22Run()), false);
+  assert.equal(engineeringAgentDraftRejudgeable(draft(), v22Run({ modeAtStart: "t2" })), false);
+  assert.equal(engineeringAgentDraftRejudgeable(draft(), v22Run({ amuxAttemptId: null })), false);
+  assert.equal(engineeringAgentDraftRejudgeable(draft(), v22Run({ card: { sourceSystem: "workboard" } })), false);
+  assert.equal(engineeringAgentDraftRejudgeable(draft(), null), false);
+});
+
+test("the console and the owner queue card share the one rejudge rule", () => {
+  const consoleRead = readFileSync("lib/engineeringAgentConsoleRead.ts", "utf8");
+  assert.match(consoleRead, /rejudgeable: engineeringAgentDraftRejudgeable\(item, run\)/);
+  assert.doesNotMatch(consoleRead, /sourceSystem === "admin-idea-v4"/);
+  const core = readFileSync("lib/engineeringAgentOwnerItemContextCore.ts", "utf8");
+  assert.match(core, /rejudgeable: engineeringAgentDraftRejudgeable\(row, row\.run\)/);
+});
+
+test("a card's open drafts and mismatches are attached to it, a review_pr mismatch through its published item", () => {
+  const mismatch = {
+    ...draft({ id: "item-2", kind: "state_mismatch", reason: "bound_review_pr_not_recorded",
+      causeKey: "review_pr:publish-1", patchBody: null, patchDigest: null, baseSha: null, run: null }),
+    createdAt: new Date("2026-11-11T02:00:00.000Z"),
+  };
+  const rows = [
+    mismatch,
+    draft(),
+    draft({ id: "other-card", run: v22Run({ cardId: "card-b" }) }),
+    draft({ id: "settled", state: "closed" }),
+    draft({ id: "decision", kind: "decision" }),
+    { ...mismatch, id: "orphan", causeKey: "review_pr:unknown" },
+  ];
+  const byCard = engineeringAgentCardItems(["card-a"], rows, new Map([["publish-1", v22Run()]]));
+  assert.deepEqual([...byCard.keys()], ["card-a"]);
+  const items = byCard.get("card-a");
+  assert.deepEqual(items.map((item) => [item.id, item.kind]), [["item-1", "t2_draft"], ["item-2", "state_mismatch"]]);
+  assert.equal(items[0].rejudgeable, true);
+  assert.equal(items[0].createdAt, "2026-11-11T01:00:00.000Z");
+  assert.deepEqual(items[0].files, [{ path: "lib/a.ts", added: 1, removed: 1 }]);
+  assert.equal(items[0].fileCount, 1);
+  assert.equal(items[1].rejudgeable, false);
+  assert.equal(items[1].patchBody, null);
+  assert.equal(engineeringAgentCardItems([], rows, new Map()).size, 0);
+});
+
+test("the card read writes nothing and the card posts only through the engineering routes", () => {
+  const consoleRead = readFileSync("lib/engineeringAgentConsoleRead.ts", "utf8");
+  const cardRead = consoleRead.slice(consoleRead.indexOf("export async function readEngineeringAgentCardItems("));
+  assert.match(cardRead, /state: "open"/);
+  assert.doesNotMatch(cardRead, /\$executeRaw|\.update\(|\.updateMany\(|\.create\(|\.upsert\(|\.delete/);
+  const card = readFileSync("components/admin/AmuxOwnerQueueEngineeringItems.tsx", "utf8");
+  assert.doesNotMatch(card, /adminFetch|dangerouslySetInnerHTML/);
+  assert.match(card, /postEngineeringAgentAction\(request\)/);
+  for (const confirm of ["confirmApprove", "confirmReject", "confirmRejudge", "confirmMismatchRecordReviewPr"]) {
+    assert.match(card, new RegExp(`m\.${confirm}`));
+  }
+  assert.match(card, /"record_bound_review_pr"/);
+  const panel = readFileSync("components/admin/AdminEngineeringAgentPanel.tsx", "utf8");
+  assert.match(panel, /engineeringAgentDecisionRequest\(item, decision\)/);
+  assert.match(panel, /engineeringAgentRejudgeRequest\(item\)/);
+});

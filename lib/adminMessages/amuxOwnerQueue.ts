@@ -128,6 +128,12 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
     question: {
       noEscalationOwnerNote: "Only the owner can read and answer a worker question.",
     },
+    engineering: {
+      title: "Engineering agent items on this card",
+      note: "Decide them here: the same buttons, checks and audit as Engineering › Decisions.",
+      readOnly: "Deciding these takes engineering agent write access.",
+      openConsole: "Open in Engineering › Decisions",
+    },
   },
   ko: {
     label: "내 확인 대기",
@@ -244,6 +250,12 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
     },
     question: {
       noEscalationOwnerNote: "워커 질문은 owner만 읽고 답할 수 있어요.",
+    },
+    engineering: {
+      title: "이 카드의 엔지니어링 Agent 항목",
+      note: "여기서 바로 결정하세요. 엔지니어링 › 결정 대기와 같은 버튼, 같은 검사, 같은 감사 기록이에요.",
+      readOnly: "이 항목을 결정하려면 엔지니어링 Agent 쓰기 권한이 필요해요.",
+      openConsole: "엔지니어링 › 결정 대기에서 열기",
     },
   },
 });
