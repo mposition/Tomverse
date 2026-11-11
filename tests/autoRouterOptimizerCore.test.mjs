@@ -939,6 +939,25 @@ test("a failed call is described by name, finish reason and output length only",
   assert.deepEqual(optimizerCallFailureDetail("boom"), { error: "unknown" });
 });
 
+test("optimizer failure tracing identifies the answering model without retrying or leaking content", async t => {
+  const { traceOptimizerCall, optimizerCallFailureDetail } = await import("../lib/autoRouterOptimizerCore.ts");
+  const logs = [];
+  t.mock.method(console, "warn", line => logs.push(JSON.parse(line)));
+  const failure = Object.assign(new Error("private provider response"), { name: "AI_APICallError", statusCode: 503, requestBody: "private prompt", responseBody: "private provider response" });
+  for (const event of ["auto_router_optimizer_call_failed", "auto_rewrite_optimizer_call_failed"]) {
+    let calls = 0;
+    await assert.rejects(traceOptimizerCall({ event, cycleId: "cycle-test", kind: "answer", modelId: "qwen3-8-flash", provider: "qwen" }, async () => { calls++; throw failure; }), error => error === failure);
+    assert.equal(calls, 1);
+    assert.deepEqual(logs.at(-1), { event, cycleId: "cycle-test", kind: "answer", modelId: "qwen3-8-flash", provider: "qwen", error: "AI_APICallError", statusCode: 503 });
+  }
+  assert.equal(JSON.stringify(logs).includes("private"), false);
+  assert.equal(optimizerCallFailureDetail({ statusCode: 999 }).statusCode, undefined);
+  assert.equal(optimizerCallFailureDetail({ statusCode: "503" }).statusCode, undefined);
+  const success = { text: "answer" };
+  assert.equal(await traceOptimizerCall({ event: "auto_router_optimizer_call_failed", cycleId: "cycle-test", kind: "answer", modelId: "qwen3-8-flash", provider: "qwen" }, async () => success), success);
+  assert.equal(logs.length, 2);
+});
+
 test("the generator is asked for a length well under the cap it is held to", async () => {
   const { AUTO_ROUTER_GENERATOR_SYSTEM, AUTO_ROUTER_GUIDANCE_TARGET_CHARS, AUTO_ROUTER_GUIDANCE_MAX_CHARS, admitGuidance } =
     await import("../lib/autoRouterOptimizerCore.ts");
