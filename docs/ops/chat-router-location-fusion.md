@@ -1,4 +1,4 @@
-# Compare Router and location decisions on a new Chat
+# Compare combined Router and location decisions in Chat
 
 `CHAT_ROUTER_LOCATION_FUSION_ENABLED` defaults to off. On an eligible first
 Smart Adaptive question, the existing Router also decides whether the answer
@@ -17,12 +17,28 @@ arms of a location experiment. Refiner follow-up preparation has its own switch.
 | Combined decision | false | true |
 | Early standalone preparation on builds that support it | true | false |
 
-When both experiment switches are true, early standalone preparation takes
-precedence. The signed-in browser proposes fusion for a saved first text
+On first turns, early standalone preparation takes precedence when both switches are true. The signed-in browser proposes fusion for a saved first text
 question with one active panel and no Refiner decision. The server checks
 the saved turn, current access, conversation settings and actual router
 eligibility. Guests, existing grants, suppressed automatic location and other
 ineligible turns use their usual paths.
+
+For a follow-up in a signed-in Smart Adaptive conversation, enable
+`CHAT_EXISTING_ROUTER_LOCATION_FUSION_ENABLED=true` in addition to
+`TOMVERSE_CHAT_LOCATION_INTENT_ENABLED=true` and `CHAT_ROUTER_LOCATION_FUSION_ENABLED=true`.
+The follow-up switch defaults off and is independent of early *first-turn*
+preparation. To isolate it, leave both master switches on and change only
+the follow-up switch. No model, credit, search or GPS settings need to change.
+
+A participating follow-up carries `routerLocationScope: "existing"` on its
+initial request and any permitted resume. The Router uses ordinary conversation
+and Refiner context to pick a model, but the location question is about the
+most recent **authored** message. A location mention in earlier history or in a
+rewrite is not a new request for device location. The current question must
+already be saved. A panel with a manual location decision, an attachment turn,
+or a turn outside the single-panel text path retains its ordinary handling.
+When the follow-up is eligible, its separate location classifier is skipped,
+including the one that would otherwise run alongside automatic Refiner preparation.
 
 The browser sends participating turns to `POST /api/chat/router-location`.
 A negative decision streams the answer on the same request. A positive
@@ -31,7 +47,7 @@ sealed Router selection with any permitted location. Declining permission
 continues the answer without coordinates. An omitted location decision can
 use the standalone classifier. Current authorization, context and routing
 inputs are rechecked on resume. A content-free database claim permits a
-single resume within five minutes and binds the first saved question even if
+single resume within five minutes and binds the saved source question even if
 a caller supplies another answer ID. Both location paths share the same
 account and IP limits. A confirmed limit refusal lets ordinary Chat continue
 without another automatic location lookup. Expired claims are removed by the existing
@@ -63,3 +79,15 @@ the initial submission and any permission wait or resume. The final POST's
 server duration alone omits the initial Router request for a positive decision.
 The separate [search comparison](./chat-presearch-comparison.md) measures
 whether presearch removed an answering-model round trip.
+
+For a follow-up A/B, use two identical conversations with the same saved user
+and assistant history. Avoid reusing the previous trial's answer as the next
+trial's history. Alternate arm order. Confirm that OFF sent a standalone
+location request and ON received a combined Router decision; do not count an
+alias compatibility fallback as a successful combined decision. The live
+`chat_auto_llm_router.routerLocationScope` field is `existing` on these
+combined Router calls, `fresh` on combined first turns and null for ordinary
+calls. A consent resume reuses a decision and does not produce a second paid
+Router call. Record separately any missing signed client timing, manual location
+grants, search corpus replays and changes in the answer-model mix. Report the
+number of completed searches at or below 10s as well as the p50 and p95.

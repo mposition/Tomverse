@@ -91,6 +91,7 @@ type AutoLlmRouterCallInput = {
     imageIntent?: ChatImageIntentContext | null;
     searchPlan?: boolean;
     locationText?: string;
+    existingLocationTurn?: boolean;
     searchUtcDate?: string;
 };
 
@@ -122,7 +123,9 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
             followUp: imageIntent.previousImagePrompt !== null,
             attachedPhoto: imageIntent.attachedPhoto,
         }) : "") + (input.searchPlan ? "\n\n" + routerSearchInstructions(input.searchUtcDate ?? new Date().toISOString().slice(0, 10)) : "") +
-            (authored ? "\n\nFor requiresLocation, use the full authoredMessage if supplied, otherwise message. " + CHAT_LOCATION_INTENT_PROMPT : ""),
+            (authored ? "\n\nFor requiresLocation, use the full authoredMessage if supplied, otherwise message. " +
+                (input.existingLocationTurn ? "Decide on this turn alone: earlier turns and the rewrite are not requests for device location. " : "") +
+                CHAT_LOCATION_INTENT_PROMPT : ""),
         prompt: autoLlmRouterUserMessage(
             input.prompt,
             input.previousAnswer,
@@ -411,6 +414,7 @@ export async function pickAutoModelWithLlm(input: {
      * A refusal prevents both the Router budget hold and the provider call. */
     verifyPreparedContext?: () => Promise<boolean>;
     locationFusion?: {
+        scope?: "existing";
         authoredText: string;
         searchUtcDate: string;
         resume: RouterLocationContinuation | null;
@@ -486,6 +490,7 @@ export async function pickAutoModelWithLlm(input: {
         searchPlan: input.searchPlan,
         searchUtcDate: input.searchPlan ? input.locationFusion?.searchUtcDate ?? new Date().toISOString().slice(0, 10) : undefined,
         locationText: input.locationFusion?.authoredText,
+        existingLocationTurn: input.locationFusion?.scope === "existing",
         // A rewrite needs its own longer deadline; a tuned one only ever adds to it.
         timeoutMs: Math.max(rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : timeoutMs, timeoutMs, imageIntent?.timeoutMs ?? 0),
     };
@@ -539,6 +544,7 @@ export async function pickAutoModelWithLlm(input: {
             rewriteAsked: rewrite,
             rewriteKept: Boolean(pick?.rewrite),
             combinedImageIntent: Boolean(imageIntent),
+            routerLocationScope: input.locationFusion ? input.locationFusion.scope ?? "fresh" : null,
             searchPlanAsked: input.searchPlan === true,
             searchQueryCount: searchQueries?.length ?? 0,
             imageOutcome: imageIntent ? imageDecision ? imageDecision.image ? "image" : "chat" : "fallback" : null,

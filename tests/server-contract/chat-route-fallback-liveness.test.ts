@@ -86,6 +86,11 @@ let fusionPayload: Record<string, unknown> | undefined;
 let fusionReceipt: { requestDigest: string; expiresAt: Date; consumedAt?: Date } | null = null;
 let fusionRouterDigest = "a".repeat(64);
 let priorFusionMessage = false;
+const fusionPriorAnswer = "77777777-7777-4777-8777-777777777777";
+let fusionLatestSource = SOURCE_USER_MESSAGE_ID;
+let fusionAttemptExists = false;
+let fusionAnswerExists = false;
+let displaceSourceAfterPick = false;
 let llmSearchQueries: string[] | undefined;
 let llmSearchModelId: string | undefined;
 let llmSearchFileIntent: boolean | undefined;
@@ -131,6 +136,7 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
       input.locationFusion.onRouterDigest(fusionRouterDigest);
       if (input.locationFusion.resume) return input.locationFusion.resume.pick;
       paidRouterCalls++;
+      if (displaceSourceAfterPick) fusionLatestSource = "newer-durable-user";
       return { modelId: input.ruleModelId, rewrite: null, requiresLocation: fusedLocationRequired };
     }
     if (!llmRouterRewrite && !llmSearchQueries) return null;
@@ -784,7 +790,8 @@ const conversationRow = () => contextConversationAccess === "missing" ? null : (
   productKey: conversationProductKey,
   selectionMode: conversationSelectionMode,
   chatRecoveryEpoch: 0,
-  messages: [{ id: SOURCE_USER_MESSAGE_ID }, ...(priorFusionMessage ? [{ id: "prior" }] : [])],
+  messages: [{ id: fusionLatestSource, role: "user" }, ...(priorFusionMessage ? [{ id: fusionPriorAnswer, role: "assistant" }] : [])],
+  responseAttempts: fusionAttemptExists ? [{ assistantMessageId: ASSISTANT_MESSAGE_ID }] : [],
   routerLocationPreparations: fusionReceipt ? [fusionReceipt] : [],
 });
 
@@ -807,6 +814,7 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
     findFirst: () => conversationRow(),
   },
   message: {
+    findUnique: () => fusionAnswerExists ? { role: "assistant", content: "Already answered", conversation: { userId: USER_ID } } : null,
     findFirst: (args: Record<string, unknown>) => {
       messageFindFirstArgs.push(args);
       const where = args.where as { id?: string; role?: string } | undefined;
@@ -4081,6 +4089,99 @@ test("fresh Router location continues a negative inline and resumes one paid pic
     turnLocation = undefined; fusionReceipt = null; fusionPayload = undefined; priorFusionMessage = false;
     fusedLocationRequired = undefined; fusionRouterDigest = "a".repeat(64);
     locationIntentLimitRefused = false; locationIntentLimitCalls = 0;
+  }
+});
+
+test("existing Auto fusion binds the saved follow-up, reuses consent once and preserves accepted or original Refiner execution", async () => {
+  const previousEnv = { ...process.env };
+  const messages = [
+    { id: "88888888-8888-4888-8888-888888888888", role: "user", content: "An earlier, unrelated question about my location." },
+    { id: fusionPriorAnswer, role: "assistant", content: "The previous answer." },
+    { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
+  ];
+  const send = (status = 200, decision?: "accepted" | "kept_original", transcript = messages) =>
+    ask("answers", "claimed", status, false, transcript, true, false, decision);
+  try {
+    process.env.APP_ENV = "dev";
+    process.env.CHAT_ROUTER_LOCATION_FUSION_ENABLED = "true";
+    process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED = "true";
+    delete process.env.CHAT_EXISTING_ROUTER_LOCATION_FUSION_ENABLED;
+    priorFusionMessage = true;
+    paidRouterCalls = 0;
+    fusionPayload = { routerLocationFusion: true, routerLocationScope: "existing" };
+    assert.deepEqual(JSON.parse((await send()).body), { requiresLocation: null });
+    process.env.CHAT_EXISTING_ROUTER_LOCATION_FUSION_ENABLED = "true";
+    process.env.CHAT_ROUTER_LOCATION_FUSION_ENABLED = "false";
+    assert.deepEqual(JSON.parse((await send()).body), { requiresLocation: null });
+    process.env.CHAT_ROUTER_LOCATION_FUSION_ENABLED = "true";
+    process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED = "true"; // Independent fresh-only treatment.
+    assert.deepEqual(JSON.parse((await send(200, undefined, [messages[2]])).body), { requiresLocation: null });
+    fusionLatestSource = "different-tab-user";
+    await send(409);
+    fusionLatestSource = SOURCE_USER_MESSAGE_ID;
+    fusionAttemptExists = true;
+    await send(409);
+    fusionAttemptExists = false;
+    fusionAnswerExists = true;
+    await send(409);
+    fusionAnswerExists = false;
+    assert.equal(paidRouterCalls, 0);
+    assert.equal(fusionReceipt, null);
+
+    for (const [mode, choice] of [["explicit", "accepted"], ["explicit", "kept_original"], ["auto", "accepted"]] as const) {
+      refinerMode = mode;
+      refinerConsumes = 0;
+      fusionReceipt = null;
+      fusedLocationRequired = true;
+      fusionPayload = { routerLocationFusion: true, routerLocationScope: "existing" };
+      const before = paidRouterCalls;
+      const pending = await send(200, choice);
+      const { continuation, requiresLocation } = JSON.parse(pending.body);
+      assert.equal(requiresLocation, true);
+      assert.ok(continuation);
+      assert.equal(llmRouterInputs.at(-1)?.locationFusion?.authoredText, messages[2].content);
+      assert.equal(llmRouterInputs.at(-1)?.locationFusion?.scope, "existing");
+      assert.equal(llmRouterInputs.at(-1)?.previousAnswer, messages[1].content);
+      assert.equal(llmRouterInputs.at(-1)?.imageIntent, undefined);
+      assert.equal(llmRouterInputs.at(-1)?.rewriteAllowed, false);
+      assert.equal(paidRouterCalls, before + 1);
+      assert.equal(refinerConsumes, 0);
+      assert.equal(attempts.length, 0);
+      fusionPayload.routerLocationContinuation = continuation;
+      await send(409, choice, [{ ...messages[0], content: "different earlier history" }, ...messages.slice(1)]);
+      fusionLatestSource = "later-user";
+      await send(409, choice);
+      fusionLatestSource = SOURCE_USER_MESSAGE_ID;
+      const resumed = await send(200, choice); // Consent declined, no coordinates.
+      assert.notEqual(resumed.response.headers.get("X-Chat-Response-Mode"), "router-location");
+      assert.equal(resumed.response.headers.get("X-Prompt-Refiner-Execution"), choice === "accepted" ? "applied" : "original");
+      assert.equal(refinerConsumes, 1);
+      assert.equal(attempts.length, 1);
+      assert.match(JSON.stringify(attempts[0].messages), new RegExp(choice === "accepted" ? REFINER_PROMPT : messages[2].content));
+      await send(409, choice);
+      assert.equal(paidRouterCalls, before + 1);
+      assert.equal(attempts.length, 0);
+    }
+
+    refinerMode = null;
+    fusedLocationRequired = false;
+    fusionPayload = { routerLocationFusion: true, routerLocationScope: "existing" };
+    fusionReceipt = null;
+    const answered = await send();
+    assert.equal(answered.streamError, null);
+    assert.equal(attempts.length, 1);
+    fusionReceipt = null;
+    displaceSourceAfterPick = true;
+    await send(409);
+    assert.equal(attempts.length, 0, "a displaced inline decision cannot dispatch the answer model");
+  } finally {
+    for (const key of ["APP_ENV", "CHAT_ROUTER_LOCATION_FUSION_ENABLED", "CHAT_EXISTING_ROUTER_LOCATION_FUSION_ENABLED",
+      "TOMVERSE_CHAT_LOCATION_INTENT_ENABLED","CHAT_FRESH_LOCATION_PREPARATION_ENABLED"]) {
+      if (previousEnv[key] === undefined) delete process.env[key]; else process.env[key] = previousEnv[key];
+    }
+    refinerMode = null; fusionPayload = undefined; fusionReceipt = null; priorFusionMessage = false;
+    fusionLatestSource = SOURCE_USER_MESSAGE_ID; fusionAttemptExists = false; fusionAnswerExists = false; displaceSourceAfterPick = false;
+    fusedLocationRequired = undefined;
   }
 });
 
