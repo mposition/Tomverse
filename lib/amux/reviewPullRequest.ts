@@ -23,6 +23,7 @@ export type AmuxReviewPullRequestFact = {
 
 export type AmuxReviewPullRequestRefusal =
   | "task_not_in_review"
+  | "review_not_required"
   | "not_the_workers_review"
   | "review_pr_conflict";
 
@@ -115,7 +116,12 @@ export async function recordAmuxReviewPullRequest(
       // request the publisher opened, which halted the whole agent until a
       // person closed it (2026-10-30 #3147, 2026-11-11 #3702). Any other card
       // is marked for human review when its first number is written.
-      const heldByAttachment = !task.requiresHumanReview && amuxV22ImplementTask(task) && attachment !== undefined;
+      const unmarkedV22Implement = !task.requiresHumanReview && amuxV22ImplementTask(task);
+      // Without an attachment nothing would hold the number, and the row cannot.
+      if (unmarkedV22Implement && attachment === undefined) {
+        return { recorded: false as const, reason: "review_not_required" as const };
+      }
+      const heldByAttachment = unmarkedV22Implement;
       const attempts = await tx.$queryRaw<AttemptRow[]>`
         SELECT "id", "worker", "outcome", "toStatus", "endedAt"
         FROM "AmuxExecutionAttempt"

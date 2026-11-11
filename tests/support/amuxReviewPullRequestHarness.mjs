@@ -102,7 +102,7 @@ assert.deepEqual(await run(), { recorded: false, reason: "task_not_in_review" })
 assert.deepEqual(attached, []);
 assert.equal(writes.some(([kind]) => kind === "audit"), false);
 
-// Any other unmarked card still has no review to attach a number to.
+// Any other unmarked card is marked for human review when its number is written.
 for (const other of [
   { sourceSystem: null, cardType: null, taskRole: null },
   { sourceSystem: "admin-idea-v4", cardType: "story", taskRole: null },
@@ -111,9 +111,13 @@ for (const other of [
 ]) {
   reset(other);
   assert.equal(amuxV22ImplementTask(task), false, JSON.stringify(other));
-  assert.deepEqual(await run(), { recorded: false, reason: "review_not_required" }, JSON.stringify(other));
-  assert.equal(writes.some(([kind]) => kind === "task" || kind === "audit"), false);
-  assert.deepEqual(attached, []);
+  assert.deepEqual(await run(), { recorded: true, taskRevision: 9, changed: true }, JSON.stringify(other));
+  assert.deepEqual(
+    cardWrites()[0][1].data,
+    { reviewPrNumber: 3702, requiresHumanReview: true, reviewSpecialty: "code-review", revision: { increment: 1 } },
+    JSON.stringify(other),
+  );
+  assert.equal(writes.find(([kind]) => kind === "audit")[1].metadata.marked_human_review, true);
 }
 
 // A card a person reviews takes the number on its own row, as before.
