@@ -129,7 +129,8 @@ const controller = (overrides: Partial<AmuxOwnerReviewController> = {}): AmuxOwn
   canInspectCards: true, selectedEscalationId: null, review: null, ownerExecution: { state: "idle" },
   reviewLoading: false, reviewBusy: false, reviewError: null, setReviewError: () => {},
   reviewUnavailable: false, reauthenticationRequired: false, selectedOutcome: null,
-  setSelectedOutcome: () => {}, retryReadConfirmed: false, setRetryReadConfirmed: () => {}, resolution: "",
+  setSelectedOutcome: () => {}, retryReadConfirmed: false, setRetryReadConfirmed: () => {},
+  noChangeConfirmed: false, setNoChangeConfirmed: () => {}, resolution: "",
   setResolution: () => {}, proposal: null, setProposal: () => {}, setIdempotencyKey: () => {},
   decisionStatusUnknown: false, setDecisionStatusUnknown: () => {}, decisionStatusChecking: false,
   pendingDecision: null, pendingDecisionChecked: true, closeReview: () => {}, openReview: async () => {},
@@ -333,6 +334,48 @@ test("the no-PR words follow the choices shown: approvable, retryable or block o
       proposed_transitions: { block: "blocked" } }) }));
   assert.match(blockOnly, /cannot be run again right now\. You can block it\./);
   assert.doesNotMatch(blockOnly, /You can run it again/);
+});
+
+test("an implement card that left no change offers 'no change needed', not a plain approve", () => {
+  // AMUX-ARTFMT-002 (owner decision 2026-11-11).
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      allowed_outcomes: ["approve", "block", "retry"], approval_basis: "no_change",
+      proposed_transitions: { approve: "done", block: "blocked", retry: "todo" },
+    }) }));
+  assert.match(html, /reports the work is already in place/);
+  assert.match(html, /data-testid="amux-owner-queue-choices"[\s\S]*Complete: no change needed/);
+  assert.match(html, /data-testid="admin-amux-select-approve"[^>]*>[\s\S]*?Complete: no change needed/);
+  assert.match(html, /Is there nothing left to change\?/);
+  assert.doesNotMatch(html, /this kind of task is approved on its verified result/);
+  // The same card on evidence keeps the plain approve words.
+  const evidence = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, { approval_basis: "evidence" }) }));
+  assert.doesNotMatch(evidence, /no change needed/);
+});
+
+test("choosing 'no change needed' asks once more that the report and code were checked", () => {
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const review = reviewFor(escalationId, {
+    task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+      due_parse_state: "valid", review_pr_number: null },
+    allowed_outcomes: ["approve", "block"], approval_basis: "no_change",
+  });
+  const html = decision(card, controller({ selectedEscalationId: escalationId, review,
+      selectedOutcome: "approve", resolution: "no change needed (owner verified)" }));
+  assert.match(html, /data-testid="admin-amux-no-change-confirmation"/);
+  assert.match(html, /I read the worker report and checked the current code: there is nothing to change\./);
+  // Preparing waits for that confirmation.
+  assert.match(html, /disabled=""[^>]*data-testid="admin-amux-prepare-proposal"/);
+  const confirmed = decision(card, controller({ selectedEscalationId: escalationId, review,
+      selectedOutcome: "approve", noChangeConfirmed: true,
+      resolution: "no change needed (owner verified)" }));
+  assert.doesNotMatch(confirmed, /disabled=""[^>]*data-testid="admin-amux-prepare-proposal"/);
 });
 
 test("a blocked card says what its own attempt reason was, not only 'blocked before it finished'", () => {

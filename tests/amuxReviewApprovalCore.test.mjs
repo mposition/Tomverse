@@ -16,6 +16,7 @@ import {
   amuxReviewSubjectDigest,
   amuxReviewPublicationMayOpenPr,
   amuxReviewTargetStatus,
+  amuxV22NoChangeCompletionAllowed,
   amuxV22PrlessReviewRetryAllowed,
   amuxV22ReviewRetryHasVerifiedOutcome,
   amuxV4ReviewEvidenceMatches,
@@ -371,6 +372,47 @@ test("publication that has opened or may still open the PR holds the retry", () 
     [{ kind: "t2_draft", state: "resolved", reason: tierPending }], tierPending), false);
 });
 
+test("an implement Task that left no change may be completed as no change needed", () => {
+  // AMUX-ARTFMT-002 (owner decision 2026-11-11): the change was already there.
+  const noChange = { ...prlessImplement, taskRole: "implement" };
+  assert.equal(amuxV22NoChangeCompletionAllowed(noChange), true);
+  for (const [field, value] of [
+    ["taskRole", "design"], ["taskRole", "test"], ["taskRole", null],
+    ["sourceSystem", "legacy"], ["cardType", "idea"], ["reviewPrNumber", 3501],
+    ["v4EvidenceVerified", false], ["publicationMayOpenPr", true],
+    ["displayTruncated", true], ["displayExact", false], ["attempt", null],
+  ]) {
+    assert.equal(amuxV22NoChangeCompletionAllowed({ ...noChange, [field]: value }),
+      false, `${field}=${value}`);
+  }
+  for (const attempt of [
+    { ...noChange.attempt, v22AssignmentId: null },
+    { ...noChange.attempt, outcome: "blocked" },
+    { ...noChange.attempt, toStatus: "blocked" },
+    { ...noChange.attempt, reason: "usage_outcome_unknown" },
+  ]) {
+    assert.equal(amuxV22NoChangeCompletionAllowed({ ...noChange, attempt }), false);
+  }
+  // It is the existing approve (review -> done), on its own evidence only.
+  const evidence = { sourceSystem: "admin-idea-v4", cardType: "task",
+    taskRole: "implement", reviewPrNumber: null, artifactAvailable: false,
+    v4EvidenceVerified: true, displayTruncated: false, displayExact: true };
+  assert.equal(amuxReviewApprovalHasEvidence(evidence), false);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...evidence,
+    noChangeCompletionAllowed: true }), true);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...evidence,
+    noChangeCompletionAllowed: true, v4EvidenceVerified: false }), false);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...evidence,
+    noChangeCompletionAllowed: true, displayExact: false }), false);
+  // Never for a test Task: its patch completes only through its PR.
+  assert.equal(amuxReviewApprovalHasEvidence({ ...evidence, taskRole: "test",
+    noChangeCompletionAllowed: true }), false);
+  // A Task with a PR still needs its artifact.
+  assert.equal(amuxReviewApprovalHasEvidence({ ...evidence, reviewPrNumber: 3501,
+    noChangeCompletionAllowed: true }), false);
+  assert.equal(amuxReviewTargetStatus("review", "approve"), "done");
+});
+
 const outcomeInput = {
   eligible: true, taskStatus: "review", reviewAttempt: true,
   approvalHasEvidence: false, prlessRetryAllowed: false,
@@ -393,6 +435,15 @@ test("review with no pull request offers block and retry, never approve", () => 
   // A blocked-path verdict never opens a retry from review.
   assert.deepEqual(amuxReviewAllowedOutcomes({ ...outcomeInput,
     blockedRetryVerified: true }), ["block"]);
+});
+
+test("a no-change implement Task offers approve beside block and retry", () => {
+  assert.deepEqual(amuxReviewAllowedOutcomes({ ...outcomeInput,
+    approvalHasEvidence: true, prlessRetryAllowed: true }), ["approve", "block", "retry"]);
+  // The attempt budget closes the retry, not the completion.
+  assert.deepEqual(amuxReviewAllowedOutcomes({ ...outcomeInput,
+    approvalHasEvidence: true, prlessRetryAllowed: true, budgetAllowed: false }),
+    ["approve", "block"]);
 });
 
 test("review with a pull request and the blocked path are unchanged", () => {

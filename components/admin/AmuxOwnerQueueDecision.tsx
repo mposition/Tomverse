@@ -6,6 +6,8 @@ import { ArrowLeft, ArrowRight, Check, CircleHelp, Eye, Wrench } from "lucide-re
 import {
   AmuxOwnerReviewDetail,
   AmuxPendingDecisionNotice,
+  amuxReviewApprovesNoChange,
+  amuxReviewOutcomeLabel,
   classifyAmuxOwnerQueueItem,
   visibleAmuxOwnerReviewOutcomes,
   type AmuxEscalationSummary,
@@ -159,7 +161,9 @@ export function AmuxOwnerQueueDecision({
   // The words follow the choices actually shown, not the PR alone: a verified
   // non-code Task is approved without one, and a spent budget, an unverified
   // result or pending publication leaves no retry.
-  const noPrWhy = outcomes.includes("approve") ? copy.why.reviewNoPrApprovable
+  const noPrWhy = outcomes.includes("approve") ?
+    reviewMatches && amuxReviewApprovesNoChange(review) ? copy.why.reviewNoPrNoChange
+      : copy.why.reviewNoPrApprovable
     : outcomes.includes("retry") ? copy.why.reviewNoPr
     : outcomes.includes("block") ? copy.why.reviewNoPrBlockOnly : copy.why.reviewNoPrNone;
   // A blocked card's escalation keeps only execution_blocked; the attempt's
@@ -336,7 +340,7 @@ export function AmuxOwnerQueueDecision({
                     {outcomes.map((outcome, position) => (
                       <li key={outcome} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200">
                         <kbd className="rounded bg-zinc-800 px-1.5 text-xs text-zinc-300">{position + 1}</kbd>
-                        {routing.outcome[outcome]}
+                        {amuxReviewOutcomeLabel(routing, review, outcome)}
                       </li>
                     ))}
                   </ul>

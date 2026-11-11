@@ -101,6 +101,9 @@ export type AmuxReviewDetail = {
     html_url: string;
   } | null;
   allowed_outcomes: ReviewOutcome[];
+  /** What an offered approve rests on; "no_change" completes an implement
+   * Task that left no change, as no change needed (owner decision 2026-11-11). */
+  approval_basis?: "evidence" | "no_change" | null;
   /** Why the server offers no decision at all; null while it offers one. */
   decision_hold?: string | null;
   retry: { used: number; limit: number; remaining: number };
@@ -363,6 +366,15 @@ export const visibleAmuxOwnerReviewOutcomes = (review: ReviewDetail) => {
       (!unknown && recovery.retryPreviewReady));
 };
 
+/** The server's approve is the owner's "no change needed" completion. */
+export const amuxReviewApprovesNoChange = (review: ReviewDetail) =>
+  review.approval_basis === "no_change" && review.allowed_outcomes.includes("approve");
+
+/** The words of one decision; approve reads as "no change needed" on that basis. */
+export const amuxReviewOutcomeLabel = (m: RoutingMessages, review: ReviewDetail,
+  outcome: ReviewOutcome) =>
+  outcome === "approve" && amuxReviewApprovesNoChange(review) ? m.noChange.outcome : m.outcome[outcome];
+
 export type AmuxOwnerQueueClassification =
   | "needs_read"
   | "owner_decision"
@@ -443,8 +455,9 @@ export function AmuxOwnerReviewView({
     : null;
   const hasWorkerEvidence = Boolean(report?.worker_report || validArtifact);
   const technicalOnly = !recovery.decisionContextReady;
+  const noChange = amuxReviewApprovesNoChange(review);
   const decisionQuestion = outcomes.includes("approve")
-    ? m.ownerQuestionApprove
+    ? noChange ? m.noChange.question : m.ownerQuestionApprove
     : outcomes.includes("retry")
       // From review, retry is offered only for a result with no pull request.
       ? review.task.status === "review" && review.task.review_pr_number === null
@@ -840,9 +853,11 @@ export function AmuxOwnerReviewView({
                 aria-pressed={selectedOutcome === outcome}
                 className="min-h-11 rounded-lg border border-zinc-600 px-4 py-3 text-left font-bold text-zinc-100 transition-colors hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 aria-pressed:border-blue-400 aria-pressed:bg-blue-500/10 disabled:opacity-50"
                 data-testid={`admin-amux-select-${outcome}`}>
-                <span className="block">{m.outcome[outcome]} · {review.proposed_transitions[outcome] ?? "—"}</span>
+                <span className="block">{amuxReviewOutcomeLabel(m, review, outcome)} · {review.proposed_transitions[outcome] ?? "—"}</span>
                 <span className="mt-1 block text-xs font-normal leading-5 text-zinc-400">
-                  {outcome === "block" ? blockEffect : m.decisionWarning[outcome]}
+                  {outcome === "block" ? blockEffect
+                    : outcome === "approve" && noChange ? m.noChange.decisionWarning
+                    : m.decisionWarning[outcome]}
                 </span>
               </button>
             ))}
@@ -1018,6 +1033,8 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
   const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
   const [selectedOutcome, setSelectedOutcome] = useState<ReviewOutcome | null>(null);
   const [retryReadConfirmed, setRetryReadConfirmed] = useState(false);
+  // "I read the worker report and checked the code": a no-change completion only.
+  const [noChangeConfirmed, setNoChangeConfirmed] = useState(false);
   const [resolution, setResolution] = useState("");
   const [proposal, setProposal] = useState<ReviewProposal | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -1045,6 +1062,7 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
     setReauthenticationRequired(false);
     setSelectedOutcome(null);
     setRetryReadConfirmed(false);
+    setNoChangeConfirmed(false);
     setResolution("");
     setProposal(null);
     setIdempotencyKey(null);
@@ -1097,6 +1115,7 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
     setReauthenticationRequired(false);
     setSelectedOutcome(null);
     setRetryReadConfirmed(false);
+    setNoChangeConfirmed(false);
     setResolution("");
     setProposal(null);
     setIdempotencyKey(null);
@@ -1165,6 +1184,10 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
       setReviewError(m.retryConfirmationRequired);
       return;
     }
+    if (selectedOutcome === "approve" && amuxReviewApprovesNoChange(review) && !noChangeConfirmed) {
+      setReviewError(m.noChange.confirmationRequired);
+      return;
+    }
     if (resolution.trim().length < 3 || resolution.trim().length > 1_000) {
       setReviewError(m.resolutionLength);
       return;
@@ -1222,6 +1245,10 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
       !selectedOutcome || selectedOutcome !== proposal.outcome) return;
     if (selectedOutcome === "retry" && !retryReadConfirmed) {
       setReviewError(m.retryConfirmationRequired);
+      return;
+    }
+    if (selectedOutcome === "approve" && amuxReviewApprovesNoChange(review) && !noChangeConfirmed) {
+      setReviewError(m.noChange.confirmationRequired);
       return;
     }
     if (!Number.isFinite(Date.parse(proposal.expires_at)) ||
@@ -1362,7 +1389,8 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
   return {
     canInspectCards, selectedEscalationId, review, ownerExecution, reviewLoading, reviewBusy,
     reviewError, setReviewError, reviewUnavailable, reauthenticationRequired, selectedOutcome,
-    setSelectedOutcome, retryReadConfirmed, setRetryReadConfirmed, resolution, setResolution,
+    setSelectedOutcome, retryReadConfirmed, setRetryReadConfirmed, noChangeConfirmed,
+    setNoChangeConfirmed, resolution, setResolution,
     proposal, setProposal, setIdempotencyKey, decisionStatusUnknown, setDecisionStatusUnknown,
     decisionStatusChecking, pendingDecision, pendingDecisionChecked, closeReview, openReview,
     prepareProposal, confirmDecision, checkDecisionStatus,
@@ -1466,11 +1494,14 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
   const { canInspectCards, selectedEscalationId, review, ownerExecution, reviewLoading,
     reviewBusy, reviewError, setReviewError, reviewUnavailable, reauthenticationRequired,
     selectedOutcome, setSelectedOutcome, retryReadConfirmed, setRetryReadConfirmed,
+    noChangeConfirmed, setNoChangeConfirmed,
     resolution, setResolution, proposal, setProposal, setIdempotencyKey,
     decisionStatusUnknown, setDecisionStatusUnknown, decisionStatusChecking,
     pendingDecision, closeReview, openReview, prepareProposal, confirmDecision,
     checkDecisionStatus } = controller;
   const reviewOutcomes = review ? visibleAmuxOwnerReviewOutcomes(review) : [];
+  const selectedNoChange = review !== null && selectedOutcome === "approve" &&
+    amuxReviewApprovesNoChange(review);
   const returnPath = reviewReturnPath ?? amuxAssignmentReviewReturnPath(selectedEscalationId);
   return (
     <>
@@ -1568,6 +1599,10 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
                 onSelectOutcome={(outcome) => {
                   setSelectedOutcome(outcome);
                   if (outcome !== "retry") setRetryReadConfirmed(false);
+                  setNoChangeConfirmed(false);
+                  // The audit entry names the basis; the owner may reword the reason.
+                  if (outcome === "approve" && amuxReviewApprovesNoChange(review) &&
+                      resolution.trim() === "") setResolution(m.noChange.defaultResolution);
                   setProposal(null);
                   setIdempotencyKey(null);
                   setDecisionStatusUnknown(false);
@@ -1577,9 +1612,25 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
               {selectedOutcome && reviewOutcomes.includes(selectedOutcome) && (
                 <div className="mt-3 border-t border-zinc-700 pt-3">
                   <p className="font-bold text-zinc-100">
-                    {m.outcome[selectedOutcome]} · {review.task.status} → {review.proposed_transitions[selectedOutcome] ?? "—"}
+                    {amuxReviewOutcomeLabel(m, review, selectedOutcome)} · {review.task.status} → {review.proposed_transitions[selectedOutcome] ?? "—"}
                   </p>
-                  <p className="mt-1 text-amber-200">{m.decisionWarning[selectedOutcome]}</p>
+                  <p className="mt-1 text-amber-200">{selectedNoChange
+                    ? m.noChange.decisionWarning : m.decisionWarning[selectedOutcome]}</p>
+                  {selectedNoChange && (
+                    <label className="mt-3 flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm font-semibold leading-6 text-blue-100">
+                      <input type="checkbox" checked={noChangeConfirmed}
+                        onChange={(event) => {
+                          setNoChangeConfirmed(event.target.checked);
+                          setProposal(null);
+                          setIdempotencyKey(null);
+                          setReviewError(null);
+                        }}
+                        disabled={reviewBusy || decisionStatusUnknown}
+                        className="mt-1 h-4 w-4 shrink-0 accent-blue-500"
+                        data-testid="admin-amux-no-change-confirmation" />
+                      <span>{m.noChange.confirmation}</span>
+                    </label>
+                  )}
                   <label htmlFor="admin-amux-resolution" className="mt-3 block font-semibold text-zinc-200">
                     {m.resolutionLabel}
                   </label>
@@ -1598,7 +1649,8 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
                       type="button"
                       onClick={() => void prepareProposal()}
                       disabled={reviewBusy || resolution.trim().length < 3 ||
-                        (selectedOutcome === "retry" && !retryReadConfirmed)}
+                        (selectedOutcome === "retry" && !retryReadConfirmed) ||
+                        (selectedNoChange && !noChangeConfirmed)}
                       className="mt-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2 font-bold text-blue-100 disabled:opacity-50"
                       data-testid="admin-amux-prepare-proposal"
                     >
@@ -1606,7 +1658,8 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
                     </button>
                   ) : (
                     <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3" data-testid="admin-amux-proposal-confirmation">
-                      <p className="font-bold text-amber-100">{m.confirmHeading[selectedOutcome]}</p>
+                      <p className="font-bold text-amber-100">{selectedNoChange
+                        ? m.noChange.confirmHeading : m.confirmHeading[selectedOutcome]}</p>
                       <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-amber-100/90">
                         <dt>{m.proposalId}</dt><dd className="break-all font-mono">{proposal.id}</dd>
                         <dt>{m.decisionId}</dt><dd className="break-all font-mono">{proposal.decision_id}</dd>
@@ -1620,11 +1673,13 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
                         <button
                           type="button"
                           onClick={() => void confirmDecision()}
-                          disabled={reviewBusy || reauthenticationRequired || decisionStatusUnknown}
+                          disabled={reviewBusy || reauthenticationRequired || decisionStatusUnknown ||
+                            (selectedNoChange && !noChangeConfirmed)}
                           className="rounded-lg border border-amber-400 bg-amber-400/20 px-3 py-2 font-bold text-amber-100 disabled:opacity-50"
                           data-testid={`admin-amux-confirm-${selectedOutcome}`}
                         >
-                          {reviewBusy ? m.working : m.confirmDecision[selectedOutcome]}
+                          {reviewBusy ? m.working : selectedNoChange
+                            ? m.noChange.confirmDecision : m.confirmDecision[selectedOutcome]}
                         </button>
                         <button
                           type="button"
