@@ -171,7 +171,7 @@ const post = (body: unknown) =>
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 const stale = () => ({
-  session: { user: { id: "operator-1", authenticatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() } },
+  session: { user: { id: "operator-1", authenticatedAt: new Date(Date.now() - 9 * 60 * 60_000).toISOString() } },
 });
 
 const REQUEST_ID = "00000000-0000-4000-8000-000000000011";

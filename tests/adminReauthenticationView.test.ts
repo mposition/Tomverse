@@ -107,17 +107,17 @@ const recentAccountAuth = (minutesAgo: number, override?: string) => {
 };
 
 test("an expired step-up window inside a valid console session shows the card", () => {
-  // 150 minutes: past the 120-minute step-up window, inside the 8-hour
+  // 150 minutes: past a 120-minute step-up override, inside the 8-hour
   // console window. This is the exact state that used to redirect in a circle.
   assert.equal(adminAccessState(150), "authorized");
-  assert.equal(recentAuth(150), false);
+  assert.equal(recentAuth(150, "120"), false);
 
   assert.deepEqual(
     resolveAdminReauthenticationView({
       signedIn: true,
       accessState: adminAccessState(150),
       mode: "recent-auth",
-      hasRecentAuthentication: recentAuth(150),
+      hasRecentAuthentication: recentAuth(150, "120"),
       callbackUrl: "/admin/platform",
     }),
     { kind: "reauthenticate", reason: "recent-auth", callbackUrl: "/admin/platform" }
@@ -228,12 +228,13 @@ test("callbacks outside the console are normalized before they are handed back",
 });
 
 test("the step-up window follows a production override, not a constant", () => {
-  // 150 minutes is expired under the 120-minute default and open under a
-  // 180-minute override. Both readings come from the same env variable the API
+  // 150 minutes is open under the 480-minute default, expired under a
+  // 120-minute override and open again under a 180-minute override. Both readings come from the same env variable the API
   // endpoint reads, so the page and `/api/admin/**` cannot disagree.
-  assert.equal(resolveRecentAuthMinutes(undefined), 120);
+  assert.equal(resolveRecentAuthMinutes(undefined), 480);
   assert.equal(resolveRecentAuthMinutes("180"), 180);
-  assert.equal(recentAuth(150), false);
+  assert.equal(recentAuth(150), true);
+  assert.equal(recentAuth(150, "120"), false);
   assert.equal(recentAuth(150, "180"), true);
   assert.equal(recentAuth(181, "180"), false);
 
@@ -262,13 +263,13 @@ test("the step-up window follows a production override, not a constant", () => {
   );
 });
 
-test("the admin default includes 120 minutes and excludes the next instant", () => {
+test("the admin default includes 480 minutes and excludes the next instant", () => {
   const now = new Date("2026-10-12T00:00:00.000Z");
   const recentAuthMinutes = resolveRecentAuthMinutes(undefined);
 
   assert.equal(
     isRecentAdminAuthentication({
-      authenticatedAt: new Date(now.getTime() - 120 * 60_000).toISOString(),
+      authenticatedAt: new Date(now.getTime() - 480 * 60_000).toISOString(),
       recentAuthMinutes,
       now,
     }),
@@ -276,7 +277,7 @@ test("the admin default includes 120 minutes and excludes the next instant", () 
   );
   assert.equal(
     isRecentAdminAuthentication({
-      authenticatedAt: new Date(now.getTime() - 120 * 60_000 - 1).toISOString(),
+      authenticatedAt: new Date(now.getTime() - 480 * 60_000 - 1).toISOString(),
       recentAuthMinutes,
       now,
     }),
