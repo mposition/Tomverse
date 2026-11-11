@@ -102,21 +102,31 @@ assert.deepEqual(await run(), { recorded: false, reason: "task_not_in_review" })
 assert.deepEqual(attached, []);
 assert.equal(writes.some(([kind]) => kind === "audit"), false);
 
-// Any other unmarked card is marked for human review when its number is written.
+// Any other v4 card's row cannot take the number either, and no binding
+// holds it: refused, never written to fail the row's CHECK.
 for (const other of [
-  { sourceSystem: null, cardType: null, taskRole: null },
   { sourceSystem: "admin-idea-v4", cardType: "story", taskRole: null },
   { sourceSystem: "admin-idea-v4", cardType: "task", taskRole: "design" },
-  { sourceSystem: "board-sync", cardType: "task", taskRole: "implement" },
 ]) {
   reset(other);
   assert.equal(amuxV22ImplementTask(task), false, JSON.stringify(other));
+  assert.deepEqual(await run(), { recorded: false, reason: "review_not_required" }, JSON.stringify(other));
+  assert.equal(writes.some(([kind]) => kind === "task" || kind === "audit"), false);
+  assert.deepEqual(attached, []);
+}
+
+// An unmarked card outside v4 is marked for human review with its first
+// number, with the default specialty (#3704).
+for (const other of [
+  { sourceSystem: null, cardType: null, taskRole: null },
+  { sourceSystem: "board-sync", cardType: "task", taskRole: "implement" },
+]) {
+  reset({ ...other, reviewSpecialty: null });
+  assert.equal(amuxV22ImplementTask(task), false, JSON.stringify(other));
   assert.deepEqual(await run(), { recorded: true, taskRevision: 9, changed: true }, JSON.stringify(other));
-  assert.deepEqual(
-    cardWrites()[0][1].data,
-    { reviewPrNumber: 3702, requiresHumanReview: true, reviewSpecialty: "code-review", revision: { increment: 1 } },
-    JSON.stringify(other),
-  );
+  assert.deepEqual(cardWrites()[0][1].data, {
+    reviewPrNumber: 3702, requiresHumanReview: true, reviewSpecialty: "code-review", revision: { increment: 1 },
+  });
   assert.equal(writes.find(([kind]) => kind === "audit")[1].metadata.marked_human_review, true);
 }
 

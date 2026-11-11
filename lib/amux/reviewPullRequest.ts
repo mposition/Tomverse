@@ -23,6 +23,7 @@ export type AmuxReviewPullRequestFact = {
 
 export type AmuxReviewPullRequestRefusal =
   | "task_not_in_review"
+  /** A v4 card no binding holds the number for: its row can never take it. */
   | "review_not_required"
   | "not_the_workers_review"
   | "review_pr_conflict";
@@ -115,13 +116,13 @@ export async function recordAmuxReviewPullRequest(
       // that binding. Refusing it opened a state mismatch for every pull
       // request the publisher opened, which halted the whole agent until a
       // person closed it (2026-10-30 #3147, 2026-11-11 #3702). Any other card
-      // is marked for human review when its first number is written.
-      const unmarkedV22Implement = !task.requiresHumanReview && amuxV22ImplementTask(task);
-      // Without an attachment nothing would hold the number, and the row cannot.
-      if (unmarkedV22Implement && attachment === undefined) {
+      // is marked for human review when its first number is written -- except
+      // a v4 row, which no write can mark (its plaintext exclusion keeps the
+      // specialty null), so one nothing holds the number for is refused.
+      const heldByAttachment = !task.requiresHumanReview && amuxV22ImplementTask(task) && attachment !== undefined;
+      if (!heldByAttachment && !task.requiresHumanReview && task.sourceSystem === "admin-idea-v4") {
         return { recorded: false as const, reason: "review_not_required" as const };
       }
-      const heldByAttachment = unmarkedV22Implement;
       const attempts = await tx.$queryRaw<AttemptRow[]>`
         SELECT "id", "worker", "outcome", "toStatus", "endedAt"
         FROM "AmuxExecutionAttempt"
