@@ -767,6 +767,7 @@ mock.module(mod("lib/r2.ts"), { namedExports: {
   },
 } });
 let conversationProductKey: "chat" | "review" = "chat";
+let continuationBridge: { id: string } | null = null;
 let messageFindFirstArgs: Array<Record<string, unknown>> = [];
 let lastDurableClaimInput: Record<string, unknown> | null = null;
 type InstrumentationAttemptRow = {
@@ -781,13 +782,14 @@ const closedInstrumentationAttempts: Array<
 > = [];
 
 let contextConversationAccess: "owned" | "locked" | "missing" = "owned";
-const conversationRow = () => contextConversationAccess === "missing" ? null : ({
+const conversationRow = (selectBridge = false) => contextConversationAccess === "missing" ? null : ({
   id: CONVERSATION_ID,
   userId: USER_ID,
   password: contextConversationAccess === "locked" ? "fixture-locked" : null,
   selectedModels: JSON.stringify(selectedConversationModels),
   kind: "chat",
   productKey: conversationProductKey,
+  ...(selectBridge ? { continuationBridge } : {}),
   selectionMode: conversationSelectionMode,
   chatRecoveryEpoch: 0,
   messages: [{ id: fusionLatestSource, role: "user" }, ...(priorFusionMessage ? [{ id: fusionPriorAnswer, role: "assistant" }] : [])],
@@ -811,7 +813,8 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
   },
   conversation: {
     findUnique: () => conversationRow(),
-    findFirst: () => conversationRow(),
+    findFirst: (args: { select?: { continuationBridge?: { select?: { id?: boolean } } } }) =>
+      conversationRow(args.select?.continuationBridge?.select?.id),
   },
   message: {
     findUnique: () => fusionAnswerExists ? { role: "assistant", content: "Already answered", conversation: { userId: USER_ID } } : null,
@@ -2766,6 +2769,27 @@ test("a Refiner preview invalidated before atomic consume is dispatch-free", asy
     invalidateRefinerAfterPreview = false;
     conversationSelectionMode = "auto";
     refinerMode = null;
+  }
+});
+
+test("a Chat continuation receives a text answer without offering image intent to Smart Adaptive", async t => {
+  const oldEnv = { ...process.env };
+  t.after(() => {
+    continuationBridge = null;
+    for (const key of ["APP_ENV", "CHAT_AUTO_COMBINED_INTENT_ENABLED"]) {
+      if (oldEnv[key] === undefined) delete process.env[key]; else process.env[key] = oldEnv[key];
+    }
+  });
+  process.env.APP_ENV = "dev";
+  process.env.CHAT_AUTO_COMBINED_INTENT_ENABLED = "true";
+  for (const bridge of [null, { id: "external-continuation" }]) {
+    continuationBridge = bridge;
+    llmRouterInputs.length = 0;
+    const { body, streamError } = await ask("answers", "claimed", 200, false, undefined, true, false);
+    assert.equal(streamError, null);
+    assert.ok(body.includes(ANSWER));
+    assert.equal(llmRouterInputs.length, 1);
+    assert.equal(Boolean(llmRouterInputs[0].imageIntent), bridge === null);
   }
 });
 
