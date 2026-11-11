@@ -195,10 +195,14 @@ export async function runPublisherCycle(ports) {
   };
   // Only `true` is a review item: anything else is the ordinary pull request.
   const review = work.ownerReview === true;
-  const titled = review ?
+  // Built only on the paths that write, each of which has its card reference.
+  const titled = () => review ?
     { title: publisherReviewPrTitle(work.runId), body: publisherReviewPrBody(work.runId, work.cardRef) } :
     { title: publisherPrTitle(work.runId), body: publisherPrBody(work.runId, work.cardRef) };
-  const titleCarriesSecret = () => detectSecrets(titled.title).length > 0 || detectSecrets(titled.body).length > 0;
+  const titleCarriesSecret = () => {
+    const { title, body } = titled();
+    return detectSecrets(title).length > 0 || detectSecrets(body).length > 0;
+  };
 
   let token = null;
   let workspace = null;
@@ -239,7 +243,7 @@ export async function runPublisherCycle(ports) {
     // repeated. A 4xx is a definite refusal; any other answer, or a pull
     // request that does not show, is for the next lookup.
     const openPull = async ({ headSha, outcome, rejected, treeId }) => {
-      const created = await github.createPull({ ...titled, head: work.branch, draft: review });
+      const created = await github.createPull({ ...titled(), head: work.branch, draft: review });
       if (created.status === "rejected") return await report(rejected.outcome, rejected);
       let pull = null;
       if (created.status === "created") {

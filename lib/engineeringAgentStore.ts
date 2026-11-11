@@ -1521,31 +1521,38 @@ export async function rejudgeEngineeringAgentV22Draft(
   return { auditLogId };
 }
 
-/** How many earlier decisions of the same unknown outcome one acknowledgement closes with it. */
-export const ENGINEERING_AGENT_SAME_OUTCOME_ACK_LIMIT = 200;
-
 /**
- * The open decisions of the same unknown outcome as this one -- the same
- * publish item, any claim -- locked, oldest first, this one included. Before
- * a lookup waited for its decision, every round opened one more
- * (AMUX-FILEGEN-003, 2026-11-11); a person who saw one has seen them all.
+ * The decision a person acts on, with every open decision of the same unknown
+ * outcome -- the same publish item, any claim -- locked oldest first, this one
+ * included. Before a lookup waited for its decision, every round opened one
+ * more (AMUX-FILEGEN-003, 2026-11-11); a person who saw one has seen them all.
+ * The whole set is locked in one order before the one acted on is checked, so
+ * two people acting on two of them at once wait for each other, never deadlock.
+ * Another kind of decision is the one item alone.
  */
-const lockSameOutcomeDecisions = async (
+const lockDecisionsToAcknowledge = async (
   tx: EngineeringAgentTransaction,
-  decision: { id: string; causeKey: string },
-): Promise<string[]> => {
+  id: string,
+): Promise<{ decision: { id: string; causeKey: string }; ids: string[] }> => {
+  const row = await tx.engineeringAgentWorkItem.findUnique({ where: { id }, select: { kind: true, causeKey: true } });
+  if (!row || row.kind !== "decision") refuse("decision_not_open");
+  const decision = { id, causeKey: row!.causeKey };
   const publishItemId = unknownOutcomeDecisionWorkItemId(decision.causeKey);
-  if (publishItemId === null) return [decision.id];
+  if (publishItemId === null) {
+    const item = await lockWorkItem(tx, id);
+    if (item.state !== "open") refuse("decision_not_open");
+    return { decision, ids: [id] };
+  }
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT d."id" FROM "EngineeringAgentWorkItem" d
     WHERE d."kind" = 'decision' AND d."state" = 'open'
       AND d."causeKey" LIKE ${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX} || ${publishItemId} || ':%'
     ORDER BY d."createdAt", d."id"
-    LIMIT ${ENGINEERING_AGENT_SAME_OUTCOME_ACK_LIMIT}
     FOR UPDATE
   `;
-  const ids = rows.map((row) => row.id);
-  return ids.includes(decision.id) ? ids : [decision.id, ...ids];
+  const ids = rows.map((candidate) => candidate.id);
+  if (!ids.includes(id)) refuse("decision_not_open");
+  return { decision, ids };
 };
 
 const closeDecisionsAsSeen = async (tx: EngineeringAgentTransaction, ids: string[]) => {
@@ -1574,13 +1581,6 @@ const decisionAcknowledgedEntry = (
   tx,
 });
 
-const lockOpenDecision = async (tx: EngineeringAgentTransaction, id: string) => {
-  const item = await lockWorkItem(tx, id);
-  if (item.kind !== "decision" || item.state !== "open") refuse("decision_not_open");
-  const { causeKey } = await tx.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id }, select: { causeKey: true } });
-  return { id: item.id, causeKey };
-};
-
 /**
  * A person has seen a decision item. The route has checked permission and
  * step-up. An unknown outcome's earlier decisions close with it.
@@ -1590,8 +1590,7 @@ export async function acknowledgeEngineeringAgentDecision(
   input: { session: Session; request?: Request; workItemId: string },
 ): Promise<{ auditLogId: string; acknowledged: number }> {
   humanActorId(input.session);
-  const decision = await lockOpenDecision(tx, input.workItemId);
-  const ids = await lockSameOutcomeDecisions(tx, decision);
+  const { decision, ids } = await lockDecisionsToAcknowledge(tx, input.workItemId);
   await closeDecisionsAsSeen(tx, ids);
   const auditLogId = await writeAdminAuditLog(
     decisionAcknowledgedEntry(tx, { session: input.session, request: input.request, decisionId: decision.id, ids }),
@@ -1624,7 +1623,7 @@ export async function approveEngineeringAgentPullRequestResume(
   input: { session: Session; request?: Request; workItemId: string },
 ): Promise<{ auditLogId: string; acknowledged: number }> {
   humanActorId(input.session);
-  const decision = await lockOpenDecision(tx, input.workItemId);
+  const { decision, ids } = await lockDecisionsToAcknowledge(tx, input.workItemId);
   const publishItemId = unknownOutcomeDecisionWorkItemId(decision.causeKey) ?? refuse("decision_not_an_unknown_outcome");
   const publishItem = await lockWorkItem(tx, publishItemId);
   const { reason } = await tx.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: publishItem.id }, select: { reason: true } });
@@ -1634,7 +1633,6 @@ export async function approveEngineeringAgentPullRequestResume(
     select: { id: true },
   });
   if (!consumed) refuse("write_without_capability");
-  const ids = await lockSameOutcomeDecisions(tx, decision);
   await tx.engineeringAgentWorkItem.update({
     where: { id: publishItem.id },
     data: { reason: ENGINEERING_AGENT_PR_RESUME_APPROVED_REASON },
