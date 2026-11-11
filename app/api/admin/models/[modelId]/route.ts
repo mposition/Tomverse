@@ -95,33 +95,22 @@ export async function PATCH(
         );
       }
     }
-    // Checked against the row this save would leave: a field the body omits
-    // keeps its stored value, so the stored value is what the readback sees.
-    const stored = await prisma.modelRegistryEntry.findUnique({
-      where: { id: modelId },
-      select: {
-        replacementModelId: true,
-        maxOutputTokens: true,
-        reservationOutputTokens: true,
-        inputUsdPerMillionTokens: true,
-        outputUsdPerMillionTokens: true,
-        cachedInputPriceMultiplier: true,
-      },
-    });
-    const kept = <T,>(next: T | undefined, current: T | null | undefined) =>
-      next === undefined ? current ?? null : next;
+    // Checked against what this save writes: registryInputToData() is the
+    // exact conversion the update below stores, and it writes an omitted price,
+    // cap or replacement as null rather than keeping the stored value.
+    const saved = registryInputToData(body, actor(session));
     const pinRefusal = codePinnedModelRefusal({
       modelId,
       status: body.status,
       publiclyListed: body.publiclyListed,
-      replacementModelId: kept(body.replacementModelId, stored?.replacementModelId),
+      replacementModelId: saved.replacementModelId ?? null,
       provider: body.provider,
       apiModel: body.apiModel,
-      maxOutputTokens: kept(body.maxOutputTokens, stored?.maxOutputTokens),
-      reservationOutputTokens: kept(body.reservationOutputTokens, stored?.reservationOutputTokens),
-      inputUsdPerMillionTokens: kept(body.inputUsdPerMillionTokens, stored?.inputUsdPerMillionTokens),
-      outputUsdPerMillionTokens: kept(body.outputUsdPerMillionTokens, stored?.outputUsdPerMillionTokens),
-      cachedInputPriceMultiplier: kept(body.cachedInputPriceMultiplier, stored?.cachedInputPriceMultiplier),
+      maxOutputTokens: saved.maxOutputTokens ?? null,
+      reservationOutputTokens: saved.reservationOutputTokens ?? null,
+      inputUsdPerMillionTokens: saved.inputUsdPerMillionTokens ?? null,
+      outputUsdPerMillionTokens: saved.outputUsdPerMillionTokens ?? null,
+      cachedInputPriceMultiplier: saved.cachedInputPriceMultiplier ?? null,
     });
     if (pinRefusal) {
       return NextResponse.json(

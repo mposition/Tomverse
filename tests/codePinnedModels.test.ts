@@ -58,8 +58,9 @@ test("every path that can switch a model off asks the pin check first", () => {
   const perModel = readFileSync("app/api/admin/models/[modelId]/route.ts", "utf8");
   // PATCH (status, listing, mapping, price, caps) and DELETE (catalogue removal).
   assert.equal(perModel.split("codePinnedModelRefusal(").length - 1, 2);
-  // Omitted fields are checked at their stored value, not skipped.
-  assert.ok(perModel.includes("maxOutputTokens: kept(body.maxOutputTokens, stored?.maxOutputTokens)"));
+  // Checked against the values the save writes (omitted fields become null).
+  assert.ok(perModel.includes("const saved = registryInputToData(body, actor(session));"));
+  assert.ok(perModel.includes("maxOutputTokens: saved.maxOutputTokens ?? null"));
   const registry = readFileSync("app/api/admin/models/route.ts", "utf8");
   assert.ok(registry.includes("codePinnedRefusal: codePinnedModelRefusal({ modelId: replacesModelId"));
   const incidents = readFileSync("app/api/admin/incidents/route.ts", "utf8");
