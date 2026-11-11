@@ -33,7 +33,7 @@ import {
 import type { MarketingLlmMessage } from "./marketingLlmClientCore.ts";
 
 /** Recorded with each run, so a change to what the model is asked is a new version. */
-export const MARKETING_A5_PROMPT_VERSION = "a5-social-v9";
+export const MARKETING_A5_PROMPT_VERSION = "a5-social-v10";
 
 /** Drafts one call may propose for one account. */
 export const MARKETING_A5_MAX_DRAFTS_PER_CALL = 5;
@@ -124,8 +124,11 @@ const SYSTEM_PROMPT = [
   "In Chinese, put a space after the ideographic full stop when Latin letters follow it, as in 。 AI Review: written without the space it reads as a web address and is refused.",
   "Name a claim id only when the post states that claim, and an asset id only when the post should carry that asset.",
   "Do not invent prices, numbers, dates, comparisons with other products, testimonials or urgency. Do not name another product or company.",
-  "An asset is an image or a video; its description says what it shows. A post that carries an asset is about what that asset shows, and says nothing the description does not support.",
+  "An asset is an image or a video; its description is the accessibility text that says what it shows. Use the description only to learn which Tomverse feature the asset is about and to keep to what it supports: it is never the subject of the post, and its sentences are never reused.",
+  "Never describe the image or the video. Do not open with, or write anywhere, phrases such as 'the image shows', 'this picture', 'in the photo', 'on the phone', 'on the screen', 'a phone, a ... and a ...'; in Chinese 画面里, 图中, 图片里, 這張, 这张; in Korean 이미지 속, 사진 속, 화면 속.",
+  "Write to the reader instead: open with the reader's situation or a question, then the value that the Tomverse feature the scene is about gives them (name Tomverse Chat or Tomverse Review), then one thing worth trying. Claim nothing about a feature the description does not support.",
   "Every post carries one asset from the assets list, an image or a video, on every platform. On youtube and tiktok it is a video; on youtube the post's first line is the video's title, at most 100 characters, and the lines after it are the description.",
+  "On rednote the post's first line is its title, at most 20 characters, with no hashtag in it. The body follows, ends by inviting a comment, and then comes one line, （图片由 AI 生成）, before the hashtags.",
   "Hashtags help people find a post; add them only where they do. task.hashtags gives this platform's range: never more than its max, usually at least its min, and fewer or none when a tag would not help the post (a min of 0 means none is fine). #Tomverse once is recommended, and it counts toward the range.",
   "Write each hashtag in the post's language and script, with no space inside it (Traditional Chinese for zh-Hant, Simplified for zh-Hans), as broad topic words such as #AI, #AIassistant or #AIcomparison in English and #AI, #인공지능 or #AI비교 in Korean. Never a hashtag that names another product or company, and never one that boasts or hints at a price, such as #best, #free, #최고 or #무료.",
   "Put the hashtags at the end of the post. On youtube they go in the description, never the title line; one of them is #Shorts when the video is a short, and none is #Shorts when the asset has longForm true. On threads use at most one. On x the hashtags count toward the post's 280 characters.",
@@ -133,7 +136,7 @@ const SYSTEM_PROMPT = [
   "The assets list holds only assets this account has not used yet. Give each post a different asset; when there are fewer assets than posts, write fewer posts rather than carry an asset twice.",
   "An asset's publishedCopies are posts other Tomverse accounts already published with it. Carrying it again is fine, but write the post fresh: a different hook, a different first line and a different angle, and none of their sentences, phrases or structure reused. Only a claim's statement stays word for word.",
   "An asset with pages is a carousel of that many images, posted together in order; its description is of the whole carousel. Write the post about the whole carousel, name only that asset id for it, and never put another asset in the same post.",
-  "When no asset fits the brief's topic, do not skip the post: write it about what an asset you were given shows, using only its description. Whenever the assets list holds at least one asset, write at least one post; return no draft only when the list is empty, since a post without an image or a video is never published. Never write what an asset's description does not support, even to stay on the brief's topic.",
+  "When no asset fits the brief's topic, do not skip the post: write it about the Tomverse feature an asset you were given is about, using only what its description supports and never describing the asset. Whenever the assets list holds at least one asset, write at least one post; return no draft only when the list is empty, since a post without an image or a video is never published. Never write what an asset's description does not support, even to stay on the brief's topic.",
   'Answer with one JSON object and nothing else: {"drafts":[{"renderedText":string,"claimIds":[string],"assetIds":[string],"disclosureFlags":["advertising"]}]}.',
 ].join("\n");
 
@@ -372,7 +375,52 @@ const hasLink = (text: string) => {
   return codes.includes("url_like") || codes.includes("link_markup");
 };
 
+/**
+ * The cheap check on the model's habit of describing the picture instead of
+ * writing to the reader (owner decision 2026-11-11). A description is the
+ * asset's accessibility text, not the post's subject. Two plain-string tests,
+ * kept here and not in the Guard's pinned closure:
+ *  - the post opens (first line, and the second where the first is a title) with
+ *    a scene phrase, or says anywhere that "the image shows" or "图中";
+ *  - most of the post is the description's own wording (shared 6-character runs).
+ */
+const SCENE_OPENING =
+  /^[\s"'“”‘’「」『』(（\[]*(?:(?:the|this|that)\s+(?:image|picture|photo|photograph|screenshot|card|graphic|illustration)\b|(?:in|on)\s+(?:the|this)\s+(?:image|picture|photo|screen|phone|laptop|desk|table)\b|on\s+(?:a|the)\s+(?:phone|laptop|screen)\b|(?:a|the)\s+(?:phone|laptop|screen)\b[^.!?\n]{0,60}\b(?:shows?|displays?)\b|(?:画面|畫面|图中|圖中|图里|圖裡|图片|圖片|照片|截图|截圖)\s*(?:里|裡|中|上)|[这這][张張]|이\s*(?:이미지|사진|카드|화면)|(?:이미지|사진|화면)\s*(?:속|안|에서))/iu;
+const SCENE_ANYWHERE =
+  /\b(?:the|this)\s+(?:image|picture|photo|photograph|screenshot)\s+(?:shows?|displays?|depicts?|captures?|puts|features?)\b|(?:画面里|畫面裡|画面中|畫面中|图中|圖中|图片里|圖片裡|照片里|照片裡)|(?:이미지|사진|화면)\s*속/iu;
+
+const compactText = (text: string): string => text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+const GRAM = 6;
+const grams = (text: string): string[] => {
+  const out: string[] = [];
+  for (let i = 0; i + GRAM <= text.length; i += 1) out.push(text.slice(i, i + GRAM));
+  return out;
+};
+
+/** Whether a post describes its picture, or copies the picture's description. */
+function marketingA5DescribesAsset(
+  text: string,
+  descriptions: readonly string[],
+  firstLineIsTitle: boolean,
+): "draft_describes_image" | "draft_copies_description" | null {
+  const lines = text.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line !== "");
+  if (lines.slice(0, firstLineIsTitle ? 2 : 1).some((line) => SCENE_OPENING.test(line)) || SCENE_ANYWHERE.test(text)) {
+    return "draft_describes_image";
+  }
+  // Hashtags are not wording of the post's own.
+  const body = compactText(text.replace(/#[\p{L}\p{M}\p{N}_]+/gu, " "));
+  const own = grams(body);
+  if (own.length < 4) return null;
+  for (const description of descriptions) {
+    const theirs = new Set(grams(compactText(description)));
+    if (own.filter((gram) => theirs.has(gram)).length / own.length >= 0.5) return "draft_copies_description";
+  }
+  return null;
+}
+
 export type MarketingA5Refusal =
+  | "draft_describes_image"
+  | "draft_copies_description"
   | "answer_not_json"
   | "answer_shape"
   | "draft_has_link"
@@ -443,6 +491,12 @@ export function readMarketingA5Answer(
     const named = [...new Set(proposal.assetIds)];
     const carousel = named.map(marketingCarouselPage).find((page) => page !== null);
     if (carousel && named.length > 1) return drop("draft_mixes_carousel");
+    const described = marketingA5DescribesAsset(
+      proposal.renderedText,
+      offered.filter((asset) => named.includes(asset.id)).map((asset) => asset.alt?.[scope.locale] ?? ""),
+      account?.channel === "youtube" || account?.channel === "rednote",
+    );
+    if (described) return drop(described);
     const carried = carousel ? marketingCarouselPageIds(carousel) : named;
     // A long-form video's post never carries #Shorts (owner decision 2026-11-07).
     const tagged = marketingHashtagsWithinBounds(proposal.renderedText, account?.channel ?? "", competitorNames, {
