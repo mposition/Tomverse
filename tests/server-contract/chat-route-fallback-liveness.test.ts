@@ -3943,9 +3943,11 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     const prompt = JSON.stringify(attempts[0].messages);
     const withEvidence = ["grounded", "lookup flag off", "complex", "unclassified", "answer flag off"].includes(scenario);
     assert.equal(prompt.includes("Verified fixture fact."), withEvidence, scenario);
-    assert.equal(prompt.includes("lead with the answer"), withEvidence && scenario !== "answer flag off", scenario);
-    assert.equal(prompt.includes("A short paragraph usually suffices"), ["grounded", "lookup flag off"].includes(scenario), scenario);
-    assert.equal(prompt.includes("requested comparisons or calculations"), ["complex", "unclassified"].includes(scenario), scenario);
+    const userContent = attempts[0].messages.findLast(message => message.role === "user")?.content;
+    const lastPart = Array.isArray(userContent) ? userContent.at(-1)?.text ?? "" : "";
+    assert.equal(lastPart.includes("End of quoted evidence"), withEvidence && scenario !== "answer flag off", scenario);
+    assert.equal(lastPart.includes("For other lookups"), ["grounded", "lookup flag off"].includes(scenario), scenario);
+    assert.equal(lastPart.includes("For comparisons and calculations"), ["complex", "unclassified"].includes(scenario), scenario);
     assert.equal(attempts[0].preparesStep, ["grounded", "answer flag off"].includes(scenario), scenario);
   }
 });

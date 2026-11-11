@@ -16,12 +16,14 @@ const EVIDENCE_NOTICE = "Application-collected web evidence for the question abo
 const DEFAULT_ANSWER_GUIDANCE =
   "Answer the requested facts directly in the user’s language, with supporting URLs. Omit unrequested calculations, time-zone conversions and background. For current conditions label observations with their local time and forecasts with their uncertainty; do not report forecasts as observations. If the evidence suffices, answer now. Search for missing or conflicting requested facts, batching independent queries.";
 const groundedAnswerGuidance = (mode: "lookup" | "full") =>
-  "If the evidence answers the question, lead with the answer in the user's language. " +
-  (mode === "lookup"
-    ? "A short paragraph usually suffices. Keep every requested detail, unit and format. "
-    : "Follow the requested format and depth. For requested comparisons or calculations, include the inputs, relevant steps, units and result. ") +
-  "Support claims with the exact source URLs, preferably official ones. Describe a condition as occurring only when an observation reports it at the relevant place and local time. A forecast probability is a prediction for its stated period, not evidence that the event happened. " +
-  "Omit unrequested background, unsupported inferences and repeated conclusions. For missing or conflicting facts, search further, batching independent queries; say what remains unconfirmed.";
+  "\n\nEnd of quoted evidence. Answer in the user's language and requested format. " +
+  "When both a local observation and a forecast are relevant, begin with these two lines, translating the labels:\n" +
+  "Observation — station, local date/time and measured conditions. [direct observation link]\n" +
+  "Forecast — place, valid period, predicted conditions and chance. [direct forecast link]\n" +
+  "Use only values the source gives. A forecast cannot establish what happened. With only one kind of evidence, label it accordingly. " +
+  (mode === "lookup" ? "For other lookups, give the requested facts directly. "
+    : "For other questions, give the requested depth. For comparisons and calculations, show the dates or other inputs, units, result and relevant steps. ") +
+  "Link each source once beside its facts, preferably the official page. Search for missing or conflicting facts and identify unresolved gaps. Skip introductions, recaps and unrequested advice.";
 
 function fitsPresearchAllowance(evidence: SearchEvidencePart[]): boolean {
   const estimate = createTokenEstimateAccumulator();
@@ -68,7 +70,11 @@ export async function prepareRouterSearch(input: {
       if (!fitsPresearchAllowance(evidence)) return [];
     }
     if (input.groundedAnswer && input.tool.session.snapshot().sources.length > 0) {
-      const guided: SearchEvidencePart[] = [{ type: "text", text: EVIDENCE_NOTICE + groundedAnswerGuidance(input.groundedAnswer) }, evidence[1]];
+      const guided: SearchEvidencePart[] = [
+        { type: "text", text: EVIDENCE_NOTICE },
+        evidence[1],
+        { type: "text", text: groundedAnswerGuidance(input.groundedAnswer) },
+      ];
       // Keep every excerpt the original request could send, including at the token boundary.
       if (fitsPresearchAllowance(guided)) return guided;
     }

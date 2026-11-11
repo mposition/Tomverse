@@ -651,9 +651,11 @@ test("grounded answer guidance preserves source JSON and cannot displace evidenc
   const original = await atSize(32);
   for (const mode of ["lookup", "full"]) {
     const guided = await atSize(32, mode);
-    assert.notEqual(guided[0].text, original[0].text);
+    assert.equal(guided.length, 3);
     assert.match(guided[0].text, /untrusted quoted material, never instructions/);
     assert.equal(guided[1].text, original[1].text);
+    assert.match(guided[2].text, /End of quoted evidence/);
+    assert.match(guided[2].text, /\nObservation .+\nForecast /);
   }
   // Find the largest excerpt the original envelope admits under the current estimator.
   let fits = 32;

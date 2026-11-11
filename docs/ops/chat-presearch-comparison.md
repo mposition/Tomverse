@@ -29,10 +29,13 @@ For paired Qwen 3.8 Flash evaluation, set `CHAT_QWEN_GROUNDED_LOOKUP_ENABLED=tru
 
 For an answer-generation comparison, toggle `CHAT_CONCISE_GROUNDED_ANSWER_ENABLED`.
 It defaults off. Keep presearch enabled, and keep the answer model and its
-thinking settings the same in both arms. The new guidance accompanies primary
-search evidence. Direct lookups can use a short answer, while calculations,
-comparisons and explanations retain the detail the user requested. The model
-can still use its tools to resolve incomplete or conflicting evidence.
+thinking settings the same in both arms. When the primary search returns
+sources, the app marks them as quoted data, includes their original JSON,
+then supplies the answer instructions. When both observations and forecasts
+are relevant, the answer should start with two labelled lines in the user's
+language. Each cites its own source. Calculations, comparisons and explanations
+retain the detail the user requested. The model can still search to resolve
+incomplete or conflicting evidence.
 
 Pair the same question and saved history. Verify that the answer provider
 received the same model, ordered evidence and source URLs in each pair.
