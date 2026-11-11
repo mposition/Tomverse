@@ -25,6 +25,16 @@ import {
   type ScoutSubmission,
   type ScoutSuggestion,
 } from "@/lib/productResearchScoutCore";
+import {
+  ISSUE_TRIAGE_MAX_OUTPUT_TOKENS,
+  ISSUE_TRIAGE_SUBJECT,
+  ISSUE_TRIAGE_SYSTEM_PROMPT,
+  issueTriageOutputSchema,
+  issueTriagePromptText,
+  parseIssueTriageAnswer,
+  type IssueSuggestion,
+  type TriageIssue,
+} from "@/lib/productResearchScoutIssuesCore";
 
 export const SCOUT_LLM_MAX_OUTPUT_TOKENS = 2_000;
 export const SCOUT_LLM_TIMEOUT_MS = 90_000;
@@ -45,9 +55,18 @@ export type ScoutJudgement = {
   readonly outputTokens: number | null;
 };
 
+export type IssueTriageJudgement = {
+  /** Null when the call failed or its answer could not be read. */
+  readonly suggestions: IssueSuggestion[] | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+};
+
 export type ScoutLlm = {
   readonly modelId: string;
   readonly judge: (submission: ScoutSubmission, existingTitles: readonly string[]) => Promise<ScoutJudgement>;
+  /** The issue-backlog subject: one text-only call over the newest observation's issues. */
+  readonly triageIssues: (issues: readonly TriageIssue[], observedAt: Date) => Promise<IssueTriageJudgement>;
 };
 
 /** The chosen model, or null when none is chosen or it can no longer read images. */
@@ -111,6 +130,48 @@ export async function scoutLlmFor(modelId: string | null): Promise<ScoutLlm | nu
             event: "product_research_scout_llm_call_failed",
             modelId: model.id,
             subject: submission.subject,
+            error: error instanceof Error ? error.name : "unknown",
+          }),
+        );
+        return { suggestions: null, inputTokens: null, outputTokens: null };
+      }
+    },
+    triageIssues: async (issues, observedAt) => {
+      try {
+        const generated = await generateText({
+          model: getActiveAiModel(model),
+          system: ISSUE_TRIAGE_SYSTEM_PROMPT,
+          prompt: issueTriagePromptText(issues, observedAt),
+          maxOutputTokens: ISSUE_TRIAGE_MAX_OUTPUT_TOKENS,
+          maxRetries: 0,
+          abortSignal: AbortSignal.timeout(SCOUT_LLM_TIMEOUT_MS),
+          output: Output.object({
+            schema: jsonSchema(issueTriageOutputSchema(issues.length) as unknown as JSONSchema7),
+            name: "product_research_scout_issues",
+          }),
+          providerOptions: { openai: { strictJsonSchema: true } },
+        });
+        const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+        const suggestions = parseIssueTriageAnswer(generated.output, issues);
+        const judgement = { suggestions, inputTokens: usage?.inputTokens ?? null, outputTokens: usage?.outputTokens ?? null };
+        console.info(
+          JSON.stringify({
+            event: "product_research_scout_llm_call",
+            modelId: model.id,
+            subject: ISSUE_TRIAGE_SUBJECT,
+            issues: issues.length,
+            inputTokens: judgement.inputTokens,
+            outputTokens: judgement.outputTokens,
+            kept: suggestions.length,
+          }),
+        );
+        return judgement;
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "product_research_scout_llm_call_failed",
+            modelId: model.id,
+            subject: ISSUE_TRIAGE_SUBJECT,
             error: error instanceof Error ? error.name : "unknown",
           }),
         );
