@@ -268,3 +268,7 @@
   .review-participant-list>button { flex-basis:calc(50% - 6px); }
   .review-participant-list strong { overflow-wrap:anywhere; }
 }
+@media(max-width:767px) {
+  .review-participant-list>button[aria-pressed] { flex:1 1 130px; min-width:max-content; }
+  .review-participant-list>button[aria-pressed] strong { white-space:nowrap; }
+}
