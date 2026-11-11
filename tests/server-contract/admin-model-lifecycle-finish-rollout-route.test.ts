@@ -173,3 +173,15 @@ test("a note is required, and only ops writers may close", async () => {
   assert.equal((await POST(post({ workItemIds: ["item_a"], note: "Live." }))).status, 404);
   assert.equal(world.finished, null);
 });
+
+test("a model that stopped being live between the read and the lock is refused", async () => {
+  world.refusal = {
+    code: "not_live",
+    message: "The model is no longer live, or the item moved, so it cannot be closed as rolled out.",
+  };
+  const { POST } = await loadRoute();
+  const response = await POST(post({ workItemIds: ["item_a"], note: "Live a moment ago." }));
+  assert.equal(response.status, 409);
+  assert.equal(((await response.json()) as { error: string }).error, "not_live");
+  assert.equal(world.audit, null);
+});

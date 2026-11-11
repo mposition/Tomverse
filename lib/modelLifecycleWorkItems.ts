@@ -795,7 +795,11 @@ export async function transitionWorkItem(
  * validations ticked, `rollout_pending`, `completed` -- in one transaction, so a
  * refusal halfway leaves every item where it was. An item that owes users a
  * notice stops at `communication_pending`, as the state machine requires. The
- * caller checks `isRolloutFinishable` against the queue first.
+ * caller checks `isRolloutFinishable` against the queue first, and this checks
+ * liveness again under lock: the live registry rows are held FOR SHARE until
+ * commit, so a disable or delist racing this call waits for it or is seen by
+ * it -- `completed` is terminal and must not be recorded against a model that
+ * stopped being served. Registry before work items, the adoption path's order.
  */
 export async function finishServedRollouts(
     tx: Prisma.TransactionClient,
@@ -803,23 +807,69 @@ export async function finishServedRollouts(
 ): Promise<
     | { ok: true; completed: number; awaitingNotice: number }
     | Extract<BulkWorkItemTransitionResult, { ok: false }>
+    | { ok: false; refusal: { code: "not_live"; message: string; workItemId: string } }
 > {
     const now = input.now ?? new Date();
     const ids = Array.from(new Set(input.workItemIds)).sort();
+    const liveRegistry = await tx.$queryRaw<Array<{ apiModel: string }>>(Prisma.sql`
+        SELECT "apiModel"
+        FROM "ModelRegistryEntry"
+        WHERE "enabled" = true
+          AND "publiclyListed" = true
+          AND "status" <> 'disabled'
+          AND "catalogDeleted" = false
+        ORDER BY "id"
+        FOR SHARE
+    `);
+    const decisionIdentity = createModelDecisionIdentityResolver(
+        providerAliasEvidence(
+            await tx.providerModelCatalogEntry.findMany({
+                select: { apiModel: true, metadata: true },
+            })
+        )
+    );
+    const liveFamilies = new Set(
+        [
+            ...liveRegistry.map((row) => row.apiModel),
+            ...listImageModels()
+                .filter((model) => model.disabledReason === null)
+                .map((model) => model.apiModelId),
+        ].map(decisionIdentity)
+    );
     const rows = await tx.$queryRaw<
         Array<{
             id: string;
+            apiModel: string;
+            action: string;
             status: string;
             pendingValidations: Prisma.JsonValue | null;
             communicationRequired: boolean;
         }>
     >(Prisma.sql`
-        SELECT "id", "status", "pendingValidations", "communicationRequired"
+        SELECT "id", "apiModel", "action", "status", "pendingValidations", "communicationRequired"
         FROM "ModelLifecycleWorkItem"
         WHERE "id" IN (${Prisma.join(ids)})
         ORDER BY "id"
         FOR UPDATE
     `);
+    const notLive = rows.find(
+        (row) =>
+            !isRolloutFinishable({
+                action: row.action,
+                status: row.status,
+                servedLive: liveFamilies.has(decisionIdentity(row.apiModel)),
+            })
+    );
+    if (notLive || rows.length !== ids.length) {
+        return {
+            ok: false,
+            refusal: {
+                code: "not_live",
+                message: "The model is no longer live, or the item moved, so it cannot be closed as rolled out.",
+                workItemId: notLive?.id ?? ids.find((id) => !rows.some((row) => row.id === id))!,
+            },
+        };
+    }
     for (const row of rows) {
         const pending = stringList(row.pendingValidations);
         if (pending.length === 0) continue;
