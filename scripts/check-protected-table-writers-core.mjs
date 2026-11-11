@@ -751,6 +751,27 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/engineeringAgentT2DmReviewService.ts",
+    table: "EngineeringAgentRun",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason: "The T2 advice sync reads a draft's run only to label its Decision Maker card (a LEFT JOIN in a SELECT); the write verbs insert and close rows of its own EngineeringAgentDmReview table. It writes no run.",
+  },
+  {
+    path: "lib/engineeringAgentT2DmReviewService.ts",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 5,
+    writeVerbs: 3,
+    reason: "The T2 advice sync reads open drafts and checks a question id is a t2_draft inside INSERT ... SELECT and UPDATE ... FROM on its own EngineeringAgentDmReview table. It never writes a work item; the draft stays the store's.",
+  },
+  {
+    path: "prisma/migrations/20261111100000_engineering_agent_t2_dm_review/migration.sql",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason: "The additive migration creates EngineeringAgentDmReview with a restrictive foreign key to the work item (ALTER TABLE ... ON DELETE/UPDATE RESTRICT); it writes no work item row.",
+  },
+  {
     path: "lib/amux/ideaLaneService.ts",
     table: "AdminAuditLog",
     tableMentions: 1,

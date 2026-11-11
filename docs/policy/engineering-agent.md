@@ -191,7 +191,9 @@ v22 `implement` Task의 패치가 T2로 판정되어도 아래를 모두 만족�
 되지 않는다. 앱은 claim 요청 헤더 `x-engineering-publisher-features`에 `review_draft`를 적은 게시 서비스에만
 검토 항목의 쓰기 claim을 준다. 그래서 이 기능 이전에 배포된 게시 서비스는 이 항목을 ready PR로 열 수 없다.
 PR 대기열 상한(§12), 결과 불명 처리(§10), 병합은 사람이 한다는 규칙은 T1과 같다. 위 조건에 맞지 않는 T2는
-지금처럼 비공개 초안으로 남는다.
+지금처럼 비공개 초안으로 남는다. 운영자가 `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW=enabled`를 켜면 열린 T2 초안은
+DM에 조언 카드로 올라가고(docs/policy/amux-decision-maker.md 결과 검토 항), 그 답은 결정 대기 화면에 참고로만 보인다.
+승인과 거절은 여전히 사람이 한다.
 
 ## 4. push 금지 집합
 
