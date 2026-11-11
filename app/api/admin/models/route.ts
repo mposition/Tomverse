@@ -34,6 +34,7 @@ import {
   creditFloorExceptionVerdict,
 } from "@/lib/modelAdoptionDraft";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { codePinnedModelRefusal } from "@/lib/codePinnedModels";
 import { getModel, type AiModel } from "@/lib/models";
 import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
 import {
@@ -90,6 +91,8 @@ async function predecessorForReplacement(
     replacementModelId: predecessor.replacementModelId,
     provider: predecessor.provider,
     isApplicationDefault: replacesModelId === APP_DEFAULTS.defaultModelId,
+    // The replaced model is disabled in the same transaction as the adoption.
+    codePinnedRefusal: codePinnedModelRefusal({ modelId: replacesModelId, status: "disabled" }),
     isGuestDefault: lead.effective === replacesModelId,
   };
 }
