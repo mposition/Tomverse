@@ -178,7 +178,7 @@ test("the card read writes nothing and the card posts only through the engineeri
   assert.doesNotMatch(card, /adminFetch|dangerouslySetInnerHTML/);
   assert.match(card, /postEngineeringAgentAction\(request\)/);
   for (const confirm of ["confirmApprove", "confirmReject", "confirmRejudge", "confirmMismatchRecordReviewPr"]) {
-    assert.match(card, new RegExp(`m\.${confirm}`));
+    assert.match(card, new RegExp(`m\\.${confirm}`));
   }
   assert.match(card, /"record_bound_review_pr"/);
   const panel = readFileSync("components/admin/AdminEngineeringAgentPanel.tsx", "utf8");
