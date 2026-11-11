@@ -422,6 +422,10 @@ run(
     // its status kept, its escalation resolved and one chained audit entry;
     // a running, changed or other-source card refuses, a held card is busy.
     "tests/integration/amux-legacy-card.db.test.ts",
+    // The owner settles any stopped v22 Task (owner decision 2026-11-12):
+    // completes it as done or closes it, with every migration trigger and the
+    // deferred constraints checked, its unknown usage accepted and one audit.
+    "tests/integration/amux-owner-settlement.db.test.ts",
     // AMUX-FILEREQ-004 (2026-11-09): the owner closes the escalation an
     // earlier attempt left open on a done or todo card, with one chained
     // audit entry; review, blocked and running cards refuse.

@@ -18,7 +18,7 @@ import {
   AmuxLegacyCardPanel,
   useAmuxLegacyCardRead,
   type AmuxLegacyCardRead,
-} from "@/components/admin/AmuxLegacyCardPanel";
+  isAmuxRemakeOnlyCardKind } from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxOwnerQueueEngineeringItems } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
 import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
 import { AmuxTaskUnknownUsageList } from "@/components/admin/AmuxAttemptUsageAcceptance";
@@ -155,15 +155,16 @@ export function AmuxOwnerQueueDecision({
   // A card no review decision opens on (a legacy WORKBOARD card or a pre-v22
   // Task) is remade or closed here, from the card detail read the execution
   // board uses, so the owner does not open the full card first. Owner only.
-  // The card detail is read only once this card's review says the card is not
-  // a v22 Task the Ubuntu inspection can take (an archived card is no longer
-  // in this queue), so an ordinary v22 card costs no second detail read.
+  // Any stopped v22 Task has the same panel (owner decision 2026-11-12): the
+  // owner completes, remakes or closes it whatever stopped it, so the card
+  // detail is read for every card here once its review is read.
   const legacyRead = useAmuxLegacyCardRead(item.taskId,
-    canInspectCards && group !== "question" && reviewMatches &&
-      review.task.host_recovery_available === false, initialLegacyCard);
+    canInspectCards && group !== "question" && reviewMatches, initialLegacyCard);
   const legacyCard = legacyRead?.view ? { revision: legacyRead.revision, view: legacyRead.view } : null;
-  // Once the review is read, the legacy panel stands in for a decision only when none is open.
-  const legacyOnly = legacyCard !== null && outcomes.length === 0;
+  // Once the review is read, the legacy panel stands in for a decision only
+  // when none is open and the card is one no decision ever opens on.
+  const legacyOnly = legacyCard !== null && outcomes.length === 0 &&
+    isAmuxRemakeOnlyCardKind(legacyCard.view.kind);
   // The words follow the choices actually shown, not the PR alone: a verified
   // non-code Task is approved without one, and a spent budget, an unverified
   // result or pending publication leaves no retry.

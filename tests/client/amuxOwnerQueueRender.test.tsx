@@ -523,8 +523,8 @@ test("a legacy panel is the owner's only, and a card with an open choice keeps i
   const ctl = controller({ selectedEscalationId: escalationId, review: reviewFor(escalationId, {
     task: { id: "task-1", title: "Tidy", status: "review", revision: 8, due_parse_state: "valid",
       host_recovery_available: false } }) });
-  // A card the Ubuntu inspection can take is a v22 Task, so its detail is never read for the panel.
-  assert.doesNotMatch(decision(card, controller({ selectedEscalationId: escalationId,
+  // A v22 Task the Ubuntu inspection can take has its panel read too (owner decision 2026-11-12).
+  assert.match(decision(card, controller({ selectedEscalationId: escalationId,
     review: reviewFor(escalationId) }), true, preV22Legacy), /data-testid="amux-legacy-card"/);
   // Nor before this card's own review is read.
   assert.doesNotMatch(decision(card, controller(), true, preV22Legacy), /data-testid="amux-legacy-card"/);
@@ -537,6 +537,37 @@ test("a legacy panel is the owner's only, and a card with an open choice keeps i
   assert.match(open, /data-testid="amux-legacy-card"/);
   assert.match(open, /<kbd[^>]*>1<\/kbd>Approve/);
   assert.doesNotMatch(open, /No review decision can open on this card/);
+});
+
+test("a stopped v22 Task is settled by the owner beside whatever the server offers", () => {
+  const stopped: AmuxLegacyCardRead = { revision: 8, view: { kind: "stopped_task", closeRefusal: null,
+    completeRefusal: null, alreadyArchived: false, idea: { state: "ready", title: "Tidy the paths",
+      truncated: false, text: "Tidy the paths\n\n원래 카드: AMUX-AUTOFILE-004" } } };
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  // The server offers nothing for this card: the owner still completes, remakes or closes it.
+  const none = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, { allowed_outcomes: [], proposed_transitions: {} }) }), true, stopped);
+  assert.match(none, /data-testid="amux-legacy-card"/);
+  assert.match(none, /Settle this card yourself/);
+  assert.match(none, /data-testid="amux-legacy-card-complete"[^>]*>Complete as done</);
+  assert.match(none, /data-testid="amux-legacy-card-recreate"/);
+  assert.match(none, /data-testid="amux-legacy-card-close"/);
+  // It is not a card no decision can ever open on, so it never says so.
+  assert.doesNotMatch(none, /No review decision can open on this card/);
+  // With a choice offered, both stay.
+  const open = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId) }), true, stopped);
+  assert.match(open, /<kbd[^>]*>1<\/kbd>Approve/);
+  assert.match(open, /data-testid="amux-legacy-card-complete"/);
+  // A Task the server says cannot be done (archived, or no v22 receipt) has no completion button.
+  const refused = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId) }), true,
+    { revision: 8, view: { ...stopped.view!, completeRefusal: "not_completable" } });
+  assert.doesNotMatch(refused, /data-testid="amux-legacy-card-complete"/);
+  // A legacy kind never completes.
+  assert.doesNotMatch(decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId) }), true, preV22Legacy), /data-testid="amux-legacy-card-complete"/);
 });
 
 test("a no-PR card with no choice at all does not say it can be blocked", () => {
