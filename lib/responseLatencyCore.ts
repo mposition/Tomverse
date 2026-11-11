@@ -14,6 +14,7 @@ export const clientLatencyStagesSchema = z.object({
   panelHandoffMs: duration.optional(),
   locationMs: duration.optional(),
   locationIntentMs: duration.optional(),
+  freshLocationOverlapMs: duration.optional(),
   responseHeadersMs: duration.optional(),
   dispatchToContentMs: duration.optional(),
   contentToEndMs: duration.optional(),
@@ -59,7 +60,9 @@ export const clientLatencyBodySchema = z.object({
   stages: clientLatencyStagesSchema.optional(),
 }).strict().refine(value => value.prepareMs <= value.completionMs &&
   (value.firstContentMs === null || (value.firstContentMs >= value.prepareMs && value.firstContentMs <= value.completionMs)) &&
-  Object.values(value.stages ?? {}).every(ms => ms <= value.completionMs),
+  Object.values(value.stages ?? {}).every(ms => ms <= value.completionMs) &&
+  (value.stages?.freshLocationOverlapMs === undefined ||
+    (value.stages.locationIntentMs !== undefined && value.stages.freshLocationOverlapMs <= value.stages.locationIntentMs)),
   "Timing events must follow submission order.");
 
 export function latencyDistribution(values: number[]) {
@@ -102,7 +105,7 @@ export const RESPONSE_LATENCY_ANALYSIS_RULE =
   "Review firstReviewMs and reviewMs start at service entry and exclude route persistence. Sample count counts measurements, not unique requests. " +
   "server firstContentMs starts at API receipt and settlementMs is not completion. " +
   "Parallel timings overlap: never sum them or subtract unrelated percentiles. Missing measurements are unknown. " +
-  "contextPrepareMs and draftPrepareMs run together. locationIntentMs may overlap refinerPrepareMs during parallel preparation; otherwise it is nested within locationMs. locationMs includes remaining device and human permission waits. " +
+  "contextPrepareMs and draftPrepareMs run together. locationIntentMs may overlap new conversation preparation or refinerPrepareMs. freshLocationOverlapMs measures the portion of a reused new conversation intent request that elapsed before the saved turn needed its result. locationMs includes remaining intent, device and human permission waits. " +
   "Report sample counts; small samples cannot prove a model is faster. Keep failed/cancelled/primary-only outcomes visible. " +
   "Recommend concrete code or setting experiments that reduce waiting while preserving selected models, both reviewers, " +
   "grounding, tools, memory, authorization, credits and quality. Distinguish earlier display from faster final completion. " +

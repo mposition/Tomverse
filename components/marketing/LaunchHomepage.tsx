@@ -133,8 +133,9 @@ export default function LaunchHomepage({ reviewInfoHref, variantCopy }: LaunchHo
   const copy: LaunchHomepageCopy = variantCopy
     ? { ...defaultCopy, hero: { ...defaultCopy.hero, title: variantCopy.title ? [variantCopy.title[0], variantCopy.title[1]] : defaultCopy.hero.title, body: variantCopy.body ?? defaultCopy.hero.body } }
     : defaultCopy;
-  const mobileHeroBody = variantCopy?.body ? undefined : copy.hero.mobileBody;
   const { chatAvailable, guestTrialAvailable, isAuthenticated, chatHref, reviewHref: reviewEntryHref, primaryHref, primaryProduct } = useMarketingChatEntry();
+  const mobileHeroBody = variantCopy?.body ? undefined : !chatAvailable && copy.hero.mobileBody
+    ? copy.hero.mobileReviewBody ?? copy.hero.mobileBody : copy.hero.mobileBody;
   const reviewEntryCopy = launchReviewEntryCopy[lang];
   const accountCopy = isAuthenticated && chatAvailable ? launchAccountEntryCopy[lang] : null;
   const isGuestChatTrial = !isAuthenticated && guestTrialAvailable;

@@ -66,9 +66,11 @@ function sectionBody(section: MarketingInfoSection, pageHref: (href: string) => 
 export function MarketingInfoPage({
   content,
   template,
+  readableBody = false,
 }: {
   content: { en: MarketingInfoCopy } & Partial<Record<Language, MarketingInfoCopy>>;
   template?: "chatgpt-vs-claude" | "ai-answer-review";
+  readableBody?: boolean;
 }) {
   const { lang } = useLanguage();
   const { guestTrialAvailable, reviewHref } = useMarketingChatEntry();
@@ -99,7 +101,7 @@ export function MarketingInfoPage({
 
       <section
         lang={localizedPage ? lang : "en"}
-        className={`mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20 ${page.keepWords ? "break-keep [overflow-wrap:anywhere]" : ""}`}
+        className={`mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20 ${page.keepWords ? "break-keep [overflow-wrap:anywhere]" : ""} ${readableBody ? "[overflow-wrap:anywhere]" : ""}`}
       >
         <div className="max-w-3xl">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{page.eyebrow}</p>
@@ -139,7 +141,7 @@ export function MarketingInfoPage({
               {page.sections.map((section, index) => {
                 const links = [...(section.link ? [section.link] : []), ...(section.links ?? [])];
                 return (
-                <article key={section.title} id={section.id} tabIndex={section.id ? -1 : undefined} lang={section.lang} className={`scroll-mt-28 focus-visible:outline-2 focus-visible:outline-blue-600 rounded-2xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40 ${page.mobileAccordion ? "min-w-0 p-4 [overflow-wrap:anywhere] sm:p-6" : "p-6"}`}>
+                <article key={section.title} id={section.id} tabIndex={section.id ? -1 : undefined} lang={section.lang} className={`scroll-mt-28 focus-visible:outline-2 focus-visible:outline-blue-600 rounded-2xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40 ${readableBody ? "min-w-0" : ""} ${page.mobileAccordion ? "min-w-0 p-4 [overflow-wrap:anywhere] sm:p-6" : "p-6"}`}>
                   <h2 className="text-xl font-black">
                     {page.mobileAccordion ? <>
                       <span className="hidden sm:inline">{section.title}</span>
@@ -157,7 +159,7 @@ export function MarketingInfoPage({
                     </> : section.title}
                   </h2>
                   <div id={`${sectionId}-${index}`} className={page.mobileAccordion && !expandedSections.has(section.title) ? "hidden sm:block" : undefined}>
-                  <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{sectionBody(section, pageHref)}</p>
+                  <p className={`mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300 ${readableBody ? "max-w-[80ch] sm:text-base" : ""}`}>{sectionBody(section, pageHref)}</p>
                   {section.comparisonTable ? <table className="mt-5 w-full table-fixed border-collapse text-left text-sm leading-6 [overflow-wrap:anywhere]">
                     <caption className="mb-2 text-left font-bold">{section.comparisonTable.caption}</caption>
                     <thead><tr>{section.comparisonTable.headers.map(header => <th key={header} scope="col" className="border-b border-zinc-300 p-2 align-top dark:border-zinc-700">{header}</th>)}</tr></thead>

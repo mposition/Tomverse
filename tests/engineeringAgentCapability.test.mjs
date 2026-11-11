@@ -230,6 +230,7 @@ const action = (overrides) =>
     workItemTerminal: false,
     lookupVerifiedNoWrite: false,
     mergeObserved: false,
+    boundReviewPrRecorded: false,
     recurrences: 0,
     ...overrides,
   });
@@ -291,6 +292,28 @@ test("C closes on a merge GitHub reports, and only C, without turning the agent 
   );
   for (const kind of ["A", "B", "D"]) {
     assert.deepEqual(action({ kind, action: "close_after_observed_merge", ...terminalBoth, mergeObserved: true }), {
+      allowed: false,
+      reason: "action_not_allowed_for_kind",
+    });
+  }
+});
+
+test("C closes when AMUX recorded the bound number on the card, and only C", () => {
+  assert.deepEqual(action({ kind: "C", action: "record_bound_review_pr", ...terminalBoth }), {
+    allowed: false,
+    reason: "bound_review_pr_not_recorded",
+  });
+  assert.deepEqual(action({ kind: "C", action: "record_bound_review_pr", ...terminalBoth, boundReviewPrRecorded: true }), {
+    allowed: true,
+    resolves: true,
+  });
+  assert.equal(
+    action({ kind: "C", action: "record_bound_review_pr", ...terminalBoth, boundReviewPrRecorded: true, runTerminal: false }).allowed,
+    false,
+    "a C item still needs its run and work item terminal",
+  );
+  for (const kind of ["A", "B", "D"]) {
+    assert.deepEqual(action({ kind, action: "record_bound_review_pr", ...terminalBoth, boundReviewPrRecorded: true }), {
       allowed: false,
       reason: "action_not_allowed_for_kind",
     });
