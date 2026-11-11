@@ -182,7 +182,7 @@ function ProviderDestinationTable({
                 aria-label={t("privacyPolicy.providerTableTitle")}
                 tabIndex={0}
             >
-                <table className="w-full min-w-[720px] border-collapse text-left">
+                <table className="w-full min-w-[720px] table-fixed border-collapse text-left [overflow-wrap:anywhere]">
                     <caption className="sr-only">{t("privacyPolicy.providerTableTitle")}</caption>
                     <thead>
                         <tr className="border-b border-zinc-200 dark:border-zinc-800">
@@ -370,9 +370,6 @@ export function PrivacyPolicy() {
                                                 </li>
                                             ))}
                                         </ul>
-                                        {showProviderTable ? (
-                                            <ProviderDestinationTable rows={destinations} t={t} />
-                                        ) : null}
                                     </>
                                 )}
                                 {bodyKey === "comments" && (
@@ -418,6 +415,11 @@ export function PrivacyPolicy() {
                                     </>
                                 )}
                             </div>
+                            {bodyKey === "providers" && showProviderTable ? (
+                                <div className="min-w-0 text-sm leading-7 text-zinc-600 md:col-span-2 dark:text-zinc-300">
+                                    <ProviderDestinationTable rows={destinations} t={t} />
+                                </div>
+                            ) : null}
                         </section>
                     ))}
                 </div>
