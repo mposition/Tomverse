@@ -577,8 +577,8 @@ export async function pullAmuxWorkDelivery(input: {
       }
       // The fixed HTTPS executor of a read-only API retry has no checkout,
       // so only a CLI run is told about its workspace.
-      const workspace = readOnlyRetry?.executorKind ===
-        AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ? "" :
+      const workspace = recovery?.riskAcceptanceId &&
+        recovery.readOnlyExecutorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ? "" :
         `${amuxV22WorkspaceNotice(amuxV22ExecutionRole(assignment.role))}\n`;
       const head = `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
         `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n` + workspace;
