@@ -5,6 +5,8 @@ import { NextResponse } from "next/server";
 
 import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import { chatSurfaceAvailable } from "@/lib/autoProductBoundary";
+import { mayStoreSelectionMode } from "@/lib/autoRoutingUi";
+import { CHAT_INITIAL_SELECTION_MODE_HEADER } from "@/lib/chatWorkspaceEntry";
 import { createConversationForProduct } from "@/lib/conversationCreateHandler";
 import { CHAT_PRODUCT_KEY } from "@/lib/conversationProduct";
 
@@ -59,5 +61,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
-  return createConversationForProduct(req, CHAT_PRODUCT_KEY);
+  const initialAutoOwnerId = req.headers.get(CHAT_INITIAL_SELECTION_MODE_HEADER) === "auto" &&
+    mayStoreSelectionMode("auto", availability) ? session.user.id : undefined;
+  return createConversationForProduct(req, CHAT_PRODUCT_KEY, initialAutoOwnerId);
 }

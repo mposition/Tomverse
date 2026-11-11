@@ -5,12 +5,22 @@ import { resolve } from "node:path";
 
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 let requestedProfile, defaults, offered, capacityCalls, clampCalls, transactions, writes;
+let rateScopes, modeLimitRefused;
+const rateRefusal = new Error("rate limited");
 mock.module("next-auth/next", { namedExports: { getServerSession: async () => ({ user: { id: "owner" } }) } });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
 mock.module(mod("lib/autoAvailability.ts"), { namedExports: { autoAvailabilityFor: async () => ({ offered }) } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
-  apiSecurityResponse: () => null,
-  consumeApiRateLimit: async () => {},
+  apiSecurityResponse: error => error === rateRefusal ? Response.json({ code: "API_RATE_LIMITED" }, { status: 429 }) : null,
+  consumeApiRateLimit: async (request, userId, scope, limit) => {
+    assert.ok(request instanceof Request);
+    assert.equal(userId, "owner");
+    rateScopes.push(scope);
+    if (scope === "conversation-update") {
+      assert.deepEqual(limit, { minute: 30, day: 1_000 });
+      if (modeLimitRefused) throw rateRefusal;
+    }
+  },
   assertConversationCapacity: async () => { capacityCalls++; },
   readLimitedJson: async (req, _limit, schema) => schema.parse(await req.json()),
 } });
@@ -39,13 +49,13 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
 mock.module(mod("lib/conversationCreation.ts"), { namedExports: {
   createConversation: async (_tx, data) => {
     writes.push(data);
-    return { id: "created", password: null, ...data };
+    return { id: "created", password: null, kind: "chat", selectionMode: "manual", ...data };
   },
 } });
 const { createConversationForProduct } = await import(mod("lib/conversationCreateHandler.ts"));
 const { POST } = await import(mod("app/api/products/chat/conversations/route.ts"));
-const request = (body) => new Request("https://chat.example/api/products/chat/conversations", {
-  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+const request = (body, headers = {}) => new Request("https://chat.example/api/products/chat/conversations", {
+  method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body),
 });
 test.beforeEach(() => {
   requestedProfile = null;
@@ -55,6 +65,8 @@ test.beforeEach(() => {
   clampCalls = [];
   transactions = 0;
   writes = [];
+  rateScopes = [];
+  modeLimitRefused = false;
 });
 const assertNoWrite = () => {
   assert.equal(capacityCalls, 0);
@@ -98,6 +110,9 @@ test("one explicit model creates Chat and returns the server surface without cha
   const body = await response.json();
   assert.deepEqual(body.selectedModels, ["model-b"]);
   assert.equal(body.surface, "chat");
+  assert.equal(body.selectionMode, "manual");
+  assert.equal(body.autoSelection, undefined);
+  assert.deepEqual(rateScopes, ["conversation-create"]);
   assert.equal(writes[0].productKey, "chat");
   assert.equal(capacityCalls, 1);
   assert.equal(transactions, 1);
@@ -109,6 +124,39 @@ test("single-model profile remains the authoritative creation selection", async 
   assert.equal(response.status, 200);
   assert.deepEqual((await response.json()).selectedModels, ["profile-a"]);
   assert.equal(writes[0].assistantProfileVersionId, "version-1");
+});
+test("an explicit offered first Chat stores Auto together with the server-selected profile model", async () => {
+  requestedProfile = ["profile-a"];
+  const response = await POST(request({ selectedModels: ["model-a"], assistantProfileId: "profile" },
+    { "X-Chat-Initial-Selection-Mode": "auto" }));
+  assert.equal(response.status, 200);
+  const row = await response.json();
+  assert.deepEqual([row.userId, row.productKey, row.kind, row.surface, row.selectionMode, row.isLocked],
+    ["owner", "chat", "chat", "chat", "auto", false]);
+  assert.deepEqual(row.autoSelection, { offered: true });
+  assert.deepEqual(row.selectedModels, ["profile-a"]);
+  assert.equal(writes[0].selectionMode, "auto");
+  assert.deepEqual(rateScopes, ["conversation-create", "conversation-update"]);
+  assert.equal(writes[0].assistantProfileVersionId, "version-1");
+  assert.equal(transactions, 1);
+  assert.equal(capacityCalls, 1);
+});
+test("Auto creation requires the admitted account and the Chat product", async () => {
+  const send = () => request({ selectedModels: ["model-a"] }, { "X-Chat-Initial-Selection-Mode": "auto" });
+  offered = false;
+  assert.equal((await POST(send())).status, 404);
+  assert.equal((await createConversationForProduct(send(), "chat", "another-account")).status, 403);
+  assert.equal((await createConversationForProduct(send(), "review", "owner")).status, 403);
+  assertNoWrite();
+  const review = await createConversationForProduct(send(), "review");
+  assert.equal((await review.json()).selectionMode, "manual");
+});
+test("the existing mode-write limit fails closed before inserting a Chat", async () => {
+  modeLimitRefused = true;
+  const response = await POST(request({ selectedModels: ["model-a"] }, { "X-Chat-Initial-Selection-Mode": "auto" }));
+  assert.equal(response.status, 429);
+  assert.deepEqual(rateScopes, ["conversation-create", "conversation-update"]);
+  assertNoWrite();
 });
 test("the existing offered gate still refuses Chat creation before any handler work", async () => {
   offered = false;

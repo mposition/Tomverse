@@ -85,18 +85,21 @@ either way. A turn with *no conversation at all* is a different thing:
 A server-offered blank Chat draft paints Smart Adaptive ON as its default
 **draft intent**. That display is not a claim that a conversation row or stored
 mode already exists: merely entering Chat creates no row and performs no paid
-call. Before the first Send, the client must create the owned Chat row, read
-its canonical detail, store `selectionMode: auto`, and adopt that confirmed
-row. Send waits for this sequence.
+call. On the first Send, the client requests `X-Chat-Initial-Selection-Mode: auto`
+from the Chat creation endpoint. The authenticated account's server-side entry
+gate authorizes the mode, which is stored in the same insert as the owned
+Chat and its selected models. Send waits for the returned row to confirm the
+owner, product, mode, capability and model settings. An older server can
+ignore the header; the client reads the same created row and stores Auto
+through its existing PATCH before dispatch.
 
 If a signed-in user has chosen manual on the blank draft and explicitly switches Smart
 Adaptive back on, the same server-confirmation sequence runs immediately. In
 that explicit transition only, the switch remains pending or returns to manual
-until every step succeeds. These network steps are deliberately not described
-as one database transaction. An unknown outcome stops for readback and is never
-retried blindly. Review and other product surfaces do not gain this account
-draft capability, and account routing itself still requires the stored owned
-row.
+until the mode is confirmed. An unknown creation outcome blocks another create.
+A lost legacy PATCH response allows one read-only check. Review and other
+product surfaces do not gain this account draft capability, and account
+routing itself still requires the stored owned row.
 
 Guest Chat follows a narrower one-turn contract. Entry and the visible default
 remain rowless and free. Immediately before Send, the client obtains a fresh

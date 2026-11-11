@@ -123,7 +123,7 @@ import type {
     RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
-import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getActiveAiModel, qwenLookupStep } from "@/lib/activeAiModel";
 import { catalogueHostRefusalCode } from "@/lib/modelRegistryShared";
 import {
     getModelGenerationSettings,
@@ -4798,10 +4798,13 @@ async function handleChatPost(
           disconnects mid-answer does not leave a search running for a turn
           nobody is reading.
         */
+        const searchSelectionEligible = access.kind !== "guest" && autoSelection.routed &&
+            llmPick?.modelId === modelConfig.id && llmPick.requiresFileGeneration === false;
         const appManagedSearchTool =
             appManagedSearchEnabled && webSearchCapability.searchBackend
                 ? buildAppManagedWebSearchTool({
                       backend: webSearchCapability.searchBackend,
+                      extraSnippets: allowRouterSearchPlan && searchSelectionEligible && Boolean(llmPick?.searchQueries?.length) && !mcpConnector,
                       maxQueries:
                           appManagedSearchQueryCeiling({
                               capability: webSearchCapability,
@@ -5108,8 +5111,6 @@ async function handleChatPost(
         ).messages;
         // File-capable models offer artifact tools on ordinary text turns too.
         // Require an explicit non-file decision and retain those tools for the answer.
-        const searchSelectionEligible = access.kind !== "guest" && autoSelection.routed &&
-            llmPick?.modelId === modelConfig.id && llmPick.requiresFileGeneration === false;
         if (routerSearchPlanCandidate && appManagedSearchTool && !mcpConnector) {
             searchObservation = createChatSearchObservation({
                 flagEnabled: presearchFlagEnabled, planOffered: allowRouterSearchPlan,
@@ -5117,6 +5118,7 @@ async function handleChatPost(
                 selectionEligible: searchSelectionEligible, snapshot: appManagedSearchTool.session.snapshot,
             });
         }
+        let lookupStep: ReturnType<typeof qwenLookupStep>;
         if (allowRouterSearchPlan && searchSelectionEligible &&
             llmPick?.searchQueries?.length && appManagedSearchTool && !mcpConnector) {
             presearchForSettlement = appManagedSearchTool;
@@ -5130,7 +5132,11 @@ async function handleChatPost(
                         toReservedInputTokens(inputEstimate.breakdown()) - TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
                 });
                 const injected = appendRouterSearchEvidence(formattedMessages, evidence);
-                searchObservation?.presearch(injected);
+                if (process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED === "true" &&
+                    injected && llmPick.simpleLookup && appManagedSearchTool.session.snapshot().sources.length > 0) {
+                    lookupStep = qwenLookupStep(modelConfig);
+                }
+                searchObservation?.presearch(injected, Boolean(lookupStep));
             } finally { finishPresearch(); }
         }
         const { messages: sdkMessages, instructions: sdkInstructions } =
@@ -5277,6 +5283,7 @@ async function handleChatPost(
                     ...generationSettings,
                     ...(combinedToolConfig ?? {}),
                     ...searchObservation?.sdk,
+                    ...(lookupStep ? { prepareStep: lookupStep } : {}),
                     ...(mcpConnector ? {
                         maxRetries: 0,
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
