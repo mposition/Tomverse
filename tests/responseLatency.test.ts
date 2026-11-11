@@ -40,6 +40,15 @@ test("full send reports separate preparation, headers, first content, stream end
     for (const stages of [{ prompt: "private" }, { contextPrepareMs: -1 }, { modelSyncMs: 421 }, { routingMs: 4 }]) {
       assert.equal(clientLatencyBodySchema.safeParse({ ...body, stages }).success, false);
     }
+    // An intent lookup can finish before the panel asks for its result.
+    // Its overlap can exceed the remaining location wait, up to the full lookup.
+    for (const overlap of [0, 70, 100]) {
+      const stages = { locationIntentMs: 100, freshLocationOverlapMs: overlap, locationMs: 30 };
+      assert.ok(clientLatencyBodySchema.safeParse({ ...body, stages }).success);
+    }
+    for (const stages of [{ freshLocationOverlapMs: 1 }, { locationIntentMs: 100, freshLocationOverlapMs: 101 }]) {
+      assert.equal(clientLatencyBodySchema.safeParse({ ...body, stages }).success, false);
+    }
     const restored = createClientLatency(undefined, { contextPrepareMs: 5_000 }, () => time);
     restored.dispatched();
     restored.headers(new Response(null, { headers: { "X-Response-Latency-Token": "proof" } }));
