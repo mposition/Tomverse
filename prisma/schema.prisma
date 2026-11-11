@@ -9825,10 +9825,23 @@ model EngineeringAgentWorkItem {
   run        EngineeringAgentRun?        @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   approval   EngineeringAgentApproval?
   capabilities EngineeringAgentCapability[]
+  dmReview     EngineeringAgentDmReview?
 
   @@index([kind, state])
   @@index([runId])
   @@index([state, leaseExpiresAt])
+}
+
+/// The Decision Maker card a T2 draft was put to for advice
+/// (lib/engineeringAgentT2DmReviewService.ts). The answer is read from the
+/// Decision Maker's own records beside the draft; nothing here decides it.
+model EngineeringAgentDmReview {
+  workItemId        String    @id
+  localCardId       String    @unique
+  localCardClosedAt DateTime?
+  createdAt         DateTime  @default(now())
+
+  workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }
 
 /// A T2 decision and nothing else: written once, before the draft closes.

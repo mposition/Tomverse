@@ -523,7 +523,32 @@ function OwnerItemContext({ item }: { item: EngineeringAgentOwnerItemView }) {
             </dd>
             <dt className="text-zinc-500">{m.contextDm}</dt>
             <dd>
-              {context.dm.filed ? (
+              {context.dm.filed && context.dm.kind === "t2_advice" ? (
+                <>
+                  <p>
+                    {fill(m.contextDmAdviceFiled, {
+                      state: context.dm.state === "closed" ? m.contextDmAdviceClosed : m.contextDmAdviceOpen,
+                    })}
+                  </p>
+                  <p className="text-zinc-400">{m.dmStates[context.dm.detail.state] ?? context.dm.detail.state}</p>
+                  {context.dm.detail.state === "proposal" ? (
+                    <div className="mt-1">
+                      <p>
+                        {fill(m.contextDmAdviceAnswer, {
+                          answer:
+                            (context.dm.detail.optionId && m.contextDmAdviceOptions[context.dm.detail.optionId]) ||
+                            context.dm.detail.answer ||
+                            context.dm.detail.optionId ||
+                            "-",
+                        })}
+                      </p>
+                      <p className="text-zinc-500">{m.contextDmRationale}</p>
+                      <p className="whitespace-pre-wrap break-words">{context.dm.detail.rationale}</p>
+                    </div>
+                  ) : null}
+                  <p className="mt-1 text-zinc-500">{m.contextDmAdviceNote}</p>
+                </>
+              ) : context.dm.filed ? (
                 <>
                   <p>
                     {fill(m.contextDmFiled, {

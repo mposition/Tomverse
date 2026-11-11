@@ -40,6 +40,8 @@ import { amuxV22ResultReviewDecisionFromAnswer,
 import { applyAmuxV22ResultReviewDecision, readOpenAmuxV22ResultReviewOfCard,
   recordAmuxV22ResultReviewHandoff, recordAmuxV22ResultReviewLocalCard,
   recordAmuxV22ResultReviewLocalCardClosed } from "./v22ResultReviewService.ts";
+import { recordEngineeringAgentT2DmLocalCard, recordEngineeringAgentT2DmLocalCardClosed } from
+  "../engineeringAgentT2DmReviewService.ts";
 
 /**
  * A v22 worker's owner question through the Decision Maker (operator decision
@@ -83,6 +85,9 @@ export async function isAmuxV22QuestionCard(
     WHERE "localCardId" = ${cardId}
     UNION ALL
     SELECT 1 AS "found" FROM "AmuxV22ResultReview"
+    WHERE "localCardId" = ${cardId}
+    UNION ALL
+    SELECT 1 AS "found" FROM "EngineeringAgentDmReview"
     WHERE "localCardId" = ${cardId}
     LIMIT 1`;
   return rows.length > 0;
@@ -209,6 +214,7 @@ export async function recordDmQuestionLocalCard(tx: Prisma.TransactionClient,
   input: { questionId: string; cardId: string }) {
   return await recordAmuxIdeaCardCloseLocalCard(tx, input) ??
     await recordAmuxV22ResultReviewLocalCard(tx, input) ??
+    await recordEngineeringAgentT2DmLocalCard(tx, input) ??
     recordAmuxV22QuestionLocalCard(tx, input);
 }
 
@@ -217,6 +223,7 @@ export async function recordDmQuestionLocalCardClosed(tx: Prisma.TransactionClie
   input: { questionId: string; cardId: string; now: Date }) {
   return await recordAmuxIdeaCardCloseLocalCardClosed(tx, input) ??
     await recordAmuxV22ResultReviewLocalCardClosed(tx, input) ??
+    await recordEngineeringAgentT2DmLocalCardClosed(tx, input) ??
     recordAmuxV22QuestionLocalCardClosed(tx, input);
 }
 

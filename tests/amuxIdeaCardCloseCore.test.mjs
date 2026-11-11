@@ -321,12 +321,16 @@ test("the owner's panel sits on the idea's detail, in both languages, and appear
 
 test("the boundaries stay within the policy's twelve statements, and the confirmed answer goes nowhere near a session", () => {
   const boundaries = readFileSync(resolve(ROOT, "lib/amux/dbBoundary.ts"), "utf8");
-  for (const [name, ceiling] of [["decisionMakerIdeaCardCloseScan", 3], ["decisionMakerIdeaCardCloseOpen", 10],
-    ["decisionMakerIdeaCardCloseRead", 4], ["decisionMakerIdeaCardCloseApply", 12],
-    ["decisionMakerIdeaCardCloseHandoff", 8], ["decisionMakerIdeaCardCloseOwnerRead", 4],
-    ["decisionMakerV22QuestionResolve", 11], ["decisionMakerV22QuestionWrite", 10]]) {
+  // Within the policy's twelve, not pinned: each new question type that rides
+  // the card record adds its own two statements (docs/agents AGENTS.md: no new
+  // fixed values that break when code moves).
+  for (const name of ["decisionMakerIdeaCardCloseScan", "decisionMakerIdeaCardCloseOpen",
+    "decisionMakerIdeaCardCloseRead", "decisionMakerIdeaCardCloseApply",
+    "decisionMakerIdeaCardCloseHandoff", "decisionMakerIdeaCardCloseOwnerRead",
+    "decisionMakerV22QuestionResolve", "decisionMakerV22QuestionWrite", "engineeringAgentT2DmReviewRead"]) {
     const match = new RegExp(`${name}: \\{[^}]*prismaCallCeiling: (\\d+)`).exec(boundaries);
-    assert.equal(Number(match?.[1]), ceiling, name);
+    const ceiling = Number(match?.[1]);
+    assert.ok(ceiling >= 1 && ceiling <= 12, `${name}: ${ceiling}`);
   }
   const dm = readFileSync(resolve(ROOT, "lib/amux/v22OwnerQuestionDmService.ts"), "utf8");
   assert.match(dm, /UNION ALL\s+SELECT 1 AS "found" FROM "AmuxIdeaCardCloseQuestion"\s+WHERE "localCardId" = \$\{cardId\}/);

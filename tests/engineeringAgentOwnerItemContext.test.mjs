@@ -87,8 +87,11 @@ test("every reason the agent writes on an owner item is explained in both langua
   // the screen must not let a person think otherwise.
   assert.match(adminEngineeringAgentMessages.ko.actionsT2[0], /PR을 열거나 코드를 적용하지 않습니다/);
   assert.match(adminEngineeringAgentMessages.en.actionsT2[0], /opens no pull request and applies nothing/);
-  // A draft with a patch is never put to the Decision Maker today; the card says so.
-  assert.match(adminEngineeringAgentMessages.ko.contextDmNotFiled, /patch가 있는 초안은 DM에 보내지 않습니다/);
+  // A T2 draft is put to the Decision Maker for advice only behind its switch,
+  // and its advice is never presented as a decision.
+  assert.match(adminEngineeringAgentMessages.ko.contextDmNotFiled, /TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW/);
+  assert.match(adminEngineeringAgentMessages.ko.contextDmAdviceNote, /조언일 뿐입니다/);
+  assert.match(adminEngineeringAgentMessages.en.contextDmAdviceNote, /approves, rejects and applies nothing/);
 });
 
 test("the read writes nothing and shows Decision Maker bodies only to ops:write", () => {
