@@ -4134,7 +4134,7 @@ test("existing Auto fusion binds the saved follow-up, reuses consent once and pr
       fusionReceipt = null;
       fusedLocationRequired = true;
       fusionPayload = { routerLocationFusion: true, routerLocationScope: "existing" };
-      const before = paidRouterCalls;
+      const before: number = paidRouterCalls;
       const pending = await send(200, choice);
       const { continuation, requiresLocation } = JSON.parse(pending.body);
       assert.equal(requiresLocation, true);

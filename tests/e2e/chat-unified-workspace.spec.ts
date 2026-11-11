@@ -4908,6 +4908,37 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
         creates, intentCalls, dispatches: dispatched.length }) });
   });
 
+  test("an explicit concurrency retry on an existing Auto question uses ordinary Chat and the same saved source", async ({ page }, testInfo) => {
+    test.skip(!existingFusionEnabled, "Requires existing conversation Router location fusion");
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const state = await openChat(page, { viewport, initialSelectionMode: "auto", autoSelectionOffered: true, useChatNetworkFixture: true });
+    const paths: string[] = [], bodies: RecordedRequest[] = [];
+    await page.route("**/api/chat/concurrency", route => route.fulfill({ json: { available: true } }));
+    await page.route(savedChatPaths, route => {
+      const path = new URL(route.request().url()).pathname;
+      paths.push(path); bodies.push(route.request().postDataJSON());
+      return path === "/api/chat/router-location"
+        ? route.fulfill({ status: 429, headers: routerLocationHeaders, json: { code: "CHAT_CONCURRENCY_EXCEEDED", error: "Busy" } })
+        : route.fulfill({ contentType: "text/plain", body: "The explicitly retried answer." });
+    });
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+    await submitComposer(page, "Retry this saved question only when I request it.", viewport.width);
+    const retry = page.getByTestId("concurrency-retry-button");
+    await expect(retry).toBeEnabled();
+    expect(paths).toEqual(["/api/chat/router-location"]);
+    await retry.click();
+    await expect(message(page, "The explicitly retried answer.")).toBeVisible();
+    expect(paths).toEqual(["/api/chat/router-location", "/api/chat"]);
+    expect(bodies[0].routerLocationScope).toBe("existing");
+    expect(bodies[1].routerLocationFusion).toBeUndefined();
+    expect(bodies[1].routerLocationContinuation).toBeUndefined();
+    expect(bodies[1].promptRefinerDecision).toBeUndefined();
+    expect(bodies[1].sourceUserMessageId).toBe(bodies[0].sourceUserMessageId);
+    expect(bodies[1].assistantMessageId).not.toBe(bodies[0].assistantMessageId);
+    expect(state.writes.filter(write => write.method === "POST" && write.path.endsWith("/messages") &&
+      (write.body.messages as Array<{ role: string }> | undefined)?.some(message => message.role === "user"))).toHaveLength(1);
+  });
+
   for (const outcome of ["negative", "positive", "legacy404"] as const) {
     test(`an existing Auto turn preserves the held Refiner decision and authored text on ${outcome} location routing`, async ({ page }, testInfo) => {
       test.skip(process.env.E2E_CHAT_LOCATION_INTENT_ENABLED === "false", "Requires location intent");
