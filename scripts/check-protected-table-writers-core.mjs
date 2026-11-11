@@ -2512,6 +2512,22 @@ export const RAW_SQL_ALLOWLIST = [
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, including a read-only v22 run lock after its AMUX attempt and card, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked in AMUX's order (admission, the attempt FOR SHARE, the audit chain, then card and delivery FOR UPDATE), the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
   {
+    path: "lib/amux/reviewMergeObserved.ts",
+    table: "EngineeringAgentRun",
+    tableMentions: 1,
+    writeVerbs: 7,
+    reason:
+      "The observed-merge completion only reads: a constant SELECT ... FOR UPDATE OF b over the engineering binding joined to its run, with bound parameters, locking the binding after the AMUX card. The run row is never written here; the write verbs are the AMUX card's own statements and the words in comments.",
+  },
+  {
+    path: "lib/amux/reviewMergeObserved.ts",
+    table: "EngineeringAgentBinding",
+    tableMentions: 1,
+    writeVerbs: 7,
+    reason:
+      "The observed-merge completion only reads: a constant SELECT ... FOR UPDATE OF b over the engineering binding joined to its run, with bound parameters, locking the binding after the AMUX card. The binding is never written here (lib/engineeringAgentStore.ts moves it); the write verbs are the AMUX card's own statements and the words in comments.",
+  },
+  {
     path: "lib/supportTriageWorker.ts",
     table: "SupportTriageRun",
     tableMentions: 1,

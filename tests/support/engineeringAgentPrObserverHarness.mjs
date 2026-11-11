@@ -107,7 +107,7 @@ const merged = { state: "closed", merged: true, mergedAt: new Date("2026-10-15T0
 completeResult = { completed: true, taskRevision: 9 };
 assert.deepEqual(await run([binding({ approvalObservation: approved })], async () => pull(merged)),
   [{ bindingId: "binding", outcome: "completed" }]);
-assert.deepEqual(recorded()[0], ["complete", { taskId: "card", attemptId: "attempt", prNumber: 42, mergeCommitSha: MERGE, approvalReviewId: 9, changedFiles: null }]);
+assert.deepEqual(recorded()[0], ["complete", { taskId: "card", attemptId: "attempt", prNumber: 42, mergeCommitSha: MERGE, approvalReviewId: 9, changedFiles: null, bindingId: "binding" }]);
 assert.equal(recorded()[1][0], "observe");
 assert.equal(recorded()[1][1], "amux-tx");
 assert.equal(recorded()[1][2].kind, "merge");

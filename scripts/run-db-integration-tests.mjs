@@ -425,6 +425,10 @@ run(
     // audit entry; review, blocked and running cards refuse.
     "tests/integration/amux-settled-card-escalation.db.test.ts",
     "tests/integration/amux-v22-result-review.db.test.ts",
+    // A v22 implement Task's review pull request (2026-11-11): its v4 row
+    // cannot hold the number, so the engineering binding holds it, the record
+    // is never refused, and only the bound pull request's merge completes it.
+    "tests/integration/amux-v22-review-pr-binding.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.
