@@ -24,6 +24,30 @@ const preferences = (productUpdatesPending: boolean) => [
   { purpose: "promotions", enabled: false, locked: false, confirmation: "off" },
 ];
 
+for (const lang of ["ko", "en"] as const) {
+  test(`required notification reasons distinguish security and billing in ${lang}`, async ({ page, isMobile }) => {
+    await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 900 });
+    await prepareGuestPage(page, lang);
+    await mockAuthenticatedApi(page);
+    let writes = 0;
+    await page.route("**/api/user/email-preferences", route => {
+      if (route.request().method() !== "GET") writes++;
+      return route.fulfill({ json: { preferences: preferences(false), country: { selfDeclared: "DE", resolved: "DE", confidence: "high", conflicts: [], needsConfirmation: false, marketingSupported: true } } });
+    });
+    await page.goto(`/settings/notifications?lang=${lang}`);
+    const security = page.getByTestId("email-preference-security");
+    const billing = page.getByTestId("email-preference-billing");
+    await expect(security).toContainText(lang === "ko" ? "계정 보호를 위한 필수 안내입니다." : "Required to protect your account.");
+    await expect(billing).toContainText(lang === "ko" ? "결제 및 구독 내역에 관한 필수 안내입니다." : "Required for payment and subscription records.");
+    await expect(security).not.toContainText(/결제|구독|payments?|subscription/i);
+    for (const purpose of ["security", "billing"]) {
+      await expect(page.getByTestId(`email-preference-${purpose}-locked`)).toBeVisible();
+      await expect(page.getByTestId(`email-preference-${purpose}`).getByRole("switch")).toHaveCount(0);
+    }
+    expect(writes).toBe(0);
+  });
+}
+
 for (const theme of ["light", "dark"] as const) {
   test(`notification switch thumb stays inside its track and changes sides in ${theme}`, async ({ page, isMobile }) => {
     await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 800 });

@@ -2145,10 +2145,12 @@ export const de = {
         },
         purpose: {
             security: {
+                requiredReason: "Diese erforderlichen Hinweise schützen Ihr Konto und können nicht deaktiviert werden.",
                 title: "Sicherheit und Konto",
                 description: "Anmeldecodes, Änderungen an Passwort und Anmeldemethode, Sicherheitshinweise.",
             },
             billing: {
+                requiredReason: "Diese erforderlichen Hinweise betreffen Zahlungen und Abonnements und können nicht deaktiviert werden.",
                 title: "Abrechnung",
                 description: "Belege, fehlgeschlagene Zahlungen, Abo-Änderungen.",
             },
