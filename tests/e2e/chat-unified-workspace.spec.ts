@@ -4533,7 +4533,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     });
   }
 
-  test("a Router location limit honors a manual grant made while routing without another classifier", async ({ page }, testInfo) => {
+  test("a Router location limit leaves manual location available for the next send without another classifier", async ({ page }, testInfo) => {
     test.skip(!fusionEnabled, "Requires Router location fusion");
     const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
     const gpsReads = await countDeviceLocationReads(page);
@@ -4552,24 +4552,34 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
         return route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
           json: { requiresLocation: null, locationRateLimited: true } });
       }
-      return route.fulfill({ contentType: "text/plain", body: "Answered with the manual grant." });
+      return route.fulfill({ contentType: "text/plain",
+        body: posts.length === 2 ? "Answered without device location." : "Answered with the manual grant." });
     });
     await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
     await submitComposer(page, "Which station is nearby?", viewport.width);
     await expect.poll(() => posts.length).toBe(1);
     expect(await gpsReads()).toBe(0);
     await page.getByTestId("composer-tools-button").click();
+    await expect(page.getByTestId("tools-location-row")).toBeDisabled();
+    await page.keyboard.press("Escape");
+    waiting.release();
+    await expect(message(page, "Answered without device location.")).toBeVisible();
+    expect(posts).toHaveLength(2);
+    expect(posts[1].currentLocation).toBeUndefined();
+    expect(lookups).toBe(0);
+    expect(await gpsReads()).toBe(0);
+    await page.getByTestId("composer-tools-button").click();
     await page.getByTestId("tools-location-row").click();
     await expect(page.getByTestId("tools-location-row")).toHaveAttribute("aria-checked", "true");
     await page.keyboard.press("Escape");
-    waiting.release();
+    await submitComposer(page, "How about my current location?", viewport.width);
     await expect(message(page, "Answered with the manual grant.")).toBeVisible();
     expect(lookups).toBe(0);
     expect(await gpsReads()).toBe(2);
-    expect(posts).toHaveLength(2);
+    expect(posts).toHaveLength(3);
     expect(posts[0].currentLocation).toBeUndefined();
-    expect(posts[1].routerLocationFusion).toBeUndefined();
-    expect(posts[1].currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+    expect(posts[2].routerLocationFusion).toBeUndefined();
+    expect(posts[2].currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
   });
 
   for (const recovery of ["unclaimed", "claimed", "already_consumed"] as const) {
