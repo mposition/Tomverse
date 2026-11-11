@@ -50,7 +50,10 @@ export const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/;
 export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> = {
   openai: ["openai.com", "developers.openai.com", "platform.openai.com"],
   anthropic: ["www.anthropic.com", "anthropic.com", "docs.anthropic.com", "docs.claude.com", "www.claude.com"],
-  google: ["ai.google.dev", "cloud.google.com"],
+  // Google moved the Gemini API docs to AI Studio in 2026-11 and ai.google.dev
+  // now answers 301. AI Studio also serves user-built apps and shared prompts,
+  // so only its /docs/ path counts as documentation.
+  google: ["ai.google.dev", "cloud.google.com", "aistudio.google.com/docs/"],
   xai: ["docs.x.ai", "x.ai"],
   fal: ["fal.ai"],
   deepseek: ["api-docs.deepseek.com"],
@@ -66,7 +69,8 @@ export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> 
 /**
  * Exact hosts only: a subdomain wildcard would admit user-written pages
  * (community.openai.com) as "official", and this list is also the fetch
- * allowlist for LLM drafts. No port, https only.
+ * allowlist for LLM drafts. No port, https only. An entry with a path
+ * ("host/path/") admits only URLs under that path on that host.
  */
 export const isOfficialSourceUrl = (provider: string, url: string): boolean => {
   let parsed: URL;
@@ -77,7 +81,11 @@ export const isOfficialSourceUrl = (provider: string, url: string): boolean => {
   }
   if (parsed.protocol !== "https:" || parsed.port !== "" || parsed.username || parsed.password) return false;
   if (!Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider)) return false;
-  return OFFICIAL_SOURCE_HOSTS[provider].includes(parsed.hostname);
+  return OFFICIAL_SOURCE_HOSTS[provider].some((entry) => {
+    const slash = entry.indexOf("/");
+    if (slash === -1) return parsed.hostname === entry;
+    return parsed.hostname === entry.slice(0, slash) && parsed.pathname.startsWith(entry.slice(slash));
+  });
 };
 
 // --- schemas ---------------------------------------------------------------

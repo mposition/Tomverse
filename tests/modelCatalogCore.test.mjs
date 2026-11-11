@@ -353,6 +353,13 @@ test("sources must be the provider's own https documentation", () => {
   // A provider name that is an Object prototype key is unknown, not a crash.
   assert.equal(isOfficialSourceUrl("toString", "https://openai.com/x"), false);
   assert.equal(isOfficialSourceUrl("constructor", "https://openai.com/x"), false);
+  // Google's Gemini API docs moved to AI Studio, under /docs/ only: the rest
+  // of that host is user-built apps and shared prompts.
+  assert.equal(isOfficialSourceUrl("google", "https://aistudio.google.com/docs/pricing"), true);
+  assert.equal(isOfficialSourceUrl("google", "https://aistudio.google.com/apps/shared-app"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://aistudio.google.com/docsx/pricing"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://aistudio.google.com/docs/../apps/x"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://ai.google.dev/gemini-api/docs/pricing"), true);
 });
 
 test("the registry lookups read the active catalogue and fall back to the seed", () => {
