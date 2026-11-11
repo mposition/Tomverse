@@ -83,7 +83,8 @@ test("every reason the agent writes on an owner item is explained in both langua
       assert.ok(adminEngineeringAgentMessages[locale].reasonText[reason], `${locale}: ${reason}`);
     }
   }
-  // Approving a T2 draft applies nothing and opens no pull request (policy §7);
+  // Approving a T2 draft applies nothing and opens no pull request
+  // (docs/policy/engineering-agent.md §7);
   // the screen must not let a person think otherwise.
   assert.match(adminEngineeringAgentMessages.ko.actionsT2[0], /PR을 열거나 코드를 적용하지 않습니다/);
   assert.match(adminEngineeringAgentMessages.en.actionsT2[0], /opens no pull request and applies nothing/);
