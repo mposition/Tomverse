@@ -44,11 +44,10 @@ import {
   type PromptRefinerFailureCode,
   type PromptRefinerFailureLayer,
 } from "@/lib/promptRefinerReceiptCore";
-import { readPromptRefinerVnextOneShotPrice } from
-  "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
-import {
-  PROMPT_REFINER_VNEXT_PRICE_PIN,
-} from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
+import { readPromptRefinerProductPrice } from
+  "@/lib/promptRefinerProductPriceReadback";
+import { PROMPT_REFINER_PRODUCT_PRICE_PIN } from
+  "@/lib/promptRefinerProductPricePin";
 import {
   PROMPT_REFINER_INPUT_SCOPE,
   PROMPT_REFINER_VERSION,
@@ -76,7 +75,7 @@ const fallback = (reason: PromptRefinerProductFallbackReason): ProductResult =>
 
 const assertCurrentPrice = async () => {
   await prisma.$transaction(async (tx) => {
-    const price = await readPromptRefinerVnextOneShotPrice(tx);
+    const price = await readPromptRefinerProductPrice(tx);
     if (!price.pricePinMatchesRegistry || price.problems.length !== 0) {
       throw new Error("prompt_refiner_product_price_drift");
     }
@@ -109,8 +108,8 @@ const failedReceipt = (snapshot: PromptRefinerCapturedChatDraft,
   receiptVersion: PROMPT_REFINER_EXECUTION_RECEIPT_VERSION,
   receiptId: randomUUID(), requestId: snapshot.requestId, suggestionId: null,
   refinerVersion: PROMPT_REFINER_VERSION,
-  provider: PROMPT_REFINER_VNEXT_PRICE_PIN.provider,
-  modelId: PROMPT_REFINER_VNEXT_PRICE_PIN.modelId,
+  provider: PROMPT_REFINER_PRODUCT_PRICE_PIN.provider,
+  modelId: PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId,
   adapterVersion: PROMPT_REFINER_PRODUCT_ADAPTER_VERSION,
   outcome: "failed" as const, failureLayer: layer, failureCode: code,
   requestedAt: outcome.requestedAt, dispatchedAt: outcome.dispatchedAt,
@@ -130,8 +129,8 @@ const successFacts = (outcome: Extract<PromptRefinerProductAdapterOutcome,
   { status: "suggested" }>) => ({
   receiptVersion: PROMPT_REFINER_EXECUTION_RECEIPT_VERSION,
   refinerVersion: PROMPT_REFINER_VERSION,
-  provider: PROMPT_REFINER_VNEXT_PRICE_PIN.provider,
-  modelId: PROMPT_REFINER_VNEXT_PRICE_PIN.modelId,
+  provider: PROMPT_REFINER_PRODUCT_PRICE_PIN.provider,
+  modelId: PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId,
   adapterVersion: PROMPT_REFINER_PRODUCT_ADAPTER_VERSION,
   outcome: "suggested" as const, failureLayer: "none" as const,
   failureCode: null,
@@ -236,9 +235,9 @@ export async function preparePromptRefinerProductSuggestion(input: {
   }
   try {
     await assertCurrentPrice();
-    model = await getEnabledRuntimeModel(PROMPT_REFINER_VNEXT_PRICE_PIN.modelId);
-    if (!model || model.provider !== PROMPT_REFINER_VNEXT_PRICE_PIN.provider ||
-        model.apiModel !== PROMPT_REFINER_VNEXT_PRICE_PIN.apiModelId) {
+    model = await getEnabledRuntimeModel(PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId);
+    if (!model || model.provider !== PROMPT_REFINER_PRODUCT_PRICE_PIN.provider ||
+        model.apiModel !== PROMPT_REFINER_PRODUCT_PRICE_PIN.apiModelId) {
       throw new Error("prompt_refiner_product_model_drift");
     }
   } catch {

@@ -412,6 +412,71 @@ test("the API key goes in one header and appears in nothing else", async () => {
   );
 });
 
+test("only a server-configured search requests Brave excerpts on the existing call", async () => {
+  globalThis.fetch = async (url) => {
+    fetchCalls.push(new URL(url));
+    return braveResponse([{
+      title: "Source", url: "https://example.com/source", description: "<b>Original</b> note.",
+      extra_snippets: ["ORIGINAL note.", "ORIGINAL note. <i>Verified</i> 42 &amp; 43.", "Verified 42 &amp; 43."],
+    }]);
+  };
+  const ordinary = toolFor();
+  const modelInput = { query: "source note", extraSnippets: true };
+  assert.equal(ordinary.tools.web_search.inputSchema.safeParse(modelInput).success, false);
+  const defaultResult = await run(ordinary, modelInput);
+  const offResult = await run(toolFor({ extraSnippets: false }), { query: "source note" });
+  assert.equal(fetchCalls[0].href, fetchCalls[1].href);
+  assert.equal(fetchCalls[0].searchParams.has("extra_snippets"), false);
+  assert.deepEqual(offResult, defaultResult);
+  assert.equal(defaultResult.results[0].snippet, "Original note.");
+
+  const enabled = toolFor({ extraSnippets: true, maxQueries: 1 });
+  const result = await run(enabled, { query: "source note" });
+  assert.equal(fetchCalls[2].searchParams.get("extra_snippets"), "true");
+  assert.deepEqual(result.results, [{ ...defaultResult.results[0], snippet: "Original note. Verified 42 & 43." }]);
+  assert.equal((await run(enabled, { query: "source note" })).results[0].snippet, result.results[0].snippet);
+  assert.equal((await run(enabled, { query: "another query" })).status, "limit_reached");
+  assert.equal(fetchCalls.length, 3);
+  assert.equal(enabled.session.snapshot().succeededRequestCount, 1);
+});
+
+test("extra excerpts retain every original source at the payload boundary", async () => {
+  const sources = Array.from({ length: 5 }, (_, index) => ({
+    title: "Source " + index, url: "https://example.com/" + "p".repeat(1120) + index,
+    description: "Original evidence " + index, extra_snippets: ["New evidence ".repeat(100)],
+  }));
+  globalThis.fetch = async () => braveResponse(sources);
+  const baseline = await run(toolFor(), { query: "source" });
+  const enriched = await run(toolFor({ extraSnippets: true }), { query: "source" });
+  assert.deepEqual(enriched.results.map(s => s.url), sources.map(s => s.url));
+  assert.equal(enriched.truncated, baseline.truncated);
+  assert.ok(enriched.results[0].snippet.length > baseline.results[0].snippet.length);
+  assert.ok(enriched.results.every((s, i) => s.snippet.startsWith(baseline.results[i].snippet)));
+  const size = enriched.results.reduce((sum, s) => sum + s.title.length + s.url.length + s.snippet.length, 0);
+  assert.ok(size <= APP_MANAGED_SEARCH_LIMITS.maxResultPayloadCharacters);
+});
+
+test("malformed or absent extra excerpts leave the source intact and long text fits the existing cap", async () => {
+  const cap = APP_MANAGED_SEARCH_LIMITS.maxSnippetCharacters;
+  const candidates = [
+    { description: "complete", extra_snippets: "not an array" },
+    { description: "unchanged", extra_snippets: [null, {}, 24, "<b></b>"] },
+    { description: "a".repeat(cap), extra_snippets: ["ignored"] },
+    { description: "b".repeat(cap - 5), extra_snippets: ["abcdefghij"] },
+    { extra_snippets: ["<strong>Additional</strong>   fact."] },
+  ];
+  globalThis.fetch = async () => braveResponse(candidates.map((s, i) => ({
+    title: "Source", url: "https://example.com/" + i, ...s,
+  })));
+  const result = await run(toolFor({ extraSnippets: true }), { query: "source" });
+  assert.deepEqual(result.results.map(s => s.snippet), [
+    "complete", "unchanged", "a".repeat(cap), "b".repeat(cap - 5) + " abc…", "Additional fact.",
+  ]);
+  globalThis.fetch = async () => braveResponse([{ title: "No excerpts", url: "https://example.com/none" }]);
+  const missing = await run(toolFor({ extraSnippets: true }), { query: "source" });
+  assert.deepEqual(missing.results, [{ title: "No excerpts", url: "https://example.com/none" }]);
+});
+
 test("results the model sees carry the untrusted-content statement", async () => {
   globalThis.fetch = async () =>
     braveResponse([
@@ -608,6 +673,38 @@ test("presearch leaves the remaining three-fifths input allowance for follow-ups
   assert.equal(fetchCalls.length, 2);
   await run(config, { query: "one" });
   assert.equal(fetchCalls.length, 2, "the normal model tool can reuse successful presearch");
+});
+
+test("oversized enriched presearch reuses original descriptions and preserves the enriched answer tool cache", async () => {
+  const sources = Array.from({ length: 5 }, (_, i) => ({
+    title: "T" + i, url: "https://example.com/" + i, ...(i ? { description: "Original " + i } : {}),
+    extra_snippets: ["添".repeat(400)],
+  }));
+  globalThis.fetch = async url => { fetchCalls.push(String(url)); return braveResponse(sources); };
+  const config = toolFor({ extraSnippets: true });
+  const evidence = await presearch(config);
+  assert.equal(fetchCalls.length, 2);
+  assert.equal(config.session.snapshot().succeededRequestCount, 2);
+  assert.equal(evidence.length, 2);
+  const batch = JSON.parse(evidence[1].text);
+  assert.equal(batch.searches.length, 2);
+  for (const search of batch.searches) {
+    assert.deepEqual(search.results.map(s => s.url), sources.map(s => s.url));
+    assert.deepEqual(search.results.map(s => s.snippet), sources.map(s => s.description));
+    assert.equal(Object.hasOwn(search.results[0], "snippet"), false);
+  }
+  assert.doesNotMatch(evidence[1].text, /添|descriptionOnly|extra_snippets/);
+  const answerToolResult = await run(config, { query: "one" });
+  assert.match(answerToolResult.results[1].snippet, /^Original 1 添/);
+  assert.doesNotMatch(JSON.stringify(answerToolResult), /descriptionOnly|extra_snippets/);
+  assert.equal(fetchCalls.length, 2);
+
+  // The original descriptions themselves exceed the existing budget.
+  for (const source of sources) source.description = "漢".repeat(375);
+  const oversized = toolFor({ extraSnippets: true });
+  assert.deepEqual(await presearch(oversized), []);
+  assert.equal(fetchCalls.length, 4);
+  assert.equal(oversized.session.snapshot().succeededRequestCount, 2);
 });
 
 

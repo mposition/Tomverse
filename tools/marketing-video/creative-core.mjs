@@ -54,6 +54,59 @@ export function stillsIn(dir, keep = Infinity) {
   return files.filter((_, index) => index % step === 0).map((file) => path.join(dir, file).split(path.sep).join("/"));
 }
 
+/** The final answer in a Claude CLI stream-json transcript, or null. */
+export function answerOf(stream) {
+  let answer = null;
+  for (const line of String(stream ?? "").split(/\r?\n/u)) {
+    try {
+      const event = JSON.parse(line);
+      if (event.type === "result" && typeof event.result === "string") answer = event.result;
+    } catch {
+      // not an event
+    }
+  }
+  return answer;
+}
+
+/**
+ * Where a run's build stands, from its calls/ transcripts: how many build rounds ran and the last
+ * review's verdict (null when none answered). A rebuild (owner 2026-11-11) goes on from there with
+ * the run's paid shots, music and voice, so it spends nothing.
+ */
+export function lastBuild(callsDir) {
+  const files = existsSync(callsDir) ? readdirSync(callsDir) : [];
+  const rounds = (prefix) => files.map((file) => new RegExp(`^${prefix}-(\\d+)\\.jsonl$`, "u").exec(file)?.[1]).filter(Boolean).map(Number);
+  const builds = rounds("build");
+  const reviews = rounds("review");
+  const last = reviews.length > 0 ? Math.max(...reviews) : 0;
+  const review = last > 0 ? jsonLine(answerOf(readFileSync(path.join(callsDir, `review-${last}.jsonl`), "utf8")), "review") : null;
+  return { rounds: builds.length > 0 ? Math.max(...builds) : 0, review: review && typeof review === "object" ? review : null };
+}
+
+/**
+ * The pack a run's copied captures came from, among `packs` (approved now): the one of the topic
+ * and locale whose present captures are exactly the files in `captureDir`, by name and byte. A
+ * rebuild renders those copies, so its words and claims must come from that pack and no other; when
+ * none matches (the pack changed or is no longer approved), null.
+ * @returns {{pack: object, words: string[]} | null}
+ */
+export function packOfRun(captureDir, packs, topic, locale) {
+  const copied = existsSync(captureDir) ? readdirSync(captureDir).sort() : [];
+  if (copied.length === 0) return null;
+  for (const pack of packs) {
+    if (pack.topic !== topic || pack.locale !== locale) continue;
+    const entries = Object.entries(pack.captures);
+    const named = entries.map(([name, { file }]) => `${name}${path.extname(file)}`);
+    if (named.length !== copied.length || [...named].sort().some((name, index) => name !== copied[index])) continue;
+    const same = entries.every(([name, { file }]) => {
+      const from = path.join(pack.dir, file);
+      return existsSync(from) && readFileSync(from).equals(readFileSync(path.join(captureDir, `${name}${path.extname(file)}`)));
+    });
+    if (same) return { pack, words: entries.map(([, { text }]) => text) };
+  }
+  return null;
+}
+
 /** The JSON object on the first line of `text` that has `key`, or null. */
 export function jsonLine(text, key) {
   for (const line of String(text ?? "").split(/\r?\n/u)) {

@@ -2,7 +2,7 @@
 
 Every concept follows these rules, and every review judges against them.
 
-1. The one accent colour is Tomverse blue `#155dfb`. No purple, violet or
+1. The one accent colour is blue `#155dfb`. No purple, violet or
    magenta anywhere, except inside a provider's own logo.
 2. The image never shows the Tomverse logo, the wordmark or a web address. The
    band code always adds the logo ("tomverse.") and tomverse.app in the same

@@ -86,6 +86,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       settledTodo: "The card is waiting to run again; only the escalation an earlier attempt left is still open.",
       settledAction: "Press \"Close only\" just below and the card leaves this queue. Its status, results and history stay.",
       reviewNoPrApprovable: "The work result is saved with no pull request; this kind of task is approved on its verified result. Check the worker report before deciding.",
+      reviewNoPrNoChange: "The worker made no change and reports the work is already in place, so there is no pull request. If the worker report and the current code show nothing left to change, complete it as no change needed; otherwise run it again or block it.",
       reviewUsageUnknown: "The run finished, but its usage was never reported, so it cannot be approved or run again yet. You can still block it.",
       // A blocked run's own attempt reason, which the escalation stores only
       // as execution_blocked (storedAmuxEscalationReasonCode).
@@ -127,6 +128,12 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
     },
     question: {
       noEscalationOwnerNote: "Only the owner can read and answer a worker question.",
+    },
+    engineering: {
+      title: "Engineering agent items on this card",
+      note: "Decide them here: the same buttons, checks and audit as Engineering › Decisions.",
+      readOnly: "Deciding these takes engineering agent write access.",
+      openConsole: "Open in Engineering › Decisions",
     },
   },
   ko: {
@@ -205,6 +212,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       settledTodo: "카드는 다시 실행을 기다리고 있고, 이전 시도가 남긴 escalation만 열려 있어요.",
       settledAction: "바로 아래에서 \"닫기만\"을 누르면 확인 대기에서 빠져요. 카드 상태, 결과, 이력은 그대로예요.",
       reviewNoPrApprovable: "작업 결과가 PR 없이 저장됐어요. 이 종류의 작업은 검증된 결과로 승인해요. 결정하기 전에 작업자 보고를 확인해 주세요.",
+      reviewNoPrNoChange: "작업자가 이미 반영돼 있다며 아무것도 바꾸지 않아 PR이 없어요. 작업자 보고와 현재 코드를 보고 바꿀 것이 없으면 '변경 불필요로 완료'를 고르고, 아니면 다시 실행하거나 차단해 주세요.",
       reviewUsageUnknown: "실행은 끝났지만 사용량 기록이 들어오지 않아서, 아직 승인하거나 다시 실행할 수 없어요. 차단은 할 수 있어요.",
       byAttemptReason: {
         reported_result: "워커가 실행을 끝내면서 스스로 막혔다고 보고해서 PR을 준비하지 않았어요. 보고를 읽고, 막힌 원인이 풀렸으면 다시 시도하고 아니면 차단해 주세요.",
@@ -244,6 +252,12 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
     },
     question: {
       noEscalationOwnerNote: "워커 질문은 owner만 읽고 답할 수 있어요.",
+    },
+    engineering: {
+      title: "이 카드의 엔지니어링 Agent 항목",
+      note: "여기서 바로 결정하세요. 엔지니어링 › 결정 대기와 같은 버튼, 같은 검사, 같은 감사 기록이에요.",
+      readOnly: "이 항목을 결정하려면 엔지니어링 Agent 쓰기 권한이 필요해요.",
+      openConsole: "엔지니어링 › 결정 대기에서 열기",
     },
   },
 });

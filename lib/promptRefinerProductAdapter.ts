@@ -15,11 +15,11 @@ import {
   parsePromptRefinerVnextModelOutput,
 } from "@/lib/promptRefinerQualityEvaluationVnextCore";
 import {
-  guardPromptRefinerVnextBilledUsage,
-  PROMPT_REFINER_VNEXT_MAX_INPUT_TOKENS,
-  PROMPT_REFINER_VNEXT_MAX_OUTPUT_TOKENS,
-  PROMPT_REFINER_VNEXT_PRICE_PIN,
-} from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
+  PROMPT_REFINER_PRODUCT_MAX_INPUT_TOKENS,
+  PROMPT_REFINER_PRODUCT_MAX_OUTPUT_TOKENS,
+  PROMPT_REFINER_PRODUCT_PRICE_PIN,
+} from "@/lib/promptRefinerProductPricePin";
+import { guardPromptRefinerProductBilledUsage } from "@/lib/promptRefinerProductUsageGuard";
 
 type Generate = (options: Record<string, unknown>) => Promise<unknown>;
 type Schedule = (callback: () => void, delayMs: number) => unknown;
@@ -107,15 +107,15 @@ export function createPromptRefinerProductAdapter(dependencies: {
   scheduleTimeout?: Schedule;
   cancelTimeout?: Cancel;
 }) {
-  const model = getEnabledModel(PROMPT_REFINER_VNEXT_PRICE_PIN.modelId);
-  if (!model || model.provider !== PROMPT_REFINER_VNEXT_PRICE_PIN.provider ||
-      model.apiModel !== PROMPT_REFINER_VNEXT_PRICE_PIN.apiModelId ||
+  const model = getEnabledModel(PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId);
+  if (!model || model.provider !== PROMPT_REFINER_PRODUCT_PRICE_PIN.provider ||
+      model.apiModel !== PROMPT_REFINER_PRODUCT_PRICE_PIN.apiModelId ||
       model.reasoning !== "medium") {
     throw new PromptRefinerProductAdapterError("product_adapter_model_pin_mismatch");
   }
   const transport = record(dependencies.languageModel);
   if (transport?.provider !== "openai.responses" ||
-      transport.modelId !== PROMPT_REFINER_VNEXT_PRICE_PIN.apiModelId) {
+      transport.modelId !== PROMPT_REFINER_PRODUCT_PRICE_PIN.apiModelId) {
     throw new PromptRefinerProductAdapterError("product_adapter_transport_pin_mismatch");
   }
   const now = dependencies.now ?? (() => performance.now());
@@ -137,7 +137,7 @@ export function createPromptRefinerProductAdapter(dependencies: {
     const messages = promptRefinerVnextCandidateMessages(input.sourceText);
     const upperBound = messages.reduce((sum, message) =>
       sum + Buffer.byteLength(message.content, "utf8"), FRAMING_BYTES);
-    if (upperBound > PROMPT_REFINER_VNEXT_MAX_INPUT_TOKENS) {
+    if (upperBound > PROMPT_REFINER_PRODUCT_MAX_INPUT_TOKENS) {
       throw new PromptRefinerProductAdapterError("product_adapter_input_cap_invalid");
     }
     const requestedAtDate = dependencies.requestedAt ?? wallClock();
@@ -204,7 +204,7 @@ export function createPromptRefinerProductAdapter(dependencies: {
           prompt: messages[1].content,
           providerOptions: { openai: { reasoningEffort: "medium",
             store: false, parallelToolCalls: false } },
-          maxOutputTokens: PROMPT_REFINER_VNEXT_MAX_OUTPUT_TOKENS,
+          maxOutputTokens: PROMPT_REFINER_PRODUCT_MAX_OUTPUT_TOKENS,
           maxRetries: 0,
           timeout: remainingMs,
           abortSignal: abort.signal,
@@ -269,8 +269,8 @@ export function createPromptRefinerProductAdapter(dependencies: {
         cacheWriteInputTokens: inputDetails.cacheWriteTokens,
         reasoningTokens: record(usage?.outputTokenDetails)?.reasoningTokens ?? null,
       };
-      const checked = guardPromptRefinerVnextBilledUsage({ usage: normalized,
-        effectivePricePin: PROMPT_REFINER_VNEXT_PRICE_PIN });
+      const checked = guardPromptRefinerProductBilledUsage({ usage: normalized,
+        effectivePricePin: PROMPT_REFINER_PRODUCT_PRICE_PIN });
       if (!checked.complete || checked.costUpperBoundMicroUsd === null) {
         return billingUnknown("response_unverified");
       }

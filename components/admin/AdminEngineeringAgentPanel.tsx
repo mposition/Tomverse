@@ -15,7 +15,12 @@ import type {
   EngineeringAgentConsolePayload,
   EngineeringAgentOwnerItemView,
 } from "@/lib/engineeringAgentConsoleRead";
-import { adminFetch } from "@/lib/adminFetch";
+import {
+  engineeringAgentDecisionRequest,
+  engineeringAgentRejudgeRequest,
+  postEngineeringAgentAction,
+  type EngineeringAgentActionRequest,
+} from "@/lib/engineeringAgentAdminAction";
 
 /** Where a step-up brings the operator back to: the tab (and view) the section is on. */
 const returnPathFor = (section: string) =>
@@ -44,56 +49,36 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
   const [notice, setNotice] = useState<Notice>(null);
   const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
 
-  const post = async (key: string, url: string, body: Record<string, string>) => {
+  const send = async (key: string, request: EngineeringAgentActionRequest) => {
     setBusy(key);
     setNotice(null);
     try {
-      const response = await adminFetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { code?: unknown };
-      if (response.status === 428 || payload.code === "ADMIN_REAUTHENTICATION_REQUIRED") {
-        setReauthenticationRequired(true);
-        return;
+      const result = await postEngineeringAgentAction(request);
+      if (result.kind === "requiresReauthentication") setReauthenticationRequired(true);
+      else if (result.kind === "refused") setNotice({ tone: "error", text: fill(m.refused, { code: result.code }) });
+      else if (result.kind === "failed") setNotice({ tone: "error", text: m.failed });
+      else {
+        setNotice({ tone: "ok", text: m.done });
+        router.refresh();
       }
-      if (response.status === 409 && typeof payload.code === "string") {
-        setNotice({ tone: "error", text: fill(m.refused, { code: payload.code }) });
-        return;
-      }
-      if (!response.ok) {
-        setNotice({ tone: "error", text: m.failed });
-        return;
-      }
-      setNotice({ tone: "ok", text: m.done });
-      router.refresh();
-    } catch {
-      setNotice({ tone: "error", text: m.failed });
     } finally {
       setBusy(null);
     }
   };
+  const post = (key: string, url: string, body: Record<string, string>) => send(key, { url, body });
 
   const decide = (item: EngineeringAgentOwnerItemView, decision: "approved" | "rejected") => {
-    if (!item.patchDigest || !item.baseSha) return;
+    const request = engineeringAgentDecisionRequest(item, decision);
+    if (!request) return;
     if (!window.confirm(decision === "approved" ? m.confirmApprove : m.confirmReject)) return;
-    void post(`${item.id}:${decision}`, "/api/admin/engineering-agent/decisions", {
-      workItemId: item.id,
-      decision,
-      patchDigest: item.patchDigest,
-      baseSha: item.baseSha,
-    });
+    void send(`${item.id}:${decision}`, request);
   };
 
   const rejudge = (item: EngineeringAgentOwnerItemView) => {
-    if (!item.patchDigest || !item.baseSha) return;
+    const request = engineeringAgentRejudgeRequest(item);
+    if (!request) return;
     if (!window.confirm(m.confirmRejudge)) return;
-    void post(`${item.id}:rejudge`, "/api/admin/engineering-agent/rejudge", {
-      workItemId: item.id,
-      patchDigest: item.patchDigest,
-      baseSha: item.baseSha,
-    });
+    void send(`${item.id}:rejudge`, request);
   };
 
   const button = (key: string, label: string, onClick: () => void, tone: "primary" | "danger" | "plain" = "plain") => (

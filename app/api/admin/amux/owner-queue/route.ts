@@ -5,14 +5,19 @@ import { NextResponse } from "next/server";
 
 import { isAdminSession } from "@/lib/adminAuth";
 import { readAmuxOwnerQueue } from "@/lib/amux/adminOwnerQueueRead";
+import { amuxOwnerQueueWithEngineeringItems } from "@/lib/amux/ownerQueueCore";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
+import { readEngineeringAgentCardItems } from "@/lib/engineeringAgentConsoleRead";
 
 /**
  * The cards that wait on the owner, read only. Same audience as the routing
  * report whose escalation list this replaces on the "Waiting on me" tab: any
  * admin role may read it. Deciding a card still takes `ops:write` in the review
  * routes, and answering a worker question takes the owner in its own route.
+ * Each card carries its open engineering items (T2 drafts, state mismatches),
+ * which Admin › Engineering › Decisions reads with the same admin
+ * authentication; deciding them takes `engineering-agent:write` in those routes.
  */
 export async function GET(request: Request) {
   try {
@@ -24,7 +29,12 @@ export async function GET(request: Request) {
       minute: 40,
       day: 2_000,
     });
-    return NextResponse.json(await readAmuxOwnerQueue(), {
+    const read = await readAmuxOwnerQueue();
+    const engineering = await readEngineeringAgentCardItems(read.items.map((item) => item.taskId)).catch((error) => {
+      console.error("admin AMUX owner queue engineering items read failed", error);
+      return null;
+    });
+    return NextResponse.json(amuxOwnerQueueWithEngineeringItems(read, engineering), {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

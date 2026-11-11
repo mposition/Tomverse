@@ -17,14 +17,18 @@ import {
   OWNER_QUEUE_LIMITS,
   killSwitchEngaged,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
-  ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
 } from "@/lib/engineeringAgentCore";
 import { readEngineeringAgentSwitches } from "@/lib/engineeringAgentStore";
 import {
   ENGINEERING_AGENT_PATCH_FILE_LIMIT,
+  ENGINEERING_AGENT_CARD_ITEM_KINDS,
+  ENGINEERING_AGENT_REVIEW_PR_CAUSE_PREFIX,
+  engineeringAgentCardItems,
+  engineeringAgentDraftRejudgeable,
   engineeringAgentItemPullRequest,
   engineeringAgentMismatchPublishItemId,
   engineeringAgentPatchFiles,
+  type EngineeringAgentCardItemView,
   type EngineeringAgentItemPullRequest,
   type EngineeringAgentPatchFile,
 } from "@/lib/engineeringAgentOwnerItemContextCore";
@@ -348,10 +352,7 @@ export async function readEngineeringAgentConsole(
         items: items.map(({ run, ...item }) => ({
           ...item,
           context: contexts.get(item.id) ?? null,
-          rejudgeable: item.kind === "t2_draft" && item.patchBody !== null &&
-            item.reason !== ENGINEERING_AGENT_V22_TIER_PENDING_REASON &&
-            run?.card.sourceSystem === "admin-idea-v4" &&
-            run.modeAtStart === "t1" && !!run.amuxAttemptId,
+          rejudgeable: engineeringAgentDraftRejudgeable(item, run),
           kind: item.kind as EngineeringAgentOwnerItemView["kind"],
           createdAt: item.createdAt.toISOString(),
           // Only a draft's patch is shown; a person reads it before deciding.
@@ -445,4 +446,61 @@ export async function readEngineeringAgentConsole(
       decisions: { occupied: openOwnerItems + activeRuns, limit: OWNER_QUEUE_LIMITS.decision },
     },
   };
+}
+
+const cardItemRunSelect = {
+  cardId: true,
+  modeAtStart: true,
+  amuxAttemptId: true,
+  card: { select: { sourceSystem: true } },
+} satisfies Prisma.EngineeringAgentRunSelect;
+
+const cardItemSelect = {
+  id: true,
+  kind: true,
+  reason: true,
+  causeKey: true,
+  createdAt: true,
+  patchBody: true,
+  patchDigest: true,
+  baseSha: true,
+  run: { select: cardItemRunSelect },
+} satisfies Prisma.EngineeringAgentWorkItemSelect;
+
+/**
+ * The open T2 drafts and state mismatches of the given AMUX cards, for the
+ * owner queue (Admin › Execution › Waiting on me). Read only, the same rows
+ * and rejudge rule the engineering console's queue shows; the actions stay in
+ * the engineering routes.
+ */
+export async function readEngineeringAgentCardItems(
+  cardIds: readonly string[],
+): Promise<Map<string, EngineeringAgentCardItemView[]>> {
+  if (cardIds.length === 0) return new Map();
+  const [own, published] = await Promise.all([
+    prisma.engineeringAgentWorkItem.findMany({
+      where: { state: "open", kind: { in: [...ENGINEERING_AGENT_CARD_ITEM_KINDS] }, run: { cardId: { in: [...cardIds] } } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: ENGINEERING_AGENT_CONSOLE_LIMIT,
+      select: cardItemSelect,
+    }),
+    // A mismatch about a published item has no run; its card is the published item's.
+    prisma.engineeringAgentWorkItem.findMany({
+      where: { state: "open", kind: "state_mismatch", runId: null, causeKey: { startsWith: ENGINEERING_AGENT_REVIEW_PR_CAUSE_PREFIX } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: ENGINEERING_AGENT_CONSOLE_LIMIT,
+      select: cardItemSelect,
+    }),
+  ]);
+  const publishIds = [...new Set(published
+    .map((row) => engineeringAgentMismatchPublishItemId(row.causeKey))
+    .filter((id): id is string => id !== null))];
+  const publishRows = publishIds.length
+    ? await prisma.engineeringAgentWorkItem.findMany({
+        where: { id: { in: publishIds } },
+        select: { id: true, run: { select: cardItemRunSelect } },
+      })
+    : [];
+  return engineeringAgentCardItems(cardIds, [...own, ...published],
+    new Map(publishRows.map((row) => [row.id, row.run] as const)));
 }

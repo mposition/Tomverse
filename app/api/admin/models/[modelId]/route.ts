@@ -22,6 +22,7 @@ import {
 import { ensureModelRegistrySeeded, registryRowToModel } from "@/lib/modelRegistry";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
+import { codePinnedModelRefusal } from "@/lib/codePinnedModels";
 
 type ModelRouteContext = { params: Promise<{ modelId: string }> };
 
@@ -93,6 +94,29 @@ export async function PATCH(
           { status: 409 }
         );
       }
+    }
+    // Checked against what this save writes: registryInputToData() is the
+    // exact conversion the update below stores, and it writes an omitted price,
+    // cap or replacement as null rather than keeping the stored value.
+    const saved = registryInputToData(body, actor(session));
+    const pinRefusal = codePinnedModelRefusal({
+      modelId,
+      status: body.status,
+      publiclyListed: body.publiclyListed,
+      replacementModelId: saved.replacementModelId ?? null,
+      provider: body.provider,
+      apiModel: body.apiModel,
+      maxOutputTokens: saved.maxOutputTokens ?? null,
+      reservationOutputTokens: saved.reservationOutputTokens ?? null,
+      inputUsdPerMillionTokens: saved.inputUsdPerMillionTokens ?? null,
+      outputUsdPerMillionTokens: saved.outputUsdPerMillionTokens ?? null,
+      cachedInputPriceMultiplier: saved.cachedInputPriceMultiplier ?? null,
+    });
+    if (pinRefusal) {
+      return NextResponse.json(
+        { error: pinRefusal, code: "MODEL_PINNED_IN_CODE" },
+        { status: 409 }
+      );
     }
     if (
       modelId === APP_DEFAULTS.defaultModelId &&
@@ -230,6 +254,13 @@ export async function DELETE(
     await consumeApiRateLimit(req, session.user.id, "admin-model-registry-delete", { minute: 10, day: 100 });
     const { modelId } = await context.params;
     await ensureModelRegistrySeeded();
+    const pinRefusal = codePinnedModelRefusal({ modelId, catalogDeleted: true });
+    if (pinRefusal) {
+      return NextResponse.json(
+        { error: pinRefusal, code: "MODEL_PINNED_IN_CODE" },
+        { status: 409 }
+      );
+    }
     if (modelId === APP_DEFAULTS.defaultModelId) {
       return NextResponse.json(
         { error: "The application fallback model cannot be removed from the catalogue." },

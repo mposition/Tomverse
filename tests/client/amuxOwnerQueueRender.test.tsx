@@ -10,6 +10,13 @@ import { readAmuxLegacyCardForTask, type AmuxLegacyCardRead } from "@/components
 import { AmuxOwnerQueueDecision } from "@/components/admin/AmuxOwnerQueueDecision";
 import { AmuxOwnerQueueView, isAmuxOwnerQueueRead } from "@/components/admin/AmuxOwnerQueueScreen";
 import type { AmuxOwnerQueueItem, AmuxOwnerQueueRead } from "@/lib/amux/ownerQueueCore";
+import { amuxOwnerQueueEngineeringButtons } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
+import {
+  engineeringAgentDecisionRequest,
+  engineeringAgentMismatchRequest,
+  engineeringAgentRejudgeRequest,
+} from "@/lib/engineeringAgentAdminAction";
+import type { EngineeringAgentCardItemView } from "@/lib/engineeringAgentOwnerItemContextCore";
 
 const item = (overrides: Partial<AmuxOwnerQueueItem>): AmuxOwnerQueueItem => ({
   taskId: "task-1",
@@ -129,7 +136,8 @@ const controller = (overrides: Partial<AmuxOwnerReviewController> = {}): AmuxOwn
   canInspectCards: true, selectedEscalationId: null, review: null, ownerExecution: { state: "idle" },
   reviewLoading: false, reviewBusy: false, reviewError: null, setReviewError: () => {},
   reviewUnavailable: false, reauthenticationRequired: false, selectedOutcome: null,
-  setSelectedOutcome: () => {}, retryReadConfirmed: false, setRetryReadConfirmed: () => {}, resolution: "",
+  setSelectedOutcome: () => {}, retryReadConfirmed: false, setRetryReadConfirmed: () => {},
+  noChangeConfirmed: false, setNoChangeConfirmed: () => {}, resolution: "",
   setResolution: () => {}, proposal: null, setProposal: () => {}, setIdempotencyKey: () => {},
   decisionStatusUnknown: false, setDecisionStatusUnknown: () => {}, decisionStatusChecking: false,
   pendingDecision: null, pendingDecisionChecked: true, closeReview: () => {}, openReview: async () => {},
@@ -333,6 +341,48 @@ test("the no-PR words follow the choices shown: approvable, retryable or block o
       proposed_transitions: { block: "blocked" } }) }));
   assert.match(blockOnly, /cannot be run again right now\. You can block it\./);
   assert.doesNotMatch(blockOnly, /You can run it again/);
+});
+
+test("an implement card that left no change offers 'no change needed', not a plain approve", () => {
+  // AMUX-ARTFMT-002 (owner decision 2026-11-11).
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      allowed_outcomes: ["approve", "block", "retry"], approval_basis: "no_change",
+      proposed_transitions: { approve: "done", block: "blocked", retry: "todo" },
+    }) }));
+  assert.match(html, /reports the work is already in place/);
+  assert.match(html, /data-testid="amux-owner-queue-choices"[\s\S]*Complete: no change needed/);
+  assert.match(html, /data-testid="admin-amux-select-approve"[^>]*>[\s\S]*?Complete: no change needed/);
+  assert.match(html, /Is there nothing left to change\?/);
+  assert.doesNotMatch(html, /this kind of task is approved on its verified result/);
+  // The same card on evidence keeps the plain approve words.
+  const evidence = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, { approval_basis: "evidence" }) }));
+  assert.doesNotMatch(evidence, /no change needed/);
+});
+
+test("choosing 'no change needed' asks once more that the report and code were checked", () => {
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const review = reviewFor(escalationId, {
+    task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+      due_parse_state: "valid", review_pr_number: null },
+    allowed_outcomes: ["approve", "block"], approval_basis: "no_change",
+  });
+  const html = decision(card, controller({ selectedEscalationId: escalationId, review,
+      selectedOutcome: "approve", resolution: "no change needed (owner verified)" }));
+  assert.match(html, /data-testid="admin-amux-no-change-confirmation"/);
+  assert.match(html, /I read the worker report and checked the current code: there is nothing to change\./);
+  // Preparing waits for that confirmation.
+  assert.match(html, /disabled=""[^>]*data-testid="admin-amux-prepare-proposal"/);
+  const confirmed = decision(card, controller({ selectedEscalationId: escalationId, review,
+      selectedOutcome: "approve", noChangeConfirmed: true,
+      resolution: "no change needed (owner verified)" }));
+  assert.doesNotMatch(confirmed, /disabled=""[^>]*data-testid="admin-amux-prepare-proposal"/);
 });
 
 test("a blocked card says what its own attempt reason was, not only 'blocked before it finished'", () => {
@@ -552,4 +602,79 @@ test("a run with unknown usage shows that it holds its worker, and only the owne
   const settled = decision(card, controller({ selectedEscalationId: escalationId,
     review: reviewFor(escalationId, { unknown_usage_attempts: [] }) }));
   assert.doesNotMatch(settled, /data-testid="amux-owner-queue-unknown-usage"/);
+});
+
+// Operator, 2026-11-11: AMUX-FILEGEN-003 waited in review with an open T2 draft
+// the owner could only judge again from Admin › Engineering › Decisions.
+const engineeringDraft = (overrides: Partial<EngineeringAgentCardItemView> = {}): EngineeringAgentCardItemView => ({
+  id: "item-draft", kind: "t2_draft", reason: "patch_unavailable", causeKey: "run:1",
+  createdAt: "2026-11-11T01:00:00.000Z", patchBody: "diff --git a/lib/a.ts b/lib/a.ts\n",
+  patchDigest: "d".repeat(64), baseSha: "b".repeat(40), rejudgeable: true,
+  files: [{ path: "lib/a.ts", added: 1, removed: 1 }], fileCount: 1, ...overrides,
+});
+const reviewPrMismatch = engineeringDraft({
+  id: "item-mismatch", kind: "state_mismatch", reason: "bound_review_pr_not_recorded", causeKey: "review_pr:publish-1",
+  patchBody: null, patchDigest: null, baseSha: null, rejudgeable: false, files: [], fileCount: 0,
+});
+
+const withEngineering = (engineeringItems: EngineeringAgentCardItemView[], canWriteEngineering: boolean) =>
+  renderToStaticMarkup(
+    <AmuxOwnerQueueDecision item={item({ status: "review", engineeringItems })} controller={controller()}
+      canInspectCards index={1} total={1} generatedAt="2026-11-08T03:00:00.000Z" navLocked={false} advance
+      onAdvanceChange={() => {}} onPrevious={null} onNext={null} onAnswered={() => {}}
+      canWriteEngineering={canWriteEngineering} onEngineeringChanged={() => {}} />);
+
+test("a card's open T2 draft is decided on the card: approve, reject and judge again", () => {
+  const html = withEngineering([engineeringDraft()], true);
+  assert.match(html, /data-testid="amux-owner-queue-engineering"/);
+  assert.match(html, /Engineering agent items on this card/);
+  assert.match(html, /data-testid="amux-owner-queue-engineering-item" data-kind="t2_draft"/);
+  assert.match(html, /data-testid="amux-owner-queue-engineering-approve"/);
+  assert.match(html, /data-testid="amux-owner-queue-engineering-reject"/);
+  assert.match(html, /data-testid="amux-owner-queue-engineering-rejudge"/);
+  assert.match(html, /lib\/a\.ts/);
+  assert.match(html, /href="\/admin\/engineering-agent\?tab=queue"/);
+  // A draft the tier round cannot take again offers no rejudge.
+  const kept = withEngineering([engineeringDraft({ rejudgeable: false })], true);
+  assert.match(kept, /amux-owner-queue-engineering-approve/);
+  assert.doesNotMatch(kept, /amux-owner-queue-engineering-rejudge/);
+});
+
+test("a review_pr mismatch records the pull request number on the card; other mismatches go to the console", () => {
+  const html = withEngineering([reviewPrMismatch], true);
+  assert.match(html, /data-kind="state_mismatch"/);
+  assert.match(html, /data-testid="amux-owner-queue-engineering-record-pr"/);
+  assert.match(html, /Record the pull request number on the card/);
+  assert.doesNotMatch(html, /amux-owner-queue-engineering-approve/);
+  const other = withEngineering([{ ...reviewPrMismatch, causeKey: "run:2" }], true);
+  assert.doesNotMatch(other, /amux-owner-queue-engineering-record-pr/);
+});
+
+test("without engineering write access the items are read only, and a card without items shows none", () => {
+  const html = withEngineering([engineeringDraft(), reviewPrMismatch], false);
+  assert.match(html, /data-testid="amux-owner-queue-engineering"/);
+  assert.match(html, /takes engineering agent write access/);
+  assert.doesNotMatch(html, /<button[^>]*amux-owner-queue-engineering-/);
+  assert.doesNotMatch(withEngineering([], true), /amux-owner-queue-engineering/);
+  assert.deepEqual(amuxOwnerQueueEngineeringButtons(engineeringDraft(), false), []);
+  assert.deepEqual(amuxOwnerQueueEngineeringButtons(engineeringDraft({ patchDigest: null }), true), []);
+  assert.deepEqual(amuxOwnerQueueEngineeringButtons(engineeringDraft(), true), ["approve", "reject", "rejudge"]);
+  assert.deepEqual(amuxOwnerQueueEngineeringButtons(reviewPrMismatch, true), ["record_pr"]);
+});
+
+test("the card's requests are the console's own, bound to the digest and base shown", () => {
+  const draft = engineeringDraft();
+  assert.deepEqual(engineeringAgentDecisionRequest(draft, "approved"), {
+    url: "/api/admin/engineering-agent/decisions",
+    body: { workItemId: "item-draft", decision: "approved", patchDigest: draft.patchDigest, baseSha: draft.baseSha },
+  });
+  assert.deepEqual(engineeringAgentRejudgeRequest(draft), {
+    url: "/api/admin/engineering-agent/rejudge",
+    body: { workItemId: "item-draft", patchDigest: draft.patchDigest, baseSha: draft.baseSha },
+  });
+  assert.equal(engineeringAgentRejudgeRequest({ ...draft, baseSha: null }), null);
+  assert.deepEqual(engineeringAgentMismatchRequest("item-mismatch", "record_bound_review_pr"), {
+    url: "/api/admin/engineering-agent/mismatches",
+    body: { workItemId: "item-mismatch", action: "record_bound_review_pr" },
+  });
 });

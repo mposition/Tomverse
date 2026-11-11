@@ -6,6 +6,8 @@ import { ArrowLeft, ArrowRight, Check, CircleHelp, Eye, Wrench } from "lucide-re
 import {
   AmuxOwnerReviewDetail,
   AmuxPendingDecisionNotice,
+  amuxReviewApprovesNoChange,
+  amuxReviewOutcomeLabel,
   classifyAmuxOwnerQueueItem,
   visibleAmuxOwnerReviewOutcomes,
   type AmuxEscalationSummary,
@@ -17,6 +19,7 @@ import {
   useAmuxLegacyCardRead,
   type AmuxLegacyCardRead,
 } from "@/components/admin/AmuxLegacyCardPanel";
+import { AmuxOwnerQueueEngineeringItems } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
 import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
 import { AmuxTaskUnknownUsageList } from "@/components/admin/AmuxAttemptUsageAcceptance";
 import { AmuxTaskQuestionSection } from "@/components/admin/AmuxWorkerQuestion";
@@ -103,6 +106,7 @@ export const useAmuxOwnerQueueElapsed = (generatedAt: string) => {
 export function AmuxOwnerQueueDecision({
   item, controller, canInspectCards, index, total, generatedAt, navLocked, advance,
   onAdvanceChange, onPrevious, onNext, onAnswered, initialLegacyCard = null,
+  canWriteEngineering = false, onEngineeringChanged,
 }: {
   item: AmuxOwnerQueueItem;
   controller: AmuxOwnerReviewController;
@@ -120,6 +124,10 @@ export function AmuxOwnerQueueDecision({
   onAnswered: () => void;
   /** The legacy panel shown before this card's own read lands (tests). */
   initialLegacyCard?: AmuxLegacyCardRead | null;
+  /** `engineering-agent:write`: the card's engineering items show their buttons. */
+  canWriteEngineering?: boolean;
+  /** An engineering action was recorded: read this card again without leaving it. */
+  onEngineeringChanged?: () => void;
 }) {
   const copy = useAdminMessages(adminAmuxOwnerQueueMessages);
   const execution = useAdminMessages(adminAmuxExecutionMessages);
@@ -159,7 +167,9 @@ export function AmuxOwnerQueueDecision({
   // The words follow the choices actually shown, not the PR alone: a verified
   // non-code Task is approved without one, and a spent budget, an unverified
   // result or pending publication leaves no retry.
-  const noPrWhy = outcomes.includes("approve") ? copy.why.reviewNoPrApprovable
+  const noPrWhy = outcomes.includes("approve") ?
+    reviewMatches && amuxReviewApprovesNoChange(review) ? copy.why.reviewNoPrNoChange
+      : copy.why.reviewNoPrApprovable
     : outcomes.includes("retry") ? copy.why.reviewNoPr
     : outcomes.includes("block") ? copy.why.reviewNoPrBlockOnly : copy.why.reviewNoPrNone;
   // A blocked card's escalation keeps only execution_blocked; the attempt's
@@ -256,6 +266,16 @@ export function AmuxOwnerQueueDecision({
         ) : null}
       </div>
 
+      {/* The engineering agent's open items on this card, decided here through
+          the engineering routes (the same as Admin › Engineering › Decisions). */}
+      {item.engineeringItems?.length ? (
+        <AmuxOwnerQueueEngineeringItems key={item.taskId} items={item.engineeringItems}
+          canWrite={canWriteEngineering}
+          reauthReturnPath={item.escalationId === null ? "/admin/amux-execution?tab=review"
+            : `/admin/amux-execution?tab=review&focusEscalation=${encodeURIComponent(item.escalationId)}`}
+          onChanged={onEngineeringChanged ?? onAnswered} />
+      ) : null}
+
       {/* Straight under "why", like the legacy panel: the owner closes the
           leftover escalation here; the review below is reading only. */}
       {settledCard && canInspectCards && item.escalationId !== null ? (
@@ -336,7 +356,7 @@ export function AmuxOwnerQueueDecision({
                     {outcomes.map((outcome, position) => (
                       <li key={outcome} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200">
                         <kbd className="rounded bg-zinc-800 px-1.5 text-xs text-zinc-300">{position + 1}</kbd>
-                        {routing.outcome[outcome]}
+                        {amuxReviewOutcomeLabel(routing, review, outcome)}
                       </li>
                     ))}
                   </ul>

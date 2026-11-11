@@ -6,10 +6,10 @@ import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import { marketingAssetSchema } from "../lib/marketingAssets.ts";
-import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, normalizePack, reviewPassed, stillsIn, usablePacks } from "../tools/marketing-video/creative-core.mjs";
-import { speakLine, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
+import { AI_LINE, answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, lastBuild, normalizePack, packOfRun, reviewPassed, stillsIn, usablePacks } from "../tools/marketing-video/creative-core.mjs";
+import { speakLine, VOICE_CAP_ENV, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
 import { admit, downloadResult, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
-import { creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
+import { CREATIVE_CAP_ENV, creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
 
 /**
  * The creative short job (owner 2026-11-09: a different, creative ad every
@@ -417,4 +417,64 @@ test("a Read-only call is handed every still by name, since Read cannot list a f
   const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(source, /stills in job\/creative\/\$\{run\}\/review\/\$\{locale\}\/;/u, "the review prompt names files, not a folder");
   assert.doesNotMatch(source, /job\/creative\/sheets\/\$\{entry\.run\}\//u, "earlier films are named by file too");
+});
+
+test("a run's last build round and review verdict are read from its call transcripts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "creative-calls-"));
+  assert.deepEqual(lastBuild(join(dir, "missing")), { rounds: 0, review: null });
+  const stream = (result) => [JSON.stringify({ type: "system" }), JSON.stringify({ type: "result", result }), ""].join("\n");
+  writeFileSync(join(dir, "build-1.jsonl"), stream("built"));
+  writeFileSync(join(dir, "build-2.jsonl"), stream("built"));
+  writeFileSync(join(dir, "review-1.jsonl"), stream(JSON.stringify({ review: { verdict: "reject", notes: "old" } })));
+  writeFileSync(join(dir, "review-2.jsonl"), stream(JSON.stringify({ review: { verdict: "fix", notes: "make the screens readable" } })));
+  writeFileSync(join(dir, "plan-1.jsonl"), stream("{}"));
+  assert.deepEqual(lastBuild(dir), { rounds: 2, review: { verdict: "fix", notes: "make the screens readable" } });
+  writeFileSync(join(dir, "review-3.jsonl"), "not a stream");
+  assert.deepEqual(lastBuild(dir), { rounds: 2, review: null }, "the newest review decides, even when it gave no answer");
+  assert.equal(answerOf(`${stream("first")}${stream("second")}`), "second");
+  assert.equal(answerOf(""), null);
+});
+
+test("a rebuild reuses the run's paid media: it never reaches a paid step, and a missing run stops it", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("if (rebuild !== null) {");
+  const end = source.indexOf("// 1. Plan.");
+  assert.ok(start > 0 && end > start, "the rebuild branch sits before the plan");
+  assert.ok(start < source.indexOf("await paid("), "and before every paid call");
+  const branch = source.slice(start, end);
+  assert.doesNotMatch(branch, /paid\(|speakLine\(|makeMedia\(/u);
+  assert.match(branch, /halt\("rejected_before"\)/u);
+  assert.ok(branch.includes('history.some((entry) => entry.run === run)) halt("already_finished")'), "a finished run is never rebuilt");
+  assert.match(branch, /await finishFilm\(/u);
+  const shell = await readFile(new URL("../tools/marketing-video/run-creative-short.sh", import.meta.url), "utf8");
+  assert.match(shell, /node run-creative-short\.mjs "\$@"/u, "the shell passes --rebuild on");
+  const tool = resolve("tools/marketing-video");
+  const env = { PATH: process.env.PATH, MARKETING_CREATIVE_SHORT: "on", [CREATIVE_CAP_ENV]: "1", [VOICE_CAP_ENV]: "1", ELEVENLABS_API_KEY: "test", MARKETING_APP_URL: "http://localhost:1", MARKETING_MEDIA_SUBMIT_SECRET: "test" };
+  for (const name of ["../../etc", "20991231-9", ""]) {
+    const out = spawnSync(process.execPath, [join(tool, "run-creative-short.mjs"), "--rebuild", name], { encoding: "utf8", env });
+    assert.equal(out.status, 1);
+    assert.equal(JSON.parse(out.stdout.trim().split("\n").at(-1)).halted, "no_such_run");
+  }
+});
+
+test("a rebuild takes words and claims only from the approved pack whose files the run copied", () => {
+  const root = mkdtempSync(join(tmpdir(), "creative-packof-"));
+  const packDir = (name, bytes) => {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "answer.png"), bytes);
+    return { topic: "review-compare", locale: "ko", dir, claimIds: [`claim-${name}`], captures: { answer: { file: "answer.png", text: `words ${name}` } } };
+  };
+  const a = packDir("a", "picture A");
+  const b = packDir("b", "picture B");
+  const copied = join(root, "run", "capture", "ko");
+  mkdirSync(copied, { recursive: true });
+  writeFileSync(join(copied, "answer.png"), "picture A");
+  assert.deepEqual(packOfRun(copied, [b, a], "review-compare", "ko"), { pack: a, words: ["words a"] });
+  assert.equal(packOfRun(copied, [b], "review-compare", "ko"), null, "A no longer approved: B's words are never put on A's pictures");
+  assert.equal(packOfRun(copied, [a], "review-compare", "en"), null);
+  assert.equal(packOfRun(join(root, "none"), [a], "review-compare", "ko"), null);
+  writeFileSync(join(copied, "extra.png"), "x");
+  assert.equal(packOfRun(copied, [a], "review-compare", "ko"), null, "the copied set must be the pack's set exactly");
 });

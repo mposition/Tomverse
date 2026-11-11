@@ -44,6 +44,7 @@ import {
   modelLimitResponse,
 } from "@/lib/billingEntitlements";
 import { createConversation } from "@/lib/conversationCreation";
+import { consumeConversationUpdateLimit } from "@/lib/conversationUpdateRateLimit";
 import { chatSingleModelRefusal } from "@/lib/chatWorkspaceEntry";
 import type { ConversationProductKey } from "@/lib/conversationProduct";
 import {
@@ -93,7 +94,8 @@ const safeParse = (data: unknown, fallback: string[]) => {
 
 export const createConversationForProduct = async (
   req: Request,
-  productKey: ConversationProductKey
+  productKey: ConversationProductKey,
+  initialAutoOwnerId?: string
 ) => {
   try {
     const routeAuth = await resolveChatRouteSession(req);
@@ -103,7 +105,11 @@ export const createConversationForProduct = async (
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
-      const userId = session.user.id;
+    const userId = session.user.id;
+    // Only the Chat entry route can supply its server-admitted principal.
+    if (initialAutoOwnerId !== undefined && (productKey !== "chat" || initialAutoOwnerId !== userId)) {
+      return NextResponse.json({ error: "Conversation access denied." }, { status: 403 });
+    }
     await consumeApiRateLimit(req, userId, "conversation-create", {
       minute: 10,
       day: 100,
@@ -208,6 +214,7 @@ export const createConversationForProduct = async (
 
     const webSearchMode = body.webSearchMode || APP_DEFAULTS.defaultWebSearchMode;
 
+    if (initialAutoOwnerId !== undefined) await consumeConversationUpdateLimit(req, userId);
     const newConversation = await prisma.$transaction(async (tx) => {
       await assertConversationCapacity(tx, userId);
       return createConversation(tx, {
@@ -220,6 +227,7 @@ export const createConversationForProduct = async (
         // Referer or a body field would be the client's claim rather than a
         // server derivation.
         productKey,
+        ...(initialAutoOwnerId !== undefined ? { selectionMode: "auto" as const } : {}),
         selectedModels,
         disabledPanels,
         webSearchMode,
@@ -231,6 +239,8 @@ export const createConversationForProduct = async (
 
       const formattedConversation = {
           ...newConversation,
+          ...(initialAutoOwnerId !== undefined && newConversation.productKey === "chat" && newConversation.selectionMode === "auto"
+            ? { autoSelection: { offered: true } } : {}),
           surface: productKey === "chat" ? "chat" : "workspace",
           projectId: newConversation.projectId || null,
           selectedModels: safeParse(newConversation.selectedModels, [defaultEngine]),
@@ -251,7 +261,7 @@ export const createConversationForProduct = async (
           password: undefined
       };
 
-      return NextResponse.json(formattedConversation);      
+      return NextResponse.json(formattedConversation, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

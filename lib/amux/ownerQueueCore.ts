@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 
 import { AMUX_ESCALATION_AWAITING_STATUSES } from "./humanReviewCore.ts";
 import type { AmuxWorkerProviderClass } from "./workerRegistryCore.ts";
+import type { EngineeringAgentCardItemView } from "../engineeringAgentOwnerItemContextCore.ts";
 
 /**
  * The owner queue ("Waiting on me"): every card that waits on the owner, from
@@ -58,6 +59,11 @@ export type AmuxOwnerQueueItem = {
   escalationId: string | null;
   /** When the card started waiting (ISO). */
   waitingSince: string;
+  /**
+   * The engineering agent's open T2 drafts and state mismatches on this card,
+   * decided on the card through the engineering routes. Absent: not read.
+   */
+  engineeringItems?: EngineeringAgentCardItemView[];
 };
 
 export type AmuxOwnerQueueRead = {
@@ -68,6 +74,19 @@ export type AmuxOwnerQueueRead = {
   processedToday: number | null;
   /** Server time of the read; the list's "N hours ago" is counted from it. */
   generatedAt: string;
+};
+
+/**
+ * The queue with each card's open engineering items attached. A failed
+ * engineering read (null) leaves the cards as they were, so the owner queue
+ * still opens; a card with no open item gets an empty list.
+ */
+export const amuxOwnerQueueWithEngineeringItems = (
+  read: AmuxOwnerQueueRead,
+  byCard: ReadonlyMap<string, EngineeringAgentCardItemView[]> | null,
+): AmuxOwnerQueueRead => byCard === null ? read : {
+  ...read,
+  items: read.items.map((item) => ({ ...item, engineeringItems: byCard.get(item.taskId) ?? [] })),
 };
 
 /** Reasons where the work itself stopped before it finished (a lost run, a limit, a failed tool). */

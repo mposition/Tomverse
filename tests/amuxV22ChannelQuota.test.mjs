@@ -3,8 +3,8 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { normalizeAmuxV22CodexQuota, normalizeAmuxV22CopilotQuota,
-  normalizeAmuxV22CursorQuota, probeAmuxV22ChannelQuota } from
+import { normalizeAmuxV22AntigravityQuota, normalizeAmuxV22CodexQuota,
+  normalizeAmuxV22CopilotQuota, normalizeAmuxV22CursorQuota, probeAmuxV22ChannelQuota } from
   "../lib/amux/v22ChannelQuota.mjs";
 import { createAmuxV22SidecarHandler } from "../lib/amux/v22OneShotSidecar.mjs";
 import { amuxQuotaObservationFeedsDispatch } from "../lib/amux/v22WorkerClaimCore.ts";
@@ -105,6 +105,43 @@ test("Cursor quota is the less-used plan pool, exhausted only when both are full
     { billingCycleEnd: end, planUsage: {} },
     { billingCycleEnd: "1e15", planUsage: { totalPercentUsed: 1 } }])
     assert.equal(normalizeAmuxV22CursorQuota(bad, at), null, JSON.stringify(bad));
+});
+
+/** `agy -p "/usage" --output-format json` as agy 1.5.4 printed it on the box
+ * (2026-11-11), with the clock moved to this test's. */
+const agyUsage = (gemini = [0.75, 0.9]) => ({ conversation_id: "", status: "SUCCESS",
+  response: "Gemini Models\tWeekly Limit Remaining\t75%\n", duration_seconds: 0, num_turns: 0,
+  usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+  command: { name: "usage", data: { groups: [
+    { name: "Gemini Models", buckets: [
+      { id: "gemini-weekly", window: "weekly", remaining_fraction: gemini[0],
+        reset_time: "2026-11-14T09:42:37Z" },
+      { id: "gemini-5h", window: "5h", remaining_fraction: gemini[1],
+        reset_time: "2026-11-08T03:00:00Z" }] },
+    { name: "Claude and GPT models", buckets: [
+      { id: "3p-weekly", window: "weekly", remaining_fraction: 0.01, reset_time: "2026-11-14T08:03:00Z" }] },
+    { name: "Gemini 4 Argon", buckets: [
+      { id: "gemini-argon-wtu-weekly", window: "weekly", remaining_fraction: 0,
+        reset_time: "2026-11-14T09:42:27Z" }] }] } } });
+
+test("Antigravity quota is the Gemini group's more-used bucket, other groups aside", () => {
+  assertObservation(normalizeAmuxV22AntigravityQuota(agyUsage(), at), "antigravity", 7500,
+    "2026-11-08T03:00:00.000Z");
+  // Measured shape: a 5-hour bucket at 1 and a weekly one just below it.
+  assert.equal(normalizeAmuxV22AntigravityQuota(agyUsage([0.9998478293418884, 1]), at)
+    .remaining_basis_points, 9998);
+  assertObservation(normalizeAmuxV22AntigravityQuota(agyUsage([0.4, 0]), at), "antigravity", 0,
+    "2026-11-08T03:00:00.000Z");
+  const without = (mutate) => { const body = agyUsage(); mutate(body); return body; };
+  for (const bad of [null, {}, without((b) => { b.status = "ERROR"; }),
+    without((b) => { b.command.name = "status"; }),
+    without((b) => { b.command.data.groups.shift(); }),
+    without((b) => { b.command.data.groups[0].buckets = []; }),
+    without((b) => { b.command.data.groups[0].buckets[0].remaining_fraction = 1.2; }),
+    without((b) => { b.command.data.groups[0].buckets[0].remaining_fraction = "0.5"; }),
+    without((b) => { b.command.data.groups[0].buckets[1].reset_time = at; }),
+    without((b) => { b.command.data.groups[0].buckets[1].reset_time = "soon"; })])
+    assert.equal(normalizeAmuxV22AntigravityQuota(bad, at), null, JSON.stringify(bad)?.slice(0, 80));
 });
 
 /** A fake CLI: records what it was started with and answers each written
@@ -214,6 +251,37 @@ test("Copilot probe uses only the run's token and the connect/getQuota exchange"
   assert.equal(args.includes("--no-remote-export"), true);
   assert.equal(options.env.COPILOT_GITHUB_TOKEN, token);
   assert.equal(JSON.stringify(result).includes(token), false);
+  assert.equal(home.homes[0].cleaned, true);
+});
+
+test("Antigravity probe prints only the usage panel, from a read-only run home", async () => {
+  const started = [];
+  let roleAsked = null;
+  const spawnChild = (binary, args, options) => {
+    const child = new EventEmitter();
+    child.stdin = new PassThrough();
+    child.stdout = new PassThrough();
+    child.kill = () => setImmediate(() => child.emit("close", null));
+    started.push({ binary, args, options });
+    setImmediate(() => child.stdout.write(`${JSON.stringify(agyUsage())}\n`));
+    return child;
+  };
+  const home = runHome();
+  const create = async (provider, given, options) => {
+    roleAsked = options.role;
+    return home.create(provider, given, options);
+  };
+  const result = await probeAmuxV22ChannelQuota("antigravity", config,
+    { now: () => now, spawn: spawnChild, createRunHome: create });
+  assertObservation(result, "antigravity", 7500, "2026-11-08T03:00:00.000Z");
+  assert.equal(roleAsked, "review");
+  const [{ binary, args, options }] = started;
+  assert.equal(binary, config.binaryPath);
+  assert.deepEqual(args.slice(0, 6), ["-p", "/usage", "--output-format", "json", "--agent", "amux-v22-read"]);
+  assert.equal(args.includes("--disable-slash-commands"), false);
+  assert.deepEqual(JSON.parse(args[7]).permissions.deny.slice(0, 2), ["command(*)", "write_file(*)"]);
+  assert.equal(options.env.AGY_CLI_DISABLE_AUTO_UPDATE, "true");
+  assert.equal(options.cwd, "/home/review/codex-chore/run-x");
   assert.equal(home.homes[0].cleaned, true);
 });
 

@@ -16,8 +16,10 @@ import {
   amuxReviewSubjectDigest,
   amuxReviewTargetStatus,
   amuxReviewPublicationMayOpenPr,
+  amuxV22NoChangeCompletionAllowed,
   amuxV22PrlessReviewRetryAllowed,
   amuxV22ReviewRetryHasVerifiedOutcome,
+  AMUX_REVIEW_NO_CHANGE_BASIS,
   amuxV4ReviewEvidenceMatches,
   amuxV4ReviewReportProjection,
   sha256Hex,
@@ -245,6 +247,18 @@ async function snapshot(
   // A twice-rejected run is retryable only with its own audited reject verdict.
   const rejectedReviewAttemptId = task.sourceSystem === "admin-idea-v4" ?
     await amuxV52RejectedTwiceReviewAttemptId(tx, task.id, lastAttempt) : null;
+  const prlessEvidence = publication === null ? null : {
+    sourceSystem: task.sourceSystem, cardType: task.cardType,
+    taskRole: task.taskRole, reviewPrNumber: task.reviewPrNumber,
+    attempt: lastAttempt, v4EvidenceVerified: v4Valid,
+    publicationMayOpenPr: amuxReviewPublicationMayOpenPr(publication,
+      ENGINEERING_AGENT_V22_TIER_PENDING_REASON),
+    displayTruncated, displayExact,
+  };
+  // An implement Task that left no change, completed by the owner as "no
+  // change needed" (owner decision 2026-11-11): approve, on that basis.
+  const noChangeCompletion = prlessEvidence !== null &&
+    amuxV22NoChangeCompletionAllowed(prlessEvidence);
   const outcomes = amuxReviewAllowedOutcomes({
     eligible: baseEligible,
     taskStatus: task.status,
@@ -254,14 +268,9 @@ async function snapshot(
       reviewPrNumber: task.reviewPrNumber,
       artifactAvailable: artifact !== null,
       v4EvidenceVerified: v4Valid, displayTruncated,
-      displayExact }),
-    prlessRetryAllowed: publication !== null && amuxV22PrlessReviewRetryAllowed({
-      sourceSystem: task.sourceSystem,
-      cardType: task.cardType, reviewPrNumber: task.reviewPrNumber,
-      attempt: lastAttempt, v4EvidenceVerified: v4Valid,
-      publicationMayOpenPr: amuxReviewPublicationMayOpenPr(publication,
-        ENGINEERING_AGENT_V22_TIER_PENDING_REASON),
-      displayTruncated, displayExact }),
+      displayExact, noChangeCompletionAllowed: noChangeCompletion }),
+    prlessRetryAllowed: prlessEvidence !== null &&
+      amuxV22PrlessReviewRetryAllowed(prlessEvidence),
     blockedRetryVerified: amuxV22ReviewRetryHasVerifiedOutcome({
       sourceSystem: task.sourceSystem, attempt: lastAttempt,
       storedResultAttemptId: latestV4Result?.attemptId ?? null,
@@ -329,9 +338,11 @@ async function snapshot(
   });
   const lastAttemptResultStored = lastAttempt !== null &&
     latestV4Result?.attemptId === lastAttempt.id;
+  const approvalBasis = !outcomes.includes("approve") ? null :
+    noChangeCompletion ? "no_change" as const : "evidence" as const;
   return { escalation, task, lastAttempt, budget, used, subject, digest, text,
     context, report, displayTruncated, displayExact, outcomes, artifact,
-    lastAttemptResultStored, decisionHold };
+    lastAttemptResultStored, decisionHold, approvalBasis };
 }
 
 export async function getAmuxReviewDetail(escalationId: string) {
@@ -341,7 +352,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
   const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
   const { escalation, task, lastAttempt, used, digest, text, context, report,
     displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored,
-    decisionHold } = state;
+    decisionHold, approvalBasis } = state;
   // The Task's ended runs whose CLI usage is unknown and not yet accepted:
   // each holds its worker in the v22 usage gate (owner decision 2026-11-10).
   const unknownUsageIds = task.sourceSystem === "admin-idea-v4" ?
@@ -399,6 +410,9 @@ export async function getAmuxReviewDetail(escalationId: string) {
       html_url: artifact.htmlUrl,
     } : null,
     allowed_outcomes: outcomes,
+    // What an offered approve rests on: "no_change" is the owner's "no change
+    // needed" for an implement Task that left none (owner decision 2026-11-11).
+    approval_basis: approvalBasis,
     // Why no decision is open at all; null while the server offers one.
     decision_hold: decisionHold,
     retry: { used, limit: AMUX_MAX_EXECUTION_ATTEMPTS, remaining: Math.max(0, AMUX_MAX_EXECUTION_ATTEMPTS - used) },
@@ -663,13 +677,18 @@ export async function resolveAmuxReview(input: {
     const acceptedUnknownUsageAttemptIds = proposal.outcome === "retry" &&
         state.task.sourceSystem === "admin-idea-v4" && getAdminRole(input.session) === "owner" ?
       await amuxV22TaskUnknownUsageAttemptIds(tx, taskId) : [];
+    // The approval rests on the snapshot the outcome check above just read.
+    const noChangeCompletion = proposal.outcome === "approve" &&
+      state.approvalBasis === "no_change";
     const auditLogId = await writeAdminAuditLog({
       session: input.session,
       request: input.request,
       action: "amux.human_escalation.resolved",
       targetType: "AmuxWorkItem",
       targetId: taskId,
-      summary: "Resolved an AMUX human review escalation.",
+      summary: noChangeCompletion ?
+        "Completed an AMUX implement Task: no change needed (owner verified)." :
+        "Resolved an AMUX human review escalation.",
       metadata: {
         decision_id: decisionId,
         proposal_id: proposal.id,
@@ -679,6 +698,8 @@ export async function resolveAmuxReview(input: {
         review_base_sha: proposal.reviewBaseSha,
         previous_revision: proposal.taskRevision,
         next_revision: proposal.taskRevision + 1,
+        ...(noChangeCompletion ? { approval_basis: AMUX_REVIEW_NO_CHANGE_BASIS,
+          result_sha256: state.context.result_sha256 } : {}),
         ...(acceptedUnknownUsageAttemptIds.length ?
           { accepted_unknown_usage_attempt_ids: acceptedUnknownUsageAttemptIds } : {}),
       },

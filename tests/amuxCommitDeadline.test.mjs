@@ -348,6 +348,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // constraints; no commit-deadline marker, classifier or deferred trigger
   // changes.
   "20261110200000_amux_antigravity_worker_class",
+  // The review no-change completion migration does not touch the commit-deadline
+  // marker, classifier or deferred trigger.
+  "20261111120000_amux_review_no_change_completion",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

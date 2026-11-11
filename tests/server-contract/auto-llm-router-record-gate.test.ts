@@ -534,13 +534,14 @@ test("router search preparation uses one priced call and malformed suggestions p
   try {
     for (const queries of [["one", "two"], ["one", "two", "three"], [42]]) {
       routerRequests.length = 0; holds.length = 0;
-      generateRouterResult = () => ({ output: { ...routerOutput, requiresFileGeneration: false, searchQueries: queries }, usage: { inputTokens: 100, outputTokens: 30 } });
+      generateRouterResult = () => ({ output: { ...routerOutput, requiresFileGeneration: false, searchQueries: queries, simpleLookup: queries.length === 2 ? true : "true" }, usage: { inputTokens: 100, outputTokens: 30 } });
       const result = await pick(undefined, { searchPlan: true });
       assert.equal(routerRequests.length, 1);
       assert.equal(routerRequests[0].maxOutputTokens, 440);
       assert.match(String(routerRequests[0].system), /searchQueries/);
       assert.equal(result?.requiresFileGeneration, false);
       assert.equal(result?.modelId, routerOutput.modelId);
+      assert.equal(result?.simpleLookup, queries.length === 2);
       assert.deepEqual(result?.searchQueries, typeof queries[0] === "string" && queries.length <= 2 ? queries : []);
       const { autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
       const { resolveModelPricing } = require(resolve(ROOT, "lib/modelPricing.ts"));

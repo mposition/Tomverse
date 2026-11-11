@@ -50,6 +50,7 @@ import { utcDateString } from "@/lib/chatCurrentDatePrompt";
 import {
   runWebSearchBackendRequest,
   type WebSearchBackendRequest,
+  type WebSearchBackendResult,
 } from "@/lib/webSearchBackendAdapter";
 
 /**
@@ -175,6 +176,8 @@ const resultNotice = (now: Date) =>
 export type AppManagedWebSearchToolConfig = {
   tools: ToolSet;
   search: (input: z.infer<typeof searchToolInputSchema>) => Promise<AppManagedSearchToolResult | AppManagedSearchBatchResult>;
+  /** Returns an already-read projection only if some excerpts were enriched. */
+  serializeOriginalDescriptions?: (result: AppManagedSearchToolResult | AppManagedSearchBatchResult) => string | undefined;
   /** The counter and collected sources. Read after the turn settles. */
   session: AppManagedSearchSession;
 };
@@ -198,6 +201,8 @@ export const buildAppManagedWebSearchTool = (input: {
    */
   defaultCountry?: string;
   defaultSearchLang?: string;
+  /** Owned by the server; the model cannot change it for a tool call. */
+  extraSnippets?: boolean;
   /** Structured observation. Never given the query text. */
   onOutcome?: (event: {
     status: AppManagedSearchToolResult["status"];
@@ -217,6 +222,8 @@ export const buildAppManagedWebSearchTool = (input: {
   // Attempt-local single flight: identical concurrent calls share one backend
   // request and one settlement. Only successful results remain reusable.
   const requests = new Map<string, Promise<AppManagedSearchToolResult>>();
+  const originalResults = input.extraSnippets === true
+    ? new WeakMap<WebSearchBackendResult[], WebSearchBackendResult[]>() : undefined;
   let toolCallIndex = 0;
 
   const search: AppManagedWebSearchToolConfig["search"] = async (raw) => {
@@ -273,6 +280,7 @@ export const buildAppManagedWebSearchTool = (input: {
           ? { searchLang: raw.searchLang ?? input.defaultSearchLang }
           : {}),
         ...(raw.freshness ? { freshness: raw.freshness } : {}),
+        ...(input.extraSnippets === true ? { extraSnippets: true } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
       };
       const key = JSON.stringify([
@@ -316,6 +324,7 @@ export const buildAppManagedWebSearchTool = (input: {
           };
         }
         session.recordSuccess(outcome.results);
+        if (outcome.descriptionOnlyResults) originalResults?.set(outcome.results, outcome.descriptionOnlyResults);
         return {
           status: "ok",
           query: validated.query,
@@ -345,7 +354,20 @@ export const buildAppManagedWebSearchTool = (input: {
       searches: searches.map(result => ({ ...result, searchesRemaining: session.remaining() })),
     };
   };
-  return { session, search, tools: {
+  // Only the presearch sizer can ask for this view. SDK tool output and the
+  // request cache continue to carry the enriched results and no metadata.
+  const serializeOriginalDescriptions = originalResults ? (result: AppManagedSearchToolResult | AppManagedSearchBatchResult) => {
+    let changed = false;
+    const restore = (search: AppManagedSearchToolResult) => {
+      const original = search.results && originalResults.get(search.results);
+      if (!original) return search;
+      changed = true;
+      return { ...search, results: original };
+    };
+    const projection = result.status === "batch" ? { ...result, searches: result.searches.map(restore) } : restore(result);
+    return changed ? JSON.stringify(projection) : undefined;
+  } : undefined;
+  return { session, search, ...(serializeOriginalDescriptions ? { serializeOriginalDescriptions } : {}), tools: {
     [APP_MANAGED_WEB_SEARCH_TOOL_NAME]: tool({
       description: SEARCH_TOOL_DESCRIPTION,
       inputSchema: searchToolInputSchema,

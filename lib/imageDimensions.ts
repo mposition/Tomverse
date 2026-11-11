@@ -20,6 +20,30 @@ export type ImageDimensions = { width: number; height: number };
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+/**
+ * MIME type of a recognized image signature, or null when the bytes do not
+ * start with one of the three allowed container signatures. This reads the
+ * header only and returns null rather than guessing.
+ */
+export const detectImageMimeType = (
+  bytes: Buffer
+): "image/png" | "image/jpeg" | "image/webp" | null => {
+  if (bytes.length >= PNG_SIGNATURE.length && bytes.subarray(0, 8).equals(PNG_SIGNATURE)) {
+    return "image/png";
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes.toString("ascii", 0, 4) === "RIFF" &&
+    bytes.toString("ascii", 8, 12) === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  return null;
+};
+
 const readPngDimensions = (bytes: Buffer): ImageDimensions | null => {
   // 8-byte signature, then the IHDR chunk: 4-byte length, 4-byte type, then
   // width and height as big-endian uint32.

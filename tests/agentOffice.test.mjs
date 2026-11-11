@@ -92,6 +92,8 @@ import {
   TEAM_ROOM_DESKS,
   ZONES,
   agentOfficeChannel,
+  agentOfficeQuotaChannel,
+  AGENT_OFFICE_QUOTA_CHANNELS,
   agentOfficeFloorLayout,
   floorLightAt,
   islandDeskCount,
@@ -782,6 +784,13 @@ test("the AMUX room sits under the teams, with an island for each CLI channel th
     ["anthropic", "openai", "github-copilot", "cursor", "devin"].map(agentOfficeChannel),
     ["claude", "codex", "copilot", "cursor", null]
   );
+  // Antigravity has no island yet but its own quota-card row.
+  assert.equal(agentOfficeChannel("antigravity"), null);
+  assert.deepEqual(
+    ["anthropic", "cursor", "antigravity", "devin"].map(agentOfficeQuotaChannel),
+    ["claude", "cursor", "antigravity", null]
+  );
+  assert.deepEqual(AGENT_OFFICE_QUOTA_CHANNELS, ["claude", "codex", "copilot", "cursor", "antigravity"]);
 });
 
 test("a worker's record decides where it is drawn, and nobody disappears from the floor", () => {

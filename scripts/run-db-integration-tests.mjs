@@ -328,6 +328,7 @@ run(
     // both finish: each takes the audit chain lock before the Task row.
     "tests/integration/amux-review-audit-lock-order.db.test.ts",
     "tests/integration/amuxV4PrlessReviewGuard.db.test.mjs",
+    "tests/integration/amuxV22NoChangeCompletion.db.test.mjs",
     // Explicit intake registration writes one backlog card, one body-free
     // draft, one consumed approval and one audit row, and leaves execution
     // and credit counts unchanged.
