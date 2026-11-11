@@ -49,6 +49,7 @@ import {
 } from "@/lib/pinnedDeploymentExecution";
 import {
     canUseModelWithPlan,
+    resolveRetiredModelSuccessor,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
     resolveReplacementModel,
@@ -1566,7 +1567,13 @@ async function handleChatPost(
         const acknowledgedUnavailable = new Set(
             acknowledgedUnavailableAttachmentIds || []
         );
-        const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
+        // `let`, not `const`: a retired model with a live successor is
+        // answered by the successor (see the retirement branch below).
+        let requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
+        // The retired id this request named, when it was answered by its
+        // successor instead. The conversation still lists the retired id until
+        // the reconciliation script moves it, so the selection check accepts it.
+        let retiredModelIdSubstituted: string | null = null;
         // Auto's inputs, gathered before the model is resolved because the
         // model is what Auto decides. The plan is carried forward to the
         // access check below so this is not a second query.
@@ -1596,7 +1603,51 @@ async function handleChatPost(
         // provider health about the one that was actually called.
         dispatchModelIdForLog = requestedModelId;
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
-        const catalogModel = runtimeModelMap.get(requestedModelId);
+        let catalogModel = runtimeModelMap.get(requestedModelId);
+        // An Auto conversation still sends the model id it was created with,
+        // but that id is nominal: Auto chooses the model further down. Refusing
+        // it here stopped every such conversation the moment that model was
+        // switched off (gpt-5-6-luna, 2026-11-11), before Auto could choose. So
+        // for an Auto conversation only, a retired nominal model stands aside
+        // for its successor -- the operator-named replacement chain first, then
+        // the app default -- and everything below (plan access, availability,
+        // Auto's own pick, credits) runs as usual. A model the user picked
+        // themselves is still refused with the replacement named, below.
+        // One primary-key read, and only on this path.
+        const autoConversationWithRetiredModel =
+            catalogModel !== undefined &&
+            !catalogModel.enabled &&
+            Boolean(conversationId) &&
+            Boolean(session?.user?.id) &&
+            (
+                await prisma.conversation.findFirst({
+                    where: { id: conversationId!, userId: session!.user!.id },
+                    select: { selectionMode: true },
+                })
+            )?.selectionMode === "auto";
+        if (catalogModel && autoConversationWithRetiredModel) {
+            const retired = catalogModel;
+            const standIn = resolveRetiredModelSuccessor(
+                retired,
+                (candidateId) => runtimeModelMap.get(candidateId),
+                APP_DEFAULTS.defaultModelId
+            );
+            if (standIn) {
+                console.info(JSON.stringify({
+                    event: "chat_retired_model_substituted",
+                    traceId,
+                    conversationId: conversationId ?? null,
+                    retiredModelId: retired.id,
+                    successorModelId: standIn.successor.id,
+                    via: standIn.via,
+                    timestamp: new Date().toISOString(),
+                }));
+                retiredModelIdSubstituted = retired.id;
+                requestedModelId = standIn.successor.id;
+                dispatchModelIdForLog = requestedModelId;
+                catalogModel = standIn.successor;
+            }
+        }
         if (catalogModel && !catalogModel.enabled) {
             // Only name a replacement the user could actually go and pick.
             // A retirement that points at a delisted or disabled model is a
@@ -2814,7 +2865,11 @@ async function handleChatPost(
             if (
                 !autoRouted &&
                 selectedConversationModels.length > 0 &&
-                !selectedConversationModels.includes(requestedModelId)
+                !selectedConversationModels.includes(requestedModelId) &&
+                !(
+                    retiredModelIdSubstituted !== null &&
+                    selectedConversationModels.includes(retiredModelIdSubstituted)
+                )
             ) {
                 console.warn(JSON.stringify({
                     event: "chat_model_selection_denied",
