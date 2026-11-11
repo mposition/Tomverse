@@ -92,14 +92,26 @@ export function decideEngineeringAgentPrApproval(input: EngineeringAgentPrApprov
 }
 
 /**
- * Approval is settled before the merge (engineering-agent.md §9-10). A pull request seen merged
- * with no approval recorded first is not approved, whatever its reviews say
+ * Approval is settled before the merge (engineering-agent.md §9-10), or by
+ * the merge itself when an account on the approver list merged the verified
+ * head into develop (owner decision 2026-11-12: one person reviews and merges
+ * their own agent's pull request, so a separate GitHub review was never
+ * written and every such merge stopped the agent). Any other merge with no
+ * approval recorded first -- a bot's, an app's, another account's, or of a
+ * head the app did not verify -- is not approved, whatever its reviews say
  * now, and stops the agent.
  */
 export function decideEngineeringAgentMergedPr(input: {
   merged: boolean;
   approvalRecordedBeforeMerge: boolean;
+  /** The merger is a person on the approver list (lib/engineeringAgentGitHubRead.ts). */
+  mergedByApprover?: boolean;
+  baseRef?: string;
+  /** The merged head is the commit the app recorded as verified. */
+  headVerified?: boolean;
 }): "done" | "merged_without_approval" | "open" {
   if (!input.merged) return "open";
-  return input.approvalRecordedBeforeMerge ? "done" : "merged_without_approval";
+  if (input.approvalRecordedBeforeMerge) return "done";
+  return input.mergedByApprover === true && input.baseRef === "develop" && input.headVerified === true ?
+    "done" : "merged_without_approval";
 }

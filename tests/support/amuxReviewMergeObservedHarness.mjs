@@ -92,6 +92,20 @@ const audit = writes.find(([kind]) => kind === "audit")[1];
 assert.equal(audit.action, "amux.v22.review.merge_observed");
 assert.equal(audit.metadata.merge_commit_sha, MERGE);
 assert.equal(audit.metadata.approval_review_id, 7);
+assert.equal("approval_basis" in audit.metadata, false);
+assert.match(escalation.data.resolution, /^GitHub approval review 7 and merge /);
+
+// An approver's own merge is the approval (owner decision 2026-11-12): no
+// review id, and the audit entry and the escalation name the basis instead.
+reset();
+assert.deepEqual(await run({ approvalReviewId: null }), { completed: true, taskRevision: 9 });
+{
+  const merged = writes.find(([kind]) => kind === "audit")[1];
+  assert.equal(merged.metadata.approval_basis, "approver_merge");
+  assert.equal("approval_review_id" in merged.metadata, false);
+  assert.match(writes.find(([kind]) => kind === "escalation")[1].data.resolution,
+    /^An authorised approver's own merge and merge /);
+}
 
 // Every refusal writes nothing.
 const refused = async (setup, reason, overrides) => {

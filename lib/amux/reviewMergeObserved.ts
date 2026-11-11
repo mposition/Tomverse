@@ -53,8 +53,9 @@ type AttemptRow = {
 /**
  * Completes a v22 `implement` Task whose review pull request the app observed
  * approved by an authorised person and then merged (engineering-agent.md
- * version 5, item 1; orchestration policy version 49). The caller has already
- * judged the approval with decideEngineeringAgentPrApproval() before the merge
+ * version 5, item 1; orchestration policy version 49), or merged by an
+ * authorised approver themselves (owner decision 2026-11-12:
+ * decideEngineeringAgentMergedPr). The caller has already judged the approval
  * and observed the merge; this writer only moves the card it names: `review`
  * to `done`, `v4TerminalAt` on the DB clock, and the open review escalation
  * resolved as approved, with one system audit entry. The number must be the
@@ -71,7 +72,8 @@ export async function completeAmuxV22ReviewOnObservedMerge(
     attemptId: string;
     prNumber: number;
     mergeCommitSha: string;
-    approvalReviewId: number;
+    /** The approval review observed before the merge; null when the approver's own merge is the approval. */
+    approvalReviewId: number | null;
     changedFiles?: string[] | null;
     /** The engineering binding whose approval and merge the caller observed. */
     bindingId?: string | null;
@@ -85,9 +87,12 @@ export async function completeAmuxV22ReviewOnObservedMerge(
     throw new Error("AMUX review pull request number is invalid");
   }
   if (!/^[0-9a-f]{40}$/.test(input.mergeCommitSha)) throw new Error("AMUX merge commit SHA is invalid");
-  if (!Number.isSafeInteger(input.approvalReviewId) || input.approvalReviewId <= 0) {
+  if (input.approvalReviewId !== null &&
+      (!Number.isSafeInteger(input.approvalReviewId) || input.approvalReviewId <= 0)) {
     throw new Error("AMUX approval review id is invalid");
   }
+  const approvedBy = input.approvalReviewId === null ?
+    "an authorised approver's own merge" : `GitHub approval review ${input.approvalReviewId}`;
   const boundary = amuxBoundaryWithAttachment(
     AMUX_DB_BOUNDARIES.reviewMergeObserved, attachment);
   return withAmuxDbBoundary(
@@ -192,7 +197,7 @@ export async function completeAmuxV22ReviewOnObservedMerge(
         data: {
           status: "resolved",
           resolutionOutcome: "approve",
-          resolution: `GitHub approval review ${input.approvalReviewId} and merge ${input.mergeCommitSha} observed.`,
+          resolution: `${approvedBy[0]!.toUpperCase()}${approvedBy.slice(1)} and merge ${input.mergeCommitSha} observed.`,
           resolvedById: AMUX_MERGE_OBSERVER_RESOLVER,
           resolvedByEmail: null,
           resolvedAt: context.dbNow,
@@ -208,7 +213,8 @@ export async function completeAmuxV22ReviewOnObservedMerge(
           attempt_id: input.attemptId,
           pr_number: input.prNumber,
           merge_commit_sha: input.mergeCommitSha,
-          approval_review_id: input.approvalReviewId,
+          ...(input.approvalReviewId === null ? { approval_basis: "approver_merge" } :
+            { approval_review_id: input.approvalReviewId }),
           ...(heldByBinding === null ? {} : { binding_id: heldByBinding }),
           previous_revision: task.revision,
           next_revision: taskRevision,

@@ -26,7 +26,7 @@ mock.module(mod("lib/prisma.ts"), {
     } } },
   },
 });
-class ReadError extends Error {}
+class ReadError extends Error { constructor(code) { super(code); this.code = code; } }
 mock.module(mod("lib/engineeringAgentGitHubRead.ts"), {
   namedExports: { EngineeringAgentGitHubReadError: ReadError, readEngineeringAgentPullObservation: async () => { throw new Error("live read"); } },
 });
@@ -98,7 +98,7 @@ assert.deepEqual(recorded(), []);
 
 // A read that fails decides nothing.
 assert.deepEqual(await run([binding()], async () => { throw new ReadError("http_error"); }),
-  [{ bindingId: "binding", outcome: "unreadable" }]);
+  [{ bindingId: "binding", outcome: "unreadable", code: "http_error" }]);
 assert.deepEqual(recorded(), []);
 
 // Merged after an approval recorded before it: the card completes and the merge is recorded in the same transaction.
@@ -139,6 +139,40 @@ for (const approval of [null, { verdict: "approved", reviewId: 9, observedAt: "2
   if (approval === null) {
     assert.deepEqual(recorded()[0][2].observation, { verdict: "not_approved", reason: "merged_without_approval",
       observedAt: "2026-10-15T05:40:00.000Z" });
+  }
+}
+
+// Owner decision 2026-11-12: an authorised approver's own merge of the verified
+// head into develop is the approval. The card completes with no review id, the
+// merge observation says so, and no mismatch stops the agent.
+{
+  const ownMerge = { ...merged, mergedByApprover: true, reviews: [] };
+  completeResult = { completed: true, taskRevision: 9 };
+  assert.deepEqual(await run([binding()], async () => pull(ownMerge)), [{ bindingId: "binding", outcome: "completed" }]);
+  assert.deepEqual(recorded()[0], ["complete", { taskId: "card", attemptId: "attempt", prNumber: 42,
+    mergeCommitSha: MERGE, approvalReviewId: null, changedFiles: null, bindingId: "binding" }]);
+  assert.deepEqual(recorded()[1].slice(0, 2), ["observe", "amux-tx"]);
+  assert.equal(recorded()[1][2].observation.approvedByMerge, true);
+  assert.equal(recorded().some(([kind]) => kind === "mismatch"), false);
+
+  // The owner already settled the card (or it is not in review): the merge is recorded, nothing stops.
+  completeResult = { completed: false, reason: "task_not_in_review" };
+  assert.deepEqual(await run([binding()], async () => pull(ownMerge)), [{ bindingId: "binding", outcome: "merge_recorded" }]);
+  assert.equal(recorded().at(-1)[2].observation.approvedByMerge, true);
+  assert.equal(recorded().some(([kind]) => kind === "mismatch"), false);
+
+  // A review recorded before the merge still completes on that review, and the merge is not marked.
+  completeResult = { completed: true, taskRevision: 9 };
+  await run([binding({ approvalObservation: approved })], async () => pull({ ...ownMerge }));
+  assert.equal(recorded()[0][1].approvalReviewId, 9);
+  assert.equal("approvedByMerge" in recorded()[1][2].observation, false);
+
+  // Not the approver's own merge of the verified head into develop: still a mismatch.
+  for (const overrides of [{ mergedByApprover: false }, { headSha: "f".repeat(40) }, { baseRef: "main" }]) {
+    assert.deepEqual(await run([binding()], async () => pull({ ...ownMerge, ...overrides })),
+      [{ bindingId: "binding", outcome: "merged_without_approval" }]);
+    assert.equal(recorded().at(-1)[2].reason, "merged_without_approval");
+    assert.equal(recorded().some(([kind]) => kind === "complete"), false);
   }
 }
 

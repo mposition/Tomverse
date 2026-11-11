@@ -355,7 +355,7 @@ test("v52 discards a contract attempt only from its original clean base", async 
       realpath: async (path) => path }), false);
 });
 
-test("a worker checkout moves to its publication base only when clean and the base is present", async () => {
+test("a worker checkout moves to its publication base once clean and the base is present", async () => {
   const base = "b".repeat(40);
   const repo = (state) => {
     const calls = [];
@@ -363,6 +363,15 @@ test("a worker checkout moves to its publication base only when clean and the ba
       const command = args.slice(6);
       calls.push({ command, timeout: options.timeout });
       if (command[0] === "status") return { stdout: Buffer.from(state.dirty ? " M x\0" : "") };
+      // What an attempt cut off mid-run left: dropped unless the checkout cannot be cleaned.
+      if (command[0] === "reset") {
+        if (state.resetFails) throw new Error("locked");
+        return { stdout: Buffer.alloc(0) };
+      }
+      if (command[0] === "clean") {
+        if (!state.stuck) state.dirty = false;
+        return { stdout: Buffer.alloc(0) };
+      }
       if (command[0] === "cat-file") {
         if (state.present) return { stdout: Buffer.alloc(0) };
         throw new Error("missing");
@@ -386,10 +395,24 @@ test("a worker checkout moves to its publication base only when clean and the ba
     .filter((name) => name !== "rev-parse");
   const realpath = async (value) => value;
 
+  // Leftovers of a cut-off attempt are dropped and the attempt goes on (2026-11-12):
+  // tracked changes reset to HEAD, untracked files removed, ignored files kept.
   const dirty = repo({ dirty: true, present: true });
   assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: dirty.run, realpath }),
-    { ok: false, reason: "worktree_dirty" });
-  assert.deepEqual(names(dirty.calls), ["status"]);
+    { ok: true, baseSha: base, discardedLeftovers: true });
+  assert.deepEqual(names(dirty.calls).slice(0, 4), ["status", "reset", "clean", "status"]);
+  assert.equal(names(dirty.calls).at(-1), "checkout");
+  assert.deepEqual(dirty.calls.find((call) => call.command[0] === "reset").command,
+    ["reset", "--hard", "--quiet", "HEAD"]);
+  assert.deepEqual(dirty.calls.find((call) => call.command[0] === "clean").command,
+    ["clean", "-fd", "--quiet", "--"]);
+  // A checkout that stays dirty, or cannot be reset, still fails the attempt before the CLI runs.
+  for (const state of [{ stuck: true }, { resetFails: true }]) {
+    const stuck = repo({ dirty: true, present: true, ...state });
+    assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: stuck.run, realpath }),
+      { ok: false, reason: "worktree_dirty" });
+    assert.equal(names(stuck.calls).includes("checkout"), false);
+  }
 
   const local = repo({ present: true });
   assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: local.run, realpath }),
@@ -438,10 +461,13 @@ test("a worker checkout moves to its publication base only when clean and the ba
     ["fetch", "--no-tags", "--quiet", "origin", "refs/heads/develop"]);
   assert.deepEqual(latest.calls.find((call) => call.command[0] === "checkout").command.at(-1), tip);
 
-  const dirtyLatest = repo({ dirty: true, fetchHead: tip });
+  const dirtyLatest = repo({ dirty: true, stuck: true, fetchHead: tip });
   assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", null,
     { run: dirtyLatest.run, realpath }), { ok: false, reason: "worktree_dirty" });
-  assert.deepEqual(names(dirtyLatest.calls), ["status"]);
+  assert.deepEqual(names(dirtyLatest.calls), ["status", "reset", "clean", "status"]);
+  const cleanedLatest = repo({ dirty: true, fetchable: ["refs/heads/develop"], fetchHead: tip, head: base });
+  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", null, { run: cleanedLatest.run, realpath }),
+    { ok: true, baseSha: tip, discardedLeftovers: true });
 
   for (const state of [{ fetchFails: true, fetchHead: tip }, { fetchHead: "not-a-sha" }]) {
     const offline = repo(state);

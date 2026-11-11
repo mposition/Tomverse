@@ -11,6 +11,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
+import { ENGINEERING_AGENT_PR_APPROVER_IDS } from "./engineeringAgentPrApprovalCore.ts";
 
 import { checkListing, gitObjectId, type TreeEntry } from
   "@/lib/engineeringAgentTreeVerify";
@@ -311,6 +312,12 @@ export type EngineeringAgentPullObservation = {
   mergeCommitSha: string | null;
   /** Who merged, as a kind only (§9-10: the merger is an observation, never an identity). */
   mergedByKind: "user" | "bot" | "app" | "unknown";
+  /**
+   * The merge was a person's own, by an account on the PR approver list
+   * (owner decision 2026-11-12: that merge stands as the approval). A yes or
+   * no only; the account is not kept.
+   */
+  mergedByApprover: boolean;
   baseRef: string;
   baseSha: string;
   headSha: string;
@@ -457,6 +464,13 @@ function mergedByKindOf(
   return mergedBy?.type === "Bot" ? "bot" : mergedBy?.type === "User" ? "user" : "unknown";
 }
 
+/** A person on the PR approver list merged it themselves: not a bot, not through an app. */
+function mergedByApproverOf(pull: Record<string, unknown> | null, merged: boolean): boolean {
+  if (mergedByKindOf(pull, merged) !== "user") return false;
+  const id = record(pull?.merged_by)?.id;
+  return typeof id === "number" && ENGINEERING_AGENT_PR_APPROVER_IDS.includes(id);
+}
+
 /**
  * Whether the agent's own branch still exists. Read by prefix, so a deleted
  * branch is an empty list rather than a 404 that a transport fault could
@@ -549,6 +563,7 @@ export async function readEngineeringAgentPullObservation(
     mergedAt,
     mergeCommitSha,
     mergedByKind,
+    mergedByApprover: mergedByApproverOf(pull, merged),
     baseRef: base.ref,
     baseSha,
     headSha,

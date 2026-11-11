@@ -27,9 +27,10 @@ import { prisma } from "@/lib/prisma";
  *   conditions hold. Nothing else is recorded before the merge: "not yet
  *   reviewed" is read again next round, never frozen as a verdict.
  * - once it is merged, completes the AMUX card in the same transaction that
- *   records the merge -- if, and only if, the approval was recorded before the
- *   merge. A merge without that is not approved and goes to a person as a
- *   state mismatch, which halts the agent.
+ *   records the merge -- if the approval was recorded before the merge, or the
+ *   merge was an authorised approver's own, of the verified head into develop
+ *   (owner decision 2026-11-12). Any other merge is not approved and goes to a
+ *   person as a state mismatch, which halts the agent.
  *
  * A read that fails decides nothing; the binding is looked at again next round.
  */
@@ -84,17 +85,25 @@ async function* watchedBindings() {
   }
 }
 
+/** One binding's outcome; `code` is the read error's own code when the round could not read it. */
+export type EngineeringAgentPrObservation = {
+  bindingId: string; outcome: EngineeringAgentPrObserverOutcome; code?: string };
+
 export async function observeEngineeringAgentPullRequests(
   ports: Ports = livePorts,
-): Promise<Array<{ bindingId: string; outcome: EngineeringAgentPrObserverOutcome }>> {
-  const results: Array<{ bindingId: string; outcome: EngineeringAgentPrObserverOutcome }> = [];
+): Promise<EngineeringAgentPrObservation[]> {
+  const results: EngineeringAgentPrObservation[] = [];
   for await (const binding of watchedBindings()) {
     let pull: EngineeringAgentPullObservation;
     try {
       pull = await ports.read(binding.prNumber);
     } catch (error) {
       if (!(error instanceof EngineeringAgentGitHubReadError)) throw error;
-      results.push({ bindingId: binding.id, outcome: "unreadable" });
+      // The code only (never upstream text): a round that cannot read decides
+      // nothing, and until 2026-11-12 it also said nothing, so a token that
+      // lost a permission left merged pull requests unobserved for days.
+      results.push({ bindingId: binding.id, outcome: "unreadable",
+        ...(typeof error.code === "string" ? { code: error.code } : {}) });
       continue;
     }
     const approval = binding.approvalObservation as Approval;
@@ -138,24 +147,31 @@ export async function observeEngineeringAgentPullRequests(
       continue;
     }
 
+    const approvedBeforeMerge = approval?.verdict === "approved" && typeof approval.observedAt === "string" &&
+      new Date(approval.observedAt).getTime() <= pull.mergedAt!.getTime();
+    const merge = decideEngineeringAgentMergedPr({ merged: true, approvalRecordedBeforeMerge: approvedBeforeMerge,
+      mergedByApprover: pull.mergedByApprover === true, baseRef: pull.baseRef,
+      headVerified: pull.headSha === binding.verifiedHeadSha });
+    // No review was recorded first: the approver's own merge is the approval.
+    const approvedByMerge = merge === "done" && !approvedBeforeMerge;
     const mergeObservation = {
       merged: true,
       mergeCommitSha: pull.mergeCommitSha,
       mergedAt: pull.mergedAt!.toISOString(),
       mergedByKind: pull.mergedByKind,
       observedAt,
+      ...(approvedByMerge ? { approvedByMerge: true as const } : {}),
     };
-    const approvedBeforeMerge = approval?.verdict === "approved" && typeof approval.observedAt === "string" &&
-      new Date(approval.observedAt).getTime() <= pull.mergedAt!.getTime();
-    const merge = decideEngineeringAgentMergedPr({ merged: true, approvalRecordedBeforeMerge: approvedBeforeMerge });
 
     if (merge === "done") {
       const cardId = binding.run?.cardId ?? null;
       const attemptId = binding.run?.amuxAttemptId ?? null;
-      if (cardId !== null && attemptId !== null && typeof approval?.reviewId === "number") {
+      const approvalReviewId = approvedByMerge ? null :
+        typeof approval?.reviewId === "number" ? approval.reviewId : undefined;
+      if (cardId !== null && attemptId !== null && approvalReviewId !== undefined) {
         const completed = await completeAmuxV22ReviewOnObservedMerge(
           { taskId: cardId, attemptId, prNumber: binding.prNumber, mergeCommitSha: pull.mergeCommitSha!,
-            approvalReviewId: approval.reviewId, changedFiles: pull.changedFiles ?? null, bindingId: binding.id },
+            approvalReviewId, changedFiles: pull.changedFiles ?? null, bindingId: binding.id },
           {
             prismaCalls: OBSERVATION_PRISMA_CALLS,
             work: async (lent) => {

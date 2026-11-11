@@ -1990,6 +1990,8 @@ export const engineeringAgentMergeObservationSchema = z
     mergedAt: isoInstant.nullable(),
     mergedByKind: z.enum(ENGINEERING_AGENT_MERGER_KINDS),
     observedAt: isoInstant,
+    /** The merge itself stood as the approval: an approver's own merge of the verified head (§9-10). */
+    approvedByMerge: z.literal(true).optional(),
   })
   .strict()
   .refine((value) => value.merged === (value.mergeCommitSha !== null && value.mergedAt !== null), {
