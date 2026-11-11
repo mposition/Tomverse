@@ -616,7 +616,7 @@ test("follow-up location and execution decisions share one request but keep thei
   try {
     generateRouterResult = () => ({ output: { ...routerOutput, requiresLocation: false }, usage: { inputTokens: 100, outputTokens: 20 } });
     routerRequests.length = 0;
-    const result = await pick(undefined, true, {
+    const result = await pick(undefined, {
       prompt: "Summarize the latest forecast.", previousAnswer,
       locationFusion: { scope: "existing", authoredText: authored, resume: null, searchUtcDate: "2026-11-11", onRouterDigest: () => {} },
     });
