@@ -566,7 +566,7 @@ function OwnerItemContext({ item }: { item: EngineeringAgentOwnerItemView }) {
                   ) : null}
                 </>
               ) : (
-                <p className="text-zinc-400">{m.contextDmNotFiled}</p>
+                <p className="text-zinc-400">{context.dm.unfilable ? m.contextDmUnfilable : m.contextDmNotFiled}</p>
               )}
             </dd>
           </dl>

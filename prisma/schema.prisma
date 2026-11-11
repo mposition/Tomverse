@@ -9835,9 +9835,12 @@ model EngineeringAgentWorkItem {
 /// The Decision Maker card a T2 draft was put to for advice
 /// (lib/engineeringAgentT2DmReviewService.ts). The answer is read from the
 /// Decision Maker's own records beside the draft; nothing here decides it.
+/// A draft whose card cannot be written is recorded once with `unfilableAt`
+/// instead, so it never holds back the drafts behind it.
 model EngineeringAgentDmReview {
   workItemId        String    @id
-  localCardId       String    @unique
+  localCardId       String?   @unique
+  unfilableAt       DateTime?
   localCardClosedAt DateTime?
   createdAt         DateTime  @default(now())
 

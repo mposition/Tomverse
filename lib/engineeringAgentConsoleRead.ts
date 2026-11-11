@@ -93,7 +93,8 @@ export type EngineeringAgentOwnerItemContext = {
    * Not filed: nothing was put to it yet.
    */
   dm:
-    | { filed: false }
+    /** `unfilable`: a T2 draft whose patch did not fit a card, recorded once. */
+    | { filed: false; unfilable?: boolean }
     | {
         filed: true;
         kind: string;
@@ -225,15 +226,18 @@ async function readOwnerItemContexts(
   const advice = draftIds.length
     ? await prisma.engineeringAgentDmReview.findMany({
         where: { workItemId: { in: draftIds } },
-        select: { workItemId: true, localCardId: true, localCardClosedAt: true },
+        select: { workItemId: true, localCardId: true, unfilableAt: true, localCardClosedAt: true },
       })
     : [];
   const adviceStates = new Map(
     await Promise.all(
-      advice.map(async (row) => {
+      advice.flatMap((row) => {
         const cardId = row.localCardId;
-        const state: AmuxV22QuestionDm = !canReadDm ? { state: "restricted" } : await readAmuxDmLocalCardState(cardId);
-        return [row.workItemId, state] as const;
+        if (cardId === null) return [];
+        return [(async () => {
+          const state: AmuxV22QuestionDm = !canReadDm ? { state: "restricted" } : await readAmuxDmLocalCardState(cardId);
+          return [row.workItemId, state] as const;
+        })()];
       }),
     ),
   );
@@ -277,7 +281,9 @@ async function readOwnerItemContexts(
             createdAt: review.createdAt.toISOString(),
           }
         : null,
-      dm: draftAdvice
+      dm: draftAdvice?.unfilableAt
+        ? { filed: false, unfilable: true }
+        : draftAdvice
         ? {
             filed: true,
             kind: "t2_advice",

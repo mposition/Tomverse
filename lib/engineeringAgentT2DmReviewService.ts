@@ -37,18 +37,40 @@ export async function readEngineeringAgentT2DmSyncRows(tx: Prisma.TransactionCli
     SELECT d."workItemId" AS "questionId", d."localCardId" AS "cardId"
     FROM "EngineeringAgentDmReview" d
     JOIN "EngineeringAgentWorkItem" w ON w."id" = d."workItemId"
-    WHERE w."state" <> 'open' AND d."localCardClosedAt" IS NULL
+    WHERE w."state" <> 'open' AND d."localCardId" IS NOT NULL AND d."localCardClosedAt" IS NULL
     ORDER BY d."createdAt", d."workItemId"
     LIMIT ${ENGINEERING_AGENT_T2_DM_SYNC_LIMIT}`;
   return { pending, closing };
 }
 
-/** The cards the relay files; a draft whose card cannot be written is left out. */
+/** The cards the relay files, and the drafts whose card cannot be written
+ * (`unfilable`), to be recorded once so they never hold back the ones behind. */
 export function engineeringAgentT2DmCards(pending: PendingDraft[]) {
-  return pending
-    .map((row) => engineeringAgentT2DmCard({ workItemId: row.workItemId,
-      cardLabel: row.cardLabel ?? "engineering draft", reason: row.reason, patchBody: row.patchBody }))
-    .filter((card): card is NonNullable<typeof card> => card !== null);
+  const cards = [];
+  const unfilable: string[] = [];
+  for (const row of pending) {
+    const card = engineeringAgentT2DmCard({ workItemId: row.workItemId,
+      cardLabel: row.cardLabel ?? "engineering draft", reason: row.reason, patchBody: row.patchBody });
+    if (card) cards.push(card);
+    else unfilable.push(row.workItemId);
+  }
+  return { cards, unfilable };
+}
+
+/** Records, once each, the drafts no card could be written for. One statement.
+ * The draft is untouched: a person still decides it; Admin says no advice came. */
+export async function recordEngineeringAgentT2DmUnfilable(tx: Prisma.TransactionClient,
+  input: { workItemIds: string[]; now: Date }) {
+  const ids = input.workItemIds.filter((id) => QUESTION_ID.test(id));
+  if (ids.length === 0) return { recorded: 0 };
+  const at = input.now.toISOString();
+  const rows = await tx.$queryRaw<Array<{ workItemId: string }>>`
+    INSERT INTO "EngineeringAgentDmReview" ("workItemId", "unfilableAt")
+    SELECT w."id", (${at}::timestamptz AT TIME ZONE 'UTC') FROM "EngineeringAgentWorkItem" w
+    WHERE w."id" = ANY(${ids}) AND w."kind" = 't2_draft'
+    ON CONFLICT DO NOTHING
+    RETURNING "workItemId"`;
+  return { recorded: rows.length };
 }
 
 /** Names the local card of a draft, once; the same card again is a read.

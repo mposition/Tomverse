@@ -33,7 +33,7 @@ type World = {
   direct: unknown; directInput: unknown;
   calls: string[]; boundaries: string[]; ownerInput: unknown; recordedInput: unknown;
   reviewPending: unknown[]; reviewClosing: unknown[]; autoApplied: unknown; autoCalls: number;
-  t2Pending: unknown[]; t2Closing: unknown[];
+  t2Pending: unknown[]; t2Closing: unknown[]; t2Unfilable: string[]; t2Recorded: unknown;
 };
 let world: World;
 const reset = (changes: Partial<World> = {}) => {
@@ -45,7 +45,7 @@ const reset = (changes: Partial<World> = {}) => {
     openError: null, resolved: null, ownerResult: { outcome: "closed", closedCards: 2, auditId: "a" },
     ownerError: null, question: null, direct: null, directInput: null, calls: [], boundaries: [], ownerInput: null, recordedInput: null,
     reviewPending: [], reviewClosing: [], autoApplied: null, autoCalls: 0,
-    t2Pending: [], t2Closing: [],
+    t2Pending: [], t2Closing: [], t2Unfilable: [], t2Recorded: null,
     ...changes,
   };
   if (world.routing === undefined) delete process.env.TOMVERSE_AMUX_DM_ROUTING;
@@ -114,7 +114,10 @@ mock.module(mod("lib/amux/v22ResultReviewService.ts"), { namedExports: {
 } });
 mock.module(mod("lib/engineeringAgentT2DmReviewService.ts"), { namedExports: {
   readEngineeringAgentT2DmSyncRows: async () => ({ pending: world.t2Pending, closing: world.t2Closing }),
-  engineeringAgentT2DmCards: (pending: unknown[]) => pending,
+  engineeringAgentT2DmCards: (pending: unknown[]) => ({ cards: pending, unfilable: world.t2Unfilable }),
+  recordEngineeringAgentT2DmUnfilable: async (_tx: unknown, input: unknown) => {
+    world.t2Recorded = input; return { recorded: 1 };
+  },
 } });
 mock.module(mod("lib/amux/ideaCardCloseService.ts"), { namedExports: {
   openAmuxIdeaCardCloseQuestionIfDue: async () => {
@@ -221,6 +224,14 @@ test("a T2 draft's advice card rides the tick last, filed only while its switch 
     reset({ v22Pending: [v22Entry("a")], reviewPending: [reviewEntry], t2Pending: [t2Entry] });
     const on = await (await syncRoute.POST(post({}))).json();
     assert.deepEqual(on.pending, [v22Entry("a"), reviewEntry, t2Entry], "after every app-answered question");
+    assert.equal(world.t2Recorded, null, "nothing to record when every card could be written");
+
+    reset({ t2Pending: [], t2Unfilable: [IDEA] });
+    const unfilable = await (await syncRoute.POST(post({}))).json();
+    assert.deepEqual(unfilable.pending, []);
+    assert.ok(world.boundaries.includes("engineeringAgentT2DmReviewUnfilable"));
+    assert.deepEqual(world.t2Recorded, { workItemIds: [IDEA], now: new Date("2026-11-05T00:00:00.000Z") },
+      "a draft no card fits is recorded once, so it never holds back the drafts behind it");
   } finally {
     delete process.env.TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW;
     delete process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM;

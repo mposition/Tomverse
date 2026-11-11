@@ -38,6 +38,7 @@ import { engineeringAgentT2DmReviewEnabled } from "@/lib/engineeringAgentT2DmRev
 import {
   engineeringAgentT2DmCards,
   readEngineeringAgentT2DmSyncRows,
+  recordEngineeringAgentT2DmUnfilable,
 } from "@/lib/engineeringAgentT2DmReviewService";
 
 /**
@@ -113,10 +114,15 @@ export async function POST(request: Request) {
       });
       const t2 = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.engineeringAgentT2DmReviewRead,
-        (tx) => readEngineeringAgentT2DmSyncRows(tx)).then((rows) => ({
-        pending: engineeringAgentT2DmReviewEnabled() ? engineeringAgentT2DmCards(rows.pending) : [],
-        closing: rows.closing,
-      })).catch(() => {
+        (tx) => readEngineeringAgentT2DmSyncRows(tx)).then(async (rows) => {
+        if (!engineeringAgentT2DmReviewEnabled()) return { pending: [], closing: rows.closing };
+        const opened = engineeringAgentT2DmCards(rows.pending);
+        if (opened.unfilable.length > 0)
+          await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.engineeringAgentT2DmReviewUnfilable,
+            (tx, context) => recordEngineeringAgentT2DmUnfilable(tx,
+              { workItemIds: opened.unfilable, now: context.dbNow }));
+        return { pending: opened.cards, closing: rows.closing };
+      }).catch(() => {
         console.warn(JSON.stringify({ subsystem: "amux", event: "engineering_t2_dm_review_sync_failed" }));
         return { pending: [], closing: [] };
       });

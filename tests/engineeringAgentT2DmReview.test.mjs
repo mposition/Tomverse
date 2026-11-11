@@ -67,8 +67,8 @@ test("every file is listed; whole diffs follow while they fit, and the card says
 
 test("the relay files, names and closes the card; nothing reads the answer to decide a draft", () => {
   const route = read("app/api/internal/amux/decision-maker/v22-questions/sync/route.ts");
-  assert.match(route, /engineeringAgentT2DmReviewEnabled\(\) \? engineeringAgentT2DmCards\(rows\.pending\) : \[\]/);
-  assert.match(route, /closing: rows\.closing,/, "cards close while the switch is off");
+  assert.match(route, /if \(!engineeringAgentT2DmReviewEnabled\(\)\) return \{ pending: \[\], closing: rows\.closing \}/,
+    "no new card while the switch is off; cards still close");
 
   const dm = read("lib/amux/v22OwnerQuestionDmService.ts");
   assert.match(dm, /FROM "EngineeringAgentDmReview"\s+WHERE "localCardId" = \$\{cardId\}/,
@@ -81,6 +81,10 @@ test("the relay files, names and closes the card; nothing reads the answer to de
   const service = read("lib/engineeringAgentT2DmReviewService.ts");
   assert.doesNotMatch(service, /UPDATE "EngineeringAgentWorkItem"|engineeringAgentWorkItem\.(update|create|delete)/,
     "filing advice never changes a draft");
+  assert.match(service, /WHERE w\."state" <> 'open' AND d\."localCardId" IS NOT NULL/,
+    "an unfilable record has no card to close");
   const migration = read("prisma/migrations/20261111100000_engineering_agent_t2_dm_review/migration.sql");
+  assert.match(migration, /CHECK \(\("localCardId" IS NULL\) <> \("unfilableAt" IS NULL\)\)/,
+    "a row names its card or records that none fit, never both");
   assert.doesNotMatch(migration, /\bDROP\b|^\s*UPDATE\b|DELETE FROM|ALTER TABLE "(?!EngineeringAgentDmReview")/m, "additive only");
 });

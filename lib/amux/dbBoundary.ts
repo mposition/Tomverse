@@ -597,6 +597,12 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 4,
     isolation: "read",
   },
+  // Drafts no card could be written for, recorded once: setup + insert + fence.
+  engineeringAgentT2DmReviewUnfilable: {
+    operation: "engineering_agent_t2_dm_review_unfilable",
+    prismaCallCeiling: 3,
+    isolation: "mutation",
+  },
   // Apply: setup + audit chain lock + switches + the locked review, Task and
   // newest attempt + Task + escalation + review + canonical audit 4 + fence.
   decisionMakerV22ResultReviewApply: {

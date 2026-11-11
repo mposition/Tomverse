@@ -2,7 +2,7 @@
  * A T2 draft put to the Decision Maker for advice (operator, 2026-11-11: the
  * owner queue must show what the reviewers -- the Decision Maker included --
  * said before a person decides). A T2 patch is one the agent may not publish
- * (policy §7); a person approves or rejects it in Admin. The relay files the
+ * (docs/policy/engineering-agent.md §7); a person approves or rejects it in Admin. The relay files the
  * draft as a typed-ask card on the same tick as a v22 result review, and the
  * Decision Maker's answer is shown beside the draft. It is advice: nothing
  * reads it to approve, reject or apply anything.
