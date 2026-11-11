@@ -1385,7 +1385,7 @@ export function MobileChatShell({
                   data-testid="mobile-header-auto-mode"
                   className="min-w-0 truncate"
                 >
-                  {lang === "ko" ? summaryCopy.openPicker : t("chat.modelSelect")}
+                  {lang === "ko" || lang === "en" ? summaryCopy.openPicker : t("chat.modelSelect")}
                 </span>
               </>
             ) : isMultiModelConversation ? (
