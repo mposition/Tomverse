@@ -356,7 +356,7 @@ test("a stored draft is audited, applied in one step, and cleared", async () => 
   );
 });
 
-test("an image draft saves the runtime profile only while the row has none and no price", async () => {
+test("an image draft carries its runtime profile and never prices another model", async () => {
   const modelId = "catalog-draft-profile";
   const profile = {
     provider: "openai",
@@ -374,21 +374,34 @@ test("an image draft saves the runtime profile only while the row has none and n
     prices: [{ quality: "medium", size: "1024x1024", credits: 50, outputCostMicroUsd: 6_000 }],
     verification,
   };
+  const storedApiModel = async () =>
+    ((await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } }))
+      ?.profile as { apiModelId?: string } | null)?.apiModelId;
+  // Unpriced: a draft for model A saves A's profile; a redraft for B moves the
+  // profile to B with it, so the draft always prices what the row calls.
+  await storeCatalogDraft({ category: "image", modelId, draft, imageProfile: { ...profile, apiModelId: "gpt-image-draft-a" }, session });
+  assert.equal(await storedApiModel(), "gpt-image-draft-a");
   await storeCatalogDraft({ category: "image", modelId, draft, imageProfile: profile, session });
-  const saved = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
-  assert.equal((saved?.profile as { apiModelId?: string } | null)?.apiModelId, "gpt-image-draft-profile");
+  assert.equal(await storedApiModel(), "gpt-image-draft-profile");
   // Applying needs no separate profile save.
   await applyCatalogDraft({ category: "image", modelId, session });
-  // Once priced, a later draft for a different request profile leaves the profile alone.
-  await storeCatalogDraft({
-    category: "image",
-    modelId,
-    draft: { ...draft, pricingVersion: "draft-profile-v2" },
-    imageProfile: { ...profile, apiModelId: "gpt-image-draft-dearer" },
-    session,
-  });
-  const after = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
-  assert.equal((after?.profile as { apiModelId?: string } | null)?.apiModelId, "gpt-image-draft-profile");
+  // Priced: a draft for another API model is refused and changes nothing.
+  await assert.rejects(
+    storeCatalogDraft({
+      category: "image",
+      modelId,
+      draft: { ...draft, pricingVersion: "draft-profile-v2" },
+      imageProfile: { ...profile, apiModelId: "gpt-image-draft-dearer" },
+      session,
+    }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "draft_profile_mismatch"
+  );
+  assert.equal(await storedApiModel(), "gpt-image-draft-profile");
+  const row = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.equal(row?.draft, null);
+  // Priced, same model: a new draft is stored.
+  await storeCatalogDraft({ category: "image", modelId, draft: { ...draft, pricingVersion: "draft-profile-v2" }, imageProfile: profile, session });
+  assert.equal(await storedApiModel(), "gpt-image-draft-profile");
 });
 
 test("the database refuses a category it has no policy for", async () => {

@@ -374,9 +374,11 @@ export const storeCatalogDraft = async (input: {
   modelId: string;
   draft: unknown;
   /**
-   * A runtime image model's request profile, saved with the draft only while
-   * the row has no valid one and no price revision, so the operator does not
-   * have to save a profile before applying the draft.
+   * The runtime image model's request profile the draft was read for, so the
+   * operator does not have to save a profile before applying the draft. A
+   * draft must price what the row calls: when the stored profile calls another
+   * provider or API model, an unpriced row takes this profile with the draft
+   * and a priced one refuses the draft.
    */
   imageProfile?: unknown;
   session: Session;
@@ -385,12 +387,18 @@ export const storeCatalogDraft = async (input: {
   prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
     let profile: Prisma.InputJsonValue | undefined;
-    if (input.category === "image" && input.imageProfile !== undefined && imageFullProfileSchema.safeParse(input.imageProfile).success) {
+    if (input.category === "image" && input.imageProfile !== undefined) {
+      const wanted = imageFullProfileSchema.safeParse(input.imageProfile);
+      if (!wanted.success) throw new CatalogRefusal("invalid_profile", wanted.error.issues.map((i) => i.path.join(".")), 400);
       const before = await tx.modelCatalogEntry.findUnique({
         where: { category_modelId: { category: "image", modelId: input.modelId } },
       });
-      const priced = (await tx.modelCatalogPriceRevision.count({ where: { category: "image", modelId: input.modelId } })) > 0;
-      if (!imageFullProfileSchema.safeParse(before?.profile).success && !priced) {
+      const stored = imageFullProfileSchema.safeParse(before?.profile);
+      const sameModel =
+        stored.success && stored.data.provider === wanted.data.provider && stored.data.apiModelId === wanted.data.apiModelId;
+      if (!sameModel) {
+        const priced = (await tx.modelCatalogPriceRevision.count({ where: { category: "image", modelId: input.modelId } })) > 0;
+        if (priced) throw new CatalogRefusal("draft_profile_mismatch", ["use_a_new_model_id"]);
         profile = input.imageProfile as Prisma.InputJsonValue;
       }
     }
