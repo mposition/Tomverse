@@ -17,6 +17,7 @@ import {
   useAmuxLegacyCardRead,
   type AmuxLegacyCardRead,
 } from "@/components/admin/AmuxLegacyCardPanel";
+import { AmuxOwnerQueueEngineeringItems } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
 import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
 import { AmuxTaskUnknownUsageList } from "@/components/admin/AmuxAttemptUsageAcceptance";
 import { AmuxTaskQuestionSection } from "@/components/admin/AmuxWorkerQuestion";
@@ -103,6 +104,7 @@ export const useAmuxOwnerQueueElapsed = (generatedAt: string) => {
 export function AmuxOwnerQueueDecision({
   item, controller, canInspectCards, index, total, generatedAt, navLocked, advance,
   onAdvanceChange, onPrevious, onNext, onAnswered, initialLegacyCard = null,
+  canWriteEngineering = false, onEngineeringChanged,
 }: {
   item: AmuxOwnerQueueItem;
   controller: AmuxOwnerReviewController;
@@ -120,6 +122,10 @@ export function AmuxOwnerQueueDecision({
   onAnswered: () => void;
   /** The legacy panel shown before this card's own read lands (tests). */
   initialLegacyCard?: AmuxLegacyCardRead | null;
+  /** `engineering-agent:write`: the card's engineering items show their buttons. */
+  canWriteEngineering?: boolean;
+  /** An engineering action was recorded: read this card again without leaving it. */
+  onEngineeringChanged?: () => void;
 }) {
   const copy = useAdminMessages(adminAmuxOwnerQueueMessages);
   const execution = useAdminMessages(adminAmuxExecutionMessages);
@@ -255,6 +261,16 @@ export function AmuxOwnerQueueDecision({
           </div>
         ) : null}
       </div>
+
+      {/* The engineering agent's open items on this card, decided here through
+          the engineering routes (the same as Admin › Engineering › Decisions). */}
+      {item.engineeringItems?.length ? (
+        <AmuxOwnerQueueEngineeringItems key={item.taskId} items={item.engineeringItems}
+          canWrite={canWriteEngineering}
+          reauthReturnPath={item.escalationId === null ? "/admin/amux-execution?tab=review"
+            : `/admin/amux-execution?tab=review&focusEscalation=${encodeURIComponent(item.escalationId)}`}
+          onChanged={onEngineeringChanged ?? onAnswered} />
+      ) : null}
 
       {/* Straight under "why", like the legacy panel: the owner closes the
           leftover escalation here; the review below is reading only. */}
