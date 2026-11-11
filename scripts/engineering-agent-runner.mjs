@@ -147,7 +147,7 @@ async function main() {
     }
   };
   const githubList = (path, { notFoundIsEmpty = false } = {}) =>
-    readGitHubList(fetchPage, `${API_REPO}${path}`, { origin: API_REPO, notFoundIsEmpty });
+    readGitHubList(fetchPage, `${API_REPO}${path}`, { origin: new URL(API_REPO).origin, notFoundIsEmpty });
 
   let result;
   try {

@@ -246,19 +246,22 @@ test("a first page of more is judged for what it holds, and never read as the wh
 });
 
 test("a GitHub list is read page after page, so more than 100 open pull requests still decide the round", async () => {
-  const origin = "https://api.github.com/repos/mposition/Tomverse";
-  const linkTo = (page) => `<${origin}/pulls?state=open&per_page=100&page=${page}>; rel="next", <${origin}/pulls?page=9>; rel="last"`;
+  const origin = "https://api.github.com";
+  const repo = `${origin}/repos/mposition/Tomverse`;
+  // GitHub names the next pages by the numeric repository path, not the one asked.
+  const byId = `${origin}/repositories/1023456789`;
+  const linkTo = (page) => `<${byId}/pulls?state=open&per_page=100&page=${page}>; rel="next", <${byId}/pulls?page=9>; rel="last"`;
   const pages = {
-    [`${origin}/pulls?state=open&per_page=100`]: { status: 200, link: linkTo(2), body: [{ number: 1 }] },
-    [`${origin}/pulls?state=open&per_page=100&page=2`]: { status: 200, link: linkTo(3), body: [{ number: 2 }] },
-    [`${origin}/pulls?state=open&per_page=100&page=3`]: { status: 200, link: `<${origin}/pulls?page=1>; rel="first"`, body: [{ number: 3 }] },
+    [`${repo}/pulls?state=open&per_page=100`]: { status: 200, link: linkTo(2), body: [{ number: 1 }] },
+    [`${byId}/pulls?state=open&per_page=100&page=2`]: { status: 200, link: linkTo(3), body: [{ number: 2 }] },
+    [`${byId}/pulls?state=open&per_page=100&page=3`]: { status: 200, link: `<${byId}/pulls?page=1>; rel="first"`, body: [{ number: 3 }] },
   };
   const fetched = [];
   const fetchPage = async (url) => {
     fetched.push(url);
     return pages[url] ?? null;
   };
-  const first = `${origin}/pulls?state=open&per_page=100`;
+  const first = `${repo}/pulls?state=open&per_page=100`;
   assert.deepEqual(await readGitHubList(fetchPage, first, { origin }), {
     items: [{ number: 1 }, { number: 2 }, { number: 3 }],
     complete: true,
@@ -276,8 +279,15 @@ test("a GitHub list is read page after page, so more than 100 open pull requests
   const notAList = async (url) => (url === first ? pages[first] : { status: 200, link: null, body: { message: "x" } });
   assert.equal(await readGitHubList(notAList, first, { origin }), null);
   // The read token goes with every page, so a next link off the API origin is not followed.
-  const offOrigin = async () => ({ status: 200, link: '<https://evil.example/pulls?page=2>; rel="next"', body: [{ number: 1 }] });
-  assert.deepEqual(await readGitHubList(offOrigin, first, { origin }), { items: [{ number: 1 }], complete: false });
+  for (const link of [
+    '<https://evil.example/pulls?page=2>; rel="next"',
+    '<https://api.github.com.evil.example/pulls?page=2>; rel="next"',
+    '<http://api.github.com/repositories/1/pulls?page=2>; rel="next"',
+    '<not a url>; rel="next"',
+  ]) {
+    const offOrigin = async () => ({ status: 200, link, body: [{ number: 1 }] });
+    assert.deepEqual(await readGitHubList(offOrigin, first, { origin }), { items: [{ number: 1 }], complete: false }, link);
+  }
   // No ref under the prefix is a 404: the empty, whole list.
   const notFound = async () => ({ status: 404, link: null, body: { message: "Not Found" } });
   assert.deepEqual(await readGitHubList(notFound, first, { origin, notFoundIsEmpty: true }), { items: [], complete: true });

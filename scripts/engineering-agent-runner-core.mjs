@@ -112,8 +112,9 @@ export const nextPageUrl = (link) => {
  * One GitHub list read whole, page after page (§12). The repository's open
  * pull requests passed 100 on 2026-11-08 and a first-page-only read left every
  * round undetermined for 18 hours, so the next page is followed -- only while
- * it stays under `origin` (the read token goes with each page), and for at
- * most `maxPages`. `fetchPage(url)` -> { status, link, body } or null when the
+ * its URL's origin is `origin` (the read token goes with each page; GitHub
+ * names next pages by the numeric repository path, /repositories/<id>/..., so
+ * the path is not compared), and for at most `maxPages`. `fetchPage(url)` -> { status, link, body } or null when the
  * request failed. Returns { items, complete } or null: a page that is not a
  * list, or a failed request, makes the whole list unread, never a shorter
  * list; a list longer than the page limit, or a next link off `origin`, is
@@ -131,7 +132,13 @@ export const readGitHubList = async (fetchPage, firstUrl, { origin, maxPages = G
     items.push(...response.body);
     const next = nextPageUrl(response.link);
     if (next === null) return { items, complete: true };
-    if (!next.startsWith(`${origin}/`)) return { items, complete: false };
+    let nextOrigin = null;
+    try {
+      nextOrigin = new URL(next).origin;
+    } catch {
+      nextOrigin = null;
+    }
+    if (nextOrigin !== origin) return { items, complete: false };
     url = next;
   }
   return { items, complete: false };
