@@ -342,7 +342,10 @@ test("banned words, unconditioned free, untranslated names and unknown models ar
   assert.match(check(conceptsOf(concept("c1"), withText("问克劳德", "zh-Hans"))), /stay as written/u);
   assert.match(check(conceptsOf(concept("c1"), withText("這個問題", "zh-Hans"))), /Simplified/u);
   assert.match(check(conceptsOf(concept("c1"), concept("c2", { prompt_en: `${concept("c2").prompt_en} with a purple glow` }))), /#155dfb/u);
-  assert.match(check(conceptsOf(concept("c1"), concept("c2", { prompt_en: `${concept("c2").prompt_en} and the Tomverse logo` }))), /never names Tomverse/u);
+  // The refusal says the word must go and quotes where it is, so the retry can drop it.
+  const named = check(conceptsOf(concept("c1"), concept("c2", { prompt_en: `${concept("c2").prompt_en}, accents in Tomverse blue` })));
+  assert.match(named, /must not contain the word "Tomverse"/u);
+  assert.match(named, /Found in: "\.\.\..*accents in Tomverse blue\.\.\."/u);
 });
 
 test("an answer under a real model name must be its recorded answer, untranslated", () => {

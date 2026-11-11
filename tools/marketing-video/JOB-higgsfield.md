@@ -40,8 +40,10 @@ and device. Each one:
   the photo, the people, the light, the composition, where each piece of text
   sits and what it says word for word, and the provider logos to place (the
   reference files are attached to the call). Write it so the picture works
-  without the Tomverse logo: the code adds a band at the bottom. Never write
-  "Tomverse" in it, and never ask for purple, violet or magenta.
+  without the Tomverse logo: the code adds a band at the bottom. The word
+  "Tomverse" never appears in it, not even as "no Tomverse logo" or "Tomverse
+  blue": the image model draws every word it reads. Say "#155dfb blue", and
+  never ask for purple, violet or magenta.
 - `texts`: every piece of text the picture shows, exactly, in English, in
   reading order, each `{"role", "text"}`:
   - `headline` (one, at most 70 characters), `subhead`, `cta`, `screen` (words
