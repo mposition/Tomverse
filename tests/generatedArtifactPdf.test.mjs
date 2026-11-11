@@ -200,6 +200,28 @@ test("forced tail balancing never overflows a very narrow table cell", async () 
   await document.cleanup();
 });
 
+for (const kind of ["paragraph", "table"]) {
+  test(`${kind} keeps Korean sentence punctuation with its preceding syllable`, async () => {
+    const font = loadPdfFont();
+    const size = kind === "table" ? 9.5 : 10.5;
+    const width = kind === "table" ? (595.28 - 112) / 3 - 8 : 595.28 - 112;
+    const advance = font.advances[glyphFor(font, "가".codePointAt(0))] * size / font.unitsPerEm;
+    for (const punctuation of [".", "!", "?", ")"]) {
+      const text = "가".repeat(Math.floor(width / advance) - 1) + "다" + punctuation + " 1분기 확정 시장 규모는 별도로 확인한다.";
+      const block = kind === "table"
+        ? { type: "table", columns: ["Note", "Value", "Other"], rows: [[text, "", ""]] }
+        : { type: "paragraph", text };
+      const document = await readPdf(build({ filename: "punctuation.pdf", format: "pdf", blocks: [block] }));
+      const content = await (await document.getPage(1)).getTextContent();
+      const lines = content.items.filter(item => item.str?.trim()).map(item => item.str.trim());
+      assert.ok(lines.every(line => !/^[.!?)]/u.test(line)), JSON.stringify(lines));
+      assert.ok(lines.join("").replace(/\s/gu, "").includes(text.replace(/\s/gu, "")));
+      for (const item of content.items.filter(item => item.str?.includes("가"))) assert.ok(item.width <= width + 0.1);
+      await document.cleanup();
+    }
+  });
+}
+
 test("a report title is not repeated by an identical opening heading", async () => {
   const title = "2026년 1분기 국내 커피 프랜차이즈 시장 요약";
   const text = await textOf(build({
