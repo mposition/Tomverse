@@ -43,6 +43,21 @@ import {
 } from "@/lib/amux/v22OwnerQuestionDmService";
 import { prisma } from "@/lib/prisma";
 
+// Shortens the step-up window around one refusal. Under the default it equals
+// the 8-hour console session, so a sign-in old enough to fail step-up would
+// also end console access; only an override leaves the step-up refusal alone
+// to test, as marketing-competitor-routes does.
+const withStepUpWindow = async <T>(minutes: string, run: () => Promise<T>) => {
+  const previous = process.env.ADMIN_RECENT_AUTH_MINUTES;
+  process.env.ADMIN_RECENT_AUTH_MINUTES = minutes;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.ADMIN_RECENT_AUTH_MINUTES;
+    else process.env.ADMIN_RECENT_AUTH_MINUTES = previous;
+  }
+};
+
 // Closing a stalled idea's remaining cards (owner decision 2026-11-05,
 // docs/policy/amux-decision-maker.md §2-10) against PostgreSQL, through the real
 // DB boundaries: an operation over its statement ceiling fails here, and each
@@ -766,8 +781,8 @@ test("the owner closes a kept idea's cards directly, with no question open, thro
     { question: null, direct: null }, "another owner's idea reads as neither");
 
   await assert.rejects(closeDirectly(ideaId, { reason: "no" }), /invalid/);
-  await assert.rejects(closeDirectly(ideaId, { session: owner({
-    authenticatedAt: new Date(Date.now() - 3 * 3_600_000).toISOString() }) }), /Sign in again/);
+  await withStepUpWindow("5", () => assert.rejects(closeDirectly(ideaId, { session: owner({
+    authenticatedAt: new Date(Date.now() - 10 * 60_000).toISOString() }) }), /Sign in again/));
   assert.equal((await card(cardIds[0])).status, "blocked", "nothing moved by a refusal");
 
   const result = await closeDirectly(ideaId);
@@ -971,8 +986,8 @@ test("the owner answers directly, with a person's audit, whatever the router or 
     session: owner(), request: adminRequest(), ideaId: routedAway.ideaId, questionId: question.id,
     decision: "close", reason: "No longer wanted, secret note.", ...over } as never);
   await assert.rejects(answer({ reason: "no" }), /invalid/, "a reason is required");
-  await assert.rejects(answer({ session: owner({ authenticatedAt: new Date(Date.now() - 3 * 3_600_000).toISOString() }) }),
-    /Sign in again/, "recent re-authentication");
+  await withStepUpWindow("5", () => assert.rejects(answer({ session: owner({ authenticatedAt: new Date(Date.now() - 10 * 60_000).toISOString() }) }),
+    /Sign in again/, "recent re-authentication"));
   await assert.rejects(answer({ session: { user: { id: "not-an-admin", email: "x@example.test" },
     expires: new Date(Date.now() + 60_000).toISOString() } }), /forbidden/);
   assert.equal((await questionOf(routedAway.ideaId))!.state, "open");

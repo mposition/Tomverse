@@ -132,7 +132,7 @@ test("only ops:write with a recent step-up resolves a delivery, before the body 
   assert.equal((await POST(post(BODY))).status, 404);
   reset({ opsWrite: false });
   assert.equal((await POST(post(BODY))).status, 403);
-  reset({ session: { user: { id: "operator-1", authenticatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() } } });
+  reset({ session: { user: { id: "operator-1", authenticatedAt: new Date(Date.now() - 9 * 60 * 60_000).toISOString() } } });
   const stale = await POST(post({ nonsense: true }));
   assert.equal(stale.status, 428);
   assert.equal((await stale.json()).code, "ADMIN_REAUTHENTICATION_REQUIRED");

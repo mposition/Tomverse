@@ -20,7 +20,6 @@ import { auditRowActorKind,
   AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
   AMUX_V4_IDEA_SYSTEM_ACTOR } from "@/lib/adminAuditSystemActors";
 import { isAdminReauthenticationError } from "@/lib/adminReauthentication";
-import { resolveRecentAuthMinutes } from "@/lib/adminReauthenticationCore";
 import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
 import { inspectFrontierCatalogWrite } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
@@ -75,6 +74,21 @@ import { AMUX_ANALYSIS_BUDGET_SETTING_ACTION,
   AMUX_ANALYSIS_BUDGET_SETTING_TARGET } from "@/lib/amux/ideaAnalysisBudgetSettingCore";
 import { commitAnalysisBudgetSetting } from "@/lib/amux/ideaAnalysisBudgetSettingStore";
 import { prisma } from "@/lib/prisma";
+
+// Shortens the step-up window around one refusal. Under the default it equals
+// the 8-hour console session, so a sign-in old enough to fail step-up would
+// also end console access; only an override leaves the step-up refusal alone
+// to test, as marketing-competitor-routes does.
+const withStepUpWindow = async <T>(minutes: string, run: () => Promise<T>) => {
+  const previous = process.env.ADMIN_RECENT_AUTH_MINUTES;
+  process.env.ADMIN_RECENT_AUTH_MINUTES = minutes;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.ADMIN_RECENT_AUTH_MINUTES;
+    else process.env.ADMIN_RECENT_AUTH_MINUTES = previous;
+  }
+};
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const url = testUrl ? new URL(testUrl) : null;
@@ -408,14 +422,13 @@ test("owner cancels only an unused hold, releasing the reservation with one audi
     if (previousOpsEmails === undefined) delete process.env.ADMIN_OPS_EMAILS;
     else process.env.ADMIN_OPS_EMAILS = previousOpsEmails;
   }
-  // One minute past the step-up window this run actually uses. A fixed age went
-  // stale-to-fresh when the default window grew from 30 minutes to two hours.
+  // Ten minutes old against a five-minute step-up window: still an
+  // administrator's session, no longer a recent sign-in.
   const staleOwner = { ...session, user: { ...session.user,
-    authenticatedAt: new Date(Date.now() -
-      (resolveRecentAuthMinutes(process.env.ADMIN_RECENT_AUTH_MINUTES) + 1) * 60_000).toISOString() } } as Session;
-  await assert.rejects(prisma.$transaction((tx) =>
+    authenticatedAt: new Date(Date.now() - 10 * 60_000).toISOString() } } as Session;
+  await withStepUpWindow("5", () => assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
-      { session: staleOwner, request, holdId })), isAdminReauthenticationError);
+      { session: staleOwner, request, holdId })), isAdminReauthenticationError));
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
       { session, request, holdId, expectedPreviewId: "synthetic-mismatched-preview" })),

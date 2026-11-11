@@ -98,7 +98,7 @@ test("only the owner links, with the latch on and a recent step-up, before the b
   const { POST } = await loadRoute();
   for (const [changes, status] of [
     [{ session: null }, 404], [{ admin: false }, 404], [{ role: "admin" }, 403], [{ latch: false }, 409],
-    [{ session: { user: { id: "owner-1", authenticatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() } } }, 428],
+    [{ session: { user: { id: "owner-1", authenticatedAt: new Date(Date.now() - 9 * 60 * 60_000).toISOString() } } }, 428],
   ] as const) {
     reset(changes as Partial<World>);
     assert.equal((await POST(post(VALID))).status, status, JSON.stringify(changes));

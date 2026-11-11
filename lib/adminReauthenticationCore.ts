@@ -3,29 +3,39 @@ import type { AdminSessionAccessState } from "@/lib/adminAuthCore";
 const FALLBACK_ADMIN_PATH = "/admin/overview";
 const PUBLIC_ORIGIN = "https://tomverse.app";
 const MIN_RECENT_AUTH_MINUTES = 5;
-const MAX_RECENT_AUTH_MINUTES = 240;
+// The administrator step-up window may run as long as the 8-hour console
+// session (owner decision 2026-11-11). Account-sensitive operations keep the
+// older 240-minute ceiling.
+const MAX_ADMIN_RECENT_AUTH_MINUTES = 480;
+const MAX_ACCOUNT_RECENT_AUTH_MINUTES = 240;
 
-export const DEFAULT_ADMIN_RECENT_AUTH_MINUTES = 120;
+export const DEFAULT_ADMIN_RECENT_AUTH_MINUTES = 480;
 export const DEFAULT_ACCOUNT_RECENT_AUTH_MINUTES = 30;
 
 const resolveBoundedRecentAuthMinutes = (
   raw: string | undefined,
-  fallback: number
+  fallback: number,
+  max: number
 ) => {
   const parsed = Number(raw || fallback);
   return Number.isFinite(parsed)
-    ? Math.min(
-        MAX_RECENT_AUTH_MINUTES,
-        Math.max(MIN_RECENT_AUTH_MINUTES, Math.trunc(parsed))
-      )
+    ? Math.min(max, Math.max(MIN_RECENT_AUTH_MINUTES, Math.trunc(parsed)))
     : fallback;
 };
 
 export const resolveRecentAuthMinutes = (raw: string | undefined) =>
-  resolveBoundedRecentAuthMinutes(raw, DEFAULT_ADMIN_RECENT_AUTH_MINUTES);
+  resolveBoundedRecentAuthMinutes(
+    raw,
+    DEFAULT_ADMIN_RECENT_AUTH_MINUTES,
+    MAX_ADMIN_RECENT_AUTH_MINUTES
+  );
 
 export const resolveAccountRecentAuthMinutes = (raw: string | undefined) =>
-  resolveBoundedRecentAuthMinutes(raw, DEFAULT_ACCOUNT_RECENT_AUTH_MINUTES);
+  resolveBoundedRecentAuthMinutes(
+    raw,
+    DEFAULT_ACCOUNT_RECENT_AUTH_MINUTES,
+    MAX_ACCOUNT_RECENT_AUTH_MINUTES
+  );
 
 /**
  * Decides whether a step-up (re-authentication) prompt is required.
@@ -91,7 +101,7 @@ export const adminReauthenticationHref = (callbackPath: unknown) => {
  *   the console is unreachable, so the reauthentication page can tell from the
  *   access state alone.
  * - `recent-auth` is the step-up window a high-risk write requires:
- *   `ADMIN_RECENT_AUTH_MINUTES`, 120 minutes by default, decided by
+ *   `ADMIN_RECENT_AUTH_MINUTES`, 480 minutes by default, decided by
  *   `isRecentAdminAuthentication`. The console session is still perfectly
  *   valid while this one is expired -- which is why a page that only looked at
  *   the access state sent the operator straight back to the screen that had
