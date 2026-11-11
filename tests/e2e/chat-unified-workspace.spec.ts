@@ -360,6 +360,7 @@ async function openChat(page: Page, options: {
   initialConversationId?: string;
   initialSelectionMode?: "manual" | "auto";
   autoSelectionOffered?: boolean;
+  confirmAutoOnCreate?: boolean;
   holdBlankChatCapability?: boolean;
   autoSelectionPatchResponseLostAfterCommit?: boolean;
   autoSelectionPatchServerErrorAfterCommit?: boolean;
@@ -684,9 +685,12 @@ async function openChat(page: Page, options: {
       return route.fulfill({ status: 201, json: payload(created) });
     }
     if (path === "/api/products/chat/conversations" && method === "POST") {
+      const createAuto = options.confirmAutoOnCreate && options.autoSelectionOffered &&
+        route.request().headers()["x-chat-initial-selection-mode"] === "auto";
       const created: ConversationFixture = {
         id: exposePreviousAccountDrafts ? "qa-chat-created" : "qa-chat-created-b",
         title: "New Chat", productKey: "chat", surface: "chat",
+        ...(createAuto ? { selectionMode: "auto" as const } : {}),
         selectedModels: Array.isArray(body.selectedModels) ? body.selectedModels as string[] : [MODEL_A],
         messages: [],
       };
@@ -697,7 +701,9 @@ async function openChat(page: Page, options: {
       if (options.autoConversationCreateServerErrorAfterCommit) {
         return route.fulfill({ status: 500, json: { code: "QA_CREATE_FORMAT_FAILED" } });
       }
-      return route.fulfill({ status: 201, json: payload(created) });
+      return route.fulfill({ status: 201, json: { ...payload(created), ...(createAuto ? {
+        userId: exposePreviousAccountDrafts ? "qa-user" : "qa-user-b", kind: "chat", isLocked: false,
+      } : {}) } });
     }
     if (path.endsWith("/messages/receipt") && method === "POST") {
       messageReceiptStarted = true;
@@ -3794,11 +3800,21 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(creates[0].body.selectedModels).toHaveLength(1);
   });
 
-  test("a fresh Chat stores Auto before its first Send and dispatches from that owned Chat", async ({ page }) => {
+  for (const confirmAutoOnCreate of [true, false]) test(`a fresh Chat stores Auto before its first Send via ${confirmAutoOnCreate ? "atomic creation" : "legacy mode update"}`, async ({ page }) => {
     const state = await openChat(page, {
       fresh: true,
+      confirmAutoOnCreate,
       autoSelectionOffered: true,
     });
+    // A background history read may still launch when the panel mounts.
+    // With a confirmed creation, it cannot delay the first message save.
+    const detail = makeGate();
+    if (confirmAutoOnCreate) {
+      await page.route("**/api/conversations/qa-chat-created", async route => {
+        if (route.request().method() === "GET") await detail.promise;
+        await route.fallback();
+      });
+    }
     const prompt = "Route this first Chat turn only after Auto is stored.";
     const textarea = page.getByTestId("chat-textarea");
     await expect(page.getByTestId("composer-auto-routing-toggle")).toBeVisible();
@@ -3819,6 +3835,9 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await textarea.fill(prompt);
     await expect.poll(() => state.drafts.get("new")?.text).toBe(prompt);
     await page.getByTestId("chat-send-button").click();
+    try {
+      if (confirmAutoOnCreate) await expect.poll(state.messageSaveCommitted).toBe(true);
+    } finally { detail.release(); }
     await expect.poll(() => state.conversations.find(
       (conversation) => conversation.id === "qa-chat-created"
     )?.selectionMode).toBe("auto");
@@ -3830,7 +3849,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     );
     expect(authorityWrites.map((write) => `${write.method} ${write.path}`)).toEqual([
       "POST /api/products/chat/conversations",
-      "PATCH /api/conversations/qa-chat-created",
+      ...(confirmAutoOnCreate ? [] : ["PATCH /api/conversations/qa-chat-created"]),
     ]);
 
     await drive(page, 0, "push", "The first stored-Auto answer.");
@@ -4168,6 +4187,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       fresh: true,
       autoSelectionOffered: true,
       autoConversationCreateResponseLostAfterCommit: true,
+      confirmAutoOnCreate: true,
     });
     await page.getByTestId("chat-textarea").fill(
       "Do not retry an Auto create whose outcome is unknown."
@@ -4191,6 +4211,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       fresh: true,
       autoSelectionOffered: true,
       autoConversationCreateServerErrorAfterCommit: true,
+      confirmAutoOnCreate: true,
     });
     await page.getByTestId("chat-textarea").fill(
       "Treat a create 5xx as an unknown committed row."

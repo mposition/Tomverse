@@ -8,6 +8,7 @@ const pick = z.object({
   rewrite: z.string().max(1_500).nullable(),
   requiresFileGeneration: z.boolean().optional(),
   searchQueries: z.array(z.string().max(400)).max(2).optional(),
+  simpleLookup: z.boolean().optional(),
   requiresLocation: z.boolean().optional(),
 }).strict();
 

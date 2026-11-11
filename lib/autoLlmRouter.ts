@@ -62,6 +62,7 @@ export type AutoLlmRouterCallResult = {
     failure?: AutoLlmRouterFailure;
     imageDecision?: ChatImageDecision;
     searchQueries?: string[];
+    simpleLookup?: boolean;
     requiresLocation?: boolean;
 };
 
@@ -101,8 +102,8 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
     const baseSchema = autoLlmRouterOutputSchema(candidates, { rewrite });
     const searchSchema = input.searchPlan ? {
         ...baseSchema,
-        properties: { ...baseSchema.properties, searchQueries: routerSearchQueriesSchema },
-        required: [...baseSchema.required, "searchQueries"],
+        properties: { ...baseSchema.properties, searchQueries: routerSearchQueriesSchema, simpleLookup: { type: "boolean" as const } },
+        required: [...baseSchema.required, "searchQueries", "simpleLookup"],
     } : baseSchema;
     const authored = input.locationText?.slice(0, 8_000);
     const schema = authored ? {
@@ -226,7 +227,10 @@ export async function callAutoLlmRouter(
         const locationValue = (output as { requiresLocation?: unknown } | null)?.requiresLocation;
         return { outcome: pick ? "picked" : "invalid", pick, usage, imageDecision,
             ...(input.locationText && typeof locationValue === "boolean" ? { requiresLocation: locationValue } : {}),
-            ...(input.searchPlan ? { searchQueries: parseRouterSearchQueries((output as { searchQueries?: unknown } | null)?.searchQueries) } : {}),
+            ...(input.searchPlan ? {
+                searchQueries: parseRouterSearchQueries((output as { searchQueries?: unknown } | null)?.searchQueries),
+                simpleLookup: (output as { simpleLookup?: unknown } | null)?.simpleLookup === true,
+            } : {}),
             ...(!pick ? { failure: { kind: "invalid_output" as const } } : {}) };
     } catch (error) {
         const structured = NoObjectGeneratedError.isInstance(error);
@@ -465,7 +469,7 @@ export async function pickAutoModelWithLlm(input: {
         routingCycleId: active.cycleId,
         rewrite,
         rewriteCycleId: rewriteGuidance?.cycleId ?? null,
-    }) + (imageIntent ? "+image-intent-v2" : "") + (input.searchPlan ? "+search-plan-v1" : "") +
+    }) + (imageIntent ? "+image-intent-v2" : "") + (input.searchPlan ? "+search-plan-v2" : "") +
         (input.locationFusion ? "+location-v1" : "");
     const call: AutoLlmRouterCallInput = {
         source: "live",
@@ -510,7 +514,7 @@ export async function pickAutoModelWithLlm(input: {
         return null;
     }
     const startedAt = Date.now();
-    const { outcome, pick, usage, failure, imageDecision, searchQueries, requiresLocation } = await callAutoLlmRouter(call);
+    const { outcome, pick, usage, failure, imageDecision, searchQueries, simpleLookup, requiresLocation } = await callAutoLlmRouter(call);
     if (imageDecision) input.onImageDecision?.(imageDecision);
     const latencyMs = Date.now() - startedAt;
     if (prices && usage?.inputTokens !== undefined && usage.outputTokens !== undefined) {
@@ -591,7 +595,7 @@ export async function pickAutoModelWithLlm(input: {
         modelId: pick.modelId,
         rewrite: pick.rewrite,
         ...(requiresLocation === undefined ? {} : { requiresLocation }),
-        ...(searchQueries ? { searchQueries } : {}),
+        ...(searchQueries ? { searchQueries, simpleLookup } : {}),
         ...(pick.requiresFileGeneration !== undefined ? { requiresFileGeneration: pick.requiresFileGeneration } : {}),
     } : null;
 }

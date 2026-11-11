@@ -38,11 +38,13 @@ export function createChatSearchObservation(input: {
   let modelCalls = 0, modelCallsWithSearchResults = 0, finishedSteps = 0;
   let searchToolCalls = 0, toolOnlySearchSteps = 0;
   let searchStepsAfterResults = 0, priorResults = false;
+  let groundedLookupStep = false;
   let presearchEntered = false, evidenceInjected = false, presearchBackendRequests = 0;
   let injectedUrls = new Set<string>();
   let sourceCards: number | null = null;
   return {
-    presearch(injected: boolean) {
+    presearch(injected: boolean, directStep = false) {
+      groundedLookupStep = directStep;
       presearchEntered = true;
       evidenceInjected = injected;
       const snapshot = input.snapshot();
@@ -77,6 +79,7 @@ export function createChatSearchObservation(input: {
         flagEnabled: input.flagEnabled, planOffered: input.planOffered,
         plannedQueries: input.plannedQueries, selectionEligible: input.selectionEligible,
         presearchEntered, presearchBackendRequests, evidenceInjected,
+        ...(groundedLookupStep ? { groundedLookupStep } : {}),
         injectedSources: injectedUrls.size, modelCalls, modelCallsWithSearchResults, finishedSteps, toolOnlySearchSteps,
         searchToolCalls, searchStepsAfterResults,
         answerBackendRequests: final.backendRequestCount - presearchBackendRequests,

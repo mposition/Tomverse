@@ -72,6 +72,8 @@ export type WebSearchBackendOutcome =
   | {
       ok: true;
       results: WebSearchBackendResult[];
+      /** Server-only fallback for presearch input sizing. */
+      descriptionOnlyResults?: WebSearchBackendResult[];
       /** True when results were dropped to stay inside the payload ceiling. */
       truncated: boolean;
     }
@@ -91,6 +93,8 @@ export type WebSearchBackendRequest = {
   searchLang?: string;
   /** How recent a result must be. Restricted to the vendor's own vocabulary. */
   freshness?: "day" | "week" | "month" | "year";
+  /** Server-selected Brave excerpts within the existing result budget. */
+  extraSnippets?: boolean;
   /** Aborts the request when the turn ends. */
   signal?: AbortSignal;
 };
@@ -183,7 +187,8 @@ const isoDate = (value: unknown): string | undefined => {
  * snippet, which is a different claim from one that was cut.
  */
 export const boundSearchResults = (
-  results: readonly WebSearchBackendResult[]
+  results: readonly WebSearchBackendResult[],
+  extraSnippets?: ReadonlyMap<WebSearchBackendResult, unknown[]>
 ): { results: WebSearchBackendResult[]; truncated: boolean } => {
   const kept: WebSearchBackendResult[] = [];
   let size = 0;
@@ -210,12 +215,37 @@ export const boundSearchResults = (
   if (results.length > APP_MANAGED_SEARCH_LIMITS.maxResultsPerQuery) {
     truncated = true;
   }
+  // Reserve every original result first. Extra text in a high-ranked result
+  // must never displace a lower-ranked URL or its original description.
+  if (extraSnippets?.size) {
+    let spare = APP_MANAGED_SEARCH_LIMITS.maxResultPayloadCharacters - size;
+    for (const [index, result] of kept.entries()) {
+      const description = result.snippet ?? "";
+      let snippet = description;
+      for (const raw of extraSnippets.get(result) ?? []) {
+        const separator = snippet ? " " : "";
+        const room = Math.min(APP_MANAGED_SEARCH_LIMITS.maxSnippetCharacters - snippet.length, spare) - separator.length;
+        if (room < 2) break;
+        let extra = plainTextFromBackend(raw, APP_MANAGED_SEARCH_LIMITS.maxSnippetCharacters);
+        if (!extra) continue;
+        if (description && extra.slice(0, description.length).toLowerCase() === description.toLowerCase()) {
+          extra = extra.slice(description.length).trimStart();
+        }
+        if (!extra || snippet.toLowerCase().includes(extra.toLowerCase())) continue;
+        const excerpt = extra.length > room ? extra.slice(0, room - 1).trimEnd() + "…" : extra;
+        snippet += separator + excerpt;
+        spare -= separator.length + excerpt.length;
+      }
+      if (snippet !== description) kept[index] = { ...result, snippet };
+    }
+  }
   return { results: kept, truncated };
 };
 
 /** Brave's `web.results[]`, reduced to the four fields that survive. */
 export const parseBraveWebSearchBody = (
-  body: unknown
+  body: unknown,
+  extraSnippets?: Map<WebSearchBackendResult, unknown[]>
 ): WebSearchBackendResult[] | null => {
   if (!body || typeof body !== "object") return null;
   const web = (body as Record<string, unknown>).web;
@@ -244,12 +274,17 @@ export const parseBraveWebSearchBody = (
     const publishedAt =
       isoDate(record.page_age) ??
       isoDate((record.article as Record<string, unknown> | undefined)?.date);
-    results.push({
+    const result = {
       title,
       url,
       ...(snippet ? { snippet } : {}),
       ...(publishedAt ? { publishedAt } : {}),
-    });
+    };
+    results.push(result);
+    if (extraSnippets && results.length <= APP_MANAGED_SEARCH_LIMITS.maxResultsPerQuery && Array.isArray(record.extra_snippets)) {
+      // Brave documents up to five alternative excerpts per result.
+      extraSnippets.set(result, record.extra_snippets.slice(0, 5));
+    }
   }
   return results;
 };
@@ -313,6 +348,7 @@ export const runWebSearchBackendRequest = async (
   // is still applied, because "in the common case" is not a guarantee.
   url.searchParams.set("text_decorations", "0");
   url.searchParams.set("safesearch", "moderate");
+  if (request.extraSnippets === true) url.searchParams.set("extra_snippets", "true");
   const country = normalizeCountry(request.country);
   if (country) url.searchParams.set("country", country);
   const searchLang = normalizeSearchLang(request.searchLang);
@@ -365,8 +401,14 @@ export const runWebSearchBackendRequest = async (
     return { ok: false, failure: "backend_invalid_response" };
   }
 
-  const parsed = parseBraveWebSearchBody(body);
+  const extraSnippets = request.extraSnippets === true ? new Map<WebSearchBackendResult, unknown[]>() : undefined;
+  const parsed = parseBraveWebSearchBody(body, extraSnippets);
   if (parsed === null) return { ok: false, failure: "backend_invalid_response" };
-  const bounded = boundSearchResults(parsed);
-  return { ok: true, results: bounded.results, truncated: bounded.truncated };
+  const bounded = boundSearchResults(parsed, extraSnippets);
+  // boundSearchResults clones only entries it enriched. Original entries
+  // cover the same retained prefix, including sources without a description.
+  const enriched = extraSnippets && bounded.results.some((result, i) => result !== parsed[i]);
+  return { ok: true, ...bounded,
+    ...(enriched ? { descriptionOnlyResults: parsed.slice(0, bounded.results.length) } : {}),
+  };
 };
