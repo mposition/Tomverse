@@ -33,6 +33,22 @@ const runtimeConfiguration = (model: AiModel) => {
   };
 };
 
+/** DashScope accepts enable_thinking at the top level of Chat Completions. */
+export function qwenLookupStep(model: AiModel) {
+  if (model.provider !== "qwen" || model.apiModel !== "qwen3.8-flash" ||
+      (model.reasoning && model.reasoning !== "none")) return undefined;
+  const lookup = createOpenAI({ ...runtimeConfiguration(model), fetch: (url, init) => {
+    // The SDK serializes the body; leave an unfamiliar request untouched.
+    if (typeof init?.body !== "string") return fetch(url, init);
+    let body;
+    try { body = JSON.parse(init.body); } catch { return fetch(url, init); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return fetch(url, init);
+    return fetch(url, { ...init, body: JSON.stringify({ ...body, enable_thinking: false }) });
+  } }).chat(model.apiModel);
+  // Later tool calls and fallbacks use their ordinary provider defaults.
+  return ({ stepNumber }: { stepNumber: number }) => stepNumber === 0 ? { model: lookup } : undefined;
+}
+
 export const getActiveAiModel = (
   model: AiModel,
   openRouterRequest?: OpenRouterRequest

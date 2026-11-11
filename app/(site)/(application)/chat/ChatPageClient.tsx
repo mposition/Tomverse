@@ -150,7 +150,7 @@ import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages
 import { CHAT_WORKSPACE_PATH, REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import { guestAutoClientExecutionState } from "@/lib/guestAutoClientExecution";
 import { chatRuntimeKey, getChatRuntimeSnapshot, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
-import { chatCreateRefusalCopyKey, chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
+import { CHAT_INITIAL_SELECTION_MODE_HEADER, chatCreateRefusalCopyKey, chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
@@ -2704,7 +2704,7 @@ export function ChatPageClient({
         // A blank Tomverse Chat defaults to Smart Adaptive when the server
         // confirms the current account is eligible. This is display intent,
         // not routing authority: first Send still has to create the owned Chat
-        // and read/PATCH its canonical selectionMode before routing an answer.
+        // with its confirmed canonical selectionMode before routing an answer.
         const explicitOverride = blankChatDefaultModeOverrideRef.current;
         const preferredMode = explicitOverride?.identityKey === identityKey &&
           explicitOverride.selectionTicket === selectionTicket
@@ -8229,8 +8229,8 @@ export function ChatPageClient({
    *
    * A blank Chat has a read-only capability but deliberately has no row. An
    * an explicit Auto click or the first Send with the server-offered default
-   * creates that owned Chat, reads its canonical product and capability, then
-   * stores `auto` before adopting the id. Merely viewing the page therefore
+   * creates that owned Chat in its server-admitted Auto mode, then adopts
+   * the confirmed row. Merely viewing the page therefore
    * creates nothing, while the first Send can never run on a client-only Auto
    * choice.
    */
@@ -8475,6 +8475,7 @@ export function ChatPageClient({
     const promise = (async () => {
       setSelectionModePending(true);
       let createdId: string | null = null;
+      let createdAutoChat: (Parameters<typeof applyConversationSettings>[0] & { surface: "chat" }) | null = null;
       let createdTitle = (
         capturedDraft.text.trim() ||
         capturedDraft.attachments[0]?.name ||
@@ -8498,7 +8499,7 @@ export function ChatPageClient({
           try {
             response = await fetch("/api/products/chat/conversations", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", [CHAT_INITIAL_SELECTION_MODE_HEADER]: "auto" },
               body: JSON.stringify({
                 title: createdTitle,
                 selectedModels: capturedModels,
@@ -8541,7 +8542,8 @@ export function ChatPageClient({
             return false;
           }
           const created = await response.json().catch(() => null);
-          if (typeof created?.id !== "string") {
+          if (typeof created?.id !== "string" || !created.id ||
+              (typeof created.userId === "string" && created.userId !== sessionUserId)) {
             if (originStillCurrent()) {
               newChatAutoUnknownRef.current = { identityKey, selectionTicket };
               setSelectionModeUnknown({ identityKey, conversationId: null });
@@ -8561,6 +8563,12 @@ export function ChatPageClient({
               ? created.disabledPanels
               : capturedDisabled
           ).filter((modelId) => createdModels.includes(modelId));
+          if (created.userId === sessionUserId && created.surface === "chat" && created.productKey === "chat" &&
+              created.kind === "chat" && created.isLocked === false && created.selectionMode === "auto" && created.autoSelection?.offered === true &&
+              createdModels.length === 1 && Array.isArray(created.selectedModels) && sameStringList(created.selectedModels, createdModels) &&
+              Array.isArray(created.disabledPanels) && sameStringList(created.disabledPanels, createdDisabled)) {
+            createdAutoChat = created;
+          }
           rememberKnownConversation(
             knownCreatedId,
             createdTitle,
@@ -8583,7 +8591,9 @@ export function ChatPageClient({
           }
           return response.json().catch(() => null);
         };
-        const canonical = await readCanonical().catch(() => null);
+        // Older servers ignore the header. Use the row already created for
+        // capability verification and the legacy mode write without replaying creation.
+        const canonical = createdAutoChat ?? await readCanonical().catch(() => null);
         if (!canonical) {
           if (originStillCurrent()) {
             showToast(t("chat.autoSelectionFailed"), "error");
@@ -8605,7 +8615,6 @@ export function ChatPageClient({
           return false;
         }
 
-        let stored = false;
         const verifyUnknownPatch = async () => {
           const verified = await readCanonical().catch(() => null);
           if (verified?.selectionMode === "auto" &&
@@ -8621,26 +8630,25 @@ export function ChatPageClient({
           }
           return false;
         };
-        try {
-          const response = await fetch(`/api/conversations/${createdId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ selectionMode: "auto" }),
-          });
-          await discardResponseBody(response);
-          stored = response.ok;
-          if (!stored && response.status >= 500) {
-            stored = await verifyUnknownPatch();
-          } else if (response.status === 403 && originStillCurrent()) {
-            setAutoSelectionOffered(false);
+        const storeLegacyAuto = async () => {
+          try {
+            const response = await fetch(`/api/conversations/${createdId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ selectionMode: "auto" }),
+            });
+            await discardResponseBody(response);
+            if (response.ok) return true;
+            if (response.status >= 500) return verifyUnknownPatch();
+            if (response.status === 403 && originStillCurrent()) setAutoSelectionOffered(false);
+            return false;
+          } catch {
+            // A lost response can still have committed. One read-only check
+            // resolves the outcome without issuing another PATCH.
+            return verifyUnknownPatch();
           }
-        } catch {
-          // A lost response can still have committed. One read-only check is
-          // the only safe way to distinguish success from an unknown write;
-          // never issue a second PATCH.
-          stored = await verifyUnknownPatch();
-        }
-        if (!stored) {
+        };
+        if (!createdAutoChat && !(await storeLegacyAuto())) {
           if (originStillCurrent()) {
             showToast(t("chat.autoSelectionFailed"), "error");
           }

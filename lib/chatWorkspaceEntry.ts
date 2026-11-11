@@ -32,6 +32,7 @@ export function decideChatWorkspaceEntry(input: {
 }
 
 export const CHAT_SINGLE_MODEL_REQUIRED = "CHAT_SINGLE_MODEL_REQUIRED";
+export const CHAT_INITIAL_SELECTION_MODE_HEADER = "X-Chat-Initial-Selection-Mode";
 export const CHAT_PROFILE_SINGLE_MODEL_REQUIRED = "CHAT_PROFILE_SINGLE_MODEL_REQUIRED";
 
 /**

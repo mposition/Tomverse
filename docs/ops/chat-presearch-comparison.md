@@ -24,3 +24,5 @@ The report gives equal-weight paired distributions for authorized, completed and
 
 For each browser metric, `within10s` reports the number of OFF and ON observations
 at or below 10,000 ms and the shared denominator `observedPairs`.
+
+For paired Qwen 3.8 Flash evaluation, set `CHAT_QWEN_GROUNDED_LOOKUP_ENABLED=true` only in the candidate environment. It defaults off. It changes the first answer step only for a Smart Adaptive direct lookup with injected search sources; follow-up steps retain the regular model and tools. Report the selected model, observation date, answer correctness and linked sources alongside browser latency; distinguish live search from replayed evidence.

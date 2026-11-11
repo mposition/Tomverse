@@ -1,4 +1,5 @@
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { consumeConversationUpdateLimit } from "@/lib/conversationUpdateRateLimit";
 ﻿export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
@@ -381,10 +382,7 @@ export async function PATCH(
         }
 
         const userId = session.user.id;
-        await consumeApiRateLimit(req, userId, "conversation-update", {
-            minute: 30,
-            day: 1000,
-        });
+        await consumeConversationUpdateLimit(req, userId);
         const body = await readLimitedJson(
             req,
             16 * 1024,

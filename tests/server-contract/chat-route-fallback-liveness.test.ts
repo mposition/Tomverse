@@ -89,6 +89,7 @@ let priorFusionMessage = false;
 let llmSearchQueries: string[] | undefined;
 let llmSearchModelId: string | undefined;
 let llmSearchFileIntent: boolean | undefined;
+let llmSimpleLookup: boolean | undefined;
 let pairedSearchModel: MockLanguageModelV4 | undefined;
 let forceAppManagedSearch = false;
 let forceNativeSearch = false;
@@ -136,7 +137,7 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
     if (input.verifyPreparedContext && !(await input.verifyPreparedContext())) return null;
     paidRouterCalls++;
     return { modelId: llmSearchModelId ?? input.ruleModelId,
-      rewrite: llmRouterRewrite, searchQueries: llmSearchQueries, requiresFileGeneration: llmSearchFileIntent };
+      rewrite: llmRouterRewrite, searchQueries: llmSearchQueries, requiresFileGeneration: llmSearchFileIntent, simpleLookup: llmSimpleLookup };
   },
 } });
 const shadowInputs: Array<import("../../lib/routingShadow").RoutingShadowInput> = [];
@@ -556,6 +557,7 @@ type Attempt = {
   cancelledWith: unknown;
   messages: Array<{ role: string; content: unknown }>;
   toolNames: string[];
+  preparesStep: boolean;
   /** What reached the provider-facing abort signal. */
   providerAbortedWith: unknown;
   /** The provider signal state at the exact reader-cancel boundary. */
@@ -609,6 +611,7 @@ mock.module("ai", {
         cancelledWith: null,
         messages: options.messages as Attempt["messages"],
         toolNames: Object.keys(options.tools ?? {}),
+        preparesStep: typeof options.prepareStep === "function",
         providerAbortedWith: null,
         providerAbortedBeforeReaderCancel: false,
       };
@@ -1387,6 +1390,7 @@ mock.module(mod("lib/modelAvailability.ts"), {
 // Both attempts go through it, which is also how each one's model id is seen.
 mock.module(mod("lib/activeAiModel.ts"), {
   namedExports: {
+    qwenLookupStep: (require(resolve(ROOT, "lib/activeAiModel.ts")) as typeof import("../../lib/activeAiModel")).qwenLookupStep,
     getActiveAiModel: (model: { id?: string }) => {
       if (guestKnownUndispatchedRefusalMode === "catalogue_host") {
         const refusal = new Error("DEPLOYMENT_HOST_NOT_A_CATALOGUE_PROVIDER") as
@@ -1649,7 +1653,8 @@ const ask = async (
     | "during_completion"
     | "after_stream_created"
     | "during_record_dispatched"
-    | "during_primary_reader_cancel" = "none"
+    | "during_primary_reader_cancel" = "none",
+  requestedModelId = REQUESTED_MODEL_ID,
 ) => {
   activeSession = {
     user: { id: USER_ID, email: "fallback-qa@tomverse.app" },
@@ -1708,7 +1713,7 @@ const ask = async (
       },
       body: JSON.stringify({
         messages: requestMessages,
-        modelId: REQUESTED_MODEL_ID,
+        modelId: requestedModelId,
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
         webSearchMode,
@@ -3805,6 +3810,50 @@ test("router presearch stays behind admission, preserves search recovery policy 
     if (oldFlag === undefined) delete process.env.CHAT_ROUTER_PRESEARCH_ENABLED; else process.env.CHAT_ROUTER_PRESEARCH_ENABLED = oldFlag;
     if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
     failPresearchBackend = false; turnLocation = undefined; forceNativeSearch = false; forceAppManagedSearch = false; llmSearchQueries = undefined; llmSearchModelId = undefined; llmSearchFileIntent = undefined; refusePresearchAdmission = false; throwAfterPresearch = false;
+  }
+});
+
+test("only an admitted simple Qwen lookup with injected sources prepares the first provider step", async t => {
+  const { STATIC_RUNTIME_MODELS } = await import("@/lib/modelRegistryShared");
+  const flash = STATIC_RUNTIME_MODELS.find(model => model.id === "qwen3.6-flash")!;
+  // Mimic a registry alias pointing at DashScope's newer deployed API model.
+  // Every scenario selects this same Qwen model, including the manual turn.
+  const originalApiModel = flash.apiModel;
+  const originalWindow = flash.contextWindowTokens;
+  const oldEnv = { ...process.env };
+  const oldModels = selectedConversationModels;
+  t.after(() => {
+    flash.apiModel = originalApiModel;
+    flash.contextWindowTokens = originalWindow;
+    selectedConversationModels = oldModels;
+    conversationSelectionMode = "auto";
+    for (const key of ["CHAT_QWEN_GROUNDED_LOOKUP_ENABLED", "CHAT_ROUTER_PRESEARCH_ENABLED", "BRAVE_SEARCH_API_KEY", "APP_ENV"]) {
+      if (oldEnv[key] === undefined) delete process.env[key]; else process.env[key] = oldEnv[key];
+    }
+    forceAppManagedSearch = false; failPresearchBackend = false;
+    llmSimpleLookup = undefined; llmSearchQueries = undefined; llmSearchModelId = undefined; llmSearchFileIntent = undefined;
+  });
+  flash.apiModel = "qwen3.8-flash";
+  flash.contextWindowTokens = 131_072;
+  process.env.APP_ENV = "dev";
+  process.env.BRAVE_SEARCH_API_KEY = "synthetic-never-sent";
+  forceAppManagedSearch = true;
+  selectedConversationModels = [flash.id];
+  llmSearchModelId = flash.id;
+  llmSearchQueries = ["one fact"];
+  llmSearchFileIntent = false;
+  for (const scenario of ["grounded", "manual", "no sources", "presearch off", "lookup flag off", "complex"]) {
+    conversationSelectionMode = scenario === "manual" ? "manual" : "auto";
+    process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED = String(scenario !== "lookup flag off");
+    process.env.CHAT_ROUTER_PRESEARCH_ENABLED = String(scenario !== "presearch off");
+    failPresearchBackend = scenario === "no sources" ? "all" : false;
+    llmSimpleLookup = scenario !== "complex";
+    await ask("answers", "claimed", 200, false, undefined, true, false, undefined, "always", "none", flash.id);
+    assert.equal(attempts[0].modelId, flash.id, scenario);
+    assert.equal(attempts[0].toolNames.includes("web_search"), true, scenario);
+    const withEvidence = JSON.stringify(attempts[0].messages).includes("Verified fixture fact.");
+    assert.equal(withEvidence, ["grounded", "lookup flag off", "complex"].includes(scenario), scenario);
+    assert.equal(attempts[0].preparesStep, scenario === "grounded", scenario);
   }
 });
 
