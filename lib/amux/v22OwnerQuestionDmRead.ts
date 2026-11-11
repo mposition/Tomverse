@@ -43,11 +43,25 @@ export async function readAmuxV22QuestionDm(questionId: string): Promise<AmuxV22
         }),
       };
     }
+    return await readAmuxDmLocalCardState(cardId);
+  } catch {
+    console.warn(JSON.stringify({ subsystem: "amux", event: "v22_question_dm_read_failed" }));
+    return { state: "unavailable" };
+  }
+}
+
+/**
+ * Where one local Decision Maker card stands -- a worker question's, or a
+ * result review's -- read through the Decision Maker's own stores. Reads only;
+ * a failed read is `unavailable`.
+ */
+export async function readAmuxDmLocalCardState(cardId: string): Promise<AmuxV22QuestionDm> {
+  try {
     const detail = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerRequestDetailRead,
       (tx) => readDecisionMakerCardDetailForAdmin(tx, cardId));
     return amuxV22QuestionDmOfDetail(detail);
   } catch {
-    console.warn(JSON.stringify({ subsystem: "amux", event: "v22_question_dm_read_failed" }));
+    console.warn(JSON.stringify({ subsystem: "amux", event: "dm_local_card_read_failed" }));
     return { state: "unavailable" };
   }
 }
