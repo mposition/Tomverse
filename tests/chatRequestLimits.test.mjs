@@ -135,8 +135,8 @@ test("the client fits to exactly the limits the server applies", () => {
 
 test("the client sends its transcript through the fit", () => {
   const source = readFileSync(new URL("../components/chat/ChatApp.tsx", import.meta.url), "utf8");
-  const send = source.indexOf('fetch("/api/chat", {\n          method: "POST"');
-  assert.ok(send > 0, "the chat request is sent from ChatApp");
+  const send = source.indexOf("const requestBody = {");
+  assert.ok(send > 0, "the chat request body is built in ChatApp");
   const body = source.slice(send, source.indexOf("modelId: modelId", send));
   assert.match(body, /messages: fitChatRequestTranscript\(/);
 });

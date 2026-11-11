@@ -12,16 +12,17 @@ const PRESEARCH_INPUT_TOKENS = Math.floor(WEB_SEARCH_INPUT_TOKEN_OVERHEAD *
 type SearchEvidencePart = { type: "text"; text: string };
 
 /** Append external data without fabricating provider-owned assistant tool history. */
-export function appendRouterSearchEvidence(messages: ModelMessage[], evidence: SearchEvidencePart[]): void {
-  if (!evidence.length) return;
+export function appendRouterSearchEvidence(messages: ModelMessage[], evidence: SearchEvidencePart[]): boolean {
+  if (!evidence.length) return false;
   const index = messages.findLastIndex(message => message.role === "user");
   const message = messages[index];
-  if (!message || message.role !== "user") return;
+  if (!message || message.role !== "user") return false;
   // Clone the message: the fallback snapshot must retain its original input.
   messages[index] = { ...message, content: [
     ...(typeof message.content === "string" ? [{ type: "text" as const, text: message.content }] : message.content),
     ...evidence,
   ] };
+  return true;
 }
 
 /** Reuse the attempt's admitted tool, counter, result cache and sources. */

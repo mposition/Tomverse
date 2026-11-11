@@ -18,6 +18,7 @@
  */
 
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
+import { chatRouterLocationFusionEnabled } from "@/lib/chatRouterLocationFusionEnabled";
 import { cookies } from "next/headers";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -380,6 +381,7 @@ export async function ReviewWorkspaceShell({
         chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
         chatLocationIntentEnabled={process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED === "true"}
         chatParallelPreparationEnabled={process.env.CHAT_PARALLEL_PREPARATION_ENABLED === "true"}
+        chatRouterLocationFusion={chatRouterLocationFusionEnabled()}
         chatFreshLocationPreparationEnabled={process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED === "true"}
         chatImageEditEnabled={chatImageEditEnabled}
         voiceInputEnabled={voiceInputEnabled}

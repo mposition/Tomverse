@@ -285,6 +285,22 @@ test("a skipped or failed combined router falls back to one standalone image cal
   assert.equal(reserved.length, 1);
 });
 
+test("a location continuation reuses an image decision only while its catalogue and gates still admit it", async () => {
+  reset();
+  const { createChatTurnImageRouting } = await load();
+  const input = { userId: "user-1", conversationId: "conv-1", text: "Draw the area near me",
+    plan: { tier: "Pro" } as never, traceId: "resume", request: new Request("https://tomverse.test/api/chat") };
+  const decision = { image: true as const, modelId: "gpt-image-2", preset: "draft" as const, prompt: null, edit: false };
+  for (const combined of [true, false]) {
+    assert.deepEqual(await createChatTurnImageRouting(input, combined, decision).resolve(), decision);
+    assert.deepEqual(await createChatTurnImageRouting(input, combined, { ...decision, modelId: "retired" }).resolve(), { image: false });
+    imageFlagOn = false;
+    assert.deepEqual(await createChatTurnImageRouting(input, combined, decision).resolve(), { image: false });
+    imageFlagOn = true;
+  }
+  assert.equal(calls.length + reserved.length, 0);
+});
+
 test("combined routing keeps image access and previous-image lock gates", async () => {
   reset();
   accessRefused = true;
