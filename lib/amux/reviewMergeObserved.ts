@@ -92,7 +92,7 @@ export async function completeAmuxV22ReviewOnObservedMerge(
     throw new Error("AMUX approval review id is invalid");
   }
   const approvedBy = input.approvalReviewId === null ?
-    "an authorised approver's own merge" : `GitHub approval review ${input.approvalReviewId}`;
+    "The authorised approver merged it themselves" : `GitHub approval review ${input.approvalReviewId}`;
   const boundary = amuxBoundaryWithAttachment(
     AMUX_DB_BOUNDARIES.reviewMergeObserved, attachment);
   return withAmuxDbBoundary(
@@ -197,7 +197,7 @@ export async function completeAmuxV22ReviewOnObservedMerge(
         data: {
           status: "resolved",
           resolutionOutcome: "approve",
-          resolution: `${approvedBy[0]!.toUpperCase()}${approvedBy.slice(1)} and merge ${input.mergeCommitSha} observed.`,
+          resolution: `${approvedBy} and merge ${input.mergeCommitSha} observed.`,
           resolvedById: AMUX_MERGE_OBSERVER_RESOLVER,
           resolvedByEmail: null,
           resolvedAt: context.dbNow,

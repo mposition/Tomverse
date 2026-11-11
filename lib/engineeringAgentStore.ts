@@ -1990,8 +1990,6 @@ export const engineeringAgentMergeObservationSchema = z
     mergedAt: isoInstant.nullable(),
     mergedByKind: z.enum(ENGINEERING_AGENT_MERGER_KINDS),
     observedAt: isoInstant,
-    /** The merge itself stood as the approval: an approver's own merge of the verified head (§9-10). */
-    approvedByMerge: z.literal(true).optional(),
   })
   .strict()
   .refine((value) => value.merged === (value.mergeCommitSha !== null && value.mergedAt !== null), {
@@ -2155,7 +2153,17 @@ type BindingObservationInput =
       observation: z.infer<typeof engineeringAgentApprovalObservationSchema>;
       reviewer: { githubId: number; login: string } | null;
     }
-  | { bindingId: string; kind: "merge"; observation: z.infer<typeof engineeringAgentMergeObservationSchema> };
+  | {
+      bindingId: string;
+      kind: "merge";
+      observation: z.infer<typeof engineeringAgentMergeObservationSchema>;
+      /**
+       * The merge itself stood as the approval: an approver's own merge of the
+       * verified head (engineering-agent.md §9-10). Kept in the audit entry;
+       * the stored observation's shape is fixed by its CHECK.
+       */
+      approvedByMerge?: true;
+    };
 
 export async function recordEngineeringAgentBindingObservation(
   tx: EngineeringAgentTransaction,
@@ -2174,6 +2182,7 @@ const bindingObservationAudit = (input: BindingObservationInput) => ({
   kind: input.kind,
   verdict: input.kind === "approval" ? input.observation.verdict : null,
   merged: input.kind === "merge" ? input.observation.merged : null,
+  ...("approvedByMerge" in input && input.approvedByMerge ? { approvedByMerge: true } : {}),
 });
 
 /**

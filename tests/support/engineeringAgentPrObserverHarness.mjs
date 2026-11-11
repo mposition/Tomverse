@@ -49,7 +49,8 @@ mock.module(mod("lib/amux/reviewMergeObserved.ts"), {
   },
 });
 
-const { observeEngineeringAgentPullRequests } = await import(mod("lib/engineeringAgentPrObserver.ts"));
+const { observeEngineeringAgentPullRequests, ENGINEERING_AGENT_PR_FILE_MISMATCH_CAUSE,
+  ENGINEERING_AGENT_UNAPPROVED_MERGE_CAUSE } = await import(mod("lib/engineeringAgentPrObserver.ts"));
 
 const binding = (overrides = {}) => ({
   id: "binding", runId: "700000001", prNumber: 42, verifiedHeadSha: HEAD, createdAt,
@@ -152,13 +153,15 @@ for (const approval of [null, { verdict: "approved", reviewId: 9, observedAt: "2
   assert.deepEqual(recorded()[0], ["complete", { taskId: "card", attemptId: "attempt", prNumber: 42,
     mergeCommitSha: MERGE, approvalReviewId: null, changedFiles: null, bindingId: "binding" }]);
   assert.deepEqual(recorded()[1].slice(0, 2), ["observe", "amux-tx"]);
-  assert.equal(recorded()[1][2].observation.approvedByMerge, true);
+  // The basis rides the audit entry; the stored observation's shape is fixed by its CHECK.
+  assert.equal(recorded()[1][2].approvedByMerge, true);
+  assert.equal("approvedByMerge" in recorded()[1][2].observation, false);
   assert.equal(recorded().some(([kind]) => kind === "mismatch"), false);
 
   // The owner already settled the card (or it is not in review): the merge is recorded, nothing stops.
   completeResult = { completed: false, reason: "task_not_in_review" };
   assert.deepEqual(await run([binding()], async () => pull(ownMerge)), [{ bindingId: "binding", outcome: "merge_recorded" }]);
-  assert.equal(recorded().at(-1)[2].observation.approvedByMerge, true);
+  assert.equal(recorded().at(-1)[2].approvedByMerge, true);
   assert.equal(recorded().some(([kind]) => kind === "mismatch"), false);
 
   // A review recorded before the merge still completes on that review, and the merge is not marked.
@@ -167,11 +170,16 @@ for (const approval of [null, { verdict: "approved", reviewId: 9, observedAt: "2
   assert.equal(recorded()[0][1].approvalReviewId, 9);
   assert.equal("approvedByMerge" in recorded()[1][2].observation, false);
 
-  // Not the approver's own merge of the verified head into develop: still a mismatch.
+  // Not the approver's own merge of the verified head into develop: still a
+  // mismatch, under a cause key the store admits (a prefix of at most 20
+  // characters; the reason codes themselves were longer and were refused).
+  for (const cause of [ENGINEERING_AGENT_UNAPPROVED_MERGE_CAUSE, ENGINEERING_AGENT_PR_FILE_MISMATCH_CAUSE])
+    assert.match(cause, /^[a-z0-9_]{1,20}$/);
   for (const overrides of [{ mergedByApprover: false }, { headSha: "f".repeat(40) }, { baseRef: "main" }]) {
     assert.deepEqual(await run([binding()], async () => pull({ ...ownMerge, ...overrides })),
       [{ bindingId: "binding", outcome: "merged_without_approval" }]);
     assert.equal(recorded().at(-1)[2].reason, "merged_without_approval");
+    assert.equal(recorded().at(-1)[2].causeKey, "unapproved_merge:binding");
     assert.equal(recorded().some(([kind]) => kind === "complete"), false);
   }
 }

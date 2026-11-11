@@ -44,6 +44,18 @@ const OBSERVATION_PRISMA_CALLS = 12;
 const PAGE_SIZE = 20;
 const ROUND_CEILING = 200;
 
+/**
+ * The cause-key prefixes of the two mismatches this observer opens. The store
+ * admits a prefix of at most 20 characters (CAUSE_KEY in
+ * lib/engineeringAgentStore.ts). Until 2026-11-12 these were the reason codes
+ * themselves, 22 and 23 characters long, so the store refused both: the
+ * mismatch was never opened, its transaction rolled the merge observation
+ * back, and the round ended in an error at that pull request every time
+ * (production: nothing was observed after #3702 merged on 2026-11-10).
+ */
+export const ENGINEERING_AGENT_PR_FILE_MISMATCH_CAUSE = "pr_file_mismatch";
+export const ENGINEERING_AGENT_UNAPPROVED_MERGE_CAUSE = "unapproved_merge";
+
 export type EngineeringAgentPrObserverOutcome =
   | "approved"
   | "completed"
@@ -160,8 +172,9 @@ export async function observeEngineeringAgentPullRequests(
       mergedAt: pull.mergedAt!.toISOString(),
       mergedByKind: pull.mergedByKind,
       observedAt,
-      ...(approvedByMerge ? { approvedByMerge: true as const } : {}),
     };
+    const mergeRecord = { bindingId: binding.id, kind: "merge" as const, observation: mergeObservation,
+      ...(approvedByMerge ? { approvedByMerge: true as const } : {}) };
 
     if (merge === "done") {
       const cardId = binding.run?.cardId ?? null;
@@ -175,9 +188,7 @@ export async function observeEngineeringAgentPullRequests(
           {
             prismaCalls: OBSERVATION_PRISMA_CALLS,
             work: async (lent) => {
-              await recordEngineeringAgentBindingObservation(engineeringAgentTransactionInAmux(lent), {
-                bindingId: binding.id, kind: "merge", observation: mergeObservation,
-              });
+              await recordEngineeringAgentBindingObservation(engineeringAgentTransactionInAmux(lent), mergeRecord);
             },
           },
         );
@@ -187,12 +198,10 @@ export async function observeEngineeringAgentPullRequests(
         }
         if (completed.reason === "pr_file_state_mismatch") {
           await runEngineeringAgentTransaction(prisma, async (tx) => {
-            await recordEngineeringAgentBindingObservation(tx, {
-              bindingId: binding.id, kind: "merge", observation: mergeObservation,
-            });
+            await recordEngineeringAgentBindingObservation(tx, mergeRecord);
             await openEngineeringAgentWorkItem(tx, {
               kind: "state_mismatch",
-              causeKey: `pr_file_state_mismatch:${binding.id}`,
+              causeKey: `${ENGINEERING_AGENT_PR_FILE_MISMATCH_CAUSE}:${binding.id}`,
               runId: binding.runId,
               reason: "pr_file_state_mismatch",
             });
@@ -204,7 +213,7 @@ export async function observeEngineeringAgentPullRequests(
       // Not a v22 implement card (or it has moved on): its review stays the
       // Admin console's; the merge is still recorded.
       await runEngineeringAgentTransaction(prisma, (tx) =>
-        recordEngineeringAgentBindingObservation(tx, { bindingId: binding.id, kind: "merge", observation: mergeObservation }),
+        recordEngineeringAgentBindingObservation(tx, mergeRecord),
       );
       results.push({ bindingId: binding.id, outcome: "merge_recorded" });
       continue;
@@ -219,10 +228,10 @@ export async function observeEngineeringAgentPullRequests(
           reviewer: null,
         });
       }
-      await recordEngineeringAgentBindingObservation(tx, { bindingId: binding.id, kind: "merge", observation: mergeObservation });
+      await recordEngineeringAgentBindingObservation(tx, mergeRecord);
       await openEngineeringAgentWorkItem(tx, {
         kind: "state_mismatch",
-        causeKey: `merged_without_approval:${binding.id}`,
+        causeKey: `${ENGINEERING_AGENT_UNAPPROVED_MERGE_CAUSE}:${binding.id}`,
         runId: binding.runId,
         reason: "merged_without_approval",
       });

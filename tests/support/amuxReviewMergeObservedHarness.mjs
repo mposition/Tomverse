@@ -104,7 +104,7 @@ assert.deepEqual(await run({ approvalReviewId: null }), { completed: true, taskR
   assert.equal(merged.metadata.approval_basis, "approver_merge");
   assert.equal("approval_review_id" in merged.metadata, false);
   assert.match(writes.find(([kind]) => kind === "escalation")[1].data.resolution,
-    /^An authorised approver's own merge and merge /);
+    /^The authorised approver merged it themselves and merge /);
 }
 
 // Every refusal writes nothing.
