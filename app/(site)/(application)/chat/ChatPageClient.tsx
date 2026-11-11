@@ -1,8 +1,7 @@
 ﻿"use client";
 
 import { requestChatLocationIntent } from "@tomverse/api-client";
-import { chatLocationSession } from "@/lib/chatLocationClient";
-import type { PreparedChatLocationIntent } from "@tomverse/chat-core";
+import { chatLocationSession, prepareFreshChatLocationIntent, type ChatPanelLocationIntent, type FreshChatLocationPreparation } from "@/lib/chatLocationClient";
 
 import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
@@ -741,6 +740,7 @@ type GlobalSubmitOptions = {
     };
     preparedDraftSend?: PreparedDraftSend;
     draftSettlement?: { settled: boolean };
+    freshLocation?: FreshChatLocationPreparation;
   };
   /**
    * The models this one send is for, when that is not the whole selection.
@@ -768,6 +768,7 @@ type BlankChatAutoSendAuthority = {
   profileId: string | null;
   preparedDraftSend: PreparedDraftSend;
   draftSettlement: { settled: boolean };
+  freshLocation?: FreshChatLocationPreparation;
 };
 
 export function ChatPageClient({
@@ -780,6 +781,7 @@ export function ChatPageClient({
   chatLocationIntentEnabled = true,
   chatParallelPreparationEnabled = false,
   chatRouterLocationFusion = false,
+  chatFreshLocationPreparationEnabled = false,
   chatImageEditEnabled = false,
   reviewEasyAvailable = false,
   voiceInputEnabled = false,
@@ -816,6 +818,7 @@ export function ChatPageClient({
   chatLocationIntentEnabled?: boolean;
   chatParallelPreparationEnabled?: boolean;
   chatRouterLocationFusion?: boolean;
+  chatFreshLocationPreparationEnabled?: boolean;
   /** A send with a photo may be an edit of it (IMAGE_EDIT_ENABLED). */
   chatImageEditEnabled?: boolean;
   reviewEasyAvailable?: boolean;
@@ -1781,7 +1784,7 @@ export function ChatPageClient({
     submittedAtMonotonicMs?: number;
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
-    preparedLocationIntent?: PreparedChatLocationIntent;
+    preparedLocationIntent?: ChatPanelLocationIntent;
     routerLocationTurnIsCurrent?: () => boolean;
     id: string;
     text: string;
@@ -2601,6 +2604,12 @@ export function ChatPageClient({
     mountedSurface: "workspace" | "continuation" | "chat";
   } | null>(null);
   useLayoutEffect(() => {
+    const owner = newChatAutoPreparationRef.current?.sendAuthority;
+    if (owner?.freshLocation && (
+      owner.selectionTicket !== conversationSelectionTicketRef.current ||
+      !sameStringList(owner.modelIds, latestModelSettingsRef.current.models) ||
+      !sameStringList(owner.disabledIds, latestModelSettingsRef.current.disabled)
+    )) owner.freshLocation.cancelUnlessHandedOff();
     committedAutoSendScopeRef.current = {
       identityKey,
       conversationId: currentChatId,
@@ -2639,6 +2648,7 @@ export function ChatPageClient({
     return () => {
       conversationNavigationAttemptRef.current = allocateConversationNavigationAttempt();
       pendingCreatedChatRef.current = null;
+      newChatAutoPreparationRef.current?.sendAuthority?.freshLocation?.cancelUnlessHandedOff();
       newChatAutoPreparationRef.current = null;
       newChatAutoDraftSendRef.current = null;
       newChatAutoUnknownRef.current = null;
@@ -2696,7 +2706,7 @@ export function ChatPageClient({
         // A blank Tomverse Chat defaults to Smart Adaptive when the server
         // confirms the current account is eligible. This is display intent,
         // not routing authority: first Send still has to create the owned Chat
-        // and read/PATCH its canonical selectionMode before any paid path.
+        // and read/PATCH its canonical selectionMode before routing an answer.
         const explicitOverride = blankChatDefaultModeOverrideRef.current;
         const preferredMode = explicitOverride?.identityKey === identityKey &&
           explicitOverride.selectionTicket === selectionTicket
@@ -4496,6 +4506,7 @@ export function ChatPageClient({
         conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         pendingCreatedChatRef.current = null;
         setPendingCreatedDraftScope(null);
+        newChatAutoPreparationRef.current?.sendAuthority?.freshLocation?.cancelUnlessHandedOff();
         newChatAutoPreparationRef.current = null;
         newChatAutoDraftSendRef.current = null;
         newChatAutoUnknownRef.current = null;
@@ -6038,6 +6049,7 @@ export function ChatPageClient({
       return matches();
     };
     const abortBlankAutoSend = (authority: BlankChatAutoSendAuthority) => {
+      authority.freshLocation?.cancelUnlessHandedOff();
       if (authority.draftSettlement.settled) return;
       abortDraftSend(authority.preparedDraftSend);
       authority.draftSettlement.settled = true;
@@ -6105,6 +6117,15 @@ export function ChatPageClient({
             abortDraftSend(preparedDraftSend);
             return null;
           }
+          const freshLocation = chatFreshLocationPreparationEnabled && chatLocationIntentEnabled &&
+            status === "authenticated" && sessionUserId && identityKey === `account:${sessionUserId}` &&
+            options === undefined && selectionModeRef.current === "auto" &&
+            preparedDraftSend.draft.text && preparedDraftSend.draft.attachments.length === 0 &&
+            capturedModels.length === 1 && !capturedDisabled.includes(capturedModels[0]) &&
+            !(newChatAutoUnknownRef.current?.identityKey === identityKey && newChatAutoUnknownRef.current.selectionTicket === expectedSelectionTicket) &&
+            !pendingSubmissionOwnersRef.current.has(identityKey)
+            ? prepareFreshChatLocationIntent(identityKey, sessionUserId, preparedDraftSend.draft.text)
+            : undefined;
           return {
             identityKey,
             identityEpoch: capturedIdentityEpoch,
@@ -6115,6 +6136,7 @@ export function ChatPageClient({
             profileId: capturedProfileId,
             preparedDraftSend,
             draftSettlement: { settled: false },
+            freshLocation,
           };
         })();
         draftPreparation = {
@@ -6163,6 +6185,7 @@ export function ChatPageClient({
           draft: sendAuthority.preparedDraftSend.draft,
           preparedDraftSend: sendAuthority.preparedDraftSend,
           draftSettlement: sendAuthority.draftSettlement,
+          freshLocation: sendAuthority.freshLocation,
         },
       });
     }
@@ -6203,6 +6226,7 @@ export function ChatPageClient({
             ? {
                 preparedDraftSend: sendAuthority.preparedDraftSend,
                 draftSettlement: sendAuthority.draftSettlement,
+                freshLocation: sendAuthority.freshLocation,
               }
             : {}),
         },
@@ -6299,6 +6323,7 @@ export function ChatPageClient({
       await runGlobalSubmit(options, owner, submittedAtMonotonicMs);
     } finally {
       const preparedBlank = options?.preparedBlankChat;
+      preparedBlank?.freshLocation?.cancelUnlessHandedOff();
       if (
         preparedBlank?.preparedDraftSend &&
         preparedBlank.draftSettlement &&
@@ -6367,6 +6392,9 @@ export function ChatPageClient({
     */
     const preparedBlankDraft = options?.preparedBlankChat?.draft;
     const suppliedPreparedDraft = options?.preparedBlankChat?.preparedDraftSend ?? null;
+    const freshLocation = suppliedPreparedDraft && submitOwner.originConversationId === null &&
+      options?.preparedBlankChat?.conversationId === currentChatId
+      ? options?.preparedBlankChat?.freshLocation : undefined;
     const suppliedDraftSettlement = options?.preparedBlankChat?.draftSettlement ?? null;
     const markSuppliedDraftSettled = (prepared: PreparedDraftSend) => {
       if (prepared.token === suppliedPreparedDraft?.token && suppliedDraftSettlement) {
@@ -6911,7 +6939,7 @@ export function ChatPageClient({
       // Only the semantic call overlaps Refiner. Device permission and GPS
       // stay in ChatApp, after the question is durably saved. Guests retain
       // their existing single-use verification sequence.
-      const locationPreparation = chatParallelPreparationEnabled && chatLocationIntentEnabled &&
+      const locationPreparation = !freshLocation && chatParallelPreparationEnabled && chatLocationIntentEnabled &&
         requestAutoPrepare && preparedDraft && promptRefinerProductScope && !imageTurnSend
         ? chatLocationSession.prepareIntent(identityKey, authoredPrompt,
             () => preparation.measure("locationIntentMs", () => requestChatLocationIntent(authoredPrompt, fetch)))
@@ -7423,8 +7451,8 @@ export function ChatPageClient({
         submittedAtMonotonicMs,
         preparationTimings: { ...preparation.timings },
         preparationReadyAtMonotonicMs: performance.now(),
-        preparedLocationIntent,
-        ...(chatRouterLocationFusion && chatLocationIntentEnabled && identityKey && status === "authenticated" &&
+        preparedLocationIntent: (messageWasSaved && freshLocation) ? freshLocation.handoff() : preparedLocationIntent,
+        ...(chatRouterLocationFusion && !freshLocation && chatLocationIntentEnabled && identityKey && status === "authenticated" &&
           mountedSurface === "chat" && selectionMode === "auto" && submitOwner.originConversationId === null &&
           suppliedPreparedDraft && messageWasSaved && !requestAutoPrepare && !explicitPromptRefinerDecision &&
           !isOverrideSend && !imageTurnSend && savedAttachments.length === 0 && activeModelIds.length === 1

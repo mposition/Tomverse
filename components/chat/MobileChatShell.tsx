@@ -1,6 +1,6 @@
 "use client";
 
-import type { PreparedChatLocationIntent } from "@tomverse/chat-core";
+import type { ChatPanelLocationIntent } from "@/lib/chatLocationClient";
 
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
@@ -118,7 +118,7 @@ type PromptPayload = {
   submittedAtMonotonicMs?: number;
   preparationTimings?: import("@/lib/responseLatencyCore").ClientLatencyStages;
   preparationReadyAtMonotonicMs?: number;
-  preparedLocationIntent?: PreparedChatLocationIntent;
+  preparedLocationIntent?: ChatPanelLocationIntent;
   routerLocationTurnIsCurrent?: () => boolean;
   id: string;
   text: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import type { PreparedChatLocationIntent } from "@tomverse/chat-core";
+import type { ChatPanelLocationIntent } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
@@ -252,7 +252,7 @@ type ChatAppProps = {
     submittedAtMonotonicMs?: number;
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
-    preparedLocationIntent?: PreparedChatLocationIntent;
+    preparedLocationIntent?: ChatPanelLocationIntent;
     routerLocationTurnIsCurrent?: () => boolean;
     id: string;
     text: string;
@@ -1513,7 +1513,7 @@ function ChatAppComponent({
     submittedAtMonotonicMs?: number,
     preparationTimings?: ClientLatencyStages,
     preparationReadyAtMonotonicMs?: number,
-    preparedLocationIntent?: PreparedChatLocationIntent,
+    preparedLocationIntent?: ChatPanelLocationIntent,
     routerLocationTurnIsCurrent?: () => boolean,
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
@@ -1908,15 +1908,15 @@ function ChatAppComponent({
 
     let hasRouterLocationContinuation = false;
     try {
-      const sendChatRequest = async (turnstileToken?: string) => {
+      const sendChatRequest = async (turnstileToken?: string, recoverWithSavedLocation = false) => {
         // Human permission and guest verification happen before provider wait
         // time starts. The same source turn is continued after either prompt.
         liveness.stop();
-        const fuseLocation = routerLocationTurnIsCurrent && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
+        const fuseLocation = !recoverWithSavedLocation && routerLocationTurnIsCurrent && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
           !deepResearchDepth && !reviewProvider && !isGuestMode && chatLocationIntentEnabled &&
           chatLocationSession.canPrepareIntent(panelIdentityKey);
         const checkLocationTurn = () => {
-          if (fuseLocation && !routerLocationTurnIsCurrent()) controller.abort();
+          if ((fuseLocation || recoverWithSavedLocation) && routerLocationTurnIsCurrent && !routerLocationTurnIsCurrent()) controller.abort();
           controller.signal.throwIfAborted();
         };
         checkLocationTurn();
@@ -1926,10 +1926,14 @@ function ChatAppComponent({
             turnId: sourceUserMessageId,
             requiresLocation: async () => {
               if (routerRequiresLocation) return true;
-              const prepared = preparedLocationIntent?.read(panelIdentityKey, String(userMessage.content ?? ""));
+              const source = String(userMessage.content ?? "");
+              const prepared = preparedLocationIntent && "readForSavedTurn" in preparedLocationIntent
+                ? await preparedLocationIntent.readForSavedTurn(panelIdentityKey, source, controller.signal, latency.freshLocation)
+                : preparedLocationIntent?.read(panelIdentityKey, source);
               if (typeof prepared === "boolean") return prepared;
+              controller.signal.throwIfAborted();
               const finishIntent = latency.stage("locationIntentMs");
-              try { return await requestChatLocationIntent(String(userMessage.content ?? ""), fetch, { turnstileToken }); }
+              try { return await requestChatLocationIntent(source, fetch, { turnstileToken }); }
               finally { finishIntent(); }
             },
           } : undefined).finally(finishLocation);
@@ -2097,12 +2101,14 @@ function ChatAppComponent({
           error && typeof error === "object"
             ? (error as { code?: string }).code
             : undefined;
-        const refusalReason =
+        const refusalDetails =
           error && typeof error === "object" &&
           (error as { details?: unknown }).details &&
           typeof (error as { details?: unknown }).details === "object"
-            ? ((error as { details: Record<string, unknown> }).details.refusalReason)
+            ? (error as { details: Record<string, unknown> }).details
             : undefined;
+        const refusalReason = refusalDetails?.refusalReason;
+        const recoverWithSavedLocation = refusalDetails?.routerLocationRecovery === "saved";
         if (isGuestMode && code === "TURNSTILE_REQUIRED") {
           // The coordinator guarantees only one panel actually runs the
           // challenge; the rest wait for that panel's verified retry to finish
@@ -2162,7 +2168,7 @@ function ChatAppComponent({
           // second turn or taking a second concurrency slot. The refused
           // request never reached `acquireChatAccess`, so its slot is still
           // this panel's to spend.
-          response = await sendChatRequest();
+          response = await sendChatRequest(undefined, recoverWithSavedLocation);
         } else if (
           !hasRouterLocationContinuation && promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
           code === "CHAT_CONTEXT_BUNDLE_STALE" &&
@@ -2210,7 +2216,7 @@ function ChatAppComponent({
           assistantMessageId = freshAssistantMessageId;
           activeContextBundle = refreshed;
           contextBundleCollisionRetries += 1;
-          response = await sendChatRequest();
+          response = await sendChatRequest(undefined, recoverWithSavedLocation);
         } else {
           throw error;
         }
