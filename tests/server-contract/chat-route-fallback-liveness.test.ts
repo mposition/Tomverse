@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 import * as aiModule from "ai";
+import { MockLanguageModelV4 } from "ai/test";
+import { parseChatStreamTrailer, splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
 import {
   PromptRefinerChatExecutionError,
   validatePromptRefinerChatExecution,
@@ -78,7 +80,16 @@ let pinnedInputs: readonly object[] | null = null;
 const routerInputs: Array<Parameters<typeof import("../../lib/autoModelSelection").selectAutoModel>[0]> = [];
 const llmRouterInputs: Array<Parameters<typeof import("../../lib/autoLlmRouter").pickAutoModelWithLlm>[0]> = [];
 let llmRouterRewrite: string | null = null;
+let paidRouterCalls = 0;
+let fusedLocationRequired: boolean | undefined;
+let fusionPayload: Record<string, unknown> | undefined;
+let fusionReceipt: { requestDigest: string; expiresAt: Date; consumedAt?: Date } | null = null;
+let fusionRouterDigest = "a".repeat(64);
+let priorFusionMessage = false;
 let llmSearchQueries: string[] | undefined;
+let llmSearchModelId: string | undefined;
+let llmSearchFileIntent: boolean | undefined;
+let pairedSearchModel: MockLanguageModelV4 | undefined;
 let forceAppManagedSearch = false;
 let forceNativeSearch = false;
 let refusePresearchAdmission = false;
@@ -99,6 +110,13 @@ mock.module(mod("lib/webSearchBackendAdapter.ts"), { namedExports: {
   runWebSearchBackendRequest: async (_backend: unknown, request: { query: string }) => {
     assert.equal(ledger.accessAcquisitions, 1, "search cannot precede credit admission");
     presearchCalls.push(request);
+    if (pairedSearchModel) {
+      const followUp = request.query === "dependent fact";
+      assert.ok(followUp || request.query === "one fact");
+      return { ok: true, results: [{ title: followUp ? "Follow-up source" : "Initial source",
+        url: followUp ? "https://example.com/follow-up" : "https://example.com/initial",
+        snippet: followUp ? "The verified total is 42." : "The initial count is 17." }] };
+    }
     if (failPresearchBackend === "all" || (failPresearchBackend === "partial" && request.query === "another fact")) return { ok: false, failure: "backend_timeout" };
     return { ok: true, results: [{ title: "Search evidence", url: "https://example.com/evidence", snippet: "Verified fixture fact." }] };
   },
@@ -108,7 +126,17 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
   ...realLlmRouter,
   pickAutoModelWithLlm: async (input: Parameters<typeof realLlmRouter.pickAutoModelWithLlm>[0]) => {
     llmRouterInputs.push(input);
-    return llmRouterRewrite || llmSearchQueries ? { modelId: input.ruleModelId, rewrite: llmRouterRewrite, searchQueries: llmSearchQueries } : null;
+    if (input.locationFusion) {
+      input.locationFusion.onRouterDigest(fusionRouterDigest);
+      if (input.locationFusion.resume) return input.locationFusion.resume.pick;
+      paidRouterCalls++;
+      return { modelId: input.ruleModelId, rewrite: null, requiresLocation: fusedLocationRequired };
+    }
+    if (!llmRouterRewrite && !llmSearchQueries) return null;
+    if (input.verifyPreparedContext && !(await input.verifyPreparedContext())) return null;
+    paidRouterCalls++;
+    return { modelId: llmSearchModelId ?? input.ruleModelId,
+      rewrite: llmRouterRewrite, searchQueries: llmSearchQueries, requiresFileGeneration: llmSearchFileIntent };
   },
 } });
 const shadowInputs: Array<import("../../lib/routingShadow").RoutingShadowInput> = [];
@@ -417,6 +445,8 @@ mock.module(mod("lib/guestChatAutoSelection.ts"), {
 
 let durableAttemptAdmissionRefused = false;
 let durableAttemptAdmissionCalls = 0;
+let locationIntentLimitCalls = 0;
+let locationIntentLimitRefused = false;
 class TestApiSecurityError extends Error {
   constructor(
     readonly status: number,
@@ -443,10 +473,21 @@ mock.module(mod("lib/apiSecurity.ts"), {
         : null,
     assertMessageCapacity: async () => undefined,
     consumeApiRateLimit: async (
-      _request: Request,
-      _userId: string,
-      scope: string
+      request: Request,
+      subject: string,
+      scope: string,
+      limits: { minute: number; day: number },
+      options?: { skipIpBucket?: boolean },
     ) => {
+      if (scope === "chat-location-intent") {
+        locationIntentLimitCalls++;
+        assert.equal(subject, `user:${"c".repeat(64)}`);
+        assert.deepEqual(limits, { minute: 30, day: 2_000 });
+        assert.ok(request instanceof Request);
+        assert.ok(!options?.skipIpBucket);
+        if (locationIntentLimitRefused) throw new TestApiSecurityError(429, "API_RATE_LIMITED", "Too many requests.");
+        return;
+      }
       if (scope !== "chat-durable-attempt") return;
       durableAttemptAdmissionCalls += 1;
       if (durableAttemptAdmissionRefused) {
@@ -464,36 +505,37 @@ mock.module(mod("lib/apiSecurity.ts"), {
 });
 
 let contextConsumeSucceeds = true;
-let contextVerification: "ok" | "stale" | "expired" | "invalid_signature" = "ok";
+type TestContextVerification = "ok" | "stale" | "expired" | "invalid_signature";
+let contextVerification: TestContextVerification = "ok";
+let contextSequence: TestContextVerification[] = [];
+const contextReads: { query: string }[] = [];
 mock.module(mod("lib/chatTurnContext.ts"), {
   namedExports: {
-    buildChatTurnContext: async () => ({
-      fingerprint: "verified-context-fingerprint",
-      fingerprintInput: {},
-      systemPrompt: null,
-      memoryTokens: 0,
-      profileTokens: 0,
-      memory: {
-        prompt: { text: null, usedCount: 0 },
-        truncatedByBudget: false,
-      },
-      profile: { knowledgeChunkCount: 0 },
-    }),
+    buildChatTurnContext: async (input: { query: string }) => {
+      contextReads.push(input);
+      return {
+        fingerprint: "verified-context-fingerprint",
+        fingerprintInput: {},
+        systemPrompt: null,
+        memoryTokens: 0,
+        profileTokens: 0,
+        memory: {
+          prompt: { text: null, usedCount: 0 },
+          truncatedByBudget: false,
+        },
+        profile: { knowledgeChunkCount: 0 },
+      };
+    },
   },
 });
 mock.module(mod("lib/chatContextBundleService.ts"), {
   namedExports: {
-    verifyChatContextBundle: () => contextVerification !== "ok"
-      ? { ok: false, reason: contextVerification }
-      : ({
-          ok: true,
-          payload: {
-            bundleId: "context-bundle-one",
-            expiresAtMs: Date.now() + 60_000,
-            memoryTokens: 0,
-            profileTokens: 0,
-          },
-        }),
+    verifyChatContextBundle: () => {
+      const verification = contextSequence.shift() ?? contextVerification;
+      if (verification !== "ok") return { ok: false, reason: verification };
+      return { ok: true, payload: { bundleId: "context-bundle-one", expiresAtMs: Date.now() + 60_000,
+        memoryTokens: 0, profileTokens: 0 } };
+    },
     consumeContextBundle: async () =>
       contextConsumeSucceeds
         ? { consumed: true }
@@ -513,6 +555,7 @@ type Attempt = {
   /** Whether its stream was cancelled, and with what. */
   cancelledWith: unknown;
   messages: Array<{ role: string; content: unknown }>;
+  toolNames: string[];
   /** What reached the provider-facing abort signal. */
   providerAbortedWith: unknown;
   /** The provider signal state at the exact reader-cancel boundary. */
@@ -553,7 +596,7 @@ let throwGuestProviderUnknown = false;
 mock.module("ai", {
   namedExports: {
     ...aiModule,
-    streamText: (options: Record<string, unknown>) => {
+    streamText: (options: Parameters<typeof aiModule.streamText>[0]) => {
       const index = attempts.length;
       if (throwAfterPresearch) throw new Error("POST_PRESEARCH_PROVIDER_FAILURE");
       if (index > 0 && throwBeforeFallbackStreamReturn) {
@@ -565,11 +608,15 @@ mock.module("ai", {
         onError: options.onError as Attempt["onError"],
         cancelledWith: null,
         messages: options.messages as Attempt["messages"],
+        toolNames: Object.keys(options.tools ?? {}),
         providerAbortedWith: null,
         providerAbortedBeforeReaderCancel: false,
       };
       attempts.push(attempt);
       attemptLifecycle.push(`${index}:provider_start`);
+      if (pairedSearchModel) {
+        return aiModule.streamText({ ...options, model: pairedSearchModel });
+      }
       if (activeSession === null) guestLifecycle.push("provider");
       if (throwGuestProviderUnknown) {
         throw new Error("GUEST_PROVIDER_UNKNOWN_TEST_FAILURE");
@@ -723,18 +770,34 @@ const closedInstrumentationAttempts: Array<
   Omit<InstrumentationAttemptRow, "state"> & { outcome: string }
 > = [];
 
-const conversationRow = () => ({
+let contextConversationAccess: "owned" | "locked" | "missing" = "owned";
+const conversationRow = () => contextConversationAccess === "missing" ? null : ({
   id: CONVERSATION_ID,
   userId: USER_ID,
-  password: null,
+  password: contextConversationAccess === "locked" ? "fixture-locked" : null,
   selectedModels: JSON.stringify(selectedConversationModels),
   kind: "chat",
   productKey: conversationProductKey,
   selectionMode: conversationSelectionMode,
   chatRecoveryEpoch: 0,
+  messages: [{ id: SOURCE_USER_MESSAGE_ID }, ...(priorFusionMessage ? [{ id: "prior" }] : [])],
+  routerLocationPreparations: fusionReceipt ? [fusionReceipt] : [],
 });
 
 const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
+  chatRouterLocationPreparation: {
+    create: ({ data }: { data: NonNullable<typeof fusionReceipt> }) => {
+      assert.equal(fusionReceipt, null);
+      fusionReceipt = data;
+      return data;
+    },
+    updateMany: ({ where, data }: { where: { requestDigest: string; expiresAt: { gt: Date } }; data: { consumedAt: Date } }) => {
+      if (!fusionReceipt || fusionReceipt.consumedAt || where.requestDigest !== fusionReceipt.requestDigest ||
+        fusionReceipt.expiresAt <= where.expiresAt.gt) return { count: 0 };
+      fusionReceipt.consumedAt = data.consumedAt;
+      return { count: 1 };
+    },
+  },
   conversation: {
     findUnique: () => conversationRow(),
     findFirst: () => conversationRow(),
@@ -1222,6 +1285,7 @@ const ledger = {
 mock.module(mod("lib/chatSecurity.ts"), {
   namedExports: {
     ...realChatSecurity,
+    assertUserOperationalAccess: async (userId: string) => { assert.equal(userId, USER_ID); },
     identifyChatCaller: (_request: Request, userId?: string | null) =>
       userId
         ? {
@@ -1571,7 +1635,7 @@ const ask = async (
   behaviour: "answers" | "silent" | "partial" | "completion_wait",
   claimMode: "claimed" | "reattach" | "reattach-completed" | "conflict" = "claimed",
   expectedStatus = 200,
-  withContextBundle = false,
+  withContextBundle: boolean | string = false,
   requestMessages: Array<Record<string, unknown>> = [
     { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
   ],
@@ -1627,12 +1691,12 @@ const ask = async (
   routerInputs.length = 0;
   shadowInputs.length = 0;
 
-  const { POST } = await loadRoute();
+  const { POST } = fusionPayload ? await import(mod("app/api/chat/router-location/route.ts")) as RouteModule : await loadRoute();
   const requestAbortController = new AbortController();
   abortActiveRequest = () =>
     requestAbortController.abort("client stopped during fallback transition");
   const response = await POST(
-    new Request("http://127.0.0.1:3100/api/chat", {
+    new Request(fusionPayload ? "http://127.0.0.1:3100/api/chat/router-location" : "http://127.0.0.1:3100/api/chat", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1648,11 +1712,12 @@ const ask = async (
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
         webSearchMode,
+        ...fusionPayload,
         ...(turnLocation ? { currentLocation: turnLocation } : {}),
         ...(includeSourceUserMessageId
           ? { sourceUserMessageId: SOURCE_USER_MESSAGE_ID }
           : {}),
-        ...(withContextBundle ? { contextBundle: "signed-test-bundle" } : {}),
+        ...(withContextBundle ? { contextBundle: typeof withContextBundle === "string" ? withContextBundle : "signed-test-bundle" } : {}),
         ...(refinerDecision ? { promptRefinerDecision: { suggestionId: REFINER_SUGGESTION_ID,
           scopeId: REFINER_SCOPE_ID, epoch: 1, decision: refinerDecision } } : {}),
       }),
@@ -3583,6 +3648,88 @@ test("Guest Auto provider unknown retains the converted hold and confirms its re
 });
 
 
+async function compareSavedSearch(repeatsInitialSearch: boolean) {
+  const oldFlag = process.env.CHAT_ROUTER_PRESEARCH_ENABLED;
+  const oldBrave = process.env.BRAVE_SEARCH_API_KEY;
+  const oldEnv = process.env.APP_ENV;
+  process.env.APP_ENV = "dev"; // Normal dev Auto cohort, without a fault-injection header.
+  process.env.BRAVE_SEARCH_API_KEY = "synthetic-never-sent";
+  llmSearchQueries = ["one fact"];
+  llmSearchModelId = "gpt-6-luna";
+  llmSearchFileIntent = false;
+  const answer = "The initial count is 17 [source](https://example.com/initial). The verified total is 42.";
+  const outcomes = [];
+  try {
+    for (const enabled of [false, true]) {
+      process.env.CHAT_ROUTER_PRESEARCH_ENABLED = String(enabled);
+      presearchCalls.length = 0;
+      const steps: Array<{ hasInitial: boolean; hasFollowUp: boolean; backendCalls: number }> = [];
+      // The provider chooses its next tool call from the evidence it actually
+      // received. The real AI SDK drives the route's registered search tool.
+      pairedSearchModel = new MockLanguageModelV4({ doStream: async ({ prompt }) => {
+        const facts = JSON.stringify(prompt);
+        const hasInitial = facts.includes("The initial count is 17.");
+        const hasFollowUp = facts.includes("The verified total is 42.");
+        steps.push({ hasInitial, hasFollowUp, backendCalls: presearchCalls.length });
+        return { stream: new ReadableStream({ start(controller) {
+          if (!hasFollowUp) {
+            controller.enqueue({ type: "tool-call", toolCallId: `search_${steps.length}`, toolName: "web_search",
+              input: JSON.stringify({ query: hasInitial && (!repeatsInitialSearch || steps.length > 1)
+                ? ["one fact", "dependent fact"] : "one fact" }) });
+          } else {
+            controller.enqueue({ type: "text-start", id: "answer" });
+            controller.enqueue({ type: "text-delta", id: "answer", delta: answer });
+            controller.enqueue({ type: "text-end", id: "answer" });
+          }
+          controller.enqueue({ type: "finish", finishReason: { unified: hasFollowUp ? "stop" : "tool-calls", raw: "fixture" },
+            usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 5, text: 5, reasoning: 0 } } });
+          controller.close();
+        } }) };
+      } });
+      const { body, streamError } = await ask("answers", "claimed", 200, false, undefined, true, false, undefined, "always");
+      assert.equal(streamError, null);
+      assert.equal(attempts.length, 1);
+      assert.equal(attempts[0].modelId, llmSearchModelId);
+      assert.equal(llmRouterInputs.at(-1)?.searchPlan, enabled);
+      const modelUsesInitialResults = enabled && !repeatsInitialSearch;
+      assert.equal(steps.length, modelUsesInitialResults ? 2 : 3);
+      assert.deepEqual(steps[0], { hasInitial: enabled, hasFollowUp: false, backendCalls: enabled ? 1 : 0 });
+      assert.equal(presearchCalls.length, 2, "the repeated initial query and presearch share one session");
+      assert.ok(attempts[0].toolNames.includes("create_document") && attempts[0].toolNames.includes("web_search"));
+      const { displayText, searchMetadataJson } = splitSearchMetadataTrailer(body);
+      const metadata = parseChatStreamTrailer(searchMetadataJson)?.searchMetadata as
+        { queryCount: number; citations: Array<{ url: string }> };
+      assert.equal(metadata.queryCount, 2);
+      const sources = metadata.citations.map(source => source.url).sort();
+      assert.deepEqual(sources, ["https://example.com/follow-up", "https://example.com/initial"]);
+      const answerText = splitStreamKeepaliveSignal(displayText).text;
+      assert.equal(answerText, answer);
+      assert.deepEqual(timingLines[0].search, {
+        flagEnabled: enabled, planOffered: enabled, plannedQueries: enabled ? 1 : 0, selectionEligible: true,
+        presearchEntered: enabled, presearchBackendRequests: enabled ? 1 : 0,
+        evidenceInjected: enabled, injectedSources: enabled ? 1 : 0,
+        modelCalls: steps.length, modelCallsWithSearchResults: modelUsesInitialResults ? 1 : 2,
+        finishedSteps: steps.length, toolOnlySearchSteps: modelUsesInitialResults ? 1 : 2,
+        searchToolCalls: modelUsesInitialResults ? 1 : 2, searchStepsAfterResults: enabled && repeatsInitialSearch ? 2 : 1,
+        answerBackendRequests: enabled ? 1 : 2, successfulBackendRequests: 2,
+        returnedSources: 2, sourceCards: 2, mentionedSources: 1, mentionedInjectedSources: enabled ? 1 : 0,
+      });
+      outcomes.push({ answer: answerText, sources, tools: attempts[0].toolNames.sort() });
+    }
+    assert.deepEqual(outcomes[0], outcomes[1]);
+  } finally {
+    pairedSearchModel = undefined; llmSearchQueries = undefined; llmSearchModelId = undefined; llmSearchFileIntent = undefined;
+    if (oldFlag === undefined) delete process.env.CHAT_ROUTER_PRESEARCH_ENABLED; else process.env.CHAT_ROUTER_PRESEARCH_ENABLED = oldFlag;
+    if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
+    if (oldEnv === undefined) delete process.env.APP_ENV; else process.env.APP_ENV = oldEnv;
+  }
+}
+for (const repeatsInitialSearch of [false, true]) {
+  test(`a saved GPT 6 Luna question uses the same sources with presearch off and on (repeats initial search: ${repeatsInitialSearch})`,
+    () => compareSavedSearch(repeatsInitialSearch));
+}
+
 test("router presearch stays behind admission, preserves search recovery policy and retains incurred cost on failure", async () => {
   const oldFlag = process.env.CHAT_ROUTER_PRESEARCH_ENABLED;
   const oldBrave = process.env.BRAVE_SEARCH_API_KEY;
@@ -3590,11 +3737,16 @@ test("router presearch stays behind admission, preserves search recovery policy 
   process.env.BRAVE_SEARCH_API_KEY = "synthetic-never-sent";
   forceAppManagedSearch = true;
   llmSearchQueries = ["one fact", "another fact"];
+  llmSearchModelId = "gpt-6-luna";
+  llmSearchFileIntent = false;
   try {
     presearchCalls.length = 0;
     await ask("answers", "claimed", 200, false, undefined, true, true, undefined, "always");
     assert.equal(presearchCalls.length, 2);
     assert.equal(attempts.length, 1, "the existing search-turn fallback restriction remains in force");
+    assert.equal(attempts[0].modelId, "gpt-6-luna");
+    assert.ok(attempts[0].toolNames.includes("web_search"));
+    assert.ok(attempts[0].toolNames.includes("create_document"), "ordinary text turns keep the file tool");
     assert.ok(!attempts[0].messages.some(message => message.role === "tool"));
     const question = attempts[0].messages.find(message => message.role === "user")!;
     assert.ok(Array.isArray(question.content));
@@ -3602,6 +3754,19 @@ test("router presearch stays behind admission, preserves search recovery policy 
     assert.ok(JSON.stringify(question.content).includes("Verified fixture fact."));
     assert.ok(JSON.stringify(question.content).includes("untrusted quoted material"));
     assert.equal(attempts[0].messages.filter(message => message.role === "user").length, 1);
+
+    // Even if an inconsistent Router returns queries for a file request or omits
+    // file intent, the answering model retains search and file execution itself.
+    for (const unresolvedOrFile of [undefined, true]) {
+      llmSearchFileIntent = unresolvedOrFile;
+      presearchCalls.length = 0;
+      await ask("answers", "claimed", 200, false, undefined, true, true, undefined, "always");
+      assert.equal(presearchCalls.length, 0);
+      assert.equal(attempts[0].modelId, "gpt-6-luna");
+      assert.ok(attempts[0].toolNames.includes("create_document"));
+      assert.ok(attempts[0].toolNames.includes("web_search"));
+    }
+    llmSearchFileIntent = false;
 
     presearchCalls.length = 0;
     refusePresearchAdmission = true;
@@ -3639,6 +3804,233 @@ test("router presearch stays behind admission, preserves search recovery policy 
   } finally {
     if (oldFlag === undefined) delete process.env.CHAT_ROUTER_PRESEARCH_ENABLED; else process.env.CHAT_ROUTER_PRESEARCH_ENABLED = oldFlag;
     if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
-    failPresearchBackend = false; turnLocation = undefined; forceNativeSearch = false; forceAppManagedSearch = false; llmSearchQueries = undefined; refusePresearchAdmission = false; throwAfterPresearch = false;
+    failPresearchBackend = false; turnLocation = undefined; forceNativeSearch = false; forceAppManagedSearch = false; llmSearchQueries = undefined; llmSearchModelId = undefined; llmSearchFileIntent = undefined; refusePresearchAdmission = false; throwAfterPresearch = false;
+  }
+});
+
+
+test("a stale priced context is rejected before paid Auto routing; recovery routes the saved question only once", async () => {
+  llmRouterRewrite = "Fresh Router rewrite.";
+  paidRouterCalls = 0;
+  refinerMode = "auto";
+  refinerConsumes = 0;
+  contextReads.length = 0;
+  try {
+    contextSequence = ["stale"];
+    const refused = await ask("answers", "claimed", 409, true, undefined, true, true, "accepted");
+    assert.equal(JSON.parse(refused.body).code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.equal(paidRouterCalls, 0);
+    assert.equal(refinerConsumes, 0);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(contextReads.length, 1);
+    await ask("answers", "claimed", 200, true, undefined, true, true, "accepted");
+    assert.equal(paidRouterCalls, 1);
+    assert.equal(contextReads.length, 3, "fresh retry checks before Router and again at the original boundary");
+    assert.ok(contextReads.every(read => read.query === "이 질문에 답해 줘"));
+    assert.equal(refinerConsumes, 1);
+  } finally { contextSequence = []; refinerMode = null; llmRouterRewrite = null; }
+});
+
+test("drift during paid routing still fails the final context check and a disabled Router builds context once", async () => {
+  llmRouterRewrite = "Candidate.";
+  paidRouterCalls = 0;
+  contextReads.length = 0;
+  try {
+    contextSequence = ["ok", "stale"];
+    const refused = await ask("answers", "claimed", 409, true);
+    assert.equal(JSON.parse(refused.body).code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.equal(paidRouterCalls, 1);
+    assert.equal(contextReads.length, 2);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+    llmRouterRewrite = null;
+    contextReads.length = 0;
+    await ask("answers", "claimed", 200, true);
+    assert.equal(contextReads.length, 1);
+    llmRouterRewrite = "Candidate.";
+    contextReads.length = 0;
+    await ask("answers", "claimed", 200, false);
+    assert.equal(contextReads.length, 0);
+  } finally { contextSequence = []; llmRouterRewrite = null; }
+});
+
+
+test("pre-Router context checks never load memory for a locked or missing owned conversation", async () => {
+  llmRouterRewrite = "Candidate.";
+  try {
+    for (const [scope, expectedStatus, code] of [
+      ["locked", 423, "CONVERSATION_LOCKED"], ["missing", 403, "CONVERSATION_FORBIDDEN"],
+    ] as const) {
+      contextConversationAccess = scope;
+      contextReads.length = 0;
+      paidRouterCalls = 0;
+      const result = await ask("answers", "claimed", expectedStatus, true);
+      assert.equal(JSON.parse(result.body).code, code);
+      assert.equal(contextReads.length, 0);
+      assert.equal(paidRouterCalls, 0);
+      assert.equal(ledger.accessAcquisitions, 0);
+      assert.equal(attempts.length, 0);
+    }
+  } finally { contextConversationAccess = "owned"; llmRouterRewrite = null; }
+});
+
+test("fresh Router location continues a negative inline and resumes one paid pick exactly once after consent", async t => {
+  const env = { ...process.env };
+  process.env.CHAT_ROUTER_LOCATION_FUSION_ENABLED = "true";
+  process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED = "true";
+  delete process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED;
+  fusionPayload = { routerLocationFusion: true };
+  paidRouterCalls = 0;
+  locationIntentLimitCalls = 0;
+  try {
+    fusionPayload = {};
+    const invalid = await ask("answers", "claimed", 400);
+    assert.equal(invalid.response.headers.get("X-Chat-Router-Location-Version"), "1");
+    assert.equal(JSON.parse(invalid.body).code, "INVALID_ROUTER_LOCATION_REQUEST");
+    fusionPayload.routerLocationFusion = true;
+    for (const [name, disabled] of [
+      ["CHAT_ROUTER_LOCATION_FUSION_ENABLED", "false"],
+      ["TOMVERSE_CHAT_LOCATION_INTENT_ENABLED", "false"],
+      ["CHAT_FRESH_LOCATION_PREPARATION_ENABLED", "true"],
+    ]) {
+      const previous = process.env[name];
+      process.env[name] = disabled;
+      assert.deepEqual(JSON.parse((await ask("answers")).body), { requiresLocation: null });
+      if (previous === undefined) delete process.env[name]; else process.env[name] = previous;
+    }
+    priorFusionMessage = true;
+    assert.deepEqual(JSON.parse((await ask("answers")).body), { requiresLocation: null });
+    assert.equal(paidRouterCalls, 0);
+    priorFusionMessage = false;
+    await ask("answers", "claimed", 409, false, [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "unsaved text" }]);
+    assert.equal(fusionReceipt, null);
+    assert.equal(paidRouterCalls, 0);
+    assert.equal(locationIntentLimitCalls, 0);
+    locationIntentLimitRefused = true;
+    const limited = await ask("answers");
+    assert.deepEqual(JSON.parse(limited.body), { requiresLocation: null, locationRateLimited: true });
+    assert.equal(paidRouterCalls, 0);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(locationIntentLimitCalls, 1);
+    await ask("answers", "claimed", 409);
+    assert.equal(locationIntentLimitCalls, 1, "rejected initial probes cannot consume additional quota");
+    fusionReceipt = null;
+    locationIntentLimitRefused = false;
+    fusedLocationRequired = false;
+    const negative = await ask("answers");
+    assert.notEqual(negative.response.headers.get("X-Chat-Response-Mode"), "router-location");
+    assert.equal(ledger.accessAcquisitions, 1);
+    assert.equal(paidRouterCalls, 1);
+    fusionReceipt = null;
+    t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-10T23:59:58Z") });
+    fusedLocationRequired = true;
+    const positive = await ask("answers");
+    assert.equal(positive.response.headers.get("X-Chat-Response-Mode"), "router-location");
+    assert.equal(positive.response.headers.get("X-Chat-Router-Location-Version"), "1");
+    assert.ok(positive.response.headers.get("X-Request-ID"));
+    const { requiresLocation, continuation } = JSON.parse(positive.body);
+    assert.equal(requiresLocation, true);
+    assert.ok(continuation);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(paidRouterCalls, 2);
+    await ask("answers", "claimed", 409);
+    assert.equal(paidRouterCalls, 2, "replayed initial request cannot dispatch another Router");
+    fusionPayload.routerLocationContinuation = continuation;
+    t.mock.timers.setTime(Date.parse("2026-11-11T00:00:02Z"));
+    turnLocation = { latitude: -27.47, longitude: 153.025, accuracy: 150, timestamp: Date.now() };
+    fusionRouterDigest = "b".repeat(64);
+    await ask("answers", "claimed", 409);
+    assert.equal(ledger.accessAcquisitions, 0);
+    fusionRouterDigest = "a".repeat(64);
+    const resumed = await ask("answers");
+    assert.equal(llmRouterInputs.at(-1)?.locationFusion?.searchUtcDate, "2026-11-10");
+    assert.notEqual(resumed.response.headers.get("X-Chat-Response-Mode"), "router-location");
+    assert.equal(resumed.response.headers.get("X-Chat-Router-Location-Version"), "1");
+    assert.equal(ledger.accessAcquisitions, 1);
+    assert.ok(JSON.stringify(attempts[0].messages).includes("-27.47"));
+    await ask("answers", "claimed", 409);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(paidRouterCalls, 2, "neither resume nor replay spends on the Router");
+    assert.equal(locationIntentLimitCalls, 3, "only the limited, negative and positive initial requests enter location admission");
+    fusionReceipt = null;
+    turnLocation = undefined;
+    fusedLocationRequired = undefined;
+    delete fusionPayload.routerLocationContinuation;
+    const unresolved = JSON.parse((await ask("answers")).body);
+    assert.equal(unresolved.requiresLocation, null);
+    assert.ok(unresolved.continuation);
+    fusionPayload.routerLocationContinuation = unresolved.continuation;
+    await ask("answers");
+    assert.equal(ledger.accessAcquisitions, 1);
+    assert.ok(!JSON.stringify(attempts[0].messages).includes("-27.47"));
+    assert.equal(paidRouterCalls, 3, "the saved lookup can decline permission without repeating the Router");
+  } finally {
+    for (const name of ["CHAT_ROUTER_LOCATION_FUSION_ENABLED", "TOMVERSE_CHAT_LOCATION_INTENT_ENABLED", "CHAT_FRESH_LOCATION_PREPARATION_ENABLED"]) {
+      if (env[name] === undefined) delete process.env[name]; else process.env[name] = env[name];
+    }
+    turnLocation = undefined; fusionReceipt = null; fusionPayload = undefined; priorFusionMessage = false;
+    fusedLocationRequired = undefined; fusionRouterDigest = "a".repeat(64);
+    locationIntentLimitRefused = false; locationIntentLimitCalls = 0;
+  }
+});
+
+test("only confirmed context drift after a fusion claim opts the one re-quote into ordinary saved Chat", async () => {
+  const oldFusion = process.env.CHAT_ROUTER_LOCATION_FUSION_ENABLED;
+  const oldLocation = process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED;
+  const oldFresh = process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED;
+  process.env.CHAT_ROUTER_LOCATION_FUSION_ENABLED = "true";
+  process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED = "true";
+  delete process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED;
+  try {
+    paidRouterCalls = 0;
+    fusionPayload = { routerLocationFusion: true };
+    fusedLocationRequired = false;
+    locationIntentLimitCalls = 0;
+    contextSequence = ["stale"];
+    const early = JSON.parse((await ask("answers", "claimed", 409, "original-quote")).body);
+    assert.equal(early.code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.equal(early.details.routerLocationRecovery, undefined);
+    assert.equal(locationIntentLimitCalls, 0);
+    assert.equal(fusionReceipt, null);
+    assert.equal(paidRouterCalls, 0);
+    contextSequence = ["ok", "stale"];
+    const late = JSON.parse((await ask("answers", "claimed", 409, "priced-before-change")).body);
+    assert.equal(late.code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.equal(late.details.routerLocationRecovery, "saved");
+    assert.ok(fusionReceipt);
+    assert.equal(paidRouterCalls, 1);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(durableClaimCalls, 0);
+    await ask("answers", "claimed", 409, "updated-quote");
+    assert.equal(paidRouterCalls, 1, "a second fusion claim is still refused");
+    fusionPayload = undefined;
+    llmRouterRewrite = "Re-evaluated under the refreshed quote.";
+    contextSequence = ["ok", "ok"];
+    const recovered = await ask("answers", "claimed", 200, "updated-quote");
+    assert.ok(recovered.body.includes(ANSWER));
+    assert.equal(paidRouterCalls, 2);
+    assert.equal(ledger.accessAcquisitions, 1);
+
+    fusionPayload = { routerLocationFusion: true };
+    fusionReceipt = null;
+    contextConsumeSucceeds = false;
+    const collision = JSON.parse((await ask("answers", "claimed", 409, "used-quote")).body);
+    assert.equal(collision.details.refusalReason, "already_consumed");
+    assert.equal(collision.details.routerLocationRecovery, "saved");
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(durableClaimCalls, 1);
+  } finally {
+    for (const [key, value] of [["CHAT_ROUTER_LOCATION_FUSION_ENABLED", oldFusion],
+      ["TOMVERSE_CHAT_LOCATION_INTENT_ENABLED", oldLocation], ["CHAT_FRESH_LOCATION_PREPARATION_ENABLED", oldFresh]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    contextSequence = []; contextConsumeSucceeds = true; llmRouterRewrite = null;
+    fusionPayload = undefined; fusionReceipt = null; fusedLocationRequired = undefined;
   }
 });

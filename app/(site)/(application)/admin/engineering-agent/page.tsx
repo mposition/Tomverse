@@ -121,6 +121,8 @@ export default async function AdminEngineeringAgentPage({
   const initial = await readEngineeringAgentConsole(
     section,
     hasAdminPermission(session, "engineering-agent:write"),
+    // Decision Maker bodies are for who may judge them (ops:write), as elsewhere.
+    hasAdminPermission(session, "ops:write"),
   );
 
   return (

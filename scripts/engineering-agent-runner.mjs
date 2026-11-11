@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 
 import { finalSignalIsSuccess, reportedHalt } from "../lib/engineeringAgentCore.ts";
-import { runRunnerCycle } from "./engineering-agent-runner-core.mjs";
+import { readGitHubList, runRunnerCycle } from "./engineering-agent-runner-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
 /** The hard deadline of one cycle (§12); the supervisor kills the process group there. */
@@ -129,10 +129,9 @@ async function main() {
   // it is the whole list: a page with a next page is judged for what it holds
   // and marked incomplete; a list with no body at all is null. Neither is
   // ever taken for a complete, empty list.
-  const githubList = async (path, { notFoundIsEmpty = false } = {}) => {
-    let response;
+  const fetchPage = async (url) => {
     try {
-      response = await fetch(`${API_REPO}${path}`, {
+      const response = await fetch(url, {
         redirect: "error",
         signal: AbortSignal.timeout(APP_TIMEOUT_MS),
         headers: {
@@ -141,18 +140,14 @@ async function main() {
           ...(readToken ? { authorization: `Bearer ${readToken}` } : {}),
         },
       });
+      const body = await response.json().catch(() => null);
+      return { status: response.status, link: response.headers.get("link"), body };
     } catch {
       return null;
     }
-    // No ref under the prefix is answered 404: that is the list, empty.
-    if (notFoundIsEmpty && response.status === 404) return { items: [], complete: true };
-    const link = response.headers.get("link");
-    const body = await response.json().catch(() => null);
-    if (!response.ok || !Array.isArray(body)) return null;
-    // The same next-page reading as lib/engineeringAgentGitHubRead.ts.
-    const hasNext = link !== null && /<[^>]*>\s*;\s*rel="?next"?/i.test(link);
-    return { items: body, complete: !hasNext };
   };
+  const githubList = (path, { notFoundIsEmpty = false } = {}) =>
+    readGitHubList(fetchPage, `${API_REPO}${path}`, { origin: new URL(API_REPO).origin, notFoundIsEmpty });
 
   let result;
   try {

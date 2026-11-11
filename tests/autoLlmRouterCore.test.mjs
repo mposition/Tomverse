@@ -209,7 +209,8 @@ test("file requests cannot select an unverified candidate or escape the eligible
 test("ordinary inline answers can still select a model without file tools", () => {
   const result = parseAutoLlmRouterOutput({ modelId: "deepseek-v4-flash", requiresFileGeneration: false }, candidates);
   assert.equal(result.modelId, "deepseek-v4-flash");
-  assert.equal(result.requiresFileGeneration, undefined);
+  assert.equal(result.requiresFileGeneration, false);
+  assert.equal(parseAutoLlmRouterOutput({ modelId: "deepseek-v4-flash" }, candidates).requiresFileGeneration, undefined);
 });
 
 test("optimizer replay recovers legacy capabilities but preserves a recorded refusal", () => {

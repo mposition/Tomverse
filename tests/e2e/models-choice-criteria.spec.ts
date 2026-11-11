@@ -12,9 +12,9 @@ test("Korean model descriptions use per-model facts instead of shared performanc
   for (const [index, model] of models.entries()) {
     const card = page.getByRole("article").filter({ has: page.getByRole("heading", { name: model.name, exact: true }) });
     const criteria = card.getByTestId("model-selection-criteria");
-    await expect(criteria).toContainText(`이용 시작: ${model.minimumPlan === "Guest" ? "게스트" : model.minimumPlan === "Free" ? "무료" : model.minimumPlan}`);
-    await expect(criteria).toContainText(`짧은 요청: ${model.creditWeight} 크레딧`);
-    await expect(criteria).toContainText(`이미지 입력: ${index === 0 ? "미지원" : "지원"}`);
+    await expect(criteria).toHaveText(`이미지 입력: ${index === 0 ? "미지원" : "지원"}`);
+    await expect(card.getByText(model.minimumPlan === "Guest" ? "게스트" : model.minimumPlan === "Free" ? "무료" : model.minimumPlan, { exact: true })).toHaveCount(1);
+    await expect(card.getByTestId("model-page-credit-cost")).toHaveAttribute("aria-label", `짧은 요청의 기본 크레딧: ${model.creditWeight} 크레딧`);
     await expect(card.getByText("글쓰기", { exact: true })).toHaveCount(0);
     await expect(card.getByText("분석", { exact: true })).toHaveCount(0);
   }

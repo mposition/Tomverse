@@ -722,6 +722,35 @@ export const resolveReplacementModel = <
     return undefined;
 };
 
+/**
+ * Who stands in for a retired model that was only nominal -- the id an Auto
+ * conversation carries but does not choose by. The operator-named replacement
+ * chain first, then the app default; undefined when neither can serve. Not for
+ * a model a user picked: that request is refused with the replacement named.
+ */
+export const resolveRetiredModelSuccessor = <
+    T extends Pick<
+        AiModel,
+        | "id"
+        | "enabled"
+        | "publiclyListed"
+        | "status"
+        | "catalogDeleted"
+        | "replacementModelId"
+    >,
+>(
+    model: Pick<AiModel, "id" | "replacementModelId">,
+    lookup: (candidateId: string) => T | undefined,
+    appDefaultModelId: string
+): { successor: T; via: "replacement" | "app_default" } | undefined => {
+    const named = resolveReplacementModel(model, lookup);
+    if (named) return { successor: named, via: "replacement" };
+    const appDefault = lookup(appDefaultModelId);
+    return appDefault && appDefault.id !== model.id && isPubliclySelectableModel(appDefault)
+        ? { successor: appDefault, via: "app_default" }
+        : undefined;
+};
+
 if (!isEnabledModelId(DEFAULT_MODEL_ID)) {
     throw new Error(`Default model "${DEFAULT_MODEL_ID}" must be enabled.`);
 }

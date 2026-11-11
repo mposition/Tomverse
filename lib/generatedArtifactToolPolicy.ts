@@ -25,6 +25,7 @@ import {
   XLSX_MEDIA_TYPE,
   type TurnAttachmentDescriptor,
 } from "@/lib/messageAttachmentCore";
+import { AVAILABLE_MODELS } from "@/lib/models";
 
 /* ------------------------------------------------------------------------ */
 /* Model capability                                                           */
@@ -205,6 +206,17 @@ export const nativeSearchBlocksArtifactTool = (input: {
 const formatList = (kind: Parameters<typeof formatIdsOfKind>[0]) =>
   formatIdsOfKind(kind).join(", ");
 
+// Only recommend models available to every signed-in and guest user. This
+// notice has no plan context, so suggesting a paid-tier model could be useless.
+const FILE_CAPABLE_MODEL_NAMES = AVAILABLE_MODELS.filter(
+  (model) =>
+    model.enabled &&
+    model.minimumPlan === "Guest" &&
+    getArtifactToolSupport(model.id) === "verified",
+)
+  .slice(0, 3)
+  .map((model) => model.name);
+
 /**
  * The instructions that go with the tools.
  *
@@ -269,6 +281,13 @@ const GENERATE_PROMPT = [
   "  do not announce a file you are not about to produce.",
   "- Put real values in. Never invent data the conversation does not contain;",
   "  if something is unknown, leave it empty and say so.",
+  "  When the user requests a fictional example or permits assumptions, supply",
+  "  clearly labeled illustrative inputs and worked figures instead of deferring",
+  "  every number. Keep assumptions distinct from actual or sourced data.",
+  "- Preserve the user's requested document outline, section names and exact",
+  "  heading count. Put a table caption in a paragraph block inside an existing",
+  "  section, not an extra heading. Before calling create_document, check the",
+  "  heading blocks against that outline; describe only the structure actually created.",
   "- Spreadsheets hold plain values only. There is no formula field, and a",
   "  string that looks like a formula is stored as text.",
   `- Limits: ${ARTIFACT_LIMITS.maxWorksheets} worksheets, ` +
@@ -324,7 +343,7 @@ const offPrompt = (reason: ArtifactToolOffReason, autoRouted = false): string =>
       : reason === "model_unverified"
         ? autoRouted
           ? "(choosing a model for this request themselves instead of Auto, one that can create files)."
-          : "(choosing a different model)."
+          : `(choosing a different model, such as ${FILE_CAPABLE_MODEL_NAMES.join(", ")}).`
         : "(starting the request again from a saved conversation).",
     "",
     "Do not write a file path, a download link, base64, or code that claims to",

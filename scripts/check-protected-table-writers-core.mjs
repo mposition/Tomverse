@@ -739,6 +739,27 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/engineeringAgentT2DmReviewService.ts",
+    table: "EngineeringAgentRun",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason: "The T2 advice sync reads a draft's run only to label its Decision Maker card (a LEFT JOIN in a SELECT); the write verbs insert and close rows of its own EngineeringAgentDmReview table. It writes no run.",
+  },
+  {
+    path: "lib/engineeringAgentT2DmReviewService.ts",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 5,
+    writeVerbs: 3,
+    reason: "The T2 advice sync reads open drafts and checks a question id is a t2_draft inside INSERT ... SELECT and UPDATE ... FROM on its own EngineeringAgentDmReview table. It never writes a work item; the draft stays the store's.",
+  },
+  {
+    path: "prisma/migrations/20261111100000_engineering_agent_t2_dm_review/migration.sql",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason: "The additive migration creates EngineeringAgentDmReview with a restrictive foreign key to the work item (ALTER TABLE ... ON DELETE/UPDATE RESTRICT); it writes no work item row.",
+  },
+  {
     path: "lib/amux/ideaLaneService.ts",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -2512,6 +2533,22 @@ export const RAW_SQL_ALLOWLIST = [
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, including a read-only v22 run lock after its AMUX attempt and card, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked in AMUX's order (admission, the attempt FOR SHARE, the audit chain, then card and delivery FOR UPDATE), the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
   {
+    path: "lib/amux/reviewMergeObserved.ts",
+    table: "EngineeringAgentRun",
+    tableMentions: 1,
+    writeVerbs: 7,
+    reason:
+      "The observed-merge completion only reads: a constant SELECT ... FOR UPDATE OF b over the engineering binding joined to its run, with bound parameters, locking the binding after the AMUX card. The run row is never written here; the write verbs are the AMUX card's own statements and the words in comments.",
+  },
+  {
+    path: "lib/amux/reviewMergeObserved.ts",
+    table: "EngineeringAgentBinding",
+    tableMentions: 1,
+    writeVerbs: 7,
+    reason:
+      "The observed-merge completion only reads: a constant SELECT ... FOR UPDATE OF b over the engineering binding joined to its run, with bound parameters, locking the binding after the AMUX card. The binding is never written here (lib/engineeringAgentStore.ts moves it); the write verbs are the AMUX card's own statements and the words in comments.",
+  },
+  {
     path: "lib/supportTriageWorker.ts",
     table: "SupportTriageRun",
     tableMentions: 1,
@@ -4065,6 +4102,13 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 1,
     reason:
       "AMUX v4 activation diagnostic: one pg import; a fixed allowlist of ciphertext/key columns (now including the v19 session result ciphertext) yields counts only inside BEGIN REPEATABLE READ READ ONLY with statement and idle-transaction timeouts. No audit, model call, switch or body write. S3 probes only version listing in an unused namespace and bucket versioning status; neither proves key deletion. Fingerprint is bound to the complete reviewed script.",
+  },
+  {
+    path: "scripts/compare-chat-presearch.mjs",
+    sha256: "2f4b12b5fa1b4ab545880172ef30b2d575ba962f2d87719dc81c7ba16a73fb17",
+    count: 1,
+    reason:
+      "Local presearch comparison (--db): one pg import; a single parameterized SELECT over ResponseLatencySample inside BEGIN READ ONLY with a statement timeout. No write.",
   },
   {
     path: "scripts/baseline-existing-database.mjs",

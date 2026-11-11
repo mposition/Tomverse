@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, openModelPickerCatalogue, prepareGuestPage, type QaConversationMessage } from "./support/app-fixtures";
 import { finishControlledStream, installChatModelStub, mockUserUsage, pushControlledChunk, restoreActiveConversation, setDeterministicTheme, suppressTransientUi, THREE_MODELS, waitForControlledStream } from "./support/chat-state-fixtures";
 import { expectAccessibleContrast, expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
+import { renderedWordLineCount } from "./support/text-wrapping";
 
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => { test.skip(info.project.name !== "desktop-chromium", "Explicit desktop and phone viewports use one browser engine."); });
@@ -102,6 +103,11 @@ for (const width of [320, 430]) test(`mobile provider selection keeps checkmarks
   const selected = page.locator('.review-participant-list>button[aria-pressed="true"]');
   await expect(selected).toHaveCount(3);
   for (const button of await selected.all()) {
+    const name = button.locator("strong");
+    expect(await renderedWordLineCount(name, (await name.innerText()).trim())).toBe(1);
+    const nameBox = (await name.boundingBox())!;
+    const checkBox = (await button.locator(":scope > svg").boundingBox())!;
+    expect(nameBox.x + nameBox.width).toBeLessThanOrEqual(checkBox.x);
     await expect(button.locator(":scope > svg")).toBeVisible();
     await expect(button).toHaveCSS("box-shadow", /inset/);
   }

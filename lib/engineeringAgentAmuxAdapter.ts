@@ -62,12 +62,14 @@ import {
   readEngineeringAgentOwnerQueues,
   readEngineeringAgentSwitches,
   recordEngineeringAgentRunStart,
+  resolveEngineeringAgentStateMismatch,
   requireEngineeringAgentRunAdmission,
   runEngineeringAgentTransaction,
   type EngineeringAgentTransaction,
 } from "@/lib/engineeringAgentStore";
 import type { EngineeringAgentMode, WriteResultOutcome } from "@/lib/engineeringAgentCore";
 import { prisma } from "@/lib/prisma";
+import type { Session } from "next-auth";
 
 /**
  * Version 12 of the orchestration policy shipped this false; version 25 turns
@@ -161,6 +163,12 @@ const WORKER_REGISTER_PRISMA_CALLS = 2;
 // binding and its audit entry (five) and the request's move -- fifteen, and
 // two to spare.
 const PUBLISH_RESULT_PRISMA_CALLS = 17;
+// A person's record of the bound number: the writer's audit-chain lock, then
+// the mismatch action (item and publish reads, run lock, item lock, run, run
+// items, capability count, bindings, binding lock, resolution and the
+// person's audit entry; a C action does not read the attempt) -- about
+// seventeen, and five to spare.
+const MISMATCH_REVIEW_PR_PRISMA_CALLS = 22;
 
 /** A run is created in the transaction that starts its AMUX attempt (§11). */
 export const engineeringRunStartAttachment = (input: {
@@ -592,4 +600,61 @@ export async function recordEngineeringAgentPublisherResult(input: {
   );
   if (recorded.recorded) return recorded;
   return settleWithoutCard(recorded.reason);
+}
+
+/**
+ * A person's action on an open `review_pr` state mismatch
+ * (docs/policy/engineering-agent.md §11, owner decision 2026-11-11): AMUX's review pull request writer puts the
+ * run's one current binding's number on the card, and the mismatch is
+ * resolved in that same transaction. The writer locks the audit chain and the
+ * card and re-checks it (in review, this run's attempt still the latest and
+ * the same worker's, no other number); the attached action then locks the run,
+ * the mismatch and the binding and reads them again. If either side refuses,
+ * nothing is written. This is an adapter call, so the whole gate must be open.
+ */
+export async function recordEngineeringAgentMismatchReviewPullRequest(input: {
+  session: Session;
+  request?: Request;
+  workItemId: string;
+}): Promise<{ auditLogId: string; resolved: boolean; reviewPrRecorded: boolean }> {
+  await requireOpen();
+  // These reads only choose what to ask AMUX; both sides are read again under their locks.
+  const item = await prisma.engineeringAgentWorkItem.findUnique({
+    where: { id: input.workItemId },
+    select: { kind: true, state: true, causeKey: true },
+  });
+  if (!item || item.kind !== "state_mismatch" || !item.causeKey.startsWith("review_pr:")) {
+    throw new EngineeringAgentStoreRefusedError("mismatch_cause_unknown");
+  }
+  if (item.state !== "open") throw new EngineeringAgentStoreRefusedError("mismatch_not_open");
+  const publish = await prisma.engineeringAgentWorkItem.findUnique({
+    where: { id: item.causeKey.slice("review_pr:".length) },
+    select: { run: { select: { id: true, cardId: true, amuxAttemptId: true, attempt: { select: { worker: true } } } } },
+  });
+  const run = publish?.run ?? null;
+  if (run === null) throw new EngineeringAgentStoreRefusedError("mismatch_without_run");
+  const bindings = await prisma.engineeringAgentBinding.findMany({
+    where: { runId: run.id, supersededAt: null },
+    select: { prNumber: true },
+  });
+  if (bindings.length !== 1) throw new EngineeringAgentStoreRefusedError("bound_review_pr_not_recorded");
+  let resolution: { auditLogId: string; resolved: boolean } | null = null;
+  const recorded = await recordAmuxReviewPullRequest(
+    { taskId: run.cardId, attemptId: run.amuxAttemptId, worker: run.attempt.worker, prNumber: bindings[0]!.prNumber },
+    {
+      prismaCalls: MISMATCH_REVIEW_PR_PRISMA_CALLS,
+      work: async (lent, fact) => {
+        resolution = await resolveEngineeringAgentStateMismatch(engineeringAgentTransactionInAmux(lent), {
+          session: input.session,
+          request: input.request,
+          workItemId: input.workItemId,
+          action: "record_bound_review_pr",
+          boundReviewPr: { taskId: fact.taskId, attemptId: fact.attemptId, prNumber: fact.prNumber },
+        });
+      },
+    },
+  );
+  if (!recorded.recorded) throw new EngineeringAgentStoreRefusedError(recorded.reason);
+  if (resolution === null) throw new Error("engineering agent mismatch action did not run with the AMUX write");
+  return { ...(resolution as { auditLogId: string; resolved: boolean }), reviewPrRecorded: recorded.changed };
 }

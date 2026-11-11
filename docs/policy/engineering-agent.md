@@ -191,7 +191,9 @@ v22 `implement` Task의 패치가 T2로 판정되어도 아래를 모두 만족�
 되지 않는다. 앱은 claim 요청 헤더 `x-engineering-publisher-features`에 `review_draft`를 적은 게시 서비스에만
 검토 항목의 쓰기 claim을 준다. 그래서 이 기능 이전에 배포된 게시 서비스는 이 항목을 ready PR로 열 수 없다.
 PR 대기열 상한(§12), 결과 불명 처리(§10), 병합은 사람이 한다는 규칙은 T1과 같다. 위 조건에 맞지 않는 T2는
-지금처럼 비공개 초안으로 남는다.
+지금처럼 비공개 초안으로 남는다. 운영자가 `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW=enabled`를 켜면 열린 T2 초안은
+DM에 조언 카드로 올라가고(docs/policy/amux-decision-maker.md 결과 검토 항), 그 답은 결정 대기 화면에 참고로만 보인다.
+승인과 거절은 여전히 사람이 한다.
 
 ## 4. push 금지 집합
 
@@ -639,6 +641,26 @@ Publisher의 실제 적용 tree hash 대조는 그대로다. tier 라운드가 �
   외에, **GitHub가 그 항목 자신의 현재 PR을 병합으로 보고하면** 사람이 닫을 수 있다(운영자
   결정 2026-11-06). 이때 병합 관측을 바인딩에 기록해 승인 관측기가 같은 PR을 다시 올리지
   않게 하고, 에이전트 모드는 바꾸지 않는다. GitHub를 읽지 못하면 닫지 않는다.
+- v22 `implement` Task(v4 카드)의 행은 review PR 번호를 가질 수 없다. v4 평문 제외 CHECK가
+  `reviewSpecialty`를 null로 두고, 사람 검토 형태 CHECK가 그래서 `requiresHumanReview`를
+  false로 두며, review PR CHECK는 그것이 true여야 번호를 받는다. 그래서 publisher가 연 PR의
+  번호는 같은 트랜잭션에서 쓰는 **engineering 바인딩이 보유**하고, AMUX는 카드를 바꾸지 않고
+  감사 항목 하나(`held_by: engineering_binding`)만 남긴다(`lib/amux/reviewPullRequest.ts`).
+  병합 관측은 그 카드의 attempt에 묶인 현재 바인딩의 PR일 때만 카드를 끝낸다
+  (`lib/amux/reviewMergeObserved.ts`). 이전에는 `review_not_required`로 거절되어 게시한 PR마다
+  C형 불일치가 열리고 에이전트 전체가 멈췄다(2026-10-30 #3147, 2026-11-11 #3702). 다른
+  카드의 거절은 그대로다.
+- 같은 C형 불일치는 사람이 **"카드에 PR 번호 기록"**으로도 닫을 수 있다(운영자 결정
+  2026-11-11). 이 조치는 그 run의 현재 바인딩 하나의 PR 번호를 AMUX의 review 대상 PR 번호
+  writer(`recordAmuxReviewPullRequest`)로 카드에 기록하고, 같은 트랜잭션에서 불일치를 닫는다.
+  writer가 감사 체인과 카드를 잠그고 다시 확인한 뒤(review 상태, 이 run의 시도가 최신이고 같은
+  worker, 다른 번호 없음) 번호를 쓰며, 붙은 조치가 run·불일치 항목·바인딩을 잠그고 다시 읽는다.
+  어느 쪽이든 거절하면 아무것도 쓰지 않는다. AMUX writer를 부르는 adapter 호출이므로 adapter
+  게이트(mode 포함)가 열려 있어야 한다. 번호를 처음 기록하는 순간 카드에 사람 검토 표시가 없으면
+  켜고 검토 분야가 비어 있으면 기본값으로 채운다(시도 정산과 같은 규칙). 다만 v4 카드의 행은
+  어떤 쓰기로도 표시할 수 없으므로(위 문단), v22 `implement` Task에서는 이 조치도 번호를 바인딩이
+  보유한 것으로 기록하고 불일치를 닫으며, 바인딩이 보유하지 않는 v4 카드는 `review_not_required`로
+  거절한다.
 - patch 본문은 크기 상한과 **두 번의 secret 검사**(초안 측 1회, 본 앱 저장 전 1회)를
   통과해야 저장된다. 탐지되면 저장하지 않는다. 본 앱은 patch를 텍스트로만 저장·표시한다.
   결정 후 보존 기간이 지나면 **본문만 지우고 digest와 결정 기록은 남긴다.** 등록 제안은

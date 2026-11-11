@@ -156,7 +156,7 @@ const post = (body: unknown) =>
   });
 
 const stale = () => ({
-  session: { user: { id: "owner-1", authenticatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() } },
+  session: { user: { id: "owner-1", authenticatedAt: new Date(Date.now() - 9 * 60 * 60_000).toISOString() } },
 });
 
 // The CLI is chosen, never read from the name (owner decision 2026-10-27).

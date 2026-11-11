@@ -34,6 +34,7 @@ gaps are scheduled rather than discovered during Router implementation.
 | Search backend reachability | `lib/webSearchBackendRuntime.ts` | environment, per deployment |
 | Provider health | `ProviderHealthState`, `ProviderProbeResult`, `ProviderErrorEvent` | DB |
 | Model lifecycle vs the provider's own catalogue | `ProviderModelCatalogEntry` | DB |
+| Unconnected providers worth considering (weekly LLM web research, off by default via `MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID`) | `ModelLifecycleWorkItem` with `evidence.discoveredBy = "new_provider_research"`, `lib/modelDiscoveryNewProviderResearch.ts` | DB, proposal only |
 | Prompt token estimate | `lib/chatTokenEstimate.ts` | code, **model-agnostic** |
 
 Two of these are stronger than a greenfield Router would assume and should be

@@ -156,7 +156,7 @@ const post = (body: unknown) =>
 
 const stale = () => ({
   session: {
-    user: { id: "operator-1", authenticatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() },
+    user: { id: "operator-1", authenticatedAt: new Date(Date.now() - 9 * 60 * 60_000).toISOString() },
   },
 });
 

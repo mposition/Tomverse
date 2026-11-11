@@ -235,6 +235,10 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 3. **앱이 LLM을 한 번 부릅니다**(`lib/productResearchScoutLlm.ts`, support-triage와 같은 방식). 입력은 그 대상의 이미지와
    신호, 그리고 같은 대상에 이미 낸 제안 제목들(반복을 막기 위해서)이고, 출력은 제안 최대 5개(제목·영역·심각도·근거·제안)의
    JSON입니다. 판정 경계는 `lib/productResearchScoutCore.ts`가 검사합니다.
+   **이슈 정리 대상**(기본 꺼짐, 앱 변수 `PRODUCT_RESEARCH_SCOUT_ISSUE_TRIAGE_ENABLED`): walker의 마지막 단계가 본문 없이
+   `…/scout/issues`를 부르면 앱이 최신 성공 관측 행(48시간 안)의 열린 이슈를 읽어 한 번의 텍스트 호출로 이슈마다 닫기·진행·대기
+   제안을 받고, `issue.<번호>` 대상으로 저장합니다. 관측 기능(§1–§9)은 그대로이며 추천은 이 Scout 제안이 합니다. 출력 검사는
+   이슈 번호가 입력 목록에 있는지 하나이고(`lib/productResearchScoutIssuesCore.ts`), 호출은 같은 하루 상한에서 차감됩니다.
 4. 제안은 `ProductResearchSuggestion` 표에 쌓이고, Admin › 제품 리서치 › "개선 제안" 탭에서 운영자가 **거절**, **완료 처리**,
    **AMUX로 보내기**를 누릅니다(한 건씩 또는 골라서 한꺼번에). owner·ops가 구현과 검증을 마친 열린 제안을 완료 처리하면
    `completed`로 보존하고 완료 목록에 표시합니다. 거절과 구분하며 상태 변경과 사람 감사 기록은 같은 트랜잭션입니다.
@@ -322,6 +326,7 @@ walker가 자기 화면을 보며, 이 둘은 Cloudflare Access 뒤에 있으므
 | `PRODUCT_RESEARCH_SCOUT_SANDBOX_FALLBACK` | walker, 선택 | `off`면 sandbox가 거부된 날 sandbox 없이 다시 띄우지 않음(§12). 없으면 재시도 |
 | `PRODUCT_RESEARCH_SCOUT_PAGE_ORIGIN` | walker, 선택 | dev나 Test의 origin(§12). 없으면 production |
 | `PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_ID`, `PRODUCT_RESEARCH_SCOUT_ACCESS_CLIENT_SECRET` | walker, 선택 | dev·Test의 Cloudflare Access 서비스 토큰 |
+| `PRODUCT_RESEARCH_SCOUT_ISSUE_TRIAGE_ENABLED` | 앱, 선택 | 이슈 정리 대상(§10). 꺼짐은 unset·빈 문자열이며 그때 `…/scout/issues`는 404. 켜면 하루 모델 호출 1회 |
 | `PRODUCT_RESEARCH_SCOUT_TEST_ACCOUNT_EMAIL` | 앱, 선택 | 테스트 계정 주소(§14). 없으면 로그인 화면과 실제 생성을 건너뛰고 route는 404 |
 | 실제 생성 하루 횟수 | Admin › 제품 리서치 › 실행과 비용 (`AppSetting`) | owner가 정함. 기본 0이면 실제 생성 없음 |
 | 모델·하루 호출 상한 | Admin › 제품 리서치 › 실행과 비용 (`AppSetting` 두 행) | owner가 정함. 모델이 없으면 route는 `model_off`, 상한을 다 쓰면 `daily_cap_reached`로 답함 |

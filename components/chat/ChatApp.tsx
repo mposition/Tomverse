@@ -1,10 +1,11 @@
 "use client";
 
-import type { PreparedChatLocationIntent } from "@tomverse/chat-core";
+import type { ChatPanelLocationIntent } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
-import { chatLocationSession } from "@/lib/chatLocationClient";
+import { chatLocationSession, readRouterLocationRequest, requireRouterLocationVersion } from "@/lib/chatLocationClient";
+import { ROUTER_LOCATION_ROUTE } from "@/lib/chatRouterLocationProtocol";
 import { requestChatLocationIntent } from "@tomverse/api-client";
 import {
   memo,
@@ -251,7 +252,8 @@ type ChatAppProps = {
     submittedAtMonotonicMs?: number;
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
-    preparedLocationIntent?: PreparedChatLocationIntent;
+    preparedLocationIntent?: ChatPanelLocationIntent;
+    routerLocationTurnIsCurrent?: () => boolean;
     id: string;
     text: string;
     chatId: string;
@@ -1515,7 +1517,8 @@ function ChatAppComponent({
     submittedAtMonotonicMs?: number,
     preparationTimings?: ClientLatencyStages,
     preparationReadyAtMonotonicMs?: number,
-    preparedLocationIntent?: PreparedChatLocationIntent,
+    preparedLocationIntent?: ChatPanelLocationIntent,
+    routerLocationTurnIsCurrent?: () => boolean,
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1907,88 +1910,126 @@ function ChatAppComponent({
       return;
     }
 
+    let hasRouterLocationContinuation = false;
     try {
-      const sendChatRequest = async (turnstileToken?: string) => {
+      const sendChatRequest = async (turnstileToken?: string, recoverWithSavedLocation = false) => {
         // Human permission and guest verification happen before provider wait
         // time starts. The same source turn is continued after either prompt.
         liveness.stop();
-        const finishLocation = latency.stage("locationMs");
-        const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal, chatLocationIntentEnabled ? {
-          turnId: sourceUserMessageId,
-          requiresLocation: async () => {
-            const prepared = preparedLocationIntent?.read(panelIdentityKey, String(userMessage.content ?? ""));
-            if (typeof prepared === "boolean") return prepared;
-            const finishIntent = latency.stage("locationIntentMs");
-            try { return await requestChatLocationIntent(String(userMessage.content ?? ""), fetch, { turnstileToken }); }
-            finally { finishIntent(); }
-          },
-        } : undefined).finally(finishLocation);
-        controller.signal.throwIfAborted();
+        const fuseLocation = !recoverWithSavedLocation && routerLocationTurnIsCurrent && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
+          !deepResearchDepth && !reviewProvider && !isGuestMode && chatLocationIntentEnabled &&
+          chatLocationSession.canPrepareIntent(panelIdentityKey);
+        const checkLocationTurn = () => {
+          if ((fuseLocation || recoverWithSavedLocation) && routerLocationTurnIsCurrent && !routerLocationTurnIsCurrent()) controller.abort();
+          controller.signal.throwIfAborted();
+        };
+        checkLocationTurn();
+        const readLocation = (routerDecision: boolean | null = null) => {
+          const finishLocation = latency.stage("locationMs");
+          return chatLocationSession.readForTurn(panelIdentityKey, controller.signal, chatLocationIntentEnabled && routerDecision !== false ? {
+            turnId: sourceUserMessageId,
+            requiresLocation: async () => {
+              if (routerDecision === true) return true;
+              const source = String(userMessage.content ?? "");
+              const prepared = preparedLocationIntent && "readForSavedTurn" in preparedLocationIntent
+                ? await preparedLocationIntent.readForSavedTurn(panelIdentityKey, source, controller.signal, latency.freshLocation)
+                : preparedLocationIntent?.read(panelIdentityKey, source);
+              if (typeof prepared === "boolean") return prepared;
+              controller.signal.throwIfAborted();
+              const finishIntent = latency.stage("locationIntentMs");
+              try { return await requestChatLocationIntent(source, fetch, { turnstileToken }); }
+              finally { finishIntent(); }
+            },
+          } : undefined).finally(finishLocation);
+        };
+        const locationFields = (fix: Awaited<ReturnType<typeof readLocation>>) =>
+          fix && chatLocationSession.canShare(fix, panelIdentityKey) ? { currentLocation: fix } : {};
+        const turnLocation = fuseLocation ? null : await readLocation();
+        checkLocationTurn();
         liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
         onDispatchStarted?.();
         if (isGuestMode && guestAutoCapability) {
           guestAutoRequestStarted = true;
         }
         latency.dispatched();
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            // UI-only turns never go to a provider, and this turn's own user
-            // message is appended exactly once -- `messages` is the pre-send
-            // snapshot, and the id filter keeps a re-render or a resend from
-            // duplicating it.
-            // The newest part that fits the request limits: a conversation
-            // has no length limit, and one sent whole could not be continued
-            // past them (lib/chatRequestLimits.ts).
-            messages: fitChatRequestTranscript(
-              requestTranscriptForScope(
-                messages,
-                userMessage,
-                transcriptScope
-              )
-                // A retry is a new visible turn but is still verified against
-                // the original durable question. Preserve the earlier
-                // user/error ordering, and change only the newly appended
-                // request copy to the persisted source identity.
-                .map((message) => message === userMessage
-                  ? { ...message, id: sourceUserMessageId }
-                  : message)
-                .map(toChatRequestMessage)
-            ),
-            ...(turnLocation && chatLocationSession.canShare(turnLocation, panelIdentityKey)
-              ? { currentLocation: turnLocation } : {}),
-            modelId: modelId,
-            ...(turnstileToken ? { turnstileToken } : {}),
-            ...(!isGuestMode
-              ? {
-                  conversationId: targetChatId,
-                  assistantMessageId,
-                  // The saved user turn this response attempt is bound to.
-                  // The server fingerprints the attempt with it, so a reused
-                  // assistant id cannot be attached to a different question.
-                  sourceUserMessageId,
-                }
-              : {}),
-            ...(deepResearchDepth ? { deepResearchDepth } : {}),
-            ...(mcpConnectionId ? { mcpConnectionId } : {}),
-            ...(admissionToken ? { admissionToken } : {}),
-            ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
-            ...(effectiveWebSearchMode && effectiveWebSearchMode !== "off"
-              ? { webSearchMode: effectiveWebSearchMode }
-              : {}),
-            ...(acknowledgedUnavailableAttachmentIds.length > 0
-              ? { acknowledgedUnavailableAttachmentIds }
-              : {}),
-            ...(promptRefinerDecision ? { promptRefinerDecision } : {}),
-            ...(isGuestMode && guestAutoCapability
-              ? { guestAutoCapability, guestClientTurnId: sourceUserMessageId }
-              : {}),
-          }),
+        const requestBody = {
+          // UI-only turns never go to a provider, and this turn's own user
+          // message is appended exactly once -- `messages` is the pre-send
+          // snapshot, and the id filter keeps a re-render or a resend from
+          // duplicating it.
+          // The newest part that fits the request limits: a conversation
+          // has no length limit, and one sent whole could not be continued
+          // past them (lib/chatRequestLimits.ts).
+          messages: fitChatRequestTranscript(
+            requestTranscriptForScope(
+              messages,
+              userMessage,
+              transcriptScope
+            )
+              // A retry is a new visible turn but is still verified against
+              // the original durable question. Preserve the earlier
+              // user/error ordering, and change only the newly appended
+              // request copy to the persisted source identity.
+              .map((message) => message === userMessage
+                ? { ...message, id: sourceUserMessageId }
+                : message)
+              .map(toChatRequestMessage)
+          ),
+          modelId: modelId,
+          ...(turnstileToken ? { turnstileToken } : {}),
+          ...(!isGuestMode
+            ? {
+                conversationId: targetChatId,
+                assistantMessageId,
+                // The saved user turn this response attempt is bound to.
+                // The server fingerprints the attempt with it, so a reused
+                // assistant id cannot be attached to a different question.
+                sourceUserMessageId,
+              }
+            : {}),
+          ...(deepResearchDepth ? { deepResearchDepth } : {}),
+          ...(mcpConnectionId ? { mcpConnectionId } : {}),
+          ...(admissionToken ? { admissionToken } : {}),
+          ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
+          ...(effectiveWebSearchMode && effectiveWebSearchMode !== "off"
+            ? { webSearchMode: effectiveWebSearchMode }
+            : {}),
+          ...(acknowledgedUnavailableAttachmentIds.length > 0
+            ? { acknowledgedUnavailableAttachmentIds }
+            : {}),
+          ...(promptRefinerDecision ? { promptRefinerDecision } : {}),
+          ...(isGuestMode && guestAutoCapability
+            ? { guestAutoCapability, guestClientTurnId: sourceUserMessageId }
+            : {}),
+        };
+        const post = (path: string, fields: Record<string, unknown>) => fetch(path, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...requestBody, ...fields }),
           signal: controller.signal,
         });
+        let res = fuseLocation
+          ? await post(ROUTER_LOCATION_ROUTE, { routerLocationFusion: true })
+          : await post("/api/chat", locationFields(turnLocation));
+        const locationRequest = fuseLocation ? await readRouterLocationRequest(res) : null;
+        if (locationRequest) {
+          hasRouterLocationContinuation = Boolean(locationRequest.continuation);
+          checkLocationTurn();
+          liveness.stop();
+          const fix = await readLocation(locationRequest.requiresLocation);
+          checkLocationTurn();
+          liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
+          if (locationRequest.continuation) {
+            res = await post(ROUTER_LOCATION_ROUTE, { ...locationFields(fix),
+              routerLocationFusion: true, routerLocationContinuation: locationRequest.continuation });
+            await requireRouterLocationVersion(res);
+          } else {
+            res = await post("/api/chat", locationFields(fix));
+          }
+          if (res.headers.get("X-Chat-Response-Mode") === "router-location") {
+            await res.body?.cancel();
+            throw new Error("Unexpected second router location request");
+          }
+        }
         // Headers move the phase and deliberately do not extend the deadline:
         // the first-response budget is absolute from the moment the request
         // was issued, so server-side attachment extraction and the provider's
@@ -2064,12 +2105,14 @@ function ChatAppComponent({
           error && typeof error === "object"
             ? (error as { code?: string }).code
             : undefined;
-        const refusalReason =
+        const refusalDetails =
           error && typeof error === "object" &&
           (error as { details?: unknown }).details &&
           typeof (error as { details?: unknown }).details === "object"
-            ? ((error as { details: Record<string, unknown> }).details.refusalReason)
+            ? (error as { details: Record<string, unknown> }).details
             : undefined;
+        const refusalReason = refusalDetails?.refusalReason;
+        const recoverWithSavedLocation = refusalDetails?.routerLocationRecovery === "saved";
         if (isGuestMode && code === "TURNSTILE_REQUIRED") {
           // The coordinator guarantees only one panel actually runs the
           // challenge; the rest wait for that panel's verified retry to finish
@@ -2080,7 +2123,7 @@ function ChatAppComponent({
             sendAfterGrant: () => sendChatRequest(),
           });
         } else if (
-          promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
+          !hasRouterLocationContinuation && promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
           code === "CHAT_CONTEXT_BUNDLE_STALE" &&
           refusalReason !== "already_consumed"
         ) {
@@ -2129,9 +2172,9 @@ function ChatAppComponent({
           // second turn or taking a second concurrency slot. The refused
           // request never reached `acquireChatAccess`, so its slot is still
           // this panel's to spend.
-          response = await sendChatRequest();
+          response = await sendChatRequest(undefined, recoverWithSavedLocation);
         } else if (
-          promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
+          !hasRouterLocationContinuation && promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
           code === "CHAT_CONTEXT_BUNDLE_STALE" &&
           refusalReason === "already_consumed" &&
           !isGuestMode &&
@@ -2177,7 +2220,7 @@ function ChatAppComponent({
           assistantMessageId = freshAssistantMessageId;
           activeContextBundle = refreshed;
           contextBundleCollisionRetries += 1;
-          response = await sendChatRequest();
+          response = await sendChatRequest(undefined, recoverWithSavedLocation);
         } else {
           throw error;
         }
@@ -3091,6 +3134,7 @@ function ChatAppComponent({
           promptPayload.preparationTimings,
           promptPayload.preparationReadyAtMonotonicMs,
           promptPayload.preparedLocationIntent,
+          promptPayload.routerLocationTurnIsCurrent,
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });

@@ -191,6 +191,9 @@ test("every page, file and the catalogue the walker sends has a name in both lan
     }
   }
   assert.deepEqual(scoutSubjectInfo("catalogue"), { kind: "catalogue" });
+  assert.deepEqual(scoutSubjectInfo("issue.881"), { kind: "issue", number: "881", href: "https://github.com/mposition/Tomverse/issues/881" });
+  assert.deepEqual(scoutSubjectInfo("issue.0"), { kind: "other" });
+  for (const locale of ["en", "ko"] as const) assert.match(adminProductResearchScoutMessages[locale].issue, /\{number\}/);
   assert.deepEqual(scoutSubjectInfo("something-else"), { kind: "other" });
 });
 

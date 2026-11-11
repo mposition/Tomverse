@@ -2142,10 +2142,12 @@ export const ko = {
         },
         purpose: {
             security: {
+                requiredReason: "계정 보호를 위한 필수 안내입니다. 끌 수 없습니다.",
                 title: "보안 및 계정",
                 description: "로그인 코드, 비밀번호·로그인 수단 변경, 보안 경고.",
             },
             billing: {
+                requiredReason: "결제 및 구독 내역에 관한 필수 안내입니다. 끌 수 없습니다.",
                 title: "결제",
                 description: "영수증, 결제 실패, 구독 변경.",
             },

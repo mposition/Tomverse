@@ -6,9 +6,11 @@ import { NextResponse } from "next/server";
 import {
   countOpenWorkItems,
   listLifecycleReportWorkItems,
+  reconcileVanishedDiscoveryItems,
   summariseLifecycleChanges,
 } from "@/lib/modelLifecycleWorkItems";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { runNewProviderModelResearch } from "@/lib/modelDiscoveryNewProviderResearch";
 import { checkProviderModelCatalogs } from "@/lib/providerModelCatalogMonitor";
 import { reconcileCatalogWithRegistry } from "@/lib/providerModelCatalogReconciliation";
 import { sendProviderModelCatalogReport } from "@/lib/providerModelCatalogReport";
@@ -43,6 +45,16 @@ export async function POST(request: Request) {
   const scheduledRun = await startScheduledJob("provider_model_catalog_monitor");
   try {
     const generatedAt = new Date();
+    const test = new URL(request.url).searchParams.get("test") === "true";
+    // Weekly and off by default (MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID). Started
+    // beside the scan, not after it: its model calls are the slowest step and
+    // read nothing the scan writes. A failure costs only its own summary line.
+    const newProviderResearch = test
+      ? Promise.resolve(undefined)
+      : runNewProviderModelResearch(generatedAt).catch((error) => {
+          console.error("New-provider model research failed:", error);
+          return undefined;
+        });
     const { results, discovery } = await checkProviderModelCatalogs(generatedAt);
     // Acts on the checks before they are reported, so the daily report states
     // what the registry now looks like rather than what it looked like when
@@ -54,6 +66,13 @@ export async function POST(request: Request) {
         return undefined;
       }
     );
+    // After the scan has recorded today's sightings: excludes candidates whose
+    // every ID left the provider's catalogue, reopens the ones that came back
+    // (owner approval 2026-11-11). Degradable: the queue just stays as it was.
+    const vanished = await reconcileVanishedDiscoveryItems().catch((error) => {
+      console.error("Vanished discovery item reconciliation failed:", error);
+      return undefined;
+    });
     // After the scan, so the models it just queued have their documentation
     // read the same morning. Degradable like everything below: a documentation
     // host that is down costs the adoption form its prefill, never the scan its
@@ -95,8 +114,9 @@ export async function POST(request: Request) {
       changes,
       docEvidence,
       generatedAt,
-      test: new URL(request.url).searchParams.get("test") === "true",
+      test,
     });
+    const research = await newProviderResearch;
     const checked = results.filter((result) => result.status === "checked").length;
     const failed = results.filter((result) => result.status === "failed").length;
     const skipped = results.filter((result) => result.status === "skipped").length;
@@ -130,6 +150,10 @@ export async function POST(request: Request) {
       registryHeld: reconciliation?.held.length ?? 0,
       docEvidenceAttempted: docEvidence?.attempted ?? null,
       docEvidenceParsed: docEvidence?.byStatus.parsed ?? null,
+      vanishedExcluded: vanished?.excluded ?? null,
+      vanishedReopened: vanished?.reopened ?? null,
+      newProviderResearch: research?.status ?? null,
+      newProviderResearchFiled: research?.status === "ran" ? research.created.length : null,
     };
     // A provider whose every enabled model went missing at once is far more
     // likely to be a broken catalog response than a real mass retirement.

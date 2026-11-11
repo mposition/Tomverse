@@ -754,7 +754,7 @@ export function AnalyticsProvider({
     consent === "unset" &&
     resolvedPolicy?.mode === "notice_opt_out" &&
     !showPreferences;
-  const promptCopy = defaultEnabledNotice
+  const regionalPromptCopy = defaultEnabledNotice
     ? {
         title: copy.noticeTitle,
         body: copy.noticeBody,
@@ -765,6 +765,9 @@ export function AnalyticsProvider({
         declineShort: copy.turnOffShort,
       }
     : copy;
+  const promptCopy = pathname === "/settings/data"
+    ? { ...regionalPromptCopy, mobileBody: regionalPromptCopy.body }
+    : regionalPromptCopy;
 
   // On /chat, once a shell has registered a slot above the composer, the
   // notice portals there instead of floating fixed over the viewport --
@@ -875,8 +878,11 @@ export function AnalyticsProvider({
           102px against its 80px contract.
         */}
         <div className="min-w-[6rem] flex-1">
+          {pathname === "/privacy" ? <p data-testid="privacy-consent-mobile-title" className="mb-1 text-sm font-bold text-zinc-900 dark:text-zinc-50 @md/notice:hidden">{promptCopy.title}</p> : null}
+          {isPluginRoute ? <p data-testid="analytics-consent-mobile-title" className="mb-1 text-sm font-bold text-zinc-900 dark:text-zinc-50 @md/notice:hidden">{promptCopy.title}</p> : null}
           <p className={`${readableNotice ? "text-sm leading-6 [overflow-wrap:anywhere]" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-300 @md/notice:hidden`}>
-            {(noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null) || ["faq", "models", "support", "support/help-centre", "privacy", "about", "pricing", "terms", "safety", "ai-for-file-analysis"].includes((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/"))) ? promptCopy.body : (promptCopy.mobileBody)}{" "}
+            {pathname === "/settings/data" ? <strong data-testid="data-consent-mobile-title" className="mb-1 block text-zinc-900 dark:text-zinc-50">{promptCopy.title}</strong> : null}
+            {(noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null) || ["faq", "models", "support", "support/help-centre", "privacy", "about", "pricing", "terms", "safety", "ai-for-file-analysis", "plugins"].includes((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/"))) ? promptCopy.body : (promptCopy.mobileBody)}{" "}
             <Link
               href="/privacy"
               className={`${((["about", "faq", "settings/assistants"].includes((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/"))) || (pathname === "/privacy" && lang === "en")) ? "mt-1 block w-fit max-w-full whitespace-nowrap" : (readableNotice ? "inline-block whitespace-nowrap" : "")} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}

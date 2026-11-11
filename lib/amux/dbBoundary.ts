@@ -574,10 +574,11 @@ export const AMUX_DB_BOUNDARIES = {
   // Card or close record: setup + update + read-back on the idea card close
   // question, then the same two on the v22 question, then on a refused session
   // answer's card, whichever it is + fence.
-  // + the same two on a v22 result review.
+  // + the same two on a v22 result review + the same two on a T2 draft's
+  // advice card (lib/engineeringAgentT2DmReviewService.ts).
   decisionMakerV22QuestionWrite: {
     operation: "decision_maker_v22_question_write",
-    prismaCallCeiling: 10,
+    prismaCallCeiling: 12,
     isolation: "mutation",
   },
   // A v22 result waiting for review (lib/amux/v22ResultReviewService.ts),
@@ -586,6 +587,20 @@ export const AMUX_DB_BOUNDARIES = {
   decisionMakerV22ResultReviewRead: {
     operation: "decision_maker_v22_result_review_read",
     prismaCallCeiling: 5,
+    isolation: "mutation",
+  },
+  // A T2 draft put to the Decision Maker for advice
+  // (lib/engineeringAgentT2DmReviewService.ts). Sync read: setup + pending +
+  // closing + fence.
+  engineeringAgentT2DmReviewRead: {
+    operation: "engineering_agent_t2_dm_review_read",
+    prismaCallCeiling: 4,
+    isolation: "read",
+  },
+  // Drafts no card could be written for, recorded once: setup + insert + fence.
+  engineeringAgentT2DmReviewUnfilable: {
+    operation: "engineering_agent_t2_dm_review_unfilable",
+    prismaCallCeiling: 3,
     isolation: "mutation",
   },
   // Apply: setup + audit chain lock + switches + the locked review, Task and

@@ -2141,10 +2141,12 @@ export const pt = {
         },
         purpose: {
             security: {
+                requiredReason: "Estas notificações obrigatórias protegem sua conta e não podem ser desativadas.",
                 title: "Segurança e conta",
                 description: "Códigos de acesso, alterações de senha e de método de login, alertas de segurança.",
             },
             billing: {
+                requiredReason: "Estas notificações obrigatórias tratam de pagamentos e assinaturas e não podem ser desativadas.",
                 title: "Cobrança",
                 description: "Recibos, pagamentos recusados, mudanças de assinatura.",
             },

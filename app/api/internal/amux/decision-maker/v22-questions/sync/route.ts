@@ -34,6 +34,12 @@ import {
   readAmuxV22ResultReviewSyncRows,
   recordAmuxV22ResultReviewsUnfilable,
 } from "@/lib/amux/v22ResultReviewService";
+import { engineeringAgentT2DmReviewEnabled } from "@/lib/engineeringAgentT2DmReviewCore";
+import {
+  engineeringAgentT2DmCards,
+  readEngineeringAgentT2DmSyncRows,
+  recordEngineeringAgentT2DmUnfilable,
+} from "@/lib/engineeringAgentT2DmReviewService";
 
 /**
  * The relay's v22 question tick (operator decision 2026-10-30): first one
@@ -58,6 +64,11 @@ import {
  * TOMVERSE_AMUX_V22_RESULT_REVIEW_DM=enabled), and while
  * TOMVERSE_AMUX_DM_APPROVER=enabled one Decision Maker proposal per tick is
  * applied without the operator (lib/amux/dmAutoApplyService.ts).
+ *
+ * Operator decision 2026-11-11: an engineering agent T2 draft rides the tick
+ * last, for advice only (lib/engineeringAgentT2DmReviewService.ts; new cards
+ * only while TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW=enabled). Its answer is
+ * shown beside the draft in Admin and applies nothing.
  */
 const OPERATION = "decision_maker_v22_question_sync";
 const refused = dmRouteRefusal("synced");
@@ -101,6 +112,20 @@ export async function POST(request: Request) {
         console.warn(JSON.stringify({ subsystem: "amux", event: "v22_result_review_sync_failed" }));
         return { pending: [], closing: [] };
       });
+      const t2 = await withAmuxDbBoundary(
+        AMUX_DB_BOUNDARIES.engineeringAgentT2DmReviewRead,
+        (tx) => readEngineeringAgentT2DmSyncRows(tx)).then(async (rows) => {
+        if (!engineeringAgentT2DmReviewEnabled()) return { pending: [], closing: rows.closing };
+        const opened = engineeringAgentT2DmCards(rows.pending);
+        if (opened.unfilable.length > 0)
+          await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.engineeringAgentT2DmReviewUnfilable,
+            (tx, context) => recordEngineeringAgentT2DmUnfilable(tx,
+              { workItemIds: opened.unfilable, now: context.dbNow }));
+        return { pending: opened.cards, closing: rows.closing };
+      }).catch(() => {
+        console.warn(JSON.stringify({ subsystem: "amux", event: "engineering_t2_dm_review_sync_failed" }));
+        return { pending: [], closing: [] };
+      });
       return amuxJsonNoStore({
         synced: true,
         resolved: outcome,
@@ -108,9 +133,9 @@ export async function POST(request: Request) {
         cursor: cursor.move === "advance" ? { move: "advance",
           judged_at_ms: cursor.judgedAtMs, request_id: cursor.requestId } :
           { move: cursor.move },
-        pending: [...cards, ...cardClose.pending, ...review.pending]
+        pending: [...cards, ...cardClose.pending, ...review.pending, ...t2.pending]
           .slice(0, AMUX_V22_QUESTION_SYNC_LIMIT),
-        closing: [...rows.closing, ...cardClose.closing, ...review.closing]
+        closing: [...rows.closing, ...cardClose.closing, ...review.closing, ...t2.closing]
           .slice(0, AMUX_V22_QUESTION_SYNC_LIMIT)
           .map((row) => ({ question_id: row.questionId, card_id: row.cardId })),
       });

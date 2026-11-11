@@ -3075,9 +3075,14 @@ export function ChatInput({
                     />
                   </span>
                 ) : (
+                  // Between the 240px icon-only rule and md the label below
+                  // already reads "3 AIs", and the 4rem button cannot hold both
+                  // a count badge and that label: the badge left the label 6px
+                  // and clipped it to "3 A". The badge returns where the label
+                  // is hidden (240px and below) and where the button is wider.
                   <span
                     aria-hidden="true"
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white"
+                    className="hidden h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white max-[240px]:flex md:flex"
                   >
                     {activeSelectedModels.length}
                   </span>

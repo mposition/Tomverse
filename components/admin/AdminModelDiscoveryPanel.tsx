@@ -47,6 +47,8 @@ export type ModelWorkItemRow = {
   servedByTomverse: boolean;
   /** The served model that is a later generation of this one's line, if any. */
   supersededBy: string | null;
+  /** Adopted, already served, stalled before rollout: "Rollout complete" applies. */
+  rolloutFinishable?: boolean;
   /** Verifications still owed before rollout, ticked off from this panel. */
   pendingValidations?: string[];
   familyKey: string;
@@ -62,6 +64,8 @@ export type ModelWorkItemRow = {
   nextStepKo: string;
   /** The three above joined; what a decision records as the analysis shown. */
   analysisKo: string;
+  /** A proposal of the weekly new-provider research: no adapter yet, so not adoptable. */
+  research?: { product: "chat" | "image" | "code"; providerName: string; citations: string[] } | null;
   /** Present only in the excluded view: what closed the item, and who. */
   exclusion?: {
     reasonCode: string | null;
@@ -176,7 +180,7 @@ const decisionIds = (group: ModelFamilyGroup, decision: DecisionDialog["decision
  */
 const adoptableMember = (group: ModelFamilyGroup) => {
   const candidate = group.representative;
-  if (candidate.action !== "add") return null;
+  if (candidate.action !== "add" || candidate.research) return null;
   // Chat only. Image generation models have their own ledger, and this row's
   // `supportsImage` means image *input*; adopting a generation model here would
   // price and route it as a chat model. The server refuses it as well.
@@ -194,7 +198,7 @@ const adoptableMember = (group: ModelFamilyGroup) => {
  */
 const imageDraftMember = (group: ModelFamilyGroup) => {
   const candidate = group.representative;
-  if (candidate.action !== "add" || candidate.product !== "image_generation") return null;
+  if (candidate.action !== "add" || candidate.research || candidate.product !== "image_generation") return null;
   return ["discovered", "awaiting_decision", "deferred", "approved", "implementation_pending"].includes(
     candidate.status
   )
@@ -273,6 +277,9 @@ export function AdminModelDiscoveryPanel() {
     validation: string;
   } | null>(null);
   const [validationNote, setValidationNote] = useState("");
+  // Adopted, already-served items being closed as rolled out.
+  const [rolloutDialog, setRolloutDialog] = useState<string[] | null>(null);
+  const [rolloutNote, setRolloutNote] = useState("");
 
   // Which load is current. A response from an earlier load -- the other view,
   // or a refresh overtaken by a decision -- is dropped instead of replacing
@@ -542,6 +549,49 @@ export function AdminModelDiscoveryPanel() {
     [m]
   );
 
+  const finishRollout = useCallback(
+    async (workItemIds: string[], note: string) => {
+      if (!note.trim() || workItemIds.length === 0) return;
+      setBusyIds(new Set(workItemIds));
+      try {
+        const response = await adminFetch("/api/admin/model-lifecycle/finish-rollout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workItemIds, note: note.trim() }),
+        });
+        const data = (await response.json().catch(() => null)) as {
+          completed?: number;
+          awaitingNotice?: number;
+          message?: string;
+        } | null;
+        if (!response.ok || typeof data?.completed !== "number") {
+          dispatchAppToast(data?.message || m.toast.rolloutFailed, "error");
+          return;
+        }
+        setRolloutDialog(null);
+        setRolloutNote("");
+        setSelectedFamilies(new Set());
+        dispatchAppToast(
+          m.toast.rolloutFinished(data.completed, data.awaitingNotice ?? 0),
+          "success"
+        );
+        await load();
+      } catch {
+        dispatchAppToast(m.toast.unreachable, "error");
+      } finally {
+        setBusyIds(new Set());
+      }
+    },
+    [load, m]
+  );
+
+  const rolloutIds = (selected: readonly ModelFamilyGroup[]) =>
+    selected.flatMap((group) =>
+      group.members.filter((member) => member.rolloutFinishable).map((member) => member.id)
+    );
+  const selectedRolloutIds =
+    view === "open" ? rolloutIds(groups.filter((group) => selectedFamilies.has(group.key))) : [];
+
   const decideSelected = (decision: DecisionDialog["decision"]) => {
     openDecision(
       decision,
@@ -645,7 +695,15 @@ export function AdminModelDiscoveryPanel() {
               <AdminStatusChip tone={AVAILABILITY_TONE[row.availability]}>
                 {m.availability[row.availability]}
               </AdminStatusChip>
-              <AdminStatusChip tone="idle">{m.product[row.product]}</AdminStatusChip>
+              {row.research ? (
+                <AdminStatusChip tone="info">
+                  <span data-testid="model-discovery-research-chip">
+                    {m.table.researchChip(row.research.product === "image" ? "Image" : row.research.product === "code" ? "Code" : "Chat")}
+                  </span>
+                </AdminStatusChip>
+              ) : (
+                <AdminStatusChip tone="idle">{m.product[row.product]}</AdminStatusChip>
+              )}
               {row.product === "chat" && group.providers.includes("google") ? (
                 <AdminStatusChip tone="info">{m.table.braveReview}</AdminStatusChip>
               ) : null}
@@ -681,6 +739,22 @@ export function AdminModelDiscoveryPanel() {
               <p className="text-xs text-zinc-300">
                 <span className="text-zinc-500">{m.table.nextStep} </span>
                 {row.nextStepKo}
+              </p>
+            ) : null}
+            {row.research?.citations.length ? (
+              <p className="flex flex-wrap gap-x-2 text-xs" data-testid="model-discovery-research-sources">
+                <span className="text-zinc-500">{m.table.researchSources}</span>
+                {row.research.citations.map((url) => (
+                  <a
+                    key={url}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    className="break-all text-blue-300 underline hover:text-blue-200"
+                  >
+                    {new URL(url).hostname}
+                  </a>
+                ))}
               </p>
             ) : null}
           </div>
@@ -761,6 +835,20 @@ export function AdminModelDiscoveryPanel() {
                   {m.table.noImageAdapter(imageDraftMember(group)!.provider)}
                 </span>
               )
+            ) : null}
+            {view === "open" && rolloutIds([group]).length > 0 ? (
+              <AdminWriteButton
+                size="sm"
+                variant="primary"
+                disabled={busy}
+                data-testid="model-discovery-finish-rollout"
+                onClick={() => {
+                  setRolloutNote("");
+                  setRolloutDialog(rolloutIds([group]));
+                }}
+              >
+                {m.table.finishRollout}
+              </AdminWriteButton>
             ) : null}
             {view === "open" && decisionIds(group, "exclude").length > 0 ? (
               <AdminWriteButton
@@ -900,6 +988,19 @@ export function AdminModelDiscoveryPanel() {
           </select>
         ) : null}
         <span className="flex-1 text-xs text-zinc-500">{m.bulk.selected(selectedFamilies.size)}</span>
+        {selectedRolloutIds.length > 0 ? (
+          <AdminWriteButton
+            size="sm"
+            variant="primary"
+            disabled={busyIds.size > 0}
+            onClick={() => {
+              setRolloutNote("");
+              setRolloutDialog(selectedRolloutIds);
+            }}
+          >
+            {m.bulk.finishRolloutSelected(selectedRolloutIds.length)}
+          </AdminWriteButton>
+        ) : null}
         <AdminWriteButton
           size="sm"
           variant="secondary"
@@ -919,7 +1020,7 @@ export function AdminModelDiscoveryPanel() {
         one view about that view's rows; letting focus reach the view switch or
         another row's button would let the answer land on a different list.
       */}
-      <div className="flex min-w-0 flex-col gap-5" inert={dialog !== null || busyIds.size > 0 || validationDialog !== null}>
+      <div className="flex min-w-0 flex-col gap-5" inert={dialog !== null || busyIds.size > 0 || validationDialog !== null || rolloutDialog !== null}>
         <AdminTile
           title={m.header.title}
           description={m.header.intro}
@@ -1070,6 +1171,28 @@ export function AdminModelDiscoveryPanel() {
           <textarea
             value={validationNote}
             onChange={(event) => setValidationNote(event.target.value)}
+            maxLength={1_000}
+            rows={3}
+            className={`${selectClass} w-full`}
+          />
+        </label>
+      </AdminReasonDialog>
+
+      <AdminReasonDialog
+        open={rolloutDialog !== null}
+        title={m.dialog.rolloutTitle}
+        description={rolloutDialog ? m.dialog.rolloutDescription(rolloutDialog.length) : undefined}
+        confirmLabel={m.dialog.rolloutConfirm}
+        confirmDisabled={!rolloutNote.trim()}
+        busy={busyIds.size > 0}
+        onConfirm={() => rolloutDialog && void finishRollout(rolloutDialog, rolloutNote)}
+        onClose={() => setRolloutDialog(null)}
+      >
+        <label className="block text-sm">
+          <span className="mb-1 block font-bold text-zinc-100">{m.dialog.rolloutNote}</span>
+          <textarea
+            value={rolloutNote}
+            onChange={(event) => setRolloutNote(event.target.value)}
             maxLength={1_000}
             rows={3}
             className={`${selectClass} w-full`}

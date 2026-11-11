@@ -473,6 +473,7 @@ model Conversation {
   promptRefinerSuggestions PromptRefinerChatSuggestion[]
   promptRefinerProductAttempts PromptRefinerProductAttempt[]
   responseAttempts      ChatResponseAttempt[]
+  routerLocationPreparations ChatRouterLocationPreparation[]
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
@@ -1417,6 +1418,22 @@ model ChatResponseAttempt {
   @@index([conversationId, updatedAt])
   @@index([status, leaseExpiresAt])
   @@index([sourceUserMessageId])
+}
+
+/// One Router call per fresh saved question while its location decision can be resumed.
+/// The browser holds the sealed decision. This row contains only its binding and expiry.
+model ChatRouterLocationPreparation {
+  conversationId      String
+  sourceUserMessageId String
+  assistantMessageId  String
+  requestDigest       String
+  expiresAt           DateTime
+  consumedAt          DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, sourceUserMessageId])
+  @@index([expiresAt])
 }
 
 // One in-flight chat response. Counted to enforce concurrency, never to bill.
@@ -9689,10 +9706,26 @@ model EngineeringAgentWorkItem {
   run        EngineeringAgentRun?        @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   approval   EngineeringAgentApproval?
   capabilities EngineeringAgentCapability[]
+  dmReview     EngineeringAgentDmReview?
 
   @@index([kind, state])
   @@index([runId])
   @@index([state, leaseExpiresAt])
+}
+
+/// The Decision Maker card a T2 draft was put to for advice
+/// (lib/engineeringAgentT2DmReviewService.ts). The answer is read from the
+/// Decision Maker's own records beside the draft; nothing here decides it.
+/// A draft whose card cannot be written is recorded once with `unfilableAt`
+/// instead, so it never holds back the drafts behind it.
+model EngineeringAgentDmReview {
+  workItemId        String    @id
+  localCardId       String?   @unique
+  unfilableAt       DateTime?
+  localCardClosedAt DateTime?
+  createdAt         DateTime  @default(now())
+
+  workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }
 
 /// A T2 decision and nothing else: written once, before the draft closes.

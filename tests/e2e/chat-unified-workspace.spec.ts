@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { GUEST_BRAND_TRIO_MODEL_IDS } from "../../lib/appDefaults";
 import { buildRoutingRetryChunk } from "../../lib/routingRetrySignal";
+import { buildChatStreamTrailerChunk } from "../../lib/webSearchStreamTrailer";
 import {
   expectNoHorizontalOverflow,
   createQaPdfBuffer,
@@ -82,9 +83,12 @@ type DraftFixture = {
 };
 
 function installControlledChatFetch(options: {
+  useChatNetworkFixture?: boolean;
+  routerRequiresLocation?: boolean;
   routedModelId?: string;
   responseErrorCode?: string;
   timingToken?: string;
+  timedAnswer?: string;
   responseErrorOnceCode?: string;
   responseErrorOnceDetails?: Record<string, unknown>;
   durableAttemptResponse?: boolean;
@@ -104,6 +108,17 @@ function installControlledChatFetch(options: {
   window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+    if (!options.useChatNetworkFixture && method === "POST" && /\/api\/chat\/router-location($|\?)/.test(url)) {
+      if (options.routerRequiresLocation && !JSON.parse(String(init?.body)).routerLocationContinuation) {
+        return Response.json({ requiresLocation: true, continuation: "fixture" }, { headers: {
+          "X-Chat-Router-Location-Version": "1", "X-Chat-Response-Mode": "router-location",
+        } });
+      }
+      const response = await window.fetch("/api/chat", init);
+      const headers = new Headers(response.headers);
+      headers.set("X-Chat-Router-Location-Version", "1");
+      return new Response(response.body, { status: response.status, headers });
+    }
     const isReceipt = /\/api\/conversations\/[^/]+\/messages\/receipt(?:$|\?)/.test(url);
     const isMessageSave = !isReceipt && /\/api\/conversations\/[^/]+\/messages(?:$|\?)/.test(url);
     if (method === "POST" && (
@@ -127,7 +142,7 @@ function installControlledChatFetch(options: {
         headers: new Headers(response.headers),
       });
     }
-    if (method !== "POST" || !/\/api\/chat($|\?)/.test(url)) {
+    if (options.useChatNetworkFixture || method !== "POST" || !/\/api\/chat($|\?)/.test(url)) {
       return originalFetch(input, init);
     }
     const request = JSON.parse(String(init?.body ?? "{}")) as RecordedRequest;
@@ -221,6 +236,11 @@ function installControlledChatFetch(options: {
           control.aborted = true;
           try { controller.error(new DOMException("Aborted", "AbortError")); } catch { /* Settled. */ }
         };
+        const timedAnswer = options.timedAnswer;
+        if (timedAnswer) {
+          setTimeout(() => control.push(timedAnswer), 40);
+          setTimeout(() => control.finish(), 80);
+        }
         if (signal?.aborted) abort();
         else signal?.addEventListener("abort", abort, { once: true });
       },
@@ -287,6 +307,8 @@ async function attachDraftFile(page: Page) {
 }
 
 async function openChat(page: Page, options: {
+  useChatNetworkFixture?: boolean;
+  routerRequiresLocation?: boolean;
   viewport?: { width: number; height: number };
   messages?: QaConversationMessage[];
   disabledPanels?: string[];
@@ -298,6 +320,7 @@ async function openChat(page: Page, options: {
   routedModelId?: string;
   responseErrorCode?: string;
   timingToken?: string;
+  timedAnswer?: string;
   responseErrorOnceCode?: string;
   responseErrorOnceDetails?: Record<string, unknown>;
   durableAttemptResponse?: boolean;
@@ -943,7 +966,10 @@ async function openChat(page: Page, options: {
     });
   });
   await page.addInitScript(installControlledChatFetch, {
+    useChatNetworkFixture: options.useChatNetworkFixture,
+    routerRequiresLocation: options.routerRequiresLocation,
     timingToken: options.timingToken,
+    timedAnswer: options.timedAnswer,
     routedModelId: options.routedModelId,
     responseErrorCode: options.responseErrorCode,
     responseErrorOnceCode: options.responseErrorOnceCode,
@@ -1135,6 +1161,69 @@ async function switchToFixtureAccountA(
 }
 
 const message = (page: Page, text: string) => page.getByTestId("chat-message").filter({ hasText: text });
+
+const fusionEnabled = process.env.E2E_CHAT_ROUTER_LOCATION_FUSION_ENABLED === "true" &&
+  process.env.E2E_CHAT_LOCATION_INTENT_ENABLED !== "false" &&
+  process.env.E2E_CHAT_FRESH_LOCATION_PREPARATION_ENABLED === "false";
+const savedChatPaths = /\/api\/chat(?:\/router-location)?$/;
+const routerLocationHeaders = { "X-Chat-Router-Location-Version": "1" };
+
+async function countDeviceLocationReads(page: Page, denied = false) {
+  await page.addInitScript(deny => {
+    const state = window as typeof window & { __qaFusionGpsReads: number };
+    state.__qaFusionGpsReads = 0;
+    Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
+      getCurrentPosition(success: PositionCallback, failure: PositionErrorCallback) {
+        state.__qaFusionGpsReads++;
+        if (deny) failure({ code: 1 } as GeolocationPositionError);
+        else success({ coords: { latitude: -27.47, longitude: 153.025, accuracy: 100 },
+          timestamp: Date.now() } as GeolocationPosition);
+      },
+    } });
+  }, denied);
+  return () => page.evaluate(() => (window as typeof window & { __qaFusionGpsReads: number }).__qaFusionGpsReads);
+}
+
+function makeGate() {
+  let release = () => {};
+  const promise = new Promise<void>(resolve => { release = resolve; });
+  return { promise, release };
+}
+
+const freshQuestion = "What is near me?";
+const locationIntentOff = process.env.E2E_CHAT_LOCATION_INTENT_ENABLED === "false";
+const freshLocationEarly = !locationIntentOff && process.env.E2E_CHAT_FRESH_LOCATION_PREPARATION_ENABLED !== "false";
+
+async function prepareGatedFreshSend(page: Page, viewport: { width: number; height: number }) {
+  const locationReads = await countDeviceLocationReads(page);
+  const state = await openChat(page, { fresh: true, autoSelectionOffered: true, viewport,
+    holdMessageSaveResponseAfterCommit: true, routerRequiresLocation: true });
+  const create = makeGate();
+  const intent = makeGate();
+  let createStarted = false;
+  const intentBodies: unknown[] = [];
+  await page.route("**/api/products/chat/conversations", async route => {
+    if (route.request().method() === "POST") { createStarted = true; await create.promise; }
+    await route.fallback();
+  });
+  await page.route("**/api/chat/location-intent", async route => {
+    const body = route.request().postDataJSON();
+    intentBodies.push(body);
+    await intent.promise;
+    await route.fulfill({ json: { requiresLocation: true,
+      ...(body.freshAccountId ? { preparationOutcome: "classified" } : {}) } });
+  });
+  await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+  // A draft edit alone must not start semantic work. The normalized, frozen
+  // message is the only text the classifier may receive after Send.
+  await page.getByTestId("chat-textarea").fill(`  ${freshQuestion}\n`);
+  expect(intentBodies).toHaveLength(0);
+  await page.getByTestId("chat-send-button").click();
+  await expect.poll(() => createStarted).toBe(true);
+  if (freshLocationEarly) await expect.poll(() => intentBodies.length).toBe(1);
+  else expect(intentBodies).toHaveLength(0);
+  return { state, create, intent, intentBodies, locationReads };
+}
 
 test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
   test("draft sync failure is visible and retry keeps the local question", async ({ page }) => {
@@ -3811,6 +3900,13 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       autoSelectionOffered: true,
       holdBlankChatCapability: true,
     });
+    let manualIntentCalls = 0;
+    await page.route("**/api/chat/location-intent", async route => {
+      manualIntentCalls++;
+      expect(route.request().postDataJSON().freshAccountId).toBeUndefined();
+      expect(state.messageSaveCommitted()).toBe(true);
+      await route.fulfill({ json: { requiresLocation: false } });
+    });
     await expect.poll(state.blankChatCapabilityStarted).toBe(true);
     await chooseModel(page, MODEL_B);
     state.releaseBlankChatCapability();
@@ -3827,6 +3923,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       write.method === "PATCH" && write.body.selectionMode === "auto"
     )).toHaveLength(0);
     expect((await requests(page))[0]?.modelId).toBe(MODEL_B);
+    expect(manualIntentCalls).toBe(locationIntentOff ? 0 : 1);
     await drive(page, 0, "finish");
   });
 
@@ -4081,11 +4178,20 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
 
   for (const autoSelectionOffered of [false, true]) {
     test(`a failed first Message save retries the same created Chat and never copies or deletes the new-scope draft (${autoSelectionOffered ? "Auto" : "manual"})`, async ({ page }) => {
+      const locationReads = await countDeviceLocationReads(page);
       const state = await openChat(page, {
         fresh: true,
         autoSelectionOffered,
         messageSaveFailureOnce: true,
+        routerRequiresLocation: true,
         messageSaveFailureStatus: 409,
+      });
+      const intentRequests: Array<{ freshAccountId?: string }> = [];
+      await page.route("**/api/chat/location-intent", async route => {
+        const body = route.request().postDataJSON();
+        intentRequests.push(body);
+        await route.fulfill({ json: { requiresLocation: true,
+          ...(body.freshAccountId ? { preparationOutcome: "classified" } : {}) } });
       });
       if (autoSelectionOffered) {
         await expect(page.getByTestId("composer-auto-routing-toggle"))
@@ -4101,6 +4207,8 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       )).toBeVisible();
       await expect(page.getByTestId("chat-textarea")).toHaveValue(prompt);
       expect(await persistentChatPostCount(page)).toBe(0);
+      expect(intentRequests).toHaveLength(autoSelectionOffered && freshLocationEarly ? 1 : 0);
+      expect(await locationReads()).toBe(0);
 
       const draftWritesAfterFailure = state.writes.filter((write) =>
         write.path.includes("/api/products/chat/drafts/")
@@ -4115,6 +4223,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       await drive(page, 0, "push", "One answer after the Message retry.");
       await drive(page, 0, "finish");
       await expect(message(page, "One answer after the Message retry.")).toBeVisible();
+      expect(await locationReads()).toBe(locationIntentOff ? 0 : 1);
 
       const creates = state.writes.filter((write) =>
         write.method === "POST" && write.path === "/api/products/chat/conversations"
@@ -4259,6 +4368,441 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(await requests(page)).toHaveLength(1);
   });
 
+  for (const decision of ["negative", "positive", "denied", "missing", "unsupported", "legacy404", "rateLimited"] as const) {
+    test(`a saved fresh Router location ${decision} decision preserves the question and final answer`, async ({ page }, testInfo) => {
+      test.skip(process.env.E2E_CHAT_LOCATION_INTENT_ENABLED === "false", "Requires location intent");
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const gpsReads = await countDeviceLocationReads(page, decision === "denied");
+      const state = await openChat(page, { fresh: true, viewport, autoSelectionOffered: true,
+        useChatNetworkFixture: true, holdMessageSaveResponseAfterCommit: true });
+      const question = "Which evidence should I review?";
+      const answer = "The complete answer for this saved question.";
+      const sourceUrl = "https://example.test/saved-routing-evidence";
+      const trailer = buildChatStreamTrailerChunk({ searchMetadata: {
+        requested: true, supported: true, executed: true, provider: "openai", queryCount: 1,
+        citations: [{ url: sourceUrl, title: "Saved turn evidence" }],
+      } });
+      const posts: RecordedRequest[] = [];
+      const paths: string[] = [];
+      const lookupKinds: string[] = [];
+      let answerCalls = 0;
+      const needsLocation = decision !== "negative" && decision !== "rateLimited";
+      const fallbackToChat = decision === "unsupported" || decision === "legacy404" || decision === "rateLimited";
+      await page.route("**/api/chat/location-intent", async route => {
+        const intent = route.request().postDataJSON();
+        expect(intent.text).toBe(question);
+        lookupKinds.push(intent.freshAccountId ? "fresh" : "saved");
+        await route.fulfill({ json: { requiresLocation: needsLocation,
+          ...(intent.freshAccountId ? { preparationOutcome: "classified" } : {}) } });
+      });
+      await page.route(savedChatPaths, async route => {
+        const body: RecordedRequest = route.request().postDataJSON();
+        posts.push(body);
+        paths.push(new URL(route.request().url()).pathname);
+        if (body.routerLocationFusion && decision === "legacy404") {
+          await route.fulfill({ status: 404, contentType: "text/html", body: "Not found" });
+          return;
+        }
+        if (body.routerLocationFusion && !body.routerLocationContinuation && decision !== "negative") {
+          await route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
+            json: decision === "rateLimited" ? { requiresLocation: null, locationRateLimited: true }
+              : decision === "unsupported" ? { requiresLocation: null }
+              : { requiresLocation: decision === "missing" ? null : true, continuation: "fixture-continuation" } });
+        } else {
+          answerCalls++;
+          await route.fulfill({ headers: body.routerLocationFusion ? routerLocationHeaders : {},
+            contentType: "text/plain; charset=utf-8", body: answer + trailer });
+        }
+      });
+      await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+      await submitComposer(page, question, viewport.width);
+      await expect.poll(state.messageSaveCommitted).toBe(true);
+      expect(posts).toHaveLength(0);
+      expect(lookupKinds).toEqual(freshLocationEarly ? ["fresh"] : []);
+      expect(await gpsReads()).toBe(0);
+      state.releaseMessageSaveResponse();
+      await expect(message(page, answer)).toBeVisible();
+      await expect(page.getByTestId("search-citation-item").getByRole("link")).toHaveAttribute("href", sourceUrl);
+      expect(answerCalls).toBe(1);
+      const resumed = fusionEnabled && decision !== "negative";
+      expect(posts).toHaveLength(resumed ? 2 : 1);
+      expect(paths).toEqual(fusionEnabled
+        ? ["/api/chat/router-location", ...(resumed ? [fallbackToChat ? "/api/chat" : "/api/chat/router-location"] : [])]
+        : ["/api/chat"]);
+      expect(posts[0].routerLocationFusion).toBe(fusionEnabled ? true : undefined);
+      const last = posts.at(-1)!;
+      expect(last.messages?.at(-1)?.content).toBe(question);
+      expect(lookupKinds).toEqual(freshLocationEarly ? ["fresh"]
+        : !fusionEnabled || decision === "unsupported" || decision === "legacy404" || decision === "missing" ? ["saved"] : []);
+      expect(await gpsReads()).toBe(needsLocation ? 1 : 0);
+      if (needsLocation && decision !== "denied") expect(last.currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+      else expect(last.currentLocation).toBeUndefined();
+      if (resumed) {
+        expect(posts[0].currentLocation).toBeUndefined();
+        const { routerLocationFusion, ...original } = posts[0];
+        const continued = { ...last };
+        delete continued.routerLocationFusion;
+        delete continued.routerLocationContinuation;
+        delete continued.currentLocation;
+        expect(routerLocationFusion).toBe(true);
+        expect(last.routerLocationFusion).toBe(fallbackToChat ? undefined : true);
+        expect(last.routerLocationContinuation).toBe(fallbackToChat ? undefined : "fixture-continuation");
+        expect(continued).toEqual(original);
+      }
+    });
+  }
+
+  test("a Router location limit leaves manual location available for the next send without another classifier", async ({ page }, testInfo) => {
+    test.skip(!fusionEnabled, "Requires Router location fusion");
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const gpsReads = await countDeviceLocationReads(page);
+    await openChat(page, { fresh: true, viewport, autoSelectionOffered: true, useChatNetworkFixture: true });
+    const waiting = makeGate();
+    const posts: RecordedRequest[] = [];
+    let lookups = 0;
+    await page.route("**/api/chat/location-intent", route => {
+      lookups++;
+      return route.fulfill({ json: { requiresLocation: true } });
+    });
+    await page.route(savedChatPaths, async route => {
+      posts.push(route.request().postDataJSON());
+      if (posts.length === 1) {
+        await waiting.promise;
+        return route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
+          json: { requiresLocation: null, locationRateLimited: true } });
+      }
+      return route.fulfill({ contentType: "text/plain",
+        body: posts.length === 2 ? "Answered without device location." : "Answered with the manual grant." });
+    });
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    await submitComposer(page, "Which station is nearby?", viewport.width);
+    await expect.poll(() => posts.length).toBe(1);
+    expect(await gpsReads()).toBe(0);
+    await page.getByTestId("composer-tools-button").click();
+    await expect(page.getByTestId("tools-location-row")).toBeDisabled();
+    await page.keyboard.press("Escape");
+    waiting.release();
+    await expect(message(page, "Answered without device location.")).toBeVisible();
+    expect(posts).toHaveLength(2);
+    expect(posts[1].currentLocation).toBeUndefined();
+    expect(lookups).toBe(0);
+    expect(await gpsReads()).toBe(0);
+    await page.getByTestId("composer-tools-button").click();
+    await page.getByTestId("tools-location-row").click();
+    await expect(page.getByTestId("tools-location-row")).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
+    await submitComposer(page, "How about my current location?", viewport.width);
+    await expect(message(page, "Answered with the manual grant.")).toBeVisible();
+    expect(lookups).toBe(0);
+    expect(await gpsReads()).toBe(2);
+    expect(posts).toHaveLength(3);
+    expect(posts[0].currentLocation).toBeUndefined();
+    expect(posts[2].routerLocationFusion).toBeUndefined();
+    expect(posts[2].currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+  });
+
+  for (const recovery of ["unclaimed", "claimed", "already_consumed"] as const) {
+    test(`a Router location stale quote recovers once after ${recovery} refusal`, async ({ page }, testInfo) => {
+      test.skip(!fusionEnabled, "Requires Router location fusion");
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      await openChat(page, { fresh: true, viewport, autoSelectionOffered: true, useChatNetworkFixture: true,
+        contextBundles: ["qa-initial-quote", "qa-refreshed-quote"] });
+      const posts: RecordedRequest[] = [];
+      const paths: string[] = [];
+      let standalone = 0;
+      await page.route("**/api/chat/location-intent", route => {
+        standalone++;
+        return route.fulfill({ json: { requiresLocation: false } });
+      });
+      await page.route(savedChatPaths, route => {
+        const body = route.request().postDataJSON();
+        paths.push(new URL(route.request().url()).pathname);
+        posts.push(body);
+        if (posts.length === 1) return route.fulfill({ status: 409, headers: routerLocationHeaders, json: {
+          error: "Context quote expired.", code: "CHAT_CONTEXT_BUNDLE_STALE", details: {
+            refusalReason: recovery === "already_consumed" ? "already_consumed" : "expired",
+            ...(recovery !== "unclaimed" ? { routerLocationRecovery: "saved" } : {}),
+          },
+        } });
+        return route.fulfill({ headers: body.routerLocationFusion ? routerLocationHeaders : {},
+          contentType: "text/plain", body: "Answered with the refreshed quote." });
+      });
+      await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+      await submitComposer(page, "Answer once with the current quote.", viewport.width);
+      await expect(message(page, "Answered with the refreshed quote.")).toBeVisible();
+      expect(paths).toEqual(["/api/chat/router-location", recovery === "unclaimed" ? "/api/chat/router-location" : "/api/chat"]);
+      expect(standalone).toBe(recovery === "unclaimed" ? 0 : 1);
+      expect(posts[0].sourceUserMessageId).toBe(posts[1].sourceUserMessageId);
+      expect(posts[0].assistantMessageId === posts[1].assistantMessageId).toBe(recovery !== "already_consumed");
+      expect(posts.map(body => body.contextBundle)).toEqual(["qa-initial-quote", "qa-refreshed-quote"]);
+    });
+  }
+
+  for (const failure of ["handled404", "unknownVersion", "invalidDecision", "resume404", "resumeTransport", "resumeStale"] as const) {
+    test(`a Router location ${failure} failure does not retry paid Chat`, async ({ page }, testInfo) => {
+      test.skip(!fusionEnabled, "Requires Router location fusion");
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const gpsReads = await countDeviceLocationReads(page);
+      await openChat(page, { fresh: true, viewport, autoSelectionOffered: true, useChatNetworkFixture: true });
+      const paths: string[] = [];
+      let standalone = 0;
+      await page.route("**/api/chat/location-intent", route => {
+        standalone++;
+        return route.fulfill({ json: { requiresLocation: false } });
+      });
+      const afterPermission = failure.startsWith("resume");
+      await page.route(savedChatPaths, async route => {
+        paths.push(new URL(route.request().url()).pathname);
+        if (afterPermission && paths.length === 1) {
+          return route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
+            json: { requiresLocation: true, continuation: "only-saved-request" } });
+        }
+        if (failure === "resumeTransport") return route.abort("connectionreset");
+        if (failure === "resumeStale") return route.fulfill({ status: 409, headers: routerLocationHeaders, json: {
+          code: "CHAT_CONTEXT_BUNDLE_STALE", details: { refusalReason: "expired", routerLocationRecovery: "saved" },
+        } });
+        if (failure === "invalidDecision") return route.fulfill({
+          headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" }, json: { requiresLocation: true },
+        });
+        return route.fulfill({ status: failure === "unknownVersion" ? 200 : 404,
+          headers: failure === "handled404" ? routerLocationHeaders : {},
+          json: { error: "The request could not continue." } });
+      });
+      await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+      await submitComposer(page, "Where is a station near me?", viewport.width);
+      await expect(page.getByTestId("chat-recovery-notice")).toBeVisible();
+      expect(paths).toEqual(afterPermission ? ["/api/chat/router-location", "/api/chat/router-location"] : ["/api/chat/router-location"]);
+      expect(standalone).toBe(0);
+      expect(await gpsReads()).toBe(afterPermission ? 1 : 0);
+    });
+  }
+
+  test("a late positive Router location decision after navigation cannot request GPS or resume the saved turn", async ({ page }, testInfo) => {
+    test.skip(!fusionEnabled, "Requires Router location fusion");
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const gpsReads = await countDeviceLocationReads(page);
+    await openChat(page, { fresh: true, viewport, autoSelectionOffered: true, useChatNetworkFixture: true });
+    const held = Promise.withResolvers<void>();
+    let chatCalls = 0;
+    await page.route("**/api/chat/router-location", async route => {
+      chatCalls++;
+      await held.promise;
+      await route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
+        json: { requiresLocation: true, continuation: "stale" } });
+    });
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    await submitComposer(page, "Where is the nearest station?", viewport.width);
+    await expect.poll(() => chatCalls).toBe(1);
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect(message(page, SECOND_ANSWER)).toBeVisible();
+    const served = page.waitForResponse(response => new URL(response.url()).pathname === "/api/chat/router-location");
+    held.resolve();
+    await served;
+    await chooseConversation(page, "qa-chat-created");
+    await expect(page.getByTestId("stop-this-response")).toHaveCount(0);
+    expect(chatCalls).toBe(1);
+    expect(await gpsReads()).toBe(0);
+  });
+
+  test("stopping a saved Router location turn during device permission prevents its continuation", async ({ page }, testInfo) => {
+    test.skip(!fusionEnabled, "Requires Router location fusion");
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
+        getCurrentPosition(success: PositionCallback) {
+          Object.assign(window, { __qaGrantSavedLocation: () =>
+            success({ coords: { latitude: -27.47, longitude: 153.025, accuracy: 100 },
+              timestamp: Date.now() } as GeolocationPosition) });
+        },
+      } });
+    });
+    await openChat(page, { fresh: true, viewport, autoSelectionOffered: true, useChatNetworkFixture: true });
+    const posts: RecordedRequest[] = [];
+    await page.route("**/api/chat/router-location", route => {
+      posts.push(route.request().postDataJSON());
+      return route.fulfill({ headers: { ...routerLocationHeaders, "X-Chat-Response-Mode": "router-location" },
+        json: { requiresLocation: true, continuation: "cancelled" } });
+    });
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    await submitComposer(page, "What is nearby?", viewport.width);
+    await page.waitForFunction(() => "__qaGrantSavedLocation" in window);
+    await page.getByTestId("stop-this-response").click();
+    await page.evaluate(() => (window as typeof window & { __qaGrantSavedLocation: () => void }).__qaGrantSavedLocation());
+    await expect(page.getByTestId("stop-this-response")).toHaveCount(0);
+    expect(posts).toHaveLength(1);
+    expect(posts[0].currentLocation).toBeUndefined();
+  });
+
+  for (const suppressed of [false, true]) {
+    test(`a fresh Router location turn honors previously ${suppressed ? "disabled" : "enabled"} manual location`, async ({ page }, testInfo) => {
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const gpsReads = await countDeviceLocationReads(page);
+      await openChat(page, { fresh: true, viewport, autoSelectionOffered: true, useChatNetworkFixture: true });
+      const posts: RecordedRequest[] = [];
+      let standalone = 0;
+      await page.route("**/api/chat/location-intent", route => {
+        standalone++;
+        return route.fulfill({ json: { requiresLocation: true } });
+      });
+      await page.route("**/api/chat", route => {
+        posts.push(route.request().postDataJSON());
+        return route.fulfill({ contentType: "text/plain", body: "Here is the requested answer." });
+      });
+      await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+      await page.getByTestId("composer-tools-button").click();
+      await page.getByTestId("tools-location-row").click();
+      await expect(page.getByTestId("tools-location-row")).toHaveAttribute("aria-checked", "true");
+      await page.keyboard.press("Escape");
+      if (suppressed) await page.getByTestId("chat-location-disable").click();
+      await submitComposer(page, "What is near me?", viewport.width);
+      await expect(message(page, "Here is the requested answer.")).toBeVisible();
+      expect(posts).toHaveLength(1);
+      expect(posts[0].routerLocationFusion).toBeUndefined();
+      expect(standalone).toBe(0);
+      expect(await gpsReads()).toBe(suppressed ? 1 : 2);
+      if (suppressed) expect(posts[0].currentLocation).toBeUndefined();
+      else expect(posts[0].currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+    });
+  }
+
+  test("a fresh Auto send overlaps semantic intent with create and saves the question before requesting GPS", async ({ page }, testInfo) => {
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const { state, create, intent, intentBodies, locationReads } = await prepareGatedFreshSend(page, viewport);
+    expect(state.messageSaveStarted()).toBe(false);
+    expect(await locationReads()).toBe(0);
+    expect(await requests(page)).toHaveLength(0);
+    create.release();
+    await expect.poll(state.messageSaveCommitted).toBe(true);
+    expect(state.messageSaveResponseSettledCount()).toBe(0);
+    expect(await locationReads()).toBe(0);
+    expect(await requests(page)).toHaveLength(0);
+    // The actual save transaction can finish with semantic intent still pending.
+    // A positive decision alone cannot enable the device before acknowledgement.
+    if (freshLocationEarly) {
+      const responded = page.waitForResponse(response => new URL(response.url()).pathname === "/api/chat/location-intent");
+      intent.release();
+      await responded;
+      expect(await locationReads()).toBe(0);
+    }
+    state.releaseMessageSaveResponse();
+    if (!locationIntentOff && !freshLocationEarly && !fusionEnabled) await expect.poll(() => intentBodies.length).toBe(1);
+    intent.release();
+    await drive(page, 0, "push", "The complete fresh answer.");
+    await expect(message(page, "The complete fresh answer.")).toBeVisible();
+    await drive(page, 0, "finish");
+    const [payload] = await requests(page);
+    expect(payload.messages?.at(-1)?.content).toBe(freshQuestion);
+    const saved = state.conversations.find(row => row.id === "qa-chat-created");
+    expect(saved?.messages.filter(row => row.role === "user").map(row => row.content)).toEqual([freshQuestion]);
+    expect(intentBodies).toEqual(locationIntentOff || fusionEnabled ? [] : [{ text: freshQuestion,
+      ...(freshLocationEarly ? { freshAccountId: "qa-user" } : {}) }]);
+    expect(await locationReads()).toBe(locationIntentOff ? 0 : 1);
+    if (locationIntentOff) expect(payload.currentLocation).toBeUndefined();
+    else expect(payload.currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+  });
+
+  for (const change of ["conversation", "account", "model"] as const) {
+    test(`a fresh Auto send abandoned by a ${change} change cannot send coordinates or a question`, async ({ page }, testInfo) => {
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const { state, create, intent, intentBodies, locationReads } = await prepareGatedFreshSend(page, viewport);
+      if (change === "conversation") await chooseConversation(page, SECOND_CONVERSATION);
+      if (change === "account") await switchToFixtureAccountB(page, state);
+      if (change === "model") await chooseModel(page, MODEL_B);
+      const response = page.waitForResponse(value => new URL(value.url()).pathname === "/api/products/chat/conversations" && value.request().method() === "POST");
+      create.release(); intent.release(); state.releaseMessageSaveResponse();
+      await response;
+      await expect(page.getByTestId("chat-textarea")).not.toHaveAttribute("readonly", "");
+      expect(state.messageSaveStarted()).toBe(false);
+      expect(await locationReads()).toBe(0);
+      expect(await persistentChatPostCount(page)).toBe(0);
+      expect(intentBodies).toHaveLength(freshLocationEarly ? 1 : 0);
+    });
+  }
+
+  for (const outcome of ["not_dispatched", "unknown"] as const) {
+    test(`a fresh Auto send continues after ${outcome} location preparation`, async ({ page }, testInfo) => {
+      test.skip(!freshLocationEarly, "Requires the fresh location classifier");
+      const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const locationReads = await countDeviceLocationReads(page);
+      const state = await openChat(page, { fresh: true, autoSelectionOffered: true, viewport,
+        holdMessageSaveResponseAfterCommit: true });
+      const paths: string[] = [];
+      await page.route("**/api/chat/location-intent", async route => {
+        const body = route.request().postDataJSON();
+        expect(body.text).toBe(freshQuestion);
+        if (body.freshAccountId) {
+          paths.push("fresh");
+          return outcome === "not_dispatched"
+            ? route.fulfill({ json: { requiresLocation: false, preparationOutcome: outcome } })
+            : route.abort("connectionreset");
+        }
+        paths.push("saved");
+        expect(state.messageSaveCommitted()).toBe(true);
+        return route.fulfill({ json: { requiresLocation: true } });
+      });
+      await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+      await submitComposer(page, freshQuestion, viewport.width);
+      await expect.poll(state.messageSaveCommitted).toBe(true);
+      expect(paths).toEqual(["fresh"]);
+      expect(await locationReads()).toBe(0);
+      state.releaseMessageSaveResponse();
+      await drive(page, 0, "push", "The question was answered.");
+      await drive(page, 0, "finish");
+      await expect(message(page, "The question was answered.")).toBeVisible();
+      expect(paths).toEqual(outcome === "not_dispatched" ? ["fresh", "saved"] : ["fresh"]);
+      expect(await locationReads()).toBe(outcome === "not_dispatched" ? 1 : 0);
+      const [payload] = await requests(page);
+      if (outcome === "not_dispatched") expect(payload.currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
+      else expect(payload.currentLocation).toBeUndefined();
+    });
+  }
+
+  test("fresh Auto first content and completion include the real browser handoff with controlled endpoint delays", async ({ page }, testInfo) => {
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const answer = "The complete controlled fresh answer.";
+    const state = await openChat(page, { fresh: true, viewport, autoSelectionOffered: true,
+      timedAnswer: answer, timingToken: "fresh-timing-proof" });
+    const reports: Array<Record<string, unknown>> = [];
+    let intentCalls = 0; let creates = 0;
+    await page.route("**/api/chat/timing", async route => {
+      reports.push(route.request().postDataJSON());
+      await route.fulfill({ status: 204 });
+    });
+    await page.route("**/api/products/chat/conversations", async route => {
+      if (route.request().method() === "POST") { creates++; await new Promise(resolve => setTimeout(resolve, 350)); }
+      await route.fallback();
+    });
+    await page.route("**/api/chat/location-intent", async route => {
+      const body = route.request().postDataJSON();
+      expect(body.text).toBe(freshQuestion);
+      intentCalls++;
+      await new Promise(resolve => setTimeout(resolve, 420));
+      await route.fulfill({ json: { requiresLocation: false,
+        ...(body.freshAccountId ? { preparationOutcome: "classified" } : {}) } });
+    });
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+    await submitComposer(page, freshQuestion, viewport.width);
+    await expect(message(page, answer)).toBeVisible();
+    await expect.poll(() => reports.length).toBe(1);
+    expect(state.messageSaveCommitted()).toBe(true);
+    expect(creates).toBe(1);
+    expect(intentCalls).toBe(locationIntentOff || fusionEnabled ? 0 : 1);
+    const dispatched = await requests(page);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0].messages?.at(-1)?.content).toBe(freshQuestion);
+    expect(reports[0].outcome).toBe("completed");
+    const { firstContentMs, completionMs, stages } = reports[0] as {
+      firstContentMs: number; completionMs: number; stages: Record<string, number> };
+    expect(firstContentMs).toBeGreaterThan(0);
+    expect(completionMs).toBeGreaterThanOrEqual(firstContentMs);
+    if (freshLocationEarly) expect(stages.freshLocationOverlapMs).toBeGreaterThan(0);
+    else expect(stages.freshLocationOverlapMs).toBeUndefined();
+    await testInfo.attach("fresh-send-latency", { contentType: "application/json",
+      body: JSON.stringify({ freshLocationEarly, locationIntentOff, repeat: testInfo.repeatEachIndex,
+        firstContentMs, completionMs, overlapMs: stages.freshLocationOverlapMs ?? null,
+        creates, intentCalls, dispatches: dispatched.length }) });
+  });
+
   for (const changeSelection of [false, true]) {
     test(`Refiner and location decisions overlap without early GPS or stale dispatch (${changeSelection ? "changed" : "retained"})`, async ({ page }, testInfo) => {
       const parallel = process.env.E2E_CHAT_PARALLEL_PREPARATION_ENABLED !== "false";
@@ -4267,16 +4811,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       let scopeRead = false; let refinerStarted = false; let intentStarted = false; let intentCount = 0;
       let release = () => {};
       const gate = new Promise<void>(resolve => { release = resolve; });
-      await page.addInitScript(() => {
-        Object.defineProperty(window, "__qaLocationReads", { value: 0, writable: true });
-        Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
-          getCurrentPosition: (success: PositionCallback) => {
-            const state = window as unknown as { __qaLocationReads: number };
-            state.__qaLocationReads++;
-            success({ coords: { latitude: -27.47, longitude: 153.025, accuracy: 150 }, timestamp: Date.now() } as GeolocationPosition);
-          },
-        } });
-      });
+      const locationReads = await countDeviceLocationReads(page);
       await page.route("**/api/chat/prompt-refiner/scope", route => {
         scopeRead = true;
         return route.fulfill({ json: { scopeId, epoch: 1 } });
@@ -4297,7 +4832,6 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       await expect.poll(() => refinerStarted).toBe(true);
       if (parallel) await expect.poll(() => intentStarted).toBe(true);
       else expect(intentStarted).toBe(false);
-      const locationReads = () => page.evaluate(() => (window as unknown as { __qaLocationReads: number }).__qaLocationReads);
       expect(await locationReads()).toBe(0);
       expect(await requests(page)).toHaveLength(0);
       expect(state.writes.filter(write => write.method === "POST" && write.path.endsWith("/messages"))).toHaveLength(0);

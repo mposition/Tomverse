@@ -264,6 +264,11 @@ const HANDLERS: Record<ArtifactKind, KindHandler> = {
       "Create a real, downloadable PowerPoint deck (.pptx) and attach it to " +
       "your reply. Use this whenever the user asks for slides, a deck or a " +
       "presentation. You supply the slides; the application writes the file. " +
+      "For a requested business-plan example with permitted assumptions, include " +
+      "a compact finance and execution slide: initial budget, monthly revenue " +
+      "and costs, break-even inputs and calculation, and week-by-week milestones. " +
+      "Label hypothetical figures as illustrative assumptions, keep their " +
+      "arithmetic consistent and never present them as the user's actual figures. " +
       "Never write file bytes, base64 or a download link yourself.",
   },
   text: {

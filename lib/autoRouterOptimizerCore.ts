@@ -657,16 +657,36 @@ export const guidanceRejection = (raw: unknown) => {
  * how much text it wrote (a truncated object stops on "length").
  */
 export const optimizerCallFailureDetail = (error: unknown) => {
-    const detail: { error: string; finishReason?: string; outputChars?: number } = {
+    const detail: { error: string; finishReason?: string; outputChars?: number; statusCode?: number } = {
         error: error instanceof Error ? error.name : "unknown",
     };
     if (error && typeof error === "object") {
-        const { finishReason, text } = error as { finishReason?: unknown; text?: unknown };
+        const { finishReason, text, statusCode } = error as { finishReason?: unknown; text?: unknown; statusCode?: unknown };
         if (typeof finishReason === "string") detail.finishReason = finishReason;
         if (typeof text === "string") detail.outputChars = text.length;
+        if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599) detail.statusCode = statusCode;
     }
     return detail;
 };
+
+/** Correlate failures to their model without logging request or response content. */
+export async function traceOptimizerCall<T>(
+    context: {
+        event: "auto_router_optimizer_call_failed" | "auto_rewrite_optimizer_call_failed";
+        cycleId: string;
+        kind: OptimizerCallKind;
+        modelId: string;
+        provider: string;
+    },
+    run: () => Promise<T>
+): Promise<T> {
+    try {
+        return await run();
+    } catch (error) {
+        console.warn(JSON.stringify({ ...context, ...optimizerCallFailureDetail(error) }));
+        throw error;
+    }
+}
 
 /** The proposal, trimmed, or null when it cannot stand in for the guidance. */
 export const admitGuidance = (raw: unknown): string | null => {

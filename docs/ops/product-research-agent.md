@@ -354,3 +354,16 @@ walker는 page origin과 `PRODUCT_RESEARCH_SCOUT_INGEST_URL`의 origin이 같을
 
 실행 결과는 walker 로그의 마지막 줄 `product_research_scout_run`(보낸 수, 저장한 제안 수, `model_off`·상한 도달·거절·실패
 수)과 Admin의 오늘 사용량에서 봅니다. 한 실행은 45분에 강제로 끝나고, 결과를 모르는 전송은 다시 보내지 않습니다.
+
+## Scout 이슈 정리 켜기 (정책 §10)
+
+기본 꺼짐입니다. 켜면 walker의 마지막 단계가 `/api/internal/product-research/scout/issues`를 부르고, 앱이 최신 관측 행의
+열린 이슈마다 "닫기 / 진행 / 대기" 제안을 하나씩 만듭니다(Admin › 제품 리서치 › 개선 제안, 대상 "이슈 #번호").
+
+1. **[Railway 대시보드 — Tomverse 프로젝트, 그 환경의 앱]** `PRODUCT_RESEARCH_SCOUT_ISSUE_TRIAGE_ENABLED`에 아무 값을 넣습니다.
+   walker 변수는 바꾸지 않습니다. 없으면 route는 404이고 walker는 이 단계를 조용히 건너뜁니다.
+2. 비용은 하루 모델 호출 1회(텍스트만, 출력 상한 6,000 token)이고 Admin의 같은 하루 호출 상한에서 차감됩니다. 상한이
+   이미 빠듯하면 1을 올립니다(owner).
+
+같은 이슈에 열린 제안이 있거나 14일 안에 제안이 있었으면 다시 묻지 않고, 물을 이슈가 없거나 48시간 안의 성공 관측이
+없으면 호출하지 않습니다. 끄려면 변수를 지웁니다.
