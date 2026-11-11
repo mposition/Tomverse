@@ -80,6 +80,11 @@ server duration alone omits the initial Router request for a positive decision.
 The separate [search comparison](./chat-presearch-comparison.md) measures
 whether presearch removed an answering-model round trip.
 
+For the dedicated existing-turn browser regression, keep the two master
+switches on, set `$env:E2E_CHAT_EXISTING_ROUTER_LOCATION_FUSION_ENABLED` to
+`'true'`, and repeat with `'false'` after restarting the server. Select the
+existing-turn cases with `--grep 'existing Auto|saved existing turn'`.
+
 For a follow-up A/B, use two identical conversations with the same saved user
 and assistant history. Avoid reusing the previous trial's answer as the next
 trial's history. Alternate arm order. Confirm that OFF sent a standalone
