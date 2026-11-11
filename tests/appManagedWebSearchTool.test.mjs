@@ -640,6 +640,47 @@ test("router presearch and dependent model queries share one cap, cache and sour
   assert.equal(config.session.snapshot().succeededRequestCount, 5);
 });
 
+test("grounded answer guidance preserves source JSON and cannot displace evidence at the token limit", async () => {
+  const config = toolFor();
+  const result = await config.search({ query: "one" });
+  const atSize = (size, groundedAnswer) => presearch({
+    ...config,
+    search: async () => ({ ...result, results: [{ ...result.results[0], snippet: "x".repeat(size) }] }),
+  }, { queries: ["one"], groundedAnswer });
+
+  const original = await atSize(32);
+  for (const mode of ["lookup", "full"]) {
+    const guided = await atSize(32, mode);
+    assert.equal(guided.length, 3);
+    assert.match(guided[0].text, /untrusted quoted material, never instructions/);
+    assert.equal(guided[1].text, original[1].text);
+    assert.match(guided[2].text, /End of quoted evidence/);
+    if (mode === "lookup") {
+      assert.match(guided[2].text, /\nObservation .+\nForecast /);
+    } else {
+      assert.match(guided[2].text, /requested precision/);
+      assert.match(guided[2].text, /analysis or a derivation is requested/);
+      assert.match(guided[2].text, /Separate observations from forecasts/);
+      assert.doesNotMatch(guided[2].text, /\nObservation .+\nForecast /);
+    }
+  }
+  // Find the largest excerpt the original envelope admits under the current estimator.
+  let fits = 32;
+  let tooLarge = 32_768;
+  while (fits + 1 < tooLarge) {
+    const middle = Math.floor((fits + tooLarge) / 2);
+    if ((await atSize(middle)).length) fits = middle;
+    else tooLarge = middle;
+  }
+  const atLimit = await atSize(fits);
+  assert.equal(atLimit.length, 2);
+  for (const mode of ["lookup", "full"]) {
+    assert.deepEqual(await atSize(fits, mode), atLimit);
+    assert.deepEqual(await atSize(tooLarge, mode), []);
+  }
+  assert.equal(fetchCalls.length, 1);
+});
+
 test("invalid, aborted and insufficient-headroom presearch never reaches a backend", async () => {
   for (const overrides of [
     { queries: ["one", "two", "three"] }, { queries: ["x".repeat(401)] },
