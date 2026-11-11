@@ -30,6 +30,10 @@ def _derive_session_from_tmux():
     session "UNKNOWN", so pre- and post-half failures of this kind land in one
     place.
     """
+    if not os.environ.get("TMUX"):
+        # Outside a pane tmux answers with its most recently used session
+        # instead of failing, which would name whichever lane was touched last.
+        return ""
     try:
         name = subprocess.run(["tmux", "display-message", "-p", "#S"],
                               capture_output=True, text=True, timeout=3).stdout.strip()

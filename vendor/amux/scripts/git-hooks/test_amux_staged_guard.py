@@ -27,6 +27,8 @@ def _fake_run(stdout):
 def main():
     failures = []
     real_run = subprocess.run
+    real_tmux = os.environ.get("TMUX")
+    os.environ["TMUX"] = "/tmp/tmux-test/default,1,0"
 
     # CONTROL FIRST: an amux-prefixed pane name DOES resolve, so a matcher that
     # silently always returns "" cannot hide behind an all-negative suite.
@@ -58,7 +60,20 @@ def main():
     elif got != "":
         failures.append(f"tmux unavailable should derive '', got {got!r}")
 
+    # Outside a pane ($TMUX unset) tmux does NOT fail: it answers with its most
+    # recently used session. That answer is not this process's lane
+    # (2026-11-11: a systemd job was attributed to antigravity-impl).
+    subprocess.run = _fake_run("amux-mixpeek-research\n")
+    os.environ.pop("TMUX", None)
+    got = mod._derive_session_from_tmux()
+    if got != "":
+        failures.append(f"outside a pane the most recent tmux session must not be claimed: got {got!r}")
+
     subprocess.run = real_run
+    if real_tmux is None:
+        os.environ.pop("TMUX", None)
+    else:
+        os.environ["TMUX"] = real_tmux
 
     # GUARD_VERSION must have moved off the pre-fix baseline, or every already-
     # installed copy on this machine reads as current and never re-syncs (the
