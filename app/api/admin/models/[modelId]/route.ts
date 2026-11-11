@@ -22,6 +22,7 @@ import {
 import { ensureModelRegistrySeeded, registryRowToModel } from "@/lib/modelRegistry";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
+import { codePinnedModelRefusal } from "@/lib/codePinnedModels";
 
 type ModelRouteContext = { params: Promise<{ modelId: string }> };
 
@@ -93,6 +94,21 @@ export async function PATCH(
           { status: 409 }
         );
       }
+    }
+    const pinRefusal = codePinnedModelRefusal({
+      modelId,
+      status: body.status,
+      publiclyListed: body.publiclyListed,
+      replacementModelId: body.replacementModelId,
+      inputUsdPerMillionTokens: body.inputUsdPerMillionTokens,
+      outputUsdPerMillionTokens: body.outputUsdPerMillionTokens,
+      cachedInputPriceMultiplier: body.cachedInputPriceMultiplier,
+    });
+    if (pinRefusal) {
+      return NextResponse.json(
+        { error: pinRefusal, code: "MODEL_PINNED_IN_CODE" },
+        { status: 409 }
+      );
     }
     if (
       modelId === APP_DEFAULTS.defaultModelId &&
@@ -230,6 +246,13 @@ export async function DELETE(
     await consumeApiRateLimit(req, session.user.id, "admin-model-registry-delete", { minute: 10, day: 100 });
     const { modelId } = await context.params;
     await ensureModelRegistrySeeded();
+    const pinRefusal = codePinnedModelRefusal({ modelId, catalogDeleted: true });
+    if (pinRefusal) {
+      return NextResponse.json(
+        { error: pinRefusal, code: "MODEL_PINNED_IN_CODE" },
+        { status: 409 }
+      );
+    }
     if (modelId === APP_DEFAULTS.defaultModelId) {
       return NextResponse.json(
         { error: "The application fallback model cannot be removed from the catalogue." },

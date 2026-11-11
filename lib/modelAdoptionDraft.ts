@@ -1211,6 +1211,8 @@ export const adoptionReplacementRefusal = (input: {
     provider: string;
     isApplicationDefault: boolean;
     isGuestDefault: boolean;
+    /** Why code that calls this model by id forbids switching it off, if it does. */
+    codePinnedRefusal?: string | null;
   } | null;
 }): { status: 400 | 409; message: string; code?: string } | null => {
   if (!input.replacesModelId) return null;
@@ -1227,6 +1229,13 @@ export const adoptionReplacementRefusal = (input: {
     return {
       status: 409,
       message: "A model can only replace another model from the same provider.",
+    };
+  }
+  if (input.predecessor.codePinnedRefusal) {
+    return {
+      status: 409,
+      code: "MODEL_PINNED_IN_CODE",
+      message: input.predecessor.codePinnedRefusal,
     };
   }
   if (input.predecessor.isApplicationDefault) {
