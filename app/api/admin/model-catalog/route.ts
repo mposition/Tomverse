@@ -26,7 +26,7 @@ import {
   storeCatalogDraft,
   updateCatalogEntry,
 } from "@/lib/modelCatalogAdmin";
-import { judgeVideoModel, MODEL_ID_PATTERN, STORED_CATALOG_CATEGORIES } from "@/lib/modelCatalogCore";
+import { defaultPriceSources, judgeVideoModel, MODEL_ID_PATTERN, STORED_CATALOG_CATEGORIES } from "@/lib/modelCatalogCore";
 import {
   catalogDraftLlmFromEnv,
   DraftRefusal,
@@ -158,7 +158,8 @@ const postBodySchema = z.discriminatedUnion("action", [
     modelId: z.string().regex(MODEL_ID_PATTERN),
     provider: z.string().min(1).max(40),
     apiModelId: z.string().min(1).max(120),
-    sourceUrls: z.array(z.string().url()).min(1).max(MAX_DRAFT_SOURCES),
+    // Empty means the provider's default pricing pages.
+    sourceUrls: z.array(z.string().url()).max(MAX_DRAFT_SOURCES),
   }),
   z.object({
     action: z.literal("apply_draft"),
@@ -197,8 +198,10 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
+    const sourceUrls = body.sourceUrls.length > 0 ? body.sourceUrls : defaultPriceSources(body.provider);
+    if (sourceUrls.length === 0) return NextResponse.json({ error: "no_default_source", detail: body.provider }, { status: 422 });
     const pages = [];
-    for (const url of body.sourceUrls) pages.push(await fetchOfficialPage(body.provider, url));
+    for (const url of sourceUrls) pages.push(await fetchOfficialPage(body.provider, url));
     const draft =
       body.category === "image"
         ? await llm.draftImagePrices({ provider: body.provider, apiModelId: body.apiModelId, pages })
