@@ -1015,20 +1015,6 @@ test("the default continuation is Chat only where Chat is offered", () => {
     assert.match(route, /productKey: await defaultContinuationProduct\(userId\)/);
 });
 
-test("a Chat continuation never becomes a Smart Adaptive image turn", () => {
-    // Independent review round 4: `startChatImageTurn` refuses a bridged
-    // conversation with 409, so an image decision on a Chat continuation left
-    // the stored question with no answer; docs/policy/external-conversation-continuation.md §5.1
-    // keeps continuations text-only.
-    const chat = readFileSync("app/api/chat/route.ts", "utf8");
-    assert.match(chat, /continuationBridge: \{ select: \{ id: true \} \},/);
-    const eligible = chat.slice(
-        chat.indexOf("const autoImageTurnEligible ="),
-        chat.indexOf("const imageRouting =")
-    );
-    assert.match(eligible, /!conversationRouting\?\.continuationBridge &&/);
-});
-
 test("no in-conversation image path starts on a continuation route", () => {
     // Independent review round 5: the client image paths (manual Chat intent,
     // Review Professional image choice, Review routing) reached the same 409

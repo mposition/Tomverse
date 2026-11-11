@@ -30,6 +30,8 @@ export const readBrowserChatLocation = (requestPermission = true): Promise<ChatL
 
 export const chatLocationSession = createChatLocationSession(readBrowserChatLocation);
 
+export type RouterLocationTurn = { scope: "fresh" | "existing"; isCurrent: () => boolean };
+
 export async function requireRouterLocationVersion(response: Response) {
   if (response.headers.get(ROUTER_LOCATION_VERSION_HEADER) === ROUTER_LOCATION_VERSION) return;
   await response.body?.cancel();

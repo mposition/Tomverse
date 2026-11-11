@@ -101,6 +101,15 @@ A lost legacy PATCH response allows one read-only check. Review and other
 product surfaces do not gain this account draft capability, and account
 routing itself still requires the stored owned row.
 
+On an existing signed-in Auto Chat, the location decision can accompany the
+Router once the current question is saved. This requires both Router/location
+master switches and `CHAT_EXISTING_ROUTER_LOCATION_FUSION_ENABLED`. The
+browser keeps the authored message and its held Refiner decision together
+on the request and its consent continuation. A positive decision goes through
+the device's normal permission flow. Changing accounts, models or the selected
+conversation prevents a late positive decision from sharing coordinates.
+Confirmed unsupported routes use the saved-turn location lookup once.
+
 Guest Chat follows a narrower one-turn contract. Entry and the visible default
 remain rowless and free. Immediately before Send, the client obtains a fresh
 opaque authority bound to the signed Guest principal and exact activated

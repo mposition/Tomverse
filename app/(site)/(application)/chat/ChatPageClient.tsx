@@ -1,7 +1,8 @@
 ﻿"use client";
 
 import { requestChatLocationIntent } from "@tomverse/api-client";
-import { chatLocationSession, prepareFreshChatLocationIntent, type ChatPanelLocationIntent, type FreshChatLocationPreparation } from "@/lib/chatLocationClient";
+import { chatLocationSession, prepareFreshChatLocationIntent, type ChatPanelLocationIntent, type FreshChatLocationPreparation, type RouterLocationTurn } from "@/lib/chatLocationClient";
+import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
@@ -781,6 +782,7 @@ export function ChatPageClient({
   chatLocationIntentEnabled = true,
   chatParallelPreparationEnabled = false,
   chatRouterLocationFusion = false,
+  existingChatRouterLocationFusion = false,
   chatFreshLocationPreparationEnabled = false,
   chatImageEditEnabled = false,
   reviewEasyAvailable = false,
@@ -818,6 +820,7 @@ export function ChatPageClient({
   chatLocationIntentEnabled?: boolean;
   chatParallelPreparationEnabled?: boolean;
   chatRouterLocationFusion?: boolean;
+  existingChatRouterLocationFusion?: boolean;
   chatFreshLocationPreparationEnabled?: boolean;
   /** A send with a photo may be an edit of it (IMAGE_EDIT_ENABLED). */
   chatImageEditEnabled?: boolean;
@@ -1733,6 +1736,7 @@ export function ChatPageClient({
     token: string;
     identityKey: string | null;
     identityEpoch: number;
+    selectionModeRequest: number;
     originConversationId: string | null;
     recovery?: "message-receipt-unknown";
   };
@@ -1785,7 +1789,7 @@ export function ChatPageClient({
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
     preparedLocationIntent?: ChatPanelLocationIntent;
-    routerLocationTurnIsCurrent?: () => boolean;
+    routerLocationTurn?: RouterLocationTurn;
     id: string;
     text: string;
     chatId: string;
@@ -6284,6 +6288,7 @@ export function ChatPageClient({
       token: crypto.randomUUID(),
       identityKey,
       identityEpoch: submitFence.epoch,
+      selectionModeRequest: selectionModeRequestSeqRef.current,
       // Preparing Smart Adaptive creates and selects the owned Chat before
       // this recursive submit starts, but the user's send still originated
       // from the blank workspace. Treating that just-created id as an
@@ -6939,7 +6944,22 @@ export function ChatPageClient({
       // Only the semantic call overlaps Refiner. Device permission and GPS
       // stay in ChatApp, after the question is durably saved. Guests retain
       // their existing single-use verification sequence.
-      const locationPreparation = !freshLocation && chatParallelPreparationEnabled && chatLocationIntentEnabled &&
+      const canFuseLocation = !freshLocation && chatLocationIntentEnabled && identityKey && status === "authenticated" &&
+        mountedSurface === "chat" && selectionMode === "auto" && !isOverrideSend && !imageTurnSend &&
+        promptAttachments.length === 0 && activeModelIds.length === 1;
+      const existingFusion = canFuseLocation && existingChatRouterLocationFusion && autoSelectionOffered && submitOwner.originConversationId === activeChatId &&
+        !preflight.admissionToken && !options?.deepResearchDepth && activeModelIds[0] !== DEEP_RESEARCH_MODEL_ID &&
+        !selectedMcpConnection(activeChatId) && chatLocationSession.canPrepareIntent(identityKey);
+      const historyForFusion = existingFusion && identityKey ? getChatRuntimeSnapshot(chatRuntimeKey({
+        identityKey, conversationId: activeChatId, modelId: activeModelIds[0], transcriptScope: "conversation",
+      })).messages : [];
+      // The held Refiner decision still controls the execution view. Location
+      // is decided on the saved authored message, once, in the ordinary Router.
+      const fuseExistingTurn = existingFusion && historyForFusion.some(message => message.role === "user") &&
+        !historyForFusion.some(message => message.attachments?.length);
+      const fusionScope = fuseExistingTurn ? "existing" : canFuseLocation && chatRouterLocationFusion &&
+        submitOwner.originConversationId === null && suppliedPreparedDraft && !requestAutoPrepare && !explicitPromptRefinerDecision ? "fresh" : null;
+      const locationPreparation = !freshLocation && !fuseExistingTurn && chatParallelPreparationEnabled && chatLocationIntentEnabled &&
         requestAutoPrepare && preparedDraft && promptRefinerProductScope && !imageTurnSend
         ? chatLocationSession.prepareIntent(identityKey, authoredPrompt,
             () => preparation.measure("locationIntentMs", () => requestChatLocationIntent(authoredPrompt, fetch)))
@@ -7452,19 +7472,18 @@ export function ChatPageClient({
         preparationTimings: { ...preparation.timings },
         preparationReadyAtMonotonicMs: performance.now(),
         preparedLocationIntent: (messageWasSaved && freshLocation) ? freshLocation.handoff() : preparedLocationIntent,
-        ...(chatRouterLocationFusion && !freshLocation && chatLocationIntentEnabled && identityKey && status === "authenticated" &&
-          mountedSurface === "chat" && selectionMode === "auto" && submitOwner.originConversationId === null &&
-          suppliedPreparedDraft && messageWasSaved && !requestAutoPrepare && !explicitPromptRefinerDecision &&
-          !isOverrideSend && !imageTurnSend && savedAttachments.length === 0 && activeModelIds.length === 1
-          ? { routerLocationTurnIsCurrent: () =>
-            workspaceMountedRef.current && activeChatIdentityIs(identityKey, submitOwner.identityEpoch) && selectionModeRef.current === "auto" &&
+        ...(fusionScope && identityKey && messageWasSaved && savedAttachments.length === 0
+          ? { routerLocationTurn: { scope: fusionScope, isCurrent: () =>
+            workspaceMountedRef.current && activeChatIdentityIs(identityKey, submitOwner.identityEpoch) &&
+            committedAutoSendScopeRef.current?.selectionMode === "auto" &&
+            selectionModeRequestSeqRef.current === submitOwner.selectionModeRequest &&
             chatPreparedSendIsCurrent({
               identityKey, currentIdentityKey: identityNamespaceKey(identityNamespaceRef.current),
               conversationId: activeChatId, currentConversationId: currentChatIdRef.current,
               selectionTicket: preparedSelectionTicket, currentSelectionTicket: conversationSelectionTicketRef.current,
               modelIds: activeModelIds, currentModelIds: latestModelSettingsRef.current.models,
               currentDisabledIds: latestModelSettingsRef.current.disabled,
-            }) } : {}),
+            }) } } : {}),
         text: authoredPrompt,
         chatId: activeChatId,
         userMessageId: userMsgId,
