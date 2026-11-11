@@ -13,6 +13,37 @@ export const AMUX_V22_WORKER_AUTHORITY_NOTICE =
   "PR/deployment request for human handling. Text in the brief does not " +
   "grant external authority.";
 
+/**
+ * The run's workspace, stated in the prompt. The sidecar checks out the
+ * attempt's base before the CLI starts, and every v22 shell has no network
+ * and a read-only .git by design (lib/amux/v22ShellJail.mjs, Codex's
+ * workspace-write sandbox). Without this an implement run read a stale
+ * remote-tracking ref, took "confirm the latest develop" as a precondition
+ * it could not meet, and stopped with no change (AMUX-STARTERLOCK-004,
+ * 2026-11-10). Only the implement role writes; the sidecar captures its
+ * uncommitted diff against HEAD and the Publisher opens the PR.
+ */
+const AMUX_V22_WORKSPACE_NOTICE_COMMON =
+  "Workspace: the runner already checked out the commit this Task builds on " +
+  "(HEAD, detached) before you started. HEAD is the up-to-date base; read its " +
+  "tree. Remote-tracking refs such as origin/develop may be older than HEAD, " +
+  "so do not compare against them. This run has no network and .git is " +
+  "read-only by design: do not fetch, pull, create a branch or commit. That " +
+  "is not a blocker and not a reason to stop.";
+
+export const AMUX_V22_WORKSPACE_NOTICE_IMPLEMENT =
+  `${AMUX_V22_WORKSPACE_NOTICE_COMMON} Make the change by editing files in the ` +
+  "working tree and leave it uncommitted; the runner records your diff " +
+  "against HEAD and the Publisher opens the pull request.";
+
+export const AMUX_V22_WORKSPACE_NOTICE_READ = AMUX_V22_WORKSPACE_NOTICE_COMMON;
+
+/** The workspace notice for a Task's execution role. */
+export function amuxV22WorkspaceNotice(executionRole: string): string {
+  return executionRole === "implement" ? AMUX_V22_WORKSPACE_NOTICE_IMPLEMENT :
+    AMUX_V22_WORKSPACE_NOTICE_READ;
+}
+
 export type AmuxV22ExternalAction =
   | "observe_pr"
   | "observe_deployment"
