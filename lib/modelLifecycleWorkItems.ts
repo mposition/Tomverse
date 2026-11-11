@@ -24,7 +24,9 @@ import {
     type ModelObservation,
     type SuppressedCandidate,
     ADOPTION_RECORD_STATUSES,
+    MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR,
     isRolloutFinishable,
+    vanishedDiscoveryChanges,
     workItemDecisionRecordRefusal,
     workItemDecisionTarget,
     workItemTimestampField,
@@ -1750,6 +1752,71 @@ export async function summariseLifecycleChanges(since: Date): Promise<{
         transitions: events.length - discovered - records,
         completed,
     };
+}
+
+/**
+ * The daily run's one automatic decision (owner approval 2026-11-11): excludes
+ * families every ID of which is gone from its provider's latest successful scan,
+ * and reopens the ones it excluded once the provider lists them again. Run after
+ * the scan has recorded today's sightings. Each batch is its own transaction; a
+ * batch the state machine refuses (somebody moved an item meanwhile) is skipped
+ * and counted, never forced.
+ */
+export async function reconcileVanishedDiscoveryItems(): Promise<{
+    excluded: number;
+    reopened: number;
+    refused: number;
+}> {
+    const [undecided, excluded] = await Promise.all([
+        listModelDiscoveryQueue({ view: "excludable" }),
+        listModelDiscoveryQueue({ view: "excluded" }),
+    ]);
+    // A family read in part cannot be judged whole.
+    if (undecided.truncated || excluded.truncated) {
+        return { excluded: 0, reopened: 0, refused: 0 };
+    }
+    const changes = vanishedDiscoveryChanges({
+        undecided: undecided.items,
+        excluded: excluded.items,
+    });
+    const result = { excluded: 0, reopened: 0, refused: 0 };
+    const batches = <T>(items: readonly T[]) => {
+        const out: T[][] = [];
+        for (let i = 0; i < items.length; i += MAX_BULK_WORK_ITEM_TRANSITIONS) {
+            out.push(items.slice(i, i + MAX_BULK_WORK_ITEM_TRANSITIONS));
+        }
+        return out;
+    };
+    for (const batch of batches(changes.exclude)) {
+        const moved = await transitionWorkItems({
+            workItemIds: batch.map((item) => item.id),
+            to: "closed_no_action",
+            actorEmail: MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR,
+            eventDecision: {
+                decision: "exclude",
+                reasonCode: "other",
+                operatorReason:
+                    "Automatic: no longer in the provider's latest successful scan. Reopened automatically if it is listed again.",
+                analysisSnapshots: new Map(batch.map((item) => [item.id, item.analysisKo])),
+            },
+        });
+        if (moved.ok) result.excluded += moved.updated;
+        else result.refused += batch.length;
+    }
+    for (const batch of batches(changes.reopen)) {
+        const moved = await transitionWorkItems({
+            workItemIds: batch.map((item) => item.id),
+            to: "discovered",
+            actorEmail: MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR,
+            eventDecision: {
+                decision: "reopen",
+                operatorReason: "Automatic: the provider lists this ID again.",
+            },
+        });
+        if (moved.ok) result.reopened += moved.updated;
+        else result.refused += batch.length;
+    }
+    return result;
 }
 
 export type { Prisma };

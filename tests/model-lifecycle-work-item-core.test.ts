@@ -788,3 +788,35 @@ test("only an adopted, served add stalled before rollout can be closed as rolled
   }
   assert.equal(isRolloutFinishable({ ...base, action: "retire" }), false);
 });
+
+test("vanished families are excluded whole, and only automatic exclusions reopen", async () => {
+  const { vanishedDiscoveryChanges, MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR } = await import(
+    "../lib/modelLifecycleWorkItemCore.ts"
+  );
+  const item = (id: string, familyKey: string, availability: string, actorEmail?: string | null) => ({
+    id,
+    familyKey,
+    availability,
+    exclusion: actorEmail === undefined ? null : { actorEmail },
+  });
+  const { exclude, reopen } = vanishedDiscoveryChanges({
+    undecided: [
+      item("a1", "alpha", "stale"),
+      item("a2", "alpha", "stale"),
+      // One member still listed keeps the whole family.
+      item("b1", "beta", "stale"),
+      item("b2", "beta", "current"),
+      // A failed or missing scan is not evidence of absence.
+      item("c1", "gamma", "unknown"),
+    ],
+    excluded: [
+      item("d1", "delta", "current", MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR),
+      item("d2", "delta", "stale", MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR),
+      // A person's exclusion is theirs, even when the model is listed again.
+      item("e1", "epsilon", "current", "admin@tomverse.app"),
+      item("f1", "phi", "stale", MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR),
+    ],
+  });
+  assert.deepEqual(exclude.map((entry) => entry.id), ["a1", "a2"]);
+  assert.deepEqual(reopen.map((entry) => entry.id), ["d1", "d2"]);
+});

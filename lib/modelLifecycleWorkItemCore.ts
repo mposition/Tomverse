@@ -183,6 +183,57 @@ export const isRolloutFinishable = (item: {
     item.servedByTomverse &&
     ROLLOUT_FINISHABLE_STATUSES.has(item.status as WorkItemStatus);
 
+/**
+ * The one automatic decision this queue makes. Owner approval 2026-11-11: a
+ * family whose every ID is gone from its provider's latest successful scan is
+ * excluded without a person, and reopened by the same actor when the provider
+ * lists it again -- the queue otherwise never refiles an excluded ID, so a
+ * broken scan would hide a candidate for good. Everything else stays "automation
+ * may create, never decide".
+ */
+export const MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR = "model-discovery-auto-exclude" as const;
+
+/**
+ * Families to exclude and to reopen, from the queue's own reading.
+ *
+ * Exclude: every undecided member is `stale` (absent from a successful scan;
+ * `unknown`, a failed or missing scan, never counts). Reopen: a family this
+ * actor excluded that the provider lists again -- only the members this actor
+ * excluded, never a person's exclusion.
+ */
+export const vanishedDiscoveryChanges = <
+    T extends {
+        id: string;
+        familyKey: string;
+        availability: string;
+        exclusion?: { actorEmail: string | null } | null;
+    },
+>(input: {
+    undecided: readonly T[];
+    excluded: readonly T[];
+}): { exclude: T[]; reopen: T[] } => {
+    const byFamily = (items: readonly T[]) => {
+        const families = new Map<string, T[]>();
+        for (const item of items) {
+            const members = families.get(item.familyKey);
+            if (members) members.push(item);
+            else families.set(item.familyKey, [item]);
+        }
+        return [...families.values()];
+    };
+    const exclude = byFamily(input.undecided)
+        .filter((members) => members.every((item) => item.availability === "stale"))
+        .flat();
+    const reopen = byFamily(
+        input.excluded.filter(
+            (item) => item.exclusion?.actorEmail === MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR
+        )
+    )
+        .filter((members) => members.some((item) => item.availability === "current"))
+        .flat();
+    return { exclude, reopen };
+};
+
 export type WorkItemTransitionInput = {
     from: WorkItemStatus;
     to: WorkItemStatus;
