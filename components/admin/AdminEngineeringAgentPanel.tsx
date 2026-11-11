@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Lock } from "lucide-react";
 
@@ -161,32 +162,36 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                   <p className="text-sm font-semibold text-zinc-100">{kindLabel(item.kind)}</p>
                   <p className="text-xs text-zinc-500">{item.createdAt}</p>
                 </div>
-                <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-                  {item.reason ? (
-                    <>
-                      <dt className="text-zinc-500">{m.reason}</dt>
-                      <dd className="font-mono">{item.reason}</dd>
-                    </>
-                  ) : null}
-                  {item.runId ? (
-                    <>
-                      <dt className="text-zinc-500">{m.run}</dt>
-                      <dd className="font-mono">{item.runId}</dd>
-                    </>
-                  ) : null}
-                  {item.baseSha ? (
-                    <>
-                      <dt className="text-zinc-500">{m.base}</dt>
-                      <dd className="break-all font-mono">{item.baseSha}</dd>
-                    </>
-                  ) : null}
-                  {item.patchDigest ? (
-                    <>
-                      <dt className="text-zinc-500">{m.digest}</dt>
-                      <dd className="break-all font-mono">{item.patchDigest}</dd>
-                    </>
-                  ) : null}
-                </dl>
+                <OwnerItemContext item={item} />
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-sm text-zinc-400">{m.contextTechnical}</summary>
+                  <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                    {item.reason ? (
+                      <>
+                        <dt className="text-zinc-500">{m.reason}</dt>
+                        <dd className="font-mono">{item.reason}</dd>
+                      </>
+                    ) : null}
+                    {item.runId ? (
+                      <>
+                        <dt className="text-zinc-500">{m.run}</dt>
+                        <dd className="font-mono">{item.runId}</dd>
+                      </>
+                    ) : null}
+                    {item.baseSha ? (
+                      <>
+                        <dt className="text-zinc-500">{m.base}</dt>
+                        <dd className="break-all font-mono">{item.baseSha}</dd>
+                      </>
+                    ) : null}
+                    {item.patchDigest ? (
+                      <>
+                        <dt className="text-zinc-500">{m.digest}</dt>
+                        <dd className="break-all font-mono">{item.patchDigest}</dd>
+                      </>
+                    ) : null}
+                  </dl>
+                </details>
                 {item.patchBody !== null ? (
                   <details className="mt-3">
                     <summary className="cursor-pointer text-sm font-medium">{m.patch}</summary>
@@ -197,6 +202,19 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                 ) : null}
                 {item.kind === "state_mismatch" ? (
                   <p className="mt-2 text-sm text-zinc-400">{m.mismatchNote}</p>
+                ) : null}
+                {item.kind !== "decision" ? (
+                  <div className="mt-3 text-sm">
+                    <p className="font-medium text-zinc-200">{m.contextActions}</p>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-5 text-zinc-400">
+                      {(item.kind === "t2_draft"
+                        ? [...m.actionsT2, ...(item.rejudgeable ? [m.actionRejudge] : [])]
+                        : m.actionsMismatch.filter((_, index) => index !== 1 || item.causeKey.startsWith("review_pr:"))
+                      ).map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
                 ) : null}
                 {initial.canWrite && item.kind === "t2_draft" ? (
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -393,5 +411,142 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
         </div>
       ) : null}
     </section>
+  );
+}
+
+const PR_BASE_URL = "https://github.com/mposition/Tomverse/pull/";
+
+/**
+ * What a person needs beside an owner item to decide it: the card and run it
+ * is about, why it waits, the pull request it touches, the files the draft
+ * changes, and who reviewed it -- the cross-vendor review and the Decision
+ * Maker. Reads only; nothing here acts.
+ */
+function OwnerItemContext({ item }: { item: EngineeringAgentOwnerItemView }) {
+  const m = useAdminMessages(adminEngineeringAgentMessages);
+  const context = item.context;
+  const why = item.reason ? (m.reasonText[item.reason] ?? null) : null;
+  return (
+    <div className="mt-2 flex flex-col gap-3 text-sm">
+      {context ? (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          <dt className="text-zinc-500">{m.contextCard}</dt>
+          <dd className="min-w-0">
+            <Link
+              className="font-medium text-zinc-100 underline-offset-2 hover:underline"
+              href={`/admin/amux-execution?tab=cards&taskId=${encodeURIComponent(context.card.id)}`}
+            >
+              {context.card.displayKey ? `${context.card.displayKey} · ` : ""}
+              {context.card.title ?? m.contextUntitled}
+            </Link>
+            <span className="ml-2 text-xs text-zinc-500">
+              {fill(m.contextCardStatus, { status: context.card.status })}
+              {context.card.taskRole ? ` · ${fill(m.contextRole, { role: context.card.taskRole })}` : ""}
+            </span>
+          </dd>
+          <dt className="text-zinc-500">{m.contextRun}</dt>
+          <dd>
+            {fill(m.contextRunLine, {
+              status: context.run.outcome ? `${context.run.status}/${context.run.outcome}` : context.run.status,
+              worker: context.run.worker,
+              attempt: context.run.attemptOutcome ?? "-",
+            })}
+            <span className="ml-2 text-xs text-zinc-500">{formatAestDateTime(context.run.startedAt)}</span>
+          </dd>
+          <dt className="text-zinc-500">{m.contextPullRequests}</dt>
+          <dd>
+            {context.pullRequests.length === 0
+              ? m.contextNoPullRequest
+              : context.pullRequests.map((pr) => (
+                  <span key={pr.prNumber} className="mr-3 inline-block">
+                    <a
+                      className="font-mono underline-offset-2 hover:underline"
+                      href={`${PR_BASE_URL}${pr.prNumber}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      #{pr.prNumber}
+                    </a>{" "}
+                    <span className="text-zinc-400">
+                      {pr.merged ? m.contextPrMerged : m.contextPrOpen}
+                      {pr.approvalVerdict === "approved" ? ` · ${m.contextPrApproved}` : ""}
+                    </span>
+                  </span>
+                ))}
+          </dd>
+        </dl>
+      ) : (
+        <p className="text-zinc-400">{m.contextNoRun}</p>
+      )}
+
+      {item.reason ? (
+        <div>
+          <p className="font-medium text-zinc-200">{m.contextWhy}</p>
+          <p className="mt-1 text-zinc-300">
+            {why ?? item.reason} <span className="font-mono text-xs text-zinc-500">({item.reason})</span>
+          </p>
+        </div>
+      ) : null}
+
+      {context && context.fileCount > 0 ? (
+        <div>
+          <p className="font-medium text-zinc-200">{fill(m.contextFiles, { count: context.fileCount })}</p>
+          <ul className="mt-1 space-y-0.5 font-mono text-xs">
+            {context.files.map((file) => (
+              <li key={file.path} className="break-all">
+                <span className="text-emerald-400">+{file.added}</span>{" "}
+                <span className="text-red-400">-{file.removed}</span> {file.path}
+              </li>
+            ))}
+          </ul>
+          {context.fileCount > context.files.length ? (
+            <p className="text-xs text-zinc-500">
+              {fill(m.contextFilesMore, { count: context.fileCount - context.files.length })}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {context ? (
+        <div>
+          <p className="font-medium text-zinc-200">{m.contextReview}</p>
+          <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            <dt className="text-zinc-500">{m.contextCrossReview}</dt>
+            <dd>
+              {context.review
+                ? `${fill(m.contextCrossReviewLine, {
+                    verdict: context.review.verdict,
+                    author: context.review.authorVendor,
+                    reviewers: context.review.reviewerVendors.join(", ") || "-",
+                  })}${context.review.touchesContract ? ` · ${m.contextTouchesContract}` : ""}`
+                : m.contextNoCrossReview}
+            </dd>
+            <dt className="text-zinc-500">{m.contextDm}</dt>
+            <dd>
+              {context.dm.filed ? (
+                <>
+                  <p>
+                    {fill(m.contextDmFiled, {
+                      kind: context.dm.kind,
+                      state: context.dm.state,
+                      decision: context.dm.decision ?? m.contextDmPending,
+                    })}
+                  </p>
+                  <p className="text-zinc-400">{m.dmStates[context.dm.detail.state] ?? context.dm.detail.state}</p>
+                  {context.dm.detail.state === "proposal" ? (
+                    <div className="mt-1">
+                      <p className="text-zinc-500">{m.contextDmRationale}</p>
+                      <p className="whitespace-pre-wrap break-words">{context.dm.detail.rationale}</p>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-zinc-400">{m.contextDmNotFiled}</p>
+              )}
+            </dd>
+          </dl>
+        </div>
+      ) : null}
+    </div>
   );
 }
