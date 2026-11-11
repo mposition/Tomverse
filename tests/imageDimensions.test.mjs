@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readImageDimensions } from "../lib/imageDimensions.ts";
+import { detectImageMimeType, readImageDimensions } from "../lib/imageDimensions.ts";
 
 // The dimensions recorded on a generation come from the file's own header,
 // because the request cannot tell you: each provider translates a resolution
@@ -53,6 +53,15 @@ test("PNG dimensions come out of the IHDR chunk", () => {
     width: 1536,
     height: 1024,
   });
+});
+
+test("image MIME detection recognizes allowed signatures without decoding", () => {
+  assert.equal(detectImageMimeType(png(1024, 1024)), "image/png");
+  assert.equal(detectImageMimeType(jpeg(1536, 1024)), "image/jpeg");
+  assert.equal(detectImageMimeType(webpVp8x(2048, 1024)), "image/webp");
+  assert.equal(detectImageMimeType(Buffer.from("GIF89a")), null);
+  assert.equal(detectImageMimeType(Buffer.from([0x89, 0x50, 0x4e])), null);
+  assert.equal(detectImageMimeType(Buffer.from("RIFFxxxxNOPE")), null);
 });
 
 test("JPEG height precedes width, and is not transposed", () => {
