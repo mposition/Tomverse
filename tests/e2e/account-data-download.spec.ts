@@ -107,6 +107,13 @@ for (const theme of ["light", "dark"] as const) {
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     const notice = page.getByTestId("settings-consent-slot").getByTestId("chat-consent-notice");
     await expect(notice).toBeVisible({ timeout: 15_000 });
+    await expect(notice).toContainText("동의하면 기능 사용·유입 경로 통계를 수집해 Tomverse를 개선합니다.", { useInnerText: true });
+    if (isMobile) {
+      const title = notice.getByTestId("data-consent-mobile-title");
+      await expect(title).toBeVisible();
+      await expect(title).toHaveText("개인정보를 보호하는 제품 분석");
+      await expectAccessibleContrast(title, "Data consent purpose");
+    }
     await notice.scrollIntoViewIfNeeded();
     const metrics = await notice.evaluate(element => {
       const visible = (selector: string) => Array.from(element.querySelectorAll(selector)).filter(node => node.getBoundingClientRect().height > 0);
