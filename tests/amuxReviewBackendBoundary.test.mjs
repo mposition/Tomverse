@@ -42,7 +42,16 @@ test("retry is bounded, planning correction is revision-proven, and approval nee
   // amuxReviewAllowedOutcomes, tested in amuxReviewApprovalCore.test.mjs.
   assert.match(service, /blockedRetryVerified: amuxV22ReviewRetryHasVerifiedOutcome\(/);
   assert.match(service, /budgetAllowed: budget\.allowed,\s*dueCorrected,\s*displayTruncated,\s*displayExact,\s*\}\);/);
-  assert.match(service, /prlessRetryAllowed: publication !== null && amuxV22PrlessReviewRetryAllowed\(/);
+  assert.match(service, /const prlessEvidence = publication === null \? null : \{/);
+  assert.match(service, /prlessRetryAllowed: prlessEvidence !== null &&\s*amuxV22PrlessReviewRetryAllowed\(prlessEvidence\)/);
+  // An implement Task that left no change is approved on the same evidence,
+  // as no change needed (owner decision 2026-11-11), and the audit says so.
+  assert.match(service, /const noChangeCompletion = prlessEvidence !== null &&\s*amuxV22NoChangeCompletionAllowed\(prlessEvidence\)/);
+  assert.match(service, /displayExact, noChangeCompletionAllowed: noChangeCompletion \}\)/);
+  assert.match(service, /approval_basis: approvalBasis/);
+  assert.match(service, /proposal\.outcome === "approve" &&\s*state\.approvalBasis === "no_change"/);
+  assert.match(service, /approval_basis: AMUX_REVIEW_NO_CHANGE_BASIS/);
+  assert.match(service, /no change needed \(owner verified\)/);
   // The stored-result exception reads the Task's own latest v22 result row,
   // fetched in the same snapshot transaction the decision writer re-runs.
   assert.match(service, /attempt: lastAttempt,\s*storedResultAttemptId: latestV4Result\?\.attemptId \?\? null,/);
