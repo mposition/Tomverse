@@ -98,6 +98,8 @@ export const amuxReviewApprovalHasEvidence = (input: {
   taskRole: string | null; reviewPrNumber: number | null;
   artifactAvailable: boolean; v4EvidenceVerified: boolean;
   displayTruncated: boolean; displayExact: boolean;
+  /** amuxV22NoChangeCompletionAllowed for this Task. */
+  noChangeCompletionAllowed?: boolean;
 }) => !input.displayTruncated && input.displayExact &&
   (input.sourceSystem === "admin-idea-v4" ?
   input.cardType === "task" &&
@@ -105,8 +107,15 @@ export const amuxReviewApprovalHasEvidence = (input: {
     input.artifactAvailable :
     // A test Task leaves a patch and completes through its PR (2026-10-30).
     input.v4EvidenceVerified &&
-      ["design", "review", "verify", "investigate", "operate"]
-        .includes(input.taskRole ?? "")) : input.artifactAvailable);
+      (["design", "review", "verify", "investigate", "operate"]
+        .includes(input.taskRole ?? "") ||
+        (input.taskRole === "implement" && input.noChangeCompletionAllowed === true))) :
+    input.artifactAvailable);
+
+/** Why an approval is offered: a PR or verified non-code result, or the
+ * owner's "no change needed" for an implement Task that left none. */
+export type AmuxReviewApprovalBasis = "evidence" | "no_change";
+export const AMUX_REVIEW_NO_CHANGE_BASIS = "no_change_owner_verified";
 
 export const amuxV4ReviewEvidenceMatches = (input: {
   task: { id: string; sourceSystem: string | null; revision: number;
@@ -222,6 +231,31 @@ export const amuxV22PrlessReviewRetryAllowed = (input: {
   input.attempt.reason !== "usage_outcome_unknown" &&
   input.v4EvidenceVerified && !input.publicationMayOpenPr &&
   !input.displayTruncated && input.displayExact;
+
+/**
+ * An implement Task in review with no pull request may be completed by the
+ * owner as "no change needed" (owner decision 2026-11-11, AMUX-ARTFMT-002):
+ * its worker found the change already in place and left none, so it could only
+ * be blocked or run again. The same evidence as the PR-less retry: this exact
+ * attempt's stored, readable result, a known usage outcome, and no publication
+ * work that has opened or may still open a pull request for it. It is the
+ * existing approve outcome (review -> done); the audit entry records the basis
+ * and the database guard repeats the publication check
+ * (20261111120000_amux_review_no_change_completion). Other roles, and a Task
+ * with a pull request, keep their own approval evidence.
+ */
+export const amuxV22NoChangeCompletionAllowed = (input: {
+  sourceSystem: string | null;
+  cardType: string | null;
+  taskRole: string | null;
+  reviewPrNumber: number | null;
+  attempt: { v22AssignmentId: string | null; outcome: string | null;
+    toStatus: string | null; reason: string | null } | null;
+  v4EvidenceVerified: boolean;
+  publicationMayOpenPr: boolean;
+  displayTruncated: boolean;
+  displayExact: boolean;
+}) => input.taskRole === "implement" && amuxV22PrlessReviewRetryAllowed(input);
 
 /**
  * The outcomes the server offers for one escalation, from the evidence the

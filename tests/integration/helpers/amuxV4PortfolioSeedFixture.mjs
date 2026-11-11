@@ -28,6 +28,8 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
   // false: no usage row at all, as when the lease expired after the result
   // was stored but before the bridge reported usage (AMUX-FILEGEN-003).
   const usageReported = input.usageReported ?? true;
+  // An implement Task for the no-change completion (owner decision 2026-11-11).
+  const taskRole = input.taskRole ?? "investigate";
   const ids = { initiative: randomUUID(), epic: randomUUID(),
     feature: randomUUID(), task: AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID,
     sourceApproval: randomUUID() };
@@ -70,11 +72,11 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
              $4::jsonb, 'task', $5, $6, 'synthetic', 1,
              $7, 'synthetic', $6, 'synthetic', 1, $3, 'synthetic',
              $6, 'synthetic', 1, $3, 'synthetic', $8,
-             'investigate', $9, CURRENT_TIMESTAMP)`,
+             $10, $9, CURRENT_TIMESTAMP)`,
     [ids.task, unitId.toUpperCase(), digest,
       JSON.stringify({ schemaVersion: "amux-v4", ideaId,
         approvalId: ids.sourceApproval }), ids.feature, synthetic,
-      titleDigest, ids.sourceApproval, executionGrade]);
+      titleDigest, ids.sourceApproval, executionGrade, taskRole]);
 
   const assessments = {};
   for (const [kind, subjectId, metrics] of [
@@ -290,10 +292,10 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
      "catalogVersion", "costReceiptDigest", "perAttemptMicroUsd",
      "authorizationAuditLogId", "assignedAt") VALUES
     ($1, $2, $3, $4, 'sev1', 1, 'worker-one', '${instanceId}',
-     1, $8, 'model-one', 'investigate', $7, 'route-one', $5,
+     1, $8, 'model-one', $9, $7, 'route-one', $5,
      'catalog-one', 'v1', $5, 3400000, $6, CURRENT_TIMESTAMP)`,
   [assignmentId, ids.task, receiptId, laneSeq, digest, assignmentAudit,
-    executionGrade, claudeCliFailure ? "anthropic" : "openai"]);
+    executionGrade, claudeCliFailure ? "anthropic" : "openai", taskRole]);
   await db.query(`UPDATE public."AmuxWorkItem"
     SET "owner" = 'worker-one', "claimedAt" = CURRENT_TIMESTAMP,
       "v22AssignmentId" = $2, "revision" = 2

@@ -14,7 +14,7 @@ const dedicated = (() => {
 // The real v4 card/assignment fixture spans many independent ledgers. These
 // transaction-local tables exercise the installed trigger's exact SQL without
 // bypassing production constraints or persisting a synthetic approval row.
-test("v4 PR-less proposal guard accepts only the latest retained non-code result", {
+test("v4 PR-less proposal guard accepts only the latest retained non-code or no-change result", {
   skip: dedicated ? undefined : "requires a dedicated loopback test database",
 }, async () => {
   const db = new pg.Client({ connectionString: databaseUrl });
@@ -34,7 +34,11 @@ test("v4 PR-less proposal guard accepts only the latest retained non-code result
       "keyId" text, "keyVersion" integer) ON COMMIT DROP`);
     await db.query(`CREATE TEMP TABLE "AmuxExecutionAttempt" (
       "id" text PRIMARY KEY, "taskId" text,
-      "v22AssignmentId" text) ON COMMIT DROP`);
+      "v22AssignmentId" text, "reason" text) ON COMMIT DROP`);
+    await db.query(`CREATE TEMP TABLE "EngineeringAgentRun" (
+      "id" text PRIMARY KEY, "amuxAttemptId" text) ON COMMIT DROP`);
+    await db.query(`CREATE TEMP TABLE "EngineeringAgentWorkItem" (
+      "runId" text, "kind" text, "state" text, "reason" text) ON COMMIT DROP`);
     await db.query(`CREATE TEMP TABLE "AmuxReviewProposal" (
       "taskId" text, "attemptId" text, "outcome" text,
       "reviewPrNumber" integer) ON COMMIT DROP`);
@@ -45,7 +49,8 @@ test("v4 PR-less proposal guard accepts only the latest retained non-code result
       ('card', 'admin-idea-v4', 'task', 'design', NULL,
        'title', 'body', 'brief', '\\x01', '\\x02', '\\x03')`);
     await db.query(`INSERT INTO pg_temp."AmuxExecutionAttempt" VALUES
-      ('attempt', 'card', 'assignment')`);
+      ('attempt', 'card', 'assignment', 'reported_result')`);
+    await db.query(`INSERT INTO pg_temp."EngineeringAgentRun" VALUES ('run', 'attempt')`);
     await db.query(`INSERT INTO pg_temp."AmuxV22TaskResult" VALUES
       ('attempt', 'card', CURRENT_TIMESTAMP, NULL, '\\x04', 'key', 1)`);
     const insert = `INSERT INTO pg_temp."AmuxReviewProposal"
@@ -56,6 +61,15 @@ test("v4 PR-less proposal guard accepts only the latest retained non-code result
       FROM pg_temp."AmuxReviewProposal"`);
     assert.equal(count.rows[0].total, 1);
 
+    const accept = async (change) => {
+      await db.query("SAVEPOINT probe");
+      await db.query(change);
+      let error;
+      try { await db.query(insert); } catch (caught) { error = caught; }
+      await db.query("ROLLBACK TO SAVEPOINT probe");
+      await db.query("RELEASE SAVEPOINT probe");
+      assert.equal(error, undefined, error?.message);
+    };
     const reject = async (change) => {
       await db.query("SAVEPOINT probe");
       await db.query(change);
@@ -65,8 +79,28 @@ test("v4 PR-less proposal guard accepts only the latest retained non-code result
       await db.query("RELEASE SAVEPOINT probe");
       assert.equal(error?.code, "23514", error?.message);
     };
-    await reject(`UPDATE pg_temp."AmuxWorkItem"
-      SET "taskRole" = 'implement' WHERE "id" = 'card'`);
+    // An implement Task that left no change is completed as "no change
+    // needed" (owner decision 2026-11-11) only while no publication work has
+    // opened or may still open its pull request, and its usage is known.
+    const implement = `UPDATE pg_temp."AmuxWorkItem"
+      SET "taskRole" = 'implement' WHERE "id" = 'card';`;
+    await accept(implement);
+    await accept(`${implement} INSERT INTO pg_temp."EngineeringAgentWorkItem"
+      VALUES ('run', 'publish', 'publish_refused', NULL),
+             ('run', 't2_draft', 'open', 'tier_two')`);
+    for (const state of ["queued", "claimed", "needs_lookup", "outcome_unknown", "published"]) {
+      await reject(`${implement} INSERT INTO pg_temp."EngineeringAgentWorkItem"
+        VALUES ('run', 'publish', '${state}', NULL)`);
+    }
+    await reject(`${implement} INSERT INTO pg_temp."EngineeringAgentWorkItem"
+      VALUES ('run', 't2_draft', 'open', 'tier_pending')`);
+    await reject(`${implement} UPDATE pg_temp."AmuxExecutionAttempt"
+      SET "reason" = 'usage_outcome_unknown' WHERE "id" = 'attempt'`);
+    await reject(`${implement} UPDATE pg_temp."AmuxWorkItem"
+      SET "reviewPrNumber" = 42 WHERE "id" = 'card'`);
+    // A design Task's approval does not read publication work.
+    await accept(`INSERT INTO pg_temp."EngineeringAgentWorkItem"
+      VALUES ('run', 'publish', 'queued', NULL)`);
     // A test Task leaves a patch and completes through its PR (2026-10-30).
     await reject(`UPDATE pg_temp."AmuxWorkItem"
       SET "taskRole" = 'test' WHERE "id" = 'card'`);

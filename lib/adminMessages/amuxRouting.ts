@@ -178,6 +178,17 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerQuestionRetry: "Has the reported blocker been corrected enough to requeue this same task?",
     ownerQuestionRetryNoPr: "This result has no pull request. Should this same task run again?",
     ownerQuestionBlock: "Should this task remain blocked with this recorded reason?",
+    // An implement Task that left no change (owner decision 2026-11-11).
+    noChange: {
+      question: "The worker made no change and says the work is already in place. Is there nothing left to change?",
+      outcome: "Complete: no change needed",
+      decisionWarning: "This marks the implement Task done with no pull request, as no change needed. Dependent work may become eligible; nothing is executed, deployed or published.",
+      confirmation: "I read the worker report and checked the current code: there is nothing to change.",
+      confirmationRequired: "Confirm that you checked the worker report and the current code before preparing a proposal.",
+      confirmHeading: "Confirm completion of this exact Task with no change",
+      confirmDecision: "Confirm: no change needed",
+      defaultResolution: "no change needed (owner verified)",
+    },
     blockWithoutResultNotice: (source: string, target: string) =>
       `No completion or retry evidence is connected. From the connected assignment and permitted decisions, this review shows the ${source} → ${target} block choice. This does not prove that a host process stopped, nor that no process ran, and does not delete, cancel, requeue, or run the Task.`,
     unknownNoRetry:
@@ -501,6 +512,16 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerQuestionRetry: "보고된 차단 원인이 이 작업을 다시 대기열에 넣을 만큼 해결됐습니까?",
     ownerQuestionRetryNoPr: "이 결과에는 PR이 없습니다. 같은 작업을 다시 실행하시겠습니까?",
     ownerQuestionBlock: "기록된 사유로 이 작업을 차단 상태에 유지해야 합니까?",
+    noChange: {
+      question: "작업자가 아무것도 바꾸지 않았고 이미 반영돼 있다고 보고했습니다. 더 바꿀 것이 없습니까?",
+      outcome: "변경 불필요로 완료",
+      decisionWarning: "PR 없이 이 구현 Task를 '변경 불필요'로 완료합니다. 후속 작업이 실행 대상이 될 수 있지만, 이 결정 자체가 실행·배포·게시를 하지는 않습니다.",
+      confirmation: "작업자 보고와 현재 코드를 확인했고 바꿀 것이 없습니다.",
+      confirmationRequired: "제안을 준비하기 전에 작업자 보고와 현재 코드를 확인했다고 체크하세요.",
+      confirmHeading: "정확히 이 Task를 변경 없이 완료하는지 확인",
+      confirmDecision: "변경 불필요로 완료 확정",
+      defaultResolution: "no change needed (owner verified)",
+    },
     blockWithoutResultNotice: (source: string, target: string) => {
       const effect = source === "blocked" && target === "blocked"
         ? "차단 상태 유지 선택"
