@@ -1,4 +1,6 @@
 import "server-only";
+import { CHAT_LOCATION_INTENT_PROMPT } from "./chatLocationIntentPrompt";
+import { routerLocationDigest, type RouterLocationContinuation, type RouterLocationPick } from "./chatRouterLocationContinuation";
 import { parseRouterSearchQueries, routerSearchInstructions, routerSearchQueriesSchema, ROUTER_SEARCH_OUTPUT_TOKENS } from "./chatRouterSearchPlan";
 
 import {
@@ -60,6 +62,7 @@ export type AutoLlmRouterCallResult = {
     failure?: AutoLlmRouterFailure;
     imageDecision?: ChatImageDecision;
     searchQueries?: string[];
+    requiresLocation?: boolean;
 };
 
 /**
@@ -86,6 +89,8 @@ type AutoLlmRouterCallInput = {
     source?: "live" | "routing_optimizer" | "rewrite_optimizer";
     imageIntent?: ChatImageIntentContext | null;
     searchPlan?: boolean;
+    locationText?: string;
+    searchUtcDate?: string;
 };
 
 /** What the call sends, built once so its cost bound is of the same request. */
@@ -94,11 +99,17 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
     const candidates = withAutoFileCapabilities(input.candidates);
     const imageIntent = input.imageIntent;
     const baseSchema = autoLlmRouterOutputSchema(candidates, { rewrite });
-    const schema = input.searchPlan ? {
+    const searchSchema = input.searchPlan ? {
         ...baseSchema,
         properties: { ...baseSchema.properties, searchQueries: routerSearchQueriesSchema },
         required: [...baseSchema.required, "searchQueries"],
     } : baseSchema;
+    const authored = input.locationText?.slice(0, 8_000);
+    const schema = authored ? {
+        ...searchSchema,
+        properties: { ...searchSchema.properties, requiresLocation: { type: "boolean" as const } },
+        required: [...searchSchema.required, "requiresLocation"],
+    } : searchSchema;
     return {
         rewrite,
         candidates,
@@ -109,7 +120,8 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
             combined: true,
             followUp: imageIntent.previousImagePrompt !== null,
             attachedPhoto: imageIntent.attachedPhoto,
-        }) : "") + (input.searchPlan ? "\n\n" + routerSearchInstructions(new Date().toISOString().slice(0, 10)) : ""),
+        }) : "") + (input.searchPlan ? "\n\n" + routerSearchInstructions(input.searchUtcDate ?? new Date().toISOString().slice(0, 10)) : "") +
+            (authored ? "\n\nFor requiresLocation, use the full authoredMessage if supplied, otherwise message. " + CHAT_LOCATION_INTENT_PROMPT : ""),
         prompt: autoLlmRouterUserMessage(
             input.prompt,
             input.previousAnswer,
@@ -119,10 +131,12 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
             imageIntent.message === input.prompt.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS)
                 ? chatImageIntentUserMessage("", imageIntent.candidates, imageIntent.previousImagePrompt, imageIntent.attachedPhoto, true)
                 : imageIntent.prompt
-        ) : ""),
+        ) : "") + (authored && authored !== input.prompt.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS)
+            ? "\n\n" + JSON.stringify({ authoredMessage: authored }) : ""),
         maxOutputTokens: (rewrite
             ? AUTO_LLM_ROUTER_REWRITE_MAX_OUTPUT_TOKENS
-            : AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS) + (imageIntent?.maxOutputTokens ?? 0) + (input.searchPlan ? ROUTER_SEARCH_OUTPUT_TOKENS : 0),
+            : AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS) + (imageIntent?.maxOutputTokens ?? 0) + (input.searchPlan ? ROUTER_SEARCH_OUTPUT_TOKENS : 0) +
+            (authored ? 16 : 0),
         schema: imageIntent ? {
             ...schema,
             properties: { ...schema.properties, imageIntent: {
@@ -209,7 +223,9 @@ export async function callAutoLlmRouter(
                 fileIntentType: typeof value?.requiresFileGeneration,
             });
         }
+        const locationValue = (output as { requiresLocation?: unknown } | null)?.requiresLocation;
         return { outcome: pick ? "picked" : "invalid", pick, usage, imageDecision,
+            ...(input.locationText && typeof locationValue === "boolean" ? { requiresLocation: locationValue } : {}),
             ...(input.searchPlan ? { searchQueries: parseRouterSearchQueries((output as { searchQueries?: unknown } | null)?.searchQueries) } : {}),
             ...(!pick ? { failure: { kind: "invalid_output" as const } } : {}) };
     } catch (error) {
@@ -250,12 +266,12 @@ export async function callAutoLlmRouter(
  * failed read must not cost the turn its pick.
  */
 async function readRouterSession(
-    conversationId: string | null
+    conversationId: string | null, excludeTraceId?: string
 ): Promise<AutoLlmRouterSession | null> {
     if (!conversationId) return null;
     try {
         const rows = await prisma.autoRouterDecision.findMany({
-            where: { conversationId },
+            where: { conversationId, ...(excludeTraceId ? { traceId: { not: excludeTraceId } } : {}) },
             orderBy: { createdAt: "desc" },
             take: AUTO_LLM_ROUTER_SESSION_PICKS,
             select: { sessionTopic: true, pickedModelId: true, taskKind: true },
@@ -390,6 +406,12 @@ export async function pickAutoModelWithLlm(input: {
     /** Request-side freshness check, only for a priced live Router candidate.
      * A refusal prevents both the Router budget hold and the provider call. */
     verifyPreparedContext?: () => Promise<boolean>;
+    locationFusion?: {
+        authoredText: string;
+        searchUtcDate: string;
+        resume: RouterLocationContinuation | null;
+        onRouterDigest: (digest: string) => void;
+    };
     searchPlan?: boolean;
     fileContext?: AutoFileGenerationContext;
     imageIntent?: Promise<ChatImageIntentContext | null>;
@@ -401,7 +423,7 @@ export async function pickAutoModelWithLlm(input: {
      * session memory hold only turns a chat model answered. Absent is true.
      */
     recordDecision?: Promise<boolean> | ((pick: AutoLlmRouterPick | null) => Promise<boolean>);
-}): Promise<{ modelId: string; rewrite: string | null; requiresFileGeneration?: boolean; searchQueries?: string[] } | null> {
+}): Promise<RouterLocationPick | null> {
     const [configuredModelId, tunables] = await Promise.all([
         readAutoLlmRouterModelId(), readAutoRouterTunables(),
     ]);
@@ -421,7 +443,7 @@ export async function pickAutoModelWithLlm(input: {
     if (candidates.length < 2 || !input.prompt.trim()) return null;
 
     const [session, active, rewriteOn, preparedImageIntent] = await Promise.all([
-        readRouterSession(input.conversationId),
+        readRouterSession(input.conversationId, input.locationFusion?.resume?.traceId),
         readActiveRouterGuidance(),
         readAutoLlmRouterRewrite(),
         input.imageIntent ?? null,
@@ -443,7 +465,8 @@ export async function pickAutoModelWithLlm(input: {
         routingCycleId: active.cycleId,
         rewrite,
         rewriteCycleId: rewriteGuidance?.cycleId ?? null,
-    }) + (imageIntent ? "+image-intent-v2" : "") + (input.searchPlan ? "+search-plan-v1" : "");
+    }) + (imageIntent ? "+image-intent-v2" : "") + (input.searchPlan ? "+search-plan-v1" : "") +
+        (input.locationFusion ? "+location-v1" : "");
     const call: AutoLlmRouterCallInput = {
         source: "live",
         traceId: input.traceId,
@@ -457,12 +480,22 @@ export async function pickAutoModelWithLlm(input: {
         rewriteGuidance: rewriteGuidance?.guidance,
         imageIntent,
         searchPlan: input.searchPlan,
+        searchUtcDate: input.searchPlan ? input.locationFusion?.searchUtcDate ?? new Date().toISOString().slice(0, 10) : undefined,
+        locationText: input.locationFusion?.authoredText,
         // A rewrite needs its own longer deadline; a tuned one only ever adds to it.
         timeoutMs: Math.max(rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : timeoutMs, timeoutMs, imageIntent?.timeoutMs ?? 0),
     };
     const prices = routerPrices(routerModel);
     const request = routerRequest(call);
     const worstCase = prices ? autoLlmRouterWorstCaseMicroUsd({ ...request, ...prices }) : null;
+    if (input.locationFusion) {
+        const digest = routerLocationDigest({ version, routerModelId: routerModel.id, provider: routerModel.provider,
+            apiModel: routerModel.apiModel, apiBaseUrl: routerModel.apiBaseUrl, prices, worstCase, timeoutMs: call.timeoutMs, request });
+        input.locationFusion.onRouterDigest(digest);
+        // No hold, model call or telemetry replay. The caller also refuses a
+        // configuration change if the live candidate set became empty.
+        if (input.locationFusion.resume) return input.locationFusion.resume.routerDigest === digest ? input.locationFusion.resume.pick : null;
+    }
     if (worstCase !== null && input.verifyPreparedContext && !(await input.verifyPreparedContext())) return null;
     const reservedAt = new Date();
     if (worstCase === null || !(await reserveRouterCost(routerModel.provider, worstCase, reservedAt))) {
@@ -477,7 +510,7 @@ export async function pickAutoModelWithLlm(input: {
         return null;
     }
     const startedAt = Date.now();
-    const { outcome, pick, usage, failure, imageDecision, searchQueries } = await callAutoLlmRouter(call);
+    const { outcome, pick, usage, failure, imageDecision, searchQueries, requiresLocation } = await callAutoLlmRouter(call);
     if (imageDecision) input.onImageDecision?.(imageDecision);
     const latencyMs = Date.now() - startedAt;
     if (prices && usage?.inputTokens !== undefined && usage.outputTokens !== undefined) {
@@ -557,6 +590,7 @@ export async function pickAutoModelWithLlm(input: {
     return pick ? {
         modelId: pick.modelId,
         rewrite: pick.rewrite,
+        ...(requiresLocation === undefined ? {} : { requiresLocation }),
         ...(searchQueries ? { searchQueries } : {}),
         ...(pick.requiresFileGeneration !== undefined ? { requiresFileGeneration: pick.requiresFileGeneration } : {}),
     } : null;

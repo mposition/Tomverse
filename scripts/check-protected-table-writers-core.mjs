@@ -4083,6 +4083,13 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "AMUX v4 activation diagnostic: one pg import; a fixed allowlist of ciphertext/key columns (now including the v19 session result ciphertext) yields counts only inside BEGIN REPEATABLE READ READ ONLY with statement and idle-transaction timeouts. No audit, model call, switch or body write. S3 probes only version listing in an unused namespace and bucket versioning status; neither proves key deletion. Fingerprint is bound to the complete reviewed script.",
   },
   {
+    path: "scripts/compare-chat-presearch.mjs",
+    sha256: "2f4b12b5fa1b4ab545880172ef30b2d575ba962f2d87719dc81c7ba16a73fb17",
+    count: 1,
+    reason:
+      "Local presearch comparison (--db): one pg import; a single parameterized SELECT over ResponseLatencySample inside BEGIN READ ONLY with a statement timeout. No write.",
+  },
+  {
     path: "scripts/baseline-existing-database.mjs",
     sha256: "861675ee9982dfff9b88c8d1fe5c2f6176c09648666328c9ad6d35c3d94cb612",
     count: 1,

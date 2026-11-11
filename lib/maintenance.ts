@@ -823,6 +823,9 @@ export async function cleanupExpiredData() {
     purgeExpiredComparisonReviewRuns(now)
   );
   await step("response_latency_samples", () => purgeResponseLatencySamples(now));
+  await step("chat_router_location_preparations", () =>
+    prisma.chatRouterLocationPreparation.deleteMany({ where: { expiresAt: { lt: now } }, limit: 5_000 })
+  );
 
   const promotionRiskIdentifiers = await step("promotion_risk_identifiers", () =>
     prisma.billingPromotionRedemption.updateMany({

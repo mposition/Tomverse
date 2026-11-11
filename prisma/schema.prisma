@@ -473,6 +473,7 @@ model Conversation {
   promptRefinerSuggestions PromptRefinerChatSuggestion[]
   promptRefinerProductAttempts PromptRefinerProductAttempt[]
   responseAttempts      ChatResponseAttempt[]
+  routerLocationPreparations ChatRouterLocationPreparation[]
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
@@ -1417,6 +1418,22 @@ model ChatResponseAttempt {
   @@index([conversationId, updatedAt])
   @@index([status, leaseExpiresAt])
   @@index([sourceUserMessageId])
+}
+
+/// One Router call per fresh saved question while its location decision can be resumed.
+/// The browser holds the sealed decision. This row contains only its binding and expiry.
+model ChatRouterLocationPreparation {
+  conversationId      String
+  sourceUserMessageId String
+  assistantMessageId  String
+  requestDigest       String
+  expiresAt           DateTime
+  consumedAt          DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, sourceUserMessageId])
+  @@index([expiresAt])
 }
 
 // One in-flight chat response. Counted to enforce concurrency, never to bill.

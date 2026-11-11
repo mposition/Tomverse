@@ -780,6 +780,7 @@ export function ChatPageClient({
   chatImageIntentEnabled = false,
   chatLocationIntentEnabled = true,
   chatParallelPreparationEnabled = false,
+  chatRouterLocationFusion = false,
   chatFreshLocationPreparationEnabled = false,
   chatImageEditEnabled = false,
   reviewEasyAvailable = false,
@@ -816,6 +817,7 @@ export function ChatPageClient({
   chatImageIntentEnabled?: boolean;
   chatLocationIntentEnabled?: boolean;
   chatParallelPreparationEnabled?: boolean;
+  chatRouterLocationFusion?: boolean;
   chatFreshLocationPreparationEnabled?: boolean;
   /** A send with a photo may be an edit of it (IMAGE_EDIT_ENABLED). */
   chatImageEditEnabled?: boolean;
@@ -1745,6 +1747,11 @@ export function ChatPageClient({
   // The browser-realm fence is adopted in the layout effect below. Rendering
   // (including SSR) never reads or mutates module-global identity state.
   const [identityEpoch, setIdentityEpoch] = useState(0);
+  const workspaceMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    workspaceMountedRef.current = true;
+    return () => { workspaceMountedRef.current = false; };
+  }, []);
   const submitIdentityFenceRef = useRef({ identityKey, epoch: identityEpoch });
   useLayoutEffect(() => {
     const adopted = adoptActiveChatIdentity(identityKey);
@@ -1776,6 +1783,7 @@ export function ChatPageClient({
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
     preparedLocationIntent?: ChatPanelLocationIntent;
+    routerLocationTurnIsCurrent?: () => boolean;
     id: string;
     text: string;
     chatId: string;
@@ -7442,6 +7450,19 @@ export function ChatPageClient({
         preparationTimings: { ...preparation.timings },
         preparationReadyAtMonotonicMs: performance.now(),
         preparedLocationIntent: (messageWasSaved && freshLocation) ? freshLocation.handoff() : preparedLocationIntent,
+        ...(chatRouterLocationFusion && !freshLocation && chatLocationIntentEnabled && identityKey && status === "authenticated" &&
+          mountedSurface === "chat" && selectionMode === "auto" && submitOwner.originConversationId === null &&
+          suppliedPreparedDraft && messageWasSaved && !requestAutoPrepare && !explicitPromptRefinerDecision &&
+          !isOverrideSend && !imageTurnSend && savedAttachments.length === 0 && activeModelIds.length === 1
+          ? { routerLocationTurnIsCurrent: () =>
+            workspaceMountedRef.current && activeChatIdentityIs(identityKey, submitOwner.identityEpoch) && selectionModeRef.current === "auto" &&
+            chatPreparedSendIsCurrent({
+              identityKey, currentIdentityKey: identityNamespaceKey(identityNamespaceRef.current),
+              conversationId: activeChatId, currentConversationId: currentChatIdRef.current,
+              selectionTicket: preparedSelectionTicket, currentSelectionTicket: conversationSelectionTicketRef.current,
+              modelIds: activeModelIds, currentModelIds: latestModelSettingsRef.current.models,
+              currentDisabledIds: latestModelSettingsRef.current.disabled,
+            }) } : {}),
         text: authoredPrompt,
         chatId: activeChatId,
         userMessageId: userMsgId,
