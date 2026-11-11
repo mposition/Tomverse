@@ -11,6 +11,17 @@ for (const theme of ["light", "dark"] as const) {
     await page.setExtraHTTPHeaders({ "cf-ipcountry": "DE" });
     await page.goto("/models?lang=ko");
     await expect(page.getByTestId("chat-consent-notice")).toBeVisible();
+    const entry = page.getByTestId("marketing-header-app-cta");
+    await expect(entry).toHaveAttribute("data-session-state", "unauthenticated");
+    await expect(entry).toHaveAccessibleName(/채팅 시작하기/);
+    await expect(entry).toHaveAttribute("href", "/chat?lang=ko");
+    await expect(entry).toBeVisible();
+    const menu = page.getByTestId("marketing-menu-button");
+    const entryBox = (await entry.boundingBox())!;
+    const menuBox = (await menu.boundingBox())!;
+    expect(Math.abs(entryBox.y - menuBox.y)).toBeLessThan(2);
+    expect(entryBox.x + entryBox.width).toBeLessThan(menuBox.x);
+    expect(entryBox.height).toBeGreaterThanOrEqual(44);
     const details = page.getByTestId("models-mobile-usage-details");
     await expect(details).not.toHaveAttribute("open");
     const firstCard = page.getByRole("article").first();
@@ -33,6 +44,14 @@ for (const theme of ["light", "dark"] as const) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.evaluate(() => { document.documentElement.style.fontSize = "32px"; });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const brand = (await page.getByTestId("marketing-brand-name").boundingBox())!;
+    const language = (await page.getByRole("combobox", { name: "언어" }).boundingBox())!;
+    expect(brand.x + brand.width <= language.x || brand.y + brand.height <= language.y || brand.y >= language.y + language.height).toBe(true);
+    await menu.focus();
+    await page.keyboard.press("Enter");
+    await expect(menu).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeFocused();
   });
 }
 

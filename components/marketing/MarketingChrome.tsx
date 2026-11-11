@@ -261,6 +261,7 @@ type MarketingHeaderProps = {
   variant?: "default" | "launch";
   chatHref?: string;
   reviewInfoHref?: string;
+  showMobileEntry?: boolean;
 };
 
 export function MarketingHeader(props: MarketingHeaderProps = {}) {
@@ -658,6 +659,7 @@ function LaunchMarketingHeader({
   localizedContentAvailable = true,
   chatHref: suppliedChatHref,
   reviewInfoHref,
+  showMobileEntry = false,
 }: MarketingHeaderProps) {
   const { lang } = useLanguage();
   const copy = launchChrome[lang];
@@ -705,8 +707,8 @@ function LaunchMarketingHeader({
   return (
     <>
       <header className="relative z-40 border-b border-white/10 bg-zinc-950 text-white" data-testid="launch-marketing-header">
-        <div className={`mx-auto flex min-h-[72px] ${maxWidth} flex-wrap items-center justify-between gap-[12px] px-[16px] py-3 sm:px-6 lg:flex-nowrap lg:px-[64px]`}>
-          <Link href={localizedHref(lang, "/")} className={`flex shrink-0 items-center gap-[8px] ${launchFocus}`} data-testid="marketing-brand-link" onClick={() => setIsMenuOpen(false)}>
+        <div className={`mx-auto ${showMobileEntry ? "grid grid-cols-[minmax(0,1fr)_auto] lg:flex" : "flex flex-wrap"} min-h-[72px] ${maxWidth} items-center justify-between gap-[12px] px-[16px] py-3 sm:px-6 lg:flex-nowrap lg:px-[64px]`}>
+          <Link href={localizedHref(lang, "/")} className={`flex shrink-0 ${showMobileEntry ? "min-w-0 flex-wrap" : ""} items-center gap-[8px] ${launchFocus}`} data-testid="marketing-brand-link" onClick={() => setIsMenuOpen(false)}>
             <span className="flex h-[36px] w-[36px] shrink-0 overflow-hidden rounded-[10px] bg-white">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
@@ -716,15 +718,15 @@ function LaunchMarketingHeader({
           <nav aria-label={copy.navigation} className="hidden items-center gap-6 text-sm font-semibold lg:flex">
             {items.map((item) => <Link key={item.key} href={localizedHref(lang, item.href)} data-testid={`header-${item.key}-link`} className={`py-3 text-zinc-300 transition hover:text-white ${launchFocus}`}>{item.label}</Link>)}
           </nav>
-          <div className="flex min-w-0 items-center gap-[8px]">
+          <div className={`${showMobileEntry ? "contents lg:flex" : "flex"} min-w-0 items-center gap-[8px]`}>
             <div className="min-w-0 [&>label]:h-[44px] [&>label]:max-w-[126px] [&>label]:border-zinc-700 [&>label]:bg-zinc-900 [&>label]:text-zinc-100 [&_select]:text-zinc-100 [&_select]:[color-scheme:dark]">
               <MarketingLanguageSwitcher />
             </div>
             {status !== "authenticated" && <Link href={loginHref} className={`hidden px-2 py-3 text-sm font-semibold text-zinc-300 hover:text-white lg:inline-flex ${launchFocus}`}>{copy.login}</Link>}
-            <Link href={primaryHref} data-testid="marketing-header-app-cta" data-session-state={status} onClick={() => trackStart("marketing_header")} className={`hidden min-h-[44px] items-center gap-2 rounded-full bg-blue-600 px-5 py-2 text-center text-sm font-bold hover:bg-blue-500 lg:inline-flex ${launchFocus}`}>
+            <Link href={primaryHref} data-testid="marketing-header-app-cta" data-session-state={status} onClick={() => trackStart("marketing_header")} className={`${showMobileEntry ? "col-start-1 row-start-2 inline-flex min-w-0 justify-center px-3 lg:px-5" : "hidden px-5"} min-h-[44px] items-center gap-2 rounded-full bg-blue-600 py-2 text-center text-sm font-bold hover:bg-blue-500 lg:inline-flex ${launchFocus}`}>
               {appLabel}<ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
             </Link>
-            <button ref={menuButtonRef} type="button" aria-label={isMenuOpen ? menuCopy.close : menuCopy.menu} aria-controls={menuId} aria-expanded={isMenuOpen} onClick={() => setIsMenuOpen((open) => !open)} data-testid="marketing-menu-button" className={`inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 lg:hidden ${launchFocus}`}>
+            <button ref={menuButtonRef} type="button" aria-label={isMenuOpen ? menuCopy.close : menuCopy.menu} aria-controls={menuId} aria-expanded={isMenuOpen} onClick={() => setIsMenuOpen((open) => !open)} data-testid="marketing-menu-button" className={`${showMobileEntry ? "col-start-2 row-start-2 justify-self-end" : ""} inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 lg:hidden ${launchFocus}`}>
               {isMenuOpen ? <X className="h-5 w-5" aria-hidden="true" /> : <Menu className="h-5 w-5" aria-hidden="true" />}
             </button>
           </div>
