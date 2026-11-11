@@ -55,3 +55,27 @@ test("only a validated semantic decision can request permission, with actual usa
 test("unknown model outcomes keep their hold and fall back without granting permission", async () => {
   reset(); fail = true; assert.equal(await ask(), false); assert.equal(calls, 1); assert.equal(holds, 1); assert.equal(settlements.length, 0);
 });
+test("early decisions distinguish rejected admission from an uncertain provider outcome", async () => {
+  const detect = (await load()).detectChatLocationIntent;
+  const outcomes: string[] = [];
+  const controller = new AbortController();
+  const options = { signal: controller.signal, onOutcome: (value: string) => outcomes.push(value) };
+  const classify = () => detect("지금 제가 있는 위치가 어디인가요?", options);
+  reset();
+  held = false;
+  assert.equal(await classify(), false);
+  assert.equal(calls, 0);
+  held = true;
+  fail = true;
+  assert.equal(await classify(), false);
+  assert.equal(settlements.length, 0);
+  fail = false;
+  output = { requiresLocation: false };
+  assert.equal(await classify(), false);
+  controller.abort();
+  assert.equal(await classify(), false);
+  assert.deepEqual(outcomes, ["not_dispatched", "unknown", "classified", "not_dispatched"]);
+  assert.equal(calls, 2);
+  assert.equal(holds, 3);
+  assert.equal(settlements.length, 1);
+});

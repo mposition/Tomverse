@@ -553,11 +553,12 @@ test("router search preparation uses one priced call and malformed suggestions p
   try {
     for (const queries of [["one", "two"], ["one", "two", "three"], [42]]) {
       routerRequests.length = 0; holds.length = 0;
-      generateRouterResult = () => ({ output: { ...routerOutput, searchQueries: queries }, usage: { inputTokens: 100, outputTokens: 30 } });
+      generateRouterResult = () => ({ output: { ...routerOutput, requiresFileGeneration: false, searchQueries: queries }, usage: { inputTokens: 100, outputTokens: 30 } });
       const result = await pick(undefined, false, { searchPlan: true });
       assert.equal(routerRequests.length, 1);
       assert.equal(routerRequests[0].maxOutputTokens, 440);
       assert.match(String(routerRequests[0].system), /searchQueries/);
+      assert.equal(result?.requiresFileGeneration, false);
       assert.equal(result?.modelId, routerOutput.modelId);
       assert.deepEqual(result?.searchQueries, typeof queries[0] === "string" && queries.length <= 2 ? queries : []);
       const { autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
@@ -574,4 +575,18 @@ test("router search preparation uses one priced call and malformed suggestions p
     assert.equal(routerRequests[0].maxOutputTokens, 200);
     assert.doesNotMatch(String(routerRequests[0].system), /searchQueries/);
   } finally { generateRouterResult = original; }
+});
+
+
+test("a context refusal precedes the live Router hold and provider; no eligible choice skips the check", async () => {
+  const holdsBefore = holds.length;
+  const callsBefore = routerRequests.length;
+  let readCount = 0;
+  const verifyPreparedContext = async () => { readCount++; return false; };
+  assert.equal(await pick(undefined, false, { eligibleModelIds: ["deepseek-v4-flash"], verifyPreparedContext }), null);
+  assert.equal(readCount, 0);
+  assert.equal(await pick(undefined, false, { verifyPreparedContext }), null);
+  assert.equal(readCount, 1);
+  assert.equal(holds.length, holdsBefore);
+  assert.equal(routerRequests.length, callsBefore);
 });

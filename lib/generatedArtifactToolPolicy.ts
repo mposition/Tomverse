@@ -284,6 +284,10 @@ const GENERATE_PROMPT = [
   "  When the user requests a fictional example or permits assumptions, supply",
   "  clearly labeled illustrative inputs and worked figures instead of deferring",
   "  every number. Keep assumptions distinct from actual or sourced data.",
+  "- Preserve the user's requested document outline, section names and exact",
+  "  heading count. Put a table caption in a paragraph block inside an existing",
+  "  section, not an extra heading. Before calling create_document, check the",
+  "  heading blocks against that outline; describe only the structure actually created.",
   "- Spreadsheets hold plain values only. There is no formula field, and a",
   "  string that looks like a formula is stored as text.",
   `- Limits: ${ARTIFACT_LIMITS.maxWorksheets} worksheets, ` +

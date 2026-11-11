@@ -13,6 +13,7 @@ export const routerSearchInstructions = (date: string) =>
   `Also return searchQueries: zero to ${ROUTER_SEARCH_MAX_QUERIES} short, independent web queries. Today is ${date} (UTC). ` +
   "Use [] unless external evidence is needed for the answer (current facts or requested sources). " +
   "Use [] for rewriting, coding from supplied material, arithmetic, image creation, or missing context. " +
+  "Use [] when requiresFileGeneration is true or it is unclear whether the user wants a downloadable file. " +
   "Do not guess facts or a device location. If the question needs the user's current location, use [] and let the answer model search with the consented location. " +
   "Queries must stand alone, preserve the user's constraints, and not depend on earlier search results. " +
   "Do not plan the full investigation: the answer model can resolve missing facts with follow-up searches. " +

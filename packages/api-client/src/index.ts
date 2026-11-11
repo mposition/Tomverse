@@ -23,19 +23,41 @@ export function filenameFromContentDisposition(
 
 export type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
+async function postLocationIntent(text: string, transport: ApiFetch, fields: { turnstileToken?: string; freshAccountId?: string }, signal?: AbortSignal) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const deadline = setTimeout(abort, 10_000);
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  try {
+    const response = await transport("/api/chat/location-intent", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text.slice(0, 8_000), ...fields }), signal: controller.signal,
+    });
+    return { response, body: await response.json().catch(() => null) };
+  } finally {
+    clearTimeout(deadline);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
+/** An uncertain provider outcome must not start another paid call for the same send. */
+export async function requestFreshChatLocationIntent(text: string, freshAccountId: string, signal: AbortSignal, transport: ApiFetch) {
+  try {
+    const { response, body } = await postLocationIntent(text, transport, { freshAccountId }, signal);
+    if (response.ok && body?.preparationOutcome === "classified" && typeof body.requiresLocation === "boolean") {
+      return { outcome: "classified" as const, requiresLocation: body.requiresLocation as boolean };
+    }
+    if (response.ok && body?.preparationOutcome === "not_dispatched" && body.requiresLocation === false) {
+      return { outcome: "not_dispatched" as const, requiresLocation: false };
+    }
+  } catch { /* The server may already have dispatched the classifier. */ }
+  return { outcome: "unknown" as const, requiresLocation: false };
+}
+
 /** An intent signal can request permission; it never contains device data. */
 export async function requestChatLocationIntent(text: string, transport: ApiFetch, options: { turnstileToken?: string } = {}): Promise<boolean> {
-  const post = async (turnstileToken?: string) => {
-    const controller = new AbortController();
-    const deadline = setTimeout(() => controller.abort(), 10_000);
-    try {
-      const response = await transport("/api/chat/location-intent", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.slice(0, 8_000), ...(turnstileToken ? { turnstileToken } : {}) }), signal: controller.signal,
-      });
-      return { response, body: await response.json().catch(() => null) };
-    } finally { clearTimeout(deadline); }
-  };
+  const post = (turnstileToken?: string) => postLocationIntent(text, transport, turnstileToken ? { turnstileToken } : {});
   if (options.turnstileToken) {
     // Redeem the single-use token and receive its cookie before any model wait.
     // An unknown redemption outcome must never fall through and reuse the token.

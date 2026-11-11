@@ -27,6 +27,8 @@ for (const theme of ["light", "dark"] as const) {
     await page.goto("/plugins?lang=ko");
     const notice = page.getByTestId("marketing-consent-slot").getByTestId("chat-consent-notice");
     await expect(notice).toBeVisible();
+    await expect(notice).toContainText("동의하면 기능 사용·유입 경로 통계를 수집해 Tomverse를 개선합니다.", { useInnerText: true });
+    if (isMobile) await expect(notice.getByTestId("analytics-consent-mobile-title")).toHaveText("개인정보를 보호하는 제품 분석");
     const metrics = await notice.evaluate(element => {
       const visible = (selector: string) => Array.from(element.querySelectorAll(selector)).filter(node => node.getBoundingClientRect().height > 0);
       return {
@@ -57,6 +59,21 @@ for (const theme of ["light", "dark"] as const) {
     expect(writes).toBe(0);
   });
 }
+
+test("plugin cards explain capabilities before opening details", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.route("**/api/mcp/**", route => route.fulfill({ json: { enabled: false, servers: [], connections: [], invocations: [] } }));
+  await page.goto("/plugins?lang=ko");
+  const search = page.getByRole("textbox", { name: "플러그인 검색" });
+  await expect(page.getByTestId("plugin-card").first()).toBeVisible();
+  for (const [provider, explanation] of [["Aiven", "데이터베이스·스트리밍"], ["Airwallex", "결제 API 문서"], ["GitHub", "저장소·이슈·PR"]]) {
+    await search.fill(provider);
+    const card = page.getByTestId("plugin-card").filter({ has: page.getByRole("heading", { name: provider, exact: true }) });
+    await expect(card.getByTestId("plugin-capability")).toContainText(explanation);
+    await expect(card.getByTestId("plugin-capability")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  }
+});
 
 test("@ui-risk mobile plugin header exposes global navigation and the current page", async ({ page, isMobile }) => {
   test.skip(!isMobile, "The header menu is a mobile entry point.");

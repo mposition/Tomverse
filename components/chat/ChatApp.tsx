@@ -1,6 +1,6 @@
 "use client";
 
-import type { PreparedChatLocationIntent } from "@tomverse/chat-core";
+import type { ChatPanelLocationIntent } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
@@ -251,7 +251,7 @@ type ChatAppProps = {
     submittedAtMonotonicMs?: number;
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
-    preparedLocationIntent?: PreparedChatLocationIntent;
+    preparedLocationIntent?: ChatPanelLocationIntent;
     id: string;
     text: string;
     chatId: string;
@@ -1511,7 +1511,7 @@ function ChatAppComponent({
     submittedAtMonotonicMs?: number,
     preparationTimings?: ClientLatencyStages,
     preparationReadyAtMonotonicMs?: number,
-    preparedLocationIntent?: PreparedChatLocationIntent,
+    preparedLocationIntent?: ChatPanelLocationIntent,
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1912,10 +1912,14 @@ function ChatAppComponent({
         const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal, chatLocationIntentEnabled ? {
           turnId: sourceUserMessageId,
           requiresLocation: async () => {
-            const prepared = preparedLocationIntent?.read(panelIdentityKey, String(userMessage.content ?? ""));
+            const source = String(userMessage.content ?? "");
+            const prepared = preparedLocationIntent && "readForSavedTurn" in preparedLocationIntent
+              ? await preparedLocationIntent.readForSavedTurn(panelIdentityKey, source, controller.signal, latency.freshLocation)
+              : preparedLocationIntent?.read(panelIdentityKey, source);
             if (typeof prepared === "boolean") return prepared;
+            controller.signal.throwIfAborted();
             const finishIntent = latency.stage("locationIntentMs");
-            try { return await requestChatLocationIntent(String(userMessage.content ?? ""), fetch, { turnstileToken }); }
+            try { return await requestChatLocationIntent(source, fetch, { turnstileToken }); }
             finally { finishIntent(); }
           },
         } : undefined).finally(finishLocation);

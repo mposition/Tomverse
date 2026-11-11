@@ -15,6 +15,11 @@ export function createClientLatency(startedAt?: number, initialStages: ClientLat
   const elapsed = () => boundedLatencyMs(now() - started);
   return {
     stage: stages.stage,
+    freshLocation(durationMs: number, overlapMs?: number) {
+      if (startedAt === undefined) return;
+      stages.timings.locationIntentMs = boundedLatencyMs(durationMs);
+      if (overlapMs !== undefined) stages.timings.freshLocationOverlapMs = boundedLatencyMs(Math.min(durationMs, overlapMs));
+    },
     dispatched() { prepareMs = elapsed(); dispatchedAt = now(); },
     headers(response: Response) {
       token = response.headers.get("X-Response-Latency-Token");
