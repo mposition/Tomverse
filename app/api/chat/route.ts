@@ -5173,6 +5173,8 @@ async function handleChatPost(
                     queries: llmPick.searchQueries,
                     tool: appManagedSearchTool,
                     signal: req.signal,
+                    groundedAnswer: process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED === "true"
+                        ? (llmPick.simpleLookup === true ? "lookup" : "full") : undefined,
                     inputHeadroomTokens: contextInputTokens - reservationOnlyInputTokens -
                         toReservedInputTokens(inputEstimate.breakdown()) - TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
                 });

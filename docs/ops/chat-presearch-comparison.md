@@ -26,3 +26,17 @@ For each browser metric, `within10s` reports the number of OFF and ON observatio
 at or below 10,000 ms and the shared denominator `observedPairs`.
 
 For paired Qwen 3.8 Flash evaluation, set `CHAT_QWEN_GROUNDED_LOOKUP_ENABLED=true` only in the candidate environment. It defaults off. It changes the first answer step only for a Smart Adaptive direct lookup with injected search sources; follow-up steps retain the regular model and tools. Report the selected model, observation date, answer correctness and linked sources alongside browser latency; distinguish live search from replayed evidence.
+
+For an answer-generation comparison, toggle `CHAT_CONCISE_GROUNDED_ANSWER_ENABLED`.
+It defaults off. Keep presearch enabled, and keep the answer model and its
+thinking settings the same in both arms. The new guidance accompanies primary
+search evidence. Direct lookups can use a short answer, while calculations,
+comparisons and explanations retain the detail the user requested. The model
+can still use its tools to resolve incomplete or conflicting evidence.
+
+Pair the same question and saved history. Verify that the answer provider
+received the same model, ordered evidence and source URLs in each pair.
+Measure browser Send to first answer text and completion separately, and
+record answer-model time and output tokens to explain changes. For weather,
+check observation time, forecast period and uncertainty against their own
+sources. For a comparison, check each requested fact, calculation and link.

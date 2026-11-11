@@ -3900,7 +3900,7 @@ test("router presearch stays behind admission, preserves search recovery policy 
   }
 });
 
-test("only an admitted simple Qwen lookup with injected sources prepares the first provider step", async t => {
+test("grounded answer guidance and Qwen first-step thinking follow independent gates on the same search turn", async t => {
   const { STATIC_RUNTIME_MODELS } = await import("@/lib/modelRegistryShared");
   const flash = STATIC_RUNTIME_MODELS.find(model => model.id === "qwen3.6-flash")!;
   // Mimic a registry alias pointing at DashScope's newer deployed API model.
@@ -3914,7 +3914,7 @@ test("only an admitted simple Qwen lookup with injected sources prepares the fir
     flash.contextWindowTokens = originalWindow;
     selectedConversationModels = oldModels;
     conversationSelectionMode = "auto";
-    for (const key of ["CHAT_QWEN_GROUNDED_LOOKUP_ENABLED", "CHAT_ROUTER_PRESEARCH_ENABLED", "BRAVE_SEARCH_API_KEY", "APP_ENV"]) {
+    for (const key of ["CHAT_CONCISE_GROUNDED_ANSWER_ENABLED", "CHAT_QWEN_GROUNDED_LOOKUP_ENABLED", "CHAT_ROUTER_PRESEARCH_ENABLED", "BRAVE_SEARCH_API_KEY", "APP_ENV"]) {
       if (oldEnv[key] === undefined) delete process.env[key]; else process.env[key] = oldEnv[key];
     }
     forceAppManagedSearch = false; failPresearchBackend = false;
@@ -3929,18 +3929,24 @@ test("only an admitted simple Qwen lookup with injected sources prepares the fir
   llmSearchModelId = flash.id;
   llmSearchQueries = ["one fact"];
   llmSearchFileIntent = false;
-  for (const scenario of ["grounded", "manual", "no sources", "presearch off", "lookup flag off", "complex"]) {
+  for (const scenario of ["grounded", "manual", "no sources", "presearch off", "lookup flag off", "complex", "unclassified", "answer flag off"]) {
     conversationSelectionMode = scenario === "manual" ? "manual" : "auto";
+    if (scenario === "answer flag off") delete process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED;
+    else process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED = "true";
     process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED = String(scenario !== "lookup flag off");
     process.env.CHAT_ROUTER_PRESEARCH_ENABLED = String(scenario !== "presearch off");
     failPresearchBackend = scenario === "no sources" ? "all" : false;
-    llmSimpleLookup = scenario !== "complex";
+    llmSimpleLookup = scenario === "unclassified" ? undefined : scenario !== "complex";
     await ask("answers", "claimed", 200, false, undefined, true, false, undefined, "always", "none", flash.id);
     assert.equal(attempts[0].modelId, flash.id, scenario);
     assert.equal(attempts[0].toolNames.includes("web_search"), true, scenario);
-    const withEvidence = JSON.stringify(attempts[0].messages).includes("Verified fixture fact.");
-    assert.equal(withEvidence, ["grounded", "lookup flag off", "complex"].includes(scenario), scenario);
-    assert.equal(attempts[0].preparesStep, scenario === "grounded", scenario);
+    const prompt = JSON.stringify(attempts[0].messages);
+    const withEvidence = ["grounded", "lookup flag off", "complex", "unclassified", "answer flag off"].includes(scenario);
+    assert.equal(prompt.includes("Verified fixture fact."), withEvidence, scenario);
+    assert.equal(prompt.includes("lead with the answer"), withEvidence && scenario !== "answer flag off", scenario);
+    assert.equal(prompt.includes("A short paragraph usually suffices"), ["grounded", "lookup flag off"].includes(scenario), scenario);
+    assert.equal(prompt.includes("requested comparisons or calculations"), ["complex", "unclassified"].includes(scenario), scenario);
+    assert.equal(attempts[0].preparesStep, ["grounded", "answer flag off"].includes(scenario), scenario);
   }
 });
 
