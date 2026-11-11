@@ -10,7 +10,7 @@ import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
-import { adminFetch } from "@/lib/adminFetch";
+import { adminFetch, isAdminFetchTimeout } from "@/lib/adminFetch";
 import { adminModelCatalogMessages } from "@/lib/adminMessages/modelCatalog";
 import { adminModelsBoardMessages } from "@/lib/adminMessages/modelsBoard";
 import { discoveryDraftRequest, runtimeImageProfileTemplate } from "@/lib/runtimeImageProviders";
@@ -18,6 +18,10 @@ import { discoveryDraftRequest, runtimeImageProfileTemplate } from "@/lib/runtim
 // Operator surface over /api/admin/model-catalog. Raw JSON editors on purpose:
 // the schemas are enforced server-side (lib/modelCatalogCore.ts), and a form
 // per field would be code that a model-written draft makes unnecessary.
+
+// A draft fetches up to three pages (10 s each) and makes one LLM call (90 s);
+// the 15 s admin default cut it off and the panel showed nothing.
+const DRAFT_REQUEST_TIMEOUT_MS = 130_000;
 
 type Admission = { admitted: boolean; reasons?: string[] };
 
@@ -125,13 +129,20 @@ export function AdminModelCatalogPanel() {
     });
   }, []);
 
-  const send = async (method: "PATCH" | "POST", body: unknown) => {
+  const send = async (method: "PATCH" | "POST", body: unknown, timeoutMs?: number) => {
     setNotice(null);
-    const response = await adminFetch("/api/admin/model-catalog", {
-      method,
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await adminFetch("/api/admin/model-catalog", {
+        method,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        timeoutMs,
+      });
+    } catch (error) {
+      setNotice(m.refused(isAdminFetchTimeout(error) ? "timeout" : "network_error", ""));
+      return false;
+    }
     const payload = (await response.json().catch(() => null)) as
       | { error?: string; reasons?: string[]; detail?: string | null }
       | null;
@@ -490,7 +501,7 @@ export function AdminModelCatalogPanel() {
                     provider: draftForm.provider.trim(),
                     apiModelId: draftForm.apiModelId.trim(),
                     sourceUrls: draftForm.sources.split("\n").map((line) => line.trim()).filter(Boolean),
-                  })
+                  }, DRAFT_REQUEST_TIMEOUT_MS)
                 }
               >
                 {m.submit}
