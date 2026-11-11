@@ -15,6 +15,12 @@ import {
   type ScoutSuggestion,
   type SuggestionStatus,
 } from "@/lib/productResearchScoutCore";
+import {
+  ISSUE_SUBJECT_PREFIX,
+  ISSUE_SUGGESTION_KIND,
+  issueNumberOfSubject,
+  type IssueSuggestion,
+} from "@/lib/productResearchScoutIssuesCore";
 
 export type StoredSuggestion = {
   readonly id: string;
@@ -66,6 +72,49 @@ export async function insertSuggestions(input: {
     })),
   });
   return created.count;
+}
+
+/**
+ * Issue numbers not to ask the model about again: those with an open
+ * suggestion, and those with any suggestion since `since` (a dismissed one
+ * does not come back the next morning).
+ */
+export async function recentlySuggestedIssues(since: Date): Promise<Set<string>> {
+  const rows = await prisma.productResearchSuggestion.findMany({
+    where: { subject: { startsWith: ISSUE_SUBJECT_PREFIX }, OR: [{ status: "open" }, { createdAt: { gte: since } }] },
+    select: { subject: true },
+  });
+  return new Set(rows.map((row) => issueNumberOfSubject(row.subject)).filter((id): id is string => id !== null));
+}
+
+/** One suggestion per issue, each under its own `issue.<number>` subject. */
+export async function insertIssueSuggestions(input: {
+  readonly modelId: string;
+  readonly suggestions: readonly IssueSuggestion[];
+}): Promise<number> {
+  if (input.suggestions.length === 0) return 0;
+  const created = await prisma.productResearchSuggestion.createMany({
+    data: input.suggestions.map((suggestion) => ({
+      kind: ISSUE_SUGGESTION_KIND,
+      subject: suggestion.subject,
+      modelId: input.modelId,
+      title: suggestion.title,
+      area: suggestion.area,
+      severity: suggestion.severity,
+      evidence: suggestion.evidence,
+      suggestion: suggestion.suggestion,
+    })),
+  });
+  return created.count;
+}
+
+/** The newest successful observation, read only (the observation store stays its only writer). */
+export async function latestObservationForTriage(): Promise<{ readonly slot: Date; readonly payload: unknown } | null> {
+  return prisma.productResearchObservation.findFirst({
+    where: { outcome: "ok" },
+    orderBy: { slot: "desc" },
+    select: { slot: true, payload: true },
+  });
 }
 
 export const SUGGESTION_LIST_LIMIT = 300;

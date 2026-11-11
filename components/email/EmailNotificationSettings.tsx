@@ -395,7 +395,9 @@ export function EmailNotificationSettings() {
                                     </p>
                                     {preference.locked ? (
                                         <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-400">
-                                            {t("emailNotifications.lockedNote")}
+                                            {t(preference.purpose === "security" || preference.purpose === "billing"
+                                                ? `emailNotifications.purpose.${preference.purpose}.requiredReason`
+                                                : "emailNotifications.lockedNote")}
                                         </p>
                                     ) : null}
                                     {!preference.locked &&

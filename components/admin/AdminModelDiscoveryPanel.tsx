@@ -64,6 +64,8 @@ export type ModelWorkItemRow = {
   nextStepKo: string;
   /** The three above joined; what a decision records as the analysis shown. */
   analysisKo: string;
+  /** A proposal of the weekly new-provider research: no adapter yet, so not adoptable. */
+  research?: { product: "chat" | "image" | "code"; providerName: string; citations: string[] } | null;
   /** Present only in the excluded view: what closed the item, and who. */
   exclusion?: {
     reasonCode: string | null;
@@ -178,7 +180,7 @@ const decisionIds = (group: ModelFamilyGroup, decision: DecisionDialog["decision
  */
 const adoptableMember = (group: ModelFamilyGroup) => {
   const candidate = group.representative;
-  if (candidate.action !== "add") return null;
+  if (candidate.action !== "add" || candidate.research) return null;
   // Chat only. Image generation models have their own ledger, and this row's
   // `supportsImage` means image *input*; adopting a generation model here would
   // price and route it as a chat model. The server refuses it as well.
@@ -196,7 +198,7 @@ const adoptableMember = (group: ModelFamilyGroup) => {
  */
 const imageDraftMember = (group: ModelFamilyGroup) => {
   const candidate = group.representative;
-  if (candidate.action !== "add" || candidate.product !== "image_generation") return null;
+  if (candidate.action !== "add" || candidate.research || candidate.product !== "image_generation") return null;
   return ["discovered", "awaiting_decision", "deferred", "approved", "implementation_pending"].includes(
     candidate.status
   )
@@ -693,7 +695,15 @@ export function AdminModelDiscoveryPanel() {
               <AdminStatusChip tone={AVAILABILITY_TONE[row.availability]}>
                 {m.availability[row.availability]}
               </AdminStatusChip>
-              <AdminStatusChip tone="idle">{m.product[row.product]}</AdminStatusChip>
+              {row.research ? (
+                <AdminStatusChip tone="info">
+                  <span data-testid="model-discovery-research-chip">
+                    {m.table.researchChip(row.research.product === "image" ? "Image" : row.research.product === "code" ? "Code" : "Chat")}
+                  </span>
+                </AdminStatusChip>
+              ) : (
+                <AdminStatusChip tone="idle">{m.product[row.product]}</AdminStatusChip>
+              )}
               {row.product === "chat" && group.providers.includes("google") ? (
                 <AdminStatusChip tone="info">{m.table.braveReview}</AdminStatusChip>
               ) : null}
@@ -729,6 +739,22 @@ export function AdminModelDiscoveryPanel() {
               <p className="text-xs text-zinc-300">
                 <span className="text-zinc-500">{m.table.nextStep} </span>
                 {row.nextStepKo}
+              </p>
+            ) : null}
+            {row.research?.citations.length ? (
+              <p className="flex flex-wrap gap-x-2 text-xs" data-testid="model-discovery-research-sources">
+                <span className="text-zinc-500">{m.table.researchSources}</span>
+                {row.research.citations.map((url) => (
+                  <a
+                    key={url}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    className="break-all text-blue-300 underline hover:text-blue-200"
+                  >
+                    {new URL(url).hostname}
+                  </a>
+                ))}
               </p>
             ) : null}
           </div>

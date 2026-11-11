@@ -25,10 +25,12 @@ export type MarketingInfoSection = {
   title: string;
   body: string;
   bodyLinks?: { text: string; href: string }[];
+  formatGroups?: Array<{ label: string; extensions: string[] }>;
   bullets?: string[];
   guestTrialLinks?: { available: string; unavailable: string; chat: string; review: string; models: string };
   link?: MarketingInfoLink;
   links?: MarketingInfoLink[];
+  comparisonTable?: { caption: string; headers: string[]; rows: string[][] };
 };
 
 export type MarketingInfoCopy = {
@@ -65,9 +67,11 @@ function sectionBody(section: MarketingInfoSection, pageHref: (href: string) => 
 export function MarketingInfoPage({
   content,
   template,
+  readableBody = false,
 }: {
   content: { en: MarketingInfoCopy } & Partial<Record<Language, MarketingInfoCopy>>;
   template?: "chatgpt-vs-claude" | "ai-answer-review";
+  readableBody?: boolean;
 }) {
   const { lang } = useLanguage();
   const { guestTrialAvailable, reviewHref } = useMarketingChatEntry();
@@ -98,7 +102,7 @@ export function MarketingInfoPage({
 
       <section
         lang={localizedPage ? lang : "en"}
-        className={`mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20 ${page.keepWords ? "break-keep [overflow-wrap:anywhere]" : ""}`}
+        className={`mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20 ${page.keepWords ? "break-keep [overflow-wrap:anywhere]" : ""} ${readableBody ? "[overflow-wrap:anywhere]" : ""}`}
       >
         <div className="max-w-3xl">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{page.eyebrow}</p>
@@ -138,7 +142,7 @@ export function MarketingInfoPage({
               {page.sections.map((section, index) => {
                 const links = [...(section.link ? [section.link] : []), ...(section.links ?? [])];
                 return (
-                <article key={section.title} id={section.id} tabIndex={section.id ? -1 : undefined} lang={section.lang} className={`scroll-mt-28 focus-visible:outline-2 focus-visible:outline-blue-600 rounded-2xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40 ${page.mobileAccordion ? "min-w-0 p-4 [overflow-wrap:anywhere] sm:p-6" : "p-6"}`}>
+                <article key={section.title} id={section.id} tabIndex={section.id ? -1 : undefined} lang={section.lang} className={`scroll-mt-28 focus-visible:outline-2 focus-visible:outline-blue-600 rounded-2xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40 ${readableBody ? "min-w-0" : ""} ${page.mobileAccordion ? "min-w-0 p-4 [overflow-wrap:anywhere] sm:p-6" : "p-6"}`}>
                   <h2 className="text-xl font-black">
                     {page.mobileAccordion ? <>
                       <span className="hidden sm:inline">{section.title}</span>
@@ -156,7 +160,15 @@ export function MarketingInfoPage({
                     </> : section.title}
                   </h2>
                   <div id={`${sectionId}-${index}`} className={page.mobileAccordion && !expandedSections.has(section.title) ? "hidden sm:block" : undefined}>
-                  <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{sectionBody(section, pageHref)}</p>
+                  <p className={`mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300 ${readableBody ? "max-w-[80ch] sm:text-base" : ""}`}>{sectionBody(section, pageHref)}</p>
+                  {section.comparisonTable ? <table className="mt-5 w-full table-fixed border-collapse text-left text-sm leading-6 [overflow-wrap:anywhere]">
+                    <caption className="mb-2 text-left font-bold">{section.comparisonTable.caption}</caption>
+                    <thead><tr>{section.comparisonTable.headers.map(header => <th key={header} scope="col" className="border-b border-zinc-300 p-2 align-top dark:border-zinc-700">{header}</th>)}</tr></thead>
+                    <tbody>{section.comparisonTable.rows.map(row => <tr key={row[0]}>
+                      <th scope="row" className="border-b border-zinc-200 p-2 align-top font-semibold dark:border-zinc-800">{row[0]}</th>
+                      {row.slice(1).map((cell, index) => <td key={index} className="border-b border-zinc-200 p-2 align-top dark:border-zinc-800">{cell}</td>)}
+                    </tr>)}</tbody>
+                  </table> : null}
                   {section.guestTrialLinks ? (
                     <div data-testid="faq-guest-trial-links" className="mt-5 space-y-3 text-sm leading-6">
                       <p>{guestTrialAvailable ? section.guestTrialLinks.available : section.guestTrialLinks.unavailable}</p>
@@ -167,6 +179,21 @@ export function MarketingInfoPage({
                       </div>
                     </div>
                   ) : null}
+                  {section.formatGroups && <div className="mt-5" data-testid="attachment-format-groups">
+                    <ul className="hidden gap-3 text-sm leading-6 text-zinc-700 sm:grid dark:text-zinc-200">
+                      {section.formatGroups.map(group => <li key={group.label}><strong>{group.label}:</strong> {group.extensions.join(", ")}</li>)}
+                    </ul>
+                    <div className="grid gap-3 sm:hidden">
+                      {section.formatGroups.map(group => <details key={group.label} data-testid="attachment-format-details" className="min-w-0 rounded-lg border border-zinc-200 p-3 text-sm leading-6 [overflow-wrap:anywhere] dark:border-zinc-700">
+                        <summary className="min-h-11 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600">
+                          <span className="font-bold">{group.label}</span>
+                          <span className="block">{group.extensions.slice(0, 3).join(", ")}{group.extensions.length > 3 ? ` · +${group.extensions.length - 3}` : ""}</span>
+                          <span className="block font-semibold text-blue-700 dark:text-blue-300">See all formats</span>
+                        </summary>
+                        <p className="mt-2 text-zinc-700 dark:text-zinc-200">{group.extensions.join(", ")}</p>
+                      </details>)}
+                    </div>
+                  </div>}
                   {section.bullets && (
                     <ul className="mt-5 grid gap-3">
                       {section.bullets.map((bullet) => (

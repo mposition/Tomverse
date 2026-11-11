@@ -155,7 +155,7 @@ export async function observeEngineeringAgentPullRequests(
       if (cardId !== null && attemptId !== null && typeof approval?.reviewId === "number") {
         const completed = await completeAmuxV22ReviewOnObservedMerge(
           { taskId: cardId, attemptId, prNumber: binding.prNumber, mergeCommitSha: pull.mergeCommitSha!,
-            approvalReviewId: approval.reviewId, changedFiles: pull.changedFiles ?? null },
+            approvalReviewId: approval.reviewId, changedFiles: pull.changedFiles ?? null, bindingId: binding.id },
           {
             prismaCalls: OBSERVATION_PRISMA_CALLS,
             work: async (lent) => {

@@ -2141,10 +2141,12 @@ export const fr = {
         },
         purpose: {
             security: {
+                requiredReason: "Ces notifications obligatoires protègent votre compte et ne peuvent pas être désactivées.",
                 title: "Sécurité et compte",
                 description: "Codes de connexion, changements de mot de passe et de méthode de connexion, alertes de sécurité.",
             },
             billing: {
+                requiredReason: "Ces notifications obligatoires concernent vos paiements et abonnements et ne peuvent pas être désactivées.",
                 title: "Facturation",
                 description: "Reçus, paiements échoués, changements d'abonnement.",
             },

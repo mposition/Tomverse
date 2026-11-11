@@ -48,6 +48,13 @@ import {
     type ModelReviewPriority,
     type ServedModelPortfolioEntry,
 } from "@/lib/modelLifecycleTriage";
+import {
+    newProviderResearchAnalysis,
+    newProviderResearchEvidence,
+    type AcceptedNewProviderCandidate,
+    type NewProviderResearchAnalysis,
+    type NewProviderResearchProduct,
+} from "@/lib/modelDiscoveryNewProviderResearchCore";
 
 /**
  * The database boundary around the model lifecycle queue. The decisions live in
@@ -196,6 +203,94 @@ export async function recordDiscoveredWorkItems(input: {
         suppressed,
     };
 }
+
+/**
+ * Files the proposals the weekly new-provider research accepted
+ * (lib/modelDiscoveryNewProviderResearch.ts) as `add` items, one per model.
+ *
+ * Skips any model id the queue already holds in any state, so a proposal an
+ * operator excluded is not filed again next week. Created at `discovered`
+ * with a null actor like every automatic row: the research may propose and
+ * never decides.
+ */
+export async function recordNewProviderResearchWorkItems(input: {
+    candidates: readonly AcceptedNewProviderCandidate[];
+    modelId: string;
+    now?: Date;
+}): Promise<Array<{ provider: string; apiModel: string; product: NewProviderResearchProduct }>> {
+    if (input.candidates.length === 0) return [];
+    const now = input.now ?? new Date();
+    const existing = await prisma.modelLifecycleWorkItem.findMany({
+        where: { apiModel: { in: input.candidates.map((candidate) => candidate.apiModelId) } },
+        select: { apiModel: true },
+    });
+    const held = new Set(existing.map((row) => row.apiModel));
+    const created: Array<{ provider: string; apiModel: string; product: NewProviderResearchProduct }> = [];
+    for (const candidate of input.candidates) {
+        if (held.has(candidate.apiModelId)) continue;
+        try {
+            await prisma.$transaction(async (tx) => {
+                const item = await tx.modelLifecycleWorkItem.create({
+                    data: {
+                        provider: candidate.provider,
+                        apiModel: candidate.apiModelId,
+                        action: "add",
+                        status: "discovered",
+                        severity: "normal",
+                        firstSeenAt: now,
+                        evidence: newProviderResearchEvidence(candidate, input.modelId),
+                    },
+                    select: { id: true },
+                });
+                await tx.modelLifecycleWorkItemEvent.create({
+                    data: {
+                        workItemId: item.id,
+                        occurredAt: now,
+                        actorEmail: null,
+                        fromStatus: null,
+                        toStatus: "discovered",
+                        note: `Proposed by the weekly new-provider research (${candidate.product}).`,
+                    },
+                });
+            });
+            created.push({ provider: candidate.provider, apiModel: candidate.apiModelId, product: candidate.product });
+        } catch (error) {
+            if ((error as { code?: string }).code !== "P2002") throw error;
+        }
+    }
+    return created;
+}
+
+/** The queue fields of a research proposal, from what was stored when it was filed. */
+const researchAssessment = (research: NewProviderResearchAnalysis): {
+    priority: ModelReviewPriority;
+    kind: ModelReviewKind;
+    product: ModelProductSurface;
+    verdictKo: string;
+    pointsKo: string[];
+    nextStepKo: string;
+    analysisKo: string;
+} => ({
+    priority: "review",
+    kind:
+        research.product === "image"
+            ? "image_generation"
+            : research.product === "code"
+              ? "specialized_code"
+              : "general_chat",
+    // Code has no surface of its own in this queue; "unsupported" also keeps
+    // the panel from offering a chat adoption for it.
+    product:
+        research.product === "image"
+            ? "image_generation"
+            : research.product === "code"
+              ? "unsupported"
+              : "chat",
+    verdictKo: research.verdictKo,
+    pointsKo: research.pointsKo,
+    nextStepKo: research.nextStepKo,
+    analysisKo: research.analysisKo,
+});
 
 /**
  * The queue row an automatic disable owes.
@@ -959,6 +1054,8 @@ export type ModelDiscoveryQueueItem = OpenWorkItem & {
     analysisKo: string;
     /** The exclusion that closed this item; only in the excluded view. */
     exclusion: WorkItemExclusionSummary | null;
+    /** Set on a proposal of the weekly new-provider research: not adoptable here. */
+    research: { product: NewProviderResearchProduct; providerName: string; citations: string[] } | null;
 };
 
 export type WorkItemExclusionSummary = {
@@ -1526,16 +1623,19 @@ export async function listModelDiscoveryQueue(options?: {
             status: row.status,
             servedLive: liveFamilies.has(familyKey),
         });
+        // A proposal of the new-provider research is about a provider no scan
+        // reads, so its analysis is the one stored when it was filed.
+        const research = newProviderResearchAnalysis(row.evidence);
         // A retirement is about a model Tomverse serves, so its own line will
         // always contain it. Asking whether it is superseded would answer yes
         // about itself and bury the one item in this queue that is urgent. An
         // adopted item whose model is live is the same case: its successor
         // would be itself.
         const supersededBy =
-            row.action === "retire" || rolloutFinishable
+            row.action === "retire" || rolloutFinishable || research
                 ? null
                 : supersedingServedModel(row.apiModel, servedApiModels);
-        const assessment = assessModelLifecycleItem({
+        const assessment = research ? researchAssessment(research) : assessModelLifecycleItem({
             action: row.action,
             apiModel: row.apiModel,
             providers: observedVia.map((item) => item.provider),
@@ -1585,6 +1685,13 @@ export async function listModelDiscoveryQueue(options?: {
             nextStepKo: assessment.nextStepKo,
             analysisKo: assessment.analysisKo,
             exclusion: exclusionByItem.get(row.id) ?? null,
+            research: research
+                ? {
+                      product: research.product,
+                      providerName: research.providerName,
+                      citations: research.citations,
+                  }
+                : null,
         };
     });
 

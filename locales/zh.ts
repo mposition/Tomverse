@@ -2124,10 +2124,12 @@ export const zh = {
         },
         purpose: {
             security: {
+                requiredReason: "用于保护账户的必要通知，无法关闭。",
                 title: "安全与账户",
                 description: "登录代码、密码与登录方式变更、安全提醒。",
             },
             billing: {
+                requiredReason: "有关付款和订阅记录的必要通知，无法关闭。",
                 title: "账单",
                 description: "收据、付款失败、订阅变更。",
             },

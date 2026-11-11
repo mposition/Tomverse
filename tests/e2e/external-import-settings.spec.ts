@@ -1,5 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { setDeterministicTheme } from "./support/chat-state-fixtures";
+import { expectAccessibleContrast } from "./support/ui-audit";
 
 /**
  * Release A external conversation import — /settings/imports and its Data-tab
@@ -18,6 +20,29 @@ const json = (body: unknown) => ({
   contentType: "application/json",
   body: JSON.stringify(body),
 });
+
+for (const theme of ["light", "dark"] as const) {
+  test(`secondary import guidance and storage text have readable contrast in ${theme}`, async ({ page, isMobile }) => {
+    await page.setViewportSize({ width: isMobile ? 320 : 1440, height: 900 });
+    await prepareGuestPage(page, "ko");
+    const account = await mockAuthenticatedApi(page);
+    account.theme = theme;
+    await setDeterministicTheme(page, theme);
+    const api = await mockImportApi(page, { history: [], viewerConversations: [] });
+    await page.goto("/settings/imports");
+    const capacity = page.getByTestId("external-import-capacity");
+    const empty = page.getByTestId("external-import-conversations-empty");
+    await expect(capacity).toBeVisible();
+    await expect(empty).toBeVisible();
+    const samples = [page.locator("h1 + p"), page.getByTestId("external-import-privacy-note").locator("p"), empty, ...await capacity.locator("p").all()];
+    for (const sample of samples) {
+      await sample.scrollIntoViewIfNeeded();
+      const contrast = await expectAccessibleContrast(sample, `${theme} import information`);
+      expect(contrast.ratio).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(api.createCount + api.finalizeCount + api.deleteCount + api.snapshotDeleteCount + api.exportCount).toBe(0);
+  });
+}
 
 /**
  * A minimal but structurally faithful ChatGPT export: a top-level array of

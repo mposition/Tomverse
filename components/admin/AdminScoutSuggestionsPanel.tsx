@@ -105,6 +105,7 @@ export function AdminScoutSuggestionsPanel({
     }
     if (info.kind === "file") return m.files[info.format as keyof typeof m.files] ?? subject;
     if (info.kind === "catalogue") return m.catalogue;
+    if (info.kind === "issue") return fill(m.issue, { number: info.number });
     return subject;
   };
   const severityLabel = (value: string) => m.severity[value as keyof typeof m.severity] ?? value;
@@ -452,6 +453,16 @@ export function AdminScoutSuggestionsPanel({
                       aria-label={`${m.openPage}: ${info.path}`}
                     >
                       {info.path} ↗
+                    </a>
+                  ) : info.kind === "issue" ? (
+                    <a
+                      href={info.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono text-xs text-blue-300 hover:text-blue-200"
+                      aria-label={`${m.openIssue}: #${info.number}`}
+                    >
+                      #{info.number} ↗
                     </a>
                   ) : null}
                   <span className={`${CHIP} ${NEUTRAL_CHIP}`}>{fill(m.groupCount, { count: shown.length })}</span>
