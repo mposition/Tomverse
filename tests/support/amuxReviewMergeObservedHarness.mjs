@@ -13,10 +13,17 @@ let writes;
 let gradeGuard;
 let auditPresent;
 let auditValid;
+let boundBinding;
+let bindingQuery;
 
 const fakeTx = {
-  $queryRaw: async (strings) => {
+  $queryRaw: async (strings, ...values) => {
     const sql = strings.join("?");
+    if (sql.includes(`FROM "EngineeringAgentBinding"`)) {
+      writes.push(["read-binding"]);
+      bindingQuery = values;
+      return boundBinding ? [{ id: "binding" }] : [];
+    }
     if (sql.includes(`FROM "AmuxWorkItem"`)) { writes.push(["read-task"]); return task ? [task] : []; }
     if (sql.includes(`FROM "AmuxExecutionAttempt"`)) return attempt ? [attempt] : [];
     throw new Error(`unexpected query: ${sql}`);
@@ -62,6 +69,8 @@ const reset = () => {
   gradeGuard = false;
   auditPresent = true;
   auditValid = true;
+  boundBinding = false;
+  bindingQuery = undefined;
 };
 const run = (overrides = {}) => completeAmuxV22ReviewOnObservedMerge({
   taskId: "card", attemptId: "attempt", prNumber: 42, mergeCommitSha: MERGE, approvalReviewId: 7, ...overrides,
@@ -100,6 +109,26 @@ await refused(() => { task.taskRole = "design"; }, "not_a_v22_implement_task");
 await refused(() => { task.sourceSystem = "workboard"; }, "not_a_v22_implement_task");
 await refused(() => { task.reviewPrNumber = 43; }, "review_pr_mismatch");
 await refused(() => { task.reviewPrNumber = null; }, "review_pr_mismatch");
+// A number on the card that differs is a mismatch whatever a binding holds.
+await refused(() => { task.reviewPrNumber = 43; boundBinding = true; }, "review_pr_mismatch", { bindingId: "binding" });
+// With no number on the card, a caller that names no binding completes nothing.
+await refused(() => { task.reviewPrNumber = null; boundBinding = true; }, "review_pr_mismatch");
+// A named binding that is no longer the current one for this PR and attempt
+// (superseded by a re-bind, say) completes nothing either.
+await refused(() => { task.reviewPrNumber = null; boundBinding = false; }, "review_pr_mismatch", { bindingId: "binding" });
+
+// A v22 implement Task's row cannot hold the number; the engineering binding
+// of this card's attempt holds it, and the merge of that pull request
+// completes the card.
+reset();
+task.reviewPrNumber = null;
+boundBinding = true;
+assert.deepEqual(await run({ bindingId: "binding" }), { completed: true, taskRevision: 9 });
+assert.deepEqual(bindingQuery, ["binding", 42, 42, "card", "attempt"]);
+assert.equal(writes.find(([kind]) => kind === "audit")[1].metadata.binding_id, "binding");
+const heldWrite = writes.find(([kind]) => kind === "task")[1];
+assert.deepEqual(heldWrite.where, { id: "card", status: "review", owner: null, archivedAt: null, revision: 8, reviewPrNumber: null });
+assert.deepEqual(heldWrite.data, { status: "done", revision: { increment: 1 }, v4TerminalAt: dbNow });
 await refused(() => { attempt.id = "newer"; }, "not_the_latest_attempt");
 await refused(() => { attempt.v22AssignmentId = null; }, "not_the_latest_attempt");
 await refused(() => { attempt.toStatus = "todo"; }, "not_the_latest_attempt");
