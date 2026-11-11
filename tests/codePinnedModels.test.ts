@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
+import { execFileSync } from "node:child_process";
 
 import { CODE_PINNED_MODELS, codePinnedModelRefusal } from "../lib/codePinnedModels.ts";
 import { PROMPT_REFINER_PRODUCT_PRICE_PIN } from "../lib/promptRefinerProductPricePin.ts";
@@ -70,7 +68,6 @@ test("every path that can switch a model off asks the pin check first", () => {
   const reconciliation = readFileSync("lib/providerModelCatalogReconciliation.ts", "utf8");
   assert.ok(reconciliation.includes("provider_model_catalog_pinned_model_kept"));
   // No other registry status writer appeared without a decision about pins.
-  const { execFileSync } = require("node:child_process");
   const writers = execFileSync(
     "git",
     ["grep", "-l", "-E", "modelRegistryEntry[.](update|updateMany|upsert)[(]", "--", "app", "lib"],
