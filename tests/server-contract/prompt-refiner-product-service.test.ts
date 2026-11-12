@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test, { beforeEach, mock } from "node:test";
 import { pathToFileURL } from "node:url";
+import { staticModelRegistrySeedRows } from "../../lib/modelRegistryShared";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const requestId = "11111111-1111-4111-8111-111111111111";
+const pinnedRow = staticModelRegistrySeedRows().find(row => row.id === "gpt-6-luna")!;
 let release: { explicitEnabled: boolean; autoEnabled: boolean;
   runtimeDeploymentId: string | null } = { explicitEnabled: true, autoEnabled: true,
   runtimeDeploymentId: "22222222-2222-4222-8222-222222222222" };
@@ -29,6 +31,8 @@ let adapterConstructionError = false;
 let executeErrorBeforeAuthorization = false;
 let executeErrorAfterAuthorization = false;
 let dispatchIntentError = false;
+let pinnedModelReads = 0;
+let driftOnPinnedModelRead = 0;
 let releaseError = false;
 let executionEvents: string[] = [];
 let recordedReceipts: Array<Record<string, unknown>> = [];
@@ -38,8 +42,11 @@ class BudgetError extends Error {
 }
 
 mock.module(mod("lib/activeAiModel.ts"), { namedExports: {
-  getActiveAiModel: () => ({ provider: "openai.responses",
-    modelId: "gpt-6-luna" }),
+  getActiveAiModel: (model: { id: string; apiModel: string }) => {
+    assert.equal(model.id, pinnedRow.id);
+    assert.equal(model.apiModel, pinnedRow.apiModel);
+    return { provider: "openai.responses", modelId: model.apiModel };
+  },
 } });
 mock.module(mod("lib/promptRefinerAutoBudgetHold.ts"), { namedExports: {
   PromptRefinerAutoBudgetError: BudgetError,
@@ -109,13 +116,16 @@ mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
       executionReceiptId: "receipt" };
   },
 } });
-mock.module(mod("lib/modelRegistry.ts"), { namedExports: {
-  getEnabledRuntimeModel: async () => ({ provider: "openai",
-    apiModel: "gpt-6-luna" }),
-} });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   conversation: { findFirst: async () => ({ selectionMode: "auto" }) },
-  $transaction: async (work: (tx: object) => Promise<unknown>) => work({}),
+  $transaction: async (work: (tx: object) => Promise<unknown>) => work({
+    $executeRaw: async () => 0,
+    modelRegistryEntry: { findUnique: async ({ where }: { where: { id: string } }) => {
+      assert.equal(where.id, pinnedRow.id);
+      return ++pinnedModelReads === driftOnPinnedModelRead
+        ? { ...pinnedRow, inputUsdPerMillionTokens: 99 } : pinnedRow;
+    } },
+  }),
 } } });
 mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
   promptRefinerChatExecutionAdmission: async () => {
@@ -123,11 +133,6 @@ mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
     return release;
   },
 } });
-mock.module(mod("lib/promptRefinerProductPriceReadback.ts"), {
-  namedExports: { readPromptRefinerProductPrice: async () => ({
-    pricePinMatchesRegistry: true, problems: [],
-  }) },
-});
 mock.module(mod("lib/promptRefinerProductReceiptStore.ts"), { namedExports: {
   recordPromptRefinerProductExecutionReceipt: async (receipt: Record<string, unknown>,
     _mode: string, state = "terminal") => {
@@ -215,6 +220,7 @@ beforeEach(() => {
   executeErrorBeforeAuthorization = false;
   executeErrorAfterAuthorization = false;
   dispatchIntentError = false;
+  pinnedModelReads = 0; driftOnPinnedModelRead = 0;
   releaseError = false;
   executionEvents = [];
   recordedReceipts = [];
@@ -243,6 +249,19 @@ test("missing release, kill switch and budget exhaustion never call provider", a
   assert.equal(auditLatches, 1);
   assert.equal(providerCalls, 0);
   assert.equal(dispatches, 0);
+});
+
+test("model pin drift before reservation or at dispatch refuses the same request", async () => {
+  const { preparePromptRefinerProductSuggestion: prepare } = await servicePromise;
+  driftOnPinnedModelRead = 1;
+  assert.equal((await prepare({ snapshot, mode: "auto" })).reason, "unavailable");
+  assert.equal(reserves, 0);
+  pinnedModelReads = 0; driftOnPinnedModelRead = 2;
+  assert.equal((await prepare({ snapshot, mode: "auto" })).reason, "unavailable");
+  assert.equal(reserves, 1);
+  assert.equal(releases, 1);
+  assert.equal(dispatches, 0);
+  assert.equal(providerCalls, 0);
 });
 
 test("verified no-change settles once and falls back to authored text", async () => {

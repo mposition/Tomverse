@@ -19,7 +19,7 @@ type PriceTransaction = Pick<Prisma.TransactionClient, "$executeRaw" | "modelReg
  * app's transaction, not model or price facts. A matching registry price does
  * not attest the provider's current published rate or permit dispatch.
  */
-export async function readPromptRefinerProductPrice(transaction: PriceTransaction) {
+async function inspectPinnedModel(transaction: PriceTransaction) {
     let row: Awaited<ReturnType<PriceTransaction["modelRegistryEntry"]["findUnique"]>>;
     try {
         // Keep the price row (including an absent row) stable until the
@@ -33,6 +33,7 @@ export async function readPromptRefinerProductPrice(transaction: PriceTransactio
         throw new Error("prompt_refiner_product_price_read_failed");
     }
     const problems: string[] = [];
+    let verifiedModel: ReturnType<typeof registryRowToModel> | undefined;
     if (!row) {
         problems.push("model_registry_row_missing");
     } else {
@@ -71,14 +72,27 @@ export async function readPromptRefinerProductPrice(transaction: PriceTransactio
                 price.costSource !== "registry") {
                 problems.push("price_pin_mismatch");
             }
+            if (problems.length === 0) verifiedModel = model;
         } catch {
             problems.push("model_registry_row_invalid");
         }
     }
+    return { verifiedModel, problems };
+}
+
+export async function readPromptRefinerProductPrice(transaction: PriceTransaction) {
+    const { problems } = await inspectPinnedModel(transaction);
     return Object.freeze({
         pricePinMatchesRegistry: problems.length === 0,
         providerPriceObserved: false as const,
         dispatchAuthorized: false as const,
         problems: Object.freeze(problems),
     });
+}
+
+/** Use the same checked row for dispatch preparation as for its price pin. */
+export async function readPromptRefinerProductModel(transaction: PriceTransaction) {
+    const { verifiedModel } = await inspectPinnedModel(transaction);
+    if (!verifiedModel) throw new Error("prompt_refiner_product_price_drift");
+    return verifiedModel;
 }

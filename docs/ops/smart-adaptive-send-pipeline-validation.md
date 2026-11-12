@@ -347,3 +347,31 @@ another model call. Include named cities, nearby requests, quoted examples
 and a decisive instruction near the end of a long prompt in the comparison.
 Measure the combined Router's actual duration, model choice, resulting
 sources and answer quality alongside the calls it removes.
+
+
+### Search router preparation and compact menu experiment
+
+The live router constructs its provider request once, then uses the same system,
+user message, candidates and schema for the price bound, location continuation
+digest and dispatch. An ineligible rewrite skips the rewrite-setting read.
+When rewriting is eligible and enabled, its guidance can load during the
+independent session, image and routing-guidance reads.
+
+`CHAT_ROUTER_COMPACT_SEARCH_MENU_ENABLED=true` opts search-plan turns into a
+candidate table. It defaults off. Every candidate field, value, order and
+output enum is retained. The table appears before the per-turn text; the system
+instructions, previous answer, rewrite, source queries, model, reasoning and
+output ceiling are unchanged. No provider cache or model switch is enabled.
+Non-search-plan calls keep the object-list format. A location continuation
+does not replay a paid pick from a different prompt/version.
+
+To reproduce the input-size comparison locally from the repository root with
+dependencies installed and no credentials, run
+`node --conditions=react-server --import tsx scripts/benchmark-search-router-menu.mjs`.
+With 28 fixture catalogue candidates, the user-message portion used 1,940 vs
+1,151 o200k_base tokens for Brisbane weather, and 1,968 vs 1,180 for NASA. These are
+offline tokenizer results, not total provider input, latency savings or
+proof of equivalent model decisions. Before promotion, compare paired real
+router outputs (selected model, search queries, file/image and location intent)
+and browser completion, factual correctness and official sources, including
+retries and failures.
