@@ -236,6 +236,15 @@ export function sortConcepts(answer, { feature, history = [], day, toolDir }) {
     }
     if (!concept.texts.some((text) => text?.role === "headline")) problems.push(`${at}: texts has a headline`);
     // A stranger must see what to do and that this is AI (JOB-higgsfield.md "Who the ad is for", owner 2026-11-12).
+    // A feature with a required disclosure (§17.1: import and memory) shows it word for word in every language.
+    const disclosure = features.find((entry) => entry.id === feature)?.disclosure;
+    if (disclosure) {
+      if (!concept.texts.some((text) => text?.text === disclosure.en)) problems.push(`${at}: texts holds this disclosure word for word, as a label: "${disclosure.en}"`);
+      for (const locale of TRANSLATED) {
+        const list = concept.translations?.[locale];
+        if (Array.isArray(list) && !list.some((text) => text?.text === disclosure[locale])) problems.push(`${at}: translations.${locale} holds the disclosure word for word: "${disclosure[locale]}"`);
+      }
+    }
     if (concept.texts.filter((text) => text?.role === "cta").length !== 1) problems.push(`${at}: texts has exactly one cta that tells the reader what to do next`);
     const copy = concept.texts.filter((text) => ["headline", "subhead"].includes(text?.role) && typeof text.text === "string").map((text) => text.text).join(" ");
     if (copy && !/\bAI\b/u.test(copy) && familiesIn(copy).length === 0) problems.push(`${at}: the headline or the subhead says "AI" or names a model, so a stranger knows this is an AI app`);

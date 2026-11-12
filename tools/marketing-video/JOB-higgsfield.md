@@ -16,7 +16,10 @@ competitor's ad (docs/policy/marketing-automation.md §2).
 - Today's date and **today's feature** (picked by code: the feature whose last
   card is oldest, never yesterday's).
 - `features.json`: what a card may say. A feature with `hold` is not in the
-  ads yet: never mention it, not even beside today's feature.
+  ads yet: never mention it, not even beside today's feature. A feature's `copy`
+  says what its copy may and may not claim, and its `disclosure` stands in
+  every concept of that feature word for word, as a `label`, translated with
+  the exact text it gives for each language.
 - The scene ideas used in the last 14 days: use none of them again.
 - The provider logo files you may name (`public/model-icons/<name>.png`).
 - You may read the newest checked research notes in `job/research-notes/` with
