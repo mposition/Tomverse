@@ -103,6 +103,13 @@ let throwAfterPresearch = false;
 let failPresearchBackend: false | "all" | "partial" = false;
 const presearchCalls: unknown[] = [];
 const presearchSettlements: Record<string, unknown>[] = [];
+let testBudgetNotice: (() => Promise<void>) | undefined;
+const realMonitoring = require(resolve(ROOT, "lib/providerMonitoring.ts")) as typeof import("../../lib/providerMonitoring");
+mock.module(mod("lib/providerMonitoring.ts"), { namedExports: {
+  ...realMonitoring,
+  notifyProviderBudgetIfNeeded: (provider: Parameters<typeof realMonitoring.notifyProviderBudgetIfNeeded>[0]) =>
+    testBudgetNotice ? testBudgetNotice() : realMonitoring.notifyProviderBudgetIfNeeded(provider),
+} });
 const realSearchCapability = require(resolve(ROOT, "lib/webSearchCapability.ts")) as typeof import("../../lib/webSearchCapability");
 mock.module(mod("lib/webSearchCapability.ts"), { namedExports: {
   ...realSearchCapability,
@@ -3833,7 +3840,23 @@ test("router presearch stays behind admission, preserves search recovery policy 
   llmSearchFileIntent = false;
   try {
     presearchCalls.length = 0;
-    await ask("answers", "claimed", 200, false, undefined, true, true, undefined, "always");
+    const noticeStarted = Promise.withResolvers<void>();
+    const finishNotice = Promise.withResolvers<void>();
+    testBudgetNotice = () => {
+      noticeStarted.resolve();
+      return finishNotice.promise;
+    };
+    const answering = ask("answers", "claimed", 200, false, undefined, true, true, undefined, "always");
+    try {
+      await Promise.race([noticeStarted.promise, answering.then(() => assert.fail("missing provider budget check"))]);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(presearchCalls.length, 2, "admitted searches run while the budget notice is pending");
+      assert.equal(attempts.length, 0, "dispatch waits for the notice and search evidence");
+    } finally {
+      finishNotice.resolve();
+      testBudgetNotice = undefined;
+      await answering;
+    }
     assert.equal(presearchCalls.length, 2);
     assert.equal(attempts.length, 1, "the existing search-turn fallback restriction remains in force");
     assert.equal(attempts[0].modelId, "gpt-6-luna");
