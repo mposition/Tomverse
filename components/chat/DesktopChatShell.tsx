@@ -99,7 +99,7 @@ type PromptPayload = {
   preparationTimings?: import("@/lib/responseLatencyCore").ClientLatencyStages;
   preparationReadyAtMonotonicMs?: number;
   sourcePassages?: string;
-    preparedLocationIntent?: ChatPanelLocationIntent;
+  preparedLocationIntent?: ChatPanelLocationIntent;
   routerLocationTurn?: RouterLocationTurn;
   id: string;
   text: string;

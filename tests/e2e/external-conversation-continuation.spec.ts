@@ -2274,8 +2274,18 @@ test.describe("a continuation opens in its product's workspace", () => {
 
     test("an empty automatic excerpt can be replaced for just the next text answer", async ({page}) => {
         await prepareGuestPage(page, "ko");
-        await mockAuthenticatedApi(page, {autoSelectionOffered:true});
+        await mockAuthenticatedApi(page, {autoSelectionOffered:true, messageConversationId:CONVERSATION_ID});
         const api=await mockContinuationApi(page,{product:"chat",seedMessageCount:0});
+        // Use the shared Chat store: saving the message also consumes the matching draft revision.
+        await page.unroute(`**/api/conversations/${CONVERSATION_ID}/messages`);
+        await page.route("**/api/chat/context", route => route.fulfill(json({ ok: true, contextBundle: null, memoryUsedCount: 0 })));
+        await page.route("**/api/chat/location-intent", route => route.fulfill(json({ requiresLocation: false })));
+        await page.route("**/api/chat/availability", route => route.fulfill(json({ runnable: true, plan: "Free", blockCode: null,
+            estimate: { requiredCredits: 1, models: [] }, entitlement: { dailyCreditLimit: 300, creditsAvailableNow: 300, creditShortfall: 0 } })));
+        await page.route("**/api/chat/router-location", route => {
+            api.pickedHeaders.push(route.request().headers()["x-tomverse-source-passages"]);
+            return route.fulfill({status: 200, headers: {"X-Chat-Router-Location-Version":"1"}, contentType:"text/plain", body:"A second answer."});
+        });
         await mockConversationList(page,[{id:CONVERSATION_ID,title:"Continued conversation",surface:"continuation",sourceTitle:SOURCE_CONVERSATION_TITLE}]);
         await page.goto(`/continuations/${CONVERSATION_ID}`);
         const card=page.getByTestId("continuation-context").first();

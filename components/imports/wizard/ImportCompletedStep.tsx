@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { slicePassage } from "@/lib/continuationPassages";
 import { useEffect, useState, type ComponentProps } from "react";
 import {
     ArrowRight,
@@ -90,7 +91,7 @@ export function ImportCompletedStep({
                 const data = await last.json();
                 const text = data.messages?.[0]?.content;
                 if (!signal.aborted && typeof text === "string")
-                    setQuote({ id: row.id, text: text.slice(-240) });
+                    setQuote({ id: row.id, text: slicePassage(text, -240, text.length) });
             } catch {
                 /* Optional preview. */
             }

@@ -23,6 +23,11 @@ export function decodePassages(value: string | null): Passage[] | null {
 export const encodePassages = (passages: readonly Passage[]) =>
     passages.map((p) => [p.ordinal, p.start, p.end].join(":")).join(",");
 
+/** Keep the selected UTF-16 range without emitting half of an emoji at either edge. */
+export function slicePassage(text: string, start: number, end: number) {
+    return text.slice(start, end).replace(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/g, "");
+}
+
 /** Coordinates cannot introduce text: the caller supplies only rows from the checked source. */
 export function selectPassageText<
     T extends { ordinal: number; content: string; truncated: boolean },
@@ -30,10 +35,12 @@ export function selectPassageText<
     return rows.flatMap((row) => {
         const part = passages.find((p) => p.ordinal === row.ordinal);
         if (!part || part.end > row.content.length) return [];
+        const content = slicePassage(row.content, part.start, part.end);
+        if (!content) return [];
         return [
             {
                 ...row,
-                content: row.content.slice(part.start, part.end),
+                content,
                 truncated:
                     row.truncated ||
                     part.start !== 0 ||

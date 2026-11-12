@@ -704,12 +704,14 @@ test.describe("external import settings", () => {
     await expect(saved).toContainText("My saved chat");
     await expect(saved.getByTestId("continuation-quick-action-create")).toBeVisible();
     await expect(saved).toContainText("계정 기억이 꺼져");
+    await expect(page.getByTestId("external-import-step-indicator").locator('[aria-current="step"]')).toHaveAttribute("data-step","done");
     await test.info().attach("import-complete", {body:await page.screenshot(),contentType:"image/png"});
     expect(api.batchBodies[0].conversations.map(c=>c.rawExternalConversationId)).toEqual(["qa-conv-1"]);
     await saved.getByRole("link",{name:/계정 기억/}).click();
-    await page.getByRole("link",{name:"가져온 대화로 돌아가기"}).click();
+    await page.getByRole("link",{name:"가져온 대화로 돌아가기"}).click({noWaitAfter:true});
+    await expect(page).toHaveURL(/\?saved=qa-import-1$/);
     await expect(saved).toContainText("My saved chat");
-    await page.reload();
+    await page.reload({waitUntil:"domcontentloaded"});
     await expect(saved).toContainText("My saved chat");
   });
   test("a saved batch offers the existing chat and withholds the locked original", async ({page})=>{

@@ -4,6 +4,7 @@ import { BookOpen, ChevronRight, CircleAlert, X } from "lucide-react";
 import {
     MAX_PASSAGES,
     PASSAGE_LENGTH,
+    slicePassage,
     type Passage,
 } from "@/lib/continuationPassages";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -69,7 +70,6 @@ export function ContinuationPassageCard({
                 type="button"
                 className="inline-flex min-h-11 items-center gap-2 font-semibold text-blue-600 dark:text-blue-300"
                 onClick={() => {
-                    setDraft(chosen);
                     dialog.current?.showModal();
                 }}
             >
@@ -77,6 +77,11 @@ export function ContinuationPassageCard({
             </button>
             <dialog
                 ref={dialog}
+                onToggle={event => {
+                    if (!event.currentTarget.open) return;
+                    setDraft(chosen);
+                    setPositions(Object.fromEntries(chosen.map(p => [p.ordinal, p.start])));
+                }}
                 aria-label={t("journey.pickSource")}
                 className="fixed inset-0 m-auto max-h-[90dvh] w-[min(38rem,96vw)] max-w-full rounded-2xl border border-zinc-300 bg-white p-0 text-zinc-900 backdrop:bg-black/45 dark:bg-zinc-950 dark:text-zinc-100"
             >
@@ -175,7 +180,8 @@ export function ContinuationPassageCard({
                                                 </strong>
                                                 <span className="mt-1 block whitespace-pre-wrap break-words text-sm">
                                                     {start > 0 && "…"}
-                                                    {m.content.slice(
+                                                    {slicePassage(
+                                                        m.content,
                                                         start,
                                                         end,
                                                     )}

@@ -41,7 +41,7 @@ export const ko = {
         "contextHint": "전체 원문은 메시지 {count}개예요. 다음 텍스트 질문에 필요한 부분을 직접 고를 수 있어요.",
         "emptyHint": "필요한 부분을 직접 고르거나 원문 없이 질문할 수 있어요. 화면에 보이는 원문이 모두 전달되지는 않아요.",
         "pickSource": "참고할 원문 선택",
-        "pickHelp": "다음 텍스트 질문에 담을 메시지를 최대 3개 고르세요. 긴 메시지는 필요한 구간을 고를 수 있어요.",
+        "pickHelp": "다음 텍스트 질문에 담을 메시지를 최대 3개 고르세요. 긴 메시지는 필요한 구간을 고를 수 있어요. 새로고침 후 같은 원문으로 다시 질문하려면 한 번 더 선택해 주세요.",
         "older": "이전 메시지",
         "newer": "다음 메시지",
         "you": "나",
@@ -59,7 +59,7 @@ export const ko = {
         "confirm": "가져오기 전에 확인하세요",
         "select": "어떤 대화를 가져올까요?",
         "again": "이 대화 이어가기"
-},
+    },
     emailConsent: consentCopyForLanguage("ko"),
     skipLink: {
         toMainContent: "본문으로 건너뛰기",

@@ -39,7 +39,7 @@ export const en = {
         "contextHint": "There are {count} original messages. Choose the parts that matter for your next text question.",
         "emptyHint": "Choose a passage or ask without one. The visible transcript is not all sent to the model.",
         "pickSource": "Choose source excerpts",
-        "pickHelp": "Select up to three messages. For a long message, choose the passage to send with your next text question.",
+        "pickHelp": "Select up to three messages. For a long message, choose the passage to send with your next text question. To use it again after reloading, select it again.",
         "older": "Earlier messages",
         "newer": "Later messages",
         "you": "You",
@@ -57,7 +57,7 @@ export const en = {
         "confirm": "Review before importing",
         "select": "Which conversations would you like to import?",
         "again": "Continue this conversation"
-},
+    },
     emailConsent: consentCopyForLanguage("en"),
     skipLink: {
         toMainContent: "Skip to main content",

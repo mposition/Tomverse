@@ -44,3 +44,11 @@ test("missing header selects automatic context; malformed or oversized coordinat
         [],
     );
 });
+
+test("partial emoji at passage boundaries never reaches the model", () => {
+    const rows = [{ ordinal: 0, content: "😀K😀", truncated: false }];
+    const select = (start, end) => selectPassageText(rows, [{ ordinal: 0, start, end }]);
+    assert.equal(select(1, 4)[0].content, "K");
+    assert.deepEqual(select(0, 1), []);
+    assert.equal(select(0, 5)[0].content, rows[0].content);
+});

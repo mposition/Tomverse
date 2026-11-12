@@ -960,8 +960,8 @@ export function MemoryReviewSettings() {
                     ))}
             </section>}
 
-            {listState.kind === "ready" &&
-                listState.rows.length < listState.total && (
+            {(!fromImport || settingsState.kind !== "ready" || settingsState.settings.masterEnabled) &&
+                listState.kind === "ready" && listState.rows.length < listState.total && (
                     <button
                         type="button"
                         className={`${secondaryButtonClass} w-full`}
