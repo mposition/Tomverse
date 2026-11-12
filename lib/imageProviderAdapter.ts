@@ -37,6 +37,7 @@ import {
   buildGoogleImageRequest,
   GOOGLE_API_KEY_HEADER,
   GOOGLE_INTERACTIONS_URL,
+  googleNonImageBillableTokens,
   parseGoogleImageResponse,
 } from "@/lib/googleImageRequest";
 import {
@@ -658,9 +659,30 @@ const generateWithGoogle = async (
       throw error;
     }
 
-    const parsed = parseGoogleImageResponse(
-      await response.json().catch(() => null)
-    );
+    const payload = await response.json().catch(() => null);
+    // The thinking cap rests on a measured bound, not a documented one, so a
+    // response that bills past it is reported the first time it happens --
+    // before the image is looked for, because a response that stopped without
+    // one was billed as well.
+    const bound = googleImageOutputLimitBound(model.provider, model.apiModelId);
+    const nonImageBillableTokens = googleNonImageBillableTokens(payload);
+    if (
+      bound &&
+      nonImageBillableTokens !== null &&
+      nonImageBillableTokens > GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN * bound.maxOutputTokens
+    ) {
+      console.error(
+        JSON.stringify({
+          event: "image_google_output_over_measured_bound",
+          modelId: model.id,
+          maxOutputTokens: bound.maxOutputTokens,
+          nonImageBillableTokens,
+          providerRequestId,
+          timestamp: new Date().toISOString(),
+        })
+      );
+    }
+    const parsed = parseGoogleImageResponse(payload);
     if (!parsed) {
       throw new ImageProviderError(
         "provider_failed",
@@ -668,23 +690,6 @@ const generateWithGoogle = async (
         response.status,
         providerRequestId,
         requestParams
-      );
-    }
-    // The thinking cap rests on a measured bound, not a documented one, so a
-    // response that bills past it is reported the first time it happens.
-    const bound = googleImageOutputLimitBound(model.provider, model.apiModelId);
-    const billableTokens = parsed.usage.outputTokens + parsed.usage.thinkingTokens;
-    if (bound && billableTokens > GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN * bound.maxOutputTokens) {
-      console.error(
-        JSON.stringify({
-          event: "image_google_output_over_measured_bound",
-          modelId: model.id,
-          maxOutputTokens: bound.maxOutputTokens,
-          outputTokens: parsed.usage.outputTokens,
-          thinkingTokens: parsed.usage.thinkingTokens,
-          providerRequestId,
-          timestamp: new Date().toISOString(),
-        })
       );
     }
     const imageBytes = Buffer.from(parsed.imageBase64, "base64");

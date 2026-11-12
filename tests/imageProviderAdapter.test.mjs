@@ -257,3 +257,53 @@ test("an unknown model never reaches a provider", async () => {
     (error) => error.name === "ImageProviderError"
   );
 });
+
+test("a Google response past the measured bound is reported even when it carries no image", async () => {
+  // Review finding 2026-11-13: the report used to run only after an image was
+  // parsed, so a response that billed past the bound and stopped without one
+  // -- the case the strict parser refuses -- went unreported.
+  const flash = IMAGE_MODEL_REGISTRY.find((model) => model.id === "gemini-3.1-flash-image");
+  const priced = {
+    ...flash,
+    disabledReason: null,
+    prices: [{ quality: "medium", size: "1024x1024", credits: 94, outputCostMicroUsd: 67_200 }],
+  };
+  const run = async (usage) => {
+    const originalFetch = globalThis.fetch;
+    const originalError = console.error;
+    const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    const logged = [];
+    const calls = [];
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url: String(url), body: JSON.parse(init.body) });
+      return Response.json({ status: "incomplete", steps: [], usage });
+    };
+    console.error = (line) => logged.push(String(line));
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = "test-google-key";
+    try {
+      setActiveImageModelCatalog([priced]);
+      await assert.rejects(
+        generateImageWithProvider({ prompt: "a red apple", size: "1024x1024", quality: "medium", modelId: priced.id }),
+        (error) => /no usable image payload/.test(error.message)
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.error = originalError;
+      if (key === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+      else process.env.GOOGLE_GENERATIVE_AI_API_KEY = key;
+      resetActiveImageModelCatalog();
+    }
+    return { calls, events: logged.filter((line) => line.includes("image_google_output_over_measured_bound")) };
+  };
+
+  // 2 x 2,048 = 4,096 non-image tokens is the bound: one more is reported.
+  const over = await run({ total_output_tokens: 600, total_thought_tokens: 3_497 });
+  // Billed and imageless: sent once, never retried, with the measured request.
+  assert.equal(over.calls.length, 1);
+  assert.deepEqual(over.calls[0].body.generation_config, { max_output_tokens: 2_048 });
+  assert.equal(over.events.length, 1);
+  assert.equal(JSON.parse(over.events[0]).nonImageBillableTokens, 4_097);
+
+  const within = await run({ total_output_tokens: 553, total_thought_tokens: 1_262 });
+  assert.equal(within.events.length, 0);
+});

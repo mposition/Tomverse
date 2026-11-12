@@ -282,6 +282,33 @@ export const readGoogleImageInteraction = (
 };
 
 /**
+ * Billable output and thinking tokens that are not the delivered image: the
+ * quantity the measured bound limits (GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS,
+ * lib/imageModelRegistry.ts). The image's own tokens are reported under
+ * `usage.output_tokens_by_modality` and are priced as the option's per-image
+ * cost, so they are taken out; a response that reports no such row is counted
+ * whole, which can only overstate. Null when the response carries no usage.
+ *
+ * Read from the raw response, not the parsed image: a response that stopped
+ * without an image was billed too, and it is the one the strict parser drops.
+ */
+export const googleNonImageBillableTokens = (payload: unknown): number | null => {
+  const usageRaw = (payload as { usage?: unknown } | null)?.usage;
+  if (!usageRaw || typeof usageRaw !== "object") return null;
+  const usage = usageRaw as Record<string, unknown>;
+  const output = finiteCount(usage.total_output_tokens);
+  const byModality = Array.isArray(usage.output_tokens_by_modality) ? usage.output_tokens_by_modality : [];
+  const image = byModality.reduce(
+    (sum: number, row: unknown) =>
+      (row as { modality?: unknown } | null)?.modality === "image"
+        ? sum + finiteCount((row as { tokens?: unknown }).tokens)
+        : sum,
+    0
+  );
+  return output - Math.min(image, output) + finiteCount(usage.total_thought_tokens);
+};
+
+/**
  * `usage.total_tokens` includes the input, so it can never be compared with
  * `max_output_tokens`. This is the quantity the staging measurement has to
  * put against the requested limit, and it exists as a named function so the

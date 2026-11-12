@@ -668,8 +668,9 @@ Banana 2.1 개정, cap이 할증보다 작은 Nano Banana 2 개정, 표에 없�
 3. **정산은 cap 전액으로 한다.** thinking counter가 0이어도 사고 텍스트가 output에
    들어 과금되므로 0으로 정산하지 않는다(`settledThinkingCostMicroUsd`).
 
-이 결정은 문서화된 상한이 아니라 관측에 기대므로 두 장치를 둔다. output + thinking이
-상한의 2배를 넘는 응답은 `image_google_output_over_measured_bound`로 기록되고, 지출의
+이 결정은 문서화된 상한이 아니라 관측에 기대므로 두 장치를 둔다. 이미지 토큰을 뺀
+output + thinking이 상한의 2배를 넘는 응답은 이미지가 있든 없든
+`image_google_output_over_measured_bound`로 기록되고, 지출의
 최종 차단은 provider 예산(§8, `IMAGE_PROVIDER_GOOGLE_COST_MICROUSD_PER_DAY`·`_PER_MONTH`)이
 한다. 그 기록이 나오면 Google 모델을 보류하고 다시 잰다.
 

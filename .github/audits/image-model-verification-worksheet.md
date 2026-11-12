@@ -710,7 +710,8 @@ hard cutoff"로 고쳐 적어, §I의 판정을 다시 잴 조건이 생겼다. 
 
 - 상한을 넘는 것은 이미지 한 장뿐이다. 표본 1건에서 본 것이고 문서 근거는 없다.
 - Google의 동작이 8월과 11월 사이에 바뀌었다. 다시 바뀔 수 있다. 그래서
-  `generateWithGoogle`은 output + thinking이 상한의 2배를 넘는 응답을
+  `generateWithGoogle`은 이미지 토큰(`output_tokens_by_modality`의 image)을 뺀
+  output + thinking이 상한의 2배를 넘는 응답을, 이미지가 없어도
   `image_google_output_over_measured_bound`로 기록하고, 지출의 최종 차단은 provider
   예산(`IMAGE_PROVIDER_GOOGLE_COST_MICROUSD_PER_DAY`·`_PER_MONTH`)이 한다.
 - 이미지 없이 멈춘 응답도 과금된다(텍스트·thinking 약 1,500토큰). 재시도하지 않는다.

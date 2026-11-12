@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildGoogleImageRequest,
   googleBillableOutputTokens,
+  googleNonImageBillableTokens,
   GOOGLE_API_KEY_HEADER,
   GOOGLE_INTERACTIONS_URL,
   parseGoogleImageResponse,
@@ -398,4 +399,34 @@ test("a response with no usage is distinguishable from one billing zero", () => 
   assert.deepEqual(interaction.stepTypes, []);
   assert.equal(readGoogleImageInteraction(null), null);
   assert.equal(readGoogleImageInteraction("{}"), null);
+});
+
+test("the bound is checked on the tokens that are not the image, image or no image", () => {
+  // Shapes from the 2026-11-12 measurement (worksheet section J).
+  const delivered = {
+    usage: {
+      total_output_tokens: 1_588,
+      output_tokens_by_modality: [{ modality: "image", tokens: 1_120 }],
+      total_thought_tokens: 0,
+    },
+  };
+  assert.equal(googleNonImageBillableTokens(delivered), 468);
+  // Stopped without an image: nothing to take out, and it was billed.
+  const stopped = { status: "incomplete", steps: [], usage: { total_output_tokens: 553, total_thought_tokens: 1_262 } };
+  assert.equal(googleNonImageBillableTokens(stopped), 1_815);
+  // No modality row: counted whole, which can only overstate.
+  assert.equal(googleNonImageBillableTokens({ usage: { total_output_tokens: 1_602, total_thought_tokens: 931 } }), 2_533);
+  // A text row is not the image, and an image row cannot take out more than was output.
+  assert.equal(
+    googleNonImageBillableTokens({
+      usage: {
+        total_output_tokens: 1_000,
+        output_tokens_by_modality: [{ modality: "text", tokens: 400 }, { modality: "image", tokens: 5_000 }],
+        total_thought_tokens: 10,
+      },
+    }),
+    10
+  );
+  assert.equal(googleNonImageBillableTokens({ steps: [] }), null);
+  assert.equal(googleNonImageBillableTokens(null), null);
 });
