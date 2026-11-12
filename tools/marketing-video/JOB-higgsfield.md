@@ -15,7 +15,8 @@ competitor's ad (docs/policy/marketing-automation.md §2).
 
 - Today's date and **today's feature** (picked by code: the feature whose last
   card is oldest, never yesterday's).
-- `features.json`: what a card may say.
+- `features.json`: what a card may say. A feature with `hold` is not in the
+  ads yet: never mention it, not even beside today's feature.
 - The scene ideas used in the last 14 days: use none of them again.
 - The provider logo files you may name (`public/model-icons/<name>.png`).
 - You may read the newest checked research notes in `job/research-notes/` with

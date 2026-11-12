@@ -491,6 +491,16 @@ test("a scene idea used in the last 14 days is refused, an older one is not", ()
   assert.equal(check(conceptsOf(concept("c1"), concept("c2")), [{ date: "2026-10-01", feature: "review", device: used }]), null);
 });
 
+test("a feature on hold is never today's and no concept may rest on it", () => {
+  const features = [{ id: "chat" }, { id: "plugins", hold: "preview only" }, { id: "review" }];
+  assert.equal(pickFeature([{ date: "2026-11-07", feature: "chat" }], features, DAY), "review");
+  assert.equal(pickFeature([], [{ id: "plugins", hold: "x" }, { id: "chat" }], DAY), "chat");
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { factRefs: ["chat.what", "plugins.what"] }))), /plugins.what" is a feature on hold/u);
+  const real = JSON.parse(readFileSync(join(tool, "features.json"), "utf8")).features;
+  assert.ok(real.some((feature) => feature.hold) && real.filter((feature) => !feature.hold).length >= 8);
+  assert.ok(real.filter((feature) => feature.hold).every((feature) => typeof feature.hold === "string" && feature.hold.length > 20), "every hold says why");
+});
+
 test("today's feature is the oldest shown, never the last run's", () => {
   const features = [{ id: "chat" }, { id: "review" }, { id: "files" }];
   assert.equal(pickFeature([], features, DAY), "chat");

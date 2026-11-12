@@ -65,8 +65,10 @@ export function pickFeature(history, features, day) {
   const lastDay = earlier.reduce((latest, entry) => (dayKey(entry.date) > latest ? dayKey(entry.date) : latest), "");
   const yesterdays = new Set(earlier.filter((entry) => dayKey(entry.date) === lastDay).map((entry) => entry.feature));
   const last = (id) => earlier.filter((entry) => entry.feature === id).reduce((latest, entry) => (dayKey(entry.date) > latest ? dayKey(entry.date) : latest), "");
-  const candidates = features.map((feature) => feature.id).filter((id) => !yesterdays.has(id));
-  const pool = candidates.length > 0 ? candidates : features.map((feature) => feature.id);
+  // A feature on hold (not shown live, or with a copy contract the cards cannot keep yet) is never today's.
+  const live = features.filter((feature) => !feature.hold).map((feature) => feature.id);
+  const candidates = live.filter((id) => !yesterdays.has(id));
+  const pool = candidates.length > 0 ? candidates : live;
   return pool.reduce((best, id) => (last(id) < last(best) ? id : best), pool[0]);
 }
 
@@ -224,6 +226,7 @@ export function sortConcepts(answer, { feature, history = [], day, toolDir }) {
 
     if (!Array.isArray(concept.factRefs) || concept.factRefs.length === 0 || concept.factRefs.length > 8) problems.push(`${at}: factRefs names 1-8 facts`);
     else {
+      for (const ref of concept.factRefs) if (typeof ref === "string" && features.find((entry) => entry.id === ref.split(".")[0])?.hold) problems.push(`${at}: factRef ${JSON.stringify(ref)} is a feature on hold: a card never mentions it`);
       for (const ref of concept.factRefs) if (resolveFact(features, ref) === undefined) problems.push(`${at}: factRef ${JSON.stringify(ref)} is not a path in features.json (<feature id>.<field>, e.g. ${feature}.what)`);
       if (!concept.factRefs.some((ref) => typeof ref === "string" && ref.split(".")[0] === feature)) problems.push(`${at}: at least one factRef is from today's feature (${feature}.what, say)`);
     }

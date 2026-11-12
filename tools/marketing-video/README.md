@@ -87,7 +87,9 @@ node make-feed-video.mjs <pack.json> <id> <out-dir>     # 4:5 feed version of th
   there, so a new feature reaches the ads (until 2026-11-12 it missed
   conversation import, a registered claim, and save and share). A feature the
   FAQ explains without a claim id, such as Smart Adaptive, is still added by
-  hand. Pictures come from
+  hand. An entry with `hold` (a preview, a switch that is off by default, or
+  copy the cards cannot keep yet) is never today's feature and no card may
+  rest on it; the owner removes `hold` once it is live. Pictures come from
   `library/library.json`: the logo, model marks (owner 2026-11-07) and AI-made
   photos. It can also use real captures from a source pack
   (`job/sources/<asset-id>/pack.json`, on the box only). `examples/` holds the

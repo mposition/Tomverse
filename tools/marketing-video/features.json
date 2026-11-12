@@ -1,5 +1,5 @@
 {
-  "note": "What a card may say about Tomverse: facts only from this file. Model and company names are fine (owner 2026-11-07), and model marks come from library/ or public/model-icons/. Owner 2026-11-08: copy may use price, 'free' and bold wording; 'free' always carries its condition ('Free to try within the included credits'), and the Guard judges every word at submission and refuses what it does not allow. Never promise that an answer is correct. Each entry restates an FAQ answer (components/marketing/marketingInfoContent.ts, claim.* ids in lib/marketingClaims.ts); tests/marketingHiggsfieldImagePath.test.mjs fails when a feature claim of the FAQ has no entry here. Checked 2026-11-12 against the FAQ and the app copy.",
+  "note": "What a card may say about Tomverse: facts only from this file. Model and company names are fine (owner 2026-11-07), and model marks come from library/ or public/model-icons/. Owner 2026-11-08: copy may use price, 'free' and bold wording; 'free' always carries its condition ('Free to try within the included credits'), and the Guard judges every word at submission and refuses what it does not allow. Never promise that an answer is correct. Each entry restates what the public FAQ or help centre says (components/marketing/marketingInfoContent.ts, chatWorkspaceGuideContent.ts; claim.* ids in lib/marketingClaims.ts). A feature with `hold` is not in the ads yet: no card is made about it and no card mentions it; `hold` says why, and the owner removes it once the feature is live and its copy can be kept. tests/marketingHiggsfieldImagePath.test.mjs fails when a feature claim of the FAQ has no entry here. Scanned against the code 2026-11-12.",
   "features": [
     {
       "id": "chat",
@@ -11,11 +11,6 @@
       "id": "smart-adaptive",
       "what": "Smart Adaptive: Tomverse picks a model for each message, weighing the question, the capabilities it needs, cost and quality, and the reply shows which model answered. You can still pick a model yourself.",
       "source": "FAQ 'Can I choose a model myself with Smart Adaptive?'; lib/autoRoutingCopy.ts"
-    },
-    {
-      "id": "import-continue",
-      "what": "Sign in and bring your past conversations from ChatGPT, Claude or Gemini with their official data export, then continue a conversation in Tomverse. New answers come from the Tomverse model you pick, drawing on the context of your past conversations.",
-      "source": "claim.chat-import-and-continue (gate feature.externalImportAndContinuation); the privacy text names ChatGPT, Claude and Gemini (Google Takeout)"
     },
     {
       "id": "review",
@@ -34,10 +29,15 @@
       "source": "real analysis recorded 2026-11-01 (marketing-reels/en-compare-short/rec/lang-en/analysis.txt)"
     },
     {
+      "id": "deep-research",
+      "what": "Deep Research: for a question where many sources matter, turn on Deep Research and get a report written from the sources it searched; a report can take several minutes. In Review's Professional mode you decide whether to use it.",
+      "source": "claim.review-modes; Deep Research status and setup copy in locales/en.ts"
+    },
+    {
       "id": "images",
       "what": "Sign in, describe an image once, generate it with one or more image models and compare the results side by side; keep the one you like.",
       "models": ["GPT Image 2", "Nano Banana 2", "Grok Imagine"],
-      "source": "claim.chat-image-generation; image model chips in the app"
+      "source": "claim.chat-image-generation (gate feature.imageGeneration); image model chips in the app"
     },
     {
       "id": "files",
@@ -45,19 +45,60 @@
       "source": "claim.chat-file-questions"
     },
     {
-      "id": "assistants",
-      "what": "Sign in and build your own AI assistant: give it a name and instructions, add your files, pick a model, and start conversations with it again and again. It stays private to your account.",
-      "source": "claim.chat-assistants"
-    },
-    {
-      "id": "save-and-share",
-      "what": "Sign in to save your conversations, and share one as a read-only link.",
-      "source": "claim.save-and-share"
-    },
-    {
       "id": "web-search",
       "what": "Turn on web search so answers come with their sources.",
       "source": "web search chip in the composer"
+    },
+    {
+      "id": "assistants",
+      "what": "Sign in and build your own AI assistant: give it a name and instructions, add your files, pick a model, and start conversations with it again and again. It stays private to your account.",
+      "source": "claim.chat-assistants (gate feature.assistantProfiles)"
+    },
+    {
+      "id": "projects",
+      "what": "Projects: sign in, create a project and move your conversations into it, so a move, a trip or a job keeps its chats together. A project is a folder; it does not share files or memory between its chats.",
+      "source": "help centre 'Use projects' (chatWorkspaceGuideContent.ts)"
+    },
+    {
+      "id": "save-and-share",
+      "what": "Sign in to save your conversations, lock one with a password, and share one as a read-only link.",
+      "source": "claim.save-and-share; help centre 'Locking and sharing'"
+    },
+    {
+      "id": "import-continue",
+      "what": "Sign in and import past conversations from another AI service with its official data export, then continue a conversation in Tomverse. New answers are generated by the Tomverse model you select, so they may differ from the original AI service.",
+      "source": "claim.chat-import-and-continue (gate feature.externalImportAndContinuation); lib/marketingMemoryClaims.ts",
+      "hold": "docs/policy/external-conversation-import-and-memory.md §17 (release blocker): copy may only use the approved claims in lib/marketingMemoryClaims.ts, never 'nothing lost', 'the same answers' or 'your memory moved over', and must carry the disclosure, which names Tomverse and so cannot be drawn on a card. Needs the disclosure in the post text and the forbidden-claim check on the card first."
+    },
+    {
+      "id": "memory",
+      "what": "Account memory: Tomverse organises memories that you review and approve, and uses them in new conversations.",
+      "source": "settings/memory; lib/marketingMemoryClaims.ts",
+      "hold": "Same §17 copy contract as import-continue, and behind feature.memoryExtractionEnabled / feature.memoryInjectionEnabled (off unless set)."
+    },
+    {
+      "id": "plugins",
+      "what": "Plugins: connect your work tools to Chat and manage access and actions in one place; an action that changes something waits for your approval.",
+      "source": "lib/mcpConnectorCopy.ts; /plugins",
+      "hold": "A preview behind the MCP_CONNECTOR_PREVIEW_ENABLED server variable; not in the FAQ or help centre. Remove once it is on in production and the connectable tools are named here."
+    },
+    {
+      "id": "voice-input",
+      "what": "Speak into the microphone in the message box and your words become text.",
+      "source": "locales/en.ts voice input copy",
+      "hold": "Behind feature.voiceInputEnabled (off unless set); not in the FAQ."
+    },
+    {
+      "id": "prompt-refiner",
+      "what": "Question-refinement suggestions: when offered, Tomverse suggests a clearer version of your question, and you choose whether to apply it.",
+      "source": "FAQ 'Are question-refinement suggestions applied automatically?'",
+      "hold": "Behind feature.promptRefinerEnabled (off unless set)."
+    },
+    {
+      "id": "photo-edit",
+      "what": "Attach a photo in Chat and ask for an edit.",
+      "source": "#3118 (chat photo edit)",
+      "hold": "Live code but dark until IMAGE_EDIT_ENABLED is set (2026-10-29); not in the FAQ."
     }
   ]
 }
