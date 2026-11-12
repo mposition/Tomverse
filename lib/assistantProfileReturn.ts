@@ -12,9 +12,8 @@
  * `GUEST_ACTIVE_CHAT_STORAGE_KEY` on mount, so returning is a fixed push to
  * `/review` and the conversation comes back by itself.
  *
- * So the only thing this module carries is a flag saying the visitor arrived
- * from the chat — a literal, compared to a literal — and, separately, the id
- * of a profile that was just created.
+ * The picker returns to the current conversation. The settings editor and
+ * knowledge guide request a new conversation with the saved assistant.
  *
  * ## Why the profile id is not authority
  *
@@ -43,7 +42,7 @@ export const ASSISTANT_PROFILE_REVIEW_PATH = REVIEW_WORKSPACE_PATH;
 export const ASSISTANT_PROFILE_CHAT_PATH = ASSISTANT_PROFILE_REVIEW_PATH;
 
 /**
- * Set by the create screen, read once by the chat surface.
+ * Set by the create or edit screen, read once by the chat surface.
  *
  * `sessionStorage` rather than `localStorage`: the handoff is meaningful for
  * exactly one navigation in one tab, and a value that outlived the tab would
@@ -81,18 +80,20 @@ export const assistantProfileCreateHref = (options?: { fromChat?: boolean }) =>
         ? `/settings/assistants/new?${ASSISTANT_PROFILE_RETURN_PARAM}=${ASSISTANT_PROFILE_RETURN_CHAT}`
         : "/settings/assistants/new";
 
-export const stashPendingChatProfile = (profileId: string) => {
-    if (typeof window === "undefined") return;
-    if (!isPlausibleProfileId(profileId)) return;
+type ProfileEntry = "chat" | "settings" | "guide";
+
+export const stashPendingChatProfile = (profileId: string, entry: ProfileEntry = "chat") => {
+    if (typeof window === "undefined" || !isPlausibleProfileId(profileId)) return false;
     try {
         window.sessionStorage.setItem(
             PENDING_CHAT_PROFILE_STORAGE_KEY,
-            profileId
+            entry === "chat" ? profileId : `${entry}:${profileId}`
         );
+        return true;
     } catch {
         // A tab with storage disabled still gets the profile and the return
-        // trip; it just does not get the automatic apply. Losing the handoff
-        // is not worth failing the create over.
+        // trip; the editor can keep a failed chat launch on screen.
+        return false;
     }
 };
 
@@ -103,14 +104,21 @@ export const stashPendingChatProfile = (profileId: string) => {
  * restoring the same conversation — cannot reapply a request that was already
  * served. Same reason `consumePendingAccountSettingsRequest` does it.
  */
-export const consumePendingChatProfile = (): string | null => {
+export const consumePendingChatProfile = (): { profileId: string; entry: ProfileEntry } | null => {
     if (typeof window === "undefined") return null;
     try {
         const value = window.sessionStorage.getItem(
             PENDING_CHAT_PROFILE_STORAGE_KEY
         );
         window.sessionStorage.removeItem(PENDING_CHAT_PROFILE_STORAGE_KEY);
-        return isPlausibleProfileId(value) ? value : null;
+        if (!value) return null;
+        const separator = value.indexOf(":");
+        // Older tabs and the create-and-return flow store a plain profile ID.
+        if (separator < 0) return isPlausibleProfileId(value) ? { profileId: value, entry: "chat" } : null;
+        const entry = value.slice(0, separator);
+        const profileId = value.slice(separator + 1);
+        if ((entry !== "settings" && entry !== "guide") || !isPlausibleProfileId(profileId)) return null;
+        return { profileId, entry };
     } catch {
         return null;
     }

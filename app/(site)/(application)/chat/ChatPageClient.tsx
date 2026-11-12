@@ -17,6 +17,7 @@ import { flushSync } from "react-dom";
 import React, {
   useState,
   useEffect,
+  useEffectEvent,
   useCallback,
   useLayoutEffect,
   useMemo,
@@ -8814,38 +8815,23 @@ export function ChatPageClient({
       });
   };
 
-  /**
-   * Applies a profile the user just created from this chat.
-   *
-   * The round trip is: the picker's CTA leaves for the create screen, that
-   * screen stashes the new profile's id and pushes `/chat`, and this consumes
-   * it once on the way back. No conversation id and no return URL travel — the
-   * conversation is the one this page restored for itself, and the id is read
-   * exactly once so a refresh cannot reapply it
-   * (`lib/assistantProfileReturn.ts`).
-   *
-   * Deliberately routed through `handleAssistantProfileChange` rather than
-   * through a PATCH of its own. That handler already owns the two cases this
-   * has — a conversation with a server row is PATCHed, one without is held in
-   * `pendingProfileId` and sent with the create — and it carries the four-way
-   * staleness guard that #632 was fixed with. A second implementation here
-   * would be a second place for that guard to be forgotten.
-   *
-   * Waits for the options list because the optimistic row is built from it,
-   * and because an empty list is how "the flag is off" arrives: with profiles
-   * disabled the fetch 403s, `assistantProfileOptions` stays null, and a
-   * stashed id is simply never applied.
-   */
-  const handleAssistantProfileChangeRef = useRef(handleAssistantProfileChange);
-  useEffect(() => {
-    handleAssistantProfileChangeRef.current = handleAssistantProfileChange;
+  /** Creation from the picker returns to its conversation. Settings and guide launches start a fresh one. */
+  const applyProfileHandoff = useEffectEvent((profileId: string, startNew: boolean) => {
+    if (!startNew) {
+      handleAssistantProfileChange(profileId);
+      return;
+    }
+    if (currentChatIdRef.current) handleNewChat();
+    setPendingProfileId(profileId);
+    pendingProfileIdRef.current = profileId;
   });
   useEffect(() => {
     if (isGuestMode || !assistantProfileOptions || !isInitialConversationResolved) {
       return;
     }
-    const profileId = consumePendingChatProfile();
-    if (!profileId) return;
+    const request = consumePendingChatProfile();
+    if (!request) return;
+    const { profileId, entry } = request;
     // A profile that is not in this account's own list is not applied. The
     // server would refuse it anyway; refusing here keeps a doomed request off
     // the wire and keeps the optimistic row from flashing a profile that was
@@ -8857,9 +8843,9 @@ export function ChatPageClient({
     // whether the round trip finished, and the create screen cannot know that
     // -- it has already navigated away by the time this runs.
     trackProductEvent("assistant_profile_applied_to_chat", 0, {
-        assistant_profile_entry: "chat",
+        assistant_profile_entry: entry,
     });
-    handleAssistantProfileChangeRef.current(profileId);
+    queueMicrotask(() => applyProfileHandoff(profileId, entry !== "chat"));
   }, [assistantProfileOptions, isGuestMode, isInitialConversationResolved]);
 
   // handleGlobalSubmit is redefined every render (not memoized); a ref
