@@ -5,6 +5,9 @@ import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
 import {
     CORE_MEMORY_KINDS,
     MEMORY_RETRIEVAL_ALGORITHM_VERSION,
+    MEMORY_SEMANTIC_DEFAULTS,
+    MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION,
+    memoryTier,
     selectMemoryContext,
     type MemoryContextBudget,
     type MemoryContextSelection,
@@ -13,6 +16,7 @@ import {
 import { getMemorySettings } from "@/lib/memoryService";
 import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
+import { rerankForRetrieval, semanticFeatureReady } from "@/lib/semanticRetrieval";
 
 /**
  * Retrieval v1 against the database (policy §9).
@@ -29,6 +33,14 @@ import { prisma } from "@/lib/prisma";
  * one only answers "given that it may be used, which memories". The single
  * exception is the account's own master toggle, which is read here so no
  * caller can forget it: with it off the answer is always empty (§8.1).
+ *
+ * ## Semantic relevance (docs/policy/external-conversation-import-and-memory.md §9a)
+ *
+ * With the operator's memory-rerank switch on, the query stops requiring a
+ * shared term -- the point is to find a memory that shares none -- and the
+ * relevance-gated memories are scored against the request by an external
+ * model. Core, pinned and style memories are untouched by it. When the switch
+ * is off, or the call is refused or fails, the selection is the lexical one.
  *
  * Nothing here writes. Retrieval never re-indexes a row it happens to notice
  * is stale — a read path that mutates on read turns a user's question into a
@@ -169,6 +181,11 @@ export async function retrieveMemoryContext(input: {
     }
 
     const queryTerms = memoryRetrievalTerms(input.query);
+    // Decided before the query, because it changes what the query may skip.
+    // An account with more active memories than MAX_CANDIDATES is truncated
+    // either way; under it, the wider fetch is a superset of the lexical one,
+    // so a failed rerank falls back to exactly the lexical selection.
+    const rerank = (await semanticFeatureReady("memoryRerank")) !== null;
     const rows = await prisma.memoryItem.findMany({
         where: {
             userId: input.userId,
@@ -183,7 +200,7 @@ export async function retrieveMemoryContext(input: {
                 // invisible: a core or style memory the scorer would never
                 // relevance-gate simply never arrives to be scored. Term
                 // matches ride the GIN index; the rest are unioned in.
-                ...(queryTerms.length > 0
+                ...(queryTerms.length > 0 && !rerank
                     ? [
                           {
                               OR: [
@@ -265,18 +282,40 @@ export async function retrieveMemoryContext(input: {
         ],
     }));
 
+    // Only the memories the selector would relevance-gate are sent, in the
+    // query's own deterministic order, and never one that has expired.
+    const externalRelevance = rerank
+        ? await rerankForRetrieval({
+              feature: "memoryRerank",
+              userId: input.userId,
+              query: input.query,
+              documents: memories
+                  .filter(
+                      (memory) =>
+                          memoryTier(memory) === "relevant" &&
+                          !(memory.expiresAt && memory.expiresAt.getTime() <= now.getTime())
+                  )
+                  .slice(0, MEMORY_SEMANTIC_DEFAULTS.maxRerankCandidates)
+                  .map((memory) => ({ id: memory.id, text: memory.statement })),
+              now,
+          })
+        : null;
+
     const selection = selectMemoryContext({
         memories,
         query: queryTerms,
         now,
         styleEnabled: settings.styleEnabled,
         budget: input.budget,
+        ...(externalRelevance ? { externalRelevance } : {}),
     });
 
     return {
         ...selection,
         resultHash: hashSignature(selection.signature),
-        algorithmVersion: MEMORY_RETRIEVAL_ALGORITHM_VERSION,
+        algorithmVersion: externalRelevance
+            ? MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION
+            : MEMORY_RETRIEVAL_ALGORITHM_VERSION,
         consideredCount: rows.length,
     };
 }

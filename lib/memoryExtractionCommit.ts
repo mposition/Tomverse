@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ExtractionDecision } from "@/lib/memoryExtractionPipeline";
 import { persistExtractionChunkDecisions } from "@/lib/memoryExtractionPersistence";
+import { prepareMemoryDuplicateContext } from "@/lib/memorySemanticDuplicates";
 import { prisma } from "@/lib/prisma";
 import type { MemoryExtractionLease } from "@/lib/memoryExtractionService";
 
@@ -65,6 +66,20 @@ export async function commitExtractionChunk(input: {
     decisions: readonly ExtractionDecision[];
     now?: Date;
 }): Promise<ExtractionCommitResult> {
+    // Before the transaction, never inside it: this may call an external
+    // provider, and the transaction below holds the run row and the account's
+    // memory lock. Null while the operator's switch is off, and on any
+    // failure -- the chunk is then stored by exact-match rules alone.
+    const semanticDuplicates = await prepareMemoryDuplicateContext({
+        userId: input.lease.userId,
+        statements: input.decisions
+            .filter(
+                (decision) =>
+                    decision.outcome === "store_candidate" && decision.validation.bulkSafe
+            )
+            .map((decision) => decision.candidate.statement),
+    });
+
     return prisma.$transaction(async (tx) => {
         const runs = await tx.$queryRaw<Array<{ leaseGeneration: number }>>`
             SELECT "leaseGeneration"
@@ -109,6 +124,7 @@ export async function commitExtractionChunk(input: {
             promptVersion: input.promptVersion,
             decisions: input.decisions,
             now: input.now,
+            semanticDuplicates,
         });
         if (persisted.memoryOff) {
             // Nothing was written, and the chunk must not be reported done:

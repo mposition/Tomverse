@@ -931,6 +931,10 @@ run(
     "tests/integration/retention-sweep.db.test.ts",
     "tests/integration/memory-review.db.test.ts",
     "tests/integration/memory-retrieval.db.test.ts",
+    // docs/policy/external-conversation-import-and-memory.md §9a: an external relevance score may add a relevance-gated memory and
+    // never remove a core one, and a paraphrase goes through the newer-wins
+    // rule instead of becoming a second memory.
+    "tests/integration/memory-semantic-retrieval.db.test.ts",
     "tests/integration/memory-source-deletion.db.test.ts",
     "tests/integration/external-conversation-lock.db.test.ts",
     "tests/integration/memory-expiry.db.test.ts",
@@ -1003,6 +1007,11 @@ run(
     // deletion order, and that the GIN term index is actually queryable.
     "tests/integration/assistant-knowledge-schema.db.test.ts",
     "tests/integration/assistant-knowledge-pipeline.db.test.ts",
+    // docs/policy/external-conversation-import-and-memory.md §9a: semantic knowledge retrieval behind its switches -- an off switch
+    // sends nothing, the budget is held and settled in its own bucket, the
+    // first outcome of a turn is every rebuild's outcome, and a vector never
+    // reads across accounts.
+    "tests/integration/assistant-knowledge-semantic.db.test.ts",
     "tests/integration/assistant-package-import.db.test.ts",
     "tests/integration/assistant-package-import-flag.db.test.ts",
     "tests/integration/assistant-package-export.db.test.ts",

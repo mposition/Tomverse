@@ -186,12 +186,7 @@ export function selectKnowledgeContext(input: {
             ? memoryRetrievalTerms(input.query)
             : input.query;
 
-    const omitted: Record<KnowledgeOmissionReason, number> = {
-        below_relevance: 0,
-        file_cap: 0,
-        token_budget: 0,
-        chunk_cap: 0,
-    };
+    const omitted = noOmissions();
 
     const scored: ScoredChunk[] = [];
     for (const chunk of input.chunks) {
@@ -204,6 +199,27 @@ export function selectKnowledgeContext(input: {
     }
     scored.sort(byScoreThenPosition);
 
+    return selectWithinBudget(scored, budget, omitted, KNOWLEDGE_RETRIEVAL_ALGORITHM_VERSION);
+}
+
+const noOmissions = (): Record<KnowledgeOmissionReason, number> => ({
+    below_relevance: 0,
+    file_cap: 0,
+    token_budget: 0,
+    chunk_cap: 0,
+});
+
+/**
+ * Applies the chunk, per-file and token caps to candidates already in rank
+ * order. Shared by the lexical and the semantic selection so the two cannot
+ * disagree about what fits.
+ */
+function selectWithinBudget(
+    scored: readonly ScoredChunk[],
+    budget: KnowledgeContextBudget,
+    omitted: Record<KnowledgeOmissionReason, number>,
+    retrievalVersion: number
+): KnowledgeContextSelection {
     const selected: ScoredChunk[] = [];
     const perFile = new Map<string, number>();
     let tokens = 0;
@@ -239,7 +255,136 @@ export function selectKnowledgeContext(input: {
         chunks: selected,
         estimatedTokens: tokens,
         omitted,
-        retrievalVersion: KNOWLEDGE_RETRIEVAL_ALGORITHM_VERSION,
+        retrievalVersion,
         fileIds: [...new Set(selected.map((chunk) => chunk.fileId))],
     };
+}
+
+/**
+ * The semantic selection's version (policy §9a). A different number from the
+ * lexical one because the same candidates are ordered differently, and the
+ * number is part of the knowledge hash a context bundle is checked against.
+ */
+export const KNOWLEDGE_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION = 2;
+
+/**
+ * Starting values, to be tuned against a retrieval eval once the switches are
+ * on somewhere. They are part of the algorithm: changing one moves the
+ * version above.
+ */
+export const KNOWLEDGE_SEMANTIC_DEFAULTS = {
+    /** How many nearest chunks join the lexical candidates. */
+    neighbourLimit: 40,
+    /** A neighbour below this cosine similarity is a coincidence. */
+    minSimilarity: 0.3,
+    /** A reranked chunk below this relevance does not reach the prompt. */
+    minRerankScore: 0.1,
+    /** Scanned pages are pointers, not text, so few of them are worth a slot. */
+    maxImagePages: 2,
+    /** Reciprocal-rank-fusion constant, the conventional one. */
+    fusionK: 60,
+} as const;
+
+export type SemanticChunk = RetrievableChunk & {
+    /** A scanned page with no text: matched by image, presented as a pointer. */
+    imagePage?: boolean;
+};
+
+/**
+ * One relevance score per candidate from its lexical rank and its cosine
+ * similarity, for when neighbours were found but nothing reranked them.
+ *
+ * Reciprocal rank fusion rather than a weighted sum: term overlap and cosine
+ * similarity are on unrelated scales, and ranks are the only thing the two
+ * lists have in common. A chunk in neither list -- too few term hits and not a
+ * neighbour -- gets no score and is not eligible.
+ */
+export function fuseKnowledgeScores(input: {
+    chunks: readonly RetrievableChunk[];
+    query: string | readonly string[];
+    similarities: ReadonlyMap<string, number>;
+    minTermHits?: number;
+}): Map<string, number> {
+    const queryTerms =
+        typeof input.query === "string" ? memoryRetrievalTerms(input.query) : input.query;
+    const minTermHits = input.minTermHits ?? KNOWLEDGE_CONTEXT_DEFAULTS.minTermHits;
+    const k = KNOWLEDGE_SEMANTIC_DEFAULTS.fusionK;
+
+    const lexical = input.chunks
+        .map((chunk) => scoreChunk(chunk, queryTerms))
+        .filter((chunk) => chunk.termHits >= minTermHits)
+        .sort(byScoreThenPosition);
+    const semantic = input.chunks
+        .filter((chunk) => input.similarities.has(chunk.id))
+        .map((chunk) => ({ ...scoreChunk(chunk, queryTerms), score: input.similarities.get(chunk.id) ?? 0 }))
+        .sort(byScoreThenPosition);
+
+    const fused = new Map<string, number>();
+    const add = (list: readonly ScoredChunk[]) =>
+        list.forEach((chunk, index) => {
+            fused.set(chunk.id, (fused.get(chunk.id) ?? 0) + 1 / (k + index + 1));
+        });
+    add(lexical);
+    add(semantic);
+    // Normalised so the best possible chunk (first in both lists) scores 1.
+    const best = 2 / (k + 1);
+    for (const [id, score] of fused) fused.set(id, score / best);
+    return fused;
+}
+
+/**
+ * The chunks worth the prompt space when an external model scored them.
+ *
+ * `scores` is the whole decision about relevance: a chunk without one was not
+ * a candidate, and one below `minScore` is dropped. The caps and the
+ * presentation order are the lexical selection's own, so turning a switch on
+ * changes which chunks are relevant and nothing about how many fit.
+ *
+ * Scanned pages are taken first, up to `maxImagePages`, by their image
+ * similarity. Their stored content is a one-line pointer, which a text
+ * reranker would bury under any real passage; they are worth a slot exactly
+ * because nothing else in the selection can say that page exists.
+ */
+export function selectKnowledgeContextRanked(input: {
+    chunks: readonly SemanticChunk[];
+    scores: ReadonlyMap<string, number>;
+    /** Image similarity for scanned pages, which `scores` does not cover. */
+    imagePageSimilarities?: ReadonlyMap<string, number>;
+    query: string | readonly string[];
+    minScore?: number;
+    budget?: Partial<KnowledgeContextBudget>;
+}): KnowledgeContextSelection {
+    const budget = { ...KNOWLEDGE_CONTEXT_DEFAULTS, ...(input.budget ?? {}) };
+    const queryTerms =
+        typeof input.query === "string" ? memoryRetrievalTerms(input.query) : input.query;
+    const minScore = input.minScore ?? 0;
+    const omitted = noOmissions();
+
+    const pages: ScoredChunk[] = [];
+    const passages: ScoredChunk[] = [];
+    for (const chunk of input.chunks) {
+        const lexical = scoreChunk(chunk, queryTerms);
+        if (chunk.imagePage) {
+            const similarity = input.imagePageSimilarities?.get(chunk.id);
+            if (similarity === undefined) omitted.below_relevance += 1;
+            else pages.push({ ...lexical, score: similarity });
+            continue;
+        }
+        const score = input.scores.get(chunk.id);
+        if (score === undefined || score < minScore) {
+            omitted.below_relevance += 1;
+            continue;
+        }
+        passages.push({ ...lexical, score });
+    }
+    pages.sort(byScoreThenPosition);
+    passages.sort(byScoreThenPosition);
+    omitted.chunk_cap += Math.max(0, pages.length - KNOWLEDGE_SEMANTIC_DEFAULTS.maxImagePages);
+
+    return selectWithinBudget(
+        [...pages.slice(0, KNOWLEDGE_SEMANTIC_DEFAULTS.maxImagePages), ...passages],
+        budget,
+        omitted,
+        KNOWLEDGE_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION
+    );
 }
