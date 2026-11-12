@@ -214,6 +214,16 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included_filtered
 
+  - domain: mcpCustomServer
+    prismaModel: McpCustomServer
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
   - domain: mcpInvocation
     prismaModel: McpInvocation
     userLinkageRole: subject

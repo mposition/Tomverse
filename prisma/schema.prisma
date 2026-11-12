@@ -13,6 +13,7 @@ model User {
   mcpConnections McpConnection[]
   mcpInvocations McpInvocation[]
   mcpOAuthFlows McpOAuthFlow[]
+  mcpCustomServers McpCustomServer[]
   codeTaskReservations CodeTaskReservation[]
   id                            String        @id @default(cuid())
   name                          String?
@@ -188,6 +189,20 @@ model McpOAuthFlow {
   createdAt DateTime @default(now())
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId, expiresAt])
+}
+
+// A remote MCP server URL one user entered; its id is McpConnection.serverId.
+// The policy (URL, auth, discovered OAuth endpoints) is fixed at registration.
+model McpCustomServer {
+  id String @id
+  userId String
+  name String
+  url String
+  auth String
+  oauth Json?
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, url, auth])
 }
 
 model McpInvocation {

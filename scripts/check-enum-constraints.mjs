@@ -44,6 +44,10 @@ const REGISTRY = {
     owner: "database",
     reason: "The server owns pending, running and terminal one-use approval states. An uncertain dispatched write remains unknown until its owner records the verified outcome; API clients cannot assign arbitrary states.",
   },
+  McpCustomServer_auth_check: {
+    owner: "database",
+    reason: "The custom-server route maps a validated request enum to none, bearer or OAuth; the stored value is only ever written by that server code.",
+  },
   McpOAuthFlow_state_check: {
     owner: "database",
     reason: "The OAuth handler and maintenance own the authorization lifecycle. The callback's untrusted state parameter is an opaque lookup token, never the stored lifecycle state.",

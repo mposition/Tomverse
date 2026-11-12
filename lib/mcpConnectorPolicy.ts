@@ -4,7 +4,7 @@ import { selectedMcpProviderPolicies } from "@/lib/mcpProviderPresets";
 export const MCP_LIMITS = Object.freeze({
   calls: 6, requestMs: 8_000, turnMs: 45_000, responseBytes: 131_072,
   inputBytes: 8_192, resultCharacters: 8_000, turnCharacters: 24_000,
-  tools: 32, catalogTools: 200, connections: 8, pendingMs: 600_000,
+  tools: 32, catalogTools: 200, connections: 8, customServers: 5, pendingMs: 600_000,
 });
 export const mcpServerSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]{1,40}$/),
@@ -49,6 +49,15 @@ export function mcpPreviewEnabled(env: Record<string, string | undefined> = proc
   return env.MCP_CONNECTOR_PREVIEW_ENABLED === "true";
 }
 
+// User-entered server URLs. On by default with the preview (owner decision
+// 2026-11-12); a non-empty MCP_CUSTOM_SERVERS_DISABLED other than "false" turns it off.
+export const MCP_CUSTOM_SERVER_PREFIX = "custom-";
+export const isCustomMcpServerId = (id: string) => id.startsWith(MCP_CUSTOM_SERVER_PREFIX);
+export function mcpCustomServersEnabled(env: Record<string, string | undefined> = process.env) {
+  const disabled = env.MCP_CUSTOM_SERVERS_DISABLED?.trim();
+  return mcpPreviewEnabled(env) && (!disabled || disabled === "false");
+}
+
 export function mcpServers(env: Record<string, string | undefined> = process.env): McpServerPolicy[] {
   if (!mcpPreviewEnabled(env)) return [];
   const configured = z.array(mcpServerSchema).max(256).parse(JSON.parse(env.MCP_CONNECTOR_SERVERS || "[]"));
@@ -73,7 +82,7 @@ export function mcpServers(env: Record<string, string | undefined> = process.env
         ...(env.MCP_CONNECTOR_SYNTHETIC_TOKEN_AUTH_METHOD === "client_secret_basic" ? { tokenAuthMethod: "client_secret_basic" as const } : {}) } } : {}),
     });
   }
-  if (new Set(configured.map(s => s.id)).size !== configured.length) throw new McpConnectorError("invalid_server_policy");
+  if (new Set(configured.map(s => s.id)).size !== configured.length || configured.some(s => isCustomMcpServerId(s.id))) throw new McpConnectorError("invalid_server_policy");
   return configured;
 }
 

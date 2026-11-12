@@ -4,7 +4,8 @@ import { isDeepStrictEqual } from "node:util";
 import { prisma } from "@/lib/prisma";
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { withMcpClient } from "@/lib/mcpConnectorClient";
-import { MCP_LIMITS, MCP_UNTRUSTED_NOTICE, McpConnectorError, mcpServer } from "@/lib/mcpConnectorPolicy";
+import { MCP_LIMITS, MCP_UNTRUSTED_NOTICE, McpConnectorError } from "@/lib/mcpConnectorPolicy";
+import { mcpServerFor } from "@/lib/mcpCustomServers";
 import { connectorInputSchema, normalizeMcpResult, validateMcpArguments } from "@/lib/mcpConnectorSchema";
 import { auditMcp, decryptMcpSecret, encryptMcpSecret, mcpPolicyDigest, ownMcpConnection, parseMcpGrants } from "@/lib/mcpConnectorStore";
 import { containsMcpCredential } from "@/lib/mcpConnectorSecrets";
@@ -37,7 +38,7 @@ async function createInvocation(userId: string, connectionId: string, version: n
 async function performMcp(input: { userId: string; connectionId: string; version: number; name: string; args: Record<string, unknown>; signal?: AbortSignal; invocationId: string }) {
   const { userId, connectionId, version, name, args, invocationId } = input;
   const connection = await ownMcpConnection(userId, connectionId);
-  const server = mcpServer(connection.serverId);
+  const server = await mcpServerFor(userId, connection.serverId);
   const grant = parseMcpGrants(connection.grants).find(t => t.name === name);
   if (connection.version !== version || !grant) throw new McpConnectorError("connection_changed", 409);
   validateMcpArguments(grant, args);
@@ -52,7 +53,7 @@ async function performMcp(input: { userId: string; connectionId: string; version
   let checking = false, dispatched = false;
   const current = async () => {
     const row = await ownMcpConnection(userId, connectionId);
-    if (row.version !== version || row.leaseId !== leaseId || row.policyDigest !== mcpPolicyDigest(mcpServer(row.serverId))) throw new McpConnectorError("connection_changed", 409);
+    if (row.version !== version || row.leaseId !== leaseId || row.policyDigest !== mcpPolicyDigest(await mcpServerFor(userId, row.serverId))) throw new McpConnectorError("connection_changed", 409);
     return row;
   };
   // The DB fence and result check work across instances; this poll additionally
@@ -108,8 +109,10 @@ export async function invokeMcpTool(input: { userId: string; connectionId: strin
   const grant = parseMcpGrants(row.grants).find(t => t.name === input.name);
   if (!grant) throw new McpConnectorError("tool_not_allowed", 403);
   validateMcpArguments(grant, input.args);
-  validateGithubRepositoryScope(mcpServer(row.serverId), input.name, input.args);
-  const mode = mcpServer(row.serverId).readTools.includes(grant.name) ? grant.mode : "confirm";
+  const server = await mcpServerFor(input.userId, row.serverId);
+  validateGithubRepositoryScope(server, input.name, input.args);
+  // A custom server has no read tools, so every one of its calls is "confirm".
+  const mode = server.readTools.includes(grant.name) ? grant.mode : "confirm";
   const invocation = await createInvocation(input.userId, row.id, row.version, grant.name, input.args, mode === "confirm");
   if (mode === "confirm") return { status: "approval_required", approvalId: invocation.id, content: "Review the exact action in Plugins. Nothing has been executed.", sources: [], notice: MCP_UNTRUSTED_NOTICE };
   try { return await performMcp({ ...input, args: input.args, invocationId: invocation.id }); }

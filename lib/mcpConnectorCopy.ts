@@ -21,6 +21,12 @@ const en = {
   noResults: "No materials found", serverError: "Connector server error", approvalState: "Review this action in Plugins", done: "Connector call complete",
   unknown: "Outcome unknown. Check the service before any new action.", executed: "Action completed", outbound: "Exact content to send", action: "Action",
   pending: "Pending", disconnected: "Disconnected", unavailable: "Unavailable", close: "Close", setupNotice: "Providers appear as connectable only after their remote server is configured.",
+  customUrl: "Server URL (HTTPS)", customName: "Display name (optional)", customAuth: "Authentication",
+  authNone: "No authentication", authBearer: "Bearer token", authOAuth: "OAuth (dynamic client registration)",
+  customHelp: "Enter a remote MCP server you trust. Only public HTTPS addresses are allowed, and every tool call needs your approval.",
+  customReady: "Enter your own server URL", customUrlRefused: "This address cannot be used. Enter a public HTTPS MCP server URL.",
+  customLimit: "You have reached the custom server limit. Disconnect one before adding another.",
+  customOAuthUnsupported: "This server does not offer OAuth with dynamic client registration. Try a bearer token instead.",
 };
 type Copy = typeof en;
 const ko: Copy = {
@@ -44,6 +50,12 @@ const ko: Copy = {
   noResults: "자료를 찾지 못했습니다", serverError: "연결 서버 오류", approvalState: "플러그인에서 실행 내용을 확인하세요", done: "연결 호출 완료",
   unknown: "실행 결과가 불명확합니다. 서비스에서 결과를 확인한 뒤 새 작업을 진행하세요.", executed: "작업 실행 완료", outbound: "외부로 전송할 정확한 내용", action: "실행할 도구",
   pending: "대기 중", disconnected: "연결 해제됨", unavailable: "사용 불가", close: "닫기", setupNotice: "원격 서버 설정을 마친 공급자만 연결할 수 있습니다.",
+  customUrl: "서버 URL (HTTPS)", customName: "표시 이름 (선택)", customAuth: "인증 방식",
+  authNone: "인증 없음", authBearer: "Bearer 토큰", authOAuth: "OAuth (동적 클라이언트 등록)",
+  customHelp: "신뢰하는 원격 MCP 서버를 입력하세요. 공개 HTTPS 주소만 허용하며, 모든 도구 실행은 매번 승인해야 합니다.",
+  customReady: "내 서버 URL 입력", customUrlRefused: "사용할 수 없는 주소입니다. 공개 HTTPS MCP 서버 URL을 입력하세요.",
+  customLimit: "사용자 지정 서버 개수 한도에 도달했습니다. 기존 연결을 해제한 뒤 추가하세요.",
+  customOAuthUnsupported: "이 서버는 동적 클라이언트 등록 OAuth를 제공하지 않습니다. Bearer 토큰으로 연결해 보세요.",
 };
 export const mcpConnectorCopy: Record<Language, Copy> = {
   en, ko,
