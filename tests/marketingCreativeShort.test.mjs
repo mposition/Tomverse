@@ -10,6 +10,7 @@ import { AI_LINE, answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsse
 import { speakLine, VOICE_CAP_ENV, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
 import { admit, downloadResult, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
 import { CREATIVE_CAP_ENV, creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
+import { FRESH_REVIEW_ENV, pickSubject, SUBJECTS } from "../tools/marketing-video/fresh-review.mjs";
 
 /**
  * The creative short job (owner 2026-11-09: a different, creative ad every
@@ -489,4 +490,48 @@ test("a rebuild takes words and claims only from the approved pack whose files t
   assert.equal(packOfRun(join(root, "none"), [a], "review-compare", "ko"), null);
   writeFileSync(join(copied, "extra.png"), "x");
   assert.equal(packOfRun(copied, [a], "review-compare", "ko"), null, "the copied set must be the pack's set exactly");
+});
+
+test("a fresh film's subject is random, never one of the last six, and never about illness or danger", () => {
+  assert.ok(SUBJECTS.length >= 12);
+  for (const subject of SUBJECTS) assert.doesNotMatch(subject, /death|die|ill|sick|medic|hospital|doctor|funeral|grief|accident|danger|injur|health|cancer/iu);
+  assert.equal(pickSubject([], () => 0), SUBJECTS[0]);
+  assert.equal(pickSubject([], () => 0.9999), SUBJECTS.at(-1));
+  const recent = SUBJECTS.slice(0, 6).map((subject) => ({ subject }));
+  for (let k = 0; k < 50; k += 1) assert.ok(!SUBJECTS.slice(0, 6).includes(pickSubject(recent, Math.random)));
+  // Only the last six count: a subject from seven films ago may come back.
+  const older = [{ subject: SUBJECTS[0] }, ...SUBJECTS.slice(1, 7).map((subject) => ({ subject }))];
+  assert.equal(pickSubject(older, () => 0), SUBJECTS[0]);
+  // Every subject used lately: any one, never nothing.
+  assert.ok(SUBJECTS.includes(pickSubject(SUBJECTS.map((subject) => ({ subject })), () => 0.5, SUBJECTS.length)));
+});
+
+test("fresh captures run only behind their switch, before the plan and every paid media call, and never twice after a paid step", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
+  assert.equal(FRESH_REVIEW_ENV, "MARKETING_CREATIVE_FRESH_REVIEW");
+  assert.match(source, /const fresh = rebuild === null && env\[FRESH_REVIEW_ENV\] === "on";/u);
+  const start = source.indexOf("if (fresh) {");
+  const plan = source.indexOf("// 1. Plan.");
+  assert.ok(start > 0 && start < plan && plan < source.indexOf("await paid("));
+  const block = source.slice(start, plan);
+  assert.match(block, /node\(\["fresh-review\.mjs", locale, into, questionFile, topic\]\)/u);
+  assert.match(block, /if \(recorded\.status === 4\) break;/u);
+  assert.doesNotMatch(block, /paid\(|speakLine\(|makeMedia\(/u);
+  assert.ok(source.includes("`job/creative/${run}/sources/**`"), "the plan call may read the run's own packs");
+});
+
+test("the recorder refuses bad arguments and a folder that already holds a recording, before opening a browser", () => {
+  const tool = resolve("tools/marketing-video");
+  const dir = mkdtempSync(join(tmpdir(), "fresh-review-"));
+  const question = join(dir, "q.txt");
+  writeFileSync(question, "What should I cook for six friends on Friday?");
+  const run = (...args) => spawnSync(process.execPath, [join(tool, "fresh-review.mjs"), ...args], { encoding: "utf8", env: { PATH: process.env.PATH } });
+  assert.equal(run("fr", join(dir, "a"), question, "fresh-cooking").status, 2);
+  assert.equal(run("en", join(dir, "a"), question, "Bad Topic!").status, 2);
+  mkdirSync(join(dir, "done"));
+  writeFileSync(join(dir, "done", "log.json"), "{}");
+  const refused = run("en", join(dir, "done"), question, "fresh-cooking");
+  assert.equal(refused.status, 3);
+  assert.match(JSON.parse(refused.stdout.trim()).refused, /never sent twice/u);
 });

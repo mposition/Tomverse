@@ -41,6 +41,7 @@ import { fileURLToPath } from "node:url";
 import { answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, lastBuild, packOfRun, stillsIn, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
 import { speakLine, VOICE_CAP_ENV, voiceLedgerPath } from "./el-voice-core.mjs";
 import { levelVoice, probe, seconds as lengthOf, stills } from "./ffmpeg-tools.mjs";
+import { FRESH_LOCALES, FRESH_REVIEW_ENV, pickSubject } from "./fresh-review.mjs";
 import { brisbaneDay, dailyCap, readLedger, spent } from "./higgsfield-cap.mjs";
 import { CREATIVE_CAP_ENV, creativeLedgerPath, makeMedia, MUSIC_SECONDS } from "./hf-media-core.mjs";
 
@@ -168,9 +169,27 @@ for (const id of existsSync(sourcesDir) ? readdirSync(sourcesDir) : []) {
   }
   onBox.push({ ...pack, captures: Object.fromEntries(present), file, dir, claimIds });
 }
-const packs = usablePacks(onBox, JSON.parse(readFileSync(path.join("job", "approved.json"), "utf8")), date);
+let packs = usablePacks(onBox, JSON.parse(readFileSync(path.join("job", "approved.json"), "utf8")), date);
 for (const pack of onBox) if (!packs.includes(pack)) report.dropped.push({ step: "packs", reason: `${pack.assetId}: not approved now` });
-if (packs.length === 0) halt("no_capture_packs");
+// Fresh captures (owner 2026-11-12, a different subject every film): recorded for this run below,
+// so a new run does not need an approved pack. Off by default: each recording spends the demo
+// account's credits.
+const fresh = rebuild === null && env[FRESH_REVIEW_ENV] === "on";
+
+/** The packs a run recorded for itself (<run>/sources/<locale>/pack.json): real screens of today, no short's claims. */
+function freshPacksIn(dir) {
+  const root = path.join(dir, "sources");
+  return (existsSync(root) ? readdirSync(root) : []).flatMap((locale) => {
+    const file = path.join(root, locale, "pack.json");
+    if (!existsSync(file)) return [];
+    const pack = normalizePack(JSON.parse(readFileSync(file, "utf8")));
+    if (!pack) return [];
+    const present = Object.entries(pack.captures).filter(([, capture]) => existsSync(path.join(root, locale, capture.file)));
+    return present.length > 0 ? [{ ...pack, captures: Object.fromEntries(present), file, dir: path.dirname(file), claimIds: [] }] : [];
+  });
+}
+if (rebuild !== null) packs = [...packs, ...freshPacksIn(runDir)];
+if (packs.length === 0 && !fresh) halt("no_capture_packs");
 
 const historyPath = path.join(creativeDir, "history.json");
 const history = existsSync(historyPath) ? JSON.parse(readFileSync(historyPath, "utf8")) : [];
@@ -215,6 +234,44 @@ if (rebuild !== null) {
   await finishFilm({ plan, locales, captureWords, sourceClaims, firstRound: before.rounds + 1, rounds: REBUILD_ROUNDS, notes });
 }
 
+// 0b. Fresh captures: a subject at random (never one of the last films'), one question about it per
+// locale written by a model, each asked ONCE in Review and its answer analysis run ONCE
+// (fresh-review.mjs). A recording that stopped after a paid step is never repeated, and stops the rest.
+let subject = null;
+if (fresh) {
+  subject = pickSubject(history);
+  const topic = `fresh-${subject.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "").slice(0, 50)}`;
+  report.topic = topic;
+  const questionPrompt = [
+    "Write the question a real person would type into an AI assistant about this everyday subject, once in each language: en, ko, zh-Hant (Traditional Chinese, Taiwan usage).",
+    `Subject: ${subject}.`,
+    "Rules: one concrete request with a detail or two that makes the answers differ (a budget, a number of people, a constraint); 40-120 characters; natural for that language, not a translation; no brand or product names; nothing about death, illness, medicine, loss or danger; never about Tomverse or AI.",
+    'Answer with one line of JSON only: {"questions": {"en": "...", "ko": "...", "zh-Hant": "..."}}',
+  ].join("\n");
+  const questions = jsonLine(claude("questions", questionPrompt, { tools: "Read", allowed: [fileRule("Read", "features.json")], maxTurns: 3, timeoutMinutes: 5 }), "questions");
+  const asked = FRESH_LOCALES.filter((locale) => typeof questions?.[locale] === "string" && questions[locale].trim().length >= 8 && questions[locale].trim().length <= 200);
+  if (asked.length === 0) halt("no_questions");
+  for (const locale of asked) {
+    const into = path.join(runDir, "sources", locale);
+    mkdirSync(path.dirname(into), { recursive: true });
+    const questionFile = path.join(runDir, "sources", `question-${locale}.txt`);
+    writeFileSync(questionFile, questions[locale].trim());
+    const recorded = node(["fresh-review.mjs", locale, into, questionFile, topic]);
+    let line = null;
+    try {
+      line = JSON.parse(String(recorded.stdout ?? "").trim().split("\n").at(-1));
+    } catch {
+      // no report line
+    }
+    if (recorded.status === 0) continue;
+    report.failed.push({ step: `fresh ${locale}`, reason: `exit ${recorded.status}: ${String(line?.error ?? recorded.stderr ?? "").slice(0, 300)}` });
+    // After a paid step: no more recordings today from this run; the account is looked at first.
+    if (recorded.status === 4) break;
+  }
+  packs = freshPacksIn(runDir);
+  if (packs.length === 0) halt("no_fresh_capture");
+}
+
 // 1. Plan.
 const notesDir = path.join("job", "research-notes");
 const newestNotes = existsSync(notesDir) ? readdirSync(notesDir).filter((file) => /^\d{8}\.json$/u.test(file)).sort().at(-1) : undefined;
@@ -222,10 +279,11 @@ const packLines = packs.map((pack) => `- topic ${pack.topic}, locale ${pack.loca
 const planPrompt = [
   readFileSync("CREATIVE-PLAN.md", "utf8"),
   `## Today\n\n- Date: ${date}\n- Newest research notes: ${newestNotes ? `job/research-notes/${newestNotes}` : "none"}\n- Facts you may state: features.json`,
+  ...(subject ? [`## Today's subject (picked at random)\n\n${subject}. The capture packs below were recorded for this film just now: a real question about it, asked once in Review. The film is about this subject and these screens.`] : []),
   `## Capture packs\n\n${packLines.join("\n")}`,
   `## Earlier creative shorts (never repeat one)\n\n${history.map((entry) => `- ${entry.date}: ${entry.concept} -- ${entry.logline} (stills: ${earlierStills(entry)})`).join("\n") || "- none yet"}`,
 ].join("\n\n");
-const planRead = ["job/research-notes/**", "features.json", "job/sources/**", "job/creative/sheets/**"].map((file) => fileRule("Read", file));
+const planRead = ["job/research-notes/**", "features.json", "job/sources/**", `job/creative/${run}/sources/**`, "job/creative/sheets/**"].map((file) => fileRule("Read", file));
 let checked = null;
 let refusal = null;
 for (let attempt = 1; attempt <= 2 && !checked?.plan; attempt += 1) {
@@ -242,6 +300,7 @@ const { plan, locales } = checked;
 report.concept = plan.concept;
 report.topic = plan.topic;
 report.locales = locales;
+if (subject) plan.subject = subject;
 writeFileSync(path.join(runDir, "plan.json"), JSON.stringify(plan, null, 2));
 
 // Real captures of the topic, per locale, and the logo.
@@ -443,7 +502,7 @@ async function finishFilm({ plan, locales, captureWords, sourceClaims, firstRoun
   mkdirSync(sheet, { recursive: true });
   const firstLocale = locales.includes("en") ? "en" : locales[0];
   for (const file of readdirSync(path.join(runDir, "review", firstLocale))) copyFileSync(path.join(runDir, "review", firstLocale, file), path.join(sheet, file));
-  history.push({ date, run, concept: plan.concept, logline: plan.logline, topic: plan.topic, locales, submitted: report.submitted });
+  history.push({ date, run, concept: plan.concept, logline: plan.logline, topic: plan.topic, ...(plan.subject ? { subject: plan.subject } : {}), locales, submitted: report.submitted });
   writeFileSync(historyPath, JSON.stringify(history, null, 2));
   rmSync(path.join(runDir, "raw"), { recursive: true, force: true });
   finish(report.submitted.length > 0 ? 0 : 1);
