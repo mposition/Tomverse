@@ -922,6 +922,13 @@ export const requestImageGeneration = async (
               // What the provider call may send; checked again before the call.
               executionProfile: imageExecutionProfile(target.model),
               thinkingCapMicroUsd: target.model.priceVerification.thinkingCapMicroUsd,
+              // The measured token bound this price rests on, frozen like the
+              // price: settlement reads it here, never the live table a deploy
+              // may have changed since.
+              measuredNonImageBound: googleImageOutputLimitBound(
+                target.model.provider,
+                target.model.apiModelId
+              ),
               // An edit: which photo, and the image-input budget its
               // surcharge bought. Read by the executor and by a retry.
               ...(edit && target.editPricing
@@ -1130,10 +1137,14 @@ const chargeProviderBudgetOverage = async (
     { period: "provider-cost-day", start: usagePeriodStart("day", reservedAt) },
     { period: "provider-cost-month", start: usagePeriodStart("month", reservedAt) },
   ]) {
+    // An upsert with no limit: spend already happened, so it is recorded even
+    // where it passes the budget, and a missing row is created rather than
+    // the overage being dropped.
     await tx.$executeRaw`
-      UPDATE "ChatUsageBucket"
-      SET "count" = "count" + ${amountMicroUsd}, "updatedAt" = NOW()
-      WHERE "key" = ${budgetKey} AND "period" = ${window.period} AND "periodStart" = ${window.start}
+      INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
+      VALUES (${budgetKey}, ${window.period}, ${window.start}, ${amountMicroUsd}, NOW())
+      ON CONFLICT ("key", "period", "periodStart")
+      DO UPDATE SET "count" = "ChatUsageBucket"."count" + ${amountMicroUsd}, "updatedAt" = NOW()
     `;
   }
 };
@@ -1351,14 +1362,20 @@ export const reservationOutputCostMicroUsd = (
     : null;
 };
 
+/** The measured bound the reservation was priced on, or null (none, or an older snapshot). */
+const frozenMeasuredBound = (snapshot: unknown): { textOutputUsdPerMTok: number } | null => {
+  const bound = (snapshot as { measuredNonImageBound?: unknown } | null)?.measuredNonImageBound;
+  const rate = (bound as { textOutputUsdPerMTok?: unknown } | null)?.textOutputUsdPerMTok;
+  return typeof rate === "number" && Number.isFinite(rate) && rate > 0 ? { textOutputUsdPerMTok: rate } : null;
+};
+
 /**
  * What the non-image billable tokens of a response cost, for a reservation of
  * a model priced on a measured token bound (Google direct, at its text output
  * rate). Null for any other model, and when no count was reported.
  */
 export const measuredNonImageCostMicroUsd = (snapshot: unknown, nonImageBillableTokens: unknown): number | null => {
-  const record = snapshot as { provider?: unknown; executionProfile?: { apiModelId?: unknown } | null } | null;
-  const bound = googleImageOutputLimitBound(record?.provider, record?.executionProfile?.apiModelId);
+  const bound = frozenMeasuredBound(snapshot);
   if (!bound || typeof nonImageBillableTokens !== "number" || !(nonImageBillableTokens >= 0)) return null;
   // Tokens times USD per million tokens is micro-USD.
   return Math.ceil(nonImageBillableTokens * bound.textOutputUsdPerMTok);
@@ -1397,7 +1414,11 @@ export const settledThinkingCostMicroUsd = (
   } | null;
   const cap = record?.thinkingCapMicroUsd;
   const reservedCap = typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? cap : null;
-  const billing = imageThinkingBilling(record?.provider, record?.executionProfile?.apiModelId);
+  // A reservation priced on a measured bound says so itself; the live table
+  // is not consulted, so a deploy between the two cannot settle it at zero.
+  const billing = frozenMeasuredBound(snapshot)
+    ? "per_token_within_output_limit"
+    : imageThinkingBilling(record?.provider, record?.executionProfile?.apiModelId);
   if (billing === "flat_per_request") return reservedCap;
   if (billing === "per_token_within_output_limit") {
     // The cap, or what the response actually billed when that is more: the

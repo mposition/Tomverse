@@ -213,7 +213,10 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   예약 snapshot의 `executionProfile.apiModelId`로 endpoint별로 정한다(§16.9):
   thinking을 과금하지 않는 endpoint(Qwen Image 3)는 0, 그 밖의 fal은 — endpoint를
   적지 않은 예전 snapshot 포함 — cap이다. fal은 thinking 수를 보고하지 않으므로
-  0이라는 보고가 아무것도 증명하지 않는다.
+  0이라는 보고가 아무것도 증명하지 않는다. 측정된 한도로 가격을 정한 Google 모델(§12.1)은
+  예약 snapshot의 `measuredNonImageBound`가 정한다: thinking 몫은 cap이고, 응답이 그보다
+  많이 과금했으면 그 실비다. 예약을 넘은 금액은 성공·실패와 관계없이 provider budget에
+  더한다 — 이 경우만 "성공의 thinking 몫은 cap"의 예외다.
 - 사용자 응답에 원시 내부 USD를 노출하지 않고, 모든 limit 오류의
   `resetAt`은 생성 시점보다 미래여야 한다.
 

@@ -103,6 +103,16 @@ const googleModels = IMAGE_MODEL_REGISTRY.filter(
 // someone who did not -- and this is a script people run having just arranged
 // to spend money. npm records what it swallowed in npm_config_*, so the
 // mistake is detectable and worth naming.
+// The model cards' own output limits. Not the profile's `maxOutputTokens`:
+// since 2026-11-13 a measured model sends the limit it was measured at (2,048),
+// which is not what its card publishes.
+const CARD_OUTPUT_LIMITS = {
+  "gemini-3.1-flash-image": 32_768,
+  "gemini-3.1-flash-lite-image": 4_096,
+  "gemini-3-pro-image": 32_768,
+};
+const cardOutputLimit = (model) => CARD_OUTPUT_LIMITS[model.id] ?? model.maxOutputTokens ?? null;
+
 const swallowedByNpm = ["model", "limit", "repeats", "thinking", "prompt", "prompts"]
   .filter((name) => process.env[`npm_config_${name}`] !== undefined);
 
@@ -187,7 +197,7 @@ if (flag("help") || args.length === 0) {
       "",
       "  --model=<id>            one of:",
       ...googleModels.map(
-        (model) => `                            ${model.id} (card limit ${model.maxOutputTokens})`
+        (model) => `                            ${model.id} (card limit ${cardOutputLimit(model)})`
       ),
       "  --limit=<n>             max_output_tokens to request (default: the card limit)",
       "  --repeats=<n>           rounds, 1-10 (default 3)",
@@ -224,7 +234,7 @@ if (!model || model.provider !== "google") {
   process.exit(1);
 }
 
-const limit = Number(value("limit") ?? model.maxOutputTokens);
+const limit = Number(value("limit") ?? cardOutputLimit(model));
 if (!Number.isSafeInteger(limit) || limit <= 0) {
   console.error("--limit must be a positive integer.");
   process.exit(1);
@@ -419,7 +429,7 @@ function buildReport(runComplete) {
     runComplete,
     modelId: model.id,
     apiModelId: model.apiModelId,
-    cardOutputLimit: model.maxOutputTokens ?? null,
+    cardOutputLimit: cardOutputLimit(model),
     requestedMaxOutputTokens: limit,
     thinkingLevel: thinkingLevel ?? model.thinkingLevel ?? null,
     promptSha256Prefixes: promptHashes,
@@ -623,7 +633,7 @@ if (flag("json")) {
   console.log(redact(JSON.stringify(report, null, 2)));
 } else {
   console.log(`Model:      ${model.id}`);
-  console.log(`Limit sent: ${limit} (card limit ${model.maxOutputTokens})`);
+  console.log(`Limit sent: ${limit} (card limit ${cardOutputLimit(model)})`);
   console.log(
     `Prompts:    ${promptHashes
       .map((hash) => `sha256:${hash}`)
