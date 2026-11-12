@@ -96,7 +96,9 @@ test.describe("coding model catalogue flow", () => {
     const profile = detail.getByTestId("model-catalog-coding-profile");
     // Prices and evidence are read, not typed.
     await expect(profile.getByText("$8", { exact: true })).toBeVisible();
-    await expect(detail.getByRole("link", { name: /openai\.com\/policies\/services-agreement/ })).toBeVisible();
+    // The terms page is also one of the pages the draft read, so it is listed twice.
+    await expect(detail.getByRole("link", { name: /openai\.com\/policies\/services-agreement/ })).toHaveCount(2);
+    await expect(detail.getByRole("link", { name: /platform\.openai\.com\/docs\/guides\/your-data/ }).first()).toBeVisible();
     await expect(detail.getByText("Allows resale and coding agents")).toBeVisible();
 
     const weight = detail.getByTestId("model-catalog-coding-weight");
