@@ -501,6 +501,25 @@ test("a feature on hold is never today's and no concept may rest on it", () => {
   assert.ok(real.filter((feature) => feature.hold).every((feature) => typeof feature.hold === "string" && feature.hold.length > 20), "every hold says why");
 });
 
+test("a concept that rests on import or memory carries the disclosure as a label in every language, whatever today's feature", () => {
+  // Independent review 2026-11-12: a chat concept citing import-continue.what passed with no disclosure.
+  const real = JSON.parse(readFileSync(join(tool, "features.json"), "utf8")).features;
+  const disclosure = real.find((feature) => feature.id === "import-continue").disclosure;
+  const withLabel = (role) =>
+    concept("c2", {
+      factRefs: ["chat.what", "import-continue.what"],
+      texts: [...texts, { role, text: disclosure.en }],
+      translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [...list, { role, text: disclosure[locale] }]])),
+    });
+  const bare = concept("c2", { factRefs: ["chat.what", "import-continue.what"] });
+  const refused = sortConcepts(conceptsOf(concept("c1"), bare), { feature: "chat", history: [], day: DAY, toolDir: tool }).dropped[0].problems.join(" | ");
+  assert.match(refused, /texts holds this disclosure word for word, as a label/u);
+  assert.match(refused, /translations.zh-Hans holds the disclosure/u);
+  assert.equal(check(conceptsOf(concept("c1"), withLabel("label"))), null);
+  assert.match(check(conceptsOf(concept("c1"), withLabel("screen"))), /as a label/u);
+  assert.throws(() => pickFeature([], [{ id: "plugins", hold: "preview only" }], DAY), /every feature in features.json is on hold/u);
+});
+
 test("today's feature is the oldest shown, never the last run's", () => {
   const features = [{ id: "chat" }, { id: "review" }, { id: "files" }];
   assert.equal(pickFeature([], features, DAY), "chat");

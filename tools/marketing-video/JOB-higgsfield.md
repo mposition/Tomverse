@@ -18,8 +18,9 @@ competitor's ad (docs/policy/marketing-automation.md §2).
 - `features.json`: what a card may say. A feature with `hold` is not in the
   ads yet: never mention it, not even beside today's feature. A feature's `copy`
   says what its copy may and may not claim, and its `disclosure` stands in
-  every concept of that feature word for word, as a `label`, translated with
-  the exact text it gives for each language.
+  every concept of that feature, and every concept that says anything about
+  it (cite it in `factRefs`), word for word, as a `label`, translated with the
+  exact text it gives for each language.
 - The scene ideas used in the last 14 days: use none of them again.
 - The provider logo files you may name (`public/model-icons/<name>.png`).
 - You may read the newest checked research notes in `job/research-notes/` with
