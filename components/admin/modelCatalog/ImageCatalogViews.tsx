@@ -47,6 +47,10 @@ export const reasonText = (m: CatalogMessages, message: ReasonMessage): string =
       return r.thinkingCapBelowMinimum(message.minimum);
     case "noPriceFound":
       return r.noPriceFound(message.detail);
+    case "codingWeightBelowFloor":
+      return r.codingWeightBelowFloor(message.floor);
+    case "draftIncomplete":
+      return r.draftIncomplete(message.detail);
     case "unknown":
       return r.unknown(message.code);
     default:
@@ -54,7 +58,7 @@ export const reasonText = (m: CatalogMessages, message: ReasonMessage): string =
   }
 };
 
-const STAGE_TONE: Record<ImageStage, AdminTone> = {
+export const STAGE_TONE: Record<ImageStage, AdminTone> = {
   profile_invalid: "warn",
   needs_draft: "warn",
   draft_ready: "warn",
@@ -69,12 +73,21 @@ export function ImageStageChip({ m, stage }: { m: CatalogMessages; stage: ImageS
   return <AdminStatusChip tone={STAGE_TONE[stage]}>{m.stageChip[stage]}</AdminStatusChip>;
 }
 
-export function ImageFlowStepper({ m, stage }: { m: CatalogMessages; stage: ImageStage }) {
+/** The four steps; coding passes its own step names (the draft is a profile, not prices). */
+export function ImageFlowStepper({
+  m,
+  stage,
+  labels = m.steps,
+}: {
+  m: CatalogMessages;
+  stage: ImageStage;
+  labels?: CatalogMessages["steps"];
+}) {
   return (
     <AdminStepper
       label={m.stepperLabel}
       stateWords={m.stepStates}
-      steps={imageFlowSteps(stage).map((step) => ({ ...step, label: m.steps[step.id] }))}
+      steps={imageFlowSteps(stage).map((step) => ({ ...step, label: labels[step.id] }))}
       data-testid="model-catalog-stepper"
     />
   );
@@ -606,7 +619,7 @@ const field =
   "mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-blue-500";
 const help = "mt-1 block text-xs font-normal text-zinc-500";
 
-function ChoiceChips({
+export function ChoiceChips({
   values,
   selected,
   label,
