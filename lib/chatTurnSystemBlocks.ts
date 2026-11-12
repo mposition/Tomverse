@@ -37,6 +37,7 @@ import {
   resolveImageHandoffState,
   type ImageArtifactState,
 } from "@/lib/imageCapabilityPrompt";
+import { FILE_CONVERSION_TOOL_DEFINITION_TOKENS } from "@/lib/fileConversionCore";
 import {
   ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS,
   ARTIFACT_TOOL_DEFINITION_TOKENS,
@@ -199,6 +200,11 @@ export const buildChatTurnSystemBlocks = (
     nativeSearchForced: input.nativeSearchForced,
     conversationKind: "chat",
     turnAttachments: input.turnAttachments,
+    // Read here, the one place preflight and the chat route share, so the
+    // quote and the request cannot disagree about whether `convert_files` is
+    // sent. `CHAT_FILE_CONVERSION=off` is the operator's switch
+    // (docs/policy/generated-artifacts.md section 14).
+    fileConversionEnabled: process.env.CHAT_FILE_CONVERSION !== "off",
   });
 
   const imageCapabilityPrompt = buildImageCapabilitySystemPrompt({
@@ -271,6 +277,9 @@ export const buildChatTurnSystemBlocks = (
     (artifactPlan.registerTool ? ARTIFACT_TOOL_DEFINITION_TOKENS : 0) +
     (artifactPlan.registerDocumentBatch
       ? ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS
+      : 0) +
+    (artifactPlan.registerFileConversion
+      ? FILE_CONVERSION_TOOL_DEFINITION_TOKENS
       : 0) +
     // Both halves. Splitting the seed by role changed where the text is sent,
     // not what it costs, and pricing only the rules would under-quote every
