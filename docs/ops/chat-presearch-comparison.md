@@ -93,3 +93,52 @@ overstated forecast certainty. All five Voyager answers in each arm supplied
 both official mission links and the correct 16-day ordering. One OFF answer
 added an unsupported launch explanation. A blinded review of the complete
 answers rated 5/4/1 pass/caveat/error OFF and 9/1/0 ON.
+
+### Answer generation after presearch
+
+`CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED` defaults to false. On a Smart Adaptive
+turn where the router classified the request and the server attached search
+results, the primary answer model gets a search tool description that tells it
+to cite the existing evidence and to search for a missing fact, conflicting
+result or missing official source. If all excerpts returned by a subsequent
+search already appeared verbatim in the evidence sent to the model, the tool
+labels them as repeated. A changed snippet, date or URL preserves the original
+notice. The model receives the original source records in either case.
+
+For a direct lookup on Qwen 3.8 Flash with no configured reasoning effort,
+the switch sets a 128-token thinking budget on the first call and after a step
+consisting solely of successful web searches with results. A failed search,
+empty result, partially failed batch or another tool restores the ordinary
+model settings on the following step. Comparisons and tasks that need reasoning
+retain the model's configured behavior. The earlier
+`CHAT_QWEN_GROUNDED_LOOKUP_ENABLED` switch by itself disables optional thinking
+only on step zero. [DashScope thinking parameters](https://www.alibabacloud.com/help/en/model-studio/deep-thinking)
+
+To evaluate this change, keep the router candidate format fixed, send the same
+questions and ordered evidence to the same answer model, and include a case
+whose first search omits a requested fact. Record every attempted turn, the
+first visible answer text, browser completion, answer model calls and factual
+support from the cited links. Record results for incomplete evidence separately.
+
+A November 12, 2026 controlled Chromium run used the same previously built
+web client in both arms, the current Chat route, real GPT-6 Luna routing and
+real Qwen 3.8 Flash answers. The catalogue, selected answer model, question,
+study clock, source order and search backend responses were fixed. Router
+candidate compression was off. Model requests and tool follow-ups streamed
+through the actual adapters. Browser timings start at Send and end at the first
+nonempty answer text or client completion.
+
+| Matched primary runs, six per arm | OFF p50 / p95 (s) | ON p50 / p95 (s) |
+|---|---:|---:|
+| Answer provider start to first answer text | 4.944 / 10.240 | 3.149 / 4.636 |
+| Send to first answer text | 8.016 / 12.707 | 5.795 / 8.671 |
+| Send to completion | 12.167 / 19.009 | 10.087 / 13.087 |
+
+Two repetitions of each Brisbane weather, NASA Voyager and RFC 6585 question
+contributed to the primary distribution. Both arms completed two of six within
+ten seconds and made one answer-model call on every turn. These nearest-rank
+p95s are the slowest observations in each arm. In a separate pair that required
+a missing station observation, both arms searched and made a second model call,
+finishing in 21.634s and 18.524s. On a separate USGS question the baseline
+searched and made two answer calls (13.612s), and the candidate used the
+supplied evidence in one call (9.975s).
