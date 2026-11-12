@@ -133,6 +133,7 @@ const MEMORY_WRITER_FILES = [
   "lib/externalImportService.ts",
   "lib/externalConversationLockService.ts",
   "lib/memoryExpiryService.ts",
+  "lib/memorySemanticDuplicates.ts",
   "scripts/backfill-memory-search-terms.mjs",
 ];
 const WRITE_VERBS = "create|createMany|update|updateMany|upsert|delete|deleteMany";
@@ -151,6 +152,8 @@ const UNLOCKED_ENUMERATIONS = new Map([
   ["lib/memoryExpiryService.ts#reconcileExpiredMemories", /tx\.memoryItem\.updateMany\(\{\s*where: \{[\s\S]*?status:[\s\S]*?expiresAt:/],
   // Ids and owners only; the lock facts are re-read for those ids.
   ["lib/externalConversationLockService.ts#reconcileSourceLockedMemories", /memoryLockFacts\(tx, userId, memoryIds\)/],
+  // The vector is attached only where the statement it was computed from still matches.
+  ["lib/memorySemanticDuplicates.ts#prepareMemoryDuplicateContext", /tx\.memoryItem\.updateMany\(\{\s*where: \{[\s\S]*?statement: row\.statement/],
   // The row is re-read before its terms are computed.
   ["scripts/backfill-memory-search-terms.mjs#main", /tx\.memoryItem\.findUnique\(/],
 ]);

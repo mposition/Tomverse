@@ -18,6 +18,7 @@ const planReads = mock.fn(async () => ({ tier: "Max" }));
 const buildContext = mock.fn(async (input: { profileVersionId: string | null; plan: string | null }) => ({
     memory: { decision: { allowed: true }, prompt: { usedCount: 1 } },
     memoryTokens: 12,
+    semanticSteps: { memoryRerank: false, knowledgeNeighbours: false, knowledgeRerank: false },
     profileTokens: input.profileVersionId && input.plan === "Max" ? 8 : 0,
     fingerprintInput: {
         memoryMode: "on", memoryVersion: "m1", styleVersion: "s1", profileVersion: input.profileVersionId,
