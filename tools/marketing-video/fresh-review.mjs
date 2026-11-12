@@ -11,8 +11,9 @@
 // capture-pack shape (creative-core normalizePack). Each capture's text is the
 // text visible in that screenshot, so a film can quote only what it shows.
 //
-// Paid: the two steps spend the demo account's credits. The creative job runs
-// this only when MARKETING_CREATIVE_FRESH_REVIEW=on. No step is retried after
+// Paid: the two steps spend the demo account's credits. Off by default: a
+// non-dry run refuses unless MARKETING_CREATIVE_FRESH_REVIEW=on, run by the job
+// or by hand. No step is retried after
 // a paid one; an out-dir that already holds a recording is refused.
 // --dry stops before the send: nothing is paid, only the composer is captured.
 //
@@ -303,6 +304,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (question.length < 8 || question.length > 200 || question.includes("\n") || question.includes("\r")) {
     console.error("the question must be one line of 8-200 characters");
     process.exit(2);
+  }
+  // Off by default here too, not only in the job: a paid recording needs the switch, a dry one does not.
+  if (!dry && process.env[FRESH_REVIEW_ENV] !== "on") {
+    console.log(JSON.stringify({ step: "fresh-review", locale, refused: `${FRESH_REVIEW_ENV} is not on; nothing sent` }));
+    process.exit(1);
   }
   mkdirSync(outDir, { recursive: true });
   // One recording at a time on the demo account, from any folder or run, dry runs included: each

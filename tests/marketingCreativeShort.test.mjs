@@ -533,7 +533,13 @@ test("the recorder refuses bad arguments and a folder that already holds a recor
   // A home of its own: the account lock lives under it.
   const home = join(dir, "home");
   const lock = join(home, ".local", "state", "tomverse", "demo-account.lock");
-  const run = (...args) => spawnSync(process.execPath, [join(tool, "fresh-review.mjs"), ...args], { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home } });
+  const run = (...args) => spawnSync(process.execPath, [join(tool, "fresh-review.mjs"), ...args], { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, [FRESH_REVIEW_ENV]: "on" } });
+  // Switch off: a paid recording refuses before anything, even run by hand.
+  const off = spawnSync(process.execPath, [join(tool, "fresh-review.mjs"), "en", join(dir, "off"), question, "fresh-cooking"], { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home } });
+  assert.equal(off.status, 1);
+  assert.match(JSON.parse(off.stdout.trim()).refused, /MARKETING_CREATIVE_FRESH_REVIEW is not on/u);
+  assert.equal(existsSync(join(dir, "off")), false);
+  assert.equal(existsSync(lock), false);
   assert.equal(run("fr", join(dir, "a"), question, "fresh-cooking").status, 2);
   assert.equal(run("en", join(dir, "a"), question, "Bad Topic!").status, 2);
   // The capture's text is the question, so it must be one line the box shows whole.
