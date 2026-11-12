@@ -420,9 +420,12 @@ const prepareToPdf = async (
       const landscape = image.width > image.height;
       const pageWidth = landscape ? long : short;
       const pageHeight = landscape ? short : long;
+      // Shrunk to fit, never enlarged past 96 dpi: a 50-pixel icon stretched
+      // over A4 is a blur, not the user's image.
       const scale = Math.min(
         (pageWidth - PAGE_MARGIN * 2) / image.width,
-        (pageHeight - PAGE_MARGIN * 2) / image.height
+        (pageHeight - PAGE_MARGIN * 2) / image.height,
+        POINTS_PER_PIXEL
       );
       const width = image.width * scale;
       const height = image.height * scale;
@@ -501,6 +504,7 @@ const prepareSplitPdf = async (
     format: "zip",
     render: async () => {
       const entries: Array<{ path: string; bytes: Uint8Array }> = [];
+      let heldBytes = 0;
       for (const [index, part] of parts.entries()) {
         const output = await PDFDocument.create();
         output.setProducer("Tomverse");
@@ -514,9 +518,17 @@ const prepareSplitPdf = async (
           }
           output.addPage(page);
         }
+        const bytes = await output.save();
+        // Checked per part, not once at the end: twenty overlapping ranges of
+        // one large PDF would otherwise all be held before the refusal.
+        heldBytes += bytes.byteLength;
+        assertOutputSize(
+          new Uint8Array(heldBytes > FILE_CONVERSION_LIMITS.maxOutputBytes ? heldBytes : 0),
+          "Offer to split a smaller range of pages."
+        );
         entries.push({
           path: `${base}_${String(index + 1).padStart(Math.max(2, digits), "0")}.pdf`,
-          bytes: await output.save(),
+          bytes,
         });
       }
       return {
@@ -930,6 +942,20 @@ const prepareConvertSpreadsheet = async (
       : "");
 
   if (target === "pdf") {
+    // Drawing runs on the request thread, so the work is bounded before it
+    // starts: the same character budget as one authored text file. The page
+    // count is checked again on the result, against the PDF page ceiling.
+    const characters = table.grid.reduce(
+      (total, row) => total + row.reduce((sum, cell) => sum + cell.length, 0),
+      0
+    );
+    if (characters > ARTIFACT_LIMITS.maxTextFileCharacters) {
+      throw new FileConversionError(
+        "TOO_MANY_PAGES",
+        `The sheet holds ${characters} characters; a PDF table holds at most ` +
+          `${ARTIFACT_LIMITS.maxTextFileCharacters}. Offer xlsx or csv instead.`
+      );
+    }
     const numberColumns = firstRow
       .map((_, index) => index)
       .filter(
@@ -955,13 +981,21 @@ const prepareConvertSpreadsheet = async (
     }
     return {
       format: "pdf",
-      render: async () => ({
-        bytes: assertOutputSize(
+      render: async () => {
+        const bytes = assertOutputSize(
           renderDocumentPdf(admission.spec),
           "Offer xlsx or csv instead."
-        ),
-        parts,
-      }),
+        );
+        const pages = (await PDFDocument.load(bytes, { updateMetadata: false })).getPageCount();
+        if (pages > FILE_CONVERSION_LIMITS.maxPdfPages) {
+          throw new FileConversionError(
+            "TOO_MANY_PAGES",
+            `The table would be ${pages} pages; a PDF holds at most ` +
+              `${FILE_CONVERSION_LIMITS.maxPdfPages}. Offer xlsx or csv instead.`
+          );
+        }
+        return { bytes, parts: `${parts}, ${plural(pages, "page")}` };
+      },
     };
   }
 

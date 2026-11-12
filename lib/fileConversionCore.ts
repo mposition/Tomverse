@@ -352,6 +352,38 @@ export const admitFileConversionSpec = (
     }
   }
 
+  // A field an operation does not read is refused: dropped silently, the
+  // model would tell the user an instruction took effect when it did not.
+  const usedBy: Record<string, readonly FileConversionOperation[]> = {
+    pageSize: ["to_pdf"],
+    splitEvery: ["split_pdf"],
+    imageFormat: ["pdf_to_images", "convert_images"],
+    dpi: ["pdf_to_images"],
+    maxDimension: ["convert_images"],
+    quality: ["pdf_to_images", "convert_images"],
+    targetFormat: ["convert_spreadsheet"],
+    sheet: ["convert_spreadsheet"],
+  };
+  for (const [field, operations] of Object.entries(usedBy)) {
+    if (
+      (spec as Record<string, unknown>)[field] !== undefined &&
+      !operations.includes(spec.operation)
+    ) {
+      return {
+        ok: false,
+        detail: `${field} does nothing for ${spec.operation}; it is used by ${operations.join(" and ")}.`,
+      };
+    }
+  }
+  for (const source of spec.sources) {
+    if (source.pages !== undefined && !["to_pdf", "split_pdf", "pdf_to_images"].includes(spec.operation)) {
+      return { ok: false, detail: `pages does nothing for ${spec.operation}.` };
+    }
+    if (source.rotate !== undefined && spec.operation === "convert_spreadsheet") {
+      return { ok: false, detail: "rotate does nothing for convert_spreadsheet." };
+    }
+  }
+
   const distinct = new Set(spec.sources.map((source) => source.attachment));
   switch (spec.operation) {
     case "split_pdf":

@@ -150,11 +150,13 @@ type StyleTable = {
   isDate: boolean[];
   /** Style index -> whether the cell also shows a time. */
   hasTime: boolean[];
+  /** Style index -> whether it shows a time and no calendar date. */
+  timeOnly: boolean[];
 };
 
 const readStyles = (parts: Unzipped): StyleTable => {
   const bytes = parts["xl/styles.xml"];
-  if (!bytes) return { isDate: [], hasTime: [] };
+  if (!bytes) return { isDate: [], hasTime: [], timeOnly: [] };
   const xml = decoder.decode(bytes);
 
   const customCodes = new Map<number, string>();
@@ -167,19 +169,29 @@ const readStyles = (parts: Unzipped): StyleTable => {
   const cellXfsMatch = xml.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/);
   const isDate: boolean[] = [];
   const hasTime: boolean[] = [];
-  if (!cellXfsMatch) return { isDate, hasTime };
+  const timeOnly: boolean[] = [];
+  if (!cellXfsMatch) return { isDate, hasTime, timeOnly };
   for (const xf of cellXfsMatch[1].matchAll(/<xf\b[^>]*\/?>/g)) {
     const numFmtId = Number(xf[0].match(/numFmtId="(\d+)"/)?.[1] ?? "0");
     const custom = customCodes.get(numFmtId);
     if (custom !== undefined) {
-      isDate.push(customFormatIsDate(custom));
-      hasTime.push(customFormatHasTime(custom));
+      const date = customFormatIsDate(custom);
+      const time = customFormatHasTime(custom);
+      // "[h]:mm:ss" and "mm:ss" carry an "m" that is minutes, not month; a
+      // code with an hour or a second and no year or day is a time.
+      const calendar = /[yd]/i.test(
+        custom.replace(/"[^"]*"/g, "").replace(/\[[^\]]*\]/g, "").replace(/\\./g, "")
+      );
+      isDate.push(date);
+      hasTime.push(time);
+      timeOnly.push(time && !calendar);
     } else {
       isDate.push(BUILTIN_DATE_FORMATS.has(numFmtId));
       hasTime.push(BUILTIN_TIME_ONLY_FORMATS.has(numFmtId) || numFmtId === 22);
+      timeOnly.push(BUILTIN_TIME_ONLY_FORMATS.has(numFmtId));
     }
   }
-  return { isDate, hasTime };
+  return { isDate, hasTime, timeOnly };
 };
 
 const pad = (value: number, width = 2) => String(value).padStart(width, "0");
@@ -204,6 +216,38 @@ export const excelSerialToDisplay = (
   )}`;
   if (!withTime) return day;
   return `${day} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+};
+
+/**
+ * An Excel serial number, for a conversion: nothing the cell holds is dropped.
+ *
+ * `excelSerialToDisplay` is for a template field and stops at minutes. A
+ * converted table keeps seconds and fractions of a second, and a time-only
+ * cell stays a time rather than gaining the epoch's date.
+ */
+const excelSerialToExactText = (
+  serial: number,
+  { withTime, timeOnly }: { withTime: boolean; timeOnly: boolean }
+): string => {
+  const milliseconds = Math.round(serial * 86_400_000);
+  const date = new Date(Date.UTC(1899, 11, 30) + milliseconds);
+  const fraction = date.getUTCMilliseconds();
+  const clock =
+    `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}` +
+    (fraction ? `.${pad(fraction, 3)}` : "");
+  // A duration past a day ("[h]:mm:ss" of 1.5) is still a time-only cell; its
+  // hours are written in full rather than wrapped into a date.
+  if (timeOnly) {
+    if (serial >= 1 || serial < 0) {
+      const totalSeconds = Math.round(serial * 86_400);
+      const sign = totalSeconds < 0 ? "-" : "";
+      const absolute = Math.abs(totalSeconds);
+      return `${sign}${Math.floor(absolute / 3600)}:${pad(Math.floor(absolute / 60) % 60)}:${pad(absolute % 60)}`;
+    }
+    return clock;
+  }
+  const day = `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+  return withTime ? `${day} ${clock}` : day;
 };
 
 /** A plain number, without the exponent notation `String()` reaches for. */
@@ -368,9 +412,17 @@ const readSheetGrid = (
             if (Number.isFinite(numeric)) {
               value =
                 styleIndex >= 0 && styles.isDate[styleIndex]
-                  ? excelSerialToDisplay(numeric + dateOffsetDays, {
-                      withTime: Boolean(styles.hasTime[styleIndex]),
-                    })
+                  ? strictValueLength !== undefined
+                    ? excelSerialToExactText(
+                        styles.timeOnly[styleIndex] ? numeric : numeric + dateOffsetDays,
+                        {
+                          withTime: Boolean(styles.hasTime[styleIndex]),
+                          timeOnly: Boolean(styles.timeOnly[styleIndex]),
+                        }
+                      )
+                    : excelSerialToDisplay(numeric + dateOffsetDays, {
+                        withTime: Boolean(styles.hasTime[styleIndex]),
+                      })
                   : strictValueLength !== undefined
                     ? // Fifteen significant digits is all a spreadsheet number
                       // has; rounding to ten decimals would turn 0.00000000001

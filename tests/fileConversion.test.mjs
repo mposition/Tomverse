@@ -815,3 +815,99 @@ test("fifth review: 1904-system dates and ISO date cells convert to the dates th
   const lines = decode(result.bytes).replace(/^﻿/, "").trimEnd().split("\r\n");
   assert.deepEqual(lines, ["when", "2030-11-13", "2026-11-12T00:00:00"]);
 });
+
+/* ------------------------------------------------------------------------ */
+/* Found by the sixth independent review                                      */
+/* ------------------------------------------------------------------------ */
+
+test("sixth review: a time keeps its seconds, a time-only cell gains no date, a duration keeps its hours", async () => {
+  const { zipSync } = await import("fflate");
+  const decode = (bytes) => new TextDecoder().decode(bytes);
+  const encode = (text) => new TextEncoder().encode(text);
+  const base = unzipSync(
+    buildXlsx({
+      rows: [
+        ["clock", "stamp", "span"],
+        [{ number: 0.5242592592592593 }, { number: 46338.5242592592592593 }, { number: 1.5 }],
+      ],
+    })
+  );
+  // Three custom formats: a time of day, a date with a time, a duration.
+  const styles =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<numFmts count="3"><numFmt numFmtId="164" formatCode="hh:mm:ss"/>' +
+    '<numFmt numFmtId="165" formatCode="yyyy-mm-dd hh:mm:ss"/>' +
+    '<numFmt numFmtId="166" formatCode="[h]:mm:ss"/></numFmts>' +
+    '<cellXfs count="4"><xf numFmtId="0"/><xf numFmtId="164"/><xf numFmtId="165"/><xf numFmtId="166"/></cellXfs>' +
+    "</styleSheet>";
+  const sheetPath = Object.keys(base).find((path) => /worksheets\/sheet1\.xml$/.test(path));
+  const sheet = decode(base[sheetPath])
+    .replace(/<c r="A2">/, '<c r="A2" s="1">')
+    .replace(/<c r="B2">/, '<c r="B2" s="2">')
+    .replace(/<c r="C2">/, '<c r="C2" s="3">');
+  const file = zipSync({ ...base, "xl/styles.xml": encode(styles), [sheetPath]: encode(sheet) });
+
+  const result = await convert(
+    { operation: "convert_spreadsheet", filename: "times", targetFormat: "csv", sources: [{ attachment: "att_1" }] },
+    attachments([["times.xlsx", XLSX, file]])
+  );
+  const lines = decode(result.bytes).replace(/^﻿/, "").trimEnd().split("\r\n");
+  assert.deepEqual(lines, ["clock,stamp,span", "12:34:56,2026-11-12 12:34:56,36:00:00"]);
+});
+
+test("sixth review: a table too large for a PDF is refused before it is drawn", async () => {
+  const cell = "z".repeat(19_000);
+  const rows = Array.from({ length: 25 }, () => `${cell}`).join("\n");
+  const files = attachments([["wide.csv", "text/csv", csvBytes(`note\n${rows}\n`)]]);
+  await rejects(
+    { operation: "convert_spreadsheet", filename: "wide", targetFormat: "pdf", sources: [{ attachment: "att_1" }] },
+    files,
+    "TOO_MANY_PAGES"
+  );
+});
+
+test("sixth review: a small image is placed at its own size, not stretched over the page", async () => {
+  const files = attachments([["icon.png", "image/png", await image({ width: 50, height: 50, format: "png" })]]);
+  const result = await convert(
+    { operation: "to_pdf", filename: "icon", sources: [{ attachment: "att_1" }] },
+    files
+  );
+  // Drawn back at 72 dpi and trimmed of the white page: what is left is the
+  // image as placed. At 96 dpi a 50 px image is 37.5 pt, not a page width.
+  const drawn = await convert(
+    { operation: "pdf_to_images", filename: "page", dpi: 72, sources: [{ attachment: "att_1" }] },
+    attachments([["icon.pdf", "application/pdf", result.bytes]])
+  );
+  const { info } = await sharp(Buffer.from(drawn.bytes))
+    .trim({ background: "#ffffff", threshold: 10 })
+    .toBuffer({ resolveWithObject: true });
+  assert.ok(info.width >= 36 && info.width <= 40, String(info.width));
+  assert.ok(info.height >= 36 && info.height <= 40, String(info.height));
+});
+
+test("sixth review: an option the operation does not use is refused, not silently dropped", () => {
+  const cases = [
+    { operation: "to_pdf", splitEvery: 2 },
+    { operation: "pdf_to_images", maxDimension: 100 },
+    { operation: "convert_images", imageFormat: "png", pageSize: "a4" },
+    { operation: "convert_images", imageFormat: "png", dpi: 100 },
+    { operation: "split_pdf", targetFormat: "csv" },
+  ];
+  for (const fields of cases) {
+    const admission = admitFileConversionSpec({
+      filename: "out",
+      sources: [{ attachment: "att_1" }],
+      ...fields,
+    });
+    assert.equal(admission.ok, false, JSON.stringify(fields));
+    assert.match(admission.detail, /does nothing for/);
+  }
+  const imagePages = admitFileConversionSpec({
+    operation: "convert_images",
+    imageFormat: "png",
+    filename: "out",
+    sources: [{ attachment: "att_1", pages: "1" }],
+  });
+  assert.equal(imagePages.ok, false);
+});
