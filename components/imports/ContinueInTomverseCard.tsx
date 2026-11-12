@@ -57,9 +57,11 @@ export function ContinueInTomverseCard({
      * A default that hides is the one that fails safe.
      */
     enabled = false,
+    fromJourney = false,
 }: {
     externalConversationId: string;
     enabled?: boolean;
+    fromJourney?: boolean;
 }) {
     const { t } = useLanguage();
     const [state, setState] = useState<CardState>({ kind: "idle" });
@@ -97,6 +99,8 @@ export function ContinueInTomverseCard({
                         {t("continuation.ctaAction")}
                         <ArrowRight className="h-4 w-4" aria-hidden="true" />
                     </button>
+                    {fromJourney && <button className="ml-2 inline-flex min-h-11 items-center text-sm font-semibold text-blue-600" disabled={creating}
+                        onClick={() => void launcher.start(true)}>{t("journey.pickSource")}</button>}
                     {launcher.status === "failed" ? (
                         <p
                             className="mt-2 text-sm leading-6 text-red-600 dark:text-red-300"

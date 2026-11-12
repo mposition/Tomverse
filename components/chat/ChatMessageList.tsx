@@ -131,6 +131,7 @@ type ChatMessageListProps = {
    * above the top, and the separator that marks where Tomverse takes over.
    */
   importedTranscript?: {
+    contextCard?: React.ReactNode;
     /** What the snapshot is: readable, deleted, or behind its own lock. */
     status: "available" | "deleted" | "locked";
     /** One of `EXTERNAL_IMPORT_PROVIDERS`, from the bridge. */
@@ -1934,6 +1935,7 @@ export function ChatMessageList({
                   />
                 </div>
               )}
+              {isLastImported && importedTranscript?.contextCard}
               </Fragment>
             );
           })}

@@ -29,6 +29,7 @@
  * the other would send every Review conversation to `/continuations`.
  */
 
+import { decodePassages, PASSAGE_HEADER, selectPassageText, type Passage } from "@/lib/continuationPassages";
 import type { Prisma } from "@prisma/client";
 
 import { APP_DEFAULTS } from "@/lib/appDefaults";
@@ -163,6 +164,15 @@ async function loadUnlockedSnapshot(
         );
     }
     return row;
+}
+
+async function readChosenPassages(snapshot: {id:string;messageCount:number}, passages: Passage[]) {
+    const rows = await prisma.externalMessage.findMany({
+        where: {externalConversationId:snapshot.id, ordinal:{in:passages.map(p => p.ordinal)}},
+        select: {ordinal:true, role:true, content:true, truncated:true},
+    });
+    const messages = selectPassageText(rows, passages);
+    return planContinuationSeed({ messages, sourceMessageCount:snapshot.messageCount });
 }
 
 async function readSeedPlan(
@@ -777,7 +787,9 @@ export async function loadContinuationTurnSeed(input: {
         return { seed: null, outcome: "locked" };
     }
 
-    const plan = await readSeedPlan(prisma, snapshot.id, snapshot.messageCount);
+    const passages = decodePassages(input.request.headers.get(PASSAGE_HEADER));
+    const plan = passages === null ? await readSeedPlan(prisma, snapshot.id, snapshot.messageCount)
+        : await readChosenPassages(snapshot, passages);
     if (plan.turns.length === 0) {
         return { seed: null, outcome: "empty_selection" };
     }

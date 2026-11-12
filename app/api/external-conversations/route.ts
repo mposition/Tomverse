@@ -52,6 +52,7 @@ export async function GET(req: Request) {
         // never a continuation created after a rollback.
         const continuationEnabled = await isExternalContinuationEnabledCached();
         const result = await listExternalConversations(session.user.id, {
+            importId: url.searchParams.get("importId") ?? undefined,
             offset: clampListParam(url.searchParams.get("offset"), {
                 fallback: 0,
                 max: 100_000,

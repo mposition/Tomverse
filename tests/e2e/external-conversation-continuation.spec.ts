@@ -139,6 +139,7 @@ const mockContinuationApi = async (
         reviewForkBodies: [] as { idempotencyKey: string }[],
         savedMessages: [] as { id: string; role: string; content: string }[],
         chatRequests: 0,
+        pickedHeaders: [] as (string | undefined)[],
         /** Every `/api/chat` body, so a spec can assert what each one carried. */
         chatBodies: [] as { modelId?: string; messages?: unknown }[],
         preflightBodies: [] as { modelIds?: string[] }[],
@@ -395,6 +396,7 @@ const mockContinuationApi = async (
         const body = route.request().postDataJSON() as { modelId?: string };
         state.chatRequests += 1;
         state.chatBodies.push(body);
+        state.pickedHeaders.push(route.request().headers()["x-tomverse-source-passages"]);
         if ((options.failModelIds ?? []).includes(body.modelId ?? "")) {
             // Recorded above first: the request happened, and K-7's claim is
             // about what the *other* panel does with it, not about the
@@ -2269,6 +2271,30 @@ test.describe("a continuation opens in its product's workspace", () => {
         await page.goto(`/continuations/${CONVERSATION_ID}`);
         return api;
     };
+
+    test("an empty automatic excerpt can be replaced for just the next text answer", async ({page}) => {
+        await prepareGuestPage(page, "ko");
+        await mockAuthenticatedApi(page, {autoSelectionOffered:true});
+        const api=await mockContinuationApi(page,{product:"chat",seedMessageCount:0});
+        await mockConversationList(page,[{id:CONVERSATION_ID,title:"Continued conversation",surface:"continuation",sourceTitle:SOURCE_CONVERSATION_TITLE}]);
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        const card=page.getByTestId("continuation-context").first();
+        await expect(card).toContainText("참고할 원문이 없어요");
+        await card.getByRole("button",{name:"참고할 원문 선택"}).click();
+        const picker=page.getByRole("dialog",{name:"참고할 원문 선택"});
+        await picker.getByRole("checkbox").last().check();
+        await test.info().attach("source-picker",{body:await page.screenshot(),contentType:"image/png"});
+        await picker.getByRole("button",{name:"선택한 원문으로 이어가기"}).click();
+        await expect(card).toContainText("선택한 원문 1개");
+        await page.getByTestId("chat-textarea").fill("What did we decide?");
+        await page.getByTestId("chat-send-button").click();
+        await expect.poll(()=>api.pickedHeaders[0]).toMatch(/^1:0:[0-9]+$/);
+        await expect(card).toContainText("참고할 원문이 없어요");
+        await page.getByTestId("chat-textarea").fill("Another question.");
+        await page.getByTestId("chat-send-button").click();
+        await expect.poll(()=>api.pickedHeaders.length).toBe(2);
+        expect(api.pickedHeaders[1]).toBeUndefined();
+    });
 
     /** The product switcher this viewport shows, opening the drawer on mobile. */
     const productSwitcher = async (page: Page): Promise<Locator> => {

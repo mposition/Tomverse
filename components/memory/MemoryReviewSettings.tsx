@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -78,6 +79,7 @@ export type MemoryEvidenceView = {
     sourceType: string;
     manualContent: string | null;
     externalConversationId: string | null;
+    sourceTitle?: string | null;
 };
 
 export type MemoryRowView = {
@@ -182,7 +184,7 @@ function StatusBadge({ status }: { status: string }) {
     );
 }
 
-function EvidenceList({ evidence }: { evidence: MemoryEvidenceView[] }) {
+function EvidenceList({ evidence, fromImport }: { evidence: MemoryEvidenceView[]; fromImport?: string | null }) {
     const { t } = useLanguage();
     if (evidence.length === 0) return null;
     return (
@@ -209,11 +211,11 @@ function EvidenceList({ evidence }: { evidence: MemoryEvidenceView[] }) {
                                 {t("memoryReview.evidenceExternal")}
                             </span>
                             <Link
-                                href={`/settings/imports/conversations/${item.externalConversationId}`}
+                                href={`/settings/imports/conversations/${encodeURIComponent(item.externalConversationId)}${fromImport ? "?memory=1&fromImport="+encodeURIComponent(fromImport) : ""}`}
                                 className="font-semibold text-blue-600 hover:underline dark:text-blue-300"
                                 data-testid="memory-evidence-source-link"
                             >
-                                {t("memoryReview.evidenceViewSource")}
+                                {item.sourceTitle || t("memoryReview.evidenceViewSource")}
                             </Link>
                         </span>
                     ) : (
@@ -265,6 +267,8 @@ function MemoryRowHeader({ row }: { row: MemoryRowView }) {
 
 export function MemoryReviewSettings() {
     const { lang, t } = useLanguage();
+    const fromImport = useSearchParams().get("fromImport");
+    const [savedId,setSavedId] = useState<string|null>(null);
     const [settingsState, setSettingsState] = useState<SettingsState>({
         kind: "loading",
     });
@@ -458,6 +462,7 @@ export function MemoryReviewSettings() {
             });
             setBusyId(null);
             if (result.ok) {
+                if(body.action === "edit") setSavedId(memoryId);
                 setEditingId(null);
                 setRestoreId(null);
                 void loadMemories();
@@ -635,6 +640,7 @@ export function MemoryReviewSettings() {
                     rows={2}
                     maxLength={MEMORY_STATEMENT_MAX_CODE_POINTS}
                     value={editStatement}
+                    aria-label={t("journey.memoryText")}
                     data-testid="memory-edit-statement"
                     onChange={(event) => setEditStatement(event.target.value)}
                 />
@@ -699,7 +705,7 @@ export function MemoryReviewSettings() {
             <div className="mx-auto w-full max-w-3xl px-4 py-10">
                 <section className={sectionClass} data-testid="memory-signin">
                     <h1 className="text-lg font-bold">
-                        {t("memoryReview.pageTitle")}
+                        {t(fromImport ? "journey.memory" : "memoryReview.pageTitle")}
                     </h1>
                     <p className="mt-2 text-sm leading-6 text-zinc-500">
                         {t("memoryReview.signInRequired")}
@@ -716,7 +722,7 @@ export function MemoryReviewSettings() {
     }
 
     return (
-        <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8">
+        <div className="mx-auto w-full max-w-3xl space-y-4 px-5 py-8" data-import-memory={fromImport ? "" : undefined}>
             <div>
                 <SettingsDetailNav
                     section="memory"
@@ -724,18 +730,19 @@ export function MemoryReviewSettings() {
                     backTestId="memory-back"
                 />
                 <h1 className="mt-3 text-xl font-bold">
-                    {t("memoryReview.pageTitle")}
+                    {t(fromImport ? "journey.memory" : "memoryReview.pageTitle")}
                 </h1>
                 <p className="mt-1 text-sm leading-6 text-zinc-500">
-                    {t("memoryReview.pageDescription")}
+                    {t(fromImport ? "journey.memoryHint" : "memoryReview.pageDescription")}
                 </p>
             </div>
 
-            <section className={sectionClass} data-testid="memory-privacy-note">
+            {fromImport && <Link className={smallButtonClass} href={`/settings/imports/new?saved=${encodeURIComponent(fromImport)}`}>{t("journey.backSaved")}</Link>}
+            {!fromImport && <section className={sectionClass} data-testid="memory-privacy-note">
                 <p className="text-sm leading-6 text-zinc-500">
                     {t("memoryReview.privacyNote")}
                 </p>
-            </section>
+            </section>}
 
             {featureDisabled && (
                 <section
@@ -787,6 +794,7 @@ export function MemoryReviewSettings() {
                                 </span>
                             </span>
                         </label>
+                        {!fromImport && <>
                         <label className="flex items-start gap-2.5">
                             <input
                                 type="checkbox"
@@ -843,6 +851,7 @@ export function MemoryReviewSettings() {
                         <p id="memory-default-mode-description" className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                             {t("memoryReview.defaultModeDescription")}
                         </p>
+                        </>}
                     </div>
                 )}
             </section>
@@ -866,7 +875,9 @@ export function MemoryReviewSettings() {
                 </section>
             )}
 
-            <section className={sectionClass} data-testid="memory-active-list">
+            {fromImport && settingsState.kind==="ready" && !settingsState.settings.masterEnabled &&
+                <p className="rounded-xl bg-zinc-100 p-4 text-sm dark:bg-zinc-900">{t("journey.memoryOff")}</p>}
+            {(!fromImport || settingsState.kind !== "ready" || settingsState.settings.masterEnabled) && <section className={sectionClass} data-testid="memory-active-list">
                 <h2 className="text-sm font-bold">
                     {t("memoryReview.activeTitle")}
                 </h2>
@@ -892,8 +903,9 @@ export function MemoryReviewSettings() {
                                     data-testid="memory-active-row"
                                 >
                                     <MemoryRowHeader row={row} />
+                                    {savedId === row.id && editingId !== row.id && <p role="status" className="text-xs text-emerald-700">{t("journey.edited")}</p>}
                                     {renderEditor(row)}
-                                    <EvidenceList evidence={row.evidence} />
+                                    <EvidenceList evidence={row.evidence} fromImport={fromImport} />
                                     {renderRowError(row.id)}
                                     <div className="mt-2 flex flex-wrap gap-2">
                                         <button
@@ -946,8 +958,29 @@ export function MemoryReviewSettings() {
                             ))}
                         </ul>
                     ))}
-            </section>
+            </section>}
 
+            {listState.kind === "ready" &&
+                listState.rows.length < listState.total && (
+                    <button
+                        type="button"
+                        className={`${secondaryButtonClass} w-full`}
+                        data-testid="memory-load-more"
+                        disabled={loadingMore}
+                        onClick={async () => {
+                            setLoadingMore(true);
+                            await loadMemories({ append: true });
+                            setLoadingMore(false);
+                        }}
+                    >
+                        {loadingMore && (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                        )}
+                        {t("memoryReview.loadMore")}
+                    </button>
+                )}
+
+            {fromImport ? <Link href="/settings/memory" className={smallButtonClass}>{t("memoryReview.importNoticeSettings")}</Link> : <>
             {groups.archived.length > 0 && (
                 <section
                     className={sectionClass}
@@ -1003,27 +1036,7 @@ export function MemoryReviewSettings() {
                 </section>
             )}
 
-            {listState.kind === "ready" &&
-                listState.rows.length < listState.total && (
-                    <button
-                        type="button"
-                        className={`${secondaryButtonClass} w-full`}
-                        data-testid="memory-load-more"
-                        disabled={loadingMore}
-                        onClick={async () => {
-                            setLoadingMore(true);
-                            await loadMemories({ append: true });
-                            setLoadingMore(false);
-                        }}
-                    >
-                        {loadingMore && (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                        )}
-                        {t("memoryReview.loadMore")}
-                    </button>
-                )}
-
-            <section className={sectionClass} data-testid="memory-create-form">
+                        <section className={sectionClass} data-testid="memory-create-form">
                 <h2 className="text-sm font-bold">
                     {t("memoryReview.createTitle")}
                 </h2>
@@ -1271,7 +1284,7 @@ export function MemoryReviewSettings() {
                     )}
                     {t("memoryReview.deleteAllSubmit")}
                 </button>
-            </section>
+            </section></>}
         </div>
     );
 }

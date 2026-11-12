@@ -118,7 +118,8 @@ type PromptPayload = {
   submittedAtMonotonicMs?: number;
   preparationTimings?: import("@/lib/responseLatencyCore").ClientLatencyStages;
   preparationReadyAtMonotonicMs?: number;
-  preparedLocationIntent?: ChatPanelLocationIntent;
+  sourcePassages?: string;
+    preparedLocationIntent?: ChatPanelLocationIntent;
   routerLocationTurn?: RouterLocationTurn;
   id: string;
   text: string;
@@ -270,6 +271,7 @@ type MobileChatShellProps = {
   importedMessages?: Message[];
   /** Provenance and paging for that transcript (`ChatMessageList`). */
   importedTranscript?: {
+    contextCard?: React.ReactNode;
     status: "available" | "deleted" | "locked";
     provider: string;
     importedAt: string;
@@ -1698,7 +1700,7 @@ export function MobileChatShell({
           // Normal flow inside the section, never an absolute overlay
           // (REAUDIT-P1-04): the section is the one region that scrolls this
           // content, and the composer is not in it.
-          <ChatWelcomeScreen
+          <ChatWelcomeScreen product={currentProduct === "chat" ? "chat" : "review"}
             recentConversations={recentConversations}
             starterGallery={starterGallery}
             recentDisclosureRef={(node) => {
