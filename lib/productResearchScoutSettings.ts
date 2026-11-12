@@ -107,18 +107,21 @@ export type ScoutCallReservation = { readonly id: string } | { readonly refused:
  * the model is called. The model and the cap are read again under the call
  * lock, which a settings write also takes, so turning the model off or
  * lowering the cap stops every reservation after it. A reservation for a model
- * that is no longer the chosen one is refused as model_off.
+ * that is no longer the chosen one is refused as model_off. `keepFree` calls
+ * must still be left after this one: the scenario call keeps one for judging the
+ * turn it plans, so it never spends a real generation that nothing could judge.
  */
 export async function startScoutCall(input: {
   readonly subject: string;
   readonly modelId: string;
+  readonly keepFree?: number;
 }): Promise<ScoutCallReservation> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SCOUT_CALL_LOCK})`;
     const current = await settingsFrom(tx);
     if (current.modelId === null || current.modelId !== input.modelId) return { refused: "model_off" as const };
     const used = await tx.productResearchScoutLlmCall.count({ where: { createdAt: { gte: startOfUtcDay(new Date()) }, ...MODEL_CALLS } });
-    if (used >= current.dailyCallCap) return { refused: "daily_cap_reached" as const };
+    if (used + (input.keepFree ?? 0) >= current.dailyCallCap) return { refused: "daily_cap_reached" as const };
     const row = await tx.productResearchScoutLlmCall.create({
       data: { subject: input.subject, modelId: input.modelId },
       select: { id: true },
