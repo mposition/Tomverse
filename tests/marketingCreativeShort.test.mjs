@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import test from "node:test";
@@ -362,6 +362,18 @@ test("off the Linux box, the renderer refuses to run the film without its sandbo
   const ran = spawnSync(process.execPath, [join(tool, "render-creative.mjs"), tmpdir(), "en", "--stills"], { encoding: "utf8", env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot ?? "" } });
   assert.equal(ran.status, 1);
   assert.match(JSON.parse(ran.stdout.trim().split("\n").at(-1)).error, /no sandbox here/u);
+});
+
+test("both renderers delete the bundle folder, and render-creative checks --out before bundling", () => {
+  const creative = readFileSync("tools/marketing-video/render-creative.mjs", "utf8");
+  const plain = readFileSync("tools/marketing-video/render.mjs", "utf8");
+  for (const source of [creative, plain]) {
+    assert.match(source, /\} finally \{\n\s+(?:if \(serveUrl\) )?rmSync\(serveUrl, \{ recursive: true, force: true \}\);/u);
+  }
+  const bundleAt = creative.indexOf("await bundle(");
+  assert.ok(creative.indexOf('!out.endsWith(".mp4")') < bundleAt, "the --out usage check (which exits) must run before bundle()");
+  assert.equal(creative.slice(bundleAt).includes("usage()"), false);
+  assert.equal(creative.slice(bundleAt).includes("process.exit(1)"), false, "a failed render cleans up before it exits");
 });
 
 test("a finished file is 1080x1920, 10-60 s, with sound", () => {
