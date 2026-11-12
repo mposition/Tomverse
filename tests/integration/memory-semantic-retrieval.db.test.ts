@@ -687,3 +687,71 @@ test("with no switch on the bundle records no step and verifies as before", asyn
     assert.equal((await verifyTurn(user.id, COFFEE_QUESTION, issued.token)).ok, true);
     assert.equal(provider.state.calls.length, 0);
 });
+
+/* --------------------------- duplicates send only relevance-gated memories */
+
+test("duplicate detection never sends a core, style or pinned memory", async () => {
+    const { user, newer } = await seedSource();
+    await turnOn("memoryDuplicates");
+    // Existing memories of every kind, none embedded yet: all would be
+    // backfill candidates if kind and pin were not part of the rule.
+    await createMemory(user.id, "identity", ENGINEER);
+    await createMemory(user.id, "tone", "사용자는 존댓말 답변을 선호한다");
+    const pinned = await createMemory(user.id, "preference", "the user pinned this preference");
+    await prisma.memoryItem.update({ where: { id: pinned.id }, data: { pinned: true } });
+    await createMemory(user.id, "preference", LIKES);
+
+    // A chunk with a core candidate and an ordinary one.
+    const decisions = [
+        { ...decision("the user is a backend engineer", newer, "coffee lover") },
+        decision(LOVER, newer, "coffee lover"),
+    ];
+    decisions[0] = {
+        ...decisions[0],
+        candidate: { ...decisions[0].candidate, kind: "occupation" },
+    } as ExtractionDecision;
+
+    const sendable = await sendableCandidateStatements({ userId: user.id, decisions });
+    assert.deepEqual(sendable, [LOVER]);
+    await prepareMemoryDuplicateContext({ userId: user.id, statements: sendable });
+
+    const sent = provider.state.calls.flatMap((call) => (call.body.texts as string[]) ?? []);
+    assert.deepEqual([...sent].sort(), [LIKES, LOVER].sort());
+    for (const text of [ENGINEER, "사용자는 존댓말 답변을 선호한다", "the user pinned this preference"]) {
+        assert.ok(!sent.includes(text), `${text} must not leave`);
+    }
+    // And none of them was given a vector to be compared with.
+    const embedded = await prisma.memoryItem.findMany({
+        where: { userId: user.id, embedding: { not: null } },
+        select: { statement: true },
+    });
+    assert.deepEqual(
+        embedded.map((row) => row.statement),
+        [LIKES]
+    );
+});
+
+test("a core memory with a stored vector is still not compared", async () => {
+    const { user, newer } = await seedSource();
+    await turnOn("memoryDuplicates");
+    // A vector written before this rule, or by any other path: the comparison
+    // still leaves it out, so the core memory cannot be superseded by a paraphrase.
+    const core = await createMemory(user.id, "preference", LIKES);
+    await prisma.memoryItem.update({ where: { id: core.id }, data: { kind: "identity" } });
+    await prisma.memoryItem.update({
+        where: { id: core.id },
+        data: {
+            embedding: Uint8Array.from([100, 100, 0, 0, 0]),
+            embeddingModel: memoryEmbeddingLabel(TEST_EMBEDDING_LABEL, LIKES),
+        },
+    });
+
+    const result = await persistChunk(user.id, [decision(LOVER, newer, "coffee lover")], 0);
+
+    assert.equal(result.stored, 1);
+    assert.equal(result.superseded, 0);
+    assert.equal(
+        (await prisma.memoryItem.findUniqueOrThrow({ where: { id: core.id } })).status,
+        "active"
+    );
+});

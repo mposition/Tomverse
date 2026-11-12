@@ -653,7 +653,7 @@ Tomverse 밖으로 나가기 때문입니다.
 | `knowledgeEmbed` | chunk마다 vector를 저장하고 질문과 가까운 chunk를 후보에 추가 | chunk 원문(색인 시), 질문 |
 | `knowledgeImagePages` | PDF의 텍스트 없는 페이지를 이미지로 색인 | 그 페이지의 렌더링 이미지 |
 | `memoryRerank` | 관련도로 걸러지는 memory를 질문과의 관련도로 선택. lexical 후보 조회와 그 상한은 그대로 두고, term이 겹치지 않는 최근 memory를 별도 조회로 더합니다(실패 시 더한 것은 버림) | 질문, 해당 memory statement(최대 100개) |
-| `memoryDuplicates` | 추출 후보가 기존 memory의 다른 표현인지 판정 | 후보 statement, 계정의 active memory statement |
+| `memoryDuplicates` | 추출 후보가 기존 memory의 다른 표현인지 판정. 관련도로 걸러지는 종류만 대상이며 core·고정·style memory는 후보로도, 색인으로도 보내지 않습니다 | 해당 후보 statement, 계정의 해당 active memory statement |
 
 **켜기 전 조건** (스위치를 켜는 승인이 확인하는 것):
 
@@ -727,7 +727,8 @@ Tomverse 밖으로 나가기 때문입니다.
   memory를 읽을지 지정할 수는 없습니다 — 후보는 항상 서버가 소유자·file scope로
   읽은 행입니다.
 - **core·pinned·style memory는 외부 점수가 건드리지 못합니다.** provider로
-  보내지도 않습니다.
+  보내지도 않습니다 — rerank에도, 중복 감지의 후보·색인·비교에도. 이 종류의 다른
+  표현은 스위치 이전처럼 정확 일치 규칙만 적용합니다.
 - **다른 표현의 memory는 삭제가 아니라 topic 충돌입니다.** 가까운 statement를
   §8.3의 newer-wins 규칙에 충돌로 넘깁니다. 부정문은 embedding 공간에서 긍정문과
   가깝기 때문에("커피를 좋아한다"/"커피를 끊었다"), 가깝다는 이유로 후보를 버리면

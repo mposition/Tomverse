@@ -5,6 +5,8 @@ import type { Prisma } from "@prisma/client";
 import { verifyExternalMessageEvidence } from "@/lib/memoryEvidenceValidation";
 import type { ExtractionDecision } from "@/lib/memoryExtractionPipeline";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
+import { CORE_MEMORY_KINDS } from "@/lib/memoryRetrievalScoring";
+import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
 import { currentEmbeddingLabel, embedForIndexing } from "@/lib/semanticRetrieval";
 import { cosineSimilarity, decodeVector, encodeVector } from "@/lib/semanticRetrievalCore";
@@ -28,7 +30,23 @@ import { cosineSimilarity, decodeVector, encodeVector } from "@/lib/semanticRetr
  * The provider is called before the write transaction opens and never inside
  * it: the transaction holds the account's memory lock, and a network call
  * under a lock is how one slow provider stalls every memory write.
+ *
+ * **Only relevance-gated memories take part.** Core memories (who the user
+ * is), style memories and pinned memories are never sent to the provider --
+ * not as a candidate, not for the backfill, and so never compared -- which is
+ * the same boundary semantic retrieval keeps. A paraphrase among those is
+ * left to the exact-match rule, as before the switch existed.
  */
+
+/** Kinds duplicate detection never sends: the ones retrieval never gates. */
+const EXCLUDED_KINDS: string[] = [...CORE_MEMORY_KINDS, ...STYLE_MEMORY_KINDS];
+
+/** Whether a memory of this kind, pinned or not, may take part at all. */
+export const duplicateDetectionEligible = (memory: { kind: string; pinned?: boolean }) =>
+    !EXCLUDED_KINDS.includes(memory.kind) && memory.pinned !== true;
+
+/** The same rule as a query filter. */
+const eligibleMemories = { pinned: false, kind: { notIn: EXCLUDED_KINDS } };
 
 /** Cosine similarity at which two statements of one kind are the same topic. */
 export const MEMORY_DUPLICATE_SIMILARITY = 0.9;
@@ -87,7 +105,10 @@ export async function sendableCandidateStatements(input: {
     decisions: readonly ExtractionDecision[];
 }): Promise<string[]> {
     const keep = input.decisions.filter(
-        (decision) => decision.outcome === "store_candidate" && decision.validation.bulkSafe
+        (decision) =>
+            decision.outcome === "store_candidate" &&
+            decision.validation.bulkSafe &&
+            duplicateDetectionEligible(decision.candidate)
     );
     if (keep.length === 0) return [];
 
@@ -180,7 +201,12 @@ export async function prepareMemoryDuplicateContext(input: {
         if (settings?.masterEnabled === false) return null;
 
         const active = await prisma.memoryItem.findMany({
-            where: { userId: input.userId, status: "active", ...reachableEvidence },
+            where: {
+                userId: input.userId,
+                status: "active",
+                ...eligibleMemories,
+                ...reachableEvidence,
+            },
             orderBy: { id: "asc" },
             take: MAX_ACTIVE_MEMORIES,
             select: { id: true, statement: true, embeddingModel: true },
@@ -244,7 +270,7 @@ export async function loadEmbeddedActiveMemories(
     modelLabel: string
 ): Promise<EmbeddedMemory[]> {
     const rows = await tx.memoryItem.findMany({
-        where: { userId, status: "active", embedding: { not: null } },
+        where: { userId, status: "active", embedding: { not: null }, ...eligibleMemories },
         orderBy: { id: "asc" },
         take: MAX_ACTIVE_MEMORIES,
         select: { id: true, kind: true, statement: true, embedding: true, embeddingModel: true },
