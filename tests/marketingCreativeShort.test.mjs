@@ -516,7 +516,7 @@ test("fresh captures run only behind their switch, before the plan and every pai
   assert.ok(start > 0 && start < plan && plan < source.indexOf("await paid("));
   const block = source.slice(start, plan);
   assert.match(block, /node\(\["fresh-review\.mjs", locale, into, questionFile, topic\]\)/u);
-  assert.match(block, /if \(recorded\.status === 4\) break;/u);
+  assert.match(block, /if \(recorded\.status === 4 \|\| recorded\.status === 5\) break;/u);
   assert.doesNotMatch(block, /paid\(|speakLine\(|makeMedia\(/u);
   assert.ok(source.includes("`job/creative/${run}/sources/**`"), "the plan call may read the run's own packs");
 });
@@ -530,8 +530,14 @@ test("the recorder refuses bad arguments and a folder that already holds a recor
   assert.equal(run("fr", join(dir, "a"), question, "fresh-cooking").status, 2);
   assert.equal(run("en", join(dir, "a"), question, "Bad Topic!").status, 2);
   mkdirSync(join(dir, "done"));
-  writeFileSync(join(dir, "done", "log.json"), "{}");
+  writeFileSync(join(dir, "done", "started.json"), "{}");
   const refused = run("en", join(dir, "done"), question, "fresh-cooking");
   assert.equal(refused.status, 3);
   assert.match(JSON.parse(refused.stdout.trim()).refused, /never sent twice/u);
+  // The claim is taken exclusively before the browser opens; the settings restore is checked by reading back.
+  const recorder = readFileSync(join(tool, "fresh-review.mjs"), "utf8");
+  const claim = recorder.indexOf('"started.json"), "wx")');
+  assert.ok(claim > 0 && claim < recorder.indexOf("const result = await record("));
+  assert.match(recorder, /now\.language === restore\.language/u);
+  assert.match(recorder, /code: 5/u);
 });

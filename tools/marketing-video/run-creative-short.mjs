@@ -265,8 +265,8 @@ if (fresh) {
     }
     if (recorded.status === 0) continue;
     report.failed.push({ step: `fresh ${locale}`, reason: `exit ${recorded.status}: ${String(line?.error ?? recorded.stderr ?? "").slice(0, 300)}` });
-    // After a paid step: no more recordings today from this run; the account is looked at first.
-    if (recorded.status === 4) break;
+    // After a paid step or a failed settings restore: no more recordings from this run; the account is looked at first.
+    if (recorded.status === 4 || recorded.status === 5) break;
   }
   packs = freshPacksIn(runDir);
   if (packs.length === 0) halt("no_fresh_capture");

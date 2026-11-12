@@ -19,9 +19,11 @@
 // The demo account's language and theme are switched for the recording and
 // restored in finally (owner OK 2026-10-31 for recordings).
 //
-// Exit 0 recorded, 1 stopped before any paid step, 2 usage, 3 already
-// recorded, 4 stopped after a paid step (do not run it again for this film).
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// Exit 0 recorded, 1 stopped before any paid step, 2 usage, 3 a recording
+// was started in this folder already, 4 stopped after a paid step, 5 the
+// account settings were not restored (stop and look; the pack is kept when the
+// recording itself finished). A non-dry run claims <out-dir>/started.json first.
+import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,9 +77,9 @@ export const FRESH_LOCALES = Object.freeze(["en", "ko", "zh-Hant"]);
 const MODELS = Object.freeze(["GPT 6 Luna", "Claude Haiku 5.5", "Gemini Flash"]);
 // The app's own words (lib/reviewWorkspaceCopy.ts).
 const LABELS = Object.freeze({
-  en: { models: /Selected models/u, side: "Side by side", browser: "en-AU" },
-  ko: { models: /선택한 모델/u, side: "나란히 비교", browser: "ko-KR" },
-  "zh-Hant": { models: /已選模型/u, side: "並排比較", browser: "zh-TW" },
+  en: { models: /Selected models/u, pro: "Professional", side: "Side by side", browser: "en-AU" },
+  ko: { models: /선택한 모델/u, pro: "전문가", side: "나란히 비교", browser: "ko-KR" },
+  "zh-Hant": { models: /已選模型/u, pro: "Professional", side: "並排比較", browser: "zh-TW" },
 });
 
 async function record({ locale, outDir, question, dry }) {
@@ -88,6 +90,8 @@ async function record({ locale, outDir, question, dry }) {
   const log = [];
   let paid = 0;
   let restore = null;
+  let result = null;
+  const DRY = Symbol("dry run ends before the send");
   const browser = await chromium.launch();
   const context = await browser.newContext({ storageState: state, viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: "light", locale: L.browser });
   const page = await context.newPage();
@@ -155,7 +159,7 @@ async function record({ locale, outDir, question, dry }) {
       await page.waitForTimeout(300);
     }
     if (await page.evaluate(() => document.documentElement.classList.contains("dark"))) throw new Error("the page is still dark");
-    const professional = page.getByRole("button", { name: "Professional" });
+    const professional = page.getByRole("button", { name: L.pro, exact: true });
     if (await professional.count()) await professional.first().click();
     await page.waitForTimeout(1000);
     await page.getByRole("button", { name: L.models }).first().click();
@@ -197,7 +201,7 @@ async function record({ locale, outDir, question, dry }) {
     await page.waitForTimeout(800);
     await capture("question", "the question typed in Review, three models chosen");
     captures.question.text = question;
-    if (dry) return { code: 0, paid, captures, log };
+    if (dry) throw DRY;
 
     await page.locator('[data-testid="chat-send-button"]').click();
     paid = 1;
@@ -236,16 +240,29 @@ async function record({ locale, outDir, question, dry }) {
       await page.waitForTimeout(2000);
       await capture("differences", "Tomverse answer analysis: where the answers differ, with their quotes", ".studio-analysis-panel");
     }
-    return { code: 0, paid, captures, log };
+    result = { code: 0, paid, captures, log };
   } catch (error) {
-    log.push({ error: String(error?.message ?? error).slice(0, 400) });
-    await page.screenshot({ path: path.join(outDir, "error.png") }).catch(() => {});
-    return { code: paid ? 4 : 1, paid, captures, log };
+    if (error === DRY) {
+      result = { code: 0, paid, captures, log };
+    } else {
+      log.push({ error: String(error?.message ?? error).slice(0, 400) });
+      await page.screenshot({ path: path.join(outDir, "error.png") }).catch(() => {});
+      result = { code: paid ? 4 : 1, paid, captures, log };
+    }
   } finally {
-    if (restore) log.push({ restored: await settings(restore).catch((error) => ({ error: String(error) })) });
+    // The account's own language and theme back, checked by reading them again. If that fails the
+    // caller stops (exit 5): the next recording would take the temporary values as the originals.
+    if (restore) {
+      const back = await settings(restore).catch((error) => ({ error: String(error) }));
+      const now = await settings().catch((error) => ({ error: String(error) }));
+      const restored = back.status === 200 && now.status === 200 && now.language === restore.language && (restore.theme === undefined || now.theme === restore.theme);
+      log.push({ restored, back, now });
+      if (!restored) result = { ...(result ?? { paid, captures, log }), code: 5 };
+    }
     await context.storageState({ path: state }).catch(() => {});
-    await browser.close();
+    await browser.close().catch(() => {});
   }
+  return result;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -256,20 +273,29 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
   const outDir = path.resolve(outArg);
-  if (!dry && (existsSync(path.join(outDir, "pack.json")) || existsSync(path.join(outDir, "log.json")))) {
-    console.log(JSON.stringify({ step: "fresh-review", locale, refused: "already recorded here; never sent twice" }));
-    process.exit(3);
-  }
   const question = readFileSync(questionFile, "utf8").trim();
   if (question.length < 8 || question.length > 200) {
     console.error("the question must be 8-200 characters");
     process.exit(2);
   }
   mkdirSync(outDir, { recursive: true });
+  // Claimed before the browser opens, exclusively (O_EXCL): a second run, at the same time or after
+  // a crash, a kill or an unknown end past a paid step, finds it and never sends again.
+  if (!dry) {
+    try {
+      closeSync(openSync(path.join(outDir, "started.json"), "wx"));
+      writeFileSync(path.join(outDir, "started.json"), JSON.stringify({ locale, question, at: new Date().toISOString(), pid: process.pid }));
+    } catch {
+      console.log(JSON.stringify({ step: "fresh-review", locale, refused: "a recording was started here already; never sent twice" }));
+      process.exit(3);
+    }
+  }
   const result = await record({ locale, outDir, question, dry });
   writeFileSync(path.join(outDir, dry ? "dry-log.json" : "log.json"), JSON.stringify({ locale, question, dry, ...result }, null, 2));
-  if (result.code === 0 && !dry) {
-    const pack = { assetId: `fresh-${path.basename(path.dirname(outDir))}-${locale.toLowerCase()}`, locale, topic, question, captures: result.captures };
+  // Recorded in full (exit 0, or 5 when only the settings restore failed): the pack is usable.
+  if ((result.code === 0 || result.code === 5) && !dry && result.log.every((entry) => !entry.error)) {
+    // <out-dir> is job/creative/<run>/sources/<locale>: the id names the run.
+    const pack = { assetId: `fresh-${path.basename(path.dirname(path.dirname(outDir)))}-${locale.toLowerCase()}`, locale, topic, question, captures: result.captures };
     writeFileSync(path.join(outDir, "pack.json"), JSON.stringify(pack, null, 2));
   }
   console.log(JSON.stringify({ step: "fresh-review", locale, dry, code: result.code, paid: result.paid, captures: Object.keys(result.captures), error: result.log.find((entry) => entry.error)?.error ?? null }));
