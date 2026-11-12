@@ -245,7 +245,7 @@ if (fresh) {
   const questionPrompt = [
     "Write the question a real person would type into an AI assistant about this everyday subject, once in each language: en, ko, zh-Hant (Traditional Chinese, Taiwan usage).",
     `Subject: ${subject}.`,
-    "Rules: one concrete request with a detail or two that makes the answers differ (a budget, a number of people, a constraint); 40-120 characters; natural for that language, not a translation; no brand or product names; nothing about death, illness, medicine, loss or danger; never about Tomverse or AI.",
+    "Rules: one concrete request with a detail or two that makes the answers differ (a budget, a number of people, a constraint); the same numbers in every language, so one set of shots fits all three; ask for practical help (a plan, a list, steps, a choice between options), never for novels, films, songs or other works to recommend, since the answers would name works whose themes nobody checked; 40-120 characters; natural for that language, not a translation; no brand or product names; nothing about death, illness, medicine, loss or danger; never about Tomverse or AI.",
     'Answer with one line of JSON only: {"questions": {"en": "...", "ko": "...", "zh-Hant": "..."}}',
   ].join("\n");
   const questions = jsonLine(claude("questions", questionPrompt, { tools: "Read", allowed: [fileRule("Read", "features.json")], maxTurns: 3, timeoutMinutes: 5 }), "questions");

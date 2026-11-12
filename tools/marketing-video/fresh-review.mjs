@@ -34,7 +34,10 @@ export const FRESH_REVIEW_ENV = "MARKETING_CREATIVE_FRESH_REVIEW";
 /**
  * Everyday subjects a film's question can come from. Tone (owner 2026-11-11):
  * nothing that reads as death, illness, loss or danger, so no health, medicine,
- * accidents or grief. Travel stays one subject among many.
+ * accidents or grief. Travel stays one subject among many. No subject asks for
+ * novels, films or songs: real answers name works whose themes the film cannot
+ * control (run 20261112's book club answers named The Midnight Library and
+ * 人間失格, and its review called both suicide imagery).
  */
 export const SUBJECTS = Object.freeze([
   "cooking dinner for friends",
@@ -51,7 +54,7 @@ export const SUBJECTS = Object.freeze([
   "moving to a new city",
   "a weekend hobby: film photography",
   "learning to play the guitar",
-  "picking a book club novel",
+  "setting up a weekly chore chart for a family",
   "a short travel weekend",
   "planning a family picnic",
   "budgeting for a first car",
