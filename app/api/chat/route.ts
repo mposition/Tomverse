@@ -419,9 +419,11 @@ import {
     SHADOW_CANDIDATE_ESTIMATOR_VERSION,
 } from "@/lib/tokenEstimateShadowRecorder";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { verifyingSemanticModes } from "@/lib/semanticRetrievalCore";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
     consumeContextBundle,
+    readChatContextBundleSemanticSteps,
     verifyChatContextBundle,
 } from "@/lib/chatContextBundleService";
 import {
@@ -2317,6 +2319,11 @@ async function handleChatPost(
                 profileVersionId,
                 plan: accountPlan?.tier ?? null,
                 conversationMode: memoryMode,
+                // This route verifies a bundle another route issued, and never
+                // asks the retrieval provider. The bundle says which semantic
+                // steps shaped its selection; those are rebuilt from what the
+                // issuing route stored and every other step is off.
+                semantic: verifyingSemanticModes(readChatContextBundleSemanticSteps(token)),
             });
             const verification = verifyChatContextBundle(token, {
                 subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,

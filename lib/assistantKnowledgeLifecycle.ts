@@ -328,7 +328,7 @@ export const runKnowledgeMaintenanceQuietly = async (
 ): Promise<KnowledgeMaintenanceResult> => {
     const empty = {
         cleanup: { examined: 0, deleted: 0, failed: 0, exhausted: 0 },
-        processing: { reclaimed: 0, processed: 0, ready: 0, failed: 0 },
+        processing: { reclaimed: 0, processed: 0, ready: 0, failed: 0, embedded: 0 },
     };
     try {
         const cleanup = await drainKnowledgeCleanupQueue(

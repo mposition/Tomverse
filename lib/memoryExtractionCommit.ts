@@ -2,6 +2,11 @@ import "server-only";
 
 import type { ExtractionDecision } from "@/lib/memoryExtractionPipeline";
 import { persistExtractionChunkDecisions } from "@/lib/memoryExtractionPersistence";
+import {
+    memoryDuplicatesEnabled,
+    prepareMemoryDuplicateContext,
+    sendableCandidateStatements,
+} from "@/lib/memorySemanticDuplicates";
 import { prisma } from "@/lib/prisma";
 import type { MemoryExtractionLease } from "@/lib/memoryExtractionService";
 
@@ -51,6 +56,38 @@ export type ExtractionCommitResult =
     | { committed: false; reason: "fenced_out" | "memory_off" };
 
 /**
+ * Whether this worker still owns the run and the chunk, read without a lock.
+ *
+ * Not the fence -- that is the locking read inside the transaction, and it
+ * still decides what is written. This is the same question asked early, so a
+ * worker that has already been superseded sends nothing on its way to being
+ * refused. Exported for the database test.
+ */
+export async function leaseStillHolds(input: {
+    lease: Pick<MemoryExtractionLease, "runId" | "userId" | "leaseGeneration">;
+    chunkIndex: number;
+}): Promise<boolean> {
+    try {
+        const run = await prisma.memoryExtractionRun.findFirst({
+            where: { id: input.lease.runId, userId: input.lease.userId, status: "running" },
+            select: { leaseGeneration: true },
+        });
+        if (run?.leaseGeneration !== input.lease.leaseGeneration) return false;
+        const chunk = await prisma.memoryExtractionChunk.findUnique({
+            where: {
+                runId_chunkIndex: { runId: input.lease.runId, chunkIndex: input.chunkIndex },
+            },
+            select: { status: true, leaseGeneration: true },
+        });
+        return (
+            chunk?.status === "running" && chunk.leaseGeneration === input.lease.leaseGeneration
+        );
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Writes a chunk's memories under the lease that produced them.
  *
  * The fence is a locking read on the run row: a concurrent claim has to update
@@ -65,6 +102,26 @@ export async function commitExtractionChunk(input: {
     decisions: readonly ExtractionDecision[];
     now?: Date;
 }): Promise<ExtractionCommitResult> {
+    // Before the transaction, never inside it: this may call an external
+    // provider, and the transaction below holds the run row and the account's
+    // memory lock. Null while the operator's switch is off, and on any
+    // failure -- the chunk is then stored by exact-match rules alone.
+    //
+    // Everything the transaction will refuse is checked first, because the
+    // refusal comes too late for a statement that has already been sent: a
+    // lease this worker no longer holds, an account that turned memory off,
+    // a source that was deleted or locked while the extraction call ran.
+    const semanticDuplicates =
+        (await memoryDuplicatesEnabled()) && (await leaseStillHolds(input))
+        ? await prepareMemoryDuplicateContext({
+              userId: input.lease.userId,
+              statements: await sendableCandidateStatements({
+                  userId: input.lease.userId,
+                  decisions: input.decisions,
+              }),
+          })
+        : null;
+
     return prisma.$transaction(async (tx) => {
         const runs = await tx.$queryRaw<Array<{ leaseGeneration: number }>>`
             SELECT "leaseGeneration"
@@ -109,6 +166,7 @@ export async function commitExtractionChunk(input: {
             promptVersion: input.promptVersion,
             decisions: input.decisions,
             now: input.now,
+            semanticDuplicates,
         });
         if (persisted.memoryOff) {
             // Nothing was written, and the chunk must not be reported done:

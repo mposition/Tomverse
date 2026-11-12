@@ -266,6 +266,14 @@ entitlement였습니다. §1의 숨은 USD 한도와 같은 결함입니다.
 | `cost-day` / `cost-month` | 플랜 크레딧으로 지불된 비용만 | `guardrails.planDay/planMonth` |
 | `op-cost-day` / `op-cost-month` | 플랜 + 구매 크레딧 전체 비용 | `guardrails.totalDay/totalMonth` |
 | `provider-cost-day` / `provider-cost-month` | provider 전체 지출 | `CHAT_PROVIDER_*` |
+| `retrieval-cost-day` / `retrieval-cost-month` | 의미 검색 provider(Cohere Rerank·Embed)의 지출. key `retrieval-provider:cohere` | `RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_*` |
+
+`retrieval-cost-*`는 모델 provider의 token 청구서와 다른 청구서라 자기 prefix와
+period를 씁니다(search·voice 예산과 같은 이유). 사용자 credit과 무관한 운영
+비용이며, 기본값이 어느 환경에도 없습니다 — 환경 변수가 없으면 호출하지
+않습니다. 최악값을 예약하고 provider가 보고한 `billed_units`로 정산합니다
+(`docs/policy/external-conversation-import-and-memory.md` §9a,
+`lib/semanticRetrieval.ts`).
 
 구매 크레딧으로 충당되는 비용은 `cost-*`에 들어가지 않습니다. 구매 크레딧은
 credit lot의 `remainingFundedCostMicroUsd`가 이미 제한하고 있어서, 플랜 모양의

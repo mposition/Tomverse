@@ -21,6 +21,8 @@ import {
     type ChatProfileContext,
 } from "@/lib/chatProfileContext";
 import type { ModelTier } from "@/lib/models";
+import type { SemanticStepsUsed } from "@/lib/chatContextBundleCore";
+import type { SemanticCallMode, SemanticStepModes } from "@/lib/semanticRetrievalCore";
 
 /**
  * Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -63,6 +65,11 @@ export type ChatTurnContext = {
     fingerprint: string;
     /** Completed once memory use is known. Null when no profile ran. */
     binding: ProfileRuntimeBinding | null;
+    /**
+     * Which semantic retrieval steps shaped this context (§9a). The issuing
+     * route signs it into the bundle; the verifying route rebuilds with it.
+     */
+    semanticSteps: SemanticStepsUsed;
 };
 
 export async function buildChatTurnContext(input: {
@@ -76,7 +83,27 @@ export async function buildChatTurnContext(input: {
     /** What the caller's plan already permits. A profile intersects with it. */
     entitledTools?: AssistantToolPolicy;
     now?: Date;
+    /**
+     * How semantic retrieval may run on this build
+     * (docs/policy/external-conversation-import-and-memory.md §9a).
+     *
+     * The routes that issue a context bundle leave this unset, and the steps
+     * that actually ran come back as `semanticSteps` to be signed. The route
+     * that verifies one and sends passes `verifyingSemanticModes(steps)`:
+     * every step the bundle used is reproduced from its stored outcome and
+     * every other step is off, so it rebuilds exactly the signed selection,
+     * and the send path never waits on or pays the retrieval provider.
+     */
+    semantic?: SemanticCallMode | SemanticStepModes;
 }): Promise<ChatTurnContext> {
+    const semantic: SemanticStepModes =
+        typeof input.semantic === "object"
+            ? input.semantic
+            : {
+                  memoryRerank: input.semantic ?? "allow",
+                  knowledgeNeighbours: input.semantic ?? "allow",
+                  knowledgeRerank: input.semantic ?? "allow",
+              };
     const profile = input.profileVersionId
         ? await buildChatProfileContext({
               userId: input.userId,
@@ -85,6 +112,10 @@ export async function buildChatTurnContext(input: {
               plan: input.plan ?? null,
               entitledTools:
                   input.entitledTools ?? { webSearch: true, deepResearch: true },
+              semantic: {
+                  neighbours: semantic.knowledgeNeighbours,
+                  rerank: semantic.knowledgeRerank,
+              },
           })
         : NO_PROFILE_CONTEXT;
 
@@ -97,6 +128,7 @@ export async function buildChatTurnContext(input: {
         // memory off by absence.
         profileMemoryPolicy: profile.memoryPolicy,
         now: input.now,
+        semantic: semantic.memoryRerank,
     });
 
     const systemPrompt = buildProfileSystemPrompt({
@@ -114,6 +146,11 @@ export async function buildChatTurnContext(input: {
     return {
         memory,
         profile,
+        semanticSteps: {
+            memoryRerank: memory.semanticRerank,
+            knowledgeNeighbours: profile.knowledgeSemanticSteps.neighbours,
+            knowledgeRerank: profile.knowledgeSemanticSteps.rerank,
+        },
         systemPrompt,
         memoryTokens: memory.memoryTokens,
         profileTokens: profile.profileTokens,

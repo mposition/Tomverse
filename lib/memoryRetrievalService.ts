@@ -5,6 +5,9 @@ import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
 import {
     CORE_MEMORY_KINDS,
     MEMORY_RETRIEVAL_ALGORITHM_VERSION,
+    MEMORY_SEMANTIC_DEFAULTS,
+    MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION,
+    memoryTier,
     selectMemoryContext,
     type MemoryContextBudget,
     type MemoryContextSelection,
@@ -13,6 +16,8 @@ import {
 import { getMemorySettings } from "@/lib/memoryService";
 import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
+import { rerankForRetrieval, semanticFeatureReady } from "@/lib/semanticRetrieval";
+import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
 
 /**
  * Retrieval v1 against the database (policy §9).
@@ -29,6 +34,16 @@ import { prisma } from "@/lib/prisma";
  * one only answers "given that it may be used, which memories". The single
  * exception is the account's own master toggle, which is read here so no
  * caller can forget it: with it off the answer is always empty (§8.1).
+ *
+ * ## Semantic relevance (docs/policy/external-conversation-import-and-memory.md §9a)
+ *
+ * With the operator's memory-rerank switch on, a second query adds recent
+ * relevance-gated memories that share no term with the request -- the point
+ * is to find one that shares none -- and the relevance-gated memories are
+ * scored against the request by an external model. The lexical query and its
+ * limit are unchanged, and core, pinned and style memories are untouched.
+ * When the switch is off, or the call is refused or fails, the added
+ * memories are dropped and the selection is the lexical one.
  *
  * Nothing here writes. Retrieval never re-indexes a row it happens to notice
  * is stale — a read path that mutates on read turns a user's question into a
@@ -62,6 +77,8 @@ export type MemoryRetrievalResult = MemoryContextSelection & {
     algorithmVersion: number;
     /** How many rows the query returned before scoring, for §22 metrics. */
     consideredCount: number;
+    /** Whether an external ranking shaped this selection (§9a). */
+    semanticRerank: boolean;
 };
 
 const EMPTY_RESULT: MemoryRetrievalResult = {
@@ -79,6 +96,7 @@ const EMPTY_RESULT: MemoryRetrievalResult = {
     resultHash: "",
     algorithmVersion: MEMORY_RETRIEVAL_ALGORITHM_VERSION,
     consideredCount: 0,
+    semanticRerank: false,
 };
 
 const hashSignature = (signature: string) =>
@@ -153,6 +171,12 @@ export async function retrieveMemoryContext(input: {
     now?: Date;
     budget?: Partial<MemoryContextBudget>;
     /**
+     * "cached_only" on the route that verifies a context bundle: the rerank
+     * reuses what the issuing route stored and never calls the provider.
+     * Defaults to "allow".
+     */
+    semantic?: SemanticCallMode;
+    /**
      * Extraction pairs whose memories may be injected (§12.4). Omit to
      * consider every stored memory — which is right for diagnostics and for
      * the account's own review screens, and never right for a prompt.
@@ -169,15 +193,52 @@ export async function retrieveMemoryContext(input: {
     }
 
     const queryTerms = memoryRetrievalTerms(input.query);
+
+    // What every candidate has to satisfy, whichever query fetches it.
+    const eligible = [
+        // Expiry is filtered here as well as in the scorer: a row that
+        // expired last month should not occupy one of the candidate
+        // slots just to be dropped after it was fetched.
+        { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+        ...(input.approvedPairs ? [provenanceFilter(input.approvedPairs)] : []),
+        reachableEvidenceFilter,
+    ];
+    const select = {
+        id: true,
+        kind: true,
+        statement: true,
+        conflictKey: true,
+        confidence: true,
+        importance: true,
+        pinned: true,
+        searchTerms: true,
+        expiresAt: true,
+        createdAt: true,
+        approvedAt: true,
+        // The source of a memory is the *conversation* its evidence came
+        // from, not the message: the diversity cap exists so one imported
+        // conversation cannot supply the whole context, and two messages
+        // from the same conversation are one source.
+        evidences: {
+            select: {
+                externalMessage: {
+                    select: {
+                        externalConversationId: true,
+                        // Read so a locked snapshot can be dropped from the
+                        // source set below.
+                        conversation: { select: { password: true } },
+                    },
+                },
+            },
+        },
+    } as const;
+
     const rows = await prisma.memoryItem.findMany({
         where: {
             userId: input.userId,
             status: RETRIEVABLE_STATUS,
             AND: [
-                // Expiry is filtered here as well as in the scorer: a row that
-                // expired last month should not occupy one of the candidate
-                // slots just to be dropped after it was fetched.
-                { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+                ...eligible,
                 // The candidate union has to mirror what the scorer considers
                 // always-relevant, or the two disagree and the disagreement is
                 // invisible: a core or style memory the scorer would never
@@ -194,46 +255,45 @@ export async function retrieveMemoryContext(input: {
                           },
                       ]
                     : []),
-                ...(input.approvedPairs
-                    ? [provenanceFilter(input.approvedPairs)]
-                    : []),
-                reachableEvidenceFilter,
             ],
         },
         orderBy: [{ pinned: "desc" }, { importance: "desc" }, { id: "asc" }],
         take: MAX_CANDIDATES,
-        select: {
-            id: true,
-            kind: true,
-            statement: true,
-            conflictKey: true,
-            confidence: true,
-            importance: true,
-            pinned: true,
-            searchTerms: true,
-            expiresAt: true,
-            createdAt: true,
-            approvedAt: true,
-            // The source of a memory is the *conversation* its evidence came
-            // from, not the message: the diversity cap exists so one imported
-            // conversation cannot supply the whole context, and two messages
-            // from the same conversation are one source.
-            evidences: {
-                select: {
-                    externalMessage: {
-                        select: {
-                            externalConversationId: true,
-                            // Read so a locked snapshot can be dropped from the
-                            // source set below.
-                            conversation: { select: { password: true } },
-                        },
-                    },
-                },
-            },
-        },
+        select,
     });
 
-    const memories: RetrievableMemory[] = rows.map((row) => ({
+    // Semantic candidates (§9a) are fetched beside the lexical ones, never
+    // instead of them. The query above is exactly the lexical query, with its
+    // own limit, so nothing it would have returned can be pushed out by a
+    // memory that is only here to be reranked -- and when the rerank is
+    // refused or fails, the extras are dropped and the selection is the
+    // lexical one, row for row. The extras are relevance-gated memories that
+    // share no term with the request, newest first, at most one search unit's
+    // worth. A request with no usable term asks for none: there is nothing to
+    // rank them against.
+    const rerank =
+        input.semantic !== "off" &&
+        queryTerms.length > 0 &&
+        (await semanticFeatureReady("memoryRerank")) !== null;
+    const extraRows = rerank
+        ? await prisma.memoryItem.findMany({
+              where: {
+                  userId: input.userId,
+                  status: RETRIEVABLE_STATUS,
+                  AND: [
+                      ...eligible,
+                      { id: { notIn: rows.map((row) => row.id) } },
+                      { pinned: false },
+                      { kind: { notIn: ALWAYS_CONSIDERED_KINDS } },
+                  ],
+              },
+              orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+              take: MEMORY_SEMANTIC_DEFAULTS.maxRerankCandidates,
+              select,
+          })
+        : [];
+
+    const toMemory = (row: (typeof rows)[number]): RetrievableMemory => ({
         id: row.id,
         kind: row.kind,
         statement: row.statement,
@@ -263,20 +323,48 @@ export async function retrieveMemoryContext(input: {
                     .filter((id): id is string => Boolean(id))
             ),
         ],
-    }));
+    });
+    const memories = rows.map(toMemory);
+    const extras = extraRows.map(toMemory);
+
+    // Only the memories the selector would relevance-gate are sent -- the
+    // lexical candidates first, in the query's own deterministic order, then
+    // the extras -- and never one that has expired.
+    const externalRelevance = rerank
+        ? await rerankForRetrieval({
+              feature: "memoryRerank",
+              userId: input.userId,
+              query: input.query,
+              documents: [...memories, ...extras]
+                  .filter(
+                      (memory) =>
+                          memoryTier(memory) === "relevant" &&
+                          !(memory.expiresAt && memory.expiresAt.getTime() <= now.getTime())
+                  )
+                  .slice(0, MEMORY_SEMANTIC_DEFAULTS.maxRerankCandidates)
+                  .map((memory) => ({ id: memory.id, text: memory.statement })),
+              now,
+              mode: input.semantic,
+          })
+        : null;
 
     const selection = selectMemoryContext({
-        memories,
+        // Without a ranking the extras were never candidates.
+        memories: externalRelevance ? [...memories, ...extras] : memories,
         query: queryTerms,
         now,
         styleEnabled: settings.styleEnabled,
         budget: input.budget,
+        ...(externalRelevance ? { externalRelevance } : {}),
     });
 
     return {
         ...selection,
         resultHash: hashSignature(selection.signature),
-        algorithmVersion: MEMORY_RETRIEVAL_ALGORITHM_VERSION,
-        consideredCount: rows.length,
+        algorithmVersion: externalRelevance
+            ? MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION
+            : MEMORY_RETRIEVAL_ALGORITHM_VERSION,
+        consideredCount: rows.length + (externalRelevance ? extraRows.length : 0),
+        semanticRerank: externalRelevance !== null,
     };
 }

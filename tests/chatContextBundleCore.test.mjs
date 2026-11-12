@@ -8,6 +8,7 @@ import {
     issueContextBundle,
     memoryStateFingerprint,
     pricedMemoryRetrievalHash,
+    readContextBundleSemanticSteps,
     verifyContextBundle,
 } from "../lib/chatContextBundleCore.ts";
 import { selectMemoryContext } from "../lib/memoryRetrievalScoring.ts";
@@ -48,6 +49,7 @@ const payload = (overrides = {}) => ({
     memoryTokens: 120,
     profileTokens: 0,
     expiresAtMs: NOW.getTime() + 60_000,
+    semanticSteps: { memoryRerank: false, knowledgeNeighbours: false, knowledgeRerank: false },
     ...fingerprintInput(),
     ...overrides,
 });
@@ -442,4 +444,65 @@ test("clock-driven score drift preserves the priced prompt; content, order, dele
         { profileVersion: "profile:3" }, { knowledgeHash: "changed" }, { promptVersion: "next" }]) {
         assert.deepEqual(verify(changes), { ok: false, reason: "stale" });
     }
+});
+
+/* ------------------------------------------- semantic steps (docs/policy/external-conversation-import-and-memory.md §9a) -- */
+
+const reSign = (body) =>
+    `${body}.${createHmac("sha256", SECRET).update(`chat-context-bundle.v1.${body}`).digest("base64url")}`;
+const bodyOf = (token) =>
+    JSON.parse(Buffer.from(token.slice(0, token.lastIndexOf(".")), "base64url").toString("utf8"));
+const withBody = (record) => reSign(Buffer.from(JSON.stringify(record), "utf8").toString("base64url"));
+
+test("the steps a bundle was issued with are signed and read back", () => {
+    for (const semanticSteps of [
+        { memoryRerank: false, knowledgeNeighbours: false, knowledgeRerank: false },
+        { memoryRerank: true, knowledgeNeighbours: false, knowledgeRerank: true },
+        { memoryRerank: true, knowledgeNeighbours: true, knowledgeRerank: true },
+    ]) {
+        const token = issueContextBundle(payload({ semanticSteps }), SECRET);
+        assert.deepEqual(readContextBundleSemanticSteps(token, SECRET), semanticSteps);
+        const verified = verifyContextBundle(token, verifyOptions());
+        assert.equal(verified.ok, true);
+        assert.deepEqual(verified.payload.semanticSteps, semanticSteps);
+    }
+});
+
+test("the steps are not part of the fingerprint", () => {
+    const lexical = payload();
+    const semantic = payload({
+        semanticSteps: { memoryRerank: true, knowledgeNeighbours: true, knowledgeRerank: true },
+    });
+    assert.equal(contextFingerprint(lexical), contextFingerprint(semantic));
+});
+
+test("a bundle issued before the field existed reads as no step used", () => {
+    const record = bodyOf(issueContextBundle(payload(), SECRET));
+    delete record.ss;
+    const token = withBody(record);
+    assert.deepEqual(readContextBundleSemanticSteps(token, SECRET), {
+        memoryRerank: false,
+        knowledgeNeighbours: false,
+        knowledgeRerank: false,
+    });
+    assert.equal(verifyContextBundle(token, verifyOptions()).ok, true);
+});
+
+test("a step field of any other shape is malformed, even when signed", () => {
+    const record = bodyOf(issueContextBundle(payload(), SECRET));
+    for (const ss of ["x", "rm", "mm", 1, null, ["m"]]) {
+        const token = withBody({ ...record, ss });
+        assert.equal(readContextBundleSemanticSteps(token, SECRET), null, JSON.stringify(ss));
+        assert.deepEqual(verifyContextBundle(token, verifyOptions()), { ok: false, reason: "malformed" });
+    }
+});
+
+test("steps are read only from a token whose signature verifies", () => {
+    const token = issueContextBundle(
+        payload({ semanticSteps: { memoryRerank: true, knowledgeNeighbours: false, knowledgeRerank: false } }),
+        SECRET
+    );
+    assert.equal(readContextBundleSemanticSteps(token, "another-secret"), null);
+    assert.equal(readContextBundleSemanticSteps(`${token}x`, SECRET), null);
+    assert.equal(readContextBundleSemanticSteps("", SECRET), null);
 });

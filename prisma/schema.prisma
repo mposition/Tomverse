@@ -119,6 +119,7 @@ model User {
   assistantProfileVersions             AssistantProfileVersion[]
   assistantKnowledgeFiles              AssistantKnowledgeFile[]
   assistantKnowledgeChunks             AssistantKnowledgeChunk[]
+  semanticRetrievalCache               SemanticRetrievalCache[]
   assistantProfileImports              AssistantProfileImport[]
   assistantKnowledgeUploadReservations AssistantKnowledgeUploadReservation[]
   emailPreferences                     EmailPreference[]
@@ -3558,6 +3559,16 @@ model MemoryItem {
   searchTerms      String[] @default([])
   retrievalVersion Int      @default(1)
 
+  /// Semantic vector of `statement` (docs/policy/external-conversation-import-and-memory.md §9a): int8 values, one byte each, written
+  /// only while the operator's duplicate-detection switch is on. Null for a
+  /// row that was never embedded -- which is every row until then.
+  /// `embeddingModel` names the provider, model and dimension that produced
+  /// it, followed by a digest of the statement it was computed from. A vector
+  /// under another label -- another model, or wording that has since been
+  /// edited -- is not comparable and is skipped.
+  embedding      Bytes?
+  embeddingModel String?
+
   revision   Int     @default(1)
   userEdited Boolean @default(false)
 
@@ -4110,6 +4121,15 @@ model AssistantKnowledgeChunk {
   searchTerms      String[] @default([])
   retrievalVersion Int      @default(1)
 
+  /// Semantic vector of this chunk (docs/policy/external-conversation-import-and-memory.md §9a): int8 values, one byte each. Null
+  /// until the operator turns knowledge embedding on and the chunk is
+  /// embedded; a null row is still found by lexical retrieval. For a scanned
+  /// page (`sourceMetadata.kind = "image_page"`) the vector is of the page
+  /// image, since the page has no text to embed. `embeddingModel` names the
+  /// provider, model and dimension; a vector under another label is skipped.
+  embedding      Bytes?
+  embeddingModel String?
+
   /// Where in the document this chunk came from -- character offsets, and the
   /// page for a PDF. Metadata for a citation, never content.
   sourceMetadata Json?
@@ -4119,6 +4139,30 @@ model AssistantKnowledgeChunk {
   @@unique([fileId, ordinal])
   @@index([userId])
   @@index([searchTerms(ops: ArrayOps)], type: Gin, map: "AssistantKnowledgeChunk_searchTerms_gin_idx")
+}
+
+/// Policy: docs/policy/external-conversation-import-and-memory.md §9a.
+/// The outcome of one semantic retrieval call, kept for the minutes a context
+/// bundle lives.
+///
+/// A turn's context is rebuilt on up to three routes and refused when the
+/// rebuilt fingerprint differs from the signed one, so the first outcome for
+/// a (question, candidates) pair has to be the outcome for all of them. `key`
+/// is a SHA-256 over the model, the question and the candidate texts; `value`
+/// holds candidate ids with scores, a query vector, or a recorded failure --
+/// never memory or knowledge text. Rows are swept after `expiresAt` and go
+/// with the account.
+model SemanticRetrievalCache {
+  key    String @id
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  value     Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
 }
 
 /// Policy: docs/policy/assistant-package-import.md §5, §6.
