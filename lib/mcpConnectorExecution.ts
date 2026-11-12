@@ -7,7 +7,7 @@ import { withMcpClient } from "@/lib/mcpConnectorClient";
 import { MCP_LIMITS, MCP_UNTRUSTED_NOTICE, McpConnectorError } from "@/lib/mcpConnectorPolicy";
 import { mcpServerFor } from "@/lib/mcpCustomServers";
 import { connectorInputSchema, normalizeMcpResult, validateMcpArguments } from "@/lib/mcpConnectorSchema";
-import { auditMcp, decryptMcpSecret, encryptMcpSecret, mcpPolicyDigest, ownMcpConnection, parseMcpGrants } from "@/lib/mcpConnectorStore";
+import { auditMcp, decryptMcpSecret, encryptMcpSecret, mcpConnectionCurrent, ownMcpConnection, parseMcpGrants } from "@/lib/mcpConnectorStore";
 import { containsMcpCredential } from "@/lib/mcpConnectorSecrets";
 import { githubIssueReadSources, githubIssueSearchIsEmpty, validateGithubRepositoryScope } from "@/lib/mcpConnectorGitHub";
 
@@ -53,7 +53,7 @@ async function performMcp(input: { userId: string; connectionId: string; version
   let checking = false, dispatched = false;
   const current = async () => {
     const row = await ownMcpConnection(userId, connectionId);
-    if (row.version !== version || row.leaseId !== leaseId || row.policyDigest !== mcpPolicyDigest(await mcpServerFor(userId, row.serverId))) throw new McpConnectorError("connection_changed", 409);
+    if (row.version !== version || row.leaseId !== leaseId || !mcpConnectionCurrent(await mcpServerFor(userId, row.serverId), row)) throw new McpConnectorError("connection_changed", 409);
     return row;
   };
   // The DB fence and result check work across instances; this poll additionally

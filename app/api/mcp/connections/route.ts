@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { mcpApi } from "@/lib/mcpConnectorApi";
-import { isCustomMcpServerId, mcpCustomServersEnabled, mcpPreviewEnabled, mcpServers } from "@/lib/mcpConnectorPolicy";
+import { isCustomMcpServerId, mcpCustomServersEnabled, mcpPreviewEnabled, mcpServers, splitMcpScope } from "@/lib/mcpConnectorPolicy";
 import { connectMcp, forgetUnusedCustomMcpServer, listMcpConnections, registerCustomMcpServer } from "@/lib/mcpConnectorStore";
 import { customMcpServerInputSchema, listCustomMcpServers } from "@/lib/mcpCustomServers";
 import { listMcpInvocations } from "@/lib/mcpConnectorExecution";
@@ -12,7 +12,8 @@ export function GET(request: Request) {
     const connections = await listMcpConnections(userId);
     const servers = [...mcpServers(), ...await listCustomMcpServers(userId)];
     return { enabled: true, customEnabled: mcpCustomServersEnabled(),
-      servers: servers.map(({ id, name, auth, url }) => ({ id, name, auth, origin: new URL(url).origin, ...(isCustomMcpServerId(id) ? { custom: true } : {}) })),
+      servers: servers.map(({ id, name, auth, url, oauth }) => ({ id, name, auth, origin: new URL(url).origin, ...(isCustomMcpServerId(id) ? { custom: true } : {}),
+        ...(oauth?.selectableScopes ? { scopes: oauth.selectableScopes, defaultScopes: splitMcpScope(oauth.scope) } : {}) })),
       connections, invocations: await listMcpInvocations(userId) };
   });
 }

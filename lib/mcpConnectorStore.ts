@@ -10,11 +10,13 @@ import { withMcpClient } from "@/lib/mcpConnectorClient";
 import { connectorInputSchema } from "@/lib/mcpConnectorSchema";
 import { containsMcpCredential } from "@/lib/mcpConnectorSecrets";
 import { GITHUB_ISSUE_TOOLS } from "@/lib/mcpConnectorGitHub";
-import { MCP_LIMITS, McpConnectorError, isCustomMcpServerId, mcpCustomServersEnabled, mcpServers, type McpGrant, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
+import { MCP_LIMITS, McpConnectorError, isCustomMcpServerId, mcpCustomServersEnabled, mcpScopedServer, mcpServers, type McpGrant, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
 import { assertPublicCustomMcpUrl, customMcpServerName, customMcpServerPolicy, discoverCustomOAuth, listCustomMcpServers, mcpServerFor, normalizeCustomMcpUrl,
   type customMcpServerInputSchema } from "@/lib/mcpCustomServers";
 
-export const mcpPolicyDigest = (server: McpServerPolicy) => createHash("sha256").update(JSON.stringify(server)).digest("hex");
+/** Digest of the policy a connection or flow runs under (default scope unless `scopes` is given). */
+export const mcpPolicyDigest = (server: McpServerPolicy, scopes?: readonly string[]) =>
+  createHash("sha256").update(JSON.stringify(mcpScopedServer(server, scopes))).digest("hex");
 export const encryptMcpSecret = (value: string) => {
   if (value.startsWith("enc:v1:")) throw new McpConnectorError("invalid_credential");
   return encryptOAuthAccountTokens({ access_token: value }).access_token;
@@ -23,6 +25,20 @@ export const decryptMcpSecret = (value: string | null) => decryptOAuthToken(valu
 export const mcpGrantSchema = z.object({ name: z.string().min(1).max(128), mode: z.enum(["read", "confirm"]), inputSchema: z.record(z.string(), z.unknown()) }).strict();
 export const parseMcpGrants = (v: unknown): McpGrant[] => z.array(mcpGrantSchema).max(MCP_LIMITS.tools).parse(v);
 export const parseMcpCatalog = (v: unknown): McpGrant[] => z.array(mcpGrantSchema).max(MCP_LIMITS.catalogTools).parse(v);
+
+const storedScopesSchema = z.object({ scopes: z.array(z.string().max(200)).max(64).optional() });
+/** The user's scope choice lives inside the encrypted OAuth session, so it cannot be edited in place. */
+export function mcpConnectionScopes(oauthCiphertext: string | null): string[] | undefined {
+  if (!oauthCiphertext) return undefined;
+  const parsed = storedScopesSchema.safeParse(JSON.parse(decryptMcpSecret(oauthCiphertext) || "{}"));
+  if (!parsed.success) throw new McpConnectorError("connection_unavailable", 409);
+  return parsed.data.scopes;
+}
+/** False when the server policy or the scope bound changed since this connection was made. */
+export function mcpConnectionCurrent(server: McpServerPolicy, row: { policyDigest: string; oauthCiphertext: string | null }) {
+  try { return row.policyDigest === mcpPolicyDigest(server, mcpConnectionScopes(row.oauthCiphertext)); }
+  catch { return false; }
+}
 
 export async function auditMcp(tx: Prisma.TransactionClient, userId: string, action: string, id: string, targetType = "McpConnection") {
   await writeAdminAuditLog({ tx, session: { user: { id: userId }, expires: "" },
@@ -34,7 +50,7 @@ export async function ownMcpConnection(userId: string, id: string, active = true
   if (!row) throw new McpConnectorError("connection_not_found", 404);
   if (active) {
     const server = await mcpServerFor(userId, row.serverId);
-    if (row.status !== "connected" || row.policyDigest !== mcpPolicyDigest(server)) throw new McpConnectorError("connection_unavailable", 409);
+    if (row.status !== "connected" || !mcpConnectionCurrent(server, row)) throw new McpConnectorError("connection_unavailable", 409);
   }
   return row;
 }
@@ -43,19 +59,23 @@ export async function listMcpConnections(userId: string) {
   await prisma.mcpInvocation.updateMany({ where: { userId, expiresAt: { lte: new Date() }, argumentsCiphertext: { not: null } },
     data: { argumentsCiphertext: null, state: "expired" } });
   const rows = await prisma.mcpConnection.findMany({ where: { userId }, orderBy: { createdAt: "asc" },
-    select: { id: true, serverId: true, status: true, catalog: true, grants: true, version: true, policyDigest: true, createdAt: true } });
+    select: { id: true, serverId: true, status: true, catalog: true, grants: true, version: true, policyDigest: true, oauthCiphertext: true, createdAt: true } });
   const servers = [...mcpServers(), ...await listCustomMcpServers(userId)];
   return rows.map(row => {
     const policy = servers.find(server => server.id === row.serverId);
+    let scopes: string[] | undefined;
+    try { scopes = mcpConnectionScopes(row.oauthCiphertext); } catch { scopes = undefined; }
     return { id: row.id, serverId: row.serverId, name: policy?.name || row.serverId,
-      status: row.status === "connected" && (!policy || row.policyDigest !== mcpPolicyDigest(policy)) ? "unavailable" : row.status,
-      catalog: row.catalog, grants: row.grants, version: row.version, createdAt: row.createdAt };
+      status: row.status === "connected" && (!policy || !mcpConnectionCurrent(policy, row)) ? "unavailable" : row.status,
+      catalog: row.catalog, grants: row.grants, version: row.version, createdAt: row.createdAt,
+      ...(row.status !== "disconnected" && scopes ? { scopes } : {}) };
   });
 }
 
 export async function connectMcp(userId: string, serverId: string, credential?: string, signal?: AbortSignal,
-  oauthSession?: { tokens: OAuthTokens; clientInformation?: OAuthClientInformationMixed; expectedVersion: number | null }) {
+  oauthSession?: { tokens: OAuthTokens; clientInformation?: OAuthClientInformationMixed; expectedVersion: number | null; scopes?: string[] }) {
   const server = await mcpServerFor(userId, serverId);
+  const policyDigest = mcpPolicyDigest(server, oauthSession?.scopes);
   const previous = await prisma.mcpConnection.findUnique({ where: { userId_serverId: { userId, serverId } }, select: { id: true, version: true, status: true } });
   if (server.auth === "oauth" && (!oauthSession || (previous?.version ?? null) !== oauthSession.expectedVersion)) throw new McpConnectorError("oauth_required", 409);
   if ((!previous || previous.status === "disconnected") && await prisma.mcpConnection.count({ where: { userId, status: { not: "disconnected" } } }) >= MCP_LIMITS.connections) throw new McpConnectorError("connection_limit", 429);
@@ -84,8 +104,9 @@ export async function connectMcp(userId: string, serverId: string, credential?: 
     const current = await tx.mcpConnection.findUnique({ where: { userId_serverId: { userId, serverId } }, select: { id: true, version: true } });
     if (previous ? current?.version !== previous.version : current !== null) throw new McpConnectorError("connection_changed", 409);
     if ((!previous || previous.status === "disconnected") && await tx.mcpConnection.count({ where: { userId, status: { not: "disconnected" } } }) >= MCP_LIMITS.connections) throw new McpConnectorError("connection_limit", 429);
-    const data = { status: "connected", policyDigest: mcpPolicyDigest(server), credentialCiphertext: ciphertext,
-      oauthCiphertext: oauthSession ? encryptMcpSecret(JSON.stringify({ tokens: oauthSession.tokens, clientInformation: oauthSession.clientInformation })) : null,
+    const data = { status: "connected", policyDigest, credentialCiphertext: ciphertext,
+      oauthCiphertext: oauthSession ? encryptMcpSecret(JSON.stringify({ tokens: oauthSession.tokens, clientInformation: oauthSession.clientInformation,
+        ...(oauthSession.scopes ? { scopes: oauthSession.scopes } : {}) })) : null,
       catalog: catalog as Prisma.InputJsonValue };
     const row = previous ? await tx.mcpConnection.update({ where: { id: previous.id, version: previous.version }, data: { ...data, grants: [], version: { increment: 1 } } }) :
       await tx.mcpConnection.create({ data: { userId, serverId, ...data } });
