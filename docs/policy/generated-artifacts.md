@@ -893,10 +893,19 @@ OpenDocument(`odt`·`odp`·`ods`), Office 97-2003(`doc`·`ppt`·`xls`), `rtf`,
 - 결과에 대한 검사는 하나다: PDF여야 한다(`%PDF-`). 25 MB를 넘으면 읽기를 멈춘다.
   시간 제한 90초.
 
-### 15.3 실패
+### 15.3 보내기 전 측정과 실패
+
+렌더러는 **공용 서비스**다. 한 문서가 수 GB로 부풀면 모두의 변환이 멈춘다. 텍스트
+리더는 자기가 읽는 부분(HWPX의 본문 section 등)만 풀기 때문에, 그림 항목에 숨긴
+압축 폭탄은 그 검사를 지나 LibreOffice에 닿을 수 있다. 그래서 렌더러로 보내기 전에
+`lib/officeRenderInput.ts`가 **압축된 모든 부분을 실제로** 입력 4 KB씩 풀어 나온
+바이트를 세고 버린다: ZIP 기반 문서(OOXML·ODF·HWPX·iWork)는 모든 항목, HWP 5.x는
+압축 플래그가 있으면 모든 스트림. 합이 200 MB를 넘거나 항목이 2만 개를 넘으면 보내지
+않고 `spec_rejected`로 거절한다(독립 검토 2026-11-13).
 
 | 렌더러 응답 | 카드 |
 |---|---|
+| (보내기 전) 실제 팽창 200 MB 초과·읽을 수 없는 ZIP | `spec_rejected` |
 | 400 (LibreOffice가 문서를 거절) | `spec_rejected` — 손상·암호 파일일 수 있다 |
 | 503·시간 초과·연결 실패·그 밖의 응답·PDF가 아닌 응답 | `generation_failed` — 잠시 뒤 다시 |
 | 25 MB 초과 | `limit_exceeded` |

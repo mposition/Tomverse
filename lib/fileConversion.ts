@@ -60,6 +60,7 @@ import {
   type OfficeDocument,
   type OfficeRenderResult,
 } from "@/lib/officeRenderer";
+import { measureRenderInput } from "@/lib/officeRenderInput";
 import {
   SpreadsheetDataError,
   readSpreadsheetGrid,
@@ -442,6 +443,18 @@ const renderOfficeSources = async (
     }
     let pdf = rendered.get(source.handle);
     if (!pdf) {
+      // Measured here, every compressed part inflated and counted, because
+      // the renderer is shared and the text readers only open the parts they
+      // read (generated-artifacts.md section 15.3).
+      const verdict = measureRenderInput(source.mediaType, source.bytes);
+      if (!verdict.ok) {
+        throw new FileConversionError(
+          "OFFICE_UNREADABLE",
+          verdict.reason === "EXPANDS_TOO_FAR"
+            ? `${source.handle} ("${source.name}") expands past what can be laid out safely.`
+            : `${source.handle} ("${source.name}") could not be opened to lay it out.`
+        );
+      }
       const result = await render({ mediaType: source.mediaType, bytes: source.bytes });
       if (!result.ok) {
         switch (result.failure) {

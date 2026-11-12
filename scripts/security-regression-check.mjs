@@ -3085,9 +3085,9 @@ const checks = [
         // allocated before the budget sees it.
         hwp.includes("inflateRawBounded") &&
         hwp.includes("visitZipEntries") &&
-        !/(inflateSync|unzipSync|gunzipSync|unzlibSync)/.test(hwp) &&
+        !/\b(inflateSync|unzipSync|gunzipSync|unzlibSync)\s*\(/.test(hwp) &&
         bounded.includes("INFLATE_INPUT_CHUNK") &&
-        !/(inflateSync|unzipSync|gunzipSync|unzlibSync)/.test(bounded) &&
+        !/\b(inflateSync|unzipSync|gunzipSync|unzlibSync)\s*\(/.test(bounded) &&
         !/\b(createDecipheriv|createHash|rc4|crypto)\b/i.test(
             parsers.join("\n")
         ) &&
