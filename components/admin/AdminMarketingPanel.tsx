@@ -143,9 +143,12 @@ const capOverride = (value: string): number | null => {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
 };
 
+/** How long an approval lasts unless the person types another expiry. */
+const APPROVAL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** A week out, which is the ordinary answer and still an editable one. */
 const defaultApprovalExpiry = () =>
-  localDateTimeValue(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString());
+  localDateTimeValue(new Date(Date.now() + APPROVAL_WINDOW_MS).toISOString());
 
 const POST = (id: unknown, action: string) =>
   `/api/admin/marketing/posts/${encodeURIComponent(String(id))}/${action}`;
@@ -447,6 +450,15 @@ export function AdminMarketingPanel({
                       () => readDailyScheduleLatest(channel)
                     ),
                   ]}
+                  section={view.section}
+                  onDone={done}
+                  m={m}
+                  appearance="block"
+                />
+              ) : null}
+              {view.section === "queue" && view.canWrite ? (
+                <MarketingActionRail
+                  actions={queueBulkActions(rows, m)}
                   section={view.section}
                   onDone={done}
                   m={m}
@@ -1786,7 +1798,102 @@ function queueActions(row: Row, m: Record<string, string>): MarketingAction[] {
   return actions;
 }
 
-const TEMPLATE_SOURCE = new Set(["approved", "scheduled", "published", "verified"]);
+/** `{key}` in a sentence, every one of them, replaced by its value. */
+const fill = (sentence: string, values: Record<string, string | number>) =>
+  sentence.replace(/\{(\w+)\}/gu, (whole, key: string) => (key in values ? String(values[key]) : whole));
+
+/** "account · Channel: n", one line per account, so the person sees where the posts go. */
+const perAccount = (rows: readonly Row[]) => {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const key = `${str(row.accountSlug)} · ${channelName(row.channel)}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts]
+    .sort(([x], [y]) => x.localeCompare(y))
+    .map(([key, n]) => `${key}: ${n}`)
+    .join("\n");
+};
+
+/**
+ * One press for every waiting card on this page (owner request 2026-11-12):
+ * reject them all, or approve them all. The cards are the ones drawn, so the
+ * channel filter narrows them too. Each card is sent through its own route
+ * with the digest and history version this page showed, so it keeps its own
+ * permission check, its own conflict check and its own audit entry; a card
+ * that changed since is refused, not decided.
+ *
+ * Approving is the person's gate before a post can go out, so approve-all
+ * leaves out what a person would stop at on the card: a legal hold, and a
+ * Guard block (an edit can leave a waiting card with a rejecting verdict).
+ * Those are counted, with the reason, in the question and in the result. The
+ * expiry is the one a single approval starts with, a week from the press.
+ */
+export function queueBulkActions(rows: Row[], m: Record<string, string>): MarketingAction[] {
+  const pending = rows.filter((row) => str(row.status) === "pending_approval");
+  if (pending.length === 0) return [];
+  const held = pending.filter((row) => row.legalHold === true);
+  const blocked = pending.filter(
+    (row) => row.legalHold !== true && guardTone(row.guardDecision) === "danger"
+  );
+  const approvable = pending.filter(
+    (row) => row.legalHold !== true && guardTone(row.guardDecision) !== "danger"
+  );
+  const skips = {
+    skipped: held.length + blocked.length,
+    held: held.length,
+    blocked: blocked.length,
+  };
+  const outcome = (done: string, result: unknown, skipped: boolean) => {
+    const { sent, failed, unsent } = result as MarketingBatchResult;
+    return [
+      fill(done, { sent, failed, ...skips }),
+      skipped && skips.skipped > 0 ? fill(m.bulkSkippedWhy, skips) : null,
+      failed > 0 ? m.bulkFailedNote : null,
+      unsent > 0 ? fill(m.bulkStopped, { unsent }) : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  };
+
+  const reject: MarketingAction = {
+    id: "reject-all-pending",
+    danger: true,
+    label: fill(m.actRejectAllPending, { n: pending.length }),
+    path: "",
+    confirm: fill(m.confirmRejectAllPending, { n: pending.length, accounts: perAccount(pending) }),
+    body: () => null,
+    batch: () => pending.map((row) => ({ path: POST(row.id, "reject"), body: postCas(row) })),
+    describe: (result) => outcome(m.bulkRejectResult, result, false),
+  };
+  const approve: MarketingAction = {
+    id: "approve-all-pending",
+    primary: true,
+    icon: "check",
+    label: fill(m.actApproveAllPending, { n: approvable.length }),
+    path: "",
+    confirm: [
+      fill(m.confirmApproveAllPending, { n: approvable.length, accounts: perAccount(approvable) }),
+      skips.skipped > 0 ? fill(m.bulkSkippedWhy, skips) : null,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    body: () => null,
+    // Built after the person said yes, so the week starts from then.
+    batch: () => {
+      const approvalExpiresAt = new Date(Date.now() + APPROVAL_WINDOW_MS).toISOString();
+      return approvable.map((row) => ({
+        path: POST(row.id, "approve"),
+        body: { ...postCas(row), approvalExpiresAt },
+      }));
+    },
+    describe: (result) => outcome(m.bulkApproveResult, result, true),
+    unavailable: approvable.length === 0 ? fill(m.approveAllNoneApprovable, skips) : undefined,
+  };
+  return [reject, approve];
+}
+
+const TEMPLATE_SOURCE =new Set(["approved", "scheduled", "published", "verified"]);
 
 /**
  * The account states in which the publisher is not taking posts.

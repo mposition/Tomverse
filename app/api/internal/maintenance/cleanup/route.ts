@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { cleanupExpiredData } from "@/lib/maintenance";
+import { readChatPresearchLatency } from "@/lib/chatPresearchLatency";
 import { summarizeMaintenanceStepFailures } from "@/lib/maintenanceStepsCore";
 import { runFeedbackAutoFixShadowWorker } from "@/lib/feedbackAutoFixShadow";
 import { runScheduledOptimizerCycle } from "@/lib/autoRewriteOptimizer";
@@ -155,12 +156,16 @@ export async function POST(request: Request) {
     // copied down (lib/modelCatalogEnvSync.ts). After the response, so a slow
     // production read never holds up the cleanup; it reports its own failure.
     after(() => runWeeklyModelCatalogEnvSync());
+    const chatPresearchLatency = await readChatPresearchLatency().catch(() => ({
+      status: "unavailable", asOf: new Date().toISOString(),
+    }));
+    console.info(JSON.stringify({ event: "chat_presearch_latency_daily", ...chatPresearchLatency }));
     const deleted = await cleanupExpiredData();
     const processedCount = Object.values(deleted).reduce<number>(
       (sum, value) => sum + (typeof value === "number" ? value : 0),
       0
     );
-    const result = JSON.parse(JSON.stringify(deleted));
+    const result = JSON.parse(JSON.stringify({ ...deleted, chatPresearchLatency }));
 
     // A step that threw no longer ends the run, so a run can finish with work
     // both done and undone. That is still a failure -- the same alert has to

@@ -38,6 +38,16 @@ precision and link each value to its source. Analysis and derivations retain
 the detail the user requested. The model can still search to resolve incomplete
 or conflicting evidence.
 
+To compare the evidence format, leave concise grounded answers enabled and
+toggle `CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED` (default off). A single query
+uses the tool's ordinary single-result format. For a batch, each query
+references its ordered extracts and identical extracts appear once. Different
+snippets or dates from the same URL remain distinct. The app uses this format
+only if the JSON shrinks and the complete grounded prompt uses fewer estimated
+tokens within the same presearch allowance. The answer instructions, search
+cache and remaining follow-up allowance are the same in both arms. Compare
+source coverage, repeat searches and browser latency separately.
+
 Pair the same question and saved history. Verify that the answer provider
 received the same model, ordered evidence and source URLs in each pair.
 Measure browser Send to first answer text and completion separately, and

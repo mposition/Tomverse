@@ -14,7 +14,6 @@ type ProductCopy = {
 export type ChatProductUiCopy = {
   selectorLabel: string;
   landingIntro: string;
-  unavailable: string;
   signInToOpenChat: string;
   tryGuestChat: string;
   guestChatDescription: string;
@@ -34,7 +33,6 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
   en: {
     selectorLabel: "Choose a Tomverse product",
     landingIntro: "Use Chat for one adaptive conversation, or Review to compare selected models side by side.",
-    unavailable: "Tomverse Chat is not available for this account yet.",
     signInToOpenChat: "Sign in for Chat",
     tryGuestChat: "Try Chat free",
     guestChatDescription: "Try Chat as a guest. When Smart Adaptive is available, it refines text questions and selects a model within your existing guest limit. Chats stay in this browser. Attachments use manual model selection.",
@@ -58,7 +56,6 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
   ko: {
     selectorLabel: "Tomverse 제품 선택",
     landingIntro: "Chat에서는 하나의 대화를 스마트하게 이어가고, Review에서는 선택한 모델의 답변을 나란히 비교하세요.",
-    unavailable: "이 계정에는 아직 Tomverse Chat이 제공되지 않습니다.",
     signInToOpenChat: "로그인하고 Chat 열기",
     tryGuestChat: "Chat 무료 체험",
     guestChatDescription: "Guest로 Chat을 체험하세요. 스마트 자동이 제공되는 경우 텍스트 질문을 다듬고 모델을 선택하며 기존 Guest 한도가 적용됩니다. 대화는 이 브라우저에 저장되고, 첨부는 수동 모델 선택을 사용합니다.",
@@ -84,7 +81,6 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
   zh: {
     selectorLabel: "选择 Tomverse 产品",
     landingIntro: "使用 Chat 进行自适应单一对话，或使用 Review 并排比较所选模型。",
-    unavailable: "此账户暂时无法使用 Tomverse Chat。",
     signInToOpenChat: "登录后打开 Chat",
     tryGuestChat: "免费体验 Chat",
     guestChatDescription: "以访客身份体验 Chat。智能自动可用时，会优化文字问题并选择模型，仍适用现有访客限额。对话保留在此浏览器中。附件使用手动模型选择。",
@@ -108,7 +104,6 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
   "zh-Hant": {
     selectorLabel: "選擇 Tomverse 產品",
     landingIntro: "使用 Chat 進行自適應單一對話，或使用 Review 並排比較所選模型。",
-    unavailable: "此帳戶暫時無法使用 Tomverse Chat。",
     signInToOpenChat: "登入後開啟 Chat",
     tryGuestChat: "免費體驗 Chat",
     guestChatDescription: "以訪客身分體驗 Chat。智慧自動可用時，會優化文字問題並選擇模型，仍適用現有訪客限額。對話保留在此瀏覽器中。附件使用手動模型選擇。",
@@ -132,7 +127,6 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
   fr: {
     selectorLabel: "Choisir un produit Tomverse",
     landingIntro: "Utilisez Chat pour une conversation adaptative, ou Review pour comparer côte à côte les modèles choisis.",
-    unavailable: "Tomverse Chat n’est pas encore disponible pour ce compte.",
     signInToOpenChat: "Se connecter pour Chat",
     tryGuestChat: "Essayer Chat gratuitement",
     guestChatDescription: "Essayez Chat en tant qu’invité. Lorsque l’adaptation intelligente est disponible, elle affine les questions textuelles et sélectionne un modèle dans votre limite d’invité actuelle. Les conversations restent dans ce navigateur. Les pièces jointes utilisent la sélection manuelle du modèle.",
@@ -156,7 +150,6 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
   de: {
     selectorLabel: "Tomverse-Produkt auswählen",
     landingIntro: "Nutzen Sie Chat für eine adaptive Unterhaltung oder Review, um ausgewählte Modelle nebeneinander zu vergleichen.",
-    unavailable: "Tomverse Chat ist für dieses Konto noch nicht verfügbar.",
     signInToOpenChat: "Für Chat anmelden",
     tryGuestChat: "Chat kostenlos testen",
     guestChatDescription: "Testen Sie Chat als Gast. Wenn Intelligente Automatik verfügbar ist, verfeinert sie Textfragen und wählt ein Modell innerhalb Ihres bestehenden Gastlimits. Unterhaltungen bleiben in diesem Browser. Anhänge verwenden die manuelle Modellauswahl.",
@@ -180,7 +173,6 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
   es: {
     selectorLabel: "Elegir un producto de Tomverse",
     landingIntro: "Usa Chat para una conversación adaptativa o Review para comparar en paralelo los modelos elegidos.",
-    unavailable: "Tomverse Chat aún no está disponible para esta cuenta.",
     signInToOpenChat: "Iniciar sesión para Chat",
     tryGuestChat: "Probar Chat gratis",
     guestChatDescription: "Prueba Chat como invitado. Cuando la adaptación inteligente está disponible, refina preguntas de texto y elige un modelo dentro de tu límite de invitado actual. Las conversaciones permanecen en este navegador. Los adjuntos usan la selección manual de modelos.",
@@ -204,7 +196,6 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
   pt: {
     selectorLabel: "Escolher um produto Tomverse",
     landingIntro: "Use o Chat para uma conversa adaptável ou o Review para comparar lado a lado os modelos escolhidos.",
-    unavailable: "O Tomverse Chat ainda não está disponível para esta conta.",
     signInToOpenChat: "Entrar para usar o Chat",
     tryGuestChat: "Experimentar Chat grátis",
     guestChatDescription: "Experimente o Chat como visitante. Quando a adaptação inteligente está disponível, ela refina perguntas de texto e escolhe um modelo dentro do seu limite de visitante atual. As conversas permanecem neste navegador. Os anexos usam a seleção manual de modelos.",

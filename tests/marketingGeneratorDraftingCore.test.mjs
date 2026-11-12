@@ -453,12 +453,27 @@ test("the instruction tells the model to write from the assets it was given when
   assert.match(system.content, /Give each post a different asset/);
   // The old rule that skipped a post is gone, and the version says the instruction changed.
   assert.doesNotMatch(system.content, /return no draft: a post without/);
-  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v10");
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v11");
+});
+
+test("A5 states a claim only where it fits the post, never as an appended condition or mission line", () => {
+  const [system] = marketingA5Messages(context, SCOPE);
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v11");
+  // The statement stays word for word: the Guard's fact boundary is unchanged.
+  assert.match(system.content, /contains the statement exactly as given, character for character/);
+  assert.match(system.content, /A claim is optional: a post with no claim/);
+  assert.match(system.content, /Never append a claim as a separate fact/);
+  assert.match(system.content, /usage being counted, model availability or other conditions, or about Tomverse's aims and focus/);
+  assert.match(system.content, /read like terms of service or a mission statement in the post, leave it out and list no claim id/);
+  assert.match(system.content, /never as its own stiff paragraph/);
+  // The old wording that pushed a claim into every post is gone.
+  assert.doesNotMatch(system.content, /Build each post on a claim not in it/);
+  assert.doesNotMatch(system.content, /built on its claims where they are/);
 });
 
 test("A5 is told when hashtags help, how many each platform takes, and which tags never to write", () => {
   const [system, user] = marketingA5Messages(context, SCOPE);
-  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v10");
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v11");
   assert.match(system.content, /task\.hashtags gives this platform's range/);
   assert.match(system.content, /fewer or none when a tag would not help/);
   assert.match(system.content, /#Tomverse once is recommended/);
