@@ -27,6 +27,7 @@ import {
   imageCatalogItems,
   type ImageNextAction,
   imageStage,
+  isSessionGone,
   priceRange,
   reasonMessage,
   refusalReasons,
@@ -204,8 +205,10 @@ export function AdminModelCatalogPanel() {
       | { error?: string; code?: string; reasons?: string[]; detail?: string | null }
       | null;
     if (!response.ok) {
-      // The route answers 404 only when the admin session is gone or expired.
-      if (response.status === 404) {
+      // The session check answers a bare 404 "Not found." when the admin
+      // session is gone or expired. A catalogue refusal can also be a 404
+      // (no_draft when another admin applied it first) and is not a sign-out.
+      if (isSessionGone(response.status, payload)) {
         setSessionExpired(true);
         showToast({
           tone: "refused",

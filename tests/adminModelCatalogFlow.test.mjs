@@ -8,6 +8,7 @@ import {
   imageFlowSteps,
   imageNextAction,
   imageStage,
+  isSessionGone,
   needsAction,
   orderedPrices,
   priceRange,
@@ -140,4 +141,12 @@ test("prices read in quality then size order, and the summary gives the range", 
   );
   assert.deepEqual(priceRange(draft.prices), { count: 2, min: 24, max: 41 });
   assert.equal(priceRange([]), null);
+});
+
+test("only the session check's own 404 reads as a signed-out admin", () => {
+  assert.equal(isSessionGone(404, { error: "Not found." }), true);
+  assert.equal(isSessionGone(404, null), true);
+  // Another admin applied the draft first: a refusal, not a sign-out.
+  assert.equal(isSessionGone(404, { error: "no_draft", reasons: [] }), false);
+  assert.equal(isSessionGone(403, { error: "Forbidden." }), false);
 });

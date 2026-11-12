@@ -211,6 +211,14 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
   }
 };
 
+/**
+ * The admin session check's own 404 ("Not found."), as opposed to a
+ * catalogue refusal that is also a 404 (no_draft when another admin applied
+ * the draft first), which must not send the operator to sign in again.
+ */
+export const isSessionGone = (status: number, payload: { error?: string } | null) =>
+  status === 404 && (payload === null || payload.error === "Not found.");
+
 /** The refusal a response carries, with the reasons that explain it best. */
 export const refusalReasons = (error: string, reasons: readonly string[]): string[] =>
   error === "not_admitted" && reasons.length > 0 ? [...reasons] : [error];
