@@ -61,10 +61,12 @@ response.
 
 The product condition is not a third clause bolted on — **it is answered
 before the cohort is consulted**, and `lib/autoProductBoundary.ts` is the one
-place that answers it. Three surfaces ask the question (surface entry,
-`offered`, and turn routing), and if each decided separately the screen and
-the execution would be free to disagree, which is exactly the control this
-section forbids.
+place that answers it. Two surfaces ask the question (`offered` and turn
+routing), and if each decided separately the screen and the execution would be
+free to disagree, which is exactly the control this section forbids. Starting a
+Chat is not gated by it: every account may open a blank Chat, and when Auto is
+not offered the Chat simply runs with manual model selection (owner decision
+2026-11-12).
 
 The order matters for the numbers as well as for correctness. A Review
 conversation is not *outside* the cohort; it was never a subject of the cohort
@@ -86,8 +88,8 @@ A server-offered blank Chat draft paints Smart Adaptive ON as its default
 **draft intent**. That display is not a claim that a conversation row or stored
 mode already exists: merely entering Chat creates no row and performs no paid
 call. On the first Send, the client requests `X-Chat-Initial-Selection-Mode: auto`
-from the Chat creation endpoint. The authenticated account's server-side entry
-gate authorizes the mode, which is stored in the same insert as the owned
+from the Chat creation endpoint. The server's Auto availability for the account
+authorizes the mode (when it refuses, the Chat is created manual), which is stored in the same insert as the owned
 Chat and its selected models. Send waits for the returned row to confirm the
 owner, product, mode, capability and model settings. An older server can
 ignore the header; the client reads the same created row and stores Auto

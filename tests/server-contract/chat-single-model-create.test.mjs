@@ -143,8 +143,6 @@ test("an explicit offered first Chat stores Auto together with the server-select
 });
 test("Auto creation requires the admitted account and the Chat product", async () => {
   const send = () => request({ selectedModels: ["model-a"] }, { "X-Chat-Initial-Selection-Mode": "auto" });
-  offered = false;
-  assert.equal((await POST(send())).status, 404);
   assert.equal((await createConversationForProduct(send(), "chat", "another-account")).status, 403);
   assert.equal((await createConversationForProduct(send(), "review", "owner")).status, 403);
   assertNoWrite();
@@ -158,12 +156,12 @@ test("the existing mode-write limit fails closed before inserting a Chat", async
   assert.deepEqual(rateScopes, ["conversation-create", "conversation-update"]);
   assertNoWrite();
 });
-test("the existing offered gate still refuses Chat creation before any handler work", async () => {
+test("an account Auto is not offered to still starts Chat, as a manual Chat", async () => {
   offered = false;
-  const response = await POST(request({ selectedModels: ["model-a"] }));
-  assert.equal(response.status, 404);
-  assert.equal(clampCalls.length, 0);
-  assertNoWrite();
+  const response = await POST(request({ selectedModels: ["model-a"] }, { "X-Chat-Initial-Selection-Mode": "auto" }));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).selectionMode, "manual");
+  assert.equal(writes[0].productKey, "chat");
 });
 test("Review creation retains multiple selected models and its existing surface", async () => {
   const response = await createConversationForProduct(request({ selectedModels: ["model-a", "model-b"] }), "review");

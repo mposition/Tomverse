@@ -1,7 +1,5 @@
 import "server-only";
 
-import { autoAvailabilityFor } from "@/lib/autoAvailability";
-import { chatSurfaceAvailable } from "@/lib/autoProductBoundary";
 import { CHAT_DRAFT_NEW_SCOPE } from "@/lib/chatComposerDraftCore";
 import {
   conversationKindNotSupportedResponse,
@@ -26,23 +24,14 @@ const jsonError = (error: string, code: string, status: number) =>
 
 /**
  * Authorizes only the durable Chat surface. Existing rows use their stored
- * product and remain readable after a cohort change; only the unbound `new`
- * scope asks the entry gate.
+ * product; the unbound `new` scope belongs to every signed-in account.
  */
 export async function authorizeChatRecoveryScope(input: {
   request: Request;
   userId: string;
   scopeKey: string;
 }): Promise<ChatRecoveryScopeAccess> {
-  if (input.scopeKey === CHAT_DRAFT_NEW_SCOPE) {
-    const availability = await autoAvailabilityFor(input.userId);
-    return chatSurfaceAvailable(availability)
-      ? { ok: true, conversationId: null }
-      : {
-          ok: false,
-          response: jsonError("Not found.", "CHAT_RECOVERY_SCOPE_NOT_FOUND", 404),
-        };
-  }
+  if (input.scopeKey === CHAT_DRAFT_NEW_SCOPE) return { ok: true, conversationId: null };
 
   const conversation = await prisma.conversation.findFirst({
     where: { id: input.scopeKey, userId: input.userId },

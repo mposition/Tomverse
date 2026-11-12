@@ -51,18 +51,12 @@ test.after(() => {
 });
 const open = (searchParams = {}) => ChatWorkspaceShell({ searchParams });
 
-test("public deployment ignores forged fixture cookies and shows Review when new Chat is unavailable", async () => {
+test("public deployment ignores forged fixture cookies and opens a blank Chat without asking Auto", async () => {
   const element = await open({ offered: "true", productKey: "chat", lang: "ko" });
-  assert.equal(element.type.name, "ChatUnavailableNotice");
-  assert.equal(element.props.language, "ko");
-  const notice = element.type(element.props);
-  assert.equal(notice.props["data-testid"], "chat-unavailable");
-  const reviewLink = notice.props.children.props.children.find(
-    (child) => child?.props?.["data-testid"] === "chat-unavailable-review"
-  );
-  assert.equal(reviewLink.props.href, "/review?lang=ko");
+  assert.equal(element.props.mountedSurface, "chat");
+  assert.equal(element.props.initialConversationId, null);
   assert.equal(cookieReads, 0);
-  assert.deepEqual(availabilityReads, ["owner-a"]);
+  assert.equal(availabilityReads.length, 0);
 });
 test("public deployment opens a blank guest Chat without reading account ownership or Auto availability", async () => {
   session = null;
@@ -93,11 +87,12 @@ test("owned Chat stays readable after cohort loss, without asking availability",
   assert.equal(element.props.initialConversationId, "owned-chat");
   assert.equal(availabilityReads.length, 0);
 });
-test("offered new entry opens the Chat shell", async () => {
-  offered = true;
+test("new entry opens the Chat shell even when Auto is not offered", async () => {
+  offered = false;
   const element = await open();
   assert.equal(element.props.mountedSurface, "chat");
   assert.equal(element.props.initialConversationId, null);
+  assert.equal(availabilityReads.length, 0);
 });
 test("owned legacy Review and continuation hand off without cutover or query loss", async () => {
   owned = { productKey: null, continuationBridge: null };
