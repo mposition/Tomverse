@@ -4006,8 +4006,8 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
       assert.equal(packet.status, scenario === "compact" ? "ok" : "batch", scenario);
     }
     assert.equal(lastPart.includes("End of quoted evidence"), withEvidence && scenario !== "answer flag off", scenario);
-    assert.equal(lastPart.includes("For other lookups"), ["grounded", "compact", "lookup flag off"].includes(scenario), scenario);
-    assert.equal(lastPart.includes("For a direct comparison or calculation"), ["complex", "unclassified"].includes(scenario), scenario);
+    assert.equal(lastPart.includes("\nObservation —"), ["grounded", "compact", "lookup flag off"].includes(scenario), scenario);
+    assert.equal(lastPart.includes("requested precision"), ["complex", "unclassified"].includes(scenario), scenario);
     assert.equal(attempts[0].preparesStep, ["grounded", "compact", "answer flag off"].includes(scenario), scenario);
   }
 });
