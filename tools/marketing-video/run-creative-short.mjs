@@ -265,8 +265,11 @@ if (fresh) {
     }
     if (recorded.status === 0) continue;
     report.failed.push({ step: `fresh ${locale}`, reason: `exit ${recorded.status}: ${String(line?.error ?? recorded.stderr ?? "").slice(0, 300)}` });
-    // After a paid step or a failed settings restore: no more recordings from this run; the account is looked at first.
-    if (recorded.status === 4 || recorded.status === 5) break;
+    // Only a recording known to have stopped before any paid step (1, or 2 usage) lets the next
+    // locale go on. After a paid step went wrong, a failed settings restore, a claim already taken
+    // or a killed recorder (status null), the whole run stops before anything else is paid for:
+    // the account is looked at first, by a person.
+    if (recorded.status !== 1 && recorded.status !== 2) halt("fresh_review_stopped");
   }
   packs = freshPacksIn(runDir);
   if (packs.length === 0) halt("no_fresh_capture");

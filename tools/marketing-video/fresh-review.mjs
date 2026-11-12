@@ -203,9 +203,10 @@ async function record({ locale, outDir, question, dry }) {
     captures.question.text = question;
     if (dry) throw DRY;
 
-    await page.locator('[data-testid="chat-send-button"]').click();
+    // Marked paid before the click: a click that sent and then threw must count as sent.
     paid = 1;
-    log.push({ paid: "sent" });
+    log.push({ paid: "send attempted" });
+    await page.locator('[data-testid="chat-send-button"]').click();
     const entry = page.locator('[data-testid="studio-analysis-entry"]');
     await entry.locator("button:not([disabled])").first().waitFor({ timeout: 300_000 });
     let last = -1;
@@ -228,9 +229,9 @@ async function record({ locale, outDir, question, dry }) {
     await page.waitForTimeout(800);
     await capture("answers-more", "the three answers side by side, each scrolled further down");
 
-    await entry.locator("button").first().click();
     paid = 2;
-    log.push({ paid: "analysis" });
+    log.push({ paid: "analysis attempted" });
+    await entry.locator("button").first().click();
     await page.locator('[data-testid="studio-analysis-entry"][data-state="done"]').waitFor({ state: "attached", timeout: 300_000 });
     await page.waitForTimeout(2500);
     await capture("summary", "Tomverse answer analysis: its summary", ".studio-analysis-panel");

@@ -516,7 +516,11 @@ test("fresh captures run only behind their switch, before the plan and every pai
   assert.ok(start > 0 && start < plan && plan < source.indexOf("await paid("));
   const block = source.slice(start, plan);
   assert.match(block, /node\(\["fresh-review\.mjs", locale, into, questionFile, topic\]\)/u);
-  assert.match(block, /if \(recorded\.status === 4 \|\| recorded\.status === 5\) break;/u);
+  assert.match(block, /if \(recorded\.status === 0\) continue;/u);
+  assert.match(block, /if \(recorded\.status !== 1 && recorded\.status !== 2\) halt\("fresh_review_stopped"\);/u);
+  const recorder = await readFile(new URL("../tools/marketing-video/fresh-review.mjs", import.meta.url), "utf8");
+  assert.ok(recorder.indexOf("paid = 1;") < recorder.indexOf('chat-send-button"]\').click()'), "marked paid before the send click");
+  assert.ok(recorder.indexOf("paid = 2;") < recorder.indexOf('await entry.locator("button").first().click()'), "marked paid before the analysis click");
   assert.doesNotMatch(block, /paid\(|speakLine\(|makeMedia\(/u);
   assert.ok(source.includes("`job/creative/${run}/sources/**`"), "the plan call may read the run's own packs");
 });
