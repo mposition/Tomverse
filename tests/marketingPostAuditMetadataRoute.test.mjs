@@ -7,7 +7,8 @@ import test from "node:test";
 // the store requires must be in the entry with the same value
 // (verifyMarketingAuditEvidence, `metadata_mismatch`). The schedule route
 // wrote only the digest and the unpublish route left out the external post
-// id, so neither write could ever succeed in production.
+// id, so neither write could ever succeed in production. The edit route wrote
+// the previous digest under `digest`, so no edit was ever saved (2026-11-12).
 
 const child = spawnSync(
   process.execPath,
@@ -65,4 +66,14 @@ test("a hand-posted record's audit entry carries everything the store requires o
     evidenceRef: "opened the link while signed out",
   });
   covers(routes.recordManual.written, routes.recordManual.required);
+});
+
+test("an edit's audit entry names the envelope the edit stores and the one it replaces", () => {
+  assert.equal(routes.edit.action, "marketing_post.edit");
+  assert.equal(routes.edit.required.previousDigest, "a".repeat(64));
+  assert.match(routes.edit.required.digest, /^[0-9a-f]{64}$/);
+  // The new digest is of the edited envelope, not the stored one or the expected one.
+  assert.notEqual(routes.edit.required.digest, routes.edit.storedDigest);
+  assert.notEqual(routes.edit.required.digest, routes.edit.required.previousDigest);
+  covers(routes.edit.written, routes.edit.required);
 });
