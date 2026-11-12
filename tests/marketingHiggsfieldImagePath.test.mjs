@@ -632,6 +632,10 @@ test("a concept needs exactly one call to action and says AI or a model in its h
 });
 
 test("every feature claim of the FAQ has an entry in features.json, so a new feature reaches the ads", () => {
+  // Since 2026-11-12 the job reads the list kept in Admin (MarketingFeatureFact);
+  // features.json is its seed and the job's fallback, so it still covers every
+  // claim, and Admin's refresh is given every claim to propose what is missing.
+  assert.match(readFileSync("lib/marketingFeatureFacts.ts", "utf8"), /claims: MARKETING_CLAIMS\.map\(/u);
   // features.json was written once by hand (2026-11-07) and missed every feature
   // shipped after it until the owner asked on 2026-11-12. General claims about
   // Tomverse as a whole are not a feature of their own.

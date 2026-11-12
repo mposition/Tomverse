@@ -479,6 +479,12 @@ are unchanged.
   person approves it. Left out because no record exists: a "next run" time (the
   generator runs on the Ubuntu box), an AI "ask for a rewrite" action (no
   route), and check lines that are not recorded.
+  Settings holds two views (`?view=`): `switches` (the switch and webhook rail,
+  the default) and `features`, the ad facts the box's Higgsfield job reads
+  (`MarketingFeatureFact`, owner 2026-11-12). Each save there is an audited
+  `runMarketingAdminMutation`; "Refresh from the site" is one model call that
+  only proposes (`/api/admin/marketing-feature-refresh`, on by default on the
+  default model, `MARKETING_FEATURE_REFRESH_LLM_MODEL_ID=off` turns it off).
 - **Product research (Scout)**: a head on every tab, the Suggestions tab keeps
   its list and bulk actions with a weekly bar and call ring beside it, Runs
   holds the model and cap controls. Suggestions carry no screenshot and the

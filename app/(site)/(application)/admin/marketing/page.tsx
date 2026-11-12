@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
+import { AdminMarketingFeatureFactsPanel } from "@/components/admin/AdminMarketingFeatureFactsPanel";
 import { AdminMarketingPanel } from "@/components/admin/AdminMarketingPanel";
 import { AdminPageTabs, type AdminPageTabChip } from "@/components/admin/AdminPageTabs";
 import { AdminViewSwitch } from "@/components/admin/AdminViewSwitch";
@@ -18,6 +19,8 @@ import {
 import { authOptions } from "@/lib/auth";
 import { readMarketingAgentOverview } from "@/lib/marketingAgentOverviewRead";
 import { readMarketingConsole } from "@/lib/marketingConsoleRead";
+import { marketingFeatureRefreshModelId, readMarketingFeatureFacts } from "@/lib/marketingFeatureFacts";
+import { prisma } from "@/lib/prisma";
 import type { MarketingConsoleSection } from "@/lib/marketingConsoleSections";
 
 const TABS = adminNavItemTabs("marketing");
@@ -35,6 +38,8 @@ const TABS = adminNavItemTabs("marketing");
  */
 const QUEUE_VIEWS = ["drafts", "assets", "comments"] as const;
 const REPORT_VIEWS = ["reports", "competitors", "experiments"] as const;
+/** Settings: the switches and webhook rail, and the ad facts the box's Higgsfield job reads (2026-11-12). */
+const SETTINGS_VIEWS = ["switches", "features"] as const;
 
 /**
  * The marketing automation's record
@@ -65,18 +70,29 @@ export default async function AdminMarketingPage({
   // Which old section's data the tab draws, and which part of the old screen.
   const queueView = resolveAdminView(QUEUE_VIEWS, query.view);
   const reportView = resolveAdminView(REPORT_VIEWS, query.view);
+  const settingsView = resolveAdminView(SETTINGS_VIEWS, query.view);
+  const adFacts = tab.id === "settings" && settingsView === "features";
   const section: MarketingConsoleSection =
     tab.id === "queue" ? (queueView === "drafts" ? "queue" : queueView)
     : tab.id === "reports" ? reportView
     : tab.id === "published" ? "published"
     : tab.id === "accounts" ? "accounts"
     : "queue";
-  const part = tab.id === "overview" ? "overview" : tab.id === "settings" ? "settings" : "section";
+  // The ad facts view draws the head and tabs only (`overview` without the
+  // agent read) and its own panel under them.
+  const part = tab.id === "overview" || adFacts ? "overview" : tab.id === "settings" ? "settings" : "section";
   // The Overview's extra reads (posts per day, the schedule, recent runs) are
   // read-only and load for that tab alone; each part is null when unreadable.
-  const [initial, agent] = await Promise.all([
-    readMarketingConsole(section, hasAdminPermission(session, "marketing:write")),
-    part === "overview" ? readMarketingAgentOverview() : Promise.resolve(undefined),
+  const canWrite = hasAdminPermission(session, "marketing:write");
+  const [initial, agent, facts] = await Promise.all([
+    readMarketingConsole(section, canWrite),
+    tab.id === "overview" ? readMarketingAgentOverview() : Promise.resolve(undefined),
+    // Unreadable is null, drawn as unavailable, never as an empty list.
+    adFacts
+      ? readMarketingFeatureFacts(prisma)
+          .then((rows) => rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() })))
+          .catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   // What each tab holds, from the overview the loader already read: the
@@ -102,7 +118,7 @@ export default async function AdminMarketingPage({
         places it under its overview.
       */}
       <AdminMarketingPanel
-        key={`${section}-${part}`}
+        key={`${section}-${part}-${adFacts ? "features" : ""}`}
         initial={initial}
         agent={agent}
         part={part}
@@ -130,6 +146,18 @@ export default async function AdminMarketingPage({
                 ]}
               />
             ) : null}
+            {tab.id === "settings" ? (
+              <AdminViewSwitch
+                basePath="/admin/marketing"
+                tabId="settings"
+                query={tabQuery}
+                activeId={settingsView}
+                views={[
+                  { id: "switches", label: ui.view.switches },
+                  { id: "features", label: ui.view.adFacts },
+                ]}
+              />
+            ) : null}
             {tab.id === "reports" ? (
               <AdminViewSwitch
                 basePath="/admin/marketing"
@@ -146,6 +174,13 @@ export default async function AdminMarketingPage({
           </>
         }
       />
+      {adFacts ? (
+        <AdminMarketingFeatureFactsPanel
+          initial={facts}
+          canWrite={canWrite}
+          refreshModelId={marketingFeatureRefreshModelId()}
+        />
+      ) : null}
     </div>
   );
 }

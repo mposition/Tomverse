@@ -6,6 +6,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { featuresFile } from "./features-source.mjs";
+
 export const LOCALES = ["en", "ko", "zh-Hant", "zh-Hans"];
 export const TRANSLATED = ["ko", "zh-Hant", "zh-Hans"];
 export const TEXT_ROLES = ["headline", "subhead", "cta", "screen", "answer", "label"];
@@ -33,8 +35,9 @@ const compact = (text) => String(text ?? "").toLowerCase().normalize("NFKC").rep
 export const dayKey = (value) => String(value ?? "").replaceAll("-", "").slice(0, 8);
 const dayNumber = (key) => Date.UTC(Number(key.slice(0, 4)), Number(key.slice(4, 6)) - 1, Number(key.slice(6, 8))) / 86_400_000;
 
+/** The run's facts: the list fetched from the app this run, else features.json (features-source.mjs). */
 export function loadFeatures(toolDir) {
-  return JSON.parse(readFileSync(path.join(toolDir, "features.json"), "utf8")).features;
+  return JSON.parse(readFileSync(featuresFile(toolDir), "utf8")).features;
 }
 
 /** Versioned model names a card may show: the listed models and the real example's. */
