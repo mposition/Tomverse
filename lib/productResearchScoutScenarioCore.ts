@@ -24,6 +24,8 @@ export { SCOUT_EXPLORE_TASK_ENV };
 
 /** The Scout ledger subject of the scenario call. */
 export const SCENARIO_SUBJECT = "scenario.explore";
+/** Calls the scenario reservation leaves free: judging the planned turn needs one. */
+export const SCENARIO_JUDGE_CALLS = 1;
 export const SCENARIO_MAX_OUTPUT_TOKENS = 1_000;
 /** Earlier findings on the model-written task, so the next request looks elsewhere. */
 export const SCENARIO_RECENT_TITLES_MAX = 30;

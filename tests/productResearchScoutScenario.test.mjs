@@ -85,6 +85,14 @@ test("no model, or a refused reservation, spends nothing; an unusable answer is 
   assert.deepEqual(failed.calls.settled, [{ id: "call-1", ok: false, inputTokens: 200, outputTokens: null, kept: 0 }]);
 });
 
+test("the scenario route keeps one call free for judging the turn it plans", async () => {
+  const { readFileSync } = await import("node:fs");
+  const route = readFileSync(new URL("../app/api/internal/product-research/scout/scenario/route.ts", import.meta.url), "utf8");
+  assert.match(route, /startScoutCall\(\{ subject: SCENARIO_SUBJECT, modelId, keepFree: SCENARIO_JUDGE_CALLS \}\)/);
+  const { SCENARIO_JUDGE_CALLS } = await import("../lib/productResearchScoutScenarioCore.ts");
+  assert.equal(SCENARIO_JUDGE_CALLS, 1);
+});
+
 test("the scenario route does not exist until both switches are on, and never answers without the secret", async () => {
   const saved = { ...process.env };
   try {

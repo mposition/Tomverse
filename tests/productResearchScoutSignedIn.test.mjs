@@ -181,6 +181,7 @@ test("a scenario runs only with a bounded request and the walker's own fixtures,
     { ...good, attachments: ["chart.png", "receipt.jpg", "sales.csv", "chart.png"] },
     { ...good, attachments: "chart.png" },
     { ...good, expectation: 3 },
+    { ...good, expectation: "  " },
   ]) {
     assert.equal(admitScenario(bad), null, JSON.stringify(bad));
   }

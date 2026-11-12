@@ -13,6 +13,7 @@ import { PRODUCT_RESEARCH_SCOUT_SECRET_ENV, PRODUCT_RESEARCH_SCOUT_SWITCH_ENV } 
 import { scoutLlmFor } from "@/lib/productResearchScoutLlm";
 import {
   SCENARIO_FINDINGS_SUBJECT,
+  SCENARIO_JUDGE_CALLS,
   SCENARIO_SUBJECT,
   SCOUT_EXPLORE_TASK_ENV,
   runScenario,
@@ -39,7 +40,8 @@ export async function POST(request: Request) {
       now: new Date(),
       recentTitles: () => recentSuggestionTitles(SCENARIO_FINDINGS_SUBJECT),
       model: async () => scoutLlmFor((await readScoutSettings()).modelId),
-      reserve: (modelId) => startScoutCall({ subject: SCENARIO_SUBJECT, modelId }),
+      // One call is kept for judging the turn this plans: with no room for it, no paid turn is made.
+      reserve: (modelId) => startScoutCall({ subject: SCENARIO_SUBJECT, modelId, keepFree: SCENARIO_JUDGE_CALLS }),
       settle: settleScoutCall,
     });
     return productResearchJson(answer, "judged" in answer && answer.reason === "model_failed" ? 502 : 200);
