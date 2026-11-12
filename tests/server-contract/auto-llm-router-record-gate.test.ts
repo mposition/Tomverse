@@ -24,6 +24,9 @@ const settlementWrites: unknown[][] = [];
 let mocksInstalled = false;
 let generateRouterResult: (() => unknown) | undefined;
 const routerRequests: Record<string, unknown>[] = [];
+let readRewriteSwitch = async () => false;
+let readGuidance: (db?: unknown, kind?: string) => Promise<{ guidance: string; cycleId: string | null }> =
+  async () => ({ guidance: "", cycleId: null });
 const holds: number[] = [];
 let budgetAllowed = true;
 let routerFailure: unknown = null;
@@ -36,7 +39,7 @@ let routerOutput: { reason: string; topic: string; modelId: string; requiresFile
 const prismaMock = {
   appSetting: { findUnique: async () => null },
   autoRouterDecision: {
-    findMany: async () => [],
+    findMany: async (): Promise<Array<{ sessionTopic: string; pickedModelId: string; taskKind: string }>> => [],
     create: async ({ data }: { data: unknown }) => {
       created.push(data);
       return data;
@@ -77,12 +80,12 @@ async function load() {
     mock.module(mod("lib/autoLlmRouterSettings.ts"), {
       namedExports: {
         readAutoLlmRouterModelId: async () => "gpt-6-luna",
-        readAutoLlmRouterRewrite: async () => false,
+        readAutoLlmRouterRewrite: () => readRewriteSwitch(),
       },
     });
     mock.module(mod("lib/autoLlmRouterGuidance.ts"), {
       namedExports: {
-        readActiveRouterGuidance: async () => ({ guidance: "", cycleId: null }),
+        readActiveRouterGuidance: (db?: unknown, kind?: string) => readGuidance(db, kind),
       },
     });
     mock.module(mod("lib/chatSecurity.ts"), {
@@ -92,7 +95,7 @@ async function load() {
       } },
     });
     mock.module(mod("lib/activeAiModel.ts"), {
-      namedExports: { getActiveAiModel: () => ({}) },
+      namedExports: { getActiveAiModel: (model: { id: string }) => ({ modelId: model.id }) },
     });
   }
   return import(mod("lib/autoLlmRouter.ts"));
@@ -560,6 +563,53 @@ test("router search preparation uses one priced call and malformed suggestions p
 });
 
 
+test("eligible rewrite guidance can finish during image preparation, with one priced dispatch after both", async t => {
+  const oldSwitch = readRewriteSwitch, oldGuidance = readGuidance;
+  t.after(() => { readRewriteSwitch = oldSwitch; readGuidance = oldGuidance; });
+  const switchRead = Promise.withResolvers<void>();
+  const image = Promise.withResolvers<null>();
+  let rewriteReads = 0;
+  readRewriteSwitch = async () => { switchRead.resolve(); return true; };
+  readGuidance = async (_db, kind) => {
+    if (kind === "rewrite") rewriteReads++;
+    return { guidance: kind === "rewrite" ? "Keep both official mission names." : "", cycleId: null };
+  };
+  const callsBefore = routerRequests.length, holdsBefore = holds.length;
+  const turn = pick(undefined, false, { prompt: "Compare both NASA missions.", rewriteAllowed: true, imageIntent: image.promise });
+  try {
+    await switchRead.promise;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(rewriteReads, 1);
+    assert.equal(routerRequests.length, callsBefore);
+    assert.equal(holds.length, holdsBefore);
+  } finally {
+    image.resolve(null);
+    await turn;
+  }
+  assert.equal(routerRequests.length, callsBefore + 1);
+  assert.match(String(routerRequests.at(-1)?.system), /Keep both official mission names\./);
+  assert.equal(holds.length, holdsBefore + 2);
+});
+
+test("held or long prompts do not wait on rewrite settings and an off switch skips rewrite guidance", async t => {
+  const oldSwitch = readRewriteSwitch, oldGuidance = readGuidance;
+  t.after(() => { readRewriteSwitch = oldSwitch; readGuidance = oldGuidance; });
+  let switches = 0, guides = 0;
+  readRewriteSwitch = async () => { switches++; return false; };
+  readGuidance = async (_db, kind) => {
+    if (kind === "rewrite") guides++;
+    return { guidance: "", cycleId: null };
+  };
+  const callsBefore = routerRequests.length;
+  await pick(undefined, false, { rewriteAllowed: false });
+  await pick(undefined, false, { rewriteAllowed: true, prompt: "x".repeat(2000) });
+  assert.equal(switches, 0);
+  await pick(undefined, false, { rewriteAllowed: true });
+  assert.equal(switches, 1);
+  assert.equal(guides, 0);
+  assert.equal(routerRequests.length, callsBefore + 3);
+});
+
 test("a context refusal precedes the live Router hold and provider; no eligible choice skips the check", async () => {
   const holdsBefore = holds.length;
   const callsBefore = routerRequests.length;
@@ -606,6 +656,67 @@ test("fresh location prices the authored 8k and reuses its dated search decision
     assert.equal(routerRequests.length, 1);
     assert.equal(holds.length, 2);
   } finally { generateRouterResult = original; }
+});
+
+test("compact search menus preserve provider input values, use their own price and invalidate old continuations", async t => {
+  const flag = "CHAT_ROUTER_COMPACT_SEARCH_MENU_ENABLED";
+  const oldFlag = process.env[flag];
+  t.after(() => { if (oldFlag === undefined) delete process.env[flag]; else process.env[flag] = oldFlag; });
+  t.mock.method(prismaMock.autoRouterDecision, "findMany", async () => [
+    { sessionTopic: "Voyager", pickedModelId: "deepseek-v4-flash", taskKind: "research" },
+  ]);
+  const { autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
+  const { resolveModelPricing } = require(resolve(ROOT, "lib/modelPricing.ts"));
+  const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
+  const prices = resolveModelPricing(AVAILABLE_MODELS.find((m: { id: string }) => m.id === "gpt-6-luna"));
+  const input = {
+    prompt: "Find the official NASA dates.",
+    previousAnswer: "We compared Voyager 1 and Voyager 2.",
+  };
+  const digests: string[] = [];
+  const locationFusion = { authoredText: input.prompt, searchUtcDate: "2026-11-12", resume: null,
+    onRouterDigest: (digest: string) => digests.push(digest) };
+  const run = async (compact: boolean, searchPlan: boolean) => {
+    process.env[flag] = String(compact);
+    const holdStart = holds.length, requestStart = routerRequests.length;
+    const result = await pick(undefined, false, { ...input, locationFusion, searchPlan });
+    assert.ok(result);
+    assert.equal(routerRequests.length, requestStart + 1);
+    const request = routerRequests[requestStart];
+    const expected = autoLlmRouterWorstCaseMicroUsd({ ...request,
+      inputUsdPerMillionTokens: prices.inputUsdPerMillionTokens, outputUsdPerMillionTokens: prices.outputUsdPerMillionTokens });
+    assert.ok(expected > 0);
+    assert.deepEqual(holds.slice(holdStart), [expected, expected]);
+    return { result, request, content: JSON.parse(String(request.prompt)),
+      schema: await (request.output as { responseFormat: Promise<unknown> }).responseFormat };
+  };
+  const off = await run(false, true);
+  const on = await run(true, true);
+  const { columns, rows } = on.content.candidates as { columns: string[]; rows: unknown[][] };
+  assert.deepEqual({ ...on.content, candidates: rows.map(row =>
+    Object.fromEntries(columns.map((name, i) => [name, row[i]]))) }, off.content);
+  assert.equal(off.content.message, input.prompt);
+  assert.equal(off.content.previousAnswer, input.previousAnswer);
+  assert.equal(off.content.session.topic, "Voyager");
+  assert.deepEqual(on.result, off.result);
+  assert.deepEqual(on.schema, off.schema);
+  assert.deepEqual(on.request.model, { modelId: "gpt-6-luna" });
+  for (const key of ["model", "system", "maxOutputTokens", "providerOptions"]) {
+    assert.deepEqual(on.request[key], off.request[key], key);
+  }
+  assert.notEqual(digests[0], digests[1]);
+  const requestsBeforeResume = routerRequests.length, holdsBeforeResume = holds.length;
+  const resume = (digest: string) => pick(undefined, false, { ...input, searchPlan: true,
+    locationFusion: { ...locationFusion, resume: { traceId: "prior", routerDigest: digest, pick: off.result } } });
+  assert.equal(await resume(digests[0]), null);
+  assert.deepEqual(await resume(digests[1]), on.result);
+  assert.equal(routerRequests.length, requestsBeforeResume);
+  assert.equal(holds.length, holdsBeforeResume);
+  const plain = await run(false, false);
+  const enabledPlain = await run(true, false);
+  assert.ok(Array.isArray(plain.content.candidates));
+  assert.equal(enabledPlain.request.prompt, plain.request.prompt);
+  assert.deepEqual(enabledPlain.schema, plain.schema);
 });
 
 test("follow-up location and execution decisions share one request but keep their input texts distinct", async t => {

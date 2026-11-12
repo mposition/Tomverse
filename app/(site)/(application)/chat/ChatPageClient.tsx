@@ -6936,7 +6936,7 @@ export function ChatPageClient({
         requestAutoPrepare && preparedDraft && promptRefinerProductScope && !imageTurnSend
         ? chatLocationSession.prepareIntent(identityKey, authoredPrompt,
             () => preparation.measure("locationIntentMs", () => requestChatLocationIntent(authoredPrompt, fetch)))
-        : Promise.resolve(undefined);
+        : undefined;
 
       let promptRefinerDecisionForSend = explicitPromptRefinerDecision;
       let userRequestId = explicitPromptRefinerClientRequestId ??
@@ -6976,7 +6976,6 @@ export function ChatPageClient({
           return;
         }
       }
-      const preparedLocationIntent = await locationPreparation;
       if (!chatSendIsCurrent()) {
         if (preparedDraft) abortPreparedDraft(preparedDraft);
         return;
@@ -7312,9 +7311,13 @@ export function ChatPageClient({
       }
 
       finishMessageSave();
+      // The Refiner can supply the ID required for saving. Only the answer
+      // panel needs the separate location decision, after the question is saved.
+      if (!sendCurrentAfterMessageSave) return;
+      const preparedLocationIntent = locationPreparation && await locationPreparation;
       // Last await boundary: an intervening model/account/conversation change
       // must not publish a payload to another panel or discard the draft.
-      if (!sendCurrentAfterMessageSave || !chatSendIsCurrent(!messageWasSaved)) return;
+      if (!chatSendIsCurrent(!messageWasSaved)) return;
       const conversation = conversations.find((item) => item.id === activeChatId);
       const previousCount = promptCountsRef.current.get(activeChatId) ??
         (conversation?.messageCount ? 1 : 0);

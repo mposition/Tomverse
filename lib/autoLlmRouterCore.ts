@@ -379,14 +379,25 @@ export const autoLlmRouterUserMessage = (
     prompt: string,
     previousAnswer: string | null,
     candidates: readonly AutoLlmRouterCandidate[],
-    session: AutoLlmRouterSession | null = null
-) =>
-    JSON.stringify({
+    session: AutoLlmRouterSession | null = null,
+    compactMenu = false
+) => {
+    const turn = {
         message: prompt.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS),
         ...(previousAnswer ? { previousAnswer } : {}),
         ...(session ? { session } : {}),
-        candidates,
-    });
+    };
+    if (compactMenu && candidates.length >= 2) {
+        // Put the menu before per-turn text and send each column name once.
+        // Retain unknown future fields; a non-uniform menu stays in object form.
+        const columns = Object.keys(candidates[0]) as (keyof AutoLlmRouterCandidate)[];
+        if (columns.length && candidates.every(row => Object.keys(row).length === columns.length &&
+            columns.every(key => Object.hasOwn(row, key) && row[key] !== undefined))) {
+            return JSON.stringify({ candidates: { columns, rows: candidates.map(row => columns.map(key => row[key])) }, ...turn });
+        }
+    }
+    return JSON.stringify({ ...turn, candidates });
+};
 
 /**
  * JSON schema for the structured answer: a short reason, then one id from

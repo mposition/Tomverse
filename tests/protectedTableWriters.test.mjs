@@ -565,15 +565,8 @@ test("the Prompt Refiner preview adds exact reads without widening its write bou
       ["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].includes(entry.table)
   );
   assert.deepEqual(
-    entries.map(({ table, tableMentions, writeVerbs }) => ({
-      table,
-      tableMentions,
-      writeVerbs,
-    })),
-    [
-      { table: "PromptRefinerChatScope", tableMentions: 5, writeVerbs: 12 },
-      { table: "PromptRefinerChatSuggestion", tableMentions: 11, writeVerbs: 12 },
-    ]
+    entries.map(({ table }) => table),
+    ["PromptRefinerChatScope", "PromptRefinerChatSuggestion"]
   );
   assert.ok(entries.every((entry) =>
     entry.reason.includes("read-only preview") &&
@@ -593,6 +586,15 @@ test("the Prompt Refiner preview adds exact reads without widening its write bou
       findings.some((finding) => finding.detail.includes(entry.table)),
       `an unreviewed ${entry.table} read must fail closed`
     );
+  }
+
+  for (const { table } of RAW_SQL_ALLOWLIST.filter((entry) => entry.path === path)) {
+    const findings = checkProtectedTableWriters({
+      sources: [{ path, text: `${source}\nconst sql = 'UPDATE "${table}" SET "id" = "id"';\n` }],
+    });
+    assert.ok(findings.some((finding) => finding.path === path &&
+      finding.rule === "raw-sql" && finding.detail.startsWith(`${table}:`)),
+    `an additional ${table} write must fail closed`);
   }
 });
 

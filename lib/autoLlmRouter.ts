@@ -90,6 +90,7 @@ type AutoLlmRouterCallInput = {
     source?: "live" | "routing_optimizer" | "rewrite_optimizer";
     imageIntent?: ChatImageIntentContext | null;
     searchPlan?: boolean;
+    compactSearchMenu?: boolean;
     locationText?: string;
     existingLocationTurn?: boolean;
     searchUtcDate?: string;
@@ -130,7 +131,8 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
             input.prompt,
             input.previousAnswer,
             candidates,
-            input.session
+            input.session,
+            input.searchPlan === true && input.compactSearchMenu === true
         ) + (imageIntent ? "\n\nImage routing context:\n" + (
             imageIntent.message === input.prompt.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS)
                 ? chatImageIntentUserMessage("", imageIntent.candidates, imageIntent.previousImagePrompt, imageIntent.attachedPhoto, true)
@@ -154,7 +156,13 @@ const routerRequest = (input: AutoLlmRouterCallInput) => {
 export async function callAutoLlmRouter(
     input: AutoLlmRouterCallInput
 ): Promise<AutoLlmRouterCallResult> {
-    const { rewrite, system, prompt, maxOutputTokens, candidates, schema } = routerRequest(input);
+    return callPreparedAutoLlmRouter(input, routerRequest(input));
+}
+
+async function callPreparedAutoLlmRouter(
+    input: AutoLlmRouterCallInput,
+    { rewrite, system, prompt, maxOutputTokens, candidates, schema }: ReturnType<typeof routerRequest>
+): Promise<AutoLlmRouterCallResult> {
     const timeoutMs = input.timeoutMs ??
         (rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : AUTO_LLM_ROUTER_TIMEOUT_MS);
     let abortSignal: AbortSignal | undefined;
@@ -450,31 +458,28 @@ export async function pickAutoModelWithLlm(input: {
     );
     if (candidates.length < 2 || !input.prompt.trim()) return null;
 
-    const [session, active, rewriteOn, preparedImageIntent] = await Promise.all([
+    // A held Refiner decision, attachments or a long message already rules out
+    // a rewrite. For eligible turns only the Admin switch gates its guidance.
+    const canRewrite = input.rewriteAllowed === true &&
+        input.prompt.trim().length <= AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS;
+    const [session, active, rewriteGuidance, preparedImageIntent] = await Promise.all([
         readRouterSession(input.conversationId, input.locationFusion?.resume?.traceId),
         readActiveRouterGuidance(),
-        readAutoLlmRouterRewrite(),
+        canRewrite ? readAutoLlmRouterRewrite().then(on => on ? readActiveRouterGuidance(prisma, "rewrite") : null) : null,
         input.imageIntent ?? null,
     ]);
     // A changed Admin model between reads must not move an image call to an
     // unapproved model. The standalone path retains its prepared model.
     const imageIntent = preparedImageIntent?.modelId === routerModel.id ? preparedImageIntent : null;
     const timeoutMs = effectiveRouterTimeoutMs(tunables, AUTO_LLM_ROUTER_TIMEOUT_MS);
-    // Rewriting pays off on short, context-dependent turns; a long message is
-    // routed as it is.
-    const rewrite =
-        rewriteOn &&
-        input.rewriteAllowed === true &&
-        input.prompt.trim().length <= AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS;
-    // Read only when a rewrite is asked for, so a turn with rewriting off
-    // makes the same reads and sends the same prompt as before.
-    const rewriteGuidance = rewrite ? await readActiveRouterGuidance(prisma, "rewrite") : null;
+    const rewrite = rewriteGuidance !== null;
+    const compactSearchMenu = input.searchPlan === true && process.env.CHAT_ROUTER_COMPACT_SEARCH_MENU_ENABLED === "true";
     const version = autoLlmRouterDecisionVersion({
         routingCycleId: active.cycleId,
         rewrite,
         rewriteCycleId: rewriteGuidance?.cycleId ?? null,
     }) + (imageIntent ? "+image-intent-v2" : "") + (input.searchPlan ? "+search-plan-v2" : "") +
-        (input.locationFusion ? "+location-v1" : "");
+        (input.locationFusion ? "+location-v1" : "") + (compactSearchMenu ? "+compact-menu-v1" : "");
     const call: AutoLlmRouterCallInput = {
         source: "live",
         traceId: input.traceId,
@@ -488,6 +493,7 @@ export async function pickAutoModelWithLlm(input: {
         rewriteGuidance: rewriteGuidance?.guidance,
         imageIntent,
         searchPlan: input.searchPlan,
+        compactSearchMenu,
         searchUtcDate: input.searchPlan ? input.locationFusion?.searchUtcDate ?? new Date().toISOString().slice(0, 10) : undefined,
         locationText: input.locationFusion?.authoredText,
         existingLocationTurn: input.locationFusion?.scope === "existing",
@@ -519,7 +525,7 @@ export async function pickAutoModelWithLlm(input: {
         return null;
     }
     const startedAt = Date.now();
-    const { outcome, pick, usage, failure, imageDecision, searchQueries, simpleLookup, requiresLocation } = await callAutoLlmRouter(call);
+    const { outcome, pick, usage, failure, imageDecision, searchQueries, simpleLookup, requiresLocation } = await callPreparedAutoLlmRouter(call, request);
     if (imageDecision) input.onImageDecision?.(imageDecision);
     const latencyMs = Date.now() - startedAt;
     if (prices && usage?.inputTokens !== undefined && usage.outputTokens !== undefined) {
