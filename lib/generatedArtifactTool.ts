@@ -51,6 +51,7 @@ import {
   type ArtifactAdmission,
   type ArtifactFailureCode,
   type ArchiveSpec,
+  type ArtifactKind,
   type AuthoredArtifactKind,
   type ChatStreamArtifact,
   type DocumentBatchSpec,
@@ -375,6 +376,11 @@ const conversionFailureCode = (error: FileConversionError): ArtifactFailureCode 
     case "SOURCE_TYPE":
     case "PAGES_INVALID":
     case "PDF_ENCRYPTED":
+    // A file that cannot be read will not read on a second attempt either:
+    // what helps is a different file, which is what this card says.
+    case "PDF_UNREADABLE":
+    case "IMAGE_UNREADABLE":
+    case "SPREADSHEET_UNREADABLE":
       return "spec_rejected";
     default:
       return "generation_failed";
@@ -1186,7 +1192,7 @@ export class GeneratedArtifactCollector {
    * them.
    */
   private async renderAndStore(job: {
-    kind: string;
+    kind: ArtifactKind;
     format: SupportedArtifactFormat;
     filename: string;
     specHash: string;

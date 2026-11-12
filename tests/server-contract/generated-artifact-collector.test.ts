@@ -809,3 +809,24 @@ test("a storage failure after a conversion leaves a failed card and no object", 
     ["storage_failed"]
   );
 });
+
+test("a source that cannot be read asks for another file, not another try", async () => {
+  resetWorld();
+  const files = await turnFiles();
+  files.set("att_4", {
+    name: "broken.pdf",
+    mediaType: "application/pdf",
+    bytes: new TextEncoder().encode("not a pdf"),
+  });
+  const subject = await collector({ turnAttachments: files });
+  const report = await subject.runFileConversion({
+    operation: "to_pdf",
+    filename: "scan",
+    sources: [{ attachment: "att_4" }],
+  });
+  assert.equal(report.status, "failed");
+  assert.deepEqual(
+    subject.failed.map((entry) => entry.failureCode),
+    ["spec_rejected"]
+  );
+});

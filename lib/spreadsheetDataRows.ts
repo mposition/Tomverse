@@ -30,6 +30,7 @@ export const SPREADSHEET_DATA_ERROR_CODES = [
   "DATA_DUPLICATE_COLUMN",
   "DATA_NO_ROWS",
   "DATA_TOO_MANY_ROWS",
+  "DATA_VALUE_TOO_LONG",
 ] as const;
 
 export type SpreadsheetDataErrorCode =
@@ -274,7 +275,15 @@ const readSheetGrid = (
   sheet: SheetEntry,
   sharedStrings: string[],
   styles: StyleTable,
-  maxRows: number = SPREADSHEET_DATA_LIMITS.maxRows
+  maxRows: number = SPREADSHEET_DATA_LIMITS.maxRows,
+  /**
+   * When given, a longer cell is refused rather than cut.
+   *
+   * A template field is cut at `maxValueLength` because a placeholder has no
+   * use for four thousand characters. A table being converted is the user's
+   * data, and a cut cell there is a file that looks complete and is not.
+   */
+  strictValueLength?: number
 ): string[][] => {
   const bytes = parts[sheet.path];
   if (!bytes) {
@@ -333,7 +342,16 @@ const readSheetGrid = (
         }
 
         while (cells.length < index) cells.push("");
-        cells[index] = value.slice(0, SPREADSHEET_DATA_LIMITS.maxValueLength);
+        if (strictValueLength !== undefined && value.length > strictValueLength) {
+          throw new SpreadsheetDataError(
+            "DATA_VALUE_TOO_LONG",
+            `A cell holds more than ${strictValueLength} characters.`
+          );
+        }
+        cells[index] =
+          strictValueLength !== undefined
+            ? value
+            : value.slice(0, SPREADSHEET_DATA_LIMITS.maxValueLength);
       }
     }
     grid.push(cells);
@@ -520,13 +538,20 @@ export const readSpreadsheetDataRows = (
  *
  * The lower-level sibling of `readSpreadsheetDataRows`, for a caller that is
  * converting the table rather than filling a template from it: no header is
- * required to be unique, nothing is keyed by column name, and the row ceiling
- * is the caller's. Trailing empty rows are dropped; everything else is kept
- * where it was.
+ * required to be unique, nothing is keyed by column name, and the ceilings
+ * are the caller's. Trailing empty rows are dropped; everything else is kept
+ * where it was, and a cell longer than `maxValueLength` is refused -- never
+ * cut, because a conversion that drops text reports success over a file that
+ * is missing some.
  */
 export const readSpreadsheetGrid = (
   bytes: Uint8Array,
-  options: { mediaType: string; sheet?: string; maxRows: number }
+  options: {
+    mediaType: string;
+    sheet?: string;
+    maxRows: number;
+    maxValueLength: number;
+  }
 ): { grid: string[][]; sheetName: string; sheetNames: string[] } => {
   const trim = (grid: string[][]) => {
     let end = grid.length;
@@ -540,6 +565,12 @@ export const readSpreadsheetGrid = (
       throw new SpreadsheetDataError(
         "DATA_TOO_MANY_ROWS",
         `The data file has more than ${options.maxRows} data rows.`
+      );
+    }
+    if (grid.some((row) => row.some((cell) => cell.length > options.maxValueLength))) {
+      throw new SpreadsheetDataError(
+        "DATA_VALUE_TOO_LONG",
+        `A cell holds more than ${options.maxValueLength} characters.`
       );
     }
     return { grid, sheetName: options.sheet ?? "Sheet1", sheetNames: [] };
@@ -570,7 +601,8 @@ export const readSpreadsheetGrid = (
       sheet,
       readSharedStrings(parts),
       readStyles(parts),
-      options.maxRows
+      options.maxRows,
+      options.maxValueLength
     )
   );
   return {

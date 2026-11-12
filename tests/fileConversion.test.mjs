@@ -447,7 +447,11 @@ test("a CSV becomes a workbook whose numbers are numbers and whose ids are not",
   assert.match(sheet, /<v>1200\.5<\/v>/);
   assert.match(sheet, /<v>-3<\/v>/);
   // "007" is an identifier: written as text, so the zeros survive.
-  const round = readSpreadsheetGrid(result.bytes, { mediaType: XLSX, maxRows: 100 });
+  const round = readSpreadsheetGrid(result.bytes, {
+    mediaType: XLSX,
+    maxRows: 100,
+    maxValueLength: 100,
+  });
   assert.deepEqual(round.grid[1], ["Kim", "1200.5", "007"]);
 });
 
@@ -520,5 +524,108 @@ test("a table becomes a PDF, and one too long for a PDF is refused with the alte
     },
     files,
     "SOURCE_TYPE"
+  );
+});
+
+/* ------------------------------------------------------------------------ */
+/* Found by the independent review of the first version                       */
+/* ------------------------------------------------------------------------ */
+
+test("zip names are unique against the names actually written, not a count per name", async () => {
+  // "scan (2)" exists as a source name and is also what the second "scan"
+  // would be renamed to. Three files in, three files out.
+  const files = attachments([
+    ["scan.jpg", "image/jpeg", await image({ width: 10, height: 10 })],
+    ["scan (2).jpg", "image/jpeg", await image({ width: 20, height: 20 })],
+    ["Scan.png", "image/png", await image({ width: 30, height: 30, format: "png" })],
+  ]);
+  const result = await convert(
+    {
+      operation: "convert_images",
+      filename: "scans",
+      imageFormat: "webp",
+      sources: [{ attachment: "att_1" }, { attachment: "att_2" }, { attachment: "att_3" }],
+    },
+    files
+  );
+  const entries = unzipSync(result.bytes);
+  const names = Object.keys(entries);
+  assert.equal(names.length, 3, names.join(", "));
+  assert.equal(new Set(names.map((name) => name.toLowerCase())).size, 3);
+  const widths = [];
+  for (const name of names) {
+    widths.push((await sharp(Buffer.from(entries[name])).metadata()).width);
+  }
+  assert.deepEqual(widths.sort(), [10, 20, 30]);
+});
+
+test("a long cell is converted whole or refused, never cut", async () => {
+  const long = "가".repeat(4_500);
+  const files = attachments([
+    ["notes.xlsx", XLSX, buildXlsx({ rows: [["id", "note"], ["1", long]] })],
+    ["huge.xlsx", XLSX, buildXlsx({ rows: [["id", "note"], ["1", "x".repeat(20_001)]] })],
+    ["huge.csv", "text/csv", csvBytes(`id,note\n1,${"y".repeat(20_001)}\n`)],
+  ]);
+  const result = await convert(
+    {
+      operation: "convert_spreadsheet",
+      filename: "notes",
+      targetFormat: "csv",
+      sources: [{ attachment: "att_1" }],
+    },
+    files
+  );
+  assert.ok(new TextDecoder().decode(result.bytes).includes(long));
+
+  for (const [attachment, targetFormat] of [["att_2", "csv"], ["att_3", "xlsx"]]) {
+    await rejects(
+      {
+        operation: "convert_spreadsheet",
+        filename: "huge",
+        targetFormat,
+        sources: [{ attachment }],
+      },
+      files,
+      "SPREADSHEET_UNREADABLE"
+    );
+  }
+});
+
+test("each range of a split keeps the rotation written for it", async () => {
+  const files = attachments([
+    ["doc.pdf", "application/pdf", await pdf([[100, 100], [110, 100], [120, 100]])],
+  ]);
+  const result = await convert(
+    {
+      operation: "split_pdf",
+      filename: "parts",
+      sources: [
+        { attachment: "att_1", pages: "1" },
+        { attachment: "att_1", pages: "2-3", rotate: 90 },
+      ],
+    },
+    files
+  );
+  const entries = unzipSync(result.bytes);
+  const first = await PDFDocument.load(entries["doc_01.pdf"]);
+  const second = await PDFDocument.load(entries["doc_02.pdf"]);
+  assert.deepEqual(first.getPages().map((page) => page.getRotation().angle), [0]);
+  assert.deepEqual(second.getPages().map((page) => page.getRotation().angle), [90, 90]);
+});
+
+test("an image over the pixel ceiling is reported as a limit, not as an unreadable file", async () => {
+  const side = Math.ceil(Math.sqrt(FILE_CONVERSION_LIMITS.maxImagePixels)) + 50;
+  const files = attachments([
+    ["poster.png", "image/png", await image({ width: side, height: side, format: "png" })],
+  ]);
+  await rejects(
+    {
+      operation: "convert_images",
+      filename: "poster",
+      imageFormat: "jpg",
+      sources: [{ attachment: "att_1" }],
+    },
+    files,
+    "OUTPUT_TOO_LARGE"
   );
 });

@@ -157,13 +157,24 @@ const baseNameOf = (name: string): string => {
   return sanitizeArtifactFilename(withoutExtension || "file", "txt").slice(0, -4);
 };
 
-/** Entry paths for a .zip, made unique without changing the first of a name. */
+/**
+ * Entry paths for a .zip, made unique without changing the first of a name.
+ *
+ * Checked against the paths actually handed out, not against a count per
+ * name: "scan.jpg", "scan (2).jpg" and "scan.png" converted to one format
+ * would otherwise mint "scan (2)" twice, and the archive writer keys entries
+ * by path -- the second would silently replace the first. Compared without
+ * case, because the archive is opened on file systems that fold it.
+ */
 const uniquePaths = () => {
-  const seen = new Map<string, number>();
+  const used = new Set<string>();
   return (base: string, extension: string): string => {
-    const count = (seen.get(`${base}.${extension}`) ?? 0) + 1;
-    seen.set(`${base}.${extension}`, count);
-    return count === 1 ? `${base}.${extension}` : `${base} (${count}).${extension}`;
+    let path = `${base}.${extension}`;
+    for (let count = 2; used.has(path.toLowerCase()); count += 1) {
+      path = `${base} (${count}).${extension}`;
+    }
+    used.add(path.toLowerCase());
+    return path;
   };
 };
 
@@ -283,7 +294,15 @@ const encodeImage = async (
     }
     const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });
     return { data, width: info.width, height: info.height };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && /pixel limit/i.test(error.message)) {
+      throw new FileConversionError(
+        "OUTPUT_TOO_LARGE",
+        `${options.handle} ("${options.name}") has more than ` +
+          `${FILE_CONVERSION_LIMITS.maxImagePixels / 1_000_000} million pixels, ` +
+          "which is the most one image may have. Offer to convert a smaller image."
+      );
+    }
     throw new FileConversionError(
       "IMAGE_UNREADABLE",
       `${options.handle} ("${options.name}") could not be read as an image.`
@@ -451,19 +470,22 @@ const prepareSplitPdf = async (
   const document = await load(first);
   const pageCount = document.getPageCount();
 
-  let parts: number[][];
+  // Each part carries its own rotation: sources may name the same PDF several
+  // times, and "pages 1-2 as they are, page 5 turned" is two different parts.
+  let parts: Array<{ indices: number[]; rotate: number }>;
   const everyPage = sources.length === 1 && first.pages === undefined;
   if (spec.splitEvery !== undefined || everyPage) {
     const size = spec.splitEvery ?? 1;
     const all = selectPages(first, pageCount, FILE_CONVERSION_LIMITS.maxPdfPages);
     parts = [];
     for (let start = 0; start < all.length; start += size) {
-      parts.push(all.slice(start, start + size));
+      parts.push({ indices: all.slice(start, start + size), rotate: first.rotate });
     }
   } else {
-    parts = sources.map((source) =>
-      selectPages(source, pageCount, FILE_CONVERSION_LIMITS.maxPdfPages)
-    );
+    parts = sources.map((source) => ({
+      indices: selectPages(source, pageCount, FILE_CONVERSION_LIMITS.maxPdfPages),
+      rotate: source.rotate,
+    }));
   }
   if (parts.length > FILE_CONVERSION_LIMITS.maxSplitParts) {
     throw new FileConversionError(
@@ -479,15 +501,15 @@ const prepareSplitPdf = async (
     format: "zip",
     render: async () => {
       const entries: Array<{ path: string; bytes: Uint8Array }> = [];
-      for (const [index, indices] of parts.entries()) {
+      for (const [index, part] of parts.entries()) {
         const output = await PDFDocument.create();
         output.setProducer("Tomverse");
         output.setCreator("Tomverse");
-        const pages = await output.copyPages(document, indices);
+        const pages = await output.copyPages(document, part.indices);
         for (const page of pages) {
-          if (first.rotate) {
+          if (part.rotate) {
             page.setRotation(
-              degrees((page.getRotation().angle + first.rotate) % 360)
+              degrees((page.getRotation().angle + part.rotate) % 360)
             );
           }
           output.addPage(page);
@@ -673,9 +695,9 @@ const rasterizePdfPages = (
       finish(failed());
     });
     worker.once("error", () => finish(failed()));
-    worker.once("exit", (code) => {
-      if (code !== 0) finish(failed());
-    });
+    // Any exit that was not preceded by an answer is a failure, a clean one
+    // included: `finish` ignores this once the message above has settled it.
+    worker.once("exit", () => finish(failed()));
   });
 
 const IMAGE_EXTENSION: Record<ConversionImageFormat, string> = {
@@ -836,6 +858,7 @@ const prepareConvertSpreadsheet = async (
       mediaType: sourceFormat === "csv" ? "text/csv" : source.mediaType,
       ...(spec.sheet !== undefined ? { sheet: spec.sheet } : {}),
       maxRows: FILE_CONVERSION_LIMITS.maxSpreadsheetRows,
+      maxValueLength: ARTIFACT_LIMITS.maxTextLength,
     });
   } catch (error) {
     if (error instanceof SpreadsheetDataError) {
