@@ -23,7 +23,7 @@
 // was started in this folder already, 4 stopped after a paid step, 5 the
 // account settings were not restored (stop and look; the pack is kept when the
 // recording itself finished). A non-dry run claims <out-dir>/started.json first.
-import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,7 +86,12 @@ const LABELS = Object.freeze({
   "zh-Hant": { models: /已選模型/u, pro: "Professional", side: "並排比較", browser: "zh-TW" },
 });
 
-/** Runs in the page (page.evaluate): the visible words of <sel> (or the body). */
+/**
+ * Runs in the page (page.evaluate): the words of <sel> (or the body) a viewer can see, split by
+ * Intl.Segmenter (so ko and zh split too). A word counts only when every box of it lies wholly
+ * inside the viewport and every clipping ancestor; a hidden run becomes one ellipsis, so no quote
+ * joins across it.
+ */
 export function visibleTextInPage(sel) {
   const root = sel ? document.querySelector(sel) : document.body;
   if (!root) return "";
@@ -115,11 +120,10 @@ export function visibleTextInPage(sel) {
       }
       range.setStart(node, index);
       range.setEnd(node, index + segment.length);
-      const shown = [...range.getClientRects()].some((rect) => {
-        const x = rect.left + rect.width / 2;
-        const y = rect.top + rect.height / 2;
-        return rect.width > 0 && rect.height > 0 && clips.every((box) => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom);
-      });
+      // Whole: every box of the word (one per line it wraps over) fully inside every clip, so a word
+      // cut at a panel's edge, or wrapped onto a hidden line, is not quotable.
+      const rects = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0);
+      const shown = rects.length > 0 && rects.every((rect) => clips.every((box) => rect.left >= box.left - 0.5 && rect.right <= box.right + 0.5 && rect.top >= box.top - 0.5 && rect.bottom <= box.bottom + 0.5));
       parts.push(shown ? segment : " … ");
     }
     parts.push(" ");
@@ -146,10 +150,7 @@ async function record({ locale, outDir, question, dry }) {
       const json = await response.json().catch(() => ({}));
       return { status: response.status, language: json.language ?? json.settings?.language, theme: json.theme ?? json.settings?.theme };
     }, body ?? null);
-  // The words a viewer can see in the frame, word by word (Intl.Segmenter, so Korean and Chinese
-  // split too): a word counts only when its box's centre is inside the viewport and inside every
-  // clipping ancestor. A long answer cut off by its panel gives only its visible lines, so a quote
-  // taken from here is on screen; a hidden word leaves a gap, so no quote joins across it.
+  // The words a viewer can see in the frame (visibleTextInPage): word by word, whole words only.
   const visibleText = (selector) => page.evaluate(visibleTextInPage, selector ?? null);
   // The account's own sidebar (its other conversations) and its analytics notice never go into a
   // film; the notice is hidden, not answered, so the account's settings stay as they are. Set
@@ -301,6 +302,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
   mkdirSync(outDir, { recursive: true });
+  // One recording at a time on the demo account, from any folder or run, dry runs included: each
+  // switches the account's language and theme. Taken exclusively (O_EXCL) before the browser opens
+  // and given back only after the settings were read back as restored; after a kill or a failed
+  // restore it stays, and every later recording refuses until a person has looked at the account
+  // and removed it.
+  const lock = path.join(homedir(), ".local", "state", "tomverse", "demo-account.lock");
+  mkdirSync(path.dirname(lock), { recursive: true });
+  try {
+    closeSync(openSync(lock, "wx"));
+    writeFileSync(lock, JSON.stringify({ locale, outDir, at: new Date().toISOString(), pid: process.pid }));
+  } catch {
+    console.log(JSON.stringify({ step: "fresh-review", locale, refused: `the demo account is in use or was left locked (${lock}); nothing sent` }));
+    process.exit(1);
+  }
   // Claimed before the browser opens, exclusively (O_EXCL): a second run, at the same time or after
   // a crash, a kill or an unknown end past a paid step, finds it and never sends again.
   if (!dry) {
@@ -308,11 +323,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       closeSync(openSync(path.join(outDir, "started.json"), "wx"));
       writeFileSync(path.join(outDir, "started.json"), JSON.stringify({ locale, question, at: new Date().toISOString(), pid: process.pid }));
     } catch {
+      rmSync(lock, { force: true });
       console.log(JSON.stringify({ step: "fresh-review", locale, refused: "a recording was started here already; never sent twice" }));
       process.exit(3);
     }
   }
   const result = await record({ locale, outDir, question, dry });
+  if (result.code !== 5) rmSync(lock, { force: true });
   writeFileSync(path.join(outDir, dry ? "dry-log.json" : "log.json"), JSON.stringify({ locale, question, dry, ...result }, null, 2));
   // Recorded in full (exit 0, or 5 when only the settings restore failed): the pack is usable.
   if ((result.code === 0 || result.code === 5) && !dry && result.log.every((entry) => !entry.error)) {

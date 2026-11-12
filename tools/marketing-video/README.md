@@ -196,8 +196,11 @@ one question about it per locale, and each is asked ONCE in Review with the
 demo account and its answer analysis run ONCE (both spend that account's
 credits; a recording that stopped after a paid step is never repeated). The
 packs land in `job/creative/<run>/sources/<locale>/`, each capture's text being
-the words visible in its picture. `node fresh-review.mjs <locale> <dir>
-<question-file> <topic> --dry` stops before the send and costs nothing. The
+the words visible in its picture. One recording at a time holds
+`~/.local/state/tomverse/demo-account.lock`; after a kill or a failed settings
+restore it stays and every recording refuses until a person has checked the
+account's language and theme and removed it. `node fresh-review.mjs <locale>
+<dir> <question-file> <topic> --dry` stops before the send and costs nothing. The
 report is one JSON line;
 `job/creative/history.json` and `job/creative/sheets/<run>/` let the next run
 avoid repeating it. For a dry run, `CLAUDE_BIN` and `HIGGSFIELD_BIN` name

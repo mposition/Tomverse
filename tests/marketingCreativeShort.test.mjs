@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import { marketingAssetSchema } from "../lib/marketingAssets.ts";
@@ -530,7 +530,10 @@ test("the recorder refuses bad arguments and a folder that already holds a recor
   const dir = mkdtempSync(join(tmpdir(), "fresh-review-"));
   const question = join(dir, "q.txt");
   writeFileSync(question, "What should I cook for six friends on Friday?");
-  const run = (...args) => spawnSync(process.execPath, [join(tool, "fresh-review.mjs"), ...args], { encoding: "utf8", env: { PATH: process.env.PATH } });
+  // A home of its own: the account lock lives under it.
+  const home = join(dir, "home");
+  const lock = join(home, ".local", "state", "tomverse", "demo-account.lock");
+  const run = (...args) => spawnSync(process.execPath, [join(tool, "fresh-review.mjs"), ...args], { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home } });
   assert.equal(run("fr", join(dir, "a"), question, "fresh-cooking").status, 2);
   assert.equal(run("en", join(dir, "a"), question, "Bad Topic!").status, 2);
   mkdirSync(join(dir, "done"));
@@ -538,6 +541,16 @@ test("the recorder refuses bad arguments and a folder that already holds a recor
   const refused = run("en", join(dir, "done"), question, "fresh-cooking");
   assert.equal(refused.status, 3);
   assert.match(JSON.parse(refused.stdout.trim()).refused, /never sent twice/u);
+  assert.equal(existsSync(lock), false, "a refused folder gives the account lock back");
+  // The demo account in use (or left locked): refused before anything, the folder not claimed, the lock kept.
+  mkdirSync(dirname(lock), { recursive: true });
+  writeFileSync(lock, "{}");
+  const busy = run("en", join(dir, "b"), question, "fresh-cooking");
+  assert.equal(busy.status, 1);
+  assert.match(JSON.parse(busy.stdout.trim()).refused, /demo account is in use/u);
+  assert.equal(existsSync(join(dir, "b", "started.json")), false);
+  assert.equal(existsSync(lock), true);
+  assert.equal(run("en", join(dir, "c"), question, "fresh-cooking", "--dry").status, 1, "a dry run switches the settings too, so it waits for the lock");
   // The claim is taken exclusively before the browser opens; the settings restore is checked by reading back.
   const recorder = readFileSync(join(tool, "fresh-review.mjs"), "utf8");
   const claim = recorder.indexOf('"started.json"), "wx")');
@@ -569,7 +582,14 @@ test("a capture's text holds only the words a viewer can see, not the lines its 
       <div id="panel" style="height:100px;width:300px;overflow:hidden"><p style="margin:0">alpha ${lines("w")} omega</p></div>
       <div id="ko" style="height:20px;width:300px;overflow:auto"><p style="margin:0">처음 보이는 문장입니다 그리고 아래로 잘린 다음 줄의 마지막문장끝</p></div>
       <p style="visibility:hidden">hiddenword</p>
-      <p style="position:absolute;top:900px">belowfold</p></body>`);
+      <p style="position:absolute;top:900px">belowfold</p>
+      <div id="half" style="height:10px;width:300px;overflow:hidden"><p style="margin:0">halfcut</p></div>
+      <div id="edge" style="height:20px;width:60px;overflow:hidden;white-space:nowrap"><p style="margin:0">in widewordcutattheedge</p></div></body>`);
+    // Half a line, or a word running past the panel's side: not quotable.
+    assert.equal(await page.evaluate(visibleTextInPage, "#half"), "");
+    const edge = await page.evaluate(visibleTextInPage, "#edge");
+    assert.match(edge, /^in/u);
+    assert.doesNotMatch(edge, /wideword/u);
     const panel = await page.evaluate(visibleTextInPage, "#panel");
     assert.match(panel, /^alpha w0-longerword w1-longerword /u);
     assert.doesNotMatch(panel, /omega|w39/u);
