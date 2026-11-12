@@ -284,19 +284,48 @@ retry() {
   done
 }
 
+# The hosted runner's apt reads its Ubuntu mirrors through
+# mirror+file:/etc/apt/apt-mirrors.txt, which the image writes as
+#   http://azure.archive.ubuntu.com/ubuntu/<TAB>priority:1
+#   https://archive.ubuntu.com/ubuntu/<TAB>priority:2
+#   https://security.ubuntu.com/ubuntu/<TAB>priority:3
+# The Azure mirror is slow (2026-10-24), so archive.ubuntu.com goes ahead of it
+# -- as an added line, never a rewrite of the Azure one. The rewrite this
+# replaces left no mirror outside Canonical's DNS: on 2026-11-11 14:11-15:02 UTC
+# archive.ubuntu.com and security.ubuntu.com did not resolve on the runners and
+# every Playwright job spent its 900s budget on "Temporary failure resolving".
+#
+# apt's mirror method (apt-transport-mirror(1), methods/mirror.cc) orders the
+# list by priority, lowest first, and draws equal priorities in random order --
+# so line order alone decides nothing and the added line carries priority:0.
+# The other mirrors go to apt as Alternate-URIs; once Acquire::Retries is spent
+# on one mirror, any failure, a resolve failure included, moves the fetch to the
+# next (HandleFailure in apt-pkg/acquire-worker.cc). Azure stays the fallback.
 prefer_ubuntu_archive() {
-  local mirrors="$1"
+  local mirrors="$1" updated=""
   [ "${GITHUB_ACTIONS:-false}" = "true" ] || return 0
   [ -f "$mirrors" ] || return 0
-  if grep -Eq '^[[:blank:]]*https?://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$mirrors"; then
-    # Change only the hosted runner's slow Azure endpoint. Package lists,
-    # signing keys and third-party repositories keep their existing settings.
-    if sudo sed -b -Ei 's#^([[:blank:]]*)https?://azure[.]archive[.]ubuntu[.]com/ubuntu(/?)([[:space:]]|$)#\1https://archive.ubuntu.com/ubuntu\2\3#' "$mirrors"; then
-      echo "Using archive.ubuntu.com for Ubuntu CI dependencies."
-    else
-      echo "::warning::Could not select the Ubuntu archive mirror; keeping the existing retry budget."
-    fi
+  grep -Eq '^[[:blank:]]*https?://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$mirrors" || return 0
+  # Already added by an earlier run of this script in the same job.
+  if grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/[[:blank:]]+priority:0([[:space:]]|$)' "$mirrors"; then
+    return 0
   fi
+  # Insert one line before the first Azure entry and copy every line as it is,
+  # so package lists, signing keys and third-party repositories keep their
+  # settings. BINMODE=3 keeps gawk from dropping a CR on a CRLF line, as
+  # `sed -b` did here before; mawk has no such mode and ignores the variable.
+  if updated="$(mktemp)" &&
+      awk -v BINMODE=3 '!done { uri = $1; sub(/\r$/, "", uri) }
+        !done && uri ~ /^https?:\/\/azure[.]archive[.]ubuntu[.]com\/ubuntu\/?$/ {
+          print "https://archive.ubuntu.com/ubuntu/\tpriority:0"; done = 1
+        }
+        { print }' "$mirrors" >"$updated" &&
+      sudo tee "$mirrors" <"$updated" >/dev/null; then
+    echo "Using archive.ubuntu.com first for Ubuntu CI dependencies; the Azure mirror stays as the fallback."
+  else
+    echo "::warning::Could not put the Ubuntu archive mirror first; keeping the existing mirror list."
+  fi
+  if [ -n "$updated" ]; then rm -f "$updated"; fi
 }
 prefer_ubuntu_archive /etc/apt/apt-mirrors.txt
 
