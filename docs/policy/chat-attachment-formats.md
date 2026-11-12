@@ -132,7 +132,7 @@ Windows는 `File.type`을 registry의 `HKCR\<확장자>\Content Type`에서 냅�
 
 운영자 결정: 2026-11-13. `.pages`(`application/vnd.apple.pages`)와
 `.numbers`(`application/vnd.apple.numbers`)를 받는다. 목적은 **PDF로 바꾸는
-것 하나**다 — 렌더러 서비스(`docs/policy/generated-artifacts.md` §15)가
+것 하나**다 — 렌더러 서비스(`docs/policy/generated-artifacts.md §15`)가
 LibreOffice로 레이아웃을 잡는다.
 
 - **읽지 않는다.** 이 앱에는 Apple의 레코드를 읽는 파서가 없다. 모델에게는 파일이
