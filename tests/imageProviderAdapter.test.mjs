@@ -296,6 +296,27 @@ test("a Google response past the measured bound is reported even when it carries
     return { calls, events: logged.filter((line) => line.includes("image_google_output_over_measured_bound")) };
   };
 
+  // The refusal carries what the imageless response billed, for settlement.
+  {
+    const originalFetch = globalThis.fetch;
+    const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    globalThis.fetch = async () =>
+      Response.json({ status: "incomplete", steps: [], usage: { total_output_tokens: 553, total_thought_tokens: 1_262 } });
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = "test-google-key";
+    try {
+      setActiveImageModelCatalog([priced]);
+      await assert.rejects(
+        generateImageWithProvider({ prompt: "a red apple", size: "1024x1024", quality: "medium", modelId: priced.id }),
+        (error) => error.nonImageBillableTokens === 1_815
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (key === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+      else process.env.GOOGLE_GENERATIVE_AI_API_KEY = key;
+      resetActiveImageModelCatalog();
+    }
+  }
+
   // 2 x 2,048 = 4,096 non-image tokens is the bound: one more is reported.
   const over = await run({ total_output_tokens: 600, total_thought_tokens: 3_497 });
   // Billed and imageless: sent once, never retried, with the measured request.
@@ -306,4 +327,46 @@ test("a Google response past the measured bound is reported even when it carries
 
   const within = await run({ total_output_tokens: 553, total_thought_tokens: 1_262 });
   assert.equal(within.events.length, 0);
+});
+
+test("a Google failure that may have been billed is never sent twice", async () => {
+  // Review finding 2026-11-13: the reservation holds one request's worst case.
+  // A lost response or a 5xx can follow a generation that was billed, so
+  // neither is retried; fal's path makes the same choice.
+  const flash = IMAGE_MODEL_REGISTRY.find((model) => model.id === "gemini-3.1-flash-image");
+  const priced = {
+    ...flash,
+    disabledReason: null,
+    prices: [{ quality: "medium", size: "1024x1024", credits: 94, outputCostMicroUsd: 67_200 }],
+  };
+  const attempt = async (respond) => {
+    const originalFetch = globalThis.fetch;
+    const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return respond();
+    };
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = "test-google-key";
+    try {
+      setActiveImageModelCatalog([priced]);
+      await assert.rejects(
+        generateImageWithProvider({ prompt: "a red apple", size: "1024x1024", quality: "medium", modelId: priced.id }),
+        (error) => error.name === "ImageProviderError" && error.failurePhase === "provider_failed"
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (key === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+      else process.env.GOOGLE_GENERATIVE_AI_API_KEY = key;
+      resetActiveImageModelCatalog();
+    }
+    return calls;
+  };
+  assert.equal(
+    await attempt(() => {
+      throw new TypeError("fetch failed");
+    }),
+    1
+  );
+  assert.equal(await attempt(() => Response.json({ error: { message: "internal" } }, { status: 503 })), 1);
 });

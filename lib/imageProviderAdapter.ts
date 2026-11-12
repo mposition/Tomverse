@@ -118,6 +118,13 @@ export class ImageProviderError extends Error {
     super(message);
     this.name = "ImageProviderError";
   }
+
+  /**
+   * Billable output and thinking tokens of a response that was billed and
+   * still refused (a Google response that stopped without its image). Null
+   * everywhere else. Lets the failure settle what was spent past the reservation.
+   */
+  nonImageBillableTokens: number | null = null;
 }
 
 /**
@@ -206,6 +213,11 @@ export type ImageProviderResult = {
    * compare the fixed price against the real cost.
    */
   thinkingTokens: number;
+  /**
+   * Billable output and thinking tokens that are not the image, for a model
+   * priced on a measured token bound (Google direct). Absent elsewhere.
+   */
+  nonImageBillableTokens?: number | null;
   /** Provider-reported output/image tokens; 0 when the response omits usage. */
   outputTokens: number;
   providerRequestId: string | null;
@@ -572,9 +584,10 @@ export const generateImageWithProvider = async (input: {
  * a price revision for an unmeasured Google model opens nothing -- only a row
  * in that table can, and a row is a code change backed by a measurement.
  *
- * A response that stops without an image (`incomplete`, which the limit causes
- * when reasoning uses the room) is refused by the parser and is not retried:
- * it was billed, and a second attempt would be billed again.
+ * Only a rate limit is retried. A response that stops without an image
+ * (`incomplete`, which the limit causes when reasoning uses the room), a
+ * transport failure and a 5xx are not: each may have been billed, and the
+ * reservation holds one request's worst case.
  *
  * Differences from the other two adapters, each of which is a way to get it
  * wrong:
@@ -624,7 +637,10 @@ const generateWithGoogle = async (
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
-      lastError = new ImageProviderError(
+      // Not retried: a generation that finished and whose response was lost
+      // looks exactly like this, and a second attempt would be billed again
+      // against a reservation that holds one.
+      throw new ImageProviderError(
         "provider_failed",
         error instanceof Error && error.name === "TimeoutError"
           ? "Image provider request timed out."
@@ -633,7 +649,6 @@ const generateWithGoogle = async (
         null,
         requestParams
       );
-      continue;
     }
 
     const providerRequestId =
@@ -649,10 +664,9 @@ const generateWithGoogle = async (
         providerRequestId,
         requestParams
       );
-      if (
-        failurePhase === "provider_rate_limited" ||
-        failurePhase === "provider_failed"
-      ) {
+      // Only a rate limit is retried: it is refused before any work is done.
+      // A 5xx may follow a generation that was billed, like a lost response.
+      if (failurePhase === "provider_rate_limited") {
         lastError = error;
         continue;
       }
@@ -684,13 +698,15 @@ const generateWithGoogle = async (
     }
     const parsed = parseGoogleImageResponse(payload);
     if (!parsed) {
-      throw new ImageProviderError(
+      const refused = new ImageProviderError(
         "provider_failed",
         "Image provider returned no usable image payload.",
         response.status,
         providerRequestId,
         requestParams
       );
+      refused.nonImageBillableTokens = nonImageBillableTokens;
+      throw refused;
     }
     const imageBytes = Buffer.from(parsed.imageBase64, "base64");
     const dimensions = readImageDimensions(imageBytes, parsed.mimeType);
@@ -699,6 +715,7 @@ const generateWithGoogle = async (
       mimeType: parsed.mimeType,
       inputTokens: parsed.usage.inputTokens,
       thinkingTokens: parsed.usage.thinkingTokens,
+      nonImageBillableTokens,
       outputTokens: parsed.usage.outputTokens,
       providerRequestId,
       // Google embeds SynthID. C2PA is claimed only where the model card says

@@ -428,5 +428,7 @@ test("the bound is checked on the tokens that are not the image, image or no ima
     10
   );
   assert.equal(googleNonImageBillableTokens({ steps: [] }), null);
+  assert.equal(googleNonImageBillableTokens({ usage: {} }), null);
+  assert.equal(googleNonImageBillableTokens({ usage: { total_thought_tokens: 7 } }), 7);
   assert.equal(googleNonImageBillableTokens(null), null);
 });

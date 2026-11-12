@@ -296,6 +296,8 @@ export const googleNonImageBillableTokens = (payload: unknown): number | null =>
   const usageRaw = (payload as { usage?: unknown } | null)?.usage;
   if (!usageRaw || typeof usageRaw !== "object") return null;
   const usage = usageRaw as Record<string, unknown>;
+  // A usage object with neither counter says nothing, which is not zero.
+  if (typeof usage.total_output_tokens !== "number" && typeof usage.total_thought_tokens !== "number") return null;
   const output = finiteCount(usage.total_output_tokens);
   const byModality = Array.isArray(usage.output_tokens_by_modality) ? usage.output_tokens_by_modality : [];
   const image = byModality.reduce(

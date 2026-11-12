@@ -666,13 +666,18 @@ Banana 2.1 개정, cap이 할증보다 작은 Nano Banana 2 개정, 표에 없�
 2. **표에 없는 Google 모델은 그대로 `per_token_uncapped`다.** 행을 더하는 것은 그
    모델의 유료 실측과 운영자 승인이 있는 코드 변경이다.
 3. **정산은 cap 전액으로 한다.** thinking counter가 0이어도 사고 텍스트가 output에
-   들어 과금되므로 0으로 정산하지 않는다(`settledThinkingCostMicroUsd`).
+   들어 과금되므로 0으로 정산하지 않는다(`settledThinkingCostMicroUsd`). 응답이 cap보다
+   많이 과금했으면 그 실제 값으로 정산하고, 예약을 넘은 금액은 provider 예산에 더한다.
+   이미지 없이 끝난 실패 응답도 같다.
+4. **과금됐을 수 있는 실패는 다시 보내지 않는다.** 예약은 요청 한 번의 최악만 잡는다.
+   Google 경로는 rate limit(429)만 재시도하고, 응답 유실·timeout·5xx·이미지 없는 응답은
+   재시도하지 않는다.
 
 이 결정은 문서화된 상한이 아니라 관측에 기대므로 두 장치를 둔다. 이미지 토큰을 뺀
 output + thinking이 상한의 2배를 넘는 응답은 이미지가 있든 없든
-`image_google_output_over_measured_bound`로 기록되고, 지출의
-최종 차단은 provider 예산(§8, `IMAGE_PROVIDER_GOOGLE_COST_MICROUSD_PER_DAY`·`_PER_MONTH`)이
-한다. 그 기록이 나오면 Google 모델을 보류하고 다시 잰다.
+`image_google_output_over_measured_bound`로 기록되고, 그 초과분까지 반영된 provider
+예산(§8, `IMAGE_PROVIDER_GOOGLE_COST_MICROUSD_PER_DAY`·`_PER_MONTH`)이 지출을 최종
+차단한다. 그 기록이 나오면 Google 모델을 보류하고 다시 잰다.
 
 켜는 절차는 다른 모델과 같다: 판매 크레딧을 담은 가격 개정(§3·§4 승인), Google 예산
 env, 그리고 Admin 카탈로그의 켜기. seed는 `operational_hold`·가격 없음으로 남는다.
