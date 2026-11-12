@@ -188,7 +188,7 @@ async function picture(label, prompt, references, out) {
   }
   if (made.ok) return out;
   if (HALTING.has(made.reason)) report.halted = { at: label, reason: made.reason };
-  report.failed.push({ id: label, step: "higgsfield", reason: made.reason });
+  report.failed.push({ id: label, step: "higgsfield", reason: made.reason, ...(made.detail ? { detail: made.detail } : {}) });
   return null;
 }
 
@@ -198,7 +198,7 @@ async function picture(label, prompt, references, out) {
 const FLAT_MARKS =
   "A provider mark on a flat surface facing the viewer (`flat: true`) is painted over with its real file afterwards: report it in `logoBoxes` with its true `shapeOk`, but its shape is never a reason for `fix` or `reject`; judge only that it is there, in a sensible place and size. Only a mark on a tilted or curved surface must match its file.";
 const STAGE_RULES = {
-  guide: `Judge rules 1-11 of the guide one by one. Look hard at hands and fingers (rule 5), at every logo against its real file, and at every word on the picture against \`texts\`. ${FLAT_MARKS} On \`fix\`, write each change so an image model can make it in one edit.`,
+  guide: `Judge rules 1-11 of the guide one by one. For rule 3, look at the picture as a stranger who has never heard of Tomverse and gives it two seconds: if they could not tell that it is an AI app and what it does for them, the verdict is \`reject\`. Look hard at hands and fingers (rule 5), at every logo against its real file, and at every word on the picture against \`texts\`. ${FLAT_MARKS} On \`fix\`, write each change so an image model can make it in one edit.`,
   content: `Read every piece of text in the picture exactly as it is written, character by character, and list it in \`readTexts\`, one string per text, in reading order, even where it is wrong. Do not correct what you read. Then check the facts, the logos and the hands again. ${FLAT_MARKS} A script compares your \`readTexts\` with \`texts\`.`,
 };
 const ANSWER_SHAPE = {
@@ -246,7 +246,7 @@ function review(stage, concept, locale, file, attempt) {
 const editPrompt = (fixes) => `Edit the attached picture. Keep everything else exactly as it is: the people, the scene, the light, the composition and every word that is right. Make only these changes:\n${fixes.map((fix) => `- ${fix}`).join("\n")}`;
 const SMOOTH =
   "Edit the attached picture. Do not change a single character of any text. Make the whole photo look natural, as if the words were really shown on the screens: match each screen's light, focus, glare and perspective, and keep everything else as it is.";
-/** The language edit; on a second attempt it carries what the content review asked to fix. */
+/** The language edit; it carries what the English content review (first attempt) or this language's review (second) asked to fix. */
 const localePrompt = (concept, locale, boxes, fixes = []) => {
   const texts = textsFor(concept, locale);
   const cleared = boxes.filter((box) => box.role !== "screen").map((box) => `"${concept.texts[box.textIndex].text}"`);
@@ -256,7 +256,7 @@ const localePrompt = (concept, locale, boxes, fixes = []) => {
       "Edit the attached picture. Keep the scene, the people, the light, the provider logos and the layout exactly as they are.",
       cleared.length > 0 ? `Remove these words and leave their space clean, continuing the background, with no letters at all: ${cleared.join(", ")}.` : "",
       screens.length > 0 ? `Replace the words on the screens, exactly, keeping model and company names as written:\n${screens.join("\n")}` : "",
-      kept.length > 0 ? `A review of the last attempt also asked for these changes:\n${kept.map((fix) => `- ${fix}`).join("\n")}` : "",
+      kept.length > 0 ? `A review of this picture also asked for these changes:\n${kept.map((fix) => `- ${fix}`).join("\n")}` : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -334,9 +334,15 @@ for (const concept of concepts) {
   const boxes = guideReview.textBoxes;
 
   // 6-9 for English: the model's own words, read back and compared.
+  // What the English content review itself asked for (not the script's word
+  // list) holds for every language version too, since each starts from the
+  // same picture: on 2026-11-12 three languages each spent an edit on the
+  // lettering of a prop that the English review had already flagged.
+  let sceneFixes = [];
   {
     let file = base;
     let content = review("content", concept, "en", file, 1);
+    sceneFixes = (content?.fixes ?? []).filter((fix) => !/^(Show exactly|Remove text that is not approved): /u.test(fix));
     if (content && content.verdict === "fix") {
       file = await picture(`${concept.id}/en/remake`, editPrompt(content.fixes), [file, ...logos], path.join(genDir, `${concept.id}-en-3.png`));
       content = file ? review("content", concept, "en", file, 2) : null;
@@ -358,7 +364,7 @@ for (const concept of concepts) {
     try {
       for (let attempt = 1; attempt <= 2 && !delivered && !report.halted; attempt += 1) {
         const stem = path.join(genDir, `${concept.id}-${locale.toLowerCase()}-${attempt}`);
-        const edited = await picture(`${concept.id}/${locale}/edit`, localePrompt(concept, locale, boxes, content?.fixes ?? []), [base, ...logos], `${stem}-a.png`);
+        const edited = await picture(`${concept.id}/${locale}/edit`, localePrompt(concept, locale, boxes, content?.fixes ?? sceneFixes), [base, ...logos], `${stem}-a.png`);
         if (!edited) break;
         let file = edited;
         if (boxes.some((box) => box.role === "screen")) {

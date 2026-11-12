@@ -1,48 +1,144 @@
 {
-  "note": "What a card may say about Tomverse: facts only from this file. Model and company names are fine (owner 2026-11-07), and model marks come from library/ or public/model-icons/. Owner 2026-11-08: copy may use price, 'free' and bold wording; 'free' always carries its condition ('Free to try within the included credits'), and the Guard judges every word at submission and refuses what it does not allow. Never promise that an answer is correct. Checked 2026-11-07 against the app and the FAQ (claim.* ids in lib/marketingClaims.ts).",
+  "note": "What a card may say about Tomverse: facts only from this file. Model and company names are fine (owner 2026-11-07), and model marks come from library/ or public/model-icons/. Owner 2026-11-08: copy may use price, 'free' and bold wording; 'free' always carries its condition ('Free to try within the included credits'), and the Guard judges every word at submission and refuses what it does not allow. Never promise that an answer is correct. Each entry restates what the public FAQ or help centre says (components/marketing/marketingInfoContent.ts, chatWorkspaceGuideContent.ts; claim.* ids in lib/marketingClaims.ts). A feature with `hold` is not in the ads yet: no card is made about it and no card mentions it; `hold` says why, and the owner removes it once the feature is live and its copy can be kept. tests/marketingHiggsfieldImagePath.test.mjs fails when a feature claim of the FAQ has no entry here. Scanned against the code 2026-11-12.",
   "features": [
     {
       "id": "chat",
-      "what": "Chat with leading models in one workspace; pick the model per question.",
-      "models": ["GPT 6 Luna", "Claude Sonnet 5.5", "Claude Haiku 5.5", "Gemini Flash"],
+      "what": "Chat with leading models in one workspace: continue a conversation with one model, and pick the model per question.",
+      "models": [
+        "GPT 6 Luna",
+        "Claude Sonnet 5.5",
+        "Claude Haiku 5.5",
+        "Gemini Flash"
+      ],
       "source": "claim.chat-and-review; model chips in the app"
     },
     {
+      "id": "smart-adaptive",
+      "what": "Smart Adaptive: Tomverse picks a model for each message, weighing the question, the capabilities it needs, cost and quality, and the reply shows which model answered. You can still pick a model yourself.",
+      "source": "FAQ 'Can I choose a model myself with Smart Adaptive?'; lib/autoRoutingCopy.ts"
+    },
+    {
       "id": "review",
-      "what": "Ask one question to three models at once and read the answers side by side.",
-      "source": "claim.review-three-models"
+      "what": "Ask one question to three models at once and read the answers side by side. Easy mode: pick the companies and Tomverse picks a model for each question; Professional mode: pick the exact models.",
+      "source": "claim.review-three-models; claim.review-modes"
     },
     {
       "id": "analysis",
       "what": "Tomverse answer analysis: where the answers agree, where they differ, what is missing, what needs checking, and contradictions, each point with the answers' own quotes. It does not say which answer is right.",
       "realExample": {
         "question": "Planning a 2-day trip near Sydney with my elderly parents. Suggest an itinerary with very little walking.",
-        "models": ["GPT 6 Luna", "Claude Haiku 5.5", "Gemini Flash"],
-        "counts": { "consensus": 7, "importantDifferences": 6, "missingPoints": 7, "verificationNeeded": 6, "contradictions": 1 },
+        "models": [
+          "GPT 6 Luna",
+          "Claude Haiku 5.5",
+          "Gemini Flash"
+        ],
+        "counts": {
+          "consensus": 7,
+          "importantDifferences": 6,
+          "missingPoints": 7,
+          "verificationNeeded": 6,
+          "contradictions": 1
+        },
         "contradiction": "Gemini Flash: \"Skip the Scenic Railway (which has steep steps)\". Claude Haiku 5.5: \"The Scenic Railway runs down a steep incline in a seated, enclosed carriage\"."
       },
       "source": "real analysis recorded 2026-11-01 (marketing-reels/en-compare-short/rec/lang-en/analysis.txt)"
     },
     {
+      "id": "deep-research",
+      "what": "Deep Research: for a question where many sources matter, turn on Deep Research and get a report written from the sources it searched; a report can take several minutes. In Review's Professional mode you decide whether to use it.",
+      "source": "claim.review-modes; Deep Research status and setup copy in locales/en.ts"
+    },
+    {
       "id": "images",
-      "what": "One prompt, images from several image models side by side; keep the one you like.",
-      "models": ["GPT Image 2", "Nano Banana 2", "Grok Imagine"],
-      "source": "claim.chat-image-generation; image model chips in the app"
+      "what": "Sign in, describe an image once, generate it with one or more image models and compare the results side by side; keep the one you like.",
+      "models": [
+        "GPT Image 2",
+        "Nano Banana 2",
+        "Grok Imagine"
+      ],
+      "source": "claim.chat-image-generation (gate feature.imageGeneration, on in production per the owner 2026-11-12); image model chips in the app"
     },
     {
       "id": "files",
-      "what": "Ask about your files: PDFs, documents and spreadsheets.",
+      "what": "Ask about your files: attach a PDF, a document or a spreadsheet, or pick one from Google Drive after signing in, and ask questions about it.",
       "source": "claim.chat-file-questions"
     },
     {
-      "id": "assistants",
-      "what": "Build your own AI assistant: give it a name and instructions, add your files, pick a model, and reuse it.",
-      "source": "claim.chat-assistants"
+      "id": "file-conversion",
+      "what": "Attach files in Chat and ask in plain words to convert them: photos and PDF pages into one PDF (merge, pick pages, reorder, rotate), one PDF split into several, PDF pages into images, images to another format or size, and an Excel or CSV sheet to Excel, CSV or a PDF table. The converted file comes back in the chat to download.",
+      "source": "convert_files tool (branch claude/office-file-conversions, docs/policy/generated-artifacts.md §14), deployed 2026-11-12 per the owner; on by default (CHAT_FILE_CONVERSION=off removes it)"
     },
     {
       "id": "web-search",
       "what": "Turn on web search so answers come with their sources.",
       "source": "web search chip in the composer"
+    },
+    {
+      "id": "assistants",
+      "what": "Sign in and build your own AI assistant: give it a name and instructions, add your files, pick a model, and start conversations with it again and again. It stays private to your account.",
+      "source": "claim.chat-assistants (gate feature.assistantProfiles, on in production per the owner 2026-11-12)"
+    },
+    {
+      "id": "projects",
+      "what": "Projects: sign in, create a project and move your conversations into it, so a move, a trip or a job keeps its chats together. A project is a folder; it does not share files or memory between its chats.",
+      "source": "help centre 'Use projects' (chatWorkspaceGuideContent.ts)"
+    },
+    {
+      "id": "save-and-share",
+      "what": "Sign in to save your conversations, lock one with a password, and share one as a read-only link.",
+      "source": "claim.save-and-share; help centre 'Locking and sharing'"
+    },
+    {
+      "id": "import-continue",
+      "what": "Sign in and import your past conversations from another AI service (ChatGPT, Claude or Gemini) with its official data export, then continue a conversation in Tomverse: the model you select refers to the past context when it answers.",
+      "source": "claim.chat-import-and-continue; lib/marketingMemoryClaims.ts ALLOWED_MEMORY_CLAIMS and MEMORY_MARKETING_SHORT_DISCLOSURE (§17.1, owner 2026-11-12)",
+      "copy": "Write within these approved claims: you can import past conversations from another AI service; the model you select refers to that past context; Tomverse can draft a custom AI profile from imported conversations. Never say or show that memories, a personality or a style are copied or recreated, that nothing is lost or everything moves over, that answers are the same as before or 'just like ChatGPT/Claude', that OpenAI, Anthropic or Google endorse it, or that hidden prompts are recovered (docs/policy/external-conversation-import-and-memory.md §17).",
+      "disclosure": {
+        "en": "Answers draw on your past chats and the memories you approve, and come from the model you choose, so they may differ from the original service.",
+        "ko": "과거 대화와 승인한 기억을 참고하며, 답변은 고른 모델이 만들기 때문에 원래 서비스와 다를 수 있습니다.",
+        "zh-Hant": "回答會參考您過去的對話與您核准的記憶，並由您選擇的模型產生，因此可能與原本的服務不同。",
+        "zh-Hans": "回答会参考您过去的对话与您批准的记忆，并由您选择的模型生成，因此可能与原来的服务不同。"
+      }
+    },
+    {
+      "id": "memory",
+      "what": "Account memory: Tomverse keeps memories that you review and approve, uses them in new conversations, and refers to the answer style you prefer from past conversations.",
+      "source": "lib/marketingMemoryClaims.ts ALLOWED_MEMORY_CLAIMS and MEMORY_MARKETING_SHORT_DISCLOSURE (§17.1, owner 2026-11-12); memory live since 2026-10-23",
+      "copy": "Write within these approved claims: memories you review and approve are used in new conversations; the answer style you prefer is referred to. Never say or show that memories, a personality or a style are copied or recreated, that nothing is lost or everything moves over, that answers are the same as before or 'just like ChatGPT/Claude', that OpenAI, Anthropic or Google endorse it, or that hidden prompts are recovered (docs/policy/external-conversation-import-and-memory.md §17).",
+      "disclosure": {
+        "en": "Answers draw on your past chats and the memories you approve, and come from the model you choose, so they may differ from the original service.",
+        "ko": "과거 대화와 승인한 기억을 참고하며, 답변은 고른 모델이 만들기 때문에 원래 서비스와 다를 수 있습니다.",
+        "zh-Hant": "回答會參考您過去的對話與您核准的記憶，並由您選擇的模型產生，因此可能與原本的服務不同。",
+        "zh-Hans": "回答会参考您过去的对话与您批准的记忆，并由您选择的模型生成，因此可能与原来的服务不同。"
+      }
+    },
+    {
+      "id": "plugins",
+      "what": "Plugins: connect your work tools to Chat and manage access and actions in one place; an action that changes something waits for your approval.",
+      "source": "lib/mcpConnectorCopy.ts; /plugins",
+      "hold": "Not live: production has no connectable server. Needs MCP_CONNECTOR_PREVIEW_ENABLED=true plus each provider's OAuth credentials (MCP_CONNECTOR_PROVIDERS, docs/ops/mcp-connector-preview.md); then name the connectable tools here and remove this hold."
+    },
+    {
+      "id": "voice-input",
+      "what": "Speak into the microphone in the message box and your words become text.",
+      "source": "locales/en.ts voice input copy",
+      "hold": "Not live: set VOICE_PROVIDER_SECONDS_PER_DAY and _PER_MONTH on the web service first (without them /api/ready fails), then the feature.voiceInputEnabled row to \"true\" (docs/policy/voice-input.md; no Admin toggle)."
+    },
+    {
+      "id": "prompt-refiner",
+      "what": "Question-refinement suggestions: when offered, Tomverse suggests a clearer version of your question, and you choose whether to apply it.",
+      "source": "FAQ 'Are question-refinement suggestions applied automatically?'",
+      "hold": "Not live: the owner activates it for the exact deployment in Admin › /admin/prompt-refiner-shadow (re-auth, audited), as docs/ui-contracts/prompt-refiner-suggestion.md requires."
+    },
+    {
+      "id": "photo-edit",
+      "what": "Sign in, attach a photo in Chat and ask in plain words to change it (remove an object, change the background, adjust a detail); an image model edits the photo and the result comes back in the chat. Editing uses credits, shown before it runs.",
+      "source": "#3118, #3134 (chat photo edit); IMAGE_EDIT_ENABLED=true on the production web service 2026-11-12 with the owner's price approval (docs/policy/image-generation.md)",
+      "models": [
+        "GPT Image 2",
+        "Nano Banana 2",
+        "Grok Imagine"
+      ]
     }
   ]
 }

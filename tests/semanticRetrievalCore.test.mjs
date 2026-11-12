@@ -1018,13 +1018,19 @@ test("no semantic call is allowed before the privacy notice is published", async
     assert.equal(semanticRetrievalNoticePublished({ NODE_ENV: "test", SEMANTIC_RETRIEVAL_TEST_NOTICE: "yes" }), false);
 });
 
-test("the notice flag is not part of the /privacy page digest", async () => {
+test("the notice flag is the one the /privacy page renders, inside the digest", async () => {
     const { readFileSync } = await import("node:fs");
+    const { SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED } = await import("../lib/privacyNoticeStatus.ts");
+    const { SEMANTIC_RETRIEVAL_PRIVACY_NOTICE_PUBLISHED } = await import("../lib/semanticRetrievalCore.ts");
+    // One value decides both whether the page shows the notice and whether a
+    // call may run, so the page can never say less than what is sent.
+    assert.equal(SEMANTIC_RETRIEVAL_PRIVACY_NOTICE_PUBLISHED, SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED);
+    // The flag lives in the file the /privacy digest hashes, so flipping it is
+    // an owner-approved new /privacy version, not a side effect of this module.
     const verifiers = readFileSync("tests/support/amendedDocumentVerifiers.mjs", "utf8");
-    // Flipping it must be its own owner-approved /privacy change, not a side
-    // effect of a file the digest hashes.
-    assert.ok(!verifiers.includes("semanticRetrievalCore"));
-    assert.ok(!readFileSync("lib/privacyNoticeStatus.ts", "utf8").includes("SEMANTIC_RETRIEVAL"));
+    assert.ok(verifiers.includes("privacyNoticeStatus"));
+    assert.ok(readFileSync("lib/privacyNoticeStatus.ts", "utf8").includes("SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED"));
+    assert.ok(!readFileSync("lib/semanticRetrievalCore.ts", "utf8").includes("= false as boolean"));
 });
 
 test("both rerank prices set is refused even when one of them does not parse", () => {

@@ -285,19 +285,23 @@ test("a price that cannot be read or is above the call ceiling refuses before an
 const texts = [
   { role: "headline", text: "Ask GPT, Claude, Gemini and more" },
   { role: "screen", text: "Which model should answer this?" },
+  { role: "cta", text: "Start without an account" },
 ];
 const translations = {
   ko: [
     { role: "headline", text: "GPT, Claude, Gemini 등에 물어보세요" },
     { role: "screen", text: "어떤 모델이 답하면 좋을까요?" },
+    { role: "cta", text: "계정 없이도 바로 시작해 보세요" },
   ],
   "zh-Hant": [
     { role: "headline", text: "問 GPT、Claude、Gemini 等" },
     { role: "screen", text: "這個問題該讓哪個模型回答？" },
+    { role: "cta", text: "不用帳號也能直接開始" },
   ],
   "zh-Hans": [
     { role: "headline", text: "问 GPT、Claude、Gemini 等" },
     { role: "screen", text: "这个问题该让哪个模型回答？" },
+    { role: "cta", text: "不用账号也能直接开始" },
   ],
 };
 const concept = (id, extra = {}) => ({
@@ -402,7 +406,7 @@ test("counts after a model name, exact model lists on a screen and compound word
     return { ...concept("c2", { feature: "analysis", factRefs: ["analysis.what"] }), texts: list.map(strip), translations: { ko: inLocale("ko"), "zh-Hant": inLocale("zhT"), "zh-Hans": inLocale("zhS") } };
   };
   const first = { ...concept("c1"), feature: "analysis", factRefs: ["analysis.what"] };
-  const problemsOf = (...list) => sortConcepts({ date: "2026-11-12", feature: "analysis", concepts: [first, analysis([{ role: "headline", text: "See where the answers differ", ko: "답변이 어디서 갈리는지 보세요", zhT: "看看回答哪裡不同", zhS: "看看回答哪里不同" }, ...list])] }, { feature: "analysis", history: [], day: DAY, toolDir: tool }).dropped[0]?.problems ?? [];
+  const problemsOf = (...list) => sortConcepts({ date: "2026-11-12", feature: "analysis", concepts: [first, analysis([{ role: "headline", text: "See where AI answers differ", ko: "AI 답변이 어디서 갈리는지 보세요", zhT: "看看 AI 回答哪裡不同", zhS: "看看 AI 回答哪里不同" }, ...list, { role: "cta", text: "Start without an account", ko: "계정 없이도 바로 시작해 보세요", zhT: "不用帳號也能直接開始", zhS: "不用账号也能直接开始" }])] }, { feature: "analysis", history: [], day: DAY, toolDir: tool }).dropped[0]?.problems ?? [];
   // A count that follows a model name is not a version (every analysis card has counts).
   assert.deepEqual(problemsOf({ role: "screen", text: "GPT, Claude, Gemini and more agree on 7 points", ko: "GPT, Claude, Gemini 등 답변 7가지 공통점", zhT: "GPT、Claude、Gemini 等 7 個共同點", zhS: "GPT、Claude、Gemini 等 7 个共同点" }), []);
   // The three models that answered the recorded example, on a screen or a tag.
@@ -425,7 +429,7 @@ test("counts after a model name, exact model lists on a screen and compound word
   assert.match(problemsOf({ role: "label", text: "GPT 6 Luna · Claude · Gemini Flash" })[0], /and more/u);
   // Words around exact names are allowed on a screen or a tag (the real model wrote this label, 2026-11-12); as copy they are not.
   assert.deepEqual(problemsOf({ role: "label", text: "Asked at once: GPT 6 Luna, Claude Haiku 5.5, Gemini Flash", ko: "한 번에 질문: GPT 6 Luna, Claude Haiku 5.5, Gemini Flash", zhT: "同時提問：GPT 6 Luna、Claude Haiku 5.5、Gemini Flash", zhS: "同时提问：GPT 6 Luna、Claude Haiku 5.5、Gemini Flash" }), []);
-  assert.match(problemsOf({ role: "cta", text: "Ask GPT 6 Luna and Claude Haiku 5.5 for every task", ko: "GPT 6 Luna와 Claude Haiku 5.5에 물어보세요", zhT: "問 GPT 6 Luna 和 Claude Haiku 5.5", zhS: "问 GPT 6 Luna 和 Claude Haiku 5.5" })[0], /and more/u);
+  assert.match(problemsOf({ role: "cta", text: "Ask GPT 6 Luna and Claude Haiku 5.5 for every task", ko: "GPT 6 Luna와 Claude Haiku 5.5에 물어보세요", zhT: "問 GPT 6 Luna 和 Claude Haiku 5.5", zhS: "问 GPT 6 Luna 和 Claude Haiku 5.5" }).join(" "), /and more/u);
   // "stress-free" is not an offer; "feel free" is reworded.
   assert.deepEqual(problemsOf({ role: "screen", text: "A stress-free weekend plan", ko: "편안한 주말 계획", zhT: "輕鬆的週末行程", zhS: "轻松的周末行程" }), []);
   assert.match(problemsOf({ role: "screen", text: "Feel free to ask again", ko: "언제든 다시 물어보세요", zhT: "隨時再問", zhS: "随时再问" })[0], /"free" stands only/u);
@@ -445,7 +449,7 @@ test("concepts with the wrong shape, feature or count are refused", () => {
 
 test("banned words, unconditioned free, untranslated names and unknown models are refused", () => {
   const withText = (text, locale = null) =>
-    concept("c2", locale ? { translations: { ...translations, [locale]: [translations[locale][0], { role: "screen", text }] } } : { texts: [texts[0], { role: "screen", text }] });
+    concept("c2", locale ? { translations: { ...translations, [locale]: [translations[locale][0], { role: "screen", text }, translations[locale][2]] } } : { texts: [texts[0], { role: "screen", text }, texts[2]] });
   assert.match(check(conceptsOf(concept("c1"), withText("Visit tomverse.app today"))), /no text in the picture contains "Tomverse"/u);
   assert.match(check(conceptsOf(concept("c1"), withText("Try it free"))), /free/u);
   assert.equal(check(conceptsOf(concept("c1"), withText("Free to try within the included credits"))), null);
@@ -464,16 +468,16 @@ test("banned words, unconditioned free, untranslated names and unknown models ar
 test("an answer under a real model name must be its recorded answer, untranslated", () => {
   const quoted = (text, translated = text) =>
     concept("c2", {
-      texts: [texts[0], { role: "answer", speaker: "Gemini Flash", text }],
-      translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [list[0], { role: "answer", speaker: "Gemini Flash", text: translated }]])),
+      texts: [texts[0], { role: "answer", speaker: "Gemini Flash", text }, texts[2]],
+      translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [list[0], { role: "answer", speaker: "Gemini Flash", text: translated }, list[2]]])),
     });
   assert.equal(check(conceptsOf(concept("c1"), quoted("Skip the Scenic Railway (which has steep steps)"))), null);
   // Quote marks around it and a final stop are not a change of words.
   assert.equal(check(conceptsOf(concept("c1"), quoted("“Skip the Scenic Railway (which has steep steps).”"))), null);
   // Every recorded speaker is read, also one whose name holds a stop ("Claude Haiku 5.5" was read as "5").
   const haiku = concept("c2", {
-    texts: [texts[0], { role: "answer", speaker: "Claude Haiku 5.5", text: "The Scenic Railway runs down a steep incline in a seated, enclosed carriage" }],
-    translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [list[0], { role: "answer", speaker: "Claude Haiku 5.5", text: "The Scenic Railway runs down a steep incline in a seated, enclosed carriage" }]])),
+    texts: [texts[0], { role: "answer", speaker: "Claude Haiku 5.5", text: "The Scenic Railway runs down a steep incline in a seated, enclosed carriage" }, texts[2]],
+    translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [list[0], { role: "answer", speaker: "Claude Haiku 5.5", text: "The Scenic Railway runs down a steep incline in a seated, enclosed carriage" }, list[2]]])),
   });
   assert.equal(check(conceptsOf(concept("c1"), haiku)), null);
   assert.match(check(conceptsOf(concept("c1"), quoted("The Scenic Railway is perfect for everyone"))), /recorded answers exist only for Gemini Flash and Claude Haiku 5\.5/u);
@@ -485,6 +489,35 @@ test("a scene idea used in the last 14 days is refused, an older one is not", ()
   const used = concept("c2").device;
   assert.match(check(conceptsOf(concept("c1"), concept("c2")), [{ date: "2026-11-01", feature: "review", device: used }]), /last 14 days/u);
   assert.equal(check(conceptsOf(concept("c1"), concept("c2")), [{ date: "2026-10-01", feature: "review", device: used }]), null);
+});
+
+test("a feature on hold is never today's and no concept may rest on it", () => {
+  const features = [{ id: "chat" }, { id: "plugins", hold: "preview only" }, { id: "review" }];
+  assert.equal(pickFeature([{ date: "2026-11-07", feature: "chat" }], features, DAY), "review");
+  assert.equal(pickFeature([], [{ id: "plugins", hold: "x" }, { id: "chat" }], DAY), "chat");
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { factRefs: ["chat.what", "plugins.what"] }))), /plugins.what" is a feature on hold/u);
+  const real = JSON.parse(readFileSync(join(tool, "features.json"), "utf8")).features;
+  assert.ok(real.some((feature) => feature.hold) && real.filter((feature) => !feature.hold).length >= 8);
+  assert.ok(real.filter((feature) => feature.hold).every((feature) => typeof feature.hold === "string" && feature.hold.length > 20), "every hold says why");
+});
+
+test("a concept that rests on import or memory carries the disclosure as a label in every language, whatever today's feature", () => {
+  // Independent review 2026-11-12: a chat concept citing import-continue.what passed with no disclosure.
+  const real = JSON.parse(readFileSync(join(tool, "features.json"), "utf8")).features;
+  const disclosure = real.find((feature) => feature.id === "import-continue").disclosure;
+  const withLabel = (role) =>
+    concept("c2", {
+      factRefs: ["chat.what", "import-continue.what"],
+      texts: [...texts, { role, text: disclosure.en }],
+      translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [...list, { role, text: disclosure[locale] }]])),
+    });
+  const bare = concept("c2", { factRefs: ["chat.what", "import-continue.what"] });
+  const refused = sortConcepts(conceptsOf(concept("c1"), bare), { feature: "chat", history: [], day: DAY, toolDir: tool }).dropped[0].problems.join(" | ");
+  assert.match(refused, /texts holds this disclosure word for word, as a label/u);
+  assert.match(refused, /translations.zh-Hans holds the disclosure/u);
+  assert.equal(check(conceptsOf(concept("c1"), withLabel("label"))), null);
+  assert.match(check(conceptsOf(concept("c1"), withLabel("screen"))), /as a label/u);
+  assert.throws(() => pickFeature([], [{ id: "plugins", hold: "preview only" }], DAY), /every feature in features.json is on hold/u);
 });
 
 test("today's feature is the oldest shown, never the last run's", () => {
@@ -506,6 +539,20 @@ const reviewOf = (extra = {}) => ({
   ...extra,
 });
 const line = (value) => `Here it is.\n${JSON.stringify(value)}\n`;
+
+test("a label, such as the import and memory disclosure, is boxed as a screen text, the role the language versions translate and set", () => {
+  // Independent review 2026-11-12 asked whether a label reaches the translated
+  // versions: the review boxes every text that is not a headline or cta as
+  // `screen` (REVIEW-higgsfield.md), and localePrompt and setTexts translate and
+  // set screen boxes. The 2026-11-12 box run set its labels in Korean this way.
+  const c = concept("c1", { texts: [...texts, { role: "label", text: "Answers come from the model you choose." }] });
+  const boxed = checkReview(line(reviewOf({ textBoxes: [{ textIndex: 3, role: "screen", x: 0.1, y: 0.8, w: 0.8, h: 0.05, rotate: 0, bg: "#ffffff" }] })), { stage: "guide", concept: c, locale: "en" });
+  assert.equal(boxed.review.textBoxes[0].role, "screen");
+  assert.match(checkReview(line(reviewOf({ textBoxes: [{ textIndex: 3, role: "label", x: 0.1, y: 0.8, w: 0.8, h: 0.05, rotate: 0, bg: "#ffffff" }] })), { stage: "guide", concept: c, locale: "en" }).problem, /role is one of headline, screen, cta/u);
+  const source = readFileSync(join(tool, "run-higgsfield.mjs"), "utf8");
+  assert.ok(source.includes('box.role === "screen"'), "localePrompt translates screen boxes");
+  assert.ok(source.includes('roles: ["screen"]'), "setTexts sets screen boxes in the real font");
+});
 
 test("a review may list up to 10 fixes of up to 500 characters; more is refused", () => {
   const c = concept("c1");
@@ -545,12 +592,54 @@ test("the content review passes only when the words read match the approved word
   const c = concept("c1");
   const read = (readTexts, locale = "ko") => checkReview(line(reviewOf({ readTexts })), { stage: "content", concept: c, locale }).review;
   assert.equal(read(translations.ko.map((text) => text.text)).verdict, "pass");
-  assert.equal(read(["GPT, Claude, Gemini 등에 물어보세요", "어떤 모델이 답하면 좋을까요?", "Claude"]).verdict, "pass", "a provider's own name on its mark may stand");
-  const wrong = read(["GPT, Claude, Gemini 등에 물어보세요", "어떤 모델이 담하면 좋을까요?"]);
+  assert.equal(read(["GPT, Claude, Gemini 등에 물어보세요", "어떤 모델이 답하면 좋을까요?", "계정 없이도 바로 시작해 보세요", "Claude"]).verdict, "pass", "a provider's own name on its mark may stand");
+  const wrong = read(["GPT, Claude, Gemini 등에 물어보세요", "어떤 모델이 담하면 좋을까요?", "계정 없이도 바로 시작해 보세요"]);
   assert.equal(wrong.verdict, "fix");
   assert.ok(wrong.fixes.some((fix) => fix.includes("어떤 모델이 답하면 좋을까요?")));
   assert.equal(read(["GPT, Claude, Gemini 등에 물어보세요"]).verdict, "fix", "a missing text is not a pass");
   assert.match(checkReview(line(reviewOf()), { stage: "content", concept: c, locale: "ko" }).problem, /keys must be exactly/u);
+});
+
+test("a quote drawn in quotation marks, a spaced list separator and the name an answer is shown under are the approved words", () => {
+  // The 2026-11-12 box run refused all three on pictures that were right.
+  const c = concept("c1", {
+    texts: [
+      { role: "headline", text: "Two AI answers, one contradiction" },
+      { role: "screen", text: "GPT 6 Luna · Claude Haiku 5.5 · Gemini Flash" },
+      { role: "answer", speaker: "Gemini Flash", text: "Skip the Scenic Railway (which has steep steps)" },
+      { role: "cta", text: "Start without an account" },
+    ],
+  });
+  const read = (readTexts) => checkReview(line(reviewOf({ readTexts })), { stage: "content", concept: c, locale: "en" }).review;
+  assert.equal(read(["Two AI answers, one contradiction", "GPT 6 Luna - Claude Haiku 5.5 - Gemini Flash", "Gemini Flash", "“Skip the Scenic Railway (which has steep steps)”", "Start without an account"]).verdict, "pass");
+  const stray = read(["Two AI answers, one contradiction", "GPT 6 Luna · Claude Haiku 5.5 · Gemini Flash", "Skip the Scenic Railway (which has steep steps),'", "Start without an account"]);
+  assert.equal(stray.verdict, "fix", "a stray mark after the quote is still a flaw");
+  assert.equal(read(["Two AI answers, one contradiction", "GPT6 Luna - Claude Haiku 5.5 - Gemini Flash", "Skip the Scenic Railway (which has steep steps)", "Start without an account"]).verdict, "fix", "a changed word is still a flaw");
+  assert.equal(read(["Two AI answers, one contradiction", "GPT 6 Luna · Claude Haiku 5.5 · Gemini Flash", "Skip the Scenic Railway (which has steep steps)", "Start without an account", "Morning: Scenic Railway"]).verdict, "fix", "words on a prop are not approved");
+});
+
+test("a concept needs exactly one call to action and says AI or a model in its headline or subhead", () => {
+  const vague = concept("c1", {
+    texts: [{ role: "headline", text: "Same ride. Contradicting advice." }, { role: "screen", text: "Which model should answer this?" }, { role: "cta", text: "Start without an account" }],
+  });
+  assert.match(check(conceptsOf(vague, concept("c2"))), /says "AI" or names a model/u);
+  const noCta = concept("c1", { texts: texts.filter((text) => text.role !== "cta"), translations: Object.fromEntries(Object.entries(translations).map(([key, list]) => [key, list.filter((text) => text.role !== "cta")])) });
+  assert.match(check(conceptsOf(noCta, concept("c2"))), /exactly one cta/u);
+  const plain = concept("c1", {
+    texts: [{ role: "headline", text: "Ask an AI if your lease clause is normal" }, { role: "screen", text: "Which model should answer this?" }, { role: "cta", text: "Start without an account" }],
+  });
+  assert.equal(check(conceptsOf(plain, concept("c2"))), null);
+});
+
+test("every feature claim of the FAQ has an entry in features.json, so a new feature reaches the ads", () => {
+  // features.json was written once by hand (2026-11-07) and missed every feature
+  // shipped after it until the owner asked on 2026-11-12. General claims about
+  // Tomverse as a whole are not a feature of their own.
+  const general = new Set(["claim.why-tomverse", "claim.about-tomverse", "claim.start-a-question"]);
+  const claims = [...readFileSync("lib/marketingClaims.ts", "utf8").matchAll(/pageClaim\(\s*"(claim\.[a-z-]+)",\s*"feature"/gu)].map((match) => match[1]).filter((id) => !general.has(id));
+  assert.ok(claims.length >= 8, "the FAQ feature claims are read");
+  const sources = JSON.parse(readFileSync(join(tool, "features.json"), "utf8")).features.map((feature) => feature.source).join(" ");
+  assert.deepEqual(claims.filter((id) => !sources.includes(id)), []);
 });
 
 // The picture steps run in Chromium (playwright), where the tool's packages and

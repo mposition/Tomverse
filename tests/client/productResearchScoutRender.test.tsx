@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import benchmark from "@/lib/scoutMemoryBenchmark.json";
 import { AdminScoutRunsPanel } from "@/components/admin/AdminScoutRunsPanel";
 import { AdminScoutSuggestionsPanel, scoutSuggestionBrief } from "@/components/admin/AdminScoutSuggestionsPanel";
 import { SCOUT_SEND_BATCH, SCOUT_SEND_SPACING_MS, nextScoutSendBatch, runScoutSuggestionBatch } from "@/lib/adminScoutDisplay";
@@ -256,4 +257,32 @@ test("every suggestion offers Copy brief, even without the right to send, and th
   // A file or the catalogue has no page to name.
   const file = suggestion("s4", "pdf.document", "low", "generated_file", "PDF title is body-sized");
   assert.equal(scoutSuggestionBrief(file, "https://tomverse.app"), [suggestionIdeaText(file), ko.briefDone].join("\n"));
+});
+
+test("the memory panel distinguishes a missing decision from an unmeasured language and shows the previous date", () => {
+  const measurement = {version:"continuation-decisions-v1", day:"2026-11-11", measuredAt:"2026-11-11T18:15:00Z", locale:"en", mode:"long-auto", model:"fixture", outcome:"omission", visible:false, usedTurns:2, originalCorrect:false, expected:{A:"UNKNOWN",B:"UNKNOWN",C:"UNKNOWN",D:"UNKNOWN"}, answers:{A:"UNKNOWN",B:"UNKNOWN",C:"UNKNOWN",D:"UNKNOWN"}} as const;
+  const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({memoryQuality:{enabled:true,day:"2026-11-12",readings:[measurement,{...measurement,locale:"fr",day:"2026-11-11",measuredAt:"2026-11-11T02:00:00Z"}]}})} week={WEEK} />);
+  assert.match(html,/Measured today: 1\/8/);
+  assert.ok(html.includes(m.memoryStatus.omission));
+  assert.equal(html.split(m.memoryWaiting).length-1,7);
+  assert.ok(html.includes("2026-11-12 04:15 AEST"));
+  assert.ok(html.includes("2026-11-11 12:00 AEST"));
+  assert.ok(html.includes(m.languages["zh-Hant"]));
+  assert.ok(html.includes(m.memoryFilter));
+});
+
+test("the recorded three-arm benchmark is visible before the daily Scout has any paired data", () => {
+  const recorded=benchmark as NonNullable<ScoutConsoleView["memoryComparison"]>["benchmark"];
+  const memoryComparison={enabled:false,daily:{model:null,day:"2026-11-12",rows:[]},benchmark:recorded};
+  const html=renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({memoryComparison})} week={WEEK} />);
+  assert.ok(html.includes(recorded.model!));
+  assert.equal(recorded.rows.length,8);
+  for (const row of recorded.rows) {
+    assert.equal(row.pairs,4);
+    assert.equal(row.observed,12);
+    assert.ok(html.includes(m.languages[row.locale]));
+    for (const arm of row.arms) assert.ok(html.includes(m.experimentArms[arm.arm]));
+  }
+  assert.ok(html.includes("Mean est. USD"));
+  assert.ok(html.includes("Evidence found"));
 });

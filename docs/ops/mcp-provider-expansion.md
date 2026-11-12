@@ -33,7 +33,9 @@ necessarily expose both read and write operations. Provider permissions and
 available tools determine the actual capabilities.
 Managed app IDs, existing Google Drive import permissions and other platforms'
 credentials cannot be reused as Tomverse connectors. Local stdio/hook execution
-and legacy SSE remain unavailable in Chat. Arbitrary user-supplied URLs remain blocked.
+and legacy SSE remain unavailable in Chat. Signed-in users can enter their own
+remote server URL (custom servers, on by default with the preview since
+2026-11-12; see [mcp-connector-preview.md](mcp-connector-preview.md)).
 
 ## Operator configuration
 

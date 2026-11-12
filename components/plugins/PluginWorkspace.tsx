@@ -19,6 +19,8 @@ import { PLUGIN_PROVIDERS, EMPTY_PLUGIN_INVENTORY, readPluginInventory, type Plu
 import "@/components/chat/review-studio.css";
 import styles from "./pluginWorkspace.module.css";
 
+// A custom server's chosen name never selects a catalogued brand logo.
+const logoName = (serverId: string, name: string) => serverId === "custom" || serverId.startsWith("custom-") ? "" : name;
 const featuredProviders = ["github", "railway", "slack", "notion", "linear", "figma", "canva", "atlassian", "sentry", "cloudflare"];
 
 export function PluginWorkspace() {
@@ -34,6 +36,8 @@ export function PluginWorkspace() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [serverId, setServerId] = useState(""); const [credential, setCredential] = useState("");
+  const [customMode, setCustomMode] = useState(false);
+  const [custom, setCustom] = useState<{ url: string; name: string; auth: PluginServer["auth"] }>({ url: "", name: "", auth: "none" });
   const [checked, setChecked] = useState<string[]>([]);
   const [scopes, setScopes] = useState<string[]>([]);
   const [verified, setVerified] = useState<Record<string, boolean>>({});
@@ -72,27 +76,42 @@ export function PluginWorkspace() {
       if (result.status === "ok") setNotice(c.executed);
       await refresh();
       return result;
-    } catch (e) { setError(e instanceof Error && ["outcome_unknown", "previous_outcome_unknown"].includes(e.message) ? c.unknown : c.error); await refresh().catch(() => {}); }
+    } catch (e) {
+      const code = e instanceof Error ? e.message : "";
+      setError(["outcome_unknown", "previous_outcome_unknown"].includes(code) ? c.unknown :
+        ["invalid_custom_url", "unsafe_endpoint", "unsafe_address"].includes(code) ? c.customUrlRefused :
+        code === "custom_server_limit" ? c.customLimit : code === "oauth_discovery_failed" ? c.customOAuthUnsupported : c.error);
+      await refresh().catch(() => {});
+    }
     finally { setBusy(false); setCredential(""); }
   };
   const selected = inventory.connections.find(conn => conn.id === selectedId);
   const showDetail = () => { if (window.innerWidth < 1250) requestAnimationFrame(() => detail.current?.scrollIntoView({ block: "start" })); };
   const choose = (conn: PluginConnection) => { setProviderId(null); setSelectedId(conn.id); setChecked(conn.grants.map(t => t.name)); showDetail(); };
   const chooseProvider = (provider: McpProvider) => { setSelectedId(null); setProviderId(provider.id); showDetail(); };
+  const openCustom = () => { setCustomMode(true); setCustom({ url: "", name: "", auth: "none" }); setCredential(""); setScopes([]); setAdding(true); };
   const chooseServer = (id: string) => { setServerId(id); setCredential(""); setScopes(initialPluginScopes(inventory.servers.find(s => s.id === id))); };
-  const openAdd = (id = "") => { chooseServer(id || inventory.servers[0]?.id || ""); setAdding(true); };
+  const openAdd = (id = "") => {
+    if (!id && !inventory.servers.length && inventory.customEnabled) return openCustom();
+    setCustomMode(false); chooseServer(id || inventory.servers[0]?.id || ""); setAdding(true);
+  };
   const chosenServer = inventory.servers.find(s => s.id === serverId);
-  const scopeMissing = Boolean(chosenServer?.scopes && !scopes.length);
+  const chosenAuth = customMode ? custom.auth : chosenServer?.auth;
+  const scopeServer = !customMode && chosenServer?.auth === "oauth" && chosenServer.scopes ? chosenServer : undefined;
+  const scopeMissing = Boolean(scopeServer && !scopes.length);
   const pending = inventory.invocations.filter(i => i.state === "pending");
   const cards: Array<{ id: string; name: string; server?: PluginServer; provider?: McpProvider }> = [
-    ...inventory.servers.map(server => ({ id: server.id, name: server.name, server, provider: mcpProvider(server.id) || mcpProvider(server.name) })),
-    ...PLUGIN_PROVIDERS.filter(provider => !inventory.servers.some(s => (mcpProvider(s.id) || mcpProvider(s.name))?.id === provider.id))
+    // A user-entered server is never presented as a catalogued provider, whatever its name.
+    ...inventory.servers.map(server => ({ id: server.id, name: server.name, server, provider: server.custom ? undefined : mcpProvider(server.id) || mcpProvider(server.name) })),
+    // Connectable now, so it sits with the connectable servers rather than after 140 catalog entries.
+    ...(inventory.customEnabled ? [{ id: "custom", name: c.custom }] : []),
+    ...PLUGIN_PROVIDERS.filter(provider => !inventory.servers.some(s => !s.custom && (mcpProvider(s.id) || mcpProvider(s.name))?.id === provider.id))
       .sort((a, b) => {
         const rank = (provider: McpProvider) => featuredProviders.includes(provider.id) ? featuredProviders.indexOf(provider.id) : provider.kind === "remote" ? 100 : 200;
         return rank(a) - rank(b);
       })
       .map(provider => ({ id: provider.id, name: provider.name, provider })),
-    { id: "custom", name: c.custom },
+    ...(inventory.customEnabled ? [] : [{ id: "custom", name: c.custom }]),
   ];
   const visibleCards = cards.filter(card => [card.name, ...(card.provider?.aliases || [])].some(name => name.toLowerCase().includes(search.toLowerCase())) &&
     (category === "all" || card.provider?.category === category) && (source === "all" || card.provider?.sources.includes(source)) &&
@@ -106,7 +125,7 @@ export function PluginWorkspace() {
       <nav>{(["all", "connected", "approvals"] as const).map(key => <button key={key} type="button" aria-current={tab === key ? "page" : undefined} onClick={() => { setTab(key); setLimit(24); }}>
         {c[key]}{key === "approvals" && pending.length > 0 ? <span className={styles.count}>{pending.length}</span> : null}</button>)}</nav>
       <p className={styles.eyebrow}>{c.myConnections}</p>
-      {inventory.connections.filter(conn => conn.status !== "disconnected").map(conn => <button className={styles.sideConnection} key={conn.id} type="button" onClick={() => choose(conn)}><PluginLogo name={conn.name} /><span>{conn.name}</span></button>)}
+      {inventory.connections.filter(conn => conn.status !== "disconnected").map(conn => <button className={styles.sideConnection} key={conn.id} type="button" onClick={() => choose(conn)}><PluginLogo name={logoName(conn.serverId, conn.name)} /><span>{conn.name}</span></button>)}
       <p className={styles.help}>{c.setupNotice}</p>
     </aside>
     <main className={styles.main}>
@@ -164,19 +183,21 @@ export function PluginWorkspace() {
             </article>)}
           </> : <><div className={styles.grid}>{visibleCards.slice(0, limit).map(card => {
             const conn = inventory.connections.find(conn => conn.serverId === card.id && conn.status !== "disconnected");
+            const addCustom = card.id === "custom" && Boolean(inventory.customEnabled);
             return <article key={card.id} className={styles.card} data-testid="plugin-card" data-provider={card.provider?.id || card.id}>
-              <div className={styles.identity}><PluginLogo name={card.name} providerId={card.provider?.id} /><h3>{card.name}</h3></div>
+              <div className={styles.identity}><PluginLogo name={logoName(card.id, card.name)} providerId={card.provider?.id} /><h3>{card.name}</h3></div>
               <p className={styles.help} data-testid="plugin-capability">{card.provider ? mcpProviderSummary(card.provider, lang) : c.customDescription}</p>
               {card.server?.origin ? <p className={styles.help}>{card.server.origin}</p> : null}
               {card.provider && <div className={styles.badges}><span>{p[card.provider.kind]}</span>{card.provider.sources.map(source => <span key={source}>{source === "openai" ? "Codex" : "Claude Code"}</span>)}</div>}
-              <div className={styles.cardFooter}><span>{conn ? conn.status === "connected" ? c.connected : c.expired : card.server ? c.disconnected : c.serverSetup}</span>
-                <button type="button" disabled={busy || (!card.server && !card.provider)} onClick={() => conn ? choose(conn) : card.server ? openAdd(card.id) : chooseProvider(card.provider!)}>{conn ? c.manage : card.server ? c.connect : p.details}</button></div>
+              <div className={styles.cardFooter}><span>{conn ? conn.status === "connected" ? c.connected : c.expired : card.server ? c.disconnected : addCustom ? c.customReady : c.serverSetup}</span>
+                <button type="button" data-testid={card.id === "custom" ? "plugin-custom-add" : undefined} disabled={busy || (!card.server && !card.provider && !addCustom)}
+                  onClick={() => conn ? choose(conn) : card.server ? openAdd(card.id) : addCustom ? openCustom() : chooseProvider(card.provider!)}>{conn ? c.manage : card.server || addCustom ? c.connect : p.details}</button></div>
             </article>;
           })}</div>{visibleCards.length > limit && <button className={styles.loadMore} type="button" onClick={() => setLimit(value => value + 24)}>{p.more} ({Math.min(limit, visibleCards.length)}/{visibleCards.length})</button>}</>}
           {!visibleCards.length && tab !== "approvals" && <p>{tab === "connected" ? c.empty : c.missing}</p>}
         </section>
         <aside ref={detail} className={styles.detail} aria-label={c.manage}>
-          {selected ? <><PluginLogo name={selected.name} /><h2>{selected.name}</h2><p className={styles.help}>{c.sharing}</p><h3>{c.tools}</h3><p className={styles.help}>{c.permissionNotice}</p>
+          {selected ? <><PluginLogo name={logoName(selected.serverId, selected.name)} /><h2>{selected.name}</h2><p className={styles.help}>{c.sharing}</p><h3>{c.tools}</h3><p className={styles.help}>{c.permissionNotice}</p>
             {selected.status !== "connected" && <p role="status">{selected.status === "disconnected" ? c.disconnected : c.expired}</p>}
             {!!selected.scopes?.length && <p className={styles.help} data-testid="plugin-granted-scopes">{c.grantedScopes}: {selected.scopes.join(", ")}</p>}
             <div className={styles.toolList}>{(selected.status === "connected" ? selected.catalog : []).map(tool => <label key={tool.name}><input type="checkbox" disabled={busy} checked={checked.includes(tool.name)} onChange={e => setChecked(old => e.target.checked ? [...old, tool.name] : old.filter(n => n !== tool.name))} /><span><strong>{tool.name}</strong><small>{tool.mode === "read" ? c.read : c.confirm}</small></span></label>)}</div>
@@ -195,14 +216,29 @@ export function PluginWorkspace() {
     </main>
     {adding && <div className={styles.backdrop}><div ref={dialog} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="plugin-add-title">
       <div className={styles.header}><h2 id="plugin-add-title">{c.add}</h2><button type="button" disabled={busy} aria-label={c.close} onClick={() => { setAdding(false); setCredential(""); }}><X size={20} /></button></div>
-      <form onSubmit={e => { e.preventDefault(); void mutate(chosenServer?.auth === "oauth" ? "/api/mcp/oauth/start" : "/api/mcp/connections", "POST", { serverId, ...(chosenServer?.auth === "bearer" ? { credential } : {}), ...(chosenServer?.scopes ? { scopes } : {}) }).then(result => { if (result) { setAdding(false); setSelectedId(result.connection?.id || result.id); setChecked([]); } }); }}>
-        <label>{c.title}<select value={serverId} onChange={e => chooseServer(e.target.value)} required>{inventory.servers.map(server => <option value={server.id} key={server.id}>{server.name}</option>)}</select></label>
-        {chosenServer && <p className={styles.help}>{chosenServer.origin}</p>}
-        {chosenServer?.auth === "oauth" && <PluginScopePicker server={chosenServer} value={scopes} onChange={setScopes} disabled={busy} copy={c} className={styles.scopePicker} />}
-        {chosenServer?.auth === "bearer" && <label>{c.token}<input data-testid="plugin-credential" type="password" value={credential} onChange={e => setCredential(e.target.value)} maxLength={4096} autoComplete="off" required /></label>}
-        <p>{chosenServer?.auth === "oauth" ? c.oauthHelp : c.authHelp}</p><p className={styles.help}>{c.sharing}</p>
-        {!inventory.servers.length && <p>{c.setupNotice}</p>}
-        <button className={styles.primary} disabled={busy || !chosenServer || scopeMissing} type="submit">{busy ? c.sending : c.connect}</button>
+      <form onSubmit={e => {
+        e.preventDefault();
+        const target = customMode ? { custom: { url: custom.url.trim(), auth: custom.auth, ...(custom.name.trim() ? { name: custom.name.trim() } : {}) } } : { serverId };
+        void mutate(chosenAuth === "oauth" ? "/api/mcp/oauth/start" : "/api/mcp/connections", "POST", { ...target, ...(chosenAuth === "bearer" ? { credential } : {}), ...(scopeServer ? { scopes } : {}) })
+          .then(result => { if (result) { setAdding(false); setSelectedId(result.connection?.id || result.id); setChecked([]); } });
+      }}>
+        {customMode ? <>
+          <label>{c.customUrl}<input data-testid="plugin-custom-url" type="url" inputMode="url" placeholder="https://mcp.example.com/mcp" value={custom.url}
+            onChange={e => setCustom(old => ({ ...old, url: e.target.value }))} maxLength={2048} autoComplete="off" required /></label>
+          <label>{c.customName}<input data-testid="plugin-custom-name" value={custom.name} onChange={e => setCustom(old => ({ ...old, name: e.target.value }))} maxLength={80} autoComplete="off" /></label>
+          <label>{c.customAuth}<select data-testid="plugin-custom-auth" value={custom.auth} onChange={e => { setCustom(old => ({ ...old, auth: e.target.value as PluginServer["auth"] })); setCredential(""); }}>
+            <option value="none">{c.authNone}</option><option value="bearer">{c.authBearer}</option><option value="oauth">{c.authOAuth}</option></select></label>
+          <p className={styles.help}>{c.customHelp}</p>
+        </> : <>
+          <label>{c.title}<select value={serverId} onChange={e => chooseServer(e.target.value)} required>{inventory.servers.map(server => <option value={server.id} key={server.id}>{server.name}</option>)}</select></label>
+          {chosenServer && <p className={styles.help}>{chosenServer.origin}</p>}
+          {scopeServer && <PluginScopePicker server={scopeServer} value={scopes} onChange={setScopes} disabled={busy} copy={c} className={styles.scopePicker} />}
+          {inventory.customEnabled && <button type="button" disabled={busy} onClick={openCustom}>{c.custom}</button>}
+        </>}
+        {chosenAuth === "bearer" && <label>{c.token}<input data-testid="plugin-credential" type="password" value={credential} onChange={e => setCredential(e.target.value)} maxLength={4096} autoComplete="off" required /></label>}
+        <p>{chosenAuth === "oauth" ? c.oauthHelp : c.authHelp}</p><p className={styles.help}>{c.sharing}</p>
+        {!customMode && !inventory.servers.length && <p>{c.setupNotice}</p>}
+        <button className={styles.primary} data-testid="plugin-connect-submit" disabled={busy || scopeMissing || (customMode ? !custom.url.trim() : !chosenServer)} type="submit">{busy ? c.sending : c.connect}</button>
       </form>
     </div></div>}
   </div>;

@@ -8,6 +8,12 @@
  */
 import "server-only";
 
+import { latestMemoryReadings, memoryScoutEnabled } from "./productResearchScoutMemory";
+import { comparisonEnabled } from "./scoutMemoryExperimentRunner";
+import { recentMemoryTrials } from "./scoutMemoryExperimentStore";
+import { summarizeTrials } from "./scoutMemoryExperiment";
+import measuredBenchmark from "./scoutMemoryBenchmark.json";
+import { formatAestDate } from "./adminUiCore";
 import type { Session } from "next-auth";
 
 import { getAdminRole } from "@/lib/adminAuth";
@@ -51,8 +57,11 @@ export type ScoutConsoleSection = "suggestions" | "runs";
 
 export const SCOUT_CONSOLE_DAYS = 7;
 
+type ComparisonView = {model:string|null;day:string;rows:ReturnType<typeof summarizeTrials>};
 export type ScoutConsoleView = {
+  readonly memoryComparison?: {enabled:boolean;daily:ComparisonView;benchmark:ComparisonView};
   readonly enabled: boolean;
+  readonly memoryQuality?: { readonly enabled:boolean;readonly day:string;readonly readings:Awaited<ReturnType<typeof latestMemoryReadings>> };
   /** Whether a test account is named. The address itself stays on the server. */
   readonly testAccountConfigured: boolean;
   readonly settings: ScoutSettings;
@@ -77,7 +86,7 @@ export type ScoutConsoleView = {
 export async function readScoutConsole(session: Session | null, section: ScoutConsoleSection): Promise<ScoutConsoleView> {
   const role = getAdminRole(session);
   const now = new Date();
-  const [settings, modelOptions, usageToday, counts, calls, open, completed] = await Promise.all([
+  const [settings, modelOptions, usageToday, counts, calls, open, completed, memoryReadings, trials] = await Promise.all([
     readScoutSettings(),
     scoutModelOptions(),
     scoutUsageToday(),
@@ -85,9 +94,14 @@ export async function readScoutConsole(session: Session | null, section: ScoutCo
     scoutRecentCalls(SCOUT_CONSOLE_DAYS),
     section === "suggestions" ? listSuggestions("open") : Promise.resolve([]),
     section === "suggestions" ? listSuggestions("completed") : Promise.resolve([]),
+    section === "suggestions" ? latestMemoryReadings() : Promise.resolve([]),
+    section === "suggestions" ? recentMemoryTrials(now) : Promise.resolve([]),
   ]);
+  const displayModel=trials.some(r=>r.model===settings.modelId) ? settings.modelId : [...trials].sort((a,b)=>b.measuredAt.localeCompare(a.measuredAt))[0]?.model ?? settings.modelId;
   return {
     enabled: isProductResearchRouteEnabled(process.env, PRODUCT_RESEARCH_SCOUT_SWITCH_ENV),
+    memoryComparison:{enabled:comparisonEnabled() && memoryScoutEnabled() && isProductResearchRouteEnabled(process.env,PRODUCT_RESEARCH_SCOUT_SWITCH_ENV), daily:{model:displayModel, day:formatAestDate(now)!, rows:summarizeTrials(trials,displayModel)},benchmark:measuredBenchmark as ComparisonView},
+    memoryQuality:{enabled:memoryScoutEnabled() && isProductResearchRouteEnabled(process.env,PRODUCT_RESEARCH_SCOUT_SWITCH_ENV),day:formatAestDate(now)!,readings:memoryReadings},
     testAccountConfigured: scoutTestAccountEmail() !== null,
     settings,
     modelOptions,

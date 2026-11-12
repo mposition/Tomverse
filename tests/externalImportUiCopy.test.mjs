@@ -145,7 +145,7 @@ test("the components render the copy", () => {
         // Step indicator and the user-facing rewording of transport terms.
         "externalImport.stepIndicatorLabel",
         "externalImport.stepPosition",
-        "externalImport.continueToReview",
+        "journey.reviewCount",
         "externalImport.preparingReviewTitle",
         "externalImport.reviewFinalizeCta",
         // Quota recovery must never read as "retry the same thing".

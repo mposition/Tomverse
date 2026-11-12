@@ -198,8 +198,7 @@ test("a blank turn is counted as blank, never as something the budget left out",
     const plan = planContinuationSeed({
         messages: [
             message({ ordinal: 0, role: "user", content: "   \n\t  " }),
-            // Blank only after the per-message cut, which is how the rule reads
-            // it: the visible word is past the 4,000th code point.
+            // The only visible word is at the end of an oversized message.
             message({
                 ordinal: 1,
                 role: "assistant",
@@ -213,10 +212,11 @@ test("a blank turn is counted as blank, never as something the budget left out",
     });
     assert.deepEqual(
         plan.turns.map((turn) => turn.ordinal),
-        [3]
+        [1, 3]
     );
+    assert.match(plan.turns[0].text, /visible$/);
     assert.equal(plan.omittedByBudgetCount, 0);
-    assert.equal(plan.blankSkippedCount, 2);
+    assert.equal(plan.blankSkippedCount, 1);
     assert.equal(plan.excludedByRoleCount, 1);
 });
 
@@ -442,4 +442,35 @@ test("the flag gates creation and seeding, and nothing else", () => {
     assert.equal(continuationCapabilityAllowed("seed", false), false);
     assert.equal(continuationCapabilityAllowed("create", true), true);
     assert.equal(continuationCapabilityAllowed("seed", true), true);
+});
+
+test("a complete closing paragraph gets the space it needs before an opening excerpt", () => {
+    const rule = "The default is A. " + "approved terms ".repeat(238) + "Only group B before noon uses route C.";
+    const messages = [message({content: "Discarded proposal. ".repeat(150) + "\r\n" + rule + "\r\nEnd."})];
+    const plan = planContinuationSeed({messages});
+    assert.ok(plan.turns[0].text.includes(rule));
+    assert.ok(plan.turns[0].text.endsWith("End."));
+    assert.ok(Array.from(plan.turns[0].text).length <= CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT);
+    assert.equal(plan.truncatedCount,1);
+});
+
+test("a dense oversized turn preserves a full final decision and its exception before a short follow-up", () => {
+    const decision = "최종 결정은 A입니다.\n정오 전의 B 회원만 C입니다.";
+    const rows = [message({content: "가".repeat(4500)+"\u2029"+decision}),message({ordinal:1, content:"다음 단계로 넘어갑시다."})];
+    const plan=planContinuationSeed({messages:rows});
+    assert.deepEqual(plan.turns.map(t=>t.ordinal),[0,1]);
+    assert.equal(plan.turns[0].text,decision);
+    assert.equal(plan.truncatedCount,1);
+    assert.equal(plan.estimatedTokens,plan.turns.reduce((n,t)=>n+estimateTextTokens(t.text),0));
+    assert.ok(plan.estimatedTokens<=CONTINUATION_SEED_TOKEN_BUDGET);
+});
+
+test("an oversized single paragraph preserves the opening and end without splitting astral characters", () => {
+    const text="🦋".repeat(2800)+"🧭".repeat(2800)+"Decision: east. Except before noon.";
+    const plan=planContinuationSeed({messages:[message({content:text+" ".repeat(4400)})]});
+    const excerpt=plan.turns[0].text;
+    assert.ok(excerpt.startsWith("🦋") && excerpt.endsWith("Except before noon."));
+    assert.ok(excerpt.includes("[…]") && excerpt.isWellFormed());
+    assert.ok(Array.from(excerpt).length<=CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT);
+    assert.ok(plan.estimatedTokens<=CONTINUATION_SEED_TOKEN_BUDGET);
 });

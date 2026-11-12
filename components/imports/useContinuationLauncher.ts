@@ -60,7 +60,7 @@ export type ContinuationLauncher = {
      * from the render that started the attempt; the card uses it to collapse
      * its disclosure back to a retry button.
      */
-    start: () => Promise<boolean>;
+    start: (openPicker?: boolean) => Promise<boolean>;
     /** The one thing that drops the key: an explicit "no, start over". */
     cancel: () => void;
 };
@@ -150,7 +150,7 @@ export function useContinuationLauncher(
     }, [endpoint]);
     const creating = status === "creating" && stateEndpoint === endpoint;
 
-    const start = useCallback(async (): Promise<boolean> => {
+    const start = useCallback(async (openPicker = false): Promise<boolean> => {
         // Guards the double click at the source: the second press finds the
         // launcher already creating and returns before it can send anything.
         // The button is disabled too, but a disabled attribute is a rendering
@@ -222,7 +222,7 @@ export function useContinuationLauncher(
                 return false;
             }
             openAttemptKeys.delete(endpoint);
-            router.push(continuationPath(body.conversationId));
+            router.push(continuationPath(body.conversationId) + (openPicker ? "?pickSource=1" : ""));
             return true;
         } catch {
             if (!isCurrent()) {

@@ -4,7 +4,11 @@ import type { ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { displayHeadingClass } from "@/lib/displayHeading";
-import { History } from "lucide-react";
+import Link from "next/link";
+import { useHelpGuideEnabledFlagKeys } from "@/components/chat/HelpGuideAccess";
+import { rememberSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
+import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
+import { ArrowRight, FolderInput, History } from "lucide-react";
 
 type ChatWelcomeScreenProps = {
   /**
@@ -43,6 +47,7 @@ type ChatWelcomeScreenProps = {
    * section 2), and it is why this is a slot rather than a boolean.
    */
   starterGallery?: ReactNode;
+  product?: "chat" | "review";
 };
 
 /**
@@ -59,11 +64,12 @@ export function ChatWelcomeScreen({
   recentConversations = [],
   onOpenRecentConversations,
   recentDisclosureRef,
-  starterGallery,
+  starterGallery, product,
 }: ChatWelcomeScreenProps) {
   const { data: session } = useSession();
   const { t, lang } = useLanguage();
   const welcomeGreeting = session?.user ? t("chat.welcomeBack") : t("chat.welcome");
+  const canImport = useHelpGuideEnabledFlagKeys().has(HELP_FLAG_KEYS.externalImport);
   const recentCount = recentConversations.length;
   const disclosureLabel = t("chat.recentConversationsDisclosure");
 
@@ -102,6 +108,13 @@ export function ChatWelcomeScreen({
           </button>
         )}
         {starterGallery}
+        {session?.user && canImport && product === "chat" && <Link onClick={() => rememberSettingsReturnProduct(product)} href="/settings/imports/new" data-testid="chat-import-entry"
+          className="mt-5 flex w-full max-w-md items-center gap-3 rounded-2xl border border-zinc-200 p-4 text-left transition hover:border-blue-400 dark:border-zinc-700">
+          <FolderInput size={20} className="shrink-0 text-blue-600" aria-hidden="true" />
+          <span className="flex-1"><strong className="block text-sm">{t("journey.entry")}</strong>
+            <span className="block text-xs text-zinc-500">{t("journey.entryHint")}</span></span>
+          <ArrowRight size={17} aria-hidden="true" />
+        </Link>}
       </div>
     </div>
   );

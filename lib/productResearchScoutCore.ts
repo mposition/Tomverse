@@ -58,7 +58,7 @@ export const SCOUT_GENERATION_PERMIT_PREFIX = "permit.";
 export type ScoutSendOutcome = "judged" | "modelOff" | "capped" | "skipped" | "refused" | "failed";
 
 /** The issue-backlog route's answers when there was nothing to ask about today: not a failure. */
-const NOTHING_TO_JUDGE = ["no_observation", "no_recent_observation", "nothing_to_triage"];
+const NOTHING_TO_JUDGE = ["no_observation", "no_recent_observation", "nothing_to_triage", "already_sampled", "day_changed"];
 
 export function scoutSendOutcome(answer: unknown): ScoutSendOutcome {
   const value = (answer ?? {}) as { judged?: unknown; reason?: unknown; refused?: unknown };
@@ -111,7 +111,7 @@ export function admitScoutSubmission(body: unknown): ScoutAdmission {
   if (body === null || typeof body !== "object" || Array.isArray(body)) return refuse("not_an_object");
   const { kind, subject, language, images, signals } = body as Record<string, unknown>;
   if (typeof kind !== "string" || !(SCOUT_SUBJECT_KINDS as readonly string[]).includes(kind)) return refuse("kind");
-  if (typeof subject !== "string" || !SUBJECT_ID.test(subject)) return refuse("subject");
+  if (typeof subject !== "string" || (!SUBJECT_ID.test(subject) || subject.startsWith("memory.continuation."))) return refuse("subject");
   if (language !== undefined && language !== null && (typeof language !== "string" || !/^[a-z]{2}$/.test(language))) {
     return refuse("language");
   }
