@@ -540,6 +540,20 @@ const reviewOf = (extra = {}) => ({
 });
 const line = (value) => `Here it is.\n${JSON.stringify(value)}\n`;
 
+test("a label, such as the import and memory disclosure, is boxed as a screen text, the role the language versions translate and set", () => {
+  // Independent review 2026-11-12 asked whether a label reaches the translated
+  // versions: the review boxes every text that is not a headline or cta as
+  // `screen` (REVIEW-higgsfield.md), and localePrompt and setTexts translate and
+  // set screen boxes. The 2026-11-12 box run set its labels in Korean this way.
+  const c = concept("c1", { texts: [...texts, { role: "label", text: "Answers come from the model you choose." }] });
+  const boxed = checkReview(line(reviewOf({ textBoxes: [{ textIndex: 3, role: "screen", x: 0.1, y: 0.8, w: 0.8, h: 0.05, rotate: 0, bg: "#ffffff" }] })), { stage: "guide", concept: c, locale: "en" });
+  assert.equal(boxed.review.textBoxes[0].role, "screen");
+  assert.match(checkReview(line(reviewOf({ textBoxes: [{ textIndex: 3, role: "label", x: 0.1, y: 0.8, w: 0.8, h: 0.05, rotate: 0, bg: "#ffffff" }] })), { stage: "guide", concept: c, locale: "en" }).problem, /role is one of headline, screen, cta/u);
+  const source = readFileSync(join(tool, "run-higgsfield.mjs"), "utf8");
+  assert.ok(source.includes('box.role === "screen"'), "localePrompt translates screen boxes");
+  assert.ok(source.includes('roles: ["screen"]'), "setTexts sets screen boxes in the real font");
+});
+
 test("a review may list up to 10 fixes of up to 500 characters; more is refused", () => {
   const c = concept("c1");
   const at = { stage: "guide", concept: c, locale: "en" };
