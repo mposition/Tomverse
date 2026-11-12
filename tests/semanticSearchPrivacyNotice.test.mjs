@@ -154,11 +154,13 @@ test("core, pinned and answer-style memories are stated as never sent, in Korean
     assert.match(ko.privacyPolicy.semanticSearchTransfer1, /이전하지 않습니다/);
 
     const enText = en.privacyPolicy.semanticSearch + en.privacyPolicy.semanticSearchTransfer1;
-    assert.match(enText, /Core memories/);
+    assert.match(enText, /Core memories|core memories/);
     assert.match(enText, /memories you pinned|pinned memories/);
     assert.match(enText, /answer-style memories/i);
     assert.match(en.privacyPolicy.semanticSearch, /never sent/);
-    assert.match(en.privacyPolicy.semanticSearchTransfer1, /not transferred/);
+    // "sends", not "transferred": the marketing claim guard reads "memories ... transferred"
+    // as a replication claim (docs/policy/external-conversation-import-and-memory.md §17).
+    assert.match(en.privacyPolicy.semanticSearchTransfer1, /never sends core memories/);
 });
 
 test("the notice says no account identifier, email or IP is attached, and that the lexical search sends nothing", () => {

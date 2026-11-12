@@ -115,7 +115,7 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // in APPROVED_AMENDED_DIGESTS.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "7ea9b0eeffffea348893d6605287d19759a26fc764d12a0efe0f3f61a22d0716",
+    contentSha256: "88ade436786085aaf6370b39fc10746082af45bc4d7b173e8192e503e1f5f177",
   },
   "/terms": {
     date: "2026-11-16",
