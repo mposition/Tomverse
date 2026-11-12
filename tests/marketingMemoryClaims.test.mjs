@@ -62,7 +62,7 @@ test("every claim §17 allows passes the matcher", () => {
     assert.deepEqual(findForbiddenMemoryClaims(MEMORY_MARKETING_DISCLOSURE.en), []);
 });
 
-test("the short ad disclosure (§17.1) makes no forbidden claim and names no brand", () => {
+test("the short ad disclosure (external-conversation-import-and-memory.md §17.1) makes no forbidden claim and names no brand", () => {
     for (const [locale, text] of Object.entries(MEMORY_MARKETING_SHORT_DISCLOSURE)) {
         assert.deepEqual(findForbiddenMemoryClaims(text), [], locale);
         assert.doesNotMatch(text, /tomverse/iu, locale);

@@ -236,7 +236,7 @@ export function sortConcepts(answer, { feature, history = [], day, toolDir }) {
     }
     if (!concept.texts.some((text) => text?.role === "headline")) problems.push(`${at}: texts has a headline`);
     // A stranger must see what to do and that this is AI (JOB-higgsfield.md "Who the ad is for", owner 2026-11-12).
-    // A feature with a required disclosure (§17.1: import and memory) shows it word for word in every language.
+    // A feature with a required disclosure (docs/policy/external-conversation-import-and-memory.md §17.1: import and memory) shows it word for word in every language.
     const disclosure = features.find((entry) => entry.id === feature)?.disclosure;
     if (disclosure) {
       if (!concept.texts.some((text) => text?.text === disclosure.en)) problems.push(`${at}: texts holds this disclosure word for word, as a label: "${disclosure.en}"`);
