@@ -524,6 +524,28 @@ const prepareSplitPdf = async (
 
   const base = baseNameOf(first.name);
   const digits = String(parts.length).length;
+  // "Pages 2 to 5 as a PDF" is one part: a PDF, not a zip holding one.
+  if (parts.length === 1) {
+    const [part] = parts;
+    return {
+      format: "pdf",
+      render: async () => {
+        const output = await PDFDocument.create();
+        output.setProducer("Tomverse");
+        output.setCreator("Tomverse");
+        for (const page of await output.copyPages(document, part.indices)) {
+          if (part.rotate) {
+            page.setRotation(degrees((page.getRotation().angle + part.rotate) % 360));
+          }
+          output.addPage(page);
+        }
+        return {
+          bytes: assertOutputSize(await output.save(), "Offer a smaller range of pages."),
+          parts: `${plural(part.indices.length, "page")} from ${plural(pageCount, "page")}`,
+        };
+      },
+    };
+  }
   return {
     format: "zip",
     render: async () => {
@@ -580,11 +602,8 @@ const { parentPort, workerData } = require("node:worker_threads");
     let document;
     try {
         const { PDFiumLibrary } = require("@hyzyla/pdfium");
-        const sharp = require("sharp");
         library = await PDFiumLibrary.init();
         document = await library.loadDocument(new Uint8Array(workerData.buffer));
-        const buffers = [];
-        let total = 0;
         for (const index of workerData.pageIndices) {
             const page = document.getPage(index);
             const size = page.getOriginalSize();
@@ -592,23 +611,20 @@ const { parentPort, workerData } = require("node:worker_threads");
                 Math.ceil(size.originalWidth * workerData.scale) *
                 Math.ceil(size.originalHeight * workerData.scale);
             if (!(pixels > 0) || pixels > workerData.maxPagePixels) throw new Error("PAGE_TOO_LARGE");
-            const image = await page.render({
-                scale: workerData.scale,
-                render: (bitmap) =>
-                    sharp(Buffer.from(bitmap.data.buffer, bitmap.data.byteOffset, bitmap.data.byteLength), {
-                        raw: { width: bitmap.width, height: bitmap.height, channels: 4 },
-                    })
-                        .png({ compressionLevel: 6 })
-                        .toBuffer(),
-            });
+            const image = await page.render({ scale: workerData.scale, render: "bitmap" });
             page.close();
-            total += image.data.byteLength;
-            if (total > workerData.maxTotalBytes) throw new Error("OUTPUT_TOO_LARGE");
-            buffers.push(Uint8Array.from(image.data).buffer);
+            // Copied out of the WebAssembly heap, then handed over, one page
+            // at a time: the next page is drawn only when this one is taken.
+            const data = Uint8Array.from(image.data).buffer;
+            parentPort.postMessage(
+                { type: "page", width: image.width, height: image.height, data },
+                [data]
+            );
+            await new Promise((resolve) => parentPort.once("message", resolve));
         }
         document.destroy();
         library.destroy();
-        parentPort.postMessage({ ok: true, buffers }, buffers);
+        parentPort.postMessage({ type: "done" });
     } catch (error) {
         try {
             if (document) document.destroy();
@@ -616,21 +632,29 @@ const { parentPort, workerData } = require("node:worker_threads");
         } catch {}
         const message = error && typeof error.message === "string" ? error.message : "";
         const code =
-            message === "PAGE_TOO_LARGE" || message === "OUTPUT_TOO_LARGE"
+            message === "PAGE_TOO_LARGE"
                 ? message
                 : error && error.code === "MODULE_NOT_FOUND"
                   ? "UNAVAILABLE"
                   : "RENDER_FAILED";
-        parentPort.postMessage({ ok: false, code });
+        parentPort.postMessage({ type: "failed", code });
     }
 })();
 `;
 
-type RasterResult =
-  | { ok: true; buffers: ArrayBuffer[] }
-  | { ok: false; code: string };
+type RasterMessage =
+  | { type: "page"; width: number; height: number; data: ArrayBuffer }
+  | { type: "done" }
+  | { type: "failed"; code: string };
 
-/** Draws the named pages of one PDF to PNG, off the request thread. */
+/**
+ * Draws the named pages of one PDF to PNG, off the request thread.
+ *
+ * The worker runs WebAssembly only and hands back raw pixels; PNG is encoded
+ * here, by sharp on its own thread pool. sharp is native, and a worker that
+ * is stopped on a timeout must hold no native module -- that is the failure
+ * this engine was chosen to avoid.
+ */
 const rasterizePdfPages = (
   source: ResolvedSource,
   pageIndices: number[],
@@ -648,9 +672,6 @@ const rasterizePdfPages = (
         pageIndices,
         scale: dpi / 72,
         maxPagePixels: RASTER_MAX_PAGE_PIXELS,
-        // Raw PNG is larger than what is finally stored; this only stops a
-        // runaway before it exhausts memory.
-        maxTotalBytes: FILE_CONVERSION_LIMITS.maxOutputBytes * 4,
       },
       transferList: [buffer],
       resourceLimits: {
@@ -660,15 +681,23 @@ const rasterizePdfPages = (
       },
     });
 
+    const pages: Uint8Array[] = [];
+    let total = 0;
     let settled = false;
-    const finish = (error: FileConversionError | null, pages?: Uint8Array[]) => {
+    const finish = (error: FileConversionError | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       void worker.terminate();
       if (error) reject(error);
-      else resolve(pages!);
+      else resolve(pages);
     };
+    const tooLarge = () =>
+      new FileConversionError(
+        "OUTPUT_TOO_LARGE",
+        `The pages of ${source.handle} ("${source.name}") are too large to draw at ` +
+          `${dpi} dpi. Offer a lower dpi or fewer pages.`
+      );
     const failed = () =>
       new FileConversionError(
         "CONVERSION_FAILED",
@@ -685,22 +714,41 @@ const rasterizePdfPages = (
       RASTER_TIMEOUT_MS
     );
 
-    worker.once("message", (result: RasterResult) => {
-      if (result?.ok) {
-        finish(null, result.buffers.map((entry) => new Uint8Array(entry)));
+    worker.on("message", (message: RasterMessage) => {
+      if (settled) return;
+      if (message?.type === "page") {
+        void (async () => {
+          try {
+            const sharp = (await import("sharp")).default;
+            const png = await sharp(Buffer.from(message.data), {
+              raw: { width: message.width, height: message.height, channels: 4 },
+            })
+              .png({ compressionLevel: 6 })
+              .toBuffer();
+            total += png.byteLength;
+            // Raw PNG is larger than what is finally stored; this only stops
+            // a runaway before it exhausts memory.
+            if (total > FILE_CONVERSION_LIMITS.maxOutputBytes * 4) {
+              finish(tooLarge());
+              return;
+            }
+            pages.push(new Uint8Array(png));
+            if (!settled) worker.postMessage("next");
+          } catch {
+            finish(failed());
+          }
+        })();
         return;
       }
-      if (result?.code === "PAGE_TOO_LARGE" || result?.code === "OUTPUT_TOO_LARGE") {
-        finish(
-          new FileConversionError(
-            "OUTPUT_TOO_LARGE",
-            `The pages of ${source.handle} ("${source.name}") are too large to draw at ` +
-              `${dpi} dpi. Offer a lower dpi or fewer pages.`
-          )
-        );
+      if (message?.type === "done") {
+        finish(null);
         return;
       }
-      if (result?.code === "UNAVAILABLE") {
+      if (message?.type === "failed" && message.code === "PAGE_TOO_LARGE") {
+        finish(tooLarge());
+        return;
+      }
+      if (message?.type === "failed" && message.code === "UNAVAILABLE") {
         finish(
           new FileConversionError(
             "RASTER_UNAVAILABLE",
@@ -1026,6 +1074,19 @@ const prepareConvertSpreadsheet = async (
   });
   if (!admission.ok) {
     throw new FileConversionError("SPREADSHEET_UNREADABLE", admission.detail);
+  }
+  // The stand-ins were admitted so the authoring rule "a header has text"
+  // does not refuse a blank first-row cell. Every other rule a header has is
+  // checked on the real values here, before they are written: a string, no
+  // longer than a cell may be. The writer escapes header text the same way
+  // it escapes cells, and a blank header writes an empty cell.
+  for (const header of firstRow) {
+    if (typeof header !== "string" || header.length > ARTIFACT_LIMITS.maxTextLength) {
+      throw new FileConversionError(
+        "SPREADSHEET_UNREADABLE",
+        `A first-row cell holds more than ${ARTIFACT_LIMITS.maxTextLength} characters.`
+      );
+    }
   }
   admission.spec.worksheets[0].columns.forEach((column, index) => {
     column.header = firstRow[index];

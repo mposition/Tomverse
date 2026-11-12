@@ -933,3 +933,43 @@ test("seventh review: the same large image named twenty times stops at the ceili
   // test cannot read portably.
   assert.ok(Date.now() - started < 60_000);
 });
+
+/* ------------------------------------------------------------------------ */
+/* Found by the eighth independent review                                     */
+/* ------------------------------------------------------------------------ */
+
+test("eighth review: a clock format shows the time of day; only an elapsed format counts past a day", async () => {
+  const { zipSync } = await import("fflate");
+  const decode = (bytes) => new TextDecoder().decode(bytes);
+  const encode = (text) => new TextEncoder().encode(text);
+  const base = unzipSync(buildXlsx({ rows: [["clock", "elapsed"], [{ number: 1.5 }, { number: 1.5 }]] }));
+  const styles =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<numFmts count="2"><numFmt numFmtId="164" formatCode="hh:mm"/><numFmt numFmtId="165" formatCode="[h]:mm"/></numFmts>' +
+    '<cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="164"/><xf numFmtId="165"/></cellXfs></styleSheet>';
+  const sheetPath = Object.keys(base).find((path) => /worksheets\/sheet1\.xml$/.test(path));
+  const sheet = decode(base[sheetPath])
+    .replace(/<c r="A2">/, '<c r="A2" s="1">')
+    .replace(/<c r="B2">/, '<c r="B2" s="2">');
+  const file = zipSync({ ...base, "xl/styles.xml": encode(styles), [sheetPath]: encode(sheet) });
+  const result = await convert(
+    { operation: "convert_spreadsheet", filename: "t", targetFormat: "csv", sources: [{ attachment: "att_1" }] },
+    attachments([["t.xlsx", XLSX, file]])
+  );
+  const lines = decode(result.bytes).replace(/^﻿/, "").trimEnd().split("\r\n");
+  assert.deepEqual(lines, ["clock,elapsed", "12:00:00,36:00:00"]);
+});
+
+test("eighth review: a split that is one part comes back as that PDF, not a zip of one", async () => {
+  const files = attachments([
+    ["report.pdf", "application/pdf", await pdf([[100, 100], [110, 100], [120, 100], [130, 100]])],
+  ]);
+  const result = await convert(
+    { operation: "split_pdf", filename: "pages 2-3", sources: [{ attachment: "att_1", pages: "2-3" }] },
+    files
+  );
+  assert.equal(result.format, "pdf");
+  const document = await PDFDocument.load(result.bytes);
+  assert.deepEqual(document.getPages().map((page) => Math.round(page.getSize().width)), [110, 120]);
+});

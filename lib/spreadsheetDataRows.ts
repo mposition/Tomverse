@@ -152,11 +152,13 @@ type StyleTable = {
   hasTime: boolean[];
   /** Style index -> whether it shows a time and no calendar date. */
   timeOnly: boolean[];
+  /** Style index -> whether it is an elapsed time ("[h]:mm:ss"), not a clock. */
+  elapsed: boolean[];
 };
 
 const readStyles = (parts: Unzipped): StyleTable => {
   const bytes = parts["xl/styles.xml"];
-  if (!bytes) return { isDate: [], hasTime: [], timeOnly: [] };
+  if (!bytes) return { isDate: [], hasTime: [], timeOnly: [], elapsed: [] };
   const xml = decoder.decode(bytes);
 
   const customCodes = new Map<number, string>();
@@ -170,7 +172,8 @@ const readStyles = (parts: Unzipped): StyleTable => {
   const isDate: boolean[] = [];
   const hasTime: boolean[] = [];
   const timeOnly: boolean[] = [];
-  if (!cellXfsMatch) return { isDate, hasTime, timeOnly };
+  const elapsed: boolean[] = [];
+  if (!cellXfsMatch) return { isDate, hasTime, timeOnly, elapsed };
   for (const xf of cellXfsMatch[1].matchAll(/<xf\b[^>]*\/?>/g)) {
     const numFmtId = Number(xf[0].match(/numFmtId="(\d+)"/)?.[1] ?? "0");
     const custom = customCodes.get(numFmtId);
@@ -182,16 +185,22 @@ const readStyles = (parts: Unzipped): StyleTable => {
       const calendar = /[yd]/i.test(
         custom.replace(/"[^"]*"/g, "").replace(/\[[^\]]*\]/g, "").replace(/\\./g, "")
       );
+      // The bracket is what makes a format count past a day: "[h]:mm" of 1.5
+      // is 36:00, "hh:mm" of 1.5 is 12:00. It is also stripped before the
+      // checks above, so an elapsed format is recognised here or not at all.
+      const isElapsed = /\[(?:h+|m+|s+)\]/i.test(custom.replace(/"[^"]*"/g, ""));
       isDate.push(date);
       hasTime.push(time);
-      timeOnly.push(time && !calendar);
+      timeOnly.push((time || isElapsed) && !calendar);
+      elapsed.push(isElapsed);
     } else {
       isDate.push(BUILTIN_DATE_FORMATS.has(numFmtId));
       hasTime.push(BUILTIN_TIME_ONLY_FORMATS.has(numFmtId) || numFmtId === 22);
       timeOnly.push(BUILTIN_TIME_ONLY_FORMATS.has(numFmtId));
+      elapsed.push(numFmtId === 46);
     }
   }
-  return { isDate, hasTime, timeOnly };
+  return { isDate, hasTime, timeOnly, elapsed };
 };
 
 const pad = (value: number, width = 2) => String(value).padStart(width, "0");
@@ -227,7 +236,11 @@ export const excelSerialToDisplay = (
  */
 const excelSerialToExactText = (
   serial: number,
-  { withTime, timeOnly }: { withTime: boolean; timeOnly: boolean }
+  {
+    withTime,
+    timeOnly,
+    elapsed,
+  }: { withTime: boolean; timeOnly: boolean; elapsed: boolean }
 ): string => {
   const milliseconds = Math.round(serial * 86_400_000);
   const date = new Date(Date.UTC(1899, 11, 30) + milliseconds);
@@ -235,10 +248,10 @@ const excelSerialToExactText = (
   const clock =
     `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}` +
     (fraction ? `.${pad(fraction, 3)}` : "");
-  // A duration past a day ("[h]:mm:ss" of 1.5) is still a time-only cell; its
-  // hours are written in full rather than wrapped into a date.
+  // An elapsed format ("[h]:mm:ss" of 1.5) counts its hours in full; a clock
+  // format shows the time of day, as Excel does, whatever date is behind it.
   if (timeOnly) {
-    if (serial >= 1 || serial < 0) {
+    if (elapsed && (serial >= 1 || serial < 0)) {
       // Counted in milliseconds, the same resolution as the clock above, so a
       // duration keeps its fraction of a second too.
       const total = Math.abs(milliseconds);
@@ -424,6 +437,7 @@ const readSheetGrid = (
                         {
                           withTime: Boolean(styles.hasTime[styleIndex]),
                           timeOnly: Boolean(styles.timeOnly[styleIndex]),
+                          elapsed: Boolean(styles.elapsed[styleIndex]),
                         }
                       )
                     : excelSerialToDisplay(numeric + dateOffsetDays, {

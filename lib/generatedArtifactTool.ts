@@ -459,6 +459,24 @@ export class GeneratedArtifactCollector {
   /** Artifact tool calls the model began and the turn never ran (`turn_incomplete`). */
   private abandonedInvocations = 0;
   private modelId: string;
+  /**
+   * The tail of the calls this answer has made, run one at a time.
+   *
+   * A provider may ask for several tools in one step, and the SDK runs them
+   * together. Every call reads the per-answer ceiling and takes the next
+   * ordinal *before* its first await and writes them *after* its last, so two
+   * calls in flight could both pass the ceiling and store under one ordinal --
+   * and the second row is then dropped by the (messageId, ordinal) index,
+   * leaving a card whose download fails. Queuing them costs nothing a user
+   * could see: the files are made one after another either way.
+   */
+  private tail: Promise<unknown> = Promise.resolve();
+
+  private exclusive<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.tail.then(work, work);
+    this.tail = next.catch(() => undefined);
+    return next;
+  }
 
   constructor(private readonly options: GeneratedArtifactCollectorOptions) {
     this.modelId = options.modelId;
@@ -710,7 +728,15 @@ export class GeneratedArtifactCollector {
    * "edit produces a new version" rule (policy section 9), and it is why the
    * key is the content and not the name.
    */
-  async run(
+  run(
+    kind: AuthoredArtifactKind,
+    rawInput: unknown,
+    toolCallId?: string
+  ): Promise<ArtifactToolReport> {
+    return this.exclusive(() => this.runAuthored(kind, rawInput, toolCallId));
+  }
+
+  private async runAuthored(
     kind: AuthoredArtifactKind,
     rawInput: unknown,
     toolCallId?: string
@@ -833,7 +859,14 @@ export class GeneratedArtifactCollector {
    * naming rule; the files themselves are the user's own, resolved before this
    * collector was constructed.
    */
-  async runDocumentBatch(
+  runDocumentBatch(
+    rawInput: unknown,
+    toolCallId?: string
+  ): Promise<ArtifactToolReport> {
+    return this.exclusive(() => this.runDocumentBatchNow(rawInput, toolCallId));
+  }
+
+  private async runDocumentBatchNow(
     rawInput: unknown,
     toolCallId?: string
   ): Promise<ArtifactToolReport> {
@@ -1031,7 +1064,14 @@ export class GeneratedArtifactCollector {
    * files have been looked at, which is why the conversion is prepared before
    * it is rendered.
    */
-  async runFileConversion(
+  runFileConversion(
+    rawInput: unknown,
+    toolCallId?: string
+  ): Promise<ArtifactToolReport> {
+    return this.exclusive(() => this.runFileConversionNow(rawInput, toolCallId));
+  }
+
+  private async runFileConversionNow(
     rawInput: unknown,
     toolCallId?: string
   ): Promise<ArtifactToolReport> {

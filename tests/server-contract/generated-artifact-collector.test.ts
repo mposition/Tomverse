@@ -849,3 +849,26 @@ test("fourth review: replaying a conversion on a full answer says unchanged, not
   await subject.runFileConversion({ operation: "nope" });
   assert.equal(subject.toStreamArtifacts().length, 3);
 });
+
+test("eighth review: tool calls made together are run one at a time, with one ordinal each", async () => {
+  resetWorld();
+  const subject = await collector({ turnAttachments: await turnFiles() });
+  const call = (name: string) => ({
+    operation: "to_pdf",
+    filename: name,
+    sources: [{ attachment: "att_1" }],
+  });
+  // Five at once, as a provider's parallel tool calls arrive: three fit.
+  const reports = await Promise.all(
+    ["a", "b", "c", "d", "e"].map((name) => subject.runFileConversion(call(name)))
+  );
+  assert.deepEqual(
+    reports.map((report) => report.status),
+    ["created", "created", "created", "failed", "failed"]
+  );
+  assert.deepEqual(
+    world.puts.map((put) => put.ordinal),
+    [0, 1, 2]
+  );
+  assert.equal(subject.toStreamArtifacts().length, 3);
+});
