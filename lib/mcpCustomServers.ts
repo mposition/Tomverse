@@ -34,7 +34,7 @@ export async function assertPublicCustomMcpUrl(url: string, signal: AbortSignal)
   await resolvePublicMcpEndpoint({ id: "custom-check", name: "custom", url, readTools: [], auth: "none" }, signal);
 }
 export const customMcpServerName = (name: string | undefined, url: string) =>
-  (name || "").replace(/\p{C}+/gu, " ").replace(/\s+/g, " ").trim().slice(0, 80) || new URL(url).hostname;
+  ((name || "").replace(/\p{C}+/gu, " ").replace(/\s+/g, " ").trim() || new URL(url).hostname).slice(0, 80);
 
 type GetJson = (url: string, signal: AbortSignal) => Promise<unknown>;
 const guardedGetJson: GetJson = async (target, signal) => {
@@ -66,7 +66,7 @@ const sameUrl = (a: string, b: string) => a.replace(/\/$/, "") === b.replace(/\/
 // RFC 9728: the advertised resource identifies this server (same origin, same path or a parent path).
 const coversServer = (resource: string, server: URL) => {
   const url = new URL(resource), path = url.pathname.replace(/\/$/, "");
-  return url.origin === server.origin && !url.search && !url.hash && (server.pathname === path || server.pathname.startsWith(`${path}/`));
+  return url.origin === server.origin && !url.username && !url.password && !url.search && !url.hash && (server.pathname === path || server.pathname.startsWith(`${path}/`));
 };
 
 // RFC 9728 protected-resource metadata, then RFC 8414 / OIDC server metadata.
@@ -107,5 +107,6 @@ export async function mcpServerFor(userId: string, id: string, db: Db = prisma):
 export async function listCustomMcpServers(userId: string) {
   if (!mcpCustomServersEnabled()) return [];
   const rows = await prisma.mcpCustomServer.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, take: MCP_LIMITS.customServers });
-  return rows.map(customMcpServerPolicy);
+  // One unreadable row must not take the whole Plugins inventory down with it.
+  return rows.flatMap(row => { try { return [customMcpServerPolicy(row)]; } catch { return []; } });
 }

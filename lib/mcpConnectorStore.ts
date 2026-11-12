@@ -122,10 +122,8 @@ export async function disconnectMcp(userId: string, id: string) {
     const row = await tx.mcpConnection.findUniqueOrThrow({ where: { id }, select: { serverId: true } });
     await tx.mcpOAuthFlow.updateMany({ where: { userId, serverId: row.serverId, state: { in: ["pending", "running"] } },
       data: { state: "failed", secretCiphertext: null } });
-    // A user-entered server lives only as long as its connection.
-    if (isCustomMcpServerId(row.serverId) && (await tx.mcpCustomServer.deleteMany({ where: { id: row.serverId, userId } })).count)
-      await auditMcp(tx, userId, "custom_server_removed", row.serverId, "McpCustomServer");
     await tx.mcpInvocation.updateMany({ where: { connectionId: id, userId, state: "pending" }, data: { state: "rejected", argumentsCiphertext: null } });
+    if (isCustomMcpServerId(row.serverId)) await removeCustomServerIfSettled(tx, userId, row.serverId);
     await auditMcp(tx, userId, "disconnected", id);
   });
 }
@@ -137,27 +135,43 @@ export async function registerCustomMcpServer(userId: string, input: z.infer<typ
   const url = normalizeCustomMcpUrl(input.url);
   const existing = await prisma.mcpCustomServer.findUnique({ where: { userId_url_auth: { userId, url, auth: input.auth } } });
   if (existing) return { server: customMcpServerPolicy(existing), created: false };
+  // Another auth type for the same URL would get a fresh connection and so
+  // escape the fence on an unverified write made through the kept row.
+  if (await prisma.mcpInvocation.count({ where: { userId, state: { in: ["running", "unknown"] }, connection: { serverId: { in:
+    (await prisma.mcpCustomServer.findMany({ where: { userId, url }, select: { id: true } })).map(row => row.id) } } } }))
+    throw new McpConnectorError("previous_outcome_unknown", 409);
   const stale = await prisma.mcpCustomServer.findMany({ where: { userId, createdAt: { lt: new Date(Date.now() - MCP_LIMITS.pendingMs) } }, select: { id: true } });
   for (const row of stale) await forgetUnusedCustomMcpServer(userId, row.id);
   const deadline = AbortSignal.any([AbortSignal.timeout(MCP_LIMITS.requestMs), ...(signal ? [signal] : [])]);
   await assertPublicCustomMcpUrl(url, deadline);
   const oauth = input.auth === "oauth" ? await discoverCustomOAuth(url, deadline) : undefined;
-  const id = `custom-${randomBytes(12).toString("hex")}`;
-  const row = await prisma.$transaction(async tx => {
-    await takeAuditChainLock(tx);
-    if (await tx.mcpCustomServer.count({ where: { userId } }) >= MCP_LIMITS.customServers) throw new McpConnectorError("custom_server_limit", 429);
-    const row = await tx.mcpCustomServer.create({ data: { id, userId, name: customMcpServerName(input.name, url), url, auth: input.auth,
-      ...(oauth ? { oauth: oauth as Prisma.InputJsonValue } : {}) } });
-    await auditMcp(tx, userId, "custom_server_added", id, "McpCustomServer");
-    return row;
-  });
-  return { server: customMcpServerPolicy(row), created: true };
+  const data = { id: `custom-${randomBytes(12).toString("hex")}`, userId, name: customMcpServerName(input.name, url), url, auth: input.auth };
+  const server = customMcpServerPolicy({ ...data, oauth: oauth ?? null }); // validated before anything is stored
+  try {
+    await prisma.$transaction(async tx => {
+      await takeAuditChainLock(tx);
+      const raced = await tx.mcpCustomServer.findUnique({ where: { userId_url_auth: { userId, url, auth: input.auth } } });
+      if (raced) return;
+      if (await tx.mcpCustomServer.count({ where: { userId } }) >= MCP_LIMITS.customServers) throw new McpConnectorError("custom_server_limit", 429);
+      await tx.mcpCustomServer.create({ data: { ...data, ...(oauth ? { oauth: oauth as Prisma.InputJsonValue } : {}) } });
+      await auditMcp(tx, userId, "custom_server_added", data.id, "McpCustomServer");
+    });
+  } catch (error) { if ((error as { code?: string })?.code !== "P2002") throw error; }
+  const stored = await prisma.mcpCustomServer.findUniqueOrThrow({ where: { userId_url_auth: { userId, url, auth: input.auth } } });
+  return { server: stored.id === data.id ? server : customMcpServerPolicy(stored), created: stored.id === data.id };
 }
 export async function forgetUnusedCustomMcpServer(userId: string, id: string) {
   await prisma.$transaction(async tx => {
     await takeAuditChainLock(tx);
-    if (await tx.mcpConnection.count({ where: { userId, serverId: id, status: { not: "disconnected" } } })) return;
-    const removed = await tx.mcpCustomServer.deleteMany({ where: { id, userId } });
-    if (removed.count) await auditMcp(tx, userId, "custom_server_removed", id, "McpCustomServer");
+    await removeCustomServerIfSettled(tx, userId, id);
   });
+}
+// A user-entered server lives only as long as its connection, except while a
+// dispatched write's outcome is unverified: the row (so its serverId and
+// connection, which carry the replay fence) stays until the owner records it.
+async function removeCustomServerIfSettled(tx: Prisma.TransactionClient, userId: string, id: string) {
+  if (await tx.mcpConnection.count({ where: { userId, serverId: id, status: { not: "disconnected" } } })) return;
+  if (await tx.mcpInvocation.count({ where: { userId, state: { in: ["running", "unknown"] }, connection: { serverId: id } } })) return;
+  const removed = await tx.mcpCustomServer.deleteMany({ where: { id, userId } });
+  if (removed.count) await auditMcp(tx, userId, "custom_server_removed", id, "McpCustomServer");
 }

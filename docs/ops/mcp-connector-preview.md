@@ -139,6 +139,9 @@ connections become unavailable and can still be disconnected.
   resolves only for that user. A user can hold 5. A row is removed when its
   connection is disconnected, when its first connection attempt fails, or when
   it has had no live connection for 10 minutes and the user registers another.
+  While a dispatched write's outcome is unknown the row is kept, so registering
+  the same URL again reuses the same connection and its replay fence; another
+  auth type for that URL is refused until the owner records the outcome.
   Account deletion cascades; the export includes URL, name and auth type.
 
 The local-only `MCP_CONNECTOR_SYNTHETIC_PORT` adds the fixture at the exact

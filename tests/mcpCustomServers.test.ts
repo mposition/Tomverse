@@ -44,6 +44,10 @@ test("a custom policy never pre-approves read tools and keeps a user's name out 
   assert.equal(customMcpServerName("  Team\u0000 tools\n ", "https://mcp.example.com/mcp"), "Team tools");
   assert.equal(customMcpServerName(undefined, "https://mcp.example.com/mcp"), "mcp.example.com");
   assert.equal(customMcpServerName("x".repeat(200), "https://mcp.example.com/mcp").length, 80);
+  // A long public hostname becomes a valid default name rather than an unparseable row.
+  const longHost = `https://${"a".repeat(60)}.${"b".repeat(60)}.example.com/mcp`;
+  assert.equal(customMcpServerName(undefined, longHost).length, 80);
+  assert.doesNotThrow(() => customMcpServerPolicy({ id: "custom-0123456789abcdef01234567", name: customMcpServerName(undefined, longHost), url: longHost, auth: "none", oauth: null }));
 });
 
 const resource = { resource: "https://mcp.example.com/mcp", authorization_servers: ["https://auth.example.com"], scopes_supported: ["notes:read", "notes:write"] };
@@ -84,6 +88,7 @@ test("OAuth discovery refuses servers without registration, PKCE, a matching iss
   await assert.rejects(() => run(withoutPkce), { code: "oauth_discovery_failed" });
   await assert.rejects(() => run(metadata, { ...resource, resource: "https://mcp.example.com/other" }), { code: "oauth_discovery_failed" });
   await assert.rejects(() => run(metadata, { ...resource, resource: "https://mcp.example.com/mc" }), { code: "oauth_discovery_failed" });
+  await assert.rejects(() => run(metadata, { ...resource, resource: "https://user:pass@mcp.example.com/mcp" }), { code: "oauth_discovery_failed" });
   assert.equal((await run(metadata, { ...resource, resource: "https://mcp.example.com/" })).issuer, "https://auth.example.com");
   await assert.rejects(() => run({ ...metadata, issuer: "https://other.example.com" }), { code: "oauth_discovery_failed" });
   await assert.rejects(() => run({ ...metadata, token_endpoint_auth_methods_supported: ["private_key_jwt"] }), { code: "oauth_discovery_failed" });

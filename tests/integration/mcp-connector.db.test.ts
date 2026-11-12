@@ -266,6 +266,28 @@ test("a user's custom server is owner-only, confirm-only, killable and removed w
   } finally { await prisma.user.deleteMany({ where: { id: { in: [owner, other] } } }); }
 });
 
+test("an unverified custom-server write keeps its row, so re-registration cannot escape the replay fence", async () => {
+  const userId = `mcp-custom-${randomUUID()}`;
+  await prisma.user.create({ data: { id: userId } });
+  const url = `http://127.0.0.1:${fixture.port}/mcp`;
+  try {
+    const { server } = await registerCustomMcpServer(userId, { url, auth: "none" });
+    const connected = await connectMcp(userId, server.id);
+    const unknown = await prisma.mcpInvocation.create({ data: { userId, connectionId: connected.id, connectionVersion: connected.version,
+      toolName: "create_note", state: "unknown", expiresAt: new Date(Date.now() + 600_000) } });
+    await disconnectMcp(userId, connected.id);
+    assert.equal(await prisma.mcpCustomServer.count({ where: { userId } }), 1);
+    const again = await registerCustomMcpServer(userId, { url, auth: "none" });
+    assert.equal(again.server.id, server.id); assert.equal(again.created, false);
+    await assert.rejects(() => registerCustomMcpServer(userId, { url, auth: "bearer" }), { code: "previous_outcome_unknown" });
+    const reconnected = await connectMcp(userId, server.id);
+    assert.equal(reconnected.id, connected.id);
+    await confirmMcpOutcome(userId, unknown.id, "not_executed");
+    await disconnectMcp(userId, reconnected.id);
+    assert.equal(await prisma.mcpCustomServer.count({ where: { userId } }), 0);
+  } finally { await prisma.user.delete({ where: { id: userId } }); }
+});
+
 test("custom servers are capped per user, freed when unused, and cascade with the account", async () => {
   const userId = `mcp-custom-${randomUUID()}`;
   await prisma.user.create({ data: { id: userId } });
