@@ -89,8 +89,10 @@ const measureHwp = (bytes: Uint8Array): RenderInputVerdict => {
     if (!compressed) return { ok: true };
 
     let expanded = 0;
-    for (const [name, entry] of file.streams) {
-      if (HWP_PLAIN_STREAMS.test(name)) continue;
+    // Every stream, not one per name: two storages may hold streams of the
+    // same name, and the renderer reads both.
+    for (const entry of file.allStreams) {
+      if (HWP_PLAIN_STREAMS.test(entry.name)) continue;
       const stream = file.read(entry);
       try {
         inflateRawBounded(stream, (chunk) => {

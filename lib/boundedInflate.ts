@@ -63,8 +63,13 @@ export type ZipEntryVisitor = {
   entry?: (name: string) => void;
   /** Whether to inflate this entry. Entries not accepted are never inflated. */
   accept: (name: string) => boolean;
-  /** Each piece of an accepted entry's output, as it is produced. */
-  data: (name: string, chunk: Uint8Array) => void;
+  /**
+   * Each piece of an accepted entry's output, as it is produced. `final` is
+   * true on the entry's last piece (which may be empty). `index` numbers the
+   * entries in order: a ZIP may hold two entries of one name, and anything
+   * keyed by name alone would mix them.
+   */
+  data: (name: string, chunk: Uint8Array, final: boolean, index: number) => void;
 };
 
 /**
@@ -99,15 +104,16 @@ export const visitZipEntries = (bytes: Uint8Array, visitor: ZipEntryVisitor): vo
     }
   };
   const unzip = new Unzip((file) => {
+    const index = entries;
     entries += 1;
     guard(() => visitor.entry?.(file.name));
     if (!visitor.accept(file.name)) return;
-    file.ondata = (error, chunk) => {
+    file.ondata = (error, chunk, final) => {
       if (error) {
         damaged = true;
         return;
       }
-      guard(() => visitor.data(file.name, chunk));
+      guard(() => visitor.data(file.name, chunk, final, index));
     };
     file.start();
   });

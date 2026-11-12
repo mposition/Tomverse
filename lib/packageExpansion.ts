@@ -128,21 +128,35 @@ export const measurePackage = (
   // Entries whose first bytes say they are a container, or whose name says
   // they are an IWA record, are kept -- they were counted already -- to be
   // measured once their own entry has ended.
-  const nested = new Map<string, Nested>();
-  const head = new Map<string, Uint8Array>();
+  // Keyed by the entry's position, not its name: two entries may share one.
+  const nested = new Map<number, Nested & { name: string }>();
+  /** Entries still gathering the bytes their kind is decided by. */
+  const pending = new Map<number, Uint8Array[]>();
+  const decided = new Set<number>();
   visitZipEntries(bytes, {
     entry: (name) => visitor.entry?.(name, depth),
     accept: () => true,
-    data: (name, chunk) => {
+    data: (name, chunk, final, index) => {
       counter.add(chunk.length);
-      const kept = nested.get(name);
+      const kept = nested.get(index);
       if (kept) {
         kept.chunks.push(chunk);
         return;
       }
-      if (head.has(name) || chunk.length === 0) return;
-      const first = chunk.subarray(0, 4);
-      head.set(name, first);
+      if (decided.has(index)) return;
+      // The signature is read from the entry's first four bytes, gathered
+      // across however many pieces they arrive in: a piece can be one byte,
+      // and deciding on it would let a container through unmeasured.
+      const gathered = pending.get(index) ?? [];
+      gathered.push(chunk);
+      const head = join(gathered);
+      if (head.length < 4 && !final) {
+        pending.set(index, gathered);
+        return;
+      }
+      pending.delete(index);
+      decided.add(index);
+      const first = head.subarray(0, 4);
       const kind = /\.iwa$/i.test(name)
         ? "iwa"
         : isZip(first)
@@ -150,11 +164,11 @@ export const measurePackage = (
           : isGzip(first)
             ? "gzip"
             : null;
-      if (kind) nested.set(name, { kind, chunks: [chunk] });
+      if (kind) nested.set(index, { kind, chunks: [head], name });
     },
   });
 
-  for (const [name, { kind, chunks }] of nested) {
+  for (const { name, kind, chunks } of nested.values()) {
     const inner = join(chunks);
     if (kind === "zip") {
       measurePackage(inner, counter, {
