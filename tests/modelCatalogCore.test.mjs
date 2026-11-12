@@ -468,6 +468,27 @@ test("an LLM image answer becomes a price revision draft at the policy floor", (
   assert.throws(() => imageDraftFromAnswer({ options: [] }, [], "x"));
 });
 
+test("an image draft takes the thinking cap the code already knows for the model", () => {
+  const answer = {
+    options: [{ quality: "high", size: "1024x1024", outputCostMicroUsd: 35_000, outputTokens: null }],
+    outputUsdPerMTok: null,
+    thinkingCapMicroUsd: null,
+    noPriceReason: null,
+  };
+  const sources = ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"];
+  // qwen-image models are billed per image with no thinking charge.
+  assert.equal(imageDraftFromAnswer(answer, sources, "qwen-image-2.0", "qwen").verification.thinkingCapMicroUsd, 0);
+  // A larger stated cap is kept: the draft never lowers what the pages say.
+  assert.equal(
+    imageDraftFromAnswer({ ...answer, thinkingCapMicroUsd: 500 }, sources, "qwen-image-2.0", "qwen").verification.thinkingCapMicroUsd,
+    500
+  );
+  // Another model on the same endpoint has no proven bound, nor does Google.
+  assert.equal(imageDraftFromAnswer(answer, sources, "z-image-turbo", "qwen").verification.thinkingCapMicroUsd, null);
+  assert.equal(imageDraftFromAnswer(answer, sources, "gemini-3.1-flash-image", "google").verification.thinkingCapMicroUsd, null);
+  assert.equal(imageDraftFromAnswer(answer, sources, "qwen-image-2.0").verification.thinkingCapMicroUsd, null);
+});
+
 test("an image answer with only token counts is priced by code, not by the model", () => {
   // OpenAI's table for models before gpt-image-2: high 1024x1024 is 4,160
   // output tokens; at US$30 per million that is 124,800 micro-USD.
