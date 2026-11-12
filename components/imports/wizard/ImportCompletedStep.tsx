@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { slicePassage } from "@/lib/continuationPassages";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import { useEffect, useState, type ComponentProps } from "react";
 import {
     ArrowRight,
@@ -66,7 +67,10 @@ export function ImportCompletedStep({
                     headers: displayTimeZoneHeaders(),
                 },
             );
-            if (!res.ok) throw Error();
+            if (!res.ok) {
+                await discardResponseBody(res);
+                throw Error();
+            }
             const body = await res.json();
             const rows: SavedRow[] = body.conversations.filter(
                 (row: SavedRow) => row.importId === importId,
@@ -87,7 +91,10 @@ export function ImportCompletedStep({
                     `/api/external-conversations/${encodeURIComponent(row.id)}?offset=${row.messageCount - 1}&limit=1`,
                     { cache: "no-store", signal },
                 );
-                if (!last.ok) return;
+                if (!last.ok) {
+                    await discardResponseBody(last);
+                    return;
+                }
                 const data = await last.json();
                 const text = data.messages?.[0]?.content;
                 if (!signal.aborted && typeof text === "string")
