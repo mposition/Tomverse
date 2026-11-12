@@ -8,7 +8,7 @@ import { crc32, deflateSync } from "node:zlib";
 
 import { admit, dailyCap, ledgerPath, readLedger, requestProblem, spent } from "../tools/marketing-video/higgsfield-cap.mjs";
 import { makeImage } from "../tools/marketing-video/hf-image-core.mjs";
-import { checkConcepts, pickFeature } from "../tools/marketing-video/concepts-core.mjs";
+import { checkConcepts, pickFeature, sortConcepts } from "../tools/marketing-video/concepts-core.mjs";
 import { checkReview } from "../tools/marketing-video/review-core.mjs";
 
 /**
@@ -317,6 +317,18 @@ const check = (answer, history = []) => checkConcepts(answer, { feature: "chat",
 
 test("well-formed concepts pass", () => {
   assert.equal(check(conceptsOf(concept("c1"), concept("c2"))), null);
+});
+
+test("one broken concept is dropped and the others go ahead; a broken answer is refused whole", () => {
+  const sort = (answer) => sortConcepts(answer, { feature: "chat", history: [], day: DAY, toolDir: tool });
+  const broken = concept("c2", { prompt_en: `${concept("c2").prompt_en}, accents in Tomverse blue` });
+  const sorted = sort(conceptsOf(concept("c1"), broken, concept("c3")));
+  assert.deepEqual(sorted.kept.map((entry) => entry.id), ["c1", "c3"]);
+  assert.equal(sorted.dropped.length, 1);
+  assert.equal(sorted.dropped[0].id, "c2");
+  assert.match(sorted.dropped[0].problem, /^concept c2: prompt_en must not contain the word "Tomverse"/u);
+  assert.deepEqual(sort(conceptsOf(concept("c1"), concept("c2"))).dropped, []);
+  assert.match(sort(conceptsOf(concept("c1"))).problem, /2-3 entries/u);
 });
 
 test("concepts with the wrong shape, feature or count are refused", () => {
