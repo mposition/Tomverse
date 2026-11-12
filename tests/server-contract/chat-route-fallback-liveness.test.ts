@@ -103,6 +103,20 @@ let throwAfterPresearch = false;
 let failPresearchBackend: false | "all" | "partial" = false;
 const presearchCalls: unknown[] = [];
 const presearchSettlements: Record<string, unknown>[] = [];
+let testBudgetNotice: (() => Promise<void>) | undefined;
+let failEvidenceSetup: (() => never) | undefined;
+const realPresearch = require(resolve(ROOT, "lib/chatRouterPresearch.ts")) as typeof import("../../lib/chatRouterPresearch");
+mock.module(mod("lib/chatRouterPresearch.ts"), { namedExports: {
+  ...realPresearch,
+  appendRouterSearchEvidence: (...args: Parameters<typeof realPresearch.appendRouterSearchEvidence>) =>
+    failEvidenceSetup ? failEvidenceSetup() : realPresearch.appendRouterSearchEvidence(...args),
+} });
+const realMonitoring = require(resolve(ROOT, "lib/providerMonitoring.ts")) as typeof import("../../lib/providerMonitoring");
+mock.module(mod("lib/providerMonitoring.ts"), { namedExports: {
+  ...realMonitoring,
+  notifyProviderBudgetIfNeeded: (provider: Parameters<typeof realMonitoring.notifyProviderBudgetIfNeeded>[0]) =>
+    testBudgetNotice ? testBudgetNotice() : realMonitoring.notifyProviderBudgetIfNeeded(provider),
+} });
 const realSearchCapability = require(resolve(ROOT, "lib/webSearchCapability.ts")) as typeof import("../../lib/webSearchCapability");
 mock.module(mod("lib/webSearchCapability.ts"), { namedExports: {
   ...realSearchCapability,
@@ -3833,7 +3847,23 @@ test("router presearch stays behind admission, preserves search recovery policy 
   llmSearchFileIntent = false;
   try {
     presearchCalls.length = 0;
-    await ask("answers", "claimed", 200, false, undefined, true, true, undefined, "always");
+    const noticeStarted = Promise.withResolvers<void>();
+    const finishNotice = Promise.withResolvers<void>();
+    testBudgetNotice = () => {
+      noticeStarted.resolve();
+      return finishNotice.promise;
+    };
+    const answering = ask("answers", "claimed", 200, false, undefined, true, true, undefined, "always");
+    try {
+      await Promise.race([noticeStarted.promise, answering.then(() => assert.fail("missing provider budget check"))]);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(presearchCalls.length, 2, "admitted searches run while the budget notice is pending");
+      assert.equal(attempts.length, 0, "dispatch waits for the notice and search evidence");
+    } finally {
+      finishNotice.resolve();
+      testBudgetNotice = undefined;
+      await answering;
+    }
     assert.equal(presearchCalls.length, 2);
     assert.equal(attempts.length, 1, "the existing search-turn fallback restriction remains in force");
     assert.equal(attempts[0].modelId, "gpt-6-luna");
@@ -3866,6 +3896,31 @@ test("router presearch stays behind admission, preserves search recovery policy 
     assert.equal(presearchCalls.length, 0);
     refusePresearchAdmission = false;
 
+    const setupFailed = Promise.withResolvers<void>();
+    const pendingNotice = Promise.withResolvers<void>();
+    testBudgetNotice = () => pendingNotice.promise;
+    failEvidenceSetup = () => {
+      setupFailed.resolve();
+      throw new Error("SYNTHETIC_EVIDENCE_SETUP_FAILURE");
+    };
+    presearchSettlements.length = 0;
+    const failed = ask("answers", "claimed", 500, false, undefined, true, true, undefined, "always");
+    try {
+      await Promise.race([setupFailed.promise, failed.then(() => assert.fail("missing evidence setup"))]);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(presearchCalls.length, 2);
+      assert.equal(presearchSettlements.length, 0, "failed preparation drains the notice before settlement");
+    } finally {
+      pendingNotice.resolve();
+      failEvidenceSetup = undefined;
+      testBudgetNotice = undefined;
+      await failed;
+    }
+    assert.equal(recordDispatchStartedCalls, 0);
+    assert.equal(presearchSettlements.length, 1);
+    assert.equal(presearchSettlements[0].searchBackendRequestCount, 2);
+    assert.equal(presearchSettlements[0].searchQueriesObserved, true);
+    presearchCalls.length = 0;
     throwAfterPresearch = true; presearchSettlements.length = 0;
     await ask("answers", "claimed", 500, false, undefined, true, true, undefined, "always");
     assert.equal(presearchCalls.length, 2);
@@ -3914,7 +3969,7 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     flash.contextWindowTokens = originalWindow;
     selectedConversationModels = oldModels;
     conversationSelectionMode = "auto";
-    for (const key of ["CHAT_CONCISE_GROUNDED_ANSWER_ENABLED", "CHAT_QWEN_GROUNDED_LOOKUP_ENABLED", "CHAT_ROUTER_PRESEARCH_ENABLED", "BRAVE_SEARCH_API_KEY", "APP_ENV"]) {
+    for (const key of ["CHAT_CONCISE_GROUNDED_ANSWER_ENABLED", "CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED", "CHAT_QWEN_GROUNDED_LOOKUP_ENABLED", "CHAT_ROUTER_PRESEARCH_ENABLED", "BRAVE_SEARCH_API_KEY", "APP_ENV"]) {
       if (oldEnv[key] === undefined) delete process.env[key]; else process.env[key] = oldEnv[key];
     }
     forceAppManagedSearch = false; failPresearchBackend = false;
@@ -3929,10 +3984,11 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
   llmSearchModelId = flash.id;
   llmSearchQueries = ["one fact"];
   llmSearchFileIntent = false;
-  for (const scenario of ["grounded", "manual", "no sources", "presearch off", "lookup flag off", "complex", "unclassified", "answer flag off"]) {
+  for (const scenario of ["grounded", "compact", "manual", "no sources", "presearch off", "lookup flag off", "complex", "unclassified", "answer flag off"]) {
     conversationSelectionMode = scenario === "manual" ? "manual" : "auto";
     if (scenario === "answer flag off") delete process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED;
     else process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED = "true";
+    process.env.CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED = String(scenario === "compact" || scenario === "answer flag off");
     process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED = String(scenario !== "lookup flag off");
     process.env.CHAT_ROUTER_PRESEARCH_ENABLED = String(scenario !== "presearch off");
     failPresearchBackend = scenario === "no sources" ? "all" : false;
@@ -3941,14 +3997,18 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     assert.equal(attempts[0].modelId, flash.id, scenario);
     assert.equal(attempts[0].toolNames.includes("web_search"), true, scenario);
     const prompt = JSON.stringify(attempts[0].messages);
-    const withEvidence = ["grounded", "lookup flag off", "complex", "unclassified", "answer flag off"].includes(scenario);
+    const withEvidence = ["grounded", "compact", "lookup flag off", "complex", "unclassified", "answer flag off"].includes(scenario);
     assert.equal(prompt.includes("Verified fixture fact."), withEvidence, scenario);
     const userContent = attempts[0].messages.findLast(message => message.role === "user")?.content;
     const lastPart = Array.isArray(userContent) ? userContent.at(-1)?.text ?? "" : "";
+    if (withEvidence && Array.isArray(userContent)) {
+      const packet = JSON.parse(userContent.find(part => part.text?.includes("Verified fixture fact."))!.text!);
+      assert.equal(packet.status, scenario === "compact" ? "ok" : "batch", scenario);
+    }
     assert.equal(lastPart.includes("End of quoted evidence"), withEvidence && scenario !== "answer flag off", scenario);
-    assert.equal(lastPart.includes("For other lookups"), ["grounded", "lookup flag off"].includes(scenario), scenario);
+    assert.equal(lastPart.includes("For other lookups"), ["grounded", "compact", "lookup flag off"].includes(scenario), scenario);
     assert.equal(lastPart.includes("For a direct comparison or calculation"), ["complex", "unclassified"].includes(scenario), scenario);
-    assert.equal(attempts[0].preparesStep, ["grounded", "answer flag off"].includes(scenario), scenario);
+    assert.equal(attempts[0].preparesStep, ["grounded", "compact", "answer flag off"].includes(scenario), scenario);
   }
 });
 
