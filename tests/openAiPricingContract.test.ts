@@ -153,7 +153,8 @@ test("every profile is priced for a direct call at the standard tier", () => {
   // npm run check:model-pricing surfaces every mention; this pins what the
   // exceptions are allowed to be.
   //
-  // The one exception is the marketing generator's adapter: it is priced by
+  // The exceptions are the marketing ledger's callers (the generator's adapter
+  // and Admin's ad facts refresh): they are priced by
   // the marketing ledger's pins, never by these profiles, so its tier cannot
   // make any of them wrong. It is accepted only in its exact form.
   for (const entry of PROCESSING_TIER_REQUEST_ALLOWLIST) {

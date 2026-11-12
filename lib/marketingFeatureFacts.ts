@@ -11,6 +11,12 @@
  * `feature_refresh` purpose and the marketing model the operator chose. It is
  * on by default (owner decision in chat, 2026-11-12) and runs only when an
  * operator presses the button; MARKETING_FEATURE_REFRESH=off turns it off.
+ *
+ * The call itself goes through the app's own route to that OpenAI model, so it
+ * is billed to the product OpenAI key, not the marketing generator's dedicated
+ * MARKETING_LLM_API_KEY, which no service with a database credential holds.
+ * The owner chose this in chat (2026-11-13) and monitors the cost; the ledger
+ * still counts it against the marketing cap (docs/policy/marketing-automation.md §5).
  */
 import "server-only";
 
@@ -34,7 +40,9 @@ import {
   type MarketingFeatureProposal,
 } from "@/lib/marketingFeatureFactsCore";
 import {
+  MARKETING_LLM_SERVICE_TIER,
   MARKETING_LLM_SETTINGS_KEY,
+  marketingLlmReportedModelMatches,
   parseMarketingLlmSettings,
   resolveMarketingLlmPin,
 } from "@/lib/marketingLlmBudgetCore";
@@ -226,8 +234,16 @@ export async function runMarketingFeatureRefresh(prisma: PrismaClient, env: Env 
         schema: jsonSchema(MARKETING_FEATURE_REFRESH_SCHEMA as unknown as JSONSchema7),
         name: "marketing_feature_refresh",
       }),
-      providerOptions: { openai: { strictJsonSchema: true } },
+      // The ledger's request conditions: its service tier, nothing stored.
+      providerOptions: { openai: { strictJsonSchema: true, serviceTier: MARKETING_LLM_SERVICE_TIER, store: false } },
     });
+    // The channel settles as the pin's model and tier, so the answer is used
+    // only when the provider says it served exactly those; anything else is an
+    // unknown outcome, counted at the reservation (review r-20261112-132625-25793f).
+    const servedModel = (generated.response as { modelId?: unknown } | undefined)?.modelId;
+    const servedTier = (generated.providerMetadata as { openai?: { serviceTier?: unknown } } | undefined)?.openai?.serviceTier;
+    if (typeof servedModel !== "string" || !marketingLlmReportedModelMatches(pin.pin.model, servedModel)) return null;
+    if (servedTier !== MARKETING_LLM_SERVICE_TIER) return null;
     const usage = generated.usage as { inputTokens?: unknown; outputTokens?: unknown } | undefined;
     // Tokens the ledger cannot read make the outcome unknown, counted at the reservation.
     if (!counted(usage?.inputTokens) || !counted(usage?.outputTokens)) return null;
