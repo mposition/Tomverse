@@ -63,7 +63,7 @@ import {
 } from "@/lib/routingShadow";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
-import { chatRouterLocationFusionEnabled } from "@/lib/chatRouterLocationFusionEnabled";
+import { chatRouterLocationFusionEnabled, existingChatRouterLocationFusionEnabled } from "@/lib/chatRouterLocationFusionEnabled";
 import { consumeChatLocationIntentLimit } from "@/lib/chatLocationIntentRateLimit";
 import { openRouterLocation, routerLocationDigest, sealRouterLocation, type RouterLocationContinuation } from "@/lib/chatRouterLocationContinuation";
 import { claimRouterLocation, consumeRouterLocation, routerLocationRefused, routerLocationResponse, type RouterLocationClaim } from "@/lib/chatRouterLocationPreparation";
@@ -1410,6 +1410,7 @@ async function handleChatPost(
         } = validateChatPayload(body);
         const fusionBody = body as Record<string, unknown>;
         const wantsFusion = fusionBody.routerLocationFusion === true;
+        const existingFusion = wantsFusion && fusionBody.routerLocationScope === "existing";
         if (!wantsFusion && new URL(req.url).pathname === "/api/chat/router-location") {
             throw new ChatAccessError(400, "INVALID_ROUTER_LOCATION_REQUEST", "A router-location request is required.");
         }
@@ -1419,11 +1420,12 @@ async function handleChatPost(
             return routerLocationResponse(null, traceId);
         };
         if (resumeToken !== undefined && !wantsFusion) throw routerLocationRefused();
-        if (wantsFusion && (!chatRouterLocationFusionEnabled() || !process.env.NEXTAUTH_SECRET ||
+        if (wantsFusion && ((existingFusion ? !existingChatRouterLocationFusionEnabled() : !chatRouterLocationFusionEnabled()) ||
+            (fusionBody.routerLocationScope !== undefined && !existingFusion) || !process.env.NEXTAUTH_SECRET ||
             !session?.user?.id || !conversationId || !assistantMessageId || !sourceUserMessageId ||
-            promptRefinerDecision || deepResearchDepth || admissionToken || mcpConnectionId || turnstileToken || guestAutoCapability ||
-            (currentLocation && resumeToken === undefined) || requestMessages.length !== 1 ||
-            requestMessages[0].role !== "user" || turnCarriesAttachments(requestMessages))) return refuseFusion();
+            (!existingFusion && promptRefinerDecision) || deepResearchDepth || admissionToken || mcpConnectionId || turnstileToken || guestAutoCapability ||
+            (currentLocation && resumeToken === undefined) || (!existingFusion && requestMessages.length !== 1) ||
+            requestMessages.at(-1)?.role !== "user" || turnCarriesAttachments(requestMessages))) return refuseFusion();
         if (mcpConnectionId && (!mcpPreviewEnabled() || !session?.user?.id)) {
             throw new ChatAccessError(403, "MCP_CONNECTOR_UNAVAILABLE", "Sign in and enable the connector preview to use a selected plugin.");
         }
@@ -1867,6 +1869,10 @@ async function handleChatPost(
         // A guest turn still reads nothing. The ownership check below reads
         // the same row again; merging the two is worth doing and is not this
         // change.
+        const fusionHead = { orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }], take: 2,
+            select: { id: true as const, role: true as const } };
+        const existingAttempt = { where: { OR: [{ assistantMessageId }, { sourceUserMessageId }] },
+            take: 1, select: { assistantMessageId: true as const } };
         const conversationRouting =
             conversationId && session?.user?.id
                 ? await prisma.conversation.findFirst({
@@ -1879,7 +1885,8 @@ async function handleChatPost(
                           ...(contextBundle || wantsFusion ? { password: true, kind: true, memoryMode: true, assistantProfileVersionId: true } : {}),
                           ...(wantsFusion ? {
                               selectedModels: true, disabledPanels: true, chatRecoveryEpoch: true,
-                              messages: { select: { id: true }, take: 2 },
+                              messages: fusionHead,
+                              ...(existingFusion ? { responseAttempts: existingAttempt } : {}),
                               routerLocationPreparations: { where: { sourceUserMessageId, assistantMessageId }, select: { requestDigest: true }, take: 1 },
                           } as const : {}),
                           selectionMode: true,
@@ -2250,6 +2257,7 @@ async function handleChatPost(
                     })
                 )
                 .catch(() => null);
+            if (existingFusion && answered?.conversation.userId === session.user.id) throw routerLocationRefused();
             // Only the caller's own answer counts: whether another account's
             // id is an image answer is nobody else's to learn.
             if (
@@ -2265,7 +2273,7 @@ async function handleChatPost(
                 );
             }
         }
-        const autoImageTurnEligible =
+        const autoTextTurnEligible =
             conversationRouting?.selectionMode === "auto" &&
             !guestAutoSelection?.routed &&
             Boolean(session?.user?.id && conversationId && assistantMessageId) &&
@@ -2274,8 +2282,8 @@ async function handleChatPost(
             // a bridged conversation, so an image decision here would leave
             // the question with no answer (docs/policy/external-conversation-continuation.md §5.1).
             !conversationRouting?.continuationBridge &&
-            !admissionToken &&
-            !deepResearchDepth &&
+            !admissionToken && !deepResearchDepth;
+        const autoImageTurnEligible = autoTextTurnEligible &&
             !promptRefinerDecision &&
             // This message's own attachments, not the conversation's. A photo
             // is the one attachment the image turn can use: it may be edited.
@@ -2371,14 +2379,29 @@ async function handleChatPost(
                 earlyContextRefusal = response;
                 return false;
             } : undefined;
-        let fusion: { key: RouterLocationClaim; requestDigest: string; expiresAt: number; searchUtcDate: string; resume: RouterLocationContinuation | null } | null = null;
+        let fusion: { key: RouterLocationClaim; userId: string; requestDigest: string; expiresAt: number; searchUtcDate: string; resume: RouterLocationContinuation | null } | null = null;
         if (wantsFusion && conversationId && sourceUserMessageId && assistantMessageId && session?.user?.id) {
             const userId = session.user.id;
             if (!conversationRouting) throw routerLocationRefused();
             if (!hasConversationUnlockGrant(req, userId, conversationId, conversationRouting.password ?? null)) return conversationLockedResponse();
             if (resumeToken === undefined && conversationRouting.routerLocationPreparations?.length) throw routerLocationRefused();
-            if (!deterministicAutoSelection.routed || !autoImageTurnEligible || !isChatConversationKind(conversationRouting.kind) ||
-                conversationRouting.messages?.length !== 1 || conversationRouting.messages[0].id !== sourceUserMessageId) return refuseFusion();
+            if (!deterministicAutoSelection.routed || !(existingFusion ? autoTextTurnEligible : autoImageTurnEligible) ||
+                !isChatConversationKind(conversationRouting.kind)) return refuseFusion();
+            const head = conversationRouting.messages;
+            if (existingFusion) {
+                if (head?.length !== 2) return refuseFusion();
+                const disabledPanels = parseStoredModelIds(conversationRouting.disabledPanels);
+                const activeModels = parseStoredModelIds(conversationRouting.selectedModels).filter(id => !disabledPanels.includes(id));
+                if (activeModels.length !== 1 || activeModels[0] !== modelId) return refuseFusion();
+                if (head[0].id !== sourceUserMessageId || head[0].role !== "user" || conversationRouting.responseAttempts?.length) {
+                    throw routerLocationRefused();
+                }
+                const previous = messages.at(-2);
+                if (!previous?.id || previous.role !== head[1].role ||
+                    (previous.id !== head[1].id && scopedMessageId(conversationId, previous.id) !== head[1].id)) {
+                    return refuseFusion();
+                }
+            } else if (head?.length !== 1 || head[0].id !== sourceUserMessageId) return refuseFusion();
             await assertUserOperationalAccess(userId);
             await verifyDurableChatSourceMessage({ userId, conversationId, sourceUserMessageId, messages });
             if (verifyPreparedContext && !(await verifyPreparedContext())) return earlyContextRefusal!;
@@ -2387,6 +2410,7 @@ async function handleChatPost(
             delete originalRequest.routerLocationContinuation;
             const key = { conversationId, sourceUserMessageId, assistantMessageId };
             const requestDigest = routerLocationDigest({
+                ...(existingFusion ? { historyHead: head } : {}),
                 userId, key, originalRequest, tier: accountPlan?.tier, selectedModels: conversationRouting.selectedModels,
                 disabledPanels: conversationRouting.disabledPanels, recoveryEpoch: conversationRouting.chatRecoveryEpoch,
                 profile: conversationRouting.assistantProfileVersionId, memory: conversationRouting.memoryMode,
@@ -2411,7 +2435,7 @@ async function handleChatPost(
             // Consent can cross UTC midnight; reconstruct the dated search
             // prompt the Router actually read when verifying its digest.
             const searchUtcDate = resume?.searchUtcDate ?? new Date().toISOString().slice(0, 10);
-            fusion = { key, requestDigest, expiresAt, searchUtcDate, resume };
+            fusion = { key, userId, requestDigest, expiresAt, searchUtcDate, resume };
         }
         const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
             ? { userId: session!.user!.id!, conversationId: conversationId!, text: profileTextFor(autoRoutingMessages),
@@ -2444,7 +2468,8 @@ async function handleChatPost(
                       // discarded, including an explicit keep-original choice.
                       rewriteAllowed: !refinerPreview && !turnCarriesAttachments(autoRoutingMessages),
                       verifyPreparedContext: fusion ? undefined : verifyPreparedContext,
-                      ...(fusion ? { locationFusion: { authoredText: messages[0].content, resume: fusion.resume, searchUtcDate: fusion.searchUtcDate,
+                      ...(fusion ? { locationFusion: { authoredText: latestUserPromptText(messages), scope: existingFusion ? "existing" : undefined,
+                          resume: fusion.resume, searchUtcDate: fusion.searchUtcDate,
                           onRouterDigest: (value: string) => { fusionRouterDigest = value; } } } : {}),
                       fileContext: fileRoutingContext,
                       searchPlan: fusion?.resume?.searchPlan ?? allowRouterSearchPlan,
@@ -3196,6 +3221,26 @@ async function handleChatPost(
           return. The client makes the image under this turn's answer id.
         */
         if (fusion) {
+            // A different tab may have committed a newer question or begun an
+            // ordinary answer while the Router was busy. Its result cannot be
+            // attached to the displaced source, even on the inline negative path.
+            if (existingFusion) {
+                const current = await prisma.conversation.findFirst({
+                    where: { id: fusion.key.conversationId, userId: fusion.userId, productKey: "chat", selectionMode: "auto",
+                        messages: { some: { id: fusion.key.sourceUserMessageId, role: "user", content: latestUserPromptText(messages) },
+                            none: { id: fusion.key.assistantMessageId } },
+                        continuationBridge: null, kind: conversationRouting?.kind, password: conversationRouting?.password,
+                        chatRecoveryEpoch: conversationRouting?.chatRecoveryEpoch, selectedModels: conversationRouting?.selectedModels,
+                        disabledPanels: conversationRouting?.disabledPanels, memoryMode: conversationRouting?.memoryMode,
+                        assistantProfileVersionId: conversationRouting?.assistantProfileVersionId },
+                    select: { messages: fusionHead, responseAttempts: existingAttempt },
+                });
+                if (!current || current.messages[0]?.id !== fusion.key.sourceUserMessageId ||
+                    current.messages[1]?.id !== conversationRouting?.messages?.[1]?.id ||
+                    current.responseAttempts.length) {
+                    throw routerLocationRefused();
+                }
+            }
             if (fusion.resume) {
                 if (fusion.resume.image.image && !autoImageDecision.image) throw routerLocationRefused();
                 await consumeRouterLocation(fusion.key, fusion.requestDigest);
@@ -5128,6 +5173,8 @@ async function handleChatPost(
                     queries: llmPick.searchQueries,
                     tool: appManagedSearchTool,
                     signal: req.signal,
+                    groundedAnswer: process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED === "true"
+                        ? (llmPick.simpleLookup === true ? "lookup" : "full") : undefined,
                     inputHeadroomTokens: contextInputTokens - reservationOnlyInputTokens -
                         toReservedInputTokens(inputEstimate.breakdown()) - TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
                 });
