@@ -5096,6 +5096,14 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
         await expect(page.getByTestId("chat-textarea")).toBeEnabled();
         expect(await requests(page)).toHaveLength(0);
         expect(await locationReads()).toBe(0);
+        if (selection === "changed-after-save") {
+          await chooseConversation(page, CONVERSATION);
+          await page.getByTestId("restore-chat-question").click();
+          await expect(page.getByTestId("chat-textarea")).toHaveValue("What is near me?");
+          expect(await requests(page)).toHaveLength(0);
+          expect(await locationReads()).toBe(0);
+          expect(intentCount).toBe(1);
+        }
       } else {
         await drive(page, 0, "push", "The complete location answer.");
         await drive(page, 0, "finish");

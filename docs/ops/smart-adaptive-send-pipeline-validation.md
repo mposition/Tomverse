@@ -351,6 +351,12 @@ sources and answer quality alongside the calls it removes.
 
 ### Search router preparation and compact menu experiment
 
+For eligible standalone location checks, a saved-chat send can persist its
+question while the semantic result is pending. Device access and answer
+dispatch still wait for the save and the current selection. If the user
+leaves during that interval, the saved question can be restored to the
+composer in the original conversation without a model call or a GPS read.
+
 The live router constructs its provider request once, then uses the same system,
 user message, candidates and schema for the price bound, location continuation
 digest and dispatch. An ineligible rewrite skips the rewrite-setting read.
