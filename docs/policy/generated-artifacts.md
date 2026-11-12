@@ -806,9 +806,15 @@ artifact tool은 없고, 이미지 artifact는 변환의 결과로만 생긴다(
 
 - handle은 요청 계층이 이미 소유권을 확인해 읽어 둔 그 turn의 파일만
   가리킨다(§13과 같은 map). 모델이 경로·URL·key를 보내면 schema에서 거절한다.
-- PDF 페이지를 그리는 일은 worker thread에서 한다(`lib/mediaSecurity.ts`와
-  같은 이유: CPU가 무거운 경로가 다른 요청을 멈추면 안 되고, 서버 bundle은
-  pdf.js를 담지 못한다). 90초 시간 제한이 있다.
+- PDF 페이지는 PDFium의 WebAssembly 빌드(`@hyzyla/pdfium`)로 worker thread에서
+  그린다. CPU가 무거운 경로가 다른 요청을 멈추면 안 되기 때문이고, 90초 시간
+  제한이 있다. **pdf.js를 쓰지 않는다**: pdf.js는 네이티브 모듈
+  `@napi-rs/canvas`로 그리는데, 그 모듈을 불러온 worker를 종료하면 worker가 아니라
+  **프로세스 전체**가 접근 위반으로 죽었다(2026-11-12, 한 번에 worker 하나로도
+  재현). WebAssembly 엔진에는 죽을 네이티브 코드가 없어 시간 초과 때 worker를
+  멈춰도 안전하다. 자식 프로세스로 격리하는 방법은 쓰지 않는다 — 게이트가 닿는
+  코드에서 `node` 자식 프로세스 실행은 control-plane 분석(`lib/agentControlPlaneSlice.ts`)이
+  금지한다.
 - 암호가 걸린 PDF는 복사하지 않고 그렇게 말한다.
 - 실패는 §8·§9의 카드 규칙을 그대로 따른다: 덜 요청하면 되는 실패는
   `limit_exceeded`, 다른 파일이나 다른 지시가 필요한 실패는 `spec_rejected`,

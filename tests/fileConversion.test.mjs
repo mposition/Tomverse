@@ -828,7 +828,7 @@ test("sixth review: a time keeps its seconds, a time-only cell gains no date, a 
     buildXlsx({
       rows: [
         ["clock", "stamp", "span"],
-        [{ number: 0.5242592592592593 }, { number: 46338.5242592592592593 }, { number: 1.5 }],
+        [{ number: 0.5242592592592593 }, { number: 46338.5242592592592593 }, { number: 1.500001 }],
       ],
     })
   );
@@ -853,7 +853,7 @@ test("sixth review: a time keeps its seconds, a time-only cell gains no date, a 
     attachments([["times.xlsx", XLSX, file]])
   );
   const lines = decode(result.bytes).replace(/^﻿/, "").trimEnd().split("\r\n");
-  assert.deepEqual(lines, ["clock,stamp,span", "12:34:56,2026-11-12 12:34:56,36:00:00"]);
+  assert.deepEqual(lines, ["clock,stamp,span", "12:34:56,2026-11-12 12:34:56,36:00:00.086"]);
 });
 
 test("sixth review: a table too large for a PDF is refused before it is drawn", async () => {
@@ -910,4 +910,26 @@ test("sixth review: an option the operation does not use is refused, not silentl
     sources: [{ attachment: "att_1", pages: "1" }],
   });
   assert.equal(imagePages.ok, false);
+});
+
+test("seventh review: the same large image named twenty times stops at the ceiling, not after", async () => {
+  const big = await sharp({ create: { width: 2400, height: 2400, channels: 3, noise: { type: "gaussian", mean: 128, sigma: 60 } } })
+    .png()
+    .toBuffer();
+  const files = attachments([["noise.png", "image/png", new Uint8Array(big)]]);
+  const started = Date.now();
+  await rejects(
+    {
+      operation: "convert_images",
+      filename: "many",
+      imageFormat: "png",
+      sources: Array.from({ length: 20 }, () => ({ attachment: "att_1" })),
+    },
+    files,
+    "OUTPUT_TOO_LARGE"
+  );
+  // Refused part-way: each copy is ~17 MB of noise, so the second already
+  // passes 25 MB. Bounded by a generous clock rather than by memory, which a
+  // test cannot read portably.
+  assert.ok(Date.now() - started < 60_000);
 });

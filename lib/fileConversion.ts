@@ -14,16 +14,17 @@
  *     parser and writer yield to the event loop between batches of objects,
  *     which is why it can run on the request thread.
  *   * `sharp` decodes, orients, resizes and re-encodes images.
- *   * `pdfjs-dist` draws a PDF page to pixels -- in a worker thread, for the
- *     same two reasons lib/mediaSecurity.ts runs it in one: drawing is the
- *     CPU-heavy path and must not stall other requests, and the Next.js
- *     server bundle cannot carry pdf.js (it is loaded from node_modules at
- *     run time by an `eval` worker).
+ *   * PDFium, built to WebAssembly (`@hyzyla/pdfium`), draws a PDF page to
+ *     pixels, in a worker thread so the drawing does not stall other
+ *     requests. Not pdf.js: pdf.js draws through `@napi-rs/canvas`, a native
+ *     module that crashed the whole process when a worker that had loaded it
+ *     was terminated -- reproduced locally with one worker at a time. A
+ *     WebAssembly engine has no native code to crash, so a worker can be
+ *     stopped on a timeout like any other.
  */
 
 import "server-only";
 
-import path from "node:path";
 import { Worker } from "node:worker_threads";
 
 import { PDFDocument, degrees } from "pdf-lib";
@@ -187,6 +188,29 @@ const assertOutputSize = (bytes: Uint8Array, hint: string): Uint8Array => {
     );
   }
   return bytes;
+};
+
+/**
+ * The bytes a multi-file conversion is holding, checked as each file is made.
+ *
+ * Every conversion that writes several files keeps them in memory until the
+ * archive is built, and a source may be named twenty times. Checked once at
+ * the end, twenty copies of one large image are all held before the refusal;
+ * checked here, the work stops at the first file past the ceiling.
+ */
+const outputBudget = (hint: string) => {
+  let held = 0;
+  return (bytes: Uint8Array): Uint8Array => {
+    held += bytes.byteLength;
+    if (held > FILE_CONVERSION_LIMITS.maxOutputBytes) {
+      throw new FileConversionError(
+        "OUTPUT_TOO_LARGE",
+        `The converted files would be over ${Math.ceil(held / 1024 / 1024)} MB, past the ` +
+          `${FILE_CONVERSION_LIMITS.maxOutputBytes / 1024 / 1024} MB limit. ${hint}`
+      );
+    }
+    return bytes;
+  };
 };
 
 /* ------------------------------------------------------------------------ */
@@ -504,7 +528,7 @@ const prepareSplitPdf = async (
     format: "zip",
     render: async () => {
       const entries: Array<{ path: string; bytes: Uint8Array }> = [];
-      let heldBytes = 0;
+      const hold = outputBudget("Offer to split a smaller range of pages.");
       for (const [index, part] of parts.entries()) {
         const output = await PDFDocument.create();
         output.setProducer("Tomverse");
@@ -518,14 +542,7 @@ const prepareSplitPdf = async (
           }
           output.addPage(page);
         }
-        const bytes = await output.save();
-        // Checked per part, not once at the end: twenty overlapping ranges of
-        // one large PDF would otherwise all be held before the refusal.
-        heldBytes += bytes.byteLength;
-        assertOutputSize(
-          new Uint8Array(heldBytes > FILE_CONVERSION_LIMITS.maxOutputBytes ? heldBytes : 0),
-          "Offer to split a smaller range of pages."
-        );
+        const bytes = hold(await output.save());
         entries.push({
           path: `${base}_${String(index + 1).padStart(Math.max(2, digits), "0")}.pdf`,
           bytes,
@@ -550,67 +567,58 @@ const RASTER_TIMEOUT_MS = 90_000;
 /** Pixels in one drawn page. A4 at 300 dpi is under nine million. */
 const RASTER_MAX_PAGE_PIXELS = 40_000_000;
 
-// Plain filesystem paths resolved from the working directory, for the reasons
-// spelled out in lib/mediaSecurity.ts: pdf.js joins these with a file name by
-// string concatenation, and the server bundle cannot resolve the package.
-const pdfjsDir = (dir: string) =>
-  `${path
-    .join(process.cwd(), "node_modules/pdfjs-dist", dir)
-    .split(path.sep)
-    .join("/")}/`;
-
+/**
+ * The worker's whole program. A string, so the server bundle never carries
+ * PDFium; it is loaded from node_modules when the worker starts, as
+ * lib/mediaSecurity.ts loads sharp and pdf.js for its own checks.
+ */
 const rasterWorkerSource = `
 const { parentPort, workerData } = require("node:worker_threads");
 
 (async () => {
-    let loadingTask;
+    let library;
+    let document;
     try {
-        const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-        loadingTask = pdfjs.getDocument({
-            data: new Uint8Array(workerData.buffer),
-            disableWorker: true,
-            isEvalSupported: false,
-            useSystemFonts: false,
-            stopAtErrors: false,
-            standardFontDataUrl: workerData.standardFontDataUrl,
-            cMapUrl: workerData.cMapUrl,
-            cMapPacked: true,
-        });
-        const document = await loadingTask.promise;
+        const { PDFiumLibrary } = require("@hyzyla/pdfium");
+        const sharp = require("sharp");
+        library = await PDFiumLibrary.init();
+        document = await library.loadDocument(new Uint8Array(workerData.buffer));
         const buffers = [];
         let total = 0;
         for (const index of workerData.pageIndices) {
-            const page = await document.getPage(index + 1);
-            const viewport = page.getViewport({ scale: workerData.scale });
-            const width = Math.ceil(viewport.width);
-            const height = Math.ceil(viewport.height);
-            if (width * height > workerData.maxPagePixels) {
-                throw new Error("PAGE_TOO_LARGE");
-            }
-            const target = document.canvasFactory.create(width, height);
-            await page.render({
-                canvasContext: target.context,
-                canvas: target.canvas,
-                viewport,
-            }).promise;
-            const png = target.canvas.toBuffer("image/png");
-            page.cleanup();
-            document.canvasFactory.destroy(target);
-            total += png.length;
+            const page = document.getPage(index);
+            const size = page.getOriginalSize();
+            const pixels =
+                Math.ceil(size.originalWidth * workerData.scale) *
+                Math.ceil(size.originalHeight * workerData.scale);
+            if (!(pixels > 0) || pixels > workerData.maxPagePixels) throw new Error("PAGE_TOO_LARGE");
+            const image = await page.render({
+                scale: workerData.scale,
+                render: (bitmap) =>
+                    sharp(Buffer.from(bitmap.data.buffer, bitmap.data.byteOffset, bitmap.data.byteLength), {
+                        raw: { width: bitmap.width, height: bitmap.height, channels: 4 },
+                    })
+                        .png({ compressionLevel: 6 })
+                        .toBuffer(),
+            });
+            page.close();
+            total += image.data.byteLength;
             if (total > workerData.maxTotalBytes) throw new Error("OUTPUT_TOO_LARGE");
-            buffers.push(Uint8Array.from(png).buffer);
+            buffers.push(Uint8Array.from(image.data).buffer);
         }
-        await loadingTask.destroy();
+        document.destroy();
+        library.destroy();
         parentPort.postMessage({ ok: true, buffers }, buffers);
     } catch (error) {
         try {
-            if (loadingTask) await loadingTask.destroy();
+            if (document) document.destroy();
+            if (library) library.destroy();
         } catch {}
         const message = error && typeof error.message === "string" ? error.message : "";
         const code =
             message === "PAGE_TOO_LARGE" || message === "OUTPUT_TOO_LARGE"
                 ? message
-                : error && error.code === "ERR_MODULE_NOT_FOUND"
+                : error && error.code === "MODULE_NOT_FOUND"
                   ? "UNAVAILABLE"
                   : "RENDER_FAILED";
         parentPort.postMessage({ ok: false, code });
@@ -632,8 +640,7 @@ const rasterizePdfPages = (
     // A copy, so transferring it to the worker leaves the caller's bytes whole.
     const buffer = Uint8Array.from(source.bytes).buffer;
     // Constructed here and named nowhere else, so the string above is the
-    // whole of what the worker can run. A constructor that throws rejects the
-    // promise, and the caller reports the conversion as failed.
+    // whole of what the worker can run.
     const worker = new Worker(rasterWorkerSource, {
       eval: true,
       workerData: {
@@ -644,8 +651,6 @@ const rasterizePdfPages = (
         // Raw PNG is larger than what is finally stored; this only stops a
         // runaway before it exhausts memory.
         maxTotalBytes: FILE_CONVERSION_LIMITS.maxOutputBytes * 4,
-        standardFontDataUrl: pdfjsDir("standard_fonts"),
-        cMapUrl: pdfjsDir("cmaps"),
       },
       transferList: [buffer],
       resourceLimits: {
@@ -751,6 +756,7 @@ const preparePdfToImages = async (
     render: async () => {
       const nameFor = uniquePaths();
       const entries: Array<{ path: string; bytes: Uint8Array }> = [];
+      const hold = outputBudget("Offer a lower dpi, JPG instead of PNG, or fewer pages.");
       for (const { source, indices } of groups) {
         const pages = await rasterizePdfPages(source, indices, dpi);
         const base = baseNameOf(source.name);
@@ -764,7 +770,7 @@ const preparePdfToImages = async (
           });
           entries.push({
             path: nameFor(`${base}_p${indices[position] + 1}`, extension),
-            bytes: image.data,
+            bytes: hold(image.data),
           });
         }
       }
@@ -795,6 +801,7 @@ const prepareConvertImages = async (
     render: async () => {
       const nameFor = uniquePaths();
       const entries: Array<{ path: string; bytes: Uint8Array }> = [];
+      const hold = outputBudget("Offer a smaller maxDimension or a lower quality.");
       let last: EncodedImage | null = null;
       for (const source of sources) {
         last = await encodeImage(source.bytes, {
@@ -807,7 +814,7 @@ const prepareConvertImages = async (
         });
         entries.push({
           path: nameFor(baseNameOf(source.name), extension),
-          bytes: last.data,
+          bytes: hold(last.data),
         });
       }
       const single = entries.length === 1 && last;

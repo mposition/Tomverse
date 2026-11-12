@@ -239,10 +239,16 @@ const excelSerialToExactText = (
   // hours are written in full rather than wrapped into a date.
   if (timeOnly) {
     if (serial >= 1 || serial < 0) {
-      const totalSeconds = Math.round(serial * 86_400);
-      const sign = totalSeconds < 0 ? "-" : "";
-      const absolute = Math.abs(totalSeconds);
-      return `${sign}${Math.floor(absolute / 3600)}:${pad(Math.floor(absolute / 60) % 60)}:${pad(absolute % 60)}`;
+      // Counted in milliseconds, the same resolution as the clock above, so a
+      // duration keeps its fraction of a second too.
+      const total = Math.abs(milliseconds);
+      const sign = milliseconds < 0 ? "-" : "";
+      const seconds = Math.floor(total / 1000);
+      const remainder = total % 1000;
+      return (
+        `${sign}${Math.floor(seconds / 3600)}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}` +
+        (remainder ? `.${pad(remainder, 3)}` : "")
+      );
     }
     return clock;
   }
