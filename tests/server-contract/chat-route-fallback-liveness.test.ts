@@ -3990,7 +3990,7 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
   llmSearchModelId = flash.id;
   llmSearchQueries = ["one fact"];
   llmSearchFileIntent = false;
-  const groundedLookupScenarios = ["grounded", "compact", "lookup flag off", "fast lookup"];
+  const groundedLookupScenarios = ["grounded", "compact", "lookup flag off", "fast lookup", "both lookup flags"];
   const groundedFullScenarios = ["complex", "unclassified"];
   let ordinarySearchDescription: string | undefined;
   for (const scenario of [...groundedLookupScenarios, ...groundedFullScenarios, "manual", "no sources", "presearch off", "answer flag off"]) {
@@ -3998,7 +3998,7 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     if (scenario === "answer flag off") delete process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED;
     else process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED = "true";
     process.env.CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED = String(scenario === "compact" || scenario === "answer flag off");
-    process.env.CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED = String(["fast lookup", "complex", "manual", "no sources", "presearch off", "unclassified"].includes(scenario));
+    process.env.CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED = String(["fast lookup", "both lookup flags", "complex", "manual", "no sources", "presearch off", "unclassified"].includes(scenario));
     process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED = String(!["lookup flag off", "fast lookup"].includes(scenario));
     process.env.CHAT_ROUTER_PRESEARCH_ENABLED = String(scenario !== "presearch off");
     failPresearchBackend = scenario === "no sources" ? "all" : false;
@@ -4018,10 +4018,10 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     assert.equal(lastPart.includes("End of quoted evidence"), withEvidence && scenario !== "answer flag off", scenario);
     assert.equal(lastPart.includes("\nObservation —"), groundedLookupScenarios.includes(scenario), scenario);
     assert.equal(lastPart.includes("requested precision"), groundedFullScenarios.includes(scenario), scenario);
-    assert.equal(attempts[0].preparesStep, ["grounded", "compact", "answer flag off", "fast lookup"].includes(scenario), scenario);
+    assert.equal(attempts[0].preparesStep, ["grounded", "compact", "answer flag off", "fast lookup", "both lookup flags"].includes(scenario), scenario);
     if (scenario === "grounded") ordinarySearchDescription = attempts[0].searchDescription;
     assert.ok(ordinarySearchDescription, "the ordinary web search tool has a provider description");
-    if (scenario === "fast lookup" || scenario === "complex") {
+    if (scenario === "fast lookup" || scenario === "both lookup flags" || scenario === "complex") {
       assert.ok(attempts[0].searchDescription);
       assert.notEqual(attempts[0].searchDescription, ordinarySearchDescription);
       assert.deepEqual(primaryGroundedManifest, {

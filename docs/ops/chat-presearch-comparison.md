@@ -105,14 +105,16 @@ search already appeared verbatim in the evidence sent to the model, the tool
 labels them as repeated. A changed snippet, date or URL preserves the original
 notice. The model receives the original source records in either case.
 
-For a direct lookup on Qwen 3.8 Flash with no configured reasoning effort,
-the switch sets a 128-token thinking budget on the first call and after a step
+DashScope enables thinking by default on Qwen 3.8 Flash. For a direct lookup
+with no configured reasoning effort, the switch sets a 128-token thinking
+budget on the first call and after a step
 consisting solely of successful web searches with results. A failed search,
 empty result, partially failed batch or another tool restores the ordinary
 model settings on the following step. Comparisons and tasks that need reasoning
 retain the model's configured behavior. The earlier
-`CHAT_QWEN_GROUNDED_LOOKUP_ENABLED` switch by itself disables optional thinking
-only on step zero. [DashScope thinking parameters](https://www.alibabacloud.com/help/en/model-studio/deep-thinking)
+`CHAT_QWEN_GROUNDED_LOOKUP_ENABLED` switch takes precedence for Qwen's model
+settings when both switches are on. It disables optional thinking on step zero
+and uses the provider default on subsequent steps. [DashScope thinking parameters](https://www.alibabacloud.com/help/en/model-studio/deep-thinking)
 
 To evaluate this change, keep the router candidate format fixed, send the same
 questions and ordered evidence to the same answer model, and include a case

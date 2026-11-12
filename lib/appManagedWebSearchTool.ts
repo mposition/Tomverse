@@ -210,7 +210,7 @@ function describeRepeatedExcerpts(
   const markRepeated = (search: AppManagedSearchToolResult) => ({
     ...search,
     notice: search.notice?.replace(DATE_GUIDANCE,
-      "Check source dates. All excerpts already appeared unchanged. Cite the supported facts now. Seek a different source only for a specific remaining gap. "),
+      "Check dates. All excerpts already appeared unchanged. Cite only URLs in this turn's evidence. If a requested fact is unavailable, say so without guessing a link. "),
   });
   return result.status === "batch"
     ? { ...result, searches: result.searches.map(markRepeated) }

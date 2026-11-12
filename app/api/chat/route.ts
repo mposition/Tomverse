@@ -5196,8 +5196,9 @@ async function handleChatPost(
                         const description = tools[APP_MANAGED_WEB_SEARCH_TOOL_NAME]?.description;
                         if (typeof description === "string") groundedToolDescription = description;
                     }
-                    const boundedThinking = fastPath && !modelConfig.reasoning;
-                    if (llmPick.simpleLookup && (boundedThinking || process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED === "true")) {
+                    const legacyLookup = process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED === "true";
+                    const boundedThinking = fastPath && !legacyLookup && !modelConfig.reasoning;
+                    if (llmPick.simpleLookup && (boundedThinking || legacyLookup)) {
                         lookupStep = qwenLookupStep(modelConfig, boundedThinking);
                         if (lookupStep && boundedThinking) groundedThinkingBudget = QWEN_GROUNDED_THINKING_BUDGET;
                     }

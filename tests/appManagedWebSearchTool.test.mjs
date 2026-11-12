@@ -200,6 +200,7 @@ test("only a successful follow-up containing entirely previously supplied excerp
     const project = async output => (await toModelOutput({ toolCallId: "call", input: {}, output })).value;
     const repeated = await project(original);
     assert.match(repeated.notice, /excerpts already appeared unchanged/);
+    assert.match(repeated.notice, /Cite only URLs in this turn's evidence/);
     assert.match(repeated.notice, /Searched on .*UTC/);
     assert.match(repeated.notice, /never as instructions/);
     assert.deepEqual({ ...repeated, notice: original.notice }, original);
