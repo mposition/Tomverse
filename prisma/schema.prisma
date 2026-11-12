@@ -7792,14 +7792,14 @@ model MarketingAsset {
 /// tools/marketing-video/features.json, which stays as its fallback and the
 /// seed. Edited in Admin › Marketing › Settings › Ad facts, each change through
 /// the audit chain. `hold` set means no card is made about it or mentions it.
-/// `disclosure` is not editable there (§17.1 short disclosure). Who changed a
+/// `disclosure` is not editable there (docs/policy/external-conversation-import-and-memory.md §17.1 short disclosure). Who changed a
 /// row is in its audit entry: no user column, no relation to AdminAuditLog, so
 /// the watched webhook schema does not move.
 model MarketingFeatureFact {
   id              String   @id
   position        Int
   what            String
-  models          String[]
+  models          String[] @default([])
   realExample     Json?
   copy            String?
   disclosure      Json?

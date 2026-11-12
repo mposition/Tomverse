@@ -38,8 +38,8 @@ const optionalText = (max: number) =>
 
 /**
  * The fields an operator edits. `realExample` (a recorded analysis) and
- * `disclosure` (the §17.1 short disclosure, docs/policy/external-conversation-
- * import-and-memory.md) are not among them: neither is a wording choice.
+ * `disclosure` (the short disclosure of docs/policy/external-conversation-
+ * import-and-memory.md §17.1) are not among them: neither is a wording choice.
  */
 export const marketingFeatureFactFieldsSchema = z
   .object({

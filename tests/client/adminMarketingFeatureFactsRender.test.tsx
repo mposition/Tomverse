@@ -33,7 +33,7 @@ test("each feature shows whether it is in the ads, its facts, and its fixed disc
   assert.match(html, /On hold/);
   assert.match(html, /Not live: no connectable server\./);
   assert.match(html, /GPT 6 Luna · Claude Haiku 5\.5/);
-  assert.match(html, /Disclosure \(fixed, §17\.1\): Answers draw on your past chats\./);
+  assert.match(html, /Disclosure \(fixed\): Answers draw on your past chats\./);
   assert.match(html, /Never say memories are copied\./);
 });
 

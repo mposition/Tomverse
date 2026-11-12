@@ -4,6 +4,7 @@ export const maxDuration = 150;
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
@@ -44,7 +45,16 @@ export async function POST(req: Request) {
         { status: 409 },
       );
     }
-    return NextResponse.json({ ok: true, result: await refresh(prisma) }, { headers: { "cache-control": "private, no-store" } });
+    const result = await refresh(prisma);
+    // The call is paid, so who pressed it is on the chain even though nothing is stored.
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "marketing_feature_fact.refresh",
+      targetType: "MarketingFeatureFact",
+      summary: "Ran the ad facts refresh (a paid model call; proposals only, nothing stored).",
+    });
+    return NextResponse.json({ ok: true, result }, { headers: { "cache-control": "private, no-store" } });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
