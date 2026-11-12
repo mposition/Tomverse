@@ -34,7 +34,10 @@ export const FRESH_REVIEW_ENV = "MARKETING_CREATIVE_FRESH_REVIEW";
 /**
  * Everyday subjects a film's question can come from. Tone (owner 2026-11-11):
  * nothing that reads as death, illness, loss or danger, so no health, medicine,
- * accidents or grief. Travel stays one subject among many.
+ * accidents or grief. Travel stays one subject among many. No subject asks for
+ * novels, films or songs: real answers name works whose themes the film cannot
+ * control (run 20261112's book club answers named The Midnight Library and
+ * 人間失格, and its review called both suicide imagery).
  */
 export const SUBJECTS = Object.freeze([
   "cooking dinner for friends",
@@ -51,7 +54,7 @@ export const SUBJECTS = Object.freeze([
   "moving to a new city",
   "a weekend hobby: film photography",
   "learning to play the guitar",
-  "picking a book club novel",
+  "setting up a weekly chore chart for a family",
   "a short travel weekend",
   "planning a family picnic",
   "budgeting for a first car",
@@ -130,6 +133,23 @@ export function visibleTextInPage(sel) {
     parts.push(" ");
   }
   return parts.join("").replace(/(?:\s*…\s*)+/gu, " … ").replace(/\s+/gu, " ").replace(/^ … | … $/gu, "").trim().slice(0, 4000);
+}
+
+/**
+ * Runs in the page: scrolls every answer column of the side-by-side view (a vertical scroller in the
+ * right two thirds of the screen, at least a third of it tall) to `fraction` of a screen below its
+ * top (0 = the top), and returns how far each one moved, for the log.
+ */
+export function scrollAnswerColumns(fraction) {
+  const columns = [...document.querySelectorAll("*")].filter((node) => {
+    const style = getComputedStyle(node);
+    const box = node.getBoundingClientRect();
+    return /(auto|scroll)/u.test(style.overflowY) && node.scrollHeight > node.clientHeight + 40 && box.left + box.width / 2 > innerWidth / 3 && box.height > innerHeight / 3;
+  });
+  return columns.map((node) => {
+    node.scrollTop = Math.min(node.scrollHeight - node.clientHeight, Math.round(node.clientHeight * fraction));
+    return node.scrollTop;
+  });
 }
 
 async function record({ locale, outDir, question, dry }) {
@@ -244,14 +264,12 @@ async function record({ locale, outDir, question, dry }) {
     }
     await page.getByRole("button", { name: L.side }).first().click();
     await page.waitForTimeout(2000);
+    // Streaming leaves each answer column scrolled to its end, so set the columns' scroll position
+    // explicitly: the top first, then about three quarters of a screen further down.
+    log.push({ columns: await page.evaluate(scrollAnswerColumns, 0) });
+    await page.waitForTimeout(800);
     await capture("answers", "the three answers side by side, from the top");
-    for (const x of [640, 940, 1240]) {
-      await page.mouse.move(x, 520);
-      for (let k = 0; k < 6; k += 1) {
-        await page.mouse.wheel(0, 110);
-        await page.waitForTimeout(150);
-      }
-    }
+    log.push({ columns: await page.evaluate(scrollAnswerColumns, 0.75) });
     await page.waitForTimeout(800);
     await capture("answers-more", "the three answers side by side, each scrolled further down");
 

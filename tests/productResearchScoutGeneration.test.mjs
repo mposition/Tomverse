@@ -22,16 +22,27 @@ const png = Buffer.from(
 
 const chatPage = `<!doctype html><html lang="ko"><body>
 <textarea data-testid="chat-textarea"></textarea>
+<div id="tray"></div>
 <button data-testid="chat-send-button">send</button>
 <div id="out"></div>
 <script>
 const out = document.getElementById("out");
 fetch("/api/background", { method: "POST", body: "on load" }).catch(() => {});
+fetch("/api/products/chat/drafts/new").then((response) => response.json()).then(({ draft }) => {
+  if (!draft) return;
+  document.querySelector('[data-testid="chat-textarea"]').value = draft.text;
+  document.getElementById("tray").innerHTML = draft.attachmentReferences.map(() => '<span data-testid="attachment-complete">file</span>').join("");
+});
+const settle = (text) => {
+  out.insertAdjacentHTML("beforeend", '<div data-testid="chat-message" data-message-role="assistant"><span data-testid="assistant-message-model-name">Fixture Model</span>' + text + '</div><button data-testid="memory-answer-feedback">report</button>');
+};
 document.querySelector('[data-testid="chat-send-button"]').onclick = async () => {
   const prompt = document.querySelector('[data-testid="chat-textarea"]').value;
   if (prompt.includes("STRAYS")) await fetch("/api/chat/voice", { method: "POST", body: "stray" }).catch(() => {});
   const answer = await (await fetch("/api/chat", { method: "POST", body: prompt })).json();
-  if (answer.failure) {
+  if (answer.refusal) {
+    settle(answer.refusal);
+  } else if (answer.failure) {
     out.innerHTML = '<span data-testid="generated-artifact-failure">' + answer.failure + "</span>";
   } else if (answer.artifact) {
     out.innerHTML = '<button data-testid="generated-artifact-download">download</button>';
@@ -53,6 +64,8 @@ let browser;
 let rules;
 let imageReads = 0;
 const seen = [];
+let draft = null;
+let uploads = 0;
 
 const walkPlace = (extra = {}) => ({
   walk: { origin, headers: { "CF-Access-Client-Id": "fixture-id" } },
@@ -84,9 +97,33 @@ before(async () => {
         response.writeHead(200, { "content-type": "text/html" });
         return response.end("<!doctype html><title>sign in</title>");
       }
+      if (pathname === "/api/chat" && request.method === "PUT") {
+        const { name, mediaType } = JSON.parse(body);
+        return json(200, { key: `acct/${name}`, uploadUrl: `${origin}/r2/${name}`, uploadHeaders: { "Content-Type": mediaType } });
+      }
+      if (pathname.startsWith("/r2/") && request.method === "PUT") {
+        seen.at(-1).bytes = Buffer.concat(chunks).byteLength;
+        response.writeHead(200);
+        return response.end();
+      }
+      if (pathname === "/api/chat" && request.method === "PATCH") {
+        uploads += 1;
+        return json(200, { uploadId: `up_${uploads}` });
+      }
+      if (pathname === "/api/products/chat/drafts/new") {
+        if (request.method === "PUT") {
+          const written = JSON.parse(body);
+          if (written.expectedRevision !== (draft?.revision ?? 0)) return json(409, { currentRevision: draft?.revision ?? 0 });
+          draft = { text: written.text, attachmentReferences: written.attachmentReferences, revision: (draft?.revision ?? 0) + 1 };
+        }
+        return json(200, { scopeKey: "new", draft });
+      }
       if (pathname === "/api/chat") {
+        // Sending consumes the draft, as the product does.
+        if (draft) draft = { ...draft, text: "", attachmentReferences: [] };
+        if (body.includes("HANGS")) return;
         if (body.includes("FAILS")) return json(200, { failure: "The file could not be made." });
-        if (body.includes("NOTHING")) return json(200, {});
+        if (body.includes("NOTHING")) return json(200, { refusal: "I cannot read attached files in this chat." });
         return json(200, { artifact: body.includes("BROKEN") ? "broken" : "pdf" });
       }
       if (pathname === "/api/artifacts/pdf") {
@@ -159,10 +196,11 @@ needsBrowser("POST closes again after the turn, so a later page cannot write", a
   try {
     const page = await context.newPage();
     await page.goto(`${origin}/chat`);
-    const before = seen.length;
+    const writes = () => seen.filter((request) => request.method !== "GET").length;
+    const before = writes();
     const outcome = await page.evaluate(() => fetch("/api/chat", { method: "POST", body: "x" }).then(() => "sent", () => "blocked"));
     assert.equal(outcome, "blocked");
-    assert.equal(seen.length, before, "the request never reached the server");
+    assert.equal(writes(), before, "the request never reached the server");
   } finally {
     await context.close();
   }
@@ -173,12 +211,53 @@ needsBrowser("what the model is told when the file failed, never came, or would 
   assert.match(failed.signals, /The file card shows a failure: The file could not be made\./);
   assert.deepEqual(failed.images.map((image) => image.label), ["chat"]);
 
-  const nothing = await generateFile(browser, rules, { id: "generated.xlsx", prompt: "NOTHING" }, walkPlace({ timeoutMs: 800 }));
-  assert.match(nothing.signals, /stopped at the step "wait_for_file"/);
-  assert.match(nothing.signals, /\(timeout\)/);
+  // A declined answer settles at once, with who answered and what it said: no four-minute wait.
+  const startedAt = Date.now();
+  const declined = await generateFile(browser, rules, { id: "generated.xlsx", prompt: "NOTHING" }, walkPlace());
+  assert.ok(Date.now() - startedAt < 30_000);
+  assert.match(declined.signals, /The answer finished without a file card: no file was made\./);
+  assert.match(declined.signals, /coming from: Fixture Model/);
+  assert.match(declined.signals, /I cannot read attached files in this chat\./);
+
+  const hangs = await generateFile(browser, rules, { id: "generated.xlsx", prompt: "HANGS" }, walkPlace({ timeoutMs: 800 }));
+  assert.match(hangs.signals, /stopped at the step "wait_for_answer"/);
+  assert.match(hangs.signals, /\(timeout\)/);
 
   const broken = await generateFile(browser, rules, { id: "generated.pptx", prompt: "BROKEN" }, walkPlace());
   assert.match(broken.signals, /answered with status 404/);
+});
+
+needsBrowser("attached fixtures go in through the account's draft, and the browser writes only the turn", async () => {
+  seen.length = 0;
+  const generation = { id: "generated.attachment-pdf", prompt: "NOTHING merge these into one PDF", attachments: ["chart.png", "receipt.jpg"] };
+  const subject = await generateFile(browser, rules, generation, walkPlace());
+  const writes = seen.filter((request) => request.method !== "GET").map((request) => `${request.method} ${request.pathname}`);
+  assert.deepEqual(writes, [
+    "PUT /api/chat",
+    "PUT /r2/chart.png",
+    "PATCH /api/chat",
+    "PUT /api/chat",
+    "PUT /r2/receipt.jpg",
+    "PATCH /api/chat",
+    "PUT /api/products/chat/drafts/new",
+    "POST /api/chat",
+  ]);
+  for (const upload of seen.filter((request) => request.pathname.startsWith("/r2/"))) {
+    assert.equal(upload.cookie, "", "the session never goes to storage");
+    assert.equal(upload.access, "", "nor does the Access token");
+    assert.ok(upload.bytes > 100, "the fixture's bytes arrived");
+  }
+  assert.match(subject.signals, /What was asked for: NOTHING merge these into one PDF/);
+  assert.match(subject.signals, /Attached to the message: chart\.png \(a bar chart[^;]*; receipt\.jpg \(a café receipt/);
+  assert.match(subject.signals, /no file was made/);
+  assert.equal(rules.allowWrite, null);
+});
+
+needsBrowser("a fixture the walker does not have stops the turn before anything is sent", async () => {
+  seen.length = 0;
+  const subject = await generateFile(browser, rules, { id: "generated.explore", prompt: "x", attachments: ["id-card.jpg"] }, walkPlace());
+  assert.match(subject.signals, /stopped at the step "attach"[^]*unknown fixture id-card\.jpg/);
+  assert.equal(seen.some((request) => request.method !== "GET"), false);
 });
 
 needsBrowser("a session the app does not honour asks the model nothing", async () => {

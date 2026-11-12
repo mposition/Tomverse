@@ -4,6 +4,8 @@ import test from "node:test";
 import { imageFullProfileSchema } from "../lib/modelCatalogCore.ts";
 import {
   RUNTIME_IMAGE_PROVIDERS,
+  RUNTIME_IMAGE_QUALITIES,
+  RUNTIME_IMAGE_SIZES,
   catalogImageDraftHref,
   discoveryDraftRequest,
   isRuntimeImageProvider,
@@ -38,4 +40,21 @@ test("a discovery link round-trips into the catalogue's draft request", () => {
 test("the starting profile for an adapter provider passes the profile schema", () => {
   const parsed = imageFullProfileSchema.safeParse(runtimeImageProfileTemplate("fal", "fal-ai/nano-banana-2.1"));
   assert.equal(parsed.success, true);
+});
+
+test("the add form's name, sizes and qualities shape the starting profile; empty answers keep the defaults", () => {
+  const chosen = runtimeImageProfileTemplate("qwen", "qwen-image-2.0", {
+    name: "  Qwen Image 2.0 ",
+    sizes: ["1024x1024", "1536x1024", "1024x1536"],
+    qualities: ["medium", "high"],
+  });
+  assert.equal(chosen.name, "Qwen Image 2.0");
+  assert.deepEqual(chosen.sizes, ["1024x1024", "1536x1024", "1024x1536"]);
+  assert.deepEqual(chosen.qualities, ["medium", "high"]);
+  assert.equal(imageFullProfileSchema.safeParse(chosen).success, true);
+
+  const defaults = runtimeImageProfileTemplate("qwen", "qwen-image-2.0", { name: " ", sizes: [], qualities: [] });
+  assert.deepEqual(defaults, runtimeImageProfileTemplate("qwen", "qwen-image-2.0"));
+  assert.deepEqual([...RUNTIME_IMAGE_SIZES], imageFullProfileSchema.shape.sizes.element.options);
+  assert.deepEqual([...RUNTIME_IMAGE_QUALITIES], imageFullProfileSchema.shape.qualities.element.options);
 });

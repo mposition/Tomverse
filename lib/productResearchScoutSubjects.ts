@@ -28,16 +28,23 @@ export function scoutSubjectInfo(subject: string): ScoutSubjectInfo {
     // Relative, so the link opens the page on the environment the viewer is on.
     return { kind: "page", page: name, lang: page.lang, path: page.path, href: page.path };
   }
-  const generated = /^generated\.(pdf|docx|xlsx|pptx|image)$/.exec(subject);
+  const generated = /^generated\.(pdf|docx|xlsx|pptx|image|attachment-pdf|explore)$/.exec(subject);
   if (generated) return { kind: "file", format: `generated-${generated[1]}` };
   const file = /^(pdf|docx|xlsx|pptx)\.[a-z]+$/.exec(subject);
   if (file) return { kind: "file", format: file[1] };
   return { kind: "other" };
 }
 
-/** The generations a walker asked for, in the table's order; anything else in its body is ignored. */
-export function requestedScoutGenerations(body: unknown): string[] {
+/**
+ * The generations a walker asked for, in the table's order; anything else in its
+ * body is ignored, and so is a generation whose app switch is off
+ * (docs/policy/product-research-agent.md §14).
+ */
+export function requestedScoutGenerations(body: unknown, env: Readonly<Record<string, string | undefined>> = process.env): string[] {
   const asked = (body as { generations?: unknown } | null)?.generations;
   if (!Array.isArray(asked)) return [];
-  return (SCOUT_GENERATIONS as readonly { id: string }[]).map((generation) => generation.id).filter((id) => asked.includes(id));
+  return (SCOUT_GENERATIONS as readonly { id: string; switchEnv: string | null }[])
+    .filter((generation) => generation.switchEnv === null || Boolean(env[generation.switchEnv]?.trim()))
+    .map((generation) => generation.id)
+    .filter((id) => asked.includes(id));
 }

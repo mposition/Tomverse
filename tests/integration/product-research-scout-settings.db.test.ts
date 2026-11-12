@@ -52,6 +52,18 @@ test("lowering the cap stops the next reservation, though the caller read the ol
   assert.equal(await prisma.productResearchScoutLlmCall.count(), 1);
 });
 
+test("a reservation that must leave calls free is refused when only the last call is left", async () => {
+  await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 2, generationDailyCap: 0 }, noAudit);
+  assert.ok("id" in (await startScoutCall({ subject: "home.en", modelId: "fixture-model" })));
+  assert.deepEqual(
+    await startScoutCall({ subject: "scenario.explore", modelId: "fixture-model", keepFree: 1 }),
+    { refused: "daily_cap_reached" },
+    "the scenario would leave nothing to judge its turn",
+  );
+  assert.ok("id" in (await startScoutCall({ subject: "faq.en", modelId: "fixture-model" })), "the last call still serves a judgement");
+  assert.equal(await prisma.productResearchScoutLlmCall.count(), 2);
+});
+
 test("turning the model off, or choosing another, refuses a reservation for the old one", async () => {
   await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 10, generationDailyCap: 0 }, noAudit);
   await writeScoutSettings({ modelId: null, dailyCallCap: 10, generationDailyCap: 0 }, noAudit);

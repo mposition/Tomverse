@@ -150,7 +150,8 @@ export async function POST(request: Request) {
             query: payload.prompt,
             conversationMode: conversationMemoryMode,
             profileVersionId,
-            plan: (await getUserBillingPlan(userId))?.tier ?? null,
+            // Only a bound profile uses the tier to check its model entitlement.
+            plan: profileVersionId ? (await getUserBillingPlan(userId))?.tier ?? null : null,
         });
 
         // Nothing to bind: issuing a bundle for an empty context would make

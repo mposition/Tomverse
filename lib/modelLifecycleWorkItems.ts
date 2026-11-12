@@ -1798,6 +1798,29 @@ export async function listOpenWorkItems(options?: {
 }
 
 /** How many items are open, for the daily report's summary line. */
+/**
+ * How many decisions the open queue holds: open items grouped into model
+ * families exactly as the discovery tab groups them (a dated snapshot, a moving
+ * alias and a second provider's prefix are one family). The Admin menu badge
+ * shows this, so it matches the list the operator acts on rather than the row
+ * count -- 16 rows were 12 families on 2026-11-12.
+ */
+export async function countOpenWorkItemFamilies(): Promise<number> {
+    const [rows, entries] = await Promise.all([
+        prisma.modelLifecycleWorkItem.findMany({
+            where: { status: { in: [...OPEN_WORK_ITEM_STATUSES] } },
+            select: { apiModel: true },
+        }),
+        prisma.providerModelCatalogEntry.findMany({
+            select: { apiModel: true, metadata: true },
+        }),
+    ]);
+    const decisionIdentity = createModelDecisionIdentityResolver(
+        providerAliasEvidence(entries)
+    );
+    return new Set(rows.map((row) => decisionIdentity(row.apiModel))).size;
+}
+
 export async function countOpenWorkItems(): Promise<number> {
     return prisma.modelLifecycleWorkItem.count({
         where: { status: { in: [...OPEN_WORK_ITEM_STATUSES] } },
