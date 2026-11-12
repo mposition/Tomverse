@@ -16,18 +16,16 @@ const EVIDENCE_NOTICE = "Application-collected web evidence for the question abo
 const DEFAULT_ANSWER_GUIDANCE =
   "Answer the requested facts directly in the user’s language, with supporting URLs. Omit unrequested calculations, time-zone conversions and background. For current conditions label observations with their local time and forecasts with their uncertainty; do not report forecasts as observations. If the evidence suffices, answer now. Search for missing or conflicting requested facts, batching independent queries.";
 const groundedAnswerGuidance = (mode: "lookup" | "full") => {
-  const prefix = "\n\nEnd of quoted evidence. Answer in the user's language and requested format. ";
-  if (mode === "full") return prefix +
-    "For a direct comparison or calculation, give each requested value once, at the requested precision and in its requested unit. Put its direct official link beside it when available. " +
-    "End with just the requested result and stop. Omit finer precision, extra conversions, history and unrequested reasoning. If analysis or a derivation is requested, give it at the requested depth. " +
-    "Separate observations from forecasts with their source time or valid period. Search for missing or conflicting facts and identify unresolved gaps.";
-  return prefix +
-    "When both a local observation and a forecast are relevant, begin with these two lines, translating the labels:\n" +
-    "Observation — station, local date/time and measured conditions. [direct observation link]\n" +
-    "Forecast — place, valid period, predicted conditions and chance. [direct forecast link]\n" +
-    "Use only values the source gives. A forecast cannot establish what happened. With only one kind of evidence, label it accordingly. " +
-    "For other lookups, give the requested facts directly. " +
-    "Link each source once beside its facts, preferably the official page. Search for missing or conflicting facts and identify unresolved gaps. Skip introductions, recaps and unrequested advice.";
+  const format = mode === "full"
+    ? "Give each compared or calculated value once at the requested precision and unit. End with the result. Give requested analysis or derivations in full. " +
+      "Separate observations from forecasts. Cite current official station readings with local time or say they are missing. Label forecast periods. "
+    : "For weather, lead with the applicable lines in translation:\n" +
+      "Observation — official station, local date/time, measured conditions. [direct observation link]\n" +
+      "Forecast — place, valid period, predictions and chance. [direct forecast link]\n" +
+      "Use only sourced values. If the current official reading is missing, say so. Never substitute a forecast, an undated or unconfirmed value, or a station link. Give other facts directly. ";
+  return "\n\nEnd of quoted evidence. Use the user's language and format. " + format +
+    "Answer now if supported. Cite direct official links inline when available. Search only for missing or conflicting facts. Batch independent queries with matching filters in one query array. " +
+    "Follow dependent leads separately. Note remaining gaps.";
 };
 
 function reservedEvidenceTokens(evidence: SearchEvidencePart[]): number {
