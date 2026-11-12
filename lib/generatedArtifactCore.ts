@@ -95,6 +95,8 @@ export const ARTIFACT_LIMITS = {
   // Documents
   /** Blocks in one document. */
   maxDocumentBlocks: 2_000,
+  /** Image blocks in one document, each a picture from the user's own files. */
+  maxDocumentImages: 30,
   /** Items in one list block. */
   maxListItems: 200,
   /** Rows in a document's table block, excluding the header. */
@@ -479,7 +481,69 @@ const blockSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("pageBreak") }).strict(),
 ]);
 
-export type ArtifactDocumentBlock = z.infer<typeof blockSchema>;
+/**
+ * A picture from a file the user attached to this turn, placed in a document.
+ *
+ * Policy: docs/policy/generated-artifacts.md section 16. The model names the
+ * file by its handle and, for a figure on a page, the region that holds it --
+ * it reads that off the page it can see. The application cuts the region out
+ * of the user's own bytes and places it; the model writes no pixels.
+ *
+ * Top-level documents only. An archive entry has no turn files to draw from,
+ * so its blocks are the text-only set above.
+ */
+export const imageBlockSchema = z
+  .object({
+    type: z.literal("image"),
+    attachment: z
+      .string()
+      .regex(/^att_[1-9][0-9]{0,2}$/, "Reference an attached file as att_1, att_2, ...")
+      .describe("The attached image or PDF, by handle: att_1, att_2, ..."),
+    page: z
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe("PDF attachments only: the 1-based page the picture is on. Default 1."),
+    crop: z
+      .object({
+        x: z.number().min(0).max(1),
+        y: z.number().min(0).max(1),
+        width: z.number().min(0.01).max(1),
+        height: z.number().min(0.01).max(1),
+      })
+      .strict()
+      .optional()
+      .describe(
+        "The region holding the picture, as fractions of the image or page measured from its top-left corner. Omit to use all of it."
+      ),
+    caption: z.string().max(ARTIFACT_LIMITS.maxTitleLength).optional(),
+    widthPercent: z
+      .number()
+      .int()
+      .min(10)
+      .max(100)
+      .optional()
+      .describe("How wide to place it, as a percentage of the text width. Default 100, never wider than the picture's own size."),
+  })
+  .strict();
+
+export type ArtifactImageBlock = z.infer<typeof imageBlockSchema>;
+
+const documentBlockSchema = z.union([blockSchema, imageBlockSchema]);
+
+export type ArtifactDocumentBlock = z.infer<typeof documentBlockSchema>;
+
+/** A picture an image block resolved to: baseline JPEG, sRGB, its own size. */
+export type ResolvedDocumentImage = {
+  jpeg: Uint8Array;
+  width: number;
+  height: number;
+};
+
+/** Resolved pictures, by the index of the block that names them. */
+export type ResolvedDocumentImages = ReadonlyMap<number, ResolvedDocumentImage>;
 
 export const documentSpecSchema = z
   .object({
@@ -488,7 +552,7 @@ export const documentSpecSchema = z
     title: z.string().max(ARTIFACT_LIMITS.maxTitleLength).optional(),
     subtitle: z.string().max(ARTIFACT_LIMITS.maxTitleLength).optional(),
     blocks: z
-      .array(blockSchema)
+      .array(documentBlockSchema)
       .min(1)
       .max(ARTIFACT_LIMITS.maxDocumentBlocks),
   })
@@ -832,7 +896,26 @@ export const admitDocumentSpec = (
   if (!parsed.success) return schemaFailure(parsed.error);
   const spec = parsed.data;
 
+  let images = 0;
   for (const block of spec.blocks) {
+    if (block.type === "image") {
+      images += 1;
+      if (images > ARTIFACT_LIMITS.maxDocumentImages) {
+        return {
+          ok: false,
+          code: "SCHEMA_INVALID",
+          detail: `A document may hold at most ${ARTIFACT_LIMITS.maxDocumentImages} images.`,
+        };
+      }
+      if (block.crop && (block.crop.x + block.crop.width > 1.001 || block.crop.y + block.crop.height > 1.001)) {
+        return {
+          ok: false,
+          code: "SCHEMA_INVALID",
+          detail: "An image crop must lie inside the picture: x + width and y + height are at most 1.",
+        };
+      }
+      continue;
+    }
     if (block.type !== "table") continue;
     for (const row of block.rows) {
       if (row.length > block.columns.length) {
@@ -945,6 +1028,9 @@ const documentSpecCharacterCount = (spec: {
               ),
             0
           );
+        break;
+      case "image":
+        characters += block.caption?.length ?? 0;
         break;
       default:
         break;

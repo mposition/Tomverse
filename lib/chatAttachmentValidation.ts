@@ -25,6 +25,7 @@ import {
     type NormalizableImageMediaType,
 } from "@/lib/mediaSecurity";
 import { assertSafeOfficeArchive, parseOfficeSafely } from "@/lib/officeSecurity";
+import { assertSafeIworkPackage } from "@/lib/iworkPackage";
 import {
     extractLegacyOfficeText,
     LegacyOfficeError,
@@ -228,6 +229,19 @@ export async function validateChatAttachmentUpload({
         if (!extracted) throw new ChatAttachmentValidationError("ATTACHMENT_NO_TEXT");
         if (extracted.length > maxExtractedCharacters) {
             throw new ChatAttachmentValidationError("ATTACHMENT_TEXT_TOO_LARGE", 413);
+        }
+        return { bytes: buffer, mediaType: format.mediaType };
+    }
+
+    if (format.category === "iwork") {
+        // Never read, so there is no text to bound: the check is the
+        // package's shape, and the renderer service is the only reader.
+        try {
+            assertSafeIworkPackage(
+                new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+            );
+        } catch {
+            throw new ChatAttachmentValidationError("ATTACHMENT_TYPE_MISMATCH");
         }
         return { bytes: buffer, mediaType: format.mediaType };
     }

@@ -122,8 +122,32 @@ Windows는 `File.type`을 registry의 `HKCR\<확장자>\Content Type`에서 냅�
 ### 2.4 이 범위에서 뺀 것과 근거
 
 - **RAR·7Z·TAR·GZ 등** — 별개 해제 파이프라인이 필요하다.
-- **오디오·비디오, HEIC/HEIF·TIFF·BMP, Pages/Numbers/Keynote, PSD/AI** —
-  별개 제품 결정이다.
+- **오디오·비디오, HEIC/HEIF·TIFF·BMP, Keynote, PSD/AI** —
+  별개 제품 결정이다. Keynote는 따로 근거가 있다: 확장자 `.key`가 개인 키
+  파일의 확장자이기도 해서 거절 목록(§2.3)에 있다. 허용하면 PEM 키가 업로드되어
+  저장된 뒤에야 package 검사가 거절하게 되므로, 바꾸는 일은 자격증명 보호에 대한
+  결정이다.
+
+### 2.5 Apple iWork: Pages와 Numbers
+
+운영자 결정: 2026-11-13. `.pages`(`application/vnd.apple.pages`)와
+`.numbers`(`application/vnd.apple.numbers`)를 받는다. 목적은 **PDF로 바꾸는
+것 하나**다 — 렌더러 서비스(`docs/policy/generated-artifacts.md §15`)가
+LibreOffice로 레이아웃을 잡는다.
+
+- **읽지 않는다.** 이 앱에는 Apple의 레코드를 읽는 파서가 없다. 모델에게는 파일이
+  첨부됐고 내용은 읽을 수 없으며 `convert_files`로 PDF로 만들 수 있다는 한 줄만
+  간다.
+- **검사는 package의 모양이다**(`lib/iworkPackage.ts`): 유효한 ZIP, 항목 5,000개·
+  펼친 크기 512 MB 이하, package 밖을 가리키는 경로 없음, iWork 색인 part
+  (`Index/Document.iwa` 등) 존재. 압축은 풀지 않는다 — 중앙 디렉터리로 충분하다.
+- **렌더러가 꺼져 있으면 업로드 준비 단계에서 거절한다.** 쓸 수 없는 파일을
+  저장해 두었다가 보낼 때 알게 하지 않는다.
+- 게스트와 압축파일 내부 항목은 받지 않는다(렌더러 turn이 없고, 읽지 못하는 항목은
+  이름조차 모델에게 전할 수 없다).
+- 형식 표에 Apple 기기가 보고하는 MIME을 넣었으므로 iPhone·iPad의 파일 선택 창에서
+  iCloud Drive의 Pages·Numbers 파일을 고를 수 있다. iCloud Drive를 서버에서 여는
+  연동은 Apple이 공개 API를 제공하지 않아 만들지 않는다.
 
 ## 3. 업로드 검증은 실제 바이트를 본다
 

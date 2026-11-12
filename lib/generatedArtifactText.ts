@@ -119,6 +119,11 @@ export const renderDocumentMarkdown = (spec: DocumentSpec): string => {
         // a blank line loses the author's intent, so the intent is stated.
         lines.push("<!-- page break -->", "");
         break;
+      case "image":
+        // A text file holds no picture and is never given a link to one; the
+        // place a picture stood is said in words.
+        lines.push(`_[Image${block.caption ? `: ${block.caption}` : ""}]_`, "");
+        break;
     }
   }
 
@@ -196,6 +201,9 @@ export const renderDocumentText = (spec: DocumentSpec): string => {
       case "pageBreak":
         // U+000C is the page break plain text actually has.
         lines.push("\f", "");
+        break;
+      case "image":
+        lines.push(`[Image${block.caption ? `: ${block.caption}` : ""}]`, "");
         break;
     }
   }
