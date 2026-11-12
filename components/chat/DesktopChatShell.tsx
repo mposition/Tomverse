@@ -161,11 +161,6 @@ export type DesktopChatShellProps = {
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
   onPromptRefinerDismiss?: (requestId: string) => boolean;
-  onPromptRefinerExecution?: (input: {
-    promptId: string | null;
-    execution: "applied" | "original";
-    mode: "explicit" | "auto";
-  }) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
@@ -470,7 +465,6 @@ export function DesktopChatShell({
   onPromptRefinerRequest,
   onPromptRefinerDecision,
   onPromptRefinerDismiss,
-  onPromptRefinerExecution,
   onVoiceTranscript,
   identityKey,
   guestPreviewMode = false,
@@ -1454,7 +1448,6 @@ export function DesktopChatShell({
                   onDurableUndispatchedAccepted={onDurableUndispatchedAccepted}
                   onProviderDispatchStarted={onProviderDispatchStarted}
                   onResponseComplete={handleAnalysisResponseComplete}
-                  onPromptRefinerExecution={onPromptRefinerExecution}
                   onTurnError={onTurnError}
                   onFollowupSent={onFollowupSent}
                   onContextBundleStale={onContextBundleStale}

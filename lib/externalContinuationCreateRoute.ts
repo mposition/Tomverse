@@ -13,8 +13,6 @@ import {
     ExternalContinuationDisabledError,
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
-import { autoAvailabilityFor } from "@/lib/autoAvailability";
-import { chatSurfaceAvailable } from "@/lib/autoProductBoundary";
 import { lockErrorResponse } from "@/lib/conversationLock";
 import {
     createExternalContinuation,
@@ -51,21 +49,6 @@ export type ContinuationTarget = {
     externalConversationId: string;
     productKey: ContinuationProductKey;
 };
-
-/**
- * Chat when this account may start a Chat, otherwise Review.
- *
- * The same surface-entry question `POST /api/products/chat/conversations`
- * asks. An account outside the Auto rollout would otherwise get a manual Chat
- * with none of the product's promise; Review is the screen it already has. An
- * unreadable availability reads as not offered, as `ChatWorkspaceShell` does.
- */
-export const defaultContinuationProduct = async (
-    userId: string
-): Promise<ContinuationProductKey> =>
-    (await autoAvailabilityFor(userId).then(chatSurfaceAvailable).catch(() => false))
-        ? "chat"
-        : "review";
 
 export async function respondToContinuationCreate(
     req: Request,

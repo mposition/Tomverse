@@ -114,7 +114,6 @@ import {
   type PromptRefinerProductChatDecision,
   type PromptRefinerProductScope,
 } from "@/lib/promptRefinerProductApiContract";
-import { promptRefinerCopy } from "@/lib/promptRefinerCopy";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
@@ -1232,8 +1231,6 @@ export function ChatPageClient({
     useState<PromptRefinerProductScope | null>(null);
   const [promptRefinerProductSelection, setPromptRefinerProductSelection] =
     useState<"none" | "accepted" | "kept_original">("none");
-  const [promptRefinerSkipAutoScope, setPromptRefinerSkipAutoScope] =
-    useState<string | null>(null);
   const [promptRefinerMountId] = useState(() => crypto.randomUUID());
   const promptRefinerScopeSequenceRef = useRef(0);
   const promptRefinerScopeAbortRef = useRef<AbortController | null>(null);
@@ -3197,21 +3194,6 @@ export function ChatPageClient({
     },
     []
   );
-  const handlePromptRefinerExecution = useCallback((input: {
-    promptId: string | null;
-    execution: "applied" | "original";
-    mode: "explicit" | "auto";
-  }) => {
-    if (input.mode !== "auto" || input.execution !== "applied" ||
-        !input.promptId || promptPayload?.id !== input.promptId ||
-        promptPayload.chatId !== currentChatId || !promptRefinerProductScope) return;
-    const copy = promptRefinerCopy[lang] ?? promptRefinerCopy.en;
-    const skipScope = `${promptRefinerProductScope.scopeId}:${promptRefinerProductScope.epoch}`;
-    showToast(copy.autoApplied, "info", {
-      label: copy.useOriginalNext,
-      onClick: () => setPromptRefinerSkipAutoScope(skipScope),
-    });
-  }, [currentChatId, lang, promptPayload, promptRefinerProductScope, showToast]);
 
   useEffect(() => {
     showToastRef.current = showToast;
@@ -6500,14 +6482,7 @@ export function ChatPageClient({
       mountedSurface === "chat" && !isGuestMode && Boolean(currentChatId) &&
       selectionMode === "auto" && promptRefinerProductRelease.autoEnabled &&
       Boolean(promptRefinerProductScope) && !explicitPromptRefinerDecision;
-    const productScopeToken = promptRefinerProductScope
-      ? `${promptRefinerProductScope.scopeId}:${promptRefinerProductScope.epoch}`
-      : null;
-    const skipAutoForThisTurn =
-      autoProductConversationEligible &&
-      promptRefinerSkipAutoScope === productScopeToken;
-    const requestAutoPrepare =
-      autoProductConversationEligible && !skipAutoForThisTurn;
+    const requestAutoPrepare = autoProductConversationEligible;
     // Product turns retain exact authored bytes. The browser never substitutes
     // the proposed execution text into the Message or durable draft.
     //
@@ -6523,7 +6498,7 @@ export function ChatPageClient({
         : promptRefinerAuthoredPromptForSend({
             rawPrompt: sendInputValue,
             ordinaryPrompt: trimmed,
-            productTurn: requestAutoPrepare || skipAutoForThisTurn,
+            productTurn: requestAutoPrepare,
           });
     if (mountedSurface === "chat" && latestModelSettingsRef.current.models.length !== 1) {
       showToast(t("chat.singleModelRequired"), "info");
@@ -7526,7 +7501,6 @@ export function ChatPageClient({
           ? { imageTurnsByModel: options.imageTurnsByModel }
           : {}),
       });
-      if (skipAutoForThisTurn) setPromptRefinerSkipAutoScope(null);
       if (explicitPromptRefinerDecision) resetPromptRefinerState();
       // The single point where a draft is cleared by sending: the prompt is
       // now on its way, so this conversation's draft is spent. Every earlier
@@ -10647,7 +10621,6 @@ export function ChatPageClient({
           onPromptRefinerRequest={handlePromptRefinerRequest}
           onPromptRefinerDecision={handlePromptRefinerDecision}
           onPromptRefinerDismiss={handlePromptRefinerDismiss}
-          onPromptRefinerExecution={handlePromptRefinerExecution}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
@@ -10830,7 +10803,6 @@ export function ChatPageClient({
           onPromptRefinerRequest={handlePromptRefinerRequest}
           onPromptRefinerDecision={handlePromptRefinerDecision}
           onPromptRefinerDismiss={handlePromptRefinerDismiss}
-          onPromptRefinerExecution={handlePromptRefinerExecution}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}

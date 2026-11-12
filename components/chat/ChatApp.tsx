@@ -132,7 +132,6 @@ import {
 import type { PromptRefinerProductChatDecision } from
   "@/lib/promptRefinerProductApiContract";
 import {
-  parsePromptRefinerExecutionHeaders,
   promptRefinerAllowsAutomaticChatRecovery,
 } from
   "@/components/chat/promptRefinerProductClient";
@@ -403,12 +402,6 @@ type ChatAppProps = {
     responseText: string,
     searchMetadata?: WebSearchExecution | null
   ) => void;
-  /** Content-free observation from a successful Chat response header. */
-  onPromptRefinerExecution?: (input: {
-    promptId: string | null;
-    execution: "applied" | "original";
-    mode: "explicit" | "auto";
-  }) => void;
   /**
    * This panel's turn ended as an error, with the code it ended on.
    *
@@ -503,7 +496,6 @@ function ChatAppComponent({
   onContentStateChange,
   onStatusChange,
   onResponseComplete,
-  onPromptRefinerExecution,
   onTurnError,
   onFollowupSent,
   onBeforeSend,
@@ -2227,18 +2219,6 @@ function ChatAppComponent({
         }
       }
 
-      const promptRefinerObservation = parsePromptRefinerExecutionHeaders(
-        response.headers
-      );
-      if (promptRefinerObservation) {
-        // Display telemetry only. Authorization was already decided and the
-        // held row consumed on the server; these headers cannot cause a send.
-        onPromptRefinerExecution?.({
-          promptId: analyticsPromptId,
-          ...promptRefinerObservation,
-        });
-      }
-
       // Capture the successful dispatch's attribution before a first chunk:
       // an async job, a missing body or an early transport failure must not
       // inherit a model the user selected after this request began.
@@ -2772,7 +2752,6 @@ function ChatAppComponent({
     messages,
     modelId,
     onResponseComplete,
-    onPromptRefinerExecution,
     persistGuestTranscript,
     chatLocationIntentEnabled,
     pollDeepResearchJob,

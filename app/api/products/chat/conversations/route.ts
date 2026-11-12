@@ -4,7 +4,6 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 
 import { autoAvailabilityFor } from "@/lib/autoAvailability";
-import { chatSurfaceAvailable } from "@/lib/autoProductBoundary";
 import { mayStoreSelectionMode } from "@/lib/autoRoutingUi";
 import { CHAT_INITIAL_SELECTION_MODE_HEADER } from "@/lib/chatWorkspaceEntry";
 import { createConversationForProduct } from "@/lib/conversationCreateHandler";
@@ -18,30 +17,10 @@ import { CHAT_PRODUCT_KEY } from "@/lib/conversationProduct";
  * server's own statement of which product it creates, and nothing the client
  * sends can change it.
  *
- * ## Why this route can 404
- *
- * Tomverse Chat is not released. The decision record's joining condition is
- * that Auto readiness and the productKey strict transition both complete
- * before Chat is exposed, and §3 adds that during the limited cohort the
- * entry to Chat is bound rather than merely the Auto toggle hidden -- an
- * account outside the cohort would otherwise get a manual Chat with none of
- * the product's promise, which is the same failure as a toggle that flips and
- * changes nothing.
- *
- * So this endpoint fails closed. The gate reuses the existing availability
- * decision (flag plus cohort, `lib/autoRoutingUi.ts`), which is off by
- * default: `TOMVERSE_AUTO_ROUTER_UI_ENABLED` has to be turned on and the
- * account has to be in the cohort. Nothing here turns either on.
- *
- * 404 rather than 403, and with no reason in the body, because the refusal is
- * internal rollout state -- which bucket, what share, which readiness gate --
- * and the UI contract §2 keeps all of it on the server. A client that could
- * read its own bucket could work out the rollout percentage.
- *
- * The three consumers of §3's shared decision are surface entry (here, via
- * `chatSurfaceAvailable`), `offered` (the conversation detail route) and turn
- * routing (`selectAutoModel`). All three read `lib/autoProductBoundary.ts`, so
- * the screen and the execution cannot disagree.
+ * Every signed-in account may start a Chat (owner decision 2026-11-12). Auto
+ * availability -- flag, cohort, readiness, initial-release authority -- only
+ * decides whether this conversation may start in Auto mode; a refusal there
+ * leaves the account in an ordinary manual-model Chat instead of closing it.
  */
 export async function POST(req: Request) {
   const routeAuth = await resolveChatRouteSession(req);
@@ -51,17 +30,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   }
 
-  // No conversation exists yet, so there is no stored product to read: this
-  // is the surface-entry question, "may this account start a Chat", which §3
-  // keeps separate from "may this account open the Chat it already has".
-  // Merging them locks a user out of their own conversation the moment the
-  // cohort shrinks.
-  const availability = await autoAvailabilityFor(session.user.id);
-  if (!chatSurfaceAvailable(availability)) {
-    return NextResponse.json({ error: "Not found." }, { status: 404 });
-  }
-
-  const initialAutoOwnerId = req.headers.get(CHAT_INITIAL_SELECTION_MODE_HEADER) === "auto" &&
-    mayStoreSelectionMode("auto", availability) ? session.user.id : undefined;
+  // Auto is asked about only when the draft wants to start in Auto. Unknown
+  // availability starts a manual Chat; it never refuses the conversation.
+  const wantsAuto = req.headers.get(CHAT_INITIAL_SELECTION_MODE_HEADER) === "auto";
+  const availability = wantsAuto
+    ? await autoAvailabilityFor(session.user.id).catch(() => null)
+    : null;
+  const initialAutoOwnerId = availability && mayStoreSelectionMode("auto", availability)
+    ? session.user.id : undefined;
   return createConversationForProduct(req, CHAT_PRODUCT_KEY, initialAutoOwnerId);
 }
