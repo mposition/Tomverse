@@ -236,9 +236,9 @@ export async function prepareMemoryDuplicateContext(input: {
             await prisma.$transaction(async (tx) => {
                 await lockAccountMemoryItems(tx, input.userId);
                 for (const { row, vector } of backfill) {
+                    // The statement is part of the condition: a vector is
+                    // never attached to wording it was not computed from.
                     await tx.memoryItem.updateMany({
-                        // The statement is part of the condition: a vector is
-                        // never attached to wording it was not computed from.
                         where: { id: row.id, userId: input.userId, statement: row.statement },
                         data: {
                             embedding: encodeVector(vector),
