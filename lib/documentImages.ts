@@ -14,6 +14,7 @@ import "server-only";
 
 import {
   ARTIFACT_LIMITS,
+  type ArtifactImageBlock,
   type DocumentSpec,
   type ResolvedDocumentImage,
   type ResolvedDocumentImages,
@@ -38,6 +39,66 @@ const describeAttached = (attachments: ReadonlyMap<string, ConversionAttachment>
         .map(([handle, file]) => `${handle} ("${file.name}")`)
         .join(", ")}.`;
 
+/** One picture: upright, cut to the crop, bounded, written as a baseline JPEG. */
+const placePicture = async (
+  block: ArtifactImageBlock,
+  name: string,
+  source: Uint8Array
+): Promise<ResolvedDocumentImage> => {
+  const sharp = (await import("sharp")).default;
+  let oriented: { data: Buffer; info: { width: number; height: number } };
+  try {
+    // Upright first, so the crop fractions mean what the model saw.
+    oriented = await sharp(Buffer.from(source), {
+      limitInputPixels: FILE_CONVERSION_LIMITS.maxImagePixels,
+      failOn: "error",
+    })
+      .autoOrient()
+      .toBuffer({ resolveWithObject: true });
+  } catch (error) {
+    throw new FileConversionError(
+      error instanceof Error && /pixel limit/i.test(error.message)
+        ? "OUTPUT_TOO_LARGE"
+        : "IMAGE_UNREADABLE",
+      `${block.attachment} ("${name}") could not be read as a picture.`
+    );
+  }
+
+  let pipeline = sharp(oriented.data);
+  if (block.crop) {
+    const { width, height } = oriented.info;
+    const left = Math.min(width - 1, Math.floor(block.crop.x * width));
+    const top = Math.min(height - 1, Math.floor(block.crop.y * height));
+    pipeline = pipeline.extract({
+      left,
+      top,
+      width: Math.max(1, Math.min(width - left, Math.round(block.crop.width * width))),
+      height: Math.max(1, Math.min(height - top, Math.round(block.crop.height * height))),
+    });
+  }
+  try {
+    const { data, info } = await pipeline
+      .resize({
+        width: PLACED_IMAGE_MAX_EDGE,
+        height: PLACED_IMAGE_MAX_EDGE,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      // A PDF image object of JPEG is DeviceRGB here: no alpha, three
+      // channels, baseline -- what every reader draws.
+      .flatten({ background: "#ffffff" })
+      .toColourspace("srgb")
+      .jpeg({ quality: 82, progressive: false })
+      .toBuffer({ resolveWithObject: true });
+    return { jpeg: new Uint8Array(data), width: info.width, height: info.height };
+  } catch {
+    throw new FileConversionError(
+      "CONVERSION_FAILED",
+      `The picture from ${block.attachment} ("${name}") could not be prepared. Offer to try again.`
+    );
+  }
+};
+
 /**
  * Every image block of the document, resolved, by block index.
  *
@@ -50,111 +111,64 @@ export const resolveDocumentImages = async (
   attachments: ReadonlyMap<string, ConversionAttachment>
 ): Promise<ResolvedDocumentImages> => {
   const resolved = new Map<number, ResolvedDocumentImage>();
-  // One drawing per page however many figures are cut from it.
-  const pages = new Map<string, Uint8Array>();
   let total = 0;
 
+  // Grouped by the page they come from, and each page drawn once and let go
+  // before the next: a drawn page of a large scan is tens of megabytes, and
+  // thirty of them held together is a server out of memory. The pictures are
+  // still placed in the order the blocks are written -- only the work is
+  // reordered.
+  const groups = new Map<string, Array<[number, ArtifactImageBlock]>>();
   for (const [index, block] of spec.blocks.entries()) {
     if (block.type !== "image") continue;
-    const file = attachments.get(block.attachment);
-    if (!file) {
-      throw new FileConversionError(
-        "SOURCE_MISSING",
-        `There is no file ${block.attachment} on this message. ${describeAttached(attachments)} ` +
-          "A picture can only come from a file attached to the message being answered."
-      );
-    }
+    const key = `${block.attachment}#${block.page ?? 1}`;
+    const group = groups.get(key) ?? [];
+    group.push([index, block]);
+    groups.set(key, group);
+  }
 
-    const kind = conversionSourceKind(file.mediaType);
-    let source: Uint8Array;
-    if (kind === "image") {
-      if (block.page !== undefined && block.page !== 1) {
+  for (const group of groups.values()) {
+    // Drawn on first use and dropped when this group is done.
+    let page: Uint8Array | null = null;
+    for (const [index, block] of group) {
+      const file = attachments.get(block.attachment);
+      if (!file) {
         throw new FileConversionError(
-          "PAGES_INVALID",
-          `${block.attachment} ("${file.name}") is an image, so it has no page ${block.page}.`
+          "SOURCE_MISSING",
+          `There is no file ${block.attachment} on this message. ${describeAttached(attachments)} ` +
+            "A picture can only come from a file attached to the message being answered."
         );
       }
-      source = file.bytes;
-    } else if (kind === "pdf") {
-      const key = `${block.attachment}#${block.page ?? 1}`;
-      let page = pages.get(key);
-      if (!page) {
-        page = await renderAttachmentPdfPage(block.attachment, file, block.page ?? 1, PAGE_DPI);
-        pages.set(key, page);
+      const kind = conversionSourceKind(file.mediaType);
+      let source: Uint8Array;
+      if (kind === "image") {
+        if (block.page !== undefined && block.page !== 1) {
+          throw new FileConversionError(
+            "PAGES_INVALID",
+            `${block.attachment} ("${file.name}") is an image, so it has no page ${block.page}.`
+          );
+        }
+        source = file.bytes;
+      } else if (kind === "pdf") {
+        page ??= await renderAttachmentPdfPage(block.attachment, file, block.page ?? 1, PAGE_DPI);
+        source = page;
+      } else {
+        throw new FileConversionError(
+          "SOURCE_TYPE",
+          `${block.attachment} ("${file.name}") cannot be placed as a picture: it needs an image or a PDF.`
+        );
       }
-      source = page;
-    } else {
-      throw new FileConversionError(
-        "SOURCE_TYPE",
-        `${block.attachment} ("${file.name}") cannot be placed as a picture: it needs an image or a PDF.`
-      );
-    }
 
-    const sharp = (await import("sharp")).default;
-    let oriented: { data: Buffer; info: { width: number; height: number } };
-    try {
-      // Upright first, so the crop fractions mean what the model saw.
-      oriented = await sharp(Buffer.from(source), {
-        limitInputPixels: FILE_CONVERSION_LIMITS.maxImagePixels,
-        failOn: "error",
-      })
-        .autoOrient()
-        .toBuffer({ resolveWithObject: true });
-    } catch (error) {
-      throw new FileConversionError(
-        error instanceof Error && /pixel limit/i.test(error.message)
-          ? "OUTPUT_TOO_LARGE"
-          : "IMAGE_UNREADABLE",
-        `${block.attachment} ("${file.name}") could not be read as a picture.`
-      );
+      const picture = await placePicture(block, file.name, source);
+      total += picture.jpeg.byteLength;
+      if (total > ARTIFACT_LIMITS.maxConvertedOutputBytes) {
+        throw new FileConversionError(
+          "OUTPUT_TOO_LARGE",
+          "The pictures together are over the size a document may be. Offer fewer pictures."
+        );
+      }
+      resolved.set(index, picture);
     }
-
-    let pipeline = sharp(oriented.data);
-    if (block.crop) {
-      const { width, height } = oriented.info;
-      const left = Math.min(width - 1, Math.floor(block.crop.x * width));
-      const top = Math.min(height - 1, Math.floor(block.crop.y * height));
-      pipeline = pipeline.extract({
-        left,
-        top,
-        width: Math.max(1, Math.min(width - left, Math.round(block.crop.width * width))),
-        height: Math.max(1, Math.min(height - top, Math.round(block.crop.height * height))),
-      });
-    }
-    let encoded: { data: Buffer; info: { width: number; height: number } };
-    try {
-      encoded = await pipeline
-        .resize({
-          width: PLACED_IMAGE_MAX_EDGE,
-          height: PLACED_IMAGE_MAX_EDGE,
-          fit: "inside",
-          withoutEnlargement: true,
-        })
-        // A PDF image object of JPEG is DeviceRGB here: no alpha, three
-        // channels, baseline -- what every reader draws.
-        .flatten({ background: "#ffffff" })
-        .toColourspace("srgb")
-        .jpeg({ quality: 82, progressive: false })
-        .toBuffer({ resolveWithObject: true });
-    } catch {
-      throw new FileConversionError(
-        "CONVERSION_FAILED",
-        `The picture from ${block.attachment} ("${file.name}") could not be prepared. Offer to try again.`
-      );
-    }
-
-    total += encoded.data.byteLength;
-    if (total > ARTIFACT_LIMITS.maxConvertedOutputBytes) {
-      throw new FileConversionError(
-        "OUTPUT_TOO_LARGE",
-        "The pictures together are over the size a document may be. Offer fewer pictures."
-      );
-    }
-    resolved.set(index, {
-      jpeg: new Uint8Array(encoded.data),
-      width: encoded.info.width,
-      height: encoded.info.height,
-    });
   }
   return resolved;
 };

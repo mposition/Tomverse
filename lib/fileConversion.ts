@@ -149,13 +149,8 @@ const resolveSources = (
     // An office file into a PDF is laid out by the renderer, an .xlsx
     // included: "this workbook as a PDF" means the sheet as it prints, while
     // a table of its values is what convert_spreadsheet makes.
-    const kind: ConversionSourceKind | null =
-      spec.operation === "to_pdf" && isOfficeRenderable(file.mediaType)
-        ? officeRendering
-          ? "office"
-          : null
-        : conversionSourceKind(file.mediaType);
-    if (spec.operation === "to_pdf" && !officeRendering && isOfficeRenderable(file.mediaType)) {
+    const officeSource = spec.operation === "to_pdf" && isOfficeRenderable(file.mediaType);
+    if (officeSource && !officeRendering) {
       throw new FileConversionError(
         "SOURCE_TYPE",
         `${source.attachment} ("${file.name}") cannot be turned into a PDF with its layout here. ` +
@@ -163,6 +158,9 @@ const resolveSources = (
           "that the layout is rebuilt rather than copied."
       );
     }
+    const kind: ConversionSourceKind | null = officeSource
+      ? "office"
+      : conversionSourceKind(file.mediaType);
     if (!kind || !accepted.includes(kind)) {
       throw new FileConversionError(
         "SOURCE_TYPE",
