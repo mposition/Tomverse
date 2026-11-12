@@ -81,7 +81,13 @@ node make-feed-video.mjs <pack.json> <id> <out-dir>     # 4:5 feed version of th
   shape, with brands from `research-brands.json` and no run of five words from
   an ad. The raw ads are then deleted, so the call that writes copy sees only
   checked notes (docs/policy/marketing-automation.md §2).
-- The job writes words from `features.json` and pictures from
+- The job writes words from `features.json`, which restates the FAQ's feature
+  answers by hand. When a feature claim is added to `lib/marketingClaims.ts`,
+  `tests/marketingHiggsfieldImagePath.test.mjs` fails until it has an entry
+  there, so a new feature reaches the ads (until 2026-11-12 it missed
+  conversation import, a registered claim, and save and share). A feature the
+  FAQ explains without a claim id, such as Smart Adaptive, is still added by
+  hand. Pictures come from
   `library/library.json`: the logo, model marks (owner 2026-11-07) and AI-made
   photos. It can also use real captures from a source pack
   (`job/sources/<asset-id>/pack.json`, on the box only). `examples/` holds the

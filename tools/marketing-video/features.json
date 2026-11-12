@@ -1,16 +1,26 @@
 {
-  "note": "What a card may say about Tomverse: facts only from this file. Model and company names are fine (owner 2026-11-07), and model marks come from library/ or public/model-icons/. Owner 2026-11-08: copy may use price, 'free' and bold wording; 'free' always carries its condition ('Free to try within the included credits'), and the Guard judges every word at submission and refuses what it does not allow. Never promise that an answer is correct. Checked 2026-11-07 against the app and the FAQ (claim.* ids in lib/marketingClaims.ts).",
+  "note": "What a card may say about Tomverse: facts only from this file. Model and company names are fine (owner 2026-11-07), and model marks come from library/ or public/model-icons/. Owner 2026-11-08: copy may use price, 'free' and bold wording; 'free' always carries its condition ('Free to try within the included credits'), and the Guard judges every word at submission and refuses what it does not allow. Never promise that an answer is correct. Each entry restates an FAQ answer (components/marketing/marketingInfoContent.ts, claim.* ids in lib/marketingClaims.ts); tests/marketingHiggsfieldImagePath.test.mjs fails when a feature claim of the FAQ has no entry here. Checked 2026-11-12 against the FAQ and the app copy.",
   "features": [
     {
       "id": "chat",
-      "what": "Chat with leading models in one workspace; pick the model per question.",
+      "what": "Chat with leading models in one workspace: continue a conversation with one model, and pick the model per question.",
       "models": ["GPT 6 Luna", "Claude Sonnet 5.5", "Claude Haiku 5.5", "Gemini Flash"],
       "source": "claim.chat-and-review; model chips in the app"
     },
     {
+      "id": "smart-adaptive",
+      "what": "Smart Adaptive: Tomverse picks a model for each message, weighing the question, the capabilities it needs, cost and quality, and the reply shows which model answered. You can still pick a model yourself.",
+      "source": "FAQ 'Can I choose a model myself with Smart Adaptive?'; lib/autoRoutingCopy.ts"
+    },
+    {
+      "id": "import-continue",
+      "what": "Sign in and bring your past conversations from ChatGPT, Claude or Gemini with their official data export, then continue a conversation in Tomverse. New answers come from the Tomverse model you pick, drawing on the context of your past conversations.",
+      "source": "claim.chat-import-and-continue (gate feature.externalImportAndContinuation); the privacy text names ChatGPT, Claude and Gemini (Google Takeout)"
+    },
+    {
       "id": "review",
-      "what": "Ask one question to three models at once and read the answers side by side.",
-      "source": "claim.review-three-models"
+      "what": "Ask one question to three models at once and read the answers side by side. Easy mode: pick the companies and Tomverse picks a model for each question; Professional mode: pick the exact models.",
+      "source": "claim.review-three-models; claim.review-modes"
     },
     {
       "id": "analysis",
@@ -25,19 +35,24 @@
     },
     {
       "id": "images",
-      "what": "One prompt, images from several image models side by side; keep the one you like.",
+      "what": "Sign in, describe an image once, generate it with one or more image models and compare the results side by side; keep the one you like.",
       "models": ["GPT Image 2", "Nano Banana 2", "Grok Imagine"],
       "source": "claim.chat-image-generation; image model chips in the app"
     },
     {
       "id": "files",
-      "what": "Ask about your files: PDFs, documents and spreadsheets.",
+      "what": "Ask about your files: attach a PDF, a document or a spreadsheet, or pick one from Google Drive after signing in, and ask questions about it.",
       "source": "claim.chat-file-questions"
     },
     {
       "id": "assistants",
-      "what": "Build your own AI assistant: give it a name and instructions, add your files, pick a model, and reuse it.",
+      "what": "Sign in and build your own AI assistant: give it a name and instructions, add your files, pick a model, and start conversations with it again and again. It stays private to your account.",
       "source": "claim.chat-assistants"
+    },
+    {
+      "id": "save-and-share",
+      "what": "Sign in to save your conversations, and share one as a read-only link.",
+      "source": "claim.save-and-share"
     },
     {
       "id": "web-search",

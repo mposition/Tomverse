@@ -232,6 +232,10 @@ export function sortConcepts(answer, { feature, history = [], day, toolDir }) {
       return [...problems, `${at}: texts holds 1-12 entries${Array.isArray(concept.texts) ? ` (it has ${concept.texts.length}; show fewer pieces of text)` : ""}`];
     }
     if (!concept.texts.some((text) => text?.role === "headline")) problems.push(`${at}: texts has a headline`);
+    // A stranger must see what to do and that this is AI (JOB-higgsfield.md "Who the ad is for", owner 2026-11-12).
+    if (concept.texts.filter((text) => text?.role === "cta").length !== 1) problems.push(`${at}: texts has exactly one cta that tells the reader what to do next`);
+    const copy = concept.texts.filter((text) => ["headline", "subhead"].includes(text?.role) && typeof text.text === "string").map((text) => text.text).join(" ");
+    if (copy && !/\bAI\b/u.test(copy) && familiesIn(copy).length === 0) problems.push(`${at}: the headline or the subhead says "AI" or names a model, so a stranger knows this is an AI app`);
     const speakers = [...new Set(quotes.map((entry) => entry.speaker))];
     /** The shape of one text; null when it can be read further. */
     const shapeProblem = (text, where, headlineMax) => {
