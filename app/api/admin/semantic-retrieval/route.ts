@@ -16,6 +16,7 @@ import {
   SEMANTIC_RETRIEVAL_FEATURES,
   resolveSemanticRetrievalConfig,
   semanticRetrievalFeatureConfigured,
+  semanticRetrievalNoticePublished,
   type SemanticRetrievalFeature,
 } from "@/lib/semanticRetrievalCore";
 import { readSemanticRetrievalKey } from "@/lib/semanticRetrievalClient";
@@ -46,12 +47,18 @@ const readState = async () => {
   const switches = await readSemanticRetrievalSwitches();
   const config = resolveSemanticRetrievalConfig();
   const keyConfigured = readSemanticRetrievalKey() !== null;
+  // Before the privacy notice is published nothing may be turned on, so every
+  // switch reads as not configured.
+  const privacyNoticePublished = semanticRetrievalNoticePublished();
   const features = Object.fromEntries(
     SEMANTIC_RETRIEVAL_FEATURES.map((feature) => [
       feature,
       {
         on: switches[feature],
-        configured: keyConfigured && semanticRetrievalFeatureConfigured(feature, config),
+        configured:
+          privacyNoticePublished &&
+          keyConfigured &&
+          semanticRetrievalFeatureConfigured(feature, config),
       },
     ])
   ) as Record<SemanticRetrievalFeature, { on: boolean; configured: boolean }>;
@@ -59,6 +66,7 @@ const readState = async () => {
     features,
     keyConfigured,
     budgetConfigured: config.budget !== null,
+    privacyNoticePublished,
     models: { rerank: config.rerank?.model ?? null, embed: config.embed?.model ?? null },
     problems: config.problems,
   };
@@ -107,7 +115,10 @@ export async function PUT(req: Request) {
     );
     if (unconfigured.length > 0) {
       return NextResponse.json(
-        { error: "A switch cannot be turned on before its environment variables are set." },
+        {
+          error:
+            "A switch cannot be turned on before the privacy notice is published and its environment variables are set.",
+        },
         { status: 409 }
       );
     }

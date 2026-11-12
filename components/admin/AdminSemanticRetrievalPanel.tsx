@@ -26,6 +26,7 @@ type Setting = {
   features: Record<SemanticRetrievalFeature, FeatureState>;
   keyConfigured: boolean;
   budgetConfigured: boolean;
+  privacyNoticePublished: boolean;
   problems: string[];
 };
 type Draft = Record<SemanticRetrievalFeature, boolean>;
@@ -128,6 +129,10 @@ export function AdminSemanticRetrievalPanel({ canWrite = true }: { canWrite?: bo
           <span>{m.budgetLabel}</span>
           <AdminStatusChip tone={setting.budgetConfigured ? "ok" : "idle"}>
             {setting.budgetConfigured ? m.set : m.missing}
+          </AdminStatusChip>
+          <span>{m.privacyNoticeLabel}</span>
+          <AdminStatusChip tone={setting.privacyNoticePublished ? "ok" : "idle"}>
+            {setting.privacyNoticePublished ? m.published : m.notPublished}
           </AdminStatusChip>
         </div>
       ) : null}

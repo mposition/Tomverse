@@ -32,6 +32,9 @@ import {
     rerankRequestBody,
     rerankWorstCaseSearchUnits,
     boundRerankQuery,
+    rerankWorstCaseTokens,
+    rerankWorstCaseMicroUsd,
+    rerankBilledMicroUsd,
     resolveSemanticRetrievalConfig,
     retrievalBudgetPeriods,
     roundSemanticScore,
@@ -89,7 +92,10 @@ test("a model and a positive integer price configure rerank", () => {
         [ENV.rerankModel]: " rerank-v3.5 ",
         [ENV.rerankPrice]: " 2000 ",
     });
-    assert.deepEqual(config.rerank, { model: "rerank-v3.5", microUsdPerSearchUnit: 2000 });
+    assert.deepEqual(config.rerank, {
+        model: "rerank-v3.5",
+        billing: { unit: "search_unit", microUsdPerSearchUnit: 2000 },
+    });
     assert.deepEqual(config.problems, []);
 });
 
@@ -476,7 +482,7 @@ test("a complete rerank answer becomes scores in submitted order", () => {
         ]),
         3
     );
-    assert.deepEqual(parsed, { scores: [0.9, 0.5, 0.1235], searchUnits: 1 });
+    assert.deepEqual(parsed, { scores: [0.9, 0.5, 0.1235], searchUnits: 1, inputTokens: null });
 });
 
 test("a missing billed search_units leaves searchUnits null but the scores valid", () => {
@@ -484,7 +490,7 @@ test("a missing billed search_units leaves searchUnits null but the scores valid
         { results: [{ index: 0, relevance_score: 0.4 }] },
         1
     );
-    assert.deepEqual(parsed, { scores: [0.4], searchUnits: null });
+    assert.deepEqual(parsed, { scores: [0.4], searchUnits: null, inputTokens: null });
 });
 
 test("a negative or non-numeric billed figure is treated as missing", () => {
@@ -920,4 +926,103 @@ test("budget periods roll over at the UTC boundary, not the local one", () => {
     const newYear = retrievalBudgetPeriods(new Date("2027-01-01T00:30:00.000Z"));
     assert.equal(newYear[0].start.toISOString(), "2027-01-01T00:00:00.000Z");
     assert.equal(newYear[1].start.toISOString(), "2027-01-01T00:00:00.000Z");
+});
+
+/* --------------------------------------------------- rerank billing units */
+
+test("a per-token rerank price configures token billing", () => {
+    const config = resolveSemanticRetrievalConfig({
+        [ENV.rerankModel]: "rerank-v5.0-fast",
+        [ENV.rerankTokenPrice]: "50000",
+    });
+    assert.deepEqual(config.rerank, {
+        model: "rerank-v5.0-fast",
+        billing: { unit: "token", microUsdPerMillionTokens: 50000 },
+    });
+    assert.deepEqual(config.problems, []);
+});
+
+test("both rerank prices at once is not a configuration", () => {
+    const config = resolveSemanticRetrievalConfig({
+        [ENV.rerankModel]: "rerank-v5.0-fast",
+        [ENV.rerankPrice]: "2000",
+        [ENV.rerankTokenPrice]: "50000",
+    });
+    assert.equal(config.rerank, null);
+    assert.deepEqual([...config.problems].sort(), [ENV.rerankPrice, ENV.rerankTokenPrice].sort());
+});
+
+test("the token bound counts the question beside every document", () => {
+    const documents = ["a".repeat(100), "b".repeat(2_000)];
+    const cap = SEMANTIC_RETRIEVAL_LIMITS.rerankMaxTokensPerDocument;
+    // 3-byte query: once on its own, once per document, plus each document capped.
+    assert.equal(rerankWorstCaseTokens("abc", documents), 3 + (3 + 100) + (3 + cap));
+    assert.equal(rerankWorstCaseTokens("", []), 1);
+    // The question is bounded the way the request bounds it.
+    const long = "q".repeat(SEMANTIC_RETRIEVAL_LIMITS.maxQueryCharacters);
+    const bounded = SEMANTIC_RETRIEVAL_LIMITS.rerankMaxQueryBytes;
+    assert.equal(rerankWorstCaseTokens(long, ["x"]), bounded + bounded + 1);
+});
+
+test("the reservation is bounded in the configured unit", () => {
+    const documents = Array.from({ length: 100 }, () => "x".repeat(1_024));
+    const perUnit = { unit: "search_unit", microUsdPerSearchUnit: 2000 };
+    const perToken = { unit: "token", microUsdPerMillionTokens: 1_000_000 };
+    assert.equal(
+        rerankWorstCaseMicroUsd(perUnit, "q", documents),
+        rerankCostMicroUsd(rerankWorstCaseSearchUnits("q", documents), 2000)
+    );
+    assert.equal(
+        rerankWorstCaseMicroUsd(perToken, "q", documents),
+        rerankWorstCaseTokens("q", documents)
+    );
+});
+
+test("settlement reads only the billed figure in the configured unit", () => {
+    const perUnit = { unit: "search_unit", microUsdPerSearchUnit: 2000 };
+    const perToken = { unit: "token", microUsdPerMillionTokens: 1_000_000 };
+    assert.equal(rerankBilledMicroUsd(perUnit, { searchUnits: 2, inputTokens: 900 }), 4000);
+    assert.equal(rerankBilledMicroUsd(perToken, { searchUnits: 2, inputTokens: 900 }), 900);
+    // Reported only in the other unit: no figure, so the hold stays.
+    assert.equal(rerankBilledMicroUsd(perUnit, { searchUnits: null, inputTokens: 900 }), null);
+    assert.equal(rerankBilledMicroUsd(perToken, { searchUnits: 2, inputTokens: null }), null);
+});
+
+test("a rerank answer reports both billed units it carries", () => {
+    const parsed = parseRerankResponse(
+        {
+            results: [{ index: 0, relevance_score: 0.5 }],
+            meta: { billed_units: { input_tokens: 812 } },
+        },
+        1
+    );
+    assert.equal(parsed.searchUnits, null);
+    assert.equal(parsed.inputTokens, 812);
+});
+
+/* ------------------------------------------------- privacy notice gate (§16) */
+
+test("no semantic call is allowed before the privacy notice is published", async () => {
+    const { SEMANTIC_RETRIEVAL_PRIVACY_NOTICE_PUBLISHED, semanticRetrievalNoticePublished } =
+        await import("../lib/semanticRetrievalCore.ts");
+    // The shipped value: the notice is not on the page yet.
+    assert.equal(SEMANTIC_RETRIEVAL_PRIVACY_NOTICE_PUBLISHED, false);
+    assert.equal(semanticRetrievalNoticePublished({}), false);
+    assert.equal(semanticRetrievalNoticePublished({}, true), true);
+    // The test stand-in works only in a test process.
+    const standIn = { SEMANTIC_RETRIEVAL_TEST_NOTICE: "published" };
+    assert.equal(semanticRetrievalNoticePublished({ ...standIn, NODE_ENV: "test" }), true);
+    assert.equal(semanticRetrievalNoticePublished({ ...standIn, NODE_ENV: "production" }), false);
+    assert.equal(semanticRetrievalNoticePublished({ ...standIn, NODE_ENV: "development" }), false);
+    assert.equal(semanticRetrievalNoticePublished(standIn), false);
+    assert.equal(semanticRetrievalNoticePublished({ NODE_ENV: "test", SEMANTIC_RETRIEVAL_TEST_NOTICE: "yes" }), false);
+});
+
+test("the notice flag is not part of the /privacy page digest", async () => {
+    const { readFileSync } = await import("node:fs");
+    const verifiers = readFileSync("tests/support/amendedDocumentVerifiers.mjs", "utf8");
+    // Flipping it must be its own owner-approved /privacy change, not a side
+    // effect of a file the digest hashes.
+    assert.ok(!verifiers.includes("semanticRetrievalCore"));
+    assert.ok(!readFileSync("lib/privacyNoticeStatus.ts", "utf8").includes("SEMANTIC_RETRIEVAL"));
 });

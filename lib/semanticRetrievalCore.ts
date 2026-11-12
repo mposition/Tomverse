@@ -28,6 +28,36 @@ import type { SemanticStepsUsed } from "@/lib/chatContextBundleCore";
 
 export const SEMANTIC_RETRIEVAL_PROVIDER = "cohere";
 
+/**
+ * Whether the privacy policy publishes the semantic search notice: what is sent
+ * to Cohere, to which entity and country, when, for what, how long it is kept,
+ * and how to refuse (import/memory policy §16, PIPA art. 28-8(2)).
+ *
+ * False until that notice is on the live page. While it is false no semantic
+ * call is made, whatever the switches and the environment say, and Admin
+ * refuses to turn a switch on -- the comment monitor's precedent
+ * (lib/privacyNoticeStatus.ts), where a feature that sends personal data out
+ * does not run before its notice exists.
+ *
+ * Deliberately not in lib/privacyNoticeStatus.ts: that file is part of the
+ * /privacy page digest (tests/support/amendedDocumentVerifiers.mjs), and this
+ * flag must be able to sit at false without moving an approved page version.
+ * It is set to true in the change that publishes the notice, which is an owner
+ * approval of a new /privacy version.
+ */
+export const SEMANTIC_RETRIEVAL_PRIVACY_NOTICE_PUBLISHED = false as boolean;
+
+/**
+ * The notice flag as the runtime reads it. A test process (NODE_ENV "test")
+ * may stand in a published notice so the database suites can exercise the
+ * calls; nothing else can, and a production process never runs as "test".
+ */
+export const semanticRetrievalNoticePublished = (
+    env: Record<string, string | undefined> = process.env,
+    published: boolean = SEMANTIC_RETRIEVAL_PRIVACY_NOTICE_PUBLISHED
+): boolean =>
+    published || (env.NODE_ENV === "test" && env.SEMANTIC_RETRIEVAL_TEST_NOTICE === "published");
+
 /** The switches an operator can turn on. All are off without a stored "on". */
 export const SEMANTIC_RETRIEVAL_FEATURES = [
     "knowledgeRerank",
@@ -100,6 +130,7 @@ export const SEMANTIC_RETRIEVAL_ENV = {
     apiKey: "COHERE_API_KEY",
     rerankModel: "COHERE_RERANK_MODEL",
     rerankPrice: "COHERE_RERANK_MICROUSD_PER_SEARCH_UNIT",
+    rerankTokenPrice: "COHERE_RERANK_MICROUSD_PER_MILLION_TOKENS",
     embedModel: "COHERE_EMBED_MODEL",
     embedDimension: "COHERE_EMBED_DIMENSION",
     embedTextPrice: "COHERE_EMBED_MICROUSD_PER_MILLION_TEXT_TOKENS",
@@ -108,8 +139,18 @@ export const SEMANTIC_RETRIEVAL_ENV = {
     budgetMonth: "RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_MONTH",
 } as const;
 
+/**
+ * How the configured rerank model is billed. Older models bill per search
+ * unit; newer ones may bill per token. The operator sets exactly one price,
+ * and that choice is the billing unit: the reservation is bounded in it, and
+ * settlement reads only the billed figure in that unit.
+ */
+export type RerankBilling =
+    | { unit: "search_unit"; microUsdPerSearchUnit: number }
+    | { unit: "token"; microUsdPerMillionTokens: number };
+
 export type SemanticRetrievalConfig = {
-    rerank: { model: string; microUsdPerSearchUnit: number } | null;
+    rerank: { model: string; billing: RerankBilling } | null;
     embed: {
         model: string;
         /** Null leaves the provider's default dimension. */
@@ -168,6 +209,21 @@ export const resolveSemanticRetrievalConfig = (
 
     const rerankModel = readModel(env, SEMANTIC_RETRIEVAL_ENV.rerankModel, problems);
     const rerankPrice = readPositiveInteger(env, SEMANTIC_RETRIEVAL_ENV.rerankPrice, problems);
+    const rerankTokenPrice = readPositiveInteger(
+        env,
+        SEMANTIC_RETRIEVAL_ENV.rerankTokenPrice,
+        problems
+    );
+    // Both prices set is not a configuration: nothing says which one the
+    // invoice uses, so neither is trusted.
+    let rerankBilling: RerankBilling | null = null;
+    if (rerankPrice !== null && rerankTokenPrice !== null) {
+        problems.push(SEMANTIC_RETRIEVAL_ENV.rerankPrice, SEMANTIC_RETRIEVAL_ENV.rerankTokenPrice);
+    } else if (rerankPrice !== null) {
+        rerankBilling = { unit: "search_unit", microUsdPerSearchUnit: rerankPrice };
+    } else if (rerankTokenPrice !== null) {
+        rerankBilling = { unit: "token", microUsdPerMillionTokens: rerankTokenPrice };
+    }
 
     const embedModel = readModel(env, SEMANTIC_RETRIEVAL_ENV.embedModel, problems);
     const embedDimension = readPositiveInteger(env, SEMANTIC_RETRIEVAL_ENV.embedDimension, problems);
@@ -188,10 +244,7 @@ export const resolveSemanticRetrievalConfig = (
     }
 
     return {
-        rerank:
-            rerankModel && rerankPrice
-                ? { model: rerankModel, microUsdPerSearchUnit: rerankPrice }
-                : null,
+        rerank: rerankModel && rerankBilling ? { model: rerankModel, billing: rerankBilling } : null,
         embed:
             embedModel && embedTextPrice && embedDimensionUsable
                 ? {
@@ -345,6 +398,53 @@ export const rerankWorstCaseSearchUnits = (
 export const rerankCostMicroUsd = (searchUnits: number, microUsdPerSearchUnit: number) =>
     Math.ceil(searchUnits * microUsdPerSearchUnit);
 
+/**
+ * The most tokens one rerank request can be billed, for a model billed per
+ * token. Every document is counted with the whole question beside it, as if
+ * the question were billed once per document: an over-count when it is billed
+ * once, and the point of an upper bound when nothing published says which.
+ */
+export const rerankWorstCaseTokens = (query: string, documents: readonly string[]): number => {
+    const queryTokens = utf8Bytes(boundRerankQuery(query));
+    let tokens = queryTokens;
+    for (const document of documents) {
+        tokens +=
+            queryTokens +
+            Math.min(utf8Bytes(document), SEMANTIC_RETRIEVAL_LIMITS.rerankMaxTokensPerDocument);
+    }
+    return Math.max(1, tokens);
+};
+
+/** The worst case of one rerank request in micro-USD, in the configured unit. */
+export const rerankWorstCaseMicroUsd = (
+    billing: RerankBilling,
+    query: string,
+    documents: readonly string[]
+): number =>
+    billing.unit === "search_unit"
+        ? rerankCostMicroUsd(rerankWorstCaseSearchUnits(query, documents), billing.microUsdPerSearchUnit)
+        : embedCostMicroUsd(rerankWorstCaseTokens(query, documents), billing.microUsdPerMillionTokens);
+
+/**
+ * What a rerank response says it billed, in the configured unit, or null when
+ * it reports nothing in that unit. Null keeps the whole hold: a figure in
+ * another unit is a model whose billing the configuration does not describe,
+ * and guessing a conversion would settle to a number nobody chose.
+ */
+export const rerankBilledMicroUsd = (
+    billing: RerankBilling,
+    billed: { searchUnits: number | null; inputTokens: number | null }
+): number | null => {
+    if (billing.unit === "search_unit") {
+        return billed.searchUnits === null
+            ? null
+            : rerankCostMicroUsd(billed.searchUnits, billing.microUsdPerSearchUnit);
+    }
+    return billed.inputTokens === null
+        ? null
+        : embedCostMicroUsd(billed.inputTokens, billing.microUsdPerMillionTokens);
+};
+
 /** A token is at least one byte, so bytes bound the tokens of any text. */
 export const embedTextWorstCaseTokens = (texts: readonly string[]) =>
     texts.reduce((total, text) => total + Math.max(1, utf8Bytes(text)), 0);
@@ -417,8 +517,10 @@ export const roundSemanticScore = (score: number) =>
 export type ParsedRerank = {
     /** One score per submitted document index; rounded, in [0, 1]. */
     scores: number[];
-    /** Null when the provider did not say what it billed. */
+    /** Null when the provider did not say what it billed in search units. */
     searchUnits: number | null;
+    /** Null when the provider did not say what it billed in tokens. */
+    inputTokens: number | null;
 };
 
 /**
@@ -444,7 +546,11 @@ export const parseRerankResponse = (body: unknown, documentCount: number): Parse
         if (typeof score !== "number" || !Number.isFinite(score)) return null;
         scores[index] = roundSemanticScore(score);
     }
-    return { scores, searchUnits: billedUnit(record, "search_units") };
+    return {
+        scores,
+        searchUnits: billedUnit(record, "search_units"),
+        inputTokens: billedUnit(record, "input_tokens"),
+    };
 };
 
 export type ParsedEmbed = {

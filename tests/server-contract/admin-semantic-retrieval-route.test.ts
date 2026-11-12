@@ -47,9 +47,11 @@ const reset = (changes: Partial<World> = {}) => {
 reset();
 
 const ENV_NAMES = [
+  "SEMANTIC_RETRIEVAL_TEST_NOTICE",
   "COHERE_API_KEY",
   "COHERE_RERANK_MODEL",
   "COHERE_RERANK_MICROUSD_PER_SEARCH_UNIT",
+  "COHERE_RERANK_MICROUSD_PER_MILLION_TOKENS",
   "COHERE_EMBED_MODEL",
   "COHERE_EMBED_DIMENSION",
   "COHERE_EMBED_MICROUSD_PER_MILLION_TEXT_TOKENS",
@@ -58,8 +60,12 @@ const ENV_NAMES = [
   "RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_MONTH",
 ];
 /** Rerank is fully configured; embeddings are not. */
+// The published-notice stand-in is read only in a test process.
+Object.assign(process.env, { NODE_ENV: "test" });
+
 const rerankOnlyEnv = () => {
   for (const name of ENV_NAMES) delete process.env[name];
+  process.env.SEMANTIC_RETRIEVAL_TEST_NOTICE = "published";
   process.env.COHERE_API_KEY = SECRET_KEY;
   process.env.COHERE_RERANK_MODEL = "rerank-v3.5";
   process.env.COHERE_RERANK_MICROUSD_PER_SEARCH_UNIT = "2000";
@@ -267,4 +273,24 @@ test("a body outside the strict shape never reaches the store", async () => {
     assert.equal(answer.status, 400, JSON.stringify(body));
     assert.deepEqual(world.updates, [], JSON.stringify(body));
   }
+});
+
+test("before the privacy notice is published nothing reads as configured and nothing turns on", async () => {
+  const { GET, PUT } = await loadRoute();
+  rerankOnlyEnv();
+  delete process.env.SEMANTIC_RETRIEVAL_TEST_NOTICE;
+  reset();
+
+  const body = await (await GET(get())).json();
+  assert.equal(body.privacyNoticePublished, false);
+  for (const state of Object.values(body.features) as Array<{ configured: boolean }>) {
+    assert.equal(state.configured, false);
+  }
+  assert.equal((await PUT(put({ knowledgeRerank: true }))).status, 409);
+  assert.deepEqual(world.updates, []);
+
+  // Turning a switch off stays possible: an operator can always stop the calls.
+  reset({ switches: { ...world.switches, memoryRerank: true } });
+  assert.equal((await PUT(put({ memoryRerank: false }))).status, 200);
+  assert.deepEqual(world.updates, [{ feature: "memoryRerank", on: false }]);
 });

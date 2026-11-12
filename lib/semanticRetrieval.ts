@@ -16,11 +16,12 @@ import {
     encodeVector,
     parseSemanticCacheValue,
     queryEmbeddingCacheKey,
+    rerankBilledMicroUsd,
     rerankCacheKey,
-    rerankCostMicroUsd,
-    rerankWorstCaseSearchUnits,
+    rerankWorstCaseMicroUsd,
     resolveSemanticRetrievalConfig,
     retrievalBudgetPeriods,
+    semanticRetrievalNoticePublished,
     semanticRetrievalFeatureConfigured,
     type SemanticCacheValue,
     type SemanticCallMode,
@@ -53,6 +54,8 @@ type ReadyFeature = { config: SemanticRetrievalConfig; budget: { day: number; mo
 export const semanticFeatureReady = async (
     feature: SemanticRetrievalFeature
 ): Promise<ReadyFeature | null> => {
+    // No notice, no call: the data must not leave before the policy says it does.
+    if (!semanticRetrievalNoticePublished()) return null;
     const config = resolveSemanticRetrievalConfig();
     if (!semanticRetrievalFeatureConfigured(feature, config) || !config.budget) return null;
     if (!readSemanticRetrievalKey()) return null;
@@ -259,7 +262,7 @@ export async function rerankForRetrieval(input: {
 
     const ready = await semanticFeatureReady(input.feature);
     if (!ready?.config.rerank) return null;
-    const { model, microUsdPerSearchUnit } = ready.config.rerank;
+    const { model, billing } = ready.config.rerank;
 
     const key = rerankCacheKey({ feature: input.feature, userId: input.userId, model, query, documents });
     const cached = await readCache(key);
@@ -277,10 +280,7 @@ export async function rerankForRetrieval(input: {
     const startedAt = Date.now();
     const reservedAt = input.now ?? new Date();
     const texts = documents.map((document) => document.text);
-    const worstCase = rerankCostMicroUsd(
-        rerankWorstCaseSearchUnits(query, texts),
-        microUsdPerSearchUnit
-    );
+    const worstCase = rerankWorstCaseMicroUsd(billing, query, texts);
     const finish = async (value: SemanticCacheValue, fields: Record<string, unknown>) => {
         const stored = await writeCache(key, input.userId, value);
         log({
@@ -304,8 +304,20 @@ export async function rerankForRetrieval(input: {
         if (!result.sent) await settleRetrievalCost(-worstCase, reservedAt);
         return finish({ kind: "failed" }, { outcome: result.failure });
     }
-    if (result.value.searchUnits !== null) {
-        const billed = rerankCostMicroUsd(result.value.searchUnits, microUsdPerSearchUnit);
+    const billed = rerankBilledMicroUsd(billing, result.value);
+    if (billed === null) {
+        // Nothing reported in the configured unit: the whole hold stays, and
+        // the operator learns the configuration may not match the invoice.
+        console.error(
+            JSON.stringify({
+                event: "semantic_retrieval_billing_unit_missing",
+                feature: input.feature,
+                configured: billing.unit,
+                searchUnits: result.value.searchUnits,
+                inputTokens: result.value.inputTokens,
+            })
+        );
+    } else {
         if (billed > worstCase) {
             // The bound is meant to make this impossible. Recorded rather than
             // hidden, and the bucket still learns the true figure below.
@@ -325,7 +337,11 @@ export async function rerankForRetrieval(input: {
             kind: "rerank",
             scores: documents.map((document, index) => [document.id, result.value.scores[index]]),
         },
-        { outcome: "ranked", searchUnits: result.value.searchUnits }
+        {
+            outcome: "ranked",
+            searchUnits: result.value.searchUnits,
+            inputTokens: result.value.inputTokens,
+        }
     );
 }
 

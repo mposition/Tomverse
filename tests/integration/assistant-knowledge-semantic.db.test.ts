@@ -767,3 +767,49 @@ test("a long question reserves more, and a budget sized for a short one refuses 
     assert.equal(provider.state.calls.length, 1);
     assert.deepEqual(await bucketCounts(), []);
 });
+
+/* -------------------------------------------- billing unit and the notice */
+
+test("a per-token rerank price settles to the tokens the answer reports", async () => {
+    const { user, fileIds } = await seedTwoFiles(WINDOW_DOC, GIFT_DOC);
+    await turnOn("knowledgeRerank");
+    delete process.env.COHERE_RERANK_MICROUSD_PER_SEARCH_UNIT;
+    provider.setEnv("COHERE_RERANK_MICROUSD_PER_MILLION_TOKENS", "1000000");
+    provider.state.rerankBilled = { input_tokens: 345 };
+
+    const selection = await retrieveKnowledgeContext({ userId: user.id, fileIds, query: GIFT_QUESTION });
+
+    assert.equal(selection.semanticSteps?.rerank, true);
+    // One micro-USD per token at this price.
+    assert.deepEqual(await bucketCounts(), [
+        ["retrieval-cost-day", 345],
+        ["retrieval-cost-month", 345],
+    ]);
+});
+
+test("an answer billed in a unit the configuration does not price keeps the whole hold", async () => {
+    const { user, fileIds } = await seedTwoFiles(WINDOW_DOC, GIFT_DOC);
+    await turnOn("knowledgeRerank");
+    // Priced per search unit, billed per token: no conversion is guessed.
+    provider.state.rerankBilled = { input_tokens: 345 };
+
+    await retrieveKnowledgeContext({ userId: user.id, fileIds, query: GIFT_QUESTION });
+
+    const held = await bucketCounts();
+    assert.equal(held.length, 2);
+    assert.ok(held.every(([, count]) => count >= 2000), "the worst case is still held");
+});
+
+test("without a published privacy notice nothing is sent, whatever is configured", async () => {
+    const { user, fileIds } = await seedTwoFiles(RETURNS_DOC, SHIPPING_DOC);
+    await turnOn("knowledgeEmbed");
+    await turnOn("knowledgeRerank");
+    delete process.env.SEMANTIC_RETRIEVAL_TEST_NOTICE;
+
+    assert.deepEqual(await embedKnowledgeChunks(), { considered: 0, embedded: 0 });
+    const selection = await retrieveKnowledgeContext({ userId: user.id, fileIds, query: REFUND_QUESTION });
+
+    assert.equal(provider.state.calls.length, 0);
+    assert.equal(selection.retrievalVersion, 1);
+    assert.deepEqual(await bucketCounts(), []);
+});

@@ -34,6 +34,8 @@ export const TEST_RETRIEVAL_ENV = {
     COHERE_EMBED_MICROUSD_PER_MILLION_IMAGE_TOKENS: "200000",
     RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_DAY: "5000000",
     RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_MONTH: "50000000",
+    // Stands in for the published privacy notice; read only when NODE_ENV is "test".
+    SEMANTIC_RETRIEVAL_TEST_NOTICE: "published",
 } as const;
 
 /** The label a vector from this provider is stored under. */
@@ -54,6 +56,8 @@ export const installTestRetrievalProvider = () => {
         /** When true every request answers 500. */
         failing: false,
         rerankScore: ((): number => 0.5) as (query: string, document: string) => number,
+        /** What a rerank answer reports it billed. */
+        rerankBilled: { search_units: 1 } as Record<string, number>,
     };
 
     globalThis.fetch = (async (input: unknown, init?: { body?: unknown }) => {
@@ -70,7 +74,7 @@ export const installTestRetrievalProvider = () => {
                     index,
                     relevance_score: state.rerankScore(String(body.query), document),
                 })),
-                meta: { billed_units: { search_units: 1 } },
+                meta: { billed_units: state.rerankBilled },
             });
         }
         const inputs = Array.isArray(body.texts)
@@ -92,6 +96,8 @@ export const installTestRetrievalProvider = () => {
             state.calls.length = 0;
             state.failing = false;
             state.rerankScore = () => 0.5;
+            state.rerankBilled = { search_units: 1 };
+            delete process.env.COHERE_RERANK_MICROUSD_PER_MILLION_TOKENS;
             for (const [name, value] of Object.entries(TEST_RETRIEVAL_ENV)) {
                 process.env[name] = value;
             }
