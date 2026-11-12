@@ -24,8 +24,7 @@
  * HWP 3.x (Hangul 97), which predates both containers, is refused.
  */
 
-import { Inflate, unzipSync } from "fflate";
-
+import { inflateRawBounded, visitZipEntries } from "@/lib/boundedInflate";
 import { LegacyOfficeError, type LegacyParseBudget } from "@/lib/legacyOffice/budget";
 import { openCompoundFile, readCompoundStream } from "@/lib/legacyOffice/cfbf";
 
@@ -48,32 +47,21 @@ const HWPTAG_PARA_TEXT = 0x10 + 51;
 const MAX_SECTIONS = 512;
 
 /**
- * Inflates raw DEFLATE against the byte budget, chunk by chunk, so a section
- * that expands without end is refused part-way rather than after it filled
- * memory.
+ * Inflates raw DEFLATE against the byte budget, a few kilobytes of input at a
+ * time (lib/boundedInflate.ts), so a section that expands without end is
+ * refused part-way -- after at most one step's output, never after the whole
+ * of it was allocated.
  */
 const inflateBounded = (data: Uint8Array, budget: LegacyParseBudget): Uint8Array => {
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  const inflater = new Inflate((chunk) => {
-    budget.tick();
-    budget.claimBytes(chunk.length);
-    chunks.push(chunk);
-    total += chunk.length;
-  });
   try {
-    inflater.push(data, true);
+    return inflateRawBounded(data, (chunk) => {
+      budget.tick();
+      budget.claimBytes(chunk.length);
+    });
   } catch (error) {
     if (error instanceof LegacyOfficeError) throw error;
     throw new LegacyOfficeError("LEGACY_OFFICE_CORRUPT");
   }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return out;
 };
 
 /**
@@ -179,27 +167,43 @@ const decodeXmlText = (value: string) =>
 const SECTION_PART = /^Contents\/section(\d+)\.xml$/i;
 
 export function extractHwpxText(bytes: Uint8Array, budget: LegacyParseBudget): string {
-  const wanted: string[] = [];
+  const pieces = new Map<string, Uint8Array[]>();
   let entries = 0;
-  let parts: Record<string, Uint8Array>;
   try {
-    parts = unzipSync(bytes, {
-      filter: (file) => {
+    // Only section parts are inflated, and each piece of output is charged
+    // to the budget as it is produced: the sizes a ZIP declares are its own
+    // claims, and a section that says 1 KB may not be.
+    visitZipEntries(bytes, {
+      entry: () => {
         budget.tick();
         entries += 1;
         if (entries > 10_000) throw new LegacyOfficeError("LEGACY_OFFICE_TOO_LARGE");
-        if (!SECTION_PART.test(file.name)) return false;
-        // Claimed before inflating, from the size the directory states.
-        budget.claimBytes(file.originalSize);
-        wanted.push(file.name);
-        return true;
+      },
+      accept: (name) => SECTION_PART.test(name),
+      data: (name, chunk) => {
+        budget.tick();
+        budget.claimBytes(chunk.length);
+        const list = pieces.get(name) ?? [];
+        list.push(chunk);
+        pieces.set(name, list);
       },
     });
   } catch (error) {
     if (error instanceof LegacyOfficeError) throw error;
     throw new LegacyOfficeError("LEGACY_OFFICE_CORRUPT");
   }
+  const wanted = [...pieces.keys()];
   if (wanted.length === 0) throw new LegacyOfficeError("LEGACY_OFFICE_CORRUPT");
+  const parts: Record<string, Uint8Array> = {};
+  for (const [name, list] of pieces) {
+    const joined = new Uint8Array(list.reduce((sum, chunk) => sum + chunk.length, 0));
+    let offset = 0;
+    for (const chunk of list) {
+      joined.set(chunk, offset);
+      offset += chunk.length;
+    }
+    parts[name] = joined;
+  }
 
   const order = (name: string) => Number(SECTION_PART.exec(name)?.[1] ?? 0);
   const decoder = new TextDecoder("utf-8");
@@ -239,7 +243,12 @@ export function extractHwpxText(bytes: Uint8Array, budget: LegacyParseBudget): s
         lastWasClose = true;
       }
     }
-    if (current) paragraphs.push(current);
+    // A section that ends without closing its last paragraph still has its
+    // text charged: the ceiling holds whatever the markup does.
+    if (current) {
+      budget.claimCharacters(current.length + 1);
+      paragraphs.push(current);
+    }
   }
   return paragraphs.join("\n");
 }

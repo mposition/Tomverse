@@ -6,18 +6,24 @@
  *
  * An iWork file is a ZIP of Apple's own binary records. This application does
  * not read those records -- nothing here could, and the renderer service lays
- * the file out instead -- so the check is only what keeps a ZIP from being a
- * weapon on its way there: a bounded entry count and expanded size, no path
- * that leaves the package, and the index part every iWork document has.
- * Nothing is decompressed: the central directory says all of it.
+ * the file out instead -- so the check is what keeps a ZIP from being a weapon
+ * on its way there: a bounded entry count, no path that leaves the package,
+ * the index part every iWork document has, and a ceiling on what it really
+ * expands to.
+ *
+ * "Really" is the point. A ZIP's sizes are the file's own claims, so every
+ * entry is inflated here a few kilobytes of input at a time
+ * (lib/boundedInflate.ts) and the output -- counted, then dropped -- is what
+ * is measured. A package that expands past the ceiling is refused part-way,
+ * before it is stored or handed to the renderer.
  */
 
-import { unzipSync } from "fflate";
+import { BoundedInflateError, visitZipEntries } from "@/lib/boundedInflate";
 
 export const IWORK_PACKAGE_LIMITS = {
   maxEntries: 5_000,
-  /** The expanded size of every entry together, as the directory states it. */
-  maxExpandedBytes: 512 * 1024 * 1024,
+  /** Bytes every entry together actually inflates to. */
+  maxExpandedBytes: 200 * 1024 * 1024,
 } as const;
 
 export class IworkPackageError extends Error {
@@ -38,17 +44,12 @@ export const assertSafeIworkPackage = (bytes: Uint8Array): void => {
   let expanded = 0;
   let indexed = false;
   try {
-    unzipSync(bytes, {
-      filter: (file) => {
+    visitZipEntries(bytes, {
+      entry: (name) => {
         entries += 1;
-        expanded += file.originalSize;
         if (entries > IWORK_PACKAGE_LIMITS.maxEntries) {
           throw new IworkPackageError("Too many entries.");
         }
-        if (expanded > IWORK_PACKAGE_LIMITS.maxExpandedBytes) {
-          throw new IworkPackageError("Expands too far.");
-        }
-        const name = file.name;
         if (
           name.startsWith("/") ||
           name.includes("\\") ||
@@ -57,13 +58,21 @@ export const assertSafeIworkPackage = (bytes: Uint8Array): void => {
           throw new IworkPackageError("An entry leaves the package.");
         }
         if (INDEX_PARTS.test(name)) indexed = true;
-        // Read nothing: the directory has already said what is needed.
-        return false;
+      },
+      accept: () => true,
+      data: (_name, chunk) => {
+        expanded += chunk.length;
+        if (expanded > IWORK_PACKAGE_LIMITS.maxExpandedBytes) {
+          throw new IworkPackageError("Expands too far.");
+        }
       },
     });
   } catch (error) {
     if (error instanceof IworkPackageError) throw error;
-    throw new IworkPackageError("Not a readable ZIP package.");
+    if (error instanceof BoundedInflateError) {
+      throw new IworkPackageError("Not a readable ZIP package.");
+    }
+    throw error;
   }
   if (!indexed) throw new IworkPackageError("Not an iWork document.");
 };

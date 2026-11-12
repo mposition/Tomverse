@@ -96,7 +96,7 @@ const KIND_NOUN: Record<ConversionSourceKind, string> = {
   image: "an image (png, jpg, webp, gif)",
   pdf: "a PDF",
   spreadsheet: "a spreadsheet (.xlsx or .csv)",
-  office: "a Word, PowerPoint or Excel file",
+  office: "an office document (Word, PowerPoint, Excel, HWP, ODF, Pages, Numbers)",
 };
 
 /**

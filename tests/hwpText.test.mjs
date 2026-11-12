@@ -220,3 +220,35 @@ test("HWP and HWPX attach like the other legacy formats, guests included, and th
     (error) => error.code === "ATTACHMENT_ENCRYPTED"
   );
 });
+
+/* ------------------------------------------------------------------------ */
+/* Found by the independent review: what a hostile file can make us do       */
+/* ------------------------------------------------------------------------ */
+
+test("a compressed HWP section that expands without end is stopped part-way", () => {
+  // 64 MB of zeros, about 64 KB compressed: past the 20 MB byte budget.
+  const bomb = deflateSync(new Uint8Array(64 * 1024 * 1024), { level: 9 });
+  const bytes = buildCompoundFile([
+    { name: "FileHeader", data: fileHeader(1) },
+    { name: "Section0", data: bomb },
+  ]);
+  const started = Date.now();
+  assert.throws(() => readText(bytes, "hwp"), (error) => error.code === "LEGACY_OFFICE_TOO_LARGE");
+  assert.ok(Date.now() - started < 10_000);
+});
+
+test("an HWPX section that expands without end is stopped part-way, whatever it declares", () => {
+  const bytes = zipSync({
+    mimetype: encoder.encode("application/hwp+zip"),
+    "Contents/section0.xml": new Uint8Array(64 * 1024 * 1024),
+  });
+  assert.throws(() => readText(bytes, "hwpx"), (error) => error.code === "LEGACY_OFFICE_TOO_LARGE");
+});
+
+test("text after the last closed paragraph still counts against the character ceiling", () => {
+  const bytes = hwpx([section(`<hp:p><hp:run><hp:t>${"가".repeat(500)}</hp:t></hp:run>`)]);
+  assert.throws(
+    () => extractLegacyOfficeText(bytes, "hwpx", { maxCharacters: 100 }),
+    (error) => error.code === "LEGACY_OFFICE_TOO_LARGE"
+  );
+});

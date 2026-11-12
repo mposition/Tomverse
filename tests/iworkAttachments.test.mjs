@@ -91,3 +91,13 @@ test("a package that expands too far is refused from its directory alone", () =>
   const many = pkg(Array.from({ length: 5_001 }, (_, index) => [`Data/${index}`, ""]));
   assert.throws(() => assertSafeIworkPackage(many), /Too many entries/);
 });
+
+test("a package is measured by what it really expands to, not what it declares", () => {
+  // Over the 200 MB ceiling once inflated, a few hundred KB as uploaded.
+  const bomb = zipSync({
+    "Index/Document.iwa": new Uint8Array(16),
+    "Data/blob": new Uint8Array(201 * 1024 * 1024),
+  });
+  assert.ok(bomb.length < 2 * 1024 * 1024);
+  assert.throws(() => assertSafeIworkPackage(bomb), /Expands too far/);
+});
