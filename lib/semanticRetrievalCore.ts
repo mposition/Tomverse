@@ -25,6 +25,7 @@
 
 import { createHash } from "node:crypto";
 import type { SemanticStepsUsed } from "@/lib/chatContextBundleCore";
+import { SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED } from "@/lib/privacyNoticeStatus";
 
 export const SEMANTIC_RETRIEVAL_PROVIDER = "cohere";
 
@@ -39,13 +40,14 @@ export const SEMANTIC_RETRIEVAL_PROVIDER = "cohere";
  * (lib/privacyNoticeStatus.ts), where a feature that sends personal data out
  * does not run before its notice exists.
  *
- * Deliberately not in lib/privacyNoticeStatus.ts: that file is part of the
- * /privacy page digest (tests/support/amendedDocumentVerifiers.mjs), and this
- * flag must be able to sit at false without moving an approved page version.
- * It is set to true in the change that publishes the notice, which is an owner
- * approval of a new /privacy version.
+ * It is the same value the /privacy page shows the notice by
+ * (SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED), so the notice being visible and
+ * the calls being allowed cannot disagree. That file is part of the /privacy
+ * page digest (tests/support/amendedDocumentVerifiers.mjs), so flipping the
+ * flag is an owner approval of a new /privacy version.
  */
-export const SEMANTIC_RETRIEVAL_PRIVACY_NOTICE_PUBLISHED = false as boolean;
+export const SEMANTIC_RETRIEVAL_PRIVACY_NOTICE_PUBLISHED: boolean =
+    SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED;
 
 /**
  * The notice flag as the runtime reads it. A test process (NODE_ENV "test")

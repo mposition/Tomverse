@@ -78,6 +78,9 @@ test("placeholders are exactly the listed pending confirmations, the same in eve
     const expected = COMMENTS_PRIVACY_NOTICE_CONFIRMED ? [] : Object.keys(PENDING_CONFIRMATIONS).sort();
     for (const [name, bundle] of Object.entries(LOCALES)) {
         const found = Object.entries(bundle.privacyPolicy)
+            // The semantic-search notice has its own placeholders and flag
+            // (tests/semanticSearchPrivacyNotice.test.mjs).
+            .filter(([key]) => !key.startsWith("semanticSearch"))
             .filter(([, value]) => typeof value === "string" && PLACEHOLDER.test(value))
             .map(([key]) => key)
             .sort();
