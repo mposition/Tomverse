@@ -44,6 +44,7 @@ import {
   signedInAccess,
 } from "../../lib/productResearchScoutBrowserPolicy.mjs";
 import { SCOUT_PAGE_TIMEOUT_MS, generateFile, generateImage, officePackage, pdfFirstPage, screenshot } from "../../lib/productResearchScoutGeneration.mjs";
+import { walkMemoryProbes } from "../../lib/productResearchScoutMemoryWalk.mjs";
 import { scoutSendOutcome } from "../../lib/productResearchScoutCore.ts";
 
 const args = process.argv.slice(2);
@@ -430,8 +431,33 @@ async function walkIssues() {
   }
 }
 
+async function walkMemory() {
+  if (outDir || capReached) return;
+  const day = new Date().toISOString().slice(0, 10);
+  const answers = await walkMemoryProbes(day, async (target) => {
+    const response = await fetch(`${ingestUrl}/memory/${target}`, {
+      method: "POST",
+      redirect: "error",
+      headers: { authorization: `Bearer ${ingestSecret}` },
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return response.status === 404 ? { disabled: true } : { judged: false, reason: "http_" + response.status };
+    }
+    return response.json();
+  });
+  for (const answer of answers) {
+    if (answer.disabled) continue;
+    const result = scoutSendOutcome(answer);
+    outcomes.sent++;
+    if (result === "judged") outcomes.stored += Number(answer.stored) || 0;
+    else outcomes[result]++;
+    if (result === "capped") capReached = true;
+  }
+}
 const startedAt = Date.now();
-for (const [name, step] of [["pages", walkPages], ["files", walkFiles], ["catalogue", walkCatalogue], ["issues", walkIssues]]) {
+for (const [name, step] of [["memory", walkMemory], ["pages", walkPages], ["files", walkFiles], ["catalogue", walkCatalogue], ["issues", walkIssues]]) {
   try {
     await step();
   } catch (error) {

@@ -8,6 +8,8 @@
  */
 import "server-only";
 
+import { latestMemoryReadings, memoryScoutEnabled } from "./productResearchScoutMemory";
+import type { MemoryReading } from "./productResearchScoutMemoryCore";
 import type { Session } from "next-auth";
 
 import { getAdminRole } from "@/lib/adminAuth";
@@ -53,6 +55,7 @@ export const SCOUT_CONSOLE_DAYS = 7;
 
 export type ScoutConsoleView = {
   readonly enabled: boolean;
+  readonly memoryQuality?: { readonly enabled:boolean;readonly day:string;readonly readings:MemoryReading[] };
   /** Whether a test account is named. The address itself stays on the server. */
   readonly testAccountConfigured: boolean;
   readonly settings: ScoutSettings;
@@ -77,7 +80,7 @@ export type ScoutConsoleView = {
 export async function readScoutConsole(session: Session | null, section: ScoutConsoleSection): Promise<ScoutConsoleView> {
   const role = getAdminRole(session);
   const now = new Date();
-  const [settings, modelOptions, usageToday, counts, calls, open, completed] = await Promise.all([
+  const [settings, modelOptions, usageToday, counts, calls, open, completed, memoryReadings] = await Promise.all([
     readScoutSettings(),
     scoutModelOptions(),
     scoutUsageToday(),
@@ -85,9 +88,11 @@ export async function readScoutConsole(session: Session | null, section: ScoutCo
     scoutRecentCalls(SCOUT_CONSOLE_DAYS),
     section === "suggestions" ? listSuggestions("open") : Promise.resolve([]),
     section === "suggestions" ? listSuggestions("completed") : Promise.resolve([]),
+    section === "suggestions" ? latestMemoryReadings() : Promise.resolve([]),
   ]);
   return {
     enabled: isProductResearchRouteEnabled(process.env, PRODUCT_RESEARCH_SCOUT_SWITCH_ENV),
+    memoryQuality:{enabled:memoryScoutEnabled() && isProductResearchRouteEnabled(process.env,PRODUCT_RESEARCH_SCOUT_SWITCH_ENV),day:now.toISOString().slice(0,10),readings:memoryReadings},
     testAccountConfigured: scoutTestAccountEmail() !== null,
     settings,
     modelOptions,

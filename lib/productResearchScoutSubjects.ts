@@ -8,7 +8,10 @@
  */
 import { SCOUT_GENERATIONS, SCOUT_PAGES, SCOUT_SIGNED_IN_PAGES } from "@/lib/productResearchScoutBrowserPolicy.mjs";
 
+import { SUPPORTED_LANGUAGES as MEMORY_PROBE_LOCALES } from "@/lib/language";
+
 export type ScoutSubjectInfo =
+  | {readonly kind:"memory";readonly lang:string}
   | { readonly kind: "page"; readonly page: string; readonly lang: string; readonly path: string; readonly href: string }
   | { readonly kind: "file"; readonly format: string }
   | { readonly kind: "catalogue" }
@@ -16,6 +19,8 @@ export type ScoutSubjectInfo =
   | { readonly kind: "other" };
 
 export function scoutSubjectInfo(subject: string): ScoutSubjectInfo {
+  const memoryLocale=MEMORY_PROBE_LOCALES.find(l=>subject===`memory.continuation.${l}`);
+  if(memoryLocale)return {kind:"memory",lang:memoryLocale};
   if (subject === "catalogue") return { kind: "catalogue" };
   // The issue-backlog subject stores one suggestion per open GitHub issue (lib/productResearchScoutIssuesCore.ts).
   const issue = /^issue.([1-9][0-9]{0,5})$/.exec(subject);

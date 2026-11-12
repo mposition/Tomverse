@@ -191,3 +191,18 @@ test("the test account gets a short session a sign-in would honour; an administr
     await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
   }
 });
+
+test("a daily memory reservation cannot be double-spent or replayed after a failed call", async () => {
+  await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 2, generationDailyCap: 0 }, noAudit);
+  const day = new Date().toISOString().slice(0, 10);
+  const input = { subject: "memory.continuation.fr", modelId: "fixture-model", onceOnUtcDay: day };
+  const results = await Promise.all(Array.from({length: 6}, () => startScoutCall(input)));
+  const grants = results.filter(x => "id" in x);
+  assert.equal(grants.length, 1);
+  assert.equal(results.filter(x => "refused" in x && x.refused === "already_sampled").length, 5);
+  await prisma.productResearchScoutLlmCall.update({where: {id: grants[0]!.id}, data: {outcome: "failed"}});
+  assert.deepEqual(await startScoutCall(input), {refused: "already_sampled"});
+  assert.deepEqual(await startScoutCall({...input, subject: "memory.continuation.es", onceOnUtcDay: "2000-01-01"}), {refused: "day_changed"});
+  assert.ok("id" in await startScoutCall({...input, subject: "home.en", onceOnUtcDay: day}));
+  assert.deepEqual(await startScoutCall({...input, subject: "memory.continuation.ideas"}), {refused: "daily_cap_reached"});
+});

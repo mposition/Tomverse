@@ -25,6 +25,7 @@ import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productRe
 import type { ScoutDaySummary } from "@/lib/productResearchScoutCore";
 import type { ScoutConsoleSuggestion, ScoutConsoleView } from "@/lib/productResearchScoutConsoleRead";
 import { suggestionWorkBrief } from "@/lib/productResearchScoutIdeaText";
+import { SUPPORTED_LANGUAGES as MEMORY_PROBE_LOCALES } from "@/lib/language";
 import { scoutSubjectInfo } from "@/lib/productResearchScoutSubjects";
 
 /**
@@ -89,6 +90,8 @@ export function AdminScoutSuggestionsPanel({
   const { locale } = useAdminLocale();
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [severity, setSeverity] = useState<string>("all");
+  const [memoryOnly, setMemoryOnly] = useState(false);
+  const memoryQuality = initial.memoryQuality;
   const [areas, setAreas] = useState<ReadonlySet<string>>(new Set());
   const [view, setView] = useState<"subject" | "newest">("subject");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -103,6 +106,7 @@ export function AdminScoutSuggestionsPanel({
       const lang = m.languages[info.lang as keyof typeof m.languages] ?? info.lang;
       return `${page} · ${lang}`;
     }
+    if (info.kind === "memory") return m.memoryLabel + " · " + (m.languages[info.lang as keyof typeof m.languages] ?? info.lang);
     if (info.kind === "file") return m.files[info.format as keyof typeof m.files] ?? subject;
     if (info.kind === "catalogue") return m.catalogue;
     if (info.kind === "issue") return fill(m.issue, { number: info.number });
@@ -121,7 +125,7 @@ export function AdminScoutSuggestionsPanel({
   }, [initial.open]);
 
   const visible = initial.open.filter(
-    (row) => (severity === "all" || row.severity === severity) && (areas.size === 0 || areas.has(row.area)),
+    (row) => (!memoryOnly || scoutSubjectInfo(row.subject).kind === "memory") && (severity === "all" || row.severity === severity) && (areas.size === 0 || areas.has(row.area)),
   );
   const groups = useMemo(() => {
     const bySubject = new Map<string, ScoutConsoleSuggestion[]>();
@@ -296,6 +300,45 @@ export function AdminScoutSuggestionsPanel({
         <p className="min-w-0 flex-1 text-sm text-zinc-400">{m.intro}</p>
       </div>
 
+      {memoryQuality && (
+        <section className="rounded-xl border border-zinc-800 p-4" data-testid="memory-quality-coverage">
+          <h3 className="font-semibold">{m.memoryTitle}</h3>
+          <p className="mt-1 text-sm text-zinc-400">{m.memoryDesc}</p>
+          <p className="mt-2 text-sm">
+            {!memoryQuality.enabled && m.memoryOff + " "}
+            {fill(m.memoryDays, {
+              count: memoryQuality.readings.filter((r) => r.day === memoryQuality.day).length,
+              day: memoryQuality.day,
+            })}
+          </p>
+          <ul className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+            {MEMORY_PROBE_LOCALES.map((lang) => {
+              const reading = memoryQuality.readings.find((r) => r.locale === lang);
+              return (
+                <li key={lang} className="rounded-lg bg-zinc-900 p-2">
+                  <strong>{m.languages[lang]}</strong>{" · "}
+                  {reading?.day !== memoryQuality.day && <span>{m.memoryWaiting}{reading && " · "}</span>}
+                  {reading && <span>{reading.day} · {m.memoryModes[reading.mode]} · {m.memoryStatus[reading.outcome]} · {reading.model}</span>}
+                </li>
+              );
+            })}
+          </ul>
+          <button
+            type="button"
+            aria-pressed={memoryOnly}
+            disabled={bulk.kind === "running"}
+            className="mt-3 min-h-9 text-sm font-semibold text-blue-300 underline"
+            onClick={() => {
+              setMemoryOnly(!memoryOnly);
+              setSelected(new Set());
+              setAreas(new Set());
+              setSeverity("all");
+            }}
+          >
+            {m.memoryFilter}
+          </button>
+        </section>
+      )}
       {state === "on" ? null : (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
           <span className="min-w-0 flex-1">
@@ -345,11 +388,12 @@ export function AdminScoutSuggestionsPanel({
                 {areaLabel(area)} {count}
               </button>
             ))}
-            {severity !== "all" || areas.size > 0 ? (
+            {memoryOnly || severity !== "all" || areas.size > 0 ? (
               <button
                 type="button"
                 className="min-h-7 px-1 text-xs font-medium text-blue-300 hover:text-blue-200"
                 onClick={() => {
+                  setMemoryOnly(false);
                   setSeverity("all");
                   setAreas(new Set());
                 }}
