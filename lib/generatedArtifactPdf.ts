@@ -32,7 +32,11 @@ import "server-only";
 // method" where the page content should be.
 import { zlibSync } from "fflate";
 
-import type { ArtifactDocumentBlock, DocumentSpec } from "@/lib/generatedArtifactCore";
+import type {
+  ArtifactDocumentBlock,
+  DocumentSpec,
+  ResolvedDocumentImages,
+} from "@/lib/generatedArtifactCore";
 import {
   PDF_FONT_NAME,
   glyphFor,
@@ -287,6 +291,20 @@ class PageBuilder {
       `${MARGIN} ${this.y.toFixed(2)} m ${(PAGE_WIDTH - MARGIN).toFixed(2)} ${this.y.toFixed(2)} l S`
     );
     this.y -= 6;
+  }
+
+  /**
+   * A picture, centred, `width` by `height` points. Moved to a new page when
+   * it does not fit what is left of this one; the caller has already made it
+   * no taller than a page.
+   */
+  image(name: string, width: number, height: number) {
+    this.ensure(height + 6);
+    const x = MARGIN + (CONTENT_WIDTH - width) / 2;
+    this.operations.push(
+      `q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${x.toFixed(2)} ${(this.y - height).toFixed(2)} cm /${name} Do Q`
+    );
+    this.y -= height + 6;
   }
 
   fill(x: number, width: number, height: number, grey: number) {
@@ -545,7 +563,10 @@ const buildPdf = (objects: PdfObject[]): Uint8Array => {
 /* ------------------------------------------------------------------------ */
 
 /** The PDF for an admitted document specification. */
-export const renderDocumentPdf = (spec: DocumentSpec): Uint8Array => {
+export const renderDocumentPdf = (
+  spec: DocumentSpec,
+  images: ResolvedDocumentImages = new Map()
+): Uint8Array => {
   const font = loadPdfFont();
   const builder = new PageBuilder(font);
   const used = new Map<number, number>();
@@ -578,6 +599,9 @@ export const renderDocumentPdf = (spec: DocumentSpec): Uint8Array => {
       case "table":
         block.columns.forEach(record);
         block.rows.forEach((row) => row.forEach((value, column) => record(tableCellText(block, column, value))));
+        break;
+      case "image":
+        record(block.caption ?? "");
         break;
       default:
         break;
@@ -632,6 +656,28 @@ export const renderDocumentPdf = (spec: DocumentSpec): Uint8Array => {
       case "pageBreak":
         builder.break();
         break;
+      case "image": {
+        const image = images.get(index);
+        if (image) {
+          // 0.75 pt a pixel is 96 dpi: never larger than the picture's own
+          // size, never wider than the text, never taller than a page.
+          let width = Math.min(
+            image.width * 0.75,
+            (CONTENT_WIDTH * (block.widthPercent ?? 100)) / 100
+          );
+          let height = (width * image.height) / image.width;
+          const tallest = CONTENT_TOP - CONTENT_BOTTOM - STYLES.subtitle.leading - 12;
+          if (height > tallest) {
+            width = (width * tallest) / height;
+            height = tallest;
+          }
+          builder.image(`Im${index}`, width, height);
+        }
+        if (block.caption) {
+          paragraph(builder, font, block.caption, { ...STYLES.subtitle, size: 10, leading: 14, spaceAfter: 10 });
+        }
+        break;
+      }
     }
   }
 
@@ -685,6 +731,19 @@ export const renderDocumentPdf = (spec: DocumentSpec): Uint8Array => {
       `/ToUnicode ${toUnicode} 0 R >>`
   );
 
+  // Each picture once, shared by every page's resources; a page that does
+  // not draw one simply does not name it.
+  const imageObjects: string[] = [];
+  for (const [index, image] of images) {
+    const object = add(
+      `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} ` +
+        `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.jpeg.length} >>`,
+      image.jpeg
+    );
+    imageObjects.push(`/Im${index} ${object} 0 R`);
+  }
+  const xObjects = imageObjects.length ? ` /XObject << ${imageObjects.join(" ")} >>` : "";
+
   const contentObjects = pages.map((content) => {
     const compressed = zlibSync(new TextEncoder().encode(content), {
       level: 6,
@@ -703,7 +762,7 @@ export const renderDocumentPdf = (spec: DocumentSpec): Uint8Array => {
     add(
       `<< /Type /Page /Parent ${pagesObjectNumber} 0 R ` +
         `/MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] ` +
-        `/Resources << /Font << /F1 ${fontObject} 0 R >> >> ` +
+        `/Resources << /Font << /F1 ${fontObject} 0 R >>${xObjects} >> ` +
         `/Contents ${content} 0 R >>`
     )
   );

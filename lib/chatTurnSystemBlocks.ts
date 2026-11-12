@@ -38,6 +38,7 @@ import {
   type ImageArtifactState,
 } from "@/lib/imageCapabilityPrompt";
 import { FILE_CONVERSION_TOOL_DEFINITION_TOKENS } from "@/lib/fileConversionCore";
+import { officeRenderingEnabled } from "@/lib/officeRenderer";
 import {
   ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS,
   ARTIFACT_TOOL_DEFINITION_TOKENS,
@@ -205,6 +206,9 @@ export const buildChatTurnSystemBlocks = (
     // sent. `CHAT_FILE_CONVERSION=off` is the operator's switch
     // (docs/policy/generated-artifacts.md section 14).
     fileConversionEnabled: process.env.CHAT_FILE_CONVERSION !== "off",
+    // Read from the same place the conversion itself reads it, so the tool is
+    // never offered for office files the renderer is not there to lay out.
+    officeRenderingEnabled: officeRenderingEnabled(),
   });
 
   const imageCapabilityPrompt = buildImageCapabilitySystemPrompt({
