@@ -3566,8 +3566,10 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The additive migration creates only this new content-free hold and its immutable/delete/truncate guards. It seeds no hold row; exact counts require new review for changed DDL.",
   },
+  // Draft capture joins the scope once and locks only that row (FOR UPDATE OF s).
+  // The scanner counts that lock's UPDATE token in every entry for this file.
   ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map((table, index) => ({
-    path: "lib/promptRefinerChatExecutionStore.ts", table, tableMentions: [5, 11][index], writeVerbs: 12,
+    path: "lib/promptRefinerChatExecutionStore.ts", table, tableMentions: [6, 11][index], writeVerbs: 13,
     reason: "The sole default-off Chat binding writer adds one read-only preview lookup per table before its separately revalidated atomic consume boundary; it still only advances epochs, holds validated snapshots, consumes or purges bodies, and records canonical audit in the same transaction.",
   })),
   ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map((table, index) => ({
@@ -3599,12 +3601,12 @@ export const RAW_SQL_ALLOWLIST = [
   })),
   {
     path: "lib/promptRefinerChatExecutionStore.ts", table: "PromptRefinerProductExecutionReceipt",
-    tableMentions: 2, writeVerbs: 12,
+    tableMentions: 2, writeVerbs: 13,
     reason: "One locked read of the execution receipt identifies the disposition binding; writes remain delegated to the sole product receipt writer in the same consume transaction.",
   },
   {
     path: "lib/promptRefinerChatExecutionStore.ts", table: "PromptRefinerProductAttempt",
-    tableMentions: 6, writeVerbs: 12,
+    tableMentions: 6, writeVerbs: 13,
     reason: "Claims one immutable draft/scope/mode key before paid admission and binds a held suggestion in the same canonical-audit transaction. Concurrent copies only read the prior claim.",
   },
   {
@@ -3649,7 +3651,7 @@ export const RAW_SQL_ALLOWLIST = [
   },
   {
     path: "lib/promptRefinerChatExecutionStore.ts", table: "PromptRefinerProductOperationalGuard",
-    tableMentions: 1, writeVerbs: 12,
+    tableMentions: 1, writeVerbs: 13,
     reason: "Auto consume reads the operational latch after acquiring the canonical audit lock in the existing conversation-to-audit order. The store writes only its held suggestion and disposition; no direct latch mutation or resume is possible.",
   },
   {
