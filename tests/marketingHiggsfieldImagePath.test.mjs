@@ -397,7 +397,7 @@ test("concepts are asked for again with every reason; what passed in either answ
 
 test("counts after a model name, exact model lists on a screen and compound words are not refused", () => {
   const analysis = (list) => {
-    const strip = ({ ko, zhT, zhS, ...text }) => text;
+    const strip = (text) => Object.fromEntries(Object.entries(text).filter(([key]) => !["ko", "zhT", "zhS"].includes(key)));
     const inLocale = (key) => list.map((text) => strip({ ...text, text: text[key] ?? text.text }));
     return { ...concept("c2", { feature: "analysis", factRefs: ["analysis.what"] }), texts: list.map(strip), translations: { ko: inLocale("ko"), "zh-Hant": inLocale("zhT"), "zh-Hans": inLocale("zhS") } };
   };
