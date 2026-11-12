@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import { before, after, test } from "node:test";
 import { prisma } from "@/lib/prisma";
 import { startMcpSyntheticServer } from "../fixtures/mcpSyntheticServer";
-import { connectMcp, disconnectMcp, encryptMcpSecret, decryptMcpSecret, grantMcpTools, listMcpConnections, ownMcpConnection } from "@/lib/mcpConnectorStore";
+import { connectMcp, disconnectMcp, encryptMcpSecret, decryptMcpSecret, forgetUnusedCustomMcpServer, grantMcpTools, listMcpConnections, ownMcpConnection,
+  registerCustomMcpServer } from "@/lib/mcpConnectorStore";
+import { mcpServerFor } from "@/lib/mcpCustomServers";
 import { confirmMcpOutcome, decideMcpInvocation, invokeMcpTool } from "@/lib/mcpConnectorExecution";
 import { buildAccountDataExport } from "@/lib/accountDataExport";
 import { buildMcpChatTools } from "@/lib/mcpConnectorChatTool";
@@ -223,4 +225,58 @@ test("disconnected servers do not consume active connection capacity", async () 
     await prisma.mcpConnection.updateMany({ where: { userId, serverId: { startsWith: "retired-" } }, data: { status: "connected" } });
     await assert.rejects(() => connectMcp(userId, "synthetic"), { code: "connection_limit" });
   } finally { await prisma.user.delete({ where: { id: userId } }); }
+});
+
+test("a user's custom server is owner-only, confirm-only, killable and removed with its connection", async () => {
+  const owner = `mcp-custom-${randomUUID()}`, other = `mcp-custom-${randomUUID()}`;
+  await prisma.user.createMany({ data: [{ id: owner }, { id: other }] });
+  const url = `http://127.0.0.1:${fixture.port}/mcp`;
+  try {
+    const { server, created } = await registerCustomMcpServer(owner, { url, auth: "none", name: "My tools" });
+    assert.equal(created, true); assert.match(server.id, /^custom-[0-9a-f]{24}$/); assert.deepEqual(server.readTools, []);
+    assert.equal((await registerCustomMcpServer(owner, { url, auth: "none" })).server.id, server.id);
+    await assert.rejects(() => mcpServerFor(other, server.id), { code: "connector_disabled" });
+    await assert.rejects(() => connectMcp(other, server.id), { code: "connector_disabled" });
+    const connected = await connectMcp(owner, server.id);
+    // The synthetic fixture's "search" and "read" are read tools only in the operator policy.
+    assert.ok(connected.catalog.length > 0); assert.ok(connected.catalog.every(tool => tool.mode === "confirm"));
+    await assert.rejects(() => ownMcpConnection(other, connected.id), { code: "connection_not_found" });
+    await grantMcpTools(owner, connected.id, ["search"], connected.version);
+    const own = await ownMcpConnection(owner, connected.id);
+    const calls = fixture.calls.length;
+    const proposal = await invokeMcpTool({ userId: owner, connectionId: connected.id, version: own.version, name: "search", args: { query: "Atlas" } });
+    assert.equal(proposal.status, "approval_required"); assert.match(proposal.notice, /untrusted quoted data/);
+    assert.equal(fixture.calls.length, calls);
+    assert.equal((await listMcpConnections(owner))[0]?.name, "My tools");
+    const exported = await buildAccountDataExport(owner);
+    const customRows = exported.data.plugin_custom_servers as Array<{ url: string; auth: string; name: string }>;
+    assert.deepEqual(customRows.map(row => [row.url, row.auth, row.name]), [[url, "none", "My tools"]]);
+    assert.equal(JSON.stringify(exported.data.plugin_custom_servers).includes("oauth"), false);
+
+    process.env.MCP_CUSTOM_SERVERS_DISABLED = "true";
+    try {
+      await assert.rejects(() => ownMcpConnection(owner, connected.id), { code: "connector_disabled" });
+      assert.equal((await listMcpConnections(owner))[0]?.status, "unavailable");
+      await assert.rejects(() => registerCustomMcpServer(owner, { url, auth: "bearer" }), { code: "custom_servers_disabled" });
+    } finally { delete process.env.MCP_CUSTOM_SERVERS_DISABLED; }
+
+    await disconnectMcp(owner, connected.id);
+    assert.equal(await prisma.mcpCustomServer.count({ where: { userId: owner } }), 0);
+    await assert.rejects(() => mcpServerFor(owner, server.id), { code: "connector_disabled" });
+  } finally { await prisma.user.deleteMany({ where: { id: { in: [owner, other] } } }); }
+});
+
+test("custom servers are capped per user, freed when unused, and cascade with the account", async () => {
+  const userId = `mcp-custom-${randomUUID()}`;
+  await prisma.user.create({ data: { id: userId } });
+  const url = `http://127.0.0.1:${fixture.port}/mcp`;
+  await prisma.mcpCustomServer.createMany({ data: Array.from({ length: 5 }, (_, index) => ({ id: `custom-cap${index}-${randomUUID().slice(0, 8)}`, userId,
+    name: `Server ${index}`, url: `https://mcp${index}.example.com/mcp`, auth: "bearer" })) });
+  await assert.rejects(() => registerCustomMcpServer(userId, { url, auth: "none" }), { code: "custom_server_limit" });
+  const [first] = await prisma.mcpCustomServer.findMany({ where: { userId }, orderBy: { id: "asc" }, take: 1 });
+  await forgetUnusedCustomMcpServer(userId, first.id);
+  assert.equal((await registerCustomMcpServer(userId, { url, auth: "none" })).created, true);
+  await assert.rejects(() => registerCustomMcpServer(userId, { url: "https://127.0.0.1/mcp", auth: "none" }), { code: "unsafe_endpoint" });
+  await prisma.user.delete({ where: { id: userId } });
+  assert.equal(await prisma.mcpCustomServer.count({ where: { userId } }), 0);
 });

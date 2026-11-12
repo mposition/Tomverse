@@ -5,7 +5,8 @@ import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprot
 import { prisma } from "@/lib/prisma";
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { guardedMcpFetch, resolvePublicMcpEndpoint, validateMcpEndpoint } from "@/lib/mcpConnectorClient";
-import { MCP_LIMITS, McpConnectorError, mcpServer, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
+import { MCP_LIMITS, McpConnectorError, isCustomMcpServerId, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
+import { mcpServerFor } from "@/lib/mcpCustomServers";
 import { auditMcp, connectMcp, decryptMcpSecret, encryptMcpSecret, mcpPolicyDigest } from "@/lib/mcpConnectorStore";
 import { githubOAuthTokenRequest } from "@/lib/mcpConnectorGitHub";
 
@@ -66,7 +67,10 @@ async function runOAuth(input: { flowId: string; userId: string; server: McpServ
     saveTokens: async tokens => {
       if (tokens.issuer !== oauth.issuer || tokens.token_type.toLowerCase() !== "bearer" || tokens.access_token.length > 4096 || /\s/.test(tokens.access_token)) throw new McpConnectorError("oauth_token_refused");
       const allowed = new Set((oauth.tokenScope ?? oauth.scope).split(/\s+/).filter(Boolean));
-      if (tokens.scope && tokens.scope.split(/\s+/).some(scope => !allowed.has(scope))) throw new McpConnectorError("oauth_scope_expanded");
+      // A custom server that advertises no scope has no bound to compare;
+      // all of its tool calls still need the user's confirmation.
+      const unbounded = isCustomMcpServerId(input.server.id) && !allowed.size;
+      if (tokens.scope && !unbounded && tokens.scope.split(/\s+/).some(scope => !allowed.has(scope))) throw new McpConnectorError("oauth_scope_expanded");
       state.tokens = tokens; await save();
     },
     redirectToAuthorization: url => {
@@ -104,7 +108,7 @@ async function runOAuth(input: { flowId: string; userId: string; server: McpServ
 }
 
 export async function startMcpOAuth(userId: string, serverId: string, redirectUri: string, signal?: AbortSignal) {
-  const server = mcpServer(serverId); ownOAuth(server);
+  const server = await mcpServerFor(userId, serverId); ownOAuth(server);
   const previous = await prisma.mcpConnection.findUnique({ where: { userId_serverId: { userId, serverId } }, select: { version: true, oauthCiphertext: true, policyDigest: true } });
   const state = randomBytes(32).toString("base64url");
   const secrets: OAuthSecrets = previous?.policyDigest === mcpPolicyDigest(server) && previous.oauthCiphertext ? JSON.parse(decryptMcpSecret(previous.oauthCiphertext) || "{}") : {};
@@ -133,7 +137,7 @@ export async function completeMcpOAuth(userId: string, state: string, code: stri
     await takeAuditChainLock(tx);
     const row = await tx.mcpOAuthFlow.findFirst({ where: { userId, stateHash: stateDigest(state), state: "pending", expiresAt: { gt: new Date() } } });
     if (!row?.secretCiphertext) throw new McpConnectorError("oauth_flow_expired", 409);
-    const server = mcpServer(row.serverId);
+    const server = await mcpServerFor(userId, row.serverId, tx);
     if (row.policyDigest !== mcpPolicyDigest(server) || (issuer && issuer !== server.oauth?.issuer)) throw new McpConnectorError("oauth_issuer_mismatch");
     const claimed = await tx.mcpOAuthFlow.updateMany({ where: { id: row.id, userId, state: "pending" }, data: { state: "running" } });
     if (!claimed.count) throw new McpConnectorError("oauth_flow_expired", 409);
@@ -141,7 +145,7 @@ export async function completeMcpOAuth(userId: string, state: string, code: stri
     return row;
   });
   try {
-    const server = mcpServer(flow.serverId);
+    const server = await mcpServerFor(userId, flow.serverId);
     const result = await runOAuth({ flowId: flow.id, userId, server, redirectUri: flow.redirectUri, state,
       secrets: JSON.parse(decryptMcpSecret(flow.secretCiphertext) || "{}"), code, signal });
     if (result.outcome !== "AUTHORIZED" || !result.secrets.tokens) throw new McpConnectorError("oauth_token_missing");

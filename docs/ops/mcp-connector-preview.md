@@ -51,9 +51,10 @@ Production activation and paid-model evaluation remain outside this handoff.
   OAuth uses the same SDK generation, S256 PKCE, owner-bound one-use state,
   issuer/resource binding and encrypted server-side tokens. Static client
   registration and dynamic registration are supported; manual reauthentication
-  can refresh tokens. Endpoint metadata is explicitly registered by the operator,
-  never accepted from remote discovery or a browser. Arbitrary end-user URLs,
-  legacy SSE and local stdio are not implemented.
+  can refresh tokens. Operator profiles register endpoint metadata explicitly.
+  A signed-in user's custom server (below) is discovered once, at registration,
+  and then fixed in the same policy shape. Legacy SSE and local stdio are not
+  implemented.
 - Up to 200 catalog tools, 32 explicitly selected tools and 8 connections per
   user. Catalog descriptions and annotations are never instructions or grants.
 - Only a reviewed server `readTools` list can bypass per-call human approval.
@@ -111,6 +112,33 @@ Register the app's canonical `/api/mcp/oauth/callback` URL with the provider.
 Authorization flows expire in 10 minutes, erase secrets on completion/failure
 or disconnect, and are swept after expiry by existing maintenance. Account
 deletion cascades through them; export contains only their safe status timeline.
+
+### Custom servers entered by the user
+
+With the preview on, a signed-in user can also enter their own remote MCP
+server URL from the "Custom MCP server" card. This is **on by default**
+(owner decision, 2026-11-12); any value of `MCP_CUSTOM_SERVERS_DISABLED`
+other than `false` turns it off, and it is always off while
+`MCP_CONNECTOR_PREVIEW_ENABLED` is off. With the switch off, existing custom
+connections become unavailable and can still be disconnected.
+
+- The URL must be HTTPS on port 443 with no credentials, query or fragment and
+  no private IP literal. Every request still goes through the client's fresh,
+  pinned DNS check, so private, loopback and link-local answers and redirects
+  are refused exactly as for operator servers.
+- Authentication is `none`, a separate bearer token, or OAuth for servers that
+  publish RFC 9728 / RFC 8414 metadata with dynamic client registration and
+  S256 PKCE. Discovery runs once, through the same guarded client, and its
+  endpoints are stored as the fixed policy. The request scope is the resource's
+  advertised `scopes_supported`; with none advertised there is no scope bound.
+- A custom server has no read tools: every selected tool needs the user's
+  approval for every call, and results carry the same untrusted-content notice
+  and size limits. Its name never selects a catalogued provider's logo.
+- Each row (`McpCustomServer`, id `custom-<hex>`) belongs to one user and
+  resolves only for that user. A user can hold 5. A row is removed when its
+  connection is disconnected, when its first connection attempt fails, or when
+  it has had no live connection for 10 minutes and the user registers another.
+  Account deletion cascades; the export includes URL, name and auth type.
 
 The local-only `MCP_CONNECTOR_SYNTHETIC_PORT` adds the fixture at the exact
 `http://127.0.0.1:<port>/mcp` endpoint outside production.

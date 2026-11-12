@@ -237,3 +237,44 @@ test("@ui-risk provider catalog searches both directories without presenting lis
   await search.fill("");
   await page.screenshot({ path: test.info().outputPath("plugins-color.png"), fullPage: false });
 });
+
+test("@ui-risk a signed-in user connects their own MCP server URL and every tool needs confirmation", async ({ page }) => {
+  const customId = "custom-0123456789abcdef01234567";
+  const catalog = [{ name: "search", mode: "confirm" }];
+  let inventory: Record<string, unknown> = { enabled: true, customEnabled: true, servers: [], connections: [], invocations: [] };
+  const posts: unknown[] = [];
+  await page.route("**/api/mcp/connections", route => {
+    if (route.request().method() !== "POST") return route.fulfill({ json: inventory });
+    const body = route.request().postDataJSON() as { custom?: { url?: string } };
+    posts.push(body);
+    if (body.custom?.url === "https://intranet.example.com/mcp") return route.fulfill({ status: 400, json: { code: "unsafe_address" } });
+    inventory = { ...inventory, servers: [{ id: customId, name: "Team tools", auth: "bearer", origin: "https://mcp.example.com", custom: true }],
+      connections: [{ id: "custom-connection", serverId: customId, name: "Team tools", status: "connected", version: 1, grants: [], catalog }] };
+    return route.fulfill({ json: { id: "custom-connection", catalog, version: 1 } });
+  });
+  await page.goto("/plugins?lang=ko");
+  const card = page.locator('[data-testid="plugin-card"][data-provider="custom"]');
+  await expect(card).toContainText("내 서버 URL 입력");
+  await card.getByTestId("plugin-custom-add").click();
+  const dialog = page.getByRole("dialog", { name: "MCP 연결 추가" });
+  await expect(dialog).toContainText("모든 도구 실행은 매번 승인해야 합니다");
+  await dialog.getByTestId("plugin-custom-url").fill("https://intranet.example.com/mcp");
+  await dialog.getByTestId("plugin-connect-submit").click();
+  await expect(page.getByRole("alert").filter({ hasText: "사용할 수 없는 주소입니다. 공개 HTTPS MCP 서버 URL을 입력하세요." })).toBeVisible();
+  await dialog.getByTestId("plugin-custom-url").fill("https://mcp.example.com/mcp");
+  await dialog.getByTestId("plugin-custom-name").fill("Team tools");
+  await dialog.getByTestId("plugin-custom-auth").selectOption("bearer");
+  await dialog.getByTestId("plugin-credential").fill("separate-connector-token");
+  await dialog.getByTestId("plugin-connect-submit").click();
+  await expect(dialog).toHaveCount(0);
+  expect(posts).toEqual([
+    { custom: { url: "https://intranet.example.com/mcp", auth: "none" } },
+    { custom: { url: "https://mcp.example.com/mcp", auth: "bearer", name: "Team tools" }, credential: "separate-connector-token" },
+  ]);
+  const detail = page.getByRole("complementary", { name: "권한 관리" });
+  await expect(detail.getByRole("heading", { name: "Team tools" })).toBeVisible();
+  await expect(detail.getByText("search", { exact: true })).toBeVisible();
+  await expect(detail.getByText("매번 실행 확인", { exact: true })).toBeVisible();
+  await expect(page.locator(`[data-testid="plugin-card"][data-provider="${customId}"]`)).toContainText("https://mcp.example.com");
+  await expectNoHorizontalOverflow(page);
+});

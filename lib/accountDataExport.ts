@@ -45,6 +45,8 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       createdAt: row.createdAt, updatedAt: row.updatedAt,
       grants: Array.isArray(row.grants) ? row.grants.map(g => ({
       name: (g as Record<string, unknown>)?.name, mode: (g as Record<string, unknown>)?.mode })) : [] })),
+  mcpCustomServer: userId => prisma.mcpCustomServer.findMany({ where: { userId },
+    select: { id: true, name: true, url: true, auth: true, createdAt: true }, take: EXPORT_ROW_CAP }),
   mcpInvocation: async userId => (await prisma.mcpInvocation.findMany({ where: { userId },
     select: { id: true, connectionId: true, toolName: true, state: true, argumentsCiphertext: true, expiresAt: true, createdAt: true }, take: EXPORT_ROW_CAP }))
     .map(row => ({ id: row.id, connectionId: row.connectionId, toolName: row.toolName,
