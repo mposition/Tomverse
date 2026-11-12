@@ -121,7 +121,9 @@ async function mockProfileApis(
     );
     await page.route(
         (url) => /^\/api\/assistant-profiles\/[^/]+$/.test(url.pathname),
-        (route) => route.fulfill(json(options.detail ?? PROFILE_DETAIL))
+        (route) => route.fulfill(json(route.request().method() === "PATCH"
+            ? { profile: route.request().postDataJSON() }
+            : options.detail ?? PROFILE_DETAIL))
     );
 }
 
@@ -225,7 +227,7 @@ test.describe("assistant profile settings", () => {
         await expect(back).toHaveAttribute("href", /settingsSection=assistants/);
     });
 
-    test("renaming saves on its own and does not publish a revision", async ({
+    test("renaming preserves draft instructions and knowledge selection without publishing a revision", async ({
         page,
     }) => {
         // Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -244,10 +246,16 @@ test.describe("assistant profile settings", () => {
         );
         await page.goto("/settings/assistants/p-published");
 
+        await page.getByTestId("assistant-instructions").fill("Use the handbook.");
+        await page.getByTestId("assistant-knowledge-f-ready").check();
         await page.getByTestId("assistant-name").fill("Renamed helper");
         await page.getByTestId("assistant-save-identity").click();
 
         await expect(page.getByTestId("assistants-notice-saved")).toBeVisible();
+        await expect(page.getByTestId("assistant-name")).toHaveValue("Renamed helper");
+        await expect(page.getByTestId("assistant-instructions")).toHaveValue("Use the handbook.");
+        await expect(page.getByTestId("assistant-knowledge-f-ready")).toBeChecked();
+        await expect(page.getByTestId("knowledge-status-f-ready")).toHaveText(ko.assistantProfiles.saveToConnect);
         expect(publishCalls).toHaveLength(0);
     });
 
@@ -266,12 +274,12 @@ test.describe("assistant profile settings", () => {
         const identity = page.getByTestId("assistant-save-identity");
         const publish = page.getByTestId("assistant-publish");
         await expect(identity).toHaveText(ko.assistantProfiles.saveIdentity);
-        await expect(publish).toHaveText(ko.assistantProfiles.saveChanges);
+        await expect(publish).toHaveText(ko.assistantProfiles.saveWithFiles);
 
         // Neither label may be a prefix of the other, which is the shape that
         // made them read as the same button doing more or less of the job.
         const identityLabel = ko.assistantProfiles.saveIdentity;
-        const publishLabel = ko.assistantProfiles.saveChanges;
+        const publishLabel = ko.assistantProfiles.saveWithFiles;
         expect(publishLabel.startsWith(identityLabel)).toBe(false);
         expect(identityLabel.startsWith(publishLabel)).toBe(false);
 
@@ -324,12 +332,15 @@ test.describe("assistant profile settings", () => {
         // route refused as an invalid payload. The radio says it instead, and
         // an empty list is what gets stored.
         await prepareGuestPage(page);
-        await mockProfileApis(page);
+        const stored = structuredClone(PROFILE_DETAIL);
+        await mockProfileApis(page, { detail: stored });
         let published: Record<string, unknown> | null = null;
         await page.route(
             (url) => url.pathname.endsWith("/versions"),
             (route) => {
                 published = route.request().postDataJSON();
+                stored.profile.currentVersion.models = [];
+                stored.profile.currentVersion.revision = 4;
                 return route.fulfill(
                     json({
                         outcome: "published",

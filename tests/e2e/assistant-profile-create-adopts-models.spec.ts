@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import {
     mockAuthenticatedApi,
     mockChatStream,
+    openRecentConversation,
+    qaPersistedMessageId,
     sendChatMessage,
 } from "./support/app-fixtures";
 
@@ -60,6 +62,19 @@ type Recorder = { chatModelIds: string[]; createRequests: unknown[] };
  */
 async function recordProfileCreate(page: Page): Promise<Recorder> {
     const recorder: Recorder = { chatModelIds: [], createRequests: [] };
+    await page.route("**/api/chat/context", route => route.fulfill({ json: { contextBundle: null } }));
+    await page.route(`**/api/conversations/${CREATED_ID}/messages`, route => {
+        const { messages, draftConsume } = route.request().postDataJSON() as {
+            messages: Array<{ clientRequestId: string }>;
+            draftConsume?: unknown;
+        };
+        const messageMappings = messages.map(({ clientRequestId }) => ({
+            requestId: clientRequestId, messageId: qaPersistedMessageId(CREATED_ID, clientRequestId),
+        }));
+        return route.fulfill({ status: 201, json: {
+            created: messages.length, messageMappings, draftConsumed: Boolean(draftConsume),
+        } });
+    });
 
     await page.route("**/api/conversations", async (route) => {
         if (route.request().method() !== "POST") {
@@ -117,6 +132,38 @@ async function recordProfileCreate(page: Page): Promise<Recorder> {
 }
 
 test.describe("a conversation started with an assistant", () => {
+    test("a settings launch uses the assistant on the first new turn and leaves the last conversation pinned", async ({ page }, testInfo) => {
+        await mockAuthenticatedApi(page, { assistantProfiles: PROFILES, selectedModels: [COMPOSER_MODEL] });
+        await mockChatStream(page, "Assistant QA response");
+        const recorder = await recordProfileCreate(page);
+        const rebound: string[] = [];
+        page.on("request", (request) => {
+            if (request.method() === "PATCH" && request.url().includes("/api/conversations/") &&
+                Object.hasOwn(request.postDataJSON() ?? {}, "assistantProfileId")) {
+                rebound.push(request.url());
+            }
+        });
+        await page.goto("/review");
+        await openRecentConversation(page);
+        await page.route("**/api/assistant-profiles/p-scheduler", (route) => route.fulfill({ json: { profile: {
+            ...PROFILES[0], currentVersionId: "v3", versions: [], knowledgeFiles: [],
+            currentVersion: { revision: 3, instructions: "Answer briefly.", models: [PROFILE_MODEL],
+                toolPolicy: { webSearch: false, deepResearch: false }, memoryPolicy: { useAccountMemory: false },
+                starters: [], knowledgeManifest: [] },
+        } } }));
+        await page.goto("/settings/assistants/p-scheduler?lang=ko");
+        await page.getByTestId("assistant-start-chat").click();
+        await expect(page).toHaveURL(/\/review(?:\?|$)/);
+        await page.getByTestId("composer-tools-button").click();
+        await expect(page.getByTestId("tools-assistant-row")).toContainText("Scheduling helper");
+        await page.keyboard.press("Escape");
+        await sendChatMessage(page, testInfo, "Hello");
+        await expect.poll(() => recorder.chatModelIds, { timeout: 15_000 }).toEqual([PROFILE_MODEL]);
+        expect(recorder.createRequests).toHaveLength(1);
+        expect(recorder.createRequests[0]).toHaveProperty("assistantProfileId", "p-scheduler");
+        expect(rebound).toEqual([]);
+    });
+
     test("sends its first turn on the assistant's model, not the composer's", async ({
         page,
     }, testInfo) => {
