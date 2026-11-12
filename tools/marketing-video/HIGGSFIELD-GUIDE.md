@@ -8,7 +8,12 @@ Every concept follows these rules, and every review judges against them.
    band code always adds the logo ("tomverse.") and tomverse.app in the same
    place at the bottom.
 3. Balanced: neither busy nor an empty card with a few words. Nothing abstract
-   or meaningless; a stranger gets the message in two seconds.
+   or meaningless. A stranger who has never heard of Tomverse gets, in two
+   seconds, that this is an AI app and what it does for them: one concrete
+   everyday task and its result, in words they would use themselves. Rejected
+   2026-11-12: a desk with two quote cards in English under "같은 열차, 엇갈린
+   조언", with no "AI", no model name and nothing to do (the owner: "뜬구름
+   잡는 광고").
 4. Prefer real people showing the product on a phone or a laptop. Physical
    metaphors (a receipt, a name tag, a checklist) are good too.
 5. Hands, fingers and poses are anatomically possible. Rejected 2026-11-08: a
@@ -29,7 +34,11 @@ Every concept follows these rules, and every review judges against them.
 10. An answer shown under a real model name is that model's recorded answer:
     only the `realExample` quotes and counts in `features.json`. Rejected: a
     made-up GPT answer. An answer under no model name (a custom assistant,
-    "AI") may be written for the scene.
+    "AI") may be written for the scene. The same holds for anything written
+    for the scene that sits beside a model name ("Asked at once: GPT 6 Luna,
+    ..." over a made-up finding, "Continuing with Claude Sonnet 5.5" over a
+    made-up answer): that screen names no model, or only "GPT, Claude, Gemini
+    and more" as a choice the reader has.
 11. A drawn Tomverse screen shows only real features, model names and words
     (`docs/policy/marketing-automation.md §7.3`, 2026-11-08). It is submitted as not depicting the product
     interface; only real captures are.
