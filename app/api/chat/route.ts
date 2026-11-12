@@ -1347,6 +1347,7 @@ async function handleChatPost(
      */
     let providerCall: ProviderCallRecord | null = null;
     let presearchForSettlement: ReturnType<typeof buildAppManagedWebSearchTool> | null = null;
+    let providerBudgetNotice: Promise<void> | undefined;
     let searchObservation: ChatSearchObservation | undefined;
     /**
      * Who this turn was for, hoisted for the catch.
@@ -4648,16 +4649,22 @@ async function handleChatPost(
                 ...shadowAccumulator.snapshot(),
             });
         }
-        try {
-            await notifyProviderBudgetIfNeeded(modelConfig.provider);
-        } catch (error) {
+        const searchSelectionEligible = access.kind !== "guest" && autoSelection.routed &&
+            llmPick?.modelId === modelConfig.id && llmPick.requiresFileGeneration === false;
+        const presearchQueries = allowRouterSearchPlan && searchSelectionEligible && !mcpConnector &&
+            modelConfig.usageClass !== "deep-research" && appManagedSearchEnabled && webSearchCapability.searchBackend
+            ? llmPick?.searchQueries : undefined;
+        // The budget has been reserved. Only the admitted presearch can run
+        // alongside this alert check; both finish before model dispatch.
+        providerBudgetNotice = notifyProviderBudgetIfNeeded(modelConfig.provider).catch((error) => {
             logRequestError(
                 "provider_budget_alert_failed",
                 traceId,
                 error,
                 requestedModelId
             );
-        }
+        });
+        if (!presearchQueries?.length) await providerBudgetNotice;
 
         // Perplexity's "sonar-deep-research" model doesn't stream like every
         // other model here -- it's a submit-then-poll async job that can run
@@ -4843,13 +4850,11 @@ async function handleChatPost(
           disconnects mid-answer does not leave a search running for a turn
           nobody is reading.
         */
-        const searchSelectionEligible = access.kind !== "guest" && autoSelection.routed &&
-            llmPick?.modelId === modelConfig.id && llmPick.requiresFileGeneration === false;
         const appManagedSearchTool =
             appManagedSearchEnabled && webSearchCapability.searchBackend
                 ? buildAppManagedWebSearchTool({
                       backend: webSearchCapability.searchBackend,
-                      extraSnippets: allowRouterSearchPlan && searchSelectionEligible && Boolean(llmPick?.searchQueries?.length) && !mcpConnector,
+                      extraSnippets: Boolean(presearchQueries?.length),
                       maxQueries:
                           appManagedSearchQueryCeiling({
                               capability: webSearchCapability,
@@ -5164,15 +5169,15 @@ async function handleChatPost(
             });
         }
         let lookupStep: ReturnType<typeof qwenLookupStep>;
-        if (allowRouterSearchPlan && searchSelectionEligible &&
-            llmPick?.searchQueries?.length && appManagedSearchTool && !mcpConnector) {
+        if (presearchQueries?.length && appManagedSearchTool && llmPick) {
             presearchForSettlement = appManagedSearchTool;
             const finishPresearch = latency.stage("presearchMs");
             try {
                 const evidence = await prepareRouterSearch({
-                    queries: llmPick.searchQueries,
+                    queries: presearchQueries,
                     tool: appManagedSearchTool,
                     signal: req.signal,
+                    compactEvidence: process.env.CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED === "true",
                     groundedAnswer: process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED === "true"
                         ? (llmPick.simpleLookup === true ? "lookup" : "full") : undefined,
                     inputHeadroomTokens: contextInputTokens - reservationOnlyInputTokens -
@@ -5185,6 +5190,7 @@ async function handleChatPost(
                 }
                 searchObservation?.presearch(injected, Boolean(lookupStep));
             } finally { finishPresearch(); }
+            await providerBudgetNotice;
         }
         const { messages: sdkMessages, instructions: sdkInstructions } =
             splitProviderInstructions(formattedMessages);
@@ -7646,6 +7652,8 @@ async function handleChatPost(
         leaseOwnership = chatLeaseStreamPublished(leaseOwnership);
         return response;
     } catch (error: unknown) {
+        // A setup failure still drains the check before releasing its reservation.
+        if (providerBudgetNotice) await providerBudgetNotice;
         mcpConnector?.cancel();
         /*
           The last catch, and the one that used to get this wrong.

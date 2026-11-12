@@ -1,5 +1,6 @@
 import "server-only";
 import { readResponseLatencyEvidence } from "@/lib/responseLatencyStore";
+import { readChatPresearchLatency } from "@/lib/chatPresearchLatency";
 
 import { generateText, jsonSchema, Output } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
@@ -678,13 +679,16 @@ async function runInBackground(input: {
     // cycle is recorded and only when it passes its range and evidence.
     let proposedSettingChanges: unknown[] = [];
     try {
-        const [candidatesFor, routerStats, catalogueIds, unreliableModels, responseLatency] = await Promise.all([
+        const measuredAt = new Date();
+        const [candidatesFor, routerStats, catalogueIds, unreliableModels, latency, chatPresearchLatency] = await Promise.all([
             autoCandidateMenu(input.models),
-            readRouterStats(new Date()),
+            readRouterStats(measuredAt),
             optimizerCatalogueIds(),
             readUnreliableAnswerModels(),
-            readResponseLatencyEvidence(),
+            readResponseLatencyEvidence(measuredAt),
+            readChatPresearchLatency(measuredAt).catch(() => ({ status: "unavailable" as const })),
         ]);
+        const responseLatency = { ...latency, chatPresearchLatency };
         const result = await runOptimizerCycle(
             {
                 decisions: input.decisions,
