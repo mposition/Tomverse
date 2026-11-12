@@ -432,3 +432,15 @@ test("the bound is checked on the tokens that are not the image, image or no ima
   assert.equal(googleNonImageBillableTokens({ usage: { total_thought_tokens: 7 } }), 7);
   assert.equal(googleNonImageBillableTokens(null), null);
 });
+
+test("the image tokens a response billed are read whether or not it is accepted", async () => {
+  const { googleBilledImageTokens } = await import("../lib/googleImageRequest.ts");
+  const two = {
+    steps: [],
+    usage: { total_output_tokens: 2_440, output_tokens_by_modality: [{ modality: "image", tokens: 2_240 }, { modality: "text", tokens: 200 }] },
+  };
+  assert.equal(googleBilledImageTokens(two), 2_240);
+  assert.equal(googleBilledImageTokens({ usage: { total_output_tokens: 553 } }), null);
+  assert.equal(googleBilledImageTokens({ usage: { output_tokens_by_modality: [{ modality: "text", tokens: 5 }] } }), null);
+  assert.equal(googleBilledImageTokens(null), null);
+});
