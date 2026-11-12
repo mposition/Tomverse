@@ -732,3 +732,27 @@ test("the first row is written as it was read: no invented header, no trimming",
   );
   assert.equal(pdf.format, "pdf");
 });
+
+test("third review: a workbook number keeps its digits, and a long PDF cell runs onto more pages", async () => {
+  const files = attachments([
+    [
+      "precise.xlsx",
+      XLSX,
+      buildXlsx({ rows: [["v"], [{ number: 0.123456789012 }], [{ number: 0.00000000001 }]] }),
+    ],
+    ["long.csv", "text/csv", csvBytes(`note\n"${"word ".repeat(3_000)}"\n`)],
+  ]);
+  const csv = await convert(
+    { operation: "convert_spreadsheet", filename: "p", targetFormat: "csv", sources: [{ attachment: "att_1" }] },
+    files
+  );
+  const text = new TextDecoder().decode(csv.bytes);
+  assert.match(text, /0\.123456789012/);
+  assert.match(text, /1e-11/);
+
+  const pdf = await convert(
+    { operation: "convert_spreadsheet", filename: "l", targetFormat: "pdf", sources: [{ attachment: "att_2" }] },
+    files
+  );
+  assert.ok((await PDFDocument.load(pdf.bytes)).getPageCount() >= 2);
+});

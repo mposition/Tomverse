@@ -340,7 +340,12 @@ const readSheetGrid = (
         } else if (type === "b") {
           value = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] === "1" ? "TRUE" : "FALSE";
         } else if (type === "e") {
-          value = "";
+          // A conversion keeps the error the cell shows (#DIV/0!); a template
+          // field has no use for one.
+          value =
+            strictValueLength !== undefined
+              ? decodeXml(inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? "")
+              : "";
         } else {
           const rawValue = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1];
           if (rawValue !== undefined && rawValue !== "") {
@@ -351,7 +356,12 @@ const readSheetGrid = (
                   ? excelSerialToDisplay(numeric, {
                       withTime: Boolean(styles.hasTime[styleIndex]),
                     })
-                  : formatNumber(numeric);
+                  : strictValueLength !== undefined
+                    ? // Fifteen significant digits is all a spreadsheet number
+                      // has; rounding to ten decimals would turn 0.00000000001
+                      // into 0 in the converted file.
+                      String(Number(numeric.toPrecision(15)))
+                    : formatNumber(numeric);
             }
           }
         }
