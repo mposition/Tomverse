@@ -509,4 +509,30 @@ with tempfile.TemporaryDirectory() as d:
     print("ok   a supported handler still wires Notification")
 PY2
 
+# Outside a pane, tmux answers `display-message -p '#S'` with the server's most
+# recently used session instead of failing. A hook fired by a process outside
+# tmux must report nothing rather than borrow that lane's name (2026-11-11: a
+# systemd `claude --print` job held antigravity-impl at `unattributed`).
+mkdir -p "$TMP/faketmux"
+cat > "$TMP/faketmux/tmux" <<'SH'
+#!/bin/sh
+case " $* " in *" display-message "*) echo amux-tmuxprobe ;; esac
+SH
+chmod +x "$TMP/faketmux/tmux"
+env -u TMUX -u TMUX_PANE -u AMUX_SESSION PATH="$TMP/faketmux:$PATH" \
+  HOME="$TMP/home" AMUX_URL="$URL" \
+  bash scripts/hooks/hook-report.sh active outside-pane-hook <<<'{"session_id":"outside-1"}'
+env -u AMUX_SESSION PATH="$TMP/faketmux:$PATH" TMUX="/tmp/tmux-fake/default,1,0" TMUX_PANE="%1" \
+  HOME="$TMP/home" AMUX_URL="$URL" \
+  bash scripts/hooks/hook-report.sh active inside-pane-hook <<<'{"session_id":"inside-1"}'
+wait_for 'any(r["body"].get("source")=="inside-pane-hook" for r in rows)'
+/usr/bin/python3 - "$CAPTURE" <<'PY'
+import json,sys
+rows=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+inside=[r for r in rows if r["body"].get("source")=="inside-pane-hook"]
+assert inside and all(r["path"]=="/api/sessions/tmuxprobe/report" for r in inside), inside
+assert not [r for r in rows if r["body"].get("source")=="outside-pane-hook"], rows[-3:]
+print("ok   only a process inside a pane takes its lane name from tmux")
+PY
+
 echo "ok   all shipped status-hook durability regressions passed"
