@@ -319,12 +319,15 @@ export async function measureKnowledge(input: {
   const target = await SaveTarget.claim(config.saveScores, snapshot(false));
   let stop: LiveStop | null = null;
   try {
-    const chunkVectors = await client.embed("search_document", corpus.chunks.map((chunk) => chunk.content));
-    corpus.chunks.forEach((chunk, index) => collected.chunkVectors.set(chunk.id, chunkVectors[index]));
-    await target.write(snapshot(false));
-    const queryVectors = await client.embed("search_query", corpus.cases.map((row) => boundQuery(row.query)));
-    corpus.cases.forEach((row, index) => collected.queryVectors.set(row.id, queryVectors[index]));
-    await target.write(snapshot(false));
+    // Recorded after every paid batch, not once per embed call.
+    await client.embed("search_document", corpus.chunks.map((chunk) => chunk.content), async (vectors) => {
+      vectors.forEach((vector, index) => collected.chunkVectors.set(corpus.chunks[index].id, vector));
+      await target.write(snapshot(false));
+    });
+    await client.embed("search_query", corpus.cases.map((row) => boundQuery(row.query)), async (vectors) => {
+      vectors.forEach((vector, index) => collected.queryVectors.set(corpus.cases[index].id, vector));
+      await target.write(snapshot(false));
+    });
     for (const testCase of corpus.cases) {
       const queryTerms = memoryRetrievalTerms(testCase.query);
       // The widest candidate set (lexical plus neighbours): the lexical-only

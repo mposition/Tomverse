@@ -433,3 +433,32 @@ test("the save file holds every paid result as the run goes, not only at the end
     assert.equal(JSON.parse(await readFile(save, "utf8")).complete, true);
   });
 });
+
+test("a snapshot that cannot be written leaves the previous one whole", async () => {
+  const { SaveTarget } = await import("../tools/memory-quality/semanticLive.ts");
+  await withTemp(async (directory) => {
+    const save = join(directory, "saved.json");
+    const target = await SaveTarget.claim(save, { complete: false, scores: { a: 1 } });
+    await target.write({ complete: false, scores: { a: 1, b: 2 } });
+    // A value JSON cannot encode stands in for a write that fails part-way:
+    // the save file still holds the last complete snapshot.
+    const broken = { complete: false };
+    broken.self = broken;
+    await assert.rejects(target.write(broken), { code: "save_scores_failed" });
+    assert.deepEqual(JSON.parse(await readFile(save, "utf8")), { complete: false, scores: { a: 1, b: 2 } });
+    const { readdir } = await import("node:fs/promises");
+    assert.deepEqual(await readdir(directory), ["saved.json"], "no temporary file is left behind");
+  });
+});
+
+test("a claim whose first snapshot fails leaves no file to block a retry", async () => {
+  const { SaveTarget } = await import("../tools/memory-quality/semanticLive.ts");
+  await withTemp(async (directory) => {
+    const save = join(directory, "saved.json");
+    const broken = {};
+    broken.self = broken;
+    await assert.rejects(SaveTarget.claim(save, broken), { code: "save_scores_unwritable" });
+    const target = await SaveTarget.claim(save, { complete: false });
+    assert.ok(target);
+  });
+});

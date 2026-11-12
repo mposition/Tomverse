@@ -1,4 +1,4 @@
-import { access, open, type FileHandle } from "node:fs/promises";
+import { access, open, rename, unlink } from "node:fs/promises";
 import { SEMANTIC_RETRIEVAL_ENV, SEMANTIC_RETRIEVAL_LIMITS } from "../../lib/semanticRetrievalCore";
 import { QualityStop } from "./runner";
 
@@ -71,46 +71,60 @@ async function assertAbsent(path: string) {
   throw new QualityStop("save_scores_exists");
 }
 
+/** Writes a whole file and flushes it; `writeFile` loops until every byte is written. */
+async function writeWhole(path: string, flag: "wx" | "w", body: string) {
+  const handle = await open(path, flag);
+  try {
+    await handle.writeFile(body, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 /**
  * The save file of one paid run, claimed before the first request.
  *
- * Opened with "wx": an existing file -- even one that appeared since the
+ * Created with "wx": an existing file -- even one that appeared since the
  * early check -- is never replaced, and a path whose directory is missing or
- * cannot be written is refused here, while nothing has been spent. The run
- * then rewrites the whole file after every paid request, so whatever stops it
- * -- a failed call, the ceiling, a crash after the last write -- the file holds
- * every result paid for up to that point, marked `complete: false`.
+ * cannot be written is refused here, while nothing has been spent. If the
+ * first snapshot cannot be written the claimed file is removed again, so a
+ * retry is not refused by an empty file this run left behind.
+ *
+ * Every later snapshot is written in full to a sibling temporary file and then
+ * renamed over the save file, which replaces it in one step. The file on disk
+ * is therefore always a complete snapshot -- the previous one until the new
+ * one is whole -- and a crash, a full disk or a short write can lose at most
+ * the request that was being recorded, never the ones recorded before it.
  */
 export class SaveTarget {
-  private constructor(readonly path: string, private handle: FileHandle) {}
+  private constructor(readonly path: string) {}
 
   static async claim(path: string, first: unknown): Promise<SaveTarget> {
-    let handle: FileHandle;
     try {
-      handle = await open(path, "wx");
+      await writeWhole(path, "wx", JSON.stringify(first, null, 2) + "\n");
     } catch (error) {
-      throw new QualityStop((error as NodeJS.ErrnoException).code === "EEXIST" ? "save_scores_exists" : "save_scores_unwritable");
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST") await unlink(path).catch(() => undefined);
+      throw new QualityStop(code === "EEXIST" ? "save_scores_exists" : "save_scores_unwritable");
     }
-    const target = new SaveTarget(path, handle);
-    await target.write(first);
-    return target;
+    return new SaveTarget(path);
   }
 
-  /** Replaces the file's contents. A failure stops the run: the next request would be unrecorded. */
+  /** Replaces the snapshot. A failure stops the run: the next request would be unrecorded. */
   async write(value: unknown) {
-    const body = Buffer.from(JSON.stringify(value, null, 2) + "\n", "utf8");
+    const temporary = `${this.path}.${process.pid}.tmp`;
     try {
-      await this.handle.truncate(0);
-      await this.handle.write(body, 0, body.length, 0);
-      await this.handle.sync();
+      await writeWhole(temporary, "w", JSON.stringify(value, null, 2) + "\n");
+      await rename(temporary, this.path);
     } catch {
+      await unlink(temporary).catch(() => undefined);
       throw new QualityStop("save_scores_failed");
     }
   }
 
-  async close() {
-    await this.handle.close().catch(() => undefined);
-  }
+  /** Nothing is held open between snapshots; kept so callers have one place to end a run. */
+  async close() {}
 }
 
 export class CallMeter {
@@ -139,7 +153,16 @@ export const embedBatchCount = (inputs: number) =>
 export type LiveClient = {
   meter: CallMeter;
   rerank(query: string, documents: readonly string[]): Promise<number[]>;
-  embed(inputType: EmbedKind, texts: readonly string[]): Promise<Int8Array[]>;
+  /**
+   * Embeds in batches of the provider's request size. `afterBatch` runs after
+   * every paid batch with the vectors so far, so the caller can record them
+   * before the next request is made.
+   */
+  embed(
+    inputType: EmbedKind,
+    texts: readonly string[],
+    afterBatch?: (vectorsSoFar: readonly Int8Array[]) => Promise<void>,
+  ): Promise<Int8Array[]>;
 };
 
 /**
@@ -168,7 +191,7 @@ export async function openLiveClient(config: LiveConfig, context: LiveContext): 
       else meter.searchUnits += result.value.searchUnits;
       return result.value.scores;
     },
-    async embed(inputType, texts) {
+    async embed(inputType, texts, afterBatch) {
       const vectors: Int8Array[] = [];
       for (let start = 0; start < texts.length; start += SEMANTIC_RETRIEVAL_LIMITS.maxEmbedInputsPerRequest) {
         const batch = texts.slice(start, start + SEMANTIC_RETRIEVAL_LIMITS.maxEmbedInputsPerRequest);
@@ -179,6 +202,7 @@ export async function openLiveClient(config: LiveConfig, context: LiveContext): 
         if (!result.ok) throw new LiveStop("live_call_failed", result.failure);
         meter.embedInputTokens += result.value.inputTokens ?? 0;
         vectors.push(...result.value.vectors);
+        if (afterBatch) await afterBatch(vectors);
       }
       return vectors;
     },
