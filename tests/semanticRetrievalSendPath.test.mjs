@@ -10,15 +10,15 @@ import test from "node:test";
  * signed selection.
  *
  * A structural check rather than a behavioural one, because the behaviour is
- * covered where it lives (the database suites drive "cached_only" directly)
- * and what can silently regress is this one argument at the call site.
+ * covered where it lives (the database suites drive the modes directly) and
+ * what can silently regress is how this one call site is wired.
  */
 
-const callBlocks = (source) => {
+const callBlocks = (source, name) => {
     const blocks = [];
     let from = 0;
     for (;;) {
-        const start = source.indexOf("buildChatTurnContext({", from);
+        const start = source.indexOf(name + "(", from);
         if (start < 0) return blocks;
         let depth = 0;
         let index = source.indexOf("(", start);
@@ -33,20 +33,42 @@ const callBlocks = (source) => {
     }
 };
 
-test("the send route rebuilds its context from cached semantic results only", () => {
-    const blocks = callBlocks(readFileSync("app/api/chat/route.ts", "utf8"));
-    assert.ok(blocks.length > 0, "the send route builds a turn context");
-    for (const block of blocks) {
-        assert.match(block, /semantic:\s*"cached_only"/);
+test("the send route builds its context only through the verifying rebuild", () => {
+    const source = readFileSync("app/api/chat/route.ts", "utf8");
+    const rebuilds = callBlocks(source, "rebuildTurnContextForBundle");
+    assert.ok(rebuilds.length > 0, "the send route rebuilds for the bundle it verifies");
+
+    const builds = callBlocks(source, "buildChatTurnContext").filter((block) =>
+        block.startsWith("buildChatTurnContext({")
+    );
+    assert.ok(builds.length > 0, "the send route builds a turn context");
+    for (const build of builds) {
+        // The mode comes from the rebuild, never from a literal here.
+        assert.match(build, /\n\s*semantic,\n/);
+        assert.ok(
+            rebuilds.some((rebuild) => rebuild.includes(build)),
+            "every context build on the send route is inside the verifying rebuild"
+        );
     }
+});
+
+test("the verifying rebuild never uses the mode that may call the provider", () => {
+    const source = readFileSync("lib/chatTurnContext.ts", "utf8");
+    const start = source.indexOf("const VERIFYING_MODES");
+    const end = source.indexOf("];", start);
+    assert.ok(start >= 0 && end > start, "the verifying modes are declared");
+    const modes = source.slice(start, end);
+    assert.doesNotMatch(modes, /"allow"/);
+    assert.match(modes, /"cached_only"/);
+    assert.match(modes, /"off"/);
 });
 
 test("the routes that issue a bundle are the ones allowed to call the provider", () => {
     for (const route of ["app/api/chat/context/route.ts", "app/api/chat/preflight/route.ts"]) {
-        const blocks = callBlocks(readFileSync(route, "utf8"));
+        const blocks = callBlocks(readFileSync(route, "utf8"), "buildChatTurnContext");
         assert.ok(blocks.length > 0, `${route} builds a turn context`);
         for (const block of blocks) {
-            assert.doesNotMatch(block, /semantic:/, `${route} issues the bundle`);
+            assert.doesNotMatch(block, /semantic/, `${route} issues the bundle`);
         }
     }
 });

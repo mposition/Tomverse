@@ -21,6 +21,7 @@ import {
     type ChatProfileContext,
 } from "@/lib/chatProfileContext";
 import type { ModelTier } from "@/lib/models";
+import { anySemanticRetrievalReady } from "@/lib/semanticRetrieval";
 import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
 
 /**
@@ -66,6 +67,60 @@ export type ChatTurnContext = {
     binding: ProfileRuntimeBinding | null;
 };
 
+/** One mode for the whole turn, or one each for memory and knowledge. */
+export type SemanticTurnMode =
+    | SemanticCallMode
+    | { memory: SemanticCallMode; knowledge: SemanticCallMode };
+
+/**
+ * The modes the verifying route may have to try, in order.
+ *
+ * A bundle does not say whether it was signed over a semantic selection or a
+ * lexical one, and the shared cache cannot say it either: an issue that fell
+ * back to lexical (the provider failed, the budget refused, the cache could
+ * not be written) may be followed by another issue of the same question that
+ * stored a ranking. So the bundle's own fingerprint decides. The cached
+ * selection is tried first; if that is not what was signed, the lexical one
+ * is, and then the two mixes, since memory and knowledge fall back
+ * independently. None of these calls the provider.
+ */
+const VERIFYING_MODES: readonly SemanticTurnMode[] = [
+    "cached_only",
+    "off",
+    { memory: "cached_only", knowledge: "off" },
+    { memory: "off", knowledge: "cached_only" },
+];
+
+/**
+ * Rebuilds a turn's context for the route that verifies a bundle, and returns
+ * the build the bundle was signed over together with its verification.
+ *
+ * `build` is the route's own call to `buildChatTurnContext` with the mode
+ * filled in; `verify` is its bundle check, run exactly once per build; and
+ * `isStale` says whether a verification failed only because the fingerprint
+ * differs -- the one failure another build can cure. When no build verifies,
+ * the first build and its verification are returned, so the caller reports the
+ * mismatch as it always did. While no retrieval switch is on there is exactly
+ * one build and one check, as before.
+ */
+export async function rebuildTurnContextForBundle<Verification>(
+    build: (semantic: SemanticTurnMode) => Promise<ChatTurnContext>,
+    verify: (context: ChatTurnContext) => Verification,
+    isStale: (verification: Verification) => boolean
+): Promise<{ turnContext: ChatTurnContext; verification: Verification }> {
+    const turnContext = await build(VERIFYING_MODES[0]);
+    const verification = verify(turnContext);
+    if (!isStale(verification) || !(await anySemanticRetrievalReady())) {
+        return { turnContext, verification };
+    }
+    for (const mode of VERIFYING_MODES.slice(1)) {
+        const candidate = await build(mode);
+        const checked = verify(candidate);
+        if (!isStale(checked)) return { turnContext: candidate, verification: checked };
+    }
+    return { turnContext, verification };
+}
+
 export async function buildChatTurnContext(input: {
     /** Null for a guest, who has neither account memory nor a profile. */
     userId: string | null;
@@ -85,10 +140,15 @@ export async function buildChatTurnContext(input: {
      * verifies one and sends passes "cached_only": it reuses the outcome the
      * issuing route stored and otherwise stays lexical, so it reproduces the
      * signed selection whatever happened to the provider or the cache in
-     * between, and the send path never waits on or pays that provider.
+     * between, and the send path never waits on or pays that provider. It
+     * does so through `rebuildTurnContextForBundle`, which supplies the mode.
      */
-    semantic?: SemanticCallMode;
+    semantic?: SemanticTurnMode;
 }): Promise<ChatTurnContext> {
+    const semantic =
+        typeof input.semantic === "object"
+            ? input.semantic
+            : { memory: input.semantic, knowledge: input.semantic };
     const profile = input.profileVersionId
         ? await buildChatProfileContext({
               userId: input.userId,
@@ -97,7 +157,7 @@ export async function buildChatTurnContext(input: {
               plan: input.plan ?? null,
               entitledTools:
                   input.entitledTools ?? { webSearch: true, deepResearch: true },
-              semantic: input.semantic,
+              semantic: semantic.knowledge,
           })
         : NO_PROFILE_CONTEXT;
 
@@ -110,7 +170,7 @@ export async function buildChatTurnContext(input: {
         // memory off by absence.
         profileMemoryPolicy: profile.memoryPolicy,
         now: input.now,
-        semantic: input.semantic,
+        semantic: semantic.memory,
     });
 
     const systemPrompt = buildProfileSystemPrompt({

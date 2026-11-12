@@ -691,8 +691,17 @@ Tomverse 밖으로 나가기 때문입니다.
   — 발급 route가 저장한 결과가 있으면 그것을 쓰고, 없으면 lexical입니다. 그래서
   lexical 선택 위에 서명된 bundle(provider 실패, 예산 거절, cache 저장 실패)은
   검증 시점에 provider나 cache가 복구돼 있어도 lexical로 재현됩니다. 전송 경로는
-  검색 provider를 기다리지도, 비용을 내지도 않습니다. `tests/semanticRetrievalSendPath.test.mjs`가
-  이 인자를 지킵니다.
+  검색 provider를 기다리지도, 비용을 내지도 않습니다.
+- **어느 선택으로 검증할지는 bundle의 fingerprint가 정합니다.** bundle은 자신이
+  의미 선택 위에 서명됐는지 lexical 선택 위에 서명됐는지 말하지 않고, 공유 cache도
+  말해 주지 못합니다 — lexical로 떨어진 발급 뒤에 같은 질문의 다른 발급이 순위를
+  저장할 수 있습니다. 그래서 `/api/chat`은 저장된 결과로 다시 만든 context가
+  서명과 다르면 의미 검색을 끈 context로 다시 만들어 대조하고(memory와 knowledge는
+  따로 떨어지므로 두 혼합도), 서명과 일치하는 쪽을 씁니다. 어느 것도 provider를
+  호출하지 않으며, 일치하는 것이 없으면 종전대로 `CHAT_CONTEXT_BUNDLE_STALE`입니다.
+  의미 검색 스위치가 모두 꺼져 있으면 재구성은 한 번뿐입니다
+  (`lib/chatTurnContext.ts`의 `rebuildTurnContextForBundle`,
+  `tests/semanticRetrievalSendPath.test.mjs`).
 - **한 턴은 한 결과를 봅니다.** context bundle은 `/api/chat/context`·`preflight`·
   `/api/chat`에서 다시 계산되고 fingerprint가 다르면 거절됩니다(§10). 그래서
   (질문, 후보) 쌍의 첫 결과 — 순위든 실패든 — 를 `SemanticRetrievalCache`에

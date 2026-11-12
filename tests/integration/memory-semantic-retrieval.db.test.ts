@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 import type { Session } from "next-auth";
+import {
+    rebuildTurnContextForBundle,
+    type ChatTurnContext,
+    type SemanticTurnMode,
+} from "@/lib/chatTurnContext";
 import { externalContentDigest } from "@/lib/externalImportDigest";
 import { leaseStillHolds } from "@/lib/memoryExtractionCommit";
 import { persistExtractionChunkDecisions } from "@/lib/memoryExtractionPersistence";
@@ -569,4 +574,106 @@ test("a bundle issued over a failed rerank verifies as lexical after the provide
     const verified = await retrieveMemoryContext({ ...input, semantic: "cached_only" });
     assert.equal(provider.state.calls.length, 1);
     assert.equal(verified.resultHash, issued.resultHash);
+});
+
+/* ----------------------------- the bundle's fingerprint picks the rebuild */
+
+/**
+ * The verifying route's rebuild, reduced to memory: a "context" whose
+ * fingerprint is the retrieval's own result hash. Counts its builds.
+ */
+const memoryRebuild = (input: { userId: string; query: string; now: Date }) => {
+    const modes: SemanticTurnMode[] = [];
+    const build = async (semantic: SemanticTurnMode) => {
+        modes.push(semantic);
+        const retrieval = await retrieveMemoryContext({
+            ...input,
+            semantic: typeof semantic === "object" ? semantic.memory : semantic,
+        });
+        return { fingerprint: retrieval.resultHash } as ChatTurnContext;
+    };
+    return { build, modes };
+};
+
+test("a bundle signed over a lexical selection verifies after another issue stored a ranking", async () => {
+    const user = await createUser();
+    await createMemory(user.id, "preference", CAFFEINE);
+    await createMemory(user.id, "identity", ENGINEER);
+    await turnOn("memoryRerank");
+    provider.state.rerankScore = () => 0.8;
+    const input = { userId: user.id, query: COFFEE_QUESTION, now: NOW };
+
+    // Bundle one is issued while the cache is unavailable: lexical, unrecorded.
+    await prisma.$executeRawUnsafe(
+        'ALTER TABLE "SemanticRetrievalCache" RENAME TO "SemanticRetrievalCacheUnavailable"'
+    );
+    let lexical;
+    try {
+        lexical = await retrieveMemoryContext(input);
+    } finally {
+        await prisma.$executeRawUnsafe(
+            'ALTER TABLE "SemanticRetrievalCacheUnavailable" RENAME TO "SemanticRetrievalCache"'
+        );
+    }
+    assert.equal(lexical.algorithmVersion, 2);
+
+    // The cache recovers and bundle two, the same question, stores a ranking.
+    const ranked = await retrieveMemoryContext(input);
+    assert.equal(ranked.algorithmVersion, 3);
+    assert.notEqual(ranked.resultHash, lexical.resultHash);
+    const callsAfterIssuing = provider.state.calls.length;
+
+    // Bundle one is sent. The cache now answers with bundle two's ranking,
+    // which is not what bundle one signed -- so the lexical rebuild is used.
+    const first = memoryRebuild(input);
+    const verifiedOne = await rebuildTurnContextForBundle(
+        first.build,
+        (context) => context.fingerprint === lexical.resultHash,
+        (matched) => !matched
+    );
+    assert.equal(verifiedOne.turnContext.fingerprint, lexical.resultHash);
+    assert.equal(verifiedOne.verification, true);
+    assert.deepEqual(first.modes, ["cached_only", "off"]);
+
+    // Bundle two verifies on the first build.
+    const second = memoryRebuild(input);
+    const verifiedTwo = await rebuildTurnContextForBundle(
+        second.build,
+        (context) => context.fingerprint === ranked.resultHash,
+        (matched) => !matched
+    );
+    assert.equal(verifiedTwo.turnContext.fingerprint, ranked.resultHash);
+    assert.equal(verifiedTwo.verification, true);
+    assert.deepEqual(second.modes, ["cached_only"]);
+
+    // Verifying never asked the provider.
+    assert.equal(provider.state.calls.length, callsAfterIssuing);
+
+    // A fingerprint nobody signed stays a mismatch after every mode is tried.
+    const third = memoryRebuild(input);
+    const unsigned = await rebuildTurnContextForBundle(
+        third.build,
+        () => false,
+        (matched) => !matched
+    );
+    assert.equal(unsigned.turnContext.fingerprint, ranked.resultHash);
+    assert.equal(unsigned.verification, false);
+    assert.equal(third.modes.length, 4);
+
+    // A failure another build cannot cure (an expired bundle, a bad
+    // signature) is reported from the first build without trying the rest.
+    const fourth = memoryRebuild(input);
+    await rebuildTurnContextForBundle(fourth.build, () => "expired", () => false);
+    assert.deepEqual(fourth.modes, ["cached_only"]);
+});
+
+test("with no retrieval switch on, a mismatch is rebuilt once and not retried", async () => {
+    const user = await createUser();
+    await createMemory(user.id, "identity", ENGINEER);
+    const rebuild = memoryRebuild({ userId: user.id, query: COFFEE_QUESTION, now: NOW });
+
+    await rebuildTurnContextForBundle(rebuild.build, () => false, (matched) => !matched);
+
+    assert.deepEqual(rebuild.modes, ["cached_only"]);
+    assert.equal(provider.state.calls.length, 0);
 });

@@ -269,7 +269,9 @@ export async function retrieveMemoryContext(input: {
     // worth. A request with no usable term asks for none: there is nothing to
     // rank them against.
     const rerank =
-        queryTerms.length > 0 && (await semanticFeatureReady("memoryRerank")) !== null;
+        input.semantic !== "off" &&
+        queryTerms.length > 0 &&
+        (await semanticFeatureReady("memoryRerank")) !== null;
     const extraRows = rerank
         ? await prisma.memoryItem.findMany({
               where: {

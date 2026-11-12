@@ -52,8 +52,12 @@ export const semanticRetrievalSettingKey = (feature: SemanticRetrievalFeature) =
  * itself could not be written -- be reproduced exactly: the verifying route
  * cannot turn it semantic by succeeding where the issuing route did not. It
  * also means the send path never waits on, or pays, the retrieval provider.
+ *
+ * "off" skips the semantic step entirely, cache included. The verifying route
+ * uses it to rebuild the purely lexical selection when the cached one is not
+ * what the bundle was signed over (lib/chatTurnContext.ts).
  */
-export type SemanticCallMode = "allow" | "cached_only";
+export type SemanticCallMode = "allow" | "cached_only" | "off";
 
 /** Which API a feature spends on, so a feature is ready only with that config. */
 export const SEMANTIC_RETRIEVAL_FEATURE_API: Record<

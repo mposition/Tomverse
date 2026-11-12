@@ -60,6 +60,18 @@ export const semanticFeatureReady = async (
     return { config, budget: config.budget };
 };
 
+/**
+ * Whether any retrieval-time feature is on and payable: the three that can
+ * change which memory or knowledge reaches a prompt. Indexing-only features
+ * are not asked about -- they change what is stored, not what a turn selects.
+ */
+export const anySemanticRetrievalReady = async (): Promise<boolean> => {
+    for (const feature of ["memoryRerank", "knowledgeRerank", "knowledgeEmbed"] as const) {
+        if (await semanticFeatureReady(feature)) return true;
+    }
+    return false;
+};
+
 const log = (fields: Record<string, unknown>) =>
     console.info(JSON.stringify({ event: "semantic_retrieval", ...fields }));
 
@@ -250,6 +262,7 @@ export async function rerankForRetrieval(input: {
     /** "cached_only" on the route that verifies a bundle. Defaults to "allow". */
     mode?: SemanticCallMode;
 }): Promise<ReadonlyMap<string, number> | null> {
+    if (input.mode === "off") return null;
     const query = boundQuery(input.query).trim();
     const documents = input.documents.slice(0, SEMANTIC_RETRIEVAL_LIMITS.maxRerankDocuments);
     if (!query || documents.length === 0) return null;
@@ -337,6 +350,7 @@ export async function embedQueryForRetrieval(input: {
     /** "cached_only" on the route that verifies a bundle. Defaults to "allow". */
     mode?: SemanticCallMode;
 }): Promise<{ vector: Int8Array; modelLabel: string } | null> {
+    if (input.mode === "off") return null;
     const query = boundQuery(input.query).trim();
     if (!query) return null;
     const ready = await semanticFeatureReady(input.feature);

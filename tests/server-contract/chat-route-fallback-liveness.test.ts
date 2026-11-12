@@ -547,6 +547,15 @@ mock.module(mod("lib/chatTurnContext.ts"), {
         profile: { knowledgeChunkCount: 0 },
       };
     },
+    // What the real rebuild does while no retrieval switch is on: one build,
+    // one check.
+    rebuildTurnContextForBundle: async (
+      build: (semantic: string) => Promise<unknown>,
+      verify: (context: unknown) => unknown
+    ) => {
+      const turnContext = await build("cached_only");
+      return { turnContext, verification: verify(turnContext) };
+    },
   },
 });
 mock.module(mod("lib/chatContextBundleService.ts"), {

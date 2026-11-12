@@ -417,7 +417,7 @@ import {
     recordShadowReservation,
     SHADOW_CANDIDATE_ESTIMATOR_VERSION,
 } from "@/lib/tokenEstimateShadowRecorder";
-import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { buildChatTurnContext, rebuildTurnContextForBundle } from "@/lib/chatTurnContext";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
     consumeContextBundle,
@@ -2310,22 +2310,26 @@ async function handleChatPost(
         // A user can revoke memory or change the profile while the Router runs:
         // only the later, freshly rebuilt context may reach the answer model.
         const checkPricedContext = async (token: string, userId: string, profileVersionId: string | null, memoryMode: string | null) => {
-            const turnContext = await buildChatTurnContext({
-                userId,
-                query: latestUserPromptText(messages),
-                profileVersionId,
-                plan: accountPlan?.tier ?? null,
-                conversationMode: memoryMode,
-                // This route verifies a bundle another route issued. It reuses
-                // the semantic outcome that route stored and never asks the
-                // retrieval provider itself.
-                semantic: "cached_only",
-            });
-            const verification = verifyChatContextBundle(token, {
-                subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
-                currentFingerprint: turnContext.fingerprint,
-            });
-            return { turnContext, verification };
+            // This route verifies a bundle another route issued. It never
+            // asks the retrieval provider: it rebuilds from what that route
+            // stored, and if that is not what the bundle was signed over, from
+            // the lexical selection -- the bundle's fingerprint decides.
+            return rebuildTurnContextForBundle(
+                (semantic) => buildChatTurnContext({
+                    userId,
+                    query: latestUserPromptText(messages),
+                    profileVersionId,
+                    plan: accountPlan?.tier ?? null,
+                    conversationMode: memoryMode,
+                    semantic,
+                }),
+                (context) => verifyChatContextBundle(token, {
+                    subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
+                    currentFingerprint: context.fingerprint,
+                }),
+                // Only a stale fingerprint can be cured by another build.
+                (verification) => !verification.ok && verification.reason === "stale"
+            );
         };
         const refuseContext = async (refusalReason: Extract<ReturnType<typeof verifyChatContextBundle>, { ok: false }>["reason"],
             claimedInitialFusion = false) => {
