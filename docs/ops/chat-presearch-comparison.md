@@ -144,3 +144,67 @@ a missing station observation, both arms searched and made a second model call,
 finishing in 21.634s and 18.524s. On a separate USGS question the baseline
 searched and made two answer calls (13.612s), and the candidate used the
 supplied evidence in one call (9.975s).
+
+### Source fidelity on the grounded answer fast path
+
+`CHAT_GROUNDED_SOURCE_FIDELITY_ENABLED=true` opts a classified Smart Adaptive
+presearch turn into numbered source citations when the #3783 fast path is on.
+The existing packet keeps its sources, order, excerpts and metadata. The
+answer receives the request time and instructions to distinguish observations
+from forecasts, check the actors, dates and units, and describe gaps in the
+available excerpts. If numbering exceeds the existing allowance, the original
+packet wins. The primary stream expands the first reference to each source
+into its exact URL before delivery and persistence. A repeated reference uses
+the same number. An additional search remains available for missing facts and
+can supply a new direct link. This requires no extra verification-model call.
+
+A November 13, 2026 AEST comparison kept #3783 on and router candidate
+compression off in both arms. A local Chromium client sent the same Korean
+questions through the Chat route with a live GPT-6 Luna router and Qwen 3.8
+Flash answer model. The source packets, clock, initial conversation history
+and model selection were fixed. The six primary topics were Brisbane weather,
+NASA Voyager, HTTP 429, the distribution of Earth's water, Himeji Castle and
+World Aquatics medley rules. Three additional paired repetitions and one
+paired missing-observation recovery case brought the total to 10 per arm. All
+20 turns completed. These are controlled browser timings, with search and
+persistence isolated. At these sample sizes the nearest-rank p95 is the
+slowest observation in each arm.
+
+| Browser metric | First six topics, OFF → ON (s) | All ten turns, OFF → ON (s) |
+|---|---:|---:|
+| First visible answer p50 | 9.370 → 6.908 | 9.370 → 6.913 |
+| First visible answer p95 | 13.957 → 15.090 | 13.957 → 15.090 |
+| Completion p50 | 14.621 → 9.843 | 14.621 → 10.312 |
+| Completion p95 | 19.472 → 19.699 | 19.472 → 19.699 |
+| Finishing within 10 seconds | 0/6 → 3/6 | 1/10 → 4/10 |
+
+The ten turns needed 14 → 12 answer calls, including 4 → 2 follow-ups.
+The incomplete weather pair recovered the missing observation in both arms
+(17.370 → 14.433 seconds). The slowest candidate was the first Voyager turn:
+the answer provider took 12.913 seconds to first text versus 2.909 seconds
+on its paired control. Reasoning tokens rose from 102 to 622. The cached
+input token counts were 1,024 and zero respectively. On repetition, Voyager
+completed in 9.763 → 9.710 seconds. The trial does not establish which of
+provider reasoning, caching or other provider variation caused the tail.
+
+Blind grading before the final display fix found the requested core facts in
+10/10 answers in both arms. All required official documents were reachable
+through body links in 8/10 → 10/10. Three control answers added incorrect or
+unsupported assertions about forecast publication times, Korean local time or
+RFC history. No candidate answer repeated such an assertion. One candidate
+weather answer mixed English into a Korean sentence.
+
+In both medley repetitions the model flattened a dated directory in a bare
+official PDF URL. The candidate also supplied a correct numbered citation.
+The final stream recognizes that observed spelling only when an entire
+standalone HTTPS URL, UUID, filename and page can be bound to the original
+evidence. It restores the two date separators from that evidence. Live-model
+timings above precede this final display-only change.
+Replaying all ten captured candidate model outputs through the final renderer
+one Unicode character at a time changed the two malformed links to the exact
+official PDF. All 29 displayed links then matched evidence, up from 27/29.
+The first visible character was released at the same input position and the
+factual wording was identical on all ten. A local CPU replay of 100 iterations
+per answer took 0.319 ms p95 with the final renderer. Original provider chunk
+arrival times were not recorded, so this replay measures display behavior,
+not a new browser latency distribution. The 10-second p95 goal remains open.

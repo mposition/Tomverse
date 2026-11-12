@@ -606,6 +606,7 @@ let fallbackBehaviour:
   | "silent"
   | "partial"
   | "completion_wait" = "answers";
+let primaryAnswerChunks: string[] | undefined;
 let injectPrimaryFault = true;
 let turnLocation: Record<string, unknown> | undefined;
 let completionUsageRead = false;
@@ -690,7 +691,7 @@ mock.module("ai", {
         textStream: new ReadableStream<string>({
           start(controller) {
             if ((index === 0 && injectPrimaryFault) || silent) return;
-            controller.enqueue(ANSWER);
+            for (const chunk of (index === 0 ? primaryAnswerChunks : undefined) ?? [ANSWER]) controller.enqueue(chunk);
             if (!partial) controller.close();
           },
           cancel(reason) {
@@ -729,7 +730,7 @@ mock.module("ai", {
 /* -------------------------------------------------------------------------- */
 
 const world = {
-  messages: [] as Array<{ id: string; status: string; modelId: string }>,
+  messages: [] as Array<{ id: string; status: string; modelId: string; content?: string }>,
   terminals: [] as Array<Record<string, unknown>>,
 };
 let failAssistantPersistence = false;
@@ -869,7 +870,7 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
       };
     },
     create: (args: {
-      data: { id: string; status: string; modelId: string };
+      data: { id: string; status: string; modelId: string; content?: string };
     }) => {
       if (failAssistantPersistence && args.data.id === ASSISTANT_MESSAGE_ID) {
         throw new Error("FORCED_ASSISTANT_MESSAGE_TX_FAILURE");
@@ -878,6 +879,7 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
         id: args.data.id,
         status: args.data.status,
         modelId: args.data.modelId,
+        content: args.data.content,
       });
       return args.data;
     },
@@ -3981,10 +3983,11 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     flash.contextWindowTokens = originalWindow;
     selectedConversationModels = oldModels;
     conversationSelectionMode = "auto";
-    for (const key of ["CHAT_CONCISE_GROUNDED_ANSWER_ENABLED", "CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED", "CHAT_QWEN_GROUNDED_LOOKUP_ENABLED", "CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED", "CHAT_ROUTER_PRESEARCH_ENABLED", "BRAVE_SEARCH_API_KEY", "APP_ENV"]) {
+    for (const key of ["CHAT_CONCISE_GROUNDED_ANSWER_ENABLED", "CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED", "CHAT_QWEN_GROUNDED_LOOKUP_ENABLED", "CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED", "CHAT_GROUNDED_SOURCE_FIDELITY_ENABLED", "CHAT_ROUTER_PRESEARCH_ENABLED", "BRAVE_SEARCH_API_KEY", "APP_ENV"]) {
       if (oldEnv[key] === undefined) delete process.env[key]; else process.env[key] = oldEnv[key];
     }
     forceAppManagedSearch = false; failPresearchBackend = false;
+    primaryAnswerChunks = undefined;
     llmSimpleLookup = undefined; llmSearchQueries = undefined; llmSearchModelId = undefined; llmSearchFileIntent = undefined;
   });
   flash.apiModel = "qwen3.8-flash";
@@ -4005,11 +4008,13 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     else process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED = "true";
     process.env.CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED = String(scenario === "compact" || scenario === "answer flag off");
     process.env.CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED = String(["fast lookup", "both lookup flags", "complex", "manual", "no sources", "presearch off", "unclassified"].includes(scenario));
+    process.env.CHAT_GROUNDED_SOURCE_FIDELITY_ENABLED = String(scenario !== "both lookup flags");
     process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED = String(!["lookup flag off", "fast lookup"].includes(scenario));
     process.env.CHAT_ROUTER_PRESEARCH_ENABLED = String(scenario !== "presearch off");
     failPresearchBackend = scenario === "no sources" ? "all" : false;
     llmSimpleLookup = scenario === "unclassified" ? undefined : scenario !== "complex";
-    await ask("answers", "claimed", 200, false, undefined, true, false, undefined, "always", "none", flash.id);
+    primaryAnswerChunks = scenario === "fast lookup" ? ["Visit the official result [[ci", "te:R1]]."] : undefined;
+    const { body } = await ask("answers", "claimed", 200, false, undefined, true, false, undefined, "always", "none", flash.id);
     assert.equal(attempts[0].modelId, flash.id, scenario);
     assert.equal(attempts[0].toolNames.includes("web_search"), true, scenario);
     const prompt = JSON.stringify(attempts[0].messages);
@@ -4017,6 +4022,13 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     assert.equal(prompt.includes("Verified fixture fact."), withEvidence, scenario);
     const userContent = attempts[0].messages.findLast(message => message.role === "user")?.content;
     const lastPart = Array.isArray(userContent) ? userContent.at(-1)?.text ?? "" : "";
+    const usesSourceIds = scenario === "fast lookup" || scenario === "complex";
+    assert.equal(lastPart.includes("[[cite:R1]]"), usesSourceIds, scenario);
+    if (scenario === "fast lookup") {
+      const expected = "Visit the official result [1](<https://example.com/evidence>).";
+      assert.equal(splitStreamKeepaliveSignal(splitSearchMetadataTrailer(body).displayText).text, expected);
+      assert.equal(world.messages.at(-1)?.content, expected);
+    }
     if (withEvidence && Array.isArray(userContent)) {
       const packet = JSON.parse(userContent.find(part => part.text?.includes("Verified fixture fact."))!.text!);
       assert.equal(packet.status, scenario === "compact" ? "ok" : "batch", scenario);
