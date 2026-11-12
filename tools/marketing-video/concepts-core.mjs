@@ -106,20 +106,33 @@ function modelNameProblem(text, models, where) {
 }
 
 /** null when the answer is fine, or the first reason it is not. */
-export function checkConcepts(answer, { feature, history = [], day, toolDir }) {
+export function checkConcepts(answer, options) {
+  const sorted = sortConcepts(answer, options);
+  return sorted.problem ?? sorted.dropped[0]?.problem ?? null;
+}
+
+/**
+ * Splits an answer into the concepts that pass and those that do not:
+ * `{problem}` when the answer as a whole is refused, else `{kept, dropped:
+ * [{id, problem}]}`. One bad concept no longer costs the day: the box runs of
+ * 2026-11-11 and 2026-11-12 each made nothing because one concept of three
+ * broke one rule twice.
+ */
+export function sortConcepts(answer, { feature, history = [], day, toolDir }) {
+  const refuse = (problem) => ({ problem });
   const features = loadFeatures(toolDir);
-  if (!features.some((entry) => entry.id === feature)) return `feature ${feature} is not in features.json`;
+  if (!features.some((entry) => entry.id === feature)) return refuse(`feature ${feature} is not in features.json`);
   const models = knownModels(features);
   const quotes = recordedQuotes(features);
   const iconDir = path.resolve(toolDir, "..", "..", "public", "model-icons");
   const used = new Set((day ? recentDevices(history, day) : []).map(compact));
   const { concepts } = answer;
-  if (Object.keys(answer).some((key) => !["date", "feature", "concepts"].includes(key))) return "the answer has keys other than date, feature, concepts";
-  if (!Array.isArray(concepts) || concepts.length < 2 || concepts.length > 3) return "concepts: 2-3 entries";
+  if (Object.keys(answer).some((key) => !["date", "feature", "concepts"].includes(key))) return refuse("the answer has keys other than date, feature, concepts");
+  if (!Array.isArray(concepts) || concepts.length < 2 || concepts.length > 3) return refuse("concepts: 2-3 entries");
   const ids = new Set();
   const devices = new Set();
   const KEYS = "alt,device,factRefs,feature,id,logos,prompt_en,texts,translations";
-  for (const concept of concepts) {
+  const problemOf = (concept) => {
     const at = `concept ${concept?.id ?? "?"}`;
     if (Object.keys(concept ?? {}).sort().join(",") !== KEYS) return `${at}: keys must be exactly ${KEYS}`;
     if (!/^[a-z][a-z0-9-]{0,15}$/u.test(concept.id) || ids.has(concept.id)) return `${at}: id is short lower-case and unique`;
@@ -195,6 +208,14 @@ export function checkConcepts(answer, { feature, history = [], day, toolDir }) {
       if (!isText(concept.alt[locale], min, 400)) return `${at} alt.${locale}: ${min}-400 characters`;
       if (URL_LIKE.test(concept.alt[locale])) return `${at} alt.${locale}: say "web address", never the address`;
     }
+    return null;
+  };
+  const kept = [];
+  const dropped = [];
+  for (const concept of concepts) {
+    const problem = problemOf(concept);
+    if (problem) dropped.push({ id: typeof concept?.id === "string" ? concept.id : null, problem });
+    else kept.push(concept);
   }
-  return null;
+  return { kept, dropped };
 }

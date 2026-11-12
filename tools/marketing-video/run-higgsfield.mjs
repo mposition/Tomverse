@@ -29,7 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { bandLayout, BAND_ALT } from "./band-layout.mjs";
-import { checkConcepts, loadFeatures, pickFeature, recentDevices, TRANSLATED } from "./concepts-core.mjs";
+import { loadFeatures, pickFeature, recentDevices, sortConcepts, TRANSLATED } from "./concepts-core.mjs";
 import { bottomIsDark, ICON_DIR, setLogos, setTexts } from "./compose-core.mjs";
 import { brisbaneDay, ledgerPath, readLedger } from "./higgsfield-cap.mjs";
 import { makeImage } from "./hf-image-core.mjs";
@@ -140,13 +140,27 @@ const conceptPrompt = [
   `## Logo files\n\n${readdirSync(ICON_DIR).filter((file) => file.endsWith(".png")).map((file) => file.replace(/\.png$/u, "")).join(", ")}`,
   `## features.json\n\n\`\`\`json\n${readFileSync("features.json", "utf8")}\n\`\`\``,
 ].join("\n\n");
+// A second try fixes what the first broke; after it, the concepts that pass go
+// ahead and only the broken ones are dropped.
 let concepts = null;
 let refusal = null;
+let best = { kept: [], dropped: [] };
 for (let attempt = 1; attempt <= 2 && !concepts; attempt += 1) {
   const prompt = refusal ? `${conceptPrompt}\n\n## Your last answer was refused\n\n${refusal}\nAnswer again, fixing that.` : conceptPrompt;
   const answer = firstJsonLine(claude(`concepts-${attempt}`, prompt, "./job/research-notes/**", 20), "concepts");
-  refusal = answer ? checkConcepts(answer, { feature, history, day, toolDir }) : "the answer held no concepts line";
-  if (!refusal) concepts = answer.concepts;
+  const sorted = answer ? sortConcepts(answer, { feature, history, day, toolDir }) : { problem: "the answer held no concepts line" };
+  if (sorted.problem) {
+    refusal = sorted.problem;
+  } else if (sorted.dropped.length === 0) {
+    concepts = sorted.kept;
+  } else {
+    refusal = sorted.dropped.map((entry) => entry.problem).join("\n");
+    if (sorted.kept.length > best.kept.length) best = sorted;
+  }
+}
+if (!concepts && best.kept.length > 0) {
+  concepts = best.kept;
+  for (const entry of best.dropped) report.dropped.push({ id: entry.id, reason: "concept_refused", problem: entry.problem });
 }
 if (!concepts) {
   report.failed.push({ id: null, step: "concepts", error: refusal });
