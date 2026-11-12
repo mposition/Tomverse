@@ -13,7 +13,7 @@ import {
 } from "../../lib/semanticRetrievalCore";
 import { QualityStop } from "./runner";
 import {
-  LiveStop, embedBatchCount, openLiveClient, resolveLive, saveNewScores, type LiveContext,
+  LiveStop, SaveTarget, embedBatchCount, openLiveClient, resolveLive, type LiveContext,
 } from "./semanticLive";
 
 /**
@@ -308,12 +308,23 @@ export async function measureKnowledge(input: {
   const client = await openLiveClient(config, context);
 
   const collected = emptyScores();
+  const vectorsOf = (vectors: Map<string, Int8Array>) => Object.fromEntries([...vectors].map(([key, vector]) => [key, encodeBase64Vector(vector)]));
+  const snapshot = (complete: boolean) => ({
+    format: KNOWLEDGE_SCORES_FORMAT, corpus: corpus.version, rerankModel: config.rerankModel,
+    embedModel: config.embedModel, embedDimension: config.embedDimension, complete, usage: client.meter.summary(),
+    chunkVectors: vectorsOf(collected.chunkVectors), queryVectors: vectorsOf(collected.queryVectors),
+    rerank: Object.fromEntries([...collected.rerank].map(([caseId, scores]) => [caseId, Object.fromEntries(scores)])),
+  });
+  // Claimed before the first request, and rewritten after every one.
+  const target = await SaveTarget.claim(config.saveScores, snapshot(false));
   let stop: LiveStop | null = null;
   try {
     const chunkVectors = await client.embed("search_document", corpus.chunks.map((chunk) => chunk.content));
     corpus.chunks.forEach((chunk, index) => collected.chunkVectors.set(chunk.id, chunkVectors[index]));
+    await target.write(snapshot(false));
     const queryVectors = await client.embed("search_query", corpus.cases.map((row) => boundQuery(row.query)));
     corpus.cases.forEach((row, index) => collected.queryVectors.set(row.id, queryVectors[index]));
+    await target.write(snapshot(false));
     for (const testCase of corpus.cases) {
       const queryTerms = memoryRetrievalTerms(testCase.query);
       // The widest candidate set (lexical plus neighbours): the lexical-only
@@ -323,20 +334,22 @@ export async function measureKnowledge(input: {
       if (queryTerms.length === 0 || rows.length === 0 || boundRerankQuery(testCase.query).trim() === "") continue;
       const ranked = await client.rerank(testCase.query, rows.map((chunk) => chunk.content));
       collected.rerank.set(testCase.id, new Map(rows.map((chunk, index) => [chunk.id, ranked[index]])));
+      await target.write(snapshot(false));
     }
   } catch (error) {
-    if (!(error instanceof LiveStop)) throw error;
+    if (!(error instanceof LiveStop)) {
+      await target.write(snapshot(false)).catch(() => undefined);
+      await target.close();
+      throw error;
+    }
     stop = error;
   }
   const usage = client.meter.summary();
-  const vectorsOf = (vectors: Map<string, Int8Array>) => Object.fromEntries([...vectors].map(([key, vector]) => [key, encodeBase64Vector(vector)]));
-  // Written even after a stop: the requests already made were paid for.
-  await saveNewScores(config.saveScores, {
-    format: KNOWLEDGE_SCORES_FORMAT, corpus: corpus.version, rerankModel: config.rerankModel,
-    embedModel: config.embedModel, embedDimension: config.embedDimension, complete: stop === null, usage,
-    chunkVectors: vectorsOf(collected.chunkVectors), queryVectors: vectorsOf(collected.queryVectors),
-    rerank: Object.fromEntries([...collected.rerank].map(([caseId, scores]) => [caseId, Object.fromEntries(scores)])),
-  });
+  try {
+    await target.write(snapshot(stop === null));
+  } finally {
+    await target.close();
+  }
   const live = { ...usage, planned, savedScores: resolve(config.saveScores) };
   if (stop) return { stopReason: stop.code, failure: stop.failure, live, paidCalls: usage.calls, decisionGrade: false as const };
   return { ...compareKnowledge(corpus, collected), source: "live" as const, live, paidCalls: usage.calls, decisionGrade: false as const };

@@ -1026,3 +1026,23 @@ test("the notice flag is not part of the /privacy page digest", async () => {
     assert.ok(!verifiers.includes("semanticRetrievalCore"));
     assert.ok(!readFileSync("lib/privacyNoticeStatus.ts", "utf8").includes("SEMANTIC_RETRIEVAL"));
 });
+
+test("both rerank prices set is refused even when one of them does not parse", () => {
+    for (const [unit, token] of [["2000", "-1"], ["2000", "abc"], ["oops", "50000"], ["0", "50000"]]) {
+        const config = resolveSemanticRetrievalConfig({
+            [ENV.rerankModel]: "rerank-v3.5",
+            [ENV.rerankPrice]: unit,
+            [ENV.rerankTokenPrice]: token,
+        });
+        assert.equal(config.rerank, null, `${unit} / ${token}`);
+        assert.deepEqual([...config.problems].sort(), [ENV.rerankPrice, ENV.rerankTokenPrice].sort());
+    }
+});
+
+test("a set rerank price that does not parse turns rerank off", () => {
+    for (const name of [ENV.rerankPrice, ENV.rerankTokenPrice]) {
+        const config = resolveSemanticRetrievalConfig({ [ENV.rerankModel]: "rerank-v3.5", [name]: "-5" });
+        assert.equal(config.rerank, null, name);
+        assert.deepEqual(config.problems, [name]);
+    }
+});

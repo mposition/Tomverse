@@ -7,7 +7,7 @@ import {
 } from "./productRetrieval";
 import { QualityStop } from "./runner";
 import {
-  LiveStop, openLiveClient, resolveLive, saveNewScores, type LiveContext,
+  LiveStop, SaveTarget, openLiveClient, resolveLive, type LiveContext,
 } from "./semanticLive";
 
 /**
@@ -126,23 +126,34 @@ export async function measureSemanticMemory(input: {
   const client = await openLiveClient(config, context);
 
   const collected: Record<string, Record<string, number>> = {};
+  const snapshot = (complete: boolean) => ({
+    format: MEMORY_SCORES_FORMAT, corpus, rerankModel: config.rerankModel,
+    complete, usage: client.meter.summary(), scores: collected,
+  });
+  // Claimed before the first request, and rewritten after every one.
+  const target = await SaveTarget.claim(config.saveScores, snapshot(false));
   let stop: LiveStop | null = null;
   try {
     for (const testCase of cases.filter(hasRerankRequest)) {
       const documents = rerankDocuments(testCase.retrieval);
       const scores = await client.rerank(testCase.retrieval.query, documents.map((doc) => doc.text));
       collected[testCase.id] = Object.fromEntries(documents.map((doc, index) => [doc.id, scores[index]]));
+      await target.write(snapshot(false));
     }
   } catch (error) {
-    if (!(error instanceof LiveStop)) throw error;
+    if (!(error instanceof LiveStop)) {
+      await target.write(snapshot(false)).catch(() => undefined);
+      await target.close();
+      throw error;
+    }
     stop = error;
   }
   const usage = client.meter.summary();
-  // Written even after a stop: the requests already made were paid for.
-  await saveNewScores(config.saveScores, {
-    format: MEMORY_SCORES_FORMAT, corpus, rerankModel: config.rerankModel,
-    complete: stop === null, usage, scores: collected,
-  });
+  try {
+    await target.write(snapshot(stop === null));
+  } finally {
+    await target.close();
+  }
   const live = { ...usage, planned, savedScores: resolve(config.saveScores) };
   if (stop) {
     return { stopReason: stop.code, failure: stop.failure, live, paidCalls: usage.calls, decisionGrade: false as const };

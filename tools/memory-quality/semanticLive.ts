@@ -1,4 +1,4 @@
-import { access, writeFile } from "node:fs/promises";
+import { access, open, type FileHandle } from "node:fs/promises";
 import { SEMANTIC_RETRIEVAL_ENV, SEMANTIC_RETRIEVAL_LIMITS } from "../../lib/semanticRetrievalCore";
 import { QualityStop } from "./runner";
 
@@ -9,8 +9,11 @@ import { QualityStop } from "./runner";
  * product's budget bucket, switches or cache. What replaces them is a hard call
  * ceiling the operator must type (`--max-calls`), a refusal to start when the
  * plan would not fit under it, one request per call and no retry (an unknown
- * outcome could be billed twice), and a save file that is created exclusively
- * so a paid result is never overwritten. Nothing here prints the credential.
+ * outcome could be billed twice), and a save file that is claimed exclusively
+ * before the first request and rewritten after every one -- so a paid result
+ * is never overwritten by another run, a path that cannot be written refuses
+ * the run before anything is spent, and an interrupted run keeps what it paid
+ * for. Nothing here prints the credential.
  */
 
 type Env = Record<string, string | undefined>;
@@ -68,12 +71,45 @@ async function assertAbsent(path: string) {
   throw new QualityStop("save_scores_exists");
 }
 
-/** Created exclusively: an existing file, even one that appeared during the run, is never replaced. */
-export async function saveNewScores(path: string, value: unknown) {
-  try {
-    await writeFile(path, JSON.stringify(value, null, 2) + "\n", { flag: "wx" });
-  } catch (error) {
-    throw new QualityStop((error as NodeJS.ErrnoException).code === "EEXIST" ? "save_scores_exists" : "save_scores_failed");
+/**
+ * The save file of one paid run, claimed before the first request.
+ *
+ * Opened with "wx": an existing file -- even one that appeared since the
+ * early check -- is never replaced, and a path whose directory is missing or
+ * cannot be written is refused here, while nothing has been spent. The run
+ * then rewrites the whole file after every paid request, so whatever stops it
+ * -- a failed call, the ceiling, a crash after the last write -- the file holds
+ * every result paid for up to that point, marked `complete: false`.
+ */
+export class SaveTarget {
+  private constructor(readonly path: string, private handle: FileHandle) {}
+
+  static async claim(path: string, first: unknown): Promise<SaveTarget> {
+    let handle: FileHandle;
+    try {
+      handle = await open(path, "wx");
+    } catch (error) {
+      throw new QualityStop((error as NodeJS.ErrnoException).code === "EEXIST" ? "save_scores_exists" : "save_scores_unwritable");
+    }
+    const target = new SaveTarget(path, handle);
+    await target.write(first);
+    return target;
+  }
+
+  /** Replaces the file's contents. A failure stops the run: the next request would be unrecorded. */
+  async write(value: unknown) {
+    const body = Buffer.from(JSON.stringify(value, null, 2) + "\n", "utf8");
+    try {
+      await this.handle.truncate(0);
+      await this.handle.write(body, 0, body.length, 0);
+      await this.handle.sync();
+    } catch {
+      throw new QualityStop("save_scores_failed");
+    }
+  }
+
+  async close() {
+    await this.handle.close().catch(() => undefined);
   }
 }
 

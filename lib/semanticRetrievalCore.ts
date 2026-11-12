@@ -214,14 +214,21 @@ export const resolveSemanticRetrievalConfig = (
         SEMANTIC_RETRIEVAL_ENV.rerankTokenPrice,
         problems
     );
-    // Both prices set is not a configuration: nothing says which one the
-    // invoice uses, so neither is trusted.
+    // Decided by which variables are *set*, not by which parse: both set is
+    // not a configuration -- nothing says which one the invoice uses -- even
+    // when one of them is a typo, because the typo may be the one that was
+    // meant. And a set price that does not parse turns rerank off rather than
+    // leaving it to the other unit.
+    const unitPriceSet = readText(env, SEMANTIC_RETRIEVAL_ENV.rerankPrice) !== null;
+    const tokenPriceSet = readText(env, SEMANTIC_RETRIEVAL_ENV.rerankTokenPrice) !== null;
     let rerankBilling: RerankBilling | null = null;
-    if (rerankPrice !== null && rerankTokenPrice !== null) {
-        problems.push(SEMANTIC_RETRIEVAL_ENV.rerankPrice, SEMANTIC_RETRIEVAL_ENV.rerankTokenPrice);
-    } else if (rerankPrice !== null) {
+    if (unitPriceSet && tokenPriceSet) {
+        for (const name of [SEMANTIC_RETRIEVAL_ENV.rerankPrice, SEMANTIC_RETRIEVAL_ENV.rerankTokenPrice]) {
+            if (!problems.includes(name)) problems.push(name);
+        }
+    } else if (unitPriceSet && rerankPrice !== null) {
         rerankBilling = { unit: "search_unit", microUsdPerSearchUnit: rerankPrice };
-    } else if (rerankTokenPrice !== null) {
+    } else if (tokenPriceSet && rerankTokenPrice !== null) {
         rerankBilling = { unit: "token", microUsdPerMillionTokens: rerankTokenPrice };
     }
 

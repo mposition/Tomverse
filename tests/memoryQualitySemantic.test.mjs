@@ -396,3 +396,40 @@ test("outside the react-server condition the offline commands run and --live sto
     await assert.rejects(readFile(save), { code: "ENOENT" });
   });
 });
+
+test("a save path that cannot be written refuses the paid run before any request", async () => {
+  await withTemp(async (directory) => {
+    const { fetchImpl, requests } = memoryRerankFake();
+    const save = join(directory, "no-such-directory", "saved.json");
+    await assert.rejects(
+      main(["retrieval", "--semantic", "--live", "--max-calls", "100", "--save-scores", save], { env: ENV, fetchImpl }),
+      { code: "save_scores_unwritable" }
+    );
+    assert.equal(requests.length, 0);
+  });
+});
+
+test("the save file holds every paid result as the run goes, not only at the end", async () => {
+  await withTemp(async (directory) => {
+    const save = join(directory, "saved.json");
+    const { fetchImpl: inner, requests } = memoryRerankFake();
+    const seen = [];
+    // Before each request after the first, the file already holds the
+    // previous answers: a crash between two requests loses nothing paid for.
+    const fetchImpl = async (...args) => {
+      if (requests.length > 0) {
+        const saved = JSON.parse(await readFile(save, "utf8"));
+        seen.push([requests.length, Object.keys(saved.scores).length, saved.complete]);
+      }
+      return inner(...args);
+    };
+    const planned = memoryCases.filter((row) => rerankDocuments(row.retrieval).length > 0).length;
+    await main(["retrieval", "--semantic", "--live", "--max-calls", String(planned), "--save-scores", save], { env: ENV, fetchImpl });
+    assert.ok(seen.length > 0);
+    for (const [paid, saved, complete] of seen) {
+      assert.equal(saved, paid);
+      assert.equal(complete, false);
+    }
+    assert.equal(JSON.parse(await readFile(save, "utf8")).complete, true);
+  });
+});
