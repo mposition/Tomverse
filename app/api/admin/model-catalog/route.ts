@@ -7,7 +7,7 @@ import { z } from "zod";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { IMAGE_MODEL_REGISTRY } from "@/lib/imageModelRegistry";
+import { IMAGE_MODEL_REGISTRY, type ImageModelProfile, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
 import {
   imageProviderBudgetReady,
   judgeImage,
@@ -26,7 +26,16 @@ import {
   storeCatalogDraft,
   updateCatalogEntry,
 } from "@/lib/modelCatalogAdmin";
-import { defaultPriceSources, imageFullProfileSchema, judgeVideoModel, MODEL_ID_PATTERN, STORED_CATALOG_CATEGORIES } from "@/lib/modelCatalogCore";
+import {
+  defaultPriceSources,
+  imageCreditOverrideSchema,
+  imageFullProfileSchema,
+  judgeVideoModel,
+  MODEL_ID_PATTERN,
+  OFFICIAL_SOURCE_HOSTS,
+  reviewImageDraft,
+  STORED_CATALOG_CATEGORIES,
+} from "@/lib/modelCatalogCore";
 import {
   catalogDraftLlmFromEnv,
   DraftRefusal,
@@ -35,7 +44,12 @@ import {
   MODEL_CATALOG_DRAFT_LLM_MODEL_ENV,
 } from "@/lib/modelCatalogDraftLlm";
 import { prisma } from "@/lib/prisma";
-import { runtimeImageProfileTemplate } from "@/lib/runtimeImageProviders";
+import {
+  RUNTIME_IMAGE_PROVIDERS,
+  RUNTIME_IMAGE_QUALITIES,
+  RUNTIME_IMAGE_SIZES,
+  runtimeImageProfileTemplate,
+} from "@/lib/runtimeImageProviders";
 
 // The dynamic model catalogue (image and coding; chat is a read-only view of
 // the model registry; video has no activation policy yet). Every write commits
@@ -50,6 +64,27 @@ const refusalResponse = (error: unknown) => {
     return NextResponse.json({ error: error.code, detail: error.detail }, { status: 422 });
   }
   return apiSecurityResponse(error);
+};
+
+/** A saved runtime profile as an unpriced model, for reviewing its draft; null when it does not parse. */
+const runtimeImageBase = (modelId: string, profile: unknown): ImageModelProfile | null => {
+  const parsed = imageFullProfileSchema.safeParse(profile);
+  if (!parsed.success) return null;
+  return {
+    id: modelId,
+    ...parsed.data,
+    disabledReason: null,
+    prices: [],
+    pricingVersion: "unpriced",
+    priceVerification: { verifiedAt: null, sources: [], thinkingCapMicroUsd: null },
+  } as unknown as ImageModelProfile;
+};
+
+/** Floors and the judge's answer at a stored image draft's prices, or null. */
+const reviewDraft = (base: ImageModelProfile | null, draft: unknown) => {
+  const parsed = priceRevisionSchema.safeParse(draft);
+  if (!base || !parsed.success) return null;
+  return reviewImageDraft(base, parsed.data as never, { minimumCredits: minimumCreditsForImageOption });
 };
 
 const adminSession = async (write: boolean) => {
@@ -92,6 +127,9 @@ export async function GET(req: Request) {
             id: model.id,
             name: model.name,
             provider: model.provider,
+            apiModelId: model.apiModelId,
+            sizes: model.sizes,
+            qualities: model.qualities,
             source: seedIds.has(model.id) ? "code" : "catalog",
             enabled: row?.enabled ?? null,
             holdReason: row?.holdReason ?? null,
@@ -103,7 +141,14 @@ export async function GET(req: Request) {
             // What the judge would say if this model were turned on now.
             admissionIfEnabled: judgeImage({ ...model, disabledReason: null }),
             providerBudgetReady: imageProviderBudgetReady(model.provider),
+            floors: model.prices.map((price) => ({
+              quality: price.quality,
+              size: price.size,
+              floor: minimumCreditsForImageOption(model, price),
+            })),
             draft: row?.draft ?? null,
+            draftCreatedAt: row?.draftCreatedAt ?? null,
+            draftReview: reviewDraft(model, row?.draft),
           };
         }),
         problems: image.problems,
@@ -116,9 +161,18 @@ export async function GET(req: Request) {
             modelId: row.modelId,
             profile: row.profile,
             draft: row.draft ?? null,
+            draftCreatedAt: row.draftCreatedAt ?? null,
+            draftReview: reviewDraft(runtimeImageBase(row.modelId, row.profile), row.draft),
             problem: image.problems.find((p) => p.modelId === row.modelId)?.problem ?? null,
           })),
         revisions,
+        // What the add form offers: providers the code can call, the pricing
+        // page a draft reads when the URL is left empty, and the hosts a URL may use.
+        providers: RUNTIME_IMAGE_PROVIDERS.map((provider) => ({
+          provider,
+          defaultSources: defaultPriceSources(provider),
+          hosts: OFFICIAL_SOURCE_HOSTS[provider] ?? [],
+        })),
       },
       coding: { models: coding, snapshot },
       chat: { models: chat, editable: false, editAt: "/admin/models?tab=registry" },
@@ -161,11 +215,23 @@ const postBodySchema = z.discriminatedUnion("action", [
     apiModelId: z.string().min(1).max(120),
     // Empty means the provider's default pricing pages.
     sourceUrls: z.array(z.string().url()).max(MAX_DRAFT_SOURCES),
+    // The add form's choices for a runtime image model's profile.
+    profile: z
+      .object({
+        name: z.string().trim().min(1).max(80).optional(),
+        sizes: z.array(z.enum(RUNTIME_IMAGE_SIZES)).min(1).max(RUNTIME_IMAGE_SIZES.length).optional(),
+        qualities: z.array(z.enum(RUNTIME_IMAGE_QUALITIES)).min(1).max(RUNTIME_IMAGE_QUALITIES.length).optional(),
+      })
+      .strict()
+      .optional(),
   }),
   z.object({
     action: z.literal("apply_draft"),
     category: z.enum(STORED_CATALOG_CATEGORIES),
     modelId: z.string().regex(MODEL_ID_PATTERN),
+    // Image: the operator's credits for options the draft priced. Costs and
+    // sources stay the draft's; the revision is judged at these credits.
+    creditOverrides: imageCreditOverrideSchema.optional(),
   }),
   z.object({ action: z.literal("publish_snapshot") }),
 ]);
@@ -183,7 +249,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, revision });
     }
     if (body.action === "apply_draft") {
-      await applyCatalogDraft({ category: body.category, modelId: body.modelId, session, request: req });
+      await applyCatalogDraft({
+        category: body.category,
+        modelId: body.modelId,
+        creditOverrides: body.creditOverrides,
+        session,
+        request: req,
+      });
       return NextResponse.json({ ok: true });
     }
     if (body.action === "publish_snapshot") {
@@ -203,7 +275,7 @@ export async function POST(req: Request) {
     // the operator can apply the draft without saving a profile first.
     const imageProfile =
       body.category === "image" && !IMAGE_MODEL_REGISTRY.some((model) => model.id === body.modelId)
-        ? runtimeImageProfileTemplate(body.provider, body.apiModelId)
+        ? runtimeImageProfileTemplate(body.provider, body.apiModelId, body.profile)
         : undefined;
     // Checked before the paid call, so a bad form fails for free.
     if (imageProfile !== undefined && !imageFullProfileSchema.safeParse(imageProfile).success) {

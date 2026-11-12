@@ -29,15 +29,24 @@ export const discoveryDraftRequest = (search: string) => {
  * discovery queue. Every field is the operator's to correct; the schema and
  * the judge decide whether it can serve.
  */
-export const runtimeImageProfileTemplate = (provider: string, apiModelId: string) => ({
+export const runtimeImageProfileTemplate = (
+  provider: string,
+  apiModelId: string,
+  // What the add form asks for; empty or missing keeps the default.
+  choices: { name?: string; sizes?: readonly string[]; qualities?: readonly string[] } = {}
+) => ({
   provider,
   apiModelId,
   // The profile schema caps a display name at 80 characters.
-  name: apiModelId.slice(0, 80),
+  name: (choices.name?.trim() || apiModelId).slice(0, 80),
   lifecycle: "preview",
-  sizes: ["1024x1024"],
-  qualities: ["low", "medium", "high"],
+  sizes: choices.sizes?.length ? [...choices.sizes] : ["1024x1024"],
+  qualities: choices.qualities?.length ? [...choices.qualities] : ["low", "medium", "high"],
   latencyClass: "balanced",
   provenance: [],
   outputMimeTypes: ["image/png"],
 });
+
+/** The sizes and qualities a runtime image profile may list (the profile schema's enums). */
+export const RUNTIME_IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536"] as const;
+export const RUNTIME_IMAGE_QUALITIES = ["low", "medium", "high"] as const;
