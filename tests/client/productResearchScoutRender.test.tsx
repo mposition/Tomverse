@@ -259,12 +259,13 @@ test("every suggestion offers Copy brief, even without the right to send, and th
 });
 
 test("the memory panel distinguishes a missing decision from an unmeasured language and shows the previous date", () => {
-  const measurement = {version:"continuation-decisions-v1", day:"2026-11-12", locale:"en", mode:"long-auto", model:"fixture", outcome:"omission", visible:false, usedTurns:2, originalCorrect:false, expected:{A:"UNKNOWN",B:"UNKNOWN",C:"UNKNOWN",D:"UNKNOWN"}, answers:{A:"UNKNOWN",B:"UNKNOWN",C:"UNKNOWN",D:"UNKNOWN"}} as const;
-  const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({memoryQuality:{enabled:true,day:"2026-11-12",readings:[measurement,{...measurement,locale:"fr",day:"2026-11-11"}]}})} week={WEEK} />);
+  const measurement = {version:"continuation-decisions-v1", day:"2026-11-11", measuredAt:"2026-11-11T18:15:00Z", locale:"en", mode:"long-auto", model:"fixture", outcome:"omission", visible:false, usedTurns:2, originalCorrect:false, expected:{A:"UNKNOWN",B:"UNKNOWN",C:"UNKNOWN",D:"UNKNOWN"}, answers:{A:"UNKNOWN",B:"UNKNOWN",C:"UNKNOWN",D:"UNKNOWN"}} as const;
+  const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({memoryQuality:{enabled:true,day:"2026-11-12",readings:[measurement,{...measurement,locale:"fr",day:"2026-11-11",measuredAt:"2026-11-11T02:00:00Z"}]}})} week={WEEK} />);
   assert.match(html,/Measured today: 1\/8/);
   assert.ok(html.includes(m.memoryStatus.omission));
   assert.equal(html.split(m.memoryWaiting).length-1,7);
-  assert.ok(html.includes("2026-11-11"));
+  assert.ok(html.includes("2026-11-12 04:15 AEST"));
+  assert.ok(html.includes("2026-11-11 12:00 AEST"));
   assert.ok(html.includes(m.languages["zh-Hant"]));
   assert.ok(html.includes(m.memoryFilter));
 });

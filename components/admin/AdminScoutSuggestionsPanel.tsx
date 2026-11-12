@@ -17,6 +17,7 @@ import {
   scoutState,
 } from "@/lib/adminScoutDisplay";
 import { adminNetworkFailure, readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
+import { formatAestDate, formatAestDateTime } from "@/lib/adminUiCore";
 import { adminFetch } from "@/lib/adminFetch";
 import { AdminCopyWorkBriefButton } from "@/components/admin/AdminCopyWorkBriefButton";
 import { ScoutAgentAside } from "@/components/admin/ScoutAgentAside";
@@ -307,7 +308,7 @@ export function AdminScoutSuggestionsPanel({
           <p className="mt-2 text-sm">
             {!memoryQuality.enabled && m.memoryOff + " "}
             {fill(m.memoryDays, {
-              count: memoryQuality.readings.filter((r) => r.day === memoryQuality.day).length,
+              count: memoryQuality.readings.filter((r) => formatAestDate(r.measuredAt) === memoryQuality.day).length,
               day: memoryQuality.day,
             })}
           </p>
@@ -317,8 +318,8 @@ export function AdminScoutSuggestionsPanel({
               return (
                 <li key={lang} className="rounded-lg bg-zinc-900 p-2">
                   <strong>{m.languages[lang]}</strong>{" · "}
-                  {reading?.day !== memoryQuality.day && <span>{m.memoryWaiting}{reading && " · "}</span>}
-                  {reading && <span>{reading.day} · {m.memoryModes[reading.mode]} · {m.memoryStatus[reading.outcome]} · {reading.model}</span>}
+                  {formatAestDate(reading?.measuredAt) !== memoryQuality.day && <span>{m.memoryWaiting}{reading && " · "}</span>}
+                  {reading && <span>{formatAestDateTime(reading.measuredAt)} · {m.memoryModes[reading.mode]} · {m.memoryStatus[reading.outcome]} · {reading.model}</span>}
                 </li>
               );
             })}

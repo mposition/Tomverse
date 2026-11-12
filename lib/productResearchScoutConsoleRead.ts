@@ -9,7 +9,7 @@
 import "server-only";
 
 import { latestMemoryReadings, memoryScoutEnabled } from "./productResearchScoutMemory";
-import type { MemoryReading } from "./productResearchScoutMemoryCore";
+import { formatAestDate } from "./adminUiCore";
 import type { Session } from "next-auth";
 
 import { getAdminRole } from "@/lib/adminAuth";
@@ -55,7 +55,7 @@ export const SCOUT_CONSOLE_DAYS = 7;
 
 export type ScoutConsoleView = {
   readonly enabled: boolean;
-  readonly memoryQuality?: { readonly enabled:boolean;readonly day:string;readonly readings:MemoryReading[] };
+  readonly memoryQuality?: { readonly enabled:boolean;readonly day:string;readonly readings:Awaited<ReturnType<typeof latestMemoryReadings>> };
   /** Whether a test account is named. The address itself stays on the server. */
   readonly testAccountConfigured: boolean;
   readonly settings: ScoutSettings;
@@ -92,7 +92,7 @@ export async function readScoutConsole(session: Session | null, section: ScoutCo
   ]);
   return {
     enabled: isProductResearchRouteEnabled(process.env, PRODUCT_RESEARCH_SCOUT_SWITCH_ENV),
-    memoryQuality:{enabled:memoryScoutEnabled() && isProductResearchRouteEnabled(process.env,PRODUCT_RESEARCH_SCOUT_SWITCH_ENV),day:now.toISOString().slice(0,10),readings:memoryReadings},
+    memoryQuality:{enabled:memoryScoutEnabled() && isProductResearchRouteEnabled(process.env,PRODUCT_RESEARCH_SCOUT_SWITCH_ENV),day:formatAestDate(now)!,readings:memoryReadings},
     testAccountConfigured: scoutTestAccountEmail() !== null,
     settings,
     modelOptions,

@@ -36,12 +36,15 @@ export const memoryScoutEnabled = (env: NodeJS.ProcessEnv = process.env) =>
 const utcDay = () => new Date().toISOString().slice(0, 10);
 const ideaSubject = "memory.continuation.ideas";
 
-export async function latestMemoryReadings(): Promise<MemoryReading[]> {
+export async function latestMemoryReadings(): Promise<Array<MemoryReading & {measuredAt:string}>> {
   const rows = await prisma.appSetting.findMany({
     where: { key: { in: MEMORY_PROBE_LOCALES.map(memoryLatestKey) } },
-    select: { key: true, value: true },
+    select: { key: true, value: true, updatedAt: true },
   });
-  return rows.flatMap((row) => parseMemoryReading(row.key, row.value) ?? []);
+  return rows.flatMap((row) => {
+    const reading = parseMemoryReading(row.key, row.value);
+    return reading ? [{ ...reading, measuredAt: row.updatedAt.toISOString() }] : [];
+  });
 }
 
 export async function sampleMemoryQuality(locale: MemoryProbeLocale) {
