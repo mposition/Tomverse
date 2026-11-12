@@ -146,6 +146,70 @@ test("a thinking cap stated for a provider whose request cannot hold it does not
   assert.ok(judge()(statedGoogle).reasons.includes("worst_case_cost_unbounded"));
 });
 
+test("a measured Google model serves on its measured bound and only with the measured request", () => {
+  // Owner decision 2026-11-13: Flash's thinking cap is twice the 2,048 output
+  // limit the request sends, at $3.00 per 1M -- 12,288 microUSD, floor 94.
+  const flash = IMAGE_MODEL_REGISTRY.find((model) => model.id === "gemini-3.1-flash-image");
+  const revision = (credits, cap, modelId = flash.id) => ({
+    modelId,
+    pricingVersion: `${modelId}-${credits}-${cap}`,
+    effectiveFrom: new Date("2026-10-19T00:00:00Z"),
+    prices: [{ quality: "medium", size: "1024x1024", credits, outputCostMicroUsd: 67_200 }],
+    verification: {
+      verifiedAt: "2026-10-19",
+      sources: ["https://ai.google.dev/gemini-api/docs/pricing"],
+      thinkingCapMicroUsd: cap,
+    },
+  });
+  const served = (rows, revisions, id = flash.id) => resolve(rows, revisions).models.find((m) => m.id === id);
+
+  // Held as shipped, and still held when priced but not turned on.
+  assert.equal(served([], []).disabledReason, "operational_hold");
+  assert.equal(served([], [revision(94, 12_288)]).disabledReason, "operational_hold");
+  assert.equal(served([row(flash.id, { enabled: true })], [revision(94, 12_288)]).disabledReason, null);
+  // Below the floor, or with a cap under the bound, it does not serve.
+  assert.notEqual(served([row(flash.id, { enabled: true })], [revision(93, 12_288)]).disabledReason, null);
+  assert.equal(
+    served([row(flash.id, { enabled: true })], [revision(10_000, 12_287)]).disabledReason,
+    "worst_case_cost_unbounded"
+  );
+  // No budget, no service.
+  assert.notEqual(
+    resolve([row(flash.id, { enabled: true })], [revision(94, 12_288)], false).models.find((m) => m.id === flash.id).disabledReason,
+    null
+  );
+
+  // A runtime row for the same API model that sends another limit, or pins a
+  // thinking level, is not the request that was measured.
+  const profile = (extra) => ({
+    provider: "google",
+    apiModelId: flash.apiModelId,
+    name: "Runtime Flash",
+    lifecycle: "stable",
+    sizes: ["1024x1024"],
+    qualities: ["medium"],
+    latencyClass: "fast",
+    provenance: ["synthid"],
+    outputMimeTypes: ["image/jpeg"],
+    deliveryMimeType: "image/jpeg",
+    ...extra,
+  });
+  const runtime = (extra) =>
+    served([row("flash-runtime", { profile: profile(extra), enabled: true })], [revision(94, 12_288, "flash-runtime")], "flash-runtime");
+  assert.equal(runtime({ maxOutputTokens: 2_048 }).disabledReason, null);
+  assert.equal(runtime({ maxOutputTokens: 32_768 }).disabledReason, "worst_case_cost_unbounded");
+  assert.equal(runtime({}).disabledReason, "worst_case_cost_unbounded");
+  assert.equal(runtime({ maxOutputTokens: 2_048, thinkingLevel: "high" }).disabledReason, "worst_case_cost_unbounded");
+  const refused = judge()({
+    ...flash,
+    disabledReason: null,
+    maxOutputTokens: 32_768,
+    prices: revision(94, 12_288).prices,
+    priceVerification: revision(94, 12_288).verification,
+  });
+  assert.ok(refused.reasons.includes("measured_request_required:max_output_tokens_2048_no_thinking_level"));
+});
+
 test("a fal revision whose thinking cap is below the pinned surcharge does not serve", () => {
   // Review finding 2026-10-21: the request still pays fal's $0.002 for high
   // thinking, so a cap of 0 would reserve and settle 2,000 less than fal bills.
@@ -487,9 +551,18 @@ test("an image draft takes the thinking cap the code already knows for the model
     imageDraftFromAnswer({ ...answer, thinkingCapMicroUsd: 500 }, sources, "qwen-image-2.0", "qwen").verification.thinkingCapMicroUsd,
     500
   );
-  // Another model on the same endpoint has no proven bound, nor does Google.
+  // Another model on the same endpoint has no proven bound, nor does an
+  // unmeasured Google model; a measured one takes its measured bound.
   assert.equal(imageDraftFromAnswer(answer, sources, "z-image-turbo", "qwen").verification.thinkingCapMicroUsd, null);
-  assert.equal(imageDraftFromAnswer(answer, sources, "gemini-3.1-flash-image", "google").verification.thinkingCapMicroUsd, null);
+  assert.equal(imageDraftFromAnswer(answer, sources, "gemini-3-pro-image", "google").verification.thinkingCapMicroUsd, null);
+  const flash = imageDraftFromAnswer(
+    { ...answer, options: [{ quality: "medium", size: "1024x1024", outputCostMicroUsd: 67_200, outputTokens: null }] },
+    sources,
+    "gemini-3.1-flash-image",
+    "google"
+  );
+  assert.equal(flash.verification.thinkingCapMicroUsd, 12_288);
+  assert.equal(flash.prices[0].credits, 94);
   assert.equal(imageDraftFromAnswer(answer, sources, "qwen-image-2.0").verification.thinkingCapMicroUsd, null);
 });
 

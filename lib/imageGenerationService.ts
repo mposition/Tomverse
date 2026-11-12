@@ -50,6 +50,7 @@ import {
   DEFAULT_IMAGE_MODEL_ID,
   getImageModel,
   getImageModelPrice,
+  googleImageOutputLimitBound,
   imageEditCredits,
   imageThinkingBilling,
   maxImageEditRequestCostMicroUsd,
@@ -69,6 +70,7 @@ import {
   IMAGE_EDIT_INPUT_MAX_EDGE_PX,
   imageEditPricing,
   IMAGE_GENERATION_MODEL_ID,
+  IMAGE_PROMPT_BUDGET_MICRO_USD,
   IMAGE_PROMPT_INPUT_USD_PER_MILLION_TOKENS,
   IMAGE_PROMPT_MAX_TOKENS,
   imageModelSupportsEdit,
@@ -920,6 +922,13 @@ export const requestImageGeneration = async (
               // What the provider call may send; checked again before the call.
               executionProfile: imageExecutionProfile(target.model),
               thinkingCapMicroUsd: target.model.priceVerification.thinkingCapMicroUsd,
+              // The measured token bound this price rests on, frozen like the
+              // price: settlement reads it here, never the live table a deploy
+              // may have changed since.
+              measuredNonImageBound: googleImageOutputLimitBound(
+                target.model.provider,
+                target.model.apiModelId
+              ),
               // An edit: which photo, and the image-input budget its
               // surcharge bought. Read by the executor and by a retry.
               ...(edit && target.editPricing
@@ -1093,6 +1102,53 @@ const refundProviderBudget = async (
   }
 };
 
+/**
+ * What a failed request that reached a measured-bound model cost: its
+ * non-image tokens, the prompt (as reported, or its whole budget when not),
+ * and the image when one was delivered. Null for any other model, and when the
+ * response's count is unknown -- the reservation is then kept as it stands.
+ */
+export const failureIncurredCostMicroUsd = (
+  snapshot: unknown,
+  billed: { nonImageBillableTokens: number | null | undefined; imageDelivered: boolean; inputTokens?: number } | undefined
+): number | null => {
+  if (!billed) return null;
+  const nonImage = measuredNonImageCostMicroUsd(snapshot, billed.nonImageBillableTokens);
+  if (nonImage === null) return null;
+  const image = billed.imageDelivered ? reservationOutputCostMicroUsd(snapshot) : 0;
+  if (image === null) return null;
+  const prompt =
+    typeof billed.inputTokens === "number" && billed.inputTokens > 0
+      ? promptCostMicroUsd(billed.inputTokens)
+      : IMAGE_PROMPT_BUDGET_MICRO_USD;
+  return nonImage + prompt + image;
+};
+
+/** Adds spend the reservation did not hold to the windows it was reserved in. */
+const chargeProviderBudgetOverage = async (
+  tx: Prisma.TransactionClient,
+  provider: string,
+  amountMicroUsd: number,
+  reservedAt: Date
+) => {
+  if (amountMicroUsd <= 0) return;
+  const budgetKey = imageProviderBudgetKey(provider);
+  for (const window of [
+    { period: "provider-cost-day", start: usagePeriodStart("day", reservedAt) },
+    { period: "provider-cost-month", start: usagePeriodStart("month", reservedAt) },
+  ]) {
+    // An upsert with no limit: spend already happened, so it is recorded even
+    // where it passes the budget, and a missing row is created rather than
+    // the overage being dropped.
+    await tx.$executeRaw`
+      INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
+      VALUES (${budgetKey}, ${window.period}, ${window.start}, ${amountMicroUsd}, NOW())
+      ON CONFLICT ("key", "period", "periodStart")
+      DO UPDATE SET "count" = "ChatUsageBucket"."count" + ${amountMicroUsd}, "updatedAt" = NOW()
+    `;
+  }
+};
+
 const parseReservationPayload = (
   payload: Prisma.JsonValue
 ): AddOnCreditReservationEntry[] =>
@@ -1125,6 +1181,14 @@ const finalizeFailure = async (input: {
    * true when the provider was never reached or the cost is provably gone.
    */
   releaseProviderBudget: boolean;
+  /**
+   * What a reached provider billed, for a model priced on a measured token
+   * bound (Google direct): its non-image tokens, and whether an image came
+   * back -- a response refused without one, or a delivered image whose
+   * storage or settlement then failed. Where that cost passes the whole
+   * reservation, the provider budget is charged the difference.
+   */
+  billed?: { nonImageBillableTokens: number | null | undefined; imageDelivered: boolean; inputTokens?: number };
   /**
    * Whether this caller may also claim a row already in `settling`, and on
    * what grounds. Omitted means no -- the ordinary failure paths must never
@@ -1199,6 +1263,13 @@ const finalizeFailure = async (input: {
             outcome: "failed",
           });
         }
+        const incurredCostMicroUsd = input.releaseProviderBudget
+          ? null
+          : failureIncurredCostMicroUsd(reservation.pricingSnapshot, input.billed);
+        const failureOverageMicroUsd =
+          incurredCostMicroUsd === null
+            ? 0
+            : Math.max(0, incurredCostMicroUsd - Number(reservation.reservedCostMicroUsd));
         if (input.releaseProviderBudget) {
           await refundProviderBudget(
             tx,
@@ -1206,6 +1277,8 @@ const finalizeFailure = async (input: {
             Number(reservation.reservedCostMicroUsd),
             reservation.createdAt
           );
+        } else if (failureOverageMicroUsd > 0) {
+          await chargeProviderBudgetOverage(tx, reservation.provider, failureOverageMicroUsd, reservation.createdAt);
         }
         await tx.imageCreditReservation.update({
           where: { id: reservation.id },
@@ -1215,7 +1288,7 @@ const finalizeFailure = async (input: {
             settledCredits: 0,
             settledCostMicroUsd: input.releaseProviderBudget
               ? BigInt(0)
-              : reservation.reservedCostMicroUsd,
+              : reservation.reservedCostMicroUsd + BigInt(failureOverageMicroUsd),
             settledFundedCostMicroUsd: BigInt(0),
             refundedAt: new Date(),
             settledAt: new Date(),
@@ -1289,6 +1362,25 @@ export const reservationOutputCostMicroUsd = (
     : null;
 };
 
+/** The measured bound the reservation was priced on, or null (none, or an older snapshot). */
+const frozenMeasuredBound = (snapshot: unknown): { textOutputUsdPerMTok: number } | null => {
+  const bound = (snapshot as { measuredNonImageBound?: unknown } | null)?.measuredNonImageBound;
+  const rate = (bound as { textOutputUsdPerMTok?: unknown } | null)?.textOutputUsdPerMTok;
+  return typeof rate === "number" && Number.isFinite(rate) && rate > 0 ? { textOutputUsdPerMTok: rate } : null;
+};
+
+/**
+ * What the non-image billable tokens of a response cost, for a reservation of
+ * a model priced on a measured token bound (Google direct, at its text output
+ * rate). Null for any other model, and when no count was reported.
+ */
+export const measuredNonImageCostMicroUsd = (snapshot: unknown, nonImageBillableTokens: unknown): number | null => {
+  const bound = frozenMeasuredBound(snapshot);
+  if (!bound || typeof nonImageBillableTokens !== "number" || !(nonImageBillableTokens >= 0)) return null;
+  // Tokens times USD per million tokens is micro-USD.
+  return Math.ceil(nonImageBillableTokens * bound.textOutputUsdPerMTok);
+};
+
 /**
  * The thinking cost to settle, and null (settle the whole reservation) when
  * the snapshot predates the cap being recorded.
@@ -1302,12 +1394,19 @@ export const reservationOutputCostMicroUsd = (
  * endpoint, read from the endpoint the reservation froze: one that bills no
  * thinking (Qwen Image 3) settles zero, and every other fal case -- including
  * an older snapshot that names no endpoint, which was Nano Banana 2's --
- * settles the cap, because fal's zero count proves nothing. Any other provider
- * settles zero when it reported no thinking and the reserved cap when it did:
- * no image provider here has a verified per-token thinking price to settle
- * less.
+ * settles the cap, because fal's zero count proves nothing. A Google model
+ * priced on the measured output-limit bound settles the cap too: with the
+ * thinking level omitted it reports zero thinking and bills its reasoning
+ * text inside the output count (measured 2026-11-12), so a zero proves nothing
+ * there either. Any other provider settles zero when it reported no thinking
+ * and the reserved cap when it did: no image provider here has a verified
+ * per-token thinking price to settle less.
  */
-export const settledThinkingCostMicroUsd = (snapshot: unknown, thinkingTokens: number): number | null => {
+export const settledThinkingCostMicroUsd = (
+  snapshot: unknown,
+  thinkingTokens: number,
+  nonImageBillableTokens?: number | null
+): number | null => {
   const record = snapshot as {
     thinkingCapMicroUsd?: unknown;
     provider?: unknown;
@@ -1315,8 +1414,19 @@ export const settledThinkingCostMicroUsd = (snapshot: unknown, thinkingTokens: n
   } | null;
   const cap = record?.thinkingCapMicroUsd;
   const reservedCap = typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? cap : null;
-  const billing = imageThinkingBilling(record?.provider, record?.executionProfile?.apiModelId);
+  // A reservation priced on a measured bound says so itself; the live table
+  // is not consulted, so a deploy between the two cannot settle it at zero.
+  const billing = frozenMeasuredBound(snapshot)
+    ? "per_token_within_output_limit"
+    : imageThinkingBilling(record?.provider, record?.executionProfile?.apiModelId);
   if (billing === "flat_per_request") return reservedCap;
+  if (billing === "per_token_within_output_limit") {
+    // The cap, or what the response actually billed when that is more: the
+    // bound is measured, not documented, so a response past it settles its
+    // real cost and the provider budget sees it.
+    const incurred = measuredNonImageCostMicroUsd(snapshot, nonImageBillableTokens);
+    return reservedCap === null ? null : Math.max(reservedCap, incurred ?? 0);
+  }
   if (record?.provider === "fal") return billing === "not_billed" ? 0 : reservedCap;
   if (!(thinkingTokens > 0)) return 0;
   return reservedCap;
@@ -1398,6 +1508,9 @@ export const processImageGeneration = async (
     : null;
   heartbeat?.unref?.();
 
+  // Kept outside the try: a failure after the provider answered still reports
+  // what it billed.
+  let answered: Awaited<ReturnType<typeof generateImageWithProvider>> | undefined;
   try {
     let result;
     try {
@@ -1426,9 +1539,11 @@ export const processImageGeneration = async (
         // The provider was reached (or unreachable in a way that may still
         // have billed); keep the budget charge -- conservative direction.
         releaseProviderBudget: false,
+        billed: { nonImageBillableTokens: providerError.nonImageBillableTokens, imageDelivered: false },
       });
       return;
     }
+    answered = result;
 
     const originalKey = imageAssetR2Key({
       userId: generation.userId,
@@ -1456,6 +1571,11 @@ export const processImageGeneration = async (
         providerRequestId: result.providerRequestId,
         providerRequestParams: result.requestParams,
         releaseProviderBudget: false,
+        billed: {
+          nonImageBillableTokens: result.nonImageBillableTokens,
+          imageDelivered: true,
+          inputTokens: result.inputTokens,
+        },
       });
       return;
     }
@@ -1587,7 +1707,11 @@ export const processImageGeneration = async (
       // Thinking has no per-token price here, so a request that thought -- or
       // one whose pinned thinking level carries a flat surcharge -- is settled
       // at the thinking cap the reservation held, never at zero.
-      const thinkingCost = settledThinkingCostMicroUsd(reservation.pricingSnapshot, result.thinkingTokens);
+      const thinkingCost = settledThinkingCostMicroUsd(
+        reservation.pricingSnapshot,
+        result.thinkingTokens,
+        result.nonImageBillableTokens
+      );
       // An edit's photo is billed as image input at the rate it was sold at.
       const imageInputTokens = result.imageInputTokens;
       const editInputCost = settledEditInputCostMicroUsd(
@@ -1668,6 +1792,16 @@ export const processImageGeneration = async (
           budgetDifference,
           reservation.createdAt
         );
+      } else if (budgetDifference < 0) {
+        // Spent past the reservation (a measured bound that did not hold):
+        // the provider budget is charged the difference, so it still stops
+        // the provider once the day's or month's money is gone.
+        await chargeProviderBudgetOverage(
+          tx,
+          reservation.provider,
+          -budgetDifference,
+          reservation.createdAt
+        );
       }
       await tx.imageCreditReservation.update({
         where: { id: reservation.id },
@@ -1711,6 +1845,17 @@ export const processImageGeneration = async (
       internalErrorDetail: String(error).slice(0, 500),
       releaseProviderBudget: false,
       reclaimSettling: "owned",
+      // Set only once the provider answered with an image; the settlement that
+      // would have charged its overage rolled back with this failure.
+      ...(answered
+        ? {
+            billed: {
+              nonImageBillableTokens: answered.nonImageBillableTokens,
+              imageDelivered: true,
+              inputTokens: answered.inputTokens,
+            },
+          }
+        : {}),
     }).catch(() => undefined);
     reportOperationalIncident({
       code: "IMAGE_GENERATION_PROCESSING_FAILED",

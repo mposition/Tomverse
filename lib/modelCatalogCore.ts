@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import {
+  googleImageOutputLimitBound,
   imageThinkingCapEnforced,
   imageThinkingCapMinimumMicroUsd,
   type ImageModelDisabledReason,
@@ -299,6 +300,11 @@ export const judgeImageModel = (
     const minimum = imageThinkingCapMinimumMicroUsd(model.provider, model.apiModelId);
     if (cap !== null && minimum !== null && cap < minimum) {
       reasons.push(`thinking_cap_below_minimum:${minimum}`);
+    }
+    // A measured Google model is bounded only for the request that was measured.
+    const bound = googleImageOutputLimitBound(model.provider, model.apiModelId);
+    if (bound && (model.maxOutputTokens !== bound.maxOutputTokens || model.thinkingLevel)) {
+      reasons.push(`measured_request_required:max_output_tokens_${bound.maxOutputTokens}_no_thinking_level`);
     }
   } else {
     for (const price of model.prices) {

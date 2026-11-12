@@ -8,6 +8,8 @@ import {
 } from "@/lib/imageGenerationPricing";
 import {
   getImageModel,
+  GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN,
+  googleImageOutputLimitBound,
   imageDeliveryMimeType,
   imageThinkingCapEnforced,
   type ImageModelProfile,
@@ -35,6 +37,7 @@ import {
   buildGoogleImageRequest,
   GOOGLE_API_KEY_HEADER,
   GOOGLE_INTERACTIONS_URL,
+  googleNonImageBillableTokens,
   parseGoogleImageResponse,
 } from "@/lib/googleImageRequest";
 import {
@@ -115,6 +118,13 @@ export class ImageProviderError extends Error {
     super(message);
     this.name = "ImageProviderError";
   }
+
+  /**
+   * Billable output and thinking tokens of a response that was billed and
+   * still refused (a Google response that stopped without its image). Null
+   * everywhere else. Lets the failure settle what was spent past the reservation.
+   */
+  nonImageBillableTokens: number | null = null;
 }
 
 /**
@@ -203,6 +213,11 @@ export type ImageProviderResult = {
    * compare the fixed price against the real cost.
    */
   thinkingTokens: number;
+  /**
+   * Billable output and thinking tokens that are not the image, for a model
+   * priced on a measured token bound (Google direct). Absent elsewhere.
+   */
+  nonImageBillableTokens?: number | null;
   /** Provider-reported output/image tokens; 0 when the response omits usage. */
   outputTokens: number;
   providerRequestId: string | null;
@@ -365,8 +380,14 @@ export const generateImageWithProvider = async (input: {
   const model = getImageModel(modelId);
   // An operator hold stops new admissions (the service refuses them); a job
   // already admitted and charged against the provider budget finishes rather
-  // than failing after its budget was spent. Price or cost refusals still stop.
-  if (!model || (model.disabledReason !== null && model.disabledReason !== "operational_hold")) {
+  // than failing after its budget was spent. Price or cost refusals still stop,
+  // and so does a model with no price at all: nothing was admitted against it,
+  // so there is no job to finish (a seed held before its sale credits exist).
+  if (
+    !model ||
+    model.prices.length === 0 ||
+    (model.disabledReason !== null && model.disabledReason !== "operational_hold")
+  ) {
     throw new ImageProviderError(
       "provider_failed",
       `Image model ${modelId} is not available for requests.`
@@ -555,16 +576,18 @@ export const generateImageWithProvider = async (input: {
 /**
  * Google, over the Interactions API.
  *
- * Unreachable today and deliberately so: generateImageWithProvider refuses any
- * model carrying a disabledReason before it dispatches, and all three Google
- * image models are `worst_case_cost_unbounded` because `max_output_tokens` was
- * measured not to bound hidden thinking. It also refuses any model whose
- * provider bills thinking per uncapped token (`imageThinkingCapEnforced`), so
- * a cap an operator writes into a price revision does not open this path
- * either -- only a code change to that table can. The adapter exists
- * ahead of that answer because implementing it is not the same decision as
- * shipping it, and because the staging measurement that would settle the
- * question needs this code to make the call.
+ * Reachable only for a model in GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS whose request
+ * is the measured one (that row's output limit, no thinking level), once an
+ * operator has priced and enabled it: generateImageWithProvider refuses any
+ * model carrying a disabledReason before it dispatches, and any whose thinking
+ * cap its request cannot hold (`imageThinkingCapEnforced`). A cap written into
+ * a price revision for an unmeasured Google model opens nothing -- only a row
+ * in that table can, and a row is a code change backed by a measurement.
+ *
+ * Only a rate limit is retried. A response that stops without an image
+ * (`incomplete`, which the limit causes when reasoning uses the room), a
+ * transport failure and a 5xx are not: each may have been billed, and the
+ * reservation holds one request's worst case.
  *
  * Differences from the other two adapters, each of which is a way to get it
  * wrong:
@@ -614,7 +637,10 @@ const generateWithGoogle = async (
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
-      lastError = new ImageProviderError(
+      // Not retried: a generation that finished and whose response was lost
+      // looks exactly like this, and a second attempt would be billed again
+      // against a reservation that holds one.
+      throw new ImageProviderError(
         "provider_failed",
         error instanceof Error && error.name === "TimeoutError"
           ? "Image provider request timed out."
@@ -623,7 +649,6 @@ const generateWithGoogle = async (
         null,
         requestParams
       );
-      continue;
     }
 
     const providerRequestId =
@@ -639,27 +664,49 @@ const generateWithGoogle = async (
         providerRequestId,
         requestParams
       );
-      if (
-        failurePhase === "provider_rate_limited" ||
-        failurePhase === "provider_failed"
-      ) {
+      // Only a rate limit is retried: it is refused before any work is done.
+      // A 5xx may follow a generation that was billed, like a lost response.
+      if (failurePhase === "provider_rate_limited") {
         lastError = error;
         continue;
       }
       throw error;
     }
 
-    const parsed = parseGoogleImageResponse(
-      await response.json().catch(() => null)
-    );
+    const payload = await response.json().catch(() => null);
+    // The thinking cap rests on a measured bound, not a documented one, so a
+    // response that bills past it is reported the first time it happens --
+    // before the image is looked for, because a response that stopped without
+    // one was billed as well.
+    const bound = googleImageOutputLimitBound(model.provider, model.apiModelId);
+    const nonImageBillableTokens = googleNonImageBillableTokens(payload);
+    if (
+      bound &&
+      nonImageBillableTokens !== null &&
+      nonImageBillableTokens > GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN * bound.maxOutputTokens
+    ) {
+      console.error(
+        JSON.stringify({
+          event: "image_google_output_over_measured_bound",
+          modelId: model.id,
+          maxOutputTokens: bound.maxOutputTokens,
+          nonImageBillableTokens,
+          providerRequestId,
+          timestamp: new Date().toISOString(),
+        })
+      );
+    }
+    const parsed = parseGoogleImageResponse(payload);
     if (!parsed) {
-      throw new ImageProviderError(
+      const refused = new ImageProviderError(
         "provider_failed",
         "Image provider returned no usable image payload.",
         response.status,
         providerRequestId,
         requestParams
       );
+      refused.nonImageBillableTokens = nonImageBillableTokens;
+      throw refused;
     }
     const imageBytes = Buffer.from(parsed.imageBase64, "base64");
     const dimensions = readImageDimensions(imageBytes, parsed.mimeType);
@@ -668,6 +715,7 @@ const generateWithGoogle = async (
       mimeType: parsed.mimeType,
       inputTokens: parsed.usage.inputTokens,
       thinkingTokens: parsed.usage.thinkingTokens,
+      nonImageBillableTokens,
       outputTokens: parsed.usage.outputTokens,
       providerRequestId,
       // Google embeds SynthID. C2PA is claimed only where the model card says

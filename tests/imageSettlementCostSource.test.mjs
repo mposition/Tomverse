@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { reservationOutputCostMicroUsd, settledThinkingCostMicroUsd } from "../lib/imageGenerationService.ts";
+import {
+  measuredNonImageCostMicroUsd,
+  reservationOutputCostMicroUsd,
+  settledThinkingCostMicroUsd,
+} from "../lib/imageGenerationService.ts";
 
 // Settlement used to re-read the live price table and fall back to zero. Both
 // halves were wrong in ways that hide: a deploy between reservation and
@@ -85,6 +89,23 @@ test("a flat thinking surcharge settles at the cap even when no thinking is repo
   assert.equal(settledThinkingCostMicroUsd({ provider: "xai", thinkingCapMicroUsd: 0 }, 0), 0);
 });
 
+test("a measured Google model settles its cap even when no thinking is reported", () => {
+  // Measured 2026-11-12: with the thinking level omitted these models report
+  // zero thinking and bill their reasoning text inside the output count, so a
+  // zero count is not a zero cost.
+  const google = (apiModelId, thinkingCapMicroUsd) => ({
+    provider: "google",
+    thinkingCapMicroUsd,
+    executionProfile: { provider: "google", apiModelId },
+    measuredNonImageBound:
+      apiModelId === "gemini-3-pro-image" ? null : { maxOutputTokens: 2_048, textOutputUsdPerMTok: 1.5 },
+  });
+  assert.equal(settledThinkingCostMicroUsd(google("gemini-3.1-flash-image", 12_288), 0), 12_288);
+  assert.equal(settledThinkingCostMicroUsd(google("gemini-3.1-flash-lite-image", 6_144), 900), 6_144);
+  // An unmeasured Google model keeps the general rule.
+  assert.equal(settledThinkingCostMicroUsd(google("gemini-3-pro-image", 2_000), 0), 0);
+});
+
 test("fal settles thinking by the endpoint the reservation froze", () => {
   // fal bills per endpoint, and settlement reads the endpoint from the
   // reservation's executionProfile -- the request it priced -- never the live
@@ -108,4 +129,90 @@ test("fal settles thinking by the endpoint the reservation froze", () => {
   assert.equal(settledThinkingCostMicroUsd(fal("fal-ai/flux/dev", null), 0), null);
   // A snapshot from before executionProfile existed was Nano Banana 2's.
   assert.equal(settledThinkingCostMicroUsd({ provider: "fal", thinkingCapMicroUsd: 2_000, executionProfile: null }, 0), 2_000);
+});
+
+test("a measured Google response past its bound settles what it billed, not the cap", () => {
+  // Review finding 2026-11-13: settling the cap for a response that billed
+  // more would hide the overage from the provider budget, which is the one
+  // deterministic stop once a measured bound stops holding.
+  const flash = {
+    provider: "google",
+    thinkingCapMicroUsd: 12_288,
+    executionProfile: { provider: "google", apiModelId: "gemini-3.1-flash-image" },
+    measuredNonImageBound: { maxOutputTokens: 2_048, textOutputUsdPerMTok: 3 },
+  };
+  // At or under the bound (4,096 tokens at $3.00 per 1M): the cap.
+  assert.equal(settledThinkingCostMicroUsd(flash, 0, 468), 12_288);
+  assert.equal(settledThinkingCostMicroUsd(flash, 0, 4_096), 12_288);
+  // Past it: the tokens at the text rate.
+  assert.equal(settledThinkingCostMicroUsd(flash, 0, 10_000), 30_000);
+  // No count reported: the cap, never zero.
+  assert.equal(settledThinkingCostMicroUsd(flash, 0, null), 12_288);
+  assert.equal(settledThinkingCostMicroUsd(flash, 0), 12_288);
+
+  assert.equal(measuredNonImageCostMicroUsd(flash, 1_815), 5_445);
+  const lite = {
+    provider: "google",
+    executionProfile: { apiModelId: "gemini-3.1-flash-lite-image" },
+    measuredNonImageBound: { maxOutputTokens: 2_048, textOutputUsdPerMTok: 1.5 },
+  };
+  assert.equal(measuredNonImageCostMicroUsd(lite, 1_815), 2_723);
+  // Read from the reservation, not the live table: a snapshot without the
+  // frozen bound prices nothing, whatever the table says today.
+  assert.equal(measuredNonImageCostMicroUsd({ ...flash, measuredNonImageBound: null }, 1_815), null);
+  // And a frozen bound settles as one even for a model the table no longer lists.
+  const delisted = { ...flash, executionProfile: { provider: "google", apiModelId: "gemini-retired-image" } };
+  assert.equal(settledThinkingCostMicroUsd(delisted, 0, 468), 12_288);
+  // Not a measured model, or no count: nothing to price.
+  assert.equal(measuredNonImageCostMicroUsd({ provider: "google", executionProfile: { apiModelId: "gemini-3-pro-image" } }, 1_815), null);
+  assert.equal(measuredNonImageCostMicroUsd({ provider: "openai", executionProfile: { apiModelId: "gpt-image-2" } }, 1_815), null);
+  assert.equal(measuredNonImageCostMicroUsd(flash, null), null);
+  assert.equal(measuredNonImageCostMicroUsd(flash, -1), null);
+  assert.equal(measuredNonImageCostMicroUsd(null, 10), null);
+});
+
+test("a failure after a measured Google model answered counts what it billed", async () => {
+  // Review finding 2026-11-13: an image delivered and then lost to storage or
+  // to a rolled-back settlement was billed in full -- image, prompt and its
+  // non-image tokens -- and the failure must see that, not only the reservation.
+  const { failureIncurredCostMicroUsd } = await import("../lib/imageGenerationService.ts");
+  const flash = {
+    provider: "google",
+    outputCostMicroUsd: 67_200,
+    thinkingCapMicroUsd: 12_288,
+    executionProfile: { provider: "google", apiModelId: "gemini-3.1-flash-image" },
+    measuredNonImageBound: { maxOutputTokens: 2_048, textOutputUsdPerMTok: 3 },
+  };
+  // Delivered: image 67,200 + prompt (62 tokens at $5/1M = 310) + 10,000 tokens at $3/1M.
+  assert.equal(
+    failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: 10_000, imageDelivered: true, inputTokens: 62 }),
+    67_200 + 310 + 30_000
+  );
+  // Refused without an image, prompt count unknown: its whole budget, no image.
+  assert.equal(
+    failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: 1_815, imageDelivered: false }),
+    5_445 + 5_000
+  );
+  // Nothing billed is known, or not a measured model: keep the reservation.
+  assert.equal(failureIncurredCostMicroUsd(flash, undefined), null);
+  assert.equal(failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: null, imageDelivered: true }), null);
+  assert.equal(
+    failureIncurredCostMicroUsd(
+      { provider: "openai", outputCostMicroUsd: 53_000, executionProfile: { apiModelId: "gpt-image-2" } },
+      { nonImageBillableTokens: 10_000, imageDelivered: true }
+    ),
+    null
+  );
+  // Delivered, but the snapshot has no image cost: never priced as free.
+  assert.equal(
+    failureIncurredCostMicroUsd(
+      {
+        provider: "google",
+        executionProfile: { apiModelId: "gemini-3.1-flash-image" },
+        measuredNonImageBound: { maxOutputTokens: 2_048, textOutputUsdPerMTok: 3 },
+      },
+      { nonImageBillableTokens: 10_000, imageDelivered: true }
+    ),
+    null
+  );
 });
