@@ -135,11 +135,7 @@ export async function registerCustomMcpServer(userId: string, input: z.infer<typ
   const url = normalizeCustomMcpUrl(input.url);
   const existing = await prisma.mcpCustomServer.findUnique({ where: { userId_url_auth: { userId, url, auth: input.auth } } });
   if (existing) return { server: customMcpServerPolicy(existing), created: false };
-  // Another auth type for the same URL would get a fresh connection and so
-  // escape the fence on an unverified write made through the kept row.
-  if (await prisma.mcpInvocation.count({ where: { userId, state: { in: ["running", "unknown"] }, connection: { serverId: { in:
-    (await prisma.mcpCustomServer.findMany({ where: { userId, url }, select: { id: true } })).map(row => row.id) } } } }))
-    throw new McpConnectorError("previous_outcome_unknown", 409);
+  await refuseUnverifiedWriteOnUrl(prisma, userId, url);
   const stale = await prisma.mcpCustomServer.findMany({ where: { userId, createdAt: { lt: new Date(Date.now() - MCP_LIMITS.pendingMs) } }, select: { id: true } });
   for (const row of stale) await forgetUnusedCustomMcpServer(userId, row.id);
   const deadline = AbortSignal.any([AbortSignal.timeout(MCP_LIMITS.requestMs), ...(signal ? [signal] : [])]);
@@ -152,6 +148,9 @@ export async function registerCustomMcpServer(userId: string, input: z.infer<typ
       await takeAuditChainLock(tx);
       const raced = await tx.mcpCustomServer.findUnique({ where: { userId_url_auth: { userId, url, auth: input.auth } } });
       if (raced) return;
+      // Again under the audit lock, which approvals also take: a pending call
+      // approved during discovery is running by now and is seen here.
+      await refuseUnverifiedWriteOnUrl(tx, userId, url);
       if (await tx.mcpCustomServer.count({ where: { userId } }) >= MCP_LIMITS.customServers) throw new McpConnectorError("custom_server_limit", 429);
       await tx.mcpCustomServer.create({ data: { ...data, ...(oauth ? { oauth: oauth as Prisma.InputJsonValue } : {}) } });
       await auditMcp(tx, userId, "custom_server_added", data.id, "McpCustomServer");
@@ -165,6 +164,13 @@ export async function forgetUnusedCustomMcpServer(userId: string, id: string) {
     await takeAuditChainLock(tx);
     await removeCustomServerIfSettled(tx, userId, id);
   });
+}
+// Another auth type for the same URL would get a fresh connection and so
+// escape the fence on an unverified write made through the kept row.
+async function refuseUnverifiedWriteOnUrl(db: Prisma.TransactionClient, userId: string, url: string) {
+  const ids = (await db.mcpCustomServer.findMany({ where: { userId, url }, select: { id: true } })).map(row => row.id);
+  if (ids.length && await db.mcpInvocation.count({ where: { userId, state: { in: ["running", "unknown"] }, connection: { serverId: { in: ids } } } }))
+    throw new McpConnectorError("previous_outcome_unknown", 409);
 }
 // A user-entered server lives only as long as its connection, except while a
 // dispatched write's outcome is unverified: the row (so its serverId and

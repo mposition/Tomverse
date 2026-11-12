@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { before, after, test } from "node:test";
+import { takeAuditChainLock } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { startMcpSyntheticServer } from "../fixtures/mcpSyntheticServer";
 import { connectMcp, disconnectMcp, encryptMcpSecret, decryptMcpSecret, forgetUnusedCustomMcpServer, grantMcpTools, listMcpConnections, ownMcpConnection,
@@ -280,6 +281,25 @@ test("an unverified custom-server write keeps its row, so re-registration cannot
     const again = await registerCustomMcpServer(userId, { url, auth: "none" });
     assert.equal(again.server.id, server.id); assert.equal(again.created, false);
     await assert.rejects(() => registerCustomMcpServer(userId, { url, auth: "bearer" }), { code: "previous_outcome_unknown" });
+    // A call that was only pending when registration began, and became unknown
+    // before the row is stored, is still caught by the check under the lock.
+    await prisma.mcpInvocation.update({ where: { id: unknown.id }, data: { state: "pending" } });
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let registration!: Promise<unknown>;
+    await prisma.$transaction(async tx => {
+      await takeAuditChainLock(tx);
+      registration = registerCustomMcpServer(userId, { url, auth: "bearer" });
+      registration.catch(() => {});
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline && !Number((await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`)[0].n))
+        await new Promise(resolve => setTimeout(resolve, 20));
+      await tx.mcpInvocation.update({ where: { id: unknown.id }, data: { state: "unknown" } });
+      release();
+    }, { timeout: 10_000 });
+    await held;
+    await assert.rejects(() => registration, { code: "previous_outcome_unknown" });
+    assert.equal(await prisma.mcpCustomServer.count({ where: { userId } }), 1);
     const reconnected = await connectMcp(userId, server.id);
     assert.equal(reconnected.id, connected.id);
     await confirmMcpOutcome(userId, unknown.id, "not_executed");
