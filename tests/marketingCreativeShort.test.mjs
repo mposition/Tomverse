@@ -553,6 +553,11 @@ test("the recorder refuses bad arguments and a folder that already holds a recor
   assert.equal(refused.status, 3);
   assert.match(JSON.parse(refused.stdout.trim()).refused, /never sent twice/u);
   assert.equal(existsSync(lock), false, "a refused folder gives the account lock back");
+  // A dry run never writes into a recording's folder (it would replace question.png under its pack).
+  const dryInto = run("en", join(dir, "done"), question, "fresh-cooking", "--dry");
+  assert.equal(dryInto.status, 3);
+  assert.match(JSON.parse(dryInto.stdout.trim()).refused, /holds a recording/u);
+  assert.equal(existsSync(lock), false);
   // The demo account in use (or left locked): refused before anything, the folder not claimed, the lock kept.
   mkdirSync(dirname(lock), { recursive: true });
   writeFileSync(lock, "{}");

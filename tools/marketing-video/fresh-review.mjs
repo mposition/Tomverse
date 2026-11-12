@@ -24,7 +24,7 @@
 // was started in this folder already, 4 stopped after a paid step, 5 the
 // account settings were not restored (stop and look; the pack is kept when the
 // recording itself finished). A non-dry run claims <out-dir>/started.json first.
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -309,6 +309,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (!dry && process.env[FRESH_REVIEW_ENV] !== "on") {
     console.log(JSON.stringify({ step: "fresh-review", locale, refused: `${FRESH_REVIEW_ENV} is not on; nothing sent` }));
     process.exit(1);
+  }
+  // A folder that holds a recording is never written again, by a dry run either: its pictures
+  // must stay the ones its pack.json describes.
+  if (dry && ["started.json", "pack.json", "log.json"].some((file) => existsSync(path.join(outDir, file)))) {
+    console.log(JSON.stringify({ step: "fresh-review", locale, refused: "this folder holds a recording; a dry run writes elsewhere" }));
+    process.exit(3);
   }
   mkdirSync(outDir, { recursive: true });
   // One recording at a time on the demo account, from any folder or run, dry runs included: each
