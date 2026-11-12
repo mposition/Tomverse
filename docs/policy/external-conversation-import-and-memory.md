@@ -685,6 +685,14 @@ Tomverse 밖으로 나가기 때문입니다.
   최악값을 예약하고 provider가 보고한 `billed_units`로 정산합니다. 보고가 없거나
   요청이 실패한 경우 예약을 그대로 둡니다
   (`docs/policy/credit-and-cost-limits.md`의 버킷 구분).
+- **발급하는 route만 provider를 호출합니다.** bundle을 발급하는
+  `/api/chat/context`와 comparison `preflight`는 의미 검색을 호출할 수 있고,
+  bundle을 검증하고 전송하는 `/api/chat`은 `cached_only`로 context를 다시 만듭니다
+  — 발급 route가 저장한 결과가 있으면 그것을 쓰고, 없으면 lexical입니다. 그래서
+  lexical 선택 위에 서명된 bundle(provider 실패, 예산 거절, cache 저장 실패)은
+  검증 시점에 provider나 cache가 복구돼 있어도 lexical로 재현됩니다. 전송 경로는
+  검색 provider를 기다리지도, 비용을 내지도 않습니다. `tests/semanticRetrievalSendPath.test.mjs`가
+  이 인자를 지킵니다.
 - **한 턴은 한 결과를 봅니다.** context bundle은 `/api/chat/context`·`preflight`·
   `/api/chat`에서 다시 계산되고 fingerprint가 다르면 거절됩니다(§10). 그래서
   (질문, 후보) 쌍의 첫 결과 — 순위든 실패든 — 를 `SemanticRetrievalCache`에

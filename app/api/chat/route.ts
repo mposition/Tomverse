@@ -2316,6 +2316,10 @@ async function handleChatPost(
                 profileVersionId,
                 plan: accountPlan?.tier ?? null,
                 conversationMode: memoryMode,
+                // This route verifies a bundle another route issued. It reuses
+                // the semantic outcome that route stored and never asks the
+                // retrieval provider itself.
+                semantic: "cached_only",
             });
             const verification = verifyChatContextBundle(token, {
                 subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,

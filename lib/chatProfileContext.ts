@@ -29,6 +29,7 @@ import {
 } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
+import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
 
 /**
  * What an assistant profile contributes to one turn (C3c).
@@ -174,6 +175,8 @@ export async function buildChatProfileContext(input: {
     plan: ModelTier | null;
     /** What the caller's plan already permits. A profile intersects with it. */
     entitledTools: AssistantToolPolicy;
+    /** See `buildChatTurnContext`: "cached_only" on the verifying route. */
+    semantic?: SemanticCallMode;
 }): Promise<ChatProfileContext> {
     if (!input.profileVersionId) return NO_PROFILE_CONTEXT;
     if (!input.userId) return refused("guest");
@@ -267,6 +270,7 @@ export async function buildChatProfileContext(input: {
         userId: input.userId,
         fileIds: knowledgeFileIds,
         query: input.query,
+        semantic: input.semantic,
     });
 
     const tools = resolveProfileTools({

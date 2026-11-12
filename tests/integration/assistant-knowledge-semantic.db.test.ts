@@ -500,41 +500,52 @@ test("a question with no usable term sends nothing and retrieves nothing", async
 
 /* -------------------------------------------- a result that is not stored */
 
-test("a ranking that could not be stored is not used, and is asked for again once the cache is back", async () => {
+test("a ranking that could not be stored is not used, and the verifying route cannot change that", async () => {
     const { user, fileIds } = await seedTwoFiles(WINDOW_DOC, GIFT_DOC);
     await turnOn("knowledgeRerank");
     provider.state.rerankScore = (_query, document) => (document.includes("gift") ? 0.9 : 0.02);
     const input = { userId: user.id, fileIds, query: GIFT_QUESTION };
 
-    // The cache is unavailable for one request. The provider answers, but a
-    // bundle signed over that answer could not be reproduced by the turn's
-    // next rebuild -- so the answer is not used.
+    // The cache is unavailable while the bundle is issued. The provider
+    // answers, but a bundle signed over that answer could not be reproduced
+    // by the route that verifies it -- so the answer is not used.
     await prisma.$executeRawUnsafe(
         'ALTER TABLE "SemanticRetrievalCache" RENAME TO "SemanticRetrievalCacheUnavailable"'
     );
-    let unstored;
+    let issued;
     try {
-        unstored = await retrieveKnowledgeContext(input);
+        issued = await retrieveKnowledgeContext(input);
     } finally {
         await prisma.$executeRawUnsafe(
             'ALTER TABLE "SemanticRetrievalCacheUnavailable" RENAME TO "SemanticRetrievalCache"'
         );
     }
     assert.equal(provider.state.calls.length, 1);
-    assert.equal(unstored.retrievalVersion, 1);
-    assert.equal(unstored.chunks.length, 2);
+    assert.equal(issued.retrievalVersion, 1);
+    assert.equal(issued.chunks.length, 2);
     assert.equal(await prisma.semanticRetrievalCache.count(), 0);
 
-    // Recovered: nothing was recorded, so the next request asks again, stores
-    // the ranking and uses it, and the one after that reuses it.
-    const ranked = await retrieveKnowledgeContext(input);
+    // The cache is back when the bundle is verified. Nothing was stored for
+    // the turn, so the verifying route asks nobody and rebuilds the lexical
+    // selection the bundle was signed over.
+    const verified = await retrieveKnowledgeContext({ ...input, semantic: "cached_only" });
+    assert.equal(provider.state.calls.length, 1);
+    assert.equal(verified.retrievalVersion, 1);
+    assert.deepEqual(
+        verified.chunks.map((chunk) => chunk.id),
+        issued.chunks.map((chunk) => chunk.id)
+    );
+
+    // A new bundle is a new issue: it asks, stores and uses the ranking, and
+    // its own verification reuses it.
+    const reissued = await retrieveKnowledgeContext(input);
     assert.equal(provider.state.calls.length, 2);
-    assert.equal(ranked.retrievalVersion, 2);
-    const rebuilt = await retrieveKnowledgeContext(input);
+    assert.equal(reissued.retrievalVersion, 2);
+    const reverified = await retrieveKnowledgeContext({ ...input, semantic: "cached_only" });
     assert.equal(provider.state.calls.length, 2);
     assert.deepEqual(
-        rebuilt.chunks.map((chunk) => chunk.id),
-        ranked.chunks.map((chunk) => chunk.id)
+        reverified.chunks.map((chunk) => chunk.id),
+        reissued.chunks.map((chunk) => chunk.id)
     );
 });
 
@@ -572,4 +583,55 @@ test("a write that loses to an entry it cannot read back does not use its own re
 
     assert.equal(provider.state.calls.length, 1);
     assert.equal(selection.retrievalVersion, 1);
+});
+
+/* ------------------------------------------------ the route that verifies */
+
+test("the verifying route never calls the provider, with every knowledge switch on", async () => {
+    const { user, fileIds } = await seedTwoFiles(RETURNS_DOC, SHIPPING_DOC);
+    await turnOn("knowledgeEmbed");
+    await turnOn("knowledgeRerank");
+    await embedKnowledgeChunks();
+    provider.state.calls.length = 0;
+    // Indexing was paid for; verifying must add nothing to it.
+    const spentOnIndexing = await bucketCounts();
+
+    // No bundle was issued for this question, so nothing is cached for it.
+    const selection = await retrieveKnowledgeContext({
+        userId: user.id,
+        fileIds,
+        query: REFUND_QUESTION,
+        semantic: "cached_only",
+    });
+
+    assert.equal(provider.state.calls.length, 0);
+    assert.equal(selection.retrievalVersion, 1);
+    assert.deepEqual(await bucketCounts(), spentOnIndexing);
+});
+
+test("the verifying route reproduces what the issuing route stored, neighbours and ranking", async () => {
+    const { user, a, fileIds } = await seedTwoFiles(RETURNS_DOC, SHIPPING_DOC);
+    await turnOn("knowledgeEmbed");
+    await turnOn("knowledgeRerank");
+    await embedKnowledgeChunks();
+    provider.state.rerankScore = (_query, document) => (document.includes("반품") ? 0.9 : 0);
+    const input = { userId: user.id, fileIds, query: REFUND_QUESTION };
+
+    const issued = await retrieveKnowledgeContext(input);
+    assert.deepEqual(
+        issued.chunks.map((chunk) => chunk.fileId),
+        [a.id]
+    );
+    const callsAtIssue = provider.state.calls.length;
+
+    // The provider is down by the time the message is sent. It is not asked.
+    provider.state.failing = true;
+    const verified = await retrieveKnowledgeContext({ ...input, semantic: "cached_only" });
+
+    assert.equal(provider.state.calls.length, callsAtIssue);
+    assert.equal(verified.retrievalVersion, issued.retrievalVersion);
+    assert.deepEqual(
+        verified.chunks.map((chunk) => chunk.id),
+        issued.chunks.map((chunk) => chunk.id)
+    );
 });

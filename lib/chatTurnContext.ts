@@ -21,6 +21,7 @@ import {
     type ChatProfileContext,
 } from "@/lib/chatProfileContext";
 import type { ModelTier } from "@/lib/models";
+import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
 
 /**
  * Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -76,6 +77,17 @@ export async function buildChatTurnContext(input: {
     /** What the caller's plan already permits. A profile intersects with it. */
     entitledTools?: AssistantToolPolicy;
     now?: Date;
+    /**
+     * Whether semantic retrieval may call its provider on this build
+     * (docs/policy/external-conversation-import-and-memory.md §9a).
+     *
+     * The routes that issue a context bundle leave this unset. The route that
+     * verifies one and sends passes "cached_only": it reuses the outcome the
+     * issuing route stored and otherwise stays lexical, so it reproduces the
+     * signed selection whatever happened to the provider or the cache in
+     * between, and the send path never waits on or pays that provider.
+     */
+    semantic?: SemanticCallMode;
 }): Promise<ChatTurnContext> {
     const profile = input.profileVersionId
         ? await buildChatProfileContext({
@@ -85,6 +97,7 @@ export async function buildChatTurnContext(input: {
               plan: input.plan ?? null,
               entitledTools:
                   input.entitledTools ?? { webSearch: true, deepResearch: true },
+              semantic: input.semantic,
           })
         : NO_PROFILE_CONTEXT;
 
@@ -97,6 +110,7 @@ export async function buildChatTurnContext(input: {
         // memory off by absence.
         profileMemoryPolicy: profile.memoryPolicy,
         now: input.now,
+        semantic: input.semantic,
     });
 
     const systemPrompt = buildProfileSystemPrompt({

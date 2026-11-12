@@ -527,3 +527,46 @@ test("a request with no usable term asks the reranker nothing", async () => {
     assert.equal(provider.state.calls.length, 0);
     assert.equal(result.algorithmVersion, 2);
 });
+
+/* ------------------------------------------------ the route that verifies */
+
+test("the verifying route reuses the issued ranking and never asks the reranker itself", async () => {
+    const user = await createUser();
+    await createMemory(user.id, "preference", CAFFEINE);
+    await createMemory(user.id, "identity", ENGINEER);
+    await turnOn("memoryRerank");
+    provider.state.rerankScore = () => 0.8;
+    const input = { userId: user.id, query: COFFEE_QUESTION, now: NOW };
+
+    // Verified without ever having been issued: lexical, and nobody is asked.
+    const cold = await retrieveMemoryContext({ ...input, semantic: "cached_only" });
+    assert.equal(provider.state.calls.length, 0);
+    assert.equal(cold.algorithmVersion, 2);
+
+    const issued = await retrieveMemoryContext(input);
+    assert.equal(issued.algorithmVersion, 3);
+    assert.equal(provider.state.calls.length, 1);
+
+    provider.state.failing = true;
+    const verified = await retrieveMemoryContext({ ...input, semantic: "cached_only" });
+    assert.equal(provider.state.calls.length, 1);
+    assert.equal(verified.resultHash, issued.resultHash);
+});
+
+test("a bundle issued over a failed rerank verifies as lexical after the provider recovers", async () => {
+    const user = await createUser();
+    await createMemory(user.id, "preference", CAFFEINE);
+    await createMemory(user.id, "identity", ENGINEER);
+    await turnOn("memoryRerank");
+    const input = { userId: user.id, query: COFFEE_QUESTION, now: NOW };
+
+    provider.state.failing = true;
+    const issued = await retrieveMemoryContext(input);
+    assert.equal(issued.algorithmVersion, 2);
+
+    provider.state.failing = false;
+    provider.state.rerankScore = () => 0.9;
+    const verified = await retrieveMemoryContext({ ...input, semantic: "cached_only" });
+    assert.equal(provider.state.calls.length, 1);
+    assert.equal(verified.resultHash, issued.resultHash);
+});

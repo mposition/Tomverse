@@ -13,6 +13,7 @@ import {
 } from "@/lib/assistantKnowledgeRetrievalScoring";
 import { prisma } from "@/lib/prisma";
 import { rerankForRetrieval } from "@/lib/semanticRetrieval";
+import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
 
 /**
  * Server-driven knowledge retrieval (Release C, C2).
@@ -57,6 +58,12 @@ export type KnowledgeRetrievalInput = {
      * slice the database happened to return first.
      */
     candidateLimit?: number;
+    /**
+     * "cached_only" on the route that verifies a context bundle: the semantic
+     * steps reuse what the issuing route stored and never call the provider.
+     * Defaults to "allow".
+     */
+    semantic?: SemanticCallMode;
 };
 
 export const KNOWLEDGE_CANDIDATE_LIMIT = 60;
@@ -121,6 +128,7 @@ export const retrieveKnowledgeContext = async (
         userId: input.userId,
         fileIds: input.fileIds,
         query: input.query,
+        mode: input.semantic,
     });
     const neighbours = found && found.size > 0 ? found : null;
 
@@ -160,6 +168,7 @@ export const retrieveKnowledgeContext = async (
         userId: input.userId,
         query: input.query,
         documents: passages.map((chunk) => ({ id: chunk.id, text: chunk.content })),
+        mode: input.semantic,
     });
 
     if (reranked) {

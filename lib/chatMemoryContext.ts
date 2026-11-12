@@ -27,6 +27,7 @@ import { retrieveMemoryContext } from "@/lib/memoryRetrievalService";
 import { getMemorySettings } from "@/lib/memoryService";
 import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
+import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
 
 /**
  * Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -164,6 +165,8 @@ export async function buildChatMemoryContext(input: {
      * result is discarded.
      */
     profileMemoryPolicy?: AssistantMemoryPolicy | null;
+    /** See `buildChatTurnContext`: "cached_only" on the verifying route. */
+    semantic?: SemanticCallMode;
     now?: Date;
 }): Promise<ChatMemoryContext> {
     if (!input.userId) {
@@ -213,6 +216,7 @@ export async function buildChatMemoryContext(input: {
             query: input.query,
             now: input.now,
             approvedPairs,
+            semantic: input.semantic,
         }),
         stateVersion(input.userId),
         stateVersion(input.userId, STYLE_MEMORY_KINDS),

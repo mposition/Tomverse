@@ -41,6 +41,20 @@ export type SemanticRetrievalFeature = (typeof SEMANTIC_RETRIEVAL_FEATURES)[numb
 export const semanticRetrievalSettingKey = (feature: SemanticRetrievalFeature) =>
     `retrieval.cohere.${feature}`;
 
+/**
+ * Whether a retrieval may ask the provider, or may only reuse what is cached.
+ *
+ * A context bundle is issued by one route and verified by another. Only the
+ * issuing routes ("allow") call the provider; the route that verifies and
+ * sends ("cached_only") reuses the outcome the issuing route stored and
+ * otherwise stays lexical. That is what lets a bundle signed over a lexical
+ * selection -- because the provider failed, the budget refused, or the cache
+ * itself could not be written -- be reproduced exactly: the verifying route
+ * cannot turn it semantic by succeeding where the issuing route did not. It
+ * also means the send path never waits on, or pays, the retrieval provider.
+ */
+export type SemanticCallMode = "allow" | "cached_only";
+
 /** Which API a feature spends on, so a feature is ready only with that config. */
 export const SEMANTIC_RETRIEVAL_FEATURE_API: Record<
     SemanticRetrievalFeature,
@@ -230,6 +244,11 @@ export const SEMANTIC_RETRIEVAL_LIMITS = {
     rerankMaxTokensPerDocument: 1_024,
     /** The provider's documented embed batch size. */
     maxEmbedInputsPerRequest: 96,
+    /**
+     * Page images per embed request. Far below the provider's 20 MB request
+     * limit at the rendered page size, so one refused batch costs few pages.
+     */
+    maxEmbedImagesPerRequest: 8,
     /** An upper bound for one page image, replaced by the billed figure. */
     imageTokenUpperBound: 8_000,
     /**

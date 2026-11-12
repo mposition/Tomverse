@@ -17,6 +17,7 @@ import { getMemorySettings } from "@/lib/memoryService";
 import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
 import { rerankForRetrieval, semanticFeatureReady } from "@/lib/semanticRetrieval";
+import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
 
 /**
  * Retrieval v1 against the database (policy §9).
@@ -166,6 +167,12 @@ export async function retrieveMemoryContext(input: {
     query: string;
     now?: Date;
     budget?: Partial<MemoryContextBudget>;
+    /**
+     * "cached_only" on the route that verifies a context bundle: the rerank
+     * reuses what the issuing route stored and never calls the provider.
+     * Defaults to "allow".
+     */
+    semantic?: SemanticCallMode;
     /**
      * Extraction pairs whose memories may be injected (§12.4). Omit to
      * consider every stored memory — which is right for diagnostics and for
@@ -332,6 +339,7 @@ export async function retrieveMemoryContext(input: {
                   .slice(0, MEMORY_SEMANTIC_DEFAULTS.maxRerankCandidates)
                   .map((memory) => ({ id: memory.id, text: memory.statement })),
               now,
+              mode: input.semantic,
           })
         : null;
 

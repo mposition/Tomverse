@@ -15,6 +15,7 @@ import {
     encodeVector,
     nearestByCosine,
     neighbourCacheKey,
+    type SemanticCallMode,
 } from "@/lib/semanticRetrievalCore";
 
 /**
@@ -70,12 +71,15 @@ export async function knowledgeNeighbours(input: {
     userId: string;
     fileIds: readonly string[];
     query: string;
+    /** "cached_only" on the route that verifies a bundle. Defaults to "allow". */
+    mode?: SemanticCallMode;
 }): Promise<Map<string, number> | null> {
     if (input.fileIds.length === 0) return null;
     const embedded = await embedQueryForRetrieval({
         feature: "knowledgeEmbed",
         userId: input.userId,
         query: input.query,
+        mode: input.mode,
     });
     if (!embedded) return null;
 
@@ -87,6 +91,9 @@ export async function knowledgeNeighbours(input: {
     });
     const cached = await readSemanticCache(key);
     if (cached?.kind === "neighbours") return new Map(cached.scores);
+    // The issuing route stored no neighbour result, so it used none. Searching
+    // the index now would be a new answer, not the signed one.
+    if (input.mode === "cached_only") return null;
 
     const rows = await prisma.assistantKnowledgeChunk.findMany({
         where: {

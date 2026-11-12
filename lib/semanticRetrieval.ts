@@ -22,6 +22,7 @@ import {
     retrievalBudgetPeriods,
     semanticRetrievalFeatureConfigured,
     type SemanticCacheValue,
+    type SemanticCallMode,
     type SemanticRetrievalConfig,
     type SemanticRetrievalFeature,
 } from "@/lib/semanticRetrievalCore";
@@ -36,12 +37,14 @@ import { readSemanticRetrievalSwitch } from "@/lib/semanticRetrievalSettings";
  * chat turn or a file-processing run, and money fails closed -- no switch, no
  * price, no budget or no room in the budget all mean no request is sent.
  *
- * The cache is what keeps a turn consistent. A context bundle is rebuilt on up
- * to three routes and refused when the rebuilt fingerprint differs from the
- * signed one, so the first outcome for a (question, candidates) pair -- a
- * ranking or a failure -- is the outcome for every rebuild within the bundle's
- * lifetime. It also means the provider is paid once per turn rather than three
- * times.
+ * The cache is what keeps a turn consistent. A context bundle is issued by
+ * one route and rebuilt by the route that verifies it, and is refused when the
+ * rebuilt fingerprint differs from the signed one. So the first outcome for a
+ * (question, candidates) pair -- a ranking or a failure -- is stored, and the
+ * verifying route only ever reuses a stored outcome ("cached_only"): it never
+ * calls the provider, and with nothing stored it stays lexical, which is what
+ * the issuing route must have signed. The provider is therefore paid at most
+ * once per issued bundle, and never on the send path.
  */
 
 type ReadyFeature = { config: SemanticRetrievalConfig; budget: { day: number; month: number } };
@@ -244,6 +247,8 @@ export async function rerankForRetrieval(input: {
     query: string;
     documents: ReadonlyArray<{ id: string; text: string }>;
     now?: Date;
+    /** "cached_only" on the route that verifies a bundle. Defaults to "allow". */
+    mode?: SemanticCallMode;
 }): Promise<ReadonlyMap<string, number> | null> {
     const query = boundQuery(input.query).trim();
     const documents = input.documents.slice(0, SEMANTIC_RETRIEVAL_LIMITS.maxRerankDocuments);
@@ -258,6 +263,12 @@ export async function rerankForRetrieval(input: {
     if (cached) {
         log({ feature: input.feature, api: "rerank", outcome: cached.kind === "rerank" ? "cached" : "cached_failure" });
         return cached.kind === "rerank" ? new Map(cached.scores) : null;
+    }
+    if (input.mode === "cached_only") {
+        // Nothing was stored for this turn, so the bundle being verified was
+        // signed over the lexical selection. Asking now could only disagree.
+        log({ feature: input.feature, api: "rerank", outcome: "not_cached" });
+        return null;
     }
 
     const startedAt = Date.now();
@@ -323,6 +334,8 @@ export async function embedQueryForRetrieval(input: {
     userId: string;
     query: string;
     now?: Date;
+    /** "cached_only" on the route that verifies a bundle. Defaults to "allow". */
+    mode?: SemanticCallMode;
 }): Promise<{ vector: Int8Array; modelLabel: string } | null> {
     const query = boundQuery(input.query).trim();
     if (!query) return null;
@@ -341,6 +354,10 @@ export async function embedQueryForRetrieval(input: {
     if (cached) {
         log({ feature: input.feature, api: "embed_query", outcome: cached.kind === "embedding" ? "cached" : "cached_failure" });
         return fromCache(cached);
+    }
+    if (input.mode === "cached_only") {
+        log({ feature: input.feature, api: "embed_query", outcome: "not_cached" });
+        return null;
     }
 
     const startedAt = Date.now();
@@ -415,7 +432,9 @@ export async function embedForIndexing(input: {
 
     const vectors: Array<Int8Array | null> = new Array(input.inputs.length).fill(null);
     const size =
-        input.kind === "image" ? 8 : SEMANTIC_RETRIEVAL_LIMITS.maxEmbedInputsPerRequest;
+        input.kind === "image"
+            ? SEMANTIC_RETRIEVAL_LIMITS.maxEmbedImagesPerRequest
+            : SEMANTIC_RETRIEVAL_LIMITS.maxEmbedInputsPerRequest;
     let embedded = 0;
     const startedAt = Date.now();
 
