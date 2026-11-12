@@ -658,14 +658,16 @@ Tomverse 밖으로 나가기 때문입니다.
 **켜기 전 조건** (스위치를 켜는 승인이 확인하는 것):
 
 1. 환경 변수: `COHERE_API_KEY`, 모델(`COHERE_RERANK_MODEL`, `COHERE_EMBED_MODEL`),
-   단가(`COHERE_RERANK_MICROUSD_PER_SEARCH_UNIT`,
+   단가(rerank는 과금 단위에 따라 `COHERE_RERANK_MICROUSD_PER_SEARCH_UNIT` **또는**
+   `COHERE_RERANK_MICROUSD_PER_MILLION_TOKENS` 하나만 — 둘 다면 설정 오류이고, 응답이
+   설정과 다른 단위로 청구를 보고하면 예약을 정산하지 않고 그대로 둡니다 —,
    `COHERE_EMBED_MICROUSD_PER_MILLION_TEXT_TOKENS`, 이미지 색인에는
    `COHERE_EMBED_MICROUSD_PER_MILLION_IMAGE_TOKENS`), 예산
    (`RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_DAY`·`_PER_MONTH`). 단가는 코드에
    상수로 두지 않습니다 — provider 가격표의 값을 운영자가 넣으며, 하나라도 없으면
    해당 기능은 호출하지 않습니다. Admin › Feature flags가 미설정 기능의 스위치를
    켜는 요청을 거절하고, 한 요청의 스위치 변경은 감사 기록과 함께 한 transaction으로
-   씁니다.
+   씁니다. 순서·값·명령은 `docs/ops/semantic-retrieval-activation.md`에 있습니다.
 2. 개인정보: Cohere가 새 수탁 처리자가 되므로 7개 locale의 `privacyPolicy`와
    knowledge·memory 안내 문구를 **스위치를 켜기 전에** 갱신합니다(§16). 스위치가
    꺼진 동안은 문구가 "외부 embedding 없음"을 그대로 말하고,
