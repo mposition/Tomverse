@@ -142,6 +142,10 @@ export const OFFICE_RENDERABLE_EXTENSIONS: Readonly<Record<string, string>> = {
   "application/vnd.ms-powerpoint": "ppt",
   "application/vnd.ms-excel": "xls",
   "application/rtf": "rtf",
+  // Apple iWork. LibreOffice imports these with less fidelity than Office
+  // files: a Keynote deck holds up well, Pages and Numbers lose some styling.
+  "application/vnd.apple.pages": "pages",
+  "application/vnd.apple.numbers": "numbers",
 };
 
 export const normalizeMediaType = (mediaType: string) =>
