@@ -275,6 +275,7 @@ export const adminModelCatalogMessages = defineAdminMessages({
       addDescription:
         "A draft reads the provider's price, terms and data retention pages. Saving adds the model switched off and drafts its profile straight away.",
       apiModelIdHelp: "Exactly the name the provider's API takes. The catalog id is the same.",
+      redraftIdHelp: (modelId: string) => `The new draft is for ${modelId}. To call another API model, add it as a new model.`,
       priceUrlLabel: "Pricing page URL",
       priceUrlDefault: (url: string) => `Leave empty to read ${url}`,
       priceUrlNoDefault: "This provider has no default pricing page. Enter the official page.",
@@ -590,6 +591,7 @@ export const adminModelCatalogMessages = defineAdminMessages({
       addDescription:
         "초안은 공급자의 가격·약관·데이터 보존 문서를 읽습니다. 저장하면 꺼진 상태로 목록에 들어가고, 바로 프로필 초안을 만듭니다.",
       apiModelIdHelp: "공급자 API에 보내는 이름 그대로 적습니다. 카탈로그 id도 같은 값입니다.",
+      redraftIdHelp: (modelId: string) => `${modelId}의 새 초안입니다. 다른 API 모델을 부르려면 새 모델로 추가해 주세요.`,
       priceUrlLabel: "가격 문서 주소",
       priceUrlDefault: (url: string) => `비워 두면 ${url}을(를) 읽습니다`,
       priceUrlNoDefault: "이 공급자는 기본 가격 문서가 없습니다. 공식 문서 주소를 넣어 주세요.",

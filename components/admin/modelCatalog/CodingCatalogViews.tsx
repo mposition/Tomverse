@@ -563,6 +563,12 @@ export function CodingModelDetail({
 }
 
 export type CodingModelFormValue = {
+  /**
+   * The catalog id of an existing model a new draft is for. Its own id, not
+   * the API model id: the two can differ, and the draft must land on this row.
+   * Null for a new model, whose catalog id is its API model id.
+   */
+  modelId: string | null;
   provider: string;
   apiModelId: string;
   priceUrl: string;
@@ -620,12 +626,13 @@ export function CodingModelForm({
       <label className="text-xs font-bold text-zinc-300">
         {m.apiModelIdLabel}
         <input
-          className={`${field} font-mono`}
+          className={`${field} font-mono ${value.modelId ? "opacity-70" : ""}`}
           value={value.apiModelId}
+          readOnly={value.modelId !== null}
           onChange={(event) => onChange({ ...value, apiModelId: event.target.value })}
           data-testid="model-catalog-coding-apiModelId"
         />
-        <span className={help}>{c.apiModelIdHelp}</span>
+        <span className={help}>{value.modelId ? c.redraftIdHelp(value.modelId) : c.apiModelIdHelp}</span>
       </label>
       {url(
         "priceUrl",

@@ -92,6 +92,7 @@ const emptyForm = (provider = "openai"): ImageModelFormValue => ({
 });
 
 const emptyCodingForm = (provider = "anthropic"): CodingModelFormValue => ({
+  modelId: null,
   provider,
   apiModelId: "",
   priceUrl: "",
@@ -409,7 +410,8 @@ export function AdminModelCatalogPanel() {
    */
   const requestCodingDraft = async (value: CodingModelFormValue) => {
     const apiModelId = value.apiModelId.trim();
-    const modelId = apiModelId;
+    // A new draft for an existing row keeps that row's id (it can differ from the API id).
+    const modelId = value.modelId ?? apiModelId;
     const before = codingItems.find((item) => item.id === modelId)?.draftCreatedAt ?? null;
     const defaults = codingProviders.find((entry) => entry.provider === value.provider)?.defaultSources ?? [];
     setCodingForm(null);
@@ -449,6 +451,7 @@ export function AdminModelCatalogPanel() {
   const codingFormFor = (item: CodingCatalogItem): CodingModelFormValue => {
     const shown = item.draft ?? item.profile;
     return {
+      modelId: item.id,
       provider: item.provider || codingProviders[0]?.provider || "anthropic",
       apiModelId: item.apiModelId,
       priceUrl: shown?.pricing.sources.find((url) => url !== shown.terms.url && url !== shown.retention.url) ?? "",

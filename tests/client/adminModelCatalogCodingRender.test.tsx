@@ -128,7 +128,7 @@ test("the add form asks for provider, API id and the price, terms and retention 
   const html = renderToStaticMarkup(
     <CodingModelForm
       m={ko}
-      value={{ provider: "openai", apiModelId: "gpt-6-coder", priceUrl: "", termsUrl: "", retentionUrl: "" }}
+      value={{ modelId: null, provider: "openai", apiModelId: "gpt-6-coder", priceUrl: "", termsUrl: "", retentionUrl: "" }}
       onChange={noop}
       providers={[
         { provider: "anthropic", defaultSources: [], hosts: ["www.anthropic.com"] },
@@ -142,4 +142,19 @@ test("the add form asks for provider, API id and the price, terms and retention 
   assert.match(html, /data-testid="model-catalog-coding-termsUrl"/);
   assert.match(html, /data-testid="model-catalog-coding-retentionUrl"/);
   assert.match(html, /허용 도메인: openai\.com, developers\.openai\.com/);
+  assert.doesNotMatch(html, /readOnly|readonly=""/);
+});
+
+test("a new draft for an existing model names that model's catalog id and keeps its API id fixed", () => {
+  // The catalog id and the API id can differ; the draft must land on this row (review 2026-11-12).
+  const html = renderToStaticMarkup(
+    <CodingModelForm
+      m={en}
+      value={{ modelId: "gpt-draft-test", provider: "openai", apiModelId: "gpt-catalog-test", priceUrl: "", termsUrl: "", retentionUrl: "" }}
+      onChange={noop}
+      providers={[{ provider: "openai", defaultSources: [], hosts: [] }]}
+    />
+  );
+  assert.match(html, /data-testid="model-catalog-coding-apiModelId"[^>]*readOnly=""|readOnly=""[^>]*data-testid="model-catalog-coding-apiModelId"/);
+  assert.match(html, /The new draft is for gpt-draft-test\./);
 });
