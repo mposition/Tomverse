@@ -23,6 +23,8 @@ type World = {
   opsWrite: boolean;
   switches: Switches;
   updates: Array<{ feature: string; on: boolean }>;
+  /** How many times the store was asked to write; one per request at most. */
+  updateCalls: number;
 };
 let world: World;
 const reset = (changes: Partial<World> = {}) => {
@@ -38,6 +40,7 @@ const reset = (changes: Partial<World> = {}) => {
       memoryDuplicates: false,
     },
     updates: [],
+    updateCalls: 0,
     ...changes,
   };
 };
@@ -94,14 +97,17 @@ async function loadRoute(): Promise<Route> {
     mock.module(mod("lib/semanticRetrievalSettings.ts"), {
       namedExports: {
         readSemanticRetrievalSwitches: async () => ({ ...world.switches }),
-        updateSemanticRetrievalSwitch: async (
+        // One call carries every change of a request, so they commit together.
+        updateSemanticRetrievalSwitches: async (
           _actor: unknown,
-          feature: string,
-          on: boolean
+          changes: Record<string, boolean>
         ) => {
-          world.updates.push({ feature, on });
-          world.switches[feature] = on;
-          return true;
+          world.updateCalls += 1;
+          for (const [feature, on] of Object.entries(changes)) {
+            world.updates.push({ feature, on });
+            world.switches[feature] = on;
+          }
+          return Object.keys(changes);
         },
       },
     });
@@ -213,6 +219,8 @@ test("only a switch whose value changes is written", async () => {
     { feature: "memoryRerank", on: true },
     { feature: "memoryDuplicates", on: false },
   ]);
+  // Both changes went to the store in one call, so they commit together.
+  assert.equal(world.updateCalls, 1);
   const body = await response.json();
   assert.equal(body.features.memoryRerank.on, true);
   assert.equal(body.features.memoryDuplicates.on, false);
@@ -222,6 +230,7 @@ test("only a switch whose value changes is written", async () => {
   reset();
   assert.equal((await PUT(put({}))).status, 200);
   assert.deepEqual(world.updates, []);
+  assert.equal(world.updateCalls, 0);
 });
 
 test("a switch cannot be turned on before its environment is set, but can always be turned off", async () => {

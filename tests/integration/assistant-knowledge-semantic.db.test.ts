@@ -397,3 +397,98 @@ test("the sweep removes cache rows past their expiry and leaves live ones", asyn
     await prisma.user.delete({ where: { id: user.id } });
     assert.equal(await prisma.semanticRetrievalCache.count(), 0);
 });
+
+/* --------------------------------------------- what a signed bundle relies on */
+
+test("an index that fills in mid-turn does not change that turn's neighbours", async () => {
+    const { user, a, fileIds } = await seedTwoFiles(RETURNS_DOC, SHIPPING_DOC);
+    await turnOn("knowledgeEmbed");
+    const input = { userId: user.id, fileIds, query: REFUND_QUESTION };
+
+    // Nothing is embedded yet, so the first build of the turn finds no
+    // neighbour and its bundle is signed over the lexical selection.
+    const first = await retrieveKnowledgeContext(input);
+    assert.deepEqual(first.chunks, []);
+    assert.equal(first.retrievalVersion, 1);
+
+    // The sweep catches up before the turn's next route rebuilds the context.
+    await embedKnowledgeChunks();
+    const rebuilt = await retrieveKnowledgeContext(input);
+    assert.deepEqual(rebuilt.chunks, []);
+    assert.equal(rebuilt.retrievalVersion, 1);
+
+    // A different question is a different turn, and sees the filled index.
+    const next = await retrieveKnowledgeContext({ ...input, query: `${REFUND_QUESTION} 다시` });
+    assert.deepEqual(
+        next.chunks.map((chunk) => chunk.fileId),
+        [a.id]
+    );
+});
+
+const secondsUntilExpiry = async () =>
+    (
+        await prisma.$queryRaw<Array<{ seconds: number }>>`
+            SELECT EXTRACT(EPOCH FROM ("expiresAt" - NOW()))::float8 AS "seconds"
+            FROM "SemanticRetrievalCache"
+            ORDER BY "expiresAt" ASC
+        `
+    ).map((row) => row.seconds);
+
+test("reading an outcome keeps it alive for a whole bundle lifetime", async () => {
+    const { user, fileIds } = await seedTwoFiles(WINDOW_DOC, GIFT_DOC);
+    await turnOn("knowledgeRerank");
+    const input = { userId: user.id, fileIds, query: GIFT_QUESTION };
+    await retrieveKnowledgeContext(input);
+
+    // The entry is nearly at the end of its first ten minutes when a new
+    // bundle is built from it.
+    await prisma.$executeRaw`
+        UPDATE "SemanticRetrievalCache" SET "expiresAt" = NOW() + INTERVAL '20 seconds'
+    `;
+    await retrieveKnowledgeContext(input);
+
+    assert.equal(provider.state.calls.length, 1);
+    // Five minutes is how long a context bundle lives.
+    assert.ok((await secondsUntilExpiry()).every((seconds) => seconds > 5 * 60));
+});
+
+test("a recorded failure stops being extended once it is old", async () => {
+    const { user, fileIds } = await seedTwoFiles(WINDOW_DOC, GIFT_DOC);
+    await turnOn("knowledgeRerank");
+    const input = { userId: user.id, fileIds, query: GIFT_QUESTION };
+    provider.state.failing = true;
+    await retrieveKnowledgeContext(input);
+    provider.state.failing = false;
+
+    // A young failure is extended like anything else.
+    await prisma.$executeRaw`
+        UPDATE "SemanticRetrievalCache" SET "expiresAt" = NOW() + INTERVAL '20 seconds'
+    `;
+    await retrieveKnowledgeContext(input);
+    assert.ok((await secondsUntilExpiry()).every((seconds) => seconds > 5 * 60));
+
+    // One recorded forty minutes ago is not: it runs out, and the provider is
+    // asked again.
+    await prisma.$executeRaw`
+        UPDATE "SemanticRetrievalCache"
+        SET "createdAt" = NOW() - INTERVAL '40 minutes', "expiresAt" = NOW() + INTERVAL '20 seconds'
+    `;
+    await retrieveKnowledgeContext(input);
+    assert.ok((await secondsUntilExpiry()).every((seconds) => seconds <= 20));
+    assert.equal(provider.state.calls.length, 1);
+});
+
+test("a question with no usable term sends nothing and retrieves nothing", async () => {
+    const { user, fileIds } = await seedTwoFiles(RETURNS_DOC, SHIPPING_DOC);
+    await turnOn("knowledgeEmbed");
+    await turnOn("knowledgeRerank");
+    await embedKnowledgeChunks();
+    provider.state.calls.length = 0;
+
+    for (const query of ["", "   ", "?!", "a"]) {
+        const selection = await retrieveKnowledgeContext({ userId: user.id, fileIds, query });
+        assert.deepEqual(selection.chunks, [], `query ${JSON.stringify(query)}`);
+        assert.equal(selection.retrievalVersion, 1);
+    }
+    assert.equal(provider.state.calls.length, 0);
+});

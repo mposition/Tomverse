@@ -130,11 +130,38 @@ export async function settleRetrievalCost(deltaMicroUsd: number, reservedAt: Dat
 // Outcome cache
 // ---------------------------------------------------------------------------
 
+/**
+ * A live outcome, and every read of one pushes its expiry a full TTL out.
+ *
+ * The extension is what makes the cache safe to sign against. A bundle lives
+ * five minutes from the moment it is issued, and it may be issued from an
+ * entry that was already nine minutes old; without the extension that entry
+ * would expire inside the bundle's life and its rebuild would ask the
+ * provider again and could disagree. A recorded failure is extended only
+ * until it is `failedCacheMaxAgeMs` old, so an outage ends.
+ */
 const readCache = async (key: string): Promise<SemanticCacheValue | null> => {
     try {
         const rows = await prisma.$queryRaw<Array<{ value: unknown }>>`
-            SELECT "value" FROM "SemanticRetrievalCache"
+            UPDATE "SemanticRetrievalCache"
+            SET "expiresAt" = CASE
+                WHEN ("value"->>'kind') = 'failed' THEN LEAST(
+                    GREATEST(
+                        "expiresAt",
+                        NOW() + (${SEMANTIC_RETRIEVAL_LIMITS.cacheTtlMs} * INTERVAL '1 millisecond')
+                    ),
+                    GREATEST(
+                        "expiresAt",
+                        "createdAt" + (${SEMANTIC_RETRIEVAL_LIMITS.failedCacheMaxAgeMs} * INTERVAL '1 millisecond')
+                    )
+                )
+                ELSE GREATEST(
+                    "expiresAt",
+                    NOW() + (${SEMANTIC_RETRIEVAL_LIMITS.cacheTtlMs} * INTERVAL '1 millisecond')
+                )
+            END
             WHERE "key" = ${key} AND "expiresAt" > NOW()
+            RETURNING "value"
         `;
         return rows.length > 0 ? parseSemanticCacheValue(rows[0].value) : null;
     } catch {
@@ -176,6 +203,10 @@ const writeCache = async (
         return value;
     }
 };
+
+/** The cache, for a caller that computes its own outcome (neighbour search). */
+export const readSemanticCache = readCache;
+export const writeSemanticCache = writeCache;
 
 /** Removes expired cache rows. Called from scheduled maintenance. */
 export async function sweepSemanticRetrievalCache(limit = 5_000): Promise<number> {

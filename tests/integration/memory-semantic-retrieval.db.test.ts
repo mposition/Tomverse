@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
+import type { Session } from "next-auth";
 import { externalContentDigest } from "@/lib/externalImportDigest";
+import { leaseStillHolds } from "@/lib/memoryExtractionCommit";
 import { persistExtractionChunkDecisions } from "@/lib/memoryExtractionPersistence";
 import type { ExtractionDecision } from "@/lib/memoryExtractionPipeline";
 import { retrieveMemoryContext } from "@/lib/memoryRetrievalService";
@@ -9,6 +11,7 @@ import { MEMORY_RETRIEVAL_VERSION, memoryRetrievalTerms } from "@/lib/memoryRetr
 import {
     memoryEmbeddingLabel,
     prepareMemoryDuplicateContext,
+    sendableCandidateStatements,
 } from "@/lib/memorySemanticDuplicates";
 import { prisma } from "@/lib/prisma";
 import {
@@ -16,6 +19,10 @@ import {
     semanticRetrievalSettingKey,
     type SemanticRetrievalFeature,
 } from "@/lib/semanticRetrievalCore";
+import {
+    readSemanticRetrievalSwitches,
+    updateSemanticRetrievalSwitches,
+} from "@/lib/semanticRetrievalSettings";
 import {
     TEST_EMBEDDING_LABEL,
     installTestRetrievalProvider,
@@ -342,4 +349,117 @@ test("a vector for wording that was since edited is ignored", async () => {
         "the user goes hiking every weekend",
         LOVER,
     ].sort());
+});
+
+/* ------------------------------------------- what may leave, and when */
+
+test("a candidate is sendable only while its source exists, matches and is unlocked", async () => {
+    const { user, older, newer } = await seedSource();
+    const decisions = [
+        decision(LIKES, older, "like coffee"),
+        decision(LOVER, newer, "coffee lover"),
+    ];
+    assert.deepEqual(await sendableCandidateStatements({ userId: user.id, decisions }), [LIKES, LOVER]);
+
+    // The cited message is gone: its candidate has nothing left to stand on.
+    await prisma.externalMessage.delete({ where: { id: older.id } });
+    assert.deepEqual(await sendableCandidateStatements({ userId: user.id, decisions }), [LOVER]);
+
+    // A digest that no longer matches is evidence of something else.
+    assert.deepEqual(
+        await sendableCandidateStatements({
+            userId: user.id,
+            decisions: [decision(LOVER, { id: newer.id, contentDigest: "0".repeat(64) }, "coffee lover")],
+        }),
+        []
+    );
+
+    // The owner locked the source while the extraction call was answering.
+    await prisma.externalConversation.updateMany({
+        where: { userId: user.id },
+        data: { password: "locked" },
+    });
+    assert.deepEqual(await sendableCandidateStatements({ userId: user.id, decisions }), []);
+});
+
+test("an account with memory off sends nothing, however the call is reached", async () => {
+    const { user, newer } = await seedSource();
+    await turnOn("memoryDuplicates");
+    await createMemory(user.id, "preference", LIKES);
+    await prisma.userMemorySettings.create({ data: { userId: user.id, masterEnabled: false } });
+
+    const decisions = [decision(LOVER, newer, "coffee lover")];
+    assert.deepEqual(await sendableCandidateStatements({ userId: user.id, decisions }), []);
+    // And the preparation refuses by itself, for a caller that skipped the check.
+    assert.equal(await prepareMemoryDuplicateContext({ userId: user.id, statements: [LOVER] }), null);
+    assert.equal(provider.state.calls.length, 0);
+});
+
+test("a memory whose only source is locked is not sent for backfill", async () => {
+    const { user, older, newer } = await seedSource();
+    await turnOn("memoryDuplicates");
+    await persistChunk(user.id, [decision(LIKES, older, "like coffee")], 0);
+    // Locked, and the reconciliation that would suspend the memory has not run.
+    await prisma.externalConversation.updateMany({
+        where: { userId: user.id },
+        data: { password: "locked" },
+    });
+    await prisma.memoryItem.updateMany({ where: { userId: user.id }, data: { embeddingModel: null } });
+    provider.state.calls.length = 0;
+
+    await prepareMemoryDuplicateContext({ userId: user.id, statements: ["the user plays chess"] });
+
+    const sent = provider.state.calls.flatMap((call) => (call.body.texts as string[]) ?? []);
+    assert.deepEqual(sent, ["the user plays chess"]);
+    void newer;
+});
+
+test("a worker without the lease is told so before it sends anything", async () => {
+    const user = await createUser();
+    assert.equal(
+        await leaseStillHolds({
+            lease: { runId: "no-such-run", userId: user.id, leaseGeneration: 1 },
+            chunkIndex: 0,
+        }),
+        false
+    );
+});
+
+/* ------------------------------------------------------------- switches */
+
+test("a set of switch changes is written and audited together", async () => {
+    const session = {
+        user: { id: `semantic-switch-${randomUUID()}`, email: "semantic-switch@example.test" },
+        expires: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+    } as Session;
+    const actor = { session, request: new Request("https://tomverse.test/api/admin/semantic-retrieval") };
+    await turnOn("memoryDuplicates");
+
+    const changed = await updateSemanticRetrievalSwitches(actor, {
+        knowledgeRerank: true,
+        memoryRerank: true,
+        // Already on: not written and not audited.
+        memoryDuplicates: true,
+    });
+
+    assert.deepEqual(changed, ["knowledgeRerank", "memoryRerank"]);
+    const switches = await readSemanticRetrievalSwitches();
+    assert.deepEqual(
+        [switches.knowledgeRerank, switches.memoryRerank, switches.memoryDuplicates, switches.knowledgeEmbed],
+        [true, true, true, false]
+    );
+    const audited = await prisma.adminAuditLog.findMany({
+        where: { action: "retrieval.semantic_switch.updated", actorUserId: session.user.id },
+        select: { targetId: true },
+        orderBy: { targetId: "asc" },
+    });
+    assert.deepEqual(
+        audited.map((row) => row.targetId),
+        [semanticRetrievalSettingKey("knowledgeRerank"), semanticRetrievalSettingKey("memoryRerank")].sort()
+    );
+
+    assert.deepEqual(await updateSemanticRetrievalSwitches(actor, { knowledgeRerank: false }), [
+        "knowledgeRerank",
+    ]);
+    assert.equal((await readSemanticRetrievalSwitches()).knowledgeRerank, false);
 });

@@ -21,7 +21,7 @@ import {
 import { readSemanticRetrievalKey } from "@/lib/semanticRetrievalClient";
 import {
   readSemanticRetrievalSwitches,
-  updateSemanticRetrievalSwitch,
+  updateSemanticRetrievalSwitches,
 } from "@/lib/semanticRetrievalSettings";
 
 /**
@@ -112,11 +112,15 @@ export async function PUT(req: Request) {
       );
     }
 
+    // One transaction for the whole request: a second switch that fails to
+    // write must not leave the first one changed.
+    const changes: Partial<Record<SemanticRetrievalFeature, boolean>> = {};
     for (const feature of SEMANTIC_RETRIEVAL_FEATURES) {
       const next = requested[feature];
-      if (next !== undefined && next !== before.features[feature].on) {
-        await updateSemanticRetrievalSwitch({ session, request: req }, feature, next);
-      }
+      if (next !== undefined && next !== before.features[feature].on) changes[feature] = next;
+    }
+    if (Object.keys(changes).length > 0) {
+      await updateSemanticRetrievalSwitches({ session, request: req }, changes);
     }
     return NextResponse.json(await readState());
   } catch (error) {

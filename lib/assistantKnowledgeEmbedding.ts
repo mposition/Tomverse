@@ -7,8 +7,15 @@ import {
     currentEmbeddingLabel,
     embedForIndexing,
     embedQueryForRetrieval,
+    readSemanticCache,
+    writeSemanticCache,
 } from "@/lib/semanticRetrieval";
-import { decodeVector, encodeVector, nearestByCosine } from "@/lib/semanticRetrievalCore";
+import {
+    decodeVector,
+    encodeVector,
+    nearestByCosine,
+    neighbourCacheKey,
+} from "@/lib/semanticRetrievalCore";
 
 /**
  * Semantic vectors for knowledge chunks (docs/policy/external-conversation-import-and-memory.md §9a): writing them, and
@@ -50,6 +57,14 @@ export const KNOWLEDGE_EMBEDDING_SCAN_LIMIT = 2_000;
 /**
  * The chunks nearest the question by meaning, with their similarity, or null
  * when embedding is off or the question could not be embedded.
+ *
+ * The result is cached like a ranking, and for the same reason. Vectors are
+ * still being written while a turn is in flight -- the sweep fills in files
+ * that predate the switch -- so a search repeated a few seconds later can
+ * find a neighbour the first one could not. The first answer, including "no
+ * neighbour", is the answer for every rebuild of that turn. An id that no
+ * longer exists by then is simply not read back: the caller re-reads the
+ * chunks by id under its own ownership and file scope.
  */
 export async function knowledgeNeighbours(input: {
     userId: string;
@@ -63,6 +78,15 @@ export async function knowledgeNeighbours(input: {
         query: input.query,
     });
     if (!embedded) return null;
+
+    const key = neighbourCacheKey({
+        userId: input.userId,
+        modelLabel: embedded.modelLabel,
+        query: input.query,
+        fileIds: input.fileIds,
+    });
+    const cached = await readSemanticCache(key);
+    if (cached?.kind === "neighbours") return new Map(cached.scores);
 
     const rows = await prisma.assistantKnowledgeChunk.findMany({
         where: {
@@ -87,7 +111,11 @@ export async function knowledgeNeighbours(input: {
         limit: KNOWLEDGE_SEMANTIC_DEFAULTS.neighbourLimit,
         minSimilarity: KNOWLEDGE_SEMANTIC_DEFAULTS.minSimilarity,
     });
-    return new Map(nearest.map((entry) => [entry.id, entry.similarity]));
+    const stored = await writeSemanticCache(key, input.userId, {
+        kind: "neighbours",
+        scores: nearest.map((entry) => [entry.id, entry.similarity]),
+    });
+    return new Map(stored.kind === "neighbours" ? stored.scores : []);
 }
 
 export type KnowledgeEmbeddingResult = { considered: number; embedded: number };

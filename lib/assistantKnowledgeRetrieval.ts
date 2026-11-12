@@ -90,7 +90,10 @@ export const retrieveKnowledgeContext = async (
     const lexical = (chunks: readonly SemanticChunk[]) =>
         selectKnowledgeContext({ chunks, query: queryTerms, budget: input.budget });
 
-    if (input.fileIds.length === 0) return lexical([]);
+    // A question with no usable term retrieves nothing, with or without the
+    // semantic steps: that was the guarantee before them, and a paid call on a
+    // message that says nothing searchable would buy neighbours of noise.
+    if (input.fileIds.length === 0 || queryTerms.length === 0) return lexical([]);
 
     const scope = {
         // Ownership first, and by column rather than through the file:
@@ -105,15 +108,12 @@ export const retrieveKnowledgeContext = async (
         file: { processingStatus: "ready" },
     };
 
-    const lexicalRows =
-        queryTerms.length === 0
-            ? []
-            : await prisma.assistantKnowledgeChunk.findMany({
-                  where: { ...scope, searchTerms: { hasSome: queryTerms } },
-                  take: input.candidateLimit ?? KNOWLEDGE_CANDIDATE_LIMIT,
-                  orderBy: DOCUMENT_ORDER,
-                  select: CHUNK_SELECT,
-              });
+    const lexicalRows = await prisma.assistantKnowledgeChunk.findMany({
+        where: { ...scope, searchTerms: { hasSome: queryTerms } },
+        take: input.candidateLimit ?? KNOWLEDGE_CANDIDATE_LIMIT,
+        orderBy: DOCUMENT_ORDER,
+        select: CHUNK_SELECT,
+    });
 
     // Null when embedding is off; an empty map is treated the same way, so a
     // question with no neighbour leaves the lexical result untouched.

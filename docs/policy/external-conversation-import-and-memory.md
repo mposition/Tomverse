@@ -664,7 +664,8 @@ Tomverse 밖으로 나가기 때문입니다.
    (`RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_DAY`·`_PER_MONTH`). 단가는 코드에
    상수로 두지 않습니다 — provider 가격표의 값을 운영자가 넣으며, 하나라도 없으면
    해당 기능은 호출하지 않습니다. Admin › Feature flags가 미설정 기능의 스위치를
-   켜는 요청을 거절합니다.
+   켜는 요청을 거절하고, 한 요청의 스위치 변경은 감사 기록과 함께 한 transaction으로
+   씁니다.
 2. 개인정보: Cohere가 새 수탁 처리자가 되므로 7개 locale의 `privacyPolicy`와
    knowledge·memory 안내 문구를 **스위치를 켜기 전에** 갱신합니다(§16). 스위치가
    꺼진 동안은 문구가 "외부 embedding 없음"을 그대로 말하고,
@@ -686,10 +687,18 @@ Tomverse 밖으로 나가기 때문입니다.
   (`docs/policy/credit-and-cost-limits.md`의 버킷 구분).
 - **한 턴은 한 결과를 봅니다.** context bundle은 `/api/chat/context`·`preflight`·
   `/api/chat`에서 다시 계산되고 fingerprint가 다르면 거절됩니다(§10). 그래서
-  (질문, 후보) 쌍의 첫 결과 — 순위든 실패든 — 를 `SemanticRetrievalCache`에 10분
-  저장하고, 같은 턴의 재계산은 그 결과를 씁니다. 저장하는 것은 id·점수·질문
-  vector이고 memory·knowledge 원문은 저장하지 않습니다. 행은 만료 후 sweep되고
-  계정 삭제와 함께 cascade됩니다. 점수는 소수 4자리로 반올림해 비교합니다.
+  (질문, 후보) 쌍의 첫 결과 — 순위든 실패든 — 를 `SemanticRetrievalCache`에
+  저장하고, 같은 턴의 재계산은 그 결과를 씁니다. 의미 이웃 검색의 결과(이웃이
+  없다는 결과 포함)도 같은 방식으로 고정합니다 — vector는 턴이 진행되는 동안에도
+  채워지므로, 몇 초 뒤의 재계산이 첫 계산에 없던 이웃을 찾으면 안 됩니다. 만료는
+  **마지막 읽기로부터 10분**입니다. bundle은 발급 시점부터 5분을 살고 이미 오래된
+  항목에서 발급될 수 있으므로, 읽을 때마다 연장해야 그 bundle의 수명 전체를
+  덮습니다. 기록된 실패는 기록 후 30분까지만 연장합니다(provider 장애가 끝나면
+  lexical fallback도 끝나야 합니다). 저장하는 것은 id·점수·질문 vector이고
+  memory·knowledge 원문은 저장하지 않습니다. 행은 만료 후 sweep되고 계정 삭제와
+  함께 cascade됩니다. 점수는 소수 4자리로 반올림해 비교합니다.
+- **검색어가 없는 질문은 아무것도 보내지 않습니다.** usable term이 하나도 없는
+  질문은 §9대로 knowledge 결과가 비어 있고, 의미 검색 호출도 하지 않습니다.
 - **provider 응답은 권한이 없습니다.** rerank 응답은 보낸 문서 전부를 정확히 한
   번씩 채점했을 때만 쓰고(범위 밖·중복·누락 index는 응답 전체 폐기), embedding은
   입력 수와 같은 개수·같은 길이의 int8 vector일 때만 씁니다. 응답이 어떤 chunk나
@@ -702,6 +711,13 @@ Tomverse 밖으로 나가기 때문입니다.
   가깝기 때문에("커피를 좋아한다"/"커피를 끊었다"), 가깝다는 이유로 후보를 버리면
   낡은 쪽이 남습니다. 사용자가 쓰거나 고치거나 고정한 memory는 대체되지 않습니다.
   provider 호출은 memory lock을 잡는 transaction **밖**에서 합니다.
+- **보내기 직전에 다시 확인합니다.** 추출 provider 호출이 진행되는 동안 계정이
+  바뀔 수 있고, write transaction의 거절은 이미 나간 statement를 되돌리지
+  못합니다. 그래서 호출 직전에 transaction이 거절할 조건을 먼저 봅니다: worker가
+  아직 run·chunk의 lease를 갖고 있는가, 계정의 memory가 켜져 있는가, 후보의
+  evidence가 지금도 이 소유자 아래 존재하고 digest가 맞고 **잠겨 있지 않은가**.
+  하나라도 아니면 그 후보는 보내지 않습니다. 기존 memory의 backfill도 같은
+  evidence 도달 가능성 조건(§7.1)을 통과한 active memory만 보냅니다.
 
 **저장.** vector는 `AssistantKnowledgeChunk.embedding`·`MemoryItem.embedding`
 (`Bytes`, 차원당 int8 1바이트)에 두고 유사도는 애플리케이션에서 계산합니다. DB

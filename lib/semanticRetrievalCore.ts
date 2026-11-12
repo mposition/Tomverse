@@ -232,8 +232,18 @@ export const SEMANTIC_RETRIEVAL_LIMITS = {
     maxEmbedInputsPerRequest: 96,
     /** An upper bound for one page image, replaced by the billed figure. */
     imageTokenUpperBound: 8_000,
-    /** Longer than a context bundle lives (five minutes). */
+    /**
+     * Longer than a context bundle lives (five minutes), and counted from the
+     * last read: a bundle signed from a cached outcome must find that outcome
+     * for its whole life, however old the entry already was.
+     */
     cacheTtlMs: 10 * 60 * 1000,
+    /**
+     * How long a recorded failure may keep being extended by reads. Without a
+     * bound, a question repeated through a provider outage would stay lexical
+     * for as long as it kept being asked.
+     */
+    failedCacheMaxAgeMs: 30 * 60 * 1000,
 } as const;
 
 /**
@@ -491,6 +501,28 @@ export const queryEmbeddingCacheKey = (input: {
 }) => sha256(JSON.stringify(["query-embed-v1", input.userId, input.modelLabel, boundQuery(input.query)]));
 
 /**
+ * The cache key of one neighbour search: the model, the question and which
+ * files were in scope. Not the vectors searched -- that is the point. The
+ * index keeps filling in while a turn is in flight, and a rebuild of the same
+ * turn has to see the neighbours the signed bundle saw.
+ */
+export const neighbourCacheKey = (input: {
+    userId: string;
+    modelLabel: string;
+    query: string;
+    fileIds: readonly string[];
+}) =>
+    sha256(
+        JSON.stringify([
+            "neighbours-v1",
+            input.userId,
+            input.modelLabel,
+            boundQuery(input.query),
+            [...new Set(input.fileIds)].sort(),
+        ])
+    );
+
+/**
  * What the cache stores for one key.
  *
  * `failed` is stored too. A turn's context is rebuilt on up to three routes
@@ -500,6 +532,7 @@ export const queryEmbeddingCacheKey = (input: {
  */
 export type SemanticCacheValue =
     | { kind: "rerank"; scores: Array<[string, number]> }
+    | { kind: "neighbours"; scores: Array<[string, number]> }
     | { kind: "embedding"; vector: string }
     | { kind: "failed" };
 
@@ -510,7 +543,7 @@ export const parseSemanticCacheValue = (value: unknown): SemanticCacheValue | nu
     if (record.kind === "embedding" && typeof record.vector === "string" && record.vector) {
         return { kind: "embedding", vector: record.vector };
     }
-    if (record.kind === "rerank" && Array.isArray(record.scores)) {
+    if ((record.kind === "rerank" || record.kind === "neighbours") && Array.isArray(record.scores)) {
         const scores: Array<[string, number]> = [];
         for (const entry of record.scores) {
             if (!Array.isArray(entry) || entry.length !== 2) return null;
@@ -520,7 +553,7 @@ export const parseSemanticCacheValue = (value: unknown): SemanticCacheValue | nu
             }
             scores.push([id, score]);
         }
-        return { kind: "rerank", scores };
+        return { kind: record.kind, scores };
     }
     return null;
 };

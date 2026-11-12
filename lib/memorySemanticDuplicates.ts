@@ -2,6 +2,8 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
+import { verifyExternalMessageEvidence } from "@/lib/memoryEvidenceValidation";
+import type { ExtractionDecision } from "@/lib/memoryExtractionPipeline";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { prisma } from "@/lib/prisma";
 import { currentEmbeddingLabel, embedForIndexing } from "@/lib/semanticRetrieval";
@@ -47,6 +49,104 @@ const MAX_ACTIVE_MEMORIES = 400;
 export const memoryEmbeddingLabel = (modelLabel: string, statement: string) =>
     `${modelLabel}#${createHash("sha256").update(statement, "utf8").digest("hex").slice(0, 16)}`;
 
+/**
+ * A memory whose evidence can still be read: the same test retrieval applies
+ * before a memory may reach a prompt. A source lock moves its memories out of
+ * `active`, and this covers the moment before that has happened.
+ */
+const reachableEvidence = {
+    OR: [
+        { evidences: { none: {} } },
+        {
+            evidences: {
+                some: {
+                    OR: [
+                        { externalMessageId: null },
+                        { externalMessage: { conversation: { password: null } } },
+                    ],
+                },
+            },
+        },
+    ],
+};
+
+/**
+ * The candidate statements that may be sent to the provider right now.
+ *
+ * The extraction call that produced these candidates took a while, and the
+ * account can have changed underneath it: memory switched off, the source
+ * conversation deleted or locked. The write transaction refuses all of those
+ * -- but only after the fact, and a statement sent to an outside provider
+ * cannot be unsent. So the same questions are asked here first, immediately
+ * before the call: an account with memory off sends nothing, and a candidate
+ * is sent only if at least one of its sources still exists under this owner,
+ * still carries the digest it was cited with, and is not locked.
+ */
+export async function sendableCandidateStatements(input: {
+    userId: string;
+    decisions: readonly ExtractionDecision[];
+}): Promise<string[]> {
+    const keep = input.decisions.filter(
+        (decision) => decision.outcome === "store_candidate" && decision.validation.bulkSafe
+    );
+    if (keep.length === 0) return [];
+
+    const settings = await prisma.userMemorySettings.findUnique({
+        where: { userId: input.userId },
+        select: { masterEnabled: true },
+    });
+    if (settings?.masterEnabled === false) return [];
+
+    const refKey = (reference: { externalMessageId: string; evidenceDigest: string }) =>
+        `${reference.externalMessageId} ${reference.evidenceDigest}`;
+    const refs = [
+        ...new Map(
+            keep
+                .flatMap((decision) => decision.candidate.evidence)
+                .map((reference) => [
+                    refKey(reference),
+                    {
+                        externalMessageId: reference.externalMessageId,
+                        evidenceDigest: reference.evidenceDigest,
+                    },
+                ])
+        ).values(),
+    ];
+    if (refs.length === 0) return [];
+    const outcomes = await verifyExternalMessageEvidence(input.userId, refs);
+    const verified = new Set(
+        refs.filter((_, index) => outcomes[index]?.outcome === "verified").map(refKey)
+    );
+    const unlocked = new Set(
+        (
+            await prisma.externalMessage.findMany({
+                where: {
+                    id: { in: refs.map((reference) => reference.externalMessageId) },
+                    userId: input.userId,
+                    conversation: { password: null },
+                },
+                select: { id: true },
+            })
+        ).map((row) => row.id)
+    );
+
+    return keep
+        .filter((decision) =>
+            decision.candidate.evidence.some(
+                (reference) =>
+                    verified.has(refKey(reference)) && unlocked.has(reference.externalMessageId)
+            )
+        )
+        .map((decision) => decision.candidate.statement);
+}
+
+/**
+ * Whether duplicate detection is on and payable at all. Asked first, so an
+ * extraction commit with the switch off reads nothing extra.
+ */
+export const memoryDuplicatesEnabled = async (): Promise<boolean> =>
+    (await currentEmbeddingLabel("memoryDuplicates")) !== null;
+
 export type MemoryDuplicateContext = {
     modelLabel: string;
     /** Candidate statement -> its vector. A statement that failed is absent. */
@@ -70,8 +170,17 @@ export async function prepareMemoryDuplicateContext(input: {
         const modelLabel = await currentEmbeddingLabel("memoryDuplicates");
         if (!modelLabel) return null;
 
+        // Asked again here, for any caller: nothing of an account that has
+        // memory off leaves, and neither does a memory whose only sources are
+        // locked.
+        const settings = await prisma.userMemorySettings.findUnique({
+            where: { userId: input.userId },
+            select: { masterEnabled: true },
+        });
+        if (settings?.masterEnabled === false) return null;
+
         const active = await prisma.memoryItem.findMany({
-            where: { userId: input.userId, status: "active" },
+            where: { userId: input.userId, status: "active", ...reachableEvidence },
             orderBy: { id: "asc" },
             take: MAX_ACTIVE_MEMORIES,
             select: { id: true, statement: true, embeddingModel: true },

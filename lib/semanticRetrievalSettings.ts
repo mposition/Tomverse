@@ -62,39 +62,50 @@ export async function readSemanticRetrievalSwitch(
 }
 
 /**
- * Turns one switch on or off with its audit entry. False when it already had
- * that value; nothing is written then.
+ * Applies a set of switch changes, each with its audit entry, in one
+ * transaction: all of them or none. Returns the features whose stored value
+ * actually changed; a switch that already had the requested value is not
+ * written and not audited.
  */
-export async function updateSemanticRetrievalSwitch(
+export async function updateSemanticRetrievalSwitches(
     actor: { session: Session; request: Request },
-    feature: SemanticRetrievalFeature,
-    on: boolean
-): Promise<boolean> {
-    const key = semanticRetrievalSettingKey(feature);
+    changes: Partial<Record<SemanticRetrievalFeature, boolean>>
+): Promise<SemanticRetrievalFeature[]> {
+    const requested = SEMANTIC_RETRIEVAL_FEATURES.filter(
+        (feature) => typeof changes[feature] === "boolean"
+    );
+    if (requested.length === 0) return [];
     return prisma.$transaction(async (tx) => {
         await takeAuditChainLock(tx);
-        const before =
-            (await tx.appSetting.findUnique({ where: { key }, select: { value: true } }))?.value.trim() ===
-            "on";
-        if (before === on) return false;
-        if (on) {
-            await tx.appSetting.upsert({
-                where: { key },
-                create: { key, value: "on" },
-                update: { value: "on" },
+        const changed: SemanticRetrievalFeature[] = [];
+        for (const feature of requested) {
+            const key = semanticRetrievalSettingKey(feature);
+            const on = changes[feature] === true;
+            const before =
+                (
+                    await tx.appSetting.findUnique({ where: { key }, select: { value: true } })
+                )?.value.trim() === "on";
+            if (before === on) continue;
+            if (on) {
+                await tx.appSetting.upsert({
+                    where: { key },
+                    create: { key, value: "on" },
+                    update: { value: "on" },
+                });
+            } else {
+                await tx.appSetting.deleteMany({ where: { key } });
+            }
+            await writeAdminAuditLog({
+                ...actor,
+                tx,
+                action: "retrieval.semantic_switch.updated",
+                targetType: "AppSettings",
+                targetId: key,
+                summary: `Turned semantic retrieval ${feature} ${on ? "on" : "off"}.`,
+                metadata: { feature, before, after: on },
             });
-        } else {
-            await tx.appSetting.deleteMany({ where: { key } });
+            changed.push(feature);
         }
-        await writeAdminAuditLog({
-            ...actor,
-            tx,
-            action: "retrieval.semantic_switch.updated",
-            targetType: "AppSettings",
-            targetId: key,
-            summary: `Turned semantic retrieval ${feature} ${on ? "on" : "off"}.`,
-            metadata: { feature, before, after: on },
-        });
-        return true;
+        return changed;
     });
 }
