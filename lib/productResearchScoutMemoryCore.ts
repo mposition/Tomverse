@@ -32,7 +32,7 @@ export function dailyMemoryMode(
     MEMORY_PROBE_LOCALES.indexOf(locale);
   return MEMORY_MODES[index % MEMORY_MODES.length]!;
 }
-export function memoryProbe(
+export function memoryProbeSource(
   day: string,
   locale: MemoryProbeLocale,
   mode: MemoryMode,
@@ -77,7 +77,20 @@ export function memoryProbe(
             },
           ])
         : rows;
-  const plan = planContinuationSeed({ messages: selected });
+  const gold: Decisions = {
+    A: values.main,
+    B: mode === "counterfactual" ? values.main : values.special,
+    C: values.main,
+    D: mode === "counterfactual" ? values.special : values.main,
+  };
+  return { day, locale, mode, selected, final, question: render(query), gold };
+}
+
+export function renderMemoryProbe(
+  source: ReturnType<typeof memoryProbeSource>,
+  plan: ReturnType<typeof planContinuationSeed>,
+) {
+  const { day, locale, mode, final, question, gold } = source;
   const seed = buildContinuationSeedPrompt({
     provider: "chatgpt",
     importedAt: day,
@@ -89,14 +102,8 @@ export function memoryProbe(
       { role: "system", content: seed.rulesText },
       { role: "user", content: seed.transcriptText },
     );
-  messages.push({ role: "user", content: render(query) });
-  const gold: Decisions = {
-    A: values.main,
-    B: mode === "counterfactual" ? values.main : values.special,
-    C: values.main,
-    D: mode === "counterfactual" ? values.special : values.main,
-  };
-  const visible = Boolean(seed.transcriptText?.includes(final));
+  messages.push({ role: "user", content: question });
+  const visible = Boolean(final && seed.transcriptText?.includes(final));
   const expected: Decisions = visible
     ? gold
     : { A: "UNKNOWN", B: "UNKNOWN", C: "UNKNOWN", D: "UNKNOWN" };
@@ -114,6 +121,11 @@ export function memoryProbe(
       .digest("hex"),
   };
 }
+export function memoryProbe(day: string, locale: MemoryProbeLocale, mode: MemoryMode) {
+  const source = memoryProbeSource(day, locale, mode);
+  return renderMemoryProbe(source, planContinuationSeed({ messages: source.selected }));
+}
+
 export type MemoryProbe = ReturnType<typeof memoryProbe>;
 export function assessMemory(probe: MemoryProbe, raw: string) {
   // No second model sees an answer key. Score the four actions, not prose fluency.

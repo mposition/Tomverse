@@ -1,6 +1,6 @@
 {
   "generatedBy": "scripts/build-continuation-staging-fixtures.mjs",
-  "seedVersion": "ext-seed-v1",
+  "seedVersion": "ext-seed-v2",
   "tokenBudget": 3000,
   "messageCharacterLimit": 4000,
   "injectionStrings": {

@@ -7,11 +7,13 @@ import {
 } from "../lib/continuationPassages.ts";
 import { planContinuationSeed } from "../lib/externalContinuationSeedCore.ts";
 
-test("a bounded Korean tail recovers an exact decision that the automatic window cannot carry", () => {
+test("automatic context preserves the Korean ending and manual selection carries only the exact passage", () => {
     const last = "결정: 첫 주에는 좌석을 운영하지 않는다.";
     const content = "가".repeat(5000) + last;
     const rows = [{ role: "user", ordinal: 5, content, truncated: false }];
-    assert.equal(planContinuationSeed({ messages: rows }).turns.length, 0);
+    const automatic = planContinuationSeed({ messages: rows }).turns[0];
+    assert.ok(automatic.text.endsWith(last));
+    assert.ok(automatic.shortened);
     const wire = encodePassages([
         { ordinal: 5, start: 5000, end: content.length },
     ]);

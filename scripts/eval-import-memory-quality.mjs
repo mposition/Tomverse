@@ -15,10 +15,11 @@ const [
   output,
   day = new Date().toISOString().slice(0, 10),
   variant = "baseline",
+  oldPlannerPath,
 ] = process.argv.slice(2);
 if (!endpoint || !model || !output || !/^\d{4}-\d{2}-\d{2}$/.test(day))
   throw Error(
-    "Usage: node --import tsx scripts/eval-import-memory-quality.mjs http://127.0.0.1:PORT MODEL OUTPUT [UTC-DAY]",
+    "Usage: node --import tsx scripts/eval-import-memory-quality.mjs http://127.0.0.1:PORT MODEL OUTPUT [UTC-DAY] [baseline|candidate|compare-excerpts OLD-PLANNER.ts]",
   );
 const url = new URL(endpoint);
 if (
@@ -28,7 +29,7 @@ if (
   url.password
 )
   throw Error("Use a loopback inference endpoint");
-if (!["baseline", "candidate"].includes(variant))
+if (!["baseline", "candidate", "compare-excerpts"].includes(variant))
   throw Error("Unknown prompt variant");
 const candidate =
   "Distinguish a proposal from the latest confirmed decision. For each case independently, apply the confirmed default unless every stated exception condition is met. If the final decision is absent, do not fill it in.";
@@ -42,10 +43,20 @@ const report = {
   sampling: { temperature: 0, max_tokens: 256 },
   results: [],
 };
+async function* trials() {
+  if (variant === "compare-excerpts") {
+    if (!oldPlannerPath) throw Error("Provide the baseline seed planner module");
+    const { compareExcerptCases } = await import("./import-memory-excerpt-comparison.mjs");
+    yield* compareExcerptCases(day, oldPlannerPath);
+    return;
+  }
+  for (const locale of MEMORY_PROBE_LOCALES) {
+    for (const mode of MEMORY_MODES) yield { probe: memoryProbe(day, locale, mode), details: {} };
+  }
+}
 await mkdir(dirname(output), { recursive: true });
-for (const locale of MEMORY_PROBE_LOCALES)
-  for (const mode of MEMORY_MODES) {
-    const probe = memoryProbe(day, locale, mode);
+for await (const { probe, details } of trials()) {
+    const { locale, mode } = probe;
     const messages = probe.messages.map((m) =>
       m.role === "system" && variant === "candidate"
         ? { ...m, content: m.content + "\n" + candidate }
@@ -67,6 +78,7 @@ for (const locale of MEMORY_PROBE_LOCALES)
     report.results.push({
       locale,
       mode,
+      ...details,
       visible: probe.visible,
       usedTurns: probe.usedTurns,
       promptDigest: createHash("sha256")

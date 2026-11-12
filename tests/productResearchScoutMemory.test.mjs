@@ -24,7 +24,7 @@ test("the qualified exception, counterfactual and user-selected tail are scored 
       picked = probe("picked"),
       auto = probe("long-auto"),
       empty = probe("empty");
-    for (const p of [base, swap, picked]) {
+    for (const p of [base, swap, picked, auto]) {
       assert.ok(p.visible);
       assert.equal(record(p, p.gold).outcome, "pass");
       assert.deepEqual(
@@ -42,9 +42,9 @@ test("the qualified exception, counterfactual and user-selected tail are scored 
       D: base.gold.B,
     });
     assert.equal(record(swap, base.gold).outcome, "decision");
-    assert.equal(auto.visible, false);
-    assert.equal(record(auto, auto.expected).outcome, "omission");
-    assert.equal(record(auto, base.gold).outcome, "unsupported");
+    const omitted = { ...empty, mode: "long-auto" };
+    assert.equal(record(omitted, omitted.expected).outcome, "omission");
+    assert.equal(record(omitted, base.gold).outcome, "unsupported");
     assert.equal(empty.messages.length, 1);
     assert.equal(record(empty, empty.expected).outcome, "pass");
     assert.equal(
@@ -82,7 +82,7 @@ test("unmeasured or malformed settings never appear as successes or actionable m
 test("ideas must name a measured failing language and carry its actual observed evidence", () => {
   const de = memoryProbe(day, "de", "long-auto"),
     en = memoryProbe(day, "en", "recent");
-  const rows = [record(de, de.expected), record(en, en.expected)];
+  const rows = [record(de, { ...de.expected, B: "UNKNOWN" }), record(en, en.expected)];
   const proposal = (title) => ({
     title,
     evidence: "Inspect the excerpt.",
@@ -104,7 +104,7 @@ test("ideas must name a measured failing language and carry its actual observed 
   );
   assert.equal(kept.length, 1);
   assert.equal(kept[0].subject, "memory.continuation.de");
-  assert.match(kept[0].suggestion.evidence, /omission.*observed=UNKNOWN/);
+  assert.match(kept[0].suggestion.evidence, /decision.*observed=.*UNKNOWN/);
 });
 test("a disabled route stops immediately; the enabled walker rotates, diagnoses last and never retries an unknown POST", async () => {
   const calls = [],
