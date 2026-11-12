@@ -208,7 +208,7 @@ export const adminModelCatalogMessages = defineAdminMessages({
         enable: "Turn on",
         redraft: "Make a new draft",
         view: "View profile",
-        none: "",
+        none: "Nothing to do",
       },
       draftReadyTitle: "The draft is ready. Check the profile, change the name, plan or credit weight if needed, then apply.",
       draftReadyBody:
@@ -524,7 +524,7 @@ export const adminModelCatalogMessages = defineAdminMessages({
         enable: "켜기",
         redraft: "새 초안 만들기",
         view: "프로필 보기",
-        none: "",
+        none: "할 일 없음",
       },
       draftReadyTitle: "초안이 준비됐습니다 — 프로필을 확인하고 필요하면 이름·최소 플랜·크레딧 가중치를 고친 뒤 적용해 주세요.",
       draftReadyBody:
