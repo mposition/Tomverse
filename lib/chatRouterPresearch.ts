@@ -4,6 +4,7 @@ import type { AppManagedSearchBatchResult, AppManagedWebSearchToolConfig } from 
 import { parseRouterSearchQueries, ROUTER_SEARCH_MAX_QUERIES } from "./chatRouterSearchPlan";
 import { APP_MANAGED_SEARCH_LIMITS, type WebSearchBackendResult } from "./webSearchBackends";
 import { createTokenEstimateAccumulator, toReservedInputTokens, WEB_SEARCH_INPUT_TOKEN_OVERHEAD } from "./chatTokenEstimate";
+import { createGroundedCitationPacket } from "./groundedCitationLinks";
 
 // Presearch owns at most its two-of-five share of the existing result allowance.
 const PRESEARCH_INPUT_TOKENS = Math.floor(WEB_SEARCH_INPUT_TOKEN_OVERHEAD *
@@ -35,6 +36,24 @@ function reservedEvidenceTokens(evidence: SearchEvidencePart[]): number {
 }
 
 const fitsPresearchAllowance = (evidence: SearchEvidencePart[]) => reservedEvidenceTokens(evidence) <= PRESEARCH_INPUT_TOKENS;
+
+/** Start from the already-sized packet so a citation aid never displaces a source. */
+export function withGroundedSourceGuidance(evidence: SearchEvidencePart[], simpleLookup: boolean, now = new Date()) {
+  if (evidence.length < 2) return;
+  const packet = createGroundedCitationPacket(evidence[1].text);
+  if (!packet) return;
+  const utcMinute = now.toISOString().slice(0, 16) + "Z";
+  const format = simpleLookup
+    ? "For weather, translate the applicable lines:\nObservation — station, local time and measurements.\nForecast — place, valid period and chance. "
+    : "Give requested comparisons, units and analysis at the requested precision and depth. ";
+  const guidance = "\n\nEnd of quoted evidence. Use the user's language and requested format. " + format +
+    `As of ${utcMinute}, resolve 'today' in the place asked about. Never turn a forecast into a reading. ` +
+    "Give only the requested facts. Check who did what, dates, units and qualifiers against the excerpts. " +
+    "After each supported fact, cite its official result with the displayed ID, e.g. [[cite:R1]]. For a later result without an ID, copy its URL exactly. Omit unsupported extras. " +
+    "Search for missing or disputed requested facts, batching independent queries. If still missing, say you could not verify it from the excerpts. An excerpt's silence does not establish what the full document omits.";
+  const candidate = [evidence[0], { type: "text" as const, text: packet.json }, { type: "text" as const, text: guidance }];
+  return fitsPresearchAllowance(candidate) ? { evidence: candidate, urls: packet.urls } : undefined;
+}
 
 const groundedEvidence = (json: string, mode: "lookup" | "full", notice = EVIDENCE_NOTICE): SearchEvidencePart[] => [
   { type: "text", text: notice }, { type: "text", text: json }, { type: "text", text: groundedAnswerGuidance(mode) },

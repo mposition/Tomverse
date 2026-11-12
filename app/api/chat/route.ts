@@ -1,4 +1,5 @@
-import { appendRouterSearchEvidence, prepareRouterSearch } from "@/lib/chatRouterPresearch";
+import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuidance } from "@/lib/chatRouterPresearch";
+import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
@@ -5179,11 +5180,12 @@ async function handleChatPost(
         let lookupStep: ReturnType<typeof qwenLookupStep>;
         let groundedToolDescription: string | undefined;
         let groundedThinkingBudget: number | undefined;
+        let citationUrls: readonly string[] = [];
         if (presearchQueries?.length && appManagedSearchTool && llmPick) {
             presearchForSettlement = appManagedSearchTool;
             const finishPresearch = latency.stage("presearchMs");
             try {
-                const evidence = await prepareRouterSearch({
+                const prepared = await prepareRouterSearch({
                     queries: presearchQueries,
                     tool: appManagedSearchTool,
                     signal: req.signal,
@@ -5193,10 +5195,15 @@ async function handleChatPost(
                     inputHeadroomTokens: contextInputTokens - reservationOnlyInputTokens -
                         toReservedInputTokens(inputEstimate.breakdown()) - TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
                 });
+                const hasSources = prepared.length > 0 && appManagedSearchTool.session.snapshot().sources.length > 0;
+                const fastPath = process.env.CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED === "true" &&
+                    typeof llmPick.simpleLookup === "boolean";
+                const fidelity = hasSources && fastPath && process.env.CHAT_GROUNDED_SOURCE_FIDELITY_ENABLED === "true"
+                    ? withGroundedSourceGuidance(prepared, llmPick.simpleLookup === true, new Date(requestReceivedAt)) : undefined;
+                const evidence = fidelity?.evidence ?? prepared;
                 const injected = appendRouterSearchEvidence(formattedMessages, evidence);
-                if (injected && appManagedSearchTool.session.snapshot().sources.length > 0) {
-                    const fastPath = process.env.CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED === "true" &&
-                        typeof llmPick.simpleLookup === "boolean";
+                if (injected && hasSources) {
+                    citationUrls = fidelity?.urls ?? [];
                     if (fastPath && combinedToolConfig) {
                         const tools = withGroundedSearchDescription(combinedToolConfig.tools, evidence[1].text);
                         combinedToolConfig = { ...combinedToolConfig, tools };
@@ -5514,6 +5521,7 @@ async function handleChatPost(
         // returned. Until then the failure path is still the owner of record.
         const activeLeaseId = accessGrant.leaseId;
         leaseOwnership = chatLeaseTakenByStream(leaseOwnership);
+        const citations = citationUrls.length ? createGroundedCitationStream(citationUrls) : null;
         let generatedText = "";
         let released = false;
         let sourceCancelled = false;
@@ -5559,13 +5567,11 @@ async function handleChatPost(
             );
             return perplexityCapture;
         };
-        const estimatedGeneratedOutputTokens = () =>
-            generatedText
-                ? Math.max(
-                      1,
-                      Math.ceil(Buffer.byteLength(generatedText, "utf8") / 4)
-                  )
-                : 0;
+        const estimatedGeneratedOutputTokens = () => {
+            const providerBytes = Buffer.byteLength(generatedText, "utf8") +
+                (dispatched.attemptIndex === 0 ? citations?.providerByteAdjustment ?? 0 : 0);
+            return Math.ceil(providerBytes / 4);
+        };
         // Used only by settleSafely("cancelled") call sites that fire before
         // the stream's tool-result content ever resolves (mid-stream abort,
         // client disconnect, transport error) -- a search cannot have been
@@ -6817,11 +6823,20 @@ async function handleChatPost(
                 startFirstTokenWatch(controller);
 
                 try {
-                    const { done, value } = await dispatched.reader.read();
-                    if (streamState !== "open") {
-                        await releaseSafely();
-                        return;
-                    }
+                    let done: boolean, value: string;
+                    do {
+                        const read = await dispatched.reader.read();
+                        if (streamState !== "open") {
+                            await releaseSafely();
+                            return;
+                        }
+                        done = read.done;
+                        value = read.value ?? "";
+                        if (citations && dispatched.attemptIndex === 0) {
+                            value = done ? citations.finish() : citations.write(value);
+                            if (done && value) done = false; // Deliver a trailing literal before settlement.
+                        }
+                    } while (citations && dispatched.attemptIndex === 0 && !done && !value);
                     if (done) {
                         // The provider finished. Whatever it produced, it is
                         // no longer being waited for.
