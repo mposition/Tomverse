@@ -73,9 +73,10 @@ test("a card waiting on the owner opens on the same owner review Assignment host
   assert.match(ui, /import \{ AmuxCardOwnerReview \} from "\.\/AdminAmuxRoutingPanel"/);
   assert.match(ui, /const ownerEscalation = canReviewCards \? selected\?\.escalations\[0\] \?\? null : null/);
   // Opened from a waiting worker question, the card stays on its overview, and
-  // so do a legacy WORKBOARD card and a done or todo card left with an
-  // escalation, which have no review decision to make.
-  assert.match(ui, /if \(canReviewCards && result\.escalations\.length > 0 && !preferOverview && !result\.legacyCard &&\s*!isAmuxSettledCardWithOpenEscalation\(\{ status: result\.status, escalationId: result\.escalations\[0\]\?\.id \?\? null \}\)\)\s*setDetailTab\("ownerReview"\)/);
+  // so do a legacy WORKBOARD card or pre-v22 Task and a done or todo card left
+  // with an escalation, which have no review decision to make. A stopped v22
+  // Task has the same panel but still opens on its review.
+  assert.match(ui, /if \(canReviewCards && result\.escalations\.length > 0 && !preferOverview &&\s*!isAmuxRemakeOnlyCardKind\(result\.legacyCard\?\.kind\) &&\s*!isAmuxSettledCardWithOpenEscalation\(\{ status: result\.status, escalationId: result\.escalations\[0\]\?\.id \?\? null \}\)\)\s*setDetailTab\("ownerReview"\)/);
   // Kept mounted behind `hidden`, so a tab switch cannot drop a decision.
   assert.match(ui, /hidden=\{detailTab !== "ownerReview"\}/);
   // A decision that lands after the owner left the card reloads the board,
