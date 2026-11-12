@@ -16,10 +16,12 @@ const TRANSLITERATIONS = ["지피티", "챗지피티", "클로드", "제미나�
 /** Common characters that exist in only one of the two Chinese scripts. */
 const TRADITIONAL_ONLY = "帳號開們這個為與對時會說問題讀檔圖實際點從來樣還種給讓頁見覺學習寫語試費額輸選擇處應該計劃錯誤書長車鐵線機電腦網頭雙類詢認證確檢雜據數隨歡";
 const SIMPLIFIED_ONLY = "账号开们这个为与对时会说问题读档图实际点从来样还种给让页见觉学习写语试费额输选择处应该计划错误书长车铁线机电脑网头双类询认证确检杂据数随欢";
-// A versioned model name: a family, at most two capitalised words, then a
-// number ("GPT 6", "Claude Opus 4", "GPT-4o"). Not "Gemini agree on 7": the
-// looser pattern refused every count that followed a model name.
-const MODEL_MENTION = /\b(?:GPT|Claude|Gemini|Grok|Llama|Mistral|Qwen|DeepSeek|Kimi|Nano Banana)\b(?:[-\s]+[A-Z][A-Za-z]*){0,2}[-\s]*\d[\d.]*/gu;
+// A versioned model name: a family in any case, at most two words that are
+// capitalised or a known tier word in lower case, then a number ("GPT 6",
+// "Claude Opus 4", "claude opus 4", "GPT-4o", "GPT4"). Not "Gemini agree on
+// 7": the looser pattern refused every count that followed a model name.
+const MODEL_FAMILY = /(?<![\p{L}\p{N}])(?:GPT|Claude|Gemini|Grok|Llama|Mistral|Qwen|DeepSeek|Kimi|Nano Banana)(?![A-Za-z])/giu;
+const MODEL_VERSION_TAIL = /^(?:[-\s]+(?:[A-Z][A-Za-z]*|(?:opus|sonnet|haiku|flash|pro|ultra|mini|nano|turbo|max|plus|lite|luna|image|imagine|banana|preview)(?![a-z]))){0,2}?[-\s]*\d[\d.]*/u;
 const COUNTER_AFTER = /^\s?(?:가지|개|건|곳|個|个|點|点|項|项|處|处|條|条)/u;
 const URL_LIKE = /https?:|www\.|\b[a-z0-9-]+\.(?:app|com|net|org|ai|io|co)\b/iu;
 
@@ -109,8 +111,10 @@ function textProblems(text, { locale, where, role, models }) {
     // Design guide 6 is about copy. A screen or a tag that lists exact models of
     // features.json (the three that answered the recorded example, say) shows
     // what is there; "and more" would be false on it (box run 2026-11-12).
-    const judged = COPY_ROLES.includes(role) ? text : [...models].sort((a, b) => b.length - a.length).reduce((rest, name) => rest.replaceAll(name, " "), text);
-    if (familiesIn(judged).filter((name) => !COMPANIES.includes(name)).length >= 2 && !/\band more\b|\+\s*more\b/iu.test(text)) {
+    // Only a list made of exact names alone: one bare name in it ("GPT 6 Luna · Claude") and it is copy again.
+    const named = (value) => familiesIn(value).filter((name) => !COMPANIES.includes(name));
+    const exactOnly = !COPY_ROLES.includes(role) && named([...models].sort((a, b) => b.length - a.length).reduce((rest, name) => rest.replaceAll(name, " "), text)).length === 0;
+    if (!exactOnly && named(text).length >= 2 && !/\band more\b|\+\s*more\b/iu.test(text)) {
       problems.push(`${where}: a text that names two or more models ends with "and more" (e.g. "GPT, Claude, Gemini and more"); only a screen or label listing full model names of features.json needs none`);
     }
   }
@@ -122,11 +126,15 @@ function textProblems(text, { locale, where, role, models }) {
     const wrong = [...new Set([...text].filter((ch) => SIMPLIFIED_ONLY.includes(ch)))];
     if (wrong.length > 0) problems.push(`${where}: zh-Hant is written in Traditional characters (found "${wrong.join("")}")`);
   }
-  for (const match of text.matchAll(MODEL_MENTION)) {
+  for (const match of text.matchAll(MODEL_FAMILY)) {
+    const version = MODEL_VERSION_TAIL.exec(text.slice(match.index + match[0].length));
+    if (!version) continue;
+    const mention = text.slice(match.index, match.index + match[0].length + version[0].length);
     // "Gemini 7가지", "Gemini 7 個": a count after a name, not a version.
-    if (COUNTER_AFTER.test(text.slice(match.index + match[0].length))) continue;
+    if (COUNTER_AFTER.test(text.slice(match.index + mention.length))) continue;
+    // Listed exactly as written in features.json, so "claude haiku 5.5" is not.
     const listed = (name) => text.startsWith(name, match.index) && !/^(?:[\p{L}\p{N}]|\s*[\d.]+)/u.test(text.slice(match.index + name.length));
-    if (!models.some(listed)) problems.push(`${where}: "${match[0]}" is not a model name in features.json (the versioned names are ${models.join(", ")})`);
+    if (!models.some(listed)) problems.push(`${where}: "${mention}" is not a model name in features.json (the versioned names are ${models.join(", ")})`);
   }
   return problems;
 }

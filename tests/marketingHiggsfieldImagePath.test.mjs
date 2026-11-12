@@ -413,6 +413,16 @@ test("counts after a model name, exact model lists on a screen and compound word
   // A version that is not in features.json is still refused, in any language.
   assert.match(problemsOf({ role: "screen", text: "Gemini Flash 2.0 answered", ko: "Gemini Flash 2.0의 답변", zhT: "Gemini Flash 2.0 的回答", zhS: "Gemini Flash 2.0 的回答" })[0], /"Gemini Flash 2\.0" is not a model name/u);
   assert.match(problemsOf({ role: "screen", text: "Ask Claude Opus 4 and more" , ko: "Claude Opus 4 등에 물어보세요", zhT: "問 Claude Opus 4 等", zhS: "问 Claude Opus 4 等" })[0], /"Claude Opus 4" is not a model name/u);
+  // Also in lower case, joined to its number, or written unlike features.json (independent review, 2026-11-12).
+  const same = (text) => ({ role: "screen", text, ko: text, zhT: text, zhS: text });
+  assert.match(problemsOf(same("Claude opus 4 and more"))[0], /"Claude opus 4" is not a model name/u);
+  assert.match(problemsOf(same("claude haiku 5.5 answered"))[0], /"claude haiku 5\.5" is not a model name/u);
+  assert.match(problemsOf(same("GPT4 answered"))[0], /"GPT4" is not a model name/u);
+  assert.match(problemsOf(same("GPT-4o mini answered"))[0], /"GPT-4" is not a model name/u);
+  assert.deepEqual(problemsOf(same("Claude Haiku 5.5 found 7 gaps; Gemini Flash found 6")), []);
+  // One bare name in a list of exact names, and the list is copy again.
+  assert.match(problemsOf({ role: "label", text: "GPT 6 Luna · Claude" })[0], /and more/u);
+  assert.match(problemsOf({ role: "label", text: "GPT 6 Luna · Claude · Gemini Flash" })[0], /and more/u);
   // "stress-free" is not an offer; "feel free" is reworded.
   assert.deepEqual(problemsOf({ role: "screen", text: "A stress-free weekend plan", ko: "편안한 주말 계획", zhT: "輕鬆的週末行程", zhS: "轻松的周末行程" }), []);
   assert.match(problemsOf({ role: "screen", text: "Feel free to ask again", ko: "언제든 다시 물어보세요", zhT: "隨時再問", zhS: "随时再问" })[0], /"free" stands only/u);
