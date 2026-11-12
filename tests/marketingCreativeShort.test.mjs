@@ -536,6 +536,11 @@ test("the recorder refuses bad arguments and a folder that already holds a recor
   const run = (...args) => spawnSync(process.execPath, [join(tool, "fresh-review.mjs"), ...args], { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home } });
   assert.equal(run("fr", join(dir, "a"), question, "fresh-cooking").status, 2);
   assert.equal(run("en", join(dir, "a"), question, "Bad Topic!").status, 2);
+  // The capture's text is the question, so it must be one line the box shows whole.
+  const twoLines = join(dir, "q2.txt");
+  writeFileSync(twoLines, "What should I cook tonight?\nFor six friends, one vegetarian.");
+  assert.equal(run("en", join(dir, "a"), twoLines, "fresh-cooking").status, 2);
+  assert.match(readFileSync(join(tool, "fresh-review.mjs"), "utf8"), /area\.scrollHeight <= area\.clientHeight \+ 1/u);
   mkdirSync(join(dir, "done"));
   writeFileSync(join(dir, "done", "started.json"), "{}");
   const refused = run("en", join(dir, "done"), question, "fresh-cooking");

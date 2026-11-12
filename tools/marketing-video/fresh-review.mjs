@@ -221,6 +221,9 @@ async function record({ locale, outDir, question, dry }) {
     await box.fill("");
     await page.keyboard.type(question, { delay: 25 });
     await page.waitForTimeout(800);
+    // The whole question must show in the box (no inner scroll), since the capture's text is the question.
+    const whole = await box.evaluate((area) => area.value === area.value.trim() && area.scrollHeight <= area.clientHeight + 1);
+    if (!whole) throw new Error("the question does not fit the box; nothing sent");
     await capture("question", "the question typed in Review, three models chosen");
     captures.question.text = question;
     if (dry) throw DRY;
@@ -297,8 +300,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   const outDir = path.resolve(outArg);
   const question = readFileSync(questionFile, "utf8").trim();
-  if (question.length < 8 || question.length > 200) {
-    console.error("the question must be 8-200 characters");
+  if (question.length < 8 || question.length > 200 || question.includes("\n") || question.includes("\r")) {
+    console.error("the question must be one line of 8-200 characters");
     process.exit(2);
   }
   mkdirSync(outDir, { recursive: true });
