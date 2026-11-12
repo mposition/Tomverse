@@ -224,7 +224,7 @@ export function AdminMarketingFeatureFactsPanel({
       )}
       {failure ? <AdminApiFailureNotice failure={failure} returnTo={RETURN_TO} /> : null}
       {notice ? <p role="status" className="text-xs text-emerald-300">{notice}</p> : null}
-      {draft?.mode === "create" && !rows?.some((row) => row.id === draft.id) ? form(draft) : null}
+      {draft?.mode === "create" ? form(draft) : null}
 
       {refresh ? (
         <div data-testid="feature-facts-proposals" className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-4">
@@ -275,7 +275,7 @@ export function AdminMarketingFeatureFactsPanel({
                     {row.hold ? m.held : m.live}
                   </span>
                 </p>
-                {canWrite && draft?.id !== row.id ? (
+                {canWrite && !(draft?.mode === "update" && draft.id === row.id) ? (
                   <div className="flex gap-2">
                     <button type="button" className={buttonClass} disabled={busy} onClick={() => setDraft(draftOf(row))}>
                       {m.edit}
@@ -292,7 +292,7 @@ export function AdminMarketingFeatureFactsPanel({
                   </div>
                 ) : null}
               </div>
-              {draft?.id === row.id ? (
+              {draft?.mode === "update" && draft.id === row.id ? (
                 form(draft)
               ) : (
                 <dl className="mt-2 grid gap-1 text-xs leading-5">

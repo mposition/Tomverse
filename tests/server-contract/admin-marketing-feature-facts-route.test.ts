@@ -255,6 +255,21 @@ test("the refresh is off when its model is turned off or not enabled", async () 
   assert.equal((await response.json()).code, "FEATURE_REFRESH_OFF");
 });
 
+test("the kill switch stops the refresh before any model call", async () => {
+  reset();
+  const saved = process.env.MARKETING_AUTOMATION_KILL_SWITCH;
+  process.env.MARKETING_AUTOMATION_KILL_SWITCH = "on";
+  try {
+    const response = await press();
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "MARKETING_KILL_SWITCH");
+    assert.equal(world.prompts.length, 0);
+  } finally {
+    if (saved === undefined) delete process.env.MARKETING_AUTOMATION_KILL_SWITCH;
+    else process.env.MARKETING_AUTOMATION_KILL_SWITCH = saved;
+  }
+});
+
 test("the box reads the list under the media secret, never under the kill switch", async () => {
   reset();
   install();

@@ -9,6 +9,7 @@ import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
+import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import { marketingFeatureRefreshFromEnv } from "@/lib/marketingFeatureFacts";
 import { prisma } from "@/lib/prisma";
 
@@ -37,7 +38,14 @@ export async function POST(req: Request) {
       );
     }
     await assertRecentAdminAuthentication(session);
-    await consumeApiRateLimit(req, session.user.id, "admin-marketing-feature-facts-refresh", { minute: 2, day: 20 });
+    // The kill switch stops everything but reading the record
+    // (docs/policy/marketing-automation.md §6.1); any non-empty value is on.
+    if ((process.env[MARKETING_AUTOMATION_KILL_SWITCH_ENV] ?? "").trim().length > 0) {
+      return NextResponse.json(
+        { error: "Marketing automation is stopped by the kill switch.", code: "MARKETING_KILL_SWITCH" },
+        { status: 409 },
+      );
+    }
     const refresh = await marketingFeatureRefreshFromEnv();
     if (!refresh) {
       return NextResponse.json(
@@ -45,6 +53,8 @@ export async function POST(req: Request) {
         { status: 409 },
       );
     }
+    // Counted only for a press that will call the model.
+    await consumeApiRateLimit(req, session.user.id, "admin-marketing-feature-facts-refresh", { minute: 2, day: 20 });
     const result = await refresh(prisma);
     // The call is paid, so who pressed it is on the chain even though nothing is stored.
     await writeAdminAuditLog({
