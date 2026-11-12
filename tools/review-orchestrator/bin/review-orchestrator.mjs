@@ -101,6 +101,8 @@ function overview(store, config, quotas = null) {
       quotaUnit: quotas?.[p.id]?.unit ?? (quotas?.[p.id]?.remainingPercent === undefined ? null : "percent"),
       // Credit left after the included pool (Cursor), shown only when the probe read it.
       ...(Number.isFinite(quotas?.[p.id]?.creditUsd) ? { creditUsd: quotas[p.id].creditUsd } : {}),
+      // Codex prepaid credit, shown when the probe read it (useCredits on).
+      ...(Number.isFinite(quotas?.[p.id]?.credits) ? { credits: quotas[p.id].credits } : {}),
     })),
   };
 }

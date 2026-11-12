@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { release, tryAcquire, writeJsonAtomic } from "./fsutil.mjs";
 import { reviewerEnv } from "./env.mjs";
-import { amuxQuota } from "./amux-usage.mjs";
+import { amuxQuota, codexCreditsOf } from "./amux-usage.mjs";
+import { antigravityQuota } from "./antigravity.mjs";
 import { cursorQuota } from "./cursor-quota.mjs";
 import { copilotQuota } from "./copilot-quota.mjs";
 
@@ -35,16 +36,27 @@ export function claudeQuotaFromUsage(body) {
     .map((row) => row.percent));
 }
 
-/** Match AMUX's Codex rateLimitsByLimitId and legacy rateLimits windows. */
-export function codexQuotaFromUsage(body) {
+/**
+ * Match AMUX's Codex rateLimitsByLimitId and legacy rateLimits windows. With
+ * `useCredits` (the provider's operator switch), a spent window stays usable
+ * while the account has prepaid credit left (amux-usage.mjs codexCredits).
+ */
+export function codexQuotaFromUsage(body, { useCredits = false } = {}) {
   if (!body || typeof body !== "object") return unknown;
   const byId = body.rateLimitsByLimitId;
   const buckets = byId && typeof byId === "object" && Object.keys(byId).length > 0
     ? Object.values(byId) : [body.rateLimits];
-  return quotaFromUsed(buckets.flatMap((bucket) => [
+  const quota = quotaFromUsed(buckets.flatMap((bucket) => [
     bucket?.primary?.usedPercent,
     bucket?.secondary?.usedPercent,
   ]));
+  if (!useCredits || quota.state === "unknown") return quota;
+  const credits = codexCreditsOf(buckets.map((bucket) => bucket?.credits));
+  return {
+    ...quota,
+    ...(credits.left ? { state: "available" } : {}),
+    ...(credits.balance === null ? {} : { credits: credits.balance }),
+  };
 }
 
 export function manualQuotaFromSnapshot(row, now = Date.now()) {
@@ -203,7 +215,7 @@ function codexQuota(provider) {
         output = output.slice(newline + 1);
         try {
           const message = JSON.parse(line);
-          if (message.id === 2) return finish(codexQuotaFromUsage(message.result));
+          if (message.id === 2) return finish(codexQuotaFromUsage(message.result, { useCredits: provider.useCredits === true }));
         } catch {
           // The app-server may emit non-JSON diagnostics before the response.
         }
@@ -238,7 +250,7 @@ export async function probeProviderQuota(provider, stateDir, now = Date.now(), {
   }
   // Claude paces itself (pacedClaudeQuota); the others share the one-minute cache.
   if (provider.quotaProbe === "claude") return pacedClaudeQuota(provider, { now });
-  const probes = { codex: codexQuota, cursor: cursorQuota, copilot: copilotQuota };
+  const probes = { codex: codexQuota, cursor: cursorQuota, copilot: copilotQuota, antigravity: antigravityQuota };
   if (!Object.hasOwn(probes, provider.quotaProbe)) return unknown;
   const cached = cache.get(provider.id);
   if (cached && now - cached.at < CACHE_MS && now >= cached.at) return cached.result;

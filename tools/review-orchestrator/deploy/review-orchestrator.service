@@ -11,6 +11,8 @@ Environment=REVIEW_ORCH_CONFIG=/etc/review-orchestrator/config.json
 # hold node and the reviewer CLIs (`which node claude codex cursor-agent`),
 # because the CLIs are themselves started with `#!/usr/bin/env node`.
 Environment=PATH=/home/review/.local/bin:/usr/local/bin:/usr/bin:/bin
+# agy ignores "1"; only "true" stops its self-update (measured on agy 1.5.4).
+Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true
 # Absolute node path from `which node`.
 ExecStart=/usr/bin/node /opt/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs daemon
 # An unknown outcome is not retried: a restart closes in-flight reviews as unknown.
