@@ -1,14 +1,20 @@
 # Office 렌더러 서비스 (Gotenberg) 운영
 
 정책: `docs/policy/generated-artifacts.md` §15. 이 서비스는 Word·PowerPoint·
-Excel·Pages·Numbers 파일을 레이아웃 그대로 PDF로 만든다. **서비스를 만들고 스위치를
-켜는 일은 상시 비용이 생기는 배포라 운영자 승인 뒤에 한다.**
+Excel·한글(HWP·HWPX)·Pages·Numbers 파일을 레이아웃 그대로 PDF로 만든다.
+**서비스를 만들고 스위치를 켜는 일은 상시 비용이 생기는 배포라 운영자 승인 뒤에 한다.**
 
 ## 1. 서비스 만들기 (Railway 웹 대시보드)
 
-1. 앱과 같은 Railway project·environment에 **New → Docker Image**로 서비스를 만든다.
-   - 이미지: `gotenberg/gotenberg:8` 계열에서 **버전을 고정**한다(예: `gotenberg/gotenberg:8.x.y`).
-     배포 전에 Docker Hub에서 2주 이상 된 버전을 고른다.
+1. 앱과 같은 Railway project·environment에 **New → GitHub Repo**로 서비스를 만들고,
+   Root Directory를 `apps/office-renderer`로 둔다. 그 폴더의 `Dockerfile`이
+   Gotenberg에 두 가지를 더한다:
+   - `libreoffice-h2orestart` — 기본 LibreOffice는 한글 97(HWP 3)만 읽는다. HWP 5.x·
+     HWPX는 이 필터(GPL-3.0-or-later, Debian 패키지)가 있어야 열린다.
+   - 한글 글꼴(`fonts-nanum`, `fonts-noto-cjk`) — 없으면 글꼴이 바뀌어 쪽이 밀린다.
+   - 기반 이미지 버전은 build arg `GOTENBERG_TAG`로 **고정**한다(예: `8.x.y`). Docker
+     Hub에서 2주 이상 된 버전을 고른다. 이 Dockerfile은 아직 실제로 빌드해 보지
+     않았다 — 첫 배포의 빌드 로그에서 패키지 설치가 성공했는지 확인한다.
    - 서비스 이름: `office-renderer` (private 주소가 `office-renderer.railway.internal`이 된다).
 2. **Public domain을 만들지 않는다.** Private networking만 쓴다.
 3. 환경 변수:
@@ -22,8 +28,8 @@ Excel·Pages·Numbers 파일을 레이아웃 그대로 PDF로 만든다. **서�
    | `API_TIMEOUT` | `90s` | 앱의 시간 제한과 같게 |
    | `API_BODY_LIMIT` | `30MB` | 첨부 상한(25 MB) + 여유 |
 
-4. 메모리는 1~2 GB로 시작한다(LibreOffice). 한글 문서가 깨지면 한글 글꼴이 든
-   이미지(직접 빌드)가 필요하다 — 첫 확인 때 한국어 docx를 꼭 넣어 본다.
+4. 메모리는 1~2 GB로 시작한다(LibreOffice와 H2Orestart의 Java). 첫 확인 때
+   한국어 docx와 hwp를 꼭 넣어 본다.
 
 ## 2. 앱 서비스에 연결
 

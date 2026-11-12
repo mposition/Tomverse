@@ -271,6 +271,32 @@ JSON·YAML·XML이 문법적으로 올바른지 **검사하지 않는다.** 망�
 넘는 스트림, 암호화된 워크북 — 는 정상 파일을 쓰는 어떤 도구도 만들 수 없으므로
 테스트 안에서 바이트 단위로 만듭니다(`tests/support/compoundFile.mjs`).
 
+### 4.6 한글(HWP 5.x, HWPX)
+
+운영자 결정: 2026-11-13 — 한국 사용자를 위해 HWP를 덮어야 한다. `.hwp`
+(`application/x-hwp`)와 `.hwpx`(`application/hwp+zip`)를 이 절의 다른 형식과
+같은 길로 받는다: **이 저장소의 파서가 본문 텍스트를 읽는다**
+(`lib/legacyOffice/hwp.ts`). 렌더러 없이 읽히므로 "이 공문 요약해 줘"가 바로
+된다. 렌더러는 PDF로 레이아웃을 잡을 때만 쓴다(`docs/policy/generated-artifacts.md §15`).
+
+- **HWP 5.x**: compound file. `FileHeader`의 속성으로 압축(raw DEFLATE)·암호·
+  배포용·DRM을 판별한다. 암호·배포용·DRM 문서는 본문이 암호화돼 있으므로
+  `ATTACHMENT_ENCRYPTED`로 거절한다 — 깨진 글자를 모델에게 주지 않는다. 본문은
+  `BodyText/Section0..N`의 레코드 중 PARA_TEXT(태그 0x43)를 문단으로 읽는다.
+  제어 문자는 명세의 폭대로 건너뛴다(char 1단위, inline·extended 8단위). 탭·줄바꿈·
+  하이픈·고정 공백은 글자로 옮긴다.
+- **HWPX**: ZIP 안의 `Contents/section*.xml`에서 `<hp:t>`를 문단(`<hp:p>`)
+  단위로 잇는다. 표 칸은 한 줄씩이다. ZIP 자체이므로 압축파일 안의 항목으로는 받지
+  않는다(압축파일 안의 압축파일).
+- **읽는 것은 글자뿐이다.** 그림·필드·서식은 읽지 않는다. HWP 3.x(한글 97)는
+  두 컨테이너 어느 쪽도 아니어서 거절된다.
+- 예산은 §4.4와 같다(시간·바이트·글자 수). 섹션 압축 해제는 조각 단위로 바이트
+  예산에 걸리므로 폭탄 파일은 도중에 멈춘다.
+- **검증 범위**: 정상 경로 테스트는 HWP 5.0 명세대로 바이트를 짜서 만든 파일로
+  한다(`tests/hwpText.test.mjs`). 이 저장소에는 HWP를 쓰는 도구가 없어 §4.5의
+  "진짜 문서" 원칙을 아직 채우지 못했다. 한컴오피스가 저장한 실제 `.hwp`·`.hwpx`
+  파일로 확인해 `tests/fixtures/legacyOffice/`에 넣는 것이 남은 일이다.
+
 ## 5. 압축파일
 
 ### 5.1 순서가 계약이다

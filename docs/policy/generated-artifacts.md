@@ -865,7 +865,7 @@ Tomverse 밖으로 나가지 않고, 신뢰할 수 없는 문서를 여는 큰 �
 
 `convert_files`의 `to_pdf`가 Office 원본을 받는다: `docx`·`pptx`·`xlsx`,
 OpenDocument(`odt`·`odp`·`ods`), Office 97-2003(`doc`·`ppt`·`xls`), `rtf`,
-Apple `pages`·`numbers`. 렌더러가 PDF로 그린 뒤 이미지·PDF와 섞어 순서대로 합치고,
+한글(`hwp`·`hwpx`), Apple `pages`·`numbers`. 렌더러가 PDF로 그린 뒤 이미지·PDF와 섞어 순서대로 합치고,
 페이지 선택(`pages`)과 회전도 그대로 적용된다. 같은 파일을 여러 번 가리켜도 한
 번만 그린다.
 
@@ -873,6 +873,10 @@ Apple `pages`·`numbers`. 렌더러가 PDF로 그린 뒤 이미지·PDF와 섞�
   `convert_spreadsheet`(§14)가 한다.
 - iWork 변환은 Office보다 충실도가 낮다(Pages·Numbers는 복잡한 서식이 일부 다를 수
   있다). Keynote는 첨부 단계에서 받지 않는다(`chat-attachment-formats.md` §2.4).
+- 한글(HWP 5.x·HWPX)은 기본 LibreOffice가 열지 못한다. 렌더러 이미지
+  (`apps/office-renderer/Dockerfile`)에 H2Orestart 필터와 한글 글꼴을 넣는다.
+  한글 파일의 **내용 읽기**는 렌더러와 무관하게 이 앱의 파서가 한다
+  (`docs/policy/chat-attachment-formats.md §4.6`).
 
 ### 15.2 스위치와 주소
 
