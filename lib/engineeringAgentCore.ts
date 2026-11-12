@@ -455,9 +455,43 @@ export const engineeringAgentV22ReviewPrEnabled = (value: string | undefined) =>
  */
 export const ENGINEERING_PUBLISHER_FEATURES_HEADER = "x-engineering-publisher-features";
 export const ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE = "review_draft";
+const publisherNames = (header: string | null, feature: string) =>
+  (header ?? "").split(",").map((part) => part.trim()).includes(feature);
 export const publisherOpensReviewDrafts = (header: string | null) =>
-  (header ?? "").split(",").map((part) => part.trim())
-    .includes(ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE);
+  publisherNames(header, ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE);
+/**
+ * A publisher that can open the pull request a lost answer left unopened, for
+ * a branch a person approved it for (§10). One deployed before this feature
+ * would only look, and so is never handed that approval.
+ */
+export const ENGINEERING_PUBLISHER_PR_RESUME_FEATURE = "pull_request_resume";
+export const publisherResumesPullRequests = (header: string | null) =>
+  publisherNames(header, ENGINEERING_PUBLISHER_PR_RESUME_FEATURE);
+/** Every feature this publisher names, in the header's form. */
+export const ENGINEERING_PUBLISHER_FEATURES = [
+  ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE,
+  ENGINEERING_PUBLISHER_PR_RESUME_FEATURE,
+].join(",");
+
+/**
+ * The reasons a lookup gives for a branch with no pull request (§10): the one
+ * a person may answer by approving that the publisher open the pull request.
+ * `pull_request_count` is how a publisher before `branch_without_pull_request`
+ * named the same reading; the publisher checks the commit again either way.
+ */
+export const ENGINEERING_AGENT_PR_RESUMABLE_REASONS = ["branch_without_pull_request", "pull_request_count"] as const;
+/** The publish item's reason while that approval waits for its one claim, and after the claim took it. */
+export const ENGINEERING_AGENT_PR_RESUME_APPROVED_REASON = "pull_request_resume_approved";
+export const ENGINEERING_AGENT_PR_RESUME_CLAIMED_REASON = "pull_request_resume_claimed";
+
+/** The publish item an `unknown:` decision item is about, or null for another kind of decision. */
+export const unknownOutcomeDecisionWorkItemId = (causeKey: string): string | null => {
+  if (!causeKey.startsWith(UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX)) return null;
+  const rest = causeKey.slice(UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX.length);
+  const colon = rest.lastIndexOf(":");
+  if (colon <= 0 || !/^[0-9]+$/.test(rest.slice(colon + 1))) return null;
+  return rest.slice(0, colon);
+};
 
 /** A v22 Task has at most one publication product. A private result is not
  * misreported as a draft, and an owner draft is not misreported as a PR. */

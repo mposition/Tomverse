@@ -5,6 +5,8 @@ import { dirname, join, normalize } from "node:path";
 import test from "node:test";
 
 import {
+  BRANCH_WITHOUT_PULL_REQUEST_REASON,
+  READ_AFTER_WRITE_ATTEMPTS,
   decideLookup,
   expectedPublishCommit,
   publisherPrBody,
@@ -22,10 +24,14 @@ import {
   tokenPermissionsAllowed,
 } from "../scripts/engineering-agent-publisher.mjs";
 import {
+  ENGINEERING_PUBLISHER_FEATURES,
   ENGINEERING_PUBLISHER_FEATURES_HEADER,
   prBodyCarriesMarker,
   publisherOpensReviewDrafts,
+  publisherResumesPullRequests,
   shouldSendSuccessHeartbeat,
+  unknownOutcomeDecisionCauseKey,
+  unknownOutcomeDecisionWorkItemId,
 } from "../lib/engineeringAgentCore.ts";
 
 // The publisher service's cycle (docs/policy/engineering-agent.md §7-2,
@@ -59,11 +65,15 @@ const writeWork = (overrides = {}) => {
   return { ...work, commitDigest: overrides.commitDigest ?? sha256(expectedPublishCommit(work, DATE)) };
 };
 
-const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, headAfterPull, moveDuringDiff = false, lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {} } = {}) => {
+const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, headAfterPull, moveDuringDiff = false, lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {}, refHiddenReads = 0, pullHiddenReads = 0 } = {}) => {
   const calls = [];
   const tokens = { minted: 0, revoked: 0 };
   let branch = branchBefore;
-  const openPulls = pulls ?? [];
+  const openPulls = [...(pulls ?? [])];
+  // GitHub showing our own write late: a ref read answers 404, a list leaves the new pull request out.
+  let hiddenRef = 0;
+  let hiddenPull = 0;
+  const pauses = [];
   const app = async (path, body) => {
     calls.push({ path, body });
     if (path === "publish/claim") return { status: 200, json: { work, halt } };
@@ -76,9 +86,19 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
     return {
       branchOid: async (name) => {
         calls.push({ path: "github:branchOid", name });
+        if (hiddenRef > 0) {
+          hiddenRef -= 1;
+          return null;
+        }
         return branch;
       },
-      pullsForHead: async () => openPulls,
+      pullsForHead: async () => {
+        if (hiddenPull > 0) {
+          hiddenPull -= 1;
+          return openPulls.filter((pull) => pull.number !== 42);
+        }
+        return [...openPulls];
+      },
       pullDiffDigest: async () => {
         if (moveDuringDiff) branch = "8".repeat(40);
         return diff;
@@ -87,6 +107,7 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
         calls.push({ path: "github:createPull", input });
         const answer = createPull ?? { status: "created", number: 42 };
         if (answer.status === "created") {
+          hiddenPull = pullHiddenReads;
           openPulls.push({ number: 42, state: "open", baseRef: "develop", baseSha: "f".repeat(40), headRef: BRANCH, headSha: headAfterPull ?? COMMIT, body: input.body });
         }
         return answer;
@@ -103,6 +124,7 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
     push: async (sha, name, token) => {
       calls.push({ path: "git:push", sha, name, token });
       branch = remoteAfterPush === undefined ? sha : remoteAfterPush;
+      hiddenRef = refHiddenReads;
       return pushOk;
     },
     commitObjectAt: async (sha) => commitAt[sha] ?? null,
@@ -117,8 +139,9 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
     },
     github,
     workspace,
+    pause: async (ms) => void pauses.push(ms),
   };
-  return { ports, calls, tokens };
+  return { ports, calls, tokens, pauses };
 };
 
 const paths = (calls) => calls.map((call) => call.path);
@@ -189,8 +212,13 @@ test("a publisher names review drafts in a header the app reads; nothing else co
     assert.equal(publisherOpensReviewDrafts(header), false);
   }
   const source = readFileSync(new URL("../scripts/engineering-agent-publisher.mjs", import.meta.url), "utf8");
-  assert.match(source, /\[ENGINEERING_PUBLISHER_FEATURES_HEADER\]: ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE/,
-    "every call to the app names the feature");
+  assert.match(source, /\[ENGINEERING_PUBLISHER_FEATURES_HEADER\]: ENGINEERING_PUBLISHER_FEATURES,/,
+    "every call to the app names the features");
+  assert.equal(publisherOpensReviewDrafts(ENGINEERING_PUBLISHER_FEATURES), true);
+  assert.equal(publisherResumesPullRequests(ENGINEERING_PUBLISHER_FEATURES), true);
+  for (const header of [null, "", "review_draft", "pull_request_resumes", "x pull_request_resume"]) {
+    assert.equal(publisherResumesPullRequests(header), false, String(header));
+  }
   assert.equal(ENGINEERING_PUBLISHER_FEATURES_HEADER, ENGINEERING_PUBLISHER_FEATURES_HEADER.toLowerCase());
 });
 
@@ -234,7 +262,9 @@ test("an answer the publisher does not know is left for a lookup, never guessed 
   for (const setup of [
     { pushOk: false, remoteAfterPush: null },
     { pushOk: true, remoteAfterPush: "9".repeat(40) },
+    { pushOk: true, refHiddenReads: READ_AFTER_WRITE_ATTEMPTS },
     { createPull: { status: "unknown" } },
+    { pullHiddenReads: READ_AFTER_WRITE_ATTEMPTS },
   ]) {
     const world = fakeWorld({ work: writeWork(), ...setup });
     const outcome = await runPublisherCycle(world.ports);
@@ -399,4 +429,103 @@ test("once stopping, the workspace refuses a push that was already on its way", 
   assert.deepEqual(pushed, []);
   assert.equal(await workspace.dispose(), "disposed", "cleaning up still works");
   await assert.rejects(open("b".repeat(40)), /stopping/);
+});
+
+test("a write GitHub shows late is read again, never written again (AMUX-FILEGEN-003)", async () => {
+  // The ref read right after the push answers 404 twice, the new pull request is
+  // missing from the first list: the round still confirms, with one push and one create.
+  const world = fakeWorld({ work: writeWork({ ownerReview: true }), refHiddenReads: 2, pullHiddenReads: 1 });
+  assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "confirmed" });
+  assert.equal(world.calls.filter((call) => call.path === "git:push").length, 1);
+  assert.equal(world.calls.filter((call) => call.path === "github:createPull").length, 1);
+  assert.equal(world.pauses.length, 3, "a pause before each read taken again");
+  assert.equal(result(world.calls).outcome, "confirmed");
+
+  // Never shown: left for a lookup, named apart from a branch that moved.
+  const unseen = fakeWorld({ work: writeWork(), refHiddenReads: READ_AFTER_WRITE_ATTEMPTS });
+  assert.equal((await runPublisherCycle(unseen.ports)).reason, "push_not_shown");
+  assert.equal(unseen.calls.some((call) => call.path === "github:createPull"), false, "no pull request for a branch not seen");
+  assert.equal(unseen.pauses.length, READ_AFTER_WRITE_ATTEMPTS - 1);
+  // A branch at another commit is not waited for.
+  const moved = fakeWorld({ work: writeWork(), remoteAfterPush: "9".repeat(40) });
+  assert.equal((await runPublisherCycle(moved.ports)).reason, "branch_changed_after_push");
+  assert.equal(moved.pauses.length, 0);
+});
+
+const resumeSetup = () => {
+  const consumedWork = writeWork({ ownerReview: true });
+  const object = expectedPublishCommit(consumedWork, DATE);
+  const consumed = { commitDigest: sha256(object), expectedTreeId: TREE };
+  const lookup = (overrides = {}) => ({
+    mode: "lookup", workItemId: consumedWork.workItemId, runId: RUN, branch: BRANCH, fencingToken: "32",
+    ownerReview: true, consumed, ...overrides,
+  });
+  return { object, lookup };
+};
+
+test("a lookup tells a branch at the allowed commit with no pull request apart, and opens nothing on its own", async () => {
+  const { object, lookup } = resumeSetup();
+  const at = fakeWorld({ work: lookup(), branchBefore: COMMIT, pulls: [], commitAt: { [COMMIT]: object } });
+  await runPublisherCycle(at.ports);
+  assert.deepEqual([result(at.calls).outcome, result(at.calls).reason], ["lookup_impossible", BRANCH_WITHOUT_PULL_REQUEST_REASON]);
+  assert.equal(at.calls.some((call) => call.path === "github:createPull"), false, "no approval, no pull request");
+  // Only `true` carries the approval.
+  for (const resumePullRequest of ["true", 1, undefined]) {
+    const odd = fakeWorld({ work: lookup({ resumePullRequest, cardRef: "card_1" }), branchBefore: COMMIT, pulls: [], commitAt: { [COMMIT]: object } });
+    await runPublisherCycle(odd.ports);
+    assert.equal(odd.calls.some((call) => call.path === "github:createPull"), false, String(resumePullRequest));
+  }
+  const foreign = fakeWorld({ work: lookup(), branchBefore: COMMIT, pulls: [], commitAt: { [COMMIT]: `${object}x` } });
+  await runPublisherCycle(foreign.ports);
+  assert.equal(result(foreign.calls).reason, "commit_not_allowed");
+});
+
+test("an approved resume opens the one pull request for the allowed commit and binds it, without a push", async () => {
+  const { object, lookup } = resumeSetup();
+  const world = fakeWorld({
+    work: lookup({ resumePullRequest: true, cardRef: "card_1" }), branchBefore: COMMIT, pulls: [], commitAt: { [COMMIT]: object }, pullHiddenReads: 1,
+  });
+  assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "lookup_found_result" });
+  assert.equal(world.calls.some((call) => call.path === "git:push"), false, "nothing is pushed");
+  const creates = world.calls.filter((call) => call.path === "github:createPull");
+  assert.equal(creates.length, 1);
+  const pr = creates[0].input;
+  assert.deepEqual([pr.head, pr.draft, pr.title, pr.body], [BRANCH, true, publisherReviewPrTitle(RUN), publisherReviewPrBody(RUN, "card_1")]);
+  assert.ok(prBodyCarriesMarker(pr.body, RUN), "the run's marker, so any later lookup finds it");
+  const reported = result(world.calls);
+  assert.equal(reported.outcome, "lookup_found_result");
+  assert.deepEqual([reported.pullRequest.prNumber, reported.pullRequest.headSha, reported.pullRequest.verifiedHeadSha], [42, COMMIT, COMMIT]);
+  assert.equal(reported.pullRequest.snapshot.treeId, TREE);
+  assert.deepEqual(world.tokens, { minted: 1, revoked: 1 });
+});
+
+test("an approved resume refuses anything but the allowed commit, and never guesses a lost answer", async () => {
+  const { object, lookup } = resumeSetup();
+  const resume = lookup({ resumePullRequest: true, cardRef: "card_1" });
+  const ours = { number: 42, state: "open", baseRef: "develop", baseSha: "f".repeat(40), headRef: BRANCH, headSha: COMMIT, body: publisherReviewPrBody(RUN, "card_1") };
+  for (const [setup, outcome, reason] of [
+    [{ commitAt: { [COMMIT]: `${object}x` } }, "lookup_impossible", "commit_not_allowed"],
+    [{ commitAt: {} }, "lookup_impossible", "pull_request_count"],
+    [{ commitAt: { [COMMIT]: object }, createPull: { status: "rejected" } }, "lookup_impossible", "pull_request_create_rejected"],
+    [{ commitAt: { [COMMIT]: object }, pulls: [ours] }, "lookup_found_result", undefined],
+    [{ commitAt: { [COMMIT]: object }, work: lookup({ resumePullRequest: true }) }, "lookup_impossible", "content_check_failed"],
+  ]) {
+    const world = fakeWorld({ work: resume, branchBefore: COMMIT, pulls: [], ...setup });
+    await runPublisherCycle(world.ports);
+    assert.deepEqual([result(world.calls).outcome, result(world.calls).reason], [outcome, reason], reason ?? outcome);
+    const creates = world.calls.filter((call) => call.path === "github:createPull").length;
+    assert.equal(creates, reason === "pull_request_create_rejected" ? 1 : 0, `${reason}: at most the one create`);
+    assert.equal(world.calls.some((call) => call.path === "git:push"), false);
+  }
+  const lost = fakeWorld({ work: resume, branchBefore: COMMIT, pulls: [], commitAt: { [COMMIT]: object }, createPull: { status: "unknown" } });
+  assert.deepEqual([(await runPublisherCycle(lost.ports)).reason, result(lost.calls)], ["pull_request_outcome_unknown", undefined]);
+  assert.equal(lost.calls.filter((call) => call.path === "github:createPull").length, 1, "never a second create");
+});
+
+test("an unknown outcome's decision names the publish item it is about", () => {
+  const id = "3614692c-f817-40d9-ab83-889384cddbf5";
+  assert.equal(unknownOutcomeDecisionWorkItemId(unknownOutcomeDecisionCauseKey(id, 31n)), id);
+  for (const key of ["registration:x", `unknown:${id}`, `unknown:${id}:`, "unknown::3", `unknown:${id}:x`]) {
+    assert.equal(unknownOutcomeDecisionWorkItemId(key), null, key);
+  }
 });

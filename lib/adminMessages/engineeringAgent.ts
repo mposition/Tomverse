@@ -110,6 +110,11 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     reject: "Reject",
     rejudge: "Judge again",
     acknowledge: "Acknowledge",
+    resumePullRequest: "Open the pull request for this branch",
+    resumePullRequestNote:
+      "The branch was pushed but its pull request was never opened. Acknowledging closes this outcome's earlier decisions too. Do not delete the branch or open the pull request by hand.",
+    confirmResumePullRequest:
+      "Approve that the publisher open the pull request for this run's branch? Its next round reads the branch again and opens the pull request once, only if the branch is at the exact commit this run was allowed and has no pull request. Nothing is pushed, and an owner review item opens as a draft. This outcome's earlier decisions are closed as seen.",
     mismatchNote:
       "A state mismatch halts the agent until a person acts. Both sides are locked and read again before any action; neither is corrected to match the other.",
     mismatchClose: "Close the run (nothing was written)",
@@ -277,6 +282,11 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     reject: "거절",
     rejudge: "다시 판정",
     acknowledge: "확인",
+    resumePullRequest: "이 브랜치로 PR 열기",
+    resumePullRequestNote:
+      "브랜치는 push됐지만 PR이 열리지 않았습니다. 확인을 누르면 같은 결과의 이전 결정 항목도 함께 닫힙니다. 브랜치를 지우거나 PR을 직접 열지 마세요.",
+    confirmResumePullRequest:
+      "게시 서비스가 이 run의 브랜치로 PR을 열도록 승인할까요? 다음 회차가 브랜치를 다시 읽고, 브랜치가 이 run에 허락된 커밋 그대로이고 PR이 없을 때만 PR을 한 번 엽니다. push는 하지 않으며, 운영자 검토 항목은 draft로 열립니다. 같은 결과의 이전 결정 항목은 확인 처리됩니다.",
     mismatchNote:
       "상태 불일치는 사람이 조치할 때까지 에이전트를 정지시킵니다. 어떤 조치든 양쪽을 잠그고 다시 읽은 뒤에만 실행되며, 한쪽을 다른 쪽에 맞춰 고치지 않습니다.",
     mismatchClose: "run 종료(쓰기 없음 확인됨)",
