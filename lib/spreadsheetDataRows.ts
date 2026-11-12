@@ -294,6 +294,17 @@ const readSheetGrid = (
   }
   const xml = decoder.decode(bytes);
   const grid: string[][] = [];
+  // A workbook saved with the 1904 date system counts days from 1904-01-01,
+  // 1,462 days after the 1900 system's day zero. Read for a conversion only;
+  // the template batch keeps its documented behaviour.
+  const workbookXml = parts["xl/workbook.xml"]
+    ? decoder.decode(parts["xl/workbook.xml"])
+    : "";
+  const dateOffsetDays =
+    strictValueLength !== undefined &&
+    /<(?:\w+:)?workbookPr\b[^>]*\bdate1904="(?:1|true)"/.test(workbookXml)
+      ? 1462
+      : 0;
 
   for (const rowMatch of xml.matchAll(
     /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g
@@ -339,6 +350,10 @@ const readSheetGrid = (
           value = decodeXml(inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? "");
         } else if (type === "b") {
           value = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] === "1" ? "TRUE" : "FALSE";
+        } else if (type === "d" && strictValueLength !== undefined) {
+          // An ISO 8601 date cell. Kept as the text the file holds, which is
+          // already a date a person can read; it is not a serial number.
+          value = decodeXml(inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? "");
         } else if (type === "e") {
           // A conversion keeps the error the cell shows (#DIV/0!); a template
           // field has no use for one.
@@ -353,7 +368,7 @@ const readSheetGrid = (
             if (Number.isFinite(numeric)) {
               value =
                 styleIndex >= 0 && styles.isDate[styleIndex]
-                  ? excelSerialToDisplay(numeric, {
+                  ? excelSerialToDisplay(numeric + dateOffsetDays, {
                       withTime: Boolean(styles.hasTime[styleIndex]),
                     })
                   : strictValueLength !== undefined

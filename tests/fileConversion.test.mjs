@@ -775,3 +775,43 @@ test("fourth review: a value past fifteen significant digits survives CSV -> XLS
   assert.match(sheet, /<v>123456789012345<\/v>/);
   assert.equal(sheet.includes("<v>123456789012345.6</v>"), false);
 });
+
+test("fifth review: two numbers without a hyphen are refused, not read as the first", () => {
+  assert.throws(() => parsePageSelection("1 2", 5), PageSelectionError);
+  assert.throws(() => parsePageSelection("12 3", 50), PageSelectionError);
+  assert.deepEqual(parsePageSelection("2", 5), [1]);
+  assert.deepEqual(parsePageSelection("2 - 3", 5), [1, 2]);
+});
+
+test("fifth review: 1904-system dates and ISO date cells convert to the dates they are", async () => {
+  // Built from the fixture, then given the 1904 date system and one ISO cell.
+  const base = unzipSync(
+    buildXlsx({ rows: [["when"], [{ date: "2026-11-12" }], ["placeholder"]] })
+  );
+  const { zipSync } = await import("fflate");
+  const decode = (bytes) => new TextDecoder().decode(bytes);
+  const encode = (text) => new TextEncoder().encode(text);
+  const sheetPath = Object.keys(base).find((path) => /worksheets\/sheet1\.xml$/.test(path));
+
+  // Same serial, 1904 system: 1,462 days later than the 1900 reading.
+  const workbook1904 = decode(base["xl/workbook.xml"]).replace(
+    /<workbook\b([^>]*)>/,
+    '<workbook$1><workbookPr date1904="1"/>'
+  );
+  const isoSheet = decode(base[sheetPath]).replace(
+    /<c r="A3"[^>]*>[\s\S]*?<\/c>/,
+    '<c r="A3" t="d"><v>2026-11-12T00:00:00</v></c>'
+  );
+  const file = zipSync({
+    ...base,
+    "xl/workbook.xml": encode(workbook1904),
+    [sheetPath]: encode(isoSheet),
+  });
+
+  const result = await convert(
+    { operation: "convert_spreadsheet", filename: "dates", targetFormat: "csv", sources: [{ attachment: "att_1" }] },
+    attachments([["dates.xlsx", XLSX, file]])
+  );
+  const lines = decode(result.bytes).replace(/^﻿/, "").trimEnd().split("\r\n");
+  assert.deepEqual(lines, ["when", "2030-11-13", "2026-11-12T00:00:00"]);
+});

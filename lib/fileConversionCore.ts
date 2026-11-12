@@ -173,7 +173,11 @@ export const parsePageSelection = (
   for (const rawPart of text.split(",")) {
     const part = rawPart.trim();
     if (part === "") continue;
-    const match = part.match(/^(\d{1,5})?\s*(-)?\s*(\d{1,5})?$/);
+    // A page, or a range with its hyphen. Two numbers without one ("1 2")
+    // are refused rather than read as the first of them.
+    const match =
+      part.match(/^(\d{1,5})()()$/) ??
+      part.match(/^(\d{1,5})?\s*(-)\s*(\d{1,5})?$/);
     if (!match || (!match[1] && !match[3])) {
       throw new PageSelectionError(
         `"${part.slice(0, 20)}" is not a page or a page range. Write pages as "1-3,5".`
