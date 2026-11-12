@@ -32,9 +32,7 @@ mock.module(mod("lib/prisma.ts"), {
 });
 
 test("the menu badge counts families the way the discovery tab lists them", async () => {
-  const { countOpenWorkItemFamilies } = await import(
-    `${mod("lib/modelLifecycleWorkItems.ts")}?families`
-  );
+  const { countOpenWorkItemFamilies } = await import(mod("lib/modelLifecycleWorkItems.ts"));
   assert.equal(await countOpenWorkItemFamilies(), 12);
 });
 
