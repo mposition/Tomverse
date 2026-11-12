@@ -1000,7 +1000,7 @@ test("a rerank answer reports both billed units it carries", () => {
     assert.equal(parsed.inputTokens, 812);
 });
 
-/* ------------------------------------------------- privacy notice gate (§16) */
+/* ---- privacy notice gate (docs/policy/external-conversation-import-and-memory.md §16) */
 
 test("no semantic call is allowed before the privacy notice is published", async () => {
     const { SEMANTIC_RETRIEVAL_PRIVACY_NOTICE_PUBLISHED, semanticRetrievalNoticePublished } =

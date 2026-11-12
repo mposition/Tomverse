@@ -1,9 +1,9 @@
 # 의미 검색(Cohere) 활성화 runbook
 
 - 작성: 2026-11-12 (Claude). 결정: 운영자, 2026-11-12 (시나리오 1~5 구현, 기본 꺼짐).
-- 계약은 `docs/policy/external-conversation-import-and-memory.md` §9a이고, 비용 버킷은
-  `docs/policy/credit-and-cost-limits.md`의 "버킷 구분"입니다. 이 문서는 스위치를 켜기까지 무엇을 어떤 순서로
-  하는지만 적습니다.
+- 계약: `docs/policy/external-conversation-import-and-memory.md §9a`.
+- 비용 버킷: `docs/policy/credit-and-cost-limits.md`의 "버킷 구분".
+- 이 문서는 스위치를 켜기까지 무엇을 어떤 순서로 하는지만 적습니다.
 - **스위치를 켜는 것은 운영자 승인입니다.** 켜는 순간 유료 호출이 시작되고 계정 memory·knowledge 원문이 Cohere로
   나갑니다. 이 문서의 어느 단계도 그 승인을 대신하지 않습니다.
 
