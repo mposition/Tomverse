@@ -135,12 +135,15 @@ test("the screen decides nothing itself: every write is the existing review and 
   assert.match(decision, /<AmuxPendingDecisionNotice /);
   // The only read it adds.
   assert.match(screen, /adminFetch\("\/api\/admin\/amux\/owner-queue"/);
-  // A legacy card is remade or closed through the existing legacy card panel,
-  // read from the card detail the execution board uses, for the owner only.
+  // A card is settled through the existing legacy card panel, for the owner
+  // only, from the card detail the review already reads: the panel adds no
+  // read of its own, so a card costs one detail read, not two.
   assert.match(decision, /<AmuxLegacyCardPanel /);
-  assert.match(decision, /useAmuxLegacyCardRead\(item\.taskId,\s*canInspectCards && /);
-  assert.match(read("components/admin/AmuxLegacyCardPanel.tsx"),
-    /\/api\/admin\/amux\/execution-view\?view=detail&taskId=/);
+  assert.match(decision, /canInspectCards && group !== "question" && reviewMatches &&[\s\S]{0,120}ownerExecution\.legacyCard/);
+  assert.doesNotMatch(decision, /adminFetch|execution-view/);
+  assert.doesNotMatch(read("components/admin/AmuxLegacyCardPanel.tsx"), /\/api\/admin\/amux\/execution-view\?view=detail&taskId=/);
+  assert.match(read("components/admin/AdminAmuxRoutingPanel.tsx"),
+    /amuxLegacyCardReadOf\(review\.task\.id, body\)/);
 });
 
 test("a key never skips a confirmation: numbers pick, Enter is not bound, typing is left alone", () => {

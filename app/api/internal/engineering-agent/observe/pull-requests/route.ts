@@ -28,6 +28,12 @@ export async function POST(request: Request) {
   try {
     await readLimitedJson(request, 64, requestSchema);
     const observed = await observeEngineeringAgentPullRequests();
+    const unreadable = observed.filter((entry) => entry.outcome === "unreadable");
+    if (unreadable.length > 0) {
+      // Codes and a count only. The round repeats; this is what says why it keeps deciding nothing.
+      console.error(JSON.stringify({ event: "engineering_agent_pr_observe_unreadable",
+        bindings: unreadable.length, codes: [...new Set(unreadable.map((entry) => entry.code ?? "unknown"))].sort() }));
+    }
     // After the observer, so a merge it records this round is released too.
     const released = await releaseEngineeringAgentBindings();
     return engineeringAgentJson({ observed, released, lane: await observeAmuxIdeaLaneMerges() }, 200);

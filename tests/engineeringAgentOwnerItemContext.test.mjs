@@ -50,7 +50,7 @@ test("a published-item mismatch names its publish item; other causes name none",
   assert.equal(engineeringAgentMismatchPublishItemId("review_pr:abc_123"), "abc_123");
   assert.equal(engineeringAgentMismatchPublishItemId("review_pr:"), null);
   assert.equal(engineeringAgentMismatchPublishItemId("run_attempt:r1"), null);
-  assert.equal(engineeringAgentMismatchPublishItemId("merged_without_approval:b1"), null);
+  assert.equal(engineeringAgentMismatchPublishItemId("unapproved_merge:b1"), null);
 });
 
 test("a binding reads its GitHub observations and never guesses one", () => {

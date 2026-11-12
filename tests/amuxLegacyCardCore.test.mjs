@@ -10,6 +10,7 @@ import {
   amuxLegacyCardIdeaText,
   amuxLegacyCardRecreateRequestId,
   amuxLegacyCardKind,
+  amuxOwnerCompleteRefusal,
   isAmuxRecoveryInspectableCard,
   isAmuxV22RecoverableTask,
 } from "../lib/amux/legacyCardCore.ts";
@@ -35,12 +36,18 @@ test("a workboard import and a pre-v22 Task with an unknown outcome are the card
   // An open run is still a candidate; the close refuses it as running.
   assert.equal(amuxLegacyCardKind(v4Task({ lastAttempt: { endedAt: null, outcome: null, reason: null } })),
     "pre_v22_task");
+  // Owner decision 2026-11-12: any other v4 Task stopped in blocked or review
+  // is one the owner settles directly, whatever stopped it.
   for (const card of [
-    // The Ubuntu inspection takes it: the v22 recovery path decides.
     v4Task({ v22ReceiptId: "r", taskRole: "implement", executionGrade: "advanced" }),
-    // A known outcome or a lane that is not stopped is not stuck.
+    v4Task({ status: "review", v22ReceiptId: "r", taskRole: "implement", executionGrade: "advanced",
+      lastAttempt: { endedAt: "x", outcome: "succeeded", reason: "review_server_accepted" } }),
     v4Task({ lastAttempt: { endedAt: "x", outcome: "succeeded", reason: "reported_result" } }),
+  ]) assert.equal(amuxLegacyCardKind(card), "stopped_task");
+  for (const card of [
+    // A lane that is not stopped is not the owner's to settle here.
     v4Task({ status: "todo" }), v4Task({ status: "done" }),
+    v4Task({ status: "doing", v22ReceiptId: "r", taskRole: "implement", executionGrade: "advanced" }),
     v4Task({ cardType: "story" }), v4Task({ sourceSystem: "local-agent-intake" }), v4Task({ sourceSystem: null }),
   ]) assert.equal(amuxLegacyCardKind(card), null);
   // Missing any one of the three keeps a Task out of the v22 recovery path.
@@ -163,8 +170,9 @@ test("a close refuses a running, closed, changed or non-legacy card", () => {
   assert.equal(amuxLegacyCardCloseRefusal(base, 3), null);
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, status: "blocked" }, 3), null);
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, sourceSystem: "admin-idea-v4" }, 3), null);
+  // A stopped v22 Task closes too (owner decision 2026-11-12).
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, sourceSystem: "admin-idea-v4", v22ReceiptId: "r",
-    executionGrade: "advanced" }, 3), "not_legacy");
+    executionGrade: "advanced" }, 3), null);
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, sourceSystem: "local-agent-intake" }, 3), "not_legacy");
   assert.equal(amuxLegacyCardCloseRefusal({ ...base, archivedAt: new Date() }, 3), "already_closed");
   // An archived card still in the owner queue closes: only its escalation is resolved.
@@ -192,4 +200,24 @@ test("an archived v22 Task is not a legacy card: archived cards leave the owner 
   assert.ok((pre.ok ? pre.text : "").includes("(v22 이전에 만든 Task를 새 아이디어로 다시 만듦)"));
   const board = amuxLegacyCardIdeaText(card(JSON.stringify({ problem: "Do X." })));
   assert.ok((board.ok ? board.text : "").includes("(옛 작업판에서 이관한 카드를 새 아이디어로 다시 만듦)"));
+});
+
+test("the owner completes only a stopped v22 Task that holds its receipt and is not archived", () => {
+  const v22 = { ...v4Task({ status: "review", v22ReceiptId: "r", taskRole: "implement", executionGrade: "advanced",
+    lastAttempt: { endedAt: "2026-11-10T00:00:00.000Z", outcome: "succeeded", reason: "review_server_accepted" } }),
+    archivedAt: null, revision: 5, activeDelivery: false, liveAttempt: false, openEscalation: true };
+  assert.equal(amuxOwnerCompleteRefusal(v22, 5), null);
+  // A blocked run whose outcome is unknown completes the same way: the owner's judgment, not a proof.
+  assert.equal(amuxOwnerCompleteRefusal({ ...v22, status: "blocked",
+    lastAttempt: { endedAt: "x", outcome: "expired", reason: "outcome_unknown" } }, 5), null);
+  // Everything a close refuses.
+  assert.equal(amuxOwnerCompleteRefusal(v22, 4), "changed");
+  assert.equal(amuxOwnerCompleteRefusal({ ...v22, liveAttempt: true }, 5), "running");
+  assert.equal(amuxOwnerCompleteRefusal({ ...v22, activeDelivery: true }, 5), "running");
+  assert.equal(amuxOwnerCompleteRefusal({ ...v22, status: "todo" }, 5), "not_legacy");
+  // No v22 receipt: the database refuses done for it, so the owner remakes or closes it instead.
+  assert.equal(amuxOwnerCompleteRefusal({ ...v22, v22ReceiptId: null }, 5), "not_completable");
+  assert.equal(amuxOwnerCompleteRefusal({ ...v22, sourceSystem: "tomverse_private_workboard" }, 5), "not_completable");
+  // An archived card keeps its archive.
+  assert.equal(amuxOwnerCompleteRefusal({ ...v22, archivedAt: new Date() }, 5), "not_legacy");
 });

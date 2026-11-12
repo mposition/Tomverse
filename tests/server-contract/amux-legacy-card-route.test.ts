@@ -24,8 +24,14 @@ const world = {
   role: "owner", recent: true,
   card: null as Card | null,
   refusal: null as string | null,
-  /** The card's kind in the detail read; null: not a card the owner can only remake. */
-  kind: "workboard" as "workboard" | "pre_v22_task" | null,
+  /** The card's kind in the detail read; null: not a stopped card. */
+  kind: "workboard" as "workboard" | "pre_v22_task" | "stopped_task" | null,
+  /** Why the detail read says the card cannot be completed; only a stopped v22 Task reads null. */
+  completeRefusal: "not_completable" as string | null,
+  completes: [] as Array<{ taskId: string; revision: number; reason: string }>,
+  completeOutcome: "completed" as "completed" | "refused",
+  engineeringClosedFor: [] as string[],
+  engineeringFails: false,
   readBack: [] as Array<{ status: "absent" } | { status: "committed"; ideaId: string }>,
   submits: [] as string[],
   sendPathIdeas: [] as Array<{ requestId: string; idea: string; sessionDisplay: string }>,
@@ -41,6 +47,8 @@ const reset = () => {
       completionCriteria: ["The date shows"] }), executionBrief: null, revision: 4 };
   world.refusal = null; world.kind = "workboard"; world.readBack = [{ status: "absent" }]; world.submits = []; world.sendPathIdeas = [];
   world.closes = []; world.closeOutcome = "closed"; world.writeOn = "true"; world.archived = false;
+  world.completeRefusal = "not_completable"; world.completes = []; world.completeOutcome = "completed";
+  world.engineeringClosedFor = []; world.engineeringFails = false;
 };
 
 let installed = false;
@@ -92,7 +100,7 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
         const card: Card | null = world.card;
         if (!card || card.id !== taskId) return null;
         return { id: card.id, revision: card.revision, legacyCard: world.kind === null ? null : {
-          kind: world.kind, closeRefusal: world.refusal,
+          kind: world.kind, closeRefusal: world.refusal, completeRefusal: world.completeRefusal,
           idea: card.description?.includes("someone@") ? { state: "refused", code: "content_refused" } :
             { state: "ready", title: "The renewal date is hidden.", truncated: false,
               text: `The renewal date is hidden.\n\n${card.description}` } } };
@@ -107,6 +115,19 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
           { outcome: "closed", archivedAt: "2026-11-08T09:00:00.000Z", alreadyArchived: world.archived,
             escalationsResolved: 1, auditId: "a1" } :
           { outcome: "refused", reason: "running" };
+      },
+      completeAmuxStoppedCardForOwner: async (input: { taskId: string; revision: number; reason: string }) => {
+        world.completes.push(input);
+        return world.completeOutcome === "completed" ?
+          { outcome: "completed", revision: input.revision + 1, escalationsResolved: 1, auditId: "a2" } :
+          { outcome: "refused", reason: "changed" };
+      } } });
+    // The engineering agent's own items for the card, closed after the settlement commits.
+    mock.module(mod("lib/amux/ownerSettlementEngineering.ts"), { namedExports: {
+      closeEngineeringOwnerItemsForSettledCard: async (input: { taskId: string }) => {
+        world.engineeringClosedFor.push(input.taskId);
+        if (world.engineeringFails) throw new Error("engineering store unavailable");
+        return { draftsRejected: 1, decisionsAcknowledged: 2, left: 0 };
       } } });
   }
   return import(mod("app/api/admin/amux/legacy-card/route.ts"));
@@ -186,7 +207,8 @@ test("a recreate saves the idea under the card's derived request id, then closes
   const requestId = amuxLegacyCardRecreateRequestId("cmlegacy0001",
     ["The renewal date is hidden.", "", world.card!.description].join("\n"));
   assert.deepEqual(await response.json(), { status: "recreated", ideaId: "idea-1", requestId, closed: true,
-    archivedAt: "2026-11-08T09:00:00.000Z", alreadyArchived: false, escalationsResolved: 1 });
+    archivedAt: "2026-11-08T09:00:00.000Z", alreadyArchived: false, escalationsResolved: 1, engineering: { draftsRejected: 1, decisionsAcknowledged: 2, left: 0 } });
+  assert.deepEqual(world.engineeringClosedFor, ["cmlegacy0001"]);
   assert.deepEqual(world.submits, [requestId]);
   assert.match(world.sendPathIdeas[0]!.idea, /^The renewal date is hidden\./);
   assert.equal(world.sendPathIdeas[0]!.sessionDisplay, "Legacy WORKBOARD card");
@@ -199,6 +221,8 @@ test("a recreate saves the idea under the card's derived request id, then closes
   assert.deepEqual(await again.json(), { status: "recreated", ideaId: "idea-1", requestId, closed: false,
     reason: "running" });
   assert.equal(world.submits.length, 0);
+  // A card that did not close keeps its engineering items.
+  assert.equal(world.engineeringClosedFor.length, 0);
 
   // Changed assigned work saves its own idea instead of reading the old one back.
   reset(); world.card!.description = JSON.stringify({ problem: "Now a different task." });
@@ -224,7 +248,7 @@ test("close only archives without an idea; a held card answers busy", async () =
   const response = await POST(post(close));
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: "closed", closed: true, archivedAt: "2026-11-08T09:00:00.000Z",
-    alreadyArchived: false, escalationsResolved: 1 });
+    alreadyArchived: false, escalationsResolved: 1, engineering: { draftsRejected: 1, decisionsAcknowledged: 2, left: 0 } });
   assert.equal(world.sendPathIdeas.length, 0);
   assert.equal(world.closes[0]!.ideaId, null);
   // An archived card still in the owner queue goes through the same close, which says so.
@@ -236,4 +260,52 @@ test("close only archives without an idea; a held card answers busy", async () =
   const busy = await POST(post(close));
   assert.equal(busy.status, 409);
   assert.deepEqual(await busy.json(), { error: "busy" });
+});
+
+test("the owner completes a stopped v22 Task as done with a reason; nothing else completes", async () => {
+  const { POST } = await loadRoute();
+  const complete = { ...recreate, action: "complete", reason: "PR merged; the work is on develop." };
+  reset(); world.kind = "stopped_task"; world.completeRefusal = null;
+  const response = await POST(post(complete));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "completed", revision: 5, escalationsResolved: 1, engineering: { draftsRejected: 1, decisionsAcknowledged: 2, left: 0 } });
+  assert.deepEqual(world.completes, [{ ...world.completes[0], taskId: "cmlegacy0001", revision: 4,
+    reason: "PR merged; the work is on develop." }]);
+  assert.equal(world.closes.length + world.sendPathIdeas.length, 0);
+  assert.deepEqual(world.engineeringClosedFor, ["cmlegacy0001"]);
+
+  // The reason is required for a completion and refused on the other two actions.
+  reset(); world.kind = "stopped_task"; world.completeRefusal = null;
+  assert.equal((await POST(post({ ...recreate, action: "complete" }))).status, 400);
+  assert.equal((await POST(post({ ...complete, reason: "   " }))).status, 400);
+  assert.equal((await POST(post({ ...close, reason: "not for a close" }))).status, 400);
+  assert.equal(world.completes.length + world.closes.length, 0);
+
+  // A legacy card, or a Task the detail read says cannot be done, refuses before any write.
+  reset();
+  const legacy = await POST(post(complete));
+  assert.equal(legacy.status, 409);
+  assert.deepEqual(await legacy.json(), { error: "not_completable", reason: "not_completable" });
+  assert.equal(world.completes.length, 0);
+
+  // The write judges again under its lock.
+  reset(); world.kind = "stopped_task"; world.completeRefusal = null; world.completeOutcome = "refused";
+  const moved = await POST(post(complete));
+  assert.equal(moved.status, 409);
+  assert.deepEqual(await moved.json(), { error: "not_completable", reason: "changed" });
+  assert.equal(world.engineeringClosedFor.length, 0);
+});
+
+test("a stopped v22 Task is remade under its own source label, and an engineering failure never undoes a settlement", async () => {
+  const { POST } = await loadRoute();
+  reset(); world.kind = "stopped_task";
+  const remade = await POST(post(recreate));
+  assert.equal(remade.status, 200);
+  assert.equal(world.sendPathIdeas[0]!.sessionDisplay, "Stopped AMUX Task");
+
+  reset(); world.kind = "stopped_task"; world.completeRefusal = null; world.engineeringFails = true;
+  const response = await POST(post({ ...recreate, action: "complete", reason: "Verified by hand." }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "completed", revision: 5, escalationsResolved: 1,
+    engineering: null });
 });

@@ -82,3 +82,16 @@ test("a merge counts only after an approval recorded before it", () => {
   assert.equal(decideEngineeringAgentMergedPr({ merged: true, approvalRecordedBeforeMerge: true }), "done");
   assert.equal(decideEngineeringAgentMergedPr({ merged: true, approvalRecordedBeforeMerge: false }), "merged_without_approval");
 });
+
+test("an approver's own merge of the verified head into develop is the approval", () => {
+  // Owner decision 2026-11-12: one person reviews and merges, so no separate review is written.
+  const own = { merged: true, approvalRecordedBeforeMerge: false, mergedByApprover: true, baseRef: "develop",
+    headVerified: true };
+  assert.equal(decideEngineeringAgentMergedPr(own), "done");
+  // Each condition is needed: who merged, where, and what.
+  assert.equal(decideEngineeringAgentMergedPr({ ...own, mergedByApprover: false }), "merged_without_approval");
+  assert.equal(decideEngineeringAgentMergedPr({ ...own, baseRef: "main" }), "merged_without_approval");
+  assert.equal(decideEngineeringAgentMergedPr({ ...own, headVerified: false }), "merged_without_approval");
+  // Nothing merged is still open, whoever would merge it.
+  assert.equal(decideEngineeringAgentMergedPr({ ...own, merged: false }), "open");
+});
