@@ -52,6 +52,10 @@ test("only a positive balance or an unlimited grant the account claims counts as
   assert.equal(judge({ hasCredits: true, unlimited: false, balance: "lots" }), "exhausted");
   assert.equal(judge(null), "exhausted");
   assert.deepEqual(codexCredits({ hasCredits: true, balance: 4 }), { left: true, balance: 4 });
+  // The balance as Codex sends it on the box (2026-11-13): ten decimal places.
+  assert.deepEqual(codexCredits({ balance: "60920.6460780000", hasCredits: true, unlimited: false }),
+    { left: true, balance: 60920.646078 });
+  assert.equal(judge({ hasCredits: true, unlimited: false, balance: "60920.6460780000" }), "available");
 });
 
 test("credits never revive an unknown or an over-stale Codex reading", () => {

@@ -136,7 +136,7 @@ export function codexCredits(credits) {
   if (!credits || typeof credits !== "object" || credits.hasCredits !== true) return { left: false, balance: null };
   const raw = credits.balance;
   const balance = typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? raw
-    : typeof raw === "string" && /^\d{1,12}(\.\d{1,6})?$/.test(raw) ? Number(raw) : null;
+    : typeof raw === "string" && /^\d{1,12}(\.\d{1,18})?$/.test(raw) ? Number(raw) : null;
   return { left: credits.unlimited === true || (balance !== null && balance > 0), balance };
 }
 
