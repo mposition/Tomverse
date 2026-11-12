@@ -442,7 +442,7 @@ test("a CSV becomes a workbook whose numbers are numbers and whose ids are not",
     files
   );
   assert.equal(result.format, "xlsx");
-  assert.equal(result.parts, "2 rows, 3 columns");
+  assert.equal(result.parts, "3 rows, 3 columns");
   const sheet = new TextDecoder().decode(unzipSync(result.bytes)["xl/worksheets/sheet1.xml"]);
   assert.match(sheet, /<v>1200\.5<\/v>/);
   assert.match(sheet, /<v>-3<\/v>/);
@@ -628,4 +628,107 @@ test("an image over the pixel ceiling is reported as a limit, not as an unreadab
     files,
     "OUTPUT_TOO_LARGE"
   );
+});
+
+/* ------------------------------------------------------------------------ */
+/* Found by the second independent review                                     */
+/* ------------------------------------------------------------------------ */
+
+test("a value a number cannot hold exactly stays the text the user wrote", async () => {
+  const source = "amount\n999999999999999.99\n1.50\n1200.5\n-3\n0.1\n";
+  const files = attachments([["money.csv", "text/csv", csvBytes(source)]]);
+  const result = await convert(
+    {
+      operation: "convert_spreadsheet",
+      filename: "money",
+      targetFormat: "xlsx",
+      sources: [{ attachment: "att_1" }],
+    },
+    files
+  );
+  const sheet = new TextDecoder().decode(unzipSync(result.bytes)["xl/worksheets/sheet1.xml"]);
+  // Numbers that print back as themselves are numbers...
+  for (const value of ["1200.5", "-3", "0.1"]) {
+    assert.match(sheet, new RegExp(`<v>${value.replace(".", "\.")}</v>`), value);
+  }
+  // ...and the two that would change are not.
+  assert.equal(sheet.includes("<v>1000000000000000</v>"), false);
+  assert.equal(sheet.includes("<v>1.5</v>"), false);
+  const round = readSpreadsheetGrid(result.bytes, {
+    mediaType: XLSX,
+    maxRows: 100,
+    maxValueLength: 100,
+  });
+  assert.deepEqual(
+    round.grid.map((row) => row[0]),
+    ["amount", "999999999999999.99", "1.50", "1200.5", "-3", "0.1"]
+  );
+});
+
+test("a blank row a workbook left out of the file is still a row after conversion", async () => {
+  // Rows 2 and 3 are blank, and removed from the sheet XML the way Excel
+  // writes a sparse sheet: the next <row> simply says r="4".
+  const dense = unzipSync(
+    buildXlsx({ rows: [["first"], ["gap"], ["gap"], ["fourth"]] })
+  );
+  const sheetPath = Object.keys(dense).find((path) => /worksheets\/sheet1\.xml$/.test(path));
+  const sparseXml = new TextDecoder()
+    .decode(dense[sheetPath])
+    .replace(/<row r="2"[\s\S]*?<\/row>/, "")
+    .replace(/<row r="3"[\s\S]*?<\/row>/, "");
+  assert.equal(sparseXml.includes('r="4"'), true);
+  assert.equal(sparseXml.includes('<row r="2"'), false);
+  const { zipSync } = await import("fflate");
+  const sparse = zipSync({ ...dense, [sheetPath]: new TextEncoder().encode(sparseXml) });
+
+  const files = attachments([["sparse.xlsx", XLSX, sparse]]);
+  const result = await convert(
+    {
+      operation: "convert_spreadsheet",
+      filename: "sparse",
+      targetFormat: "csv",
+      sources: [{ attachment: "att_1" }],
+    },
+    files
+  );
+  const lines = new TextDecoder()
+    .decode(result.bytes)
+    .replace(/^\uFEFF/, "")
+    .trimEnd()
+    .split("\r\n");
+  assert.deepEqual(lines, ["first", "", "", "fourth"]);
+  assert.equal(result.parts, '4 rows, 1 column from worksheet "Sheet1"');
+});
+
+test("the first row is written as it was read: no invented header, no trimming", async () => {
+  const files = attachments([
+    ["raw.csv", "text/csv", csvBytes(", padded ,\n1,2,3\n")],
+  ]);
+  const result = await convert(
+    {
+      operation: "convert_spreadsheet",
+      filename: "raw",
+      targetFormat: "xlsx",
+      sources: [{ attachment: "att_1" }],
+    },
+    files
+  );
+  const parts = unzipSync(result.bytes);
+  const everything = Object.values(parts)
+    .map((bytes) => new TextDecoder().decode(bytes))
+    .join("\n");
+  assert.equal(/Column \d/.test(everything), false);
+  assert.equal(/>c1<|>c3</.test(everything), false, "stand-in headers must not be written");
+  assert.match(everything, /> padded </);
+
+  const pdf = await convert(
+    {
+      operation: "convert_spreadsheet",
+      filename: "raw",
+      targetFormat: "pdf",
+      sources: [{ attachment: "att_1" }],
+    },
+    files
+  );
+  assert.equal(pdf.format, "pdf");
 });

@@ -1083,6 +1083,9 @@ export class GeneratedArtifactCollector {
       reason: string
     ): ArtifactToolReport => {
       const format = conversionFallbackFormat(spec);
+      // The rejection log has two buckets and the card has more: everything
+      // that is not "ask for less" is logged as a rejected specification,
+      // while the card below keeps the exact code.
       this.noteRejection(
         toolCallId,
         CONVERT_FILES_TOOL_NAME,
@@ -1114,6 +1117,32 @@ export class GeneratedArtifactCollector {
       GeneratedArtifactCollectorOptions["turnAttachments"]
     > = this.options.turnAttachments ?? new Map();
 
+    // The same instruction over different files is a different file, so the
+    // hash covers what each handle resolved to, not only the handle. Checked
+    // before the files are opened: a replayed call costs a hash, not a parse.
+    const specHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          kind: "fileConversion",
+          ...spec,
+          files: spec.sources.map((source) => {
+            const file = attachments.get(source.attachment);
+            return [source.attachment, file?.name, file?.bytes.byteLength];
+          }),
+        })
+      )
+      .digest("hex");
+    const already = this.seenSpecHashes.get(specHash);
+    if (already) {
+      return {
+        status: "unchanged",
+        filename: already.filename,
+        note:
+          "That exact conversion was already done for this answer. Do not call " +
+          "the tool again for it; just describe the file.",
+      };
+    }
+
     let prepared: PreparedConversion;
     try {
       prepared = await prepareFileConversion(spec, attachments);
@@ -1132,31 +1161,6 @@ export class GeneratedArtifactCollector {
 
     const format = prepared.format;
     const filename = sanitizeArtifactFilename(spec.filename, format);
-    // The same instruction over different files is a different file, so the
-    // hash covers what each handle resolved to, not only the handle.
-    const specHash = createHash("sha256")
-      .update(
-        JSON.stringify({
-          kind: "fileConversion",
-          ...spec,
-          filename,
-          files: spec.sources.map((source) => {
-            const file = attachments.get(source.attachment);
-            return [source.attachment, file?.name, file?.bytes.byteLength];
-          }),
-        })
-      )
-      .digest("hex");
-    const already = this.seenSpecHashes.get(specHash);
-    if (already) {
-      return {
-        status: "unchanged",
-        filename: already.filename,
-        note:
-          "That exact conversion was already done for this answer. Do not call " +
-          "the tool again for it; just describe the file.",
-      };
-    }
 
     let parts = "";
     return this.renderAndStore({

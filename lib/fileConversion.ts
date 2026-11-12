@@ -824,13 +824,19 @@ const prepareConvertImages = async (
  * not thank it for; they stay text. What is left is written as a number so a
  * converted workbook can be summed and a converted CSV is not guarded as if
  * "-5" were a formula.
+ *
+ * The shape alone is not enough: "999999999999999.99" has the shape and does
+ * not survive a double. So the value must also print back as exactly the text
+ * it was read from -- anything a number cannot hold, or would restyle
+ * ("1.50"), stays the text the user wrote.
  */
 const PLAIN_NUMBER = /^-?(0|[1-9]\d{0,14})(\.\d{1,10})?$/;
 
 const toCell = (value: string): ArtifactCellValue => {
-  const trimmed = value.trim();
-  if (trimmed === "") return null;
-  return PLAIN_NUMBER.test(trimmed) ? Number(trimmed) : value;
+  if (value === "") return null;
+  return PLAIN_NUMBER.test(value) && String(Number(value)) === value
+    ? Number(value)
+    : value;
 };
 
 /** Excel's rules for a worksheet name, applied to a name we did not choose. */
@@ -896,10 +902,10 @@ const prepareConvertSpreadsheet = async (
     );
   }
 
-  const headers = Array.from({ length: width }, (_, index) => {
-    const header = (table.grid[0][index] ?? "").trim();
-    return header || `Column ${index + 1}`;
-  });
+  // The first row goes where a header goes, because every table format here
+  // has one -- but it is written exactly as it was read. Whether it *is* a
+  // header is not this code's to decide, and a blank cell in it stays blank.
+  const firstRow = Array.from({ length: width }, (_, index) => table.grid[0][index] ?? "");
   const rows = table.grid
     .slice(1)
     .map((row) =>
@@ -907,14 +913,14 @@ const prepareConvertSpreadsheet = async (
     );
   const otherSheets = table.sheetNames.length > 1;
   const parts =
-    `${plural(rows.length, "row")}, ${plural(width, "column")}` +
+    `${plural(table.grid.length, "row")}, ${plural(width, "column")}` +
     (sourceFormat === "xlsx" ? ` from worksheet "${table.sheetName}"` : "") +
     (otherSheets
       ? ` (the workbook has ${table.sheetNames.length} worksheets; only this one was converted)`
       : "");
 
   if (target === "pdf") {
-    const numberColumns = headers
+    const numberColumns = firstRow
       .map((_, index) => index)
       .filter(
         (index) =>
@@ -928,7 +934,7 @@ const prepareConvertSpreadsheet = async (
       blocks: [
         {
           type: "table",
-          columns: headers,
+          columns: firstRow,
           rows,
           ...(numberColumns.length ? { pdfNumberColumns: numberColumns } : {}),
         },
@@ -949,20 +955,30 @@ const prepareConvertSpreadsheet = async (
     };
   }
 
+  // Admitted with stand-in headers, because the authoring schema requires a
+  // header to have text and a converted first row may not; every other rule
+  // (worksheet name, cell count, cell length) is the authoring one. The real
+  // first row is put back before anything is written, and the header styling
+  // is left off: the source did not say its first row was a header.
   const admission = admitWorkbookSpecSafely({
     filename: spec.filename,
     format: target,
+    styleHeader: false,
     worksheets: [
       {
         name: worksheetName(table.sheetName),
-        columns: headers.map((header) => ({ header })),
+        columns: firstRow.map((_, index) => ({ header: `c${index + 1}` })),
         rows,
+        freezeHeader: false,
       },
     ],
   });
   if (!admission.ok) {
     throw new FileConversionError("SPREADSHEET_UNREADABLE", admission.detail);
   }
+  admission.spec.worksheets[0].columns.forEach((column, index) => {
+    column.header = firstRow[index];
+  });
   return {
     format: target,
     render: async () => ({

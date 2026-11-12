@@ -296,9 +296,24 @@ const readSheetGrid = (
   const grid: string[][] = [];
 
   for (const rowMatch of xml.matchAll(
-    /<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g
+    /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g
   )) {
-    const body = rowMatch[1];
+    // A workbook may leave a blank row out of the file altogether and say
+    // where the next one is with `r`. A template batch skips blank rows
+    // anyway; a conversion must put them back, or row 4 arrives as row 2.
+    if (strictValueLength !== undefined) {
+      const rowNumber = Number(rowMatch[1].match(/\br="(\d+)"/)?.[1] ?? "0");
+      while (rowNumber > grid.length + 1) {
+        grid.push([]);
+        if (grid.length > maxRows + 1) {
+          throw new SpreadsheetDataError(
+            "DATA_TOO_MANY_ROWS",
+            `The data file has more than ${maxRows} data rows.`
+          );
+        }
+      }
+    }
+    const body = rowMatch[2];
     const cells: string[] = [];
     if (body) {
       for (const cellMatch of body.matchAll(
