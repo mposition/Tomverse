@@ -4,6 +4,8 @@ import { MCP_PROVIDERS, mcpProvider } from "@/lib/mcpProviderCatalog";
 export type PluginTool = { name: string; mode: "read" | "confirm"; inputSchema?: Record<string, unknown> };
 export type PluginConnection = { id: string; serverId: string; name: string; status: string; catalog: PluginTool[]; grants: PluginTool[]; version: number; scopes?: string[] };
 // `scopes` lists what a user may choose at connect time; absent means the server's scope is fixed.
+// Mirrors MCP_SCOPE_LIMITS in lib/mcpConnectorPolicy.ts (server-only); the server re-checks.
+export const PLUGIN_SCOPE_LIMITS = Object.freeze({ chosen: 64, chosenCharacters: 2_000 });
 export type PluginServer = { id: string; name: string; auth: "none" | "bearer" | "oauth"; origin: string; scopes?: string[]; defaultScopes?: string[] };
 export type PluginAction = { id: string; connectionId: string; toolName: string; state: string; arguments: unknown; expiresAt: string };
 export type PluginInventory = { enabled: boolean; servers: PluginServer[]; connections: PluginConnection[]; invocations: PluginAction[] };

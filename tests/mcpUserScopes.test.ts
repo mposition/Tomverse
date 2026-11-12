@@ -63,3 +63,8 @@ test("selectable scopes cannot coexist with a token bound or omit the default sc
   assert.equal(mcpServerSchema.safeParse({ ...base, oauth: { ...base.oauth, scope: "", tokenScope: "read", selectableScopes: ["read"] } }).success, false);
   assert.equal(mcpServerSchema.safeParse({ ...base, oauth: { ...base.oauth, selectableScopes: ["read", "bad scope"] } }).success, false);
 });
+
+test("the connect dialog enforces the same choice limits as the server", async () => {
+  const { PLUGIN_SCOPE_LIMITS } = await import("@/lib/mcpConnectorClientContract");
+  assert.deepEqual(PLUGIN_SCOPE_LIMITS, { chosen: MCP_SCOPE_LIMITS.chosen, chosenCharacters: MCP_SCOPE_LIMITS.chosenCharacters });
+});
