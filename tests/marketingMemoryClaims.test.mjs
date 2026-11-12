@@ -72,6 +72,15 @@ test("the short ad disclosure (docs/policy/external-conversation-import-and-memo
     for (const id of ["import-continue", "memory"]) {
         assert.deepEqual(features.find((feature) => feature.id === id)?.disclosure, MEMORY_MARKETING_SHORT_DISCLOSURE, id);
     }
+    // The list the job reads since 2026-11-12 is seeded with the same words, and
+    // Admin cannot change them (tests/marketingFeatureFacts.test.mjs pins that the
+    // edit schemas refuse `disclosure`).
+    const seed = readFileSync(join(import.meta.dirname, "..", "prisma", "migrations", "20261112120000_marketing_feature_facts", "migration.sql"), "utf8");
+    const words = `'${JSON.stringify(MEMORY_MARKETING_SHORT_DISCLOSURE).replaceAll("'", "''")}'::jsonb`;
+    for (const id of ["import-continue", "memory"]) {
+        const line = seed.split(/\r?\n/u).find((entry) => entry.trimStart().startsWith(`('${id}', `));
+        assert.ok(line?.includes(words), id);
+    }
 });
 
 /**

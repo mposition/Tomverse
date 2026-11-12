@@ -7846,6 +7846,30 @@ model MarketingAsset {
   @@index([status])
 }
 
+/// What a marketing ad may say about one Tomverse feature (owner request
+/// 2026-11-12): the facts the box's Higgsfield image job reads instead of
+/// tools/marketing-video/features.json, which stays as its fallback and the
+/// seed. Edited in Admin › Marketing › Settings › Ad facts, each change through
+/// the audit chain. `hold` set means no card is made about it or mentions it.
+/// `disclosure` is not editable there (docs/policy/external-conversation-import-and-memory.md §17.1 short disclosure). Who changed a
+/// row is in its audit entry: no user column, no relation to AdminAuditLog, so
+/// the watched webhook schema does not move.
+model MarketingFeatureFact {
+  id              String   @id
+  position        Int
+  what            String
+  models          String[] @default([])
+  realExample     Json?
+  copy            String?
+  disclosure      Json?
+  source          String
+  hold            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([position])
+}
+
 /// The analysis behind one marketing brief report (operator decision
 /// 2026-11-01): written in the brief's transaction, read by a person in the
 /// Reports tab, never given to A5. `briefReportId` is a plain column rather
