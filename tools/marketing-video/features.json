@@ -132,9 +132,13 @@
     },
     {
       "id": "photo-edit",
-      "what": "Attach a photo in Chat and ask for an edit.",
-      "source": "#3118 (chat photo edit)",
-      "hold": "Not live: IMAGE_EDIT_ENABLED=true on the Tomverse web service and a redeploy, with feature.imageGenerationEnabled and Admin › Routing image triage on; the edit surcharge (+90 credits on GPT Image 2, +10 Grok, 0 Nano Banana) has no recorded price approval yet."
+      "what": "Sign in, attach a photo in Chat and ask in plain words to change it (remove an object, change the background, adjust a detail); an image model edits the photo and the result comes back in the chat. Editing uses credits, shown before it runs.",
+      "source": "#3118, #3134 (chat photo edit); IMAGE_EDIT_ENABLED=true on the production web service 2026-11-12 with the owner's price approval (docs/policy/image-generation.md)",
+      "models": [
+        "GPT Image 2",
+        "Nano Banana 2",
+        "Grok Imagine"
+      ]
     }
   ]
 }
