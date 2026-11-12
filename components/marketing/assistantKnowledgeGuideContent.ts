@@ -122,7 +122,7 @@ export const assistantKnowledgeGuideContent: Record<Language, AssistantKnowledge
         "body": "답변 방식과 파일을 정한 뒤 새 버전으로 저장합니다.",
         "screenTitle": "AI 어시스턴트 편집",
         "screenHint": "예: 원문에 있는 일정과 준비물만 정리하고, 없는 정보는 미정으로 표시하며 근거 문장을 붙여 주세요.",
-        "targetLabel": "파일 추가 → 지시문과 모델 저장",
+        "targetLabel": "파일 추가 → 지시문·모델·지식 파일 저장",
         "result": "처리가 끝난 파일이 현재 버전의 Knowledge로 선택됩니다."
       },
       {
@@ -274,7 +274,7 @@ export const assistantKnowledgeGuideContent: Record<Language, AssistantKnowledge
         "body": "Set the response style, choose a file, and save a new version.",
         "screenTitle": "Edit AI Assistant",
         "screenHint": "Example: list only dates and items in the source, mark missing information as unknown and quote supporting sentences.",
-        "targetLabel": "Add file → Save instructions and models",
+        "targetLabel": "Add a file → Save instructions, models and files",
         "result": "A processed file is selected as Knowledge for the current version."
       },
       {
@@ -426,7 +426,7 @@ export const assistantKnowledgeGuideContent: Record<Language, AssistantKnowledge
         "body": "设置回答方式、选择文件，然后保存新修订。",
         "screenTitle": "编辑 AI 配置",
         "screenHint": "示例：只整理原文中的日期与准备物品，缺失信息标为未定并附依据句子。",
-        "targetLabel": "添加文件 → 保存指令与模型",
+        "targetLabel": "添加文件 → 保存指令、模型和知识文件",
         "result": "处理完成的文件会被选为当前修订的 Knowledge。"
       },
       {
@@ -578,7 +578,7 @@ export const assistantKnowledgeGuideContent: Record<Language, AssistantKnowledge
         "body": "設定回答方式、選擇檔案，然後儲存新的修訂版本。",
         "screenTitle": "編輯 AI 設定",
         "screenHint": "範例：只整理原文中的日期與準備物品，缺少的資訊標為未定，並附上依據句子。",
-        "targetLabel": "新增檔案 → 儲存指令與模型",
+        "targetLabel": "新增檔案 → 儲存指令、模型和知識檔案",
         "result": "處理完成的檔案會被選為目前修訂版本的 Knowledge。"
       },
       {
@@ -784,7 +784,7 @@ export const assistantKnowledgeGuideContent: Record<Language, AssistantKnowledge
         "body": "Rédigez les instructions, choisissez un fichier prêt et enregistrez une version.",
         "screenTitle": "Modifier l’assistant d’IA",
         "screenHint": "Exemple : listez uniquement dates et objets de la source, signalez l’inconnu et citez les phrases justificatives.",
-        "targetLabel": "Ajouter un fichier → Enregistrer instructions et modèles",
+        "targetLabel": "Ajouter un fichier → Enregistrer les instructions, les modèles et les fichiers",
         "result": "Le fichier Knowledge choisi est fixé à la version enregistrée."
       },
       {
@@ -936,7 +936,7 @@ export const assistantKnowledgeGuideContent: Record<Language, AssistantKnowledge
         "body": "Schreiben Sie Anweisungen, wählen Sie eine bereite Datei und speichern Sie eine Version.",
         "screenTitle": "KI-Assistent bearbeiten",
         "screenHint": "Beispiel: Nur Termine und Mitbringsel aus der Quelle nennen, Fehlendes als offen markieren und Belegsätze zitieren.",
-        "targetLabel": "Datei hinzufügen → Anweisungen und Modelle speichern",
+        "targetLabel": "Datei hinzufügen → Anweisungen, Modelle und Dateien speichern",
         "result": "Die gewählte Knowledge-Datei wird an die gespeicherte Version gebunden."
       },
       {
@@ -1088,7 +1088,7 @@ export const assistantKnowledgeGuideContent: Record<Language, AssistantKnowledge
         "body": "Escribe las instrucciones, elige un archivo listo y guarda una nueva versión.",
         "screenTitle": "Editar asistente de IA",
         "screenHint": "Ejemplo: indica solo fechas y objetos presentes, marca lo ausente como pendiente y cita las frases de apoyo.",
-        "targetLabel": "Añadir archivo → Guardar instrucciones y modelos",
+        "targetLabel": "Añadir un archivo → Guardar instrucciones, modelos y archivos",
         "result": "El archivo elegido queda fijado a la versión guardada."
       },
       {
@@ -1240,7 +1240,7 @@ export const assistantKnowledgeGuideContent: Record<Language, AssistantKnowledge
         "body": "Escreva as instruções, escolha um arquivo pronto e salve uma nova versão.",
         "screenTitle": "Editar assistente de IA",
         "screenHint": "Exemplo: liste apenas datas e itens presentes, marque o ausente como indefinido e cite as frases de apoio.",
-        "targetLabel": "Adicionar arquivo → Salvar instruções e modelos",
+        "targetLabel": "Adicionar um ficheiro → Guardar instruções, modelos e ficheiros",
         "result": "O arquivo escolhido fica vinculado à versão salva."
       },
       {
