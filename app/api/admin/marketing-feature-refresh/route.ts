@@ -10,7 +10,7 @@ import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
-import { marketingFeatureRefreshFromEnv } from "@/lib/marketingFeatureFacts";
+import { marketingFeatureRefreshOn, runMarketingFeatureRefresh } from "@/lib/marketingFeatureFacts";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -20,10 +20,12 @@ import { prisma } from "@/lib/prisma";
  * come back to the screen, and only an operator's save (PATCH or POST on the
  * list) stores one, through the audit chain.
  *
- * Paid. On by default on the app's default model (owner decision in chat,
- * 2026-11-12); MARKETING_FEATURE_REFRESH_LLM_MODEL_ID=off turns it off. It
- * runs only on an operator's press and takes the same marketing:write and
- * recent sign-in as a save, with a small rate limit.
+ * Paid, through the marketing LLM cost ledger: the call is reserved against
+ * the monthly cap before it is sent and settled after, on the marketing model
+ * the operator chose (docs/policy/marketing-automation.md §5). On by default
+ * (owner decision in chat, 2026-11-12); MARKETING_FEATURE_REFRESH=off turns it
+ * off. It runs only on an operator's press and takes the same marketing:write
+ * and recent sign-in as a save, with a small rate limit.
  */
 export async function POST(req: Request) {
   try {
@@ -46,25 +48,41 @@ export async function POST(req: Request) {
         { status: 409 },
       );
     }
-    const refresh = await marketingFeatureRefreshFromEnv();
-    if (!refresh) {
+    if (!marketingFeatureRefreshOn()) {
       return NextResponse.json(
-        { error: "The refresh is off, or its model is not enabled.", code: "FEATURE_REFRESH_OFF" },
+        { error: "The refresh is turned off.", code: "FEATURE_REFRESH_OFF" },
         { status: 409 },
       );
     }
-    // Counted only for a press that will call the model.
+    // Counted only for a press that may call the model.
     await consumeApiRateLimit(req, session.user.id, "admin-marketing-feature-facts-refresh", { minute: 2, day: 20 });
-    const result = await refresh(prisma);
-    // The call is paid, so who pressed it is on the chain even though nothing is stored.
+    const result = await runMarketingFeatureRefresh(prisma);
+    // Who pressed it is on the chain even though nothing is stored; the
+    // ledger's own rows record what the call cost.
     await writeAdminAuditLog({
       session,
       request: req,
       action: "marketing_feature_fact.refresh",
       targetType: "MarketingFeatureFact",
       summary: "Ran the ad facts refresh (a paid model call; proposals only, nothing stored).",
+      metadata: { outcome: result.status, ...(result.status === "refused" ? { code: result.code } : {}) },
     });
-    return NextResponse.json({ ok: true, result }, { headers: { "cache-control": "private, no-store" } });
+    if (result.status === "refused") {
+      return NextResponse.json(
+        { error: `The cost ledger refused the call (${result.code}).`, code: "FEATURE_REFRESH_REFUSED", reason: result.code },
+        { status: 409 },
+      );
+    }
+    if (result.status !== "ok") {
+      return NextResponse.json(
+        { error: "The model call did not settle; nothing was proposed.", code: "FEATURE_REFRESH_FAILED" },
+        { status: 502 },
+      );
+    }
+    return NextResponse.json(
+      { ok: true, result: { proposals: result.proposals, dropped: result.dropped, modelId: result.modelId } },
+      { headers: { "cache-control": "private, no-store" } },
+    );
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

@@ -37,6 +37,23 @@ const seed = (): Row[] => [
   { id: "plugins", position: 1, what: "Plugins.", models: [], realExample: null, copy: null, disclosure: null, source: "/plugins", hold: "Not live.", updatedAt: new Date("2026-11-12T00:00:00.000Z") },
 ];
 
+/** A valid marketing price pin (as tests/marketingLlmClientCore.test.mjs writes one). */
+const PIN = {
+  model: "gpt-6-luna-api",
+  tokenizerFamily: "o200k",
+  projectId: "key-scoped",
+  region: "us",
+  tiers: ["default"],
+  contextWindowTokens: 128_000,
+  worstInputMicroUsdPerMillion: 800_000,
+  worstOutputMicroUsdPerMillion: 3_200_000,
+  maxOutputTokens: 4_096,
+  priceVersion: "fixture-v1",
+  verifiedAt: "2026-10-01T00:00:00.000Z",
+  expiresAt: "2099-12-30T00:00:00.000Z",
+  source: "https://example.invalid/pricing",
+};
+
 const world = {
   session: { user: { id: "admin-1" } } as { user: { id: string } } | null,
   admin: true,
@@ -44,9 +61,14 @@ const world = {
   recent: true,
   rows: seed(),
   writes: 0,
-  model: { id: "gpt-6-luna" } as { id: string } | null,
+  /** The marketing LLM model the operator chose (marketing.llmSettings). */
+  settingsModel: PIN.model as string | null,
   modelAnswer: { proposals: [] } as unknown,
   prompts: [] as string[],
+  maxOutputTokens: [] as number[],
+  /** Each budget action the refresh sent, with its fields. */
+  budget: [] as Array<{ action: string; fields: Record<string, unknown> }>,
+  reserveRefusal: null as string | null,
 };
 const reset = () => {
   world.session = { user: { id: "admin-1" } };
@@ -55,9 +77,12 @@ const reset = () => {
   world.recent = true;
   world.rows = seed();
   world.writes = 0;
-  world.model = { id: "gpt-6-luna" };
+  world.settingsModel = PIN.model;
   world.modelAnswer = { proposals: [] };
   world.prompts = [];
+  world.maxOutputTokens = [];
+  world.budget = [];
+  world.reserveRefusal = null;
 };
 
 const pick = (row: Row) => ({ ...row });
@@ -86,7 +111,11 @@ const table = {
 };
 const prisma = {
   marketingFeatureFact: table,
-  appSetting: { findMany: async () => [{ key: "feature.assistantProfiles", value: "true" }] },
+  appSetting: {
+    findMany: async () => [{ key: "feature.assistantProfiles", value: "true" }],
+    findUnique: async ({ where }: { where: { key: string } }) =>
+      where.key === "marketing.llmSettings" ? { value: JSON.stringify({ model: world.settingsModel, monthlyUsdCap: "20" }) } : null,
+  },
 };
 
 class StepUpRequired extends Error {}
@@ -137,13 +166,36 @@ const install = () => {
     },
   });
   mock.module(mod("lib/prisma.ts"), { namedExports: { prisma } });
-  mock.module(mod("lib/modelRegistry.ts"), { namedExports: { getEnabledRuntimeModel: async () => world.model } });
+  mock.module(mod("lib/modelRegistry.ts"), {
+    namedExports: { getRuntimeModels: async () => [{ id: "gpt-6-luna", enabled: true, provider: "openai", apiModel: PIN.model }] },
+  });
+  mock.module(mod("lib/marketingLlmModelCatalog.ts"), { namedExports: { marketingLlmCatalogPins: async () => [PIN] } });
+  // The ledger's own actions are tested with the store in
+  // tests/server-contract/marketing-llm-budget-in-process-port.test.ts; here
+  // the port records what the refresh sent and answers as the ledger would.
+  mock.module(mod("lib/marketingLlmBudgetRequest.ts"), {
+    namedExports: {
+      marketingLlmBudgetInProcessPort: (_prisma: unknown, budget: { killSwitchOn: boolean }) =>
+        async (action: string, fields: Record<string, unknown>) => {
+          world.budget.push({ action, fields });
+          if (action === "reserve") {
+            if (budget.killSwitchOn) return { httpStatus: 200, body: { status: "refused", code: "kill_switch" } };
+            if (world.reserveRefusal) return { httpStatus: 200, body: { status: "refused", code: world.reserveRefusal } };
+            return { httpStatus: 200, body: { status: "ok", callId: "c1", reservedMicroUsd: 1000 } };
+          }
+          if (action === "dispatch") return { httpStatus: 200, body: { status: "ok", firstConsumption: true } };
+          if (action === "settle") return { httpStatus: 200, body: { status: "ok", state: "settled" } };
+          return { httpStatus: 200, body: { status: "ok" } };
+        },
+    },
+  });
   mock.module(mod("lib/activeAiModel.ts"), { namedExports: { getActiveAiModel: (model: unknown) => model } });
   mock.module("ai", {
     namedExports: {
-      generateText: async ({ prompt }: { prompt: string }) => {
+      generateText: async ({ prompt, maxOutputTokens }: { prompt: string; maxOutputTokens: number }) => {
         world.prompts.push(prompt);
-        return { output: world.modelAnswer, usage: { inputTokens: 1, outputTokens: 1 } };
+        world.maxOutputTokens.push(maxOutputTokens);
+        return { output: world.modelAnswer, usage: { inputTokens: 1200, outputTokens: 300 } };
       },
       jsonSchema: (schema: unknown) => schema,
       Output: { object: (value: unknown) => value },
@@ -161,14 +213,17 @@ const spec = async (bucket: string, method: "POST" | "PATCH") => {
   return specs.get(bucket)!;
 };
 
-test("the console offers the refresh on the app's default model unless it is turned off", async () => {
+test("the refresh is on unless turned off, on the marketing model the operator chose", async () => {
   reset();
   install();
-  const { marketingFeatureRefreshModelId } = await import(mod("lib/marketingFeatureFacts.ts"));
+  const { marketingFeatureRefreshModel, marketingFeatureRefreshOn } = await import(mod("lib/marketingFeatureFacts.ts"));
   // On by default (owner decision 2026-11-12).
-  assert.equal(marketingFeatureRefreshModelId({}), "gpt-6-luna");
-  assert.equal(marketingFeatureRefreshModelId({ MARKETING_FEATURE_REFRESH_LLM_MODEL_ID: "off" }), null);
-  assert.equal(marketingFeatureRefreshModelId({ MARKETING_FEATURE_REFRESH_LLM_MODEL_ID: "claude-haiku-5-5" }), "claude-haiku-5-5");
+  assert.equal(marketingFeatureRefreshOn({}), true);
+  assert.equal(marketingFeatureRefreshOn({ MARKETING_FEATURE_REFRESH: "off" }), false);
+  assert.equal(await marketingFeatureRefreshModel(prisma, {}), PIN.model);
+  assert.equal(await marketingFeatureRefreshModel(prisma, { MARKETING_FEATURE_REFRESH: "off" }), null);
+  world.settingsModel = null;
+  assert.equal(await marketingFeatureRefreshModel(prisma, {}), null);
 });
 
 test("a change is the audited mutation of the row the screen saw, and a stale screen is refused", async () => {
@@ -224,7 +279,7 @@ test("the refresh needs marketing write and a recent sign-in", async () => {
   assert.equal(world.prompts.length, 0, "no model call before the checks pass");
 });
 
-test("the refresh proposes from the site and saves nothing", async () => {
+test("the refresh reserves, calls once and settles in the marketing ledger, proposes from the site and saves nothing", async () => {
   reset();
   world.modelAnswer = {
     proposals: [
@@ -237,8 +292,15 @@ test("the refresh proposes from the site and saves nothing", async () => {
   const { result } = await response.json();
   assert.deepEqual(result.proposals.map((p: { id: string }) => p.id), ["plugins"]);
   assert.equal(result.dropped, 1);
-  assert.equal(result.modelId, "gpt-6-luna");
+  assert.equal(result.modelId, PIN.model);
   assert.equal(world.writes, 0, "a proposal is not a save");
+  // The cost ledger: reserved under its own purpose before the call, settled after with the reported tokens.
+  assert.deepEqual(world.budget.map((entry) => entry.action), ["reserve", "dispatch", "settle"]);
+  assert.equal(world.budget[0].fields.purpose, "feature_refresh");
+  assert.equal(world.budget[0].fields.model, PIN.model);
+  assert.equal(world.budget[2].fields.reportedInputTokens, 1200);
+  assert.equal(world.budget[2].fields.reportedOutputTokens, 300);
+  assert.deepEqual(world.maxOutputTokens, [PIN.maxOutputTokens], "the output cap the reservation priced");
   assert.equal(world.rows[1].hold, "Not live.");
   // It read the FAQ, the help centre, the claims and the switches.
   const prompt = world.prompts[0];
@@ -247,12 +309,35 @@ test("the refresh proposes from the site and saves nothing", async () => {
   }
 });
 
-test("the refresh is off when its model is turned off or not enabled", async () => {
+test("a refusal by the ledger or a missing model sends nothing", async () => {
   reset();
-  world.model = null;
-  const response = await press();
+  world.reserveRefusal = "budget_exhausted";
+  let response = await press();
   assert.equal(response.status, 409);
-  assert.equal((await response.json()).code, "FEATURE_REFRESH_OFF");
+  assert.deepEqual(await response.json(), {
+    error: "The cost ledger refused the call (budget_exhausted).",
+    code: "FEATURE_REFRESH_REFUSED",
+    reason: "budget_exhausted",
+  });
+  assert.equal(world.prompts.length, 0, "no model call past a refused reservation");
+
+  reset();
+  world.settingsModel = null;
+  response = await press();
+  assert.equal((await response.json()).reason, "model_not_selected");
+  assert.equal(world.budget.length, 0);
+
+  reset();
+  const saved = process.env.MARKETING_FEATURE_REFRESH;
+  process.env.MARKETING_FEATURE_REFRESH = "off";
+  try {
+    response = await press();
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "FEATURE_REFRESH_OFF");
+  } finally {
+    if (saved === undefined) delete process.env.MARKETING_FEATURE_REFRESH;
+    else process.env.MARKETING_FEATURE_REFRESH = saved;
+  }
 });
 
 test("the kill switch stops the refresh before any model call", async () => {

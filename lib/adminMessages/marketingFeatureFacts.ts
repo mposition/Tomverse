@@ -27,9 +27,9 @@ export const adminMarketingFeatureFactsMessages = defineAdminMessages({
     saved: "Saved. The next box run uses it.",
     refresh: "Refresh from the site",
     refreshing: "Reading the FAQ, help centre, claims and switches…",
-    refreshOff: "Refresh is off (MARKETING_FEATURE_REFRESH_LLM_MODEL_ID=off) or its model is not enabled.",
+    refreshOff: "Refresh is off (MARKETING_FEATURE_REFRESH=off), or no marketing LLM model is chosen in Settings.",
     refreshNote: (model: string) =>
-      `One paid call on ${model} proposes changes; nothing is saved until you open a proposal and save it.`,
+      `One paid call on ${model}, counted against the marketing LLM monthly cap, proposes changes; nothing is saved until you open a proposal and save it.`,
     proposals: "Proposals",
     noProposals: "No change proposed.",
     dropped: (count: number) => `${count} proposal(s) did not pass the field checks and are not shown.`,
@@ -64,9 +64,9 @@ export const adminMarketingFeatureFactsMessages = defineAdminMessages({
     saved: "저장했어요. 다음 박스 실행부터 씁니다.",
     refresh: "사이트에서 새로고침",
     refreshing: "FAQ, 도움말, 마케팅 주장, 기능 스위치를 읽는 중…",
-    refreshOff: "새로고침이 꺼져 있거나(MARKETING_FEATURE_REFRESH_LLM_MODEL_ID=off) 모델이 켜져 있지 않아요.",
+    refreshOff: "새로고침이 꺼져 있거나(MARKETING_FEATURE_REFRESH=off) 설정에서 마케팅 LLM 모델을 고르지 않았어요.",
     refreshNote: (model: string) =>
-      `${model} 유료 호출 한 번으로 변경 제안만 만듭니다. 제안을 열어 저장하기 전에는 아무것도 바뀌지 않아요.`,
+      `${model} 유료 호출 한 번(마케팅 LLM 월 상한에 포함)으로 변경 제안만 만듭니다. 제안을 열어 저장하기 전에는 아무것도 바뀌지 않아요.`,
     proposals: "제안",
     noProposals: "바꿀 것이 없다고 제안했어요.",
     dropped: (count: number) => `필드 검사를 통과하지 못한 제안 ${count}개는 보이지 않아요.`,

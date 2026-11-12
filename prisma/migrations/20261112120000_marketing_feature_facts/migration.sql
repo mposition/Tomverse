@@ -38,3 +38,27 @@ INSERT INTO "MarketingFeatureFact" ("id", "position", "what", "models", "realExa
     ('voice-input', 15, 'Speak into the microphone in the message box and your words become text.', ARRAY[]::TEXT[], NULL, NULL, NULL, 'locales/en.ts voice input copy', 'Not live: set VOICE_PROVIDER_SECONDS_PER_DAY and _PER_MONTH on the web service first (without them /api/ready fails), then the feature.voiceInputEnabled row to "true" (docs/policy/voice-input.md; no Admin toggle).', CURRENT_TIMESTAMP),
     ('prompt-refiner', 16, 'Question-refinement suggestions: when offered, Tomverse suggests a clearer version of your question, and you choose whether to apply it.', ARRAY[]::TEXT[], NULL, NULL, NULL, 'FAQ ''Are question-refinement suggestions applied automatically?''', 'Not live: the owner activates it for the exact deployment in Admin › /admin/prompt-refiner-shadow (re-auth, audited), as docs/ui-contracts/prompt-refiner-suggestion.md requires.', CURRENT_TIMESTAMP),
     ('photo-edit', 17, 'Sign in, attach a photo in Chat and ask in plain words to change it (remove an object, change the background, adjust a detail); an image model edits the photo and the result comes back in the chat. Editing uses credits, shown before it runs.', ARRAY['GPT Image 2', 'Nano Banana 2', 'Grok Imagine']::TEXT[], NULL, NULL, NULL, '#3118, #3134 (chat photo edit); IMAGE_EDIT_ENABLED=true on the production web service 2026-11-12 with the owner''s price approval (docs/policy/image-generation.md)', NULL, CURRENT_TIMESTAMP);
+
+-- Admin's ad facts refresh spends through the marketing LLM cost ledger under
+-- its own `feature_refresh` purpose (docs/policy/marketing-automation.md §5,
+-- owner 2026-11-12). The list mirrors MARKETING_LLM_PURPOSES in
+-- lib/marketingLlmBudgetCore.ts. Additive: every purpose
+-- 20261102110000_marketing_llm_seo_purpose allowed is still allowed and every
+-- other predicate is unchanged, so no existing row can fail the validation. One
+-- ALTER TABLE holds the DROP and the ADD, so the constraint is never absent.
+ALTER TABLE "MarketingLlmCall"
+    DROP CONSTRAINT "MarketingLlmCall_shape_check",
+    ADD CONSTRAINT "MarketingLlmCall_shape_check"
+        CHECK ("generatorRunId" ~ '^[A-Za-z0-9_-]{1,64}$'
+            AND "purpose" IN ('draft', 'market_intel', 'brief', 'comment_triage', 'seo', 'feature_refresh')
+            AND "provider" = 'openai'
+            AND "model" ~ '^[A-Za-z0-9._:/-]{1,128}$'
+            AND jsonb_typeof("configSnapshot") = 'object'
+            AND octet_length("configSnapshot"::text) <= 4096
+            AND "reservedInputTokens" BETWEEN 1 AND 10000000
+            AND "reservedOutputTokens" BETWEEN 1 AND 100000
+            AND "reservedMicroUsd" BETWEEN 1 AND 100000000
+            AND ("reportedModel" IS NULL OR "reportedModel" ~ '^[A-Za-z0-9._:/-]{1,128}$')
+            AND ("reportedServiceTier" IS NULL OR "reportedServiceTier" ~ '^[a-z_]{1,32}$')
+            AND ("reportedInputTokens" IS NULL OR "reportedInputTokens" >= 0)
+            AND ("reportedOutputTokens" IS NULL OR "reportedOutputTokens" >= 0));

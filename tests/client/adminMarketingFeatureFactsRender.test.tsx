@@ -44,7 +44,7 @@ test("a writer gets edit, hold controls, add and the refresh, which names its pa
   assert.match(html, />Release hold</);
   assert.match(html, /Add a feature/);
   assert.match(html, /Refresh from the site/);
-  assert.match(html, /One paid call on gpt-6-luna proposes changes; nothing is saved until you open a proposal and save it\./);
+  assert.match(html, /One paid call on gpt-6-luna, counted against the marketing LLM monthly cap, proposes changes; nothing is saved until you open a proposal and save it\./);
 });
 
 test("the refresh turned off is drawn disabled with its reason", () => {

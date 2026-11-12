@@ -19,7 +19,7 @@ import {
 import { authOptions } from "@/lib/auth";
 import { readMarketingAgentOverview } from "@/lib/marketingAgentOverviewRead";
 import { readMarketingConsole } from "@/lib/marketingConsoleRead";
-import { marketingFeatureRefreshModelId, readMarketingFeatureFacts } from "@/lib/marketingFeatureFacts";
+import { marketingFeatureRefreshModel, readMarketingFeatureFacts } from "@/lib/marketingFeatureFacts";
 import { prisma } from "@/lib/prisma";
 import type { MarketingConsoleSection } from "@/lib/marketingConsoleSections";
 
@@ -84,7 +84,7 @@ export default async function AdminMarketingPage({
   // The Overview's extra reads (posts per day, the schedule, recent runs) are
   // read-only and load for that tab alone; each part is null when unreadable.
   const canWrite = hasAdminPermission(session, "marketing:write");
-  const [initial, agent, facts] = await Promise.all([
+  const [initial, agent, facts, refreshModelId] = await Promise.all([
     readMarketingConsole(section, canWrite),
     tab.id === "overview" ? readMarketingAgentOverview() : Promise.resolve(undefined),
     // Unreadable is null, drawn as unavailable, never as an empty list.
@@ -93,6 +93,8 @@ export default async function AdminMarketingPage({
           .then((rows) => rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() })))
           .catch(() => null)
       : Promise.resolve(null),
+    // The marketing model the refresh would spend on, or null (off, none chosen, unreadable).
+    adFacts ? marketingFeatureRefreshModel(prisma).catch(() => null) : Promise.resolve(null),
   ]);
 
   // What each tab holds, from the overview the loader already read: the
@@ -178,7 +180,7 @@ export default async function AdminMarketingPage({
         <AdminMarketingFeatureFactsPanel
           initial={facts}
           canWrite={canWrite}
-          refreshModelId={marketingFeatureRefreshModelId()}
+          refreshModelId={refreshModelId}
         />
       ) : null}
     </div>
