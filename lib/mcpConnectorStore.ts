@@ -14,8 +14,15 @@ import { MCP_LIMITS, McpConnectorError, isCustomMcpServerId, mcpCustomServersEna
 import { assertPublicCustomMcpUrl, customMcpServerName, customMcpServerPolicy, discoverCustomOAuth, listCustomMcpServers, mcpServerFor, normalizeCustomMcpUrl,
   type customMcpServerInputSchema } from "@/lib/mcpCustomServers";
 
-/** Digest of the policy a connection or flow runs under (default scope unless `scopes` is given). */
+/**
+ * Digest of the policy a connection or flow runs under (default scope unless `scopes` is given).
+ * It fingerprints public policy (URLs, client id, the env var *name* of a client secret, scopes) so a stored
+ * connection can be compared with the current policy; no secret or password is in it, and it is never
+ * authenticated against. CodeQL reads the `oauth` field as a password. The algorithm must stay SHA-256:
+ * changing it would change every stored `policyDigest` and disconnect every existing connection.
+ */
 export const mcpPolicyDigest = (server: McpServerPolicy, scopes?: readonly string[]) =>
+  // codeql[js/insufficient-password-hash]
   createHash("sha256").update(JSON.stringify(mcpScopedServer(server, scopes))).digest("hex");
 export const encryptMcpSecret = (value: string) => {
   if (value.startsWith("enc:v1:")) throw new McpConnectorError("invalid_credential");
