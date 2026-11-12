@@ -463,3 +463,67 @@ test("a set of switch changes is written and audited together", async () => {
     ]);
     assert.equal((await readSemanticRetrievalSwitches()).knowledgeRerank, false);
 });
+
+/* ------------------------------------------ the lexical query is untouched */
+
+test("extra candidates never push a lexical one out, and a failed rerank restores the lexical result", async () => {
+    const user = await createUser();
+    // More relevance-gated memories than the candidate limit, all outranking
+    // the one that actually matches the request and none sharing a term with it.
+    await prisma.memoryItem.createMany({
+        data: Array.from({ length: 420 }, (_, index) => {
+            const statement = `사용자는 주제 ${index}번 자료를 정리했다`;
+            return {
+                userId: user.id,
+                kind: "project",
+                statement,
+                status: "active",
+                confidence: 0.9,
+                importance: 5,
+                approvedAt: new Date("2026-11-01T00:00:00.000Z"),
+                searchTerms: memoryRetrievalTerms(statement),
+                retrievalVersion: MEMORY_RETRIEVAL_VERSION,
+            };
+        }),
+    });
+    const match = await createMemory(user.id, "preference", "사용자는 커피를 자주 마신다");
+    const input = { userId: user.id, query: COFFEE_QUESTION, now: NOW };
+
+    const lexical = await retrieveMemoryContext(input);
+    assert.deepEqual(
+        lexical.selected.map((entry) => entry.memory.id),
+        [match.id]
+    );
+
+    // On, and the provider fails: the same selection, the same hash.
+    await turnOn("memoryRerank");
+    provider.state.failing = true;
+    const fallback = await retrieveMemoryContext(input);
+    assert.equal(fallback.algorithmVersion, 2);
+    assert.equal(fallback.resultHash, lexical.resultHash);
+
+    // On, and the provider answers: the lexical match is still a candidate.
+    provider.state.failing = false;
+    provider.state.rerankScore = (_query, document) => (document.includes("커피") ? 0.9 : 0);
+    const ranked = await retrieveMemoryContext({ ...input, query: `${COFFEE_QUESTION} 부탁해` });
+    assert.equal(ranked.algorithmVersion, 3);
+    assert.deepEqual(
+        ranked.selected.map((entry) => entry.memory.id),
+        [match.id]
+    );
+    // One search unit's worth of statements at most, the lexical match among them.
+    const sent = provider.state.calls.at(-1)?.body.documents as string[];
+    assert.ok(sent.length <= 100);
+    assert.ok(sent.includes("사용자는 커피를 자주 마신다"));
+});
+
+test("a request with no usable term asks the reranker nothing", async () => {
+    const user = await createUser();
+    await createMemory(user.id, "preference", CAFFEINE);
+    await turnOn("memoryRerank");
+
+    const result = await retrieveMemoryContext({ userId: user.id, query: "?!", now: NOW });
+
+    assert.equal(provider.state.calls.length, 0);
+    assert.equal(result.algorithmVersion, 2);
+});

@@ -652,7 +652,7 @@ Tomverse 밖으로 나가기 때문입니다.
 | `knowledgeRerank` | lexical·의미 후보를 질문과의 관련도로 다시 정렬 | 질문, 후보 chunk 원문(최대 100개) |
 | `knowledgeEmbed` | chunk마다 vector를 저장하고 질문과 가까운 chunk를 후보에 추가 | chunk 원문(색인 시), 질문 |
 | `knowledgeImagePages` | PDF의 텍스트 없는 페이지를 이미지로 색인 | 그 페이지의 렌더링 이미지 |
-| `memoryRerank` | 관련도로 걸러지는 memory를 질문과의 관련도로 선택 | 질문, 해당 memory statement(최대 100개) |
+| `memoryRerank` | 관련도로 걸러지는 memory를 질문과의 관련도로 선택. lexical 후보 조회와 그 상한은 그대로 두고, term이 겹치지 않는 최근 memory를 별도 조회로 더합니다(실패 시 더한 것은 버림) | 질문, 해당 memory statement(최대 100개) |
 | `memoryDuplicates` | 추출 후보가 기존 memory의 다른 표현인지 판정 | 후보 statement, 계정의 active memory statement |
 
 **켜기 전 조건** (스위치를 켜는 승인이 확인하는 것):
@@ -693,8 +693,10 @@ Tomverse 밖으로 나가기 때문입니다.
   채워지므로, 몇 초 뒤의 재계산이 첫 계산에 없던 이웃을 찾으면 안 됩니다. 만료는
   **마지막 읽기로부터 10분**입니다. bundle은 발급 시점부터 5분을 살고 이미 오래된
   항목에서 발급될 수 있으므로, 읽을 때마다 연장해야 그 bundle의 수명 전체를
-  덮습니다. 기록된 실패는 기록 후 30분까지만 연장합니다(provider 장애가 끝나면
-  lexical fallback도 끝나야 합니다). 저장하는 것은 id·점수·질문 vector이고
+  덮습니다. 기록된 실패도 똑같이 연장하고 상한 나이를 두지 않습니다 — 어떤 상한이든
+  그 직전에 발급된 bundle이 서명한 결과를 잃는 시점이 됩니다. 대가는 **정확히 같은
+  질문·같은 후보**가 10분 안에 계속 다시 요청되는 동안 lexical로 남는 것이고, 질문이나
+  후보가 바뀌거나 10분이 비면 provider에 다시 묻습니다. 저장하는 것은 id·점수·질문 vector이고
   memory·knowledge 원문은 저장하지 않습니다. 행은 만료 후 sweep되고 계정 삭제와
   함께 cascade됩니다. 점수는 소수 4자리로 반올림해 비교합니다.
 - **검색어가 없는 질문은 아무것도 보내지 않습니다.** usable term이 하나도 없는

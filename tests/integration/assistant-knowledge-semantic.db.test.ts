@@ -452,30 +452,34 @@ test("reading an outcome keeps it alive for a whole bundle lifetime", async () =
     assert.ok((await secondsUntilExpiry()).every((seconds) => seconds > 5 * 60));
 });
 
-test("a recorded failure stops being extended once it is old", async () => {
+test("a recorded failure is kept alive the same way, however old it is", async () => {
     const { user, fileIds } = await seedTwoFiles(WINDOW_DOC, GIFT_DOC);
     await turnOn("knowledgeRerank");
     const input = { userId: user.id, fileIds, query: GIFT_QUESTION };
     provider.state.failing = true;
-    await retrieveKnowledgeContext(input);
+    const first = await retrieveKnowledgeContext(input);
     provider.state.failing = false;
 
-    // A young failure is extended like anything else.
-    await prisma.$executeRaw`
-        UPDATE "SemanticRetrievalCache" SET "expiresAt" = NOW() + INTERVAL '20 seconds'
-    `;
-    await retrieveKnowledgeContext(input);
-    assert.ok((await secondsUntilExpiry()).every((seconds) => seconds > 5 * 60));
-
-    // One recorded forty minutes ago is not: it runs out, and the provider is
-    // asked again.
+    // Recorded long ago and about to lapse when a new bundle is built from
+    // it. Any age limit here would be a moment at which that bundle loses the
+    // outcome it was signed over, so there is none.
     await prisma.$executeRaw`
         UPDATE "SemanticRetrievalCache"
-        SET "createdAt" = NOW() - INTERVAL '40 minutes', "expiresAt" = NOW() + INTERVAL '20 seconds'
+        SET "createdAt" = NOW() - INTERVAL '3 hours', "expiresAt" = NOW() + INTERVAL '20 seconds'
     `;
-    await retrieveKnowledgeContext(input);
-    assert.ok((await secondsUntilExpiry()).every((seconds) => seconds <= 20));
+    const rebuilt = await retrieveKnowledgeContext(input);
+
     assert.equal(provider.state.calls.length, 1);
+    assert.equal(rebuilt.retrievalVersion, first.retrievalVersion);
+    assert.ok((await secondsUntilExpiry()).every((seconds) => seconds > 5 * 60));
+
+    // Left alone past its expiry, the same question asks the provider again.
+    await prisma.$executeRaw`
+        UPDATE "SemanticRetrievalCache" SET "expiresAt" = NOW() - INTERVAL '1 second'
+    `;
+    const later = await retrieveKnowledgeContext(input);
+    assert.equal(provider.state.calls.length, 2);
+    assert.equal(later.retrievalVersion, 2);
 });
 
 test("a question with no usable term sends nothing and retrieves nothing", async () => {

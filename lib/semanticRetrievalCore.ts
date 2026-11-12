@@ -238,12 +238,6 @@ export const SEMANTIC_RETRIEVAL_LIMITS = {
      * for its whole life, however old the entry already was.
      */
     cacheTtlMs: 10 * 60 * 1000,
-    /**
-     * How long a recorded failure may keep being extended by reads. Without a
-     * bound, a question repeated through a provider outage would stay lexical
-     * for as long as it kept being asked.
-     */
-    failedCacheMaxAgeMs: 30 * 60 * 1000,
 } as const;
 
 /**

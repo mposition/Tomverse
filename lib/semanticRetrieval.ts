@@ -137,29 +137,23 @@ export async function settleRetrievalCost(deltaMicroUsd: number, reservedAt: Dat
  * five minutes from the moment it is issued, and it may be issued from an
  * entry that was already nine minutes old; without the extension that entry
  * would expire inside the bundle's life and its rebuild would ask the
- * provider again and could disagree. A recorded failure is extended only
- * until it is `failedCacheMaxAgeMs` old, so an outage ends.
+ * provider again and could disagree.
+ *
+ * A recorded failure is extended exactly like a ranking, with no upper age.
+ * Any earlier cut-off is a moment at which a bundle signed seconds before it
+ * loses the outcome it was signed over. The price is that one exact question,
+ * over one exact set of candidates, stays lexical for as long as it keeps
+ * being re-asked within ten minutes of the last time; a different question,
+ * a changed candidate, or a ten-minute pause asks the provider again.
  */
 const readCache = async (key: string): Promise<SemanticCacheValue | null> => {
     try {
         const rows = await prisma.$queryRaw<Array<{ value: unknown }>>`
             UPDATE "SemanticRetrievalCache"
-            SET "expiresAt" = CASE
-                WHEN ("value"->>'kind') = 'failed' THEN LEAST(
-                    GREATEST(
-                        "expiresAt",
-                        NOW() + (${SEMANTIC_RETRIEVAL_LIMITS.cacheTtlMs} * INTERVAL '1 millisecond')
-                    ),
-                    GREATEST(
-                        "expiresAt",
-                        "createdAt" + (${SEMANTIC_RETRIEVAL_LIMITS.failedCacheMaxAgeMs} * INTERVAL '1 millisecond')
-                    )
-                )
-                ELSE GREATEST(
-                    "expiresAt",
-                    NOW() + (${SEMANTIC_RETRIEVAL_LIMITS.cacheTtlMs} * INTERVAL '1 millisecond')
-                )
-            END
+            SET "expiresAt" = GREATEST(
+                "expiresAt",
+                NOW() + (${SEMANTIC_RETRIEVAL_LIMITS.cacheTtlMs} * INTERVAL '1 millisecond')
+            )
             WHERE "key" = ${key} AND "expiresAt" > NOW()
             RETURNING "value"
         `;
