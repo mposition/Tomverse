@@ -74,6 +74,10 @@ export function pickSubject(history = [], random = Math.random, recent = 6) {
 }
 
 export const FRESH_LOCALES = Object.freeze(["en", "ko", "zh-Hant"]);
+// The names production's model catalogue shows (it is set in Admin, not lib/models.ts): all three
+// were found and chosen on tomverse.app by --dry runs in en, ko and zh-Hant on 2026-11-12, and are
+// the ones the approved Review shorts show. A name the catalogue no longer has stops the recording
+// before the send (exit 1, nothing paid).
 const MODELS = Object.freeze(["GPT 6 Luna", "Claude Haiku 5.5", "Gemini Flash"]);
 // The app's own words (lib/reviewWorkspaceCopy.ts).
 const LABELS = Object.freeze({
@@ -81,6 +85,47 @@ const LABELS = Object.freeze({
   ko: { models: /선택한 모델/u, pro: "전문가", side: "나란히 비교", browser: "ko-KR" },
   "zh-Hant": { models: /已選模型/u, pro: "Professional", side: "並排比較", browser: "zh-TW" },
 });
+
+/** Runs in the page (page.evaluate): the visible words of <sel> (or the body). */
+export function visibleTextInPage(sel) {
+  const root = sel ? document.querySelector(sel) : document.body;
+  if (!root) return "";
+  // The boxes a node's text is clipped to (viewport first), or null when it is not shown at all.
+  const clipsOf = (element) => {
+    const boxes = [{ top: 0, left: 0, bottom: innerHeight, right: innerWidth }];
+    for (let node = element; node && node !== document.documentElement; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.visibility === "hidden" || style.display === "none" || Number(style.opacity) === 0) return null;
+      if (/(hidden|auto|scroll|clip)/u.test(`${style.overflowX} ${style.overflowY}`)) boxes.push(node.getBoundingClientRect());
+    }
+    return boxes;
+  };
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
+  const range = document.createRange();
+  const parts = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!node.parentElement || !node.textContent.trim()) continue;
+    const clips = clipsOf(node.parentElement);
+    if (!clips) continue;
+    for (const { segment, index } of segmenter.segment(node.textContent)) {
+      if (!segment.trim()) {
+        parts.push(" ");
+        continue;
+      }
+      range.setStart(node, index);
+      range.setEnd(node, index + segment.length);
+      const shown = [...range.getClientRects()].some((rect) => {
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        return rect.width > 0 && rect.height > 0 && clips.every((box) => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom);
+      });
+      parts.push(shown ? segment : " … ");
+    }
+    parts.push(" ");
+  }
+  return parts.join("").replace(/(?:\s*…\s*)+/gu, " … ").replace(/\s+/gu, " ").replace(/^ … | … $/gu, "").trim().slice(0, 4000);
+}
 
 async function record({ locale, outDir, question, dry }) {
   const { chromium } = await import("playwright");
@@ -101,35 +146,11 @@ async function record({ locale, outDir, question, dry }) {
       const json = await response.json().catch(() => ({}));
       return { status: response.status, language: json.language ?? json.settings?.language, theme: json.theme ?? json.settings?.theme };
     }, body ?? null);
-  // The words a viewer can see in the frame: text nodes inside the viewport and inside every
-  // clipping ancestor, so a quote taken from here is on screen.
-  const visibleText = (selector) =>
-    page.evaluate((sel) => {
-      const root = sel ? document.querySelector(sel) : document.body;
-      if (!root) return "";
-      const inside = (element, rect) => {
-        for (let node = element; node && node !== document.documentElement; node = node.parentElement) {
-          const style = getComputedStyle(node);
-          if (style.visibility === "hidden" || style.display === "none" || Number(style.opacity) === 0) return false;
-          if (/(hidden|auto|scroll|clip)/u.test(`${style.overflowX} ${style.overflowY}`)) {
-            const box = node.getBoundingClientRect();
-            if (rect.bottom <= box.top || rect.top >= box.bottom || rect.right <= box.left || rect.left >= box.right) return false;
-          }
-        }
-        return true;
-      };
-      const words = [];
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        const text = node.textContent.replace(/\s+/gu, " ").trim();
-        if (!text || !node.parentElement) continue;
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        const seen = [...range.getClientRects()].some((rect) => rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth && inside(node.parentElement, rect));
-        if (seen) words.push(text);
-      }
-      return words.join(" ").replace(/\s+/gu, " ").slice(0, 4000);
-    }, selector ?? null);
+  // The words a viewer can see in the frame, word by word (Intl.Segmenter, so Korean and Chinese
+  // split too): a word counts only when its box's centre is inside the viewport and inside every
+  // clipping ancestor. A long answer cut off by its panel gives only its visible lines, so a quote
+  // taken from here is on screen; a hidden word leaves a gap, so no quote joins across it.
+  const visibleText = (selector) => page.evaluate(visibleTextInPage, selector ?? null);
   // The account's own sidebar (its other conversations) and its analytics notice never go into a
   // film; the notice is hidden, not answered, so the account's settings stay as they are. Set
   // through the CSSOM, which the site's CSP allows (an injected <style> is refused), before every capture.

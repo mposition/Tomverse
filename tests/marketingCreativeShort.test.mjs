@@ -545,3 +545,40 @@ test("the recorder refuses bad arguments and a folder that already holds a recor
   assert.match(recorder, /now\.language === restore\.language/u);
   assert.match(recorder, /code: 5/u);
 });
+
+test("a capture's text holds only the words a viewer can see, not the lines its panel cuts off", async (t) => {
+  const { visibleTextInPage } = await import("../tools/marketing-video/fresh-review.mjs");
+  let chromium;
+  try {
+    ({ chromium } = await import("../tools/marketing-video/node_modules/playwright/index.mjs"));
+  } catch {
+    t.skip("no playwright here");
+    return;
+  }
+  let browser;
+  try {
+    browser = await chromium.launch();
+  } catch {
+    t.skip("no Chromium here");
+    return;
+  }
+  try {
+    const page = await browser.newPage({ viewport: { width: 600, height: 400 } });
+    const lines = (word) => Array.from({ length: 40 }, (_, n) => `${word}${n}-longerword`).join(" ");
+    await page.setContent(`<body style="margin:0;font:16px/20px sans-serif">
+      <div id="panel" style="height:100px;width:300px;overflow:hidden"><p style="margin:0">alpha ${lines("w")} omega</p></div>
+      <div id="ko" style="height:20px;width:300px;overflow:auto"><p style="margin:0">처음 보이는 문장입니다 그리고 아래로 잘린 다음 줄의 마지막문장끝</p></div>
+      <p style="visibility:hidden">hiddenword</p>
+      <p style="position:absolute;top:900px">belowfold</p></body>`);
+    const panel = await page.evaluate(visibleTextInPage, "#panel");
+    assert.match(panel, /^alpha w0-longerword w1-longerword /u);
+    assert.doesNotMatch(panel, /omega|w39/u);
+    const ko = await page.evaluate(visibleTextInPage, "#ko");
+    assert.match(ko, /처음/u);
+    assert.doesNotMatch(ko, /마지막문장끝/u);
+    const body = await page.evaluate(visibleTextInPage, null);
+    assert.doesNotMatch(body, /hiddenword|belowfold|omega/u);
+  } finally {
+    await browser.close();
+  }
+});
