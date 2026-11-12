@@ -136,6 +136,17 @@ export type ReasonMessage =
   | { key: "timeout" }
   | { key: "network" }
   | { key: "sessionExpired" }
+  | { key: "codingWeightBelowFloor"; floor: number }
+  | { key: "codingFloorUnbounded" }
+  | { key: "unknownProvider" }
+  | { key: "destinationUnproven" }
+  | { key: "termsDoNotAllow" }
+  | { key: "termsUnofficial" }
+  | { key: "retentionUnofficial" }
+  | { key: "retentionMissing" }
+  | { key: "noToolCalling" }
+  | { key: "noProfile" }
+  | { key: "draftIncomplete"; detail: string }
   | { key: "unknown"; code: string };
 
 const hostOf = (url: string) => {
@@ -161,13 +172,33 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
     case "no_price_sources":
       return { key: "priceUnverified" };
     case "unofficial_source":
+    case "unofficial_price_source":
       return { key: "unofficialSource", host: hostOf(tail || detail) };
     case "credits_below_floor": {
+      // Coding names the floor ("credits_below_floor:12"); image names the option.
+      if (/^\d+$/.test(tail)) return { key: "codingWeightBelowFloor", floor: Number(tail) };
       const [quality = "", size = ""] = tail.split("/");
       return { key: "creditsBelowFloor", quality, size };
     }
     case "worst_case_cost_unbounded":
       return { key: "worstCaseUnbounded" };
+    case "credit_floor_unbounded":
+      return { key: "codingFloorUnbounded" };
+    case "unknown_provider":
+      return { key: "unknownProvider" };
+    case "provider_destination_unproven":
+      return { key: "destinationUnproven" };
+    case "terms_do_not_allow":
+      return { key: "termsDoNotAllow" };
+    case "terms_source_unofficial":
+      return { key: "termsUnofficial" };
+    case "retention_source_unofficial":
+      return { key: "retentionUnofficial" };
+    case "no_tool_calling":
+      return { key: "noToolCalling" };
+    case "no_profile":
+    case "no_valid_profile":
+      return { key: "noProfile" };
     case "thinking_cap_below_minimum":
       return { key: "thinkingCapBelowMinimum", minimum: tail };
     case "provider_budget_missing":
@@ -177,7 +208,11 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
     case "no_default_source":
       return { key: "noDefaultSource" };
     case "draft_rejected":
-      return { key: "noPriceFound", detail: detail.replace(/^no_options:?\s*/, "") };
+      // A coding draft is refused for missing evidence or fields, not a missing price.
+      if (detail === "retention_source_missing") return { key: "retentionMissing" };
+      if (detail === "credit_floor_unbounded") return { key: "codingFloorUnbounded" };
+      if (detail && !/^(no_options|invalid_prices)/.test(detail)) return { key: "draftIncomplete", detail };
+      return { key: "noPriceFound", detail: detail.replace(/^(no_options|invalid_prices):?\s*/, "") };
     case "pricing_version_reused":
       return { key: "versionReused" };
     case "execution_profile_priced":
@@ -190,6 +225,8 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
     case "invalid_model_id":
     case "invalid_draft":
     case "credit_override_unknown_option":
+    case "credit_overrides_image_only":
+    case "coding_edit_coding_only":
       return { key: "invalidInput" };
     case "fetch_failed":
     case "page_too_large":
@@ -354,3 +391,159 @@ export const imageCatalogItems = (report: {
   });
   return [...pending, ...served];
 };
+
+// --- coding ------------------------------------------------------------------
+// The same four steps for a coding model, whose draft is a whole profile
+// (name, plan, capabilities, prices, terms and retention evidence). The
+// judge is judgeCodingModel on the server; these only read its answer.
+
+export type CodingProfileView = {
+  name: string;
+  provider: string;
+  apiModelId: string;
+  minimumPlan: "Free" | "Pro" | "Max";
+  capabilities: {
+    toolCalling: string;
+    structuredOutput: string;
+    imageInput: boolean;
+    maxContextTokens: number;
+    maxOutputTokens: number;
+  };
+  pricing: { inputUsdPerMTok: number; outputUsdPerMTok: number; creditWeight: number; verifiedAt: string; sources: string[] };
+  terms: { allowsResaleAndCodingAgent: boolean; url: string; checkedAt: string };
+  retention: { url: string; checkedAt: string };
+  processingRegion: string;
+};
+
+export const CODING_PLANS = ["Free", "Pro", "Max"] as const;
+
+export type CodingCatalogItem = {
+  id: string;
+  name: string;
+  provider: string;
+  apiModelId: string;
+  enabled: boolean | null;
+  holdReason: string | null;
+  /** The stored profile, when it parses. */
+  profile: CodingProfileView | null;
+  /** The credit weight's floor at the stored profile's prices. */
+  floor: number | null;
+  problem: string | null;
+  admission: Admission | null;
+  draft: CodingProfileView | null;
+  draftCreatedAt: string | null;
+  /** The draft's floor and the judge's reasons at the draft's own values. */
+  draftReview: { floor: number | null; reasons: string[] } | null;
+  raw: unknown;
+};
+
+/** The image stages without the image budget one (coding has no per-provider budget). */
+export type CodingStage = Exclude<ImageStage, "needs_budget">;
+
+const looksLikeCodingProfile = (value: unknown): value is CodingProfileView => {
+  const v = value as Partial<CodingProfileView> | null;
+  return Boolean(v && typeof v.name === "string" && v.pricing && v.capabilities && v.terms && v.retention);
+};
+
+export const codingCatalogItems = (report: {
+  models: Array<{
+    modelId: string;
+    enabled: boolean | null;
+    holdReason: string | null;
+    profile: unknown;
+    problem: string | null;
+    admission: Admission | null;
+    draft: unknown;
+    draftCreatedAt?: string | null;
+    floor?: number | null;
+    draftReview?: { floor: number | null; reasons: string[] } | null;
+  }>;
+}): CodingCatalogItem[] =>
+  report.models.map((row) => {
+    const profile = looksLikeCodingProfile(row.profile) ? row.profile : null;
+    const draft = looksLikeCodingProfile(row.draft) ? row.draft : null;
+    const shown = draft ?? profile;
+    return {
+      id: row.modelId,
+      name: profile?.name ?? draft?.name ?? row.modelId,
+      provider: shown?.provider ?? "",
+      apiModelId: shown?.apiModelId ?? row.modelId,
+      enabled: row.enabled,
+      holdReason: row.holdReason,
+      profile,
+      floor: row.floor ?? null,
+      problem: row.problem,
+      admission: row.admission,
+      draft,
+      draftCreatedAt: row.draftCreatedAt ?? null,
+      draftReview: row.draftReview ?? null,
+      raw: row,
+    };
+  });
+
+export const codingStage = (item: CodingCatalogItem): CodingStage => {
+  if (item.draft) return "draft_ready";
+  if (!item.profile) return item.problem === "invalid_profile" ? "profile_invalid" : "needs_draft";
+  if (item.holdReason || item.enabled === false) return "held";
+  if (item.admission?.admitted) return item.enabled === true ? "serving" : "ready_to_enable";
+  return "blocked";
+};
+
+/** Whether the stored profile is what the Code client is served now. */
+export const codingServing = (item: CodingCatalogItem) =>
+  item.profile !== null && item.enabled === true && !item.holdReason && item.admission?.admitted === true;
+
+/**
+ * A coding profile has no form to fix: an invalid one is replaced by a new
+ * draft, so the first step's action is "make a new draft" too.
+ */
+export const codingNextAction = (stage: CodingStage): ImageNextAction =>
+  stage === "profile_invalid" ? "redraft" : imageNextAction(stage);
+
+export const codingNeedsAction = (stage: CodingStage) => stage !== "serving" && stage !== "held";
+
+export type CodingEditValue = { name?: string; minimumPlan?: string; creditWeight?: string };
+export type CodingEditProblem = "name_invalid" | "not_a_number" | "below_floor";
+
+/** The operator's edits to a draft, checked the way the server will check them. */
+export const codingEditProblems = (
+  draft: Pick<CodingProfileView, "name" | "pricing">,
+  edits: Readonly<CodingEditValue>,
+  floor: number | null
+): Partial<Record<"name" | "creditWeight", CodingEditProblem>> => {
+  const problems: Partial<Record<"name" | "creditWeight", CodingEditProblem>> = {};
+  const name = (edits.name ?? draft.name).trim();
+  if (name.length === 0 || name.length > 80) problems.name = "name_invalid";
+  const weight = edits.creditWeight === undefined ? draft.pricing.creditWeight : Number(edits.creditWeight);
+  if (!Number.isInteger(weight) || weight <= 0 || weight > 1_000) problems.creditWeight = "not_a_number";
+  else if (floor !== null && weight < floor) problems.creditWeight = "below_floor";
+  return problems;
+};
+
+/** The apply request's codingEdit: only the fields that differ from the draft. */
+export const codingEdit = (
+  draft: Pick<CodingProfileView, "name" | "minimumPlan" | "pricing">,
+  edits: Readonly<CodingEditValue>
+): { name?: string; minimumPlan?: string; creditWeight?: number } => {
+  const out: { name?: string; minimumPlan?: string; creditWeight?: number } = {};
+  const name = edits.name?.trim();
+  if (name !== undefined && name !== draft.name) out.name = name;
+  if (edits.minimumPlan !== undefined && edits.minimumPlan !== draft.minimumPlan) out.minimumPlan = edits.minimumPlan;
+  if (edits.creditWeight !== undefined && Number(edits.creditWeight) !== draft.pricing.creditWeight) {
+    out.creditWeight = Number(edits.creditWeight);
+  }
+  return out;
+};
+
+/**
+ * The URLs a coding draft reads: the price page (or the provider's default),
+ * then the terms and the retention pages, without repeats, at most three.
+ */
+export const codingDraftSources = (
+  input: { priceUrl: string; termsUrl: string; retentionUrl: string },
+  defaultSources: readonly string[]
+): string[] => {
+  const price = input.priceUrl.trim() || defaultSources[0] || "";
+  return [...new Set([price, input.termsUrl.trim(), input.retentionUrl.trim()].filter(Boolean))].slice(0, 3);
+};
+

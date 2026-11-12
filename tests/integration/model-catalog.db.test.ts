@@ -488,6 +488,46 @@ test("credit overrides are for image drafts only", async () => {
   );
 });
 
+test("an applied coding draft takes the operator's name, plan and weight, never under the floor, and its audit row says so", async () => {
+  const modelId = "gpt-coding-edit-test";
+  const key = { category_modelId: { category: "coding", modelId } };
+  await storeCatalogDraft({ category: "coding", modelId, draft: codingProfile, session });
+  // Under the floor the judge uses: refused, and the draft is still there to fix.
+  await assert.rejects(
+    applyCatalogDraft({ category: "coding", modelId, codingEdit: { creditWeight: 1 }, session }),
+    (error: unknown) =>
+      error instanceof CatalogRefusal && error.code === "not_admitted" && /^credits_below_floor:\d+$/.test(error.reasons[0] ?? "")
+  );
+  assert.notEqual((await prisma.modelCatalogEntry.findUnique({ where: key }))?.draft, null);
+  await assert.rejects(
+    applyCatalogDraft({ category: "image", modelId: "gpt-image-2", codingEdit: { creditWeight: 9 }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "coding_edit_coding_only"
+  );
+
+  await applyCatalogDraft({ category: "coding", modelId, codingEdit: { name: "Edited Coder", minimumPlan: "Max", creditWeight: 9 }, session });
+  const row = await prisma.modelCatalogEntry.findUnique({ where: key });
+  const stored = row?.profile as typeof codingProfile;
+  assert.equal(row?.draft, null);
+  assert.equal(stored.name, "Edited Coder");
+  assert.equal(stored.minimumPlan, "Max");
+  assert.equal(stored.pricing.creditWeight, 9);
+  // Prices and evidence are the draft's.
+  assert.equal(stored.pricing.outputUsdPerMTok, codingProfile.pricing.outputUsdPerMTok);
+  assert.deepEqual(stored.terms, codingProfile.terms);
+  const audit = await prisma.adminAuditLog.findFirst({
+    where: { action: "model_catalog.entry_updated", targetId: `coding:${modelId}` },
+    orderBy: { createdAt: "desc" },
+  });
+  assert.deepEqual((audit?.metadata as { provenance?: unknown }).provenance, {
+    fromDraft: true,
+    edits: [
+      { field: "name", from: "Catalog Test Coder", to: "Edited Coder" },
+      { field: "minimumPlan", from: "Pro", to: "Max" },
+      { field: "creditWeight", from: 4, to: 9 },
+    ],
+  });
+});
+
 test("the database refuses a category it has no policy for", async () => {
   await assert.rejects(
     prisma.modelCatalogEntry.create({ data: { category: "video", modelId: "veo-x" } }),

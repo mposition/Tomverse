@@ -167,6 +167,7 @@ export type CodingCatalogEntry = {
   problem: string | null;
   admission: CodingAdmission | null;
   draft: unknown;
+  draftCreatedAt: Date | null;
 };
 
 export const loadCodingCatalog = async (
@@ -187,6 +188,7 @@ export const loadCodingCatalog = async (
       problem: row.profile === null ? "no_profile" : parsed.success ? null : "invalid_profile",
       admission: profile ? judgeCoding(profile) : null,
       draft: row.draft,
+      draftCreatedAt: row.draftCreatedAt ?? null,
     };
   });
 };
