@@ -132,6 +132,23 @@ export function visibleTextInPage(sel) {
   return parts.join("").replace(/(?:\s*…\s*)+/gu, " … ").replace(/\s+/gu, " ").replace(/^ … | … $/gu, "").trim().slice(0, 4000);
 }
 
+/**
+ * Runs in the page: scrolls every answer column of the side-by-side view (a vertical scroller in the
+ * right two thirds of the screen, at least a third of it tall) to `fraction` of a screen below its
+ * top (0 = the top), and returns how far each one moved, for the log.
+ */
+export function scrollAnswerColumns(fraction) {
+  const columns = [...document.querySelectorAll("*")].filter((node) => {
+    const style = getComputedStyle(node);
+    const box = node.getBoundingClientRect();
+    return /(auto|scroll)/u.test(style.overflowY) && node.scrollHeight > node.clientHeight + 40 && box.left + box.width / 2 > innerWidth / 3 && box.height > innerHeight / 3;
+  });
+  return columns.map((node) => {
+    node.scrollTop = Math.min(node.scrollHeight - node.clientHeight, Math.round(node.clientHeight * fraction));
+    return node.scrollTop;
+  });
+}
+
 async function record({ locale, outDir, question, dry }) {
   const { chromium } = await import("playwright");
   const L = LABELS[locale];
@@ -244,14 +261,12 @@ async function record({ locale, outDir, question, dry }) {
     }
     await page.getByRole("button", { name: L.side }).first().click();
     await page.waitForTimeout(2000);
+    // Streaming leaves each answer column scrolled to its end, so set the columns' scroll position
+    // explicitly: the top first, then about three quarters of a screen further down.
+    log.push({ columns: await page.evaluate(scrollAnswerColumns, 0) });
+    await page.waitForTimeout(800);
     await capture("answers", "the three answers side by side, from the top");
-    for (const x of [640, 940, 1240]) {
-      await page.mouse.move(x, 520);
-      for (let k = 0; k < 6; k += 1) {
-        await page.mouse.wheel(0, 110);
-        await page.waitForTimeout(150);
-      }
-    }
+    log.push({ columns: await page.evaluate(scrollAnswerColumns, 0.75) });
     await page.waitForTimeout(800);
     await capture("answers-more", "the three answers side by side, each scrolled further down");
 
