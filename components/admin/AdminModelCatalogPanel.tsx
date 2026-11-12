@@ -5,6 +5,12 @@ import { Plus, RefreshCw } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import {
+  CodingCatalogList,
+  CodingModelDetail,
+  CodingModelForm,
+  type CodingModelFormValue,
+} from "@/components/admin/modelCatalog/CodingCatalogViews";
+import {
   CatalogToast,
   type CatalogToastValue,
   ImageCatalogList,
@@ -22,6 +28,12 @@ import { adminFetch, isAdminFetchTimeout } from "@/lib/adminFetch";
 import { adminModelCatalogMessages } from "@/lib/adminMessages/modelCatalog";
 import { adminModelsBoardMessages } from "@/lib/adminMessages/modelsBoard";
 import {
+  type CodingCatalogItem,
+  codingCatalogItems,
+  codingDraftSources,
+  codingEdit,
+  type CodingEditValue,
+  codingStage,
   creditOverrides,
   type ImageCatalogItem,
   imageCatalogItems,
@@ -43,32 +55,22 @@ import {
 // Operator surface over /api/admin/model-catalog. Image models follow one
 // guided flow (details -> price draft -> check prices -> turn on) with no JSON
 // to type; the schemas and the judge stay server-side (lib/modelCatalogCore.ts).
-// Coding profiles are still edited as JSON (not redesigned yet).
+// Coding models follow the same four steps; their draft is a whole profile,
+// shown as a field table where only the name, minimum plan and credit weight
+// are the operator's to change.
 
 // A draft fetches up to three pages (10 s each) and makes one LLM call (90 s);
 // the 15 s admin default cut it off and the panel showed nothing.
 const DRAFT_REQUEST_TIMEOUT_MS = 130_000;
 const CATALOG_PATH = "/admin/models?tab=catalog";
 
-type Admission = { admitted: boolean; reasons?: string[] };
-
-type CodingRow = {
-  modelId: string;
-  enabled: boolean | null;
-  holdReason: string | null;
-  profile: unknown;
-  problem: string | null;
-  admission: Admission | null;
-  draft: unknown;
-};
-
 type CatalogReport = {
   image: Parameters<typeof imageCatalogItems>[0] & {
     providers?: { provider: string; defaultSources: string[]; hosts: string[] }[];
   };
-  coding: {
-    models: CodingRow[];
+  coding: Parameters<typeof codingCatalogItems>[0] & {
     snapshot: { version: number; models: unknown[]; coverageUntil: string } | null;
+    providers?: { provider: string; defaultSources: string[]; hosts: string[] }[];
   };
   chat: { models: { modelId: string; name: string; provider: string; enabled: boolean }[] };
   video: { policy: { reasons: string[] } };
@@ -79,10 +81,6 @@ type SendResult = { ok: true; payload: unknown } | { ok: false; timedOut: boolea
 
 const textarea =
   "mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 outline-none focus:border-blue-500";
-const fieldLabel = "text-xs font-bold text-zinc-400";
-
-const reasonsOf = (admission: Admission | null | undefined) =>
-  admission?.admitted ? "" : (admission?.reasons ?? []).join(", ");
 
 const emptyForm = (provider = "openai"): ImageModelFormValue => ({
   provider,
@@ -91,6 +89,14 @@ const emptyForm = (provider = "openai"): ImageModelFormValue => ({
   sizes: [...RUNTIME_IMAGE_SIZES],
   qualities: [...RUNTIME_IMAGE_QUALITIES],
   sources: "",
+});
+
+const emptyCodingForm = (provider = "anthropic"): CodingModelFormValue => ({
+  provider,
+  apiModelId: "",
+  priceUrl: "",
+  termsUrl: "",
+  retentionUrl: "",
 });
 
 const elapsedText = (ms: number) => {
@@ -112,15 +118,16 @@ export function AdminModelCatalogPanel() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
   const [form, setForm] = useState<{ mode: "add" | "fix"; modelId: string | null; value: ImageModelFormValue } | null>(null);
-  const [drafting, setDrafting] = useState<{ modelId: string; startedAt: number } | null>(null);
+  const [drafting, setDrafting] = useState<{ category: "image" | "coding"; modelId: string; startedAt: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [confirmEnable, setConfirmEnable] = useState<ImageCatalogItem | null>(null);
   const [busy, setBusy] = useState(false);
-  const [profileDrafts, setProfileDrafts] = useState<Record<string, string>>({});
-  const [newCodingId, setNewCodingId] = useState("");
+  const [codingOpenId, setCodingOpenId] = useState<string | null>(null);
+  const [codingEdits, setCodingEdits] = useState<Record<string, CodingEditValue>>({});
+  const [codingForm, setCodingForm] = useState<CodingModelFormValue | null>(null);
+  const [confirmCodingEnable, setConfirmCodingEnable] = useState<CodingCatalogItem | null>(null);
   const [hold, setHold] = useState<{ category: "image" | "coding"; modelId: string; name: string } | null>(null);
   const [holdReason, setHoldReason] = useState("");
-  const [draftForm, setDraftForm] = useState({ modelId: "", provider: "", apiModelId: "", sources: "" });
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((value: CatalogToastValue | null) => {
@@ -177,6 +184,9 @@ export function AdminModelCatalogPanel() {
   const items = useMemo(() => (report ? imageCatalogItems(report.image) : []), [report]);
   const providers = report?.image.providers ?? [];
   const openItem = items.find((item) => item.id === openId) ?? null;
+  const codingItems = useMemo(() => (report ? codingCatalogItems(report.coding) : []), [report]);
+  const codingProviders = report?.coding.providers ?? [];
+  const openCoding = codingItems.find((item) => item.id === codingOpenId) ?? null;
 
   const refusedToast = useCallback(
     (codes: readonly string[], detail = "") => {
@@ -241,7 +251,7 @@ export function AdminModelCatalogPanel() {
     sources: string[];
   }) => {
     const before = items.find((item) => item.id === input.modelId)?.draftCreatedAt ?? null;
-    setDrafting({ modelId: input.modelId, startedAt: Date.now() });
+    setDrafting({ category: "image", modelId: input.modelId, startedAt: Date.now() });
     setNow(Date.now());
     setOpenId(input.modelId);
     showToast({ tone: "progress", title: m.draftingTitle, body: m.draftingBody });
@@ -393,62 +403,109 @@ export function AdminModelCatalogPanel() {
     showToast({ tone: "ok", title: m.toastSaved });
   };
 
-  const codingStateButtons = (modelId: string) => (
-    <div className="flex flex-wrap gap-1.5">
-      <AdminWriteButton
-        size="sm"
-        variant="secondary"
-        onClick={async () => {
-          if ((await send("PATCH", { category: "coding", modelId, enabled: true, holdReason: null })).ok) {
-            await load();
-            showToast({ tone: "ok", title: m.toastSaved });
-          }
-        }}
-      >
-        {m.enable}
-      </AdminWriteButton>
-      <AdminWriteButton
-        size="sm"
-        variant="secondary"
-        onClick={() => {
-          setHoldReason("");
-          setHold({ category: "coding", modelId, name: modelId });
-        }}
-      >
-        {m.hold}
-      </AdminWriteButton>
-      <AdminWriteButton
-        size="sm"
-        variant="secondary"
-        onClick={async () => {
-          if ((await send("PATCH", { category: "coding", modelId, enabled: null, holdReason: null })).ok) {
-            await load();
-            showToast({ tone: "ok", title: m.toastSaved });
-          }
-        }}
-      >
-        {m.inherit}
-      </AdminWriteButton>
-    </div>
-  );
-
-  const sendAndReload = async (method: "PATCH" | "POST", body: unknown, timeoutMs?: number, okTitle: string = m.toastSaved) => {
-    if (timeoutMs) showToast({ tone: "progress", title: m.drafting });
-    const result = await send(method, body, timeoutMs);
+  /**
+   * Ask for a coding profile draft (one paid LLM call), like requestDraft:
+   * on a timeout the catalogue is read again, the request is not resent.
+   */
+  const requestCodingDraft = async (value: CodingModelFormValue) => {
+    const apiModelId = value.apiModelId.trim();
+    const modelId = apiModelId;
+    const before = codingItems.find((item) => item.id === modelId)?.draftCreatedAt ?? null;
+    const defaults = codingProviders.find((entry) => entry.provider === value.provider)?.defaultSources ?? [];
+    setCodingForm(null);
+    setDrafting({ category: "coding", modelId, startedAt: Date.now() });
+    setNow(Date.now());
+    setCodingOpenId(modelId);
+    showToast({ tone: "progress", title: m.codingFlow.draftingTitle, body: m.codingFlow.draftingBody });
+    const result = await send(
+      "POST",
+      {
+        action: "draft",
+        category: "coding",
+        modelId,
+        provider: value.provider,
+        apiModelId,
+        sourceUrls: codingDraftSources(value, defaults),
+      },
+      DRAFT_REQUEST_TIMEOUT_MS
+    );
+    setDrafting(null);
     if (result.ok) {
-      await load();
-      showToast({ tone: "ok", title: okTitle });
-    } else if (result.timedOut) {
-      refusedToast(["timeout"]);
+      const next = await load();
+      const name = (next ? codingCatalogItems(next.coding).find((item) => item.id === modelId)?.name : null) ?? apiModelId;
+      showToast({ tone: "ok", title: m.codingFlow.toastDraftReady(name), body: m.codingFlow.toastDraftReadyBody });
+      return;
+    }
+    if (result.timedOut) {
+      showToast({ tone: "progress", title: m.toastChecking });
+      const next = await load();
+      const after = next ? codingCatalogItems(next.coding).find((item) => item.id === modelId)?.draftCreatedAt ?? null : null;
+      if (after && after !== before) showToast({ tone: "ok", title: m.toastFinishedAnyway });
+      else refusedToast(["timeout"]);
     }
   };
 
-  const parseJson = (text: string): unknown => {
-    try {
-      return JSON.parse(text);
-    } catch {
-      refusedToast(["invalid_json"]);
-      return undefined;
+  /** The form for a new draft of an existing model, with the pages its last profile or draft read. */
+  const codingFormFor = (item: CodingCatalogItem): CodingModelFormValue => {
+    const shown = item.draft ?? item.profile;
+    return {
+      provider: item.provider || codingProviders[0]?.provider || "anthropic",
+      apiModelId: item.apiModelId,
+      priceUrl: shown?.pricing.sources.find((url) => url !== shown.terms.url && url !== shown.retention.url) ?? "",
+      termsUrl: shown?.terms.url ?? "",
+      retentionUrl: shown?.retention.url ?? "",
+    };
+  };
+
+  const onCodingAction = (item: CodingCatalogItem, action: ImageNextAction) => {
+    if (action === "enable") {
+      setConfirmCodingEnable(item);
+      return;
+    }
+    if (action === "make_draft" || action === "redraft" || action === "fix_profile") {
+      setCodingForm(codingFormFor(item));
+      return;
+    }
+    setCodingOpenId(item.id);
+  };
+
+  const applyCodingProfile = async (item: CodingCatalogItem) => {
+    if (!item.draft) return;
+    setBusy(true);
+    const result = await send("POST", {
+      action: "apply_draft",
+      category: "coding",
+      modelId: item.id,
+      codingEdit: codingEdit(item.draft, codingEdits[item.id] ?? {}),
+    });
+    setBusy(false);
+    if (!result.ok) return;
+    setCodingEdits((current) => ({ ...current, [item.id]: {} }));
+    const next = await load();
+    const updated = next ? codingCatalogItems(next.coding).find((entry) => entry.id === item.id) : null;
+    const stage = updated ? codingStage(updated) : null;
+    showToast({
+      tone: "ok",
+      title: m.codingFlow.toastApplied(updated?.name ?? item.name),
+      body: stage === "ready_to_enable" ? m.toastAppliedBody : stage && stage !== "serving" ? m.codingFlow.stage[stage] : undefined,
+      action: updated && stage === "ready_to_enable" ? { label: m.goEnable, onClick: () => setConfirmCodingEnable(updated) } : null,
+    });
+  };
+
+  const enableCoding = async (item: CodingCatalogItem) => {
+    setBusy(true);
+    const result = await send("PATCH", { category: "coding", modelId: item.id, enabled: true, holdReason: null });
+    setBusy(false);
+    setConfirmCodingEnable(null);
+    if (!result.ok) return;
+    await load();
+    showToast({ tone: "ok", title: m.toastEnabled(item.name) });
+  };
+
+  const publishSnapshot = async () => {
+    if ((await send("POST", { action: "publish_snapshot" })).ok) {
+      await load();
+      showToast({ tone: "ok", title: m.toastSaved });
     }
   };
 
@@ -459,6 +516,16 @@ export function AdminModelCatalogPanel() {
     form.value.sizes.length > 0 &&
     form.value.qualities.length > 0 &&
     providers.some((entry) => entry.provider === form.value.provider);
+  // The retention page is required (a draft without one is refused for
+  // nothing), and the price page only where the provider has no default.
+  const codingFormValid =
+    codingForm !== null &&
+    codingForm.apiModelId.trim().length > 0 &&
+    codingForm.termsUrl.trim().length > 0 &&
+    codingForm.retentionUrl.trim().length > 0 &&
+    codingProviders.some(
+      (entry) => entry.provider === codingForm.provider && (codingForm.priceUrl.trim().length > 0 || entry.defaultSources.length > 0)
+    );
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -522,7 +589,7 @@ export function AdminModelCatalogPanel() {
                 m={m}
                 item={openItem}
                 edits={edits[openItem.id] ?? {}}
-                drafting={drafting?.modelId === openItem.id ? elapsedText(now - drafting.startedAt) : null}
+                drafting={drafting?.category === "image" && drafting.modelId === openItem.id ? elapsedText(now - drafting.startedAt) : null}
                 onBack={() => setOpenId(null)}
                 onEdit={(key, value) =>
                   setEdits((current) => ({ ...current, [openItem.id]: { ...(current[openItem.id] ?? {}), [key]: value } }))
@@ -535,7 +602,7 @@ export function AdminModelCatalogPanel() {
                   setHold({ category: "image", modelId: openItem.id, name: openItem.name });
                 }}
               />
-            ) : drafting && !items.some((item) => item.id === drafting.modelId) ? (
+            ) : drafting?.category === "image" && !items.some((item) => item.id === drafting.modelId) ? (
               // A brand-new model has no row until its draft is stored.
               <AdminStateBlock kind="loading" />
             ) : (
@@ -553,72 +620,56 @@ export function AdminModelCatalogPanel() {
             )}
           </AdminTile>
 
-          <AdminTile title={m.coding}>
-            <div className="flex flex-col">
-              {report.coding.models.map((row) => (
-                <div key={row.modelId} className="border-t border-zinc-800 py-3 first:border-t-0 first:pt-0">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="font-mono text-sm font-bold text-zinc-100">{row.modelId}</div>
-                      <div className="text-xs text-zinc-400">
-                        {row.holdReason ? `${m.hold} · ${row.holdReason}` : row.enabled === true ? m.serving : m.inherit}
-                        {" · "}
-                        {m.judge}: {row.admission?.admitted ? m.admitted : reasonsOf(row.admission) || row.problem}
-                      </div>
-                    </div>
-                    {codingStateButtons(row.modelId)}
-                  </div>
-                  <label className={`mt-2 block ${fieldLabel}`}>
-                    {m.profile}
-                    <textarea
-                      className={textarea}
-                      rows={6}
-                      value={profileDrafts[row.modelId] ?? JSON.stringify(row.profile ? { ...(row.profile as object), modelId: undefined } : {}, null, 2)}
-                      onChange={(event) => setProfileDrafts({ ...profileDrafts, [row.modelId]: event.target.value })}
-                    />
-                  </label>
-                  <AdminWriteButton
-                    size="sm"
-                    variant="secondary"
-                    className="mt-1"
-                    onClick={() => {
-                      const profile = parseJson(profileDrafts[row.modelId] ?? "");
-                      if (profile !== undefined) void sendAndReload("PATCH", { category: "coding", modelId: row.modelId, profile });
-                    }}
-                  >
-                    {m.saveProfile}
-                  </AdminWriteButton>
-                  {row.draft ? (
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-xs font-bold text-zinc-400">{m.draft}</summary>
-                      <pre className="mt-1 max-h-48 overflow-auto rounded-xl bg-zinc-950 p-2 text-[11px] text-zinc-300">{JSON.stringify(row.draft, null, 2)}</pre>
-                      <AdminWriteButton
-                        size="sm"
-                        variant="secondary"
-                        className="mt-1"
-                        onClick={() => void sendAndReload("POST", { action: "apply_draft", category: "coding", modelId: row.modelId })}
-                      >
-                        {m.applyDraft}
-                      </AdminWriteButton>
-                    </details>
-                  ) : null}
-                </div>
-              ))}
-              <div className="flex flex-wrap items-end gap-2 border-t border-zinc-800 pt-3">
-                <label className={fieldLabel}>
-                  {m.newCodingModel}
-                  <input className={textarea} value={newCodingId} onChange={(event) => setNewCodingId(event.target.value)} />
-                </label>
-                <AdminWriteButton
-                  size="sm"
-                  variant="secondary"
-                  disabled={!newCodingId.trim()}
-                  onClick={() => void sendAndReload("PATCH", { category: "coding", modelId: newCodingId.trim(), enabled: null })}
-                >
-                  {m.submit}
-                </AdminWriteButton>
-              </div>
-            </div>
+          <AdminTile
+            title={m.coding}
+            action={
+              <AdminWriteButton
+                size="sm"
+                disabled={!report.draftLlm.configured || drafting !== null || codingProviders.length === 0}
+                onClick={() => setCodingForm(emptyCodingForm(codingProviders.find((entry) => entry.provider === "anthropic")?.provider ?? codingProviders[0]?.provider))}
+                data-testid="model-catalog-add-coding"
+              >
+                <Plus className="h-4 w-4" aria-hidden />
+                {m.codingFlow.add}
+              </AdminWriteButton>
+            }
+          >
+            {!report.draftLlm.configured ? (
+              <p className="text-xs text-amber-300">{m.draftNotConfigured(report.draftLlm.env)}</p>
+            ) : null}
+            {openCoding ? (
+              <CodingModelDetail
+                m={m}
+                item={openCoding}
+                edits={codingEdits[openCoding.id] ?? {}}
+                drafting={drafting?.category === "coding" && drafting.modelId === openCoding.id ? elapsedText(now - drafting.startedAt) : null}
+                onBack={() => setCodingOpenId(null)}
+                onEdit={(field, value) =>
+                  setCodingEdits((current) => ({ ...current, [openCoding.id]: { ...(current[openCoding.id] ?? {}), [field]: value } }))
+                }
+                onResetEdits={() => setCodingEdits((current) => ({ ...current, [openCoding.id]: {} }))}
+                onApply={() => void applyCodingProfile(openCoding)}
+                onAction={(action) => onCodingAction(openCoding, action)}
+                onHold={() => {
+                  setHoldReason("");
+                  setHold({ category: "coding", modelId: openCoding.id, name: openCoding.name });
+                }}
+              />
+            ) : drafting?.category === "coding" && !codingItems.some((item) => item.id === drafting.modelId) ? (
+              // A brand-new model has no row until its draft is stored.
+              <AdminStateBlock kind="loading" />
+            ) : (
+              <CodingCatalogList
+                m={m}
+                items={codingItems}
+                onOpen={(item) => setCodingOpenId(item.id)}
+                onAction={onCodingAction}
+                onHold={(item) => {
+                  setHoldReason("");
+                  setHold({ category: "coding", modelId: item.id, name: item.name });
+                }}
+              />
+            )}
             <div className="border-t border-zinc-800 pt-3">
               <div className="text-sm font-bold text-zinc-100">{m.snapshot}</div>
               <div className="text-xs text-zinc-400">
@@ -626,56 +677,8 @@ export function AdminModelCatalogPanel() {
                   ? m.snapshotLine(report.coding.snapshot.version, report.coding.snapshot.models.length, report.coding.snapshot.coverageUntil.slice(0, 10))
                   : m.snapshotNone}
               </div>
-              <AdminWriteButton size="sm" variant="secondary" className="mt-2" onClick={() => void sendAndReload("POST", { action: "publish_snapshot" })}>
+              <AdminWriteButton size="sm" variant="secondary" className="mt-2" onClick={() => void publishSnapshot()}>
                 {m.publishSnapshot}
-              </AdminWriteButton>
-            </div>
-          </AdminTile>
-
-          <AdminTile title={m.requestDraft}>
-            {!report.draftLlm.configured ? (
-              <p className="text-xs text-amber-300">{m.draftNotConfigured(report.draftLlm.env)}</p>
-            ) : null}
-            <div className="grid gap-2 sm:grid-cols-3">
-              <label className={fieldLabel}>
-                {m.draftModelId}
-                <input className={textarea} value={draftForm.modelId} onChange={(event) => setDraftForm({ ...draftForm, modelId: event.target.value })} />
-              </label>
-              <label className={fieldLabel}>
-                {m.provider}
-                <input className={textarea} value={draftForm.provider} onChange={(event) => setDraftForm({ ...draftForm, provider: event.target.value })} />
-              </label>
-              <label className={fieldLabel}>
-                {m.draftApiModelId}
-                <input className={textarea} value={draftForm.apiModelId} onChange={(event) => setDraftForm({ ...draftForm, apiModelId: event.target.value })} />
-              </label>
-            </div>
-            <label className={`block ${fieldLabel}`}>
-              {m.draftSources}
-              <textarea className={textarea} rows={3} value={draftForm.sources} onChange={(event) => setDraftForm({ ...draftForm, sources: event.target.value })} />
-            </label>
-            <div>
-              <AdminWriteButton
-                size="sm"
-                variant="secondary"
-                disabled={!report.draftLlm.configured}
-                onClick={() =>
-                  void sendAndReload(
-                    "POST",
-                    {
-                      action: "draft",
-                      category: "coding",
-                      modelId: draftForm.modelId.trim(),
-                      provider: draftForm.provider.trim(),
-                      apiModelId: draftForm.apiModelId.trim(),
-                      sourceUrls: draftForm.sources.split("\n").map((line) => line.trim()).filter(Boolean),
-                    },
-                    DRAFT_REQUEST_TIMEOUT_MS,
-                    m.draftSaved(draftForm.modelId.trim())
-                  )
-                }
-              >
-                {m.submit}
               </AdminWriteButton>
             </div>
           </AdminTile>
@@ -734,6 +737,41 @@ export function AdminModelCatalogPanel() {
         busy={busy}
         onConfirm={() => confirmEnable && void enable(confirmEnable)}
         onClose={() => setConfirmEnable(null)}
+      />
+
+      <AdminReasonDialog
+        open={codingForm !== null}
+        title={m.codingFlow.addTitle}
+        description={m.codingFlow.addDescription}
+        confirmLabel={m.codingFlow.addConfirm}
+        confirmDisabled={!codingFormValid}
+        onConfirm={() => codingForm && void requestCodingDraft(codingForm)}
+        onClose={() => setCodingForm(null)}
+      >
+        {codingForm ? <CodingModelForm m={m} value={codingForm} onChange={setCodingForm} providers={codingProviders} /> : null}
+      </AdminReasonDialog>
+
+      <AdminConfirmDialog
+        open={confirmCodingEnable !== null}
+        title={confirmCodingEnable ? m.enableTitle(confirmCodingEnable.name) : ""}
+        summary={
+          confirmCodingEnable?.profile
+            ? m.codingFlow.enableSummary(confirmCodingEnable.profile.pricing.inputUsdPerMTok, confirmCodingEnable.profile.pricing.outputUsdPerMTok)
+            : undefined
+        }
+        effects={
+          confirmCodingEnable?.profile
+            ? [
+                m.codingFlow.enableEffectListed(confirmCodingEnable.name, confirmCodingEnable.profile.minimumPlan),
+                m.codingFlow.enableEffectCharges(confirmCodingEnable.profile.pricing.creditWeight, confirmCodingEnable.provider),
+                m.codingFlow.enableEffectSnapshot,
+              ]
+            : []
+        }
+        confirmLabel={m.enable}
+        busy={busy}
+        onConfirm={() => confirmCodingEnable && void enableCoding(confirmCodingEnable)}
+        onClose={() => setConfirmCodingEnable(null)}
       />
 
       <AdminReasonDialog

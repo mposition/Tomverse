@@ -48,6 +48,88 @@ const seedCatalog = async () => {
   });
 };
 
+const CODER = "gpt-coding-flow-e2e";
+
+// A coding draft as the LLM path stores it (codingDraftFromAnswer), with
+// OpenAI's own pages so the judge's source checks pass.
+const codingDraft = {
+  name: "Flow Test Coder",
+  provider: "openai",
+  apiModelId: CODER,
+  minimumPlan: "Pro",
+  capabilities: { toolCalling: "parallel", structuredOutput: "strict_schema", imageInput: false, maxContextTokens: 200_000, maxOutputTokens: 32_000 },
+  pricing: {
+    inputUsdPerMTok: 1,
+    outputUsdPerMTok: 8,
+    creditWeight: 4,
+    verifiedAt: "2026-11-12",
+    sources: [
+      "https://developers.openai.com/api/docs/pricing",
+      "https://openai.com/policies/services-agreement",
+      "https://platform.openai.com/docs/guides/your-data",
+    ],
+  },
+  terms: { allowsResaleAndCodingAgent: true, url: "https://openai.com/policies/services-agreement", checkedAt: "2026-11-12" },
+  retention: { url: "https://platform.openai.com/docs/guides/your-data", checkedAt: "2026-11-12" },
+  processingRegion: "US",
+};
+
+test.describe("coding model catalogue flow", () => {
+  test.beforeEach(async ({ signInAs }) => {
+    await adminFixtureDatabase().modelCatalogEntry.create({
+      data: { category: "coding", modelId: CODER, draft: codingDraft, draftSource: "llm", draftCreatedAt: new Date() },
+    });
+    await signInAs("owner");
+  });
+
+  test("a coding draft is checked as a field table, applied with the operator's weight, then turned on after a confirmation", async ({ page }) => {
+    await page.goto("/admin/models?tab=catalog");
+    // No profile JSON to type anywhere on the screen.
+    await expect(page.getByText("Profile (JSON)")).toHaveCount(0);
+
+    const card = page.getByTestId("model-catalog-pending-coding").filter({ hasText: CODER });
+    await expect(card).toHaveAttribute("data-stage", "draft_ready");
+    await card.getByRole("button", { name: "Check profile" }).click();
+
+    const detail = page.getByTestId("model-catalog-coding-detail");
+    await expect(detail).toBeVisible();
+    const profile = detail.getByTestId("model-catalog-coding-profile");
+    // Prices and evidence are read, not typed.
+    await expect(profile.getByText("$8", { exact: true })).toBeVisible();
+    await expect(detail.getByRole("link", { name: /openai\.com\/policies\/services-agreement/ })).toBeVisible();
+    await expect(detail.getByText("Allows resale and coding agents")).toBeVisible();
+
+    const weight = detail.getByTestId("model-catalog-coding-weight");
+    const apply = detail.getByTestId("model-catalog-coding-apply");
+    await weight.fill("1");
+    await expect(apply).toBeDisabled();
+    await expect(detail.getByText("Fix the marked fields to apply.")).toBeVisible();
+    await weight.fill("9");
+    await detail.getByTestId("model-catalog-coding-name").fill("Flow Coder");
+    await expect(apply).toBeEnabled();
+    await apply.click();
+
+    await expect(page.getByTestId("model-catalog-toast")).toContainText("Applied the profile for Flow Coder.");
+    const key = { category_modelId: { category: "coding", modelId: CODER } };
+    const applied = await adminFixtureDatabase().modelCatalogEntry.findUniqueOrThrow({ where: key });
+    expect(applied.draft).toBeNull();
+    expect(applied.enabled).toBeNull();
+    expect((applied.profile as { name: string; pricing: { creditWeight: number } }).pricing.creditWeight).toBe(9);
+    expect((applied.profile as { name: string }).name).toBe("Flow Coder");
+
+    await expect(detail).toHaveAttribute("data-stage", "ready_to_enable");
+    await detail.getByRole("button", { name: "Turn on", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Turn on Flow Coder?" });
+    await expect(dialog).toContainText("from the Pro plan");
+    await expect(dialog).toContainText("weight 9");
+    await dialog.getByRole("button", { name: /Turn on/ }).click();
+
+    await expect(page.getByTestId("model-catalog-toast")).toContainText("Flow Coder is on.");
+    expect((await adminFixtureDatabase().modelCatalogEntry.findUniqueOrThrow({ where: key })).enabled).toBe(true);
+    await expect(detail).toHaveAttribute("data-stage", "serving");
+  });
+});
+
 test.describe("image model catalogue flow", () => {
   test.beforeEach(async ({ signInAs }) => {
     await seedCatalog();

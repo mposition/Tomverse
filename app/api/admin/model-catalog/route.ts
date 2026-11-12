@@ -9,7 +9,9 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { authOptions } from "@/lib/auth";
 import { IMAGE_MODEL_REGISTRY, type ImageModelProfile, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
 import {
+  codingCreditFloor,
   imageProviderBudgetReady,
+  judgeCoding,
   judgeImage,
   latestCodingSnapshot,
   loadChatCatalogView,
@@ -27,6 +29,8 @@ import {
   updateCatalogEntry,
 } from "@/lib/modelCatalogAdmin";
 import {
+  codingDraftEditSchema,
+  codingProfileSchema,
   defaultPriceSources,
   imageCreditOverrideSchema,
   imageFullProfileSchema,
@@ -44,6 +48,7 @@ import {
   MODEL_CATALOG_DRAFT_LLM_MODEL_ENV,
 } from "@/lib/modelCatalogDraftLlm";
 import { prisma } from "@/lib/prisma";
+import { AI_PROVIDERS } from "@/lib/modelRegistryShared";
 import {
   RUNTIME_IMAGE_PROVIDERS,
   RUNTIME_IMAGE_QUALITIES,
@@ -86,6 +91,17 @@ const reviewDraft = (base: ImageModelProfile | null, draft: unknown) => {
   if (!base || !parsed.success) return null;
   return reviewImageDraft(base, parsed.data as never, { minimumCredits: minimumCreditsForImageOption });
 };
+
+/** A stored coding draft's floor and what the judge would say at its values, or null when it does not parse. */
+const reviewCodingDraft = (modelId: string, draft: unknown) => {
+  const parsed = codingProfileSchema.safeParse(draft);
+  if (!parsed.success) return null;
+  const admission = judgeCoding({ modelId, ...parsed.data });
+  return { floor: codingCreditFloor(parsed.data), reasons: admission.admitted ? [] : [...admission.reasons] };
+};
+
+/** Providers a coding draft can read: known to the code, with official documentation hosts. */
+const CODING_DRAFT_PROVIDERS = AI_PROVIDERS.filter((provider) => Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider));
 
 const adminSession = async (write: boolean) => {
   const session = await getServerSession(authOptions);
@@ -174,7 +190,22 @@ export async function GET(req: Request) {
           hosts: OFFICIAL_SOURCE_HOSTS[provider] ?? [],
         })),
       },
-      coding: { models: coding, snapshot },
+      coding: {
+        models: coding.map((entry) => ({
+          ...entry,
+          // The floor the judge holds the credit weight to, at the stored profile's prices.
+          floor: entry.profile ? codingCreditFloor(entry.profile) : null,
+          draftReview: reviewCodingDraft(entry.modelId, entry.draft),
+        })),
+        snapshot,
+        // What the add form offers: a draft reads up to three official pages
+        // (price, terms, retention); the price page may default.
+        providers: CODING_DRAFT_PROVIDERS.map((provider) => ({
+          provider,
+          defaultSources: defaultPriceSources(provider),
+          hosts: OFFICIAL_SOURCE_HOSTS[provider] ?? [],
+        })),
+      },
       chat: { models: chat, editable: false, editAt: "/admin/models?tab=registry" },
       video: { models: [], policy: judgeVideoModel() },
       draftLlm: {
@@ -232,6 +263,9 @@ const postBodySchema = z.discriminatedUnion("action", [
     // Image: the operator's credits for options the draft priced. Costs and
     // sources stay the draft's; the revision is judged at these credits.
     creditOverrides: imageCreditOverrideSchema.optional(),
+    // Coding: the operator's name, minimum plan and credit weight (at or
+    // above the floor). Prices and evidence stay the draft's.
+    codingEdit: codingDraftEditSchema.optional(),
   }),
   z.object({ action: z.literal("publish_snapshot") }),
 ]);
@@ -253,6 +287,7 @@ export async function POST(req: Request) {
         category: body.category,
         modelId: body.modelId,
         creditOverrides: body.creditOverrides,
+        codingEdit: body.codingEdit,
         session,
         request: req,
       });

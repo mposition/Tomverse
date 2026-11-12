@@ -9,10 +9,12 @@ import { z } from "zod";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { IMAGE_MODEL_REGISTRY, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
-import { invalidateImageModelCatalog, judgeCoding, judgeImage } from "@/lib/modelCatalog";
+import { codingCreditFloor, invalidateImageModelCatalog, judgeCoding, judgeImage } from "@/lib/modelCatalog";
 import {
+  applyCodingDraftEdits,
   applyImageCreditOverrides,
   canonicalJson,
+  type CodingDraftEdit,
   codingProfileSchema,
   freePricingVersion,
   type ImageCreditOverride,
@@ -106,6 +108,8 @@ export const updateCatalogEntry = async (input: {
   session: Session;
   request?: Request;
   tx?: Prisma.TransactionClient;
+  /** Where a new profile came from, for the audit row (an applied coding draft and the operator's edits to it). */
+  provenance?: { fromDraft: true; edits: { field: string; from: string | number; to: string | number }[] };
 }) => {
   const { category, modelId, patch, session } = input;
   if (!MODEL_ID_PATTERN.test(modelId)) throw new CatalogRefusal("invalid_model_id", [], 400);
@@ -187,6 +191,7 @@ export const updateCatalogEntry = async (input: {
         before: before ? { enabled: before.enabled, holdReason: before.holdReason, sortOrder: before.sortOrder } : null,
         after: { enabled: next.enabled, holdReason: next.holdReason, sortOrder: next.sortOrder },
         profileChanged: profile !== undefined,
+        ...(input.provenance ? { provenance: input.provenance } : {}),
       },
       tx,
     });
@@ -335,11 +340,16 @@ export const applyCatalogDraft = async (input: {
   modelId: string;
   /** Image only: the operator's credits for options the draft priced. */
   creditOverrides?: readonly ImageCreditOverride[];
+  /** Coding only: the operator's name, minimum plan and credit weight. */
+  codingEdit?: CodingDraftEdit;
   session: Session;
   request?: Request;
 }) => {
   if (input.category !== "image" && input.creditOverrides?.length) {
     throw new CatalogRefusal("credit_overrides_image_only", [], 400);
+  }
+  if (input.category !== "coding" && input.codingEdit && Object.keys(input.codingEdit).length > 0) {
+    throw new CatalogRefusal("coding_edit_coding_only", [], 400);
   }
   // One transaction: the draft read, its application and its removal commit
   // together, so a draft written in between is neither applied nor lost.
@@ -356,13 +366,21 @@ export const applyCatalogDraft = async (input: {
     if (input.category === "coding") {
       const parsed = codingProfileSchema.safeParse(draft);
       if (!parsed.success) throw new CatalogRefusal("invalid_draft", parsed.error.issues.map((i) => i.path.join(".")), 400);
+      const edited = applyCodingDraftEdits(parsed.data, input.codingEdit ?? {});
+      // The credit weight is the operator's, but never under the floor the
+      // judge uses: a weight below it would only be refused at turn-on, or
+      // would reprice a serving model below its worst turn.
+      const floor = codingCreditFloor(edited.profile);
+      if (floor === null) throw new CatalogRefusal("not_admitted", ["credit_floor_unbounded"]);
+      if (edited.profile.pricing.creditWeight < floor) throw new CatalogRefusal("not_admitted", [`credits_below_floor:${floor}`]);
       await updateCatalogEntry({
         category: "coding",
         modelId: input.modelId,
-        patch: { profile: parsed.data },
+        patch: { profile: edited.profile },
         session: input.session,
         request: input.request,
         tx,
+        provenance: { fromDraft: true, edits: edited.edits },
       });
     } else {
       const parsed = priceRevisionSchema.safeParse(draft);
