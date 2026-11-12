@@ -117,8 +117,8 @@ deletion cascades through them; export contains only their safe status timeline.
 
 With the preview on, a signed-in user can also enter their own remote MCP
 server URL from the "Custom MCP server" card. This is **on by default**
-(owner decision, 2026-11-12); any value of `MCP_CUSTOM_SERVERS_DISABLED`
-other than `false` turns it off, and it is always off while
+(owner decision, 2026-11-12); a non-empty `MCP_CUSTOM_SERVERS_DISABLED`
+other than `false` turns it off (unset, empty or `false` leaves it on), and it is always off while
 `MCP_CONNECTOR_PREVIEW_ENABLED` is off. With the switch off, existing custom
 connections become unavailable and can still be disconnected.
 
@@ -128,7 +128,8 @@ connections become unavailable and can still be disconnected.
   are refused exactly as for operator servers.
 - Authentication is `none`, a separate bearer token, or OAuth for servers that
   publish RFC 9728 / RFC 8414 metadata with dynamic client registration and
-  S256 PKCE. Discovery runs once, through the same guarded client, and its
+  explicitly advertise S256 PKCE; an advertised resource must be this URL or a
+  parent path on the same origin. Discovery runs once, through the same guarded client, and its
   endpoints are stored as the fixed policy. The request scope is the resource's
   advertised `scopes_supported`; with none advertised there is no scope bound.
 - A custom server has no read tools: every selected tool needs the user's

@@ -79,6 +79,12 @@ test("OAuth discovery refuses servers without registration, PKCE, a matching iss
   delete withoutRegistration.registration_endpoint;
   await assert.rejects(() => run(withoutRegistration), { code: "oauth_discovery_failed" });
   await assert.rejects(() => run({ ...metadata, code_challenge_methods_supported: ["plain"] }), { code: "oauth_discovery_failed" });
+  const withoutPkce: Record<string, unknown> = { ...metadata };
+  delete withoutPkce.code_challenge_methods_supported;
+  await assert.rejects(() => run(withoutPkce), { code: "oauth_discovery_failed" });
+  await assert.rejects(() => run(metadata, { ...resource, resource: "https://mcp.example.com/other" }), { code: "oauth_discovery_failed" });
+  await assert.rejects(() => run(metadata, { ...resource, resource: "https://mcp.example.com/mc" }), { code: "oauth_discovery_failed" });
+  assert.equal((await run(metadata, { ...resource, resource: "https://mcp.example.com/" })).issuer, "https://auth.example.com");
   await assert.rejects(() => run({ ...metadata, issuer: "https://other.example.com" }), { code: "oauth_discovery_failed" });
   await assert.rejects(() => run({ ...metadata, token_endpoint_auth_methods_supported: ["private_key_jwt"] }), { code: "oauth_discovery_failed" });
   await assert.rejects(() => run({ ...metadata, token_endpoint: "https://10.0.0.8/token" }), { code: "unsafe_endpoint" });

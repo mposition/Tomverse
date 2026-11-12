@@ -19,7 +19,7 @@ import "@/components/chat/review-studio.css";
 import styles from "./pluginWorkspace.module.css";
 
 // A custom server's chosen name never selects a catalogued brand logo.
-const logoName = (serverId: string, name: string) => serverId.startsWith("custom-") ? "" : name;
+const logoName = (serverId: string, name: string) => serverId === "custom" || serverId.startsWith("custom-") ? "" : name;
 const featuredProviders = ["github", "railway", "slack", "notion", "linear", "figma", "canva", "atlassian", "sentry", "cloudflare"];
 
 export function PluginWorkspace() {

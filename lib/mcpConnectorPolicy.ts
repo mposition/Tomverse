@@ -50,7 +50,7 @@ export function mcpPreviewEnabled(env: Record<string, string | undefined> = proc
 }
 
 // User-entered server URLs. On by default with the preview (owner decision
-// 2026-11-12); any value of MCP_CUSTOM_SERVERS_DISABLED except "false" turns it off.
+// 2026-11-12); a non-empty MCP_CUSTOM_SERVERS_DISABLED other than "false" turns it off.
 export const MCP_CUSTOM_SERVER_PREFIX = "custom-";
 export const isCustomMcpServerId = (id: string) => id.startsWith(MCP_CUSTOM_SERVER_PREFIX);
 export function mcpCustomServersEnabled(env: Record<string, string | undefined> = process.env) {

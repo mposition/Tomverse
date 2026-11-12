@@ -63,6 +63,11 @@ const serverMetadataSchema = z.object({ issuer: z.string().url(), authorization_
   registration_endpoint: z.string().url(), code_challenge_methods_supported: z.array(z.string()).optional(),
   token_endpoint_auth_methods_supported: z.array(z.string()).optional() });
 const sameUrl = (a: string, b: string) => a.replace(/\/$/, "") === b.replace(/\/$/, "");
+// RFC 9728: the advertised resource identifies this server (same origin, same path or a parent path).
+const coversServer = (resource: string, server: URL) => {
+  const url = new URL(resource), path = url.pathname.replace(/\/$/, "");
+  return url.origin === server.origin && !url.search && !url.hash && (server.pathname === path || server.pathname.startsWith(`${path}/`));
+};
 
 // RFC 9728 protected-resource metadata, then RFC 8414 / OIDC server metadata.
 // Only servers with dynamic client registration and PKCE are accepted. The
@@ -71,12 +76,13 @@ export async function discoverCustomOAuth(serverUrl: string, signal: AbortSignal
   const server = new URL(serverUrl);
   const resource = resourceMetadataSchema.safeParse(await firstJson([...wellKnown(server, "oauth-protected-resource"),
     ...(server.pathname === "/" ? [] : [`${server.origin}/.well-known/oauth-protected-resource`])], getJson, signal) ?? {});
-  if (!resource.success || (resource.data.resource && new URL(resource.data.resource).origin !== server.origin)) throw new McpConnectorError("oauth_discovery_failed");
+  if (!resource.success || (resource.data.resource && !coversServer(resource.data.resource, server))) throw new McpConnectorError("oauth_discovery_failed");
   const issuer = new URL(resource.data.authorization_servers?.[0] ?? server.origin);
   const parsed = serverMetadataSchema.safeParse(await firstJson([...wellKnown(issuer, "oauth-authorization-server"), ...wellKnown(issuer, "openid-configuration")], getJson, signal));
   if (!parsed.success) throw new McpConnectorError("oauth_discovery_failed");
   const metadata = parsed.data;
-  if (!sameUrl(metadata.issuer, issuer.href) || (metadata.code_challenge_methods_supported && !metadata.code_challenge_methods_supported.includes("S256")))
+  // The authorization request always sends an S256 challenge, so the server must say it verifies one.
+  if (!sameUrl(metadata.issuer, issuer.href) || !metadata.code_challenge_methods_supported?.includes("S256"))
     throw new McpConnectorError("oauth_discovery_failed");
   const methods = metadata.token_endpoint_auth_methods_supported ?? ["client_secret_basic"];
   const tokenAuthMethod = (["none", "client_secret_post", "client_secret_basic"] as const).find(method => methods.includes(method));
