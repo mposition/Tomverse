@@ -137,6 +137,8 @@ import {
   type ContinuationRowNaming,
 } from "@/lib/continuationTitleContext";
 import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
+import { ContinuationPassageCard } from "@/components/continuations/ContinuationPassageCard";
+import { encodePassages, type Passage } from "@/lib/continuationPassages";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
 import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
 import { reviewPrefillHref } from "@/lib/chatReviewHandoff";
@@ -1784,6 +1786,7 @@ export function ChatPageClient({
     submittedAtMonotonicMs?: number;
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
+    sourcePassages?: string;
     preparedLocationIntent?: ChatPanelLocationIntent;
     routerLocationTurn?: RouterLocationTurn;
     id: string;
@@ -2101,6 +2104,8 @@ export function ChatPageClient({
   // on failure it stays visible until the user dismisses it (no failure
   // callback is threaded up from ChatApp today), which is disclosed in the
   // chip's own copy rather than silently claimed as a real cancel.
+  const [pickedSource, setPickedSource] = useState<{owner:string;chat:string;parts:Passage[]}|null>(null);
+  const pickedRef = useRef<typeof pickedSource>(null);
   const [isDeepResearchPending, setIsDeepResearchPending] = useState(false);
   // The model the cap dialog is open for, or null. Set only when a Deep
   // Research run needs a slot the selection has no room for.
@@ -6776,6 +6781,9 @@ export function ChatPageClient({
         if (!modelSettingsReady) return;
       }
       const comparisonId = Date.now().toString();
+      const picked = pickedRef.current;
+      const sourcePassages = mountedSurface === "chat" && picked && picked.owner === identityKey && picked.chat === activeChatId && picked.parts.length
+        ? encodePassages(picked.parts) : undefined;
       // Resolved before the preflight, not after it: the preflight prices this
       // set and hands back the admission slots for it, so it has to be asked
       // about the same models the send will name.
@@ -7443,7 +7451,12 @@ export function ChatPageClient({
       // The panels draw the real user turn from this payload, in this commit.
       sendEchoRef.current = null;
       setSendEcho(null);
+      if (sourcePassages && !imageTurnSend && pickedRef.current === picked) {
+        pickedRef.current = null;
+        setPickedSource(null);
+      }
       setPromptPayload({
+        ...(!imageTurnSend && sourcePassages ? {sourcePassages} : {}),
         id: comparisonId,
         submittedAtMonotonicMs,
         preparationTimings: { ...preparation.timings },
@@ -10309,6 +10322,10 @@ export function ChatPageClient({
       continuationSource.timeline
         ? {
             compareInReview,
+            contextCard: mountedSurface === "chat" && identityKey && shellConversationId && continuationSource.timeline.source.status === "available" ?
+              <ContinuationPassageCard key={identityKey + ":" + shellConversationId} source={continuationSource}
+                chosen={pickedSource?.owner === identityKey && pickedSource.chat === shellConversationId ? pickedSource.parts : []}
+                onChoose={parts => { const next = {owner:identityKey,chat:shellConversationId,parts}; pickedRef.current = next; setPickedSource(next); }} /> : null,
             status: continuationSource.timeline.source.status,
             provider: continuationSource.timeline.provider,
             importedAt: continuationSource.timeline.importedAt,
@@ -10333,14 +10350,7 @@ export function ChatPageClient({
           }
         : undefined,
     [
-      continuationSource.timeline,
-      continuationSource.olderCount,
-      continuationSource.loadMore,
-      continuationSource.loadingMore,
-      continuationSource.newerCount,
-      continuationSource.loadNewer,
-      continuationSource.loadingNewer,
-      continuationSource.focusOutcome,
+      continuationSource, mountedSurface, identityKey, shellConversationId, pickedSource,
       continuationFocusRequest,
       consumeAppliedSearchHitFocus,
       compareInReview,

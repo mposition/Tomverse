@@ -241,6 +241,7 @@ export type ExternalImportWizardAction =
     | { type: "device_limit_reached" }
     | { type: "toggle_conversation"; id: string }
     | { type: "set_truncation_approval"; id: string; approved: boolean }
+    | { type: "select_only"; id: string }
     | { type: "select_all_matching_filter" }
     | { type: "clear_all_matching_filter" }
     | { type: "set_filter"; filter: Partial<ConversationFilter> }
@@ -747,6 +748,12 @@ export function externalImportWizardReducer(
             };
         }
 
+        case "select_only": {
+            const row = state.rows.find(item => item.id === action.id);
+            return row && isRowSelectable(row, state.truncationApprovals)
+                ? { ...state, selectedIds: new Set([row.id]) }
+                : state;
+        }
         case "select_all_matching_filter": {
             // Applies to the whole filtered dataset, not the rendered window,
             // and covers only conversations importable as-is: pulling in

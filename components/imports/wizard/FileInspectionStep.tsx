@@ -22,12 +22,14 @@ import type { ExternalImportWizardStatus } from "@/lib/externalImportWizard";
  * a screen-reader user hears it without losing their place.
  */
 export function FileInspectionStep({
+    compact = false,
     status,
     onFileSelected,
     onCancelParsing,
     onBack,
     onRetry,
 }: {
+    compact?: boolean;
     status: Extract<
         ExternalImportWizardStatus,
         | { kind: "file_selection" }
@@ -185,7 +187,7 @@ export function FileInspectionStep({
     return (
         <div data-testid="external-import-file-selection">
             <h2 className="text-base font-bold">
-                {t("externalImport.selectFile")}
+                {t(compact ? "journey.haveFile" : "externalImport.selectFile")}
             </h2>
             <p className="mt-1 text-sm leading-6 text-zinc-500">
                 {t("externalImport.selectFileHint")}
@@ -229,14 +231,14 @@ export function FileInspectionStep({
                     {t("externalImport.guideStaysLocal")}
                 </p>
             </div>
-            <button
+            {!compact && <button
                 type="button"
                 className={`${secondaryButtonClass} mt-4`}
                 data-testid="external-import-back-step"
                 onClick={onBack}
             >
                 {t("externalImport.back")}
-            </button>
+            </button>}
         </div>
     );
 }

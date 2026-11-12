@@ -34,9 +34,8 @@
  * docs/policy/external-conversation-import-and-memory.md §6 and would
  * be priced against the user's credits every time. The window is taken from
  * the end — the turns nearest to where the user stopped — and stops the moment
- * the next turn would not fit whole. Half a turn is not a turn: a truncated
- * assistant answer in the middle of a sentence is worse context than its
- * absence, and it would make the "N messages were used" disclosure false.
+ * the next turn does not fit. An already oversized boundary turn may still
+ * contribute its complete closing paragraphs. Every shortened turn is counted.
  *
  * Pure: no database, no clock, no provider. The caller supplies rows and gets
  * a plan.
@@ -54,7 +53,7 @@ import { estimateTextTokens } from "@/lib/chatTokenEstimate";
  * for the same reason `mem-context-v1` is separate from retrieval: changing
  * the words is not changing the choice.
  */
-export const CONTINUATION_SEED_VERSION = "ext-seed-v1";
+export const CONTINUATION_SEED_VERSION = "ext-seed-v2";
 
 /**
  * The cap, in estimated input tokens, on everything the seed contributes.
@@ -140,24 +139,66 @@ export type ContinuationSeedPlan = {
     estimatedTokens: number;
 };
 
-const shorten = (text: string) => {
-    // A string can never hold more code points than UTF-16 units, so anything
-    // this short is already whole and needs no scan. Worth the line because
-    // every eligible message in the scan window is cut before selection, and
-    // the seed is rebuilt on every turn of a continued conversation.
-    if (text.length <= CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT) {
+// Reserve room for the given opening and find the longest ending that fits.
+// Both the omission marker and every retained character count toward the caps.
+function fittingSuffix(points: string[], opening = "", budget = CONTINUATION_SEED_TOKEN_BUDGET) {
+    const room = CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT - Array.from(opening).length;
+    let low = Math.max(0, points.length - room);
+    let high = points.length;
+    const candidate = points.slice(low).join("");
+    if (estimateTextTokens(opening + candidate) <= budget) return candidate;
+    while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        if (estimateTextTokens(opening + points.slice(middle).join("")) > budget) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    return points.slice(low).join("");
+}
+
+export function excerptContinuationMessage(text: string) {
+    const limit = CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT;
+    if (text.length <= limit && estimateTextTokens(text) <= CONTINUATION_SEED_TOKEN_BUDGET) {
         return { text, shortened: false };
     }
-    const points = [...text];
-    return points.length > CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT
-        ? {
-              text: points
-                  .slice(0, CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT)
-                  .join(""),
-              shortened: true,
-          }
-        : { text, shortened: false };
-};
+
+    // Export padding should not displace the last substantive paragraph.
+    const end = text.trimEnd();
+    const points = Array.from(end.slice(-2 * limit)).slice(-limit);
+    const fullTail = fittingSuffix(points);
+    if (fullTail === end) return { text: fullTail, shortened: fullTail !== text };
+
+    // Keep a little opening context when it only displaces part of the paragraph
+    // already cut by the suffix. A complete closing paragraph has first claim.
+    const lineBreak = /[\r\n\u2028\u2029]/u;
+    if (lineBreak.test(end.charAt(end.length - fullTail.length - 1))) {
+        return { text: fullTail, shortened: true };
+    }
+    const openingLength = Math.floor(limit / 8);
+    const head = Array.from(end.slice(0, 2 * openingLength)).slice(0, openingLength).join("");
+    if (!head.trim()) return { text: fullTail, shortened: true };
+    const opening = head + " […] ";
+    const tail = fittingSuffix(points, opening);
+    const firstBreak = fullTail.search(lineBreak);
+    const dropsWholeParagraph = firstBreak >= 0 && fullTail.length - tail.length > firstBreak + 1;
+    return { text: dropsWholeParagraph ? fullTail : opening + tail, shortened: true };
+}
+
+// A short follow-up must not displace an entire earlier oversized turn when
+// its complete closing paragraphs still fit in the remaining window.
+function closingParagraphs(text: string, remaining: number): string {
+    if (remaining <= 0) return "";
+    const end = text.trimEnd();
+    const limit = CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT;
+    const points = Array.from(end.slice(-2 * limit)).slice(-limit);
+    const tail = fittingSuffix(points, "", remaining);
+    const start = end.length - tail.length;
+    if (start === 0 || /[\r\n\u2028\u2029]/u.test(end.charAt(start - 1))) return tail;
+    const boundary = tail.search(/[\r\n\u2028\u2029]/u);
+    return boundary < 0 ? "" : tail.slice(boundary + 1).trimStart();
+}
 
 /**
  * The empty plan.
@@ -214,20 +255,9 @@ export function planContinuationSeed(
     );
     const excludedByRoleCount = ordered.length - eligible.length;
 
-    /*
-      Every eligible message is cut and judged before any of them is selected,
-      rather than inside the loop below.
-
-      The loop stops at the first turn that does not fit, so a message older
-      than that one is never reached — and a reason it was absent that the loop
-      never evaluated cannot be reported. Blank turns are the reason this
-      matters: they are dropped by the rule whatever the budget is, and
-      counting them as budget omissions made the seed header's sentence about
-      the context budget overstate what the cap left out.
-    */
-    const candidates = eligible
-        .map((message) => ({ message, ...shorten(message.content) }))
-        .filter((candidate) => candidate.text.trim().length > 0);
+    // Every nonblank message retains its last substantive character, so blanks
+    // can be counted before building excerpts for the newest turns we need.
+    const candidates = eligible.filter((message) => /\S/u.test(message.content));
     const blankSkippedCount = eligible.length - candidates.length;
 
     if (budget <= 0 || candidates.length === 0) {
@@ -242,16 +272,25 @@ export function planContinuationSeed(
     const selected: ContinuationSeedTurn[] = [];
     let spent = 0;
     for (let index = candidates.length - 1; index >= 0; index -= 1) {
-        const { message, text, shortened } = candidates[index]!;
-        const cost = estimateTextTokens(text);
-        if (spent + cost > budget) break;
+        const message = candidates[index]!;
+        const excerpt = excerptContinuationMessage(message.content);
+        let text = excerpt.text;
+        let cost = estimateTextTokens(text);
+        const atBoundary = spent + cost > budget;
+        if (atBoundary) {
+            if (!excerpt.shortened) break;
+            text = closingParagraphs(message.content, budget - spent);
+            if (!text.trim()) break;
+            cost = estimateTextTokens(text);
+        }
         spent += cost;
         selected.push({
             role: message.role as ContinuationSeedRole,
             ordinal: message.ordinal,
             text,
-            shortened: shortened || message.truncated,
+            shortened: excerpt.shortened || message.truncated,
         });
+        if (atBoundary) break;
     }
     selected.reverse();
 

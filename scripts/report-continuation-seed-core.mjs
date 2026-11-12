@@ -26,7 +26,7 @@
 // suppresses any group smaller than `minGroupSize`.
 
 import {
-  CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT,
+  excerptContinuationMessage,
   CONTINUATION_SEED_TOKEN_BUDGET,
   isContinuationSeedRole,
   planContinuationSeed,
@@ -66,13 +66,6 @@ export const ASSISTANT_TURN_WEIGHT_NOTE =
   "requests that failed before a message was saved are missing, and no time window or seed-version " +
   "filter is applied.";
 
-/** The text the planner actually judges and prices: the pre-cut to the message cap. */
-const preCut = (content) => {
-  const points = [...content];
-  return points.length > CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT
-    ? { text: points.slice(0, CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT).join(""), cut: true }
-    : { text: content, cut: false };
-};
 
 // ---------------------------------------------------------------- script class
 
@@ -136,52 +129,31 @@ export function planWithBoundaryExcerpt({
   keep,
   tokenBudget = CONTINUATION_SEED_TOKEN_BUDGET,
 }) {
-  const ordered = [...messages].sort((a, b) => a.ordinal - b.ordinal);
-  const eligible = ordered.filter((message) => isContinuationSeedRole(message.role));
-  const candidates = eligible
-    .map((message) => ({ message, ...preCut(message.content) }))
-    .filter((candidate) => candidate.text.trim().length > 0);
-  const selected = [];
-  let spent = 0;
-  let excerpted = false;
-  for (let index = candidates.length - 1; index >= 0; index -= 1) {
-    const { message, text, cut: wasPreCut } = candidates[index];
-    const cost = estimateTextTokens(text);
-    if (spent + cost <= tokenBudget) {
-      spent += cost;
-      selected.push({
-        role: message.role,
-        ordinal: message.ordinal,
-        text,
-        shortened: wasPreCut || message.truncated,
-      });
-      continue;
-    }
-    const remaining = tokenBudget - spent;
-    if (remaining > 0) {
-      const cut = excerptToTokens(text, remaining, keep);
-      if (cut.trim().length > 0) {
-        spent += estimateTextTokens(cut);
-        selected.push({ role: message.role, ordinal: message.ordinal, text: cut, shortened: true });
-        excerpted = true;
-      }
-    }
-    break;
+  const current = planContinuationSeed({ messages, sourceMessageCount, tokenBudget });
+  const result = { ...current, seedVersion: `measurement-C-${keep}`, excerpted: false };
+  const remaining = tokenBudget - current.estimatedTokens;
+  if (!current.omittedByBudgetCount || remaining <= 0) return result;
+  const earlier = messages
+    .filter((message) => isContinuationSeedRole(message.role) && (!current.turns.length || message.ordinal < current.fromOrdinal))
+    .sort((a, b) => b.ordinal - a.ordinal);
+  for (const message of earlier) {
+    const { text } = excerptContinuationMessage(message.content);
+    if (!text.trim()) continue;
+    const cut = excerptToTokens(text, remaining, keep);
+    if (!cut.trim()) break;
+    const turn = { role: message.role, ordinal: message.ordinal, text: cut, shortened: true };
+    return {
+      ...result,
+      turns: [turn, ...current.turns],
+      fromOrdinal: turn.ordinal,
+      toOrdinal: current.turns.length ? current.toOrdinal : turn.ordinal,
+      truncatedCount: current.truncatedCount + 1,
+      omittedByBudgetCount: current.omittedByBudgetCount - 1,
+      estimatedTokens: current.estimatedTokens + estimateTextTokens(cut),
+      excerpted: true,
+    };
   }
-  selected.reverse();
-  return {
-    seedVersion: `measurement-C-${keep}`,
-    turns: selected,
-    fromOrdinal: selected[0]?.ordinal ?? 0,
-    toOrdinal: selected.at(-1)?.ordinal ?? 0,
-    sourceMessageCount: sourceMessageCount ?? ordered.length,
-    truncatedCount: selected.filter((turn) => turn.shortened).length,
-    omittedByBudgetCount: candidates.length - selected.length,
-    excludedByRoleCount: ordered.length - eligible.length,
-    blankSkippedCount: eligible.length - candidates.length,
-    estimatedTokens: spent,
-    excerpted,
-  };
+  return result;
 }
 
 export const SEED_CANDIDATES = [
@@ -229,9 +201,8 @@ export const SEED_CANDIDATES = [
  * messages with text, in a role the seed admits -- so a source made mostly of
  * tool calls or blank turns does not read as a loss.
  *
- * "Blank" is judged on the pre-cut text, as the planner judges it: a message
- * whose first 4,000 code points are whitespace is skipped by the rule, not left
- * out by the budget. Both the shipped plan and the C candidates separate it
+ * "Blank" is judged on the pre-cut text, as the planner judges it: a message with no visible
+ * text in its excerpt is skipped before the window spends its budget. Both the shipped plan and the C candidates separate it
  * from a budget stop themselves, so the two counts are read off the plan rather
  * than re-derived here -- a second derivation is a second rule, and it would
  * keep agreeing with the first right up to the edit that made them differ.
@@ -239,7 +210,7 @@ export const SEED_CANDIDATES = [
 export function evaluatePlan(plan, messages, { provider = "chatgpt", importedAt = null } = {}) {
   const eligible = messages.filter((message) => isContinuationSeedRole(message.role));
   const eligibleNonBlank = eligible
-    .filter((message) => preCut(message.content).text.trim().length > 0)
+    .filter((message) => excerptContinuationMessage(message.content).text.trim().length > 0)
     .sort((a, b) => a.ordinal - b.ordinal);
   const newest = eligibleNonBlank.at(-1);
   const newestTurn = newest ? plan.turns.find((turn) => turn.ordinal === newest.ordinal) : undefined;
