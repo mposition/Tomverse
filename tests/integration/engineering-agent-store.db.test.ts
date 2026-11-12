@@ -13,6 +13,7 @@ import {
   acceptEngineeringAgentRequest,
   acknowledgeEngineeringAgentDecision,
   acknowledgeEngineeringAgentHalt,
+  approveEngineeringAgentPullRequestResume,
   currentEngineeringAgentHalt,
   recordEngineeringAgentObservedHalt,
   readEngineeringAgentKnownPublishes,
@@ -1259,4 +1260,100 @@ test("an unbound branch the runner observed halts like a recorded halt, until a 
     await prisma.appSetting.deleteMany({ where: { key: observedKey } });
     if (previous) await prisma.appSetting.create({ data: { key: observedKey, value: previous.value } });
   }
+});
+
+test("an unknown publish outcome keeps one open decision, and an approved resume is claimed once (AMUX-FILEGEN-003)", async () => {
+  const run = await startRun();
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "publish",
+      causeKey: `publish:${run.runId}:resume`,
+      runId: run.runId,
+      patchBody: "patch",
+      patchDigest: sha256("patch"),
+      baseSha: sha1("base"),
+      expectedTreeId: sha1("tree"),
+    }),
+  );
+  await inTx((tx) =>
+    issueEngineeringAgentCapability(tx, {
+      workItemId,
+      capability: { baseSha: sha1("base"), patchDigest: sha256("patch"), expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
+    }),
+  );
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+  const openDecisions = () =>
+    prisma.engineeringAgentWorkItem.findMany({
+      where: { kind: "decision", state: "open", causeKey: { startsWith: `unknown:${workItemId}:` } },
+      select: { id: true },
+    });
+  const next = (input: { resumePullRequests?: boolean } = {}) =>
+    inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000, ...input }));
+  const reasonOf = async () => (await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } })).reason;
+
+  // The write pushed and its answer was lost; the lookup that followed found a branch and no pull request.
+  const write = await next();
+  assert.ok(write && write.mode === "write" && write.workItemId === workItemId);
+  const first = await inTx((tx) =>
+    settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: write.fencingToken, outcome: "lookup_impossible", reason: "pull_request_not_ours" }),
+  );
+  assert.equal(first.state, "outcome_unknown");
+
+  // While its decision is open, no round looks again, so none opens another.
+  assert.equal(await next({ resumePullRequests: true }), null);
+  assert.equal(await next(), null);
+  assert.deepEqual((await openDecisions()).map((row) => row.id), [first.decisionItemId]);
+  // Only a branch without its pull request may be resumed.
+  await refusedWith(
+    inTx((tx) => approveEngineeringAgentPullRequestResume(tx, { session: owner, workItemId: first.decisionItemId! })),
+    "pull_request_not_resumable",
+  );
+  await inTx((tx) => acknowledgeEngineeringAgentDecision(tx, { session: owner, workItemId: first.decisionItemId! }));
+
+  // Seen, it is looked at again once, and that lookup opens the one new decision.
+  const looked = await next();
+  assert.ok(looked && looked.mode === "lookup" && looked.workItemId === workItemId);
+  assert.equal(looked.resumePullRequest, undefined, "a lookup carries no approval nobody gave");
+  const second = await inTx((tx) =>
+    settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: looked.fencingToken, outcome: "lookup_impossible", reason: "branch_without_pull_request" }),
+  );
+  // An earlier decision of the same outcome, as the rounds before this change left them.
+  const stale = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, { kind: "decision", causeKey: `unknown:${workItemId}:0`, runId: run.runId, reason: "outcome_unknown" }),
+  );
+  assert.equal((await openDecisions()).length, 2);
+  assert.equal(await next(), null);
+
+  // The person approves: every open decision of this outcome closes as seen, and the item waits for one claim.
+  const approved = await inTx((tx) =>
+    approveEngineeringAgentPullRequestResume(tx, { session: owner, workItemId: second.decisionItemId! }),
+  );
+  assert.equal(approved.acknowledged, 2);
+  assert.deepEqual(await openDecisions(), []);
+  assert.equal(await reasonOf(), "pull_request_resume_approved");
+  const approval = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: approved.auditLogId } });
+  assert.equal(approval.action, ENGINEERING_AGENT_AUDIT_ACTIONS.pullRequestResumeApproved);
+  assert.equal(approval.actorUserId, owner.user!.id);
+  const seen = await prisma.adminAuditLog.findMany({
+    where: { action: ENGINEERING_AGENT_AUDIT_ACTIONS.decisionAcknowledged, targetId: second.decisionItemId! },
+  });
+  assert.deepEqual((seen[0]?.metadata as { sameOutcome?: string[] } | null)?.sameOutcome, [stale.workItemId]);
+
+  // A publisher that does not name the feature is never handed it; the approval waits.
+  assert.equal(await next(), null);
+  assert.equal(await reasonOf(), "pull_request_resume_approved");
+  const resume = await next({ resumePullRequests: true });
+  assert.ok(resume && resume.mode === "lookup" && resume.workItemId === workItemId);
+  assert.equal(resume.resumePullRequest, true);
+  assert.equal(resume.cardRef, run.cardId);
+  assert.ok(resume.consumed, "the commit the consumed capability allows, to check the branch against");
+  assert.equal(await reasonOf(), "pull_request_resume_claimed", "the claim took the approval");
+
+  // The pull request it opened is the result.
+  const bound = await inTx(async (tx) => {
+    const settled = await settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: resume.fencingToken, outcome: "lookup_found_result" });
+    assert.equal(settled.state, "published");
+    return recordEngineeringAgentBinding(tx, bindingInput(run.runId));
+  });
+  await retireBinding(bound.bindingId);
 });

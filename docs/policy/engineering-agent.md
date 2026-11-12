@@ -569,6 +569,22 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
   결정적 판정과 새 capability를 처음부터 다시 만든다(그 사이 base가 움직였을 수 있다).
 - branch를 지우는 경로는 **PR이 없음을 끝까지 읽은 목록으로 확인한 뒤**의 정리뿐이다.
   "PR은 생겼는데 head만 사라진" 상태를 만들지 않는다.
+- 자기 쓰기 직후의 **읽기**(push 뒤 branch ref, PR 생성 뒤 PR 목록)는 GitHub가 아직 그
+  쓰기를 보이지 않을 때 짧게 몇 번 다시 읽는다(최대 5회, 2초 간격). 다시 하는 것은 읽기뿐이고,
+  다른 commit을 가리키는 branch는 기다리지 않는다. 2026-11-11 AMUX-FILEGEN-003은 push 직후
+  ref 읽기가 404를 받아 PR 생성을 건너뛰었다.
+- 결정 항목이 열려 있는 결과 불명 게시 항목은 **다시 조회하지 않는다.** 사람이 그 결정을
+  확인하면 다음 회차가 한 번 조회하고, 그래도 모르면 결정 항목 하나를 새로 연다. 같은 게시
+  항목의 결정 항목을 확인하면 그 항목의 이전 결정 항목도 함께 확인 처리된다(감사 기록에 목록).
+- **branch는 있고 PR이 없으며 branch head가 소비된 capability가 허락한 commit 그대로인 경우**
+  (`branch_without_pull_request`), 사람은 결정 항목에서 "이 브랜치로 PR 열기"를 승인할 수 있다.
+  승인은 그 게시 항목의 다음 claim 하나에만 실리고 claim이 가져간다. 게시 서비스는
+  `pull_request_resume` 기능을 밝힌 경우에만 그 claim을 받고, 쓰기와 같은 스위치(mode·freeze·
+  halt, v22 게시 latch, 검토 draft 기능)가 열려 있어야 한다. 게시 서비스는 branch와 PR 목록을
+  다시 읽고 commit digest가 같고 PR이 0개일 때만 run 표식을 넣은 PR을 **한 번** 연다(운영자 검토
+  항목은 draft). push는 하지 않는다. 결과를 모르면 다음 조회에 맡기고, 4xx면 새 결정 항목이
+  열린다. 사람이 branch를 지우면 다음 조회는 "이전 쓰기 없음"이 되어 대기로 돌아가지만, 소비된
+  capability는 돌아오지 않으므로 새 판정이 필요하다.
 - **본 앱 내부 route의 결과 불명은 GitHub 조회로 풀지 않는다.** 모든 내부 요청은
   idempotency key를 싣고, 상태는 `accepted → in_progress → committed | aborted`다. 결과를
   모르는 호출자는 재시도하지 않고 읽기 전용 상태 route로 묻는다. `in_progress`는
