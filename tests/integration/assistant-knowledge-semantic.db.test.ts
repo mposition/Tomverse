@@ -723,3 +723,47 @@ test("a partial success is reproduced step by step after a later issue completes
     );
     assert.equal(provider.state.calls.length, callsAfterIssuing);
 });
+
+/* ------------------------------------------- the bound includes the question */
+
+test("a long question reserves more, and a budget sized for a short one refuses it", async () => {
+    // Sixty chunks of about a thousand bytes, each matching the question: a
+    // realistic candidate set, large enough that the query's share of every
+    // billed piece decides how many search units the request can cost.
+    const paragraph = (index: number) =>
+        `Refund window and gift card note ${index}. ${"Terms and conditions apply to this passage. ".repeat(24)}`;
+    const user = await createUser();
+    const profile = await createProfile(user.id);
+    const file = await storeFile({
+        userId: user.id,
+        profileId: profile.id,
+        name: "terms.txt",
+        text: Array.from({ length: 60 }, (_, index) => paragraph(index)).join("\n\n"),
+    });
+    await turnOn("knowledgeRerank");
+    // Two search units at 2,000 micro-USD each: what the short question's
+    // worst case comes to, and less than the long question's.
+    provider.setEnv("RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_DAY", "4000");
+    provider.setEnv("RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_MONTH", "4000");
+    const input = { userId: user.id, fileIds: [file.id] };
+
+    const short = await retrieveKnowledgeContext({ ...input, query: GIFT_QUESTION });
+    assert.equal(short.semanticSteps?.rerank, true);
+    assert.equal(provider.state.calls.length, 1);
+    assert.equal((provider.state.calls[0].body.documents as string[]).length, 60);
+    // The hold settled to the one unit the stand-in reports.
+    assert.deepEqual(await bucketCounts(), [
+        ["retrieval-cost-day", 2000],
+        ["retrieval-cost-month", 2000],
+    ]);
+    await prisma.$executeRaw`DELETE FROM "ChatUsageBucket" WHERE "key" = ${RETRIEVAL_PROVIDER_BUCKET_KEY}`;
+
+    // The long question is sent cut to its byte bound, and even so it leaves
+    // so little of each 500-token piece for the document that its worst case
+    // is more than the whole budget: refused before anything is sent.
+    const long = "refund window gift card ".repeat(40);
+    const refused = await retrieveKnowledgeContext({ ...input, query: long });
+    assert.equal(refused.semanticSteps?.rerank, false);
+    assert.equal(provider.state.calls.length, 1);
+    assert.deepEqual(await bucketCounts(), []);
+});

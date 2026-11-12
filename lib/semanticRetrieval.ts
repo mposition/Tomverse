@@ -8,6 +8,7 @@ import {
     RETRIEVAL_PROVIDER_BUCKET_KEY,
     SEMANTIC_RETRIEVAL_LIMITS,
     boundQuery,
+    boundRerankQuery,
     decodeVector,
     embedCostMicroUsd,
     embedTextWorstCaseTokens,
@@ -250,7 +251,9 @@ export async function rerankForRetrieval(input: {
     mode?: SemanticCallMode;
 }): Promise<ReadonlyMap<string, number> | null> {
     if (input.mode === "off") return null;
-    const query = boundQuery(input.query).trim();
+    // The question as it will be sent, so the cache key, the reserved worst
+    // case and the request all describe the same thing.
+    const query = boundRerankQuery(input.query).trim();
     const documents = input.documents.slice(0, SEMANTIC_RETRIEVAL_LIMITS.maxRerankDocuments);
     if (!query || documents.length === 0) return null;
 
@@ -274,7 +277,10 @@ export async function rerankForRetrieval(input: {
     const startedAt = Date.now();
     const reservedAt = input.now ?? new Date();
     const texts = documents.map((document) => document.text);
-    const worstCase = rerankCostMicroUsd(rerankWorstCaseSearchUnits(texts), microUsdPerSearchUnit);
+    const worstCase = rerankCostMicroUsd(
+        rerankWorstCaseSearchUnits(query, texts),
+        microUsdPerSearchUnit
+    );
     const finish = async (value: SemanticCacheValue, fields: Record<string, unknown>) => {
         const stored = await writeCache(key, input.userId, value);
         log({
@@ -299,10 +305,20 @@ export async function rerankForRetrieval(input: {
         return finish({ kind: "failed" }, { outcome: result.failure });
     }
     if (result.value.searchUnits !== null) {
-        await settleRetrievalCost(
-            rerankCostMicroUsd(result.value.searchUnits, microUsdPerSearchUnit) - worstCase,
-            reservedAt
-        );
+        const billed = rerankCostMicroUsd(result.value.searchUnits, microUsdPerSearchUnit);
+        if (billed > worstCase) {
+            // The bound is meant to make this impossible. Recorded rather than
+            // hidden, and the bucket still learns the true figure below.
+            console.error(
+                JSON.stringify({
+                    event: "semantic_retrieval_billed_above_reservation",
+                    feature: input.feature,
+                    reserved: worstCase,
+                    billed,
+                })
+            );
+        }
+        await settleRetrievalCost(billed - worstCase, reservedAt);
     }
     return finish(
         {

@@ -265,6 +265,13 @@ export const SEMANTIC_RETRIEVAL_LIMITS = {
     /** The provider bills one search unit per 100 documents. */
     maxRerankDocuments: 100,
     maxQueryCharacters: 2_000,
+    /**
+     * The question as sent for reranking, in UTF-8 bytes. The provider splits
+     * a document into pieces of about 500 tokens *including the query*, so the
+     * query's length is part of what is billed; bounding it in bytes bounds
+     * it in tokens, and keeps every piece at least 100 tokens of document.
+     */
+    rerankMaxQueryBytes: 400,
     /** Sent as `max_tokens_per_doc`, so a document's cost is bounded. */
     rerankMaxTokensPerDocument: 1_024,
     /** The provider's documented embed batch size. */
@@ -285,23 +292,52 @@ export const SEMANTIC_RETRIEVAL_LIMITS = {
 } as const;
 
 /**
- * Documents longer than about 500 tokens, query included, are billed as
- * several. Half the window is assumed taken by the query, which over-counts for
- * a short question and is the point of an upper bound.
+ * The provider's billing window: a document longer than this many tokens,
+ * query included, is billed as several documents.
  */
-const RERANK_BILLED_PIECE_TOKENS = 250;
+const RERANK_BILLING_WINDOW_TOKENS = 500;
 
 const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");
 
-/** The most search units one rerank request can be billed. */
-export const rerankWorstCaseSearchUnits = (documents: readonly string[]): number => {
+/**
+ * The question exactly as a rerank request sends it: NFC, and cut at
+ * `rerankMaxQueryBytes` without splitting a character.
+ */
+export const boundRerankQuery = (query: string): string => {
+    const limit = SEMANTIC_RETRIEVAL_LIMITS.rerankMaxQueryBytes;
+    let bounded = "";
+    let bytes = 0;
+    for (const character of query.normalize("NFC")) {
+        const size = utf8Bytes(character);
+        if (bytes + size > limit) break;
+        bounded += character;
+        bytes += size;
+    }
+    return bounded;
+};
+
+/**
+ * The most search units one rerank request can be billed.
+ *
+ * Every quantity is an upper bound: a token is at least one byte, so the
+ * query's tokens are at most its bytes and a document's at most its bytes or
+ * the per-document cap; each piece holds at least the window minus the
+ * query. The query is bounded the way the request bounds it, so the figure
+ * reserved is never below the figure billed.
+ */
+export const rerankWorstCaseSearchUnits = (
+    query: string,
+    documents: readonly string[]
+): number => {
+    const queryTokens = utf8Bytes(boundRerankQuery(query));
+    const documentRoom = RERANK_BILLING_WINDOW_TOKENS - queryTokens;
     let pieces = 0;
     for (const document of documents) {
         const tokens = Math.min(
             utf8Bytes(document),
             SEMANTIC_RETRIEVAL_LIMITS.rerankMaxTokensPerDocument
         );
-        pieces += Math.max(1, Math.ceil(tokens / RERANK_BILLED_PIECE_TOKENS));
+        pieces += Math.max(1, Math.ceil(tokens / documentRoom));
     }
     return Math.max(1, Math.ceil(pieces / SEMANTIC_RETRIEVAL_LIMITS.maxRerankDocuments));
 };
@@ -332,7 +368,7 @@ export const rerankRequestBody = (input: {
     documents: readonly string[];
 }) => ({
     model: input.model,
-    query: boundQuery(input.query),
+    query: boundRerankQuery(input.query),
     documents: [...input.documents],
     max_tokens_per_doc: SEMANTIC_RETRIEVAL_LIMITS.rerankMaxTokensPerDocument,
 });
@@ -527,7 +563,7 @@ export const rerankCacheKey = (input: {
             input.feature,
             input.userId,
             input.model,
-            boundQuery(input.query),
+            boundRerankQuery(input.query),
             input.documents.map((document) => [document.id, sha256(document.text)]),
         ])
     );

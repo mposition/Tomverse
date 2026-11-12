@@ -31,6 +31,7 @@ import {
     rerankCostMicroUsd,
     rerankRequestBody,
     rerankWorstCaseSearchUnits,
+    boundRerankQuery,
     resolveSemanticRetrievalConfig,
     retrievalBudgetPeriods,
     roundSemanticScore,
@@ -262,22 +263,46 @@ test("image pages also need an image price", () => {
 
 /* ------------------------------------------------------------- cost bounds */
 
+const Q = "refund window";
+
 test("rerank search units are at least one, even for no documents", () => {
-    assert.equal(rerankWorstCaseSearchUnits([]), 1);
+    assert.equal(rerankWorstCaseSearchUnits(Q, []), 1);
 });
 
 test("a hundred short documents are one search unit and a hundred and one are two", () => {
     const short = Array.from({ length: 100 }, () => "short passage");
-    assert.equal(rerankWorstCaseSearchUnits(short), 1);
-    assert.equal(rerankWorstCaseSearchUnits([...short, "one more"]), 2);
+    assert.equal(rerankWorstCaseSearchUnits(Q, short), 1);
+    assert.equal(rerankWorstCaseSearchUnits(Q, [...short, "one more"]), 2);
 });
 
 test("a long document is counted as several pieces", () => {
     const long = "x".repeat(3_600);
-    // 3,600 bytes are capped at 1,024 tokens, which is five 250-token pieces.
-    assert.equal(rerankWorstCaseSearchUnits(Array.from({ length: 20 }, () => long)), 1);
-    assert.equal(rerankWorstCaseSearchUnits(Array.from({ length: 21 }, () => long)), 2);
-    assert.equal(rerankWorstCaseSearchUnits(Array.from({ length: 100 }, () => long)), 5);
+    // Capped at 1,024 tokens; a 13-byte query leaves 487 per piece: three pieces.
+    assert.equal(rerankWorstCaseSearchUnits(Q, Array.from({ length: 33 }, () => long)), 1);
+    assert.equal(rerankWorstCaseSearchUnits(Q, Array.from({ length: 34 }, () => long)), 2);
+    assert.equal(rerankWorstCaseSearchUnits(Q, Array.from({ length: 100 }, () => long)), 3);
+});
+
+test("the query's length is part of the bound", () => {
+    // The provider counts the query inside each 500-token piece, so a longer
+    // question splits the same documents into more pieces.
+    const documents = Array.from({ length: 100 }, () => "x".repeat(450));
+    const short = rerankWorstCaseSearchUnits("q", documents);
+    const long = rerankWorstCaseSearchUnits("q".repeat(400), documents);
+    assert.equal(short, 1);
+    assert.equal(long, 5);
+});
+
+test("a query past the byte bound reserves as the bounded query it is sent as", () => {
+    const documents = Array.from({ length: 100 }, () => "x".repeat(1_024));
+    const atBound = "q".repeat(SEMANTIC_RETRIEVAL_LIMITS.rerankMaxQueryBytes);
+    const wayOver = "q".repeat(SEMANTIC_RETRIEVAL_LIMITS.maxQueryCharacters);
+    assert.equal(
+        rerankWorstCaseSearchUnits(wayOver, documents),
+        rerankWorstCaseSearchUnits(atBound, documents)
+    );
+    // And the bound always leaves room for document text in every piece.
+    assert.equal(rerankWorstCaseSearchUnits(wayOver, documents), 11);
 });
 
 test("pieces per document are capped by rerankMaxTokensPerDocument", () => {
@@ -285,24 +310,38 @@ test("pieces per document are capped by rerankMaxTokensPerDocument", () => {
     const atCap = "x".repeat(cap);
     const wayOver = "x".repeat(cap * 50);
     const docs = (text) => Array.from({ length: 100 }, () => text);
-    assert.equal(rerankWorstCaseSearchUnits(docs(wayOver)), rerankWorstCaseSearchUnits(docs(atCap)));
+    assert.equal(rerankWorstCaseSearchUnits(Q, docs(wayOver)), rerankWorstCaseSearchUnits(Q, docs(atCap)));
 });
 
 test("bytes, not characters, bound a document's tokens", () => {
     // 600 Hangul characters are 1,800 bytes, so more pieces than 600 ASCII ones.
     const ascii = Array.from({ length: 100 }, () => "a".repeat(600));
     const hangul = Array.from({ length: 100 }, () => "한".repeat(600));
-    assert.ok(rerankWorstCaseSearchUnits(hangul) > rerankWorstCaseSearchUnits(ascii));
+    assert.ok(rerankWorstCaseSearchUnits(Q, hangul) > rerankWorstCaseSearchUnits(Q, ascii));
 });
 
 test("the reservation never falls below ceil(documents / 100)", () => {
     for (const count of [1, 7, 99, 100, 101, 250, 1000]) {
         const documents = Array.from({ length: count }, () => "tiny");
         assert.ok(
-            rerankWorstCaseSearchUnits(documents) >= Math.ceil(count / 100),
+            rerankWorstCaseSearchUnits(Q, documents) >= Math.ceil(count / 100),
             `count ${count}`
         );
     }
+});
+
+test("the rerank query is cut in bytes without splitting a character", () => {
+    const limit = SEMANTIC_RETRIEVAL_LIMITS.rerankMaxQueryBytes;
+    assert.equal(boundRerankQuery("short"), "short");
+    assert.equal(Buffer.byteLength(boundRerankQuery("q".repeat(limit + 10))), limit);
+    // Three-byte Hangul: the cut lands on a character boundary at or below the limit.
+    const hangul = boundRerankQuery("한".repeat(limit));
+    assert.equal(Buffer.byteLength(hangul), Math.floor(limit / 3) * 3);
+    assert.ok(!hangul.includes("\uFFFD"));
+    // Four-byte emoji are never halved.
+    const emoji = boundRerankQuery("😀".repeat(limit));
+    assert.equal(Buffer.byteLength(emoji) % 4, 0);
+    assert.equal(boundRerankQuery("café"), "café");
 });
 
 test("rerank cost is search units times the unit price, rounded up", () => {
@@ -341,13 +380,13 @@ test("rerank body carries model, bounded query, documents and the per-document c
     assert.notEqual(body.documents, documents, "the documents are copied");
 });
 
-test("the query is cut at maxQueryCharacters", () => {
+test("the rerank query is cut at rerankMaxQueryBytes", () => {
     const body = rerankRequestBody({
         model: "rerank-v3.5",
         query: "q".repeat(SEMANTIC_RETRIEVAL_LIMITS.maxQueryCharacters + 500),
         documents: ["d"],
     });
-    assert.equal(body.query.length, SEMANTIC_RETRIEVAL_LIMITS.maxQueryCharacters);
+    assert.equal(Buffer.byteLength(body.query), SEMANTIC_RETRIEVAL_LIMITS.rerankMaxQueryBytes);
 });
 
 test("the query is normalised to NFC", () => {
@@ -743,7 +782,7 @@ test("userId, model, feature and query each change the rerank key", () => {
 });
 
 test("queries that differ only past the length bound share a rerank key", () => {
-    const bound = SEMANTIC_RETRIEVAL_LIMITS.maxQueryCharacters;
+    const bound = SEMANTIC_RETRIEVAL_LIMITS.rerankMaxQueryBytes;
     const a = rerankCacheKey(rerankInput({ query: "q".repeat(bound) + "A" }));
     const b = rerankCacheKey(rerankInput({ query: "q".repeat(bound) + "B" }));
     assert.equal(a, b, "only the bounded query is ever sent, so only it is keyed");
