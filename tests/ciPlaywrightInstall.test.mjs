@@ -297,11 +297,41 @@ function withMirrorFixture(action) {
     }
 }
 
-test("hosted CI selects the Ubuntu archive without changing custom mirror entries", { skip: noWindowsBash }, () => {
+const ARCHIVE_FIRST = "https://archive.ubuntu.com/ubuntu/\tpriority:0\n";
+
+// 2026-11-11 14:11-15:02 UTC: archive.ubuntu.com did not resolve on the hosted
+// runners. The earlier selector had rewritten the Azure entry into
+// archive.ubuntu.com, so apt had no mirror left to fail over to and every
+// Playwright job ran out of its install budget. The archive is now added ahead
+// of Azure and every existing entry is kept as it is.
+test("hosted CI puts the Ubuntu archive first and keeps every existing mirror entry", { skip: noWindowsBash }, () => {
     withMirrorFixture((path, run) => {
-        writeFileSync(path, "# http://azure.archive.ubuntu.com/ubuntu\nhttp://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n  https://azure.archive.ubuntu.com/ubuntu\r\n\thttps://azure.archive.ubuntu.com/ubuntu priority:2\nhttps://security.ubuntu.com/ubuntu/\nhttps://archive.ubuntu.com/ubuntu\nhttps://custom.example.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu-other\n");
+        const tail = "  https://azure.archive.ubuntu.com/ubuntu\r\n\thttps://azure.archive.ubuntu.com/ubuntu priority:2\nhttps://security.ubuntu.com/ubuntu/\nhttps://archive.ubuntu.com/ubuntu\nhttps://custom.example.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu-other\n";
+        const head = "# http://azure.archive.ubuntu.com/ubuntu\nhttps://azure.archive.ubuntu.com.invalid/ubuntu/\n";
+        const firstAzure = "http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n";
+        writeFileSync(path, head + firstAzure + tail);
+        assert.match(run("true"), /archive\.ubuntu\.com first .*Azure mirror stays as the fallback/);
+        assert.equal(read(path), head + ARCHIVE_FIRST + firstAzure + tail, "one line inserted before the first Azure entry, nothing rewritten");
+    });
+});
+
+// The hosted runner's own list (actions/runner-images configure-apt-sources.sh).
+// apt orders mirror+file entries by priority, lowest first, and draws equal
+// priorities at random -- so the added line must out-rank Azure's priority:1,
+// and Azure must still be in the list for apt to fall back to.
+test("on the runner's mirror list the archive comes first and Azure stays as the next mirror", { skip: noWindowsBash }, () => {
+    withMirrorFixture((path, run) => {
+        const runner = "http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://archive.ubuntu.com/ubuntu/\tpriority:2\nhttps://security.ubuntu.com/ubuntu/\tpriority:3\n";
+        writeFileSync(path, runner);
         run("true");
-        assert.equal(read(path), "# http://azure.archive.ubuntu.com/ubuntu\nhttps://archive.ubuntu.com/ubuntu/\tpriority:1\n  https://archive.ubuntu.com/ubuntu\r\n\thttps://archive.ubuntu.com/ubuntu priority:2\nhttps://security.ubuntu.com/ubuntu/\nhttps://archive.ubuntu.com/ubuntu\nhttps://custom.example.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com.invalid/ubuntu/\nhttps://azure.archive.ubuntu.com/ubuntu-other\n");
+        const lines = read(path).split("\n").filter(Boolean);
+        assert.deepEqual(lines.slice(0, 2), ["https://archive.ubuntu.com/ubuntu/\tpriority:0", "http://azure.archive.ubuntu.com/ubuntu/\tpriority:1"]);
+        const byPriority = lines.map((line) => ({ host: new URL(line.split("\t")[0]).host, priority: Number(/priority:(\d+)/.exec(line)?.[1]) }))
+            .sort((a, b) => a.priority - b.priority).map(({ host }) => host);
+        assert.deepEqual(byPriority, ["archive.ubuntu.com", "azure.archive.ubuntu.com", "archive.ubuntu.com", "security.ubuntu.com"]);
+        assert.equal(new Set(lines.map((line) => /priority:(\d+)/.exec(line)?.[1])).size, lines.length, "no two mirrors share a priority, so apt's order is fixed");
+        run("true");
+        assert.equal(read(path), ARCHIVE_FIRST + runner, "a second run in the same job adds nothing");
     });
 });
 
