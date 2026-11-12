@@ -16,9 +16,7 @@ import {
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import {
   AmuxLegacyCardPanel,
-  useAmuxLegacyCardRead,
-  type AmuxLegacyCardRead,
-} from "@/components/admin/AmuxLegacyCardPanel";
+  isAmuxRemakeOnlyCardKind } from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxOwnerQueueEngineeringItems } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
 import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
 import { AmuxTaskUnknownUsageList } from "@/components/admin/AmuxAttemptUsageAcceptance";
@@ -105,7 +103,7 @@ export const useAmuxOwnerQueueElapsed = (generatedAt: string) => {
  */
 export function AmuxOwnerQueueDecision({
   item, controller, canInspectCards, index, total, generatedAt, navLocked, advance,
-  onAdvanceChange, onPrevious, onNext, onAnswered, initialLegacyCard = null,
+  onAdvanceChange, onPrevious, onNext, onAnswered,
   canWriteEngineering = false, onEngineeringChanged,
 }: {
   item: AmuxOwnerQueueItem;
@@ -122,8 +120,6 @@ export function AmuxOwnerQueueDecision({
   onPrevious: (() => void) | null;
   onNext: (() => void) | null;
   onAnswered: () => void;
-  /** The legacy panel shown before this card's own read lands (tests). */
-  initialLegacyCard?: AmuxLegacyCardRead | null;
   /** `engineering-agent:write`: the card's engineering items show their buttons. */
   canWriteEngineering?: boolean;
   /** An engineering action was recorded: read this card again without leaving it. */
@@ -155,15 +151,19 @@ export function AmuxOwnerQueueDecision({
   // A card no review decision opens on (a legacy WORKBOARD card or a pre-v22
   // Task) is remade or closed here, from the card detail read the execution
   // board uses, so the owner does not open the full card first. Owner only.
-  // The card detail is read only once this card's review says the card is not
-  // a v22 Task the Ubuntu inspection can take (an archived card is no longer
-  // in this queue), so an ordinary v22 card costs no second detail read.
-  const legacyRead = useAmuxLegacyCardRead(item.taskId,
-    canInspectCards && group !== "question" && reviewMatches &&
-      review.task.host_recovery_available === false, initialLegacyCard);
+  // Any stopped v22 Task has the same panel (owner decision 2026-11-12): the
+  // owner completes, remakes or closes it whatever stopped it. The panel comes
+  // from the card detail the review already reads for its attempt metadata, so
+  // no card costs a second detail read.
+  const ownerExecution = controller.ownerExecution;
+  const legacyRead = canInspectCards && group !== "question" && reviewMatches &&
+    (ownerExecution.state === "ready" || ownerExecution.state === "unavailable") ?
+    ownerExecution.legacyCard ?? null : null;
   const legacyCard = legacyRead?.view ? { revision: legacyRead.revision, view: legacyRead.view } : null;
-  // Once the review is read, the legacy panel stands in for a decision only when none is open.
-  const legacyOnly = legacyCard !== null && outcomes.length === 0;
+  // Once the review is read, the legacy panel stands in for a decision only
+  // when none is open and the card is one no decision ever opens on.
+  const legacyOnly = legacyCard !== null && outcomes.length === 0 &&
+    isAmuxRemakeOnlyCardKind(legacyCard.view.kind);
   // The words follow the choices actually shown, not the PR alone: a verified
   // non-code Task is approved without one, and a spent budget, an unverified
   // result or pending publication leaves no retry.

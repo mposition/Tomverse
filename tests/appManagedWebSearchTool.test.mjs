@@ -695,6 +695,92 @@ test("invalid, aborted and insufficient-headroom presearch never reaches a backe
   assert.deepEqual(parseRouterSearchQueries([" one ", "one"]), ["one"]);
 });
 
+test("compact grounding shares identical hits but keeps each query's ranking and different extracts from the same official URL", async () => {
+  const bulletin = "https://example.com/2026/02/18/bulletin.pdf";
+  const shared = { title: "Station", url: "https://example.com/station", description: "Observed at 13:00." };
+  globalThis.fetch = async url => {
+    const query = new URL(url).searchParams.get("q");
+    fetchCalls.push(query);
+    const bulletinHit = { title: "Bulletin", url: bulletin, description: query === "one" ? "Rain observed." : "Forecast: rain possible." };
+    return braveResponse(query === "one" ? [shared, bulletinHit] : [bulletinHit, shared]);
+  };
+  const config = toolFor();
+  const original = await presearch(config, { groundedAnswer: "lookup" });
+  assert.deepEqual(await presearch(config, { compactEvidence: true }), await presearch(config));
+  const evidence = await presearch(config, { groundedAnswer: "lookup", compactEvidence: true });
+  const batch = JSON.parse(evidence[1].text);
+  const raw = JSON.parse(original[1].text);
+  assert.deepEqual(batch.searches.map(search => search.query), ["one", "two"]);
+  assert.equal(batch.notice, raw.searches[0].notice);
+  assert.equal(batch.searchesRemaining, raw.searchesRemaining);
+  assert.equal(Object.keys(batch.sources).length, 3);
+  assert.equal(evidence[2].text, original[2].text);
+  for (const [i, search] of batch.searches.entries()) {
+    assert.deepEqual(search.sourceIds.map(id => batch.sources[id]), raw.searches[i].results);
+  }
+  assert.ok(evidence[1].text.length < original[1].text.length);
+  assert.match(evidence[0].text, /untrusted quoted material/);
+  assert.deepEqual(fetchCalls, ["one", "two"]);
+});
+
+test("a single search retains its original result, date notice and answer guidance", async () => {
+  const config = toolFor();
+  for (const groundedAnswer of ["lookup", "full"]) {
+    const options = { queries: ["one"], groundedAnswer };
+    const original = await presearch(config, options);
+    const compact = await presearch(config, { ...options, compactEvidence: true });
+    assert.deepEqual(JSON.parse(compact[1].text), JSON.parse(original[1].text).searches[0]);
+    assert.equal(compact[2].text, original[2].text);
+  }
+  assert.equal(fetchCalls.length, 1);
+});
+
+test("a partial search failure does not inherit the successful query's date notice", async () => {
+  const source = { title: "Station bulletin", url: "https://example.com/bulletin", description: "Observation at local noon. ".repeat(7) };
+  globalThis.fetch = async url => new URL(url).searchParams.get("q") === "one"
+    ? braveResponse([source, source]) : new Response("", { status: 503 });
+  const evidence = await presearch(toolFor(), { groundedAnswer: "lookup", compactEvidence: true });
+  const batch = JSON.parse(evidence[1].text);
+  const [succeeded, failed] = batch.searches;
+  assert.deepEqual(succeeded.sourceIds, ["S1", "S1"]);
+  assert.equal(Object.hasOwn(batch, "notice"), false);
+  assert.match(succeeded.notice, /Searched on /);
+  assert.equal(failed.status, "failed");
+  assert.equal(Object.hasOwn(failed, "notice"), false);
+});
+
+test("a compact index that would enlarge two disjoint result sets keeps the original grounded prompt", async () => {
+  const config = toolFor();
+  const batch = await config.search({ query: ["one", "two"] });
+  // Two query responses can straddle midnight, so both date notices must survive.
+  for (const [i, search] of batch.searches.entries()) {
+    search.notice = "Searched on day " + i;
+    search.results = Array.from({ length: 5 }, (_, j) => ({
+      title: "Document", url: "https://example.com/" + i + "/" + j,
+    }));
+  }
+  const stub = { ...config, search: async () => batch };
+  assert.deepEqual(await presearch(stub, { groundedAnswer: "full", compactEvidence: true }),
+    await presearch(stub, { groundedAnswer: "full" }));
+});
+
+test("compact grounding can keep complete excerpts that would otherwise leave the answer model without presearch evidence", async () => {
+  const results = Array.from({ length: 5 }, (_, i) => ({
+    title: "Bulletin " + i, url: "https://example.com/" + i, description: "測".repeat(170),
+  }));
+  globalThis.fetch = async url => { fetchCalls.push(String(url)); return braveResponse(results); };
+  const config = toolFor();
+  assert.deepEqual(await presearch(config, { groundedAnswer: "full" }), []);
+  const evidence = await presearch(config, { groundedAnswer: "full", compactEvidence: true });
+  const batch = JSON.parse(evidence[1].text);
+  const original = await run(config, { query: "one" });
+  for (const search of batch.searches) {
+    assert.deepEqual(search.sourceIds.map(id => batch.sources[id]), original.results);
+  }
+  assert.equal(config.session.remaining(), 3);
+  assert.equal(fetchCalls.length, 2);
+});
+
 test("failed presearch remains recoverable through the ordinary tool without an automatic retry", async () => {
   const config = toolFor();
   globalThis.fetch = async () => { fetchCalls.push("failed"); return new Response("", { status: 503 }); };

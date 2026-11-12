@@ -7,7 +7,8 @@
 // shell, a write tool, MCP, the submission secret or the Higgsfield login.
 //
 //  1. concepts   one Claude call (JOB-higgsfield.md), Read on research notes;
-//                check-concepts rules; asked once more with the reason
+//                check-concepts rules; asked again with every reason, and a
+//                concept still refused is dropped while the others go on
 //  2. picture    the English picture per concept (gpt_image_2_6, 4:5, one)
 //  3. review 1   a separate Claude call, Read on its own review folder: the
 //                guide as a checklist, plus where marks and words sit
@@ -29,7 +30,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { bandLayout, BAND_ALT } from "./band-layout.mjs";
-import { checkConcepts, loadFeatures, pickFeature, recentDevices, TRANSLATED } from "./concepts-core.mjs";
+import { gatherConcepts, loadFeatures, pickFeature, recentDevices, sortConcepts, TRANSLATED } from "./concepts-core.mjs";
 import { bottomIsDark, ICON_DIR, setLogos, setTexts } from "./compose-core.mjs";
 import { brisbaneDay, ledgerPath, readLedger } from "./higgsfield-cap.mjs";
 import { makeImage } from "./hf-image-core.mjs";
@@ -94,21 +95,28 @@ function claude(name, prompt, readGlob, maxTurns) {
   );
   writeFileSync(path.join(dir, "calls", `${name}.jsonl`), out.stdout ?? "");
   let answer = null;
+  let failure = out.error ? String(out.error.code ?? out.error.message) : null;
   for (const line of String(out.stdout ?? "").split(/\r?\n/u)) {
     try {
       const event = JSON.parse(line);
-      if (event.type === "result" && typeof event.result === "string") answer = event.result;
+      if (event.type !== "result") continue;
+      if (typeof event.result === "string") answer = event.result;
+      // The CLI says why it failed in its last event, not on stderr (a login that ran out, a usage limit, the turn limit).
+      if (event.is_error || (event.subtype && event.subtype !== "success")) failure = `${event.subtype ?? "error"}: ${String(event.result ?? "").slice(0, 200)}`;
     } catch {
       // not an event
     }
   }
+  if (failure || out.status !== 0) report.failed.push({ id: name, step: "claude-cli", status: out.status, error: failure ?? String(out.stderr ?? "").trim().slice(-200) });
   return answer;
 }
 
+/** The answer's JSON object that has `key`: one line of it, or the whole answer when the model spread it over lines or fenced it. */
 const firstJsonLine = (text, key) => {
-  for (const line of String(text ?? "").split(/\r?\n/u)) {
+  const whole = String(text ?? "");
+  for (const candidate of [...whole.split(/\r?\n/u), whole.slice(whole.indexOf("{"), whole.lastIndexOf("}") + 1)]) {
     try {
-      const value = JSON.parse(line.trim());
+      const value = JSON.parse(candidate.trim());
       if (value && typeof value === "object" && key in value) return value;
     } catch {
       // not it
@@ -140,25 +148,34 @@ const conceptPrompt = [
   `## Logo files\n\n${readdirSync(ICON_DIR).filter((file) => file.endsWith(".png")).map((file) => file.replace(/\.png$/u, "")).join(", ")}`,
   `## features.json\n\n\`\`\`json\n${readFileSync("features.json", "utf8")}\n\`\`\``,
 ].join("\n\n");
-let concepts = null;
-let refusal = null;
-for (let attempt = 1; attempt <= 2 && !concepts; attempt += 1) {
-  const prompt = refusal ? `${conceptPrompt}\n\n## Your last answer was refused\n\n${refusal}\nAnswer again, fixing that.` : conceptPrompt;
-  const answer = firstJsonLine(claude(`concepts-${attempt}`, prompt, "./job/research-notes/**", 20), "concepts");
-  refusal = answer ? checkConcepts(answer, { feature, history, day, toolDir }) : "the answer held no concepts line";
-  if (!refusal) concepts = answer.concepts;
+// A dry run on the box after a deployment (MARKETING_HIGGSFIELD_CONCEPTS_ONLY=1):
+// the concept step alone, with no picture, no credit, no submission and no
+// history, so a broken concept step shows the same day and not at 05:00. Its
+// files are named dry-*, beside the day's real ones.
+const dry = process.env.MARKETING_HIGGSFIELD_CONCEPTS_ONLY === "1" ? "dry-" : "";
+// These calls are on the box's Claude plan, not Higgsfield credits.
+const gathered = gatherConcepts({
+  ask: (again, attempt) => firstJsonLine(claude(`${dry}concepts-${attempt}`, `${conceptPrompt}${again}`, "./job/research-notes/**", 20), "concepts"),
+  sort: (answer) => sortConcepts(answer, { feature, history, day, toolDir }),
+});
+const { concepts } = gathered;
+for (const entry of gathered.dropped) report.dropped.push({ id: entry.id, reason: "concept_refused", problems: entry.problems.slice(0, 6) });
+let exitCode = 0;
+if (concepts.length === 0) {
+  report.failed.push({ id: null, step: "concepts", error: String(gathered.refusal).slice(0, 1200) });
+  exitCode = 1;
 }
-if (!concepts) {
-  report.failed.push({ id: null, step: "concepts", error: refusal });
-  finish(1);
-}
-const conceptsPath = path.join(dir, "concepts.json");
-writeFileSync(conceptsPath, `${JSON.stringify({ feature, concepts }, null, 1)}\n`);
+writeFileSync(path.join(dir, `${dry}concepts.json`), `${JSON.stringify({ feature, concepts }, null, 1)}\n`);
 report.concepts = concepts.map((concept) => concept.id);
+if (dry) {
+  report.conceptsOnly = true;
+  finish(exitCode);
+}
 
 // Paid steps stop for the day at the first refusal by the cap; finished cards are still submitted.
 const HALTING = new Set(["no_daily_cap", "ledger_locked", "daily_cap_reached", "unknown_outcome_pending", "cost_unreadable", "cost_above_call_ceiling", "create_outcome_unknown", "wait_outcome_unknown", "more_than_one_job"]);
-const NO_LOGO = "Do not draw the Tomverse logo, any wordmark or any web address. Fill the frame edge to edge, and keep the bottom 10% of the picture calm, without text or important detail.";
+// It does not name the brand: a concept may not either (the image model draws what it reads).
+const NO_LOGO = "Draw no logo or wordmark other than the provider logos asked for or already shown, and no web address. Fill the frame edge to edge, and keep the bottom 10% of the picture calm, without text or important detail.";
 async function picture(label, prompt, references, out) {
   if (report.halted) return null;
   let made;
@@ -209,13 +226,21 @@ function review(stage, concept, locale, file, attempt) {
     .replace("{{GUIDE}}", guide)
     .replace("{{STAGE_RULES}}", STAGE_RULES[stage])
     .replace("{{ANSWER_SHAPE}}", ANSWER_SHAPE[stage]);
-  const checked = checkReview(claude(`review-${name}`, prompt, `./${rel}/**`, 12) ?? "", { stage, concept, locale });
-  if (checked.problem) {
-    report.failed.push({ id: name, step: "check-review", error: checked.problem });
-    return null;
+  // The picture is already paid for: an answer of the wrong shape is asked for
+  // once more with the reason before the picture is given up (the 2026-11-10
+  // box run lost two pictures to one over-long fix each).
+  let problem = null;
+  for (let ask = 1; ask <= 2; ask += 1) {
+    const again = problem ? `\n\n## Your last answer was refused\n\n${problem}\n\nAnswer again with the whole line in the shape above, fixing that.` : "";
+    const checked = checkReview(claude(`review-${name}${ask > 1 ? "-again" : ""}`, `${prompt}${again}`, `./${rel}/**`, 12) ?? "", { stage, concept, locale });
+    if (!checked.problem) {
+      writeFileSync(path.join(folder, "review.json"), JSON.stringify(checked.review, null, 1));
+      return checked.review;
+    }
+    problem = checked.problem;
   }
-  writeFileSync(path.join(folder, "review.json"), JSON.stringify(checked.review, null, 1));
-  return checked.review;
+  report.failed.push({ id: name, step: "check-review", error: problem });
+  return null;
 }
 
 const editPrompt = (fixes) => `Edit the attached picture. Keep everything else exactly as it is: the people, the scene, the light, the composition and every word that is right. Make only these changes:\n${fixes.map((fix) => `- ${fix}`).join("\n")}`;
@@ -226,14 +251,19 @@ const localePrompt = (concept, locale, boxes, fixes = []) => {
   const texts = textsFor(concept, locale);
   const cleared = boxes.filter((box) => box.role !== "screen").map((box) => `"${concept.texts[box.textIndex].text}"`);
   const screens = boxes.filter((box) => box.role === "screen").map((box) => `- "${concept.texts[box.textIndex].text}" becomes "${texts[box.textIndex].text}"`);
-  return [
-    "Edit the attached picture. Keep the scene, the people, the light, the provider logos and the layout exactly as they are.",
-    cleared.length > 0 ? `Remove these words and leave their space clean, continuing the background, with no letters at all: ${cleared.join(", ")}.` : "",
-    screens.length > 0 ? `Replace the words on the screens, exactly, keeping model and company names as written:\n${screens.join("\n")}` : "",
-    fixes.length > 0 ? `A review of the last attempt also asked for these changes:\n${fixes.map((fix) => `- ${fix}`).join("\n")}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const build = (kept) =>
+    [
+      "Edit the attached picture. Keep the scene, the people, the light, the provider logos and the layout exactly as they are.",
+      cleared.length > 0 ? `Remove these words and leave their space clean, continuing the background, with no letters at all: ${cleared.join(", ")}.` : "",
+      screens.length > 0 ? `Replace the words on the screens, exactly, keeping model and company names as written:\n${screens.join("\n")}` : "",
+      kept.length > 0 ? `A review of the last attempt also asked for these changes:\n${kept.map((fix) => `- ${fix}`).join("\n")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  // The cap refuses a prompt over 8000 characters (with the no-logo line): the least important fixes go first.
+  let kept = fixes;
+  while (kept.length > 0 && build(kept).length > 7600) kept = kept.slice(0, -1);
+  return build(kept);
 };
 
 const madeIds = new Set(history.map((entry) => entry.id).filter(Boolean));
@@ -383,10 +413,13 @@ if (new Date().toLocaleDateString("en-US", { timeZone: "Australia/Brisbane", wee
   }
 }
 
+// A day with no concept still counts as the feature's day, so tomorrow's run
+// takes another feature instead of failing on the same one again.
+if (concepts.length === 0) newHistory.push({ date, id: null, locale: null, kind: "card", path: "higgsfield", feature, dropped: "concepts_refused" });
 // History: one entry per asset or dropped version, with the credits of its concept.
 for (const entry of newHistory) {
   const concept = concepts.find((candidate) => candidate.device === entry.device);
   entry.credits = concept ? creditsFor(`${concept.id}/${entry.locale}/`) : 0;
 }
 writeFileSync(historyPath, `${JSON.stringify([...history, ...newHistory], null, 1)}\n`);
-finish(0);
+finish(exitCode);

@@ -139,6 +139,18 @@ The design guide every call follows is `HIGGSFIELD-GUIDE.md`.
   a call whose outcome is unknown blocks the next until its job id shows it.
 - `HIGGSFIELD_BIN` and `CLAUDE_BIN` name other binaries (a `.mjs` is run with
   node), for a dry run with stand-ins.
+- The concept call is asked again with every reason a concept was refused
+  (`concepts-core.mjs`); a concept still refused is dropped and the others are
+  drawn. A day with no concept counts as the feature's day, so the next run
+  takes another feature. A full day of three concepts in four languages is
+  about 21 pictures (5.25 credits at 0.25 each) before any refine.
+- After a deployment, the concept step can be run alone on the box, with the
+  cron's own PATH and env file. It draws nothing, spends no credit, submits
+  nothing and leaves `history.json` alone; its files are `job/<day>/dry-*`:
+
+  ```
+  cd ~/marketing-video-job && git pull --ff-only -q && cd tools/marketing-video && set -a && . $HOME/.config/tomverse/marketing-video.prod.env && set +a && PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin MARKETING_HIGGSFIELD_CONCEPTS_ONLY=1 node run-higgsfield.mjs
+  ```
 
 ## The creative short job (off by default, run by hand)
 
@@ -187,9 +199,21 @@ its topic, and submits each for approval in Admin:
    asset file in code (`capture_with_ai_media`, showing the product interface, a disclosure on every channel, zh-Hans to
    RedNote only) and submit with `submit-asset.mjs`.
 
-Phase 1 limits: the real screens come from the approved shorts' capture packs
-(`job/sources/`), so a film is about a topic one of them shows; recording new
-screens per film is the next step. The report is one JSON line;
+Real screens: by default they come from the approved shorts' capture packs
+(`job/sources/`), so a film is about a topic one of them shows (so far one
+travel question). With `MARKETING_CREATIVE_FRESH_REVIEW=on` (off by default,
+owner 2026-11-12) each run records its own: `fresh-review.mjs` picks a subject
+at random from `SUBJECTS` (never one of the last six films'), a model writes
+one question about it per locale, and each is asked ONCE in Review with the
+demo account and its answer analysis run ONCE (both spend that account's
+credits; a recording that stopped after a paid step is never repeated). The
+packs land in `job/creative/<run>/sources/<locale>/`, each capture's text being
+the words visible in its picture. One recording at a time holds
+`~/.local/state/tomverse/demo-account.lock`; after a kill or a failed settings
+restore it stays and every recording refuses until a person has checked the
+account's language and theme and removed it. `node fresh-review.mjs <locale>
+<dir> <question-file> <topic> --dry` stops before the send and costs nothing. The
+report is one JSON line;
 `job/creative/history.json` and `job/creative/sheets/<run>/` let the next run
 avoid repeating it. For a dry run, `CLAUDE_BIN` and `HIGGSFIELD_BIN` name
 stand-ins.

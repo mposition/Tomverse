@@ -105,6 +105,9 @@ export const RESPONSE_LATENCY_ANALYSIS_RULE =
   "Review firstReviewMs and reviewMs start at service entry and exclude route persistence. Sample count counts measurements, not unique requests. " +
   "server firstContentMs starts at API receipt and settlementMs is not completion. " +
   "Parallel timings overlap: never sum them or subtract unrelated percentiles. Missing measurements are unknown. " +
+  "chatPresearchLatency covers only Smart Adaptive attempts with an app presearch timer, not all search. Its 24h and 7d windows overlap. " +
+  "Use completed browser p95 and the fraction of all recorded attempts confirmed complete with content within 10s together. Report missing clients and sample size. " +
+  "These aggregates alone cannot identify a slow model, establish answer quality or justify a routing change; propose a matched test with the same questions and official sources. " +
   "contextPrepareMs and draftPrepareMs run together. locationIntentMs may overlap new conversation preparation or refinerPrepareMs. freshLocationOverlapMs measures the portion of a reused new conversation intent request that elapsed before the saved turn needed its result. locationMs includes remaining intent, device and human permission waits. " +
   "Report sample counts; small samples cannot prove a model is faster. Keep failed/cancelled/primary-only outcomes visible. " +
   "Recommend concrete code or setting experiments that reduce waiting while preserving selected models, both reviewers, " +

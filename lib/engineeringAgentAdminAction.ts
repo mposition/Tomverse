@@ -8,7 +8,7 @@ import { adminFetch } from "@/lib/adminFetch";
  * saw, the lock and the audit again; nothing here decides.
  */
 
-export type EngineeringAgentActionRequest = { url: string; body: Record<string, string> };
+export type EngineeringAgentActionRequest = { url: string; body: Record<string, string | boolean> };
 
 export type EngineeringAgentActionResult =
   | { kind: "ok" }

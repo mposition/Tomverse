@@ -20,10 +20,17 @@ import { AMUX_IDEA_INPUT_MAX_BYTES } from "./ideaInputCore.ts";
  * builds, and closes the old card by archiving it: its status, attempts,
  * escalation history and audit stay as they are.
  *
+ * - `stopped_task` (owner decision 2026-11-12): any other admin-idea-v4 Task
+ *   stopped in blocked or review. It may have a review decision or a recovery
+ *   path, but each new way a run stops needed its own decision before the
+ *   owner could move the card at all. The owner may now always remake it,
+ *   close it, or complete it as done, whatever stopped it; the decisions the
+ *   server offers stay beside these.
+ *
  * Pure: no database, no clock.
  */
 
-export type AmuxLegacyCardKind = "workboard" | "pre_v22_task";
+export type AmuxLegacyCardKind = "workboard" | "pre_v22_task" | "stopped_task";
 
 /** The facts that decide whether a card is one the owner can only remake. */
 export type AmuxLegacyCardFacts = {
@@ -31,6 +38,8 @@ export type AmuxLegacyCardFacts = {
   v22ReceiptId: string | null; taskRole: string | null; executionGrade: string | null;
   /** The newest attempt, or null when the card never ran. */
   lastAttempt: { endedAt: Date | string | null; outcome: string | null; reason: string | null } | null;
+  /** An archived card left the owner queue (owner decision 2026-11-09): it is never a stopped Task. */
+  archivedAt?: Date | string | null;
 };
 
 /** What the Ubuntu inspection accepts (lockRecoveryTask), apart from the archive. */
@@ -54,8 +63,10 @@ function preV22Task(card: AmuxLegacyCardFacts) {
 export function amuxLegacyCardKind(card: AmuxLegacyCardFacts): AmuxLegacyCardKind | null {
   if (card.sourceSystem === BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM) return "workboard";
   if (card.sourceSystem !== "admin-idea-v4" || card.cardType !== "task") return null;
-  return preV22Task(card) ? "pre_v22_task" : null;
+  if (preV22Task(card)) return "pre_v22_task";
+  return !card.archivedAt && (card.status === "blocked" || card.status === "review") ? "stopped_task" : null;
 }
+
 
 /**
  * The app record inspection and the Ubuntu inspection read v22 execution
@@ -101,9 +112,28 @@ export function amuxLegacyCardCloseRefusal(card: AmuxLegacyCardFacts & {
   return null;
 }
 
+/** Why the owner cannot complete a card as done now. Null when the owner can. */
+export type AmuxOwnerCompleteRefusal = AmuxLegacyCardCloseRefusal | "not_completable";
+
+/**
+ * The owner completes a stopped v22 Task as done (owner decision 2026-11-12):
+ * the work is in, whatever the pipeline recorded. Only a Task that holds its
+ * v22 receipt can be done (amux_v22_card_receipt_guard), and an archived card
+ * keeps its archive. Everything a close refuses, this refuses too.
+ */
+export function amuxOwnerCompleteRefusal(card: Parameters<typeof amuxLegacyCardCloseRefusal>[0],
+  shownRevision: number): AmuxOwnerCompleteRefusal | null {
+  const refusal = amuxLegacyCardCloseRefusal(card, shownRevision);
+  if (refusal) return refusal;
+  if (amuxLegacyCardKind(card) !== "stopped_task" || !isAmuxV22RecoverableTask(card) ||
+      card.archivedAt !== null) return "not_completable";
+  return null;
+}
+
 const LEGACY_KIND_LABELS: Record<AmuxLegacyCardKind, string> = {
   workboard: "옛 작업판에서 이관한 카드",
   pre_v22_task: "v22 이전에 만든 Task",
+  stopped_task: "멈춘 Task",
 };
 
 const LABELS: Record<string, string> = {

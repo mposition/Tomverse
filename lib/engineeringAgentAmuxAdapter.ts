@@ -536,13 +536,22 @@ export async function finishEngineeringAgentRun(input: {
  * the item in the same AMUX transaction; any other result touches no AMUX row
  * and settles in an engineering transaction of its own.
  *
- * If AMUX will not take the number -- the card is not waiting on this
- * worker's review -- the pull request still exists: the item is settled and
- * bound all the same, and a state mismatch goes to a person (§11). A fact the
- * publisher reports is never dropped because the other side disagrees. The
- * same holds when the adapter is closed, the mode turned off included: the
- * number then never reaches AMUX, and the mismatch says `adapter_closed`.
+ * If AMUX will not take the number, the pull request still exists: the item
+ * is settled and bound all the same, and a person is told. A fact the
+ * publisher reports is never dropped because the other side disagrees.
+ *
+ * - The card moved on while the pull request was being opened -- the owner
+ *   settled it, or a newer attempt took it (`task_not_in_review`,
+ *   `not_the_workers_review`): a decision item for the run, which does not
+ *   stop the agent (owner decision 2026-11-12). Nothing is inconsistent: the
+ *   draft pull request waits for a person to merge or close it, as every
+ *   agent pull request does.
+ * - Anything else, and a closed adapter (the mode turned off included, where
+ *   the number never reaches AMUX and the reason is `adapter_closed`): a
+ *   state mismatch (engineering-agent.md §11), which stops the agent until a person resolves it.
  */
+const CARD_MOVED_ON: ReadonlySet<string> = new Set(["task_not_in_review", "not_the_workers_review"]);
+
 export async function recordEngineeringAgentPublisherResult(input: {
   workItemId: string;
   fencingToken: bigint;
@@ -559,22 +568,20 @@ export async function recordEngineeringAgentPublisherResult(input: {
     });
   }
   const pullRequest = input.pullRequest;
-  const settleWithoutCard = (refusal: string) =>
+  const settleWithoutCard = (refusal: string, runId: string | null = null) =>
     runEngineeringAgentTransaction(prisma, async (tx) => {
       const settled = await recordEngineeringAgentPublishResult(tx, { ...input, pullRequest });
-      await openEngineeringAgentWorkItem(tx, {
-        kind: "state_mismatch",
-        causeKey: `review_pr:${input.workItemId}`,
-        runId: null,
-        reason: refusal,
-      });
+      await openEngineeringAgentWorkItem(tx, CARD_MOVED_ON.has(refusal) && runId !== null ?
+        { kind: "decision", causeKey: `review_pr_moved:${input.workItemId}`, runId, reason: refusal } :
+        { kind: "state_mismatch", causeKey: `review_pr:${input.workItemId}`, runId: null, reason: refusal });
       await input.markCommitted?.(tx, input.workItemId);
       return { recorded: false as const, reason: refusal, ...settled };
     });
   if (!(await engineeringAgentAmuxAdapterPermittedNow())) return settleWithoutCard("adapter_closed");
   const item = await prisma.engineeringAgentWorkItem.findUnique({
     where: { id: input.workItemId },
-    select: { run: { select: { cardId: true, amuxAttemptId: true, attempt: { select: { worker: true } } } } },
+    select: { runId: true,
+      run: { select: { cardId: true, amuxAttemptId: true, attempt: { select: { worker: true } } } } },
   });
   const cardId = item?.run?.cardId ?? null;
   const attemptId = item?.run?.amuxAttemptId ?? null;
@@ -599,7 +606,7 @@ export async function recordEngineeringAgentPublisherResult(input: {
     }),
   );
   if (recorded.recorded) return recorded;
-  return settleWithoutCard(recorded.reason);
+  return settleWithoutCard(recorded.reason, item?.runId ?? null);
 }
 
 /**

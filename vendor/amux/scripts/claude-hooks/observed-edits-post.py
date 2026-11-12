@@ -66,6 +66,10 @@ def _derive_session_from_tmux():
     same "" — a human shell (tmux succeeds, name isn't amux-*) still logs
     nothing, so this does not add a row for every ordinary command.
     """
+    if not os.environ.get("TMUX"):
+        # Outside a pane tmux answers with its most recently used session
+        # instead of failing, which would name whichever lane was touched last.
+        return ""
     try:
         name = subprocess.run(["tmux", "display-message", "-p", "#S"],
                               capture_output=True, text=True, timeout=3).stdout.strip()

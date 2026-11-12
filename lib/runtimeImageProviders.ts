@@ -32,7 +32,8 @@ export const discoveryDraftRequest = (search: string) => {
 export const runtimeImageProfileTemplate = (provider: string, apiModelId: string) => ({
   provider,
   apiModelId,
-  name: apiModelId,
+  // The profile schema caps a display name at 80 characters.
+  name: apiModelId.slice(0, 80),
   lifecycle: "preview",
   sizes: ["1024x1024"],
   qualities: ["low", "medium", "high"],

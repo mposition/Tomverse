@@ -22,6 +22,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { amuxOwnerRecoveryPreparation, amuxReviewUsageOutcomeUnknown } from "@/lib/amux/ownerRecoveryCore";
 import { amuxReviewReadError } from "@/lib/amux/reviewReadErrorCore";
 import { AmuxOwnerRecoveryInspectionPanel } from "./AmuxOwnerRecoveryInspectionPanel";
+import { amuxLegacyCardReadOf, type AmuxLegacyCardRead } from "./AmuxLegacyCardPanel";
 
 // The server-side review proxy waits up to 40s. The browser must not abort
 // first; an unknown outcome freezes writes until decision ID/digest lookup.
@@ -119,9 +120,12 @@ export type AmuxOwnerExecutionMetadata = {
   actualCostConfirmed: boolean;
 };
 
+// `legacyCard` is the card's owner settlement panel from the same answer, kept
+// whether or not the attempt metadata could be bound to the review.
 type OwnerExecutionState =
-  | { state: "idle" | "loading" | "unavailable" }
-  | { state: "ready"; metadata: AmuxOwnerExecutionMetadata };
+  | { state: "idle" | "loading" }
+  | { state: "unavailable"; legacyCard?: AmuxLegacyCardRead | null }
+  | { state: "ready"; metadata: AmuxOwnerExecutionMetadata; legacyCard?: AmuxLegacyCardRead | null };
 
 export type AmuxOwnerExecutionReadFetcher = (
   input: RequestInfo | URL,
@@ -296,7 +300,8 @@ export async function readAmuxOwnerExecutionMetadata({
     if (!isCurrent()) return null;
     if (controller.signal.aborted) return { state: "unavailable" };
     const metadata = bindAmuxOwnerExecutionMetadata(review, body);
-    return metadata ? { state: "ready", metadata } : { state: "unavailable" };
+    const legacyCard = amuxLegacyCardReadOf(review.task.id, body);
+    return metadata ? { state: "ready", metadata, legacyCard } : { state: "unavailable", legacyCard };
   } catch {
     if (!isCurrent()) return null;
     return { state: "unavailable" };

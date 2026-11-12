@@ -80,7 +80,11 @@ import {
   ENGINEERING_AGENT_MODE_SETTING_KEY,
   ENGINEERING_AGENT_NOT_APPROVED_REASONS,
   ENGINEERING_AGENT_POLICY_VERSION,
+  ENGINEERING_AGENT_PR_RESUMABLE_REASONS,
+  ENGINEERING_AGENT_PR_RESUME_APPROVED_REASON,
+  ENGINEERING_AGENT_PR_RESUME_CLAIMED_REASON,
   ENGINEERING_AGENT_REGISTRATION_SETTING_KEY,
+  UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX,
   QUEUE_TTL_DAYS,
   WRITE_ITEM_KINDS,
   decideArmedGate,
@@ -93,6 +97,7 @@ import {
   parseSettingInstant,
   resolveEngineeringAgentSwitches,
   unknownOutcomeDecisionCauseKey,
+  unknownOutcomeDecisionWorkItemId,
   writeItemStates,
   type EffectiveSwitches,
   type HaltValue,
@@ -222,6 +227,7 @@ export const ENGINEERING_AGENT_AUDIT_ACTIONS = Object.freeze({
   t2Decided: "engineering_agent.t2_decision",
   v22DraftRejudged: "engineering_agent.v22_draft_rejudged",
   decisionAcknowledged: "engineering_agent.decision_acknowledged",
+  pullRequestResumeApproved: "engineering_agent.pull_request_resume_approved",
   bindingRecorded: "engineering_agent.binding_recorded",
   bindingReplaced: "engineering_agent.binding_replaced",
   bindingMoved: "engineering_agent.binding_moved",
@@ -984,6 +990,13 @@ export type EngineeringAgentPublishWork =
       ownerReview: boolean;
       /** The capability a write claim consumed; null when none was, and so no write was allowed. */
       consumed: { commitDigest: string; expectedTreeId: string } | null;
+      /**
+       * A person approved opening the pull request for this item's branch,
+       * and this claim carries that approval, once (§10). The card is named
+       * for the pull request's body.
+       */
+      resumePullRequest?: true;
+      cardRef?: string;
     }
   | {
       mode: "write";
@@ -1011,10 +1024,17 @@ export type EngineeringAgentPublishWork =
  * An owner review item is written only for a publisher that opens it as a
  * draft (`reviewDrafts`) and only while its switch is on; its lookups go to
  * any publisher, since a lookup writes nothing.
+ *
+ * An outcome nobody knows is looked at again only once its decision is no
+ * longer open: while a person has it, another round would read the same and
+ * open another decision for each claim (AMUX-FILEGEN-003, 2026-11-11). An
+ * approved pull request resume goes only to a publisher that names it
+ * (`resumePullRequests`) and only while publishing is allowed, since it opens
+ * a pull request; it waits otherwise, and its claim takes the approval.
  */
 export async function claimNextEngineeringAgentPublishWork(
   tx: EngineeringAgentTransaction,
-  input: { leaseMs: number; reviewDrafts?: boolean },
+  input: { leaseMs: number; reviewDrafts?: boolean; resumePullRequests?: boolean },
 ): Promise<EngineeringAgentPublishWork | null> {
   await requireSwitch(tx, "maintenanceAllowed");
   // A claim whose lease passed -- a publisher that died, or an answer that
@@ -1038,13 +1058,37 @@ export async function claimNextEngineeringAgentPublishWork(
   const reviewWrites = input.reviewDrafts === true && engineeringAgentV22ReviewPrEnabled(
     process.env[ENGINEERING_AGENT_V22_REVIEW_PR_ENV]);
   const reviewKeys = `${ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX}%`;
+  // A resume opens a pull request: the same switches as a write, and a review
+  // item's only for a publisher that also opens drafts.
+  const resumeAllowed = publishAllowed && input.resumePullRequests === true;
   const now = await databaseNow(tx);
-  const candidates = await tx.$queryRaw<Array<{ id: string; state: string }>>`
-    SELECT w."id", w."state"
+  const candidates = await tx.$queryRaw<Array<{ id: string; state: string; reason: string | null }>>`
+    SELECT w."id", w."state", w."reason"
     FROM "EngineeringAgentWorkItem" w
     WHERE w."kind" = 'publish'
       AND (
-        w."state" IN ('needs_lookup', 'outcome_unknown')
+        w."state" = 'needs_lookup'
+        OR (
+          w."state" = 'outcome_unknown'
+          AND NOT EXISTS (
+            SELECT 1 FROM "EngineeringAgentWorkItem" d
+            WHERE d."kind" = 'decision' AND d."state" = 'open'
+              AND d."causeKey" LIKE ${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX} || w."id" || ':%'
+          )
+          AND (
+            w."reason" IS DISTINCT FROM ${ENGINEERING_AGENT_PR_RESUME_APPROVED_REASON}
+            OR (
+              ${resumeAllowed}
+              AND (${reviewWrites} OR w."causeKey" NOT LIKE ${reviewKeys})
+              AND (${v22PublicationEnabled} OR NOT EXISTS (
+                SELECT 1 FROM "EngineeringAgentRun" r
+                JOIN "AmuxWorkItem" card ON card."id" = r."cardId"
+                WHERE r."id" = w."runId"
+                  AND card."sourceSystem" = 'admin-idea-v4'
+              ))
+            )
+          )
+        )
         OR (
           ${publishAllowed} AND w."state" = 'queued'
           AND (${reviewWrites} OR w."causeKey" NOT LIKE ${reviewKeys})
@@ -1067,7 +1111,15 @@ export async function claimNextEngineeringAgentPublishWork(
   const candidate = candidates[0];
   if (!candidate) return null;
   const mode = candidate.state === "queued" ? "write" : "lookup";
+  const resume = candidate.state === "outcome_unknown" && candidate.reason === ENGINEERING_AGENT_PR_RESUME_APPROVED_REASON;
   const claim = await claimEngineeringAgentWorkItem(tx, { workItemId: candidate.id, mode, leaseMs: input.leaseMs });
+  // The approval is this claim's alone: a later claim of the item only looks.
+  if (resume) {
+    await tx.engineeringAgentWorkItem.update({
+      where: { id: candidate.id },
+      data: { reason: ENGINEERING_AGENT_PR_RESUME_CLAIMED_REASON },
+    });
+  }
   const item = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
     where: { id: candidate.id },
     select: {
@@ -1098,7 +1150,14 @@ export async function claimNextEngineeringAgentPublishWork(
       orderBy: { consumedAt: "desc" },
       select: { commitDigest: true, expectedTreeId: true },
     });
-    return { mode, ...common, consumed };
+    if (!resume) return { mode, ...common, consumed };
+    return {
+      mode,
+      ...common,
+      consumed,
+      resumePullRequest: true,
+      cardRef: item.run?.cardId ?? refuse("publish_item_without_run"),
+    };
   }
   const capability = await tx.engineeringAgentCapability.findFirstOrThrow({
     where: { workItemId: candidate.id, claimFencingToken: claim.fencingToken },
@@ -1462,26 +1521,137 @@ export async function rejudgeEngineeringAgentV22Draft(
   return { auditLogId };
 }
 
-/** A person has seen a decision item. The route has checked permission and step-up. */
+/**
+ * The decision a person acts on, with every open decision of the same unknown
+ * outcome -- the same publish item, any claim -- locked oldest first, this one
+ * included. Before a lookup waited for its decision, every round opened one
+ * more (AMUX-FILEGEN-003, 2026-11-11); a person who saw one has seen them all.
+ * The whole set is locked in one order before the one acted on is checked, so
+ * two people acting on two of them at once wait for each other, never deadlock.
+ * Another kind of decision is the one item alone.
+ */
+const lockDecisionsToAcknowledge = async (
+  tx: EngineeringAgentTransaction,
+  id: string,
+): Promise<{ decision: { id: string; causeKey: string }; ids: string[] }> => {
+  const row = await tx.engineeringAgentWorkItem.findUnique({ where: { id }, select: { kind: true, causeKey: true } });
+  if (!row || row.kind !== "decision") refuse("decision_not_open");
+  const decision = { id, causeKey: row!.causeKey };
+  const publishItemId = unknownOutcomeDecisionWorkItemId(decision.causeKey);
+  if (publishItemId === null) {
+    const item = await lockWorkItem(tx, id);
+    if (item.state !== "open") refuse("decision_not_open");
+    return { decision, ids: [id] };
+  }
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT d."id" FROM "EngineeringAgentWorkItem" d
+    WHERE d."kind" = 'decision' AND d."state" = 'open'
+      AND d."causeKey" LIKE ${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX} || ${publishItemId} || ':%'
+    ORDER BY d."createdAt", d."id"
+    FOR UPDATE
+  `;
+  const ids = rows.map((candidate) => candidate.id);
+  if (!ids.includes(id)) refuse("decision_not_open");
+  return { decision, ids };
+};
+
+const closeDecisionsAsSeen = async (tx: EngineeringAgentTransaction, ids: string[]) => {
+  for (const id of ids) {
+    await tx.engineeringAgentWorkItem.update({ where: { id }, data: { state: "acknowledged" } });
+  }
+};
+
+/** The one audit entry of an acknowledgement, naming the earlier decisions it closed with it. */
+const decisionAcknowledgedEntry = (
+  tx: EngineeringAgentTransaction,
+  input: { session: Session; request?: Request; decisionId: string; ids: string[]; resumeOf?: string },
+) => ({
+  session: input.session,
+  request: input.request,
+  action: ENGINEERING_AGENT_AUDIT_ACTIONS.decisionAcknowledged,
+  targetType: "engineering_agent_work_item",
+  targetId: input.decisionId,
+  summary: `${ENGINEERING_AGENT_AUDIT_ACTIONS.decisionAcknowledged} ${input.decisionId}`,
+  metadata: {
+    kind: "decision",
+    // The earlier decisions of the same outcome this acknowledgement closed with it.
+    sameOutcome: input.ids.filter((id) => id !== input.decisionId),
+    ...(input.resumeOf ? { pullRequestResumeFor: input.resumeOf } : {}),
+  },
+  tx,
+});
+
+/**
+ * A person has seen a decision item. The route has checked permission and
+ * step-up. An unknown outcome's earlier decisions close with it.
+ */
 export async function acknowledgeEngineeringAgentDecision(
   tx: EngineeringAgentTransaction,
   input: { session: Session; request?: Request; workItemId: string },
-): Promise<{ auditLogId: string }> {
+): Promise<{ auditLogId: string; acknowledged: number }> {
   humanActorId(input.session);
-  const item = await lockWorkItem(tx, input.workItemId);
-  if (item.kind !== "decision" || item.state !== "open") refuse("decision_not_open");
-  await tx.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: "acknowledged" } });
+  const { decision, ids } = await lockDecisionsToAcknowledge(tx, input.workItemId);
+  await closeDecisionsAsSeen(tx, ids);
+  const auditLogId = await writeAdminAuditLog(
+    decisionAcknowledgedEntry(tx, { session: input.session, request: input.request, decisionId: decision.id, ids }),
+  );
+  return { auditLogId, acknowledged: ids.length };
+}
+
+/**
+ * Whether a person may approve that the publisher open the pull request for a
+ * branch an unknown outcome left without one (§10): the publish item is still
+ * that unknown outcome, a write consumed its capability, and the last lookup
+ * read a branch and no pull request. The approval itself checks nothing on
+ * GitHub; the publisher's claim reads the branch again and opens the pull
+ * request only for the commit the consumed capability allows.
+ */
+export const engineeringAgentPullRequestResumable = (publishItem: { kind: string; state: string; reason: string | null }) =>
+  publishItem.kind === "publish" &&
+  publishItem.state === "outcome_unknown" &&
+  (ENGINEERING_AGENT_PR_RESUMABLE_REASONS as readonly string[]).includes(publishItem.reason ?? "");
+
+/**
+ * A person approves that the publisher open the pull request for the branch
+ * this decision's unknown outcome left without one (§10). The decision and
+ * its earlier ones close as seen, and the publish item waits for one claim,
+ * which carries the approval and takes it. Nothing is written to GitHub here,
+ * and nothing is pushed by anyone. The route has checked permission and step-up.
+ */
+export async function approveEngineeringAgentPullRequestResume(
+  tx: EngineeringAgentTransaction,
+  input: { session: Session; request?: Request; workItemId: string },
+): Promise<{ auditLogId: string; acknowledged: number }> {
+  humanActorId(input.session);
+  const { decision, ids } = await lockDecisionsToAcknowledge(tx, input.workItemId);
+  const publishItemId = unknownOutcomeDecisionWorkItemId(decision.causeKey) ?? refuse("decision_not_an_unknown_outcome");
+  const publishItem = await lockWorkItem(tx, publishItemId);
+  const { reason } = await tx.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: publishItem.id }, select: { reason: true } });
+  if (!engineeringAgentPullRequestResumable({ ...publishItem, reason })) refuse("pull_request_not_resumable");
+  const consumed = await tx.engineeringAgentCapability.findFirst({
+    where: { workItemId: publishItem.id, consumedAt: { not: null } },
+    select: { id: true },
+  });
+  if (!consumed) refuse("write_without_capability");
+  await tx.engineeringAgentWorkItem.update({
+    where: { id: publishItem.id },
+    data: { reason: ENGINEERING_AGENT_PR_RESUME_APPROVED_REASON },
+  });
   const auditLogId = await writeAdminAuditLog({
     session: input.session,
     request: input.request,
-    action: ENGINEERING_AGENT_AUDIT_ACTIONS.decisionAcknowledged,
+    action: ENGINEERING_AGENT_AUDIT_ACTIONS.pullRequestResumeApproved,
     targetType: "engineering_agent_work_item",
-    targetId: item.id,
-    summary: `${ENGINEERING_AGENT_AUDIT_ACTIONS.decisionAcknowledged} ${item.id}`,
-    metadata: { kind: "decision" },
+    targetId: publishItem.id,
+    summary: `${ENGINEERING_AGENT_AUDIT_ACTIONS.pullRequestResumeApproved} ${publishItem.id}`,
+    metadata: { decisionId: decision.id, previousReason: reason, fencingToken: publishItem.fencingToken.toString() },
     tx,
   });
-  return { auditLogId };
+  await closeDecisionsAsSeen(tx, ids);
+  await writeAdminAuditLog(decisionAcknowledgedEntry(tx, {
+    session: input.session, request: input.request, decisionId: decision.id, ids, resumeOf: publishItem.id,
+  }));
+  return { auditLogId, acknowledged: ids.length };
 }
 
 /* ------------------------------------------------------------------------- */
@@ -2153,7 +2323,17 @@ type BindingObservationInput =
       observation: z.infer<typeof engineeringAgentApprovalObservationSchema>;
       reviewer: { githubId: number; login: string } | null;
     }
-  | { bindingId: string; kind: "merge"; observation: z.infer<typeof engineeringAgentMergeObservationSchema> };
+  | {
+      bindingId: string;
+      kind: "merge";
+      observation: z.infer<typeof engineeringAgentMergeObservationSchema>;
+      /**
+       * The merge itself stood as the approval: an approver's own merge of the
+       * verified head (engineering-agent.md §9-10). Kept in the audit entry;
+       * the stored observation's shape is fixed by its CHECK.
+       */
+      approvedByMerge?: true;
+    };
 
 export async function recordEngineeringAgentBindingObservation(
   tx: EngineeringAgentTransaction,
@@ -2172,6 +2352,7 @@ const bindingObservationAudit = (input: BindingObservationInput) => ({
   kind: input.kind,
   verdict: input.kind === "approval" ? input.observation.verdict : null,
   merged: input.kind === "merge" ? input.observation.merged : null,
+  ...("approvedByMerge" in input && input.approvedByMerge ? { approvedByMerge: true } : {}),
 });
 
 /**

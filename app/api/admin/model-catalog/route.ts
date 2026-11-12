@@ -26,7 +26,7 @@ import {
   storeCatalogDraft,
   updateCatalogEntry,
 } from "@/lib/modelCatalogAdmin";
-import { judgeVideoModel, MODEL_ID_PATTERN, STORED_CATALOG_CATEGORIES } from "@/lib/modelCatalogCore";
+import { defaultPriceSources, imageFullProfileSchema, judgeVideoModel, MODEL_ID_PATTERN, STORED_CATALOG_CATEGORIES } from "@/lib/modelCatalogCore";
 import {
   catalogDraftLlmFromEnv,
   DraftRefusal,
@@ -35,6 +35,7 @@ import {
   MODEL_CATALOG_DRAFT_LLM_MODEL_ENV,
 } from "@/lib/modelCatalogDraftLlm";
 import { prisma } from "@/lib/prisma";
+import { runtimeImageProfileTemplate } from "@/lib/runtimeImageProviders";
 
 // The dynamic model catalogue (image and coding; chat is a read-only view of
 // the model registry; video has no activation policy yet). Every write commits
@@ -158,7 +159,8 @@ const postBodySchema = z.discriminatedUnion("action", [
     modelId: z.string().regex(MODEL_ID_PATTERN),
     provider: z.string().min(1).max(40),
     apiModelId: z.string().min(1).max(120),
-    sourceUrls: z.array(z.string().url()).min(1).max(MAX_DRAFT_SOURCES),
+    // Empty means the provider's default pricing pages.
+    sourceUrls: z.array(z.string().url()).max(MAX_DRAFT_SOURCES),
   }),
   z.object({
     action: z.literal("apply_draft"),
@@ -197,13 +199,25 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
+    // A runtime image model gets its request profile from the same form, so
+    // the operator can apply the draft without saving a profile first.
+    const imageProfile =
+      body.category === "image" && !IMAGE_MODEL_REGISTRY.some((model) => model.id === body.modelId)
+        ? runtimeImageProfileTemplate(body.provider, body.apiModelId)
+        : undefined;
+    // Checked before the paid call, so a bad form fails for free.
+    if (imageProfile !== undefined && !imageFullProfileSchema.safeParse(imageProfile).success) {
+      return NextResponse.json({ error: "invalid_profile", detail: body.provider }, { status: 400 });
+    }
+    const sourceUrls = body.sourceUrls.length > 0 ? body.sourceUrls : defaultPriceSources(body.provider);
+    if (sourceUrls.length === 0) return NextResponse.json({ error: "no_default_source", detail: body.provider }, { status: 422 });
     const pages = [];
-    for (const url of body.sourceUrls) pages.push(await fetchOfficialPage(body.provider, url));
+    for (const url of sourceUrls) pages.push(await fetchOfficialPage(body.provider, url));
     const draft =
       body.category === "image"
         ? await llm.draftImagePrices({ provider: body.provider, apiModelId: body.apiModelId, pages })
         : await llm.draftCodingProfile({ provider: body.provider, apiModelId: body.apiModelId, pages });
-    await storeCatalogDraft({ category: body.category, modelId: body.modelId, draft, session, request: req });
+    await storeCatalogDraft({ category: body.category, modelId: body.modelId, draft, imageProfile, session, request: req });
     return NextResponse.json({ ok: true, draft });
   } catch (error) {
     return refusalResponse(error) ?? NextResponse.json({ error: "Catalog action failed." }, { status: 500 });

@@ -11,24 +11,15 @@ export function decideChatWorkspaceEntry(input: {
   authenticated: boolean;
   requestedConversation: boolean;
   ownedConversation: { productKey: string | null; hasContinuationBridge: boolean } | null;
-  offered: boolean;
-  /** Guest Chat trial entry; independent of authenticated Auto availability. */
-  guestTrialAvailable?: boolean;
 }): ChatWorkspaceEntryDecision {
-  if (!input.authenticated) {
-    // A guest has no database row to own. A URL that names one must therefore
-    // fail closed without probing the database; only a blank local trial may
-    // enter Chat.
-    return input.guestTrialAvailable && !input.requestedConversation
-      ? { action: "open" }
-      : { action: "not_found" };
-  }
-  if (input.requestedConversation) {
-    if (!input.ownedConversation) return { action: "not_found" };
-    const surface = conversationSurface(input.ownedConversation);
-    return surface === "chat" ? { action: "open" } : { action: "redirect", surface };
-  }
-  return input.offered ? { action: "open" } : { action: "not_found" };
+  // A blank Chat is open to everyone, guest or account (owner decision
+  // 2026-11-12): no rollout, readiness or model-registry state closes it.
+  if (!input.requestedConversation) return { action: "open" };
+  // A guest has no database row to own. A URL that names one must therefore
+  // fail closed without probing the database.
+  if (!input.authenticated || !input.ownedConversation) return { action: "not_found" };
+  const surface = conversationSurface(input.ownedConversation);
+  return surface === "chat" ? { action: "open" } : { action: "redirect", surface };
 }
 
 export const CHAT_SINGLE_MODEL_REQUIRED = "CHAT_SINGLE_MODEL_REQUIRED";

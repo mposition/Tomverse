@@ -38,6 +38,7 @@ import type { Session } from "next-auth";
 
 import {
   EngineeringAgentStoreRefusedError,
+  acknowledgeEngineeringAgentDecision,
   claimEngineeringAgentWorkItem,
   currentEngineeringAgentHalt,
   endEngineeringAgentRun,
@@ -1512,6 +1513,67 @@ test("an open adapter puts the publisher's pull request on the review of the wor
       0,
     );
     const binding = await prisma.engineeringAgentBinding.findFirstOrThrow({ where: { runId, prNumber } });
+    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "closed" }));
+    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "pruned" }));
+  } finally {
+    await setMode("shadow");
+  }
+});
+
+test("a pull request opened after its card moved on leaves a decision for the run, not a mismatch that stops the agent", async () => {
+  // Owner decision 2026-11-12: the owner may settle a card while its pull
+  // request is still being opened. The pull request is bound all the same; a
+  // person is told through a decision item, and the agent keeps running.
+  const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const inTx = <T>(work: Parameters<typeof runEngineeringAgentTransaction<T>>[1]) =>
+    runEngineeringAgentTransaction(prisma, work);
+  await setMode("t1");
+  try {
+    const fixture = await readyWorkerWithCard({ requiresHumanReview: true });
+    const runId = nextRunId();
+    const started = await startWithRun(fixture, runId);
+    const { workItemId } = await inTx((tx) =>
+      openEngineeringAgentWorkItem(tx, { kind: "publish", causeKey: `publish:${runId}:moved-on`, runId,
+        patchBody: "patch", patchDigest: sha256("patch"), baseSha: sha1(runId), expectedTreeId: sha1("tree") }));
+    await inTx((tx) =>
+      issueEngineeringAgentCapability(tx, { workItemId, capability: {
+        baseSha: sha1(runId), patchDigest: sha256("patch"), expectedTreeId: sha1("tree"),
+        commit: { identity: { name: "Tomverse Engineering Agent", email: "engineering-agent@users.noreply.github.com" },
+          baseCommitterDate: "1759000000 +1000", runId, cardRef: fixture.taskId } } }));
+    const settled = await withAmuxRouteBudget(
+      () => settleAmuxExecution({ attemptId: started.attemptId, worker: fixture.worker, instanceId: fixture.instanceId,
+        generation: fixture.generation, taskRevision: started.taskRevision, outcome: "succeeded", toStatus: "review",
+        actualCostMicrousd: null }, engineeringRunEndAttachment({ runId, outcome: "t1_queued", halt: "none" })),
+      ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS);
+    assert.equal(settled.settled, true);
+    const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+
+    // The owner closes the card (an archive) before the publisher's result arrives.
+    await prisma.amuxWorkItem.update({ where: { id: fixture.taskId },
+      data: { archivedAt: new Date(), revision: { increment: 1 } } });
+
+    const prNumber = 900_000 + Math.floor(Math.random() * 90_000);
+    const result = await withExecutionApi(() =>
+      recordEngineeringAgentPublisherResult({ workItemId, fencingToken: claim.fencingToken, outcome: "confirmed",
+        pullRequest: { prNumber, headSha: sha1("head"), verifiedHeadSha: sha1("head"),
+          snapshot: { baseSha: sha1(runId), diffDigest: sha256("diff"), treeId: sha1("tree"), invalidatedReviewIds: [] } } }));
+    assert.equal(result.recorded, false);
+    assert.equal(result.recorded === false ? result.reason : null, "task_not_in_review");
+
+    // Settled and bound on the engineering side, as any published result is.
+    assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } })).state, "published");
+    const binding = await prisma.engineeringAgentBinding.findFirstOrThrow({ where: { runId, prNumber } });
+    // No mismatch, so nothing stops; one decision for the run says what happened.
+    assert.equal(await prisma.engineeringAgentWorkItem.count({
+      where: { kind: "state_mismatch", causeKey: `review_pr:${workItemId}` } }), 0);
+    const decision = await prisma.engineeringAgentWorkItem.findFirstOrThrow({
+      where: { kind: "decision", causeKey: `review_pr_moved:${workItemId}` } });
+    assert.deepEqual([decision.state, decision.reason, decision.runId], ["open", "task_not_in_review", runId]);
+    assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "none");
+
+    const person = { user: { id: `eng-adapter-owner-${randomUUID()}`, email: "owner@example.test" },
+      expires: new Date(Date.now() + 3_600_000).toISOString() } as Session;
+    await inTx((tx) => acknowledgeEngineeringAgentDecision(tx, { session: person, workItemId: decision.id }));
     await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "closed" }));
     await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "pruned" }));
   } finally {

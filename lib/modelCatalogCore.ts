@@ -59,12 +59,28 @@ export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> 
   deepseek: ["api-docs.deepseek.com"],
   mistral: ["docs.mistral.ai", "mistral.ai"],
   moonshot: ["platform.moonshot.ai"],
-  qwen: ["www.alibabacloud.com", "help.aliyun.com"],
+  // QwenCloud is Alibaba's Qwen API site. Its www host also serves sign-in and
+  // a playground, so only /pricing/ there counts; docs.qwencloud.com is docs.
+  qwen: ["www.alibabacloud.com", "help.aliyun.com", "docs.qwencloud.com", "www.qwencloud.com/pricing/"],
   zhipu: ["docs.z.ai"],
   minimax: ["platform.minimax.io"],
   groq: ["console.groq.com"],
   perplexity: ["docs.perplexity.ai"],
 };
+
+/**
+ * The pricing pages a draft reads when the operator gives no URL, so the
+ * operator does not have to look them up. Each one was checked to carry its
+ * prices in the HTML (not loaded by script) and to fit the draft page limits.
+ */
+export const DEFAULT_PRICE_SOURCES: Readonly<Record<string, readonly string[]>> = {
+  openai: ["https://developers.openai.com/api/docs/pricing", "https://developers.openai.com/api/docs/guides/image-generation"],
+  google: ["https://aistudio.google.com/docs/pricing"],
+  qwen: ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"],
+};
+
+export const defaultPriceSources = (provider: string): readonly string[] =>
+  Object.hasOwn(DEFAULT_PRICE_SOURCES, provider) ? DEFAULT_PRICE_SOURCES[provider] : [];
 
 /**
  * Exact hosts only: a subdomain wildcard would admit user-written pages

@@ -21,8 +21,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  ENGINEERING_PUBLISHER_FEATURES,
   ENGINEERING_PUBLISHER_FEATURES_HEADER,
-  ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE,
   finalSignalIsSuccess,
   reportedHalt,
 } from "../lib/engineeringAgentCore.ts";
@@ -379,8 +379,9 @@ async function main() {
       headers: {
         authorization: `Bearer ${secret}`,
         "content-type": "application/json",
-        // Owner review items are handed only to a publisher that opens them as drafts.
-        [ENGINEERING_PUBLISHER_FEATURES_HEADER]: ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE,
+        // Owner review items are handed only to a publisher that opens them as
+        // drafts, and an approved pull request resume only to one that opens it.
+        [ENGINEERING_PUBLISHER_FEATURES_HEADER]: ENGINEERING_PUBLISHER_FEATURES,
       },
       body: JSON.stringify(body),
     });

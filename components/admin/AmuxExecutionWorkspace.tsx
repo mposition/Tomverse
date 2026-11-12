@@ -11,7 +11,7 @@ import { AmuxBoardAttentionLane, AMUX_ATTENTION_LANE_ROWS, type AmuxBoardOwnerQu
 import { AmuxBoardPastWork } from "./AmuxBoardPastWork";
 import { AmuxCardListPanel } from "./AmuxCardListPanel";
 import { AmuxTaskQuestionSection } from "./AmuxWorkerQuestion";
-import { AmuxLegacyCardPanel, type AmuxLegacyCardView } from "./AmuxLegacyCardPanel";
+import { AmuxLegacyCardPanel, type AmuxLegacyCardView, isAmuxRemakeOnlyCardKind } from "./AmuxLegacyCardPanel";
 import { AmuxSettledCardEscalationPanel } from "./AmuxSettledCardEscalationPanel";
 import { isAmuxSettledCardWithOpenEscalation } from "@/lib/amux/settledCardEscalationCore";
 import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
@@ -456,7 +456,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         // A worker question is answered on the overview, where it is shown.
         // A legacy WORKBOARD card has no review decision; it opens on its recreate and close.
         // A done or todo card left with an escalation has no decision either; it opens on its close.
-        if (canReviewCards && result.escalations.length > 0 && !preferOverview && !result.legacyCard &&
+        if (canReviewCards && result.escalations.length > 0 && !preferOverview &&
+            !isAmuxRemakeOnlyCardKind(result.legacyCard?.kind) &&
             !isAmuxSettledCardWithOpenEscalation({ status: result.status, escalationId: result.escalations[0]?.id ?? null }))
           setDetailTab("ownerReview");
       }

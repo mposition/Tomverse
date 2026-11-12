@@ -92,7 +92,12 @@ CC_DEFAULTS="$CC_HOME/defaults.env"
 # without a separate edit per site. Scoped to amux- prefixed panes: a human's
 # own tmux session (or no tmux at all) leaves AMUX_SESSION exactly as unset as
 # before this.
-if [[ -z "${AMUX_SESSION:-}" ]]; then
+#
+# Only inside a pane ($TMUX set). Outside tmux, `tmux display-message` answers
+# with the server's most recently used session instead of failing, so a process
+# started by cron or systemd would take whichever lane was touched last
+# (2026-11-11: a marketing `claude --print` job reported as antigravity-impl).
+if [[ -z "${AMUX_SESSION:-}" && -n "${TMUX:-}" ]]; then
   _mr43_tname="$(tmux display-message -p '#S' 2>/dev/null || true)"
   if [[ "$_mr43_tname" == amux-* ]]; then
     export AMUX_SESSION="${_mr43_tname#amux-}"
@@ -115,7 +120,7 @@ fi
 # the typo case (a lane once ran 4h15m as `amax-gtm`, 138 reports, every one a
 # 404), and it cannot hijack a deliberate cross-session claim, because there the
 # claimed session exists and this leaves it alone.
-if [[ -n "${AMUX_SESSION:-}" && ! -f "$CC_HOME/sessions/$AMUX_SESSION.env" ]]; then
+if [[ -n "${AMUX_SESSION:-}" && -n "${TMUX:-}" && ! -f "$CC_HOME/sessions/$AMUX_SESSION.env" ]]; then
   _stale_tname="$(tmux display-message -p '#S' 2>/dev/null || true)"
   if [[ "$_stale_tname" == amux-* ]]; then
     _stale_true="${_stale_tname#amux-}"

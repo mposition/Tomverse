@@ -56,7 +56,8 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
       CREATE TABLE "Conversation" ("id" TEXT PRIMARY KEY, "userId" TEXT REFERENCES "User"("id") ON DELETE CASCADE,
         "kind" TEXT, "productKey" TEXT, "chatRecoveryEpoch" INTEGER DEFAULT 0, "selectionMode" TEXT DEFAULT 'auto');
       CREATE TABLE "ChatComposerDraft" ("id" TEXT PRIMARY KEY, "userId" TEXT, "conversationId" TEXT,
-        "revision" INTEGER, "text" TEXT, "attachmentReferences" JSONB DEFAULT '[]');
+        "revision" INTEGER, "text" TEXT, "attachmentReferences" JSONB DEFAULT '[]',
+        "scopeKey" TEXT GENERATED ALWAYS AS ("conversationId") STORED);
       CREATE TABLE "Message" ("id" TEXT PRIMARY KEY, "conversationId" TEXT, "role" TEXT, "content" TEXT);
       CREATE TABLE "AdminAuditLog" ("id" TEXT PRIMARY KEY, "action" TEXT NOT NULL,
         "targetType" TEXT NOT NULL, "targetId" TEXT);
@@ -175,6 +176,19 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
       return { scope, draftId, snapshot, held, claims };
     };
 
+    await t.test("capture binds the draft and recovery epoch to the same owner, Chat scope and revision", async () => {
+      const { scope, snapshot } = await setup();
+      const input = { userId: "owner", conversationId: "conversation", scopeId: scope.id,
+        epoch: scope.epoch, expectedDraftRevision: snapshot.draftRevision };
+      const current = await store.capturePromptRefinerChatDraft(input);
+      assert.equal(current.sourcePrompt, snapshot.sourcePrompt);
+      assert.equal(current.draftId, snapshot.draftId);
+      assert.equal(current.recoveryEpoch, snapshot.recoveryEpoch);
+      for (const changed of [{ userId: "other" }, { conversationId: "other-conversation" },
+        { epoch: scope.epoch + 1 }, { expectedDraftRevision: snapshot.draftRevision + 1 }]) {
+        await assert.rejects(store.capturePromptRefinerChatDraft({ ...input, ...changed }), /no longer available/);
+      }
+    });
     await t.test("default-off refuses and does not consume", async () => {
       const f = await setup(); await f.save(); await refuse(f.input);
       assert.equal((await row(f.held.suggestionId)).state, "ready");

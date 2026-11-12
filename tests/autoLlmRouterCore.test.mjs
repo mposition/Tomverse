@@ -152,6 +152,29 @@ test("the previous answer is the assistant reply the latest prompt follows", () 
   assert.equal(long.length, AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS);
 });
 
+test("the compact search menu preserves each model, capability, price and turn field", () => {
+  const menu = candidates.map((row, i) => ({ ...row, bestFor: i === 0 ? '"columns":[],한글' : row.bestFor,
+    credits: i === 0 ? 0 : null, futureCapability: i !== 0 }));
+  // A differently ordered object must still be read by column name.
+  menu[1] = Object.fromEntries(Object.entries(menu[1]).reverse());
+  const session = { topic: "saved topic", recentPicks: [{ modelId: menu[0].id, taskKind: "research" }] };
+  const inputs = ["today's Brisbane weather", "Voyager 1 and 2 UTC launch dates"];
+  for (const prompt of inputs) {
+    const full = autoLlmRouterUserMessage(prompt, "prior answer", menu, session);
+    const compact = autoLlmRouterUserMessage(prompt, "prior answer", menu, session, true);
+    const decoded = JSON.parse(compact);
+    const { columns, rows } = decoded.candidates;
+    decoded.candidates = rows.map(row => Object.fromEntries(columns.map((key, i) => [key, row[i]])));
+    assert.deepEqual(decoded, JSON.parse(full));
+    assert.ok(Buffer.byteLength(compact) < Buffer.byteLength(full));
+  }
+  for (const last of [{ ...menu[1], futureCapability: undefined }, { ...menu[1], extra: "turn-specific" }]) {
+    const heterogeneous = [menu[0], last];
+    assert.equal(autoLlmRouterUserMessage(inputs[0], null, heterogeneous, null, true),
+      autoLlmRouterUserMessage(inputs[0], null, heterogeneous));
+  }
+});
+
 test("session memory is the latest topic and recent picks of this conversation", () => {
   assert.equal(autoLlmRouterSession([]), null);
   // Newest first, as the reader orders them.

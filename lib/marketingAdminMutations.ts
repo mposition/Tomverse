@@ -143,8 +143,17 @@ export type MarketingMutationSpec<TBody, TResult> = {
   /** Distinguishes the rate-limit bucket; the buckets are per action. */
   bucket: string;
   schema: z.ZodType<TBody>;
-  /** Audit metadata. `actorHadMarketingWrite` is added here, not by callers. */
-  metadata: (body: TBody) => Record<string, unknown>;
+  /**
+   * Audit metadata. `actorHadMarketingWrite` is added here, not by callers.
+   *
+   * It may read the transaction: the edit route's entry has to name the
+   * digest of the envelope the edit will store, which is the stored envelope
+   * with the new words, and only the row knows the rest of that envelope.
+   */
+  metadata: (
+    body: TBody,
+    tx: MarketingTransaction
+  ) => Record<string, unknown> | Promise<Record<string, unknown>>;
   /**
    * A route's own refusals, for errors the store does not raise.
    *
@@ -207,7 +216,7 @@ export async function runMarketingAdminMutation<TBody, TResult>(
           typeof spec.targetId === "function" ? spec.targetId(body) : spec.targetId,
         summary:
           typeof spec.summary === "function" ? spec.summary(body) : spec.summary,
-        metadata: { ...spec.metadata(body), actorHadMarketingWrite: true },
+        metadata: { ...(await spec.metadata(body, tx)), actorHadMarketingWrite: true },
         tx,
       });
       return spec.run(tx, { body, auditLogId, session });

@@ -173,6 +173,21 @@ PY
 fi
 MODE="${1:-idle}"; SRC="${2:-stop-hook}"
 DERIVED=0
+# The tmux session THIS process runs in, or nothing. Outside tmux ($TMUX unset)
+# `tmux display-message` does not fail: it answers with the server's most
+# recently used session. Measured 2026-11-11 on the box: a `claude --print`
+# marketing job started by systemd, outside any pane, reported 72 `active
+# tool-hook` rows as `antigravity-impl` (the newest lane), which held that
+# idle lane at `unattributed` for as long as the job ran. Only a process inside
+# a pane may take its identity from tmux, and then from its own pane.
+own_tmux_session() {
+  [ -n "${TMUX:-}" ] || return 0
+  if [ -n "${TMUX_PANE:-}" ]; then
+    tmux display-message -p -t "$TMUX_PANE" '#S' 2>/dev/null
+  else
+    tmux display-message -p '#S' 2>/dev/null
+  fi
+}
 if [ -z "$AMUX_SESSION" ]; then
   # MR-43: the var can go missing INSIDE a lane that IS running in its
   # amux-launched pane (spawn always injects it — session_verbs.rs — so this
@@ -180,7 +195,7 @@ if [ -z "$AMUX_SESSION" ]; then
   # lane is not invisible to its own liveness report, and flag the recovery
   # in the body so /api/logs/analyze can count how often this happens instead
   # of a human noticing a lane that silently never reported.
-  TNAME=$(tmux display-message -p '#S' 2>/dev/null)
+  TNAME=$(own_tmux_session)
   case "$TNAME" in
     amux-*) export AMUX_SESSION="${TNAME#amux-}"; DERIVED=1 ;;
   esac
@@ -203,7 +218,7 @@ fi
 # there the claimed session exists and this leaves it alone.
 CORRECTED=0
 if [ -n "$AMUX_SESSION" ] && [ ! -f "$HOME/.amux/sessions/$AMUX_SESSION.env" ]; then
-  _TN=$(tmux display-message -p '#S' 2>/dev/null)
+  _TN=$(own_tmux_session)
   case "$_TN" in
     amux-*)
       _TRUE="${_TN#amux-}"
