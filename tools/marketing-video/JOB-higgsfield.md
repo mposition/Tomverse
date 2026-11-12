@@ -61,8 +61,9 @@ and device. Each one:
   - "free" stands only in a text that also says "within the included credits"
     (guide 7); use another word for any other sense ("feel free", "free time").
   - A text that names two or more models ends with "and more" (guide 6). Only a
-    `screen`, `answer` or `label` that lists full model names of
-    `features.json` (the three that answered the recorded example) needs none.
+    `screen`, `answer` or `label` whose every model is a full model name of
+    `features.json` (the three that answered the recorded example) needs none;
+    one bare name in it ("GPT 6 Luna · Claude") and it needs "and more" again.
   - A model name with a version is exactly one of the names in
     `features.json`.
 - `logos`: the logo files the picture shows, by name, at most 4 (e.g.

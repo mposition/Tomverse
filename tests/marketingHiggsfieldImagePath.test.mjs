@@ -423,6 +423,9 @@ test("counts after a model name, exact model lists on a screen and compound word
   // One bare name in a list of exact names, and the list is copy again.
   assert.match(problemsOf({ role: "label", text: "GPT 6 Luna · Claude" })[0], /and more/u);
   assert.match(problemsOf({ role: "label", text: "GPT 6 Luna · Claude · Gemini Flash" })[0], /and more/u);
+  // Words around exact names are allowed on a screen or a tag (the real model wrote this label, 2026-11-12); as copy they are not.
+  assert.deepEqual(problemsOf({ role: "label", text: "Asked at once: GPT 6 Luna, Claude Haiku 5.5, Gemini Flash", ko: "한 번에 질문: GPT 6 Luna, Claude Haiku 5.5, Gemini Flash", zhT: "同時提問：GPT 6 Luna、Claude Haiku 5.5、Gemini Flash", zhS: "同时提问：GPT 6 Luna、Claude Haiku 5.5、Gemini Flash" }), []);
+  assert.match(problemsOf({ role: "cta", text: "Ask GPT 6 Luna and Claude Haiku 5.5 for every task", ko: "GPT 6 Luna와 Claude Haiku 5.5에 물어보세요", zhT: "問 GPT 6 Luna 和 Claude Haiku 5.5", zhS: "问 GPT 6 Luna 和 Claude Haiku 5.5" })[0], /and more/u);
   // "stress-free" is not an offer; "feel free" is reworded.
   assert.deepEqual(problemsOf({ role: "screen", text: "A stress-free weekend plan", ko: "편안한 주말 계획", zhT: "輕鬆的週末行程", zhS: "轻松的周末行程" }), []);
   assert.match(problemsOf({ role: "screen", text: "Feel free to ask again", ko: "언제든 다시 물어보세요", zhT: "隨時再問", zhS: "随时再问" })[0], /"free" stands only/u);

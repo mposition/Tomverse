@@ -111,11 +111,14 @@ function textProblems(text, { locale, where, role, models }) {
     // Design guide 6 is about copy. A screen or a tag that lists exact models of
     // features.json (the three that answered the recorded example, say) shows
     // what is there; "and more" would be false on it (box run 2026-11-12).
-    // Only a list made of exact names alone: one bare name in it ("GPT 6 Luna · Claude") and it is copy again.
+    // Every model in it must be an exact name: one bare name among them
+    // ("GPT 6 Luna · Claude") and it is copy again. Words around the names are
+    // allowed: the real model writes "Asked at once: GPT 6 Luna, Claude Haiku
+    // 5.5, Gemini Flash", and a bare-list rule refused 3 of 30 real concepts.
     const named = (value) => familiesIn(value).filter((name) => !COMPANIES.includes(name));
     const exactOnly = !COPY_ROLES.includes(role) && named([...models].sort((a, b) => b.length - a.length).reduce((rest, name) => rest.replaceAll(name, " "), text)).length === 0;
     if (!exactOnly && named(text).length >= 2 && !/\band more\b|\+\s*more\b/iu.test(text)) {
-      problems.push(`${where}: a text that names two or more models ends with "and more" (e.g. "GPT, Claude, Gemini and more"); only a screen or label listing full model names of features.json needs none`);
+      problems.push(`${where}: a text that names two or more models ends with "and more" (e.g. "GPT, Claude, Gemini and more"); only a screen, answer or label whose every model is a full name of features.json ("GPT 6 Luna · Claude Haiku 5.5 · Gemini Flash") needs none`);
     }
   }
   if (locale === "zh-Hans") {
