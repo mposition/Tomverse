@@ -17,6 +17,8 @@ import {
   imageExecutionDrift,
   imageExecutionProfile,
   isOfficialSourceUrl,
+  DEFAULT_PRICE_SOURCES,
+  defaultPriceSources,
   judgeCodingModel,
   judgeImageModel,
   judgeVideoModel,
@@ -32,6 +34,7 @@ import {
   draftPricingVersion,
   imageDraftFromAnswer,
   imageOptionCostMicroUsd,
+  MAX_DRAFT_SOURCES,
   pageToText,
 } from "../lib/modelCatalogDraftLlm.ts";
 
@@ -372,6 +375,16 @@ test("sources must be the provider's own https documentation", () => {
   assert.equal(isOfficialSourceUrl("qwen", "https://www.qwencloud.com/models"), false);
   assert.equal(isOfficialSourceUrl("qwen", "https://qwencloud.com/pricing/api"), false);
   assert.equal(isOfficialSourceUrl("openai", "https://www.qwencloud.com/pricing/api"), false);
+});
+
+test("default price sources are official for their provider and fit the draft limit", () => {
+  for (const [provider, urls] of Object.entries(DEFAULT_PRICE_SOURCES)) {
+    assert.ok(urls.length >= 1 && urls.length <= MAX_DRAFT_SOURCES, provider);
+    for (const url of urls) assert.equal(isOfficialSourceUrl(provider, url), true, url);
+  }
+  assert.deepEqual(defaultPriceSources("qwen"), ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"]);
+  assert.deepEqual(defaultPriceSources("toString"), []);
+  assert.deepEqual(defaultPriceSources("unknown"), []);
 });
 
 test("the registry lookups read the active catalogue and fall back to the seed", () => {

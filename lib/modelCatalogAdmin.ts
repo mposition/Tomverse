@@ -373,15 +373,40 @@ export const storeCatalogDraft = async (input: {
   category: StoredCatalogCategory;
   modelId: string;
   draft: unknown;
+  /**
+   * The runtime image model's request profile the draft was read for, so the
+   * operator does not have to save a profile before applying the draft. A
+   * draft must price what the row calls: when the stored profile calls another
+   * provider or API model, an unpriced row takes this profile with the draft
+   * and a priced one refuses the draft.
+   */
+  imageProfile?: unknown;
   session: Session;
   request?: Request;
 }) =>
   prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
+    let profile: Prisma.InputJsonValue | undefined;
+    if (input.category === "image" && input.imageProfile !== undefined) {
+      const wanted = imageFullProfileSchema.safeParse(input.imageProfile);
+      if (!wanted.success) throw new CatalogRefusal("invalid_profile", wanted.error.issues.map((i) => i.path.join(".")), 400);
+      const before = await tx.modelCatalogEntry.findUnique({
+        where: { category_modelId: { category: "image", modelId: input.modelId } },
+      });
+      const stored = imageFullProfileSchema.safeParse(before?.profile);
+      const sameModel =
+        stored.success && stored.data.provider === wanted.data.provider && stored.data.apiModelId === wanted.data.apiModelId;
+      if (!sameModel) {
+        const priced = (await tx.modelCatalogPriceRevision.count({ where: { category: "image", modelId: input.modelId } })) > 0;
+        if (priced) throw new CatalogRefusal("draft_profile_mismatch", ["use_a_new_model_id"]);
+        profile = input.imageProfile as Prisma.InputJsonValue;
+      }
+    }
     const data = {
       draft: input.draft as Prisma.InputJsonValue,
       draftSource: "llm",
       draftCreatedAt: new Date(),
+      ...(profile === undefined ? {} : { profile }),
     };
     await tx.modelCatalogEntry.upsert({
       where: { category_modelId: { category: input.category, modelId: input.modelId } },
@@ -395,7 +420,7 @@ export const storeCatalogDraft = async (input: {
       targetType: "ModelCatalogEntry",
       targetId: `${input.category}:${input.modelId}`,
       summary: `Stored an LLM draft for ${input.category} model ${input.modelId}.`,
-      metadata: { category: input.category, modelId: input.modelId },
+      metadata: { category: input.category, modelId: input.modelId, profileSaved: profile !== undefined },
       tx,
     });
   });

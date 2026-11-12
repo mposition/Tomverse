@@ -69,6 +69,20 @@ export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> 
 };
 
 /**
+ * The pricing pages a draft reads when the operator gives no URL, so the
+ * operator does not have to look them up. Each one was checked to carry its
+ * prices in the HTML (not loaded by script) and to fit the draft page limits.
+ */
+export const DEFAULT_PRICE_SOURCES: Readonly<Record<string, readonly string[]>> = {
+  openai: ["https://developers.openai.com/api/docs/pricing", "https://developers.openai.com/api/docs/guides/image-generation"],
+  google: ["https://aistudio.google.com/docs/pricing"],
+  qwen: ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"],
+};
+
+export const defaultPriceSources = (provider: string): readonly string[] =>
+  Object.hasOwn(DEFAULT_PRICE_SOURCES, provider) ? DEFAULT_PRICE_SOURCES[provider] : [];
+
+/**
  * Exact hosts only: a subdomain wildcard would admit user-written pages
  * (community.openai.com) as "official", and this list is also the fetch
  * allowlist for LLM drafts. No port, https only. An entry with a path
