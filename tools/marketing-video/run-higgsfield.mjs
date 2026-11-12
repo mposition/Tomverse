@@ -30,6 +30,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { bandLayout, BAND_ALT } from "./band-layout.mjs";
+import { FEATURES_FILE_ENV, featuresFile, syncFeatures } from "./features-source.mjs";
 import { gatherConcepts, loadFeatures, pickFeature, recentDevices, sortConcepts, TRANSLATED } from "./concepts-core.mjs";
 import { bottomIsDark, ICON_DIR, setLogos, setTexts } from "./compose-core.mjs";
 import { brisbaneDay, ledgerPath, readLedger } from "./higgsfield-cap.mjs";
@@ -43,7 +44,7 @@ const date = `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}`;
 const dir = path.join("job", day);
 const genDir = path.join(dir, "generated");
 for (const sub of [genDir, path.join(dir, "review"), path.join(dir, "calls")]) mkdirSync(sub, { recursive: true });
-const report = { job: "marketing-media", path: "higgsfield", date, feature: null, concepts: [], submitted: [], refused: [], failed: [], dropped: [], halted: null, credits: 0 };
+const report = { job: "marketing-media", path: "higgsfield", date, features: null, feature: null, concepts: [], submitted: [], refused: [], failed: [], dropped: [], halted: null, credits: 0 };
 const finish = (code) => {
   try {
     report.credits = readLedger(ledgerPath("job", day)).entries.reduce((sum, entry) => sum + entry.cost, 0);
@@ -133,6 +134,11 @@ if (listed.status !== 0) {
 }
 const historyPath = path.join("job", "history.json");
 const history = existsSync(historyPath) ? JSON.parse(readFileSync(historyPath, "utf8")) : [];
+// The facts an operator keeps in Admin (Marketing › Settings › Ad facts), or
+// features.json when the app cannot answer; every later read names this file.
+const synced = await syncFeatures({ toolDir, out: path.resolve(dir, "features.json") });
+process.env[FEATURES_FILE_ENV] = synced.file;
+report.features = synced.source === "app" ? "app" : `repo:${synced.reason}`;
 const features = loadFeatures(toolDir);
 const feature = pickFeature(history, features, day);
 report.feature = feature;
@@ -146,7 +152,7 @@ const conceptPrompt = [
   `## Today\n\n- Date: ${date}\n- Feature: ${feature}\n- Newest research notes: ${newestNotes ? `job/research-notes/${newestNotes}` : "none"}`,
   `## Scene ideas used in the last 14 days\n\n${recentDevices(history, day).map((device) => `- ${device}`).join("\n") || "- none"}`,
   `## Logo files\n\n${readdirSync(ICON_DIR).filter((file) => file.endsWith(".png")).map((file) => file.replace(/\.png$/u, "")).join(", ")}`,
-  `## features.json\n\n\`\`\`json\n${readFileSync("features.json", "utf8")}\n\`\`\``,
+  `## features.json\n\n\`\`\`json\n${readFileSync(featuresFile(toolDir), "utf8")}\n\`\`\``,
 ].join("\n\n");
 // A dry run on the box after a deployment (MARKETING_HIGGSFIELD_CONCEPTS_ONLY=1):
 // the concept step alone, with no picture, no credit, no submission and no
@@ -216,7 +222,7 @@ function review(stage, concept, locale, file, attempt) {
     JSON.stringify({ id: concept.id, feature: concept.feature, device: concept.device, texts: textsFor(concept, locale), logos: concept.logos, factRefs: concept.factRefs }, null, 1),
   );
   // The facts the reviewer judges against: the whole of features.json (what Tomverse does, its models and the recorded answers).
-  copyFileSync("features.json", path.join(folder, "features.json"));
+  copyFileSync(featuresFile(toolDir), path.join(folder, "features.json"));
   for (const logo of concept.logos) copyFileSync(path.join(ICON_DIR, `${logo}.png`), path.join(folder, "logos", `${logo}.png`));
   const rel = folder.split(path.sep).join("/");
   const prompt = readFileSync("REVIEW-higgsfield.md", "utf8")

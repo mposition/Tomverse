@@ -21,6 +21,7 @@ import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 
 import { marketingLlmBudgetSignature, MARKETING_LLM_PURPOSES } from "@/lib/marketingLlmBudgetCore";
+import type { MarketingLlmBudgetPort } from "@/lib/marketingLlmClientCore";
 import { marketingLlmCatalogPins } from "@/lib/marketingLlmModelCatalog";
 import {
   dispatchMarketingLlmCall,
@@ -190,6 +191,24 @@ async function run(
       );
   }
 }
+
+/**
+ * The same five actions for a caller inside the app (Admin's ad facts refresh,
+ * `feature_refresh`), as the budget port `runMarketingLlmCall` takes. No HTTP
+ * and no secret: the caller is this process, already past its own admin
+ * checks. Each action is parsed by the same schema and run by the same store
+ * functions in its own transaction, and answers as the route does; a failure
+ * throws, which the client treats as a lost answer and stops on.
+ */
+export const marketingLlmBudgetInProcessPort =
+  (prisma: PrismaClient, budget: MarketingLlmBudgetEnvironment, deadlineAt: string): MarketingLlmBudgetPort =>
+  async (action, fields) => {
+    // The signature field is the route's; nothing checks it here.
+    const parsed = marketingLlmBudgetRequestSchema.safeParse({ ...fields, action, deadlineAt, signature: "0".repeat(64) });
+    if (!parsed.success) return { httpStatus: 400, body: { code: "invalid_request" } };
+    const response = answer(await run(prisma, parsed.data, budget));
+    return { httpStatus: response.status, body: response.body };
+  };
 
 /**
  * Authenticate, bound, parse, verify, act. A failure inside the transaction

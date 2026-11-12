@@ -3515,6 +3515,14 @@ export const RAW_SQL_ALLOWLIST = [
       "Replaces the ledger's shape check in one ALTER to add the SEO code agent's seo purpose; every other predicate is unchanged. The verbs are that ALTER and its DROP CONSTRAINT; it writes no row.",
   },
   {
+    path: "prisma/migrations/20261112120000_marketing_feature_facts/migration.sql",
+    table: "MarketingLlmCall",
+    tableMentions: 1,
+    writeVerbs: 8,
+    reason:
+      "Creates and seeds the MarketingFeatureFact table, then replaces the ledger's shape check in one ALTER to add the ad facts refresh's feature_refresh purpose; every other predicate is unchanged. The verbs counted are the table's CREATE and INSERT, the CHECK's ALTER and DROP CONSTRAINT, and the same words in the comments; no MarketingLlmCall row is written.",
+  },
+  {
     path: "prisma/migrations/20261016150000_marketing_llm_call_legal_hold_decision/migration.sql",
     table: "MarketingLlmCall",
     tableMentions: 5,

@@ -31,11 +31,12 @@ export const MARKETING_LLM_ADAPTER_VERSION = "1";
 
 /**
  * What a call is for. The ledger's shape CHECK holds the same list
- * (prisma/migrations/20261102110000_marketing_llm_seo_purpose);
+ * (prisma/migrations/20261112120000_marketing_feature_facts);
  * `comment_triage` is the comment monitor's classifier (S4d), `seo` the SEO code
- * agent (S5), which must not wait on the analysis switch that gates `brief`.
+ * agent (S5), which must not wait on the analysis switch that gates `brief`,
+ * `feature_refresh` Admin's ad facts refresh (owner 2026-11-12).
  */
-export const MARKETING_LLM_PURPOSES = ["draft", "market_intel", "brief", "comment_triage", "seo"] as const;
+export const MARKETING_LLM_PURPOSES = ["draft", "market_intel", "brief", "comment_triage", "seo", "feature_refresh"] as const;
 export type MarketingLlmPurpose = (typeof MARKETING_LLM_PURPOSES)[number];
 
 export const MARKETING_LLM_CALL_STATES = [
