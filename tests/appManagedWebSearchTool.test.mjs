@@ -735,6 +735,20 @@ test("a single search retains its original result, date notice and answer guidan
   assert.equal(fetchCalls.length, 1);
 });
 
+test("a partial search failure does not inherit the successful query's date notice", async () => {
+  const source = { title: "Station bulletin", url: "https://example.com/bulletin", description: "Observation at local noon. ".repeat(7) };
+  globalThis.fetch = async url => new URL(url).searchParams.get("q") === "one"
+    ? braveResponse([source, source]) : new Response("", { status: 503 });
+  const evidence = await presearch(toolFor(), { groundedAnswer: "lookup", compactEvidence: true });
+  const batch = JSON.parse(evidence[1].text);
+  const [succeeded, failed] = batch.searches;
+  assert.deepEqual(succeeded.sourceIds, ["S1", "S1"]);
+  assert.equal(Object.hasOwn(batch, "notice"), false);
+  assert.match(succeeded.notice, /Searched on /);
+  assert.equal(failed.status, "failed");
+  assert.equal(Object.hasOwn(failed, "notice"), false);
+});
+
 test("a compact index that would enlarge two disjoint result sets keeps the original grounded prompt", async () => {
   const config = toolFor();
   const batch = await config.search({ query: ["one", "two"] });

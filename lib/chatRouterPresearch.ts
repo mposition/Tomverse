@@ -49,8 +49,8 @@ function compactBatchEvidence(batch: AppManagedSearchBatchResult): string {
   if (batch.searches.length === 1 && single.searchesRemaining === batch.searchesRemaining) return JSON.stringify(single);
   const sources: Record<string, WebSearchBackendResult> = {};
   const sourceIds = new Map<string, string>();
-  const notices = new Set(batch.searches.flatMap(search => search.notice ? [search.notice] : []));
-  const notice = notices.size === 1 ? [...notices][0] : undefined;
+  const firstNotice = single?.notice;
+  const notice = firstNotice && batch.searches.every(search => search.notice === firstNotice) ? firstNotice : undefined;
   const searches = batch.searches.map(({ results, notice: queryNotice, searchesRemaining, ...query }) => ({
     ...query,
     ...(queryNotice && queryNotice !== notice ? { notice: queryNotice } : {}),
