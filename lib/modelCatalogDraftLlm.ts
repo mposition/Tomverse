@@ -185,6 +185,10 @@ For each quality and size of this model, give the per-image price the pages stat
 output tokens per image the pages state for that quality and size as outputTokens; give null for either one the pages
 do not state for this model. Give the image output token rate as outputUsdPerMTok, or null.
 Never estimate a token count: a table for another model or an earlier model is not this model's count.
+When the pages price by resolution tier instead of quality (for example 1K and 2K, or one flat price per image), that
+price applies to every quality. All three sizes here are requested at the 1K tier (1536x1024 and 1024x1536 are 1K
+at 3:2 and 2:3), so use the 1K price for each. When the pages list prices for several regions or deployment modes,
+use the highest.
 If no option has a stated per-image price or stated token count, return no options and say in one sentence, in
 noPriceReason, what the pages state instead (for example "only per-token rates, no tokens per image").`;
 
