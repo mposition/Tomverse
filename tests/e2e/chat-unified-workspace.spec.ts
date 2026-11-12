@@ -5046,14 +5046,16 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     });
   }
 
-  for (const changeSelection of [false, true]) {
-    test(`Refiner and location decisions overlap without early GPS or stale dispatch (${changeSelection ? "changed" : "retained"})`, async ({ page }, testInfo) => {
+  for (const selection of ["retained", "changed", "changed-after-save"] as const) {
+    test(`Refiner and location decisions overlap without early GPS or stale dispatch (${selection})`, async ({ page }, testInfo) => {
       const parallel = process.env.E2E_CHAT_PARALLEL_PREPARATION_ENABLED !== "false" && !existingFusionEnabled;
+      test.skip(selection === "changed-after-save" && !parallel, "Requires standalone location preparation");
       const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
       const scopeId = "44444444-4444-4444-8444-444444444444";
       let scopeRead = false; let refinerStarted = false; let intentStarted = false; let intentCount = 0;
       let release = () => {};
       const gate = new Promise<void>(resolve => { release = resolve; });
+      const location = makeGate();
       const locationReads = await countDeviceLocationReads(page);
       await page.route("**/api/chat/prompt-refiner/scope", route => {
         scopeRead = true;
@@ -5067,7 +5069,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       await page.route("**/api/chat/location-intent", async route => {
         intentStarted = true; intentCount++;
         expect(route.request().postDataJSON().text).toBe("What is near me?");
-        await gate;
+        await location.promise;
         await route.fulfill({ json: { requiresLocation: true } });
       });
       await expect.poll(() => scopeRead).toBe(true);
@@ -5078,12 +5080,30 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       expect(await locationReads()).toBe(0);
       expect(await requests(page)).toHaveLength(0);
       expect(state.writes.filter(write => write.method === "POST" && write.path.endsWith("/messages"))).toHaveLength(0);
-      if (changeSelection) await chooseModel(page, MODEL_B);
+      if (selection === "changed") await chooseModel(page, MODEL_B);
       release();
-      if (changeSelection) {
+      if (parallel && selection !== "changed") {
+        await expect.poll(state.messageSaveCommitted).toBe(true);
+        expect(await requests(page)).toHaveLength(0);
+        expect(await locationReads()).toBe(0);
+      }
+      if (selection === "changed-after-save") {
+        await chooseConversation(page, SECOND_CONVERSATION);
+        await expect(message(page, SECOND_ANSWER)).toBeVisible();
+      }
+      location.release();
+      if (selection !== "retained") {
         await expect(page.getByTestId("chat-textarea")).toBeEnabled();
         expect(await requests(page)).toHaveLength(0);
         expect(await locationReads()).toBe(0);
+        if (selection === "changed-after-save") {
+          await chooseConversation(page, CONVERSATION);
+          await page.getByTestId("restore-chat-question").click();
+          await expect(page.getByTestId("chat-textarea")).toHaveValue("What is near me?");
+          expect(await requests(page)).toHaveLength(0);
+          expect(await locationReads()).toBe(0);
+          expect(intentCount).toBe(1);
+        }
       } else {
         await drive(page, 0, "push", "The complete location answer.");
         await drive(page, 0, "finish");
