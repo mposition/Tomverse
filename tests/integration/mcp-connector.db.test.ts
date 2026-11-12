@@ -291,9 +291,12 @@ test("an unverified custom-server write keeps its row, so re-registration cannot
       await takeAuditChainLock(tx);
       registration = registerCustomMcpServer(userId, { url, auth: "bearer" });
       registration.catch(() => {});
+      // Proceed only once a backend is blocked on this very advisory lock, i.e. after the pre-check passed.
+      const waiting = async () => Number((await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+        WHERE l.locktype = 'advisory' AND NOT l.granted AND l.objid = hashtext('tomverse-admin-audit-chain')::oid AND a.datname = current_database()`)[0].n);
       const deadline = Date.now() + 5_000;
-      while (Date.now() < deadline && !Number((await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`)[0].n))
-        await new Promise(resolve => setTimeout(resolve, 20));
+      while (Date.now() < deadline && !await waiting()) await new Promise(resolve => setTimeout(resolve, 20));
+      assert.ok(await waiting(), "registration must be waiting on the audit lock");
       await tx.mcpInvocation.update({ where: { id: unknown.id }, data: { state: "unknown" } });
       release();
     }, { timeout: 10_000 });
