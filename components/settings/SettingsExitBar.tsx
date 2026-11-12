@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+import { usePathname } from "next/navigation";
 import { useLanguage } from "@/components/LanguageProvider";
 import { SettingsReturnToChat } from "@/components/settings/SettingsReturnToChat";
 
@@ -27,6 +29,7 @@ import { SettingsReturnToChat } from "@/components/settings/SettingsReturnToChat
  */
 export function SettingsExitBar() {
     const { t } = useLanguage();
+    const wizard = usePathname() === "/settings/imports/new";
 
     return (
         <nav
@@ -34,7 +37,9 @@ export function SettingsExitBar() {
             data-testid="settings-exit-bar"
             className="sticky top-0 z-30 border-b border-zinc-200/80 bg-zinc-50/95 backdrop-blur supports-[backdrop-filter]:bg-zinc-50/80 dark:border-zinc-800/80 dark:bg-zinc-950/95 dark:supports-[backdrop-filter]:bg-zinc-950/80"
         >
-            <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-end gap-2 px-4 py-2">
+            <div className={wizard ? "flex min-h-14 w-full items-center gap-2 bg-white [&>a]:shrink-0 [&>a]:whitespace-nowrap px-5 py-2 sm:px-10 dark:bg-zinc-950" : "mx-auto flex w-full max-w-3xl flex-wrap items-center justify-end gap-2 px-4 py-2"}>
+                {wizard && <><Image unoptimized src="/tomverse-logo.png" alt="" width={29} height={29}/><span className="font-bold">Tomverse</span>
+                    <span className="mr-auto min-w-0 truncate border-l border-zinc-300 pl-2 text-sm">{t("journey.importTitle")}</span></>}
                 <SettingsReturnToChat />
             </div>
         </nav>

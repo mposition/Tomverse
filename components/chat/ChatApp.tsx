@@ -1,5 +1,6 @@
 "use client";
 
+import { PASSAGE_HEADER } from "@/lib/continuationPassages";
 import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
@@ -251,6 +252,7 @@ type ChatAppProps = {
     submittedAtMonotonicMs?: number;
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
+    sourcePassages?: string;
     preparedLocationIntent?: ChatPanelLocationIntent;
     routerLocationTurn?: RouterLocationTurn;
     id: string;
@@ -357,6 +359,7 @@ type ChatAppProps = {
   importedMessages?: Message[];
   /** Provenance and paging for that transcript (`ChatMessageList`). */
   importedTranscript?: {
+    contextCard?: React.ReactNode;
     status: "available" | "deleted" | "locked";
     provider: string;
     importedAt: string;
@@ -1507,6 +1510,7 @@ function ChatAppComponent({
     preparationReadyAtMonotonicMs?: number,
     preparedLocationIntent?: ChatPanelLocationIntent,
     routerLocationTurn?: RouterLocationTurn,
+    sourcePassages?: string,
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1578,7 +1582,10 @@ function ChatAppComponent({
     const effectiveWebSearchMode: WebSearchMode | undefined =
       webSearchModeOverride ?? webSearchMode;
     const mcpConnectionId = currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
+    const previous = getChatRuntimeLastPrompt(runKey);
+    const turnPassages = sourcePassages ?? (previous?.sourceUserMessageId === sourceUserMessageId ? previous.sourcePassages : undefined);
     setChatRuntimeLastPrompt(runKey, {
+      ...(turnPassages ? {sourcePassages: turnPassages} : {}),
       text,
       targetChatId,
       attachments,
@@ -1904,7 +1911,7 @@ function ChatAppComponent({
         // Human permission and guest verification happen before provider wait
         // time starts. The same source turn is continued after either prompt.
         liveness.stop();
-        const fuseLocation = !recoverWithSavedLocation && routerLocationTurn && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
+        const fuseLocation = !turnPassages && !recoverWithSavedLocation && routerLocationTurn && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
           !deepResearchDepth && !reviewProvider && !isGuestMode && chatLocationIntentEnabled &&
           chatLocationSession.canPrepareIntent(panelIdentityKey);
         const checkLocationTurn = () => {
@@ -1991,7 +1998,7 @@ function ChatAppComponent({
             : {}),
         };
         const post = (path: string, fields: Record<string, unknown>) => fetch(path, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json", ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}) },
           body: JSON.stringify({ ...requestBody, ...fields }),
           signal: controller.signal,
         });
@@ -3111,6 +3118,7 @@ function ChatAppComponent({
           promptPayload.preparationReadyAtMonotonicMs,
           promptPayload.preparedLocationIntent,
           promptPayload.routerLocationTurn,
+          promptPayload.sourcePassages,
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });

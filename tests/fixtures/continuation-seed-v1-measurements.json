@@ -1,0 +1,135 @@
+{
+  "seedVersion": "ext-seed-v1",
+  "empty": {
+    "script": "hangul",
+    "notScannedCount": 0,
+    "results": {
+      "current": {
+        "empty": true,
+        "eligibleNonBlank": 2,
+        "includedMessages": 0,
+        "includedShare": 0,
+        "shortenedMessages": 0,
+        "bodyTokens": 0,
+        "renderedTokens": 0,
+        "newest": "missing",
+        "omittedByBudget": 2,
+        "blankSkipped": 0
+      },
+      "B6000": {
+        "empty": false,
+        "eligibleNonBlank": 2,
+        "includedMessages": 2,
+        "includedShare": 1,
+        "shortenedMessages": 0,
+        "bodyTokens": 3169,
+        "renderedTokens": 3523,
+        "newest": "whole",
+        "omittedByBudget": 0,
+        "blankSkipped": 0
+      },
+      "B8000": {
+        "empty": false,
+        "eligibleNonBlank": 2,
+        "includedMessages": 2,
+        "includedShare": 1,
+        "shortenedMessages": 0,
+        "bodyTokens": 3169,
+        "renderedTokens": 3523,
+        "newest": "whole",
+        "omittedByBudget": 0,
+        "blankSkipped": 0
+      },
+      "C-head": {
+        "empty": false,
+        "eligibleNonBlank": 2,
+        "includedMessages": 1,
+        "includedShare": 0.5,
+        "shortenedMessages": 1,
+        "bodyTokens": 3000,
+        "renderedTokens": 3380,
+        "newest": "shortened",
+        "omittedByBudget": 1,
+        "blankSkipped": 0
+      },
+      "C-tail": {
+        "empty": false,
+        "eligibleNonBlank": 2,
+        "includedMessages": 1,
+        "includedShare": 0.5,
+        "shortenedMessages": 1,
+        "bodyTokens": 3000,
+        "renderedTokens": 3380,
+        "newest": "shortened",
+        "omittedByBudget": 1,
+        "blankSkipped": 0
+      }
+    }
+  },
+  "stopped": {
+    "script": "hangul",
+    "notScannedCount": 0,
+    "results": {
+      "current": {
+        "empty": false,
+        "eligibleNonBlank": 4,
+        "includedMessages": 2,
+        "includedShare": 0.5,
+        "shortenedMessages": 0,
+        "bodyTokens": 43,
+        "renderedTokens": 417,
+        "newest": "whole",
+        "omittedByBudget": 2,
+        "blankSkipped": 0
+      },
+      "B6000": {
+        "empty": false,
+        "eligibleNonBlank": 4,
+        "includedMessages": 4,
+        "includedShare": 1,
+        "shortenedMessages": 0,
+        "bodyTokens": 3220,
+        "renderedTokens": 3584,
+        "newest": "whole",
+        "omittedByBudget": 0,
+        "blankSkipped": 0
+      },
+      "B8000": {
+        "empty": false,
+        "eligibleNonBlank": 4,
+        "includedMessages": 4,
+        "includedShare": 1,
+        "shortenedMessages": 0,
+        "bodyTokens": 3220,
+        "renderedTokens": 3584,
+        "newest": "whole",
+        "omittedByBudget": 0,
+        "blankSkipped": 0
+      },
+      "C-head": {
+        "empty": false,
+        "eligibleNonBlank": 4,
+        "includedMessages": 3,
+        "includedShare": 0.75,
+        "shortenedMessages": 1,
+        "bodyTokens": 3000,
+        "renderedTokens": 3389,
+        "newest": "whole",
+        "omittedByBudget": 1,
+        "blankSkipped": 0
+      },
+      "C-tail": {
+        "empty": false,
+        "eligibleNonBlank": 4,
+        "includedMessages": 3,
+        "includedShare": 0.75,
+        "shortenedMessages": 1,
+        "bodyTokens": 3000,
+        "renderedTokens": 3389,
+        "newest": "whole",
+        "omittedByBudget": 1,
+        "blankSkipped": 0
+      }
+    }
+  }
+}

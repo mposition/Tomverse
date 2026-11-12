@@ -29,6 +29,9 @@ import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
 import { NewConversationLauncher } from "@/components/chat/NewConversationLauncher";
 import Link from "next/link";
+import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
+import { useHelpGuideEnabledFlagKeys } from "@/components/chat/HelpGuideAccess";
+import { rememberSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import { AlertTriangle, ChevronDown, CircleHelp, Compass, Crown, Download, Folder, FolderPlus, Image as ImageIcon, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Share2, SlidersHorizontal, Sparkles, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { HelpGuideDialog } from "@/components/chat/HelpGuideDialog";
@@ -298,6 +301,7 @@ export function ChatSidebar({
         getLegacyPins,
         getServerLegacyPins
     );
+    const importEnabled = useHelpGuideEnabledFlagKeys().has(HELP_FLAG_KEYS.externalImport);
     const { data: pinSession } = useSession();
     const pinIdentity = isGuestMode ? "guest" : (pinSession?.user?.id ?? "anonymous");
     useEffect(() => {
@@ -1496,6 +1500,11 @@ export function ChatSidebar({
                 />
             </div>
 
+            {importEnabled && currentProduct === "chat" && !isGuestMode && pinSession?.user && <Link
+                href="/settings/imports" onClick={() => rememberSettingsReturnProduct("chat")}
+                className="mx-3 flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <Folder size={16} aria-hidden="true"/>{t("journey.imported")}
+            </Link>}
             <div className={`shrink-0 border-b border-zinc-200/60 px-3 dark:border-zinc-800/40 ${isMobileDrawer ? "py-2" : "py-3"}`}>
                 <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />

@@ -72,7 +72,7 @@ function useRowLayout(rows: readonly ConversationSelectionRow[]) {
 }
 
 export function ConversationSelectionStep({
-    state,
+    state, fileName, onOnly,
     capacityRemaining,
     busy,
     onToggleConversation,
@@ -84,6 +84,8 @@ export function ConversationSelectionStep({
     onBack,
 }: {
     state: ExternalImportWizardState;
+    fileName: string;
+    onOnly: (id: string) => void;
     capacityRemaining: CapacityRemaining | null;
     busy: boolean;
     onToggleConversation: (id: string) => void;
@@ -138,7 +140,7 @@ export function ConversationSelectionStep({
     return (
         <div data-testid="external-import-selection">
             <h2 className="text-base font-bold">
-                {t("externalImport.previewTitle")}
+                {t("journey.select")}
             </h2>
             <p className="mt-1 text-sm leading-6 text-zinc-500">
                 {interpolate(t("externalImport.previewProvider"), {
@@ -146,6 +148,7 @@ export function ConversationSelectionStep({
                 })}
             </p>
 
+            <div className="journey-card my-4 break-words"><strong>{fileName}</strong><p>{interpolate(t("journey.found"), {count:state.rows.length})}</p></div>
             {mismatch && (
                 <p
                     className="mt-2 flex items-start gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300"
@@ -280,7 +283,7 @@ export function ConversationSelectionStep({
                         ?.getAttribute("data-conversation-id");
                     if (id) setFocusedId(id);
                 }}
-                style={{ height: VIEWPORT_HEIGHT }}
+                style={{ height: Math.min(VIEWPORT_HEIGHT, Math.max(72, totalHeight)) }}
                 className="mt-3 overflow-y-auto rounded-xl border border-zinc-200 dark:border-zinc-800"
                 data-testid="external-import-conversation-list"
             >
@@ -312,6 +315,7 @@ export function ConversationSelectionStep({
                             outsideFilter={
                                 !matchesConversationFilter(row, state.filter)
                             }
+                            onOnly={() => onOnly(row.id)}
                             onToggle={() => onToggleConversation(row.id)}
                             onSetTruncationApproval={(approved) =>
                                 onSetTruncationApproval(row.id, approved)
@@ -330,7 +334,7 @@ export function ConversationSelectionStep({
                     onClick={onContinue}
                 >
                     {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {t("externalImport.continueToReview")}
+                    {interpolate(t("journey.reviewCount"),{count:totals.conversations})}
                 </button>
                 <button
                     type="button"
@@ -482,7 +486,7 @@ function ConversationRow({
     truncationApproved,
     selectable,
     outsideFilter,
-    onToggle,
+    onOnly, onToggle,
     onSetTruncationApproval,
 }: {
     row: ConversationSelectionRow;
@@ -495,6 +499,7 @@ function ConversationRow({
     selectable: boolean;
     /** True only for the focus-pinned row that scrolled out of the filter. */
     outsideFilter: boolean;
+    onOnly: () => void;
     onToggle: () => void;
     onSetTruncationApproval: (approved: boolean) => void;
 }) {
@@ -516,6 +521,7 @@ function ConversationRow({
             }}
             className="overflow-hidden border-b border-zinc-100 px-3 py-2 dark:border-zinc-900"
         >
+            {selectable && <button type="button" className="float-right min-h-11 px-2 text-xs font-semibold text-blue-600" onClick={onOnly} data-testid="import-select-only">{t("journey.only")}</button>}
             <label
                 className={`flex items-start gap-2.5 ${
                     selectable ? "cursor-pointer" : "cursor-not-allowed"

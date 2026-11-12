@@ -4,51 +4,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Brain } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
-import { discardResponseBody } from "@/lib/discardResponseBody";
 
-/**
- * What finishing an import does to memory, said before the user confirms it
- * (docs/policy/external-conversation-import-and-memory.md §11, §16; owner decision
- * 2026-10-24).
- *
- * Finishing an import starts a free extraction over the imported
- * conversations, which sends them to an AI provider. That is a processing
- * activity the user should read about on the screen that triggers it, not
- * only in the privacy policy. Shown only when it is true: the extraction
- * rollout flag is on (the run list answers MEMORY_FEATURE_DISABLED
- * otherwise) and the account has not turned memory off.
- */
+/** Keep conditional processing visible until both account readings resolve. */
 export function ImportMemoryNotice() {
     const { t } = useLanguage();
-    const [applies, setApplies] = useState(false);
-
-    useEffect(() => {
-        let cancelled = false;
-        Promise.all([
-            fetch("/api/memories/extraction-runs", { cache: "no-store" }),
-            fetch("/api/memories/settings", { cache: "no-store" }),
-        ])
-            .then(async ([runsResponse, settingsResponse]) => {
-                await discardResponseBody(runsResponse);
-                if (cancelled || !runsResponse.ok || !settingsResponse.ok) {
-                    await discardResponseBody(settingsResponse);
-                    return;
-                }
-                const settings = (await settingsResponse.json()) as {
-                    masterEnabled?: boolean;
-                } | null;
-                if (!cancelled) setApplies(settings?.masterEnabled !== false);
-            })
-            .catch(() => {
-                // Unknown reads as "not shown": the notice never claims a run
-                // the server may not start.
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, []);
-
-    if (!applies) return null;
+    const state = useImportMemoryState();
     return (
         <div
             className="mt-4 flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300"
@@ -56,9 +16,17 @@ export function ImportMemoryNotice() {
         >
             <Brain className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
             <p>
-                {t("memoryReview.importNotice")}{" "}
+                {t(
+                    state === "off"
+                        ? "journey.memoryOff"
+                        : state === "unavailable"
+                          ? "journey.memoryUnavailable"
+                          : "journey.memoryConditional",
+                )}{" "}
                 <Link
                     href="/settings/memory"
+                    target="_blank"
+                    rel="noopener"
                     className="font-semibold text-blue-600 hover:underline dark:text-blue-300"
                 >
                     {t("memoryReview.importNoticeSettings")}
@@ -66,6 +34,8 @@ export function ImportMemoryNotice() {
                 {" · "}
                 <Link
                     href="/privacy"
+                    target="_blank"
+                    rel="noopener"
                     className="font-semibold text-blue-600 hover:underline dark:text-blue-300"
                 >
                     {t("memoryReview.importNoticePrivacy")}
@@ -73,4 +43,55 @@ export function ImportMemoryNotice() {
             </p>
         </div>
     );
+}
+
+/** These are account-wide signals, never an assertion that this file has finished. */
+export function useImportMemoryState() {
+    const [state, setState] = useState<
+        "unknown" | "off" | "available" | "organising" | "unavailable"
+    >("unknown");
+    useEffect(() => {
+        let controller: AbortController;
+        const refresh = () => {
+            controller?.abort();
+            controller = new AbortController();
+            const signal = controller.signal;
+            const read = async (path: string) => {
+                const response = await fetch(path, {
+                    cache: "no-store",
+                    signal,
+                });
+                return {
+                    ok: response.ok,
+                    body: await response.json().catch(() => null),
+                };
+            };
+            // Either endpoint can be slow or unavailable. A confirmed account opt-out
+            // is conclusive without waiting for the unrelated run-history endpoint.
+            let master: boolean | undefined;
+            let runs: "unknown" | "available" | "organising" | "unavailable" = "unknown";
+            const publish = () => {
+                if (!signal.aborted) setState(master === false ? "off" :
+                    runs === "unavailable" ? runs : master === true ? runs : "unknown");
+            };
+            void read("/api/memories/settings").then(result => {
+                master = result.ok && typeof result.body?.masterEnabled === "boolean"
+                    ? result.body.masterEnabled : undefined;
+                publish();
+            }).catch(publish);
+            void read("/api/memories/extraction-runs").then(result => {
+                runs = result.body?.code === "MEMORY_FEATURE_DISABLED" ? "unavailable"
+                    : result.ok ? (result.body?.activeRunId ? "organising" : "available") : "unknown";
+                publish();
+            }).catch(publish);
+
+        };
+        refresh();
+        window.addEventListener("focus", refresh);
+        return () => {
+            controller.abort();
+            window.removeEventListener("focus", refresh);
+        };
+    }, []);
+    return state;
 }

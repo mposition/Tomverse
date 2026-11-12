@@ -191,3 +191,40 @@ test("the test account gets a short session a sign-in would honour; an administr
     await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
   }
 });
+
+test("a daily memory reservation cannot be double-spent or replayed after a failed call", async () => {
+  await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 2, generationDailyCap: 0 }, noAudit);
+  const day = new Date().toISOString().slice(0, 10);
+  const input = { subject: "memory.continuation.fr", modelId: "fixture-model", onceOnUtcDay: day };
+  const results = await Promise.all(Array.from({length: 6}, () => startScoutCall(input)));
+  const grants = results.filter(x => "id" in x);
+  assert.equal(grants.length, 1);
+  assert.equal(results.filter(x => "refused" in x && x.refused === "already_sampled").length, 5);
+  await prisma.productResearchScoutLlmCall.update({where: {id: grants[0]!.id}, data: {outcome: "failed"}});
+  assert.deepEqual(await startScoutCall(input), {refused: "already_sampled"});
+  assert.deepEqual(await startScoutCall({...input, subject: "memory.continuation.es", onceOnUtcDay: "2000-01-01"}), {refused: "day_changed"});
+  assert.ok("id" in await startScoutCall({...input, subject: "home.en", onceOnUtcDay: day}));
+  assert.deepEqual(await startScoutCall({...input, subject: "memory.continuation.ideas"}), {refused: "daily_cap_reached"});
+});
+
+test("the daily comparison meters Rerank against the selected model cap and publishes a completed trial atomically", async () => {
+  const { storeMemoryTrial, recentMemoryTrials } = await import("@/lib/scoutMemoryExperimentStore");
+  const { experimentCase, armProbe, scoreArm, EXPERIMENT_VERSION, RERANK_MODEL } = await import("@/lib/scoutMemoryExperiment");
+  const modelId="fixture-model",day=new Date().toISOString().slice(0,10);
+  await writeScoutSettings({modelId,dailyCallCap:2,generationDailyCap:0}, noAudit);
+  const reserve={modelId,subject:"memory.continuation.compare.fr.rank",onceOnUtcDay:day,keepFree:1,rerank:true} as const;
+  const results=await Promise.all([startScoutCall(reserve),startScoutCall(reserve)]);
+  assert.equal(results.filter(r=>"id" in r).length,1);
+  const record=await prisma.productResearchScoutLlmCall.findFirstOrThrow({where:{subject:reserve.subject}});
+  assert.equal(record.modelId,RERANK_MODEL);
+  const answer=await startScoutCall({modelId,subject:"memory.continuation.compare.fr.cohere",onceOnUtcDay:day});
+  assert.ok("id" in answer);
+  assert.deepEqual(await startScoutCall({modelId,subject:"other"}),{refused:"daily_cap_reached"});
+  const c=experimentCase(day,"fr","buried");
+  const trial={...scoreArm(c,armProbe(c,"cohere",c.goldOrdinals),JSON.stringify(c.source.gold)),version:EXPERIMENT_VERSION,day,
+    locale:"fr",arm:"cohere",scenario:"buried",sourceDigest:c.digest,model:modelId,measuredAt:new Date().toISOString(),elapsedMs:250,
+    answerMs:200,retrievalMs:50,inputTokens:55,outputTokens:21,rerankTokens:1000,answerMicroUsd:null,retrievalMicroUsd:20} as const;
+  await storeMemoryTrial(trial,answer.id);
+  assert.deepEqual((await recentMemoryTrials()).find(r=>r.sourceDigest===c.digest),trial);
+  assert.equal((await prisma.productResearchScoutLlmCall.findUniqueOrThrow({where:{id:answer.id}})).outcome,"ok");
+});
