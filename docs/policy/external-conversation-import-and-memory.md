@@ -668,10 +668,24 @@ Tomverse 밖으로 나가기 때문입니다.
    해당 기능은 호출하지 않습니다. Admin › Feature flags가 미설정 기능의 스위치를
    켜는 요청을 거절하고, 한 요청의 스위치 변경은 감사 기록과 함께 한 transaction으로
    씁니다. 순서·값·명령은 `docs/ops/semantic-retrieval-activation.md`에 있습니다.
-2. 개인정보: Cohere가 새 수탁 처리자가 되므로 7개 locale의 `privacyPolicy`와
-   knowledge·memory 안내 문구를 **스위치를 켜기 전에** 갱신합니다(§16). 스위치가
-   꺼진 동안은 문구가 "외부 embedding 없음"을 그대로 말하고,
-   `tests/assistantProfilePrivacyCopy.test.mjs`가 그것을 고정합니다.
+2. 개인정보: Cohere가 새 수탁 처리자가 되므로 7개 locale의 `privacyPolicy`에
+   의미 검색 고지(`semanticSearch*` 키: 섹션과 이전 8항목)가 이미 들어 있고,
+   `/privacy` 페이지는 `lib/privacyNoticeStatus.ts`의
+   `SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED`가 true일 때만 그 섹션을 보입니다.
+   이 값이 false인 동안에는 섹션이 페이지에 없고, 의미 검색 호출도 막혀 있습니다 —
+   `lib/semanticRetrievalCore.ts`의 `SEMANTIC_RETRIEVAL_PRIVACY_NOTICE_PUBLISHED`가
+   같은 값이라 표시와 호출 허용이 하나로 정해집니다. 운영자가 확인할 사실은 세 가지로,
+   locale 문구에 `[운영자 확인 필요]`(ko) / `[OPERATOR CONFIRMATION REQUIRED]`(그 밖의
+   locale)로 남아 있습니다: `semanticSearchTransfer2`의 **Cohere가 요청을 처리·저장하는
+   국가**, `semanticSearchTransfer5`의 **Tomverse가 Cohere의 학습 이용을 끄도록
+   설정했다는 사실**, `semanticSearchTransfer6`의 **Cohere의 요청 보관 기간**(기본 30일,
+   zero data retention이면 없음). 세 가지를 7개 locale 문구에 쓰고
+   `tests/semanticSearchPrivacyNotice.test.mjs`의 `PENDING_CONFIRMATIONS`를 비운 뒤
+   `SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED`를 true로 바꿉니다. 그 변경이 운영자의
+   새 `/privacy` 버전 승인이고, 페이지를 바꾸므로 `/privacy` digest도 함께 움직입니다
+   (`lib/emailPolicyPublication.ts`의 증거 값은 승인이 아닙니다). 기존 knowledge·memory
+   안내 문구(`assistantProfiles`, `memory`)는 그대로 두며
+   `tests/assistantProfilePrivacyCopy.test.mjs`가 고정합니다.
 3. 품질: 켠 뒤 `tools/memory-quality`의 retrieval 표본으로 전후를 비교합니다.
    임계값(`KNOWLEDGE_SEMANTIC_DEFAULTS`, `MEMORY_SEMANTIC_DEFAULTS`,
    `MEMORY_DUPLICATE_SIMILARITY`)은 측정 전의 초기값입니다.
@@ -1706,7 +1720,7 @@ flag를 순서 때문에 되돌리지는 않습니다.
 | A | 제3자 AI 서비스 export 대화의 계정 저장(제3자 개인정보 포함 가능, 사용자의 권한·적법성 확인 책임), raw archive는 브라우저에서만 처리, 정규화 선택분만 서버 저장, media 미저장, 보존·삭제·export, Tomverse 삭제가 원 제공자 삭제를 의미하지 않음 |
 | B | 가져온 대화의 extraction provider 자동 전송(import 완료 시, 기억 사용이 켜진 동안, credit 무료 — 2026-10-24), 활성 memory/style의 chat provider 전송(비교 시 여러 provider), 민감 정보 미저장과 최신 대화 우선, memory 보존, 조회·수정·비활성화·전체 export·delete-all, source lock·suspension 동작. import 확정 화면에도 같은 고지를 둡니다 |
 | C | instructions 저장, knowledge file 저장·분석, knowledge excerpt의 provider 전송, 보존·삭제, private 기본, share snapshot 제외, marketplace·connector 미지원 |
-| §9a 의미 검색 (스위치를 켤 때) | 질문, 후보 knowledge chunk·memory statement, 스캔 페이지 이미지의 검색 provider(Cohere) 전송과 그 결과로 만든 vector의 저장·삭제. **스위치가 꺼진 동안은 처리 활동이 아니므로 문구에 넣지 않고**, 켜기 전에 7개 locale 문구를 갱신합니다 |
+| §9a 의미 검색 (스위치를 켤 때) | 질문, 후보 knowledge chunk·memory statement, 스캔 페이지 이미지의 검색 provider(Cohere) 전송과 그 결과로 만든 vector의 저장·삭제. 7개 locale 고지(`privacyPolicy.semanticSearch*`)는 이미 들어 있되, 운영자 확인 3가지(처리 국가, 학습 미이용 설정, 보관 기간)가 비어 있는 동안 `SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED`가 false라 **페이지에 보이지 않고 호출도 막혀 있습니다**. 세 가지를 채워 그 값을 true로 바꾸는 변경이 새 `/privacy` 버전 승인입니다 |
 
 Release C의 사용법·활성화 분석은 기존 analytics 동의 경계를 그대로 따릅니다.
 가이드 조회, 단계 설명 열기, 실제 설정 단계 완료, Knowledge 업로드 성공만 별도
