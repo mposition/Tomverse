@@ -121,6 +121,7 @@ const install = () => {
       },
     },
   });
+  mock.module(mod("lib/adminAudit.ts"), { namedExports: { writeAdminAuditLog: async () => undefined } });
   mock.module(mod("lib/adminApproval.ts"), {
     namedExports: {
       adminApprovalErrorResponse: (error: unknown) =>
