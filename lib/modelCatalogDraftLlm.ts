@@ -20,6 +20,7 @@ import {
   IMAGE_PROMPT_BUDGET_MICRO_USD,
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
 } from "@/lib/imageGenerationPricing";
+import { imageThinkingCapMinimumMicroUsd } from "@/lib/imageModelRegistry";
 import {
   codingProfileSchema,
   imagePriceListSchema,
@@ -241,7 +242,8 @@ export const imageOptionCostMicroUsd = (
 export const imageDraftFromAnswer = (
   answer: unknown,
   sources: readonly string[],
-  apiModelId: string
+  apiModelId: string,
+  provider?: string
 ): unknown => {
   const value = answer as {
     options?: { quality: string; size: string; outputCostMicroUsd?: number | null; outputTokens?: number | null }[];
@@ -249,7 +251,12 @@ export const imageDraftFromAnswer = (
     thinkingCapMicroUsd?: number | null;
     noPriceReason?: string | null;
   } | null;
-  const thinkingCap = typeof value?.thinkingCapMicroUsd === "number" ? value.thinkingCapMicroUsd : null;
+  const stated = typeof value?.thinkingCapMicroUsd === "number" ? value.thinkingCapMicroUsd : null;
+  // Where the code already knows what this model's request spends on thinking
+  // (none for a per-image billed model, the pinned surcharge on fal), that is
+  // the cap; the pages rarely state it and the model is told to leave it null.
+  const known = provider === undefined ? null : imageThinkingCapMinimumMicroUsd(provider, apiModelId);
+  const thinkingCap = known === null ? stated : Math.max(known, stated ?? 0);
   const rate = positive(value?.outputUsdPerMTok);
   const options = (Array.isArray(value?.options) ? value.options : []).flatMap((option) => {
     const cost = imageOptionCostMicroUsd(option.outputCostMicroUsd, option.outputTokens, rate);
@@ -378,7 +385,7 @@ export const catalogDraftLlmFromEnv = async (
 
   return {
     draftImagePrices: async ({ provider, apiModelId, pages }) =>
-      imageDraftFromAnswer(await call("image", provider, apiModelId, pages), pages.map((p) => p.url), apiModelId),
+      imageDraftFromAnswer(await call("image", provider, apiModelId, pages), pages.map((p) => p.url), apiModelId, provider),
     draftCodingProfile: async ({ provider, apiModelId, pages }) =>
       codingDraftFromAnswer(await call("coding", provider, apiModelId, pages), provider, apiModelId, pages.map((p) => p.url), codingCreditFloor),
   };
