@@ -19,6 +19,12 @@ import {
   proposeMemoryImprovements,
 } from "@/lib/productResearchScoutMemory";
 
+import { ARM_NAMES } from "@/lib/scoutMemoryExperiment";
+import {
+  comparisonEnabled,
+  sampleMemoryTrial,
+} from "@/lib/scoutMemoryExperimentRunner";
+
 export async function POST(
   req: Request,
   ctx: { params: Promise<{ target: string }> },
@@ -40,6 +46,32 @@ export async function POST(
   )
     return productResearchUnauthorized();
   const { target } = await ctx.params;
+  if (target.startsWith("compare.")) {
+    if (!comparisonEnabled()) return productResearchNotFound();
+    const [, day, language, armName, ...extra] = target.split(".");
+    const locale = MEMORY_PROBE_LOCALES.find((l) => l === language),
+      arm = ARM_NAMES.find((a) => a === armName);
+    if (
+      extra.length ||
+      !locale ||
+      !arm ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(day ?? "")
+    )
+      return productResearchNotFound();
+    if (day !== new Date().toISOString().slice(0, 10))
+      return productResearchJson({ judged: false, reason: "day_changed" }, 200);
+    try {
+      return productResearchJson(
+        await sampleMemoryTrial(locale, arm, day),
+        200,
+      );
+    } catch (err) {
+      return productResearchInternalError(
+        "product_research_memory_comparison",
+        err,
+      );
+    }
+  }
   const locale = MEMORY_PROBE_LOCALES.find((l) => l === target);
   if (!locale && target !== "ideas") return productResearchNotFound();
   try {

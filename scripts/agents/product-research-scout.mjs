@@ -44,7 +44,7 @@ import {
   signedInAccess,
 } from "../../lib/productResearchScoutBrowserPolicy.mjs";
 import { SCOUT_PAGE_TIMEOUT_MS, generateFile, generateImage, officePackage, pdfFirstPage, screenshot } from "../../lib/productResearchScoutGeneration.mjs";
-import { walkMemoryProbes } from "../../lib/productResearchScoutMemoryWalk.mjs";
+import { walkMemoryProbes, walkMemoryComparison } from "../../lib/productResearchScoutMemoryWalk.mjs";
 import { scoutSendOutcome } from "../../lib/productResearchScoutCore.ts";
 
 const args = process.argv.slice(2);
@@ -434,7 +434,7 @@ async function walkIssues() {
 async function walkMemory() {
   if (outDir || capReached) return;
   const day = new Date().toISOString().slice(0, 10);
-  const answers = await walkMemoryProbes(day, async (target) => {
+  const post = async (target) => {
     const response = await fetch(`${ingestUrl}/memory/${target}`, {
       method: "POST",
       redirect: "error",
@@ -446,7 +446,11 @@ async function walkMemory() {
       return response.status === 404 ? { disabled: true } : { judged: false, reason: "http_" + response.status };
     }
     return response.json();
-  });
+  };
+  const answers = await walkMemoryProbes(day, post);
+  if (!answers.some(a => a.disabled || ["daily_cap_reached", "model_off", "day_changed"].includes(a.reason))) {
+    answers.push(...await walkMemoryComparison(day, post));
+  }
   for (const answer of answers) {
     if (answer.disabled) continue;
     const result = scoutSendOutcome(answer);

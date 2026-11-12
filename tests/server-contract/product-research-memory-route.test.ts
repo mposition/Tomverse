@@ -27,6 +27,13 @@ test("memory probes require both switches, the Scout secret and a known syntheti
   process.env.PRODUCT_RESEARCH_SCOUT_MEMORY_ENABLED = "1";
   assert.equal((await call("en", "wrong")).status, 401);
   assert.equal((await call("user-supplied-subject")).status, 404);
+  const target="compare.2001-01-01.en.cohere";
+  delete process.env.PRODUCT_RESEARCH_SCOUT_MEMORY_COMPARISON_ENABLED;
+  assert.equal((await call(target)).status,404);
+  process.env.PRODUCT_RESEARCH_SCOUT_MEMORY_COMPARISON_ENABLED="1";
+  assert.equal((await call(target,"wrong")).status,401);
+  assert.equal((await call("compare.2001-01-01.fr.unlisted")).status,404);
+  assert.equal((await (await call(target)).json()).reason,"day_changed");
   delete process.env.PRODUCT_RESEARCH_SCOUT_ENABLED;
   assert.equal((await call("ideas")).status, 404);
 });

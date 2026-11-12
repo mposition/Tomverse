@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import benchmark from "@/lib/scoutMemoryBenchmark.json";
 import { AdminScoutRunsPanel } from "@/components/admin/AdminScoutRunsPanel";
 import { AdminScoutSuggestionsPanel, scoutSuggestionBrief } from "@/components/admin/AdminScoutSuggestionsPanel";
 import { SCOUT_SEND_BATCH, SCOUT_SEND_SPACING_MS, nextScoutSendBatch, runScoutSuggestionBatch } from "@/lib/adminScoutDisplay";
@@ -268,4 +269,20 @@ test("the memory panel distinguishes a missing decision from an unmeasured langu
   assert.ok(html.includes("2026-11-11 12:00 AEST"));
   assert.ok(html.includes(m.languages["zh-Hant"]));
   assert.ok(html.includes(m.memoryFilter));
+});
+
+test("the recorded three-arm benchmark is visible before the daily Scout has any paired data", () => {
+  const recorded=benchmark as NonNullable<ScoutConsoleView["memoryComparison"]>["benchmark"];
+  const memoryComparison={enabled:false,daily:{model:null,day:"2026-11-12",rows:[]},benchmark:recorded};
+  const html=renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({memoryComparison})} week={WEEK} />);
+  assert.ok(html.includes(recorded.model!));
+  assert.equal(recorded.rows.length,8);
+  for (const row of recorded.rows) {
+    assert.equal(row.pairs,4);
+    assert.equal(row.observed,12);
+    assert.ok(html.includes(m.languages[row.locale]));
+    for (const arm of row.arms) assert.ok(html.includes(m.experimentArms[arm.arm]));
+  }
+  assert.ok(html.includes("Mean est. USD"));
+  assert.ok(html.includes("Evidence found"));
 });

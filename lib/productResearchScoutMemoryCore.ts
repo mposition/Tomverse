@@ -36,9 +36,10 @@ export function memoryProbeSource(
   day: string,
   locale: MemoryProbeLocale,
   mode: MemoryMode,
+  identityLocale: MemoryProbeLocale = locale,
 ) {
   const digest = createHash("sha256")
-    .update([MEMORY_PROBE_VERSION, day, locale.replace("-", "")].join("/"))
+    .update([MEMORY_PROBE_VERSION, day, identityLocale.replace("-", "")].join("/"))
     .digest("hex");
   // Codes have the same shape; they cannot identify a decision by their prefix.
   const values = {

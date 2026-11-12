@@ -20,6 +20,7 @@ import { adminNetworkFailure, readAdminApiFailure, type AdminApiFailure } from "
 import { formatAestDate, formatAestDateTime } from "@/lib/adminUiCore";
 import { adminFetch } from "@/lib/adminFetch";
 import { AdminCopyWorkBriefButton } from "@/components/admin/AdminCopyWorkBriefButton";
+import { ScoutMemoryComparison } from "./ScoutMemoryComparison";
 import { ScoutAgentAside } from "@/components/admin/ScoutAgentAside";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
@@ -301,6 +302,7 @@ export function AdminScoutSuggestionsPanel({
         <p className="min-w-0 flex-1 text-sm text-zinc-400">{m.intro}</p>
       </div>
 
+      {initial.memoryComparison && <ScoutMemoryComparison comparison={initial.memoryComparison} />}
       {memoryQuality && (
         <section className="rounded-xl border border-zinc-800 p-4" data-testid="memory-quality-coverage">
           <h3 className="font-semibold">{m.memoryTitle}</h3>

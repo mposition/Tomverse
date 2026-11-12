@@ -111,7 +111,7 @@ export type ScoutCallReservation = { readonly id: string } | { readonly refused:
  * must still be left after this one: the scenario call keeps one for judging the
  * turn it plans, so it never spends a real generation that nothing could judge.
  */
-type ScoutCallInput = {readonly subject:string;readonly modelId:string;readonly keepFree?:number};
+type ScoutCallInput = {readonly subject:string;readonly modelId:string;readonly keepFree?:number; readonly rerank?:true};
 export function startScoutCall(input: ScoutCallInput & {onceOnUtcDay:string}): Promise<ScoutCallReservation | {refused:"already_sampled"|"day_changed"}>;
 export function startScoutCall(input: ScoutCallInput): Promise<ScoutCallReservation>;
 export async function startScoutCall(input: ScoutCallInput & {onceOnUtcDay?:string}) {
@@ -129,7 +129,7 @@ export async function startScoutCall(input: ScoutCallInput & {onceOnUtcDay?:stri
     const used = await tx.productResearchScoutLlmCall.count({ where: { createdAt: { gte: since }, ...MODEL_CALLS } });
     if (used + (input.keepFree ?? 0) >= current.dailyCallCap) return { refused: "daily_cap_reached" as const };
     const row = await tx.productResearchScoutLlmCall.create({
-      data: { subject: input.subject, modelId: input.modelId, createdAt: now },
+      data: { subject: input.subject, modelId: input.rerank ? "rerank-v5.0-fast" : input.modelId, createdAt: now },
       select: { id: true },
     });
     return { id: row.id };
