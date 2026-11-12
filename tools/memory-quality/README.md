@@ -295,8 +295,7 @@ node --conditions=react-server --import tsx --test tests/memoryQualitySemantic.t
 reproduction, tag deltas and lost cases, the `--live` refusals (no ceiling, missing
 environment, existing save file, ceiling below plan), metering, no retry, exclusive
 saving and the key staying out of output. Its `--live` runs use a fake `fetch`; nothing
-in the test reaches a network. It sits beside the tool and is not part of the unit
-suite runner, which reads only `tests/`; move it there to gate it in CI.
+in the test reaches a network. It runs with the unit suite.
 
 The CLI regression runs the complete loop with socket/fetch access disabled,
 checks persisted candidates/results and replays it to the identical recommendation.
