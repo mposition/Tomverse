@@ -28,6 +28,10 @@ import {
   snapshotIsCurrent,
   SNAPSHOT_RENEWAL_WINDOW_MS,
   stalePricingVersions,
+  applyImageCreditOverrides,
+  freePricingVersion,
+  imageCreditOverrideSchema,
+  reviewImageDraft,
 } from "../lib/modelCatalogCore.ts";
 import {
   codingDraftFromAnswer,
@@ -639,4 +643,70 @@ test("a draft's pricing version fits the revision schema for any API model id", 
     assert.match(version, pattern, id);
     assert.ok(version.endsWith("-2026-10-19-llm"));
   }
+});
+
+test("an image draft review gives each option's floor and the judge's answer at the draft prices", () => {
+  const draft = {
+    prices: enabledSeed.prices.map((price) => ({ ...price })),
+    verification: { ...enabledSeed.priceVerification, verifiedAt: "2026-11-12" },
+  };
+  const review = reviewImageDraft(enabledSeed, draft, { minimumCredits: minimumCreditsForImageOption });
+  assert.equal(review.floors.length, draft.prices.length);
+  for (const [index, floor] of review.floors.entries()) {
+    assert.equal(floor.quality, draft.prices[index].quality);
+    assert.equal(floor.floor, minimumCreditsForImageOption(enabledSeed, draft.prices[index]));
+  }
+  assert.deepEqual(review.reasons, []);
+
+  // One option a credit under its floor is named by quality and size.
+  const low = draft.prices[0];
+  const floor = minimumCreditsForImageOption(enabledSeed, low);
+  const under = reviewImageDraft(
+    enabledSeed,
+    { ...draft, prices: [{ ...low, credits: floor - 1 }, ...draft.prices.slice(1)] },
+    { minimumCredits: minimumCreditsForImageOption }
+  );
+  assert.deepEqual(under.reasons, [`credits_below_floor:${low.quality}/${low.size}`]);
+
+  // No reasoning cap: no floor can be computed and the judge refuses.
+  const uncapped = reviewImageDraft(
+    enabledSeed,
+    { ...draft, verification: { ...draft.verification, thinkingCapMicroUsd: null } },
+    { minimumCredits: minimumCreditsForImageOption }
+  );
+  if (enabledSeed.priceVerification.thinkingCapMicroUsd !== null) {
+    assert.ok(uncapped.floors.every((entry) => entry.floor === null));
+    assert.ok(uncapped.reasons.includes("worst_case_cost_unbounded"));
+  }
+});
+
+test("credit overrides change only credits, only for options the draft priced", () => {
+  const prices = [
+    { quality: "low", size: "1024x1024", credits: 24, outputCostMicroUsd: 20_000 },
+    { quality: "medium", size: "1024x1024", credits: 41, outputCostMicroUsd: 35_000 },
+  ];
+  const applied = applyImageCreditOverrides(prices, [
+    { quality: "medium", size: "1024x1024", credits: 45 },
+    { quality: "low", size: "1024x1024", credits: 24 },
+  ]);
+  assert.equal(applied.ok, true);
+  assert.deepEqual(applied.prices, [prices[0], { ...prices[1], credits: 45 }]);
+  assert.deepEqual(applied.edits, [{ quality: "medium", size: "1024x1024", from: 41, to: 45 }]);
+  // The draft's own objects are not changed.
+  assert.equal(prices[1].credits, 41);
+
+  const unknown = applyImageCreditOverrides(prices, [{ quality: "high", size: "1536x1024", credits: 90 }]);
+  assert.deepEqual(unknown, { ok: false, unknown: ["high|1536x1024"] });
+  assert.equal(imageCreditOverrideSchema.safeParse([{ quality: "low", size: "1024x1024", credits: 0 }]).success, false);
+  assert.equal(imageCreditOverrideSchema.safeParse([{ quality: "low", size: "1024x1024", credits: 3, outputCostMicroUsd: 1 }]).success, false);
+});
+
+test("a draft applied again the same day gets the next free version name within 80 characters", () => {
+  assert.equal(freePricingVersion("qwen-image-2.0-2026-11-12-llm", new Set()), "qwen-image-2.0-2026-11-12-llm");
+  assert.equal(freePricingVersion("v-llm", new Set(["v-llm"])), "v-llm-2");
+  assert.equal(freePricingVersion("v-llm", new Set(["v-llm", "v-llm-2"])), "v-llm-3");
+  const long = "x".repeat(80);
+  const next = freePricingVersion(long, new Set([long]));
+  assert.equal(next.length, 80);
+  assert.ok(next.endsWith("-2"));
 });

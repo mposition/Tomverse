@@ -11,8 +11,11 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { IMAGE_MODEL_REGISTRY, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
 import { invalidateImageModelCatalog, judgeCoding, judgeImage } from "@/lib/modelCatalog";
 import {
+  applyImageCreditOverrides,
   canonicalJson,
   codingProfileSchema,
+  freePricingVersion,
+  type ImageCreditOverride,
   imageExecutionProfile,
   imageFullProfileSchema,
   imagePriceListSchema,
@@ -213,6 +216,12 @@ export const createImagePriceRevision = async (input: {
   request?: Request;
   now?: Date;
   tx?: Prisma.TransactionClient;
+  /** Where the revision came from, for the audit row (an applied draft and the operator's edits to it). */
+  provenance?: {
+    fromDraft: true;
+    draftPricingVersion: string;
+    creditEdits: { quality: string; size: string; from: number; to: number }[];
+  };
 }) => {
   const now = input.now ?? new Date();
   const { modelId, revision, session } = input;
@@ -292,6 +301,7 @@ export const createImagePriceRevision = async (input: {
         previousPricingVersion: seed?.pricingVersion ?? null,
         prices: revision.prices,
         verification: revision.verification,
+        ...(input.provenance ? { provenance: input.provenance } : {}),
       },
       tx,
     });
@@ -323,9 +333,14 @@ const runRevision = async <T>(
 export const applyCatalogDraft = async (input: {
   category: StoredCatalogCategory;
   modelId: string;
+  /** Image only: the operator's credits for options the draft priced. */
+  creditOverrides?: readonly ImageCreditOverride[];
   session: Session;
   request?: Request;
 }) => {
+  if (input.category !== "image" && input.creditOverrides?.length) {
+    throw new CatalogRefusal("credit_overrides_image_only", [], 400);
+  }
   // One transaction: the draft read, its application and its removal commit
   // together, so a draft written in between is neither applied nor lost.
   await prisma.$transaction(async (tx) => {
@@ -352,12 +367,31 @@ export const applyCatalogDraft = async (input: {
     } else {
       const parsed = priceRevisionSchema.safeParse(draft);
       if (!parsed.success) throw new CatalogRefusal("invalid_draft", parsed.error.issues.map((i) => i.path.join(".")), 400);
+      const overridden = applyImageCreditOverrides(parsed.data.prices, input.creditOverrides ?? []);
+      if (!overridden.ok) throw new CatalogRefusal("credit_override_unknown_option", overridden.unknown, 400);
+      // A draft redone the same day carries the same version name; the next
+      // free suffix keeps the second apply from hitting pricing_version_reused.
+      const taken = new Set(
+        (
+          await tx.modelCatalogPriceRevision.findMany({
+            where: { category: "image", modelId: input.modelId },
+            select: { pricingVersion: true },
+          })
+        ).map((row) => row.pricingVersion)
+      );
+      const seedVersion = IMAGE_MODEL_REGISTRY.find((model) => model.id === input.modelId)?.pricingVersion;
+      if (seedVersion) taken.add(seedVersion);
       await createImagePriceRevision({
         modelId: input.modelId,
-        revision: parsed.data,
+        revision: {
+          ...parsed.data,
+          pricingVersion: freePricingVersion(parsed.data.pricingVersion, taken),
+          prices: overridden.prices,
+        },
         session: input.session,
         request: input.request,
         tx,
+        provenance: { fromDraft: true, draftPricingVersion: parsed.data.pricingVersion, creditEdits: overridden.edits },
       });
     }
     await tx.modelCatalogEntry.update({
@@ -396,10 +430,19 @@ export const storeCatalogDraft = async (input: {
       const stored = imageFullProfileSchema.safeParse(before?.profile);
       const sameModel =
         stored.success && stored.data.provider === wanted.data.provider && stored.data.apiModelId === wanted.data.apiModelId;
-      if (!sameModel) {
-        const priced = (await tx.modelCatalogPriceRevision.count({ where: { category: "image", modelId: input.modelId } })) > 0;
-        if (priced) throw new CatalogRefusal("draft_profile_mismatch", ["use_a_new_model_id"]);
-        profile = input.imageProfile as Prisma.InputJsonValue;
+      const priced = (await tx.modelCatalogPriceRevision.count({ where: { category: "image", modelId: input.modelId } })) > 0;
+      if (!sameModel && priced) throw new CatalogRefusal("draft_profile_mismatch", ["use_a_new_model_id"]);
+      // Unpriced, the add form's latest answer (name, sizes, qualities) is the
+      // profile. Priced, the stored profile stays: it is what the price was
+      // verified for, and updateCatalogEntry is the way to change its name.
+      // A redraft of the same model keeps what only the stored profile says
+      // (latency, provenance, output types) and takes the form's three fields.
+      if (!priced) {
+        profile = (
+          sameModel && stored.success
+            ? { ...stored.data, name: wanted.data.name, sizes: wanted.data.sizes, qualities: wanted.data.qualities }
+            : wanted.data
+        ) as Prisma.InputJsonValue;
       }
     }
     const data = {

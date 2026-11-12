@@ -312,6 +312,88 @@ export const judgeImageModel = (
   return reasons.length === 0 ? { admitted: true } : { admitted: false, reasons };
 };
 
+/** One option's credit floor; null when the worst case is unbounded. */
+export type ImageOptionFloor = { quality: string; size: string; floor: number | null };
+
+/**
+ * What an operator sees before applying an image price draft: each option's
+ * credit floor, and what the judge would say at the draft's prices. Budget is
+ * left out as at revision time (`createImagePriceRevision`): it is an
+ * enable-time question. Null when the draft is not a price revision.
+ */
+export const reviewImageDraft = (
+  model: ImageModelProfile,
+  draft: { prices: readonly ImageModelOptionPrice[]; verification: ImageModelPriceVerification },
+  deps: { minimumCredits: (model: ImageModelProfile, price: ImageModelOptionPrice) => number | null }
+): { floors: ImageOptionFloor[]; reasons: readonly string[] } => {
+  const candidate: ImageModelProfile = {
+    ...model,
+    disabledReason: null,
+    prices: draft.prices,
+    priceVerification: draft.verification,
+  };
+  const admission = judgeImageModel(candidate, { minimumCredits: deps.minimumCredits, providerBudgetReady: () => true });
+  return {
+    floors: draft.prices.map((price) => ({
+      quality: price.quality,
+      size: price.size,
+      floor: deps.minimumCredits(candidate, price),
+    })),
+    reasons: admission.admitted ? [] : admission.reasons,
+  };
+};
+
+export const imageCreditOverrideSchema = z
+  .array(
+    z
+      .object({
+        quality: z.enum(["low", "medium", "high"]),
+        size: z.enum(["1024x1024", "1536x1024", "1024x1536"]),
+        credits: z.number().int().positive().max(10_000),
+      })
+      .strict()
+  )
+  .max(9);
+export type ImageCreditOverride = z.infer<typeof imageCreditOverrideSchema>[number];
+
+/**
+ * The draft's prices with the operator's credits. Only credits change: the
+ * output cost is what the cited documentation says, and an option the draft
+ * did not price cannot be added here. Returns the refused options otherwise.
+ */
+export const applyImageCreditOverrides = <P extends { quality: string; size: string; credits: number }>(
+  prices: readonly P[],
+  overrides: readonly ImageCreditOverride[]
+): { ok: true; prices: P[]; edits: { quality: string; size: string; from: number; to: number }[] } | { ok: false; unknown: string[] } => {
+  const byKey = new Map(overrides.map((override) => [`${override.quality}|${override.size}`, override.credits]));
+  const known = new Set(prices.map((price) => `${price.quality}|${price.size}`));
+  const unknown = [...byKey.keys()].filter((key) => !known.has(key));
+  if (unknown.length > 0) return { ok: false, unknown };
+  const edits: { quality: string; size: string; from: number; to: number }[] = [];
+  const next = prices.map((price) => {
+    const credits = byKey.get(`${price.quality}|${price.size}`);
+    if (credits === undefined || credits === price.credits) return price;
+    edits.push({ quality: price.quality, size: price.size, from: price.credits, to: credits });
+    return { ...price, credits };
+  });
+  return { ok: true, prices: next, edits };
+};
+
+/**
+ * The draft's version, or the first "-2", "-3", ... after it that no revision
+ * of this model has used: a second draft applied the same day otherwise hits
+ * pricing_version_reused. Stays within the 80-character version limit.
+ */
+export const freePricingVersion = (base: string, taken: ReadonlySet<string>): string => {
+  if (!taken.has(base)) return base;
+  for (let n = 2; n < 1_000; n += 1) {
+    const suffix = `-${n}`;
+    const candidate = base.slice(0, 80 - suffix.length) + suffix;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return base;
+};
+
 /** The latest revision per model whose effectiveFrom has passed. */
 export const effectiveRevisions = (
   revisions: readonly PriceRevisionInput[],

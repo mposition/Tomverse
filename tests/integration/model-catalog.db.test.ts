@@ -404,6 +404,90 @@ test("an image draft carries its runtime profile and never prices another model"
   assert.equal(await storedApiModel(), "gpt-image-draft-profile");
 });
 
+test("an applied image draft takes the operator's credits and a free version name, and its audit row says so", async () => {
+  const modelId = "catalog-draft-credits";
+  const profile = {
+    provider: "openai",
+    apiModelId: "gpt-image-draft-credits",
+    name: "Before",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["low", "medium"],
+    latencyClass: "slow",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+  };
+  await updateCatalogEntry({ category: "image", modelId, patch: { profile }, session });
+  const draft = {
+    pricingVersion: "draft-credits-v1",
+    prices: [
+      { quality: "low", size: "1024x1024", credits: 50, outputCostMicroUsd: 6_000 },
+      { quality: "medium", size: "1024x1024", credits: 50, outputCostMicroUsd: 6_000 },
+    ],
+    verification,
+  };
+  // Unpriced, same model: the add form's name, sizes and qualities replace the
+  // stored ones, and what only the stored profile says (latency) stays.
+  await storeCatalogDraft({
+    category: "image",
+    modelId,
+    draft,
+    imageProfile: { ...profile, name: "After", sizes: ["1024x1024", "1536x1024"], latencyClass: "balanced" },
+    session,
+  });
+  const stored = (await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } }))
+    ?.profile as { name: string; sizes: string[]; latencyClass: string };
+  assert.equal(stored.name, "After");
+  assert.deepEqual(stored.sizes, ["1024x1024", "1536x1024"]);
+  assert.equal(stored.latencyClass, "slow");
+
+  // An override for an option the draft did not price is refused and the draft stays.
+  await assert.rejects(
+    applyCatalogDraft({ category: "image", modelId, creditOverrides: [{ quality: "high", size: "1024x1024", credits: 90 }], session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "credit_override_unknown_option"
+  );
+  // Credits under the floor are refused by the judge, as for any revision.
+  await assert.rejects(
+    applyCatalogDraft({ category: "image", modelId, creditOverrides: [{ quality: "low", size: "1024x1024", credits: 1 }], session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "not_admitted" && error.reasons.includes("credits_below_floor:low/1024x1024")
+  );
+  assert.equal(await prisma.modelCatalogPriceRevision.count({ where: { category: "image", modelId } }), 0);
+
+  await applyCatalogDraft({ category: "image", modelId, creditOverrides: [{ quality: "medium", size: "1024x1024", credits: 60 }], session });
+  const first = await prisma.modelCatalogPriceRevision.findFirst({ where: { category: "image", modelId } });
+  assert.equal(first?.pricingVersion, "draft-credits-v1");
+  assert.deepEqual(
+    (first?.prices as { quality: string; credits: number; outputCostMicroUsd: number }[]).map((p) => [p.quality, p.credits, p.outputCostMicroUsd]),
+    [
+      ["low", 50, 6_000],
+      ["medium", 60, 6_000],
+    ]
+  );
+  const audit = await prisma.adminAuditLog.findFirst({
+    where: { action: "model_catalog.price_revision_created", targetId: first!.id },
+  });
+  assert.deepEqual((audit?.metadata as { provenance?: unknown }).provenance, {
+    fromDraft: true,
+    draftPricingVersion: "draft-credits-v1",
+    creditEdits: [{ quality: "medium", size: "1024x1024", from: 50, to: 60 }],
+  });
+
+  // The same day's draft again: the second apply takes the next free name instead of a 409.
+  await storeCatalogDraft({ category: "image", modelId, draft, imageProfile: profile, session });
+  await applyCatalogDraft({ category: "image", modelId, session });
+  const versions = (await prisma.modelCatalogPriceRevision.findMany({ where: { category: "image", modelId }, orderBy: { createdAt: "asc" } })).map(
+    (row) => row.pricingVersion
+  );
+  assert.deepEqual(versions, ["draft-credits-v1", "draft-credits-v1-2"]);
+});
+
+test("credit overrides are for image drafts only", async () => {
+  await assert.rejects(
+    applyCatalogDraft({ category: "coding", modelId: "gpt-draft-test", creditOverrides: [{ quality: "low", size: "1024x1024", credits: 5 }], session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "credit_overrides_image_only"
+  );
+});
+
 test("the database refuses a category it has no policy for", async () => {
   await assert.rejects(
     prisma.modelCatalogEntry.create({ data: { category: "video", modelId: "veo-x" } }),
