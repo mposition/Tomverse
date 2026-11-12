@@ -28,23 +28,36 @@ const normalize = (line) => line.trim();
  * (docs/policy/marketing-automation.md §5; S3 plan §2 names `service_tier:
  * "default"` in the adapter's request allowlist).
  *
- * So exactly one line in exactly one file may send one, and only by naming the
- * ledger's own constant -- a literal, or any other value, is still an error.
+ * So exactly these lines in exactly these files may send one, and only by
+ * naming the ledger's own constant -- a literal, or any other value, is still
+ * an error. The second is Admin's ad facts refresh (2026-11-12), which spends
+ * through the same ledger under its `feature_refresh` purpose and keeps an
+ * answer served at another tier at its reservation.
  */
-export const MARKETING_LEDGER_TIER_SENDER = Object.freeze({
-  file: "lib/marketingLlmClientCore.ts",
-  pricedBy: "marketing-llm-price-pins",
-  line: "service_tier: MARKETING_LLM_SERVICE_TIER,",
-});
+export const MARKETING_LEDGER_TIER_SENDERS = Object.freeze([
+  Object.freeze({
+    file: "lib/marketingLlmClientCore.ts",
+    pricedBy: "marketing-llm-price-pins",
+    line: "service_tier: MARKETING_LLM_SERVICE_TIER,",
+  }),
+  Object.freeze({
+    file: "lib/marketingFeatureFacts.ts",
+    pricedBy: "marketing-llm-price-pins",
+    line: "providerOptions: { openai: { strictJsonSchema: true, serviceTier: MARKETING_LLM_SERVICE_TIER, store: false } },",
+  }),
+]);
 
-/** Whether an allowlist entry is exactly the exception above. Shared with the pricing contract test. */
+/** Whether an allowlist entry is exactly one of the exceptions above. Shared with the pricing contract test. */
 export const isMarketingLedgerTierSender = (entry) =>
-  entry.file === MARKETING_LEDGER_TIER_SENDER.file &&
-  entry.pricedBy === MARKETING_LEDGER_TIER_SENDER.pricedBy &&
-  Array.isArray(entry.sends) &&
-  entry.sends.length === 1 &&
-  normalize(entry.sends[0]) === MARKETING_LEDGER_TIER_SENDER.line &&
-  entry.mentions.map(normalize).includes(MARKETING_LEDGER_TIER_SENDER.line);
+  MARKETING_LEDGER_TIER_SENDERS.some(
+    (sender) =>
+      entry.file === sender.file &&
+      entry.pricedBy === sender.pricedBy &&
+      Array.isArray(entry.sends) &&
+      entry.sends.length === 1 &&
+      normalize(entry.sends[0]) === sender.line &&
+      entry.mentions.map(normalize).includes(sender.line),
+  );
 
 /**
  * @param {{
@@ -135,7 +148,7 @@ export function auditProcessingTierMentions({ matchedLines, allowlist }) {
  *
  * `sendsATier` is the field that matters: no entry may set it to `true`
  * without the pricing profiles that describe that tier landing in the same
- * change. The one exception is MARKETING_LEDGER_TIER_SENDER above, which is
+ * change. The exceptions are MARKETING_LEDGER_TIER_SENDERS above, which are
  * priced by the marketing ledger's pins rather than by those profiles.
  *
  * @type {readonly {
@@ -164,6 +177,18 @@ export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
       "return { content, citations, model: root.model, serviceTier: root.service_tier, inputTokens, outputTokens };",
       "reportedServiceTier: answer.serviceTier,",
       "answer = served && { ...served, model: input.pin.model, serviceTier: MARKETING_LLM_SERVICE_TIER };",
+    ],
+  },
+  {
+    file: "lib/marketingFeatureFacts.ts",
+    sendsATier: true,
+    pricedBy: "marketing-llm-price-pins",
+    sends: ["providerOptions: { openai: { strictJsonSchema: true, serviceTier: MARKETING_LLM_SERVICE_TIER, store: false } },"],
+    reason:
+      "Admin's ad facts refresh spends through the marketing LLM cost ledger (feature_refresh purpose) on the app's route to the chosen OpenAI model, and sends the ledger's tier (`default`, Standard) as the generator's adapter does; it is priced by the marketing price pin, never by lib/modelPricing.ts. The other line reads the served tier off the response: an answer served at another tier is reported unknown and kept at its reservation (review r-20261112-132625-25793f).",
+    mentions: [
+      "providerOptions: { openai: { strictJsonSchema: true, serviceTier: MARKETING_LLM_SERVICE_TIER, store: false } },",
+      "const servedTier = (generated.providerMetadata as { openai?: { serviceTier?: unknown } } | undefined)?.openai?.serviceTier;",
     ],
   },
   {
