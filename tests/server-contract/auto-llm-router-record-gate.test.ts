@@ -575,7 +575,7 @@ test("eligible rewrite guidance can finish during image preparation, with one pr
     return { guidance: kind === "rewrite" ? "Keep both official mission names." : "", cycleId: null };
   };
   const callsBefore = routerRequests.length, holdsBefore = holds.length;
-  const turn = pick(undefined, false, { prompt: "Compare both NASA missions.", rewriteAllowed: true, imageIntent: image.promise });
+  const turn = pick(undefined, { prompt: "Compare both NASA missions.", rewriteAllowed: true, imageIntent: image.promise });
   try {
     await switchRead.promise;
     await new Promise<void>(resolve => setImmediate(resolve));
@@ -601,10 +601,10 @@ test("held or long prompts do not wait on rewrite settings and an off switch ski
     return { guidance: "", cycleId: null };
   };
   const callsBefore = routerRequests.length;
-  await pick(undefined, false, { rewriteAllowed: false });
-  await pick(undefined, false, { rewriteAllowed: true, prompt: "x".repeat(2000) });
+  await pick(undefined, { rewriteAllowed: false });
+  await pick(undefined, { rewriteAllowed: true, prompt: "x".repeat(2000) });
   assert.equal(switches, 0);
-  await pick(undefined, false, { rewriteAllowed: true });
+  await pick(undefined, { rewriteAllowed: true });
   assert.equal(switches, 1);
   assert.equal(guides, 0);
   assert.equal(routerRequests.length, callsBefore + 3);
@@ -679,7 +679,7 @@ test("compact search menus preserve provider input values, use their own price a
   const run = async (compact: boolean, searchPlan: boolean) => {
     process.env[flag] = String(compact);
     const holdStart = holds.length, requestStart = routerRequests.length;
-    const result = await pick(undefined, false, { ...input, locationFusion, searchPlan });
+    const result = await pick(undefined, { ...input, locationFusion, searchPlan });
     assert.ok(result);
     assert.equal(routerRequests.length, requestStart + 1);
     const request = routerRequests[requestStart];
@@ -706,7 +706,7 @@ test("compact search menus preserve provider input values, use their own price a
   }
   assert.notEqual(digests[0], digests[1]);
   const requestsBeforeResume = routerRequests.length, holdsBeforeResume = holds.length;
-  const resume = (digest: string) => pick(undefined, false, { ...input, searchPlan: true,
+  const resume = (digest: string) => pick(undefined, { ...input, searchPlan: true,
     locationFusion: { ...locationFusion, resume: { traceId: "prior", routerDigest: digest, pick: off.result } } });
   assert.equal(await resume(digests[0]), null);
   assert.deepEqual(await resume(digests[1]), on.result);
