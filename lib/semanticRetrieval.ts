@@ -39,12 +39,11 @@ import { readSemanticRetrievalSwitch } from "@/lib/semanticRetrievalSettings";
  *
  * The cache is what keeps a turn consistent. A context bundle is issued by
  * one route and rebuilt by the route that verifies it, and is refused when the
- * rebuilt fingerprint differs from the signed one. So the first outcome for a
- * (question, candidates) pair -- a ranking or a failure -- is stored, and the
- * verifying route only ever reuses a stored outcome ("cached_only"): it never
- * calls the provider, and with nothing stored it stays lexical, which is what
- * the issuing route must have signed. The provider is therefore paid at most
- * once per issued bundle, and never on the send path.
+ * rebuilt fingerprint differs from the signed one. So an outcome is used only
+ * once it is stored, the bundle records which steps used one, and the
+ * verifying route reproduces exactly those steps from the store ("cached_only")
+ * and leaves the rest off. It never calls the provider: the provider is paid
+ * at most once per issued bundle, and never on the send path.
  */
 
 type ReadyFeature = { config: SemanticRetrievalConfig; budget: { day: number; month: number } };
@@ -58,18 +57,6 @@ export const semanticFeatureReady = async (
     if (!readSemanticRetrievalKey()) return null;
     if (!(await readSemanticRetrievalSwitch(feature))) return null;
     return { config, budget: config.budget };
-};
-
-/**
- * Whether any retrieval-time feature is on and payable: the three that can
- * change which memory or knowledge reaches a prompt. Indexing-only features
- * are not asked about -- they change what is stored, not what a turn selects.
- */
-export const anySemanticRetrievalReady = async (): Promise<boolean> => {
-    for (const feature of ["memoryRerank", "knowledgeRerank", "knowledgeEmbed"] as const) {
-        if (await semanticFeatureReady(feature)) return true;
-    }
-    return false;
 };
 
 const log = (fields: Record<string, unknown>) =>

@@ -692,16 +692,16 @@ Tomverse 밖으로 나가기 때문입니다.
   lexical 선택 위에 서명된 bundle(provider 실패, 예산 거절, cache 저장 실패)은
   검증 시점에 provider나 cache가 복구돼 있어도 lexical로 재현됩니다. 전송 경로는
   검색 provider를 기다리지도, 비용을 내지도 않습니다.
-- **어느 선택으로 검증할지는 bundle의 fingerprint가 정합니다.** bundle은 자신이
-  의미 선택 위에 서명됐는지 lexical 선택 위에 서명됐는지 말하지 않고, 공유 cache도
-  말해 주지 못합니다 — lexical로 떨어진 발급 뒤에 같은 질문의 다른 발급이 순위를
-  저장할 수 있습니다. 그래서 `/api/chat`은 저장된 결과로 다시 만든 context가
-  서명과 다르면 의미 검색을 끈 context로 다시 만들어 대조하고(memory와 knowledge는
-  따로 떨어지므로 두 혼합도), 서명과 일치하는 쪽을 씁니다. 어느 것도 provider를
-  호출하지 않으며, 일치하는 것이 없으면 종전대로 `CHAT_CONTEXT_BUNDLE_STALE`입니다.
-  의미 검색 스위치가 모두 꺼져 있으면 재구성은 한 번뿐입니다
-  (`lib/chatTurnContext.ts`의 `rebuildTurnContextForBundle`,
-  `tests/semanticRetrievalSendPath.test.mjs`).
+- **bundle은 실제로 쓴 단계를 서명합니다.** 의미 검색은 단계마다 따로 떨어질 수
+  있습니다(memory rerank, knowledge 이웃 검색, knowledge rerank). 발급 route는 이 중
+  **결과가 저장되어 실제로 선택에 쓰인 단계**를 bundle의 서명된 payload
+  (`semanticSteps`, fingerprint와 별개)에 기록합니다. `/api/chat`은 그 단계만 저장된
+  결과로 재현하고 나머지 단계는 끈 채 context를 한 번 다시 만듭니다. 그래서 일부
+  단계만 성공한 발급도, 그 뒤 같은 질문의 다른 발급이 다른 결과를 저장한 경우도
+  그대로 재현되고, 검증 경로는 provider를 호출하지 않습니다. 쓰인 단계의 저장 결과가
+  없어졌다면 종전대로 `CHAT_CONTEXT_BUNDLE_STALE`이고 client가 다시 준비합니다.
+  이 필드가 없는 bundle(배포 전에 발급된 것)은 어떤 단계도 쓰지 않은 것으로
+  읽습니다(`lib/chatContextBundleCore.ts`, `tests/semanticRetrievalSendPath.test.mjs`).
 - **한 턴은 한 결과를 봅니다.** context bundle은 `/api/chat/context`·`preflight`·
   `/api/chat`에서 다시 계산되고 fingerprint가 다르면 거절됩니다(§10). 그래서
   (질문, 후보) 쌍의 첫 결과 — 순위든 실패든 — 를 `SemanticRetrievalCache`에

@@ -635,3 +635,91 @@ test("the verifying route reproduces what the issuing route stored, neighbours a
         issued.chunks.map((chunk) => chunk.id)
     );
 });
+
+/* ------------------------------------------ steps that succeeded separately */
+
+test("a selection records exactly the steps that shaped it", async () => {
+    const { user, fileIds } = await seedTwoFiles(RETURNS_DOC, SHIPPING_DOC);
+    const input = { userId: user.id, fileIds, query: REFUND_QUESTION };
+
+    assert.deepEqual((await retrieveKnowledgeContext(input)).semanticSteps, {
+        neighbours: false,
+        rerank: false,
+    });
+
+    await turnOn("knowledgeEmbed");
+    await embedKnowledgeChunks();
+    assert.deepEqual(
+        (await retrieveKnowledgeContext({ ...input, query: `${REFUND_QUESTION} 1` })).semanticSteps,
+        { neighbours: true, rerank: false }
+    );
+
+    await turnOn("knowledgeRerank");
+    assert.deepEqual(
+        (await retrieveKnowledgeContext({ ...input, query: `${REFUND_QUESTION} 2` })).semanticSteps,
+        { neighbours: true, rerank: true }
+    );
+});
+
+test("a partial success is reproduced step by step after a later issue completes it", async () => {
+    const { user, fileIds } = await seedTwoFiles(WINDOW_DOC, GIFT_DOC);
+    await turnOn("knowledgeEmbed");
+    await turnOn("knowledgeRerank");
+    await embedKnowledgeChunks();
+    provider.state.rerankScore = (_query, document) => (document.includes("gift") ? 0.9 : 0.02);
+    const input = { userId: user.id, fileIds, query: GIFT_QUESTION };
+
+    // Issue one: the neighbours are stored, but the ranking's cache entry is
+    // occupied by a live row nobody can read, so the ranking is not used.
+    const documents = (
+        await prisma.assistantKnowledgeChunk.findMany({
+            where: { userId: user.id },
+            orderBy: [{ fileId: "asc" }, { ordinal: "asc" }],
+            select: { id: true, content: true },
+        })
+    ).map((chunk) => ({ id: chunk.id, text: chunk.content }));
+    const rerankKey = rerankCacheKey({
+        feature: "knowledgeRerank",
+        userId: user.id,
+        model: "rerank-test",
+        query: GIFT_QUESTION,
+        documents,
+    });
+    await prisma.$executeRaw`
+        INSERT INTO "SemanticRetrievalCache" ("key", "userId", "value", "expiresAt", "createdAt")
+        VALUES (${rerankKey}, ${user.id}, '{"kind":"something-else"}'::jsonb, NOW() + INTERVAL '5 minutes', NOW())
+    `;
+    const partial = await retrieveKnowledgeContext(input);
+    assert.deepEqual(partial.semanticSteps, { neighbours: true, rerank: false });
+
+    // Issue two, same question: the blocking row is gone and the ranking is stored.
+    await prisma.semanticRetrievalCache.delete({ where: { key: rerankKey } });
+    const complete = await retrieveKnowledgeContext(input);
+    assert.deepEqual(complete.semanticSteps, { neighbours: true, rerank: true });
+    assert.notDeepEqual(
+        complete.chunks.map((chunk) => chunk.id),
+        partial.chunks.map((chunk) => chunk.id)
+    );
+    const callsAfterIssuing = provider.state.calls.length;
+
+    // Each is rebuilt from its own steps: neighbours from the store, and the
+    // ranking only where it was used.
+    const rebuiltPartial = await retrieveKnowledgeContext({
+        ...input,
+        semantic: { neighbours: "cached_only", rerank: "off" },
+    });
+    const rebuiltComplete = await retrieveKnowledgeContext({
+        ...input,
+        semantic: { neighbours: "cached_only", rerank: "cached_only" },
+    });
+    assert.deepEqual(
+        rebuiltPartial.chunks.map((chunk) => chunk.id),
+        partial.chunks.map((chunk) => chunk.id)
+    );
+    assert.equal(rebuiltPartial.retrievalVersion, partial.retrievalVersion);
+    assert.deepEqual(
+        rebuiltComplete.chunks.map((chunk) => chunk.id),
+        complete.chunks.map((chunk) => chunk.id)
+    );
+    assert.equal(provider.state.calls.length, callsAfterIssuing);
+});

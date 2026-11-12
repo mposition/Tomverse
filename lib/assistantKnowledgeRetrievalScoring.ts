@@ -94,6 +94,11 @@ export type KnowledgeContextSelection = {
     retrievalVersion: number;
     /** Distinct files the selection drew on, for the citation line. */
     fileIds: string[];
+    /**
+     * Which semantic steps shaped this selection (§9a). Absent on a selection
+     * made without the service, which used neither.
+     */
+    semanticSteps?: { neighbours: boolean; rerank: boolean };
 };
 
 export function estimateChunkTokens(content: string): number {

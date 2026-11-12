@@ -59,11 +59,11 @@ export type KnowledgeRetrievalInput = {
      */
     candidateLimit?: number;
     /**
-     * "cached_only" on the route that verifies a context bundle: the semantic
-     * steps reuse what the issuing route stored and never call the provider.
-     * Defaults to "allow".
+     * How each semantic step may run. One mode for both, or one each: the
+     * route that verifies a context bundle passes "cached_only" for the steps
+     * the bundle used and "off" for the rest. Defaults to "allow".
      */
-    semantic?: SemanticCallMode;
+    semantic?: SemanticCallMode | { neighbours: SemanticCallMode; rerank: SemanticCallMode };
 };
 
 export const KNOWLEDGE_CANDIDATE_LIMIT = 60;
@@ -94,8 +94,14 @@ export const retrieveKnowledgeContext = async (
     input: KnowledgeRetrievalInput
 ): Promise<KnowledgeContextSelection> => {
     const queryTerms = memoryRetrievalTerms(input.query);
-    const lexical = (chunks: readonly SemanticChunk[]) =>
-        selectKnowledgeContext({ chunks, query: queryTerms, budget: input.budget });
+    const modes =
+        typeof input.semantic === "object"
+            ? input.semantic
+            : { neighbours: input.semantic, rerank: input.semantic };
+    const lexical = (chunks: readonly SemanticChunk[]): KnowledgeContextSelection => ({
+        ...selectKnowledgeContext({ chunks, query: queryTerms, budget: input.budget }),
+        semanticSteps: { neighbours: false, rerank: false },
+    });
 
     // A question with no usable term retrieves nothing, with or without the
     // semantic steps: that was the guarantee before them, and a paid call on a
@@ -128,7 +134,7 @@ export const retrieveKnowledgeContext = async (
         userId: input.userId,
         fileIds: input.fileIds,
         query: input.query,
-        mode: input.semantic,
+        mode: modes.neighbours,
     });
     const neighbours = found && found.size > 0 ? found : null;
 
@@ -168,27 +174,36 @@ export const retrieveKnowledgeContext = async (
         userId: input.userId,
         query: input.query,
         documents: passages.map((chunk) => ({ id: chunk.id, text: chunk.content })),
-        mode: input.semantic,
+        mode: modes.rerank,
     });
+    // Recorded on the result so the issuing route can sign it: a rebuild has
+    // to use exactly these steps to reach the same selection.
+    const semanticSteps = { neighbours: neighbours !== null, rerank: reranked !== null };
 
     if (reranked) {
-        return selectKnowledgeContextRanked({
-            chunks,
-            scores: reranked,
-            imagePageSimilarities: neighbours ?? undefined,
-            query: queryTerms,
-            minScore: KNOWLEDGE_SEMANTIC_DEFAULTS.minRerankScore,
-            budget: input.budget,
-        });
+        return {
+            ...selectKnowledgeContextRanked({
+                chunks,
+                scores: reranked,
+                imagePageSimilarities: neighbours ?? undefined,
+                query: queryTerms,
+                minScore: KNOWLEDGE_SEMANTIC_DEFAULTS.minRerankScore,
+                budget: input.budget,
+            }),
+            semanticSteps,
+        };
     }
     if (neighbours) {
-        return selectKnowledgeContextRanked({
-            chunks,
-            scores: fuseKnowledgeScores({ chunks: passages, query: queryTerms, similarities: neighbours }),
-            imagePageSimilarities: neighbours,
-            query: queryTerms,
-            budget: input.budget,
-        });
+        return {
+            ...selectKnowledgeContextRanked({
+                chunks,
+                scores: fuseKnowledgeScores({ chunks: passages, query: queryTerms, similarities: neighbours }),
+                imagePageSimilarities: neighbours,
+                query: queryTerms,
+                budget: input.budget,
+            }),
+            semanticSteps,
+        };
     }
     return lexical(chunks);
 };

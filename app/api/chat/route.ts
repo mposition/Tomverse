@@ -417,10 +417,12 @@ import {
     recordShadowReservation,
     SHADOW_CANDIDATE_ESTIMATOR_VERSION,
 } from "@/lib/tokenEstimateShadowRecorder";
-import { buildChatTurnContext, rebuildTurnContextForBundle } from "@/lib/chatTurnContext";
+import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { verifyingSemanticModes } from "@/lib/semanticRetrievalCore";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
     consumeContextBundle,
+    readChatContextBundleSemanticSteps,
     verifyChatContextBundle,
 } from "@/lib/chatContextBundleService";
 import {
@@ -2310,26 +2312,23 @@ async function handleChatPost(
         // A user can revoke memory or change the profile while the Router runs:
         // only the later, freshly rebuilt context may reach the answer model.
         const checkPricedContext = async (token: string, userId: string, profileVersionId: string | null, memoryMode: string | null) => {
-            // This route verifies a bundle another route issued. It never
-            // asks the retrieval provider: it rebuilds from what that route
-            // stored, and if that is not what the bundle was signed over, from
-            // the lexical selection -- the bundle's fingerprint decides.
-            return rebuildTurnContextForBundle(
-                (semantic) => buildChatTurnContext({
-                    userId,
-                    query: latestUserPromptText(messages),
-                    profileVersionId,
-                    plan: accountPlan?.tier ?? null,
-                    conversationMode: memoryMode,
-                    semantic,
-                }),
-                (context) => verifyChatContextBundle(token, {
-                    subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
-                    currentFingerprint: context.fingerprint,
-                }),
-                // Only a stale fingerprint can be cured by another build.
-                (verification) => !verification.ok && verification.reason === "stale"
-            );
+            const turnContext = await buildChatTurnContext({
+                userId,
+                query: latestUserPromptText(messages),
+                profileVersionId,
+                plan: accountPlan?.tier ?? null,
+                conversationMode: memoryMode,
+                // This route verifies a bundle another route issued, and never
+                // asks the retrieval provider. The bundle says which semantic
+                // steps shaped its selection; those are rebuilt from what the
+                // issuing route stored and every other step is off.
+                semantic: verifyingSemanticModes(readChatContextBundleSemanticSteps(token)),
+            });
+            const verification = verifyChatContextBundle(token, {
+                subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
+                currentFingerprint: turnContext.fingerprint,
+            });
+            return { turnContext, verification };
         };
         const refuseContext = async (refusalReason: Extract<ReturnType<typeof verifyChatContextBundle>, { ok: false }>["reason"],
             claimedInitialFusion = false) => {

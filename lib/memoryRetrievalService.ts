@@ -77,6 +77,8 @@ export type MemoryRetrievalResult = MemoryContextSelection & {
     algorithmVersion: number;
     /** How many rows the query returned before scoring, for §22 metrics. */
     consideredCount: number;
+    /** Whether an external ranking shaped this selection (§9a). */
+    semanticRerank: boolean;
 };
 
 const EMPTY_RESULT: MemoryRetrievalResult = {
@@ -94,6 +96,7 @@ const EMPTY_RESULT: MemoryRetrievalResult = {
     resultHash: "",
     algorithmVersion: MEMORY_RETRIEVAL_ALGORITHM_VERSION,
     consideredCount: 0,
+    semanticRerank: false,
 };
 
 const hashSignature = (signature: string) =>
@@ -362,5 +365,6 @@ export async function retrieveMemoryContext(input: {
             ? MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION
             : MEMORY_RETRIEVAL_ALGORITHM_VERSION,
         consideredCount: rows.length + (externalRelevance ? extraRows.length : 0),
+        semanticRerank: externalRelevance !== null,
     };
 }

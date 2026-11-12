@@ -24,6 +24,7 @@
  */
 
 import { createHash } from "node:crypto";
+import type { SemanticStepsUsed } from "@/lib/chatContextBundleCore";
 
 export const SEMANTIC_RETRIEVAL_PROVIDER = "cohere";
 
@@ -53,11 +54,31 @@ export const semanticRetrievalSettingKey = (feature: SemanticRetrievalFeature) =
  * cannot turn it semantic by succeeding where the issuing route did not. It
  * also means the send path never waits on, or pays, the retrieval provider.
  *
- * "off" skips the semantic step entirely, cache included. The verifying route
- * uses it to rebuild the purely lexical selection when the cached one is not
- * what the bundle was signed over (lib/chatTurnContext.ts).
+ * "off" skips the semantic step entirely, cache included: the verifying route
+ * uses it for every step the bundle says was not used.
  */
 export type SemanticCallMode = "allow" | "cached_only" | "off";
+
+/** One mode per semantic step of a turn. */
+export type SemanticStepModes = {
+    memoryRerank: SemanticCallMode;
+    knowledgeNeighbours: SemanticCallMode;
+    knowledgeRerank: SemanticCallMode;
+};
+
+/**
+ * The modes that rebuild exactly the selection a bundle was issued with.
+ *
+ * A step the bundle records as used is reproduced from its stored outcome;
+ * every other step is off. Neither mode can call the provider, so the
+ * verifying route never does -- and a bundle whose steps cannot be read (it
+ * will fail verification anyway) is rebuilt with everything off.
+ */
+export const verifyingSemanticModes = (steps: SemanticStepsUsed | null): SemanticStepModes => ({
+    memoryRerank: steps?.memoryRerank ? "cached_only" : "off",
+    knowledgeNeighbours: steps?.knowledgeNeighbours ? "cached_only" : "off",
+    knowledgeRerank: steps?.knowledgeRerank ? "cached_only" : "off",
+});
 
 /** Which API a feature spends on, so a feature is ready only with that config. */
 export const SEMANTIC_RETRIEVAL_FEATURE_API: Record<

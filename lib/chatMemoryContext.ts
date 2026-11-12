@@ -75,6 +75,8 @@ export type ChatMemoryContext = {
      * was not.
      */
     truncatedByBudget: boolean;
+    /** Whether an external ranking shaped the selection (§9a), for the bundle. */
+    semanticRerank: boolean;
 };
 
 /**
@@ -122,6 +124,7 @@ const buildEmpty = (decision: MemoryInjectionDecision): ChatMemoryContext => {
         fingerprint: contextFingerprint(fingerprintInput),
         consideredCount: 0,
         truncatedByBudget: false,
+        semanticRerank: false,
     };
 };
 
@@ -165,7 +168,7 @@ export async function buildChatMemoryContext(input: {
      * result is discarded.
      */
     profileMemoryPolicy?: AssistantMemoryPolicy | null;
-    /** See `buildChatTurnContext`: "cached_only" on the verifying route. */
+    /** See `buildChatTurnContext`. */
     semantic?: SemanticCallMode;
     now?: Date;
 }): Promise<ChatMemoryContext> {
@@ -250,5 +253,6 @@ export async function buildChatMemoryContext(input: {
         consideredCount: retrieval.consideredCount,
         truncatedByBudget:
             retrieval.omitted.token_budget + retrieval.omitted.item_cap > 0,
+        semanticRerank: retrieval.semanticRerank,
     };
 }
