@@ -577,6 +577,7 @@ type Attempt = {
   cancelledWith: unknown;
   messages: Array<{ role: string; content: unknown }>;
   toolNames: string[];
+  searchDescription?: string;
   preparesStep: boolean;
   /** What reached the provider-facing abort signal. */
   providerAbortedWith: unknown;
@@ -624,6 +625,7 @@ mock.module("ai", {
       if (index > 0 && throwBeforeFallbackStreamReturn) {
         throw new Error("FALLBACK_STREAM_CONSTRUCTOR_TEST_FAILURE");
       }
+      const searchDescription = options.tools?.web_search?.description;
       const attempt: Attempt = {
         modelId:
           (options.model as { modelId?: string } | undefined)?.modelId ?? null,
@@ -631,6 +633,7 @@ mock.module("ai", {
         cancelledWith: null,
         messages: options.messages as Attempt["messages"],
         toolNames: Object.keys(options.tools ?? {}),
+        searchDescription: typeof searchDescription === "string" ? searchDescription : undefined,
         preparesStep: typeof options.prepareStep === "function",
         providerAbortedWith: null,
         providerAbortedBeforeReaderCancel: false,
@@ -790,6 +793,7 @@ type InstrumentationAttemptRow = {
   state: "draft" | "finalized" | "dispatch_started" | "dispatched" | "terminal";
 };
 const instrumentationAttemptRows = new Map<string, InstrumentationAttemptRow>();
+let primaryGroundedManifest: { searchToolDescription: string; qwenThinkingBudget: number | null } | undefined;
 const closedInstrumentationAttempts: Array<
   Omit<InstrumentationAttemptRow, "state"> & { outcome: string }
 > = [];
@@ -1415,6 +1419,7 @@ mock.module(mod("lib/modelAvailability.ts"), {
 // Both attempts go through it, which is also how each one's model id is seen.
 mock.module(mod("lib/activeAiModel.ts"), {
   namedExports: {
+    QWEN_GROUNDED_THINKING_BUDGET: (require(resolve(ROOT, "lib/activeAiModel.ts")) as typeof import("../../lib/activeAiModel")).QWEN_GROUNDED_THINKING_BUDGET,
     qwenLookupStep: (require(resolve(ROOT, "lib/activeAiModel.ts")) as typeof import("../../lib/activeAiModel")).qwenLookupStep,
     getActiveAiModel: (model: { id?: string }) => {
       if (guestKnownUndispatchedRefusalMode === "catalogue_host") {
@@ -1488,11 +1493,12 @@ mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
     authoriseDispatch: async (record: {
       attemptId: string;
       modelId: string;
-    }) => {
+    }, request: { settings: { groundedAnswer?: typeof primaryGroundedManifest } }) => {
       const row = instrumentationAttemptRows.get(record.attemptId);
       assert.ok(row);
       assert.equal(row.modelId, record.modelId);
       assert.equal(row.state, "draft");
+      if (row.attemptIndex === 0) primaryGroundedManifest = request.settings.groundedAnswer;
       row.state = "finalized";
       attemptLifecycle.push(`${row.attemptIndex}:manifest_finalized`);
       if (activeSession === null) guestLifecycle.push("manifest");
@@ -3914,7 +3920,7 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     flash.contextWindowTokens = originalWindow;
     selectedConversationModels = oldModels;
     conversationSelectionMode = "auto";
-    for (const key of ["CHAT_CONCISE_GROUNDED_ANSWER_ENABLED", "CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED", "CHAT_QWEN_GROUNDED_LOOKUP_ENABLED", "CHAT_ROUTER_PRESEARCH_ENABLED", "BRAVE_SEARCH_API_KEY", "APP_ENV"]) {
+    for (const key of ["CHAT_CONCISE_GROUNDED_ANSWER_ENABLED", "CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED", "CHAT_QWEN_GROUNDED_LOOKUP_ENABLED", "CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED", "CHAT_ROUTER_PRESEARCH_ENABLED", "BRAVE_SEARCH_API_KEY", "APP_ENV"]) {
       if (oldEnv[key] === undefined) delete process.env[key]; else process.env[key] = oldEnv[key];
     }
     forceAppManagedSearch = false; failPresearchBackend = false;
@@ -3929,12 +3935,16 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
   llmSearchModelId = flash.id;
   llmSearchQueries = ["one fact"];
   llmSearchFileIntent = false;
-  for (const scenario of ["grounded", "compact", "manual", "no sources", "presearch off", "lookup flag off", "complex", "unclassified", "answer flag off"]) {
+  const groundedLookupScenarios = ["grounded", "compact", "lookup flag off", "fast lookup", "both lookup flags"];
+  const groundedFullScenarios = ["complex", "unclassified"];
+  let ordinarySearchDescription: string | undefined;
+  for (const scenario of [...groundedLookupScenarios, ...groundedFullScenarios, "manual", "no sources", "presearch off", "answer flag off"]) {
     conversationSelectionMode = scenario === "manual" ? "manual" : "auto";
     if (scenario === "answer flag off") delete process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED;
     else process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED = "true";
     process.env.CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED = String(scenario === "compact" || scenario === "answer flag off");
-    process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED = String(scenario !== "lookup flag off");
+    process.env.CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED = String(["fast lookup", "both lookup flags", "complex", "manual", "no sources", "presearch off", "unclassified"].includes(scenario));
+    process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED = String(!["lookup flag off", "fast lookup"].includes(scenario));
     process.env.CHAT_ROUTER_PRESEARCH_ENABLED = String(scenario !== "presearch off");
     failPresearchBackend = scenario === "no sources" ? "all" : false;
     llmSimpleLookup = scenario === "unclassified" ? undefined : scenario !== "complex";
@@ -3942,7 +3952,7 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     assert.equal(attempts[0].modelId, flash.id, scenario);
     assert.equal(attempts[0].toolNames.includes("web_search"), true, scenario);
     const prompt = JSON.stringify(attempts[0].messages);
-    const withEvidence = ["grounded", "compact", "lookup flag off", "complex", "unclassified", "answer flag off"].includes(scenario);
+    const withEvidence = [...groundedLookupScenarios, ...groundedFullScenarios, "answer flag off"].includes(scenario);
     assert.equal(prompt.includes("Verified fixture fact."), withEvidence, scenario);
     const userContent = attempts[0].messages.findLast(message => message.role === "user")?.content;
     const lastPart = Array.isArray(userContent) ? userContent.at(-1)?.text ?? "" : "";
@@ -3951,9 +3961,21 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
       assert.equal(packet.status, scenario === "compact" ? "ok" : "batch", scenario);
     }
     assert.equal(lastPart.includes("End of quoted evidence"), withEvidence && scenario !== "answer flag off", scenario);
-    assert.equal(lastPart.includes("\nObservation —"), ["grounded", "compact", "lookup flag off"].includes(scenario), scenario);
-    assert.equal(lastPart.includes("requested precision"), ["complex", "unclassified"].includes(scenario), scenario);
-    assert.equal(attempts[0].preparesStep, ["grounded", "compact", "answer flag off"].includes(scenario), scenario);
+    assert.equal(lastPart.includes("\nObservation —"), groundedLookupScenarios.includes(scenario), scenario);
+    assert.equal(lastPart.includes("requested precision"), groundedFullScenarios.includes(scenario), scenario);
+    assert.equal(attempts[0].preparesStep, ["grounded", "compact", "answer flag off", "fast lookup", "both lookup flags"].includes(scenario), scenario);
+    if (scenario === "grounded") ordinarySearchDescription = attempts[0].searchDescription;
+    assert.ok(ordinarySearchDescription, "the ordinary web search tool has a provider description");
+    if (scenario === "fast lookup" || scenario === "both lookup flags" || scenario === "complex") {
+      assert.ok(attempts[0].searchDescription);
+      assert.notEqual(attempts[0].searchDescription, ordinarySearchDescription);
+      assert.deepEqual(primaryGroundedManifest, {
+        searchToolDescription: attempts[0].searchDescription, qwenThinkingBudget: scenario === "fast lookup" ? 128 : null,
+      });
+    } else {
+      assert.equal(attempts[0].searchDescription, ordinarySearchDescription, scenario);
+      assert.equal(primaryGroundedManifest, undefined, scenario);
+    }
   }
 });
 

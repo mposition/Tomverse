@@ -80,6 +80,31 @@ const SEARCH_TOOL_DESCRIPTION =
   "are available for this answer; when they run out, answer from what you " +
   "already found and say what you could not confirm.";
 
+// Only used after the answer model's messages actually contain search results.
+const GROUNDED_SEARCH_TOOL_DESCRIPTION =
+  "Web results for this question are already in the conversation. If they support the requested facts, " +
+  "give just those facts and cite their direct URLs. Leave out unrequested background. " +
+  "Use this tool for a specific missing fact, a conflicting or stale result, or a required official source " +
+  "the existing evidence does not supply. Batch independent queries with the same filters in one query array. " +
+  "Use separate calls for different filters or dependent questions. If the remaining searches cannot verify " +
+  "a fact, say what could not be confirmed.";
+
+export function withGroundedSearchDescription(tools: ToolSet, renderedEvidence: string): ToolSet {
+  const search = tools[APP_MANAGED_WEB_SEARCH_TOOL_NAME];
+  if (!search || search.type === "provider") return tools;
+  return {
+    ...tools,
+    [APP_MANAGED_WEB_SEARCH_TOOL_NAME]: {
+      ...search,
+      description: GROUNDED_SEARCH_TOOL_DESCRIPTION,
+      toModelOutput: ({ output }: { output: AppManagedSearchToolResult | AppManagedSearchBatchResult }) => ({
+        type: "json" as const,
+        value: describeRepeatedExcerpts(output, renderedEvidence),
+      }),
+    },
+  };
+}
+
 /**
  * The tool's input.
  *
@@ -166,12 +191,31 @@ const UNTRUSTED_NOTICE =
  * know today's date reads a page about last year's festival as this year's;
  * stated next to the results, the comparison is in front of it.
  */
-const resultNotice = (now: Date) =>
-  `Searched on ${utcDateString(now)} (UTC). Compare each result's ` +
+const DATE_GUIDANCE = "Compare each result's " +
   "publishedAt and the dates in its text with this date: a page about an " +
   "earlier year's event is not about this year, and a forecast for another " +
-  "day is not today's. " +
-  UNTRUSTED_NOTICE;
+  "day is not today's. ";
+const resultNotice = (now: Date) => `Searched on ${utcDateString(now)} (UTC). ${DATE_GUIDANCE}${UNTRUSTED_NOTICE}`;
+
+function describeRepeatedExcerpts(
+  result: AppManagedSearchToolResult | AppManagedSearchBatchResult,
+  renderedEvidence: string,
+) {
+  const searches = result.status === "batch" ? result.searches : [result];
+  // The presearch serializer embeds each whole source object as JSON, including
+  // in its compact form. Quoted snippets are escaped and cannot match an object.
+  if (!searches.length || !searches.every(search => search.status === "ok" && search.results?.length &&
+    search.results.every(source => renderedEvidence.includes(JSON.stringify(source))))) return result;
+
+  const markRepeated = (search: AppManagedSearchToolResult) => ({
+    ...search,
+    notice: search.notice?.replace(DATE_GUIDANCE,
+      "Check dates. All excerpts already appeared unchanged. Cite only URLs in this turn's evidence. If a requested fact is unavailable, say so without guessing a link. "),
+  });
+  return result.status === "batch"
+    ? { ...result, searches: result.searches.map(markRepeated) }
+    : markRepeated(result);
+}
 
 export type AppManagedWebSearchToolConfig = {
   tools: ToolSet;

@@ -123,7 +123,7 @@ import type {
     RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
-import { getActiveAiModel, qwenLookupStep } from "@/lib/activeAiModel";
+import { getActiveAiModel, QWEN_GROUNDED_THINKING_BUDGET, qwenLookupStep } from "@/lib/activeAiModel";
 import { catalogueHostRefusalCode } from "@/lib/modelRegistryShared";
 import {
     getModelGenerationSettings,
@@ -148,6 +148,7 @@ import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime"
 import {
     APP_MANAGED_WEB_SEARCH_TOOL_NAME,
     buildAppManagedWebSearchTool,
+    withGroundedSearchDescription,
 } from "@/lib/appManagedWebSearchTool";
 import { APP_MANAGED_SEARCH_MAX_STEPS } from "@/lib/chatAttemptExecution";
 import { refreshSearchQueryCeilingBreaches } from "@/lib/webSearchCeilingBreachStore";
@@ -5033,7 +5034,7 @@ async function handleChatPost(
           other turn keeps the SDK's single-step default, so a request that
           registers no application tool behaves exactly as it does today.
         */
-        const combinedToolConfig =
+        let combinedToolConfig =
             webSearchToolConfig || appManagedSearchTool || artifactToolConfig || mcpConnector
                 ? {
                       ...(webSearchToolConfig ?? {}),
@@ -5169,6 +5170,8 @@ async function handleChatPost(
             });
         }
         let lookupStep: ReturnType<typeof qwenLookupStep>;
+        let groundedToolDescription: string | undefined;
+        let groundedThinkingBudget: number | undefined;
         if (presearchQueries?.length && appManagedSearchTool && llmPick) {
             presearchForSettlement = appManagedSearchTool;
             const finishPresearch = latency.stage("presearchMs");
@@ -5184,9 +5187,21 @@ async function handleChatPost(
                         toReservedInputTokens(inputEstimate.breakdown()) - TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
                 });
                 const injected = appendRouterSearchEvidence(formattedMessages, evidence);
-                if (process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED === "true" &&
-                    injected && llmPick.simpleLookup && appManagedSearchTool.session.snapshot().sources.length > 0) {
-                    lookupStep = qwenLookupStep(modelConfig);
+                if (injected && appManagedSearchTool.session.snapshot().sources.length > 0) {
+                    const fastPath = process.env.CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED === "true" &&
+                        typeof llmPick.simpleLookup === "boolean";
+                    if (fastPath && combinedToolConfig) {
+                        const tools = withGroundedSearchDescription(combinedToolConfig.tools, evidence[1].text);
+                        combinedToolConfig = { ...combinedToolConfig, tools };
+                        const description = tools[APP_MANAGED_WEB_SEARCH_TOOL_NAME]?.description;
+                        if (typeof description === "string") groundedToolDescription = description;
+                    }
+                    const legacyLookup = process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED === "true";
+                    const boundedThinking = fastPath && !legacyLookup && !modelConfig.reasoning;
+                    if (llmPick.simpleLookup && (boundedThinking || legacyLookup)) {
+                        lookupStep = qwenLookupStep(modelConfig, boundedThinking);
+                        if (lookupStep && boundedThinking) groundedThinkingBudget = QWEN_GROUNDED_THINKING_BUDGET;
+                    }
                 }
                 searchObservation?.presearch(injected, Boolean(lookupStep));
             } finally { finishPresearch(); }
@@ -5271,7 +5286,9 @@ async function handleChatPost(
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             maxOutputTokens: requestMaxOutputTokens,
-            settings: { ...generationSettings, ...(locationCacheBreakpoint?.historyBreakpoint != null ? {
+            settings: { ...generationSettings, ...(groundedToolDescription ? {
+                groundedAnswer: { searchToolDescription: groundedToolDescription, qwenThinkingBudget: groundedThinkingBudget ?? null },
+            } : {}), ...(locationCacheBreakpoint?.historyBreakpoint != null ? {
                 locationCacheBreakpoint: { position: "stable_history", messageIndex: locationCacheBreakpoint.historyBreakpoint, ttl: ANTHROPIC_PROMPT_CACHE_TTL },
             } : {}) } as Record<string, unknown>,
             // Named rather than embedded when the artifact tool is present:
