@@ -262,6 +262,21 @@ test("a merge is read as its commit, time and merger kind; a merge without them 
   await assert.rejects(readEngineeringAgentPullObservation(0, { env, fetchImpl: pullFetch().fetchImpl }));
 });
 
+test("a merge is an approver's own only when that account merged it as a person", async () => {
+  // Owner decision 2026-11-12: the approver's own merge stands as the approval.
+  const merged = { state: "closed", merged: true, merge_commit_sha: "3".repeat(40), merged_at: "2026-10-15T06:00:00Z" };
+  const read = async (pull) => (await readEngineeringAgentPullObservation(42,
+    { env, fetchImpl: pullFetch({ pull: { ...merged, ...pull } }).fetchImpl })).mergedByApprover;
+  assert.equal(await read({ merged_by: { type: "User", id: 60078951 } }), true);
+  // Another account, no account id, a bot under that id, or a merge made through an app.
+  assert.equal(await read({ merged_by: { type: "User", id: 1 } }), false);
+  assert.equal(await read({ merged_by: { type: "User" } }), false);
+  assert.equal(await read({ merged_by: { type: "Bot", id: 60078951 } }), false);
+  assert.equal(await read({ merged_by: { type: "User", id: 60078951 }, performed_via_github_app: { id: 7 } }), false);
+  // Not merged: nobody merged it.
+  assert.equal((await readEngineeringAgentPullObservation(42, { env, fetchImpl: pullFetch().fetchImpl })).mergedByApprover, false);
+});
+
 test("merged PR file names are complete and include a rename source", async () => {
   const merged = { state: "closed", merged: true,
     merge_commit_sha: "3".repeat(40), merged_at: "2026-10-15T06:00:00Z" };
