@@ -71,15 +71,25 @@ async function assertAbsent(path: string) {
   throw new QualityStop("save_scores_exists");
 }
 
-/** Writes a whole file and flushes it; `writeFile` loops until every byte is written. */
-async function writeWhole(path: string, flag: "wx" | "w", body: string) {
-  const handle = await open(path, flag);
+/**
+ * Creates a file that must not exist yet, writes all of it and flushes it
+ * (`writeFile` loops until every byte is written).
+ *
+ * Removes the file again if anything after its creation fails -- and only
+ * then: a file this call did not create is never touched, so a failed open
+ * (it already exists, permission denied) cannot delete anyone's file.
+ */
+async function createWhole(path: string, body: string) {
+  const handle = await open(path, "wx");
   try {
     await handle.writeFile(body, "utf8");
     await handle.sync();
-  } finally {
-    await handle.close();
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    await unlink(path).catch(() => undefined);
+    throw error;
   }
+  await handle.close();
 }
 
 /**
@@ -101,21 +111,39 @@ export class SaveTarget {
   private constructor(readonly path: string) {}
 
   static async claim(path: string, first: unknown): Promise<SaveTarget> {
+    // Serialised before anything touches the disk: a value that cannot be
+    // written is refused with no file created and none removed.
+    let body: string;
     try {
-      await writeWhole(path, "wx", JSON.stringify(first, null, 2) + "\n");
+      body = JSON.stringify(first, null, 2) + "\n";
+    } catch {
+      throw new QualityStop("save_scores_failed");
+    }
+    try {
+      await createWhole(path, body);
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "EEXIST") await unlink(path).catch(() => undefined);
-      throw new QualityStop(code === "EEXIST" ? "save_scores_exists" : "save_scores_unwritable");
+      throw new QualityStop((error as NodeJS.ErrnoException).code === "EEXIST" ? "save_scores_exists" : "save_scores_unwritable");
     }
     return new SaveTarget(path);
   }
 
   /** Replaces the snapshot. A failure stops the run: the next request would be unrecorded. */
   async write(value: unknown) {
+    let body: string;
+    try {
+      body = JSON.stringify(value, null, 2) + "\n";
+    } catch {
+      throw new QualityStop("save_scores_failed");
+    }
+    // Created exclusively too, so a file of that name that is not ours is
+    // refused rather than overwritten; createWhole removes it only if it made it.
     const temporary = `${this.path}.${process.pid}.tmp`;
     try {
-      await writeWhole(temporary, "w", JSON.stringify(value, null, 2) + "\n");
+      await createWhole(temporary, body);
+    } catch {
+      throw new QualityStop("save_scores_failed");
+    }
+    try {
       await rename(temporary, this.path);
     } catch {
       await unlink(temporary).catch(() => undefined);

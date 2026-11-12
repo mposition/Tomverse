@@ -457,8 +457,26 @@ test("a claim whose first snapshot fails leaves no file to block a retry", async
     const save = join(directory, "saved.json");
     const broken = {};
     broken.self = broken;
-    await assert.rejects(SaveTarget.claim(save, broken), { code: "save_scores_unwritable" });
+    await assert.rejects(SaveTarget.claim(save, broken), { code: "save_scores_failed" });
+    const { readdir } = await import("node:fs/promises");
+    assert.deepEqual(await readdir(directory), [], "nothing was created");
     const target = await SaveTarget.claim(save, { complete: false });
     assert.ok(target);
+  });
+});
+
+test("a failed claim never removes a file it did not create", async () => {
+  const { SaveTarget } = await import("../tools/memory-quality/semanticLive.ts");
+  await withTemp(async (directory) => {
+    const save = join(directory, "saved.json");
+    const paid = JSON.stringify({ complete: true, scores: { earlier: 1 } });
+    await writeFile(save, paid);
+    const broken = {};
+    broken.self = broken;
+    // An unwritable value and an existing path: both refused, the earlier
+    // paid result untouched either way.
+    await assert.rejects(SaveTarget.claim(save, broken), { code: "save_scores_failed" });
+    await assert.rejects(SaveTarget.claim(save, { complete: false }), { code: "save_scores_exists" });
+    assert.equal(await readFile(save, "utf8"), paid);
   });
 });
