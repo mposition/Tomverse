@@ -165,14 +165,24 @@ const readCache = async (key: string): Promise<SemanticCacheValue | null> => {
 
 /**
  * Stores an outcome unless a live one is already there, and returns whichever
- * is stored. Two routes of one turn can both miss and both call; the first
- * write wins so they still agree. The clock is the database's on both sides.
+ * is stored -- or null when nothing could be confirmed stored.
+ *
+ * Two routes of one turn can both miss and both call; the first write wins so
+ * they still agree. The clock is the database's on both sides.
+ *
+ * Null is the important answer. A result that is not in the cache is a result
+ * the turn's next rebuild cannot find: it would ask the provider again, or
+ * read an index that has moved, and disagree with a bundle signed over this
+ * one. So a write that failed, or a conflict whose winner could not be read
+ * back, means the caller does not use the semantic result at all and the
+ * selection stays lexical -- which every rebuild can reproduce without the
+ * cache.
  */
 const writeCache = async (
     key: string,
     userId: string,
     value: SemanticCacheValue
-): Promise<SemanticCacheValue> => {
+): Promise<SemanticCacheValue | null> => {
     try {
         const written = await prisma.$queryRaw<Array<{ value: unknown }>>`
             INSERT INTO "SemanticRetrievalCache" ("key", "userId", "value", "expiresAt", "createdAt")
@@ -192,9 +202,9 @@ const writeCache = async (
             RETURNING "value"
         `;
         if (written.length > 0) return value;
-        return (await readCache(key)) ?? value;
+        return await readCache(key);
     } catch {
-        return value;
+        return null;
     }
 };
 
@@ -263,8 +273,9 @@ export async function rerankForRetrieval(input: {
             documents: documents.length,
             latencyMs: Date.now() - startedAt,
             ...fields,
+            ...(stored ? {} : { cache: "unconfirmed" }),
         });
-        return stored.kind === "rerank" ? new Map(stored.scores) : null;
+        return stored?.kind === "rerank" ? new Map(stored.scores) : null;
     };
 
     if (!(await reserveRetrievalCost(worstCase, ready.budget, reservedAt))) {
@@ -346,6 +357,7 @@ export async function embedQueryForRetrieval(input: {
             model: embed.model,
             latencyMs: Date.now() - startedAt,
             ...fields,
+            ...(stored ? {} : { cache: "unconfirmed" }),
         });
         return fromCache(stored);
     };

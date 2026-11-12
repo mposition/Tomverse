@@ -115,7 +115,9 @@ export async function knowledgeNeighbours(input: {
         kind: "neighbours",
         scores: nearest.map((entry) => [entry.id, entry.similarity]),
     });
-    return new Map(stored.kind === "neighbours" ? stored.scores : []);
+    // Not confirmed stored: the next rebuild could not find these neighbours,
+    // so this one does not use them either.
+    return stored?.kind === "neighbours" ? new Map(stored.scores) : null;
 }
 
 export type KnowledgeEmbeddingResult = { considered: number; embedded: number };

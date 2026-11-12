@@ -17,6 +17,7 @@ import {
 import {
     RETRIEVAL_PROVIDER_BUCKET_KEY,
     encodeVector,
+    rerankCacheKey,
     semanticRetrievalSettingKey,
     type SemanticRetrievalFeature,
 } from "@/lib/semanticRetrievalCore";
@@ -495,4 +496,80 @@ test("a question with no usable term sends nothing and retrieves nothing", async
         assert.equal(selection.retrievalVersion, 1);
     }
     assert.equal(provider.state.calls.length, 0);
+});
+
+/* -------------------------------------------- a result that is not stored */
+
+test("a ranking that could not be stored is not used, and is asked for again once the cache is back", async () => {
+    const { user, fileIds } = await seedTwoFiles(WINDOW_DOC, GIFT_DOC);
+    await turnOn("knowledgeRerank");
+    provider.state.rerankScore = (_query, document) => (document.includes("gift") ? 0.9 : 0.02);
+    const input = { userId: user.id, fileIds, query: GIFT_QUESTION };
+
+    // The cache is unavailable for one request. The provider answers, but a
+    // bundle signed over that answer could not be reproduced by the turn's
+    // next rebuild -- so the answer is not used.
+    await prisma.$executeRawUnsafe(
+        'ALTER TABLE "SemanticRetrievalCache" RENAME TO "SemanticRetrievalCacheUnavailable"'
+    );
+    let unstored;
+    try {
+        unstored = await retrieveKnowledgeContext(input);
+    } finally {
+        await prisma.$executeRawUnsafe(
+            'ALTER TABLE "SemanticRetrievalCacheUnavailable" RENAME TO "SemanticRetrievalCache"'
+        );
+    }
+    assert.equal(provider.state.calls.length, 1);
+    assert.equal(unstored.retrievalVersion, 1);
+    assert.equal(unstored.chunks.length, 2);
+    assert.equal(await prisma.semanticRetrievalCache.count(), 0);
+
+    // Recovered: nothing was recorded, so the next request asks again, stores
+    // the ranking and uses it, and the one after that reuses it.
+    const ranked = await retrieveKnowledgeContext(input);
+    assert.equal(provider.state.calls.length, 2);
+    assert.equal(ranked.retrievalVersion, 2);
+    const rebuilt = await retrieveKnowledgeContext(input);
+    assert.equal(provider.state.calls.length, 2);
+    assert.deepEqual(
+        rebuilt.chunks.map((chunk) => chunk.id),
+        ranked.chunks.map((chunk) => chunk.id)
+    );
+});
+
+test("a write that loses to an entry it cannot read back does not use its own result", async () => {
+    const { user, fileIds } = await seedTwoFiles(WINDOW_DOC, GIFT_DOC);
+    await turnOn("knowledgeRerank");
+    provider.state.rerankScore = () => 0.9;
+    const documents = (
+        await prisma.assistantKnowledgeChunk.findMany({
+            where: { userId: user.id },
+            orderBy: [{ fileId: "asc" }, { ordinal: "asc" }],
+            select: { id: true, content: true },
+        })
+    ).map((chunk) => ({ id: chunk.id, text: chunk.content }));
+    const key = rerankCacheKey({
+        feature: "knowledgeRerank",
+        userId: user.id,
+        model: "rerank-test",
+        query: GIFT_QUESTION,
+        documents,
+    });
+    // A live entry under the same key whose value cannot be understood: the
+    // read misses, the provider is asked, the write conflicts with the live
+    // row, and the winner still cannot be read.
+    await prisma.$executeRaw`
+        INSERT INTO "SemanticRetrievalCache" ("key", "userId", "value", "expiresAt", "createdAt")
+        VALUES (${key}, ${user.id}, '{"kind":"something-else"}'::jsonb, NOW() + INTERVAL '5 minutes', NOW())
+    `;
+
+    const selection = await retrieveKnowledgeContext({
+        userId: user.id,
+        fileIds,
+        query: GIFT_QUESTION,
+    });
+
+    assert.equal(provider.state.calls.length, 1);
+    assert.equal(selection.retrievalVersion, 1);
 });
