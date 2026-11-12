@@ -853,7 +853,7 @@ test("sixth review: a time keeps its seconds, a time-only cell gains no date, a 
     attachments([["times.xlsx", XLSX, file]])
   );
   const lines = decode(result.bytes).replace(/^﻿/, "").trimEnd().split("\r\n");
-  assert.deepEqual(lines, ["clock,stamp,span", "12:34:56,2026-11-12 12:34:56,36:00:00.086"]);
+  assert.deepEqual(lines, ["clock,stamp,span", "12:34:56,2026-11-12 12:34:56,36:00:00"]);
 });
 
 test("sixth review: a table too large for a PDF is refused before it is drawn", async () => {
@@ -958,7 +958,7 @@ test("eighth review: a clock format shows the time of day; only an elapsed forma
     attachments([["t.xlsx", XLSX, file]])
   );
   const lines = decode(result.bytes).replace(/^﻿/, "").trimEnd().split("\r\n");
-  assert.deepEqual(lines, ["clock,elapsed", "12:00:00,36:00:00"]);
+  assert.deepEqual(lines, ["clock,elapsed", "12:00,36:00"]);
 });
 
 test("eighth review: a split that is one part comes back as that PDF, not a zip of one", async () => {
@@ -1026,7 +1026,7 @@ test("ninth review: [h], [s] and hh:ss formats convert as times, not as bare num
     attachments([["t.xlsx", XLSX, file]])
   );
   const lines = decode(result.bytes).replace(/^﻿/, "").trimEnd().split("\r\n");
-  assert.deepEqual(lines, ["h,s,hs", "36:00:00,12:00:00,12:00:00"]);
+  assert.deepEqual(lines, ["h,s,hs", "36,43200,12:00"]);
 });
 
 test("ninth review: a worksheet name given for a CSV is refused", async () => {
@@ -1039,6 +1039,53 @@ test("ninth review: a worksheet name given for a CSV is refused", async () => {
       sources: [{ attachment: "att_1" }],
     },
     attachments([["a.csv", "text/csv", csvBytes("a\n1\n")]]),
+    "SOURCE_TYPE"
+  );
+});
+
+/* ------------------------------------------------------------------------ */
+/* Found by the tenth independent review: numbers are written as displayed    */
+/* ------------------------------------------------------------------------ */
+
+test("tenth review: every number format converts as the spreadsheet displays it", async () => {
+  const { zipSync } = await import("fflate");
+  const decode = (bytes) => new TextDecoder().decode(bytes);
+  const encode = (text) => new TextEncoder().encode(text);
+  const codes = ["000", "0.00%", "\"$\"#,##0.00", "#,##0;(#,##0)", "yyyy\"년\" m\"월\" d\"일\""];
+  const values = [7, 0.0219, 1234.5, -5, 46338];
+  const base = unzipSync(
+    buildXlsx({ rows: [codes.map((_, i) => `c${i}`), values.map((number) => ({ number }))] })
+  );
+  const styles =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    `<numFmts count="${codes.length}">` +
+    codes
+      .map((code, i) => `<numFmt numFmtId="${164 + i}" formatCode="${code.replace(/"/g, "&quot;")}"/>`)
+      .join("") +
+    "</numFmts>" +
+    `<cellXfs count="${codes.length + 1}"><xf numFmtId="0"/>` +
+    codes.map((_, i) => `<xf numFmtId="${164 + i}"/>`).join("") +
+    "</cellXfs></styleSheet>";
+  const sheetPath = Object.keys(base).find((path) => /worksheets\/sheet1\.xml$/.test(path));
+  let sheet = decode(base[sheetPath]);
+  codes.forEach((_, i) => {
+    const ref = String.fromCharCode(65 + i) + "2";
+    sheet = sheet.replace(`<c r="${ref}">`, `<c r="${ref}" s="${i + 1}">`);
+  });
+  const file = zipSync({ ...base, "xl/styles.xml": encode(styles), [sheetPath]: encode(sheet) });
+  const result = await convert(
+    { operation: "convert_spreadsheet", filename: "f", targetFormat: "csv", sources: [{ attachment: "att_1" }] },
+    attachments([["f.xlsx", XLSX, file]])
+  );
+  const lines = decode(result.bytes).replace(/^﻿/, "").trimEnd().split("\r\n");
+  assert.deepEqual(lines[1], '007,2.19%,"$1,234.50",(5),2026년 11월 12일');
+});
+
+test("tenth review: pageSize on a request of PDFs only is refused, not ignored", async () => {
+  await rejects(
+    { operation: "to_pdf", filename: "m", pageSize: "letter", sources: [{ attachment: "att_1" }] },
+    attachments([["a.pdf", "application/pdf", await pdf([[100, 100]])]]),
     "SOURCE_TYPE"
   );
 });

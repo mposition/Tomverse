@@ -284,8 +284,23 @@ const encodeImage = async (
     quality?: number;
   }
 ): Promise<EncodedImage> => {
+  const sharp = (await import("sharp")).default;
+  // Read the header first, on its own. A file that fails *here* is not an
+  // image this can read, and the user needs a different file; a failure past
+  // this point is the conversion's, and trying again is the right advice.
   try {
-    const sharp = (await import("sharp")).default;
+    await sharp(Buffer.from(input), {
+      limitInputPixels: FILE_CONVERSION_LIMITS.maxImagePixels,
+    }).metadata();
+  } catch (error) {
+    if (!(error instanceof Error && /pixel limit/i.test(error.message))) {
+      throw new FileConversionError(
+        "IMAGE_UNREADABLE",
+        `${options.handle} ("${options.name}") could not be read as an image.`
+      );
+    }
+  }
+  try {
     // `autoOrient` first: a phone photograph is stored sideways with a note
     // saying which way is up, and a PDF page has nowhere to keep the note.
     let pipeline = sharp(Buffer.from(input), {
@@ -327,9 +342,11 @@ const encodeImage = async (
           "which is the most one image may have. Offer to convert a smaller image."
       );
     }
+    // Decoded the header and still failed: the file is an image, so the
+    // failure is the conversion's -- "try again", not "attach another file".
     throw new FileConversionError(
-      "IMAGE_UNREADABLE",
-      `${options.handle} ("${options.name}") could not be read as an image.`
+      "CONVERSION_FAILED",
+      `${options.handle} ("${options.name}") could not be converted. Offer to try again.`
     );
   }
 };
@@ -366,6 +383,14 @@ const prepareToPdf = async (
   spec: FileConversionSpec,
   sources: ResolvedSource[]
 ): Promise<PreparedConversion> => {
+  // The page size places an image on paper. PDF pages keep their own size,
+  // so on a request with no image it would be an instruction nothing reads.
+  if (spec.pageSize !== undefined && !sources.some((source) => source.kind === "image")) {
+    throw new FileConversionError(
+      "SOURCE_TYPE",
+      "pageSize places images on pages; these sources are all PDFs, whose pages keep their own size. Leave out pageSize."
+    );
+  }
   const load = pdfLoader();
   const plan: Array<
     | { source: ResolvedSource; kind: "image" }

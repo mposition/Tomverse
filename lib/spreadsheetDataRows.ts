@@ -21,6 +21,7 @@
  */
 
 import { unzipSync, type Unzipped } from "fflate";
+import SSF from "ssf";
 
 export const SPREADSHEET_DATA_ERROR_CODES = [
   "DATA_UNREADABLE",
@@ -151,15 +152,17 @@ type StyleTable = {
   isDate: boolean[];
   /** Style index -> whether the cell also shows a time. */
   hasTime: boolean[];
-  /** Style index -> whether it shows a time and no calendar date. */
-  timeOnly: boolean[];
-  /** Style index -> whether it is an elapsed time ("[h]:mm:ss"), not a clock. */
-  elapsed: boolean[];
+  /**
+   * Style index -> the number format, as Excel stores it: a format code for
+   * a custom format, the built-in id otherwise. Read by a conversion, which
+   * writes every number the way the spreadsheet displays it.
+   */
+  formats: Array<string | number>;
 };
 
 const readStyles = (parts: Unzipped): StyleTable => {
   const bytes = parts["xl/styles.xml"];
-  if (!bytes) return { isDate: [], hasTime: [], timeOnly: [], elapsed: [] };
+  if (!bytes) return { isDate: [], hasTime: [], formats: [] };
   const xml = decoder.decode(bytes);
 
   const customCodes = new Map<number, string>();
@@ -172,36 +175,22 @@ const readStyles = (parts: Unzipped): StyleTable => {
   const cellXfsMatch = xml.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/);
   const isDate: boolean[] = [];
   const hasTime: boolean[] = [];
-  const timeOnly: boolean[] = [];
-  const elapsed: boolean[] = [];
-  if (!cellXfsMatch) return { isDate, hasTime, timeOnly, elapsed };
+  const formats: Array<string | number> = [];
+  if (!cellXfsMatch) return { isDate, hasTime, formats };
   for (const xf of cellXfsMatch[1].matchAll(/<xf\b[^>]*\/?>/g)) {
     const numFmtId = Number(xf[0].match(/numFmtId="(\d+)"/)?.[1] ?? "0");
     const custom = customCodes.get(numFmtId);
     if (custom !== undefined) {
-      const date = customFormatIsDate(custom);
-      const time = customFormatHasTime(custom);
-      // "[h]:mm:ss" and "mm:ss" carry an "m" that is minutes, not month; a
-      // code with an hour or a second and no year or day is a time.
-      const calendar = /[yd]/i.test(
-        custom.replace(/"[^"]*"/g, "").replace(/\[[^\]]*\]/g, "").replace(/\\./g, "")
-      );
-      // The bracket is what makes a format count past a day: "[h]:mm" of 1.5
-      // is 36:00, "hh:mm" of 1.5 is 12:00. It is also stripped before the
-      // checks above, so an elapsed format is recognised here or not at all.
-      const isElapsed = /\[(?:h+|m+|s+)\]/i.test(custom.replace(/"[^"]*"/g, ""));
-      isDate.push(date);
-      hasTime.push(time);
-      timeOnly.push((time || isElapsed) && !calendar);
-      elapsed.push(isElapsed);
+      isDate.push(customFormatIsDate(custom));
+      hasTime.push(customFormatHasTime(custom));
+      formats.push(custom);
     } else {
       isDate.push(BUILTIN_DATE_FORMATS.has(numFmtId));
       hasTime.push(BUILTIN_TIME_ONLY_FORMATS.has(numFmtId) || numFmtId === 22);
-      timeOnly.push(BUILTIN_TIME_ONLY_FORMATS.has(numFmtId));
-      elapsed.push(numFmtId === 46);
+      formats.push(numFmtId);
     }
   }
-  return { isDate, hasTime, timeOnly, elapsed };
+  return { isDate, hasTime, formats };
 };
 
 const pad = (value: number, width = 2) => String(value).padStart(width, "0");
@@ -229,45 +218,43 @@ export const excelSerialToDisplay = (
 };
 
 /**
- * An Excel serial number, for a conversion: nothing the cell holds is dropped.
- *
- * `excelSerialToDisplay` is for a template field and stops at minutes. A
- * converted table keeps seconds and fractions of a second, and a time-only
- * cell stays a time rather than gaining the epoch's date.
+ * The two built-in formats whose look Excel takes from the computer's region:
+ * 14, the short date, and 22, the short date with a time. SheetJS renders them
+ * the American way ("11/12/26"); a converted file is read anywhere, so they
+ * are written as ISO dates, which no region reads wrongly.
  */
-const excelSerialToExactText = (
-  serial: number,
-  {
-    withTime,
-    timeOnly,
-    elapsed,
-  }: { withTime: boolean; timeOnly: boolean; elapsed: boolean }
+const REGIONAL_DATE_FORMATS: Readonly<Record<number, string>> = {
+  14: "yyyy-mm-dd",
+  22: "yyyy-mm-dd hh:mm",
+};
+
+/**
+ * A number, as the spreadsheet displays it, for a conversion.
+ *
+ * The display grammar -- zero padding, currency, percent, thousands, dates,
+ * clock and elapsed times, sections and colours -- is SheetJS's SSF, the
+ * formatter behind SheetJS itself, rather than a parser written here. The
+ * result is what Excel's own "Save as CSV" writes for the cell.
+ *
+ * One exception: a number in the General format keeps fifteen significant
+ * digits. SSF's General shortens to what fits a default column width, and a
+ * conversion has no column to fit.
+ */
+const numberAsDisplayed = (
+  value: number,
+  format: string | number | undefined,
+  date1904: boolean
 ): string => {
-  const milliseconds = Math.round(serial * 86_400_000);
-  const date = new Date(Date.UTC(1899, 11, 30) + milliseconds);
-  const fraction = date.getUTCMilliseconds();
-  const clock =
-    `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}` +
-    (fraction ? `.${pad(fraction, 3)}` : "");
-  // An elapsed format ("[h]:mm:ss" of 1.5) counts its hours in full; a clock
-  // format shows the time of day, as Excel does, whatever date is behind it.
-  if (timeOnly) {
-    if (elapsed && (serial >= 1 || serial < 0)) {
-      // Counted in milliseconds, the same resolution as the clock above, so a
-      // duration keeps its fraction of a second too.
-      const total = Math.abs(milliseconds);
-      const sign = milliseconds < 0 ? "-" : "";
-      const seconds = Math.floor(total / 1000);
-      const remainder = total % 1000;
-      return (
-        `${sign}${Math.floor(seconds / 3600)}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}` +
-        (remainder ? `.${pad(remainder, 3)}` : "")
-      );
-    }
-    return clock;
+  if (format === undefined || format === 0 || format === "General" || format === "general") {
+    return String(Number(value.toPrecision(15)));
   }
-  const day = `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
-  return withTime ? `${day} ${clock}` : day;
+  const code = typeof format === "number" ? REGIONAL_DATE_FORMATS[format] ?? format : format;
+  try {
+    return SSF.format(code, value, { date1904 });
+  } catch {
+    // A code SSF cannot read is shown as the number it holds, not dropped.
+    return String(Number(value.toPrecision(15)));
+  }
 };
 
 /** A plain number, without the exponent notation `String()` reaches for. */
@@ -358,17 +345,13 @@ const readSheetGrid = (
   }
   const xml = decoder.decode(bytes);
   const grid: string[][] = [];
-  // A workbook saved with the 1904 date system counts days from 1904-01-01,
-  // 1,462 days after the 1900 system's day zero. Read for a conversion only;
-  // the template batch keeps its documented behaviour.
+  // A workbook saved with the 1904 date system counts days from 1904-01-01.
+  // Read for a conversion only; the template batch keeps its documented
+  // behaviour.
   const workbookXml = parts["xl/workbook.xml"]
     ? decoder.decode(parts["xl/workbook.xml"])
     : "";
-  const dateOffsetDays =
-    strictValueLength !== undefined &&
-    /<(?:\w+:)?workbookPr\b[^>]*\bdate1904="(?:1|true)"/.test(workbookXml)
-      ? 1462
-      : 0;
+  const date1904 = /<(?:\w+:)?workbookPr\b[^>]*\bdate1904="(?:1|true)"/.test(workbookXml);
 
   for (const rowMatch of xml.matchAll(
     /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g
@@ -446,28 +429,16 @@ const readSheetGrid = (
             const numeric = Number(rawValue);
             if (Number.isFinite(numeric)) {
               value =
-                styleIndex >= 0 &&
-                (styles.isDate[styleIndex] ||
-                  // "[h]", "[s]" and "hh:ss" have no "m", so the date check
-                  // misses them; for a conversion they are times all the same.
-                  (strictValueLength !== undefined && styles.timeOnly[styleIndex]))
-                  ? strictValueLength !== undefined
-                    ? excelSerialToExactText(
-                        styles.timeOnly[styleIndex] ? numeric : numeric + dateOffsetDays,
-                        {
-                          withTime: Boolean(styles.hasTime[styleIndex]),
-                          timeOnly: Boolean(styles.timeOnly[styleIndex]),
-                          elapsed: Boolean(styles.elapsed[styleIndex]),
-                        }
-                      )
-                    : excelSerialToDisplay(numeric + dateOffsetDays, {
+                strictValueLength !== undefined
+                  ? numberAsDisplayed(
+                      numeric,
+                      styleIndex >= 0 ? styles.formats[styleIndex] : undefined,
+                      date1904
+                    )
+                  : styleIndex >= 0 && styles.isDate[styleIndex]
+                    ? excelSerialToDisplay(numeric, {
                         withTime: Boolean(styles.hasTime[styleIndex]),
                       })
-                  : strictValueLength !== undefined
-                    ? // Fifteen significant digits is all a spreadsheet number
-                      // has; rounding to ten decimals would turn 0.00000000001
-                      // into 0 in the converted file.
-                      String(Number(numeric.toPrecision(15)))
                     : formatNumber(numeric);
             }
           }
