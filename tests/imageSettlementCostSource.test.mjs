@@ -157,3 +157,44 @@ test("a measured Google response past its bound settles what it billed, not the 
   assert.equal(measuredNonImageCostMicroUsd(flash, -1), null);
   assert.equal(measuredNonImageCostMicroUsd(null, 10), null);
 });
+
+test("a failure after a measured Google model answered counts what it billed", async () => {
+  // Review finding 2026-11-13: an image delivered and then lost to storage or
+  // to a rolled-back settlement was billed in full -- image, prompt and its
+  // non-image tokens -- and the failure must see that, not only the reservation.
+  const { failureIncurredCostMicroUsd } = await import("../lib/imageGenerationService.ts");
+  const flash = {
+    provider: "google",
+    outputCostMicroUsd: 67_200,
+    thinkingCapMicroUsd: 12_288,
+    executionProfile: { provider: "google", apiModelId: "gemini-3.1-flash-image" },
+  };
+  // Delivered: image 67,200 + prompt (62 tokens at $5/1M = 310) + 10,000 tokens at $3/1M.
+  assert.equal(
+    failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: 10_000, imageDelivered: true, inputTokens: 62 }),
+    67_200 + 310 + 30_000
+  );
+  // Refused without an image, prompt count unknown: its whole budget, no image.
+  assert.equal(
+    failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: 1_815, imageDelivered: false }),
+    5_445 + 5_000
+  );
+  // Nothing billed is known, or not a measured model: keep the reservation.
+  assert.equal(failureIncurredCostMicroUsd(flash, undefined), null);
+  assert.equal(failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: null, imageDelivered: true }), null);
+  assert.equal(
+    failureIncurredCostMicroUsd(
+      { provider: "openai", outputCostMicroUsd: 53_000, executionProfile: { apiModelId: "gpt-image-2" } },
+      { nonImageBillableTokens: 10_000, imageDelivered: true }
+    ),
+    null
+  );
+  // Delivered, but the snapshot has no image cost: never priced as free.
+  assert.equal(
+    failureIncurredCostMicroUsd(
+      { provider: "google", executionProfile: { apiModelId: "gemini-3.1-flash-image" } },
+      { nonImageBillableTokens: 10_000, imageDelivered: true }
+    ),
+    null
+  );
+});

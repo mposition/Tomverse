@@ -70,6 +70,7 @@ import {
   IMAGE_EDIT_INPUT_MAX_EDGE_PX,
   imageEditPricing,
   IMAGE_GENERATION_MODEL_ID,
+  IMAGE_PROMPT_BUDGET_MICRO_USD,
   IMAGE_PROMPT_INPUT_USD_PER_MILLION_TOKENS,
   IMAGE_PROMPT_MAX_TOKENS,
   imageModelSupportsEdit,
@@ -1094,6 +1095,28 @@ const refundProviderBudget = async (
   }
 };
 
+/**
+ * What a failed request that reached a measured-bound model cost: its
+ * non-image tokens, the prompt (as reported, or its whole budget when not),
+ * and the image when one was delivered. Null for any other model, and when the
+ * response's count is unknown -- the reservation is then kept as it stands.
+ */
+export const failureIncurredCostMicroUsd = (
+  snapshot: unknown,
+  billed: { nonImageBillableTokens: number | null | undefined; imageDelivered: boolean; inputTokens?: number } | undefined
+): number | null => {
+  if (!billed) return null;
+  const nonImage = measuredNonImageCostMicroUsd(snapshot, billed.nonImageBillableTokens);
+  if (nonImage === null) return null;
+  const image = billed.imageDelivered ? reservationOutputCostMicroUsd(snapshot) : 0;
+  if (image === null) return null;
+  const prompt =
+    typeof billed.inputTokens === "number" && billed.inputTokens > 0
+      ? promptCostMicroUsd(billed.inputTokens)
+      : IMAGE_PROMPT_BUDGET_MICRO_USD;
+  return nonImage + prompt + image;
+};
+
 /** Adds spend the reservation did not hold to the windows it was reserved in. */
 const chargeProviderBudgetOverage = async (
   tx: Prisma.TransactionClient,
@@ -1148,11 +1171,13 @@ const finalizeFailure = async (input: {
    */
   releaseProviderBudget: boolean;
   /**
-   * Billable non-image tokens of a response that was billed and refused (a
-   * Google response without its image). Where that cost passes the whole
+   * What a reached provider billed, for a model priced on a measured token
+   * bound (Google direct): its non-image tokens, and whether an image came
+   * back -- a response refused without one, or a delivered image whose
+   * storage or settlement then failed. Where that cost passes the whole
    * reservation, the provider budget is charged the difference.
    */
-  nonImageBillableTokens?: number | null;
+  billed?: { nonImageBillableTokens: number | null | undefined; imageDelivered: boolean; inputTokens?: number };
   /**
    * Whether this caller may also claim a row already in `settling`, and on
    * what grounds. Omitted means no -- the ordinary failure paths must never
@@ -1229,7 +1254,7 @@ const finalizeFailure = async (input: {
         }
         const incurredCostMicroUsd = input.releaseProviderBudget
           ? null
-          : measuredNonImageCostMicroUsd(reservation.pricingSnapshot, input.nonImageBillableTokens);
+          : failureIncurredCostMicroUsd(reservation.pricingSnapshot, input.billed);
         const failureOverageMicroUsd =
           incurredCostMicroUsd === null
             ? 0
@@ -1462,6 +1487,9 @@ export const processImageGeneration = async (
     : null;
   heartbeat?.unref?.();
 
+  // Kept outside the try: a failure after the provider answered still reports
+  // what it billed.
+  let answered: Awaited<ReturnType<typeof generateImageWithProvider>> | undefined;
   try {
     let result;
     try {
@@ -1490,10 +1518,11 @@ export const processImageGeneration = async (
         // The provider was reached (or unreachable in a way that may still
         // have billed); keep the budget charge -- conservative direction.
         releaseProviderBudget: false,
-        nonImageBillableTokens: providerError.nonImageBillableTokens,
+        billed: { nonImageBillableTokens: providerError.nonImageBillableTokens, imageDelivered: false },
       });
       return;
     }
+    answered = result;
 
     const originalKey = imageAssetR2Key({
       userId: generation.userId,
@@ -1521,6 +1550,11 @@ export const processImageGeneration = async (
         providerRequestId: result.providerRequestId,
         providerRequestParams: result.requestParams,
         releaseProviderBudget: false,
+        billed: {
+          nonImageBillableTokens: result.nonImageBillableTokens,
+          imageDelivered: true,
+          inputTokens: result.inputTokens,
+        },
       });
       return;
     }
@@ -1790,6 +1824,17 @@ export const processImageGeneration = async (
       internalErrorDetail: String(error).slice(0, 500),
       releaseProviderBudget: false,
       reclaimSettling: "owned",
+      // Set only once the provider answered with an image; the settlement that
+      // would have charged its overage rolled back with this failure.
+      ...(answered
+        ? {
+            billed: {
+              nonImageBillableTokens: answered.nonImageBillableTokens,
+              imageDelivered: true,
+              inputTokens: answered.inputTokens,
+            },
+          }
+        : {}),
     }).catch(() => undefined);
     reportOperationalIncident({
       code: "IMAGE_GENERATION_PROCESSING_FAILED",
