@@ -461,3 +461,45 @@ test("the operator's switch removes the tool and every mention of it", () => {
   assert.equal(result.registerFileConversion, false);
   assert.equal(result.systemPrompt.includes("convert_files"), false);
 });
+
+/* -------------------------------------------------------------------------- */
+/* Office to PDF through the renderer (policy section 15)                       */
+/* -------------------------------------------------------------------------- */
+
+const PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+test("a Word or PowerPoint file registers convert_files only while the renderer is on", () => {
+  const off = plan({ turnAttachments: attached(DOCX) });
+  assert.equal(off.registerFileConversion, false);
+  assert.match(off.systemPrompt, /layout is rebuilt rather than copied/);
+
+  const on = plan({ turnAttachments: attached(DOCX, PPTX), officeRenderingEnabled: true });
+  assert.equal(on.registerFileConversion, true);
+  assert.match(on.systemPrompt, /The files it can read here: `att_1`, `att_2`\./);
+  assert.match(on.systemPrompt, /a PDF that keeps its layout/);
+  assert.match(on.systemPrompt, /becomes a PDF \*with its\s+layout\*/);
+});
+
+test("the renderer switch follows the conversion switch", () => {
+  const result = plan({
+    turnAttachments: attached(DOCX),
+    officeRenderingEnabled: true,
+    fileConversionEnabled: false,
+  });
+  assert.equal(result.registerFileConversion, false);
+  assert.equal(result.systemPrompt.includes("keeps its layout"), false);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Pictures in documents (policy section 16)                                    */
+/* -------------------------------------------------------------------------- */
+
+test("an attached image or PDF tells the model it can place pictures in a document", () => {
+  for (const type of ["image/png", "application/pdf"]) {
+    const result = plan({ turnAttachments: attached(type) });
+    assert.match(result.systemPrompt, /add an `image`\s+block to `create_document`/);
+    assert.match(result.systemPrompt, /place its figures this way rather than describing/);
+  }
+  assert.equal(plan({ turnAttachments: attached(DOCX) }).systemPrompt.includes("add an `image`"), false);
+  assert.equal(plan().systemPrompt.includes("add an `image`"), false);
+});

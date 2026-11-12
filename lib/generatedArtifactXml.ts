@@ -50,10 +50,21 @@ const encoder = new TextEncoder();
 
 export type OoxmlPart = { path: string; xml: string };
 
+/**
+ * A binary part -- a picture under `word/media/`. Its bytes are a JPEG this
+ * application encoded (policy section 16), never a file passed through.
+ */
+export type OoxmlMediaPart = { path: string; bytes: Uint8Array };
+
 /** Zips a set of XML parts into a deterministic OOXML package. */
-export const zipOoxmlPackage = (parts: readonly OoxmlPart[]): Uint8Array => {
+export const zipOoxmlPackage = (
+  parts: readonly OoxmlPart[],
+  media: readonly OoxmlMediaPart[] = []
+): Uint8Array => {
   const files: Zippable = {};
   for (const part of parts) files[part.path] = encoder.encode(part.xml);
+  // Already compressed; deflating a JPEG again only costs time.
+  for (const part of media) files[part.path] = [part.bytes, { level: 0 }];
   return zipSync(files, { level: 6, mtime: FIXED_ENTRY_TIME });
 };
 

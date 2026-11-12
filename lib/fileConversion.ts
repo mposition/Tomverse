@@ -34,6 +34,7 @@ import {
   FileConversionError,
   PageSelectionError,
   conversionSourceKind,
+  isOfficeRenderable,
   parsePageSelection,
   type ConversionAttachment,
   type ConversionImageFormat,
@@ -53,6 +54,12 @@ import { renderDocumentPdf } from "@/lib/generatedArtifactPdf";
 import { zipArchiveEntries } from "@/lib/generatedArtifactText";
 import { renderWorkbook } from "@/lib/generatedArtifactXlsx";
 import { XLSX_MEDIA_TYPE } from "@/lib/messageAttachmentCore";
+import {
+  officeRendererConfig,
+  renderOfficeDocumentToPdf,
+  type OfficeDocument,
+  type OfficeRenderResult,
+} from "@/lib/officeRenderer";
 import {
   SpreadsheetDataError,
   readSpreadsheetGrid,
@@ -89,6 +96,23 @@ const KIND_NOUN: Record<ConversionSourceKind, string> = {
   image: "an image (png, jpg, webp, gif)",
   pdf: "a PDF",
   spreadsheet: "a spreadsheet (.xlsx or .csv)",
+  office: "a Word, PowerPoint or Excel file",
+};
+
+/**
+ * Renders one office document to PDF. Injected by tests; the default is the
+ * renderer service from the environment, or none when office rendering is off.
+ */
+export type OfficeRender = (document: OfficeDocument) => Promise<OfficeRenderResult>;
+
+export type FileConversionOptions = {
+  /** null turns office rendering off whatever the environment says. */
+  renderOffice?: OfficeRender | null;
+};
+
+const defaultOfficeRender = (): OfficeRender | null => {
+  const config = officeRendererConfig();
+  return config ? (document) => renderOfficeDocumentToPdf(config, document) : null;
 };
 
 const plural = (count: number, noun: string) =>
@@ -105,9 +129,13 @@ const describeAttached = (
 
 const resolveSources = (
   spec: FileConversionSpec,
-  attachments: ReadonlyMap<string, ConversionAttachment>
+  attachments: ReadonlyMap<string, ConversionAttachment>,
+  officeRendering: boolean
 ): ResolvedSource[] => {
-  const accepted = ACCEPTED_KINDS[spec.operation];
+  const accepted: readonly ConversionSourceKind[] =
+    spec.operation === "to_pdf" && officeRendering
+      ? [...ACCEPTED_KINDS.to_pdf, "office"]
+      : ACCEPTED_KINDS[spec.operation];
   return spec.sources.map((source) => {
     const file = attachments.get(source.attachment);
     if (!file) {
@@ -118,7 +146,23 @@ const resolveSources = (
           "has to be attached again to be converted."
       );
     }
-    const kind = conversionSourceKind(file.mediaType);
+    // An office file into a PDF is laid out by the renderer, an .xlsx
+    // included: "this workbook as a PDF" means the sheet as it prints, while
+    // a table of its values is what convert_spreadsheet makes.
+    const kind: ConversionSourceKind | null =
+      spec.operation === "to_pdf" && isOfficeRenderable(file.mediaType)
+        ? officeRendering
+          ? "office"
+          : null
+        : conversionSourceKind(file.mediaType);
+    if (spec.operation === "to_pdf" && !officeRendering && isOfficeRenderable(file.mediaType)) {
+      throw new FileConversionError(
+        "SOURCE_TYPE",
+        `${source.attachment} ("${file.name}") cannot be turned into a PDF with its layout here. ` +
+          "Offer to rebuild its content as a PDF with create_document instead, and say " +
+          "that the layout is rebuilt rather than copied."
+      );
+    }
     if (!kind || !accepted.includes(kind)) {
       throw new FileConversionError(
         "SOURCE_TYPE",
@@ -128,7 +172,7 @@ const resolveSources = (
             .join(" or ")}.`
       );
     }
-    if (source.pages !== undefined && kind !== "pdf") {
+    if (source.pages !== undefined && kind !== "pdf" && kind !== "office") {
       throw new FileConversionError(
         "PAGES_INVALID",
         `${source.attachment} ("${file.name}") is not a PDF, so it has no pages to select.`
@@ -380,10 +424,62 @@ const PDF_IMAGE_STEPS = [
   { maxEdge: 1240, quality: 68 },
 ] as const;
 
+/**
+ * Office sources, rendered to PDF and handed on as PDFs.
+ *
+ * Rendered once per attachment however many sources name it, and one at a
+ * time: the renderer is a shared service, and a request with five decks
+ * should not hold five of its slots.
+ */
+const renderOfficeSources = async (
+  sources: ResolvedSource[],
+  render: OfficeRender
+): Promise<ResolvedSource[]> => {
+  const rendered = new Map<string, Uint8Array>();
+  const out: ResolvedSource[] = [];
+  for (const source of sources) {
+    if (source.kind !== "office") {
+      out.push(source);
+      continue;
+    }
+    let pdf = rendered.get(source.handle);
+    if (!pdf) {
+      const result = await render({ mediaType: source.mediaType, bytes: source.bytes });
+      if (!result.ok) {
+        switch (result.failure) {
+          case "UNREADABLE":
+            throw new FileConversionError(
+              "OFFICE_UNREADABLE",
+              `${source.handle} ("${source.name}") could not be opened to lay it out. ` +
+                "It may be damaged or password-protected."
+            );
+          case "TOO_LARGE":
+            throw new FileConversionError(
+              "OUTPUT_TOO_LARGE",
+              `${source.handle} ("${source.name}") would be a PDF over the ` +
+                `${FILE_CONVERSION_LIMITS.maxOutputBytes / 1024 / 1024} MB limit.`
+            );
+          default:
+            throw new FileConversionError(
+              "RENDERER_UNAVAILABLE",
+              "Laying out office documents is not available right now. Offer to try again shortly."
+            );
+        }
+      }
+      pdf = result.pdf;
+      rendered.set(source.handle, pdf);
+    }
+    out.push({ ...source, kind: "pdf", mediaType: "application/pdf", bytes: pdf });
+  }
+  return out;
+};
+
 const prepareToPdf = async (
   spec: FileConversionSpec,
-  sources: ResolvedSource[]
+  resolved: ResolvedSource[],
+  render: OfficeRender | null
 ): Promise<PreparedConversion> => {
+  const sources = render ? await renderOfficeSources(resolved, render) : resolved;
   // The page size places an image on paper. PDF pages keep their own size,
   // so on a request with no image it would be an instruction nothing reads.
   if (spec.pageSize !== undefined && !sources.some((source) => source.kind === "image")) {
@@ -1159,12 +1255,15 @@ const prepareConvertSpreadsheet = async (
  */
 export const prepareFileConversion = async (
   spec: FileConversionSpec,
-  attachments: ReadonlyMap<string, ConversionAttachment>
+  attachments: ReadonlyMap<string, ConversionAttachment>,
+  options: FileConversionOptions = {}
 ): Promise<PreparedConversion> => {
-  const sources = resolveSources(spec, attachments);
+  const render =
+    options.renderOffice === undefined ? defaultOfficeRender() : options.renderOffice;
+  const sources = resolveSources(spec, attachments, render !== null);
   switch (spec.operation) {
     case "to_pdf":
-      return prepareToPdf(spec, sources);
+      return prepareToPdf(spec, sources, render);
     case "split_pdf":
       return prepareSplitPdf(spec, sources);
     case "pdf_to_images":
@@ -1174,4 +1273,33 @@ export const prepareFileConversion = async (
     case "convert_spreadsheet":
       return prepareConvertSpreadsheet(spec, sources);
   }
+};
+
+/**
+ * One page of an attached PDF, drawn as a PNG.
+ *
+ * For a document's image block (lib/documentImages.ts): a figure on a page of
+ * a PDF the user attached. The same reading, page check and drawing the
+ * conversions use, so a page that does not exist or a password-protected file
+ * is refused the same way.
+ */
+export const renderAttachmentPdfPage = async (
+  handle: string,
+  file: ConversionAttachment,
+  pageNumber: number,
+  dpi: number
+): Promise<Uint8Array> => {
+  const source: ResolvedSource = {
+    handle,
+    name: file.name,
+    mediaType: file.mediaType,
+    kind: "pdf",
+    bytes: file.bytes,
+    pages: String(pageNumber),
+    rotate: 0,
+  };
+  const document = await loadPdf(source);
+  const [index] = selectPages(source, document.getPageCount(), 1);
+  const [png] = await rasterizePdfPages(source, [index], dpi);
+  return png;
 };

@@ -1100,3 +1100,119 @@ test("eleventh review: a first-row cell longer than a heading still converts to 
   assert.equal(result.format, "pdf");
   assert.ok((await PDFDocument.load(result.bytes)).getPageCount() >= 1);
 });
+
+/* ------------------------------------------------------------------------ */
+/* Office documents to PDF, through the renderer (policy section 15)          */
+/* ------------------------------------------------------------------------ */
+
+const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+/** A stand-in renderer: every document becomes a PDF of `pages` pages. */
+const fakeRenderer = (pages, calls = []) => async (document) => {
+  calls.push(document.mediaType);
+  const output = await PDFDocument.create();
+  for (let index = 0; index < pages; index += 1) output.addPage([300 + index, 400]);
+  return { ok: true, pdf: new Uint8Array(await output.save()) };
+};
+
+const convertWith = async (spec, files, renderOffice) => {
+  const admission = admitFileConversionSpec(spec);
+  assert.ok(admission.ok, admission.ok ? "" : admission.detail);
+  const prepared = await prepareFileConversion(admission.spec, files, { renderOffice });
+  return { format: prepared.format, ...(await prepared.render()) };
+};
+
+test("a Word file becomes a PDF with its layout, and merges in order with images and PDFs", async () => {
+  const calls = [];
+  const files = attachments([
+    ["report.docx", DOCX_TYPE, new Uint8Array([1, 2, 3])],
+    ["cover.png", "image/png", await image({ width: 100, height: 100, format: "png" })],
+    ["deck.pptx", PPTX_TYPE, new Uint8Array([4, 5])],
+  ]);
+  const result = await convertWith(
+    {
+      operation: "to_pdf",
+      filename: "bundle",
+      sources: [
+        { attachment: "att_2" },
+        { attachment: "att_1" },
+        { attachment: "att_3", pages: "2" },
+        { attachment: "att_1", pages: "1" },
+      ],
+    },
+    files,
+    fakeRenderer(2, calls)
+  );
+  assert.equal(result.format, "pdf");
+  // The Word file was rendered once, though it was named twice.
+  assert.deepEqual(calls, [DOCX_TYPE, PPTX_TYPE]);
+  const document = await PDFDocument.load(result.bytes);
+  assert.equal(document.getPageCount(), 1 + 2 + 1 + 1);
+  assert.deepEqual(
+    document.getPages().slice(1).map((page) => Math.round(page.getSize().width)),
+    [300, 301, 301, 300]
+  );
+});
+
+test("without the renderer an office file is refused with what would work instead", async () => {
+  const files = attachments([["report.docx", DOCX_TYPE, new Uint8Array([1])]]);
+  const admission = admitFileConversionSpec({
+    operation: "to_pdf",
+    filename: "x",
+    sources: [{ attachment: "att_1" }],
+  });
+  await assert.rejects(
+    prepareFileConversion(admission.spec, files, { renderOffice: null }),
+    (error) => {
+      assert.equal(error.code, "SOURCE_TYPE");
+      assert.match(error.message, /create_document/);
+      return true;
+    }
+  );
+});
+
+test("an xlsx into to_pdf is laid out by the renderer; convert_spreadsheet still makes a table", async () => {
+  const calls = [];
+  const files = attachments([["book.xlsx", XLSX, buildXlsx({ rows: [["a"], ["1"]] })]]);
+  const laidOut = await convertWith(
+    { operation: "to_pdf", filename: "book", sources: [{ attachment: "att_1" }] },
+    files,
+    fakeRenderer(1, calls)
+  );
+  assert.equal(laidOut.format, "pdf");
+  assert.deepEqual(calls, [XLSX]);
+
+  const table = await convertWith(
+    { operation: "convert_spreadsheet", filename: "book", targetFormat: "pdf", sources: [{ attachment: "att_1" }] },
+    files,
+    fakeRenderer(1, calls)
+  );
+  assert.equal(table.format, "pdf");
+  assert.deepEqual(calls, [XLSX], "a value table never goes to the renderer");
+});
+
+test("each renderer failure becomes the card the user can act on", async () => {
+  const files = attachments([["report.docx", DOCX_TYPE, new Uint8Array([1])]]);
+  for (const [failure, code] of [
+    ["UNREADABLE", "OFFICE_UNREADABLE"],
+    ["TOO_LARGE", "OUTPUT_TOO_LARGE"],
+    ["TIMEOUT", "RENDERER_UNAVAILABLE"],
+    ["UNAVAILABLE", "RENDERER_UNAVAILABLE"],
+  ]) {
+    const admission = admitFileConversionSpec({
+      operation: "to_pdf",
+      filename: "x",
+      sources: [{ attachment: "att_1" }],
+    });
+    await assert.rejects(
+      prepareFileConversion(admission.spec, files, {
+        renderOffice: async () => ({ ok: false, failure }),
+      }),
+      (error) => {
+        assert.equal(error.code, code, failure);
+        return true;
+      }
+    );
+  }
+});
