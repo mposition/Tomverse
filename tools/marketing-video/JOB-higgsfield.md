@@ -36,32 +36,49 @@ and device. Each one:
 - `feature`: today's feature.
 - `device`: the scene idea in one line (10-160 characters), e.g. "a commuter
   on a train compares three answers on a phone".
-- `prompt_en`: the full image prompt for `gpt_image_2_6`, 4:5 portrait. Describe
-  the photo, the people, the light, the composition, where each piece of text
-  sits and what it says word for word, and the provider logos to place (the
-  reference files are attached to the call). Write it so the picture works
-  without the Tomverse logo: the code adds a band at the bottom. The word
-  "Tomverse" never appears in it, not even as "no Tomverse logo" or "Tomverse
-  blue": the image model draws every word it reads. Say "#155dfb blue", and
-  never ask for purple, violet or magenta.
+- `prompt_en`: the full image prompt for `gpt_image_2_6`, 4:5 portrait, 200 to
+  6000 characters. Describe the photo, the people, the light, the composition,
+  where each piece of text sits and what it says word for word, and the
+  provider logos to place (the reference files are attached to the call). Write
+  it so the picture works without the Tomverse logo: the code adds a band at
+  the bottom. The image model draws or follows every word it reads, even after
+  "no", so these never appear in it, not even to forbid them: "Tomverse" (not
+  "no Tomverse logo", not "Tomverse blue"), purple, violet, magenta, lavender,
+  lilac, fuchsia, "lorem ipsum", and any web address. Say "#155dfb blue" and
+  "real sentences".
 - `texts`: every piece of text the picture shows, exactly, in English, in
-  reading order, each `{"role", "text"}`:
+  reading order, at most 12, each `{"role", "text"}`:
   - `headline` (one, at most 70 characters), `subhead`, `cta`, `screen` (words
     on a phone or laptop screen), `answer` (an AI answer on a screen), `label`
-    (a name tag, a chip, a receipt line).
-  - An `answer` under a real model name has `"speaker": "<model name as in
-    features.json>"` and is that model's recorded words (guide 10).
-- `logos`: the logo files the picture shows, by name (e.g. `["chatgpt",
-  "claude", "gemini"]`).
-- `factRefs`: the facts of `features.json` the concept rests on, as paths:
+    (a name tag, a chip, a receipt line). Every text but the headline is at
+    most 400 characters. A picture that needs more than 12 texts shows too
+    much: cut it down.
+  - Only an `answer` may have a `speaker`. An `answer` under a real model name
+    has `"speaker": "<model name as in features.json>"` and is that model's
+    recorded words, with nothing added (guide 10). Only the models quoted in a
+    `realExample` have recorded words; any other answer has no `speaker`.
+  - No text contains "Tomverse", a web address, "swipe" or another page marker.
+  - "free" stands only in a text that also says "within the included credits"
+    (guide 7); use another word for any other sense ("feel free", "free time").
+  - A text that names two or more models ends with "and more" (guide 6). Only a
+    `screen`, `answer` or `label` that lists full model names of
+    `features.json` (the three that answered the recorded example) needs none.
+  - A model name with a version is exactly one of the names in
+    `features.json`.
+- `logos`: the logo files the picture shows, by name, at most 4 (e.g.
+  `["chatgpt", "claude", "gemini"]`).
+- `factRefs`: 1 to 8 facts of `features.json` the concept rests on, as paths:
   `<feature id>.<field>`, e.g. `chat.what`, `chat.models`,
   `analysis.realExample.counts.consensus`, `analysis.realExample.contradiction`.
   At least one from today's feature.
 - `translations`: `{"ko": [...], "zh-Hant": [...], "zh-Hans": [...]}`, one entry
   per entry of `texts`, same order, same `role` and `speaker`. Natural copy in
-  each language, not word for word; names and recorded quotes as written
-  (guide 12, 15, 16, 17). A Korean or Chinese headline is at most 40
-  characters.
+  each language, not word for word; every model or company name of the English
+  text stays in its translation, in Latin letters, and a recorded answer is
+  repeated in English exactly (guide 12, 15, 16, 17). A Korean or Chinese
+  headline is at most 40 characters. "무료" and "免費" carry their condition
+  (크레딧, 額度) as "free" does. zh-Hant uses only Traditional characters and
+  zh-Hans only Simplified.
 - `alt`: `{"en", "ko", "zh-Hant", "zh-Hans"}`, what the picture shows in each
   language (en 20-400 characters, ko 10-400, zh 8-400). Never write a web address.
 
@@ -72,4 +89,5 @@ Answer with exactly one line of JSON and nothing else:
 `{"date":"<yyyy-mm-dd>","feature":"<feature>","concepts":[{"id":"c1","feature":"...","device":"...","prompt_en":"...","texts":[{"role":"headline","text":"..."}],"logos":["..."],"factRefs":["..."],"translations":{"ko":[...],"zh-Hant":[...],"zh-Hans":[...]},"alt":{"en":"...","ko":"...","zh-Hant":"...","zh-Hans":"..."}}]}`
 
 A script checks the line (shape, lengths, names, quotes, banned words) before
-anything is drawn. If it is refused, you are asked once more with the reason.
+anything is drawn. If a concept is refused, you are asked once more with every
+reason; a concept still refused then is dropped and the others are drawn.
