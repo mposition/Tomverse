@@ -561,6 +561,12 @@ mock.module(mod("lib/chatContextBundleService.ts"), {
       contextConsumeSucceeds
         ? { consumed: true }
         : { consumed: false, reason: "already_consumed" },
+    // No semantic step was used: what every bundle says while the switches are off.
+    readChatContextBundleSemanticSteps: () => ({
+      memoryRerank: false,
+      knowledgeNeighbours: false,
+      knowledgeRerank: false,
+    }),
   },
 });
 

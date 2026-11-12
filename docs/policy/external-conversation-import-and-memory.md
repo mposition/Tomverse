@@ -51,8 +51,8 @@ approvalTicket: N/A
 |---|---|---|
 | **A — Import** | ChatGPT·Claude 공식 export의 브라우저 파싱, 선택 대화의 정규화 저장, account-private read-only viewer, 삭제·export | Gemini, memory 추출·주입, 이어서 대화하기, password lock, 공유 링크, `Conversation` 변환 |
 | **A2 — Gemini Import** | Google Takeout `My Activity → Gemini Apps`의 JSON parser. **scope 승인됨 (2026-08-14, §23)** — 계약은 `docs/policy/external-import-gemini-a2.md`이며, 분기별 독립 대화·내용 형태 인식·중첩 아카이브 미해제·첨부 누락 표시가 그 핵심입니다. 승인은 **구현 착수까지**이고 production 활성화는 별도입니다 | HTML export, Gems, scheduled actions, 첨부 파일 복제 |
-| **B — 계정 장기 메모리** | 메모리 후보 추출·검토·승인, 서버 주도 retrieval·주입, context bundle, external conversation lock 일반화 + memory suspension | Assistant Profile, knowledge, 외부 embedding |
-| **C — Assistant Profile** | private 프로필(지시문·모델·도구·memory 범위·지식 파일), 버전 고정, searchTerms 기반 knowledge RAG | public marketplace, 공유·판매, Actions, OAuth connector, 코드 실행, 외부 embedding |
+| **B — 계정 장기 메모리** | 메모리 후보 추출·검토·승인, 서버 주도 retrieval·주입, context bundle, external conversation lock 일반화 + memory suspension | Assistant Profile, knowledge, 외부 embedding(§9a의 기본 꺼진 스위치 뒤 경로는 예외) |
+| **C — Assistant Profile** | private 프로필(지시문·모델·도구·memory 범위·지식 파일), 버전 고정, searchTerms 기반 knowledge RAG | public marketplace, 공유·판매, Actions, OAuth connector, 코드 실행, 외부 embedding(§9a의 기본 꺼진 스위치 뒤 경로는 예외) |
 
 - 세 릴리스는 독립적으로 배포·롤백·검증합니다.
 - 한 릴리스 안에서도 `DELIVERY_SLICE` 단위의 작은 PR로 나눕니다. 특히 릴리스 B는
@@ -622,10 +622,11 @@ maintenance에 함께 실행됩니다.
   `truncated`로 보고한 뒤 다음 주기가 나머지를 처리합니다. 실패해도 함께 도는
   reconciliation을 실패로 만들지 않습니다.
 
-## 9. Retrieval v1 — 외부 embedding 없음 (확정)
+## 9. Retrieval v1 — 기본 경로는 lexical (확정)
 
-첫 릴리스(B와 C 모두)에서 외부 embedding API·embedding pipeline·vector column·
-vector index를 도입하지 않습니다.
+기본 경로이자 fallback은 lexical retrieval입니다. 외부 rerank·embedding은 §9a의
+기본 꺼진 스위치 뒤에서만 호출하며, 스위치가 꺼져 있으면 이 절의 동작 그대로입니다
+(운영자 결정 2026-11-12).
 
 - `searchTerms String[]` + Unicode normalization(NFC) + locale-aware case
   normalization + Latin token + CJK/Hangul bigram
@@ -634,10 +635,135 @@ vector index를 도입하지 않습니다.
 - category·recency·confidence·pin을 결합한 deterministic scoring
 - retrieval algorithm 구분용 `retrievalVersion`
 
-금지: 외부 embedding provider 호출, embedding API로 memory/knowledge 원문 전송,
-vector schema 즉흥 추가, 클라이언트 측 retrieval 계산·선택, embedding 기능을
-`retrievalVersion` 이름으로 위장. 향후 embedding 도입은 별도 정책·개인정보·
-비용·provider budget·eval 승인을 거칩니다.
+금지: §9a의 스위치·예산·캐시 경로 밖에서 외부 rerank·embedding provider를
+호출하거나 memory/knowledge 원문을 보내는 것, vector 확장·vector index의 즉흥
+추가, 클라이언트 측 retrieval 계산·선택, 의미 검색 결과를 lexical
+`retrievalVersion` 값으로 내보내는 것.
+
+## 9a. 의미 검색 — 외부 rerank·embedding (기본 꺼짐)
+
+운영자 결정 2026-11-12: Cohere의 Rerank·Embed를 다섯 개의 스위치 뒤에 둡니다.
+구현과 기본 꺼짐 상태의 배포까지가 이 결정의 범위이고, **스위치를 켜는 것은 별도의
+운영자 승인**입니다 — 켜는 순간 유료 호출이 시작되고 계정 memory·knowledge 원문이
+Tomverse 밖으로 나가기 때문입니다.
+
+| 스위치 (`retrieval.cohere.*`) | 하는 일 | provider로 나가는 것 |
+|---|---|---|
+| `knowledgeRerank` | lexical·의미 후보를 질문과의 관련도로 다시 정렬 | 질문, 후보 chunk 원문(최대 100개) |
+| `knowledgeEmbed` | chunk마다 vector를 저장하고 질문과 가까운 chunk를 후보에 추가 | chunk 원문(색인 시), 질문 |
+| `knowledgeImagePages` | PDF의 텍스트 없는 페이지를 이미지로 색인 | 그 페이지의 렌더링 이미지 |
+| `memoryRerank` | 관련도로 걸러지는 memory를 질문과의 관련도로 선택. lexical 후보 조회와 그 상한은 그대로 두고, term이 겹치지 않는 최근 memory를 별도 조회로 더합니다(실패 시 더한 것은 버림) | 질문, 해당 memory statement(최대 100개) |
+| `memoryDuplicates` | 추출 후보가 기존 memory의 다른 표현인지 판정. 관련도로 걸러지는 종류만 대상이며 core·고정·style memory는 후보로도, 색인으로도 보내지 않습니다 | 해당 후보 statement, 계정의 해당 active memory statement |
+
+**켜기 전 조건** (스위치를 켜는 승인이 확인하는 것):
+
+1. 환경 변수: `COHERE_API_KEY`, 모델(`COHERE_RERANK_MODEL`, `COHERE_EMBED_MODEL`),
+   단가(rerank는 과금 단위에 따라 `COHERE_RERANK_MICROUSD_PER_SEARCH_UNIT` **또는**
+   `COHERE_RERANK_MICROUSD_PER_MILLION_TOKENS` 하나만 — 둘 다면 설정 오류이고, 응답이
+   설정과 다른 단위로 청구를 보고하면 예약을 정산하지 않고 그대로 둡니다 —,
+   `COHERE_EMBED_MICROUSD_PER_MILLION_TEXT_TOKENS`, 이미지 색인에는
+   `COHERE_EMBED_MICROUSD_PER_MILLION_IMAGE_TOKENS`), 예산
+   (`RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_DAY`·`_PER_MONTH`). 단가는 코드에
+   상수로 두지 않습니다 — provider 가격표의 값을 운영자가 넣으며, 하나라도 없으면
+   해당 기능은 호출하지 않습니다. Admin › Feature flags가 미설정 기능의 스위치를
+   켜는 요청을 거절하고, 한 요청의 스위치 변경은 감사 기록과 함께 한 transaction으로
+   씁니다. 순서·값·명령은 `docs/ops/semantic-retrieval-activation.md`에 있습니다.
+2. 개인정보: Cohere가 새 수탁 처리자가 되므로 7개 locale의 `privacyPolicy`와
+   knowledge·memory 안내 문구를 **스위치를 켜기 전에** 갱신합니다(§16). 스위치가
+   꺼진 동안은 문구가 "외부 embedding 없음"을 그대로 말하고,
+   `tests/assistantProfilePrivacyCopy.test.mjs`가 그것을 고정합니다.
+3. 품질: 켠 뒤 `tools/memory-quality`의 retrieval 표본으로 전후를 비교합니다.
+   임계값(`KNOWLEDGE_SEMANTIC_DEFAULTS`, `MEMORY_SEMANTIC_DEFAULTS`,
+   `MEMORY_DUPLICATE_SIMILARITY`)은 측정 전의 초기값입니다.
+
+**불변식.**
+
+- **꺼짐과 실패는 lexical입니다.** 스위치·key·모델·단가·예산 중 하나라도 없거나,
+  예산이 거절하거나, 호출이 실패·timeout이면 §9의 결과를 그대로 냅니다(결과의
+  retrieval version도 lexical 값). 호출은 요청당 한 번이며 재시도하지 않습니다 —
+  결과를 모르는 요청의 재시도는 이중 청구일 수 있습니다.
+- **비용은 사용자 credit이 아닙니다.** `ChatUsageBucket`의 별도 key
+  `retrieval-provider:cohere`, period `retrieval-cost-day`·`retrieval-cost-month`에
+  최악값을 예약하고 provider가 보고한 `billed_units`로 정산합니다. 보고가 없거나
+  요청이 실패한 경우 예약을 그대로 둡니다
+  (`docs/policy/credit-and-cost-limits.md`의 버킷 구분).
+- **발급하는 route만 provider를 호출합니다.** bundle을 발급하는
+  `/api/chat/context`와 comparison `preflight`는 의미 검색을 호출할 수 있고,
+  bundle을 검증하고 전송하는 `/api/chat`은 `cached_only`로 context를 다시 만듭니다
+  — 발급 route가 저장한 결과가 있으면 그것을 쓰고, 없으면 lexical입니다. 그래서
+  lexical 선택 위에 서명된 bundle(provider 실패, 예산 거절, cache 저장 실패)은
+  검증 시점에 provider나 cache가 복구돼 있어도 lexical로 재현됩니다. 전송 경로는
+  검색 provider를 기다리지도, 비용을 내지도 않습니다.
+- **bundle은 실제로 쓴 단계를 서명합니다.** 의미 검색은 단계마다 따로 떨어질 수
+  있습니다(memory rerank, knowledge 이웃 검색, knowledge rerank). 발급 route는 이 중
+  **결과가 저장되어 실제로 선택에 쓰인 단계**를 bundle의 서명된 payload
+  (`semanticSteps`, fingerprint와 별개)에 기록합니다. `/api/chat`은 그 단계만 저장된
+  결과로 재현하고 나머지 단계는 끈 채 context를 한 번 다시 만듭니다. 그래서 일부
+  단계만 성공한 발급도, 그 뒤 같은 질문의 다른 발급이 다른 결과를 저장한 경우도
+  그대로 재현되고, 검증 경로는 provider를 호출하지 않습니다. 쓰인 단계의 저장 결과가
+  없어졌다면 종전대로 `CHAT_CONTEXT_BUNDLE_STALE`이고 client가 다시 준비합니다.
+  이 필드가 없는 bundle(배포 전에 발급된 것)은 어떤 단계도 쓰지 않은 것으로
+  읽습니다(`lib/chatContextBundleCore.ts`, `tests/semanticRetrievalSendPath.test.mjs`).
+- **한 턴은 한 결과를 봅니다.** context bundle은 `/api/chat/context`·`preflight`·
+  `/api/chat`에서 다시 계산되고 fingerprint가 다르면 거절됩니다(§10). 그래서
+  (질문, 후보) 쌍의 첫 결과 — 순위든 실패든 — 를 `SemanticRetrievalCache`에
+  저장하고, 같은 턴의 재계산은 그 결과를 씁니다. 의미 이웃 검색의 결과(이웃이
+  없다는 결과 포함)도 같은 방식으로 고정합니다 — vector는 턴이 진행되는 동안에도
+  채워지므로, 몇 초 뒤의 재계산이 첫 계산에 없던 이웃을 찾으면 안 됩니다. 만료는
+  **마지막 읽기로부터 10분**입니다. bundle은 발급 시점부터 5분을 살고 이미 오래된
+  항목에서 발급될 수 있으므로, 읽을 때마다 연장해야 그 bundle의 수명 전체를
+  덮습니다. 기록된 실패도 똑같이 연장하고 상한 나이를 두지 않습니다 — 어떤 상한이든
+  그 직전에 발급된 bundle이 서명한 결과를 잃는 시점이 됩니다. 대가는 **정확히 같은
+  질문·같은 후보**가 10분 안에 계속 다시 요청되는 동안 lexical로 남는 것이고, 질문이나
+  후보가 바뀌거나 10분이 비면 provider에 다시 묻습니다. 저장하는 것은 id·점수·질문 vector이고
+  memory·knowledge 원문은 저장하지 않습니다. 행은 만료 후 sweep되고 계정 삭제와
+  함께 cascade됩니다. 점수는 소수 4자리로 반올림해 비교합니다. **저장이 확인되지
+  않은 결과는 쓰지 않습니다** — cache 쓰기가 실패했거나, 충돌 뒤 이긴 쪽을 다시 읽지
+  못했다면 그 요청은 lexical 결과를 냅니다. cache에 없는 결과로 bundle을 발급하면
+  다음 재계산이 그 결과를 찾지 못하기 때문입니다.
+- **검색어가 없는 질문은 아무것도 보내지 않습니다.** usable term이 하나도 없는
+  질문은 §9대로 knowledge 결과가 비어 있고, 의미 검색 호출도 하지 않습니다.
+- **provider 응답은 권한이 없습니다.** rerank 응답은 보낸 문서 전부를 정확히 한
+  번씩 채점했을 때만 쓰고(범위 밖·중복·누락 index는 응답 전체 폐기), embedding은
+  입력 수와 같은 개수·같은 길이의 int8 vector일 때만 씁니다. 응답이 어떤 chunk나
+  memory를 읽을지 지정할 수는 없습니다 — 후보는 항상 서버가 소유자·file scope로
+  읽은 행입니다.
+- **core·pinned·style memory는 외부 점수가 건드리지 못합니다.** provider로
+  보내지도 않습니다 — rerank에도, 중복 감지의 후보·색인·비교에도. 이 종류의 다른
+  표현은 스위치 이전처럼 정확 일치 규칙만 적용합니다.
+- **다른 표현의 memory는 삭제가 아니라 topic 충돌입니다.** 가까운 statement를
+  §8.3의 newer-wins 규칙에 충돌로 넘깁니다. 부정문은 embedding 공간에서 긍정문과
+  가깝기 때문에("커피를 좋아한다"/"커피를 끊었다"), 가깝다는 이유로 후보를 버리면
+  낡은 쪽이 남습니다. 사용자가 쓰거나 고치거나 고정한 memory는 대체되지 않습니다.
+  provider 호출은 memory lock을 잡는 transaction **밖**에서 합니다.
+- **보내기 직전에 다시 확인합니다.** 추출 provider 호출이 진행되는 동안 계정이
+  바뀔 수 있고, write transaction의 거절은 이미 나간 statement를 되돌리지
+  못합니다. 그래서 호출 직전에 transaction이 거절할 조건을 먼저 봅니다: worker가
+  아직 run·chunk의 lease를 갖고 있는가, 계정의 memory가 켜져 있는가, 후보의
+  evidence가 지금도 이 소유자 아래 존재하고 digest가 맞고 **잠겨 있지 않은가**.
+  하나라도 아니면 그 후보는 보내지 않습니다. 기존 memory의 backfill도 같은
+  evidence 도달 가능성 조건(§7.1)을 통과한 active memory만 보냅니다.
+
+**저장.** vector는 `AssistantKnowledgeChunk.embedding`·`MemoryItem.embedding`
+(`Bytes`, 차원당 int8 1바이트)에 두고 유사도는 애플리케이션에서 계산합니다. DB
+확장과 vector index는 쓰지 않습니다. `embeddingModel`은 provider·모델·차원을
+담고(memory는 statement digest도 포함), label이 현재 설정과 다른 vector는
+비교하지 않고 다시 색인합니다. vector는 원본 행과 함께 삭제됩니다.
+
+**스캔 페이지.** `knowledgeImagePages`가 켜져 있으면 텍스트 없는 PDF 페이지를
+파일당 최대 20쪽까지 렌더링해 색인하고, `sourceMetadata.kind = "image_page"`인
+pointer chunk로 저장합니다. 그래서 스캔 PDF가 `NO_TEXT` 실패 대신 `ready`가
+됩니다. pointer는 "N쪽이 질문과 관련 있어 보이지만 글자는 읽을 수 없다"는 사실만
+모델에 전달합니다 — 페이지 이미지를 답변 모델에 넘기는 것은 이 범위가 아니며
+(입력 token 가격이 바뀌므로 credit 계약의 결정입니다), `knowledgeEmbed`가 꺼져
+있으면 질문 vector가 없어 pointer는 검색되지 않습니다.
+
+구현: `lib/semanticRetrievalCore.ts`(설정·비용 상한·응답 검증·vector),
+`lib/semanticRetrievalClient.ts`(HTTP), `lib/semanticRetrieval.ts`(스위치·예산·
+캐시), `lib/semanticRetrievalSettings.ts`(스위치와 감사 기록),
+`lib/assistantKnowledgeEmbedding.ts`, `lib/memorySemanticDuplicates.ts`.
+
+## 9b. Retrieval v1 구현
 
 구현: tokenizer는 `lib/memoryRetrievalTerms.ts`의 `memoryRetrievalTerms()`
 하나뿐이며 **색인과 질의가 같은 함수를 씁니다** — 서로 다른 tokenizer로 색인한
@@ -1277,7 +1403,8 @@ provider·`externalStableId`·digest·원본 시각·model label·메시지는 �
 ## 14. Assistant Profile (릴리스 C)
 
 - private only. public marketplace·공유·판매·Actions·OAuth·코드 실행·외부
-  embedding은 비목표이며, 도입하려면 별도 정책·보안 리뷰가 필요합니다.
+  embedding은 비목표이며, 도입하려면 별도 정책·보안 리뷰가 필요합니다. 외부
+  embedding·rerank는 §9a의 기본 꺼진 스위치 뒤에서만 허용됩니다(2026-11-12).
 - **버전 고정**: 새 conversation은 최신 active version에 pin, 기존 conversation
   은 생성 시점 version 유지(소급 적용 금지, 이동은 명시적 사용자 동작).
   version snapshot: instructions, models, tools, memory policy, knowledge
@@ -1579,6 +1706,7 @@ flag를 순서 때문에 되돌리지는 않습니다.
 | A | 제3자 AI 서비스 export 대화의 계정 저장(제3자 개인정보 포함 가능, 사용자의 권한·적법성 확인 책임), raw archive는 브라우저에서만 처리, 정규화 선택분만 서버 저장, media 미저장, 보존·삭제·export, Tomverse 삭제가 원 제공자 삭제를 의미하지 않음 |
 | B | 가져온 대화의 extraction provider 자동 전송(import 완료 시, 기억 사용이 켜진 동안, credit 무료 — 2026-10-24), 활성 memory/style의 chat provider 전송(비교 시 여러 provider), 민감 정보 미저장과 최신 대화 우선, memory 보존, 조회·수정·비활성화·전체 export·delete-all, source lock·suspension 동작. import 확정 화면에도 같은 고지를 둡니다 |
 | C | instructions 저장, knowledge file 저장·분석, knowledge excerpt의 provider 전송, 보존·삭제, private 기본, share snapshot 제외, marketplace·connector 미지원 |
+| §9a 의미 검색 (스위치를 켤 때) | 질문, 후보 knowledge chunk·memory statement, 스캔 페이지 이미지의 검색 provider(Cohere) 전송과 그 결과로 만든 vector의 저장·삭제. **스위치가 꺼진 동안은 처리 활동이 아니므로 문구에 넣지 않고**, 켜기 전에 7개 locale 문구를 갱신합니다 |
 
 Release C의 사용법·활성화 분석은 기존 analytics 동의 경계를 그대로 따릅니다.
 가이드 조회, 단계 설명 열기, 실제 설정 단계 완료, Knowledge 업로드 성공만 별도
@@ -2108,8 +2236,8 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
   품질 보장을 주장하지 않고, 후속 locale eval 전까지 admin 지표·feedback으로
   관찰합니다.
 - ~~Gemini Takeout은 A2로 연기~~ — A2 scope 승인됨(아래). retrieval v1은
-  lexical이므로 의미 검색 품질에 한계가 있고 embedding 도입은 별도 승인
-  경로입니다.
+  lexical이므로 의미 검색 품질에 한계가 있습니다. 의미 검색은 §9a의 기본 꺼진
+  스위치 뒤에 구현돼 있고(2026-11-12), 켜는 것이 별도 승인입니다.
 - 모바일 대형 archive Import는 데스크톱 권장으로 제한됩니다.
 - media·첨부는 Import되지 않습니다.
 

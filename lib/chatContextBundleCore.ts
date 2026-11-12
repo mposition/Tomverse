@@ -67,6 +67,51 @@ export type ContextBundleFingerprintInput = {
     knowledgeHash: string;
 };
 
+/**
+ * Which semantic retrieval steps the issuing route actually used
+ * (docs/policy/external-conversation-import-and-memory.md §9a).
+ *
+ * Carried in the signed payload, beside the fingerprint rather than inside
+ * it. The fingerprint says *what* was selected; this says *how*, so the route
+ * that verifies can rebuild the selection the same way: a step that was used
+ * is reproduced from its stored outcome, and a step that was not -- because
+ * its switch was off, the provider failed, the budget refused or its outcome
+ * could not be stored -- is left off. Without it the verifying route could
+ * only guess, and any later issue of the same question that stored an outcome
+ * would change the guess.
+ */
+export type SemanticStepsUsed = {
+    memoryRerank: boolean;
+    knowledgeNeighbours: boolean;
+    knowledgeRerank: boolean;
+};
+
+export const NO_SEMANTIC_STEPS: SemanticStepsUsed = {
+    memoryRerank: false,
+    knowledgeNeighbours: false,
+    knowledgeRerank: false,
+};
+
+/** Compact and order-fixed: one letter per step that was used. */
+const encodeSemanticSteps = (steps: SemanticStepsUsed) =>
+    (steps.memoryRerank ? "m" : "") +
+    (steps.knowledgeNeighbours ? "n" : "") +
+    (steps.knowledgeRerank ? "r" : "");
+
+/**
+ * Absent is "no step used", which is what every bundle issued before the
+ * field existed was. Anything present must be exactly the encoding above.
+ */
+const decodeSemanticSteps = (value: unknown): SemanticStepsUsed | null => {
+    if (value === undefined) return NO_SEMANTIC_STEPS;
+    if (typeof value !== "string" || !/^m?n?r?$/.test(value)) return null;
+    return {
+        memoryRerank: value.includes("m"),
+        knowledgeNeighbours: value.includes("n"),
+        knowledgeRerank: value.includes("r"),
+    };
+};
+
 export type ContextBundlePayload = ContextBundleFingerprintInput & {
     version: 1;
     /** Shared lineage identity. A comparison's panels all carry the same one. */
@@ -91,6 +136,8 @@ export type ContextBundlePayload = ContextBundleFingerprintInput & {
      */
     profileTokens: number;
     expiresAtMs: number;
+    /** See `SemanticStepsUsed`. Signed, never compared as content. */
+    semanticSteps: SemanticStepsUsed;
 };
 
 export type ContextBundleVerification =
@@ -181,6 +228,7 @@ const encode = (payload: ContextBundlePayload) =>
             t: payload.memoryTokens,
             pt: payload.profileTokens,
             e: payload.expiresAtMs,
+            ss: encodeSemanticSteps(payload.semanticSteps),
         }),
         "utf8"
     ).toString("base64url");
@@ -257,6 +305,8 @@ const decode = (body: string): ContextBundlePayload | null => {
     ) {
         return null;
     }
+    const semanticSteps = decodeSemanticSteps(record.ss);
+    if (!semanticSteps) return null;
     return {
         version: 1,
         bundleId: record.b,
@@ -274,7 +324,40 @@ const decode = (body: string): ContextBundlePayload | null => {
         memoryTokens: record.t,
         profileTokens: typeof record.pt === "number" ? record.pt : 0,
         expiresAtMs: record.e,
+        semanticSteps,
     };
+};
+
+/** The body of a token whose signature verifies, or null. */
+const signedBody = (token: string, secret: string): string | null => {
+    if (!token || token.length > MAX_TOKEN_LENGTH) return null;
+    const separator = token.lastIndexOf(".");
+    if (separator <= 0) return null;
+    const body = token.slice(0, separator);
+    const actualBuffer = Buffer.from(token.slice(separator + 1));
+    const expectedBuffer = Buffer.from(sign(body, secret));
+    if (
+        actualBuffer.length !== expectedBuffer.length ||
+        !timingSafeEqual(actualBuffer, expectedBuffer)
+    ) {
+        return null;
+    }
+    return body;
+};
+
+/**
+ * The semantic steps a bundle was issued with, read before its context is
+ * rebuilt -- the rebuild needs them to reproduce the selection, and the full
+ * verification needs the rebuild's fingerprint. Null when the token does not
+ * verify or does not decode; the verification that follows then refuses it
+ * for that reason, so the caller only has to rebuild without semantic steps.
+ */
+export const readContextBundleSemanticSteps = (
+    token: string,
+    secret: string
+): SemanticStepsUsed | null => {
+    const body = signedBody(token, secret);
+    return body === null ? null : (decode(body)?.semanticSteps ?? null);
 };
 
 export const verifyContextBundle = (

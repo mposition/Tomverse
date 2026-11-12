@@ -4,8 +4,10 @@ Runnable local quality loop: development failure analysis -> prompt candidate ->
 evaluation -> incumbent comparison -> case regression check -> frozen candidate ->
 independent synthetic validation -> recorded recommendation.
 
-The CLI supports mock and archived-response replay. It has no live flag, scheduler,
-product database access, user Memory collector, publication or promotion command.
+The quality-loop commands (`run`) support mock and archived-response replay. They have
+no live flag, scheduler, product database access, user Memory collector, publication
+or promotion command. The only paid path in this tool is the opt-in `--live` of the
+two semantic retrieval comparisons below.
 The existing extraction register and feature flags are untouched: v8 remains
 revoked and there are zero approved extraction pairs.
 
@@ -115,6 +117,110 @@ The semantic judge itself still needs independent calibration with approved
 model execution or archived real judge outputs before its scores support claims.
 No past score is treated as the current model's absolute quality.
 
+## Semantic retrieval comparison (Cohere Rerank / Embed)
+
+Before the `retrieval.cohere.*` switches (policy
+`docs/policy/external-conversation-import-and-memory.md` section 9a) are turned on,
+these two commands answer "does it beat lexical retrieval on the same data". Both
+run the product's own pure selectors; only the source of the scores differs. Both
+are operator tools: they do not use the product budget bucket, switches or cache,
+and they write no product data.
+
+Use the local PC, PowerShell, from the root of the worktree. Prerequisite: repository
+Node dependencies installed. Saved-score runs need no credentials and no network.
+
+### Memory: `retrieval --semantic`
+
+Measures lexical `selectMemoryContext` and, beside it, the same function given
+`externalRelevance` scores (the section 9a rerank path). The reranked set is what the
+service sends: the active memories `memoryTier` relevance-gates (core, pinned and
+style memories are never sent or moved), at most 100. The corpus pool is one account,
+so that is every such memory in it.
+
+```powershell
+node --import tsx tools/memory-quality/cli.ts retrieval --semantic --rerank-scores <scores.json>
+node --import tsx tools/memory-quality/cli.ts retrieval --semantic --corpus all --rerank-scores <scores.json>
+```
+
+Output (`semantic.<corpus>`): lexical and semantic Korean Recall@5 and irrelevant
+injection rates, the delta, a per-tag table (`byTag.<tag>.lexical|semantic|delta`),
+per-case `differences` (gold memories gained or lost, with both top-5 lists) and
+`coverage`. A case with no entry in the scores file keeps its lexical selection, like a
+failed provider call, and is listed under `casesFallingBackToLexical`.
+
+Scores file: `{ "<caseId>": { "<memoryId>": <score 0..1> } }`, or the wrapped form
+`--save-scores` writes (`format: "memory-rerank-scores-v1"`, `scores`, `usage`).
+
+### Knowledge files: `knowledge-retrieval`
+
+Synthetic corpus `fixtures/knowledge-retrieval-ko.json`: six fictional documents, 46
+paragraph-sized chunks, 27 questions, tagged `exact`, `synonym` (different wording),
+`cross_language` (Korean question, English document) and `distractor` (words overlap
+with chunks that are not the answer; `distractorChunkIds` names them). Chunks are
+indexed with `memoryRetrievalTerms` at the chunker's term cap, as stored chunks are,
+and are shorter than production chunks so the token budget rarely binds; the chunk
+and per-file caps are the product's.
+
+```powershell
+node --import tsx tools/memory-quality/cli.ts knowledge-retrieval
+node --import tsx tools/memory-quality/cli.ts knowledge-retrieval --scores <scores.json>
+```
+
+Four configurations, each as `retrieveKnowledgeContext` would run it with those steps
+on: `lexical` (`selectKnowledgeContext`), `embedOnly` (nearest chunks added to the
+candidates, `fuseKnowledgeScores`), `rerankOnly` (lexical candidates, then
+`selectKnowledgeContextRanked`) and `embedRerank` (both). Each reports Recall@6 (the
+product `maxChunks`), MRR over the selected chunks in rank order, the average number
+of chunks injected, how many `distractorChunkIds` were injected, and the same by tag.
+`differences` lists gold chunks gained or lost against lexical; `stepFallbacks` lists
+questions where a switched-on step had no vector, score or neighbour above the floor.
+Without `--scores` only `lexical` is available and the others say why.
+
+Scores file (`format: "knowledge-retrieval-scores-v1"`, `corpus` must equal the
+corpus version): `chunkVectors` and `queryVectors` (int8 vectors, base64, by chunk id
+and case id) and `rerank` (`{ "<caseId>": { "<chunkId>": <score> } }`). Rerank scores
+are read per question and chunk, so one set serves both `rerankOnly` (its lexical
+subset) and `embedRerank`, on the assumption that a pair's score does not depend on
+the other documents in the request.
+
+### `--live` (paid)
+
+`--live` sends the corpus text and questions to the provider (Cohere) and **costs
+money**. Run it only when the owner has approved the spend; this tool does not
+decide that. It runs only when all of these hold, each checked before the first
+request:
+
+- `--max-calls <n>` is given and positive (absent or 0 is refused). The run is also
+  refused if its planned request count exceeds `n` (`live.planned` is the upper
+  bound: memory is one rerank per case; knowledge is the embed batches plus one
+  rerank per question), and the meter stops before any request past `n`.
+- Environment variables are set: `COHERE_API_KEY`, `COHERE_RERANK_MODEL`, and for
+  knowledge `COHERE_EMBED_MODEL` (optional `COHERE_EMBED_DIMENSION`). Values are never
+  printed or written; set them for the session only (for example `$env:COHERE_API_KEY`
+  from the secret store) and do not paste them into chat or a file.
+- `--save-scores <new file>` names a file that does not exist. It is created
+  exclusively and never overwritten, also after a failed or interrupted run: a failed
+  request ends the run (one request each, never retried, since an unknown outcome could
+  be billed twice) and what was already paid for is saved with `complete: false`.
+- The run uses `node --conditions=react-server`, because the provider client is a
+  `server-only` module. Without it `--live` stops with `live_client_unavailable` before
+  any request; the offline commands do not need the condition.
+
+```powershell
+$env:COHERE_API_KEY = "<from the secret store>"
+$env:COHERE_RERANK_MODEL = "<rerank model id>"
+$env:COHERE_EMBED_MODEL = "<embed model id>"
+node --conditions=react-server --import tsx tools/memory-quality/cli.ts retrieval --semantic --live --max-calls 40 --save-scores .tmp/memory-rerank-scores.json
+node --conditions=react-server --import tsx tools/memory-quality/cli.ts knowledge-retrieval --live --max-calls 30 --save-scores .tmp/knowledge-scores.json
+```
+
+`--live` for memory takes one corpus (not `all`). The output carries `live.calls`,
+`live.searchUnits` (sum of `billed_units.search_units`; `searchUnitsUnreported` counts
+responses that did not report it) and `live.embedInputTokens`; the request body is the
+product's `rerankRequestBody` / `embedRequestBody`. Re-run any comparison for free from
+the saved file with `--rerank-scores` / `--scores`. The results are synthetic-corpus
+measurements, not decision grade (`decisionGrade: false`).
+
 ## Data isolation and candidate authority
 
 `fixtures/development.json` and `fixtures/validation.json` contain ten synthetic
@@ -182,7 +288,14 @@ are required. Tests use synthetic data and temporary local files.
 node --import tsx --test tests/memoryQualityEvaluator.test.mjs tests/memoryQualityRunner.test.mjs tests/memoryQualityProvider.test.mjs tests/memoryQualityCli.test.mjs
 node node_modules/typescript/bin/tsc --project tools/memory-quality/tsconfig.json --noEmit
 node node_modules/eslint/bin/eslint.js tools/memory-quality tests/memoryQuality*.test.mjs
+node --conditions=react-server --import tsx --test tests/memoryQualitySemantic.test.mjs
 ```
+
+`tests/memoryQualitySemantic.test.mjs` covers the two semantic comparisons: saved-score
+reproduction, tag deltas and lost cases, the `--live` refusals (no ceiling, missing
+environment, existing save file, ceiling below plan), metering, no retry, exclusive
+saving and the key staying out of output. Its `--live` runs use a fake `fetch`; nothing
+in the test reaches a network. It runs with the unit suite.
 
 The CLI regression runs the complete loop with socket/fetch access disabled,
 checks persisted candidates/results and replays it to the identical recommendation.
