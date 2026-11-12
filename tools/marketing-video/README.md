@@ -139,6 +139,18 @@ The design guide every call follows is `HIGGSFIELD-GUIDE.md`.
   a call whose outcome is unknown blocks the next until its job id shows it.
 - `HIGGSFIELD_BIN` and `CLAUDE_BIN` name other binaries (a `.mjs` is run with
   node), for a dry run with stand-ins.
+- The concept call is asked again with every reason a concept was refused
+  (`concepts-core.mjs`); a concept still refused is dropped and the others are
+  drawn. A day with no concept counts as the feature's day, so the next run
+  takes another feature. A full day of three concepts in four languages is
+  about 21 pictures (5.25 credits at 0.25 each) before any refine.
+- After a deployment, the concept step can be run alone on the box, with the
+  cron's own PATH and env file. It draws nothing, spends no credit, submits
+  nothing and leaves `history.json` alone; its files are `job/<day>/dry-*`:
+
+  ```
+  cd ~/marketing-video-job && git pull --ff-only -q && cd tools/marketing-video && set -a && . $HOME/.config/tomverse/marketing-video.prod.env && set +a && PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin MARKETING_HIGGSFIELD_CONCEPTS_ONLY=1 node run-higgsfield.mjs
+  ```
 
 ## The creative short job (off by default, run by hand)
 
