@@ -14,7 +14,9 @@ Every concept follows these rules, and every review judges against them.
 5. Hands, fingers and poses are anatomically possible. Rejected 2026-11-08: a
    right hand holding a phone screen outwards with the thumb in an impossible
    place.
-6. Chat copy names models as "GPT, Claude, Gemini and more": always "and more".
+6. Copy that names models says "GPT, Claude, Gemini and more": always "and
+   more". Only a screen or a tag that lists the exact models of `features.json`
+   (the three that answered the recorded example) needs none.
 7. Chat and Review work without an account. "Free" always carries its
    condition, e.g. "Free to try within the included credits". A bare "free" is
    refused.
