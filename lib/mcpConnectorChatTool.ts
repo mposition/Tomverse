@@ -6,7 +6,7 @@ import { MCP_LIMITS, MCP_UNTRUSTED_NOTICE, McpConnectorError } from "@/lib/mcpCo
 import { invokeMcpTool } from "@/lib/mcpConnectorExecution";
 import { mcpModelSchema, mcpToolName, type McpReadSource } from "@/lib/mcpConnectorSchema";
 import { ownMcpConnection, parseMcpGrants } from "@/lib/mcpConnectorStore";
-import { mcpServer } from "@/lib/mcpConnectorPolicy";
+import { mcpServerFor } from "@/lib/mcpCustomServers";
 import { githubScopedModelSchema } from "@/lib/mcpConnectorGitHub";
 
 export type McpProgress = "searching" | "reading" | "approval_required" | "no_results" | "reauth_required" | "server_error" | "done";
@@ -17,6 +17,7 @@ export async function buildMcpChatTools(input: {
 }) {
   if (getArtifactToolSupport(input.modelId) !== "verified" || input.nativeSearch) throw new McpConnectorError("model_tools_unavailable");
   const connection = await ownMcpConnection(input.userId, input.connectionId);
+  const server = await mcpServerFor(input.userId, connection.serverId);
   const grants = parseMcpGrants(connection.grants);
   if (!grants.length) throw new McpConnectorError("no_tools_selected");
   const controller = new AbortController();
@@ -26,8 +27,8 @@ export async function buildMcpChatTools(input: {
   const tools: ToolSet = {};
   for (const grant of grants) {
     tools[mcpToolName(connection.id, grant.name)] = tool({
-      description: `User-selected connector tool ${JSON.stringify(grant.name)}. ${grant.mode === "read" ? "Read access." : "Propose an action for exact human approval; this does not execute it."} ${mcpServer(connection.serverId).githubRepository && grant.name === "search_issues" ? "Use plain search terms without qualifiers, parentheses, quotes or boolean operators; the repository is fixed by the host." : ""} ${MCP_UNTRUSTED_NOTICE}`,
-      inputSchema: jsonSchema<Record<string, unknown>>(githubScopedModelSchema(mcpServer(connection.serverId), grant.name, mcpModelSchema(grant.inputSchema))),
+      description: `User-selected connector tool ${JSON.stringify(grant.name)}. ${grant.mode === "read" ? "Read access." : "Propose an action for exact human approval; this does not execute it."} ${server.githubRepository && grant.name === "search_issues" ? "Use plain search terms without qualifiers, parentheses, quotes or boolean operators; the repository is fixed by the host." : ""} ${MCP_UNTRUSTED_NOTICE}`,
+      inputSchema: jsonSchema<Record<string, unknown>>(githubScopedModelSchema(server, grant.name, mcpModelSchema(grant.inputSchema))),
       execute: args => {
         const run = async () => {
         startedAt ??= Date.now();
