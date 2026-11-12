@@ -21,6 +21,7 @@
  */
 
 import { unzipSync, type Unzipped } from "fflate";
+import SSF from "ssf";
 
 export const SPREADSHEET_DATA_ERROR_CODES = [
   "DATA_UNREADABLE",
@@ -30,6 +31,8 @@ export const SPREADSHEET_DATA_ERROR_CODES = [
   "DATA_DUPLICATE_COLUMN",
   "DATA_NO_ROWS",
   "DATA_TOO_MANY_ROWS",
+  "DATA_VALUE_TOO_LONG",
+  "DATA_FORMULA_UNCALCULATED",
 ] as const;
 
 export type SpreadsheetDataErrorCode =
@@ -149,11 +152,17 @@ type StyleTable = {
   isDate: boolean[];
   /** Style index -> whether the cell also shows a time. */
   hasTime: boolean[];
+  /**
+   * Style index -> the number format, as Excel stores it: a format code for
+   * a custom format, the built-in id otherwise. Read by a conversion, which
+   * writes every number the way the spreadsheet displays it.
+   */
+  formats: Array<string | number>;
 };
 
 const readStyles = (parts: Unzipped): StyleTable => {
   const bytes = parts["xl/styles.xml"];
-  if (!bytes) return { isDate: [], hasTime: [] };
+  if (!bytes) return { isDate: [], hasTime: [], formats: [] };
   const xml = decoder.decode(bytes);
 
   const customCodes = new Map<number, string>();
@@ -166,19 +175,22 @@ const readStyles = (parts: Unzipped): StyleTable => {
   const cellXfsMatch = xml.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/);
   const isDate: boolean[] = [];
   const hasTime: boolean[] = [];
-  if (!cellXfsMatch) return { isDate, hasTime };
+  const formats: Array<string | number> = [];
+  if (!cellXfsMatch) return { isDate, hasTime, formats };
   for (const xf of cellXfsMatch[1].matchAll(/<xf\b[^>]*\/?>/g)) {
     const numFmtId = Number(xf[0].match(/numFmtId="(\d+)"/)?.[1] ?? "0");
     const custom = customCodes.get(numFmtId);
     if (custom !== undefined) {
       isDate.push(customFormatIsDate(custom));
       hasTime.push(customFormatHasTime(custom));
+      formats.push(custom);
     } else {
       isDate.push(BUILTIN_DATE_FORMATS.has(numFmtId));
       hasTime.push(BUILTIN_TIME_ONLY_FORMATS.has(numFmtId) || numFmtId === 22);
+      formats.push(numFmtId);
     }
   }
-  return { isDate, hasTime };
+  return { isDate, hasTime, formats };
 };
 
 const pad = (value: number, width = 2) => String(value).padStart(width, "0");
@@ -203,6 +215,46 @@ export const excelSerialToDisplay = (
   )}`;
   if (!withTime) return day;
   return `${day} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+};
+
+/**
+ * The two built-in formats whose look Excel takes from the computer's region:
+ * 14, the short date, and 22, the short date with a time. SheetJS renders them
+ * the American way ("11/12/26"); a converted file is read anywhere, so they
+ * are written as ISO dates, which no region reads wrongly.
+ */
+const REGIONAL_DATE_FORMATS: Readonly<Record<number, string>> = {
+  14: "yyyy-mm-dd",
+  22: "yyyy-mm-dd hh:mm",
+};
+
+/**
+ * A number, as the spreadsheet displays it, for a conversion.
+ *
+ * The display grammar -- zero padding, currency, percent, thousands, dates,
+ * clock and elapsed times, sections and colours -- is SheetJS's SSF, the
+ * formatter behind SheetJS itself, rather than a parser written here. The
+ * result is what Excel's own "Save as CSV" writes for the cell.
+ *
+ * One exception: a number in the General format keeps fifteen significant
+ * digits. SSF's General shortens to what fits a default column width, and a
+ * conversion has no column to fit.
+ */
+const numberAsDisplayed = (
+  value: number,
+  format: string | number | undefined,
+  date1904: boolean
+): string => {
+  if (format === undefined || format === 0 || format === "General" || format === "general") {
+    return String(Number(value.toPrecision(15)));
+  }
+  const code = typeof format === "number" ? REGIONAL_DATE_FORMATS[format] ?? format : format;
+  try {
+    return SSF.format(code, value, { date1904 });
+  } catch {
+    // A code SSF cannot read is shown as the number it holds, not dropped.
+    return String(Number(value.toPrecision(15)));
+  }
 };
 
 /** A plain number, without the exponent notation `String()` reaches for. */
@@ -273,7 +325,16 @@ const readSheetGrid = (
   parts: Unzipped,
   sheet: SheetEntry,
   sharedStrings: string[],
-  styles: StyleTable
+  styles: StyleTable,
+  maxRows: number = SPREADSHEET_DATA_LIMITS.maxRows,
+  /**
+   * When given, a longer cell is refused rather than cut.
+   *
+   * A template field is cut at `maxValueLength` because a placeholder has no
+   * use for four thousand characters. A table being converted is the user's
+   * data, and a cut cell there is a file that looks complete and is not.
+   */
+  strictValueLength?: number
 ): string[][] => {
   const bytes = parts[sheet.path];
   if (!bytes) {
@@ -284,11 +345,33 @@ const readSheetGrid = (
   }
   const xml = decoder.decode(bytes);
   const grid: string[][] = [];
+  // A workbook saved with the 1904 date system counts days from 1904-01-01.
+  // Read for a conversion only; the template batch keeps its documented
+  // behaviour.
+  const workbookXml = parts["xl/workbook.xml"]
+    ? decoder.decode(parts["xl/workbook.xml"])
+    : "";
+  const date1904 = /<(?:\w+:)?workbookPr\b[^>]*\bdate1904="(?:1|true)"/.test(workbookXml);
 
   for (const rowMatch of xml.matchAll(
-    /<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g
+    /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g
   )) {
-    const body = rowMatch[1];
+    // A workbook may leave a blank row out of the file altogether and say
+    // where the next one is with `r`. A template batch skips blank rows
+    // anyway; a conversion must put them back, or row 4 arrives as row 2.
+    if (strictValueLength !== undefined) {
+      const rowNumber = Number(rowMatch[1].match(/\br="(\d+)"/)?.[1] ?? "0");
+      while (rowNumber > grid.length + 1) {
+        grid.push([]);
+        if (grid.length > maxRows + 1) {
+          throw new SpreadsheetDataError(
+            "DATA_TOO_MANY_ROWS",
+            `The data file has more than ${maxRows} data rows.`
+          );
+        }
+      }
+    }
+    const body = rowMatch[2];
     const cells: string[] = [];
     if (body) {
       for (const cellMatch of body.matchAll(
@@ -300,6 +383,21 @@ const readSheetGrid = (
         const index = reference ? columnIndex(reference) : cells.length;
         const type = attributes.match(/t="([^"]+)"/)?.[1] ?? "n";
         const styleIndex = Number(attributes.match(/s="(\d+)"/)?.[1] ?? "-1");
+
+        // A formula whose result the file does not carry. This reader never
+        // evaluates formulas, so for a conversion the honest answer is a
+        // refusal: written as a blank, the cell would look converted and be
+        // empty. A template batch keeps reading it as blank, as before.
+        if (strictValueLength !== undefined && /<f[\s>/]/.test(inner)) {
+          const cached = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1];
+          if (cached === undefined || (cached === "" && type !== "str")) {
+            throw new SpreadsheetDataError(
+              "DATA_FORMULA_UNCALCULATED",
+              `Cell ${reference ?? "?"} holds a formula with no calculated value. ` +
+                "Open the file in a spreadsheet, let it calculate, save it and attach it again."
+            );
+          }
+        }
 
         let value = "";
         if (type === "s") {
@@ -314,32 +412,56 @@ const readSheetGrid = (
           value = decodeXml(inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? "");
         } else if (type === "b") {
           value = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] === "1" ? "TRUE" : "FALSE";
+        } else if (type === "d" && strictValueLength !== undefined) {
+          // An ISO 8601 date cell. Kept as the text the file holds, which is
+          // already a date a person can read; it is not a serial number.
+          value = decodeXml(inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? "");
         } else if (type === "e") {
-          value = "";
+          // A conversion keeps the error the cell shows (#DIV/0!); a template
+          // field has no use for one.
+          value =
+            strictValueLength !== undefined
+              ? decodeXml(inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? "")
+              : "";
         } else {
           const rawValue = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1];
           if (rawValue !== undefined && rawValue !== "") {
             const numeric = Number(rawValue);
             if (Number.isFinite(numeric)) {
               value =
-                styleIndex >= 0 && styles.isDate[styleIndex]
-                  ? excelSerialToDisplay(numeric, {
-                      withTime: Boolean(styles.hasTime[styleIndex]),
-                    })
-                  : formatNumber(numeric);
+                strictValueLength !== undefined
+                  ? numberAsDisplayed(
+                      numeric,
+                      styleIndex >= 0 ? styles.formats[styleIndex] : undefined,
+                      date1904
+                    )
+                  : styleIndex >= 0 && styles.isDate[styleIndex]
+                    ? excelSerialToDisplay(numeric, {
+                        withTime: Boolean(styles.hasTime[styleIndex]),
+                      })
+                    : formatNumber(numeric);
             }
           }
         }
 
         while (cells.length < index) cells.push("");
-        cells[index] = value.slice(0, SPREADSHEET_DATA_LIMITS.maxValueLength);
+        if (strictValueLength !== undefined && value.length > strictValueLength) {
+          throw new SpreadsheetDataError(
+            "DATA_VALUE_TOO_LONG",
+            `A cell holds more than ${strictValueLength} characters.`
+          );
+        }
+        cells[index] =
+          strictValueLength !== undefined
+            ? value
+            : value.slice(0, SPREADSHEET_DATA_LIMITS.maxValueLength);
       }
     }
     grid.push(cells);
-    if (grid.length > SPREADSHEET_DATA_LIMITS.maxRows + 1) {
+    if (grid.length > maxRows + 1) {
       throw new SpreadsheetDataError(
         "DATA_TOO_MANY_ROWS",
-        `The data file has more than ${SPREADSHEET_DATA_LIMITS.maxRows} data rows.`
+        `The data file has more than ${maxRows} data rows.`
       );
     }
   }
@@ -511,4 +633,84 @@ export const readSpreadsheetDataRows = (
     readStyles(parts)
   );
   return gridToDataSet(grid, sheet.name);
+};
+
+/**
+ * Reads one worksheet of an uploaded .xlsx, or a .csv, as a grid of display
+ * strings.
+ *
+ * The lower-level sibling of `readSpreadsheetDataRows`, for a caller that is
+ * converting the table rather than filling a template from it: no header is
+ * required to be unique, nothing is keyed by column name, and the ceilings
+ * are the caller's. Trailing empty rows are dropped; everything else is kept
+ * where it was, and a cell longer than `maxValueLength` is refused -- never
+ * cut, because a conversion that drops text reports success over a file that
+ * is missing some.
+ */
+export const readSpreadsheetGrid = (
+  bytes: Uint8Array,
+  options: {
+    mediaType: string;
+    sheet?: string;
+    maxRows: number;
+    maxValueLength: number;
+  }
+): { grid: string[][]; sheetName: string; sheetNames: string[] } => {
+  const trim = (grid: string[][]) => {
+    let end = grid.length;
+    while (end > 0 && !grid[end - 1].some((cell) => cell.trim() !== "")) end -= 1;
+    return grid.slice(0, end);
+  };
+
+  if (options.mediaType === "text/csv" || options.mediaType === "text/plain") {
+    const grid = trim(parseCsvGrid(decoder.decode(bytes)));
+    if (grid.length > options.maxRows + 1) {
+      throw new SpreadsheetDataError(
+        "DATA_TOO_MANY_ROWS",
+        `The data file has more than ${options.maxRows} data rows.`
+      );
+    }
+    if (grid.some((row) => row.some((cell) => cell.length > options.maxValueLength))) {
+      throw new SpreadsheetDataError(
+        "DATA_VALUE_TOO_LONG",
+        `A cell holds more than ${options.maxValueLength} characters.`
+      );
+    }
+    return { grid, sheetName: options.sheet ?? "Sheet1", sheetNames: [] };
+  }
+
+  let parts: Unzipped;
+  try {
+    parts = unzipSync(bytes);
+  } catch {
+    throw new SpreadsheetDataError(
+      "DATA_UNREADABLE",
+      "The data file could not be read as a spreadsheet."
+    );
+  }
+  const sheets = listSheets(parts);
+  const sheet = options.sheet
+    ? sheets.find((entry) => entry.name === options.sheet)
+    : sheets[0];
+  if (!sheet) {
+    throw new SpreadsheetDataError(
+      "DATA_SHEET_NOT_FOUND",
+      `The data file has no worksheet named "${options.sheet}".`
+    );
+  }
+  const grid = trim(
+    readSheetGrid(
+      parts,
+      sheet,
+      readSharedStrings(parts),
+      readStyles(parts),
+      options.maxRows,
+      options.maxValueLength
+    )
+  );
+  return {
+    grid,
+    sheetName: sheet.name,
+    sheetNames: sheets.map((entry) => entry.name),
+  };
 };

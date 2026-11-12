@@ -51,6 +51,7 @@ export {
   requireArtifactFormat,
   type ArtifactFormatDescriptor,
   type ArtifactKind,
+  type AuthoredArtifactKind,
   type ArtifactLabelGroup,
   type ArtifactTextValidation,
 } from "@/lib/generatedArtifactFormats";
@@ -128,6 +129,17 @@ export const ARTIFACT_LIMITS = {
   maxFilenameLength: 120,
   /** Bytes in the generated file. Checked after generation, not guessed. */
   maxOutputBytes: 5 * 1024 * 1024,
+  /**
+   * Bytes in a file *converted* from the user's own attachments
+   * (lib/fileConversionCore.ts), and therefore the largest object the store
+   * and the download route will ever handle.
+   *
+   * Larger than `maxOutputBytes` on purpose: that one bounds what a model can
+   * make the application author, and a merged PDF is as large as the PDFs the
+   * user uploaded however it is written. Equal to the request's attachment
+   * ceiling, so a conversion cannot store more than the request carried in.
+   */
+  maxConvertedOutputBytes: 25 * 1024 * 1024,
   /** Artifacts one assistant turn may produce. */
   maxArtifactsPerMessage: 3,
 } as const;

@@ -584,9 +584,10 @@ test("every kind has a tool, and every tool a kind", async () => {
   const { tools } = buildGeneratedArtifactToolConfig(subject);
 
   // The five kind tools go out on every turn that may make a file. The batch
-  // tool is the one exception and it is conditional by design -- it acts on an
-  // attached Word template, and a tool with nothing to act on is priced input
-  // the request had no use for (docs/policy/generated-artifacts.md section 13).
+  // and conversion tools are the two exceptions and they are conditional by
+  // design -- each acts on an attached file, and a tool with nothing to act on
+  // is priced input the request had no use for
+  // (docs/policy/generated-artifacts.md sections 13 and 14).
   assert.deepEqual(Object.keys(tools).sort(), Object.values(ARTIFACT_TOOL_NAMES).sort());
   assert.deepEqual(Object.keys(ARTIFACT_TOOL_NAMES).sort(), [
     "archive",
@@ -597,6 +598,7 @@ test("every kind has a tool, and every tool a kind", async () => {
   ]);
   const withBatch = buildGeneratedArtifactToolConfig(subject, {
     registerDocumentBatch: true,
+    registerFileConversion: true,
   });
   assert.deepEqual(
     Object.keys(withBatch.tools).sort(),
@@ -610,4 +612,263 @@ test("every kind has a tool, and every tool a kind", async () => {
     // breaks by writing a link instead of calling the tool.
     assert.match(description as string, /Never write (file bytes|base64)/);
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* convert_files                                                                */
+/* -------------------------------------------------------------------------- */
+
+// docs/policy/generated-artifacts.md section 14.
+
+const turnFiles = async () => {
+  const sharp = (await import("sharp")).default;
+  const { PDFDocument } = await import("pdf-lib");
+  const photo = async (width: number, height: number) =>
+    new Uint8Array(
+      await sharp({
+        create: { width, height, channels: 3, background: "#225588" },
+      })
+        .jpeg()
+        .toBuffer()
+    );
+  const document = await PDFDocument.create();
+  document.addPage([200, 300]);
+  document.addPage([200, 300]);
+  return new Map([
+    ["att_1", { name: "id-card.jpg", mediaType: "image/jpeg", bytes: await photo(640, 400) }],
+    ["att_2", { name: "letter.jpg", mediaType: "image/jpeg", bytes: await photo(400, 640) }],
+    [
+      "att_3",
+      {
+        name: "contract.pdf",
+        mediaType: "application/pdf",
+        bytes: new Uint8Array(await document.save()),
+      },
+    ],
+  ]);
+};
+
+test("two attached images become one stored PDF, which is the request that used to be refused", async () => {
+  resetWorld();
+  const subject = await collector({ turnAttachments: await turnFiles() });
+  const report = await subject.runFileConversion({
+    operation: "to_pdf",
+    filename: "combined",
+    sources: [{ attachment: "att_1" }, { attachment: "att_2" }],
+  });
+
+  assert.equal(report.status, "created");
+  assert.equal(report.filename, "combined.pdf");
+  assert.equal(report.format, "pdf");
+  assert.equal(report.parts, "2 pages from 2 files");
+  assert.deepEqual(
+    world.puts.map((put) => [put.format, put.filename, put.ordinal]),
+    [["pdf", "combined.pdf", 0]]
+  );
+  assert.equal(subject.toStreamArtifacts()[0].mediaType, "application/pdf");
+  // Nothing a model is handed may address the file.
+  assert.equal(JSON.stringify(report).includes("message-artifacts/"), false);
+});
+
+test("a conversion's format follows the files: one drawn page is an image", async () => {
+  resetWorld();
+  const subject = await collector({ turnAttachments: await turnFiles() });
+  const single = await subject.runFileConversion({
+    operation: "pdf_to_images",
+    filename: "first page",
+    imageFormat: "jpg",
+    dpi: 72,
+    sources: [{ attachment: "att_3", pages: "1" }],
+  });
+  assert.equal(single.status, "created");
+  assert.equal(single.filename, "first page.jpg");
+
+  const both = await subject.runFileConversion({
+    operation: "pdf_to_images",
+    filename: "all pages",
+    dpi: 72,
+    sources: [{ attachment: "att_3" }],
+  });
+  assert.equal(both.status, "created");
+  assert.equal(both.filename, "all pages.zip");
+  assert.deepEqual(
+    subject.toStreamArtifacts().map((artifact) => artifact.mediaType),
+    ["image/jpeg", "application/zip"]
+  );
+});
+
+test("a replayed conversion is one file, and the same instruction over other files is another", async () => {
+  resetWorld();
+  const files = await turnFiles();
+  const subject = await collector({ turnAttachments: files });
+  const call = {
+    operation: "to_pdf",
+    filename: "merged",
+    sources: [{ attachment: "att_3" }, { attachment: "att_1" }],
+  };
+  assert.equal((await subject.runFileConversion(call)).status, "created");
+  assert.equal((await subject.runFileConversion(call)).status, "unchanged");
+  assert.equal(world.puts.length, 1);
+});
+
+test("a conversion that cannot be done draws one failed card and says why", async () => {
+  resetWorld();
+  const subject = await collector({ turnAttachments: await turnFiles() });
+
+  const missing = await subject.runFileConversion({
+    operation: "to_pdf",
+    filename: "scan",
+    sources: [{ attachment: "att_7" }],
+  });
+  assert.equal(missing.status, "failed");
+  assert.match(missing.status === "failed" ? missing.reason : "", /att_1 \("id-card\.jpg"\)/);
+
+  const wrongType = await subject.runFileConversion({
+    operation: "convert_images",
+    filename: "photo",
+    imageFormat: "webp",
+    sources: [{ attachment: "att_3" }],
+  });
+  assert.equal(wrongType.status, "failed");
+
+  const malformed = await subject.runFileConversion({
+    operation: "to_pdf",
+    filename: "x",
+    sources: [{ attachment: "s3://bucket/key" }],
+  });
+  assert.equal(malformed.status, "failed");
+
+  assert.equal(world.puts.length, 0);
+  assert.deepEqual(
+    subject.failed.map((entry) => [entry.format, entry.failureCode, entry.filename]),
+    [
+      ["pdf", "spec_rejected", "scan.pdf"],
+      ["webp", "spec_rejected", "photo.webp"],
+      ["pdf", "spec_rejected", "x.pdf"],
+    ]
+  );
+});
+
+test("a conversion on a turn with no attachments refuses instead of inventing a file", async () => {
+  resetWorld();
+  const subject = await collector();
+  const report = await subject.runFileConversion({
+    operation: "to_pdf",
+    filename: "photos",
+    sources: [{ attachment: "att_1" }],
+  });
+  assert.equal(report.status, "failed");
+  assert.match(report.status === "failed" ? report.reason : "", /No files are attached/);
+  assert.equal(world.puts.length, 0);
+});
+
+test("a conversion respects the per-answer ceiling and the missing-conversation rule", async () => {
+  resetWorld();
+  const files = await turnFiles();
+  const noConversation = await collector({ conversationId: null, turnAttachments: files });
+  const refused = await noConversation.runFileConversion({
+    operation: "to_pdf",
+    filename: "a",
+    sources: [{ attachment: "att_1" }],
+  });
+  assert.equal(refused.status, "failed");
+  assert.equal(refused.status === "failed" ? refused.reason : "", "no_conversation");
+
+  const subject = await collector({ turnAttachments: files });
+  for (const name of ["a", "b", "c"]) {
+    const report = await subject.runFileConversion({
+      operation: "to_pdf",
+      filename: name,
+      sources: [{ attachment: "att_1" }],
+    });
+    assert.equal(report.status, "created");
+  }
+  const fourth = await subject.runFileConversion({
+    operation: "to_pdf",
+    filename: "d",
+    sources: [{ attachment: "att_1" }],
+  });
+  assert.equal(fourth.status, "failed");
+  assert.equal(fourth.status === "failed" ? fourth.reason : "", "too_many_files");
+  assert.equal(world.puts.length, 3);
+});
+
+test("a storage failure after a conversion leaves a failed card and no object", async () => {
+  resetWorld();
+  const subject = await collector({ turnAttachments: await turnFiles() });
+  world.failNextPut = true;
+  const report = await subject.runFileConversion({
+    operation: "to_pdf",
+    filename: "scan",
+    sources: [{ attachment: "att_1" }],
+  });
+  assert.equal(report.status, "failed");
+  assert.equal(JSON.stringify(report).includes(MESSAGE_MARKER), false);
+  assert.deepEqual(
+    subject.failed.map((entry) => entry.failureCode),
+    ["storage_failed"]
+  );
+});
+
+test("a source that cannot be read asks for another file, not another try", async () => {
+  resetWorld();
+  const files = await turnFiles();
+  files.set("att_4", {
+    name: "broken.pdf",
+    mediaType: "application/pdf",
+    bytes: new TextEncoder().encode("not a pdf"),
+  });
+  const subject = await collector({ turnAttachments: files });
+  const report = await subject.runFileConversion({
+    operation: "to_pdf",
+    filename: "scan",
+    sources: [{ attachment: "att_4" }],
+  });
+  assert.equal(report.status, "failed");
+  assert.deepEqual(
+    subject.failed.map((entry) => entry.failureCode),
+    ["spec_rejected"]
+  );
+});
+
+test("fourth review: replaying a conversion on a full answer says unchanged, not too many files", async () => {
+  resetWorld();
+  const subject = await collector({ turnAttachments: await turnFiles() });
+  const calls = ["a", "b", "c"].map((name) => ({
+    operation: "to_pdf",
+    filename: name,
+    sources: [{ attachment: "att_1" }],
+  }));
+  for (const call of calls) {
+    assert.equal((await subject.runFileConversion(call)).status, "created");
+  }
+  assert.equal((await subject.runFileConversion(calls[0])).status, "unchanged");
+  const fourth = await subject.runFileConversion({ ...calls[0], filename: "d" });
+  assert.equal(fourth.status === "failed" ? fourth.reason : fourth.status, "too_many_files");
+  // A malformed call on a full answer draws no fourth card either.
+  await subject.runFileConversion({ operation: "nope" });
+  assert.equal(subject.toStreamArtifacts().length, 3);
+});
+
+test("eighth review: tool calls made together are run one at a time, with one ordinal each", async () => {
+  resetWorld();
+  const subject = await collector({ turnAttachments: await turnFiles() });
+  const call = (name: string) => ({
+    operation: "to_pdf",
+    filename: name,
+    sources: [{ attachment: "att_1" }],
+  });
+  // Five at once, as a provider's parallel tool calls arrive: three fit.
+  const reports = await Promise.all(
+    ["a", "b", "c", "d", "e"].map((name) => subject.runFileConversion(call(name)))
+  );
+  assert.deepEqual(
+    reports.map((report) => report.status),
+    ["created", "created", "created", "failed", "failed"]
+  );
+  assert.deepEqual(
+    world.puts.map((put) => put.ordinal),
+    [0, 1, 2]
+  );
+  assert.equal(subject.toStreamArtifacts().length, 3);
 });

@@ -387,7 +387,23 @@ const tableBlock = (
       wrap(font, value, style.size, columnWidths[column] - padding * 2)
     );
 
+  // A row taller than a page is drawn in page-sized pieces. Drawn whole it
+  // ran off the bottom of the page: the file was made and the text was not in
+  // it. A row that fits is one piece, exactly as before.
+  const linesPerPage = Math.max(
+    1,
+    Math.floor((CONTENT_TOP - CONTENT_BOTTOM - padding * 2) / style.leading)
+  );
   const drawRow = (cells: Glyph[][][], header: boolean) => {
+    const total = Math.max(...cells.map((lines) => lines.length));
+    for (let start = 0; start === 0 || start < total; start += linesPerPage) {
+      drawRowPiece(
+        cells.map((lines) => lines.slice(start, start + linesPerPage)),
+        header
+      );
+    }
+  };
+  const drawRowPiece = (cells: Glyph[][][], header: boolean) => {
     const height = Math.max(...cells.map((lines) => lines.length)) * style.leading + padding * 2;
     builder.ensure(height);
     if (header) builder.fill(MARGIN, CONTENT_WIDTH, height, 0.94);

@@ -21,6 +21,10 @@ import {
   formatIdsOfKind,
 } from "@/lib/generatedArtifactCore";
 import {
+  conversionSourceKind,
+  turnHasConvertibleAttachment,
+} from "@/lib/fileConversionCore";
+import {
   DOCX_MEDIA_TYPE,
   XLSX_MEDIA_TYPE,
   type TurnAttachmentDescriptor,
@@ -113,6 +117,15 @@ export type ArtifactToolPlan = {
    * offered it anyway would eventually reach for it with an invented handle.
    */
   registerDocumentBatch: boolean;
+  /**
+   * Whether `convert_files` is sent as well.
+   *
+   * Only on a turn that carries a file a conversion could read -- an image, a
+   * PDF, an .xlsx or a .csv -- for the same reason the batch tool is
+   * conditional: a tool with nothing to act on is priced input, and a model
+   * offered it anyway reaches for it with an invented handle.
+   */
+  registerFileConversion: boolean;
   /** The system block this turn carries. Never empty. */
   systemPrompt: string;
 };
@@ -153,6 +166,14 @@ export type ArtifactToolPlanInput = {
    * for, and nothing that addresses a route.
    */
   turnAttachments?: readonly TurnAttachmentDescriptor[];
+  /**
+   * The operator's switch for `convert_files`. On unless it is passed false.
+   *
+   * A switch rather than a deploy because the tool reads user files with
+   * libraries the rest of this domain does not use, and turning it off must
+   * not need a release (policy section 14).
+   */
+  fileConversionEnabled?: boolean;
 };
 
 /**
@@ -232,7 +253,7 @@ const FILE_CAPABLE_MODEL_NAMES = AVAILABLE_MODELS.filter(
  *      is attached by the application and any URL the model invents is a lie
  *      with a plausible shape.
  */
-const GENERATE_PROMPT = [
+const GENERATE_PROMPT_LINES = [
   "# File generation",
   "",
   "You can create real, downloadable files for this user. When the user asks",
@@ -307,7 +328,35 @@ const GENERATE_PROMPT = [
     "be wrong.",
   "- If the tool reports a failure, tell the user what failed. Do not describe",
   "  a file that does not exist.",
-].join("\n");
+];
+
+/**
+ * What the model is told about converting the user's own files.
+ *
+ * On every `generate` turn, attachments or not, because the request that
+ * matters most arrives without them: "make those two photos a PDF", sent a
+ * message after the photos. The tool is not on that turn; what must not happen
+ * is the model concluding the product cannot do it.
+ */
+const CONVERSION_RULES = [
+  "- **Converting the user's own files.** Putting attached images into a PDF,",
+  "  merging or splitting PDFs, taking or rotating PDF pages, drawing PDF pages",
+  "  as images, changing an image's format or size, and re-saving an .xlsx or",
+  "  .csv are done by `convert_files`. It is offered only on a message that has",
+  "  those files attached to it. If the user asks for one of these and",
+  "  `convert_files` is not available on this message, ask them to send the",
+  "  request again with the files attached -- never say it cannot be done, and",
+  "  never retype a file's content as a substitute for converting it.",
+  "- To turn an attached document's *content* into another format (a PDF's",
+  "  text as a Word file, a Word file as a PDF), write it again with",
+  "  `create_document` and say that the layout is rebuilt rather than copied.",
+];
+
+const generatePrompt = (fileConversionEnabled: boolean): string =>
+  [
+    ...GENERATE_PROMPT_LINES,
+    ...(fileConversionEnabled ? CONVERSION_RULES : []),
+  ].join("\n");
 
 const SIGN_IN_PROMPT = [
   "# File generation",
@@ -379,7 +428,8 @@ export const turnSupportsDocumentBatch = (
  * this request and nothing else.
  */
 const attachmentSection = (
-  attachments: readonly TurnAttachmentDescriptor[]
+  attachments: readonly TurnAttachmentDescriptor[],
+  registerFileConversion: boolean
 ): string => {
   const lines = [
     "",
@@ -420,6 +470,32 @@ const attachmentSection = (
     );
   }
 
+  if (registerFileConversion) {
+    const convertible = attachments.filter(
+      (attachment) => conversionSourceKind(attachment.mediaType) !== null
+    );
+    lines.push(
+      "",
+      "`convert_files` is available for this message. Use it when the user",
+      "wants these files themselves converted, combined or split. You pass",
+      "handles; the application works from the files' own bytes:",
+      '- images and PDFs -> ONE PDF: `operation: "to_pdf"`, `sources` in page',
+      "  order. One image per page. The same call merges PDFs, and takes,",
+      '  reorders (`pages: "3,1,2"`) or rotates pages.',
+      "- one PDF -> several PDFs in a .zip: `split_pdf`.",
+      "- PDF pages -> PNG/JPG/WebP images: `pdf_to_images`.",
+      "- an image -> another format, smaller or more compressed: `convert_images`.",
+      "- an .xlsx or .csv -> xlsx, csv or a PDF table: `convert_spreadsheet`.",
+      `The files it can read here: ${convertible
+        .map((attachment) => `\`${attachment.handle}\``)
+        .join(", ")}.`,
+      "An attached image is a file you can pass by handle even though you",
+      "cannot write its bytes. Never answer that attached images cannot be",
+      "made into a PDF, and do not describe the images instead of converting",
+      "them."
+    );
+  }
+
   return lines.join("\n");
 };
 
@@ -440,6 +516,7 @@ export const planGeneratedArtifactTool = (
       offReason: "not_a_chat_conversation",
       registerTool: false,
       registerDocumentBatch: false,
+      registerFileConversion: false,
       systemPrompt: offPrompt("not_a_chat_conversation"),
     };
   }
@@ -450,6 +527,7 @@ export const planGeneratedArtifactTool = (
       offReason: "model_unverified",
       registerTool: false,
       registerDocumentBatch: false,
+      registerFileConversion: false,
       systemPrompt: offPrompt("model_unverified", input.autoRouted === true),
     };
   }
@@ -466,6 +544,7 @@ export const planGeneratedArtifactTool = (
       offReason: "native_search_conflict",
       registerTool: false,
       registerDocumentBatch: false,
+      registerFileConversion: false,
       systemPrompt: offPrompt("native_search_conflict"),
     };
   }
@@ -475,6 +554,7 @@ export const planGeneratedArtifactTool = (
       mode: "sign_in_required",
       registerTool: true,
       registerDocumentBatch: false,
+      registerFileConversion: false,
       systemPrompt: SIGN_IN_PROMPT,
     };
   }
@@ -485,19 +565,25 @@ export const planGeneratedArtifactTool = (
       offReason: "no_conversation",
       registerTool: false,
       registerDocumentBatch: false,
+      registerFileConversion: false,
       systemPrompt: offPrompt("no_conversation"),
     };
   }
 
   const attachments = input.turnAttachments ?? [];
   const registerDocumentBatch = turnSupportsDocumentBatch(attachments);
+  const fileConversionEnabled = input.fileConversionEnabled !== false;
+  const registerFileConversion =
+    fileConversionEnabled && turnHasConvertibleAttachment(attachments);
+  const prompt = generatePrompt(fileConversionEnabled);
   return {
     mode: "generate",
     registerTool: true,
     registerDocumentBatch,
+    registerFileConversion,
     systemPrompt: attachments.length
-      ? `${GENERATE_PROMPT}\n${attachmentSection(attachments)}`
-      : GENERATE_PROMPT,
+      ? `${prompt}\n${attachmentSection(attachments, registerFileConversion)}`
+      : prompt,
   };
 };
 
