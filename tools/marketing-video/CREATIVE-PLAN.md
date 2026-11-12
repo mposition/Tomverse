@@ -19,7 +19,10 @@ competitor's ad (docs/policy/marketing-automation.md §2).
   are written there.
 - The capture packs: real recordings of Tomverse, per topic and locale. Read
   `pack.json` and look at its pictures. These real screens are the only way
-  the film shows the product.
+  the film shows the product. When "Today's subject" is given, the packs were
+  recorded for this film just now: the story is about that subject, and each
+  capture's `text` is exactly the words visible in its picture, so quote only
+  those words over that picture.
 - The newest research notes in `job/research-notes/`: ideas about what the
   market's ads do. Take a device, never a competitor's words, characters or
   layout.
