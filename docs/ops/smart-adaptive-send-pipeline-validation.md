@@ -381,3 +381,14 @@ proof of equivalent model decisions. Before promotion, compare paired real
 router outputs (selected model, search queries, file/image and location intent)
 and browser completion, factual correctness and official sources, including
 retries and failures.
+
+For a supervised browser run, the Performance timeline also retains one
+`tomverse.chat.turn` measure per document: the last finished turn that received
+a signed timing header. Read its duration (completion ms) and `detail.firstContentMs`
+in the browser immediately after each answer. Both use the same clock as the
+timing POST even if that POST receives HTTP 429. Use only `clock: "submit"` for
+end-to-end comparisons; `"panel"` means the original submission clock was
+unavailable. A non-completed outcome or null first content is not a success.
+The measure carries no proof, request ID or text. Run one turn at a time in the
+tab and check its start time: an unsigned attempt will leave the prior measure
+untouched. This is local QA evidence, not a replacement for a signed server row.

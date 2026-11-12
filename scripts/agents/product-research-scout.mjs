@@ -8,7 +8,8 @@
 // PDF, the text of generated Office files, and the catalogue mismatches the
 // 0-step report finds. When the app has a test account (§14) it also sees the
 // signed-in screens and makes real files and an image, within the cap an owner
-// set. Each subject goes to the app's scout route on its own; the app calls the
+// set; with the app's own switches on, also a turn with attached example files
+// and a turn whose request the app's scenario model wrote. Each subject goes to the app's scout route on its own; the app calls the
 // model and stores the suggestions. Last, it asks the app's issues route to
 // triage the newest issue-backlog observation, which the app reads itself (the
 // route is 404 unless the app's PRODUCT_RESEARCH_SCOUT_ISSUE_TRIAGE_ENABLED is set).
@@ -25,6 +26,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { installCdpRules, launch, resolverRules, ruledContext, sandboxHost } from "../../lib/productResearchScoutBrowser.mjs";
 import {
+  SCOUT_EXPLORE_GENERATION,
   SCOUT_GENERATIONS,
   SCOUT_LOCALES,
   SCOUT_PAGES,
@@ -36,6 +38,7 @@ import {
   launchFailure,
   originOf,
   retriesWithoutSandbox,
+  scenarioTask,
   scoutWalkTarget,
   scoutPageLanguageMatches,
   signedInAccess,
@@ -252,6 +255,34 @@ async function askSignedIn() {
   return access;
 }
 
+/**
+ * The request the scenario model wrote for today (§14): a prompt, the fixtures to
+ * attach and what a user would expect, or null when the app's switch is off (404),
+ * the model is off or capped, or the answer is unusable. One model call from the
+ * Scout's daily cap; an unknown outcome is not repeated.
+ */
+async function askScenario() {
+  try {
+    const response = await fetch(`${ingestUrl}/scenario`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ingestSecret}` },
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    });
+    if (response.status === 404) return null;
+    const answer = await response.json().catch(() => ({}));
+    const outcome = scoutSendOutcome(answer);
+    if (outcome === "capped") capReached = true;
+    if (outcome === "modelOff") outcomes.modelOff += 1;
+    const task = scenarioTask(answer);
+    if (!task) console.warn(JSON.stringify({ event: "product_research_scout_scenario_unavailable", reason: String(answer.reason ?? response.status).slice(0, 40) }));
+    return task;
+  } catch (error) {
+    outcomes.failed += 1;
+    console.warn(JSON.stringify({ event: "product_research_scout_send_unknown", subject: SCOUT_EXPLORE_GENERATION, error: errorCode(error) }));
+    return null;
+  }
+}
+
 async function walkSignedIn(browser, rules) {
   // Nothing signed in is worth paying for when the model will not judge it.
   if (outDir || capReached || outcomes.modelOff > 0) return;
@@ -279,7 +310,16 @@ async function walkSignedIn(browser, rules) {
       outcomes.capped += 1;
       continue;
     }
-    const generation = SCOUT_GENERATIONS.find((entry) => entry.id === id);
+    let generation = SCOUT_GENERATIONS.find((entry) => entry.id === id);
+    if (id === SCOUT_EXPLORE_GENERATION) {
+      // Today's request comes from the app's scenario model; the permit stays spent if none comes.
+      const task = await askScenario();
+      if (!task) {
+        outcomes.skipped += 1;
+        continue;
+      }
+      generation = { ...generation, ...task };
+    }
     const place = { walk, cookie: access.cookie };
     const subject = id === "generated.image"
       ? await generateImage(browser, generation, place)
