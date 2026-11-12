@@ -8,7 +8,7 @@ import { crc32, deflateSync } from "node:zlib";
 
 import { admit, dailyCap, ledgerPath, readLedger, requestProblem, spent } from "../tools/marketing-video/higgsfield-cap.mjs";
 import { makeImage } from "../tools/marketing-video/hf-image-core.mjs";
-import { checkConcepts, pickFeature, sortConcepts } from "../tools/marketing-video/concepts-core.mjs";
+import { checkConcepts, gatherConcepts, pickFeature, sortConcepts } from "../tools/marketing-video/concepts-core.mjs";
 import { checkReview } from "../tools/marketing-video/review-core.mjs";
 
 /**
@@ -326,9 +326,96 @@ test("one broken concept is dropped and the others go ahead; a broken answer is 
   assert.deepEqual(sorted.kept.map((entry) => entry.id), ["c1", "c3"]);
   assert.equal(sorted.dropped.length, 1);
   assert.equal(sorted.dropped[0].id, "c2");
-  assert.match(sorted.dropped[0].problem, /^concept c2: prompt_en must not contain the word "Tomverse"/u);
+  assert.match(sorted.dropped[0].problems[0], /^concept c2: prompt_en must not contain the word "Tomverse"/u);
   assert.deepEqual(sort(conceptsOf(concept("c1"), concept("c2"))).dropped, []);
   assert.match(sort(conceptsOf(concept("c1"))).problem, /2-3 entries/u);
+  assert.match(sort(null).problem, /one JSON object/u);
+});
+
+test("a refused concept lists everything wrong with it, so one retry can mend it all", () => {
+  const sort = (answer) => sortConcepts(answer, { feature: "chat", history: [], day: DAY, toolDir: tool });
+  const broken = concept("c2", {
+    prompt_en: `${concept("c2").prompt_en} No purple anywhere, no lorem ipsum, and no Tomverse logo.`,
+    logos: ["chatgpt", "../secret"],
+    texts: [texts[0], { role: "screen", text: "Try it free at tomverse.app" }],
+    translations: { ...translations, ko: [translations.ko[0], { role: "screen", text: "지피티에게 무료로 물어보세요" }] },
+  });
+  const { problems } = sort(conceptsOf(concept("c1"), broken)).dropped[0];
+  for (const expected of [
+    /prompt_en must not contain the word "Tomverse".*Found in: ".*no Tomverse logo/u,
+    /prompt_en must not contain the words purple.*Found in: ".*No purple anywhere/u,
+    /prompt_en must not contain the words "lorem ipsum"/u,
+    /logo "\.\.\/secret" is not one of the logo files/u,
+    /texts\[1\]: no text in the picture contains "Tomverse"/u,
+    /texts\[1\]: no web address/u,
+    /texts\[1\]: the word "free" stands only/u,
+    /ko\[1\]: model and company names stay as written.*지피티/u,
+    /ko\[1\]: "무료" only/u,
+  ]) {
+    assert.ok(problems.some((problem) => expected.test(problem)), `${expected} in ${JSON.stringify(problems)}`);
+  }
+});
+
+test("concepts are asked for again with every reason; what passed in either answer is kept", () => {
+  const sort = (answer) => sortConcepts(answer, { feature: "chat", history: [], day: DAY, toolDir: tool });
+  const bad = (id) => concept(id, { prompt_en: `${concept(id).prompt_en} No purple, no Tomverse logo.` });
+  const gather = (answers) => {
+    const asked = [];
+    const result = gatherConcepts({
+      ask: (again) => {
+        asked.push(again);
+        return answers[asked.length - 1] ?? null;
+      },
+      sort,
+    });
+    return { ...result, asked };
+  };
+  // All pass at once: one call.
+  const clean = gather([conceptsOf(concept("c1"), concept("c2"))]);
+  assert.deepEqual([clean.concepts.map((entry) => entry.id), clean.dropped, clean.asked], [["c1", "c2"], [], [""]]);
+  // One broken: asked once more with both reasons and told what passed; the mended one joins the kept ones.
+  const mended = gather([conceptsOf(concept("c1"), bad("c2"), concept("c3")), conceptsOf(concept("c1"), concept("c2"), concept("c3"))]);
+  assert.deepEqual(mended.concepts.map((entry) => entry.id), ["c1", "c3", "c2"]);
+  assert.equal(mended.asked.length, 2);
+  assert.match(mended.asked[1], /the words purple[\s\S]*the word "Tomverse"|the word "Tomverse"[\s\S]*the words purple/u);
+  assert.match(mended.asked[1], /Repeat c1 and c3 exactly as they were/u);
+  // Still broken the second time: it is dropped, the others go ahead, and there is no third call.
+  const dropped = gather([conceptsOf(concept("c1"), bad("c2")), conceptsOf(concept("c1"), bad("c2")), conceptsOf(concept("c1"), concept("c2"))]);
+  assert.deepEqual([dropped.concepts.map((entry) => entry.id), dropped.dropped.map((entry) => entry.id), dropped.asked.length], [["c1"], ["c2"], 2]);
+  // The second answer breaks what passed before: the first version stays.
+  const kept = gather([conceptsOf(concept("c1"), bad("c2")), conceptsOf(bad("c1"), concept("c2"))]);
+  assert.deepEqual([kept.concepts.map((entry) => entry.id), kept.dropped], [["c1", "c2"], []]);
+  // Nothing passes twice (no JSON, then all broken): a third call, and its concepts are used.
+  const third = gather([null, conceptsOf(bad("c1"), bad("c2")), conceptsOf(concept("c1"), concept("c2"))]);
+  assert.deepEqual([third.concepts.map((entry) => entry.id), third.asked.length], [["c1", "c2"], 3]);
+  assert.match(third.asked[1], /exactly one line of JSON/u);
+  // Nothing ever passes: no concepts, and the last reasons are kept for the report.
+  const none = gather([null, null, conceptsOf(bad("c1"), bad("c2"))]);
+  assert.deepEqual([none.concepts, none.asked.length], [[], 3]);
+  assert.match(none.refusal, /must not contain/u);
+});
+
+test("counts after a model name, exact model lists on a screen and compound words are not refused", () => {
+  const analysis = (list) => {
+    const strip = (text) => Object.fromEntries(Object.entries(text).filter(([key]) => !["ko", "zhT", "zhS"].includes(key)));
+    const inLocale = (key) => list.map((text) => strip({ ...text, text: text[key] ?? text.text }));
+    return { ...concept("c2", { feature: "analysis", factRefs: ["analysis.what"] }), texts: list.map(strip), translations: { ko: inLocale("ko"), "zh-Hant": inLocale("zhT"), "zh-Hans": inLocale("zhS") } };
+  };
+  const first = { ...concept("c1"), feature: "analysis", factRefs: ["analysis.what"] };
+  const problemsOf = (...list) => sortConcepts({ date: "2026-11-12", feature: "analysis", concepts: [first, analysis([{ role: "headline", text: "See where the answers differ", ko: "답변이 어디서 갈리는지 보세요", zhT: "看看回答哪裡不同", zhS: "看看回答哪里不同" }, ...list])] }, { feature: "analysis", history: [], day: DAY, toolDir: tool }).dropped[0]?.problems ?? [];
+  // A count that follows a model name is not a version (every analysis card has counts).
+  assert.deepEqual(problemsOf({ role: "screen", text: "GPT, Claude, Gemini and more agree on 7 points", ko: "GPT, Claude, Gemini 등 답변 7가지 공통점", zhT: "GPT、Claude、Gemini 等 7 個共同點", zhS: "GPT、Claude、Gemini 等 7 个共同点" }), []);
+  // The three models that answered the recorded example, on a screen or a tag.
+  assert.deepEqual(problemsOf({ role: "label", text: "GPT 6 Luna · Claude Haiku 5.5 · Gemini Flash" }), []);
+  // The same list as copy still ends "and more", and so does any list of bare names.
+  assert.match(problemsOf({ role: "subhead", text: "GPT 6 Luna, Claude Haiku 5.5 and Gemini Flash answered", ko: "GPT 6 Luna, Claude Haiku 5.5, Gemini Flash의 답변", zhT: "GPT 6 Luna、Claude Haiku 5.5、Gemini Flash 的回答", zhS: "GPT 6 Luna、Claude Haiku 5.5、Gemini Flash 的回答" })[0], /and more/u);
+  assert.match(problemsOf({ role: "label", text: "GPT · Claude · Gemini" })[0], /and more/u);
+  // A version that is not in features.json is still refused, in any language.
+  assert.match(problemsOf({ role: "screen", text: "Gemini Flash 2.0 answered", ko: "Gemini Flash 2.0의 답변", zhT: "Gemini Flash 2.0 的回答", zhS: "Gemini Flash 2.0 的回答" })[0], /"Gemini Flash 2\.0" is not a model name/u);
+  assert.match(problemsOf({ role: "screen", text: "Ask Claude Opus 4 and more" , ko: "Claude Opus 4 등에 물어보세요", zhT: "問 Claude Opus 4 等", zhS: "问 Claude Opus 4 等" })[0], /"Claude Opus 4" is not a model name/u);
+  // "stress-free" is not an offer; "feel free" is reworded.
+  assert.deepEqual(problemsOf({ role: "screen", text: "A stress-free weekend plan", ko: "편안한 주말 계획", zhT: "輕鬆的週末行程", zhS: "轻松的周末行程" }), []);
+  assert.match(problemsOf({ role: "screen", text: "Feel free to ask again", ko: "언제든 다시 물어보세요", zhT: "隨時再問", zhS: "随时再问" })[0], /"free" stands only/u);
 });
 
 test("concepts with the wrong shape, feature or count are refused", () => {
@@ -337,15 +424,16 @@ test("concepts with the wrong shape, feature or count are refused", () => {
   const noAlt = concept("c2");
   delete noAlt.alt;
   assert.match(check(conceptsOf(concept("c1"), noAlt)), /keys must be exactly/u);
-  assert.match(check(conceptsOf(concept("c1"), concept("c2", { logos: ["../secret"] }))), /not a file in public\/model-icons/u);
-  assert.match(check(conceptsOf(concept("c1"), concept("c2", { factRefs: ["chat.price"] }))), /not in features\.json/u);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { logos: ["../secret"] }))), /not one of the logo files/u);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { factRefs: ["chat.price"] }))), /not a path in features\.json/u);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { texts: Array.from({ length: 13 }, () => texts[0]) }))), /texts holds 1-12 entries \(it has 13/u);
   assert.match(check(conceptsOf(concept("c1"), concept("c2", { device: concept("c1").device }))), /share a device/u);
 });
 
 test("banned words, unconditioned free, untranslated names and unknown models are refused", () => {
   const withText = (text, locale = null) =>
     concept("c2", locale ? { translations: { ...translations, [locale]: [translations[locale][0], { role: "screen", text }] } } : { texts: [texts[0], { role: "screen", text }] });
-  assert.match(check(conceptsOf(concept("c1"), withText("Visit tomverse.app today"))), /Tomverse name/u);
+  assert.match(check(conceptsOf(concept("c1"), withText("Visit tomverse.app today"))), /no text in the picture contains "Tomverse"/u);
   assert.match(check(conceptsOf(concept("c1"), withText("Try it free"))), /free/u);
   assert.equal(check(conceptsOf(concept("c1"), withText("Free to try within the included credits"))), null);
   assert.match(check(conceptsOf(concept("c1"), withText("Ask GPT and Claude at once"))), /and more/u);
@@ -367,6 +455,15 @@ test("an answer under a real model name must be its recorded answer, untranslate
       translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [list[0], { role: "answer", speaker: "Gemini Flash", text: translated }]])),
     });
   assert.equal(check(conceptsOf(concept("c1"), quoted("Skip the Scenic Railway (which has steep steps)"))), null);
+  // Quote marks around it and a final stop are not a change of words.
+  assert.equal(check(conceptsOf(concept("c1"), quoted("“Skip the Scenic Railway (which has steep steps).”"))), null);
+  // Every recorded speaker is read, also one whose name holds a stop ("Claude Haiku 5.5" was read as "5").
+  const haiku = concept("c2", {
+    texts: [texts[0], { role: "answer", speaker: "Claude Haiku 5.5", text: "The Scenic Railway runs down a steep incline in a seated, enclosed carriage" }],
+    translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [list[0], { role: "answer", speaker: "Claude Haiku 5.5", text: "The Scenic Railway runs down a steep incline in a seated, enclosed carriage" }]])),
+  });
+  assert.equal(check(conceptsOf(concept("c1"), haiku)), null);
+  assert.match(check(conceptsOf(concept("c1"), quoted("The Scenic Railway is perfect for everyone"))), /recorded answers exist only for Gemini Flash and Claude Haiku 5\.5/u);
   assert.match(check(conceptsOf(concept("c1"), quoted("The Scenic Railway is perfect for everyone"))), /recorded answer/u);
   assert.match(check(conceptsOf(concept("c1"), quoted("Skip the Scenic Railway (which has steep steps)", "풍경 열차는 건너뛰세요"))), /not translated/u);
 });
