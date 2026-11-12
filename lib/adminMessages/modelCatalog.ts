@@ -194,7 +194,7 @@ export const adminModelCatalogMessages = defineAdminMessages({
     goEnable: "Go to turn on",
     relogin: "Sign in again",
     sessionExpiredTitle: "Your admin session has expired.",
-    sessionExpiredBody: "What you typed on this screen is kept. Sign in again and you come back here.",
+    sessionExpiredBody: "Sign in again and you come back to this screen. Unsaved credits and form entries have to be entered again.",
     reason: {
       invalidProfile: "The model details are not valid.",
       noPrice: "There is no price yet.",
@@ -405,7 +405,7 @@ export const adminModelCatalogMessages = defineAdminMessages({
     goEnable: "켜기로 이동",
     relogin: "다시 로그인",
     sessionExpiredTitle: "관리자 로그인 시간이 만료되었습니다.",
-    sessionExpiredBody: "이 화면에 입력한 값은 그대로 남아 있습니다. 다시 로그인하면 이 화면으로 돌아옵니다.",
+    sessionExpiredBody: "다시 로그인하면 이 화면으로 돌아옵니다. 저장하지 않은 크레딧·폼 입력은 다시 넣어야 합니다.",
     reason: {
       invalidProfile: "모델 정보가 올바르지 않습니다.",
       noPrice: "가격이 아직 없습니다.",

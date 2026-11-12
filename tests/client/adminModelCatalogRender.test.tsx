@@ -74,7 +74,7 @@ test("the list puts the models waiting for the operator first, each with one nex
 
 test("the price check shows each option's cost and floor, and an edit below the floor locks the apply button", () => {
   const clean = renderToStaticMarkup(
-    <ImageModelDetail m={en} item={qwen} edits={{ "medium|1024x1024": "45" }} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} />
+    <ImageModelDetail m={en} item={qwen} edits={{ "medium|1024x1024": "45" }} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
   );
   assert.match(clean, /\$0\.035/);
   assert.match(clean, />Draft 41</);
@@ -86,7 +86,7 @@ test("the price check shows each option's cost and floor, and an edit below the 
   assert.doesNotMatch(applyButton(clean), / disabled=""/);
 
   const below = renderToStaticMarkup(
-    <ImageModelDetail m={en} item={qwen} edits={{ "medium|1024x1024": "40" }} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} />
+    <ImageModelDetail m={en} item={qwen} edits={{ "medium|1024x1024": "40" }} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
   );
   assert.match(below, />Below 41</);
   assert.match(applyButton(below), / disabled=""/);
@@ -99,7 +99,7 @@ test("the price check shows each option's cost and floor, and an edit below the 
 test("a draft the judge refuses for another reason offers only a new draft, in words", () => {
   const refused = { ...qwen, draftReview: { floors, reasons: ["worst_case_cost_unbounded"] } };
   const html = renderToStaticMarkup(
-    <ImageModelDetail m={en} item={refused} edits={{}} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} />
+    <ImageModelDetail m={en} item={refused} edits={{}} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
   );
   assert.match(html, /No reasoning cost cap is stated/);
   assert.match(html, />Make a new draft</);
@@ -108,7 +108,7 @@ test("a draft the judge refuses for another reason offers only a new draft, in w
 
 test("while drafting, the detail shows the elapsed time instead of the table", () => {
   const html = renderToStaticMarkup(
-    <ImageModelDetail m={ko} item={qwen} edits={{}} drafting="0:42" onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} />
+    <ImageModelDetail m={ko} item={qwen} edits={{}} drafting="0:42" onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
   );
   assert.match(html, /0:42 경과 · 최대 2:00/);
   assert.doesNotMatch(html, /data-testid="model-catalog-price-table"/);
@@ -134,4 +134,40 @@ test("the add form asks for provider, API id, name, sizes and qualities, and nam
   assert.match(html, /aria-pressed="false"[^>]*>가로 1536×1024</);
   assert.match(html, /기본: https:\/\/www\.alibabacloud\.com/);
   assert.match(html, /허용 도메인: www\.alibabacloud\.com, help\.aliyun\.com/);
+});
+
+test("a serving model with a new draft can still be held from its card and its detail", () => {
+  const [repriced] = imageCatalogItems({
+    models: [
+      {
+        id: "gpt-image-2",
+        name: "GPT Image 2",
+        provider: "openai",
+        apiModelId: "gpt-image-2",
+        source: "code",
+        enabled: null,
+        holdReason: null,
+        disabledReason: null,
+        pricingVersion: "gpt-image-2-v3",
+        prices: [{ quality: "low", size: "1024x1024", credits: 6, outputCostMicroUsd: 5_000 }],
+        floors: [{ quality: "low", size: "1024x1024", floor: 6 }],
+        priceVerification: { verifiedAt: "2026-11-03", sources: ["https://developers.openai.com/api/docs/pricing"], thinkingCapMicroUsd: 0 },
+        admissionIfEnabled: { admitted: true },
+        draft,
+        draftReview: { floors, reasons: ["worst_case_cost_unbounded"] },
+      },
+    ],
+  });
+  const list = renderToStaticMarkup(
+    <ImageCatalogList m={en} items={[repriced]} onOpen={noop} onAction={noop} onHold={noop} onInherit={noop} />
+  );
+  assert.match(list, /data-stage="draft_ready"/);
+  assert.match(list, /data-testid="model-catalog-hold"/);
+  assert.match(list, />Serving</);
+  const detail = renderToStaticMarkup(
+    <ImageModelDetail m={en} item={repriced} edits={{}} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
+  );
+  // Even when the judge refuses the draft, the live model can be stopped.
+  assert.match(detail, /data-testid="model-catalog-hold"/);
+  assert.match(detail, />Make a new draft</);
 });

@@ -527,6 +527,10 @@ export function AdminModelCatalogPanel() {
                 onResetEdits={() => setEdits((current) => ({ ...current, [openItem.id]: {} }))}
                 onApply={() => void applyPrices(openItem)}
                 onAction={(action) => onAction(openItem, action)}
+                onHold={() => {
+                  setHoldReason("");
+                  setHold({ category: "image", modelId: openItem.id, name: openItem.name });
+                }}
               />
             ) : drafting && !items.some((item) => item.id === drafting.modelId) ? (
               // A brand-new model has no row until its draft is stored.

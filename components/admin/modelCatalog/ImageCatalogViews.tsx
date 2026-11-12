@@ -196,8 +196,20 @@ export function ImageCatalogList({
                   </div>
                   <ImageFlowStepper m={m} stage={stage} />
                   <p className="text-xs font-bold text-amber-300">{m.stage[stage]}</p>
+                  {item.served?.disabledReason === null && stage !== "serving" ? (
+                    <div>
+                      <ImageStageChip m={m} stage="serving" />
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
+                  {/* A model with a new draft may still be serving at its current
+                      price; it can always be held from here (review 2026-11-12). */}
+                  {item.served?.disabledReason === null ? (
+                    <AdminWriteButton variant="secondary" onClick={() => onHold(item)} data-testid="model-catalog-hold">
+                      {m.holdAction}
+                    </AdminWriteButton>
+                  ) : null}
                   {action === "review_prices" ? null : (
                     <button
                       type="button"
@@ -413,6 +425,7 @@ export function ImageModelDetail({
   onResetEdits,
   onApply,
   onAction,
+  onHold,
 }: {
   m: CatalogMessages;
   item: ImageCatalogItem;
@@ -424,6 +437,7 @@ export function ImageModelDetail({
   onResetEdits: () => void;
   onApply: () => void;
   onAction: (action: ImageNextAction) => void;
+  onHold: () => void;
 }) {
   const stage = imageStage(item);
   const draft = item.draft;
@@ -447,6 +461,12 @@ export function ImageModelDetail({
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <h2 className="text-xl font-bold text-zinc-100">{item.name}</h2>
           <ImageStageChip m={m} stage={stage} />
+          {serving && stage !== "serving" ? <ImageStageChip m={m} stage="serving" /> : null}
+          {serving ? (
+            <AdminWriteButton size="sm" variant="secondary" className="ml-auto" onClick={onHold} data-testid="model-catalog-hold">
+              {m.holdAction}
+            </AdminWriteButton>
+          ) : null}
         </div>
         <p className="mt-1 break-all font-mono text-xs text-zinc-500">{subtitle(m, item)}</p>
       </div>
