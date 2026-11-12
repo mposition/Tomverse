@@ -9,6 +9,7 @@ import { ReviewNavigation } from "@/components/chat/ReviewStudioChrome";
 import { MarketingConsentSlot } from "@/components/analytics/AnalyticsProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { PluginLogo } from "./PluginLogo";
+import { PluginScopePicker, initialPluginScopes } from "./PluginScopePicker";
 import { mcpConnectorCopy } from "@/lib/mcpConnectorCopy";
 import { mcpProviderCopy } from "@/lib/mcpProviderCopy";
 import { mcpProviderSummary } from "@/lib/mcpProviderSummary";
@@ -38,6 +39,7 @@ export function PluginWorkspace() {
   const [customMode, setCustomMode] = useState(false);
   const [custom, setCustom] = useState<{ url: string; name: string; auth: PluginServer["auth"] }>({ url: "", name: "", auth: "none" });
   const [checked, setChecked] = useState<string[]>([]);
+  const [scopes, setScopes] = useState<string[]>([]);
   const [verified, setVerified] = useState<Record<string, boolean>>({});
   const dialog = useRef<HTMLDivElement>(null);
   const detail = useRef<HTMLElement>(null);
@@ -87,13 +89,16 @@ export function PluginWorkspace() {
   const showDetail = () => { if (window.innerWidth < 1250) requestAnimationFrame(() => detail.current?.scrollIntoView({ block: "start" })); };
   const choose = (conn: PluginConnection) => { setProviderId(null); setSelectedId(conn.id); setChecked(conn.grants.map(t => t.name)); showDetail(); };
   const chooseProvider = (provider: McpProvider) => { setSelectedId(null); setProviderId(provider.id); showDetail(); };
-  const openCustom = () => { setCustomMode(true); setCustom({ url: "", name: "", auth: "none" }); setCredential(""); setAdding(true); };
+  const openCustom = () => { setCustomMode(true); setCustom({ url: "", name: "", auth: "none" }); setCredential(""); setScopes([]); setAdding(true); };
+  const chooseServer = (id: string) => { setServerId(id); setCredential(""); setScopes(initialPluginScopes(inventory.servers.find(s => s.id === id))); };
   const openAdd = (id = "") => {
     if (!id && !inventory.servers.length && inventory.customEnabled) return openCustom();
-    setCustomMode(false); setServerId(id || inventory.servers[0]?.id || ""); setCredential(""); setAdding(true);
+    setCustomMode(false); chooseServer(id || inventory.servers[0]?.id || ""); setAdding(true);
   };
   const chosenServer = inventory.servers.find(s => s.id === serverId);
   const chosenAuth = customMode ? custom.auth : chosenServer?.auth;
+  const scopeServer = !customMode && chosenServer?.auth === "oauth" && chosenServer.scopes ? chosenServer : undefined;
+  const scopeMissing = Boolean(scopeServer && !scopes.length);
   const pending = inventory.invocations.filter(i => i.state === "pending");
   const cards: Array<{ id: string; name: string; server?: PluginServer; provider?: McpProvider }> = [
     // A user-entered server is never presented as a catalogued provider, whatever its name.
@@ -194,6 +199,7 @@ export function PluginWorkspace() {
         <aside ref={detail} className={styles.detail} aria-label={c.manage}>
           {selected ? <><PluginLogo name={logoName(selected.serverId, selected.name)} /><h2>{selected.name}</h2><p className={styles.help}>{c.sharing}</p><h3>{c.tools}</h3><p className={styles.help}>{c.permissionNotice}</p>
             {selected.status !== "connected" && <p role="status">{selected.status === "disconnected" ? c.disconnected : c.expired}</p>}
+            {!!selected.scopes?.length && <p className={styles.help} data-testid="plugin-granted-scopes">{c.grantedScopes}: {selected.scopes.join(", ")}</p>}
             <div className={styles.toolList}>{(selected.status === "connected" ? selected.catalog : []).map(tool => <label key={tool.name}><input type="checkbox" disabled={busy} checked={checked.includes(tool.name)} onChange={e => setChecked(old => e.target.checked ? [...old, tool.name] : old.filter(n => n !== tool.name))} /><span><strong>{tool.name}</strong><small>{tool.mode === "read" ? c.read : c.confirm}</small></span></label>)}</div>
             <button className={styles.primary} type="button" disabled={busy || selected.status !== "connected"} onClick={() => void mutate(`/api/mcp/connections/${selected.id}`, "PATCH", { tools: checked, version: selected.version })}>{c.save}</button>
             <button type="button" disabled={busy || !inventory.enabled} onClick={() => openAdd(selected.serverId)}>{c.reconnect}</button>
@@ -213,7 +219,7 @@ export function PluginWorkspace() {
       <form onSubmit={e => {
         e.preventDefault();
         const target = customMode ? { custom: { url: custom.url.trim(), auth: custom.auth, ...(custom.name.trim() ? { name: custom.name.trim() } : {}) } } : { serverId };
-        void mutate(chosenAuth === "oauth" ? "/api/mcp/oauth/start" : "/api/mcp/connections", "POST", { ...target, ...(chosenAuth === "bearer" ? { credential } : {}) })
+        void mutate(chosenAuth === "oauth" ? "/api/mcp/oauth/start" : "/api/mcp/connections", "POST", { ...target, ...(chosenAuth === "bearer" ? { credential } : {}), ...(scopeServer ? { scopes } : {}) })
           .then(result => { if (result) { setAdding(false); setSelectedId(result.connection?.id || result.id); setChecked([]); } });
       }}>
         {customMode ? <>
@@ -224,14 +230,15 @@ export function PluginWorkspace() {
             <option value="none">{c.authNone}</option><option value="bearer">{c.authBearer}</option><option value="oauth">{c.authOAuth}</option></select></label>
           <p className={styles.help}>{c.customHelp}</p>
         </> : <>
-          <label>{c.title}<select value={serverId} onChange={e => { setServerId(e.target.value); setCredential(""); }} required>{inventory.servers.map(server => <option value={server.id} key={server.id}>{server.name}</option>)}</select></label>
+          <label>{c.title}<select value={serverId} onChange={e => chooseServer(e.target.value)} required>{inventory.servers.map(server => <option value={server.id} key={server.id}>{server.name}</option>)}</select></label>
           {chosenServer && <p className={styles.help}>{chosenServer.origin}</p>}
+          {scopeServer && <PluginScopePicker server={scopeServer} value={scopes} onChange={setScopes} disabled={busy} copy={c} className={styles.scopePicker} />}
           {inventory.customEnabled && <button type="button" disabled={busy} onClick={openCustom}>{c.custom}</button>}
         </>}
         {chosenAuth === "bearer" && <label>{c.token}<input data-testid="plugin-credential" type="password" value={credential} onChange={e => setCredential(e.target.value)} maxLength={4096} autoComplete="off" required /></label>}
         <p>{chosenAuth === "oauth" ? c.oauthHelp : c.authHelp}</p><p className={styles.help}>{c.sharing}</p>
         {!customMode && !inventory.servers.length && <p>{c.setupNotice}</p>}
-        <button className={styles.primary} data-testid="plugin-connect-submit" disabled={busy || (customMode ? !custom.url.trim() : !chosenServer)} type="submit">{busy ? c.sending : c.connect}</button>
+        <button className={styles.primary} data-testid="plugin-connect-submit" disabled={busy || scopeMissing || (customMode ? !custom.url.trim() : !chosenServer)} type="submit">{busy ? c.sending : c.connect}</button>
       </form>
     </div></div>}
   </div>;

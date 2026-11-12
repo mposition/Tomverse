@@ -182,6 +182,48 @@ test("@ui-risk OAuth requires an explicit connect action and never asks for a to
   await page.getByRole("dialog").getByRole("button", { name: "연결", exact: true }).click();
   await page.waitForURL("https://oauth.example/authorize?state=synthetic"); expect(starts).toBe(1);
 });
+test("@ui-risk OAuth sends only the scopes the user chose and shows them on the connection", async ({ page }) => {
+  const starts: unknown[] = [];
+  let connections: unknown[] = [];
+  await page.route("**/api/mcp/connections", route => route.fulfill({ json: { enabled: true,
+    servers: [{ id: "linear", name: "Linear", auth: "oauth", origin: "https://mcp.linear.app", scopes: ["read", "write", "openid", "email"], defaultScopes: ["read", "write"] }],
+    connections, invocations: [] } }));
+  await page.route("**/api/mcp/oauth/start", route => {
+    starts.push(route.request().postDataJSON());
+    connections = [{ id: "scoped-connection", serverId: "linear", name: "Linear", status: "connected", version: 1, catalog: tools, grants: [], scopes: ["read", "email"] }];
+    return route.fulfill({ json: { status: "connected", connection: { id: "scoped-connection", catalog: tools, version: 1 } } });
+  });
+  await page.goto("/plugins?lang=ko");
+  await page.getByRole("button", { name: "MCP 연결 추가" }).click();
+  const dialog = page.getByRole("dialog"), picker = dialog.getByTestId("plugin-scope-picker");
+  await expect(picker).toContainText("허용할 권한");
+  const scope = (name: string) => picker.getByRole("checkbox", { name });
+  await expect(scope("read")).toBeChecked(); await expect(scope("write")).toBeChecked(); await expect(scope("email")).not.toBeChecked();
+  await scope("read").uncheck(); await scope("write").uncheck();
+  await expect(picker.getByRole("alert")).toHaveText("권한을 하나 이상 고르세요.");
+  await expect(dialog.getByRole("button", { name: "연결", exact: true })).toBeDisabled();
+  await scope("email").check(); await scope("read").check();
+  await expectNoHorizontalOverflow(page);
+  await dialog.getByRole("button", { name: "연결", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(starts).toEqual([{ serverId: "linear", scopes: ["read", "email"] }]);
+  await expect(page.getByTestId("plugin-granted-scopes")).toHaveText("허용한 권한: read, email");
+});
+test("@ui-risk OAuth scope picker stops at the per-connection limit", async ({ page }) => {
+  const scopes = Array.from({ length: 70 }, (_, index) => `scope-${index}.read`);
+  await page.route("**/api/mcp/connections", route => route.fulfill({ json: { enabled: true,
+    servers: [{ id: "cloudflare", name: "Cloudflare", auth: "oauth", origin: "https://mcp.cloudflare.com", scopes, defaultScopes: [] }], connections: [], invocations: [] } }));
+  await page.goto("/plugins?lang=ko");
+  await page.getByRole("button", { name: "MCP 연결 추가" }).click();
+  const picker = page.getByRole("dialog").getByTestId("plugin-scope-picker");
+  await expect(picker.getByRole("checkbox", { checked: true })).toHaveCount(0);
+  for (const scope of scopes.slice(0, 64)) await picker.getByRole("checkbox", { name: scope, exact: true }).check();
+  await expect(picker.getByTestId("plugin-scope-limit")).toHaveText("한 연결에 권한은 최대 64개까지 고를 수 있습니다.");
+  await expect(picker.getByRole("checkbox", { name: "scope-64.read", exact: true })).toBeDisabled();
+  await picker.getByRole("checkbox", { name: "scope-0.read", exact: true }).uncheck();
+  await expect(picker.getByRole("checkbox", { name: "scope-64.read", exact: true })).toBeEnabled();
+  await expectNoHorizontalOverflow(page);
+});
 test("@ui-risk disabled preview and add dialog remain accessible without exposing credentials", async ({ page }) => {
   await page.route("**/api/mcp/connections", route => route.fulfill({ json: { enabled: false, servers: [], connections: [], invocations: [] } }));
   await page.goto("/plugins?lang=ko");
