@@ -830,3 +830,22 @@ test("a source that cannot be read asks for another file, not another try", asyn
     ["spec_rejected"]
   );
 });
+
+test("fourth review: replaying a conversion on a full answer says unchanged, not too many files", async () => {
+  resetWorld();
+  const subject = await collector({ turnAttachments: await turnFiles() });
+  const calls = ["a", "b", "c"].map((name) => ({
+    operation: "to_pdf",
+    filename: name,
+    sources: [{ attachment: "att_1" }],
+  }));
+  for (const call of calls) {
+    assert.equal((await subject.runFileConversion(call)).status, "created");
+  }
+  assert.equal((await subject.runFileConversion(calls[0])).status, "unchanged");
+  const fourth = await subject.runFileConversion({ ...calls[0], filename: "d" });
+  assert.equal(fourth.status === "failed" ? fourth.reason : fourth.status, "too_many_files");
+  // A malformed call on a full answer draws no fourth card either.
+  await subject.runFileConversion({ operation: "nope" });
+  assert.equal(subject.toStreamArtifacts().length, 3);
+});

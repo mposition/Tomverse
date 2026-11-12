@@ -756,3 +756,22 @@ test("third review: a workbook number keeps its digits, and a long PDF cell runs
   );
   assert.ok((await PDFDocument.load(pdf.bytes)).getPageCount() >= 2);
 });
+
+test("fourth review: a value past fifteen significant digits survives CSV -> XLSX -> CSV as text", async () => {
+  const values = ["123456789012345.6", "0.1234567890123456", "123456789012345", "-0.000123"];
+  const files = attachments([["digits.csv", "text/csv", csvBytes(`v\n${values.join("\n")}\n`)]]);
+  const workbook = await convert(
+    { operation: "convert_spreadsheet", filename: "d", targetFormat: "xlsx", sources: [{ attachment: "att_1" }] },
+    files
+  );
+  const back = await convert(
+    { operation: "convert_spreadsheet", filename: "d", targetFormat: "csv", sources: [{ attachment: "att_1" }] },
+    attachments([["d.xlsx", XLSX, workbook.bytes]])
+  );
+  const lines = new TextDecoder().decode(back.bytes).replace(/^﻿/, "").trimEnd().split("\r\n");
+  assert.deepEqual(lines, ["v", ...values]);
+  // Within the limit stays a number in the workbook; past it, text.
+  const sheet = new TextDecoder().decode(unzipSync(workbook.bytes)["xl/worksheets/sheet1.xml"]);
+  assert.match(sheet, /<v>123456789012345<\/v>/);
+  assert.equal(sheet.includes("<v>123456789012345.6</v>"), false);
+});

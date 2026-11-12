@@ -1063,20 +1063,6 @@ export class GeneratedArtifactCollector {
         note: "The file could not be attached to this conversation. Say so.",
       };
     }
-    if (
-      this.storedArtifacts.length + this.failedArtifacts.length >=
-      ARTIFACT_LIMITS.maxArtifactsPerMessage
-    ) {
-      return {
-        status: "failed",
-        reason: "too_many_files",
-        note:
-          `This answer already has ${ARTIFACT_LIMITS.maxArtifactsPerMessage} files, ` +
-          "which is the limit on top-level files. Say so, and offer to do the " +
-          "remaining conversion in the next message.",
-      };
-    }
-
     const refuse = (
       spec: Partial<FileConversionSpec> | null,
       failureCode: ArtifactFailureCode,
@@ -1110,29 +1096,31 @@ export class GeneratedArtifactCollector {
       };
     };
 
-    const admission = admitFileConversionSpec(rawInput);
-    if (!admission.ok) return refuse(rawSpec, "spec_rejected", admission.detail);
-    const spec = admission.spec;
     const attachments: NonNullable<
       GeneratedArtifactCollectorOptions["turnAttachments"]
     > = this.options.turnAttachments ?? new Map();
+    const admission = admitFileConversionSpec(rawInput);
 
     // The same instruction over different files is a different file, so the
     // hash covers what each handle resolved to, not only the handle. Checked
-    // before the files are opened: a replayed call costs a hash, not a parse.
-    const specHash = createHash("sha256")
-      .update(
-        JSON.stringify({
-          kind: "fileConversion",
-          ...spec,
-          files: spec.sources.map((source) => {
-            const file = attachments.get(source.attachment);
-            return [source.attachment, file?.name, file?.bytes.byteLength];
-          }),
-        })
-      )
-      .digest("hex");
-    const already = this.seenSpecHashes.get(specHash);
+    // before the files are opened -- a replayed call costs a hash, not a
+    // parse -- and before the per-answer ceiling, so replaying a file this
+    // answer already has says "unchanged" rather than "too many files".
+    const specHash = admission.ok
+      ? createHash("sha256")
+          .update(
+            JSON.stringify({
+              kind: "fileConversion",
+              ...admission.spec,
+              files: admission.spec.sources.map((source) => {
+                const file = attachments.get(source.attachment);
+                return [source.attachment, file?.name, file?.bytes.byteLength];
+              }),
+            })
+          )
+          .digest("hex")
+      : null;
+    const already = specHash ? this.seenSpecHashes.get(specHash) : undefined;
     if (already) {
       return {
         status: "unchanged",
@@ -1142,6 +1130,24 @@ export class GeneratedArtifactCollector {
           "the tool again for it; just describe the file.",
       };
     }
+
+    if (
+      this.storedArtifacts.length + this.failedArtifacts.length >=
+      ARTIFACT_LIMITS.maxArtifactsPerMessage
+    ) {
+      return {
+        status: "failed",
+        reason: "too_many_files",
+        note:
+          `This answer already has ${ARTIFACT_LIMITS.maxArtifactsPerMessage} files, ` +
+          "which is the limit on top-level files. Say so, and offer to do the " +
+          "remaining conversion in the next message.",
+      };
+    }
+
+    if (!admission.ok) return refuse(rawSpec, "spec_rejected", admission.detail);
+    if (specHash === null) return refuse(rawSpec, "spec_rejected", "unhashable");
+    const spec = admission.spec;
 
     let prepared: PreparedConversion;
     try {

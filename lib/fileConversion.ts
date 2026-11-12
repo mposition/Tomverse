@@ -832,9 +832,19 @@ const prepareConvertImages = async (
  */
 const PLAIN_NUMBER = /^-?(0|[1-9]\d{0,14})(\.\d{1,10})?$/;
 
+/**
+ * Significant digits in a plain decimal: what a spreadsheet can hold is
+ * fifteen, and a value past that is rounded the moment it is read back
+ * ("123456789012345.6" reopens as 123456789012346).
+ */
+const significantDigits = (value: string): number =>
+  value.replace(/^-/, "").replace(".", "").replace(/^0+/, "").length;
+
 const toCell = (value: string): ArtifactCellValue => {
   if (value === "") return null;
-  return PLAIN_NUMBER.test(value) && String(Number(value)) === value
+  return PLAIN_NUMBER.test(value) &&
+    String(Number(value)) === value &&
+    significantDigits(value) <= 15
     ? Number(value)
     : value;
 };
