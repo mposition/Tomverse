@@ -110,9 +110,12 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // historical version on 2026-11-05. Later observations may differ; they need
   // their own approval before this gate permits release-note publication.
   // Current observed copy is evidence only; its digest is not a new approval.
+  // The semantic-search notice (flag false, so the page does not show it yet)
+  // moved this digest on 2026-11-12: evidence only, not approval, and it is not
+  // in APPROVED_AMENDED_DIGESTS.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "177aeba9595438d5eaf0b5e6186a88e81b02c943fbbe53841e183b49f7487c85",
+    contentSha256: "7ea9b0eeffffea348893d6605287d19759a26fc764d12a0efe0f3f61a22d0716",
   },
   "/terms": {
     date: "2026-11-16",
