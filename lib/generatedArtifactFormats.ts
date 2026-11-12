@@ -26,9 +26,22 @@ export const ARTIFACT_KINDS = [
   "presentation",
   "text",
   "archive",
+  "image",
 ] as const;
 
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
+
+/**
+ * The kinds a model can *author*, each with a tool of its own.
+ *
+ * `image` is the one kind that is not here. There is no `create_image` among
+ * the artifact tools and there will not be one: a model has no specification
+ * for a photograph, only for the instruction to convert one. An image
+ * artifact is therefore only ever the output of `convert_files`
+ * (lib/fileConversionCore.ts), built from bytes the user uploaded -- generated
+ * pictures are a different domain (docs/policy/image-generation.md).
+ */
+export type AuthoredArtifactKind = Exclude<ArtifactKind, "image">;
 
 /**
  * How a text format's content is checked before it is stored.
@@ -43,8 +56,8 @@ export type ArtifactTextValidation = "json" | "yaml" | "xml" | "svg" | "none";
 /**
  * Which localised name and icon the download card uses.
  *
- * Coarser than the format on purpose. Fifty-eight formats would be
- * fifty-eight strings in each of seven locales, most of them a translation of
+ * Coarser than the format on purpose. Sixty-one formats would be
+ * sixty-one strings in each of eight locales, most of them a translation of
  * an extension nobody translates -- so the ones a person recognises by name
  * (an Excel workbook, a PDF) get their own, and the rest are named by their
  * group with the extension filled in: "PY source file", "PY 소스 코드".
@@ -61,6 +74,7 @@ export const ARTIFACT_LABEL_GROUPS = [
   "markup",
   "code",
   "archive",
+  "image",
 ] as const;
 
 export type ArtifactLabelGroup = (typeof ARTIFACT_LABEL_GROUPS)[number];
@@ -250,6 +264,35 @@ export const ARTIFACT_FORMAT_TABLE: readonly ArtifactFormatDescriptor[] = [
     mediaType: "application/zip",
     label: "ZIP archive",
     labelGroup: "archive",
+  },
+
+  // --- Converted images ---------------------------------------------------
+  // Never authored by a model: the output of `convert_files` only, written by
+  // the application from a file the user attached. Raster formats only -- an
+  // SVG is markup and stays a `text` format above.
+  {
+    id: "png",
+    kind: "image",
+    extension: ".png",
+    mediaType: "image/png",
+    label: "PNG image",
+    labelGroup: "image",
+  },
+  {
+    id: "jpg",
+    kind: "image",
+    extension: ".jpg",
+    mediaType: "image/jpeg",
+    label: "JPEG image",
+    labelGroup: "image",
+  },
+  {
+    id: "webp",
+    kind: "image",
+    extension: ".webp",
+    mediaType: "image/webp",
+    label: "WebP image",
+    labelGroup: "image",
   },
 ];
 

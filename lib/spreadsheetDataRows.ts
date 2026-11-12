@@ -273,7 +273,8 @@ const readSheetGrid = (
   parts: Unzipped,
   sheet: SheetEntry,
   sharedStrings: string[],
-  styles: StyleTable
+  styles: StyleTable,
+  maxRows: number = SPREADSHEET_DATA_LIMITS.maxRows
 ): string[][] => {
   const bytes = parts[sheet.path];
   if (!bytes) {
@@ -336,10 +337,10 @@ const readSheetGrid = (
       }
     }
     grid.push(cells);
-    if (grid.length > SPREADSHEET_DATA_LIMITS.maxRows + 1) {
+    if (grid.length > maxRows + 1) {
       throw new SpreadsheetDataError(
         "DATA_TOO_MANY_ROWS",
-        `The data file has more than ${SPREADSHEET_DATA_LIMITS.maxRows} data rows.`
+        `The data file has more than ${maxRows} data rows.`
       );
     }
   }
@@ -511,4 +512,70 @@ export const readSpreadsheetDataRows = (
     readStyles(parts)
   );
   return gridToDataSet(grid, sheet.name);
+};
+
+/**
+ * Reads one worksheet of an uploaded .xlsx, or a .csv, as a grid of display
+ * strings.
+ *
+ * The lower-level sibling of `readSpreadsheetDataRows`, for a caller that is
+ * converting the table rather than filling a template from it: no header is
+ * required to be unique, nothing is keyed by column name, and the row ceiling
+ * is the caller's. Trailing empty rows are dropped; everything else is kept
+ * where it was.
+ */
+export const readSpreadsheetGrid = (
+  bytes: Uint8Array,
+  options: { mediaType: string; sheet?: string; maxRows: number }
+): { grid: string[][]; sheetName: string; sheetNames: string[] } => {
+  const trim = (grid: string[][]) => {
+    let end = grid.length;
+    while (end > 0 && !grid[end - 1].some((cell) => cell.trim() !== "")) end -= 1;
+    return grid.slice(0, end);
+  };
+
+  if (options.mediaType === "text/csv" || options.mediaType === "text/plain") {
+    const grid = trim(parseCsvGrid(decoder.decode(bytes)));
+    if (grid.length > options.maxRows + 1) {
+      throw new SpreadsheetDataError(
+        "DATA_TOO_MANY_ROWS",
+        `The data file has more than ${options.maxRows} data rows.`
+      );
+    }
+    return { grid, sheetName: options.sheet ?? "Sheet1", sheetNames: [] };
+  }
+
+  let parts: Unzipped;
+  try {
+    parts = unzipSync(bytes);
+  } catch {
+    throw new SpreadsheetDataError(
+      "DATA_UNREADABLE",
+      "The data file could not be read as a spreadsheet."
+    );
+  }
+  const sheets = listSheets(parts);
+  const sheet = options.sheet
+    ? sheets.find((entry) => entry.name === options.sheet)
+    : sheets[0];
+  if (!sheet) {
+    throw new SpreadsheetDataError(
+      "DATA_SHEET_NOT_FOUND",
+      `The data file has no worksheet named "${options.sheet}".`
+    );
+  }
+  const grid = trim(
+    readSheetGrid(
+      parts,
+      sheet,
+      readSharedStrings(parts),
+      readStyles(parts),
+      options.maxRows
+    )
+  );
+  return {
+    grid,
+    sheetName: sheet.name,
+    sheetNames: sheets.map((entry) => entry.name),
+  };
 };

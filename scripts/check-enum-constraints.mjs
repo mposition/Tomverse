@@ -109,7 +109,7 @@ const REGISTRY = {
     module: "lib/generatedArtifactCore.ts",
     list: "SUPPORTED_ARTIFACT_FORMATS",
     reason:
-      "The fifty-eight formats a generator actually exists for, built from the format table in lib/generatedArtifactFormats.ts (docs/policy/generated-artifacts.md). REFUSED_ARTIFACT_EXTENSIONS beside it is the opposite list -- extensions the product refuses outright -- and neither it nor any format without a generator may reach the constraint, because a row here claims a file the download route can serve.",
+      "The sixty-one formats a generator or a converter actually exists for, built from the format table in lib/generatedArtifactFormats.ts (docs/policy/generated-artifacts.md): fifty-eight a model can author and three raster image formats that only convert_files writes, from the user's own attachments. REFUSED_ARTIFACT_EXTENSIONS beside it is the opposite list -- extensions the product refuses outright -- and neither it nor any format without a generator may reach the constraint, because a row here claims a file the download route can serve.",
   },
   MessageArtifact_status_check: {
     owner: "list",

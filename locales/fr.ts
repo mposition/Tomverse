@@ -552,6 +552,7 @@ export const fr = {
         artifactTypeMarkup: "Fichier {ext}",
         artifactTypeCode: "Fichier source {ext}",
         artifactTypeArchive: "Archive ZIP",
+        artifactTypeImage: "Image {ext}",
         artifactDownload: "Télécharger",
         artifactPreviewAlt: "Aperçu de {filename}",
         artifactReadyLabel: "Télécharger {filename}, {type}, {size}",

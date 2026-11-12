@@ -598,6 +598,7 @@ export const zhHant = {
         artifactTypeMarkup: "{ext} 檔案",
         artifactTypeCode: "{ext} 原始檔",
         artifactTypeArchive: "ZIP 壓縮檔",
+        artifactTypeImage: "{ext} 圖片",
         artifactDownload: "下載",
         artifactPreviewAlt: "{filename} 預覽",
         artifactReadyLabel: "下載 {filename}，{type}，{size}",

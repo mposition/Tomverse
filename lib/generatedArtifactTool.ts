@@ -41,6 +41,7 @@ import {
   archiveSpecSchema,
   artifactFormat,
   documentBatchSpecSchema,
+  isSupportedArtifactFormat,
   documentSpecSchema,
   presentationSpecSchema,
   requireArtifactFormat,
@@ -50,7 +51,7 @@ import {
   type ArtifactAdmission,
   type ArtifactFailureCode,
   type ArchiveSpec,
-  type ArtifactKind,
+  type AuthoredArtifactKind,
   type ChatStreamArtifact,
   type DocumentBatchSpec,
   type DocumentSpec,
@@ -72,6 +73,15 @@ import {
 import { ArtifactGenerationError } from "@/lib/generatedArtifactXlsx";
 import { PdfGenerationError } from "@/lib/generatedArtifactPdf";
 import { TextContentError } from "@/lib/generatedArtifactText";
+import { prepareFileConversion } from "@/lib/fileConversion";
+import {
+  FILE_CONVERSION_LIMITS,
+  FileConversionError,
+  admitFileConversionSpec,
+  fileConversionSpecSchema,
+  type FileConversionSpec,
+  type PreparedConversion,
+} from "@/lib/fileConversionCore";
 import {
   discardStoredArtifacts,
   putArtifactObject,
@@ -96,7 +106,7 @@ export const ARTIFACT_TOOL_NAMES = {
   presentation: "create_presentation",
   text: "create_text_file",
   archive: "create_archive",
-} as const satisfies Record<ArtifactKind, string>;
+} as const satisfies Record<AuthoredArtifactKind, string>;
 
 export const CREATE_SPREADSHEET_TOOL_NAME = ARTIFACT_TOOL_NAMES.spreadsheet;
 
@@ -111,9 +121,21 @@ export const CREATE_SPREADSHEET_TOOL_NAME = ARTIFACT_TOOL_NAMES.spreadsheet;
  */
 export const CREATE_DOCUMENT_BATCH_TOOL_NAME = "create_document_batch";
 
+/**
+ * The conversion tool, which authors nothing.
+ *
+ * Every other tool here takes content the model writes. This one takes the
+ * handles of files the user attached and an instruction -- images into a PDF,
+ * PDFs merged or split, pages drawn as images, a table re-saved -- and the
+ * application does the rest (lib/fileConversion.ts, policy section 14).
+ * Registered only on a turn that carries a file it could read.
+ */
+export const CONVERT_FILES_TOOL_NAME = "convert_files";
+
 export const ALL_ARTIFACT_TOOL_NAMES: readonly string[] = [
   ...Object.values(ARTIFACT_TOOL_NAMES),
   CREATE_DOCUMENT_BATCH_TOOL_NAME,
+  CONVERT_FILES_TOOL_NAME,
 ];
 
 /**
@@ -125,16 +147,19 @@ export const ALL_ARTIFACT_TOOL_NAMES: readonly string[] = [
  * admitted format and no filename, and the honest label is the one its kind
  * falls back to.
  */
-const ARTIFACT_KIND_BY_TOOL_NAME: Readonly<Record<string, ArtifactKind>> = {
+const ARTIFACT_KIND_BY_TOOL_NAME: Readonly<Record<string, AuthoredArtifactKind>> = {
   ...(Object.fromEntries(
     Object.entries(ARTIFACT_TOOL_NAMES).map(([kind, name]) => [name, kind])
-  ) as Record<string, ArtifactKind>),
+  ) as Record<string, AuthoredArtifactKind>),
   [CREATE_DOCUMENT_BATCH_TOOL_NAME]: "archive",
+  // A conversion can end as a PDF, an image, a table or an archive; a call
+  // that never produced a specification is labelled as the commonest of them.
+  [CONVERT_FILES_TOOL_NAME]: "document",
 };
 
 export const artifactKindForToolName = (
   toolName: string
-): ArtifactKind | null => ARTIFACT_KIND_BY_TOOL_NAME[toolName] ?? null;
+): AuthoredArtifactKind | null => ARTIFACT_KIND_BY_TOOL_NAME[toolName] ?? null;
 
 /**
  * Steps one turn may take when the tools are registered.
@@ -154,7 +179,31 @@ const FALLBACK_FORMAT = {
   presentation: "pptx",
   text: "txt",
   archive: "zip",
-} as const satisfies Record<ArtifactKind, string>;
+} as const satisfies Record<AuthoredArtifactKind, string>;
+
+/**
+ * What a conversion that failed before it had an output is labelled with.
+ *
+ * Read from the specification where it says: a refused "these as JPG" draws a
+ * JPG card. `to_pdf` is the default because it is the default request.
+ */
+const conversionFallbackFormat = (
+  spec: Partial<FileConversionSpec> | null
+): SupportedArtifactFormat => {
+  const named = (value: unknown, fallback: string): string =>
+    typeof value === "string" && isSupportedArtifactFormat(value) ? value : fallback;
+  switch (spec?.operation) {
+    case "split_pdf":
+      return "zip";
+    case "pdf_to_images":
+    case "convert_images":
+      return named(spec.imageFormat, "png");
+    case "convert_spreadsheet":
+      return named(spec.targetFormat, "xlsx");
+    default:
+      return "pdf";
+  }
+};
 
 /** The template a batch fills. Word only -- there is no other template shape. */
 const DOCX_MEDIA_TYPE =
@@ -222,7 +271,7 @@ type KindHandler = {
 const plural = (count: number, noun: string) =>
   `${count} ${noun}${count === 1 ? "" : "s"}`;
 
-const HANDLERS: Record<ArtifactKind, KindHandler> = {
+const HANDLERS: Record<AuthoredArtifactKind, KindHandler> = {
   spreadsheet: {
     admit: admitWorkbookSpecSafely,
     render: renderSpreadsheetArtifact,
@@ -310,6 +359,28 @@ const HANDLERS: Record<ArtifactKind, KindHandler> = {
  * an obvious next request (a smaller file) and the other does not, and the
  * card's copy differs accordingly.
  */
+/**
+ * The card a failed conversion draws.
+ *
+ * Three answers, by what the user can do next: ask for less (`limit_exceeded`),
+ * ask differently or attach the right file (`spec_rejected`), or nothing but
+ * try again (`generation_failed`).
+ */
+const conversionFailureCode = (error: FileConversionError): ArtifactFailureCode => {
+  switch (error.code) {
+    case "OUTPUT_TOO_LARGE":
+    case "TOO_MANY_PAGES":
+      return "limit_exceeded";
+    case "SOURCE_MISSING":
+    case "SOURCE_TYPE":
+    case "PAGES_INVALID":
+    case "PDF_ENCRYPTED":
+      return "spec_rejected";
+    default:
+      return "generation_failed";
+  }
+};
+
 const renderFailureCode = (error: unknown): ArtifactFailureCode => {
   if (error instanceof ArtifactRenderError) {
     return error.code === "OUTPUT_TOO_LARGE" ? "limit_exceeded" : "generation_failed";
@@ -321,6 +392,7 @@ const renderFailureCode = (error: unknown): ArtifactFailureCode => {
   // generator -- and the model can fix it on a second attempt.
   if (error instanceof TextContentError) return "spec_rejected";
   if (error instanceof PdfGenerationError) return "generation_failed";
+  if (error instanceof FileConversionError) return conversionFailureCode(error);
   return "generation_failed";
 };
 
@@ -344,9 +416,9 @@ export type GeneratedArtifactCollectorOptions = {
    * The files the user attached to the turn being answered, by opaque handle.
    *
    * Resolved and ownership-checked by the request layer before the collector
-   * exists, which is the only reason the batch tool can be synchronous and the
-   * only reason a handle is safe to give a model: it addresses this map and
-   * nothing else. Empty on a turn with no attachments, which is almost all of
+   * exists, which is the only reason a handle is safe to give a model: it
+   * addresses this map and nothing else. Read by the batch tool and by
+   * `convert_files`. Empty on a turn with no attachments, which is almost all of
    * them.
    */
   turnAttachments?: ReadonlyMap<
@@ -532,7 +604,10 @@ export class GeneratedArtifactCollector {
       ) {
         continue;
       }
-      const format = FALLBACK_FORMAT[kind];
+      const format =
+        call.toolName === CONVERT_FILES_TOOL_NAME
+          ? conversionFallbackFormat(null)
+          : FALLBACK_FORMAT[kind];
       this.recordFailure(
         sanitizeArtifactFilename("generated", format),
         format,
@@ -604,7 +679,10 @@ export class GeneratedArtifactCollector {
    * specification is untrusted by definition, hence the membership check
    * rather than a cast.
    */
-  private failureFormat(kind: ArtifactKind, rawInput: unknown): SupportedArtifactFormat {
+  private failureFormat(
+    kind: AuthoredArtifactKind,
+    rawInput: unknown
+  ): SupportedArtifactFormat {
     const requested =
       rawInput && typeof rawInput === "object"
         ? (rawInput as Record<string, unknown>).format
@@ -627,7 +705,7 @@ export class GeneratedArtifactCollector {
    * key is the content and not the name.
    */
   async run(
-    kind: ArtifactKind,
+    kind: AuthoredArtifactKind,
     rawInput: unknown,
     toolCallId?: string
   ): Promise<ArtifactToolReport> {
@@ -938,6 +1016,168 @@ export class GeneratedArtifactCollector {
   }
 
   /**
+   * `convert_files`: a file made from the files the user attached.
+   *
+   * Shares the lifecycle of every other tool -- the per-answer ceiling, the
+   * ordinal, the idempotency hash, storage, failure recording -- and differs in
+   * two ways. The bytes come from the user's own attachments rather than from
+   * anything the model wrote, and the output's format is only known once those
+   * files have been looked at, which is why the conversion is prepared before
+   * it is rendered.
+   */
+  async runFileConversion(
+    rawInput: unknown,
+    toolCallId?: string
+  ): Promise<ArtifactToolReport> {
+    this.invocations += 1;
+    const rawSpec =
+      rawInput && typeof rawInput === "object"
+        ? (rawInput as Partial<FileConversionSpec>)
+        : null;
+
+    if (this.options.mode === "sign_in_required") {
+      const format = conversionFallbackFormat(null);
+      this.recordFailure(
+        sanitizeArtifactFilename("converted", format),
+        format,
+        "sign_in_required",
+        null
+      );
+      return {
+        status: "sign_in_required",
+        note:
+          "Converting files requires a signed-in account. Tell the user that, " +
+          "briefly. Do not write the contents as a table, as code, or as a link.",
+      };
+    }
+    if (!this.options.userId || !this.options.conversationId) {
+      return {
+        status: "failed",
+        reason: "no_conversation",
+        note: "The file could not be attached to this conversation. Say so.",
+      };
+    }
+    if (
+      this.storedArtifacts.length + this.failedArtifacts.length >=
+      ARTIFACT_LIMITS.maxArtifactsPerMessage
+    ) {
+      return {
+        status: "failed",
+        reason: "too_many_files",
+        note:
+          `This answer already has ${ARTIFACT_LIMITS.maxArtifactsPerMessage} files, ` +
+          "which is the limit on top-level files. Say so, and offer to do the " +
+          "remaining conversion in the next message.",
+      };
+    }
+
+    const refuse = (
+      spec: Partial<FileConversionSpec> | null,
+      failureCode: ArtifactFailureCode,
+      reason: string
+    ): ArtifactToolReport => {
+      const format = conversionFallbackFormat(spec);
+      this.noteRejection(
+        toolCallId,
+        CONVERT_FILES_TOOL_NAME,
+        rawInput,
+        failureCode === "limit_exceeded" ? "limit_exceeded" : "spec_rejected"
+      );
+      this.recordFailure(
+        sanitizeArtifactFilename(
+          typeof spec?.filename === "string" ? spec.filename : "converted",
+          format
+        ),
+        format,
+        failureCode,
+        null
+      );
+      return {
+        status: "failed",
+        reason: reason.slice(0, 400),
+        note:
+          "The file was not created. Tell the user why in their language and " +
+          "say what would work. Do not describe a file that does not exist.",
+      };
+    };
+
+    const admission = admitFileConversionSpec(rawInput);
+    if (!admission.ok) return refuse(rawSpec, "spec_rejected", admission.detail);
+    const spec = admission.spec;
+    const attachments: NonNullable<
+      GeneratedArtifactCollectorOptions["turnAttachments"]
+    > = this.options.turnAttachments ?? new Map();
+
+    let prepared: PreparedConversion;
+    try {
+      prepared = await prepareFileConversion(spec, attachments);
+    } catch (error) {
+      if (error instanceof FileConversionError) {
+        return refuse(spec, conversionFailureCode(error), error.message);
+      }
+      console.error("File conversion preparation failed:", {
+        traceId: this.options.traceId,
+        conversationId: this.options.conversationId,
+        operation: spec.operation,
+        ...contentFreeErrorMetadata(error),
+      });
+      return refuse(spec, "generation_failed", "The conversion could not be started.");
+    }
+
+    const format = prepared.format;
+    const filename = sanitizeArtifactFilename(spec.filename, format);
+    // The same instruction over different files is a different file, so the
+    // hash covers what each handle resolved to, not only the handle.
+    const specHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          kind: "fileConversion",
+          ...spec,
+          filename,
+          files: spec.sources.map((source) => {
+            const file = attachments.get(source.attachment);
+            return [source.attachment, file?.name, file?.bytes.byteLength];
+          }),
+        })
+      )
+      .digest("hex");
+    const already = this.seenSpecHashes.get(specHash);
+    if (already) {
+      return {
+        status: "unchanged",
+        filename: already.filename,
+        note:
+          "That exact conversion was already done for this answer. Do not call " +
+          "the tool again for it; just describe the file.",
+      };
+    }
+
+    let parts = "";
+    return this.renderAndStore({
+      kind: requireArtifactFormat(format).kind,
+      format,
+      filename,
+      specHash,
+      maxBytes: FILE_CONVERSION_LIMITS.maxOutputBytes,
+      render: async () => {
+        const converted = await prepared.render();
+        parts = converted.parts;
+        return {
+          format,
+          mediaType: requireArtifactFormat(format).mediaType,
+          bytes: converted.bytes,
+        };
+      },
+      describe: () => parts,
+      createdNote:
+        "The converted file is attached to your message and the user has a " +
+        "download button. Say in one or two sentences what it is -- how many " +
+        "pages, images or rows it holds. Do not write a link, a path or the " +
+        "file's contents.",
+    });
+  }
+
+  /**
    * Everything that happens once a specification has been accepted.
    *
    * Shared by the five kind tools and by the batch tool, so the ordering that
@@ -946,13 +1186,15 @@ export class GeneratedArtifactCollector {
    * them.
    */
   private async renderAndStore(job: {
-    kind: ArtifactKind;
+    kind: string;
     format: SupportedArtifactFormat;
     filename: string;
     specHash: string;
-    render: () => RenderedArtifact;
+    render: () => RenderedArtifact | Promise<RenderedArtifact>;
     describe: (rendered: RenderedArtifact) => string;
     createdNote?: string;
+    /** The storage ceiling, when it is not the authoring one. Conversions only. */
+    maxBytes?: number;
   }): Promise<ArtifactToolReport> {
     const { kind, format, filename, specHash } = job;
 
@@ -962,7 +1204,7 @@ export class GeneratedArtifactCollector {
 
     let rendered: RenderedArtifact;
     try {
-      rendered = job.render();
+      rendered = await job.render();
     } catch (error) {
       this.recordFailure(filename, format, renderFailureCode(error), specHash);
       // Not `error.message`: a parser or font error quotes the model's content.
@@ -995,6 +1237,7 @@ export class GeneratedArtifactCollector {
         mediaType: rendered.mediaType,
         bytes: rendered.bytes,
         modelId: this.modelId,
+        ...(job.maxBytes !== undefined ? { maxBytes: job.maxBytes } : {}),
       });
     } catch (error) {
       this.recordFailure(filename, format, "storage_failed", specHash);
@@ -1078,13 +1321,39 @@ const DOCUMENT_BATCH_TOOL_DESCRIPTION =
   "write file bytes, base64, XML, a storage key or a local path yourself, " +
   "and never ask for them: a handle is the whole of what this tool accepts.";
 
+/**
+ * What the provider is told `convert_files` is for.
+ *
+ * Written against the refusal this tool exists to remove: a model that could
+ * see two attached photographs, had a tool that writes PDFs, and still said it
+ * could not turn the photographs into one -- because every tool it had took
+ * content, and a photograph is not content a model can write.
+ */
+const CONVERT_FILES_TOOL_DESCRIPTION =
+  "Convert files the user attached to THIS message into another file, and " +
+  "attach the result to your reply. The application reads and writes every " +
+  "byte; you only name the files by the handles in this turn's attachment " +
+  "section (att_1, att_2, ...). Use it for: putting images into one PDF " +
+  "(one image per page); merging PDFs, or PDFs and images, into one PDF; " +
+  "taking, reordering or rotating pages of a PDF; splitting a PDF into " +
+  "several files; drawing PDF pages as PNG/JPG/WebP images; changing an " +
+  "image's format, shrinking or compressing it; and re-saving an .xlsx or " +
+  ".csv as xlsx, csv or a PDF table. Several outputs come back as one .zip. " +
+  "This is the only tool that can use an attached image or PDF as a file -- " +
+  "never say an attached image cannot be put into a PDF, and never rewrite " +
+  "an attached file's content through another tool when this one converts " +
+  "it. Never write file bytes, base64, a storage key or a path yourself.";
+
 export const buildGeneratedArtifactToolConfig = (
   collector: GeneratedArtifactCollector,
   {
     registerDocumentBatch = false,
+    registerFileConversion = false,
     noteExecutionStarted,
   }: {
     registerDocumentBatch?: boolean;
+    /** Whether `convert_files` is sent. Only on a turn with a convertible file. */
+    registerFileConversion?: boolean;
     /**
      * Says that this call reached the tool, before any of its work.
      *
@@ -1146,6 +1415,18 @@ export const buildGeneratedArtifactToolConfig = (
             execute: async (input, { toolCallId }) => {
               noteExecutionStarted?.(toolCallId);
               return collector.runDocumentBatch(input, toolCallId);
+            },
+          }),
+        }
+      : {}),
+    ...(registerFileConversion
+      ? {
+          [CONVERT_FILES_TOOL_NAME]: tool({
+            description: CONVERT_FILES_TOOL_DESCRIPTION,
+            inputSchema: fileConversionSpecSchema,
+            execute: async (input, { toolCallId }) => {
+              noteExecutionStarted?.(toolCallId);
+              return collector.runFileConversion(input, toolCallId);
             },
           }),
         }

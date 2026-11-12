@@ -113,11 +113,23 @@ export const putArtifactObject = async (input: {
   mediaType: string;
   bytes: Uint8Array;
   modelId: string | null;
+  /**
+   * The ceiling for this object. Authored files keep the default; only a
+   * conversion of the user's own attachments passes the larger
+   * `maxConvertedOutputBytes`.
+   */
+  maxBytes?: number;
 }): Promise<StoredArtifact> => {
   if (input.bytes.byteLength <= 0) {
     throw new Error("Refusing to store an empty artifact.");
   }
-  if (input.bytes.byteLength > ARTIFACT_LIMITS.maxOutputBytes) {
+  if (
+    input.bytes.byteLength >
+    Math.min(
+      input.maxBytes ?? ARTIFACT_LIMITS.maxOutputBytes,
+      ARTIFACT_LIMITS.maxConvertedOutputBytes
+    )
+  ) {
     throw new Error("Refusing to store an artifact over the size limit.");
   }
 

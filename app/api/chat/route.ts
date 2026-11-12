@@ -4977,7 +4977,8 @@ async function handleChatPost(
                       },
                       // This turn's own files, by the handles the system block
                       // named. Already read, already ownership-checked; the
-                      // batch tool is the only reader and it never sees a key.
+                      // batch and conversion tools are the only readers and
+                      // neither ever sees a key.
                       turnAttachments: turnAttachmentBytes,
                   })
                 : null;
@@ -5000,6 +5001,9 @@ async function handleChatPost(
             ? buildGeneratedArtifactToolConfig(artifactCollector, {
                   registerDocumentBatch: Boolean(
                       artifactToolPlan?.registerDocumentBatch
+                  ),
+                  registerFileConversion: Boolean(
+                      artifactToolPlan?.registerFileConversion
                   ),
                   // Read at call time, which is after the assignment below:
                   // a tool cannot execute before the request that carries it

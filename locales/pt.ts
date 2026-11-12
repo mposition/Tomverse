@@ -552,6 +552,7 @@ export const pt = {
         artifactTypeMarkup: "Arquivo {ext}",
         artifactTypeCode: "Arquivo de código {ext}",
         artifactTypeArchive: "Arquivo ZIP",
+        artifactTypeImage: "Imagem {ext}",
         artifactDownload: "Baixar",
         artifactPreviewAlt: "Pré-visualização de {filename}",
         artifactReadyLabel: "Baixar {filename}, {type}, {size}",

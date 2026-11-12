@@ -388,3 +388,76 @@ test("the prompt never states a bare per-answer file limit", () => {
   // read as "you cannot make ten documents".
   assert.equal(/\d+ files per answer/.test(prompt), false);
 });
+
+/* -------------------------------------------------------------------------- */
+/* convert_files                                                                */
+/* -------------------------------------------------------------------------- */
+
+// docs/policy/generated-artifacts.md section 14.
+//
+// The refusal this exists to remove: Auto answered on a model that can create
+// files, the user attached two photographs and asked for one PDF, and the
+// model said it could not load the images -- every tool it had took content it
+// had to write, and a photograph is not content a model can write.
+
+test("an attached image registers the conversion tool and names its handle", () => {
+  const result = plan({ turnAttachments: attached("image/jpeg", "image/png") });
+  assert.equal(result.mode, "generate");
+  assert.equal(result.registerFileConversion, true);
+  assert.match(result.systemPrompt, /`convert_files` is available for this message/);
+  assert.match(result.systemPrompt, /operation: "to_pdf"/);
+  assert.match(result.systemPrompt, /The files it can read here: `att_1`, `att_2`\./);
+  assert.match(
+    result.systemPrompt,
+    /Never answer that attached images cannot be\s+made into a PDF/
+  );
+});
+
+test("a PDF or a spreadsheet registers it too; a file it cannot read does not", () => {
+  assert.equal(plan({ turnAttachments: attached("application/pdf") }).registerFileConversion, true);
+  assert.equal(plan({ turnAttachments: attached(XLSX) }).registerFileConversion, true);
+  assert.equal(plan({ turnAttachments: attached("text/csv") }).registerFileConversion, true);
+
+  const wordOnly = plan({ turnAttachments: attached(DOCX) });
+  assert.equal(wordOnly.registerFileConversion, false);
+  assert.equal(wordOnly.systemPrompt.includes("is available for this message. Use it when the user\nwants these files themselves"), false);
+
+  // Only the readable file is offered as a source.
+  const mixed = plan({ turnAttachments: attached(DOCX, "image/webp") });
+  assert.match(mixed.systemPrompt, /The files it can read here: `att_2`\./);
+});
+
+test("a turn with no attachments does not register it, and still says how to get one", () => {
+  const result = plan();
+  assert.equal(result.registerFileConversion, false);
+  assert.equal(result.systemPrompt.includes("is available for this message"), false);
+  // The request that arrives a message after the files: the model must ask
+  // for them rather than conclude the product cannot do it.
+  assert.match(result.systemPrompt, /send the\s+request again with the files attached/);
+  assert.match(result.systemPrompt, /never say it cannot be done/);
+});
+
+test("every turn that cannot make files leaves the conversion tool out", () => {
+  const images = attached("image/jpeg");
+  for (const overrides of [
+    { isAuthenticated: false },
+    { canPersist: false },
+    { modelId: "some-unverified-model" },
+    { conversationKind: "image" },
+    { provider: "openai", nativeSearchEnabled: true, nativeSearchForced: true },
+  ]) {
+    const result = plan({ ...overrides, turnAttachments: images });
+    assert.equal(result.registerFileConversion, false, JSON.stringify(overrides));
+    assert.equal(result.systemPrompt.includes("convert_files"), false, JSON.stringify(overrides));
+  }
+});
+
+test("the operator's switch removes the tool and every mention of it", () => {
+  const result = plan({
+    turnAttachments: attached("image/jpeg"),
+    fileConversionEnabled: false,
+  });
+  assert.equal(result.mode, "generate");
+  assert.equal(result.registerFileConversion, false);
+  assert.equal(result.systemPrompt.includes("convert_files"), false);
+});

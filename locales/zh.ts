@@ -603,6 +603,7 @@ export const zh = {
         artifactTypeMarkup: "{ext} 文件",
         artifactTypeCode: "{ext} 源文件",
         artifactTypeArchive: "ZIP 压缩包",
+        artifactTypeImage: "{ext} 图片",
         artifactDownload: "下载",
         artifactPreviewAlt: "{filename} 预览",
         artifactReadyLabel: "下载 {filename}，{type}，{size}",

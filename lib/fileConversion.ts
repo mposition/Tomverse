@@ -1,0 +1,984 @@
+/**
+ * File conversion: the part that reads and writes bytes.
+ *
+ * Policy: docs/policy/generated-artifacts.md section 14.
+ *
+ * Everything here works on files the *user* attached to the turn being
+ * answered, resolved and ownership-checked by the request layer before this
+ * module is reached. The model contributes handles and an instruction
+ * (lib/fileConversionCore.ts) and never a byte.
+ *
+ * Three libraries, each for the one thing nothing here should hand-write:
+ *
+ *   * `pdf-lib` copies pages between PDFs and places images on pages. Its
+ *     parser and writer yield to the event loop between batches of objects,
+ *     which is why it can run on the request thread.
+ *   * `sharp` decodes, orients, resizes and re-encodes images.
+ *   * `pdfjs-dist` draws a PDF page to pixels -- in a worker thread, for the
+ *     same two reasons lib/mediaSecurity.ts runs it in one: drawing is the
+ *     CPU-heavy path and must not stall other requests, and the Next.js
+ *     server bundle cannot carry pdf.js (it is loaded from node_modules at
+ *     run time by an `eval` worker).
+ */
+
+import "server-only";
+
+import path from "node:path";
+import { Worker } from "node:worker_threads";
+
+import { PDFDocument, degrees } from "pdf-lib";
+
+import {
+  FILE_CONVERSION_LIMITS,
+  FileConversionError,
+  PageSelectionError,
+  conversionSourceKind,
+  parsePageSelection,
+  type ConversionAttachment,
+  type ConversionImageFormat,
+  type ConversionSourceKind,
+  type FileConversionOperation,
+  type FileConversionSpec,
+  type PreparedConversion,
+} from "@/lib/fileConversionCore";
+import {
+  ARTIFACT_LIMITS,
+  admitDocumentSpec,
+  admitWorkbookSpecSafely,
+  sanitizeArtifactFilename,
+  type ArtifactCellValue,
+} from "@/lib/generatedArtifactCore";
+import { renderDocumentPdf } from "@/lib/generatedArtifactPdf";
+import { zipArchiveEntries } from "@/lib/generatedArtifactText";
+import { renderWorkbook } from "@/lib/generatedArtifactXlsx";
+import { XLSX_MEDIA_TYPE } from "@/lib/messageAttachmentCore";
+import {
+  SpreadsheetDataError,
+  readSpreadsheetGrid,
+} from "@/lib/spreadsheetDataRows";
+
+export { FileConversionError } from "@/lib/fileConversionCore";
+
+/* ------------------------------------------------------------------------ */
+/* Sources                                                                    */
+/* ------------------------------------------------------------------------ */
+
+type ResolvedSource = {
+  handle: string;
+  name: string;
+  mediaType: string;
+  kind: ConversionSourceKind;
+  bytes: Uint8Array;
+  pages: string | undefined;
+  rotate: number;
+};
+
+const ACCEPTED_KINDS: Record<
+  FileConversionOperation,
+  readonly ConversionSourceKind[]
+> = {
+  to_pdf: ["image", "pdf"],
+  split_pdf: ["pdf"],
+  pdf_to_images: ["pdf"],
+  convert_images: ["image"],
+  convert_spreadsheet: ["spreadsheet"],
+};
+
+const KIND_NOUN: Record<ConversionSourceKind, string> = {
+  image: "an image (png, jpg, webp, gif)",
+  pdf: "a PDF",
+  spreadsheet: "a spreadsheet (.xlsx or .csv)",
+};
+
+const plural = (count: number, noun: string) =>
+  `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+const describeAttached = (
+  attachments: ReadonlyMap<string, ConversionAttachment>
+): string =>
+  attachments.size === 0
+    ? "No files are attached to this message."
+    : `The files attached to this message are: ${Array.from(attachments)
+        .map(([handle, file]) => `${handle} ("${file.name}")`)
+        .join(", ")}.`;
+
+const resolveSources = (
+  spec: FileConversionSpec,
+  attachments: ReadonlyMap<string, ConversionAttachment>
+): ResolvedSource[] => {
+  const accepted = ACCEPTED_KINDS[spec.operation];
+  return spec.sources.map((source) => {
+    const file = attachments.get(source.attachment);
+    if (!file) {
+      throw new FileConversionError(
+        "SOURCE_MISSING",
+        `There is no file ${source.attachment} on this message. ` +
+          `${describeAttached(attachments)} A file from an earlier message ` +
+          "has to be attached again to be converted."
+      );
+    }
+    const kind = conversionSourceKind(file.mediaType);
+    if (!kind || !accepted.includes(kind)) {
+      throw new FileConversionError(
+        "SOURCE_TYPE",
+        `${source.attachment} ("${file.name}") cannot be used for ` +
+          `${spec.operation}: it needs ${accepted
+            .map((entry) => KIND_NOUN[entry])
+            .join(" or ")}.`
+      );
+    }
+    if (source.pages !== undefined && kind !== "pdf") {
+      throw new FileConversionError(
+        "PAGES_INVALID",
+        `${source.attachment} ("${file.name}") is not a PDF, so it has no pages to select.`
+      );
+    }
+    return {
+      handle: source.attachment,
+      name: file.name,
+      mediaType: file.mediaType,
+      kind,
+      bytes: file.bytes,
+      pages: source.pages,
+      rotate: source.rotate ?? 0,
+    };
+  });
+};
+
+/* ------------------------------------------------------------------------ */
+/* Names                                                                      */
+/* ------------------------------------------------------------------------ */
+
+/** A file's name without its extension, safe to use inside an archive. */
+const baseNameOf = (name: string): string => {
+  const leaf = name.split(/[\\/]/).pop() ?? "";
+  const withoutExtension = leaf.replace(/\.[A-Za-z0-9]{1,5}$/, "");
+  // The sanitiser appends an extension it owns; ".txt" is taken back off.
+  return sanitizeArtifactFilename(withoutExtension || "file", "txt").slice(0, -4);
+};
+
+/** Entry paths for a .zip, made unique without changing the first of a name. */
+const uniquePaths = () => {
+  const seen = new Map<string, number>();
+  return (base: string, extension: string): string => {
+    const count = (seen.get(`${base}.${extension}`) ?? 0) + 1;
+    seen.set(`${base}.${extension}`, count);
+    return count === 1 ? `${base}.${extension}` : `${base} (${count}).${extension}`;
+  };
+};
+
+const assertOutputSize = (bytes: Uint8Array, hint: string): Uint8Array => {
+  if (bytes.byteLength > FILE_CONVERSION_LIMITS.maxOutputBytes) {
+    throw new FileConversionError(
+      "OUTPUT_TOO_LARGE",
+      `The converted file would be ${Math.ceil(bytes.byteLength / 1024 / 1024)} MB, over the ` +
+        `${FILE_CONVERSION_LIMITS.maxOutputBytes / 1024 / 1024} MB limit. ${hint}`
+    );
+  }
+  return bytes;
+};
+
+/* ------------------------------------------------------------------------ */
+/* PDF reading                                                                */
+/* ------------------------------------------------------------------------ */
+
+const loadPdf = async (source: ResolvedSource): Promise<PDFDocument> => {
+  try {
+    return await PDFDocument.load(source.bytes, { updateMetadata: false });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/encrypted/i.test(message)) {
+      throw new FileConversionError(
+        "PDF_ENCRYPTED",
+        `${source.handle} ("${source.name}") is password-protected, so its pages cannot be ` +
+          "copied. The user has to remove the password and attach it again."
+      );
+    }
+    throw new FileConversionError(
+      "PDF_UNREADABLE",
+      `${source.handle} ("${source.name}") could not be read as a PDF.`
+    );
+  }
+};
+
+/** One loaded document per attachment, however many sources name it. */
+const pdfLoader = () => {
+  const loaded = new Map<string, Promise<PDFDocument>>();
+  return (source: ResolvedSource): Promise<PDFDocument> => {
+    let pending = loaded.get(source.handle);
+    if (!pending) {
+      pending = loadPdf(source);
+      loaded.set(source.handle, pending);
+    }
+    return pending;
+  };
+};
+
+const selectPages = (
+  source: ResolvedSource,
+  pageCount: number,
+  maxPages: number
+): number[] => {
+  try {
+    return parsePageSelection(source.pages, pageCount, maxPages);
+  } catch (error) {
+    if (error instanceof PageSelectionError) {
+      throw new FileConversionError(
+        "PAGES_INVALID",
+        `${source.handle} ("${source.name}"): ${error.message}`
+      );
+    }
+    throw error;
+  }
+};
+
+/* ------------------------------------------------------------------------ */
+/* Images                                                                     */
+/* ------------------------------------------------------------------------ */
+
+type EncodedImage = { data: Buffer; width: number; height: number };
+
+const encodeImage = async (
+  input: Uint8Array,
+  options: {
+    name: string;
+    handle: string;
+    rotate: number;
+    maxEdge?: number;
+    format: ConversionImageFormat;
+    quality?: number;
+  }
+): Promise<EncodedImage> => {
+  try {
+    const sharp = (await import("sharp")).default;
+    // `autoOrient` first: a phone photograph is stored sideways with a note
+    // saying which way is up, and a PDF page has nowhere to keep the note.
+    let pipeline = sharp(Buffer.from(input), {
+      limitInputPixels: FILE_CONVERSION_LIMITS.maxImagePixels,
+      failOn: "error",
+    }).autoOrient();
+    if (options.rotate) pipeline = pipeline.rotate(options.rotate);
+    if (options.maxEdge) {
+      pipeline = pipeline.resize({
+        width: options.maxEdge,
+        height: options.maxEdge,
+        fit: "inside",
+        withoutEnlargement: true,
+      });
+    }
+    pipeline = pipeline.toColourspace("srgb");
+    switch (options.format) {
+      case "jpg":
+        // JPEG has no transparency; without this a transparent PNG turns black.
+        pipeline = pipeline
+          .flatten({ background: "#ffffff" })
+          .jpeg({ quality: options.quality ?? 85 });
+        break;
+      case "webp":
+        pipeline = pipeline.webp({ quality: options.quality ?? 82 });
+        break;
+      default:
+        pipeline = pipeline.png({ compressionLevel: 9 });
+        break;
+    }
+    const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });
+    return { data, width: info.width, height: info.height };
+  } catch {
+    throw new FileConversionError(
+      "IMAGE_UNREADABLE",
+      `${options.handle} ("${options.name}") could not be read as an image.`
+    );
+  }
+};
+
+const PAGE_SIZES = {
+  a4: [595.28, 841.89],
+  letter: [612, 792],
+} as const;
+
+/** Points of margin around an image fitted to a paper size. */
+const PAGE_MARGIN = 18;
+/** Points per pixel for a page sized to its image (96 dpi). */
+const POINTS_PER_PIXEL = 0.75;
+
+/* ------------------------------------------------------------------------ */
+/* to_pdf                                                                     */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * How large an image may be on its way into a PDF, tried in order.
+ *
+ * The first step is print quality on A4; the later ones exist only for the
+ * request whose photographs would otherwise put the file over the output
+ * ceiling. A smaller file the user gets is better than a sharper one they do
+ * not.
+ */
+const PDF_IMAGE_STEPS = [
+  { maxEdge: FILE_CONVERSION_LIMITS.pdfImageMaxEdge, quality: 85 },
+  { maxEdge: 1754, quality: 76 },
+  { maxEdge: 1240, quality: 68 },
+] as const;
+
+const prepareToPdf = async (
+  spec: FileConversionSpec,
+  sources: ResolvedSource[]
+): Promise<PreparedConversion> => {
+  const load = pdfLoader();
+  const plan: Array<
+    | { source: ResolvedSource; kind: "image" }
+    | { source: ResolvedSource; kind: "pdf"; indices: number[] }
+  > = [];
+  let pageTotal = 0;
+  for (const source of sources) {
+    if (source.kind === "pdf") {
+      const document = await load(source);
+      const indices = selectPages(
+        source,
+        document.getPageCount(),
+        FILE_CONVERSION_LIMITS.maxPdfPages
+      );
+      pageTotal += indices.length;
+      plan.push({ source, kind: "pdf", indices });
+    } else {
+      pageTotal += 1;
+      plan.push({ source, kind: "image" });
+    }
+  }
+  if (pageTotal > FILE_CONVERSION_LIMITS.maxPdfPages) {
+    throw new FileConversionError(
+      "TOO_MANY_PAGES",
+      `That would be ${pageTotal} pages; one PDF can hold at most ` +
+        `${FILE_CONVERSION_LIMITS.maxPdfPages}.`
+    );
+  }
+
+  const build = async (
+    step: (typeof PDF_IMAGE_STEPS)[number]
+  ): Promise<Uint8Array> => {
+    const output = await PDFDocument.create();
+    output.setProducer("Tomverse");
+    output.setCreator("Tomverse");
+    for (const entry of plan) {
+      if (entry.kind === "pdf") {
+        const pages = await output.copyPages(
+          await load(entry.source),
+          entry.indices
+        );
+        for (const page of pages) {
+          if (entry.source.rotate) {
+            page.setRotation(
+              degrees((page.getRotation().angle + entry.source.rotate) % 360)
+            );
+          }
+          output.addPage(page);
+        }
+        continue;
+      }
+
+      const image = await encodeImage(entry.source.bytes, {
+        name: entry.source.name,
+        handle: entry.source.handle,
+        rotate: entry.source.rotate,
+        maxEdge: step.maxEdge,
+        format: "jpg",
+        quality: step.quality,
+      });
+      const embedded = await output.embedJpg(image.data);
+      const pageSize = spec.pageSize ?? "a4";
+      if (pageSize === "fit") {
+        const width = image.width * POINTS_PER_PIXEL;
+        const height = image.height * POINTS_PER_PIXEL;
+        output.addPage([width, height]).drawImage(embedded, {
+          x: 0,
+          y: 0,
+          width,
+          height,
+        });
+        continue;
+      }
+      const [short, long] = PAGE_SIZES[pageSize];
+      // The paper turns to suit the picture, as a person would turn it.
+      const landscape = image.width > image.height;
+      const pageWidth = landscape ? long : short;
+      const pageHeight = landscape ? short : long;
+      const scale = Math.min(
+        (pageWidth - PAGE_MARGIN * 2) / image.width,
+        (pageHeight - PAGE_MARGIN * 2) / image.height
+      );
+      const width = image.width * scale;
+      const height = image.height * scale;
+      output.addPage([pageWidth, pageHeight]).drawImage(embedded, {
+        x: (pageWidth - width) / 2,
+        y: (pageHeight - height) / 2,
+        width,
+        height,
+      });
+    }
+    return output.save();
+  };
+
+  const hasImages = plan.some((entry) => entry.kind === "image");
+  const fileCount = new Set(sources.map((source) => source.handle)).size;
+  return {
+    format: "pdf",
+    render: async () => {
+      let bytes: Uint8Array | null = null;
+      for (const step of hasImages ? PDF_IMAGE_STEPS : PDF_IMAGE_STEPS.slice(0, 1)) {
+        bytes = await build(step);
+        if (bytes.byteLength <= FILE_CONVERSION_LIMITS.maxOutputBytes) break;
+      }
+      return {
+        bytes: assertOutputSize(
+          bytes!,
+          "Offer to convert fewer files or fewer pages at a time."
+        ),
+        parts: `${plural(pageTotal, "page")} from ${plural(fileCount, "file")}`,
+      };
+    },
+  };
+};
+
+/* ------------------------------------------------------------------------ */
+/* split_pdf                                                                  */
+/* ------------------------------------------------------------------------ */
+
+const prepareSplitPdf = async (
+  spec: FileConversionSpec,
+  sources: ResolvedSource[]
+): Promise<PreparedConversion> => {
+  const load = pdfLoader();
+  const first = sources[0];
+  const document = await load(first);
+  const pageCount = document.getPageCount();
+
+  let parts: number[][];
+  const everyPage = sources.length === 1 && first.pages === undefined;
+  if (spec.splitEvery !== undefined || everyPage) {
+    const size = spec.splitEvery ?? 1;
+    const all = selectPages(first, pageCount, FILE_CONVERSION_LIMITS.maxPdfPages);
+    parts = [];
+    for (let start = 0; start < all.length; start += size) {
+      parts.push(all.slice(start, start + size));
+    }
+  } else {
+    parts = sources.map((source) =>
+      selectPages(source, pageCount, FILE_CONVERSION_LIMITS.maxPdfPages)
+    );
+  }
+  if (parts.length > FILE_CONVERSION_LIMITS.maxSplitParts) {
+    throw new FileConversionError(
+      "TOO_MANY_PAGES",
+      `That would be ${parts.length} files; one split can produce at most ` +
+        `${FILE_CONVERSION_LIMITS.maxSplitParts}. Use a larger splitEvery.`
+    );
+  }
+
+  const base = baseNameOf(first.name);
+  const digits = String(parts.length).length;
+  return {
+    format: "zip",
+    render: async () => {
+      const entries: Array<{ path: string; bytes: Uint8Array }> = [];
+      for (const [index, indices] of parts.entries()) {
+        const output = await PDFDocument.create();
+        output.setProducer("Tomverse");
+        output.setCreator("Tomverse");
+        const pages = await output.copyPages(document, indices);
+        for (const page of pages) {
+          if (first.rotate) {
+            page.setRotation(
+              degrees((page.getRotation().angle + first.rotate) % 360)
+            );
+          }
+          output.addPage(page);
+        }
+        entries.push({
+          path: `${base}_${String(index + 1).padStart(Math.max(2, digits), "0")}.pdf`,
+          bytes: await output.save(),
+        });
+      }
+      return {
+        bytes: assertOutputSize(
+          zipArchiveEntries(entries),
+          "Offer to split a smaller range of pages."
+        ),
+        parts: `${plural(parts.length, "PDF file")} from ${plural(pageCount, "page")}`,
+      };
+    },
+  };
+};
+
+/* ------------------------------------------------------------------------ */
+/* pdf_to_images                                                              */
+/* ------------------------------------------------------------------------ */
+
+const RASTER_TIMEOUT_MS = 90_000;
+/** Pixels in one drawn page. A4 at 300 dpi is under nine million. */
+const RASTER_MAX_PAGE_PIXELS = 40_000_000;
+
+// Plain filesystem paths resolved from the working directory, for the reasons
+// spelled out in lib/mediaSecurity.ts: pdf.js joins these with a file name by
+// string concatenation, and the server bundle cannot resolve the package.
+const pdfjsDir = (dir: string) =>
+  `${path
+    .join(process.cwd(), "node_modules/pdfjs-dist", dir)
+    .split(path.sep)
+    .join("/")}/`;
+
+const rasterWorkerSource = `
+const { parentPort, workerData } = require("node:worker_threads");
+
+(async () => {
+    let loadingTask;
+    try {
+        const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        loadingTask = pdfjs.getDocument({
+            data: new Uint8Array(workerData.buffer),
+            disableWorker: true,
+            isEvalSupported: false,
+            useSystemFonts: false,
+            stopAtErrors: false,
+            standardFontDataUrl: workerData.standardFontDataUrl,
+            cMapUrl: workerData.cMapUrl,
+            cMapPacked: true,
+        });
+        const document = await loadingTask.promise;
+        const buffers = [];
+        let total = 0;
+        for (const index of workerData.pageIndices) {
+            const page = await document.getPage(index + 1);
+            const viewport = page.getViewport({ scale: workerData.scale });
+            const width = Math.ceil(viewport.width);
+            const height = Math.ceil(viewport.height);
+            if (width * height > workerData.maxPagePixels) {
+                throw new Error("PAGE_TOO_LARGE");
+            }
+            const target = document.canvasFactory.create(width, height);
+            await page.render({
+                canvasContext: target.context,
+                canvas: target.canvas,
+                viewport,
+            }).promise;
+            const png = target.canvas.toBuffer("image/png");
+            page.cleanup();
+            document.canvasFactory.destroy(target);
+            total += png.length;
+            if (total > workerData.maxTotalBytes) throw new Error("OUTPUT_TOO_LARGE");
+            buffers.push(Uint8Array.from(png).buffer);
+        }
+        await loadingTask.destroy();
+        parentPort.postMessage({ ok: true, buffers }, buffers);
+    } catch (error) {
+        try {
+            if (loadingTask) await loadingTask.destroy();
+        } catch {}
+        const message = error && typeof error.message === "string" ? error.message : "";
+        const code =
+            message === "PAGE_TOO_LARGE" || message === "OUTPUT_TOO_LARGE"
+                ? message
+                : error && error.code === "ERR_MODULE_NOT_FOUND"
+                  ? "UNAVAILABLE"
+                  : "RENDER_FAILED";
+        parentPort.postMessage({ ok: false, code });
+    }
+})();
+`;
+
+type RasterResult =
+  | { ok: true; buffers: ArrayBuffer[] }
+  | { ok: false; code: string };
+
+/** Draws the named pages of one PDF to PNG, off the request thread. */
+const rasterizePdfPages = (
+  source: ResolvedSource,
+  pageIndices: number[],
+  dpi: number
+): Promise<Uint8Array[]> =>
+  new Promise((resolve, reject) => {
+    // A copy, so transferring it to the worker leaves the caller's bytes whole.
+    const buffer = Uint8Array.from(source.bytes).buffer;
+    // Constructed here and named nowhere else, so the string above is the
+    // whole of what the worker can run. A constructor that throws rejects the
+    // promise, and the caller reports the conversion as failed.
+    const worker = new Worker(rasterWorkerSource, {
+      eval: true,
+      workerData: {
+        buffer,
+        pageIndices,
+        scale: dpi / 72,
+        maxPagePixels: RASTER_MAX_PAGE_PIXELS,
+        // Raw PNG is larger than what is finally stored; this only stops a
+        // runaway before it exhausts memory.
+        maxTotalBytes: FILE_CONVERSION_LIMITS.maxOutputBytes * 4,
+        standardFontDataUrl: pdfjsDir("standard_fonts"),
+        cMapUrl: pdfjsDir("cmaps"),
+      },
+      transferList: [buffer],
+      resourceLimits: {
+        maxOldGenerationSizeMb: 512,
+        maxYoungGenerationSizeMb: 64,
+        stackSizeMb: 4,
+      },
+    });
+
+    let settled = false;
+    const finish = (error: FileConversionError | null, pages?: Uint8Array[]) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      void worker.terminate();
+      if (error) reject(error);
+      else resolve(pages!);
+    };
+    const failed = () =>
+      new FileConversionError(
+        "CONVERSION_FAILED",
+        `${source.handle} ("${source.name}") could not be drawn as images.`
+      );
+    const timeout = setTimeout(
+      () =>
+        finish(
+          new FileConversionError(
+            "CONVERSION_FAILED",
+            `Drawing ${source.handle} ("${source.name}") took too long. Offer fewer pages or a lower dpi.`
+          )
+        ),
+      RASTER_TIMEOUT_MS
+    );
+
+    worker.once("message", (result: RasterResult) => {
+      if (result?.ok) {
+        finish(null, result.buffers.map((entry) => new Uint8Array(entry)));
+        return;
+      }
+      if (result?.code === "PAGE_TOO_LARGE" || result?.code === "OUTPUT_TOO_LARGE") {
+        finish(
+          new FileConversionError(
+            "OUTPUT_TOO_LARGE",
+            `The pages of ${source.handle} ("${source.name}") are too large to draw at ` +
+              `${dpi} dpi. Offer a lower dpi or fewer pages.`
+          )
+        );
+        return;
+      }
+      if (result?.code === "UNAVAILABLE") {
+        finish(
+          new FileConversionError(
+            "RASTER_UNAVAILABLE",
+            "Drawing PDF pages as images is not available right now."
+          )
+        );
+        return;
+      }
+      finish(failed());
+    });
+    worker.once("error", () => finish(failed()));
+    worker.once("exit", (code) => {
+      if (code !== 0) finish(failed());
+    });
+  });
+
+const IMAGE_EXTENSION: Record<ConversionImageFormat, string> = {
+  png: "png",
+  jpg: "jpg",
+  webp: "webp",
+};
+
+const preparePdfToImages = async (
+  spec: FileConversionSpec,
+  sources: ResolvedSource[]
+): Promise<PreparedConversion> => {
+  const load = pdfLoader();
+  const groups: Array<{ source: ResolvedSource; indices: number[] }> = [];
+  let pageTotal = 0;
+  for (const source of sources) {
+    const document = await load(source);
+    const indices = selectPages(
+      source,
+      document.getPageCount(),
+      FILE_CONVERSION_LIMITS.maxRasterPages
+    );
+    pageTotal += indices.length;
+    groups.push({ source, indices });
+  }
+  if (pageTotal > FILE_CONVERSION_LIMITS.maxRasterPages) {
+    throw new FileConversionError(
+      "TOO_MANY_PAGES",
+      `That would be ${pageTotal} images; one request can draw at most ` +
+        `${FILE_CONVERSION_LIMITS.maxRasterPages} pages. Offer a page range.`
+    );
+  }
+
+  const imageFormat = spec.imageFormat ?? "png";
+  const extension = IMAGE_EXTENSION[imageFormat];
+  const dpi = spec.dpi ?? FILE_CONVERSION_LIMITS.defaultDpi;
+  return {
+    format: pageTotal === 1 ? imageFormat : "zip",
+    render: async () => {
+      const nameFor = uniquePaths();
+      const entries: Array<{ path: string; bytes: Uint8Array }> = [];
+      for (const { source, indices } of groups) {
+        const pages = await rasterizePdfPages(source, indices, dpi);
+        const base = baseNameOf(source.name);
+        for (const [position, png] of pages.entries()) {
+          const image = await encodeImage(png, {
+            name: source.name,
+            handle: source.handle,
+            rotate: source.rotate,
+            format: imageFormat,
+            ...(spec.quality !== undefined ? { quality: spec.quality } : {}),
+          });
+          entries.push({
+            path: nameFor(`${base}_p${indices[position] + 1}`, extension),
+            bytes: image.data,
+          });
+        }
+      }
+      const hint = "Offer a lower dpi, JPG instead of PNG, or fewer pages.";
+      return {
+        bytes: assertOutputSize(
+          entries.length === 1 ? entries[0].bytes : zipArchiveEntries(entries),
+          hint
+        ),
+        parts: `${plural(pageTotal, `${imageFormat.toUpperCase()} image`)} at ${dpi} dpi`,
+      };
+    },
+  };
+};
+
+/* ------------------------------------------------------------------------ */
+/* convert_images                                                             */
+/* ------------------------------------------------------------------------ */
+
+const prepareConvertImages = async (
+  spec: FileConversionSpec,
+  sources: ResolvedSource[]
+): Promise<PreparedConversion> => {
+  const imageFormat = spec.imageFormat!;
+  const extension = IMAGE_EXTENSION[imageFormat];
+  return {
+    format: sources.length === 1 ? imageFormat : "zip",
+    render: async () => {
+      const nameFor = uniquePaths();
+      const entries: Array<{ path: string; bytes: Uint8Array }> = [];
+      let last: EncodedImage | null = null;
+      for (const source of sources) {
+        last = await encodeImage(source.bytes, {
+          name: source.name,
+          handle: source.handle,
+          rotate: source.rotate,
+          format: imageFormat,
+          ...(spec.maxDimension !== undefined ? { maxEdge: spec.maxDimension } : {}),
+          ...(spec.quality !== undefined ? { quality: spec.quality } : {}),
+        });
+        entries.push({
+          path: nameFor(baseNameOf(source.name), extension),
+          bytes: last.data,
+        });
+      }
+      const single = entries.length === 1 && last;
+      return {
+        bytes: assertOutputSize(
+          single ? entries[0].bytes : zipArchiveEntries(entries),
+          "Offer a smaller maxDimension or a lower quality."
+        ),
+        parts: single
+          ? `${imageFormat.toUpperCase()} image, ${last!.width}x${last!.height} pixels`
+          : plural(entries.length, `${imageFormat.toUpperCase()} image`),
+      };
+    },
+  };
+};
+
+/* ------------------------------------------------------------------------ */
+/* convert_spreadsheet                                                        */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * A cell that is unambiguously a plain number.
+ *
+ * Deliberately narrow. "007", "1e5", "+82-10" and a sixteen-digit card number
+ * are all things a spreadsheet would happily reinterpret and a person would
+ * not thank it for; they stay text. What is left is written as a number so a
+ * converted workbook can be summed and a converted CSV is not guarded as if
+ * "-5" were a formula.
+ */
+const PLAIN_NUMBER = /^-?(0|[1-9]\d{0,14})(\.\d{1,10})?$/;
+
+const toCell = (value: string): ArtifactCellValue => {
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  return PLAIN_NUMBER.test(trimmed) ? Number(trimmed) : value;
+};
+
+/** Excel's rules for a worksheet name, applied to a name we did not choose. */
+const worksheetName = (name: string): string =>
+  name.replace(/[[\]:*?/\\]/g, "_").replace(/^'+|'+$/g, "").slice(0, 31).trim() ||
+  "Sheet1";
+
+const prepareConvertSpreadsheet = async (
+  spec: FileConversionSpec,
+  sources: ResolvedSource[]
+): Promise<PreparedConversion> => {
+  const source = sources[0];
+  const target = spec.targetFormat!;
+  const sourceFormat = source.mediaType.startsWith(XLSX_MEDIA_TYPE) ? "xlsx" : "csv";
+  if (sourceFormat === target) {
+    throw new FileConversionError(
+      "SOURCE_TYPE",
+      `${source.handle} ("${source.name}") is already a .${target} file.`
+    );
+  }
+
+  let table: ReturnType<typeof readSpreadsheetGrid>;
+  try {
+    table = readSpreadsheetGrid(source.bytes, {
+      mediaType: sourceFormat === "csv" ? "text/csv" : source.mediaType,
+      ...(spec.sheet !== undefined ? { sheet: spec.sheet } : {}),
+      maxRows: FILE_CONVERSION_LIMITS.maxSpreadsheetRows,
+    });
+  } catch (error) {
+    if (error instanceof SpreadsheetDataError) {
+      throw new FileConversionError(
+        "SPREADSHEET_UNREADABLE",
+        `${source.handle} ("${source.name}"): ${error.message}`
+      );
+    }
+    throw error;
+  }
+  if (table.grid.length === 0) {
+    throw new FileConversionError(
+      "SPREADSHEET_UNREADABLE",
+      `${source.handle} ("${source.name}") has no rows to convert.`
+    );
+  }
+
+  const width = table.grid.reduce((max, row) => Math.max(max, row.length), 0);
+  const columnLimit =
+    target === "pdf"
+      ? ARTIFACT_LIMITS.maxDocumentTableColumns
+      : ARTIFACT_LIMITS.maxColumnsPerSheet;
+  const dataRows = table.grid.length - 1;
+  if (width > columnLimit) {
+    throw new FileConversionError(
+      "TOO_MANY_PAGES",
+      `The sheet has ${width} columns; a .${target} conversion holds at most ${columnLimit}.`
+    );
+  }
+  if (target === "pdf" && dataRows > ARTIFACT_LIMITS.maxDocumentTableRows) {
+    throw new FileConversionError(
+      "TOO_MANY_PAGES",
+      `The sheet has ${dataRows} rows; a PDF table holds at most ` +
+        `${ARTIFACT_LIMITS.maxDocumentTableRows}. Offer xlsx or csv instead.`
+    );
+  }
+
+  const headers = Array.from({ length: width }, (_, index) => {
+    const header = (table.grid[0][index] ?? "").trim();
+    return header || `Column ${index + 1}`;
+  });
+  const rows = table.grid
+    .slice(1)
+    .map((row) =>
+      Array.from({ length: width }, (_, index) => toCell(row[index] ?? ""))
+    );
+  const otherSheets = table.sheetNames.length > 1;
+  const parts =
+    `${plural(rows.length, "row")}, ${plural(width, "column")}` +
+    (sourceFormat === "xlsx" ? ` from worksheet "${table.sheetName}"` : "") +
+    (otherSheets
+      ? ` (the workbook has ${table.sheetNames.length} worksheets; only this one was converted)`
+      : "");
+
+  if (target === "pdf") {
+    const numberColumns = headers
+      .map((_, index) => index)
+      .filter(
+        (index) =>
+          rows.some((row) => row[index] !== null) &&
+          rows.every((row) => row[index] === null || typeof row[index] === "number")
+      );
+    const admission = admitDocumentSpec({
+      filename: spec.filename,
+      format: "pdf",
+      ...(sourceFormat === "xlsx" ? { title: table.sheetName } : {}),
+      blocks: [
+        {
+          type: "table",
+          columns: headers,
+          rows,
+          ...(numberColumns.length ? { pdfNumberColumns: numberColumns } : {}),
+        },
+      ],
+    });
+    if (!admission.ok) {
+      throw new FileConversionError("SPREADSHEET_UNREADABLE", admission.detail);
+    }
+    return {
+      format: "pdf",
+      render: async () => ({
+        bytes: assertOutputSize(
+          renderDocumentPdf(admission.spec),
+          "Offer xlsx or csv instead."
+        ),
+        parts,
+      }),
+    };
+  }
+
+  const admission = admitWorkbookSpecSafely({
+    filename: spec.filename,
+    format: target,
+    worksheets: [
+      {
+        name: worksheetName(table.sheetName),
+        columns: headers.map((header) => ({ header })),
+        rows,
+      },
+    ],
+  });
+  if (!admission.ok) {
+    throw new FileConversionError("SPREADSHEET_UNREADABLE", admission.detail);
+  }
+  return {
+    format: target,
+    render: async () => ({
+      bytes: assertOutputSize(
+        renderWorkbook(admission.spec, admission.spec.format).bytes,
+        "Offer a smaller range of rows."
+      ),
+      parts,
+    }),
+  };
+};
+
+/* ------------------------------------------------------------------------ */
+/* Entry point                                                                */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Checks a conversion against the turn's own files and says what it will make.
+ *
+ * Throws `FileConversionError` for everything that is the request's fault or
+ * the file's -- a handle that is not on the turn, a photograph offered as a
+ * PDF, page 9 of a six-page file, a password-protected PDF. Nothing has been
+ * written when it throws.
+ */
+export const prepareFileConversion = async (
+  spec: FileConversionSpec,
+  attachments: ReadonlyMap<string, ConversionAttachment>
+): Promise<PreparedConversion> => {
+  const sources = resolveSources(spec, attachments);
+  switch (spec.operation) {
+    case "to_pdf":
+      return prepareToPdf(spec, sources);
+    case "split_pdf":
+      return prepareSplitPdf(spec, sources);
+    case "pdf_to_images":
+      return preparePdfToImages(spec, sources);
+    case "convert_images":
+      return prepareConvertImages(spec, sources);
+    case "convert_spreadsheet":
+      return prepareConvertSpreadsheet(spec, sources);
+  }
+};

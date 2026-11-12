@@ -596,6 +596,7 @@ export const ko = {
         artifactTypeMarkup: "{ext} 파일",
         artifactTypeCode: "{ext} 소스 파일",
         artifactTypeArchive: "ZIP 압축 파일",
+        artifactTypeImage: "{ext} 이미지",
         artifactDownload: "다운로드",
         artifactPreviewAlt: "{filename} 미리보기",
         artifactReadyLabel: "{filename} 다운로드, {type}, {size}",
