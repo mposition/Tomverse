@@ -108,7 +108,7 @@ docs/policy/conversation-product-key.md §5.2. 요청 본문은 idempotency key�
 
 | endpoint | productKey | selectionMode | 모델 |
 |---|---|---|---|
-| `POST /api/external-conversations/[id]/continuations` | Chat 진입이 제공되면(`chatSurfaceAvailable`) `chat`, 아니거나 읽지 못하면 `review` | chat이면 `auto`, review면 `manual` | chat은 계정 새 대화 조합의 첫 모델 하나, review는 조합 전체 |
+| `POST /api/external-conversations/[id]/continuations` | 항상 `chat`(운영자 결정 2026-11-12: Auto 상태가 Chat을 닫지 않음) | chat이면 `auto`, review면 `manual` | chat은 계정 새 대화 조합의 첫 모델 하나, review는 조합 전체 |
 | `POST /api/conversations/[id]/continuation/review` | `review` | `manual` | 조합 전체 |
 
 두 번째 endpoint는 Chat 이어가기 화면의 "Review에서 여러 모델로 비교" 버튼입니다.

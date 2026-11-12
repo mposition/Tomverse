@@ -1000,19 +1000,17 @@ test("the service writes the endpoint's product through the shared writer", () =
     assert.match(source, /webSearchMode: APP_DEFAULTS\.defaultWebSearchMode,/);
 });
 
-test("the default continuation is Chat only where Chat is offered", () => {
-    // Owner decision 2026-10-25. The same surface-entry question
-    // `POST /api/products/chat/conversations` asks, failing to Review.
+test("the default continuation is always Chat", () => {
+    // Owner decision 2026-11-12: rollout state no longer sends it to Review.
     const helper = readFileSync("lib/externalContinuationCreateRoute.ts", "utf8");
-    assert.match(helper, /autoAvailabilityFor\(userId\)\.then\(chatSurfaceAvailable\)\.catch\(\(\) => false\)/);
-    assert.match(helper, /\?\s*"chat"\s*:\s*"review";/);
+    assert.doesNotMatch(helper, /autoAvailabilityFor|chatSurfaceAvailable/);
     // The body still carries only the key; nothing the client sends picks it.
     assert.match(helper, /idempotencyKey: z\.string\(\)\.uuid\(\),\s*\}\)\s*\.strict\(\)/);
     const route = readFileSync(
         "app/api/external-conversations/[conversationId]/continuations/route.ts",
         "utf8"
     );
-    assert.match(route, /productKey: await defaultContinuationProduct\(userId\)/);
+    assert.match(route, /productKey: "chat"/);
 });
 
 test("no in-conversation image path starts on a continuation route", () => {

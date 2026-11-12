@@ -6,15 +6,18 @@
  *
  * ## Three consumers, one decision
  *
- * The product question has three askers, and they used to have none:
+ * The product question has two askers:
  *
- *   1. surface entry   -- may this account start a Chat? (`chatSurfaceAvailable`)
- *   2. UI exposure     -- is Auto offered? (`autoUiAvailability`)
- *   3. turn routing    -- does Auto route this turn? (`selectAutoModel`)
+ *   1. UI exposure     -- is Auto offered? (`autoUiAvailability`)
+ *   2. turn routing    -- does Auto route this turn? (`selectAutoModel`)
  *
  * If each decided separately the screen and the execution would be free to
  * disagree, and the user would get a control that flips, saves and changes
- * nothing -- which UI contract §1 exists to prevent. So all three call this.
+ * nothing -- which `docs/ui-contracts/auto-model-selection.md §1` exists to
+ * prevent. So both call this.
+ * Starting a Chat is not one of them: every account may start one, and Auto
+ * state only decides whether the Auto option is offered (owner decision
+ * 2026-11-12).
  *
  * ## Why the product comes before the cohort
  *
@@ -152,19 +155,3 @@ export const autoProductBoundary = (
     defect: false,
   };
 };
-
-/**
- * Whether this account may *start* a Tomverse Chat conversation.
- *
- * Deliberately separate from whether an existing conversation still opens.
- * Decision record §3: "chatSurfaceAvailable과 기존 대화의 지속 가능성은
- * 분리합니다" -- the first is "can I begin one", the second is "can I open the
- * one I have". Merging them locks a user out of their own conversation the
- * moment the cohort shrinks, which is the same failure UI contract §5 avoids
- * by accepting a return to manual unconditionally.
- *
- * Takes the availability decision rather than computing it, so the surface and
- * the toggle cannot read different cohort state.
- */
-export const chatSurfaceAvailable = (availability: { offered: boolean }): boolean =>
-  availability.offered;
