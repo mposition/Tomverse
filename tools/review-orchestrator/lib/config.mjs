@@ -126,8 +126,21 @@ export function validateConfig(raw) {
     if (provider.priority !== undefined && !(Number.isInteger(provider.priority) && provider.priority >= 0)) {
       errors.push(`${label}: priority must be a non-negative integer`);
     }
-    if (provider.quotaProbe !== undefined && !["amux", "claude", "codex", "cursor", "copilot", "manual"].includes(provider.quotaProbe)) {
-      errors.push(`${label}: quotaProbe must be amux, claude, codex, cursor, copilot or manual`);
+    if (provider.quotaProbe !== undefined && !["amux", "claude", "codex", "cursor", "copilot", "antigravity", "manual"].includes(provider.quotaProbe)) {
+      errors.push(`${label}: quotaProbe must be amux, claude, codex, cursor, copilot, antigravity or manual`);
+    }
+    // Spending prepaid credit is the operator's switch, and only Codex reports it.
+    if (provider.useCredits !== undefined && (provider.useCredits !== true && provider.useCredits !== false ||
+        !["amux", "codex"].includes(provider.quotaProbe))) {
+      errors.push(`${label}: useCredits is true or false, with quotaProbe amux or codex`);
+    }
+    if (provider.io !== undefined && provider.io !== "antigravity-stream-json") {
+      errors.push(`${label}: io must be antigravity-stream-json`);
+    }
+    // agy reads the prompt as an event on stdin; a prompt file would go unread.
+    if (provider.io !== undefined && Array.isArray(provider.args) &&
+        provider.args.some((arg) => arg.includes("{promptFile}") || arg.includes("{promptDir}"))) {
+      errors.push(`${label}: io providers take the prompt on stdin, not {promptFile}`);
     }
     if (provider.quotaProbe === "amux" && !amuxUsageEndpoint(config.amuxUsageUrl)) {
       errors.push(`${label}: quotaProbe amux needs amuxUsageUrl, an http(s) URL on this machine`);

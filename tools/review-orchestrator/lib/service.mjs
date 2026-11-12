@@ -19,6 +19,7 @@ import {
   removeWorktree,
   SHA,
 } from "./git.mjs";
+import { antigravityAnswer, antigravityStdin } from "./antigravity.mjs";
 import { buildPrompt } from "./prompt.mjs";
 import { consumeManualQuota } from "./quota.mjs";
 import { Store, newJobId } from "./store.mjs";
@@ -396,6 +397,10 @@ export class Orchestrator {
     const maxOutput = this.config.maxOutputBytes;
     return new Promise((resolve) => {
       const out = createWriteStream(this.store.reviewPath(job.id, slot.index));
+      // An event-stream CLI (agy) keeps its raw stream beside the review; the
+      // review file gets only its final answer, as for every other reviewer.
+      const eventStream = provider.io === "antigravity-stream-json";
+      const raw = eventStream ? createWriteStream(this.store.reviewPath(job.id, slot.index, ".stream.jsonl")) : null;
       const err = createWriteStream(this.store.reviewPath(job.id, slot.index, ".stderr.txt"));
       const chunks = [];
       let size = 0;
@@ -420,6 +425,7 @@ export class Orchestrator {
         this.killers.delete(kill);
         if (promptDir) rmSync(promptDir, { recursive: true, force: true });
         out.end();
+        raw?.end();
         err.end();
         resolve(outcome);
       };
@@ -469,7 +475,7 @@ export class Orchestrator {
           return;
         }
         chunks.push(chunk);
-        out.write(chunk);
+        (raw ?? out).write(chunk);
       });
       let stderrSize = 0;
       child.stderr.on("data", (chunk) => {
@@ -484,11 +490,16 @@ export class Orchestrator {
         if (timedOut) return done({ verdict: "unknown", reason: "timeout", findings: [] });
         if (overflow) return done({ verdict: "unknown", reason: "output_too_large", findings: [] });
         if (code !== 0) return done({ verdict: "unknown", reason: `reviewer_exit_${code}`, findings: [] });
-        done(parseReviewerOutput(Buffer.concat(chunks).toString("utf8")));
+        const stdout = Buffer.concat(chunks).toString("utf8");
+        if (!eventStream) return done(parseReviewerOutput(stdout));
+        const answer = antigravityAnswer(stdout);
+        if (answer.text === undefined) return done({ verdict: "unknown", reason: answer.reason, findings: [] });
+        out.write(answer.text);
+        done(parseReviewerOutput(answer.text));
       });
       if (!promptFile) {
         child.stdin.on("error", () => {});
-        child.stdin.end(text);
+        child.stdin.end(eventStream ? antigravityStdin(text) : text);
       }
     });
   }

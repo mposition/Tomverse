@@ -200,6 +200,13 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 - **Cursor는 AMUX가 `credit_usd`를 보고하는 빌드로 바뀐 뒤에 `amux`로 옮깁니다.** 그 전 빌드는
   크레딧을 읽지 않아, 포함 사용량이 소진되면 크레딧이 남아도 소진으로 보입니다. 그때까지는
   `quotaProbe: "cursor"`에 둡니다.
+- **Codex 크레딧으로 계속 배정(`useCredits`, 기본 꺼짐).** Codex는 플랜 창(5시간·7일)을 다 쓴 뒤에도
+  계정에 선불 크레딧이 있으면 크레딧으로 계속 처리합니다. 크레딧은 실제 돈이므로 provider에
+  `"useCredits": true`를 둔 때만 씁니다(운영자 결정 2026-11-13). 켜면 AMUX Codex 항목의
+  `buckets[].credits`(또는 `quotaProbe: "codex"`의 `account/rateLimits/read` 응답의 `credits`)를 읽어,
+  `hasCredits`가 참이고 잔액이 0보다 크거나 `unlimited`이면 창이 0%여도 배정합니다. 잔액을 못 읽었거나
+  형식이 숫자가 아니면 크레딧이 없는 것으로 봅니다. `unknown`이나 30분을 넘긴 stale 값은 크레딧으로
+  되살리지 않습니다. 잔액은 `status`의 `credits`에 보입니다. 끄려면 `false`로 바꾸고 재시작합니다.
 
 아래의 공급사별 probe는 AMUX가 없는 기계나 AMUX가 보지 않는 계정을 위한 것입니다.
 
@@ -214,6 +221,12 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 `quotaProbe: "codex"`는 reviewer와 같은 `codex` 실행 파일의 app-server에서
 `account/rateLimits/read`를 조회합니다. 각 창의 남은 비율이 0이면 배정하지
 않습니다. 조회 실패·응답 형식 불명·설정 누락도 새 배정을 대기시킵니다.
+
+`quotaProbe: "antigravity"`는 reviewer와 같은 `agy` 실행 파일로 `agy -p /usage --output-format json`을
+실행해(모델 호출 없음, 토큰 0) "Gemini Models" 그룹의 주간·5시간 bucket 중 적게 남은 쪽을 잔액으로
+봅니다. 리셋 시각이 지난 bucket, 형식이 다른 응답, 실패는 `unknown`입니다. AMUX는 Antigravity를
+측정하지 않으므로(`measured: false`) `amux`로는 배정되지 않습니다. 이 probe는 review 계정 자신의 agy
+로그인만 읽습니다.
 
 `quotaProbe: "cursor"`는 Cursor CLI 2026.10.01의 [`/usage`](https://cursor.com/docs/cli/changelog)가
 쓰는 `DashboardService/GetCurrentPeriodUsage`를 조회합니다. Ubuntu에서는
@@ -307,6 +320,28 @@ $RO status
   (provider의 `passEnv`와 systemd `EnvironmentFile`). 1년 뒤 만료되면 Claude reviewer만
   `unknown`을 돌려주므로 같은 방법으로 갱신합니다. Codex는 `codex login --device-auth`로
   붙여 넣기 없이 로그인합니다.
+- **Antigravity CLI(`agy`, 2026-11-13 추가, 서버 실측 전).** Gemini 4 Argon을 고정해 `vendor: "google"`로
+  둡니다(다른 네 공급사와 겹치지 않음). 인자는 AMUX v22 worker가 박스에서 실측한 agy 1.5.4 형식을 따릅니다
+  (`lib/amux/v22ChannelRun.mjs`): 프롬프트는 stdin의 NDJSON user 이벤트 하나(`io: "antigravity-stream-json"`가
+  감쌉니다), 출력은 stream-json이고 판정은 마지막 `result` 이벤트의 `response`에서 읽습니다. 원본 스트림은
+  `reviews/<slot>.stream.jsonl`, `report`에는 최종 답만 남습니다. `--settings`의 deny 규칙이 명령 실행·쓰기·URL·MCP를
+  막고, agy의 파일 도구는 `request-review` 권한 모드에서만 작업 폴더 밖을 읽지 못하므로 첫 `init` 이벤트가
+  그 모드가 아니거나, `read_file` 외 도구를 부른 실행은 `unknown`입니다. 켜는 순서(review 계정, 박스 root):
+  1. agy를 review 계정 PATH에 설치하고 `agy` 로그인(Google AI 계정; tommy의 로그인은 review 계정이 읽을 수 없음).
+  2. 읽기 전용 agent 파일 `~review/.gemini/config/agents/review-read/agent.md`:
+     ```
+     ---
+     name: review-read
+     description: Independent code reviewer, read-only
+     mainAgent: true
+     tools:
+       - view_file
+     ---
+     Work only in the current workspace and only with the tools you have.
+     ```
+  3. 새 unit 파일(`AGY_CLI_DISABLE_AUTO_UPDATE=true`; 값 `1`은 무시됨)을 복사하고 `systemctl daemon-reload`.
+  4. config에 예시의 `antigravity` 항목을 넣고 `"enabled": true`, `quota check antigravity`로 잔액이 읽히는지 본 뒤
+     drain 재시작합니다. **첫 실제 검토 한 건이 판정을 돌려주는지 확인합니다**(셸 pipe 시험만으로 판단하지 않음).
 - Devin CLI(2026-10-03 실측, v3000.11.3): `devin -p --prompt-file {promptFile}
   --respect-workspace-trust false --sandbox --permission-mode auto --model swe-2-high`.
   공급사는 모델로 정해지므로 Anthropic·OpenAI·xAI와 겹치지 않는 Cognition의 SWE-2를 고정해
