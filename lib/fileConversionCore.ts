@@ -134,7 +134,16 @@ export const turnHasConvertibleAttachment = (
 /* ------------------------------------------------------------------------ */
 
 export class PageSelectionError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /**
+     * `too_many` when the selection is valid and only longer than the
+     * ceiling -- a limit, which the user meets by asking for fewer pages.
+     * `invalid` for everything else: a page that does not exist, or text
+     * that is not a page list.
+     */
+    readonly reason: "invalid" | "too_many" = "invalid"
+  ) {
     super(message);
     this.name = "PageSelectionError";
   }
@@ -160,7 +169,8 @@ export const parsePageSelection = (
     indices.push(page - 1);
     if (indices.length > maxPages) {
       throw new PageSelectionError(
-        `The selection names more than ${maxPages} pages.`
+        `The selection names more than ${maxPages} pages.`,
+        "too_many"
       );
     }
   };

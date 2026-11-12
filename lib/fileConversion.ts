@@ -259,8 +259,9 @@ const selectPages = (
   } catch (error) {
     if (error instanceof PageSelectionError) {
       throw new FileConversionError(
-        "PAGES_INVALID",
-        `${source.handle} ("${source.name}"): ${error.message}`
+        error.reason === "too_many" ? "TOO_MANY_PAGES" : "PAGES_INVALID",
+        `${source.handle} ("${source.name}"): ${error.message}` +
+          (error.reason === "too_many" ? " Offer a smaller page range." : "")
       );
     }
     throw error;
@@ -1056,7 +1057,11 @@ const prepareConvertSpreadsheet = async (
       blocks: [
         {
           type: "table",
-          columns: firstRow,
+          // Stand-ins, for the reason the workbook path uses them: the
+          // authoring rules for a column heading (300 characters) are not the
+          // rules for a converted first row, which is the user's data and may
+          // hold a cell as long as any other. The real row goes back below.
+          columns: firstRow.map(() => ""),
           rows,
           ...(numberColumns.length ? { pdfNumberColumns: numberColumns } : {}),
         },
@@ -1064,6 +1069,12 @@ const prepareConvertSpreadsheet = async (
     });
     if (!admission.ok) {
       throw new FileConversionError("SPREADSHEET_UNREADABLE", admission.detail);
+    }
+    const tableBlock = admission.spec.blocks[0];
+    if (tableBlock.type === "table") {
+      // Checked by the reader already: no cell, first row included, is longer
+      // than ARTIFACT_LIMITS.maxTextLength.
+      tableBlock.columns = [...firstRow];
     }
     return {
       format: "pdf",

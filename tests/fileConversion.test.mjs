@@ -370,7 +370,8 @@ test("drawing is bounded by a page count, not attempted and abandoned", async ()
   await rejects(
     { operation: "pdf_to_images", filename: "out", sources: [{ attachment: "att_1" }] },
     files,
-    "PAGES_INVALID"
+    // A limit, not a bad request: the card says "ask for less".
+    "TOO_MANY_PAGES"
   );
 });
 
@@ -1088,4 +1089,14 @@ test("tenth review: pageSize on a request of PDFs only is refused, not ignored",
     attachments([["a.pdf", "application/pdf", await pdf([[100, 100]])]]),
     "SOURCE_TYPE"
   );
+});
+
+test("eleventh review: a first-row cell longer than a heading still converts to a PDF table", async () => {
+  const long = "제목".repeat(400);
+  const result = await convert(
+    { operation: "convert_spreadsheet", filename: "long", targetFormat: "pdf", sources: [{ attachment: "att_1" }] },
+    attachments([["long.csv", "text/csv", csvBytes(`"${long}",b\n1,2\n`)]])
+  );
+  assert.equal(result.format, "pdf");
+  assert.ok((await PDFDocument.load(result.bytes)).getPageCount() >= 1);
 });
