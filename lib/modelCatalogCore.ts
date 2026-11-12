@@ -59,7 +59,9 @@ export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> 
   deepseek: ["api-docs.deepseek.com"],
   mistral: ["docs.mistral.ai", "mistral.ai"],
   moonshot: ["platform.moonshot.ai"],
-  qwen: ["www.alibabacloud.com", "help.aliyun.com"],
+  // QwenCloud is Alibaba's Qwen API site. Its www host also serves sign-in and
+  // a playground, so only /pricing/ there counts; docs.qwencloud.com is docs.
+  qwen: ["www.alibabacloud.com", "help.aliyun.com", "docs.qwencloud.com", "www.qwencloud.com/pricing/"],
   zhipu: ["docs.z.ai"],
   minimax: ["platform.minimax.io"],
   groq: ["console.groq.com"],
