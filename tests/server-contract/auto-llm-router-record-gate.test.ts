@@ -25,7 +25,8 @@ let mocksInstalled = false;
 let generateRouterResult: (() => unknown) | undefined;
 const routerRequests: Record<string, unknown>[] = [];
 let readRewriteSwitch = async () => false;
-let readGuidance = async (_db?: unknown, _kind?: string) => ({ guidance: "", cycleId: null as string | null });
+let readGuidance: (db?: unknown, kind?: string) => Promise<{ guidance: string; cycleId: string | null }> =
+  async () => ({ guidance: "", cycleId: null });
 const holds: number[] = [];
 let budgetAllowed = true;
 let routerFailure: unknown = null;

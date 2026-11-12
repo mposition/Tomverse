@@ -3566,11 +3566,9 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The additive migration creates only this new content-free hold and its immutable/delete/truncate guards. It seeds no hold row; exact counts require new review for changed DDL.",
   },
-  // Draft capture joins the scope once and locks only that row (FOR UPDATE OF s).
-  // The scanner counts that lock's UPDATE token in every entry for this file.
   ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map((table, index) => ({
     path: "lib/promptRefinerChatExecutionStore.ts", table, tableMentions: [6, 11][index], writeVerbs: 13,
-    reason: "The sole default-off Chat binding writer adds one read-only preview lookup per table before its separately revalidated atomic consume boundary; it still only advances epochs, holds validated snapshots, consumes or purges bodies, and records canonical audit in the same transaction.",
+    reason: "The Chat binding store has one read-only preview lookup per table before its separately revalidated atomic consume boundary. Draft capture also joins the scope and locks only that row (FOR UPDATE OF s); the scanner counts that lock as a write verb file-wide. No new data write is admitted.",
   })),
   ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map((table, index) => ({
     path: "prisma/migrations/20261009140000_prompt_refiner_chat_execution/migration.sql", table,
