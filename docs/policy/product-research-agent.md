@@ -234,7 +234,8 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
 2. walker가 대상 하나씩 앱의 `POST /api/internal/product-research/scout`로 보냅니다.
 3. **앱이 LLM을 한 번 부릅니다**(`lib/productResearchScoutLlm.ts`, support-triage와 같은 방식). 입력은 그 대상의 이미지와
    신호, 그리고 같은 대상에 이미 낸 제안 제목들(반복을 막기 위해서)이고, 출력은 제안 최대 5개(제목·영역·심각도·근거·제안)의
-   JSON입니다. 판정 경계는 `lib/productResearchScoutCore.ts`가 검사합니다.
+   JSON입니다. 판정 경계는 `lib/productResearchScoutCore.ts`가 검사합니다. 실제 생성 결과에서 "할 수 없습니다"류 답은 올바른
+   거절이 아니라 빠진 기능으로 판정합니다(요청이 분명히 위험한 경우만 예외).
    **이슈 정리 대상**(기본 꺼짐, 앱 변수 `PRODUCT_RESEARCH_SCOUT_ISSUE_TRIAGE_ENABLED`): walker의 마지막 단계가 본문 없이
    `…/scout/issues`를 부르면 앱이 최신 성공 관측 행(48시간 안)의 열린 이슈를 읽어 한 번의 텍스트 호출로 이슈마다 닫기·진행·대기
    제안을 받고, `issue.<번호>` 대상으로 저장합니다. 관측 기능(§1–§9)은 그대로이며 추천은 이 Scout 제안이 합니다. 출력 검사는
@@ -256,7 +257,8 @@ LLM·외부 유료 API 비용이 0입니다. 비용 namespace는 `agent:product-
    감사 기록에 남습니다. 호출은 대상당 한 번이고, 호출 전에 원장(`ProductResearchScoutLlmCall`)에 한 줄을 써서 상한을 차감하며,
    `maxRetries: 0`과 출력 상한이 있고, 로그와 원장에는 토큰 수만 남깁니다.
 3. **walker는 제출 secret 하나만 갖습니다.** LLM 키·제품 DB 자격증명은 앱에만 있습니다.
-4. **page는 GET·HEAD로만 봅니다.** 클릭·입력·form 제출이 없습니다. 예외는 §14의 실제 생성 한 턴뿐입니다.
+4. **page는 GET·HEAD로만 봅니다.** 클릭·입력·form 제출이 없습니다. 예외는 §14의 실제 생성 한 턴과, 첨부가 있는 턴 앞에서
+   walker가 browser 밖에서 테스트 계정으로 하는 첨부 업로드·초안 저장뿐입니다(§14).
 5. **봇 차단·CAPTCHA를 우회하지 않습니다.** 챌린지나 오류 상태의 문서는 renderer에 닿기 전에 그 자리에서 멈춥니다(§12).
 6. **이미지와 파일은 모델 호출에만 쓰고 저장하지 않습니다.** 저장하는 것은 제안 문장과 대상 id입니다.
 7. 화면과 신호는 Tomverse 자신의 것이지만 모델에게는 **데이터**로 넘깁니다(프롬프트의 태그 안).
@@ -345,11 +347,20 @@ Chromium sandbox가 떴는지(`on`), 재시도로 sandbox 없이 떴는지(`off`
 - **경계**: 관리자 계정은 거부합니다(`test_account_is_admin`). 활성 계정이 아니면 거부합니다. session cookie는 답을 준 앱과 같은 origin에만
   넣습니다. 테스트 계정에는 실제 사용자의 데이터를 넣지 않습니다.
 - **로그인 화면**(§12 표): 공개 page와 같이 GET·HEAD로만 보고, 모델 호출 상한을 함께 씁니다.
-- **실제 생성**: 파일 4종은 채팅 입력창에 고정 문장을 넣어 보내고 카드의 다운로드 버튼으로 받으며, 이미지는 이미지 route로 만듭니다
+- **실제 생성**: 파일 4종(과 아래 스위치로 켜는 두 턴)은 채팅 입력창에 문장을 넣어 보내고 카드의 다운로드 버튼으로 받으며, 이미지는 이미지 route로 만듭니다
   (`SCOUT_GENERATIONS`). 쓰기(POST·PUT·DELETE)는 전송 버튼을 누를 때부터 답이 끝날 때까지만, 채팅 턴이 쓰는 경로(`scoutTurnWrites`: `/api/chat` 최대 3회와 대화 생성·초안·preflight·메시지 저장 같은 주변 호출)에만
   허용합니다. 음성·Review·이미지 턴 같은 다른 유료 경로로는 나가지 못하고, 막힌 쓰기는 모델에게 알립니다. walker가 하는 것과 같은 새 대화의 전송 경로에 호출이 새로 생기면
   `tests/e2e/scout-chat-turn-writes.spec.ts`가 실패합니다. 모델은 요청한 내용, 걸린 시간, 채팅 화면, PDF 첫 쪽 또는 Office 본문,
-  이미지를 보고 결과가 요청을 충족하는지 판정합니다. 파일이 오지 않은 것도 제안 대상입니다.
+  이미지를 보고 결과가 요청을 충족하는지 판정합니다. 파일이 오지 않은 것도 제안 대상입니다. walker는 파일 카드나 답이 끝난 표시
+  (문제 신고 버튼, 오류 아이콘)를 기다리고, 답한 모델 이름과 답 본문 앞부분을 판정에 함께 넘깁니다.
+- **첨부가 있는 턴과 모델이 정한 턴**(운영자 결정 2026-11-12, 각각 앱 변수로 기본 꺼짐: `PRODUCT_RESEARCH_SCOUT_ATTACHMENT_TASK_ENABLED`,
+  `PRODUCT_RESEARCH_SCOUT_EXPLORE_TASK_ENABLED`). 스위치가 꺼진 생성은 허가를 받지 못하고, 허가는 고정 5종 다음 순서로 나가므로 하루 횟수도 올려야 합니다.
+  - 첨부 파일은 walker가 실행 중에 그리거나 쓰는 예시 파일(`SCOUT_FIXTURES`: 차트 PNG, 영수증 JPEG, CSV)뿐이고 실제 사람의 파일은 올리지 않습니다.
+  - walker는 browser 밖에서 테스트 계정 session으로 제품의 업로드 경로(`PUT`·`PATCH /api/chat`)와 새 대화 초안(`PUT /api/products/chat/drafts/new`)을
+    부르고, 저장소로 가는 바이트는 앱이 준 presigned URL로 Node에서 보냅니다(session cookie·Access 헤더 없음). browser의 origin·쓰기 규칙은 그대로이며,
+    채팅 화면은 초안을 복원한 상태로 열리고 전송 한 턴만 씁니다.
+  - 모델이 정한 턴은 앱의 `POST …/scout/scenario`가 Scout 모델에 텍스트 호출 한 번(하루 호출 상한에서 차감)으로 요청 문장·첨부·기대 결과를
+    받아 walker에 돌려줍니다. 검사는 문장 길이와 첨부가 `SCOUT_FIXTURES`에 있는지 하나입니다(`admitScenario`).
 - **비용**: owner가 Admin에서 정한 하루 횟수(UTC 하루, 기본 0, 최대 20)만큼 walker가 허가를 받습니다. 허가는 쓰기 전에 원장에 한 줄씩 남고
   (`permit.` 접두어, 모델 호출 상한과 따로 셉니다), 쓰지 못한 허가도 돌려주지 않습니다. 이 경로는 제품 경로 그대로이므로 **테스트 계정의 크레딧을
   쓰고 Chat 비용에 잡힙니다.** owner가 2026-11-05에 허용했습니다. 크레딧이 떨어지면 생성이 멈추므로, 계정에 넣은 크레딧이 실제 상한입니다. 판정할 모델이 없거나 호출 상한이 0이면 허가를 내주지

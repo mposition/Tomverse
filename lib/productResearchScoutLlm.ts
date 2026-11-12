@@ -35,6 +35,15 @@ import {
   type IssueSuggestion,
   type TriageIssue,
 } from "@/lib/productResearchScoutIssuesCore";
+import {
+  SCENARIO_MAX_OUTPUT_TOKENS,
+  SCENARIO_OUTPUT_SCHEMA,
+  SCENARIO_SUBJECT,
+  SCENARIO_SYSTEM_PROMPT,
+  parseScenarioAnswer,
+  scenarioPromptText,
+  type ScoutScenario,
+} from "@/lib/productResearchScoutScenarioCore";
 
 export const SCOUT_LLM_MAX_OUTPUT_TOKENS = 2_000;
 export const SCOUT_LLM_TIMEOUT_MS = 90_000;
@@ -67,6 +76,15 @@ export type ScoutLlm = {
   readonly judge: (submission: ScoutSubmission, existingTitles: readonly string[]) => Promise<ScoutJudgement>;
   /** The issue-backlog subject: one text-only call over the newest observation's issues. */
   readonly triageIssues: (issues: readonly TriageIssue[], observedAt: Date) => Promise<IssueTriageJudgement>;
+  /** The model-written task (§14): one text-only call for today's request. */
+  readonly planScenario: (recentTitles: readonly string[], today: Date) => Promise<ScenarioPlan>;
+};
+
+export type ScenarioPlan = {
+  /** Null when the call failed or its answer is not a scenario the walker can run. */
+  readonly scenario: ScoutScenario | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
 };
 
 /** The chosen model, or null when none is chosen or it can no longer read images. */
@@ -176,6 +194,50 @@ export async function scoutLlmFor(modelId: string | null): Promise<ScoutLlm | nu
           }),
         );
         return { suggestions: null, inputTokens: null, outputTokens: null };
+      }
+    },
+    planScenario: async (recentTitles, today) => {
+      try {
+        const generated = await generateText({
+          model: getActiveAiModel(model),
+          system: SCENARIO_SYSTEM_PROMPT,
+          prompt: scenarioPromptText(recentTitles, today),
+          maxOutputTokens: SCENARIO_MAX_OUTPUT_TOKENS,
+          maxRetries: 0,
+          abortSignal: AbortSignal.timeout(SCOUT_LLM_TIMEOUT_MS),
+          output: Output.object({
+            schema: jsonSchema(SCENARIO_OUTPUT_SCHEMA as unknown as JSONSchema7),
+            name: "product_research_scout_scenario",
+          }),
+          providerOptions: { openai: { strictJsonSchema: true } },
+        });
+        const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+        const plan = {
+          scenario: parseScenarioAnswer(generated.output),
+          inputTokens: usage?.inputTokens ?? null,
+          outputTokens: usage?.outputTokens ?? null,
+        };
+        console.info(
+          JSON.stringify({
+            event: "product_research_scout_llm_call",
+            modelId: model.id,
+            subject: SCENARIO_SUBJECT,
+            inputTokens: plan.inputTokens,
+            outputTokens: plan.outputTokens,
+            kept: plan.scenario ? 1 : 0,
+          }),
+        );
+        return plan;
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "product_research_scout_llm_call_failed",
+            modelId: model.id,
+            subject: SCENARIO_SUBJECT,
+            error: error instanceof Error ? error.name : "unknown",
+          }),
+        );
+        return { scenario: null, inputTokens: null, outputTokens: null };
       }
     },
   };
