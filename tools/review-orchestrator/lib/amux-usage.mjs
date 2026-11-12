@@ -92,7 +92,7 @@ export function readAmuxCa(caFile) {
  * its credit grants), the rule is cursor-quota.mjs's: a spent pool stays
  * usable while credit is left, and credit that was not read proves nothing.
  */
-export function amuxQuotaFromUsage(body, providerId, now = Date.now()) {
+export function amuxQuotaFromUsage(body, providerId, now = Date.now(), { useCredits = false } = {}) {
   if (!body || typeof body !== "object" || !Array.isArray(body.providers)) return UNKNOWN;
   const providers = body.providers;
   const entry = providers.find((row) => row && typeof row === "object" && row.id === providerId);
@@ -110,8 +110,40 @@ export function amuxQuotaFromUsage(body, providerId, now = Date.now()) {
   }
   const credit = typeof entry.credit_usd === "number" && Number.isFinite(entry.credit_usd) && entry.credit_usd >= 0
     ? entry.credit_usd : null;
-  const state = remainingPercent > 0 || (credit !== null && credit > 0) ? "available" : "exhausted";
-  return credit === null ? { state, remainingPercent } : { state, remainingPercent, creditUsd: credit };
+  // Codex keeps serving on the account's prepaid credits once a plan window
+  // is spent. That spends money, so it counts only for a provider the
+  // operator switched on (`useCredits`); otherwise a spent window holds it.
+  const credits = useCredits && Array.isArray(entry.buckets)
+    ? codexCreditsOf(entry.buckets.map((bucket) => bucket?.credits)) : null;
+  const state = remainingPercent > 0 || (credit !== null && credit > 0) || credits?.left === true
+    ? "available" : "exhausted";
+  return {
+    state,
+    remainingPercent,
+    ...(credit === null ? {} : { creditUsd: credit }),
+    ...(credits === null || credits.balance === null ? {} : { credits: credits.balance }),
+  };
+}
+
+/**
+ * What Codex's `credits` snapshot (account/rateLimits/read; AMUX passes it
+ * through as `buckets[].credits`) leaves to spend after the plan windows:
+ * `{ left, balance }`. `left` is true only for a positive balance or an
+ * unlimited grant the account says it has; a balance that is missing or not a
+ * plain decimal proves nothing. `balance` is the number when one was read.
+ */
+export function codexCredits(credits) {
+  if (!credits || typeof credits !== "object" || credits.hasCredits !== true) return { left: false, balance: null };
+  const raw = credits.balance;
+  const balance = typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? raw
+    : typeof raw === "string" && /^\d{1,12}(\.\d{1,18})?$/.test(raw) ? Number(raw) : null;
+  return { left: credits.unlimited === true || (balance !== null && balance > 0), balance };
+}
+
+/** The first snapshot with credit left, else the first with a balance read, else none. */
+export function codexCreditsOf(snapshots) {
+  const read = snapshots.map(codexCredits);
+  return read.find((row) => row.left) ?? read.find((row) => row.balance !== null) ?? { left: false, balance: null };
 }
 
 /**
@@ -197,8 +229,9 @@ export async function amuxQuota(provider, usageUrl, { now = Date.now(), read = r
   const entry = reads.get(key) ?? { at: -Infinity, body: null, inflight: null };
   reads.set(key, entry);
   const providerId = provider.amuxProvider ?? provider.id;
-  if (entry.inflight) return amuxQuotaFromUsage(await entry.inflight, providerId, now);
-  if (now >= entry.at && now - entry.at < AMUX_USAGE_CACHE_MS) return amuxQuotaFromUsage(entry.body, providerId, now);
+  const options = { useCredits: provider.useCredits === true };
+  if (entry.inflight) return amuxQuotaFromUsage(await entry.inflight, providerId, now, options);
+  if (now >= entry.at && now - entry.at < AMUX_USAGE_CACHE_MS) return amuxQuotaFromUsage(entry.body, providerId, now, options);
   entry.inflight = read(url, { ca: url.protocol === "https:" ? readAmuxCa(caFile) : undefined })
     .catch(() => null)
     .then((body) => {
@@ -209,5 +242,5 @@ export async function amuxQuota(provider, usageUrl, { now = Date.now(), read = r
     .finally(() => {
       entry.inflight = null;
     });
-  return amuxQuotaFromUsage(await entry.inflight, providerId, now);
+  return amuxQuotaFromUsage(await entry.inflight, providerId, now, options);
 }
