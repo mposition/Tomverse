@@ -495,6 +495,9 @@ test("a rebuild takes words and claims only from the approved pack whose files t
 test("a fresh film's subject is random, never one of the last six, and never about illness or danger", () => {
   assert.ok(SUBJECTS.length >= 12);
   for (const subject of SUBJECTS) assert.doesNotMatch(subject, /death|die|ill|sick|medic|hospital|doctor|funeral|grief|accident|danger|injur|health|cancer/iu);
+  // Nor a request for works to recommend: their themes are the answers', not ours (run 20261112).
+  for (const subject of SUBJECTS) assert.doesNotMatch(subject, /novel|book|movie|song|playlist|series to watch/iu);
+  assert.match(readFileSync(resolve("tools/marketing-video/run-creative-short.mjs"), "utf8"), /never for novels, films, songs or other works to recommend/u);
   assert.equal(pickSubject([], () => 0), SUBJECTS[0]);
   assert.equal(pickSubject([], () => 0.9999), SUBJECTS.at(-1));
   const recent = SUBJECTS.slice(0, 6).map((subject) => ({ subject }));
