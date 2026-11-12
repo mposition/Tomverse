@@ -31,6 +31,7 @@ export const SPREADSHEET_DATA_ERROR_CODES = [
   "DATA_NO_ROWS",
   "DATA_TOO_MANY_ROWS",
   "DATA_VALUE_TOO_LONG",
+  "DATA_FORMULA_UNCALCULATED",
 ] as const;
 
 export type SpreadsheetDataErrorCode =
@@ -400,6 +401,21 @@ const readSheetGrid = (
         const type = attributes.match(/t="([^"]+)"/)?.[1] ?? "n";
         const styleIndex = Number(attributes.match(/s="(\d+)"/)?.[1] ?? "-1");
 
+        // A formula whose result the file does not carry. This reader never
+        // evaluates formulas, so for a conversion the honest answer is a
+        // refusal: written as a blank, the cell would look converted and be
+        // empty. A template batch keeps reading it as blank, as before.
+        if (strictValueLength !== undefined && /<f[\s>/]/.test(inner)) {
+          const cached = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1];
+          if (cached === undefined || (cached === "" && type !== "str")) {
+            throw new SpreadsheetDataError(
+              "DATA_FORMULA_UNCALCULATED",
+              `Cell ${reference ?? "?"} holds a formula with no calculated value. ` +
+                "Open the file in a spreadsheet, let it calculate, save it and attach it again."
+            );
+          }
+        }
+
         let value = "";
         if (type === "s") {
           const rawValue = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1];
@@ -430,7 +446,11 @@ const readSheetGrid = (
             const numeric = Number(rawValue);
             if (Number.isFinite(numeric)) {
               value =
-                styleIndex >= 0 && styles.isDate[styleIndex]
+                styleIndex >= 0 &&
+                (styles.isDate[styleIndex] ||
+                  // "[h]", "[s]" and "hh:ss" have no "m", so the date check
+                  // misses them; for a conversion they are times all the same.
+                  (strictValueLength !== undefined && styles.timeOnly[styleIndex]))
                   ? strictValueLength !== undefined
                     ? excelSerialToExactText(
                         styles.timeOnly[styleIndex] ? numeric : numeric + dateOffsetDays,

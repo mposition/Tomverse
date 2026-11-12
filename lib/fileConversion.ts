@@ -928,6 +928,12 @@ const prepareConvertSpreadsheet = async (
   const source = sources[0];
   const target = spec.targetFormat!;
   const sourceFormat = source.mediaType.startsWith(XLSX_MEDIA_TYPE) ? "xlsx" : "csv";
+  if (sourceFormat === "csv" && spec.sheet !== undefined) {
+    throw new FileConversionError(
+      "SOURCE_TYPE",
+      `${source.handle} ("${source.name}") is a CSV file, which has no worksheets; leave out sheet.`
+    );
+  }
   if (sourceFormat === target) {
     throw new FileConversionError(
       "SOURCE_TYPE",

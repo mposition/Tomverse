@@ -1186,8 +1186,9 @@ export class GeneratedArtifactCollector {
     }
 
     if (!admission.ok) return refuse(rawSpec, "spec_rejected", admission.detail);
-    if (specHash === null) return refuse(rawSpec, "spec_rejected", "unhashable");
     const spec = admission.spec;
+    // Set whenever the specification was admitted, which it was by here.
+    const hash = specHash as string;
 
     let prepared: PreparedConversion;
     try {
@@ -1213,7 +1214,7 @@ export class GeneratedArtifactCollector {
       kind: requireArtifactFormat(format).kind,
       format,
       filename,
-      specHash,
+      specHash: hash,
       maxBytes: FILE_CONVERSION_LIMITS.maxOutputBytes,
       render: async () => {
         const converted = await prepared.render();

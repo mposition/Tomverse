@@ -973,3 +973,72 @@ test("eighth review: a split that is one part comes back as that PDF, not a zip 
   const document = await PDFDocument.load(result.bytes);
   assert.deepEqual(document.getPages().map((page) => Math.round(page.getSize().width)), [110, 120]);
 });
+
+/* ------------------------------------------------------------------------ */
+/* Found by the ninth independent review                                      */
+/* ------------------------------------------------------------------------ */
+
+test("ninth review: a formula without a calculated value is refused, not written as a blank", async () => {
+  const { zipSync } = await import("fflate");
+  const decode = (bytes) => new TextDecoder().decode(bytes);
+  const encode = (text) => new TextEncoder().encode(text);
+  const base = unzipSync(buildXlsx({ rows: [["n"], [{ number: 1 }], [{ number: 2 }], [{ number: 0 }]] }));
+  const sheetPath = Object.keys(base).find((path) => /worksheets\/sheet1\.xml$/.test(path));
+  const withFormula = (cell) =>
+    zipSync({
+      ...base,
+      [sheetPath]: encode(decode(base[sheetPath]).replace(/<c r="A4">[\s\S]*?<\/c>/, cell)),
+    });
+
+  for (const cell of ['<c r="A4"><f>SUM(A2:A3)</f></c>', '<c r="A4"><f>SUM(A2:A3)</f><v></v></c>']) {
+    await rejects(
+      { operation: "convert_spreadsheet", filename: "f", targetFormat: "csv", sources: [{ attachment: "att_1" }] },
+      attachments([["f.xlsx", XLSX, withFormula(cell)]]),
+      "SPREADSHEET_UNREADABLE"
+    );
+  }
+  // With its cached result, the value is converted.
+  const cached = await convert(
+    { operation: "convert_spreadsheet", filename: "f", targetFormat: "csv", sources: [{ attachment: "att_1" }] },
+    attachments([["f.xlsx", XLSX, withFormula('<c r="A4"><f>SUM(A2:A3)</f><v>3</v></c>')]])
+  );
+  assert.deepEqual(decode(cached.bytes).replace(/^﻿/, "").trimEnd().split("\r\n"), ["n", "1", "2", "3"]);
+});
+
+test("ninth review: [h], [s] and hh:ss formats convert as times, not as bare numbers", async () => {
+  const { zipSync } = await import("fflate");
+  const decode = (bytes) => new TextDecoder().decode(bytes);
+  const encode = (text) => new TextEncoder().encode(text);
+  const base = unzipSync(buildXlsx({ rows: [["h", "s", "hs"], [{ number: 1.5 }, { number: 0.5 }, { number: 0.5 }]] }));
+  const styles =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<numFmts count="3"><numFmt numFmtId="164" formatCode="[h]"/><numFmt numFmtId="165" formatCode="[s]"/><numFmt numFmtId="166" formatCode="hh:ss"/></numFmts>' +
+    '<cellXfs count="4"><xf numFmtId="0"/><xf numFmtId="164"/><xf numFmtId="165"/><xf numFmtId="166"/></cellXfs></styleSheet>';
+  const sheetPath = Object.keys(base).find((path) => /worksheets\/sheet1\.xml$/.test(path));
+  const sheet = decode(base[sheetPath])
+    .replace(/<c r="A2">/, '<c r="A2" s="1">')
+    .replace(/<c r="B2">/, '<c r="B2" s="2">')
+    .replace(/<c r="C2">/, '<c r="C2" s="3">');
+  const file = zipSync({ ...base, "xl/styles.xml": encode(styles), [sheetPath]: encode(sheet) });
+  const result = await convert(
+    { operation: "convert_spreadsheet", filename: "t", targetFormat: "csv", sources: [{ attachment: "att_1" }] },
+    attachments([["t.xlsx", XLSX, file]])
+  );
+  const lines = decode(result.bytes).replace(/^﻿/, "").trimEnd().split("\r\n");
+  assert.deepEqual(lines, ["h,s,hs", "36:00:00,12:00:00,12:00:00"]);
+});
+
+test("ninth review: a worksheet name given for a CSV is refused", async () => {
+  await rejects(
+    {
+      operation: "convert_spreadsheet",
+      filename: "x",
+      targetFormat: "xlsx",
+      sheet: "Data",
+      sources: [{ attachment: "att_1" }],
+    },
+    attachments([["a.csv", "text/csv", csvBytes("a\n1\n")]]),
+    "SOURCE_TYPE"
+  );
+});
