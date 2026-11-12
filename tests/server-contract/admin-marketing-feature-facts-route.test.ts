@@ -69,6 +69,10 @@ const world = {
   /** Each budget action the refresh sent, with its fields. */
   budget: [] as Array<{ action: string; fields: Record<string, unknown> }>,
   reserveRefusal: null as string | null,
+  /** What the provider says it served. */
+  servedModel: PIN.model as string,
+  servedTier: "default" as string | undefined,
+  providerOptions: [] as unknown[],
 };
 const reset = () => {
   world.session = { user: { id: "admin-1" } };
@@ -83,6 +87,9 @@ const reset = () => {
   world.maxOutputTokens = [];
   world.budget = [];
   world.reserveRefusal = null;
+  world.servedModel = PIN.model;
+  world.servedTier = "default";
+  world.providerOptions = [];
 };
 
 const pick = (row: Row) => ({ ...row });
@@ -192,10 +199,16 @@ const install = () => {
   mock.module(mod("lib/activeAiModel.ts"), { namedExports: { getActiveAiModel: (model: unknown) => model } });
   mock.module("ai", {
     namedExports: {
-      generateText: async ({ prompt, maxOutputTokens }: { prompt: string; maxOutputTokens: number }) => {
+      generateText: async ({ prompt, maxOutputTokens, providerOptions }: { prompt: string; maxOutputTokens: number; providerOptions: unknown }) => {
         world.prompts.push(prompt);
         world.maxOutputTokens.push(maxOutputTokens);
-        return { output: world.modelAnswer, usage: { inputTokens: 1200, outputTokens: 300 } };
+        world.providerOptions.push(providerOptions);
+        return {
+          output: world.modelAnswer,
+          usage: { inputTokens: 1200, outputTokens: 300 },
+          response: { modelId: world.servedModel },
+          providerMetadata: { openai: { serviceTier: world.servedTier } },
+        };
       },
       jsonSchema: (schema: unknown) => schema,
       Output: { object: (value: unknown) => value },
@@ -306,6 +319,24 @@ test("the refresh reserves, calls once and settles in the marketing ledger, prop
   const prompt = world.prompts[0];
   for (const part of ["public FAQ", "help centre", "marketing claims", "claim.chat-assistants", "feature.assistantProfiles", "IMAGE_EDIT_ENABLED"]) {
     assert.ok(prompt.includes(part), part);
+  }
+});
+
+test("the request carries the ledger's tier and stores nothing, and a different model or tier is never settled", async () => {
+  reset();
+  await press();
+  assert.deepEqual(world.providerOptions[0], { openai: { strictJsonSchema: true, serviceTier: "default", store: false } });
+
+  for (const served of [{ model: "gpt-9-other" }, { tier: "priority" }, { tier: undefined }]) {
+    reset();
+    world.modelAnswer = { proposals: [{ kind: "release_hold", id: "plugins", what: "Plugins.", models: [], copy: null, source: "/plugins", hold: null, reason: "Live." }] };
+    if ("model" in served) world.servedModel = served.model as string;
+    if ("tier" in served) world.servedTier = served.tier;
+    const response = await press();
+    assert.equal(response.status, 502, JSON.stringify(served));
+    assert.equal((await response.json()).code, "FEATURE_REFRESH_FAILED");
+    // Reported unknown (counted at the reservation), never settled at the pin's price.
+    assert.deepEqual(world.budget.map((entry) => entry.action), ["reserve", "dispatch", "unknown"], JSON.stringify(served));
   }
 });
 
