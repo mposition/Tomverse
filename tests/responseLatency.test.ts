@@ -58,6 +58,45 @@ test("full send reports separate preparation, headers, first content, stream end
   } finally { globalThis.fetch = original; }
 });
 
+test("a rejected timing report leaves one content-free local observation with the same browser clock", () => {
+  const name = "tomverse.chat.turn";
+  const original = globalThis.fetch;
+  const reports: Array<{ firstContentMs: number | null; completionMs: number }> = [];
+  globalThis.fetch = async (_url, init) => {
+    reports.push(JSON.parse(String(init?.body)));
+    return new Response(null, { status: 429 });
+  };
+  let now = 100;
+  try {
+    performance.clearMeasures(name);
+    const turn = createClientLatency(now, {}, () => now);
+    turn.dispatched();
+    turn.headers(new Response(null, { headers: { "X-Response-Latency-Token": "test-only-proof" } }));
+    now += 700;
+    turn.content("private answer");
+    now += 130;
+    turn.finish("completed");
+    turn.finish("cancelled");
+    const [entry] = performance.getEntriesByName(name, "measure") as PerformanceMeasure[];
+    assert.equal(reports.length, 1);
+    assert.equal(entry.startTime, 100);
+    assert.equal(entry.duration, reports[0].completionMs);
+    assert.deepEqual(entry.detail, { clock: "submit", outcome: "completed", firstContentMs: reports[0].firstContentMs });
+
+    const restored = createClientLatency(undefined, {}, () => now);
+    restored.headers(new Response(null, { headers: { "X-Response-Latency-Token": "another-proof" } }));
+    now += 17;
+    restored.finish("cancelled");
+    const entries = performance.getEntriesByName(name, "measure") as PerformanceMeasure[];
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].duration, 17);
+    assert.deepEqual(entries[0].detail, { clock: "panel", outcome: "cancelled", firstContentMs: null });
+  } finally {
+    globalThis.fetch = original;
+    performance.clearMeasures(name);
+  }
+});
+
 test("distributions distinguish missing data from zero and separate product/source cohorts", () => {
   assert.deepEqual(latencyDistribution([]), { count: 0, p50Ms: null, p95Ms: null });
   assert.deepEqual(latencyDistribution([30, 0, 10, 20]), { count: 4, p50Ms: 10, p95Ms: 30 });

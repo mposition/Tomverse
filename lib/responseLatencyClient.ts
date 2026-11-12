@@ -1,6 +1,8 @@
 import type { ClientLatencyStages } from "./responseLatencyCore";
 import { boundedLatencyMs, createLatencyStages } from "./responseLatencyStages";
 
+const localTurnMeasure = "tomverse.chat.turn";
+
 /** No content, identity, model strings or wall-clock timestamps leave the browser. */
 export function createClientLatency(startedAt?: number, initialStages: ClientLatencyStages = {}, now = () => performance.now()) {
   const started = startedAt ?? now();
@@ -37,8 +39,15 @@ export function createClientLatency(startedAt?: number, initialStages: ClientLat
     finish(outcome: "completed" | "cancelled" | "failed") {
       if (!token) return;
       if (streamEndedAt !== null) stages.timings.clientFinalizeMs = boundedLatencyMs(now() - streamEndedAt);
-      const body = JSON.stringify({ token, outcome, prepareMs, firstContentMs, completionMs: elapsed(), stages: stages.timings });
+      const completionMs = elapsed();
+      const body = JSON.stringify({ token, outcome, prepareMs, firstContentMs, completionMs, stages: stages.timings });
       token = null;
+      // Keep only the last signed turn in this document, even when the report is rate-limited.
+      try {
+        performance.clearMeasures(localTurnMeasure);
+        performance.measure(localTurnMeasure, { start: started, duration: completionMs,
+          detail: { clock: startedAt === undefined ? "panel" : "submit", outcome, firstContentMs } });
+      } catch { /* User Timing support is optional. */ }
       // One best-effort report; diagnostics must not delay or retry the answer.
       try {
         void fetch("/api/chat/timing", { method: "POST", headers: { "Content-Type": "application/json" },

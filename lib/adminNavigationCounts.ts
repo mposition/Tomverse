@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
 import { abandonedLegalEmailCount } from "@/lib/adminEmailDeliveries";
-import { countOpenWorkItems } from "@/lib/modelLifecycleWorkItems";
+import { countOpenWorkItemFamilies } from "@/lib/modelLifecycleWorkItems";
 import { overdueCampaignWaveCount } from "@/lib/adminEmailCampaigns";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore";
@@ -90,7 +90,8 @@ export async function getAdminNavigationCounts(): Promise<{
       where: { status: "failed", acknowledgedAt: null },
     }),
     abandonedLegalEmailCount(),
-    countOpenWorkItems(),
+    // Families, not rows: the discovery tab lists and decides by family.
+    countOpenWorkItemFamilies(),
     overdueCampaignWaveCount({ now }),
     countPendingMarketingApprovals(),
     prisma.productResearchSuggestion.count({ where: { status: "open" } }),

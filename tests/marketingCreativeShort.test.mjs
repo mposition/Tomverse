@@ -618,3 +618,33 @@ test("a capture's text holds only the words a viewer can see, not the lines its 
     await browser.close();
   }
 });
+
+test("the answer columns are set to their top, then further down, whatever streaming left them at", async (t) => {
+  const { scrollAnswerColumns } = await import("../tools/marketing-video/fresh-review.mjs");
+  let chromium;
+  try {
+    ({ chromium } = await import("../tools/marketing-video/node_modules/playwright/index.mjs"));
+  } catch {
+    t.skip("no playwright here");
+    return;
+  }
+  let browser;
+  try {
+    browser = await chromium.launch();
+  } catch {
+    t.skip("no Chromium here");
+    return;
+  }
+  try {
+    const page = await browser.newPage({ viewport: { width: 900, height: 600 } });
+    const column = (left) => `<div class="col" style="position:absolute;top:50px;left:${left}px;width:200px;height:400px;overflow-y:auto"><div style="height:3000px">answer</div></div>`;
+    // The composer panel on the left scrolls too, but is not an answer column.
+    await page.setContent(`<body style="margin:0"><div id="composer" style="position:absolute;top:50px;left:0;width:250px;height:400px;overflow-y:auto"><div style="height:3000px"></div></div>${column(300)}${column(520)}${column(700)}</body>`);
+    await page.evaluate(() => document.querySelectorAll(".col, #composer").forEach((node) => { node.scrollTop = node.scrollHeight; }));
+    assert.deepEqual(await page.evaluate(scrollAnswerColumns, 0), [0, 0, 0]);
+    assert.deepEqual(await page.evaluate(scrollAnswerColumns, 0.75), [300, 300, 300]);
+    assert.ok((await page.evaluate(() => document.querySelector("#composer").scrollTop)) > 2000);
+  } finally {
+    await browser.close();
+  }
+});

@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
+  SCOUT_ATTACHMENT_TASK_ENV,
+  SCOUT_EXPLORE_GENERATION,
+  SCOUT_EXPLORE_TASK_ENV,
+  SCOUT_FIXTURES,
   SCOUT_GENERATIONS,
   SCOUT_PAGE_ORIGIN,
+  admitScenario,
+  scenarioTask,
   SCOUT_PAGE_ORIGINS,
   SCOUT_SIGNED_IN_PAGES,
   decideScoutRequest,
@@ -144,8 +150,43 @@ test("a page that ended on the sign-in screens reads as signed out", () => {
 });
 
 test("the walker asks only for generations the table knows, in the table's order", () => {
-  assert.deepEqual(requestedScoutGenerations({ generations: ["generated.image", "generated.pdf", "generated.secret"] }), ["generated.pdf", "generated.image"]);
-  for (const body of [null, {}, { generations: "generated.pdf" }, []]) assert.deepEqual(requestedScoutGenerations(body), []);
+  assert.deepEqual(requestedScoutGenerations({ generations: ["generated.image", "generated.pdf", "generated.secret"] }, {}), ["generated.pdf", "generated.image"]);
+  for (const body of [null, {}, { generations: "generated.pdf" }, []]) assert.deepEqual(requestedScoutGenerations(body, {}), []);
+});
+
+test("the attachment and model-written turns get no permit until their own app switch is on, and come last", () => {
+  const all = { generations: SCOUT_GENERATIONS.map((generation) => generation.id) };
+  const fixed = ["generated.pdf", "generated.docx", "generated.xlsx", "generated.pptx", "generated.image"];
+  assert.deepEqual(requestedScoutGenerations(all, {}), fixed);
+  assert.deepEqual(requestedScoutGenerations(all, { [SCOUT_ATTACHMENT_TASK_ENV]: " " }), fixed, "blank is off");
+  assert.deepEqual(requestedScoutGenerations(all, { [SCOUT_ATTACHMENT_TASK_ENV]: "1" }), [...fixed, "generated.attachment-pdf"]);
+  assert.deepEqual(
+    requestedScoutGenerations(all, { [SCOUT_ATTACHMENT_TASK_ENV]: "1", [SCOUT_EXPLORE_TASK_ENV]: "1" }),
+    [...fixed, "generated.attachment-pdf", SCOUT_EXPLORE_GENERATION],
+  );
+  assert.deepEqual(SCOUT_GENERATIONS.filter((generation) => generation.switchEnv === null).map((generation) => generation.id), fixed);
+});
+
+test("a scenario runs only with a bounded request and the walker's own fixtures, each once", () => {
+  const good = { prompt: " 두 이미지를 PDF로 합쳐 주세요 ", attachments: ["chart.png", "receipt.jpg"], expectation: "PDF 한 개" };
+  assert.deepEqual(admitScenario(good), { prompt: "두 이미지를 PDF로 합쳐 주세요", attachments: ["chart.png", "receipt.jpg"], expectation: "PDF 한 개" });
+  assert.deepEqual(scenarioTask({ scenario: { ...good, attachments: [] } })?.attachments, []);
+  for (const bad of [
+    null,
+    { ...good, prompt: "" },
+    { ...good, prompt: "x".repeat(501) },
+    { ...good, attachments: ["id-card.jpg"] },
+    { ...good, attachments: ["../chart.png"] },
+    { ...good, attachments: ["chart.png", "chart.png"] },
+    { ...good, attachments: ["chart.png", "receipt.jpg", "sales.csv", "chart.png"] },
+    { ...good, attachments: "chart.png" },
+    { ...good, expectation: 3 },
+    { ...good, expectation: "  " },
+  ]) {
+    assert.equal(admitScenario(bad), null, JSON.stringify(bad));
+  }
+  assert.equal(scenarioTask({ judged: false, reason: "model_off" }), null);
+  for (const name of Object.keys(SCOUT_FIXTURES)) assert.match(SCOUT_FIXTURES[name].mediaType, /^(image\/(png|jpeg)|text\/csv)$/);
 });
 
 test("every signed-in screen and generation is a subject the route admits and the Admin view names", () => {
@@ -157,9 +198,15 @@ test("every signed-in screen and generation is a subject the route admits and th
     assert.equal(scoutSubjectInfo(page.id).kind, "page", page.id);
     assert.equal(scoutSubjectInfo(page.id).href, page.path);
   }
+  const messages = read("lib/adminMessages/productResearchScout.ts");
   for (const generation of SCOUT_GENERATIONS) {
-    assert.equal(scoutSubjectInfo(generation.id).kind, "file", generation.id);
-    assert.ok(generation.prompt.length > 0 && generation.prompt.length < 500);
+    const info = scoutSubjectInfo(generation.id);
+    assert.equal(info.kind, "file", generation.id);
+    assert.equal(messages.split(`"${info.format}":`).length, 3, `both languages name ${info.format}`);
+    // The model-written turn has no fixed sentence: the scenario route writes it on the day.
+    if (generation.id === SCOUT_EXPLORE_GENERATION) assert.equal(generation.prompt, "");
+    else assert.ok(generation.prompt.length > 0 && generation.prompt.length < 500);
+    for (const name of generation.attachments) assert.ok(Object.hasOwn(SCOUT_FIXTURES, name), name);
   }
 });
 
@@ -168,13 +215,20 @@ test("the controls the walker drives exist in the product under those test ids",
   const owners = {
     "chat-textarea": "components/chat/ChatInput.tsx",
     "chat-send-button": "components/chat/ChatInput.tsx",
+    "attachment-complete": "components/chat/ChatInput.tsx",
     "generated-artifact-download": "components/chat/GeneratedArtifactCard.tsx",
     "generated-artifact-failure": "components/chat/GeneratedArtifactCard.tsx",
+    "chat-message": "components/chat/ChatMessageList.tsx",
+    "chat-error-icon": "components/chat/ChatMessageList.tsx",
+    "assistant-message-model-name": "components/chat/ChatMessageList.tsx",
   };
   for (const [testId, path] of Object.entries(owners)) {
     assert.ok(walker.includes(testId), `walker uses ${testId}`);
     assert.ok(read(path).includes(`data-testid="${testId}"`), `${path} renders ${testId}`);
   }
+  // The finished answer's report button takes its test id as a prop.
+  assert.ok(walker.includes("memory-answer-feedback"));
+  assert.ok(read("components/chat/ChatMessageList.tsx").includes('triggerTestId="memory-answer-feedback"'));
 });
 
 test("every signed-in screen the walker opens is a page the app has", () => {
