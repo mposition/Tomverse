@@ -37,7 +37,8 @@ export function scoutSubjectInfo(subject: string): ScoutSubjectInfo {
 
 /**
  * The generations a walker asked for, in the table's order; anything else in its
- * body is ignored, and so is a generation whose app switch is off (§14).
+ * body is ignored, and so is a generation whose app switch is off
+ * (docs/policy/product-research-agent.md §14).
  */
 export function requestedScoutGenerations(body: unknown, env: Readonly<Record<string, string | undefined>> = process.env): string[] {
   const asked = (body as { generations?: unknown } | null)?.generations;

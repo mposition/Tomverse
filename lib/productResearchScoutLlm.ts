@@ -76,7 +76,7 @@ export type ScoutLlm = {
   readonly judge: (submission: ScoutSubmission, existingTitles: readonly string[]) => Promise<ScoutJudgement>;
   /** The issue-backlog subject: one text-only call over the newest observation's issues. */
   readonly triageIssues: (issues: readonly TriageIssue[], observedAt: Date) => Promise<IssueTriageJudgement>;
-  /** The model-written task (§14): one text-only call for today's request. */
+  /** The model-written task (docs/policy/product-research-agent.md §14): one text-only call for today's request. */
   readonly planScenario: (recentTitles: readonly string[], today: Date) => Promise<ScenarioPlan>;
 };
 
