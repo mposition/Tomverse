@@ -3066,6 +3066,15 @@ const checks = [
       const rtf = read("lib/legacyOffice/rtf.ts");
       const hwp = read("lib/legacyOffice/hwp.ts");
       const bounded = read("lib/boundedInflate.ts");
+      // Every reader of untrusted packages: none may inflate in one call.
+      const inflaters = [
+        "lib/legacyOffice/hwp.ts",
+        "lib/boundedInflate.ts",
+        "lib/packageExpansion.ts",
+        "lib/iworkPackage.ts",
+        "lib/officeRenderInput.ts",
+        "lib/legacyOfficeText.ts",
+      ].map(read);
       const parsers = [cfbf, doc, xls, ppt, rtf, hwp];
       return (
         // A protected document is refused by name. Nothing attempts a key.
@@ -3087,6 +3096,9 @@ const checks = [
         hwp.includes("visitZipEntries") &&
         !/\b(inflateSync|unzipSync|gunzipSync|unzlibSync)\s*\(/.test(hwp) &&
         bounded.includes("INFLATE_INPUT_CHUNK") &&
+        inflaters.every(
+          (code) => !/\b(inflateSync|unzipSync|gunzipSync|unzlibSync)\s*\(/.test(code)
+        ) &&
         !/\b(inflateSync|unzipSync|gunzipSync|unzlibSync)\s*\(/.test(bounded) &&
         !/\b(createDecipheriv|createHash|rc4|crypto)\b/i.test(
             parsers.join("\n")

@@ -10,9 +10,10 @@
 #   * Korean fonts (Nanum, Noto CJK) -- without them LibreOffice substitutes
 #     fonts and a Korean document lays out with shifted pages.
 #
-# Pin the base to an exact 8.x tag at least two weeks old before deploying;
-# the build arg keeps the tag in one place.
-ARG GOTENBERG_TAG=8
+# The base is pinned by the build arg, which has no default on purpose: an
+# exact 8.x.y tag at least two weeks old must be chosen at deploy time, and a
+# build without one fails rather than pulling whatever "8" means that day.
+ARG GOTENBERG_TAG
 FROM gotenberg/gotenberg:${GOTENBERG_TAG}
 
 USER root

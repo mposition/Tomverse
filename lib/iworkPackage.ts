@@ -4,30 +4,40 @@
  * Policy: docs/policy/chat-attachment-formats.md (iWork) and
  * docs/policy/generated-artifacts.md section 15.
  *
- * An iWork file is a ZIP of Apple's own binary records. This application does
- * not read those records -- nothing here could, and the renderer service lays
- * the file out instead -- so the check is what keeps a ZIP from being a weapon
- * on its way there: a bounded entry count, no path that leaves the package,
- * the index part every iWork document has, and a ceiling on what it really
- * expands to.
+ * An iWork file is a ZIP of Apple's own records. This application does not
+ * read those records -- the renderer service lays the file out instead -- so
+ * the check is what keeps the package from being a weapon on its way there: a
+ * bounded entry count, no path that leaves the package, the index part every
+ * iWork document has, and a ceiling on what it *really* expands to.
  *
- * "Really" is the point. A ZIP's sizes are the file's own claims, so every
- * entry is inflated here a few kilobytes of input at a time
- * (lib/boundedInflate.ts) and the output -- counted, then dropped -- is what
- * is measured. A package that expands past the ceiling is refused part-way,
- * before it is stored or handed to the renderer.
+ * "Really" includes what is compressed inside: the Snappy-compressed `.iwa`
+ * records LibreOffice decodes, and the `index.xml.gz` / `Index.zip` older
+ * versions wrote. lib/packageExpansion.ts measures all of it against one
+ * running total, inflating a step at a time, so a package that would expand
+ * past the ceiling is refused part-way, before it is stored or rendered.
  */
 
-import { BoundedInflateError, visitZipEntries } from "@/lib/boundedInflate";
+import { BoundedInflateError } from "@/lib/boundedInflate";
+import {
+  ExpansionLimitError,
+  createExpansionCounter,
+  measurePackage,
+} from "@/lib/packageExpansion";
 
 export const IWORK_PACKAGE_LIMITS = {
   maxEntries: 5_000,
-  /** Bytes every entry together actually inflates to. */
+  /** Bytes the package and everything compressed inside it expand to. */
   maxExpandedBytes: 200 * 1024 * 1024,
 } as const;
 
+export type IworkRefusal = "TOO_LARGE" | "MALFORMED";
+
 export class IworkPackageError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** Too large is something the user can fix by sending less. */
+    readonly refusal: IworkRefusal = "MALFORMED"
+  ) {
     super(message);
     this.name = "IworkPackageError";
   }
@@ -41,14 +51,14 @@ const INDEX_PARTS = /^(?:Index\/Document\.iwa|Index\.zip|index\.xml(?:\.gz)?|ind
 
 export const assertSafeIworkPackage = (bytes: Uint8Array): void => {
   let entries = 0;
-  let expanded = 0;
   let indexed = false;
+  const counter = createExpansionCounter(IWORK_PACKAGE_LIMITS.maxExpandedBytes);
   try {
-    visitZipEntries(bytes, {
-      entry: (name) => {
+    measurePackage(bytes, counter, {
+      entry: (name, depth) => {
         entries += 1;
         if (entries > IWORK_PACKAGE_LIMITS.maxEntries) {
-          throw new IworkPackageError("Too many entries.");
+          throw new IworkPackageError("Too many entries.", "TOO_LARGE");
         }
         if (
           name.startsWith("/") ||
@@ -57,18 +67,14 @@ export const assertSafeIworkPackage = (bytes: Uint8Array): void => {
         ) {
           throw new IworkPackageError("An entry leaves the package.");
         }
-        if (INDEX_PARTS.test(name)) indexed = true;
-      },
-      accept: () => true,
-      data: (_name, chunk) => {
-        expanded += chunk.length;
-        if (expanded > IWORK_PACKAGE_LIMITS.maxExpandedBytes) {
-          throw new IworkPackageError("Expands too far.");
-        }
+        if (depth === 0 && INDEX_PARTS.test(name)) indexed = true;
       },
     });
   } catch (error) {
     if (error instanceof IworkPackageError) throw error;
+    if (error instanceof ExpansionLimitError) {
+      throw new IworkPackageError("Expands too far.", "TOO_LARGE");
+    }
     if (error instanceof BoundedInflateError) {
       throw new IworkPackageError("Not a readable ZIP package.");
     }

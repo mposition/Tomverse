@@ -48,3 +48,12 @@ test("a compound file that is not an HWP is passed through: nothing in it inflat
   const doc = buildCompoundFile([{ name: "WordDocument", data: new Uint8Array(512) }]);
   assert.deepEqual(measureRenderInput("application/msword", doc), { ok: true });
 });
+
+test("fourth review: a workbook embedded in a Word file is measured too", () => {
+  const embedded = zipSync({ "xl/worksheets/sheet1.xml": new Uint8Array(201 * 1024 * 1024) });
+  const docx = zipSync({
+    "word/document.xml": new TextEncoder().encode("<w:document/>"),
+    "word/embeddings/Microsoft_Excel_Worksheet.xlsx": [embedded, { level: 0 }],
+  });
+  assert.deepEqual(measureRenderInput(DOCX, docx), { ok: false, reason: "EXPANDS_TOO_FAR" });
+});

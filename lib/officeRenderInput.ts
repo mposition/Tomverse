@@ -20,7 +20,12 @@
 
 import "server-only";
 
-import { BoundedInflateError, inflateRawBounded, visitZipEntries } from "@/lib/boundedInflate";
+import { BoundedInflateError, inflateRawBounded } from "@/lib/boundedInflate";
+import {
+  ExpansionLimitError,
+  createExpansionCounter,
+  measurePackage,
+} from "@/lib/packageExpansion";
 import { createLegacyParseBudget, LegacyOfficeError } from "@/lib/legacyOffice/budget";
 import { hasCompoundFileSignature, openCompoundFile, readCompoundStream } from "@/lib/legacyOffice/cfbf";
 
@@ -37,23 +42,24 @@ const isZip = (bytes: Uint8Array) =>
 
 class Overflow extends Error {}
 
+/**
+ * Every entry, and every container compressed inside one -- an embedded
+ * workbook, an iWork index, Snappy-compressed .iwa records -- against one
+ * running total (lib/packageExpansion.ts).
+ */
 const measureZip = (bytes: Uint8Array): RenderInputVerdict => {
-  let expanded = 0;
   let entries = 0;
   try {
-    visitZipEntries(bytes, {
+    measurePackage(bytes, createExpansionCounter(RENDER_INPUT_LIMITS.maxExpandedBytes), {
       entry: () => {
         entries += 1;
         if (entries > RENDER_INPUT_LIMITS.maxZipEntries) throw new Overflow();
       },
-      accept: () => true,
-      data: (_name, chunk) => {
-        expanded += chunk.length;
-        if (expanded > RENDER_INPUT_LIMITS.maxExpandedBytes) throw new Overflow();
-      },
     });
   } catch (error) {
-    if (error instanceof Overflow) return { ok: false, reason: "EXPANDS_TOO_FAR" };
+    if (error instanceof Overflow || error instanceof ExpansionLimitError) {
+      return { ok: false, reason: "EXPANDS_TOO_FAR" };
+    }
     if (error instanceof BoundedInflateError) return { ok: false, reason: "UNREADABLE" };
     throw error;
   }

@@ -101,3 +101,50 @@ test("a package is measured by what it really expands to, not what it declares",
   assert.ok(bomb.length < 2 * 1024 * 1024);
   assert.throws(() => assertSafeIworkPackage(bomb), /Expands too far/);
 });
+
+/* ------------------------------------------------------------------------ */
+/* Found by the fourth review: what is compressed inside the package counts   */
+/* ------------------------------------------------------------------------ */
+
+import { gzipSync } from "fflate";
+
+test("a gzipped index that expands too far is refused, though small as stored", () => {
+  const bomb = zipSync({
+    "index.xml.gz": [gzipSync(new Uint8Array(201 * 1024 * 1024)), { level: 0 }],
+  });
+  assert.ok(bomb.length < 2 * 1024 * 1024);
+  assert.throws(() => assertSafeIworkPackage(bomb), (error) => error.refusal === "TOO_LARGE");
+});
+
+test("a nested Index.zip is measured against the same total", () => {
+  const inner = zipSync({ "Document.iwa": new Uint8Array(201 * 1024 * 1024) });
+  const bomb = zipSync({ "Index.zip": [inner, { level: 0 }] });
+  assert.throws(() => assertSafeIworkPackage(bomb), (error) => error.refusal === "TOO_LARGE");
+});
+
+test("an .iwa record's stated Snappy length counts, since a decoder writes that much", () => {
+  // One IWA chunk: [0][3-byte length][varint uncompressed length = 300 MB]...
+  const varint = [];
+  let value = 300 * 1024 * 1024;
+  while (value >= 0x80) {
+    varint.push((value & 0x7f) | 0x80);
+    value = Math.floor(value / 128);
+  }
+  varint.push(value);
+  const body = new Uint8Array([...varint, 0, 0, 0, 0]);
+  const chunk = new Uint8Array([0, body.length & 0xff, (body.length >> 8) & 0xff, 0, ...body]);
+  const bomb = zipSync({ "Index/Document.iwa": chunk });
+  assert.throws(() => assertSafeIworkPackage(bomb), (error) => error.refusal === "TOO_LARGE");
+});
+
+test("a size refusal reaches the user as a size error, not a type mismatch", async () => {
+  const format = resolveChatAttachmentFormat({ filename: "Big.pages", declaredMediaType: "application/vnd.apple.pages" });
+  const bomb = zipSync({
+    "Index/Document.iwa": new Uint8Array(16),
+    "Data/blob": new Uint8Array(201 * 1024 * 1024),
+  });
+  await assert.rejects(
+    validateChatAttachmentUpload({ buffer: Buffer.from(bomb), format, scope: "account" }),
+    (error) => error.code === "ATTACHMENT_TOO_LARGE" && error.status === 413
+  );
+});

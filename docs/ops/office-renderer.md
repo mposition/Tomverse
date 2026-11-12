@@ -13,7 +13,9 @@ Excel·한글(HWP·HWPX)·Pages·Numbers 파일을 레이아웃 그대로 PDF로
      HWPX는 이 필터(GPL-3.0-or-later, Debian 패키지)가 있어야 열린다.
    - 한글 글꼴(`fonts-nanum`, `fonts-noto-cjk`) — 없으면 글꼴이 바뀌어 쪽이 밀린다.
    - 기반 이미지 버전은 build arg `GOTENBERG_TAG`로 **고정**한다(예: `8.x.y`). Docker
-     Hub에서 2주 이상 된 버전을 고른다. 이 Dockerfile은 아직 실제로 빌드해 보지
+     Hub에서 2주 이상 된 버전을 고른다. 기본값이 없으므로 이 값을 넣지 않으면 빌드가
+     실패한다 — 그날의 `8`이 무엇이든 끌어오는 일을 막기 위해서다. Railway 서비스의
+     변수에 `GOTENBERG_TAG`를 넣으면 build arg로 전달된다. 이 Dockerfile은 아직 실제로 빌드해 보지
      않았다 — 첫 배포의 빌드 로그에서 패키지 설치가 성공했는지 확인한다.
    - 서비스 이름: `office-renderer` (private 주소가 `office-renderer.railway.internal`이 된다).
 2. **Public domain을 만들지 않는다.** Private networking만 쓴다.

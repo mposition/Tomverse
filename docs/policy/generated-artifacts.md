@@ -899,8 +899,9 @@ OpenDocument(`odt`·`odp`·`ods`), Office 97-2003(`doc`·`ppt`·`xls`), `rtf`,
 리더는 자기가 읽는 부분(HWPX의 본문 section 등)만 풀기 때문에, 그림 항목에 숨긴
 압축 폭탄은 그 검사를 지나 LibreOffice에 닿을 수 있다. 그래서 렌더러로 보내기 전에
 `lib/officeRenderInput.ts`가 **압축된 모든 부분을 실제로** 입력 4 KB씩 풀어 나온
-바이트를 세고 버린다: ZIP 기반 문서(OOXML·ODF·HWPX·iWork)는 모든 항목, HWP 5.x는
-압축 플래그가 있으면 모든 스트림. 합이 200 MB를 넘거나 항목이 2만 개를 넘으면 보내지
+바이트를 세고 버린다: ZIP 기반 문서(OOXML·ODF·HWPX·iWork)는 모든 항목과 그 안에 다시
+압축된 것(문서에 넣은 통합 문서 같은 내부 ZIP, gzip, iWork의 Snappy `.iwa`;
+`lib/packageExpansion.ts`), HWP 5.x는 압축 플래그가 있으면 모든 스트림. 합이 200 MB를 넘거나 항목이 2만 개를 넘으면 보내지
 않고 `spec_rejected`로 거절한다(독립 검토 2026-11-13).
 
 | 렌더러 응답 | 카드 |
