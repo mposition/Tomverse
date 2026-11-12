@@ -9,6 +9,7 @@ import { ReviewNavigation } from "@/components/chat/ReviewStudioChrome";
 import { MarketingConsentSlot } from "@/components/analytics/AnalyticsProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { PluginLogo } from "./PluginLogo";
+import { PluginScopePicker, initialPluginScopes } from "./PluginScopePicker";
 import { mcpConnectorCopy } from "@/lib/mcpConnectorCopy";
 import { mcpProviderCopy } from "@/lib/mcpProviderCopy";
 import { mcpProviderSummary } from "@/lib/mcpProviderSummary";
@@ -34,6 +35,7 @@ export function PluginWorkspace() {
   const [adding, setAdding] = useState(false);
   const [serverId, setServerId] = useState(""); const [credential, setCredential] = useState("");
   const [checked, setChecked] = useState<string[]>([]);
+  const [scopes, setScopes] = useState<string[]>([]);
   const [verified, setVerified] = useState<Record<string, boolean>>({});
   const dialog = useRef<HTMLDivElement>(null);
   const detail = useRef<HTMLElement>(null);
@@ -77,8 +79,10 @@ export function PluginWorkspace() {
   const showDetail = () => { if (window.innerWidth < 1250) requestAnimationFrame(() => detail.current?.scrollIntoView({ block: "start" })); };
   const choose = (conn: PluginConnection) => { setProviderId(null); setSelectedId(conn.id); setChecked(conn.grants.map(t => t.name)); showDetail(); };
   const chooseProvider = (provider: McpProvider) => { setSelectedId(null); setProviderId(provider.id); showDetail(); };
-  const openAdd = (id = "") => { setServerId(id || inventory.servers[0]?.id || ""); setCredential(""); setAdding(true); };
+  const chooseServer = (id: string) => { setServerId(id); setCredential(""); setScopes(initialPluginScopes(inventory.servers.find(s => s.id === id))); };
+  const openAdd = (id = "") => { chooseServer(id || inventory.servers[0]?.id || ""); setAdding(true); };
   const chosenServer = inventory.servers.find(s => s.id === serverId);
+  const scopeMissing = Boolean(chosenServer?.scopes && !scopes.length);
   const pending = inventory.invocations.filter(i => i.state === "pending");
   const cards: Array<{ id: string; name: string; server?: PluginServer; provider?: McpProvider }> = [
     ...inventory.servers.map(server => ({ id: server.id, name: server.name, server, provider: mcpProvider(server.id) || mcpProvider(server.name) })),
@@ -174,6 +178,7 @@ export function PluginWorkspace() {
         <aside ref={detail} className={styles.detail} aria-label={c.manage}>
           {selected ? <><PluginLogo name={selected.name} /><h2>{selected.name}</h2><p className={styles.help}>{c.sharing}</p><h3>{c.tools}</h3><p className={styles.help}>{c.permissionNotice}</p>
             {selected.status !== "connected" && <p role="status">{selected.status === "disconnected" ? c.disconnected : c.expired}</p>}
+            {!!selected.scopes?.length && <p className={styles.help} data-testid="plugin-granted-scopes">{c.grantedScopes}: {selected.scopes.join(", ")}</p>}
             <div className={styles.toolList}>{(selected.status === "connected" ? selected.catalog : []).map(tool => <label key={tool.name}><input type="checkbox" disabled={busy} checked={checked.includes(tool.name)} onChange={e => setChecked(old => e.target.checked ? [...old, tool.name] : old.filter(n => n !== tool.name))} /><span><strong>{tool.name}</strong><small>{tool.mode === "read" ? c.read : c.confirm}</small></span></label>)}</div>
             <button className={styles.primary} type="button" disabled={busy || selected.status !== "connected"} onClick={() => void mutate(`/api/mcp/connections/${selected.id}`, "PATCH", { tools: checked, version: selected.version })}>{c.save}</button>
             <button type="button" disabled={busy || !inventory.enabled} onClick={() => openAdd(selected.serverId)}>{c.reconnect}</button>
@@ -190,13 +195,14 @@ export function PluginWorkspace() {
     </main>
     {adding && <div className={styles.backdrop}><div ref={dialog} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="plugin-add-title">
       <div className={styles.header}><h2 id="plugin-add-title">{c.add}</h2><button type="button" disabled={busy} aria-label={c.close} onClick={() => { setAdding(false); setCredential(""); }}><X size={20} /></button></div>
-      <form onSubmit={e => { e.preventDefault(); void mutate(chosenServer?.auth === "oauth" ? "/api/mcp/oauth/start" : "/api/mcp/connections", "POST", { serverId, ...(chosenServer?.auth === "bearer" ? { credential } : {}) }).then(result => { if (result) { setAdding(false); setSelectedId(result.connection?.id || result.id); setChecked([]); } }); }}>
-        <label>{c.title}<select value={serverId} onChange={e => { setServerId(e.target.value); setCredential(""); }} required>{inventory.servers.map(server => <option value={server.id} key={server.id}>{server.name}</option>)}</select></label>
+      <form onSubmit={e => { e.preventDefault(); void mutate(chosenServer?.auth === "oauth" ? "/api/mcp/oauth/start" : "/api/mcp/connections", "POST", { serverId, ...(chosenServer?.auth === "bearer" ? { credential } : {}), ...(chosenServer?.scopes ? { scopes } : {}) }).then(result => { if (result) { setAdding(false); setSelectedId(result.connection?.id || result.id); setChecked([]); } }); }}>
+        <label>{c.title}<select value={serverId} onChange={e => chooseServer(e.target.value)} required>{inventory.servers.map(server => <option value={server.id} key={server.id}>{server.name}</option>)}</select></label>
         {chosenServer && <p className={styles.help}>{chosenServer.origin}</p>}
+        {chosenServer?.auth === "oauth" && <PluginScopePicker server={chosenServer} value={scopes} onChange={setScopes} disabled={busy} copy={c} className={styles.scopePicker} />}
         {chosenServer?.auth === "bearer" && <label>{c.token}<input data-testid="plugin-credential" type="password" value={credential} onChange={e => setCredential(e.target.value)} maxLength={4096} autoComplete="off" required /></label>}
         <p>{chosenServer?.auth === "oauth" ? c.oauthHelp : c.authHelp}</p><p className={styles.help}>{c.sharing}</p>
         {!inventory.servers.length && <p>{c.setupNotice}</p>}
-        <button className={styles.primary} disabled={busy || !chosenServer} type="submit">{busy ? c.sending : c.connect}</button>
+        <button className={styles.primary} disabled={busy || !chosenServer || scopeMissing} type="submit">{busy ? c.sending : c.connect}</button>
       </form>
     </div></div>}
   </div>;

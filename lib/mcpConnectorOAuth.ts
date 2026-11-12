@@ -5,11 +5,12 @@ import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprot
 import { prisma } from "@/lib/prisma";
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { guardedMcpFetch, resolvePublicMcpEndpoint, validateMcpEndpoint } from "@/lib/mcpConnectorClient";
-import { MCP_LIMITS, McpConnectorError, mcpServer, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
+import { MCP_LIMITS, McpConnectorError, mcpScopedServer, mcpServer, splitMcpScope, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
 import { auditMcp, connectMcp, decryptMcpSecret, encryptMcpSecret, mcpPolicyDigest } from "@/lib/mcpConnectorStore";
 import { githubOAuthTokenRequest } from "@/lib/mcpConnectorGitHub";
 
-type OAuthSecrets = { verifier?: string; clientInformation?: OAuthClientInformationMixed; tokens?: OAuthTokens };
+// `scopes` is the user's choice; it rides in the encrypted (AES-GCM) flow secret.
+type OAuthSecrets = { verifier?: string; clientInformation?: OAuthClientInformationMixed; tokens?: OAuthTokens; scopes?: string[] };
 const stateDigest = (state: string) => createHash("sha256").update(state).digest("hex");
 const ownOAuth = (server: McpServerPolicy) => {
   if (server.auth !== "oauth" || !server.oauth) throw new McpConnectorError("oauth_not_configured");
@@ -103,15 +104,31 @@ async function runOAuth(input: { flowId: string; userId: string; server: McpServ
   return { outcome, redirect, secrets: state };
 }
 
-export async function startMcpOAuth(userId: string, serverId: string, redirectUri: string, signal?: AbortSignal) {
-  const server = mcpServer(serverId); ownOAuth(server);
+/** Validated user scope choice for a new flow; undefined when the server's scope is fixed. */
+function chosenMcpScopes(server: McpServerPolicy, scopes: string[] | undefined) {
+  if (!server.oauth?.selectableScopes) {
+    if (scopes) throw new McpConnectorError("oauth_scope_not_allowed");
+    return undefined;
+  }
+  const chosen = scopes ?? splitMcpScope(server.oauth.scope);
+  if (!chosen.length) throw new McpConnectorError("oauth_scope_required");
+  mcpScopedServer(server, chosen);
+  const selectable = server.oauth.selectableScopes;
+  return selectable.filter(scope => chosen.includes(scope));
+}
+
+export async function startMcpOAuth(userId: string, serverId: string, redirectUri: string, signal?: AbortSignal, scopes?: string[]) {
+  const policy = mcpServer(serverId); ownOAuth(policy);
+  const chosen = chosenMcpScopes(policy, scopes), server = mcpScopedServer(policy, chosen), policyDigest = mcpPolicyDigest(policy, chosen);
   const previous = await prisma.mcpConnection.findUnique({ where: { userId_serverId: { userId, serverId } }, select: { version: true, oauthCiphertext: true, policyDigest: true } });
   const state = randomBytes(32).toString("base64url");
-  const secrets: OAuthSecrets = previous?.policyDigest === mcpPolicyDigest(server) && previous.oauthCiphertext ? JSON.parse(decryptMcpSecret(previous.oauthCiphertext) || "{}") : {};
+  // Saved tokens are reused only under the identical policy and scope choice.
+  const secrets: OAuthSecrets = previous?.policyDigest === policyDigest && previous.oauthCiphertext ? JSON.parse(decryptMcpSecret(previous.oauthCiphertext) || "{}") : {};
+  if (chosen) secrets.scopes = chosen; else delete secrets.scopes;
   const flow = await prisma.$transaction(async tx => {
     await takeAuditChainLock(tx);
     if (await tx.mcpOAuthFlow.count({ where: { userId, expiresAt: { gt: new Date() } } }) >= 8) throw new McpConnectorError("oauth_flow_limit", 429);
-    const row = await tx.mcpOAuthFlow.create({ data: { userId, serverId, policyDigest: mcpPolicyDigest(server), connectionVersion: previous?.version,
+    const row = await tx.mcpOAuthFlow.create({ data: { userId, serverId, policyDigest, connectionVersion: previous?.version,
       stateHash: stateDigest(state), redirectUri, secretCiphertext: encryptMcpSecret(JSON.stringify(secrets)), expiresAt: new Date(Date.now() + MCP_LIMITS.pendingMs) } });
     await auditMcp(tx, userId, "authorization_started", row.id, "McpOAuthFlow");
     return row;
@@ -121,11 +138,15 @@ export async function startMcpOAuth(userId: string, serverId: string, redirectUr
     if (result.outcome === "AUTHORIZED" && result.secrets.tokens) {
       await prisma.mcpOAuthFlow.update({ where: { id: flow.id }, data: { state: "used", secretCiphertext: null } });
       return { status: "connected", connection: await connectMcp(userId, serverId, undefined, signal,
-        { tokens: result.secrets.tokens, clientInformation: result.secrets.clientInformation, expectedVersion: previous?.version ?? null }) };
+        { tokens: result.secrets.tokens, clientInformation: result.secrets.clientInformation, expectedVersion: previous?.version ?? null, scopes: chosen }) };
     }
     if (!result.redirect) throw new McpConnectorError("oauth_redirect_missing");
     return { status: "authorization_required", authorizationUrl: result.redirect };
   } catch { await prisma.mcpOAuthFlow.updateMany({ where: { id: flow.id }, data: { state: "failed", secretCiphertext: null } }); throw new McpConnectorError("oauth_authorization_failed", 502); }
+}
+
+function flowPolicyCurrent(server: McpServerPolicy, digest: string, scopes?: string[]) {
+  try { return digest === mcpPolicyDigest(server, scopes); } catch { return false; }
 }
 
 export async function completeMcpOAuth(userId: string, state: string, code: string, issuer?: string, signal?: AbortSignal) {
@@ -134,19 +155,20 @@ export async function completeMcpOAuth(userId: string, state: string, code: stri
     const row = await tx.mcpOAuthFlow.findFirst({ where: { userId, stateHash: stateDigest(state), state: "pending", expiresAt: { gt: new Date() } } });
     if (!row?.secretCiphertext) throw new McpConnectorError("oauth_flow_expired", 409);
     const server = mcpServer(row.serverId);
-    if (row.policyDigest !== mcpPolicyDigest(server) || (issuer && issuer !== server.oauth?.issuer)) throw new McpConnectorError("oauth_issuer_mismatch");
+    const secrets: OAuthSecrets = JSON.parse(decryptMcpSecret(row.secretCiphertext) || "{}");
+    if (!flowPolicyCurrent(server, row.policyDigest, secrets.scopes) || (issuer && issuer !== server.oauth?.issuer)) throw new McpConnectorError("oauth_issuer_mismatch");
     const claimed = await tx.mcpOAuthFlow.updateMany({ where: { id: row.id, userId, state: "pending" }, data: { state: "running" } });
     if (!claimed.count) throw new McpConnectorError("oauth_flow_expired", 409);
     await auditMcp(tx, userId, "authorization_claimed", row.id, "McpOAuthFlow");
-    return row;
+    return { ...row, secrets };
   });
   try {
-    const server = mcpServer(flow.serverId);
+    const server = mcpScopedServer(mcpServer(flow.serverId), flow.secrets.scopes);
     const result = await runOAuth({ flowId: flow.id, userId, server, redirectUri: flow.redirectUri, state,
-      secrets: JSON.parse(decryptMcpSecret(flow.secretCiphertext) || "{}"), code, signal });
+      secrets: flow.secrets, code, signal });
     if (result.outcome !== "AUTHORIZED" || !result.secrets.tokens) throw new McpConnectorError("oauth_token_missing");
     const connection = await connectMcp(userId, flow.serverId, undefined, signal,
-      { tokens: result.secrets.tokens, clientInformation: result.secrets.clientInformation, expectedVersion: flow.connectionVersion });
+      { tokens: result.secrets.tokens, clientInformation: result.secrets.clientInformation, expectedVersion: flow.connectionVersion, scopes: flow.secrets.scopes });
     await prisma.mcpOAuthFlow.update({ where: { id: flow.id }, data: { state: "used", secretCiphertext: null } });
     return connection;
   } catch { await prisma.mcpOAuthFlow.updateMany({ where: { id: flow.id }, data: { state: "failed", secretCiphertext: null } }); throw new McpConnectorError("oauth_authorization_failed", 502); }

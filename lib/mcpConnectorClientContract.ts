@@ -2,8 +2,9 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { MCP_PROVIDERS, mcpProvider } from "@/lib/mcpProviderCatalog";
 
 export type PluginTool = { name: string; mode: "read" | "confirm"; inputSchema?: Record<string, unknown> };
-export type PluginConnection = { id: string; serverId: string; name: string; status: string; catalog: PluginTool[]; grants: PluginTool[]; version: number };
-export type PluginServer = { id: string; name: string; auth: "none" | "bearer" | "oauth"; origin: string };
+export type PluginConnection = { id: string; serverId: string; name: string; status: string; catalog: PluginTool[]; grants: PluginTool[]; version: number; scopes?: string[] };
+// `scopes` lists what a user may choose at connect time; absent means the server's scope is fixed.
+export type PluginServer = { id: string; name: string; auth: "none" | "bearer" | "oauth"; origin: string; scopes?: string[]; defaultScopes?: string[] };
 export type PluginAction = { id: string; connectionId: string; toolName: string; state: string; arguments: unknown; expiresAt: string };
 export type PluginInventory = { enabled: boolean; servers: PluginServer[]; connections: PluginConnection[]; invocations: PluginAction[] };
 export const EMPTY_PLUGIN_INVENTORY: PluginInventory = { enabled: false, servers: [], connections: [], invocations: [] };

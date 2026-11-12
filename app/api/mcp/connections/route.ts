@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { mcpApi } from "@/lib/mcpConnectorApi";
-import { mcpPreviewEnabled, mcpServers } from "@/lib/mcpConnectorPolicy";
+import { mcpPreviewEnabled, mcpServers, splitMcpScope } from "@/lib/mcpConnectorPolicy";
 import { connectMcp, listMcpConnections } from "@/lib/mcpConnectorStore";
 import { listMcpInvocations } from "@/lib/mcpConnectorExecution";
 export const dynamic = "force-dynamic";
@@ -9,7 +9,8 @@ export function GET(request: Request) {
   return mcpApi(request, async userId => {
     if (!mcpPreviewEnabled()) return { enabled: false, servers: [], connections: [], invocations: [] };
     const connections = await listMcpConnections(userId);
-    return { enabled: true, servers: mcpServers().map(({ id, name, auth, url }) => ({ id, name, auth, origin: new URL(url).origin })),
+    return { enabled: true, servers: mcpServers().map(({ id, name, auth, url, oauth }) => ({ id, name, auth, origin: new URL(url).origin,
+      ...(oauth?.selectableScopes ? { scopes: oauth.selectableScopes, defaultScopes: splitMcpScope(oauth.scope) } : {}) })),
       connections, invocations: await listMcpInvocations(userId) };
   });
 }
