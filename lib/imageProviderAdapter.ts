@@ -8,6 +8,8 @@ import {
 } from "@/lib/imageGenerationPricing";
 import {
   getImageModel,
+  GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN,
+  googleImageOutputLimitBound,
   imageDeliveryMimeType,
   imageThinkingCapEnforced,
   type ImageModelProfile,
@@ -365,8 +367,14 @@ export const generateImageWithProvider = async (input: {
   const model = getImageModel(modelId);
   // An operator hold stops new admissions (the service refuses them); a job
   // already admitted and charged against the provider budget finishes rather
-  // than failing after its budget was spent. Price or cost refusals still stop.
-  if (!model || (model.disabledReason !== null && model.disabledReason !== "operational_hold")) {
+  // than failing after its budget was spent. Price or cost refusals still stop,
+  // and so does a model with no price at all: nothing was admitted against it,
+  // so there is no job to finish (a seed held before its sale credits exist).
+  if (
+    !model ||
+    model.prices.length === 0 ||
+    (model.disabledReason !== null && model.disabledReason !== "operational_hold")
+  ) {
     throw new ImageProviderError(
       "provider_failed",
       `Image model ${modelId} is not available for requests.`
@@ -555,16 +563,17 @@ export const generateImageWithProvider = async (input: {
 /**
  * Google, over the Interactions API.
  *
- * Unreachable today and deliberately so: generateImageWithProvider refuses any
- * model carrying a disabledReason before it dispatches, and all three Google
- * image models are `worst_case_cost_unbounded` because `max_output_tokens` was
- * measured not to bound hidden thinking. It also refuses any model whose
- * provider bills thinking per uncapped token (`imageThinkingCapEnforced`), so
- * a cap an operator writes into a price revision does not open this path
- * either -- only a code change to that table can. The adapter exists
- * ahead of that answer because implementing it is not the same decision as
- * shipping it, and because the staging measurement that would settle the
- * question needs this code to make the call.
+ * Reachable only for a model in GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS whose request
+ * is the measured one (that row's output limit, no thinking level), once an
+ * operator has priced and enabled it: generateImageWithProvider refuses any
+ * model carrying a disabledReason before it dispatches, and any whose thinking
+ * cap its request cannot hold (`imageThinkingCapEnforced`). A cap written into
+ * a price revision for an unmeasured Google model opens nothing -- only a row
+ * in that table can, and a row is a code change backed by a measurement.
+ *
+ * A response that stops without an image (`incomplete`, which the limit causes
+ * when reasoning uses the room) is refused by the parser and is not retried:
+ * it was billed, and a second attempt would be billed again.
  *
  * Differences from the other two adapters, each of which is a way to get it
  * wrong:
@@ -659,6 +668,23 @@ const generateWithGoogle = async (
         response.status,
         providerRequestId,
         requestParams
+      );
+    }
+    // The thinking cap rests on a measured bound, not a documented one, so a
+    // response that bills past it is reported the first time it happens.
+    const bound = googleImageOutputLimitBound(model.provider, model.apiModelId);
+    const billableTokens = parsed.usage.outputTokens + parsed.usage.thinkingTokens;
+    if (bound && billableTokens > GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN * bound.maxOutputTokens) {
+      console.error(
+        JSON.stringify({
+          event: "image_google_output_over_measured_bound",
+          modelId: model.id,
+          maxOutputTokens: bound.maxOutputTokens,
+          outputTokens: parsed.usage.outputTokens,
+          thinkingTokens: parsed.usage.thinkingTokens,
+          providerRequestId,
+          timestamp: new Date().toISOString(),
+        })
       );
     }
     const imageBytes = Buffer.from(parsed.imageBase64, "base64");

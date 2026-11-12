@@ -26,7 +26,8 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
   (§12)에서만 관리한다. 등록 현황(2026-08-05): `gpt-image-2`·
   `grok-imagine-image-quality-20260403`(활성) 2개,
   `gemini-3.1-flash-image`·`gemini-3.1-flash-lite-image`·
-  `gemini-3-pro-image`(등록-비활성) 3개.
+  `gemini-3-pro-image`(등록-비활성) 3개 — 2026-11-13부터 앞의 둘은 thinking cap이
+  정해진 운영 보류다(§12.1).
   미등록 평가 후보는 §12.1에 있다. 비교 그룹의 모델 수 상한은
   `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)이며 UI·데이터 모델에 상한값을
   하드코딩하지 않는다. **UI는 이 값을 서버에서 전달받는다**
@@ -509,7 +510,9 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
      목표 잔여율·환불 위험·가격 drift 여유를 반영해 별도 승인한다.
   6. thinking 비용은 평균이 아니라 provider가 허용하는 상한·최악 조건으로
      계산한다. 공식 문서에서 상한을 확인할 수 없으면 **고정 가격 산정
-     불가 — 모델 활성화 보류**다.
+     불가 — 모델 활성화 보류**다. 예외는 하나다: 유료 실측으로 잰 한도에
+     여유를 더한 값을 운영자가 모델별로 승인한 경우(§12.1 "측정된 한도 + 여유",
+     2026-11-13). 그 값은 코드 표에 있고 가격 개정으로는 만들 수 없다.
   7. 성공 후 사용자에게 추가 청구하지 않는다. 실측 원가는 내부 정산·관측
      전용이다.
 - **공식 도메인 본문을 직접 읽고 기록한 가격만 `verified`다.** 검색
@@ -529,9 +532,9 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 |---|---|---|---|
 | `gpt-image-2` | **활성** | 표 §3 | — |
 | `grok-imagine-image-quality-20260403` | **활성 (2026-08-05)** | 1K $0.05 · 판매가 75크레딧 | 1K 정사각만. 2K(승인 100크레딧)는 크기 체계 확장 후 |
-| `gemini-3.1-flash-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | **thinking 상한** — 아래 참조 |
-| `gemini-3.1-flash-lite-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K $0.0336 (1K 전용) | 동일. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
-| `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | 동일 + 제품 판단 보류(`gpt-image-2` Final과 중복) |
+| `gemini-3.1-flash-image` | 등록-보류 (`operational_hold`, 2026-11-13) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | thinking cap 12,288µUSD(측정된 한도 + 여유, 아래). 남은 것: 판매 크레딧 승인(최소 94)·Google 예산 env |
+| `gemini-3.1-flash-lite-image` | 등록-보류 (`operational_hold`, 2026-11-13) | 1K $0.0336 (1K 전용) | thinking cap 6,144µUSD. 남은 것: 판매 크레딧 승인(최소 50)·Google 예산 env. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
+| `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | **thinking 상한**(재실측 대상 아님) + 제품 판단 보류(`gpt-image-2` Final과 중복) |
 | Qwen Image (`qwen-image-2.0`·`-2.0-pro`·`-3.0`·`-3.0-pro`) | 미등록 · **직접 어댑터 구현(기본 꺼짐, 2026-11-07)** | 장당 2.0 $0.035 / 2.0-pro $0.075 / 3.0 1K $0.03 / 3.0-pro 1K $0.04 (운영자 조사, `verified` 아님) | 아래 "Qwen 직접 어댑터" — 결과 저장 리전, 예산 env, 판매 크레딧, 약관, 한국어 글자 정확도 |
 | `google/nano-banana-2.1` (fal) | 미등록 — endpoint 표 행만 (`per_token_uncapped`) | 토큰 과금: 1M당 입력 $1.764 · 출력 텍스트·thinking $8.823 · 출력 이미지 $35.294 (2026-11-07 읽음, `verified` 아님) | **thinking 상한** — §16.9 |
 | `alibaba/qwen-image-3/text-to-image` (fal) | 미등록 — endpoint 표 행만 (`not_billed`) | 1K $0.04 / 2K $0.075 (조사 전언, 원문 미확인) | 가격 원문 확인·smoke·판매 크레딧 승인 — §16.9 |
@@ -609,19 +612,21 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 
 세 모델은 `worst_case_cost_unbounded`를 유지한다. 재검토 조건은 Google이 thinking
 토큰 상한을 거는 요청 파라미터를 제공하거나, 공식 문서가 과금 대상의 상한을
-명시하는 경우다.
+명시하는 경우다. (2026-11-13: Flash·Flash Lite는 아래 "측정된 한도 + 여유"로
+`operational_hold`가 됐다. Pro는 그대로다.)
 
 **상한인지 아닌지는 데이터가 아니라 코드가 정한다 (2026-10-21).** 동적 카탈로그의
 가격 개정은 `thinkingCapMicroUsd`에 숫자를 적을 수 있지만, 그 숫자가 상한이 되려면
 우리가 보내는 요청이 그것을 지킬 수 있어야 한다. `imageThinkingCapEnforced`
 (`lib/imageModelRegistry.ts`)가 provider별로 답한다 — OpenAI·xAI는 이미지 요청에
-thinking 과금이 없고, Google 직접 호출은 토큰 과금이고 묶을 파라미터가 없다. fal은
+thinking 과금이 없고, Google 직접 호출은 토큰 과금이고, 실측으로 한도를 잰 모델(아래 "측정된 한도 + 여유")만
+그 한도로 묶인다. fal은
 gateway라 **endpoint별로** 답한다(2026-11-07, `FAL_ENDPOINT_PROFILES`,
 `lib/falImageRequest.ts`, §16.9): Nano Banana 2는 요청이 고정한
 `thinking_level: "high"`에 대한 요청당 고정 할증(`FAL_HIGH_THINKING_SURCHARGE_MICRO_USD`
 = 2,000)이라 cap이 그 이상일 때만 상한이고, Qwen Image 3는 이미지당 과금이라 0이
 상한이며, Nano Banana 2.1은 토큰 과금에 상한 파라미터가 없어 Google 직접 호출과 같이
-상한이 없다. 표에 없는 fal endpoint도 상한이 없다. 그래서 cap을 적은 Google·Nano
+상한이 없다. 표에 없는 fal endpoint도 상한이 없다. 그래서 cap을 적은 미실측 Google·Nano
 Banana 2.1 개정, cap이 할증보다 작은 Nano Banana 2 개정, 표에 없는 endpoint의 fal
 개정은 판정·최악 원가·어댑터 dispatch에서 모두 거절된다. Google이나 Nano Banana 2.1을
 여는 것은 개정이 아니라 이 표를 바꾸는 코드 변경이다.
@@ -630,6 +635,46 @@ Banana 2.1 개정, cap이 할증보다 작은 Nano Banana 2 개정, 표에 없�
 `max_output_tokens`가 thought 토큰을 포함한 hard cutoff라고 적는다. 이미지 모델에 대한
 문장이 아니고 위 2026-08-14 실측과 반대다. 재검토 조건의 문서 쪽이 충족됐을 수 있지만,
 상한으로 쓰려면 새 실측(유료, §15 예산 승인 필요)이 먼저다.
+
+#### 측정된 한도 + 여유 (2026-11-12 재실측, 2026-11-13 운영자 결정)
+
+운영자 승인으로 2026-11-12에 Flash·Flash Lite를 23건 다시 쟀다
+(`.github/audits/image-model-verification-worksheet.md` §J).
+
+- thinking을 `high`로 강제하고 상한 2,048을 보낸 10건은 모두 output + thinking이
+  상한 이하였고 이미지 없이 멈췄다. 2026-08-14의 2,533(이미지 반환)과 다른 동작이다.
+- `thinking_level`을 생략한 12건은 thinking counter가 0이고 output이 1,575–1,699였다.
+- 상한 1,536에서는 1,610을 보고하고 이미지를 반환했다. **엄격한 상한은 아니다** —
+  이미지 한 장은 통째로 나오므로 상한을 넘을 수 있다.
+
+**결정: 엄격한 상한 대신 "측정된 한도 + 여유"로 최악 원가를 정한다.** 이미지가 아닌
+과금 토큰(텍스트·thinking)의 최악을 요청이 보내는 `max_output_tokens`의 2배로 잡고,
+모델의 텍스트 출력 단가를 곱한 값을 thinking cap으로 쓴다. 2배는 두 실측을 모두
+덮는다(8월: thinking과 output이 각각 상한 아래, 11월: 합계가 상한 아래). 이미지 자체의
+원가는 옵션의 장당 원가다.
+
+| 모델 | 보내는 상한 | 텍스트·thinking 단가 | thinking cap | 최소 크레딧(1K) |
+|---|---:|---:|---:|---:|
+| `gemini-3.1-flash-image` | 2,048 | $3.00/1M | 12,288µUSD | 94 |
+| `gemini-3.1-flash-lite-image` | 2,048 | $1.50/1M | 6,144µUSD | 50 |
+
+코드: `GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS`(`lib/imageModelRegistry.ts`). 조건은 셋이다.
+
+1. **잰 요청만 유효하다.** 모델이 그 표의 상한(2,048)을 보내고 `thinking_level`을
+   고정하지 않을 때만 cap이 성립한다(`imageThinkingCapEnforced`). 다른 상한이나
+   thinking level을 가진 런타임 행은 판정·어댑터에서 거절된다.
+2. **표에 없는 Google 모델은 그대로 `per_token_uncapped`다.** 행을 더하는 것은 그
+   모델의 유료 실측과 운영자 승인이 있는 코드 변경이다.
+3. **정산은 cap 전액으로 한다.** thinking counter가 0이어도 사고 텍스트가 output에
+   들어 과금되므로 0으로 정산하지 않는다(`settledThinkingCostMicroUsd`).
+
+이 결정은 문서화된 상한이 아니라 관측에 기대므로 두 장치를 둔다. output + thinking이
+상한의 2배를 넘는 응답은 `image_google_output_over_measured_bound`로 기록되고, 지출의
+최종 차단은 provider 예산(§8, `IMAGE_PROVIDER_GOOGLE_COST_MICROUSD_PER_DAY`·`_PER_MONTH`)이
+한다. 그 기록이 나오면 Google 모델을 보류하고 다시 잰다.
+
+켜는 절차는 다른 모델과 같다: 판매 크레딧을 담은 가격 개정(§3·§4 승인), Google 예산
+env, 그리고 Admin 카탈로그의 켜기. seed는 `operational_hold`·가격 없음으로 남는다.
 
 #### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 절차 (2026-08-14 실행 완료, 판정 부정)
 

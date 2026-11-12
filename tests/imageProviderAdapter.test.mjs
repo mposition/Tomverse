@@ -109,28 +109,37 @@ test("a held model whose thinking the request cannot bound is never dispatched",
   // dispatch lets through so admitted jobs can finish. A Google model with a
   // cap an operator wrote down must still not reach a provider that bills its
   // thinking per uncapped token -- and refusing happens before any key lookup
-  // or network call.
-  const google = IMAGE_MODEL_REGISTRY.find((model) => model.provider === "google");
-  const statedCap = {
-    ...google,
-    priceVerification: { ...google.priceVerification, thinkingCapMicroUsd: 2_000 },
+  // or network call. The same holds for a measured model whose cap is under
+  // its bound or whose request is not the measured one.
+  const price = [{ quality: "medium", size: "1024x1024", credits: 10_000, outputCostMicroUsd: 67_200 }];
+  const withCap = (modelId, cap, extra = {}) => {
+    const seed = IMAGE_MODEL_REGISTRY.find((model) => model.id === modelId);
+    return { ...seed, prices: price, priceVerification: { ...seed.priceVerification, thinkingCapMicroUsd: cap }, ...extra };
   };
+  const unheld = [
+    withCap("gemini-3-pro-image", 2_000),
+    withCap("gemini-3.1-flash-image", 12_287),
+    withCap("gemini-3.1-flash-image", 12_288, { maxOutputTokens: 32_768 }),
+    withCap("gemini-3.1-flash-image", 12_288, { thinkingLevel: "high" }),
+  ];
   try {
-    for (const disabledReason of ["operational_hold", null]) {
-      setActiveImageModelCatalog([{ ...statedCap, disabledReason }]);
-      await assert.rejects(
-        generateImageWithProvider({
-          prompt: "a red apple",
-          size: "1024x1024",
-          quality: "medium",
-          modelId: google.id,
-        }),
-        (error) =>
-          error.name === "ImageProviderError" &&
-          error.failurePhase === "provider_failed" &&
-          /no thinking cap its request can enforce/.test(error.message),
-        String(disabledReason)
-      );
+    for (const model of unheld) {
+      for (const disabledReason of ["operational_hold", null]) {
+        setActiveImageModelCatalog([{ ...model, disabledReason }]);
+        await assert.rejects(
+          generateImageWithProvider({
+            prompt: "a red apple",
+            size: "1024x1024",
+            quality: "medium",
+            modelId: model.id,
+          }),
+          (error) =>
+            error.name === "ImageProviderError" &&
+            error.failurePhase === "provider_failed" &&
+            /no thinking cap its request can enforce/.test(error.message),
+          `${model.id} ${String(disabledReason)}`
+        );
+      }
     }
   } finally {
     resetActiveImageModelCatalog();

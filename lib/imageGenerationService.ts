@@ -1302,10 +1302,13 @@ export const reservationOutputCostMicroUsd = (
  * endpoint, read from the endpoint the reservation froze: one that bills no
  * thinking (Qwen Image 3) settles zero, and every other fal case -- including
  * an older snapshot that names no endpoint, which was Nano Banana 2's --
- * settles the cap, because fal's zero count proves nothing. Any other provider
- * settles zero when it reported no thinking and the reserved cap when it did:
- * no image provider here has a verified per-token thinking price to settle
- * less.
+ * settles the cap, because fal's zero count proves nothing. A Google model
+ * priced on the measured output-limit bound settles the cap too: with the
+ * thinking level omitted it reports zero thinking and bills its reasoning
+ * text inside the output count (measured 2026-11-12), so a zero proves nothing
+ * there either. Any other provider settles zero when it reported no thinking
+ * and the reserved cap when it did: no image provider here has a verified
+ * per-token thinking price to settle less.
  */
 export const settledThinkingCostMicroUsd = (snapshot: unknown, thinkingTokens: number): number | null => {
   const record = snapshot as {
@@ -1316,7 +1319,7 @@ export const settledThinkingCostMicroUsd = (snapshot: unknown, thinkingTokens: n
   const cap = record?.thinkingCapMicroUsd;
   const reservedCap = typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? cap : null;
   const billing = imageThinkingBilling(record?.provider, record?.executionProfile?.apiModelId);
-  if (billing === "flat_per_request") return reservedCap;
+  if (billing === "flat_per_request" || billing === "per_token_within_output_limit") return reservedCap;
   if (record?.provider === "fal") return billing === "not_billed" ? 0 : reservedCap;
   if (!(thinkingTokens > 0)) return 0;
   return reservedCap;

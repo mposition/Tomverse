@@ -21,6 +21,7 @@ import {
   imageThinkingBilling,
   imageThinkingCapEnforced,
   imageThinkingCapMinimumMicroUsd,
+  GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS,
   shouldUseCompactImageModelPicker,
   IMAGE_INLINE_MODEL_DISCOVERY_LIMIT,
 } from "../lib/imageModelRegistry.ts";
@@ -74,13 +75,13 @@ test("the registry ships GPT Image 2 enabled and Nano Banana 2 on a verification
   const google = getImageModel("gemini-3.1-flash-image");
   assert.equal(google?.provider, "google");
   assert.equal(google?.lifecycle, "stable");
-  // Policy section 12: the per-image price was read from Google's own
-  // documentation on 2026-08-04, but thinking cannot be disabled and no token
-  // cap is established -- so the worst case is not provably finite and the
-  // reason says exactly that rather than claiming the price is unknown.
-  assert.equal(google?.disabledReason, "worst_case_cost_unbounded");
+  // Policy section 12.1: the per-image price was read from Google's own
+  // documentation on 2026-08-04 and the thinking cap is the bound measured on
+  // 2026-11-12 with a margin. What is missing is operational -- approved sale
+  // credits and the provider budget -- so it ships held and unpriced.
+  assert.equal(google?.disabledReason, "operational_hold");
   assert.equal(google?.priceVerification.verifiedAt, "2026-08-04");
-  assert.equal(google?.priceVerification.thinkingCapMicroUsd, null);
+  assert.equal(google?.priceVerification.thinkingCapMicroUsd, 12_288);
   assert.deepEqual(google?.prices, []);
 });
 
@@ -157,7 +158,7 @@ test("a disabled model is invisible to every selection path", () => {
 });
 
 test("worst-case cost is null when the thinking cap is unknown", () => {
-  const google = getImageModel("gemini-3.1-flash-image");
+  const google = getImageModel("gemini-3-pro-image");
   const hypotheticalPrice = {
     quality: "medium",
     size: "1024x1024",
@@ -171,16 +172,18 @@ test("worst-case cost is null when the thinking cap is unknown", () => {
 });
 
 test("a stated thinking cap is a bound only where the request can hold it", () => {
-  // Google bills thinking per token and no request parameter caps the count,
-  // so a cap an operator writes into a price revision is a number, not a
-  // bound: the worst case stays unbounded and no floor can be derived.
-  const google = getImageModel("gemini-3.1-flash-image");
+  // Google bills thinking per token, and for a model nobody measured no
+  // request parameter is known to cap the count, so a cap an operator writes
+  // into a price revision is a number, not a bound: the worst case stays
+  // unbounded and no floor can be derived.
+  const google = getImageModel("gemini-3-pro-image");
   const stated = {
     ...google,
     priceVerification: { ...google.priceVerification, thinkingCapMicroUsd: 2_000 },
   };
-  const price = { quality: "medium", size: "1024x1024", credits: 10_000, outputCostMicroUsd: 67_000 };
+  const price = { quality: "high", size: "1024x1024", credits: 10_000, outputCostMicroUsd: 134_000 };
   assert.equal(imageThinkingBilling("google"), "per_token_uncapped");
+  assert.equal(imageThinkingBilling("google", "gemini-3-pro-image"), "per_token_uncapped");
   assert.equal(imageThinkingCapEnforced(stated), false);
   assert.equal(maxImageRequestCostMicroUsd(stated, price), null);
   assert.equal(minimumCreditsForImageOption(stated, price), null);
@@ -219,6 +222,43 @@ test("a stated thinking cap is a bound only where the request can hold it", () =
   assert.equal(imageThinkingBilling(undefined), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("ideogram"), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("google"), null);
+});
+
+test("a measured Google model is bounded only for the request that was measured", () => {
+  // Owner decision 2026-11-13: twice the output limit the 2026-11-12
+  // measurement sent, at the model's text output rate.
+  assert.deepEqual(Object.keys(GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS).sort(), [
+    "gemini-3.1-flash-image",
+    "gemini-3.1-flash-lite-image",
+  ]);
+  assert.equal(imageThinkingBilling("google", "gemini-3.1-flash-image"), "per_token_within_output_limit");
+  assert.equal(imageThinkingCapMinimumMicroUsd("google", "gemini-3.1-flash-image"), 12_288);
+  assert.equal(imageThinkingCapMinimumMicroUsd("google", "gemini-3.1-flash-lite-image"), 6_144);
+  // The rows are Google direct's: the same id through another provider has none.
+  assert.equal(imageThinkingCapMinimumMicroUsd("fal", "gemini-3.1-flash-image"), null);
+  assert.equal(imageThinkingCapMinimumMicroUsd("google", "toString"), null);
+
+  const flash = getImageModel("gemini-3.1-flash-image");
+  const lite = getImageModel("gemini-3.1-flash-lite-image");
+  assert.equal(imageThinkingCapEnforced(flash), true);
+  assert.equal(imageThinkingCapEnforced(lite), true);
+  // Floors over the whole request: image output + prompt budget + cap.
+  const flashPrice = { quality: "medium", size: "1024x1024", credits: 94, outputCostMicroUsd: 67_200 };
+  assert.equal(maxImageRequestCostMicroUsd(flash, flashPrice), 67_200 + IMAGE_PROMPT_BUDGET_MICRO_USD + 12_288);
+  assert.equal(minimumCreditsForImageOption(flash, flashPrice), 94);
+  const litePrice = { quality: "low", size: "1024x1024", credits: 50, outputCostMicroUsd: 33_600 };
+  assert.equal(minimumCreditsForImageOption(lite, litePrice), 50);
+
+  // A cap below the bound, another output limit, or a pinned thinking level
+  // is not the measured request, and nothing is bounded.
+  const withCap = (cap) => ({ ...flash, priceVerification: { ...flash.priceVerification, thinkingCapMicroUsd: cap } });
+  assert.equal(imageThinkingCapEnforced(withCap(12_287)), false);
+  assert.equal(imageThinkingCapEnforced(withCap(null)), false);
+  assert.equal(imageThinkingCapEnforced(withCap(20_000)), true);
+  assert.equal(imageThinkingCapEnforced({ ...flash, maxOutputTokens: 32_768 }), false);
+  assert.equal(imageThinkingCapEnforced({ ...flash, maxOutputTokens: undefined }), false);
+  assert.equal(imageThinkingCapEnforced({ ...flash, thinkingLevel: "high" }), false);
+  assert.equal(maxImageRequestCostMicroUsd({ ...flash, thinkingLevel: "low" }, flashPrice), null);
 });
 
 test("a flat thinking surcharge is a bound only when the cap covers it", () => {
@@ -389,13 +429,21 @@ test("a documented output limit is never mistaken for a proven cost cap", () => 
   assert.equal(google.length, 3);
   for (const model of google) {
     assert.ok(model.maxOutputTokens && model.maxOutputTokens > 0, model.id);
-    assert.equal(model.priceVerification.thinkingCapMicroUsd, null, model.id);
-    assert.equal(model.disabledReason, "worst_case_cost_unbounded", model.id);
+    assert.notEqual(model.disabledReason, null, model.id);
     assert.deepEqual(model.prices, [], model.id);
+    // Only a measured model carries a cap, and then it sends the measured
+    // limit -- never the model card's.
+    const bound = GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS[model.apiModelId];
+    if (bound) {
+      assert.equal(model.maxOutputTokens, bound.maxOutputTokens, model.id);
+      assert.equal(model.disabledReason, "operational_hold", model.id);
+      assert.equal(imageThinkingCapEnforced(model), true, model.id);
+    } else {
+      assert.equal(model.priceVerification.thinkingCapMicroUsd, null, model.id);
+      assert.equal(model.disabledReason, "worst_case_cost_unbounded", model.id);
+    }
   }
-  // Flash Lite's low ceiling is what makes it the first model worth measuring:
-  // a limit that never binds proves nothing about whether it is enforced.
-  assert.equal(getImageModel("gemini-3.1-flash-lite-image").maxOutputTokens, 4_096);
+  assert.equal(getImageModel("gemini-3-pro-image").maxOutputTokens, 32_768);
 });
 
 test("no model claims a thinking level nobody verified it accepts", () => {

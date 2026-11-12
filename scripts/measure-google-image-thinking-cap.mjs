@@ -4,9 +4,17 @@
 // gemini-3.1-flash-lite-image with `max_output_tokens: 2048` reported 1,602
 // output plus 931 thinking -- 2,533 -- as billable usage and returned a
 // finished image. The parameter is a request parameter, not a cost ceiling.
-// The three Google image models keep `worst_case_cost_unbounded` and
-// `thinkingCapMicroUsd` stays null. Full result and all eighteen samples:
+// Full result and all eighteen samples:
 // .github/audits/image-model-verification-worksheet.md §I.
+//
+// RE-MEASURED 2026-11-12 (§J, 23 samples on Flash and Flash Lite). With
+// thinking forced high the sum stayed under a 2,048 limit in 10 of 10; one
+// sample at 1,536 carried its whole image past the limit (1,610). Still not a
+// strict ceiling, and the owner decided on 2026-11-13 to price the measured
+// bound with a margin: GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS in
+// lib/imageModelRegistry.ts. gemini-3-pro-image was not measured and keeps
+// `worst_case_cost_unbounded`. A new row in that table needs a run of this
+// script on that model.
 //
 // This script is kept because the question can reopen -- a new model, a new
 // parameter, a documented bound -- and because rebuilding a measurement that

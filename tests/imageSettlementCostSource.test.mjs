@@ -85,6 +85,21 @@ test("a flat thinking surcharge settles at the cap even when no thinking is repo
   assert.equal(settledThinkingCostMicroUsd({ provider: "xai", thinkingCapMicroUsd: 0 }, 0), 0);
 });
 
+test("a measured Google model settles its cap even when no thinking is reported", () => {
+  // Measured 2026-11-12: with the thinking level omitted these models report
+  // zero thinking and bill their reasoning text inside the output count, so a
+  // zero count is not a zero cost.
+  const google = (apiModelId, thinkingCapMicroUsd) => ({
+    provider: "google",
+    thinkingCapMicroUsd,
+    executionProfile: { provider: "google", apiModelId },
+  });
+  assert.equal(settledThinkingCostMicroUsd(google("gemini-3.1-flash-image", 12_288), 0), 12_288);
+  assert.equal(settledThinkingCostMicroUsd(google("gemini-3.1-flash-lite-image", 6_144), 900), 6_144);
+  // An unmeasured Google model keeps the general rule.
+  assert.equal(settledThinkingCostMicroUsd(google("gemini-3-pro-image", 2_000), 0), 0);
+});
+
 test("fal settles thinking by the endpoint the reservation froze", () => {
   // fal bills per endpoint, and settlement reads the endpoint from the
   // reservation's executionProfile -- the request it priced -- never the live

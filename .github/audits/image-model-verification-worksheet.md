@@ -635,3 +635,82 @@ Image도 반드시 같은 방식으로 초과한다"를 주장하는 것이 아�
   발생한다.
 - **모델이 시키지 않은 해설문을 낸다.** 표본의 절반에 `model_output` step이
   둘이고 하나는 그림 설명 문단이다. 표본당 약 1,000토큰을 과금당하고 버린다.
+
+## J. 2026-11-12 재실측 — 합계는 상한 안에 머물렀고, 이미지 한 장은 상한을 넘을 수 있다
+
+2026-10-14에 Google thinking 가이드가 `max_output_tokens`를 "thought 토큰을 포함한
+hard cutoff"로 고쳐 적어, §I의 판정을 다시 잴 조건이 생겼다. 운영자가 2026-11-12에
+유료 실측을 승인했다(24건·$4 이내). `npm run measure:google-image-thinking-cap`으로
+두 모델, 1K 정사각, 프롬프트 2종을 23건 보냈다. 이미지가 나온 것은 13건이고 비용은
+약 $0.7로 추정한다(청구서 대조 전).
+
+| # | 모델 | 상한 | thinking_level | 프롬프트 | output | thinking | 합계 | 이미지 | status | 응답 id |
+|---:|---|---:|---|---|---:|---:|---:|---:|---|---|
+| 1 | `gemini-3.1-flash-lite-image` | 1536 | 생략 | p0 | 1610 | 0 | **1610** | 1 | incomplete | `v1_ChdUOFQxY…` |
+| 2 | `gemini-3.1-flash-lite-image` | 2048 | 생략 | p0 | 1575 | 0 | 1575 | 1 | completed | `v1_ChdjY1QxY…` |
+| 3 | `gemini-3.1-flash-lite-image` | 2048 | 생략 | p1 | 1699 | 0 | 1699 | 1 | completed | `v1_ChdlY1QxY…` |
+| 4 | `gemini-3.1-flash-lite-image` | 2048 | 생략 | p0 | 1589 | 0 | 1589 | 1 | completed | `v1_ChdnY1QxY…` |
+| 5 | `gemini-3.1-flash-lite-image` | 2048 | 생략 | p1 | 1664 | 0 | 1664 | 1 | completed | `v1_ChdpY1QxY…` |
+| 6 | `gemini-3.1-flash-lite-image` | 2048 | 생략 | p0 | 1581 | 0 | 1581 | 1 | completed | `v1_ChdrTVQxY…` |
+| 7 | `gemini-3.1-flash-lite-image` | 2048 | 생략 | p1 | 1658 | 0 | 1658 | 1 | completed | `v1_ChdsOFQxY…` |
+| 8 | `gemini-3.1-flash-lite-image` | 2048 | high | p0 | 451 | 1095 | 1546 | 0 | incomplete | `v1_Chdyc1QxY…` |
+| 9 | `gemini-3.1-flash-lite-image` | 2048 | high | p1 | 492 | 1025 | 1517 | 0 | incomplete | `v1_Chd0Y1QxY…` |
+| 10 | `gemini-3.1-flash-lite-image` | 2048 | high | p0 | 426 | 1043 | 1469 | 0 | incomplete | `v1_Chd2TVQxY…` |
+| 11 | `gemini-3.1-flash-lite-image` | 2048 | high | p1 | 523 | 1057 | 1580 | 0 | incomplete | `v1_ChZ3OFQxY…` |
+| 12 | `gemini-3.1-flash-lite-image` | 2048 | high | p0 | 473 | 1028 | 1501 | 0 | incomplete | `v1_Chd5Y1QxY…` |
+| 13 | `gemini-3.1-flash-lite-image` | 2048 | high | p1 | 522 | 1002 | 1524 | 0 | incomplete | `v1_ChcwY1QxY…` |
+| 14 | `gemini-3.1-flash-image` | 2048 | 생략 | p0 | 1588 | 0 | 1588 | 1 | completed | `v1_ChdBTVgxY…` |
+| 15 | `gemini-3.1-flash-image` | 2048 | 생략 | p1 | 1681 | 0 | 1681 | 1 | completed | `v1_ChdEc1gxY…` |
+| 16 | `gemini-3.1-flash-image` | 2048 | 생략 | p0 | 1581 | 0 | 1581 | 1 | completed | `v1_ChdITVgxY…` |
+| 17 | `gemini-3.1-flash-image` | 2048 | 생략 | p1 | 1613 | 0 | 1613 | 1 | completed | `v1_ChdLc1gxY…` |
+| 18 | `gemini-3.1-flash-image` | 2048 | 생략 | p0 | 1600 | 0 | 1600 | 1 | completed | `v1_ChdPTVgxY…` |
+| 19 | `gemini-3.1-flash-image` | 2048 | 생략 | p1 | 1680 | 0 | 1680 | 1 | completed | `v1_ChdSOFgxY…` |
+| 20 | `gemini-3.1-flash-image` | 2048 | high | p0 | 431 | 1034 | 1465 | 0 | incomplete | `v1_ChdjOFgxY…` |
+| 21 | `gemini-3.1-flash-image` | 2048 | high | p1 | 553 | 1262 | 1815 | 0 | incomplete | `v1_ChdnOFgxY…` |
+| 22 | `gemini-3.1-flash-image` | 2048 | high | p0 | 470 | 982 | 1452 | 0 | incomplete | `v1_ChdsY1gxY…` |
+| 23 | `gemini-3.1-flash-image` | 2048 | high | p1 | 564 | 909 | 1473 | 0 | incomplete | `v1_ChdwY1gxY…` |
+
+프롬프트는 측정 스크립트의 내장 2종이다(p0 `sha256:7a69077a9536e2f9`, p1
+`sha256:19de63828bbbc350`). 값은 응답의 usage counter이며 청구서가 아니다(§I와 같은 범위).
+
+### 관측
+
+- **엄격한 상한은 아니다.** 1번 표본은 상한 1,536에서 1,610을 보고하고 이미지를
+  반환했다(`incomplete`). 이미지는 통째로 나오는 덩어리라 상한을 넘겨도 나온다.
+- **§I와 달리 thinking이 합계를 상한 밖으로 밀지 않았다.** `high`로 thinking을
+  강제한 10건(8–13, 20–23)은 모두 합계가 2,048 이하였고, 이미지를 넣을 자리가 없으면
+  이미지 없이 멈췄다. §I의 2,533(1,602 + 931, 이미지 반환)과 다른 동작이다.
+- **thinking_level을 생략하면 thinking counter가 0이다.** 12건(2–7, 14–19) 모두
+  `thought` step은 있는데 `total_thought_tokens`는 0이고, output이 1,575–1,699다.
+  1K 이미지 1,120토큰을 빼면 약 450–580토큰의 텍스트가 output에 들어 있다.
+- **`high`에서는 이미지가 한 장도 나오지 않았다.** 상한 2,048에서 thinking이
+  1,000 안팎을 쓰면 이미지 자리가 없다. `thinking_level`을 고정한 요청은 이 상한으로
+  서비스할 수 없다.
+- 두 모델의 이미지 output은 같은 범위였다(Flash Lite 1,575–1,699, Flash 1,581–1,681).
+
+### 판정과 결정
+
+측정 도구의 기준(모든 표본이 상한 이하)으로는 **실패**다. 다만 초과는 이미지 한 장
+분량 안이었고, 이미지 원가는 옵션의 장당 원가로 따로 잡혀 있다.
+
+운영자가 2026-11-13에 **"측정된 한도 + 여유"로 가격을 정하기로 결정했다**(정책
+§12.1). 이미지가 아닌 과금 토큰(텍스트·thinking)의 최악을 **보내는 상한의 2배**로
+잡는다. 두 실측을 모두 덮는 값이다 — §I에서는 thinking과 output이 각각 상한 아래에서
+따로 세졌고, 이번에는 합계가 상한 아래였다.
+
+| 모델 | 보내는 상한 | 텍스트·thinking 단가 | thinking cap | 1K 장당 원가 | 최소 크레딧 |
+|---|---:|---:|---:|---:|---:|
+| `gemini-3.1-flash-image` | 2,048 | $3.00/1M | 12,288µUSD | 67,200µUSD | 94 |
+| `gemini-3.1-flash-lite-image` | 2,048 | $1.50/1M | 6,144µUSD | 33,600µUSD | 50 |
+
+최소 크레딧 = ceil((장당 원가 + 프롬프트 예산 5,000 + thinking cap) / 900).
+`gemini-3-pro-image`는 재지 않았으므로 `worst_case_cost_unbounded` 그대로다.
+
+### 이 결정이 기대는 가정
+
+- 상한을 넘는 것은 이미지 한 장뿐이다. 표본 1건에서 본 것이고 문서 근거는 없다.
+- Google의 동작이 8월과 11월 사이에 바뀌었다. 다시 바뀔 수 있다. 그래서
+  `generateWithGoogle`은 output + thinking이 상한의 2배를 넘는 응답을
+  `image_google_output_over_measured_bound`로 기록하고, 지출의 최종 차단은 provider
+  예산(`IMAGE_PROVIDER_GOOGLE_COST_MICROUSD_PER_DAY`·`_PER_MONTH`)이 한다.
+- 이미지 없이 멈춘 응답도 과금된다(텍스트·thinking 약 1,500토큰). 재시도하지 않는다.
