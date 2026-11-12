@@ -242,6 +242,99 @@ const { parentPort, workerData } = require("node:worker_threads");
 })();
 `;
 
+/**
+ * Renders the pages of a PDF that carry no text, as JPEGs.
+ *
+ * A page with a text layer is skipped: its text is already extracted, and the
+ * only pages worth an image are the ones that would otherwise vanish. Each
+ * page is scaled so its longer side is at most `maxDimension`, which bounds
+ * both the canvas memory and what an image embedding is billed for. The loop
+ * stops at `maxImagePages` or when the output would pass `maxOutputBytes`.
+ */
+const pdfImagePagesWorkerSource = `
+const { parentPort, workerData } = require("node:worker_threads");
+
+(async () => {
+    let document;
+    let loadingTask;
+    try {
+        const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        loadingTask = pdfjs.getDocument({
+            data: new Uint8Array(workerData.buffer),
+            disableWorker: true,
+            isEvalSupported: false,
+            useSystemFonts: false,
+            stopAtErrors: false,
+            standardFontDataUrl: workerData.standardFontDataUrl,
+            cMapUrl: workerData.cMapUrl,
+            cMapPacked: true,
+        });
+        document = await loadingTask.promise;
+        if (
+            !Number.isInteger(document.numPages) ||
+            document.numPages < 1 ||
+            document.numPages > workerData.maxPages
+        ) {
+            throw new Error("PDF page count is invalid.");
+        }
+
+        const pages = [];
+        const transfer = [];
+        let totalBytes = 0;
+        for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+            if (pages.length >= workerData.maxImagePages) break;
+            const page = await document.getPage(pageNumber);
+            const content = await page.getTextContent({
+                includeMarkedContent: false,
+                disableNormalization: false,
+            });
+            const hasText = content.items.some(
+                (item) => typeof item.str === "string" && item.str.trim() !== ""
+            );
+            if (!hasText) {
+                const base = page.getViewport({ scale: 1 });
+                const longest = Math.max(base.width, base.height);
+                if (longest > 0 && Number.isFinite(longest)) {
+                    const scale = Math.min(2, workerData.maxDimension / longest);
+                    const viewport = page.getViewport({ scale });
+                    const width = Math.max(1, Math.ceil(viewport.width));
+                    const height = Math.max(1, Math.ceil(viewport.height));
+                    const target = document.canvasFactory.create(width, height);
+                    try {
+                        await page.render({
+                            canvasContext: target.context,
+                            viewport,
+                            canvas: target.canvas,
+                        }).promise;
+                        const jpeg = target.canvas.toBuffer("image/jpeg", 80);
+                        if (totalBytes + jpeg.length > workerData.maxOutputBytes) {
+                            page.cleanup();
+                            break;
+                        }
+                        totalBytes += jpeg.length;
+                        const bytes = Uint8Array.from(jpeg).buffer;
+                        pages.push({ pageNumber, jpeg: bytes });
+                        transfer.push(bytes);
+                    } finally {
+                        document.canvasFactory.destroy(target);
+                    }
+                }
+            }
+            page.cleanup();
+        }
+        await loadingTask.destroy();
+        parentPort.postMessage({ ok: true, pages }, transfer);
+    } catch {
+        if (document) {
+            try {
+                await document.cleanup();
+            } catch {}
+        }
+        parentPort.postMessage({ ok: false });
+    }
+})();
+`;
+
 const assertPdfSignature = (buffer: Buffer) => {
     const headerWindow = buffer
         .subarray(0, Math.min(buffer.length, PDF_HEADER_SCAN_BYTES))
@@ -254,7 +347,8 @@ const assertPdfSignature = (buffer: Buffer) => {
 const runWorker = <T>(
     source: string,
     workerData: Record<string, unknown>,
-    transferList: ArrayBuffer[]
+    transferList: ArrayBuffer[],
+    timeoutMs: number = MEDIA_PARSE_TIMEOUT_MS
 ) =>
     new Promise<T>((resolve, reject) => {
         const worker = new Worker(source, {
@@ -278,7 +372,7 @@ const runWorker = <T>(
         };
         const timeout = setTimeout(
             () => finish(new Error("Media validation timed out.")),
-            MEDIA_PARSE_TIMEOUT_MS
+            timeoutMs
         );
 
         worker.once("message", (result: T & { ok?: boolean }) => {
@@ -377,4 +471,57 @@ export async function extractPdfTextSafely(
     );
 
     return result.text.trim();
+}
+
+/** Rendering is slower than reading text, and it is never on a user's turn. */
+const PDF_IMAGE_PAGE_RENDER_TIMEOUT_MS = 45_000;
+
+export const PDF_IMAGE_PAGE_LIMITS = {
+    /** Scanned pages rendered per file; the rest stay unindexed. */
+    maxImagePages: 20,
+    /** The longer side of a rendered page, in pixels. */
+    maxDimension: 1_024,
+    /** All rendered pages of one file together. */
+    maxOutputBytes: 16 * 1024 * 1024,
+} as const;
+
+export type PdfImagePage = { pageNumber: number; jpeg: Buffer };
+
+/**
+ * The text-less pages of a PDF as JPEGs, in page order.
+ *
+ * Runs in the same resource-limited worker as the other PDF readers. Throws
+ * when the PDF cannot be parsed or rendered -- including on a host without the
+ * canvas binary -- and the caller treats that as "no image pages", which is
+ * the behaviour before this existed.
+ */
+export async function renderPdfImagePagesSafely(buffer: Buffer): Promise<PdfImagePage[]> {
+    assertPdfSignature(buffer);
+
+    const transferableBuffer = Uint8Array.from(buffer).buffer;
+    const result = await runWorker<{
+        ok: true;
+        pages: Array<{ pageNumber: number; jpeg: ArrayBuffer }>;
+    }>(
+        pdfImagePagesWorkerSource,
+        {
+            buffer: transferableBuffer,
+            maxPages: MAX_PDF_PAGES,
+            ...PDF_IMAGE_PAGE_LIMITS,
+            standardFontDataUrl: PDF_STANDARD_FONT_DATA_URL,
+            cMapUrl: PDF_CMAP_URL,
+        },
+        [transferableBuffer],
+        PDF_IMAGE_PAGE_RENDER_TIMEOUT_MS
+    );
+
+    return result.pages
+        .filter(
+            (page) =>
+                Number.isInteger(page.pageNumber) &&
+                page.pageNumber >= 1 &&
+                page.jpeg instanceof ArrayBuffer &&
+                page.jpeg.byteLength > 0
+        )
+        .map((page) => ({ pageNumber: page.pageNumber, jpeg: Buffer.from(page.jpeg) }));
 }

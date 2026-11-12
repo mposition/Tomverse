@@ -112,7 +112,13 @@ export async function GET(
     // untrusted upload, catastrophic for a file this application generated and
     // the user cannot regenerate without paying for the answer again.
     const bytes = await readOwnR2ObjectBytes(artifact.objectKey, {
-      maxBytes: ARTIFACT_LIMITS.maxOutputBytes,
+      // No more than this row says it stored, and never more than the larger
+      // of the two ceilings (a converted file may be as large as the
+      // attachments it was made from, generated-artifacts.md section 14).
+      maxBytes: Math.max(
+        1,
+        Math.min(artifact.byteSize, ARTIFACT_LIMITS.maxConvertedOutputBytes)
+      ),
     });
 
     return new Response(new Uint8Array(bytes), {

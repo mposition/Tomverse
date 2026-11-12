@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { memoryRetrievalTerms } from "../../lib/memoryRetrievalTerms";
-import { selectMemoryContext, type RetrievableMemory } from "../../lib/memoryRetrievalScoring";
+import {
+  MEMORY_SEMANTIC_DEFAULTS, memoryTier, selectMemoryContext, type RetrievableMemory,
+} from "../../lib/memoryRetrievalScoring";
 import { evaluateRetrieval, retrievalTargetFailures, summarizeRetrieval } from "./evaluator";
 import { corpusSchema, retrievalCorpusSchema, type QualityCase } from "./schema";
 
@@ -12,7 +14,7 @@ export type ProductRetrievalCorpus = (typeof PRODUCT_RETRIEVAL_CORPORA)[number];
 // statement text decide the order — the part MEMORY-01 measures.
 const NOW = new Date("2026-01-01T00:00:00.000Z");
 
-type RetrievalCase = Pick<QualityCase, "id" | "language" | "retrieval"> & { tag: string };
+export type RetrievalCase = Pick<QualityCase, "id" | "language" | "retrieval"> & { tag: string };
 
 /**
  * The product retrieval path, with no model call: statements are indexed with
@@ -23,22 +25,48 @@ type RetrievalCase = Pick<QualityCase, "id" | "language" | "retrieval"> & { tag:
  * rows stay in the pool: nothing on the read path removes them (the write-time
  * validator is the product's defence), so a forbidden selection is a finding.
  */
-export function productSelection(retrieval: QualityCase["retrieval"]) {
-  const memories: RetrievableMemory[] = retrieval.pool
+function productMemories(retrieval: QualityCase["retrieval"]): RetrievableMemory[] {
+  return retrieval.pool
     .filter((item) => item.status === "active")
     .map((item) => ({
       id: item.id, kind: item.kind ?? "preference", statement: item.statement, conflictKey: null,
       confidence: 1, importance: 5, pinned: false, searchTerms: memoryRetrievalTerms(item.statement),
       effectiveAt: NOW, expiresAt: null, sourceIds: [],
     }));
-  return selectMemoryContext({ memories, query: retrieval.query, now: NOW }).selected
-    .map((candidate) => ({ id: candidate.memory.id, tier: candidate.tier }));
 }
 
-export function measureProductRetrieval(cases: readonly RetrievalCase[]) {
+/**
+ * What `retrieveMemoryContext` sends to the reranker: only the memories the
+ * selector relevance-gates (`memoryTier`), at most one search unit's worth. The
+ * pool is one account's memories, so the lexical candidates plus the extras the
+ * service adds are all of it. A query with no usable term asks for nothing.
+ */
+export function rerankDocuments(retrieval: QualityCase["retrieval"]) {
+  if (memoryRetrievalTerms(retrieval.query).length === 0) return [];
+  return productMemories(retrieval).filter((memory) => memoryTier(memory) === "relevant")
+    .slice(0, MEMORY_SEMANTIC_DEFAULTS.maxRerankCandidates)
+    .map((memory) => ({ id: memory.id, text: memory.statement }));
+}
+
+export function productSelection(
+  retrieval: QualityCase["retrieval"], externalRelevance?: ReadonlyMap<string, number>,
+) {
+  return selectMemoryContext({
+    memories: productMemories(retrieval), query: retrieval.query, now: NOW,
+    ...(externalRelevance ? { externalRelevance } : {}),
+  }).selected.map((candidate) => ({ id: candidate.memory.id, tier: candidate.tier }));
+}
+
+type RelevanceFor = (caseId: string) => ReadonlyMap<string, number> | undefined;
+
+export function measureProductRetrieval(cases: readonly RetrievalCase[], relevanceFor?: RelevanceFor) {
+  return measureProductRetrievalDetailed(cases, relevanceFor).result;
+}
+
+export function measureProductRetrievalDetailed(cases: readonly RetrievalCase[], relevanceFor?: RelevanceFor) {
   const rows = cases.map((testCase) => {
     const { relevantIds } = testCase.retrieval;
-    const injected = productSelection(testCase.retrieval);
+    const injected = productSelection(testCase.retrieval, relevanceFor?.(testCase.id));
     // Recall@5 is read off the prompt order: core first, then relevant, then style.
     const topItems = injected.slice(0, RECALL_K);
     const top = topItems.map((item) => item.id);
@@ -65,7 +93,7 @@ export function measureProductRetrieval(cases: readonly RetrievalCase[]) {
     entry.recallAt5 = entry.relevant ? entry.recalled / entry.relevant : null;
   }
   const gatedSelected = rows.reduce((n, row) => n + row.gatedSelected, 0);
-  return {
+  const result = {
     path: "product:selectMemoryContext" as const, k: RECALL_K, cases: rows.length,
     // Without kinds every row is treated as relevance-gated, which the product never does for core/style.
     poolKinds: cases.every((row) => row.retrieval.pool.every((item) => item.kind)) ? "annotated" : "defaulted",
@@ -81,6 +109,7 @@ export function measureProductRetrieval(cases: readonly RetrievalCase[]) {
     targetFailures: retrievalTargetFailures(summary),
     paidCalls: 0 as const, decisionGrade: false as const,
   };
+  return { result, rows };
 }
 
 const fixture = async (name: string) =>

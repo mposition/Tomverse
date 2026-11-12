@@ -108,7 +108,7 @@ const withSessionStorage = (run) => {
 test("a stashed profile is read exactly once", () => {
     withSessionStorage(() => {
         stashPendingChatProfile("cmt1cx5yq001z02migrx1oe9v");
-        assert.equal(consumePendingChatProfile(), "cmt1cx5yq001z02migrx1oe9v");
+        assert.deepEqual(consumePendingChatProfile(), { profileId: "cmt1cx5yq001z02migrx1oe9v", entry: "chat" });
         // The second read is the one that matters: a refresh, or a second tab
         // restoring the same conversation, must not reapply a served request.
         assert.equal(consumePendingChatProfile(), null);
@@ -122,6 +122,16 @@ test("a malformed stored value is refused rather than sent", () => {
         // Cleared even though it was refused: leaving it would retry the same
         // bad value on every mount.
         assert.equal(store.has("tomverse_pending_chat_assistant_profile"), false);
+    });
+});
+
+test("settings and guide launches carry their entry once for a fresh conversation", () => {
+    withSessionStorage(() => {
+        for (const entry of ["settings", "guide"]) {
+            assert.equal(stashPendingChatProfile("p-published", entry), true);
+            assert.deepEqual(consumePendingChatProfile(), { profileId: "p-published", entry });
+            assert.equal(consumePendingChatProfile(), null);
+        }
     });
 });
 

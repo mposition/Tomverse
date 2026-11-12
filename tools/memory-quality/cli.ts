@@ -7,6 +7,9 @@ import {
   loadRetrievalCases, measureProductRetrieval, PRODUCT_RETRIEVAL_CORPORA, type ProductRetrievalCorpus,
 } from "./productRetrieval";
 import { runQualityLoop, QualityStop } from "./runner";
+import { loadKnowledgeCorpus, measureKnowledge } from "./semanticKnowledge";
+import type { LiveContext } from "./semanticLive";
+import { measureSemanticMemory } from "./semanticMemory";
 import { createRunStore, listRuns, readEvents, requestStop, runPath } from "./store";
 
 const HELP = `Memory quality agent (local synthetic data only)
@@ -18,42 +21,85 @@ show    --out <directory> --run <id>
 stop    --out <directory> --run <id>
 export-replay --out <directory> --run <id> --file <new-json-file>
 retrieval [--corpus retrieval-ko|development|validation|all]
-        Product retrieval (selectMemoryContext) Recall@5; no model call, no output files.
+        [--semantic (--rerank-scores <json> | --live --max-calls <n> --save-scores <new-json>)]
+        Product retrieval (selectMemoryContext) Recall@5. Plain: no model call, no output files.
+        --semantic also measures the rerank path (externalRelevance) next to it.
+knowledge-retrieval [--scores <json> | --live --max-calls <n> --save-scores <new-json>]
+        Knowledge-file retrieval Recall@6 and MRR: lexical, embed-only, rerank-only, embed+rerank.
+        Without --scores only lexical is measured.
 Defaults: mode=mock, out=.tmp/memory-quality, iterations=3, max-calls=1000, timeout-ms=60000,
 corpus=retrieval-ko.
-No live mode, paid execution, product writes, promotion, network or raw Memory collection.`;
+The run command has no live mode, paid execution, product writes, promotion, network or raw
+Memory collection. --live (retrieval --semantic, knowledge-retrieval only) makes PAID provider
+calls: it needs COHERE_API_KEY and the model variables, an explicit --max-calls (0 or absent is
+refused) and a new --save-scores file; run it with node --conditions=react-server.`;
 const commandOptions: Record<string, string[]> = {
   run: ["mode", "out", "responses", "iterations", "max-calls", "timeout-ms"],
   list: ["out"], show: ["out", "run"], stop: ["out", "run"],
   "export-replay": ["out", "run", "file"],
-  retrieval: ["corpus"],
+  retrieval: ["corpus", "semantic", "rerank-scores", "live", "max-calls", "save-scores"],
+  "knowledge-retrieval": ["scores", "live", "max-calls", "save-scores"],
 };
+const booleanOptions = new Set(["semantic", "live"]);
 function parse(args: string[]) {
   const command = args[0] ?? "help", options: Record<string, string> = {};
   if (command === "help" || command === "--help") return { command: "help", options };
   if (!commandOptions[command]) throw new QualityStop("unknown_command");
-  for (let index = 1; index < args.length; index += 2) {
+  for (let index = 1; index < args.length; index += 1) {
     const flag = args[index];
-    const value = args[index + 1];
-    if (!flag.startsWith("--") || !commandOptions[command].includes(flag.slice(2)) ||
-      !value || value.startsWith("--") || options[flag.slice(2)] !== undefined) {
+    const name = flag.slice(2);
+    if (!flag.startsWith("--") || !commandOptions[command].includes(name) || options[name] !== undefined) {
       throw new QualityStop("unknown_or_invalid_option");
     }
-    options[flag.slice(2)] = value;
+    if (booleanOptions.has(name)) {
+      options[name] = "true";
+      continue;
+    }
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) throw new QualityStop("unknown_or_invalid_option");
+    options[name] = value;
+    index += 1;
   }
   return { command, options };
 }
-export async function main(args: string[]) {
+export async function main(args: string[], context: LiveContext = {}) {
   const { command, options } = parse(args);
   if (command === "help") return { help: HELP };
+  if (command === "knowledge-retrieval") {
+    const live = options.live === "true";
+    if (live && options.scores) throw new QualityStop("live_and_scores_exclusive");
+    if (!live && (options["max-calls"] || options["save-scores"])) throw new QualityStop("live_option_without_live");
+    const result = await measureKnowledge({ corpus: await loadKnowledgeCorpus(), options, live, context });
+    return { knowledgeRetrieval: result, ...("stopReason" in result ? { stopReason: result.stopReason } : {}) };
+  }
   if (command === "retrieval") {
     const corpus = options.corpus ?? "retrieval-ko";
     const names = corpus === "all" ? PRODUCT_RETRIEVAL_CORPORA
       : PRODUCT_RETRIEVAL_CORPORA.filter((name) => name === corpus);
     if (names.length === 0) throw new QualityStop("unknown_corpus");
     const results: Record<string, ReturnType<typeof measureProductRetrieval>> = {};
-    for (const name of names) results[name] = measureProductRetrieval(await loadRetrievalCases(name as ProductRetrievalCorpus));
-    return { retrieval: results };
+    const loaded: Record<string, Awaited<ReturnType<typeof loadRetrievalCases>>> = {};
+    for (const name of names) {
+      loaded[name] = await loadRetrievalCases(name as ProductRetrievalCorpus);
+      results[name] = measureProductRetrieval(loaded[name]);
+    }
+    const live = options.live === "true";
+    if (!options.semantic) {
+      if (live || options["rerank-scores"] || options["max-calls"] || options["save-scores"]) {
+        throw new QualityStop("semantic_required");
+      }
+      return { retrieval: results };
+    }
+    if (live && options["rerank-scores"]) throw new QualityStop("live_and_scores_exclusive");
+    if (!live && !options["rerank-scores"]) throw new QualityStop("semantic_source_required");
+    if (!live && (options["max-calls"] || options["save-scores"])) throw new QualityStop("live_option_without_live");
+    if (live && names.length !== 1) throw new QualityStop("live_single_corpus");
+    const semantic: Record<string, Awaited<ReturnType<typeof measureSemanticMemory>>> = {};
+    for (const name of names) {
+      semantic[name] = await measureSemanticMemory({ corpus: name, cases: loaded[name], options, live, context });
+    }
+    const stopped = Object.values(semantic).find((row) => "stopReason" in row);
+    return { retrieval: results, semantic, ...(stopped && "stopReason" in stopped ? { stopReason: stopped.stopReason } : {}) };
   }
   const output = resolve(options.out ?? ".tmp/memory-quality");
   if (command === "list") return { runs: await listRuns(output) };

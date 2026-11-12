@@ -44,6 +44,10 @@ const REGISTRY = {
     owner: "database",
     reason: "The server owns pending, running and terminal one-use approval states. An uncertain dispatched write remains unknown until its owner records the verified outcome; API clients cannot assign arbitrary states.",
   },
+  McpCustomServer_auth_check: {
+    owner: "database",
+    reason: "The custom-server route maps a validated request enum to none, bearer or OAuth; the stored value is only ever written by that server code.",
+  },
   McpOAuthFlow_state_check: {
     owner: "database",
     reason: "The OAuth handler and maintenance own the authorization lifecycle. The callback's untrusted state parameter is an opaque lookup token, never the stored lifecycle state.",
@@ -109,7 +113,7 @@ const REGISTRY = {
     module: "lib/generatedArtifactCore.ts",
     list: "SUPPORTED_ARTIFACT_FORMATS",
     reason:
-      "The fifty-eight formats a generator actually exists for, built from the format table in lib/generatedArtifactFormats.ts (docs/policy/generated-artifacts.md). REFUSED_ARTIFACT_EXTENSIONS beside it is the opposite list -- extensions the product refuses outright -- and neither it nor any format without a generator may reach the constraint, because a row here claims a file the download route can serve.",
+      "The sixty-one formats a generator or a converter actually exists for, built from the format table in lib/generatedArtifactFormats.ts (docs/policy/generated-artifacts.md): fifty-eight a model can author and three raster image formats that only convert_files writes, from the user's own attachments. REFUSED_ARTIFACT_EXTENSIONS beside it is the opposite list -- extensions the product refuses outright -- and neither it nor any format without a generator may reach the constraint, because a row here claims a file the download route can serve.",
   },
   MessageArtifact_status_check: {
     owner: "list",

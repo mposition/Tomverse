@@ -593,6 +593,8 @@ export type QaConversationMessage = {
 export async function mockAuthenticatedApi(
   page: Page,
   options: {
+    /** Reuse the same server-backed draft and message store on a continued Chat. */
+    messageConversationId?: string;
     /**
      * The seeded conversation's model selection. Note this only takes effect
      * once that conversation is actually opened (see openRecentConversation) --
@@ -1154,7 +1156,8 @@ export async function mockAuthenticatedApi(
   // not from whatever the composer happened to be holding.
   const uploadRegistry = finalizedUploadRegistry(page);
 
-  await page.route("**/api/conversations/qa-conversation/messages**", async (route) => {
+  const messageConversationId = options.messageConversationId ?? "qa-conversation";
+  await page.route(`**/api/conversations/${messageConversationId}/messages**`, async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as {
         draftConsume?: { scopeKey: string; expectedRevision: number; requestId: string };
@@ -1193,7 +1196,7 @@ export async function mockAuthenticatedApi(
         if (!requestMessage?.clientRequestId) continue;
         const message = {
           ...requestMessage,
-          id: qaPersistedMessageId("qa-conversation", requestMessage.clientRequestId),
+          id: qaPersistedMessageId(messageConversationId, requestMessage.clientRequestId),
         };
         messageMappings.push({
           requestId: requestMessage.clientRequestId,

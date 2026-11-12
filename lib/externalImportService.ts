@@ -334,8 +334,9 @@ export async function listExternalConversations(
     {
         offset = 0,
         limit = 50,
-        timeZone = "UTC",
+        timeZone = "UTC", importId,
     }: {
+        importId?: string;
         offset?: number;
         limit?: number;
         /**
@@ -347,10 +348,10 @@ export async function listExternalConversations(
 ) {
     const [total, rows] = await Promise.all([
         prisma.externalConversation.count({
-            where: { userId, finalized: true },
+            where: { userId, finalized: true, ...(importId !== undefined ? {importId} : {}) },
         }),
         prisma.externalConversation.findMany({
-            where: { userId, finalized: true },
+            where: { userId, finalized: true, ...(importId !== undefined ? {importId} : {}) },
             orderBy: [{ importedAt: "desc" }, { id: "desc" }],
             skip: offset,
             take: limit,

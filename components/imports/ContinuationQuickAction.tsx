@@ -46,7 +46,7 @@ import { continuationQuickActionState } from "@/lib/continuationQuickAction";
 export function ContinuationQuickAction({
     externalConversationId,
     /** The source's title, for the button's accessible name. */
-    sourceTitle,
+    sourceTitle, primaryLabel,
     locked,
     continuationCount,
     latestContinuationId,
@@ -54,6 +54,7 @@ export function ContinuationQuickAction({
 }: {
     externalConversationId: string;
     sourceTitle: string;
+    primaryLabel?: string;
     locked: boolean;
     continuationCount: number;
     latestContinuationId: string | null;
@@ -249,7 +250,7 @@ export function ContinuationQuickAction({
                     ? t("continuation.creating")
                     : failed
                       ? t("continuation.quickRetry")
-                      : t("continuation.quickStart")}
+                      : (primaryLabel ?? t("continuation.quickStart"))}
             </button>
             {failed && launcher.errorMessage ? (
                 <span

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Bot, Database, FileUp, Mail, MapPin, MessageSquare, Mic, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
+import { ArrowLeft, BarChart3, Bot, Database, FileUp, Mail, MapPin, MessageSquare, Mic, Scale, Search, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { englishLocationNotice } from "@/locales/privacyLocation";
 import {
@@ -9,6 +9,7 @@ import {
     MarketingHeader,
 } from "@/components/marketing/MarketingChrome";
 import { COMMENTS_PRIVACY_NOTICE_CONFIRMED } from "@/lib/privacyNoticeStatus";
+import { SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED } from "@/lib/privacyNoticeStatus";
 import {
     PROVIDER_DATA_DESTINATIONS,
     disclosableDataDestinations,
@@ -73,6 +74,24 @@ const COMMENTS_ITEMS = [
     "commentsTransfer6",
     "commentsTransfer7",
     "commentsTransfer8",
+] as const;
+
+/**
+ * What is sent to Cohere for semantic search of knowledge files and account
+ * memory, itemized like the voice notice because it is the same kind of
+ * overseas transfer (docs/policy/external-conversation-import-and-memory.md
+ * sections 9a and 16). The section is shown only once the operator has
+ * confirmed the facts its placeholders stand for.
+ */
+const SEMANTIC_SEARCH_TRANSFER_ITEMS = [
+    "semanticSearchTransfer1",
+    "semanticSearchTransfer2",
+    "semanticSearchTransfer3",
+    "semanticSearchTransfer4",
+    "semanticSearchTransfer5",
+    "semanticSearchTransfer6",
+    "semanticSearchTransfer7",
+    "semanticSearchTransfer8",
 ] as const;
 
 /**
@@ -257,6 +276,11 @@ const sections = [
     ["externalImportTitle", "externalImport", FileUp],
     ["memoryTitle", "memory", Database],
     ["assistantProfilesTitle", "assistantProfiles", Bot],
+    // Its own section: the semantic search sends the question and candidate
+    // passages to a search provider, which is a transfer the assistant-profile
+    // and memory paragraphs do not describe. Hidden, with the calls, until the
+    // operator confirms its three open facts.
+    ["semanticSearchTitle", "semanticSearch", Search],
     // Its own section rather than a line inside "Retention": what a reader
     // needs to know is which mail they can switch off and what is stored to
     // honour that, and the one record that outlives the account is the part a
@@ -281,10 +305,13 @@ export function PrivacyPolicy() {
     const { t, lang } = useLanguage();
     const localizedContentAvailable = lang === "en" || lang === "ko" || lang === "zh";
     const destinations = disclosableDataDestinations();
-    // The comment-monitoring section is shown only once its operator-confirmation
-    // placeholders are resolved (lib/privacyNoticeStatus.ts).
+    // The comment-monitoring and semantic-search sections are shown only once
+    // their operator-confirmation placeholders are resolved
+    // (lib/privacyNoticeStatus.ts).
     const visibleSections = sections.filter(
         ([, bodyKey]) => bodyKey !== "comments" || COMMENTS_PRIVACY_NOTICE_CONFIRMED
+    ).filter(
+        ([, bodyKey]) => bodyKey !== "semanticSearch" || SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED
     );
     const showProviderTable =
         destinations.length > 0 &&
@@ -379,6 +406,20 @@ export function PrivacyPolicy() {
                                         </h3>
                                         <ul className="mt-2 list-disc space-y-1.5 pl-5">
                                             {COMMENTS_ITEMS.map((itemKey) => (
+                                                <li key={itemKey}>
+                                                    {t(`privacyPolicy.${itemKey}`)}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </>
+                                )}
+                                {bodyKey === "semanticSearch" && (
+                                    <>
+                                        <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
+                                            {t("privacyPolicy.semanticSearchTransferTitle")}
+                                        </h3>
+                                        <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                                            {SEMANTIC_SEARCH_TRANSFER_ITEMS.map((itemKey) => (
                                                 <li key={itemKey}>
                                                     {t(`privacyPolicy.${itemKey}`)}
                                                 </li>

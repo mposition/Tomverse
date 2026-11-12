@@ -21,14 +21,23 @@ export const MAX_FIX_LENGTH = 500;
 export const BOX_ROLES = ["headline", "screen", "cta"];
 
 const isNumber = (value, min, max) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
-/** Compared as a reader sees them: Unicode-normalised, spaces collapsed, quotes unified. */
+/**
+ * Compared as a reader sees them: Unicode-normalised, spaces collapsed, quotes
+ * unified, the quotation marks around a whole text dropped and a spaced list
+ * separator (" · ", " - ", " | ", " • ") read as one. The 2026-11-12 box run
+ * refused a quote drawn inside quotation marks and "GPT 6 Luna - Claude Haiku
+ * 5.5" for "GPT 6 Luna · Claude Haiku 5.5", both right on the picture.
+ */
 export const sameText = (text) =>
   String(text ?? "")
     .normalize("NFKC")
-    .replace(/[“”„]/gu, '"')
+    .replace(/[“”„«»「」『』]/gu, '"')
     .replace(/[‘’]/gu, "'")
     .replace(/\s+/gu, " ")
-    .trim();
+    .trim()
+    .replace(/^(["'])(.+)\1$/u, "$2")
+    .trim()
+    .replace(/ [·•|\-–—] /gu, " · ");
 
 /** The approved texts of a concept in one locale. */
 export const textsFor = (concept, locale) => (locale === "en" ? concept.texts : concept.translations[locale]);
@@ -103,8 +112,10 @@ export function checkReview(answerText, { stage, concept, locale }) {
     const read = answer.readTexts.map(sameText).filter(Boolean);
     const approved = texts.map((text) => sameText(text.text));
     const missing = approved.filter((text) => !read.includes(text));
-    // Words that are not approved: only a provider's own name on its mark may stand beside them.
-    const extra = read.filter((text) => !approved.includes(text) && !MODEL_FAMILIES.some((name) => text === name));
+    // Words that are not approved: only a provider's own name on its mark, or
+    // the name an answer is shown under (its `speaker`), may stand beside them.
+    const names = [...MODEL_FAMILIES, ...texts.map((text) => text.speaker).filter((name) => typeof name === "string")].map(sameText);
+    const extra = read.filter((text) => !approved.includes(text) && !names.includes(text));
     if (missing.length > 0 || extra.length > 0) {
       review.verdict = review.verdict === "reject" ? "reject" : "fix";
       review.fixes = [

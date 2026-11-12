@@ -42,6 +42,21 @@ import { FACTUAL_MEMORY_KINDS, STYLE_MEMORY_KINDS, memoryStatementKey } from "@/
 export const MEMORY_RETRIEVAL_ALGORITHM_VERSION = 2;
 
 /**
+ * The version of a selection whose relevance came from an external reranker
+ * (docs/policy/external-conversation-import-and-memory.md §9a). A different number because the same memories are ordered
+ * differently, and the number is in the signature a context bundle binds.
+ */
+export const MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION = 3;
+
+/** Starting values, to be tuned against the retrieval eval. */
+export const MEMORY_SEMANTIC_DEFAULTS = {
+    /** A reranked memory below this relevance is not in the running. */
+    minRerankScore: 0.1,
+    /** One search unit's worth of statements. */
+    maxRerankCandidates: 100,
+} as const;
+
+/**
  * Kinds that describe who the user is rather than what they were doing.
  * Always considered, never relevance-gated (§9 "core/pinned first").
  */
@@ -193,6 +208,13 @@ const tierFor = (memory: RetrievableMemory): ScoredMemory["tier"] => {
     return "relevant";
 };
 
+/**
+ * Which tier a memory is selected in. Exported so the service that asks an
+ * external model for relevance sends it exactly the memories this selector
+ * relevance-gates, and no core or style memory that it never would.
+ */
+export const memoryTier = tierFor;
+
 /** Compared at fixed precision so float noise cannot reorder two memories. */
 const rank = (score: number) => Math.round(score * 1e6);
 
@@ -256,6 +278,17 @@ export function selectMemoryContext(input: {
     /** False drops the style tier entirely (§8.1 style toggle). */
     styleEnabled?: boolean;
     budget?: Partial<MemoryContextBudget>;
+    /**
+     * Relevance in [0, 1] from an external reranker, by memory id (docs/policy/external-conversation-import-and-memory.md §9a).
+     *
+     * Only the "relevant" tier reads it: core and style memories are never
+     * relevance-gated, so nothing an outside model says can remove one. For a
+     * memory it covers, the score replaces term overlap both as the gate and
+     * as the relevance term; a memory it does not cover is judged lexically,
+     * as before. Passing a map at all moves the signature to the semantic
+     * version, even when the map is empty.
+     */
+    externalRelevance?: ReadonlyMap<string, number>;
 }): MemoryContextSelection {
     const budget = { ...MEMORY_CONTEXT_DEFAULTS, ...(input.budget ?? {}) };
     const queryTerms =
@@ -279,6 +312,24 @@ export function selectMemoryContext(input: {
         }
         const candidate = scoreMemory(memory, queryTerms, input.now, budget);
         if (candidate.tier === "style" && input.styleEnabled === false) continue;
+        const external =
+            candidate.tier === "relevant"
+                ? input.externalRelevance?.get(memory.id)
+                : undefined;
+        if (external !== undefined) {
+            if (external < MEMORY_SEMANTIC_DEFAULTS.minRerankScore) {
+                omitted.below_relevance += 1;
+                continue;
+            }
+            scored.push({
+                ...candidate,
+                relevance: external,
+                // The same weights, with the reranker's relevance in place of
+                // term overlap.
+                score: candidate.score + 0.45 * (external - candidate.relevance),
+            });
+            continue;
+        }
         if (
             candidate.tier === "relevant" &&
             candidate.termHits < budget.minRelevantTermHits
@@ -361,7 +412,7 @@ export function selectMemoryContext(input: {
         tokens,
         omitted,
         signature: [
-            `v${MEMORY_RETRIEVAL_ALGORITHM_VERSION}`,
+            `v${input.externalRelevance ? MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION : MEMORY_RETRIEVAL_ALGORITHM_VERSION}`,
             ...selected.map(
                 (candidate) => `${candidate.memory.id}:${rank(candidate.score)}`
             ),

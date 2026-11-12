@@ -10,6 +10,7 @@ import {
   Download,
   FileArchive,
   FileCode,
+  FileImage,
   FileText,
   FileType,
   Loader2,
@@ -74,7 +75,7 @@ const interpolateCopy = (
  * The card's name and icon for each label group.
  *
  * Grouped rather than per format, for the reason `ARTIFACT_LABEL_GROUPS` is
- * grouped: eleven translated names cover fifty-eight formats, and the four
+ * grouped: twelve translated names cover sixty-one formats, and the five
  * generic ones fill the extension in themselves so a `.rs` file still says
  * "RS" on the card rather than "source file".
  */
@@ -92,6 +93,7 @@ const LABEL_GROUP_COPY: Readonly<
   markup: { key: "chat.artifactTypeMarkup", icon: FileCode },
   code: { key: "chat.artifactTypeCode", icon: FileCode },
   archive: { key: "chat.artifactTypeArchive", icon: FileArchive },
+  image: { key: "chat.artifactTypeImage", icon: FileImage },
 };
 
 const FAILURE_COPY_KEYS: Readonly<Record<ArtifactFailureCode, string>> = {

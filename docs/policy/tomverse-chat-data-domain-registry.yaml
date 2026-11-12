@@ -214,6 +214,16 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included_filtered
 
+  - domain: mcpCustomServer
+    prismaModel: McpCustomServer
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
   - domain: mcpInvocation
     prismaModel: McpInvocation
     userLinkageRole: subject
@@ -588,6 +598,28 @@ domains:
     retentionPolicy: immediate
     implementationStatus: implemented
     inUnifiedExport: included_filtered
+
+  - domain: semanticRetrievalCache
+    prismaModel: SemanticRetrievalCache
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      The outcome of one semantic retrieval call (import/memory policy §9a):
+      candidate ids with relevance scores, the vector of one question, or a
+      recorded failure, under a SHA-256 key. Never memory or knowledge text.
+      Kept ten minutes so every rebuild of a turn's context reaches the same
+      selection, then removed by sweepSemanticRetrievalCache; an account
+      deletion removes its rows at once through the cascade. Excluded from the
+      export because it is a derived, minutes-lived working copy of data the
+      export already carries at its source. The embedding and embeddingModel
+      columns on AssistantKnowledgeChunk and MemoryItem are the same kind of
+      thing -- derived from the row's own text, deleted with the row -- and are
+      likewise not exported.
 
   - domain: assistantProfileImport
     prismaModel: AssistantProfileImport

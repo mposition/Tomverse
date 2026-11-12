@@ -17,6 +17,7 @@ import { flushSync } from "react-dom";
 import React, {
   useState,
   useEffect,
+  useEffectEvent,
   useCallback,
   useLayoutEffect,
   useMemo,
@@ -136,6 +137,8 @@ import {
   type ContinuationRowNaming,
 } from "@/lib/continuationTitleContext";
 import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
+import { ContinuationPassageCard } from "@/components/continuations/ContinuationPassageCard";
+import { encodePassages, type Passage } from "@/lib/continuationPassages";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
 import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
 import { reviewPrefillHref } from "@/lib/chatReviewHandoff";
@@ -1783,6 +1786,7 @@ export function ChatPageClient({
     submittedAtMonotonicMs?: number;
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
+    sourcePassages?: string;
     preparedLocationIntent?: ChatPanelLocationIntent;
     routerLocationTurn?: RouterLocationTurn;
     id: string;
@@ -2100,6 +2104,8 @@ export function ChatPageClient({
   // on failure it stays visible until the user dismisses it (no failure
   // callback is threaded up from ChatApp today), which is disclosed in the
   // chip's own copy rather than silently claimed as a real cancel.
+  const [pickedSource, setPickedSource] = useState<{owner:string;chat:string;parts:Passage[]}|null>(null);
+  const pickedRef = useRef<typeof pickedSource>(null);
   const [isDeepResearchPending, setIsDeepResearchPending] = useState(false);
   // The model the cap dialog is open for, or null. Set only when a Deep
   // Research run needs a slot the selection has no room for.
@@ -6775,6 +6781,9 @@ export function ChatPageClient({
         if (!modelSettingsReady) return;
       }
       const comparisonId = Date.now().toString();
+      const picked = pickedRef.current;
+      const sourcePassages = mountedSurface === "chat" && picked && picked.owner === identityKey && picked.chat === activeChatId && picked.parts.length
+        ? encodePassages(picked.parts) : undefined;
       // Resolved before the preflight, not after it: the preflight prices this
       // set and hands back the admission slots for it, so it has to be asked
       // about the same models the send will name.
@@ -7442,7 +7451,12 @@ export function ChatPageClient({
       // The panels draw the real user turn from this payload, in this commit.
       sendEchoRef.current = null;
       setSendEcho(null);
+      if (sourcePassages && !imageTurnSend && pickedRef.current === picked) {
+        pickedRef.current = null;
+        setPickedSource(null);
+      }
       setPromptPayload({
+        ...(!imageTurnSend && sourcePassages ? {sourcePassages} : {}),
         id: comparisonId,
         submittedAtMonotonicMs,
         preparationTimings: { ...preparation.timings },
@@ -8812,38 +8826,23 @@ export function ChatPageClient({
       });
   };
 
-  /**
-   * Applies a profile the user just created from this chat.
-   *
-   * The round trip is: the picker's CTA leaves for the create screen, that
-   * screen stashes the new profile's id and pushes `/chat`, and this consumes
-   * it once on the way back. No conversation id and no return URL travel — the
-   * conversation is the one this page restored for itself, and the id is read
-   * exactly once so a refresh cannot reapply it
-   * (`lib/assistantProfileReturn.ts`).
-   *
-   * Deliberately routed through `handleAssistantProfileChange` rather than
-   * through a PATCH of its own. That handler already owns the two cases this
-   * has — a conversation with a server row is PATCHed, one without is held in
-   * `pendingProfileId` and sent with the create — and it carries the four-way
-   * staleness guard that #632 was fixed with. A second implementation here
-   * would be a second place for that guard to be forgotten.
-   *
-   * Waits for the options list because the optimistic row is built from it,
-   * and because an empty list is how "the flag is off" arrives: with profiles
-   * disabled the fetch 403s, `assistantProfileOptions` stays null, and a
-   * stashed id is simply never applied.
-   */
-  const handleAssistantProfileChangeRef = useRef(handleAssistantProfileChange);
-  useEffect(() => {
-    handleAssistantProfileChangeRef.current = handleAssistantProfileChange;
+  /** Creation from the picker returns to its conversation. Settings and guide launches start a fresh one. */
+  const applyProfileHandoff = useEffectEvent((profileId: string, startNew: boolean) => {
+    if (!startNew) {
+      handleAssistantProfileChange(profileId);
+      return;
+    }
+    if (currentChatIdRef.current) handleNewChat();
+    setPendingProfileId(profileId);
+    pendingProfileIdRef.current = profileId;
   });
   useEffect(() => {
     if (isGuestMode || !assistantProfileOptions || !isInitialConversationResolved) {
       return;
     }
-    const profileId = consumePendingChatProfile();
-    if (!profileId) return;
+    const request = consumePendingChatProfile();
+    if (!request) return;
+    const { profileId, entry } = request;
     // A profile that is not in this account's own list is not applied. The
     // server would refuse it anyway; refusing here keeps a doomed request off
     // the wire and keeps the optimistic row from flashing a profile that was
@@ -8855,9 +8854,9 @@ export function ChatPageClient({
     // whether the round trip finished, and the create screen cannot know that
     // -- it has already navigated away by the time this runs.
     trackProductEvent("assistant_profile_applied_to_chat", 0, {
-        assistant_profile_entry: "chat",
+        assistant_profile_entry: entry,
     });
-    handleAssistantProfileChangeRef.current(profileId);
+    queueMicrotask(() => applyProfileHandoff(profileId, entry !== "chat"));
   }, [assistantProfileOptions, isGuestMode, isInitialConversationResolved]);
 
   // handleGlobalSubmit is redefined every render (not memoized); a ref
@@ -10323,6 +10322,10 @@ export function ChatPageClient({
       continuationSource.timeline
         ? {
             compareInReview,
+            contextCard: mountedSurface === "chat" && identityKey && shellConversationId && continuationSource.timeline.source.status === "available" ?
+              <ContinuationPassageCard key={identityKey + ":" + shellConversationId} source={continuationSource}
+                chosen={pickedSource?.owner === identityKey && pickedSource.chat === shellConversationId ? pickedSource.parts : []}
+                onChoose={parts => { const next = {owner:identityKey,chat:shellConversationId,parts}; pickedRef.current = next; setPickedSource(next); }} /> : null,
             status: continuationSource.timeline.source.status,
             provider: continuationSource.timeline.provider,
             importedAt: continuationSource.timeline.importedAt,
@@ -10347,14 +10350,7 @@ export function ChatPageClient({
           }
         : undefined,
     [
-      continuationSource.timeline,
-      continuationSource.olderCount,
-      continuationSource.loadMore,
-      continuationSource.loadingMore,
-      continuationSource.newerCount,
-      continuationSource.loadNewer,
-      continuationSource.loadingNewer,
-      continuationSource.focusOutcome,
+      continuationSource, mountedSurface, identityKey, shellConversationId, pickedSource,
       continuationFocusRequest,
       consumeAppliedSearchHitFocus,
       compareInReview,

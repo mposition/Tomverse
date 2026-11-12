@@ -6,8 +6,8 @@
     "lib/marketingFacts.ts",
     "lib/marketingStore.ts"
   ],
-  "digest": "e45c6c0319f42ff278ed4fbf7799a344b3380805bb6749e3fc9578aa1dc96c72",
-  "totalSizeBytes": 665585,
+  "digest": "aaa92a8f1c7ae724bb032af6f14fd7eaa9f4b232647a4649d00fc29c057cfd93",
+  "totalSizeBytes": 666694,
   "files": [
     {
       "path": "lib/adminAudit.ts",
@@ -86,8 +86,8 @@
     },
     {
       "path": "lib/marketingMemoryClaims.ts",
-      "sizeBytes": 21038,
-      "sha256": "9c436437fcb2fbb0b54d0bae4e5406367e9bbc2f6c4be873f3af7ae5934259f9"
+      "sizeBytes": 22147,
+      "sha256": "99b0bf39b5f7382b2087635988a6739ca910448a41e4b0c4851f0fa6eec40b5c"
     },
     {
       "path": "lib/marketingMinorsClaims.ts",

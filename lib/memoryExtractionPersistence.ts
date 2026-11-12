@@ -9,6 +9,13 @@ import {
     memoryRetrievalTerms,
 } from "@/lib/memoryRetrievalTerms";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
+import {
+    loadEmbeddedActiveMemories,
+    memoryEmbeddingLabel,
+    semanticDuplicatesOf,
+    type MemoryDuplicateContext,
+} from "@/lib/memorySemanticDuplicates";
+import { encodeVector } from "@/lib/semanticRetrievalCore";
 import { activeMemoryConflicts } from "@/lib/memoryService";
 import { memoryStatementKey } from "@/lib/memoryValidatorCore";
 
@@ -37,6 +44,11 @@ import { memoryStatementKey } from "@/lib/memoryValidatorCore";
  * superseded by extraction, nor is one they pinned -- the user's own choice
  * outranks an imported conversation -- and a duplicate of an active memory
  * adds nothing.
+ *
+ * **A paraphrase is the same topic** (§9a, behind an operator switch). When
+ * the caller supplies vectors for the candidates, an active memory of the same
+ * kind that says nearly the same thing is treated as one more conflict, so the
+ * rule above decides between them. Without vectors nothing changes.
  *
  * **A retried chunk adds only what is new.** A worker can die after this
  * transaction commits and before the chunk is reported, and the bounded
@@ -70,6 +82,12 @@ export type PersistExtractionChunkInput = {
     promptVersion: string;
     decisions: readonly ExtractionDecision[];
     now?: Date;
+    /**
+     * Vectors for the candidates' statements, computed before the transaction
+     * (lib/memorySemanticDuplicates.ts). Absent means exact-match conflicts
+     * only, which is the behaviour while the switch is off.
+     */
+    semanticDuplicates?: MemoryDuplicateContext | null;
 };
 
 export type PersistExtractionChunkResult = {
@@ -262,6 +280,13 @@ export async function persistExtractionChunkDecisions(
             .map(refKey)
     );
 
+    const semantic = input.semanticDuplicates ?? null;
+    // Grows as this chunk stores memories, so two paraphrases in one chunk
+    // meet each other as well as what was already there.
+    const embeddedMemories = semantic
+        ? await loadEmbeddedActiveMemories(tx, input.userId, semantic.modelLabel)
+        : [];
+
     let stored = 0;
     let superseded = 0;
     let unsourced = 0;
@@ -291,11 +316,21 @@ export async function persistExtractionChunkDecisions(
             statement,
             decision.candidate.canonicalKey
         );
-        const conflicts = await activeMemoryConflicts(tx, input.userId, {
+        const exactConflicts = await activeMemoryConflicts(tx, input.userId, {
             kind,
             statement,
             conflictKey,
         });
+        const vector = semantic?.vectors.get(statement);
+        const known = new Set(exactConflicts.map((row) => row.id));
+        const conflicts = [
+            ...exactConflicts,
+            ...(vector
+                ? semanticDuplicatesOf({ kind, vector }, embeddedMemories).filter(
+                      (row) => !known.has(row.id)
+                  )
+                : []),
+        ];
         if (conflicts.length > 0) {
             const wins = await candidateWinsTopic(
                 tx,
@@ -320,6 +355,12 @@ export async function persistExtractionChunkDecisions(
                 data: { status: "superseded", revision: { increment: 1 } },
             });
             superseded += replaced.count;
+            // Superseded memories are no longer active, so later candidates in
+            // this chunk must not be compared with them.
+            const replacedIds = new Set(conflicts.map((row) => row.id));
+            for (let index = embeddedMemories.length - 1; index >= 0; index -= 1) {
+                if (replacedIds.has(embeddedMemories[index].id)) embeddedMemories.splice(index, 1);
+            }
         }
 
         stored += 1;
@@ -350,9 +391,16 @@ export async function persistExtractionChunkDecisions(
                 extractionRunId: input.runId,
                 extractionChunkIndex: input.chunkIndex,
                 createdAt: now,
+                ...(semantic && vector
+                    ? {
+                          embedding: encodeVector(vector),
+                          embeddingModel: memoryEmbeddingLabel(semantic.modelLabel, statement),
+                      }
+                    : {}),
             },
             select: { id: true },
         });
+        if (vector) embeddedMemories.push({ id: item.id, kind, statement, vector });
 
         await tx.memoryEvidence.createMany({
             data: evidence.map((reference) => ({

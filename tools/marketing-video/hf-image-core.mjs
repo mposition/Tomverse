@@ -182,7 +182,12 @@ export async function makeImage({ prompt, references = [], out, label, jobDir, e
     job = null;
   }
   const outcome = job ? outcomeOf(job) : "unknown";
-  if (outcome === "unknown") return { ok: false, reason: "wait_outcome_unknown", detail: { jobId } };
+  // What the wait said goes into the report: on 2026-11-12 a wait ended within a
+  // minute with an outcome no one could read afterwards.
+  if (outcome === "unknown") {
+    const job0 = Array.isArray(job) ? job[0] : job?.job ?? job;
+    return { ok: false, reason: "wait_outcome_unknown", detail: { jobId, status: waited.status, timedOut: waited.timedOut, jobStatus: job0?.status ?? null, stderr: String(waited.stderr ?? "").trim().slice(-300), stdout: job ? null : String(waited.stdout ?? "").trim().slice(-300) } };
+  }
   settle(file, entry.id, { status: outcome, jobId });
   if (outcome === "failed") return { ok: false, reason: "job_failed", detail: { jobId } };
 

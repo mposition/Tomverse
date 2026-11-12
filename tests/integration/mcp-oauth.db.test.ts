@@ -127,3 +127,60 @@ test("SDK confidential DCR uses bound Basic client authentication with an empty 
     await prisma.user.deleteMany({ where: { id: owner } }); await basic.close();
   }
 });
+
+test("user-chosen scopes are validated, stored encrypted, bound the token and stay owner-isolated", async () => {
+  const carol = `mcp-scope-${randomUUID()}`, dave = `mcp-scope-${randomUUID()}`;
+  process.env.MCP_CONNECTOR_SYNTHETIC_SELECTABLE_SCOPES = "read write admin";
+  await prisma.user.createMany({ data: [{ id: carol }, { id: dave }] });
+  const follow = async (authorizationUrl: string) => {
+    const location = new URL((await fetch(authorizationUrl, { redirect: "manual" })).headers.get("location")!);
+    return { state: location.searchParams.get("state")!, code: location.searchParams.get("code")!, issuer: location.searchParams.get("iss")! };
+  };
+  try {
+    await assert.rejects(() => startMcpOAuth(carol, "synthetic", callback, undefined, ["read", "delete"]), { code: "oauth_scope_not_allowed" });
+    assert.equal(await prisma.mcpOAuthFlow.count({ where: { userId: carol } }), 0);
+
+    // The fixture grants "read write"; a token wider than the user's choice is refused.
+    const narrow = await startMcpOAuth(carol, "synthetic", callback, undefined, ["read"]);
+    assert.equal(new URL(narrow.authorizationUrl!).searchParams.get("scope"), "read");
+    const narrowCallback = await follow(narrow.authorizationUrl!);
+    await assert.rejects(() => completeMcpOAuth(carol, narrowCallback.state, narrowCallback.code, narrowCallback.issuer), { code: "oauth_authorization_failed" });
+    assert.equal(await prisma.mcpConnection.count({ where: { userId: carol } }), 0);
+
+    const wide = await startMcpOAuth(carol, "synthetic", callback, undefined, ["admin", "read", "write"]);
+    assert.equal(new URL(wide.authorizationUrl!).searchParams.get("scope"), "read write admin");
+    const wideCallback = await follow(wide.authorizationUrl!);
+    const flow = await prisma.mcpOAuthFlow.findUniqueOrThrow({ where: { stateHash: createHash("sha256").update(wideCallback.state).digest("hex") } });
+    assert.equal(flow.secretCiphertext?.includes("admin"), false);
+    assert.deepEqual(JSON.parse(decryptMcpSecret(flow.secretCiphertext)!).scopes, ["read", "write", "admin"]);
+    // Another account cannot finish this flow or see the connection.
+    await assert.rejects(() => completeMcpOAuth(dave, wideCallback.state, wideCallback.code, wideCallback.issuer), { code: "oauth_flow_expired" });
+    const connected = await completeMcpOAuth(carol, wideCallback.state, wideCallback.code, wideCallback.issuer);
+    const row = await prisma.mcpConnection.findUniqueOrThrow({ where: { id: connected.id } });
+    assert.equal(row.oauthCiphertext?.includes("admin"), false);
+    const [listed] = await listMcpConnections(carol);
+    assert.equal(listed.status, "connected"); assert.deepEqual(listed.scopes, ["read", "write", "admin"]);
+    await ownMcpConnection(carol, row.id);
+    assert.deepEqual(await listMcpConnections(dave), []);
+    await assert.rejects(() => ownMcpConnection(dave, row.id), { code: "connection_not_found" });
+
+    // Changing the choice is a new authorization: the saved token is not reused.
+    const changed = await startMcpOAuth(carol, "synthetic", callback, undefined, ["read", "write"]);
+    assert.equal(changed.status, "authorization_required");
+
+    // Narrowing the operator bound below the stored choice makes the connection unavailable.
+    process.env.MCP_CONNECTOR_SYNTHETIC_SELECTABLE_SCOPES = "read write";
+    await assert.rejects(() => ownMcpConnection(carol, row.id), { code: "connection_unavailable" });
+    assert.equal((await listMcpConnections(carol))[0].status, "unavailable");
+    process.env.MCP_CONNECTOR_SYNTHETIC_SELECTABLE_SCOPES = "read write admin";
+    await ownMcpConnection(carol, row.id);
+
+    // A fixed-scope server accepts no user choice.
+    delete process.env.MCP_CONNECTOR_SYNTHETIC_SELECTABLE_SCOPES;
+    await assert.rejects(() => startMcpOAuth(carol, "synthetic", callback, undefined, ["read"]), { code: "oauth_scope_not_allowed" });
+    await assert.rejects(() => ownMcpConnection(carol, row.id), { code: "connection_unavailable" });
+  } finally {
+    delete process.env.MCP_CONNECTOR_SYNTHETIC_SELECTABLE_SCOPES;
+    await prisma.user.deleteMany({ where: { id: { in: [carol, dave] } } });
+  }
+});

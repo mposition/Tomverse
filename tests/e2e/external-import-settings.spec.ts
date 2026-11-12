@@ -583,7 +583,6 @@ test.describe("external import settings", () => {
       page.getByTestId("external-import-step-indicator")
     ).toBeVisible();
     await page.getByTestId("external-import-guide-chatgpt").click();
-    await page.getByTestId("external-import-guide-has-file").click();
 
     // Step 2 — the file is opened by the real Web Worker, in the browser.
     await expect(
@@ -664,7 +663,6 @@ test.describe("external import settings", () => {
     const reachReview = async () => {
       await page.goto("/settings/imports/new");
       await page.getByTestId("external-import-guide-chatgpt").click();
-      await page.getByTestId("external-import-guide-has-file").click();
       await page
         .getByTestId("external-import-file-input")
         .setInputFiles(chatgptExportFile(1));
@@ -683,9 +681,61 @@ test.describe("external import settings", () => {
     // Memory turned off: no extraction will start, so nothing is promised.
     masterEnabled = false;
     await reachReview();
-    await expect(page.getByTestId("external-import-memory-notice")).toHaveCount(0);
+    await expect(page.getByTestId("external-import-memory-notice")).toContainText("계정 기억이 꺼져");
   });
 
+  test("choose only one conversation and return to that saved batch from memory", async ({page})=>{
+    await prepareGuestPage(page,"ko");
+    await mockAuthenticatedApi(page);
+    const api=await mockImportApi(page);
+    await page.route(url=>url.pathname==="/api/memories/settings",route=>route.fulfill(json({masterEnabled:false,styleEnabled:true,defaultConversationMode:"off"})));
+    await page.route(url=>url.pathname==="/api/memories/extraction-runs", route=>route.abort());
+    await page.route(url=>url.pathname==="/api/memories",route=>route.fulfill(json({total:0,memories:[]})));
+    await page.route(url=>url.pathname==="/api/external-conversations" && url.searchParams.get("importId")==="qa-import-1",route=>route.fulfill(json({
+      total:1, continuationEnabled:true, conversations:[{id:"qa-saved",importId:"qa-import-1",title:"My saved chat",provider:"claude",messageCount:2,locked:false,continuationCount:0,latestContinuationId:null,continuations:[]}]
+    })));
+    await page.goto("/settings/imports/new");
+    await page.getByTestId("external-import-file-input").setInputFiles(chatgptExportFile(3));
+    await page.getByTestId("import-select-only").nth(1).click();
+    await expect(page.getByTestId("external-import-conversation-toggle").nth(0)).not.toBeChecked();
+    await page.getByTestId("external-import-continue-to-review").click();
+    await page.getByTestId("external-import-finalize").click();
+    const saved=page.getByTestId("external-import-completed");
+    await expect(saved).toContainText("My saved chat");
+    await expect(saved.getByTestId("continuation-quick-action-create")).toBeVisible();
+    await expect(saved).toContainText("계정 기억이 꺼져");
+    await expect(page.getByTestId("external-import-step-indicator").locator('[aria-current="step"]')).toHaveAttribute("data-step","done");
+    await test.info().attach("import-complete", {body:await page.screenshot(),contentType:"image/png"});
+    expect(api.batchBodies[0].conversations.map(c=>c.rawExternalConversationId)).toEqual(["qa-conv-1"]);
+    await saved.getByRole("link",{name:/계정 기억/}).click();
+    await page.getByRole("link",{name:"가져온 대화로 돌아가기"}).click({noWaitAfter:true});
+    await expect(page).toHaveURL(/\?saved=qa-import-1$/);
+    await expect(saved).toContainText("My saved chat");
+    await page.reload({waitUntil:"domcontentloaded"});
+    await expect(saved).toContainText("My saved chat");
+  });
+  test("a saved batch offers the existing chat and withholds the locked original", async ({page})=>{
+    await prepareGuestPage(page,"en");
+    await mockAuthenticatedApi(page);
+    await mockImportApi(page);
+    let continuationEnabled=true;
+    const rows=[
+      {id:"locked",title:null,locked:true,continuationCount:0,latestContinuationId:null,continuations:[]},
+      {id:"readable",title:"Project brief",locked:false,continuationCount:1,latestContinuationId:"existing",continuations:[]},
+    ].map(row=>({...row,provider:"chatgpt",importId:"batch",messageCount:18}));
+    await page.route(url=>url.pathname==="/api/external-conversations" && url.searchParams.get("importId")==="batch",
+      route=>route.fulfill(json({conversations:rows,total:2,continuationEnabled})));
+    await page.goto("/settings/imports/new?saved=batch");
+    const saved=page.getByTestId("external-import-completed");
+    await expect(saved.locator('a[href="/continuations/existing"]')).toHaveCount(1);
+    await expect(saved.getByTestId("continuation-quick-action-create")).toHaveCount(0);
+    await expect(saved.getByTestId("continuation-quick-action-locked")).toBeVisible();
+    continuationEnabled=false;
+    await page.reload();
+    await expect(saved).toContainText("Project brief");
+    await expect(saved.locator('a[href="/continuations/existing"]')).toHaveCount(0);
+    await expect(saved.getByRole("link",{name:"View original"})).toHaveCount(2);
+  });
   test("the raw archive is never sent over the network", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
@@ -698,7 +748,6 @@ test.describe("external import settings", () => {
     });
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(2));
@@ -726,7 +775,6 @@ test.describe("external import settings", () => {
     await page.goto("/settings/imports/new");
     // The user says Claude; the file is a ChatGPT export.
     await page.getByTestId("external-import-guide-claude").click();
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(1));
@@ -750,7 +798,6 @@ test.describe("external import settings", () => {
     });
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(2));
@@ -787,7 +834,6 @@ test.describe("external import settings", () => {
     });
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(2));
@@ -826,7 +872,6 @@ test.describe("external import settings", () => {
     });
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(2));
@@ -858,7 +903,6 @@ test.describe("external import settings", () => {
     await mockImportApi(page);
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page.getByTestId("external-import-file-input").setInputFiles({
       name: "conversations.json",
       mimeType: "application/json",
@@ -894,7 +938,6 @@ test.describe("external import settings", () => {
     await mockImportApi(page);
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
 
     const accept = await page
       .getByTestId("external-import-file-input")
@@ -1154,7 +1197,6 @@ test.describe("external import settings", () => {
     };
     await page.getByTestId; // keep the import of chatgptConversation honest
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page.getByTestId("external-import-file-input").setInputFiles({
       name: "conversations.json",
       mimeType: "application/json",
@@ -1205,7 +1247,6 @@ test.describe("external import settings", () => {
     await mockImportApi(page);
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(400));
@@ -1246,7 +1287,6 @@ test.describe("external import settings", () => {
     await mockImportApi(page);
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(400));
@@ -1285,15 +1325,14 @@ test.describe("external import settings", () => {
     await expect(indicator.locator("a")).toHaveCount(0);
     await expect(indicator.locator('[aria-current="step"]')).toHaveCount(1);
 
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(1));
     await expect(page.getByTestId("external-import-selection")).toBeVisible();
-    // "Step 3 of 5, Choose conversations" is what a screen reader gets.
+    // "Step 2 of 4, Choose conversations" is what a screen reader gets.
     await expect(
       indicator.locator('[data-step="select_conversations"]')
-    ).toHaveAttribute("aria-label", /3.*5|5.*3/);
+    ).toHaveAttribute("aria-label", /2.*4|4.*2/);
 
     // Stepping back is a real button in the body, not a step chip.
     await page.getByTestId("external-import-back-step").first().click();
@@ -1400,7 +1439,6 @@ test.describe("external import settings", () => {
     await page.getByTestId("external-import-new").click();
     await expect(page).toHaveURL(/\/settings\/imports\/new$/);
 
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(2));
@@ -1422,7 +1460,6 @@ test.describe("external import settings", () => {
     await mockImportApi(page);
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(3));

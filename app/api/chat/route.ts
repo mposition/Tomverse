@@ -419,9 +419,11 @@ import {
     SHADOW_CANDIDATE_ESTIMATOR_VERSION,
 } from "@/lib/tokenEstimateShadowRecorder";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { verifyingSemanticModes } from "@/lib/semanticRetrievalCore";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
     consumeContextBundle,
+    readChatContextBundleSemanticSteps,
     verifyChatContextBundle,
 } from "@/lib/chatContextBundleService";
 import {
@@ -2317,6 +2319,11 @@ async function handleChatPost(
                 profileVersionId,
                 plan: accountPlan?.tier ?? null,
                 conversationMode: memoryMode,
+                // This route verifies a bundle another route issued, and never
+                // asks the retrieval provider. The bundle says which semantic
+                // steps shaped its selection; those are rebuilt from what the
+                // issuing route stored and every other step is off.
+                semantic: verifyingSemanticModes(readChatContextBundleSemanticSteps(token)),
             });
             const verification = verifyChatContextBundle(token, {
                 subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
@@ -4978,7 +4985,8 @@ async function handleChatPost(
                       },
                       // This turn's own files, by the handles the system block
                       // named. Already read, already ownership-checked; the
-                      // batch tool is the only reader and it never sees a key.
+                      // batch and conversion tools are the only readers and
+                      // neither ever sees a key.
                       turnAttachments: turnAttachmentBytes,
                   })
                 : null;
@@ -5001,6 +5009,9 @@ async function handleChatPost(
             ? buildGeneratedArtifactToolConfig(artifactCollector, {
                   registerDocumentBatch: Boolean(
                       artifactToolPlan?.registerDocumentBatch
+                  ),
+                  registerFileConversion: Boolean(
+                      artifactToolPlan?.registerFileConversion
                   ),
                   // Read at call time, which is after the assignment below:
                   // a tool cannot execute before the request that carries it

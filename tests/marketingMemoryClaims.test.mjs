@@ -6,6 +6,7 @@ import {
     ALLOWED_MEMORY_CLAIMS,
     FORBIDDEN_MEMORY_CLAIMS,
     MEMORY_MARKETING_DISCLOSURE,
+    MEMORY_MARKETING_SHORT_DISCLOSURE,
     MEMORY_MARKETING_DISCLOSURE_ID,
     MEMORY_MARKETING_KEYS,
     MEMORY_MARKETING_NAMESPACE,
@@ -59,6 +60,27 @@ test("every claim §17 allows passes the matcher", () => {
     }
     assert.deepEqual(findForbiddenMemoryClaims(MEMORY_MARKETING_DISCLOSURE.ko), []);
     assert.deepEqual(findForbiddenMemoryClaims(MEMORY_MARKETING_DISCLOSURE.en), []);
+});
+
+test("the short ad disclosure (docs/policy/external-conversation-import-and-memory.md §17.1) makes no forbidden claim and names no brand", () => {
+    for (const [locale, text] of Object.entries(MEMORY_MARKETING_SHORT_DISCLOSURE)) {
+        assert.deepEqual(findForbiddenMemoryClaims(text), [], locale);
+        assert.doesNotMatch(text, /tomverse/iu, locale);
+    }
+    // The image path's facts carry the same words (tools/marketing-video/features.json).
+    const features = JSON.parse(readFileSync(join(import.meta.dirname, "..", "tools", "marketing-video", "features.json"), "utf8")).features;
+    for (const id of ["import-continue", "memory"]) {
+        assert.deepEqual(features.find((feature) => feature.id === id)?.disclosure, MEMORY_MARKETING_SHORT_DISCLOSURE, id);
+    }
+    // The list the job reads since 2026-11-12 is seeded with the same words, and
+    // Admin cannot change them (tests/marketingFeatureFacts.test.mjs pins that the
+    // edit schemas refuse `disclosure`).
+    const seed = readFileSync(join(import.meta.dirname, "..", "prisma", "migrations", "20261112120000_marketing_feature_facts", "migration.sql"), "utf8");
+    const words = `'${JSON.stringify(MEMORY_MARKETING_SHORT_DISCLOSURE).replaceAll("'", "''")}'::jsonb`;
+    for (const id of ["import-continue", "memory"]) {
+        const line = seed.split(/\r?\n/u).find((entry) => entry.trimStart().startsWith(`('${id}', `));
+        assert.ok(line?.includes(words), id);
+    }
 });
 
 /**

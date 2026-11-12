@@ -209,6 +209,45 @@ export const codingProfileSchema = z
   .strict();
 export type CodingProfile = z.infer<typeof codingProfileSchema>;
 
+/**
+ * What the operator may change in a coding draft before applying it: the
+ * display name, the plan that sees the model and the credit weight. Prices,
+ * capabilities and the terms and retention evidence are what the cited pages
+ * say, so they are not editable; a different answer is a new draft.
+ */
+export const codingDraftEditSchema = z
+  .object({
+    name: codingProfileSchema.shape.name.optional(),
+    minimumPlan: codingProfileSchema.shape.minimumPlan.optional(),
+    creditWeight: codingProfileSchema.shape.pricing.shape.creditWeight.optional(),
+  })
+  .strict();
+export type CodingDraftEdit = z.infer<typeof codingDraftEditSchema>;
+
+/** The draft with the operator's edits, and each field that changed (for the audit row). */
+export const applyCodingDraftEdits = (
+  draft: CodingProfile,
+  edit: CodingDraftEdit
+): { profile: CodingProfile; edits: { field: keyof CodingDraftEdit; from: string | number; to: string | number }[] } => {
+  const edits: { field: keyof CodingDraftEdit; from: string | number; to: string | number }[] = [];
+  if (edit.name !== undefined && edit.name !== draft.name) edits.push({ field: "name", from: draft.name, to: edit.name });
+  if (edit.minimumPlan !== undefined && edit.minimumPlan !== draft.minimumPlan) {
+    edits.push({ field: "minimumPlan", from: draft.minimumPlan, to: edit.minimumPlan });
+  }
+  if (edit.creditWeight !== undefined && edit.creditWeight !== draft.pricing.creditWeight) {
+    edits.push({ field: "creditWeight", from: draft.pricing.creditWeight, to: edit.creditWeight });
+  }
+  return {
+    profile: {
+      ...draft,
+      name: edit.name ?? draft.name,
+      minimumPlan: edit.minimumPlan ?? draft.minimumPlan,
+      pricing: { ...draft.pricing, creditWeight: edit.creditWeight ?? draft.pricing.creditWeight },
+    },
+    edits,
+  };
+};
+
 // --- image resolution -------------------------------------------------------
 
 export type CatalogRowInput = {

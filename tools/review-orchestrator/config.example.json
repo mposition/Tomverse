@@ -39,6 +39,7 @@
       "id": "codex",
       "vendor": "openai",
       "quotaProbe": "amux",
+      "useCredits": false,
       "enabled": true,
       "maxConcurrent": 2,
       "command": "codex",
@@ -71,6 +72,26 @@
         "--permission-mode", "auto",
         "--model", "{model}"
       ]
+    },
+    {
+      "id": "antigravity",
+      "vendor": "google",
+      "quotaProbe": "antigravity",
+      "io": "antigravity-stream-json",
+      "enabled": false,
+      "maxConcurrent": 1,
+      "model": "gemini-4-argon-medium",
+      "command": "agy",
+      "args": [
+        "-p", "",
+        "--input-format", "stream-json",
+        "--output-format", "stream-json",
+        "--model", "{model}",
+        "--agent", "review-read",
+        "--disable-slash-commands",
+        "--settings", "{\"permissions\":{\"deny\":[\"command(*)\",\"write_file(*)\",\"read_url(*)\",\"execute_url(*)\",\"mcp(*)\"]}}"
+      ],
+      "passEnv": ["AGY_CLI_DISABLE_AUTO_UPDATE"]
     },
     {
       "id": "copilot",

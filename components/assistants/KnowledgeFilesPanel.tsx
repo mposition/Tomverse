@@ -70,6 +70,7 @@ const megabytes = (bytes: number) => Math.floor(bytes / (1024 * 1024));
 export function KnowledgeFilesPanel({
     profileId,
     knowledgeEnabled,
+    onKnowledgeDisabled,
     files,
     publishedManifest,
     selectedFileIds,
@@ -87,6 +88,7 @@ export function KnowledgeFilesPanel({
      * meant the panel rendered for a moment before hiding itself.
      */
     knowledgeEnabled: boolean;
+    onKnowledgeDisabled: () => void;
     files: KnowledgeFile[];
     /** The manifest of the revision that is currently published, if any. */
     publishedManifest: ManifestEntry[];
@@ -104,11 +106,6 @@ export function KnowledgeFilesPanel({
     const inputId = useId();
     const inputRef = useRef<HTMLInputElement>(null);
     const [capacity, setCapacity] = useState<Capacity | null>(null);
-    // Seeded from the server's answer rather than from `null`: there is no
-    // window in which the panel does not know. The 403 branch below stays as a
-    // fallback, because the flag can be turned off between this page being
-    // rendered and the capacity read landing.
-    const [enabled, setEnabled] = useState<boolean>(knowledgeEnabled);
     const [upload, setUpload] = useState<UploadState>({ kind: "idle" });
     const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -119,23 +116,20 @@ export function KnowledgeFilesPanel({
             const response = await fetch(api, { cache: "no-store" });
             if (response.status === 403) {
                 await discardResponseBody(response);
-                setEnabled(false);
+                onKnowledgeDisabled();
                 return;
             }
             if (!response.ok) {
                 await discardResponseBody(response);
-                setEnabled(true);
                 return;
             }
             const data = (await response.json()) as { capacity: Capacity };
-            setEnabled(true);
             setCapacity(data.capacity);
         } catch {
             // A failed capacity read is not a refusal. Leave the panel up so
             // the owner can still see and deselect what is already there.
-            setEnabled(true);
         }
-    }, [api]);
+    }, [api, onKnowledgeDisabled]);
 
     useEffect(() => {
         // Nothing to read when the feature is off: the only thing this request
@@ -245,7 +239,7 @@ export function KnowledgeFilesPanel({
         [api, onChanged, readCapacity]
     );
 
-    if (!enabled) return null;
+    if (!knowledgeEnabled) return null;
 
     // A manifest entry whose file is gone. §14 makes the manifest audit
     // metadata: it records what a published revision was given and cannot
@@ -256,6 +250,7 @@ export function KnowledgeFilesPanel({
     return (
         <fieldset
             id="assistant-knowledge-panel"
+            tabIndex={-1}
             className="flex scroll-mt-24 flex-col gap-3"
             data-testid="knowledge-panel"
         >
@@ -287,49 +282,59 @@ export function KnowledgeFilesPanel({
             )}
 
             <div className="flex flex-col gap-2">
-                {files.map((file) => (
-                    <div key={file.id} className="flex items-center gap-2 text-sm">
-                        <input
-                            type="checkbox"
-                            id={`${inputId}-${file.id}`}
-                            checked={selectedFileIds.includes(file.id)}
-                            disabled={file.processingStatus !== "ready"}
-                            onChange={(event) =>
-                                onToggleFile(file.id, event.target.checked)
-                            }
-                            data-testid={`assistant-knowledge-${file.id}`}
-                        />
-                        <label htmlFor={`${inputId}-${file.id}`} className="flex-1">
-                            {file.name}
-                        </label>
-                        {file.processingStatus !== "ready" && (
+                {files.map((file) => {
+                    const selected = selectedFileIds.includes(file.id);
+                    const connected = publishedManifest.some((entry) => entry.fileId === file.id);
+                    let status = `assistantProfiles.fileStatus.${file.processingStatus}`;
+                    if (file.processingStatus === "ready") {
+                        if (selected !== connected) {
+                            status = selected ? "assistantProfiles.saveToConnect" : "assistantProfiles.saveToDisconnect";
+                        } else if (connected) {
+                            status = "assistantProfiles.fileConnected";
+                        }
+                    }
+                    return (
+                        <div key={file.id} className="flex items-center gap-2 text-sm">
+                            <input
+                                type="checkbox"
+                                id={`${inputId}-${file.id}`}
+                                checked={selected}
+                                aria-describedby={`${inputId}-status-${file.id}`}
+                                disabled={file.processingStatus !== "ready"}
+                                onChange={(event) =>
+                                    onToggleFile(file.id, event.target.checked)
+                                }
+                                data-testid={`assistant-knowledge-${file.id}`}
+                            />
+                            <label htmlFor={`${inputId}-${file.id}`} className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                                {file.name}
+                            </label>
                             <span
+                                id={`${inputId}-status-${file.id}`}
                                 className="text-xs text-zinc-500"
                                 data-testid={`knowledge-status-${file.id}`}
                             >
-                                {t(
-                                    `assistantProfiles.fileStatus.${file.processingStatus}`
-                                )}
+                                {t(status)}
                             </span>
-                        )}
-                        <button
-                            type="button"
-                            onClick={() => void removeFile(file.id)}
-                            disabled={deletingId === file.id}
-                            className="rounded-lg p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50 dark:hover:bg-zinc-800"
-                            aria-label={t(
-                                "assistantProfiles.knowledgeRemove"
-                            ).replace("{name}", file.name)}
-                            data-testid={`knowledge-remove-${file.id}`}
-                        >
-                            {deletingId === file.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                                <Trash2 className="h-4 w-4" />
-                            )}
-                        </button>
-                    </div>
-                ))}
+                            <button
+                                type="button"
+                                onClick={() => void removeFile(file.id)}
+                                disabled={deletingId === file.id}
+                                className="rounded-lg p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50 dark:hover:bg-zinc-800"
+                                aria-label={t(
+                                    "assistantProfiles.knowledgeRemove"
+                                ).replace("{name}", file.name)}
+                                data-testid={`knowledge-remove-${file.id}`}
+                            >
+                                {deletingId === file.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                )}
+                            </button>
+                        </div>
+                    );
+                })}
 
                 {unavailable.map((entry) => (
                     <p

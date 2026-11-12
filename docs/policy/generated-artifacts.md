@@ -138,7 +138,7 @@ module에는 "그 텍스트"가 아닌 명세가 없다. 그래서 그 형식에
 | 아카이브 전체 문자 수 | 2,000,000 |
 | cell·block 문자열 | 20,000자 |
 | 파일명 | 120자 |
-| 결과 파일 크기 | 5 MB |
+| 결과 파일 크기 | 5 MB (변환 결과는 25 MB — §14.4) |
 | 메시지당 artifact | 3 |
 
 각 상한은 서로 다른 자원을 막으므로 어느 하나도 잉여가 아니다. 특히 파일
@@ -159,6 +159,7 @@ module에는 "그 텍스트"가 아닌 명세가 없다. 그래서 그 형식에
 | presentation | `pptx` | `lib/generatedArtifactPptx.ts` |
 | text | `json`, `yaml`, `yml`, `xml`, `toml`, `ini`, `tsv`, `html`, `htm`, `svg`, `css`, `scss`, `less`, `sql`, `graphql`, `proto`, `ts`, `tsx`, `js`, `jsx`, `mjs`, `cjs`, `py`, `rb`, `go`, `rs`, `java`, `kt`, `swift`, `c`, `h`, `cpp`, `hpp`, `cs`, `php`, `sh`, `bash`, `ps1`, `r`, `scala`, `lua`, `pl`, `dart`, `ex`, `exs`, `hs`, `vue`, `svelte`, `dockerfile`, `env` | `lib/generatedArtifactText.ts` |
 | archive | `zip` | `lib/generatedArtifactText.ts` |
+| image | `png`, `jpg`, `webp` | `lib/fileConversion.ts` — 모델이 저작하지 않는다. 변환 결과로만 생긴다(§14) |
 
 **형식을 추가하는 일은 세 가지다** — `ARTIFACT_FORMAT_TABLE`의 행 하나,
 `lib/generatedArtifactRenderers.ts`의 분기 하나, migration의 `format` CHECK를
@@ -702,3 +703,148 @@ Word에서 선택 영역 위에 타이핑했을 때와 같은 결과다.
 - 101번째 archive 항목 거절, 100번째 통과.
 - 네 번째 top-level artifact 거절 유지.
 - 기존 텍스트 ZIP과 단일 DOCX 생성 회귀 없음.
+
+## 14. 사용자가 올린 파일을 변환하기 (`convert_files`)
+
+운영자 결정: 2026-11-12. 사용자가 사진 두 장을 첨부하고 "하나의 PDF로 만들어
+달라"고 했을 때, 파일을 만들 수 있는 모델이 "첨부된 이미지를 불러와 PDF로
+변환할 수 없다"고 답했다. 모델을 바꿔도 결과는 같았다 — §3의 다섯 tool은 모두
+**모델이 쓴 내용**을 받고, 사진은 모델이 쓸 수 있는 내용이 아니기 때문이다.
+이 절은 그 공백을 메운다.
+
+### 14.1 규칙
+
+> 변환에서 모델은 바이트를 받지도, 만들지도 않는다.
+
+모델이 내는 것은 §13과 같은 handle(`att_1`, `att_2`)과 지시뿐이다. 읽기·변환·
+쓰기는 전부 서버가 한다(`lib/fileConversion.ts`). 명세와 한도, 페이지 선택
+문법은 `lib/fileConversionCore.ts`에 있고 파일 없이 테스트할 수 있다.
+
+### 14.2 무엇을 변환하는가
+
+tool은 하나(`convert_files`)이고 `operation`이 다섯 가지다.
+
+| operation | 입력 | 출력 |
+|---|---|---|
+| `to_pdf` | 이미지(png·jpg·webp·gif)와 PDF, 순서대로 | PDF 하나. 이미지는 한 장에 한 페이지. PDF 합치기, 페이지 추출·순서 변경(`pages: "3,1,2"`)·회전도 같은 호출이다 |
+| `split_pdf` | PDF 하나 | 구간별 PDF 묶음(zip). `splitEvery` 또는 source별 `pages` |
+| `pdf_to_images` | PDF | 페이지별 png·jpg·webp. 한 장이면 이미지 파일, 여러 장이면 zip |
+| `convert_images` | 이미지 | png·jpg·webp로 형식 변환, `maxDimension` 축소, `quality` 압축. 여러 장이면 zip |
+| `convert_spreadsheet` | xlsx·csv | xlsx·csv·PDF 표. 워크북은 지정한(없으면 첫) 시트 하나 |
+
+- 휴대폰 사진은 EXIF 방향대로 세운 뒤 페이지에 놓는다. PDF 페이지에는 방향
+  메모를 둘 곳이 없다.
+- 표 변환에서 **명백한 숫자만** 숫자로 쓴다. `007`, `1e5`, 16자리 번호는 글자로
+  남는다. 숫자로 바꿨다가 다시 적었을 때 원래 글자와 똑같지 않은 값
+  (`999999999999999.99`, `1.50`)도 글자로 남는다.
+- XLSX의 숫자 셀은 **스프레드시트가 화면에 보여 주는 글자 그대로** 쓴다(운영자
+  결정 2026-11-12). 0 채움(`000`→`007`)·통화·퍼센트·천 단위·날짜·시각·누적
+  시간(`[h]:mm`)·서식 구역의 해석은 직접 만든 해석기가 아니라 SheetJS의 SSF
+  (`ssf`, Apache-2.0)가 한다 — Excel의 "CSV로 저장"과 같은 결과다. 그러므로
+  `hh:mm` 서식의 초처럼 화면에 보이지 않는 자리는 결과에도 없다. 예외는 둘이다:
+  - 기본(General) 서식 숫자는 유효숫자 15자리를 유지한다. SSF의 General은 기본
+    열 너비에 맞춰 줄이기 때문이다.
+  - 지역 설정을 따르는 내장 짧은 날짜 서식 14·22번은 `yyyy-mm-dd`(·`hh:mm`)로
+    쓴다. SSF는 미국식(`11/12/26`)으로 쓰는데, 변환된 파일은 어느 지역에서나
+    읽힌다.
+- 계산된 값이 없는 수식 셀이 있으면 변환을 거절한다. 이 리더는 수식을 계산하지
+  않으므로 빈칸으로 쓰면 변환된 척하는 빈 셀이 된다.
+- 첫 행은 **읽은 그대로** 쓴다. 헤더인지 아닌지는 변환이 정하지 않으며, 빈 칸에
+  이름을 지어 넣거나 공백을 다듬지 않는다. 워크북이 파일에서 생략한 빈 행도
+  제자리에 되살린다.
+- 표 변환은 셀을 **자르지 않는다**. 20,000자를 넘는 셀이 있으면 변환을 거절한다
+  (템플릿 batch는 placeholder 값이라 4,000자에서 자르지만, 변환 대상은 사용자의
+  데이터다).
+- zip 안의 이름은 실제로 쓴 이름 전체와 대소문자 구분 없이 비교해 겹치지 않게
+  한다.
+- **내용을 다른 형식으로 다시 쓰는 일**(PDF 본문 → Word, Word → PDF)은 변환이
+  아니다. 모델이 추출된 내용을 읽고 `create_document`로 다시 쓰며, 레이아웃이
+  복사되지 않고 다시 만들어진다고 말한다.
+
+### 14.3 언제 등록되는가
+
+`planGeneratedArtifactTool()`의 `registerFileConversion`. `generate` mode이고,
+이 turn에 변환이 읽을 수 있는 파일(이미지·PDF·xlsx·csv)이 하나라도 첨부됐을
+때만 tool을 보낸다. batch tool과 같은 이유다 — 쓸 대상이 없는 tool은 과금되는
+입력이고, 모델은 결국 없는 handle을 지어낸다. schema 비용은
+`FILE_CONVERSION_TOOL_DEFINITION_TOKENS`로 예약에 더한다.
+
+변환 대상은 **그 메시지에 첨부한 파일**이다. 앞선 메시지의 파일을 변환해
+달라는 요청에는 tool이 없으므로, `generate` 프롬프트가 "파일을 첨부해 다시
+보내 달라고 말하라, 못 한다고 말하지 말라"고 지시한다.
+
+게스트(`sign_in_required`)와 모든 `off` mode에는 등록하지 않는다.
+
+운영 스위치: 환경 변수 `CHAT_FILE_CONVERSION=off`이면 tool과 그 안내 문구가
+모두 빠진다. preflight와 chat route가 함께 읽는 `buildChatTurnSystemBlocks`
+한 곳에서만 읽으므로 견적과 실제 요청이 어긋나지 않는다. 기본은 켜짐이다 —
+새 지출도, 외부 전송도 없고 배포 없이 끌 수 있다.
+
+### 14.4 한도 (`FILE_CONVERSION_LIMITS`)
+
+| 항목 | 값 |
+|---|---|
+| source 항목 | 20 |
+| 만들어지는 PDF의 페이지 | 500 |
+| 이미지로 그리는 PDF 페이지 | 30 |
+| split 결과 파일 | 100 |
+| 입력 이미지 픽셀 | 6,000만 |
+| `pdf_to_images` dpi | 50~300, 기본 150 |
+| 표 변환 행 · 열 | 10,000 · 64 (PDF 표는 500 · 20) |
+| 결과 파일 크기 | 25 MB (`ARTIFACT_LIMITS.maxConvertedOutputBytes`) |
+
+결과 크기 상한이 §3의 5 MB보다 큰 것은 의도다. 5 MB는 모델이 앱에게
+**쓰게 할 수 있는** 양의 상한이고, 변환 결과는 사용자가 이미 올린 바이트의
+재배열이다. 25 MB는 요청 하나의 첨부 총량 상한과 같으므로, 변환이 요청이
+가져온 것보다 많이 저장할 수는 없다. 저장(`putArtifactObject`)과 다운로드
+route가 이 값을 함께 쓴다. 이미지를 PDF에 넣을 때는 A4 인쇄 품질(긴 변
+2,480px)에서 시작해, 상한을 넘으면 단계적으로 줄인다.
+
+존재하지 않는 페이지는 **거절한다**. 6쪽 파일에 대한 `1-9`를 조용히 6쪽으로
+줄이면 사용자가 말하지 않은 문서가 나간다.
+
+### 14.5 형식
+
+출력이 이미지일 수 있으므로 형식 표에 `png`·`jpg`·`webp`(kind `image`)가
+추가됐다. **모델이 저작하는 kind가 아니다** — `create_image`에 해당하는
+artifact tool은 없고, 이미지 artifact는 변환의 결과로만 생긴다(생성 이미지는
+`docs/policy/image-generation.md`의 별개 도메인). migration
+`20261112150000_message_artifact_image_formats`가 `format` CHECK를 넓힌다.
+
+### 14.6 보안과 실패
+
+- handle은 요청 계층이 이미 소유권을 확인해 읽어 둔 그 turn의 파일만
+  가리킨다(§13과 같은 map). 모델이 경로·URL·key를 보내면 schema에서 거절한다.
+- PDF 페이지는 PDFium의 WebAssembly 빌드(`@hyzyla/pdfium`)로 worker thread에서
+  그린다. CPU가 무거운 경로가 다른 요청을 멈추면 안 되기 때문이고, 90초 시간
+  제한이 있다. **pdf.js를 쓰지 않는다**: pdf.js는 네이티브 모듈
+  `@napi-rs/canvas`로 그리는데, 그 모듈을 불러온 worker를 종료하면 worker가 아니라
+  **프로세스 전체**가 접근 위반으로 죽었다(2026-11-12, 한 번에 worker 하나로도
+  재현). WebAssembly 엔진에는 죽을 네이티브 코드가 없어 시간 초과 때 worker를
+  멈춰도 안전하다. 자식 프로세스로 격리하는 방법은 쓰지 않는다 — 게이트가 닿는
+  코드에서 `node` 자식 프로세스 실행은 control-plane 분석(`lib/agentControlPlaneSlice.ts`)이
+  금지한다.
+- 암호가 걸린 PDF는 복사하지 않고 그렇게 말한다.
+- 실패는 §8·§9의 카드 규칙을 그대로 따른다: 덜 요청하면 되는 실패는
+  `limit_exceeded`, 다른 파일이나 다른 지시가 필요한 실패는 `spec_rejected`,
+  그 밖은 `generation_failed`. 실패 사유 문장에는 파일 내용이 들어가지 않는다.
+- 같은 지시와 같은 파일의 재호출은 `unchanged`다(hash에 각 handle이 가리킨
+  파일의 이름과 크기가 들어간다).
+
+### 14.7 아직 하지 않는 것
+
+- Word·Excel·PowerPoint를 **레이아웃 그대로** PDF로 바꾸는 일. 렌더링 엔진
+  (LibreOffice 등)이 서버에 필요하다.
+- HEIC 입력(첨부 형식에 없다), PDF 암호 설정·해제, PDF 압축.
+- 문서 본문 중간에 첨부 이미지를 넣는 block.
+- 앞선 메시지의 첨부를 handle로 가리키는 일.
+
+### 14.8 무엇을 테스트하는가
+
+- `tests/fileConversion.test.mjs`: 실제 바이트로 다섯 operation을 돌리고 결과를
+  parser로 다시 연다(페이지 수·크기·회전, zip 항목, 이미지 형식·픽셀, 표 값).
+  페이지 선택 문법, 없는 handle·틀린 형식·없는 페이지·읽을 수 없는 PDF 거절.
+- `tests/generatedArtifactToolPolicy.test.mjs`: 등록 조건, 프롬프트 문구,
+  운영 스위치.
+- `tests/server-contract/generated-artifact-collector.test.ts`: 저장·ordinal·
+  재호출·실패 카드·answer당 3개 상한·storage 실패.

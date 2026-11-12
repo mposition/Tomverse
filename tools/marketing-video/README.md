@@ -81,7 +81,24 @@ node make-feed-video.mjs <pack.json> <id> <out-dir>     # 4:5 feed version of th
   shape, with brands from `research-brands.json` and no run of five words from
   an ad. The raw ads are then deleted, so the call that writes copy sees only
   checked notes (docs/policy/marketing-automation.md §2).
-- The job writes words from `features.json` and pictures from
+- The Higgsfield image path reads its facts from the list an operator keeps in
+  Admin › Marketing › Settings › Ad facts (`MarketingFeatureFact`), fetched at
+  the start of a run from `/api/internal/marketing-features` with
+  `MARKETING_APP_URL` and `MARKETING_MEDIA_SUBMIT_SECRET` and kept as
+  `job/<day>/features.json`; the run report's `features` says `app` or
+  `repo:<reason>`. Admin's "Refresh from the site" asks one model call for
+  proposals from the FAQ, help centre, claims and switches; only a saved
+  proposal changes the list. When the app cannot answer, the job reads
+  `features.json` here, the list's seed.
+- The job writes words from `features.json`, which restates the FAQ's feature
+  answers by hand. When a feature claim is added to `lib/marketingClaims.ts`,
+  `tests/marketingHiggsfieldImagePath.test.mjs` fails until it has an entry
+  there, so a new feature reaches the ads (until 2026-11-12 it missed
+  conversation import, a registered claim, and save and share). A feature the
+  FAQ explains without a claim id, such as Smart Adaptive, is still added by
+  hand. An entry with `hold` (a preview, a switch that is off by default, or
+  copy the cards cannot keep yet) is never today's feature and no card may
+  rest on it; the owner removes `hold` once it is live. Pictures come from
   `library/library.json`: the logo, model marks (owner 2026-11-07) and AI-made
   photos. It can also use real captures from a source pack
   (`job/sources/<asset-id>/pack.json`, on the box only). `examples/` holds the

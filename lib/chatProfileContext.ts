@@ -29,6 +29,7 @@ import {
 } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
+import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
 
 /**
  * What an assistant profile contributes to one turn (C3c).
@@ -98,6 +99,8 @@ export type ChatProfileContext = {
     tools: AssistantToolPolicy | null;
     /** §22-shaped observation, content-free. */
     knowledgeChunkCount: number;
+    /** Which semantic steps shaped the knowledge selection (§9a), for the bundle. */
+    knowledgeSemanticSteps: { neighbours: boolean; rerank: boolean };
 };
 
 /** The turn no profile is bound to, which is every turn today. */
@@ -112,6 +115,7 @@ export const NO_PROFILE_CONTEXT: ChatProfileContext = {
     memoryPolicy: null,
     tools: null,
     knowledgeChunkCount: 0,
+    knowledgeSemanticSteps: { neighbours: false, rerank: false },
 };
 
 const refused = (reason: ProfileRuntimeRefusal): ChatProfileContext => ({
@@ -174,6 +178,8 @@ export async function buildChatProfileContext(input: {
     plan: ModelTier | null;
     /** What the caller's plan already permits. A profile intersects with it. */
     entitledTools: AssistantToolPolicy;
+    /** See `buildChatTurnContext`. */
+    semantic?: SemanticCallMode | { neighbours: SemanticCallMode; rerank: SemanticCallMode };
 }): Promise<ChatProfileContext> {
     if (!input.profileVersionId) return NO_PROFILE_CONTEXT;
     if (!input.userId) return refused("guest");
@@ -267,6 +273,7 @@ export async function buildChatProfileContext(input: {
         userId: input.userId,
         fileIds: knowledgeFileIds,
         query: input.query,
+        semantic: input.semantic,
     });
 
     const tools = resolveProfileTools({
@@ -311,5 +318,6 @@ export async function buildChatProfileContext(input: {
         memoryPolicy: storedMemoryPolicy(version.memoryPolicy),
         tools,
         knowledgeChunkCount: selection.chunks.length,
+        knowledgeSemanticSteps: selection.semanticSteps ?? { neighbours: false, rerank: false },
     };
 }

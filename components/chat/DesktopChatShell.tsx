@@ -98,6 +98,7 @@ type PromptPayload = {
   submittedAtMonotonicMs?: number;
   preparationTimings?: import("@/lib/responseLatencyCore").ClientLatencyStages;
   preparationReadyAtMonotonicMs?: number;
+  sourcePassages?: string;
   preparedLocationIntent?: ChatPanelLocationIntent;
   routerLocationTurn?: RouterLocationTurn;
   id: string;
@@ -233,6 +234,7 @@ export type DesktopChatShellProps = {
   importedMessages?: Message[];
   /** Provenance and paging for that transcript (`ChatMessageList`). */
   importedTranscript?: {
+    contextCard?: React.ReactNode;
     status: "available" | "deleted" | "locked";
     provider: string;
     importedAt: string;
@@ -1181,7 +1183,7 @@ export function DesktopChatShell({
             // No recent-conversation cards here: the sidebar next to this
             // screen already lists the same conversations.
             <div className="absolute inset-0 z-10 overflow-y-auto bg-zinc-100/80 dark:bg-zinc-950/80">
-              {studio && !singleTranscript ? <ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} starterGallery={starterGallery} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /> : <ChatWelcomeScreen starterGallery={starterGallery} />}
+              {studio && !singleTranscript ? <ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} starterGallery={starterGallery} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /> : <ChatWelcomeScreen product={currentProduct === "chat" ? "chat" : "review"} starterGallery={starterGallery} />}
             </div>
           )}
           {selectedModels.length === 0 && (

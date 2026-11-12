@@ -15,7 +15,12 @@ competitor's ad (docs/policy/marketing-automation.md §2).
 
 - Today's date and **today's feature** (picked by code: the feature whose last
   card is oldest, never yesterday's).
-- `features.json`: what a card may say.
+- `features.json`: what a card may say. A feature with `hold` is not in the
+  ads yet: never mention it, not even beside today's feature. A feature's `copy`
+  says what its copy may and may not claim, and its `disclosure` stands in
+  every concept of that feature, and every concept that says anything about
+  it (cite it in `factRefs`), word for word, as a `label`, translated with the
+  exact text it gives for each language.
 - The scene ideas used in the last 14 days: use none of them again.
 - The provider logo files you may name (`public/model-icons/<name>.png`).
 - You may read the newest checked research notes in `job/research-notes/` with
@@ -27,6 +32,30 @@ draft or layout (owner 2026-11-08).
 
 {{GUIDE}}
 
+## Who the ad is for (owner 2026-11-12)
+
+The owner's verdict on the cards so far: too vague ("뜬구름 잡는"), and nearly
+all about comparing answers. Write for a stranger scrolling past:
+
+- They have never heard of Tomverse. Most already use one AI app, or none. They
+  give the picture two seconds.
+- Sell one concrete, everyday task that today's feature does for them, shown
+  with the real words a person would type or see ("Is this clause in my lease
+  normal?", "Turn these notes into a polite email to my landlord") and the
+  result they get. Pick a moment people recognise from their own week: work,
+  family, money, a move, a trip, a hobby.
+- No abstract metaphor (threads, maps of ideas, puzzles, scales), no feature
+  mechanics (counts, "consensus", "five checks") and no product jargon as the
+  point. A product name ("Smart Adaptive", "answer analysis") may stand on a
+  screen or in the subhead, never as the headline's whole message.
+- The headline says what the reader gets, in plain words, and works alone:
+  someone who reads only the headline knows it is an AI app and what it does
+  for them. The headline or the subhead says "AI" or names a model.
+- Every concept has exactly one `cta` that tells the reader what to do next.
+- Comparing models side by side is the subject of the `review` and `analysis`
+  features only. On any other feature, the picture is about that feature's
+  task, not about comparing answers.
+
 ## What to write
 
 Two or three concepts for today's feature that differ from each other in scene
@@ -34,21 +63,24 @@ and device. Each one:
 
 - `id`: `c1`, `c2`, `c3`.
 - `feature`: today's feature.
-- `device`: the scene idea in one line (10-160 characters), e.g. "a commuter
-  on a train compares three answers on a phone".
+- `device`: the scene idea in one line (10-160 characters), e.g. "a renter on
+  the bus asks an AI on her phone whether a clause in her lease is normal".
 - `prompt_en`: the full image prompt for `gpt_image_2_6`, 4:5 portrait, 200 to
   6000 characters. Describe the photo, the people, the light, the composition,
   where each piece of text sits and what it says word for word, and the
   provider logos to place (the reference files are attached to the call). Write
   it so the picture works without the Tomverse logo: the code adds a band at
-  the bottom. The image model draws or follows every word it reads, even after
+  the bottom. Every word the picture shows is one of `texts`: props (papers,
+  books, maps, signs) carry no other lettering, and a quoted answer is drawn
+  without quotation marks around it. The image model draws or follows every word it reads, even after
   "no", so these never appear in it, not even to forbid them: "Tomverse" (not
   "no Tomverse logo", not "Tomverse blue"), purple, violet, magenta, lavender,
   lilac, fuchsia, "lorem ipsum", and any web address. Say "#155dfb blue" and
   "real sentences".
 - `texts`: every piece of text the picture shows, exactly, in English, in
   reading order, at most 12, each `{"role", "text"}`:
-  - `headline` (one, at most 70 characters), `subhead`, `cta`, `screen` (words
+  - `headline` (one, at most 70 characters), `subhead`, `cta` (exactly one),
+    `screen` (words
     on a phone or laptop screen), `answer` (an AI answer on a screen), `label`
     (a name tag, a chip, a receipt line). Every text but the headline is at
     most 400 characters. A picture that needs more than 12 texts shows too

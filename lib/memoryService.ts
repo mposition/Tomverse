@@ -1,3 +1,4 @@
+import { readableContinuationSourceTitle } from "@/lib/continuationDisplayTitle";
 import "server-only";
 import { memoryCanonicalKey, memoryConflictKey, isMemoryCanonicalKey } from "@/lib/memoryConflictCore";
 
@@ -102,7 +103,7 @@ async function loadOwnedMemory(
                     sourceType: true,
                     manualContent: true,
                     externalMessage: {
-                        select: { role: true, externalConversationId: true },
+                        select: { role: true, externalConversationId: true, conversation: {select:{userId:true, password:true, title:true}} },
                     },
                 },
             },
@@ -141,6 +142,8 @@ const serializeMemory = (
         manualContent: evidence.manualContent,
         externalConversationId:
             evidence.externalMessage?.externalConversationId ?? null,
+        sourceTitle: evidence.externalMessage?.conversation?.userId === item.userId
+            ? readableContinuationSourceTitle(evidence.externalMessage.conversation) : null,
     })),
 });
 
@@ -213,6 +216,7 @@ export async function listMemories(
                             select: {
                                 role: true,
                                 externalConversationId: true,
+                                conversation: {select:{userId:true, password:true, title:true}},
                             },
                         },
                     },
