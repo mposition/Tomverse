@@ -16,8 +16,6 @@ import {
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import {
   AmuxLegacyCardPanel,
-  useAmuxLegacyCardRead,
-  type AmuxLegacyCardRead,
   isAmuxRemakeOnlyCardKind } from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxOwnerQueueEngineeringItems } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
 import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
@@ -105,7 +103,7 @@ export const useAmuxOwnerQueueElapsed = (generatedAt: string) => {
  */
 export function AmuxOwnerQueueDecision({
   item, controller, canInspectCards, index, total, generatedAt, navLocked, advance,
-  onAdvanceChange, onPrevious, onNext, onAnswered, initialLegacyCard = null,
+  onAdvanceChange, onPrevious, onNext, onAnswered,
   canWriteEngineering = false, onEngineeringChanged,
 }: {
   item: AmuxOwnerQueueItem;
@@ -122,8 +120,6 @@ export function AmuxOwnerQueueDecision({
   onPrevious: (() => void) | null;
   onNext: (() => void) | null;
   onAnswered: () => void;
-  /** The legacy panel shown before this card's own read lands (tests). */
-  initialLegacyCard?: AmuxLegacyCardRead | null;
   /** `engineering-agent:write`: the card's engineering items show their buttons. */
   canWriteEngineering?: boolean;
   /** An engineering action was recorded: read this card again without leaving it. */
@@ -156,10 +152,13 @@ export function AmuxOwnerQueueDecision({
   // Task) is remade or closed here, from the card detail read the execution
   // board uses, so the owner does not open the full card first. Owner only.
   // Any stopped v22 Task has the same panel (owner decision 2026-11-12): the
-  // owner completes, remakes or closes it whatever stopped it, so the card
-  // detail is read for every card here once its review is read.
-  const legacyRead = useAmuxLegacyCardRead(item.taskId,
-    canInspectCards && group !== "question" && reviewMatches, initialLegacyCard);
+  // owner completes, remakes or closes it whatever stopped it. The panel comes
+  // from the card detail the review already reads for its attempt metadata, so
+  // no card costs a second detail read.
+  const ownerExecution = controller.ownerExecution;
+  const legacyRead = canInspectCards && group !== "question" && reviewMatches &&
+    (ownerExecution.state === "ready" || ownerExecution.state === "unavailable") ?
+    ownerExecution.legacyCard ?? null : null;
   const legacyCard = legacyRead?.view ? { revision: legacyRead.revision, view: legacyRead.view } : null;
   // Once the review is read, the legacy panel stands in for a decision only
   // when none is open and the card is one no decision ever opens on.

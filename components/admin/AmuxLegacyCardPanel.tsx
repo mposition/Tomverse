@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { useAdminMessages } from "./AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
@@ -88,39 +88,17 @@ const isLegacyCardView = (value: unknown): value is AmuxLegacyCardView => {
 export type AmuxLegacyCardRead = { revision: number; view: AmuxLegacyCardView | null };
 
 /**
- * The legacy panel of one card, from the same owner-only card detail read the
- * execution board opens (`/api/admin/amux/execution-view?view=detail`). Null
- * when it could not be read: the caller then shows no panel. Read only.
+ * The legacy panel in one card detail answer
+ * (`/api/admin/amux/execution-view?view=detail`) and the revision it was read
+ * at. Null when the answer is not this card's: the caller then shows no panel.
+ * The owner review already reads that answer for the card on screen, so the
+ * panel takes it from there and adds no read of its own.
  */
-export async function readAmuxLegacyCardForTask(taskId: string,
-  fetcher: typeof adminFetch = adminFetch): Promise<AmuxLegacyCardRead | null> {
-  try {
-    const response = await fetcher(
-      `/api/admin/amux/execution-view?view=detail&taskId=${encodeURIComponent(taskId)}`, { cache: "no-store" });
-    if (!response.ok) return null;
-    const body = await response.json() as Record<string, unknown> | null;
-    if (!body || body.id !== taskId || !Number.isSafeInteger(body.revision)) return null;
-    return { revision: body.revision as number, view: isLegacyCardView(body.legacyCard) ? body.legacyCard : null };
-  } catch { return null; }
-}
-
-/**
- * Reads the legacy panel of the card on screen when `enabled` (the owner).
- * A read for an earlier card is dropped: only the answer for `taskId` is kept.
- * `initial` is what is shown before the read lands.
- */
-export function useAmuxLegacyCardRead(taskId: string, enabled: boolean,
-  initial: AmuxLegacyCardRead | null = null, fetcher?: typeof adminFetch): AmuxLegacyCardRead | null {
-  const [read, setRead] = useState<{ taskId: string; read: AmuxLegacyCardRead | null }>({ taskId, read: initial });
-  useEffect(() => {
-    if (!enabled) return;
-    let current = true;
-    void readAmuxLegacyCardForTask(taskId, fetcher).then((result) => {
-      if (current) setRead({ taskId, read: result });
-    });
-    return () => { current = false; };
-  }, [taskId, enabled, fetcher]);
-  return enabled && read.taskId === taskId ? read.read : null;
+export function amuxLegacyCardReadOf(taskId: string, body: unknown): AmuxLegacyCardRead | null {
+  if (typeof body !== "object" || body === null) return null;
+  const detail = body as Record<string, unknown>;
+  if (detail.id !== taskId || !Number.isSafeInteger(detail.revision)) return null;
+  return { revision: detail.revision as number, view: isLegacyCardView(detail.legacyCard) ? detail.legacyCard : null };
 }
 
 export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged, fetcher, reauthReturnPath }: {

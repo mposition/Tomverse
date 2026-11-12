@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type {
-  AmuxOwnerReviewController,
-  AmuxReviewDetail,
+import {
+  readAmuxOwnerExecutionMetadata,
+  type AmuxOwnerReviewController,
+  type AmuxReviewDetail,
 } from "@/components/admin/AdminAmuxRoutingPanel";
-import { readAmuxLegacyCardForTask, type AmuxLegacyCardRead } from "@/components/admin/AmuxLegacyCardPanel";
+import { amuxLegacyCardReadOf, type AmuxLegacyCardRead } from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxOwnerQueueDecision } from "@/components/admin/AmuxOwnerQueueDecision";
 import { AmuxOwnerQueueView, isAmuxOwnerQueueRead } from "@/components/admin/AmuxOwnerQueueScreen";
 import type { AmuxOwnerQueueItem, AmuxOwnerQueueRead } from "@/lib/amux/ownerQueueCore";
@@ -168,10 +169,13 @@ const reviewFor = (escalationId: string, overrides: Partial<AmuxReviewDetail> = 
 
 const decision = (card: AmuxOwnerQueueItem, ctl: AmuxOwnerReviewController, canInspectCards = true,
   legacy: AmuxLegacyCardRead | null = null) =>
+  // The panel rides the review's own card detail read, bound or not.
   renderToStaticMarkup(
-    <AmuxOwnerQueueDecision item={card} controller={ctl} canInspectCards={canInspectCards} index={1} total={4}
+    <AmuxOwnerQueueDecision item={card}
+      controller={legacy === null ? ctl : { ...ctl, ownerExecution: { state: "unavailable", legacyCard: legacy } }}
+      canInspectCards={canInspectCards} index={1} total={4}
       generatedAt="2026-11-08T03:00:00.000Z" navLocked={false} advance onAdvanceChange={() => {}}
-      onPrevious={null} onNext={() => {}} onAnswered={() => {}} initialLegacyCard={legacy} />);
+      onPrevious={null} onNext={() => {}} onAnswered={() => {}} />);
 
 test("a decision card explains why it stopped, offers the next-card checkbox on and links to the full card", () => {
   const html = decision(items[0], controller());
@@ -585,26 +589,31 @@ test("a no-PR card with no choice at all does not say it can be blocked", () => 
   assert.doesNotMatch(html, /data-testid="amux-legacy-card"/);
 });
 
-test("the legacy panel reads the execution board's card detail and keeps only a legacy view", async () => {
-  const sent: string[] = [];
-  const answer = (body: unknown, status = 200) => (async (url: RequestInfo | URL) => {
-    sent.push(String(url));
-    return Response.json(body, { status });
-  }) as unknown as typeof fetch;
-  assert.deepEqual(await readAmuxLegacyCardForTask("task 1", answer({ id: "task 1", revision: 9,
-    legacyCard: preV22Legacy.view })), preV22Legacy);
-  assert.deepEqual(sent, ["/api/admin/amux/execution-view?view=detail&taskId=task%201"]);
-  // Another card's answer, a malformed view or a failure: no panel.
-  assert.equal(await readAmuxLegacyCardForTask("task-1", answer({ id: "task-2", revision: 9,
-    legacyCard: preV22Legacy.view })), null);
-  assert.deepEqual(await readAmuxLegacyCardForTask("task-1", answer({ id: "task-1", revision: 9,
-    legacyCard: null })), { revision: 9, view: null });
-  assert.deepEqual(await readAmuxLegacyCardForTask("task-1", answer({ id: "task-1", revision: 9,
-    legacyCard: { kind: "something_else", closeRefusal: null, idea: { state: "refused", code: "x" } } })),
+test("the legacy panel comes out of the card detail the review reads and keeps only a legacy view", async () => {
+  assert.deepEqual(amuxLegacyCardReadOf("task 1", { id: "task 1", revision: 9, legacyCard: preV22Legacy.view }),
+    preV22Legacy);
+  // Another card's answer, a malformed view or no answer: no panel.
+  assert.equal(amuxLegacyCardReadOf("task-1", { id: "task-2", revision: 9, legacyCard: preV22Legacy.view }), null);
+  assert.deepEqual(amuxLegacyCardReadOf("task-1", { id: "task-1", revision: 9, legacyCard: null }),
+    { revision: 9, view: null });
+  assert.deepEqual(amuxLegacyCardReadOf("task-1", { id: "task-1", revision: 9,
+    legacyCard: { kind: "something_else", closeRefusal: null, idea: { state: "refused", code: "x" } } }),
   { revision: 9, view: null });
-  assert.equal(await readAmuxLegacyCardForTask("task-1", answer({ error: "not_found" }, 404)), null);
-  assert.equal(await readAmuxLegacyCardForTask("task-1",
-    (async () => { throw new Error("offline"); }) as unknown as typeof fetch), null);
+  assert.equal(amuxLegacyCardReadOf("task-1", { error: "not_found" }), null);
+  assert.equal(amuxLegacyCardReadOf("task-1", null), null);
+
+  // One read serves both: the review's attempt metadata read hands the panel
+  // on, whether or not the metadata itself could be bound to the review.
+  const sent: string[] = [];
+  const read = await readAmuxOwnerExecutionMetadata({
+    review: reviewFor("esc-1"), controller: new AbortController(), isCurrent: () => true,
+    fetcher: async (url) => {
+      sent.push(String(url));
+      return Response.json({ id: "task-1", revision: 8, attempts: [], legacyCard: preV22Legacy.view });
+    },
+  });
+  assert.deepEqual(sent, ["/api/admin/amux/execution-view?view=detail&taskId=task-1"]);
+  assert.deepEqual(read, { state: "unavailable", legacyCard: { revision: 8, view: preV22Legacy.view } });
 });
 
 // Owner decision 2026-11-10: a run whose CLI usage was never fully reported
