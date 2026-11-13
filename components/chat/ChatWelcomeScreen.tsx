@@ -64,7 +64,8 @@ export function ChatWelcomeScreen({
   recentConversations = [],
   onOpenRecentConversations,
   recentDisclosureRef,
-  starterGallery, product,
+  starterGallery,
+  product,
 }: ChatWelcomeScreenProps) {
   const { data: session } = useSession();
   const { t, lang } = useLanguage();
@@ -93,6 +94,21 @@ export function ChatWelcomeScreen({
         >
           {welcomeGreeting}
         </p>
+        {session?.user && canImport && product === "chat" && (
+          <Link
+            onClick={() => rememberSettingsReturnProduct(product)}
+            href="/settings/imports/new"
+            data-testid="chat-import-entry"
+            className="mt-4 flex min-h-16 w-full items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 text-left text-zinc-900 transition hover:border-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+          >
+            <FolderInput size={20} className="shrink-0 text-blue-600 dark:text-blue-400" aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <strong className="block text-sm">{t("journey.entry")}</strong>
+              <span className="block text-xs text-zinc-600 dark:text-zinc-300">{t("journey.entryHint")}</span>
+            </span>
+            <ArrowRight size={17} className="shrink-0" aria-hidden="true" />
+          </Link>
+        )}
         {recentCount > 0 && onOpenRecentConversations && (
           <button
             ref={recentDisclosureRef}
@@ -108,13 +124,6 @@ export function ChatWelcomeScreen({
           </button>
         )}
         {starterGallery}
-        {session?.user && canImport && product === "chat" && <Link onClick={() => rememberSettingsReturnProduct(product)} href="/settings/imports/new" data-testid="chat-import-entry"
-          className="mt-5 flex w-full max-w-md items-center gap-3 rounded-2xl border border-zinc-200 p-4 text-left transition hover:border-blue-400 dark:border-zinc-700">
-          <FolderInput size={20} className="shrink-0 text-blue-600" aria-hidden="true" />
-          <span className="flex-1"><strong className="block text-sm">{t("journey.entry")}</strong>
-            <span className="block text-xs text-zinc-500">{t("journey.entryHint")}</span></span>
-          <ArrowRight size={17} aria-hidden="true" />
-        </Link>}
       </div>
     </div>
   );
