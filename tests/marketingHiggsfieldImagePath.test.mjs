@@ -99,11 +99,12 @@ function fakeCli(script) {
   const cli = (args) => {
     calls.push(args);
     if (args[1] === "wait" && unknownWaitFlag(args)) return { status: 1, stdout: "", stderr: `unknown flag: ${unknownWaitFlag(args)}`, timedOut: false };
-    const answer = script[args[1]];
+    // `upload create` is its own command; every other one is `generate <sub>`.
+    const answer = args[0] === "upload" ? script.upload : script[args[1]];
     const value = typeof answer === "function" ? answer(args, calls) : answer;
     return value ?? { status: 1, stdout: "", stderr: "unexpected", timedOut: false };
   };
-  return { cli, calls, count: (sub) => calls.filter((args) => args[1] === sub).length };
+  return { cli, calls, count: (sub) => calls.filter((args) => (sub === "upload" ? args[0] === "upload" : args[0] !== "upload" && args[1] === sub)).length };
 }
 const ok = (value) => ({ status: 0, stdout: JSON.stringify(value), stderr: "", timedOut: false });
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0]);
@@ -141,6 +142,62 @@ test("a picture is priced, recorded, created, waited for and written", async () 
     const create = fake.calls.find((args) => args[1] === "create");
     assert.deepEqual(create.slice(0, 7), ["generate", "create", "gpt_image_2_6", "--prompt", create[4], "--aspect_ratio", "4:5"]);
     assert.ok(!create.includes("--wait"), "create returns the job id at once; waiting is a separate call");
+  } finally {
+    rmSync(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("a reference picture is uploaded once a day and passed to cost and create by its upload id", async () => {
+  const jobDir = tempJob();
+  try {
+    const logo = join(jobDir, "claude.png");
+    const base = join(jobDir, "base.png");
+    writeFileSync(logo, Buffer.concat([PNG, Buffer.from("logo")]));
+    writeFileSync(base, Buffer.concat([PNG, Buffer.from("base")]));
+    const copy = join(jobDir, "claude-copy.png");
+    writeFileSync(copy, readFileSync(logo));
+    let next = 0;
+    const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"];
+    let job = 0;
+    const fake = fakeCli({
+      // The shape `upload list --json` lists on the box (2026-11-13).
+      upload: () => ok({ id: ids[next++], type: "image", url: "https://cdn.example/u.png", created_at: "2026-11-13T00:00:00Z" }),
+      cost: ok({ credits: 0.25 }),
+      create: () => ok({ id: `job-${++job}` }),
+      wait: (args) => ok({ id: args[2], status: "completed", result_url: `https://cdn.example/${args[2]}.png` }),
+    });
+    const args = { prompt: "scene", jobDir, day: DAY, env: capEnv("5"), cli: fake.cli, fetchBytes: async () => PNG };
+    assert.equal((await makeImage({ ...args, references: [logo], out: join(jobDir, "a.png"), label: "c1/en/make" })).ok, true);
+    // The same logo again, a byte-identical copy of it, and a new picture.
+    assert.equal((await makeImage({ ...args, references: [base, copy], out: join(jobDir, "b.png"), label: "c1/ko/edit" })).ok, true);
+    assert.equal(fake.count("upload"), 2, "the logo once and the base once; the copy has the logo's bytes");
+    for (const sub of ["cost", "create"]) {
+      const sent = fake.calls.filter((call) => call[0] === "generate" && call[1] === sub).map((call) => call.filter((_, index) => call[index - 1] === "--image-references"));
+      assert.deepEqual(sent, [[ids[0]], [ids[1], ids[0]]], `${sub} gets upload ids, never a path the CLI would upload again`);
+    }
+    const entries = readLedger(ledgerPath(jobDir, DAY)).entries;
+    assert.deepEqual(entries.map((entry) => entry.status), ["done", "done"]);
+
+    // Another day uploads again, so an upload deleted in Higgsfield's library is not reused.
+    await makeImage({ ...args, day: "20261109", references: [logo], out: join(jobDir, "c.png"), label: "c1/en/make" });
+    assert.equal(fake.count("upload"), 3);
+  } finally {
+    rmSync(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("a reference that cannot be uploaded stops the picture before it is priced or recorded", async () => {
+  const jobDir = tempJob();
+  try {
+    const logo = join(jobDir, "logo.png");
+    writeFileSync(logo, PNG);
+    const fake = fakeCli({ upload: { status: 1, stdout: "", stderr: "unauthorized", timedOut: false }, cost: ok({ credits: 0.25 }) });
+    const made = await makeImage({ prompt: "scene", references: [logo], out: join(jobDir, "x.png"), label: "c1/en/make", jobDir, day: DAY, env: capEnv("5"), cli: fake.cli, fetchBytes: async () => PNG });
+    assert.equal(made.reason, "reference_upload_failed");
+    assert.equal(fake.count("cost"), 0);
+    assert.equal(readLedger(ledgerPath(jobDir, DAY)).entries.length, 0);
+    const missing = await makeImage({ prompt: "scene", references: [join(jobDir, "none.png")], out: join(jobDir, "y.png"), label: "c1/en/make", jobDir, day: DAY, env: capEnv("5"), cli: fake.cli, fetchBytes: async () => PNG });
+    assert.equal(missing.reason, "reference_unreadable");
   } finally {
     rmSync(jobDir, { recursive: true, force: true });
   }
