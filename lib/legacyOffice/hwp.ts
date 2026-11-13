@@ -159,9 +159,13 @@ export function extractHwpText(bytes: Uint8Array, budget: LegacyParseBudget): st
 /* HWPX                                                                       */
 /* ------------------------------------------------------------------------ */
 
+/**
+ * Decode the entities in one run of character data. The caller passes only the
+ * text between two tags (it cuts at the next `<`), so there is no markup to strip;
+ * the result is plain text for the model, never HTML.
+ */
 const decodeXmlText = (value: string) =>
   value
-    .replace(/<[^>]+>/g, "")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
