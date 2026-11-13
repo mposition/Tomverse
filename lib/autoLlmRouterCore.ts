@@ -197,6 +197,7 @@ export const autoLlmRouterCandidates = (
         const nativeSearchEnabled = fileContext.webSearchRequested && nativeSearchIsDispatchable(search);
         const canCreateFiles = model.usageClass !== "deep-research" && planGeneratedArtifactTool({
             modelId: model.id, provider: model.provider,
+            usageClass: model.usageClass, fileToolsOverride: model.fileToolsOverride ?? null,
             isAuthenticated: fileContext.isAuthenticated, canPersist: fileContext.canPersist,
             nativeSearchEnabled, nativeSearchForced: nativeSearchEnabled && search.canForceExecution,
             conversationKind: "chat",

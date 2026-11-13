@@ -122,6 +122,28 @@ test("a known file request without a usable model pick uses a capable eligible f
   assert.equal(applyLlmModelPick(manual, capable[0], { required: true, capableModelIds: capable }), manual);
 });
 
+test("a router that was asked and failed hands the turn to the requested model, not the rule's cheapest fit", () => {
+  // 2026-11-13: the router timed out on a two-photo PDF request and the rule's
+  // choice, a model with no file tools, answered it.
+  const original = selectAutoModel(input());
+  const requested = original.record.eligibleModelIds.find(id => id !== original.modelId);
+  assert.ok(requested, "the fixture needs a second eligible model");
+  const routed = applyLlmModelPick(original, null, { required: false, capableModelIds: [] }, requested);
+  assert.equal(routed.modelId, requested);
+  assert.equal(routed.record.selectedModelId, requested);
+  assert.equal(routed.record.selectionReason, "fallback_order");
+  assert.ok(routed.fallbackCandidateModelIds.includes(original.modelId));
+  assert.ok(!routed.fallbackCandidateModelIds.includes(requested));
+  // A model the filters refused is never chosen this way, and a real pick wins.
+  assert.equal(applyLlmModelPick(original, null, undefined, "not-eligible"), original);
+  assert.equal(applyLlmModelPick(original, null, undefined, null), original);
+  const picked = original.record.eligibleModelIds.find(id => id !== original.modelId && id !== requested) ?? original.modelId;
+  assert.equal(applyLlmModelPick(original, picked, undefined, requested).modelId, picked);
+  // Not Auto: nothing changes.
+  const manual = selectAutoModel(input({ conversation: autoConversation({ selectionMode: "manual" }) }));
+  assert.equal(applyLlmModelPick(manual, null, undefined, requested), manual);
+});
+
 test("file-capable fallback preserves an unchanged exploration choice and sticky telemetry", () => {
   const original = selectAutoModel(input());
   assert.equal(original.routed, true);

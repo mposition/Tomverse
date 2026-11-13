@@ -740,3 +740,34 @@ test("follow-up location and execution decisions share one request but keep thei
     assert.ok(!JSON.stringify(event).includes(authored));
   } finally { generateRouterResult = original; }
 });
+
+test("the router's outcome reaches the caller, and a resumed location turn replays it instead of hiding a failure", async () => {
+  // A failed call means the turn goes to the requested model, not the rule's
+  // choice (applyLlmModelPick). A location consent resumes in a second request
+  // that makes no call, so the outcome has to travel in the continuation.
+  const log = mock.method(console, "info", () => {});
+  const digest: string[] = [];
+  const locationFusion = { authoredText: "near me?", searchUtcDate: "2026-11-13", resume: null,
+    onRouterDigest: (value: string) => { digest.push(value); } };
+  try {
+    const outcomes: string[] = [];
+    routerFailure = Object.assign(new Error("down"), { name: "AI_APICallError", statusCode: 503 });
+    assert.equal(await pick(undefined, true, { prompt: "near me?", locationFusion,
+      onCallOutcome: (outcome: string) => outcomes.push(outcome) }), null);
+    routerFailure = null;
+    assert.deepEqual(outcomes, ["error"]);
+    const calls = routerRequests.length;
+
+    const resumed: string[] = [];
+    assert.equal(await pick(undefined, true, { prompt: "near me?", onCallOutcome: (outcome: string) => resumed.push(outcome),
+      locationFusion: { ...locationFusion, resume: { traceId: "first", routerDigest: digest[0], pick: null, routerOutcome: "error" } } }), null);
+    assert.deepEqual(resumed, ["error"]);
+    assert.equal(routerRequests.length, calls, "a resume makes no second call");
+
+    // A continuation sealed before the field existed resumes as a turn the router never saw.
+    const legacy: string[] = [];
+    await pick(undefined, true, { prompt: "near me?", onCallOutcome: (outcome: string) => legacy.push(outcome),
+      locationFusion: { ...locationFusion, resume: { traceId: "first", routerDigest: digest[0], pick: null } } });
+    assert.deepEqual(legacy, []);
+  } finally { routerFailure = null; log.mock.restore(); }
+});

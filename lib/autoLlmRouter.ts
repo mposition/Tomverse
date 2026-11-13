@@ -440,6 +440,13 @@ export async function pickAutoModelWithLlm(input: {
      * session memory hold only turns a chat model answered. Absent is true.
      */
     recordDecision?: Promise<boolean> | ((pick: AutoLlmRouterPick | null) => Promise<boolean>);
+    /**
+     * Told the call's outcome once the router model was actually asked. Not
+     * called when no call was made (no router model, too few candidates, a
+     * refused budget): a null pick from a call that timed out is a failure the
+     * caller treats differently from a turn the router never looked at.
+     */
+    onCallOutcome?: (outcome: string) => void;
 }): Promise<RouterLocationPick | null> {
     const [configuredModelId, tunables] = await Promise.all([
         readAutoLlmRouterModelId(), readAutoRouterTunables(),
@@ -510,7 +517,15 @@ export async function pickAutoModelWithLlm(input: {
         input.locationFusion.onRouterDigest(digest);
         // No hold, model call or telemetry replay. The caller also refuses a
         // configuration change if the live candidate set became empty.
-        if (input.locationFusion.resume) return input.locationFusion.resume.routerDigest === digest ? input.locationFusion.resume.pick : null;
+        if (input.locationFusion.resume) {
+            if (input.locationFusion.resume.routerDigest !== digest) return null;
+            // The call was made on the first request; its outcome travels with
+            // the pick so a failure is still a failure on resume.
+            if (input.locationFusion.resume.routerOutcome) {
+                input.onCallOutcome?.(input.locationFusion.resume.routerOutcome);
+            }
+            return input.locationFusion.resume.pick;
+        }
     }
     if (worstCase !== null && input.verifyPreparedContext && !(await input.verifyPreparedContext())) return null;
     const reservedAt = new Date();
@@ -528,6 +543,7 @@ export async function pickAutoModelWithLlm(input: {
     const startedAt = Date.now();
     const { outcome, pick, usage, failure, imageDecision, searchQueries, simpleLookup, requiresLocation } = await callPreparedAutoLlmRouter(call, request);
     if (imageDecision) input.onImageDecision?.(imageDecision);
+    input.onCallOutcome?.(outcome);
     const latencyMs = Date.now() - startedAt;
     if (prices && usage?.inputTokens !== undefined && usage.outputTokens !== undefined) {
         const actual = callCostMicroUsd({

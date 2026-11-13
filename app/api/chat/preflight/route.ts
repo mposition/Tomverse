@@ -445,6 +445,8 @@ export async function POST(request: Request) {
                 reserveLocationInput: true,
                 modelId: model.id,
                 provider: model.provider,
+                usageClass: model.usageClass,
+                fileToolsOverride: model.fileToolsOverride ?? null,
                 isDeepResearchTurn: model.usageClass === "deep-research",
                 isAuthenticated: Boolean(session?.user?.id),
                 canPersist: canPersistTurn,
