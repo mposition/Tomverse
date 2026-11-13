@@ -3,7 +3,8 @@ import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext, type AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
-import { NotFoundBody } from "@/components/NotFoundContent";
+import { NotFoundBody, notFoundCopy } from "@/components/NotFoundContent";
+import { SUPPORTED_LANGUAGES } from "@/lib/language";
 import { HELP_CENTRE_PATH } from "@/lib/localizedHelpHref";
 import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 
@@ -73,4 +74,31 @@ test("a 404 that may be the account's fault offers the switch and says so", () =
   assert.match(html, new RegExp(SWITCH_ACCOUNT_LABEL));
   // Nothing names the console, a role, or an allowlist.
   assert.doesNotMatch(html, /admin console|administrat/i);
+});
+
+test("a Korean document renders the whole 404, account switch included, in Korean", () => {
+  const html = renderToStaticMarkup(
+    <AppRouterContext.Provider value={ssrRouter}>
+      <NotFoundBody
+        signInHref="/auth/signin?callbackUrl=%2Fadmin%2Foverview&reason=switch-account"
+        language="ko"
+      />
+    </AppRouterContext.Provider>
+  );
+  const ko = notFoundCopy.ko;
+  for (const text of [ko.title, ko.accountDescription, ko.home, ko.workspace, ko.helpCentre, ko.support, ko.switchAccount]) {
+    assert.ok(html.includes(text), text);
+  }
+  assert.match(html, /답변 비교 화면으로 이동/);
+  assert.ok(!html.includes("couldn&#x27;t find"));
+  assert.ok(!html.includes(SWITCH_ACCOUNT_LABEL));
+  assert.match(html, new RegExp(`href="${REVIEW_WORKSPACE_PATH}"`));
+});
+
+test("every supported language has its own 404 copy", () => {
+  for (const language of SUPPORTED_LANGUAGES) {
+    const copy = notFoundCopy[language];
+    assert.ok(copy, language);
+    for (const value of Object.values(copy)) assert.ok(value.trim(), language);
+  }
 });
