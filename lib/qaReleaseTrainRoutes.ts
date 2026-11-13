@@ -172,7 +172,7 @@ export async function handleQaReleaseTrain(request: Request, env: Readonly<Recor
       return { status: 200, body: { askedAt: advice?.askedAt ?? null, saturation: admission.state.saturation, budget: admission.state.capacity } };
     }
     if (input.phase === "ci_advice") {
-      // Display only: no revision check, no audit row.
+      // Store the model round and durable suggestions; no operator decision is implied.
       await recordQaReleaseCiAdvice(input.at, input.suggestions);
       return { status: 200, body: { recorded: true } };
     }
