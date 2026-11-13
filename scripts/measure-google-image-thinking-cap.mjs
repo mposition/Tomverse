@@ -71,6 +71,7 @@ import {
   imageDeliveryMimeType,
   IMAGE_MODEL_REGISTRY,
 } from "../lib/imageModelRegistry.ts";
+import { runtimeImageProfileTemplate } from "../lib/runtimeImageProviders.ts";
 import { writeFileSync } from "node:fs";
 
 import {
@@ -113,7 +114,7 @@ const CARD_OUTPUT_LIMITS = {
 };
 const cardOutputLimit = (model) => CARD_OUTPUT_LIMITS[model.id] ?? model.maxOutputTokens ?? null;
 
-const swallowedByNpm = ["model", "limit", "repeats", "thinking", "prompt", "prompts"]
+const swallowedByNpm = ["model", "api-model", "limit", "repeats", "thinking", "prompt", "prompts"]
   .filter((name) => process.env[`npm_config_${name}`] !== undefined);
 
 if (args.length === 0 && swallowedByNpm.length > 0) {
@@ -146,6 +147,7 @@ if (args.length === 0 && swallowedByNpm.length > 0) {
 const VALUELESS_FLAGS = new Set(["help", "json", "i-accept-the-cost"]);
 const VALUED_FLAGS = new Set([
   "model",
+  "api-model",
   "limit",
   "repeats",
   "prompts",
@@ -199,6 +201,8 @@ if (flag("help") || args.length === 0) {
       ...googleModels.map(
         (model) => `                            ${model.id} (card limit ${cardOutputLimit(model)})`
       ),
+      "  --api-model=<id>        instead of --model: a Google API model id the registry",
+      "                          does not hold, sent with the catalogue's runtime profile",
       "  --limit=<n>             max_output_tokens to request (default: the card limit)",
       "  --repeats=<n>           rounds, 1-10 (default 3)",
       "  --prompts=<n>           built-in prompts to use, 1-2 (default 1)",
@@ -223,13 +227,21 @@ if (flag("help") || args.length === 0) {
   process.exit(0);
 }
 
+// A model the code registry does not hold -- one added to the catalogue at
+// runtime, measured before a bound can be written for it -- is measured with
+// the profile the catalogue would give it (runtimeImageProfileTemplate).
+const apiModelArg = value("api-model");
 const modelId = value("model");
-const model = modelId ? getImageModel(modelId) : null;
+const model = apiModelArg
+  ? { id: apiModelArg, ...runtimeImageProfileTemplate("google", apiModelArg) }
+  : modelId
+    ? getImageModel(modelId)
+    : null;
 if (!model || model.provider !== "google") {
   console.error(
     `--model must name a registered Google image model (${googleModels
       .map((entry) => entry.id)
-      .join(", ")}).`
+      .join(", ")}), or --api-model a Google API model id.`
   );
   process.exit(1);
 }
