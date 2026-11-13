@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
+
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
@@ -41,6 +43,17 @@ const LANE_LIST_READ_BUDGET_MS = 15_000;
 type Env = Readonly<Record<string, string | undefined>>;
 
 /**
+ * Records that approvals were looked at, one statement: both readers take the
+ * least recently visited first (readAmuxDmT2MergeApprovals orders by
+ * updatedAt), so a visited one goes to the back. Nothing else on the row moves.
+ */
+async function recordAmuxDmT2MergeVisits(tx: Prisma.TransactionClient, settlementIds: string[]) {
+  await tx.$executeRaw`
+    UPDATE "AmuxDmOwnerSettlement" SET "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
+    WHERE "id" = ANY(${settlementIds}) AND "state" = 'applied'`;
+}
+
+/**
  * The pull requests the merge lane may take although their branch is the
  * engineering agent's: each at the one head and branch approved, its change
  * read again from GitHub now (review r-20261113-134019-5d8f82) -- diff digest
@@ -50,6 +63,12 @@ type Env = Readonly<Record<string, string | undefined>>;
  * that cannot be read is not listed. Empty while the switch is off or the
  * kill switch is not off. The GitHub reads run outside the transaction, at
  * most LANE_LIST_LIMIT of them, within the lane's state call.
+ *
+ * Every approval read is recorded as visited in the same transaction, as the
+ * ready step records its pick (review r-20261113-135805-1535ac): the next
+ * state read starts with the ones least recently looked at, so approvals that
+ * stay unmergeable -- a changed diff, a failed check, a conflict -- never hide
+ * the ones behind them for more than a few rounds.
  */
 export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
   change?: (prNumber: number) => Promise<AmuxDmT2MergeChangeNow>;
@@ -57,7 +76,9 @@ export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
   if (!amuxDmT2MergeEnabled(env)) return [];
   const rows = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeLaneRead, async (tx) => {
     if ((await readDecisionMakerSwitches(tx)).killSwitch !== false) return [];
-    return readAmuxDmT2MergeApprovals(tx, { limit: LANE_LIST_LIMIT });
+    const read = await readAmuxDmT2MergeApprovals(tx, { limit: LANE_LIST_LIMIT });
+    if (read.length > 0) await recordAmuxDmT2MergeVisits(tx, read.map((row) => row.settlementId));
+    return read;
   });
   const change = deps.change ?? ((prNumber: number) => readEngineeringAgentPullChange(prNumber));
   const listed: Array<{ number: number; headSha: string; headRef: string }> = [];
@@ -136,9 +157,7 @@ export async function runAmuxDmT2MergeReadyStep(input: {
   const row = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeReadyPick, async (tx) => {
     const [next] = await readAmuxDmT2MergeApprovals(tx, { limit: 1, prNumbers: drafts.map((pull) => pull.number) });
     if (!next) return null;
-    await tx.$executeRaw`
-      UPDATE "AmuxDmOwnerSettlement" SET "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
-      WHERE "id" = ${next.settlementId} AND "state" = 'applied'`;
+    await recordAmuxDmT2MergeVisits(tx, [next.settlementId]);
     return next;
   });
   if (!row) return { outcome: "none" };

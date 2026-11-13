@@ -654,11 +654,11 @@ export const AMUX_DB_BOUNDARIES = {
   },
   // A Decision Maker approved review pull request merged into develop (owner
   // decision 2026-11-13, lib/amux/dmT2MergeService.ts). The lane's list:
-  // setup + switches + the approvals + fence.
+  // setup + switches + the approvals + their visit + fence.
   dmT2MergeLaneRead: {
     operation: "dm_t2_merge_lane_read",
-    prismaCallCeiling: 4,
-    isolation: "read",
+    prismaCallCeiling: 5,
+    isolation: "mutation",
   },
   // The observer's read of a merged one: setup + the approval and lane facts + fence.
   dmT2MergeObservedRead: {

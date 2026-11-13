@@ -299,8 +299,13 @@ test("the merge lane's list and the observer's read follow the approval while it
       .filter((entry) => entry.number === card.prNumber);
     assert.deepEqual(await mine(), [], "nothing before the approval");
     assert.deepEqual(await approve(card, ON), { applied: true, outcome: "approved" });
+    const visitedAt = async () => (await tx.$queryRaw<Array<{ at: Date }>>`
+      SELECT "updatedAt" AS "at" FROM "AmuxDmOwnerSettlement" WHERE "id" = ${card.settlementId}`)[0]!.at.getTime();
+    const before = await visitedAt();
     assert.deepEqual(await mine(), [{ number: card.prNumber, headSha: HEAD, headRef: card.ref }], "the same diff: listed");
     assert.ok(reads.includes(card.prNumber));
+    // Its visit is recorded in the read's own bounded transaction, so the next read starts after it.
+    assert.ok(await visitedAt() > before, "the lane's read records its visit");
     assert.deepEqual(await mine(gh({ diffDigest: "e".repeat(64) })), [],
       "a diff that moved with develop, or a person's ready pull request that changed: not listed");
     assert.deepEqual(await mine(gh({ diffDigest: null })), [], "a diff that cannot be read: not listed");
