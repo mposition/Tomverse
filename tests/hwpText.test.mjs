@@ -294,6 +294,10 @@ test("a real Hancom HWP reads in full: its own preview text is the answer key", 
   const lines = text.split("\n");
   assert.equal(lines[0], "교정기관 사서함 주소(e-그린우편 작성 시)");
   assert.deepEqual(lines.slice(1, 8), ["", "기관명", "우편번호", "사서함주소", "서울구", "15829", "경기도 군포우체국 사서함 20호"]);
+  // The preview below stops at about 1 KB; the last row and the line count
+  // hold the rest of the document.
+  assert.equal(lines.length, 170);
+  assert.deepEqual(lines.slice(-3), ["거창구", "50132", "경상남도 거창군 거창우체국 사서함 1호"]);
   assert.doesNotMatch(text, /[\u0000-\u0008\u000b-\u001f�-]/, "no control characters or replacement glyphs");
 
   // PrvText is the plain text Hancom stores for its own file preview (UTF-16,
