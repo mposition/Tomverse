@@ -36,16 +36,30 @@ Judge, as a demanding creative director and a careful editor:
    a locale whose lines promise what its own screens do not show is not.
    A real screen's own wrapping or wording is the product's, not the film's.
 
+Gates (owner 2026-11-13): you hold back only what must never reach a person
+in Admin. Taste is theirs: they watch every film in Admin before anything is
+published, with your scores and notes beside it. Answer each gate true or
+false:
+
+- `truth`: the product appears only as real screens (no redrawn screen, no
+  words added inside one); the film's own words are only the listed ones; no
+  line claims what that locale's own screens contradict.
+- `tone`: nothing can read as death, suicide, loss, illness or danger (item 4).
+- `disclosure`: the AI line on every AI shot and on the end card; the end card
+  has the logo and tomverse.app (item 5).
+
 Verdict:
 
-- `pass`: it may go to a person in Admin as it is.
-- `fix`: it can be good with changes; list them concretely (which locale, which
-  second, what to change). The builder gets one more round.
-- `reject`: a truth or disclosure problem the builder cannot fix, or an idea
-  that does not work.
+- `pass`: every gate is true. It goes to Admin, with your scores and notes on
+  craft (items 1-3, 6) for the person there; craft alone never holds a film
+  back.
+- `fix`: a gate is false and the builder can mend it; say exactly what
+  (locale, second, change). Put the gate fixes first, then any craft notes.
+- `reject`: a gate is false and the builder cannot mend it, or any tone
+  problem.
 
 Answer with exactly one line of JSON:
 
-`{"review":{"verdict":"pass|fix|reject","scores":{"creative":0,"craft":0,"readability":0,"truth":0,"disclosure":0},"notes":"..."}}`
+`{"review":{"verdict":"pass|fix|reject","gates":{"truth":true,"tone":true,"disclosure":true},"scores":{"creative":0,"craft":0,"readability":0,"truth":0,"disclosure":0},"notes":"..."}}`
 
-Scores are 1-10. Pass only when every score is 8 or more.
+Scores are 1-10, for the person in Admin.

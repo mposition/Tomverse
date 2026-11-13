@@ -413,15 +413,23 @@ test("both pack shapes are read the same way, and a pack's topic comes from its 
   assert.equal(normalizePack({ assetId: "media-x-short", locale: "en", captures: {} }), null);
 });
 
-test("a review passes only with the verdict pass and every score 8 or more", () => {
-  const scores = { creative: 9, craft: 8, readability: 8, truth: 10, disclosure: 9 };
-  assert.equal(reviewPassed({ verdict: "pass", scores }), true);
-  assert.equal(reviewPassed({ verdict: "pass", scores: { ...scores, craft: 7 } }), false);
-  assert.equal(reviewPassed({ verdict: "pass", scores: { creative: 9 } }), false);
-  assert.equal(reviewPassed({ verdict: "pass", scores: { ...scores, truth: "10" } }), false);
-  assert.equal(reviewPassed({ verdict: "pass" }), false);
-  assert.equal(reviewPassed({ verdict: "fix", scores }), false);
+test("a film reaches Admin on its gates (truth, tone, disclosure); craft scores are notes, not a gate", () => {
+  const gates = { truth: true, tone: true, disclosure: true };
+  // Owner 2026-11-13: low craft never holds a film back; the person in Admin judges it.
+  assert.equal(reviewPassed({ verdict: "pass", gates, scores: { creative: 5, craft: 5, readability: 6, truth: 7, disclosure: 9 } }), true);
+  assert.equal(reviewPassed({ verdict: "pass", gates }), true);
+  for (const gate of ["truth", "tone", "disclosure"]) {
+    assert.equal(reviewPassed({ verdict: "pass", gates: { ...gates, [gate]: false } }), false, gate);
+    assert.equal(reviewPassed({ verdict: "pass", gates: { ...gates, [gate]: "true" } }), false, `${gate} as text`);
+  }
+  assert.equal(reviewPassed({ verdict: "pass", gates: { truth: true, tone: true } }), false);
+  assert.equal(reviewPassed({ verdict: "pass", scores: { creative: 10, craft: 10, readability: 10, truth: 10, disclosure: 10 } }), false, "no gates, no pass");
+  assert.equal(reviewPassed({ verdict: "fix", gates }), false);
+  assert.equal(reviewPassed({ verdict: "reject", gates }), false);
   assert.equal(reviewPassed(null), false);
+  const review = readFileSync(resolve("tools/marketing-video/CREATIVE-REVIEW.md"), "utf8");
+  assert.match(review, /"gates":\{"truth":true,"tone":true,"disclosure":true\}/u);
+  assert.match(review, /craft alone never holds a film\s+back/u);
 });
 
 test("the asset carries the words inside the captures it shows and its source short's claims", () => {

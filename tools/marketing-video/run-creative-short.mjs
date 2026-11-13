@@ -204,10 +204,10 @@ const history = existsSync(historyPath) ? JSON.parse(readFileSync(historyPath, "
 const sheetsDir = path.join(creativeDir, "sheets");
 mkdirSync(sheetsDir, { recursive: true });
 const earlierStills = (entry) => stillsIn(path.join(sheetsDir, entry.run), 4).join(", ") || "none kept";
-/** What the builder is told after a review: a "pass" with a score under 8 (or a missing one) is not a pass. */
+/** What the builder is told after a review: a "pass" without every gate true is not a pass. */
 const notesFrom = (review) => {
   const low = review?.verdict === "pass" && !reviewPassed(review);
-  return `${low ? `Every score must be 8 or more; it was ${JSON.stringify(review.scores ?? null)}. ` : ""}${String(review?.notes ?? "")}`.slice(0, 4000);
+  return `${low ? `Every gate (truth, tone, disclosure) must be true; it was ${JSON.stringify(review.gates ?? null)}. ` : ""}${String(review?.notes ?? "")}`.slice(0, 4000);
 };
 
 // A rebuild: the run's plan, captures, shots, music and voice as they are; only build and review
@@ -497,15 +497,18 @@ async function finishFilm({ plan, locales, captureWords, sourceClaims, firstRoun
     }
     const answer = claude(`review-${round}`, reviewPrompt(), { tools: "Read", allowed: [fileRule("Read", `job/creative/${run}/review/**`), fileRule("Read", `job/creative/${run}/public/capture/**`), fileRule("Read", "job/creative/sheets/**")], maxTurns: 60 });
     verdict = jsonLine(answer, "review");
-    // A "pass" with a score under 8 (or a missing one) is not a pass: it goes back as a fix.
+    // A "pass" with a gate not true (or missing) is not a pass: it goes back as a fix.
     const low = verdict?.verdict === "pass" && !reviewPassed(verdict);
     if (verdict?.verdict !== "fix" && !low) break;
     notes = notesFrom(verdict);
   }
   if (!reviewPassed(verdict)) {
-    report.dropped.push({ step: "review", reason: verdict ? `${verdict.verdict} ${JSON.stringify(verdict.scores ?? null)}: ${String(verdict.notes ?? "").slice(0, 300)}` : "no verdict" });
+    report.dropped.push({ step: "review", reason: verdict ? `${verdict.verdict} ${JSON.stringify(verdict.gates ?? null)} ${JSON.stringify(verdict.scores ?? null)}: ${String(verdict.notes ?? "").slice(0, 300)}` : "no verdict" });
     halt("review_did_not_pass");
   }
+  // The reviewer's craft scores and notes go with the films, for the person who judges them in Admin.
+  report.review = { scores: verdict.scores ?? null, notes: String(verdict.notes ?? "").slice(0, 2000) };
+  writeFileSync(path.join(runDir, "out", "review.json"), JSON.stringify(verdict, null, 2));
 
   // 8. Render, check, submit.
   for (const locale of locales) {
