@@ -1096,7 +1096,7 @@ export function ComparisonReviewDialog({
                         />
                         {t("chat.aiReviewSynthesis")}
                       </h3>
-                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-700 dark:text-zinc-300">
+                      <p className="mt-2 whitespace-pre-wrap break-words [&:lang(ko)]:break-keep text-sm leading-6 text-zinc-700 dark:text-zinc-300">
                         {activeResult.synthesis}
                       </p>
                     </section>

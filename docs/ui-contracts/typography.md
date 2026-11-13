@@ -245,6 +245,11 @@ navigation controls; the accessible page heading remains available.
 - Monospace is for content that is semantically monospaced: code, model IDs,
   build metadata, verification codes, preserved-formatting input. Not prompt
   examples, not email addresses, not ordinary numbers.
+- Chat and Review message bubbles wrap Korean between 어절: `word-break:
+  keep-all` under `:lang(ko)` only, with `overflow-wrap: break-word` still
+  breaking URLs and other runs too long for a line. Chinese keeps breaking
+  between characters. `tests/e2e/korean-typography.spec.ts` measures it in the
+  three-panel Review at 1440px and on mobile.
 
 ### Documented exception
 
