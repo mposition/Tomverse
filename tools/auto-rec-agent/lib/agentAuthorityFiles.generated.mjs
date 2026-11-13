@@ -82,6 +82,10 @@ const CONTROL_PLANE_PATTERNS = [
   // bearer-secret check, the claim and result it may write, and its system
   // audit writer. An agent changing them could widen its own permission.
   "lib/autoRouterRecAgent*",
+  "lib/dailyProductAgent*",
+  "tests/dailyProductAgent*",
+  "tests/server-contract/daily-product-agent*",
+  "lib/productResearchScoutStore.ts",
   "tests/autoRouterRecAgent*",
   // §4-4: policy and contract documents.
   "docs/policy/**",

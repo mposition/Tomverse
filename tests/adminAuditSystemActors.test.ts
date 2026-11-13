@@ -137,6 +137,7 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-v22-recovery-preapproval",
     "auto-router-optimizer",
     "auto-router-rec-agent",
+    "daily-product-agent",
     "amux-v4-intake",
     "amux-session-intake",
     "engineering-agent-runner",
@@ -463,6 +464,9 @@ test("no administrator audit call site names the reserved key", () => {
     // system writer and leaves owner registrations on the administrator writer.
     // Both writers independently reject a reserved-key mismatch.
     "lib/amux/ideaRegistrationAuditAuthority.ts",
+    // Reviewed pair: agent claims and results go to the system writer, the
+    // owner-only retry request stays on the administrator writer.
+    "lib/dailyProductAgentStore.ts",
   ]);
   const callSites = ["app", "lib", "components", "scripts", "packages"]
     .flatMap((top) => walk(resolve(ROOT, top)))

@@ -48,6 +48,9 @@ export const adminProductResearchScoutMessages = defineAdminMessages({
       "Showing the newest {shown} of {total} open suggestions. Dismissed {dismissed} · sent to AMUX {sent}.",
 
     evidenceShow: "Show evidence",
+    agentWork: { claimed: "Coding agent working", needs_lookup: "Agent outcome needs lookup", pr_opened: "Draft PR", failed: "Agent blocked", retry_ready: "Agent retry queued" },
+    agentRetry: "Retry coding agent",
+    agentRetryQueued: "Coding agent retry queued. The daily task cap still applies.",
     evidenceLabel: "What the model saw",
     selectRow: "Select: {title}",
     dismiss: "Dismiss",
@@ -245,6 +248,9 @@ export const adminProductResearchScoutMessages = defineAdminMessages({
     shownLimited: "열린 제안 {total}건 중 최신 {shown}건만 보입니다. 거절 {dismissed} · AMUX로 보냄 {sent}.",
 
     evidenceShow: "근거 보기",
+    agentWork: { claimed: "Coding agent working", needs_lookup: "Agent outcome needs lookup", pr_opened: "Draft PR", failed: "Agent blocked", retry_ready: "Agent retry queued" },
+    agentRetry: "Retry coding agent",
+    agentRetryQueued: "Coding agent retry queued. The daily task cap still applies.",
     evidenceLabel: "모델이 본 것",
     selectRow: "선택: {title}",
     dismiss: "거절",

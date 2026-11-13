@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 
 import { claimNextRecommendation } from "@/lib/autoRouterRecAgent";
 import { isAutoRouterRecAgentAuthorized } from "@/lib/autoRouterRecAgentCore";
+import { DAILY_PRODUCT_AGENT_HEADER, DAILY_PRODUCT_AGENT_MODE, dailyProductAgentEnabled } from "@/lib/dailyProductAgentCore";
+import { claimDailyProductTask } from "@/lib/dailyProductAgentStore";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -17,8 +19,13 @@ export async function POST(request: Request) {
   if (!isAutoRouterRecAgentAuthorized(request.headers.get("authorization"), process.env)) {
     return NextResponse.json({ error: "Not found." }, { status: 404, headers: NO_STORE });
   }
+  const daily = request.headers.get(DAILY_PRODUCT_AGENT_HEADER) === DAILY_PRODUCT_AGENT_MODE;
+  if (daily && !dailyProductAgentEnabled(process.env)) {
+    return NextResponse.json({ error: "Not found." }, { status: 404, headers: NO_STORE });
+  }
   try {
-    const claimed = await claimNextRecommendation({ origin: new URL(request.url).origin });
+    const claim = daily ? claimDailyProductTask : claimNextRecommendation;
+    const claimed = await claim({ origin: new URL(request.url).origin });
     if (!claimed) return new NextResponse(null, { status: 204, headers: NO_STORE });
     return NextResponse.json(claimed, { headers: NO_STORE });
   } catch {

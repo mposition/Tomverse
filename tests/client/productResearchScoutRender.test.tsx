@@ -71,6 +71,24 @@ const WEEK = Array.from({ length: 7 }, (_, index) => ({
   outputTokens: 30_000,
 }));
 
+test("the source card shows a draft PR or a blocked outcome without completing the suggestion", () => {
+  const prUrl = "https://github.com/mposition/Tomverse/pull/4000";
+  for (const agentWork of [{ status: "pr_opened" as const, prUrl }, { status: "failed" as const, reason: "no_change" }]) {
+    const initial = view({ open: [{ ...suggestion("one", "home.en", "high", "copy", "Source improvement"), agentWork }] });
+    const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={initial} week={null} />);
+    assert.match(html, /data-testid="scout-agent-work"/);
+    assert.match(html, agentWork.status === "pr_opened" ? /href="https:\/\/github.com\/mposition\/Tomverse\/pull\/4000"/ : /Agent blocked.*no_change/);
+    assert.equal(initial.counts.completed, 0);
+  }
+});
+
+test("only the owner sees retry for a known pre-publication failure", () => {
+  const open = [{ ...suggestion("one", "home.en", "high", "copy", "Source improvement"), agentWork: { status: "failed" as const, reason: "setup_failed", retryable: true } }];
+  assert.match(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ open })} week={null} />), /Retry coding agent/);
+  assert.doesNotMatch(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ open, canConfigure: false })} week={null} />), /Retry coding agent/);
+  assert.doesNotMatch(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ open: [{ ...open[0], agentWork: { status: "needs_lookup" } }] })} week={null} />), /Retry coding agent/);
+});
+
 test("the side tiles say what the Scout kept, today's calls against the limit and the last run, before any list", () => {
   const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view()} week={WEEK} />);
   assert.match(html, new RegExp(m.stateOn));
