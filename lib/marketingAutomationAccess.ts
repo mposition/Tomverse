@@ -628,9 +628,15 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * docs/policy/marketing-automation.md §7.1), in
  * `lib/marketingGuardNormalise.ts`, which the receiver's closure loads. No webhook module, event decision or admission condition changes; the
  * bytes moved, so prior signed evidence is stale.
+ *
+ * 2026-11-13: the same file's hygiene check reads a spelled-out dot as a host
+ * only before a Latin suffix, so Korean prose using the everyday word for
+ * "point" is no longer refused as a web address. No webhook module, event
+ * decision or admission condition changes; the bytes moved, so prior signed
+ * evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "f2d59af40bc5cf9aae5f3d479915a2b89d54cc64de67d6902087bbd45cc879aa";
+  "396fbaccd8f48d99437210922e343c539863aef6f6d73fda0f5b026699234bca";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
