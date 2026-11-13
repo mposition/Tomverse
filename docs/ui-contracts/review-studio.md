@@ -29,6 +29,17 @@ Owner approved Concept B on 2026-10-20: Figma file
 - Easy history follows the provider across model changes. Professional retains
   the existing direct model picker and transcript behavior. Neither changes a
   conversation's stored product or grants a new plan entitlement.
+- Easy's provider rows mark each provider with an active image model with an
+  image badge (`review-provider-image-badge`), read from the image catalogue
+  the page was served with (Admin model catalogue), never a fixed list. No
+  badge is shown where image generation is off for the deployment or the
+  conversation.
+- The new-review image card ("one sentence, several images") is v2's
+  multi-model image comparison entry (`docs/policy/image-generation.md` §1, §11).
+  It seeds the composer and arms image mode: Easy routes the sentence once per
+  selected provider; Professional starts on an active catalogue model of a
+  provider already answering, else the first active one, and never on a fixed
+  default model.
 - Unsupported image providers have a local notice and no execution. Other
   supported providers retain the existing image execution/consent flow. An
   all-unsupported image request never substitutes a provider or calls text.

@@ -33,6 +33,8 @@ import {
   CHAT_STARTER_CATALOG,
   CHAT_STARTER_FLAG_KEYS,
   STARTER_CAPABILITY_IDS,
+  STARTER_SURFACES,
+  chatStarterCatalogFor,
 } from "../lib/chatStarterCatalog.ts";
 import {
   CHAT_STARTER_MAX_VISIBLE,
@@ -78,8 +80,19 @@ const voiceOn = onOff("voice", "off");
 // would make it decisive again, and then this argument is already here.
 const braveOn = onOff("brave", "on");
 
+// Chat and Review offer different rows (`surfaces`): comparison cards are
+// Review's, and Chat's image card needs Admin image triage.
+const surface = argument("surface", "chat");
+if (!STARTER_SURFACES.includes(surface)) {
+  console.error(`--surface takes ${STARTER_SURFACES.join(" or ")}; got ${JSON.stringify(surface)}.`);
+  process.exit(1);
+}
+const surfaceCatalog = chatStarterCatalogFor(surface);
+const imageTriageOn = onOff("image-triage", "off");
+
 const capabilities = resolveChatStarterCapabilities({
   webSearchBackendReadiness: { brave: braveOn },
+  chatImageAnswers: imageTriageOn,
 });
 
 const readKey = (key) =>
@@ -121,7 +134,7 @@ const report = (image, voice) => {
       knownFlags,
       modelCapabilities: new Set(capabilities),
     };
-    const shown = selectVisibleStarterCards(state);
+    const shown = selectVisibleStarterCards(state, surfaceCatalog);
     const shownIds = new Set(shown.map((card) => card.entry.id));
 
     console.log(`\n## ${viewer.label}`);
@@ -137,7 +150,7 @@ const report = (image, voice) => {
       console.log(`      "${readKey(card.entry.outcomeKey)}"`);
     });
 
-    const absent = CHAT_STARTER_CATALOG.filter(
+    const absent = surfaceCatalog.filter(
       (entry) => !shownIds.has(entry.id)
     );
     if (absent.length > 0) {
@@ -154,7 +167,7 @@ const report = (image, voice) => {
   }
 };
 
-console.log("Chat starter gallery - expected cards on screen\n");
+console.log(`Starter gallery on /${surface} - expected cards on screen\n`);
 console.log("What this answer key does not depend on:");
 console.log(
   `  the application-managed search backend. web-search resolves through the\n` +
@@ -176,7 +189,8 @@ if (unresolved.length > 0) {
   console.log(`  capabilities that do NOT resolve = ${unresolved.join(", ")}`);
 }
 console.log(
-  `  registry size = ${CHAT_STARTER_CATALOG.length}, screen cap = ${CHAT_STARTER_MAX_VISIBLE}\n`
+  `  registry size = ${CHAT_STARTER_CATALOG.length} (${surfaceCatalog.length} on ${surface}), ` +
+    `screen cap = ${CHAT_STARTER_MAX_VISIBLE}, image triage = ${imageTriageOn ? "on" : "off"}\n`
 );
 console.log(
   "If the screen shows a card its table does not, or omits one it does,\n" +

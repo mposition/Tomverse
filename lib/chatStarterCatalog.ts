@@ -60,6 +60,14 @@ export const STARTER_CAPABILITIES = {
     resolvedBy: "lib/generatedArtifactFormats.ts",
     resolvedByExport: "ARTIFACT_FORMAT_TABLE",
   },
+  // A Chat send that asks for a picture is answered with an image in the same
+  // conversation only while Admin image triage is on. Without it the seeded
+  // sentence would come back as text, so the card would promise an image the
+  // send cannot make.
+  "chat-image-answer": {
+    resolvedBy: "lib/chatImageIntent.ts",
+    resolvedByExport: "chatImageTriageModelId",
+  },
 } as const;
 
 export type StarterCapability = keyof typeof STARTER_CAPABILITIES;
@@ -89,6 +97,17 @@ export const STARTER_ACCENT_ROLES = [
 ] as const;
 
 export type StarterAccentRole = (typeof STARTER_ACCENT_ROLES)[number];
+
+/**
+ * Which product a card is offered in.
+ *
+ * Chat is one model answering one conversation; Review compares several. A
+ * card whose outcome is "read several answers side by side" belongs to Review
+ * only, and on Chat it would promise a comparison the product does not make.
+ */
+export const STARTER_SURFACES = ["chat", "review"] as const;
+
+export type StarterSurface = (typeof STARTER_SURFACES)[number];
 
 /**
  * What the card asks of the viewer before it can be run.
@@ -160,6 +179,8 @@ export type StarterTaskProfile = {
 export type ChatStarterEntry = {
   /** Stable identifier. Appears in `data-starter-id`, never in user copy. */
   id: string;
+  /** The products whose new-conversation screen may offer this card. */
+  surfaces: readonly StarterSurface[];
   /**
    * Locale key of the short label the card shows.
    *
@@ -217,6 +238,7 @@ export type ChatStarterEntry = {
 export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   {
     id: "compare-answers",
+    surfaces: ["review"],
     labelKey: "chatStarter.cards.compareAnswers.label",
     outcomeKey: "chatStarter.cards.compareAnswers.outcome",
     taskProfile: { kind: "general", needsCurrentInformation: false },
@@ -230,6 +252,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "document-questions",
+    surfaces: ["chat", "review"],
     labelKey: "chatStarter.cards.documentQuestions.label",
     outcomeKey: "chatStarter.cards.documentQuestions.outcome",
     taskProfile: { kind: "documents", needsCurrentInformation: false },
@@ -244,6 +267,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "sourced-answer",
+    surfaces: ["chat", "review"],
     labelKey: "chatStarter.cards.sourcedAnswer.label",
     outcomeKey: "chatStarter.cards.sourcedAnswer.outcome",
     taskProfile: { kind: "research", needsCurrentInformation: true },
@@ -258,6 +282,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "debug-stack-trace",
+    surfaces: ["chat", "review"],
     labelKey: "chatStarter.cards.debugStackTrace.label",
     outcomeKey: "chatStarter.cards.debugStackTrace.outcome",
     taskProfile: { kind: "coding", needsCurrentInformation: false },
@@ -271,6 +296,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "spreadsheet-from-answer",
+    surfaces: ["chat", "review"],
     labelKey: "chatStarter.cards.spreadsheetFromAnswer.label",
     outcomeKey: "chatStarter.cards.spreadsheetFromAnswer.outcome",
     taskProfile: { kind: "documents", needsCurrentInformation: false },
@@ -287,6 +313,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "read-a-screenshot",
+    surfaces: ["chat", "review"],
     labelKey: "chatStarter.cards.readAScreenshot.label",
     outcomeKey: "chatStarter.cards.readAScreenshot.outcome",
     taskProfile: { kind: "general", needsCurrentInformation: false },
@@ -301,6 +328,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "translate-and-compare",
+    surfaces: ["review"],
     labelKey: "chatStarter.cards.translateAndCompare.label",
     outcomeKey: "chatStarter.cards.translateAndCompare.outcome",
     taskProfile: { kind: "multilingual", needsCurrentInformation: false },
@@ -314,23 +342,120 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "compare-image-models",
+    surfaces: ["review"],
     labelKey: "chatStarter.cards.compareImageModels.label",
     outcomeKey: "chatStarter.cards.compareImageModels.outcome",
     taskProfile: { kind: "general", needsCurrentInformation: false },
+    // Every signed-in plan may generate images (`planAllowsImageGeneration`),
+    // so the requirement is the account, not a tier.
     requires: {
       signedIn: true,
-      minimumPlan: "Pro",
       flagKeys: [IMAGE_GENERATION_FLAG_KEY],
     },
+    // Review answers an image request inside the conversation, one image per
+    // selected provider (docs/ui-contracts/review-studio.md). `studio` here
+    // only tells the Review composer to arm its image mode.
     seed: {
       promptSeedKey: "chatStarter.cards.compareImageModels.seed",
       productKey: "studio",
     },
     accentRole: "image",
-    evidence: "components/images/ImageGenerationWorkspace.tsx",
+    evidence: "lib/reviewRoutingCore.ts",
+  },
+  {
+    id: "make-an-image",
+    surfaces: ["chat"],
+    labelKey: "chatStarter.cards.makeAnImage.label",
+    outcomeKey: "chatStarter.cards.makeAnImage.outcome",
+    taskProfile: { kind: "general", needsCurrentInformation: false },
+    requires: {
+      signedIn: true,
+      flagKeys: [IMAGE_GENERATION_FLAG_KEY],
+      capabilities: ["chat-image-answer"],
+    },
+    // A Chat seed, not a hand-over: the send asks the image triage and the
+    // answer is an image in this conversation (docs/policy/image-generation.md
+    // section 13). Chat no longer opens the image workspace.
+    seed: {
+      promptSeedKey: "chatStarter.cards.makeAnImage.seed",
+      productKey: "chat",
+    },
+    accentRole: "image",
+    evidence: "lib/chatImageTurn.ts",
+  },
+  {
+    id: "summarize-text",
+    surfaces: ["chat"],
+    labelKey: "chatStarter.cards.summarizeText.label",
+    outcomeKey: "chatStarter.cards.summarizeText.outcome",
+    taskProfile: { kind: "writing", needsCurrentInformation: false },
+    requires: {},
+    seed: {
+      promptSeedKey: "chatStarter.cards.summarizeText.seed",
+      productKey: "chat",
+    },
+    accentRole: "neutral",
+    evidence: "app/api/chat/route.ts",
+  },
+  {
+    id: "draft-reply",
+    surfaces: ["chat"],
+    labelKey: "chatStarter.cards.draftReply.label",
+    outcomeKey: "chatStarter.cards.draftReply.outcome",
+    taskProfile: { kind: "writing", needsCurrentInformation: false },
+    requires: {},
+    seed: {
+      promptSeedKey: "chatStarter.cards.draftReply.seed",
+      productKey: "chat",
+    },
+    accentRole: "neutral",
+    evidence: "app/api/chat/route.ts",
+  },
+  {
+    id: "explain-code",
+    surfaces: ["chat"],
+    labelKey: "chatStarter.cards.explainCode.label",
+    outcomeKey: "chatStarter.cards.explainCode.outcome",
+    taskProfile: { kind: "coding", needsCurrentInformation: false },
+    requires: {},
+    seed: {
+      promptSeedKey: "chatStarter.cards.explainCode.seed",
+      productKey: "chat",
+    },
+    accentRole: "neutral",
+    evidence: "app/api/chat/route.ts",
+  },
+  {
+    id: "learn-a-concept",
+    surfaces: ["chat"],
+    labelKey: "chatStarter.cards.learnAConcept.label",
+    outcomeKey: "chatStarter.cards.learnAConcept.outcome",
+    taskProfile: { kind: "general", needsCurrentInformation: false },
+    requires: {},
+    seed: {
+      promptSeedKey: "chatStarter.cards.learnAConcept.seed",
+      productKey: "chat",
+    },
+    accentRole: "neutral",
+    evidence: "app/api/chat/route.ts",
+  },
+  {
+    id: "plan-a-week",
+    surfaces: ["chat"],
+    labelKey: "chatStarter.cards.planAWeek.label",
+    outcomeKey: "chatStarter.cards.planAWeek.outcome",
+    taskProfile: { kind: "general", needsCurrentInformation: false },
+    requires: {},
+    seed: {
+      promptSeedKey: "chatStarter.cards.planAWeek.seed",
+      productKey: "chat",
+    },
+    accentRole: "neutral",
+    evidence: "app/api/chat/route.ts",
   },
   {
     id: "speak-a-question",
+    surfaces: ["chat", "review"],
     labelKey: "chatStarter.cards.speakAQuestion.label",
     outcomeKey: "chatStarter.cards.speakAQuestion.outcome",
     taskProfile: { kind: "general", needsCurrentInformation: false },
@@ -357,6 +482,12 @@ export const CHAT_STARTER_REQUIRED_CAPABILITIES: readonly StarterCapability[] = 
     CHAT_STARTER_CATALOG.flatMap((entry) => entry.requires.capabilities ?? [])
   ),
 ];
+
+/** The registry rows one product may offer, in registry order. */
+export const chatStarterCatalogFor = (
+  surface: StarterSurface
+): readonly ChatStarterEntry[] =>
+  CHAT_STARTER_CATALOG.filter((entry) => entry.surfaces.includes(surface));
 
 export const findChatStarterEntry = (
   id: string

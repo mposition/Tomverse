@@ -63,8 +63,15 @@ submitted prompt through the existing LLM routing.
 On Review (`/review`) entry 3 and the starter catalogue's image card
 do not open this workspace: they arm the Review composer's image mode
 (`review-image-mode`) and the answer is generated inside the conversation
-(`docs/ui-contracts/review-studio.md`, owner direction 2026-10-23). The sidebar
-and drawer launcher stay explicit entries to this workspace there too.
+(`docs/ui-contracts/review-studio.md`, owner direction 2026-10-23). With no
+model chosen, the card arms an active model from the image catalogue, never a
+fixed default. The sidebar and drawer launcher stay explicit entries to this
+workspace there too.
+
+On Chat (`/chat`) no starter card opens this workspace (owner direction
+2026-11-13). Chat's image card (`make-an-image`) seeds an ordinary Chat draft;
+the send is answered with an image in the same conversation (policy §13 ⑥), and
+the card is hidden when image triage is off.
 
 The Chat **image-request handoff chip** that used to be a fifth entry point was
 **deleted on 2026-10-20**: the LLM judgement on send (policy §13 ⑥,
