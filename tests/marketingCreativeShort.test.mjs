@@ -288,9 +288,62 @@ test("the film may import only react, remotion and its own files, and stay a pur
     write(source);
     assert.match((await checkFilmSource(film)).join("\n"), pattern, source);
   }
+  // The kit is the one import from outside the folder; screens, clips and files come only through it.
+  write(`import React from "react";\nimport { Stack, Caption } from "../kit";\nexport const Film = () => <Stack><Caption text="x" /></Stack>;`);
+  assert.deepEqual(await checkFilmSource(film), []);
+  for (const source of [
+    `import { Img, staticFile } from "remotion";\nexport const Film = () => <Img src={staticFile("capture/en/a.png")} />;`,
+    `import { OffthreadVideo } from "remotion";\nexport const Film = () => null;`,
+    `export const Film = () => <img src="a.png" />;`,
+    `import { Video } from "remotion";\nexport const Film = () => <Video src="a.mp4" />;`,
+  ]) {
+    write(source);
+    assert.match((await checkFilmSource(film)).join("\n"), /Img, a video or staticFile/u, source);
+  }
+  write(`import { Kit } from "../kit/geometry";\nexport const Film = () => null;`);
+  assert.match((await checkFilmSource(film)).join("\n"), /imports \.\.\/kit\/geometry/u);
   write(`export const Film = () => null;`);
   writeFileSync(join(film, "run.sh"), "rm -rf /");
   assert.match((await checkFilmSource(film)).join("\n"), /only \.tsx and \.ts/u);
+});
+
+test("the kit keeps a screen's crop in the gaps between lines and words, and readable", async () => {
+  const { gridOf } = await import("../tools/marketing-video/creative-layout.mjs");
+  const { blocksOf, lineTimes, readGrid, screenScale, screenWord, snapCrop } = await import("../tools/marketing-video/creative-kit/geometry.js");
+  // A 640x480 white picture with two columns of "text": dark bars 24 px tall, 40 px apart.
+  const width = 640;
+  const height = 480;
+  const gray = new Uint8Array(width * height).fill(250);
+  const bar = (x0, x1, y0, y1) => {
+    for (let y = y0; y < y1; y += 1) for (let x = x0; x < x1; x += 1) gray[y * width + x] = (x + y) % 6 < 3 ? 30 : 250;
+  };
+  for (let line = 0; line < 6; line += 1) {
+    bar(40, 280, 40 + line * 64, 64 + line * 64);
+    bar(360, 600, 40 + line * 64, 64 + line * 64);
+  }
+  const grid = readGrid(gridOf(gray, width, height));
+  // An edge through a line of words moves to the gap above or below it; the sides move off the words.
+  const cut = snapCrop(grid, { x: 300, y: 50, w: 330, h: 140 }, "a");
+  assert.ok([[24, 64], [64, 104], [88, 128]].some(([from, to]) => cut.y >= from && cut.y <= to), `top ${cut.y} in a gap`);
+  const bottom = cut.y + cut.h;
+  assert.ok(bottom % 64 >= 0 && (bottom - 40) % 64 >= 24, `bottom ${bottom} in a gap, not inside a 24 px line`);
+  assert.ok(cut.x >= 280 && cut.x <= 360 && cut.x + cut.w >= 600, `sides ${cut.x}-${cut.x + cut.w} clear of the words`);
+  // No gap within reach: the render stops, naming the edge.
+  const solid = new Uint8Array(width * height).map((_, index) => ((index % width) + Math.floor(index / width)) % 6 < 3 ? 30 : 250);
+  assert.throws(() => snapCrop(readGrid(gridOf(solid, width, height)), { x: 100, y: 100, w: 200, h: 200 }, "s"), /top edge .* cuts through words/u);
+  assert.throws(() => snapCrop(grid, { x: 600, y: 0, w: 100, h: 10 }, "a"), /not inside/u);
+  // Drawn below 80% of its pixels, a screen's words stop reading.
+  assert.equal(screenScale({ x: 0, y: 0, w: 900, h: 10 }, 900), 1);
+  assert.throws(() => screenScale({ x: 0, y: 0, w: 1400, h: 10 }, 900, "wide"), /at least 1120 px wide/u);
+  // The blocks: the two columns, each one block of its lines (40 px gaps are under the 48 px row gutter).
+  const blocks = blocksOf(grid);
+  assert.equal(blocks.length, 2);
+  assert.ok(blocks[0].x < 40 && blocks[0].x + blocks[0].w > 280 && blocks[0].x + blocks[0].w < 360);
+  for (const block of blocks) assert.deepEqual(snapCrop(grid, block, "block"), block, "a block is a crop Screen takes as it is");
+  // Captions show only the plan's words; the narration plays line after line with a breath.
+  assert.equal(screenWord(["Hello there.", "AI"], " Hello there. "), "Hello there.");
+  assert.throws(() => screenWord(["Hello there."], "Hello"), /not one of the props' screen lines/u);
+  assert.deepEqual(lineTimes([{ seconds: 2 }, { seconds: 1 }], 30), [{ from: 6, frames: 60 }, { from: 74, frames: 30 }]);
 });
 
 test("the film's imports are read by a parser: comments, webpack loaders, re-exports and unused imports do not slip past", async () => {
