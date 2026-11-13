@@ -261,7 +261,6 @@ export const zhHant = {
         imageModelTabFooterHint: "選擇後將進入圖片工作區。",
         imageModelCreditsFrom: "{credits} 點數起",
         imageModelViaGateway: "經由 {gateway}",
-        imageModelHoldPriceUnverified: "官方價格核實前暫不開放",
         imageModelLatencyFast: "快速",
         imageModelLatencyBalanced: "均衡",
         imageModelLatencySlow: "較慢",

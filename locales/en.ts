@@ -240,7 +240,6 @@ export const en = {
         imageModelTabFooterHint: "Picking one opens the image workspace.",
         imageModelCreditsFrom: "From {credits} credits",
         imageModelViaGateway: "via {gateway}",
-        imageModelHoldPriceUnverified: "On hold until its official price is verified",
         imageModelLatencyFast: "Fast",
         imageModelLatencyBalanced: "Balanced",
         imageModelLatencySlow: "Slower",
