@@ -441,7 +441,7 @@ export function SendEchoTurn({ echo }: { echo: SendEcho }) {
     <div data-testid="chat-send-echo" className="flex w-full flex-col gap-2">
       <div className="flex w-full flex-col items-end">
         <span className="sr-only">{t("chat.you")}</span>
-        <div className="relative max-w-[94%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-blue-600 px-3 py-2 text-[13px] leading-[1.55] text-white shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed">
+        <div className="relative max-w-[94%] whitespace-pre-wrap break-words [&:lang(ko)]:break-keep rounded-2xl rounded-br-md bg-blue-600 px-3 py-2 text-[13px] leading-[1.55] text-white shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed">
           {echo.text}
           {echo.attachmentCount > 0 && (
             <span className="mt-1 block text-xs text-white/80">
@@ -1162,7 +1162,15 @@ export function ChatMessageList({
                         )
                       : undefined
                   }
-                  className={`relative max-w-[94%] break-words rounded-2xl px-3 py-2 text-[13px] leading-[1.55] shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed ${
+                  /*
+                    Korean wraps between 어절, not inside them: the default
+                    `word-break: normal` lets Hangul break after any syllable,
+                    so a narrow Review panel printed "체크/리스트". `keep-all`
+                    is scoped to `:lang(ko)` because Chinese has no spaces and
+                    must keep breaking between characters; `break-words` still
+                    breaks a URL or any run too long for the line.
+                  */
+                  className={`relative max-w-[94%] break-words [&:lang(ko)]:break-keep rounded-2xl px-3 py-2 text-[13px] leading-[1.55] shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed ${
                     isUser ? `${userBoxClass} rounded-br-md` : `${assistantBoxClass} rounded-bl-md`
                   } ${
                     /*

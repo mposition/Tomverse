@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { publicAgentSummary } from "../tools/auto-rec-agent/lib/core.mjs";
+
+test("only a bounded public summary is eligible for the commit and PR", () => {
+  assert.equal(publicAgentSummary(JSON.stringify({ publicSummary: "Keep the mobile model label visible" })), "Keep the mobile model label visible");
+  for (const publicSummary of ["email user@example.test", "See https://private.example.test", "a\nnew line", "x".repeat(141)]) {
+    assert.equal(publicAgentSummary(JSON.stringify({ publicSummary })), null);
+  }
+  assert.equal(publicAgentSummary("Private unstructured result"), null);
+});
 
 import { autoPrDecision } from "../scripts/auto-pr-branch-policy.mjs";
 import { BRANCH_PATTERN, FAILURE_REASONS, LIMITS } from "../tools/auto-rec-agent/lib/contract.mjs";
@@ -26,6 +35,11 @@ import {
 } from "../tools/auto-rec-agent/lib/core.mjs";
 
 const SHA_A = "a".repeat(40);
+test("only daily-mode PRs carry the daily-product goal step", () => {
+  const claim = { id: "cycle:0", recommendation: "Keep model selection consistent" };
+  assert.doesNotMatch(buildPrBody({ claim, reviewJobId: "review" }), /Goal-Step:/);
+  assert.match(buildPrBody({ claim: { ...claim, dailyProduct: true }, reviewJobId: "review" }), /Goal-Step: daily-product-improvements\/cycle:0/);
+});
 const SHA_B = "b".repeat(40);
 const ZERO = "0".repeat(40);
 const modified = (path, mode = "100644") => ({ oldMode: mode, newMode: mode, status: "M", path });

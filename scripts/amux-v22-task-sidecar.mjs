@@ -26,6 +26,9 @@ const provider = process.env.TOMVERSE_AMUX_V22_PROVIDER ?? "anthropic";
 if (!["anthropic", "openai", "github-copilot", "cursor", "antigravity"].includes(provider))
   throw new Error("invalid sidecar provider");
 const config = { ...amuxV22SidecarLaunchConfigFromEnvironment(process.env), provider };
+// The agy /usage group that bounds the worker's model (default "Gemini 4
+// Argon"; Gemini Flash or Pro is "Gemini Models"). Read only for the quota.
+const quotaGroup = process.env.TOMVERSE_AMUX_V22_ANTIGRAVITY_QUOTA_GROUP || undefined;
 const socketPath = process.env.TOMVERSE_AMUX_V22_SIDECAR_SOCKET;
 const stateDir = process.env.TOMVERSE_AMUX_V22_SIDECAR_STATE_DIR;
 const invocationId = process.env.INVOCATION_ID ?? null;
@@ -39,6 +42,6 @@ const sidecar = createAmuxV22SidecarServer(socketPath,
     // Each provider reads its own sign-in's subscription quota; what the
     // app does with a non-Claude reading is TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE.
     quota: () => provider === "anthropic" ? probeAmuxV22ClaudeQuota(config) :
-      probeAmuxV22ChannelQuota(provider, config),
+      probeAmuxV22ChannelQuota(provider, { ...config, quotaGroup }),
     run: (request) => runAmuxV22OneShot(request, config) }));
 await sidecar.listen();

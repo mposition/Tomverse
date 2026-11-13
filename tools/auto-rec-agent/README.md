@@ -4,9 +4,67 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
 대체 모델로 재시도")을 **한 시간에 하나씩** 받아, Claude Code headless로 구현하고 테스트와
 독립 검토를 거쳐 **develop으로 가는 draft PR**을 여는 Ubuntu 서버 도구입니다.
 
+### 일일 제품 개선 모드 (2026-11-13 운영자 요청)
+
+로컬 PC/Codex 자동화와 별개로 Ubuntu의 systemd가 매일 **09:00 Australia/Brisbane**에 실행합니다.
+`install.sh <검토된 commit SHA> daily-product`가 기존 runner/timer에 이 모드를 설치합니다.
+설치 자체는 타이머를 켜거나 실행하지 않습니다. 기존 시간별 모드가 기본값으로 유지됩니다.
+
+- 제품 리서치 → 라우팅 code 권장안 → 제품 리서치 안의 `memory.continuation.*` 합성 품질 권장안을
+  한 건씩 순환합니다. 각 원천 안에서는 오래된 열린 항목부터 처리합니다. 라우팅은 기존 Admin의
+  코딩 에이전트 스위치를 존중합니다. 설정 변경이나 Refiner 후보 승격은 하지 않습니다.
+- 앱의 `DAILY_PRODUCT_AGENT_ENABLED=true`와 gateway의 root 소유 daily-product 모드가 모두
+  있어야 확장 원천을 claim합니다. 공유 비밀과 GitHub 토큰은 기존 gateway 계정에만 남고,
+  runner는 제품 DB 자격증명이나 관리자 브라우저 세션을 쓰지 않습니다.
+  일일 모드는 `/api/internal/product-improvements/claim`과 `/result`만 사용합니다. 이전 앱의
+  404나 스위치 꺼짐에서 기존 라우팅 API로 우회하지 않습니다.
+- 최대 하루 24건(실패·무변경 포함), 새 작업 진입은 회차 시작 후 18시간, systemd 전체는 23시간입니다. 마지막 작업과 정리에 5시간을 남깁니다. 앱도 AEST 날짜의
+  claim 상한을 직렬화해 강제하므로 같은 날 다시 시작해도 상한을 늘리지 않습니다. 게시 상한은
+  기존의 24시간 24건 그대로입니다. 추가 API 모델 호출이나 유료 평가를 켜지 않습니다.
+- 작업마다 최신 develop에서 독립 worktree/브랜치를 만듭니다. 이미 해결됐으면 근거를 로그에
+  남기고 `no_change`, 막히면 사유 코드를 기록하고 다음 작업으로 갑니다. 관련 테스트·lint와
+  기존 독립 검토를 통과한 변경만 게시합니다. 새 PR은 항상 **develop · draft · ci:hold**이며
+  gateway가 라벨을 다시 읽어 확인해야 게시 성공입니다. 병합·배포·CI 보류 해제는 하지 않습니다.
+- Scout의 claim·결과는 `AppSetting`의 `auto.dailyProductAgent.*` 행과 트랜잭션 감사에 남습니다.
+  원래 카드에서 작업 중/PR 링크/실패 사유/결과 확인 필요를 읽을 수 있습니다. 원문 제안은 PR에
+  복사하지 않습니다. PR 작성만으로 원래 제안을 완료 처리하지 않습니다.
+- 만료·실패·손상된 claim도 자동으로 다시 가져오지 않습니다. publish/result 불명은 회차를
+  중단하고 사람의 lookup을 기다립니다. 과제 자체의 무변경·범위·검증·검토 거절은 다음 항목으로
+  넘어가지만 인증·설치·timeout·검토 불명·게시 장애는 첫 건을 기록하고 그날 회차를 멈춥니다.
+  게시를 시도하기 전의 실패가 확실한 항목은 최근 재인증한 owner가 카드의 Retry coding agent로
+  재예약하거나 기존 Send to AMUX로 넘길 수 있습니다. 재예약에도 일일 상한이 적용되고 새
+  claimId를 발급합니다. 활성/만료 claim, 게시·검토 불명은 이 재예약 경로로 풀지 않습니다. AMUX로 보낸
+  제안과 전달 예약도 제외하며, 같은 잠금으로 claim과 전달 예약의 중복 소유를 막습니다.
+  AMUX 전달이 실패하거나 불명이면 예약을 보존하고, 같은 Send to AMUX를 다시 사용해 기존의
+  결정적 request id로 결과를 읽어 마칩니다. 예약을 자동 삭제하거나 에이전트가 인수하지 않습니다.
+
+**운영 반영 순서 — Ubuntu 서버, sudo 가능한 관리자 계정의 bash, 임의 디렉터리.**
+먼저 이 변경을 담은 앱 버전을 운영에 배포하고 앱의 `DAILY_PRODUCT_AGENT_ENABLED=true`를
+설정해야 합니다. 이는 일일 에이전트 구현 PR 생성과 별도의 운영 배포 단계입니다. 기존
+`AUTO_ROUTER_REC_AGENT_SECRET`과 gateway의 공유 비밀이 일치해야 합니다. 값은 출력하지 않습니다.
+이미 설정된 root 전용 env, `autorec` Claude 구독 인증, mirror, 검토 서버 접속을 재사용합니다.
+
+```bash
+# SHA is the reviewed, immutable commit containing this implementation.
+SHA=<reviewed-40-character-commit>
+curl -fsSL "https://raw.githubusercontent.com/mposition/Tomverse/$SHA/tools/auto-rec-agent/deploy/install.sh" -o /tmp/autorec-install.sh
+sudo bash /tmp/autorec-install.sh "$SHA" daily-product
+sudo systemctl enable --now autorec-gateway.socket autorec-runner.timer
+systemctl list-timers autorec-runner.timer --no-pager
+# Optional first run, after the app and credentials are ready:
+sudo systemctl start --no-block autorec-runner.service
+journalctl -u autorec-runner.service -n 40 --no-pager
+```
+
+PC가 꺼져 있어도 Ubuntu 서버가 켜져 있으면 실행합니다. 첫 실행 완료의 증거는 timer 설치가
+아니라 실제 claim→검증→draft/hold PR→앱 결과 기록입니다. 꺼진 서버의 회차는 `Persistent=true`로
+다음 기동 때 한 번 처리합니다. 현재 회차가 실행 중이면 systemd가 겹쳐 실행하지 않습니다.
+정지는 `sudo systemctl disable --now autorec-runner.timer`로 이후 회차만 막습니다. 실행 중인
+작업을 강제 종료하면 결과가 불명일 수 있으므로 해당 claim을 확인한 뒤 재시도를 결정합니다.
+
 - 운영자 승인(2026-10-20 채팅, 원문): "네 에이전트가 자율적으로 develop PR 작성하는거 승인합니다."
-- **병합은 사람이 합니다.** PR은 draft로 남아 CI가 돌지 않고, merge train(`npm run merge-train`)은
-  draft를 병합하지 않습니다. 사람이 `gh pr ready <번호>`로 바꿀 때 CI가 시작합니다.
+- **병합은 사람이 합니다.** PR은 draft와 `ci:hold`를 유지하고, merge train(`npm run merge-train`)은
+  draft를 병합하지 않습니다. CI 보류 해제와 ready 전환도 운영자가 별도로 결정합니다.
 - 권한 범위: develop PR만 엽니다. 병합·auto-merge·main PR·force push·브랜치 삭제는 하지 않습니다.
   GitHub 토큰은 이 저장소 하나의 Contents·Pull requests 쓰기뿐입니다.
 - **결과를 모르면 다시 하지 않습니다.** push나 결과 보고의 성공 여부를 모르면 로그에 남기고

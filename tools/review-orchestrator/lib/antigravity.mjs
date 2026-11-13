@@ -67,16 +67,27 @@ export function antigravityAnswer(stdout) {
 /**
  * The quota from `agy -p /usage --output-format json` (no model turn, zero
  * tokens; measured on agy 1.5.4). The plan groups models and each group has
- * a weekly and a five-hour bucket. A Gemini reviewer draws on the "Gemini
- * Models" group, so the less-remaining bucket of that group is what is left.
+ * one or two buckets (weekly, five-hour). Which group bounds a reviewer
+ * depends on its model: "Gemini Models" holds Gemini Flash and Pro, while
+ * Gemini 4 Argon has a group of its own (seen on the box 2026-11-13). So the
+ * provider names its groups (`quotaGroups`, default "Gemini Models"), and the
+ * least-remaining bucket across them is what is left. A named group that is
+ * missing or empty is unknown: the panel changed, and a guess would assign.
  */
-export function antigravityQuotaFromUsage(body, now = Date.now()) {
+export const DEFAULT_QUOTA_GROUPS = Object.freeze(["Gemini Models"]);
+
+export function antigravityQuotaFromUsage(body, now = Date.now(), groups = DEFAULT_QUOTA_GROUPS) {
   if (!body || typeof body !== "object" || body.status !== "SUCCESS" ||
       body.command?.name !== "usage" || !Array.isArray(body.command?.data?.groups)) return UNKNOWN;
-  const group = body.command.data.groups.find((row) => row && row.name === "Gemini Models");
-  if (!group || !Array.isArray(group.buckets) || group.buckets.length === 0) return UNKNOWN;
+  const buckets = [];
+  for (const name of groups) {
+    const group = body.command.data.groups.find((row) => row && row.name === name);
+    if (!group || !Array.isArray(group.buckets) || group.buckets.length === 0) return UNKNOWN;
+    buckets.push(...group.buckets);
+  }
+  if (buckets.length === 0) return UNKNOWN;
   const remaining = [];
-  for (const bucket of group.buckets) {
+  for (const bucket of buckets) {
     const fraction = bucket?.remaining_fraction;
     const reset = typeof bucket?.reset_time === "string" ? Date.parse(bucket.reset_time) : NaN;
     // A bucket whose reset already passed is an old reading, not the account now.
@@ -125,7 +136,7 @@ export function antigravityQuota(provider, { spawnChild = spawn, now = Date.now(
     child.on("close", (code) => {
       if (code !== 0) return finish(UNKNOWN);
       try {
-        finish(antigravityQuotaFromUsage(JSON.parse(output), now));
+        finish(antigravityQuotaFromUsage(JSON.parse(output), now, provider.quotaGroups ?? DEFAULT_QUOTA_GROUPS));
       } catch {
         finish(UNKNOWN);
       }

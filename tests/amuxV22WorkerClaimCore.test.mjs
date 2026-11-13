@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
+import { AMUX_V22_GLOBAL_ACTIVE_LIMIT, amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
   amuxV22ResumeRoutes, amuxV22WorkerClaimEnabled, amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
   amuxV22TaskRoleSupported, amuxV22TaskWritesPatch, chooseAmuxV22WorkerRoute } from
   "../lib/amux/v22WorkerClaimCore.ts";
@@ -19,24 +19,62 @@ test("v22 claim requires its own exact environment switch", () => {
   }
 });
 
-test("global three, one per lane and the two reserved slots are separate", () => {
-  assert.equal(amuxV22ClaimCapacity({ lane: "normal",
-    verifiedWorkerCount: 3, totalAssigned: 0, laneAssigned: 0 }).allowed, true);
-  assert.equal(amuxV22ClaimCapacity({ lane: "normal",
-    verifiedWorkerCount: 3, totalAssigned: 1, laneAssigned: 1 }).allowed, false);
-  assert.equal(amuxV22ClaimCapacity({ lane: "parallel",
-    verifiedWorkerCount: 3, totalAssigned: 1, laneAssigned: 0 }).allowed, true);
-  assert.equal(amuxV22ClaimCapacity({ lane: "sev1",
-    verifiedWorkerCount: 3, totalAssigned: 2, laneAssigned: 0 }).allowed, true);
-  assert.equal(amuxV22ClaimCapacity({ lane: "sev1",
-    verifiedWorkerCount: 3, totalAssigned: 3, laneAssigned: 0 }).allowed, false);
-  assert.equal(amuxV22ClaimCapacity({ lane: "normal",
-    verifiedWorkerCount: 2, totalAssigned: 0, laneAssigned: 0 }).reason,
-  "reserved_capacity_unavailable");
-  assert.equal(amuxV22ClaimCapacity({ lane: "sev1",
-    verifiedWorkerCount: 1, totalAssigned: 0, laneAssigned: 0 }).allowed, true);
-  assert.equal(amuxV22ClaimCapacity({ lane: "sev1",
-    verifiedWorkerCount: 1, totalAssigned: 1, laneAssigned: 0 }).allowed, false);
+test("Tasks run in parallel up to the global limit and never past the verified workers", () => {
+  assert.equal(AMUX_V22_GLOBAL_ACTIVE_LIMIT, 6);
+  // A second, third ... normal Task no longer waits for the first.
+  for (let assigned = 0; assigned < 6; assigned += 1) {
+    assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 9,
+      totalAssigned: assigned }).allowed, true, `assigned ${assigned}`);
+  }
+  assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 9,
+    totalAssigned: 6 }).reason, "global_capacity_full");
+  // Fewer verified workers than the limit: one Task per worker.
+  assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 2,
+    totalAssigned: 1 }).allowed, true);
+  assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 2,
+    totalAssigned: 2 }).reason, "global_capacity_full");
+  assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 0,
+    totalAssigned: 0 }).reason, "capacity_unconfigured");
+  assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 3,
+    totalAssigned: -1 }).reason, "capacity_unconfigured");
+});
+
+test("the provider running the fewest Tasks wins before price", () => {
+  const route = (workerName, provider, perAttemptMicroUsd) => ({
+    routeId: workerName, workerName, provider, modelId: "model",
+    routePolicyDigest: "a".repeat(64), perAttemptMicroUsd,
+  });
+  const routes = [route("codex-chore", "openai", "100"),
+    route("copilot-impl", "github-copilot", "400"),
+    route("claude-impl", "anthropic", "900")];
+  const choose = (active) => chooseAmuxV22WorkerRoute({ routes,
+    priorAuthorWorkers: [], priorAuthorProviders: [], isReview: false,
+    activeByProvider: new Map(Object.entries(active)) })?.workerName;
+  // Nothing running: the cheapest, as before.
+  assert.equal(choose({}), "codex-chore");
+  assert.equal(chooseAmuxV22WorkerRoute({ routes, priorAuthorWorkers: [],
+    priorAuthorProviders: [], isReview: false })?.workerName, "codex-chore");
+  // Codex busy: the next Task goes to another provider, the cheaper one first.
+  assert.equal(choose({ openai: 1 }), "copilot-impl");
+  assert.equal(choose({ openai: 1, "github-copilot": 1 }), "claude-impl");
+  // Every provider equally busy: price again.
+  assert.equal(choose({ openai: 1, "github-copilot": 1, anthropic: 1 }), "codex-chore");
+  // A review still avoids its author's provider before anything else.
+  assert.equal(chooseAmuxV22WorkerRoute({ routes, priorAuthorWorkers: ["codex-chore"],
+    priorAuthorProviders: ["openai"], isReview: true,
+    activeByProvider: new Map([["anthropic", 2]]) })?.workerName, "copilot-impl");
+});
+
+test("one tick assigns every ready Task, logs what it passed over, and stops at an unknown outcome", () => {
+  const claim = readFileSync("lib/amux/v22WorkerClaimService.ts", "utf8");
+  const tick = claim.slice(claim.indexOf("export async function tickV22WorkerClaim"));
+  // No early return on the first assignment.
+  assert.doesNotMatch(tick, /return await claimCandidate/);
+  assert.match(tick, /claims\.push\(claimed\)/);
+  assert.match(tick, /event: "amux_v22_claim_tick"/);
+  assert.match(tick, /stop = "outcome_unknown";\s+break;/);
+  assert.match(claim, /isReview: card\.taskRole === "review", activeByProvider \}\)/);
+  assert.doesNotMatch(claim, /laneAssigned|lane_capacity_full|reserved_capacity_unavailable/);
 });
 
 test("review prefers another provider and never selects its author", () => {
@@ -117,7 +155,7 @@ test("claim only selects routes the environment-gated one-shot sidecar can execu
   assert.match(claim, /amuxV22TaskRoleSupported\(card\.taskRole\)/);
   assert.match(claim, /worker\.routing_roles\.includes\(executionRole\)/);
   assert.match(claim, /amuxV22OneShotRouteSupported\(route\.provider, route\.modelId\)/);
-  assert.match(claim, /"one_shot_role_unavailable",[\s\S]*?\]\.includes\(error\.code\)\) continue/);
+  assert.match(claim, /const SKIPPED_CODES = new Set\(\[[^\]]*"one_shot_role_unavailable"/);
 });
 
 test("v22 tick wire never disguises a receipt as a v8 grant", () => {

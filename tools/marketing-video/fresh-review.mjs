@@ -287,6 +287,25 @@ async function record({ locale, outDir, question, dry }) {
       await page.waitForTimeout(2000);
       await capture("differences", "Tomverse answer analysis: where the answers differ, with their quotes", ".studio-analysis-panel");
     }
+    // The same analysis in a narrow window, its lines wrapped short enough to read in a 9:16 film
+    // (at 1440 px a line runs ~1900 px, too wide for the kit's Screen). Nothing is sent: the page
+    // only reflows. A failure here keeps the captures above and is logged, not fatal.
+    try {
+      await page.setViewportSize({ width: 560, height: 1000 });
+      await page.waitForTimeout(2500);
+      await capture("differences-narrow", "Tomverse answer analysis in a narrow window: where the answers differ", ".studio-analysis-panel");
+      log.push({ columns: await page.evaluate(scrollAnswerColumns, 0.8) });
+      await page.waitForTimeout(800);
+      await capture("differences-narrow-more", "Tomverse answer analysis in a narrow window: further down, with their quotes", ".studio-analysis-panel");
+      const first = page.getByRole("tab").nth(0);
+      if (await first.count()) {
+        await first.click();
+        await page.waitForTimeout(2000);
+        await capture("summary-narrow", "Tomverse answer analysis in a narrow window: its summary", ".studio-analysis-panel");
+      }
+    } catch (error) {
+      log.push({ narrow: String(error?.message ?? error).slice(0, 300) });
+    }
     result = { code: 0, paid, captures, log };
   } catch (error) {
     if (error === DRY) {

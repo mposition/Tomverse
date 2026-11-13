@@ -11,6 +11,10 @@ let closeResult: boolean;
 let closes: Record<string, unknown>[];
 let sends: number;
 let rateLimits: number;
+let retries = 0;
+mock.module(mod("lib/dailyProductAgentStore.ts"), { namedExports: {
+  retryDailyProductTask: async () => { retries += 1; return true; },
+} });
 class ReauthenticationError extends Error {}
 
 mock.module("next-auth/next", { namedExports: { getServerSession: async () => role ? { user: { id: "operator" } } : null } });
@@ -40,6 +44,19 @@ const complete = () => POST(new Request("https://example.test/api/admin/product-
 }), { params: Promise.resolve({ suggestionId: "one" }) });
 
 beforeEach(() => { role = "owner"; recent = true; storedStatus = "open"; closeResult = true; closes = []; sends = 0; rateLimits = 0; });
+
+test("only a recently authenticated owner may queue another known-failed agent attempt", async () => {
+  retries = 0;
+  const retry = () => POST(new Request("https://example.test/api/admin/product-research/suggestions/one", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "retry_agent" }),
+  }), { params: Promise.resolve({ suggestionId: "one" }) });
+  role = "ops"; assert.equal((await retry()).status, 403);
+  role = "owner"; recent = false; assert.equal((await retry()).status, 428);
+  assert.equal(retries, 0);
+  recent = true;
+  assert.deepEqual(await (await retry()).json(), { status: "retry_queued" });
+  assert.equal(retries, 1); assert.equal(closes.length, 0); assert.equal(sends, 0);
+});
 
 test("owner and ops complete through the audited store without sending an AMUX idea", async () => {
   for (const allowed of ["owner", "ops"]) {

@@ -84,6 +84,14 @@ export async function claimNextRecommendation(input: {
     return prisma.$transaction(async (tx) => {
         await takeAuditChainLock(tx);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
+        return claimRecommendationInTransaction(tx, input.origin, now);
+    });
+}
+
+/** Caller holds the audit and optimizer locks, also shared with the daily agent. */
+export async function claimRecommendationInTransaction(
+    tx: Prisma.TransactionClient, origin: string, now: Date
+): Promise<ClaimedRecommendation | null> {
         if (!(await readRecAgentEnabled(tx))) return null;
         const cycles = await tx.autoRouterOptimizerCycle.findMany({
             where: { status: { not: "running" } },
@@ -132,12 +140,11 @@ export async function claimNextRecommendation(input: {
                 recommendation: { kind: next.kind, text: next.text },
                 findings,
                 cycle: { id: next.cycleId, createdAt: next.createdAt },
-                link: `${input.origin}/admin/routing#optimizer-cycle-${next.cycleId}`,
+                link: `${origin}/admin/routing#optimizer-cycle-${next.cycleId}`,
             }),
             leaseUntil,
             claimId,
         };
-    });
 }
 
 /**

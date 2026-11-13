@@ -46,7 +46,7 @@ type Action = "dismiss" | "send" | "complete";
 
 type RowState =
   | { readonly kind: "idle" }
-  | { readonly kind: "busy"; readonly action: Action }
+  | { readonly kind: "busy"; readonly action: Action | "retry_agent" }
   | { readonly kind: "done"; readonly message: string }
   | { readonly kind: "failed"; readonly failure: AdminApiFailure };
 
@@ -144,7 +144,7 @@ export function AdminScoutSuggestionsPanel({
   const visibleIds = new Set(visible.map((row) => row.id));
   const isOpen = (subject: string, top: number) => expanded[subject] ?? top === 0;
 
-  const act = async (suggestion: ScoutConsoleSuggestion, action: Action): Promise<AdminApiFailure | null> => {
+  const act = async (suggestion: ScoutConsoleSuggestion, action: Action | "retry_agent"): Promise<AdminApiFailure | null> => {
     setRows((current) => ({ ...current, [suggestion.id]: { kind: "busy", action } }));
     let response: Response;
     try {
@@ -165,12 +165,12 @@ export function AdminScoutSuggestionsPanel({
       return failure;
     }
     const body = (await response.json().catch(() => ({}))) as { status?: string; amuxIdeaId?: string | null };
-    if (body.status !== "completed" && body.status !== "sent" && body.status !== "dismissed" && body.status !== "unchanged") {
+    if (body.status !== "completed" && body.status !== "sent" && body.status !== "dismissed" && body.status !== "unchanged" && body.status !== "retry_queued") {
       const failure: AdminApiFailure = { message: m.failed, tone: "error", requiresReauthentication: false, approvalId: null };
       setRows((current) => ({ ...current, [suggestion.id]: { kind: "failed", failure } }));
       return failure;
     }
-    const message = body.status === "unchanged" ? m.unchanged : body.status === "completed" ? m.completed
+    const message = body.status === "retry_queued" ? m.agentRetryQueued : body.status === "unchanged" ? m.unchanged : body.status === "completed" ? m.completed
       : body.status === "sent" ? fill(m.sent, { ideaId: body.amuxIdeaId ?? "-" }) : m.dismissed;
     setRows((current) => ({ ...current, [suggestion.id]: { kind: "done", message } }));
     setSelected((current) => {
@@ -231,6 +231,15 @@ export function AdminScoutSuggestionsPanel({
             </div>
             <h4 className="mt-1.5 text-sm font-semibold text-zinc-50">{suggestion.title}</h4>
             <p className="mt-1 text-sm text-zinc-400">{suggestion.suggestion}</p>
+            {suggestion.agentWork ? (
+              <p className="mt-2 text-xs text-zinc-300" data-testid="scout-agent-work">
+                {m.agentWork[suggestion.agentWork.status]}
+                {suggestion.agentWork.reason ? ` · ${suggestion.agentWork.reason}` : null}
+                {suggestion.agentWork.prUrl ? (
+                  <> · <a className="text-blue-300 hover:text-blue-200" href={suggestion.agentWork.prUrl} target="_blank" rel="noreferrer">{suggestion.agentWork.prUrl}</a></>
+                ) : null}
+              </p>
+            ) : null}
             <details className="mt-1.5">
               <summary className="w-fit cursor-pointer text-xs font-medium text-blue-300 hover:text-blue-200">{m.evidenceShow}</summary>
               <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5">
@@ -250,6 +259,9 @@ export function AdminScoutSuggestionsPanel({
           <div className="flex flex-wrap gap-2 sm:shrink-0">
             {done ? null : (
               <>
+                {initial.canConfigure && suggestion.agentWork?.retryable ? (
+                  <button type="button" className={DISMISS_BUTTON} disabled={busy} onClick={() => act(suggestion, "retry_agent")}>{m.agentRetry}</button>
+                ) : null}
                 <button
                   type="button"
                   className={COMPLETE_BUTTON}
