@@ -8331,7 +8331,7 @@ model AmuxDmOwnerSettlement {
   taskStatus         String
   /// The engineering binding of the pull request (t2_pr), named, not referenced.
   bindingId          String?
-  /// open | applied | cancelled
+  /// open | claimed (a remake decided, its idea not filed yet) | applied | cancelled
   state              String    @default("open")
   /// stopped: retry | complete | close | remake; t2_pr: approve | retry | close
   decision           String?
@@ -8341,6 +8341,8 @@ model AmuxDmOwnerSettlement {
   /// An approval: the verified head and diff digest it approved, for the next stage.
   approvedHeadSha    String?
   approvedDiffDigest String?
+  /// A remake's idea request id, recorded by its claim before the idea is filed.
+  remakeRequestId    String?
   remakeIdeaId       String?
   cancelReason       String?
   handoffReason      String?

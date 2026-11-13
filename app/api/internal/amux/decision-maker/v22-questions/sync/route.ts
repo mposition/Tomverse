@@ -40,6 +40,7 @@ import {
   readAmuxDmOwnerSettlementSyncRows,
   recordAmuxDmOwnerSettlementsUnfilable,
 } from "@/lib/amux/dmOwnerSettlementService";
+import { resumeAmuxDmOwnerSettlementRemake } from "@/lib/amux/dmOwnerSettlementRemake";
 import { engineeringAgentT2DmReviewEnabled } from "@/lib/engineeringAgentT2DmReviewCore";
 import {
   engineeringAgentT2DmCards,
@@ -122,6 +123,11 @@ export async function POST(request: Request) {
       }).catch(() => {
         console.warn(JSON.stringify({ subsystem: "amux", event: "v22_result_review_sync_failed" }));
         return { pending: [], closing: [] };
+      });
+      // A remake an earlier tick claimed and did not finish: its idea read back,
+      // never filed again, and its cards closed or the person told.
+      await resumeAmuxDmOwnerSettlementRemake().catch(() => {
+        console.warn(JSON.stringify({ subsystem: "amux", event: "dm_owner_settlement_resume_failed" }));
       });
       const settlementOn = amuxDmOwnerSettlementEnabled();
       const settlement = await withAmuxDbBoundary(

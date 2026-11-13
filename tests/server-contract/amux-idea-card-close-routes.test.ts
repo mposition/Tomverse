@@ -122,6 +122,9 @@ mock.module(mod("lib/amux/dmOwnerSettlementService.ts"), { namedExports: {
   openAmuxDmOwnerSettlementCards: async (rows: { pending: unknown[] }) => ({ cards: rows.pending, unfilable: [] }),
   recordAmuxDmOwnerSettlementsUnfilable: async () => ({ recorded: 0 }),
 } });
+mock.module(mod("lib/amux/dmOwnerSettlementRemake.ts"), { namedExports: {
+  resumeAmuxDmOwnerSettlementRemake: async () => { world.calls.push("remake-resume"); return null; },
+} });
 mock.module(mod("lib/engineeringAgentT2DmReviewService.ts"), { namedExports: {
   readEngineeringAgentT2DmSyncRows: async () => ({ pending: world.t2Pending, closing: world.t2Closing }),
   engineeringAgentT2DmCards: (pending: unknown[]) => ({ cards: pending, unfilable: world.t2Unfilable }),
@@ -189,7 +192,7 @@ test("the sync lists a card close question beside the v22 ones, three at most, i
   const body = await response.json();
   assert.deepEqual(body, { synced: true, resolved: "closed", cursor: { move: "keep" },
     pending: [closeEntry(QUESTION)], closing: [{ question_id: OTHER, card_id: "CC-1" }] });
-  assert.deepEqual(world.calls, ["walk", "open", "close-read"], "the walk first, as before");
+  assert.deepEqual(world.calls, ["walk", "open", "close-read", "remake-resume"], "the walk first, as before");
 
   reset({ v22Pending: [v22Entry("a"), v22Entry("b"), v22Entry("c")], closePending: [closeEntry(QUESTION)],
     v22Closing: [{ questionId: "a", cardId: "1" }, { questionId: "b", cardId: "2" }, { questionId: "c", cardId: "3" }],

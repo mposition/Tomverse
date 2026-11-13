@@ -6,7 +6,10 @@
 -- settle it; the app applies a reversible one (retry, complete, close,
 -- remake) behind the DM approver switch, and records an approval of a review
 -- pull request for the next stage to act on. The human escalation stays open
--- beside it: whichever answers first wins.
+-- beside it: whichever answers first wins. A remake is claimed first
+-- ("claimed": the Decision Maker decided, its idea not filed yet), in the
+-- transaction that holds the request, so no idea is filed for an answer a
+-- person decided first or under the kill switch; its cards close after.
 --
 -- Additive: one new table, no existing row changes. Its id is a version 8
 -- UUID derived from the escalation, so the relay's card writes tell it apart
@@ -30,6 +33,7 @@ CREATE TABLE "AmuxDmOwnerSettlement" (
   "requestId" TEXT,
   "approvedHeadSha" TEXT,
   "approvedDiffDigest" TEXT,
+  "remakeRequestId" TEXT,
   "remakeIdeaId" TEXT,
   "cancelReason" TEXT,
   "handoffReason" TEXT,
@@ -54,7 +58,12 @@ CREATE TABLE "AmuxDmOwnerSettlement" (
     ("approvedHeadSha" IS NULL OR "approvedHeadSha" ~ '^[0-9a-f]{40}$') AND
     ("approvedDiffDigest" IS NULL OR "approvedDiffDigest" ~ '^[0-9a-f]{64}$') AND
     (("approvedHeadSha" IS NULL) = ("approvedDiffDigest" IS NULL)) AND
+    ("remakeRequestId" IS NULL OR
+      "remakeRequestId" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') AND
     ("remakeIdeaId" IS NULL OR "remakeIdeaId" ~ '^[A-Za-z0-9_-]{1,64}$') AND
+    -- A remake's idea is filed only under the request id its claim recorded.
+    ("remakeIdeaId" IS NULL OR "remakeRequestId" IS NOT NULL) AND
+    (("decision" = 'remake') = ("remakeRequestId" IS NOT NULL)) AND
     ("cancelReason" IS NULL OR "cancelReason" ~ '^[a-z_]{1,64}$') AND
     (("handoffReason" IS NULL) = ("handoffAt" IS NULL)) AND
     ("handoffReason" IS NULL OR "handoffReason" ~ '^[a-z_]{1,64}$') AND
@@ -67,6 +76,11 @@ CREATE TABLE "AmuxDmOwnerSettlement" (
     ("state" = 'open' AND "decision" IS NULL AND "answerSource" IS NULL AND
       "decidedAt" IS NULL AND "cancelReason" IS NULL AND
       "approvedHeadSha" IS NULL AND "remakeIdeaId" IS NULL) OR
+    -- The Decision Maker decided a remake; its idea is not filed yet. It may be
+    -- handed to the person from here when the idea cannot be filed.
+    ("state" = 'claimed' AND "kind" = 'stopped' AND "decision" = 'remake' AND
+      "answerSource" IS NOT NULL AND "requestId" IS NOT NULL AND "decidedAt" IS NOT NULL AND
+      "cancelReason" IS NULL AND "approvedHeadSha" IS NULL AND "remakeIdeaId" IS NULL) OR
     ("state" = 'applied' AND "answerSource" IS NOT NULL AND "requestId" IS NOT NULL AND
       "decidedAt" IS NOT NULL AND "cancelReason" IS NULL AND "handoffAt" IS NULL AND
       (("kind" = 'stopped' AND "decision" IN ('retry', 'complete', 'close', 'remake')) OR
@@ -74,9 +88,10 @@ CREATE TABLE "AmuxDmOwnerSettlement" (
       -- An approval names the exact change it approved, and only an approval does.
       (("decision" = 'approve') = ("approvedHeadSha" IS NOT NULL)) AND
       (("decision" = 'remake') = ("remakeIdeaId" IS NOT NULL))) OR
-    -- A remake whose idea was filed before the Task moved keeps the idea's id.
-    ("state" = 'cancelled' AND "decision" IS NULL AND "cancelReason" IS NOT NULL AND
-      "approvedHeadSha" IS NULL)
+    -- A claimed remake whose Task moved keeps its decision, and its idea's id
+    -- when the idea was filed first.
+    ("state" = 'cancelled' AND ("decision" IS NULL OR "decision" = 'remake') AND
+      "cancelReason" IS NOT NULL AND "approvedHeadSha" IS NULL)
   ),
   CONSTRAINT "AmuxDmOwnerSettlement_taskId_fkey" FOREIGN KEY ("taskId")
     REFERENCES "AmuxWorkItem"("id") ON DELETE RESTRICT ON UPDATE RESTRICT,

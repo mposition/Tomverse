@@ -44,8 +44,8 @@ import { recordEngineeringAgentT2DmLocalCard, recordEngineeringAgentT2DmLocalCar
   "../engineeringAgentT2DmReviewService.ts";
 import { amuxDmOwnerSettlementAnswerOf, isAmuxDmOwnerSettlementId,
   type AmuxDmOwnerSettlementAnswer } from "./dmOwnerSettlementCore.ts";
-import { fileAmuxDmOwnerSettlementRemakeIdea } from "./dmOwnerSettlementRemake.ts";
-import { applyAmuxDmOwnerSettlementDecision, readOpenAmuxDmOwnerSettlementOfCard,
+import { settleAmuxDmOwnerSettlementAnswer } from "./dmOwnerSettlementRemake.ts";
+import { readOpenAmuxDmOwnerSettlementOfCard,
   recordAmuxDmOwnerSettlementHandoff, recordAmuxDmOwnerSettlementLocalCard,
   recordAmuxDmOwnerSettlementLocalCardClosed } from "./dmOwnerSettlementService.ts";
 
@@ -466,17 +466,10 @@ export async function runAmuxV22ResolveStep(after: DmDeliveryCursor | null):
             requestId: step.requestId, reason: "answer_unreadable", now: context.dbNow }));
         return { resolved: null, cursor: step.cursor };
       }
-      const { answer } = step;
-      // A remake's idea is filed first, outside the settlement's transaction.
-      // One whose outcome is not known yet is stepped past, not waited on: the
-      // walk meets it again on its next pass and reads the idea back first.
-      const filed = answer.decision === "remake" ? await fileAmuxDmOwnerSettlementRemakeIdea({
-        settlementId: step.settlementId, ideaText: answer.ideaText }) : undefined;
-      if (filed && "pending" in filed) return { resolved: null, cursor: step.cursor };
-      const applied = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementApply,
-        (tx, context) => applyAmuxDmOwnerSettlementDecision(tx, { settlementId: step.settlementId,
-          answer, source: "dm_confirmed", requestId: step.requestId, now: context.dbNow,
-          remake: filed }));
+      // The answer, and for a remake its claim, in one transaction; a remake's
+      // idea is filed only once that claim has committed (dmOwnerSettlementRemake.ts).
+      const applied = await settleAmuxDmOwnerSettlementAnswer({ settlementId: step.settlementId,
+        answer: step.answer, source: "dm_confirmed", requestId: step.requestId });
       // Held by the kill switch: keep the place. Handed to the person: step past it.
       if (!applied.applied && applied.outcome !== "handed_off")
         return { resolved: null, cursor: { move: "keep" } };

@@ -636,11 +636,19 @@ export const AMUX_DB_BOUNDARIES = {
   },
   // Apply: setup + audit chain lock + switches + the locked settlement and card
   // + the approval read, or the card write and the escalation write + the
-  // settlement + canonical audit 4 + fence.
+  // settlement + canonical audit 4 + fence. A remake's claim and its close of
+  // the cards once the idea is filed take the same.
   decisionMakerOwnerSettlementApply: {
     operation: "decision_maker_owner_settlement_apply",
     prismaCallCeiling: 12,
     isolation: "mutation",
+  },
+  // A claimed remake, read just before its idea is filed: setup + switches +
+  // the claim + fence; or the one claim an earlier tick left unfinished.
+  decisionMakerOwnerSettlementRemakeRead: {
+    operation: "decision_maker_owner_settlement_remake_read",
+    prismaCallCeiling: 4,
+    isolation: "read",
   },
   // The Decision Maker as the approver (TOMVERSE_AMUX_DM_APPROVER), its read:
   // setup + switches + the open app-answered cards + the next open proposal

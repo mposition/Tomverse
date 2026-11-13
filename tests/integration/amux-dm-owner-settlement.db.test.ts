@@ -65,12 +65,37 @@ async function sync(enabled = true) {
 }
 
 async function apply(settlementId: string, answer: Parameters<
-  Awaited<ReturnType<typeof services>>["applyAmuxDmOwnerSettlementDecision"]>[1]["answer"],
-  remake?: { ideaId: string } | { refused: string }) {
+  Awaited<ReturnType<typeof services>>["applyAmuxDmOwnerSettlementDecision"]>[1]["answer"]) {
   const { withAmuxDbBoundary, AMUX_DB_BOUNDARIES, applyAmuxDmOwnerSettlementDecision } = await services();
   return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementApply,
     (tx, context) => applyAmuxDmOwnerSettlementDecision(tx, { settlementId, answer, source: "dm",
-      requestId: `req-${randomUUID().slice(0, 8)}`, now: context.dbNow, remake }));
+      requestId: `req-${randomUUID().slice(0, 8)}`, now: context.dbNow }));
+}
+
+type Filing = { ideaId: string } | { refused: string } | { unknown: true };
+
+/** The idea intake, replaced: what it is asked, and what the settlement was when it was asked. */
+function fakeIntake(tx: LifecycleTx, settlementId: string, answer: Filing, readBack: { ideaId: string } | null = null) {
+  const seen = { filed: [] as Array<{ requestId: string; ideaText: string; state: unknown; archived: boolean }>,
+    readBack: [] as string[] };
+  return { seen, deps: {
+    fileIdea: async (input: { requestId: string; ideaText: string }) => {
+      const row = await settlementRow(tx, settlementId);
+      const [task] = await tx.$queryRaw<Array<{ archived: boolean }>>`
+        SELECT "archivedAt" IS NOT NULL AS "archived" FROM "AmuxWorkItem" WHERE "id" = ${row!.taskId as string}`;
+      seen.filed.push({ ...input, state: row?.state, archived: task!.archived });
+      return answer;
+    },
+    readBack: async (requestId: string) => { seen.readBack.push(requestId); return readBack; },
+  } };
+}
+
+async function settle(settlementId: string, answer: Parameters<
+  Awaited<ReturnType<typeof services>>["applyAmuxDmOwnerSettlementDecision"]>[1]["answer"],
+  deps: ReturnType<typeof fakeIntake>["deps"], source: "dm" | "dm_confirmed" = "dm_confirmed") {
+  const { settleAmuxDmOwnerSettlementAnswer } = await import("@/lib/amux/dmOwnerSettlementRemake");
+  return settleAmuxDmOwnerSettlementAnswer({ settlementId, answer, source,
+    requestId: `req-${randomUUID().slice(0, 8)}` }, deps);
 }
 
 const settlementRow = async (tx: LifecycleTx, id: string) => (await tx.$queryRaw<Array<Record<string, unknown>>>`
@@ -208,7 +233,9 @@ test("complete finishes the Task terminal on the database clock; close archives 
   });
 });
 
-test("remake closes the card and the unstarted cards waiting on it, and names the idea filed for them", async () => {
+const REMAKE = { decision: "remake" as const, ideaText: "One card: add the router failure name and wire it." };
+
+test("a confirmed remake is claimed first, then its idea filed, then the card and the unstarted cards waiting on it close", async () => {
   await lifecycle(async (tx) => {
     const ids = { waiting: randomUUID(), chained: randomUUID(), started: randomUUID(), unrelated: randomUUID() };
     const card = await stoppedTask(tx, { afterSettlement: remakeSiblings(ids) });
@@ -218,28 +245,142 @@ test("remake closes the card and the unstarted cards waiting on it, and names th
     assert.deepEqual(siblings.filter((row) => row.waitsOnThis).map((row) => row.id).sort(),
       [ids.waiting, ids.started].sort());
 
-    const refused = await apply(card.settlementId, { decision: "remake", ideaText: "One card" }, { refused: "intake_disabled" });
-    assert.deepEqual(refused, { applied: false, outcome: "handed_off" }, "no idea, no close");
-    assert.equal((await taskRow(tx, card.taskId)).archivedAt, null);
-  });
-  await lifecycle(async (tx) => {
-    const ids = { waiting: randomUUID(), chained: randomUUID(), started: randomUUID(), unrelated: randomUUID() };
-    const card = await stoppedTask(tx, { afterSettlement: remakeSiblings(ids) });
-    await sync(true);
     const ideaId = randomUUID();
-    assert.deepEqual(await apply(card.settlementId, { decision: "remake", ideaText: "One card" }, { ideaId }),
-      { applied: true, outcome: "remade" });
+    const intake = fakeIntake(tx, card.settlementId, { ideaId });
+    assert.deepEqual(await settle(card.settlementId, REMAKE, intake.deps), { applied: true, outcome: "remade" });
+    assert.equal(intake.seen.filed.length, 1);
+    assert.equal(intake.seen.filed[0]!.state, "claimed", "the idea is filed only after the claim committed");
+    assert.equal(intake.seen.filed[0]!.archived, false, "and before any card closes");
+    assert.equal(intake.seen.filed[0]!.ideaText, REMAKE.ideaText);
     for (const id of [card.taskId, ids.waiting, ids.chained])
       assert.ok((await taskRow(tx, id)).archivedAt, `${id} is closed`);
     for (const id of [ids.started, ids.unrelated])
       assert.equal((await taskRow(tx, id)).archivedAt, null, `${id} is left: started, or not waiting on it`);
     const row = await settlementRow(tx, card.settlementId);
+    assert.equal(row?.state, "applied");
     assert.equal(row?.decision, "remake");
+    assert.equal(row?.answerSource, "dm_confirmed");
     assert.equal(row?.remakeIdeaId, ideaId);
+    assert.equal(row?.remakeRequestId, intake.seen.filed[0]!.requestId, "filed under the request id the claim recorded");
+    const claimed = await tx.adminAuditLog.findFirst({ where: { targetId: card.taskId,
+      action: "amux.dm_owner_settlement.remake_claimed" }, select: { entryHash: true } });
+    assert.ok(claimed?.entryHash, "the claim is in the hash chain");
     const audit = await appliedAudit(tx, card.taskId);
     assert.deepEqual((audit?.metadata as { closedTaskIds: string[] }).closedTaskIds,
       [card.taskId, ids.waiting, ids.chained].sort());
   });
+});
+
+test("a person who answered first, or the kill switch, means no idea is filed", async () => {
+  // The person resolved the card's escalation before the answer was applied.
+  await lifecycle(async (tx) => {
+    const card = await stoppedTask(tx);
+    await sync(true);
+    await tx.$executeRaw`UPDATE "AmuxHumanEscalation" SET "status" = 'resolved', "resolvedById" = 'person',
+      "resolution" = 'Handled it myself.', "resolutionOutcome" = 'block',
+      "resolvedAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ${card.escalationId}`;
+    const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() });
+    assert.deepEqual(await settle(card.settlementId, REMAKE, intake.deps), { applied: true, outcome: "cancelled" });
+    assert.equal(intake.seen.filed.length, 0);
+  });
+  // The approver's claim of the request is refused (a person judged it first,
+  // or it is not there): nothing is applied and nothing is filed.
+  await lifecycle(async (tx) => {
+    const card = await stoppedTask(tx);
+    await sync(true);
+    const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() });
+    const { applyAmuxDmAutoApplyCandidate } = await import("@/lib/amux/dmAutoApplyService");
+    assert.deepEqual(await applyAmuxDmAutoApplyCandidate({ kind: "owner_settlement",
+      requestId: "req-judged", cardId: `OS-${randomUUID().slice(0, 8)}`, questionRevision: 1,
+      settlementId: card.settlementId, answer: REMAKE }, intake.deps),
+      { requestId: "req-judged", kind: "owner_settlement", applied: false });
+    assert.equal(intake.seen.filed.length, 0);
+    assert.equal((await settlementRow(tx, card.settlementId))?.state, "open");
+  });
+  // The kill switch is on when the answer comes: nothing is claimed.
+  await lifecycle(async (tx) => {
+    const card = await stoppedTask(tx);
+    await sync(true);
+    const { recordDecisionMakerSwitchByOperator } = await services();
+    await recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: "kill_switch", value: "on" });
+    const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() });
+    assert.deepEqual(await settle(card.settlementId, REMAKE, intake.deps), { applied: false, outcome: null });
+    assert.equal(intake.seen.filed.length, 0);
+    assert.equal((await settlementRow(tx, card.settlementId))?.state, "open");
+  });
+  // The kill switch goes on after the claim: it is read again before the idea,
+  // nothing is filed and the person decides.
+  await lifecycle(async (tx) => {
+    const card = await stoppedTask(tx);
+    await sync(true);
+    assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
+    const { recordDecisionMakerSwitchByOperator } = await services();
+    await recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: "kill_switch", value: "on" });
+    const row = await settlementRow(tx, card.settlementId);
+    const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() });
+    const { continueAmuxDmOwnerSettlementRemake } = await import("@/lib/amux/dmOwnerSettlementRemake");
+    assert.deepEqual(await continueAmuxDmOwnerSettlementRemake({ settlementId: card.settlementId,
+      requestId: row!.requestId as string, remakeRequestId: row!.remakeRequestId as string,
+      ideaText: REMAKE.ideaText }, intake.deps), { applied: false, outcome: "handed_off" });
+    assert.equal(intake.seen.filed.length, 0);
+    assert.equal((await settlementRow(tx, card.settlementId))?.handoffReason, "remake_held");
+    assert.equal((await taskRow(tx, card.taskId)).archivedAt, null);
+  });
+});
+
+test("an idea the intake refuses, or whose outcome nobody knows and cannot be read back, goes to the person; it is never filed twice", async () => {
+  const cases: Array<[Filing, { ideaId: string } | null, string]> = [
+    [{ refused: "idea_refused" }, null, "remake_refused"], [{ unknown: true }, null, "remake_unknown"]];
+  for (const [filing, readBack, reason] of cases) {
+    await lifecycle(async (tx) => {
+      const card = await stoppedTask(tx);
+      await sync(true);
+      const intake = fakeIntake(tx, card.settlementId, filing, readBack);
+      assert.deepEqual(await settle(card.settlementId, REMAKE, intake.deps), { applied: false, outcome: "handed_off" });
+      assert.equal(intake.seen.filed.length, 1, "filed once");
+      const row = await settlementRow(tx, card.settlementId);
+      assert.equal(row?.state, "claimed");
+      assert.equal(row?.handoffReason, reason);
+      assert.equal((await taskRow(tx, card.taskId)).archivedAt, null, "no idea, no close");
+      if ("unknown" in filing)
+        assert.deepEqual(intake.seen.readBack, [row!.remakeRequestId], "read back once, by its request id");
+      const after = await sync(true);
+      assert.ok(!after.pending.some((entry) => entry.settlementId === card.settlementId));
+    });
+  }
+  // An unknown outcome that reads back committed is the idea: the cards close.
+  await lifecycle(async (tx) => {
+    const card = await stoppedTask(tx);
+    await sync(true);
+    const ideaId = randomUUID();
+    const intake = fakeIntake(tx, card.settlementId, { unknown: true }, { ideaId });
+    assert.deepEqual(await settle(card.settlementId, REMAKE, intake.deps), { applied: true, outcome: "remade" });
+    assert.equal(intake.seen.filed.length, 1);
+    assert.equal((await settlementRow(tx, card.settlementId))?.remakeIdeaId, ideaId);
+  });
+  // A claim an earlier tick left unfinished is finished from the read-back
+  // alone, or handed to the person: nothing is filed again.
+  for (const back of [{ ideaId: randomUUID() }, null]) {
+    await lifecycle(async (tx) => {
+      const card = await stoppedTask(tx);
+      await sync(true);
+      assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
+      await tx.$executeRaw`UPDATE "AmuxDmOwnerSettlement" SET "decidedAt" = "decidedAt" - INTERVAL '3 minutes'
+        WHERE "id" = ${card.settlementId}`;
+      const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() }, back);
+      const { resumeAmuxDmOwnerSettlementRemake } = await import("@/lib/amux/dmOwnerSettlementRemake");
+      const resumed = await resumeAmuxDmOwnerSettlementRemake(intake.deps);
+      assert.equal(intake.seen.filed.length, 0, "never filed again");
+      const row = await settlementRow(tx, card.settlementId);
+      if (back) {
+        assert.deepEqual(resumed, { applied: true, outcome: "remade" });
+        assert.equal(row?.remakeIdeaId, back.ideaId);
+      } else {
+        assert.deepEqual(resumed, { applied: false, outcome: "handed_off" });
+        assert.equal(row?.handoffReason, "remake_unknown");
+      }
+    });
+  }
 });
 
 test("a review pull request's approval is recorded with its verified head and diff; the Task and its escalation stay", async () => {
@@ -384,10 +525,20 @@ test("the table refuses what the lifecycle does not allow", async () => {
       UPDATE "AmuxDmOwnerSettlement" SET "state" = 'applied', "decision" = 'approve', "answerSource" = 'dm',
         "requestId" = 'r', "decidedAt" = now() WHERE "id" = ${card.settlementId}`), true,
       "a stopped Task is never approved, and an approval names its head");
-    assert.equal(await refusedBy("AmuxDmOwnerSettlement_state_check", () => tx.$executeRaw`
+    assert.equal(await refusedBy("AmuxDmOwnerSettlement_shape_check", () => tx.$executeRaw`
       UPDATE "AmuxDmOwnerSettlement" SET "state" = 'applied', "decision" = 'remake', "answerSource" = 'dm',
         "requestId" = 'r', "decidedAt" = now() WHERE "id" = ${card.settlementId}`), true,
-      "a remake names its idea");
+      "a remake names its claim's idea request id");
+    assert.equal(await refusedBy("AmuxDmOwnerSettlement_state_check", () => tx.$executeRaw`
+      UPDATE "AmuxDmOwnerSettlement" SET "state" = 'applied', "decision" = 'remake', "answerSource" = 'dm',
+        "requestId" = 'r', "remakeRequestId" = ${"00000000-0000-4000-8000-000000000002"},
+        "decidedAt" = now() WHERE "id" = ${card.settlementId}`), true,
+      "an applied remake names its idea");
+    assert.equal(await refusedBy("AmuxDmOwnerSettlement_state_check", () => tx.$executeRaw`
+      UPDATE "AmuxDmOwnerSettlement" SET "state" = 'claimed', "decision" = 'remake', "answerSource" = 'dm',
+        "requestId" = 'r', "remakeRequestId" = ${"00000000-0000-4000-8000-000000000002"},
+        "remakeIdeaId" = 'idea-1', "decidedAt" = now() WHERE "id" = ${card.settlementId}`), true,
+      "a claim has no idea yet");
     assert.equal(await refusedBy("AmuxDmOwnerSettlement_shape_check", () => tx.$executeRaw`
       UPDATE "AmuxDmOwnerSettlement" SET "kind" = 't2_pr' WHERE "id" = ${card.settlementId}`), true,
       "a pull request settlement names its binding");

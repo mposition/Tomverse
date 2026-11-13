@@ -10,7 +10,7 @@ import { settlementDestinationForBudget } from "@/lib/amux/executionBudgetCore";
 import { readAmuxCardTitle } from "./adminExecutionRead.ts";
 import {
   AMUX_DM_OWNER_SETTLEMENT_DECISIONS, amuxDmOwnerSettlementCard, amuxDmOwnerSettlementId,
-  amuxDmOwnerSettlementKind, isAmuxDmOwnerSettlementId,
+  amuxDmOwnerSettlementKind, amuxDmOwnerSettlementRemakeRequestId, isAmuxDmOwnerSettlementId,
   type AmuxDmOwnerSettlementAnswer, type AmuxDmOwnerSettlementKind,
 } from "./dmOwnerSettlementCore.ts";
 import {
@@ -48,6 +48,7 @@ export const AMUX_DM_OWNER_SETTLEMENT_PENDING_SCAN = 12;
 const SIBLINGS_READ = 8;
 export const AMUX_DM_OWNER_SETTLEMENT_APPLIED_ACTION = "amux.dm_owner_settlement.applied";
 export const AMUX_DM_OWNER_SETTLEMENT_HANDED_OFF_ACTION = "amux.dm_owner_settlement.handed_off";
+export const AMUX_DM_OWNER_SETTLEMENT_REMAKE_CLAIMED_ACTION = "amux.dm_owner_settlement.remake_claimed";
 
 type SealedTitle = { cardTitle: string; sourceSystem: string; sourceSnapshot: Prisma.JsonValue;
   v4TitleCiphertext: Uint8Array<ArrayBuffer> | null; v4TitleKeyId: string | null;
@@ -83,7 +84,7 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
         ELSE 'escalation_resolved' END,
       "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
     FROM "AmuxWorkItem" w, "AmuxHumanEscalation" e
-    WHERE w."id" = s."taskId" AND e."id" = s."escalationId" AND s."state" = 'open'
+    WHERE w."id" = s."taskId" AND e."id" = s."escalationId" AND s."state" IN ('open', 'claimed')
       AND (w."status" <> s."taskStatus" OR w."archivedAt" IS NOT NULL
         OR e."status" NOT IN ('open', 'acknowledged')
         OR (SELECT x."id" FROM "AmuxExecutionAttempt" x WHERE x."taskId" = w."id"
@@ -297,6 +298,7 @@ type LockedSettlement = AmuxStoppedCardLockedFacts & {
   settlementId: string; state: string; handedOff: boolean; kind: AmuxDmOwnerSettlementKind;
   taskId: string; escalationId: string; attemptId: string | null; bindingId: string | null;
   taskStatus: string; escalationOpen: boolean;
+  answerSource: string | null; requestId: string | null; remakeRequestId: string | null;
   lastAttempt: { id: string; attemptNumber: number; endedAt: string | null; outcome: string | null;
     reason: string | null } | null;
 };
@@ -307,6 +309,7 @@ async function lockSettlement(tx: Prisma.TransactionClient, settlementId: string
   const rows = await tx.$queryRaw<LockedSettlement[]>`
     SELECT s."id" AS "settlementId", s."state", s."handoffAt" IS NOT NULL AS "handedOff", s."kind",
       s."taskId", s."escalationId", s."attemptId", s."bindingId", s."taskStatus",
+      s."answerSource", s."requestId", s."remakeRequestId",
       w."id", w."displayKey", w."sourceSystem", w."cardType", w."status", w."revision", w."archivedAt",
       w."v22ReceiptId"::text AS "v22ReceiptId", w."taskRole", w."executionGrade",
       EXISTS (SELECT 1 FROM "AmuxWorkDelivery" d WHERE d."taskId" = w."id"
@@ -329,7 +332,65 @@ async function lockSettlement(tx: Prisma.TransactionClient, settlementId: string
 }
 
 export type AmuxDmOwnerSettlementOutcome =
-  | "handed_off" | "cancelled" | "todo" | "done" | "closed" | "remade" | "approved";
+  | "handed_off" | "cancelled" | "todo" | "done" | "closed" | "remade" | "approved" | "remake_claimed";
+
+export type AmuxDmOwnerSettlementApplied = {
+  applied: boolean; outcome: AmuxDmOwnerSettlementOutcome | null;
+  /** A claimed remake: the idea request id it is filed under, before its cards close. */
+  remakeRequestId?: string;
+};
+
+const taskMoved = (row: LockedSettlement) =>
+  row.status !== row.taskStatus || row.archivedAt !== null || !row.escalationOpen ||
+  (row.lastAttempt?.id ?? null) !== row.attemptId || row.activeDelivery || row.liveAttempt ||
+  row.sourceSystem !== "admin-idea-v4";
+
+/** The writes every applier shares, over one locked settlement. */
+function settlementWrites(tx: Prisma.TransactionClient, row: LockedSettlement, input: {
+  decision: string; source: string; requestId: string; now: Date }) {
+  const at = input.now.toISOString();
+  return {
+    cancel: async (reason: string, remakeIdeaId: string | null = null) => {
+      await tx.$executeRaw`
+        UPDATE "AmuxDmOwnerSettlement" SET "state" = 'cancelled', "cancelReason" = ${reason},
+          "remakeIdeaId" = coalesce(${remakeIdeaId}::text, "remakeIdeaId"),
+          "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+        WHERE "id" = ${row.settlementId} AND "state" IN ('open', 'claimed')`;
+      return { applied: true, outcome: "cancelled" as const };
+    },
+    handOff: async (reason: string) => {
+      const handed = await tx.$executeRaw`
+        UPDATE "AmuxDmOwnerSettlement" SET "handoffReason" = ${reason},
+          "handoffAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
+          "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+        WHERE "id" = ${row.settlementId} AND "state" IN ('open', 'claimed') AND "handoffAt" IS NULL`;
+      if (handed === 1)
+        await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+          action: AMUX_DM_OWNER_SETTLEMENT_HANDED_OFF_ACTION, targetType: "AmuxDmOwnerSettlement",
+          targetId: row.settlementId,
+          summary: "Left a stopped v22 Task to a person: the Decision Maker's answer could not be applied.",
+          metadata: { taskId: row.taskId, requestId: input.requestId, reason,
+            decision: input.decision, source: input.source } });
+      return { applied: false, outcome: "handed_off" as const };
+    },
+    audit: (summary: string, metadata: Record<string, unknown> = {}) => ({
+      action: AMUX_DM_OWNER_SETTLEMENT_APPLIED_ACTION, summary,
+      metadata: { settlementId: row.settlementId, kind: row.kind, decision: input.decision,
+        source: input.source, requestId: input.requestId, escalationId: row.escalationId, ...metadata } }),
+    resolution: `Decision Maker settlement (${input.source}): ${input.decision}`,
+  };
+}
+
+/** The audit chain lock, the kill switch read under it, then the settlement
+ * and its card. Null under the kill switch or when it cannot be read. */
+async function lockUnderKillSwitch(tx: Prisma.TransactionClient, settlementId: string) {
+  await takeAuditChainLock(tx);
+  let killSwitch: boolean | null;
+  try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
+  catch { killSwitch = null; }
+  if (killSwitch !== false) return null;
+  return { row: await lockSettlement(tx, settlementId) };
+}
 
 /**
  * Applies a Decision Maker answer to a settlement: the audit chain lock, the
@@ -338,74 +399,61 @@ export type AmuxDmOwnerSettlementOutcome =
  * escalation a person resolved cancels the settlement instead. retry returns
  * the Task to todo within its attempt budget (a spent budget leaves it to the
  * person); complete and close are the owner's settlement done by the system
- * (legacyCardSystemService.ts); remake closes the card and the unstarted cards
- * waiting on it and names the idea the caller already filed for them; approve
- * records the pull request's verified head and diff digest and changes nothing
- * else. Every write past the judgment is audited once through the chain writer.
- * At most ten statements: lock, switches, the locked rows, the approval read
- * or the card and escalation writes, the settlement, canonical audit 4.
+ * (legacyCardSystemService.ts); approve records the pull request's verified
+ * head and diff digest and changes nothing else.
+ *
+ * A remake is only claimed here: the settlement becomes `claimed`, with the
+ * idea request id its idea will be filed under, in the transaction that holds
+ * the request -- the approver's claim of it, or after the operator's judgment
+ * -- so no idea is ever filed for an answer a person decided first, or under
+ * the kill switch. The caller files the idea and then closes the cards
+ * (dmOwnerSettlementRemake.ts). Every write past the judgment is audited once
+ * through the chain writer. At most ten statements: lock, switches, the locked
+ * rows, the approval read or the card and escalation writes, the settlement,
+ * canonical audit 4.
  */
 export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionClient, input: {
   settlementId: string; answer: AmuxDmOwnerSettlementAnswer; source: "dm" | "dm_confirmed";
   requestId: string; now: Date;
-  /** A remake's idea, filed before this transaction, or why it could not be. */
-  remake?: { ideaId: string } | { refused: string };
-}): Promise<{ applied: boolean; outcome: AmuxDmOwnerSettlementOutcome | null }> {
-  await takeAuditChainLock(tx);
-  let killSwitch: boolean | null;
-  try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
-  catch { killSwitch = null; }
-  if (killSwitch !== false) return { applied: false, outcome: null };
-  const row = await lockSettlement(tx, input.settlementId);
+}): Promise<AmuxDmOwnerSettlementApplied> {
+  const locked = await lockUnderKillSwitch(tx, input.settlementId);
+  if (!locked) return { applied: false, outcome: null };
+  const { row } = locked;
   if (!row || row.state !== "open") return { applied: false, outcome: null };
   // Handed to the person: no later Decision Maker answer decides it.
   if (row.handedOff) return { applied: false, outcome: "handed_off" };
-  const at = input.now.toISOString();
-  const cancel = async (reason: string) => {
-    await tx.$executeRaw`
-      UPDATE "AmuxDmOwnerSettlement" SET "state" = 'cancelled', "cancelReason" = ${reason},
-        "remakeIdeaId" = ${input.remake && "ideaId" in input.remake ? input.remake.ideaId : null},
-        "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
-      WHERE "id" = ${row.settlementId} AND "state" = 'open'`;
-    return { applied: true, outcome: "cancelled" as const };
-  };
-  const handOff = async (reason: string) => {
-    const handed = await tx.$executeRaw`
-      UPDATE "AmuxDmOwnerSettlement" SET "handoffReason" = ${reason},
-        "handoffAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
-        "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
-      WHERE "id" = ${row.settlementId} AND "state" = 'open' AND "handoffAt" IS NULL`;
-    if (handed === 1)
-      await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
-        action: AMUX_DM_OWNER_SETTLEMENT_HANDED_OFF_ACTION, targetType: "AmuxDmOwnerSettlement",
-        targetId: row.settlementId,
-        summary: "Left a stopped v22 Task to a person: the Decision Maker's answer could not be applied.",
-        metadata: { taskId: row.taskId, requestId: input.requestId, reason,
-          decision: input.answer.decision, source: input.source } });
-    return { applied: false, outcome: "handed_off" as const };
-  };
-  if (row.status !== row.taskStatus || row.archivedAt !== null || !row.escalationOpen ||
-      (row.lastAttempt?.id ?? null) !== row.attemptId || row.activeDelivery || row.liveAttempt ||
-      row.sourceSystem !== "admin-idea-v4")
-    return cancel(row.escalationOpen ? "task_moved" : "escalation_resolved");
   const { decision } = input.answer;
+  const { cancel, handOff, audit, resolution } = settlementWrites(tx, row, { decision,
+    source: input.source, requestId: input.requestId, now: input.now });
+  if (taskMoved(row)) return cancel(row.escalationOpen ? "task_moved" : "escalation_resolved");
   if (!(AMUX_DM_OWNER_SETTLEMENT_DECISIONS[row.kind] as readonly string[]).includes(decision))
     return handOff("answer_unreadable");
-  const audit = (summary: string, metadata: Record<string, unknown> = {}) => ({
-    action: AMUX_DM_OWNER_SETTLEMENT_APPLIED_ACTION, summary,
-    metadata: { settlementId: row.settlementId, kind: row.kind, decision, source: input.source,
-      requestId: input.requestId, escalationId: row.escalationId, ...metadata } });
-  const record = (extra: { approvedHeadSha?: string; approvedDiffDigest?: string;
-    remakeIdeaId?: string } = {}) => tx.$executeRaw`
+  const at = input.now.toISOString();
+  const record = (extra: { approvedHeadSha?: string; approvedDiffDigest?: string } = {}) => tx.$executeRaw`
     UPDATE "AmuxDmOwnerSettlement" SET "state" = 'applied', "decision" = ${decision},
       "answerSource" = ${input.source}, "requestId" = ${input.requestId},
       "approvedHeadSha" = ${extra.approvedHeadSha ?? null},
       "approvedDiffDigest" = ${extra.approvedDiffDigest ?? null},
-      "remakeIdeaId" = ${extra.remakeIdeaId ?? null},
       "decidedAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
       "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
     WHERE "id" = ${row.settlementId} AND "state" = 'open' AND "handoffAt" IS NULL`;
-  const resolution = `Decision Maker settlement (${input.source}): ${decision}`;
+
+  if (input.answer.decision === "remake") {
+    const remakeRequestId = amuxDmOwnerSettlementRemakeRequestId(row.settlementId, input.answer.ideaText);
+    await tx.$executeRaw`
+      UPDATE "AmuxDmOwnerSettlement" SET "state" = 'claimed', "decision" = 'remake',
+        "answerSource" = ${input.source}, "requestId" = ${input.requestId},
+        "remakeRequestId" = ${remakeRequestId},
+        "decidedAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
+        "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+      WHERE "id" = ${row.settlementId} AND "state" = 'open' AND "handoffAt" IS NULL`;
+    const entry = audit("Claimed a Decision Maker remake of a stopped v22 Task: its idea is filed next, then its cards close.",
+      { remakeRequestId, taskStatus: row.status, revision: row.revision });
+    await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+      action: AMUX_DM_OWNER_SETTLEMENT_REMAKE_CLAIMED_ACTION, targetType: "AmuxWorkItem",
+      targetId: row.taskId, summary: entry.summary, metadata: entry.metadata });
+    return { applied: true, outcome: "remake_claimed", remakeRequestId };
+  }
 
   if (decision === "approve") {
     const facts = row.bindingId && row.attemptId ?
@@ -426,11 +474,11 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
     if (settlementDestinationForBudget({ requested_status: "todo",
       attempt_number: row.lastAttempt?.attemptNumber ?? null }).to_status !== "todo")
       return handOff("attempt_budget_spent");
-    const moved = await tx.amuxWorkItem.updateMany({
+    const changed = await tx.amuxWorkItem.updateMany({
       where: { id: row.taskId, revision: row.revision, status: row.status, archivedAt: null },
       data: { status: "todo", owner: null, claimedAt: null, reviewPrNumber: null,
         revision: { increment: 1 } } });
-    if (moved.count !== 1) return cancel("task_moved");
+    if (changed.count !== 1) return cancel("task_moved");
     const resolved = await tx.amuxHumanEscalation.updateMany({ where: { taskId: row.taskId,
       status: { in: ["open", "acknowledged"] } }, data: { status: "resolved",
       resolutionOutcome: "retry", resolution, resolvedById: AMUX_DM_OWNER_SETTLEMENT_RESOLVER,
@@ -452,23 +500,83 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
     return { applied: true, outcome: "done" };
   }
 
-  // close, or remake: the card, and for a remake the unstarted cards waiting on it.
-  const remake = decision === "remake";
-  if (remake && !(input.remake && "ideaId" in input.remake))
-    return handOff(input.remake && "refused" in input.remake ? "remake_refused" : "remake_unavailable");
-  const ideaId = remake && input.remake && "ideaId" in input.remake ? input.remake.ideaId : null;
-  const closed = await closeAmuxStoppedCardAsSystemWithin(tx, { card: row, now: input.now,
-    resolution: ideaId ? `${resolution}; remade as AMUX idea ${ideaId}` : resolution, waitingToo: remake,
-    audit: audit(remake ? "Applied a Decision Maker settlement to a stopped v22 Task: it and the unstarted cards waiting on it were closed for one new idea." :
-      "Applied a Decision Maker settlement to a stopped v22 Task: its card was closed.",
-    ideaId ? { remakeIdeaId: ideaId } : {}) });
-  if (closed.outcome !== "closed") return handOff(`${decision}_refused`);
-  await record(ideaId ? { remakeIdeaId: ideaId } : {});
-  return { applied: true, outcome: remake ? "remade" : "closed" };
+  const closed = await closeAmuxStoppedCardAsSystemWithin(tx, { card: row, now: input.now, resolution,
+    waitingToo: false,
+    audit: audit("Applied a Decision Maker settlement to a stopped v22 Task: its card was closed.") });
+  if (closed.outcome !== "closed") return handOff("close_refused");
+  await record();
+  return { applied: true, outcome: "closed" };
 }
 
-/** An answer that is none of the settlement's words changes nothing; the
- * settlement stays with the person's escalation, and this says why, once. */
+/**
+ * The last step of a claimed remake, once its idea is filed: under the audit
+ * chain lock and the kill switch, the claimed settlement and its card locked,
+ * the card and the unstarted cards waiting on it closed in one write, and the
+ * settlement applied with the idea's id. A Task that moved since the claim
+ * cancels the settlement and keeps the idea's id. Under the kill switch
+ * nothing changes and the claim waits for resumeAmuxDmOwnerSettlementRemake.
+ * At most ten statements, as an answer's.
+ */
+export async function applyAmuxDmOwnerSettlementRemake(tx: Prisma.TransactionClient, input: {
+  settlementId: string; ideaId: string; now: Date;
+}): Promise<AmuxDmOwnerSettlementApplied> {
+  const locked = await lockUnderKillSwitch(tx, input.settlementId);
+  if (!locked) return { applied: false, outcome: null };
+  const { row } = locked;
+  if (!row || row.state !== "claimed") return { applied: false, outcome: null };
+  if (row.handedOff) return { applied: false, outcome: "handed_off" };
+  const writes = settlementWrites(tx, row, { decision: "remake", source: row.answerSource ?? "dm",
+    requestId: row.requestId ?? "", now: input.now });
+  if (taskMoved(row)) return writes.cancel(row.escalationOpen ? "task_moved" : "escalation_resolved", input.ideaId);
+  const closed = await closeAmuxStoppedCardAsSystemWithin(tx, { card: row, now: input.now,
+    resolution: `${writes.resolution}; remade as AMUX idea ${input.ideaId}`, waitingToo: true,
+    audit: writes.audit("Applied a Decision Maker settlement to a stopped v22 Task: it and the unstarted cards waiting on it were closed for one new idea.",
+      { remakeIdeaId: input.ideaId, remakeRequestId: row.remakeRequestId }) });
+  if (closed.outcome !== "closed") return writes.handOff("remake_refused");
+  const at = input.now.toISOString();
+  await tx.$executeRaw`
+    UPDATE "AmuxDmOwnerSettlement" SET "state" = 'applied', "remakeIdeaId" = ${input.ideaId},
+      "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+    WHERE "id" = ${row.settlementId} AND "state" = 'claimed' AND "handoffAt" IS NULL`;
+  return { applied: true, outcome: "remade" };
+}
+
+/**
+ * Whether a claimed remake may file its idea now, read just before it is
+ * filed: the kill switch, and whether the claim still stands -- not handed
+ * off, its Task unmoved, nothing running, its escalation open. Two statements.
+ */
+export async function readAmuxDmOwnerSettlementRemakeLive(tx: Prisma.TransactionClient,
+  settlementId: string) {
+  let killSwitch: boolean | null;
+  try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
+  catch { killSwitch = null; }
+  const rows = await tx.$queryRaw<Array<{ live: boolean }>>`
+    SELECT (s."state" = 'claimed' AND s."handoffAt" IS NULL AND w."status" = s."taskStatus"
+      AND w."archivedAt" IS NULL
+      AND EXISTS (SELECT 1 FROM "AmuxHumanEscalation" e WHERE e."id" = s."escalationId"
+        AND e."status" IN ('open', 'acknowledged'))
+      AND NOT EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" a
+        WHERE a."taskId" = w."id" AND a."endedAt" IS NULL)) AS "live"
+    FROM "AmuxDmOwnerSettlement" s JOIN "AmuxWorkItem" w ON w."id" = s."taskId"
+    WHERE s."id" = ${settlementId}`;
+  return { killSwitch, live: rows[0]?.live === true };
+}
+
+/** One remake claimed more than two minutes ago that never finished (a lost
+ * answer, a held close), for the tick to finish or hand over. One statement. */
+export async function readStaleAmuxDmOwnerSettlementRemake(tx: Prisma.TransactionClient) {
+  const rows = await tx.$queryRaw<Array<{ settlementId: string; remakeRequestId: string; requestId: string }>>`
+    SELECT "id" AS "settlementId", "remakeRequestId", "requestId" FROM "AmuxDmOwnerSettlement"
+    WHERE "state" = 'claimed' AND "handoffAt" IS NULL
+      AND "decidedAt" < (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '2 minutes'
+    ORDER BY "decidedAt", "id" LIMIT 1`;
+  return rows[0] ?? null;
+}
+
+/** An answer that is none of the settlement's words, or a claimed remake whose
+ * idea could not be filed, changes nothing more; the settlement stays with the
+ * person's escalation, and this says why, once. */
 export async function recordAmuxDmOwnerSettlementHandoff(tx: Prisma.TransactionClient,
   input: { settlementId: string; requestId: string; reason: string; now: Date }) {
   await takeAuditChainLock(tx);
@@ -477,7 +585,7 @@ export async function recordAmuxDmOwnerSettlementHandoff(tx: Prisma.TransactionC
     UPDATE "AmuxDmOwnerSettlement" SET "handoffReason" = ${input.reason},
       "handoffAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
       "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
-    WHERE "id" = ${input.settlementId} AND "state" = 'open' AND "handoffAt" IS NULL`;
+    WHERE "id" = ${input.settlementId} AND "state" IN ('open', 'claimed') AND "handoffAt" IS NULL`;
   if (changed !== 1) return { recorded: false as const };
   await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
     action: AMUX_DM_OWNER_SETTLEMENT_HANDED_OFF_ACTION, targetType: "AmuxDmOwnerSettlement",

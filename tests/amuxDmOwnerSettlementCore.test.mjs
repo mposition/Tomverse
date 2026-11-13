@@ -184,7 +184,9 @@ test("an answer decides only by its kind's fixed words, with the delivery's prec
 test("the app applies the answer as the system, through the chain writer, and a person who answers first wins", () => {
   const service = read("lib/amux/dmOwnerSettlementService.ts");
   assert.match(service, /await takeAuditChainLock\(tx\);\s+let killSwitch/, "the chain lock, then the kill switch");
-  assert.match(service, /if \(killSwitch !== false\) return \{ applied: false, outcome: null \};/);
+  assert.match(service, /if \(killSwitch !== false\) return null;/);
+  assert.equal((service.match(/const locked = await lockUnderKillSwitch\(tx, input\.settlementId\);\s+if \(!locked\) return \{ applied: false, outcome: null \};/g) ?? []).length, 2,
+    "an answer and a remake's close both stop under the kill switch");
   assert.match(service, /FOR UPDATE OF s, w NOWAIT/);
   assert.match(service, /row\.status !== row\.taskStatus \|\| row\.archivedAt !== null \|\| !row\.escalationOpen \|\|\s+\(row\.lastAttempt\?\.id \?\? null\) !== row\.attemptId/,
     "a Task that moved, or an escalation a person resolved, cancels");
@@ -209,8 +211,27 @@ test("the approver and the walk apply it; the card never reaches a session", () 
   const auto = read("lib/amux/dmAutoApplyService.ts");
   assert.match(auto, /SELECT "localCardId", 'settlement_' \|\| "kind", "id" FROM "AmuxDmOwnerSettlement"\s+WHERE "state" = 'open' AND "handoffAt" IS NULL/);
   assert.match(auto, /applyAmuxDmOwnerSettlementDecision\(tx, \{\s+settlementId: candidate\.settlementId, answer: candidate\.answer, source: "dm",/);
-  assert.ok(auto.indexOf("fileAmuxDmOwnerSettlementRemakeIdea(") < auto.indexOf("closeDecisionMakerRequestOnDirectAnswer(tx"),
-    "a remake's idea is filed before the claim, so a closed card always has its idea");
+  assert.ok(!auto.includes("fileAmuxDmOwnerSettlementRemakeIdea("), "the approver never files an idea itself");
+  assert.ok(auto.indexOf("closeDecisionMakerRequestOnDirectAnswer(tx") < auto.indexOf("continueAmuxDmOwnerSettlementRemake("),
+    "a remake's idea comes only after the request is claimed");
+  assert.match(auto, /return true;\s+\}\);\s+\/\/ The claim committed with the request closed[\s\S]*?if \(applied && claim && candidate\.kind === "owner_settlement"/,
+    "after the claim's transaction committed, and only when it claimed");
+  const remake = read("lib/amux/dmOwnerSettlementRemake.ts");
+  const cont = remake.slice(remake.indexOf("export async function continueAmuxDmOwnerSettlementRemake"),
+    remake.indexOf("export async function settleAmuxDmOwnerSettlementAnswer"));
+  assert.ok(cont.indexOf("readAmuxDmOwnerSettlementRemakeLive(") < cont.indexOf("await fileIdea("),
+    "the kill switch and the claim are read again just before the idea");
+  assert.match(cont, /if \(live\.killSwitch !== false\) return handOff\(input\.settlementId, input\.requestId, "remake_held"\);/);
+  assert.match(cont, /if \("unknown" in filed\) filed = await readBack\(input\.remakeRequestId\)/,
+    "an unknown outcome is read back by its request id, never filed again");
+  assert.equal((cont.match(/fileIdea\(/g) ?? []).length, 1, "one filing per claim");
+  const settle = remake.slice(remake.indexOf("export async function settleAmuxDmOwnerSettlementAnswer"));
+  assert.ok(settle.indexOf("applyAmuxDmOwnerSettlementDecision(tx") < settle.indexOf("continueAmuxDmOwnerSettlementRemake("),
+    "the confirmed answer's path claims first too");
+  assert.match(read("lib/amux/dmOwnerSettlementService.ts"),
+    /UPDATE "AmuxDmOwnerSettlement" SET "state" = 'claimed', "decision" = 'remake',/);
+  assert.match(read("prisma/migrations/20261113200000_amux_dm_owner_settlement/migration.sql"),
+    /"state" = 'claimed' AND "kind" = 'stopped' AND "decision" = 'remake'/);
   const dm = read("lib/amux/v22OwnerQuestionDmService.ts");
   assert.match(dm, /UNION ALL\s+SELECT 1 AS "found" FROM "AmuxDmOwnerSettlement"\s+WHERE "localCardId" = \$\{cardId\}/);
   assert.match(dm, /if \(isAmuxDmOwnerSettlementId\(input\.questionId\)\) \{\s+const recorded = await recordAmuxDmOwnerSettlementLocalCard\(tx, input\);/);

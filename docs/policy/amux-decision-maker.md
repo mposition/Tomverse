@@ -174,9 +174,13 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     저장되지 않으므로 싣지 않는다. 검토 PR이면 PR 번호, 파일 목록 전체, 들어가는 만큼의 파일 diff(통째로)와 빠진 수를 싣는다.
     증거를 읽을 수 없거나 카드 한 장(2,000자)에 통째로 들어가지 않으면 DM에 올리지 않고 사람에게 넘긴다(`evidence_unavailable`).
     선택지는 멈춘 Task가 `retry`(시도 예산 안에서 `todo`, 넘으면 사람에게)·`complete`(done, `v4TerminalAt`)·`close`(archive)·
-    `remake`(자유 텍스트로 첫 줄 `remake`, 그다음 새 아이디어), 검토 PR이 `approve`·`retry`·`close`다. `remake`는 새 아이디어를
-    세션 접수(`submitAmuxIdeaFromSession`)로 먼저 접수하고(접수의 입력 검사와 분석 예산을 그대로 거친다), 이 카드와 같은 부모 아래 이 카드에 (직간접으로) 의존하며 시작하지
-    않은 카드를 한 트랜잭션에서 archive한다. `approve`는 binding id와 그 binding의 `verifiedHeadSha`·`snapshot.diffDigest`, 요청 id,
+    `remake`(자유 텍스트로 첫 줄 `remake`, 그다음 새 아이디어), 검토 PR이 `approve`·`retry`·`close`다. `remake`는 세 단계다.
+    먼저 요청을 붙잡은 트랜잭션(DM 승인자의 선점, 또는 운영자 확정 뒤) 안에서 감사 체인 잠금과 kill switch 아래 행을 `claimed`로
+    바꾸고 아이디어 요청 id를 적는다. 사람이 먼저 판정했거나 kill switch가 켜져 있으면 여기서 멈추고 아이디어는 접수되지 않는다.
+    다음으로 kill switch와 선점을 다시 읽은 뒤 새 아이디어를 세션 접수(`submitAmuxIdeaFromSession`)로 접수한다(접수의 입력 검사와
+    분석 예산을 그대로 거친다). 접수가 거절되거나 kill switch가 켜졌으면 사람에게 넘기고, 결과를 모르면 같은 요청 id로 한 번 다시
+    읽어 없으면 사람에게 넘긴다. 다시 접수하지 않는다. 끝으로 이 카드와 같은 부모 아래 이 카드에 (직간접으로) 의존하며 시작하지
+    않은 카드를 한 트랜잭션에서 archive한다. 끝나지 않은 선점은 다음 tick이 다시 읽기만으로 마치거나 사람에게 넘긴다. `approve`는 binding id와 그 binding의 `verifiedHeadSha`·`snapshot.diffDigest`, 요청 id,
     결정 시각을 행에 기록할 뿐 Task와 escalation은 그대로 둔다. 적용은 시스템 주체로 해시 체인 감사 한 건을 남기고, 운영자의
     unknown usage 수락은 하지 않는다. Task가 움직였거나(상태, 새 실행, archive) 사람이 escalation을 해결했으면 행은 취소된다.
     그 밖의 답은 사람에게 넘긴다. 1~6은 위와 같고, 7은 8처럼 다르다. 확정 답(`dm_confirmed`)과 DM 승인자의 답(`dm`)을 같은
