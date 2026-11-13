@@ -30,6 +30,7 @@ import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
+import { providerStatusClass, type ProviderStatusClass } from "@/lib/autoLlmRouterDiagnostics";
 import { TUNABLE_GENERATOR_RULE, tunableChangesSchema } from "@/lib/autoRouterTunablesCore";
 
 /** At most this many recent decisions are sampled; half train, half evaluate. */
@@ -657,14 +658,19 @@ export const guidanceRejection = (raw: unknown) => {
  * how much text it wrote (a truncated object stops on "length").
  */
 export const optimizerCallFailureDetail = (error: unknown) => {
-    const detail: { error: string; finishReason?: string; outputChars?: number; statusCode?: number } = {
+    const detail: {
+        error: string; finishReason?: string; outputChars?: number; statusCode?: number; statusClass?: ProviderStatusClass;
+    } = {
         error: error instanceof Error ? error.name : "unknown",
     };
     if (error && typeof error === "object") {
         const { finishReason, text, statusCode } = error as { finishReason?: unknown; text?: unknown; statusCode?: unknown };
         if (typeof finishReason === "string") detail.finishReason = finishReason;
         if (typeof text === "string") detail.outputChars = text.length;
-        if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599) detail.statusCode = statusCode;
+        if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599) {
+            detail.statusCode = statusCode;
+            detail.statusClass = providerStatusClass(statusCode);
+        }
     }
     return detail;
 };

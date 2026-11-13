@@ -948,7 +948,7 @@ test("optimizer failure tracing identifies the answering model without retrying 
     let calls = 0;
     await assert.rejects(traceOptimizerCall({ event, cycleId: "cycle-test", kind: "answer", modelId: "qwen3-8-flash", provider: "qwen" }, async () => { calls++; throw failure; }), error => error === failure);
     assert.equal(calls, 1);
-    assert.deepEqual(logs.at(-1), { event, cycleId: "cycle-test", kind: "answer", modelId: "qwen3-8-flash", provider: "qwen", error: "AI_APICallError", statusCode: 503 });
+    assert.deepEqual(logs.at(-1), { event, cycleId: "cycle-test", kind: "answer", modelId: "qwen3-8-flash", provider: "qwen", error: "AI_APICallError", statusCode: 503, statusClass: "server" });
   }
   assert.equal(JSON.stringify(logs).includes("private"), false);
   assert.equal(optimizerCallFailureDetail({ statusCode: 999 }).statusCode, undefined);
