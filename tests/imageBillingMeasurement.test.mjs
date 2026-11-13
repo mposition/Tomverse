@@ -27,7 +27,7 @@ import {
   imageThinkingCapMinimumMicroUsd,
   minimumCreditsForImageOption,
 } from "../lib/imageModelRegistry.ts";
-import { judgeImageModel, latestBillingTerms, resolveImageCatalog } from "../lib/modelCatalogCore.ts";
+import { judgeImageModel, latestBillingTerms, resolveImageCatalog, reviewImageDraft, withImageBillingTerms } from "../lib/modelCatalogCore.ts";
 import { imageDraftFromAnswer } from "../lib/modelCatalogDraftLlm.ts";
 
 // The admin billing measurement (image policy section 12.1) on the three
@@ -454,4 +454,50 @@ test("an enabled code model with no row is judged again once terms are confirmed
   // Terms the seed price covers keep it serving; terms it does not cover hold it.
   assert.equal(resolve(Math.floor(high.outputCostMicroUsd / 30)).disabledReason, null);
   assert.equal(resolve(Math.ceil(high.outputCostMicroUsd / 30) * 2).disabledReason, "price_unverified");
+});
+
+test("a draft made after confirming terms is one the judge admits, for Google and OpenAI", () => {
+  const base = (provider, apiModelId, extra = {}) => ({
+    id: apiModelId,
+    provider,
+    apiModelId,
+    name: apiModelId,
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["medium", "high"],
+    latencyClass: "balanced",
+    provenance: [],
+    outputMimeTypes: ["image/jpeg"],
+    disabledReason: null,
+    prices: [],
+    pricingVersion: "unpriced",
+    priceVerification: { verifiedAt: null, sources: [], thinkingCapMicroUsd: null },
+    ...extra,
+  });
+  const review = (model, terms, draft) =>
+    reviewImageDraft(withImageBillingTerms(model, latestBillingTerms(terms), { runtime: true }), draft, { minimumCredits: minimumCreditsForImageOption });
+
+  // Google: the pages say $0.030 for a 1K image, the measurement found 1,120 tokens at $30/1M.
+  const googleSource = ["https://aistudio.google.com/docs/pricing"];
+  const nano = imageDraftFromAnswer(
+    { options: [{ quality: "medium", size: "1024x1024", outputCostMicroUsd: 30_000, outputTokens: null }], outputUsdPerMTok: null, thinkingCapMicroUsd: null, noPriceReason: null },
+    googleSource,
+    "gemini-nano-banana-2.1",
+    "google",
+    measured
+  );
+  assert.equal(nano.prices[0].outputCostMicroUsd, 33_600);
+  const nanoReview = review(base("google", "gemini-nano-banana-2.1", { maxOutputTokens: 2_048 }), [termsRow("t", "google", "gemini-nano-banana-2.1", measured, "2026-11-13")], nano);
+  assert.deepEqual(nanoReview.reasons, []);
+
+  // OpenAI: no per-image price on the pages, measured tokens at the documented rate.
+  const flare = imageDraftFromAnswer(
+    { options: [], outputUsdPerMTok: 30, thinkingCapMicroUsd: null, noPriceReason: "only per-token rates" },
+    ["https://developers.openai.com/api/docs/pricing"],
+    "gpt-image-2.6-flare",
+    "openai",
+    flareTerms
+  );
+  const flareReview = review(base("openai", "gpt-image-2.6-flare", { outputMimeTypes: ["image/png"] }), [termsRow("t", "openai", "gpt-image-2.6-flare", flareTerms, "2026-11-13")], flare);
+  assert.deepEqual(flareReview.reasons, []);
 });

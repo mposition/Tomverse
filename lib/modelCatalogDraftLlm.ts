@@ -276,8 +276,20 @@ export const imageDraftFromAnswer = (
   const thinkingCap = known === null ? stated : Math.max(known, stated ?? 0);
   const measured = provider === undefined ? null : billingTermsApplyTo(provider, confirmed);
   const measuredTokens = measured?.kind === "tokens_per_image" ? measured.tokens : [];
-  const rate =
-    positive(value?.outputUsdPerMTok) ?? (measured?.kind === "tokens_per_image" ? measured.imageOutputUsdPerMTok : null);
+  const rate = positive(value?.outputUsdPerMTok);
+  // What one image of this option costs by the confirmed measurement: its own
+  // count on OpenAI, one count for every option on Google (all at the 1K
+  // tier), at the image rate the measurement was confirmed with. The judge
+  // refuses a price below it (price_below_measured_cost), so the draft never
+  // proposes one.
+  const measuredCost = (quality: string, size: string): number | null => {
+    if (measured?.kind === "measured_output_limit") {
+      return Math.ceil(measured.imageTokensPerImage * measured.imageOutputUsdPerMTok);
+    }
+    if (measured?.kind !== "tokens_per_image") return null;
+    const tokens = confirmedImageOutputTokens(provider, confirmed, quality, size);
+    return tokens === null ? null : Math.ceil(tokens * measured.imageOutputUsdPerMTok);
+  };
   const answered = Array.isArray(value?.options) ? value.options : [];
   const keyOf = (option: { quality: string; size: string }) => `${option.quality}|${option.size}`;
   const answeredKeys = new Set(answered.map(keyOf));
@@ -289,10 +301,11 @@ export const imageDraftFromAnswer = (
       .map((entry) => ({ quality: entry.quality, size: entry.size, outputCostMicroUsd: null, outputTokens: null })),
   ];
   const options = candidates.flatMap((option) => {
-    const fromMeasurement = confirmedImageOutputTokens(provider, confirmed, option.quality, option.size);
-    const tokens = Math.max(positive(option.outputTokens) ?? 0, fromMeasurement ?? 0) || null;
-    const cost = imageOptionCostMicroUsd(option.outputCostMicroUsd, tokens, rate);
-    return cost === null ? [] : [{ quality: option.quality, size: option.size, cost }];
+    // The larger of what the pages state and what the measurement found.
+    const documented = imageOptionCostMicroUsd(option.outputCostMicroUsd, option.outputTokens, rate);
+    const fromMeasurement = measuredCost(option.quality, option.size);
+    if (documented === null && fromMeasurement === null) return [];
+    return [{ quality: option.quality, size: option.size, cost: Math.max(documented ?? 0, fromMeasurement ?? 0) }];
   });
   if (options.length === 0) {
     const reason = typeof value?.noPriceReason === "string" ? value.noPriceReason.replace(/\s+/g, " ").trim().slice(0, 300) : "";
