@@ -193,7 +193,9 @@ const checkLocalHeader = (bytes: Uint8Array, entry: CentralEntry, dataEnd: numbe
   const size = view.getUint32(at + 22, true);
   const nameLength = view.getUint16(at + 26, true);
   const extraLength = view.getUint16(at + 28, true);
-  if (method !== entry.method || (flags & 0x1) !== (entry.flags & 0x1)) throw unreadable();
+  // Encryption (bit 0) and a trailing data descriptor (bit 3) must be the
+  // same story in both headers.
+  if (method !== entry.method || (flags & 0x9) !== (entry.flags & 0x9)) throw unreadable();
   // With a trailing data descriptor (flag bit 3) the local sizes may be zero;
   // otherwise they are the central directory's, exactly.
   const deferred = (flags & 0x8) !== 0;

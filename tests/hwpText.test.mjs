@@ -184,6 +184,16 @@ test("ninth review: a section of text tags that never close is read in one pass"
   assert.ok(performance.now() - started < 1000, "linear in the section");
 });
 
+test("tenth review: CDATA is text, comments are not, and a `>` in an attribute does not end its tag", () => {
+  const bytes = hwpx([
+    section(
+      '<hp:p><hp:run charPrIDRef="a>b"><hp:t>앞 <![CDATA[<그대로> & 둔다]]><!-- 메모 --> 뒤</hp:t></hp:run></hp:p>' +
+        "<hp:p><hp:run><hp:t>둘째</hp:t></hp:run></hp:p>"
+    ),
+  ]);
+  assert.equal(readText(bytes, "hwpx"), "앞 <그대로> & 둔다 뒤\n둘째");
+});
+
 test("a ZIP with no HWPX section, or a compound file named .hwpx, is refused", () => {
   assert.throws(
     () => readText(zipSync({ "readme.txt": encoder.encode("x") }), "hwpx"),

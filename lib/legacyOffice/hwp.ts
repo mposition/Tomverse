@@ -233,10 +233,37 @@ export function extractHwpxText(bytes: Uint8Array, budget: LegacyParseBudget): s
     while (at < xml.length) {
       const open = xml.indexOf("<", at);
       if (open < 0) break;
-      const close = xml.indexOf(">", open);
-      if (close < 0) break;
       budget.tick();
       if (inText && open > at) current += decodeXmlText(xml.slice(at, open));
+      // CDATA is text as it stands; a comment or processing instruction is
+      // nothing. Each ends at its own terminator, found once.
+      if (xml.startsWith("<![CDATA[", open)) {
+        const end = xml.indexOf("]]>", open + 9);
+        if (end < 0) break;
+        if (inText) current += xml.slice(open + 9, end);
+        at = end + 3;
+        continue;
+      }
+      if (xml.startsWith("<!--", open)) {
+        const end = xml.indexOf("-->", open + 4);
+        if (end < 0) break;
+        at = end + 3;
+        continue;
+      }
+      // A tag ends at the first `>` outside a quoted attribute value.
+      let close = open + 1;
+      let quote = "";
+      for (; close < xml.length; close += 1) {
+        const char = xml[close];
+        if (quote) {
+          if (char === quote) quote = "";
+        } else if (char === '"' || char === "'") {
+          quote = char;
+        } else if (char === ">") {
+          break;
+        }
+      }
+      if (close >= xml.length) break;
       at = close + 1;
       const tag = xml.slice(open + 1, close);
       const closing = tag.startsWith("/");
