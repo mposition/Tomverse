@@ -113,7 +113,12 @@ fi
 # package, with 225s reserved for a browser download that is a no-op on a cache
 # hit and a fast CDN fetch otherwise. Downloading first spends only what the
 # download actually takes.
-DOWNLOAD_RESERVE=$((DEADLINE / 4))
+#
+# A quarter of the deadline (225s for Chromium) was less than one attempt
+# window (300s), so a single stalled CDN fetch spent the whole cap and the
+# 30s backoff left no budget to retry (2026-11-13, Admin E2E shard 2/2). Half
+# the deadline fits an attempt, the backoff and a second attempt.
+DOWNLOAD_RESERVE=$((DEADLINE / 2))
 
 # The absolute second the half currently running must stop by. Set before each
 # half rather than counted per attempt, so waiting counts against the budget too.
