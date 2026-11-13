@@ -862,7 +862,7 @@ Tomverse 밖으로 나가지 않고, 신뢰할 수 없는 문서를 여는 큰 �
 
 `convert_files`의 `to_pdf`가 Office 원본을 받는다: `docx`·`pptx`·`xlsx`,
 OpenDocument(`odt`·`odp`·`ods`), Office 97-2003(`doc`·`ppt`·`xls`), `rtf`,
-Apple `pages`·`numbers`. 렌더러가 PDF로 그린 뒤 이미지·PDF와 섞어 순서대로 합치고,
+한글(`hwp`·`hwpx`), Apple `pages`·`numbers`. 렌더러가 PDF로 그린 뒤 이미지·PDF와 섞어 순서대로 합치고,
 페이지 선택(`pages`)과 회전도 그대로 적용된다. 같은 파일을 여러 번 가리켜도 한
 번만 그린다.
 
@@ -870,6 +870,10 @@ Apple `pages`·`numbers`. 렌더러가 PDF로 그린 뒤 이미지·PDF와 섞�
   `convert_spreadsheet`(§14)가 한다.
 - iWork 변환은 Office보다 충실도가 낮다(Pages·Numbers는 복잡한 서식이 일부 다를 수
   있다). Keynote는 첨부 단계에서 받지 않는다(`chat-attachment-formats.md` §2.4).
+- 한글(HWP 5.x·HWPX)은 기본 LibreOffice가 열지 못한다. 렌더러 이미지
+  (`apps/office-renderer/Dockerfile`)에 H2Orestart 필터와 한글 글꼴을 넣는다.
+  한글 파일의 **내용 읽기**는 렌더러와 무관하게 이 앱의 파서가 한다
+  (`docs/policy/chat-attachment-formats.md §4.6`).
 
 ### 15.2 스위치와 주소
 
@@ -886,10 +890,22 @@ Apple `pages`·`numbers`. 렌더러가 PDF로 그린 뒤 이미지·PDF와 섞�
 - 결과에 대한 검사는 하나다: PDF여야 한다(`%PDF-`). 25 MB를 넘으면 읽기를 멈춘다.
   시간 제한 90초.
 
-### 15.3 실패
+### 15.3 보내기 전 측정과 실패
+
+렌더러는 **공용 서비스**다. 한 문서가 수 GB로 부풀면 모두의 변환이 멈춘다. 텍스트
+리더는 자기가 읽는 부분(HWPX의 본문 section 등)만 풀기 때문에, 그림 항목에 숨긴
+압축 폭탄은 그 검사를 지나 LibreOffice에 닿을 수 있다. 그래서 렌더러로 보내기 전에
+`lib/officeRenderInput.ts`가 **압축된 모든 부분을 실제로** 입력 4 KB씩 풀어 나온
+바이트를 세고 버린다: ZIP 기반 문서(OOXML·ODF·HWPX·iWork)는 모든 항목과 그 안에 다시
+압축된 것(문서에 넣은 통합 문서 같은 내부 ZIP, gzip, iWork의 Snappy `.iwa`;
+`lib/packageExpansion.ts`), HWP 5.x는 머리의 압축 플래그와 관계없이 모든 스트림(BinData 항목은 따로 압축될 수 있다, 독립 검토 7차). 풀어 나온 바이트의 합이 200 MB를 넘거나 항목이 2만 개를 넘으면 보내지
+않고 `spec_rejected`로 거절한다(독립 검토 2026-11-13). 압축을 풀기 전 원래 바이트는 이 합에
+넣지 않는다 — 업로드 상한(25 MB)이 그 크기를 묶는다. HWP 컨테이너 읽기는 따로 200 MB 예산을
+쓴다. 측정 경로는 나온 조각을 세기만 하고 보관하지 않는다.
 
 | 렌더러 응답 | 카드 |
 |---|---|
+| (보내기 전) 실제 팽창 200 MB 초과·읽을 수 없는 ZIP | `spec_rejected` |
 | 400 (LibreOffice가 문서를 거절) | `spec_rejected` — 손상·암호 파일일 수 있다 |
 | 503·시간 초과·연결 실패·그 밖의 응답·PDF가 아닌 응답 | `generation_failed` — 잠시 뒤 다시 |
 | 25 MB 초과 | `limit_exceeded` |

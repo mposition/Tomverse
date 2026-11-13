@@ -3947,10 +3947,17 @@ async function handleChatPost(
                     // model is told the file is attached and what it can do
                     // with it, so it neither guesses at the contents nor says
                     // the file is missing (generated-artifacts.md section 15).
+                    // Said as it is at send time: the renderer can be switched
+                    // off after the file was uploaded, and the model must not
+                    // be promised a tool this turn will not carry.
                     addExtractedText(
                         format.promptKind,
-                        "[This Apple iWork file is attached, but its contents cannot be read here. " +
-                            "It can be laid out as a PDF with convert_files (to_pdf).]"
+                        officeRenderingEnabled()
+                            ? "[This Apple iWork file is attached, but its contents cannot be read here. " +
+                                  "It can be laid out as a PDF with convert_files (to_pdf).]"
+                            : "[This Apple iWork file is attached, but its contents cannot be read here, " +
+                                  "and it cannot be converted right now. Say so, and suggest exporting it " +
+                                  "from Pages or Numbers as a Word, Excel or PDF file.]"
                     );
                     return "ok";
                 }

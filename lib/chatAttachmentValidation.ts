@@ -25,7 +25,7 @@ import {
     type NormalizableImageMediaType,
 } from "@/lib/mediaSecurity";
 import { assertSafeOfficeArchive, parseOfficeSafely } from "@/lib/officeSecurity";
-import { assertSafeIworkPackage } from "@/lib/iworkPackage";
+import { IworkPackageError, assertSafeIworkPackage } from "@/lib/iworkPackage";
 import {
     extractLegacyOfficeText,
     LegacyOfficeError,
@@ -76,7 +76,9 @@ export type ChatAttachmentValidationCode =
     | "ATTACHMENT_NO_TEXT"
     | "ATTACHMENT_TEXT_TOO_LARGE"
     | "ATTACHMENT_ENCRYPTED"
-    | "ATTACHMENT_UNREADABLE";
+    | "ATTACHMENT_UNREADABLE"
+    /** The file expands past what may be stored (an iWork package). */
+    | "ATTACHMENT_TOO_LARGE";
 
 export class ChatAttachmentValidationError extends Error {
     constructor(
@@ -240,7 +242,12 @@ export async function validateChatAttachmentUpload({
             assertSafeIworkPackage(
                 new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
             );
-        } catch {
+        } catch (error) {
+            // Too large is the user's to fix by sending less, and says so; a
+            // package that is not an iWork document is a type mismatch.
+            if (error instanceof IworkPackageError && error.refusal === "TOO_LARGE") {
+                throw new ChatAttachmentValidationError("ATTACHMENT_TOO_LARGE", 413);
+            }
             throw new ChatAttachmentValidationError("ATTACHMENT_TYPE_MISMATCH");
         }
         return { bytes: buffer, mediaType: format.mediaType };
