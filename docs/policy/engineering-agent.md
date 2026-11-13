@@ -175,7 +175,9 @@ branch 이름은 등급을 정하지 못한다.
 **T2 검토 draft PR (운영자 결정 2026-10-30).** 완성된 작업은 PR로 끝나야 한다는 운영자 지시에 따라,
 v22 `implement` Task의 패치가 T2로 판정되어도 아래를 모두 만족하면 게시 서비스가 전용 branch를 push하고
 `develop` 대상 **draft** PR을 연다. 제목 끝에 `(owner review)`를, 본문에 "Owner review (T2)"와 ready로
-바꾸면 이 변경의 코드가 저장소 secret과 함께 CI에서 돈다는 경고를 단다.
+바꾸면 이 변경의 코드가 저장소 secret과 함께 CI에서 돈다는 경고를 단다. 모든 게시 PR의 제목은 카드의
+표시 코드(`AMUX-FILEREQ-005`)로 시작한다(운영자 요청 2026-11-13). 앱이 카드 행에서 읽어 형식을 검사한
+코드만 쓰고, 아이디어에서 나온 카드 제목은 쓰지 않는다.
 
 - 앱 변수 `ENGINEERING_AGENT_V22_REVIEW_PR`가 정확히 `on`이다(기본 꺼짐).
 - T1 후보와 같은 결속(run·카드·base·patch digest, `t1`로 시작한 run, 카드의 공개 PR 동의, 게시 스위치)이
