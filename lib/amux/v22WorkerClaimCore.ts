@@ -148,11 +148,22 @@ export function chooseAmuxV22WorkerRoute(input: {
   isReview: boolean;
   /** Tasks each provider's workers hold now, keyed by lowercase provider. */
   activeByProvider?: ReadonlyMap<string, number>;
+  /** When each worker was last assigned a Task, in ms; a worker never assigned is absent. */
+  lastAssignedAtByWorker?: ReadonlyMap<string, number>;
+  /** A paid API run (the read-only recovery retry): the cheapest route first. */
+  preferLowerPrice?: boolean;
 }) {
   const candidates = input.routes.filter((route) =>
     !input.isReview || !input.priorAuthorWorkers.includes(route.workerName));
   const active = (provider: string) =>
     input.activeByProvider?.get(provider.toLowerCase()) ?? 0;
+  const lastAssigned = (worker: string) => input.lastAssignedAtByWorker?.get(worker) ?? 0;
+  // A provider's last assignment is its most recent worker's.
+  const providerLast = new Map<string, number>();
+  for (const route of candidates) {
+    const key = route.provider.toLowerCase();
+    providerLast.set(key, Math.max(providerLast.get(key) ?? 0, lastAssigned(route.workerName)));
+  }
   candidates.sort((left, right) => {
     const leftPrior = input.isReview &&
       input.priorAuthorProviders.includes(left.provider) ? 1 : 0;
@@ -161,9 +172,21 @@ export function chooseAmuxV22WorkerRoute(input: {
     if (leftPrior !== rightPrior) return leftPrior - rightPrior;
     const load = active(left.provider) - active(right.provider);
     if (load !== 0) return load;
-    const price = BigInt(left.perAttemptMicroUsd) -
-      BigInt(right.perAttemptMicroUsd);
-    if (price !== BigInt(0)) return price < 0 ? -1 : 1;
+    if (input.preferLowerPrice === true) {
+      const price = BigInt(left.perAttemptMicroUsd) - BigInt(right.perAttemptMicroUsd);
+      if (price !== BigInt(0)) return price < 0 ? -1 : 1;
+    }
+    // Owner decision 2026-11-13: no price competition between the workers.
+    // They are flat-rate CLI subscriptions, and the cheapest list price sent
+    // nearly every Task to OpenAI although Anthropic and the others serve
+    // the same grade. The provider that waited longest takes the next Task,
+    // then its worker that waited longest. Price stays the cost ceiling and
+    // ledger's measure, never the choice.
+    const providerTurn = (providerLast.get(left.provider.toLowerCase()) ?? 0) -
+      (providerLast.get(right.provider.toLowerCase()) ?? 0);
+    if (providerTurn !== 0) return providerTurn;
+    const workerTurn = lastAssigned(left.workerName) - lastAssigned(right.workerName);
+    if (workerTurn !== 0) return workerTurn;
     const worker = left.workerName.localeCompare(right.workerName);
     return worker || left.routeId.localeCompare(right.routeId);
   });

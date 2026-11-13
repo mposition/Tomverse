@@ -347,9 +347,15 @@ async function claimCandidate(taskId: string, assignmentId: string,
         workerServesGrade: (workerName) => !exactGradeRouting ||
           amuxWorkerMatchesExecutionGrade(card.executionGrade, workerName,
             ceilings) });
+      // Whose turn it is: each candidate worker's latest assignment.
+      const lastAssigned = resumeRoutes.length ? await tx.amuxV22WorkerAssignment.groupBy({
+        by: ["workerName"], where: { workerName: { in: resumeRoutes.map((item) => item.workerName) } },
+        _max: { assignedAt: true } }) : [];
+      const lastAssignedAtByWorker = new Map(lastAssigned.flatMap((row) =>
+        row._max.assignedAt ? [[row.workerName, row._max.assignedAt.getTime()] as const] : []));
       const route = chooseAmuxV22WorkerRoute({ routes: resumeRoutes,
         priorAuthorWorkers: authorWorkers, priorAuthorProviders: authorProviders,
-        isReview: card.taskRole === "review", activeByProvider });
+        isReview: card.taskRole === "review", activeByProvider, lastAssignedAtByWorker });
       if (!route) throw new BoardImportError(
         exactGradeRouting && matchingRoutes.length === 0 ? "no_worker_for_grade" :
           settled.unsettled ? "usage_unverified" : "worker_unavailable", 409);

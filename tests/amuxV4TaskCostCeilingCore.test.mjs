@@ -228,10 +228,32 @@ test("route identity and resource bounds cannot drift beneath an unchanged ceili
     decision: "reconfirm",
     reason: "task_route_changed",
   });
-  const newRoute = calculateV4TaskCostCeiling(input({
-    routes: [route(), route({ routeId: "another", workerName: "another-worker" })],
+  // Owner decision 2026-11-13: one more worker on an approved provider and
+  // model is the approved route (codex-chore-2 beside codex-chore). A new
+  // model, or a new provider for the same model name, still asks.
+  const sameModelWorker = calculateV4TaskCostCeiling(input({
+    routes: [route(), route({ routeId: "another", workerName: "another-worker",
+      routePolicyDigest: "d".repeat(64) })],
   }));
-  assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, newRoute), {
+  assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, sameModelWorker), {
+    decision: "allow",
+    reason: "within_approved_ceiling",
+  });
+  for (const changed of [{ modelId: "different-model" }, { provider: "copilot" }]) {
+    const newRoute = calculateV4TaskCostCeiling(input({
+      routes: [route(), route({ routeId: "another", workerName: "another-worker", ...changed })],
+    }));
+    assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, newRoute), {
+      decision: "reconfirm",
+      reason: "task_route_changed",
+    }, JSON.stringify(changed));
+  }
+  // A route the receipt named still has to match it exactly, even when a
+  // same-model worker is added beside it.
+  const namedRouteChanged = calculateV4TaskCostCeiling(input({
+    routes: [route({ routePolicyDigest: "c".repeat(64) }), route({ routeId: "another", workerName: "another-worker" })],
+  }));
+  assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, namedRouteChanged), {
     decision: "reconfirm",
     reason: "task_route_changed",
   });
