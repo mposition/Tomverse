@@ -181,10 +181,12 @@ test("a merge by anyone else with no review still stops the agent and leaves the
     assert.equal(await openMismatches(tx, card), 1);
     assert.equal(((await bindingRow(tx, card)).mergeObservation as { merged: boolean }).merged, true);
   });
-  // An approver's merge of a head the app did not verify is not that approval either.
+  // An approver's merge of a head the app did not verify, whose diff also differs from the verified
+  // one, is not that approval either (a later head with the verified diff is: #3828).
   await lifecycle(async (tx) => {
     const card = await publishedCard(tx);
-    const outcome = await observe(card, () => mergedPull({ mergedByApprover: true, headSha: "a".repeat(40) }));
+    const outcome = await observe(card, () => mergedPull({ mergedByApprover: true, headSha: "a".repeat(40),
+      diffDigest: "b".repeat(64) }));
     assert.equal(outcome?.outcome, "merged_without_approval");
     assert.equal((await cardRow(tx, card)).status, "review");
   });
