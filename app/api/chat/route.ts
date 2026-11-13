@@ -2468,6 +2468,8 @@ async function handleChatPost(
             !mcpConnectionId && !turnCarriesAttachments(autoRoutingMessages);
         const presearchFlagEnabled = process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true";
         const allowRouterSearchPlan = routerSearchPlanCandidate && presearchFlagEnabled;
+        // Set only when the router model was actually asked.
+        let routerCallOutcome = null as string | null;
         const llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
                       prompt: profileTextFor(autoRoutingMessages),
@@ -2494,6 +2496,7 @@ async function handleChatPost(
                       searchPlan: fusion?.resume?.searchPlan ?? allowRouterSearchPlan,
                       imageIntent: imageRouting.context,
                       onImageDecision: imageRouting.accept,
+                      onCallOutcome: (outcome: string) => { routerCallOutcome = outcome; },
                       // An image turn is not a routing decision a chat model
                       // answered; its row would teach the router the wrong thing.
                       recordDecision: (pick) => pick?.requiresFileGeneration
@@ -2517,7 +2520,11 @@ async function handleChatPost(
                 // offering file tools to every turn would disable that recovery.
                 required: llmPick?.requiresFileGeneration === true,
                 capableModelIds: fileCapableModelIds,
-            }
+            },
+            // The router was asked and gave nothing usable: answer with the
+            // requested model (normally the default), not the rule's cheapest
+            // fit, which never saw whether this is a file request.
+            routerCallOutcome !== null && routerCallOutcome !== "picked" ? requestedModelId : null
         );
         const autoRouted = guestAutoSelection?.routed === true ||
             autoSelection.routed;
@@ -3571,6 +3578,8 @@ async function handleChatPost(
             currentLocation,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
+            usageClass: modelConfig.usageClass,
+            fileToolsOverride: modelConfig.fileToolsOverride ?? null,
             autoRouted,
             isDeepResearchTurn,
             isAuthenticated: Boolean(session?.user?.id),
@@ -3597,7 +3606,7 @@ async function handleChatPost(
             if (conversationProductKey !== "chat" || isDeepResearchTurn) throw new ChatAccessError(400, "MCP_CHAT_REQUIRED", "Plugins are available in Chat with a model that supports tools.");
             try {
                 mcpConnector = await buildMcpChatTools({ userId: session!.user.id,
-                    connectionId: mcpConnectionId, modelId: modelConfig.id, nativeSearch: nativeSearchEnabled,
+                    connectionId: mcpConnectionId, model: modelConfig, nativeSearch: nativeSearchEnabled,
                     signal: req.signal, onState: state => {
                         try { streamController?.enqueue(buildMcpProgressChunk(state)); } catch { /* The client has closed its stream. */ }
                     } });

@@ -440,6 +440,13 @@ export async function pickAutoModelWithLlm(input: {
      * session memory hold only turns a chat model answered. Absent is true.
      */
     recordDecision?: Promise<boolean> | ((pick: AutoLlmRouterPick | null) => Promise<boolean>);
+    /**
+     * Told the call's outcome once the router model was actually asked. Not
+     * called when no call was made (no router model, too few candidates, a
+     * refused budget): a null pick from a call that timed out is a failure the
+     * caller treats differently from a turn the router never looked at.
+     */
+    onCallOutcome?: (outcome: string) => void;
 }): Promise<RouterLocationPick | null> {
     const [configuredModelId, tunables] = await Promise.all([
         readAutoLlmRouterModelId(), readAutoRouterTunables(),
@@ -528,6 +535,7 @@ export async function pickAutoModelWithLlm(input: {
     const startedAt = Date.now();
     const { outcome, pick, usage, failure, imageDecision, searchQueries, simpleLookup, requiresLocation } = await callPreparedAutoLlmRouter(call, request);
     if (imageDecision) input.onImageDecision?.(imageDecision);
+    input.onCallOutcome?.(outcome);
     const latencyMs = Date.now() - startedAt;
     if (prices && usage?.inputTokens !== undefined && usage.outputTokens !== undefined) {
         const actual = callCostMicroUsd({

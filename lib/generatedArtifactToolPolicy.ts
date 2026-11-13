@@ -85,8 +85,51 @@ export const ARTIFACT_TOOL_CAPABILITIES: Readonly<
   // deep-research model never reaches this code path at all.
 };
 
-export const getArtifactToolSupport = (modelId: string): ArtifactToolSupport =>
-  ARTIFACT_TOOL_CAPABILITIES[modelId] ?? "unverified";
+/**
+ * Providers whose adapter in this repository sends application-defined tools
+ * and has been run against them -- every model in the register above is one
+ * of theirs. A chat model the register does not list is recognised by its
+ * provider, so a new OpenAI, Anthropic or Google model is file-capable from
+ * the moment it is added, and any other provider's is not until someone ticks
+ * it. Either way an administrator can tick or untick a model in the Admin
+ * Console (`ModelRegistryEntry.fileToolsOverride`).
+ */
+export const ARTIFACT_TOOL_PROVIDERS: ReadonlySet<string> = new Set([
+  "openai",
+  "anthropic",
+  "google",
+]);
+
+/** What the decision reads about a model: the catalogue row's own fields. */
+export type ArtifactToolModel = {
+  id: string;
+  provider?: string;
+  usageClass?: string;
+  /** An administrator's tick (true) or untick (false); null follows the code. */
+  fileToolsOverride?: boolean | null;
+};
+
+/** The automatic answer, before any administrator's tick or untick. */
+export const autoArtifactToolSupport = (model: ArtifactToolModel): ArtifactToolSupport => {
+  // Deep research answers from a retrieval loop this app does not drive.
+  if (model.usageClass === "deep-research") return "unverified";
+  return (
+    ARTIFACT_TOOL_CAPABILITIES[model.id] ??
+    (model.provider && ARTIFACT_TOOL_PROVIDERS.has(model.provider) ? "verified" : "unverified")
+  );
+};
+
+/**
+ * Whether this model gets the file tools. A bare id reads only the register,
+ * for callers that hold nothing else (older recorded router samples).
+ */
+export const getArtifactToolSupport = (model: string | ArtifactToolModel): ArtifactToolSupport => {
+  if (typeof model === "string") return ARTIFACT_TOOL_CAPABILITIES[model] ?? "unverified";
+  if (typeof model.fileToolsOverride === "boolean") {
+    return model.fileToolsOverride ? "verified" : "unverified";
+  }
+  return autoArtifactToolSupport(model);
+};
 
 /* ------------------------------------------------------------------------ */
 /* The decision                                                               */
@@ -134,6 +177,10 @@ export type ArtifactToolPlan = {
 export type ArtifactToolPlanInput = {
   modelId: string;
   provider: string;
+  /** The catalogue's usage class; deep research never gets the tools. */
+  usageClass?: string;
+  /** The catalogue row's tick or untick (ModelRegistryEntry.fileToolsOverride). */
+  fileToolsOverride?: boolean | null;
   /** false for a guest session. */
   isAuthenticated: boolean;
   /**
@@ -239,7 +286,7 @@ const FILE_CAPABLE_MODEL_NAMES = AVAILABLE_MODELS.filter(
   (model) =>
     model.enabled &&
     model.minimumPlan === "Guest" &&
-    getArtifactToolSupport(model.id) === "verified",
+    getArtifactToolSupport(model) === "verified",
 )
   .slice(0, 3)
   .map((model) => model.name);
@@ -418,7 +465,10 @@ const offPrompt = (reason: ArtifactToolOffReason, autoRouted = false): string =>
       ? "(turning web search off for this question)."
       : reason === "model_unverified"
         ? autoRouted
-          ? `(choosing a model for this request themselves instead of Auto, one that can create files, such as ${FILE_CAPABLE_MODEL_NAMES.join(", ")}).`
+          ? // Auto chose this model; the user did not. Telling them to leave
+            // Auto names a choice they never made: a file request sent again
+            // is routed to a model that can create files.
+            "(sending the same request again: Auto routes a file request to a model that can create files). Do not tell them to turn Auto off or to pick a model themselves."
           : `(choosing a different model, such as ${FILE_CAPABLE_MODEL_NAMES.join(", ")}).`
         : "(starting the request again from a saved conversation).",
     "",
@@ -579,7 +629,14 @@ export const planGeneratedArtifactTool = (
     };
   }
 
-  if (getArtifactToolSupport(input.modelId) !== "verified") {
+  if (
+    getArtifactToolSupport({
+      id: input.modelId,
+      provider: input.provider,
+      usageClass: input.usageClass,
+      fileToolsOverride: input.fileToolsOverride,
+    }) !== "verified"
+  ) {
     return {
       mode: "off",
       offReason: "model_unverified",

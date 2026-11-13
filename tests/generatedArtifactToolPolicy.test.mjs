@@ -6,6 +6,7 @@ import { ENABLED_MODELS } from "../lib/models.ts";
 import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
 import {
   ARTIFACT_TOOL_CAPABILITIES,
+  autoArtifactToolSupport,
   getArtifactToolSupport,
   nativeSearchBlocksArtifactTool,
   planGeneratedArtifactTool,
@@ -277,9 +278,9 @@ test("an unknown model is unverified rather than assumed to work", () => {
   assert.equal(getArtifactToolSupport("a-model-nobody-added"), "unverified");
 });
 
-test("an unverified catalogue model prompt names verified active models, not itself", () => {
+test("an unverified catalogue model prompt names verified active models (manual turns only), not itself", () => {
   const unverifiedModel = ENABLED_MODELS.find(
-    (model) => getArtifactToolSupport(model.id) === "unverified"
+    (model) => getArtifactToolSupport(model) === "unverified"
   );
   assert.ok(unverifiedModel, "expected an unverified enabled catalogue model");
 
@@ -290,11 +291,14 @@ test("an unverified catalogue model prompt names verified active models, not its
       autoRouted,
     });
     const verifiedActiveModels = ENABLED_MODELS.filter(
-      (model) => model.enabled && getArtifactToolSupport(model.id) === "verified"
+      (model) => model.enabled && getArtifactToolSupport(model) === "verified"
     );
-    assert.ok(
+    // A manual turn names models to choose; an Auto turn names none -- Auto
+    // made the choice, and asking again is the remedy.
+    assert.equal(
       verifiedActiveModels.some((model) => result.systemPrompt.includes(model.name)),
-      `autoRouted=${autoRouted}: prompt should identify a verified active model`
+      !autoRouted,
+      `autoRouted=${autoRouted}: which models the prompt names`
     );
     assert.ok(
       !result.systemPrompt.includes(unverifiedModel.name),
@@ -468,7 +472,7 @@ test("every turn that cannot make files leaves the conversion tool out", () => {
   for (const overrides of [
     { isAuthenticated: false },
     { canPersist: false },
-    { modelId: "some-unverified-model" },
+    { modelId: "some-unverified-model", provider: "qwen" },
     { conversationKind: "image" },
     { provider: "openai", nativeSearchEnabled: true, nativeSearchForced: true },
   ]) {
@@ -528,4 +532,47 @@ test("an attached image or PDF tells the model it can place pictures in a docume
   }
   assert.equal(plan({ turnAttachments: attached(DOCX) }).systemPrompt.includes("add an `image`"), false);
   assert.equal(plan().systemPrompt.includes("add an `image`"), false);
+});
+
+/* ------------------------------------------------------------------------ */
+/* The catalogue's file-tool tick                                             */
+/* ------------------------------------------------------------------------ */
+
+test("a model the register does not list is recognised by its provider", () => {
+  // 2026-11-13: one Auto candidate in 27 could create files, because the
+  // register named only older ids. A new OpenAI, Anthropic or Google chat model
+  // is file-capable as soon as it is added.
+  for (const [id, provider] of [
+    ["claude-haiku-5-5", "anthropic"],
+    ["gpt-7-luna", "openai"],
+    ["gemini-4-flash", "google"],
+  ]) {
+    assert.equal(autoArtifactToolSupport({ id, provider, usageClass: "standard" }), "verified", id);
+    assert.equal(plan({ modelId: id, provider }).mode, "generate", id);
+  }
+  for (const [id, provider] of [["qwen3-8-flash", "qwen"], ["grok-4-5", "xai"], ["sonar-pro", "perplexity"]]) {
+    assert.equal(autoArtifactToolSupport({ id, provider }), "unverified", id);
+  }
+  // Deep research never gets the tools, whatever its provider.
+  assert.equal(autoArtifactToolSupport({ id: "o-deep", provider: "openai", usageClass: "deep-research" }), "unverified");
+});
+
+test("an administrator's tick or untick decides over the automatic answer", () => {
+  assert.equal(plan({ modelId: "qwen3-8-flash", provider: "qwen", fileToolsOverride: true }).mode, "generate");
+  assert.equal(plan({ modelId: "gpt-6-luna", provider: "openai", fileToolsOverride: false }).offReason, "model_unverified");
+  // Null follows the code.
+  assert.equal(plan({ modelId: "gpt-6-luna", provider: "openai", fileToolsOverride: null }).mode, "generate");
+  assert.equal(getArtifactToolSupport({ id: "qwen3-8-flash", provider: "qwen", fileToolsOverride: true }), "verified");
+  // A bare id still reads only the register (older recorded router samples).
+  assert.equal(getArtifactToolSupport("claude-haiku-5-5"), "unverified");
+  assert.equal(getArtifactToolSupport("gpt-6-luna"), "verified");
+});
+
+test("an Auto turn on a model without the tools is told to ask again, not to leave Auto", () => {
+  const auto = plan({ modelId: "qwen3-8-flash", provider: "qwen", autoRouted: true }).systemPrompt;
+  assert.match(auto, /sending the same request again: Auto routes a file request/);
+  assert.match(auto, /Do not tell them to turn Auto off or to pick a model themselves/);
+  assert.doesNotMatch(auto, /instead of Auto/);
+  const manual = plan({ modelId: "qwen3-8-flash", provider: "qwen" }).systemPrompt;
+  assert.match(manual, /choosing a different model/);
 });

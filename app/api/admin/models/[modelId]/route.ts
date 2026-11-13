@@ -163,15 +163,19 @@ export async function PATCH(
     // A web search route change moves which budget a model's searches spend
     // and whether it searches at all, so "set to X" without "from Y" is not a
     // record anyone can act on.
+    // The file-tool tick is read for the same reason: it decides whether the
+    // model is offered tools at all.
+    const previous =
+      body.webSearchOverride === undefined && body.fileToolsOverride === undefined
+        ? null
+        : await prisma.modelRegistryEntry.findUnique({
+            where: { id: modelId },
+            select: { webSearchOverride: true, fileToolsOverride: true },
+          });
     const previousWebSearchOverride =
-      body.webSearchOverride === undefined
-        ? undefined
-        : (
-            await prisma.modelRegistryEntry.findUnique({
-              where: { id: modelId },
-              select: { webSearchOverride: true },
-            })
-          )?.webSearchOverride ?? null;
+      body.webSearchOverride === undefined ? undefined : previous?.webSearchOverride ?? null;
+    const previousFileToolsOverride =
+      body.fileToolsOverride === undefined ? undefined : previous?.fileToolsOverride ?? null;
     const updateModel = () =>
       prisma.modelRegistryEntry.update({
         where: { id: modelId },
@@ -210,6 +214,15 @@ export async function PATCH(
               webSearchOverride: {
                 from: previousWebSearchOverride ?? null,
                 to: body.webSearchOverride,
+              },
+            }
+          : {}),
+        ...(body.fileToolsOverride !== undefined &&
+        previousFileToolsOverride !== body.fileToolsOverride
+          ? {
+              fileToolsOverride: {
+                from: previousFileToolsOverride ?? null,
+                to: body.fileToolsOverride,
               },
             }
           : {}),

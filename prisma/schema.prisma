@@ -2928,6 +2928,10 @@ model ModelRegistryEntry {
   // NULL follows the code (lib/webSearchCapability.ts); 'off' | 'app-managed'
   // is an administrator's override (lib/webSearchOverride.ts).
   webSearchOverride          String?
+  // NULL follows the code (autoArtifactToolSupport in
+  // lib/generatedArtifactToolPolicy.ts); true/false is an administrator's tick
+  // or untick of the file tools for this model.
+  fileToolsOverride          Boolean?
   maxImages                  Int?
   maxBase64ImagePayloadBytes Int?
   maxOutputTokens            Int?
