@@ -7,7 +7,7 @@ import { useSession } from "next-auth/react";
 import { useUserUsage } from "./useUserUsage";
 import { usagePercent } from "./UsagePercentGauge";
 import { chatProductUiCopy, localizedProductHref, type ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
-import { ArrowRight, BarChart3, Check, ChevronDown, Moon, Puzzle, X } from "lucide-react";
+import { ArrowRight, BarChart3, Check, ChevronDown, ImagePlus, Moon, Puzzle, X } from "lucide-react";
 import { mcpConnectorCopy } from "@/lib/mcpConnectorCopy";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -168,7 +168,7 @@ export function ReviewParticipants({ review, selectedModels, canSelectModel, ini
           if (review.mode === "professional") { openChatModelPicker(event.currentTarget); return; }
           if (selected && providers.length <= 1) return;
           review.setProviders(selected ? providers.filter(p => p !== id) : review.maxProviders === 1 ? [id] : [...providers, id]);
-        }}><ModelLogo model={model} size="md" /><span><strong>{review.mode === "easy" ? reviewProviderName(id) : model?.name ?? id}</strong><small>{review.mode === "easy" ? c.automatic : model ? reviewProviderName(model.provider) : ""}</small></span><Check size={14} className={!selected && review.mode === "easy" ? "invisible" : ""} /></button>;
+        }}><ModelLogo model={model} size="md" /><span><strong>{review.mode === "easy" ? reviewProviderName(id) : model?.name ?? id}{review.mode === "easy" && review.imageProviders?.includes(id) && <span data-testid="review-provider-image-badge" className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-accent-image-50 px-1.5 align-middle text-xs font-medium text-accent-image-700 dark:bg-accent-image-950 dark:text-accent-image-200"><ImagePlus size={12} aria-hidden="true" />{c.imageBadge}</span>}</strong><small>{review.mode === "easy" ? c.automatic : model ? reviewProviderName(model.provider) : ""}</small></span><Check size={14} className={!selected && review.mode === "easy" ? "invisible" : ""} /></button>;
       })}
     </div>
     {review.mode === "easy" && !providers.length && <p role="status">{reviewProviderPreferencesCopy(lang).unavailable}</p>}

@@ -630,16 +630,16 @@ test.describe("Chat starter catalogue", () => {
     expect(labelWordBreak).not.toBe("keep-all");
   });
 
-  test("the image card is locked for a Free account rather than hidden", { tag: "@ui-risk" }, async ({
+  test("the image card is locked for a guest rather than hidden", { tag: "@ui-risk" }, async ({
     page,
   }) => {
     // Locked and hidden are different answers, and this is the one the
-    // image-generation contract cares about: a feature the account could buy
-    // must not be invisible to it.
+    // image-generation contract cares about: a feature the visitor could sign
+    // in for must not be invisible to them. Every signed-in plan may draw
+    // (planAllowsImageGeneration), so the requirement is the account.
     await enableStarterFlag(page);
     await enableImageFlag(page);
-    await mockAuthenticatedApi(page);
-    await mockUserUsage(page, { plan: "Free" });
+    await mockGuestUsage(page, 0, 1000);
     await openWelcome(page);
 
     const imageCard = page.locator('[data-starter-id="compare-image-models"]');
@@ -729,5 +729,47 @@ test.describe("Chat starter catalogue", () => {
     await expect(
       page.locator('[data-starter-id="compare-image-models"]')
     ).toHaveCount(0);
+  });
+  test("Chat offers one-model cards and makes images in the conversation", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // Owner report 2026-11-13: Chat is one model, yet its gallery offered
+    // three-model and image-model comparisons, and the image card opened the
+    // retired image workspace. Comparison cards are Review's; Chat's image
+    // card seeds a request the send answers with an image in place.
+    await enableStarterFlag(page);
+    await enableImageFlag(page);
+    await page.context().addCookies([
+      { name: "__tomverse_e2e_chat_image_intent", value: "1", url: BASE_URL },
+    ]);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Free" });
+    await page.goto("/chat");
+    await expect(page.getByTestId("chat-empty-state")).toBeVisible();
+    await expect(gallery(page)).toBeVisible();
+
+    for (const id of ["compare-answers", "translate-and-compare", "compare-image-models"]) {
+      await expect(page.locator(`[data-starter-id="${id}"]`)).toHaveCount(0);
+    }
+    const imageCard = page.locator('[data-starter-id="make-an-image"]');
+    await expect(imageCard).toHaveAttribute("data-starter-state", "available");
+    await imageCard.click();
+    await expect(page.getByTestId("chat-textarea")).not.toHaveValue("");
+    await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/chat/);
+  });
+
+  test("without image triage Chat's image card is absent", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // Without triage the seeded sentence would be answered in text, so the
+    // card would promise an image the send cannot make.
+    await enableStarterFlag(page);
+    await enableImageFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Free" });
+    await page.goto("/chat");
+    await expect(gallery(page)).toBeVisible();
+    await expect(page.locator('[data-starter-id="make-an-image"]')).toHaveCount(0);
   });
 });

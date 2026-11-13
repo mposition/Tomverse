@@ -17,8 +17,8 @@ export const workspaceWelcomeCopy = {
                 seed: "Explain in plain language what a vector database is for, in about 200 words.",
             },
             documentQuestions: {
-                label: "Ask several models about a PDF",
-                outcome: "Attach an 18 page PDF and ask several models the same question about it",
+                label: "Ask questions about a PDF",
+                outcome: "Attach an 18 page PDF and get the decisions and deadlines it holds",
                 seed: "I attached a document. Summarise what it asks me to decide, and list every deadline it names.",
             },
             sourcedAnswer: {
@@ -51,6 +51,11 @@ export const workspaceWelcomeCopy = {
                 outcome: "Send one sentence to several image models and compare what each returns",
                 seed: "A quiet reading room at dawn, warm light through tall windows, photographic.",
             },
+            makeAnImage: {
+                label: "Make an image from a sentence",
+                outcome: "Describe a picture in one sentence and get the image in this chat",
+                seed: "Make an image: a quiet reading room at dawn, warm light through tall windows, photographic.",
+            },
             speakAQuestion: {
                 label: "Speak a question, edit the text",
                 outcome: "Speak a long question instead of typing it, and edit the text before it is sent",
@@ -76,8 +81,8 @@ export const workspaceWelcomeCopy = {
                 seed: "벡터 데이터베이스가 어떤 문제를 푸는지 쉬운 말로 200자 정도로 설명해 주세요.",
             },
             documentQuestions: {
-                label: "PDF 붙여 여러 모델에 질문",
-                outcome: "18페이지 PDF를 붙여 여러 모델에게 같은 질문 하기",
+                label: "PDF 붙여 질문하기",
+                outcome: "18페이지 PDF를 붙여 결정할 일과 기한 받기",
                 seed: "문서를 첨부했습니다. 제가 무엇을 결정해야 하는지 요약하고, 문서에 나오는 기한을 모두 뽑아 주세요.",
             },
             sourcedAnswer: {
@@ -110,6 +115,11 @@ export const workspaceWelcomeCopy = {
                 outcome: "문장 하나를 여러 이미지 모델에 보내고 결과를 비교하기",
                 seed: "새벽의 조용한 열람실, 높은 창으로 들어오는 따뜻한 빛, 사진 느낌.",
             },
+            makeAnImage: {
+                label: "문장으로 이미지 만들기",
+                outcome: "장면을 한 문장으로 쓰고 이 대화 안에서 이미지 받기",
+                seed: "이미지를 만들어 주세요: 새벽의 조용한 열람실, 높은 창으로 들어오는 따뜻한 빛, 사진 느낌.",
+            },
             speakAQuestion: {
                 label: "말로 질문하고 글로 고치기",
                 outcome: "긴 질문을 말로 입력하고 보내기 전에 글로 고치기",
@@ -135,8 +145,8 @@ export const workspaceWelcomeCopy = {
                 seed: "用通俗的语言解释向量数据库用来解决什么问题，大约 200 字。",
             },
             documentQuestions: {
-                label: "就一份 PDF 问多个模型",
-                outcome: "上传一份 18 页的 PDF，向多个模型提出同一个问题",
+                label: "上传 PDF 提问",
+                outcome: "上传一份 18 页的 PDF，得到其中要做的决定和截止日期",
                 seed: "我上传了一份文档。请概括它要我做出什么决定，并列出其中提到的所有截止日期。",
             },
             sourcedAnswer: {
@@ -169,6 +179,11 @@ export const workspaceWelcomeCopy = {
                 outcome: "把同一句话发给多个图像模型，比较各自的结果",
                 seed: "清晨安静的阅览室，暖光从高窗照入，摄影风格。",
             },
+            makeAnImage: {
+                label: "用一句话生成图像",
+                outcome: "用一句话描述画面，在这个对话里得到图像",
+                seed: "请生成一张图像：清晨安静的阅览室，暖光从高窗照入，摄影风格。",
+            },
             speakAQuestion: {
                 label: "用语音提问，再改文字",
                 outcome: "用语音说出较长的问题，在发送前再修改文字",
@@ -194,8 +209,8 @@ export const workspaceWelcomeCopy = {
                 seed: "用淺顯的語言解釋向量資料庫用來解決什麼問題，大約 200 字。",
             },
             documentQuestions: {
-                label: "就一份 PDF 詢問多個模型",
-                outcome: "上傳一份 18 頁的 PDF，向多個模型提出同一個問題",
+                label: "上傳 PDF 提問",
+                outcome: "上傳一份 18 頁的 PDF，得到其中要做的決定和截止日期",
                 seed: "我上傳了一份文件。請摘要它要我做出什麼決定，並列出其中提到的所有截止日期。",
             },
             sourcedAnswer: {
@@ -228,6 +243,11 @@ export const workspaceWelcomeCopy = {
                 outcome: "把同一句話傳給多個圖像模型，比較各自的結果",
                 seed: "清晨安靜的閱覽室，暖光從高窗照入，攝影風格。",
             },
+            makeAnImage: {
+                label: "用一句話生成圖像",
+                outcome: "用一句話描述畫面，在這個對話裡得到圖像",
+                seed: "請生成一張圖像：清晨安靜的閱覽室，暖光從高窗照入，攝影風格。",
+            },
             speakAQuestion: {
                 label: "用語音提問，再改文字",
                 outcome: "用語音說出較長的問題，在傳送前再修改文字",
@@ -253,8 +273,8 @@ export const workspaceWelcomeCopy = {
                 seed: "Erklären Sie in einfachen Worten, wofür eine Vektordatenbank gedacht ist, in etwa 200 Wörtern.",
             },
             documentQuestions: {
-                label: "Mehrere Modelle zu einem PDF fragen",
-                outcome: "Ein PDF mit 18 Seiten anhängen und mehreren Modellen dieselbe Frage dazu stellen",
+                label: "Fragen zu einem PDF stellen",
+                outcome: "Ein PDF mit 18 Seiten anhängen und die Entscheidungen und Fristen darin erhalten",
                 seed: "Ich habe ein Dokument angehängt. Fassen Sie zusammen, worüber ich entscheiden soll, und nennen Sie alle Fristen darin.",
             },
             sourcedAnswer: {
@@ -287,6 +307,11 @@ export const workspaceWelcomeCopy = {
                 outcome: "Einen Satz an mehrere Bildmodelle schicken und die Ergebnisse vergleichen",
                 seed: "Ein ruhiger Lesesaal im Morgengrauen, warmes Licht durch hohe Fenster, fotografisch.",
             },
+            makeAnImage: {
+                label: "Ein Bild aus einem Satz machen",
+                outcome: "Ein Bild in einem Satz beschreiben und es in diesem Chat erhalten",
+                seed: "Erstelle ein Bild: ein ruhiger Lesesaal im Morgengrauen, warmes Licht durch hohe Fenster, fotografisch.",
+            },
             speakAQuestion: {
                 label: "Frage diktieren, Text bearbeiten",
                 outcome: "Eine lange Frage diktieren statt tippen und den Text vor dem Senden bearbeiten",
@@ -312,8 +337,8 @@ export const workspaceWelcomeCopy = {
                 seed: "Expliquez simplement à quoi sert une base de données vectorielle, en 200 mots environ.",
             },
             documentQuestions: {
-                label: "Interrogez plusieurs modèles sur un PDF",
-                outcome: "Joignez un PDF de 18 pages et posez la même question à plusieurs modèles",
+                label: "Posez vos questions sur un PDF",
+                outcome: "Joignez un PDF de 18 pages et obtenez les décisions et échéances qu'il contient",
                 seed: "J'ai joint un document. Résumez ce qu'il me demande de décider et listez toutes les échéances qu'il cite.",
             },
             sourcedAnswer: {
@@ -346,6 +371,11 @@ export const workspaceWelcomeCopy = {
                 outcome: "Envoyez une phrase à plusieurs modèles d'image et comparez leurs rendus",
                 seed: "Une salle de lecture calme à l'aube, lumière chaude par de hautes fenêtres, style photographique.",
             },
+            makeAnImage: {
+                label: "Créez une image à partir d'une phrase",
+                outcome: "Décrivez une image en une phrase et recevez-la dans ce chat",
+                seed: "Crée une image : une salle de lecture calme à l'aube, lumière chaude par de hautes fenêtres, style photographique.",
+            },
             speakAQuestion: {
                 label: "Dictez une question, corrigez le texte",
                 outcome: "Dictez une longue question au lieu de la taper, et corrigez le texte avant l'envoi",
@@ -371,8 +401,8 @@ export const workspaceWelcomeCopy = {
                 seed: "Explica en lenguaje sencillo para qué sirve una base de datos vectorial, en unas 200 palabras.",
             },
             documentQuestions: {
-                label: "Pregunta a varios modelos por un PDF",
-                outcome: "Adjunta un PDF de 18 páginas y haz la misma pregunta a varios modelos",
+                label: "Pregunta sobre un PDF",
+                outcome: "Adjunta un PDF de 18 páginas y obtén las decisiones y plazos que contiene",
                 seed: "He adjuntado un documento. Resume qué me pide decidir y enumera todos los plazos que menciona.",
             },
             sourcedAnswer: {
@@ -405,6 +435,11 @@ export const workspaceWelcomeCopy = {
                 outcome: "Envía una frase a varios modelos de imagen y compara lo que devuelve cada uno",
                 seed: "Una sala de lectura tranquila al amanecer, luz cálida por ventanales altos, estilo fotográfico.",
             },
+            makeAnImage: {
+                label: "Crea una imagen con una frase",
+                outcome: "Describe una imagen en una frase y recíbela en este chat",
+                seed: "Crea una imagen: una sala de lectura tranquila al amanecer, luz cálida por ventanales altos, estilo fotográfico.",
+            },
             speakAQuestion: {
                 label: "Dicta una pregunta y edita el texto",
                 outcome: "Dicta una pregunta larga en vez de escribirla y edita el texto antes de enviarlo",
@@ -430,8 +465,8 @@ export const workspaceWelcomeCopy = {
                 seed: "Explique em linguagem simples para que serve um banco de dados vetorial, em cerca de 200 palavras.",
             },
             documentQuestions: {
-                label: "Pergunte a vários modelos sobre um PDF",
-                outcome: "Anexe um PDF de 18 páginas e faça a mesma pergunta a vários modelos",
+                label: "Pergunte sobre um PDF",
+                outcome: "Anexe um PDF de 18 páginas e receba as decisões e prazos que ele contém",
                 seed: "Anexei um documento. Resuma o que ele pede que eu decida e liste todos os prazos citados.",
             },
             sourcedAnswer: {
@@ -463,6 +498,11 @@ export const workspaceWelcomeCopy = {
                 label: "Compare modelos de imagem",
                 outcome: "Envie uma frase para vários modelos de imagem e compare o que cada um devolve",
                 seed: "Uma sala de leitura tranquila ao amanhecer, luz quente por janelas altas, estilo fotográfico.",
+            },
+            makeAnImage: {
+                label: "Crie uma imagem com uma frase",
+                outcome: "Descreva uma imagem em uma frase e receba-a neste chat",
+                seed: "Crie uma imagem: uma sala de leitura tranquila ao amanhecer, luz quente por janelas altas, estilo fotográfico.",
             },
             speakAQuestion: {
                 label: "Dite uma pergunta e edite o texto",

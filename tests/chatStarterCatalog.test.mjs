@@ -8,6 +8,8 @@ import {
   CHAT_STARTER_REQUIRED_CAPABILITIES,
   STARTER_CAPABILITIES,
   STARTER_CAPABILITY_IDS,
+  STARTER_SURFACES,
+  chatStarterCatalogFor,
   findChatStarterEntry,
   isStarterCapability,
 } from "../lib/chatStarterCatalog.ts";
@@ -573,4 +575,69 @@ test("every entry the real catalogue holds can actually be offered somewhere", (
       `${item.id} can never be offered`
     );
   }
+});
+
+// --- which product offers which card ----------------------------------------
+
+test("every card names the products that may offer it", () => {
+  for (const item of CHAT_STARTER_CATALOG) {
+    assert.ok(item.surfaces.length > 0, item.id);
+    for (const surface of item.surfaces) assert.ok(STARTER_SURFACES.includes(surface), item.id);
+  }
+});
+
+test("Chat offers no multi-model comparison and never hands a card to the image workspace", () => {
+  // Owner report 2026-11-13: Chat is one model, and its image card opened the
+  // retired image workspace. Comparison cards belong to Review.
+  const chat = chatStarterCatalogFor("chat");
+  for (const item of chat) {
+    assert.notEqual(item.seed.productKey, "studio", item.id);
+    assert.equal(item.seed.productKey, "chat", item.id);
+  }
+  for (const id of ["compare-answers", "translate-and-compare", "compare-image-models"]) {
+    assert.ok(!chat.some((item) => item.id === id), id);
+    assert.ok(chatStarterCatalogFor("review").some((item) => item.id === id), id);
+  }
+});
+
+test("Chat's image card answers in the conversation and hides without image triage", () => {
+  const card = findChatStarterEntry("make-an-image");
+  assert.deepEqual(card?.surfaces, ["chat"]);
+  assert.equal(card?.seed.productKey, "chat");
+  assert.deepEqual(chatStarterAvailability(card, viewer()), { state: "available" });
+  // Without triage the seeded sentence would come back as text.
+  const withoutTriage = new Set(STARTER_CAPABILITY_IDS.filter((id) => id !== "chat-image-answer"));
+  assert.equal(
+    chatStarterAvailability(card, viewer({ modelCapabilities: withoutTriage })).state,
+    "hidden"
+  );
+  assert.equal(
+    chatStarterAvailability(card, viewer({ signedIn: false, plan: null })).state,
+    "locked"
+  );
+});
+
+test("the real Chat catalogue shows a Free account the image card it can run", () => {
+  const cards = selectVisibleStarterCards(viewer({ plan: "Free" }), chatStarterCatalogFor("chat"));
+  assert.equal(
+    cards.find((card) => card.entry.id === "make-an-image")?.availability.state,
+    "available"
+  );
+  assert.ok(!cards.some((card) => card.entry.id === "compare-image-models"));
+});
+
+test("Review's image card is not locked behind Pro for a plan that can draw", () => {
+  // planAllowsImageGeneration admits Free; a "Pro required" badge was stale.
+  const card = findChatStarterEntry("compare-image-models");
+  assert.deepEqual(chatStarterAvailability(card, viewer({ plan: "Free" })), { state: "available" });
+});
+
+test("image-triage capability resolves only from the shell's answer", () => {
+  const off = resolveChatStarterCapabilities({ webSearchBackendReadiness: NO_BACKENDS });
+  assert.ok(!off.includes("chat-image-answer"));
+  const on = resolveChatStarterCapabilities({
+    webSearchBackendReadiness: NO_BACKENDS,
+    chatImageAnswers: true,
+  });
+  assert.ok(on.includes("chat-image-answer"));
 });

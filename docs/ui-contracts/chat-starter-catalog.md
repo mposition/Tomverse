@@ -27,7 +27,7 @@
 
 | 쓴다 | 쓰지 않는다 |
 | --- | --- |
-| "18페이지 PDF를 붙여 여러 모델에게 같은 질문 하기" | "파일 첨부 지원" |
+| "18페이지 PDF를 붙여 결정할 일과 기한 받기" | "파일 첨부 지원" |
 | "출처 링크가 함께 붙은 답 받기" | "web search 연동" |
 | "답변을 내려받을 수 있는 .xlsx 파일로 만들기" | "Generated Artifact tool" |
 
@@ -209,21 +209,26 @@ quieter").
   응답으로 OS 대화상자가 뜨는 것은 놀람이고, picker는 composer가 이미 소유한다.
 - **어느 제품으로 넘길지는 소유권 판정 뒤에 정한다.** `productKey`로 먼저
   갈라지면 그 갈래는 `applyStarterSeed()`를 아예 지나지 않는다.
-  `seed.productKey === "studio"`인 카드는 기존 `handleStartImageDraft()`로
-  넘어간다. `fromImageRequest` 없이 부르므로 `imageDraftAutoGenerate`는 false를
-  유지한다 — 초안만 채우고 생성은 사람이 누른다.
+  `seed.productKey === "studio"`인 카드는 **Review 표면에서만** 기존
+  `handleStartImageDraft()`로 넘어가고, 그 함수의 Review 갈래는 이미지 workspace를
+  열지 않고 Review composer의 이미지 모드를 켠다. 모델이 정해져 있지 않으면 고정
+  기본 모델이 아니라 **활성 이미지 모델 카탈로그**에서 고른다 — 지금 답하는
+  공급자의 모델을 먼저, 없으면 카탈로그 첫 활성 모델. 활성 모델이 없으면 이미지
+  모드를 켜지 않고 문장만 채운다(2026-11-13: 비활성화된 GPT Image 2가 고정으로
+  켜져 보내기가 아무 일도 하지 않았다). Review 간편 모드의 카드는 문장을 채우고
+  이미지 모드를 켜며, 선택한 공급자마다 한 번 라우팅된다.
+  **Chat은 카드로 이미지 workspace를 열지 않는다**(운영자 결정 2026-11-13). Chat의
+  이미지 카드(`make-an-image`)는 `productKey: "chat"`인 보통 씨앗이고, 보내면
+  이미지 Triage가 같은 대화 안에서 이미지로 답한다
+  (`docs/policy/image-generation.md` §13 ⑥).
 
   이것도 처음에는 그렇지 않았다. studio 분기가 판정보다 **앞**에 있어서,
   이미지 카드만은 사람이 타이핑한 composer를 빼앗고 다른 workspace로 데려갔고,
   앞 카드가 켠 검색을 되돌리지도 않았다 — 위에 적은 staging 결함이 이 한
   경로에만 살아 있었다. 2026-09-15 cross review round 0이 찾았다.
-- **chat composer에는 아무것도 남기지 않고 넘긴다.** studio로 넘어가는 순간 앞
-  카드의 씨앗은 토글과 함께 회수됐으므로, chat 초안에 그 문장만 남으면 씨앗이
-  반쪽으로 쪼개진다. 그리고 이미지 초안을 취소했을 때 chat 작성란으로 되돌아
-  가는 값은 **넘긴 씨앗이 아니라 빈 문자열**이다 —
-  `handleStartImageDraft()`의 `draftText`는 composer가 넘길 때만 그 둘이 같은
-  문장이고, 시작 카드가 넘긴 씨앗은 chat 작성란에 있던 적이 없다
-  (`chatDraftOnReturn`).
+- **Review composer에는 넘긴 씨앗만 남는다.** 넘기는 순간 앞 카드의 씨앗은
+  토글과 함께 회수되고, 작성란은 이미지 카드의 문장 하나로 바뀐다. 씨앗이 반쪽으로
+  쪼개지지 않는다.
 - **provider 호출 · 크레딧 예약 · 정산 · 대화 row 생성은 이 표면에 없다.**
 - **카드는 가격을 말하지 않는다.** 실행하지 않으므로 가격을 말할 자격이 없다.
   유료 플랜이 필요한 것은 `locked` 사유로만 말한다.
@@ -343,7 +348,8 @@ composer · AI 고지 · 동의 안내            하단 dock (대화 중과 같
 
 **세 가지뿐이다.**
 
-1. `lib/chatStarterCatalog.ts`의 `CHAT_STARTER_CATALOG`에 행 하나.
+1. `lib/chatStarterCatalog.ts`의 `CHAT_STARTER_CATALOG`에 행 하나. 그 행의
+   `surfaces`가 카드를 보여 줄 제품을 정한다(`chat` · `review`).
 2. `labelKey` · `outcomeKey` · `seed.promptSeedKey` 세 문자열을 **7개 locale
    전부**에. 짧은 문구는 좁은 타일 한 칸에서 두 줄 안에 드는 길이로 쓴다.
 3. `evidence`에 그 약속을 실제로 수행하는 모듈의 경로.
@@ -361,7 +367,12 @@ composer · AI 고지 · 동의 안내            하단 dock (대화 중과 같
   발명하지 않는다 — `MODEL_FINDER_TASKS`와 이미 조심스럽게 분리되어 있는 두
   어휘에 세 번째를 더하지 않는다.
 - `seed.productKey`는 `CONVERSATION_PRODUCT_KEYS`(`chat` · `review` · `studio`)
-  안에서 고른다.
+  안에서 고른다. `studio`는 Review 전용 카드에만 쓴다.
+- **Chat은 모델 하나가 답한다.** "여러 모델의 답을 나란히" 같은 결과를 약속하는
+  카드(`compare-answers` · `translate-and-compare` · `compare-image-models`)는
+  `surfaces: ["review"]`다. Chat에 두면 Chat이 하지 않는 비교를 약속한다
+  (운영자 지적 2026-11-13). 두 제품에 모두 두는 카드의 문구는 모델 수를 말하지
+  않는다.
 - 새 capability가 필요하면 `STARTER_CAPABILITIES`에 id와 **해석하는 모듈·export
   이름**을 함께 등록하고, `lib/chatStarterCapabilityResolution.ts`에 해석을
   더한다. 등록되지 않은 id를 요구하는 카드는 `hidden`이다.

@@ -160,12 +160,18 @@ import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { askChatImageTurn } from "@/lib/chatImageIntentClient";
 import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "@/lib/imageGenerationPricing";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
-import { reviewImageTurnPlan, type ReviewImageTurns } from "@/lib/reviewImageTurn";
+import {
+  reviewImageDraftModelId,
+  reviewImageProviders,
+  reviewImageTurnPlan,
+  type ReviewImageTurns,
+} from "@/lib/reviewImageTurn";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
-import { DEFAULT_IMAGE_MODEL_ID, imageModelOwner } from "@/lib/imageModelRegistry";
+import { imageModelOwner } from "@/lib/imageModelRegistry";
 import type { ImagePreset } from "@/lib/imageGenerationPricing";
 import { ChatStarterGallery } from "@/components/chat/ChatStarterGallery";
 import {
+  chatStarterCatalogFor,
   type ChatStarterEntry,
   type StarterCapability,
 } from "@/lib/chatStarterCatalog";
@@ -4620,7 +4626,20 @@ export function ChatPageClient({
             // A Review continuation has no in-conversation image mode
             // (docs/policy/external-conversation-continuation.md §5.1).
             if (!inConversationImagesAllowed) return;
-            setReviewImageModelId(modelId ?? options?.modelIds?.[0] ?? DEFAULT_IMAGE_MODEL_ID);
+            // A fixed default model outlived its catalogue row: GPT Image 2
+            // was disabled and the image mode it armed could never send. The
+            // fallback is an active model, preferably of a provider already
+            // answering here.
+            const draftModelId = modelId ?? options?.modelIds?.[0] ??
+                reviewImageDraftModelId(imageCatalog.models, [...new Set(selectedModels.flatMap(id => {
+                    const model = getModel(id); return model ? [model.provider] : [];
+                }))]);
+            if (!draftModelId) {
+                setInputValue(draftText);
+                setFocusToken(value => value + 1);
+                return;
+            }
+            setReviewImageModelId(draftModelId);
             reviewWorkspace.setImagePromptMode(true);
             setInputValue(draftText);
             setFocusToken(value => value + 1);
@@ -10000,8 +10019,11 @@ export function ChatPageClient({
       enabledFlags: new Set(chatStarterEnabledFlagKeys),
       knownFlags: new Set(chatStarterKnownFlagKeys),
       modelCapabilities: new Set(chatStarterCapabilities),
-    });
+      // Chat is one model; cards that promise several answers side by side
+      // are Review's (docs/ui-contracts/chat-starter-catalog.md section 7).
+    }, chatStarterCatalogFor(mountedSurface === "chat" ? "chat" : "review"));
   }, [
+    mountedSurface,
     accountUsage?.plan,
     chatStarterCapabilities,
     chatStarterEnabled,
@@ -10062,7 +10084,11 @@ export function ChatPageClient({
     // it took over a composer holding typed work, and it never put back the
     // search a previous card had armed. That is the staging defect again, on
     // the one path the staging fix did not cover.
-    const handsToStudio = entry.seed.productKey === "studio";
+    // Only Review hands an image seed on, and only to its own composer's
+    // image mode. Chat never opens the image workspace from a card: its image
+    // card is an ordinary seed the send answers with an image in place.
+    const handsToStudio =
+      entry.seed.productKey === "studio" && mountedSurface === "workspace";
     const application = applyStarterSeed({
       scope: activeDraftKey,
       draft: inputValue,
@@ -10115,6 +10141,15 @@ export function ChatPageClient({
     }
     router.push("/pricing");
   };
+
+  // Which "who answers" rows can draw, read from the active image catalogue
+  // (Admin model catalogue). Empty where this deployment or conversation
+  // cannot answer with an image, so no row promises one.
+  const reviewImageProviderIds = useMemo(
+    () => imageGenerationEnabled && inConversationImagesAllowed
+      ? reviewImageProviders(imageCatalog.models) : [],
+    [imageCatalog.models, imageGenerationEnabled, inConversationImagesAllowed]
+  );
 
   const starterGalleryElement =
     starterCards.length > 0 ? (
@@ -10473,6 +10508,7 @@ export function ChatPageClient({
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,
             imageModelLabel: imageCatalog.getModel(reviewImageModelId ?? "")?.name,
+            imageProviders: reviewImageProviderIds,
           } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
@@ -10646,7 +10682,14 @@ export function ChatPageClient({
             if (!card) return;
             if (card.availability.state === "locked") handleStarterLocked(card.availability.reason);
             else if (reviewWorkspace.mode === "easy" && card.entry.seed.productKey === "studio") {
-              if (!inputValue.trim()) setInputValue(t(card.entry.seed.promptSeedKey));
+              // Easy routes once per selected provider, so the sentence goes
+              // out as an image request to every provider that can draw.
+              if (inputValue.trim()) return;
+              setInputValue(t(card.entry.seed.promptSeedKey));
+              if (canOfferNewImage && inConversationImagesAllowed) {
+                setReviewImageModelId(null);
+                reviewWorkspace.setImagePromptMode(true);
+              }
             } else handleStarterSeed(card.entry);
           }}
           review={mountedSurface === "workspace" ? {
@@ -10656,6 +10699,7 @@ export function ChatPageClient({
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,
             imageModelLabel: imageCatalog.getModel(reviewImageModelId ?? "")?.name,
+            imageProviders: reviewImageProviderIds,
           } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}

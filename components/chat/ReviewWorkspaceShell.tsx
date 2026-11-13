@@ -358,6 +358,7 @@ export async function ReviewWorkspaceShell({
   // Capabilities cross as ids only -- never a key, a backend name or a budget.
   const starterCapabilities = resolveChatStarterCapabilities({
     webSearchBackendReadiness,
+    chatImageAnswers: chatImageIntentEnabled || imageTriageFixtureOffered,
   });
 
   // The verification coordinator wraps the page rather than living inside it,
