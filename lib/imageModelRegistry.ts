@@ -204,6 +204,8 @@ export type ConfirmedImageBillingTerms =
       maxOutputTokens: number;
       textOutputUsdPerMTok: number;
       imageTokensPerImage: number;
+      /** The documented image output rate the measurement priced its samples at; the judge holds prices to it. */
+      imageOutputUsdPerMTok: number;
       confirmationId?: string;
     }
   | {

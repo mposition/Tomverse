@@ -29,6 +29,7 @@ export const confirmedImageBillingTermsSchema = z.discriminatedUnion("kind", [
       maxOutputTokens: z.number().int().min(256).max(65_536),
       textOutputUsdPerMTok: z.number().positive().max(1_000),
       imageTokensPerImage: z.number().int().positive().max(100_000),
+      imageOutputUsdPerMTok: z.number().positive().max(1_000),
     })
     .strict(),
   z
@@ -285,6 +286,7 @@ export const measurementVerdict = (plan: MeasurementPlan, samples: readonly Meas
         maxOutputTokens: plan.maxOutputTokens,
         textOutputUsdPerMTok: plan.textOutputUsdPerMTok,
         imageTokensPerImage: Math.max(...imageTokens),
+        imageOutputUsdPerMTok: plan.imageOutputUsdPerMTok,
       };
     }
   } else if (plan.method === "tokens_per_image") {

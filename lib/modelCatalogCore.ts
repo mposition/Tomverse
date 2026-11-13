@@ -408,17 +408,23 @@ export const judgeImageModel = (
       reasons.push(`measured_request_required:max_output_tokens_${bound.maxOutputTokens}_no_thinking_level`);
     }
   } else {
-    // Measured tokens per image hold the price as well as the thinking: an
-    // option priced below its confirmed tokens at the confirmed rate is a
+    // Confirmed image tokens hold the price as well as the thinking: an option
+    // priced below its measured image tokens at the confirmed image rate is a
     // price older than the measurement, refused until a new draft is applied.
+    // Per option for an OpenAI count; one count for every option on Google
+    // (each size is requested at the 1K tier).
     const measured = billingTermsApplyTo(model.provider, model.billingTerms);
-    if (measured?.kind === "tokens_per_image") {
-      for (const price of model.prices) {
-        const tokens = measured.tokens.find((row) => row.quality === price.quality && row.size === price.size)?.tokens;
-        const cost = tokens === undefined ? null : Math.ceil(tokens * measured.imageOutputUsdPerMTok);
-        if (cost !== null && price.outputCostMicroUsd < cost) {
-          reasons.push(`price_below_measured_cost:${price.quality}/${price.size}`);
-        }
+    for (const price of model.prices) {
+      const tokens =
+        measured?.kind === "tokens_per_image"
+          ? measured.tokens.find((row) => row.quality === price.quality && row.size === price.size)?.tokens
+          : measured?.kind === "measured_output_limit"
+            ? measured.imageTokensPerImage
+            : undefined;
+      const rate =
+        measured?.kind === "tokens_per_image" || measured?.kind === "measured_output_limit" ? measured.imageOutputUsdPerMTok : 0;
+      if (tokens !== undefined && price.outputCostMicroUsd < Math.ceil(tokens * rate)) {
+        reasons.push(`price_below_measured_cost:${price.quality}/${price.size}`);
       }
     }
     for (const price of model.prices) {

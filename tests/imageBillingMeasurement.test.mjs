@@ -177,6 +177,7 @@ test("Nano Banana 2.1: limits that lose images cannot be confirmed; a limit that
     maxOutputTokens: 8_192,
     textOutputUsdPerMTok: 7.5,
     imageTokensPerImage: 1_120,
+    imageOutputUsdPerMTok: 30,
   });
   // Past twice the limit is not a bound.
   const over = measurementVerdict(at8192, [...kept.slice(0, 5), sample(5, { nonImageBillableTokens: 16_385, billedImageTokens: 1_120 })]);
@@ -261,7 +262,7 @@ test("usage is flattened to numbers only", () => {
 // --- the judge and the request read confirmed terms beside the code tables ---
 
 const perImage = { kind: "per_image_no_thinking", confirmationId: "t1" };
-const measured = { kind: "measured_output_limit", maxOutputTokens: 8_192, textOutputUsdPerMTok: 7.5, imageTokensPerImage: 1_120 };
+const measured = { kind: "measured_output_limit", maxOutputTokens: 8_192, textOutputUsdPerMTok: 7.5, imageTokensPerImage: 1_120, imageOutputUsdPerMTok: 30 };
 const flareTerms = {
   kind: "tokens_per_image",
   imageOutputUsdPerMTok: 30,
@@ -339,6 +340,9 @@ test("a runtime Google model is sent the confirmed limit and the judge admits it
   assert.deepEqual(imageMeasuredOutputLimitBound(model), { maxOutputTokens: 8_192, textOutputUsdPerMTok: 7.5, imageTokensPerImage: 1_120 });
   assert.equal(imageThinkingCapEnforced(model), true);
   assert.equal(model.disabledReason, null);
+  // Re-measured at twice the image tokens: the 1K price no longer covers one image.
+  const doubled = [termsRow("t2", "google", "gemini-nano-banana-2.1", { ...measured, imageTokensPerImage: 2_240 }, "2026-11-14"), ...terms];
+  assert.equal(resolve(doubled).disabledReason, "price_unverified");
   // Credits under the floor at the confirmed cap are still refused.
   assert.equal(resolve(terms, 10).disabledReason, "operational_hold");
 });
