@@ -37,8 +37,10 @@ import {
   buildGoogleImageRequest,
   GOOGLE_API_KEY_HEADER,
   GOOGLE_INTERACTIONS_URL,
+  googleBilledImageTokens,
   googleNonImageBillableTokens,
   parseGoogleImageResponse,
+  readGoogleImageInteraction,
 } from "@/lib/googleImageRequest";
 import {
   buildQwenImageRequest,
@@ -125,6 +127,13 @@ export class ImageProviderError extends Error {
    * everywhere else. Lets the failure settle what was spent past the reservation.
    */
   nonImageBillableTokens: number | null = null;
+
+  /**
+   * What the refused response billed as images: its image tokens, or null when
+   * it reported none, and the images its model output carried (0 or several).
+   */
+  billedImageTokens: number | null = null;
+  billedImageCount = 0;
 }
 
 /**
@@ -218,6 +227,8 @@ export type ImageProviderResult = {
    * priced on a measured token bound (Google direct). Absent elsewhere.
    */
   nonImageBillableTokens?: number | null;
+  /** Image tokens the response billed, for the same models; null when not reported. */
+  billedImageTokens?: number | null;
   /** Provider-reported output/image tokens; 0 when the response omits usage. */
   outputTokens: number;
   providerRequestId: string | null;
@@ -706,6 +717,8 @@ const generateWithGoogle = async (
         requestParams
       );
       refused.nonImageBillableTokens = nonImageBillableTokens;
+      refused.billedImageTokens = googleBilledImageTokens(payload);
+      refused.billedImageCount = readGoogleImageInteraction(payload)?.modelOutputImageCount ?? 0;
       throw refused;
     }
     const imageBytes = Buffer.from(parsed.imageBase64, "base64");
@@ -716,6 +729,7 @@ const generateWithGoogle = async (
       inputTokens: parsed.usage.inputTokens,
       thinkingTokens: parsed.usage.thinkingTokens,
       nonImageBillableTokens,
+      billedImageTokens: googleBilledImageTokens(payload),
       outputTokens: parsed.usage.outputTokens,
       providerRequestId,
       // Google embeds SynthID. C2PA is claimed only where the model card says

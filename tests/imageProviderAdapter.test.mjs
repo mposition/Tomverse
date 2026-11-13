@@ -307,7 +307,7 @@ test("a Google response past the measured bound is reported even when it carries
       setActiveImageModelCatalog([priced]);
       await assert.rejects(
         generateImageWithProvider({ prompt: "a red apple", size: "1024x1024", quality: "medium", modelId: priced.id }),
-        (error) => error.nonImageBillableTokens === 1_815
+        (error) => error.nonImageBillableTokens === 1_815 && error.billedImageTokens === null && error.billedImageCount === 0
       );
     } finally {
       globalThis.fetch = originalFetch;
@@ -369,4 +369,39 @@ test("a Google failure that may have been billed is never sent twice", async () 
     1
   );
   assert.equal(await attempt(() => Response.json({ error: { message: "internal" } }, { status: 503 })), 1);
+});
+
+test("a refused Google response with two images carries both for settlement", async () => {
+  const flash = IMAGE_MODEL_REGISTRY.find((model) => model.id === "gemini-3.1-flash-image");
+  const priced = {
+    ...flash,
+    disabledReason: null,
+    prices: [{ quality: "medium", size: "1024x1024", credits: 94, outputCostMicroUsd: 67_200 }],
+  };
+  const image = { type: "image", data: "AAAA", mime_type: "image/jpeg" };
+  const originalFetch = globalThis.fetch;
+  const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  globalThis.fetch = async () =>
+    Response.json({
+      status: "completed",
+      steps: [{ type: "model_output", content: [image, image] }],
+      usage: {
+        total_output_tokens: 2_440,
+        output_tokens_by_modality: [{ modality: "image", tokens: 2_240 }],
+        total_thought_tokens: 0,
+      },
+    });
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY = "test-google-key";
+  try {
+    setActiveImageModelCatalog([priced]);
+    await assert.rejects(
+      generateImageWithProvider({ prompt: "a red apple", size: "1024x1024", quality: "medium", modelId: priced.id }),
+      (error) => error.billedImageTokens === 2_240 && error.billedImageCount === 2 && error.nonImageBillableTokens === 200
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (key === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    else process.env.GOOGLE_GENERATIVE_AI_API_KEY = key;
+    resetActiveImageModelCatalog();
+  }
 });
