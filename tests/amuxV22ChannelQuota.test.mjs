@@ -124,14 +124,18 @@ const agyUsage = (gemini = [0.75, 0.9]) => ({ conversation_id: "", status: "SUCC
       { id: "gemini-argon-wtu-weekly", window: "weekly", remaining_fraction: 0,
         reset_time: "2026-11-14T09:42:27Z" }] }] } } });
 
-test("Antigravity quota is the Gemini group's more-used bucket, other groups aside", () => {
-  assertObservation(normalizeAmuxV22AntigravityQuota(agyUsage(), at), "antigravity", 7500,
-    "2026-11-08T03:00:00.000Z");
+test("Antigravity quota is the named group's more-used bucket, other groups aside", () => {
+  const read = (body, group = "Gemini Models") => normalizeAmuxV22AntigravityQuota(body, at, group);
+  assertObservation(read(agyUsage()), "antigravity", 7500, "2026-11-08T03:00:00.000Z");
   // Measured shape: a 5-hour bucket at 1 and a weekly one just below it.
-  assert.equal(normalizeAmuxV22AntigravityQuota(agyUsage([0.9998478293418884, 1]), at)
-    .remaining_basis_points, 9998);
-  assertObservation(normalizeAmuxV22AntigravityQuota(agyUsage([0.4, 0]), at), "antigravity", 0,
-    "2026-11-08T03:00:00.000Z");
+  assert.equal(read(agyUsage([0.9998478293418884, 1])).remaining_basis_points, 9998);
+  assertObservation(read(agyUsage([0.4, 0])), "antigravity", 0, "2026-11-08T03:00:00.000Z");
+  // The default group is Gemini 4 Argon's own, exhausted in this fixture.
+  assertObservation(normalizeAmuxV22AntigravityQuota(agyUsage(), at), "antigravity", 0,
+    "2026-11-14T09:42:27.000Z");
+  // A group the panel does not have, or a name that is not one, is unknown.
+  for (const group of ["Gemini 5 Argon", "", " Gemini Models", null, 7])
+    assert.equal(read(agyUsage(), group), null, String(group));
   const without = (mutate) => { const body = agyUsage(); mutate(body); return body; };
   for (const bad of [null, {}, without((b) => { b.status = "ERROR"; }),
     without((b) => { b.command.name = "status"; }),
@@ -141,7 +145,42 @@ test("Antigravity quota is the Gemini group's more-used bucket, other groups asi
     without((b) => { b.command.data.groups[0].buckets[0].remaining_fraction = "0.5"; }),
     without((b) => { b.command.data.groups[0].buckets[1].reset_time = at; }),
     without((b) => { b.command.data.groups[0].buckets[1].reset_time = "soon"; })])
-    assert.equal(normalizeAmuxV22AntigravityQuota(bad, at), null, JSON.stringify(bad)?.slice(0, 80));
+    assert.equal(read(bad), null, JSON.stringify(bad)?.slice(0, 80));
+});
+
+/** agy 1.5.4 `/usage` as measured on the box 2026-11-13 (Claude and GPT
+ * group trimmed to one bucket). Gemini 4 Argon is its own group, apart from
+ * "Gemini Models" (Flash, Pro), with a weekly bucket only. */
+const measuredAgyUsage = () => ({ conversation_id: "", status: "SUCCESS", duration_seconds: 0,
+  num_turns: 0, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+  command: { name: "usage", data: { groups: [
+    { name: "Gemini Models", description: "Models within this group: Gemini Flash, Gemini Pro",
+      buckets: [
+        { id: "gemini-weekly", window: "weekly", remaining_fraction: 0.9998,
+          reset_time: "2026-11-17T09:42:37Z" },
+        { id: "gemini-5h", window: "5h", remaining_fraction: 1,
+          reset_time: "2026-11-13T06:41:39Z" }] },
+    { name: "Claude and GPT models", buckets: [
+      { id: "3p-weekly", window: "weekly", remaining_fraction: 0.5,
+        reset_time: "2026-11-17T08:03:00Z" }] },
+    { name: "Gemini 4 Argon", buckets: [
+      { id: "gemini-argon-wtu-weekly", window: "weekly", remaining_fraction: 0.97,
+        reset_time: "2026-11-17T09:42:27Z" }] }] } } });
+
+test("the measured 2026-11-13 panel gives the Argon worker Argon's weekly bucket", () => {
+  const measuredAt = "2026-11-13T02:00:00.000Z";
+  const argon = normalizeAmuxV22AntigravityQuota(measuredAgyUsage(), measuredAt);
+  assert.equal(argon.remaining_basis_points, 9700);
+  assert.equal(argon.reset_at, "2026-11-17T09:42:27.000Z");
+  assert.equal(argon.exhausted, false);
+  // Before the fix the worker read the Flash/Pro group: 99.98% and its 5-hour reset.
+  const flashPro = normalizeAmuxV22AntigravityQuota(measuredAgyUsage(), measuredAt, "Gemini Models");
+  assert.equal(flashPro.remaining_basis_points, 9998);
+  assert.equal(flashPro.reset_at, "2026-11-13T06:41:39.000Z");
+  // Argon's group missing from a later panel is unknown, never Flash/Pro's number.
+  const withoutArgon = measuredAgyUsage();
+  withoutArgon.command.data.groups.pop();
+  assert.equal(normalizeAmuxV22AntigravityQuota(withoutArgon, measuredAt), null);
 });
 
 /** A fake CLI: records what it was started with and answers each written
@@ -271,9 +310,16 @@ test("Antigravity probe prints only the usage panel, from a read-only run home",
     roleAsked = options.role;
     return home.create(provider, given, options);
   };
+  // Without a named group the probe reads Gemini 4 Argon's (exhausted here).
   const result = await probeAmuxV22ChannelQuota("antigravity", config,
     { now: () => now, spawn: spawnChild, createRunHome: create });
-  assertObservation(result, "antigravity", 7500, "2026-11-08T03:00:00.000Z");
+  assertObservation(result, "antigravity", 0, "2026-11-14T09:42:27.000Z");
+  // The sidecar's TOMVERSE_AMUX_V22_ANTIGRAVITY_QUOTA_GROUP names another group.
+  const named = { ...config, quotaGroup: "Gemini Models" };
+  assertObservation(await probeAmuxV22ChannelQuota("antigravity", named, { now: () => now,
+    spawn: spawnChild, createRunHome: async (_provider, given) => ({
+      config: { ...given, homePath: "/home/review/codex-chore/run-y" }, cleanup: async () => {} }) }),
+  "antigravity", 7500, "2026-11-08T03:00:00.000Z");
   assert.equal(roleAsked, "review");
   const [{ binary, args, options }] = started;
   assert.equal(binary, config.binaryPath);
