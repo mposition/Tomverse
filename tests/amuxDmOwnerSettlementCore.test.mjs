@@ -204,15 +204,20 @@ test("the app applies the answer as the system, through the chain writer, and a 
     "an answer and a remake's close both stop under the kill switch");
   assert.match(service, /FOR UPDATE OF s, w NOWAIT/);
   // One judgment of "the Task moved", in every step: the sync's sweep, the
-  // answer (and a remake's claim), the read before a remake's idea, the
-  // cancel of a moved claim, and the close after the idea.
+  // answer (and a remake's claim), the guard inside the idea's own commit,
+  // the cancel of a moved claim, and the close after the idea.
   assert.equal((service.match(/amuxDmOwnerSettlementMoved\(row\)/g) ?? []).length, 5);
   assert.doesNotMatch(service, /IS DISTINCT FROM s\."attemptId"|row\.status !== row\.taskStatus/,
     "no second copy of the judgment");
-  assert.equal((service.match(/\$\{SETTLEMENT_FACTS\}/g) ?? []).length, 3, "and one read of its facts");
-  const remake = read("lib/amux/dmOwnerSettlementRemake.ts");
-  assert.match(remake, /if \(live\.moved\)\s+return withAmuxDbBoundary\(AMUX_DB_BOUNDARIES\.decisionMakerOwnerSettlementApply,\s+\(tx, context\) => cancelMovedAmuxDmOwnerSettlementClaim/);
-  assert.ok(remake.indexOf("if (live.moved)") < remake.indexOf("await fileIdea("), "a moved Task is never filed for");
+  assert.equal((service.match(/\$\{SETTLEMENT_FACTS\}/g) ?? []).length, 2, "and one read of its facts");
+  const guard = service.slice(service.indexOf("export async function guardAmuxDmOwnerSettlementRemakeIntake"),
+    service.indexOf("export async function recordAmuxDmOwnerSettlementRemakeIdea"));
+  const order = ["await takeAuditChainLock(tx);", "readDecisionMakerSwitchesOrThrow(tx)",
+    "await lockSettlement(tx, input.settlementId)", "row.remakeRequestId !== input.remakeRequestId",
+    "amuxDmOwnerSettlementMoved(row) ?? true"].map((step) => guard.indexOf(step));
+  assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])),
+    "the guard: the chain lock, the kill switch, the locked claim under its request id, the one judgment");
+  assert.doesNotMatch(guard, /\bUPDATE\b|\bINSERT\b/, "the guard only reads and locks");
   assert.match(service, /settlementDestinationForBudget\(\{ requested_status: "todo",/, "a retry stays inside the attempt budget");
   assert.match(service, /return handOff\("attempt_budget_spent"\)/);
   assert.match(service, /if \(decision === "approve"\) \{[\s\S]*?await record\(\{ approvedHeadSha: facts\.verifiedHeadSha, approvedDiffDigest: facts\.diffDigest \}\);[\s\S]*?return \{ applied: true, outcome: "approved" \};/,
@@ -242,9 +247,17 @@ test("the approver and the walk apply it; the card never reaches a session", () 
   const remake = read("lib/amux/dmOwnerSettlementRemake.ts");
   const cont = remake.slice(remake.indexOf("export async function continueAmuxDmOwnerSettlementRemake"),
     remake.indexOf("export async function settleAmuxDmOwnerSettlementAnswer"));
-  assert.ok(cont.indexOf("readAmuxDmOwnerSettlementRemakeLive(") < cont.indexOf("await fileIdea("),
-    "the kill switch and the claim are read again just before the idea");
-  assert.match(cont, /if \(live\.killSwitch !== false\) return handOff\(input\.settlementId, input\.requestId, "remake_held"\);/);
+  assert.doesNotMatch(remake, /RemakeLive|live\.killSwitch/, "no separate check before the commit: the guard is it");
+  assert.match(cont, /guard: amuxDmOwnerSettlementRemakeGuard\(input\.settlementId, input\.remakeRequestId\)/);
+  assert.match(remake, /check: \(tx\) => guardAmuxDmOwnerSettlementRemakeIntake\(tx, \{ settlementId, remakeRequestId \}\),\s+committed: \(tx, ideaId\) => recordAmuxDmOwnerSettlementRemakeIdea\(tx, \{ settlementId, ideaId \}\),/);
+  assert.match(remake, /submitAmuxIdeaFromSession\(\{ inspected, guard: input\.guard \}\)/);
+  const intake = read("lib/amux/ideaSessionSubmissionService.ts");
+  const body = intake.slice(intake.indexOf("export async function commitAmuxIdeaSessionIntake"));
+  assert.ok(body.indexOf("await input.guard.check(tx)") < body.indexOf("commitAmuxIdeaSessionSubmission(tx"),
+    "the guard runs in the commit transaction before the idea is written");
+  assert.ok(body.indexOf("commitAmuxSessionAnalysisReservation(tx") < body.indexOf("input.guard?.committed?.(tx"),
+    "and names it after both are written, in the same transaction");
+  assert.match(intake, /if \(error instanceof AmuxIdeaSessionGuardRefused\) throw error;/);
   assert.match(cont, /if \("unknown" in filed\) filed = await readBack\(input\.remakeRequestId\)/,
     "an unknown outcome is read back by its request id, never filed again");
   assert.equal((cont.match(/fileIdea\(/g) ?? []).length, 1, "one filing per claim");

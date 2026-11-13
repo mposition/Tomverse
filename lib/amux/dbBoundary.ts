@@ -644,11 +644,12 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 12,
     isolation: "mutation",
   },
-  // A claimed remake, read just before its idea is filed: setup + switches +
-  // the claim + fence; or the one claim an earlier tick left unfinished.
+  // The one remake claim an earlier tick left unfinished: setup + the claim +
+  // fence. A remake's idea is guarded inside the idea intake's own commit
+  // transaction, which is not an AMUX boundary (ideaSessionSubmissionService.ts).
   decisionMakerOwnerSettlementRemakeRead: {
     operation: "decision_maker_owner_settlement_remake_read",
-    prismaCallCeiling: 4,
+    prismaCallCeiling: 3,
     isolation: "read",
   },
   // The Decision Maker as the approver (TOMVERSE_AMUX_DM_APPROVER), its read:

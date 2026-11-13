@@ -76,11 +76,13 @@ CREATE TABLE "AmuxDmOwnerSettlement" (
     ("state" = 'open' AND "decision" IS NULL AND "answerSource" IS NULL AND
       "decidedAt" IS NULL AND "cancelReason" IS NULL AND
       "approvedHeadSha" IS NULL AND "remakeIdeaId" IS NULL) OR
-    -- The Decision Maker decided a remake; its idea is not filed yet. It may be
-    -- handed to the person from here when the idea cannot be filed.
+    -- The Decision Maker decided a remake; its cards are not closed yet. The
+    -- idea's id is written by the intake's own commit, in the transaction that
+    -- writes the idea. It may be handed to the person from here when the idea
+    -- cannot be filed.
     ("state" = 'claimed' AND "kind" = 'stopped' AND "decision" = 'remake' AND
       "answerSource" IS NOT NULL AND "requestId" IS NOT NULL AND "decidedAt" IS NOT NULL AND
-      "cancelReason" IS NULL AND "approvedHeadSha" IS NULL AND "remakeIdeaId" IS NULL) OR
+      "cancelReason" IS NULL AND "approvedHeadSha" IS NULL) OR
     ("state" = 'applied' AND "answerSource" IS NOT NULL AND "requestId" IS NOT NULL AND
       "decidedAt" IS NOT NULL AND "cancelReason" IS NULL AND "handoffAt" IS NULL AND
       (("kind" = 'stopped' AND "decision" IN ('retry', 'complete', 'close', 'remake')) OR

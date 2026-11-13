@@ -8,6 +8,7 @@ import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import { settlementDestinationForBudget } from "@/lib/amux/executionBudgetCore";
 import { readAmuxCardTitle } from "./adminExecutionRead.ts";
+import { amuxDatabaseDiagnosticCode } from "./readFailureCore.ts";
 import {
   AMUX_DM_OWNER_SETTLEMENT_DECISIONS, amuxDmOwnerSettlementCard, amuxDmOwnerSettlementId,
   amuxDmOwnerSettlementKind, amuxDmOwnerSettlementMoved, amuxDmOwnerSettlementRemakeRequestId,
@@ -301,6 +302,7 @@ type SettlementFacts = AmuxStoppedCardLockedFacts & {
   taskId: string; escalationId: string; attemptId: string | null; bindingId: string | null;
   taskStatus: string; escalationOpen: boolean;
   answerSource: string | null; requestId: string | null; remakeRequestId: string | null;
+  remakeIdeaId: string | null;
   lastAttempt: { id: string; attemptNumber: number; endedAt: string | null; outcome: string | null;
     reason: string | null } | null;
 };
@@ -313,7 +315,7 @@ const CANCEL_SWEEP = 50;
 const SETTLEMENT_FACTS = Prisma.sql`
     SELECT s."id" AS "settlementId", s."state", s."handoffAt" IS NOT NULL AS "handedOff", s."kind",
       s."taskId", s."escalationId", s."attemptId", s."bindingId", s."taskStatus",
-      s."answerSource", s."requestId", s."remakeRequestId",
+      s."answerSource", s."requestId", s."remakeRequestId", s."remakeIdeaId",
       w."id", w."displayKey", w."sourceSystem", w."cardType", w."status", w."revision", w."archivedAt",
       w."v22ReceiptId"::text AS "v22ReceiptId", w."taskRole", w."executionGrade",
       EXISTS (SELECT 1 FROM "AmuxWorkDelivery" d WHERE d."taskId" = w."id"
@@ -514,7 +516,8 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
 }
 
 /**
- * The last step of a claimed remake, once its idea is filed: under the audit
+ * The last step of a claimed remake, once its idea is filed (and named on the
+ * claim by the intake's own commit): under the audit
  * chain lock and the kill switch, the claimed settlement and its card locked,
  * the card and the unstarted cards waiting on it closed in one write, and the
  * settlement applied with the idea's id. A Task that moved since the claim
@@ -548,21 +551,49 @@ export async function applyAmuxDmOwnerSettlementRemake(tx: Prisma.TransactionCli
 }
 
 /**
- * Whether a claimed remake may file its idea now, read just before it is
- * filed: the kill switch, whether the claim is still the settlement's and not
- * handed off, and the same judgment every step makes
- * (amuxDmOwnerSettlementMoved). Two statements.
+ * The guard of a remake's idea, run inside the idea intake's own commit
+ * transaction before the idea or its analysis reservation is written
+ * (ideaSessionSubmissionService.ts, AmuxIdeaSessionSubmissionGuard). The
+ * audit chain lock first: a person's settlement of the card, a review
+ * decision, an escalation's resolution and a kill switch change all write the
+ * chain, so they are ordered against this commit. Then the kill switch under
+ * it, then the settlement and its card locked without waiting (a writer that
+ * holds the card -- a retry, a review decision -- makes this refuse as busy),
+ * the claim still this settlement's under the same idea request id, and the
+ * Task judged by the one rule (amuxDmOwnerSettlementMoved). `true` lets the
+ * idea be written; anything else is the reason nothing was.
  */
-export async function readAmuxDmOwnerSettlementRemakeLive(tx: Prisma.TransactionClient,
-  settlementId: string) {
+export async function guardAmuxDmOwnerSettlementRemakeIntake(tx: Prisma.TransactionClient, input: {
+  settlementId: string; remakeRequestId: string;
+}): Promise<true | string> {
+  await takeAuditChainLock(tx);
   let killSwitch: boolean | null;
   try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
   catch { killSwitch = null; }
-  const rows = await tx.$queryRaw<SettlementFacts[]>`${SETTLEMENT_FACTS}
-    WHERE s."id" = ${settlementId}`;
-  const row = rows[0];
-  const claimed = !!row && row.state === "claimed" && !row.handedOff;
-  return { killSwitch, claimed, moved: claimed ? amuxDmOwnerSettlementMoved(row) : null };
+  if (killSwitch !== false) return "kill_switch";
+  let row: LockedSettlement | null;
+  try { row = await lockSettlement(tx, input.settlementId); }
+  catch (error) {
+    if (amuxDatabaseDiagnosticCode(error) === "55P03") return "busy";
+    throw error;
+  }
+  if (!row || row.state !== "claimed" || row.handedOff || row.remakeIdeaId !== null ||
+      row.remakeRequestId !== input.remakeRequestId) return "not_claimed";
+  return amuxDmOwnerSettlementMoved(row) ?? true;
+}
+
+/** In the same transaction, once the idea and its reservation are written:
+ * the claim names its idea, so no idea exists that its settlement does not
+ * name. A claim that changed rolls the idea back with it. */
+export async function recordAmuxDmOwnerSettlementRemakeIdea(tx: Prisma.TransactionClient, input: {
+  settlementId: string; ideaId: string;
+}) {
+  const changed = await tx.$executeRaw`
+    UPDATE "AmuxDmOwnerSettlement" SET "remakeIdeaId" = ${input.ideaId},
+      "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
+    WHERE "id" = ${input.settlementId} AND "state" = 'claimed' AND "handoffAt" IS NULL
+      AND "remakeIdeaId" IS NULL`;
+  if (changed !== 1) throw new Error("amux_dm_owner_settlement_claim_changed");
 }
 
 /**
@@ -584,8 +615,9 @@ export async function cancelMovedAmuxDmOwnerSettlementClaim(tx: Prisma.Transacti
 /** One remake claimed more than two minutes ago that never finished (a lost
  * answer, a held close), for the tick to finish or hand over. One statement. */
 export async function readStaleAmuxDmOwnerSettlementRemake(tx: Prisma.TransactionClient) {
-  const rows = await tx.$queryRaw<Array<{ settlementId: string; remakeRequestId: string; requestId: string }>>`
-    SELECT "id" AS "settlementId", "remakeRequestId", "requestId" FROM "AmuxDmOwnerSettlement"
+  const rows = await tx.$queryRaw<Array<{ settlementId: string; remakeRequestId: string; requestId: string;
+    remakeIdeaId: string | null }>>`
+    SELECT "id" AS "settlementId", "remakeRequestId", "requestId", "remakeIdeaId" FROM "AmuxDmOwnerSettlement"
     WHERE "state" = 'claimed' AND "handoffAt" IS NULL
       AND "decidedAt" < (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '2 minutes'
     ORDER BY "decidedAt", "id" LIMIT 1`;

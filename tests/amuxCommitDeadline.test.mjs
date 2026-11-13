@@ -351,6 +351,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // The review no-change completion migration does not touch the commit-deadline
   // marker, classifier or deferred trigger.
   "20261111120000_amux_review_no_change_completion",
+  // Owner decision 2026-11-13: the owner queue settlement adds one table with
+  // CHECK constraints only; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261113200000_amux_dm_owner_settlement",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

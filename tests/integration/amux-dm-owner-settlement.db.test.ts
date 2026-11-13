@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 import type { Session } from "next-auth";
 
@@ -8,6 +8,7 @@ import type { Session } from "next-auth";
 import { closeLifecycleHarness, fixtureCommitted, lifecycle, queryAdapter, withoutTriggers, type LifecycleTx } from
   "./helpers/amuxLifecycleHarness";
 import { seedAmuxV4PortfolioRecoveryPrerequisites } from "./helpers/amuxV4PortfolioSeedFixture.mjs";
+import { amuxContentUnitKeyId } from "@/lib/amux/ideaKeyStore";
 
 // The AMUX owner queue through the Decision Maker (owner decision 2026-11-13),
 // on PostgreSQL with every migration trigger on: a stopped v22 Task is filed
@@ -17,6 +18,11 @@ import { seedAmuxV4PortfolioRecoveryPrerequisites } from "./helpers/amuxV4Portfo
 // executed.
 
 process.env.ADMIN_AUDIT_INTEGRITY_KEY = "synthetic-amux-dm-owner-settlement-audit-key-2026";
+// The owner of the operating scope a remake's idea is committed under.
+const SCOPE_OWNER_ID = "synthetic-dm-remake-owner";
+const SCOPE_OWNER_EMAIL = "amux-dm-remake-owner@example.test";
+Object.assign(process.env, { ADMIN_USER_IDS: SCOPE_OWNER_ID, ADMIN_EMAILS: SCOPE_OWNER_EMAIL,
+  ADMIN_OWNER_EMAILS: SCOPE_OWNER_EMAIL });
 Object.assign(process.env, { NODE_ENV: "test" });
 
 const services = async () => ({
@@ -72,30 +78,117 @@ async function apply(settlementId: string, answer: Parameters<
       requestId: `req-${randomUUID().slice(0, 8)}`, now: context.dbNow }));
 }
 
-type Filing = { ideaId: string } | { refused: string } | { unknown: true };
+type Filing = { ideaId: string } | { refused: string } | { unknown: true } | { guarded: string };
+type Guard = { check: (tx: LifecycleTx) => Promise<true | string>;
+  committed?: (tx: LifecycleTx, ideaId: string) => Promise<void> };
 
-/** The idea intake, replaced: what it is asked, and what the settlement was when it was asked. */
+/** The idea intake, replaced by a fixed answer: what it is asked, and what the
+ * settlement was when it was asked. It never reaches a commit. */
 function fakeIntake(tx: LifecycleTx, settlementId: string, answer: Filing, readBack: { ideaId: string } | null = null) {
   const seen = { filed: [] as Array<{ requestId: string; ideaText: string; state: unknown; archived: boolean }>,
     readBack: [] as string[] };
   return { seen, deps: {
-    fileIdea: async (input: { requestId: string; ideaText: string }) => {
+    fileIdea: async (input: { requestId: string; ideaText: string; guard: Guard }) => {
       const row = await settlementRow(tx, settlementId);
       const [task] = await tx.$queryRaw<Array<{ archived: boolean }>>`
         SELECT "archivedAt" IS NOT NULL AS "archived" FROM "AmuxWorkItem" WHERE "id" = ${row!.taskId as string}`;
-      seen.filed.push({ ...input, state: row?.state, archived: task!.archived });
+      seen.filed.push({ requestId: input.requestId, ideaText: input.ideaText, state: row?.state,
+        archived: task!.archived });
       return answer;
     },
     readBack: async (requestId: string) => { seen.readBack.push(requestId); return readBack; },
   } };
 }
 
+/**
+ * The idea intake as it commits: the asynchronous preparation is what this
+ * skips (pinning and the key store reach outside the database), then `race`
+ * runs -- the moment after preparation and before the commit transaction --
+ * then the real commit body (commitAmuxIdeaSessionIntake) with the guard the
+ * remake passes, on the operating scope the lifecycle seeded. A refusal is
+ * thrown before the body writes anything.
+ */
+function committingIntake(tx: LifecycleTx, race: () => Promise<unknown> = async () => {}) {
+  const seen = { filed: 0, readBack: [] as string[] };
+  return { seen, deps: {
+    fileIdea: async (input: { requestId: string; ideaText: string; guard: Guard }) => {
+      seen.filed += 1;
+      const { amuxDmOwnerSettlementRemakeSubmission } = await import("@/lib/amux/dmOwnerSettlementRemake");
+      const { commitAmuxIdeaSessionIntake, AmuxIdeaSessionGuardRefused } =
+        await import("@/lib/amux/ideaSessionSubmissionService");
+      const { readAmuxOperatingScopeAuthority } = await import("@/lib/amux/ideaOperatingScopeStore");
+      const { prisma } = await import("@/lib/prisma");
+      const inspected = amuxDmOwnerSettlementRemakeSubmission(input.requestId, input.ideaText);
+      assert.ok(inspected.ok, "the remake's idea passes the intake's input check");
+      const authority = await prisma.$transaction((inner) => readAmuxOperatingScopeAuthority(inner));
+      assert.ok(authority);
+      await race();
+      const ideaId = randomUUID();
+      try {
+        // The body runs on the lifecycle's own transaction, not a savepoint: the
+        // intake's trigger requires its audit row to carry the commit's own xid.
+        const committed = await commitAmuxIdeaSessionIntake(tx, {
+          inspected, expectedAuthority: authority, ideaId, keys: keysFor(ideaId),
+          // What pinning the one repository the remake names would have given.
+          pinnedCommitShas: ["a".repeat(40)],
+          guard: input.guard });
+        return { ideaId: committed.ideaId };
+      } catch (error) {
+        if (error instanceof AmuxIdeaSessionGuardRefused) return { guarded: error.reason };
+        throw error;
+      }
+    },
+    readBack: async (requestId: string) => { seen.readBack.push(requestId); return null; },
+  } };
+}
+
+const masterKey = randomBytes(32);
+const digestKey = randomBytes(32);
+const keysFor = (ideaId: string) => ({
+  masterKeyId: amuxContentUnitKeyId({ ideaId, purpose: "idea_raw", subjectId: ideaId }),
+  masterKeyVersion: 1, masterKey, digestKeyId: "synthetic-dm-remake-digest", digestKey,
+});
+const scopeOwner = () => ({ user: { id: SCOPE_OWNER_ID, email: SCOPE_OWNER_EMAIL,
+  authenticatedAt: new Date().toISOString() }, expires: new Date(Date.now() + 3_600_000).toISOString() }) as Session;
+
+/** An operating scope the intake commits under, with an approved model of its
+ * own: seeded in the lifecycle over whatever scope the database holds, and
+ * rolled back with it. */
+async function operatingScope(tx: LifecycleTx) {
+  const { readAmuxOperatingScopeAuthority, commitAmuxOperatingScope } = await import("@/lib/amux/ideaOperatingScopeStore");
+  const current = await readAmuxOperatingScopeAuthority(tx);
+  const { commitFrontierCatalogDecision } = await import("@/lib/amux/ideaFrontierCatalogWrite");
+  const { inspectFrontierCatalogWrite } = await import("@/lib/amux/ideaFrontierCatalogWriteCore");
+  const modelId = `synthetic-remake-model-${randomUUID()}`;
+  const request = new Request("https://tomverse.test/internal/amux/dm-remake", { method: "POST" });
+  const frontier = inspectFrontierCatalogWrite(JSON.stringify({ schemaVersion: 1, action: "approve",
+    approvalId: randomUUID(), provider: "openai", modelId, allowedEfforts: ["high"],
+    expectedPreviousVersion: 0, ownerConfirmedFrontierEligibility: true }));
+  if (!frontier.ok) throw new Error(`synthetic Frontier input rejected: ${frontier.code}`);
+  await commitFrontierCatalogDecision(tx, { session: scopeOwner(), request, decision: frontier.request });
+  await commitAmuxOperatingScope(tx, { session: scopeOwner(), request, id: randomUUID(),
+    expectedPreviousVersion: current?.version ?? 0, ownerConfirmed: true,
+    scope: { repositories: ["mposition/Tomverse"], model: { provider: "openai", modelId, reasoningEffort: "high" } } });
+}
+
+/** Ideas and analysis reservations filed under one request id. */
+async function filedUnder(tx: LifecycleTx, requestId: string) {
+  const [row] = await tx.$queryRaw<Array<{ ideas: number; reservations: number; ideaId: string | null }>>`
+    SELECT count(DISTINCT i."id")::int AS "ideas", count(r."id")::int AS "reservations", max(i."id") AS "ideaId"
+    FROM "AmuxIdeaSubmission" i
+    LEFT JOIN "AmuxIdeaSessionAnalysisReservation" r ON r."ideaId" = i."id"
+    WHERE i."requestId" = ${requestId}::uuid`;
+  return row!;
+}
+
 async function settle(settlementId: string, answer: Parameters<
   Awaited<ReturnType<typeof services>>["applyAmuxDmOwnerSettlementDecision"]>[1]["answer"],
-  deps: ReturnType<typeof fakeIntake>["deps"], source: "dm" | "dm_confirmed" = "dm_confirmed") {
+  deps: { fileIdea: (input: { requestId: string; ideaText: string; guard: Guard }) => Promise<Filing>;
+    readBack: (requestId: string) => Promise<{ ideaId: string } | null> },
+  source: "dm" | "dm_confirmed" = "dm_confirmed") {
   const { settleAmuxDmOwnerSettlementAnswer } = await import("@/lib/amux/dmOwnerSettlementRemake");
   return settleAmuxDmOwnerSettlementAnswer({ settlementId, answer, source,
-    requestId: `req-${randomUUID().slice(0, 8)}` }, deps);
+    requestId: `req-${randomUUID().slice(0, 8)}` }, deps as never);
 }
 
 const settlementRow = async (tx: LifecycleTx, id: string) => (await tx.$queryRaw<Array<Record<string, unknown>>>`
@@ -235,33 +328,31 @@ test("complete finishes the Task terminal on the database clock; close archives 
 
 const REMAKE = { decision: "remake" as const, ideaText: "One card: add the router failure name and wire it." };
 
-test("a confirmed remake is claimed first, then its idea filed, then the card and the unstarted cards waiting on it close", async () => {
+test("a confirmed remake is claimed first; its idea and reservation are written once, under the guard, and named on the claim; then its cards close", async () => {
   await lifecycle(async (tx) => {
     const ids = { waiting: randomUUID(), chained: randomUUID(), started: randomUUID(), unrelated: randomUUID() };
     const card = await stoppedTask(tx, { afterSettlement: remakeSiblings(ids) });
+    await operatingScope(tx);
     const rows = await sync(true);
     const siblings = rows.siblings.filter((row) => row.forTaskId === card.taskId);
     assert.equal(siblings.length, 4, "the cards under the same parent come with its card");
     assert.deepEqual(siblings.filter((row) => row.waitsOnThis).map((row) => row.id).sort(),
       [ids.waiting, ids.started].sort());
 
-    const ideaId = randomUUID();
-    const intake = fakeIntake(tx, card.settlementId, { ideaId });
+    let atCommit: Record<string, unknown> | undefined;
+    const intake = committingIntake(tx, async () => { atCommit = await settlementRow(tx, card.settlementId); });
     assert.deepEqual(await settle(card.settlementId, REMAKE, intake.deps), { applied: true, outcome: "remade" });
-    assert.equal(intake.seen.filed.length, 1);
-    assert.equal(intake.seen.filed[0]!.state, "claimed", "the idea is filed only after the claim committed");
-    assert.equal(intake.seen.filed[0]!.archived, false, "and before any card closes");
-    assert.equal(intake.seen.filed[0]!.ideaText, REMAKE.ideaText);
+    assert.equal(atCommit?.state, "claimed", "the idea is committed only after the claim committed");
+    const row = await settlementRow(tx, card.settlementId);
+    const filed = await filedUnder(tx, row!.remakeRequestId as string);
+    assert.deepEqual({ ideas: filed.ideas, reservations: filed.reservations }, { ideas: 1, reservations: 1 });
+    assert.equal(row?.remakeIdeaId, filed.ideaId, "the intake's own commit named the idea on the claim");
+    assert.equal(row?.state, "applied");
+    assert.equal(row?.answerSource, "dm_confirmed");
     for (const id of [card.taskId, ids.waiting, ids.chained])
       assert.ok((await taskRow(tx, id)).archivedAt, `${id} is closed`);
     for (const id of [ids.started, ids.unrelated])
       assert.equal((await taskRow(tx, id)).archivedAt, null, `${id} is left: started, or not waiting on it`);
-    const row = await settlementRow(tx, card.settlementId);
-    assert.equal(row?.state, "applied");
-    assert.equal(row?.decision, "remake");
-    assert.equal(row?.answerSource, "dm_confirmed");
-    assert.equal(row?.remakeIdeaId, ideaId);
-    assert.equal(row?.remakeRequestId, intake.seen.filed[0]!.requestId, "filed under the request id the claim recorded");
     const claimed = await tx.adminAuditLog.findFirst({ where: { targetId: card.taskId,
       action: "amux.dm_owner_settlement.remake_claimed" }, select: { entryHash: true } });
     assert.ok(claimed?.entryHash, "the claim is in the hash chain");
@@ -271,7 +362,67 @@ test("a confirmed remake is claimed first, then its idea filed, then the card an
   });
 });
 
-test("a person who answered first, or the kill switch, means no idea is filed", async () => {
+test("whatever changes between the intake's preparation and its commit, the guard in the commit writes no idea and no reservation", async () => {
+  const races: Array<[string, (tx: LifecycleTx, card: Stopped) => Promise<unknown>, string, string]> = [
+    ["the person resolves the escalation", (tx, card) => tx.$executeRaw`
+      UPDATE "AmuxHumanEscalation" SET "status" = 'resolved', "resolvedById" = 'person',
+        "resolution" = 'Handled it myself.', "resolutionOutcome" = 'block',
+        "resolvedAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ${card.escalationId}`,
+      "cancelled", "escalation_resolved"],
+    ["a new run ends back in the same status", (tx, card) => withoutTriggers(tx, async () => {
+      await tx.$executeRawUnsafe(`CREATE TEMP TABLE dm_next_attempt ON COMMIT DROP AS
+        SELECT * FROM "AmuxExecutionAttempt" WHERE "id" = '${card.attemptId}'`);
+      await tx.$executeRaw`UPDATE dm_next_attempt SET "id" = ${randomUUID()}, "attemptNumber" = "attemptNumber" + 1,
+        "taskRevision" = "taskRevision" + 1, "startedAt" = "startedAt" + INTERVAL '1 minute',
+        "endedAt" = "endedAt" + INTERVAL '2 minutes', "v22AssignmentId" = NULL`;
+      await tx.$executeRawUnsafe(`INSERT INTO "AmuxExecutionAttempt" SELECT * FROM dm_next_attempt`);
+      await tx.$executeRawUnsafe("DROP TABLE dm_next_attempt");
+    }), "cancelled", "task_moved"],
+    ["a delivery is queued", (tx, card) => withoutTriggers(tx, () => tx.$executeRaw`
+      UPDATE "AmuxWorkDelivery" SET "status" = 'queued', "receiptId" = NULL, "leasedAt" = NULL,
+        "leaseExpiresAt" = NULL, "acknowledgedAt" = NULL WHERE "attemptId" = ${card.attemptId}`),
+      "cancelled", "task_moved"],
+    ["the kill switch goes on", async (tx) => {
+      const { recordDecisionMakerSwitchByOperator } = await services();
+      await recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: "kill_switch", value: "on" });
+    }, "handed_off", "remake_held"],
+    ["the claim is cancelled", (tx, card) => tx.$executeRaw`
+      UPDATE "AmuxDmOwnerSettlement" SET "state" = 'cancelled', "cancelReason" = 'task_moved'
+      WHERE "id" = ${card.settlementId}`, "unchanged", "task_moved"],
+  ];
+  for (const [label, race, outcome, reason] of races) {
+    await lifecycle(async (tx) => {
+      const card = await stoppedTask(tx);
+      await operatingScope(tx);
+      await sync(true);
+      const intake = committingIntake(tx, () => race(tx, card));
+      const result = await settle(card.settlementId, REMAKE, intake.deps);
+      assert.equal(intake.seen.filed, 1, `${label}: the intake prepared once`);
+      const row = await settlementRow(tx, card.settlementId);
+      const filed = await filedUnder(tx, row!.remakeRequestId as string);
+      assert.deepEqual({ ideas: filed.ideas, reservations: filed.reservations }, { ideas: 0, reservations: 0 },
+        `${label}: no idea and no reservation`);
+      assert.equal(row?.remakeIdeaId, null, label);
+      assert.deepEqual(intake.seen.readBack, [], `${label}: a refusal is not an unknown outcome`);
+      assert.equal((await taskRow(tx, card.taskId)).archivedAt, null, `${label}: no card closed`);
+      if (outcome === "cancelled") {
+        assert.deepEqual(result, { applied: true, outcome: "cancelled" }, label);
+        assert.equal(row?.state, "cancelled", label);
+        assert.equal(row?.cancelReason, reason, label);
+      } else if (outcome === "handed_off") {
+        assert.deepEqual(result, { applied: false, outcome: "handed_off" }, label);
+        assert.equal(row?.state, "claimed", label);
+        assert.equal(row?.handoffReason, reason, label);
+      } else {
+        assert.deepEqual(result, { applied: true, outcome: "remake_claimed",
+          remakeRequestId: row!.remakeRequestId }, `${label}: the claim was the answer; nothing more`);
+        assert.equal(row?.state, "cancelled", label);
+      }
+    });
+  }
+});
+
+test("a person who answered first, or the kill switch at the answer, means nothing is claimed or filed", async () => {
   // The person resolved the card's escalation before the answer was applied.
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
@@ -292,7 +443,7 @@ test("a person who answered first, or the kill switch, means no idea is filed", 
     const { applyAmuxDmAutoApplyCandidate } = await import("@/lib/amux/dmAutoApplyService");
     assert.deepEqual(await applyAmuxDmAutoApplyCandidate({ kind: "owner_settlement",
       requestId: "req-judged", cardId: `OS-${randomUUID().slice(0, 8)}`, questionRevision: 1,
-      settlementId: card.settlementId, answer: REMAKE }, intake.deps),
+      settlementId: card.settlementId, answer: REMAKE }, intake.deps as never),
       { requestId: "req-judged", kind: "owner_settlement", applied: false });
     assert.equal(intake.seen.filed.length, 0);
     assert.equal((await settlementRow(tx, card.settlementId))?.state, "open");
@@ -308,24 +459,6 @@ test("a person who answered first, or the kill switch, means no idea is filed", 
     assert.equal(intake.seen.filed.length, 0);
     assert.equal((await settlementRow(tx, card.settlementId))?.state, "open");
   });
-  // The kill switch goes on after the claim: it is read again before the idea,
-  // nothing is filed and the person decides.
-  await lifecycle(async (tx) => {
-    const card = await stoppedTask(tx);
-    await sync(true);
-    assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
-    const { recordDecisionMakerSwitchByOperator } = await services();
-    await recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: "kill_switch", value: "on" });
-    const row = await settlementRow(tx, card.settlementId);
-    const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() });
-    const { continueAmuxDmOwnerSettlementRemake } = await import("@/lib/amux/dmOwnerSettlementRemake");
-    assert.deepEqual(await continueAmuxDmOwnerSettlementRemake({ settlementId: card.settlementId,
-      requestId: row!.requestId as string, remakeRequestId: row!.remakeRequestId as string,
-      ideaText: REMAKE.ideaText }, intake.deps), { applied: false, outcome: "handed_off" });
-    assert.equal(intake.seen.filed.length, 0);
-    assert.equal((await settlementRow(tx, card.settlementId))?.handoffReason, "remake_held");
-    assert.equal((await taskRow(tx, card.taskId)).archivedAt, null);
-  });
 });
 
 test("an idea the intake refuses, or whose outcome nobody knows and cannot be read back, goes to the person; it is never filed twice", async () => {
@@ -338,14 +471,13 @@ test("an idea the intake refuses, or whose outcome nobody knows and cannot be re
       const intake = fakeIntake(tx, card.settlementId, filing, readBack);
       assert.deepEqual(await settle(card.settlementId, REMAKE, intake.deps), { applied: false, outcome: "handed_off" });
       assert.equal(intake.seen.filed.length, 1, "filed once");
+      assert.equal(intake.seen.filed[0]!.state, "claimed", "only after the claim");
       const row = await settlementRow(tx, card.settlementId);
       assert.equal(row?.state, "claimed");
       assert.equal(row?.handoffReason, reason);
       assert.equal((await taskRow(tx, card.taskId)).archivedAt, null, "no idea, no close");
       if ("unknown" in filing)
         assert.deepEqual(intake.seen.readBack, [row!.remakeRequestId], "read back once, by its request id");
-      const after = await sync(true);
-      assert.ok(!after.pending.some((entry) => entry.settlementId === card.settlementId));
     });
   }
   // An unknown outcome that reads back committed is the idea: the cards close.
@@ -358,79 +490,54 @@ test("an idea the intake refuses, or whose outcome nobody knows and cannot be re
     assert.equal(intake.seen.filed.length, 1);
     assert.equal((await settlementRow(tx, card.settlementId))?.remakeIdeaId, ideaId);
   });
-  // A claim an earlier tick left unfinished is finished from the read-back
-  // alone, or handed to the person: nothing is filed again.
-  for (const back of [{ ideaId: randomUUID() }, null]) {
-    await lifecycle(async (tx) => {
-      const card = await stoppedTask(tx);
-      await sync(true);
-      assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
-      await tx.$executeRaw`UPDATE "AmuxDmOwnerSettlement" SET "decidedAt" = "decidedAt" - INTERVAL '3 minutes'
-        WHERE "id" = ${card.settlementId}`;
-      const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() }, back);
-      const { resumeAmuxDmOwnerSettlementRemake } = await import("@/lib/amux/dmOwnerSettlementRemake");
-      const resumed = await resumeAmuxDmOwnerSettlementRemake(intake.deps);
-      assert.equal(intake.seen.filed.length, 0, "never filed again");
-      const row = await settlementRow(tx, card.settlementId);
-      if (back) {
-        assert.deepEqual(resumed, { applied: true, outcome: "remade" });
-        assert.equal(row?.remakeIdeaId, back.ideaId);
-      } else {
-        assert.deepEqual(resumed, { applied: false, outcome: "handed_off" });
-        assert.equal(row?.handoffReason, "remake_unknown");
-      }
-    });
-  }
 });
 
-test("a run or a delivery after a remake's claim cancels it before any idea is filed", async () => {
-  // A new run that ended back in the same status, and a delivery waiting for a
-  // worker: each is a Task that moved since the claim, judged as the answer was.
-  const moves: Array<[string, (tx: LifecycleTx, card: Stopped) => Promise<unknown>]> = [
-    ["a new attempt", (tx, card) => withoutTriggers(tx, async () => {
-      await tx.$executeRawUnsafe(`CREATE TEMP TABLE dm_next_attempt ON COMMIT DROP AS
-        SELECT * FROM "AmuxExecutionAttempt" WHERE "id" = '${card.attemptId}'`);
-      await tx.$executeRaw`UPDATE dm_next_attempt SET "id" = ${randomUUID()}, "attemptNumber" = "attemptNumber" + 1,
-        "taskRevision" = "taskRevision" + 1, "startedAt" = "startedAt" + INTERVAL '1 minute',
-        "endedAt" = "endedAt" + INTERVAL '2 minutes', "v22AssignmentId" = NULL`;
-      await tx.$executeRawUnsafe(`INSERT INTO "AmuxExecutionAttempt" SELECT * FROM dm_next_attempt`);
-      await tx.$executeRawUnsafe("DROP TABLE dm_next_attempt");
-    })],
-    ["a queued delivery", (tx, card) => withoutTriggers(tx, () => tx.$executeRaw`
+test("a claim an earlier tick left unfinished is finished from what it names, cancelled when its Task moved, or handed over; nothing is filed", async () => {
+  const stale = (tx: LifecycleTx, card: Stopped) => tx.$executeRaw`
+    UPDATE "AmuxDmOwnerSettlement" SET "decidedAt" = "decidedAt" - INTERVAL '3 minutes' WHERE "id" = ${card.settlementId}`;
+  const resume = async (deps: unknown) =>
+    (await import("@/lib/amux/dmOwnerSettlementRemake")).resumeAmuxDmOwnerSettlementRemake(deps as never);
+  // The intake's commit named its idea, then the close was lost: the close runs.
+  await lifecycle(async (tx) => {
+    const card = await stoppedTask(tx);
+    await sync(true);
+    assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
+    const ideaId = randomUUID();
+    await tx.$executeRaw`UPDATE "AmuxDmOwnerSettlement" SET "remakeIdeaId" = ${ideaId} WHERE "id" = ${card.settlementId}`;
+    await stale(tx, card);
+    const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() });
+    assert.deepEqual(await resume(intake.deps), { applied: true, outcome: "remade" });
+    assert.equal(intake.seen.filed.length, 0);
+    assert.deepEqual(intake.seen.readBack, []);
+    assert.equal((await settlementRow(tx, card.settlementId))?.remakeIdeaId, ideaId);
+    assert.ok((await taskRow(tx, card.taskId)).archivedAt);
+  });
+  // No idea named and the Task moved (a queued delivery): cancelled, nothing read back.
+  await lifecycle(async (tx) => {
+    const card = await stoppedTask(tx);
+    await sync(true);
+    assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
+    await withoutTriggers(tx, () => tx.$executeRaw`
       UPDATE "AmuxWorkDelivery" SET "status" = 'queued', "receiptId" = NULL, "leasedAt" = NULL,
-        "leaseExpiresAt" = NULL, "acknowledgedAt" = NULL WHERE "attemptId" = ${card.attemptId}`)],
-  ];
-  for (const [label, move] of moves) {
-    for (const path of ["continue", "resume"] as const) {
-      await lifecycle(async (tx) => {
-        const card = await stoppedTask(tx);
-        await sync(true);
-        assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed", label);
-        await move(tx, card);
-        const row = await settlementRow(tx, card.settlementId);
-        const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() }, { ideaId: randomUUID() });
-        const remakeModule = await import("@/lib/amux/dmOwnerSettlementRemake");
-        let result;
-        if (path === "continue") {
-          result = await remakeModule.continueAmuxDmOwnerSettlementRemake({ settlementId: card.settlementId,
-            requestId: row!.requestId as string, remakeRequestId: row!.remakeRequestId as string,
-            ideaText: REMAKE.ideaText }, intake.deps);
-        } else {
-          await tx.$executeRaw`UPDATE "AmuxDmOwnerSettlement" SET "decidedAt" = "decidedAt" - INTERVAL '3 minutes'
-            WHERE "id" = ${card.settlementId}`;
-          result = await remakeModule.resumeAmuxDmOwnerSettlementRemake(intake.deps);
-        }
-        assert.deepEqual(result, { applied: true, outcome: "cancelled" }, `${label}, ${path}`);
-        assert.equal(intake.seen.filed.length, 0, `${label}, ${path}: no idea is filed`);
-        assert.deepEqual(intake.seen.readBack, [], `${label}, ${path}: nor read back to close cards`);
-        const after = await settlementRow(tx, card.settlementId);
-        assert.equal(after?.state, "cancelled");
-        assert.equal(after?.cancelReason, "task_moved");
-        assert.equal(after?.remakeIdeaId, null);
-        assert.equal((await taskRow(tx, card.taskId)).archivedAt, null);
-      });
-    }
-  }
+        "leaseExpiresAt" = NULL, "acknowledgedAt" = NULL WHERE "attemptId" = ${card.attemptId}`);
+    await stale(tx, card);
+    const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() }, { ideaId: randomUUID() });
+    assert.deepEqual(await resume(intake.deps), { applied: true, outcome: "cancelled" });
+    assert.equal(intake.seen.filed.length, 0);
+    assert.deepEqual(intake.seen.readBack, []);
+    assert.equal((await settlementRow(tx, card.settlementId))?.cancelReason, "task_moved");
+  });
+  // No idea named, the Task unmoved, and none reads back: the person decides.
+  await lifecycle(async (tx) => {
+    const card = await stoppedTask(tx);
+    await sync(true);
+    assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
+    await stale(tx, card);
+    const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() }, null);
+    assert.deepEqual(await resume(intake.deps), { applied: false, outcome: "handed_off" });
+    assert.equal(intake.seen.filed.length, 0, "never filed again");
+    assert.equal((await settlementRow(tx, card.settlementId))?.handoffReason, "remake_unknown");
+  });
   // The sync's sweep judges the same way: a claim with a queued delivery is cancelled there too.
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
@@ -596,10 +703,13 @@ test("the table refuses what the lifecycle does not allow", async () => {
         "decidedAt" = now() WHERE "id" = ${card.settlementId}`), true,
       "an applied remake names its idea");
     assert.equal(await refusedBy("AmuxDmOwnerSettlement_state_check", () => tx.$executeRaw`
-      UPDATE "AmuxDmOwnerSettlement" SET "state" = 'claimed', "decision" = 'remake', "answerSource" = 'dm',
+      UPDATE "AmuxDmOwnerSettlement" SET "state" = 'claimed', "decision" = 'remake',
         "requestId" = 'r', "remakeRequestId" = ${"00000000-0000-4000-8000-000000000002"},
-        "remakeIdeaId" = 'idea-1', "decidedAt" = now() WHERE "id" = ${card.settlementId}`), true,
-      "a claim has no idea yet");
+        "decidedAt" = now() WHERE "id" = ${card.settlementId}`), true,
+      "a claim names who decided it");
+    assert.equal(await refusedBy("AmuxDmOwnerSettlement_shape_check", () => tx.$executeRaw`
+      UPDATE "AmuxDmOwnerSettlement" SET "remakeIdeaId" = 'idea-1' WHERE "id" = ${card.settlementId}`), true,
+      "an idea is named only under its claim's request id");
     assert.equal(await refusedBy("AmuxDmOwnerSettlement_shape_check", () => tx.$executeRaw`
       UPDATE "AmuxDmOwnerSettlement" SET "kind" = 't2_pr' WHERE "id" = ${card.settlementId}`), true,
       "a pull request settlement names its binding");

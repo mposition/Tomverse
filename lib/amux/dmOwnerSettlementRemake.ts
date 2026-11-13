@@ -4,9 +4,9 @@ import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import type { AmuxDmOwnerSettlementAnswer } from "./dmOwnerSettlementCore.ts";
 import {
   applyAmuxDmOwnerSettlementDecision, applyAmuxDmOwnerSettlementRemake,
-  cancelMovedAmuxDmOwnerSettlementClaim,
-  readAmuxDmOwnerSettlementRemakeLive, readStaleAmuxDmOwnerSettlementRemake,
-  recordAmuxDmOwnerSettlementHandoff, type AmuxDmOwnerSettlementApplied,
+  cancelMovedAmuxDmOwnerSettlementClaim, guardAmuxDmOwnerSettlementRemakeIntake,
+  readStaleAmuxDmOwnerSettlementRemake, recordAmuxDmOwnerSettlementHandoff,
+  recordAmuxDmOwnerSettlementRemakeIdea, type AmuxDmOwnerSettlementApplied,
 } from "./dmOwnerSettlementService.ts";
 import { AMUX_SESSION_INTAKE_READBACK_ENV, amuxSessionIntakeReadbackEnabled } from
   "./ideaSessionIntakeReadbackCore.ts";
@@ -15,7 +15,8 @@ import {
   inspectAmuxIdeaSessionSubmission,
 } from "./ideaSessionSubmissionCore.ts";
 import {
-  AmuxIdeaSessionSubmissionError, readAmuxIdeaSessionSubmissionRequest, submitAmuxIdeaFromSession,
+  AmuxIdeaSessionGuardRefused, AmuxIdeaSessionSubmissionError, readAmuxIdeaSessionSubmissionRequest,
+  submitAmuxIdeaFromSession, type AmuxIdeaSessionSubmissionGuard,
 } from "./ideaSessionSubmissionService.ts";
 import { AMUX_V4_IDEA_READBACK_ENV, AMUX_V4_IDEA_SUBMISSION_ENV } from "./ideaSubmissionCore.ts";
 
@@ -30,24 +31,26 @@ import { AMUX_V4_IDEA_READBACK_ENV, AMUX_V4_IDEA_SUBMISSION_ENV } from "./ideaSu
  * 2. The idea, through the same session intake the Admin idea form and a
  *    coding session use (submitAmuxIdeaFromSession): analysed, carded and run
  *    like any other, its analysis inside the operating scope's own budget. The
- *    kill switch and the claim are read again just before it, and the Task
- *    judged by the same rule as the answer (amuxDmOwnerSettlementMoved): a
- *    Task that moved cancels the claim, the kill switch hands it to the
- *    person, and neither files anything.
- *    A refusal goes to the person; an outcome nobody knows is read back once
+ *    claim is checked again inside the intake's own commit transaction, before
+ *    the idea or its reservation is written, under the audit chain lock
+ *    (guardAmuxDmOwnerSettlementRemakeIntake): the kill switch, the claim, and
+ *    the Task by the one rule every step uses; the same commit names the idea
+ *    on the claim. A Task that moved cancels the claim, the kill switch or a
+ *    busy card hands it to the person, and none of them writes an idea. A
+ *    refusal goes to the person; an outcome nobody knows is read back once
  *    under the same request id and, when the idea is not there, goes to the
  *    person -- it is never filed again.
  * 3. The close of the card and the unstarted cards waiting on it, with the
  *    idea's id (applyAmuxDmOwnerSettlementRemake).
  *
- * A claim whose steps 2 and 3 never ended (a lost answer, a held close) is
- * finished by a later tick from step 2's read-back alone.
+ * A claim whose steps never ended (a lost answer, a held close) is finished by
+ * a later tick from what the claim names, or handed over; nothing is filed then.
  */
 
 const REPOSITORY = "mposition/Tomverse";
 
 export type AmuxDmOwnerSettlementRemakeFiling =
-  | { ideaId: string } | { refused: string } | { unknown: true };
+  | { ideaId: string } | { refused: string } | { unknown: true } | { guarded: string };
 
 const intakeOn = () =>
   amuxSessionIntakeWritePermitted(process.env[AMUX_SESSION_INTAKE_ENV], process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) &&
@@ -59,22 +62,28 @@ export async function readBackAmuxDmOwnerSettlementRemakeIdea(requestId: string)
   return seen.status === "committed" ? { ideaId: seen.ideaId } : null;
 }
 
-/** Files the remake's idea once under its request id; an idea already there is read back. */
+/** The session intake's own input for a remake: this repository, the Decision Maker as its source. */
+export const amuxDmOwnerSettlementRemakeSubmission = (requestId: string, ideaText: string) =>
+  inspectAmuxIdeaSessionSubmission({ version: 1, requestId,
+    input: { version: 1, idea: ideaText, repositories: [REPOSITORY], pullRequests: [] },
+    source: { toolName: "tomverse-amux-decision-maker", modelProvider: "decision-maker",
+      sessionDisplay: "Decision Maker remake of a stopped card" } });
+
+/** Files the remake's idea once under its request id, the guard inside its
+ * commit; an idea already there is read back. */
 export async function fileAmuxDmOwnerSettlementRemakeIdea(input: {
-  requestId: string; ideaText: string;
+  requestId: string; ideaText: string; guard: AmuxIdeaSessionSubmissionGuard;
 }): Promise<AmuxDmOwnerSettlementRemakeFiling> {
   if (!intakeOn()) return { refused: "intake_disabled" };
   const seen = await readAmuxIdeaSessionSubmissionRequest(input.requestId);
   if (seen.status === "committed") return { ideaId: seen.ideaId };
   if (seen.status === "partial") return { unknown: true };
-  const inspected = inspectAmuxIdeaSessionSubmission({ version: 1, requestId: input.requestId,
-    input: { version: 1, idea: input.ideaText, repositories: [REPOSITORY], pullRequests: [] },
-    source: { toolName: "tomverse-amux-decision-maker", modelProvider: "decision-maker",
-      sessionDisplay: "Decision Maker remake of a stopped card" } });
+  const inspected = amuxDmOwnerSettlementRemakeSubmission(input.requestId, input.ideaText);
   if (!inspected.ok) return { refused: "idea_refused" };
   try {
-    return { ideaId: (await submitAmuxIdeaFromSession({ inspected })).ideaId };
+    return { ideaId: (await submitAmuxIdeaFromSession({ inspected, guard: input.guard })).ideaId };
   } catch (error) {
+    if (error instanceof AmuxIdeaSessionGuardRefused) return { guarded: error.reason };
     if (error instanceof AmuxIdeaSessionSubmissionError) {
       if (error.code === "request_already_seen" && error.readBack === "committed" && error.ideaId)
         return { ideaId: error.ideaId };
@@ -90,43 +99,54 @@ export type AmuxDmOwnerSettlementRemakeDeps = {
   readBack?: typeof readBackAmuxDmOwnerSettlementRemakeIdea;
 };
 
+/** The guard a claim's idea is committed under: checked, and the idea named on the claim. */
+export const amuxDmOwnerSettlementRemakeGuard = (settlementId: string,
+  remakeRequestId: string): AmuxIdeaSessionSubmissionGuard => ({
+  check: (tx) => guardAmuxDmOwnerSettlementRemakeIntake(tx, { settlementId, remakeRequestId }),
+  committed: (tx, ideaId) => recordAmuxDmOwnerSettlementRemakeIdea(tx, { settlementId, ideaId }),
+});
+
 const handOff = (settlementId: string, requestId: string, reason: string) =>
   withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementHandoff,
     (tx, context) => recordAmuxDmOwnerSettlementHandoff(tx, { settlementId, requestId, reason,
       now: context.dbNow })).then(() => ({ applied: false, outcome: "handed_off" as const }));
 
-/**
- * Steps 2 and 3 of a claimed remake. `ideaText` null finishes an old claim
- * from the read-back alone: nothing new is filed then.
- */
+const cancelMoved = (settlementId: string) =>
+  withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementApply,
+    (tx, context) => cancelMovedAmuxDmOwnerSettlementClaim(tx, { settlementId, now: context.dbNow }));
+
+const closeCards = (settlementId: string, ideaId: string) =>
+  withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementApply,
+    (tx, context) => applyAmuxDmOwnerSettlementRemake(tx, { settlementId, ideaId, now: context.dbNow }));
+
+/** Steps 2 and 3 of a claimed remake. */
 export async function continueAmuxDmOwnerSettlementRemake(input: {
-  settlementId: string; requestId: string; remakeRequestId: string; ideaText: string | null;
+  settlementId: string; requestId: string; remakeRequestId: string; ideaText: string;
 }, deps: AmuxDmOwnerSettlementRemakeDeps = {}): Promise<AmuxDmOwnerSettlementApplied> {
   const fileIdea = deps.fileIdea ?? fileAmuxDmOwnerSettlementRemakeIdea;
   const readBack = deps.readBack ?? readBackAmuxDmOwnerSettlementRemakeIdea;
-  const live = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementRemakeRead,
-    (tx) => readAmuxDmOwnerSettlementRemakeLive(tx, input.settlementId));
-  // No longer this claim's (applied, cancelled or handed over): nothing is filed.
-  if (!live.claimed) return { applied: false, outcome: null };
-  // The Task moved since the claim -- a new run, a queued delivery, a person's
-  // answer -- by the same judgment the answer made: cancelled, nothing filed.
-  if (live.moved)
-    return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementApply,
-      (tx, context) => cancelMovedAmuxDmOwnerSettlementClaim(tx, { settlementId: input.settlementId,
-        now: context.dbNow }));
-  if (live.killSwitch !== false) return handOff(input.settlementId, input.requestId, "remake_held");
-  let filed: AmuxDmOwnerSettlementRemakeFiling = input.ideaText === null ? { unknown: true } :
-    await fileIdea({ requestId: input.remakeRequestId, ideaText: input.ideaText })
-      .catch((): AmuxDmOwnerSettlementRemakeFiling => ({ unknown: true }));
+  let filed: AmuxDmOwnerSettlementRemakeFiling = await fileIdea({ requestId: input.remakeRequestId,
+    ideaText: input.ideaText,
+    guard: amuxDmOwnerSettlementRemakeGuard(input.settlementId, input.remakeRequestId) })
+    .catch((): AmuxDmOwnerSettlementRemakeFiling => ({ unknown: true }));
+  if ("guarded" in filed) {
+    // The commit wrote nothing. A Task that moved, or a person's answer, cancels
+    // the claim; the kill switch or a card another writer holds leaves it to
+    // the person; a claim that is no longer this one's needs nothing more.
+    if (filed.guarded === "task_moved" || filed.guarded === "escalation_resolved")
+      return cancelMoved(input.settlementId);
+    if (filed.guarded === "kill_switch" || filed.guarded === "busy")
+      return handOff(input.settlementId, input.requestId,
+        filed.guarded === "busy" ? "remake_busy" : "remake_held");
+    return { applied: false, outcome: null };
+  }
   if ("unknown" in filed) filed = await readBack(input.remakeRequestId).catch(() => null) ??
     { refused: "outcome_unknown" };
   if ("refused" in filed)
     return handOff(input.settlementId, input.requestId,
       filed.refused === "outcome_unknown" ? "remake_unknown" : "remake_refused");
-  const ideaId = filed.ideaId;
-  return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementApply,
-    (tx, context) => applyAmuxDmOwnerSettlementRemake(tx, { settlementId: input.settlementId,
-      ideaId, now: context.dbNow }));
+  if (!("ideaId" in filed)) return { applied: false, outcome: null };
+  return closeCards(input.settlementId, filed.ideaId);
 }
 
 /**
@@ -150,11 +170,21 @@ export async function settleAmuxDmOwnerSettlementAnswer(input: {
   return next.outcome === null ? applied : next;
 }
 
-/** One claimed remake an earlier tick left unfinished: finished, or handed to the person. */
+/**
+ * One claimed remake an earlier tick left unfinished. Nothing is filed: a
+ * claim the intake's commit named an idea on closes its cards, one whose Task
+ * moved is cancelled, and any other goes to the person once the idea is read
+ * back and not there.
+ */
 export async function resumeAmuxDmOwnerSettlementRemake(deps: AmuxDmOwnerSettlementRemakeDeps = {}) {
   const stale = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementRemakeRead,
     (tx) => readStaleAmuxDmOwnerSettlementRemake(tx));
   if (!stale) return null;
-  return continueAmuxDmOwnerSettlementRemake({ settlementId: stale.settlementId,
-    requestId: stale.requestId, remakeRequestId: stale.remakeRequestId, ideaText: null }, deps);
+  if (stale.remakeIdeaId) return closeCards(stale.settlementId, stale.remakeIdeaId);
+  const cancelled = await cancelMoved(stale.settlementId);
+  if (cancelled.outcome) return cancelled;
+  const back = await (deps.readBack ?? readBackAmuxDmOwnerSettlementRemakeIdea)(stale.remakeRequestId)
+    .catch(() => null);
+  return back ? closeCards(stale.settlementId, back.ideaId) :
+    handOff(stale.settlementId, stale.requestId, "remake_unknown");
 }
