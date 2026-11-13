@@ -1096,9 +1096,12 @@ pub fn bridge_error_class(error: &anyhow::Error) -> String {
 
 /// Whether a failed API model-access authorization read may wait for a later
 /// tick. Only answers that carry no evidence the app decided anything qualify:
-/// the exact busy answer, a transport failure, or a 5xx/429 status.
+/// a "nothing committed" answer (busy, deadline or call ceiling), a transport
+/// failure, or a 5xx/429 status. The deadline and call-ceiling answers carry
+/// `NothingCommittedAnswer` rather than the transient-status tag since
+/// 2026-11-13, so they are asked for by name (review r-20261113-104822-c3afa9).
 fn api_model_access_read_deferrable(error: &anyhow::Error) -> bool {
-    is_database_busy(error) || crate::tomverse_api::is_selection_read_recoverable(error)
+    is_nothing_committed(error) || crate::tomverse_api::is_selection_read_recoverable(error)
 }
 
 /// The warning for a quota observation POST whose outcome is unknown
@@ -6273,6 +6276,12 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
             .worker_register("claude-impl", "00000000-0000-4000-8000-000000000009")
             .await;
         assert_eq!(plan_registration_answer(&busy), RegistrationAnswer::RetryNextTick);
+        for body in [DEADLINE_EXCEEDED_BODY, CALL_CEILING_EXCEEDED_BODY] {
+            let answer = tomverse_api(tomverse_answering("503 Service Unavailable", body))
+                .worker_register("claude-impl", "00000000-0000-4000-8000-000000000009")
+                .await;
+            assert_eq!(plan_registration_answer(&answer), RegistrationAnswer::RetryNextTick, "{body}");
+        }
         let unknown = tomverse_api(tomverse_answering("503 Service Unavailable", OUTCOME_UNKNOWN_BODY))
             .worker_register("claude-impl", "00000000-0000-4000-8000-000000000009")
             .await;
@@ -7069,6 +7078,13 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
         assert!(api_model_access_read_deferrable(&busy));
         assert!(api_model_access_read_deferrable(&transient));
         assert!(api_model_access_read_deferrable(&limited));
+        // The other two "nothing committed" answers defer too, as they did
+        // while they carried the transient-status tag.
+        for reason in ["amux_database_deadline_exceeded", "amux_database_call_ceiling_exceeded"] {
+            let answer = anyhow::Error::new(crate::tomverse_api::NothingCommittedAnswer { reason })
+                .context("API model access authorization refused");
+            assert!(api_model_access_read_deferrable(&answer), "{reason}");
+        }
         let unauthorized = anyhow::Error::new(UnacceptedStatus {
             status: StatusCode::UNAUTHORIZED }).context("API model access authorization refused");
         let malformed = anyhow::anyhow!("invalid API model access request");
