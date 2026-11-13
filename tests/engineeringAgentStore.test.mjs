@@ -182,6 +182,17 @@ test("every claim, capability, publish and maintenance write reads the switches 
   }
 });
 
+test("a publish claim names the card by its code only, never by its title", () => {
+  const claim = exportedFunctions().find((fn) => fn.name.getText(tree) === "claimNextEngineeringAgentPublishWork");
+  assert.ok(claim);
+  const body = claim.body.getText(tree);
+  // The pull request title goes on the public repository: the card's code,
+  // checked against the display key grammar, and nothing drawn from the idea.
+  assert.match(body, /tx\.amuxWorkItem\.findUnique\(\{\s*where: \{ id: item\.run\.cardId \}, select: \{ displayKey: true \},/);
+  assert.match(body, /cardKey: isAmuxCardDisplayKey\(cardKey\) \? cardKey : null,/);
+  assert.doesNotMatch(body, /title: true|\.title\b/);
+});
+
 test("the store names no target state for a result; the core decides it", () => {
   const settle = exportedFunctions().find((fn) => fn.name.getText(tree) === "settleEngineeringAgentWorkItem");
   assert.ok(settle);

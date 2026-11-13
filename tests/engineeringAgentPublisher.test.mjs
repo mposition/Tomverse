@@ -205,6 +205,22 @@ test("an owner review item opens a draft pull request that says what marking it 
   }
 });
 
+test("the title leads with the card's code the app sends, and leaves off anything that is not one", async () => {
+  assert.equal(publisherPrTitle(RUN, "AMUX-FILEREQ-005"), `AMUX-FILEREQ-005 engineering-agent: run ${RUN}`);
+  assert.equal(publisherReviewPrTitle(RUN, "AMUX-MODELTIER-002"),
+    `AMUX-MODELTIER-002 engineering-agent: run ${RUN} (owner review)`);
+  // An older app sends no code, and a value that is not a card code (a
+  // card's title, an unpadded number, lowercase) is never written to the title.
+  for (const cardKey of [undefined, null, "", "Add Guest vs Free copy", "AMUX-FILEREQ-5",
+    "amux-filereq-005", "AMUX-FILEREQ-005 extra", 5]) {
+    assert.equal(publisherPrTitle(RUN, cardKey), `engineering-agent: run ${RUN}`, String(cardKey));
+  }
+  const world = fakeWorld({ work: writeWork({ ownerReview: true, cardKey: "AMUX-FILEREQ-005" }) });
+  assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "confirmed" });
+  const pr = world.calls.find((call) => call.path === "github:createPull").input;
+  assert.equal(pr.title, `AMUX-FILEREQ-005 engineering-agent: run ${RUN} (owner review)`);
+});
+
 test("a publisher names review drafts in a header the app reads; nothing else counts as naming them", () => {
   assert.equal(publisherOpensReviewDrafts("review_draft"), true);
   assert.equal(publisherOpensReviewDrafts("other, review_draft"), true);

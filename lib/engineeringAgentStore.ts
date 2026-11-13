@@ -46,6 +46,7 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import type { EngineeringAgentSystemAuditActor } from "@/lib/adminAuditSystemActors";
 import type { AmuxAttachedTransaction } from "@/lib/amux/dbBoundary";
 import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
+import { isAmuxCardDisplayKey } from "@/lib/amux/cardDisplayKeyCore";
 import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
   amuxV22EngineeringPublicationEnabled } from
   "@/lib/amux/v22TaskExecutionCore";
@@ -988,6 +989,8 @@ export type EngineeringAgentPublishWork =
       leaseExpiresAt: Date;
       /** An owner review item: a T2 patch the publisher opens as a draft pull request. */
       ownerReview: boolean;
+      /** The card's readable code for the pull request title; null when it has none. */
+      cardKey: string | null;
       /** The capability a write claim consumed; null when none was, and so no write was allowed. */
       consumed: { commitDigest: string; expectedTreeId: string } | null;
       /**
@@ -1006,6 +1009,7 @@ export type EngineeringAgentPublishWork =
       fencingToken: bigint;
       leaseExpiresAt: Date;
       ownerReview: boolean;
+      cardKey: string | null;
       cardRef: string;
       baseSha: string;
       patchBody: string;
@@ -1133,6 +1137,15 @@ export async function claimNextEngineeringAgentPublishWork(
     },
   });
   const runId = item.runId ?? refuse("publish_item_without_run");
+  // The card's readable code (AMUX-FILEREQ-005) for the pull request's title,
+  // so the owner can tell which card a pull request is. Only the code, read
+  // from the card row: the card's title is drawn from the owner's idea, which
+  // never goes on the public repository (§2.1, §9-8). Null leaves the title
+  // as it was.
+  const card = item.run?.cardId ? await tx.amuxWorkItem.findUnique({
+    where: { id: item.run.cardId }, select: { displayKey: true },
+  }) : null;
+  const cardKey = card?.displayKey ?? null;
   const common = {
     workItemId: candidate.id,
     runId,
@@ -1140,6 +1153,7 @@ export async function claimNextEngineeringAgentPublishWork(
     fencingToken: claim.fencingToken,
     leaseExpiresAt: claim.leaseExpiresAt,
     ownerReview: item.causeKey.startsWith(ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX),
+    cardKey: isAmuxCardDisplayKey(cardKey) ? cardKey : null,
   };
   if (mode === "lookup") {
     // What a lookup compares a found commit with: the capability a write
