@@ -181,14 +181,29 @@ test("a merge by anyone else with no review still stops the agent and leaves the
     assert.equal(await openMismatches(tx, card), 1);
     assert.equal(((await bindingRow(tx, card)).mergeObservation as { merged: boolean }).merged, true);
   });
-  // An approver's merge of a head the app did not verify, whose diff also differs from the verified
-  // one, is not that approval either (a later head with the verified diff is: #3828).
+  // An approver's merge of a change the app did not verify is not that
+  // approval either: another head whose pull request diff is not the verified
+  // one, or whose diff could not be read.
+  for (const diffDigest of ["e".repeat(64), null]) {
+    await lifecycle(async (tx) => {
+      const card = await publishedCard(tx);
+      const outcome = await observe(card, () =>
+        mergedPull({ mergedByApprover: true, headSha: "a".repeat(40), diffDigest }));
+      assert.equal(outcome?.outcome, "merged_without_approval");
+      assert.equal((await cardRow(tx, card)).status, "review");
+    });
+  }
+});
+
+test("an approver's merge of a branch brought up to date still counts: same diff, later head", async () => {
+  // #3828, 2026-11-13: develop was merged into the branch before the owner
+  // merged it. The head moved; what the pull request changes did not.
   await lifecycle(async (tx) => {
     const card = await publishedCard(tx);
-    const outcome = await observe(card, () => mergedPull({ mergedByApprover: true, headSha: "a".repeat(40),
-      diffDigest: "b".repeat(64) }));
-    assert.equal(outcome?.outcome, "merged_without_approval");
-    assert.equal((await cardRow(tx, card)).status, "review");
+    const outcome = await observe(card, () =>
+      mergedPull({ mergedByApprover: true, headSha: "a".repeat(40), diffDigest: DIFF }));
+    assert.equal(outcome?.outcome, "completed");
+    assert.equal((await cardRow(tx, card)).status, "done");
   });
 });
 
