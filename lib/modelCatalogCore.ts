@@ -640,7 +640,9 @@ export const resolveImageCatalog = (input: {
       // an operator added -- a row, a price revision, a whole model -- is
       // judged here before it can serve, so a revision priced below the floor
       // never serves just because the row said "inherit".
-      const operatorTouched = Boolean(row) || Boolean(revision) || !seedIds.has(base.id);
+      // Confirmed billing terms (ImageModelBillingTerms) count too: they can
+      // move a serving seed's worst case without a row or a revision.
+      const operatorTouched = Boolean(row) || Boolean(revision) || !seedIds.has(base.id) || Boolean(model.billingTerms);
       if (wouldServe && operatorTouched) {
         const admission = input.judge({ ...model, disabledReason: null });
         disabledReason = admission.admitted ? null : reasonFor(admission.reasons);

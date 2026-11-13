@@ -431,3 +431,23 @@ test("a price older than the confirmed tokens per image is refused until a new d
   assert.equal(stale.disabledReason, "price_unverified");
   assert.ok(judge({ ...stale, disabledReason: null }).reasons.includes("price_below_measured_cost:high/1024x1024"));
 });
+
+test("an enabled code model with no row is judged again once terms are confirmed for it", () => {
+  const seed = IMAGE_MODEL_REGISTRY.find((model) => model.id === "gpt-image-2");
+  const high = seed.prices.find((price) => price.quality === "high" && price.size === "1024x1024");
+  const judge = (model) => judgeImageModel(model, { minimumCredits: minimumCreditsForImageOption, providerBudgetReady: () => true });
+  const resolve = (tokens) =>
+    resolveImageCatalog({
+      seed: IMAGE_MODEL_REGISTRY,
+      rows: [],
+      revisions: [],
+      now: NOW,
+      judge,
+      billingTerms: [
+        termsRow("t", "openai", "gpt-image-2", { kind: "tokens_per_image", imageOutputUsdPerMTok: 30, tokens: [{ quality: "high", size: "1024x1024", tokens }] }, "2026-11-13"),
+      ],
+    }).models.find((model) => model.id === seed.id);
+  // Terms the seed price covers keep it serving; terms it does not cover hold it.
+  assert.equal(resolve(Math.floor(high.outputCostMicroUsd / 30)).disabledReason, null);
+  assert.equal(resolve(Math.ceil(high.outputCostMicroUsd / 30) * 2).disabledReason, "price_unverified");
+});
