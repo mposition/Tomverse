@@ -618,6 +618,15 @@ test("a quote drawn in quotation marks, a spaced list separator and the name an 
   assert.equal(read(["Two AI answers, one contradiction", "GPT 6 Luna · Claude Haiku 5.5 · Gemini Flash", "Skip the Scenic Railway (which has steep steps)", "Start without an account", "Morning: Scenic Railway"]).verdict, "fix", "words on a prop are not approved");
 });
 
+test("one closing full stop drawn after an approved text is the same text; a changed word is not", () => {
+  // The 2026-11-13 box run refused every English card for a drawn closing stop.
+  const c = concept("c1", { texts: [{ role: "headline", text: "Ask AI anything" }, { role: "screen", text: "Model picked for this message" }, { role: "cta", text: "Start without an account" }] });
+  const read = (readTexts, locale = "en") => checkReview(line(reviewOf({ readTexts })), { stage: "content", concept: c, locale }).review.verdict;
+  assert.equal(read(["Ask AI anything.", "Model picked for this message.", "Start without an account"]), "pass");
+  assert.equal(read(["Ask AI anything", "Model pickcd for this message.", "Start without an account"]), "fix");
+  assert.equal(read(["Ask AI anything", "Model picked for this message..", "Start without an account"]), "fix", "an ellipsis-like run is still read as written");
+});
+
 test("a concept needs exactly one call to action and says AI or a model in its headline or subhead", () => {
   const vague = concept("c1", {
     texts: [{ role: "headline", text: "Same ride. Contradicting advice." }, { role: "screen", text: "Which model should answer this?" }, { role: "cta", text: "Start without an account" }],
