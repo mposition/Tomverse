@@ -344,6 +344,12 @@ test("the kit keeps a screen's crop in the gaps between lines and words, and rea
   assert.equal(screenWord(["Hello there.", "AI"], " Hello there. "), "Hello there.");
   assert.throws(() => screenWord(["Hello there."], "Hello"), /not one of the props' screen lines/u);
   assert.deepEqual(lineTimes([{ seconds: 2 }, { seconds: 1 }], 30), [{ from: 6, frames: 60 }, { from: 74, frames: 30 }]);
+  // A caption line breaks between words only: never inside "week-by-week", never inside 哪裡.
+  const { captionUnits } = await import("../tools/marketing-video/creative-kit/geometry.js");
+  assert.ok(captionUnits("Can you give me a week-by-week checklist?", "en").includes("week-by-week"));
+  const zh = captionUnits("要從哪裡開始？", "zh-Hant");
+  assert.ok(zh.includes("哪裡") && zh.at(-1).endsWith("？") && zh.at(-1).length > 1, JSON.stringify(zh));
+  assert.deepEqual(captionUnits("할 일 체크리스트", "ko"), ["할", " ", "일", " ", "체크리스트"]);
 });
 
 test("the film's imports are read by a parser: comments, webpack loaders, re-exports and unused imports do not slip past", async () => {
