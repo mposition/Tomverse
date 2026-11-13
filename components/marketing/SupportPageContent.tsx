@@ -193,8 +193,8 @@ const copy: Record<Language, SupportCopy> = {
     "success": "지원 요청이 접수되었습니다.",
     "failed": "지원 요청을 전송하지 못했습니다.",
     "helpCta": "도움말 센터 보기",
-    "appCta": "Review 열기",
-    "messageExample": "예: Review에서 PDF를 첨부한 뒤 답변이 나오지 않았습니다. 발생 시간, 모델명, 파일 형식·크기와 화면의 추적 ID를 함께 적어주세요. 비밀번호나 카드번호는 보내지 마세요."
+    "appCta": "리뷰 열기",
+    "messageExample": "예: 리뷰에서 PDF를 첨부한 뒤 답변이 나오지 않았습니다. 발생 시간, 모델명, 파일 형식·크기와 화면의 추적 ID를 함께 적어주세요. 비밀번호나 카드번호는 보내지 마세요."
   },
   "zh": {
     "eyebrow": "支持",
