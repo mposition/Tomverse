@@ -482,9 +482,30 @@ async fn database_busy_or(mut response: reqwest::Response, otherwise: &'static s
     }
     if is_database_busy_body(&body) {
         anyhow::Error::new(DatabaseBusy)
+    } else if let Some(reason) = other_nothing_committed_reason(&body) {
+        // The other two "nothing committed" answers (policy version 20,
+        // section 1): the route rolled back. Marked so a caller that asks
+        // `is_nothing_committed` may send the request again; every other
+        // caller still sees an error and stops as before.
+        anyhow::Error::new(NothingCommittedAnswer { reason }).context(otherwise)
     } else {
         transient_status_or(status, otherwise)
     }
+}
+
+/// Whether this error is, anywhere in its chain, one of the three answers that
+/// say the request committed nothing: the database-busy body, or a deadline
+/// or call-ceiling refusal, each of which the app sends only after its
+/// transaction rolled back (lib/amux/dbBoundary.ts; policy version 20,
+/// section 1). Such a write may be sent again. Until 2026-11-13 the WSL bridge
+/// asked only `is_database_busy`, so a settlement refused at its commit
+/// deadline halted the bridge as an unknown outcome: codex-chore stopped twice
+/// that day, both times on `amux_database_deadline_exceeded`.
+pub fn is_nothing_committed(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause.downcast_ref::<DatabaseBusy>().is_some()
+            || cause.downcast_ref::<NothingCommittedAnswer>().is_some()
+    })
 }
 
 /// `otherwise`, tagged with `SelectionReadTransientStatus` when `status` is a
