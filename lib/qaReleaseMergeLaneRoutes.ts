@@ -162,7 +162,8 @@ export async function handleQaReleaseMergeReport(request: Request, env: Env = pr
  * attempt it holds, on the database clock. A read with no write, so it needs
  * no revision -- the calls that write judge the revision themselves.
  */
-export async function handleQaReleaseMergeLaneState(request: Request, env: Env = process.env) {
+export async function handleQaReleaseMergeLaneState(request: Request, env: Env = process.env,
+  deps: Parameters<typeof readAmuxDmT2MergeLanePulls>[1] = {}) {
   const auth = authenticate(request, env);
   if (!auth) return answer(401, { error: "unauthorized" });
   return guarded(async () => {
@@ -172,9 +173,10 @@ export async function handleQaReleaseMergeLaneState(request: Request, env: Env =
       .catch(() => [] as number[]);
     // Owner decision 2026-11-13 (develop only, TOMVERSE_AMUX_DM_T2_MERGE): the
     // engineering pull requests the Decision Maker approved, their conditions
-    // read again now. Unread, none: every `agent` branch stays a person's.
+    // and their current GitHub diff and files read again now. Unread, none:
+    // every `agent` branch stays a person's.
     const dmApproved = amuxDmT2MergeEnabled(env)
-      ? { dmApproved: await readAmuxDmT2MergeLanePulls(env).catch(() => []) } : {};
+      ? { dmApproved: await readAmuxDmT2MergeLanePulls(env, deps).catch(() => []) } : {};
     return answer(200, { ...(await readQaReleaseMergeLaneState()), priority, ...dmApproved });
   });
 }

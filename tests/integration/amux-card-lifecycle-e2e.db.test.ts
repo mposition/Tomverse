@@ -306,7 +306,8 @@ test("the Decision Maker's approval, readied by the app and merged by the merge 
   const { observeEngineeringAgentPullRequests } = await services();
   await lifecycle(async (tx) => {
     const card = await publishedCard(tx);
-    const patch = ["diff --git a/lib/ordinary.ts b/lib/ordinary.ts", "@@ -1 +1 @@", "-a", "+b", ""].join("\n");
+    // A change wholly inside the Decision Maker merge allow list.
+    const patch = ["diff --git a/components/Ordinary.tsx b/components/Ordinary.tsx", "@@ -1 +1 @@", "-a", "+b", ""].join("\n");
     await withoutTriggers(tx, () => tx.$executeRaw`INSERT INTO "EngineeringAgentWorkItem"
       ("id", "kind", "state", "causeKey", "runId", "patchBody", "patchDigest", "baseSha", "expectedTreeId",
        "updatedAt", "closedAt")
@@ -332,7 +333,7 @@ test("the Decision Maker's approval, readied by the app and merged by the merge 
         pull: async (number) => ({ open: true, pull: { number, nodeId: "PR_node", title: "t", base: "develop", head: ref,
           headSha: HEAD, draft: true, fork: false, labels: [] } }),
         change: async () => ({ state: "open", baseRef: "develop", headRef: ref, headSha: HEAD, diffDigest: DIFF,
-          changedFiles: ["lib/ordinary.ts"] }),
+          changedFiles: ["components/Ordinary.tsx"] }),
         markReady: async (pull) => { readied.push(pull.number); },
       } });
     assert.equal(step.outcome, "marked_ready");
@@ -348,7 +349,8 @@ test("the Decision Maker's approval, readied by the app and merged by the merge 
     const state = await handleQaReleaseMergeLaneState(new Request(
       "https://staging.tomverse.app/api/internal/agents/qa-release/merge-lane/state",
       { method: "POST", headers: { authorization: `Bearer ${LANE}`, "content-type": "application/json" }, body: "{}" }),
-    laneEnv);
+    laneEnv, { change: async () => ({ state: "open", baseRef: "develop", headRef: ref, headSha: HEAD, diffDigest: DIFF,
+      changedFiles: ["components/Ordinary.tsx"] }) });
     assert.equal(state.status, 200, JSON.stringify(state.body));
     assert.deepEqual((state.body.dmApproved as unknown[]).filter((entry) =>
       (entry as { number: number }).number === card.prNumber), [{ number: card.prNumber, headSha: HEAD, headRef: ref }]);

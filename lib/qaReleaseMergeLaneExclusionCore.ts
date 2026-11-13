@@ -7,7 +7,8 @@
  * candidate. Every input comes from the caller -- this module reads no
  * network, file or clock -- and every uncertainty excludes.
  */
-import { compileManifestPattern, isCanonicalRepoPath } from "./agentAuthorityFiles.ts";
+import { classifyPath, compileManifestPattern, isCanonicalRepoPath } from "./agentAuthorityFiles.ts";
+import { isPolicyTestName } from "./agentPushPolicy.ts";
 
 /**
  * Gate paths: only what a revert cannot undo or what would let an agent widen
@@ -58,17 +59,43 @@ export const QA_RELEASE_MERGE_LANE_EXCLUDED_BRANCH_PREFIXES: readonly string[] =
 export const QA_RELEASE_DM_APPROVED_HEAD = /^agent\/engineering\/[0-9]{1,20}$/;
 
 /**
- * What still leaves a Decision Maker approved pull request to a person,
- * beside the gate paths above (the workflows and actions, admin auth, the
- * system audit actors among them): what a revert cannot undo. Migrations and
- * the schema; prices, credits and the rest of the contract role's areas
- * (AGENTS.md: the product key, promotions, the price catalogue, plan change,
- * email sending, as the v52 contract list in lib/amux/executionGradeCore.ts
- * names them); authentication and secrets; the audit chain; deletion and
- * retention. The one list the app's gate (lib/amux/dmT2MergeCore.ts) and the
- * lane both judge, without regard to case: a doubt goes to a person.
+ * The only paths a Decision Maker approved pull request may change and still
+ * be merged without a person (review r-20261113-134019-5d8f82: an allow list,
+ * not a block list -- a list of what a revert cannot undo always misses one,
+ * such as a deletion route's re-authentication, a spending cap or a discount
+ * provider). Every changed path, both sides of a rename, must be inside it;
+ * one outside leaves the whole pull request to a person. Tests, documents
+ * other than policy, UI contracts and agent instructions, locale strings,
+ * components, and the page, layout, loading and error files of app routes.
+ * Code under lib/, every API route and everything else is a person's.
  */
-export const QA_RELEASE_DM_APPROVED_HUMAN_PATTERNS: readonly string[] = [
+export const QA_RELEASE_DM_MERGE_ALLOW_PATTERNS: readonly string[] = [
+  "tests/**",
+  "docs/**",
+  "locales/**",
+  "components/**",
+  "app/**/page.tsx",
+  "app/**/layout.tsx",
+  "app/**/loading.tsx",
+  "app/**/error.tsx",
+];
+
+/** Inside the allow list and still a person's: the policy, the UI contracts, the agent instructions, every API route. */
+export const QA_RELEASE_DM_MERGE_ALLOW_EXCEPT_PATTERNS: readonly string[] = [
+  "docs/policy/**",
+  "docs/ui-contracts/**",
+  "docs/agents/**",
+  "app/api/**",
+];
+
+/**
+ * Laid over the allow list, without regard to case: the gate paths above and
+ * what a revert cannot undo (migrations and the schema; prices, credits and
+ * the contract role's other areas; authentication and secrets; the audit
+ * chain; deletion and retention). A path on it is a person's even inside the
+ * allow list.
+ */
+export const QA_RELEASE_DM_MERGE_BLOCK_PATTERNS: readonly string[] = [
   "prisma/migrations/**",
   "prisma/schema.prisma",
   "lib/modelPricing*",
@@ -138,16 +165,36 @@ export type QaReleaseExclusionReason =
   | "agent_own_path"
   | "protected_table_migration"
   | "excluded_branch"
-  /** A Decision Maker approved pull request that changes a gate or irreversible path. */
-  | "dm_human_path";
+  /** A Decision Maker approved pull request that changes a path outside its merge allow list. */
+  | "dm_outside_allowlist";
 
 export type QaReleaseExclusion =
   | { excluded: false }
   | { excluded: true; reasons: QaReleaseExclusionReason[] };
 
 const GATE_MATCHERS = QA_RELEASE_MERGE_LANE_GATE_PATTERNS.map(compileManifestPattern);
-const DM_HUMAN_MATCHERS = [...QA_RELEASE_MERGE_LANE_GATE_PATTERNS, ...QA_RELEASE_DM_APPROVED_HUMAN_PATTERNS]
+const DM_ALLOW_MATCHERS = QA_RELEASE_DM_MERGE_ALLOW_PATTERNS.map(compileManifestPattern);
+const DM_ALLOW_EXCEPT_MATCHERS = QA_RELEASE_DM_MERGE_ALLOW_EXCEPT_PATTERNS
   .map((pattern) => new RegExp(compileManifestPattern(pattern).source, "i"));
+const DM_BLOCK_MATCHERS = [...QA_RELEASE_MERGE_LANE_GATE_PATTERNS, ...QA_RELEASE_DM_MERGE_BLOCK_PATTERNS]
+  .map((pattern) => new RegExp(compileManifestPattern(pattern).source, "i"));
+
+/**
+ * Whether one changed path may be part of a pull request the Decision Maker
+ * merges: a canonical path inside the allow list and outside its exceptions,
+ * a product path in the engineering agent's authority manifest (its
+ * control-plane tests, documents and components stay a person's), not a
+ * policy test (by name, lib/agentPushPolicy.ts, or named by the policy
+ * documents when the caller read them), and on no block list.
+ */
+export function qaReleaseDmMergeAllowed(path: unknown, policyTestPaths: readonly string[] = []): boolean {
+  if (!isReadablePath(path)) return false;
+  if (!DM_ALLOW_MATCHERS.some((matcher) => matcher.test(path))) return false;
+  if (DM_ALLOW_EXCEPT_MATCHERS.some((matcher) => matcher.test(path))) return false;
+  if (classifyPath(path) !== "product") return false;
+  if (isPolicyTestName(path) || policyTestPaths.includes(path)) return false;
+  return !DM_BLOCK_MATCHERS.some((matcher) => matcher.test(path));
+}
 
 /**
  * A repository-relative path as Git stores it, judged by the same rule the
@@ -167,14 +214,11 @@ function branchExcluded(headBranch: string, dmApproved: boolean): boolean {
 
 /**
  * The paths of a Decision Maker approved pull request that leave it to a
- * person: a gate path, an irreversible one (QA_RELEASE_DM_APPROVED_HUMAN_PATTERNS),
- * or one that cannot be judged. Empty when none does.
+ * person (qaReleaseDmMergeAllowed): outside the allow list, on a block list,
+ * a policy test, or one that cannot be judged. Empty when none does.
  */
-export function qaReleaseDmApprovedHumanPaths(paths: readonly unknown[]): string[] {
-  return paths.flatMap((path) => {
-    if (!isReadablePath(path)) return [String(path).slice(0, 200)];
-    return DM_HUMAN_MATCHERS.some((matcher) => matcher.test(path)) ? [path] : [];
-  });
+export function qaReleaseDmApprovedHumanPaths(paths: readonly unknown[], policyTestPaths: readonly string[] = []): string[] {
+  return paths.flatMap((path) => qaReleaseDmMergeAllowed(path, policyTestPaths) ? [] : [String(path).slice(0, 200)]);
 }
 
 export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput): QaReleaseExclusion {
@@ -223,7 +267,7 @@ function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonl
       }
       if (policyTests.has(path)) reasons.add("policy_test");
       if (ownMatchers.some((matcher) => matcher.test(path))) reasons.add("agent_own_path");
-      if (dmApproved && DM_HUMAN_MATCHERS.some((matcher) => matcher.test(path))) reasons.add("dm_human_path");
+      if (dmApproved && !qaReleaseDmMergeAllowed(path, policyTestPaths)) reasons.add("dm_outside_allowlist");
     }
     if (isReadablePath(file.path) && QA_RELEASE_MIGRATION_SQL_PATH.test(file.path)) {
       if (typeof file.migrationSql !== "string" || QA_RELEASE_PROTECTED_TABLE_PATTERN.test(file.migrationSql)) {

@@ -595,8 +595,11 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
       (`QaReleaseMergeAttempt`)가 이 PR·head에 대해 바로 그 병합 commit을 보고했다. 레인이
       아직 보고하지 않은 attempt가 열려 있거나 diff를 읽지 못하면 그 회차에는 판정하지 않는다.
 
-    가격·크레딧·migration·삭제·인증·감사 체인 경로와 병합 레인 게이트 파일을 건드리는 PR은
-    DM 승인을 기록하지 않고 사람에게 넘긴다(`QA_RELEASE_DM_APPROVED_HUMAN_PATTERNS`). 위 조건에
+    이 경로는 **변경 파일이 모두 허용 목록 안에 있는 PR만** 탄다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`와
+    `qaReleaseDmMergeAllowed`: 테스트, 정책·UI 계약·에이전트 지시가 아닌 문서, locale, 컴포넌트, app의 page·layout·loading·error
+    파일; 이 manifest의 control-plane 경로, 정책 테스트, 레인 게이트 파일, 가격·크레딧·migration·삭제·인증·감사 체인 경로는
+    그 안에 있어도 제외). 하나라도 밖이면 DM 승인을 기록하지 않고 사람에게 넘긴다. 앱이 레인에 승인을 넘길 때마다 현재 PR
+    diff와 파일 목록을 다시 읽어 같을 때만 넘기고, 레인은 승인된 head를 고정해 병합한다. 위 조건에
     하나라도 맞지 않는 병합은 종전대로 비승인이고 정지 대상이다. `main` 병합과 배포는 사람의
     몫이다. 게시 App과 에이전트에는 여전히 병합 권한이 없다 — 병합하는 것은 병합 레인 App이다.
 

@@ -4,9 +4,10 @@
  * DM에게 자동으로 하도록 승인합니다."). A review pull request the Decision
  * Maker approved from the owner queue (lib/amux/dmOwnerSettlementService.ts,
  * kind `t2_pr`) is marked ready by the app, its CI runs, and the QA-release
- * merge lane merges it into develop -- never main, never a deploy. A pull
- * request that changes a gate or irreversible path
- * (QA_RELEASE_DM_APPROVED_HUMAN_PATTERNS) stays a person's.
+ * merge lane merges it into develop -- never main, never a deploy. Only a
+ * pull request whose every changed path is on the allow list
+ * (QA_RELEASE_DM_MERGE_ALLOW_PATTERNS, qaReleaseDmMergeAllowed) takes this
+ * path; one path outside it leaves the pull request to a person.
  *
  * Pure: the switch, which paths a patch changes, whether CI admission's line
  * leaves room, and whether a pull request read fresh is still the change the
@@ -44,17 +45,17 @@ export function amuxDmT2MergePatchPaths(patch: string | null): string[] | null {
 
 export type AmuxDmT2MergeGate =
   | { pass: true }
-  | { pass: false; reason: "irreversible_path" | "paths_unreadable"; paths: string[] };
+  | { pass: false; reason: "outside_dm_merge_allowlist" | "paths_unreadable"; paths: string[] };
 
 /**
- * Whether a change may take the automatic path: none of its paths is a gate
- * or irreversible one, and its paths could be read at all. Anything else is
- * left to a person.
+ * Whether a change may take the automatic path: every one of its paths is on
+ * the allow list, and its paths could be read at all. Anything else is left to
+ * a person.
  */
 export function amuxDmT2MergeGate(paths: readonly string[] | null): AmuxDmT2MergeGate {
   if (paths === null || paths.length === 0) return { pass: false, reason: "paths_unreadable", paths: [] };
   const human = qaReleaseDmApprovedHumanPaths(paths);
-  return human.length === 0 ? { pass: true } : { pass: false, reason: "irreversible_path", paths: human.slice(0, 20) };
+  return human.length === 0 ? { pass: true } : { pass: false, reason: "outside_dm_merge_allowlist", paths: human.slice(0, 20) };
 }
 
 /** Line statuses of a draft that still waits for runners: the line goes first. */
@@ -91,18 +92,45 @@ export type AmuxDmT2MergeChangeNow = {
   diffDigest: string | null; changedFiles: string[] | null;
 };
 
+export type AmuxDmT2MergeSkipReason = "pull_closed" | "base_not_develop" | "branch_moved" | "head_moved" |
+  "diff_unreadable" | "diff_changed" | "paths_unreadable" | "outside_dm_merge_allowlist";
+
+/**
+ * Whether a pull request's change, read fresh from GitHub, is still the one
+ * the Decision Maker approved: open, into develop, on the approved branch and
+ * head, its diff byte for byte the approved one (a merge base that moved with
+ * develop changes it), and every path on the allow list. Anything unread or
+ * different does not hold. What the app checks before it marks a pull request
+ * ready and every time it tells the merge lane of one.
+ */
+export function amuxDmT2MergeChangeVerdict(input: {
+  approved: AmuxDmT2MergeApproved;
+  change: AmuxDmT2MergeChangeNow;
+}): { holds: true } | { holds: false; reason: AmuxDmT2MergeSkipReason; paths?: string[] } {
+  const { approved, change } = input;
+  if (!SHA.test(approved.approvedHeadSha) || !DIGEST.test(approved.approvedDiffDigest) ||
+      !AMUX_DM_T2_MERGE_HEAD.test(approved.headRef)) return { holds: false, reason: "head_moved" };
+  if (change.state !== "open") return { holds: false, reason: "pull_closed" };
+  if (change.baseRef !== "develop") return { holds: false, reason: "base_not_develop" };
+  if (change.headRef !== approved.headRef) return { holds: false, reason: "branch_moved" };
+  if (change.headSha !== approved.approvedHeadSha) return { holds: false, reason: "head_moved" };
+  if (change.diffDigest === null) return { holds: false, reason: "diff_unreadable" };
+  if (change.diffDigest !== approved.approvedDiffDigest) return { holds: false, reason: "diff_changed" };
+  const gate = amuxDmT2MergeGate(change.changedFiles);
+  return gate.pass ? { holds: true } : { holds: false, reason: gate.reason, paths: gate.paths };
+}
+
 export type AmuxDmT2MergeReadyVerdict =
   | { verdict: "ready" }
   | { verdict: "already_ready" }
-  | { verdict: "skip"; reason: "pull_closed" | "base_not_develop" | "branch_moved" | "head_moved" |
-      "diff_unreadable" | "diff_changed" | "paths_unreadable" | "irreversible_path"; paths?: string[] };
+  | { verdict: "skip"; reason: AmuxDmT2MergeSkipReason; paths?: string[] };
 
 /**
  * Whether a Decision Maker approved pull request, read fresh from GitHub just
- * before the write, may be marked ready: open, into develop, on the approved
- * branch and head, its diff byte for byte the approved one, and no path a
- * person must merge. A pull request already ready needs nothing. Anything
- * unread or different is skipped this round and read again on a later one.
+ * before the write, may be marked ready: CI admission's App sees it open, into
+ * develop, on the approved branch and head, and its change still holds
+ * (amuxDmT2MergeChangeVerdict). A pull request already ready needs nothing.
+ * Anything unread or different is skipped this round and read again later.
  */
 export function amuxDmT2MergeReadyVerdict(input: {
   approved: AmuxDmT2MergeApproved;
@@ -112,14 +140,12 @@ export function amuxDmT2MergeReadyVerdict(input: {
   const { approved, pull, change } = input;
   if (!SHA.test(approved.approvedHeadSha) || !DIGEST.test(approved.approvedDiffDigest) ||
       !AMUX_DM_T2_MERGE_HEAD.test(approved.headRef)) return { verdict: "skip", reason: "head_moved" };
-  if (pull === null || !pull.open || change.state !== "open") return { verdict: "skip", reason: "pull_closed" };
-  if (pull.base !== "develop" || change.baseRef !== "develop") return { verdict: "skip", reason: "base_not_develop" };
-  if (pull.head !== approved.headRef || change.headRef !== approved.headRef) return { verdict: "skip", reason: "branch_moved" };
-  if (pull.headSha !== approved.approvedHeadSha || change.headSha !== approved.approvedHeadSha)
-    return { verdict: "skip", reason: "head_moved" };
+  if (pull === null || !pull.open) return { verdict: "skip", reason: "pull_closed" };
+  if (pull.base !== "develop") return { verdict: "skip", reason: "base_not_develop" };
+  if (pull.head !== approved.headRef) return { verdict: "skip", reason: "branch_moved" };
+  if (pull.headSha !== approved.approvedHeadSha) return { verdict: "skip", reason: "head_moved" };
   if (!pull.draft) return { verdict: "already_ready" };
-  if (change.diffDigest === null) return { verdict: "skip", reason: "diff_unreadable" };
-  if (change.diffDigest !== approved.approvedDiffDigest) return { verdict: "skip", reason: "diff_changed" };
-  const gate = amuxDmT2MergeGate(change.changedFiles);
-  return gate.pass ? { verdict: "ready" } : { verdict: "skip", reason: gate.reason, paths: gate.paths };
+  const held = amuxDmT2MergeChangeVerdict({ approved, change });
+  return held.holds ? { verdict: "ready" } :
+    { verdict: "skip", reason: held.reason, ...(held.paths ? { paths: held.paths } : {}) };
 }

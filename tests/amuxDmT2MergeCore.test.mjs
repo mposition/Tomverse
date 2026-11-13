@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AMUX_DM_T2_MERGE_ENV, amuxDmT2MergeEnabled, amuxDmT2MergeGate, amuxDmT2MergePatchPaths,
-  amuxDmT2MergeReadyVerdict, amuxDmT2MergeRoomBesideLine,
+  AMUX_DM_T2_MERGE_ENV, amuxDmT2MergeChangeVerdict, amuxDmT2MergeEnabled, amuxDmT2MergeGate,
+  amuxDmT2MergePatchPaths, amuxDmT2MergeReadyVerdict, amuxDmT2MergeRoomBesideLine,
 } from "../lib/amux/dmT2MergeCore.ts";
 import { decideEngineeringAgentDmApprovedMerge, decideEngineeringAgentMergedPr } from "../lib/engineeringAgentPrApprovalCore.ts";
 import { createQaReleaseMergeLaneAppPorts } from "../lib/qaReleaseMergeLaneAppClient.ts";
 import {
   QA_RELEASE_MERGE_LANE_GATE_PATTERNS, judgeQaReleaseMergeLaneExclusion, qaReleaseDmApprovedHumanPaths,
-  qaReleaseMergeLaneExcludingFiles,
+  qaReleaseDmMergeAllowed, qaReleaseMergeLaneExcludingFiles,
 } from "../lib/qaReleaseMergeLaneExclusionCore.ts";
 import { qaReleaseDmApprovedPull, runQaReleaseMergeLaneRound } from "../lib/qaReleaseMergeLaneServiceCore.ts";
 
@@ -28,34 +28,45 @@ test("the switch is off unless set to exactly enabled", () => {
   assert.equal(amuxDmT2MergeEnabled({ [AMUX_DM_T2_MERGE_ENV]: "enabled" }), true);
 });
 
-test("the gate leaves every irreversible path, and every merge lane gate file, to a person", () => {
+test("only a change wholly inside the allow list takes the automatic path; anything else is a person's", () => {
+  // Review r-20261113-134019-5d8f82: the three files it named, and every lib/, agent and API path.
   const human = [
-    "prisma/migrations/20261113200000_x/migration.sql", "prisma/schema.prisma",
-    "lib/modelPricing.ts", "lib/modelPricingDb.ts", "lib/creditLedger.ts", "lib/credits/x.ts",
-    "lib/billingPriceCatalog.ts", "lib/planChangeService.ts", "app/api/billing/checkout/route.ts",
-    "lib/models.ts", "lib/chatCostGuardrails.ts", "lib/conversationProduct.ts", "lib/emailLogin.ts",
-    "lib/adminAuth.ts", "lib/adminAuthCore.ts", "lib/auth.ts", "app/api/auth/[...nextauth]/route.ts",
-    "lib/mcpConnectorSecrets.ts", "lib/adminAudit.ts", "lib/adminAuditIntegrityCore.ts",
-    "lib/adminAuditSystemActors.ts", "lib/autoRouterOptimizerSystemAudit.ts", "lib/amux/auditContract.ts",
-    "lib/retentionPolicyCore.ts", "lib/emailSnapshotRetention.ts", "lib/accountDeletion.ts",
-    ".github/workflows/ci.yml", ".github/actions/setup/action.yml", "package.json", "tsconfig.json",
-    "next.config.ts", "AGENTS.md", "CLAUDE.md", "docs/policy/qa-release-agent.md", "lib/agentAuthorityFiles.ts",
-    // Case never hides one.
-    "LIB/ModelPricing.ts", "Prisma/Schema.prisma",
+    "app/api/memories/delete-all/route.ts", "lib/providerCostBudget.ts", "lib/stripePromotionProvisioning.ts",
+    "lib/amux/dmT2MergeCore.ts", "lib/amux/x/y.ts", "lib/engineeringAgentPrObserver.ts", "lib/engineeringAgentStore.ts",
+    "app/api/chat/route.ts", "app/api/x/page.tsx", "lib/ordinary.ts", "packages/x/index.ts", "types/x.d.ts",
+    "prisma/migrations/20261113200000_x/migration.sql", "prisma/schema.prisma", "scripts/x.mjs", "middleware.ts",
+    // Inside the allow list and still a person's.
+    "docs/policy/amux-decision-maker.md", "docs/ui-contracts/typography.md", "docs/agents/agents-reference.md",
+    "tests/agentAuthorityFiles.test.mjs", "tests/engineeringAgentStore.test.mjs", "tests/amuxDmT2MergeCore.test.mjs",
+    "tests/billingPolicy.test.mjs", "tests/mobileComposerInvariant.test.mjs", "tests/fooContract.test.ts",
+    "components/admin/AdminShell.tsx", "app/(site)/(application)/admin/page.tsx",
+    "app/(site)/x/route.ts", "app/(site)/x/actions.ts", "app/globals.css",
+    // The lane's own gate files, whatever list they sit beside.
+    "package.json", ".github/workflows/ci.yml", "AGENTS.md",
+    // Case never slips one through.
+    "Tests/x.test.mjs", "Components/X.tsx", "DOCS/POLICY/x.md",
   ];
   for (const path of human) {
-    assert.deepEqual(qaReleaseDmApprovedHumanPaths([path]), [path], path);
-    assert.deepEqual(amuxDmT2MergeGate([path]), { pass: false, reason: "irreversible_path", paths: [path] }, path);
+    assert.equal(qaReleaseDmMergeAllowed(path), false, path);
+    assert.deepEqual(amuxDmT2MergeGate([path]), { pass: false, reason: "outside_dm_merge_allowlist", paths: [path] }, path);
   }
-  // The merge lane's own gate list is all in it.
+  // The lane's gate files are all a person's.
   for (const pattern of QA_RELEASE_MERGE_LANE_GATE_PATTERNS) {
     const sample = pattern.replace("/**", "/x/y.ts").replace("*", "x");
     assert.equal(qaReleaseDmApprovedHumanPaths([sample]).length, 1, pattern);
   }
-  const ordinary = ["lib/amux/dmT2MergeCore.ts", "components/chat/ChatInput.tsx", "tests/x.test.mjs",
-    "docs/policy/amux-decision-maker.md", "lib/engineeringAgentPrObserver.ts", "scripts/x.mjs"];
-  assert.deepEqual(qaReleaseDmApprovedHumanPaths(ordinary), []);
-  assert.deepEqual(amuxDmT2MergeGate(ordinary), { pass: true });
+  // A test the policy documents name, when the caller read them.
+  assert.equal(qaReleaseDmMergeAllowed("tests/chatComposer.test.mjs", ["tests/chatComposer.test.mjs"]), false);
+  const allowed = ["tests/chatComposer.test.mjs", "tests/server-contract/chat-route.test.ts", "docs/guides/x.md",
+    "docs/ops/x.md", "locales/en.ts", "locales/ko.ts", "components/chat/MessageBubble.tsx",
+    "app/(site)/(application)/chat/page.tsx", "app/(site)/layout.tsx", "app/(site)/x/loading.tsx",
+    "app/(site)/x/error.tsx"];
+  for (const path of allowed) assert.equal(qaReleaseDmMergeAllowed(path), true, path);
+  assert.deepEqual(qaReleaseDmApprovedHumanPaths(allowed), []);
+  assert.deepEqual(amuxDmT2MergeGate(allowed), { pass: true }, "tests, docs, locales and components only");
+  // One path outside leaves the whole change to a person.
+  assert.deepEqual(amuxDmT2MergeGate([...allowed, "lib/providerCostBudget.ts"]),
+    { pass: false, reason: "outside_dm_merge_allowlist", paths: ["lib/providerCostBudget.ts"] });
   // A path that cannot be judged, or no paths at all, goes to a person.
   assert.deepEqual(amuxDmT2MergeGate(["../etc/passwd"]).pass, false);
   assert.deepEqual(amuxDmT2MergeGate(null), { pass: false, reason: "paths_unreadable", paths: [] });
@@ -64,11 +75,11 @@ test("the gate leaves every irreversible path, and every merge lane gate file, t
 
 test("a patch names both sides of a rename, and a patch with no file names nothing", () => {
   const patch = [
-    "diff --git a/lib/x.ts b/lib/x.ts", "@@ -1 +1 @@", "-a", "+b",
-    "diff --git a/lib/old.ts b/lib/modelPricing.ts", "similarity index 90%",
+    "diff --git a/components/X.tsx b/components/X.tsx", "@@ -1 +1 @@", "-a", "+b",
+    "diff --git a/components/Old.tsx b/lib/modelPricing.ts", "similarity index 90%",
   ].join("\n");
-  assert.deepEqual(amuxDmT2MergePatchPaths(patch), ["lib/x.ts", "lib/old.ts", "lib/modelPricing.ts"]);
-  assert.equal(amuxDmT2MergeGate(amuxDmT2MergePatchPaths(patch)).reason, "irreversible_path");
+  assert.deepEqual(amuxDmT2MergePatchPaths(patch), ["components/X.tsx", "components/Old.tsx", "lib/modelPricing.ts"]);
+  assert.equal(amuxDmT2MergeGate(amuxDmT2MergePatchPaths(patch)).reason, "outside_dm_merge_allowlist");
   assert.equal(amuxDmT2MergePatchPaths("no diff here"), null);
   assert.equal(amuxDmT2MergePatchPaths(null), null);
 });
@@ -87,7 +98,7 @@ test("a pull request read fresh is marked ready only as the Decision Maker appro
   const approved = { prNumber: 42, headRef: REF, approvedHeadSha: HEAD, approvedDiffDigest: DIFF };
   const pull = (over = {}) => ({ open: true, draft: true, base: "develop", head: REF, headSha: HEAD, ...over });
   const change = (over = {}) => ({ state: "open", baseRef: "develop", headRef: REF, headSha: HEAD, diffDigest: DIFF,
-    changedFiles: ["lib/x.ts"], ...over });
+    changedFiles: ["components/X.tsx"], ...over });
   const verdict = (p = pull(), c = change()) => amuxDmT2MergeReadyVerdict({ approved, pull: p, change: c });
   assert.deepEqual(verdict(), { verdict: "ready" });
   assert.deepEqual(verdict(pull({ draft: false })), { verdict: "already_ready" });
@@ -103,8 +114,18 @@ test("a pull request read fresh is marked ready only as the Decision Maker appro
   assert.deepEqual(verdict(pull(), change({ diffDigest: null })), { verdict: "skip", reason: "diff_unreadable" });
   assert.deepEqual(verdict(pull(), change({ diffDigest: "e".repeat(64) })), { verdict: "skip", reason: "diff_changed" });
   assert.deepEqual(verdict(pull(), change({ changedFiles: null })), { verdict: "skip", reason: "paths_unreadable", paths: [] });
-  assert.deepEqual(verdict(pull(), change({ changedFiles: ["lib/x.ts", "prisma/schema.prisma"] })),
-    { verdict: "skip", reason: "irreversible_path", paths: ["prisma/schema.prisma"] });
+  assert.deepEqual(verdict(pull(), change({ changedFiles: ["components/X.tsx", "prisma/schema.prisma"] })),
+    { verdict: "skip", reason: "outside_dm_merge_allowlist", paths: ["prisma/schema.prisma"] });
+  // The change alone, as the lane's list reads it: the approved digest holds, any other or none does not.
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change() }), { holds: true });
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change({ diffDigest: "e".repeat(64) }) }),
+    { holds: false, reason: "diff_changed" });
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change({ diffDigest: null }) }),
+    { holds: false, reason: "diff_unreadable" });
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change({ changedFiles: ["lib/providerCostBudget.ts"] }) }),
+    { holds: false, reason: "outside_dm_merge_allowlist", paths: ["lib/providerCostBudget.ts"] });
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change({ state: "closed" }) }),
+    { holds: false, reason: "pull_closed" });
   // Only the engineering agent's own branch.
   assert.equal(amuxDmT2MergeReadyVerdict({ approved: { ...approved, headRef: "claude/to-develop/x" },
     pull: pull({ head: "claude/to-develop/x" }), change: change({ headRef: "claude/to-develop/x" }) }).verdict, "skip");
@@ -133,7 +154,7 @@ test("the observer's second basis: the lane's own merge of exactly the approved 
     mergedByApprover: false, baseRef: "develop", headVerified: true }), "merged_without_approval");
 });
 
-const inputs = (over = {}) => ({ headBranch: REF, changedFiles: [{ path: "lib/x.ts" }], changedFilesComplete: true,
+const inputs = (over = {}) => ({ headBranch: REF, changedFiles: [{ path: "components/X.tsx" }], changedFilesComplete: true,
   policyTestPaths: [], agentOwnPatterns: [], ...over });
 
 test("the merge lane takes an engineering branch only on the app's report, and still leaves its human paths", () => {
@@ -145,21 +166,26 @@ test("the merge lane takes an engineering branch only on the app's report, and s
     assert.deepEqual(judgeQaReleaseMergeLaneExclusion(inputs({ headBranch, dmApproved: true })).reasons, ["excluded_branch"], headBranch);
   }
   // Every other rule still holds.
-  assert.deepEqual(judgeQaReleaseMergeLaneExclusion(inputs({ dmApproved: true, changedFiles: [{ path: "lib/creditLedger.ts" }] })),
-    { excluded: true, reasons: ["dm_human_path"] });
+  for (const path of ["lib/creditLedger.ts", "lib/providerCostBudget.ts", "lib/stripePromotionProvisioning.ts",
+    "app/api/memories/delete-all/route.ts", "lib/amux/x.ts", "lib/engineeringAgentStore.ts", "lib/ordinary.ts"]) {
+    assert.deepEqual(judgeQaReleaseMergeLaneExclusion(inputs({ dmApproved: true, changedFiles: [{ path }] })),
+      { excluded: true, reasons: ["dm_outside_allowlist"] }, path);
+  }
   assert.deepEqual(judgeQaReleaseMergeLaneExclusion(inputs({ dmApproved: true, changedFiles: [{ path: "package.json" }] })),
-    { excluded: true, reasons: ["dm_human_path", "gate_path"] });
-  assert.deepEqual(judgeQaReleaseMergeLaneExclusion(inputs({ dmApproved: true, changedFiles: [{ path: "lib/x.ts", previousPath: "prisma/schema.prisma" }] })),
-    { excluded: true, reasons: ["dm_human_path"] });
+    { excluded: true, reasons: ["dm_outside_allowlist", "gate_path"] });
+  assert.deepEqual(judgeQaReleaseMergeLaneExclusion(inputs({ dmApproved: true, changedFiles: [{ path: "components/X.tsx", previousPath: "lib/x.ts" }] })),
+    { excluded: true, reasons: ["dm_outside_allowlist"] });
+  assert.deepEqual(judgeQaReleaseMergeLaneExclusion(inputs({ dmApproved: true, changedFiles: [{ path: "tests/x.test.mjs" },
+    { path: "docs/guides/x.md" }, { path: "locales/en.ts" }, { path: "components/X.tsx" }] })), { excluded: false });
   assert.deepEqual(judgeQaReleaseMergeLaneExclusion(inputs({ dmApproved: true, changedFilesComplete: false })),
     { excluded: true, reasons: ["changed_files_incomplete"] });
-  assert.deepEqual(judgeQaReleaseMergeLaneExclusion(inputs({ dmApproved: true, policyTestPaths: ["lib/x.ts"] })),
-    { excluded: true, reasons: ["policy_test"] });
+  assert.deepEqual(judgeQaReleaseMergeLaneExclusion(inputs({ dmApproved: true, changedFiles: [{ path: "tests/x.test.mjs" }],
+    policyTestPaths: ["tests/x.test.mjs"] })), { excluded: true, reasons: ["dm_outside_allowlist", "policy_test"] });
   // A pull request the app did not report keeps its old verdict, irreversible paths and all.
   assert.deepEqual(judgeQaReleaseMergeLaneExclusion(inputs({ headBranch: "claude/to-develop/x", changedFiles: [{ path: "lib/creditLedger.ts" }] })),
     { excluded: false });
   assert.deepEqual(qaReleaseMergeLaneExcludingFiles(inputs({ dmApproved: true, changedFiles: [{ path: "lib/auth.ts" }] })),
-    [{ path: "lib/auth.ts", reasons: ["dm_human_path"] }]);
+    [{ path: "lib/auth.ts", reasons: ["dm_outside_allowlist"] }]);
 });
 
 test("the app's report counts only for the same number, head and branch, into develop", () => {
@@ -201,23 +227,26 @@ test("a lane round merges a reported engineering pull request and leaves an unre
   const pull = { number: 42, createdAt: "2026-11-13T00:00:00Z", baseRefName: "develop", headRefName: REF,
     headRefOid: HEAD, isDraft: false, mergeable: "MERGEABLE", state: "OPEN", statusCheckRollup: GREEN,
     merged: false, mergeCommitSha: null };
-  const run = async (state) => {
+  const run = async (state, answers = {}) => {
     const issued = [];
+    const merges = [];
     const ports = {
       app: {
         readState: async () => ({ dbNowMs: 1, latched: false, openAttempt: null, ...state }),
-        issue: async (request) => { issued.push(request); return { issued: false, reason: "lane_off" }; },
-        consume: async () => ({ consumed: false }), report: async () => ({ recorded: true }),
+        issue: async (request) => { issued.push(request); return answers.issue ?? { issued: false, reason: "lane_off" }; },
+        consume: async () => answers.consume ?? { consumed: false }, report: async () => ({ recorded: true }),
       },
       github: {
         listOpenDevelopPulls: async () => [pull],
         exclusionInputs: async (p) => inputs({ headBranch: p.headRefName }),
-        readPull: async () => pull, merge: async () => ({ result: "refused" }), onDevelop: async () => true,
+        readPull: async () => pull,
+        merge: async (number, headSha) => { merges.push([number, headSha]); return { result: "merged", sha: "9".repeat(40) }; },
+        onDevelop: async () => true,
         commitsContaining: async () => new Set(), cancelledCommits: async () => new Set(),
       },
       railway: { developDeployments: async () => [] },
     };
-    return { outcome: await runQaReleaseMergeLaneRound(ENV, ports), issued };
+    return { outcome: await runQaReleaseMergeLaneRound(ENV, ports), issued, merges };
   };
   const reported = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] });
   assert.deepEqual(reported.issued, [{ pullRequestNumber: 42, headSha: HEAD }]);
@@ -226,4 +255,8 @@ test("a lane round merges a reported engineering pull request and leaves an unre
   assert.equal(unreported.outcome.outcome, "idle");
   const moved = await run({ dmApproved: [{ number: 42, headSha: OTHER, headRef: REF }] });
   assert.deepEqual(moved.issued, [], "a report of another head is not this one");
+  // Merged, the call pins the approved head: a head that moved since is refused by GitHub.
+  const merged = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] },
+    { issue: { issued: true, attemptId: "att-1" }, consume: { consumed: true } });
+  assert.deepEqual(merged.merges, [[42, HEAD]]);
 });

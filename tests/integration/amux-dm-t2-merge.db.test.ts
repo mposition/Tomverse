@@ -89,7 +89,8 @@ async function approve(card: Card, env: Record<string, string | undefined>) {
       now: context.dbNow, env }));
 }
 
-const ORDINARY = "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n@@ -1 +1 @@\n-a\n+b\n";
+/** A change wholly inside the Decision Maker merge allow list. */
+const ORDINARY = "diff --git a/components/Ordinary.tsx b/components/Ordinary.tsx\n@@ -1 +1 @@\n-a\n+b\n";
 
 /** GitHub as the step reads it: the draft as approved unless told otherwise. */
 function github(card: Card, over: { draft?: boolean; headSha?: string; files?: string[]; markReady?: () => void } = {}) {
@@ -101,7 +102,7 @@ function github(card: Card, over: { draft?: boolean; headSha?: string; files?: s
         number: prNumber, nodeId: "PR_node", title: "t", base: "develop", head: card.ref,
         headSha: over.headSha ?? HEAD, draft: over.draft ?? true, fork: false, labels: [] } }),
       change: async () => ({ state: "open" as const, baseRef: "develop", headRef: card.ref,
-        headSha: over.headSha ?? HEAD, diffDigest: DIFF, changedFiles: over.files ?? ["lib/ordinary.ts"] }),
+        headSha: over.headSha ?? HEAD, diffDigest: DIFF, changedFiles: over.files ?? ["components/Ordinary.tsx"] }),
       markReady: async (pull: { number: number }) => { writes.push(pull.number); over.markReady?.(); },
     },
   };
@@ -166,7 +167,7 @@ test("a write whose answer is unknown is not retried; a moved head, a changed fi
     assert.equal((await readyAudits(tx, card.settlementId)).length, 1, "audited before the write");
 
     const cases: Array<[{ headSha?: string; files?: string[] }, string]> = [[{ headSha: "a".repeat(40) }, "head_moved"],
-      [{ files: ["lib/ordinary.ts", "lib/creditLedger.ts"] }, "irreversible_path"]];
+      [{ files: ["components/Ordinary.tsx", "lib/providerCostBudget.ts"] }, "outside_dm_merge_allowlist"]];
     for (const [over, reason] of cases) {
       const moved = github(card, over);
       const step = await runAmuxDmT2MergeReadyStep({ drafts: draftsOf(card), room: true, ports: moved.ports, env: ON });
@@ -192,7 +193,7 @@ test("an approval of a change a revert cannot undo is left to the person, and no
     assert.deepEqual(await approve(card, ON), { applied: false, outcome: "handed_off" });
     const [row] = await tx.$queryRaw<Array<{ state: string; handoffReason: string | null; approvedHeadSha: string | null }>>`
       SELECT "state", "handoffReason", "approvedHeadSha" FROM "AmuxDmOwnerSettlement" WHERE "id" = ${card.settlementId}`;
-    assert.deepEqual(row, { state: "open", handoffReason: "irreversible_path", approvedHeadSha: null });
+    assert.deepEqual(row, { state: "open", handoffReason: "outside_dm_merge_allowlist", approvedHeadSha: null });
     const handed = await tx.adminAuditLog.findFirst({ where: { targetId: card.settlementId,
       action: "amux.dm_owner_settlement.handed_off" }, select: { metadata: true } });
     assert.deepEqual((handed?.metadata as { paths?: string[] }).paths, ["prisma/schema.prisma"]);
@@ -201,7 +202,9 @@ test("an approval of a change a revert cannot undo is left to the person, and no
     assert.deepEqual(await runAmuxDmT2MergeReadyStep({ drafts: draftsOf(card), room: true, ports: step.ports, env: ON }),
       { outcome: "none" });
     assert.deepEqual(step.writes, []);
-    assert.ok(!(await readAmuxDmT2MergeLanePulls(ON)).some((entry) => entry.number === card.prNumber));
+    assert.ok(!(await readAmuxDmT2MergeLanePulls(ON, { change: async () => ({ state: "open" as const,
+      baseRef: "develop", headRef: card.ref, headSha: HEAD, diffDigest: DIFF, changedFiles: ["prisma/schema.prisma"] }) }))
+      .some((entry) => entry.number === card.prNumber));
   });
   // Switch off, the same approval is recorded exactly as before.
   await lifecycle(async (tx) => {
@@ -243,7 +246,7 @@ test("CI admission's round marks the approved draft ready after its line, and on
         };
         const dmT2MergePorts = { pull: github.pull, markReady: github.markReady,
           change: async () => ({ state: "open" as const, baseRef: "develop", headRef: card.ref, headSha: HEAD,
-            diffDigest: DIFF, changedFiles: ["lib/ordinary.ts"] }) };
+            diffDigest: DIFF, changedFiles: ["components/Ordinary.tsx"] }) };
         return { github, dmT2MergePorts, readied };
       };
 
@@ -284,11 +287,27 @@ test("the merge lane's list and the observer's read follow the approval while it
   await lifecycle(async (tx) => {
     const card = await reviewDraft(tx, ORDINARY);
     const { readAmuxDmT2MergeLanePulls, readAmuxDmT2MergeObserved } = await services();
-    assert.ok(!(await readAmuxDmT2MergeLanePulls(ON)).some((entry) => entry.number === card.prNumber),
-      "nothing before the approval");
+    // The lane's list reads the pull request's change from GitHub every time (review r-20261113-134019-5d8f82).
+    const reads: number[] = [];
+    const gh = (over: Record<string, unknown> | "throw" = {}) => ({ change: async (prNumber: number) => {
+      reads.push(prNumber);
+      if (over === "throw") throw new Error("http_error");
+      return { state: "open" as const, baseRef: "develop", headRef: card.ref, headSha: HEAD, diffDigest: DIFF,
+        changedFiles: ["components/Ordinary.tsx"], ...over };
+    } });
+    const mine = async (deps = gh()) => (await readAmuxDmT2MergeLanePulls(ON, deps))
+      .filter((entry) => entry.number === card.prNumber);
+    assert.deepEqual(await mine(), [], "nothing before the approval");
     assert.deepEqual(await approve(card, ON), { applied: true, outcome: "approved" });
-    const listed = (await readAmuxDmT2MergeLanePulls(ON)).filter((entry) => entry.number === card.prNumber);
-    assert.deepEqual(listed, [{ number: card.prNumber, headSha: HEAD, headRef: card.ref }]);
+    assert.deepEqual(await mine(), [{ number: card.prNumber, headSha: HEAD, headRef: card.ref }], "the same diff: listed");
+    assert.ok(reads.includes(card.prNumber));
+    assert.deepEqual(await mine(gh({ diffDigest: "e".repeat(64) })), [],
+      "a diff that moved with develop, or a person's ready pull request that changed: not listed");
+    assert.deepEqual(await mine(gh({ diffDigest: null })), [], "a diff that cannot be read: not listed");
+    assert.deepEqual(await mine(gh("throw")), [], "a read that fails: not listed");
+    assert.deepEqual(await mine(gh({ changedFiles: ["components/Ordinary.tsx", "lib/providerCostBudget.ts"] })), [],
+      "a file outside the allow list: not listed");
+    assert.deepEqual(await mine(gh({ headSha: "a".repeat(40) })), [], "another head: not listed");
 
     const merge = "e".repeat(40);
     const facts = await readAmuxDmT2MergeObserved({ bindingId: card.bindingId, prNumber: card.prNumber, headSha: HEAD,
@@ -302,6 +321,6 @@ test("the merge lane's list and the observer's read follow the approval while it
 
     // A Task that moved is not the lane's any more.
     await tx.amuxWorkItem.update({ where: { id: card.taskId }, data: { status: "blocked", revision: { increment: 1 } } });
-    assert.ok(!(await readAmuxDmT2MergeLanePulls(ON)).some((entry) => entry.number === card.prNumber));
+    assert.deepEqual(await mine(), []);
   });
 });

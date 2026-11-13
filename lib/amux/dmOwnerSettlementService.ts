@@ -472,8 +472,8 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
     // The pull request it was asked about is no longer the open one of this run.
     if (!facts) return cancel("binding_moved");
     // Behind the develop merge switch (owner decision 2026-11-13): an approval
-    // that would let the merge lane take a change a revert cannot undo -- or
-    // whose paths cannot be read -- is not recorded; the person merges it.
+    // of a change with any path outside the merge allow list -- or whose paths
+    // cannot be read -- is not recorded; the person merges it.
     if (amuxDmT2MergeEnabled(input.env ?? process.env)) {
       const gate = amuxDmT2MergeGate(amuxDmT2MergePatchPaths(facts.patchBody));
       if (!gate.pass) return handOff(gate.reason, { bindingId: row.bindingId, paths: gate.paths });

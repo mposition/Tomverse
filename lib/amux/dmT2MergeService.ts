@@ -5,7 +5,7 @@ import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerSwitches, readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import {
-  AMUX_DM_T2_MERGE_HEAD, amuxDmT2MergeEnabled, amuxDmT2MergeReadyVerdict,
+  AMUX_DM_T2_MERGE_HEAD, amuxDmT2MergeChangeVerdict, amuxDmT2MergeEnabled, amuxDmT2MergeReadyVerdict,
   type AmuxDmT2MergeChangeNow,
 } from "@/lib/amux/dmT2MergeCore";
 import { readAmuxDmT2MergeApprovals, readAmuxDmT2MergeObservedFacts } from "@/lib/amux/dmT2MergeRead";
@@ -33,22 +33,45 @@ import { readEngineeringAgentPullChange } from "@/lib/engineeringAgentGitHubRead
  */
 
 export const AMUX_DM_T2_MERGE_READY_ACTION = "amux.dm_t2_merge.ready_requested";
-const LANE_LIST_LIMIT = 50;
+/** Approvals the lane hears of per state read: each costs a few GitHub reads inside the lane's 50 s call. */
+const LANE_LIST_LIMIT = 5;
+/** The GitHub reads of the lane's list start within this much of the call, well inside its 50 s budget. */
+const LANE_LIST_READ_BUDGET_MS = 15_000;
 
 type Env = Readonly<Record<string, string | undefined>>;
 
 /**
  * The pull requests the merge lane may take although their branch is the
- * engineering agent's: each at the one head and branch approved. Empty while
- * the switch is off or the kill switch is not off.
+ * engineering agent's: each at the one head and branch approved, its change
+ * read again from GitHub now (review r-20261113-134019-5d8f82) -- diff digest
+ * the approved one, every path on the allow list
+ * (amuxDmT2MergeChangeVerdict). A pull request a person made ready, or whose
+ * merge base moved with develop, is listed only while that still holds; one
+ * that cannot be read is not listed. Empty while the switch is off or the
+ * kill switch is not off. The GitHub reads run outside the transaction, at
+ * most LANE_LIST_LIMIT of them, within the lane's state call.
  */
-export async function readAmuxDmT2MergeLanePulls(env: Env = process.env) {
+export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
+  change?: (prNumber: number) => Promise<AmuxDmT2MergeChangeNow>;
+} = {}) {
   if (!amuxDmT2MergeEnabled(env)) return [];
-  return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeLaneRead, async (tx) => {
+  const rows = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeLaneRead, async (tx) => {
     if ((await readDecisionMakerSwitches(tx)).killSwitch !== false) return [];
-    const rows = await readAmuxDmT2MergeApprovals(tx, { limit: LANE_LIST_LIMIT });
-    return rows.map((row) => ({ number: row.prNumber, headSha: row.approvedHeadSha, headRef: row.headRef }));
+    return readAmuxDmT2MergeApprovals(tx, { limit: LANE_LIST_LIMIT });
   });
+  const change = deps.change ?? ((prNumber: number) => readEngineeringAgentPullChange(prNumber));
+  const listed: Array<{ number: number; headSha: string; headRef: string }> = [];
+  // What is not read in time is not listed this round; the lane asks again in ten minutes.
+  const stopAt = Date.now() + LANE_LIST_READ_BUDGET_MS;
+  for (const row of rows) {
+    if (Date.now() > stopAt) break;
+    const now = await change(row.prNumber).catch(() => null);
+    if (now === null) continue;
+    const held = amuxDmT2MergeChangeVerdict({ change: now, approved: { prNumber: row.prNumber,
+      headRef: row.headRef, approvedHeadSha: row.approvedHeadSha, approvedDiffDigest: row.approvedDiffDigest } });
+    if (held.holds) listed.push({ number: row.prNumber, headSha: row.approvedHeadSha, headRef: row.headRef });
+  }
+  return listed;
 }
 
 /** The observer's read of a merged binding's pull request; null while the switch is off. */
