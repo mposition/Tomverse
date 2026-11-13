@@ -25,6 +25,30 @@ export const discoveryDraftRequest = (search: string) => {
 };
 
 /**
+ * What a Google direct image request needs, which the generic template left
+ * out (2026-11-13: a runtime gemini-nano-banana-2.1 row could not have been
+ * called). The request builder serves 1K square only and refuses a profile
+ * with no output limit; the API accepts only image/jpeg; 2,048 is the limit
+ * the measured bound in GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS
+ * (lib/imageModelRegistry.ts) holds for, and a Google model is bounded only
+ * while its request sends exactly that. Kept here as literals because this
+ * module is dependency-free for the client panels.
+ */
+const GOOGLE_RUNTIME_PROFILE = {
+  sizes: ["1024x1024"],
+  outputMimeTypes: ["image/jpeg", "image/png"],
+  deliveryMimeType: "image/jpeg",
+  maxOutputTokens: 2_048,
+  provenance: ["synthid"],
+} as const;
+
+/**
+ * Qwen's request maps 1024x1024 only (lib/qwenImageRequest.ts); a rectangle
+ * builds no request and every generation of it would fail after charging.
+ */
+const QWEN_RUNTIME_SIZES = ["1024x1024"] as const;
+
+/**
  * The starting profile for a runtime image model handed over from the
  * discovery queue. Every field is the operator's to correct; the schema and
  * the judge decide whether it can serve.
@@ -43,8 +67,19 @@ export const runtimeImageProfileTemplate = (
   sizes: choices.sizes?.length ? [...choices.sizes] : ["1024x1024"],
   qualities: choices.qualities?.length ? [...choices.qualities] : ["low", "medium", "high"],
   latencyClass: "balanced",
-  provenance: [],
-  outputMimeTypes: ["image/png"],
+  provenance: [] as string[],
+  outputMimeTypes: ["image/png"] as string[],
+  ...(provider === "qwen" ? { sizes: [...QWEN_RUNTIME_SIZES] } : {}),
+  // A Google request has one shape whatever the form chose.
+  ...(provider === "google"
+    ? {
+        sizes: [...GOOGLE_RUNTIME_PROFILE.sizes],
+        outputMimeTypes: [...GOOGLE_RUNTIME_PROFILE.outputMimeTypes],
+        deliveryMimeType: GOOGLE_RUNTIME_PROFILE.deliveryMimeType,
+        maxOutputTokens: GOOGLE_RUNTIME_PROFILE.maxOutputTokens,
+        provenance: [...GOOGLE_RUNTIME_PROFILE.provenance],
+      }
+    : {}),
 });
 
 /** The sizes and qualities a runtime image profile may list (the profile schema's enums). */
