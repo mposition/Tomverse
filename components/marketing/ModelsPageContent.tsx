@@ -47,7 +47,7 @@ const copy = {
     eyebrow: "모델",
     title: "질문에 맞는 모델을 찾아보세요.",
     description: "이용 시작 플랜, 기본 크레딧과 이미지 입력 지원을 비교해 보세요. 비용 차이가 성능 우열을 뜻하지는 않습니다. 현재 제공 여부와 사용량은 앱의 모델 선택기에서 확인할 수 있습니다.",
-    mobileDescription: "Chat과 Review의 모델, 기본 크레딧과 이용 플랜을 비교하세요.",
+    mobileDescription: "채팅과 리뷰에서 사용할 모델, 기본 크레딧과 이용 플랜을 비교하세요.",
     mobileCreditNote: "모델별 ‘짧은 요청의 기본 크레딧’ 숫자로 기본 비용을 비교하세요.",
     mobileUsageDetails: "크레딧·이용 안내 자세히 보기",
     provider: "공급자",
