@@ -6,6 +6,24 @@ export type ArtifactToolRejectionCode =
   | "spec_rejected"
   | "limit_exceeded";
 
+/**
+ * What a rejected call can add to its line: a fixed failure code from the
+ * code (never the detail sentence, which may quote the input) and how many of
+ * the turn's files were listed to the model against how many were read. A
+ * gap between the two is a server fault the model cannot see.
+ */
+export type ArtifactToolRejectionDiagnostics = {
+  failure?: string;
+  listedAttachments?: number;
+  readAttachments?: number;
+};
+
+const FAILURE_CODE = /^[A-Z][A-Z_]{0,39}$/;
+const count = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 999
+    ? value
+    : undefined;
+
 /** Per-turn diagnostic bound, independent of artifact count and step scheduling. */
 export const MAX_ARTIFACT_REJECTION_LOGS_PER_TURN = 16;
 
@@ -58,7 +76,8 @@ export class ArtifactToolRejectionLog {
     toolCallId: string | undefined,
     toolName: string,
     input: unknown,
-    rejectionCode: ArtifactToolRejectionCode
+    rejectionCode: ArtifactToolRejectionCode,
+    diagnostics: ArtifactToolRejectionDiagnostics = {}
   ): void {
     if (!this.registeredNames.has(toolName)) return;
     if (this.recordedCount >= MAX_ARTIFACT_REJECTION_LOGS_PER_TURN) return;
@@ -71,6 +90,15 @@ export class ArtifactToolRejectionLog {
         toolName,
         requestedFormat: requestedFormat(input),
         rejectionCode,
+        ...(typeof diagnostics.failure === "string" && FAILURE_CODE.test(diagnostics.failure)
+          ? { failure: diagnostics.failure }
+          : {}),
+        ...(count(diagnostics.listedAttachments) !== undefined
+          ? { listedAttachments: count(diagnostics.listedAttachments) }
+          : {}),
+        ...(count(diagnostics.readAttachments) !== undefined
+          ? { readAttachments: count(diagnostics.readAttachments) }
+          : {}),
       }));
     } catch {
       // Logging is best-effort; never turn a file rejection into a chat error.
