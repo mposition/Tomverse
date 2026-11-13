@@ -370,6 +370,7 @@ const translations = {
 const concept = (id, extra = {}) => ({
   id,
   feature: "chat",
+  format: { c1: "person", c2: "laptop", c3: "object" }[id] ?? "diagram",
   device: `a commuter on a train picks a model on a phone ${id}`,
   prompt_en: `A candid photo of a commuter on a morning train holding a phone in a natural grip, the screen showing a chat app with model chips. ${"Soft window light, shallow depth of field, real people around. ".repeat(4)}`,
   texts,
@@ -923,4 +924,167 @@ test("Chinese words are spaced after a full stop and pass the Guard's hygiene ch
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// --- the app screen on a green display (owner 2026-11-13) --------------------
+
+const withDisplay = (extra = {}) =>
+  concept("c2", {
+    prompt_en: `${concept("c2").prompt_en} The phone's screen is filled edge to edge with flat chroma green #00ff00, evenly lit, completely empty.`,
+    texts: [
+      { role: "headline", text: "Ask AI what to cook tonight" },
+      { role: "screen", ui: "question", text: "What can I cook with eggs and spinach?" },
+      { role: "answer", ui: "answer", text: "A spinach omelette: wilt the spinach, pour in beaten eggs, fold after 3 minutes." },
+      { role: "cta", text: "Start without an account" },
+    ],
+    translations: {
+      ko: [
+        { role: "headline", text: "오늘 저녁 메뉴, AI에게 물어보세요" },
+        { role: "screen", ui: "question", text: "달걀이랑 시금치로 뭘 만들까?" },
+        { role: "answer", ui: "answer", text: "시금치 오믈렛: 시금치를 숨 죽이고 달걀을 부어 3분 뒤 접으세요." },
+        { role: "cta", text: "계정 없이도 바로 시작해 보세요" },
+      ],
+      "zh-Hant": [
+        { role: "headline", text: "今晚吃什麼，問 AI" },
+        { role: "screen", ui: "question", text: "雞蛋和菠菜可以做什麼？" },
+        { role: "answer", ui: "answer", text: "菠菜蛋捲：菠菜炒軟，倒入蛋液，三分鐘後對折。" },
+        { role: "cta", text: "不用帳號也能直接開始" },
+      ],
+      "zh-Hans": [
+        { role: "headline", text: "今晚吃什么，问 AI" },
+        { role: "screen", ui: "question", text: "鸡蛋和菠菜可以做什么？" },
+        { role: "answer", ui: "answer", text: "菠菜蛋卷：菠菜炒软，倒入蛋液，三分钟后对折。" },
+        { role: "cta", text: "不用账号也能直接开始" },
+      ],
+    },
+    ...extra,
+  });
+
+test("words on the green display are few, marked with ui, and asked for as chroma green", () => {
+  const problemsOf = (c) => sortConcepts(conceptsOf(concept("c1"), c), { feature: "chat", history: [], day: DAY, toolDir: tool }).dropped[0]?.problems ?? [];
+  assert.deepEqual(problemsOf(withDisplay()), []);
+  // The display must be asked for as flat green, or code has nowhere to draw.
+  assert.match(problemsOf(withDisplay({ prompt_en: concept("c2").prompt_en })).join(" | "), /#00ff00/u);
+  // A long answer grows the phone (owner 2026-11-13): 120 characters in English, 80 in Korean or Chinese.
+  const long = withDisplay();
+  long.texts = long.texts.map((text) => (text.ui === "answer" ? { ...text, text: "x ".repeat(70).trim() } : text));
+  assert.match(problemsOf(long).join(" | "), /1-120 characters on the display/u);
+  const longKo = withDisplay();
+  longKo.translations = { ...longKo.translations, ko: longKo.translations.ko.map((text) => (text.ui === "answer" ? { ...text, text: "가".repeat(81) } : text)) };
+  assert.match(problemsOf(longKo).join(" | "), /1-80 characters on the display/u);
+  // ui only on a screen or an answer, and the same ui in every language.
+  const onLabel = withDisplay();
+  onLabel.texts = onLabel.texts.map((text, index) => (index === 1 ? { ...text, role: "label" } : text));
+  assert.match(problemsOf(onLabel).join(" | "), /ui is one of title, question, answer, caption, only on a screen or answer/u);
+  const lost = withDisplay();
+  lost.translations = { ...lost.translations, ko: lost.translations.ko.map((text, index) => (index === 1 ? { role: "screen", text: text.text } : text)) };
+  assert.match(problemsOf(lost).join(" | "), /same role, speaker and ui/u);
+});
+
+test("the quadrilateral around a rounded display has its sharp corners", async () => {
+  const { convexHull, enclosingQuad } = await import("../tools/marketing-video/screen-core.mjs");
+  // A 200 x 400 rectangle with 30 px rounded corners, tilted 8 degrees.
+  const points = [];
+  const corner = (cx, cy, from) => {
+    for (let a = from; a <= from + 90; a += 5) points.push([cx + 30 * Math.cos((a * Math.PI) / 180), cy + 30 * Math.sin((a * Math.PI) / 180)]);
+  };
+  corner(230, 430, 0);
+  corner(30, 430, 90);
+  corner(30, 30, 180);
+  corner(230, 30, 270);
+  const turn = (8 * Math.PI) / 180;
+  const tilted = points.map(([x, y]) => [x * Math.cos(turn) - y * Math.sin(turn) + 300, x * Math.sin(turn) + y * Math.cos(turn) + 100]);
+  const quad = enclosingQuad(convexHull(tilted));
+  const expected = [[0, 0], [260, 0], [260, 460], [0, 460]].map(([x, y]) => [x * Math.cos(turn) - y * Math.sin(turn) + 300, x * Math.sin(turn) + y * Math.cos(turn) + 100]);
+  for (const [index, [x, y]] of quad.entries()) {
+    assert.ok(Math.hypot(x - expected[index][0], y - expected[index][1]) < 2, `corner ${index}: ${x},${y} vs ${expected[index]}`);
+  }
+});
+
+test("the app screen is keyed onto the green display, and a finger over it stays in front", { skip }, async () => {
+  const { withPage } = await import("../tools/marketing-video/compose-core.mjs");
+  const { findGreenScreens, setScreen } = await import("../tools/marketing-video/screen-core.mjs");
+  const root = mkdtempSync(join(tmpdir(), "hf-screen-"));
+  try {
+    const input = join(root, "green.png");
+    // A grey room, a tilted green display, and a skin-coloured finger over its right edge.
+    const png = await withPage((page) =>
+      page.evaluate(() => {
+        const canvas = Object.assign(document.createElement("canvas"), { width: 400, height: 500 });
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#9a948c";
+        ctx.fillRect(0, 0, 400, 500);
+        ctx.fillStyle = "#1a1a1a";
+        ctx.beginPath();
+        ctx.moveTo(125, 85);
+        ctx.lineTo(285, 75);
+        ctx.lineTo(300, 395);
+        ctx.lineTo(135, 410);
+        ctx.fill();
+        ctx.fillStyle = "#00ff00";
+        ctx.beginPath();
+        ctx.moveTo(135, 95);
+        ctx.lineTo(275, 86);
+        ctx.lineTo(289, 384);
+        ctx.lineTo(144, 398);
+        ctx.fill();
+        ctx.fillStyle = "#e0a98c";
+        ctx.fillRect(265, 250, 45, 22);
+        return canvas.toDataURL("image/png");
+      }),
+    );
+    writeFileSync(input, Buffer.from(png.split(",")[1], "base64"));
+    const [display] = await findGreenScreens(input);
+    const expected = [[135, 95], [275, 86], [289, 384], [144, 398]];
+    for (const [index, [x, y]] of display.corners.entries()) {
+      assert.ok(Math.hypot(x * 400 - expected[index][0], y * 500 - expected[index][1]) < 4, `corner ${index}`);
+    }
+    const out = join(root, "screen.png");
+    await setScreen({ input, items: [{ kind: "question", text: "What can I cook?" }, { kind: "answer", text: "A spinach omelette, ready in ten minutes." }], locale: "en", out });
+    const finger = await pixelAt(out, 285, 260);
+    assert.deepEqual(finger, [224, 169, 140], "the finger over the display is untouched");
+    const left = await findGreenScreens(out);
+    assert.equal(left.length, 0, "no green display is left");
+    const middle = await pixelAt(out, 210, 330);
+    assert.ok(middle[1] - Math.max(middle[0], middle[2]) < 20, `no green inside the display: ${middle}`);
+    await assert.rejects(setScreen({ input: join(root, "screen.png"), items: [{ kind: "answer", text: "Hi" }], locale: "en", out: join(root, "again.png") }), /no green screen/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a day's concepts are each a different format, and the recent formats are listed newest first", async () => {
+  const { recentFormats } = await import("../tools/marketing-video/concepts-core.mjs");
+  // Owner 2026-11-13: variety, not a person in every ad.
+  assert.equal(check(conceptsOf(concept("c1"), concept("c2"), concept("c3"))), null);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { format: "person" }))), /different format \(person is taken\)/u);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { format: "poster" }))), /format is one of person, phone, laptop, diagram, object/u);
+  const history = [
+    { date: "2026-11-05", format: "object" },
+    { date: "2026-11-07", format: "person" },
+    { date: "2026-11-07", format: "laptop" },
+    { date: "2026-10-20", format: "diagram" },
+    { date: "2026-11-08", format: "person" },
+  ];
+  assert.deepEqual(recentFormats(history, DAY), ["person", "laptop", "object"]);
+});
+
+test("the native editor changes only the Korean and Chinese, and a concept it breaks keeps the writer's words", async () => {
+  const { withNativeCopy } = await import("../tools/marketing-video/concepts-core.mjs");
+  const original = [concept("c1"), concept("c2")];
+  const better = { ...translations, ko: translations.ko.map((text, index) => (index === 0 ? { ...text, text: "GPT, Claude, Gemini 등 AI에게 물어보세요" } : text)) };
+  const edited = withNativeCopy(original, {
+    concepts: [
+      { id: "c1", translations: better, alt: { ko: "출근길 기차에서 휴대폰으로 모델을 고르는 사람.", en: "ignored" } },
+      { id: "c2", translations: { ...translations, ko: translations.ko.map((text) => ({ ...text, text: "지피티에게 물어보세요" })) } },
+    ],
+  });
+  assert.equal(edited[0].translations.ko[0].text, "GPT, Claude, Gemini 등 AI에게 물어보세요");
+  assert.equal(edited[0].alt.ko, "출근길 기차에서 휴대폰으로 모델을 고르는 사람.");
+  assert.equal(edited[0].alt.en, original[0].alt.en, "English is never the editor's");
+  assert.deepEqual(edited[0].texts, original[0].texts);
+  // The caller checks the edit like any concept: the transliterated model name is refused, so c2 keeps its own words.
+  const checked = sortConcepts({ date: "2026-11-08", feature: "chat", concepts: edited }, { feature: "chat", history: [], day: DAY, toolDir: tool });
+  assert.deepEqual(checked.kept.map((c) => c.id), ["c1"]);
+  assert.deepEqual(withNativeCopy(original, null), original, "no edit, no change");
 });
