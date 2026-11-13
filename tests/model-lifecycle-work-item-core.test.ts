@@ -772,22 +772,55 @@ test("a half-written sighting is dropped rather than halved", () => {
   );
 });
 
-test("only an adopted, served add stalled before rollout can be closed as rolled out", async () => {
-  const { isRolloutFinishable, ROLLOUT_FINISHABLE_STATUSES } = await import(
-    "../lib/modelLifecycleWorkItemCore.ts"
-  );
-  assert.deepEqual([...ROLLOUT_FINISHABLE_STATUSES].sort(), ["rollout_pending", "validation_pending"]);
+test("only a served add still open before rollout can be closed as rolled out", async () => {
+  const { isRolloutFinishable, ROLLOUT_FINISHABLE_STATUSES, ROLLOUT_WALK_TO_VALIDATION, workItemTransitionRefusal } =
+    await import("../lib/modelLifecycleWorkItemCore.ts");
+  assert.deepEqual([...ROLLOUT_FINISHABLE_STATUSES].sort(), [
+    "approved",
+    "awaiting_decision",
+    "deferred",
+    "discovered",
+    "implementation_pending",
+    "rollout_pending",
+    "validation_pending",
+  ]);
   const base = { action: "add", status: "validation_pending", servedLive: true };
   assert.equal(isRolloutFinishable(base), true);
   assert.equal(isRolloutFinishable({ ...base, status: "rollout_pending" }), true);
+  // 2026-11-13: an image model turned on in the catalogue leaves its item
+  // `discovered`; it is finishable once the model serves.
+  assert.equal(isRolloutFinishable({ ...base, status: "discovered" }), true);
+  assert.equal(isRolloutFinishable({ ...base, status: "approved" }), true);
   // Registered but not live (disabled, unlisted, or not yet enabled): the
-  // validations are real work, not a stale record.
+  // open item is real work, not a stale record.
+  assert.equal(isRolloutFinishable({ ...base, status: "discovered", servedLive: false }), false);
   assert.equal(isRolloutFinishable({ ...base, servedLive: false }), false);
-  // Undecided, notice owed, closed, or a retirement: other paths own these.
-  for (const status of ["discovered", "approved", "communication_pending", "completed", "closed_no_action"]) {
+  // Notice owed, closed, or a retirement: other paths own these.
+  for (const status of ["communication_pending", "completed", "closed_no_action", "rejected"]) {
     assert.equal(isRolloutFinishable({ ...base, status }), false, status);
   }
   assert.equal(isRolloutFinishable({ ...base, action: "retire" }), false);
+
+  // The walk to validation is made only of transitions the state machine
+  // allows, approval with its decision, and reaches validation_pending from
+  // every open state before it.
+  for (const start of ["discovered", "awaiting_decision", "deferred", "approved", "implementation_pending"]) {
+    let status = start;
+    for (const step of ROLLOUT_WALK_TO_VALIDATION) {
+      if (!step.from.includes(status)) continue;
+      const refusal = workItemTransitionRefusal({
+        from: status,
+        to: step.to,
+        hasDecision: step.to === "approved",
+        pendingValidations: [],
+        communicationRequired: false,
+        actorEmail: "ops@example.com",
+      });
+      assert.equal(refusal, null, `${status} -> ${step.to}`);
+      status = step.to;
+    }
+    assert.equal(status, "validation_pending", start);
+  }
 });
 
 test("vanished families are excluded whole, and only automatic exclusions reopen", async () => {

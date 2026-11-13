@@ -589,6 +589,7 @@ export function AdminModelCatalogPanel() {
             ) : null}
             {openItem ? (
               <ImageModelDetail
+                key={openItem.id}
                 m={m}
                 item={openItem}
                 edits={edits[openItem.id] ?? {}}
@@ -603,6 +604,13 @@ export function AdminModelCatalogPanel() {
                 onHold={() => {
                   setHoldReason("");
                   setHold({ category: "image", modelId: openItem.id, name: openItem.name });
+                }}
+                onRename={async (name) => {
+                  const result = await send("PATCH", { category: "image", modelId: openItem.id, name });
+                  if (!result.ok) return false;
+                  await load();
+                  showToast({ tone: "ok", title: m.toastRenamed(name) });
+                  return true;
                 }}
               />
             ) : drafting?.category === "image" && !items.some((item) => item.id === drafting.modelId) ? (

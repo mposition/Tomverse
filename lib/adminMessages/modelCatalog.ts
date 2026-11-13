@@ -131,6 +131,12 @@ export const adminModelCatalogMessages = defineAdminMessages({
       `Each image charges ${min === max ? min : `${min}–${max}`} credits, and the cost is paid from the ${provider} budget.`,
     enableEffectUndo: "You can hold it again at any time. Images already started still finish.",
     holdAction: "Hold",
+    renameAction: "Rename",
+    renameLabel: "Model name",
+    renameHelp: "Shown to users in the image model list. Up to 80 characters. Prices and the API model are unchanged.",
+    renameSave: "Save name",
+    renameCancel: "Cancel",
+    toastRenamed: (name: string) => `Renamed to ${name}.`,
     inheritAction: "Back to the code default",
 
     // Image: add / fix
@@ -451,6 +457,12 @@ export const adminModelCatalogMessages = defineAdminMessages({
       `생성할 때마다 사용자 크레딧 ${min === max ? min : `${min}–${max}`}이 차감되고, 원가가 ${provider} 공급자 예산에서 나갑니다.`,
     enableEffectUndo: "언제든 다시 보류할 수 있습니다. 이미 시작된 생성은 끝까지 진행됩니다.",
     holdAction: "보류",
+    renameAction: "이름 변경",
+    renameLabel: "모델 이름",
+    renameHelp: "사용자에게 보이는 이미지 모델 이름입니다. 최대 80자이며, 가격과 호출하는 API 모델은 바뀌지 않습니다.",
+    renameSave: "이름 저장",
+    renameCancel: "취소",
+    toastRenamed: (name: string) => `이름을 ${name}(으)로 바꿨습니다.`,
     inheritAction: "코드 기본값으로 되돌리기",
 
     addTitle: "이미지 모델 추가",
