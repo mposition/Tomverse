@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { deflateSync, zipSync } from "fflate";
+import { deflateSync, unzipSync, zipSync } from "fflate";
 
 import { resolveChatAttachmentFormat } from "../lib/chatAttachmentFormats.ts";
 import { validateChatAttachmentUpload } from "../lib/chatAttachmentValidation.ts";
@@ -18,8 +18,9 @@ import { buildCompoundFile } from "./support/compoundFile.mjs";
 //
 // HWP 5.x and HWPX, read for their text. The hostile and edge cases are
 // built field by field from the HWP 5.0 specification with the repository's
-// test compound-file writer; the happy path is also checked against a document
-// Hancom Office saved (fixtures/legacyOffice/sample-hancom.hwp, at the end).
+// test compound-file writer; the happy path is also checked against documents
+// Hancom Office saved (fixtures/legacyOffice/sample-hancom.hwp and .hwpx, at
+// the end).
 
 const encoder = new TextEncoder();
 
@@ -322,4 +323,42 @@ test("a real Hancom HWP reads in full: its own preview text is the answer key", 
     maxExtractedCharacters: 100_000,
   });
   assert.equal(valid.mediaType, "application/x-hwp");
+});
+
+test("a real Hancom HWPX reads in full: its own preview text is the answer key", async () => {
+  const bytes = new Uint8Array(
+    readFileSync(fileURLToPath(new URL("./fixtures/legacyOffice/sample-hancom.hwpx", import.meta.url)))
+  );
+  const text = readText(bytes, "hwpx");
+  const lines = text.split("\n");
+  assert.equal(lines[0], "대전광역시시설관리공단 공무직 관리 규정");
+  assert.equal(lines[20], "제1장  총    칙");
+  assert.ok(lines[21].startsWith("제1조(목적) 이 규정은 대전광역시시설관리공단(이하 “공단”이라 한다.)"));
+  // Past the preview's reach: the line count and the last form's last cells.
+  assert.equal(lines.length, 775);
+  assert.deepEqual(lines.slice(-3), ["인   원", "증원목적", "비  고"]);
+  assert.doesNotMatch(text, /[\u0000-\u0008\u000b-\u001f�-]/, "no control characters or replacement glyphs");
+
+  // Preview/PrvText.txt is the plain text Hancom stores for its own file
+  // preview (cut short at about 2 KB). Every whole word in it is in what the
+  // parser read, in the same order.
+  const preview = new TextDecoder("utf-8").decode(unzipSync(bytes)["Preview/PrvText.txt"]);
+  const words = preview.split(/[<>\s]+/).filter(Boolean).slice(0, -1);
+  assert.ok(words.length > 100, `preview words: ${words.length}`);
+  let from = 0;
+  for (const word of words) {
+    const at = text.indexOf(word, from);
+    assert.ok(at >= 0, `missing or out of order: ${word}`);
+    from = at + word.length;
+  }
+
+  assert.deepEqual(measureRenderInput("application/hwp+zip", bytes), { ok: true });
+  const format = resolveChatAttachmentFormat({ filename: "규정.hwpx", declaredMediaType: "" });
+  const valid = await validateChatAttachmentUpload({
+    buffer: Buffer.from(bytes),
+    format,
+    scope: "guest",
+    maxExtractedCharacters: 100_000,
+  });
+  assert.equal(valid.mediaType, "application/hwp+zip");
 });
