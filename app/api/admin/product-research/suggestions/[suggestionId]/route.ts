@@ -99,7 +99,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
       await consumeApiRateLimit(request, session.user!.id!, "admin-product-research-agent-retry", { minute: 5, day: 50 });
       const { retryDailyProductTask } = await import("@/lib/dailyProductAgentStore");
       return await retryDailyProductTask({ id: suggestionId, session, request })
-        ? json({ status: "retry_queued" }) : json({ error: "agent_outcome_needs_lookup" }, 409);
+        ? json({ status: "retry_queued" }) : json({ error: "agent_retry_unavailable" }, 409);
     }
 
     if (body.action === "dismiss") {

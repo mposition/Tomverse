@@ -10,7 +10,7 @@ import { claimRecommendationInTransaction, type ClaimedRecommendation } from "@/
 import { OPTIMIZER_LOCK } from "@/lib/autoRouterOptimizerLock";
 import { REC_AGENT_LEASE_MS } from "@/lib/autoRouterRecommendationsCore";
 import {
-  DAILY_PRODUCT_AGENT_CURSOR, DAILY_PRODUCT_AGENT_DAY, DAILY_PRODUCT_AGENT_TASK_CAP, DAILY_PRODUCT_AGENT_PREFIX, dailyProductAgentEnabled,
+  DAILY_PRODUCT_AGENT_CURSOR, DAILY_PRODUCT_AGENT_DAY, DAILY_PRODUCT_AGENT_TASK_CAP, DAILY_PRODUCT_AGENT_PREFIX, DAILY_PRODUCT_INSTRUCTION_CHARS, dailyProductAgentEnabled,
   canRetryDailyProductTask, dailyProductAgentKey, dailyProductDaySchema, dailyProductResultDecision, followingSource, parseDailyProductState,
   scoutAgentId, scoutIdFromAgentId, sourceOrder, type DailyProductAgentState,
   type DailyProductResult, type DailyProductSource,
@@ -82,16 +82,16 @@ async function claimScout(tx: Prisma.TransactionClient, source: Exclude<DailyPro
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
   if (!row) return null;
+  const instruction = suggestionWorkBrief({ ...row, url: `${origin}/admin/product-research` }, {
+    url: "Admin source", done: "Verify the current develop code first. If already solved, report the evidence without a duplicate change. Otherwise implement, run relevant tests, and commit the smallest fix. Never mark this suggestion completed or send it to AMUX.",
+  }).slice(0, DAILY_PRODUCT_INSTRUCTION_CHARS);
   const id = scoutAgentId(row.id);
   const claimId = randomUUID();
   const leaseUntil = new Date(now.getTime() + REC_AGENT_LEASE_MS).toISOString();
   const entry: DailyProductAgentState = { source, claimId, at: now.toISOString(), leaseUntil, status: "claimed" };
   await saveSetting(tx, dailyProductAgentKey(id), JSON.stringify(entry));
   await audit(tx, row.id, "claimed", { source, claimId, leaseUntil });
-  return { id, recommendation: row.title, findings: [row.evidence], claimId, leaseUntil,
-    instruction: suggestionWorkBrief({ ...row, url: `${origin}/admin/product-research` }, {
-      url: "Admin source", done: "Verify the current develop code first. If already solved, report the evidence without a duplicate change. Otherwise implement, run relevant tests, and commit the smallest fix. Never mark this suggestion completed or send it to AMUX.",
-    }) };
+  return { id, recommendation: row.title.slice(0, 1_000), findings: [row.evidence.slice(0, 8_000)], claimId, leaseUntil, instruction };
 }
 
 export async function recordDailyProductResult(input: DailyProductResult) {

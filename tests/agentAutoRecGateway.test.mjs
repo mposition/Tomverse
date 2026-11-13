@@ -43,7 +43,7 @@ function jsonResponse(status, body) {
  * Fake git and fetch. `git` answers by the subcommand after `-C <mirror>`;
  * `github` is a list of answers consumed in order for api.github.com calls.
  */
-function fakeDeps({ gitAnswers = {}, github = [], labels = null, app = [], files = {}, env = ENV, mainPid = 4242 } = {}) {
+function fakeDeps({ gitAnswers = {}, github = [], labels = null, prReadbacks = null, app = [], files = {}, env = ENV, mainPid = 4242 } = {}) {
   let clock = Date.parse("2026-10-20T00:00:00.000Z");
   const gitCalls = [];
   const fetchCalls = [];
@@ -69,6 +69,11 @@ function fakeDeps({ gitAnswers = {}, github = [], labels = null, app = [], files
     },
     fetch: async (url, init) => {
       fetchCalls.push({ url, init });
+      if (init.method === "GET" && /\/pulls\/\d+$/.test(url)) {
+        const response = prReadbacks ? prReadbacks.shift() : jsonResponse(200, { draft: true, labels: [{ name: "ci:hold" }], head: { sha: HEAD } });
+        if (response instanceof Error) throw response;
+        return response;
+      }
       if (url.endsWith("/labels")) {
         const response = labels ? labels.shift() : jsonResponse(200, [{ name: "ci:hold" }]);
         if (response instanceof Error) throw response;
@@ -383,6 +388,15 @@ test("only the gateway's root-owned daily mode sends the expanded-source header"
   assert.equal((await handleRequest(deps, { op: "claim", mode: "ignored" }, Buffer.alloc(0))).status, "empty");
   assert.equal(fetchCalls[0].init.headers["x-autorec-work-mode"], "daily-product");
   assert.equal(new URL(fetchCalls[0].url).pathname, "/api/internal/product-improvements/claim");
+});
+
+test("publication rechecks draft, hold and reviewed head after adding the hold label", async () => {
+  const pr = { number: 2900, html_url: PR_URL, draft: true };
+  for (const state of [{ draft: false, labels: [{ name: "ci:hold" }], head: { sha: HEAD } },
+    { draft: true, labels: [], head: { sha: HEAD } }, { draft: true, labels: [{ name: "ci:hold" }], head: { sha: "d".repeat(40) } }]) {
+    const { deps } = fakeDeps({ github: [jsonResponse(200, [pr]), jsonResponse(200, pr)], prReadbacks: [jsonResponse(200, state)] });
+    assert.equal((await handleRequest(deps, publishHeader(), BUNDLE)).status, "unknown");
+  }
 });
 
 test("an older app refusing the daily endpoint never falls back to a router claim", async () => {

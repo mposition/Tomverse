@@ -130,12 +130,13 @@ export async function listSuggestions(status: SuggestionStatus): Promise<StoredS
   });
   if (status !== "open") return rows;
   const agentRows = rows.length > 0
-    ? await prisma.appSetting.findMany({ where: { key: { in: rows.map((row) => dailyProductAgentKey(scoutAgentId(row.id))) } }, select: { key: true, value: true } })
+    ? await prisma.appSetting.findMany({ where: { key: { in: rows.flatMap((row) => [dailyProductAgentKey(scoutAgentId(row.id)), `${DAILY_PRODUCT_AGENT_PREFIX}amux.${row.id}`]) } }, select: { key: true, value: true } })
     : [];
   const work = new Map(agentRows.map((row) => [row.key, row.value]));
   const visible: StoredSuggestion[] = rows.map((row) => {
     const value = work.get(dailyProductAgentKey(scoutAgentId(row.id)));
-    return value === undefined ? row : { ...row, agentWork: dailyProductDisplayState(value, Date.now()) };
+    return value === undefined ? row : { ...row, agentWork: { ...dailyProductDisplayState(value, Date.now()),
+      ...(work.has(`${DAILY_PRODUCT_AGENT_PREFIX}amux.${row.id}`) ? { retryable: false } : {}) } };
   });
   const rank = { high: 0, medium: 1, low: 2 } as Record<string, number>;
   return visible.sort((a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3));

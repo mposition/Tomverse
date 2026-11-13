@@ -9,6 +9,7 @@ export const DAILY_PRODUCT_AGENT_PREFIX = "auto.dailyProductAgent.";
 export const DAILY_PRODUCT_AGENT_CURSOR = `${DAILY_PRODUCT_AGENT_PREFIX}cursor`;
 export const DAILY_PRODUCT_AGENT_DAY = `${DAILY_PRODUCT_AGENT_PREFIX}day`;
 export const DAILY_PRODUCT_AGENT_TASK_CAP = 24;
+export const DAILY_PRODUCT_INSTRUCTION_CHARS = 20_000;
 export const dailyProductDaySchema = z.object({
   day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   count: z.number().int().min(0).max(DAILY_PRODUCT_AGENT_TASK_CAP),

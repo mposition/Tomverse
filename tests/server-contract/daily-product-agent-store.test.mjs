@@ -17,6 +17,7 @@ const tx = {
     create: async ({ data }) => { assert.equal(settings.has(data.key), false); settings.set(data.key, data.value); },
   },
   productResearchSuggestion: {
+    findMany: async ({ where }) => suggestions.filter((row) => row.status === where.status),
     findFirst: async ({ where }) => [...suggestions].sort((a, b) => a.createdAt - b.createdAt).find((row) => row.status === where.status && row.amuxIdeaId === null && !where.id.notIn.includes(row.id) &&
       (where.subject ? row.subject.startsWith(where.subject.startsWith) : !row.subject.startsWith(where.NOT.subject.startsWith))) ?? null,
     findUnique: async ({ where }) => suggestions.find((row) => row.id === where.id) ?? null,
@@ -39,7 +40,7 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: { takeAuditChainLock: asyn
 mock.module(mod("lib/autoRouterRecAgent.ts"), { namedExports: { claimRecommendationInTransaction: async () => router.shift() ?? null } });
 
 const { claimDailyProductTask, recordDailyProductResult, retryDailyProductTask } = await import(mod("lib/dailyProductAgentStore.ts"));
-const { reserveScoutSend } = await import(mod("lib/productResearchScoutStore.ts"));
+const { reserveScoutSend, listSuggestions } = await import(mod("lib/productResearchScoutStore.ts"));
 const { sendScoutSuggestion } = await import(mod("lib/productResearchScoutSend.ts"));
 const { DAILY_PRODUCT_AGENT_CURSOR, DAILY_PRODUCT_AGENT_DAY, dailyProductAgentKey } = await import(mod("lib/dailyProductAgentCore.ts"));
 const oldSwitch = process.env.DAILY_PRODUCT_AGENT_ENABLED;
@@ -52,6 +53,13 @@ const claim = () => claimDailyProductTask({ origin: "https://app.example.test", 
 test("disabled daily mode performs no claim or audit", async () => {
   delete process.env.DAILY_PRODUCT_AGENT_ENABLED; suggestions = [row("one")];
   assert.equal(await claim(), null); assert.equal(settings.size, 0); assert.equal(audits.length, 0);
+});
+
+test("even unexpectedly long source text produces a claim within the gateway contract", async () => {
+  suggestions = [{ ...row("one"), suggestion: "x".repeat(30_000), evidence: "e".repeat(30_000) }];
+  const result = await claim();
+  assert.ok(result.instruction.length <= 20_000);
+  assert.ok(result.findings[0].length <= 8_000);
 });
 
 test("research, routing and embedded memory rotate with oldest-first selection", async () => {
@@ -156,6 +164,7 @@ test("published or unknown outcomes cannot be retried or handed off to AMUX", as
   await recordDailyProductResult({ id: first.id, claimId: first.claimId, outcome: "failed", reason: "setup_failed" });
   assert.equal(await reserveScoutSend(input), true);
   assert.equal(await retryDailyProductTask(input), false);
+  assert.equal((await listSuggestions("open"))[0].agentWork.retryable, false);
   // A failed/unknown send keeps its reservation; the same human send can
   // read back/retry its deterministic AMUX request without an agent takeover.
   await assert.rejects(sendScoutSuggestion({ readBack: async () => ({ status: "absent" }),
