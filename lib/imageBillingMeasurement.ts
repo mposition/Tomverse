@@ -187,13 +187,22 @@ const sampleFromError = (error: unknown) => {
     return {
       failure: error.failurePhase,
       httpStatus: error.status,
+      afterGeneration: error.afterGeneration,
       providerRequestId: error.providerRequestId,
       nonImageBillableTokens: error.nonImageBillableTokens,
       billedImageTokens: error.billedImageTokens,
       usage: error.providerUsage,
     };
   }
-  return { failure: "internal", httpStatus: null, providerRequestId: null, nonImageBillableTokens: null, billedImageTokens: null, usage: null };
+  return {
+    failure: "internal",
+    httpStatus: null,
+    afterGeneration: false,
+    providerRequestId: null,
+    nonImageBillableTokens: null,
+    billedImageTokens: null,
+    usage: null,
+  };
 };
 
 type Generate = typeof generateImageForMeasurement;

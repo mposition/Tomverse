@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import {
   classifyImageProviderFailure,
+  generateImageForMeasurement,
   generateImageWithProvider,
   ImageProviderError,
 } from "../lib/imageProviderAdapter.ts";
@@ -404,4 +405,82 @@ test("a refused Google response with two images carries both for settlement", as
     else process.env.GOOGLE_GENERATIVE_AI_API_KEY = key;
     resetActiveImageModelCatalog();
   }
+});
+
+// The admin billing measurement (lib/imageBillingMeasurement.ts) calls an
+// unpriced candidate profile; review findings 2026-11-13.
+const candidate = (provider, apiModelId, extra = {}) => ({
+  id: `measurement:${apiModelId}`,
+  provider,
+  apiModelId,
+  name: apiModelId,
+  lifecycle: "preview",
+  disabledReason: null,
+  sizes: ["1024x1024"],
+  qualities: ["medium"],
+  prices: [],
+  latencyClass: "balanced",
+  provenance: [],
+  outputMimeTypes: ["image/png"],
+  pricingVersion: "measurement",
+  priceVerification: { verifiedAt: null, sources: [], thinkingCapMicroUsd: null },
+  ...extra,
+});
+
+const withEnv = async (name, value, run) => {
+  const before = process.env[name];
+  process.env[name] = value;
+  try {
+    return await run();
+  } finally {
+    if (before === undefined) delete process.env[name];
+    else process.env[name] = before;
+  }
+};
+
+test("a measurement sample is one request: a 5xx is not retried into a second paid generation", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ error: { message: "upstream" } }, { status: 500 });
+  };
+  try {
+    await withEnv("OPENAI_IMAGE_API_KEY", "test-openai-key", () =>
+      assert.rejects(
+        generateImageForMeasurement(candidate("openai", "gpt-image-2.6-flare"), { prompt: "p", size: "1024x1024", quality: "medium" }),
+        (error) => error instanceof ImageProviderError && error.status === 500
+      )
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 1);
+});
+
+test("a Qwen result that was generated but could not be downloaded is marked as generated", async () => {
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    if (urls.length === 1) {
+      return Response.json({
+        request_id: "req-1",
+        output: { choices: [{ message: { content: [{ image: "https://dashscope-result-sgp.oss-ap-southeast-1.aliyuncs.com/a.png" }] } }] },
+        usage: { image_count: 1, width: 1024, height: 1024 },
+      });
+    }
+    return new Response(null, { status: 403 });
+  };
+  try {
+    await withEnv("DASHSCOPE_API_KEY", "test-qwen-key", () =>
+      assert.rejects(
+        generateImageForMeasurement(candidate("qwen", "wan2.7-image"), { prompt: "p", size: "1024x1024", quality: "medium" }),
+        (error) => error instanceof ImageProviderError && error.afterGeneration === true && error.status === 403
+      )
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(urls.length, 2);
 });

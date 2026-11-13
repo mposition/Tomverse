@@ -35,5 +35,20 @@ CREATE TABLE "ImageBillingMeasurement" (
 );
 
 CREATE INDEX "ImageModelBillingTerms_provider_apiModelId_createdAt_idx" ON "ImageModelBillingTerms"("provider", "apiModelId", "createdAt");
+
+-- Append-only: the judge, the request and settlement read these terms, so a
+-- change is a new row with its own audit entry, never an edit. UPDATE and
+-- DELETE are refused per row, TRUNCATE per statement.
+CREATE FUNCTION "ImageModelBillingTerms_append_only"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'ImageModelBillingTerms is append-only';
+END;
+$$;
+CREATE TRIGGER "ImageModelBillingTerms_append_only_trigger"
+    BEFORE UPDATE OR DELETE ON "ImageModelBillingTerms"
+    FOR EACH ROW EXECUTE FUNCTION "ImageModelBillingTerms_append_only"();
+CREATE TRIGGER "ImageModelBillingTerms_no_truncate_trigger"
+    BEFORE TRUNCATE ON "ImageModelBillingTerms"
+    FOR EACH STATEMENT EXECUTE FUNCTION "ImageModelBillingTerms_append_only"();
 CREATE INDEX "ImageBillingMeasurement_provider_apiModelId_createdAt_idx" ON "ImageBillingMeasurement"("provider", "apiModelId", "createdAt");
 CREATE INDEX "ImageBillingMeasurement_status_idx" ON "ImageBillingMeasurement"("status");

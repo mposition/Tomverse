@@ -62,7 +62,7 @@ const withTriggersOff = async (table: string, trigger: string, sql: string) => {
 
 const cleanup = async () => {
   await prisma.imageBillingMeasurement.deleteMany({});
-  await prisma.imageModelBillingTerms.deleteMany({});
+  await withTriggersOff("ImageModelBillingTerms", "ImageModelBillingTerms_append_only_trigger", `DELETE FROM "ImageModelBillingTerms"`);
   await prisma.modelCatalogEntry.deleteMany({});
   await withTriggersOff(
     "ModelCatalogPriceRevision",
@@ -146,6 +146,10 @@ test("Wan 2.7: measure, confirm per-image billing, then its price revision is ad
   assert.equal(await confirmedBillingTermsFor("qwen", WAN), null);
   await confirmImageBillingTerms({ measurementId: row.id, sources: [QWEN_SOURCE], session });
   assert.equal((await confirmedBillingTermsFor("qwen", WAN))?.kind, "per_image_no_thinking");
+  // Append-only at the database: no edit, delete or truncate of confirmed terms.
+  await assert.rejects(prisma.imageModelBillingTerms.updateMany({ data: { kind: "tokens_per_image" } }), /append-only/);
+  await assert.rejects(prisma.imageModelBillingTerms.deleteMany({}), /append-only/);
+  await assert.rejects(prisma.$executeRawUnsafe(`TRUNCATE "ImageModelBillingTerms"`), /append-only/);
   assert.equal(
     await prisma.adminAuditLog.count({ where: { action: { startsWith: "model_catalog.billing_" } } }),
     auditsBefore + 3

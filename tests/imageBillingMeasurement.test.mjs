@@ -141,6 +141,9 @@ test("a sample costs what its usage says, its ceiling when the usage is missing,
   assert.equal(sampleCostMicroUsd(plan, sample(0, { delivered: false, httpStatus: 429 })), sampleCeilingMicroUsd(plan));
   assert.equal(sampleCostMicroUsd(flarePlan, sample(0, { outputTokens: 4_160 })), 124_800 + PROMPT);
   assert.equal(sampleCostMicroUsd(wanPlan, sample(0)), 30_000);
+  // A 4xx from downloading a generated image is not a refusal: the image was billed.
+  assert.equal(sampleCostMicroUsd(wanPlan, sample(0, { delivered: false, httpStatus: 403, afterGeneration: true })), sampleCeilingMicroUsd(wanPlan));
+  assert.equal(sampleCostMicroUsd(wanPlan, sample(0, { delivered: false, httpStatus: 400 })), 0);
 });
 
 test("Nano Banana 2.1: limits that lose images cannot be confirmed; a limit that keeps them can", () => {
@@ -201,6 +204,10 @@ test("GPT Image 2.6 Flare: the measured tokens per option become the terms; a mo
     ],
   });
   assert.ok(verdict.notes.some((note) => note.startsWith("tokens_vary:high/1536x1024")));
+  // One good sample per option is not enough when its sibling failed or reported nothing.
+  const partial = measurementVerdict(flarePlan, [steady[0], sample(1, { quality: "low", size: "1024x1024", delivered: false, failure: "provider_failed" }), steady[2], sample(3, { quality: "high", size: "1536x1024", outputTokens: null })]);
+  assert.equal(partial.confirmable, false);
+  assert.deepEqual(partial.reasons, ["image_missing:1/4", "usage_missing"]);
   const missing = measurementVerdict(flarePlan, [...steady.slice(0, 2), sample(2, { quality: "high", size: "1536x1024", delivered: false, failure: "provider_failed" }), sample(3, { quality: "high", size: "1536x1024", delivered: false, failure: "provider_failed" })]);
   assert.equal(missing.confirmable, false);
   assert.ok(missing.reasons.includes("option_unmeasured:high/1536x1024"));

@@ -177,6 +177,12 @@ export type MeasurementSample = {
   delivered: boolean;
   /** The failure phase when no image came back. */
   failure: string | null;
+  /**
+   * True when the provider accepted and generated, and only fetching or
+   * checking the result failed (a Qwen asset download, say): billed, whatever
+   * HTTP status the failure carries.
+   */
+  afterGeneration?: boolean;
   httpStatus: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -194,9 +200,19 @@ export type MeasurementSample = {
 
 const known = (value: number | null | undefined): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
-/** A request the provider refused outright (4xx other than rate limit and timeout) did no billable work. */
-const refusedBeforeWork = (sample: Pick<MeasurementSample, "delivered" | "httpStatus">) =>
-  !sample.delivered && sample.httpStatus !== null && sample.httpStatus >= 400 && sample.httpStatus < 500 && sample.httpStatus !== 408 && sample.httpStatus !== 429;
+/**
+ * A generation request the provider refused outright (4xx other than rate
+ * limit and timeout) did no billable work. A 4xx from fetching a generated
+ * result is not that: the image was made and billed.
+ */
+const refusedBeforeWork = (sample: Pick<MeasurementSample, "delivered" | "httpStatus" | "afterGeneration">) =>
+  !sample.delivered &&
+  !sample.afterGeneration &&
+  sample.httpStatus !== null &&
+  sample.httpStatus >= 400 &&
+  sample.httpStatus < 500 &&
+  sample.httpStatus !== 408 &&
+  sample.httpStatus !== 429;
 
 /**
  * What a sample cost, from its reported usage. Where the usage a cost needs
@@ -205,7 +221,10 @@ const refusedBeforeWork = (sample: Pick<MeasurementSample, "delivered" | "httpSt
  */
 export const sampleCostMicroUsd = (
   plan: MeasurementPlan,
-  sample: Pick<MeasurementSample, "delivered" | "httpStatus" | "outputTokens" | "nonImageBillableTokens" | "billedImageTokens">
+  sample: Pick<
+    MeasurementSample,
+    "delivered" | "httpStatus" | "afterGeneration" | "outputTokens" | "nonImageBillableTokens" | "billedImageTokens"
+  >
 ): number => {
   const ceiling = sampleCeilingMicroUsd(plan);
   if (plan.method === "output_limit") {
@@ -269,6 +288,10 @@ export const measurementVerdict = (plan: MeasurementPlan, samples: readonly Meas
       };
     }
   } else if (plan.method === "tokens_per_image") {
+    // Every planned sample has to deliver and report its count: a failed or
+    // silent sample beside a good one hides whether the count moves.
+    if (delivered.length < samples.length) reasons.push(`image_missing:${samples.length - delivered.length}/${samples.length}`);
+    if (delivered.some((sample) => !(known(sample.outputTokens) && sample.outputTokens > 0))) reasons.push("usage_missing");
     const rows: { quality: SampleRequest["quality"]; size: SampleRequest["size"]; tokens: number }[] = [];
     for (const option of plan.options) {
       const counts = delivered

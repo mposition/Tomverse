@@ -713,12 +713,15 @@ env, 그리고 Admin 카탈로그의 켜기. seed는 `operational_hold`·가격 
 - **provider 예산(§8)에서 최대 비용을 먼저 잡고** 끝나면 쓰지 않은 만큼 돌려놓는다. 표본은
   "지금까지 쓴 비용 + 표본당 상한"이 최대 비용 안에 있을 때만 보내고, 한 표본이 상한을 넘게
   과금되면 거기서 멈추며 넘은 금액은 예산에 더한다. 사용량을 읽지 못한 표본은 상한으로 센다.
-  한 번에 하나의 실측만 돈다.
+  0원으로 세는 것은 생성 요청을 provider가 바로 거절한 4xx뿐이다 — 생성된 이미지를 받아 오다
+  난 4xx(Qwen 결과 다운로드)는 과금된 것으로 센다. 표본 하나는 요청 하나다: 과금됐을 수 있는
+  실패(timeout·전송 실패·5xx)를 재시도하지 않는다. 한 번에 하나의 실측만 돈다.
 - 이미지는 저장하지 않고 사용자 크레딧·대화에 닿지 않는다. 표본마다 토큰·이미지 유무·보고된
   사용량·비용만 `ImageBillingMeasurement`에 남는다. 시작과 종료는 감사 기록을 쓴다.
 - **측정 결과가 스스로 조건을 확정하지 않는다.** 판정(`measurementVerdict`)은 조건을 제안할
   뿐이고, 운영자가 "이 조건으로 확정"을 눌러야 `ImageModelBillingTerms`(append-only, 최신 행이
-  유효)에 기록된다. 확정 때 서버가 저장된 표본으로 판정을 다시 계산하고, 출처 URL은
+  유효)에 기록된다. append-only는 DB trigger가 강제한다(UPDATE·DELETE·TRUNCATE 거절). OpenAI
+  판정은 계획한 모든 표본이 이미지와 토큰 수를 보고해야 확정할 수 있다. 확정 때 서버가 저장된 표본으로 판정을 다시 계산하고, 출처 URL은
   `isOfficialSourceUrl`을 통과해야 하며, 감사 기록과 한 transaction으로 커밋된다.
 - 확정된 조건은 판정(`judgeImageModel`, `imageThinkingCapEnforced`), 어댑터, 예약 snapshot의
   `measuredNonImageBound`, 초안(`imageDraftFromAnswer`)이 함께 읽는다. 켜는 절차는 그대로다:
