@@ -277,6 +277,32 @@ test("an unknown model is unverified rather than assumed to work", () => {
   assert.equal(getArtifactToolSupport("a-model-nobody-added"), "unverified");
 });
 
+test("an unverified catalogue model prompt names verified active models, not itself", () => {
+  const unverifiedModel = ENABLED_MODELS.find(
+    (model) => getArtifactToolSupport(model.id) === "unverified"
+  );
+  assert.ok(unverifiedModel, "expected an unverified enabled catalogue model");
+
+  for (const autoRouted of [false, true]) {
+    const result = plan({
+      modelId: unverifiedModel.id,
+      provider: unverifiedModel.provider,
+      autoRouted,
+    });
+    const verifiedActiveModels = ENABLED_MODELS.filter(
+      (model) => model.enabled && getArtifactToolSupport(model.id) === "verified"
+    );
+    assert.ok(
+      verifiedActiveModels.some((model) => result.systemPrompt.includes(model.name)),
+      `autoRouted=${autoRouted}: prompt should identify a verified active model`
+    );
+    assert.ok(
+      !result.systemPrompt.includes(unverifiedModel.name),
+      `autoRouted=${autoRouted}: prompt must not identify the unverified model as supported`
+    );
+  }
+});
+
 test("the default models can create files", () => {
   // Off the registry, a new account's file request is told to pick another
   // model. That went unnoticed from the default's change on 2026-10-12 until the

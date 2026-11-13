@@ -26,6 +26,7 @@
  */
 
 import type { AiModel, ModelTier } from "@/lib/models";
+import { isAutoFileCapableModel } from "@/lib/autoLlmRouterCore";
 import { applyAutoExploration } from "@/lib/autoExploration";
 import { estimateRequestCredits } from "@/lib/webSearchCredits";
 import { NO_WEB_SEARCH_BACKENDS } from "@/lib/webSearchBackends";
@@ -440,6 +441,29 @@ export const applyLlmModelPick = (
       allocationSeedGrain: keepDecision ? selection.record.allocationSeedGrain : null,
     },
   };
+};
+
+/**
+ * Find the first distinct, verified file generation candidate after an
+ * answer that was classified as requiring file generation.
+ *
+ * This is only a routing recommendation. The send path remains responsible
+ * for deciding permission and credits.
+ */
+export const fileGenerationRetryModelId = ({
+  requiresFileGeneration,
+  answeredModelId,
+  fileCapableCandidates,
+}: {
+  requiresFileGeneration: boolean;
+  answeredModelId: string;
+  fileCapableCandidates: readonly { id: string; tier: string }[];
+}): string | null => {
+  if (!requiresFileGeneration) return null;
+  const candidates = fileCapableCandidates.filter(candidate =>
+    isAutoFileCapableModel(candidate.id, candidate.tier));
+  if (candidates.some(candidate => candidate.id === answeredModelId)) return null;
+  return candidates.find(candidate => candidate.id !== answeredModelId)?.id ?? null;
 };
 
 /**
