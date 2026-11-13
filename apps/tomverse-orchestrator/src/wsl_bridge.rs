@@ -41,7 +41,7 @@ use crate::local_card::{
     review_pr_number_from, valid_local_card_id, LinkDecision, LocalCardSummary,
 };
 use crate::tomverse_api::{
-    is_database_busy, AmuxV22ApiModelAccessRequest, AmuxV22ApiModelAccessResult,
+    is_database_busy, is_nothing_committed, AmuxV22ApiModelAccessRequest, AmuxV22ApiModelAccessResult,
     DatabaseBusy, ExecutionStartResponse,
     NothingCommittedAnswer, OwnedTodoTask,
     PulledDelivery, SelectionRead, SelectionReadTransientStatus, UnacceptedStatus,
@@ -1006,7 +1006,7 @@ pub fn plan_settle_result(settled: Option<bool>) -> SettleResult {
 pub fn plan_settle_answer(answer: &Result<bool>) -> SettleResult {
     match answer {
         Ok(settled) => plan_settle_result(Some(*settled)),
-        Err(error) if is_database_busy(error) => SettleResult::RetryNextTick,
+        Err(error) if is_nothing_committed(error) => SettleResult::RetryNextTick,
         Err(_) => plan_settle_result(None),
     }
 }
@@ -1017,7 +1017,8 @@ struct SettleFollowup {
     keep_pending: bool,
 }
 
-/// Only an explicit database-busy answer proves that settlement wrote nothing.
+/// Only an explicit "nothing committed" answer (busy, deadline or call ceiling)
+/// proves that settlement wrote nothing.
 /// An unknown result stops the bridge for human read-back, not another write.
 fn plan_settle_followup(result: SettleResult) -> SettleFollowup {
     match result {
@@ -1169,7 +1170,7 @@ pub fn plan_pending_heartbeat(accepted: Option<bool>) -> PendingHeartbeat {
 pub fn plan_heartbeat_answer(answer: &Result<bool>) -> PendingHeartbeat {
     match answer {
         Ok(accepted) => plan_pending_heartbeat(Some(*accepted)),
-        Err(error) if is_database_busy(error) => PendingHeartbeat::RetryNextTick,
+        Err(error) if is_nothing_committed(error) => PendingHeartbeat::RetryNextTick,
         Err(_) => plan_pending_heartbeat(None),
     }
 }
@@ -1192,7 +1193,7 @@ pub fn plan_registration_answer(
             .generation
             .map_or(RegistrationAnswer::Skip, RegistrationAnswer::Registered),
         Ok(_) => RegistrationAnswer::Skip,
-        Err(error) if is_database_busy(error) => RegistrationAnswer::RetryNextTick,
+        Err(error) if is_nothing_committed(error) => RegistrationAnswer::RetryNextTick,
         Err(_) => RegistrationAnswer::Skip,
     }
 }
@@ -3746,7 +3747,7 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                             );
                         } else if result == SettleResult::RetryNextTick {
                             eprintln!(
-                                "amux wsl bridge warn: settle for attempt {} answered 503 {DATABASE_BUSY}; settling again next tick, not halted",
+                                "amux wsl bridge warn: settle for attempt {} answered 503 with nothing committed; settling again next tick, not halted",
                                 entry.delivery.attempt_id
                             );
                         }
@@ -5862,6 +5863,11 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
     const LIFECYCLE_DATABASE_BUSY_BODY: &str =
         r#"{"error":"AMUX database is busy.","reason":"amux_database_busy"}"#;
     const OUTCOME_UNKNOWN_BODY: &str = r#"{"error":"AMUX database outcome is unknown.","reason":"amux_outcome_unknown","incident_id":"0b8e9a52-6d8c-4f0e-9b1a-2c3d4e5f6a7b"}"#;
+    // The other two "nothing committed" answers (policy version 20, section 1).
+    const DEADLINE_EXCEEDED_BODY: &str =
+        r#"{"error":"AMUX database deadline exceeded.","reason":"amux_database_deadline_exceeded"}"#;
+    const CALL_CEILING_EXCEEDED_BODY: &str =
+        r#"{"error":"AMUX database call ceiling exceeded.","reason":"amux_database_call_ceiling_exceeded"}"#;
 
     fn pulled_delivery() -> PulledDelivery {
         PulledDelivery {
@@ -6203,6 +6209,13 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
             .await
             .map(|response| response.accepted);
         assert_eq!(plan_heartbeat_answer(&busy), PendingHeartbeat::RetryNextTick);
+        for body in [DEADLINE_EXCEEDED_BODY, CALL_CEILING_EXCEEDED_BODY] {
+            let answer = tomverse_api(tomverse_answering("503 Service Unavailable", body))
+                .execution_heartbeat(&pulled_delivery(), "00000000-0000-4000-8000-000000000001", 4)
+                .await
+                .map(|response| response.accepted);
+            assert_eq!(plan_heartbeat_answer(&answer), PendingHeartbeat::RetryNextTick, "{body}");
+        }
 
         // Any other failure still halts new assignments, as before.
         for (status, body) in [
@@ -6239,6 +6252,15 @@ AMUX_OWNER_QUESTION: {\"question\":\"Which?\",\"unblocks\":\"u\",\"options\":[{\
         };
         let busy = settle(tomverse_answering("503 Service Unavailable", LIFECYCLE_DATABASE_BUSY_BODY)).await;
         assert_eq!(plan_settle_answer(&busy), SettleResult::RetryNextTick);
+        // 2026-11-13: codex-chore halted twice on a settlement refused at its
+        // commit deadline. Every "nothing committed" answer is retried.
+        for body in [DEADLINE_EXCEEDED_BODY, CALL_CEILING_EXCEEDED_BODY] {
+            let answer = settle(tomverse_answering("503 Service Unavailable", body)).await;
+            assert_eq!(plan_settle_answer(&answer), SettleResult::RetryNextTick, "{body}");
+            // The same body at another status is not that answer.
+            let other = settle(tomverse_answering("500 Internal Server Error", body)).await;
+            assert_eq!(plan_settle_answer(&other), SettleResult::HaltForReadBack, "{body}");
+        }
         let unknown = settle(tomverse_answering("503 Service Unavailable", OUTCOME_UNKNOWN_BODY)).await;
         assert_eq!(plan_settle_answer(&unknown), SettleResult::HaltForReadBack);
         assert_eq!(plan_settle_answer(&Ok(true)), SettleResult::Settled);
