@@ -1027,10 +1027,11 @@ test("Auto routing to an unverified model registers no file tool and says Auto c
   ]) {
     assert.equal(tools[name], undefined, `${name} was registered for an unverified model`);
   }
-  // The remedy names what the user can actually change: Auto made this
-  // choice, so "choose a different model" alone would point at a picker the
-  // user did not use.
-  assert.match(promptText(), /instead of Auto/);
+  // Auto made this choice, so the remedy is to ask again -- Auto routes a file
+  // request to a model that can create files -- never "turn Auto off" or
+  // "choose a model yourself", which names a choice the user did not make.
+  assert.match(promptText(), /sending the same request again: Auto routes a file request/);
+  assert.match(promptText(), /do not tell them to turn Auto off/);
   assert.deepEqual(world.artifactRows, []);
 });
 
@@ -1042,7 +1043,8 @@ test("file intent with no capable candidate keeps the refusal in Chat despite a 
   assert.equal(routerDecisionKept, true, "a file request remains a Chat routing decision");
   assert.ok(lastStreamTextOptions, "the turn was incorrectly handed off to the image workspace");
   assert.equal((lastStreamTextOptions.tools as Record<string, unknown> | undefined)?.create_text_file, undefined);
-  assert.match(promptText(), /instead of Auto/);
+  assert.match(promptText(), /sending the same request again: Auto routes a file request/);
+  assert.match(promptText(), /do not tell them to turn Auto off/);
   assert.deepEqual(world.artifactRows, []);
 });
 
@@ -1052,7 +1054,7 @@ test("a manual turn on an unverified model keeps the plain remedy, with no menti
   const tools = (lastStreamTextOptions!.tools ?? {}) as Record<string, unknown>;
   assert.equal(tools.create_text_file, undefined);
   assert.match(promptText(), /choosing a different model/);
-  assert.doesNotMatch(promptText(), /instead of Auto/);
+  assert.doesNotMatch(promptText(), /Auto routes a file request/);
 });
 
 /* -------------------------------------------------------------------------- */
