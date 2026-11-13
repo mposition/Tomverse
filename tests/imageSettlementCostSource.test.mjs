@@ -185,21 +185,21 @@ test("a failure after a measured Google model answered counts what it billed", a
   };
   // Delivered: image 67,200 + prompt (62 tokens at $5/1M = 310) + 10,000 tokens at $3/1M.
   assert.equal(
-    failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: 10_000, imageDelivered: true, inputTokens: 62 }),
+    failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: 10_000, imageCount: 1, inputTokens: 62 }),
     67_200 + 310 + 30_000
   );
   // Refused without an image, prompt count unknown: its whole budget, no image.
   assert.equal(
-    failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: 1_815, imageDelivered: false }),
+    failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: 1_815, imageCount: 0 }),
     5_445 + 5_000
   );
   // Nothing billed is known, or not a measured model: keep the reservation.
   assert.equal(failureIncurredCostMicroUsd(flash, undefined), null);
-  assert.equal(failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: null, imageDelivered: true }), null);
+  assert.equal(failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: null, imageCount: 1 }), null);
   assert.equal(
     failureIncurredCostMicroUsd(
       { provider: "openai", outputCostMicroUsd: 53_000, executionProfile: { apiModelId: "gpt-image-2" } },
-      { nonImageBillableTokens: 10_000, imageDelivered: true }
+      { nonImageBillableTokens: 10_000, imageCount: 1 }
     ),
     null
   );
@@ -211,8 +211,40 @@ test("a failure after a measured Google model answered counts what it billed", a
         executionProfile: { apiModelId: "gemini-3.1-flash-image" },
         measuredNonImageBound: { maxOutputTokens: 2_048, textOutputUsdPerMTok: 3 },
       },
-      { nonImageBillableTokens: 10_000, imageDelivered: true }
+      { nonImageBillableTokens: 10_000, imageCount: 1 }
     ),
     null
+  );
+});
+
+test("every image a measured Google response billed is counted, delivered or refused", async () => {
+  // Review finding 2026-11-13: a response with two images is refused by the
+  // strict parser and was billed for both; counting it as imageless left the
+  // budget at one image's reservation.
+  const { billedImageCostMicroUsd, failureIncurredCostMicroUsd } = await import("../lib/imageGenerationService.ts");
+  const flash = {
+    provider: "google",
+    outputCostMicroUsd: 67_200,
+    thinkingCapMicroUsd: 12_288,
+    executionProfile: { provider: "google", apiModelId: "gemini-3.1-flash-image" },
+    measuredNonImageBound: { maxOutputTokens: 2_048, textOutputUsdPerMTok: 3, imageTokensPerImage: 1_120 },
+  };
+  // By image tokens, whatever the parser made of the response.
+  assert.equal(billedImageCostMicroUsd(flash, 2_240, 0), 134_400);
+  assert.equal(billedImageCostMicroUsd(flash, 1_120, 1), 67_200);
+  assert.equal(billedImageCostMicroUsd(flash, 0, 0), 0);
+  // No image row reported: by the images the response carried.
+  assert.equal(billedImageCostMicroUsd(flash, null, 2), 134_400);
+  assert.equal(billedImageCostMicroUsd(flash, null, 0), 0);
+  // A snapshot without tokens-per-image counts images.
+  const older = { ...flash, measuredNonImageBound: { maxOutputTokens: 2_048, textOutputUsdPerMTok: 3 } };
+  assert.equal(billedImageCostMicroUsd(older, 2_240, 2), 134_400);
+  // An image billed with no per-image price on the reservation is unknown, not free.
+  assert.equal(billedImageCostMicroUsd({ ...flash, outputCostMicroUsd: undefined }, 1_120, 1), null);
+
+  // The reviewer's case: two 1K images and a little text, refused.
+  assert.equal(
+    failureIncurredCostMicroUsd(flash, { nonImageBillableTokens: 200, imageTokens: 2_240, imageCount: 2, inputTokens: 62 }),
+    600 + 310 + 134_400
   );
 });
