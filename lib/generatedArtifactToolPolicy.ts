@@ -418,7 +418,7 @@ const offPrompt = (reason: ArtifactToolOffReason, autoRouted = false): string =>
       ? "(turning web search off for this question)."
       : reason === "model_unverified"
         ? autoRouted
-          ? "(choosing a model for this request themselves instead of Auto, one that can create files)."
+          ? `(choosing a model for this request themselves instead of Auto, one that can create files, such as ${FILE_CAPABLE_MODEL_NAMES.join(", ")}).`
           : `(choosing a different model, such as ${FILE_CAPABLE_MODEL_NAMES.join(", ")}).`
         : "(starting the request again from a saved conversation).",
     "",
