@@ -443,9 +443,14 @@ async function finishFilm({ plan, locales, captureWords, sourceClaims, firstRoun
     `## The props per locale\n\n${locales.map((locale) => `- ${locale}: job/creative/${run}/public/props-${locale}.json`).join("\n")}`,
     notes ? `## The reviewer asked for these changes\n\n${notes}` : "",
   ].join("\n\n");
+  // The run's real captures of a locale, each a file the reviewer may open (Read takes files, not folders).
+  const capturesIn = (locale) => {
+    const dir = path.join(runDir, "public", "capture", locale);
+    return existsSync(dir) ? readdirSync(dir).filter((file) => file.endsWith(".png")).sort().map((file) => posix(path.join(dir, file))) : [];
+  };
   const reviewPrompt = () => [
     readFileSync("CREATIVE-REVIEW.md", "utf8"),
-    `## This film\n\n${plan.concept}: ${plan.logline}\n\n${locales.map((locale) => `- ${locale}: stills ${stillsIn(path.join(runDir, "review", locale)).join(", ")}; words ${JSON.stringify(plan.locales[locale].screen)}`).join("\n")}`,
+    `## This film\n\n${plan.concept}: ${plan.logline}\n\n${locales.map((locale) => `- ${locale}: stills ${stillsIn(path.join(runDir, "review", locale)).join(", ")}; words ${JSON.stringify(plan.locales[locale].screen)}; real captures ${capturesIn(locale).join(", ")}`).join("\n")}`,
     `## Earlier films\n\n${history.map((entry) => `- ${entry.concept}: ${earlierStills(entry)}`).join("\n") || "- none yet"}`,
   ].join("\n\n");
   const buildAllowed = [
@@ -467,7 +472,7 @@ async function finishFilm({ plan, locales, captureWords, sourceClaims, firstRoun
       report.dropped.push({ step: `build ${round}`, reason: renderProblem });
       halt("film_did_not_render");
     }
-    const answer = claude(`review-${round}`, reviewPrompt(), { tools: "Read", allowed: [fileRule("Read", `job/creative/${run}/review/**`), fileRule("Read", "job/creative/sheets/**")], maxTurns: 60 });
+    const answer = claude(`review-${round}`, reviewPrompt(), { tools: "Read", allowed: [fileRule("Read", `job/creative/${run}/review/**`), fileRule("Read", `job/creative/${run}/public/capture/**`), fileRule("Read", "job/creative/sheets/**")], maxTurns: 60 });
     verdict = jsonLine(answer, "review");
     // A "pass" with a score under 8 (or a missing one) is not a pass: it goes back as a fix.
     const low = verdict?.verdict === "pass" && !reviewPassed(verdict);
