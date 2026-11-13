@@ -786,10 +786,15 @@ export type ImageThinkingBilling =
  * row: it was not measured.
  */
 export const GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS: Readonly<
-  Record<string, { maxOutputTokens: number; textOutputUsdPerMTok: number }>
+  Record<string, { maxOutputTokens: number; textOutputUsdPerMTok: number; imageTokensPerImage: number }>
 > = {
-  "gemini-3.1-flash-image": { maxOutputTokens: 2_048, textOutputUsdPerMTok: 3 },
-  "gemini-3.1-flash-lite-image": { maxOutputTokens: 2_048, textOutputUsdPerMTok: 1.5 },
+  // imageTokensPerImage: what one 1K image is billed as, from the usage the
+  // measurement read (`output_tokens_by_modality` image: 1,120 on every
+  // delivered sample, worksheet sections I and J). Settlement prices billed
+  // image tokens in units of it, so a response that carried more than one image
+  // is not settled as one.
+  "gemini-3.1-flash-image": { maxOutputTokens: 2_048, textOutputUsdPerMTok: 3, imageTokensPerImage: 1_120 },
+  "gemini-3.1-flash-lite-image": { maxOutputTokens: 2_048, textOutputUsdPerMTok: 1.5, imageTokensPerImage: 1_120 },
 };
 
 /** Non-image billable tokens are held at this many times the limit sent. */
