@@ -11,6 +11,10 @@
 //  1. every earlier call of the day whose outcome is unknown is looked up by
 //     its job id (`generate get`); one that stays unknown, or has no id,
 //     refuses this call;
+//  1b. each reference picture is uploaded once a day (`upload create`) and
+//     passed by its upload id: a local path makes the CLI upload the file
+//     again on every command, so `cost` and `create` each uploaded every
+//     logo and base picture (324 copies on 2026-11-13 for 41 pictures);
 //  2. `generate cost` prices the exact request without submitting it; a price
 //     above HF_MAX_CALL_COST, or one that cannot be read, refuses it;
 //  3. the ledger admits it (model, ratio, one picture, daily cap) and records
@@ -22,7 +26,9 @@
 //     makes it exit at once, which stopped the first run on 2026-11-09); a
 //     timeout leaves the entry unknown with its id, for step 1 of the next call.
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 
 import { admit, brisbaneDay, downloadResult, HF_ASPECT_RATIO, HF_MODEL, ledgerPath, requestProblem, resolveUnsettled, settle } from "./higgsfield-cap.mjs";
 
@@ -65,6 +71,66 @@ export function parseJson(text) {
     const start = trimmed.search(/[[{]/u);
     return start >= 0 ? JSON.parse(trimmed.slice(start)) : null;
   }
+}
+
+const UPLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/** The day's upload ids by the sha256 of the uploaded bytes. A new file each day, so an upload deleted in Higgsfield's library is not used again past that day. */
+export const uploadsPath = (jobDir, day) => path.join(jobDir, `higgsfield-uploads-${day}.json`);
+
+/** The id an `upload create --json` answered (`id`, `upload_id` or `media_id`, on the top object or one under it), or null. */
+export function uploadIdOf(value) {
+  for (const node of walk(value)) {
+    if (!node || typeof node !== "object" || Array.isArray(node)) continue;
+    for (const key of ["id", "upload_id", "media_id"]) if (typeof node[key] === "string" && UPLOAD_ID.test(node[key])) return node[key];
+  }
+  return null;
+}
+
+/**
+ * Each reference as an upload id. A local file is uploaded only the first time
+ * its bytes are seen that day; an id (upload or job) is passed through. Nothing
+ * is spent by an upload, and one that fails stops the picture before pricing.
+ */
+export function referenceIds(references, { jobDir, day, cli }) {
+  const file = uploadsPath(jobDir, day);
+  let known = {};
+  try {
+    known = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) ?? {} : {};
+  } catch {
+    known = {};
+  }
+  const ids = [];
+  for (const reference of references) {
+    if (UPLOAD_ID.test(reference)) {
+      ids.push(reference);
+      continue;
+    }
+    let bytes;
+    try {
+      bytes = readFileSync(reference);
+    } catch {
+      return { ok: false, reason: "reference_unreadable", detail: { file: path.basename(reference) } };
+    }
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    if (!known[hash]) {
+      const uploaded = cli(["upload", "create", reference, "--json"]);
+      let id = null;
+      try {
+        id = uploaded.status === 0 ? uploadIdOf(parseJson(uploaded.stdout)) : null;
+      } catch {
+        id = null;
+      }
+      if (!id) return { ok: false, reason: "reference_upload_failed", detail: { file: path.basename(reference), status: uploaded.status } };
+      known[hash] = id;
+      // Before the ledger exists, so the job folder may not yet.
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, `${JSON.stringify(known, null, 2)}
+`);
+    }
+    ids.push(known[hash]);
+  }
+  return { ok: true, ids };
 }
 
 /** The job ids a create answered: `id`, `job_id` or `request_id` on the top object or its list. */
@@ -123,7 +189,7 @@ const requestArgs = (request) => [
  * @returns {Promise<{ok: true, jobId: string, cost: number, out: string} | {ok: false, reason: string, detail?: object}>}
  */
 export async function makeImage({ prompt, references = [], out, label, jobDir, env = process.env, cli = cliRunner(env), fetchBytes = defaultFetch, day = brisbaneDay() }) {
-  const request = { model: HF_MODEL, aspect_ratio: HF_ASPECT_RATIO, count: 1, prompt, ...(references.length > 0 ? { image_references: references } : {}) };
+  let request = { model: HF_MODEL, aspect_ratio: HF_ASPECT_RATIO, count: 1, prompt, ...(references.length > 0 ? { image_references: references } : {}) };
   const problem = requestProblem(request);
   if (problem) return { ok: false, reason: problem };
   const file = ledgerPath(jobDir, day);
@@ -135,6 +201,12 @@ export async function makeImage({ prompt, references = [], out, label, jobDir, e
   };
   const open = await resolveUnsettled(file, lookup);
   if (open.length > 0) return { ok: false, reason: "unknown_outcome_pending", detail: { entries: open.map((entry) => entry.id) } };
+
+  if (references.length > 0) {
+    const uploaded = referenceIds(references, { jobDir, day, cli });
+    if (!uploaded.ok) return uploaded;
+    request = { ...request, image_references: uploaded.ids };
+  }
 
   const priced = cli(["generate", "cost", ...requestArgs(request)]);
   let cost = null;

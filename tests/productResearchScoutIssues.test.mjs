@@ -33,6 +33,20 @@ test("issues come from a payload the observation core accepts, and nothing else"
   assert.equal(issuesFromObservationPayload(null), null);
 });
 
+test("a stored payload whose keys JSONB reordered is still read", () => {
+  // Postgres JSONB does not keep key order; production's stored payload came
+  // back with its count keys in another order and every triage was refused.
+  const reorder = (value) => {
+    if (Array.isArray(value)) return value.map(reorder);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.keys(value).reverse().map((key) => [key, reorder(value[key])]));
+    }
+    return value;
+  };
+  const issues = issuesFromObservationPayload(reorder(payload()));
+  assert.deepEqual(issues?.map((issue) => issue.id), ["881", "1277"]);
+});
+
 test("the prompt names every issue with its verdict and fences the data", () => {
   const text = issueTriagePromptText(issuesFromObservationPayload(payload()), new Date("2026-11-10T21:30:00Z"));
   assert.match(text, /#881 \| verdict=landed_but_unverified/);

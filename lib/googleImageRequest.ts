@@ -311,6 +311,22 @@ export const googleNonImageBillableTokens = (payload: unknown): number | null =>
 };
 
 /**
+ * Image tokens a response billed (`usage.output_tokens_by_modality`, image),
+ * whether or not the strict parser accepts the response -- one that carried
+ * two images is refused and was still billed for both. Null when the response
+ * reports no image row, so the caller falls back to counting images.
+ */
+export const googleBilledImageTokens = (payload: unknown): number | null => {
+  const usageRaw = (payload as { usage?: unknown } | null)?.usage;
+  if (!usageRaw || typeof usageRaw !== "object") return null;
+  const byModality = (usageRaw as { output_tokens_by_modality?: unknown }).output_tokens_by_modality;
+  if (!Array.isArray(byModality)) return null;
+  const rows = byModality.filter((row) => (row as { modality?: unknown } | null)?.modality === "image");
+  if (rows.length === 0) return null;
+  return rows.reduce((sum: number, row: unknown) => sum + finiteCount((row as { tokens?: unknown }).tokens), 0);
+};
+
+/**
  * `usage.total_tokens` includes the input, so it can never be compared with
  * `max_output_tokens`. This is the quantity the staging measurement has to
  * put against the requested limit, and it exists as a named function so the

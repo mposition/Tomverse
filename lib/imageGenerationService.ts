@@ -1105,17 +1105,25 @@ const refundProviderBudget = async (
 /**
  * What a failed request that reached a measured-bound model cost: its
  * non-image tokens, the prompt (as reported, or its whole budget when not),
- * and the image when one was delivered. Null for any other model, and when the
- * response's count is unknown -- the reservation is then kept as it stands.
+ * and every image it billed -- by its image tokens where reported, otherwise
+ * by the images it carried. Null for any other model, and when the response's
+ * count is unknown -- the reservation is then kept as it stands.
  */
 export const failureIncurredCostMicroUsd = (
   snapshot: unknown,
-  billed: { nonImageBillableTokens: number | null | undefined; imageDelivered: boolean; inputTokens?: number } | undefined
+  billed: {
+    nonImageBillableTokens: number | null | undefined;
+    /** Image tokens the response billed; null or absent when not reported. */
+    imageTokens?: number | null;
+    /** Images the response carried: 1 delivered, 0 or several on a refusal. */
+    imageCount: number;
+    inputTokens?: number;
+  } | undefined
 ): number | null => {
   if (!billed) return null;
   const nonImage = measuredNonImageCostMicroUsd(snapshot, billed.nonImageBillableTokens);
   if (nonImage === null) return null;
-  const image = billed.imageDelivered ? reservationOutputCostMicroUsd(snapshot) : 0;
+  const image = billedImageCostMicroUsd(snapshot, billed.imageTokens, billed.imageCount);
   if (image === null) return null;
   const prompt =
     typeof billed.inputTokens === "number" && billed.inputTokens > 0
@@ -1188,7 +1196,14 @@ const finalizeFailure = async (input: {
    * storage or settlement then failed. Where that cost passes the whole
    * reservation, the provider budget is charged the difference.
    */
-  billed?: { nonImageBillableTokens: number | null | undefined; imageDelivered: boolean; inputTokens?: number };
+  billed?: {
+    nonImageBillableTokens: number | null | undefined;
+    /** Image tokens the response billed; null or absent when not reported. */
+    imageTokens?: number | null;
+    /** Images the response carried: 1 delivered, 0 or several on a refusal. */
+    imageCount: number;
+    inputTokens?: number;
+  };
   /**
    * Whether this caller may also claim a row already in `settling`, and on
    * what grounds. Omitted means no -- the ordinary failure paths must never
@@ -1360,6 +1375,31 @@ export const reservationOutputCostMicroUsd = (
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : null;
+};
+
+/**
+ * What the images a response billed cost, at the reservation's per-image
+ * price: in units of the frozen tokens-per-image where the response reported
+ * image tokens, otherwise per image it carried. Null when an image was billed
+ * and the reservation has no per-image price to put on it.
+ */
+export const billedImageCostMicroUsd = (
+  snapshot: unknown,
+  imageTokens: number | null | undefined,
+  imageCount: number
+): number | null => {
+  const perImageTokens = (snapshot as { measuredNonImageBound?: { imageTokensPerImage?: unknown } | null } | null)
+    ?.measuredNonImageBound?.imageTokensPerImage;
+  const byTokens =
+    typeof imageTokens === "number" &&
+    imageTokens >= 0 &&
+    typeof perImageTokens === "number" &&
+    Number.isFinite(perImageTokens) &&
+    perImageTokens > 0;
+  if (byTokens ? imageTokens === 0 : !(imageCount > 0)) return 0;
+  const perImage = reservationOutputCostMicroUsd(snapshot);
+  if (perImage === null) return null;
+  return byTokens ? Math.ceil((perImage * (imageTokens as number)) / (perImageTokens as number)) : perImage * imageCount;
 };
 
 /** The measured bound the reservation was priced on, or null (none, or an older snapshot). */
@@ -1539,7 +1579,11 @@ export const processImageGeneration = async (
         // The provider was reached (or unreachable in a way that may still
         // have billed); keep the budget charge -- conservative direction.
         releaseProviderBudget: false,
-        billed: { nonImageBillableTokens: providerError.nonImageBillableTokens, imageDelivered: false },
+        billed: {
+          nonImageBillableTokens: providerError.nonImageBillableTokens,
+          imageTokens: providerError.billedImageTokens,
+          imageCount: providerError.billedImageCount,
+        },
       });
       return;
     }
@@ -1573,7 +1617,8 @@ export const processImageGeneration = async (
         releaseProviderBudget: false,
         billed: {
           nonImageBillableTokens: result.nonImageBillableTokens,
-          imageDelivered: true,
+          imageTokens: result.billedImageTokens,
+          imageCount: 1,
           inputTokens: result.inputTokens,
         },
       });
@@ -1760,10 +1805,22 @@ export const processImageGeneration = async (
           })
         );
       }
+      // A measured-bound model billed by image tokens: more than one image's
+      // worth (a working sketch, a second image) is spend past the price, and
+      // the provider budget has to see it. Zero for every other model.
+      const extraImageCost =
+        snapshotOutputCost === null || !frozenMeasuredBound(reservation.pricingSnapshot)
+          ? 0
+          : Math.max(
+              0,
+              (billedImageCostMicroUsd(reservation.pricingSnapshot, result.billedImageTokens, 1) ?? snapshotOutputCost) -
+                snapshotOutputCost
+            );
       const actualCostMicroUsd =
         snapshotOutputCost === null || thinkingCost === null || editInputCost === null
           ? Number(reservation.reservedCostMicroUsd)
           : snapshotOutputCost +
+            extraImageCost +
             promptCostMicroUsd(result.inputTokens) +
             editInputCost +
             thinkingCost;
@@ -1851,7 +1908,8 @@ export const processImageGeneration = async (
         ? {
             billed: {
               nonImageBillableTokens: answered.nonImageBillableTokens,
-              imageDelivered: true,
+              imageTokens: answered.billedImageTokens,
+              imageCount: 1,
               inputTokens: answered.inputTokens,
             },
           }
