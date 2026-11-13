@@ -334,6 +334,24 @@ test("the router asks an OpenAI model for low reasoning effort and leaves others
   assert.ok(AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS > AUTO_LLM_ROUTER_TIMEOUT_MS);
 });
 
+test("the router's reasoning effort is low unless the operator lowers it to a listed value", async () => {
+  const { autoLlmRouterReasoningEffort, autoLlmRouterProviderOptions } = await import("../lib/autoLlmRouterCore.ts");
+  assert.equal(autoLlmRouterReasoningEffort(undefined), "low");
+  assert.equal(autoLlmRouterReasoningEffort("none"), "none");
+  assert.equal(autoLlmRouterReasoningEffort(" Minimal "), "minimal");
+  // Never raised, and nothing outside the list is sent.
+  for (const raw of ["high", "medium", "xhigh", "fast"]) assert.equal(autoLlmRouterReasoningEffort(raw), "low", raw);
+  const saved = process.env.AUTO_LLM_ROUTER_REASONING_EFFORT;
+  process.env.AUTO_LLM_ROUTER_REASONING_EFFORT = "none";
+  try {
+    assert.deepEqual(autoLlmRouterProviderOptions("openai"), { openai: { strictJsonSchema: true, reasoningEffort: "none" } });
+    assert.deepEqual(autoLlmRouterProviderOptions("anthropic"), { openai: { strictJsonSchema: true } });
+  } finally {
+    if (saved === undefined) delete process.env.AUTO_LLM_ROUTER_REASONING_EFFORT;
+    else process.env.AUTO_LLM_ROUTER_REASONING_EFFORT = saved;
+  }
+});
+
 test("a router call's worst case bounds input by bytes and output by its token cap", async () => {
   const { autoLlmRouterWorstCaseMicroUsd } = await import("../lib/autoLlmRouterCore.ts");
   // 3 + 6 UTF-8 bytes ("abc" + two Hangul syllables), 200 output tokens.

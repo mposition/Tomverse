@@ -68,7 +68,7 @@ import { chatRouterLocationFusionEnabled, existingChatRouterLocationFusionEnable
 import { consumeChatLocationIntentLimit } from "@/lib/chatLocationIntentRateLimit";
 import { openRouterLocation, routerLocationDigest, sealRouterLocation, type RouterLocationContinuation } from "@/lib/chatRouterLocationContinuation";
 import { claimRouterLocation, consumeRouterLocation, routerLocationRefused, routerLocationResponse, type RouterLocationClaim } from "@/lib/chatRouterLocationPreparation";
-import { combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
+import { chatRouterImageHedgeMs, combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
 import {
     latestUserTurnHasAttachments,
     latestUserTurnHasImageAttachment,
@@ -2470,6 +2470,10 @@ async function handleChatPost(
         const allowRouterSearchPlan = routerSearchPlanCandidate && presearchFlagEnabled;
         // Set only when the router model was actually asked.
         let routerCallOutcome = null as string | null;
+        // A combined router call slower than this starts the separate image
+        // classification beside it (off unless CHAT_ROUTER_IMAGE_HEDGE_MS).
+        const imageHedgeMs = imageRouting.context ? chatRouterImageHedgeMs() : null;
+        const imageHedge = imageHedgeMs ? setTimeout(() => imageRouting.hedge(), imageHedgeMs) : null;
         const llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
                       prompt: profileTextFor(autoRoutingMessages),
@@ -2504,6 +2508,7 @@ async function handleChatPost(
                           : imageRouting.resolve().then((decision) => !decision.image),
                   })
             : null;
+        if (imageHedge) clearTimeout(imageHedge);
         finishRoutingTiming();
         if (fusion?.resume && fusion.resume.routerDigest !== fusionRouterDigest) throw routerLocationRefused();
         if (earlyContextRefusal) return earlyContextRefusal;

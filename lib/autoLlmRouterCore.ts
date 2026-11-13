@@ -125,9 +125,25 @@ export const autoLlmRouterFailureDetail = (error: unknown, timedOut: boolean): A
 export const autoLlmRouterProviderOptions = (provider: string) => ({
     openai: {
         strictJsonSchema: true,
-        ...(provider === "openai" ? { reasoningEffort: "low" as const } : {}),
+        ...(provider === "openai" ? { reasoningEffort: autoLlmRouterReasoningEffort() } : {}),
     },
 });
+
+/**
+ * The OpenAI router's reasoning effort: `low` unless the operator sets
+ * `AUTO_LLM_ROUTER_REASONING_EFFORT` to `none` or `minimal` (2026-11-13: the
+ * router's 2.9-5.5 s left little room under its 7-8 s deadline once candidates
+ * and combined intents grew). Not lowered by default: a model that does not
+ * implement an effort rejects every call with it, and whether the configured
+ * router model implements `none` is checked by trying it, not assumed. A
+ * value outside the list is ignored. The router log reports the effort sent.
+ */
+export const AUTO_LLM_ROUTER_REASONING_EFFORTS = ["none", "minimal", "low"] as const;
+export type AutoLlmRouterReasoningEffort = (typeof AUTO_LLM_ROUTER_REASONING_EFFORTS)[number];
+export const autoLlmRouterReasoningEffort = (
+    raw: string | undefined = process.env.AUTO_LLM_ROUTER_REASONING_EFFORT
+): AutoLlmRouterReasoningEffort =>
+    AUTO_LLM_ROUTER_REASONING_EFFORTS.find(effort => effort === raw?.trim().toLowerCase()) ?? "low";
 
 /**
  * What the router model is told about one candidate.
