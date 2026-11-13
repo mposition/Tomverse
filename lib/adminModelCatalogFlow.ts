@@ -120,6 +120,7 @@ export type ReasonMessage =
   | { key: "priceUnverified" }
   | { key: "unofficialSource"; host: string }
   | { key: "creditsBelowFloor"; quality: string; size: string }
+  | { key: "priceBelowMeasured"; quality: string; size: string }
   | { key: "worstCaseUnbounded" }
   | { key: "thinkingCapBelowMinimum"; minimum: string }
   | { key: "providerBudgetMissing" }
@@ -179,6 +180,10 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       if (/^\d+$/.test(tail)) return { key: "codingWeightBelowFloor", floor: Number(tail) };
       const [quality = "", size = ""] = tail.split("/");
       return { key: "creditsBelowFloor", quality, size };
+    }
+    case "price_below_measured_cost": {
+      const [quality = "", size = ""] = tail.split("/");
+      return { key: "priceBelowMeasured", quality, size };
     }
     case "worst_case_cost_unbounded":
       return { key: "worstCaseUnbounded" };

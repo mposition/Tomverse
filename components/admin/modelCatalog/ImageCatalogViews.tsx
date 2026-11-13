@@ -45,6 +45,8 @@ export const reasonText = (m: CatalogMessages, message: ReasonMessage): string =
       return r.unofficialSource(message.host);
     case "creditsBelowFloor":
       return r.creditsBelowFloor(m.quality[message.quality] ?? message.quality, m.size[message.size] ?? message.size);
+    case "priceBelowMeasured":
+      return r.priceBelowMeasured(m.quality[message.quality] ?? message.quality, m.size[message.size] ?? message.size);
     case "thinkingCapBelowMinimum":
       return r.thinkingCapBelowMinimum(message.minimum);
     case "noPriceFound":

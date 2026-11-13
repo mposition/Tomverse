@@ -408,6 +408,19 @@ export const judgeImageModel = (
       reasons.push(`measured_request_required:max_output_tokens_${bound.maxOutputTokens}_no_thinking_level`);
     }
   } else {
+    // Measured tokens per image hold the price as well as the thinking: an
+    // option priced below its confirmed tokens at the confirmed rate is a
+    // price older than the measurement, refused until a new draft is applied.
+    const measured = billingTermsApplyTo(model.provider, model.billingTerms);
+    if (measured?.kind === "tokens_per_image") {
+      for (const price of model.prices) {
+        const tokens = measured.tokens.find((row) => row.quality === price.quality && row.size === price.size)?.tokens;
+        const cost = tokens === undefined ? null : Math.ceil(tokens * measured.imageOutputUsdPerMTok);
+        if (cost !== null && price.outputCostMicroUsd < cost) {
+          reasons.push(`price_below_measured_cost:${price.quality}/${price.size}`);
+        }
+      }
+    }
     for (const price of model.prices) {
       const floor = deps.minimumCredits(model, price);
       if (floor === null || price.credits < floor) {

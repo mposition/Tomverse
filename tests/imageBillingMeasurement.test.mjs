@@ -395,3 +395,39 @@ test("the panel offers a measurement for an unbounded or unpriced refusal on a m
   assert.equal(suggestsMeasurement("qwen", ["credits_below_floor:low/1024x1024"]), false);
   assert.equal(suggestsMeasurement("fal", ["worst_case_cost_unbounded"]), false);
 });
+
+test("a price older than the confirmed tokens per image is refused until a new draft", () => {
+  const profile = {
+    provider: "openai",
+    apiModelId: "gpt-image-2.6-flare",
+    name: "Flare",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["high"],
+    latencyClass: "balanced",
+    provenance: ["c2pa"],
+    outputMimeTypes: ["image/png"],
+  };
+  const revision = (outputCostMicroUsd) => ({
+    modelId: "flare",
+    pricingVersion: "v1",
+    prices: [{ quality: "high", size: "1024x1024", credits: 400, outputCostMicroUsd }],
+    verification: { verifiedAt: "2026-11-13", sources: ["https://developers.openai.com/api/docs/pricing"], thinkingCapMicroUsd: 0 },
+    effectiveFrom: new Date("2026-11-01"),
+  });
+  const judge = (model) => judgeImageModel(model, { minimumCredits: minimumCreditsForImageOption, providerBudgetReady: () => true });
+  const resolve = (cost, tokens) =>
+    resolveImageCatalog({
+      seed: IMAGE_MODEL_REGISTRY,
+      rows: [runtimeRow("flare", profile)],
+      revisions: [revision(cost)],
+      now: NOW,
+      judge,
+      billingTerms: [termsRow("t", "openai", "gpt-image-2.6-flare", { ...flareTerms, tokens: [{ quality: "high", size: "1024x1024", tokens }] }, "2026-11-13")],
+    }).models.find((model) => model.id === "flare");
+  assert.equal(resolve(124_800, 4_160).disabledReason, null);
+  // Re-measured at twice the tokens: the served price no longer covers it.
+  const stale = resolve(124_800, 8_320);
+  assert.equal(stale.disabledReason, "price_unverified");
+  assert.ok(judge({ ...stale, disabledReason: null }).reasons.includes("price_below_measured_cost:high/1024x1024"));
+});

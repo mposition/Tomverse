@@ -303,6 +303,8 @@ export const adminModelCatalogMessages = defineAdminMessages({
       unofficialSource: (host: string) => `A source is not the provider's official documentation: ${host}`,
       creditsBelowFloor: (quality: string, size: string) => `Credits for ${quality}, ${size} are below the minimum.`,
       worstCaseUnbounded: "No reasoning cost cap is stated, so the worst-case cost is unknown.",
+      priceBelowMeasured: (quality: string, size: string) =>
+        `The cost for ${quality}, ${size} is below what the confirmed measurement found. Make a new price draft.`,
       thinkingCapBelowMinimum: (minimum: string) => `The reasoning cost cap is below the minimum of ${minimum}.`,
       providerBudgetMissing: "This provider has no budget yet. Set it before turning the model on.",
       draftLlmOff: "Drafting is off.",
@@ -720,6 +722,8 @@ export const adminModelCatalogMessages = defineAdminMessages({
       unofficialSource: (host: string) => `공식 문서가 아닌 출처가 있습니다: ${host}`,
       creditsBelowFloor: (quality: string, size: string) => `${quality} · ${size}의 판매 크레딧이 최소값보다 낮습니다.`,
       worstCaseUnbounded: "추론 비용 상한이 없어 최악의 비용을 알 수 없습니다.",
+      priceBelowMeasured: (quality: string, size: string) =>
+        `${quality}, ${size}의 원가가 확정된 실측 값보다 낮습니다. 새 가격 초안을 만들어 주세요.`,
       thinkingCapBelowMinimum: (minimum: string) => `추론 비용 상한이 최소 ${minimum}보다 낮습니다.`,
       providerBudgetMissing: "이 공급자의 예산이 아직 없습니다. 켜기 전에 예산을 정해 주세요.",
       draftLlmOff: "초안 기능이 꺼져 있습니다.",

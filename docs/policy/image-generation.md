@@ -721,7 +721,10 @@ env, 그리고 Admin 카탈로그의 켜기. seed는 `operational_hold`·가격 
 - **측정 결과가 스스로 조건을 확정하지 않는다.** 판정(`measurementVerdict`)은 조건을 제안할
   뿐이고, 운영자가 "이 조건으로 확정"을 눌러야 `ImageModelBillingTerms`(append-only, 최신 행이
   유효)에 기록된다. append-only는 DB trigger가 강제한다(UPDATE·DELETE·TRUNCATE 거절). OpenAI
-  판정은 계획한 모든 표본이 이미지와 토큰 수를 보고해야 확정할 수 있다. 확정 때 서버가 저장된 표본으로 판정을 다시 계산하고, 출처 URL은
+  판정은 계획한 모든 표본이 이미지와 토큰 수를 보고해야 확정할 수 있다. `tokens_per_image`가
+  확정된 모델은 판정이 옵션별 원가가 "확정 단가 × 확정 토큰 수" 이상인지도 본다
+  (`price_below_measured_cost`): 다시 재서 토큰이 늘면 기존 가격 개정은 새 초안을 적용할
+  때까지 서비스되지 않는다. 확정 때 서버가 저장된 표본으로 판정을 다시 계산하고, 출처 URL은
   `isOfficialSourceUrl`을 통과해야 하며, 감사 기록과 한 transaction으로 커밋된다.
 - 확정된 조건은 판정(`judgeImageModel`, `imageThinkingCapEnforced`), 어댑터, 예약 snapshot의
   `measuredNonImageBound`, 초안(`imageDraftFromAnswer`)이 함께 읽는다. 켜는 절차는 그대로다:
