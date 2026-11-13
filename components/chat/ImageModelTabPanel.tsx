@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronRight, LockKeyhole, Sparkles } from "lucide-react";
+import { ChevronRight, LockKeyhole } from "lucide-react";
+import { ModelLogo } from "@/components/chat/ModelLogo";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
@@ -19,11 +20,11 @@ import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvi
 // different pricing. Mixing the two into one list would make that word mean
 // two things in the same column.
 //
-// Every registered model is listed, including the ones held disabled by the
-// section 12 price verification rule -- a model the product has decided about
-// but cannot yet run is more honest as a stated hold than as an absence. A held
-// model is not selectable; only the verification state changes that, never a
-// click here.
+// Only models that can run are listed. Owner decision 2026-11-13: a held
+// model (an unverified price, an unbounded worst case, an operator hold) is
+// operator state, and a row a user cannot pick is noise in the picker. The
+// Admin catalogue is where holds are stated. Each row carries its owner's
+// logo, the same ModelLogo the chat list uses.
 
 const interpolate = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce(
@@ -91,7 +92,8 @@ export function ImageModelTabPanel({
   isKeyboardCompact,
 }: ImageModelTabPanelProps) {
   const { t } = useLanguage();
-  const { models } = useImageModelCatalog();
+  const { models: catalogue } = useImageModelCatalog();
+  const models = catalogue.filter((model) => model.disabledReason === null);
 
   return (
     <div
@@ -108,7 +110,6 @@ export function ImageModelTabPanel({
 
       <ul className="space-y-2">
         {models.map((model) => {
-          const held = model.disabledReason !== null;
           const brand = imageModelBrandParts(model);
           // "From" pricing: the picker does not know which quality and size the
           // workspace will end on, so it quotes the cheapest option rather than
@@ -122,11 +123,8 @@ export function ImageModelTabPanel({
                 type="button"
                 data-testid="image-model-option"
                 data-model-id={model.id}
-                data-held={held ? "true" : "false"}
-                data-locked={!held && lock ? "true" : "false"}
-                disabled={held}
+                data-locked={lock ? "true" : "false"}
                 onClick={() => {
-                  if (held) return;
                   if (lock) {
                     onLockedClick(lock);
                     return;
@@ -135,15 +133,11 @@ export function ImageModelTabPanel({
                 }}
                 className={`flex w-full items-start gap-3 rounded-xl border px-3 text-left transition ${
                   touchTarget ? "min-h-14 py-2.5" : "py-2.5"
-                } ${
-                  held
-                    ? "cursor-not-allowed border-zinc-200 bg-zinc-50 opacity-70 dark:border-zinc-800 dark:bg-zinc-900/40"
-                    : "border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-                }`}
+                } border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800`}
               >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-image-500/10 text-accent-image-500">
-                  <Sparkles className="h-5 w-5" aria-hidden="true" />
-                </span>
+                {/* Whose model it is, like the chat list: Nano Banana 2 through
+                    fal shows Google's mark, and the subtitle names fal. */}
+                <ModelLogo provider={brand.owner} size="lg" className="h-9 w-9" />
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">
                     {model.name}
@@ -168,15 +162,7 @@ export function ImageModelTabPanel({
                     {" · "}
                     {t(LATENCY_LABEL_KEYS[model.latencyClass])}
                   </span>
-                  {held && (
-                    <span
-                      data-testid="image-model-hold-note"
-                      className="mt-1 text-[11px] font-bold leading-4 text-amber-600 dark:text-amber-400"
-                    >
-                      {t("chat.imageModelHoldPriceUnverified")}
-                    </span>
-                  )}
-                  {!held && lock && (
+                  {lock && (
                     <span className="mt-1 flex items-center gap-1 text-[11px] font-bold text-accent-image-600 dark:text-accent-image-300">
                       <LockKeyhole className="h-3 w-3" aria-hidden="true" />
                       {lock === "sign_in"
@@ -196,12 +182,10 @@ export function ImageModelTabPanel({
                       })}
                     />
                   )}
-                  {!held && (
-                    <ChevronRight
-                      className="h-4 w-4 text-zinc-400"
-                      aria-hidden="true"
-                    />
-                  )}
+                  <ChevronRight
+                    className="h-4 w-4 text-zinc-400"
+                    aria-hidden="true"
+                  />
                 </span>
               </button>
             </li>

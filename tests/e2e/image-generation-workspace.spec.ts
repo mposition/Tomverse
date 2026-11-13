@@ -1056,24 +1056,20 @@ test("the catalogue's image tab is its own list and seeds the picked model", { t
   await expect(page.getByTestId("recommended-model-option")).toHaveCount(0);
   await expect(page.getByTestId("model-picker-selection-count")).toHaveCount(0);
 
-  // Every registered model is listed, including the ones held by the price
-  // verification rule -- stated as a hold, never silently absent. The count is
-  // asserted against the registry rather than hard-coded, so registering
-  // another candidate does not fail this test for the wrong reason.
-  const heldInRegistry = listImageModels().filter(
-    (model) => model.disabledReason !== null
-  ).length;
-  expect(heldInRegistry).toBeGreaterThan(0);
-  const held = panel.getByTestId("image-model-option").filter({
-    has: page.getByTestId("image-model-hold-note"),
-  });
-  await expect(held).toHaveCount(heldInRegistry);
-  for (let index = 0; index < heldInRegistry; index += 1) {
-    await expect(held.nth(index)).toBeDisabled();
-  }
-  await expect(panel.getByTestId("image-model-option")).toHaveCount(
-    listImageModels().length
+  // Only models that can run are listed (owner decision 2026-11-13): a held
+  // model is operator state, shown in the Admin catalogue. Counted against the
+  // registry rather than hard-coded, so registering another candidate does not
+  // fail this test for the wrong reason.
+  const enabledInRegistry = listImageModels().filter(
+    (model) => model.disabledReason === null
   );
+  expect(listImageModels().length).toBeGreaterThan(enabledInRegistry.length);
+  await expect(panel.getByTestId("image-model-option")).toHaveCount(
+    enabledInRegistry.length
+  );
+  for (const model of listImageModels().filter((entry) => entry.disabledReason !== null)) {
+    await expect(panel.locator(`[data-model-id="${model.id}"]`)).toHaveCount(0);
+  }
 
   // The subtitle credits the model's owner and names the supplier when they
   // differ. Staging showed why this needs asserting: the row read `provider`,
@@ -1094,7 +1090,6 @@ test("the catalogue's image tab is its own list and seeds the picked model", { t
 
   await panel
     .getByTestId("image-model-option")
-    .filter({ hasNot: page.getByTestId("image-model-hold-note") })
     .first()
     .click();
 
@@ -1116,7 +1111,6 @@ test("a Free plan can select an image model without an upgrade redirect", { tag:
   const selectable = page
     .getByTestId("image-model-tab-panel")
     .getByTestId("image-model-option")
-    .filter({ hasNot: page.getByTestId("image-model-hold-note") })
     .first();
   await expect(selectable).toBeVisible();
   await expect(selectable).toHaveAttribute("data-locked", "false");
@@ -1145,7 +1139,6 @@ test("the catalogue entry keeps the chat draft when leaving image mode", { tag: 
   await page
     .getByTestId("image-model-tab-panel")
     .getByTestId("image-model-option")
-    .filter({ hasNot: page.getByTestId("image-model-hold-note") })
     .first()
     .click();
 
