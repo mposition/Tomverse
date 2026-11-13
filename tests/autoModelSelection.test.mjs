@@ -258,6 +258,24 @@ test("an unsupported raw file pick preserves a capable primary instead of fabric
   }
 });
 
+test("file intent parsing preserves explicit false and rejects non-boolean values", () => {
+  const candidates = autoLlmRouterCandidates(
+    ["gpt-5-6-luna"], AVAILABLE_MODELS, { "gpt-5-6-luna": 1 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+  );
+  const withoutIntent = parseAutoLlmRouterOutput({ modelId: "gpt-5-6-luna" }, candidates);
+  assert.equal("requiresFileGeneration" in withoutIntent, false);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: false,
+  }, candidates).requiresFileGeneration, false);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: true,
+  }, candidates).requiresFileGeneration, true);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: "true",
+  }, candidates), null);
+});
+
 test("file enforcement considers all eligible candidates even when a capable model is absent from ranked fallbacks", () => {
   const original = selectAutoModel(input());
   const selection = { ...original, modelId: "deepseek-v4-flash", fallbackCandidateModelIds: [],
