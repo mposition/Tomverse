@@ -484,3 +484,30 @@ test("a Qwen result that was generated but could not be downloaded is marked as 
   }
   assert.equal(urls.length, 2);
 });
+
+test("a Google measurement sample is one request, a rate limit included; other providers are refused", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ error: { code: 429, message: "rate" } }, { status: 429 });
+  };
+  try {
+    await withEnv("GOOGLE_GENERATIVE_AI_API_KEY", "test-google-key", () =>
+      assert.rejects(
+        generateImageForMeasurement(
+          candidate("google", "gemini-nano-banana-2.1", { maxOutputTokens: 8_192, deliveryMimeType: "image/jpeg", outputMimeTypes: ["image/jpeg"] }),
+          { prompt: "p", size: "1024x1024", quality: "medium" }
+        ),
+        (error) => error instanceof ImageProviderError && error.status === 429
+      )
+    );
+    await assert.rejects(
+      generateImageForMeasurement(candidate("xai", "grok-x"), { prompt: "p", size: "1024x1024", quality: "medium" }),
+      /No billing measurement/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 1);
+});

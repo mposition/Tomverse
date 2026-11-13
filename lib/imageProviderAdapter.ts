@@ -465,10 +465,16 @@ type ImageRequestInput = {
  * budget and the operator's approved maximum instead. Never an edit, never
  * retried: one sample is one request.
  */
-export const generateImageForMeasurement = (
+export const generateImageForMeasurement = async (
   model: ImageModelProfile,
   input: { prompt: string; size: ImageSize; quality: ImageQuality }
-): Promise<ImageProviderResult> => dispatchImageRequest(model, { ...input, retry: false });
+): Promise<ImageProviderResult> => {
+  // The providers whose adapters honour `retry: false` (Qwen never retries).
+  if (!["openai", "google", "qwen"].includes(model.provider)) {
+    throw new ImageProviderError("provider_failed", `No billing measurement for provider ${model.provider}.`);
+  }
+  return dispatchImageRequest(model, { ...input, retry: false });
+};
 
 const dispatchImageRequest = async (
   model: ImageModelProfile,
@@ -671,7 +677,7 @@ const generateWithOpenAi = async (
  */
 const generateWithGoogle = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize }
+  input: { prompt: string; size: ImageSize; retry?: boolean }
 ): Promise<ImageProviderResult> => {
   const body = buildGoogleImageRequest({
     apiModelId: model.apiModelId,
@@ -690,8 +696,10 @@ const generateWithGoogle = async (
   const requestParams = auditableRequestParams(body);
   const apiKey = getGoogleApiKey();
   let lastError: ImageProviderError | null = null;
+  // A measurement sends one request per sample, a rate limit included.
+  const retries = input.retry === false ? 0 : RETRY_DELAYS_MS.length;
 
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (attempt > 0) {
       const base = RETRY_DELAYS_MS[attempt - 1];
       await wait(base + Math.floor(Math.random() * 500));
