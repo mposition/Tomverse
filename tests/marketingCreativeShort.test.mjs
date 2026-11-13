@@ -344,6 +344,11 @@ test("the kit keeps a screen's crop in the gaps between lines and words, and rea
   assert.equal(screenWord(["Hello there.", "AI"], " Hello there. "), "Hello there.");
   assert.throws(() => screenWord(["Hello there."], "Hello"), /not one of the props' screen lines/u);
   assert.deepEqual(lineTimes([{ seconds: 2 }, { seconds: 1 }], 30), [{ from: 6, frames: 60 }, { from: 74, frames: 30 }]);
+  // The reviewer gets each locale's real captures and may open them: a screen's own words are not "unlisted" (run 20261113-2).
+  const runner = readFileSync(resolve("tools/marketing-video/run-creative-short.mjs"), "utf8");
+  assert.ok(runner.includes("real captures ${capturesIn(locale)"));
+  assert.ok(runner.includes('fileRule("Read", `job/creative/${run}/public/capture/**`)'));
+  assert.match(readFileSync(resolve("tools/marketing-video/CREATIVE-REVIEW.md"), "utf8"), /The words inside a screen are the\s+screen's own/u);
   // A caption line breaks between words only: never inside "week-by-week", never inside 哪裡.
   const { captionUnits } = await import("../tools/marketing-video/creative-kit/geometry.js");
   assert.ok(captionUnits("Can you give me a week-by-week checklist?", "en").includes("week-by-week"));
