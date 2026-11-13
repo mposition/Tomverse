@@ -2,6 +2,10 @@
 // <run>/film/Film.tsx, for one locale:
 //   node render-creative.mjs <run-dir> <locale> --stills [count]   -> <run>/review/<locale>/f-NN.png
 //   node render-creative.mjs <run-dir> <locale> --out <run>/out/<file>.mp4
+//   node render-creative.mjs <run-dir> <locale> --blocks             -> <run>/kit/blocks-<locale>.json
+// Each run first copies the creative kit into <run>/kit and writes the ink grid
+// of the locale's captures there (creative-layout.mjs), and the blocks of words
+// the film's Screen can crop.
 // The film's code is checked first (creative-core.mjs checkFilmSource) and is
 // refused before it is bundled. Its props are <run>/public/props-<locale>.json,
 // and <run>/public is the only folder it can load files from (staticFile).
@@ -16,7 +20,7 @@
 // bubblewrap on Linux it refuses; elsewhere (a developer's machine) it runs
 // only with CREATIVE_RENDER_UNSANDBOXED=1, and with the same bare environment.
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,7 +28,9 @@ import { fileURLToPath } from "node:url";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, renderStill, selectComposition } from "@remotion/renderer";
 
-import { checkFilmSource } from "./creative-core.mjs";
+import { AI_LINE, checkFilmSource } from "./creative-core.mjs";
+import { blocksOf, readGrid } from "./creative-kit/geometry.js";
+import { gridOfFile } from "./creative-layout.mjs";
 import { master } from "./ffmpeg-tools.mjs";
 
 export const FPS = 30;
@@ -53,12 +59,12 @@ if (process.env[INSIDE] !== "inside") {
   process.exit(ran.status ?? 1);
 }
 const usage = () => {
-  console.error("usage: node render-creative.mjs <run-dir> <locale> --stills [count] | --out <run-dir>/out/<file>.mp4");
+  console.error("usage: node render-creative.mjs <run-dir> <locale> --stills [count] | --out <run-dir>/out/<file>.mp4 | --blocks");
   process.exit(2);
 };
 
 const [runArg, locale, mode, value] = process.argv.slice(2);
-if (!runArg || !locale || !["--stills", "--out"].includes(mode ?? "")) usage();
+if (!runArg || !locale || !["--stills", "--out", "--blocks"].includes(mode ?? "")) usage();
 const run = path.resolve(runArg);
 const inside = (file) => !path.relative(run, file).startsWith("..") && !path.isAbsolute(path.relative(run, file));
 if (!/^[a-zA-Z-]{2,7}$/u.test(locale)) usage();
@@ -66,17 +72,47 @@ if (!/^[a-zA-Z-]{2,7}$/u.test(locale)) usage();
 const out = mode === "--out" ? path.resolve(value ?? "") : null;
 if (out !== null && (!value || !inside(out) || !out.endsWith(".mp4"))) usage();
 
+// The kit, fresh from the job's own copy (an edit in the run's copy is undone), and the ink grid
+// of each of this locale's captures, which its Screen keeps crops in the gaps of.
+const kitDir = path.join(run, "kit");
+rmSync(kitDir, { recursive: true, force: true });
+cpSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "creative-kit"), kitDir, { recursive: true });
+let props;
+try {
+  props = JSON.parse(readFileSync(path.join(run, "public", `props-${locale}.json`), "utf8"));
+} catch (error) {
+  console.log(JSON.stringify({ step: "render-creative", error: `no props for ${locale}: ${String(error?.message ?? error).split("\n")[0]}` }));
+  process.exit(1);
+}
+const layout = {};
+for (const capture of Array.isArray(props.captures) ? props.captures : []) {
+  const file = path.join(run, "public", String(capture.file));
+  if (!inside(file)) usage();
+  layout[capture.name] = gridOfFile(file);
+}
+writeFileSync(path.join(kitDir, `layout-${locale}.json`), JSON.stringify(layout));
+// The blocks of words in each capture, the crops Screen takes as they are: the builder reads them.
+const blocks = Object.fromEntries(Object.entries(layout).map(([name, entry]) => [name, blocksOf(readGrid(entry))]));
+writeFileSync(path.join(kitDir, `blocks-${locale}.json`), `{\n${Object.entries(blocks).map(([name, list]) => `${JSON.stringify(name)}: [\n${list.map((block) => `  ${JSON.stringify(block)}`).join(",\n")}\n]`).join(",\n")}\n}\n`);
+if (mode === "--blocks") {
+  console.log(JSON.stringify({ step: "render-creative", locale, blocks: path.relative(run, path.join(kitDir, `blocks-${locale}.json`)) }));
+  process.exit(0);
+}
+
 const problems = await checkFilmSource(path.join(run, "film"));
 if (problems.length > 0) {
   console.log(JSON.stringify({ step: "render-creative", refused: problems }));
   process.exit(3);
 }
 
+
 const entry = path.join(run, "entry.tsx");
 writeFileSync(
   entry,
   `import React from "react";
 import { Composition, registerRoot } from "remotion";
+import { KitRoot, type FilmProps } from "./kit";
+import layout from "./kit/layout-${locale}.json";
 // The brand faces, from the box's node_modules (it has no CJK system fonts):
 // "Geist Variable", "Instrument Serif", "Noto Sans KR/TC/SC Variable".
 import "@fontsource-variable/geist";
@@ -87,10 +123,15 @@ import "@fontsource-variable/noto-sans-tc";
 import "@fontsource-variable/noto-sans-sc";
 import { Film } from "./film/Film";
 
+const Framed = (props: Record<string, unknown>) => (
+  <KitRoot props={props as unknown as FilmProps} aiLine={${JSON.stringify(AI_LINE[locale] ?? "")}} layout={layout} final={${mode === "--out"}}>
+    <Film {...props} />
+  </KitRoot>
+);
 const Root = () => (
   <Composition
     id="Creative"
-    component={Film as React.ComponentType<Record<string, unknown>>}
+    component={Framed}
     width={1080}
     height={1920}
     fps={${FPS}}
@@ -106,7 +147,7 @@ registerRoot(Root);
 // removes it: 65 left behind filled the box's /tmp quota (EDQUOT, 2026-11-11).
 let serveUrl = null;
 try {
-  const inputProps = JSON.parse(readFileSync(path.join(run, "public", `props-${locale}.json`), "utf8"));
+  const inputProps = props;
   serveUrl = await bundle({ entryPoint: entry, publicDir: path.join(run, "public") });
   const composition = await selectComposition({ serveUrl, id: "Creative", inputProps });
 
