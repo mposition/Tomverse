@@ -7,7 +7,8 @@ import "server-only";
 
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { DAILY_PRODUCT_AGENT_PREFIX, dailyProductAgentKey, dailyProductDisplayState, scoutAgentId } from "@/lib/dailyProductAgentCore";
 import { prisma } from "@/lib/prisma";
 import {
   SCOUT_EXISTING_TITLES_MAX,
@@ -36,6 +37,7 @@ export type StoredSuggestion = {
   readonly statusChangedAt: Date | null;
   readonly amuxIdeaId: string | null;
   readonly modelId: string | null;
+  readonly agentWork?: { status: "claimed" | "needs_lookup" | "pr_opened" | "failed"; prUrl?: string; reason?: string };
 };
 
 /**
@@ -127,12 +129,37 @@ export async function listSuggestions(status: SuggestionStatus): Promise<StoredS
     take: SUGGESTION_LIST_LIMIT,
   });
   if (status !== "open") return rows;
+  const agentRows = rows.length > 0
+    ? await prisma.appSetting.findMany({ where: { key: { in: rows.map((row) => dailyProductAgentKey(scoutAgentId(row.id))) } }, select: { key: true, value: true } })
+    : [];
+  const work = new Map(agentRows.map((row) => [row.key, row.value]));
+  const visible: StoredSuggestion[] = rows.map((row) => {
+    const value = work.get(dailyProductAgentKey(scoutAgentId(row.id)));
+    return value === undefined ? row : { ...row, agentWork: dailyProductDisplayState(value, Date.now()) };
+  });
   const rank = { high: 0, medium: 1, low: 2 } as Record<string, number>;
-  return [...rows].sort((a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3));
+  return visible.sort((a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3));
 }
 
 export async function readSuggestion(id: string): Promise<StoredSuggestion | null> {
   return prisma.productResearchSuggestion.findUnique({ where: { id } });
+}
+
+/** A human AMUX send and an autonomous claim cannot both own the suggestion. */
+export async function reserveScoutSend(input: { id: string; session: Session; request: Request }): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    const claimed = await tx.appSetting.findUnique({ where: { key: dailyProductAgentKey(scoutAgentId(input.id)) }, select: { key: true } });
+    if (claimed) return false;
+    const key = `${DAILY_PRODUCT_AGENT_PREFIX}amux.${input.id}`;
+    const earlier = await tx.appSetting.findUnique({ where: { key }, select: { key: true } });
+    if (earlier) return true;
+    await tx.appSetting.create({ data: { key, value: "reserved" } });
+    await writeAdminAuditLog({ tx, session: input.session, request: input.request,
+      action: "product_research.suggestion.send_reserved", targetType: "product_research_suggestion", targetId: input.id,
+      summary: "Scout suggestion reserved for an operator AMUX send.", metadata: {} });
+    return true;
+  });
 }
 
 export const SUGGESTION_AUDIT_TARGET = "product_research_suggestion";

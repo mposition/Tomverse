@@ -121,6 +121,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
       sessionDisplay: "Scout suggestion",
     });
     if (!path.ok) return json({ error: path.code }, path.status);
+    const { reserveScoutSend } = await import("@/lib/productResearchScoutStore");
+    if (!(await reserveScoutSend({ session, request, id: suggestionId }))) {
+      return json({ error: "coding_agent_owns_suggestion" }, 409);
+    }
     const result = await sendScoutSuggestion({
       readBack: path.readBack,
       submit: path.submit,

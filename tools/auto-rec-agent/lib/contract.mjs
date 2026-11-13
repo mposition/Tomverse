@@ -11,6 +11,10 @@
 // other internal routes the Ubuntu host calls (review-orchestrator status).
 export const APP_CLAIM_PATH = "/api/internal/auto-router/recommendations/claim";
 export const APP_RESULT_PATH = "/api/internal/auto-router/recommendations/result";
+// Separate paths fail closed against an older app instead of silently taking
+// a legacy router claim that ignores the daily-mode header.
+export const DAILY_APP_CLAIM_PATH = "/api/internal/product-improvements/claim";
+export const DAILY_APP_RESULT_PATH = "/api/internal/product-improvements/result";
 export const appRequestHeaders = (secret) => ({
   authorization: `Bearer ${secret}`,
   "content-type": "application/json",
@@ -88,6 +92,8 @@ export const LIMITS = Object.freeze({
   leaseMarginMs: 5 * 60_000,
   // The gateway never publishes more than the hourly timer could ask for.
   publishesPerDay: 24,
+  tasksPerDay: 24,
+  dailyRunMs: 20 * 60 * 60_000,
   autoPrWaitMs: 5 * 60_000,
   autoPrPollMs: 15_000,
   bundleBytes: 50 * 1024 * 1024,

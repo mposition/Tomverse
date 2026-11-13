@@ -42,6 +42,8 @@ import { fileURLToPath } from "node:url";
 import {
   APP_CLAIM_PATH,
   APP_RESULT_PATH,
+  DAILY_APP_CLAIM_PATH,
+  DAILY_APP_RESULT_PATH,
   GITHUB_API,
   LIMITS,
   REPO_OWNER,
@@ -82,6 +84,7 @@ export function readGatewayConfig(env) {
     missing,
     appOrigin: origin,
     appSecret: env.AUTOREC_APP_SECRET ?? "",
+    dailyProduct: env.AUTOREC_WORK_MODE === "daily-product",
     githubToken: env.AUTOREC_GITHUB_TOKEN ?? "",
     // systemd sets STATE_DIRECTORY for StateDirectory=.
     stateDir: env.STATE_DIRECTORY?.split(":")[0] || "/var/lib/autorec-gw",
@@ -150,7 +153,8 @@ async function appPost(deps, path, body) {
   try {
     response = await deps.fetch(`${config.appOrigin}${path}`, {
       method: "POST",
-      headers: appRequestHeaders(config.appSecret),
+      headers: { ...appRequestHeaders(config.appSecret),
+        ...(config.dailyProduct ? { "x-autorec-work-mode": "daily-product" } : {}) },
       body: JSON.stringify(body),
       redirect: "error",
       signal: AbortSignal.timeout(60_000),
@@ -172,7 +176,7 @@ async function appPost(deps, path, body) {
 }
 
 async function claim(deps) {
-  const answer = await appPost(deps, APP_CLAIM_PATH, {});
+  const answer = await appPost(deps, deps.config.dailyProduct ? DAILY_APP_CLAIM_PATH : APP_CLAIM_PATH, {});
   if (answer.kind === "unknown") return { status: "unknown", code: answer.status ? `http_${answer.status}` : "network" };
   if (answer.status === 204) return { status: "empty" };
   if (answer.status !== 200) return { status: "error", code: `http_${answer.status}` };
@@ -188,7 +192,7 @@ async function result(deps, header) {
   } catch (error) {
     return { status: "error", code: error.message };
   }
-  const answer = await appPost(deps, APP_RESULT_PATH, body);
+  const answer = await appPost(deps, deps.config.dailyProduct ? DAILY_APP_RESULT_PATH : APP_RESULT_PATH, body);
   if (answer.kind === "unknown") return { status: "unknown", code: answer.status ? `http_${answer.status}` : "network" };
   if (answer.status >= 200 && answer.status < 300) return { status: "reported" };
   return { status: "error", code: `http_${answer.status}` };
@@ -313,10 +317,19 @@ async function ensurePullRequest(deps, branch, text) {
   }
   const prUrl = found.pr?.html_url;
   if (!isPrUrl(prUrl)) return { status: "failed", code: "pr_failed", pushed: true, branch };
+  // Never adopt an already-ready PR or report success without the owner's CI hold.
+  if (found.pr.draft !== true) return { status: "unknown", step: "pr_not_draft", branch };
   let bodyUpdated = created;
   if (!created) {
     const patch = await githubRequest(deps, "PATCH", `/repos/${REPO_SLUG}/pulls/${found.pr.number}`, text);
     bodyUpdated = patch.ok && patch.status === 200;
+  }
+  const labelsPath = `/repos/${REPO_SLUG}/issues/${found.pr.number}/labels`;
+  await githubRequest(deps, "POST", labelsPath, { labels: ["ci:hold"] });
+  // Even an unanswered label write is read back once; never blindly replay it.
+  const labels = await githubRequest(deps, "GET", labelsPath);
+  if (!labels.ok || labels.status !== 200 || !Array.isArray(labels.json) || !labels.json.some((label) => label?.name === "ci:hold")) {
+    return { status: "unknown", step: "ci_hold_unverified", prUrl, branch };
   }
   return { status: "published", prUrl, number: found.pr.number, bodyUpdated };
 }

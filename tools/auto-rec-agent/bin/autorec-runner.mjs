@@ -49,6 +49,7 @@ import {
   leaseAllowsPublish,
   lintableFiles,
   parseRawDiff,
+  publicAgentSummary,
   selectRelatedTests,
 } from "../lib/core.mjs";
 
@@ -107,6 +108,7 @@ export function readRunnerConfig(env) {
     gatewaySocket: env.AUTOREC_GATEWAY_SOCKET || DEFAULTS.gatewaySocket,
     nodeBin: process.execPath,
     npmBin: env.AUTOREC_NPM_BIN || DEFAULTS.npmBin,
+    dailyProduct: env.AUTOREC_RUN_DAILY === "true",
     // Optional: a `claude setup-token` token from /etc/autorec/claude.env.
     claudeOauthToken: env.CLAUDE_CODE_OAUTH_TOKEN || null,
   };
@@ -269,6 +271,8 @@ async function work(deps, claim, ctx) {
   deps.runLog("agent_result", typeof summary?.result === "string" ? summary.result.slice(-8_000) : agent.stderr.slice(-4_000));
   if (agent.timedOut) return failed("timeout");
   if (agent.code !== 0) return failed("agent_error");
+  const publicSummary = publicAgentSummary(summary?.result);
+  if (publicSummary) claim = { ...claim, publicSummary };
 
   // Only committed work counts: drop anything the agent left uncommitted.
   await git(worktree, ["reset", "--quiet", "--hard", "HEAD"]);
@@ -393,7 +397,7 @@ async function report(deps, claim, outcome) {
   return reply?.status === "reported" ? 0 : 1;
 }
 
-export async function runLocked(deps) {
+export async function runLocked(deps, { onEmpty = () => {} } = {}) {
   let reply;
   try {
     reply = await deps.gateway({ op: "claim" }, null, 3 * 60_000);
@@ -402,6 +406,7 @@ export async function runLocked(deps) {
     return 1;
   }
   if (reply?.status === "empty") {
+    onEmpty();
     deps.log("no_recommendation");
     return 0;
   }
@@ -439,10 +444,22 @@ export async function runOnce(deps) {
   }
   try {
     deps.pruneLogs();
-    return await runLocked(deps);
+    return deps.config.dailyProduct ? await runDailyBatch(deps) : await runLocked(deps);
   } finally {
     deps.lock.release(lockPath, token);
   }
+}
+
+/** Known blocked outcomes advance; any unknown claim/publish/result ends the batch. */
+export async function runDailyBatch(deps) {
+  const started = deps.now();
+  for (let count = 0; count < LIMITS.tasksPerDay && deps.now() - started < LIMITS.dailyRunMs; count += 1) {
+    let empty = false;
+    const code = await runLocked(deps, { onEmpty: () => { empty = true; } });
+    if (code !== 0 || empty) return code;
+  }
+  deps.log("daily_batch_limit");
+  return 0;
 }
 
 // ---------------------------------------------------------------- real I/O

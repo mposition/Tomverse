@@ -78,6 +78,8 @@ export const AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR = "auto-router-optimizer" as cons
  * code recommendation and reporting the develop PR it opened, or why not.
  * Owner approval 2026-10-20; merging its PR stays a person's. */
 export const AUTO_ROUTER_REC_AGENT_AUDIT_ACTOR = "auto-router-rec-agent" as const;
+/** Daily Scout implementation results; never completes or dispatches a suggestion. */
+export const DAILY_PRODUCT_AGENT_AUDIT_ACTOR = "daily-product-agent" as const;
 
 /**
  * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
@@ -269,6 +271,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   CHAT_UNIFIED_OPTIMIZER_AUDIT_ACTOR,
   AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR,
   AUTO_ROUTER_REC_AGENT_AUDIT_ACTOR,
+  DAILY_PRODUCT_AGENT_AUDIT_ACTOR,
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
@@ -461,6 +464,9 @@ export const systemAuditActionAllowed = (
     ((action === "auto.llm_router_recommendation.claimed" ||
       action === "auto.llm_router_recommendation.result_recorded") &&
       targetType === "AutoRouterOptimizerCycle")) &&
+  (actor !== DAILY_PRODUCT_AGENT_AUDIT_ACTOR ||
+    ((action === "daily_product_agent.claimed" || action === "daily_product_agent.result_recorded") &&
+      targetType === "ProductResearchSuggestion")) &&
   (actor !== AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR ||
     ((action === "auto.llm_router_optimizer.cycle_started" ||
       action === "auto.llm_router_guidance.promoted" ||

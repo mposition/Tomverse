@@ -231,6 +231,15 @@ export function AdminScoutSuggestionsPanel({
             </div>
             <h4 className="mt-1.5 text-sm font-semibold text-zinc-50">{suggestion.title}</h4>
             <p className="mt-1 text-sm text-zinc-400">{suggestion.suggestion}</p>
+            {suggestion.agentWork ? (
+              <p className="mt-2 text-xs text-zinc-300" data-testid="scout-agent-work">
+                {m.agentWork[suggestion.agentWork.status]}
+                {suggestion.agentWork.reason ? ` · ${suggestion.agentWork.reason}` : null}
+                {suggestion.agentWork.prUrl ? (
+                  <> · <a className="text-blue-300 hover:text-blue-200" href={suggestion.agentWork.prUrl} target="_blank" rel="noreferrer">{suggestion.agentWork.prUrl}</a></>
+                ) : null}
+              </p>
+            ) : null}
             <details className="mt-1.5">
               <summary className="w-fit cursor-pointer text-xs font-medium text-blue-300 hover:text-blue-200">{m.evidenceShow}</summary>
               <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5">

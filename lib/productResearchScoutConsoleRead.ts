@@ -51,6 +51,7 @@ export type ScoutConsoleSuggestion = {
   readonly severity: string;
   readonly evidence: string;
   readonly suggestion: string;
+  readonly agentWork?: { status: "claimed" | "needs_lookup" | "pr_opened" | "failed"; prUrl?: string; reason?: string };
 };
 
 export type ScoutConsoleSection = "suggestions" | "runs";
@@ -119,6 +120,7 @@ export async function readScoutConsole(session: Session | null, section: ScoutCo
       severity: row.severity,
       evidence: row.evidence,
       suggestion: row.suggestion,
+      ...(row.agentWork ? { agentWork: row.agentWork } : {}),
     })),
     completed: completed.map((row) => ({ id: row.id, title: row.title, subject: row.subject, completedAt: row.statusChangedAt?.toISOString() ?? null })),
     days: section === "runs" ? scoutDays(calls, now, SCOUT_CONSOLE_DAYS) : [],

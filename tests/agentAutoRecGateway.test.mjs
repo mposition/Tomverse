@@ -43,7 +43,7 @@ function jsonResponse(status, body) {
  * Fake git and fetch. `git` answers by the subcommand after `-C <mirror>`;
  * `github` is a list of answers consumed in order for api.github.com calls.
  */
-function fakeDeps({ gitAnswers = {}, github = [], app = [], files = {}, env = ENV, mainPid = 4242 } = {}) {
+function fakeDeps({ gitAnswers = {}, github = [], labels = null, app = [], files = {}, env = ENV, mainPid = 4242 } = {}) {
   let clock = Date.parse("2026-10-20T00:00:00.000Z");
   const gitCalls = [];
   const fetchCalls = [];
@@ -69,6 +69,11 @@ function fakeDeps({ gitAnswers = {}, github = [], app = [], files = {}, env = EN
     },
     fetch: async (url, init) => {
       fetchCalls.push({ url, init });
+      if (url.endsWith("/labels")) {
+        const response = labels ? labels.shift() : jsonResponse(200, [{ name: "ci:hold" }]);
+        if (response instanceof Error) throw response;
+        return response;
+      }
       const queue = new URL(url).host === "api.github.com" ? github : app;
       const next = queue.shift();
       if (next === undefined) throw new Error(`unexpected fetch ${init.method} ${url}`);
@@ -255,7 +260,7 @@ test("publish pushes only a single commit on the fork point", async () => {
 });
 
 test("publish pushes create-only with the token in git's environment, then adopts Auto PR's draft", async () => {
-  const pr = { number: 2900, html_url: PR_URL };
+  const pr = { number: 2900, html_url: PR_URL, draft: true };
   const { deps, gitCalls, fetchCalls, store } = fakeDeps({
     files: { [MIRROR_HEAD]: "ref" },
     github: [jsonResponse(200, []), jsonResponse(200, [pr]), jsonResponse(200, pr)],
@@ -297,7 +302,7 @@ test("a rejected push is a known refusal and is not verified or retried", async 
 });
 
 test("an unclear push is looked up once: there, absent, or still unknown", async () => {
-  const pr = { number: 5, html_url: "https://github.com/mposition/Tomverse/pull/5" };
+  const pr = { number: 5, html_url: "https://github.com/mposition/Tomverse/pull/5", draft: true };
   const failing = { code: 128, stdout: "", stderr: "fatal: unable to access" };
 
   const landed = fakeDeps({
@@ -318,13 +323,13 @@ test("an unclear push is looked up once: there, absent, or still unknown", async
 
 test("when Auto PR does not open one in time, the gateway opens the draft itself", async () => {
   const polls = Math.floor(LIMITS.autoPrWaitMs / LIMITS.autoPrPollMs) + 1;
-  const created = { number: 9, html_url: "https://github.com/mposition/Tomverse/pull/9" };
+  const created = { number: 9, html_url: "https://github.com/mposition/Tomverse/pull/9", draft: true };
   const { deps, fetchCalls } = fakeDeps({
     github: [...Array.from({ length: polls }, () => jsonResponse(200, [])), jsonResponse(201, created)],
   });
   const answer = await handleRequest(deps, publishHeader(), BUNDLE);
   assert.deepEqual(answer, { status: "published", prUrl: created.html_url, number: 9, bodyUpdated: true });
-  const post = fetchCalls.at(-1);
+  const post = fetchCalls.find((call) => call.init.method === "POST" && call.url.endsWith("/pulls"));
   assert.equal(post.init.method, "POST");
   assert.deepEqual(
     (({ head, base, draft }) => ({ head, base, draft }))(JSON.parse(post.init.body)),
@@ -334,7 +339,7 @@ test("when Auto PR does not open one in time, the gateway opens the draft itself
 
 test("a failed PR create is looked up once; still none means pr_failed with the branch pushed", async () => {
   const polls = Math.floor(LIMITS.autoPrWaitMs / LIMITS.autoPrPollMs) + 1;
-  const raced = { number: 11, html_url: "https://github.com/mposition/Tomverse/pull/11" };
+  const raced = { number: 11, html_url: "https://github.com/mposition/Tomverse/pull/11", draft: true };
   const race = fakeDeps({
     github: [...Array.from({ length: polls }, () => jsonResponse(200, [])), jsonResponse(422, {}), jsonResponse(200, [raced]), jsonResponse(200, raced)],
   });
@@ -349,6 +354,42 @@ test("a failed PR create is looked up once; still none means pr_failed with the 
     pushed: true,
     branch: BRANCH,
   });
+});
+
+test("a published draft has a verified ci:hold label, including an unanswered label write", async () => {
+  const pr = { number: 2900, html_url: PR_URL, draft: true };
+  const { deps, fetchCalls } = fakeDeps({ github: [jsonResponse(200, [pr]), jsonResponse(200, pr)],
+    labels: [new Error("unknown write"), jsonResponse(200, [{ name: "ci:hold" }])] });
+  assert.equal((await handleRequest(deps, publishHeader(), BUNDLE)).status, "published");
+  const calls = fetchCalls.filter((call) => call.url.endsWith("/labels"));
+  assert.deepEqual(calls.map((call) => call.init.method), ["POST", "GET"]);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { labels: ["ci:hold"] });
+});
+
+test("missing CI hold or an already-ready PR is an unknown outcome, never published success", async () => {
+  for (const draft of [true, false]) {
+    const pr = { number: 2900, html_url: PR_URL, draft };
+    const { deps, fetchCalls } = fakeDeps({ github: [jsonResponse(200, [pr]), jsonResponse(200, pr)],
+      labels: [jsonResponse(403, {}), jsonResponse(200, [])] });
+    const answer = await handleRequest(deps, publishHeader(), BUNDLE);
+    assert.equal(answer.status, "unknown");
+    assert.equal(answer.step, draft ? "ci_hold_unverified" : "pr_not_draft");
+    assert.equal(fetchCalls.filter((call) => call.url.endsWith("/labels") && call.init.method === "POST").length, draft ? 1 : 0);
+  }
+});
+
+test("only the gateway's root-owned daily mode sends the expanded-source header", async () => {
+  const { deps, fetchCalls } = fakeDeps({ env: { ...ENV, AUTOREC_WORK_MODE: "daily-product" }, app: [jsonResponse(204)] });
+  assert.equal((await handleRequest(deps, { op: "claim", mode: "ignored" }, Buffer.alloc(0))).status, "empty");
+  assert.equal(fetchCalls[0].init.headers["x-autorec-work-mode"], "daily-product");
+  assert.equal(new URL(fetchCalls[0].url).pathname, "/api/internal/product-improvements/claim");
+});
+
+test("an older app refusing the daily endpoint never falls back to a router claim", async () => {
+  const { deps, fetchCalls } = fakeDeps({ env: { ...ENV, AUTOREC_WORK_MODE: "daily-product" }, app: [jsonResponse(404)] });
+  assert.equal((await handleRequest(deps, { op: "claim" }, Buffer.alloc(0))).status, "error");
+  assert.equal(fetchCalls.length, 1);
+  assert.ok(fetchCalls[0].url.endsWith("/product-improvements/claim"));
 });
 
 test("requests are one JSON header line followed by the payload", () => {

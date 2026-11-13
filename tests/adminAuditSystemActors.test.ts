@@ -159,6 +159,7 @@ test("the system actor list is closed and changes only by review", () => {
     "chat-unified-optimizer",
     "auto-router-optimizer",
     "auto-router-rec-agent",
+    "daily-product-agent",
     "amux-v4-intake",
     "amux-session-intake",
     "engineering-agent-runner",

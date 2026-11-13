@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { basename } from "node:path";
 import test from "node:test";
 
-import { CLAUDE_ARGS, readRunnerConfig, runLocked, runOnce } from "../tools/auto-rec-agent/bin/autorec-runner.mjs";
+import { CLAUDE_ARGS, readRunnerConfig, runDailyBatch, runLocked, runOnce } from "../tools/auto-rec-agent/bin/autorec-runner.mjs";
 import { LIMITS } from "../tools/auto-rec-agent/lib/contract.mjs";
 import { INSTRUCTION_PREAMBLE, branchNameFor } from "../tools/auto-rec-agent/lib/core.mjs";
 
@@ -98,6 +98,47 @@ function fakeRunner({ rules = [], gateway = {}, now = NOW, lockFree = true, file
 }
 
 const ops = (gatewayCalls) => gatewayCalls.map(({ header }) => header.op);
+
+test("daily mode continues after a known no-change result and ends at an empty queue", async () => {
+  let claims = 0;
+  const { deps, gatewayCalls } = fakeRunner({
+    rules: [[/^git .* diff --raw/, ok("")]],
+    gateway: { claim: () => ++claims <= 2 ? { status: "claimed", claim: { ...CLAIM, id: `scout.item${claims}` } } : { status: "empty" } },
+  });
+  deps.config.dailyProduct = true;
+  assert.equal(await runOnce(deps), 0);
+  assert.deepEqual(ops(gatewayCalls), ["claim", "result", "claim", "result", "claim"]);
+  assert.ok(gatewayCalls.filter(({ header }) => header.op === "result").every(({ header }) => header.reason === "no_change"));
+});
+
+test("daily mode stops on unknown publishing or reporting without claiming another task", async () => {
+  for (const gateway of [{ publish: { status: "unknown" } }, { result: { status: "unknown" } }]) {
+    const { deps, gatewayCalls } = fakeRunner({ gateway });
+    assert.equal(await runDailyBatch(deps), 1);
+    assert.equal(ops(gatewayCalls).filter((op) => op === "claim").length, 1);
+  }
+});
+
+test("a daily batch is bounded by the existing 24-publication daily ceiling", async () => {
+  const { deps, gatewayCalls } = fakeRunner({ rules: [[/^git .* diff --raw/, ok("")]] });
+  assert.equal(await runDailyBatch(deps), 0);
+  assert.equal(ops(gatewayCalls).filter((op) => op === "claim").length, LIMITS.tasksPerDay);
+});
+
+test("the same agent call supplies the public commit and PR summary without copying Scout source text", async () => {
+  const publicSummary = "Keep the mobile model label visible";
+  const privateText = "Private Scout analysis note";
+  const { deps, gatewayCalls, calls } = fakeRunner({
+    gateway: { claim: { status: "claimed", claim: { ...CLAIM, id: "scout.one", recommendation: privateText } } },
+    rules: [[/^claude /, ok(JSON.stringify({ result: JSON.stringify({ publicSummary, outcomeNote: "Tested" }) }))]],
+  });
+  assert.equal(await runLocked(deps), 0);
+  const published = gatewayCalls.find(({ header }) => header.op === "publish").header;
+  assert.equal(published.title, `fix: ${publicSummary}`);
+  assert.ok(published.body.includes(publicSummary));
+  assert.ok(!published.body.includes(privateText));
+  assert.equal(calls.find((call) => call.args.includes("commit-tree")).options.input, `fix: ${publicSummary}\n`);
+});
 const resultOf = (gatewayCalls) => gatewayCalls.find(({ header }) => header.op === "result")?.header;
 const ran = (calls, pattern) => calls.some(({ signature }) => pattern.test(signature));
 
