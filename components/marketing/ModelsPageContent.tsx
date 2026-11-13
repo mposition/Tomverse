@@ -35,6 +35,11 @@ const copy = {
     limited: "Limited availability",
     unavailable: "Currently unavailable",
     minimumPlan: "Access starts with",
+    planExplanation: "Guest: use without signing in (guest usage limits apply). Free: requires a free Tomverse account. Pro/Max: paid plans.",
+    planHintGuest: "Use without signing in; limits apply.",
+    planHintFree: "Requires a free Tomverse account.",
+    planHintPro: "Requires the Pro paid plan.",
+    planHintMax: "Requires the Max paid plan.",
     mobileMinimumPlan: "Access",
     mobileBaseCharge: "Base credits",
   },
@@ -58,6 +63,11 @@ const copy = {
     limited: "제공 제한",
     unavailable: "현재 이용 불가",
     minimumPlan: "이용 시작 플랜",
+    planExplanation: "게스트: 로그인 없이 이용할 수 있습니다(게스트 사용 한도 적용). Free: Tomverse 무료 계정이 필요합니다. Pro/Max: 유료 플랜입니다.",
+    planHintGuest: "로그인 없이 이용 가능 · 사용 한도 적용",
+    planHintFree: "Tomverse 무료 계정 필요",
+    planHintPro: "Pro 유료 플랜 필요",
+    planHintMax: "Max 유료 플랜 필요",
   },
   zh: {
     eyebrow: "模型",
@@ -76,6 +86,11 @@ const copy = {
     limited: "可用性受限",
     unavailable: "暂不可用",
     minimumPlan: "使用所需套餐",
+    planExplanation: "访客：无需登录即可使用（受访客用量限制）。Free：需要 Tomverse 免费账户。Pro/Max：付费套餐。",
+    planHintGuest: "无需登录；受用量限制。",
+    planHintFree: "需要 Tomverse 免费账户。",
+    planHintPro: "需要 Pro 付费套餐。",
+    planHintMax: "需要 Max 付费套餐。",
   },
   "zh-Hant": {
     eyebrow: "模型",
@@ -94,6 +109,11 @@ const copy = {
     limited: "可用性受限",
     unavailable: "暫不可用",
     minimumPlan: "使用所需方案",
+    planExplanation: "訪客：無需登入即可使用（受訪客用量限制）。Free：需要 Tomverse 免費帳戶。Pro/Max：付費方案。",
+    planHintGuest: "無需登入；受用量限制。",
+    planHintFree: "需要 Tomverse 免費帳戶。",
+    planHintPro: "需要 Pro 付費方案。",
+    planHintMax: "需要 Max 付費方案。",
   },
   fr: {
     eyebrow: "Modèles",
@@ -112,6 +132,11 @@ const copy = {
     limited: "Disponibilité limitée",
     unavailable: "Indisponible actuellement",
     minimumPlan: "Accès à partir de",
+    planExplanation: "Invité : utilisation sans connexion (limites d’usage invité applicables). Free : compte Tomverse gratuit requis. Pro/Max : offres payantes.",
+    planHintGuest: "Sans connexion ; limites d’usage applicables.",
+    planHintFree: "Compte Tomverse gratuit requis.",
+    planHintPro: "Offre payante Pro requise.",
+    planHintMax: "Offre payante Max requise.",
   },
   de: {
     eyebrow: "Modelle",
@@ -130,6 +155,11 @@ const copy = {
     limited: "Eingeschränkt verfügbar",
     unavailable: "Derzeit nicht verfügbar",
     minimumPlan: "Zugang ab",
+    planExplanation: "Gast: ohne Anmeldung nutzbar (Gastlimits gelten). Free: kostenloses Tomverse-Konto erforderlich. Pro/Max: kostenpflichtige Tarife.",
+    planHintGuest: "Ohne Anmeldung; Nutzungslimits gelten.",
+    planHintFree: "Kostenloses Tomverse-Konto erforderlich.",
+    planHintPro: "Kostenpflichtiger Pro-Tarif erforderlich.",
+    planHintMax: "Kostenpflichtiger Max-Tarif erforderlich.",
   },
   es: {
     eyebrow: "Modelos",
@@ -148,6 +178,11 @@ const copy = {
     limited: "Disponibilidad limitada",
     unavailable: "No disponible actualmente",
     minimumPlan: "Acceso desde",
+    planExplanation: "Invitado: úsalo sin iniciar sesión (se aplican límites de uso para invitados). Free: requiere una cuenta gratuita de Tomverse. Pro/Max: planes de pago.",
+    planHintGuest: "Sin iniciar sesión; se aplican límites.",
+    planHintFree: "Requiere una cuenta gratuita de Tomverse.",
+    planHintPro: "Requiere el plan Pro de pago.",
+    planHintMax: "Requiere el plan Max de pago.",
   },
   pt: {
     eyebrow: "Modelos",
@@ -166,6 +201,11 @@ const copy = {
     limited: "Disponibilidade limitada",
     unavailable: "Indisponível no momento",
     minimumPlan: "Acesso a partir de",
+    planExplanation: "Visitante: use sem iniciar sessão (limites de uso para visitantes se aplicam). Free: requer uma conta gratuita Tomverse. Pro/Max: planos pagos.",
+    planHintGuest: "Use sem iniciar sessão; há limites.",
+    planHintFree: "Requer uma conta gratuita Tomverse.",
+    planHintPro: "Requer o plano Pro pago.",
+    planHintMax: "Requer o plano Max pago.",
   },
 } satisfies Record<Language, Record<string, string>>;
 
@@ -219,6 +259,7 @@ export function ModelsPageContent() {
           <p className={`mt-5 rounded-2xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200 ${lang === "ko" || lang === "en" ? "hidden sm:block" : ""}`}>
             {content.usageNote}
           </p>
+          <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{content.planExplanation}</p>
           <Link
             href={`/status?lang=${encodeURIComponent(lang)}`}
             target="_blank"
@@ -317,6 +358,7 @@ export function ModelsPageContent() {
                 <div>
                   <p data-testid="model-access-label" className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{lang === "en" ? <><span className="sm:hidden">{copy.en.mobileMinimumPlan}</span><span className="hidden sm:inline">{content.minimumPlan}</span></> : content.minimumPlan}</p>
                   <p className="mt-1 text-sm font-bold">{t(`modelTiers.${model.minimumPlan.toLowerCase()}`)}</p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-400">{content[`planHint${model.minimumPlan}` as "planHintGuest" | "planHintFree" | "planHintPro" | "planHintMax"]}</p>
                 </div>
                 <div>
                   <p className="break-words text-sm font-bold uppercase leading-5 text-zinc-600 dark:text-zinc-300">{content.provider}</p>
