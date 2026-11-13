@@ -11,7 +11,7 @@
 import React, { createContext, useContext, useLayoutEffect, useMemo, useRef } from "react";
 import { AbsoluteFill, Audio, Img, OffthreadVideo, Sequence, spring, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 
-import { FRAME, SAFE, SAFE_HEIGHT, SAFE_WIDTH, blocksOf, lineTimes, readGrid, screenScale, screenWord, snapCrop } from "./geometry.js";
+import { FRAME, SAFE, SAFE_HEIGHT, SAFE_WIDTH, blocksOf, captionUnits, lineTimes, readGrid, screenScale, screenWord, snapCrop } from "./geometry.js";
 
 export { FRAME, SAFE, SAFE_HEIGHT, SAFE_WIDTH };
 
@@ -191,7 +191,16 @@ export function Caption({ text, size = 60, weight = 700, serif = false, italic =
   if (Math.abs(tilt) > 4) throw new Error(`Caption "${words.slice(0, 40)}": tilt ${tilt} degrees; at most 4`);
   return (
     <div style={{ maxWidth: Math.min(maxWidth, SAFE_WIDTH), flexShrink: 0, fontFamily: fontFamily(props.locale, serif ? "serif" : "sans"), fontSize: size, fontWeight: weight, fontStyle: italic ? "italic" : "normal", lineHeight: 1.18, color, background, padding: padding ?? (background ? "0.28em 0.5em" : 0), borderRadius: radius, textAlign: align, textWrap: "balance", wordBreak: props.locale === "ko" ? "keep-all" : "normal", overflowWrap: "break-word", ...motion, transform: [motion.transform, tilt ? `rotate(${tilt}deg)` : null].filter(Boolean).join(" ") || undefined }}>
-      {words}
+      {captionUnits(words, props.locale).map((unit: string, index: number) =>
+        unit === " " ? (
+          " "
+        ) : (
+          <React.Fragment key={index}>
+            {index > 0 ? <wbr /> : null}
+            <span style={{ whiteSpace: "nowrap" }}>{unit}</span>
+          </React.Fragment>
+        ),
+      )}
     </div>
   );
 }

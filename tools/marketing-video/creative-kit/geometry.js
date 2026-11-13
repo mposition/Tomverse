@@ -181,6 +181,23 @@ export function lineTimes(lines, fps, { lead = 0.2, breath = 0.25 } = {}) {
   });
 }
 
+/**
+ * A caption's unbreakable pieces, in order: a line may break only between two
+ * of them. Space-separated languages break at spaces only (never inside
+ * "week-by-week"); Chinese between its words (Intl.Segmenter), never inside
+ * 哪裡, with punctuation kept on the word before it. Spaces come back as " ".
+ */
+export function captionUnits(text, locale) {
+  if (!locale.startsWith("zh")) return text.split(/( +)/u).filter((part) => part.length > 0).map((part) => (part.trim() ? part : " "));
+  const units = [];
+  for (const { segment, isWordLike } of new Intl.Segmenter(locale, { granularity: "word" }).segment(text)) {
+    if (!segment.trim()) units.push(" ");
+    else if (!isWordLike && units.length > 0 && units.at(-1) !== " ") units[units.length - 1] += segment;
+    else units.push(segment);
+  }
+  return units;
+}
+
 /** The exact `screen` entry a caption shows, or throws: the film shows only the plan's words. */
 export function screenWord(screen, text) {
   const wanted = String(text).trim();

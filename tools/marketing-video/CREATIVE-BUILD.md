@@ -106,6 +106,9 @@ motion is yours to wrap around them.
   (a Caption never overlaps a Screen; the Stack keeps them apart). Show only
   the `screen` words, through `Caption`.
 - The AI line rides on every `Shot` and on the `EndCard`; do not hide it.
+- Over a `Shot`, captions sit where no face is (look at the still: a caption
+  across a face reads as an accident); give the Stack a `top`/`height` band
+  clear of the people.
 - The end card (`EndCard`, last 2 seconds or more). Blue #155dfb belongs to the
   brand; the rest of the palette is yours.
 - Time the words and pictures to `useFilm().times`. Leave no silence longer
