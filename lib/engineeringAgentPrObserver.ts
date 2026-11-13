@@ -161,9 +161,18 @@ export async function observeEngineeringAgentPullRequests(
 
     const approvedBeforeMerge = approval?.verdict === "approved" && typeof approval.observedAt === "string" &&
       new Date(approval.observedAt).getTime() <= pull.mergedAt!.getTime();
+    // The merged head is the verified commit, or a later head whose pull
+    // request diff is still the verified one: develop merged into the branch
+    // (GitHub's "Update branch", or a session bringing it up to date) moves the
+    // head without changing what the pull request changes. A diff that differs
+    // in any byte, or that could not be read, is not verified (#3828,
+    // 2026-11-13).
+    const bound = engineeringAgentBindingSnapshotSchema.safeParse(binding.snapshot);
+    const sameChange = pull.diffDigest !== null && bound.success &&
+      pull.diffDigest === bound.data.diffDigest;
     const merge = decideEngineeringAgentMergedPr({ merged: true, approvalRecordedBeforeMerge: approvedBeforeMerge,
       mergedByApprover: pull.mergedByApprover === true, baseRef: pull.baseRef,
-      headVerified: pull.headSha === binding.verifiedHeadSha });
+      headVerified: pull.headSha === binding.verifiedHeadSha || sameChange });
     // No review was recorded first: the approver's own merge is the approval.
     const approvedByMerge = merge === "done" && !approvedBeforeMerge;
     const mergeObservation = {

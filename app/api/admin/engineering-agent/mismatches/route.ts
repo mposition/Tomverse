@@ -5,6 +5,7 @@ import { z } from "zod";
 import { runEngineeringAgentAdminMutation } from "@/lib/engineeringAgentAdminMutations";
 import { recordEngineeringAgentMismatchReviewPullRequest } from "@/lib/engineeringAgentAmuxAdapter";
 import { readEngineeringAgentPullMerge } from "@/lib/engineeringAgentGitHubRead";
+import { mergedPrMismatchBindingId } from "@/lib/engineeringAgentStateMismatch";
 import {
   ENGINEERING_AGENT_MISMATCH_CONSOLE_ACTIONS,
   type EngineeringAgentObservedMerge,
@@ -37,7 +38,15 @@ async function mismatchPullNumber(workItemId: string): Promise<number | null> {
     where: { id: workItemId },
     select: { kind: true, causeKey: true },
   });
-  if (!item || item.kind !== "state_mismatch" || !item.causeKey.startsWith("review_pr:")) return null;
+  if (!item || item.kind !== "state_mismatch") return null;
+  // A merged pull request mismatch names its binding: that pull request.
+  const bindingId = mergedPrMismatchBindingId(item.causeKey);
+  if (bindingId !== null) {
+    const binding = await prisma.engineeringAgentBinding.findUnique({
+      where: { id: bindingId }, select: { prNumber: true, supersededAt: true } });
+    return binding && binding.supersededAt === null ? binding.prNumber : null;
+  }
+  if (!item.causeKey.startsWith("review_pr:")) return null;
   const publish = await prisma.engineeringAgentWorkItem.findUnique({
     where: { id: item.causeKey.slice("review_pr:".length) },
     select: { runId: true },
