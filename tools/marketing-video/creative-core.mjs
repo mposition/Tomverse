@@ -330,19 +330,23 @@ export function creativeAsset({ id, locale, words, captureWords = [], claimIds =
   const channels = CHANNELS[locale];
   if (!channels) throw new Error(`no channels for ${locale}`);
   const validUntil = new Date(today.getTime() + 90 * 86_400_000).toISOString().slice(0, 10);
-  const inside = captureWords.map((text) => String(text).replace(/\s+/gu, " ").trim()).filter(Boolean);
+  // A space after an ideographic stop before Latin letters, as it is typeset: the Guard reads
+  // "分析。AI 生成" as the host 析.ai (".ai" is a top-level domain) and says to write it this way
+  // (lib/marketingGuardNormalise.ts); run 20261113-2's zh-Hant alt was refused on it.
+  const spaced = (text) => String(text).replace(/。(?=[A-Za-z])/gu, "。 ");
+  const inside = captureWords.map((text) => spaced(text).replace(/\s+/gu, " ").trim()).filter(Boolean);
   return {
     asset: {
       id,
       provenance: "capture_with_ai_media",
       allowedChannels: [...channels],
-      alt: { [locale]: words.alt },
+      alt: { [locale]: spaced(words.alt) },
       claimIds: [...new Set(claimIds)],
       validUntil,
       disclosure: Object.fromEntries(channels.map((channel) => [channel, DISCLOSURE[channel]])),
       depictsProductInterface: true,
     },
-    transcript: { [locale]: [words.lines.join(" "), [...words.screen, "tomverse.app"].join("\n"), ...(inside.length > 0 ? [inside.join("\n")] : [])].join("\n\n") },
+    transcript: { [locale]: [spaced(words.lines.join(" ")), [...words.screen.map(spaced), "tomverse.app"].join("\n"), ...(inside.length > 0 ? [inside.join("\n")] : [])].join("\n\n") },
   };
 }
 

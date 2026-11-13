@@ -437,6 +437,12 @@ test("the asset carries the words inside the captures it shows and its source sh
   assert.equal(marketingAssetSchema.safeParse(asset).success, true);
   assert.deepEqual(asset.claimIds, ["claim-a"]);
   assert.ok(transcript.en.endsWith("GPT 6 Luna says hello\nAGREE 7"));
+  // "分析。AI" reads to the Guard as the host 析.ai: a space goes after the stop (run 20261113-2).
+  const zh = { ...words("zh-Hant"), alt: "然後是回答分析。AI 生成：三個計時器。" };
+  const spaced = creativeAsset({ id: "media-20261113-creative-zh-hant-short", locale: "zh-Hant", words: zh, captureWords: ["比較。AI Review"] });
+  assert.equal(spaced.asset.alt["zh-Hant"], "然後是回答分析。 AI 生成：三個計時器。");
+  assert.ok(spaced.transcript["zh-Hant"].endsWith("比較。 AI Review"));
+  assert.doesNotMatch(JSON.stringify(spaced), /。[A-Za-z]/u);
 });
 
 test("captures come only from shorts approved now and still valid", () => {
