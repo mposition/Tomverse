@@ -36,35 +36,24 @@ test("the image workspace never mounts a chat-only surface", () => {
   }
 });
 
-test("the image tab lists held models rather than only the runnable ones", () => {
+test("the image tab lists only the models that can run", () => {
+  // Owner decision 2026-11-13: a held model is operator state, stated in the
+  // Admin catalogue, and a row a user cannot pick is noise in the picker. The
+  // tab still reads the catalogue context (not the module-global registry), so
+  // a runtime catalogue model is listed once it serves.
   const source = read(IMAGE_TAB);
-  // The enabled-only list would silently drop a model held by the price
-  // verification rule, and the catalogue would answer "why is this model
-  // missing?" with nothing. The tab reads the catalogue context (not the
-  // module-global registry) and takes the full `models` list from it.
+  assert.match(source, /useImageModelCatalog\(\)/, `${IMAGE_TAB} must read the image catalogue context.`);
   assert.match(
     source,
-    /const \{ models \} = useImageModelCatalog\(\)/,
-    `${IMAGE_TAB} must list every registered model via the image catalogue context.`
+    /\.filter\(\(model\) => model\.disabledReason === null\)/,
+    `${IMAGE_TAB} must list only models with no disabled reason.`
   );
-  assert.ok(
-    !source.includes("listEnabledImageModels") && !source.includes("enabledModels"),
-    `${IMAGE_TAB} must not filter to enabled models; a held model is stated as a hold, not omitted.`
-  );
+  assert.ok(!source.includes("listEnabledImageModels"), `${IMAGE_TAB} must not read the module-global registry.`);
 });
 
-test("a held image model cannot be selected from the catalogue", () => {
+test("each image tab row carries its owner's logo, like the chat list", () => {
   const source = read(IMAGE_TAB);
-  assert.match(
-    source,
-    /disabled=\{held\}/,
-    `${IMAGE_TAB} must disable held rows.`
-  );
-  assert.match(
-    source,
-    /if \(held\) return;/,
-    `${IMAGE_TAB}'s click handler must refuse a held model even if the row becomes clickable.`
-  );
+  assert.match(source, /<ModelLogo provider=\{brand\.owner\}/, `${IMAGE_TAB} must show the model owner's logo.`);
 });
 
 test("locked image entries stay clickable and route somewhere", () => {

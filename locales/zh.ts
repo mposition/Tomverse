@@ -266,7 +266,6 @@ export const zh = {
         imageModelTabFooterHint: "选择后将进入图像工作区。",
         imageModelCreditsFrom: "{credits} 积分起",
         imageModelViaGateway: "经由 {gateway}",
-        imageModelHoldPriceUnverified: "官方价格核实前暂不开放",
         imageModelLatencyFast: "快速",
         imageModelLatencyBalanced: "均衡",
         imageModelLatencySlow: "较慢",

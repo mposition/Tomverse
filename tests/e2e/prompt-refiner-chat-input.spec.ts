@@ -407,7 +407,6 @@ test.describe("Prompt Refiner in the actual ChatInput", { tag: "@ui-risk" }, () 
     await page
       .getByTestId("image-model-tab-panel")
       .getByTestId("image-model-option")
-      .filter({ hasNot: page.getByTestId("image-model-hold-note") })
       .first()
       .click();
     await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
