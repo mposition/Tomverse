@@ -258,6 +258,22 @@ test("a plan is made only for locales with a capture pack, and must show the AI 
   url.locales.en = { ...words("en"), lines: ["Visit www.example.com", "Two.", "Three."] };
   assert.match(checkPlan(answer(url), { packs: PACKS }).refusal, /web address/u);
   assert.match(checkPlan("no json here", { packs: PACKS }).refusal, /no \{"creative"/u);
+  // A screen line too long is named, so the retry mends that line and nothing else (run 20261113-3).
+  const long = plan();
+  const quoted = "Hosting 6 friends for dinner, one is vegetarian, and I have 2 hours to cook.";
+  long.locales.en = { ...words("en"), screen: [...words("en").screen, quoted] };
+  assert.match(checkPlan(answer(long), { packs: PACKS }).refusal, /en: screen is at most 16 lines of at most 60 characters; shorten or split "Hosting 6 friends/u);
+});
+
+test("a refused plan is mended, not rewritten, and a run whose plan was refused can go on without recording again", () => {
+  const runner = readFileSync(resolve("tools/marketing-video/run-creative-short.mjs"), "utf8");
+  assert.ok(runner.includes("attempt <= 3"));
+  assert.ok(runner.includes("Change only what the refusal names and keep everything else as it is"));
+  assert.ok(runner.includes("Your last plan:"));
+  // --replan: only a run with recordings and no accepted plan; it never records, and its plan calls get new names.
+  assert.ok(runner.includes('existsSync(path.join(creativeDir, replan, "sources")) && !existsSync(path.join(creativeDir, replan, "plan.json"))'));
+  assert.match(runner, /const fresh = rebuild === null && replan === null && env\[FRESH_REVIEW_ENV\] === "on";/u);
+  assert.ok(runner.includes("`plan-${planCalls + attempt}`"));
 });
 
 test("a concept or logline used before is refused", () => {
@@ -583,7 +599,7 @@ test("fresh captures run only behind their switch, before the plan and every pai
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
   assert.equal(FRESH_REVIEW_ENV, "MARKETING_CREATIVE_FRESH_REVIEW");
-  assert.match(source, /const fresh = rebuild === null && env\[FRESH_REVIEW_ENV\] === "on";/u);
+  assert.ok(source.includes('const fresh = rebuild === null && replan === null && env[FRESH_REVIEW_ENV] === "on";'));
   const start = source.indexOf("if (fresh) {");
   const plan = source.indexOf("// 1. Plan.");
   assert.ok(start > 0 && start < plan && plan < source.indexOf("await paid("));

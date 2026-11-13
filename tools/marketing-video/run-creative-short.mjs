@@ -2,6 +2,7 @@
 // time", made with Higgsfield and ElevenLabs, not a reused template):
 //   node run-creative-short.mjs
 //   node run-creative-short.mjs --rebuild <run>
+//   node run-creative-short.mjs --replan <run>    (a fresh run whose plan was refused: from the plan on, no new recording)
 // Off unless MARKETING_CREATIVE_SHORT=on. Run by hand for now (phase 1): no
 // cron starts it.
 //
@@ -41,7 +42,7 @@ import { fileURLToPath } from "node:url";
 import { answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, lastBuild, packOfRun, stillsIn, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
 import { speakLine, VOICE_CAP_ENV, voiceLedgerPath } from "./el-voice-core.mjs";
 import { levelVoice, probe, seconds as lengthOf, stills } from "./ffmpeg-tools.mjs";
-import { FRESH_LOCALES, FRESH_REVIEW_ENV, pickSubject } from "./fresh-review.mjs";
+import { FRESH_LOCALES, FRESH_REVIEW_ENV, pickSubject, SUBJECTS } from "./fresh-review.mjs";
 import { brisbaneDay, dailyCap, readLedger, spent } from "./higgsfield-cap.mjs";
 import { CREATIVE_CAP_ENV, creativeLedgerPath, makeMedia, MUSIC_SECONDS } from "./hf-media-core.mjs";
 
@@ -93,9 +94,14 @@ const REBUILD_ROUNDS = 3;
 const rebuildAt = process.argv.indexOf("--rebuild");
 const rebuild = rebuildAt === -1 ? null : String(process.argv[rebuildAt + 1] ?? "");
 if (rebuild !== null && !(/^\d{8}(?:-\d+)?$/u.test(rebuild) && existsSync(path.join(creativeDir, rebuild, "plan.json")))) halt("no_such_run");
+// --replan (owner 2026-11-13): a run whose fresh recording finished but whose plan was refused goes
+// on from the plan with the captures it already recorded, so the demo account is not asked again.
+const replanAt = process.argv.indexOf("--replan");
+const replan = replanAt === -1 ? null : String(process.argv[replanAt + 1] ?? "");
+if (replan !== null && !(rebuild === null && /^\d{8}(?:-\d+)?$/u.test(replan) && existsSync(path.join(creativeDir, replan, "sources")) && !existsSync(path.join(creativeDir, replan, "plan.json")))) halt("no_run_to_replan");
 mkdirSync(creativeDir, { recursive: true });
-let run = rebuild ?? day;
-if (rebuild === null) for (let n = 2; existsSync(path.join(creativeDir, run)); n += 1) run = `${day}-${n}`;
+let run = rebuild ?? replan ?? day;
+if (rebuild === null && replan === null) for (let n = 2; existsSync(path.join(creativeDir, run)); n += 1) run = `${day}-${n}`;
 report.run = run;
 const runDir = path.join(creativeDir, run);
 const pub = path.join(runDir, "public");
@@ -174,7 +180,9 @@ for (const pack of onBox) if (!packs.includes(pack)) report.dropped.push({ step:
 // Fresh captures (owner 2026-11-12, a different subject every film): recorded for this run below,
 // so a new run does not need an approved pack. Off by default: each recording spends the demo
 // account's credits.
-const fresh = rebuild === null && env[FRESH_REVIEW_ENV] === "on";
+const fresh = rebuild === null && replan === null && env[FRESH_REVIEW_ENV] === "on";
+/** A fresh run's topic from its subject: `fresh-` and the subject's words. */
+const freshTopic = (text) => `fresh-${text.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "").slice(0, 50)}`;
 
 /** The packs a run recorded for itself (<run>/sources/<locale>/pack.json): real screens of today, no short's claims. */
 function freshPacksIn(dir) {
@@ -238,9 +246,16 @@ if (rebuild !== null) {
 // locale written by a model, each asked ONCE in Review and its answer analysis run ONCE
 // (fresh-review.mjs). A recording that stopped after a paid step is never repeated, and stops the rest.
 let subject = null;
+if (replan !== null) {
+  // Only the run's own recordings, and the subject they were made for.
+  packs = freshPacksIn(runDir);
+  if (packs.length === 0) halt("no_fresh_capture");
+  report.topic = packs[0].topic;
+  subject = SUBJECTS.find((entry) => freshTopic(entry) === packs[0].topic) ?? null;
+}
 if (fresh) {
   subject = pickSubject(history);
-  const topic = `fresh-${subject.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "").slice(0, 50)}`;
+  const topic = freshTopic(subject);
   report.topic = topic;
   const questionPrompt = [
     "Write the question a real person would type into an AI assistant about this everyday subject, once in each language: en, ko, zh-Hant (Traditional Chinese, Taiwan usage).",
@@ -289,9 +304,17 @@ const planPrompt = [
 const planRead = ["job/research-notes/**", "features.json", "job/sources/**", `job/creative/${run}/sources/**`, "job/creative/sheets/**"].map((file) => fileRule("Read", file));
 let checked = null;
 let refusal = null;
-for (let attempt = 1; attempt <= 2 && !checked?.plan; attempt += 1) {
-  const prompt = refusal ? `${planPrompt}\n\n## Your last plan was refused\n\n${refusal}\nWrite a new plan line that meets it.` : planPrompt;
-  const answer = claude(`plan-${attempt}`, prompt, { tools: "Read", allowed: planRead, maxTurns: 40 });
+let lastPlan = null;
+// A refused plan goes back with the reason to be mended, not rewritten: a rewrite fixed one rule and
+// broke another (run 20261113-3: too many shots, then a 76-character line).
+const planCalls = readdirSync(path.join(runDir, "calls")).filter((file) => /^plan-\d+\.jsonl$/u.test(file)).length;
+for (let attempt = 1; attempt <= 3 && !checked?.plan; attempt += 1) {
+  const prompt = refusal
+    ? `${planPrompt}\n\n## Your last plan was refused\n\n${refusal}\n\nYour last plan:\n\n${lastPlan ?? "(no plan line)"}\n\nChange only what the refusal names and keep everything else as it is; answer with the whole mended plan line.`
+    : planPrompt;
+  const answer = claude(`plan-${planCalls + attempt}`, prompt, { tools: "Read", allowed: planRead, maxTurns: 40 });
+  const line = jsonLine(answer, "creative");
+  lastPlan = line ? JSON.stringify({ creative: line }) : lastPlan;
   checked = answer ? checkPlan(answer, { packs, history }) : { refusal: "the answer held no {\"creative\": ...} line" };
   refusal = checked.refusal ?? null;
 }
