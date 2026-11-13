@@ -1086,8 +1086,10 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   없습니다. 아카이브 경로는 정규화하지 않고 **거절**합니다.
 - **조용한 퇴행이 없습니다.** 모든 turn이 artifact system block을 하나 싣고,
   tool을 못 쓰는 turn은 그 사실을 말하라고 지시받습니다. 가용성 판정은
-  `planGeneratedArtifactTool()` 한 곳이며, 검증되지 않은 모델은 fail-closed
-  입니다(`ARTIFACT_TOOL_CAPABILITIES`).
+  `planGeneratedArtifactTool()` 한 곳입니다. 모델별 판정은 카탈로그 행의 관리자 체크
+  (`fileToolsOverride`)가 먼저이고, 없으면 확인된 목록(`ARTIFACT_TOOL_CAPABILITIES`)과
+  제공사 규칙(OpenAI·Anthropic·Google)을 따릅니다. 그 밖의 제공사는 체크하기 전까지
+  꺼져 있습니다(`docs/policy/generated-artifacts.md`).
 - **게스트는 MVP에서 파일을 만들 수 없습니다.** tool은 등록되지만 즉시
   거절하고, UI는 `blocked` 카드와 로그인 CTA를 보여 줍니다. 표·코드로 대신하지
   않습니다.

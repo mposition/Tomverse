@@ -37,12 +37,28 @@ test("provider failures expose only a valid HTTP status, never request or respon
     });
     assert.deepEqual(autoLlmRouterFailureDetail(error), {
       failureKind: "provider",
-      ...([408, 429, 503].includes(statusCode) ? { statusCode } : {}),
+      ...([408, 429, 503].includes(statusCode)
+        ? { statusCode, statusClass: statusCode === 429 ? "rate_limit" : "server" } : {}),
     });
   }
   assert.deepEqual(autoLlmRouterFailureDetail(new InvalidResponseDataError({ data: SECRET })), {
     failureKind: "provider_response",
   });
+});
+
+test("a provider status is labelled as auth, request parameters, rate limit or provider side", async () => {
+  const { providerStatusClass } = await import("../lib/autoLlmRouterDiagnostics.ts");
+  for (const [statusCode, statusClass] of [
+    [401, "auth"], [403, "auth"], [400, "request"], [404, "request"], [422, "request"],
+    [429, "rate_limit"], [408, "server"], [500, "server"], [503, "server"], [418, "other"],
+  ]) {
+    assert.equal(providerStatusClass(statusCode), statusClass);
+  }
+  const auth = new APICallError({
+    message: SECRET, url: "https://example.invalid", statusCode: 401,
+    requestBodyValues: { secret: SECRET }, responseBody: SECRET,
+  });
+  assert.deepEqual(autoLlmRouterFailureDetail(auth), { failureKind: "provider", statusCode: 401, statusClass: "auth" });
 });
 
 test("an actual deadline abort is distinct from HTTP 408 or an unrelated abort", () => {

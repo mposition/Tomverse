@@ -63,6 +63,9 @@ const modelFields = {
   // Absent keeps what is stored (older panels predate the field); null returns
   // the model to "follow the code".
   webSearchOverride: z.enum(WEB_SEARCH_OVERRIDES).nullable().optional(),
+  // The file-tool tick. Absent keeps what is stored; null returns the model to
+  // the automatic answer (lib/generatedArtifactToolPolicy.ts).
+  fileToolsOverride: z.boolean().nullable().optional(),
   maxImages: nullablePositiveInt(100),
   maxBase64ImagePayloadBytes: nullablePositiveInt(100 * 1024 * 1024),
   maxOutputTokens: nullablePositiveInt(2_000_000),
@@ -219,6 +222,9 @@ export function registryInputToData(
     supportsNativePdf: input.supportsNativePdf,
     ...(input.webSearchOverride !== undefined
       ? { webSearchOverride: input.webSearchOverride }
+      : {}),
+    ...(input.fileToolsOverride !== undefined
+      ? { fileToolsOverride: input.fileToolsOverride }
       : {}),
     maxImages: input.supportsImage ? nullable(input.maxImages) : null,
     maxBase64ImagePayloadBytes: input.supportsImage

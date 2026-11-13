@@ -207,6 +207,7 @@ test("one invalid guest-lead row does not reject the rest", () => {
   const valid = {
     ...seed,
     webSearchOverride: null,
+    fileToolsOverride: null,
     updatedById: null,
     updatedByEmail: null,
     createdAt: new Date(0),

@@ -610,6 +610,7 @@ export async function POST(req: Request) {
         minimumPlan: body.minimumPlan,
         creditWeight: body.creditWeight,
         webSearchOverride: body.webSearchOverride ?? null,
+        fileToolsOverride: body.fileToolsOverride ?? null,
         ...(workItemId
           ? {
               workItemId,
