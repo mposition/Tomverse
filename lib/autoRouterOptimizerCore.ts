@@ -30,6 +30,7 @@ import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
+import { providerStatusClass, type ProviderStatusClass } from "@/lib/autoLlmRouterDiagnostics";
 import { TUNABLE_GENERATOR_RULE, tunableChangesSchema } from "@/lib/autoRouterTunablesCore";
 
 /** At most this many recent decisions are sampled; half train, half evaluate. */
@@ -657,14 +658,19 @@ export const guidanceRejection = (raw: unknown) => {
  * how much text it wrote (a truncated object stops on "length").
  */
 export const optimizerCallFailureDetail = (error: unknown) => {
-    const detail: { error: string; finishReason?: string; outputChars?: number; statusCode?: number } = {
+    const detail: {
+        error: string; finishReason?: string; outputChars?: number; statusCode?: number; statusClass?: ProviderStatusClass;
+    } = {
         error: error instanceof Error ? error.name : "unknown",
     };
     if (error && typeof error === "object") {
         const { finishReason, text, statusCode } = error as { finishReason?: unknown; text?: unknown; statusCode?: unknown };
         if (typeof finishReason === "string") detail.finishReason = finishReason;
         if (typeof text === "string") detail.outputChars = text.length;
-        if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599) detail.statusCode = statusCode;
+        if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599) {
+            detail.statusCode = statusCode;
+            detail.statusClass = providerStatusClass(statusCode);
+        }
     }
     return detail;
 };
@@ -951,6 +957,8 @@ export const optimizerAnswerOutputTokens = (
     );
 
 export const AUTO_ROUTER_ANSWER_TIMEOUT_MS = 60_000;
+/** Tries per answer: one transient failure must not leave a comparison undecided. */
+export const AUTO_ROUTER_ANSWER_ATTEMPTS = 2;
 /** A reasoning model thinks before it answers; it gets longer to do both. */
 export const AUTO_ROUTER_REASONING_ANSWER_TIMEOUT_MS = 120_000;
 
@@ -960,7 +968,8 @@ export const AUTO_ROUTER_REASONING_ANSWER_TIMEOUT_MS = 120_000;
  * answers with its own generation settings, as a chat turn would have it
  * answer (reasoning effort, adaptive thinking, the sampling rules some models
  * require): without them a reasoning model would be measured as a different
- * model from the one users get. Never a tool, never a retry.
+ * model from the one users get. Never a tool, never a provider retry: the
+ * cycle retries a missing answer itself, up to AUTO_ROUTER_ANSWER_ATTEMPTS.
  */
 export const optimizerAnswerOptions = (model: AiModel, turn: OptimizerAnswerTurn) => ({
     system: autoRouterAnswerSystem(turn.previousAnswer),
@@ -1337,17 +1346,27 @@ export async function runOptimizerCycle(
         if (!answer) {
             const turn = { message: decision.routerInput, previousAnswer: decision.routerContext };
             // Counted only when the call was made: a budget refusal says
-            // nothing about the model.
-            answer = call("answer", async () => {
-                try {
-                    const result = await deps.answer(modelId, turn);
-                    noteAnswer(modelId, admitOptimizerAnswer(result.value) !== null);
-                    return result;
-                } catch (error) {
-                    noteAnswer(modelId, false);
-                    throw error;
+            // nothing about the model. Every failed attempt is counted, so a
+            // model that only answers on its second try still shows it.
+            const attempt = () =>
+                call("answer", async () => {
+                    try {
+                        const result = await deps.answer(modelId, turn);
+                        noteAnswer(modelId, admitOptimizerAnswer(result.value) !== null);
+                        return result;
+                    } catch (error) {
+                        noteAnswer(modelId, false);
+                        throw error;
+                    }
+                }).then(admitOptimizerAnswer);
+            // A missing answer leaves its comparison undecided, so a failed or
+            // empty answer is asked for again, within the same budget.
+            answer = (async () => {
+                for (let tries = 1; ; tries += 1) {
+                    const admitted = await attempt();
+                    if (admitted !== null || exhausted || tries >= AUTO_ROUTER_ANSWER_ATTEMPTS) return admitted;
                 }
-            }).then(admitOptimizerAnswer);
+            })();
             answers.set(key, answer);
         }
         return answer;

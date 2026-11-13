@@ -290,7 +290,12 @@ const HANDLERS: Record<AuthoredArtifactKind, KindHandler> = {
       "Create a real, downloadable spreadsheet file (.xlsx or .csv) from " +
       "structured data and attach it to your reply. Use this whenever the " +
       "user asks for a spreadsheet, an Excel file, a .xlsx or a CSV. You " +
-      "supply the data; the application writes the file. Never write file " +
+      "supply the data; the application writes the file. The file holds " +
+      "values only, never formulas, so compute every total, subtotal and " +
+      "derived column yourself from the rows you supply: a total row must " +
+      "equal the sum of the rows above it, and a derived figure such as " +
+      "profit must equal its inputs (revenue minus cost) on every row and in " +
+      "the total. Re-add each column before calling. Never write file " +
       "bytes, base64 or a download link yourself.",
   },
   document: {

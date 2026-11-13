@@ -8,6 +8,7 @@ import {
   buildAutoLlmRouterSystem,
 } from "../lib/autoLlmRouterCore.ts";
 import {
+  AUTO_ROUTER_ANSWER_ATTEMPTS,
   AUTO_ROUTER_GENERATOR_SYSTEM,
   AUTO_ROUTER_GUIDANCE_MAX_CHARS,
   AUTO_ROUTER_OPTIMIZER_CONCURRENCY,
@@ -473,7 +474,9 @@ test("a case whose answer cannot be had is undecided and never judged", async ()
   assert.equal(result.failure, "evidence_below");
   assert.deepEqual(result.gate, { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 0 });
   assert.equal(thrown.calls.judge, 0);
-  assert.equal(result.failedCalls, 6);
+  // Each missing answer is asked for once more before the case is undecided.
+  assert.equal(result.failedCalls, 6 * AUTO_ROUTER_ANSWER_ATTEMPTS);
+  assert.deepEqual(result.answerStats.light, { answered: 0, failed: 6 * AUTO_ROUTER_ANSWER_ATTEMPTS });
   // The answers that came back are still paid for, to their provider.
   assert.equal(result.spentByKind.answer, 6 * 30);
   assert.equal(result.spentByProvider.get("strong-co"), 6 * 30);
@@ -489,6 +492,32 @@ test("a case whose answer cannot be had is undecided and never judged", async ()
   assert.equal(admitOptimizerAnswer("  답  "), "답");
   assert.equal(admitOptimizerAnswer(""), null);
   assert.equal(admitOptimizerAnswer(null), null);
+});
+
+test("an answer that fails once is asked for again, so its case is still judged", async () => {
+  const tries = new Map();
+  const flaky = fakeDeps({
+    answer: async (modelId, turn) => {
+      flaky.calls.answer++;
+      const key = `${modelId}:${turn.message}`;
+      tries.set(key, (tries.get(key) ?? 0) + 1);
+      if (modelId === "light" && tries.get(key) === 1) throw new Error("timeout");
+      return { value: ANSWERS[modelId], costMicroUsd: 30, provider: `${modelId}-co` };
+    },
+  });
+  const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, flaky.deps);
+  assert.equal(AUTO_ROUTER_ANSWER_ATTEMPTS, 2);
+  assert.equal(result.summary.undecided, 0);
+  assert.equal(result.summary.candidateWins, 6);
+  assert.equal(result.status, "passed");
+  assert.equal(result.failedCalls, 6);
+  assert.deepEqual(result.answerStats.light, { answered: 6, failed: 6 });
+  assert.equal(flaky.calls.answer, 6 + 6 * 2);
+
+  // No retry once the budget is spent: the budget still bounds every call.
+  const refused = fakeDeps({ budgetMicroUsd: 0 });
+  await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, refused.deps);
+  assert.equal(refused.calls.answer, 0);
 });
 
 test("Admin sees synthetic cases in full and real ones not at all", () => {
@@ -951,7 +980,7 @@ test("optimizer failure tracing identifies the answering model without retrying 
     let calls = 0;
     await assert.rejects(traceOptimizerCall({ event, cycleId: "cycle-test", kind: "answer", modelId: "qwen3-8-flash", provider: "qwen" }, async () => { calls++; throw failure; }), error => error === failure);
     assert.equal(calls, 1);
-    assert.deepEqual(logs.at(-1), { event, cycleId: "cycle-test", kind: "answer", modelId: "qwen3-8-flash", provider: "qwen", error: "AI_APICallError", statusCode: 503 });
+    assert.deepEqual(logs.at(-1), { event, cycleId: "cycle-test", kind: "answer", modelId: "qwen3-8-flash", provider: "qwen", error: "AI_APICallError", statusCode: 503, statusClass: "server" });
   }
   assert.equal(JSON.stringify(logs).includes("private"), false);
   assert.equal(optimizerCallFailureDetail({ statusCode: 999 }).statusCode, undefined);
@@ -1190,7 +1219,7 @@ test("answers are counted per model, and a model whose answers all failed is not
     },
   });
   const first = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, timedOut.deps);
-  assert.deepEqual(first.answerStats.rival, { answered: 0, failed: 12 });
+  assert.deepEqual(first.answerStats.rival, { answered: 0, failed: 12 * AUTO_ROUTER_ANSWER_ATTEMPTS });
   assert.equal(first.answerStats.strong.failed, 0);
   assert.ok(first.answerStats.strong.answered >= 12);
   assert.deepEqual(unreliableAnswerModels(first.answerStats), ["rival"]);
