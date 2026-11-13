@@ -157,6 +157,15 @@ export type AutoFileGenerationContext = {
     webSearchRequested: boolean;
 };
 
+/** File-routing diagnostics for the candidates actually offered to the router. */
+export const autoLlmRouterFileDiagnostics = (
+    pick: { requiresFileGeneration?: boolean } | null | undefined,
+    candidates: readonly Pick<AutoLlmRouterCandidate, "canCreateFiles">[]
+) => ({
+    requiresFileGeneration: pick?.requiresFileGeneration === true,
+    fileCapableCandidateCount: candidates.filter(candidate => candidate.canCreateFiles === true).length,
+});
+
 /** Older optimizer samples predate the per-turn capability field. */
 export const withAutoFileCapabilities = (candidates: readonly AutoLlmRouterCandidate[]) =>
     candidates.map(candidate => typeof candidate.canCreateFiles === "boolean" ? candidate : {

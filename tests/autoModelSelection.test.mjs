@@ -3,7 +3,7 @@ import test from "node:test";
 import { createRequire } from "node:module";
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
-import { autoLlmRouterCandidates, parseAutoLlmRouterOutput } from "../lib/autoLlmRouterCore.ts";
+import { autoLlmRouterCandidates, autoLlmRouterFileDiagnostics, parseAutoLlmRouterOutput } from "../lib/autoLlmRouterCore.ts";
 import {
   applyLlmModelPick,
   selectAutoModel,
@@ -75,6 +75,25 @@ const initialReleaseAuthority = () =>
     runtimeCommitSha: "a".repeat(40),
     runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
   });
+
+test("file diagnostics default missing intent to false and count only offered capable candidates", () => {
+  const candidates = [
+    { id: "capable", canCreateFiles: true },
+    { id: "unsupported", canCreateFiles: false },
+    { id: "excluded", canCreateFiles: true },
+  ].filter(candidate => candidate.id !== "excluded");
+  for (const pick of [null, undefined, {}, { requiresFileGeneration: false }]) {
+    assert.deepEqual(autoLlmRouterFileDiagnostics(pick, candidates), {
+      requiresFileGeneration: false, fileCapableCandidateCount: 1,
+    });
+  }
+  assert.deepEqual(autoLlmRouterFileDiagnostics({ requiresFileGeneration: true }, candidates), {
+    requiresFileGeneration: true, fileCapableCandidateCount: 1,
+  });
+  assert.deepEqual(autoLlmRouterFileDiagnostics({ requiresFileGeneration: true }, []), {
+    requiresFileGeneration: true, fileCapableCandidateCount: 0,
+  });
+});
 
 test("file routing keeps the primary and every failover inside the capable eligible set", () => {
   const original = selectAutoModel(input());
