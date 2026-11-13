@@ -319,10 +319,12 @@ JSON·YAML·XML이 문법적으로 올바른지 **검사하지 않는다.** 망�
   할당한 뒤에야 예산을 보게 되므로 이 파서들에서 쓰지 않는다 —
   `scripts/security-regression-check.mjs`가 고정한다. ZIP이 적어 둔 크기는 믿지
   않는다.
-- **검증 범위**: 정상 경로 테스트는 HWP 5.0 명세대로 바이트를 짜서 만든 파일로
-  한다(`tests/hwpText.test.mjs`). 이 저장소에는 HWP를 쓰는 도구가 없어 §4.5의
-  "진짜 문서" 원칙을 아직 채우지 못했다. 한컴오피스가 저장한 실제 `.hwp`·`.hwpx`
-  파일로 확인해 `tests/fixtures/legacyOffice/`에 넣는 것이 남은 일이다.
+- **검증 범위**: HWP 5.x 정상 경로는 한컴오피스가 저장한 실제 파일
+  (`tests/fixtures/legacyOffice/sample-hancom.hwp`, 압축 본문·표·그림)로 확인한다.
+  한컴이 파일 안에 남긴 미리보기 글(`PrvText`)을 답안으로 삼아, 그 단어가 모두 같은
+  순서로 읽히는지 본다(`tests/hwpText.test.mjs`). 공격·경계 사례는 HWP 5.0 명세대로
+  바이트를 짜서 만든다. **HWPX는 아직 실제 파일이 없다** — 한컴오피스가 저장한
+  `.hwpx`를 받으면 같은 방식으로 넣는다.
 
 ## 5. 압축파일
 

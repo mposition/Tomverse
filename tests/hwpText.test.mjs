@@ -1,20 +1,25 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { deflateSync, zipSync } from "fflate";
 
 import { resolveChatAttachmentFormat } from "../lib/chatAttachmentFormats.ts";
 import { validateChatAttachmentUpload } from "../lib/chatAttachmentValidation.ts";
 import { OFFICE_RENDERABLE_EXTENSIONS } from "../lib/fileConversionCore.ts";
+import { createLegacyParseBudget } from "../lib/legacyOffice/budget.ts";
+import { openCompoundFile, readCompoundStream } from "../lib/legacyOffice/cfbf.ts";
 import { extractLegacyOfficeText } from "../lib/legacyOfficeText.ts";
+import { measureRenderInput } from "../lib/officeRenderInput.ts";
 import { buildCompoundFile } from "./support/compoundFile.mjs";
 
 // docs/policy/chat-attachment-formats.md section 4.6.
 //
-// HWP 5.x and HWPX, read for their text. Built field by field from the HWP
-// 5.0 specification with the repository's test compound-file writer: no tool
-// here writes a real one. A document saved by Hancom Office is still to be
-// checked by hand (the policy's verification note says so).
+// HWP 5.x and HWPX, read for their text. The hostile and edge cases are
+// built field by field from the HWP 5.0 specification with the repository's
+// test compound-file writer; the happy path is also checked against a document
+// Hancom Office saved (fixtures/legacyOffice/sample-hancom.hwp, at the end).
 
 const encoder = new TextEncoder();
 
@@ -270,4 +275,47 @@ test("text after the last closed paragraph still counts against the character ce
     () => extractLegacyOfficeText(bytes, "hwpx", { maxCharacters: 100 }),
     (error) => error.code === "LEGACY_OFFICE_TOO_LARGE"
   );
+});
+
+/* ------------------------------------------------------------------------ */
+/* A document Hancom Office saved                                             */
+/* ------------------------------------------------------------------------ */
+
+test("a real Hancom HWP reads in full: its own preview text is the answer key", async () => {
+  const bytes = new Uint8Array(
+    readFileSync(fileURLToPath(new URL("./fixtures/legacyOffice/sample-hancom.hwp", import.meta.url)))
+  );
+  const file = openCompoundFile(bytes, createLegacyParseBudget());
+  const header = readCompoundStream(file, "FileHeader");
+  // A compressed body, as Hancom writes by default: the inflating path is the one tested.
+  assert.equal(new DataView(header.buffer, header.byteOffset).getUint32(36, true) & 1, 1);
+
+  const text = readText(bytes, "hwp");
+  const lines = text.split("\n");
+  assert.equal(lines[0], "교정기관 사서함 주소(e-그린우편 작성 시)");
+  assert.deepEqual(lines.slice(1, 8), ["", "기관명", "우편번호", "사서함주소", "서울구", "15829", "경기도 군포우체국 사서함 20호"]);
+  assert.doesNotMatch(text, /[\u0000-\u0008\u000b-\u001f�-]/, "no control characters or replacement glyphs");
+
+  // PrvText is the plain text Hancom stores for its own file preview (UTF-16,
+  // cells set off with < >, cut short at about 1 KB). Every whole word in it
+  // is in what the parser read, in the same order.
+  const preview = new TextDecoder("utf-16le").decode(readCompoundStream(file, "PrvText"));
+  const words = preview.split(/[<>\s]+/).filter(Boolean).slice(0, -1);
+  assert.ok(words.length > 50, `preview words: ${words.length}`);
+  let from = 0;
+  for (const word of words) {
+    const at = text.indexOf(word, from);
+    assert.ok(at >= 0, `missing or out of order: ${word}`);
+    from = at + word.length;
+  }
+
+  assert.deepEqual(measureRenderInput("application/x-hwp", bytes), { ok: true });
+  const format = resolveChatAttachmentFormat({ filename: "주소.hwp", declaredMediaType: "application/x-hwp" });
+  const valid = await validateChatAttachmentUpload({
+    buffer: Buffer.from(bytes),
+    format,
+    scope: "guest",
+    maxExtractedCharacters: 100_000,
+  });
+  assert.equal(valid.mediaType, "application/x-hwp");
 });

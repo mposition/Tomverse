@@ -1,6 +1,6 @@
 # Legacy Office fixtures
 
-Four real documents, for the parsers in `lib/legacyOffice/**`.
+Five real documents, for the parsers in `lib/legacyOffice/**`.
 
 They are committed rather than generated at test time because a binary-format
 parser tested only against files its own writer produced proves that the two
@@ -17,6 +17,11 @@ four.
 | `sample.xls` | `soffice --convert-to "xls:MS Excel 97"` | two sheets, shared strings, RK/MULRK/NUMBER, a `SUM` result |
 | `sample.ppt` | `soffice --convert-to "ppt:MS PowerPoint 97"`, then rebuilt | two slides and a speaker note |
 | `sample.rtf` | `soffice --convert-to "rtf:Rich Text Format"` | the same three paragraphs, with a font table and a style sheet to skip |
+| `sample-hancom.hwp` | Hancom Office (HWP 5.0, compressed body), supplied by the operator | a public list of correctional facilities' PO box addresses: a title, a blank paragraph, a table, a GIF in BinData, and Hancom's own `PrvText` preview |
+
+`sample-hancom.hwp` holds no personal data: every entry is a facility's
+published postal address. Its `PrvText` stream is what Hancom shows as the
+file's preview, so the test uses it as an answer key the parser did not write.
 
 `sample.ppt` is the one that was touched after conversion. LibreOffice writes
 a preview thumbnail into `SummaryInformation`, which came to 442KB -- 97% of
