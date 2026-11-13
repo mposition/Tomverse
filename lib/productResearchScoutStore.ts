@@ -8,7 +8,7 @@ import "server-only";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
-import { DAILY_PRODUCT_AGENT_PREFIX, dailyProductAgentKey, dailyProductDisplayState, scoutAgentId } from "@/lib/dailyProductAgentCore";
+import { DAILY_PRODUCT_AGENT_PREFIX, canHandOffDailyProductTask, dailyProductAgentKey, dailyProductDisplayState, parseDailyProductState, scoutAgentId } from "@/lib/dailyProductAgentCore";
 import { prisma } from "@/lib/prisma";
 import {
   SCOUT_EXISTING_TITLES_MAX,
@@ -37,7 +37,7 @@ export type StoredSuggestion = {
   readonly statusChangedAt: Date | null;
   readonly amuxIdeaId: string | null;
   readonly modelId: string | null;
-  readonly agentWork?: { status: "claimed" | "needs_lookup" | "pr_opened" | "failed"; prUrl?: string; reason?: string };
+  readonly agentWork?: { status: "claimed" | "needs_lookup" | "pr_opened" | "failed" | "retry_ready"; prUrl?: string; reason?: string; retryable?: boolean };
 };
 
 /**
@@ -149,8 +149,8 @@ export async function readSuggestion(id: string): Promise<StoredSuggestion | nul
 export async function reserveScoutSend(input: { id: string; session: Session; request: Request }): Promise<boolean> {
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
-    const claimed = await tx.appSetting.findUnique({ where: { key: dailyProductAgentKey(scoutAgentId(input.id)) }, select: { key: true } });
-    if (claimed) return false;
+    const claimed = await tx.appSetting.findUnique({ where: { key: dailyProductAgentKey(scoutAgentId(input.id)) }, select: { value: true } });
+    if (claimed && !canHandOffDailyProductTask(parseDailyProductState(claimed.value))) return false;
     const key = `${DAILY_PRODUCT_AGENT_PREFIX}amux.${input.id}`;
     const earlier = await tx.appSetting.findUnique({ where: { key }, select: { key: true } });
     if (earlier) return true;

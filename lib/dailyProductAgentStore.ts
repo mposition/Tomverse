@@ -2,15 +2,16 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
+import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
 import { DAILY_PRODUCT_AGENT_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
 import { claimRecommendationInTransaction, type ClaimedRecommendation } from "@/lib/autoRouterRecAgent";
 import { OPTIMIZER_LOCK } from "@/lib/autoRouterOptimizerLock";
 import { REC_AGENT_LEASE_MS } from "@/lib/autoRouterRecommendationsCore";
 import {
   DAILY_PRODUCT_AGENT_CURSOR, DAILY_PRODUCT_AGENT_DAY, DAILY_PRODUCT_AGENT_TASK_CAP, DAILY_PRODUCT_AGENT_PREFIX, dailyProductAgentEnabled,
-  dailyProductAgentKey, dailyProductResultDecision, followingSource, parseDailyProductState,
+  canRetryDailyProductTask, dailyProductAgentKey, dailyProductResultDecision, followingSource, parseDailyProductState,
   scoutAgentId, scoutIdFromAgentId, sourceOrder, type DailyProductAgentState,
   type DailyProductResult, type DailyProductSource,
 } from "@/lib/dailyProductAgentCore";
@@ -65,7 +66,8 @@ export async function claimDailyProductTask(input: { origin: string; now?: Date 
 async function claimScout(tx: Prisma.TransactionClient, source: Exclude<DailyProductSource, "routing">, origin: string, now: Date): Promise<DailyProductClaim | null> {
   // Any existing row fences the source forever, including expired/invalid
   // leases and unknown publish outcomes. No daily automatic retries.
-  const held = await tx.appSetting.findMany({ where: { key: { startsWith: `${DAILY_PRODUCT_AGENT_PREFIX}scout.` } }, select: { key: true } });
+  const records = await tx.appSetting.findMany({ where: { key: { startsWith: `${DAILY_PRODUCT_AGENT_PREFIX}scout.` } }, select: { key: true, value: true } });
+  const held = records.filter((row) => parseDailyProductState(row.value)?.status !== "retry_ready");
   const sent = await tx.appSetting.findMany({ where: { key: { startsWith: `${DAILY_PRODUCT_AGENT_PREFIX}amux.` } }, select: { key: true } });
   const heldIds = [...held, ...sent].flatMap(({ key }) => {
     if (key.startsWith(`${DAILY_PRODUCT_AGENT_PREFIX}amux.`)) return [key.slice(`${DAILY_PRODUCT_AGENT_PREFIX}amux.`.length)];
@@ -102,8 +104,8 @@ export async function recordDailyProductResult(input: DailyProductResult) {
     const decision = dailyProductResultDecision(current, input);
     if (decision === "not_claimed" || !current) return { refused: "not_claimed" as const };
     if (decision === "replay") return { ok: true as const, changed: false };
-    const row = await tx.productResearchSuggestion.findUnique({ where: { id }, select: { status: true, amuxIdeaId: true } });
-    if (!row || row.status !== "open" || row.amuxIdeaId) return { refused: "not_claimed" as const };
+    // A factual result belongs to its claim even if a person has since closed
+    // the source. Never overwrite that person's suggestion status.
     const next: DailyProductAgentState = input.outcome === "pr_opened"
       ? { ...current, status: "pr_opened", prUrl: input.prUrl }
       : { ...current, status: "failed", reason: input.reason };
@@ -111,5 +113,25 @@ export async function recordDailyProductResult(input: DailyProductResult) {
     await audit(tx, id, "result_recorded", { claimId: input.claimId, outcome: input.outcome,
       ...(input.outcome === "pr_opened" ? { prUrl: input.prUrl } : { reason: input.reason }) });
     return { ok: true as const, changed: true };
+  });
+}
+
+/** Owner route only: unknown publication/review outcomes are never released here. */
+export async function retryDailyProductTask(input: { id: string; session: Session; request: Request }) {
+  return prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    const id = scoutAgentId(input.id), key = dailyProductAgentKey(id);
+    const row = await tx.productResearchSuggestion.findUnique({ where: { id: input.id }, select: { status: true, amuxIdeaId: true } });
+    const sent = await tx.appSetting.findUnique({ where: { key: `${DAILY_PRODUCT_AGENT_PREFIX}amux.${input.id}` }, select: { key: true } });
+    if (!row || row.status !== "open" || row.amuxIdeaId || sent) return false;
+    const stored = await tx.appSetting.findUnique({ where: { key }, select: { value: true } });
+    const current = parseDailyProductState(stored?.value);
+    if (!canRetryDailyProductTask(current) || current?.status !== "failed") return false;
+    await saveSetting(tx, key, JSON.stringify({ ...current, status: "retry_ready" }));
+    await writeAdminAuditLog({ tx, session: input.session, request: input.request,
+      action: "product_research.suggestion.agent_retry_requested", targetType: "product_research_suggestion", targetId: input.id,
+      summary: "Owner queued a known pre-publication failure for another coding attempt.",
+      metadata: { priorClaimId: current.claimId, reason: current.reason } });
+    return true;
   });
 }

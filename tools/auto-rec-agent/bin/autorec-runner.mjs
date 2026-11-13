@@ -222,6 +222,7 @@ async function review(deps, ctx, claim, base, head) {
 /** Everything between the claim and the publish. Returns the outcome to report. */
 async function work(deps, claim, ctx) {
   const { config, exec, fs } = deps;
+  claim = { ...claim, dailyProduct: config.dailyProduct };
   const git = (cwd, args, timeoutMs = 120_000) => exec(config.gitBin, ["-C", cwd, ...args], { env: baseEnv(config), timeoutMs });
 
   ctx.stage = "setup";
@@ -397,7 +398,7 @@ async function report(deps, claim, outcome) {
   return reply?.status === "reported" ? 0 : 1;
 }
 
-export async function runLocked(deps, { onEmpty = () => {} } = {}) {
+export async function runLocked(deps, { onEmpty = () => {}, onOutcome = () => {} } = {}) {
   let reply;
   try {
     reply = await deps.gateway({ op: "claim" }, null, 3 * 60_000);
@@ -432,6 +433,7 @@ export async function runLocked(deps, { onEmpty = () => {} } = {}) {
     return 1;
   }
   deps.log("outcome", { outcome: outcome.outcome, reason: outcome.reason ?? null, detail: outcome.detail ?? null, prUrl: outcome.prUrl ?? null });
+  onOutcome(outcome);
   return report(deps, claim, outcome);
 }
 
@@ -450,13 +452,18 @@ export async function runOnce(deps) {
   }
 }
 
-/** Known blocked outcomes advance; any unknown claim/publish/result ends the batch. */
+/** Task failures advance; infrastructure failures and unknown outcomes stop the batch. */
 export async function runDailyBatch(deps) {
   const started = deps.now();
   for (let count = 0; count < LIMITS.tasksPerDay && deps.now() - started < LIMITS.dailyRunMs; count += 1) {
     let empty = false;
-    const code = await runLocked(deps, { onEmpty: () => { empty = true; } });
+    let outcome = null;
+    const code = await runLocked(deps, { onEmpty: () => { empty = true; }, onOutcome: (value) => { outcome = value; } });
     if (code !== 0 || empty) return code;
+    if (outcome?.outcome === OUTCOME_FAILED && !["no_change", "out_of_scope", "tests", "review_reject"].includes(outcome.reason)) {
+      deps.log("daily_batch_paused", { reason: outcome.reason });
+      return 1;
+    }
   }
   deps.log("daily_batch_limit");
   return 0;

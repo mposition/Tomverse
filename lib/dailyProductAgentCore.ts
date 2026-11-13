@@ -9,6 +9,9 @@ export const DAILY_PRODUCT_AGENT_PREFIX = "auto.dailyProductAgent.";
 export const DAILY_PRODUCT_AGENT_CURSOR = `${DAILY_PRODUCT_AGENT_PREFIX}cursor`;
 export const DAILY_PRODUCT_AGENT_DAY = `${DAILY_PRODUCT_AGENT_PREFIX}day`;
 export const DAILY_PRODUCT_AGENT_TASK_CAP = 24;
+/** These outcomes are known to precede any push or PR request. */
+const RETRYABLE_FAILURES = ["out_of_scope", "no_change", "tests", "review_reject",
+  "agent_error", "timeout", "lease_expired", "setup_failed", "runner_error", "rate_limited"] as const;
 export const DAILY_PRODUCT_SOURCES = ["research", "routing", "memory"] as const;
 export type DailyProductSource = (typeof DAILY_PRODUCT_SOURCES)[number];
 export const scoutAgentId = (id: string) => `scout.${id}`;
@@ -49,8 +52,13 @@ const state = z.discriminatedUnion("status", [
   claim.extend({ status: z.literal("claimed") }).strict(),
   claim.extend({ status: z.literal("pr_opened"), prUrl }).strict(),
   claim.extend({ status: z.literal("failed"), reason: z.enum(RECOMMENDATION_FAILURE_REASONS) }).strict(),
+  claim.extend({ status: z.literal("retry_ready"), reason: z.enum(RETRYABLE_FAILURES) }).strict(),
 ]);
 export type DailyProductAgentState = z.infer<typeof state>;
+export const canRetryDailyProductTask = (current: DailyProductAgentState | null) =>
+  current?.status === "failed" && RETRYABLE_FAILURES.some((reason) => reason === current.reason);
+export const canHandOffDailyProductTask = (current: DailyProductAgentState | null) =>
+  current?.status === "retry_ready" || canRetryDailyProductTask(current);
 
 /** Corrupt state is not an invitation to claim again. Callers also test row existence. */
 export function parseDailyProductState(value: string | null | undefined): DailyProductAgentState | null {
@@ -73,7 +81,7 @@ export function dailyProductDisplayState(value: string, now: number) {
   if (!current || (current.status === "claimed" && Date.parse(current.leaseUntil) <= now)) {
     return { status: "needs_lookup" as const };
   }
-  return { status: current.status,
+  return { status: current.status, retryable: canRetryDailyProductTask(current),
     ...(current.status === "pr_opened" ? { prUrl: current.prUrl } : {}),
     ...(current.status === "failed" ? { reason: current.reason } : {}) };
 }

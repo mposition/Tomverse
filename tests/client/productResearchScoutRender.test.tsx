@@ -82,6 +82,13 @@ test("the source card shows a draft PR or a blocked outcome without completing t
   }
 });
 
+test("only the owner sees retry for a known pre-publication failure", () => {
+  const open = [{ ...suggestion("one", "home.en", "high", "copy", "Source improvement"), agentWork: { status: "failed" as const, reason: "setup_failed", retryable: true } }];
+  assert.match(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ open })} week={null} />), /Retry coding agent/);
+  assert.doesNotMatch(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ open, canConfigure: false })} week={null} />), /Retry coding agent/);
+  assert.doesNotMatch(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ open: [{ ...open[0], agentWork: { status: "needs_lookup" } }] })} week={null} />), /Retry coding agent/);
+});
+
 test("the side tiles say what the Scout kept, today's calls against the limit and the last run, before any list", () => {
   const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view()} week={WEEK} />);
   assert.match(html, new RegExp(m.stateOn));

@@ -125,6 +125,14 @@ test("a daily batch is bounded by the existing 24-publication daily ceiling", as
   assert.equal(ops(gatewayCalls).filter((op) => op === "claim").length, LIMITS.tasksPerDay);
 });
 
+test("a reported infrastructure failure pauses the batch before it can consume more suggestions", async () => {
+  const { deps, gatewayCalls, events } = fakeRunner({ rules: [[/^claude /, exit(1)]] });
+  assert.equal(await runDailyBatch(deps), 1);
+  assert.deepEqual(ops(gatewayCalls), ["claim", "result"]);
+  assert.equal(gatewayCalls[1].header.reason, "agent_error");
+  assert.ok(events.some((event) => event.event === "daily_batch_paused"));
+});
+
 test("the same agent call supplies the public commit and PR summary without copying Scout source text", async () => {
   const publicSummary = "Keep the mobile model label visible";
   const privateText = "Private Scout analysis note";

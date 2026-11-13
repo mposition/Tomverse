@@ -93,7 +93,8 @@ export const LIMITS = Object.freeze({
   // The gateway never publishes more than the hourly timer could ask for.
   publishesPerDay: 24,
   tasksPerDay: 24,
-  dailyRunMs: 20 * 60 * 60_000,
+  // Leave five hours inside the unit's 23h bound for the last task and cleanup.
+  dailyRunMs: 18 * 60 * 60_000,
   autoPrWaitMs: 5 * 60_000,
   autoPrPollMs: 15_000,
   bundleBytes: 50 * 1024 * 1024,

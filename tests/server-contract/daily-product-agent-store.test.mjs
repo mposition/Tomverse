@@ -38,8 +38,9 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: { takeAuditChainLock: async () => {}, writeSystemAuditLog: writeAudit, writeAdminAuditLog: writeAudit } });
 mock.module(mod("lib/autoRouterRecAgent.ts"), { namedExports: { claimRecommendationInTransaction: async () => router.shift() ?? null } });
 
-const { claimDailyProductTask, recordDailyProductResult } = await import(mod("lib/dailyProductAgentStore.ts"));
+const { claimDailyProductTask, recordDailyProductResult, retryDailyProductTask } = await import(mod("lib/dailyProductAgentStore.ts"));
 const { reserveScoutSend } = await import(mod("lib/productResearchScoutStore.ts"));
+const { sendScoutSuggestion } = await import(mod("lib/productResearchScoutSend.ts"));
 const { DAILY_PRODUCT_AGENT_CURSOR, DAILY_PRODUCT_AGENT_DAY, dailyProductAgentKey } = await import(mod("lib/dailyProductAgentCore.ts"));
 const oldSwitch = process.env.DAILY_PRODUCT_AGENT_ENABLED;
 test.beforeEach(() => { settings.clear(); suggestions = []; router = []; audits = []; rejectAudit = false; process.env.DAILY_PRODUCT_AGENT_ENABLED = "true"; });
@@ -84,7 +85,7 @@ test("an expired, failed or corrupt source is never automatically reclaimed", as
   assert.equal(await claim(), null);
 });
 
-test("result replay is idempotent, stale tokens and a human completion cannot overwrite state", async () => {
+test("result replay is idempotent and a factual result does not overwrite a human completion", async () => {
   suggestions = [row("one")]; const first = await claim();
   const result = { id: first.id, claimId: first.claimId, outcome: "pr_opened", prUrl: "https://github.com/mposition/Tomverse/pull/4000" };
   assert.deepEqual(await recordDailyProductResult({ ...result, claimId: "11111111-2222-4333-8444-555555555555" }), { refused: "not_claimed" });
@@ -92,7 +93,8 @@ test("result replay is idempotent, stale tokens and a human completion cannot ov
   assert.deepEqual(await recordDailyProductResult(result), { ok: true, changed: false });
   assert.equal(audits.length, 2); assert.equal(suggestions[0].status, "open");
   suggestions.push(row("two")); const second = await claim(); suggestions[1].status = "completed";
-  assert.deepEqual(await recordDailyProductResult({ ...result, id: second.id, claimId: second.claimId }), { refused: "not_claimed" });
+  assert.deepEqual(await recordDailyProductResult({ ...result, id: second.id, claimId: second.claimId }), { ok: true, changed: true });
+  assert.equal(suggestions[1].status, "completed");
 });
 
 test("the app bounds daily claims including failures and does not reset a corrupt counter", async () => {
@@ -125,4 +127,37 @@ test("sent or completed source records are not offered and empty lanes do not ad
   settings.set(DAILY_PRODUCT_AGENT_CURSOR, "memory");
   assert.equal(await claim(), null);
   assert.equal(settings.get(DAILY_PRODUCT_AGENT_CURSOR), "memory");
+});
+
+test("an owner can queue a known pre-publication failure with a new token and unchanged daily cap", async () => {
+  suggestions = [row("one")]; const first = await claim();
+  const input = { id: "one", session: { user: { id: "owner" } }, request: new Request("https://app.example.test") };
+  assert.equal(await retryDailyProductTask(input), false);
+  await recordDailyProductResult({ id: first.id, claimId: first.claimId, outcome: "failed", reason: "agent_error" });
+  assert.equal(await retryDailyProductTask(input), true);
+  assert.equal(await retryDailyProductTask(input), false);
+  const second = await claim(); assert.notEqual(second.claimId, first.claimId);
+  assert.equal(JSON.parse(settings.get(DAILY_PRODUCT_AGENT_DAY)).count, 2);
+  assert.deepEqual(await recordDailyProductResult({ id: first.id, claimId: first.claimId, outcome: "failed", reason: "agent_error" }), { refused: "not_claimed" });
+});
+
+test("published or unknown outcomes cannot be retried or handed off to AMUX", async () => {
+  const input = { id: "one", session: { user: { id: "owner" } }, request: new Request("https://app.example.test") };
+  for (const reason of ["pr_failed", "push_rejected", "review_unknown"]) {
+    settings.clear(); suggestions = [row("one")]; const first = await claim();
+    await recordDailyProductResult({ id: first.id, claimId: first.claimId, outcome: "failed", reason });
+    assert.equal(await retryDailyProductTask(input), false);
+    assert.equal(await reserveScoutSend(input), false);
+  }
+  settings.clear(); suggestions = [row("one")]; const first = await claim();
+  await recordDailyProductResult({ id: first.id, claimId: first.claimId, outcome: "failed", reason: "setup_failed" });
+  assert.equal(await reserveScoutSend(input), true);
+  assert.equal(await retryDailyProductTask(input), false);
+  // A failed/unknown send keeps its reservation; the same human send can
+  // read back/retry its deterministic AMUX request without an agent takeover.
+  await assert.rejects(sendScoutSuggestion({ readBack: async () => ({ status: "absent" }),
+    submit: async () => { throw new Error("send transport failed"); }, isAlreadySeen: () => false,
+    close: async () => true }), /send transport failed/);
+  assert.equal(await reserveScoutSend(input), true);
+  assert.equal(await claim(), null);
 });

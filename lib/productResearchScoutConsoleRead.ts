@@ -51,7 +51,7 @@ export type ScoutConsoleSuggestion = {
   readonly severity: string;
   readonly evidence: string;
   readonly suggestion: string;
-  readonly agentWork?: { status: "claimed" | "needs_lookup" | "pr_opened" | "failed"; prUrl?: string; reason?: string };
+  readonly agentWork?: { status: "claimed" | "needs_lookup" | "pr_opened" | "failed" | "retry_ready"; prUrl?: string; reason?: string; retryable?: boolean };
 };
 
 export type ScoutConsoleSection = "suggestions" | "runs";

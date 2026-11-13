@@ -30,6 +30,7 @@ test("claim tokens fence results, exact replays are idempotent, and different ou
 
 test("expired and corrupt claims need lookup rather than being reopened", () => {
   assert.equal(parseDailyProductState("not json"), null);
+  assert.equal(parseDailyProductState(JSON.stringify({ ...state, status: "retry_ready", reason: "pr_failed" })), null);
   assert.deepEqual(dailyProductDisplayState("not json", Date.now()), { status: "needs_lookup" });
   assert.deepEqual(dailyProductDisplayState(JSON.stringify(state), Date.parse(state.leaseUntil)), { status: "needs_lookup" });
   assert.equal(dailyProductDisplayState(JSON.stringify(state), Date.parse(state.at)).status, "claimed");

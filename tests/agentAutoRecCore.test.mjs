@@ -35,6 +35,11 @@ import {
 } from "../tools/auto-rec-agent/lib/core.mjs";
 
 const SHA_A = "a".repeat(40);
+test("only daily-mode PRs carry the daily-product goal step", () => {
+  const claim = { id: "cycle:0", recommendation: "Keep model selection consistent" };
+  assert.doesNotMatch(buildPrBody({ claim, reviewJobId: "review" }), /Goal-Step:/);
+  assert.match(buildPrBody({ claim: { ...claim, dailyProduct: true }, reviewJobId: "review" }), /Goal-Step: daily-product-improvements\/cycle:0/);
+});
 const SHA_B = "b".repeat(40);
 const ZERO = "0".repeat(40);
 const modified = (path, mode = "100644") => ({ oldMode: mode, newMode: mode, status: "M", path });

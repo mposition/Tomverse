@@ -305,7 +305,7 @@ export function buildPrBody({ claim, reviewJobId, cycleUrl }) {
     "",
     cycleUrl ? `Optimizer cycle: ${cycleUrl}` : "Optimizer cycle: not given in the claim.",
     `Independent review: accepted, job \`${reviewJobId}\`.`,
-    `Goal-Step: daily-product-improvements/${claim.id}`,
+    ...(claim.dailyProduct ? [`Goal-Step: daily-product-improvements/${claim.id}`] : []),
     "",
     PR_BODY_FOOTER,
   ].join("\n");
