@@ -575,6 +575,62 @@ test("a priced runtime image model cannot change what it calls", async () => {
   assert.equal((row?.profile as { apiModelId?: string } | null)?.apiModelId, "gpt-image-catalog-a");
 });
 
+test("an image model is renamed in place, code or runtime, priced or not", async () => {
+  // Owner request 2026-11-13: the guided screen had no way to change a name.
+  // A rename writes only the name into the stored profile.
+  await updateCatalogEntry({ category: "image", modelId: enabledSeed.id, patch: { name: "Seed Renamed" }, session });
+  const seedRow = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId: enabledSeed.id } } });
+  assert.deepEqual(seedRow?.profile, { name: "Seed Renamed" });
+  assert.equal(seedRow?.enabled, null);
+  const models = await refreshImageModelCatalog({ force: true });
+  assert.equal(models.find((model) => model.id === enabledSeed.id)?.name, "Seed Renamed");
+
+  const modelId = "catalog-runtime-rename";
+  const profile = {
+    provider: "openai",
+    apiModelId: "gpt-image-catalog-rename",
+    name: "Runtime Before",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["low"],
+    latencyClass: "balanced",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+  };
+  // No saved profile yet: a name alone says nothing about what to call.
+  await assert.rejects(
+    updateCatalogEntry({ category: "image", modelId, patch: { name: "Nothing" }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "invalid_profile"
+  );
+  await updateCatalogEntry({ category: "image", modelId, patch: { profile }, session });
+  await createImagePriceRevision({
+    modelId,
+    revision: {
+      pricingVersion: "rename-v1",
+      prices: [{ quality: "low", size: "1024x1024", credits: 50, outputCostMicroUsd: 6_000 }],
+      verification,
+    },
+    session,
+  });
+  const audits = await auditCount("model_catalog.entry_updated");
+  await updateCatalogEntry({ category: "image", modelId, patch: { name: "Runtime After" }, session });
+  const row = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.deepEqual(row?.profile, { ...profile, name: "Runtime After" });
+  assert.equal(await auditCount("model_catalog.entry_updated"), audits + 1);
+
+  // A name is for image models, and never together with a profile.
+  await assert.rejects(
+    updateCatalogEntry({ category: "coding", modelId: "coding-x", patch: { name: "x" }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "invalid_patch"
+  );
+  await assert.rejects(
+    updateCatalogEntry({ category: "image", modelId, patch: { name: "x", profile }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "invalid_patch"
+  );
+  assert.equal(catalogPatchBodySchema.safeParse({ category: "image", modelId, name: "" }).success, false);
+  assert.equal(catalogPatchBodySchema.safeParse({ category: "image", modelId, name: "x".repeat(81) }).success, false);
+});
+
 test("a priced runtime image model whose stored profile no longer parses cannot be given a new one", async () => {
   // Review nit 2026-10-21: the lock compared execution profiles only when the
   // stored one parsed, so an unreadable profile let any new request profile
