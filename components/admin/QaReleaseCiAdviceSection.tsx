@@ -14,7 +14,7 @@ import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouter
 import { adminProductResearchScoutMessages } from "@/lib/adminMessages/productResearchScout";
 import { aestStamp } from "@/lib/agentOffice/time";
 import { ciAdviceWorkBrief, type CiAdviceConsole, type CiAdviceItem } from "@/lib/qaReleaseCiAdviceActionsCore";
-import type { QaReleaseCiAdviceRecord } from "@/lib/qaReleaseCiAdviceCore";
+import type { QaReleaseCiAdviceRecord, QaReleaseCiAdviceSuggestion } from "@/lib/qaReleaseCiAdviceCore";
 
 type Props = { advice: CiAdviceConsole | QaReleaseCiAdviceRecord | null; canWrite?: boolean; canSend?: boolean };
 
@@ -30,7 +30,7 @@ function CiAdviceItems({ advice, canWrite = false, canSend = false }: Props & { 
   const routing = useAdminMessages(adminAutoRouterOptimizerMessages);
   const { locale } = useAdminLocale();
   const router = useRouter();
-  const [items, setItems] = useState(advice.suggestions);
+  const [items, setItems] = useState<Array<QaReleaseCiAdviceSuggestion | CiAdviceItem>>(advice.suggestions);
   const [busy, setBusy] = useState<{ id: string; action: string } | null>(null);
   const [failure, setFailure] = useState<{ id: string; detail: AdminApiFailure } | null>(null);
   const act = async (id: string, action: "complete" | "dismiss" | "send") => {
@@ -56,7 +56,7 @@ function CiAdviceItems({ advice, canWrite = false, canSend = false }: Props & { 
     <section className={`${card} flex min-w-0 flex-col gap-3`} data-testid="qa-release-ci-advice">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h2 className="text-base font-semibold text-zinc-100">{m.ciAdviceTitle}</h2>
-        <span className="text-xs text-zinc-500">{m.ciAdviceAt.replace("{at}", aestStamp(advice.answeredAt))}</span>
+        <span className="text-xs text-zinc-500">{m.ciAdviceAt.replace("{at}", aestStamp(advice.answeredAt ?? advice.askedAt))}</span>
       </div>
       {items.length === 0 ? (
         <p className="text-sm text-zinc-400">{m.ciAdviceNone}</p>
