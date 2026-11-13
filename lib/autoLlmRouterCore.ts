@@ -157,6 +157,15 @@ export type AutoFileGenerationContext = {
     webSearchRequested: boolean;
 };
 
+/** File-routing diagnostics for the candidates actually offered to the router. */
+export const autoLlmRouterFileDiagnostics = (
+    pick: { requiresFileGeneration?: boolean } | null | undefined,
+    candidates: readonly Pick<AutoLlmRouterCandidate, "canCreateFiles">[]
+) => ({
+    requiresFileGeneration: pick?.requiresFileGeneration === true,
+    fileCapableCandidateCount: candidates.filter(candidate => candidate.canCreateFiles === true).length,
+});
+
 /** Whether a model may be recommended for application managed file creation. */
 export const isAutoFileCapableModel = (id: string, tier: string): boolean =>
     tier !== "deep-research" && getArtifactToolSupport(id) === "verified";
