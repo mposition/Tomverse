@@ -313,6 +313,24 @@ test("a count that disagrees with the rows is refused", () => {
   );
 });
 
+test("a payload read back with its keys reordered, as JSONB returns it, still validates", () => {
+  const payload = built([issue(), issue({ number: 700 }), issue({ number: 800, signals: [probe("develop", { resolved: true })] })]);
+  const reverseKeys = (value) => {
+    if (Array.isArray(value)) return value.map(reverseKeys);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.keys(value).reverse().map((key) => [key, reverseKeys(value[key])]));
+    }
+    return value;
+  };
+  const stored = reverseKeys(payload);
+  assert.notEqual(JSON.stringify(stored.counts), JSON.stringify(payload.counts));
+  assert.deepEqual(validateObservationPayload(stored), { ok: true });
+
+  const inflated = structuredClone(stored);
+  inflated.counts.byVerdict[VERDICTS.OPEN_WORK] += 1;
+  assert.match(validateObservationPayload(inflated).problems.join("\n"), /disagree with payload.issues/);
+});
+
 test("rows out of ascending order are refused on the way in", () => {
   const payload = built([issue({ number: 10 }), issue({ number: 20 })]);
   const swapped = structuredClone(payload);

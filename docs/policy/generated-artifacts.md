@@ -848,3 +848,111 @@ artifact tool은 없고, 이미지 artifact는 변환의 결과로만 생긴다(
   운영 스위치.
 - `tests/server-contract/generated-artifact-collector.test.ts`: 저장·ordinal·
   재호출·실패 카드·answer당 3개 상한·storage 실패.
+
+## 15. Office 문서를 레이아웃 그대로 PDF로 (렌더러 서비스)
+
+운영자 결정: 2026-11-12, 선택지 1(사내 렌더러 서비스). Word·PowerPoint·Excel
+파일을 **레이아웃 그대로** PDF로 만드는 일은 이 프로세스 안의 어떤 것도 할 수
+없다 — 오피스 제품군이 필요하다. 렌더러는 Gotenberg(LibreOffice를 HTTP API로
+감싼 것)이고, Railway의 private network에 **별도 서비스**로 돈다. 사용자의 파일이
+Tomverse 밖으로 나가지 않고, 신뢰할 수 없는 문서를 여는 큰 네이티브 프로그램이
+앱과 다른 컨테이너에서 돈다.
+
+### 15.1 무엇이 되는가
+
+`convert_files`의 `to_pdf`가 Office 원본을 받는다: `docx`·`pptx`·`xlsx`,
+OpenDocument(`odt`·`odp`·`ods`), Office 97-2003(`doc`·`ppt`·`xls`), `rtf`,
+한글(`hwp`·`hwpx`), Apple `pages`·`numbers`. 렌더러가 PDF로 그린 뒤 이미지·PDF와 섞어 순서대로 합치고,
+페이지 선택(`pages`)과 회전도 그대로 적용된다. 같은 파일을 여러 번 가리켜도 한
+번만 그린다.
+
+- `to_pdf`의 xlsx는 **인쇄 모양 그대로**다. 값만 표로 옮기는 것은 지금처럼
+  `convert_spreadsheet`(§14)가 한다.
+- iWork 변환은 Office보다 충실도가 낮다(Pages·Numbers는 복잡한 서식이 일부 다를 수
+  있다). Keynote는 첨부 단계에서 받지 않는다(`chat-attachment-formats.md` §2.4).
+- 한글(HWP 5.x·HWPX)은 기본 LibreOffice가 열지 못한다. 렌더러 이미지
+  (`apps/office-renderer/Dockerfile`)에 H2Orestart 필터와 한글 글꼴을 넣는다.
+  한글 파일의 **내용 읽기**는 렌더러와 무관하게 이 앱의 파서가 한다
+  (`docs/policy/chat-attachment-formats.md §4.6`).
+
+### 15.2 스위치와 주소
+
+두 값이 **모두** 있어야 켜진다: `CHAT_OFFICE_TO_PDF=on`, `OFFICE_RENDERER_URL`.
+꺼져 있으면 tool 안내에서도 빠지고, Office 원본을 `to_pdf`에 주면
+`create_document`로 다시 쓰는 대안을 안내하며 거절한다.
+
+- 주소는 **환경 변수에서만** 온다. 요청이나 모델이 주소를 정할 길은 없다.
+- `http:` 주소는 사설망(`*.railway.internal`, localhost)만 허용한다. 주소에 계정
+  정보를 넣을 수 없다. Basic 인증은 `OFFICE_RENDERER_USERNAME`·
+  `OFFICE_RENDERER_PASSWORD`로 선택한다.
+- 렌더러에는 **사용자 파일명을 보내지 않는다**. `document.<확장자>`를 보내며,
+  확장자는 서버가 저장한 media type에서 정한다.
+- 결과에 대한 검사는 하나다: PDF여야 한다(`%PDF-`). 25 MB를 넘으면 읽기를 멈춘다.
+  시간 제한 90초.
+
+### 15.3 보내기 전 측정과 실패
+
+렌더러는 **공용 서비스**다. 한 문서가 수 GB로 부풀면 모두의 변환이 멈춘다. 텍스트
+리더는 자기가 읽는 부분(HWPX의 본문 section 등)만 풀기 때문에, 그림 항목에 숨긴
+압축 폭탄은 그 검사를 지나 LibreOffice에 닿을 수 있다. 그래서 렌더러로 보내기 전에
+`lib/officeRenderInput.ts`가 **압축된 모든 부분을 실제로** 입력 4 KB씩 풀어 나온
+바이트를 세고 버린다: ZIP 기반 문서(OOXML·ODF·HWPX·iWork)는 모든 항목과 그 안에 다시
+압축된 것(문서에 넣은 통합 문서 같은 내부 ZIP, gzip, iWork의 Snappy `.iwa`;
+`lib/packageExpansion.ts`), HWP 5.x는 머리의 압축 플래그와 관계없이 모든 스트림(BinData 항목은 따로 압축될 수 있다, 독립 검토 7차). 풀어 나온 바이트의 합이 200 MB를 넘거나 항목이 2만 개를 넘으면 보내지
+않고 `spec_rejected`로 거절한다(독립 검토 2026-11-13). 압축을 풀기 전 원래 바이트는 이 합에
+넣지 않는다 — 업로드 상한(25 MB)이 그 크기를 묶는다. HWP 컨테이너 읽기는 따로 200 MB 예산을
+쓴다. 측정 경로는 나온 조각을 세기만 하고 보관하지 않는다.
+
+| 렌더러 응답 | 카드 |
+|---|---|
+| (보내기 전) 실제 팽창 200 MB 초과·읽을 수 없는 ZIP | `spec_rejected` |
+| 400 (LibreOffice가 문서를 거절) | `spec_rejected` — 손상·암호 파일일 수 있다 |
+| 503·시간 초과·연결 실패·그 밖의 응답·PDF가 아닌 응답 | `generation_failed` — 잠시 뒤 다시 |
+| 25 MB 초과 | `limit_exceeded` |
+
+### 15.4 배포
+
+`docs/ops/office-renderer.md`. 서비스 생성과 스위치 켜기는 상시 비용이 생기는
+배포라 운영자 승인 뒤에 한다.
+
+## 16. 문서에 그림 넣기 (PDF → Office)
+
+운영자 결정: 2026-11-13. 파일을 만들 수 있는 모델(GPT 6 Luna, Claude, Gemini)은
+PDF를 원본 그대로 받아 스캔 페이지까지 읽는다. 그래서 "이 PDF를 Word로"는 모델이
+읽고 `create_document`로 다시 쓰는 일이고, 빠져 있던 것은 **그림**이었다.
+
+### 16.1 image 블록
+
+`create_document`의 블록에 `image`가 추가됐다.
+
+| field | 뜻 |
+|---|---|
+| `attachment` | 이 메시지에 첨부된 이미지나 PDF의 handle |
+| `page` | PDF일 때 그림이 있는 쪽(1부터). 기본 1 |
+| `crop` | 그림 영역. 이미지나 페이지 왼쪽 위 기준 비율(0~1). 생략하면 전체 |
+| `caption` | 그림 아래 설명 |
+| `widthPercent` | 본문 폭 대비 너비(10~100). 원래 크기(96 dpi)보다 크게 그리지 않는다 |
+
+- **모델은 픽셀을 쓰지 않는다.** handle과 비율 네 개만 낸다. 영역은 모델이 페이지를
+  보고 읽어 낸 것이다(LLM 우선 원칙). 서버가 사용자의 바이트에서 그 영역을 잘라
+  JPEG(긴 변 1,600px, 품질 82)로 만든다. PDF 페이지는 §14와 같은 PDFium 엔진이
+  150 dpi로 그린다.
+- 문서당 30개. 그림이 든 문서는 변환 결과와 같은 25 MB 상한을 쓴다(그림이 사용자의
+  바이트이기 때문이다).
+- docx는 `word/media/`의 JPEG와 inline drawing으로, pdf는 DCTDecode image
+  object로 넣는다. md·txt에는 그림 자리를 글로 적는다(`[Image: 설명]`). 링크는
+  어느 형식에도 쓰지 않는다.
+- **압축파일(archive) 항목에는 쓸 수 없다.** 그 블록은 이 turn의 파일에 닿을 수
+  없다.
+- 없는 handle, 이미지·PDF가 아닌 파일, 없는 쪽은 §14와 같은 거절 카드가 된다.
+
+### 16.2 비용
+
+`create_document` schema가 커져(약 1,380자) `ARTIFACT_TOOL_DEFINITION_TOKENS`를
+2,600에서 3,100으로 올렸다. 그림 자체에 별도 과금은 없다.
+
+### 16.3 아직 하지 않는 것
+
+- 슬라이드(`create_presentation`)와 스프레드시트에 그림 넣기.
+- 원본 PDF의 레이아웃을 그대로 Word로 옮기는 일. 상용 엔진도 완벽하지 않은
+  "복원"이며, 여기서는 모델이 다시 쓴다.

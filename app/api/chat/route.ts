@@ -171,6 +171,7 @@ import {
     buildChatTurnSystemBlocks,
 } from "@/lib/chatTurnSystemBlocks";
 import { loadContinuationTurnSeed } from "@/lib/externalContinuationService";
+import { officeRenderingEnabled } from "@/lib/officeRenderer";
 import { recordContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
 import {
     buildGeneratedArtifactToolConfig,
@@ -860,7 +861,15 @@ export async function PUT(req: Request) {
             filename: name,
             declaredMediaType: mediaType,
         });
-        if (!name || !preparedFormat || preparedFormat.mediaType !== mediaType) {
+        if (
+            !name ||
+            !preparedFormat ||
+            preparedFormat.mediaType !== mediaType ||
+            // An iWork file is only ever laid out by the renderer, so without
+            // it there is nothing to do with one: refused at upload rather
+            // than stored and found useless at send.
+            (preparedFormat.category === "iwork" && !officeRenderingEnabled())
+        ) {
             return Response.json(
                 { error: "Unsupported attachment.", code: "UNSUPPORTED_ATTACHMENT_TYPE" },
                 { status: 400 }
@@ -3931,6 +3940,26 @@ async function handleChatPost(
                         "PDF_TEXT_UNREADABLE",
                         "The attached PDF does not contain readable text."
                     );
+                }
+
+                if (format.category === "iwork") {
+                    // Pages, Numbers and Keynote are never read here. The
+                    // model is told the file is attached and what it can do
+                    // with it, so it neither guesses at the contents nor says
+                    // the file is missing (generated-artifacts.md section 15).
+                    // Said as it is at send time: the renderer can be switched
+                    // off after the file was uploaded, and the model must not
+                    // be promised a tool this turn will not carry.
+                    addExtractedText(
+                        format.promptKind,
+                        officeRenderingEnabled()
+                            ? "[This Apple iWork file is attached, but its contents cannot be read here. " +
+                                  "It can be laid out as a PDF with convert_files (to_pdf).]"
+                            : "[This Apple iWork file is attached, but its contents cannot be read here, " +
+                                  "and it cannot be converted right now. Say so, and suggest exporting it " +
+                                  "from Pages or Numbers as a Word, Excel or PDF file.]"
+                    );
+                    return "ok";
                 }
 
                 if (format.category === "legacy-office") {

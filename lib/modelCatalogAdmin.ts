@@ -48,6 +48,12 @@ export const catalogEntryPatchSchema = z
     holdReason: z.string().trim().min(1).max(500).nullable().optional(),
     sortOrder: z.number().int().min(0).max(10_000).nullable().optional(),
     profile: z.unknown().optional(),
+    /**
+     * An image model's display name, written into whatever profile the row
+     * already has: the override of a code model, or a runtime model's full
+     * profile. The name is not part of the request, so a priced model takes it.
+     */
+    name: z.string().trim().min(1).max(80).optional(),
   })
   .strict();
 export type CatalogEntryPatch = z.infer<typeof catalogEntryPatchSchema>;
@@ -69,6 +75,23 @@ const validateProfile = (category: StoredCatalogCategory, modelId: string, profi
   const parsed = (hasSeed ? imageProfileOverrideSchema : imageFullProfileSchema).safeParse(profile);
   if (!parsed.success) throw new CatalogRefusal("invalid_profile", parsed.error.issues.map((i) => i.path.join(".")), 400);
   return parsed.data;
+};
+
+/**
+ * The stored image profile with only its name changed. A code model's row holds
+ * an override (an empty one is fine); a runtime model's must already be a whole
+ * profile, since a name alone does not say what to call.
+ */
+const renamedImageProfile = (modelId: string, stored: unknown, name: string) => {
+  if (IMAGE_MODEL_REGISTRY.some((model) => model.id === modelId)) {
+    const current = stored === null || stored === undefined ? {} : stored;
+    const parsed = imageProfileOverrideSchema.safeParse(current);
+    if (!parsed.success) throw new CatalogRefusal("invalid_profile", ["stored_override"], 409);
+    return validateProfile("image", modelId, { ...parsed.data, name });
+  }
+  const parsed = imageFullProfileSchema.safeParse(stored);
+  if (!parsed.success) throw new CatalogRefusal("invalid_profile", ["no_saved_profile"], 409);
+  return validateProfile("image", modelId, { ...parsed.data, name });
 };
 
 /** Would this image model serve if `enabled: true` were written? */
@@ -113,7 +136,10 @@ export const updateCatalogEntry = async (input: {
 }) => {
   const { category, modelId, patch, session } = input;
   if (!MODEL_ID_PATTERN.test(modelId)) throw new CatalogRefusal("invalid_model_id", [], 400);
-  const profile = "profile" in patch ? validateProfile(category, modelId, patch.profile) : undefined;
+  if (patch.name !== undefined && (category !== "image" || "profile" in patch)) {
+    throw new CatalogRefusal("invalid_patch", [category !== "image" ? "name_is_image_only" : "name_with_profile"], 400);
+  }
+  const profileInput = "profile" in patch ? validateProfile(category, modelId, patch.profile) : undefined;
 
   const run = (body: (tx: Prisma.TransactionClient) => Promise<Awaited<ReturnType<typeof prisma.modelCatalogEntry.upsert>>>) =>
     input.tx ? body(input.tx) : prisma.$transaction(body);
@@ -126,6 +152,8 @@ export const updateCatalogEntry = async (input: {
     const before = await tx.modelCatalogEntry.findUnique({
       where: { category_modelId: { category, modelId } },
     });
+    // A rename keeps every other field of the stored profile.
+    const profile = patch.name === undefined ? profileInput : renamedImageProfile(modelId, before?.profile, patch.name);
     const next = {
       enabled: patch.enabled === undefined ? (before?.enabled ?? null) : patch.enabled,
       holdReason: patch.holdReason === undefined ? (before?.holdReason ?? null) : patch.holdReason,
@@ -191,6 +219,7 @@ export const updateCatalogEntry = async (input: {
         before: before ? { enabled: before.enabled, holdReason: before.holdReason, sortOrder: before.sortOrder } : null,
         after: { enabled: next.enabled, holdReason: next.holdReason, sortOrder: next.sortOrder },
         profileChanged: profile !== undefined,
+        ...(patch.name !== undefined ? { renamedTo: patch.name } : {}),
         ...(input.provenance ? { provenance: input.provenance } : {}),
       },
       tx,

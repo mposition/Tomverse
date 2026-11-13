@@ -25,6 +25,7 @@ import {
     type NormalizableImageMediaType,
 } from "@/lib/mediaSecurity";
 import { assertSafeOfficeArchive, parseOfficeSafely } from "@/lib/officeSecurity";
+import { IworkPackageError, assertSafeIworkPackage } from "@/lib/iworkPackage";
 import {
     extractLegacyOfficeText,
     LegacyOfficeError,
@@ -75,7 +76,9 @@ export type ChatAttachmentValidationCode =
     | "ATTACHMENT_NO_TEXT"
     | "ATTACHMENT_TEXT_TOO_LARGE"
     | "ATTACHMENT_ENCRYPTED"
-    | "ATTACHMENT_UNREADABLE";
+    | "ATTACHMENT_UNREADABLE"
+    /** The file expands past what may be stored (an iWork package). */
+    | "ATTACHMENT_TOO_LARGE";
 
 export class ChatAttachmentValidationError extends Error {
     constructor(
@@ -228,6 +231,24 @@ export async function validateChatAttachmentUpload({
         if (!extracted) throw new ChatAttachmentValidationError("ATTACHMENT_NO_TEXT");
         if (extracted.length > maxExtractedCharacters) {
             throw new ChatAttachmentValidationError("ATTACHMENT_TEXT_TOO_LARGE", 413);
+        }
+        return { bytes: buffer, mediaType: format.mediaType };
+    }
+
+    if (format.category === "iwork") {
+        // Never read, so there is no text to bound: the check is the
+        // package's shape, and the renderer service is the only reader.
+        try {
+            assertSafeIworkPackage(
+                new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+            );
+        } catch (error) {
+            // Too large is the user's to fix by sending less, and says so; a
+            // package that is not an iWork document is a type mismatch.
+            if (error instanceof IworkPackageError && error.refusal === "TOO_LARGE") {
+                throw new ChatAttachmentValidationError("ATTACHMENT_TOO_LARGE", 413);
+            }
+            throw new ChatAttachmentValidationError("ATTACHMENT_TYPE_MISMATCH");
         }
         return { bytes: buffer, mediaType: format.mediaType };
     }

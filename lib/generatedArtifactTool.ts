@@ -75,6 +75,7 @@ import { ArtifactGenerationError } from "@/lib/generatedArtifactXlsx";
 import { PdfGenerationError } from "@/lib/generatedArtifactPdf";
 import { TextContentError } from "@/lib/generatedArtifactText";
 import { prepareFileConversion } from "@/lib/fileConversion";
+import { resolveDocumentImages } from "@/lib/documentImages";
 import {
   FILE_CONVERSION_LIMITS,
   FileConversionError,
@@ -303,7 +304,10 @@ const HANDLERS: Record<AuthoredArtifactKind, KindHandler> = {
       "numeric cells as numbers for grouped, right-aligned display. Keep identifiers " +
       "and exact authored strings as strings. For PDF tables, set " +
       "pdfColumnWeights to match the content: give description columns more " +
-      "space than short item labels and amounts (for example [1, 4, 1]). Never write file " +
+      "space than short item labels and amounts (for example [1, 4, 1]). An image " +
+      "block places a picture from a file attached to this message -- a photo, " +
+      "or a figure on a page of an attached PDF -- by handle, page and the crop " +
+      "you read off the page; .docx and .pdf show it. Never write file " +
       "bytes, base64 or a download link yourself.",
   },
   presentation: {
@@ -381,6 +385,7 @@ const conversionFailureCode = (error: FileConversionError): ArtifactFailureCode 
     case "PDF_UNREADABLE":
     case "IMAGE_UNREADABLE":
     case "SPREADSHEET_UNREADABLE":
+    case "OFFICE_UNREADABLE":
       return "spec_rejected";
     default:
       return "generation_failed";
@@ -840,12 +845,27 @@ export class GeneratedArtifactCollector {
       };
     }
 
+    // A document that places the user's pictures resolves them first, from
+    // this turn's own files, and may then be as large as a converted file.
+    const placesPictures =
+      kind === "document" &&
+      (spec as DocumentSpec).blocks.some((block) => block.type === "image");
     return this.renderAndStore({
       kind,
       format,
       filename,
       specHash,
-      render: () => handler.render(spec),
+      ...(placesPictures ? { maxBytes: ARTIFACT_LIMITS.maxConvertedOutputBytes } : {}),
+      render: placesPictures
+        ? async () =>
+            renderDocumentArtifact(
+              spec as DocumentSpec,
+              await resolveDocumentImages(
+                spec as DocumentSpec,
+                this.options.turnAttachments ?? new Map()
+              )
+            )
+        : () => handler.render(spec),
       describe: () => handler.describe(spec),
     });
   }

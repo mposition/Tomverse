@@ -90,7 +90,12 @@ export const FILE_CONVERSION_LIMITS = {
 /* Sources                                                                    */
 /* ------------------------------------------------------------------------ */
 
-export type ConversionSourceKind = "image" | "pdf" | "spreadsheet";
+/**
+ * `office` is a Word, PowerPoint or Excel file rendered to PDF with its
+ * layout by the renderer service (lib/officeRenderer.ts). It is a kind only
+ * while office rendering is on, and only for `to_pdf`.
+ */
+export type ConversionSourceKind = "image" | "pdf" | "spreadsheet" | "office";
 
 const IMAGE_MEDIA_TYPES = new Set([
   "image/png",
@@ -119,13 +124,55 @@ export const conversionSourceKind = (
   return null;
 };
 
-/** Whether any file on this turn is something a conversion could read. */
+/**
+ * The extension the renderer is told the file has, by media type.
+ *
+ * LibreOffice picks its import filter from the extension. It is decided here
+ * from the media type the server stored, so the user's file name -- which
+ * reaches a multipart header -- is never sent at all.
+ */
+export const OFFICE_RENDERABLE_EXTENSIONS: Readonly<Record<string, string>> = {
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.oasis.opendocument.text": "odt",
+  "application/vnd.oasis.opendocument.presentation": "odp",
+  "application/vnd.oasis.opendocument.spreadsheet": "ods",
+  "application/msword": "doc",
+  "application/vnd.ms-powerpoint": "ppt",
+  "application/vnd.ms-excel": "xls",
+  "application/rtf": "rtf",
+  // Hangul. Laid out only by a renderer image carrying the H2Orestart filter
+  // (docs/ops/office-renderer.md); stock LibreOffice reads HWP 97 alone.
+  "application/x-hwp": "hwp",
+  "application/hwp+zip": "hwpx",
+  // Apple iWork. LibreOffice imports these with less fidelity than Office
+  // files: a Keynote deck holds up well, Pages and Numbers lose some styling.
+  "application/vnd.apple.pages": "pages",
+  "application/vnd.apple.numbers": "numbers",
+};
+
+export const normalizeMediaType = (mediaType: string) =>
+  mediaType.split(";")[0].trim().toLowerCase();
+
+export const isOfficeRenderable = (mediaType: string): boolean =>
+  normalizeMediaType(mediaType) in OFFICE_RENDERABLE_EXTENSIONS;
+
+/**
+ * Whether any file on this turn is something a conversion could read.
+ *
+ * An office document counts only while office rendering is on: without the
+ * renderer there is nothing `convert_files` can do with a Word file.
+ */
 export const turnHasConvertibleAttachment = (
-  attachments: readonly { mediaType: string }[] | undefined
+  attachments: readonly { mediaType: string }[] | undefined,
+  options: { officeRendering?: boolean } = {}
 ): boolean =>
   Boolean(
     attachments?.some(
-      (attachment) => conversionSourceKind(attachment.mediaType) !== null
+      (attachment) =>
+        conversionSourceKind(attachment.mediaType) !== null ||
+        (options.officeRendering === true && isOfficeRenderable(attachment.mediaType))
     )
   );
 
@@ -449,6 +496,8 @@ export const FILE_CONVERSION_ERROR_CODES = [
   "TOO_MANY_PAGES",
   "OUTPUT_TOO_LARGE",
   "RASTER_UNAVAILABLE",
+  "OFFICE_UNREADABLE",
+  "RENDERER_UNAVAILABLE",
   "CONVERSION_FAILED",
 ] as const;
 

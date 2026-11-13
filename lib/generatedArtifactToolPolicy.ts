@@ -22,6 +22,7 @@ import {
 } from "@/lib/generatedArtifactCore";
 import {
   conversionSourceKind,
+  isOfficeRenderable,
   turnHasConvertibleAttachment,
 } from "@/lib/fileConversionCore";
 import {
@@ -174,6 +175,11 @@ export type ArtifactToolPlanInput = {
    * not need a release (policy section 14).
    */
   fileConversionEnabled?: boolean;
+  /**
+   * Whether office documents can be laid out as PDF by the renderer service
+   * (lib/officeRenderer.ts, policy section 15). Off unless passed true.
+   */
+  officeRenderingEnabled?: boolean;
 };
 
 /**
@@ -347,15 +353,36 @@ const CONVERSION_RULES = [
   "  `convert_files` is not available on this message, ask them to send the",
   "  request again with the files attached -- never say it cannot be done, and",
   "  never retype a file's content as a substitute for converting it.",
-  "- To turn an attached document's *content* into another format (a PDF's",
-  "  text as a Word file, a Word file as a PDF), write it again with",
-  "  `create_document` and say that the layout is rebuilt rather than copied.",
 ];
 
-const generatePrompt = (fileConversionEnabled: boolean): string =>
+/** Office to PDF when the renderer can keep the layout, and when it cannot. */
+const officeToPdfRule = (officeRendering: boolean): string[] =>
+  officeRendering
+    ? [
+        "- An attached office document -- Word, PowerPoint, Excel, Hangul (HWP,",
+        "  HWPX), OpenDocument, Pages or Numbers -- becomes a PDF *with its",
+        "  layout* through `convert_files` (`to_pdf`, the file as a source). Use",
+        "  that, not `create_document`, whenever the user wants the file itself as",
+        "  a PDF.",
+        "- A PDF's content as a Word, Excel or PowerPoint file is written again",
+        "  with `create_document`, `create_spreadsheet` or `create_presentation`;",
+        "  say that the layout is rebuilt rather than copied.",
+      ]
+    : [
+        "- To turn an attached document's *content* into another format (a PDF's",
+        "  text as a Word file, a Word file as a PDF), write it again with",
+        "  `create_document` and say that the layout is rebuilt rather than copied.",
+      ];
+
+const generatePrompt = (
+  fileConversionEnabled: boolean,
+  officeRendering: boolean
+): string =>
   [
     ...GENERATE_PROMPT_LINES,
-    ...(fileConversionEnabled ? CONVERSION_RULES : []),
+    ...(fileConversionEnabled
+      ? [...CONVERSION_RULES, ...officeToPdfRule(officeRendering)]
+      : []),
   ].join("\n");
 
 const SIGN_IN_PROMPT = [
@@ -429,7 +456,8 @@ export const turnSupportsDocumentBatch = (
  */
 const attachmentSection = (
   attachments: readonly TurnAttachmentDescriptor[],
-  registerFileConversion: boolean
+  registerFileConversion: boolean,
+  officeRendering = false
 ): string => {
   const lines = [
     "",
@@ -470,9 +498,31 @@ const attachmentSection = (
     );
   }
 
+  // Pictures from this turn's images and PDFs can go into a document. Said
+  // whenever such a file is attached, because "make this PDF a Word file"
+  // is a rebuild with create_document, and the figures are the part a
+  // rebuild otherwise drops.
+  if (attachments.some((attachment) => {
+    const kind = conversionSourceKind(attachment.mediaType);
+    return kind === "image" || kind === "pdf";
+  })) {
+    lines.push(
+      "",
+      "Pictures from these files can be placed in a document: add an `image`",
+      "block to `create_document` (.docx or .pdf) with `attachment` (the",
+      "handle), for a PDF the `page` (1-based), and `crop` -- the region",
+      "holding the picture as fractions of the page from its top-left corner,",
+      "read off the page you see -- plus an optional `caption`. When rebuilding",
+      "a PDF as a Word file, place its figures this way rather than describing",
+      "them in words."
+    );
+  }
+
   if (registerFileConversion) {
     const convertible = attachments.filter(
-      (attachment) => conversionSourceKind(attachment.mediaType) !== null
+      (attachment) =>
+        conversionSourceKind(attachment.mediaType) !== null ||
+        (officeRendering && isOfficeRenderable(attachment.mediaType))
     );
     lines.push(
       "",
@@ -486,6 +536,14 @@ const attachmentSection = (
       "- PDF pages -> PNG/JPG/WebP images: `pdf_to_images`.",
       "- an image -> another format, smaller or more compressed: `convert_images`.",
       "- an .xlsx or .csv -> xlsx, csv or a PDF table: `convert_spreadsheet`.",
+      ...(officeRendering
+        ? [
+            "- an office document (Word, PowerPoint, Excel, HWP, HWPX, ODF, Pages,",
+            "  Numbers) -> a PDF that keeps its layout:",
+            '  `operation: "to_pdf"` with the file as a source. Several files, or',
+            "  office files with images and PDFs, merge into one PDF in order.",
+          ]
+        : []),
       `The files it can read here: ${convertible
         .map((attachment) => `\`${attachment.handle}\``)
         .join(", ")}.`,
@@ -573,16 +631,18 @@ export const planGeneratedArtifactTool = (
   const attachments = input.turnAttachments ?? [];
   const registerDocumentBatch = turnSupportsDocumentBatch(attachments);
   const fileConversionEnabled = input.fileConversionEnabled !== false;
+  const officeRendering = fileConversionEnabled && input.officeRenderingEnabled === true;
   const registerFileConversion =
-    fileConversionEnabled && turnHasConvertibleAttachment(attachments);
-  const prompt = generatePrompt(fileConversionEnabled);
+    fileConversionEnabled &&
+    turnHasConvertibleAttachment(attachments, { officeRendering });
+  const prompt = generatePrompt(fileConversionEnabled, officeRendering);
   return {
     mode: "generate",
     registerTool: true,
     registerDocumentBatch,
     registerFileConversion,
     systemPrompt: attachments.length
-      ? `${prompt}\n${attachmentSection(attachments, registerFileConversion)}`
+      ? `${prompt}\n${attachmentSection(attachments, registerFileConversion, officeRendering)}`
       : prompt,
   };
 };
@@ -597,9 +657,11 @@ export const planGeneratedArtifactTool = (
  * spend real time on a number that cannot change between requests.
  *
  * Measured against the rendered schema and rounded up, so the reservation is
- * never short.
+ * never short. Raised from 2,600 when `create_document` gained the image
+ * block (about 1,150 characters of schema and 230 of description, rounded up
+ * to 500 tokens; policy section 16).
  */
-export const ARTIFACT_TOOL_DEFINITION_TOKENS = 2600;
+export const ARTIFACT_TOOL_DEFINITION_TOKENS = 3100;
 
 /**
  * The extra allowance for `create_document_batch`'s own schema.

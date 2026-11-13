@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft, Loader2 } from "lucide-react";
+import { useState } from "react";
 
 import { AdminDataTable, type AdminDataColumn } from "@/components/admin/ui/AdminDataTable";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
@@ -439,6 +440,7 @@ export function ImageModelDetail({
   onApply,
   onAction,
   onHold,
+  onRename,
 }: {
   m: CatalogMessages;
   item: ImageCatalogItem;
@@ -451,8 +453,20 @@ export function ImageModelDetail({
   onApply: () => void;
   onAction: (action: ImageNextAction) => void;
   onHold: () => void;
+  /** Resolves true once saved; the field closes then. */
+  onRename: (name: string) => Promise<boolean>;
 }) {
   const stage = imageStage(item);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+  const renameValue = renaming?.trim() ?? "";
+  const saveRename = async () => {
+    if (!renameValue || renameValue === item.name) return setRenaming(null);
+    setRenameBusy(true);
+    const saved = await onRename(renameValue);
+    setRenameBusy(false);
+    if (saved) setRenaming(null);
+  };
   const draft = item.draft;
   const draftReasons = item.draftReview?.reasons ?? [];
   // Credit floors are re-checked against the typed credits; every other
@@ -473,6 +487,16 @@ export function ImageModelDetail({
         </button>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <h2 className="text-xl font-bold text-zinc-100">{item.name}</h2>
+          {renaming === null ? (
+            <button
+              type="button"
+              onClick={() => setRenaming(item.name)}
+              data-testid="model-catalog-rename"
+              className="text-xs font-bold text-zinc-400 underline hover:text-zinc-100"
+            >
+              {m.renameAction}
+            </button>
+          ) : null}
           <ImageStageChip m={m} stage={stage} />
           {serving && stage !== "serving" ? <ImageStageChip m={m} stage="serving" /> : null}
           {serving ? (
@@ -482,6 +506,35 @@ export function ImageModelDetail({
           ) : null}
         </div>
         <p className="mt-1 break-all font-mono text-xs text-zinc-500">{subtitle(m, item)}</p>
+        {renaming !== null ? (
+          <form
+            className="mt-3 flex flex-wrap items-end gap-2"
+            data-testid="model-catalog-rename-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveRename();
+            }}
+          >
+            <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-bold text-zinc-300">
+              {m.renameLabel}
+              <input
+                autoFocus
+                maxLength={80}
+                value={renaming}
+                onChange={(event) => setRenaming(event.target.value)}
+                className="min-h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 focus:border-blue-400 focus:outline-none"
+              />
+              <span className="font-normal text-zinc-500">{m.renameHelp}</span>
+            </label>
+            <AdminWriteButton size="sm" type="submit" disabled={renameBusy || !renameValue}>
+              {renameBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+              {m.renameSave}
+            </AdminWriteButton>
+            <button type="button" onClick={() => setRenaming(null)} className="min-h-8 px-2 text-xs font-bold text-zinc-400 hover:text-zinc-100">
+              {m.renameCancel}
+            </button>
+          </form>
+        ) : null}
       </div>
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
         <ImageFlowStepper m={m} stage={drafting ? "needs_draft" : stage} />

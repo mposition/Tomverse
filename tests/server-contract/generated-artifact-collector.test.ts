@@ -872,3 +872,28 @@ test("eighth review: tool calls made together are run one at a time, with one or
   );
   assert.equal(subject.toStreamArtifacts().length, 3);
 });
+
+test("a document placing an attached picture is stored, under the converted-file ceiling", async () => {
+  resetWorld();
+  const subject = await collector({ turnAttachments: await turnFiles() });
+  const report = await subject.run("document", {
+    filename: "photo report",
+    format: "docx",
+    blocks: [
+      { type: "heading", level: 1, text: "Inspection" },
+      { type: "image", attachment: "att_1", caption: "Front" },
+      { type: "image", attachment: "att_3", page: 2, crop: { x: 0, y: 0, width: 1, height: 0.5 } },
+    ],
+  });
+  assert.equal(report.status, "created");
+  assert.equal(world.puts.length, 1);
+  assert.equal(world.puts[0].format, "docx");
+
+  const missing = await subject.run("document", {
+    filename: "x",
+    format: "pdf",
+    blocks: [{ type: "image", attachment: "att_9" }],
+  });
+  assert.equal(missing.status, "failed");
+  assert.deepEqual(subject.failed.map((entry) => entry.failureCode), ["spec_rejected"]);
+});
