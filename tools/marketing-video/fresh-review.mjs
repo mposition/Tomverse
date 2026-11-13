@@ -174,11 +174,13 @@ async function record({ locale, outDir, question, dry }) {
   // The words a viewer can see in the frame (visibleTextInPage): word by word, whole words only.
   const visibleText = (selector) => page.evaluate(visibleTextInPage, selector ?? null);
   // The account's own sidebar (its other conversations) and its analytics notice never go into a
-  // film; the notice is hidden, not answered, so the account's settings stay as they are. Set
-  // through the CSSOM, which the site's CSP allows (an injected <style> is refused), before every capture.
+  // film; the notice is hidden, not answered, so the account's settings stay as they are. Nor do the
+  // "jump to latest" buttons a column shows once it is scrolled up: they cover the answer's words
+  // (run 20261113). Set through the CSSOM, which the site's CSP allows (an injected <style> is
+  // refused), before every capture.
   const hideSidebar = () =>
     page.evaluate(() => {
-      for (const element of document.querySelectorAll('[data-testid="chat-sidebar"],[data-testid="chat-sidebar-rail"],[data-testid="chat-consent-notice"]')) element.style.setProperty("visibility", "hidden", "important");
+      for (const element of document.querySelectorAll('[data-testid="chat-sidebar"],[data-testid="chat-sidebar-rail"],[data-testid="chat-consent-notice"],[data-testid="scroll-to-latest-button"]')) element.style.setProperty("visibility", "hidden", "important");
     });
   const capture = async (name, shows, selector) => {
     const file = `${name}.png`;
