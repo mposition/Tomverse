@@ -571,7 +571,8 @@ test("an administrator's tick or untick decides over the automatic answer", () =
 test("an Auto turn on a model without the tools is told to ask again, not to leave Auto", () => {
   const auto = plan({ modelId: "qwen3-8-flash", provider: "qwen", autoRouted: true }).systemPrompt;
   assert.match(auto, /sending the same request again: Auto routes a file request/);
-  assert.match(auto, /Do not tell them to turn Auto off or to pick a model themselves/);
+  assert.match(auto, /do not tell them to turn Auto off or to pick a model themselves/);
+  assert.match(auto, /Do not promise that a resend will work/);
   assert.doesNotMatch(auto, /instead of Auto/);
   const manual = plan({ modelId: "qwen3-8-flash", provider: "qwen" }).systemPrompt;
   assert.match(manual, /choosing a different model/);

@@ -1031,7 +1031,7 @@ test("Auto routing to an unverified model registers no file tool and says Auto c
   // request to a model that can create files -- never "turn Auto off" or
   // "choose a model yourself", which names a choice the user did not make.
   assert.match(promptText(), /sending the same request again: Auto routes a file request/);
-  assert.match(promptText(), /Do not tell them to turn Auto off/);
+  assert.match(promptText(), /do not tell them to turn Auto off/);
   assert.deepEqual(world.artifactRows, []);
 });
 
@@ -1044,7 +1044,7 @@ test("file intent with no capable candidate keeps the refusal in Chat despite a 
   assert.ok(lastStreamTextOptions, "the turn was incorrectly handed off to the image workspace");
   assert.equal((lastStreamTextOptions.tools as Record<string, unknown> | undefined)?.create_text_file, undefined);
   assert.match(promptText(), /sending the same request again: Auto routes a file request/);
-  assert.match(promptText(), /Do not tell them to turn Auto off/);
+  assert.match(promptText(), /do not tell them to turn Auto off/);
   assert.deepEqual(world.artifactRows, []);
 });
 

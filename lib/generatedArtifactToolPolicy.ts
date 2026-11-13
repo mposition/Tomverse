@@ -468,7 +468,7 @@ const offPrompt = (reason: ArtifactToolOffReason, autoRouted = false): string =>
           ? // Auto chose this model; the user did not. Telling them to leave
             // Auto names a choice they never made: a file request sent again
             // is routed to a model that can create files.
-            "(sending the same request again: Auto routes a file request to a model that can create files). Do not tell them to turn Auto off or to pick a model themselves."
+            "(sending the same request again: Auto routes a file request to a model that can create files when one is available to them; if none is, files cannot be made for them right now). Do not promise that a resend will work, and do not tell them to turn Auto off or to pick a model themselves."
           : `(choosing a different model, such as ${FILE_CAPABLE_MODEL_NAMES.join(", ")}).`
         : "(starting the request again from a saved conversation).",
     "",
