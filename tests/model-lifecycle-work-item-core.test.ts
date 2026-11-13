@@ -804,8 +804,9 @@ test("only a served add still open before rollout can be closed as rolled out", 
   // The walk to validation is made only of transitions the state machine
   // allows, approval with its decision, and reaches validation_pending from
   // every open state before it.
-  for (const start of ["discovered", "awaiting_decision", "deferred", "approved", "implementation_pending"]) {
-    let status = start;
+  const starts: WorkItemStatus[] = ["discovered", "awaiting_decision", "deferred", "approved", "implementation_pending"];
+  for (const start of starts) {
+    let status: WorkItemStatus = start;
     for (const step of ROLLOUT_WALK_TO_VALIDATION) {
       if (!step.from.includes(status)) continue;
       const refusal = workItemTransitionRefusal({
