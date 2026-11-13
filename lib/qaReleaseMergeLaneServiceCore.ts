@@ -4,10 +4,12 @@
  * Railway read token and its own secret; it merges nothing it picked by
  * itself -- every merge rides on an instruction the app issued and consumed.
  *
- * A round does one of two things, never both (section 8 item 5):
- * - with an attempt open, it finishes or advances that attempt only -- the
+ * A round works in this order (section 8 item 5):
+ * - with an attempt open, it finishes or advances that attempt -- the
  *   deployment outcome of a merge awaiting deploy, or the ordered re-read of
- *   an attempt whose result never arrived -- and ends;
+ *   an attempt whose result never arrived. It ends there, except that a
+ *   deploy it closed as succeeded, on a lane the app then reads as free and
+ *   unlatched, goes on to the next step in the same round;
  * - with none open and the lane free, it picks the oldest candidate, asks the
  *   app for an instruction, re-reads the pull request and its own switches,
  *   consumes the instruction, merges with the head pinned, checks where the
@@ -104,9 +106,23 @@ export type QaReleaseMergeLanePorts = {
     /** Every recent deployment in the environment that deploys develop (dev); null when unread. */
     developDeployments: () => Promise<QaReleaseDeployment[] | null>;
   };
+  /**
+   * Milliseconds on the service's own clock, for the round's time budget only
+   * (never a judgement about the lane, which reads the database clock).
+   * Without it a round never goes on past a deploy it closed.
+   */
+  clock?: () => number;
 };
 
-export type QaReleaseMergeLaneRoundOutcome =
+/**
+ * What a round did. `afterDeploy` is set when the round first closed the
+ * previous attempt's deploy as deployed (every service serving it, or its CI
+ * passed) and then went on to the next pull request; the rest of the outcome
+ * is that second step's.
+ */
+export type QaReleaseMergeLaneRoundOutcome = QaReleaseMergeLaneStepOutcome & { afterDeploy?: "succeeded" | "ci_passed" };
+
+type QaReleaseMergeLaneStepOutcome =
   | { exitCode: 0; outcome: "disabled" | "latched" | "hold" | "idle" | "waiting" | "attempt_in_flight" | "abandoned" }
   /** The pick the app declined: in S-M1 (lane switch off) this is the shadow judgement, compared with what people merged. */
   | { exitCode: 0; outcome: "instruction_refused"; pullRequestNumber: number; headSha: string; reason: string }
@@ -357,6 +373,7 @@ async function laneRound(
   const start = decideQaReleaseServiceStart("mergeLane", env);
   if (start === "refuse") return { exitCode: 1, outcome: "refused_to_start" };
   if (start === "disabled") return { exitCode: 0, outcome: "disabled" };
+  const roundStartMs = ports.clock?.() ?? 0;
 
   let state: QaReleaseLaneState;
   try {
@@ -365,11 +382,32 @@ async function laneRound(
     return { exitCode: 1, outcome: "state_unknown" };
   }
 
-  // An open attempt is this round's whole business; a latch does not stop
-  // its judgement (section 8 item 5), only new merges.
+  // An open attempt comes first; a latch does not stop its judgement
+  // (section 8 item 5), only new merges.
   const attempt = state.openAttempt;
   if (attempt) {
-    if (attempt.state === "awaiting_deploy") return judgeAwaitingDeploy(ports, attempt, state.dbNowMs, state.latched);
+    if (attempt.state === "awaiting_deploy") {
+      const judged = await judgeAwaitingDeploy(ports, attempt, state.dbNowMs, state.latched);
+      // Closed as deployed (CI passed or every service serving it) frees the
+      // lane, and the same round goes on to the next pull request (section 8
+      // item 5, version 5) instead of leaving it to the next cron, ten
+      // minutes on. Any other result ends the round. The lane is read again
+      // first: the close is the app's, and only its answer says the lane is
+      // free and unlatched.
+      if (judged.outcome !== "reported" || !CLOSED_AS_DEPLOYED.has(judged.detail)) return judged;
+      // The merge path's own worst case already fits the hard timeout; going
+      // on is only for a round whose judgement was quick, so the two together
+      // still do (policy section 10).
+      if (!ports.clock || ports.clock() - roundStartMs > QA_RELEASE_CONTINUE_AFTER_DEPLOY_WITHIN_MS) return judged;
+      let after: QaReleaseLaneState;
+      try {
+        after = await ports.app.readState();
+      } catch {
+        return judged;
+      }
+      if (after.openAttempt !== null || after.latched) return judged;
+      return { ...(await startNextAttempt(env, ports, after, observer)), afterDeploy: judged.detail as "succeeded" | "ci_passed" };
+    }
     // A latched lane issues nothing, so an issued or consumed attempt under a
     // latch is one whose merge result was unknown or never reported: re-read
     // it now. Unlatched, it may still be in another round's hands for twelve
@@ -379,7 +417,26 @@ async function laneRound(
     return sendReport(ports, attempt.id, { kind: "unreported" }, "unreported");
   }
   if (state.latched) return { exitCode: 0, outcome: "latched" };
+  return startNextAttempt(env, ports, state, observer);
+}
 
+/** The deploy reports that close an attempt as deployed, by their round detail. */
+const CLOSED_AS_DEPLOYED = new Set(["succeeded", "ci_passed"]);
+
+/**
+ * A round goes on from a deploy it closed to the next merge only when it got
+ * there within this long: the rest of the round may take the merge path's
+ * whole worst case, and both must fit the service's ten-minute hard timeout.
+ */
+export const QA_RELEASE_CONTINUE_AFTER_DEPLOY_WITHIN_MS = 90 * 1000;
+
+/** With no attempt open and the lane unlatched: hold, idle, or pick, issue, merge and report. */
+async function startNextAttempt(
+  env: Readonly<Record<string, string | undefined>>,
+  ports: QaReleaseMergeLanePorts,
+  state: QaReleaseLaneState,
+  observer?: QaReleaseMergeLaneObserver,
+): Promise<QaReleaseMergeLaneRoundOutcome> {
   let deployments: QaReleaseDeployment[] | null;
   try {
     deployments = await ports.railway.developDeployments();
