@@ -54,6 +54,16 @@ export const imageBillingMeasurementEnabled = (env: Readonly<Record<string, stri
 /** The most one measurement may be approved to spend, micro-USD ($10). */
 export const MEASUREMENT_MAX_COST_MICRO_USD = 10_000_000;
 
+/**
+ * How long one run may take, and the slowest one sample can be (a Qwen
+ * generation and its download, 150 s each). A sample is sent only while the
+ * time so far plus that worst case fits; the route's maxDuration (2,400 s)
+ * is above it. The slowest plan -- 12 samples of 150 s, or 6 Qwen samples of
+ * 300 s -- is 1,800 s.
+ */
+export const MEASUREMENT_RUN_BUDGET_MS = 2_100_000;
+export const MEASUREMENT_SAMPLE_WORST_MS = 300_000;
+
 /** The most samples one plan may send. */
 export const MEASUREMENT_MAX_SAMPLES = 12;
 

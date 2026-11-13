@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
-// A measurement sends its samples after this response; the run is bounded by
-// at most 12 samples, each under the adapter's provider timeout.
-export const maxDuration = 900;
+// A measurement sends its samples after this response. The slowest plan is
+// 1,800 s (MEASUREMENT_RUN_BUDGET_MS stops a run at 2,100 s); this is above both.
+export const maxDuration = 2400;
 
 import { getServerSession } from "next-auth/next";
 import { after, NextResponse } from "next/server";

@@ -262,3 +262,25 @@ test("Nano Banana 2.1: samples without images complete but cannot be confirmed",
     (error: unknown) => error instanceof MeasurementRefusal && error.code === "not_confirmable"
   );
 });
+
+test("a run stops before the time limit instead of being cut off, and returns the unspent maximum", async () => {
+  const now = new Date();
+  const row = await startImageBillingMeasurement({ plan: measurementPlanSchema.parse({ ...wanPlan, samples: 3 }), session, env: ON, now });
+  let clock = 0;
+  let calls = 0;
+  await runImageBillingMeasurement({
+    measurementId: row.id,
+    session,
+    // Each sample appears to take 20 minutes: the second would pass the 35-minute budget.
+    now: () => (clock += 600_000),
+    generate: async () => {
+      calls += 1;
+      return qwenResult({ image_count: 1 });
+    },
+  });
+  assert.equal(calls, 1);
+  const done = await prisma.imageBillingMeasurement.findUniqueOrThrow({ where: { id: row.id } });
+  assert.equal(done.status, "stopped");
+  assert.equal(done.stopReason, "time_cap");
+  assert.equal(done.spentMicroUsd, 30_000);
+});

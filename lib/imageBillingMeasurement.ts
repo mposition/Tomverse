@@ -27,6 +27,8 @@ import { incrementUsageBucket, usagePeriodStart } from "@/lib/chatSecurity";
 import {
   imageBillingMeasurementEnabled,
   MEASUREMENT_PROMPT,
+  MEASUREMENT_RUN_BUDGET_MS,
+  MEASUREMENT_SAMPLE_WORST_MS,
   MEASUREMENT_STALE_MS,
   type MeasurementPlan,
   measurementPlanSchema,
@@ -231,9 +233,16 @@ export const runImageBillingMeasurement = async (input: {
     const plan = parsed.data;
     const ceiling = sampleCeilingMicroUsd(plan);
     const candidate = measurementCandidate(plan);
+    const runStarted = clock();
     for (const [index, request] of sampleRequests(plan).entries()) {
       if (spent + ceiling > plan.maxCostMicroUsd) {
         stopReason = "cost_cap";
+        break;
+      }
+      // Stop cleanly inside the route's time limit rather than be cut off
+      // with the maximum still held.
+      if (clock() - runStarted + MEASUREMENT_SAMPLE_WORST_MS > MEASUREMENT_RUN_BUDGET_MS) {
+        stopReason = "time_cap";
         break;
       }
       const started = clock();

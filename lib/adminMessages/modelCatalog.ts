@@ -368,7 +368,7 @@ export const adminModelCatalogMessages = defineAdminMessages({
       historyTitle: "Measurements",
       noMeasurements: "No measurement yet.",
       status: { running: "Running", completed: "Completed", stopped: "Stopped", failed: "Failed", interrupted: "Interrupted (spend unknown)" },
-      stopReason: { cost_cap: "Stopped before the maximum cost.", sample_over_ceiling: "A sample billed past its ceiling.", error: "The run failed." },
+      stopReason: { cost_cap: "Stopped before the maximum cost.", time_cap: "Stopped before the time limit.", sample_over_ceiling: "A sample billed past its ceiling.", error: "The run failed." },
       progress: (done: number, planned: number) => `${done} of ${planned} samples`,
       spent: (spent: string, max: string) => `Spent ${spent} of ${max}`,
       columns: {
@@ -787,7 +787,7 @@ export const adminModelCatalogMessages = defineAdminMessages({
       historyTitle: "실측 기록",
       noMeasurements: "아직 실측이 없습니다.",
       status: { running: "진행 중", completed: "완료", stopped: "중단", failed: "실패", interrupted: "끊김 (지출 불명)" },
-      stopReason: { cost_cap: "최대 비용에 닿기 전에 멈췄습니다.", sample_over_ceiling: "한 표본이 건당 상한을 넘었습니다.", error: "실행이 실패했습니다." },
+      stopReason: { cost_cap: "최대 비용에 닿기 전에 멈췄습니다.", time_cap: "시간 한도에 닿기 전에 멈췄습니다.", sample_over_ceiling: "한 표본이 건당 상한을 넘었습니다.", error: "실행이 실패했습니다." },
       progress: (done: number, planned: number) => `표본 ${planned}건 중 ${done}건`,
       spent: (spent: string, max: string) => `${max} 중 ${spent} 사용`,
       columns: {
