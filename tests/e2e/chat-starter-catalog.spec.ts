@@ -774,4 +774,38 @@ test.describe("Chat starter catalogue", () => {
     await expect(gallery(page)).toBeVisible();
     await expect(page.locator('[data-starter-id="make-an-image"]')).toHaveCount(0);
   });
+  test("Chat keeps one card order for the browser session", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // Owner decision 2026-11-13: Chat shows a different selection from a
+    // larger pool, fixed for the session. The server reads the order from the
+    // session cookie, so a reload keeps it and the hydrated page agrees.
+    await enableStarterFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    const cardIds = () =>
+      page.getByTestId("chat-starter-card").evaluateAll((cards) =>
+        cards.filter((card) => (card as HTMLElement).offsetParent !== null)
+          .map((card) => card.getAttribute("data-starter-id")));
+    const setSeed = (seed: string) =>
+      page.context().addCookies([{ name: "tomverse_starter_order", value: seed, url: BASE_URL }]);
+
+    await setSeed("7");
+    await page.goto("/chat");
+    await expect(gallery(page)).toBeVisible();
+    const first = [
+      "draft-reply", "summarize-text", "learn-a-concept",
+      "sourced-answer", "debug-stack-trace", "spreadsheet-from-answer",
+    ];
+    await expect.poll(cardIds).toEqual(first);
+    await page.reload();
+    await expect(gallery(page)).toBeVisible();
+    await expect.poll(cardIds).toEqual(first);
+
+    await setSeed("1234");
+    await page.reload();
+    await expect(gallery(page)).toBeVisible();
+    await expect.poll(cardIds).not.toEqual(first);
+  });
+
 });

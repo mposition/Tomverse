@@ -176,7 +176,9 @@ import {
   type StarterCapability,
 } from "@/lib/chatStarterCatalog";
 import {
+  CHAT_STARTER_MAX_VISIBLE,
   selectVisibleStarterCards,
+  STARTER_ORDER_COOKIE,
   type StarterLockReason,
 } from "@/lib/chatStarterAvailability";
 import {
@@ -805,6 +807,7 @@ export function ChatPageClient({
   chatStarterKnownFlagKeys = [],
   chatStarterEnabledFlagKeys = [],
   chatStarterCapabilities = [],
+  chatStarterOrderSeed = null,
   initialConversationId = null,
   mountedSurface: routeSurface = "workspace",
   continuationProduct,
@@ -903,6 +906,11 @@ export function ChatPageClient({
    * crosses is a list of ids, never a key, a backend name or a budget.
    */
   chatStarterCapabilities?: readonly StarterCapability[];
+  /**
+   * Chat's starter order for this browser session, chosen by the server
+   * (`STARTER_ORDER_COOKIE`). Null keeps registry order.
+   */
+  chatStarterOrderSeed?: number | null;
   /**
    * The conversation this mount opens with, when the URL named one.
    *
@@ -10021,9 +10029,13 @@ export function ChatPageClient({
       modelCapabilities: new Set(chatStarterCapabilities),
       // Chat is one model; cards that promise several answers side by side
       // are Review's (docs/ui-contracts/chat-starter-catalog.md section 7).
-    }, chatStarterCatalogFor(mountedSurface === "chat" ? "chat" : "review"));
+      // Only Chat draws from its pool in a per-session order: Review's chrome
+      // names fixed cards and keeps registry order.
+    }, chatStarterCatalogFor(mountedSurface === "chat" ? "chat" : "review"),
+    CHAT_STARTER_MAX_VISIBLE, mountedSurface === "chat" ? chatStarterOrderSeed : null);
   }, [
     mountedSurface,
+    chatStarterOrderSeed,
     accountUsage?.plan,
     chatStarterCapabilities,
     chatStarterEnabled,
@@ -10150,6 +10162,16 @@ export function ChatPageClient({
       ? reviewImageProviders(imageCatalog.models) : [],
     [imageCatalog.models, imageGenerationEnabled, inConversationImagesAllowed]
   );
+
+  // Keep the server's starter order for the rest of this browser session: a
+  // session cookie (no Max-Age), written only when it differs.
+  useEffect(() => {
+    if (!chatStarterEnabled || chatStarterOrderSeed === null) return;
+    const current = `${STARTER_ORDER_COOKIE}=${chatStarterOrderSeed}`;
+    if (document.cookie.split("; ").includes(current)) return;
+    document.cookie = `${current}; path=/; samesite=lax` +
+      (window.location.protocol === "https:" ? "; secure" : "");
+  }, [chatStarterEnabled, chatStarterOrderSeed]);
 
   const starterGalleryElement =
     starterCards.length > 0 ? (

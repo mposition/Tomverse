@@ -15,7 +15,10 @@ import {
 } from "../lib/chatStarterCatalog.ts";
 import {
   CHAT_STARTER_MAX_VISIBLE,
+  STARTER_ORDER_SEED_LIMIT,
   chatStarterAvailability,
+  parseStarterOrderSeed,
+  seededStarterOrder,
   selectVisibleStarterCards,
 } from "../lib/chatStarterAvailability.ts";
 import {
@@ -640,4 +643,58 @@ test("image-triage capability resolves only from the shell's answer", () => {
     chatImageAnswers: true,
   });
   assert.ok(on.includes("chat-image-answer"));
+});
+
+// --- Chat's per-session order -------------------------------------------------
+
+test("the same seed always orders the same way, and seeds differ", () => {
+  const items = Array.from({ length: 12 }, (_, index) => index);
+  assert.deepEqual(seededStarterOrder(items, 42), seededStarterOrder(items, 42));
+  assert.deepEqual([...seededStarterOrder(items, 42)].sort((a, b) => a - b), items);
+  const orders = new Set(
+    Array.from({ length: 20 }, (_, seed) => seededStarterOrder(items, seed).join(","))
+  );
+  assert.ok(orders.size > 15, `only ${orders.size} distinct orders`);
+});
+
+test("only a bounded number is accepted as a seed", () => {
+  assert.equal(parseStarterOrderSeed("0"), 0);
+  assert.equal(parseStarterOrderSeed(String(STARTER_ORDER_SEED_LIMIT - 1)), STARTER_ORDER_SEED_LIMIT - 1);
+  for (const value of [undefined, null, "", "-1", "1.5", "abc", String(STARTER_ORDER_SEED_LIMIT), "123456"]) {
+    assert.equal(parseStarterOrderSeed(value), null, String(value));
+  }
+});
+
+test("Chat's pool is larger than the screen, so seeds show different cards", () => {
+  const chat = chatStarterCatalogFor("chat");
+  assert.ok(chat.length >= 12, `pool of ${chat.length}`);
+  const shown = new Set();
+  for (let seed = 0; seed < 50; seed += 1) {
+    for (const card of selectVisibleStarterCards(viewer(), chat, CHAT_STARTER_MAX_VISIBLE, seed)) {
+      shown.add(card.entry.id);
+    }
+  }
+  assert.equal(shown.size, chat.length, "every Chat card appears for some seed");
+});
+
+test("a seed reorders within groups and keeps the reserved requirement slot", () => {
+  const chat = chatStarterCatalogFor("chat");
+  for (let seed = 0; seed < 50; seed += 1) {
+    const guest = selectVisibleStarterCards(
+      viewer({ signedIn: false, plan: null }), chat, CHAT_STARTER_MAX_VISIBLE, seed
+    );
+    assert.equal(guest.length, CHAT_STARTER_MAX_VISIBLE);
+    const states = guest.map((card) => card.availability.state);
+    assert.equal(states.at(-1), "locked", `seed ${seed}: a lock is disclosed`);
+    assert.equal(states.indexOf("locked"), states.lastIndexOf("locked"), `seed ${seed}: one reserved slot`);
+    assert.ok(guest.some((card) => card.availability.state === "available"));
+  }
+});
+
+test("no seed keeps registry order", () => {
+  const chat = chatStarterCatalogFor("chat");
+  assert.deepEqual(
+    selectVisibleStarterCards(viewer(), chat).map((card) => card.entry.id),
+    selectVisibleStarterCards(viewer(), chat, CHAT_STARTER_MAX_VISIBLE, null).map((card) => card.entry.id)
+  );
 });

@@ -41,6 +41,12 @@ import {
 } from "@/lib/voiceInputAccess";
 import { chatStarterEnabledWithFixtureOverride } from "@/lib/chatStarterAccess";
 import { CHAT_STARTER_FLAG_KEYS } from "@/lib/chatStarterCatalog";
+import {
+  parseStarterOrderSeed,
+  STARTER_ORDER_COOKIE,
+  STARTER_ORDER_SEED_LIMIT,
+} from "@/lib/chatStarterAvailability";
+import { randomInt } from "node:crypto";
 import { resolveChatStarterCapabilities } from "@/lib/chatStarterCapabilityResolution";
 import {
   promptRefinerAvailable,
@@ -360,6 +366,14 @@ export async function ReviewWorkspaceShell({
     webSearchBackendReadiness,
     chatImageAnswers: chatImageIntentEnabled || imageTriageFixtureOffered,
   });
+  // Chat's starter order for this browser session (owner decision
+  // 2026-11-13). Read here and handed down, so the server render and the
+  // hydrating client order the cards alike; the client stores a new seed in
+  // the session cookie. The E2E fixture keeps registry order unless a spec
+  // sets the cookie, so card assertions stay deterministic.
+  const starterOrderSeed =
+    parseStarterOrderSeed((await cookies()).get(STARTER_ORDER_COOKIE)?.value) ??
+    (fixtureMode ? null : randomInt(STARTER_ORDER_SEED_LIMIT));
 
   // The verification coordinator wraps the page rather than living inside it,
   // so ChatPageClient itself can ask for a token for a user-initiated action
@@ -401,6 +415,7 @@ export async function ReviewWorkspaceShell({
         chatStarterKnownFlagKeys={starterKnownFlagKeys}
         chatStarterEnabledFlagKeys={starterEnabledFlagKeys}
         chatStarterCapabilities={starterCapabilities}
+        chatStarterOrderSeed={starterOrderSeed}
         initialConversationId={initialConversationId}
         mountedSurface={mountedSurface}
         continuationProduct={continuationProduct}
