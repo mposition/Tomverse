@@ -37,7 +37,12 @@ export const sameText = (text) =>
     .trim()
     .replace(/^(["'])(.+)\1$/u, "$2")
     .trim()
-    .replace(/ [·•|\-–—] /gu, " · ");
+    .replace(/ [·•|\-–—] /gu, " · ")
+    // One closing full stop is not a different text: on 2026-11-13 every
+    // English card was refused for "...for this message." against "...for
+    // this message", and the forced "show exactly" plus "remove" fixes made
+    // the model erase the subhead and the call to action on the remake.
+    .replace(/(?<![.。])[.。]$/u, "");
 
 /** The approved texts of a concept in one locale. */
 export const textsFor = (concept, locale) => (locale === "en" ? concept.texts : concept.translations[locale]);

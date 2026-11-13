@@ -375,8 +375,14 @@ for (const concept of concepts) {
         let file = edited;
         if (boxes.some((box) => box.role === "screen")) {
           await setTexts({ input: file, review: guideReview, concept, locale, roles: ["screen"], out: `${stem}-b.png` });
-          file = await picture(`${concept.id}/${locale}/smooth`, SMOOTH, [`${stem}-b.png`], `${stem}-c.png`);
-          if (!file) break;
+          const smoothed = await picture(`${concept.id}/${locale}/smooth`, SMOOTH, [`${stem}-b.png`], `${stem}-c.png`);
+          if (!smoothed) break;
+          // The smoothing edit settles the screens into the photo but redraws
+          // their letters: on 2026-11-13 it misspelt the long Korean and
+          // Chinese answers it was given exactly. So the exact words go on once
+          // more over the smoothed screens (each box has its own opaque ground).
+          await setTexts({ input: smoothed, review: guideReview, concept, locale, roles: ["screen"], out: `${stem}-c2.png` });
+          file = `${stem}-c2.png`;
         }
         // The headline last, so no model edit ever redraws its letters.
         await setTexts({ input: file, review: guideReview, concept, locale, roles: ["headline", "cta"], out: `${stem}-d.png` });
