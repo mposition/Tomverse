@@ -175,6 +175,15 @@ test("an HWPX document's runs are joined into paragraphs, table cells each on th
   assert.equal(readText(bytes, "hwpx"), "안내 & 공지(요약)\n이름\n값\t2\n둘째\n줄");
 });
 
+test("ninth review: a section of text tags that never close is read in one pass", () => {
+  const bytes = hwpx([section("<hp:p><hp:run>" + "<hp:t>x".repeat(40_000) + "</hp:p>")]);
+  const started = performance.now();
+  assert.equal(readText(bytes, "hwpx"), "x".repeat(40_000));
+  // A pattern that looks ahead for each closing tag rescans the rest of the
+  // section once per opening tag: seconds here, minutes at upload size.
+  assert.ok(performance.now() - started < 1000, "linear in the section");
+});
+
 test("a ZIP with no HWPX section, or a compound file named .hwpx, is refused", () => {
   assert.throws(
     () => readText(zipSync({ "readme.txt": encoder.encode("x") }), "hwpx"),

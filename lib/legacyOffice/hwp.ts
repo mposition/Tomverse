@@ -224,24 +224,33 @@ export function extractHwpxText(bytes: Uint8Array, budget: LegacyParseBudget): s
     // A paragraph that only held a table closes right after its last cell
     // did, with nothing of its own; that close is not a blank line.
     let lastWasClose = false;
-    for (const match of xml.matchAll(
-      /<(?:\w+:)?t(?:\s[^>]*)?>([\s\S]*?)<\/(?:\w+:)?t>|<\/(?:\w+:)?p>|<(?:\w+:)?(tab|lineBreak)\b[^>]*\/>/g
-    )) {
+    let inText = false;
+    // One pass over the tags, each `<` and `>` looked for once from where the
+    // last tag ended: linear in the section, whatever the markup. (A pattern
+    // that searches ahead for a closing tag rescans the rest of the section
+    // for every opening one that never closes.)
+    let at = 0;
+    while (at < xml.length) {
+      const open = xml.indexOf("<", at);
+      if (open < 0) break;
+      const close = xml.indexOf(">", open);
+      if (close < 0) break;
       budget.tick();
-      if (match[1] !== undefined) {
-        current += decodeXmlText(
-          match[1]
-            .replace(/<(?:\w+:)?tab\b[^>]*\/>/g, "\t")
-            .replace(/<(?:\w+:)?lineBreak\b[^>]*\/>/g, "\n")
-        );
+      if (inText && open > at) current += decodeXmlText(xml.slice(at, open));
+      at = close + 1;
+      const tag = xml.slice(open + 1, close);
+      const closing = tag.startsWith("/");
+      const selfClosing = tag.endsWith("/");
+      const qualified = tag.slice(closing ? 1 : 0).split(/[\s/]/, 1)[0];
+      const name = qualified.slice(qualified.indexOf(":") + 1);
+      if (name === "t" && !selfClosing) {
+        inText = !closing;
         lastWasClose = false;
-      } else if (match[2] === "tab") {
-        current += "\t";
+      } else if ((name === "tab" || name === "lineBreak") && selfClosing) {
+        current += name === "tab" ? "\t" : "\n";
         lastWasClose = false;
-      } else if (match[2] === "lineBreak") {
-        current += "\n";
-        lastWasClose = false;
-      } else {
+      } else if (name === "p" && closing) {
+        inText = false;
         if (!(lastWasClose && current === "")) {
           budget.claimCharacters(current.length + 1);
           paragraphs.push(current);
