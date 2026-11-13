@@ -87,7 +87,11 @@ const runRejectedBatchWithDiagnostic = async (input, overrides = {}) => {
     toolName: CREATE_DOCUMENT_BATCH_TOOL_NAME,
     requestedFormat: null,
     rejectionCode: "spec_rejected",
+    // Counts only: how many files were listed to the model and how many read.
+    listedAttachments: calls[0][4].listedAttachments,
+    readAttachments: calls[0][4].readAttachments,
   }]);
+  assert.equal(typeof calls[0][4].readAttachments, "number");
   assert.doesNotMatch(lines[0], /SECRET_|contracts|att_[0-9]|계약서양식|명단|메모/);
   assert.equal(artifacts.failed.length, 1);
   assert.equal(artifacts.failed[0].failureCode, "spec_rejected");

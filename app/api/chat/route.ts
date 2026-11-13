@@ -4991,6 +4991,28 @@ async function handleChatPost(
         let streamController: ReadableStreamDefaultController<string> | null =
             null;
         let artifactToolRejectionLog: ArtifactToolRejectionLog | null = null;
+        /*
+          Files the system block listed whose bytes were not read above.
+
+          The handles were named to the model before the files were opened, so
+          a file that turned out to be gone is still on its list. The tools are
+          told which ones, so they answer "it could not be opened" rather than
+          "nothing is attached" -- which the model repeats to a user who did
+          attach it. Counts go to the log: a gap here is a server-side fault.
+        */
+        const unreadTurnAttachments = new Map(
+            turnAttachmentDescriptors
+                .filter((descriptor) => !turnAttachmentBytes.has(descriptor.handle))
+                .map((descriptor) => [descriptor.handle, descriptor.name] as const)
+        );
+        if (unreadTurnAttachments.size > 0) {
+            console.warn(JSON.stringify({
+                event: "chat_turn_attachments_unread",
+                traceId,
+                listedAttachments: turnAttachmentDescriptors.length,
+                readAttachments: turnAttachmentBytes.size,
+            }));
+        }
         const artifactCollector =
             artifactToolPlan && artifactToolPlan.registerTool
                 ? new GeneratedArtifactCollector({
@@ -4999,12 +5021,13 @@ async function handleChatPost(
                       conversationId: conversationId ?? null,
                       modelId: modelConfig.id,
                       traceId,
-                      noteRejection: (toolCallId, toolName, input, rejectionCode) =>
+                      noteRejection: (toolCallId, toolName, input, rejectionCode, diagnostics) =>
                           artifactToolRejectionLog?.record(
                               toolCallId,
                               toolName,
                               input,
-                              rejectionCode
+                              rejectionCode,
+                              diagnostics
                           ),
                       emitProgress: (format) => {
                           if (!streamController) return;
@@ -5018,6 +5041,7 @@ async function handleChatPost(
                       // batch and conversion tools are the only readers and
                       // neither ever sees a key.
                       turnAttachments: turnAttachmentBytes,
+                      unreadTurnAttachments,
                   })
                 : null;
         /*
