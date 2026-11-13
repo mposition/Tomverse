@@ -20,6 +20,7 @@ import {
 } from "@/lib/amux/ideaSubmissionCore";
 import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
 import { authOptions } from "@/lib/auth";
+import { retryDailyProductTask } from "@/lib/dailyProductAgentStore";
 import { suggestionIdeaText, suggestionSendRequestId } from "@/lib/productResearchScoutCore";
 import { sendScoutSuggestion } from "@/lib/productResearchScoutSend";
 import { closeSuggestion, readSuggestion } from "@/lib/productResearchScoutStore";
@@ -97,7 +98,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
 
     if (body.action === "retry_agent") {
       await consumeApiRateLimit(request, session.user!.id!, "admin-product-research-agent-retry", { minute: 5, day: 50 });
-      const { retryDailyProductTask } = await import("@/lib/dailyProductAgentStore");
       return await retryDailyProductTask({ id: suggestionId, session, request })
         ? json({ status: "retry_queued" }) : json({ error: "agent_retry_unavailable" }, 409);
     }
