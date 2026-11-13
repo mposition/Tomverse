@@ -630,22 +630,24 @@ test.describe("Chat starter catalogue", () => {
     expect(labelWordBreak).not.toBe("keep-all");
   });
 
-  test("the image card is locked for a guest rather than hidden", { tag: "@ui-risk" }, async ({
+  test("a Free account can run the Review image card", { tag: "@ui-risk" }, async ({
     page,
   }) => {
-    // Locked and hidden are different answers, and this is the one the
-    // image-generation contract cares about: a feature the visitor could sign
-    // in for must not be invisible to them. Every signed-in plan may draw
-    // (planAllowsImageGeneration), so the requirement is the account.
+    // Every signed-in plan may draw (planAllowsImageGeneration), so the card
+    // carries no plan lock. It still has a requirement (sign-in), so the
+    // reserved slot keeps it on screen when the cap would cut it. The guest's
+    // locked state is covered in tests/chatStarterCatalog.test.mjs: on screen
+    // a guest's one reserved slot goes to the .xlsx card first.
     await enableStarterFlag(page);
     await enableImageFlag(page);
-    await mockGuestUsage(page, 0, 1000);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Free" });
     await openWelcome(page);
 
     const imageCard = page.locator('[data-starter-id="compare-image-models"]');
     await expect(imageCard).toBeVisible();
-    await expect(imageCard).toHaveAttribute("data-starter-state", "locked");
-    await expect(imageCard.getByTestId("chat-starter-lock")).toBeVisible();
+    await expect(imageCard).toHaveAttribute("data-starter-state", "available");
+    await expect(imageCard.getByTestId("chat-starter-lock")).toHaveCount(0);
   });
 
   test("the image card refuses typed work like every other card", { tag: "@ui-risk" }, async ({

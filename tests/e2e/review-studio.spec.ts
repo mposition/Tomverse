@@ -599,14 +599,14 @@ test("the Review image card arms image mode on an active model in both modes", a
   // selected provider; Professional starts on an active catalogue model, never
   // a fixed default that may have been disabled.
   await prepare(page, 1440);
-  await page.locator(".review-image-starter").click();
+  await page.locator(".review-image-starter:visible").click();
   await expect(page.getByTestId("review-image-mode")).toBeVisible();
   await expect(page.getByTestId("chat-textarea")).not.toHaveValue("");
   await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
   await page.getByTestId("review-image-mode").getByRole("button").click();
   await page.getByTestId("chat-textarea").fill("");
   await page.getByTestId("composer-review-mode").getByRole("button", { name: "전문가", exact: true }).click();
-  await page.locator(".review-image-starter").click();
+  await page.locator(".review-image-starter:visible").click();
   await expect(page.getByTestId("review-image-mode")).toContainText("GPT Image 2");
   await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
   await expect(page).toHaveURL(/\/review/);
