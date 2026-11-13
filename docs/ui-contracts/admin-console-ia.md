@@ -184,6 +184,12 @@ train's cargo, an emergency departure request, and a departure board of
 past trains that stays dark in both console themes (the one Admin file
 `tests/adminTheme.test.mjs` lets use literal colours).
 
+The QA overview's CI suggestions keep item-level completion, dismissal and
+AMUX-send history across model rounds. Owner and ops can complete or dismiss
+after recent authentication; sending uses the existing owner-only AMUX intake.
+Every item offers the same stored implementation brief for copying. These
+controls do not add CI suggestions to the Daily Agent's sources.
+
 **Agent digests** is the common area where agent teams' daily digests are
 read (`docs/policy/qa-release-agent.md` section 4), one section per agent
 that stores them. What follows describes the QA and release section, which
