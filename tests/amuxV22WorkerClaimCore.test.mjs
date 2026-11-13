@@ -81,14 +81,23 @@ test("no price competition: at equal load the provider that waited longest takes
     "codex-chore-2");
   // A worker never assigned goes first.
   assert.equal(choose({ "codex-chore": 300, "copilot-chore": 200 }), "claude-impl");
+  // A provider whose busy worker just took a Task has not waited, though that
+  // worker is no candidate now (review r-20261113-071016-e1734a).
+  assert.equal(chooseAmuxV22WorkerRoute({
+    routes: routes.filter((item) => item.workerName !== "codex-chore"),
+    priorAuthorWorkers: [], priorAuthorProviders: [], isReview: false,
+    lastAssignedAtByWorker: new Map([["codex-chore-2", 10], ["claude-impl", 100], ["copilot-chore", 200]]),
+    lastAssignedAtByProvider: new Map([["openai", 900], ["anthropic", 100], ["github-copilot", 200]]),
+  })?.workerName, "claude-impl");
   // A paid API run still takes the cheapest route.
   assert.equal(chooseAmuxV22WorkerRoute({ routes, priorAuthorWorkers: [], priorAuthorProviders: [],
     isReview: false, preferLowerPrice: true,
     lastAssignedAtByWorker: new Map([["codex-chore", 900]]) })?.workerName, "codex-chore-2");
-  // The claim reads each candidate's last assignment and passes it on.
+  // The claim reads every worker's last assignment, not only the candidates',
+  // and passes both turns on.
   const claim = readFileSync("lib/amux/v22WorkerClaimService.ts", "utf8");
-  assert.match(claim, /tx\.amuxV22WorkerAssignment\.groupBy\(\{\s*by: \["workerName"\]/);
-  assert.match(claim, /activeByProvider, lastAssignedAtByWorker \}\)/);
+  assert.match(claim, /tx\.amuxV22WorkerAssignment\.groupBy\(\{\s*by: \["workerName"\], _max: \{ assignedAt: true \} \}\)/);
+  assert.match(claim, /activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider \}\)/);
   const recovery = readFileSync("lib/amux/v22TaskRecoveryService.ts", "utf8");
   assert.match(recovery, /isReview: false, preferLowerPrice: true \}\)/);
 });
@@ -101,7 +110,7 @@ test("one tick assigns every ready Task, logs what it passed over, and stops at 
   assert.match(tick, /claims\.push\(claimed\)/);
   assert.match(tick, /event: "amux_v22_claim_tick"/);
   assert.match(tick, /stop = "outcome_unknown";\s+break;/);
-  assert.match(claim, /isReview: card\.taskRole === "review", activeByProvider, lastAssignedAtByWorker \}\)/);
+  assert.match(claim, /isReview: card\.taskRole === "review", activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider \}\)/);
   assert.doesNotMatch(claim, /laneAssigned|lane_capacity_full|reserved_capacity_unavailable/);
 });
 

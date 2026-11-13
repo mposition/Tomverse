@@ -150,6 +150,12 @@ export function chooseAmuxV22WorkerRoute(input: {
   activeByProvider?: ReadonlyMap<string, number>;
   /** When each worker was last assigned a Task, in ms; a worker never assigned is absent. */
   lastAssignedAtByWorker?: ReadonlyMap<string, number>;
+  /**
+   * When each provider (lowercase) was last assigned a Task by ANY of its
+   * workers, candidates or not: a provider whose worker is busy on the Task it
+   * just took has not waited. Absent, it is read from the candidates alone.
+   */
+  lastAssignedAtByProvider?: ReadonlyMap<string, number>;
   /** A paid API run (the read-only recovery retry): the cheapest route first. */
   preferLowerPrice?: boolean;
 }) {
@@ -159,7 +165,7 @@ export function chooseAmuxV22WorkerRoute(input: {
     input.activeByProvider?.get(provider.toLowerCase()) ?? 0;
   const lastAssigned = (worker: string) => input.lastAssignedAtByWorker?.get(worker) ?? 0;
   // A provider's last assignment is its most recent worker's.
-  const providerLast = new Map<string, number>();
+  const providerLast = new Map<string, number>(input.lastAssignedAtByProvider ?? []);
   for (const route of candidates) {
     const key = route.provider.toLowerCase();
     providerLast.set(key, Math.max(providerLast.get(key) ?? 0, lastAssigned(route.workerName)));
