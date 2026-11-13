@@ -344,8 +344,9 @@
 @keyframes kf_13_269_translate_0 { 0% { translate: -130px -40px; } 6.667% { animation-timing-function: ease-out; translate: -130px -40px; } 25.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
 .stamp1 { animation: kf_13_270_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
 @keyframes kf_13_270_translate_0 { 0% { translate: 0px -40px; } 10.667% { animation-timing-function: ease-out; translate: 0px -40px; } 29.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
+/* Gemini sits at the right edge, which .hero clips: keep its entrance offset inside the container padding. */
 .stamp2 { animation: kf_13_271_translate_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
-@keyframes kf_13_271_translate_0 { 0% { translate: 130px -40px; } 14.667% { animation-timing-function: ease-out; translate: 130px -40px; } 33.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
+@keyframes kf_13_271_translate_0 { 0% { translate: 16px -40px; } 14.667% { animation-timing-function: ease-out; translate: 16px -40px; } 33.556% { translate: 0px 0px; } 100% { translate: 0px 0px; } }
 .chatPreview { animation: kf_13_272_translate_0 4.5s linear, kf_13_272_scale_0 4.5s linear; animation-iteration-count: 1; animation-fill-mode: both; }
 @keyframes kf_13_272_translate_0 { 0% { translate: 0px 70px; } 21.111% { animation-timing-function: ease-out; translate: 0px 70px; } 38.889% { translate: 0px 0px; } 100% { translate: 0px 0px; } } @keyframes kf_13_272_scale_0 { 0% { scale: 0.9 0.9; } 21.111% { animation-timing-function: ease-out; scale: 0.9 0.9; } 38.889% { scale: 1 1; } 100% { scale: 1 1; } }
 .ribbon { animation: kf_13_283_translate_0 4.5s linear; animation-iteration-count: infinite; }
