@@ -126,7 +126,7 @@ test("an uncompressed document and a record longer than 4,094 bytes read the sam
 });
 
 test("a password-protected, distribution or DRM document is refused, never read as noise", () => {
-  for (const flag of [1 << 1, 1 << 2, 1 << 4]) {
+  for (const flag of [1 << 1, 1 << 2, 1 << 4, 1 << 8, 1 << 10]) {
     assert.throws(
       () => readText(hwp({ properties: 1 | flag, sections: [paragraph(unitsOf("비밀"))] }), "hwp"),
       (error) => error.code === "LEGACY_OFFICE_ENCRYPTED"

@@ -39,16 +39,11 @@ export const inflateRawBounded = (
 ): Uint8Array => {
   const chunks: Uint8Array[] = [];
   let total = 0;
-  const inflater = new Inflate((chunk) => {
+  inflateRawPieces(data, (chunk) => {
     onChunk(chunk);
     chunks.push(chunk);
     total += chunk.length;
   });
-  for (let offset = 0; offset < data.length; offset += INFLATE_INPUT_CHUNK) {
-    const end = Math.min(data.length, offset + INFLATE_INPUT_CHUNK);
-    inflater.push(data.subarray(offset, end), end === data.length);
-  }
-  if (data.length === 0) inflater.push(new Uint8Array(0), true);
   const out = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {
@@ -56,6 +51,19 @@ export const inflateRawBounded = (
     offset += chunk.length;
   }
   return out;
+};
+
+/**
+ * Raw DEFLATE, chunk by chunk, keeping nothing: for a caller that only counts
+ * what comes out, so measuring a large stream does not hold it in memory.
+ */
+export const inflateRawPieces = (data: Uint8Array, onChunk: (chunk: Uint8Array) => void): void => {
+  const inflater = new Inflate((chunk) => onChunk(chunk));
+  for (let offset = 0; offset < data.length; offset += INFLATE_INPUT_CHUNK) {
+    const end = Math.min(data.length, offset + INFLATE_INPUT_CHUNK);
+    inflater.push(data.subarray(offset, end), end === data.length);
+  }
+  if (data.length === 0) inflater.push(new Uint8Array(0), true);
 };
 
 export type ZipEntryVisitor = {

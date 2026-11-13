@@ -39,6 +39,9 @@ const FLAG_COMPRESSED = 1 << 0;
 const FLAG_PASSWORD = 1 << 1;
 const FLAG_DISTRIBUTION = 1 << 2;
 const FLAG_DRM = 1 << 4;
+/** Encrypted to a certificate, and certificate DRM: bits 8 and 10. */
+const FLAG_CERTIFICATE_ENCRYPTED = 1 << 8;
+const FLAG_CERTIFICATE_DRM = 1 << 10;
 
 /** HWPTAG_BEGIN (0x10) + 51: the record that holds a paragraph's text. */
 const HWPTAG_PARA_TEXT = 0x10 + 51;
@@ -131,9 +134,13 @@ export function extractHwpText(bytes: Uint8Array, budget: LegacyParseBudget): st
   if (signature !== HWP_SIGNATURE) throw new LegacyOfficeError("LEGACY_OFFICE_CORRUPT");
 
   const properties = new DataView(header.buffer, header.byteOffset, header.byteLength).getUint32(36, true);
-  // A password, a distribution copy and DRM all mean the body is encrypted:
+  // A password, a distribution copy, DRM and certificate encryption or DRM
+  // all mean the body is encrypted:
   // nothing here decrypts, and a garbled read is worse than a refusal.
-  if (properties & (FLAG_PASSWORD | FLAG_DISTRIBUTION | FLAG_DRM)) {
+  if (
+    properties &
+    (FLAG_PASSWORD | FLAG_DISTRIBUTION | FLAG_DRM | FLAG_CERTIFICATE_ENCRYPTED | FLAG_CERTIFICATE_DRM)
+  ) {
     throw new LegacyOfficeError("LEGACY_OFFICE_ENCRYPTED");
   }
   const compressed = (properties & FLAG_COMPRESSED) !== 0;

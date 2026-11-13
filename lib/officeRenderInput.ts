@@ -20,7 +20,7 @@
 
 import "server-only";
 
-import { BoundedInflateError, inflateRawBounded } from "@/lib/boundedInflate";
+import { BoundedInflateError, inflateRawPieces } from "@/lib/boundedInflate";
 import {
   ExpansionLimitError,
   createExpansionCounter,
@@ -105,7 +105,7 @@ const measureHwp = (bytes: Uint8Array): RenderInputVerdict => {
       const stream = file.read(entry);
       for (const candidate of inflatable(stream)) {
         try {
-          inflateRawBounded(candidate, charge);
+          inflateRawPieces(candidate, charge);
           break;
         } catch (error) {
           if (error instanceof Overflow) throw error;

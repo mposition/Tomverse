@@ -901,8 +901,10 @@ OpenDocument(`odt`·`odp`·`ods`), Office 97-2003(`doc`·`ppt`·`xls`), `rtf`,
 `lib/officeRenderInput.ts`가 **압축된 모든 부분을 실제로** 입력 4 KB씩 풀어 나온
 바이트를 세고 버린다: ZIP 기반 문서(OOXML·ODF·HWPX·iWork)는 모든 항목과 그 안에 다시
 압축된 것(문서에 넣은 통합 문서 같은 내부 ZIP, gzip, iWork의 Snappy `.iwa`;
-`lib/packageExpansion.ts`), HWP 5.x는 머리의 압축 플래그와 관계없이 모든 스트림(BinData 항목은 따로 압축될 수 있다, 독립 검토 7차). 합이 200 MB를 넘거나 항목이 2만 개를 넘으면 보내지
-않고 `spec_rejected`로 거절한다(독립 검토 2026-11-13).
+`lib/packageExpansion.ts`), HWP 5.x는 머리의 압축 플래그와 관계없이 모든 스트림(BinData 항목은 따로 압축될 수 있다, 독립 검토 7차). 풀어 나온 바이트의 합이 200 MB를 넘거나 항목이 2만 개를 넘으면 보내지
+않고 `spec_rejected`로 거절한다(독립 검토 2026-11-13). 압축을 풀기 전 원래 바이트는 이 합에
+넣지 않는다 — 업로드 상한(25 MB)이 그 크기를 묶는다. HWP 컨테이너 읽기는 따로 200 MB 예산을
+쓴다. 측정 경로는 나온 조각을 세기만 하고 보관하지 않는다.
 
 | 렌더러 응답 | 카드 |
 |---|---|
