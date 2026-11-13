@@ -28,7 +28,7 @@ import {
   priceRange,
   reasonMessage,
   type ReasonMessage,
-  suggestsMeasurement,
+  measurementApplies,
 } from "@/lib/adminModelCatalogFlow";
 import type { AdminTone } from "@/lib/adminUiCore";
 
@@ -485,7 +485,7 @@ export function ImageModelDetail({
   const nextAction = imageNextAction(stage);
   // "No reasoning cost cap" or "no price in the documentation": a measurement can settle either.
   const measureButton = (reasons: readonly string[]) =>
-    onMeasure && suggestsMeasurement(item.provider, reasons) ? (
+    onMeasure && measurementApplies(item, reasons) ? (
       <AdminWriteButton onClick={onMeasure} data-testid="model-catalog-measure-open">
         {m.measure.action}
       </AdminWriteButton>
@@ -608,7 +608,7 @@ export function ImageModelDetail({
                 {blockingReasons.length > 0 ? (
                   <>
                     {measureButton(blockingReasons)}
-                    <AdminWriteButton variant={onMeasure && suggestsMeasurement(item.provider, blockingReasons) ? "secondary" : undefined} onClick={() => onAction("redraft")}>
+                    <AdminWriteButton variant={onMeasure && measurementApplies(item, blockingReasons) ? "secondary" : undefined} onClick={() => onAction("redraft")}>
                       {m.redraft}
                     </AdminWriteButton>
                     <p className="text-center text-xs text-zinc-400">{m.applyRefusedBlocked}</p>

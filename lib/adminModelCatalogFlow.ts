@@ -266,6 +266,20 @@ export const suggestsMeasurement = (provider: string, codes: readonly string[], 
   });
 
 /**
+ * Whether this model's refusal is one a measurement settles. Not when the
+ * model already serves a reasoning cap of its own (a code model with a
+ * measured bound, gemini-3.1-flash-image): a draft refused for an unbounded
+ * cost there is one written before the cap existed, and a new draft takes the
+ * cap. Measuring it instead would confirm terms the code model may not use
+ * (2026-11-13: a 4,096 measurement on Flash was refused against its 2,048).
+ */
+export const measurementApplies = (
+  item: { provider: string; served: null | { priceVerification: { thinkingCapMicroUsd: number | null } } },
+  codes: readonly string[],
+  detail = ""
+) => item.served?.priceVerification.thinkingCapMicroUsd == null && suggestsMeasurement(item.provider, codes, detail);
+
+/**
  * The admin session check's own 404 ("Not found."), as opposed to a
  * catalogue refusal that is also a 404 (no_draft when another admin applied
  * the draft first), which must not send the operator to sign in again.
