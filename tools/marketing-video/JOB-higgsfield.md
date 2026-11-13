@@ -59,14 +59,21 @@ all about comparing answers. Write for a stranger scrolling past:
 ## What to write
 
 Two or three concepts for today's feature that differ from each other in scene
-and device. Each one:
+and device, each in a different format (guide 4), the formats of the last 7
+days used last. Each one:
 
 - `id`: `c1`, `c2`, `c3`.
+- `format`: `person`, `phone`, `laptop`, `diagram` or `object` (guide 4).
+  `phone` and `laptop`: the device's screen fills a large part of the frame,
+  close to the camera, hands at most at its edges. `diagram`: a flat, clean
+  graphic on a calm ground, shapes, arrows and provider marks, its words in
+  `texts` as `label`s. `object`: the metaphor fills the frame. `person`: the
+  person and the product share the frame, the product clearly readable.
 - `feature`: today's feature.
 - `device`: the scene idea in one line (10-160 characters), e.g. "a renter on
   the bus asks an AI on her phone whether a clause in her lease is normal".
 - `prompt_en`: the full image prompt for `gpt_image_2_6`, 4:5 portrait, 200 to
-  6000 characters. Describe the photo, the people, the light, the composition,
+  6000 characters. Describe the picture in its format: the scene or the graphic, any people, the light, the composition,
   where each piece of text sits and what it says word for word, and the
   provider logos to place (the reference files are attached to the call). Write
   it so the picture works without the Tomverse logo: the code adds a band at
@@ -117,8 +124,10 @@ and device. Each one:
   `analysis.realExample.counts.consensus`, `analysis.realExample.contradiction`.
   At least one from today's feature.
 - `translations`: `{"ko": [...], "zh-Hant": [...], "zh-Hans": [...]}`, one entry
-  per entry of `texts`, same order, same `role` and `speaker`. Natural copy in
-  each language, not word for word; every model or company name of the English
+  per entry of `texts`, same order, same `role` and `speaker`. Written as a
+  native copywriter of that market would write it, never a calque of the
+  English (not "한 팬 달걀볶음밥" but "프라이팬 하나로 만드는 달걀볶음밥"); a
+  native-copy editor polishes them after you, but start natural; every model or company name of the English
   text stays in its translation, in Latin letters, and a recorded answer is
   repeated in English exactly (guide 12, 15, 16, 17). A Korean or Chinese
   headline is at most 40 characters. "무료" and "免費" carry their condition

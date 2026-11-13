@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 
 import { bandLayout, BAND_ALT } from "./band-layout.mjs";
 import { FEATURES_FILE_ENV, featuresFile, syncFeatures } from "./features-source.mjs";
-import { gatherConcepts, loadFeatures, pickFeature, recentDevices, sortConcepts, TRANSLATED } from "./concepts-core.mjs";
+import { gatherConcepts, loadFeatures, pickFeature, recentDevices, recentFormats, sortConcepts, TRANSLATED, withNativeCopy } from "./concepts-core.mjs";
 import { bottomIsDark, ICON_DIR, setLogos, setTexts } from "./compose-core.mjs";
 import { brisbaneDay, ledgerPath, readLedger } from "./higgsfield-cap.mjs";
 import { makeImage } from "./hf-image-core.mjs";
@@ -152,6 +152,7 @@ const conceptPrompt = [
   readFileSync("JOB-higgsfield.md", "utf8").replace("{{GUIDE}}", guide),
   `## Today\n\n- Date: ${date}\n- Feature: ${feature}\n- Newest research notes: ${newestNotes ? `job/research-notes/${newestNotes}` : "none"}`,
   `## Scene ideas used in the last 14 days\n\n${recentDevices(history, day).map((device) => `- ${device}`).join("\n") || "- none"}`,
+  `## Formats of the last 7 days, newest first\n\n${recentFormats(history, day).join(", ") || "none"}: choose others first.`,
   `## Logo files\n\n${readdirSync(ICON_DIR).filter((file) => file.endsWith(".png")).map((file) => file.replace(/\.png$/u, "")).join(", ")}`,
   `## features.json\n\n\`\`\`json\n${readFileSync(featuresFile(toolDir), "utf8")}\n\`\`\``,
 ].join("\n\n");
@@ -165,7 +166,21 @@ const gathered = gatherConcepts({
   ask: (again, attempt) => firstJsonLine(claude(`${dry}concepts-${attempt}`, `${conceptPrompt}${again}`, "./job/research-notes/**", 20), "concepts"),
   sort: (answer) => sortConcepts(answer, { feature, history, day, toolDir }),
 });
-const { concepts } = gathered;
+// 1b. The Korean and Chinese read as a native copywriter would write them
+// (owner 2026-11-13: the translations read as translations). The edit is
+// checked like the concepts; a concept it breaks keeps the writer's words.
+let concepts = gathered.concepts;
+if (concepts.length > 0) {
+  const nativePrompt = `${readFileSync("NATIVE-COPY.md", "utf8").replace("{{GUIDE}}", guide)}\n\n## The concepts\n\n\`\`\`json\n${JSON.stringify(concepts.map((concept) => ({ id: concept.id, format: concept.format, texts: concept.texts, translations: concept.translations, alt: concept.alt })))}\n\`\`\``;
+  const edited = firstJsonLine(claude(`${dry}native-copy`, nativePrompt, "./job/research-notes/**", 6), "concepts");
+  if (edited) {
+    const candidates = withNativeCopy(concepts, edited);
+    const checked = sortConcepts({ date, feature, concepts: candidates }, { feature, history, day, toolDir });
+    const kept = new Map((checked.kept ?? []).map((concept) => [concept.id, concept]));
+    report.nativeCopy = { edited: kept.size, kept: concepts.length - kept.size };
+    concepts = concepts.map((concept) => kept.get(concept.id) ?? concept);
+  }
+}
 for (const entry of gathered.dropped) report.dropped.push({ id: entry.id, reason: "concept_refused", problems: entry.problems.slice(0, 6) });
 let exitCode = 0;
 if (concepts.length === 0) {
@@ -301,7 +316,7 @@ async function deliver(concept, locale, file, verdicts) {
     path.join(dir, `${id}.spec.json`),
     JSON.stringify({ id, locale, layout: `${id}.layout.html`, alt: `${concept.alt[locale]} ${BAND_ALT[locale]}`, texts: textsFor(concept, locale).map((text) => text.text) }, null, 1),
   );
-  const entry = { date, id, locale, kind: "card", path: "higgsfield", feature, concept: concept.device, device: concept.device, pictures: [`generated:${name}`], headline: textsFor(concept, locale).find((text) => text.role === "headline")?.text ?? null, verdicts: verdicts.map((v) => `${v.stage}:${v.verdict}`), refused: null };
+  const entry = { date, id, locale, kind: "card", path: "higgsfield", feature, format: concept.format, concept: concept.device, device: concept.device, pictures: [`generated:${name}`], headline: textsFor(concept, locale).find((text) => text.role === "headline")?.text ?? null, verdicts: verdicts.map((v) => `${v.stage}:${v.verdict}`), refused: null };
   newHistory.push(entry);
   const card = node(["make-card.mjs", path.join(dir, `${id}.spec.json`), dir]);
   if (card.status !== 0) {
@@ -323,7 +338,7 @@ async function deliver(concept, locale, file, verdicts) {
 
 const drop = (concept, locale, reason) => {
   report.dropped.push({ id: `${concept.id}-${locale}`, reason });
-  newHistory.push({ date, id: null, locale, kind: "card", path: "higgsfield", feature, concept: concept.device, device: concept.device, dropped: reason });
+  newHistory.push({ date, id: null, locale, kind: "card", path: "higgsfield", feature, format: concept.format, concept: concept.device, device: concept.device, dropped: reason });
 };
 
 for (const concept of concepts) {

@@ -156,6 +156,15 @@ The design guide every call follows is `HIGGSFIELD-GUIDE.md`.
   a call whose outcome is unknown blocks the next until its job id shows it.
 - `HIGGSFIELD_BIN` and `CLAUDE_BIN` name other binaries (a `.mjs` is run with
   node), for a dry run with stand-ins.
+- Variety (owner 2026-11-13: not a person in every ad). Each concept has a
+  `format` -- person, phone, laptop, diagram or object -- a day's concepts are
+  each a different one, and the formats of the last 7 days are listed for the
+  concept call to use last.
+- Native copy (owner 2026-11-13: the Korean and Chinese read as
+  translations). After the concepts, one more Claude call (`NATIVE-COPY.md`)
+  rewrites only their Korean and Chinese and alt texts as a native copywriter
+  would; the edit is checked like any concept, and a concept it breaks keeps
+  the concept writer's words.
 - The app screen (owner 2026-11-13: words set on a screen looked pasted on).
   The concept asks Higgsfield for the one display that shows words as flat
   chroma green `#00ff00`, empty, and marks the texts on it with `ui` (title,

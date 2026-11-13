@@ -14,8 +14,16 @@ Every concept follows these rules, and every review judges against them.
    2026-11-12: a desk with two quote cards in English under "같은 열차, 엇갈린
    조언", with no "AI", no model name and nothing to do (the owner: "뜬구름
    잡는 광고").
-4. Prefer real people showing the product on a phone or a laptop. Physical
-   metaphors (a receipt, a name tag, a checklist) are good too.
+4. Variety (owner 2026-11-13): a person is one way to show the product, not
+   the rule. A concept is one of these formats, and a day's concepts are each a
+   different one: `person` (someone using it, the product clearly visible),
+   `phone` (a phone screen is the hero, filling much of the frame), `laptop`
+   (a laptop or desktop screen is the hero), `diagram` (a clean, flat diagram
+   that shows how the feature works, e.g. one question going to three model
+   marks and coming back as one answer), `object` (a physical metaphor: a
+   receipt, a ticket, a checklist, a name tag). Whatever the format, the
+   product, what Tomverse shows or does, gets more of the picture than any
+   person.
 5. Hands, fingers, poses and sizes are possible and true to scale. A phone is
    about as long as the hand that holds it and clearly smaller than a head; a
    laptop is about as wide as the shoulders. Rejected 2026-11-08: a right hand

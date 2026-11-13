@@ -307,6 +307,7 @@ const translations = {
 const concept = (id, extra = {}) => ({
   id,
   feature: "chat",
+  format: { c1: "person", c2: "laptop", c3: "object" }[id] ?? "diagram",
   device: `a commuter on a train picks a model on a phone ${id}`,
   prompt_en: `A candid photo of a commuter on a morning train holding a phone in a natural grip, the screen showing a chat app with model chips. ${"Soft window light, shallow depth of field, real people around. ".repeat(4)}`,
   texts,
@@ -987,4 +988,40 @@ test("the app screen is keyed onto the green display, and a finger over it stays
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a day's concepts are each a different format, and the recent formats are listed newest first", async () => {
+  const { recentFormats } = await import("../tools/marketing-video/concepts-core.mjs");
+  // Owner 2026-11-13: variety, not a person in every ad.
+  assert.equal(check(conceptsOf(concept("c1"), concept("c2"), concept("c3"))), null);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { format: "person" }))), /different format \(person is taken\)/u);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { format: "poster" }))), /format is one of person, phone, laptop, diagram, object/u);
+  const history = [
+    { date: "2026-11-05", format: "object" },
+    { date: "2026-11-07", format: "person" },
+    { date: "2026-11-07", format: "laptop" },
+    { date: "2026-10-20", format: "diagram" },
+    { date: "2026-11-08", format: "person" },
+  ];
+  assert.deepEqual(recentFormats(history, DAY), ["person", "laptop", "object"]);
+});
+
+test("the native editor changes only the Korean and Chinese, and a concept it breaks keeps the writer's words", async () => {
+  const { withNativeCopy } = await import("../tools/marketing-video/concepts-core.mjs");
+  const original = [concept("c1"), concept("c2")];
+  const better = { ...translations, ko: translations.ko.map((text, index) => (index === 0 ? { ...text, text: "GPT, Claude, Gemini 등 AI에게 물어보세요" } : text)) };
+  const edited = withNativeCopy(original, {
+    concepts: [
+      { id: "c1", translations: better, alt: { ko: "출근길 기차에서 휴대폰으로 모델을 고르는 사람.", en: "ignored" } },
+      { id: "c2", translations: { ...translations, ko: translations.ko.map((text) => ({ ...text, text: "지피티에게 물어보세요" })) } },
+    ],
+  });
+  assert.equal(edited[0].translations.ko[0].text, "GPT, Claude, Gemini 등 AI에게 물어보세요");
+  assert.equal(edited[0].alt.ko, "출근길 기차에서 휴대폰으로 모델을 고르는 사람.");
+  assert.equal(edited[0].alt.en, original[0].alt.en, "English is never the editor's");
+  assert.deepEqual(edited[0].texts, original[0].texts);
+  // The caller checks the edit like any concept: the transliterated model name is refused, so c2 keeps its own words.
+  const checked = sortConcepts({ date: "2026-11-08", feature: "chat", concepts: edited }, { feature: "chat", history: [], day: DAY, toolDir: tool });
+  assert.deepEqual(checked.kept.map((c) => c.id), ["c1"]);
+  assert.deepEqual(withNativeCopy(original, null), original, "no edit, no change");
 });

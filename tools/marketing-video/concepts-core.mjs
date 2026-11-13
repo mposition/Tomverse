@@ -11,6 +11,11 @@ import { featuresFile } from "./features-source.mjs";
 export const LOCALES = ["en", "ko", "zh-Hant", "zh-Hans"];
 export const TRANSLATED = ["ko", "zh-Hant", "zh-Hans"];
 export const TEXT_ROLES = ["headline", "subhead", "cta", "screen", "answer", "label"];
+/**
+ * The kinds of picture a concept may be (owner 2026-11-13: variety, not a
+ * person in every ad). A day's concepts are each a different one.
+ */
+export const FORMATS = ["person", "phone", "laptop", "diagram", "object"];
 /** What the app screen on the green display holds (screen-core.mjs draws it). */
 export const SCREEN_UI = ["title", "question", "answer", "caption"];
 /** The most characters a display text may have: few words keep a phone phone-sized (owner 2026-11-13). */
@@ -78,6 +83,33 @@ export function pickFeature(history, features, day) {
   if (live.length === 0) throw new Error("every feature in features.json is on hold: remove a hold before the next run");
   const pool = candidates.length > 0 ? candidates : live;
   return pool.reduce((best, id) => (last(id) < last(best) ? id : best), pool[0]);
+}
+
+/** The formats of the cards made in the `days` before `day`, newest first. */
+export function recentFormats(history, day, days = 7) {
+  const today = dayNumber(dayKey(day));
+  return history
+    .filter((entry) => entry && typeof entry.format === "string" && /^\d{8}$/u.test(dayKey(entry.date)) && today - dayNumber(dayKey(entry.date)) <= days && today - dayNumber(dayKey(entry.date)) > 0)
+    .sort((a, b) => dayKey(b.date).localeCompare(dayKey(a.date)))
+    .map((entry) => entry.format)
+    .filter((format, index, all) => all.indexOf(format) === index);
+}
+
+/**
+ * The concepts with the native editor's Korean and Chinese (and their alt
+ * texts) put in place of the concept writer's. Only translations and alt
+ * change; the caller checks the result like any concept and keeps the
+ * writer's version of a concept the edit broke.
+ */
+export function withNativeCopy(concepts, edited) {
+  const byId = new Map((Array.isArray(edited?.concepts) ? edited.concepts : []).filter((entry) => entry && typeof entry.id === "string").map((entry) => [entry.id, entry]));
+  return concepts.map((concept) => {
+    const edit = byId.get(concept.id);
+    if (!edit || typeof edit.translations !== "object" || edit.translations === null) return concept;
+    const alt = { ...concept.alt };
+    for (const locale of ["ko", "zh-Hant", "zh-Hans"]) if (typeof edit.alt?.[locale] === "string") alt[locale] = edit.alt[locale];
+    return { ...concept, translations: edit.translations, alt };
+  });
 }
 
 /** Scene ideas used in the 14 days before `day`. */
@@ -192,7 +224,8 @@ export function sortConcepts(answer, { feature, history = [], day, toolDir }) {
   if (!Array.isArray(concepts) || concepts.length < 2 || concepts.length > 3) return refuse("concepts: 2-3 entries");
   const ids = new Set();
   const devices = new Set();
-  const KEYS = "alt,device,factRefs,feature,id,logos,prompt_en,texts,translations";
+  const formats = new Set();
+  const KEYS = "alt,device,factRefs,feature,format,id,logos,prompt_en,texts,translations";
   /** Every problem of one concept. A broken shape is reported alone: nothing under it can be read. */
   const problemsOf = (concept) => {
     const at = `concept ${typeof concept?.id === "string" ? concept.id : "?"}`;
@@ -201,6 +234,9 @@ export function sortConcepts(answer, { feature, history = [], day, toolDir }) {
     ids.add(concept.id);
     const problems = [];
     if (concept.feature !== feature) problems.push(`${at}: feature must be today's (${feature})`);
+    if (!FORMATS.includes(concept.format)) problems.push(`${at}: format is one of ${FORMATS.join(", ")}`);
+    else if (formats.has(concept.format)) problems.push(`${at}: each concept of the day is a different format (${concept.format} is taken)`);
+    else formats.add(concept.format);
     if (!isText(concept.device, 10, 160)) problems.push(`${at}: device is 10-160 characters`);
     else {
       if (devices.has(compact(concept.device))) problems.push(`${at}: two concepts share a device`);
