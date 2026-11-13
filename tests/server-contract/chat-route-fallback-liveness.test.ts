@@ -212,6 +212,20 @@ mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
   },
 } });
 let forceAnthropicPrimary = false;
+// Anthropic chat models are file-capable by provider now, and a turn that was
+// offered tools is never retried on another model (`tools_offered`). The
+// forced-Anthropic case is about the location cache across a fallback, so its
+// models are unticked, as an administrator would untick them.
+const realModelRegistry = require(resolve(ROOT, "lib/modelRegistry.ts")) as typeof import("../../lib/modelRegistry");
+mock.module(mod("lib/modelRegistry.ts"), { namedExports: {
+  ...realModelRegistry,
+  getRuntimeModels: async (...args: Parameters<typeof realModelRegistry.getRuntimeModels>) => {
+    const models = await realModelRegistry.getRuntimeModels(...args);
+    return forceAnthropicPrimary
+      ? models.map((model) => model.provider === "anthropic" ? { ...model, fileToolsOverride: false } : model)
+      : models;
+  },
+} });
 const realAutoSelection = require(resolve(ROOT, "lib/autoModelSelection.ts")) as typeof import("../../lib/autoModelSelection");
 const modelPickInputs: Array<Parameters<typeof realAutoSelection.applyLlmModelPick>> = [];
 const modelPickResults: Array<ReturnType<typeof realAutoSelection.applyLlmModelPick>> = [];

@@ -1,7 +1,7 @@
 import "server-only";
 import { jsonSchema, tool, type ToolSet, type ModelMessage } from "ai";
 import { estimatePromptTokens, estimateTokenBreakdown, toReservedInputTokens } from "@/lib/chatTokenEstimate";
-import { getArtifactToolSupport } from "@/lib/generatedArtifactToolPolicy";
+import { getArtifactToolSupport, type ArtifactToolModel } from "@/lib/generatedArtifactToolPolicy";
 import { MCP_LIMITS, MCP_UNTRUSTED_NOTICE, McpConnectorError } from "@/lib/mcpConnectorPolicy";
 import { invokeMcpTool } from "@/lib/mcpConnectorExecution";
 import { mcpModelSchema, mcpToolName, type McpReadSource } from "@/lib/mcpConnectorSchema";
@@ -12,10 +12,11 @@ import { githubScopedModelSchema } from "@/lib/mcpConnectorGitHub";
 export type McpProgress = "searching" | "reading" | "approval_required" | "no_results" | "reauth_required" | "server_error" | "done";
 export const MCP_CHAT_MAX_STEPS = 4;
 export async function buildMcpChatTools(input: {
-  userId: string; connectionId: string; modelId: string; nativeSearch: boolean;
+  userId: string; connectionId: string; model: ArtifactToolModel; nativeSearch: boolean;
   signal: AbortSignal; onState?: (state: McpProgress) => void;
 }) {
-  if (getArtifactToolSupport(input.modelId) !== "verified" || input.nativeSearch) throw new McpConnectorError("model_tools_unavailable");
+  // The same tick that gives a model the file tools: both are application-defined tools.
+  if (getArtifactToolSupport(input.model) !== "verified" || input.nativeSearch) throw new McpConnectorError("model_tools_unavailable");
   const connection = await ownMcpConnection(input.userId, input.connectionId);
   const server = await mcpServerFor(input.userId, connection.serverId);
   const grants = parseMcpGrants(connection.grants);
