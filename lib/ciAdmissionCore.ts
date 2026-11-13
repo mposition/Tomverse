@@ -48,6 +48,14 @@
  *   `agent/engineering/`, owner 2026-10-30): an owner review draft runs its
  *   code with the repository's secrets once ready, so only a person marks it
  *   ready, and a label would come too late -- the head is fixed on opening.
+ *   One exception (owner decision 2026-11-13: "develop 병합 권한은 DM에게
+ *   승인합니다. main은 안됩니다."): a draft into develop the Decision Maker
+ *   approved from the owner queue, at the approved head and diff and with no
+ *   gate or irreversible path, is marked ready by the round's own step after
+ *   the line (lib/amux/dmT2MergeService.ts, TOMVERSE_AMUX_DM_T2_MERGE, default
+ *   off) -- only when no draft in the line waits for runners and its whole
+ *   need fits. It stays out of the line: its CI then counts as another
+ *   workflow's, which the line never sends back.
  *
  * Pure: no clock, network or database. lib/ciAdmissionRound.ts passes what it
  * read and carries out the actions.

@@ -15,6 +15,8 @@ import {
   type CiAdmissionState,
   type CiRunnerOwner,
 } from "@/lib/ciAdmissionCore";
+import { amuxDmT2MergeEnabled, amuxDmT2MergeRoomBesideLine } from "@/lib/amux/dmT2MergeCore";
+import type { AmuxDmT2MergeReadyPorts } from "@/lib/amux/dmT2MergeService";
 import { readCiFixView } from "@/lib/ciAdmissionFix";
 import { CI_FIX_AGAIN_LABEL, ciFixLabelsToClear, emptyCiFixView } from "@/lib/ciAdmissionFixCore";
 import { ciAdmissionGithubConfig, createCiAdmissionGithub, type CiAdmissionGithub } from "@/lib/ciAdmissionGithub";
@@ -34,7 +36,10 @@ import { prisma } from "@/lib/prisma";
  *      base;
  *   2. one short transaction under the admission lock: read the state (the
  *      order the operator set), judge the whole line, write it;
- *   3. outside any transaction, carry out the actions on GitHub;
+ *   3. outside any transaction, carry out the actions on GitHub, and then,
+ *      behind TOMVERSE_AMUX_DM_T2_MERGE (default off), mark at most one
+ *      review pull request the Decision Maker approved ready, only when the
+ *      line leaves room (lib/amux/dmT2MergeService.ts);
  *   4. one more short transaction records what failed and which pending
  *      statuses were cleared.
  *
@@ -137,7 +142,11 @@ export type CiAdmissionRoundOutcome =
       nextCheckInMs: number | null;
     };
 
-type RoundDeps = { mode?: CiAdmissionMode; github?: CiAdmissionGithub | null; now?: () => number };
+type RoundDeps = {
+  mode?: CiAdmissionMode; github?: CiAdmissionGithub | null; now?: () => number;
+  /** The Decision Maker ready step's GitHub ports; by default CI admission's App and the engineering read token. */
+  dmT2MergePorts?: AmuxDmT2MergeReadyPorts;
+};
 
 const numbersOf = (actions: CiAdmissionAction[], kind: "hold" | "release" | "cancel") =>
   actions.flatMap((action) => (action.kind === kind ? [action.pull.number] : []));
@@ -240,6 +249,32 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
       failures.push(`${action.kind}:${number}:${code(error)}`);
       extra.push({ at, kind: "failed", number, shadow: false, detail: `${action.kind}:${code(error)}`.slice(0, 120) });
       if (action.kind === "release") failedReleases.add(number);
+    }
+  }
+
+  // One review pull request the Decision Maker approved (owner decision
+  // 2026-11-13: develop only). It is not in the line, so once ready its CI
+  // counts as another workflow's (lib/ciAdmissionCore.ts): it is marked ready
+  // only after the line, when no draft in it waits for runners and its whole
+  // need fits. The service is loaded only while the switch is on.
+  if (amuxDmT2MergeEnabled()) {
+    try {
+      const { amuxDmT2MergeReadyPorts, runAmuxDmT2MergeReadyStep } = await import("@/lib/amux/dmT2MergeService");
+      const step = await runAmuxDmT2MergeReadyStep({
+        drafts: openPulls,
+        room: amuxDmT2MergeRoomBesideLine({ queue: evaluation.state.queue, used: evaluation.used,
+          capacity: evaluation.state.capacity, need: evaluation.state.needs.develop }),
+        ports: deps.dmT2MergePorts ?? amuxDmT2MergeReadyPorts(github),
+      });
+      if (step.outcome === "marked_ready") {
+        extra.push({ at, kind: "released", number: step.prNumber, shadow: false, detail: "dm_approved" });
+      } else if (step.outcome === "write_unknown") {
+        // Not retried now: the next round reads the pull request before anything else.
+        failures.push(`dm_ready:${step.prNumber}:${step.code}`);
+        extra.push({ at, kind: "failed", number: step.prNumber, shadow: false, detail: `dm_ready:${step.code}`.slice(0, 120) });
+      }
+    } catch (error) {
+      failures.push(`dm_ready:${code(error)}`);
     }
   }
 

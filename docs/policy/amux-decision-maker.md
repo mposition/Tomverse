@@ -81,8 +81,16 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    있는 정리(`retry`·`complete`·`close`·`remake`)를 DM 승인자(1)가 켜져 있을 때 앱이 적용한다. 검토 PR(`t2_pr`)의
    `approve`는 적용하지 않고 승인 사실만 기록한다. 카드를 올리는 것이 유료 DM 호출을 부르므로
    `TOMVERSE_AMUX_DM_OWNER_SETTLEMENT=enabled`(기본 꺼짐)를 켜는 것은 운영자 몫이다. 가격·크레딧·migration·삭제·인증·감사
-   체인 경로와 병합 레인 게이트 파일, main 병합과 배포는 사람에게 남는다. 다음 단계: S2는 기록된 `approve`로 PR을 ready로
-   바꾸고 CI 통과 뒤 develop에 병합하며(병합 레인 예외, observer 판정), S3는 사람에게 남는 카드에 DM 제안과 원클릭 확인을 붙인다.
+   체인 경로와 병합 레인 게이트 파일, main 병합과 배포는 사람에게 남는다. S2(`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본
+   꺼짐): 기록된 `approve`를 쓸 때마다 binding이 열려 있고 head·diff digest가 승인 때와 같고 base가 develop이고 Task가
+   review인지 다시 읽는다. 스위치가 켜져 있으면 승인을 기록하는 순간 patch의 경로를 판정해, 게이트·되돌릴 수 없는 경로를
+   건드리거나 경로를 읽지 못하면 승인 대신 handoff(`irreversible_path`·`paths_unreadable`)를 남긴다. 앱은 CI 입장 round가
+   한 번 돌 때마다 승인된 검토 초안 하나를 GitHub에서 다시 읽어(CI 입장 App으로 단계·head, 엔지니어링 읽기 토큰으로 diff와
+   파일 목록) 대기열의 draft가 runner를 기다리지 않고 그 CI가 통째로 들어갈 때만, 해시 체인 감사를 먼저 남기고 ready로
+   바꾼다. 쓰기 결과를 모르면 그 round에 다시 쓰지 않고 다음 round가 PR을 읽고 판단한다. 병합 레인은 앱이 넘긴 목록의 PR만
+   `agent` 브랜치 제외의 예외로 받고(`docs/policy/qa-release-agent.md` 8절 3항), observer는 그 레인의 병합을 두 번째 승인
+   근거(`dm_approval`, `docs/policy/engineering-agent.md` §9-10)로 판정한다. **대상은 develop뿐이고 main은 제외다.** 다음
+   단계: S3는 사람에게 남는 카드에 DM 제안과 원클릭 확인을 붙인다.
 
 ## 1. 목적과 경계
 

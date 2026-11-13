@@ -2,13 +2,17 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 
+import type { AmuxDmT2MergeObservedFacts } from "@/lib/amux/dmT2MergeRead";
+import { readAmuxDmT2MergeObserved } from "@/lib/amux/dmT2MergeService";
 import { completeAmuxV22ReviewOnObservedMerge } from "@/lib/amux/reviewMergeObserved";
 import {
   EngineeringAgentGitHubReadError,
   readEngineeringAgentPullObservation,
   type EngineeringAgentPullObservation,
 } from "@/lib/engineeringAgentGitHubRead";
-import { decideEngineeringAgentMergedPr, decideEngineeringAgentPrApproval } from "@/lib/engineeringAgentPrApprovalCore";
+import {
+  decideEngineeringAgentDmApprovedMerge, decideEngineeringAgentMergedPr, decideEngineeringAgentPrApproval,
+} from "@/lib/engineeringAgentPrApprovalCore";
 import {
   engineeringAgentBindingSnapshotSchema,
   engineeringAgentTransactionInAmux,
@@ -29,8 +33,11 @@ import { prisma } from "@/lib/prisma";
  * - once it is merged, completes the AMUX card in the same transaction that
  *   records the merge -- if the approval was recorded before the merge, or the
  *   merge was an authorised approver's own, of the verified head into develop
- *   (owner decision 2026-11-12). Any other merge is not approved and goes to a
- *   person as a state mismatch, which halts the agent.
+ *   (owner decision 2026-11-12), or -- behind TOMVERSE_AMUX_DM_T2_MERGE -- the
+ *   merge lane's own merge into develop of a pull request the Decision Maker
+ *   approved before it, at the merged head and diff (owner decision
+ *   2026-11-13). Any other merge is not approved and goes to a person as a
+ *   state mismatch, which halts the agent.
  *
  * A read that fails decides nothing; the binding is looked at again next round.
  */
@@ -68,9 +75,21 @@ export type EngineeringAgentPrObserverOutcome =
 type Ports = {
   read: (prNumber: number) => Promise<EngineeringAgentPullObservation>;
   now: () => Date;
+  /**
+   * The Decision Maker's approval of a merged binding's pull request and the
+   * merge lane's record of that merge (owner decision 2026-11-13), or null.
+   * Absent -- and null while TOMVERSE_AMUX_DM_T2_MERGE is off -- the second
+   * basis of approval is never consulted.
+   */
+  dmMerge?: (input: { bindingId: string; prNumber: number; headSha: string; mergeCommitSha: string }) =>
+    Promise<AmuxDmT2MergeObservedFacts | null>;
 };
 
-const livePorts: Ports = { read: (prNumber) => readEngineeringAgentPullObservation(prNumber), now: () => new Date() };
+const livePorts: Ports = {
+  read: (prNumber) => readEngineeringAgentPullObservation(prNumber),
+  now: () => new Date(),
+  dmMerge: (input) => readAmuxDmT2MergeObserved(input),
+};
 
 type Approval = { verdict: string; reviewId?: number; observedAt?: string } | null;
 
@@ -170,11 +189,38 @@ export async function observeEngineeringAgentPullRequests(
     const bound = engineeringAgentBindingSnapshotSchema.safeParse(binding.snapshot);
     const sameChange = pull.diffDigest !== null && bound.success &&
       pull.diffDigest === bound.data.diffDigest;
-    const merge = decideEngineeringAgentMergedPr({ merged: true, approvalRecordedBeforeMerge: approvedBeforeMerge,
+    let merge = decideEngineeringAgentMergedPr({ merged: true, approvalRecordedBeforeMerge: approvedBeforeMerge,
       mergedByApprover: pull.mergedByApprover === true, baseRef: pull.baseRef,
       headVerified: pull.headSha === binding.verifiedHeadSha || sameChange });
-    // No review was recorded first: the approver's own merge is the approval.
-    const approvedByMerge = merge === "done" && !approvedBeforeMerge;
+    // The second basis (owner decision 2026-11-13): the merge lane's own merge
+    // into develop of a pull request the Decision Maker approved before it, at
+    // exactly the merged head and diff. Consulted only for a merge that would
+    // otherwise stop the agent; an unread approval, or a lane report still to
+    // come, decides nothing this round.
+    let dmSettlementId: string | null = null;
+    if (merge === "merged_without_approval" && ports.dmMerge) {
+      let facts: AmuxDmT2MergeObservedFacts | null;
+      try {
+        facts = await ports.dmMerge({ bindingId: binding.id, prNumber: binding.prNumber, headSha: pull.headSha,
+          mergeCommitSha: pull.mergeCommitSha! });
+      } catch {
+        results.push({ bindingId: binding.id, outcome: "unreadable", code: "dm_approval_unreadable" });
+        continue;
+      }
+      const dm = decideEngineeringAgentDmApprovedMerge({ baseRef: pull.baseRef, headSha: pull.headSha,
+        diffDigest: pull.diffDigest, mergedAt: pull.mergedAt!, mergedByKind: pull.mergedByKind,
+        approval: facts, laneMerge: facts?.laneMerge ?? null });
+      if (dm === "waiting") {
+        results.push({ bindingId: binding.id, outcome: "waiting" });
+        continue;
+      }
+      if (dm === "done") {
+        merge = "done";
+        dmSettlementId = facts!.settlementId;
+      }
+    }
+    // No review was recorded first: the approver's own merge, or the Decision Maker's approval, is the approval.
+    const approvedByMerge = merge === "done" && !approvedBeforeMerge && dmSettlementId === null;
     const mergeObservation = {
       merged: true,
       mergeCommitSha: pull.mergeCommitSha,
@@ -183,17 +229,19 @@ export async function observeEngineeringAgentPullRequests(
       observedAt,
     };
     const mergeRecord = { bindingId: binding.id, kind: "merge" as const, observation: mergeObservation,
-      ...(approvedByMerge ? { approvedByMerge: true as const } : {}) };
+      ...(approvedByMerge ? { approvedByMerge: true as const } : {}),
+      ...(dmSettlementId !== null ? { approvedByDm: true as const } : {}) };
 
     if (merge === "done") {
       const cardId = binding.run?.cardId ?? null;
       const attemptId = binding.run?.amuxAttemptId ?? null;
-      const approvalReviewId = approvedByMerge ? null :
+      const approvalReviewId = approvedByMerge || dmSettlementId !== null ? null :
         typeof approval?.reviewId === "number" ? approval.reviewId : undefined;
       if (cardId !== null && attemptId !== null && approvalReviewId !== undefined) {
         const completed = await completeAmuxV22ReviewOnObservedMerge(
           { taskId: cardId, attemptId, prNumber: binding.prNumber, mergeCommitSha: pull.mergeCommitSha!,
-            approvalReviewId, changedFiles: pull.changedFiles ?? null, bindingId: binding.id },
+            approvalReviewId, changedFiles: pull.changedFiles ?? null, bindingId: binding.id,
+            ...(dmSettlementId !== null ? { dmSettlementId } : {}) },
           {
             prismaCalls: OBSERVATION_PRISMA_CALLS,
             work: async (lent) => {

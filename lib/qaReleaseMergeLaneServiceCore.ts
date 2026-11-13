@@ -58,6 +58,13 @@ export type QaReleaseLaneState = {
   latched: boolean;
   /** The operator's priority from CI admission; absent, the lane takes the oldest first. */
   priority?: readonly number[];
+  /**
+   * Engineering agent pull requests the app reports approved by the Decision
+   * Maker, their conditions re-checked (owner decision 2026-11-13), each at
+   * the one head and branch approved. Absent: none, and every `agent` branch
+   * is a person's as before.
+   */
+  dmApproved?: readonly QaReleaseDmApprovedPull[];
   openAttempt: {
     id: string;
     state: "issued" | "consumed" | "awaiting_deploy";
@@ -69,6 +76,18 @@ export type QaReleaseLaneState = {
     mergeNotBeforeMs: number;
   } | null;
 };
+
+export type QaReleaseDmApprovedPull = { number: number; headSha: string; headRef: string };
+
+/**
+ * Whether the app's report covers this pull request as GitHub lists it now:
+ * the same number, head commit and branch, into develop. Anything else -- a
+ * moved head, another base -- is a person's, as every `agent` branch was.
+ */
+export const qaReleaseDmApprovedPull = (state: Pick<QaReleaseLaneState, "dmApproved">,
+  pull: Pick<QaReleaseLanePullRequest, "number" | "headRefOid" | "headRefName" | "baseRefName">): boolean =>
+  pull.baseRefName === "develop" && (state.dmApproved ?? []).some((entry) =>
+    entry.number === pull.number && entry.headSha === pull.headRefOid && entry.headRef === pull.headRefName);
 
 /** What GitHub says about one pull request, read fresh. */
 export type QaReleasePullRead = QaReleaseLanePullRequest & {
@@ -297,13 +316,15 @@ async function observeVerdicts(
   excludingFiles: Map<number, ReturnType<typeof qaReleaseMergeLaneExcludingFiles>>,
   pickNumber: number | null,
   priority?: readonly number[],
+  state: Pick<QaReleaseLaneState, "dmApproved"> = {},
 ): Promise<void> {
   const shown = new Map(exclusions);
   for (const pull of ordered) {
     if (shown.has(pull.number) || pull.number === pickNumber) continue;
     if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
-    const inputs = await ports.github.exclusionInputs(pull).catch(() => null);
-    if (inputs === null) continue;
+    const read = await ports.github.exclusionInputs(pull).catch(() => null);
+    if (read === null) continue;
+    const inputs = { ...read, dmApproved: qaReleaseDmApprovedPull(state, pull) };
     const judged = judgeQaReleaseMergeLaneExclusion(inputs);
     shown.set(pull.number, judged);
     if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
@@ -402,7 +423,8 @@ async function laneRound(
     // a pull request that cannot be merged anyway.
     for (const pull of ordered) {
       if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
-      const inputs = await ports.github.exclusionInputs(pull);
+      // The one exception to the `agent` branch rule is the app's report, at this very head.
+      const inputs = { ...(await ports.github.exclusionInputs(pull)), dmApproved: qaReleaseDmApprovedPull(state, pull) };
       const judged = judgeQaReleaseMergeLaneExclusion(inputs);
       exclusions.set(pull.number, judged);
       if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
@@ -412,7 +434,7 @@ async function laneRound(
     return { exitCode: 1, outcome: "candidates_unknown" };
   }
   const { pick } = pickQaReleaseLaneCandidate(pulls, exclusions, state.priority);
-  if (observer) await observeVerdicts(ports, observer, ordered, exclusions, excludingFiles, pick?.number ?? null, state.priority);
+  if (observer) await observeVerdicts(ports, observer, ordered, exclusions, excludingFiles, pick?.number ?? null, state.priority, state);
   if (pick === null) return { exitCode: 0, outcome: "idle" };
 
   const issued = await ports.app.issue({ pullRequestNumber: pick.number, headSha: pick.headRefOid }).catch(() => null);

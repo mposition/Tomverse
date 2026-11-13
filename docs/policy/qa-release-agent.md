@@ -198,6 +198,15 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      `prisma/migrations/**/migration.sql` 본문에 그 테이블 이름이 나오는지로 하고, 본문을 읽지 못하면 제외합니다.
    - head 브랜치 `agent/**`, `marketing-agent/**`, `feedback-autofix/**`, `feedback-autofix-main/**`, `autofix/**`,
      `visual-baseline/**`, `dependabot/**`.
+     **예외 하나(운영자 결정 2026-11-13, "develop 병합 권한은 DM에게 승인합니다. main은 안됩니다."):** 엔지니어링 에이전트의
+     `agent/engineering/<run>` PR 가운데 앱이 "Decision Maker가 승인했고 조건을 지금 다시 확인했다"고 넘겨준 것만 후보가 될 수
+     있습니다. 레인은 제품 DB가 없으므로 앱이 상태 읽기(`lib/qaReleaseMergeLaneRoutes.ts`)의 `dmApproved`로 PR 번호·head·브랜치를
+     넘겨 주고, 레인은 지금 GitHub가 보여 주는 번호·head commit·브랜치가 셋 다 같고 base가 develop일 때만 이 예외를 씁니다
+     (`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본 꺼짐; 꺼져 있으면 목록 자체가 없습니다). 그런 PR도 이 3항의 다른 제외(게이트
+     파일, 정책 테스트, 부록 A, 보호 테이블 migration, 목록 미완)와 2항의 CI 판정을 그대로 받고, 게이트 파일과 가격·크레딧·
+     migration·schema·인증·비밀·감사 체인·삭제·보존 경로(`QA_RELEASE_DM_APPROVED_HUMAN_PATTERNS`, 대소문자 무시)를 하나라도
+     건드리면 `dm_human_path`로 사람에게 남깁니다. **대상은 develop뿐이고 main은 제외입니다** — main 병합과 배포는 1항대로
+     사람이 합니다.
    - 변경 파일 목록(전체 페이지, rename은 이전·이후 경로 둘 다)을 끝까지 읽지 못한 PR.
    **migration을 포함한 PR도 무인 병합 대상입니다**(dev의 preDeploy가 적용합니다). git revert는 적용된 migration과 실패한
    migration 기록을 되돌리지 않습니다. 그래서 dev 배포가 실패하면 레인은 latch하고, 운영자가 dev DB를 복구한 뒤에만

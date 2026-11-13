@@ -23,6 +23,7 @@ import {
   AMUX_DM_OWNER_SETTLEMENT_RESOLVER, closeAmuxStoppedCardAsSystemWithin,
   completeAmuxStoppedCardAsSystemWithin, type AmuxStoppedCardLockedFacts,
 } from "./legacyCardSystemService.ts";
+import { amuxDmT2MergeEnabled, amuxDmT2MergeGate, amuxDmT2MergePatchPaths } from "./dmT2MergeCore.ts";
 import { parseAmuxV22Conclusion } from "./v22ConclusionCore.ts";
 import { openCompletionCriteria } from "./v22ResultReviewService.ts";
 import { openAmuxV22TaskResultRow, v22TaskResultIdeaId } from "./v22TaskResultStore.ts";
@@ -364,7 +365,7 @@ function settlementWrites(tx: Prisma.TransactionClient, row: LockedSettlement, i
         WHERE "id" = ${row.settlementId} AND "state" IN ('open', 'claimed')`;
       return { applied: true, outcome: "cancelled" as const };
     },
-    handOff: async (reason: string) => {
+    handOff: async (reason: string, extra: Record<string, unknown> = {}) => {
       const handed = await tx.$executeRaw`
         UPDATE "AmuxDmOwnerSettlement" SET "handoffReason" = ${reason},
           "handoffAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
@@ -376,7 +377,7 @@ function settlementWrites(tx: Prisma.TransactionClient, row: LockedSettlement, i
           targetId: row.settlementId,
           summary: "Left a stopped v22 Task to a person: the Decision Maker's answer could not be applied.",
           metadata: { taskId: row.taskId, requestId: input.requestId, reason,
-            decision: input.decision, source: input.source } });
+            decision: input.decision, source: input.source, ...extra } });
       return { applied: false, outcome: "handed_off" as const };
     },
     audit: (summary: string, metadata: Record<string, unknown> = {}) => ({
@@ -421,6 +422,8 @@ async function lockUnderKillSwitch(tx: Prisma.TransactionClient, settlementId: s
 export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionClient, input: {
   settlementId: string; answer: AmuxDmOwnerSettlementAnswer; source: "dm" | "dm_confirmed";
   requestId: string; now: Date;
+  /** The environment the develop merge switch is read from; the process's by default. */
+  env?: Readonly<Record<string, string | undefined>>;
 }): Promise<AmuxDmOwnerSettlementApplied> {
   const locked = await lockUnderKillSwitch(tx, input.settlementId);
   if (!locked) return { applied: false, outcome: null };
@@ -468,6 +471,13 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
       null;
     // The pull request it was asked about is no longer the open one of this run.
     if (!facts) return cancel("binding_moved");
+    // Behind the develop merge switch (owner decision 2026-11-13): an approval
+    // that would let the merge lane take a change a revert cannot undo -- or
+    // whose paths cannot be read -- is not recorded; the person merges it.
+    if (amuxDmT2MergeEnabled(input.env ?? process.env)) {
+      const gate = amuxDmT2MergeGate(amuxDmT2MergePatchPaths(facts.patchBody));
+      if (!gate.pass) return handOff(gate.reason, { bindingId: row.bindingId, paths: gate.paths });
+    }
     await record({ approvedHeadSha: facts.verifiedHeadSha, approvedDiffDigest: facts.diffDigest });
     const entry = audit("Recorded a Decision Maker approval of a v22 Task's review pull request for the merge lane; nothing else changed.",
       { bindingId: row.bindingId, approvedHeadSha: facts.verifiedHeadSha,

@@ -48,6 +48,49 @@ export const QA_RELEASE_MERGE_LANE_EXCLUDED_BRANCH_PREFIXES: readonly string[] =
   "dependabot",
 ];
 
+/**
+ * The one exception to the `agent` prefix (owner decision 2026-11-13: "develop
+ * 병합 권한은 DM에게 승인합니다. main은 안됩니다."): an engineering agent pull
+ * request, head `agent/engineering/<run>`, that the app reports approved by
+ * the Decision Maker with its conditions re-checked at this very head
+ * (lib/amux/dmT2MergeRead.ts). Develop only; the lane never merges into main.
+ */
+export const QA_RELEASE_DM_APPROVED_HEAD = /^agent\/engineering\/[0-9]{1,20}$/;
+
+/**
+ * What still leaves a Decision Maker approved pull request to a person,
+ * beside the gate paths above (the workflows and actions, admin auth, the
+ * system audit actors among them): what a revert cannot undo. Migrations and
+ * the schema; prices, credits and the rest of the contract role's areas
+ * (AGENTS.md: the product key, promotions, the price catalogue, plan change,
+ * email sending, as the v52 contract list in lib/amux/executionGradeCore.ts
+ * names them); authentication and secrets; the audit chain; deletion and
+ * retention. The one list the app's gate (lib/amux/dmT2MergeCore.ts) and the
+ * lane both judge, without regard to case: a doubt goes to a person.
+ */
+export const QA_RELEASE_DM_APPROVED_HUMAN_PATTERNS: readonly string[] = [
+  "prisma/migrations/**",
+  "prisma/schema.prisma",
+  "lib/modelPricing*",
+  "lib/credit*",
+  "lib/chatCostGuardrails.ts",
+  "lib/models.ts",
+  "lib/billing*",
+  "lib/planChange*",
+  "app/api/billing/**",
+  "lib/conversationProduct.ts",
+  "lib/email*",
+  "lib/auth*",
+  "app/api/auth/**",
+  "lib/**/*Secret*",
+  "lib/adminAudit*",
+  "lib/**/*SystemAudit*",
+  "lib/amux/auditContract.ts",
+  "lib/retention*",
+  "lib/**/*Retention*",
+  "lib/**/*Deletion*",
+];
+
 export type QaReleaseChangedFile = {
   path: string;
   /** Set for a rename: both sides are judged. */
@@ -77,6 +120,12 @@ export type QaReleaseExclusionInput = {
   policyTestPaths: readonly string[] | null;
   /** This agent's own path patterns, read from the policy at the pull request's base; null when unread. */
   agentOwnPatterns: readonly string[] | null;
+  /**
+   * The app reports this pull request approved by the Decision Maker, its
+   * conditions re-checked, at this head, into develop (QA_RELEASE_DM_APPROVED_HEAD).
+   * Absent or false: the `agent` prefix leaves it to a person, as ever.
+   */
+  dmApproved?: boolean;
 };
 
 export type QaReleaseExclusionReason =
@@ -88,13 +137,17 @@ export type QaReleaseExclusionReason =
   | "policy_test"
   | "agent_own_path"
   | "protected_table_migration"
-  | "excluded_branch";
+  | "excluded_branch"
+  /** A Decision Maker approved pull request that changes a gate or irreversible path. */
+  | "dm_human_path";
 
 export type QaReleaseExclusion =
   | { excluded: false }
   | { excluded: true; reasons: QaReleaseExclusionReason[] };
 
 const GATE_MATCHERS = QA_RELEASE_MERGE_LANE_GATE_PATTERNS.map(compileManifestPattern);
+const DM_HUMAN_MATCHERS = [...QA_RELEASE_MERGE_LANE_GATE_PATTERNS, ...QA_RELEASE_DM_APPROVED_HUMAN_PATTERNS]
+  .map((pattern) => new RegExp(compileManifestPattern(pattern).source, "i"));
 
 /**
  * A repository-relative path as Git stores it, judged by the same rule the
@@ -105,16 +158,30 @@ function isReadablePath(path: unknown): path is string {
   return typeof path === "string" && isCanonicalRepoPath(path);
 }
 
-function branchExcluded(headBranch: string): boolean {
+function branchExcluded(headBranch: string, dmApproved: boolean): boolean {
+  if (dmApproved && QA_RELEASE_DM_APPROVED_HEAD.test(headBranch)) return false;
   return QA_RELEASE_MERGE_LANE_EXCLUDED_BRANCH_PREFIXES.some(
     (prefix) => headBranch === prefix || headBranch.startsWith(`${prefix}/`),
   );
 }
 
+/**
+ * The paths of a Decision Maker approved pull request that leave it to a
+ * person: a gate path, an irreversible one (QA_RELEASE_DM_APPROVED_HUMAN_PATTERNS),
+ * or one that cannot be judged. Empty when none does.
+ */
+export function qaReleaseDmApprovedHumanPaths(paths: readonly unknown[]): string[] {
+  return paths.flatMap((path) => {
+    if (!isReadablePath(path)) return [String(path).slice(0, 200)];
+    return DM_HUMAN_MATCHERS.some((matcher) => matcher.test(path)) ? [path] : [];
+  });
+}
+
 export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput): QaReleaseExclusion {
   const reasons = new Set<QaReleaseExclusionReason>();
+  const dmApproved = input.dmApproved === true;
 
-  if (typeof input.headBranch !== "string" || input.headBranch === "" || branchExcluded(input.headBranch)) {
+  if (typeof input.headBranch !== "string" || input.headBranch === "" || branchExcluded(input.headBranch, dmApproved)) {
     reasons.add("excluded_branch");
   }
   // The lists the judgement depends on must be present; a missing one is not
@@ -132,14 +199,14 @@ export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput)
     return { excluded: true, reasons: [...reasons].sort() };
   }
 
-  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns);
+  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns, dmApproved);
   for (const file of changedFiles) for (const reason of judgeFile(file)) reasons.add(reason);
 
   return reasons.size === 0 ? { excluded: false } : { excluded: true, reasons: [...reasons].sort() };
 }
 
 /** The per-file half of the judgement: what one changed file excludes for. */
-function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonly string[]) {
+function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonly string[], dmApproved = false) {
   const policyTests = new Set(policyTestPaths);
   const ownMatchers = agentOwnPatterns.map(compileManifestPattern);
   return (file: QaReleaseChangedFile): Set<QaReleaseExclusionReason> => {
@@ -156,6 +223,7 @@ function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonl
       }
       if (policyTests.has(path)) reasons.add("policy_test");
       if (ownMatchers.some((matcher) => matcher.test(path))) reasons.add("agent_own_path");
+      if (dmApproved && DM_HUMAN_MATCHERS.some((matcher) => matcher.test(path))) reasons.add("dm_human_path");
     }
     if (isReadablePath(file.path) && QA_RELEASE_MIGRATION_SQL_PATH.test(file.path)) {
       if (typeof file.migrationSql !== "string" || QA_RELEASE_PROTECTED_TABLE_PATTERN.test(file.migrationSql)) {
@@ -176,7 +244,7 @@ export function qaReleaseMergeLaneExcludingFiles(
   limit = 20,
 ): { path: string; reasons: QaReleaseExclusionReason[] }[] {
   if (!Array.isArray(input.changedFiles) || !Array.isArray(input.policyTestPaths) || !Array.isArray(input.agentOwnPatterns)) return [];
-  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns);
+  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns, input.dmApproved === true);
   const out: { path: string; reasons: QaReleaseExclusionReason[] }[] = [];
   for (const file of input.changedFiles) {
     const reasons = judgeFile(file);

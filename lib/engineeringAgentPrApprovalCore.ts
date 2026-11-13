@@ -115,3 +115,36 @@ export function decideEngineeringAgentMergedPr(input: {
   return input.mergedByApprover === true && input.baseRef === "develop" && input.headVerified === true ?
     "done" : "merged_without_approval";
 }
+
+/**
+ * The second basis of approval (owner decision 2026-11-13: "develop 병합 권한은
+ * DM에게 승인합니다. main은 안됩니다."): a merge the approver list did not make
+ * is approved when the Decision Maker approved this pull request from the
+ * owner queue before the merge, of exactly the merged head and diff, the base
+ * is develop, and the merge is the QA-release merge lane's own -- a bot's
+ * merge whose commit the lane reported for this pull request and head. While
+ * the lane has an attempt open for it and has not reported yet, or the diff
+ * cannot be read, nothing is decided: the observer reads it again next round.
+ * Anything else is not this basis, and the merge stays unapproved.
+ */
+export function decideEngineeringAgentDmApprovedMerge(input: {
+  baseRef: string;
+  headSha: string;
+  /** The merged pull request's diff digest, or null when it could not be read. */
+  diffDigest: string | null;
+  mergedAt: Date;
+  mergedByKind: "user" | "bot" | "app" | "unknown";
+  /** The Decision Maker's approval of this binding's pull request, or null when there is none. */
+  approval: { approvedHeadSha: string; approvedDiffDigest: string; decidedAt: Date } | null;
+  /** The merge lane's record of this pull request and head: it reported this merge commit, or an attempt is still open. */
+  laneMerge: "merged" | "pending" | null;
+}): "done" | "waiting" | "not_approved" {
+  const { approval } = input;
+  if (approval === null || input.baseRef !== "develop" || input.headSha !== approval.approvedHeadSha ||
+      approval.decidedAt.getTime() > input.mergedAt.getTime() ||
+      (input.mergedByKind !== "bot" && input.mergedByKind !== "app")) return "not_approved";
+  if (input.diffDigest === null) return "waiting";
+  if (input.diffDigest !== approval.approvedDiffDigest) return "not_approved";
+  if (input.laneMerge === "merged") return "done";
+  return input.laneMerge === "pending" ? "waiting" : "not_approved";
+}

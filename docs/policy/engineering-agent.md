@@ -577,6 +577,29 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
     승인으로 인정하는 것이며, 에이전트나 게시 App에 새 권한을 주지 않는다 — 둘 다
     `develop`에 병합할 수 없다는 조건은 그대로다.
 
+    **두 번째 근거: Decision Maker의 승인과 병합 레인의 `develop` 병합(운영자 결정
+    2026-11-13).** 채팅 원문: "develop 병합 권한은 DM에게 승인합니다. main은 안됩니다.",
+    "1~4까지 DM에게 자동으로 하도록 승인합니다." 대상은 **`develop`뿐이고 `main`은 제외**다.
+    운영자 확인 대기의 검토 PR을 DM이 승인하면(`docs/policy/amux-decision-maker.md` §0a-5,
+    §2-11) 앱이 그 PR을 ready로 바꾸고 CI가 통과하면 QA·릴리스 병합 레인이 `develop`에
+    병합한다(`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본 꺼짐). 이 병합은 다음을 모두 만족할
+    때 승인으로 보고 카드를 완료하며 불일치를 열지 않는다. 감사 기록의 `approval_basis`는
+    `dm_approval`이다.
+
+    - 병합 전에 기록된 DM 승인(`AmuxDmOwnerSettlement`의 `t2_pr`·`applied`·`approve` 행)이
+      이 binding과 그 run에 있다.
+    - 병합된 head가 그 행의 `approvedHeadSha`와 같고, PR diff digest가 `approvedDiffDigest`와
+      같다. head가 움직였으면 해당하지 않는다(병합 레인은 head를 고정해 병합한다).
+    - base가 `develop`이다.
+    - 병합이 병합 레인의 것이다: bot(또는 App)의 병합이고, 앱에 남은 병합 레인의 attempt
+      (`QaReleaseMergeAttempt`)가 이 PR·head에 대해 바로 그 병합 commit을 보고했다. 레인이
+      아직 보고하지 않은 attempt가 열려 있거나 diff를 읽지 못하면 그 회차에는 판정하지 않는다.
+
+    가격·크레딧·migration·삭제·인증·감사 체인 경로와 병합 레인 게이트 파일을 건드리는 PR은
+    DM 승인을 기록하지 않고 사람에게 넘긴다(`QA_RELEASE_DM_APPROVED_HUMAN_PATTERNS`). 위 조건에
+    하나라도 맞지 않는 병합은 종전대로 비승인이고 정지 대상이다. `main` 병합과 배포는 사람의
+    몫이다. 게시 App과 에이전트에는 여전히 병합 권한이 없다 — 병합하는 것은 병합 레인 App이다.
+
 ## 10. 결과를 모를 때
 
 회수되지 않는 쓰기에서 "결과 모름"(timeout·연결 종료·5xx·응답 파싱 실패)은 실패와

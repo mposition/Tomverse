@@ -9,6 +9,8 @@ import {
   readQaReleaseMergeLaneState,
   reportQaReleaseMergeResult,
 } from "@/lib/qaReleaseMergeLaneStore";
+import { amuxDmT2MergeEnabled } from "@/lib/amux/dmT2MergeCore";
+import { readAmuxDmT2MergeLanePulls } from "@/lib/amux/dmT2MergeService";
 import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
 import { qaReleaseDeployObservation } from "@/lib/qaReleaseMergeLaneReportCore";
 import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/lib/qaReleaseRouteAuthCore";
@@ -168,6 +170,11 @@ export async function handleQaReleaseMergeLaneState(request: Request, env: Env =
     const priority = await readCiAdmissionAdminView()
       .then((view) => view.state.queue.map((entry) => entry.number))
       .catch(() => [] as number[]);
-    return answer(200, { ...(await readQaReleaseMergeLaneState()), priority });
+    // Owner decision 2026-11-13 (develop only, TOMVERSE_AMUX_DM_T2_MERGE): the
+    // engineering pull requests the Decision Maker approved, their conditions
+    // read again now. Unread, none: every `agent` branch stays a person's.
+    const dmApproved = amuxDmT2MergeEnabled(env)
+      ? { dmApproved: await readAmuxDmT2MergeLanePulls(env).catch(() => []) } : {};
+    return answer(200, { ...(await readQaReleaseMergeLaneState()), priority, ...dmApproved });
   });
 }

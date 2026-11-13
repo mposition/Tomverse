@@ -508,6 +508,38 @@ export async function readEngineeringAgentPullMerge(
 }
 
 /**
+ * A pull request's change as it stands now: its base and head, the digest of
+ * its diff as the publisher binds it, and its whole file list at that base
+ * and head (both sides of a rename). What a Decision Maker approval is
+ * checked against before the app marks the pull request ready (owner
+ * decision 2026-11-13). A digest or list that cannot be read whole is null.
+ */
+export async function readEngineeringAgentPullChange(
+  prNumber: number,
+  deps: Deps = {},
+): Promise<{ state: "open" | "closed"; baseRef: string; headRef: string; headSha: string;
+  diffDigest: string | null; changedFiles: string[] | null }> {
+  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
+  const resolved = withDefaults(deps);
+  const pull = record(await githubJson(`/pulls/${prNumber}`, resolved));
+  const base = record(pull?.base);
+  const head = record(pull?.head);
+  const baseSha = typeof base?.sha === "string" ? base.sha.toLowerCase() : null;
+  const headSha = typeof head?.sha === "string" ? head.sha.toLowerCase() : null;
+  const state = pull?.state;
+  if (pull?.number !== prNumber || (state !== "open" && state !== "closed") ||
+      typeof base?.ref !== "string" || typeof head?.ref !== "string" ||
+      baseSha === null || !SHA.test(baseSha) || headSha === null || !SHA.test(headSha)) {
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  }
+  return {
+    state, baseRef: base.ref, headRef: head.ref, headSha,
+    diffDigest: await readPullDiffDigest(prNumber, resolved),
+    changedFiles: await readPullFileNames(prNumber, { baseSha, headSha, changedFiles: pull.changed_files as number }, resolved),
+  };
+}
+
+/**
  * One published pull request with what the approval judgement needs: its
  * state and merge, its reviews, its head's required checks and its diff
  * digest. Reads only; a list that is not whole is a refusal, not a shorter
