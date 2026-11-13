@@ -201,8 +201,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      **예외 하나(운영자 결정 2026-11-13, "develop 병합 권한은 DM에게 승인합니다. main은 안됩니다."):** 엔지니어링 에이전트의
      `agent/engineering/<run>` PR 가운데 앱이 "Decision Maker가 승인했고 조건을 지금 다시 확인했다"고 넘겨준 것만 후보가 될 수
      있습니다. 레인은 제품 DB가 없으므로 앱이 상태 읽기(`lib/qaReleaseMergeLaneRoutes.ts`)의 `dmApproved`로 PR 번호·head·브랜치를
-     넘겨 줍니다. 앱은 넘길 때마다 그 PR의 현재 diff와 파일 목록을 GitHub에서 다시 읽어, digest가 승인 때와 같고 파일이 모두
-     허용 목록 안일 때만 싣습니다(읽지 못하거나 다르면 싣지 않습니다). 레인은 지금 GitHub가 보여 주는 번호·head commit·브랜치가
+     넘겨 줍니다. 앱은 상태 읽기마다 가장 오래 확인하지 않은 승인 한 건만 골라 그 PR의 현재 diff와 파일 목록을 GitHub에서 다시
+     읽어, digest가 승인 때와 같고 파일이 모두 허용 목록 안일 때만 싣습니다(읽지 못하거나 다르면 싣지 않고, 그 승인은 다음
+     차례로 넘어갑니다). 레인은 지금 GitHub가 보여 주는 번호·head commit·브랜치가
      셋 다 같고 base가 develop일 때만 이 예외를 쓰고, 4항대로 그 head를 `sha`로 고정해 병합합니다
      (`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본 꺼짐; 꺼져 있으면 목록 자체가 없습니다). 그런 PR도 이 3항의 다른 제외(게이트
      파일, 정책 테스트, 부록 A, 보호 테이블 migration, 목록 미완)와 2항의 CI 판정을 그대로 받습니다. 그리고 **변경 파일이 모두

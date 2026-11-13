@@ -260,3 +260,39 @@ test("a lane round merges a reported engineering pull request and leaves an unre
     { issue: { issued: true, attemptId: "att-1" }, consume: { consumed: true } });
   assert.deepEqual(merged.merges, [[42, HEAD]]);
 });
+
+test("a Decision Maker ready pull request outside CI admission's line is reserved like a release until its runs show", async () => {
+  const { evaluateCiAdmission, parseCiAdmissionState, ciRunKey, CI_ADMISSION_RELEASE_GRACE_MS } =
+    await import("../lib/ciAdmissionCore.ts");
+  const NOW = Date.parse("2026-11-13T10:00:00Z");
+  const agent = { number: 42, nodeId: "PR_a", title: "agent", base: "develop", head: REF, headSha: HEAD,
+    draft: false, fork: false, labels: [] };
+  const line = { number: 7, nodeId: "PR_l", title: "line", base: "develop", head: "claude/to-develop/x",
+    headSha: OTHER, draft: true, fork: false, labels: [] };
+  const deploys = [{ branch: "develop", sha: "2".repeat(40), title: "push" }];
+  const judge = (released, over = {}) => evaluateCiAdmission({
+    state: { ...parseCiAdmissionState(undefined), released }, openPulls: [agent, line], running: new Set(),
+    deploys, checks: new Map([[7, { conflict: false, behind: false }]]), runners: [], nowMs: NOW, shadow: false, ...over });
+  // Without a reservation, its CI not yet shown, the line draft fits beside the deploy (18 + 15 <= 40).
+  assert.ok(judge([]).actions.some((action) => action.kind === "release" && action.pull.number === 7));
+  // Reserved at its need (15): 18 + 15 + 15 > 40, so the line draft waits for it.
+  const reserved = judge([{ number: 42, headSha: HEAD, atMs: NOW - 1_000 }]);
+  assert.equal(reserved.actions.some((action) => action.kind === "release"), false);
+  assert.equal(reserved.used, 18 + 15);
+  assert.deepEqual(reserved.state.released, [{ number: 42, headSha: HEAD, atMs: NOW - 1_000 }], "kept");
+  assert.ok(reserved.state.lastRound.running.some((entry) => entry.number === 42 && entry.runners === 15));
+  // Its runs shown: counted as running, not twice.
+  const shown = judge([{ number: 42, headSha: HEAD, atMs: NOW - 1_000 }], { running: new Set([ciRunKey(42, HEAD)]),
+    runningBases: new Map([[42, "develop"]]) });
+  assert.equal(shown.used, 18 + 15);
+  assert.deepEqual(shown.state.released, []);
+  // Expired, still a draft (a write that never happened), or another head: no reservation.
+  for (const [entry, pulls] of [
+    [{ number: 42, headSha: HEAD, atMs: NOW - CI_ADMISSION_RELEASE_GRACE_MS - 1 }, [agent, line]],
+    [{ number: 42, headSha: HEAD, atMs: NOW - 1_000 }, [{ ...agent, draft: true }, line]],
+    [{ number: 42, headSha: OTHER, atMs: NOW - 1_000 }, [agent, line]],
+  ]) {
+    const judged = judge([entry], { openPulls: pulls });
+    assert.deepEqual(judged.state.released.filter((kept) => kept.number === 42), [], JSON.stringify(entry));
+  }
+});

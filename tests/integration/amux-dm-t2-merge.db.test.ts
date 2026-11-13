@@ -132,7 +132,7 @@ test("an approved review draft is marked ready once, audited first, only behind 
 
     const on = github(card);
     assert.deepEqual(await runAmuxDmT2MergeReadyStep({ drafts: draftsOf(card), room: true, ports: on.ports, env: ON }),
-      { outcome: "marked_ready", settlementId: card.settlementId, prNumber: card.prNumber });
+      { outcome: "marked_ready", settlementId: card.settlementId, prNumber: card.prNumber, headSha: HEAD });
     assert.deepEqual(on.writes, [card.prNumber]);
     const audits = await readyAudits(tx, card.settlementId);
     assert.equal(audits.length, 1);
@@ -162,7 +162,8 @@ test("a write whose answer is unknown is not retried; a moved head, a changed fi
 
     const lost = github(card, { markReady: () => { throw new Error("github_graphql_502"); } });
     assert.deepEqual(await runAmuxDmT2MergeReadyStep({ drafts: draftsOf(card), room: true, ports: lost.ports, env: ON }),
-      { outcome: "write_unknown", settlementId: card.settlementId, prNumber: card.prNumber, code: "github_graphql_502" });
+      { outcome: "write_unknown", settlementId: card.settlementId, prNumber: card.prNumber, headSha: HEAD,
+        code: "github_graphql_502" });
     assert.deepEqual(lost.writes, [card.prNumber], "one call, never a second in the same step");
     assert.equal((await readyAudits(tx, card.settlementId)).length, 1, "audited before the write");
 
@@ -270,6 +271,36 @@ test("CI admission's round marks the approved draft ready after its line, and on
       assert.ok(events.some((entry) => entry.kind === "released" && entry.number === card.prNumber && entry.detail === "dm_approved"));
       const queue = (JSON.parse(stored.value) as { queue: Array<{ number: number }> }).queue;
       assert.ok(!queue.some((entry) => entry.number === card.prNumber), "it never joins the line");
+      const releasedOf = async () => (JSON.parse((await tx.appSetting.findUniqueOrThrow({
+        where: { key: CI_ADMISSION_STATE_SETTING_KEY } })).value) as { released: Array<{ number: number; headSha: string }> })
+        .released.filter((entry) => entry.number === card.prNumber);
+      assert.deepEqual((await releasedOf()).map((entry) => entry.headSha), [HEAD], "reserved like a release");
+
+      // The next round, its runs not shown yet: its need is counted, so a line draft that would fit
+      // beside the deploy alone (18 + 15) waits (18 + 15 + 15 > 40).
+      const agentReady = { ...agentDraft, draft: false };
+      const after = fake([agentReady, lineDraft], [{ branch: "develop", sha: "2".repeat(40), title: "push" }]);
+      await runCiAdmissionRound({ mode: "on", github: after.github as never, now: () => Date.now(),
+        dmT2MergePorts: after.dmT2MergePorts });
+      assert.deepEqual(after.readied, [], "nothing is admitted into the runners it holds");
+      assert.deepEqual((await releasedOf()).length, 1, "the reservation holds until its runs show");
+
+      // A write whose answer is unknown is reserved as if it happened; GitHub still showing a draft drops it.
+      await tx.appSetting.deleteMany({ where: { key: CI_ADMISSION_STATE_SETTING_KEY } });
+      const lost = fake([agentDraft], []);
+      lost.github.markReady = async () => { throw new Error("github_graphql_502"); };
+      const unknown = await runCiAdmissionRound({ mode: "on", github: lost.github as never, now: () => Date.now(),
+        dmT2MergePorts: { ...lost.dmT2MergePorts, markReady: lost.github.markReady } });
+      assert.equal(unknown.outcome, "done");
+      assert.ok((unknown as { failures: string[] }).failures.some((entry) => entry.startsWith(`dm_ready:${card.prNumber}:`)));
+      assert.deepEqual((await releasedOf()).map((entry) => entry.headSha), [HEAD], "reserved although unknown");
+      // GitHub shows it still a draft: the write never happened, its reservation is dropped, and the line
+      // draft takes the room it held (18 + 15); the approved draft then finds no room and waits.
+      const stillDraft = fake([agentDraft, lineDraft], [{ branch: "develop", sha: "2".repeat(40), title: "push" }]);
+      await runCiAdmissionRound({ mode: "on", github: stillDraft.github as never, now: () => Date.now(),
+        dmT2MergePorts: stillDraft.dmT2MergePorts });
+      assert.deepEqual(stillDraft.readied, [lineDraft.number]);
+      assert.deepEqual(await releasedOf(), []);
 
       // Shadow mode writes nothing on GitHub.
       const shadow = fake([agentDraft], []);

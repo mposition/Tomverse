@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import {
+  CI_ADMISSION_RELEASE_GRACE_MS,
   CI_ADMISSION_STATE_SETTING_KEY,
   ciAdmissionDraftsToCheck,
   evaluateCiAdmission,
@@ -253,10 +254,14 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
   }
 
   // One review pull request the Decision Maker approved (owner decision
-  // 2026-11-13: develop only). It is not in the line, so once ready its CI
-  // counts as another workflow's (lib/ciAdmissionCore.ts): it is marked ready
-  // only after the line, when no draft in it waits for runners and its whole
-  // need fits. The service is loaded only while the switch is on.
+  // 2026-11-13: develop only). It is not in the line: it is marked ready only
+  // after the line, when no draft in it waits for runners and its whole need
+  // fits, and then reserved like any release (state.released) until GitHub
+  // shows its runs or the grace period ends -- a write whose answer is unknown
+  // too, since it may have happened; the next evaluation keeps a reservation
+  // only while GitHub shows the pull request ready at that head. The service
+  // is loaded only while the switch is on.
+  const dmReserved: CiAdmissionState["released"] = [];
   if (amuxDmT2MergeEnabled()) {
     try {
       const { amuxDmT2MergeReadyPorts, runAmuxDmT2MergeReadyStep } = await import("@/lib/amux/dmT2MergeService");
@@ -266,6 +271,9 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
           capacity: evaluation.state.capacity, need: evaluation.state.needs.develop }),
         ports: deps.dmT2MergePorts ?? amuxDmT2MergeReadyPorts(github),
       });
+      if (step.outcome === "marked_ready" || step.outcome === "write_unknown") {
+        dmReserved.push({ number: step.prNumber, headSha: step.headSha, atMs: now() });
+      }
       if (step.outcome === "marked_ready") {
         extra.push({ at, kind: "released", number: step.prNumber, shadow: false, detail: "dm_approved" });
       } else if (step.outcome === "write_unknown") {
@@ -287,7 +295,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
   }
 
   // 4. What happened, on top of the state as it is now.
-  if (extra.length > 0 || cleared.size > 0 || failedReleases.size > 0) {
+  if (extra.length > 0 || cleared.size > 0 || failedReleases.size > 0 || dmReserved.length > 0) {
     await prisma.$transaction(
       async (tx) => {
         await takeLock(tx);
@@ -295,15 +303,19 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
         await writeState(tx, {
           ...current,
           pendingStatus: current.pendingStatus.filter((entry) => !cleared.has(`${entry.number}@${entry.headSha}`)),
-          // A release that did not happen reserves nothing.
-          released: current.released.filter((entry) => !failedReleases.has(entry.number)),
+          // A release that did not happen reserves nothing; a Decision Maker ready reserves like one.
+          released: [...current.released.filter((entry) => !failedReleases.has(entry.number) &&
+            !dmReserved.some((reserved) => reserved.number === entry.number)), ...dmReserved],
           events: [...current.events, ...extra].slice(-50),
         });
       },
       { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
     );
   }
-  scheduleRecheck(failures.length > 0 ? RETRY_AFTER_FAILURE_MS : evaluation.nextCheckInMs);
+  // A reservation made here is judged again when its grace period ends, as a release's.
+  scheduleRecheck(failures.length > 0 ? RETRY_AFTER_FAILURE_MS :
+    dmReserved.length > 0 ? Math.min(evaluation.nextCheckInMs ?? CI_ADMISSION_RELEASE_GRACE_MS, CI_ADMISSION_RELEASE_GRACE_MS) :
+    evaluation.nextCheckInMs);
   return { outcome: "done", mode, ...summary, failures, nextCheckInMs: evaluation.nextCheckInMs };
 }
 

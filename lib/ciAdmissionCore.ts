@@ -54,8 +54,9 @@
  *   every changed path on its merge allow list, is marked ready by the round's own step after
  *   the line (lib/amux/dmT2MergeService.ts, TOMVERSE_AMUX_DM_T2_MERGE, default
  *   off) -- only when no draft in the line waits for runners and its whole
- *   need fits. It stays out of the line: its CI then counts as another
- *   workflow's, which the line never sends back.
+ *   need fits. It stays out of the line: it is reserved like a release (a
+ *   write whose answer is unknown too) until its runs show, and its CI then
+ *   counts as another workflow's, which the line never sends back.
  *
  * Pure: no clock, network or database. lib/ciAdmissionRound.ts passes what it
  * read and carries out the actions.
@@ -541,6 +542,20 @@ export function evaluateCiAdmission(input: {
       const title = open.get(number)?.title.slice(0, 200) ?? "";
       return need === null ? [] : [{ number, base, title, runners: countOf(ciRunnerOwnerKey.pull(number), need) }];
     });
+  // A reservation of a pull request outside the line -- the Decision Maker
+  // ready step's (lib/ciAdmissionRound.ts) -- holds its need like any release
+  // until GitHub shows its runs or the grace period ends, and nobody here can
+  // send it back: a round that cannot see its runs yet never gives its runners
+  // to another.
+  const reservedOutside = released
+    .filter((entry) => !inLineNumbers.has(entry.number))
+    .flatMap((entry) => {
+      const pull = open.get(entry.number);
+      const need = pull ? unitsOf(pull) : null;
+      return pull && need !== null
+        ? [{ number: entry.number, base: pull.base, title: pull.title.slice(0, 200), runners: countOf(ciRunnerOwnerKey.pull(entry.number), need) }]
+        : [];
+    });
   const deploys = (input.deploys ?? []).map((deploy) => ({
     ...deploy,
     runners: countOf(ciRunnerOwnerKey.deploy(deploy.branch, deploy.sha), ciAdmissionDeployUnits(deploy.branch, needs)),
@@ -550,7 +565,8 @@ export function evaluateCiAdmission(input: {
   // request's CI): they cannot be given back either.
   const others = (input.runners ?? []).reduce((sum, owner) => (counted.has(owner.key) ? sum : sum + owner.running + owner.queued), 0);
   const fixedUnits =
-    closedRunning.reduce((sum, closed) => sum + closed.runners, 0) + deploys.reduce((sum, deploy) => sum + deploy.runners, 0) + others;
+    closedRunning.reduce((sum, closed) => sum + closed.runners, 0) + deploys.reduce((sum, deploy) => sum + deploy.runners, 0) + others +
+    reservedOutside.reduce((sum, entry) => sum + entry.runners, 0);
   // Runners in use now, by every run GitHub shows: a cancellation asked for
   // frees nothing until the runs stop.
   let used = fixedUnits + [...pullRunners.values()].reduce((sum, runners) => sum + runners, 0);
@@ -693,7 +709,8 @@ export function evaluateCiAdmission(input: {
             base: pull.base,
             runners: pullRunners.get(pull.number) ?? unitsOf(pull)!,
           }))
-          .concat(closedRunning.map((closed) => ({ number: closed.number, title: closed.title, base: closed.base, runners: closed.runners }))),
+          .concat(closedRunning.map((closed) => ({ number: closed.number, title: closed.title, base: closed.base, runners: closed.runners })))
+          .concat(reservedOutside),
         deploys: deploys.slice(0, MAX_QUEUE).map((deploy) => ({ ...deploy, title: deploy.title.slice(0, 200) })),
         others,
       },

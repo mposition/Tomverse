@@ -4,9 +4,11 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // The merge lane's list of Decision Maker approvals (lib/amux/dmT2MergeService.ts)
-// over an in-memory table: approvals that stay unmergeable never hide the ones
-// behind them (review r-20261113-135805-1535ac). The table's order is the
-// reader's own, least recently visited first; the visit is the service's write.
+// over an in-memory table: one approval per state read, the least recently
+// visited, recorded as visited whatever its check finds (reviews
+// r-20261113-135805-1535ac, r-20261113-140634-2ede9b). The table's order is the
+// reader's own -- updatedAt, then id -- and a visit always lands after every
+// other row's, as the service's GREATEST(clock, max + 1 ms) write does.
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
@@ -16,18 +18,21 @@ const DIFF = "d".repeat(64);
 const ON = { TOMVERSE_AMUX_DM_T2_MERGE: "enabled" };
 
 let rows;
-let clock;
 let statements;
 
 const fakeTx = {
   $executeRaw: async (strings, ...values) => {
     const sql = strings.join("?");
-    statements.push(sql.includes(`"updatedAt"`) ? "visit" : "other");
-    assert.match(sql, /UPDATE "AmuxDmOwnerSettlement" SET "updatedAt"/);
+    statements.push("visit");
+    assert.match(sql, /UPDATE "AmuxDmOwnerSettlement" SET "updatedAt" = GREATEST\(clock_timestamp\(\)/);
+    assert.match(sql, /max\(o\."updatedAt"\)/);
+    assert.match(sql, /interval '1 millisecond'/);
     assert.match(sql, /"state" = 'applied'/);
-    const ids = values[0];
-    for (const row of rows) if (ids.includes(row.settlementId)) row.visited = (clock += 1);
-    return ids.length;
+    const [id] = values;
+    assert.equal(typeof id, "string", "one approval per visit");
+    const after = Math.max(...rows.map((row) => row.updatedAt)) + 1;
+    for (const row of rows) if (row.settlementId === id) row.updatedAt = after;
+    return 1;
   },
 };
 
@@ -49,10 +54,10 @@ mock.module(mod("lib/amux/decisionMakerSwitchStore.ts"), {
 mock.module(mod("lib/amux/dmT2MergeRead.ts"), {
   namedExports: {
     readAmuxDmT2MergeApprovals: async (_tx, input) => {
-      statements.push("approvals");
+      statements.push(`approvals:${input.limit}`);
       return [...rows]
         .filter((row) => !input.prNumbers || input.prNumbers.includes(row.prNumber))
-        .sort((a, b) => a.visited - b.visited || a.settlementId.localeCompare(b.settlementId))
+        .sort((a, b) => a.updatedAt - b.updatedAt || a.settlementId.localeCompare(b.settlementId))
         .slice(0, input.limit)
         .map((row) => ({ ...row }));
     },
@@ -68,38 +73,62 @@ mock.module(mod("lib/engineeringAgentGitHubRead.ts"), {
 
 const { readAmuxDmT2MergeLanePulls } = await import(mod("lib/amux/dmT2MergeService.ts"));
 
+// Every approval shares one updatedAt to start with: the tie's id order must never trap one.
 const approval = (index) => ({
   settlementId: `s-${String(index).padStart(2, "0")}`, taskId: `t-${index}`, attemptId: `a-${index}`,
   bindingId: `b-${index}`, prNumber: 1000 + index, headRef: `agent/engineering/${700 + index}`,
-  approvedHeadSha: HEAD, approvedDiffDigest: DIFF, decidedAt: new Date(), visited: 0,
+  approvedHeadSha: HEAD, approvedDiffDigest: DIFF, decidedAt: new Date(), updatedAt: 0,
 });
-const change = (good) => async (prNumber) => ({ state: "open", baseRef: "develop",
-  headRef: `agent/engineering/${700 + prNumber - 1000}`, headSha: HEAD,
-  diffDigest: good.has(prNumber) ? DIFF : "e".repeat(64), changedFiles: ["components/X.tsx"] });
+const github = (behaviour) => {
+  const checked = [];
+  return {
+    checked,
+    change: async (prNumber) => {
+      checked.push(prNumber);
+      const kind = behaviour(prNumber);
+      if (kind === "throw") throw new Error("http_error");
+      return { state: "open", baseRef: "develop", headRef: `agent/engineering/${700 + prNumber - 1000}`,
+        headSha: HEAD, diffDigest: kind === "good" ? DIFF : "e".repeat(64), changedFiles: ["components/X.tsx"] };
+    },
+  };
+};
 
-// Eleven approvals that stay unmergeable ahead of one that holds: it is listed
-// within the rounds a full turn takes (ceil(12 / 5) = 3), and again a turn later.
-rows = Array.from({ length: 12 }, (_, index) => approval(index));
-clock = 0;
-statements = [];
-const good = new Set([1011]);
-const rounds = [];
-for (let round = 0; round < 6; round += 1) {
-  rounds.push((await readAmuxDmT2MergeLanePulls(ON, { change: change(good) })).map((entry) => entry.number));
-  // Every approval is looked at within the first full turn.
-  if (round === 2) assert.ok(rows.every((row) => row.visited > 0), JSON.stringify(rows.map((row) => row.visited)));
+// N approvals are each checked exactly once in N rounds, one per round.
+{
+  const N = 9;
+  rows = Array.from({ length: N }, (_, index) => approval(index));
+  statements = [];
+  const gh = github(() => "changed");
+  for (let round = 0; round < N; round += 1) {
+    assert.deepEqual(await readAmuxDmT2MergeLanePulls(ON, { change: gh.change }), []);
+  }
+  assert.equal(gh.checked.length, N);
+  assert.equal(new Set(gh.checked).size, N, `each once: ${JSON.stringify(gh.checked)}`);
+  // Per round: the switches, one approval, its one visit -- five calls with setup and fence.
+  assert.deepEqual(statements.slice(0, 3), ["switches", "approvals:1", "visit"]);
+  assert.equal(statements.filter((entry) => entry === "visit").length, N);
 }
-const firstListed = rounds.findIndex((listed) => listed.includes(1011));
-assert.ok(firstListed >= 0 && firstListed < 3, `listed in round ${firstListed}: ${JSON.stringify(rounds)}`);
-assert.ok(rounds.slice(firstListed + 1).some((listed) => listed.includes(1011)), "listed again a turn later");
-assert.ok(rounds.every((listed) => listed.every((number) => number === 1011)), "the unmergeable ones are never listed");
-// Each round: the switches, five approvals and one visit of exactly those -- within the boundary's five calls with setup and fence.
-assert.deepEqual(statements.slice(0, 3), ["switches", "approvals", "visit"]);
-assert.equal(statements.filter((entry) => entry === "visit").length, 6);
 
-// Off, or nothing approved: no visit is written.
-statements = [];
-assert.deepEqual(await readAmuxDmT2MergeLanePulls({}, { change: change(good) }), []);
-rows = [];
-assert.deepEqual(await readAmuxDmT2MergeLanePulls(ON, { change: change(good) }), []);
-assert.deepEqual(statements, ["switches", "approvals"]);
+// Approvals whose read fails every time, ahead of one that holds, never hold it up.
+{
+  rows = Array.from({ length: 6 }, (_, index) => approval(index));
+  statements = [];
+  const gh = github((prNumber) => prNumber === 1005 ? "good" : "throw");
+  const listed = [];
+  for (let round = 0; round < 12; round += 1) {
+    listed.push((await readAmuxDmT2MergeLanePulls(ON, { change: gh.change })).map((entry) => entry.number));
+  }
+  assert.deepEqual(listed, [[], [], [], [], [], [1005], [], [], [], [], [], [1005]],
+    "listed on its turn, and again a turn later; the failing ones never");
+}
+
+// Off, or nothing approved: no visit is written and nothing is read.
+{
+  statements = [];
+  const gh = github(() => "good");
+  assert.deepEqual(await readAmuxDmT2MergeLanePulls({}, { change: gh.change }), []);
+  rows = [];
+  assert.deepEqual(await readAmuxDmT2MergeLanePulls(ON, { change: gh.change }), []);
+  assert.deepEqual(statements, ["switches", "approvals:1"]);
+  assert.deepEqual(gh.checked, []);
+}

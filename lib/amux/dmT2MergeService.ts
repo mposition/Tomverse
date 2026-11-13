@@ -35,64 +35,53 @@ import { readEngineeringAgentPullChange } from "@/lib/engineeringAgentGitHubRead
  */
 
 export const AMUX_DM_T2_MERGE_READY_ACTION = "amux.dm_t2_merge.ready_requested";
-/** Approvals the lane hears of per state read: each costs a few GitHub reads inside the lane's 50 s call. */
-const LANE_LIST_LIMIT = 5;
-/** The GitHub reads of the lane's list start within this much of the call, well inside its 50 s budget. */
-const LANE_LIST_READ_BUDGET_MS = 15_000;
-
 type Env = Readonly<Record<string, string | undefined>>;
 
 /**
- * Records that approvals were looked at, one statement: both readers take the
- * least recently visited first (readAmuxDmT2MergeApprovals orders by
- * updatedAt), so a visited one goes to the back. Nothing else on the row moves.
+ * Records that one approval was looked at, one statement. Both readers take
+ * the least recently visited first (readAmuxDmT2MergeApprovals orders by
+ * updatedAt, then id); the visit is written on the database clock and always
+ * after every other approval's, so the visited one goes to the very back even
+ * when two would share a millisecond. Nothing else on the row moves.
  */
-async function recordAmuxDmT2MergeVisits(tx: Prisma.TransactionClient, settlementIds: string[]) {
+async function recordAmuxDmT2MergeVisit(tx: Prisma.TransactionClient, settlementId: string) {
   await tx.$executeRaw`
-    UPDATE "AmuxDmOwnerSettlement" SET "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
-    WHERE "id" = ANY(${settlementIds}) AND "state" = 'applied'`;
+    UPDATE "AmuxDmOwnerSettlement" SET "updatedAt" = GREATEST(clock_timestamp() AT TIME ZONE 'UTC',
+      (SELECT max(o."updatedAt") FROM "AmuxDmOwnerSettlement" o WHERE o."state" = 'applied')
+        + interval '1 millisecond')
+    WHERE "id" = ${settlementId} AND "state" = 'applied'`;
 }
 
 /**
- * The pull requests the merge lane may take although their branch is the
- * engineering agent's: each at the one head and branch approved, its change
- * read again from GitHub now (review r-20261113-134019-5d8f82) -- diff digest
- * the approved one, every path on the allow list
- * (amuxDmT2MergeChangeVerdict). A pull request a person made ready, or whose
- * merge base moved with develop, is listed only while that still holds; one
- * that cannot be read is not listed. Empty while the switch is off or the
- * kill switch is not off. The GitHub reads run outside the transaction, at
- * most LANE_LIST_LIMIT of them, within the lane's state call.
- *
- * Every approval read is recorded as visited in the same transaction, as the
- * ready step records its pick (review r-20261113-135805-1535ac): the next
- * state read starts with the ones least recently looked at, so approvals that
- * stay unmergeable -- a changed diff, a failed check, a conflict -- never hide
- * the ones behind them for more than a few rounds.
+ * The pull request the merge lane may take this round although its branch is
+ * the engineering agent's: one approval per state read (review
+ * r-20261113-140634-2ede9b; the lane merges at most one pull request a round
+ * anyway). The least recently visited approval that still holds in the
+ * database is picked and recorded as visited in the same transaction, then
+ * its change is read again from GitHub (review r-20261113-134019-5d8f82):
+ * listed only while its diff digest is the approved one and every path is on
+ * the allow list (amuxDmT2MergeChangeVerdict). A change that differs or cannot
+ * be read is not listed and has had its turn, so N approvals are each looked
+ * at once in N rounds and none holds up the rest. Empty while the switch is
+ * off or the kill switch is not off.
  */
 export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
   change?: (prNumber: number) => Promise<AmuxDmT2MergeChangeNow>;
 } = {}) {
   if (!amuxDmT2MergeEnabled(env)) return [];
-  const rows = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeLaneRead, async (tx) => {
-    if ((await readDecisionMakerSwitches(tx)).killSwitch !== false) return [];
-    const read = await readAmuxDmT2MergeApprovals(tx, { limit: LANE_LIST_LIMIT });
-    if (read.length > 0) await recordAmuxDmT2MergeVisits(tx, read.map((row) => row.settlementId));
-    return read;
+  const row = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeLaneRead, async (tx) => {
+    if ((await readDecisionMakerSwitches(tx)).killSwitch !== false) return null;
+    const [next] = await readAmuxDmT2MergeApprovals(tx, { limit: 1 });
+    if (next) await recordAmuxDmT2MergeVisit(tx, next.settlementId);
+    return next ?? null;
   });
+  if (!row) return [];
   const change = deps.change ?? ((prNumber: number) => readEngineeringAgentPullChange(prNumber));
-  const listed: Array<{ number: number; headSha: string; headRef: string }> = [];
-  // What is not read in time is not listed this round; the lane asks again in ten minutes.
-  const stopAt = Date.now() + LANE_LIST_READ_BUDGET_MS;
-  for (const row of rows) {
-    if (Date.now() > stopAt) break;
-    const now = await change(row.prNumber).catch(() => null);
-    if (now === null) continue;
-    const held = amuxDmT2MergeChangeVerdict({ change: now, approved: { prNumber: row.prNumber,
-      headRef: row.headRef, approvedHeadSha: row.approvedHeadSha, approvedDiffDigest: row.approvedDiffDigest } });
-    if (held.holds) listed.push({ number: row.prNumber, headSha: row.approvedHeadSha, headRef: row.headRef });
-  }
-  return listed;
+  const now = await change(row.prNumber).catch(() => null);
+  if (now === null) return [];
+  const held = amuxDmT2MergeChangeVerdict({ change: now, approved: { prNumber: row.prNumber,
+    headRef: row.headRef, approvedHeadSha: row.approvedHeadSha, approvedDiffDigest: row.approvedDiffDigest } });
+  return held.holds ? [{ number: row.prNumber, headSha: row.approvedHeadSha, headRef: row.headRef }] : [];
 }
 
 /** The observer's read of a merged binding's pull request; null while the switch is off. */
@@ -123,9 +112,14 @@ export type AmuxDmT2MergeReadyOutcome =
   | { outcome: "off" | "none" | "no_room" }
   | { outcome: "held"; settlementId: string; prNumber: number }
   | { outcome: "skipped"; settlementId: string; prNumber: number; reason: string }
-  | { outcome: "already_ready" | "marked_ready"; settlementId: string; prNumber: number }
-  /** The write's answer is unknown: nothing is retried now; a later round reads the pull request first. */
-  | { outcome: "write_unknown"; settlementId: string; prNumber: number; code: string };
+  | { outcome: "already_ready"; settlementId: string; prNumber: number }
+  /** Marked ready at this head: CI admission reserves its runners as for a release. */
+  | { outcome: "marked_ready"; settlementId: string; prNumber: number; headSha: string }
+  /**
+   * The write's answer is unknown: nothing is retried now; a later round reads
+   * the pull request first. Reserved as if it had happened.
+   */
+  | { outcome: "write_unknown"; settlementId: string; prNumber: number; headSha: string; code: string };
 
 const failureCode = (error: unknown) => (error instanceof Error ? error.message : "unknown").slice(0, 80);
 
@@ -157,7 +151,7 @@ export async function runAmuxDmT2MergeReadyStep(input: {
   const row = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeReadyPick, async (tx) => {
     const [next] = await readAmuxDmT2MergeApprovals(tx, { limit: 1, prNumbers: drafts.map((pull) => pull.number) });
     if (!next) return null;
-    await recordAmuxDmT2MergeVisits(tx, [next.settlementId]);
+    await recordAmuxDmT2MergeVisit(tx, next.settlementId);
     return next;
   });
   if (!row) return { outcome: "none" };
@@ -202,7 +196,7 @@ export async function runAmuxDmT2MergeReadyStep(input: {
   try {
     await input.ports.markReady(now!.pull);
   } catch (error) {
-    return { outcome: "write_unknown", ...at, code: failureCode(error) };
+    return { outcome: "write_unknown", ...at, headSha: row.approvedHeadSha, code: failureCode(error) };
   }
-  return { outcome: "marked_ready", ...at };
+  return { outcome: "marked_ready", ...at, headSha: row.approvedHeadSha };
 }
