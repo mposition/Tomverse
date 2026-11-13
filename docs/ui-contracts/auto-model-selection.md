@@ -112,6 +112,14 @@ the device's normal permission flow. Changing accounts, models or the selected
 conversation prevents a late positive decision from sharing coordinates.
 Confirmed unsupported routes use the saved-turn location lookup once.
 
+When the LLM Router was asked and failed -- it timed out, errored or answered
+with nothing usable -- the turn is answered by the requested model (normally
+the default) if it is eligible, not by the rule's cheapest fit. The rule cannot
+see whether the message asks for a file or carries a photo, and on 2026-11-13 a
+timed-out Router left a two-photo PDF request with a model that had no file
+tools. The reason stays `fallback_order`. A turn the Router never looked at
+(no Router model, too few candidates, budget) keeps the rule's choice.
+
 Guest Chat follows a narrower one-turn contract. Entry and the visible default
 remain rowless and free. Immediately before Send, the client obtains a fresh
 opaque authority bound to the signed Guest principal and exact activated
