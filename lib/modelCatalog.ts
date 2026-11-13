@@ -81,13 +81,23 @@ export const judgeCoding = (row: CodingCatalogRow): CodingAdmission =>
     creditFloor: codingCreditFloor,
   });
 
+/** Every confirmed billing terms row; the core keeps the latest per provider model. */
+export const loadImageBillingTermRows = (
+  client: Pick<Prisma.TransactionClient, "imageModelBillingTerms"> = prisma
+) =>
+  client.imageModelBillingTerms.findMany({
+    select: { id: true, provider: true, apiModelId: true, terms: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+
 export const loadImageCatalog = async (now = new Date()): Promise<ResolvedImageCatalog> => {
-  const [rows, revisions] = await Promise.all([
+  const [rows, revisions, billingTerms] = await Promise.all([
     prisma.modelCatalogEntry.findMany({ where: { category: "image" } }),
     prisma.modelCatalogPriceRevision.findMany({
       where: { category: "image", effectiveFrom: { lte: now } },
       orderBy: [{ effectiveFrom: "asc" }, { createdAt: "asc" }],
     }),
+    loadImageBillingTermRows(),
   ]);
   return resolveImageCatalog({
     seed: IMAGE_MODEL_REGISTRY,
@@ -95,6 +105,7 @@ export const loadImageCatalog = async (now = new Date()): Promise<ResolvedImageC
     revisions,
     now,
     judge: judgeImage,
+    billingTerms,
   });
 };
 

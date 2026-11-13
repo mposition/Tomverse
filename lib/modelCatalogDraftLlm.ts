@@ -20,7 +20,12 @@ import {
   IMAGE_PROMPT_BUDGET_MICRO_USD,
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
 } from "@/lib/imageGenerationPricing";
-import { imageThinkingCapMinimumMicroUsd } from "@/lib/imageModelRegistry";
+import {
+  billingTermsApplyTo,
+  type ConfirmedImageBillingTerms,
+  confirmedImageOutputTokens,
+  imageThinkingCapMinimumMicroUsd,
+} from "@/lib/imageModelRegistry";
 import {
   codingProfileSchema,
   imagePriceListSchema,
@@ -203,6 +208,8 @@ export type CatalogDraftLlm = {
     provider: string;
     apiModelId: string;
     pages: readonly DraftPage[];
+    /** The operator's confirmed billing terms for this model, if any. */
+    billingTerms?: ConfirmedImageBillingTerms | null;
   }) => Promise<unknown>;
   draftCodingProfile: (input: {
     provider: string;
@@ -238,12 +245,21 @@ export const imageOptionCostMicroUsd = (
   return Math.ceil(Math.max(stated ?? 0, fromTokens ?? 0));
 };
 
-/** Turn the model's image answer into a price revision draft, or refuse it. */
+/**
+ * Turn the model's image answer into a price revision draft, or refuse it.
+ *
+ * `confirmed` is the billing terms an operator confirmed for this model from
+ * a measurement (ImageModelBillingTerms): its thinking cap, and for a model
+ * billed per image output token, the measured tokens per option where the
+ * pages give the rate but no count. The larger of a stated and a measured
+ * count stands; code multiplies.
+ */
 export const imageDraftFromAnswer = (
   answer: unknown,
   sources: readonly string[],
   apiModelId: string,
-  provider?: string
+  provider?: string,
+  confirmed?: ConfirmedImageBillingTerms | null
 ): unknown => {
   const value = answer as {
     options?: { quality: string; size: string; outputCostMicroUsd?: number | null; outputTokens?: number | null }[];
@@ -253,14 +269,45 @@ export const imageDraftFromAnswer = (
   } | null;
   const stated = typeof value?.thinkingCapMicroUsd === "number" ? value.thinkingCapMicroUsd : null;
   // Where the code already knows what this model's request spends on thinking
-  // (none for a per-image billed model, the pinned surcharge on fal), that is
-  // the cap; the pages rarely state it and the model is told to leave it null.
-  const known = provider === undefined ? null : imageThinkingCapMinimumMicroUsd(provider, apiModelId);
+  // (none for a per-image billed model, the pinned surcharge on fal, the
+  // measured bound an operator confirmed), that is the cap; the pages rarely
+  // state it and the model is told to leave it null.
+  const known = provider === undefined ? null : imageThinkingCapMinimumMicroUsd(provider, apiModelId, confirmed);
   const thinkingCap = known === null ? stated : Math.max(known, stated ?? 0);
+  const measured = provider === undefined ? null : billingTermsApplyTo(provider, confirmed);
+  const measuredTokens = measured?.kind === "tokens_per_image" ? measured.tokens : [];
   const rate = positive(value?.outputUsdPerMTok);
-  const options = (Array.isArray(value?.options) ? value.options : []).flatMap((option) => {
-    const cost = imageOptionCostMicroUsd(option.outputCostMicroUsd, option.outputTokens, rate);
-    return cost === null ? [] : [{ quality: option.quality, size: option.size, cost }];
+  // What one image of this option costs by the confirmed measurement: its own
+  // count on OpenAI, one count for every option on Google (all at the 1K
+  // tier), at the higher of the rate the measurement was confirmed with and
+  // the rate these pages state now -- a rate raised since the measurement
+  // prices the measured tokens at the new rate. The judge refuses a price
+  // below the confirmed one (price_below_measured_cost), so the draft never
+  // proposes one.
+  const measuredCost = (quality: string, size: string): number | null => {
+    if (measured?.kind !== "measured_output_limit" && measured?.kind !== "tokens_per_image") return null;
+    const tokens =
+      measured.kind === "measured_output_limit"
+        ? measured.imageTokensPerImage
+        : confirmedImageOutputTokens(provider, confirmed, quality, size);
+    return tokens === null ? null : Math.ceil(tokens * Math.max(measured.imageOutputUsdPerMTok, rate ?? 0));
+  };
+  const answered = Array.isArray(value?.options) ? value.options : [];
+  const keyOf = (option: { quality: string; size: string }) => `${option.quality}|${option.size}`;
+  const answeredKeys = new Set(answered.map(keyOf));
+  const candidates = [
+    ...answered,
+    // Options only the measurement priced: no per-image price on the pages, and no count there either.
+    ...measuredTokens
+      .filter((entry) => !answeredKeys.has(keyOf(entry)))
+      .map((entry) => ({ quality: entry.quality, size: entry.size, outputCostMicroUsd: null, outputTokens: null })),
+  ];
+  const options = candidates.flatMap((option) => {
+    // The larger of what the pages state and what the measurement found.
+    const documented = imageOptionCostMicroUsd(option.outputCostMicroUsd, option.outputTokens, rate);
+    const fromMeasurement = measuredCost(option.quality, option.size);
+    if (documented === null && fromMeasurement === null) return [];
+    return [{ quality: option.quality, size: option.size, cost: Math.max(documented ?? 0, fromMeasurement ?? 0) }];
   });
   if (options.length === 0) {
     const reason = typeof value?.noPriceReason === "string" ? value.noPriceReason.replace(/\s+/g, " ").trim().slice(0, 300) : "";
@@ -384,8 +431,14 @@ export const catalogDraftLlmFromEnv = async (
   };
 
   return {
-    draftImagePrices: async ({ provider, apiModelId, pages }) =>
-      imageDraftFromAnswer(await call("image", provider, apiModelId, pages), pages.map((p) => p.url), apiModelId, provider),
+    draftImagePrices: async ({ provider, apiModelId, pages, billingTerms }) =>
+      imageDraftFromAnswer(
+        await call("image", provider, apiModelId, pages),
+        pages.map((p) => p.url),
+        apiModelId,
+        provider,
+        billingTerms
+      ),
     draftCodingProfile: async ({ provider, apiModelId, pages }) =>
       codingDraftFromAnswer(await call("coding", provider, apiModelId, pages), provider, apiModelId, pages.map((p) => p.url), codingCreditFloor),
   };

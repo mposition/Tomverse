@@ -120,6 +120,7 @@ export type ReasonMessage =
   | { key: "priceUnverified" }
   | { key: "unofficialSource"; host: string }
   | { key: "creditsBelowFloor"; quality: string; size: string }
+  | { key: "priceBelowMeasured"; quality: string; size: string }
   | { key: "worstCaseUnbounded" }
   | { key: "thinkingCapBelowMinimum"; minimum: string }
   | { key: "providerBudgetMissing" }
@@ -179,6 +180,10 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       if (/^\d+$/.test(tail)) return { key: "codingWeightBelowFloor", floor: Number(tail) };
       const [quality = "", size = ""] = tail.split("/");
       return { key: "creditsBelowFloor", quality, size };
+    }
+    case "price_below_measured_cost": {
+      const [quality = "", size = ""] = tail.split("/");
+      return { key: "priceBelowMeasured", quality, size };
     }
     case "worst_case_cost_unbounded":
       return { key: "worstCaseUnbounded" };
@@ -247,6 +252,18 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "unknown", code };
   }
 };
+
+/**
+ * Whether a refusal is one a billing measurement can answer: no per-image
+ * price in the documentation, or no bound on what thinking costs. Only for a
+ * provider the measurement has a method for.
+ */
+export const suggestsMeasurement = (provider: string, codes: readonly string[], detail = "") =>
+  ["google", "openai", "qwen"].includes(provider) &&
+  codes.some((code) => {
+    const key = reasonMessage(code, detail).key;
+    return key === "worstCaseUnbounded" || key === "noPriceFound";
+  });
 
 /**
  * The admin session check's own 404 ("Not found."), as opposed to a
