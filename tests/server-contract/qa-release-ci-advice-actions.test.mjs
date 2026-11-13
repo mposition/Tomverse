@@ -5,7 +5,7 @@ import test, { mock } from "node:test";
 
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const id = "a".repeat(64);
-let role, recent, item, calls, reserved, ambiguous;
+let role, recent, item, calls, rates, reserved, ambiguous;
 const submissions = new Map();
 class ReauthenticationError extends Error {}
 mock.module("next-auth/next", { namedExports: { getServerSession: async () => role ? { user: { id: "operator" } } : null } });
@@ -18,7 +18,7 @@ mock.module(mod("lib/adminReauthentication.ts"), { namedExports: {
 mock.module(mod("lib/adminApproval.ts"), { namedExports: { adminApprovalErrorResponse: () => null } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
   readLimitedJson: async (request, _limit, schema) => schema.parse(await request.json()),
-  consumeApiRateLimit: async () => {}, apiSecurityResponse: (error) => error.name === "ZodError" ? Response.json({ error: "invalid_request" }, { status: 400 }) : null,
+  consumeApiRateLimit: async (_request, _user, key, limit) => { rates.push({ key, limit }); }, apiSecurityResponse: (error) => error.name === "ZodError" ? Response.json({ error: "invalid_request" }, { status: 400 }) : null,
 } });
 mock.module(mod("lib/publicUrl.ts"), { namedExports: { getPublicAppOrigin: () => "https://app.example.test" } });
 mock.module(mod("lib/qaReleaseCiAdviceStore.ts"), { namedExports: {
@@ -36,7 +36,7 @@ const { POST } = await import(mod("app/api/admin/qa-release/ci-advice/[suggestio
 const { AMUX_V4_IDEA_SUBMISSION_ENV: writeKey, AMUX_V4_IDEA_READBACK_ENV: readKey } = await import(mod("lib/amux/ideaSubmissionCore.ts"));
 const oldWrite = process.env[writeKey], oldRead = process.env[readKey];
 test.beforeEach(() => {
-  role = "owner"; recent = true; calls = []; reserved = true; ambiguous = false; submissions.clear();
+  role = "owner"; recent = true; calls = []; rates = []; reserved = true; ambiguous = false; submissions.clear();
   item = { id, title: "Reuse CI fixtures", why: "Measured six-minute check", change: "Reuse the existing fixtures", savesMinutes: 2,
     status: "open", createdAt: "2026-11-13T00:00:00.000Z", at: null, amuxIdeaId: null };
   process.env[writeKey] = "enabled"; process.env[readKey] = "enabled";
@@ -60,6 +60,7 @@ test("only recent owner or ops can complete or dismiss, while sending remains ow
   const response = await act("complete");
   assert.equal(response.status, 200); assert.match(response.headers.get("cache-control"), /no-store/);
   assert.deepEqual(calls, ["completed"]);
+  assert.deepEqual(rates, [{ key: "admin-ci-advice-close", limit: { minute: 60, day: 500 } }]);
   role = "owner"; assert.equal((await act("dismiss")).status, 200);
   assert.deepEqual(calls, ["completed", "dismissed"]);
 });
@@ -84,4 +85,5 @@ test("an unknown send is finished by deterministic read-back without a second ex
   ambiguous = false;
   assert.equal((await act("send")).status, 200); assert.equal(item.amuxIdeaId, "idea-one");
   assert.equal((await act("send")).status, 200); assert.deepEqual(calls, ["submit", "sent"]);
+  assert.ok(rates.every((entry) => entry.key === "admin-ci-advice-send" && entry.limit.minute === 5 && entry.limit.day === 50));
 });

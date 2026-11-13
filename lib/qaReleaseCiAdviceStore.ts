@@ -52,14 +52,18 @@ async function readItems(db: Db, latest: QaReleaseCiAdviceRecord | null) {
 }
 
 /** Called under the shared audit lock by generation and operator actions. */
-export async function ensureQaReleaseCiAdviceItems(tx: Prisma.TransactionClient): Promise<CiAdviceItem[]> {
+async function ensureQaReleaseCiAdviceItems(tx: Prisma.TransactionClient): Promise<void> {
   const latest = await readLatest(tx);
-  const items = await readItems(tx, latest);
   for (const item of itemsFrom(latest)) {
     const key = itemKey(item.id), value = JSON.stringify(item);
     await tx.appSetting.upsert({ where: { key }, create: { key, value }, update: {} });
   }
-  return items;
+}
+
+async function readStoredItem(db: Db, id: string): Promise<CiAdviceItem | null> {
+  const row = await db.appSetting.findUnique({ where: { key: itemKey(id) }, select: { value: true } });
+  const item = row ? parseCiAdviceItem(row.value) : null;
+  return item?.id === id ? item : null;
 }
 
 /** Preserve pending items and all decisions when the model produces its next round. */
@@ -95,7 +99,8 @@ async function updateItem(tx: Prisma.TransactionClient, input: Operator, item: C
 export async function changeCiAdviceStatus(input: Operator & { id: string; status: "completed" | "dismissed" | "sent"; ideaId?: string }) {
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
-    const item = (await ensureQaReleaseCiAdviceItems(tx)).find((row) => row.id === input.id);
+    await ensureQaReleaseCiAdviceItems(tx);
+    const item = await readStoredItem(tx, input.id);
     if (!item) return null;
     if (item.status === input.status) return item;
     if (input.status === "sent" ? item.status !== "sending_to_amux" || !input.ideaId : item.status !== "open") return null;
@@ -108,7 +113,8 @@ export async function changeCiAdviceStatus(input: Operator & { id: string; statu
 export async function reserveCiAdviceSend(input: Operator & { id: string }): Promise<CiAdviceItem | null> {
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
-    const item = (await ensureQaReleaseCiAdviceItems(tx)).find((row) => row.id === input.id);
+    await ensureQaReleaseCiAdviceItems(tx);
+    const item = await readStoredItem(tx, input.id);
     if (!item || (item.status !== "open" && item.status !== "sending_to_amux")) return null;
     if (item.status === "sending_to_amux") return item;
     const next: CiAdviceItem = { ...item, status: "sending_to_amux", at: new Date().toISOString() };
@@ -118,5 +124,10 @@ export async function reserveCiAdviceSend(input: Operator & { id: string }): Pro
 }
 
 export async function readCiAdviceItem(id: string) {
-  return (await readItems(prisma, await readLatest(prisma))).find((item) => item.id === id) ?? null;
+  const existing = await prisma.appSetting.findUnique({ where: { key: itemKey(id) }, select: { value: true } });
+  if (existing) {
+    const item = parseCiAdviceItem(existing.value);
+    return item?.id === id ? item : null;
+  }
+  return itemsFrom(await readLatest(prisma)).find((item) => item.id === id) ?? null;
 }

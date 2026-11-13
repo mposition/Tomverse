@@ -18,7 +18,6 @@ import { CI_ADVICE_ID, ciAdviceWorkBrief } from "@/lib/qaReleaseCiAdviceActionsC
 import { changeCiAdviceStatus, readCiAdviceItem, reserveCiAdviceSend } from "@/lib/qaReleaseCiAdviceStore";
 import { suggestionSendRequestId } from "@/lib/productResearchScoutCore";
 import { sendScoutSuggestion } from "@/lib/productResearchScoutSend";
-import { getPublicAppOrigin } from "@/lib/publicUrl";
 
 const bodySchema = z.object({ action: z.enum(["complete", "dismiss", "send"]) }).strict();
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
@@ -35,7 +34,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
     if (!CI_ADVICE_ID.test(id)) return json({ error: "invalid_id" }, 400);
     const item = await readCiAdviceItem(id);
     if (!item) return json({ error: "not_found" }, 404);
-    await consumeApiRateLimit(request, session.user.id, "admin-ci-advice-action", { minute: 5, day: 50 });
+    await consumeApiRateLimit(request, session.user.id, `admin-ci-advice-${body.action === "send" ? "send" : "close"}`,
+      body.action === "send" ? { minute: 5, day: 50 } : { minute: 60, day: 500 });
     const operator = { session, request, id };
     if (body.action !== "send") {
       const updated = await changeCiAdviceStatus({ ...operator, status: body.action === "complete" ? "completed" : "dismissed" });
@@ -45,7 +45,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
     if (!ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) ||
       !ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])) return json({ error: "amux_submission_disabled" }, 503);
     const path = await ideaSendPath({ session, request, requestId: suggestionSendRequestId(`qa-ci:${id}`),
-      idea: ciAdviceWorkBrief(item, getPublicAppOrigin(request)), sessionDisplay: "CI improvement suggestion" });
+      idea: ciAdviceWorkBrief(item), sessionDisplay: "CI improvement suggestion" });
     if (!path.ok) return json({ error: path.code }, path.status);
     if (!(await reserveCiAdviceSend(operator))) return json({ error: "suggestion_not_sendable" }, 409);
     const result = await sendScoutSuggestion({ readBack: path.readBack, submit: path.submit, isAlreadySeen: path.isAlreadySeen,

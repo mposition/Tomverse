@@ -189,6 +189,8 @@ AMUX-send history across model rounds. Owner and ops can complete or dismiss
 after recent authentication; sending uses the existing owner-only AMUX intake.
 Every item offers the same stored implementation brief for copying. These
 controls do not add CI suggestions to the Daily Agent's sources.
+Closed suggestions stay behind an expandable history control showing at most
+the newest 20; earlier decisions remain stored.
 
 **Agent digests** is the common area where agent teams' daily digests are
 read (`docs/policy/qa-release-agent.md` section 4), one section per agent

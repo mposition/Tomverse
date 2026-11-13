@@ -5,10 +5,10 @@ import test, { mock } from "node:test";
 
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const settings = new Map();
-let audits, rejectAudit, tail = Promise.resolve();
+let audits, rejectAudit, scans, tail = Promise.resolve();
 const tx = { appSetting: {
   findUnique: async ({ where }) => settings.has(where.key) ? { key: where.key, value: settings.get(where.key) } : null,
-  findMany: async ({ where }) => [...settings].filter(([key]) => key.startsWith(where.key.startsWith)).map(([key, value]) => ({ key, value })),
+  findMany: async ({ where }) => { scans += 1; return [...settings].filter(([key]) => key.startsWith(where.key.startsWith)).map(([key, value]) => ({ key, value })); },
   upsert: async ({ where, create, update }) => { if (!settings.has(where.key)) settings.set(where.key, create.value); else if (update.value !== undefined) settings.set(where.key, update.value); },
   update: async ({ where, data }) => { assert.equal(settings.has(where.key), true); settings.set(where.key, data.value); },
 } };
@@ -36,7 +36,7 @@ const NOW = "2026-11-13T08:32:00.000Z";
 const suggestion = (title) => ({ title, why: "A measured six-minute check.", change: "Reuse existing fixtures.", savesMinutes: 2 });
 const owner = { session: { user: { id: "operator" } }, request: new Request("https://app.example.test/admin/release") };
 const seed = (list) => settings.set("qa_release.ci_advice", JSON.stringify({ askedAt: NOW, answeredAt: NOW, suggestions: list }));
-test.beforeEach(() => { settings.clear(); audits = []; rejectAudit = false; });
+test.beforeEach(() => { settings.clear(); audits = []; rejectAudit = false; scans = 0; });
 
 test("legacy suggestions receive stable IDs and duplicate copies retain one durable item", async () => {
   const first = suggestion("One"); seed([first, first]);
@@ -44,8 +44,8 @@ test("legacy suggestions receive stable IDs and duplicate copies retain one dura
   assert.equal(view.suggestions.length, 1);
   assert.equal(view.suggestions[0].id, ciAdviceId(first));
   assert.equal(settings.size, 1, "reading must not write");
-  assert.match(ciAdviceWorkBrief(view.suggestions[0], "https://app.example.test"), /preserve security, billing and audit coverage/);
-  assert.match(ciAdviceWorkBrief(view.suggestions[0], "https://app.example.test"), /develop draft PR with ci:hold/);
+  assert.match(ciAdviceWorkBrief(view.suggestions[0]), /preserve security, billing and audit coverage/);
+  assert.match(ciAdviceWorkBrief(view.suggestions[0]), /develop draft PR with ci:hold/);
 });
 
 test("new model rounds and failed asks preserve pending items and operator decisions", async () => {
@@ -74,6 +74,7 @@ test("a concurrent completion and dismissal cannot overwrite each other or dupli
 test("AMUX reservations survive subsequent rounds and block closing an unresolved send", async () => {
   const first = suggestion("One"), id = ciAdviceId(first); seed([first]);
   await reserveCiAdviceSend({ ...owner, id });
+  assert.equal(scans, 0, "an action must not scan every historical item");
   await recordQaReleaseCiAdvice("2026-11-14T08:32:00.000Z", [first]);
   assert.equal((await reserveCiAdviceSend({ ...owner, id })).status, "sending_to_amux");
   assert.equal(await changeCiAdviceStatus({ ...owner, id, status: "completed" }), null);

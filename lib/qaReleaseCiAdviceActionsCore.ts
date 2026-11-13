@@ -23,8 +23,8 @@ export function parseCiAdviceItem(value: string): CiAdviceItem | null {
 }
 
 /** Copied locally and sent through AMUX intake without changing its contents. */
-export const ciAdviceWorkBrief = (item: CiAdviceItem, origin: string) => [
+export const ciAdviceWorkBrief = (item: CiAdviceItem) => [
   "# CI improvement", "", item.title, "", "## Evidence", item.why, "", "## Requested change", item.change, "",
-  `Admin source: ${origin}/admin/release?tab=qa#ci-advice-${item.id}`,
+  `Tomverse Admin source: /admin/release?tab=qa#ci-advice-${item.id}`,
   "", "Done when: verify the current develop code, implement the smallest useful change, preserve security, billing and audit coverage, run relevant checks, and open an independent develop draft PR with ci:hold. Do not merge, deploy, release CI or mark this suggestion completed automatically.",
 ].join("\n");

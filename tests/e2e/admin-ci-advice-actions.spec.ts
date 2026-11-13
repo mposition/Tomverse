@@ -10,7 +10,7 @@ test("CI suggestions expose every action and copy the same implementation brief"
     await route.fulfill({ json: { item: { id, status: action === "complete" ? "completed" : action === "dismiss" ? "dismissed" : "sent", at: "2026-11-13T09:00:00.000Z", amuxIdeaId: action === "send" ? "idea-fixture" : null } } });
   });
   await page.goto("/e2e/admin-console-fixture?view=ci-advice&locale=ko");
-  const first = page.getByTestId("qa-release-ci-advice-item").first();
+  const first = page.getByTestId("qa-release-ci-advice-item").filter({ hasText: "Reuse CI fixtures" });
   await expect(first.getByTestId("qa-release-ci-advice-complete")).toBeVisible();
   await expect(first.getByTestId("qa-release-ci-advice-dismiss")).toBeVisible();
   await expect(first.getByTestId("qa-release-ci-advice-send")).toBeVisible();
@@ -23,9 +23,13 @@ test("CI suggestions expose every action and copy the same implementation brief"
   await first.getByTestId("qa-release-ci-advice-complete").click();
   await expect.poll(() => posted.length).toBe(1);
   expect(posted[0]).toEqual({ id: "a".repeat(64), action: "complete" });
-  await page.getByTestId("qa-release-ci-advice-item").nth(1).getByTestId("qa-release-ci-advice-send").click();
+  await page.getByTestId("qa-release-ci-advice-history").click();
+  await expect(first.getByTestId("qa-release-ci-advice-status")).toContainText("완료");
+  const second = page.getByTestId("qa-release-ci-advice-item").filter({ hasText: "Review a queued outlier" });
+  await second.getByTestId("qa-release-ci-advice-send").click();
   await expect.poll(() => posted.length).toBe(2);
   expect(posted[1]).toEqual({ id: "b".repeat(64), action: "send" });
+  await expect(second.getByTestId("qa-release-ci-advice-status")).toContainText("AMUX로 보냄");
   await page.goto("/e2e/admin-console-fixture?view=ci-advice&locale=ko");
   await page.getByTestId("qa-release-ci-advice-dismiss").first().click();
   await expect.poll(() => posted.length).toBe(3);
