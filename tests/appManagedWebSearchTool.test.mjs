@@ -1,4 +1,4 @@
-import { appendRouterSearchEvidence, prepareRouterSearch } from "../lib/chatRouterPresearch.ts";
+import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuidance } from "../lib/chatRouterPresearch.ts";
 import { parseRouterSearchQueries } from "../lib/chatRouterSearchPlan.ts";
 import assert from "node:assert/strict";
 import test, { afterEach, beforeEach } from "node:test";
@@ -688,6 +688,27 @@ test("router presearch and dependent model queries share one cap, cache and sour
   assert.equal(config.session.snapshot().succeededRequestCount, 5);
 });
 
+test("source fidelity uses the same excerpts and a UTC instant for the requested local day", async () => {
+  const config = toolFor();
+  const asOf = new Date("2026-11-12T14:10:27.000Z");
+  for (const compactEvidence of [false, true]) {
+    const before = await presearch(config, { groundedAnswer: "lookup", compactEvidence });
+    const candidate = withGroundedSourceGuidance(before, true, asOf);
+    assert.ok(candidate);
+    assert.equal(candidate.evidence[0], before[0], "the original untrusted-evidence boundary is retained");
+    const packet = JSON.parse(before[1].text);
+    const sources = packet.sources ? Object.values(packet.sources) : packet.searches.flatMap(search => search.results);
+    for (const source of sources) {
+      assert.ok(candidate.evidence[1].text.includes(JSON.stringify(source)));
+      assert.ok(candidate.urls.includes(source.url));
+    }
+    const guidance = candidate.evidence.at(-1).text;
+    assert.match(guidance, /2026-11-12T14:10Z/);
+    assert.match(guidance, /\[\[cite:R1\]\]/);
+    assert.match(guidance, /from the excerpts/);
+  }
+});
+
 test("grounded answer guidance preserves source JSON and cannot displace evidence at the token limit", async () => {
   const config = toolFor();
   const result = await config.search({ query: "one" });
@@ -729,6 +750,7 @@ test("grounded answer guidance preserves source JSON and cannot displace evidenc
   }
   const atLimit = await atSize(fits);
   assert.equal(atLimit.length, 2);
+  assert.equal(withGroundedSourceGuidance(atLimit, true), undefined, "baseline evidence remains usable when citation guidance will not fit");
   for (const mode of ["lookup", "full"]) {
     assert.deepEqual(await atSize(fits, mode), atLimit);
     assert.deepEqual(await atSize(tooLarge, mode), []);
