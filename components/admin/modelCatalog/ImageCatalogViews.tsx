@@ -28,6 +28,7 @@ import {
   priceRange,
   reasonMessage,
   type ReasonMessage,
+  suggestsMeasurement,
 } from "@/lib/adminModelCatalogFlow";
 import type { AdminTone } from "@/lib/adminUiCore";
 
@@ -441,9 +442,12 @@ export function ImageModelDetail({
   onAction,
   onHold,
   onRename,
+  onMeasure,
 }: {
   m: CatalogMessages;
   item: ImageCatalogItem;
+  /** Opens the billing measurement for this model; offered where a measurement can answer the refusal. */
+  onMeasure?: () => void;
   edits: Readonly<Record<string, string>>;
   /** Elapsed time while a draft request for this model runs. */
   drafting: string | null;
@@ -477,6 +481,13 @@ export function ImageModelDetail({
   const editedCount = draft ? draft.prices.filter((price) => edits[optionKey(price)] !== undefined && Number(edits[optionKey(price)]) !== price.credits).length : 0;
   const serving = item.served?.disabledReason === null;
   const nextAction = imageNextAction(stage);
+  // "No reasoning cost cap" or "no price in the documentation": a measurement can settle either.
+  const measureButton = (reasons: readonly string[]) =>
+    onMeasure && suggestsMeasurement(item.provider, reasons) ? (
+      <AdminWriteButton onClick={onMeasure} data-testid="model-catalog-measure-open">
+        {m.measure.action}
+      </AdminWriteButton>
+    ) : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="model-catalog-detail" data-stage={stage}>
@@ -594,7 +605,10 @@ export function ImageModelDetail({
                 ) : null}
                 {blockingReasons.length > 0 ? (
                   <>
-                    <AdminWriteButton onClick={() => onAction("redraft")}>{m.redraft}</AdminWriteButton>
+                    {measureButton(blockingReasons)}
+                    <AdminWriteButton variant={onMeasure && suggestsMeasurement(item.provider, blockingReasons) ? "secondary" : undefined} onClick={() => onAction("redraft")}>
+                      {m.redraft}
+                    </AdminWriteButton>
                     <p className="text-center text-xs text-zinc-400">{m.applyRefusedBlocked}</p>
                   </>
                 ) : (
@@ -640,6 +654,7 @@ export function ImageModelDetail({
                   ))}
                 </ul>
               ) : null}
+              {stage === "blocked" ? measureButton(item.served?.admissionIfEnabled.reasons ?? []) : null}
               {nextAction === "none" ? null : nextAction === "view" ? (
                 <AdminWriteButton variant="secondary" onClick={() => onAction("redraft")}>
                   {m.redraft}

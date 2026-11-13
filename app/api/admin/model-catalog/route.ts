@@ -16,9 +16,11 @@ import {
   latestCodingSnapshot,
   loadChatCatalogView,
   loadCodingCatalog,
+  loadImageBillingTermRows,
   loadImageCatalog,
   publishCodingSnapshot,
 } from "@/lib/modelCatalog";
+import { confirmedBillingTermsFor } from "@/lib/imageBillingMeasurement";
 import {
   applyCatalogDraft,
   CatalogRefusal,
@@ -35,10 +37,12 @@ import {
   imageCreditOverrideSchema,
   imageFullProfileSchema,
   judgeVideoModel,
+  latestBillingTerms,
   MODEL_ID_PATTERN,
   OFFICIAL_SOURCE_HOSTS,
   reviewImageDraft,
   STORED_CATALOG_CATEGORIES,
+  withImageBillingTerms,
 } from "@/lib/modelCatalogCore";
 import {
   catalogDraftLlmFromEnv,
@@ -71,18 +75,29 @@ const refusalResponse = (error: unknown) => {
   return apiSecurityResponse(error);
 };
 
-/** A saved runtime profile as an unpriced model, for reviewing its draft; null when it does not parse. */
-const runtimeImageBase = (modelId: string, profile: unknown): ImageModelProfile | null => {
+/**
+ * A saved runtime profile as an unpriced model with its confirmed billing
+ * terms, for reviewing its draft; null when it does not parse.
+ */
+const runtimeImageBase = (
+  modelId: string,
+  profile: unknown,
+  terms: ReturnType<typeof latestBillingTerms>
+): ImageModelProfile | null => {
   const parsed = imageFullProfileSchema.safeParse(profile);
   if (!parsed.success) return null;
-  return {
-    id: modelId,
-    ...parsed.data,
-    disabledReason: null,
-    prices: [],
-    pricingVersion: "unpriced",
-    priceVerification: { verifiedAt: null, sources: [], thinkingCapMicroUsd: null },
-  } as unknown as ImageModelProfile;
+  return withImageBillingTerms(
+    {
+      id: modelId,
+      ...parsed.data,
+      disabledReason: null,
+      prices: [],
+      pricingVersion: "unpriced",
+      priceVerification: { verifiedAt: null, sources: [], thinkingCapMicroUsd: null },
+    } as unknown as ImageModelProfile,
+    terms,
+    { runtime: true }
+  );
 };
 
 /** Floors and the judge's answer at a stored image draft's prices, or null. */
@@ -120,7 +135,7 @@ export async function GET(req: Request) {
     if ("response" in auth) return auth.response;
     await consumeApiRateLimit(req, auth.session.user.id, "admin-model-catalog", { minute: 30, day: 1_000 });
 
-    const [image, imageRows, revisions, coding, chat, snapshot] = await Promise.all([
+    const [image, imageRows, revisions, coding, chat, snapshot, billingTermRows] = await Promise.all([
       loadImageCatalog(),
       prisma.modelCatalogEntry.findMany({ where: { category: "image" } }),
       prisma.modelCatalogPriceRevision.findMany({
@@ -131,7 +146,9 @@ export async function GET(req: Request) {
       loadCodingCatalog(),
       loadChatCatalogView(),
       latestCodingSnapshot(),
+      loadImageBillingTermRows(),
     ]);
+    const billingTerms = latestBillingTerms(billingTermRows);
     const rowById = new Map(imageRows.map((row) => [row.modelId, row]));
     const seedIds = new Set(IMAGE_MODEL_REGISTRY.map((model) => model.id));
 
@@ -154,6 +171,8 @@ export async function GET(req: Request) {
             pricingVersion: model.pricingVersion,
             prices: model.prices,
             priceVerification: model.priceVerification,
+            // Terms an operator confirmed from a measurement, if any.
+            billingTerms: model.billingTerms ?? null,
             // What the judge would say if this model were turned on now.
             admissionIfEnabled: judgeImage({ ...model, disabledReason: null }),
             providerBudgetReady: imageProviderBudgetReady(model.provider),
@@ -178,7 +197,7 @@ export async function GET(req: Request) {
             profile: row.profile,
             draft: row.draft ?? null,
             draftCreatedAt: row.draftCreatedAt ?? null,
-            draftReview: reviewDraft(runtimeImageBase(row.modelId, row.profile), row.draft),
+            draftReview: reviewDraft(runtimeImageBase(row.modelId, row.profile, billingTerms), row.draft),
             problem: image.problems.find((p) => p.modelId === row.modelId)?.problem ?? null,
           })),
         revisions,
@@ -322,7 +341,14 @@ export async function POST(req: Request) {
     for (const url of sourceUrls) pages.push(await fetchOfficialPage(body.provider, url));
     const draft =
       body.category === "image"
-        ? await llm.draftImagePrices({ provider: body.provider, apiModelId: body.apiModelId, pages })
+        ? await llm.draftImagePrices({
+            provider: body.provider,
+            apiModelId: body.apiModelId,
+            pages,
+            // A measurement the operator confirmed supplies the thinking cap
+            // and, for a per-token model, the tokens per image.
+            billingTerms: await confirmedBillingTermsFor(body.provider, body.apiModelId),
+          })
         : await llm.draftCodingProfile({ provider: body.provider, apiModelId: body.apiModelId, pages });
     await storeCatalogDraft({ category: body.category, modelId: body.modelId, draft, imageProfile, session, request: req });
     return NextResponse.json({ ok: true, draft });

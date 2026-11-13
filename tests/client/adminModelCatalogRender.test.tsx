@@ -171,3 +171,25 @@ test("a serving model with a new draft can still be held from its card and its d
   assert.match(detail, /data-testid="model-catalog-hold"/);
   assert.match(detail, />Make a new draft</);
 });
+
+test("a draft refused for an unbounded thinking cost offers the billing measurement, in Korean too", () => {
+  const [wan] = imageCatalogItems({
+    models: [],
+    pending: [
+      {
+        modelId: "wan2.7-image",
+        profile: { provider: "qwen", apiModelId: "wan2.7-image", name: "Wan 2.7 Image" },
+        draft: { ...draft, verification: { ...draft.verification, thinkingCapMicroUsd: null } },
+        draftReview: { floors, reasons: ["worst_case_cost_unbounded"] },
+        problem: "no_price_revision",
+      },
+    ],
+  });
+  const props = { edits: {}, drafting: null, onBack: noop, onEdit: noop, onResetEdits: noop, onApply: noop, onAction: noop, onHold: noop, onRename: async () => true };
+  const offered = renderToStaticMarkup(<ImageModelDetail m={ko} item={wan} {...props} onMeasure={noop} />);
+  assert.match(offered, /data-testid="model-catalog-measure-open"/);
+  assert.match(offered, />실측</);
+  // Without a handler, or for a refusal a measurement cannot answer, there is no button.
+  assert.doesNotMatch(renderToStaticMarkup(<ImageModelDetail m={ko} item={wan} {...props} />), /model-catalog-measure-open/);
+  assert.doesNotMatch(renderToStaticMarkup(<ImageModelDetail m={ko} item={qwen} {...props} onMeasure={noop} />), /model-catalog-measure-open/);
+});

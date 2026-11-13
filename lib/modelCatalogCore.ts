@@ -15,7 +15,9 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import {
-  googleImageOutputLimitBound,
+  billingTermsApplyTo,
+  type ConfirmedImageBillingTerms,
+  imageMeasuredOutputLimitBound,
   imageThinkingCapEnforced,
   imageThinkingCapMinimumMicroUsd,
   type ImageModelDisabledReason,
@@ -23,6 +25,7 @@ import {
   type ImageModelPriceVerification,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
+import { confirmedImageBillingTermsSchema } from "@/lib/imageBillingMeasurementCore";
 import { RUNTIME_IMAGE_PROVIDERS } from "@/lib/runtimeImageProviders";
 
 export const MODEL_CATALOG_CATEGORIES = ["chat", "image", "coding", "video"] as const;
@@ -249,6 +252,65 @@ export const applyCodingDraftEdits = (
   };
 };
 
+// --- confirmed billing terms -------------------------------------------------
+
+export { confirmedImageBillingTermsSchema };
+
+export type BillingTermsRowInput = {
+  id: string;
+  provider: string;
+  apiModelId: string;
+  terms: unknown;
+  createdAt: Date;
+};
+
+export const billingTermsKey = (provider: string, apiModelId: string) => `${provider}\u0000${apiModelId}`;
+const termsKey = billingTermsKey;
+
+/**
+ * The latest confirmed terms per provider model that parse and that the
+ * provider's request can hold. A later row replaces an earlier one; a row
+ * that does not parse is skipped rather than reviving the one before it.
+ */
+export const latestBillingTerms = (
+  rows: readonly BillingTermsRowInput[]
+): Map<string, ConfirmedImageBillingTerms | null> => {
+  const latest = new Map<string, BillingTermsRowInput>();
+  for (const row of rows) {
+    const key = termsKey(row.provider, row.apiModelId);
+    const current = latest.get(key);
+    if (!current || row.createdAt.getTime() >= current.createdAt.getTime()) latest.set(key, row);
+  }
+  const out = new Map<string, ConfirmedImageBillingTerms | null>();
+  for (const [key, row] of latest) {
+    const parsed = confirmedImageBillingTermsSchema.safeParse(row.terms);
+    const terms = parsed.success ? ({ ...parsed.data, confirmationId: row.id } as ConfirmedImageBillingTerms) : null;
+    out.set(key, billingTermsApplyTo(row.provider, terms));
+  }
+  return out;
+};
+
+/**
+ * The model with its confirmed terms. A runtime Google model (not in the code
+ * seed) is sent the confirmed output limit with no thinking level, so the
+ * request is the measured one; a code model's request stays the code's, and
+ * the judge refuses terms it does not match.
+ */
+export const withImageBillingTerms = <M extends ImageModelProfile>(
+  model: M,
+  terms: ReadonlyMap<string, ConfirmedImageBillingTerms | null> | undefined,
+  options: { runtime: boolean }
+): M => {
+  const confirmed = terms?.get(termsKey(model.provider, model.apiModelId)) ?? null;
+  if (!confirmed) return model;
+  const next: M = { ...model, billingTerms: confirmed };
+  if (options.runtime && confirmed.kind === "measured_output_limit") {
+    next.maxOutputTokens = confirmed.maxOutputTokens;
+    delete next.thinkingLevel;
+  }
+  return next;
+};
+
 // --- image resolution -------------------------------------------------------
 
 export type CatalogRowInput = {
@@ -336,12 +398,12 @@ export const judgeImageModel = (
   if (!imageThinkingCapEnforced(model)) {
     reasons.push("worst_case_cost_unbounded");
     const cap = model.priceVerification.thinkingCapMicroUsd;
-    const minimum = imageThinkingCapMinimumMicroUsd(model.provider, model.apiModelId);
+    const minimum = imageThinkingCapMinimumMicroUsd(model.provider, model.apiModelId, model.billingTerms);
     if (cap !== null && minimum !== null && cap < minimum) {
       reasons.push(`thinking_cap_below_minimum:${minimum}`);
     }
     // A measured Google model is bounded only for the request that was measured.
-    const bound = googleImageOutputLimitBound(model.provider, model.apiModelId);
+    const bound = imageMeasuredOutputLimitBound(model);
     if (bound && (model.maxOutputTokens !== bound.maxOutputTokens || model.thinkingLevel)) {
       reasons.push(`measured_request_required:max_output_tokens_${bound.maxOutputTokens}_no_thinking_level`);
     }
@@ -498,14 +560,17 @@ export const resolveImageCatalog = (input: {
   revisions: readonly PriceRevisionInput[];
   now: Date;
   judge: (model: ImageModelProfile) => ImageAdmission;
+  /** Confirmed billing terms (ImageModelBillingTerms rows); absent reads the code tables alone. */
+  billingTerms?: readonly BillingTermsRowInput[];
 }): ResolvedImageCatalog => {
   const problems: { modelId: string; problem: string }[] = [];
   const rowsById = new Map(input.rows.map((row) => [row.modelId, row]));
   const revisions = effectiveRevisions(input.revisions, input.now);
   const seedIds = new Set(input.seed.map((model) => model.id));
+  const terms = latestBillingTerms(input.billingTerms ?? []);
 
   const bases: { model: ImageModelProfile; order: number }[] = input.seed.map((model, index) => ({
-    model,
+    model: withImageBillingTerms(model, terms, { runtime: false }),
     order: index,
   }));
   for (const row of input.rows) {
@@ -520,14 +585,18 @@ export const resolveImageCatalog = (input: {
       continue;
     }
     bases.push({
-      model: {
-        id: row.modelId,
-        ...full.data,
-        disabledReason: "price_unverified",
-        prices: [],
-        pricingVersion: "unpriced",
-        priceVerification: { verifiedAt: null, sources: [], thinkingCapMicroUsd: null },
-      } as ImageModelProfile,
+      model: withImageBillingTerms(
+        {
+          id: row.modelId,
+          ...full.data,
+          disabledReason: "price_unverified",
+          prices: [],
+          pricingVersion: "unpriced",
+          priceVerification: { verifiedAt: null, sources: [], thinkingCapMicroUsd: null },
+        } as ImageModelProfile,
+        terms,
+        { runtime: true }
+      ),
       order: input.seed.length + bases.length,
     });
   }

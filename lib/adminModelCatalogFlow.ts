@@ -249,6 +249,18 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
 };
 
 /**
+ * Whether a refusal is one a billing measurement can answer: no per-image
+ * price in the documentation, or no bound on what thinking costs. Only for a
+ * provider the measurement has a method for.
+ */
+export const suggestsMeasurement = (provider: string, codes: readonly string[], detail = "") =>
+  ["google", "openai", "qwen"].includes(provider) &&
+  codes.some((code) => {
+    const key = reasonMessage(code, detail).key;
+    return key === "worstCaseUnbounded" || key === "noPriceFound";
+  });
+
+/**
  * The admin session check's own 404 ("Not found."), as opposed to a
  * catalogue refusal that is also a 404 (no_draft when another admin applied
  * the draft first), which must not send the operator to sign in again.

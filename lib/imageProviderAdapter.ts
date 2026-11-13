@@ -9,12 +9,13 @@ import {
 import {
   getImageModel,
   GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN,
-  googleImageOutputLimitBound,
   imageDeliveryMimeType,
+  imageMeasuredOutputLimitBound,
   imageThinkingCapEnforced,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 import { BoundedBufferError, readResponseToBuffer } from "@/lib/boundedBuffer";
+import { numericUsage } from "@/lib/imageBillingMeasurementCore";
 import { readImageDimensions } from "@/lib/imageDimensions";
 import {
   buildFalImageEditRequest,
@@ -134,6 +135,9 @@ export class ImageProviderError extends Error {
    */
   billedImageTokens: number | null = null;
   billedImageCount = 0;
+
+  /** The response's numeric usage fields, where a refused response reported any (billing measurement). */
+  providerUsage: Record<string, number> | null = null;
 }
 
 /**
@@ -229,6 +233,11 @@ export type ImageProviderResult = {
   nonImageBillableTokens?: number | null;
   /** Image tokens the response billed, for the same models; null when not reported. */
   billedImageTokens?: number | null;
+  /**
+   * The response's numeric usage fields, flattened. Read by the admin billing
+   * measurement (lib/imageBillingMeasurement.ts); settlement does not use it.
+   */
+  providerUsage?: Record<string, number> | null;
   /** Provider-reported output/image tokens; 0 when the response omits usage. */
   outputTokens: number;
   providerRequestId: string | null;
@@ -425,6 +434,32 @@ export const generateImageWithProvider = async (input: {
       `Image model ${modelId} cannot edit an image.`
     );
   }
+  return dispatchImageRequest(model, input);
+};
+
+type ImageRequestInput = {
+  prompt: string;
+  size: ImageSize;
+  quality: ImageQuality;
+  editImage?: ImageEditInput;
+};
+
+/**
+ * Generation for a candidate profile that is not in the catalogue, for the
+ * admin billing measurement only (lib/imageBillingMeasurement.ts). It skips
+ * the catalogue checks above on purpose -- the model is unpriced because its
+ * billing is what is being measured -- so the caller holds the provider
+ * budget and the operator's approved maximum instead. Never an edit.
+ */
+export const generateImageForMeasurement = (
+  model: ImageModelProfile,
+  input: { prompt: string; size: ImageSize; quality: ImageQuality }
+): Promise<ImageProviderResult> => dispatchImageRequest(model, input);
+
+const dispatchImageRequest = async (
+  model: ImageModelProfile,
+  input: ImageRequestInput
+): Promise<ImageProviderResult> => {
   if (model.provider === "xai") {
     return generateWithXai(model, input);
   }
@@ -443,6 +478,13 @@ export const generateImageWithProvider = async (input: {
       `No adapter is implemented for provider ${model.provider}.`
     );
   }
+  return generateWithOpenAi(model, input);
+};
+
+const generateWithOpenAi = async (
+  model: ImageModelProfile,
+  input: ImageRequestInput
+): Promise<ImageProviderResult> => {
   const openAiBody = {
     model: model.apiModelId,
     prompt: input.prompt,
@@ -570,6 +612,7 @@ export const generateImageWithProvider = async (input: {
       outputTokens: Number.isSafeInteger(payload?.usage?.output_tokens)
         ? Number(payload?.usage?.output_tokens)
         : 0,
+      providerUsage: numericUsage(payload?.usage),
       providerRequestId,
       provenance: ["c2pa"],
       outputWidth: dimensions?.width ?? null,
@@ -587,13 +630,15 @@ export const generateImageWithProvider = async (input: {
 /**
  * Google, over the Interactions API.
  *
- * Reachable only for a model in GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS whose request
+ * Reachable only for a model in GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS (or with confirmed
+ * measured terms) whose request
  * is the measured one (that row's output limit, no thinking level), once an
  * operator has priced and enabled it: generateImageWithProvider refuses any
  * model carrying a disabledReason before it dispatches, and any whose thinking
  * cap its request cannot hold (`imageThinkingCapEnforced`). A cap written into
  * a price revision for an unmeasured Google model opens nothing -- only a row
- * in that table can, and a row is a code change backed by a measurement.
+ * in that table (a code change backed by a measurement) or terms an operator
+ * confirmed from an admin measurement (ImageModelBillingTerms) can.
  *
  * Only a rate limit is retried. A response that stops without an image
  * (`incomplete`, which the limit causes when reasoning uses the room), a
@@ -689,7 +734,7 @@ const generateWithGoogle = async (
     // response that bills past it is reported the first time it happens --
     // before the image is looked for, because a response that stopped without
     // one was billed as well.
-    const bound = googleImageOutputLimitBound(model.provider, model.apiModelId);
+    const bound = imageMeasuredOutputLimitBound(model);
     const nonImageBillableTokens = googleNonImageBillableTokens(payload);
     if (
       bound &&
@@ -719,6 +764,7 @@ const generateWithGoogle = async (
       refused.nonImageBillableTokens = nonImageBillableTokens;
       refused.billedImageTokens = googleBilledImageTokens(payload);
       refused.billedImageCount = readGoogleImageInteraction(payload)?.modelOutputImageCount ?? 0;
+      refused.providerUsage = numericUsage((payload as { usage?: unknown } | null)?.usage);
       throw refused;
     }
     const imageBytes = Buffer.from(parsed.imageBase64, "base64");
@@ -730,6 +776,7 @@ const generateWithGoogle = async (
       thinkingTokens: parsed.usage.thinkingTokens,
       nonImageBillableTokens,
       billedImageTokens: googleBilledImageTokens(payload),
+      providerUsage: numericUsage((payload as { usage?: unknown } | null)?.usage),
       outputTokens: parsed.usage.outputTokens,
       providerRequestId,
       // Google embeds SynthID. C2PA is claimed only where the model card says
@@ -1242,6 +1289,7 @@ const generateWithQwen = async (
     inputTokens: 0,
     thinkingTokens: 0,
     outputTokens: 0,
+    providerUsage: numericUsage((payload as { usage?: unknown } | null)?.usage),
     providerRequestId,
     provenance: [...model.provenance],
     outputWidth: dimensions.width,
