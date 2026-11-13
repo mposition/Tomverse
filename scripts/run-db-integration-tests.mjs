@@ -1395,6 +1395,20 @@ run(
   ],
   "Running the dynamic model catalogue scenarios"
 );
+// The admin image billing measurement: off by default, its maximum held
+// against the provider budget and the unspent part returned, one run at a
+// time, and confirmed terms admitting a model the code tables could not bound.
+run(
+  [
+    "--conditions=react-server",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/image-billing-measurement.db.test.ts",
+  ],
+  "Running the image billing measurement scenarios"
+);
 // The weekly production-to-staging/dev catalogue copy: references land on this
 // environment's ids, the sync actor's audit entry, and a price revision an
 // operator commits while the copy waits for the catalogue writers' lock holds

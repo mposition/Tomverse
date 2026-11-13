@@ -97,6 +97,9 @@ done
 # uses. Ubuntu's nodejs package brings npm 9, whose `npm ci` refuses this
 # repository's lockfile (apps/mobile's file: link to native-auth).
 /usr/bin/npm install --global --prefix "$STAGE/npm" --ignore-scripts --no-audit --no-fund --loglevel=error "npm@$NPM_VERSION" >/dev/null
+# sudo may retain a restrictive caller umask. This tree contains public npm
+# tools: the runner needs read/execute access, never permission to change them.
+chmod -R a+rX,go-w "$STAGE/npm"
 [ "$("$STAGE/npm/bin/npm" --version)" = "$NPM_VERSION" ] || fail "npm $NPM_VERSION did not install" 69
 # The installed tree has no package.json of its own; this one makes the .ts module ESM.
 printf '{ "private": true, "type": "module" }\n' > "$STAGE/package.json"

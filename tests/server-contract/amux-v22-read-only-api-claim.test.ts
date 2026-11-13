@@ -74,6 +74,7 @@ const tx = {
     runtime(worker.worker_name)) },
   amuxV22WorkerAssignment: {
     findMany: async () => [],
+    groupBy: async () => [],
     create: async () => { assignmentWrites += 1; },
   },
   amuxIdeaUnitDecision: { findUnique: async () => ({

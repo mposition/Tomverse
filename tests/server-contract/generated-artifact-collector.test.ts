@@ -749,6 +749,73 @@ test("a conversion that cannot be done draws one failed card and says why", asyn
   );
 });
 
+test("a file the model was told is attached but the server could not read is never called missing", async () => {
+  // 2026-11-13 production: two photos were listed to the model, their bytes
+  // were not read, and the conversion answered "No files are attached" --
+  // which the model told the user, who had attached them.
+  resetWorld();
+  const notes: unknown[][] = [];
+  const subject = await collector({
+    turnAttachments: new Map(),
+    unreadTurnAttachments: new Map([
+      ["att_1", "id-card.jpg"],
+      ["att_2", "letter.jpg"],
+    ]),
+    noteRejection: (...args: unknown[]) => notes.push(args),
+  });
+
+  const conversion = await subject.runFileConversion({
+    operation: "to_pdf",
+    filename: "combined",
+    sources: [{ attachment: "att_1" }, { attachment: "att_2" }],
+  });
+  assert.equal(conversion.status, "failed");
+  const reason = conversion.status === "failed" ? conversion.reason : "";
+  assert.match(reason, /att_1 \("id-card\.jpg"\) IS attached/);
+  assert.match(reason, /upload it again/);
+  assert.doesNotMatch(reason, /No files are attached/);
+
+  const document = await subject.run("document", {
+    format: "pdf",
+    filename: "with photo",
+    blocks: [{ type: "image", attachment: "att_2" }],
+  });
+  assert.equal(document.status, "failed");
+  assert.match(document.status === "failed" ? document.reason : "", /att_2 \("letter\.jpg"\) IS attached/);
+
+  // Not "the data is wrong": the user did nothing wrong.
+  assert.deepEqual(
+    subject.failed.map((entry) => entry.failureCode),
+    ["generation_failed", "generation_failed"]
+  );
+  assert.deepEqual(
+    notes.map((args) => args[4]),
+    [
+      { failure: "SOURCE_UNREAD", listedAttachments: 2, readAttachments: 0 },
+      { failure: "SOURCE_UNREAD", listedAttachments: 2, readAttachments: 0 },
+    ]
+  );
+  assert.equal(world.puts.length, 0);
+});
+
+test("a refused conversion logs which refusal it was", async () => {
+  resetWorld();
+  const notes: unknown[][] = [];
+  const subject = await collector({
+    turnAttachments: await turnFiles(),
+    noteRejection: (...args: unknown[]) => notes.push(args),
+  });
+  await subject.runFileConversion({ operation: "to_pdf", filename: "x", sources: [{ attachment: "att_9" }] });
+  await subject.runFileConversion({ operation: "to_pdf", filename: "x", sources: [{ attachment: "bucket/key" }] });
+  assert.deepEqual(
+    notes.map((args) => args[4]),
+    [
+      { failure: "SOURCE_MISSING", listedAttachments: 3, readAttachments: 3 },
+      { failure: "ADMISSION_REJECTED", listedAttachments: 3, readAttachments: 3 },
+    ]
+  );
+});
+
 test("a conversion on a turn with no attachments refuses instead of inventing a file", async () => {
   resetWorld();
   const subject = await collector();

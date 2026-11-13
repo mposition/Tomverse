@@ -249,7 +249,6 @@ export const pt = {
         imageModelTabFooterHint: "Escolher um abre o espaço de imagens.",
         imageModelCreditsFrom: "A partir de {credits} créditos",
         imageModelViaGateway: "via {gateway}",
-        imageModelHoldPriceUnverified: "Em espera até o preço oficial ser verificado",
         imageModelLatencyFast: "Rápido",
         imageModelLatencyBalanced: "Equilibrado",
         imageModelLatencySlow: "Mais lento",

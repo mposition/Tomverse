@@ -50,7 +50,7 @@ import {
   DEFAULT_IMAGE_MODEL_ID,
   getImageModel,
   getImageModelPrice,
-  googleImageOutputLimitBound,
+  imageMeasuredOutputLimitBound,
   imageEditCredits,
   imageThinkingBilling,
   maxImageEditRequestCostMicroUsd,
@@ -925,10 +925,9 @@ export const requestImageGeneration = async (
               // The measured token bound this price rests on, frozen like the
               // price: settlement reads it here, never the live table a deploy
               // may have changed since.
-              measuredNonImageBound: googleImageOutputLimitBound(
-                target.model.provider,
-                target.model.apiModelId
-              ),
+              // From the code table or the operator's confirmed terms
+              // (ImageModelBillingTerms), whichever priced this model.
+              measuredNonImageBound: imageMeasuredOutputLimitBound(target.model),
               // An edit: which photo, and the image-input budget its
               // surcharge bought. Read by the executor and by a retry.
               ...(edit && target.editPricing
@@ -1079,7 +1078,7 @@ const refundPlanCredits = async (
  * which over-counts that provider and is the safe direction for a guardrail.
  * Crediting the wrong provider is not.
  */
-const refundProviderBudget = async (
+export const refundProviderBudget = async (
   tx: Prisma.TransactionClient,
   provider: string,
   amountMicroUsd: number,
@@ -1133,7 +1132,7 @@ export const failureIncurredCostMicroUsd = (
 };
 
 /** Adds spend the reservation did not hold to the windows it was reserved in. */
-const chargeProviderBudgetOverage = async (
+export const chargeProviderBudgetOverage = async (
   tx: Prisma.TransactionClient,
   provider: string,
   amountMicroUsd: number,

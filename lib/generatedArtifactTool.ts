@@ -90,7 +90,10 @@ import {
   type StoredArtifact,
 } from "@/lib/generatedArtifactStorage";
 import type { ArtifactToolMode } from "@/lib/generatedArtifactToolPolicy";
-import type { ArtifactToolRejectionCode } from "@/lib/generatedArtifactRejectionLog";
+import type {
+  ArtifactToolRejectionCode,
+  ArtifactToolRejectionDiagnostics,
+} from "@/lib/generatedArtifactRejectionLog";
 import { contentFreeErrorMetadata } from "@/lib/providerErrorClassification";
 
 /**
@@ -436,6 +439,16 @@ export type GeneratedArtifactCollectorOptions = {
     string,
     { name: string; mediaType: string; bytes: Uint8Array }
   >;
+  /**
+   * Handles the system block listed whose bytes this request could not read
+   * (a stored file that is gone), by display name.
+   *
+   * The model was told the file is here, so a tool that cannot find it must
+   * not answer "nothing is attached" -- the model repeats that to the user,
+   * who did attach it. A call naming one of these is refused with what
+   * actually happened.
+   */
+  unreadTurnAttachments?: ReadonlyMap<string, string>;
   /** Injectable so a test can assert the date folder in a batch path. */
   now?: Date;
   /** Receives raw input; its diagnostic output must contain metadata only. */
@@ -443,7 +456,8 @@ export type GeneratedArtifactCollectorOptions = {
     toolCallId: string | undefined,
     toolName: string,
     input: unknown,
-    rejectionCode: ArtifactToolRejectionCode
+    rejectionCode: ArtifactToolRejectionCode,
+    diagnostics?: ArtifactToolRejectionDiagnostics
   ) => void;
 };
 
@@ -685,15 +699,42 @@ export class GeneratedArtifactCollector {
     return entry;
   }
 
+  /**
+   * The first of these handles that was listed to the model but could not be
+   * read, with what to tell it instead of "there is no such file".
+   */
+  private unreadAttachment(handles: readonly string[]): string | null {
+    const unread = this.options.unreadTurnAttachments;
+    if (!unread?.size) return null;
+    const handle = handles.find((candidate) => unread.has(candidate));
+    if (!handle) return null;
+    return (
+      `${handle} ("${unread.get(handle)}") IS attached to this message, but the ` +
+      "server could not read it: the stored copy is no longer available. Tell " +
+      "the user that this file could not be opened and ask them to upload it " +
+      "again as a new attachment. Do not say they did not attach it."
+    );
+  }
+
   private noteRejection(
     toolCallId: string | undefined,
     toolName: string,
     input: unknown,
-    rejectionCode: ArtifactToolRejectionCode
+    rejectionCode: ArtifactToolRejectionCode,
+    failure?: string
   ): void {
+    // Counts and a fixed code only: which files, and what was in them, never
+    // reach a log line.
+    // Only on a turn with files: "0 of 0" says nothing.
+    const read = this.options.turnAttachments?.size ?? 0;
+    const listed = read + (this.options.unreadTurnAttachments?.size ?? 0);
+    const diagnostics: ArtifactToolRejectionDiagnostics = {
+      ...(failure ? { failure } : {}),
+      ...(listed > 0 ? { listedAttachments: listed, readAttachments: read } : {}),
+    };
     try {
       void Promise.resolve(
-        this.options.noteRejection?.(toolCallId, toolName, input, rejectionCode)
+        this.options.noteRejection?.(toolCallId, toolName, input, rejectionCode, diagnostics)
       ).catch(() => undefined);
     } catch {
       // Diagnostics are best-effort; preserve the rejection report and card.
@@ -850,6 +891,28 @@ export class GeneratedArtifactCollector {
     const placesPictures =
       kind === "document" &&
       (spec as DocumentSpec).blocks.some((block) => block.type === "image");
+    const unreadPicture = placesPictures
+      ? this.unreadAttachment(
+          (spec as DocumentSpec).blocks.flatMap((block) =>
+            block.type === "image" ? [block.attachment] : []
+          )
+        )
+      : null;
+    if (unreadPicture) {
+      this.noteRejection(
+        toolCallId,
+        ARTIFACT_TOOL_NAMES[kind],
+        rawInput,
+        "spec_rejected",
+        "SOURCE_UNREAD"
+      );
+      this.recordFailure(filename, format, "generation_failed", null);
+      return {
+        status: "failed",
+        reason: unreadPicture,
+        note: "The file was not created. Do not describe a file that does not exist.",
+      };
+    }
     return this.renderAndStore({
       kind,
       format,
@@ -948,6 +1011,27 @@ export class GeneratedArtifactCollector {
     }
 
     const spec: DocumentBatchSpec = admission.spec;
+    const unreadSource = this.unreadAttachment([spec.templateAttachment, spec.dataAttachment]);
+    if (unreadSource) {
+      this.noteRejection(
+        toolCallId,
+        CREATE_DOCUMENT_BATCH_TOOL_NAME,
+        rawInput,
+        "spec_rejected",
+        "SOURCE_UNREAD"
+      );
+      this.recordFailure(
+        sanitizeArtifactFilename(spec.filename, "zip"),
+        "zip",
+        "generation_failed",
+        null
+      );
+      return {
+        status: "failed",
+        reason: unreadSource,
+        note: "The files were not created. Do not describe files that do not exist.",
+      };
+    }
     const attachments = this.options.turnAttachments;
     const template = attachments?.get(spec.templateAttachment);
     const data = attachments?.get(spec.dataAttachment);
@@ -1126,17 +1210,21 @@ export class GeneratedArtifactCollector {
     const refuse = (
       spec: Partial<FileConversionSpec> | null,
       failureCode: ArtifactFailureCode,
-      reason: string
+      reason: string,
+      failure: string
     ): ArtifactToolReport => {
       const format = conversionFallbackFormat(spec);
       // The rejection log has two buckets and the card has more: everything
       // that is not "ask for less" is logged as a rejected specification,
-      // while the card below keeps the exact code.
+      // while the card below keeps the exact code -- and the log line carries
+      // the fixed failure code, so "the input was malformed" and "the file
+      // was not there" are no longer one bucket.
       this.noteRejection(
         toolCallId,
         CONVERT_FILES_TOOL_NAME,
         rawInput,
-        failureCode === "limit_exceeded" ? "limit_exceeded" : "spec_rejected"
+        failureCode === "limit_exceeded" ? "limit_exceeded" : "spec_rejected",
+        failure
       );
       this.recordFailure(
         sanitizeArtifactFilename(
@@ -1205,8 +1293,12 @@ export class GeneratedArtifactCollector {
       };
     }
 
-    if (!admission.ok) return refuse(rawSpec, "spec_rejected", admission.detail);
+    if (!admission.ok) {
+      return refuse(rawSpec, "spec_rejected", admission.detail, "ADMISSION_REJECTED");
+    }
     const spec = admission.spec;
+    const unread = this.unreadAttachment(spec.sources.map((source) => source.attachment));
+    if (unread) return refuse(spec, "generation_failed", unread, "SOURCE_UNREAD");
     // Set whenever the specification was admitted, which it was by here.
     const hash = specHash as string;
 
@@ -1215,7 +1307,7 @@ export class GeneratedArtifactCollector {
       prepared = await prepareFileConversion(spec, attachments);
     } catch (error) {
       if (error instanceof FileConversionError) {
-        return refuse(spec, conversionFailureCode(error), error.message);
+        return refuse(spec, conversionFailureCode(error), error.message, error.code);
       }
       console.error("File conversion preparation failed:", {
         traceId: this.options.traceId,
@@ -1223,7 +1315,12 @@ export class GeneratedArtifactCollector {
         operation: spec.operation,
         ...contentFreeErrorMetadata(error),
       });
-      return refuse(spec, "generation_failed", "The conversion could not be started.");
+      return refuse(
+        spec,
+        "generation_failed",
+        "The conversion could not be started.",
+        "PREPARATION_FAILED"
+      );
     }
 
     const format = prepared.format;

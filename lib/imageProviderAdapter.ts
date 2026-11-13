@@ -9,12 +9,13 @@ import {
 import {
   getImageModel,
   GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN,
-  googleImageOutputLimitBound,
   imageDeliveryMimeType,
+  imageMeasuredOutputLimitBound,
   imageThinkingCapEnforced,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 import { BoundedBufferError, readResponseToBuffer } from "@/lib/boundedBuffer";
+import { numericUsage } from "@/lib/imageBillingMeasurementCore";
 import { readImageDimensions } from "@/lib/imageDimensions";
 import {
   buildFalImageEditRequest,
@@ -134,6 +135,16 @@ export class ImageProviderError extends Error {
    */
   billedImageTokens: number | null = null;
   billedImageCount = 0;
+
+  /** The response's numeric usage fields, where a refused response reported any (billing measurement). */
+  providerUsage: Record<string, number> | null = null;
+
+  /**
+   * The provider generated (and billed) the image and only fetching or
+   * checking it failed, so `status` is the download's, not a refusal of the
+   * request. Set on the Qwen asset path; read by the billing measurement.
+   */
+  afterGeneration = false;
 }
 
 /**
@@ -229,6 +240,11 @@ export type ImageProviderResult = {
   nonImageBillableTokens?: number | null;
   /** Image tokens the response billed, for the same models; null when not reported. */
   billedImageTokens?: number | null;
+  /**
+   * The response's numeric usage fields, flattened. Read by the admin billing
+   * measurement (lib/imageBillingMeasurement.ts); settlement does not use it.
+   */
+  providerUsage?: Record<string, number> | null;
   /** Provider-reported output/image tokens; 0 when the response omits usage. */
   outputTokens: number;
   providerRequestId: string | null;
@@ -425,6 +441,45 @@ export const generateImageWithProvider = async (input: {
       `Image model ${modelId} cannot edit an image.`
     );
   }
+  return dispatchImageRequest(model, input);
+};
+
+type ImageRequestInput = {
+  prompt: string;
+  size: ImageSize;
+  quality: ImageQuality;
+  editImage?: ImageEditInput;
+  /**
+   * False sends one attempt only. A retried timeout, transport failure or 5xx
+   * may follow an attempt that was billed, and a measurement counts each
+   * request it sends against the operator's approved maximum.
+   */
+  retry?: boolean;
+};
+
+/**
+ * Generation for a candidate profile that is not in the catalogue, for the
+ * admin billing measurement only (lib/imageBillingMeasurement.ts). It skips
+ * the catalogue checks above on purpose -- the model is unpriced because its
+ * billing is what is being measured -- so the caller holds the provider
+ * budget and the operator's approved maximum instead. Never an edit, never
+ * retried: one sample is one request.
+ */
+export const generateImageForMeasurement = async (
+  model: ImageModelProfile,
+  input: { prompt: string; size: ImageSize; quality: ImageQuality }
+): Promise<ImageProviderResult> => {
+  // The providers whose adapters honour `retry: false` (Qwen never retries).
+  if (!["openai", "google", "qwen"].includes(model.provider)) {
+    throw new ImageProviderError("provider_failed", `No billing measurement for provider ${model.provider}.`);
+  }
+  return dispatchImageRequest(model, { ...input, retry: false });
+};
+
+const dispatchImageRequest = async (
+  model: ImageModelProfile,
+  input: ImageRequestInput
+): Promise<ImageProviderResult> => {
   if (model.provider === "xai") {
     return generateWithXai(model, input);
   }
@@ -443,6 +498,13 @@ export const generateImageWithProvider = async (input: {
       `No adapter is implemented for provider ${model.provider}.`
     );
   }
+  return generateWithOpenAi(model, input);
+};
+
+const generateWithOpenAi = async (
+  model: ImageModelProfile,
+  input: ImageRequestInput
+): Promise<ImageProviderResult> => {
   const openAiBody = {
     model: model.apiModelId,
     prompt: input.prompt,
@@ -477,8 +539,9 @@ export const generateImageWithProvider = async (input: {
   };
   const apiKey = getImageApiKey();
   let lastError: ImageProviderError | null = null;
+  const retries = input.retry === false ? 0 : RETRY_DELAYS_MS.length;
 
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (attempt > 0) {
       const base = RETRY_DELAYS_MS[attempt - 1];
       await wait(base + Math.floor(Math.random() * 500));
@@ -570,6 +633,7 @@ export const generateImageWithProvider = async (input: {
       outputTokens: Number.isSafeInteger(payload?.usage?.output_tokens)
         ? Number(payload?.usage?.output_tokens)
         : 0,
+      providerUsage: numericUsage(payload?.usage),
       providerRequestId,
       provenance: ["c2pa"],
       outputWidth: dimensions?.width ?? null,
@@ -587,13 +651,15 @@ export const generateImageWithProvider = async (input: {
 /**
  * Google, over the Interactions API.
  *
- * Reachable only for a model in GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS whose request
+ * Reachable only for a model in GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS (or with confirmed
+ * measured terms) whose request
  * is the measured one (that row's output limit, no thinking level), once an
  * operator has priced and enabled it: generateImageWithProvider refuses any
  * model carrying a disabledReason before it dispatches, and any whose thinking
  * cap its request cannot hold (`imageThinkingCapEnforced`). A cap written into
  * a price revision for an unmeasured Google model opens nothing -- only a row
- * in that table can, and a row is a code change backed by a measurement.
+ * in that table (a code change backed by a measurement) or terms an operator
+ * confirmed from an admin measurement (ImageModelBillingTerms) can.
  *
  * Only a rate limit is retried. A response that stops without an image
  * (`incomplete`, which the limit causes when reasoning uses the room), a
@@ -611,7 +677,7 @@ export const generateImageWithProvider = async (input: {
  */
 const generateWithGoogle = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize }
+  input: { prompt: string; size: ImageSize; retry?: boolean }
 ): Promise<ImageProviderResult> => {
   const body = buildGoogleImageRequest({
     apiModelId: model.apiModelId,
@@ -630,8 +696,10 @@ const generateWithGoogle = async (
   const requestParams = auditableRequestParams(body);
   const apiKey = getGoogleApiKey();
   let lastError: ImageProviderError | null = null;
+  // A measurement sends one request per sample, a rate limit included.
+  const retries = input.retry === false ? 0 : RETRY_DELAYS_MS.length;
 
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (attempt > 0) {
       const base = RETRY_DELAYS_MS[attempt - 1];
       await wait(base + Math.floor(Math.random() * 500));
@@ -689,7 +757,7 @@ const generateWithGoogle = async (
     // response that bills past it is reported the first time it happens --
     // before the image is looked for, because a response that stopped without
     // one was billed as well.
-    const bound = googleImageOutputLimitBound(model.provider, model.apiModelId);
+    const bound = imageMeasuredOutputLimitBound(model);
     const nonImageBillableTokens = googleNonImageBillableTokens(payload);
     if (
       bound &&
@@ -719,6 +787,7 @@ const generateWithGoogle = async (
       refused.nonImageBillableTokens = nonImageBillableTokens;
       refused.billedImageTokens = googleBilledImageTokens(payload);
       refused.billedImageCount = readGoogleImageInteraction(payload)?.modelOutputImageCount ?? 0;
+      refused.providerUsage = numericUsage((payload as { usage?: unknown } | null)?.usage);
       throw refused;
     }
     const imageBytes = Buffer.from(parsed.imageBase64, "base64");
@@ -730,6 +799,7 @@ const generateWithGoogle = async (
       thinkingTokens: parsed.usage.thinkingTokens,
       nonImageBillableTokens,
       billedImageTokens: googleBilledImageTokens(payload),
+      providerUsage: numericUsage((payload as { usage?: unknown } | null)?.usage),
       outputTokens: parsed.usage.outputTokens,
       providerRequestId,
       // Google embeds SynthID. C2PA is claimed only where the model card says
@@ -1155,97 +1225,109 @@ const generateWithQwen = async (
     );
   }
 
-  let asset: Response;
-  try {
-    asset = await fetch(parsed.url, {
-      redirect: "manual",
-      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
-    });
-  } catch {
-    throw new ImageProviderError(
-      "provider_failed",
-      "Image provider asset could not be downloaded.",
-      null,
-      providerRequestId,
-      requestParams
-    );
-  }
-  // Cancelled, not drained, as on the fal path: an unread image body pins its
-  // connection, and reading it would spend the memory the limit refuses.
-  const releaseAsset = () => asset.body?.cancel().catch(() => undefined);
-  if (!asset.ok || !isQwenAssetUrl(asset.url)) {
-    await releaseAsset();
-    throw new ImageProviderError(
-      "provider_failed",
-      "Image provider asset was not served from the expected location.",
-      asset.status,
-      providerRequestId,
-      requestParams
-    );
-  }
-  // The response names no type, so the file's own Content-Type does, and it
-  // has to be one this profile may store.
-  const mimeType = (asset.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
-  if (!model.outputMimeTypes.includes(mimeType)) {
-    await releaseAsset();
-    throw new ImageProviderError(
-      "provider_failed",
-      "Image provider asset is not a type this model may store.",
-      null,
-      providerRequestId,
-      requestParams
-    );
-  }
-  // A declared length over the limit is refused unread, and the stream itself
-  // is capped while it is read: a chunked or compressed body declares nothing
-  // useful up front, and reading it whole first would spend the memory the
-  // limit exists to refuse.
-  let imageBytes: Buffer;
-  try {
-    imageBytes = await readResponseToBuffer(asset, FAL_MAX_ASSET_BYTES);
-  } catch (error) {
-    throw new ImageProviderError(
-      "provider_failed",
-      error instanceof BoundedBufferError
-        ? "Image provider asset was larger than the accepted limit."
-        : "Image provider asset could not be read.",
-      null,
-      providerRequestId,
-      requestParams
-    );
-  }
-  if (imageBytes.byteLength === 0) {
-    throw new ImageProviderError(
-      "provider_failed",
-      "Image provider asset was empty.",
-      null,
-      providerRequestId,
-      requestParams
-    );
-  }
-  const dimensions = readImageDimensions(imageBytes, mimeType);
-  const [expectedWidth, expectedHeight] = input.size.split("x").map(Number);
-  if (!dimensions || dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
-    throw new ImageProviderError(
-      "provider_failed",
-      "Image provider returned a different size than the one that was priced.",
-      null,
-      providerRequestId,
-      requestParams
-    );
-  }
+  // From here the image was generated and billed: a failure to fetch or check
+  // it is not a refusal, whatever HTTP status the download answered
+  // (`afterGeneration`, read by the billing measurement).
+  const deliver = async (): Promise<ImageProviderResult> => {
+    let asset: Response;
+    try {
+      asset = await fetch(parsed.url, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      });
+    } catch {
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider asset could not be downloaded.",
+        null,
+        providerRequestId,
+        requestParams
+      );
+    }
+    // Cancelled, not drained, as on the fal path: an unread image body pins its
+    // connection, and reading it would spend the memory the limit refuses.
+    const releaseAsset = () => asset.body?.cancel().catch(() => undefined);
+    if (!asset.ok || !isQwenAssetUrl(asset.url)) {
+      await releaseAsset();
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider asset was not served from the expected location.",
+        asset.status,
+        providerRequestId,
+        requestParams
+      );
+    }
+    // The response names no type, so the file's own Content-Type does, and it
+    // has to be one this profile may store.
+    const mimeType = (asset.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+    if (!model.outputMimeTypes.includes(mimeType)) {
+      await releaseAsset();
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider asset is not a type this model may store.",
+        null,
+        providerRequestId,
+        requestParams
+      );
+    }
+    // A declared length over the limit is refused unread, and the stream itself
+    // is capped while it is read: a chunked or compressed body declares nothing
+    // useful up front, and reading it whole first would spend the memory the
+    // limit exists to refuse.
+    let imageBytes: Buffer;
+    try {
+      imageBytes = await readResponseToBuffer(asset, FAL_MAX_ASSET_BYTES);
+    } catch (error) {
+      throw new ImageProviderError(
+        "provider_failed",
+        error instanceof BoundedBufferError
+          ? "Image provider asset was larger than the accepted limit."
+          : "Image provider asset could not be read.",
+        null,
+        providerRequestId,
+        requestParams
+      );
+    }
+    if (imageBytes.byteLength === 0) {
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider asset was empty.",
+        null,
+        providerRequestId,
+        requestParams
+      );
+    }
+    const dimensions = readImageDimensions(imageBytes, mimeType);
+    const [expectedWidth, expectedHeight] = input.size.split("x").map(Number);
+    if (!dimensions || dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider returned a different size than the one that was priced.",
+        null,
+        providerRequestId,
+        requestParams
+      );
+    }
 
-  return {
-    imageBytes,
-    mimeType,
-    // Billed per image; no token usage to record.
-    inputTokens: 0,
-    thinkingTokens: 0,
-    outputTokens: 0,
-    providerRequestId,
-    provenance: [...model.provenance],
-    outputWidth: dimensions.width,
-    outputHeight: dimensions.height,
-    requestParams,
+    return {
+      imageBytes,
+      mimeType,
+      // Billed per image; no token usage to record.
+      inputTokens: 0,
+      thinkingTokens: 0,
+      outputTokens: 0,
+      providerUsage: numericUsage((payload as { usage?: unknown } | null)?.usage),
+      providerRequestId,
+      provenance: [...model.provenance],
+      outputWidth: dimensions.width,
+      outputHeight: dimensions.height,
+      requestParams,
+    };
   };
+  try {
+    return await deliver();
+  } catch (error) {
+    if (error instanceof ImageProviderError) error.afterGeneration = true;
+    throw error;
+  }
 };

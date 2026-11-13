@@ -347,9 +347,21 @@ async function claimCandidate(taskId: string, assignmentId: string,
         workerServesGrade: (workerName) => !exactGradeRouting ||
           amuxWorkerMatchesExecutionGrade(card.executionGrade, workerName,
             ceilings) });
+      // Whose turn it is: every worker's latest assignment, so a provider's
+      // turn counts its busy workers too (review r-20261113-071016-e1734a).
+      const lastAssigned = resumeRoutes.length ? await tx.amuxV22WorkerAssignment.groupBy({
+        by: ["workerName"], _max: { assignedAt: true } }) : [];
+      const lastAssignedAtByWorker = new Map(lastAssigned.flatMap((row) =>
+        row._max.assignedAt ? [[row.workerName, row._max.assignedAt.getTime()] as const] : []));
+      const lastAssignedAtByProvider = new Map<string, number>();
+      for (const [workerName, at] of lastAssignedAtByWorker) {
+        const provider = providerOf.get(workerName);
+        if (provider) lastAssignedAtByProvider.set(provider,
+          Math.max(lastAssignedAtByProvider.get(provider) ?? 0, at));
+      }
       const route = chooseAmuxV22WorkerRoute({ routes: resumeRoutes,
         priorAuthorWorkers: authorWorkers, priorAuthorProviders: authorProviders,
-        isReview: card.taskRole === "review", activeByProvider });
+        isReview: card.taskRole === "review", activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider });
       if (!route) throw new BoardImportError(
         exactGradeRouting && matchingRoutes.length === 0 ? "no_worker_for_grade" :
           settled.unsettled ? "usage_unverified" : "worker_unavailable", 409);

@@ -599,6 +599,15 @@ tool 호출 후의 두 번째 step은 출력 토큰이며, 둘 다 기존 reserv
   뒤에 만들어진다. 모델이 없는 handle을 대면 tool은 **실제로 붙어 있는 handle
   목록을 알려 주고 거절**한다 — 지어내지 말라고 말하는 것이 지어낸 파일을 만드는
   것보다 낫다.
+- 시스템 지시에 목록으로 알린 첨부인데 서버가 바이트를 읽지 못한 경우(저장본이 사라진
+  경우 등)는 "없는 handle"과 다르다. tool은 "첨부는 되어 있지만 열 수 없었다, 새로
+  올려 달라고 하라, 첨부하지 않았다고 말하지 말라"고 거절하고 카드는
+  `generation_failed`다. 2026-11-13 운영에서 사진 두 장이 목록에는 있고 바이트는 없어
+  "No files are attached"가 돌아갔고, 모델이 그 말을 사용자에게 그대로 전했다. 거절
+  로그(`generated_artifact_tool_rejected`)에는 고정 실패 코드(`SOURCE_UNREAD`·
+  `SOURCE_MISSING`·`ADMISSION_REJECTED` 등)와 "목록에 있던 첨부 수 / 읽은 첨부 수"만
+  남긴다. 파일 이름과 내용은 남기지 않는다. 둘이 다르면 route가
+  `chat_turn_attachments_unread`도 남긴다.
 
 ### 13.4 템플릿 보존 — 무엇을, 어디까지
 

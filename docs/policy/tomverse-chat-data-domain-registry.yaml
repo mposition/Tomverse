@@ -3681,6 +3681,34 @@ domains:
       history and a database trigger refuses UPDATE and DELETE, so an erasure decision here needs a
       migration; undecided on every axis.
 
+  - domain: imageModelBillingTerms
+    prismaModel: ImageModelBillingTerms
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The operator who confirmed an image billing term, by id and address. The rows are append-only
+      billing history and are not reachable from User by cascade; undecided on every axis.
+
+  - domain: imageBillingMeasurement
+    prismaModel: ImageBillingMeasurement
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The operator who approved a paid image billing measurement, by id and address. No user credits
+      or images are stored; not reachable from User by cascade; undecided on every axis.
+
   - domain: providerBillingConfig
     prismaModel: ProviderBillingConfig
     userLinkageRole: actor

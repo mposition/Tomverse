@@ -239,7 +239,6 @@ export const ko = {
         imageModelTabFooterHint: "모델을 고르면 이미지 화면으로 이동합니다.",
         imageModelCreditsFrom: "{credits}크레딧부터",
         imageModelViaGateway: "{gateway} 경유",
-        imageModelHoldPriceUnverified: "공식 가격 확인 전까지 준비 중",
         imageModelLatencyFast: "빠름",
         imageModelLatencyBalanced: "보통",
         imageModelLatencySlow: "느림",

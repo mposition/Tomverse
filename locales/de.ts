@@ -238,7 +238,6 @@ export const de = {
         imageModelTabFooterHint: "Bei Auswahl öffnet sich der Bildbereich.",
         imageModelCreditsFrom: "Ab {credits} Credits",
         imageModelViaGateway: "über {gateway}",
-        imageModelHoldPriceUnverified: "Pausiert, bis der offizielle Preis geprüft ist",
         imageModelLatencyFast: "Schnell",
         imageModelLatencyBalanced: "Ausgewogen",
         imageModelLatencySlow: "Langsamer",

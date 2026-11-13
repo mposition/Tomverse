@@ -238,6 +238,8 @@
 [data-focus-drop-target="true"],[data-model-reorder-target="true"] { outline:3px dashed var(--review-action); outline-offset:-4px; }
 [data-studio-product="chat"] .review-studio-results [data-testid="desktop-conversation-surface"] { display:flex; }
 [data-studio-product="chat"] .review-studio-results [data-testid="chat-welcome-group"] { align-items:flex-start; text-align:left; padding:32px; }
+[data-studio-product="chat"] .review-studio-results [data-testid="chat-import-entry"] { border-color:var(--review-shell); background:var(--review-surface); color:var(--review-text); }
+[data-studio-product="chat"] .review-studio-results [data-testid="chat-import-entry"]:hover { border-color:var(--review-action); background:var(--review-selected); }
 [data-studio-product="chat"] .review-studio-results [data-testid="chat-welcome-greeting"] { max-width:16ch; font-size:clamp(1.5rem,2.6vw,2.5rem); line-height:1.5; letter-spacing:-.04em; color:var(--review-text); margin-bottom:20px; }
 [data-studio-product="chat"] .review-studio-results [data-testid="desktop-conversation-surface"]>div:has([data-testid="chat-empty-state"]) { background:var(--review-canvas); }
 .review-studio-composer-slot>[data-chat-composer="studio"] { display:flex; flex:1; flex-direction:column; }

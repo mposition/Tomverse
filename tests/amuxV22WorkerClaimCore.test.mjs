@@ -47,22 +47,59 @@ test("the provider running the fewest Tasks wins before price", () => {
   const routes = [route("codex-chore", "openai", "100"),
     route("copilot-impl", "github-copilot", "400"),
     route("claude-impl", "anthropic", "900")];
-  const choose = (active) => chooseAmuxV22WorkerRoute({ routes,
+  const choose = (active, last = {}) => chooseAmuxV22WorkerRoute({ routes,
     priorAuthorWorkers: [], priorAuthorProviders: [], isReview: false,
-    activeByProvider: new Map(Object.entries(active)) })?.workerName;
-  // Nothing running: the cheapest, as before.
-  assert.equal(choose({}), "codex-chore");
-  assert.equal(chooseAmuxV22WorkerRoute({ routes, priorAuthorWorkers: [],
-    priorAuthorProviders: [], isReview: false })?.workerName, "codex-chore");
-  // Codex busy: the next Task goes to another provider, the cheaper one first.
-  assert.equal(choose({ openai: 1 }), "copilot-impl");
+    activeByProvider: new Map(Object.entries(active)),
+    lastAssignedAtByWorker: new Map(Object.entries(last)) })?.workerName;
+  // Codex busy: the next Task goes to another provider.
+  assert.equal(choose({ openai: 1 }, { "claude-impl": 5 }), "copilot-impl");
   assert.equal(choose({ openai: 1, "github-copilot": 1 }), "claude-impl");
-  // Every provider equally busy: price again.
-  assert.equal(choose({ openai: 1, "github-copilot": 1, anthropic: 1 }), "codex-chore");
   // A review still avoids its author's provider before anything else.
   assert.equal(chooseAmuxV22WorkerRoute({ routes, priorAuthorWorkers: ["codex-chore"],
     priorAuthorProviders: ["openai"], isReview: true,
     activeByProvider: new Map([["anthropic", 2]]) })?.workerName, "copilot-impl");
+});
+
+test("no price competition: at equal load the provider that waited longest takes the Task", () => {
+  // Owner decision 2026-11-13: the cheapest list price sent nearly every Task
+  // to OpenAI. Price no longer chooses between subscription workers.
+  const route = (workerName, provider, perAttemptMicroUsd) => ({
+    routeId: workerName, workerName, provider, modelId: "model",
+    routePolicyDigest: "a".repeat(64), perAttemptMicroUsd,
+  });
+  const routes = [route("codex-chore", "openai", "100"), route("codex-chore-2", "openai", "100"),
+    route("claude-impl", "anthropic", "900"), route("copilot-chore", "github-copilot", "400")];
+  const choose = (last) => chooseAmuxV22WorkerRoute({ routes, priorAuthorWorkers: [],
+    priorAuthorProviders: [], isReview: false,
+    lastAssignedAtByWorker: new Map(Object.entries(last)) })?.workerName;
+  // OpenAI just took one: the dearer Anthropic, which waited longest, is next.
+  assert.equal(choose({ "codex-chore": 300, "copilot-chore": 200, "claude-impl": 100 }), "claude-impl");
+  // Then Copilot, then OpenAI again.
+  assert.equal(choose({ "codex-chore": 300, "copilot-chore": 200, "claude-impl": 400 }), "copilot-chore");
+  // Within a provider, its worker that waited longest.
+  assert.equal(choose({ "codex-chore": 300, "codex-chore-2": 50, "copilot-chore": 500, "claude-impl": 400 }),
+    "codex-chore-2");
+  // A worker never assigned goes first.
+  assert.equal(choose({ "codex-chore": 300, "copilot-chore": 200 }), "claude-impl");
+  // A provider whose busy worker just took a Task has not waited, though that
+  // worker is no candidate now (review r-20261113-071016-e1734a).
+  assert.equal(chooseAmuxV22WorkerRoute({
+    routes: routes.filter((item) => item.workerName !== "codex-chore"),
+    priorAuthorWorkers: [], priorAuthorProviders: [], isReview: false,
+    lastAssignedAtByWorker: new Map([["codex-chore-2", 10], ["claude-impl", 100], ["copilot-chore", 200]]),
+    lastAssignedAtByProvider: new Map([["openai", 900], ["anthropic", 100], ["github-copilot", 200]]),
+  })?.workerName, "claude-impl");
+  // A paid API run still takes the cheapest route.
+  assert.equal(chooseAmuxV22WorkerRoute({ routes, priorAuthorWorkers: [], priorAuthorProviders: [],
+    isReview: false, preferLowerPrice: true,
+    lastAssignedAtByWorker: new Map([["codex-chore", 900]]) })?.workerName, "codex-chore-2");
+  // The claim reads every worker's last assignment, not only the candidates',
+  // and passes both turns on.
+  const claim = readFileSync("lib/amux/v22WorkerClaimService.ts", "utf8");
+  assert.match(claim, /tx\.amuxV22WorkerAssignment\.groupBy\(\{\s*by: \["workerName"\], _max: \{ assignedAt: true \} \}\)/);
+  assert.match(claim, /activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider \}\)/);
+  const recovery = readFileSync("lib/amux/v22TaskRecoveryService.ts", "utf8");
+  assert.match(recovery, /isReview: false, preferLowerPrice: true \}\)/);
 });
 
 test("one tick assigns every ready Task, logs what it passed over, and stops at an unknown outcome", () => {
@@ -73,7 +110,7 @@ test("one tick assigns every ready Task, logs what it passed over, and stops at 
   assert.match(tick, /claims\.push\(claimed\)/);
   assert.match(tick, /event: "amux_v22_claim_tick"/);
   assert.match(tick, /stop = "outcome_unknown";\s+break;/);
-  assert.match(claim, /isReview: card\.taskRole === "review", activeByProvider \}\)/);
+  assert.match(claim, /isReview: card\.taskRole === "review", activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider \}\)/);
   assert.doesNotMatch(claim, /laneAssigned|lane_capacity_full|reserved_capacity_unavailable/);
 });
 

@@ -357,8 +357,9 @@ async function createAmuxV22ReadOnlyLaunchCheck(tx: Prisma.TransactionClient, no
       BigInt(route.perAttemptMicroUsd) > BigInt(0) &&
       BigInt(route.perAttemptMicroUsd) <= AMUX_V22_READ_ONLY_RETRY_CAP_MICROUSD;
   });
+  // A read-only retry is a paid API run, not a subscription: cheapest first.
   const route = chooseAmuxV22WorkerRoute({ routes, priorAuthorWorkers: [],
-    priorAuthorProviders: [], isReview: false });
+    priorAuthorProviders: [], isReview: false, preferLowerPrice: true });
   if (!route) return null;
   const runtime = liveByName.get(route.workerName);
   const profile = configuredAmuxV22RecoveryProfile(route.workerName);

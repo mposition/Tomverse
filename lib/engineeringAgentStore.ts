@@ -53,7 +53,7 @@ import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
 import { readAmuxV22PublicPrConsent } from
   "@/lib/amux/v22PublicPrConsent";
 import { writeEngineeringAgentSystemAudit as systemAudit } from "@/lib/engineeringAgentAudit";
-import { decideMismatchAction, type MismatchAction } from "@/lib/engineeringAgentStateMismatch";
+import { decideMismatchAction, mergedPrMismatchBindingId, type MismatchAction } from "@/lib/engineeringAgentStateMismatch";
 import {
   ENGINEERING_AGENT_VERIFIER_VERSION,
   capabilityCommitObject,
@@ -1688,6 +1688,8 @@ async function mismatchRunId(
   item: { causeKey: string; runId: string | null },
 ): Promise<string | null> {
   if (item.causeKey.startsWith("run_attempt:")) return item.runId;
+  // A merged pull request mismatch is opened with its binding's run.
+  if (mergedPrMismatchBindingId(item.causeKey) !== null) return item.runId;
   if (item.causeKey.startsWith("review_pr:")) {
     const publish = await db.engineeringAgentWorkItem.findUnique({
       where: { id: item.causeKey.slice("review_pr:".length) },
@@ -1785,9 +1787,10 @@ export async function resolveEngineeringAgentStateMismatch(
   }
   const locked = await lockWorkItem(tx, input.workItemId);
   if (locked.kind !== "state_mismatch" || locked.state !== "open") refuse("mismatch_not_open");
+  const mergedCauseBindingId = mergedPrMismatchBindingId(item.causeKey);
   const kind: "A" | "C" = item.causeKey.startsWith("run_attempt:")
     ? "A"
-    : item.causeKey.startsWith("review_pr:")
+    : item.causeKey.startsWith("review_pr:") || mergedCauseBindingId !== null
       ? "C"
       : refuse("mismatch_cause_unknown");
   const runId = (await mismatchRunId(tx, item)) ?? refuse("mismatch_without_run");
@@ -1811,8 +1814,14 @@ export async function resolveEngineeringAgentStateMismatch(
     where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
     select: { id: true, kind: true, state: true },
   });
+  // C names its publish item; a merged pull request mismatch names a binding,
+  // so its publish item is the run's published one.
   const publishItem =
-    kind === "C" ? runItems.find((candidate) => candidate.id === item.causeKey.slice("review_pr:".length)) ?? null : null;
+    kind !== "C"
+      ? null
+      : mergedCauseBindingId !== null
+        ? runItems.find((candidate) => candidate.kind === "publish" && candidate.state === "published") ?? null
+        : runItems.find((candidate) => candidate.id === item.causeKey.slice("review_pr:".length)) ?? null;
   const consumed = await tx.engineeringAgentCapability.count({
     where: { consumedAt: { not: null }, workItem: { runId: run.id } },
   });
@@ -1827,6 +1836,7 @@ export async function resolveEngineeringAgentStateMismatch(
       : [];
   const mergedBinding =
     currentBindings.length === 1 &&
+    (mergedCauseBindingId === null || currentBindings[0]!.id === mergedCauseBindingId) &&
     observed !== null &&
     observed.merged &&
     observed.mergedAt !== null &&

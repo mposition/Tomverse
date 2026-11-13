@@ -74,7 +74,7 @@ const tx = {
     sourceApprovalId: "source-one", briefDigest: "b".repeat(64) }) },
   amuxWorkerRuntime: { findMany: async () => workers.map((worker) =>
     runtime(worker.worker_name)) },
-  amuxV22WorkerAssignment: { findMany: async () => [], create: async () => undefined },
+  amuxV22WorkerAssignment: { findMany: async () => [], groupBy: async () => [], create: async () => undefined },
   amuxIdeaUnitDecision: { findUnique: async () => ({
     confirmationSnapshot: { card: { task: { costReceipt: receipt } } },
   }) },
