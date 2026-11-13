@@ -102,6 +102,9 @@ test("the app bounds daily claims including failures and does not reset a corrup
   settings.set(DAILY_PRODUCT_AGENT_DAY, JSON.stringify({ day: "2026-11-13", count: 24 }));
   assert.equal(await claim(), null); assert.equal(audits.length, 0);
   settings.set(DAILY_PRODUCT_AGENT_DAY, "bad"); assert.equal(await claim(), null);
+  for (const invalid of [{ day: "wrong", count: 0 }, { day: "2026-11-14", count: 0 }, { day: "2026-11-13", count: 25 }, { day: "2026-11-13", count: 0, bypass: true }]) {
+    settings.set(DAILY_PRODUCT_AGENT_DAY, JSON.stringify(invalid)); assert.equal(await claim(), null);
+  }
   settings.set(DAILY_PRODUCT_AGENT_DAY, JSON.stringify({ day: "2026-11-12", count: 24 }));
   assert.equal((await claim()).id, "scout.one");
   assert.equal(JSON.parse(settings.get(DAILY_PRODUCT_AGENT_DAY)).count, 1);

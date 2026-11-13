@@ -9,6 +9,10 @@ export const DAILY_PRODUCT_AGENT_PREFIX = "auto.dailyProductAgent.";
 export const DAILY_PRODUCT_AGENT_CURSOR = `${DAILY_PRODUCT_AGENT_PREFIX}cursor`;
 export const DAILY_PRODUCT_AGENT_DAY = `${DAILY_PRODUCT_AGENT_PREFIX}day`;
 export const DAILY_PRODUCT_AGENT_TASK_CAP = 24;
+export const dailyProductDaySchema = z.object({
+  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  count: z.number().int().min(0).max(DAILY_PRODUCT_AGENT_TASK_CAP),
+}).strict();
 /** These outcomes are known to precede any push or PR request. */
 const RETRYABLE_FAILURES = ["out_of_scope", "no_change", "tests", "review_reject",
   "agent_error", "timeout", "lease_expired", "setup_failed", "runner_error", "rate_limited"] as const;

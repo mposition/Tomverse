@@ -11,7 +11,7 @@ import { OPTIMIZER_LOCK } from "@/lib/autoRouterOptimizerLock";
 import { REC_AGENT_LEASE_MS } from "@/lib/autoRouterRecommendationsCore";
 import {
   DAILY_PRODUCT_AGENT_CURSOR, DAILY_PRODUCT_AGENT_DAY, DAILY_PRODUCT_AGENT_TASK_CAP, DAILY_PRODUCT_AGENT_PREFIX, dailyProductAgentEnabled,
-  canRetryDailyProductTask, dailyProductAgentKey, dailyProductResultDecision, followingSource, parseDailyProductState,
+  canRetryDailyProductTask, dailyProductAgentKey, dailyProductDaySchema, dailyProductResultDecision, followingSource, parseDailyProductState,
   scoutAgentId, scoutIdFromAgentId, sourceOrder, type DailyProductAgentState,
   type DailyProductResult, type DailyProductSource,
 } from "@/lib/dailyProductAgentCore";
@@ -38,15 +38,16 @@ export async function claimDailyProductTask(input: { origin: string; now?: Date 
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
-    const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Brisbane", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+    // Brisbane has no daylight saving; the quota key must not depend on ICU formatting.
+    const day = new Date(now.getTime() + 10 * 60 * 60_000).toISOString().slice(0, 10);
     const daily = await tx.appSetting.findUnique({ where: { key: DAILY_PRODUCT_AGENT_DAY }, select: { value: true } });
     let count = 0;
     if (daily) {
       // Fail closed on corrupt budget state, rather than silently resetting it.
-      let stored;
-      try { stored = JSON.parse(daily.value); } catch { return null; }
-      if (!stored || typeof stored.day !== "string" || !Number.isInteger(stored.count) || stored.count < 0) return null;
-      if (stored.day === day) count = stored.count;
+      let parsed;
+      try { parsed = dailyProductDaySchema.safeParse(JSON.parse(daily.value)); } catch { return null; }
+      if (!parsed.success || parsed.data.day > day) return null;
+      if (parsed.data.day === day) count = parsed.data.count;
     }
     if (count >= DAILY_PRODUCT_AGENT_TASK_CAP) return null;
     const cursor = await tx.appSetting.findUnique({ where: { key: DAILY_PRODUCT_AGENT_CURSOR }, select: { value: true } });
