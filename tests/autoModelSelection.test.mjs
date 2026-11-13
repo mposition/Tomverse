@@ -131,7 +131,6 @@ test("file generation retry excludes deep research and unverified candidates", (
     { "perplexity/sonar-deep-research": 1, "gpt-5-6-luna": 2, "deepseek-v4-flash": 3 },
     { isAuthenticated: true, canPersist: true, webSearchRequested: false }
   );
-  const capable = candidates.filter(candidate => candidate.canCreateFiles);
   const before = candidates.map(candidate => candidate.canCreateFiles);
   assert.equal(candidates.find(candidate => candidate.id === "perplexity/sonar-deep-research").canCreateFiles, false);
   assert.equal(candidates.find(candidate => candidate.id === "deepseek-v4-flash").canCreateFiles, false);
