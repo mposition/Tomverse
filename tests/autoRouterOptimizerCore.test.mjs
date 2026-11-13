@@ -804,6 +804,9 @@ test("the report is admitted bounded, of known kinds, and never repeating a user
 
 test("optimizer distinguishes recorded timeouts and historical errors without inferring causes", () => {
   assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /zero recorded timeouts does not prove none occurred/);
+  // Per-turn credits vary with input length and search; guidance must not pin one turn's number.
+  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /never by one decision's credits/);
+  assert.doesNotMatch(AUTO_ROUTER_GENERATOR_SYSTEM, /\d+-credit/);
   assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /Do not infer parsing or provider causes from aggregate counts/);
   assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /errors alone or zero recorded timeouts do not justify changing it/);
 });
