@@ -156,11 +156,33 @@ The design guide every call follows is `HIGGSFIELD-GUIDE.md`.
   a call whose outcome is unknown blocks the next until its job id shows it.
 - `HIGGSFIELD_BIN` and `CLAUDE_BIN` name other binaries (a `.mjs` is run with
   node), for a dry run with stand-ins.
+- Variety (owner 2026-11-13: not a person in every ad). Each concept has a
+  `format` -- person, phone, laptop, diagram or object -- a day's concepts are
+  each a different one, and the formats of the last 7 days are listed for the
+  concept call to use last.
+- Native copy (owner 2026-11-13: the Korean and Chinese read as
+  translations). After the concepts, one more Claude call (`NATIVE-COPY.md`)
+  rewrites only their Korean and Chinese and alt texts as a native copywriter
+  would; the edit is checked like any concept, and a concept it breaks keeps
+  the concept writer's words.
+- The app screen (owner 2026-11-13: words set on a screen looked pasted on).
+  The concept asks Higgsfield for the one display that shows words as flat
+  chroma green `#00ff00`, empty, and marks the texts on it with `ui` (title,
+  question, answer, caption; few words, so the phone stays phone-sized).
+  `screen-core.mjs` finds the green in the pixels, draws the app screen in the
+  product fonts at the display's proportions, maps it onto the display's
+  corners in perspective and keys it in only where the picture is green, so a
+  finger over the display stays in front. Every language gets its screen this
+  way, after every model edit; no model edit or smoothing redraws its words,
+  and the language versions spend one edit each (two only when words also
+  stand in the scene, on paper or a sign). A picture with no green display
+  drops that version as `no_green_screen`.
 - The concept call is asked again with every reason a concept was refused
   (`concepts-core.mjs`); a concept still refused is dropped and the others are
   drawn. A day with no concept counts as the feature's day, so the next run
   takes another feature. A full day of three concepts in four languages is
-  about 21 pictures (5.25 credits at 0.25 each) before any refine.
+  about 12 pictures (3 credits at 0.25 each) before any refine or retry, and
+  21 when every concept also has words on paper or a sign.
 - After a deployment, the concept step can be run alone on the box, with the
   cron's own PATH and env file. It draws nothing, spends no credit, submits
   nothing and leaves `history.json` alone; its files are `job/<day>/dry-*`:
