@@ -165,7 +165,7 @@ export type AiModel = {
     inputUsdPerMillionTokens?: number;
     outputUsdPerMillionTokens?: number;
     cachedInputPriceMultiplier?: number;
-} & ModelWebSearchOverrideField;
+} & ModelWebSearchOverrideField & ModelFileToolsOverrideField;
 
 const FULL_BINARY_INPUT = {
     image: true,
@@ -786,4 +786,15 @@ export type ModelWebSearchOverrideField = {
     // module. It holds the closed list (`WEB_SEARCH_OVERRIDES`) and fails to
     // compile if the two ever name different values.
     webSearchOverride?: "off" | "app-managed";
+};
+
+/**
+ * An administrator's tick or untick of the file tools for one model, from the
+ * runtime registry (`ModelRegistryEntry.fileToolsOverride`). Joined on below
+ * the catalogue for the same reason as the web search override. Absent means
+ * "follow the code" -- see `autoArtifactToolSupport` in
+ * lib/generatedArtifactToolPolicy.ts.
+ */
+export type ModelFileToolsOverrideField = {
+    fileToolsOverride?: boolean;
 };

@@ -19,6 +19,13 @@ const decision = z.object({
   searchPlan: z.boolean(),
   searchUtcDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   pick: pick.nullable(),
+  /**
+   * How the router call ended, when it was made. A resumed turn has to know a
+   * null pick came from a failed call -- that turn is answered by the requested
+   * model, not the rule's choice. Optional: a token sealed before this field
+   * existed resumes as a call that was not made.
+   */
+  routerOutcome: z.enum(["picked", "invalid", "error", "timeout"]).optional(),
   image: z.discriminatedUnion("image", [
     z.object({ image: z.literal(false) }).strict(),
     z.object({ image: z.literal(true), modelId: z.string().max(300).nullable(), preset: z.enum(["draft", "standard", "final"]).nullable(),

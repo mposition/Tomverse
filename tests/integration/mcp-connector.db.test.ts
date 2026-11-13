@@ -106,7 +106,7 @@ test("mock Chat model completes search/read/answer with real MCP and no paid pro
   const row = await connectMcp(alice, "synthetic");
   await grantMcpTools(alice, row.id, ["search", "read"], row.version);
   const config = await buildMcpChatTools({ userId: alice, connectionId: row.id,
-    modelId: "gpt-5-6-sol", nativeSearch: false, signal: new AbortController().signal });
+    model: { id: "gpt-5-6-sol", provider: "openai" }, nativeSearch: false, signal: new AbortController().signal });
   const prompt = "Synthetic context for the release checklist. ".repeat(1800) + " Name the owner and blocker.";
   const budget = createChatBudget("user", getModel("gpt-5-6-sol")!, estimateTokenBreakdown(prompt), {
     additionalToolInputTokens: config.definitionTokens + config.resultInputAllowance, toolInputPasses: 4 });
@@ -137,7 +137,7 @@ test("mock Chat model completes search/read/answer with real MCP and no paid pro
 
 test("server-side call ceiling refuses the seventh call without opening a socket", async () => {
   const row = await prisma.mcpConnection.findFirstOrThrow({ where: { userId: alice } });
-  const config = await buildMcpChatTools({ userId: alice, connectionId: row.id, modelId: "gpt-5-6-sol", nativeSearch: false, signal: new AbortController().signal });
+  const config = await buildMcpChatTools({ userId: alice, connectionId: row.id, model: { id: "gpt-5-6-sol", provider: "openai" }, nativeSearch: false, signal: new AbortController().signal });
   const execute = config.tools[mcpToolName(row.id, "search")].execute!;
   const before = fixture.calls.length;
   for (let i = 0; i < 7; i++) {
@@ -196,7 +196,7 @@ test("unsupported catalog schemas do not break compatible tools", async () => {
 });
 test("parallel model calls are serialized within the existing connection bound", async () => {
   const row = await prisma.mcpConnection.findFirstOrThrow({ where: { userId: alice, serverId: "synthetic" } });
-  const config = await buildMcpChatTools({ userId: alice, connectionId: row.id, modelId: "gpt-5-6-sol", nativeSearch: false, signal: new AbortController().signal });
+  const config = await buildMcpChatTools({ userId: alice, connectionId: row.id, model: { id: "gpt-5-6-sol", provider: "openai" }, nativeSearch: false, signal: new AbortController().signal });
   const execute = config.tools[mcpToolName(row.id, "search")].execute!;
   const results = await Promise.all(["Atlas", "missing"].map(query => execute({ query }, { toolCallId: query, messages: [], context: {} })));
   assert.deepEqual(results.map(result => (result as { status: string }).status), ["ok", "no_results"]);
