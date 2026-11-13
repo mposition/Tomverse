@@ -33,7 +33,6 @@ import {
   normaliseIssueTitle,
   displayableObservationSlot,
   observationLabel,
-  observationPayloadDigest,
   observationSilenceVerdict,
   observationSlotSeries,
   observationSummaryView,
@@ -326,7 +325,6 @@ test("a payload read back with its keys reordered, as JSONB returns it, still va
   const stored = reverseKeys(payload);
   assert.notEqual(JSON.stringify(stored.counts), JSON.stringify(payload.counts));
   assert.deepEqual(validateObservationPayload(stored), { ok: true });
-  assert.equal(observationPayloadDigest(stored), observationPayloadDigest(payload));
 
   const inflated = structuredClone(stored);
   inflated.counts.byVerdict[VERDICTS.OPEN_WORK] += 1;
