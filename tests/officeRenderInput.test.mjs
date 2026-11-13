@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deflateSync, gzipSync, zipSync } from "fflate";
+import { deflateSync, gzipSync, zipSync, zlibSync } from "fflate";
 
 import { measureRenderInput } from "../lib/officeRenderInput.ts";
 import { buildCompoundFile } from "./support/compoundFile.mjs";
@@ -42,6 +42,25 @@ test("an HWP whose compressed picture stream is a bomb is refused; its text sect
     measureRenderInput("application/x-hwp", hwp([{ name: "BIN0001.png", data: deflateSync(new Uint8Array(201 * 1024 * 1024)) }])),
     { ok: false, reason: "EXPANDS_TOO_FAR" }
   );
+});
+
+test("seventh review: a compressed picture in a document whose header says uncompressed is measured", () => {
+  const hwp = (bin) =>
+    buildCompoundFile([
+      { name: "FileHeader", data: hwpHeader(0) },
+      { name: "Section0", data: new Uint8Array(64).fill(0x42) },
+      { name: "BIN0001.png", data: bin },
+    ]);
+  assert.deepEqual(measureRenderInput("application/x-hwp", hwp(new Uint8Array(512).fill(7))), { ok: true });
+  const bomb = new Uint8Array(201 * 1024 * 1024);
+  assert.deepEqual(measureRenderInput("application/x-hwp", hwp(deflateSync(bomb))), {
+    ok: false,
+    reason: "EXPANDS_TOO_FAR",
+  });
+  assert.deepEqual(measureRenderInput("application/x-hwp", hwp(zlibSync(bomb))), {
+    ok: false,
+    reason: "EXPANDS_TOO_FAR",
+  });
 });
 
 test("a compound file that is not an HWP is passed through: nothing in it inflates", () => {

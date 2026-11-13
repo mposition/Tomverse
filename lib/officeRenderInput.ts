@@ -13,7 +13,7 @@
  * file is sent.
  *
  *   * A ZIP-based document (OOXML, ODF, HWPX, iWork): every entry.
- *   * HWP 5.x: every stream, when the header says the streams are compressed.
+ *   * HWP 5.x: every stream, whatever the header says about compression.
  *   * Other compound files (.doc, .xls, .ppt): nothing to inflate; their size
  *     is the upload's.
  */
@@ -67,8 +67,14 @@ const measureZip = (bytes: Uint8Array): RenderInputVerdict => {
 };
 
 const HWP_SIGNATURE = "HWP Document File";
-/** Streams HWP never compresses: the header and the summary/preview parts. */
-const HWP_PLAIN_STREAMS = /^(?:fileheader|\u0005hwpsummaryinformation|prvtext|prvimage)$/i;
+/**
+ * The ways a stream may be compressed: raw DEFLATE, as HWP writes it, and the
+ * same behind a zlib header, which a reader may accept as well.
+ */
+const inflatable = (stream: Uint8Array): Uint8Array[] => {
+  const zlib = stream.length > 2 && (stream[0] & 0x0f) === 8 && ((stream[0] << 8) | stream[1]) % 31 === 0;
+  return zlib ? [stream, stream.subarray(2)] : [stream];
+};
 
 const measureHwp = (bytes: Uint8Array): RenderInputVerdict => {
   // The container is read under a byte budget of its own: a compound file's
@@ -84,25 +90,28 @@ const measureHwp = (bytes: Uint8Array): RenderInputVerdict => {
     if (String.fromCharCode(...header.subarray(0, HWP_SIGNATURE.length)) !== HWP_SIGNATURE) {
       return { ok: true };
     }
-    const compressed =
-      (new DataView(header.buffer, header.byteOffset, header.byteLength).getUint32(36, true) & 1) !== 0;
-    if (!compressed) return { ok: true };
-
+    // The header's compression bit is the document's default, not a promise:
+    // a BinData item can be compressed on its own in an uncompressed
+    // document, and the filter inflates it. So every stream is tried, whatever
+    // the header says, and whatever really comes out is counted.
     let expanded = 0;
+    const charge = (chunk: Uint8Array) => {
+      expanded += chunk.length;
+      if (expanded > RENDER_INPUT_LIMITS.maxExpandedBytes) throw new Overflow();
+    };
     // Every stream, not one per name: two storages may hold streams of the
     // same name, and the renderer reads both.
     for (const entry of file.allStreams) {
-      if (HWP_PLAIN_STREAMS.test(entry.name)) continue;
       const stream = file.read(entry);
-      try {
-        inflateRawBounded(stream, (chunk) => {
-          expanded += chunk.length;
-          if (expanded > RENDER_INPUT_LIMITS.maxExpandedBytes) throw new Overflow();
-        });
-      } catch (error) {
-        if (error instanceof Overflow) throw error;
-        // A stream that does not inflate is not one LibreOffice will inflate
-        // either; it is the filter's problem, not a bomb.
+      for (const candidate of inflatable(stream)) {
+        try {
+          inflateRawBounded(candidate, charge);
+          break;
+        } catch (error) {
+          if (error instanceof Overflow) throw error;
+          // Not DEFLATE (an uncompressed record, a picture): what it is, it
+          // is at its upload size. The bytes it did yield stay counted.
+        }
       }
     }
     return { ok: true };
