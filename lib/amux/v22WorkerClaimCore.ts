@@ -2,7 +2,13 @@
  * and route facts come from owner-approved receipts, never model prose. */
 export const AMUX_V22_WORKER_CLAIM_CODE_LATCH = true;
 export const AMUX_V22_WORKER_CLAIM_ENV = "TOMVERSE_AMUX_V22_WORKER_CLAIM";
-export const AMUX_V22_GLOBAL_ACTIVE_LIMIT = 3;
+/**
+ * Tasks held by workers at once, across every lane. Owner decision
+ * 2026-11-13: the workers run in parallel up to this many, one Task per
+ * worker; the lane only orders the candidates (SEV1 first). Each attempt
+ * still reserves its own approved cost and the daily caps still apply.
+ */
+export const AMUX_V22_GLOBAL_ACTIVE_LIMIT = 6;
 export const AMUX_V22_PER_WORKER_ACTIVE_LIMIT = 1;
 export const AMUX_V22_CLAIM_LANES = ["normal", "parallel", "sev1"] as const;
 export type AmuxV22ClaimLane = (typeof AMUX_V22_CLAIM_LANES)[number];
@@ -99,28 +105,24 @@ export const amuxV22OneShotRouteSupported = (provider: string, modelId: string) 
 export const amuxV22WorkerClaimEnabled = (value: string | undefined) =>
   AMUX_V22_WORKER_CLAIM_CODE_LATCH && value === "enabled";
 
+/**
+ * Whether one more Task may be assigned now. Until 2026-11-13 each lane
+ * (normal, parallel, SEV1) held one Task, so nearly every Task, being normal,
+ * waited for the one before it and the other workers stayed idle. Now the
+ * only limit is the global one, and never more Tasks than verified workers.
+ */
 export function amuxV22ClaimCapacity(input: {
-  lane: AmuxV22ClaimLane;
   verifiedWorkerCount: number;
   totalAssigned: number;
-  laneAssigned: number;
 }) {
-  const { lane, verifiedWorkerCount, totalAssigned, laneAssigned } = input;
-  if (![verifiedWorkerCount, totalAssigned, laneAssigned].every(
+  const { verifiedWorkerCount, totalAssigned } = input;
+  if (![verifiedWorkerCount, totalAssigned].every(
     (value) => Number.isSafeInteger(value) && value >= 0) ||
     verifiedWorkerCount === 0) return { allowed: false as const,
       reason: "capacity_unconfigured" as const };
   if (totalAssigned >= Math.min(AMUX_V22_GLOBAL_ACTIVE_LIMIT,
       verifiedWorkerCount)) return { allowed: false as const,
     reason: "global_capacity_full" as const };
-  // One normal, one parallel, one owner-declared SEV1. In particular a normal
-  // job never borrows a reserved slot from a lane that has no ready card.
-  if (laneAssigned >= 1) return { allowed: false as const,
-    reason: "lane_capacity_full" as const };
-  if (lane === "normal" && verifiedWorkerCount < 3) {
-    return { allowed: false as const,
-      reason: "reserved_capacity_unavailable" as const };
-  }
   return { allowed: true as const, reason: null };
 }
 
@@ -134,21 +136,31 @@ export type AmuxV22EligibleRoute = {
 };
 
 /** Review cannot use the implementing worker. A distinct provider wins when
- * one is actually available; price then identity break ties deterministically. */
+ * one is actually available. Then the provider running the fewest Tasks now
+ * wins (owner decision 2026-11-13: the workers are flat-rate CLI
+ * subscriptions, so the cheapest list price alone sent every Task to one
+ * provider while the others sat idle); price then identity break ties
+ * deterministically. */
 export function chooseAmuxV22WorkerRoute(input: {
   routes: readonly AmuxV22EligibleRoute[];
   priorAuthorWorkers: readonly string[];
   priorAuthorProviders: readonly string[];
   isReview: boolean;
+  /** Tasks each provider's workers hold now, keyed by lowercase provider. */
+  activeByProvider?: ReadonlyMap<string, number>;
 }) {
   const candidates = input.routes.filter((route) =>
     !input.isReview || !input.priorAuthorWorkers.includes(route.workerName));
+  const active = (provider: string) =>
+    input.activeByProvider?.get(provider.toLowerCase()) ?? 0;
   candidates.sort((left, right) => {
     const leftPrior = input.isReview &&
       input.priorAuthorProviders.includes(left.provider) ? 1 : 0;
     const rightPrior = input.isReview &&
       input.priorAuthorProviders.includes(right.provider) ? 1 : 0;
     if (leftPrior !== rightPrior) return leftPrior - rightPrior;
+    const load = active(left.provider) - active(right.provider);
+    if (load !== 0) return load;
     const price = BigInt(left.perAttemptMicroUsd) -
       BigInt(right.perAttemptMicroUsd);
     if (price !== BigInt(0)) return price < 0 ? -1 : 1;
