@@ -575,6 +575,8 @@ test("the recorder refuses bad arguments and a folder that already holds a recor
   const claim = recorder.indexOf('"started.json"), "wx")');
   assert.ok(claim > 0 && claim < recorder.indexOf("const result = await record("));
   assert.match(recorder, /now\.language === restore\.language/u);
+  // A scrolled-up column's "jump to latest" button would cover the answer in the picture.
+  assert.match(recorder, /chat-consent-notice"\],\[data-testid="scroll-to-latest-button"\]/u);
   assert.match(recorder, /code: 5/u);
 });
 
