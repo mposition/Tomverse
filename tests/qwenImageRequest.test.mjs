@@ -7,6 +7,7 @@ import {
   buildQwenImageRequest,
   isQwenAssetUrl,
   parseQwenImageResponse,
+  qwenAssetFetchUrl,
   QWEN_IMAGE_GENERATION_URL,
   qwenErrorEnvelope,
   qwenFailurePhase,
@@ -134,6 +135,35 @@ test("a result is fetched only from Singapore's public OSS endpoint", () => {
   assert.equal(isQwenAssetUrl("https://aliyuncs.com.example.org/a.png"), false);
   assert.equal(isQwenAssetUrl("https://169.254.169.254/latest/meta-data"), false);
   assert.equal(isQwenAssetUrl("not a url"), false);
+});
+
+test("an accelerate result URL is fetched from the bucket's Singapore endpoint, never as given", () => {
+  // wan2.7-image, 2026-11-13: the result came back on OSS Global Accelerate,
+  // whose bucket answered from ap-southeast-1. Six measured samples were
+  // refused for the host alone.
+  const accelerated = "https://dashscope-463f.oss-accelerate.aliyuncs.com/7a/out.png?Expires=1&OSSAccessKeyId=k&Signature=s%2B";
+  assert.equal(
+    qwenAssetFetchUrl(accelerated),
+    "https://dashscope-463f.oss-ap-southeast-1.aliyuncs.com/7a/out.png?Expires=1&OSSAccessKeyId=k&Signature=s%2B"
+  );
+  assert.deepEqual(
+    parseQwenImageResponse(success(accelerated)),
+    { url: "https://dashscope-463f.oss-ap-southeast-1.aliyuncs.com/7a/out.png?Expires=1&OSSAccessKeyId=k&Signature=s%2B" }
+  );
+  // A Singapore URL is unchanged; every other host stays refused.
+  assert.equal(qwenAssetFetchUrl(ASSET_URL), ASSET_URL);
+  for (const refused of [
+    "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/a.png",
+    "http://dashscope-463f.oss-accelerate.aliyuncs.com/a.png",
+    "https://dashscope-463f.oss-accelerate.aliyuncs.com:8443/a.png",
+    "https://u@dashscope-463f.oss-accelerate.aliyuncs.com/a.png",
+    "https://a.b.oss-accelerate.aliyuncs.com/a.png",
+    "https://oss-accelerate.aliyuncs.com/a.png",
+    "https://dashscope-463f.oss-accelerate-overseas.aliyuncs.com/a.png",
+    "not a url",
+  ]) {
+    assert.equal(qwenAssetFetchUrl(refused), null, refused);
+  }
 });
 
 test("exactly one image, and usage that agrees with one", () => {

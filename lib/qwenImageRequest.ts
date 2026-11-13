@@ -109,6 +109,39 @@ export const isQwenAssetUrl = (value: string): boolean => {
   return ASSET_HOST.test(url.hostname);
 };
 
+/**
+ * OSS Global Accelerate: the same bucket reached through Alibaba's acceleration
+ * network. wan2.7-image answers with this host (observed 2026-11-13,
+ * `dashscope-463f.oss-accelerate.aliyuncs.com`). It names no region, so it is
+ * never fetched as given: `qwenAssetFetchUrl` sends the same signed path to the
+ * bucket's Singapore endpoint, which OSS serves only for a Singapore bucket --
+ * any other answers "must be addressed using the specified endpoint" and the
+ * download is refused. That bucket was confirmed in ap-southeast-1 the same day.
+ */
+const ACCELERATE_HOST = /^([a-z0-9][a-z0-9-]{1,61}[a-z0-9])\.oss-accelerate\.aliyuncs\.com$/;
+
+/**
+ * Where to fetch a result URL from: unchanged when it is already on
+ * Singapore's endpoint, rewritten to it when it is an accelerate URL, else
+ * null. The query (the signature and expiry) is kept as is; an OSS V1
+ * signature covers the bucket and object, not the host.
+ */
+export const qwenAssetFetchUrl = (value: string): string | null => {
+  if (isQwenAssetUrl(value)) return value;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.port !== "" || url.username || url.password) return null;
+  const bucket = ACCELERATE_HOST.exec(url.hostname)?.[1];
+  if (!bucket) return null;
+  url.hostname = `${bucket}.oss-ap-southeast-1.aliyuncs.com`;
+  const rewritten = url.toString();
+  return isQwenAssetUrl(rewritten) ? rewritten : null;
+};
+
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -134,8 +167,9 @@ export const parseQwenImageResponse = (payload: unknown): { url: string } | null
     .filter((part): part is Record<string, unknown> => part !== null && "image" in part)
     .map((part) => part.image);
   if (images.length !== 1) return null;
-  const [url] = images;
-  if (typeof url !== "string" || !isQwenAssetUrl(url)) return null;
+  const [image] = images;
+  const url = typeof image === "string" ? qwenAssetFetchUrl(image) : null;
+  if (!url) return null;
 
   const usage = asRecord(asRecord(payload)?.usage);
   if (usage) {
