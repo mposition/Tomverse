@@ -19,6 +19,29 @@ import {
 type Settlement = "review" | "retry" | "blocked" | "recovered";
 
 /**
+ * The approval observer's two causes about a pull request already merged
+ * (lib/engineeringAgentPrObserver.ts), each keyed `<cause>:<binding id>`:
+ * merged without an approval it could see, and merged with files the card
+ * did not expect. Both are C -- a finished run and a finished publish whose
+ * conclusions disagree -- so a person closes them as C closes: once GitHub
+ * reports the pull request merged, read just now. Until 2026-11-13 the store
+ * knew neither cause and refused every action on them, so one such item held
+ * the agent halted with no way out (#3828).
+ */
+export const ENGINEERING_AGENT_MERGED_PR_MISMATCH_CAUSES = ["unapproved_merge", "pr_file_mismatch"] as const;
+
+/** The binding a merged pull request mismatch names, or null for any other cause. */
+export const mergedPrMismatchBindingId = (causeKey: string): string | null => {
+  for (const cause of ENGINEERING_AGENT_MERGED_PR_MISMATCH_CAUSES) {
+    if (causeKey.startsWith(`${cause}:`)) {
+      const id = causeKey.slice(cause.length + 1);
+      return id.length > 0 ? id : null;
+    }
+  }
+  return null;
+};
+
+/**
  * The AMUX settlement a domain outcome should have produced. An abandoned run
  * is AMUX's to recover. An outcome this does not know -- a new enum value, an
  * unvalidated string -- maps to nothing, and the caller treats that as

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -19,6 +20,7 @@ import {
   decideMismatchAction,
   expectedSettlement,
   followsCrossLockOrder,
+  mergedPrMismatchBindingId,
   resolveBOnAmuxTerminal,
 } from "../lib/engineeringAgentStateMismatch.ts";
 
@@ -344,4 +346,22 @@ test("B resolves only when AMUX concludes the same way; otherwise C; never guess
   assert.equal(resolveBOnAmuxTerminal({ amuxSettlement: "blocked", domainOutcome: "t1_queued" }), "C");
   assert.equal(resolveBOnAmuxTerminal({ amuxSettlement: "recovered", domainOutcome: "abandoned" }), "resolved");
   assert.equal(resolveBOnAmuxTerminal({ amuxSettlement: "recovered", domainOutcome: "mystery" }), "unmapped");
+});
+
+test("a merged pull request mismatch names its binding; every other cause names none", () => {
+  // #3828 (2026-11-13): the store knew neither observer cause and refused every
+  // action on them, so the item held the agent halted with no way out.
+  assert.equal(mergedPrMismatchBindingId("unapproved_merge:5b009a4b-c596-4367-ac9e-aa0426547ba7"),
+    "5b009a4b-c596-4367-ac9e-aa0426547ba7");
+  assert.equal(mergedPrMismatchBindingId("pr_file_mismatch:binding"), "binding");
+  for (const causeKey of ["review_pr:item", "run_attempt:run", "unapproved_merge:", "unapproved_merge", "x_unapproved_merge:b"]) {
+    assert.equal(mergedPrMismatchBindingId(causeKey), null, causeKey);
+  }
+  // The console offers "closed: merged" on both causes, and the store takes
+  // them as C, bound to their own binding.
+  const panel = readFileSync("components/admin/AdminEngineeringAgentPanel.tsx", "utf8");
+  assert.ok(panel.includes("/^(review_pr|unapproved_merge|pr_file_mismatch):/.test(causeKey)"));
+  const store = readFileSync("lib/engineeringAgentStore.ts", "utf8");
+  assert.ok(store.includes('item.causeKey.startsWith("review_pr:") || mergedCauseBindingId !== null'));
+  assert.ok(store.includes("(mergedCauseBindingId === null || currentBindings[0]!.id === mergedCauseBindingId)"));
 });

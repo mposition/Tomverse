@@ -22,6 +22,15 @@ import {
   type EngineeringAgentActionRequest,
 } from "@/lib/engineeringAgentAdminAction";
 
+/**
+ * A mismatch a person closes once GitHub reports its pull request merged: a
+ * review pull request item, or one of the approval observer's merged pull
+ * request causes (lib/engineeringAgentStateMismatch.ts
+ * ENGINEERING_AGENT_MERGED_PR_MISMATCH_CAUSES; the store decides).
+ */
+const mismatchClosesOnMerge = (causeKey: string) =>
+  /^(review_pr|unapproved_merge|pr_file_mismatch):/.test(causeKey);
+
 /** Where a step-up brings the operator back to: the tab (and view) the section is on. */
 const returnPathFor = (section: string) =>
   section === "pull-requests"
@@ -194,7 +203,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                     <ul className="mt-1 list-disc space-y-0.5 pl-5 text-zinc-400">
                       {(item.kind === "t2_draft"
                         ? [...m.actionsT2, ...(item.rejudgeable ? [m.actionRejudge] : [])]
-                        : m.actionsMismatch.filter((_, index) => index !== 1 || item.causeKey.startsWith("review_pr:"))
+                        : m.actionsMismatch.filter((_, index) => index !== 1 || mismatchClosesOnMerge(item.causeKey))
                       ).map((line) => (
                         <li key={line}>{line}</li>
                       ))}
@@ -217,7 +226,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
                         action: "close_domain_after_verified_no_write",
                       });
                     })}
-                    {item.causeKey.startsWith("review_pr:")
+                    {mismatchClosesOnMerge(item.causeKey)
                       ? button(`${item.id}:merged`, m.mismatchCloseMerged, () => {
                           if (!window.confirm(m.confirmMismatchCloseMerged)) return;
                           void post(`${item.id}:merged`, "/api/admin/engineering-agent/mismatches", {
