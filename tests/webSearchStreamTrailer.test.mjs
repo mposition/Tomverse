@@ -172,6 +172,26 @@ test("an artifacts-only trailer is still read as an envelope", () => {
   assert.equal(trailer.searchMetadata, null);
 });
 
+test("file generation retry exposes only a non-empty model id", () => {
+  const trailer = parseChatStreamTrailer(JSON.stringify({
+    fileGenerationRetry: { modelId: "gpt-5-6-luna", provider: "internal", reason: "retry" },
+  }));
+  assert.deepEqual(trailer, {
+    searchMetadata: null,
+    fileGenerationRetry: { modelId: "gpt-5-6-luna" },
+  });
+});
+
+test("invalid file generation retry shapes are dropped", () => {
+  for (const value of [null, "model", {}, { modelId: "" }, { modelId: 42 }]) {
+    const trailer = parseChatStreamTrailer(JSON.stringify({
+      searchMetadata: execution,
+      fileGenerationRetry: value,
+    }));
+    assert.equal(trailer.fileGenerationRetry, undefined);
+  }
+});
+
 test("the storage key cannot ride along in the trailer", () => {
   const trailer = parseChatStreamTrailer(
     JSON.stringify({

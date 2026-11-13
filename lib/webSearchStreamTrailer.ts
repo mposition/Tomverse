@@ -51,6 +51,7 @@ export type ChatStreamTrailer = {
    * is exactly right for a turn that had none.
    */
   artifacts?: ChatStreamArtifact[];
+  fileGenerationRetry?: { modelId: string };
 };
 
 export function buildChatStreamTrailerChunk(trailer: ChatStreamTrailer): string {
@@ -81,7 +82,8 @@ export function parseChatStreamTrailer(
   if (
     !("searchMetadata" in record) &&
     !("completion" in record) &&
-    !("artifacts" in record)
+    !("artifacts" in record) &&
+    !("fileGenerationRetry" in record)
   ) {
     return { searchMetadata: parsed };
   }
@@ -91,6 +93,11 @@ export function parseChatStreamTrailer(
       ? (completion as Record<string, unknown>)
       : null;
   const artifacts = parseChatStreamArtifacts(record.artifacts);
+  const fileGenerationRetry = record.fileGenerationRetry;
+  const retryRecord =
+    fileGenerationRetry && typeof fileGenerationRetry === "object"
+      ? (fileGenerationRetry as Record<string, unknown>)
+      : null;
   return {
     searchMetadata: record.searchMetadata ?? null,
     ...(completionRecord && isChatCompletionStatus(completionRecord.status)
@@ -104,6 +111,11 @@ export function parseChatStreamTrailer(
         }
       : {}),
     ...(artifacts ? { artifacts } : {}),
+    ...(retryRecord &&
+    typeof retryRecord.modelId === "string" &&
+    retryRecord.modelId.length > 0
+      ? { fileGenerationRetry: { modelId: retryRecord.modelId } }
+      : {}),
   };
 }
 
