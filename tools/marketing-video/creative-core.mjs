@@ -166,6 +166,8 @@ export function checkPlan(answer, { packs, history = [] }) {
 
 /** Import specifiers the film may use; anything else (and every package) is refused. */
 const ALLOWED_IMPORTS = new Set(["react", "remotion"]);
+/** The creative kit (creative-kit/), copied into the run by render-creative.mjs: the job's code, not the film's. */
+const KIT_IMPORT = "../kit";
 const LOCAL_IMPORT = /^\.\/([A-Za-z0-9_-]+)(\.tsx?)?$/u;
 /**
  * A second, cruder layer after the parser: words that have no place in a film
@@ -180,6 +182,9 @@ const FORBIDDEN = [
   [/https?:\/\/|\/\/[a-z0-9-]+\.[a-z]|\bnew\s+URL\b/iu, "a URL"],
   [/localStorage|sessionStorage|indexedDB|\bcookie\b/u, "browser storage"],
   [/Math\.random\s*\(|Date\.now\s*\(|new\s+Date\s*\(|performance\.now/u, "randomness or the clock (a frame must be a pure function of time)"],
+  // Screens, the logo and AI clips come only through the kit (Screen, Logo, Shot), which keeps
+  // their words whole, readable and in the safe area, and the AI line on every clip.
+  [/\b(?:Img|OffthreadVideo|IFrame|staticFile)\b|<Video\b|<img\b|<video\b/u, "Img, a video or staticFile (show screens with the kit's Screen, clips with Shot, the logo with Logo, the voice with Narration)"],
 ];
 
 /**
@@ -206,9 +211,9 @@ async function importProblems(dir, names) {
           return { path: args.path, external: true };
         };
         if (args.kind !== "import-statement") return refuse(`${args.kind} of ${args.path} (static imports only)`);
-        if (ALLOWED_IMPORTS.has(args.path)) return { path: args.path, external: true };
+        if (ALLOWED_IMPORTS.has(args.path) || args.path === KIT_IMPORT) return { path: args.path, external: true };
         const local = LOCAL_IMPORT.exec(args.path);
-        if (!local) return refuse(`imports ${args.path} (only react, remotion and ./ files)`);
+        if (!local) return refuse(`imports ${args.path} (only react, remotion, ../kit and ./ files)`);
         const file = (local[2] ? [args.path] : [`${args.path}.tsx`, `${args.path}.ts`]).map((name) => path.join(filmDir, name)).find((candidate) => existsSync(candidate));
         if (!file) return refuse(`imports ${args.path}, which is not a file in film/`);
         return { path: file };
