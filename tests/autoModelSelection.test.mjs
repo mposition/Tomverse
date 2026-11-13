@@ -3,7 +3,7 @@ import test from "node:test";
 import { createRequire } from "node:module";
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
-import { autoLlmRouterFileDiagnostics } from "../lib/autoLlmRouterCore.ts";
+import { autoLlmRouterCandidates, autoLlmRouterFileDiagnostics, parseAutoLlmRouterOutput } from "../lib/autoLlmRouterCore.ts";
 import {
   applyLlmModelPick,
   fileGenerationRetryModelId,
@@ -227,6 +227,24 @@ test("file-capable fallback preserves an unchanged exploration choice and sticky
     assert.equal(routed.record[field], selection.record[field], field);
   }
   assert.deepEqual(routed.fallbackCandidateModelIds, []);
+});
+
+test("file intent parsing preserves explicit false and rejects non-boolean values", () => {
+  const candidates = autoLlmRouterCandidates(
+    ["gpt-5-6-luna"], AVAILABLE_MODELS, { "gpt-5-6-luna": 1 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+  );
+  const withoutIntent = parseAutoLlmRouterOutput({ modelId: "gpt-5-6-luna" }, candidates);
+  assert.equal("requiresFileGeneration" in withoutIntent, false);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: false,
+  }, candidates).requiresFileGeneration, false);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: true,
+  }, candidates).requiresFileGeneration, true);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: "true",
+  }, candidates), null);
 });
 
 test("an Auto conversation in an open cohort is routed by the Router", () => {
