@@ -34,6 +34,7 @@ type World = {
   calls: string[]; boundaries: string[]; ownerInput: unknown; recordedInput: unknown;
   reviewPending: unknown[]; reviewClosing: unknown[]; autoApplied: unknown; autoCalls: number;
   t2Pending: unknown[]; t2Closing: unknown[]; t2Unfilable: string[]; t2Recorded: unknown;
+  settlementPending: unknown[]; settlementClosing: unknown[]; settlementEnabled: boolean | null;
 };
 let world: World;
 const reset = (changes: Partial<World> = {}) => {
@@ -46,6 +47,7 @@ const reset = (changes: Partial<World> = {}) => {
     ownerError: null, question: null, direct: null, directInput: null, calls: [], boundaries: [], ownerInput: null, recordedInput: null,
     reviewPending: [], reviewClosing: [], autoApplied: null, autoCalls: 0,
     t2Pending: [], t2Closing: [], t2Unfilable: [], t2Recorded: null,
+    settlementPending: [], settlementClosing: [], settlementEnabled: null,
     ...changes,
   };
   if (world.routing === undefined) delete process.env.TOMVERSE_AMUX_DM_ROUTING;
@@ -111,6 +113,14 @@ mock.module(mod("lib/amux/v22ResultReviewService.ts"), { namedExports: {
   readAmuxV22ResultReviewSyncRows: async () => ({ pending: world.reviewPending, closing: world.reviewClosing }),
   openAmuxV22ResultReviewCards: async (pending: unknown[]) => ({ cards: pending, unfilable: [] }),
   recordAmuxV22ResultReviewsUnfilable: async () => ({ recorded: 0 }),
+} });
+mock.module(mod("lib/amux/dmOwnerSettlementService.ts"), { namedExports: {
+  readAmuxDmOwnerSettlementSyncRows: async (_tx: unknown, input: { enabled: boolean }) => {
+    world.settlementEnabled = input.enabled;
+    return { pending: world.settlementPending, siblings: [], pulls: [], closing: world.settlementClosing };
+  },
+  openAmuxDmOwnerSettlementCards: async (rows: { pending: unknown[] }) => ({ cards: rows.pending, unfilable: [] }),
+  recordAmuxDmOwnerSettlementsUnfilable: async () => ({ recorded: 0 }),
 } });
 mock.module(mod("lib/engineeringAgentT2DmReviewService.ts"), { namedExports: {
   readEngineeringAgentT2DmSyncRows: async () => ({ pending: world.t2Pending, closing: world.t2Closing }),
@@ -235,6 +245,30 @@ test("a T2 draft's advice card rides the tick last, filed only while its switch 
   } finally {
     delete process.env.TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW;
     delete process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM;
+  }
+});
+
+test("an owner queue settlement rides the tick before the T2 drafts, filed only while its switch is on", async () => {
+  const SETTLEMENT = "44444444-5555-8666-8777-888888888888";
+  const settlementEntry = { question_id: SETTLEMENT, worker: "amux-owner-settlement" };
+  const t2Entry = { question_id: IDEA, worker: "engineering-t2-review" };
+  delete process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT;
+  reset({ settlementPending: [settlementEntry], settlementClosing: [{ questionId: SETTLEMENT, cardId: "OS-1" }] });
+  const off = await (await syncRoute.POST(post({}))).json();
+  assert.equal(world.settlementEnabled, false, "nothing is filed while the switch is off");
+  assert.deepEqual(off.pending, []);
+  assert.deepEqual(off.closing, [{ question_id: SETTLEMENT, card_id: "OS-1" }], "its cards still close");
+  assert.ok(world.boundaries.includes("decisionMakerOwnerSettlementSync"));
+  process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT = "enabled";
+  process.env.TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW = "enabled";
+  try {
+    reset({ v22Pending: [v22Entry("a")], settlementPending: [settlementEntry], t2Pending: [t2Entry] });
+    const on = await (await syncRoute.POST(post({}))).json();
+    assert.equal(world.settlementEnabled, true);
+    assert.deepEqual(on.pending, [v22Entry("a"), settlementEntry, t2Entry], "after the app-answered ones, before the advice");
+  } finally {
+    delete process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT;
+    delete process.env.TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW;
   }
 });
 

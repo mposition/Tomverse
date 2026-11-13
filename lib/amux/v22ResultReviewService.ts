@@ -77,8 +77,11 @@ export async function readAmuxV22ResultReviewSyncRows(tx: Prisma.TransactionClie
 }
 
 /** The Task's approved completion criteria, opened from its sealed body, or
- * null when they cannot be read. */
-async function openCompletionCriteria(row: PendingReview): Promise<string[] | null> {
+ * null when they cannot be read. The owner queue settlement reads them too
+ * (dmOwnerSettlementService.ts). */
+export async function openCompletionCriteria(row: Pick<PendingReview, "ideaId" | "taskId" |
+  "bodyCiphertext" | "bodyKeyId" | "bodyKeyVersion" | "bodyDigest" | "bodyDigestKeyId">):
+  Promise<string[] | null> {
   if (!row.bodyCiphertext || !row.bodyKeyId || !row.bodyKeyVersion ||
       !row.bodyDigest || !row.bodyDigestKeyId) return null;
   const keys = await loadAmuxContentKeyRing([

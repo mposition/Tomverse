@@ -19,14 +19,19 @@ import { amuxDmApproverEnabled, amuxDmProposalAutoApplicable,
   amuxV22ResultReviewDecisionFromAnswer } from "@/lib/amux/v22ResultReviewCore";
 import { applyAmuxV22ResultReviewDecision } from "@/lib/amux/v22ResultReviewService";
 import { applyAmuxV22DmAnswer } from "@/lib/amux/v22OwnerQuestionDmService";
+import { amuxDmOwnerSettlementAnswerOf, type AmuxDmOwnerSettlementAnswer,
+  type AmuxDmOwnerSettlementKind } from "@/lib/amux/dmOwnerSettlementCore";
+import { fileAmuxDmOwnerSettlementRemakeIdea } from "@/lib/amux/dmOwnerSettlementRemake";
+import { applyAmuxDmOwnerSettlementDecision } from "@/lib/amux/dmOwnerSettlementService";
 
 /**
  * The Decision Maker as the approver (owner decision 2026-11-07: "the
  * Decision Maker replaces the operator for most of the automation"). Behind
  * `TOMVERSE_AMUX_DM_APPROVER=enabled`, default off. A DM proposal on a
  * question the app answers itself -- a v22 worker question, a refused session
- * answer, an idea card close question, a v22 result review -- is applied
- * without the operator's confirmation in Admin, with the answer source `dm`.
+ * answer, an idea card close question, a v22 result review, an owner queue
+ * settlement (owner decision 2026-11-13) -- is applied without the operator's
+ * confirmation in Admin, with the answer source `dm`.
  *
  * What stays with a person: a proposal the DM marked irreversible, an answer
  * that is not one of the question's fixed words, and every question routed to
@@ -45,11 +50,14 @@ type Candidate =
   | { kind: "card_close"; requestId: string; cardId: string; questionRevision: number;
       questionId: string; decision: "close" | "keep" }
   | { kind: "result_review"; requestId: string; cardId: string; questionRevision: number;
-      reviewId: string; decision: "approve" | "retry" | "block" };
+      reviewId: string; decision: "approve" | "retry" | "block" }
+  | { kind: "owner_settlement"; requestId: string; cardId: string; questionRevision: number;
+      settlementId: string; answer: AmuxDmOwnerSettlementAnswer };
 
 type OpenCard = { cardId: string; kind: string; id: string };
 
-/** The open questions of the four types that have a local card, one statement. */
+/** The open questions of the five types that have a local card, one statement.
+ * A settlement's kind rides in its own: `settlement_stopped`, `settlement_t2_pr`. */
 async function readOpenAppAnsweredCards(tx: Prisma.TransactionClient) {
   return tx.$queryRaw<OpenCard[]>`
     SELECT * FROM (
@@ -63,6 +71,9 @@ async function readOpenAppAnsweredCards(tx: Prisma.TransactionClient) {
     WHERE "state" = 'open' AND "handoffAt" IS NULL AND "localCardId" IS NOT NULL
     UNION ALL
     SELECT "localCardId", 'result_review', "id" FROM "AmuxV22ResultReview"
+    WHERE "state" = 'open' AND "handoffAt" IS NULL AND "localCardId" IS NOT NULL
+    UNION ALL
+    SELECT "localCardId", 'settlement_' || "kind", "id" FROM "AmuxDmOwnerSettlement"
     WHERE "state" = 'open' AND "handoffAt" IS NULL AND "localCardId" IS NOT NULL
     ) AS open_cards
     -- A random hundred each tick: cards whose proposals cannot be applied
@@ -122,6 +133,11 @@ export async function readAmuxDmAutoApplyCandidate(tx: Prisma.TransactionClient,
     const decision = amuxIdeaCardCloseDecisionFromAnswer(words);
     return decision ? { kind: "card_close", ...base, questionId: card.id, decision } : null;
   }
+  if (card.kind === "settlement_stopped" || card.kind === "settlement_t2_pr") {
+    const kind = card.kind.slice("settlement_".length) as AmuxDmOwnerSettlementKind;
+    const answer = amuxDmOwnerSettlementAnswerOf({ kind, ...words });
+    return answer ? { kind: "owner_settlement", ...base, settlementId: card.id, answer } : null;
+  }
   const decision = amuxV22ResultReviewDecisionFromAnswer(words);
   return decision ? { kind: "result_review", ...base, reviewId: card.id, decision } : null;
 }
@@ -146,6 +162,12 @@ export async function runAmuxDmAutoApplyStep(env: Record<string, string | undefi
     (tx, context) => readAmuxDmAutoApplyCandidate(tx, context.dbNow));
   if (!candidate) return null;
   const result = { requestId: candidate.requestId, kind: candidate.kind };
+  // A remake's idea is filed before the claim: a closed card always has its
+  // idea, and an outcome nobody knows waits for the next tick's read-back.
+  const remake = candidate.kind === "owner_settlement" && candidate.answer.decision === "remake" ?
+    await fileAmuxDmOwnerSettlementRemakeIdea({ settlementId: candidate.settlementId,
+      ideaText: candidate.answer.ideaText }).catch(() => ({ pending: true as const })) : undefined;
+  if (remake && "pending" in remake) return { ...result, applied: false };
   try {
     const applied = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerAutoApply,
       async (tx, context) => {
@@ -166,6 +188,14 @@ export async function runAmuxDmAutoApplyStep(env: Record<string, string | undefi
           effect = (await applyAmuxIdeaCardCloseDmAnswer(tx, { questionId: candidate.questionId,
             requestId: candidate.requestId, decision: candidate.decision, now,
             source: "dm" })).applied;
+        } else if (candidate.kind === "owner_settlement") {
+          const settled = await applyAmuxDmOwnerSettlementDecision(tx, {
+            settlementId: candidate.settlementId, answer: candidate.answer, source: "dm",
+            requestId: candidate.requestId, now, remake });
+          // As a result review: a moved Task or a hand-off is kept with the
+          // request closed; only the kill switch (no outcome) rolls back.
+          if (settled.outcome === null) throw new AmuxDmAutoApplyHeld();
+          return settled.applied && settled.outcome !== "cancelled";
         } else {
           const review = await applyAmuxV22ResultReviewDecision(tx, { reviewId: candidate.reviewId,
             decision: candidate.decision, source: "dm", requestId: candidate.requestId, now });

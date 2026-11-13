@@ -112,7 +112,7 @@ test("the DM approver: behind its switch, irreversible stays human, answers are 
   assert.match(source, /if \(!amuxDmApproverEnabled\(env\)\) return null;/);
   assert.match(source, /amuxDmProposalAutoApplicable\(\{ resultKind: "proposal",\s+outputKind: detail\.outputKind, irreversible: detail\.irreversible \}\)/);
   assert.match(source, /state\.closing !== null/, "a judged or closed request is never applied again");
-  assert.equal((source.match(/source: "dm"/g) ?? []).length, 4, "each of the four question types records dm");
+  assert.equal((source.match(/source: "dm"/g) ?? []).length, 5, "each of the five question types records dm");
   const close = source.indexOf("closeDecisionMakerRequestOnDirectAnswer(tx");
   assert.ok(close > 0 && close < source.indexOf("applyAmuxV22DmAnswer(tx"),
     "the request is closed first, under the chain lock, so a judgment that came first wins");

@@ -42,6 +42,12 @@ import { applyAmuxV22ResultReviewDecision, readOpenAmuxV22ResultReviewOfCard,
   recordAmuxV22ResultReviewLocalCardClosed } from "./v22ResultReviewService.ts";
 import { recordEngineeringAgentT2DmLocalCard, recordEngineeringAgentT2DmLocalCardClosed } from
   "../engineeringAgentT2DmReviewService.ts";
+import { amuxDmOwnerSettlementAnswerOf, isAmuxDmOwnerSettlementId,
+  type AmuxDmOwnerSettlementAnswer } from "./dmOwnerSettlementCore.ts";
+import { fileAmuxDmOwnerSettlementRemakeIdea } from "./dmOwnerSettlementRemake.ts";
+import { applyAmuxDmOwnerSettlementDecision, readOpenAmuxDmOwnerSettlementOfCard,
+  recordAmuxDmOwnerSettlementHandoff, recordAmuxDmOwnerSettlementLocalCard,
+  recordAmuxDmOwnerSettlementLocalCardClosed } from "./dmOwnerSettlementService.ts";
 
 /**
  * A v22 worker's owner question through the Decision Maker (operator decision
@@ -88,6 +94,9 @@ export async function isAmuxV22QuestionCard(
     WHERE "localCardId" = ${cardId}
     UNION ALL
     SELECT 1 AS "found" FROM "EngineeringAgentDmReview"
+    WHERE "localCardId" = ${cardId}
+    UNION ALL
+    SELECT 1 AS "found" FROM "AmuxDmOwnerSettlement"
     WHERE "localCardId" = ${cardId}
     LIMIT 1`;
   return rows.length > 0;
@@ -209,9 +218,16 @@ export async function recordAmuxV22QuestionLocalCardClosed(
 
 /** The local card of a question the relay filed, whichever table holds it:
  * an idea card close question, else a v22 question, else a refused session
- * answer. The relay does not tell them apart. */
+ * answer. The relay does not tell them apart. An owner queue settlement's id
+ * is a version 8 UUID and every other one is version 4, so a settlement is
+ * looked up alone and the others never pay for its two statements. */
 export async function recordDmQuestionLocalCard(tx: Prisma.TransactionClient,
   input: { questionId: string; cardId: string }) {
+  if (isAmuxDmOwnerSettlementId(input.questionId)) {
+    const recorded = await recordAmuxDmOwnerSettlementLocalCard(tx, input);
+    if (!recorded) throw new BoardImportError("not_found", 404);
+    return recorded;
+  }
   return await recordAmuxIdeaCardCloseLocalCard(tx, input) ??
     await recordAmuxV22ResultReviewLocalCard(tx, input) ??
     await recordEngineeringAgentT2DmLocalCard(tx, input) ??
@@ -221,6 +237,11 @@ export async function recordDmQuestionLocalCard(tx: Prisma.TransactionClient,
 /** That the relay closed the local card of a question, whichever table holds it. */
 export async function recordDmQuestionLocalCardClosed(tx: Prisma.TransactionClient,
   input: { questionId: string; cardId: string; now: Date }) {
+  if (isAmuxDmOwnerSettlementId(input.questionId)) {
+    const recorded = await recordAmuxDmOwnerSettlementLocalCardClosed(tx, input);
+    if (!recorded) throw new BoardImportError("not_found", 404);
+    return recorded;
+  }
   return await recordAmuxIdeaCardCloseLocalCardClosed(tx, input) ??
     await recordAmuxV22ResultReviewLocalCardClosed(tx, input) ??
     await recordEngineeringAgentT2DmLocalCardClosed(tx, input) ??
@@ -251,6 +272,10 @@ export type AmuxV22ResolveStep =
   | { kind: "result_review"; cursor: Advance; reviewId: string; requestId: string;
       decision: AmuxV22ResultReviewDecision }
   | { kind: "result_review_handoff"; cursor: Advance; reviewId: string;
+      requestId: string }
+  | { kind: "owner_settlement"; cursor: Advance; settlementId: string; requestId: string;
+      answer: AmuxDmOwnerSettlementAnswer }
+  | { kind: "owner_settlement_handoff"; cursor: Advance; settlementId: string;
       requestId: string };
 
 /**
@@ -288,7 +313,9 @@ export async function readAmuxV22ResolveStep(
     await readOpenAmuxIdeaCardCloseQuestionOfCard(tx, state.binding.cardId) : null;
   const review = state && !question && !refusal && !closeQuestion ?
     await readOpenAmuxV22ResultReviewOfCard(tx, state.binding.cardId) : null;
-  if (!question && !refusal && !closeQuestion && !review) return { kind: "skip", cursor };
+  const settlement = state && !question && !refusal && !closeQuestion && !review ?
+    await readOpenAmuxDmOwnerSettlementOfCard(tx, state.binding.cardId) : null;
+  if (!question && !refusal && !closeQuestion && !review && !settlement) return { kind: "skip", cursor };
   // The asking run has not settled yet: the walk waits here and asks again,
   // rather than cancel a question that is about to be parked.
   if (question && !question.attempt.endedAt) return { kind: "wait", cursor: { move: "keep" } };
@@ -325,6 +352,15 @@ export async function readAmuxV22ResolveStep(
         dmAnswer: bodies.dm_answer, operatorAnswer: bodies.operator_answer }) : null;
     return decision ? { kind: "result_review", ...reviewBase, decision } :
       { kind: "result_review_handoff", ...reviewBase };
+  }
+  if (settlement) {
+    const settlementBase = { cursor, settlementId: settlement.id, requestId: judgment.requestId };
+    const answer = candidate?.status === "ready" ?
+      amuxDmOwnerSettlementAnswerOf({ kind: settlement.kind, judgmentKind: judgment.judgmentKind,
+        outputKind: detail?.outputKind ?? null, optionId: detail?.optionId ?? null,
+        dmAnswer: bodies.dm_answer, operatorAnswer: bodies.operator_answer }) : null;
+    return answer ? { kind: "owner_settlement", ...settlementBase, answer } :
+      { kind: "owner_settlement_handoff", ...settlementBase };
   }
   if (!question) return { kind: "skip", cursor };
   const base = { cursor, questionId: question.id, taskId: question.taskId,
@@ -417,10 +453,41 @@ export const applyAmuxPlanRefusalDecisionStep = (step: { refusalId: string;
  * the cancel. What the relay is told about its cursor comes back with it.
  */
 export async function runAmuxV22ResolveStep(after: DmDeliveryCursor | null):
-  Promise<{ resolved: null | "answered" | "cancelled" | "closed" | "kept" | "reviewed"; cursor: AmuxV22ResolveCursor }> {
+  Promise<{ resolved: null | "answered" | "cancelled" | "closed" | "kept" | "reviewed" | "settled"; cursor: AmuxV22ResolveCursor }> {
   const step = await withAmuxDbBoundary(
     AMUX_DB_BOUNDARIES.decisionMakerV22QuestionResolve,
     (tx, context) => readAmuxV22ResolveStep(tx, after, context.dbNow));
+  if (step.kind === "owner_settlement" || step.kind === "owner_settlement_handoff") {
+    // As a result review: a fault never holds back the questions behind it.
+    try {
+      if (step.kind === "owner_settlement_handoff") {
+        await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementHandoff,
+          (tx, context) => recordAmuxDmOwnerSettlementHandoff(tx, { settlementId: step.settlementId,
+            requestId: step.requestId, reason: "answer_unreadable", now: context.dbNow }));
+        return { resolved: null, cursor: step.cursor };
+      }
+      const { answer } = step;
+      // A remake's idea is filed first, outside the settlement's transaction.
+      // One whose outcome is not known yet is stepped past, not waited on: the
+      // walk meets it again on its next pass and reads the idea back first.
+      const filed = answer.decision === "remake" ? await fileAmuxDmOwnerSettlementRemakeIdea({
+        settlementId: step.settlementId, ideaText: answer.ideaText }) : undefined;
+      if (filed && "pending" in filed) return { resolved: null, cursor: step.cursor };
+      const applied = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementApply,
+        (tx, context) => applyAmuxDmOwnerSettlementDecision(tx, { settlementId: step.settlementId,
+          answer, source: "dm_confirmed", requestId: step.requestId, now: context.dbNow,
+          remake: filed }));
+      // Held by the kill switch: keep the place. Handed to the person: step past it.
+      if (!applied.applied && applied.outcome !== "handed_off")
+        return { resolved: null, cursor: { move: "keep" } };
+      return { resolved: applied.outcome === "cancelled" ? "cancelled" :
+        applied.outcome === "handed_off" ? null : "settled", cursor: step.cursor };
+    } catch (error) {
+      console.warn(JSON.stringify({ subsystem: "amux", event: "dm_owner_settlement_apply_failed",
+        sqlState: amuxDatabaseDiagnosticCode(error) }));
+      return { resolved: null, cursor: step.cursor };
+    }
+  }
   if (step.kind === "result_review" || step.kind === "result_review_handoff") {
     // As a card close: a fault never holds back the questions behind it.
     try {
