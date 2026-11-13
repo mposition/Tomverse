@@ -153,7 +153,11 @@ export function checkPlan(answer, { packs, history = [] }) {
     if (!Array.isArray(words.lines) || words.lines.length < LIMITS.lines[0] || words.lines.length > LIMITS.lines[1]) return refuse(`${locale}: lines is a list of ${LIMITS.lines[0]}-${LIMITS.lines[1]} narration lines`);
     if (!words.lines.every((line) => isText(line, LIMITS.lineChars))) return refuse(`${locale}: a narration line is empty or longer than ${LIMITS.lineChars}`);
     if (words.lines.join("").length > LIMITS.localeChars) return refuse(`${locale}: the narration is longer than ${LIMITS.localeChars} characters`);
-    if (!Array.isArray(words.screen) || words.screen.length > LIMITS.screenLines || !words.screen.every((line) => isText(line, LIMITS.screenChars))) return refuse(`${locale}: screen is at most ${LIMITS.screenLines} lines of at most ${LIMITS.screenChars}`);
+    if (!Array.isArray(words.screen) || words.screen.length > LIMITS.screenLines || !words.screen.every((line) => isText(line, LIMITS.screenChars))) {
+      // Name the line to mend, so a retry changes that line and nothing else.
+      const long = Array.isArray(words.screen) ? words.screen.find((line) => !isText(line, LIMITS.screenChars)) : undefined;
+      return refuse(`${locale}: screen is at most ${LIMITS.screenLines} lines of at most ${LIMITS.screenChars} characters${Array.isArray(words.screen) && words.screen.length > LIMITS.screenLines ? ` (it has ${words.screen.length})` : ""}${long !== undefined ? `; shorten or split ${JSON.stringify(String(long).slice(0, 120))}` : ""}`);
+    }
     if (!words.screen.includes(AI_LINE[locale])) return refuse(`${locale}: screen must include the AI line "${AI_LINE[locale]}" exactly`);
     if (!isText(words.alt, LIMITS.altChars)) return refuse(`${locale}: alt is missing or longer than ${LIMITS.altChars}`);
     if ([...words.lines, ...words.screen].some((line) => URL_LIKE.test(line))) return refuse(`${locale}: no web address in the words (the end card carries tomverse.app)`);
