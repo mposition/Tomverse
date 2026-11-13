@@ -39,8 +39,8 @@ the top left):
   "cta", "x", "y", "w", "h", "rotate": <degrees, -45 to 45>, "bg": "#rrggbb"
   (six hex digits: the colour right behind it)}`. A headline or subhead is
   `headline`; a call to action is `cta`; every other text in the scene is
-  `screen`, whether it is on a phone or laptop screen, an answer, a label, a
-  name tag or a line on paper. Make each box just large enough to hold its
+  `screen`, whether it is a label, a name tag or a line on paper. A text with
+  `ui` is drawn on the device's display by code: give it no box. Make each box just large enough to hold its
   words and keep it inside the picture: `x + w` and `y + h` are at most 1, `w`
   at least 0.02 and `h` at least 0.01. The language versions set their words
   in these boxes, so a text with no box stays in English.

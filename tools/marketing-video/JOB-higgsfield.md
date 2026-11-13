@@ -59,20 +59,32 @@ all about comparing answers. Write for a stranger scrolling past:
 ## What to write
 
 Two or three concepts for today's feature that differ from each other in scene
-and device. Each one:
+and device, each in a different format (guide 4), the formats of the last 7
+days used last. Each one:
 
 - `id`: `c1`, `c2`, `c3`.
+- `format`: `person`, `phone`, `laptop`, `diagram` or `object` (guide 4).
+  `phone` and `laptop`: the device's screen fills a large part of the frame,
+  close to the camera, hands at most at its edges. `diagram`: a flat, clean
+  graphic on a calm ground, shapes, arrows and provider marks, its words in
+  `texts` as `label`s. `object`: the metaphor fills the frame. `person`: the
+  person and the product share the frame, the product clearly readable.
 - `feature`: today's feature.
 - `device`: the scene idea in one line (10-160 characters), e.g. "a renter on
   the bus asks an AI on her phone whether a clause in her lease is normal".
 - `prompt_en`: the full image prompt for `gpt_image_2_6`, 4:5 portrait, 200 to
-  6000 characters. Describe the photo, the people, the light, the composition,
+  6000 characters. Describe the picture in its format: the scene or the graphic, any people, the light, the composition,
   where each piece of text sits and what it says word for word, and the
   provider logos to place (the reference files are attached to the call). Write
   it so the picture works without the Tomverse logo: the code adds a band at
   the bottom. Every word the picture shows is one of `texts`: props (papers,
   books, maps, signs) carry no other lettering, and a quoted answer is drawn
-  without quotation marks around it. The image model draws or follows every word it reads, even after
+  without quotation marks around it. The one display that shows words (a
+  phone, a tablet or a laptop) is described as "a screen filled edge to edge
+  with flat chroma green #00ff00, evenly lit, completely empty"; never
+  describe the words or the app on it, because code draws the app screen
+  there (guide 15). Fingers may rest on its edge. Size every device true to
+  the person (guide 5): a phone is about as long as the hand holding it. The image model draws or follows every word it reads, even after
   "no", so these never appear in it, not even to forbid them: "Tomverse" (not
   "no Tomverse logo", not "Tomverse blue"), purple, violet, magenta, lavender,
   lilac, fuchsia, "lorem ipsum", and any web address. Say "#155dfb blue" and
@@ -80,11 +92,18 @@ and device. Each one:
 - `texts`: every piece of text the picture shows, exactly, in English, in
   reading order, at most 12, each `{"role", "text"}`:
   - `headline` (one, at most 70 characters), `subhead`, `cta` (exactly one),
-    `screen` (words
-    on a phone or laptop screen), `answer` (an AI answer on a screen), `label`
-    (a name tag, a chip, a receipt line). Every text but the headline is at
-    most 400 characters. A picture that needs more than 12 texts shows too
-    much: cut it down.
+    `screen` (words on a phone or laptop screen), `answer` (an AI answer on a
+    screen), `label` (a name tag, a chip, a receipt line). Every text but the
+    headline is at most 400 characters. A picture that needs more than 12
+    texts shows too much: cut it down.
+  - Every text on the green display has `ui`, in the order the app shows
+    them: `title` (a small chip at the top, e.g. "Smart Adaptive"),
+    `question` (what the person typed), `answer` (the AI's reply), `caption`
+    (a small grey line under it). One display, at most 5 texts, at most one
+    question and exactly one answer. An `answer` with `ui` is at most 120
+    characters (80 in Korean or Chinese), any other `ui` text at most 60 (40):
+    guide 18. Its `role` is `answer` for the answer and `screen` for the rest.
+    Each translation keeps the same `ui`.
   - Only an `answer` may have a `speaker`. An `answer` under a real model name
     has `"speaker": "<model name as in features.json>"` and is that model's
     recorded words, with nothing added (guide 10). Only the models quoted in a
@@ -105,8 +124,10 @@ and device. Each one:
   `analysis.realExample.counts.consensus`, `analysis.realExample.contradiction`.
   At least one from today's feature.
 - `translations`: `{"ko": [...], "zh-Hant": [...], "zh-Hans": [...]}`, one entry
-  per entry of `texts`, same order, same `role` and `speaker`. Natural copy in
-  each language, not word for word; every model or company name of the English
+  per entry of `texts`, same order, same `role` and `speaker`. Written as a
+  native copywriter of that market would write it, never a calque of the
+  English (not "한 팬 달걀볶음밥" but "프라이팬 하나로 만드는 달걀볶음밥"); a
+  native-copy editor polishes them after you, but start natural; every model or company name of the English
   text stays in its translation, in Latin letters, and a recorded answer is
   repeated in English exactly (guide 12, 15, 16, 17). A Korean or Chinese
   headline is at most 40 characters. "무료" and "免費" carry their condition
