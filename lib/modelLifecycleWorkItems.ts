@@ -2,7 +2,9 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 
-import { listImageModels } from "@/lib/imageModelRegistry";
+// The resolved catalogue, not the module seed: a model added and turned on at
+// runtime (qwen-image-2.0, 2026-11-13) exists only there.
+import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { modelOwner } from "@/lib/modelOwner";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
@@ -26,6 +28,7 @@ import {
     ADOPTION_RECORD_STATUSES,
     MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR,
     isRolloutFinishable,
+    ROLLOUT_WALK_TO_VALIDATION,
     vanishedDiscoveryChanges,
     workItemDecisionRecordRefusal,
     workItemDecisionTarget,
@@ -119,7 +122,7 @@ export async function recordDiscoveredWorkItems(input: {
         observed: input.observed,
         catalogueApiModels: [
             ...catalogue.map((row) => row.apiModel),
-            ...listImageModels().map((model) => model.apiModelId),
+            ...(await refreshImageModelCatalog()).map((model) => model.apiModelId),
         ],
         queuedApiModels: queued.map((row) => row.apiModel),
         queuedDecisionKeys: queued
@@ -926,7 +929,7 @@ export async function finishServedRollouts(
     const liveFamilies = new Set(
         [
             ...liveRegistry.map((row) => row.apiModel),
-            ...listImageModels()
+            ...(await refreshImageModelCatalog())
                 .filter((model) => model.disabledReason === null)
                 .map((model) => model.apiModelId),
         ].map(decisionIdentity)
@@ -965,6 +968,24 @@ export async function finishServedRollouts(
             },
         };
     }
+    // An item still open before validation (an image model turned on in the
+    // catalogue never moved its item) walks there first; approving records the
+    // decision this click is.
+    const statusById = new Map(rows.map((row) => [row.id, row.status as WorkItemStatus]));
+    for (const step of ROLLOUT_WALK_TO_VALIDATION) {
+        const stepIds = rows.filter((row) => step.from.includes(statusById.get(row.id)!)).map((row) => row.id);
+        if (stepIds.length === 0) continue;
+        const moved = await transitionWorkItemsInTransaction(tx, {
+            workItemIds: stepIds,
+            to: step.to,
+            actorEmail: input.actorEmail,
+            note: input.note,
+            ...(step.to === "approved" ? { decision: { decision: "approve" as const, reason: input.note } } : {}),
+            now,
+        });
+        if (!moved.ok) return moved;
+        for (const id of stepIds) statusById.set(id, step.to);
+    }
     for (const row of rows) {
         const pending = stringList(row.pendingValidations);
         if (pending.length === 0) continue;
@@ -977,15 +998,15 @@ export async function finishServedRollouts(
                 workItemId: row.id,
                 occurredAt: now,
                 actorEmail: input.actorEmail,
-                fromStatus: row.status,
-                toStatus: row.status,
+                fromStatus: statusById.get(row.id)!,
+                toStatus: statusById.get(row.id)!,
                 note: `Validation satisfied: ${pending.join(", ")}. ${input.note}`,
             },
         });
     }
     const steps: Array<{ ids: string[]; to: WorkItemStatus }> = [
         {
-            ids: rows.filter((row) => row.status === "validation_pending").map((row) => row.id),
+            ids: rows.filter((row) => statusById.get(row.id) === "validation_pending").map((row) => row.id),
             to: "rollout_pending",
         },
         {
@@ -1401,7 +1422,7 @@ export async function listModelDiscoveryQueue(options?: {
 
     const aliases = providerAliasEvidence(entries);
     const decisionIdentity = createModelDecisionIdentityResolver(aliases);
-    const imageModels = listImageModels();
+    const imageModels = (await refreshImageModelCatalog());
     const servedModels: ServedModelPortfolioEntry[] = [
         ...registry
             .filter(

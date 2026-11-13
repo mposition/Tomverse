@@ -806,7 +806,10 @@ export function AdminModelDiscoveryPanel() {
       header: m.table.triage,
       render: (group) => {
         const busy = group.members.some((member) => busyIds.has(member.id));
-        const adoptable = view === "open" ? adoptableMember(group) : null;
+        // A model already served needs neither a draft nor adoption: the row
+        // offers to finish its rollout instead.
+        const live = group.members.some((member) => member.rolloutFinishable);
+        const adoptable = view === "open" && !live ? adoptableMember(group) : null;
         return (
           <div className="flex max-w-[12rem] flex-wrap gap-1.5">
             {adoptable ? (
@@ -817,7 +820,7 @@ export function AdminModelDiscoveryPanel() {
                 {m.table.adopt}
               </a>
             ) : null}
-            {view === "open" && imageDraftMember(group) ? (
+            {view === "open" && !live && imageDraftMember(group) ? (
               isRuntimeImageProvider(imageDraftMember(group)!.provider) ? (
                 <a
                   data-testid="model-discovery-image-draft"

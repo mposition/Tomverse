@@ -74,7 +74,7 @@ test("the list puts the models waiting for the operator first, each with one nex
 
 test("the price check shows each option's cost and floor, and an edit below the floor locks the apply button", () => {
   const clean = renderToStaticMarkup(
-    <ImageModelDetail m={en} item={qwen} edits={{ "medium|1024x1024": "45" }} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
+    <ImageModelDetail m={en} item={qwen} edits={{ "medium|1024x1024": "45" }} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} onRename={async () => true} />
   );
   assert.match(clean, /\$0\.035/);
   assert.match(clean, />Draft 41</);
@@ -86,7 +86,7 @@ test("the price check shows each option's cost and floor, and an edit below the 
   assert.doesNotMatch(applyButton(clean), / disabled=""/);
 
   const below = renderToStaticMarkup(
-    <ImageModelDetail m={en} item={qwen} edits={{ "medium|1024x1024": "40" }} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
+    <ImageModelDetail m={en} item={qwen} edits={{ "medium|1024x1024": "40" }} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} onRename={async () => true} />
   );
   assert.match(below, />Below 41</);
   assert.match(applyButton(below), / disabled=""/);
@@ -99,7 +99,7 @@ test("the price check shows each option's cost and floor, and an edit below the 
 test("a draft the judge refuses for another reason offers only a new draft, in words", () => {
   const refused = { ...qwen, draftReview: { floors, reasons: ["worst_case_cost_unbounded"] } };
   const html = renderToStaticMarkup(
-    <ImageModelDetail m={en} item={refused} edits={{}} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
+    <ImageModelDetail m={en} item={refused} edits={{}} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} onRename={async () => true} />
   );
   assert.match(html, /No reasoning cost cap is stated/);
   assert.match(html, />Make a new draft</);
@@ -108,7 +108,7 @@ test("a draft the judge refuses for another reason offers only a new draft, in w
 
 test("while drafting, the detail shows the elapsed time instead of the table", () => {
   const html = renderToStaticMarkup(
-    <ImageModelDetail m={ko} item={qwen} edits={{}} drafting="0:42" onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
+    <ImageModelDetail m={ko} item={qwen} edits={{}} drafting="0:42" onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} onRename={async () => true} />
   );
   assert.match(html, /0:42 경과 · 최대 2:00/);
   assert.doesNotMatch(html, /data-testid="model-catalog-price-table"/);
@@ -165,7 +165,7 @@ test("a serving model with a new draft can still be held from its card and its d
   assert.match(list, /data-testid="model-catalog-hold"/);
   assert.match(list, />Serving</);
   const detail = renderToStaticMarkup(
-    <ImageModelDetail m={en} item={repriced} edits={{}} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
+    <ImageModelDetail m={en} item={repriced} edits={{}} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} onRename={async () => true} />
   );
   // Even when the judge refuses the draft, the live model can be stopped.
   assert.match(detail, /data-testid="model-catalog-hold"/);

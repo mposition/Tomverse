@@ -159,20 +159,40 @@ export const REOPENABLE_WORK_ITEM_STATUSES: ReadonlySet<WorkItemStatus> = new Se
 ]);
 
 /**
- * Where an adopted model's item stalls once the model is live: adoption walks
- * it to `validation_pending` and nothing in the discovery queue walked it on.
+ * Where an item whose model is already live can stall. Adoption walks a chat
+ * item to `validation_pending` and nothing in the discovery queue walked it on:
  * 26 production items sat there for up to 50 days (cleared by hand
- * 2026-11-11), each read as "a later version is served" -- itself.
+ * 2026-11-11), each read as "a later version is served" -- itself. An image
+ * model is turned on in the catalogue, which never touches its item, so it
+ * stays `discovered` with its "catalogue draft" button after it serves
+ * (2026-11-13). Every open state before rollout is listed; finishing walks the
+ * item through the states in between (`finishServedRollouts`).
  */
 export const ROLLOUT_FINISHABLE_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
+    "discovered",
+    "awaiting_decision",
+    "deferred",
+    "approved",
+    "implementation_pending",
     "validation_pending",
     "rollout_pending",
 ]);
 
 /**
+ * The walk from each open state to `validation_pending`, in order. Approving
+ * records the decision the click is (`approve`, with the operator's note).
+ */
+export const ROLLOUT_WALK_TO_VALIDATION: ReadonlyArray<{ from: readonly WorkItemStatus[]; to: WorkItemStatus }> = [
+    { from: ["discovered", "deferred"], to: "awaiting_decision" },
+    { from: ["awaiting_decision"], to: "approved" },
+    { from: ["approved"], to: "implementation_pending" },
+    { from: ["implementation_pending"], to: "validation_pending" },
+];
+
+/**
  * Whether an operator can close this item as rolled out in one step: an `add`
  * whose model is live -- enabled, publicly listed and not disabled in the
- * registry, or an enabled image model -- stalled after adoption. A registry row
+ * registry, or an enabled image model -- that is still open before rollout. A registry row
  * alone is not enough: `completed` is terminal, and a disabled or unlisted row
  * has not rolled out. The person still decides; this only says the button
  * applies.
