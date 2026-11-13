@@ -271,6 +271,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "imageModelBillingTerms",
+    publicName: "image_model_billing_terms",
+    prismaModel: "ImageModelBillingTerms",
+    state: "unverified",
+  },
+  {
+    domain: "imageBillingMeasurement",
+    publicName: "image_billing_measurement",
+    prismaModel: "ImageBillingMeasurement",
+    state: "unverified",
+  },
+  {
     domain: "providerBillingConfig",
     publicName: "provider_billing_config",
     prismaModel: "ProviderBillingConfig",

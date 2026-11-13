@@ -19,6 +19,7 @@ import {
   type ImageModelFormValue,
   reasonText,
 } from "@/components/admin/modelCatalog/ImageCatalogViews";
+import { ImageBillingMeasurePanel, type MeasureTarget } from "@/components/admin/modelCatalog/ImageBillingMeasureViews";
 import { AdminConfirmDialog } from "@/components/admin/ui/AdminConfirmDialog";
 import { AdminReasonDialog } from "@/components/admin/ui/AdminReasonDialog";
 import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
@@ -43,6 +44,7 @@ import {
   priceRange,
   reasonMessage,
   refusalReasons,
+  suggestsMeasurement,
 } from "@/lib/adminModelCatalogFlow";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import {
@@ -129,6 +131,8 @@ export function AdminModelCatalogPanel() {
   const [confirmCodingEnable, setConfirmCodingEnable] = useState<CodingCatalogItem | null>(null);
   const [hold, setHold] = useState<{ category: "image" | "coding"; modelId: string; name: string } | null>(null);
   const [holdReason, setHoldReason] = useState("");
+  // The billing measurement screen for one provider model (no catalogue row needed).
+  const [measure, setMeasure] = useState<MeasureTarget | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((value: CatalogToastValue | null) => {
@@ -190,15 +194,35 @@ export function AdminModelCatalogPanel() {
   const openCoding = codingItems.find((item) => item.id === codingOpenId) ?? null;
 
   const refusedToast = useCallback(
-    (codes: readonly string[], detail = "") => {
+    (codes: readonly string[], detail = "", measureTarget?: MeasureTarget) => {
       const text = codes.map((code) => reasonText(m, reasonMessage(code, detail))).join(" ");
-      showToast({ tone: "refused", title: m.toastRefused, body: text });
+      // A price the documentation cannot settle can be measured: offer that as the next step.
+      const offerMeasure = measureTarget && suggestsMeasurement(measureTarget.provider, codes, detail);
+      showToast({
+        tone: "refused",
+        title: m.toastRefused,
+        body: text,
+        action: offerMeasure
+          ? {
+              label: m.measure.action,
+              onClick: () => {
+                showToast(null);
+                setMeasure(measureTarget);
+              },
+            }
+          : null,
+      });
     },
     [m, showToast]
   );
 
   /** One request; refusals become a toast in words. A timeout is reported, never retried here. */
-  const send = async (method: "PATCH" | "POST", body: unknown, timeoutMs?: number): Promise<SendResult> => {
+  const send = async (
+    method: "PATCH" | "POST",
+    body: unknown,
+    timeoutMs?: number,
+    measureTarget?: MeasureTarget
+  ): Promise<SendResult> => {
     let response: Response;
     try {
       response = await adminFetch("/api/admin/model-catalog", {
@@ -231,7 +255,7 @@ export function AdminModelCatalogPanel() {
         refusedToast(["forbidden"]);
       } else {
         const code = payload?.code ?? payload?.error ?? String(response.status);
-        refusedToast(refusalReasons(code, payload?.reasons ?? []), payload?.detail ?? "");
+        refusedToast(refusalReasons(code, payload?.reasons ?? []), payload?.detail ?? "", measureTarget);
       }
       return { ok: false, timedOut: false };
     }
@@ -267,7 +291,8 @@ export function AdminModelCatalogPanel() {
         sourceUrls: input.sources,
         ...(input.choices ? { profile: input.choices } : {}),
       },
-      DRAFT_REQUEST_TIMEOUT_MS
+      DRAFT_REQUEST_TIMEOUT_MS,
+      { provider: input.provider, apiModelId: input.apiModelId, name: input.name }
     );
     setDrafting(null);
     if (result.ok) {
@@ -325,6 +350,21 @@ export function AdminModelCatalogPanel() {
       return;
     }
     setOpenId(item.id);
+  };
+
+  /** After terms are confirmed: a new draft for the model, or the add form when it has no row yet. */
+  const redraftAfterMeasure = (target: MeasureTarget) => {
+    setMeasure(null);
+    const item = items.find((entry) => entry.provider === target.provider && entry.apiModelId === target.apiModelId);
+    if (item) {
+      onAction(item, "redraft");
+      return;
+    }
+    setForm({
+      mode: "add",
+      modelId: null,
+      value: { ...emptyForm(target.provider), apiModelId: target.apiModelId, name: target.name },
+    });
   };
 
   const submitForm = async () => {
@@ -587,11 +627,21 @@ export function AdminModelCatalogPanel() {
             {!report.draftLlm.configured ? (
               <p className="text-xs text-amber-300">{m.draftNotConfigured(report.draftLlm.env)}</p>
             ) : null}
-            {openItem ? (
+            {measure ? (
+              <ImageBillingMeasurePanel
+                key={`${measure.provider}:${measure.apiModelId}`}
+                m={m}
+                target={measure}
+                defaultSources={providers.find((entry) => entry.provider === measure.provider)?.defaultSources ?? []}
+                onBack={() => setMeasure(null)}
+                onRedraft={() => redraftAfterMeasure(measure)}
+              />
+            ) : openItem ? (
               <ImageModelDetail
                 key={openItem.id}
                 m={m}
                 item={openItem}
+                onMeasure={() => setMeasure({ provider: openItem.provider, apiModelId: openItem.apiModelId, name: openItem.name })}
                 edits={edits[openItem.id] ?? {}}
                 drafting={drafting?.category === "image" && drafting.modelId === openItem.id ? elapsedText(now - drafting.startedAt) : null}
                 onBack={() => setOpenId(null)}

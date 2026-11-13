@@ -172,7 +172,64 @@ export type ImageModelProfile = {
   thinkingLevel?: GoogleThinkingLevel;
   /** Free-text note surfaced in the admin panel for a disabled model. */
   disabledNote?: string;
+  /**
+   * The billing terms an operator confirmed for this provider model from a
+   * measurement in the admin console (policy section 12.1), attached when the
+   * catalogue resolves. Absent means the code tables alone answer. Read
+   * through the functions below, never as a bound on its own.
+   */
+  billingTerms?: ConfirmedImageBillingTerms;
 };
+
+/**
+ * Billing terms confirmed from a measurement, per provider model. Data the
+ * judge reads beside the code tables (GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS,
+ * IMAGE_PER_IMAGE_BILLED_MODELS); which provider each kind may describe is
+ * code (`billingTermsApplyTo`), so a stored row cannot open a provider whose
+ * request does not hold it.
+ *
+ *   - `per_image_no_thinking`: billed per delivered image with no thinking or
+ *     token charge; a Qwen model outside the `qwen-image-` family read so.
+ *   - `measured_output_limit`: a Google direct model whose billable text and
+ *     thinking the sent `max_output_tokens` was measured to hold, with the
+ *     same margin as the code rows.
+ *   - `tokens_per_image`: an OpenAI model billed per image output token whose
+ *     documentation gives the rate but not the count; the count per quality
+ *     and size is the measured one. Thinking stays the provider's answer.
+ */
+export type ConfirmedImageBillingTerms =
+  | { kind: "per_image_no_thinking"; confirmationId?: string }
+  | {
+      kind: "measured_output_limit";
+      maxOutputTokens: number;
+      textOutputUsdPerMTok: number;
+      imageTokensPerImage: number;
+      /** The documented image output rate the measurement priced its samples at; the judge holds prices to it. */
+      imageOutputUsdPerMTok: number;
+      confirmationId?: string;
+    }
+  | {
+      kind: "tokens_per_image";
+      imageOutputUsdPerMTok: number;
+      tokens: readonly { quality: ImageQuality; size: ImageSize; tokens: number }[];
+      confirmationId?: string;
+    };
+
+export type ConfirmedImageBillingKind = ConfirmedImageBillingTerms["kind"];
+
+/** The one provider each kind can describe: the request that provider's adapter sends is what holds it. */
+export const IMAGE_BILLING_TERMS_PROVIDER: Readonly<Record<ConfirmedImageBillingKind, ImageModelProvider>> = {
+  per_image_no_thinking: "qwen",
+  measured_output_limit: "google",
+  tokens_per_image: "openai",
+};
+
+/** Confirmed terms that this provider's request can hold, else null. */
+export const billingTermsApplyTo = (
+  provider: unknown,
+  terms: ConfirmedImageBillingTerms | null | undefined
+): ConfirmedImageBillingTerms | null =>
+  terms && IMAGE_BILLING_TERMS_PROVIDER[terms.kind] === provider ? terms : null;
 
 const OPENAI_GPT_IMAGE_2: ImageModelProfile = {
   id: "gpt-image-2",
@@ -743,7 +800,7 @@ export const getImageModelPrice = (
  *     cutoff including thought tokens, which is the opposite of that
  *     measurement; until a new measurement settles it, it is not a bound.
  *     This is what a Google model with no row in
- *     GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS still is.
+ *     GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS and no confirmed measured terms still is.
  *   - `per_token_within_output_limit`: billed per token, and the output limit
  *     the request sends holds the count. Only a Google direct model listed in
  *     GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS, and only while its request sends that
@@ -800,11 +857,34 @@ export const GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS: Readonly<
 /** Non-image billable tokens are held at this many times the limit sent. */
 export const GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN = 2;
 
-/** The measured row for a Google direct model, or null (also for a prototype key). */
-export const googleImageOutputLimitBound = (provider: unknown, apiModelId: unknown) =>
-  provider === "google" && typeof apiModelId === "string" && Object.hasOwn(GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS, apiModelId)
+type MeasuredOutputLimitBound = { maxOutputTokens: number; textOutputUsdPerMTok: number; imageTokensPerImage: number };
+
+/**
+ * The measured bound for a Google direct model, or null (also for a prototype
+ * key). Terms an operator confirmed from a measurement come first; the code
+ * table is the default for a model with none.
+ */
+export const googleImageOutputLimitBound = (
+  provider: unknown,
+  apiModelId: unknown,
+  confirmed?: ConfirmedImageBillingTerms | null
+): MeasuredOutputLimitBound | null => {
+  const terms = billingTermsApplyTo(provider, confirmed);
+  if (terms?.kind === "measured_output_limit") {
+    return {
+      maxOutputTokens: terms.maxOutputTokens,
+      textOutputUsdPerMTok: terms.textOutputUsdPerMTok,
+      imageTokensPerImage: terms.imageTokensPerImage,
+    };
+  }
+  return provider === "google" && typeof apiModelId === "string" && Object.hasOwn(GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS, apiModelId)
     ? GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS[apiModelId]
     : null;
+};
+
+/** The measured bound a model's request is priced on, with its confirmed terms. */
+export const imageMeasuredOutputLimitBound = (model: Pick<ImageModelProfile, "provider" | "apiModelId" | "billingTerms">) =>
+  googleImageOutputLimitBound(model.provider, model.apiModelId, model.billingTerms);
 
 type ImageThinkingTerms =
   | FalThinkingTerms
@@ -834,10 +914,18 @@ const IMAGE_PER_IMAGE_BILLED_MODELS: Readonly<Partial<Record<ImageModelProvider,
   qwen: /^qwen-image-/,
 };
 
-/** The terms for this model's request: per endpoint on fal, per provider elsewhere. */
-const imageThinkingTerms = (provider: unknown, apiModelId: unknown): ImageThinkingTerms | null => {
+/**
+ * The terms for this model's request: per endpoint on fal, per provider
+ * elsewhere, and the operator's confirmed terms (`confirmed`) where the code
+ * tables have no answer of their own.
+ */
+const imageThinkingTerms = (
+  provider: unknown,
+  apiModelId: unknown,
+  confirmed?: ConfirmedImageBillingTerms | null
+): ImageThinkingTerms | null => {
   if (provider === "fal") return falEndpointProfile(apiModelId)?.thinking ?? null;
-  const bound = googleImageOutputLimitBound(provider, apiModelId);
+  const bound = googleImageOutputLimitBound(provider, apiModelId, confirmed);
   if (bound) {
     return {
       billing: "per_token_within_output_limit",
@@ -845,12 +933,14 @@ const imageThinkingTerms = (provider: unknown, apiModelId: unknown): ImageThinki
       capMicroUsd: Math.ceil(GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN * bound.maxOutputTokens * bound.textOutputUsdPerMTok),
     };
   }
-  // A family read as per-image is not a bound on the provider's other models.
+  // A family read as per-image is not a bound on the provider's other models,
+  // unless an operator confirmed this model's per-image billing by measuring it.
   const family =
     typeof provider === "string" && Object.hasOwn(IMAGE_PER_IMAGE_BILLED_MODELS, provider)
       ? IMAGE_PER_IMAGE_BILLED_MODELS[provider as ImageModelProvider]
       : undefined;
-  if (family && typeof apiModelId === "string" && !family.test(apiModelId)) return null;
+  const confirmedPerImage = billingTermsApplyTo(provider, confirmed)?.kind === "per_image_no_thinking";
+  if (family && typeof apiModelId === "string" && !family.test(apiModelId) && !confirmedPerImage) return null;
   return typeof provider === "string" && Object.hasOwn(IMAGE_PROVIDER_THINKING_BILLING, provider)
     ? { billing: IMAGE_PROVIDER_THINKING_BILLING[provider as keyof typeof IMAGE_PROVIDER_THINKING_BILLING] }
     : null;
@@ -859,8 +949,9 @@ const imageThinkingTerms = (provider: unknown, apiModelId: unknown): ImageThinki
 /** Null for a provider this code has no adapter for, and for an unlisted fal endpoint. */
 export const imageThinkingBilling = (
   provider: unknown,
-  apiModelId?: unknown
-): ImageThinkingBilling | null => imageThinkingTerms(provider, apiModelId)?.billing ?? null;
+  apiModelId?: unknown,
+  confirmed?: ConfirmedImageBillingTerms | null
+): ImageThinkingBilling | null => imageThinkingTerms(provider, apiModelId, confirmed)?.billing ?? null;
 
 /**
  * The smallest stated cap that bounds what this model's request spends on
@@ -872,9 +963,10 @@ export const imageThinkingBilling = (
  */
 export const imageThinkingCapMinimumMicroUsd = (
   provider: unknown,
-  apiModelId?: unknown
+  apiModelId?: unknown,
+  confirmed?: ConfirmedImageBillingTerms | null
 ): number | null => {
-  const terms = imageThinkingTerms(provider, apiModelId);
+  const terms = imageThinkingTerms(provider, apiModelId, confirmed);
   if (terms?.billing === "not_billed") return 0;
   if (terms?.billing === "flat_per_request") return terms.surchargeMicroUsd;
   if (terms?.billing === "per_token_within_output_limit") return terms.capMicroUsd;
@@ -893,15 +985,30 @@ export const imageThinkingCapMinimumMicroUsd = (
 export const imageThinkingCapEnforced = (
   model: Pick<
     ImageModelProfile,
-    "provider" | "apiModelId" | "priceVerification" | "maxOutputTokens" | "thinkingLevel"
+    "provider" | "apiModelId" | "priceVerification" | "maxOutputTokens" | "thinkingLevel" | "billingTerms"
   >
 ): boolean => {
   const cap = model.priceVerification.thinkingCapMicroUsd;
   if (cap === null) return false;
-  const minimum = imageThinkingCapMinimumMicroUsd(model.provider, model.apiModelId);
+  const minimum = imageThinkingCapMinimumMicroUsd(model.provider, model.apiModelId, model.billingTerms);
   if (minimum === null || cap < minimum) return false;
-  const bound = googleImageOutputLimitBound(model.provider, model.apiModelId);
+  const bound = imageMeasuredOutputLimitBound(model);
   return !bound || (model.maxOutputTokens === bound.maxOutputTokens && !model.thinkingLevel);
+};
+
+/**
+ * The image output tokens a confirmed `tokens_per_image` measurement found for
+ * one option, or null. What the draft multiplies by the documented rate.
+ */
+export const confirmedImageOutputTokens = (
+  provider: unknown,
+  confirmed: ConfirmedImageBillingTerms | null | undefined,
+  quality: string,
+  size: string
+): number | null => {
+  const terms = billingTermsApplyTo(provider, confirmed);
+  if (terms?.kind !== "tokens_per_image") return null;
+  return terms.tokens.find((entry) => entry.quality === quality && entry.size === size)?.tokens ?? null;
 };
 
 /**

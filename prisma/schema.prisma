@@ -11876,6 +11876,47 @@ model ModelCatalogPriceRevision {
   @@index([category, modelId, effectiveFrom])
 }
 
+/// Image billing terms an operator confirmed from a measurement (image policy
+/// section 12.1), per provider model. Append-only: the latest row per provider
+/// and apiModelId is in force; nothing updates or deletes a row.
+model ImageModelBillingTerms {
+  id            String   @id @default(cuid())
+  provider      String
+  apiModelId    String
+  kind          String
+  terms         Json
+  sources       Json
+  measurementId String?
+  actorId       String?
+  actorEmail    String?
+  createdAt     DateTime @default(now())
+
+  @@index([provider, apiModelId, createdAt])
+}
+
+/// One paid billing measurement an operator approved in the admin console:
+/// the plan, each sample's reported usage (never the image), and what it spent
+/// against the provider budget. No user credits are involved.
+model ImageBillingMeasurement {
+  id              String    @id @default(cuid())
+  provider        String
+  apiModelId      String
+  status          String
+  plan            Json
+  maxCostMicroUsd Int
+  spentMicroUsd   Int       @default(0)
+  samples         Json
+  verdict         Json?
+  stopReason      String?
+  actorId         String?
+  actorEmail      String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+
+  @@index([provider, apiModelId, createdAt])
+  @@index([status])
+}
+
 /// Immutable published catalogue the Code client reads (managed mode).
 model ModelCatalogSnapshot {
   version       Int      @id @default(autoincrement())

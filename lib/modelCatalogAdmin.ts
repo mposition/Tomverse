@@ -8,8 +8,14 @@ import type { Session } from "next-auth";
 import { z } from "zod";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
-import { IMAGE_MODEL_REGISTRY, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
-import { codingCreditFloor, invalidateImageModelCatalog, judgeCoding, judgeImage } from "@/lib/modelCatalog";
+import { IMAGE_MODEL_REGISTRY, type ImageModelProfile, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
+import {
+  codingCreditFloor,
+  invalidateImageModelCatalog,
+  judgeCoding,
+  judgeImage,
+  loadImageBillingTermRows,
+} from "@/lib/modelCatalog";
 import {
   applyCodingDraftEdits,
   applyImageCreditOverrides,
@@ -25,8 +31,10 @@ import {
   imageVerificationSchema,
   isOfficialSourceUrl,
   judgeImageModel,
+  latestBillingTerms,
   MODEL_ID_PATTERN,
   resolveImageCatalog,
+  withImageBillingTerms,
   STORED_CATALOG_CATEGORIES,
   type StoredCatalogCategory,
 } from "@/lib/modelCatalogCore";
@@ -101,9 +109,10 @@ const imageAdmissionAfter = async (
   next: { holdReason: string | null; sortOrder: number | null; profile: unknown }
 ) => {
   const now = new Date();
-  const [rows, revisions] = await Promise.all([
+  const [rows, revisions, billingTerms] = await Promise.all([
     tx.modelCatalogEntry.findMany({ where: { category: "image" } }),
     tx.modelCatalogPriceRevision.findMany({ where: { category: "image", effectiveFrom: { lte: now } } }),
+    loadImageBillingTermRows(tx),
   ]);
   const others = rows.filter((row) => row.modelId !== modelId);
   let admission: { admitted: boolean; reasons?: readonly string[] } = { admitted: false, reasons: ["unknown_model"] };
@@ -111,6 +120,7 @@ const imageAdmissionAfter = async (
     seed: IMAGE_MODEL_REGISTRY,
     rows: [...others, { modelId, enabled: true, holdReason: next.holdReason, sortOrder: next.sortOrder, profile: next.profile }],
     revisions,
+    billingTerms,
     now,
     judge: (model) => {
       const result = judgeImage(model);
@@ -295,14 +305,19 @@ export const createImagePriceRevision = async (input: {
     // A runtime model is judged from its stored profile, like a seed one.
     const base = seed ?? (fullProfile?.success ? { id: modelId, ...fullProfile.data } : null);
     if (!base) throw new CatalogRefusal("unknown_model", [], 404);
-    const candidate = {
-      ...base,
-      disabledReason: null,
-      prices: revision.prices,
-      pricingVersion: revision.pricingVersion,
-      priceVerification: revision.verification,
-    };
-    const admission = judgeImageModel(candidate as never, {
+    // With the operator's confirmed billing terms, as the catalogue will resolve it.
+    const candidate = withImageBillingTerms(
+      {
+        ...base,
+        disabledReason: null,
+        prices: revision.prices,
+        pricingVersion: revision.pricingVersion,
+        priceVerification: revision.verification,
+      } as unknown as ImageModelProfile,
+      latestBillingTerms(await loadImageBillingTermRows(tx)),
+      { runtime: !seed }
+    );
+    const admission = judgeImageModel(candidate, {
       minimumCredits: minimumCreditsForImageOption,
       // Budget is an enable-time question; a price is judged on its own.
       providerBudgetReady: () => true,
