@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowLeft, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { CatalogMessages } from "@/components/admin/modelCatalog/ImageCatalogViews";
 import { ChoiceChips } from "@/components/admin/modelCatalog/ImageCatalogViews";
@@ -11,6 +11,7 @@ import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminFetch } from "@/lib/adminFetch";
 import { formatUsd, QUALITY_ORDER, SIZE_ORDER } from "@/lib/adminModelCatalogFlow";
+import { shouldIssueAdminPoll } from "@/lib/adminPollTick";
 import {
   emptyMeasurementForm,
   type MeasurementForm,
@@ -172,13 +173,28 @@ export function ImageBillingMeasurePanel({
     [target.provider, target.apiModelId]
   );
 
-  const load = useCallback(async () => {
+  // One read at a time (admin-console-ia section 11): a slow answer is never
+  // overtaken by an older one, and a hidden tab is not polled.
+  const inFlight = useRef(false);
+  const load = useCallback(async (trigger: "manual" | "interval" = "manual") => {
+    if (
+      !shouldIssueAdminPoll({
+        inFlight: inFlight.current,
+        documentVisible: typeof document === "undefined" || document.visibilityState === "visible",
+        trigger,
+      })
+    ) {
+      return;
+    }
+    inFlight.current = true;
     try {
       const response = await adminFetch(query, { cache: "no-store" });
       if (!response.ok) throw new Error(String(response.status));
       setReport((await response.json()) as MeasureReport);
     } catch {
       setError(mm.refusal.failed);
+    } finally {
+      inFlight.current = false;
     }
   }, [query, mm.refusal.failed]);
 
@@ -189,7 +205,7 @@ export function ImageBillingMeasurePanel({
   const running = report?.measurements.some((row) => row.status === "running") ?? false;
   useEffect(() => {
     if (!running) return;
-    const timer = setInterval(() => void load(), POLL_MS);
+    const timer = setInterval(() => void load("interval"), POLL_MS);
     return () => clearInterval(timer);
   }, [running, load]);
 
