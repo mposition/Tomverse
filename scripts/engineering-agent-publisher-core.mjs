@@ -47,8 +47,24 @@ const realPause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** A lookup's reason for a branch at the allowed commit with no pull request: what a person may approve resuming. */
 export const BRANCH_WITHOUT_PULL_REQUEST_REASON = "branch_without_pull_request";
 
-/** The PR's title: computed from the run, nothing free (§9-8). */
-export const publisherPrTitle = (runId) => `engineering-agent: run ${runId}`;
+/**
+ * The card code the app sends (AMUX-FILEREQ-005); anything else is left off.
+ * The same grammar as AMUX_CARD_DISPLAY_KEY_PATTERN (lib/amux/cardDisplayKeyCore.ts),
+ * copied because this core imports nothing; tests/engineeringAgentPublisher.test.mjs
+ * holds the two equal.
+ */
+export const PUBLISHER_CARD_KEY = /^AMUX-[A-Z0-9]{2,16}-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,8})$/;
+
+/**
+ * The PR's title: computed from the run and, when the app sends one, the
+ * card's readable code first, so the owner can tell which card a pull request
+ * is (owner request 2026-11-13). Nothing free (§9-8): the code is read from
+ * the card row, never the card's title.
+ */
+export const publisherPrTitle = (runId, cardKey = null) => {
+  const card = typeof cardKey === "string" && PUBLISHER_CARD_KEY.test(cardKey) ? `${cardKey} ` : "";
+  return `${card}engineering-agent: run ${runId}`;
+};
 
 /** The PR's body: the marker first (§10), then fixed text and the card reference. */
 export const publisherPrBody = (runId, cardRef) =>
@@ -66,7 +82,7 @@ export const publisherPrBody = (runId, cardRef) =>
  * decision 2026-10-30). The title says so, and the body says what marking it
  * ready does -- the one step that runs its code with the repository's secrets.
  */
-export const publisherReviewPrTitle = (runId) => `${publisherPrTitle(runId)} (owner review)`;
+export const publisherReviewPrTitle = (runId, cardKey = null) => `${publisherPrTitle(runId, cardKey)} (owner review)`;
 export const publisherReviewPrBody = (runId, cardRef) =>
   [
     prBodyMarker(runId),
@@ -197,8 +213,8 @@ export async function runPublisherCycle(ports) {
   const review = work.ownerReview === true;
   // Built only on the paths that write, each of which has its card reference.
   const titled = () => review ?
-    { title: publisherReviewPrTitle(work.runId), body: publisherReviewPrBody(work.runId, work.cardRef) } :
-    { title: publisherPrTitle(work.runId), body: publisherPrBody(work.runId, work.cardRef) };
+    { title: publisherReviewPrTitle(work.runId, work.cardKey), body: publisherReviewPrBody(work.runId, work.cardRef) } :
+    { title: publisherPrTitle(work.runId, work.cardKey), body: publisherPrBody(work.runId, work.cardRef) };
   const titleCarriesSecret = () => {
     const { title, body } = titled();
     return detectSecrets(title).length > 0 || detectSecrets(body).length > 0;
