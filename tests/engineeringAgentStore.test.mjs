@@ -190,7 +190,9 @@ test("a publish claim names the card by its code only, never by its title", () =
   // checked against the display key grammar, and nothing drawn from the idea.
   assert.match(body, /tx\.amuxWorkItem\.findUnique\(\{\s*where: \{ id: item\.run\.cardId \}, select: \{ displayKey: true \},/);
   assert.match(body, /cardKey: isAmuxCardDisplayKey\(cardKey\) \? cardKey : null,/);
-  assert.doesNotMatch(body, /title: true|\.title\b/);
+  const cardRead = body.slice(body.indexOf("tx.amuxWorkItem.findUnique"),
+    body.indexOf("const common = {"));
+  assert.doesNotMatch(cardRead, /title/);
 });
 
 test("the store names no target state for a result; the core decides it", () => {

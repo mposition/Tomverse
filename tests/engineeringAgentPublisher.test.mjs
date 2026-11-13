@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   BRANCH_WITHOUT_PULL_REQUEST_REASON,
+  PUBLISHER_CARD_KEY,
   READ_AFTER_WRITE_ATTEMPTS,
   decideLookup,
   expectedPublishCommit,
@@ -219,6 +220,12 @@ test("the title leads with the card's code the app sends, and leaves off anythin
   assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "confirmed" });
   const pr = world.calls.find((call) => call.path === "github:createPull").input;
   assert.equal(pr.title, `AMUX-FILEREQ-005 engineering-agent: run ${RUN} (owner review)`);
+  // The publisher's copy of the grammar is the app's display key grammar, so
+  // a valid code is never dropped from a title (the core imports nothing).
+  const app = readFileSync(new URL("../lib/amux/cardDisplayKeyCore.ts", import.meta.url), "utf8");
+  const grammar = app.match(/export const AMUX_CARD_DISPLAY_KEY_PATTERN =\s*"([^"]+)";/)?.[1];
+  assert.ok(grammar, "the app's display key grammar is found");
+  assert.equal(PUBLISHER_CARD_KEY.source, grammar);
 });
 
 test("a publisher names review drafts in a header the app reads; nothing else counts as naming them", () => {

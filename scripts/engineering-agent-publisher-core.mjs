@@ -47,8 +47,13 @@ const realPause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** A lookup's reason for a branch at the allowed commit with no pull request: what a person may approve resuming. */
 export const BRANCH_WITHOUT_PULL_REQUEST_REASON = "branch_without_pull_request";
 
-/** The card code the app sends (AMUX-FILEREQ-005); anything else is left off. */
-const CARD_KEY = /^AMUX-[A-Z0-9]{2,16}-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,8})$/;
+/**
+ * The card code the app sends (AMUX-FILEREQ-005); anything else is left off.
+ * The same grammar as AMUX_CARD_DISPLAY_KEY_PATTERN (lib/amux/cardDisplayKeyCore.ts),
+ * copied because this core imports nothing; tests/engineeringAgentPublisher.test.mjs
+ * holds the two equal.
+ */
+export const PUBLISHER_CARD_KEY = /^AMUX-[A-Z0-9]{2,16}-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,8})$/;
 
 /**
  * The PR's title: computed from the run and, when the app sends one, the
@@ -57,7 +62,7 @@ const CARD_KEY = /^AMUX-[A-Z0-9]{2,16}-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,8})$/;
  * the card row, never the card's title.
  */
 export const publisherPrTitle = (runId, cardKey = null) => {
-  const card = typeof cardKey === "string" && CARD_KEY.test(cardKey) ? `${cardKey} ` : "";
+  const card = typeof cardKey === "string" && PUBLISHER_CARD_KEY.test(cardKey) ? `${cardKey} ` : "";
   return `${card}engineering-agent: run ${runId}`;
 };
 
