@@ -14,11 +14,22 @@ Every concept follows these rules, and every review judges against them.
    2026-11-12: a desk with two quote cards in English under "같은 열차, 엇갈린
    조언", with no "AI", no model name and nothing to do (the owner: "뜬구름
    잡는 광고").
-4. Prefer real people showing the product on a phone or a laptop. Physical
-   metaphors (a receipt, a name tag, a checklist) are good too.
-5. Hands, fingers and poses are anatomically possible. Rejected 2026-11-08: a
-   right hand holding a phone screen outwards with the thumb in an impossible
-   place.
+4. Variety (owner 2026-11-13): a person is one way to show the product, not
+   the rule. A concept is one of these formats, and a day's concepts are each a
+   different one: `person` (someone using it, the product clearly visible),
+   `phone` (a phone screen is the hero, filling much of the frame), `laptop`
+   (a laptop or desktop screen is the hero), `diagram` (a clean, flat diagram
+   that shows how the feature works, e.g. one question going to three model
+   marks and coming back as one answer), `object` (a physical metaphor: a
+   receipt, a ticket, a checklist, a name tag). Whatever the format, the
+   product, what Tomverse shows or does, gets more of the picture than any
+   person.
+5. Hands, fingers, poses and sizes are possible and true to scale. A phone is
+   about as long as the hand that holds it and clearly smaller than a head; a
+   laptop is about as wide as the shoulders. Rejected 2026-11-08: a right hand
+   holding a phone screen outwards with the thumb in an impossible place.
+   Rejected 2026-11-13: a phone as tall as the head of the man holding it, his
+   hand too small to wrap round it.
 6. Copy that names models says "GPT, Claude, Gemini and more": always "and
    more". Only a screen or a tag whose every model is an exact name of
    `features.json` needs none ("Asked at once: GPT 6 Luna, Claude Haiku 5.5,
@@ -51,17 +62,24 @@ Every concept follows these rules, and every review judges against them.
     font that feels foreign"). In those versions the headline and subhead go on
     the space the model cleared, set by code in the product fonts. The English
     headline may be drawn by the model.
-15. Screen words (phone, laptop) are translated too. Only model names and the
-    proper nouns of a recorded quote (e.g. Scenic Railway) stay as written. Code
-    sets the exact words in a real font and one edit makes them sit naturally on
-    the screen; the second review then compares them letter by letter.
+15. A display that shows words (a phone, a tablet, a laptop) is drawn flat
+    chroma green #00ff00, evenly lit and empty. Code draws the app screen there
+    in every language, in the product fonts and in perspective, and a finger the
+    image model draws over the display stays in front of it (owner 2026-11-13:
+    words set on a screen by a box or an edit looked pasted on). Its words are
+    translated; only model names and the proper nouns of a recorded quote (e.g.
+    Scenic Railway) stay as written. Words elsewhere in the scene (paper, a
+    sign) are set by code and one edit makes them sit naturally there.
 16. "+ more" is "+ 기타 AI" in ko and "+ 其他 AI" in zh-Hant and zh-Hans (never
     "+ 더 보기").
 17. A call to action never looks like a solid button. Outside English it is a
     pale guide band (`#eff6ff` ground, `#155dfb` words) with an inviting
     sentence: ko "계정 없이도 바로 시작해 보세요", zh-Hant "不用帳號也能直接開始",
     zh-Hans "不用账号也能直接开始".
-18. An AI answer on a screen is helpful in length (e.g. a three-step recipe),
-    not one short line, and fits inside its bubble.
+18. An AI answer on a display is short and concrete: two or three lines that
+    a reader takes in at a glance (at most 120 characters in English, 80 in
+    Korean or Chinese), such as the first step and the time it takes. A display
+    full of text forces the device to grow bigger than it is (owner
+    2026-11-13).
 19. Facts only from `features.json`. The owner allowed price, "free" and bold
     wording on 2026-11-08; the Guard still judges every word at submission.

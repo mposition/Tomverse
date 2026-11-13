@@ -317,6 +317,25 @@ export const CHAT_ATTACHMENT_FORMATS: readonly ChatAttachmentFormat[] = [
         "application/powerpoint",
         "application/x-mspowerpoint",
     ]),
+    // Hangul (Hancom Office): HWP 5.x is a compound file, HWPX a ZIP of XML.
+    // Read by this repository's own parsers like the formats above
+    // (lib/legacyOffice/hwp.ts), so a Korean document is readable without
+    // the renderer; the renderer is only for laying one out as a PDF.
+    legacyOffice("hwp", ["hwp"], "application/x-hwp", "cfbf", [
+        "application/haansofthwp",
+        "application/vnd.hancom.hwp",
+        "application/hwp",
+    ]),
+    {
+        ...legacyOffice("hwpx", ["hwpx"], "application/hwp+zip", "zip", [
+            "application/haansofthwpx",
+            "application/vnd.hancom.hwpx",
+            "application/x-hwpx",
+        ]),
+        // A ZIP itself: inside an uploaded archive it would be an archive in
+        // an archive, which the expander refuses by design.
+        allowedInArchive: false,
+    },
     legacyOffice("rtf", ["rtf"], "application/rtf", "rtf", [
         "text/rtf",
         "text/richtext",

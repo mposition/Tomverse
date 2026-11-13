@@ -138,9 +138,31 @@ LibreOffice로 레이아웃을 잡는다.
 - **읽지 않는다.** 이 앱에는 Apple의 레코드를 읽는 파서가 없다. 모델에게는 파일이
   첨부됐고 내용은 읽을 수 없으며 `convert_files`로 PDF로 만들 수 있다는 한 줄만
   간다.
-- **검사는 package의 모양이다**(`lib/iworkPackage.ts`): 유효한 ZIP, 항목 5,000개·
-  펼친 크기 512 MB 이하, package 밖을 가리키는 경로 없음, iWork 색인 part
-  (`Index/Document.iwa` 등) 존재. 압축은 풀지 않는다 — 중앙 디렉터리로 충분하다.
+- **검사는 package의 모양과 실제 크기다**(`lib/iworkPackage.ts`): 유효한 ZIP,
+  항목 5,000개 이하, package 밖을 가리키는 경로 없음, iWork 색인 part
+  (`Index/Document.iwa` 등) 존재, **실제로 풀었을 때** 200 MB 이하. ZIP이 적어 둔
+  크기는 파일 스스로의 주장이라 믿지 않는다 — 모든 항목을 입력 4 KB씩
+  풀어(`lib/boundedInflate.ts`) 나온 바이트를 세고 버리며, 넘으면 그 자리에서
+  멈추고 거절한다(독립 검토 2026-11-13).
+- **ZIP은 중앙 디렉터리로 읽고, 로컬 헤더와 어긋나면 거절한다**(`lib/boundedInflate.ts`).
+  읽는 쪽마다 믿는 곳이 달라서(스트리밍 리더는 로컬 헤더, LibreOffice는 중앙
+  디렉터리), 둘이 다른 말을 하는 package는 잰 것과 열리는 것이 다를 수 있다.
+  항목마다 방식·크기·이름이 두 곳에서 같아야 하고, 디렉터리에 없는 로컬 항목·
+  겹치는 항목·적힌 크기와 다르게 풀리는 항목·암호화·stored/DEFLATE 밖의 방식·
+  ZIP64는 거절한다(독립 검토 2026-11-13, 6차). 앞에 다른 바이트가 붙은 ZIP(자기
+  압축 해제 파일 등)과 항목 사이 빈 곳에 로컬 헤더 서명이 있는 ZIP도 거절한다 —
+  LibreOffice는 열 수 있지만, 사무 문서에서는 드물어 일부러 감수하는 호환성 손실이다.
+- `.iwa` 틀([0x00][3바이트 길이][Snappy 블록])은 공개 분석 자료를 따른 것이고 아직 실제
+  Pages·Numbers 파일로 확인하지 않았다. 틀이 다르면 Snappy 상한을 덜 세지만, 항목 자체를
+  ZIP에서 풀어 나온 바이트는 그대로 센다.
+- **안에 다시 압축된 것도 같은 합계로 잰다**(`lib/packageExpansion.ts`): 항목 안의
+  ZIP(`Index.zip` 등, 깊이 3까지)은 같은 방식으로 걷고, gzip(`index.xml.gz`)은
+  조금씩 풀어 세며, 최신 iWork의 Snappy 압축 `.iwa` 레코드는 블록 머리에 적힌
+  해제 후 길이를 더한다 — Snappy 해제기는 그 길이를 넘겨 쓰지 않으므로 그 값이
+  상한이다. 크기 때문에 거절된 파일은 형식 오류가 아니라 `ATTACHMENT_TOO_LARGE`
+  (파일 크기 오류)로 알린다.
+- 렌더러가 꺼진 뒤 보낸 turn에서는 모델에게 "지금은 PDF로 바꿀 수 없다, Pages·
+  Numbers에서 Word·Excel·PDF로 내보내기를 권하라"고 알린다.
 - **렌더러가 꺼져 있으면 업로드 준비 단계에서 거절한다.** 쓸 수 없는 파일을
   저장해 두었다가 보낼 때 알게 하지 않는다.
 - 게스트와 압축파일 내부 항목은 받지 않는다(렌더러 turn이 없고, 읽지 못하는 항목은
@@ -270,6 +292,37 @@ JSON·YAML·XML이 문법적으로 올바른지 **검사하지 않는다.** 망�
 동의한다는 사실만 증명합니다. 거절 경로 — 순환하는 sector chain, 파일 끝을
 넘는 스트림, 암호화된 워크북 — 는 정상 파일을 쓰는 어떤 도구도 만들 수 없으므로
 테스트 안에서 바이트 단위로 만듭니다(`tests/support/compoundFile.mjs`).
+
+### 4.6 한글(HWP 5.x, HWPX)
+
+운영자 결정: 2026-11-13 — 한국 사용자를 위해 HWP를 덮어야 한다. `.hwp`
+(`application/x-hwp`)와 `.hwpx`(`application/hwp+zip`)를 이 절의 다른 형식과
+같은 길로 받는다: **이 저장소의 파서가 본문 텍스트를 읽는다**
+(`lib/legacyOffice/hwp.ts`). 렌더러 없이 읽히므로 "이 공문 요약해 줘"가 바로
+된다. 렌더러는 PDF로 레이아웃을 잡을 때만 쓴다(`docs/policy/generated-artifacts.md §15`).
+
+- **HWP 5.x**: compound file. `FileHeader`의 속성으로 압축(raw DEFLATE)·암호·
+  배포용·DRM을 판별한다. 암호·배포용·DRM 문서는 본문이 암호화돼 있으므로
+  `ATTACHMENT_ENCRYPTED`로 거절한다 — 깨진 글자를 모델에게 주지 않는다. 본문은
+  `BodyText/Section0..N`의 레코드 중 PARA_TEXT(태그 0x43)를 문단으로 읽는다.
+  제어 문자는 명세의 폭대로 건너뛴다(char 1단위, inline·extended 8단위). 탭·줄바꿈·
+  하이픈·고정 공백은 글자로 옮긴다.
+- **HWPX**: ZIP 안의 `Contents/section*.xml`에서 `<hp:t>`를 문단(`<hp:p>`)
+  단위로 잇는다. 표 칸은 한 줄씩이다. ZIP 자체이므로 압축파일 안의 항목으로는 받지
+  않는다(압축파일 안의 압축파일).
+- **읽는 것은 글자뿐이다.** 그림·필드·서식은 읽지 않는다. HWP 3.x(한글 97)는
+  두 컨테이너 어느 쪽도 아니어서 거절된다.
+- 예산은 §4.4와 같다(시간·바이트·글자 수). 압축 해제(HWP 섹션의 DEFLATE,
+  HWPX의 ZIP 항목)는 **입력 4 KB씩** 한다(`lib/boundedInflate.ts`). DEFLATE는 많아야
+  약 1,032배로 늘어나므로 한 걸음의 출력은 몇 MB를 넘지 않고, 나온 바이트를 그때마다
+  예산에 청구한다. 한 번에 다 푸는 호출(`inflateSync`·`unzipSync`)은 출력 전체를
+  할당한 뒤에야 예산을 보게 되므로 이 파서들에서 쓰지 않는다 —
+  `scripts/security-regression-check.mjs`가 고정한다. ZIP이 적어 둔 크기는 믿지
+  않는다.
+- **검증 범위**: 정상 경로 테스트는 HWP 5.0 명세대로 바이트를 짜서 만든 파일로
+  한다(`tests/hwpText.test.mjs`). 이 저장소에는 HWP를 쓰는 도구가 없어 §4.5의
+  "진짜 문서" 원칙을 아직 채우지 못했다. 한컴오피스가 저장한 실제 `.hwp`·`.hwpx`
+  파일로 확인해 `tests/fixtures/legacyOffice/`에 넣는 것이 남은 일이다.
 
 ## 5. 압축파일
 

@@ -359,7 +359,8 @@ const CONVERSION_RULES = [
 const officeToPdfRule = (officeRendering: boolean): string[] =>
   officeRendering
     ? [
-        "- An attached Word, PowerPoint or Excel file becomes a PDF *with its",
+        "- An attached office document -- Word, PowerPoint, Excel, Hangul (HWP,",
+        "  HWPX), OpenDocument, Pages or Numbers -- becomes a PDF *with its",
         "  layout* through `convert_files` (`to_pdf`, the file as a source). Use",
         "  that, not `create_document`, whenever the user wants the file itself as",
         "  a PDF.",
@@ -537,7 +538,8 @@ const attachmentSection = (
       "- an .xlsx or .csv -> xlsx, csv or a PDF table: `convert_spreadsheet`.",
       ...(officeRendering
         ? [
-            "- a Word, PowerPoint or Excel file -> a PDF that keeps its layout:",
+            "- an office document (Word, PowerPoint, Excel, HWP, HWPX, ODF, Pages,",
+            "  Numbers) -> a PDF that keeps its layout:",
             '  `operation: "to_pdf"` with the file as a source. Several files, or',
             "  office files with images and PDFs, merge into one PDF in order.",
           ]

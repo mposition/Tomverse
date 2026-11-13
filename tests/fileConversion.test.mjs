@@ -1216,3 +1216,25 @@ test("each renderer failure becomes the card the user can act on", async () => {
     );
   }
 });
+
+test("third review: a document that expands too far is never sent to the shared renderer", async () => {
+  const { zipSync } = await import("fflate");
+  const calls = [];
+  // A valid-looking HWPX whose picture part inflates past the ceiling.
+  const bomb = zipSync({
+    mimetype: new TextEncoder().encode("application/hwp+zip"),
+    "Contents/section0.xml": new TextEncoder().encode("<hs:sec/>"),
+    "BinData/image1.png": new Uint8Array(201 * 1024 * 1024),
+  });
+  const files = attachments([["notice.hwpx", "application/hwp+zip", bomb]]);
+  const admission = admitFileConversionSpec({ operation: "to_pdf", filename: "x", sources: [{ attachment: "att_1" }] });
+  await assert.rejects(
+    prepareFileConversion(admission.spec, files, { renderOffice: fakeRenderer(1, calls) }),
+    (error) => {
+      assert.equal(error.code, "OFFICE_UNREADABLE");
+      assert.match(error.message, /expands past/);
+      return true;
+    }
+  );
+  assert.deepEqual(calls, [], "the renderer was never called");
+});

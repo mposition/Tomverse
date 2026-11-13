@@ -142,6 +142,10 @@ export const OFFICE_RENDERABLE_EXTENSIONS: Readonly<Record<string, string>> = {
   "application/vnd.ms-powerpoint": "ppt",
   "application/vnd.ms-excel": "xls",
   "application/rtf": "rtf",
+  // Hangul. Laid out only by a renderer image carrying the H2Orestart filter
+  // (docs/ops/office-renderer.md); stock LibreOffice reads HWP 97 alone.
+  "application/x-hwp": "hwp",
+  "application/hwp+zip": "hwpx",
   // Apple iWork. LibreOffice imports these with less fidelity than Office
   // files: a Keynote deck holds up well, Pages and Numbers lose some styling.
   "application/vnd.apple.pages": "pages",

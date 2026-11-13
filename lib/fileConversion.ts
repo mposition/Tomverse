@@ -60,6 +60,7 @@ import {
   type OfficeDocument,
   type OfficeRenderResult,
 } from "@/lib/officeRenderer";
+import { measureRenderInput } from "@/lib/officeRenderInput";
 import {
   SpreadsheetDataError,
   readSpreadsheetGrid,
@@ -96,7 +97,7 @@ const KIND_NOUN: Record<ConversionSourceKind, string> = {
   image: "an image (png, jpg, webp, gif)",
   pdf: "a PDF",
   spreadsheet: "a spreadsheet (.xlsx or .csv)",
-  office: "a Word, PowerPoint or Excel file",
+  office: "an office document (Word, PowerPoint, Excel, HWP, ODF, Pages, Numbers)",
 };
 
 /**
@@ -149,13 +150,8 @@ const resolveSources = (
     // An office file into a PDF is laid out by the renderer, an .xlsx
     // included: "this workbook as a PDF" means the sheet as it prints, while
     // a table of its values is what convert_spreadsheet makes.
-    const kind: ConversionSourceKind | null =
-      spec.operation === "to_pdf" && isOfficeRenderable(file.mediaType)
-        ? officeRendering
-          ? "office"
-          : null
-        : conversionSourceKind(file.mediaType);
-    if (spec.operation === "to_pdf" && !officeRendering && isOfficeRenderable(file.mediaType)) {
+    const officeSource = spec.operation === "to_pdf" && isOfficeRenderable(file.mediaType);
+    if (officeSource && !officeRendering) {
       throw new FileConversionError(
         "SOURCE_TYPE",
         `${source.attachment} ("${file.name}") cannot be turned into a PDF with its layout here. ` +
@@ -163,6 +159,9 @@ const resolveSources = (
           "that the layout is rebuilt rather than copied."
       );
     }
+    const kind: ConversionSourceKind | null = officeSource
+      ? "office"
+      : conversionSourceKind(file.mediaType);
     if (!kind || !accepted.includes(kind)) {
       throw new FileConversionError(
         "SOURCE_TYPE",
@@ -444,6 +443,18 @@ const renderOfficeSources = async (
     }
     let pdf = rendered.get(source.handle);
     if (!pdf) {
+      // Measured here, every compressed part inflated and counted, because
+      // the renderer is shared and the text readers only open the parts they
+      // read (generated-artifacts.md section 15.3).
+      const verdict = measureRenderInput(source.mediaType, source.bytes);
+      if (!verdict.ok) {
+        throw new FileConversionError(
+          "OFFICE_UNREADABLE",
+          verdict.reason === "EXPANDS_TOO_FAR"
+            ? `${source.handle} ("${source.name}") expands past what can be laid out safely.`
+            : `${source.handle} ("${source.name}") could not be opened to lay it out.`
+        );
+      }
       const result = await render({ mediaType: source.mediaType, bytes: source.bytes });
       if (!result.ok) {
         switch (result.failure) {
