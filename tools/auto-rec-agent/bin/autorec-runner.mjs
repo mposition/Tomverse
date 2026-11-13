@@ -49,6 +49,7 @@ import {
   leaseAllowsPublish,
   lintableFiles,
   parseRawDiff,
+  publicAgentSummary,
   selectRelatedTests,
 } from "../lib/core.mjs";
 
@@ -107,6 +108,7 @@ export function readRunnerConfig(env) {
     gatewaySocket: env.AUTOREC_GATEWAY_SOCKET || DEFAULTS.gatewaySocket,
     nodeBin: process.execPath,
     npmBin: env.AUTOREC_NPM_BIN || DEFAULTS.npmBin,
+    dailyProduct: env.AUTOREC_RUN_DAILY === "true",
     // Optional: a `claude setup-token` token from /etc/autorec/claude.env.
     claudeOauthToken: env.CLAUDE_CODE_OAUTH_TOKEN || null,
   };
@@ -220,6 +222,7 @@ async function review(deps, ctx, claim, base, head) {
 /** Everything between the claim and the publish. Returns the outcome to report. */
 async function work(deps, claim, ctx) {
   const { config, exec, fs } = deps;
+  claim = { ...claim, dailyProduct: config.dailyProduct };
   const git = (cwd, args, timeoutMs = 120_000) => exec(config.gitBin, ["-C", cwd, ...args], { env: baseEnv(config), timeoutMs });
 
   ctx.stage = "setup";
@@ -269,6 +272,8 @@ async function work(deps, claim, ctx) {
   deps.runLog("agent_result", typeof summary?.result === "string" ? summary.result.slice(-8_000) : agent.stderr.slice(-4_000));
   if (agent.timedOut) return failed("timeout");
   if (agent.code !== 0) return failed("agent_error");
+  const publicSummary = publicAgentSummary(summary?.result);
+  if (publicSummary) claim = { ...claim, publicSummary };
 
   // Only committed work counts: drop anything the agent left uncommitted.
   await git(worktree, ["reset", "--quiet", "--hard", "HEAD"]);
@@ -393,7 +398,7 @@ async function report(deps, claim, outcome) {
   return reply?.status === "reported" ? 0 : 1;
 }
 
-export async function runLocked(deps) {
+export async function runLocked(deps, { onEmpty = () => {}, onOutcome = () => {} } = {}) {
   let reply;
   try {
     reply = await deps.gateway({ op: "claim" }, null, 3 * 60_000);
@@ -402,6 +407,7 @@ export async function runLocked(deps) {
     return 1;
   }
   if (reply?.status === "empty") {
+    onEmpty();
     deps.log("no_recommendation");
     return 0;
   }
@@ -427,6 +433,7 @@ export async function runLocked(deps) {
     return 1;
   }
   deps.log("outcome", { outcome: outcome.outcome, reason: outcome.reason ?? null, detail: outcome.detail ?? null, prUrl: outcome.prUrl ?? null });
+  onOutcome(outcome);
   return report(deps, claim, outcome);
 }
 
@@ -439,10 +446,27 @@ export async function runOnce(deps) {
   }
   try {
     deps.pruneLogs();
-    return await runLocked(deps);
+    return deps.config.dailyProduct ? await runDailyBatch(deps) : await runLocked(deps);
   } finally {
     deps.lock.release(lockPath, token);
   }
+}
+
+/** Task failures advance; infrastructure failures and unknown outcomes stop the batch. */
+export async function runDailyBatch(deps) {
+  const started = deps.now();
+  for (let count = 0; count < LIMITS.tasksPerDay && deps.now() - started < LIMITS.dailyRunMs; count += 1) {
+    let empty = false;
+    let outcome = null;
+    const code = await runLocked(deps, { onEmpty: () => { empty = true; }, onOutcome: (value) => { outcome = value; } });
+    if (code !== 0 || empty) return code;
+    if (outcome?.outcome === OUTCOME_FAILED && !["no_change", "out_of_scope", "tests", "review_reject"].includes(outcome.reason)) {
+      deps.log("daily_batch_paused", { reason: outcome.reason });
+      return 1;
+    }
+  }
+  deps.log("daily_batch_limit");
+  return 0;
 }
 
 // ---------------------------------------------------------------- real I/O

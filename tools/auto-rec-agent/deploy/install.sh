@@ -12,6 +12,7 @@
 set -euo pipefail
 
 REF="${1:-develop}"
+MODE="${2:-router}"
 REPO_URL="https://github.com/mposition/Tomverse.git"
 DEST=/usr/local/lib/autorec-agent
 UNIT_DIR=/etc/systemd/system
@@ -42,6 +43,9 @@ UNITS=(
 fail() { echo "install: $*" >&2; exit "${2:-1}"; }
 
 [ "$(id -u)" -eq 0 ] || fail "run as root (sudo)" 77
+[[ "$MODE" == router || "$MODE" == daily-product ]] || fail "mode must be router or daily-product" 64
+# Never replace the trusted runner while an attempt may still be publishing.
+systemctl is-active --quiet autorec-runner.service && fail "runner is busy; install after it finishes" 75
 [[ "$REF" =~ ^[A-Za-z0-9._/-]+$ ]] || fail "ref must be a branch or tag name" 64
 id "$ACCOUNT" >/dev/null 2>&1 || fail "account $ACCOUNT does not exist" 64
 # Only /etc/passwd counts: while an older DynamicUser gateway instance runs,
@@ -69,10 +73,19 @@ command -v git >/dev/null || fail "git is not installed" 64
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-# A blobless clone fetches only the files checked out below.
-git clone --quiet --filter=blob:none --no-checkout --depth 1 --branch "$REF" "$REPO_URL" "$WORK/repo"
+# Deployment may name the reviewed immutable commit instead of a moving branch.
+if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+  git init --quiet "$WORK/repo"
+  git -C "$WORK/repo" fetch --quiet --filter=blob:none --depth 1 "$REPO_URL" "$REF"
+  git -C "$WORK/repo" update-ref HEAD FETCH_HEAD
+  [ "$(git -C "$WORK/repo" rev-parse HEAD)" = "$REF" ] || fail "commit mismatch" 65
+else
+  git clone --quiet --filter=blob:none --no-checkout --depth 1 --branch "$REF" "$REPO_URL" "$WORK/repo"
+fi
 git -C "$WORK/repo" checkout --quiet HEAD -- "${FILES[@]}" "${UNITS[@]/#/tools/auto-rec-agent/deploy/}" \
-  tools/auto-rec-agent/deploy/autorec.env.example tools/auto-rec-agent/deploy/review-ssh.conf
+  tools/auto-rec-agent/deploy/autorec.env.example tools/auto-rec-agent/deploy/review-ssh.conf \
+  tools/auto-rec-agent/deploy/autorec-daily-product.timer \
+  tools/auto-rec-agent/deploy/daily-product-runner.conf tools/auto-rec-agent/deploy/daily-product-gateway.conf
 COMMIT="$(git -C "$WORK/repo" rev-parse HEAD)"
 
 # Code: root-owned, readable, replaced as a whole so a removed file does not linger.
@@ -88,7 +101,8 @@ done
 # The installed tree has no package.json of its own; this one makes the .ts module ESM.
 printf '{ "private": true, "type": "module" }\n' > "$STAGE/package.json"
 printf '%s %s\n' "$REF" "$COMMIT" > "$STAGE/INSTALLED_FROM"
-chmod 0644 "$STAGE/package.json" "$STAGE/INSTALLED_FROM"
+printf '%s\n' "$MODE" > "$STAGE/INSTALLED_MODE"
+chmod 0644 "$STAGE/package.json" "$STAGE/INSTALLED_FROM" "$STAGE/INSTALLED_MODE"
 chmod 0755 "$STAGE/tools/auto-rec-agent/deploy/review-ssh"
 find "$STAGE" -type d -exec chmod 0755 {} +
 chown -R root:root "$STAGE"
@@ -101,6 +115,14 @@ rm -rf "${DEST}.old"
 for unit in "${UNITS[@]}"; do
   install -m 0644 -o root -g root "$WORK/repo/tools/auto-rec-agent/deploy/$unit" "$UNIT_DIR/$unit"
 done
+if [ "$MODE" = daily-product ]; then
+  install -m 0644 -o root -g root "$WORK/repo/tools/auto-rec-agent/deploy/autorec-daily-product.timer" "$UNIT_DIR/autorec-runner.timer"
+  install -D -m 0644 -o root -g root "$WORK/repo/tools/auto-rec-agent/deploy/daily-product-runner.conf" "$UNIT_DIR/autorec-runner.service.d/daily-product.conf"
+  install -D -m 0644 -o root -g root "$WORK/repo/tools/auto-rec-agent/deploy/daily-product-gateway.conf" "$UNIT_DIR/autorec-gateway@.service.d/daily-product.conf"
+else
+  # Remove only this installer's mode overrides when explicitly returning to router mode.
+  rm -f "$UNIT_DIR/autorec-runner.service.d/daily-product.conf" "$UNIT_DIR/autorec-gateway@.service.d/daily-product.conf"
+fi
 
 # Secrets directory and file: root only. An existing file is never overwritten.
 install -d -m 0700 -o root -g root /etc/autorec

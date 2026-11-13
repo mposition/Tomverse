@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Tomverse product improvements daily at 09:00 Brisbane
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 Australia/Brisbane
+Persistent=true
+Unit=autorec-runner.service
+
+[Install]
+WantedBy=timers.target
