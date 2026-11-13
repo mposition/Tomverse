@@ -949,6 +949,8 @@ export const optimizerAnswerOutputTokens = (
     );
 
 export const AUTO_ROUTER_ANSWER_TIMEOUT_MS = 60_000;
+/** Tries per answer: one transient failure must not leave a comparison undecided. */
+export const AUTO_ROUTER_ANSWER_ATTEMPTS = 2;
 /** A reasoning model thinks before it answers; it gets longer to do both. */
 export const AUTO_ROUTER_REASONING_ANSWER_TIMEOUT_MS = 120_000;
 
@@ -958,7 +960,8 @@ export const AUTO_ROUTER_REASONING_ANSWER_TIMEOUT_MS = 120_000;
  * answers with its own generation settings, as a chat turn would have it
  * answer (reasoning effort, adaptive thinking, the sampling rules some models
  * require): without them a reasoning model would be measured as a different
- * model from the one users get. Never a tool, never a retry.
+ * model from the one users get. Never a tool, never a provider retry: the
+ * cycle retries a missing answer itself, up to AUTO_ROUTER_ANSWER_ATTEMPTS.
  */
 export const optimizerAnswerOptions = (model: AiModel, turn: OptimizerAnswerTurn) => ({
     system: autoRouterAnswerSystem(turn.previousAnswer),
@@ -1335,17 +1338,27 @@ export async function runOptimizerCycle(
         if (!answer) {
             const turn = { message: decision.routerInput, previousAnswer: decision.routerContext };
             // Counted only when the call was made: a budget refusal says
-            // nothing about the model.
-            answer = call("answer", async () => {
-                try {
-                    const result = await deps.answer(modelId, turn);
-                    noteAnswer(modelId, admitOptimizerAnswer(result.value) !== null);
-                    return result;
-                } catch (error) {
-                    noteAnswer(modelId, false);
-                    throw error;
+            // nothing about the model. Every failed attempt is counted, so a
+            // model that only answers on its second try still shows it.
+            const attempt = () =>
+                call("answer", async () => {
+                    try {
+                        const result = await deps.answer(modelId, turn);
+                        noteAnswer(modelId, admitOptimizerAnswer(result.value) !== null);
+                        return result;
+                    } catch (error) {
+                        noteAnswer(modelId, false);
+                        throw error;
+                    }
+                }).then(admitOptimizerAnswer);
+            // A missing answer leaves its comparison undecided, so a failed or
+            // empty answer is asked for again, within the same budget.
+            answer = (async () => {
+                for (let tries = 1; ; tries += 1) {
+                    const admitted = await attempt();
+                    if (admitted !== null || exhausted || tries >= AUTO_ROUTER_ANSWER_ATTEMPTS) return admitted;
                 }
-            }).then(admitOptimizerAnswer);
+            })();
             answers.set(key, answer);
         }
         return answer;
