@@ -178,9 +178,15 @@ test("a reference picture is uploaded once a day and passed to cost and create b
     const entries = readLedger(ledgerPath(jobDir, DAY)).entries;
     assert.deepEqual(entries.map((entry) => entry.status), ["done", "done"]);
 
+    // A job folder that does not exist yet is made before the day's uploads are recorded.
+    const fresh = join(jobDir, "new-job");
+    assert.equal((await makeImage({ ...args, jobDir: fresh, references: [ids[0]], out: join(jobDir, "n.png"), label: "c2/en/make" })).ok, true);
+    assert.equal((await makeImage({ ...args, jobDir: join(jobDir, "other-job"), references: [logo], out: join(jobDir, "o.png"), label: "c2/en/make" })).ok, true);
+    next = 2;
+
     // Another day uploads again, so an upload deleted in Higgsfield's library is not reused.
     await makeImage({ ...args, day: "20261109", references: [logo], out: join(jobDir, "c.png"), label: "c1/en/make" });
-    assert.equal(fake.count("upload"), 3);
+    assert.equal(fake.count("upload"), 4);
   } finally {
     rmSync(jobDir, { recursive: true, force: true });
   }

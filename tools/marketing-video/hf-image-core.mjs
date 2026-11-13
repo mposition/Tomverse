@@ -27,7 +27,7 @@
 //     timeout leaves the entry unknown with its id, for step 1 of the next call.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { admit, brisbaneDay, downloadResult, HF_ASPECT_RATIO, HF_MODEL, ledgerPath, requestProblem, resolveUnsettled, settle } from "./higgsfield-cap.mjs";
@@ -123,6 +123,8 @@ export function referenceIds(references, { jobDir, day, cli }) {
       }
       if (!id) return { ok: false, reason: "reference_upload_failed", detail: { file: path.basename(reference), status: uploaded.status } };
       known[hash] = id;
+      // Before the ledger exists, so the job folder may not yet.
+      mkdirSync(path.dirname(file), { recursive: true });
       writeFileSync(file, `${JSON.stringify(known, null, 2)}
 `);
     }
