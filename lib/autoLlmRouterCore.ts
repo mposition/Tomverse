@@ -15,7 +15,7 @@
  */
 
 import { turnCarriesAttachments } from "@/lib/autoDispatchPreflight";
-import { modelSupportsImageInput, type AiModel } from "@/lib/models";
+import { getModelUsageCredits, modelSupportsImageInput, type AiModel } from "@/lib/models";
 import { getArtifactToolSupport, planGeneratedArtifactTool } from "@/lib/generatedArtifactToolPolicy";
 import { getWebSearchCapability, nativeSearchIsDispatchable } from "@/lib/webSearchCapability";
 
@@ -125,9 +125,25 @@ export const autoLlmRouterFailureDetail = (error: unknown, timedOut: boolean): A
 export const autoLlmRouterProviderOptions = (provider: string) => ({
     openai: {
         strictJsonSchema: true,
-        ...(provider === "openai" ? { reasoningEffort: "low" as const } : {}),
+        ...(provider === "openai" ? { reasoningEffort: autoLlmRouterReasoningEffort() } : {}),
     },
 });
+
+/**
+ * The OpenAI router's reasoning effort: `low` unless the operator sets
+ * `AUTO_LLM_ROUTER_REASONING_EFFORT` to `none` or `minimal` (2026-11-13: the
+ * router's 2.9-5.5 s left little room under its 7-8 s deadline once candidates
+ * and combined intents grew). Not lowered by default: a model that does not
+ * implement an effort rejects every call with it, and whether the configured
+ * router model implements `none` is checked by trying it, not assumed. A
+ * value outside the list is ignored. The router log reports the effort sent.
+ */
+export const AUTO_LLM_ROUTER_REASONING_EFFORTS = ["none", "minimal", "low"] as const;
+export type AutoLlmRouterReasoningEffort = (typeof AUTO_LLM_ROUTER_REASONING_EFFORTS)[number];
+export const autoLlmRouterReasoningEffort = (
+    raw: string | undefined = process.env.AUTO_LLM_ROUTER_REASONING_EFFORT
+): AutoLlmRouterReasoningEffort =>
+    AUTO_LLM_ROUTER_REASONING_EFFORTS.find(effort => effort === raw?.trim().toLowerCase()) ?? "low";
 
 /**
  * What the router model is told about one candidate.
@@ -148,7 +164,10 @@ export type AutoLlmRouterCandidate = {
     acceptsImages: boolean;
     /** Actual application file tools, not a model's ability to write code. */
     canCreateFiles: boolean;
+    /** This turn's estimate: base times the input-length multiplier, plus any web-search surcharge. */
     credits: number | null;
+    /** The model's usage-class price, the same on every turn. Absent on older samples. */
+    baseCredits?: number;
 };
 
 export type AutoFileGenerationContext = {
@@ -194,6 +213,7 @@ export const autoLlmRouterCandidates = (
         const nativeSearchEnabled = fileContext.webSearchRequested && nativeSearchIsDispatchable(search);
         const canCreateFiles = model.usageClass !== "deep-research" && planGeneratedArtifactTool({
             modelId: model.id, provider: model.provider,
+            usageClass: model.usageClass, fileToolsOverride: model.fileToolsOverride ?? null,
             isAuthenticated: fileContext.isAuthenticated, canPersist: fileContext.canPersist,
             nativeSearchEnabled, nativeSearchForced: nativeSearchEnabled && search.canForceExecution,
             conversationKind: "chat",
@@ -210,6 +230,7 @@ export const autoLlmRouterCandidates = (
                 acceptsImages: modelSupportsImageInput(model),
                 canCreateFiles,
                 credits: typeof credits === "number" ? credits : null,
+                baseCredits: getModelUsageCredits(model),
             },
         ];
     });
@@ -242,7 +263,10 @@ export const previousAnswerExcerpt = (
  * is what the optimizer (lib/autoRouterOptimizerCore.ts) may propose to change.
  */
 /** Shared by Chat and provider-scoped Review; capability comes from candidates. */
-export const CHAT_RESEARCH_ROUTING_CRITERIA = "When the request needs extended investigation and comparison across many sources, choose an eligible deep-research candidate if available. For simple questions, calculations or rewriting, use a regular candidate. Never invent a research capability, add a provider, or run a second paid expansion after answering.";
+/** Chat passes per-turn totals; without this the same model reads as 1, 9 or 10 credits across turns. */
+export const AUTO_LLM_ROUTER_CREDITS_RULE = "A candidate's credits is this message's estimate: baseCredits times a long-input multiplier, plus a flat web-search surcharge when search is on. Compare credits only between candidates of the same message; baseCredits is the model's fixed price level.";
+
+export const CHAT_RESEARCH_ROUTING_CRITERIA ="When the request needs extended investigation and comparison across many sources, choose an eligible deep-research candidate if available. For simple questions, calculations or rewriting, use a regular candidate. Never invent a research capability, add a provider, or run a second paid expansion after answering.";
 
 const AUTO_LLM_ROUTER_SYSTEM_HEAD = [
     "You choose which AI model answers one chat message.",
@@ -252,6 +276,7 @@ const AUTO_LLM_ROUTER_SYSTEM_HEAD = [
     "Pick exactly one id from the candidates.",
     "Set requiresFileGeneration to true when this message asks you to create, edit or deliver a downloadable file (spreadsheet, document, PDF, slides, text/source file or archive). Use previousAnswer for follow-ups such as 'download that as Excel'. Reading an attachment, explaining code, inline text and image generation alone do not require file generation.",
     "When requiresFileGeneration is true, choose only a candidate with canCreateFiles=true. This capability is supplied by the application; never infer or invent it from a model name or guidance.",
+    AUTO_LLM_ROUTER_CREDITS_RULE,
     CHAT_RESEARCH_ROUTING_CRITERIA,
 ].join("\n");
 

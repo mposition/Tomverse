@@ -60,14 +60,15 @@ const CI_CLASS_TONE: Record<string, string> = {
  * running, what did the latest digest find. The operator control revision,
  * rarely used, sits collapsed at the bottom; the release train has its own
  * tab, and a failed train is raised here with a link to it.
- * Nothing here approves, merges or signs; the one write on the tab's main
- * body is the merge lane's release form, owner and ops only.
+ * Release controls do not approve, merge or sign. CI suggestions have their
+ * own audited operator actions; sending an idea remains owner-only.
  */
 export function AdminAgentDigestsPanel({
   initial,
   main,
   trains,
   ciAdvice,
+  canSendCiAdvice = false,
   laneRounds,
   nowMs,
 }: {
@@ -75,6 +76,7 @@ export function AdminAgentDigestsPanel({
   main: QaReleaseMainCandidates;
   trains: QaReleaseTrainView[];
   ciAdvice: QaReleaseCiAdviceRecord | null;
+  canSendCiAdvice?: boolean;
   laneRounds: QaReleaseLaneRounds;
   /** The server's clock when the page was read, so both renders agree. */
   nowMs: number;
@@ -111,7 +113,7 @@ export function AdminAgentDigestsPanel({
         <QaReleaseMainCandidatesSection data={main} id={QA_RELEASE_SECTION_IDS.main} />
         <QaReleaseMergeLaneSection lane={initial.mergeLane} canWrite={initial.canWrite} id={QA_RELEASE_SECTION_IDS.lane} />
       </div>
-      <QaReleaseCiAdviceSection advice={ciAdvice} />
+      <QaReleaseCiAdviceSection advice={ciAdvice} canWrite={initial.canWrite} canSend={canSendCiAdvice} />
       <LatestDigest digests={initial.digests} limit={initial.limit} />
       <AgentSettings initial={initial} />
     </section>

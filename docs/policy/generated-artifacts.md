@@ -38,10 +38,23 @@
 
 `off`의 이유는 이름이 있다.
 
-- `model_unverified` — 이 모델로 custom tool 호출을 **실제로 확인하지 않았다**.
-  `ARTIFACT_TOOL_CAPABILITIES`에 없는 모델은 전부 여기다. "아마 될 것이다"는
-  이 registry가 막으려는 상태이고, 모델은 changelog를 읽어서가 아니라 누군가
-  돌려 봐서 등록된다.
+- `model_unverified` — 이 모델은 파일 도구를 받지 않는다. 판정 순서는 다음과 같다
+  (운영자 결정 2026-11-13).
+  1. 카탈로그 행의 관리자 체크(`ModelRegistryEntry.fileToolsOverride`). Admin 모델
+     편집 화면의 "파일 생성·플러그인 도구" 체크박스다. 값이 있으면 그것이 답이다.
+  2. 없으면 자동 판정(`autoArtifactToolSupport`). 직접 돌려 확인한 모델 목록
+     `ARTIFACT_TOOL_CAPABILITIES`에 있으면 그 값을 쓰고, 목록에 없으면 제공사로
+     판단한다. 이 저장소의 adapter로 도구 호출을 확인한 OpenAI·Anthropic·Google의
+     채팅 모델은 켜진다. 다른 제공사는 꺼진다.
+  3. Deep research는 언제나 꺼진다.
+
+  그래서 새 모델은 추가되는 순간 자동 판정 값으로 체크된 채 나타나고, 관리자가
+  Tick/Untick할 수 있다. 자동 판정과 같은 값으로 클릭하면 NULL로 저장해 자동을
+  따르게 둔다. 고정 목록만 쓰던 때는 카탈로그가 바뀌면서 Auto 후보 27개 중
+  하나만 파일을 만들 수 있었다(2026-11-13).
+- 파일 도구를 받은 턴에는 §7의 자동 대체(다른 모델로 다시 시도)가 일어나지 않는다
+  (`tools_offered`). 도구가 이미 부작용을 냈을 수 있기 때문이다. 체크를 켜면 그
+  모델의 턴은 이 복구를 잃는다.
 - `native_search_conflict` — §9 참조.
 - `not_a_chat_conversation` — 이미지 대화. 생성 문서는 이미지 도메인과 별개다.
 - `no_conversation` — 첨부할 대화도 메시지 ID도 없는 요청.

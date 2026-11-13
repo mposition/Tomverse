@@ -26,7 +26,6 @@
  */
 
 import type { AiModel, ModelTier } from "@/lib/models";
-import { isAutoFileCapableModel } from "@/lib/autoLlmRouterCore";
 import { applyAutoExploration } from "@/lib/autoExploration";
 import { estimateRequestCredits } from "@/lib/webSearchCredits";
 import { NO_WEB_SEARCH_BACKENDS } from "@/lib/webSearchBackends";
@@ -404,9 +403,44 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
 export const applyLlmModelPick = (
   selection: AutoSelection,
   pickedModelId: string | null,
-  files?: { required: boolean; capableModelIds: readonly string[] }
+  files?: { required: boolean; capableModelIds: readonly string[] },
+  /**
+   * The model to answer with when the router was asked and failed (timed out,
+   * errored, answered nothing usable): the turn's requested model, normally
+   * the default. The rule's own choice is the cheapest fit for what the rule
+   * can see, which is not a file request or an attached image -- a failed
+   * router is exactly the turn where nobody looked (2026-11-13: a two-photo
+   * PDF request answered by a model with no file tools). Only an eligible
+   * model; the reason stays `fallback_order`.
+   */
+  routerFailedModelId?: string | null
 ): AutoSelection => {
   if (!selection.routed) return selection;
+  if (
+    !pickedModelId &&
+    routerFailedModelId &&
+    routerFailedModelId !== selection.modelId &&
+    selection.record.eligibleModelIds.includes(routerFailedModelId)
+  ) {
+    return {
+      ...selection,
+      modelId: routerFailedModelId,
+      sticky: { modelId: routerFailedModelId, turnsFavouringChallenger: 0 },
+      stickyMemoryModelId: undefined,
+      fallbackCandidateModelIds: [
+        selection.modelId,
+        ...selection.fallbackCandidateModelIds,
+      ].filter((id) => id !== routerFailedModelId),
+      record: {
+        ...selection.record,
+        selectedModelId: routerFailedModelId,
+        selectionReason: "fallback_order",
+        selectionDecidedBy: null,
+        allocationMode: "deterministic",
+        allocationSeedGrain: null,
+      },
+    };
+  }
   const ranked = [selection.modelId, ...selection.fallbackCandidateModelIds];
   const eligible = files?.required
     ? selection.record.eligibleModelIds.filter(id => files.capableModelIds.includes(id))
@@ -457,8 +491,10 @@ export const fileGenerationRetryModelId = ({
   fileCapableCandidates: readonly { id: string; tier: string }[];
 }): string | null => {
   if (!requiresFileGeneration) return null;
-  const candidates = fileCapableCandidates.filter(candidate =>
-    isAutoFileCapableModel(candidate.id, candidate.tier));
+  // Already the candidates the catalogue marks file-capable (the route filters
+  // on `canCreateFiles`, which reads each row's tick); only deep research is
+  // dropped again here.
+  const candidates = fileCapableCandidates.filter(candidate => candidate.tier !== "deep-research");
   if (candidates.some(candidate => candidate.id === answeredModelId)) return null;
   return candidates.find(candidate => candidate.id !== answeredModelId)?.id ?? null;
 };

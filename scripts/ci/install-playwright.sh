@@ -113,7 +113,24 @@ fi
 # package, with 225s reserved for a browser download that is a no-op on a cache
 # hit and a fast CDN fetch otherwise. Downloading first spends only what the
 # download actually takes.
-DOWNLOAD_RESERVE=$((DEADLINE / 4))
+#
+# A third, not the quarter it was, and with its own shorter attempt: on
+# 2026-11-13 (#3860) the CDN stalled the headless shell at 40% and the first
+# attempt, windowed to the whole 225s share, spent all of it, so the half
+# reported "out of budget after 1 attempt" with no retry ever made. A healthy
+# fetch of both builds takes seconds and a retry skips the build already on
+# disk, so attempts of DOWNLOAD_ATTEMPT_TIMEOUT leave room for two or three
+# inside the share. apt still gets whatever the download did not use. (Half
+# the deadline with the 300s apt window, the first fix proposed, still spent
+# 300s on one stalled fetch and clamped the second attempt to what was left.)
+DOWNLOAD_RESERVE=$((DEADLINE / 3))
+DOWNLOAD_ATTEMPT_TIMEOUT="${PLAYWRIGHT_DOWNLOAD_ATTEMPT_TIMEOUT:-90}"
+
+# The per-attempt window `retry` uses; set for each half below.
+RETRY_WINDOW="$ATTEMPT_TIMEOUT"
+
+# What the half running now may spend, for the out-of-budget report.
+HALF_BUDGET="$DEADLINE"
 
 # The absolute second the half currently running must stop by. Set before each
 # half rather than counted per attempt, so waiting counts against the budget too.
@@ -262,10 +279,10 @@ retry() {
           return 0
         fi
       fi
-      echo "::error::${label} ran out of the install budget (${DEADLINE}s for this run) after $((attempt - 1)) attempt(s)."
+      echo "::error::${label} ran out of the install budget (its share ${HALF_BUDGET}s of ${DEADLINE}s for this run) after $((attempt - 1)) attempt(s)."
       return 1
     fi
-    window="$ATTEMPT_TIMEOUT"
+    window="$RETRY_WINDOW"
     if [ "$window" -gt "$budget" ]; then
       window="$budget"
     fi
@@ -373,13 +390,17 @@ fi
 
 STARTED_AT="$(date +%s)"
 ENDS_AT=$((STARTED_AT + DEADLINE))
-echo "Installing ${BROWSERS[*]} with a ${DEADLINE}s budget (${ATTEMPTS} attempts of up to ${ATTEMPT_TIMEOUT}s per half)."
+echo "Installing ${BROWSERS[*]} with a ${DEADLINE}s budget (up to ${ATTEMPTS} attempts per half: browser download ${DOWNLOAD_ATTEMPT_TIMEOUT}s each within ${DOWNLOAD_RESERVE}s, apt ${ATTEMPT_TIMEOUT}s each)."
 
 # Browsers first, capped by DOWNLOAD_RESERVE: on a cache hit this is a no-op
 # that costs a second, which is the whole reason the two are not one command.
+RETRY_WINDOW="$DOWNLOAD_ATTEMPT_TIMEOUT"
+HALF_BUDGET="$DOWNLOAD_RESERVE"
 DEADLINE_AT=$((STARTED_AT + DOWNLOAD_RESERVE))
 retry "playwright install" "" npx playwright install "${BROWSERS[@]}" || exit 1
 # Then apt, with everything the download did not use.
+RETRY_WINDOW="$ATTEMPT_TIMEOUT"
+HALF_BUDGET=$((ENDS_AT - $(date +%s)))
 DEADLINE_AT="$ENDS_AT"
 retry "playwright install-deps" release_dpkg_lock npx playwright install-deps "${BROWSERS[@]}" || exit 1
 

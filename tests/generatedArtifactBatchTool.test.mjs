@@ -6,6 +6,7 @@ import { ArtifactToolRejectionLog } from "../lib/generatedArtifactRejectionLog.t
 import {
   ALL_ARTIFACT_TOOL_NAMES,
   CREATE_DOCUMENT_BATCH_TOOL_NAME,
+  CREATE_SPREADSHEET_TOOL_NAME,
   GeneratedArtifactCollector,
   buildGeneratedArtifactToolConfig,
 } from "../lib/generatedArtifactTool.ts";
@@ -130,6 +131,17 @@ test("the tool name list covers every tool that can be registered", () => {
       `${name} is registered but not in ALL_ARTIFACT_TOOL_NAMES`
     );
   }
+});
+
+test("the spreadsheet tool asks for totals and derived columns that add up", () => {
+  // The writer stores values only (no `<f>`), so a total row the model
+  // miscomputes reaches the user as a wrong number nobody recalculates.
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[
+    CREATE_SPREADSHEET_TOOL_NAME
+  ].description;
+  assert.match(description, /values only, never formulas/);
+  assert.match(description, /total row must equal the sum of the rows above it/);
+  assert.match(description, /revenue minus cost/);
 });
 
 /* -------------------------------------------------------------------------- */

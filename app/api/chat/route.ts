@@ -68,7 +68,7 @@ import { chatRouterLocationFusionEnabled, existingChatRouterLocationFusionEnable
 import { consumeChatLocationIntentLimit } from "@/lib/chatLocationIntentRateLimit";
 import { openRouterLocation, routerLocationDigest, sealRouterLocation, type RouterLocationContinuation } from "@/lib/chatRouterLocationContinuation";
 import { claimRouterLocation, consumeRouterLocation, routerLocationRefused, routerLocationResponse, type RouterLocationClaim } from "@/lib/chatRouterLocationPreparation";
-import { combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
+import { chatRouterImageHedgeMs, combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
 import {
     latestUserTurnHasAttachments,
     latestUserTurnHasImageAttachment,
@@ -2468,6 +2468,12 @@ async function handleChatPost(
             !mcpConnectionId && !turnCarriesAttachments(autoRoutingMessages);
         const presearchFlagEnabled = process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true";
         const allowRouterSearchPlan = routerSearchPlanCandidate && presearchFlagEnabled;
+        // Set only when the router model was actually asked.
+        let routerCallOutcome = null as string | null;
+        // A combined router call slower than this starts the separate image
+        // classification beside it (off unless CHAT_ROUTER_IMAGE_HEDGE_MS).
+        const imageHedgeMs = imageRouting.context ? chatRouterImageHedgeMs() : null;
+        const imageHedge = imageHedgeMs ? setTimeout(() => imageRouting.hedge(), imageHedgeMs) : null;
         const llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
                       prompt: profileTextFor(autoRoutingMessages),
@@ -2494,6 +2500,7 @@ async function handleChatPost(
                       searchPlan: fusion?.resume?.searchPlan ?? allowRouterSearchPlan,
                       imageIntent: imageRouting.context,
                       onImageDecision: imageRouting.accept,
+                      onCallOutcome: (outcome: string) => { routerCallOutcome = outcome; },
                       // An image turn is not a routing decision a chat model
                       // answered; its row would teach the router the wrong thing.
                       recordDecision: (pick) => pick?.requiresFileGeneration
@@ -2501,6 +2508,7 @@ async function handleChatPost(
                           : imageRouting.resolve().then((decision) => !decision.image),
                   })
             : null;
+        if (imageHedge) clearTimeout(imageHedge);
         finishRoutingTiming();
         if (fusion?.resume && fusion.resume.routerDigest !== fusionRouterDigest) throw routerLocationRefused();
         if (earlyContextRefusal) return earlyContextRefusal;
@@ -2517,7 +2525,11 @@ async function handleChatPost(
                 // offering file tools to every turn would disable that recovery.
                 required: llmPick?.requiresFileGeneration === true,
                 capableModelIds: fileCapableModelIds,
-            }
+            },
+            // The router was asked and gave nothing usable: answer with the
+            // requested model (normally the default), not the rule's cheapest
+            // fit, which never saw whether this is a file request.
+            routerCallOutcome !== null && routerCallOutcome !== "picked" ? requestedModelId : null
         );
         const autoRouted = guestAutoSelection?.routed === true ||
             autoSelection.routed;
@@ -3266,7 +3278,10 @@ async function handleChatPost(
             } else if (llmPick?.requiresLocation !== false) {
                 const continuation = sealRouterLocation({ requestDigest: fusion.requestDigest, routerDigest: fusionRouterDigest,
                     traceId, searchPlan: allowRouterSearchPlan, searchUtcDate: fusion.searchUtcDate,
-                    pick: llmPick, image: autoImageDecision, expiresAt: fusion.expiresAt }, process.env.NEXTAUTH_SECRET!);
+                    pick: llmPick, image: autoImageDecision, expiresAt: fusion.expiresAt,
+                    ...(routerCallOutcome === "picked" || routerCallOutcome === "invalid" ||
+                        routerCallOutcome === "error" || routerCallOutcome === "timeout"
+                        ? { routerOutcome: routerCallOutcome } : {}) }, process.env.NEXTAUTH_SECRET!);
                 return routerLocationResponse(llmPick?.requiresLocation === true ? true : null, traceId, { continuation });
             }
         }
@@ -3571,6 +3586,8 @@ async function handleChatPost(
             currentLocation,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
+            usageClass: modelConfig.usageClass,
+            fileToolsOverride: modelConfig.fileToolsOverride ?? null,
             autoRouted,
             isDeepResearchTurn,
             isAuthenticated: Boolean(session?.user?.id),
@@ -3597,7 +3614,7 @@ async function handleChatPost(
             if (conversationProductKey !== "chat" || isDeepResearchTurn) throw new ChatAccessError(400, "MCP_CHAT_REQUIRED", "Plugins are available in Chat with a model that supports tools.");
             try {
                 mcpConnector = await buildMcpChatTools({ userId: session!.user.id,
-                    connectionId: mcpConnectionId, modelId: modelConfig.id, nativeSearch: nativeSearchEnabled,
+                    connectionId: mcpConnectionId, model: modelConfig, nativeSearch: nativeSearchEnabled,
                     signal: req.signal, onState: state => {
                         try { streamController?.enqueue(buildMcpProgressChunk(state)); } catch { /* The client has closed its stream. */ }
                     } });

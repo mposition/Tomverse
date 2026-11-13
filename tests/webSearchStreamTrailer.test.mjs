@@ -182,14 +182,42 @@ test("file generation retry exposes only a non-empty model id", () => {
   });
 });
 
+test("file generation retry strips fields beyond the model id", () => {
+  const trailer = parseChatStreamTrailer(JSON.stringify({
+    fileGenerationRetry: {
+      modelId: "gpt-5-6-luna",
+      provider: "internal",
+      reason: "retry",
+      secret: "must not be exposed",
+    },
+  }));
+  assert.deepEqual(trailer.fileGenerationRetry, { modelId: "gpt-5-6-luna" });
+});
+
 test("invalid file generation retry shapes are dropped", () => {
-  for (const value of [null, "model", {}, { modelId: "" }, { modelId: 42 }]) {
+  for (const value of [
+    null,
+    "model",
+    {},
+    { modelId: "" },
+    { modelId: 42 },
+  ]) {
     const trailer = parseChatStreamTrailer(JSON.stringify({
       searchMetadata: execution,
       fileGenerationRetry: value,
     }));
     assert.equal(trailer.fileGenerationRetry, undefined);
   }
+});
+
+test("a keyless envelope still parses without inventing search metadata", () => {
+  const trailer = parseChatStreamTrailer(JSON.stringify({
+    completion: { status: "normal" },
+  }));
+  assert.deepEqual(trailer, {
+    searchMetadata: null,
+    completion: { status: "normal" },
+  });
 });
 
 test("the storage key cannot ride along in the trailer", () => {

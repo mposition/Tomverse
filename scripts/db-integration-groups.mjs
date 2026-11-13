@@ -110,6 +110,17 @@ const LANE_RULES = [
     "agents",
     /^(marketing-(automation|fact|templates|webhook|competitor|draft|generator|intel|llm|retention)|prompt-refiner-|comparison-review-|feedback-lifecycle)/,
   ],
+  // What came to rest in `accounts` without being about accounts: the model
+  // catalogue and providers, MCP connectors, Scout, the AMUX v22 CLI ledgers
+  // (camelCase names the `amux-` rule does not take), the marketing console's
+  // stores and the migration checks. Split out on 2026-11-13, when accounts
+  // held 67 suites and ran ~14 minutes against at most 9 elsewhere, the last
+  // check Railway's Wait for CI held every dev deployment -- and so every
+  // merge lane round -- for. Last on purpose: every rule above keeps its suites.
+  [
+    "platform",
+    /^(mcp-|model-catalog|provider-|product-research-|trace-report-|voice-provider-|auto-router-tunables|chat-c16-lifecycle|chat-router-location-preparation|develop-ci-repair|migration-baseline-|image-billing-measurement|agent-office-|amuxV22|amuxCli|marketing-)/,
+  ],
 ];
 
 /**

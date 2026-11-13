@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AVAILABLE_MODELS } from "../lib/models.ts";
+import { AVAILABLE_MODELS, getModelUsageCredits } from "../lib/models.ts";
 import {
+  AUTO_LLM_ROUTER_CREDITS_RULE,
+  AUTO_LLM_ROUTER_SYSTEM,
   AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS,
   AUTO_LLM_ROUTER_MAX_PROMPT_CHARS,
   AUTO_LLM_ROUTER_MAX_REASON_CHARS,
@@ -63,6 +65,13 @@ test("candidates carry what the choice needs, in the eligible order", () => {
   assert.equal(candidates[0].contextWindowTokens, luna.contextWindowTokens ?? null);
   // An unknown credit price is null, not zero: zero would read as free.
   assert.equal(candidates[2].credits, null);
+  // The fixed price level does not move with this turn's estimate.
+  const searching = autoLlmRouterCandidates(["gpt-5-6-luna"], AVAILABLE_MODELS, { "gpt-5-6-luna": 9 });
+  assert.equal(searching[0].credits, 9);
+  assert.equal(searching[0].baseCredits, candidates[0].baseCredits);
+  assert.equal(candidates[0].baseCredits, getModelUsageCredits(luna));
+  assert.equal(typeof candidates[2].baseCredits, "number");
+  assert.ok(AUTO_LLM_ROUTER_SYSTEM.includes(AUTO_LLM_ROUTER_CREDITS_RULE));
   assert.deepEqual(
     autoLlmRouterCandidates(["no-such-model"], AVAILABLE_MODELS, {}),
     []
@@ -323,6 +332,24 @@ test("the router asks an OpenAI model for low reasoning effort and leaves others
   assert.deepEqual(autoLlmRouterProviderOptions("openai"), { openai: { strictJsonSchema: true, reasoningEffort: "low" } });
   assert.deepEqual(autoLlmRouterProviderOptions("anthropic"), { openai: { strictJsonSchema: true } });
   assert.ok(AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS > AUTO_LLM_ROUTER_TIMEOUT_MS);
+});
+
+test("the router's reasoning effort is low unless the operator lowers it to a listed value", async () => {
+  const { autoLlmRouterReasoningEffort, autoLlmRouterProviderOptions } = await import("../lib/autoLlmRouterCore.ts");
+  assert.equal(autoLlmRouterReasoningEffort(undefined), "low");
+  assert.equal(autoLlmRouterReasoningEffort("none"), "none");
+  assert.equal(autoLlmRouterReasoningEffort(" Minimal "), "minimal");
+  // Never raised, and nothing outside the list is sent.
+  for (const raw of ["high", "medium", "xhigh", "fast"]) assert.equal(autoLlmRouterReasoningEffort(raw), "low", raw);
+  const saved = process.env.AUTO_LLM_ROUTER_REASONING_EFFORT;
+  process.env.AUTO_LLM_ROUTER_REASONING_EFFORT = "none";
+  try {
+    assert.deepEqual(autoLlmRouterProviderOptions("openai"), { openai: { strictJsonSchema: true, reasoningEffort: "none" } });
+    assert.deepEqual(autoLlmRouterProviderOptions("anthropic"), { openai: { strictJsonSchema: true } });
+  } finally {
+    if (saved === undefined) delete process.env.AUTO_LLM_ROUTER_REASONING_EFFORT;
+    else process.env.AUTO_LLM_ROUTER_REASONING_EFFORT = saved;
+  }
 });
 
 test("a router call's worst case bounds input by bytes and output by its token cap", async () => {

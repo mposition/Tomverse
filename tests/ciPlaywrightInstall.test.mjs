@@ -260,6 +260,36 @@ test("the browser download runs first and apt gets what it leaves", () => {
     );
 });
 
+test("a stalled browser download is retried inside its share, not spent in one attempt", () => {
+    // 2026-11-13 (#3860): the CDN stalled the headless shell at 40%. The one
+    // attempt was windowed to the whole 225s share, used all of it, and the
+    // half reported "out of budget after 1 attempt" -- a retry the loop
+    // promised and never made.
+    const script = read(SCRIPT_PATH);
+    const attempt = Number(/PLAYWRIGHT_DOWNLOAD_ATTEMPT_TIMEOUT:-(\d+)/.exec(script)?.[1]);
+    const share = Number(/^DOWNLOAD_RESERVE=\$\(\(DEADLINE \/ (\d+)\)\)$/m.exec(script)?.[1]);
+    assert.ok(attempt > 0 && share > 0, "the download attempt and its share must both be read from the script");
+    const firstBackoff = 30;
+    for (const name of ["DEADLINE_LIGHT_DEFAULT", "DEADLINE_HEAVY_DEFAULT"]) {
+        const reserve = Math.floor(scriptDefault(name) / share);
+        assert.ok(
+            2 * attempt + firstBackoff <= reserve,
+            `${name}: two ${attempt}s download attempts and the backoff between them must fit the ${reserve}s share`
+        );
+    }
+    assert.match(
+        script,
+        /RETRY_WINDOW="\$DOWNLOAD_ATTEMPT_TIMEOUT"[\s\S]*?retry "playwright install" ""/,
+        "the download half must use its own attempt window"
+    );
+    assert.match(
+        script,
+        /RETRY_WINDOW="\$ATTEMPT_TIMEOUT"[\s\S]*?retry "playwright install-deps"/,
+        "apt goes back to its own attempt window"
+    );
+    assert.match(script, /window="\$RETRY_WINDOW"/);
+});
+
 test("the wrapper is executable", () => {
     // A workflow `run:` of a non-executable path fails with "Permission
     // denied" on every job at once, which is a worse outage than the flake.
