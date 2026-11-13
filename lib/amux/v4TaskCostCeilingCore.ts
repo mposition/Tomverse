@@ -368,9 +368,19 @@ export function checkV4TaskApprovedCeiling(
   if (approvedRoutes.size !== approved.routes.length) {
     return { decision: "hold", reason: "approval_invalid" };
   }
+  // A route the receipt did not name still counts as approved when it runs
+  // the same provider and model as a route the receipt did name: a worker
+  // added on an approved model, priced from the same entry (owner decision
+  // 2026-11-13). Until then every worker added -- even one more codex-chore on
+  // gpt-6-luna -- sent every waiting Task back for reconfirmation. A route the
+  // receipt named must still match it exactly, a new model still asks, and the
+  // bounds and ceiling checks below still apply.
+  const approvedModels = new Set(approved.routes.map((route) =>
+    JSON.stringify([route.provider, route.modelId])));
   if (current.receipt.routes.some((route) => {
     const old = approvedRoutes.get(route.routeId);
-    return !old || old.workerName !== route.workerName ||
+    if (!old) return !approvedModels.has(JSON.stringify([route.provider, route.modelId]));
+    return old.workerName !== route.workerName ||
       old.provider !== route.provider || old.modelId !== route.modelId ||
       old.routePolicyDigest !== route.routePolicyDigest;
   })) {
