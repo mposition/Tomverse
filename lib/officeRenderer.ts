@@ -60,6 +60,9 @@ export const officeRendererConfig = (
   env: Readonly<Record<string, string | undefined>> = process.env
 ): OfficeRendererConfig | null => {
   if (env.CHAT_OFFICE_TO_PDF !== "on") return null;
+  // Office rendering is a conversion: with conversions off it is off too, so
+  // nothing (an iWork upload, a prompt line) promises a tool that is not sent.
+  if (env.CHAT_FILE_CONVERSION === "off") return null;
   const raw = env.OFFICE_RENDERER_URL?.trim();
   if (!raw) return null;
   let url: URL;
@@ -73,6 +76,9 @@ export const officeRendererConfig = (
   if (url.username || url.password) return null;
   const username = env.OFFICE_RENDERER_USERNAME?.trim();
   const password = env.OFFICE_RENDERER_PASSWORD;
+  // Half a credential is a misconfiguration, not "no authentication": sending
+  // unauthenticated requests would only meet 401s nobody could read.
+  if (Boolean(username) !== Boolean(password)) return null;
   return {
     url,
     ...(username && password ? { username, password } : {}),
@@ -88,7 +94,10 @@ export const officeRenderingEnabled = (
 const readBounded = async (response: Response, limit: number): Promise<Uint8Array | null> => {
   const declared = Number(response.headers.get("content-length") ?? "");
   if (Number.isFinite(declared) && declared > limit) return null;
-  if (!response.body) return new Uint8Array(await response.arrayBuffer());
+  if (!response.body) {
+    const whole = new Uint8Array(await response.arrayBuffer());
+    return whole.byteLength > limit ? null : whole;
+  }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -111,9 +120,14 @@ const readBounded = async (response: Response, limit: number): Promise<Uint8Arra
   return out;
 };
 
+/**
+ * The renderer writes a PDF and nothing else, so its answer starts with the
+ * header. A page that merely mentions "%PDF-" somewhere -- a proxy's error
+ * page -- is the service failing, not the user's file.
+ */
 const isPdf = (bytes: Uint8Array) =>
   bytes.byteLength > 5 &&
-  new TextDecoder("latin1").decode(bytes.subarray(0, 1024)).includes("%PDF-");
+  new TextDecoder("latin1").decode(bytes.subarray(0, 5)) === "%PDF-";
 
 /**
  * Renders one office document to PDF. Never throws: a renderer that is down,

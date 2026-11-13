@@ -164,3 +164,24 @@ test("a renderer down altogether is unavailable, not a crash", async () => {
   const result = await renderOfficeDocumentToPdf(config, { mediaType: DOCX, bytes: new Uint8Array([1]) });
   assert.deepEqual(result, { ok: false, failure: "UNAVAILABLE" });
 });
+
+test("review 1: the renderer is off with conversions off, or with half a credential", () => {
+  const base = { CHAT_OFFICE_TO_PDF: "on", OFFICE_RENDERER_URL: "http://gotenberg.railway.internal:3000" };
+  assert.ok(officeRendererConfig(base));
+  assert.equal(officeRendererConfig({ ...base, CHAT_FILE_CONVERSION: "off" }), null);
+  assert.equal(officeRendererConfig({ ...base, OFFICE_RENDERER_USERNAME: "u" }), null);
+  assert.equal(officeRendererConfig({ ...base, OFFICE_RENDERER_PASSWORD: "p" }), null);
+});
+
+test("review 1: an answer that only mentions %PDF- somewhere is not a PDF", async () => {
+  const server = await standIn((request, response) => {
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end("<html>see %PDF-1.7 spec</html>");
+  });
+  try {
+    const result = await renderOfficeDocumentToPdf(server.config(), { mediaType: DOCX, bytes: new Uint8Array([1]) });
+    assert.deepEqual(result, { ok: false, failure: "UNAVAILABLE" });
+  } finally {
+    await server.close();
+  }
+});

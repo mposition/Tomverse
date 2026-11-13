@@ -3064,7 +3064,18 @@ const checks = [
       const xls = read("lib/legacyOffice/xls.ts");
       const ppt = read("lib/legacyOffice/ppt.ts");
       const rtf = read("lib/legacyOffice/rtf.ts");
-      const parsers = [cfbf, doc, xls, ppt, rtf];
+      const hwp = read("lib/legacyOffice/hwp.ts");
+      const bounded = read("lib/boundedInflate.ts");
+      // Every reader of untrusted packages: none may inflate in one call.
+      const inflaters = [
+        "lib/legacyOffice/hwp.ts",
+        "lib/boundedInflate.ts",
+        "lib/packageExpansion.ts",
+        "lib/iworkPackage.ts",
+        "lib/officeRenderInput.ts",
+        "lib/legacyOfficeText.ts",
+      ].map(read);
+      const parsers = [cfbf, doc, xls, ppt, rtf, hwp];
       return (
         // A protected document is refused by name. Nothing attempts a key.
         doc.includes("FIB_FLAG_ENCRYPTED") &&
@@ -3073,6 +3084,22 @@ const checks = [
         xls.includes('LEGACY_OFFICE_ENCRYPTED') &&
         ppt.includes("CURRENT_USER_ENCRYPTED") &&
         ppt.includes("RECORD_CRYPT_SESSION_10") &&
+        // HWP: a password, a distribution copy and DRM are all refused.
+        hwp.includes("FLAG_PASSWORD") &&
+        hwp.includes("FLAG_DISTRIBUTION") &&
+        hwp.includes("FLAG_DRM") &&
+        hwp.includes('LEGACY_OFFICE_ENCRYPTED') &&
+        // Compressed sections and HWPX parts inflate a step at a time with the
+        // output charged as it comes, never in one call whose whole output is
+        // allocated before the budget sees it.
+        hwp.includes("inflateRawBounded") &&
+        hwp.includes("visitZipEntries") &&
+        !/\b(inflateSync|unzipSync|gunzipSync|unzlibSync)\s*\(/.test(hwp) &&
+        bounded.includes("INFLATE_INPUT_CHUNK") &&
+        inflaters.every(
+          (code) => !/\b(inflateSync|unzipSync|gunzipSync|unzlibSync)\s*\(/.test(code)
+        ) &&
+        !/\b(inflateSync|unzipSync|gunzipSync|unzlibSync)\s*\(/.test(bounded) &&
         !/\b(createDecipheriv|createHash|rc4|crypto)\b/i.test(
             parsers.join("\n")
         ) &&

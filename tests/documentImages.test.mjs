@@ -215,3 +215,20 @@ test("text formats say where a picture stood, and never link to one", async () =
   assert.match(markdown, /_\[Image: Map\]_/);
   assert.equal(/\]\(|https?:/.test(markdown), false);
 });
+
+test("review 1: figures from several pages are placed in block order, each page drawn once", async () => {
+  const files = attachments([["paper.pdf", "application/pdf", await figurePdf()]]);
+  const images = await resolveDocumentImages(
+    spec([
+      { type: "image", attachment: "att_1", page: 2, crop: { x: 0, y: 0, width: 0.5, height: 0.5 } },
+      { type: "image", attachment: "att_1", page: 1 },
+      { type: "image", attachment: "att_1", page: 2, crop: { x: 0.5, y: 0.5, width: 0.5, height: 0.5 } },
+    ]),
+    files
+  );
+  assert.deepEqual([...images.keys()].sort(), [0, 1, 2]);
+  const [, green] = await meanColour(images.get(0).jpeg);
+  const [white] = await meanColour(images.get(2).jpeg);
+  assert.ok(green > 150, "block 0 is the green figure");
+  assert.ok(white > 240, "block 2 is the blank corner");
+});
