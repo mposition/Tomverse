@@ -3273,7 +3273,10 @@ async function handleChatPost(
             } else if (llmPick?.requiresLocation !== false) {
                 const continuation = sealRouterLocation({ requestDigest: fusion.requestDigest, routerDigest: fusionRouterDigest,
                     traceId, searchPlan: allowRouterSearchPlan, searchUtcDate: fusion.searchUtcDate,
-                    pick: llmPick, image: autoImageDecision, expiresAt: fusion.expiresAt }, process.env.NEXTAUTH_SECRET!);
+                    pick: llmPick, image: autoImageDecision, expiresAt: fusion.expiresAt,
+                    ...(routerCallOutcome === "picked" || routerCallOutcome === "invalid" ||
+                        routerCallOutcome === "error" || routerCallOutcome === "timeout"
+                        ? { routerOutcome: routerCallOutcome } : {}) }, process.env.NEXTAUTH_SECRET!);
                 return routerLocationResponse(llmPick?.requiresLocation === true ? true : null, traceId, { continuation });
             }
         }

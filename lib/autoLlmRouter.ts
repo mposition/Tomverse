@@ -517,7 +517,15 @@ export async function pickAutoModelWithLlm(input: {
         input.locationFusion.onRouterDigest(digest);
         // No hold, model call or telemetry replay. The caller also refuses a
         // configuration change if the live candidate set became empty.
-        if (input.locationFusion.resume) return input.locationFusion.resume.routerDigest === digest ? input.locationFusion.resume.pick : null;
+        if (input.locationFusion.resume) {
+            if (input.locationFusion.resume.routerDigest !== digest) return null;
+            // The call was made on the first request; its outcome travels with
+            // the pick so a failure is still a failure on resume.
+            if (input.locationFusion.resume.routerOutcome) {
+                input.onCallOutcome?.(input.locationFusion.resume.routerOutcome);
+            }
+            return input.locationFusion.resume.pick;
+        }
     }
     if (worstCase !== null && input.verifyPreparedContext && !(await input.verifyPreparedContext())) return null;
     const reservedAt = new Date();
