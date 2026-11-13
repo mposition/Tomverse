@@ -274,6 +274,9 @@ test("a refused plan is mended, not rewritten, and a run whose plan was refused 
   assert.ok(runner.includes('existsSync(path.join(creativeDir, replan, "sources")) && !existsSync(path.join(creativeDir, replan, "plan.json"))'));
   assert.match(runner, /const fresh = rebuild === null && replan === null && env\[FRESH_REVIEW_ENV\] === "on";/u);
   assert.ok(runner.includes("`plan-${planCalls + attempt}`"));
+  // Its recordings count before the "no capture packs" stop (a replan of 20261113-3 halted there).
+  const packsIn = runner.indexOf("if (rebuild !== null || replan !== null) packs = [...packs, ...freshPacksIn(runDir)];");
+  assert.ok(packsIn > 0 && packsIn < runner.indexOf('halt("no_capture_packs")'));
 });
 
 test("a concept or logline used before is refused", () => {
@@ -413,15 +416,23 @@ test("both pack shapes are read the same way, and a pack's topic comes from its 
   assert.equal(normalizePack({ assetId: "media-x-short", locale: "en", captures: {} }), null);
 });
 
-test("a review passes only with the verdict pass and every score 8 or more", () => {
-  const scores = { creative: 9, craft: 8, readability: 8, truth: 10, disclosure: 9 };
-  assert.equal(reviewPassed({ verdict: "pass", scores }), true);
-  assert.equal(reviewPassed({ verdict: "pass", scores: { ...scores, craft: 7 } }), false);
-  assert.equal(reviewPassed({ verdict: "pass", scores: { creative: 9 } }), false);
-  assert.equal(reviewPassed({ verdict: "pass", scores: { ...scores, truth: "10" } }), false);
-  assert.equal(reviewPassed({ verdict: "pass" }), false);
-  assert.equal(reviewPassed({ verdict: "fix", scores }), false);
+test("a film reaches Admin on its gates (truth, tone, disclosure); craft scores are notes, not a gate", () => {
+  const gates = { truth: true, tone: true, disclosure: true };
+  // Owner 2026-11-13: low craft never holds a film back; the person in Admin judges it.
+  assert.equal(reviewPassed({ verdict: "pass", gates, scores: { creative: 5, craft: 5, readability: 6, truth: 7, disclosure: 9 } }), true);
+  assert.equal(reviewPassed({ verdict: "pass", gates }), true);
+  for (const gate of ["truth", "tone", "disclosure"]) {
+    assert.equal(reviewPassed({ verdict: "pass", gates: { ...gates, [gate]: false } }), false, gate);
+    assert.equal(reviewPassed({ verdict: "pass", gates: { ...gates, [gate]: "true" } }), false, `${gate} as text`);
+  }
+  assert.equal(reviewPassed({ verdict: "pass", gates: { truth: true, tone: true } }), false);
+  assert.equal(reviewPassed({ verdict: "pass", scores: { creative: 10, craft: 10, readability: 10, truth: 10, disclosure: 10 } }), false, "no gates, no pass");
+  assert.equal(reviewPassed({ verdict: "fix", gates }), false);
+  assert.equal(reviewPassed({ verdict: "reject", gates }), false);
   assert.equal(reviewPassed(null), false);
+  const review = readFileSync(resolve("tools/marketing-video/CREATIVE-REVIEW.md"), "utf8");
+  assert.match(review, /"gates":\{"truth":true,"tone":true,"disclosure":true\}/u);
+  assert.match(review, /craft alone never holds a film\s+back/u);
 });
 
 test("the asset carries the words inside the captures it shows and its source short's claims", () => {
@@ -429,6 +440,12 @@ test("the asset carries the words inside the captures it shows and its source sh
   assert.equal(marketingAssetSchema.safeParse(asset).success, true);
   assert.deepEqual(asset.claimIds, ["claim-a"]);
   assert.ok(transcript.en.endsWith("GPT 6 Luna says hello\nAGREE 7"));
+  // "分析。AI" reads to the Guard as the host 析.ai: a space goes after the stop (run 20261113-2).
+  const zh = { ...words("zh-Hant"), alt: "然後是回答分析。AI 生成：三個計時器。" };
+  const spaced = creativeAsset({ id: "media-20261113-creative-zh-hant-short", locale: "zh-Hant", words: zh, captureWords: ["比較。AI Review"] });
+  assert.equal(spaced.asset.alt["zh-Hant"], "然後是回答分析。 AI 生成：三個計時器。");
+  assert.ok(spaced.transcript["zh-Hant"].endsWith("比較。 AI Review"));
+  assert.doesNotMatch(JSON.stringify(spaced), /。[A-Za-z]/u);
 });
 
 test("captures come only from shorts approved now and still valid", () => {

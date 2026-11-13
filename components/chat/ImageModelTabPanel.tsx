@@ -62,6 +62,33 @@ const PROVIDER_LABELS: Record<ImageModelProvider, string> = {
   qwen: "Alibaba Cloud",
 };
 
+/**
+ * Owners in the order the chat list shows its providers (OpenAI, then Google),
+ * the rest after them in this order. Grouped by owner, not supplier: Nano
+ * Banana 2 through fal sits with Google, and its row still names fal.
+ */
+const OWNER_DISPLAY_ORDER: readonly ImageModelOwner[] = ["openai", "google", "xai", "qwen", "fal"];
+
+/** Enabled models grouped by owner; within a group, the catalogue's own order. */
+export const groupImageModelsByOwner = <T extends Parameters<typeof imageModelBrandParts>[0]>(
+  models: readonly T[]
+): { owner: ImageModelOwner; models: T[] }[] => {
+  const groups = new Map<ImageModelOwner, T[]>();
+  for (const model of models) {
+    const owner = imageModelBrandParts(model).owner;
+    const group = groups.get(owner);
+    if (group) group.push(model);
+    else groups.set(owner, [model]);
+  }
+  const rank = (owner: ImageModelOwner) => {
+    const index = OWNER_DISPLAY_ORDER.indexOf(owner);
+    return index === -1 ? OWNER_DISPLAY_ORDER.length : index;
+  };
+  return [...groups.entries()]
+    .sort(([a], [b]) => rank(a) - rank(b))
+    .map(([owner, grouped]) => ({ owner, models: grouped }));
+};
+
 const LATENCY_LABEL_KEYS = {
   fast: "chat.imageModelLatencyFast",
   balanced: "chat.imageModelLatencyBalanced",
@@ -94,6 +121,7 @@ export function ImageModelTabPanel({
   const { t } = useLanguage();
   const { models: catalogue } = useImageModelCatalog();
   const models = catalogue.filter((model) => model.disabledReason === null);
+  const groups = groupImageModelsByOwner(models);
 
   return (
     <div
@@ -108,90 +136,98 @@ export function ImageModelTabPanel({
         {t("chat.imageModelTabSubtitle")}
       </p>
 
-      <ul className="space-y-2">
-        {models.map((model) => {
-          const brand = imageModelBrandParts(model);
-          // "From" pricing: the picker does not know which quality and size the
-          // workspace will end on, so it quotes the cheapest option rather than
-          // a number the composer might contradict.
-          const fromCredits = model.prices.length
-            ? Math.min(...model.prices.map((price) => price.credits))
-            : null;
-          return (
-            <li key={model.id}>
-              <button
-                type="button"
-                data-testid="image-model-option"
-                data-model-id={model.id}
-                data-locked={lock ? "true" : "false"}
-                onClick={() => {
-                  if (lock) {
-                    onLockedClick(lock);
-                    return;
-                  }
-                  onSelectModel(model.id);
-                }}
-                className={`flex w-full items-start gap-3 rounded-xl border px-3 text-left transition ${
-                  touchTarget ? "min-h-14 py-2.5" : "py-2.5"
-                } border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800`}
-              >
-                {/* Whose model it is, like the chat list: Nano Banana 2 through
-                    fal shows Google's mark, and the subtitle names fal. */}
-                <ModelLogo provider={brand.owner} size="lg" className="h-9 w-9" />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                    {model.name}
-                  </span>
-                  <span className="mt-0.5 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
-                    {/* Brand names, not copy: never translated. */}
-                    {OWNER_LABELS[brand.owner]}
-                    {brand.gateway !== null && (
-                      <>
+      {groups.map((group) => (
+        <div key={group.owner} className="space-y-1" data-testid="image-model-group" data-owner={group.owner}>
+          {/* The chat list's provider heading: a brand, never translated. */}
+          <div className="px-2 text-[11px] font-bold uppercase tracking-wide text-zinc-400">
+            {OWNER_LABELS[group.owner].toUpperCase()}
+          </div>
+          <ul className="space-y-2">
+            {group.models.map((model) => {
+              const brand = imageModelBrandParts(model);
+              // "From" pricing: the picker does not know which quality and size the
+              // workspace will end on, so it quotes the cheapest option rather than
+              // a number the composer might contradict.
+              const fromCredits = model.prices.length
+                ? Math.min(...model.prices.map((price) => price.credits))
+                : null;
+              return (
+                <li key={model.id}>
+                  <button
+                    type="button"
+                    data-testid="image-model-option"
+                    data-model-id={model.id}
+                    data-locked={lock ? "true" : "false"}
+                    onClick={() => {
+                      if (lock) {
+                        onLockedClick(lock);
+                        return;
+                      }
+                      onSelectModel(model.id);
+                    }}
+                    className={`flex w-full items-start gap-3 rounded-xl border px-3 text-left transition ${
+                      touchTarget ? "min-h-14 py-2.5" : "py-2.5"
+                    } border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800`}
+                  >
+                    {/* Whose model it is, like the chat list: Nano Banana 2 through
+                        fal shows Google's mark, and the subtitle names fal. */}
+                    <ModelLogo provider={brand.owner} size="lg" className="h-9 w-9" />
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                        {model.name}
+                      </span>
+                      <span className="mt-0.5 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+                        {/* Brand names, not copy: never translated. */}
+                        {OWNER_LABELS[brand.owner]}
+                        {brand.gateway !== null && (
+                          <>
+                            {" · "}
+                            {/* Named, not hidden (policy section 16.1). Whose model
+                                it is and who supplies it are different facts, and a
+                                row that showed only one of them would be wrong
+                                about the other. */}
+                            <span data-testid="image-model-gateway">
+                              {interpolate(t("chat.imageModelViaGateway"), {
+                                gateway: PROVIDER_LABELS[brand.gateway],
+                              })}
+                            </span>
+                          </>
+                        )}
                         {" · "}
-                        {/* Named, not hidden (policy section 16.1). Whose model
-                            it is and who supplies it are different facts, and a
-                            row that showed only one of them would be wrong
-                            about the other. */}
-                        <span data-testid="image-model-gateway">
-                          {interpolate(t("chat.imageModelViaGateway"), {
-                            gateway: PROVIDER_LABELS[brand.gateway],
-                          })}
+                        {t(LATENCY_LABEL_KEYS[model.latencyClass])}
+                      </span>
+                      {lock && (
+                        <span className="mt-1 flex items-center gap-1 text-[11px] font-bold text-accent-image-600 dark:text-accent-image-300">
+                          <LockKeyhole className="h-3 w-3" aria-hidden="true" />
+                          {lock === "sign_in"
+                            ? t("modelStatusReasons.loginRequired")
+                            : t("modelStatusReasons.upgradeRequired")}
                         </span>
-                      </>
-                    )}
-                    {" · "}
-                    {t(LATENCY_LABEL_KEYS[model.latencyClass])}
-                  </span>
-                  {lock && (
-                    <span className="mt-1 flex items-center gap-1 text-[11px] font-bold text-accent-image-600 dark:text-accent-image-300">
-                      <LockKeyhole className="h-3 w-3" aria-hidden="true" />
-                      {lock === "sign_in"
-                        ? t("modelStatusReasons.loginRequired")
-                        : t("modelStatusReasons.upgradeRequired")}
+                      )}
                     </span>
-                  )}
-                </span>
-                <span className="flex shrink-0 items-center gap-2">
-                  {fromCredits !== null && (
-                    <CreditCostBadge
-                      credits={fromCredits}
-                      size="xs"
-                      testId="image-model-credit-badge"
-                      label={interpolate(t("chat.imageModelCreditsFrom"), {
-                        credits: fromCredits,
-                      })}
-                    />
-                  )}
-                  <ChevronRight
-                    className="h-4 w-4 text-zinc-400"
-                    aria-hidden="true"
-                  />
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                    <span className="flex shrink-0 items-center gap-2">
+                      {fromCredits !== null && (
+                        <CreditCostBadge
+                          credits={fromCredits}
+                          size="xs"
+                          testId="image-model-credit-badge"
+                          label={interpolate(t("chat.imageModelCreditsFrom"), {
+                            credits: fromCredits,
+                          })}
+                        />
+                      )}
+                      <ChevronRight
+                        className="h-4 w-4 text-zinc-400"
+                        aria-hidden="true"
+                      />
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }
