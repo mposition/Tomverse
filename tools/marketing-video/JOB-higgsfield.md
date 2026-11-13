@@ -72,7 +72,12 @@ and device. Each one:
   it so the picture works without the Tomverse logo: the code adds a band at
   the bottom. Every word the picture shows is one of `texts`: props (papers,
   books, maps, signs) carry no other lettering, and a quoted answer is drawn
-  without quotation marks around it. The image model draws or follows every word it reads, even after
+  without quotation marks around it. The one display that shows words (a
+  phone, a tablet or a laptop) is described as "a screen filled edge to edge
+  with flat chroma green #00ff00, evenly lit, completely empty"; never
+  describe the words or the app on it, because code draws the app screen
+  there (guide 15). Fingers may rest on its edge. Size every device true to
+  the person (guide 5): a phone is about as long as the hand holding it. The image model draws or follows every word it reads, even after
   "no", so these never appear in it, not even to forbid them: "Tomverse" (not
   "no Tomverse logo", not "Tomverse blue"), purple, violet, magenta, lavender,
   lilac, fuchsia, "lorem ipsum", and any web address. Say "#155dfb blue" and
@@ -80,11 +85,18 @@ and device. Each one:
 - `texts`: every piece of text the picture shows, exactly, in English, in
   reading order, at most 12, each `{"role", "text"}`:
   - `headline` (one, at most 70 characters), `subhead`, `cta` (exactly one),
-    `screen` (words
-    on a phone or laptop screen), `answer` (an AI answer on a screen), `label`
-    (a name tag, a chip, a receipt line). Every text but the headline is at
-    most 400 characters. A picture that needs more than 12 texts shows too
-    much: cut it down.
+    `screen` (words on a phone or laptop screen), `answer` (an AI answer on a
+    screen), `label` (a name tag, a chip, a receipt line). Every text but the
+    headline is at most 400 characters. A picture that needs more than 12
+    texts shows too much: cut it down.
+  - Every text on the green display has `ui`, in the order the app shows
+    them: `title` (a small chip at the top, e.g. "Smart Adaptive"),
+    `question` (what the person typed), `answer` (the AI's reply), `caption`
+    (a small grey line under it). One display, at most 5 texts, at most one
+    question and exactly one answer. An `answer` with `ui` is at most 120
+    characters (80 in Korean or Chinese), any other `ui` text at most 60 (40):
+    guide 18. Its `role` is `answer` for the answer and `screen` for the rest.
+    Each translation keeps the same `ui`.
   - Only an `answer` may have a `speaker`. An `answer` under a real model name
     has `"speaker": "<model name as in features.json>"` and is that model's
     recorded words, with nothing added (guide 10). Only the models quoted in a

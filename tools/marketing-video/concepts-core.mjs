@@ -11,6 +11,10 @@ import { featuresFile } from "./features-source.mjs";
 export const LOCALES = ["en", "ko", "zh-Hant", "zh-Hans"];
 export const TRANSLATED = ["ko", "zh-Hant", "zh-Hans"];
 export const TEXT_ROLES = ["headline", "subhead", "cta", "screen", "answer", "label"];
+/** What the app screen on the green display holds (screen-core.mjs draws it). */
+export const SCREEN_UI = ["title", "question", "answer", "caption"];
+/** The most characters a display text may have: few words keep a phone phone-sized (owner 2026-11-13). */
+export const UI_MAX = { en: { answer: 120, other: 60 }, cjk: { answer: 80, other: 40 } };
 /** Model and company names that are never translated (design guide 12). */
 export const MODEL_FAMILIES = ["ChatGPT", "GPT", "Claude", "Gemini", "Grok", "Llama", "Mistral", "Qwen", "DeepSeek", "Kimi", "Nano Banana", "Perplexity", "OpenAI", "Anthropic", "Google", "xAI"];
 /** Transliterations rejected on 2026-11-08 and their neighbours. */
@@ -257,11 +261,13 @@ export function sortConcepts(answer, { feature, history = [], day, toolDir }) {
     if (copy && !/\bAI\b/u.test(copy) && familiesIn(copy).length === 0) problems.push(`${at}: the headline or the subhead says "AI" or names a model, so a stranger knows this is an AI app`);
     const speakers = [...new Set(quotes.map((entry) => entry.speaker))];
     /** The shape of one text; null when it can be read further. */
-    const shapeProblem = (text, where, headlineMax) => {
-      if (text === null || typeof text !== "object" || Object.keys(text).some((key) => !["role", "text", "speaker"].includes(key))) return `${where}: keys are role, text and speaker`;
+    const shapeProblem = (text, where, headlineMax, cjk = false) => {
+      if (text === null || typeof text !== "object" || Object.keys(text).some((key) => !["role", "text", "speaker", "ui"].includes(key))) return `${where}: keys are role, text, speaker and ui`;
       if (!TEXT_ROLES.includes(text.role)) return `${where}: role is one of ${TEXT_ROLES.join(", ")}`;
-      const max = text.role === "headline" ? headlineMax : 400;
-      if (!isText(text.text, 1, max)) return `${where}: text is 1-${max} characters${typeof text.text === "string" ? ` (it has ${text.text.length})` : ""}`;
+      if (text.ui !== undefined && (!SCREEN_UI.includes(text.ui) || !["screen", "answer"].includes(text.role))) return `${where}: ui is one of ${SCREEN_UI.join(", ")}, only on a screen or answer text shown on the green display`;
+      // Words on a display are few, so the display stays phone-sized (owner 2026-11-13).
+      const max = text.ui ? UI_MAX[cjk ? "cjk" : "en"][text.ui === "answer" ? "answer" : "other"] : text.role === "headline" ? headlineMax : 400;
+      if (!isText(text.text, 1, max)) return `${where}: text is 1-${max} characters${text.ui ? " on the display" : ""}${typeof text.text === "string" ? ` (it has ${text.text.length})` : ""}`;
       return null;
     };
     const readable = [];
@@ -285,6 +291,15 @@ export function sortConcepts(answer, { feature, history = [], day, toolDir }) {
       }
     }
 
+    // The app screen: code draws it on the one display the image model leaves flat green.
+    const onDisplay = concept.texts.filter((text) => text && typeof text === "object" && text.ui !== undefined);
+    if (onDisplay.length > 0) {
+      if (onDisplay.length > 5) problems.push(`${at}: at most 5 texts on the display (it has ${onDisplay.length}); a display with more words grows bigger than a phone`);
+      if (!onDisplay.some((text) => text.ui === "answer")) problems.push(`${at}: the display shows one answer (ui "answer")`);
+      if (onDisplay.filter((text) => text.ui === "question").length > 1 || onDisplay.filter((text) => text.ui === "answer").length > 1) problems.push(`${at}: the display shows at most one question and one answer`);
+      if (typeof concept.prompt_en === "string" && !/#00ff00/iu.test(concept.prompt_en)) problems.push(`${at}: prompt_en draws the display that shows the ui texts as flat chroma green #00ff00, empty; code draws the app screen there`);
+    }
+
     if (concept.translations === null || typeof concept.translations !== "object" || Object.keys(concept.translations).sort().join(",") !== [...TRANSLATED].sort().join(",")) {
       problems.push(`${at}: translations has exactly ${TRANSLATED.join(", ")}`);
     } else {
@@ -297,13 +312,13 @@ export function sortConcepts(answer, { feature, history = [], day, toolDir }) {
         for (const [index, text] of list.entries()) {
           const source = concept.texts[index];
           const where = `${at} ${locale}[${index}]`;
-          const shape = shapeProblem(text, where, 40);
+          const shape = shapeProblem(text, where, 40, true);
           if (shape) {
             problems.push(shape);
             continue;
           }
           if (!readable[index]) continue;
-          if (text.role !== source.role || text.speaker !== source.speaker) problems.push(`${where}: same role and speaker as the English text`);
+          if (text.role !== source.role || text.speaker !== source.speaker || text.ui !== source.ui) problems.push(`${where}: same role, speaker and ui as the English text`);
           problems.push(...textProblems(text.text, { locale, where, role: text.role, models }));
           for (const name of familiesIn(source.text)) if (!text.text.includes(name)) problems.push(`${where}: "${name}" of the English text stays in the translation, as written`);
           if (/\+\s*more\b/iu.test(source.text) && !text.text.includes(locale === "ko" ? "+ 기타 AI" : "+ 其他 AI")) {

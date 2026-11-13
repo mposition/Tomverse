@@ -861,3 +861,130 @@ test("Chinese words are spaced after a full stop and pass the Guard's hygiene ch
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// --- the app screen on a green display (owner 2026-11-13) --------------------
+
+const withDisplay = (extra = {}) =>
+  concept("c2", {
+    prompt_en: `${concept("c2").prompt_en} The phone's screen is filled edge to edge with flat chroma green #00ff00, evenly lit, completely empty.`,
+    texts: [
+      { role: "headline", text: "Ask AI what to cook tonight" },
+      { role: "screen", ui: "question", text: "What can I cook with eggs and spinach?" },
+      { role: "answer", ui: "answer", text: "A spinach omelette: wilt the spinach, pour in beaten eggs, fold after 3 minutes." },
+      { role: "cta", text: "Start without an account" },
+    ],
+    translations: {
+      ko: [
+        { role: "headline", text: "오늘 저녁 메뉴, AI에게 물어보세요" },
+        { role: "screen", ui: "question", text: "달걀이랑 시금치로 뭘 만들까?" },
+        { role: "answer", ui: "answer", text: "시금치 오믈렛: 시금치를 숨 죽이고 달걀을 부어 3분 뒤 접으세요." },
+        { role: "cta", text: "계정 없이도 바로 시작해 보세요" },
+      ],
+      "zh-Hant": [
+        { role: "headline", text: "今晚吃什麼，問 AI" },
+        { role: "screen", ui: "question", text: "雞蛋和菠菜可以做什麼？" },
+        { role: "answer", ui: "answer", text: "菠菜蛋捲：菠菜炒軟，倒入蛋液，三分鐘後對折。" },
+        { role: "cta", text: "不用帳號也能直接開始" },
+      ],
+      "zh-Hans": [
+        { role: "headline", text: "今晚吃什么，问 AI" },
+        { role: "screen", ui: "question", text: "鸡蛋和菠菜可以做什么？" },
+        { role: "answer", ui: "answer", text: "菠菜蛋卷：菠菜炒软，倒入蛋液，三分钟后对折。" },
+        { role: "cta", text: "不用账号也能直接开始" },
+      ],
+    },
+    ...extra,
+  });
+
+test("words on the green display are few, marked with ui, and asked for as chroma green", () => {
+  const problemsOf = (c) => sortConcepts(conceptsOf(concept("c1"), c), { feature: "chat", history: [], day: DAY, toolDir: tool }).dropped[0]?.problems ?? [];
+  assert.deepEqual(problemsOf(withDisplay()), []);
+  // The display must be asked for as flat green, or code has nowhere to draw.
+  assert.match(problemsOf(withDisplay({ prompt_en: concept("c2").prompt_en })).join(" | "), /#00ff00/u);
+  // A long answer grows the phone (owner 2026-11-13): 120 characters in English, 80 in Korean or Chinese.
+  const long = withDisplay();
+  long.texts = long.texts.map((text) => (text.ui === "answer" ? { ...text, text: "x ".repeat(70).trim() } : text));
+  assert.match(problemsOf(long).join(" | "), /1-120 characters on the display/u);
+  const longKo = withDisplay();
+  longKo.translations = { ...longKo.translations, ko: longKo.translations.ko.map((text) => (text.ui === "answer" ? { ...text, text: "가".repeat(81) } : text)) };
+  assert.match(problemsOf(longKo).join(" | "), /1-80 characters on the display/u);
+  // ui only on a screen or an answer, and the same ui in every language.
+  const onLabel = withDisplay();
+  onLabel.texts = onLabel.texts.map((text, index) => (index === 1 ? { ...text, role: "label" } : text));
+  assert.match(problemsOf(onLabel).join(" | "), /ui is one of title, question, answer, caption, only on a screen or answer/u);
+  const lost = withDisplay();
+  lost.translations = { ...lost.translations, ko: lost.translations.ko.map((text, index) => (index === 1 ? { role: "screen", text: text.text } : text)) };
+  assert.match(problemsOf(lost).join(" | "), /same role, speaker and ui/u);
+});
+
+test("the quadrilateral around a rounded display has its sharp corners", async () => {
+  const { convexHull, enclosingQuad } = await import("../tools/marketing-video/screen-core.mjs");
+  // A 200 x 400 rectangle with 30 px rounded corners, tilted 8 degrees.
+  const points = [];
+  const corner = (cx, cy, from) => {
+    for (let a = from; a <= from + 90; a += 5) points.push([cx + 30 * Math.cos((a * Math.PI) / 180), cy + 30 * Math.sin((a * Math.PI) / 180)]);
+  };
+  corner(230, 430, 0);
+  corner(30, 430, 90);
+  corner(30, 30, 180);
+  corner(230, 30, 270);
+  const turn = (8 * Math.PI) / 180;
+  const tilted = points.map(([x, y]) => [x * Math.cos(turn) - y * Math.sin(turn) + 300, x * Math.sin(turn) + y * Math.cos(turn) + 100]);
+  const quad = enclosingQuad(convexHull(tilted));
+  const expected = [[0, 0], [260, 0], [260, 460], [0, 460]].map(([x, y]) => [x * Math.cos(turn) - y * Math.sin(turn) + 300, x * Math.sin(turn) + y * Math.cos(turn) + 100]);
+  for (const [index, [x, y]] of quad.entries()) {
+    assert.ok(Math.hypot(x - expected[index][0], y - expected[index][1]) < 2, `corner ${index}: ${x},${y} vs ${expected[index]}`);
+  }
+});
+
+test("the app screen is keyed onto the green display, and a finger over it stays in front", { skip }, async () => {
+  const { withPage } = await import("../tools/marketing-video/compose-core.mjs");
+  const { findGreenScreens, setScreen } = await import("../tools/marketing-video/screen-core.mjs");
+  const root = mkdtempSync(join(tmpdir(), "hf-screen-"));
+  try {
+    const input = join(root, "green.png");
+    // A grey room, a tilted green display, and a skin-coloured finger over its right edge.
+    const png = await withPage((page) =>
+      page.evaluate(() => {
+        const canvas = Object.assign(document.createElement("canvas"), { width: 400, height: 500 });
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#9a948c";
+        ctx.fillRect(0, 0, 400, 500);
+        ctx.fillStyle = "#1a1a1a";
+        ctx.beginPath();
+        ctx.moveTo(125, 85);
+        ctx.lineTo(285, 75);
+        ctx.lineTo(300, 395);
+        ctx.lineTo(135, 410);
+        ctx.fill();
+        ctx.fillStyle = "#00ff00";
+        ctx.beginPath();
+        ctx.moveTo(135, 95);
+        ctx.lineTo(275, 86);
+        ctx.lineTo(289, 384);
+        ctx.lineTo(144, 398);
+        ctx.fill();
+        ctx.fillStyle = "#e0a98c";
+        ctx.fillRect(265, 250, 45, 22);
+        return canvas.toDataURL("image/png");
+      }),
+    );
+    writeFileSync(input, Buffer.from(png.split(",")[1], "base64"));
+    const [display] = await findGreenScreens(input);
+    const expected = [[135, 95], [275, 86], [289, 384], [144, 398]];
+    for (const [index, [x, y]] of display.corners.entries()) {
+      assert.ok(Math.hypot(x * 400 - expected[index][0], y * 500 - expected[index][1]) < 4, `corner ${index}`);
+    }
+    const out = join(root, "screen.png");
+    await setScreen({ input, items: [{ kind: "question", text: "What can I cook?" }, { kind: "answer", text: "A spinach omelette, ready in ten minutes." }], locale: "en", out });
+    const finger = await pixelAt(out, 285, 260);
+    assert.deepEqual(finger, [224, 169, 140], "the finger over the display is untouched");
+    const left = await findGreenScreens(out);
+    assert.equal(left.length, 0, "no green display is left");
+    const middle = await pixelAt(out, 210, 330);
+    assert.ok(middle[1] - Math.max(middle[0], middle[2]) < 20, `no green inside the display: ${middle}`);
+    await assert.rejects(setScreen({ input: join(root, "screen.png"), items: [{ kind: "answer", text: "Hi" }], locale: "en", out: join(root, "again.png") }), /no green screen/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
