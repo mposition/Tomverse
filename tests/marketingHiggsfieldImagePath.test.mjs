@@ -559,9 +559,21 @@ test("a feature on hold is never today's and no concept may rest on it", () => {
   const features = [{ id: "chat" }, { id: "plugins", hold: "preview only" }, { id: "review" }];
   assert.equal(pickFeature([{ date: "2026-11-07", feature: "chat" }], features, DAY), "review");
   assert.equal(pickFeature([], [{ id: "plugins", hold: "x" }, { id: "chat" }], DAY), "chat");
-  assert.match(check(conceptsOf(concept("c1"), concept("c2", { factRefs: ["chat.what", "plugins.what"] }))), /plugins.what" is a feature on hold/u);
   const real = JSON.parse(readFileSync(join(tool, "features.json"), "utf8")).features;
-  assert.ok(real.some((feature) => feature.hold) && real.filter((feature) => !feature.hold).length >= 8);
+  // The run's list (the app's, else this file) with plugins put on hold.
+  const dir = mkdtempSync(join(tmpdir(), "hf-hold-"));
+  const held = join(dir, "features.json");
+  writeFileSync(held, JSON.stringify({ features: real.map((feature) => (feature.id === "plugins" ? { ...feature, hold: "preview only" } : feature)) }));
+  const before = process.env.MARKETING_FEATURES_FILE;
+  process.env.MARKETING_FEATURES_FILE = held;
+  try {
+    assert.match(check(conceptsOf(concept("c1"), concept("c2", { factRefs: ["chat.what", "plugins.what"] }))), /plugins.what" is a feature on hold/u);
+  } finally {
+    if (before === undefined) delete process.env.MARKETING_FEATURES_FILE;
+    else process.env.MARKETING_FEATURES_FILE = before;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.ok(real.filter((feature) => !feature.hold).length >= 8);
   assert.ok(real.filter((feature) => feature.hold).every((feature) => typeof feature.hold === "string" && feature.hold.length > 20), "every hold says why");
 });
 

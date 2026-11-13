@@ -114,21 +114,20 @@
     },
     {
       "id": "plugins",
-      "what": "Plugins: connect your work tools to Chat and manage access and actions in one place; an action that changes something waits for your approval.",
-      "source": "lib/mcpConnectorCopy.ts; /plugins",
-      "hold": "Not live: production has no connectable server. Needs MCP_CONNECTOR_PREVIEW_ENABLED=true plus each provider's OAuth credentials (MCP_CONNECTOR_PROVIDERS, docs/ops/mcp-connector-preview.md); then name the connectable tools here and remove this hold."
+      "what": "Plugins: sign in and connect work tools such as Notion, Linear, Figma or Dropbox to Chat, and manage access and actions in one place; an action that changes something waits for your approval.",
+      "source": "lib/mcpConnectorCopy.ts; /plugins (Connect button live in production for Notion, Linear, Figma, Dropbox, Stripe, Airtable, ClickUp, checked 2026-11-13)",
+      "copy": "Name only tools with a live Connect button on /plugins (Notion, Linear, Figma, Dropbox, Stripe, Airtable, ClickUp as of 2026-11-13). Never name Google Drive, Gmail, Google Calendar, Slack, GitHub, Asana, Canva, HubSpot or other tools that still need server setup, and never say every tool or any app connects."
     },
     {
       "id": "voice-input",
       "what": "Speak into the microphone in the message box and your words become text.",
-      "source": "locales/en.ts voice input copy",
-      "hold": "Not live: set VOICE_PROVIDER_SECONDS_PER_DAY and _PER_MONTH on the web service first (without them /api/ready fails), then the feature.voiceInputEnabled row to \"true\" (docs/policy/voice-input.md; no Admin toggle)."
+      "source": "locales/en.ts voice input copy; 'Voice input' button live in the production Chat composer, checked 2026-11-13"
     },
     {
       "id": "prompt-refiner",
-      "what": "Question-refinement suggestions: when offered, Tomverse suggests a clearer version of your question, and you choose whether to apply it.",
-      "source": "FAQ 'Are question-refinement suggestions applied automatically?'",
-      "hold": "Not live: the owner activates it for the exact deployment in Admin › /admin/prompt-refiner-shadow (re-auth, audited), as docs/ui-contracts/prompt-refiner-suggestion.md requires."
+      "what": "With Smart Adaptive, Tomverse can rewrite your question into a clearer version before sending it to the model, so you don't have to polish every prompt yourself. Your message stays in the chat exactly as you wrote it.",
+      "source": "docs/policy/chat-refiner-initial-auto-release-v1.md; docs/ui-contracts/prompt-refiner-suggestion.md; Admin › /admin/prompt-refiner-shadow shows rollout and auto-apply active (2026-11-13)",
+      "copy": "Describe what it does, not a result: it rewrites the question more clearly before the model gets it, in Smart Adaptive conversations, and the user's own message is kept as written. Never promise better, correct or error-free answers, the best or optimal model, or that every message is rewritten (policy §4: no superiority or guaranteed-improvement claim). Do not say the user picks or approves the rewrite."
     },
     {
       "id": "photo-edit",
