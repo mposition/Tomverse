@@ -114,8 +114,15 @@ motion is yours to wrap around them.
 - Time the words and pictures to `useFilm().times`. Leave no silence longer
   than a second, and no frame without something to look at (no empty
   background between scenes for more than 0.3 s).
-- Every locale tells the same story: the same scenes, the same screens (their
-  own locale's captures, cropped to the same parts), the same difference.
+- Every locale shares the concept, the world, the shots and the rhythm, and
+  tells its own story from its own captures: the plan's lines for a locale
+  name the difference its own analysis found, so crop the screens that show
+  that difference in that locale (the same part of the app may say something
+  else in another). Run `--blocks` per locale and read its captures.
+- A screen is evidence: never crop one that carries the product's own warning
+  that a quote could not be matched to the answer; take the answer itself, or
+  a matched quote, instead. Keep model names whole (an answer header, not a
+  truncated dropdown).
 - Design like a studio, not a template: one idea carried through, a hook in the
   first 2 seconds, something new every 2-4 seconds, entrances with direction
   and weight. Avoid centered titles on gradients, everything fading in, frame

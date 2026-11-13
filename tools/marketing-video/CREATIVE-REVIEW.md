@@ -29,7 +29,12 @@ Judge, as a demanding creative director and a careful editor:
 5. Disclosure: the AI line is plainly visible while an AI shot is on screen and
    on the end card. The end card has the logo and tomverse.app.
 6. Every locale: the right language and script (zh-Hans Simplified, zh-Hant
-   Traditional), no missing glyphs (boxes), lines broken well.
+   Traditional), no missing glyphs (boxes), lines broken well. Each locale
+   asked Review on its own, so its answers and analysis differ: judge each
+   locale's story against its own screens. Locales sharing the concept and
+   world but naming different differences is by design (owner 2026-11-13);
+   a locale whose lines promise what its own screens do not show is not.
+   A real screen's own wrapping or wording is the product's, not the film's.
 
 Verdict:
 

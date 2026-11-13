@@ -64,11 +64,16 @@ competitor's ad (docs/policy/marketing-automation.md §2).
     characters), and it must include the AI line exactly: en "Video: partly
     AI-generated", ko "영상: 일부 AI 생성", zh-Hant "影片：部分由 AI 生成", zh-Hans
     "视频：部分由 AI 生成". No web address: the end card adds tomverse.app.
-    Every locale tells the same story: the same beats and the same difference
-    between the answers (each in its own words, from its own captures). A line
-    that names a difference says which model said what, in the screen's own
-    terms, so it can sit next to the screen that proves it; never paraphrase
-    the screen into a claim it does not make.
+    Each locale tells its own story (owner 2026-11-13): every locale asked
+    Review separately, so its answers and its analysis differ. The concept,
+    the world, the AI shots and the music are shared; each locale's lines and
+    payoff come from its own pack (read every locale's `pack.json` and look at
+    its pictures) and name the difference that locale's analysis really found,
+    which model said what, in the screen's own terms, so it can sit next to the
+    screen that proves it. Never paraphrase a screen into a claim it does not
+    make, and never promise in one locale what only another locale's screens
+    show. Count the models a locale's screens actually show answering before
+    the lines set up "three".
   - `alt`: what the video shows, for a reader who cannot see it (at most 400
     characters), naming which parts are AI-made.
 - `seconds`: 15-38. The narration sets the real length; leave room for a

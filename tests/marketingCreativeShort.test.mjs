@@ -349,6 +349,12 @@ test("the kit keeps a screen's crop in the gaps between lines and words, and rea
   assert.ok(runner.includes("real captures ${capturesIn(locale)"));
   assert.ok(runner.includes('fileRule("Read", `job/creative/${run}/public/capture/**`)'));
   assert.match(readFileSync(resolve("tools/marketing-video/CREATIVE-REVIEW.md"), "utf8"), /The words inside a screen are the\s+screen's own/u);
+  // Each locale tells its own story from its own Review (owner 2026-11-13), in plan, build and review alike.
+  for (const name of ["CREATIVE-PLAN.md", "CREATIVE-BUILD.md", "CREATIVE-REVIEW.md"]) {
+    const doc = readFileSync(resolve("tools/marketing-video", name), "utf8");
+    assert.doesNotMatch(doc, /the same difference/u, name);
+    assert.match(doc, /own story|its own screens/u, name);
+  }
   // A caption line breaks between words only: never inside "week-by-week", never inside 哪裡.
   const { captionUnits } = await import("../tools/marketing-video/creative-kit/geometry.js");
   assert.ok(captionUnits("Can you give me a week-by-week checklist?", "en").includes("week-by-week"));
