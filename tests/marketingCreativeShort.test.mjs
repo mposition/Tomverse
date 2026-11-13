@@ -274,6 +274,9 @@ test("a refused plan is mended, not rewritten, and a run whose plan was refused 
   assert.ok(runner.includes('existsSync(path.join(creativeDir, replan, "sources")) && !existsSync(path.join(creativeDir, replan, "plan.json"))'));
   assert.match(runner, /const fresh = rebuild === null && replan === null && env\[FRESH_REVIEW_ENV\] === "on";/u);
   assert.ok(runner.includes("`plan-${planCalls + attempt}`"));
+  // Its recordings count before the "no capture packs" stop (a replan of 20261113-3 halted there).
+  const packsIn = runner.indexOf("if (rebuild !== null || replan !== null) packs = [...packs, ...freshPacksIn(runDir)];");
+  assert.ok(packsIn > 0 && packsIn < runner.indexOf('halt("no_capture_packs")'));
 });
 
 test("a concept or logline used before is refused", () => {

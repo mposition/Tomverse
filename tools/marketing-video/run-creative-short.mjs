@@ -196,7 +196,8 @@ function freshPacksIn(dir) {
     return present.length > 0 ? [{ ...pack, captures: Object.fromEntries(present), file, dir: path.dirname(file), claimIds: [] }] : [];
   });
 }
-if (rebuild !== null) packs = [...packs, ...freshPacksIn(runDir)];
+// A rebuild or a replan has its own recordings: the approved packs on the box may well be none.
+if (rebuild !== null || replan !== null) packs = [...packs, ...freshPacksIn(runDir)];
 if (packs.length === 0 && !fresh) halt("no_capture_packs");
 
 const historyPath = path.join(creativeDir, "history.json");
