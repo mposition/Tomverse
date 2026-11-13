@@ -752,21 +752,21 @@ test("the router's outcome reaches the caller, and a resumed location turn repla
   try {
     const outcomes: string[] = [];
     routerFailure = Object.assign(new Error("down"), { name: "AI_APICallError", statusCode: 503 });
-    assert.equal(await pick(undefined, true, { prompt: "near me?", locationFusion,
+    assert.equal(await pick(undefined, { fileContext: { isAuthenticated: true, canPersist: true, webSearchRequested: false }, prompt: "near me?", locationFusion,
       onCallOutcome: (outcome: string) => outcomes.push(outcome) }), null);
     routerFailure = null;
     assert.deepEqual(outcomes, ["error"]);
     const calls = routerRequests.length;
 
     const resumed: string[] = [];
-    assert.equal(await pick(undefined, true, { prompt: "near me?", onCallOutcome: (outcome: string) => resumed.push(outcome),
+    assert.equal(await pick(undefined, { fileContext: { isAuthenticated: true, canPersist: true, webSearchRequested: false }, prompt: "near me?", onCallOutcome: (outcome: string) => resumed.push(outcome),
       locationFusion: { ...locationFusion, resume: { traceId: "first", routerDigest: digest[0], pick: null, routerOutcome: "error" } } }), null);
     assert.deepEqual(resumed, ["error"]);
     assert.equal(routerRequests.length, calls, "a resume makes no second call");
 
     // A continuation sealed before the field existed resumes as a turn the router never saw.
     const legacy: string[] = [];
-    await pick(undefined, true, { prompt: "near me?", onCallOutcome: (outcome: string) => legacy.push(outcome),
+    await pick(undefined, { fileContext: { isAuthenticated: true, canPersist: true, webSearchRequested: false }, prompt: "near me?", onCallOutcome: (outcome: string) => legacy.push(outcome),
       locationFusion: { ...locationFusion, resume: { traceId: "first", routerDigest: digest[0], pick: null } } });
     assert.deepEqual(legacy, []);
   } finally { routerFailure = null; log.mock.restore(); }
