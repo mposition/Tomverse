@@ -279,16 +279,18 @@ export const imageDraftFromAnswer = (
   const rate = positive(value?.outputUsdPerMTok);
   // What one image of this option costs by the confirmed measurement: its own
   // count on OpenAI, one count for every option on Google (all at the 1K
-  // tier), at the image rate the measurement was confirmed with. The judge
-  // refuses a price below it (price_below_measured_cost), so the draft never
+  // tier), at the higher of the rate the measurement was confirmed with and
+  // the rate these pages state now -- a rate raised since the measurement
+  // prices the measured tokens at the new rate. The judge refuses a price
+  // below the confirmed one (price_below_measured_cost), so the draft never
   // proposes one.
   const measuredCost = (quality: string, size: string): number | null => {
-    if (measured?.kind === "measured_output_limit") {
-      return Math.ceil(measured.imageTokensPerImage * measured.imageOutputUsdPerMTok);
-    }
-    if (measured?.kind !== "tokens_per_image") return null;
-    const tokens = confirmedImageOutputTokens(provider, confirmed, quality, size);
-    return tokens === null ? null : Math.ceil(tokens * measured.imageOutputUsdPerMTok);
+    if (measured?.kind !== "measured_output_limit" && measured?.kind !== "tokens_per_image") return null;
+    const tokens =
+      measured.kind === "measured_output_limit"
+        ? measured.imageTokensPerImage
+        : confirmedImageOutputTokens(provider, confirmed, quality, size);
+    return tokens === null ? null : Math.ceil(tokens * Math.max(measured.imageOutputUsdPerMTok, rate ?? 0));
   };
   const answered = Array.isArray(value?.options) ? value.options : [];
   const keyOf = (option: { quality: string; size: string }) => `${option.quality}|${option.size}`;

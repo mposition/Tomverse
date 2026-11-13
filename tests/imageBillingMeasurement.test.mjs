@@ -381,6 +381,9 @@ test("drafts: Flare is priced from measured tokens, Wan and Nano Banana 2.1 take
     flareTerms
   );
   assert.equal(stated.prices[0].outputCostMicroUsd, 150_000);
+  // A documented rate raised since the measurement prices the measured tokens at the new rate.
+  const raised = imageDraftFromAnswer({ ...flareAnswer, outputUsdPerMTok: 60 }, source, "gpt-image-2.6-flare", "openai", flareTerms);
+  assert.equal(raised.prices[0].outputCostMicroUsd, 249_600);
 
   const priced = { options: [{ quality: "medium", size: "1024x1024", outputCostMicroUsd: 30_000, outputTokens: null }], outputUsdPerMTok: null, thinkingCapMicroUsd: null, noPriceReason: null };
   const qwenSource = ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"];
