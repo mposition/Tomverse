@@ -77,6 +77,7 @@
       "id": "antigravity",
       "vendor": "google",
       "quotaProbe": "antigravity",
+      "quotaGroups": ["Gemini 4 Argon"],
       "io": "antigravity-stream-json",
       "enabled": false,
       "maxConcurrent": 1,

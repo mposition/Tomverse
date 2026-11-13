@@ -134,6 +134,11 @@ export function validateConfig(raw) {
         !["amux", "codex"].includes(provider.quotaProbe))) {
       errors.push(`${label}: useCredits is true or false, with quotaProbe amux or codex`);
     }
+    if (provider.quotaGroups !== undefined && (provider.quotaProbe !== "antigravity" ||
+        !Array.isArray(provider.quotaGroups) || provider.quotaGroups.length === 0 || provider.quotaGroups.length > 8 ||
+        provider.quotaGroups.some((name) => typeof name !== "string" || name.trim() === "" || name.length > 100))) {
+      errors.push(`${label}: quotaGroups names 1-8 agy usage groups, with quotaProbe antigravity`);
+    }
     if (provider.io !== undefined && provider.io !== "antigravity-stream-json") {
       errors.push(`${label}: io must be antigravity-stream-json`);
     }

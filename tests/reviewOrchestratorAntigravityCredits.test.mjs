@@ -109,6 +109,8 @@ test("the example config validates, with Antigravity off and Codex credits off u
   assert.equal(byId.antigravity.enabled, false);
   assert.equal(byId.antigravity.vendor, "google");
   assert.equal(byId.codex.useCredits, false);
+  assert.deepEqual(byId.antigravity.quotaGroups, ["Gemini 4 Argon"]);
+  assert.equal(byId.antigravity.model.startsWith("gemini-4-argon"), true);
   // The deny rules are real JSON agy can read, and they shut every tool but reads.
   const settings = JSON.parse(byId.antigravity.args[byId.antigravity.args.indexOf("--settings") + 1]);
   assert.deepEqual(settings.permissions.deny,
@@ -310,4 +312,37 @@ test("agy project config is an instruction path: a submitter's .gemini/ never re
   // The fake agy answers without a verdict if it can see .gemini/ or .agents/.
   const { slot } = await reviewWith("ok", { plant: true });
   assert.equal(slot.verdict, "accept", JSON.stringify(slot));
+});
+
+// The usage panel as agy 1.5.4 printed it on the box (2026-11-13, review login);
+// Gemini 4 Argon is a group of its own, apart from "Gemini Models".
+const BOX_PANEL = { conversation_id: "", status: "SUCCESS", command: { name: "usage", data: { groups: [
+  { name: "Gemini Models", description: "Models within this group: Gemini Flash, Gemini Pro", buckets: [
+    { id: "gemini-weekly", window: "weekly", remaining_fraction: 0.9998478293418884, reset_time: "2026-11-17T09:42:37Z" },
+    { id: "gemini-5h", window: "5h", remaining_fraction: 1, reset_time: "2026-11-13T06:41:39Z" }] },
+  { name: "Claude and GPT models", buckets: [
+    { id: "other-weekly", window: "weekly", remaining_fraction: 1, reset_time: "2026-11-20T01:41:39Z" }] },
+  { name: "Gemini 4 Argon", buckets: [
+    { id: "argon-weekly", window: "weekly", remaining_fraction: 0.97, reset_time: "2026-11-17T09:42:27Z" }] },
+] } } };
+
+test("the quota is read from the groups that bound the model, not always Gemini Models", () => {
+  const at = Date.parse("2026-11-13T02:00:00Z");
+  assert.deepEqual(antigravityQuotaFromUsage(BOX_PANEL, at), { state: "available", remainingPercent: 100 });
+  assert.deepEqual(antigravityQuotaFromUsage(BOX_PANEL, at, ["Gemini 4 Argon"]), { state: "available", remainingPercent: 97 });
+  assert.deepEqual(antigravityQuotaFromUsage(BOX_PANEL, at, ["Gemini 4 Argon", "Gemini Models"]),
+    { state: "available", remainingPercent: 97 });
+  // A named group the panel does not list is unknown, never a guess.
+  assert.deepEqual(antigravityQuotaFromUsage(BOX_PANEL, at, ["Gemini 5"]), { state: "unknown" });
+});
+
+test("the probe passes the provider's quotaGroups; config takes them only for the antigravity probe", async () => {
+  const at = Date.parse("2026-11-13T02:00:00Z");
+  const quota = await antigravityQuota({ command: "agy", quotaGroups: ["Gemini 4 Argon"] },
+    { now: at, spawnChild: () => fakeChild(JSON.stringify(BOX_PANEL)) });
+  assert.deepEqual(quota, { state: "available", remainingPercent: 97 });
+  assert.doesNotThrow(() => validateConfig(baseConfig({ quotaProbe: "antigravity", quotaGroups: ["Gemini 4 Argon"] })));
+  assert.throws(() => validateConfig(baseConfig({ quotaProbe: "amux", quotaGroups: ["Gemini 4 Argon"] })), /quotaGroups/);
+  assert.throws(() => validateConfig(baseConfig({ quotaProbe: "antigravity", quotaGroups: [] })), /quotaGroups/);
+  assert.throws(() => validateConfig(baseConfig({ quotaProbe: "antigravity", quotaGroups: "Gemini 4 Argon" })), /quotaGroups/);
 });

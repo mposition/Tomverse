@@ -223,8 +223,10 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 않습니다. 조회 실패·응답 형식 불명·설정 누락도 새 배정을 대기시킵니다.
 
 `quotaProbe: "antigravity"`는 reviewer와 같은 `agy` 실행 파일로 `agy -p /usage --output-format json`을
-실행해(모델 호출 없음, 토큰 0) "Gemini Models" 그룹의 주간·5시간 bucket 중 적게 남은 쪽을 잔액으로
-봅니다. 리셋 시각이 지난 bucket, 형식이 다른 응답, 실패는 `unknown`입니다. AMUX는 Antigravity를
+실행해(모델 호출 없음, 토큰 0) `quotaGroups`에 적은 그룹들의 bucket 중 가장 적게 남은 쪽을 잔액으로 봅니다
+(기본 "Gemini Models"). 그룹은 모델마다 다릅니다: "Gemini Models"는 Gemini Flash·Pro이고, Gemini 4 Argon은
+주간 한도가 따로인 "Gemini 4 Argon" 그룹입니다(2026-11-13 박스 실측). 모델을 바꾸면 `quotaGroups`도 같이
+바꿉니다. 적은 그룹이 응답에 없으면 `unknown`입니다. 리셋 시각이 지난 bucket, 형식이 다른 응답, 실패는 `unknown`입니다. AMUX는 Antigravity를
 측정하지 않으므로(`measured: false`) `amux`로는 배정되지 않습니다. 이 probe는 review 계정 자신의 agy
 로그인만 읽습니다.
 
