@@ -192,20 +192,20 @@ async function claimCandidate(taskId: string, assignmentId: string,
       }, select: { id: true, owner: true, v22AssignmentId: true,
         sourceSystem: true },
       });
-      const assignedIds = occupied.map((item) => item.v22AssignmentId).filter(
-        (id): id is string => id !== null);
-      const assignments = assignedIds.length ?
-        await tx.amuxV22WorkerAssignment.findMany({ where: {
-          id: { in: assignedIds } }, select: { id: true, lane: true },
-        }) : [];
-      const lanes = new Map(assignments.map((item) => [item.id, item.lane]));
-      const laneAssigned = occupied.filter((item) =>
-        (item.v22AssignmentId ? lanes.get(item.v22AssignmentId) ?? "normal" :
-          "normal") === lane.lane).length;
-      const capacity = amuxV22ClaimCapacity({ lane: lane.lane,
+      const capacity = amuxV22ClaimCapacity({
         verifiedWorkerCount: verifiedNames.size,
-        totalAssigned: occupied.length, laneAssigned });
+        totalAssigned: occupied.length });
       if (!capacity.allowed) throw new BoardImportError(capacity.reason, 409);
+      // How many Tasks each provider holds now, so the route choice spreads
+      // Tasks across providers instead of sending them all to the cheapest.
+      const providerOf = new Map(catalog.map((worker) =>
+        [worker.worker_name, worker.provider]));
+      const activeByProvider = new Map<string, number>();
+      for (const item of occupied) {
+        const provider = item.owner ? providerOf.get(item.owner) : undefined;
+        if (provider) activeByProvider.set(provider,
+          (activeByProvider.get(provider) ?? 0) + 1);
+      }
 
       const approved = await calculateCurrentApprovedAmuxV4TaskCost(tx,
         card.taskRole, card.executionGrade);
@@ -349,7 +349,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
             ceilings) });
       const route = chooseAmuxV22WorkerRoute({ routes: resumeRoutes,
         priorAuthorWorkers: authorWorkers, priorAuthorProviders: authorProviders,
-        isReview: card.taskRole === "review" });
+        isReview: card.taskRole === "review", activeByProvider });
       if (!route) throw new BoardImportError(
         exactGradeRouting && matchingRoutes.length === 0 ? "no_worker_for_grade" :
           settled.unsettled ? "usage_unverified" : "worker_unavailable", 409);
@@ -468,38 +468,64 @@ async function readBackLostClaim(taskId: string, assignmentId: string) {
     });
 }
 
-/** One admitted tick assigns at most one Task, without starting execution. */
-export async function tickV22WorkerClaim() {
+type ClaimTickResult =
+  | { claimed: true; taskId: string; assignmentId: string; workerName: string }
+  | { claimed: false; reason: string };
+
+/** Reasons a candidate is passed over while the tick goes on to the next. */
+const SKIPPED_CODES = new Set(["not_unassigned_todo", "task_not_ready",
+  "worker_unavailable", "one_shot_role_unavailable", "attempt_budget_exhausted",
+  "review_author_unknown", "conflict", "usage_unverified", "no_worker_for_grade"]);
+
+/**
+ * One admitted tick assigns every ready Task it can, one transaction each, up
+ * to the global capacity (owner decision 2026-11-13; it used to assign one
+ * Task per tick, so a queue of ten took fifty minutes to reach the workers).
+ * It never starts execution. The reply names the first assignment; one line
+ * of log names how many were made and why the others were passed over.
+ */
+export async function tickV22WorkerClaim(): Promise<ClaimTickResult> {
   if (!amuxV22WorkerClaimEnabled(process.env[AMUX_V22_WORKER_CLAIM_ENV])) {
     return { claimed: false as const, reason: "apply_disabled" as const };
   }
   const rows = await prisma.$transaction((tx) => candidates(tx));
   if (!rows.length) return { claimed: false as const, reason: "no_candidate" as const };
-  let noWorkerForGrade = false;
+  const claims: Array<Extract<ClaimTickResult, { claimed: true }>> = [];
+  const skipped: Record<string, number> = {};
+  let stop: string | null = null;
   for (const candidate of rows) {
     let context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>;
     try { context = await loadAmuxV4TaskReadyContext(candidate.id); }
-    catch { continue; }
+    catch { skipped.context_unreadable = (skipped.context_unreadable ?? 0) + 1; continue; }
     const assignmentId = randomUUID();
-    try { return await claimCandidate(candidate.id, assignmentId, context); }
-    catch (error) {
+    try {
+      const claimed = await claimCandidate(candidate.id, assignmentId, context);
+      if (claimed.claimed) claims.push(claimed);
+    } catch (error) {
       if (!(error instanceof BoardImportError)) throw error;
       if (error.code === "outcome_unknown") {
-        try { return await readBackLostClaim(candidate.id, assignmentId); }
-        catch { return { claimed: false as const,
-          reason: "outcome_unknown" as const }; }
+        // Read the lost write back once; never claim past an unknown outcome.
+        let readBack: ClaimTickResult;
+        try { readBack = await readBackLostClaim(candidate.id, assignmentId); }
+        catch { readBack = { claimed: false, reason: "outcome_unknown" }; }
+        if (readBack.claimed) { claims.push(readBack); continue; }
+        stop = "outcome_unknown";
+        break;
       }
-      if (error.code === "no_worker_for_grade") {
-        noWorkerForGrade = true;
+      if (SKIPPED_CODES.has(error.code)) {
+        skipped[error.code] = (skipped[error.code] ?? 0) + 1;
         continue;
       }
-      if (["not_unassigned_todo", "task_not_ready", "worker_unavailable",
-        "one_shot_role_unavailable", "attempt_budget_exhausted",
-        "review_author_unknown", "reserved_capacity_unavailable",
-        "lane_capacity_full", "conflict", "usage_unverified"].includes(error.code)) continue;
-      return { claimed: false as const, reason: error.code };
+      // Global capacity full, or a reason that holds every candidate alike.
+      stop = error.code;
+      break;
     }
   }
-  return { claimed: false as const, reason:
-    noWorkerForGrade ? "no_worker_for_grade" as const : "no_ready_candidate" as const };
+  console.info(JSON.stringify({ event: "amux_v22_claim_tick",
+    candidates: rows.length, claimed: claims.length,
+    workers: claims.map((claim) => claim.workerName), skipped, stop }));
+  if (claims.length > 0) return claims[0]!;
+  if (stop) return { claimed: false as const, reason: stop };
+  return { claimed: false as const, reason: skipped.no_worker_for_grade ?
+    "no_worker_for_grade" as const : "no_ready_candidate" as const };
 }
