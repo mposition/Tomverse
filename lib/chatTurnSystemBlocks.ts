@@ -66,6 +66,9 @@ export type ChatTurnSystemBlocksInput = {
   reserveLocationInput?: boolean;
   modelId: string;
   provider: string;
+  /** The catalogue row's usage class and file-tool tick (ArtifactToolPlanInput). */
+  usageClass?: string;
+  fileToolsOverride?: boolean | null;
   /**
    * Deep research carries location context but no file/image tool blocks.
    */
@@ -195,6 +198,8 @@ export const buildChatTurnSystemBlocks = (
     modelId: input.modelId,
     autoRouted: input.autoRouted === true,
     provider: input.provider,
+    usageClass: input.usageClass,
+    fileToolsOverride: input.fileToolsOverride,
     isAuthenticated: input.isAuthenticated,
     canPersist: input.canPersist,
     nativeSearchEnabled: input.nativeSearchEnabled,
