@@ -11,6 +11,7 @@ import {
   amuxDmOwnerSettlementEnabled,
   amuxDmOwnerSettlementId,
   amuxDmOwnerSettlementKind,
+  amuxDmOwnerSettlementMoved,
   amuxDmOwnerSettlementReasonText,
   amuxDmOwnerSettlementRemakeRequestId,
   isAmuxDmOwnerSettlementId,
@@ -92,6 +93,20 @@ test("only a review draft pull request is t2_pr; an ordinary open pull request o
   assert.match(sql, /"EngineeringAgentBinding"/);
   assert.doesNotMatch(sql.toLowerCase(), /\b(insert|update|delete|merge|upsert|truncate|alter|drop)\b/,
     "the engineering reads only read (scripts/check-protected-table-writers-core.mjs)");
+});
+
+test("a settlement stands only while its Task is where it was filed, with nothing running and its escalation open", () => {
+  const facts = { taskStatus: "blocked", attemptId: "a1", status: "blocked", sourceSystem: "admin-idea-v4",
+    archivedAt: null, lastAttempt: { id: "a1" }, activeDelivery: false, liveAttempt: false, escalationOpen: true };
+  assert.equal(amuxDmOwnerSettlementMoved(facts), null);
+  for (const [change, reason] of [[{ status: "todo" }, "task_moved"], [{ archivedAt: new Date() }, "task_moved"],
+    [{ lastAttempt: { id: "a2" } }, "task_moved"], [{ lastAttempt: null }, "task_moved"],
+    [{ activeDelivery: true }, "task_moved"], [{ liveAttempt: true }, "task_moved"],
+    [{ sourceSystem: "tomverse_private_workboard" }, "task_moved"],
+    [{ escalationOpen: false, status: "todo" }, "escalation_resolved"]])
+    assert.equal(amuxDmOwnerSettlementMoved({ ...facts, ...change }), reason, JSON.stringify(change));
+  assert.equal(amuxDmOwnerSettlementMoved({ ...facts, attemptId: null, lastAttempt: null }), null,
+    "a Task that never ran stands while it still has not");
 });
 
 test("the card's fixed words hit no routing term, so it reaches a DM", () => {
@@ -188,8 +203,16 @@ test("the app applies the answer as the system, through the chain writer, and a 
   assert.equal((service.match(/const locked = await lockUnderKillSwitch\(tx, input\.settlementId\);\s+if \(!locked\) return \{ applied: false, outcome: null \};/g) ?? []).length, 2,
     "an answer and a remake's close both stop under the kill switch");
   assert.match(service, /FOR UPDATE OF s, w NOWAIT/);
-  assert.match(service, /row\.status !== row\.taskStatus \|\| row\.archivedAt !== null \|\| !row\.escalationOpen \|\|\s+\(row\.lastAttempt\?\.id \?\? null\) !== row\.attemptId/,
-    "a Task that moved, or an escalation a person resolved, cancels");
+  // One judgment of "the Task moved", in every step: the sync's sweep, the
+  // answer (and a remake's claim), the read before a remake's idea, the
+  // cancel of a moved claim, and the close after the idea.
+  assert.equal((service.match(/amuxDmOwnerSettlementMoved\(row\)/g) ?? []).length, 5);
+  assert.doesNotMatch(service, /IS DISTINCT FROM s\."attemptId"|row\.status !== row\.taskStatus/,
+    "no second copy of the judgment");
+  assert.equal((service.match(/\$\{SETTLEMENT_FACTS\}/g) ?? []).length, 3, "and one read of its facts");
+  const remake = read("lib/amux/dmOwnerSettlementRemake.ts");
+  assert.match(remake, /if \(live\.moved\)\s+return withAmuxDbBoundary\(AMUX_DB_BOUNDARIES\.decisionMakerOwnerSettlementApply,\s+\(tx, context\) => cancelMovedAmuxDmOwnerSettlementClaim/);
+  assert.ok(remake.indexOf("if (live.moved)") < remake.indexOf("await fileIdea("), "a moved Task is never filed for");
   assert.match(service, /settlementDestinationForBudget\(\{ requested_status: "todo",/, "a retry stays inside the attempt budget");
   assert.match(service, /return handOff\("attempt_budget_spent"\)/);
   assert.match(service, /if \(decision === "approve"\) \{[\s\S]*?await record\(\{ approvedHeadSha: facts\.verifiedHeadSha, approvedDiffDigest: facts\.diffDigest \}\);[\s\S]*?return \{ applied: true, outcome: "approved" \};/,

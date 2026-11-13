@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
@@ -10,7 +10,8 @@ import { settlementDestinationForBudget } from "@/lib/amux/executionBudgetCore";
 import { readAmuxCardTitle } from "./adminExecutionRead.ts";
 import {
   AMUX_DM_OWNER_SETTLEMENT_DECISIONS, amuxDmOwnerSettlementCard, amuxDmOwnerSettlementId,
-  amuxDmOwnerSettlementKind, amuxDmOwnerSettlementRemakeRequestId, isAmuxDmOwnerSettlementId,
+  amuxDmOwnerSettlementKind, amuxDmOwnerSettlementMoved, amuxDmOwnerSettlementRemakeRequestId,
+  isAmuxDmOwnerSettlementId,
   type AmuxDmOwnerSettlementAnswer, type AmuxDmOwnerSettlementKind,
 } from "./dmOwnerSettlementCore.ts";
 import {
@@ -70,26 +71,27 @@ type SiblingRow = SealedTitle & { forTaskId: string; id: string; label: string; 
 
 /**
  * One tick's read, one transaction: settlements whose Task moved, or whose
- * escalation a person resolved, are cancelled first; while the switch is on,
+ * escalation a person resolved (amuxDmOwnerSettlementMoved), are cancelled first; while the switch is on,
  * up to three new stopped Tasks are filed, and the open settlements with no
  * card yet are read with the rows their cards are opened from; the cards of
  * settlements no longer open that the relay has not closed come back to be
- * closed. At most seven statements past the boundary's own.
+ * closed. At most eight statements past the boundary's own.
  */
 export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionClient,
   input: { enabled: boolean }) {
-  await tx.$executeRaw`
-    UPDATE "AmuxDmOwnerSettlement" s SET "state" = 'cancelled',
-      "cancelReason" = CASE WHEN e."status" IN ('open', 'acknowledged') THEN 'task_moved'
-        ELSE 'escalation_resolved' END,
+  // Up to fifty open or claimed settlements a tick, at random so none is
+  // missed for good, judged as every other step judges them.
+  const live = await tx.$queryRaw<SettlementFacts[]>`${SETTLEMENT_FACTS}
+    WHERE s."state" IN ('open', 'claimed') ORDER BY random() LIMIT ${CANCEL_SWEEP}`;
+  const moved = live.flatMap((row) => {
+    const reason = amuxDmOwnerSettlementMoved(row);
+    return reason ? [{ id: row.settlementId, reason }] : [];
+  });
+  if (moved.length > 0) await tx.$executeRaw`
+    UPDATE "AmuxDmOwnerSettlement" s SET "state" = 'cancelled', "cancelReason" = x."reason",
       "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
-    FROM "AmuxWorkItem" w, "AmuxHumanEscalation" e
-    WHERE w."id" = s."taskId" AND e."id" = s."escalationId" AND s."state" IN ('open', 'claimed')
-      AND (w."status" <> s."taskStatus" OR w."archivedAt" IS NOT NULL
-        OR e."status" NOT IN ('open', 'acknowledged')
-        OR (SELECT x."id" FROM "AmuxExecutionAttempt" x WHERE x."taskId" = w."id"
-          ORDER BY x."taskRevision" DESC, x."startedAt" DESC, x."id" DESC LIMIT 1)
-          IS DISTINCT FROM s."attemptId")`;
+    FROM jsonb_to_recordset(${JSON.stringify(moved)}::jsonb) AS x("id" text, "reason" text)
+    WHERE s."id" = x."id" AND s."state" IN ('open', 'claimed')`;
   let pending: PendingSettlement[] = [];
   let siblings: SiblingRow[] = [];
   let pulls: Awaited<ReturnType<typeof readAmuxDmOwnerSettlementPullEvidence>> = [];
@@ -294,7 +296,7 @@ export async function readOpenAmuxDmOwnerSettlementOfCard(tx: Prisma.Transaction
   return rows[0] ?? null;
 }
 
-type LockedSettlement = AmuxStoppedCardLockedFacts & {
+type SettlementFacts = AmuxStoppedCardLockedFacts & {
   settlementId: string; state: string; handedOff: boolean; kind: AmuxDmOwnerSettlementKind;
   taskId: string; escalationId: string; attemptId: string | null; bindingId: string | null;
   taskStatus: string; escalationOpen: boolean;
@@ -302,11 +304,13 @@ type LockedSettlement = AmuxStoppedCardLockedFacts & {
   lastAttempt: { id: string; attemptNumber: number; endedAt: string | null; outcome: string | null;
     reason: string | null } | null;
 };
+type LockedSettlement = SettlementFacts;
 
-/** The settlement and its card, locked without waiting (a worker's writers
- * lock the card and then the chain), with the facts a settlement is judged on. */
-async function lockSettlement(tx: Prisma.TransactionClient, settlementId: string) {
-  const rows = await tx.$queryRaw<LockedSettlement[]>`
+const CANCEL_SWEEP = 50;
+
+/** The facts a settlement is judged on, one row per settlement: what
+ * amuxDmOwnerSettlementMoved reads, and what the owner's close judges. */
+const SETTLEMENT_FACTS = Prisma.sql`
     SELECT s."id" AS "settlementId", s."state", s."handoffAt" IS NOT NULL AS "handedOff", s."kind",
       s."taskId", s."escalationId", s."attemptId", s."bindingId", s."taskStatus",
       s."answerSource", s."requestId", s."remakeRequestId",
@@ -325,7 +329,12 @@ async function lockSettlement(tx: Prisma.TransactionClient, settlementId: string
         FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id"
         ORDER BY a."taskRevision" DESC, a."startedAt" DESC, a."id" DESC LIMIT 1) AS "lastAttempt"
     FROM "AmuxDmOwnerSettlement" s
-    JOIN "AmuxWorkItem" w ON w."id" = s."taskId"
+    JOIN "AmuxWorkItem" w ON w."id" = s."taskId"`;
+
+/** The settlement and its card, locked without waiting (a worker's writers
+ * lock the card and then the chain), with the facts a settlement is judged on. */
+async function lockSettlement(tx: Prisma.TransactionClient, settlementId: string) {
+  const rows = await tx.$queryRaw<LockedSettlement[]>`${SETTLEMENT_FACTS}
     WHERE s."id" = ${settlementId}
     FOR UPDATE OF s, w NOWAIT`;
   return rows[0] ?? null;
@@ -339,11 +348,6 @@ export type AmuxDmOwnerSettlementApplied = {
   /** A claimed remake: the idea request id it is filed under, before its cards close. */
   remakeRequestId?: string;
 };
-
-const taskMoved = (row: LockedSettlement) =>
-  row.status !== row.taskStatus || row.archivedAt !== null || !row.escalationOpen ||
-  (row.lastAttempt?.id ?? null) !== row.attemptId || row.activeDelivery || row.liveAttempt ||
-  row.sourceSystem !== "admin-idea-v4";
 
 /** The writes every applier shares, over one locked settlement. */
 function settlementWrites(tx: Prisma.TransactionClient, row: LockedSettlement, input: {
@@ -425,7 +429,8 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
   const { decision } = input.answer;
   const { cancel, handOff, audit, resolution } = settlementWrites(tx, row, { decision,
     source: input.source, requestId: input.requestId, now: input.now });
-  if (taskMoved(row)) return cancel(row.escalationOpen ? "task_moved" : "escalation_resolved");
+  const moved = amuxDmOwnerSettlementMoved(row);
+  if (moved) return cancel(moved);
   if (!(AMUX_DM_OWNER_SETTLEMENT_DECISIONS[row.kind] as readonly string[]).includes(decision))
     return handOff("answer_unreadable");
   const at = input.now.toISOString();
@@ -527,7 +532,8 @@ export async function applyAmuxDmOwnerSettlementRemake(tx: Prisma.TransactionCli
   if (row.handedOff) return { applied: false, outcome: "handed_off" };
   const writes = settlementWrites(tx, row, { decision: "remake", source: row.answerSource ?? "dm",
     requestId: row.requestId ?? "", now: input.now });
-  if (taskMoved(row)) return writes.cancel(row.escalationOpen ? "task_moved" : "escalation_resolved", input.ideaId);
+  const moved = amuxDmOwnerSettlementMoved(row);
+  if (moved) return writes.cancel(moved, input.ideaId);
   const closed = await closeAmuxStoppedCardAsSystemWithin(tx, { card: row, now: input.now,
     resolution: `${writes.resolution}; remade as AMUX idea ${input.ideaId}`, waitingToo: true,
     audit: writes.audit("Applied a Decision Maker settlement to a stopped v22 Task: it and the unstarted cards waiting on it were closed for one new idea.",
@@ -543,24 +549,36 @@ export async function applyAmuxDmOwnerSettlementRemake(tx: Prisma.TransactionCli
 
 /**
  * Whether a claimed remake may file its idea now, read just before it is
- * filed: the kill switch, and whether the claim still stands -- not handed
- * off, its Task unmoved, nothing running, its escalation open. Two statements.
+ * filed: the kill switch, whether the claim is still the settlement's and not
+ * handed off, and the same judgment every step makes
+ * (amuxDmOwnerSettlementMoved). Two statements.
  */
 export async function readAmuxDmOwnerSettlementRemakeLive(tx: Prisma.TransactionClient,
   settlementId: string) {
   let killSwitch: boolean | null;
   try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
   catch { killSwitch = null; }
-  const rows = await tx.$queryRaw<Array<{ live: boolean }>>`
-    SELECT (s."state" = 'claimed' AND s."handoffAt" IS NULL AND w."status" = s."taskStatus"
-      AND w."archivedAt" IS NULL
-      AND EXISTS (SELECT 1 FROM "AmuxHumanEscalation" e WHERE e."id" = s."escalationId"
-        AND e."status" IN ('open', 'acknowledged'))
-      AND NOT EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" a
-        WHERE a."taskId" = w."id" AND a."endedAt" IS NULL)) AS "live"
-    FROM "AmuxDmOwnerSettlement" s JOIN "AmuxWorkItem" w ON w."id" = s."taskId"
+  const rows = await tx.$queryRaw<SettlementFacts[]>`${SETTLEMENT_FACTS}
     WHERE s."id" = ${settlementId}`;
-  return { killSwitch, live: rows[0]?.live === true };
+  const row = rows[0];
+  const claimed = !!row && row.state === "claimed" && !row.handedOff;
+  return { killSwitch, claimed, moved: claimed ? amuxDmOwnerSettlementMoved(row) : null };
+}
+
+/**
+ * Cancels a claimed remake whose Task moved, or whose escalation a person
+ * resolved, before its idea was filed: the settlement and its card locked
+ * and judged again by the same rule. Two statements.
+ */
+export async function cancelMovedAmuxDmOwnerSettlementClaim(tx: Prisma.TransactionClient, input: {
+  settlementId: string; now: Date;
+}): Promise<AmuxDmOwnerSettlementApplied> {
+  const row = await lockSettlement(tx, input.settlementId);
+  if (!row || row.state !== "claimed" || row.handedOff) return { applied: false, outcome: null };
+  const moved = amuxDmOwnerSettlementMoved(row);
+  if (!moved) return { applied: false, outcome: null };
+  return settlementWrites(tx, row, { decision: "remake", source: row.answerSource ?? "dm",
+    requestId: row.requestId ?? "", now: input.now }).cancel(moved);
 }
 
 /** One remake claimed more than two minutes ago that never finished (a lost

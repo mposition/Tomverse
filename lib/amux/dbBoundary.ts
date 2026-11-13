@@ -619,12 +619,13 @@ export const AMUX_DB_BOUNDARIES = {
   },
   // A stopped v22 Task in the owner queue put to the Decision Maker (owner
   // decision 2026-11-13, lib/amux/dmOwnerSettlementService.ts), each within
-  // the same 12 statements. Sync: setup + the cancel of settlements whose Task
-  // moved + the candidate scan + the insert + pending + their sibling cards +
-  // their pull request evidence + closing + fence.
+  // the same 12 statements. Sync: setup + the facts of open and claimed
+  // settlements + the cancel of those whose Task moved + the candidate scan +
+  // the insert + pending + their sibling cards + their pull request evidence +
+  // closing + fence.
   decisionMakerOwnerSettlementSync: {
     operation: "decision_maker_owner_settlement_sync",
-    prismaCallCeiling: 9,
+    prismaCallCeiling: 10,
     isolation: "mutation",
   },
   // Hand off (unfilable evidence, or an answer that decides nothing): setup +

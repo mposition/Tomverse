@@ -37,6 +37,36 @@ export type AmuxDmOwnerSettlementAnswer =
   | { decision: Exclude<AmuxDmOwnerSettlementDecision, "remake"> }
   | { decision: "remake"; ideaText: string };
 
+/** What a settlement is judged on, read with it (dmOwnerSettlementService.ts). */
+export type AmuxDmOwnerSettlementTaskFacts = {
+  /** The Task's status when the settlement was filed. */
+  taskStatus: string;
+  /** The newest attempt when it was filed, or null when the Task never ran. */
+  attemptId: string | null;
+  status: string; sourceSystem: string | null; archivedAt: Date | string | null;
+  /** The newest attempt now, ordered as the owner's settlement orders it. */
+  lastAttempt: { id: string } | null;
+  /** A queued or leased delivery, or an attempt still open. */
+  activeDelivery: boolean; liveAttempt: boolean;
+  /** The settlement's own escalation is still open or acknowledged. */
+  escalationOpen: boolean;
+};
+
+/**
+ * Why a settlement no longer stands, or null when it does: the one judgment
+ * every step uses -- the sync's cancel sweep, the answer, a remake's claim,
+ * the read just before its idea is filed, and the close after it. A person
+ * who resolved the escalation answered first; otherwise the Task moved: its
+ * status, an archive, a new run since it was filed, or anything running.
+ */
+export function amuxDmOwnerSettlementMoved(facts: AmuxDmOwnerSettlementTaskFacts):
+  "escalation_resolved" | "task_moved" | null {
+  if (!facts.escalationOpen) return "escalation_resolved";
+  return facts.status !== facts.taskStatus || facts.archivedAt !== null ||
+    (facts.lastAttempt?.id ?? null) !== facts.attemptId || facts.activeDelivery || facts.liveAttempt ||
+    facts.sourceSystem !== "admin-idea-v4" ? "task_moved" : null;
+}
+
 /** The session name the relay files a settlement card under: no worker session asks it. */
 export const AMUX_DM_OWNER_SETTLEMENT_DM_WORKER = "amux-owner-settlement";
 /** As the result review: `claude` routes to `decision-maker-openai`. */

@@ -4,6 +4,7 @@ import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import type { AmuxDmOwnerSettlementAnswer } from "./dmOwnerSettlementCore.ts";
 import {
   applyAmuxDmOwnerSettlementDecision, applyAmuxDmOwnerSettlementRemake,
+  cancelMovedAmuxDmOwnerSettlementClaim,
   readAmuxDmOwnerSettlementRemakeLive, readStaleAmuxDmOwnerSettlementRemake,
   recordAmuxDmOwnerSettlementHandoff, type AmuxDmOwnerSettlementApplied,
 } from "./dmOwnerSettlementService.ts";
@@ -29,8 +30,10 @@ import { AMUX_V4_IDEA_READBACK_ENV, AMUX_V4_IDEA_SUBMISSION_ENV } from "./ideaSu
  * 2. The idea, through the same session intake the Admin idea form and a
  *    coding session use (submitAmuxIdeaFromSession): analysed, carded and run
  *    like any other, its analysis inside the operating scope's own budget. The
- *    kill switch and the claim are read again just before it; a claim that no
- *    longer stands files nothing, and the kill switch hands it to the person.
+ *    kill switch and the claim are read again just before it, and the Task
+ *    judged by the same rule as the answer (amuxDmOwnerSettlementMoved): a
+ *    Task that moved cancels the claim, the kill switch hands it to the
+ *    person, and neither files anything.
  *    A refusal goes to the person; an outcome nobody knows is read back once
  *    under the same request id and, when the idea is not there, goes to the
  *    person -- it is never filed again.
@@ -103,9 +106,14 @@ export async function continueAmuxDmOwnerSettlementRemake(input: {
   const readBack = deps.readBack ?? readBackAmuxDmOwnerSettlementRemakeIdea;
   const live = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementRemakeRead,
     (tx) => readAmuxDmOwnerSettlementRemakeLive(tx, input.settlementId));
-  // The claim no longer stands (a person moved the card, or it was handed
-  // over): nothing is filed, and the sync cancels a claim whose Task moved.
-  if (!live.live) return { applied: false, outcome: null };
+  // No longer this claim's (applied, cancelled or handed over): nothing is filed.
+  if (!live.claimed) return { applied: false, outcome: null };
+  // The Task moved since the claim -- a new run, a queued delivery, a person's
+  // answer -- by the same judgment the answer made: cancelled, nothing filed.
+  if (live.moved)
+    return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementApply,
+      (tx, context) => cancelMovedAmuxDmOwnerSettlementClaim(tx, { settlementId: input.settlementId,
+        now: context.dbNow }));
   if (live.killSwitch !== false) return handOff(input.settlementId, input.requestId, "remake_held");
   let filed: AmuxDmOwnerSettlementRemakeFiling = input.ideaText === null ? { unknown: true } :
     await fileIdea({ requestId: input.remakeRequestId, ideaText: input.ideaText })

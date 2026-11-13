@@ -383,6 +383,67 @@ test("an idea the intake refuses, or whose outcome nobody knows and cannot be re
   }
 });
 
+test("a run or a delivery after a remake's claim cancels it before any idea is filed", async () => {
+  // A new run that ended back in the same status, and a delivery waiting for a
+  // worker: each is a Task that moved since the claim, judged as the answer was.
+  const moves: Array<[string, (tx: LifecycleTx, card: Stopped) => Promise<unknown>]> = [
+    ["a new attempt", (tx, card) => withoutTriggers(tx, async () => {
+      await tx.$executeRawUnsafe(`CREATE TEMP TABLE dm_next_attempt ON COMMIT DROP AS
+        SELECT * FROM "AmuxExecutionAttempt" WHERE "id" = '${card.attemptId}'`);
+      await tx.$executeRaw`UPDATE dm_next_attempt SET "id" = ${randomUUID()}, "attemptNumber" = "attemptNumber" + 1,
+        "taskRevision" = "taskRevision" + 1, "startedAt" = "startedAt" + INTERVAL '1 minute',
+        "endedAt" = "endedAt" + INTERVAL '2 minutes', "v22AssignmentId" = NULL`;
+      await tx.$executeRawUnsafe(`INSERT INTO "AmuxExecutionAttempt" SELECT * FROM dm_next_attempt`);
+      await tx.$executeRawUnsafe("DROP TABLE dm_next_attempt");
+    })],
+    ["a queued delivery", (tx, card) => withoutTriggers(tx, () => tx.$executeRaw`
+      UPDATE "AmuxWorkDelivery" SET "status" = 'queued', "receiptId" = NULL, "leasedAt" = NULL,
+        "leaseExpiresAt" = NULL, "acknowledgedAt" = NULL WHERE "attemptId" = ${card.attemptId}`)],
+  ];
+  for (const [label, move] of moves) {
+    for (const path of ["continue", "resume"] as const) {
+      await lifecycle(async (tx) => {
+        const card = await stoppedTask(tx);
+        await sync(true);
+        assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed", label);
+        await move(tx, card);
+        const row = await settlementRow(tx, card.settlementId);
+        const intake = fakeIntake(tx, card.settlementId, { ideaId: randomUUID() }, { ideaId: randomUUID() });
+        const remakeModule = await import("@/lib/amux/dmOwnerSettlementRemake");
+        let result;
+        if (path === "continue") {
+          result = await remakeModule.continueAmuxDmOwnerSettlementRemake({ settlementId: card.settlementId,
+            requestId: row!.requestId as string, remakeRequestId: row!.remakeRequestId as string,
+            ideaText: REMAKE.ideaText }, intake.deps);
+        } else {
+          await tx.$executeRaw`UPDATE "AmuxDmOwnerSettlement" SET "decidedAt" = "decidedAt" - INTERVAL '3 minutes'
+            WHERE "id" = ${card.settlementId}`;
+          result = await remakeModule.resumeAmuxDmOwnerSettlementRemake(intake.deps);
+        }
+        assert.deepEqual(result, { applied: true, outcome: "cancelled" }, `${label}, ${path}`);
+        assert.equal(intake.seen.filed.length, 0, `${label}, ${path}: no idea is filed`);
+        assert.deepEqual(intake.seen.readBack, [], `${label}, ${path}: nor read back to close cards`);
+        const after = await settlementRow(tx, card.settlementId);
+        assert.equal(after?.state, "cancelled");
+        assert.equal(after?.cancelReason, "task_moved");
+        assert.equal(after?.remakeIdeaId, null);
+        assert.equal((await taskRow(tx, card.taskId)).archivedAt, null);
+      });
+    }
+  }
+  // The sync's sweep judges the same way: a claim with a queued delivery is cancelled there too.
+  await lifecycle(async (tx) => {
+    const card = await stoppedTask(tx);
+    await sync(true);
+    assert.equal((await apply(card.settlementId, REMAKE)).outcome, "remake_claimed");
+    await withoutTriggers(tx, () => tx.$executeRaw`
+      UPDATE "AmuxWorkDelivery" SET "status" = 'queued', "receiptId" = NULL, "leasedAt" = NULL,
+        "leaseExpiresAt" = NULL, "acknowledgedAt" = NULL WHERE "attemptId" = ${card.attemptId}`);
+    await sync(true);
+    assert.equal((await settlementRow(tx, card.settlementId))?.cancelReason, "task_moved");
+  });
+});
+
 test("a review pull request's approval is recorded with its verified head and diff; the Task and its escalation stay", async () => {
   await lifecycle(async (tx) => {
     const runId = String(820_000_000 + Math.floor(Math.random() * 90_000_000));
