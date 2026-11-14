@@ -1,5 +1,5 @@
 /**
- * `mem-context-v1` — how selected memories are placed in a prompt
+ * `mem-context-v2` — app rules and user-role memory data
  * (policy §9.1, §13.4).
  *
  * The retrieval slice decided *which* memories a request gets. This decides
@@ -37,7 +37,7 @@ import {
     STYLE_MEMORY_KINDS,
 } from "@/lib/memoryValidatorCore";
 
-export const MEMORY_CONTEXT_PROMPT_VERSION = "mem-context-v1";
+export const MEMORY_CONTEXT_PROMPT_VERSION = "mem-context-v2";
 
 /**
  * Where this block belongs in the §9.1 order. Exported so the caller that
@@ -106,13 +106,15 @@ export function inertStatement(statement: string): string {
 export type MemoryContextPrompt = {
     promptVersion: typeof MEMORY_CONTEXT_PROMPT_VERSION;
     /**
-     * The block to place in the system message, or null when nothing was
+     * App-authored system rules, or null when nothing was
      * selected. Null rather than an empty block on purpose: §13.4 forbids a
      * misleading indication when zero memories were used, and an empty
      * "account memory" heading is exactly that.
      */
-    text: string | null;
-    /** Server-computed, for the §13.4 "N memories used" disclosure. */
+    rules: string | null;
+    /** Factual/style statements: send once as user-role data, never instructions. */
+    data: string | null;
+    /** Server-computed internal attribution; no per-answer badge. */
     usedCount: number;
     factualCount: number;
     styleCount: number;
@@ -137,7 +139,8 @@ export function buildMemoryContextPrompt(
     if (factual.length === 0 && style.length === 0) {
         return {
             promptVersion: MEMORY_CONTEXT_PROMPT_VERSION,
-            text: null,
+            rules: null,
+            data: null,
             usedCount: 0,
             factualCount: 0,
             styleCount: 0,
@@ -158,9 +161,8 @@ export function buildMemoryContextPrompt(
 
     return {
         promptVersion: MEMORY_CONTEXT_PROMPT_VERSION,
-        text: [
-            MEMORY_CONTEXT_RULES,
-            "",
+        rules: MEMORY_CONTEXT_RULES,
+        data: [
             MEMORY_OPEN,
             ...sections,
             MEMORY_CLOSE,

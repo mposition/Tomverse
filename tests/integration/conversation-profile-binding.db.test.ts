@@ -54,6 +54,7 @@ const publishRevision = async (input: {
     revision: number;
     modelIds?: string[];
     starters?: string[];
+    useAccountMemory?: boolean;
 }) => {
     const version = await prisma.assistantProfileVersion.create({
         data: {
@@ -63,7 +64,7 @@ const publishRevision = async (input: {
             instructions: `Revision ${input.revision} instructions.`,
             models: input.modelIds ?? [MODEL_ID],
             toolPolicy: { webSearch: false, deepResearch: false },
-            memoryPolicy: { useAccountMemory: false },
+            memoryPolicy: { useAccountMemory: input.useAccountMemory ?? false },
             starters: input.starters ?? [],
             knowledgeManifest: [],
             retrievalVersion: 1,
@@ -77,7 +78,7 @@ const publishRevision = async (input: {
     return version;
 };
 
-const createProfile = async (userId: string, name = "Scheduler") => {
+const createProfile = async (userId: string, name = "Scheduler", useAccountMemory = false) => {
     const profile = await prisma.assistantProfile.create({
         data: { userId, name, icon: "🧭" },
     });
@@ -86,6 +87,7 @@ const createProfile = async (userId: string, name = "Scheduler") => {
         profileId: profile.id,
         revision: 1,
         starters: ["오늘 일정 정리해줘"],
+        useAccountMemory,
     });
     return { profile, version };
 };
@@ -200,6 +202,7 @@ test("a bound conversation reports its revision and its starters", async () => {
     assert.equal(summary?.revision, 1);
     assert.equal(summary?.latestRevision, 1);
     assert.equal(summary?.status, "current");
+    assert.equal(summary?.useAccountMemory, false);
     assert.deepEqual(summary?.starters, ["오늘 일정 정리해줘"]);
 });
 
@@ -209,10 +212,11 @@ test("publishing past a conversation leaves it on its own revision", async () =>
     // being moved onto it.
     const user = await createUser();
     const { profile, version } = await createProfile(user.id);
-    await publishRevision({
+    const next = await publishRevision({
         userId: user.id,
         profileId: profile.id,
         revision: 2,
+        useAccountMemory: true,
     });
 
     const summary = await readConversationProfile({
@@ -223,6 +227,9 @@ test("publishing past a conversation leaves it on its own revision", async () =>
     assert.equal(summary?.revision, 1);
     assert.equal(summary?.latestRevision, 2);
     assert.equal(summary?.status, "superseded");
+    assert.equal(summary?.useAccountMemory, false, "the older pin keeps its own memory restriction");
+    const current = await readConversationProfile({ userId: user.id, profileVersionId: next.id });
+    assert.equal(current?.useAccountMemory, true, "only the new pin reports the new policy");
     // The pinned version's own starters, not the new revision's.
     assert.deepEqual(summary?.starters, ["오늘 일정 정리해줘"]);
 });
@@ -290,4 +297,18 @@ test("deleting the profile leaves the conversation readable and unbound", async 
         }),
         null
     );
+});
+
+
+test("a pinned allowed memory policy is not replaced by a newer restricted policy", async () => {
+    const user = await createUser();
+    const { profile, version } = await createProfile(user.id, "Scheduler", true);
+    const next = await publishRevision({ userId: user.id, profileId: profile.id, revision: 2,
+        useAccountMemory: false });
+    const pinned = await readConversationProfile({ userId: user.id, profileVersionId: version.id });
+    const current = await readConversationProfile({ userId: user.id, profileVersionId: next.id });
+    assert.equal(pinned?.status, "superseded");
+    assert.equal(pinned?.useAccountMemory, true);
+    assert.equal(current?.status, "current");
+    assert.equal(current?.useAccountMemory, false);
 });

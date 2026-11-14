@@ -62,6 +62,8 @@ export type ChatAssistantProfile = {
     revision: number;
     latestRevision: number;
     status: ProfileBindingStatus;
+    /** Known restriction from the conversation's pinned version, when supplied. */
+    useAccountMemory?: boolean;
 };
 
 /** One selectable profile in the picker. Only published profiles appear. */

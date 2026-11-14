@@ -76,7 +76,10 @@ const json = process.argv.includes("--json");
  * The same builders run on ordinary content. Structure that appears in both
  * runs is the builder's own; only what a payload adds counts against it.
  */
-const BENIGN_MEMORY_PROMPT =
+const assembleMemory = (built) =>
+    built.rules && built.data ? `${built.rules}\n\n${built.data}` : "";
+
+const BENIGN_MEMORY_PROMPT = assembleMemory(
     buildMemoryContextPrompt({
         selected: [
             {
@@ -88,7 +91,8 @@ const BENIGN_MEMORY_PROMPT =
                 tier: "primary",
             },
         ],
-    }).text ?? "";
+    })
+);
 
 const BENIGN_ATTACHMENT_PROMPT = buildAttachmentPromptText({
     userText: "What does this say?",
@@ -158,7 +162,7 @@ const memoryCase = (payload) => {
         surface: "memory",
         payloadId: payload.id,
         payload: payload.text,
-        assembled: built.text ?? "",
+        assembled: assembleMemory(built),
         rules: MEMORY_CONTEXT_RULES,
         openMarker: MEMORY_MARKERS.open,
         closeMarker: MEMORY_MARKERS.close,

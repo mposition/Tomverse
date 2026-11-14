@@ -70,8 +70,73 @@ test("inherit says which way the account default currently points", async ({
 
   await toolsMenuTrigger(page).click();
   await expect(page.getByTestId("tools-memory-row")).toContainText(
-    "not in use"
+    "default (off)"
   );
+});
+
+for (const memoryMode of ["on", "inherit"] as const) {
+  test(`account master off keeps the saved ${memoryMode} mode and exposes settings`, async ({ page }) => {
+    const state = await mockAuthenticatedApi(page, { memoryMode });
+    const methods: string[] = [];
+    await page.route("**/api/memories/settings", (route) => {
+      methods.push(route.request().method());
+      return route.fulfill({ json: { masterEnabled: false, defaultConversationMode: "on" } });
+    });
+    await page.goto("/review?lang=en");
+    await openRecentConversation(page);
+    await toolsMenuTrigger(page).click();
+    await expect(page.getByTestId("memory-account-status")).toContainText("Account memory is off");
+    await expect(page.getByTestId("tools-memory-row")).toContainText(memoryMode === "on"
+      ? "Use in this conversation" : "default (on)");
+    expect(state.memoryMode).toBe(memoryMode);
+    expect(methods.every((method) => method === "GET")).toBe(true);
+    await page.getByTestId("tools-memory-row").click();
+    await expect(page.getByTestId(`memory-mode-option-${memoryMode}`)).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("link", { name: "Open memory settings", exact: true })).toHaveAttribute("href", "/settings/memory");
+  });
+}
+
+test("opening tools refreshes account permission and a failed response displays unknown", async ({ page }) => {
+  const state = await mockAuthenticatedApi(page, { memoryMode: "on" });
+  let status = 200;
+  let masterEnabled = true;
+  let reads = 0;
+  await page.route("**/api/memories/settings", (route) => {
+    reads += 1;
+    return route.fulfill({ status, json: { masterEnabled, defaultConversationMode: "on" } });
+  });
+  await page.goto("/review?lang=en");
+  await openRecentConversation(page);
+  await toolsMenuTrigger(page).click();
+  await expect(page.getByTestId("memory-account-status")).toContainText("Account settings permit memory");
+  // The compact popover covers the trigger; use its supported dismissal path.
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("tools-memory-row")).toBeHidden();
+  const before = reads;
+  masterEnabled = false;
+  await toolsMenuTrigger(page).click();
+  await expect.poll(() => reads).toBeGreaterThan(before);
+  await expect(page.getByTestId("memory-account-status")).toContainText("Account memory is off");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("tools-memory-row")).toBeHidden();
+  status = 503;
+  await toolsMenuTrigger(page).click();
+  await expect(page.getByTestId("memory-account-status")).toHaveText("Account memory settings are not confirmed.");
+  await expect(page.getByTestId("tools-memory-row")).toContainText("Use in this conversation");
+  expect(state.memoryMode).toBe("on");
+});
+
+test("a known assistant restriction is shown separately from the saved conversation mode", async ({ page }) => {
+  await mockAuthenticatedApi(page, {
+    memoryMode: "on",
+    assistantProfile: { profileId: "profile-no-memory", name: "QA assistant", icon: null,
+      revision: 1, latestRevision: 1, status: "current", useAccountMemory: false },
+  });
+  await page.goto("/review?lang=en");
+  await openRecentConversation(page);
+  await toolsMenuTrigger(page).click();
+  await expect(page.getByTestId("memory-account-status")).toHaveText("This assistant does not use account memory.");
+  await expect(page.getByTestId("tools-memory-row")).toContainText("Use in this conversation");
 });
 
 test("an explicit choice survives a return to the conversation", async ({

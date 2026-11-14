@@ -29,7 +29,7 @@
  * would report that as tampering.
  */
 
-import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
+import { buildMemoryQueryPlan } from "@/lib/memoryQueryPlan";
 import { FACTUAL_MEMORY_KINDS, STYLE_MEMORY_KINDS, memoryStatementKey } from "@/lib/memoryValidatorCore";
 
 /**
@@ -39,14 +39,14 @@ import { FACTUAL_MEMORY_KINDS, STYLE_MEMORY_KINDS, memoryStatementKey } from "@/
  * invalidate a context bundle, but it does not change a single stored term,
  * so folding the two together would force a pointless re-index of every row.
  */
-export const MEMORY_RETRIEVAL_ALGORITHM_VERSION = 2;
+export const MEMORY_RETRIEVAL_ALGORITHM_VERSION = 4;
 
 /**
  * The version of a selection whose relevance came from an external reranker
  * (docs/policy/external-conversation-import-and-memory.md §9a). A different number because the same memories are ordered
  * differently, and the number is in the signature a context bundle binds.
  */
-export const MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION = 3;
+export const MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION = 5;
 
 /** Starting values, to be tuned against the retrieval eval. */
 export const MEMORY_SEMANTIC_DEFAULTS = {
@@ -54,6 +54,8 @@ export const MEMORY_SEMANTIC_DEFAULTS = {
     minRerankScore: 0.1,
     /** One search unit's worth of statements. */
     maxRerankCandidates: 100,
+    /** Reserve half a search unit for recent rows outside the lexical DB result. */
+    maxRecentExtraCandidates: 50,
 } as const;
 
 /**
@@ -215,6 +217,27 @@ const tierFor = (memory: RetrievableMemory): ScoredMemory["tier"] => {
  */
 export const memoryTier = tierFor;
 
+/** Preserve both pools inside one search unit; unused slots go to the other pool. */
+export function memoryRerankCandidates(input: {
+    lexical: readonly RetrievableMemory[];
+    extras: readonly RetrievableMemory[];
+    now: Date;
+}): RetrievableMemory[] {
+    const seen = new Set<string>();
+    const eligible = (rows: readonly RetrievableMemory[]) => rows.filter(memory => {
+        if (seen.has(memory.id)) return false;
+        seen.add(memory.id);
+        return memoryTier(memory) === "relevant" &&
+            !(memory.expiresAt && memory.expiresAt.getTime() <= input.now.getTime());
+    });
+    const lexical = eligible(input.lexical);
+    const extras = eligible(input.extras);
+    const max = MEMORY_SEMANTIC_DEFAULTS.maxRerankCandidates;
+    const extraSlots = Math.min(extras.length, MEMORY_SEMANTIC_DEFAULTS.maxRecentExtraCandidates);
+    const lexicalSlots = Math.min(lexical.length, max - extraSlots);
+    return [...lexical.slice(0, lexicalSlots), ...extras.slice(0, max - lexicalSlots)];
+}
+
 /** Compared at fixed precision so float noise cannot reorder two memories. */
 const rank = (score: number) => Math.round(score * 1e6);
 
@@ -293,7 +316,7 @@ export function selectMemoryContext(input: {
     const budget = { ...MEMORY_CONTEXT_DEFAULTS, ...(input.budget ?? {}) };
     const queryTerms =
         typeof input.query === "string"
-            ? memoryRetrievalTerms(input.query)
+            ? buildMemoryQueryPlan(input.query).terms
             : input.query;
     const omitted: Record<OmissionReason, number> = {
         expired: 0,

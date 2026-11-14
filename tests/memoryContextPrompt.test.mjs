@@ -73,17 +73,18 @@ test("ordinary text is left alone apart from whitespace", () => {
 
 test("nothing selected produces no block at all", () => {
     const prompt = build([]);
-    assert.equal(prompt.text, null, "an empty memory heading would mislead");
+    assert.equal(prompt.rules, null, "no rules are needed without memory");
+    assert.equal(prompt.data, null, "an empty memory heading would mislead");
     assert.equal(prompt.usedCount, 0);
 });
 
-test("the rules come before the memories, never after", () => {
+test("application rules and factual data are returned separately", () => {
     const prompt = build([scored("사용자는 커피를 좋아한다")]);
-    assert.ok(prompt.text.startsWith(MEMORY_CONTEXT_RULES));
-    assert.ok(
-        prompt.text.indexOf(MEMORY_CONTEXT_RULES) <
-            prompt.text.indexOf("<<<ACCOUNT_MEMORY>>>")
-    );
+    assert.equal(prompt.rules, MEMORY_CONTEXT_RULES);
+    assert.ok(!prompt.rules.includes("사용자는 커피를 좋아한다"));
+    assert.ok(prompt.data.startsWith("<<<ACCOUNT_MEMORY>>>"));
+    assert.ok(!prompt.data.includes(MEMORY_CONTEXT_RULES));
+    assert.equal("text" in prompt, false, "no combined system-ready field remains");
 });
 
 test("every memory sits inside the fence", () => {
@@ -91,10 +92,10 @@ test("every memory sits inside the fence", () => {
         scored("사용자는 커피를 좋아한다"),
         scored("사용자는 존댓말을 선호한다", "tone"),
     ]);
-    const open = prompt.text.indexOf("<<<ACCOUNT_MEMORY>>>");
-    const close = prompt.text.indexOf("<<<END_ACCOUNT_MEMORY>>>");
+    const open = prompt.data.indexOf("<<<ACCOUNT_MEMORY>>>");
+    const close = prompt.data.indexOf("<<<END_ACCOUNT_MEMORY>>>");
     for (const statement of ["커피", "존댓말"]) {
-        const at = prompt.text.indexOf(statement);
+        const at = prompt.data.indexOf(statement);
         assert.ok(at > open && at < close, `${statement} escaped the fence`);
     }
 });
@@ -104,8 +105,8 @@ test("facts and answer style are separate sections in the §9.1 order", () => {
         scored("사용자는 존댓말을 선호한다", "tone"),
         scored("사용자는 서울에 산다", "identity"),
     ]);
-    const facts = prompt.text.indexOf("What is known about the user");
-    const style = prompt.text.indexOf("How the user prefers answers");
+    const facts = prompt.data.indexOf("What is known about the user");
+    const style = prompt.data.indexOf("How the user prefers answers");
     assert.ok(facts > -1 && style > -1);
     assert.ok(facts < style, "factual memory is section 3, style is section 4");
     assert.equal(prompt.factualCount, 1);
@@ -114,8 +115,8 @@ test("facts and answer style are separate sections in the §9.1 order", () => {
 
 test("a style-only selection still renders its own section", () => {
     const prompt = build([scored("사용자는 존댓말을 선호한다", "tone")]);
-    assert.ok(!prompt.text.includes("What is known about the user"));
-    assert.ok(prompt.text.includes("How the user prefers answers"));
+    assert.ok(!prompt.data.includes("What is known about the user"));
+    assert.ok(prompt.data.includes("How the user prefers answers"));
     assert.equal(prompt.factualCount, 0);
     assert.equal(prompt.styleCount, 1);
 });
@@ -126,8 +127,8 @@ test("selection order is preserved inside a section", () => {
         scored("second statement"),
     ]);
     assert.ok(
-        prompt.text.indexOf("first statement") <
-            prompt.text.indexOf("second statement")
+        prompt.data.indexOf("first statement") <
+            prompt.data.indexOf("second statement")
     );
 });
 
@@ -148,8 +149,7 @@ test("the rules state every §9.1 constraint", () => {
 /* ---------------------------------------------------------------- counts -- */
 
 test("the used count is derived from what was rendered", () => {
-    // §13.4: the number shown to the user is the server's, and it has to be
-    // the number of memories that actually reached the prompt.
+    // Internal attribution counts only the rendered memory data lines.
     const prompt = build([
         scored("a statement"),
         scored("b statement"),
@@ -158,17 +158,17 @@ test("the used count is derived from what was rendered", () => {
     assert.equal(prompt.usedCount, 3);
     assert.equal(prompt.factualCount + prompt.styleCount, prompt.usedCount);
     assert.equal(
-        prompt.text.split("\n").filter((line) => line.startsWith("- ")).length,
+        prompt.data.split("\n").filter((line) => line.startsWith("- ")).length,
         prompt.usedCount
     );
 });
 
-test("the prompt version is stable", () => {
-    assert.equal(MEMORY_CONTEXT_PROMPT_VERSION, "mem-context-v1");
+test("the split-role prompt has a new version", () => {
+    assert.notEqual(MEMORY_CONTEXT_PROMPT_VERSION, "mem-context-v1");
     assert.equal(build([]).promptVersion, MEMORY_CONTEXT_PROMPT_VERSION);
 });
 
 test("the same selection renders byte-identical text", () => {
     const selection = [scored("사용자는 커피를 좋아한다")];
-    assert.equal(build(selection).text, build(selection).text);
+    assert.deepEqual(build(selection), build(selection));
 });
