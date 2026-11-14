@@ -57,6 +57,7 @@ import {
     emptyContinuationSeedPlan,
     planContinuationSeed,
     planSelectedContinuationSeed,
+    planRetrievedContinuationSeed,
     type ContinuationSeedPlan,
 } from "@/lib/externalContinuationSeedCore";
 import {
@@ -66,6 +67,7 @@ import {
 import type { ContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
 import { LEGACY_CONTINUATION_TITLE } from "@/lib/continuationDisplayTitle";
 import { prisma } from "@/lib/prisma";
+import { historyMatchPassages, validHistoryQueries, HISTORY_SOURCE_MAX_BYTES } from "@/lib/continuationHistorySearch";
 
 /**
  * How many stored messages the seed builder reads.
@@ -167,18 +169,20 @@ async function loadUnlockedSnapshot(
     return row;
 }
 
-async function readChosenPassages(snapshot: {id:string;messageCount:number}, passages: Passage[]) {
-    if (!passages.length) return emptyContinuationSeedPlan(snapshot.messageCount);
+async function readChosenPassages(snapshot: {id:string;messageCount:number}, passages: Passage[] | null, retrievedPassages?: Passage[]) {
+    if (passages !== null && !passages.length) return emptyContinuationSeedPlan(snapshot.messageCount);
     const [rows, recent] = await Promise.all([prisma.externalMessage.findMany({
-        where: {externalConversationId:snapshot.id, ordinal:{in:passages.map(p => p.ordinal)}},
+        where: {externalConversationId:snapshot.id, ordinal:{in:[...(passages ?? []), ...(retrievedPassages ?? [])].map(p => p.ordinal)}},
         select: {ordinal:true, role:true, content:true, truncated:true},
     }), prisma.externalMessage.findMany({
         where: { externalConversationId: snapshot.id }, orderBy: { ordinal: "desc" },
         take: SEED_SOURCE_MESSAGE_SCAN_LIMIT,
         select: { ordinal: true, role: true, content: true, truncated: true },
     })]);
-    return planSelectedContinuationSeed({ messages: recent, selectedMessages: rows, passages,
-        sourceMessageCount: snapshot.messageCount });
+    return retrievedPassages ? planRetrievedContinuationSeed({ messages: recent, selectedMessages: rows,
+        passages, retrievedMessages: rows, retrievedPassages, sourceMessageCount: snapshot.messageCount })
+        : planSelectedContinuationSeed({ messages: recent, selectedMessages: rows, passages: passages!,
+            sourceMessageCount: snapshot.messageCount });
 }
 
 async function readSeedPlan(
@@ -727,6 +731,8 @@ export async function loadContinuationTurnSeed(input: {
     request: Request;
     /** Reuse text only after every current access gate below has passed again. */
     prepared?: ContinuationTurnSeed | null;
+    /** Server-owned coordinates from the bounded history tool, never an HTTP field. */
+    retrievedPassages?: Passage[];
 }): Promise<ContinuationTurnSeedResult> {
     const bridge = await prisma.conversationContinuationBridge.findFirst({
         where: { conversationId: input.conversationId, userId: input.userId },
@@ -797,12 +803,12 @@ export async function loadContinuationTurnSeed(input: {
         return { seed: null, outcome: "locked" };
     }
 
-    if (input.prepared?.sourceId === snapshot.id && input.prepared.plan.sourceMessageCount === snapshot.messageCount) {
+    if (!input.retrievedPassages && input.prepared?.sourceId === snapshot.id && input.prepared.plan.sourceMessageCount === snapshot.messageCount) {
         return { seed: input.prepared, outcome: "seeded" };
     }
     const passages = decodePassages(input.request.headers.get(PASSAGE_HEADER));
-    const plan = passages === null ? await readSeedPlan(prisma, snapshot.id, snapshot.messageCount)
-        : await readChosenPassages(snapshot, passages);
+    const plan = passages === null && !input.retrievedPassages ? await readSeedPlan(prisma, snapshot.id, snapshot.messageCount)
+        : await readChosenPassages(snapshot, passages, input.retrievedPassages);
     if (plan.turns.length === 0) {
         return { seed: null, outcome: "empty_selection" };
     }
@@ -819,6 +825,37 @@ export async function loadContinuationTurnSeed(input: {
             }),
         },
     };
+}
+
+/** Read all stored ordinals through the owned immutable snapshot, then rebuild one bounded plan. */
+export async function searchContinuationHistory(input: {
+    userId: string; conversationId: string; request: Request; prepared: ContinuationTurnSeed;
+    queries: string[]; enabled: () => boolean;
+}): Promise<ContinuationTurnSeedResult> {
+    if (!input.enabled()) return { seed: null, outcome: "flag_off" };
+    if (!validHistoryQueries(input.queries)) throw new Error("Invalid history queries");
+    const selection = decodePassages(input.request.headers.get(PASSAGE_HEADER));
+    if (selection !== null && !selection.length) return { seed: null, outcome: "empty_selection" };
+    const checked = await loadContinuationTurnSeed(input);
+    if (!checked.seed?.sourceId || checked.seed.sourceId !== input.prepared.sourceId) return { seed: null, outcome: checked.outcome };
+    const rows = input.queries.length ? await prisma.externalMessage.findMany({
+        where: { userId: input.userId, externalConversationId: checked.seed.sourceId,
+            role: { in: ["user", "assistant"] },
+            OR: input.queries.map(query => ({ content: { contains: query, mode: "insensitive" as const } })) },
+        orderBy: { ordinal: "desc" }, take: 9,
+        select: { ordinal: true, content: true },
+    }) : [];
+    const passages = historyMatchPassages(rows, input.queries);
+    const rebuilt = passages.length ? await loadContinuationTurnSeed({ ...input, retrievedPassages: passages }) : checked;
+    if (!rebuilt.seed || rebuilt.seed.sourceId !== input.prepared.sourceId) return { seed: null, outcome: rebuilt.outcome };
+    const fits = new TextEncoder().encode(rebuilt.seed.prompt.transcriptText ?? "").length <= HISTORY_SOURCE_MAX_BYTES;
+    const selected = fits ? rebuilt.seed : checked.seed;
+    const plan: ContinuationSeedPlan = { ...selected.plan,
+        historyOutcome: !fits || passages.length > selected.plan.turns.filter(turn => turn.retrievedRanges?.length).length
+            ? "budget_limited" : passages.length ? "matched" : input.queries.length ? "no_match" : "no_query" };
+    const final = await loadContinuationTurnSeed({ ...input, prepared: { ...selected, plan } });
+    if (!input.enabled()) return { seed: null, outcome: "flag_off" };
+    return final.seed && final.seed.sourceId !== input.prepared.sourceId ? { seed: null, outcome: "source_deleted" } : final;
 }
 
 /**

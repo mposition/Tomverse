@@ -5,6 +5,9 @@ import { en } from "./en";
 export const de = {
     journey: {
         receiptSent: "Quelle in diesem Versuch: {selected} ausgewählt + {recent} aktuell ({unique} eindeutige Nachrichten)",
+        receiptRetrieved: "{count} frühere Treffer enthalten",
+        historyNoMatch: "Keine früheren Treffer gefunden",
+        historyBudget: "Frühere Auszüge durch Kontextbudget begrenzt",
         receiptNotSent: "Quelle in diesem Versuch nicht gesendet",
         receiptUnknown: "Quellübertragung für diesen Versuch nicht bestätigt",
         receiptPartial: "Teilweise Auszüge",

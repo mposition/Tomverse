@@ -60,6 +60,8 @@ test("an allowed origin gets a preflight answer with the methods and headers", (
     }
     assert.match(headers["Access-Control-Allow-Headers"], /\bAuthorization\b/);
     assert.match(headers["Access-Control-Allow-Headers"], /\bContent-Type\b/);
+    assert.match(headers["Access-Control-Allow-Headers"], /\bX-Tomverse-Source-Passages\b/);
+    assert.match(headers["Access-Control-Expose-Headers"], /\bX-Chat-Continuation-Receipt\b/);
     assert.ok(Number(headers["Access-Control-Max-Age"]) > 0);
   }
 });

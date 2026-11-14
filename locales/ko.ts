@@ -7,6 +7,9 @@ import { en } from "./en";
 export const ko = {
     journey: {
         receiptSent: "이번 시도 입력에 원문 포함: 선택 {selected}개 + 최근 {recent}개 (고유 메시지 {unique}개)",
+        receiptRetrieved: "과거 검색 {count}개 포함",
+        historyNoMatch: "과거 원문에서 일치 항목을 찾지 못함",
+        historyBudget: "맥락 예산으로 과거 발췌 제한",
         receiptNotSent: "이번 시도에 원문 미전달",
         receiptUnknown: "이번 시도의 원문 전달 여부 확인 불가",
         receiptPartial: "일부 구간 발췌",

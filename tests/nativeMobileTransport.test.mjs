@@ -5,6 +5,7 @@ import { chatStreamDisplayText } from "../packages/chat-core/src/streamText.ts";
 import { nativeChatBearerRoute } from "../lib/nativeBearerGate.ts";
 import { mobileErrorText } from "../locales/mobileErrors.ts";
 import { createChatLocationSession } from "../packages/chat-core/src/location.ts";
+import { buildRoutingRetryChunk } from "../lib/routingRetrySignal.ts";
 import { authenticatedFetch } from "../apps/mobile/src/authenticatedFetch.ts";
 
 for (const language of ["en", "ko", "zh", "de", "fr", "es", "pt"]) test(`native credit refusals explain the balance or daily limit instead of a disconnection: ${language}`, () => {
@@ -61,7 +62,7 @@ test("new mobile Chat and Review conversations enable web search without rewriti
     { webSearchMode: "always", title: "New question" }, { selectedModels: ["fixture-model"], webSearchMode: "always" },
   ]);
 });
-function fixture({ unknown = false, routedModel = null, location, authenticate, locationRequired = false, orphanAttempt = false, beforePersist = async () => {} } = {}) {
+function fixture({ unknown = false, routedModel = null, sourceReceipt = false, wrongReceiptTrace = false, location, authenticate, locationRequired = false, orphanAttempt = false, beforePersist = async () => {} } = {}) {
   const calls = []; let turns = 0;
   let sourceSequence = 0; let latestSourceId = "saved-source";
   const conversation = { id: "conversation-a", title: "Test", selectedModels: ["fixture-model"], messages: [], responseAttempts: orphanAttempt
@@ -91,9 +92,15 @@ function fixture({ unknown = false, routedModel = null, location, authenticate, 
         throw Error("Connection lost after dispatch");
       }
       conversation.messages.push({ id: input.assistantMessageId, role: "assistant", content: "안녕하세요!", status: "normal" });
-      const bytes = new TextEncoder().encode('안녕하세요!\u0000TOMVERSE_SEARCH_METADATA{"completion":{"status":"normal"}}');
+      const receipt = { traceId: wrongReceiptTrace ? "old-trace" : "native-trace", assistantMessageId: input.assistantMessageId,
+        attempt: 0, mode: new Headers(init.headers).has("x-tomverse-source-passages") ? "selected_recent" : "automatic",
+        status: "dispatched", outcome: "seeded", plannerVersion: "ext-seed-v3-selected-recent",
+        selectedCount: 1, recentCount: 2, uniqueMessageCount: 2, partial: true, omitted: false };
+      const metadata = { completion: { status: "normal" }, ...(sourceReceipt ? { continuationReceipt: receipt } : {}) };
+      const bytes = new TextEncoder().encode('안녕하세요!\u0000TOMVERSE_SEARCH_METADATA' + JSON.stringify(metadata));
       return new Response(new ReadableStream({ start(controller) { for (const byte of bytes) controller.enqueue(new Uint8Array([byte])); controller.close(); } }),
-        routedModel ? { headers: { "X-Chat-Routed-Model": routedModel } } : undefined);
+        { headers: { ...(routedModel ? { "X-Chat-Routed-Model": routedModel } : {}), ...(sourceReceipt ? {
+          "X-Request-ID": "native-trace", "X-Chat-Continuation-Receipt": JSON.stringify({ ...receipt, status: "unknown" }) } : {}) } });
     }
     throw Error(`Unexpected request ${path}`);
   };
@@ -397,4 +404,61 @@ test("usage retry refreshes server support before any cookie-only endpoint is ca
   await assert.rejects(transport.usage(),error=>error.code==="NATIVE_USAGE_UNAVAILABLE");
   assert.equal(reads,0);assert.equal(lost,0);enabled=true;
   assert.equal((await transport.usage()).usage.creditsMonth,25);assert.equal(reads,1);
+});
+
+test("native source coordinates and bound receipts survive response readback without entering later prompts", async () => {
+  const f = fixture({ sourceReceipt: true });
+  const received = [];
+  await f.transport.send(f.conversation, "Use the selected source.", [], new AbortController().signal, () => {}, {
+    sourcePassages: [{ ordinal: 250, start: 10, end: 40 }], onReceipt: receipt => received.push(receipt),
+  });
+  const first = f.calls.find(call => call.path === "/api/chat");
+  assert.equal(new Headers(first.headers).get("x-tomverse-source-passages"), "250:10:40");
+  assert.equal(received.at(-1).status, "dispatched");
+  assert.equal(received.at(-1).uniqueMessageCount, 2);
+  const loaded = await f.transport.load(f.conversation.id);
+  assert.equal(loaded.messages.at(-1).continuationReceipt.assistantMessageId, received.at(-1).assistantMessageId);
+  await f.transport.send(loaded, "Next question", [], new AbortController().signal, () => {});
+  const second = f.calls.filter(call => call.path === "/api/chat")[1];
+  assert.equal(new Headers(second.headers).has("x-tomverse-source-passages"), false);
+  assert.equal(second.body.includes("continuationReceipt"), false);
+  await f.transport.signOut();
+  assert.equal((await f.transport.load(f.conversation.id)).messages.some(message => message.continuationReceipt), false);
+});
+
+test("native receipts reject another trace and preserve explicit empty coordinates", async () => {
+  const f = fixture({ sourceReceipt: true, wrongReceiptTrace: true });
+  const received = [];
+  await f.transport.send(f.conversation, "Question", [], new AbortController().signal, () => {}, {
+    sourcePassages: [], onReceipt: receipt => received.push(receipt),
+  });
+  assert.equal(new Headers(f.calls.find(call => call.path === "/api/chat").headers).get("x-tomverse-source-passages"), "");
+  assert.deepEqual(received, []);
+});
+
+
+test("native retry announcements stay unknown until the matching attempt receipt arrives", async () => {
+    for (const trailerAttempt of [0, 1]) {
+        const received = [];
+        const f = fixture({ sourceReceipt: true, authenticate: async (path, init, run) => {
+            const response = await run(path, init);
+            const initial = JSON.parse(response.headers.get("X-Chat-Continuation-Receipt"));
+            const receipt = { ...initial, attempt: trailerAttempt, status: "not_sent", selectedCount: 0, recentCount: 0, uniqueMessageCount: 0 };
+            return new Response(buildRoutingRetryChunk("fallback-model") + "\u0000TOMVERSE_SEARCH_METADATA" + JSON.stringify({ continuationReceipt: receipt }), { headers: response.headers });
+        } });
+        await f.transport.send(f.conversation, "Question", [], new AbortController().signal, () => {}, { onReceipt: receipt => received.push(receipt) });
+        assert.equal(received.at(-1).attempt, 1);
+        assert.equal(received.at(-1).status, trailerAttempt === 0 ? "unknown" : "not_sent");
+    }
+});
+
+test("native cancellation ignores late stream receipts after the known response header", async () => {
+    const controller = new AbortController();
+    const received = [];
+    const f = fixture({ sourceReceipt: true });
+    await f.transport.send(f.conversation, "Question", [], controller.signal, () => {}, {
+        onReceipt: receipt => { received.push(receipt); controller.abort(); },
+    });
+    assert.equal(received.length, 1);
+    assert.equal(received[0].status, "unknown");
 });

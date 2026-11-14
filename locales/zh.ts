@@ -22,6 +22,9 @@ import { en } from "./en";
 export const zh = {
     journey: {
         receiptSent: "本次尝试的输入包含原文：已选 {selected} 个 + 最近 {recent} 个（去重后 {unique} 条消息）",
+        receiptRetrieved: "包含 {count} 条历史匹配",
+        historyNoMatch: "未找到历史匹配",
+        historyBudget: "历史摘录受上下文预算限制",
         receiptNotSent: "本次尝试未发送原文",
         receiptUnknown: "无法确认本次尝试的原文传递情况",
         receiptPartial: "部分摘录",

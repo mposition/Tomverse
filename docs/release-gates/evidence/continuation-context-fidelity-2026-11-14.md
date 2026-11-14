@@ -82,8 +82,10 @@ existing configured Router, excluding sampling and optimizer replay. Explicit `f
 invalid configuration disables that Auto input. The continuation flag and live source
 access gates remain independent. No operational setting, merge, deployment or paid-call
 allowance has been changed.
-Source-aware location fusion, Deep Research, automatic full-history retrieval, durable pin,
-automatic Memory storage and native selection/receipt parity remain outside the patch.
+At the initial implementation snapshot, source-aware location fusion, Deep Research,
+automatic full-history retrieval, durable pin, automatic Memory storage and native
+selection/receipt parity were outside the patch. The clarified owner follow-up below
+adds the retrieval implementation and native parity; the other exclusions remain.
 
 At the original local-only snapshot no PR or push had been performed. The subsequent owner
 instruction authorizes a `ci:hold` PR. CI admission/re-run, merge, deployment and operational
@@ -120,3 +122,55 @@ This source change does not itself merge, deploy or change an operational settin
 The requested next development scope is full-history automatic source retrieval and native
 selection/receipt parity; summary/capsule, Research, Memory storage and durable pin are not
 included in that clarified scope.
+
+
+## Full-history and native follow-up verification
+
+Implemented after draft PR #3925 was created with `ci:hold`, on a fresh develop-based
+worktree with its own lockfile installation. The original main-based worktree and the
+owner's dirty `ai-chat-hub` worktree remain untouched.
+
+- Native: source coordinates from actual DTO ordinals, loaded older-page selection,
+  next-text-turn consumption, shared runtime delivery receipt, trace/answer/attempt guards,
+  explicit invalid/empty coordinates, retry/abort/late-event handling. Selection and
+  receipts are excluded from persisted messages and subsequent prompts. Existing bearer,
+  origin, source lock and continuation flag gates still apply. Only the coordinate request
+  header and content-free receipt response header were added to existing native CORS.
+- History: existing Auto Router read-only tool, at most three model-authored literal
+  queries against all ordinals of the owned snapshot, at most nine database matches and
+  three 500 UTF-16-unit source excerpts. One `ext-seed-v4-retrieved` final plan shares the
+  original 3,000 body-token / 4,000 code-point limits; manual ranges keep priority and
+  the v2 recent tail remains. Final Router messages replace the preview/tool transcript
+  with the same final source sent to the answer provider. No summary store or embedding
+  index was added. Literal retrieval may miss paraphrases or other-language wording.
+- The tool uses at most two model steps, reserves both inputs/outputs and the actual tool
+  schema in the existing provider hold, and settles cumulative `totalUsage`. Concurrent
+  tool calls cannot race into a second source read. Current access is rechecked before
+  and after reads, before the final Router step and before answering. Revocation drops
+  source and source-aware routing without an additional paid reroute.
+
+Executed locally in the PR worktree:
+
+| Check | Result |
+| --- | --- |
+| `npm run test:continuation-fidelity` | 45 pure/input tests + 156 mocked server cases passed |
+| Additional actual-SDK history tool tests, after the parallel-call guard | 6 passed |
+| Continuation contracts, native CORS/proxy/transport, Auto core/UI/product and concurrency regression | 244 passed |
+| Native Chromium continuation + composer submit/tools | 22 passed |
+| Native desktop WebKit continuation | 4 passed |
+| Root TypeScript and changed-file ESLint | passed |
+| Native TypeScript + Vite build | passed |
+
+The actual-SDK suite uses `MockLanguageModelV4`, not a paid model. Korean/English buried
+history fixtures prove that retrieved source and the latest correction survive the final
+input. The existing 24 independent bilingual quality fixtures retain separate declared
+present/absent/partial input checks and answer-quality expectations. Real-model answer
+quality runs remain zero. No Cohere, production model, `--live`, PostgreSQL integration,
+native binary signing or physical-device acceptance was executed.
+
+`CHAT_CONTINUATION_AUTO_SOURCE_ENABLED` stays default-on as explicitly requested.
+`CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED` is separately default-off: live use adds a
+bounded Router model step and requires approval for that actual paid execution scope,
+then explicit activation under the existing Router provider budget and continuation gates.
+No operational flags were changed. Native selection/receipt needs no new provider call.
+CI hold, merge/deploy and operational settings remain unchanged.

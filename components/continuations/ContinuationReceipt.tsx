@@ -9,7 +9,12 @@ export function ContinuationReceipt({ receipt, t }: { receipt: Receipt; t: (key:
     const text = t(key).replaceAll("{selected}", String(receipt.selectedCount))
         .replaceAll("{recent}", String(receipt.recentCount)).replaceAll("{unique}", String(receipt.uniqueMessageCount));
     return <p data-testid="continuation-receipt" className="mt-2 text-xs text-zinc-500 dark:text-zinc-400" role="status">
-        {text}{receipt.status === "dispatched" && receipt.partial ? ` · ${t("journey.receiptPartial")}` : ""}
+        {text}
+        {receipt.status === "dispatched" && receipt.historyOutcome
+            ? ` · ${t("journey.receiptRetrieved").replaceAll("{count}", String(receipt.retrievedCount ?? 0))}` : ""}
+        {receipt.status === "dispatched" && receipt.historyOutcome === "no_match" ? ` · ${t("journey.historyNoMatch")}` : ""}
+        {receipt.status === "dispatched" && receipt.historyOutcome === "budget_limited" ? ` · ${t("journey.historyBudget")}` : ""}
+        {receipt.status === "dispatched" && receipt.partial ? ` · ${t("journey.receiptPartial")}` : ""}
         {receipt.status === "dispatched" && receipt.omitted ? ` · ${t("journey.receiptOmitted")}` : ""}
         {receipt.status === "not_sent" && ["locked", "source_deleted", "empty_selection", "flag_off", "flag_off_stale_cache", "unsupported"].includes(receipt.outcome)
             ? ` · ${t(`journey.receiptReason_${receipt.outcome === "flag_off_stale_cache" ? "flag_off" : receipt.outcome}`)}` : ""}

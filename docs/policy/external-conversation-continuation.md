@@ -255,6 +255,37 @@ Router 결과를 폐기하고 추가 유료 Router 없이 기존 capability·입
 묶고 늦은 이벤트를 버린다. receipt를 DB/localStorage에 저장하지 않으며 새로고침 후 과거
 receipt를 만들어내지 않는다. Deep Research 원문 미전달 제약은 그대로다.
 
+### 4.6 전체 저장 원문 자동 검색과 Native 선택 (로컬 후속 구현)
+
+운영자 후속 범위(2026-11-14)는 연결된 snapshot의 전체 저장 ordinal 검색과 Native 선택·receipt parity다.
+`CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED=true`인 Auto Chat에 한해 기존 Router의 read-only
+`read_imported_source` 도구를 한 번 쓴다. LLM이 원문 언어의 짧은 literal query를 최대 3개 고르고,
+서버는 현재 소유·finalized·잠금·continuation flag를 확인한 snapshot 안에서만 검색한다.
+최근 200개 제한을 검색 대상에 적용하지 않는다. DB 결과는 최대 9개, 추가 발췌는 최대 3×500
+UTF-16 단위다. 직접 선택을 먼저 보존한 뒤 검색 원문과 최근 v2 tail을 같은 3,000 body-token /
+메시지당 4,000 code-point 예산에 합성한다. 범위 중복을 제거하며, 검색 활성 시 planner는
+`ext-seed-v4-retrieved`다. 일치 없음·예산 제한을 receipt로 구분한다. 전체 원문을 보냈거나
+모든 사실을 찾았다는 뜻은 아니다. 검색은 literal match이며 원문 언어/표현이 다르면 놓칠 수 있다.
+
+최종 Router 단계는 preview·tool transcript를 교체하여 답변 provider와 동일한 최종 원문만
+별도 user 데이터로 읽는다. 호출 단계는 최대 2개이며 새 selector·summary 서비스는 없다.
+추가 도구 정의와 최악의 JSON escaping을 포함한 두 단계 입력·출력 전체를 기존 provider
+hold에 먼저 넣고 `totalUsage`로 누적 정산한다. 실패·불명 비용은 기존 hold 유지 규칙을 따른다.
+권한은 도구 실행 전후·최종 Router 전·답변 dispatch 전에 다시 확인한다. 중간 flag off는
+그 요청에서 source 경로를 닫고 원문과 source-aware 결과를 모두 버려 기존 fallback으로 간다.
+
+이 검색 스위치는 **기본 꺼짐**이다. 기존 Auto 원문 입력의 기본 켜짐 승인과 별개로 추가
+Router 모델 단계의 실제 실행·비용 범위를 승인받아야 활성화할 수 있다. 이 로컬 구현·mock
+검증은 그 실행 승인이나 운영 스위치 변경을 대신하지 않는다. 기존 continuation/Auto 공급사·
+가격·admission 한도 안에서만 사용하며 source-aware rewrite/presearch/sample 금지는 유지한다.
+
+Native는 기존 원문 열람 위에 같은 좌표 선택을 제공한다. 읽어 온 이전 페이지의 메시지도
+실제 ordinal로 선택하며, 다음 텍스트 질문에만 소비한다. voice·Review에는 선택을 보내지
+않는다. 기존 bearer/lock/continuation 게이트를 우회하지 않는다. 허용된 Native origin의
+CORS는 좌표 헤더와 receipt 응답 헤더만 추가하며 인증 주체·credential/origin 범위는 같다.
+Native receipt도 trace·응답 ID·attempt에 결속하고 retry·abort·늦은 이벤트를 처리한다.
+선택과 receipt는 runtime에만 두고 DB·localStorage·Memory·공유·원문 export에 쓰지 않는다.
+
 ## 5. Turn 동작
 
 각 chat turn은 다음을 **모두** 만족할 때만 seed를 싣습니다.

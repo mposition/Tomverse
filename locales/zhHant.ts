@@ -13,6 +13,9 @@ import { en } from "./en";
 export const zhHant = {
     journey: {
         receiptSent: "本次嘗試的輸入包含原文：已選 {selected} 個 + 最近 {recent} 個（去重後 {unique} 則訊息）",
+        receiptRetrieved: "包含 {count} 條歷史比對",
+        historyNoMatch: "未找到歷史比對",
+        historyBudget: "歷史摘錄受上下文預算限制",
         receiptNotSent: "本次嘗試未傳送原文",
         receiptUnknown: "無法確認本次嘗試的原文傳遞情況",
         receiptPartial: "部分摘錄",

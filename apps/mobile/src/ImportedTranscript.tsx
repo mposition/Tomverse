@@ -4,6 +4,7 @@ import { mobileContinuationCopy } from "../../../locales/mobileContinuation";
 import { providerLabel } from "../../../components/imports/importFormatting";
 import type { ChatTransport, ImportedTranscript as ImportedTranscriptValue } from "./chatTransport";
 import { AnswerContent } from "./AnswerContent";
+import { ContinuationSourcePicker } from "./ContinuationSourcePicker";
 
 /**
  * The imported original above a continuation's own turns, on the native app.
@@ -15,11 +16,12 @@ import { AnswerContent } from "./AnswerContent";
  * report, retry or copy-into-composer -- because nothing here is a Tomverse
  * answer.
  */
-export function ImportedTranscript({ conversationId, imported, transport, language }: {
+export function ImportedTranscript({ conversationId, imported, transport, language, selection }: {
   conversationId: string;
   imported: ImportedTranscriptValue | undefined;
   transport: ChatTransport;
   language: MobileLanguage;
+  selection?: { selected: import("../../../lib/continuationPassages").Passage[]; onChoose: (value: import("../../../lib/continuationPassages").Passage[]) => void; busy: boolean };
 }) {
   const c = mobileContinuationCopy(language);
   // Older pages are this screen's own reading state; the parent remounts it
@@ -43,6 +45,7 @@ export function ImportedTranscript({ conversationId, imported, transport, langua
     {imported && <p className="imported-provenance" data-testid="continuation-provenance">
       <span>{c.importedFrom.replaceAll("{provider}", provider)}</span><span aria-hidden="true"> · </span><span>{imported.importedAt.slice(0, 10)}</span><span aria-hidden="true"> · </span><span>{c.readOnlyLabel}</span>
     </p>}
+    {imported && selection && <ContinuationSourcePicker imported={{ ...imported, messages }} selected={selection.selected} onChoose={selection.onChoose} language={language} busy={selection.busy} />}
     {imported?.status === "deleted" && <p className="imported-state" data-testid="continuation-source-tombstone">{c.sourceDeleted}</p>}
     {imported?.status === "locked" && <p className="imported-state" data-testid="continuation-source-locked">{c.sourceLocked}</p>}
     {imported?.status === "available" && firstOffset > 0 && <button type="button" className="imported-older" data-testid="imported-load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>

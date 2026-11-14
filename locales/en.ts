@@ -5,6 +5,9 @@ import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 export const en = {
     journey: {
         receiptSent: "Source included in this attempt: {selected} selected + {recent} recent ({unique} unique messages)",
+        receiptRetrieved: "{count} history matches included",
+        historyNoMatch: "No history matches found",
+        historyBudget: "History excerpts limited by context budget",
         receiptNotSent: "Source not sent in this attempt",
         receiptUnknown: "Source delivery could not be confirmed for this attempt",
         receiptPartial: "Partial excerpts",

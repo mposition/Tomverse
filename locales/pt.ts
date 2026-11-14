@@ -5,6 +5,9 @@ import { en } from "./en";
 export const pt = {
     journey: {
         receiptSent: "Fonte incluída nesta tentativa: {selected} selecionados + {recent} recentes ({unique} mensagens únicas)",
+        receiptRetrieved: "{count} correspondências históricas incluídas",
+        historyNoMatch: "Nenhuma correspondência histórica encontrada",
+        historyBudget: "Trechos históricos limitados pelo contexto disponível",
         receiptNotSent: "Fonte não enviada nesta tentativa",
         receiptUnknown: "Não foi possível confirmar o envio da fonte nesta tentativa",
         receiptPartial: "Trechos parciais",

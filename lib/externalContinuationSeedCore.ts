@@ -108,12 +108,14 @@ export type ContinuationSeedTurn = {
     ranges?: SourceRange[];
     selectedRanges?: SourceRange[];
     recentRanges?: SourceRange[];
+    retrievedRanges?: SourceRange[];
 };
 
 export type SourceRange = { start: number; end: number };
 
 export type ContinuationSeedPlan = {
-    seedVersion: typeof CONTINUATION_SEED_VERSION | "ext-seed-v3-selected-recent";
+    seedVersion: typeof CONTINUATION_SEED_VERSION | "ext-seed-v3-selected-recent" | "ext-seed-v4-retrieved";
+    historyOutcome?: "matched" | "no_match" | "no_query" | "budget_limited";
     turns: ContinuationSeedTurn[];
     /** Ordinal window actually used. Both 0 when nothing was selected. */
     fromOrdinal: number;
@@ -342,18 +344,20 @@ const mergeRanges = (ranges: readonly SourceRange[]): SourceRange[] => {
 const renderRanges = (text: string, ranges: readonly SourceRange[]) =>
     ranges.map(range => text.slice(range.start, range.end)).join(" […] ");
 
-/** Selection has first claim; the unchanged v2 recent window fills the same body budget. */
-export function planSelectedContinuationSeed(input: ContinuationSeedInput & {
+/** Manual selection, then retrieved evidence, then the unchanged v2 tail share one budget. */
+function composeContinuationSeed(input: ContinuationSeedInput & {
     selectedMessages: readonly ContinuationSourceMessage[];
-    passages: readonly Passage[];
+    passages: readonly Passage[] | null;
+    retrievedMessages?: readonly ContinuationSourceMessage[];
+    retrievedPassages?: readonly Passage[];
 }): ContinuationSeedPlan {
     const empty = () => ({ ...emptyContinuationSeedPlan(input.sourceMessageCount),
         seedVersion: "ext-seed-v3-selected-recent" as const });
     // Revalidate even for non-HTTP callers. An explicit invalid selection never becomes Auto.
-    const passages = decodePassages(encodePassages(input.passages));
-    if (!passages?.length) return empty();
+    const passages = input.passages === null ? [] : decodePassages(encodePassages(input.passages));
+    if (!passages || (input.passages !== null && !passages.length)) return empty();
     const budget = Math.min(input.tokenBudget ?? CONTINUATION_SEED_TOKEN_BUDGET, CONTINUATION_SEED_TOKEN_BUDGET);
-    const rows = new Map([...input.messages, ...input.selectedMessages].map(row => [row.ordinal, row]));
+    const rows = new Map([...input.messages, ...input.selectedMessages, ...(input.retrievedMessages ?? [])].map(row => [row.ordinal, row]));
     const turns = new Map<number, ContinuationSeedTurn>();
     for (const passage of passages) {
         const row = rows.get(passage.ordinal);
@@ -368,6 +372,25 @@ export function planSelectedContinuationSeed(input: ContinuationSeedInput & {
     }
     let spent = [...turns.values()].reduce((sum, turn) => sum + estimateTextTokens(turn.text), 0);
     if (spent > budget) return empty();
+    const retrieved = decodePassages(encodePassages(input.retrievedPassages ?? [])) ?? [];
+    for (const passage of retrieved) {
+        const row = rows.get(passage.ordinal);
+        if (!row || !isContinuationSeedRole(row.role) || passage.end > row.content.length) continue;
+        let { start, end } = passage;
+        if (/[\uDC00-\uDFFF]/u.test(row.content.charAt(start))) start++;
+        if (/[\uD800-\uDBFF]/u.test(row.content.charAt(end - 1))) end--;
+        if (start >= end || !row.content.slice(start, end).trim()) continue;
+        const previous = turns.get(row.ordinal);
+        const ranges = mergeRanges([...(previous?.ranges ?? []), { start, end }]);
+        const text = renderRanges(row.content, ranges);
+        const cost = estimateTextTokens(text);
+        const nextSpent = spent - estimateTextTokens(previous?.text ?? "") + cost;
+        if (nextSpent > budget || Array.from(text).length > CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT) continue;
+        turns.set(row.ordinal, { role: row.role, ordinal: row.ordinal, text, ranges,
+            selectedRanges: previous?.selectedRanges ?? [], retrievedRanges: [{ start, end }], recentRanges: [],
+            shortened: row.truncated || ranges.length !== 1 || ranges[0].start > 0 || ranges[0].end < row.content.length });
+        spent = nextSpent;
+    }
     const recent = planContinuationSeed(input);
     for (const turn of [...recent.turns].reverse()) {
         const row = rows.get(turn.ordinal)!;
@@ -376,7 +399,7 @@ export function planSelectedContinuationSeed(input: ContinuationSeedInput & {
         const previousCost = estimateTextTokens(previous?.text ?? "");
         const fullRanges = turn.ranges ?? [];
         const make = (ranges: SourceRange[]) => {
-            const merged = mergeRanges([...selected, ...ranges]);
+            const merged = mergeRanges([...selected, ...(previous?.retrievedRanges ?? []), ...ranges]);
             const text = renderRanges(row.content, merged);
             return { merged, text, cost: estimateTextTokens(text) };
         };
@@ -410,14 +433,24 @@ export function planSelectedContinuationSeed(input: ContinuationSeedInput & {
         if (!kept.length || !next.text.trim() || !fits(next)) continue;
         spent = spent - previousCost + next.cost;
         turns.set(row.ordinal, { role: turn.role, ordinal: row.ordinal, text: next.text,
-            ranges: next.merged, selectedRanges: selected, recentRanges: kept,
+            ranges: next.merged, selectedRanges: selected, retrievedRanges: previous?.retrievedRanges, recentRanges: kept,
             shortened: row.truncated || next.merged.length !== 1 || next.merged[0].start !== 0 || next.merged[0].end !== row.content.length });
     }
     const ordered = [...turns.values()].sort((a, b) => a.ordinal - b.ordinal);
     const eligible = input.messages.filter(row => isContinuationSeedRole(row.role) && row.content.trim());
-    return { ...recent, seedVersion: "ext-seed-v3-selected-recent", turns: ordered,
+    return { ...recent, seedVersion: input.retrievedPassages ? "ext-seed-v4-retrieved" : "ext-seed-v3-selected-recent", turns: ordered,
         fromOrdinal: ordered[0]?.ordinal ?? 0, toOrdinal: ordered.at(-1)?.ordinal ?? 0,
         sourceMessageCount: input.sourceMessageCount ?? rows.size,
         estimatedTokens: spent, truncatedCount: ordered.filter(turn => turn.shortened).length,
         omittedByBudgetCount: eligible.filter(row => !turns.has(row.ordinal)).length };
 }
+
+/** An explicit invalid manual selection must never become automatic retrieval. */
+export function planSelectedContinuationSeed(input: ContinuationSeedInput & {
+    selectedMessages: readonly ContinuationSourceMessage[]; passages: readonly Passage[];
+}): ContinuationSeedPlan { return composeContinuationSeed(input); }
+
+export function planRetrievedContinuationSeed(input: ContinuationSeedInput & {
+    selectedMessages: readonly ContinuationSourceMessage[]; passages: readonly Passage[] | null;
+    retrievedMessages: readonly ContinuationSourceMessage[]; retrievedPassages: readonly Passage[];
+}): ContinuationSeedPlan { return composeContinuationSeed(input); }

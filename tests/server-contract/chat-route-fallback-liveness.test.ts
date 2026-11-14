@@ -142,6 +142,8 @@ mock.module(mod("lib/webSearchBackendAdapter.ts"), { namedExports: {
   },
 } });
 let continuationScenario: { reads: number; revokeAt: number; outcome: "locked" | "source_deleted" | "flag_off" } | null = null;
+let historyQueries: string[][] = [];
+let disableHistoryAfterRead = false;
 const realContinuation = require(resolve(ROOT, "lib/externalContinuationService.ts")) as typeof import("../../lib/externalContinuationService");
 const { planSelectedContinuationSeed } = require(resolve(ROOT, "lib/externalContinuationSeedCore.ts")) as typeof import("../../lib/externalContinuationSeedCore");
 const { buildContinuationSeedPrompt } = require(resolve(ROOT, "lib/externalContinuationSeedPrompt.ts")) as typeof import("../../lib/externalContinuationSeedPrompt");
@@ -152,12 +154,21 @@ const continuationPlan = planSelectedContinuationSeed({
 });
 const continuationPrompt = buildContinuationSeedPrompt({ provider: "chatgpt", importedAt: null, plan: continuationPlan });
 mock.module(mod("lib/externalContinuationService.ts"), { namedExports: { ...realContinuation,
+  searchContinuationHistory: async (input: Parameters<typeof realContinuation.searchContinuationHistory>[0]) => {
+    historyQueries.push(input.queries);
+    const plan = { ...continuationPlan, seedVersion: "ext-seed-v4-retrieved" as const, historyOutcome: "matched" as const,
+      turns: [...continuationPlan.turns, { role: "user" as const, ordinal: 42, text: "Kyoto, not Osaka.", shortened: false,
+        ranges: [{ start: 0, end: 17 }], retrievedRanges: [{ start: 0, end: 17 }] }] };
+    if (disableHistoryAfterRead) process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED = "false";
+    return { outcome: "seeded", seed: { ...input.prepared, plan,
+      prompt: buildContinuationSeedPrompt({ provider: "chatgpt", importedAt: null, plan }) } };
+  },
   loadContinuationTurnSeed: async (input: Parameters<typeof realContinuation.loadContinuationTurnSeed>[0]) => {
     if (!continuationScenario) return realContinuation.loadContinuationTurnSeed(input);
     continuationScenario.reads++;
     return continuationScenario.reads >= continuationScenario.revokeAt
       ? { seed: null, outcome: continuationScenario.outcome }
-      : { outcome: "seeded", seed: { plan: continuationPlan, prompt: continuationPrompt } };
+      : input.prepared ? { outcome: "seeded", seed: input.prepared } : { outcome: "seeded", seed: { plan: continuationPlan, prompt: continuationPrompt } };
   },
 } });
 const realSettings = require(resolve(ROOT, "lib/appSettings.ts")) as typeof import("../../lib/appSettings");
@@ -177,6 +188,10 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
       return { modelId: input.ruleModelId, rewrite: null, requiresLocation: fusedLocationRequired };
     }
     if (continuationScenario && input.importedSource) {
+      if (input.historySearch) {
+        await input.historySearch.read(["Kyoto"]);
+        if (!(await input.historySearch.verify())) return null;
+      }
       input.onCallOutcome?.("picked"); paidRouterCalls++;
       return { modelId: input.eligibleModelIds.find(id => id !== input.ruleModelId) ?? input.ruleModelId,
         rewrite: null, requiresFileGeneration: false };
@@ -4511,4 +4526,30 @@ test("explicit Auto source opt-out retains the ordinary answer source but omits 
   assert.equal(llmRouterInputs[0].importedSource, undefined);
   assert.ok(attempts[0].messages.some(message => JSON.stringify(message.content).includes("AUD70")));
   assert.ok(body.includes(ANSWER));
+});
+
+
+for (const revoked of [false, true]) test(`history search final input and receipt follow current access (revoked=${revoked})`, async t => {
+  const previous = process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED;
+  const priorEnv = process.env.APP_ENV; process.env.APP_ENV = "dev";
+  process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED = "true";
+  continuationBridge = { id: "external-continuation" };
+  continuationScenario = { reads: 0, revokeAt: Infinity, outcome: "locked" };
+  historyQueries = []; disableHistoryAfterRead = revoked;
+  t.after(() => { process.env.APP_ENV = priorEnv; continuationBridge = null; continuationScenario = null;
+    disableHistoryAfterRead = false;
+    if (previous === undefined) delete process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED;
+    else process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED = previous; });
+  const { response, body } = await ask("answers", "claimed", 200, false, undefined, true, false);
+  assert.deepEqual(historyQueries, [["Kyoto"]]);
+  const receipt = parseChatStreamTrailer(splitSearchMetadataTrailer(body).searchMetadataJson)?.continuationReceipt;
+  assert.equal(response.status, 200);
+  if (revoked) {
+    assert.equal(receipt?.status, "not_sent");
+    assert.doesNotMatch(JSON.stringify(attempts[0].messages), /Kyoto|AUD70|AUD100/);
+  } else {
+    assert.equal(receipt?.retrievedCount, 1); assert.equal(receipt?.historyOutcome, "matched");
+    assert.match(JSON.stringify(attempts[0].messages), /Kyoto, not Osaka/);
+    assert.match(JSON.stringify(attempts[0].messages), /AUD70/);
+  }
 });

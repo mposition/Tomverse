@@ -1,3 +1,7 @@
+import { ContinuationReceipt } from "../../../components/continuations/ContinuationReceipt";
+import type { ContinuationReceipt as SourceReceipt } from "../../../lib/continuationReceipt";
+import type { Passage } from "../../../lib/continuationPassages";
+import { mobileSourceContextCopy } from "../../../locales/mobileSourceContext";
 import { providerName } from "./ModelChoices";
 import { isIosWorkspace, type AssistantEntry, type IosPanel } from "./iosWorkspaceContract";
 import { IosNavigation, IosWelcome, IosWorkspacePanel, IosAssistantBadge } from "./IosWorkspace";
@@ -92,6 +96,13 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const [owner, setOwner] = useState<string | null>(null);
+  const [sourcePick, setSourcePick] = useState<{ owner: string | null; id: string; parts: Passage[] } | null>(null);
+  const [sourceDelivery, setSourceDelivery] = useState<{ owner: string | null; id: string; receipt: SourceReceipt } | null>(null);
+  const sourceParts = sourcePick?.owner === owner && sourcePick.id === conversation?.id ? sourcePick.parts : [];
+  const sourceCopy = mobileSourceContextCopy(language);
+  const sourceT = (key: string) => sourceCopy[key] ?? key;
+  const sourceSelection = conversation ? { selected: sourceParts, busy: streaming || uncertain,
+    onChoose: (parts: Passage[]) => setSourcePick({ owner, id: conversation.id, parts }) } : undefined;
   const [draft, setDraft] = useDeviceDraft(owner, conversation?.id ?? null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [reportFor, setReportFor] = useState<{ messageId: string; modelId?: string } | null>(null);
@@ -203,6 +214,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     else void signIn();
   }
   async function open(id: string) {
+    setSourcePick(null); setSourceDelivery(null);
     const current = ++requestEpoch.current;
     setLoading(true); setError(""); setPartial(null);
     try {
@@ -243,6 +255,8 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     if (streaming || uncertain) { if (fromVoice) throw Error("CHAT_TURN_BUSY"); return false; }
     const current = ++requestEpoch.current;
     const titleEpoch = epoch.current;
+    const picked = !fromVoice && sourceParts.length ? [...sourceParts] : undefined;
+    setSourceDelivery(null);
     const controller = new AbortController(); abort.current = controller;
     setStreaming(true); setError(""); setPartial(""); setPendingQuestion(text); setDraft("");
     let item = conversation; let dispatched = false;
@@ -255,14 +269,17 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       localStorage.setItem(LAST_CHAT, item.id);
       setDraft("", item.id);
       dispatched = true;
+      if (!fromVoice) setSourcePick(null);
       const receipt = fromVoice ? await transport.sendVoice!(item, text, controller.signal, (value) => {
         if (current === requestEpoch.current) setPartial(value);
       }) : await transport.send(item, text, files, controller.signal, (value) => {
         if (current === requestEpoch.current) setPartial(value);
-      });
+      }, { ...(picked ? { sourcePassages: picked } : {}), onReceipt: receipt => {
+        if (current === requestEpoch.current && !controller.signal.aborted) setSourceDelivery({ owner, id: item!.id, receipt });
+      } });
       const restored = await transport.load(item.id);
       if (current !== requestEpoch.current) return;
-      setConversation(restored); setPartial(null);
+      setConversation(restored); setPartial(null); setSourceDelivery(null);
       const list = await transport.list();
       if (current === requestEpoch.current) setChats(list);
       if (titleEpoch === epoch.current) void transport.generateTitle?.(restored).then(title => {
@@ -283,6 +300,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
 
   function newConversation() {
     if (streaming || reviewBusy || loading) return;
+    setSourcePick(null); setSourceDelivery(null);
     if (product === "review") { setReviewOpen(undefined); setNewReviewRequest(value => value + 1); }
     else { requestEpoch.current++; setConversation(null); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); }
     setView("chat");
@@ -296,6 +314,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   }
   function switchProduct(next: "chat" | "review") {
     if (next === product) return;
+    setSourcePick(null); setSourceDelivery(null);
     requestEpoch.current++;
     setReviewOpen(undefined); setProduct(next); setView("chat"); setError("");
     if (next === "chat") { setConversation(null); setPartial(null); setUncertain(false); localStorage.removeItem(LAST_CHAT); }
@@ -385,16 +404,17 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); localStorage.removeItem(LAST_CHAT); } }} />
     </ConversationListScreen> : <>
       <div className="native-chat-body">
-      {isIosWorkspace && conversation?.surface === "continuation" && <details className="ios-source-panel" open={sourceExpanded} onToggle={event => setSourceExpanded(event.currentTarget.open)}><summary>{mobileIosWorkspaceCopy(language).source}</summary><ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} /></details>}
+      {isIosWorkspace && conversation?.surface === "continuation" && <details className="ios-source-panel" open={sourceExpanded} onToggle={event => setSourceExpanded(event.currentTarget.open)}><summary>{mobileIosWorkspaceCopy(language).source}</summary><ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} selection={sourceSelection} /></details>}
       <section className="transcript" aria-label={conversation?.title ?? copy.newChat} aria-busy={streaming}>
         {/* A continuation is never a blank new chat: its original is its start. */}
-        {!isIosWorkspace && conversation?.surface === "continuation" && <ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} />}
+        {!isIosWorkspace && conversation?.surface === "continuation" && <ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} selection={sourceSelection} />}
         {isIosWorkspace && conversation?.assistantProfileId && <IosAssistantBadge id={conversation.assistantProfileId} transport={transport} />}
         {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && (isIosWorkspace ? <IosWelcome importsEnabled={iosImportsEnabled} language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} imageEnabled={iosImageEnabled} onPanel={openIosPanel} onSeed={seedIosWorkspace} /> : <WorkspaceWelcome product="chat" language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} />)}
         {isIosWorkspace && conversation?.surface === "continuation" && !conversation.messages.length && !streaming && <div className="ios-continuation-start"><h2>{mobileIosWorkspaceCopy(language).disclosure}</h2><p>{mobileIosWorkspaceCopy(language).readOnly}</p><button onClick={() => setDraft(language === "ko" ? "지난 대화를 바탕으로 다음 할 일을 정리해줘." : "Based on our previous conversation, help me plan the next steps.")}>{language === "ko" ? "다음 할 일부터 정리해줘" : "Help me plan the next steps"}</button></div>}
         {pendingQuestion !== null && <article className="message user"><AnswerContent content={pendingQuestion} transport={transport} language={language} /></article>}
-        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.role === "assistant" && ((reportable(message)) || comparable(message) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{comparable(message) && <button type="button" className="answer-report" data-testid="chat-compare-in-review" aria-label={mobileCompareInReviewCopy(language).aria} disabled={streaming || reviewBusy || uncertain} onClick={() => compareInReview(message.id)}>{mobileCompareInReviewCopy(language).label}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.continuationReceipt && <ContinuationReceipt receipt={message.continuationReceipt} t={sourceT} />}{message.role === "assistant" && ((reportable(message)) || comparable(message) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{comparable(message) && <button type="button" className="answer-report" data-testid="chat-compare-in-review" aria-label={mobileCompareInReviewCopy(language).aria} disabled={streaming || reviewBusy || uncertain} onClick={() => compareInReview(message.id)}>{mobileCompareInReviewCopy(language).label}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
         {partial !== null && <article className="message assistant"><span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
+        {sourceDelivery?.owner === owner && sourceDelivery.id === conversation?.id && <ContinuationReceipt receipt={sourceDelivery.receipt} t={sourceT} />}
         {conversation && <VoiceHistory transport={transport} conversationId={conversation.id} revision={voiceRevision} language={language} />}
         <div ref={end} />
       </section>

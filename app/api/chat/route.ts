@@ -173,7 +173,8 @@ import {
 import { continuationReceipt, deliveryReceipt, CONTINUATION_RECEIPT_HEADER, type ContinuationReceipt } from "@/lib/continuationReceipt";
 import { PASSAGE_HEADER } from "@/lib/continuationPassages";
 import { continuationAutoSourceEnabledFromValue } from "@/lib/externalContinuationAccess";
-import { loadContinuationTurnSeed, type ContinuationTurnSeedResult } from "@/lib/externalContinuationService";
+import { loadContinuationTurnSeed, searchContinuationHistory, type ContinuationTurnSeedResult } from "@/lib/externalContinuationService";
+import { HISTORY_SOURCE_MAX_BYTES } from "@/lib/continuationHistorySearch";
 import { officeRenderingEnabled } from "@/lib/officeRenderer";
 import { recordContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
 import {
@@ -2474,12 +2475,15 @@ async function handleChatPost(
         const routerSearchPlanCandidate = deterministicAutoSelection.routed &&
             Boolean(session?.user?.id) && webSearchMode === "always" && !currentLocation &&
             !mcpConnectionId && !turnCarriesAttachments(autoRoutingMessages);
+        let historySearchActive = false;
         let preparedContinuation: ContinuationTurnSeedResult = { seed: null, outcome: "no_bridge" };
         const hasContinuation = Boolean(conversationRouting?.continuationBridge);
         const readContinuation = async (): Promise<ContinuationTurnSeedResult> => {
             if (!session?.user?.id || !conversationId || !hasContinuation) return { seed: null, outcome: "no_bridge" };
             if (deepResearchDepth || requestedModelConfig.usageClass === "deep-research") return { seed: null, outcome: "no_bridge" };
             try {
+                if (historySearchActive && process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED !== "true")
+                    return { seed: null, outcome: "flag_off" };
                 if (!(await isExternalContinuationEnabledCached())) return { seed: null, outcome: "flag_off" };
                 return await loadContinuationTurnSeed({ userId: session.user.id, conversationId, request: req, prepared: preparedContinuation.seed });
             } catch (error) {
@@ -2494,9 +2498,16 @@ async function handleChatPost(
                     ? "unsupported" : preparedContinuation.outcome, plan: preparedContinuation.seed?.plan });
         }
         // Owner-approved default-on source input; explicit false remains the kill switch.
-        const importedSource = deterministicAutoSelection.routed &&
+        let importedSource = deterministicAutoSelection.routed &&
             continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED) && !fusion
             ? preparedContinuation.seed?.prompt.transcriptText ?? undefined : undefined;
+        historySearchActive = Boolean(importedSource && process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED === "true" &&
+            new TextEncoder().encode(importedSource).length <= HISTORY_SOURCE_MAX_BYTES);
+        const verifyImportedSource = async () => {
+            const checked = await readContinuation();
+            return Boolean(importedSource && checked.seed?.prompt.transcriptText === importedSource &&
+                continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED));
+        };
         const presearchFlagEnabled = process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true";
         const allowRouterSearchPlan = !hasContinuation && routerSearchPlanCandidate && presearchFlagEnabled;
         // Set only when the router model was actually asked.
@@ -2508,10 +2519,20 @@ async function handleChatPost(
         let llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
                       importedSource,
-                      ...(importedSource ? { verifyImportedSource: async () => {
-                          const checked = await readContinuation();
-                          return checked.seed?.prompt.transcriptText === importedSource &&
-                              continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED);
+                      ...(importedSource ? { verifyImportedSource } : {}),
+                      ...(historySearchActive ? { historySearch: {
+                          source: () => importedSource,
+                          verify: verifyImportedSource,
+                          read: async (queries: string[]) => {
+                              if (!preparedContinuation.seed || !session?.user?.id || !conversationId) throw new Error("History access refused");
+                              const result = await searchContinuationHistory({ userId: session.user.id, conversationId, request: req,
+                                  prepared: preparedContinuation.seed, queries,
+                                  enabled: () => process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED === "true" &&
+                                      continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED) });
+                              preparedContinuation = result;
+                              if (!result.seed) throw new Error("History access refused");
+                              importedSource = result.seed.prompt.transcriptText ?? undefined;
+                          },
                       } } : {}),
                       prompt: profileTextFor(autoRoutingMessages),
                       previousAnswer: previousAnswerExcerpt(autoRoutingMessages),

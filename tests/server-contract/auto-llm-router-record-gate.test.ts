@@ -833,3 +833,25 @@ test("the router's outcome reaches the caller, and a resumed location turn repla
     assert.deepEqual(legacy, []);
   } finally { routerFailure = null; log.mock.restore(); }
 });
+
+
+test("history tool steps share one bounded hold and settle cumulative usage without sampling", async () => {
+    routerRequests.length = 0; holds.length = 0; settlementWrites.length = 0; created.length = 0;
+    generateRouterResult = () => ({ output: routerOutput, usage: { inputTokens: 1, outputTokens: 1 },
+        totalUsage: { inputTokens: 300, outputTokens: 50 } });
+    try {
+        const result = await pick(Promise.resolve(true), false, { importedSource: "authorized source",
+            verifyImportedSource: async () => true, historySearch: { source: () => "final source",
+                verify: async () => true, read: async () => {} } });
+        assert.ok(result); assert.equal(routerRequests.length, 1);
+        assert.ok(routerRequests[0].tools); assert.ok(routerRequests[0].prepareStep);
+        assert.equal(holds.length, 2); assert.equal(holds[0], holds[1]);
+        const { resolveModelPricing } = require(resolve(ROOT, "lib/modelPricing.ts"));
+        const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
+        const { callCostMicroUsd } = require(resolve(ROOT, "lib/autoRouterOptimizerCore.ts"));
+        const price = resolveModelPricing(AVAILABLE_MODELS.find((model: { id: string }) => model.id === "gpt-6-luna"));
+        const actual = callCostMicroUsd({ inputTokens: 300, outputTokens: 50, ...price });
+        assert.equal(settlementWrites[0][0], actual - holds[0]);
+        assert.equal(created.length, 0);
+    } finally { generateRouterResult = undefined; }
+});
