@@ -161,7 +161,7 @@ export const DM_ESCALATION_MAX_BYTES = 1024;
  */
 const PLAN_DESCRIPTION_CLAUSE = new RegExp(
   "^\\s*(?:(?:[가-힣A-Za-z]+\\s+){0,2}[가-힣A-Za-z]+(?:은|는)\\s+)?" +
-  "(?:(?:(?:free|pro|max|guest|plus|team)\\s*[·,/]?\\s*)+(?:플랜\\s*)?|(?:플랜|요금제)\\s*)(?:별\\s*)?권한" +
+  "(?:(?:(?:free|pro|max|guest|plus|team)\\s*(?:[·,/]\\s*)?)+(?:플랜\\s*)?|(?:플랜|요금제)\\s*)(?:별\\s*)?권한" +
   "(?:(?:을|를)\\s*(?:구분|비교)(?:합니다|해요|한다|됩니다)|에\\s*따라\\s*[가-힣]+(?:이|가)\\s*(?:다릅니다|달라집니다))\\s*$",
   "i",
 );
