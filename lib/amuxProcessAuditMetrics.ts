@@ -34,6 +34,7 @@ export type AmuxProcessAuditMetrics = Record<string, unknown> & {
 export async function readProcessAuditMetrics(db: Db, window: { start: Date; end: Date }): Promise<AmuxProcessAuditMetrics> {
   const s = window.start.toISOString();
   const e = window.end.toISOString();
+  // The cohort created in the window, and how many of it are done or archived by now.
   const tasks = await db.$queryRaw`
     SELECT count(*)::int AS created,
       count(*) FILTER (WHERE "status" = 'done')::int AS done,
@@ -45,6 +46,16 @@ export async function readProcessAuditMetrics(db: Db, window: { start: Date; end
     WHERE "cardType" = 'task'
       AND "createdAt" >= (${s}::timestamptz AT TIME ZONE 'UTC')
       AND "createdAt" < (${e}::timestamptz AT TIME ZONE 'UTC')`;
+  // Throughput: Tasks that finished in the window, whenever they were created.
+  const completed = await db.$queryRaw`
+    SELECT count(*)::int AS count,
+      round((percentile_cont(0.5) WITHIN GROUP (ORDER BY
+        EXTRACT(EPOCH FROM (COALESCE("v4TerminalAt", "updatedAt") - "createdAt")) / 3600))::numeric, 1)::float8
+        AS "medianHoursFromCreation"
+    FROM "AmuxWorkItem"
+    WHERE "cardType" = 'task' AND "status" = 'done'
+      AND COALESCE("v4TerminalAt", "updatedAt") >= (${s}::timestamptz AT TIME ZONE 'UTC')
+      AND COALESCE("v4TerminalAt", "updatedAt") < (${e}::timestamptz AT TIME ZONE 'UTC')`;
   const liveByStatus = await db.$queryRaw`
     SELECT "status", count(*)::int AS count
     FROM "AmuxWorkItem"
@@ -171,7 +182,9 @@ export async function readProcessAuditMetrics(db: Db, window: { start: Date; end
   const days = Math.max(1, Math.round((window.end.getTime() - window.start.getTime()) / DAY_MS));
   return plain({
     window: { start: s, end: e, days },
-    tasks: (tasks as unknown[])[0] ?? null,
+    // `tasksCreatedInWindow` is a creation cohort; `tasksCompletedInWindow` is throughput.
+    tasksCreatedInWindow: (tasks as unknown[])[0] ?? null,
+    tasksCompletedInWindow: (completed as unknown[])[0] ?? null,
     liveTasksByStatus: liveByStatus,
     backlogBlockers: (backlogBlockers as unknown[])[0] ?? null,
     exhaustedTodo,
