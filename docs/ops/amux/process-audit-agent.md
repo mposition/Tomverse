@@ -9,7 +9,7 @@
   최근 14일입니다.
   - Task 생성·done·보관, 살아 있는 Task 상태, backlog를 막는 의존 카드
   - 예산을 다 쓴 todo, 일별 시도 수, 시도가 끝난 사유와 다음 시도까지 걸린 시간
-  - escalation 사유·해결 시간, 열린 escalation, v52 검토 결과, v22 결과 검토, DM 요청 경로
+  - escalation 사유·해결 시간, 열린 escalation, v52 검토 결과, v22 결과 검토
   - 엔지니어링 run, 사람의 AMUX·엔지니어링 Admin 조작, 감사 로그 양
   - 읽기 전용 트랜잭션에서 집계 수치와 카드 표시 번호만 읽습니다. 카드 제목·본문, 이메일, 사람이 쓴 글은 읽지 않습니다.
 - **해석·순위·제안**은 AMUX 박스의 Codex CLI 한 번으로 만듭니다(`scripts/amux-process-audit-runner.mjs`).

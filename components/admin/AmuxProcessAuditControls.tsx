@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxProcessAuditMessages } from "@/lib/adminMessages/amuxProcessAudit";
+import { adminFetch } from "@/lib/adminFetch";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { AMUX_PROCESS_AUDIT_MAX_CADENCE_DAYS, AMUX_PROCESS_AUDIT_MIN_CADENCE_DAYS } from "@/lib/amuxProcessAuditCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -33,7 +34,7 @@ export function AmuxProcessAuditControls({ enabled, cadenceDays, status }: {
     setBusy(true);
     setMessage(null);
     try {
-      const response = await fetch("/api/admin/amux/process-audit/settings", {
+      const response = await adminFetch("/api/admin/amux/process-audit/settings", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ enabled: on, cadenceDays: cadence, runNow, ownerConfirmed: true }),

@@ -137,12 +137,6 @@ export async function readProcessAuditMetrics(db: Db, window: { start: Date; end
     WHERE "createdAt" >= (${s}::timestamptz AT TIME ZONE 'UTC')
       AND "createdAt" < (${e}::timestamptz AT TIME ZONE 'UTC')
     GROUP BY 1, 2, 3 ORDER BY count DESC`;
-  const decisionMakerRequests = await db.$queryRaw`
-    SELECT CASE WHEN "route" IS NULL THEN NULL WHEN "route" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "route" ELSE 'other_text' END AS route, count(*)::int AS count
-    FROM "AmuxDecisionMakerRequest"
-    WHERE "createdAt" >= (${s}::timestamptz AT TIME ZONE 'UTC')
-      AND "createdAt" < (${e}::timestamptz AT TIME ZONE 'UTC')
-    GROUP BY 1 ORDER BY count DESC`;
   const engineeringRuns = await db.$queryRaw`
     SELECT CASE WHEN "status" IS NULL THEN NULL WHEN "status" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "status" ELSE 'other_text' END AS status, CASE WHEN "outcome" IS NULL THEN NULL WHEN "outcome" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "outcome" ELSE 'other_text' END AS outcome, count(*)::int AS count
     FROM "EngineeringAgentRun"
@@ -194,7 +188,6 @@ export async function readProcessAuditMetrics(db: Db, window: { start: Date; end
     openEscalations: (openEscalations as unknown[])[0] ?? null,
     v52Reviews,
     resultReviews,
-    decisionMakerRequests,
     engineeringRuns,
     humanActions,
     humanActionsPerDay,

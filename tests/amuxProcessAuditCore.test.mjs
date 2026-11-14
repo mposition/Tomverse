@@ -288,7 +288,7 @@ test("the report's Markdown makes no request: links and images render as text, n
 
 test("every grouped text column passes only as a code-shaped value", () => {
   const metrics = readFileSync(new URL("../lib/amuxProcessAuditMetrics.ts", import.meta.url), "utf8");
-  for (const column of ['a."reason"', '"reason"', '"resolutionOutcome"', '"verdict"', '"route"', '"action"', '"answerSource"']) {
+  for (const column of ['a."reason"', '"reason"', '"resolutionOutcome"', '"verdict"', '"action"', '"answerSource"']) {
     assert.ok(metrics.includes(`WHEN ${column} ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN ${column} ELSE 'other_text' END`), column);
   }
   assert.equal(/left\("?a?\.?"?reason/.test(metrics), false);

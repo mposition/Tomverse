@@ -763,7 +763,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "decision log",
       "incident",
       "process analysis",
-      "process audit",
     ],
     tabs: [
       {

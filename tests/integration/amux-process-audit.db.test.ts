@@ -148,7 +148,7 @@ test("the figures count a window's tasks, stop reasons and escalations in UTC, d
     count: 1, resolvedByPerson: 1, medianHoursToResolve: 4 }]);
   assert.deepEqual(metrics.attemptsPerDay, [{ day: "2001-01-05", attempts: 1 }, { day: "2001-01-06", attempts: 1 },
     { day: "2001-01-07", attempts: 1 }]);
-  for (const key of ["v52Reviews", "resultReviews", "decisionMakerRequests", "engineeringRuns", "humanActions",
+  for (const key of ["v52Reviews", "resultReviews", "engineeringRuns", "humanActions",
     "humanActionsPerDay", "auditTopActions", "liveTasksByStatus", "exhaustedTodo"]) {
     assert.ok(Array.isArray(metrics[key]), key);
   }
