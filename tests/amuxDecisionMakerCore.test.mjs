@@ -194,6 +194,9 @@ test("Korean access terms name a grant or change, not a plan's entitlement", () 
     // describing word right after "권한" in a sentence that is not a request.
     "봇 계정에 Pro 권한을 활성화할까요?", "이 계정의 Max 권한을 비활성화할까요?", "Pro 권한을 비교한 뒤 켜도 될까요?",
     "Pro 권한을 구분해서 넣을까요?", "Max 권한으로 실행합니다.",
+    // Independent review r-20261114-142113-428be9: an action after the describing word.
+    "Pro 권한을 구분 없이 지급합니다.", "Pro 권한을 비교한 뒤 봇 계정으로 이양합니다.",
+    "봇 계정은 Pro 권한을 구분합니다. 그리고 Max 권한을 이양합니다.",
   ]) {
     assert.deepEqual(irreversibleTermCategories(text), ["access"], text);
   }

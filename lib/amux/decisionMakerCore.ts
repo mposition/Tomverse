@@ -153,9 +153,18 @@ export const DM_ESCALATION_MAX_BYTES = 1024;
  * words, case-insensitively. A false positive only costs the operator a draft,
  * so the list errs wide. Changing it is a policy version change.
  */
-const PLAN_NAME_BEFORE = /(?:free|pro|max|guest|plus|team|플랜|요금제|구독|등급)\s*(?:별\s*)?$/i;
-/** What may follow "권한" in a plan description: telling the tiers apart, nothing else. */
-const PLAN_DESCRIPTION_AFTER = /^\s*(?:을|를|이|가|은|는|의|에)?\s*(?:구분|비교|차이|따라|따른|설명|안내|표시)/;
+/**
+ * The only clauses the exception admits, whole from the clause's start (after
+ * the last comma) to the sentence's end: "(목록은) Free·Pro·Max 권한을
+ * 구분합니다" and "(플랜) 권한에 따라 문구가 다릅니다". Anything else after the
+ * describing word -- "구분 없이 지급합니다" -- is not one.
+ */
+const PLAN_DESCRIPTION_CLAUSE = new RegExp(
+  "^\\s*(?:(?:[가-힣A-Za-z]+\\s+){0,2}[가-힣A-Za-z]+(?:은|는)\\s+)?" +
+  "(?:(?:(?:free|pro|max|guest|plus|team)\\s*[·,/]?\\s*)+(?:플랜\\s*)?|(?:플랜|요금제)\\s*)(?:별\\s*)?권한" +
+  "(?:(?:을|를)\\s*(?:구분|비교)(?:합니다|해요|한다|됩니다)|에\\s*따라\\s*[가-힣]+(?:이|가)\\s*(?:다릅니다|달라집니다))\\s*$",
+  "i",
+);
 /** A request or question, whatever its verb. */
 const REQUEST_FORM = /까요|까\s|할지|될지|해도|하면|하시겠|주세요|해\s*주|합시다|하자|드릴/;
 /** Stems of granting, changing, switching or taking away; wide on purpose ("줄" also hits "줄이다"). */
@@ -164,16 +173,14 @@ const ACCESS_CHANGE_STEM =
 
 /**
  * Whether a text's Korean "권한" names access. Every one does, except a
- * declarative sentence that describes plans: "권한" right after a plan name,
- * followed by a describing word (구분·비교·차이·따라·설명·안내·표시), not a
- * request or question, with no changing verb anywhere in the sentence
+ * clause that is exactly a plan description (`PLAN_DESCRIPTION_CLAUSE`) in a
+ * sentence that is not a request or question and has no changing verb
  * ("플랜별 목록은 Free·Pro·Max 권한을 구분합니다."). The exception is narrow on
- * purpose: four independent review rounds each found an access change that a
- * list of change verbs alone let through.
+ * purpose: five independent review rounds each found an access change that a
+ * looser rule let through.
  */
 export function koreanAccessTermHit(text: string): boolean {
   for (let at = text.indexOf("권한"); at !== -1; at = text.indexOf("권한", at + 2)) {
-    const before = text.slice(Math.max(0, at - 16), at);
     const head = text.slice(0, at);
     const start = Math.max(...[".", "?", "!", "\n", "。"].map((mark) => head.lastIndexOf(mark))) + 1;
     const rest = text.slice(at + 2);
@@ -181,7 +188,9 @@ export function koreanAccessTermHit(text: string): boolean {
     const after = end === -1 ? rest : rest.slice(0, end);
     const sentence = text.slice(start, at) + after;
     const question = end !== -1 && rest[end] === "?";
-    const planDescription = PLAN_NAME_BEFORE.test(before) && PLAN_DESCRIPTION_AFTER.test(after) &&
+    const clauseStart = Math.max(start, head.lastIndexOf(",") + 1);
+    const clause = text.slice(clauseStart, at) + "권한" + after;
+    const planDescription = PLAN_DESCRIPTION_CLAUSE.test(clause) &&
       !question && !REQUEST_FORM.test(sentence) && !ACCESS_CHANGE_STEM.test(sentence);
     if (!planDescription) return true;
   }
