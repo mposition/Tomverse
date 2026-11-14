@@ -68,6 +68,22 @@ test("MiniMax M3 enables adaptive thinking without Anthropic-only effort", () =>
   });
 });
 
+test("MiniMax M3.1 Flash sends its catalogue effort instead of defaulting to max", () => {
+  const model = { ...getModel("minimax-m3"), apiModel: "MiniMax-M3.1-Flash" };
+  for (const [reasoning, effort] of [["low", "low"], ["medium", "medium"], ["high", "high"], ["none", "low"], [undefined, "medium"]]) {
+    assert.deepEqual(getModelProviderOptions({ ...model, reasoning }), {
+      anthropic: { thinking: { type: "adaptive" }, effort },
+    });
+  }
+});
+
+test("Mistral reasoning settings use the native provider namespace", () => {
+  const model = { ...getModel("mistral-large-3"), apiModel: "mistral-large-4-0", reasoning: "medium" };
+  assert.deepEqual(getModelGenerationSettings(model), {
+    providerOptions: { mistral: { reasoningEffort: "medium" } },
+  });
+});
+
 test("new Gemini request paths omit unsupported sampling parameters", () => {
   for (const id of ["gemini-3-6-flash", "gemini-2-5-flash", "gemini-flash-lite-latest"]) {
     assert.deepEqual(getModelGenerationSettings(getModel(id), { temperature: 0.1 }), {});

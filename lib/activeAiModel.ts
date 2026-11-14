@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogle } from "@ai-sdk/google";
+import { createMistral } from "@ai-sdk/mistral";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createMoonshotAI } from "@ai-sdk/moonshotai";
 import type { StepResult, ToolSet } from "ai";
@@ -93,7 +94,9 @@ export const getActiveAiModel = (
         model.apiModel
       );
     case "mistral":
-      return createOpenAI(configuration).chat(model.apiModel);
+      // Mistral returns thinking/text chunks in message.content. The OpenAI
+      // adapter accepts only a string there and rejects successful responses.
+      return createMistral(configuration)(model.apiModel);
     case "xai":
       return createOpenAI(configuration).chat(model.apiModel);
     case "moonshot":
