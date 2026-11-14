@@ -99,8 +99,9 @@ provider `antigravity`. The prose report described no defects and supported the
 change, but omitted the required verdict JSON block. The orchestrator therefore
 returned `unknown` / `no_verdict_block` (exit 2), not an accepted review.
 Per the repository's unknown-outcome rule, the review was not resubmitted.
-The remaining follow-up changes contain only the verified browser fixture
-assertion and this verification record; the reviewed production code is unchanged.
+The follow-up changes contain the verified browser fixture assertion, this
+verification record and trailing blank-line cleanup. The reviewed production
+behavior is unchanged.
 
 No PR, push, CI start/retry, merge, deployment, AMUX mutation, feature activation,
 pricing/budget increase or paid model/search evaluation was performed.

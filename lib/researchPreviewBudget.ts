@@ -65,4 +65,3 @@ export function createResearchPreviewBudget(input: {
     totalOutputTokenCap: RESEARCH_PREVIEW_MAX_TOTAL_OUTPUT_TOKENS,
   });
 }
-
