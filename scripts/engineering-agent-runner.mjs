@@ -36,13 +36,6 @@ export const RUNNER_VARIABLES = [
   "ENGINEERING_AGENT_RUNNER_DEADMAN_URL",
 ];
 
-/**
- * Read by the image before this one, which still drafted patches with a model.
- * The IaC keeps declaring it until the image that no longer reads it is the
- * pinned one; it goes in the same change as that digest.
- */
-export const RUNNER_RETIRED_VARIABLES = ["ENGINEERING_AGENT_ANTHROPIC_API_KEY"];
-
 const required = (name) => {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`missing ${name}`);
