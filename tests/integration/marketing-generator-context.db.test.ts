@@ -5,6 +5,8 @@ import type { Session } from "next-auth";
 
 import { POST } from "@/app/api/internal/marketing-generator-context/route";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { MARKETING_ASSET_ACTIONS, MARKETING_ASSET_NO_DECISION } from "@/lib/marketingAssetCore";
+import { confirmMarketingAssetUpload, decideMarketingAsset, submitMarketingAsset } from "@/lib/marketingAssetStore";
 import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
 import { MARKETING_COMPETITOR_ACTIONS } from "@/lib/marketingCompetitorCore";
 import { createApprovedMarketingCompetitor } from "@/lib/marketingCompetitorStore";
@@ -21,7 +23,7 @@ const DIGEST = "b".repeat(64);
 const reset = () =>
   resetTestFixture(
     prisma,
-    `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun", "MarketingCompetitor" RESTART IDENTITY CASCADE`,
+    `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun", "MarketingCompetitor", "MarketingAsset", "AdminAuditLog" RESTART IDENTITY CASCADE`,
   );
 
 beforeEach(reset);
@@ -141,6 +143,50 @@ test("the context names approval-mode accounts, claims without evidence, and fac
   }));
 
 
+/** Approved, uploaded video assets for linkedin and x, through the store's own submit, upload and decision steps. */
+async function approveAssets(ids: string[]) {
+  for (const [index, assetId] of ids.entries()) {
+    const sha256 = (index + 1).toString(16).repeat(64).slice(0, 64);
+    await runMarketingTransaction(prisma, async (tx) => {
+      await submitMarketingAsset(tx, {
+        asset: {
+          id: assetId,
+          provenance: "capture",
+          allowedChannels: ["linkedin", "x"],
+          alt: { en: "Three answers side by side in Tomverse." },
+          claimIds: [],
+          validUntil: "2099-01-31",
+          disclosure: { linkedin: "none", x: "none" },
+          depictsProductInterface: true,
+        },
+        kind: "video",
+        contentType: "video/mp4",
+        bytes: 12_000_000,
+        sha256,
+        durationSeconds: 45,
+        transcript: { en: "Ask three models at once and compare their answers side by side." },
+      });
+      await confirmMarketingAssetUpload(tx, { assetId, bytes: 12_000_000 });
+      const auditLogId = await writeAdminAuditLog({
+        session: operator,
+        request: new Request("https://tomverse.app/api/admin/marketing/assets/x/decision"),
+        action: MARKETING_ASSET_ACTIONS.approved,
+        targetType: "MarketingAsset",
+        targetId: assetId,
+        summary: "Asset decision.",
+        metadata: { actorHadMarketingWrite: true, previousDecisionAuditLogId: MARKETING_ASSET_NO_DECISION, sha256 },
+        tx,
+      });
+      await decideMarketingAsset(tx, {
+        assetId,
+        decision: "approved",
+        expectedDecisionAuditLogId: null,
+        auditLogId,
+      });
+    });
+  }
+}
+
 /** A post in `status` naming `assetIds` (the insert trigger that starts every post as a draft is off for the one insert). */
 async function postNaming(channelId: string, status: string, assetIds: string[], createdAt?: Date) {
   const key = `post-${Math.random().toString(36).slice(2)}`;
@@ -198,6 +244,9 @@ test("the context lists, per account, the assets it has used in any state but a 
   withSecret(async () => {
     const one = await channelIn("approval_mode");
     const two = await channelIn("approval_mode", "x");
+    // The context lists a used id only while the asset itself is still listed,
+    // so each one is an approved registry asset both accounts could post.
+    await approveAssets(["media-published", "media-both", "media-pending", "media-old", "media-elsewhere"]);
     await postNaming(one.id, "published", ["media-published", "media-both"]);
     await postNaming(one.id, "pending_approval", ["media-pending"]);
     await postNaming(one.id, "approved", ["media-both"]);
