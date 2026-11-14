@@ -92,15 +92,32 @@ const GROUNDED_SEARCH_TOOL_DESCRIPTION =
 export function withGroundedSearchDescription(tools: ToolSet, renderedEvidence: string): ToolSet {
   const search = tools[APP_MANAGED_WEB_SEARCH_TOOL_NAME];
   if (!search || search.type === "provider") return tools;
+  // A follow-up can also repeat an earlier follow-up, not only the presearch.
+  // Each source remembers the output that first carried it; projections are
+  // cached so re-projecting that output never counts it against itself.
+  const firstCarrier = new Map<string, object>();
+  const projected = new WeakMap<object, ReturnType<typeof describeRepeatedExcerpts>>();
   return {
     ...tools,
     [APP_MANAGED_WEB_SEARCH_TOOL_NAME]: {
       ...search,
       description: GROUNDED_SEARCH_TOOL_DESCRIPTION,
-      toModelOutput: ({ output }: { output: AppManagedSearchToolResult | AppManagedSearchBatchResult }) => ({
-        type: "json" as const,
-        value: describeRepeatedExcerpts(output, renderedEvidence),
-      }),
+      toModelOutput: ({ output }: { output: AppManagedSearchToolResult | AppManagedSearchBatchResult }) => {
+        let value = projected.get(output);
+        if (!value) {
+          value = describeRepeatedExcerpts(output, source =>
+            renderedEvidence.includes(source) || (firstCarrier.get(source) ?? output) !== output);
+          for (const item of output.status === "batch" ? output.searches : [output]) {
+            if (item.status !== "ok") continue;
+            for (const source of item.results ?? []) {
+              const key = JSON.stringify(source);
+              if (!firstCarrier.has(key)) firstCarrier.set(key, output);
+            }
+          }
+          projected.set(output, value);
+        }
+        return { type: "json" as const, value };
+      },
     },
   };
 }
@@ -199,13 +216,13 @@ const resultNotice = (now: Date) => `Searched on ${utcDateString(now)} (UTC). ${
 
 function describeRepeatedExcerpts(
   result: AppManagedSearchToolResult | AppManagedSearchBatchResult,
-  renderedEvidence: string,
+  alreadySupplied: (serializedSource: string) => boolean,
 ) {
   const searches = result.status === "batch" ? result.searches : [result];
   // The presearch serializer embeds each whole source object as JSON, including
   // in its compact form. Quoted snippets are escaped and cannot match an object.
   if (!searches.length || !searches.every(search => search.status === "ok" && search.results?.length &&
-    search.results.every(source => renderedEvidence.includes(JSON.stringify(source))))) return result;
+    search.results.every(source => alreadySupplied(JSON.stringify(source))))) return result;
 
   const markRepeated = (search: AppManagedSearchToolResult) => ({
     ...search,
