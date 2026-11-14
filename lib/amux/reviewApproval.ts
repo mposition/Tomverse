@@ -17,6 +17,7 @@ import {
   amuxReviewTargetStatus,
   amuxReviewPublicationMayOpenPr,
   amuxV22NoChangeCompletionAllowed,
+  amuxV22UnpublishedPatchNotice,
   amuxV22PrlessReviewRetryAllowed,
   amuxV22ReviewRetryHasVerifiedOutcome,
   AMUX_REVIEW_NO_CHANGE_BASIS,
@@ -249,14 +250,20 @@ async function snapshot(
       // A stored patch is immutable evidence that this attempt changed code.
       tx.amuxV22TaskPatch.findUnique({ where: { attemptId: prlessAttempt.id },
         select: { attemptId: true } }),
+      // A v22 implement Task's PR lives on its run's binding, not on the card
+      // (reviewPullRequest.ts), so an open or merged binding carries the patch.
       tx.engineeringAgentRun.findUnique({ where: { amuxAttemptId: prlessAttempt.id },
-        select: { id: true } }),
+        select: { id: true, bindings: { where: { supersededAt: null },
+          select: { state: true, mergeObservation: true } } } }),
     ]) : [null, null, null];
-  // A patch that reached review with no pull request has not reached develop.
-  // "No change needed" would drop it (AMUX-FILEGEN2-002, 2026-11-13); the
-  // screen says so and names the run when none was ever created.
-  const unpublishedPatch = storedPatch === null ? null :
-    { publication_run_missing: publicationRun === null };
+  const publicationMayOpenPr = publication !== null &&
+    amuxReviewPublicationMayOpenPr(publication, ENGINEERING_AGENT_V22_TIER_PENDING_REASON);
+  // "No change needed" is refused for any stored patch; the screen also says
+  // when no pull request carries it (AMUX-FILEGEN2-002, 2026-11-13).
+  const unpublishedPatch = amuxV22UnpublishedPatchNotice({
+    patchStored: storedPatch !== null, publicationMayOpenPr,
+    run: publicationRun === null ? null : { bindings: publicationRun.bindings },
+  });
   // A twice-rejected run is retryable only with its own audited reject verdict.
   const rejectedReviewAttemptId = task.sourceSystem === "admin-idea-v4" ?
     await amuxV52RejectedTwiceReviewAttemptId(tx, task.id, lastAttempt) : null;
@@ -264,9 +271,8 @@ async function snapshot(
     sourceSystem: task.sourceSystem, cardType: task.cardType,
     taskRole: task.taskRole, reviewPrNumber: task.reviewPrNumber,
     attempt: lastAttempt, v4EvidenceVerified: v4Valid,
-    publicationMayOpenPr: amuxReviewPublicationMayOpenPr(publication,
-      ENGINEERING_AGENT_V22_TIER_PENDING_REASON),
-    displayTruncated, displayExact, unpublishedPatch: unpublishedPatch !== null,
+    publicationMayOpenPr,
+    displayTruncated, displayExact, patchStored: storedPatch !== null,
   };
   // An implement Task that left no change, completed by the owner as "no
   // change needed" (owner decision 2026-11-11): approve, on that basis.
