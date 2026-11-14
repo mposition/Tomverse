@@ -45,8 +45,8 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
       hasValidMutationOrigin: (request: Request) => request.headers.get("origin") === "https://tomverse.test" } });
     mock.module(mod("lib/amux/ownerQueueDmRequestService.ts"), { namedExports: {
       requestAmuxOwnerQueueDm: async (input: Record<string, unknown>) => {
-        const { session: _session, request: _request, ...rest } = input;
-        world.calls.push(rest);
+        world.calls.push(Object.fromEntries(Object.entries(input)
+          .filter(([key]) => key !== "session" && key !== "request")));
         if (world.outcome === "throw") throw new Error("database gone");
         return world.outcome === "done" ? { outcome: "done", settlementId: "s-1" } :
           { outcome: "refused", reason: "not_eligible" };
