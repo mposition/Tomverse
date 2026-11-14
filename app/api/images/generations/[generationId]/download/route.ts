@@ -13,6 +13,7 @@ import {
   imageDownloadFilename,
 } from "@/lib/imageAssetDownload";
 import { IMAGE_ORIGINAL_MAX_READ_BYTES } from "@/lib/imageGenerationStateCore";
+import { detectImageMimeType } from "@/lib/imageDimensions";
 import { prisma } from "@/lib/prisma";
 import { readOwnR2ObjectBytes } from "@/lib/r2";
 
@@ -126,17 +127,25 @@ export async function GET(req: Request, { params }: Params) {
       maxBytes: IMAGE_ORIGINAL_MAX_READ_BYTES,
     });
 
+    const mimeType = detectImageMimeType(bytes);
+    if (!mimeType) {
+      // The object must be a recognized image before this route serves it.
+      return NextResponse.json(
+        { error: "Image not found.", code: "IMAGE_GENERATION_INVALID_IMAGE" },
+        { status: 404, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
     const filename = imageDownloadFilename({
       generationId: generation.id,
       modelId: generation.modelId,
-      mimeType: asset.mimeType,
+      mimeType,
     });
 
     return new Response(new Uint8Array(bytes), {
       headers: {
-        // The row's recorded type, which is what the bytes were parsed as when
-        // they were written. `nosniff` below makes it binding.
-        "Content-Type": asset.mimeType,
+        // The byte signature is authoritative; stored metadata can be stale.
+        "Content-Type": mimeType,
         "Content-Length": String(bytes.byteLength),
         // The half that was missing. Named from the mime type, so a provider
         // that returned JPEG does not arrive as `original.png`.
