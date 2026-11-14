@@ -16,8 +16,7 @@ export const GEMINI_STRICT_GENERATION_MODEL_IDS = new Set([
   "gemini-flash-lite-latest",
 ]);
 
-type GenerationModel = Pick<AiModel, "id" | "provider" | "reasoning"> &
-  Partial<Pick<AiModel, "apiModel">>;
+type GenerationModel = Pick<AiModel, "id" | "provider" | "reasoning" | "apiModel">;
 
 export const getModelProviderOptions = (
   model: GenerationModel
@@ -62,10 +61,6 @@ export const getModelProviderOptions = (
         reasoningEffort: model.reasoning,
       },
     };
-  }
-
-  if (model.provider === "mistral") {
-    return { mistral: { reasoningEffort: model.reasoning } };
   }
 
   const usesOpenAiReasoning =
@@ -160,6 +155,11 @@ export const getModelGenerationSettings = (
       : undefined
   );
   return {
+    // The native SDK maps this to the effort levels each Mistral model
+    // supports, instead of sending an unsupported provider override verbatim.
+    ...(model.provider === "mistral" && model.reasoning !== undefined
+      ? { reasoning: model.reasoning }
+      : {}),
     ...(options?.temperature !== undefined &&
     !GEMINI_STRICT_GENERATION_MODEL_IDS.has(model.id) &&
     model.reasoning === undefined

@@ -257,7 +257,7 @@ export async function reportOperationalIncident({
   const safeContext = sanitizeOperationalContext(context);
   // Setting-change notices have a title but no error. Keep their description
   // in the log and notification instead of manufacturing "Unknown error".
-  const message = sanitizeOperationalText(error ?? title);
+  const message = sanitizeOperationalText(error || title);
   const timestamp = new Date().toISOString();
   console.error(
     JSON.stringify({
@@ -288,7 +288,7 @@ export async function reportOperationalIncident({
   }
   state.lastNotifiedAt.set(code, Date.now());
 
-  const capturedError = safeError(error ?? title);
+  const capturedError = safeError(error || title);
   const eventId = Sentry.withScope((scope) => {
     scope.setLevel(severity);
     scope.setTag("operational.code", code);

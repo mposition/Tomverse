@@ -77,10 +77,10 @@ test("MiniMax M3.1 Flash sends its catalogue effort instead of defaulting to max
   }
 });
 
-test("Mistral reasoning settings use the native provider namespace", () => {
+test("Mistral reasoning settings let the native SDK resolve supported effort", () => {
   const model = { ...getModel("mistral-large-3"), apiModel: "mistral-large-4-0", reasoning: "medium" };
   assert.deepEqual(getModelGenerationSettings(model), {
-    providerOptions: { mistral: { reasoningEffort: "medium" } },
+    reasoning: "medium",
   });
 });
 

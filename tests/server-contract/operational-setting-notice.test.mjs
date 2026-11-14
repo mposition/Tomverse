@@ -72,3 +72,12 @@ test("a real error still takes precedence over the incident title", async t => {
   assert.equal(captured[0].message, "Upstream returned 503");
   assert.ok(emails[0].text.includes("Message: Upstream returned 503"));
 });
+
+test("an empty error keeps the incident description in Sentry and email", async t => {
+  t.mock.method(console, "error", () => {});
+  await reportOperationalIncident({
+    code: "EMPTY_ERROR_TEST", title: "Routing recovered", error: "", forceNotification: true,
+  });
+  assert.equal(captured[0].message, "Routing recovered");
+  assert.ok(emails[0].text.includes("Message: Routing recovered"));
+});
