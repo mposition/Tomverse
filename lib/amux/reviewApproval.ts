@@ -17,6 +17,7 @@ import {
   amuxReviewTargetStatus,
   amuxReviewPublicationMayOpenPr,
   amuxV22NoChangeCompletionAllowed,
+  amuxV22UnpublishedPatchNotice,
   amuxV22PrlessReviewRetryAllowed,
   amuxV22ReviewRetryHasVerifiedOutcome,
   AMUX_REVIEW_NO_CHANGE_BASIS,
@@ -238,12 +239,31 @@ async function snapshot(
   // publisher takes first. A promotion racing the retry can still open a
   // draft PR, but the moved Task never records it
   // (reviewPullRequest.ts: not_the_workers_review).
-  const publication = inReview && task.sourceSystem === "admin-idea-v4" &&
-    task.reviewPrNumber === null && lastAttempt !== null ?
-    await tx.engineeringAgentWorkItem.findMany({
-      where: { run: { amuxAttemptId: lastAttempt.id } },
-      select: { kind: true, state: true, reason: true },
-    }) : null;
+  const prlessAttempt = inReview && task.sourceSystem === "admin-idea-v4" &&
+    task.reviewPrNumber === null ? lastAttempt : null;
+  const [publication, storedPatch, publicationRun] = prlessAttempt ?
+    await Promise.all([
+      tx.engineeringAgentWorkItem.findMany({
+        where: { run: { amuxAttemptId: prlessAttempt.id } },
+        select: { kind: true, state: true, reason: true },
+      }),
+      // A stored patch is immutable evidence that this attempt changed code.
+      tx.amuxV22TaskPatch.findUnique({ where: { attemptId: prlessAttempt.id },
+        select: { attemptId: true } }),
+      // A v22 implement Task's PR lives on its run's binding, not on the card
+      // (reviewPullRequest.ts), so an open or merged binding carries the patch.
+      tx.engineeringAgentRun.findUnique({ where: { amuxAttemptId: prlessAttempt.id },
+        select: { id: true, bindings: { where: { supersededAt: null },
+          select: { state: true, mergeObservation: true } } } }),
+    ]) : [null, null, null];
+  const publicationMayOpenPr = publication !== null &&
+    amuxReviewPublicationMayOpenPr(publication, ENGINEERING_AGENT_V22_TIER_PENDING_REASON);
+  // "No change needed" is refused for any stored patch; the screen also says
+  // when no pull request carries it (AMUX-FILEGEN2-002, 2026-11-13).
+  const unpublishedPatch = amuxV22UnpublishedPatchNotice({
+    patchStored: storedPatch !== null, publicationMayOpenPr,
+    run: publicationRun === null ? null : { bindings: publicationRun.bindings },
+  });
   // A twice-rejected run is retryable only with its own audited reject verdict.
   const rejectedReviewAttemptId = task.sourceSystem === "admin-idea-v4" ?
     await amuxV52RejectedTwiceReviewAttemptId(tx, task.id, lastAttempt) : null;
@@ -251,9 +271,8 @@ async function snapshot(
     sourceSystem: task.sourceSystem, cardType: task.cardType,
     taskRole: task.taskRole, reviewPrNumber: task.reviewPrNumber,
     attempt: lastAttempt, v4EvidenceVerified: v4Valid,
-    publicationMayOpenPr: amuxReviewPublicationMayOpenPr(publication,
-      ENGINEERING_AGENT_V22_TIER_PENDING_REASON),
-    displayTruncated, displayExact,
+    publicationMayOpenPr,
+    displayTruncated, displayExact, patchStored: storedPatch !== null,
   };
   // An implement Task that left no change, completed by the owner as "no
   // change needed" (owner decision 2026-11-11): approve, on that basis.
@@ -342,7 +361,7 @@ async function snapshot(
     noChangeCompletion ? "no_change" as const : "evidence" as const;
   return { escalation, task, lastAttempt, budget, used, subject, digest, text,
     context, report, displayTruncated, displayExact, outcomes, artifact,
-    lastAttemptResultStored, decisionHold, approvalBasis };
+    lastAttemptResultStored, decisionHold, approvalBasis, unpublishedPatch };
 }
 
 export async function getAmuxReviewDetail(escalationId: string) {
@@ -352,7 +371,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
   const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
   const { escalation, task, lastAttempt, used, digest, text, context, report,
     displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored,
-    decisionHold, approvalBasis } = state;
+    decisionHold, approvalBasis, unpublishedPatch } = state;
   // The Task's ended runs whose CLI usage is unknown and not yet accepted:
   // each holds its worker in the v22 usage gate (owner decision 2026-11-10).
   const unknownUsageIds = task.sourceSystem === "admin-idea-v4" ?
@@ -413,6 +432,9 @@ export async function getAmuxReviewDetail(escalationId: string) {
     // What an offered approve rests on: "no_change" is the owner's "no change
     // needed" for an implement Task that left none (owner decision 2026-11-11).
     approval_basis: approvalBasis,
+    // The attempt stored a patch that no pull request carries to develop:
+    // "no change needed" is refused for it; retry or restore the publication.
+    unpublished_patch: unpublishedPatch,
     // Why no decision is open at all; null while the server offers one.
     decision_hold: decisionHold,
     retry: { used, limit: AMUX_MAX_EXECUTION_ATTEMPTS, remaining: Math.max(0, AMUX_MAX_EXECUTION_ATTEMPTS - used) },

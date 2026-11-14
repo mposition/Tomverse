@@ -17,6 +17,7 @@ import {
   BRANCH_PATTERN,
   BRANCH_PREFIX,
   FAILURE_REASONS,
+  DAILY_HALT_REASONS,
   LIMITS,
   OUTCOME_FAILED,
   OUTCOME_PR_OPENED,
@@ -236,6 +237,15 @@ export function buildResultBody({ id, claimId, outcome, prUrl, reason }) {
     return { id, claimId, outcome, reason };
   }
   throw new Error("result_outcome_invalid");
+}
+
+/** A halt notice carries codes and counts only, never task or model text. */
+export function buildHaltBody({ runId, reason, attempted, prOpened, lastPrUrl = null }) {
+  if (!CLAIM_TOKEN.test(runId ?? "") || !DAILY_HALT_REASONS.includes(reason)) throw new Error("halt_notice_invalid");
+  if (!Number.isInteger(attempted) || attempted < 0 || attempted > LIMITS.tasksPerDay ||
+      !Number.isInteger(prOpened) || prOpened < 0 || prOpened > attempted ||
+      (lastPrUrl !== null && !isPrUrl(lastPrUrl))) throw new Error("halt_notice_invalid");
+  return { runId, reason, attempted, prOpened, lastPrUrl };
 }
 
 /** Publishing starts only while the lease has `leaseMarginMs` left. */

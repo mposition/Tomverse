@@ -43,7 +43,7 @@ export type MobileImageGroup = {
   generations: Array<{ generationId: string; status: string; prompt: string; quality?: string; preset?: string; assets: Array<{ role: string; url: string; urlExpiresAt?: string }> }>;
 };
 export type MobileImageModel = { id: string; name: string; provider: string; pricingVersion: string; prices: Array<{ quality: "low" | "medium" | "high"; size: "1024x1024" | "1536x1024" | "1024x1536"; credits: number }> };
-export type MobileCapabilities = { historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
+export type MobileCapabilities = { workspace?: import("./iosWorkspaceContract").WorkspaceFeatures; historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
 export type AccountUsage = { plan: string; usage: { creditsMonth: number }; limits: { creditsMonth: number } };
 export type UserPreferences = { reviewEasyEffectiveProviders?: string[]; reviewEasyProviderOptions?: string[]; reviewEasyMaxProviders?: number; theme: "system" | "light" | "dark"; language: string; defaultModel: string; timeZone: string; timeZoneChangeAllowedAt?: string | null; imageHandoffAutoGenerate: boolean };
 export type MemoryPreferences = { masterEnabled: boolean; styleEnabled: boolean; defaultConversationMode: "on" | "off" };
@@ -70,6 +70,7 @@ export interface HistoryTransport {
 export type MobileAttachment = { uploadId: string; name: string; mediaType: string; size: number };
 export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"] };
 export interface ChatTransport {
+  workspace?: import("./iosWorkspaceContract").WorkspaceTransport;
   location?: ReturnType<typeof import("@tomverse/chat-core").createChatLocationSession>;
   history?: HistoryTransport;
   voiceConfiguration?(): Promise<{ enabled: boolean; maxSeconds: number | null }>;
@@ -85,7 +86,7 @@ export interface ChatTransport {
   imageHistory?(id: string): Promise<{ generations: Array<{ groupId: string; prompt: string }> }>;
   imageRequest?(key: string): Promise<{ groupId: string; conversationId: string }>;
   listReview?(): Promise<ChatSummary[]>;
-  createReview?(models: string[]): Promise<Conversation>;
+  createReview?(models: string[], assistantProfileId?: string): Promise<Conversation>;
   configureReview?(id: string, models: string[]): Promise<Conversation>;
   routeReview?(input: { text: string; context: string; providers: string[]; hasImages: boolean }): Promise<import("../../../lib/reviewRoutingCore").ReviewRouteDecision>;
   sendReview?(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal, progress: (modelId: string, text: string) => void): Promise<{ failedModelIds: string[] }>;
@@ -117,7 +118,7 @@ export interface ChatTransport {
   list(): Promise<ChatSummary[]>;
   load(id: string): Promise<Conversation>;
   continuationSource?(id: string, offset?: number): Promise<ImportedTranscript>;
-  create(title?: string): Promise<Conversation>;
+  create(title?: string, assistantProfileId?: string): Promise<Conversation>;
   models(): Promise<MobileModel[]>;
   capabilities(): Promise<{ offered: boolean }>;
   configure(id: string, modelId: string, auto: boolean): Promise<Conversation>;

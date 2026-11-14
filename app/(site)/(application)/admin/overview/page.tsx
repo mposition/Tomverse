@@ -35,6 +35,7 @@ import { authOptions } from "@/lib/auth";
 import { getBillingPlans } from "@/lib/billingConfig";
 import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore";
 import { prisma } from "@/lib/prisma";
+import { ADMIN_NOTIFICATION_ATTENTION_WHERE } from "@/lib/adminNotificationAttention";
 import { formatAestDateTime } from "@/lib/adminUiCore";
 
 const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
@@ -61,7 +62,7 @@ async function healthTabProps() {
     await Promise.allSettled([
       loadProviderHealthDashboard(),
       prisma.adminNotificationLog.count({
-        where: { status: "failed", acknowledgedAt: null },
+        where: ADMIN_NOTIFICATION_ATTENTION_WHERE,
       }),
       prisma.refundRequest.count({ where: { status: "pending" } }),
       // The same count the overview's score uses, or this page would explain
@@ -183,7 +184,7 @@ export default async function AdminOverviewPage({
     prisma.refundRequest.count({ where: { status: "approved" } }),
     prisma.billingPromotionRedemption.count(),
     prisma.adminNotificationLog.count({
-      where: { status: "failed", acknowledgedAt: null },
+      where: ADMIN_NOTIFICATION_ATTENTION_WHERE,
     }),
     loadAuditRows(ADMIN_READ_LIMITS.recentActivity),
     ]),

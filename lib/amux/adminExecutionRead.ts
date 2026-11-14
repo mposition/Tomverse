@@ -20,6 +20,7 @@ import {
   AMUX_EXECUTION_VISIBLE_LANES,
   amuxExecutionLaneWhere, type AmuxExecutionLane,
 } from "./adminExecutionViewCore.ts";
+import type { AmuxV52AttemptReviewView } from "./v52ReviewFindingsCore.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -395,7 +396,9 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
           taskRevision: true,
           startedAt: true, endedAt: true, outcome: true, toStatus: true,
           reason: true, reservedCostMicrousd: true,
-          settledCostMicrousd: true, costConfirmed: true } },
+          settledCostMicrousd: true, costConfirmed: true,
+          v52ReviewRecord: { select: { verdict: true, jobId: true,
+            reviewerVendors: true, findingsSummary: true } } } },
       humanEscalations: { where: { status: { in: ["open", "acknowledged"] } },
         orderBy: { createdAt: "desc" as const }, take: 10,
         select: { id: true, reason: true, specialty: true,
@@ -544,7 +547,9 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
         { state: "purged" as const } : null } : null,
     dependencies: card.dependencies.map((edge) => edge.dependency),
     dependents: card.dependents.map((edge) => edge.task),
-    attempts: card.executionAttempts.map((attempt) => ({ ...attempt,
+    attempts: card.executionAttempts.map(({ v52ReviewRecord, ...attempt }) => ({ ...attempt,
+      // The v52 review of this run; a reject carries its reasons for the owner.
+      v52Review: v52ReviewRecord satisfies AmuxV52AttemptReviewView | null,
       usageUnknown: usageUnknown(attempt),
       usageAcceptance: (() => {
         const row = acceptanceByAttempt.get(attempt.id);

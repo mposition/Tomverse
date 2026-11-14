@@ -107,7 +107,13 @@ attempt 결속을 확인한다. 기존 카드와 v4 `implement` Task의 PR 필�
 확인한 뒤 "변경 불필요로 완료"할 수 있다. 같은 `approve`(review → done)이며 PR 없는 재시도와
 같은 근거(그 attempt의 보존된 결과, 알려진 사용량 결과, PR을 열었거나 열 수 있는 게시 항목
 없음)를 요구하고, DB guard가 게시 항목 조건을 다시 확인한다. 감사 기록에는
-`approval_basis: no_change_owner_verified`가 남는다.
+`approval_basis: no_change_owner_verified`가 남는다. 그 attempt가 patch(`AmuxV22TaskPatch`)를
+저장했다면 변경이 있었던 것이므로 "변경 불필요로 완료"를 열지 않고 DB guard도 거절한다
+(AMUX-FILEGEN2-002, 2026-11-13: run이 만들어지지 않아 게시 항목이 없었고 patch가 develop에 들어가지
+않았다). 이때 Admin은 develop에 들어가지 않은 patch가 있다고 보이고 재시도나 게시 경로 복구를 안내한다.
+뒤 카드의 readiness도 patch를 낸 앞 카드는 done에 더해 그 attempt의 병합 기록
+(`amux.v22.review.merge_observed` 감사 또는 병합된 엔지니어링 binding)이 있어야 통과하고, 없으면
+`dependency_unpublished`로 막는다.
 PR 없는 완료 판정은 외부 게시·병합·배포 승인이 아니며, Admin 경로에서는 운영자가 작업별 완료
 조건과 독립 검증 근거를 직접 판단한다. 2026-11-07부터는 같은 판정을 Decision Maker의 결과 검토나
 investigate 결론이 할 수도 있다(§2의 되돌릴 수 있는 승인). 그 경로는 이 절의 제안·결정 행을 쓰지 않고

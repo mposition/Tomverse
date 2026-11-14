@@ -49,3 +49,37 @@ test("invalid or future evidence fails closed", () => {
   assert.throws(() => scoreAmuxPortfolio(input,
     new Date("2026-09-30T00:00:00.000Z")), /invalid_portfolio_score_input/);
 });
+
+test("an unchanged score's active window is extended a day before it closes, never past its baseline", async () => {
+  const { amuxRefreshedActiveStaleAt, amuxScoreAutoRefreshEnabled,
+    amuxScoreAuditActionBinds } = await import("../lib/amux/portfolioScoreCore.ts");
+  const day = 86_400_000;
+  const now = new Date("2026-11-14T02:00:00.000Z");
+  const at = (days) => new Date(now.getTime() + days * day);
+  // Due within the lead, or already lapsed: seven days past now.
+  assert.deepEqual(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(0.5),
+    baselineStaleAt: at(20) }), at(7));
+  assert.deepEqual(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(-3),
+    baselineStaleAt: at(20) }), at(7));
+  // Capped at the evidence's 28-day baseline.
+  assert.deepEqual(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(-1),
+    baselineStaleAt: at(2) }), at(2));
+  // Not yet due, at the cap already, or past the baseline: nothing to write.
+  assert.equal(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(1.5),
+    baselineStaleAt: at(20) }), null);
+  assert.equal(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(0.5),
+    baselineStaleAt: at(0.5) }), null);
+  assert.equal(amuxRefreshedActiveStaleAt({ now, activeStaleAt: at(-9),
+    baselineStaleAt: at(-1) }), null);
+  assert.equal(amuxRefreshedActiveStaleAt({ now: new Date(Number.NaN),
+    activeStaleAt: at(0), baselineStaleAt: at(5) }), null);
+  // Default off: only the exact value turns it on.
+  assert.equal(amuxScoreAutoRefreshEnabled(undefined), false);
+  assert.equal(amuxScoreAutoRefreshEnabled("true"), false);
+  assert.equal(amuxScoreAutoRefreshEnabled("enabled"), true);
+  // A refresh binds a snapshot like a confirmation; nothing else does.
+  assert.equal(amuxScoreAuditActionBinds("amux.v4.portfolio.score.confirm"), true);
+  assert.equal(amuxScoreAuditActionBinds("amux.v4.portfolio.score.refresh"), true);
+  assert.equal(amuxScoreAuditActionBinds("amux.v4.portfolio.assessment.approve"), false);
+  assert.equal(amuxScoreAuditActionBinds(null), false);
+});

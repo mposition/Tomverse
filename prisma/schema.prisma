@@ -8402,6 +8402,8 @@ model AmuxV52ReviewRecord {
   touchesContract Boolean
   requestDigest   String
   auditLogId      String   @unique
+  /// A reject's bounded, redacted reasons (lib/amux/v52ReviewFindingsCore.ts). Display only.
+  findingsSummary String?
   createdAt       DateTime @default(now())
 
   attempt  AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
