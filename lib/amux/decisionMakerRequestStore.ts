@@ -1320,11 +1320,12 @@ export async function readNewestDecisionMakerRequestPerCard(
   const ids = [...cardIds];
   const closing = [...DM_CLOSING_EVENT_KINDS];
   return client.$queryRaw<Array<{ id: string; cardId: string; resultKind: string | null; judged: boolean }>>`
-    SELECT DISTINCT ON (q."cardId") q."id", q."cardId", d."resultKind",
+    SELECT DISTINCT ON (q."cardId") q."id", q."cardId",
+      (SELECT ev."resultKind" FROM "AmuxDecisionMakerRequestEvent" ev
+        WHERE ev."requestId" = q."id" AND ev."kind" = 'result' LIMIT 1) AS "resultKind",
       (q."route" <> 'dm_proposal' OR EXISTS (SELECT 1 FROM "AmuxDecisionMakerRequestEvent" e
         WHERE e."requestId" = q."id" AND e."kind" = ANY(${closing}::text[]))) AS "judged"
     FROM "AmuxDecisionMakerRequest" q
-    LEFT JOIN "AmuxDecisionMakerResultDetail" d ON d."requestId" = q."id"
     WHERE q."cardId" = ANY(${ids}::text[])
     ORDER BY q."cardId", q."questionRevision" DESC
   `;
