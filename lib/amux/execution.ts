@@ -54,6 +54,7 @@ import { amuxV52ReviewRequired, classifyAmuxExecutionPath,
   decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
 import { decideAmuxV52ReviewDisposition, validAmuxV52ReviewEvidence,
   type AmuxV52ReviewEvidence } from "@/lib/amux/v52ReviewCore";
+import { normalizeAmuxV52FindingsSummary } from "@/lib/amux/v52ReviewFindingsCore";
 import { amuxV52PriorReviewRejections } from "@/lib/amux/v52ReviewRejections";
 import { ENGINEERING_AGENT_POLICY_VERSION,
   v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
@@ -337,7 +338,8 @@ export async function startAmuxV22TaskExecution(input: {
   return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionStart,
     // One more read is needed only after an audited frontier escalation.
     prismaCallCeiling: AMUX_DB_BOUNDARIES.executionStart.prismaCallCeiling +
-      (publicationBaseSha ? 24 : 0) + 3 },
+      // + 1: the card a card-scoped halt reads at admission (AMUXFLOW/B2).
+      (publicationBaseSha ? 25 : 0) + 3 },
     async (tx, context) => {
       const now = context.dbNow;
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
@@ -521,7 +523,8 @@ export async function startAmuxV22TaskExecution(input: {
           // The engineering row is optional for Task execution. A full owner
           // queue or halted Publisher leaves the Task's result private.
           await requireEngineeringAgentRunAdmission(
-            engineeringAgentTransactionInAmux(context.attachedTransaction));
+            engineeringAgentTransactionInAmux(context.attachedTransaction),
+            { cardId: input.taskId });
           publicationRunId = String(randomInt(100_000_000_000,
             1_000_000_000_000));
         } catch (error) {
@@ -1248,6 +1251,8 @@ export async function recordAmuxV52Review(input: {
   generation: number; taskRevision: number;
   changedPaths: string[];
   evidence: AmuxV52ReviewEvidence;
+  /** The launcher's reasons for a reject; display only, never in the digest. */
+  findingsSummary?: string;
 }) {
   if (!validAmuxV52ReviewEvidence(input.evidence))
     return { recorded: false as const, reason: "review_evidence_invalid" as const };
@@ -1355,6 +1360,8 @@ export async function recordAmuxV52Review(input: {
         verdict: evidence.verdict, authorVendor: evidence.authorVendor,
         reviewerVendors: evidence.reviewerVendors,
         touchesContract: evidence.touchesContract, requestDigest, auditLogId,
+        findingsSummary: evidence.verdict === "reject" ?
+          normalizeAmuxV52FindingsSummary(input.findingsSummary) : null,
       } });
       context.requireLeaseAt(runtime.leaseExpiresAt);
       context.requireLeaseAt(attempt.leaseExpiresAt);

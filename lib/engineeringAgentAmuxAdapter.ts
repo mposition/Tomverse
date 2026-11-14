@@ -151,7 +151,8 @@ const lockedCardKind = async (tx: AmuxAttachedTransaction, taskId: string): Prom
 // halt lock, halt state, clock, the run's INSERT, its audit entry (four), the
 // card's kind and the request's move -- fifteen. The heartbeat: clock and
 // update. The end: halt state, halt lock, update, audit entry and the
-// request's move -- twelve.
+// request's move -- twelve. A card-scoped halt (AMUXFLOW/B2) adds no read
+// here: the start names no card, so the agent-wide halt stands.
 const RUN_START_PRISMA_CALLS = 24;
 const RUN_HEARTBEAT_PRISMA_CALLS = 2;
 // Twelve, and one for the agent usage row the settlement writes beside it.
@@ -174,6 +175,7 @@ const MISMATCH_REVIEW_PR_PRISMA_CALLS = 22;
 export const engineeringRunStartAttachment = (input: {
   runId: string;
   baseSha: string;
+
   markCommitted?: MarkCommitted;
 }): AmuxAttachment<AmuxExecutionStartedFact> => ({
   prismaCalls: RUN_START_PRISMA_CALLS,

@@ -91,6 +91,15 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
       "Read-only evidence. Completion requires a separate owner decision; a PR or deployment is not completion.",
     running: "running", unknown: "unknown", unconfirmed: "unconfirmed",
     internalCost: "Internal settled cost", projected: "projected API equivalent",
+    reviewRejection: {
+      title: "Why the code review rejected this run",
+      attempt: (number: number | null) => number === null ? "Run" : `Run ${number}`,
+      reviewers: (vendors: string) => `reviewed by ${vendors}`,
+      untrusted: "Reviewer text, shown as data. It informs the decision; it does not make it.",
+      noSummary: (jobId: string) => `This rejection was recorded before reasons were kept. The full reasons are on the review server, job ${jobId}.`,
+      noSummaryCommand: "Read them on the PC or the AMUX box:",
+      noJob: "This rejection has no review job id, so its reasons cannot be read.",
+    },
     usageUnknown: {
       held: "This run's CLI usage was never fully reported, so its worker takes no other Task until the usage is settled or accepted.",
       accept: "Accept this run's usage as unknown",
@@ -252,6 +261,15 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
       "읽기 전용 근거입니다. 완료에는 별도 운영자 결정이 필요하며 PR·배포만으로 완료되지 않습니다.",
     running: "실행 중", unknown: "미확인", unconfirmed: "미확정",
     internalCost: "내부 정산 비용", projected: "예상 API 환산액",
+    reviewRejection: {
+      title: "코드 검토가 이 실행을 거절한 이유",
+      attempt: (number: number | null) => number === null ? "실행" : `실행 ${number}`,
+      reviewers: (vendors: string) => `검토: ${vendors}`,
+      untrusted: "검토자가 쓴 글을 그대로 보여 줍니다. 결정을 돕는 자료일 뿐, 결정을 대신하지 않습니다.",
+      noSummary: (jobId: string) => `이 거절은 사유를 남기기 전에 기록됐어요. 사유 원문은 검토 서버 job ${jobId}에 있어요.`,
+      noSummaryCommand: "PC나 AMUX 박스에서 이렇게 읽을 수 있어요:",
+      noJob: "이 거절에는 검토 job id가 없어 사유를 읽을 수 없어요.",
+    },
     usageUnknown: {
       held: "이 실행의 CLI 사용량이 끝까지 보고되지 않아, 사용량이 정산되거나 받아들여질 때까지 이 워커에 다른 작업이 배정되지 않습니다.",
       accept: "이 실행의 사용량은 알 수 없음으로 받아들이기",

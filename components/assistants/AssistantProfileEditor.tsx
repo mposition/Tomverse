@@ -26,10 +26,14 @@ import {
     ASSISTANT_PROFILE_LIST_PATH,
     assistantProfileHierarchy,
 } from "@/lib/settingsNavigation";
+import { useSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import {
-    ASSISTANT_PROFILE_REVIEW_PATH,
+    assistantProfileCreateModelLimit,
+    assistantProfileProductPath,
+    assistantProfileStartPath,
     stashPendingChatProfile,
 } from "@/lib/assistantProfileReturn";
+import type { ConversationProductKey } from "@/lib/conversationProduct";
 import { assistantProfileErrorCopyKey } from "@/lib/assistantProfileErrorCopy";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -202,6 +206,7 @@ export function AssistantProfileEditor({
     onCreated,
     knowledgeEnabled = false,
     creationEntry,
+    returnProduct,
     assistantKnowledgeGuideActive = false,
 }: {
     profileId?: string;
@@ -223,12 +228,23 @@ export function AssistantProfileEditor({
      *
      * Supplied by the chat entry point, which wants the user back in the
      * conversation they left. Absent everywhere else, and the fallback is the
-     * edit page — the same destination as before.
+     * edit page — the same destination as before. `modelCount` is how many
+     * models the created profile names, so the caller can keep a multi-model
+     * profile out of single-model Chat.
      */
-    onCreated?: (profileId: string) => void;
+    onCreated?: (profileId: string, modelCount: number) => void;
+    /**
+     * The product whose composer opened this create (owner decision
+     * 2026-11-14: an assistant starts where it was added). Absent on the
+     * settings routes, which use the product whose settings panel is open.
+     */
+    returnProduct?: ConversationProductKey;
 }) {
     const { t } = useLanguage();
     const router = useRouter();
+    // Where "back" and "start" go. Review when neither is known, as before.
+    const settingsReturnProduct = useSettingsReturnProduct();
+    const launchProduct = returnProduct ?? settingsReturnProduct;
     const isNew = !profileId;
     const guideActive =
         creationEntry === "guide" || assistantKnowledgeGuideActive;
@@ -539,7 +555,7 @@ export function AssistantProfileEditor({
                     { assistant_knowledge_guide_step: "create_assistant" }
                 );
             }
-            onCreated?.(data.profile.id);
+            onCreated?.(data.profile.id, modelIdsForSave().length);
             if (!onCreated) router.replace(`/settings/assistants/${data.profile.id}`);
         } catch {
             setNotice({ kind: "failed" });
@@ -698,9 +714,9 @@ export function AssistantProfileEditor({
      * Opened from a conversation, the way out is the conversation rather than
      * a list the visitor never saw -- and it is a plain link rather than a
      * trail, because the chat is not a settings ancestor and putting it in the
-     * breadcrumb would claim settings sits underneath it. The destination is a
-     * constant either way; the query parameter that got the visitor here is
-     * compared to a literal and never read as a place to go
+     * breadcrumb would claim settings sits underneath it. The destination is
+     * one of two product routes; the query parameter that got the visitor here
+     * is compared to literals and never read as a place to go
      * (lib/assistantProfileReturn.ts).
      */
     const upwardNav = analyticsEntry === "chat" ? (
@@ -709,7 +725,7 @@ export function AssistantProfileEditor({
                     data-testid="settings-detail-nav"
                 >
                     <Link
-                        href={ASSISTANT_PROFILE_REVIEW_PATH}
+                        href={assistantProfileProductPath(launchProduct)}
                         data-testid="assistant-create-back"
                         className="inline-flex items-center gap-1.5 rounded-lg text-sm font-semibold text-zinc-500 transition-colors hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-50 dark:hover:text-zinc-100 dark:focus-visible:ring-offset-zinc-950"
                     >
@@ -766,7 +782,7 @@ export function AssistantProfileEditor({
                 assistant_knowledge_guide_step: "start_chat",
             });
         }
-        router.push(ASSISTANT_PROFILE_REVIEW_PATH);
+        router.push(assistantProfileStartPath(launchProduct, version.models?.length ?? 0));
     };
     const chatAction = (testId: string) => version && (
         <button
@@ -1041,6 +1057,12 @@ export function AssistantProfileEditor({
                                         selected={selectedModelIds}
                                         onChange={setSelectedModelIds}
                                         t={t}
+                                        // Added in Chat, it answers in Chat,
+                                        // which takes exactly one model.
+                                        maxModels={assistantProfileCreateModelLimit(
+                                            launchProduct,
+                                            ASSISTANT_PROFILE_LIMITS.maxModels
+                                        )}
                                     />
                                 </div>
                             </details>

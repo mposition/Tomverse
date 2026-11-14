@@ -5,7 +5,8 @@ import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { dmKeyPeriodOf, dmOptionSetDigest, dmRequestDigestKey } from "@/lib/amux/decisionMakerBodyCore";
-import { dmInstanceForProvider, routeDmQuestion } from "@/lib/amux/decisionMakerCore";
+import { DM_TERMS_FIXED_TEXT_ONLY_ENV, dmInstanceForProvider, dmTermsFixedTextOnlyEnabled,
+  routeDmQuestion } from "@/lib/amux/decisionMakerCore";
 import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
   DM_ROUTING_BINDING_KEYS,
@@ -424,6 +425,28 @@ export async function countOpenDecisionMakerRequestsCreatedBetween(
 }
 
 /**
+ * When the newest request created after `afterMs` (epoch milliseconds) was
+ * created, or null when there is none, in one statement. The relay heartbeat
+ * reads it to tell a relay that is asked from one that is silent.
+ */
+export async function readNewestDecisionMakerRequestCreatedAfter(
+  client: LedgerReader,
+  afterMs: number,
+): Promise<Date | null> {
+  if (!Number.isSafeInteger(afterMs) || afterMs < 0) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  const rows = await client.$queryRaw<Array<{ createdAt: Date }>>`
+    SELECT r."createdAt" AS "createdAt"
+    FROM "AmuxDecisionMakerRequest" r
+    WHERE r."createdAt" > 'epoch'::timestamptz + ${afterMs} * INTERVAL '1 millisecond'
+    ORDER BY r."createdAt" DESC
+    LIMIT 1
+  `;
+  return rows[0]?.createdAt ?? null;
+}
+
+/**
  * Requests routed to a DM that no closing event has closed and that are at
  * least 720 hours old by the database clock -- the ones §10's stale close
  * applies to -- oldest first, at most `limit` (1 to 100), in one statement.
@@ -752,11 +775,17 @@ export async function recordDecisionMakerRequest(
     // §5, §8: an owed latch is the instance off -- the question goes to the operator.
     routingSwitches = dmSwitchInputWithOwedLatch(routingSwitches, owedLatch(switches, instance, load) !== null);
   }
+  // AMUXFLOW/B2: the evidence markers count only on a card the app filed
+  // itself, proven by the settlement row that recorded this local card.
+  const evidenceTermsExempt = dmTermsFixedTextOnlyEnabled(process.env[DM_TERMS_FIXED_TEXT_ONLY_ENV]) &&
+    (await tx.$queryRaw<Array<{ one: number }>>`
+      SELECT 1 AS "one" FROM "AmuxDmOwnerSettlement" WHERE "localCardId" = ${binding.cardId} LIMIT 1`).length > 0;
   const decision = routeDmQuestion({
     ...routingSwitches,
     card,
     askingProvider: binding.askingProvider,
     throughput,
+    evidenceTermsExempt,
   });
   const requestId = randomUUID();
   const optionSetDigest = dmOptionSetDigest(dmRequestDigestKey(periodKey, requestId), card.options);

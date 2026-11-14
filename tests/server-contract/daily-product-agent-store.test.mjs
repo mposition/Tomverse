@@ -6,10 +6,11 @@ import { pathToFileURL } from "node:url";
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const NOW = new Date("2026-11-13T00:00:00.000Z");
 const settings = new Map();
-let suggestions = [], router = [], audits = [], rejectAudit = false;
+let suggestions = [], router = [], audits = [], notices = [], rejectAudit = false;
 let tail = Promise.resolve();
 const tx = {
   $executeRaw: async () => 1,
+  adminNotificationLog: { create: async ({ data }) => { const notice = { ...data, id: `notice-${notices.length}` }; notices.push(notice); return notice; } },
   appSetting: {
     findUnique: async ({ where }) => settings.has(where.key) ? { key: where.key, value: settings.get(where.key) } : null,
     findMany: async ({ where }) => [...settings].filter(([key]) => where.key.startsWith ? key.startsWith(where.key.startsWith) : where.key.in.includes(key)).map(([key, value]) => ({ key, value })),
@@ -28,10 +29,10 @@ const prisma = { ...tx, $transaction: async (fn) => {
   let release;
   tail = new Promise((done) => { release = done; });
   await before;
-  const saved = new Map(settings), auditCount = audits.length;
+  const saved = new Map(settings), auditCount = audits.length, noticeCount = notices.length;
   try { return await fn(tx); } catch (error) {
     settings.clear(); for (const [key, value] of saved) settings.set(key, value);
-    audits.length = auditCount; throw error;
+    audits.length = auditCount; notices.length = noticeCount; throw error;
   } finally { release(); }
 } };
 const writeAudit = async (entry) => { if (rejectAudit) throw new Error("audit refused"); audits.push(entry); };
@@ -39,13 +40,46 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: { takeAuditChainLock: async () => {}, writeSystemAuditLog: writeAudit, writeAdminAuditLog: writeAudit } });
 mock.module(mod("lib/autoRouterRecAgent.ts"), { namedExports: { claimRecommendationInTransaction: async () => router.shift() ?? null } });
 
-const { claimDailyProductTask, recordDailyProductResult, retryDailyProductTask } = await import(mod("lib/dailyProductAgentStore.ts"));
+const { claimDailyProductTask, recordDailyProductResult, retryDailyProductTask, recordDailyProductHalt } = await import(mod("lib/dailyProductAgentStore.ts"));
 const { reserveScoutSend, listSuggestions } = await import(mod("lib/productResearchScoutStore.ts"));
 const { sendScoutSuggestion } = await import(mod("lib/productResearchScoutSend.ts"));
 const { DAILY_PRODUCT_AGENT_CURSOR, DAILY_PRODUCT_AGENT_DAY, dailyProductAgentKey } = await import(mod("lib/dailyProductAgentCore.ts"));
 const oldSwitch = process.env.DAILY_PRODUCT_AGENT_ENABLED;
-test.beforeEach(() => { settings.clear(); suggestions = []; router = []; audits = []; rejectAudit = false; process.env.DAILY_PRODUCT_AGENT_ENABLED = "true"; });
+const oldAlerts = process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED;
+test.beforeEach(() => { settings.clear(); suggestions = []; router = []; audits = []; notices = []; rejectAudit = false; process.env.DAILY_PRODUCT_AGENT_ENABLED = "true"; process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED = "true"; });
 test.after(() => { if (oldSwitch === undefined) delete process.env.DAILY_PRODUCT_AGENT_ENABLED; else process.env.DAILY_PRODUCT_AGENT_ENABLED = oldSwitch; });
+test.after(() => { if (oldAlerts === undefined) delete process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED; else process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED = oldAlerts; });
+const halt = { runId: "11111111-2222-4333-8444-555555555555", reason: "publish_unknown", attempted: 9, prOpened: 1, lastPrUrl: "https://github.com/mposition/Tomverse/pull/1" };
+
+test("halt notices are opt-in, durable and idempotent under concurrent delivery", async () => {
+  delete process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED;
+  assert.equal((await recordDailyProductHalt(halt)).refused, "disabled");
+  assert.equal(notices.length, 0);
+  process.env.DAILY_PRODUCT_AGENT_ALERTS_ENABLED = "true";
+  const results = await Promise.all([recordDailyProductHalt(halt), recordDailyProductHalt(halt)]);
+  assert.deepEqual(results.map((result) => result.changed), [true, false]);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].detail, /do not resubmit an unknown outcome/);
+  assert.equal(audits[0].action, "daily_product_agent.halt_notified");
+  assert.equal(suggestions.length, 0);
+});
+
+test("an audit refusal rolls back the notice and deduplication marker", async () => {
+  rejectAudit = true;
+  await assert.rejects(recordDailyProductHalt(halt), /audit refused/);
+  assert.equal(notices.length, 0);
+  assert.equal(settings.size, 0);
+});
+
+test("the operator alert cap and corrupt budget state fail closed", async () => {
+  const day = new Date(Date.now() + 10 * 60 * 60_000).toISOString().slice(0, 10);
+  settings.set("auto.dailyProductAgent.haltDay", JSON.stringify({ day, count: 24 }));
+  assert.equal((await recordDailyProductHalt(halt)).refused, "alert_budget_exhausted");
+  assert.equal(notices.length, 0);
+  settings.set("auto.dailyProductAgent.haltDay", "corrupt");
+  await assert.rejects(recordDailyProductHalt(halt));
+  assert.equal(notices.length, 0);
+});
 const row = (id, subject = "home.en", age = 0) => ({ id, subject, status: "open", amuxIdeaId: null,
   createdAt: new Date(NOW.getTime() + age), title: `Improve ${id}`, evidence: "Synthetic evidence", suggestion: "Fix and verify", area: "copy", severity: "low" });
 const claim = () => claimDailyProductTask({ origin: "https://app.example.test", now: NOW });

@@ -48,6 +48,11 @@ export const PROVIDER_LABELS: Record<ExternalImportProvider, string> = {
 export const providerLabel = (provider: string) =>
     isExternalImportProvider(provider) ? PROVIDER_LABELS[provider] : provider;
 
+// Korean breaks between eojeol (keep-all) so a 320px screen never prints
+// "내보/내기"; break-words still wraps a long URL or file name that cannot fit.
+// Both properties inherit, so this sits once on the screen root.
+export const koreanWordWrapClass = "break-words [&:lang(ko)]:break-keep";
+
 export const sectionClass =
     "rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60";
 

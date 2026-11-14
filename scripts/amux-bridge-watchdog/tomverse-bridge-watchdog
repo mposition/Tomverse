@@ -21,6 +21,15 @@
 # rebooted with no per-worker instance enabled -- is down, never an empty
 # "all active".
 #
+# The AMUX Decision Maker relay (tomverse-amux-dm-relay.service, one unit, no
+# template) is watched the same way once its unit file is installed: failed or
+# inactive is down. Its calls stopped on 2026-11-09 and nothing said so for
+# five days. It is asked for by name, not listed: a stopped unit nothing refers
+# to may not be loaded, so a listing would miss exactly the stopped relay. A
+# host without the unit file ("not-found") does not run the relay and is not
+# asked about it. A relay that halted stays active and is not seen here; the
+# app's own alert (AMUX_DM_RELAY_SILENT) catches it.
+#
 # Sending nothing is a signal too: the monitor turns a silence longer than its
 # grace period into an alert, which is also what the host going down, losing
 # its network, or this timer stopping looks like.
@@ -37,6 +46,7 @@ set -euo pipefail
 unit_patterns=('tomverse-amux-bridge@*.service' 'tomverse-amux-v22-sidecar@*.service')
 bridge_name='^tomverse-amux-bridge@[A-Za-z0-9_.-]+\.service$'
 sidecar_name='^tomverse-amux-v22-sidecar@[A-Za-z0-9_.-]+\.service$'
+relay_unit=tomverse-amux-dm-relay.service
 # A plain https URL: host, optional port, path segments. No query string, no
 # fragment, no credentials -- the check's own ping URL never needs them.
 url_pattern='^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)+$'
@@ -75,6 +85,23 @@ else
   pending=$((pending + 1))
   reason=${listing%%$'\n'*}
   echo "tomverse-bridge-watchdog: the instance unit list is unreadable (systemctl: ${reason:0:200})"
+fi
+
+# The relay, by name. `show` loads the unit to answer, so a stopped relay is
+# "loaded"; a host that never installed it answers "not-found".
+if load=$(systemctl show -p LoadState --value "$relay_unit" 2>&1); then
+  case "$load" in
+    loaded) units+=("$relay_unit") ;;
+    not-found) ;;
+    *)
+      pending=$((pending + 1))
+      echo "tomverse-bridge-watchdog: $relay_unit is unreadable (load state: ${load:0:80})"
+      ;;
+  esac
+else
+  pending=$((pending + 1))
+  reason=${load%%$'\n'*}
+  echo "tomverse-bridge-watchdog: $relay_unit is unreadable (systemctl: ${reason:0:200})"
 fi
 
 for unit in "${units[@]}"; do

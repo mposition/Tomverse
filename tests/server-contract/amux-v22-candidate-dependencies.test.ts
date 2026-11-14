@@ -13,10 +13,16 @@ const root = resolve(import.meta.dirname, "../..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const now = new Date("2026-11-06T00:00:00Z");
 const queries: string[] = [];
+const fragments: string[] = [];
 const db = {
-  $queryRaw: async (strings: TemplateStringsArray) => {
+  $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join("?");
     queries.push(sql);
+    for (const value of values) {
+      if (value && typeof value === "object" && "sql" in value &&
+          typeof (value as { sql: unknown }).sql === "string")
+        fragments.push((value as { sql: string }).sql);
+    }
     return sql.includes("clock_timestamp") ? [{ now }] : [];
   },
   $transaction: async (fn: (tx: unknown) => unknown) => fn(db),
@@ -33,7 +39,13 @@ test("the candidate window leaves out Tasks still waiting on a dependency", asyn
     assert.ok(candidates, "the tick read its candidates");
     const flat = candidates.replace(/\s+/g, " ");
     // The same condition as readiness's dependency_incomplete (lib/amux/v4TaskReadyCore.ts).
-    assert.match(flat, /NOT EXISTS \(SELECT 1 FROM "AmuxWorkDependency" d JOIN "AmuxWorkItem" dep ON dep\."id" = d\."dependencyId" WHERE d\."taskId" = w\."id" AND \(dep\."status" <> 'done' OR dep\."v4TerminalAt" IS NULL\)\)/);
+    assert.match(flat, /NOT EXISTS \(SELECT 1 FROM "AmuxWorkDependency" d JOIN "AmuxWorkItem" dep ON dep\."id" = d\."dependencyId" WHERE d\."taskId" = w\."id" AND \(dep\."status" <> 'done' OR dep\."v4TerminalAt" IS NULL OR \?\)\)/);
+    // ...and readiness's dependency_unpublished, from the one shared condition
+    // (lib/amux/v4DependencyPublication.ts) on the same `dep` row.
+    const unpublished = fragments.map((sql) => sql.replace(/\s+/g, " "))
+      .find((sql) => sql.includes(`"AmuxV22TaskPatch"`));
+    assert.ok(unpublished, "the window reads the unpublished-patch condition");
+    assert.match(unpublished, /a\."taskId" = dep\."id"/);
     // The exclusion comes before the window is cut.
     assert.ok(flat.indexOf(`"AmuxWorkDependency"`) < flat.indexOf("LIMIT"));
   } finally {

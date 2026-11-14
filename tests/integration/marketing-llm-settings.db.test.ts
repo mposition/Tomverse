@@ -62,7 +62,7 @@ test("a first save creates the document, and later saves compare against the ver
 
 test("only a pinned model and a cap within the ceiling can be saved, and a refusal writes nothing", async () => {
   assert.equal(await refusal(write({ model: "unpinned", monthlyUsdCap: "1", expectedVersion: null })), "model_not_pinned");
-  for (const cap of ["0", "101", "-1", "1.1234567", "ten"]) {
+  for (const cap of ["0", "501", "-1", "1.1234567", "ten"]) {
     assert.equal(await refusal(write({ model: PIN.model, monthlyUsdCap: cap, expectedVersion: null })), "cap_invalid", cap);
   }
   assert.equal(await prisma.appSetting.count({ where: { key: MARKETING_LLM_SETTINGS_KEY } }), 0);

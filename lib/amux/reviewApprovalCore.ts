@@ -243,6 +243,11 @@ export const amuxV22PrlessReviewRetryAllowed = (input: {
  * and the database guard repeats the publication check
  * (20261111120000_amux_review_no_change_completion). Other roles, and a Task
  * with a pull request, keep their own approval evidence.
+ *
+ * An attempt that stored a patch did change something: "no change needed"
+ * would close it with the patch never reaching develop (AMUX-FILEGEN2-002,
+ * 2026-11-13, whose run was never created and so had no publication rows).
+ * Its owner may retry it or restore the publication path instead.
  */
 export const amuxV22NoChangeCompletionAllowed = (input: {
   sourceSystem: string | null;
@@ -255,7 +260,29 @@ export const amuxV22NoChangeCompletionAllowed = (input: {
   publicationMayOpenPr: boolean;
   displayTruncated: boolean;
   displayExact: boolean;
-}) => input.taskRole === "implement" && amuxV22PrlessReviewRetryAllowed(input);
+  patchStored: boolean;
+}) => input.taskRole === "implement" && !input.patchStored &&
+  amuxV22PrlessReviewRetryAllowed(input);
+
+/**
+ * Whether the owner review says a stored patch has not reached develop: no
+ * publication work has opened or may still open its pull request, and no
+ * current binding of the attempt's run carries it open or merged. A v22
+ * implement Task's PR lives on that binding, not on the card
+ * (reviewPullRequest.ts), so the card's own PR number cannot tell. Display
+ * only: "no change needed" is refused for any stored patch regardless.
+ */
+export const amuxV22UnpublishedPatchNotice = (input: {
+  patchStored: boolean;
+  publicationMayOpenPr: boolean;
+  run: { bindings: ReadonlyArray<{ state: string; mergeObservation: unknown }> } | null;
+}): { publication_run_missing: boolean } | null => {
+  if (!input.patchStored || input.publicationMayOpenPr) return null;
+  const carried = input.run?.bindings.some((binding) => binding.state === "open" ||
+    (!!binding.mergeObservation && typeof binding.mergeObservation === "object" &&
+      (binding.mergeObservation as Record<string, unknown>).merged === true)) ?? false;
+  return carried ? null : { publication_run_missing: input.run === null };
+};
 
 /**
  * The outcomes the server offers for one escalation, from the evidence the

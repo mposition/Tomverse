@@ -194,7 +194,7 @@ test("new reservations are refused without a switch, cap, pin or time, and leave
   assert.deepEqual(await reserve(1, { ...OPEN, killSwitchOn: true }), { status: "refused", code: "kill_switch" });
   assert.deepEqual(await reserve(1, { ...OPEN, killSwitchOn: null }), { status: "refused", code: "kill_switch" });
   // A cap above the ceiling, no cap, no settings and an unreadable document all refuse.
-  await cap("101");
+  await cap("501");
   assert.deepEqual(await reserve(1), { status: "refused", code: "cap_unreadable" });
   await settings(PIN.model, null);
   assert.deepEqual(await reserve(1), { status: "refused", code: "cap_unreadable" });

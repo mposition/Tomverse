@@ -1063,6 +1063,11 @@ fn apply_settle_followup<T>(
 /// TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED=enabled.
 pub const BRIDGE_READ_BACK_PROCEED_ENV: &str = "TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED";
 
+/// The context a result or usage write that failed before the settle call
+/// carries, so the settle read-back below never takes it for the settle's
+/// own lost answer.
+const PRE_SETTLE_WRITE_UNKNOWN: &str = "v22 result or usage write outcome unknown before settle";
+
 pub fn bridge_read_back_proceed_enabled(value: Option<&str>) -> bool {
     value.map(str::trim) == Some("enabled")
 }
@@ -2385,7 +2390,13 @@ fn v22_digest(value: &str) -> bool {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum V52ReviewStep {
     Pending { #[serde(rename = "jobId")] job_id: String },
-    Final { evidence: V52ReviewEvidence },
+    Final {
+        evidence: V52ReviewEvidence,
+        /// A reject's reasons for the owner (display only; the app bounds
+        /// and redacts it again, and it never decides the settlement).
+        #[serde(default, rename = "findingsSummary")]
+        findings_summary: Option<String>,
+    },
     Findings { text: String },
 }
 
@@ -2494,6 +2505,15 @@ async fn v52_review_helper_call(payload: serde_json::Value) -> Result<V52ReviewS
 #[cfg(not(unix))]
 async fn v52_review_helper_call(_payload: serde_json::Value) -> Result<V52ReviewStep> {
     bail!("v52 review helper requires Ubuntu")
+}
+
+/// The launcher's reject summary as the record route takes it: only for a
+/// reject with a job id, and within the route's input bound (a longer one is
+/// dropped rather than turning the record into a refused request).
+fn v52_findings_summary_for_record(evidence: &V52ReviewEvidence,
+    summary: Option<String>) -> Option<String> {
+    summary.filter(|text| evidence.verdict == "reject" && evidence.job_id.is_some() &&
+        !text.trim().is_empty() && text.encode_utf16().count() <= 8_192)
 }
 
 fn v52_review_evidence_matches_readback(
@@ -3649,7 +3669,7 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                                     Err(anyhow::anyhow!(
                                                                         "v52 review readback conflict"))
                                                                 } else { Ok(V52ReviewStep::Final {
-                                                                    evidence: prior }) }
+                                                                    evidence: prior, findings_summary: None }) }
                                                             },
                                                             Ok(readback) if readback.status == "absent" =>
                                                                 v52_review_helper_call(serde_json::json!({
@@ -3664,18 +3684,25 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                                     halted = true;
                                                                     note_halt(&mut halt_cause,
                                                                         "review_readback_unknown");
+                                                                } else {
+                                                                    eprintln!("amux wsl bridge warn: v52 review read-back for attempt {} failed; read again next round, not halted",
+                                                                        entry.delivery.attempt_id);
                                                                 }
                                                                 still_running.push(entry);
                                                                 continue;
                                                             },
                                                         };
-                                                        let evidence = match review {
+                                                        let (evidence, findings_summary) = match review {
                                                             Ok(V52ReviewStep::Pending { job_id: _job_id }) => {
                                                                 still_running.push(entry);
                                                                 continue;
                                                             },
-                                                            Ok(V52ReviewStep::Final { evidence }) => evidence,
-                                                            Ok(V52ReviewStep::Findings { .. }) | Err(_) =>
+                                                            Ok(V52ReviewStep::Final { evidence, findings_summary }) => {
+                                                                let summary = v52_findings_summary_for_record(
+                                                                    &evidence, findings_summary);
+                                                                (evidence, summary)
+                                                            },
+                                                            Ok(V52ReviewStep::Findings { .. }) | Err(_) => (
                                                                 V52ReviewEvidence {
                                                                     job_id: None,
                                                                     base_sha: base.to_owned(),
@@ -3684,12 +3711,12 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                                     author_vendor: author_vendor.to_owned(),
                                                                     reviewer_vendors: Vec::new(),
                                                                     touches_contract: touches,
-                                                                },
+                                                                }, None),
                                                         };
                                                         match api.v52_review_record(&entry.delivery,
                                                             &session.instance_id, session.generation,
                                                             result.changed_paths.as_deref().unwrap_or(&[]),
-                                                            &evidence).await {
+                                                            &evidence, findings_summary.as_deref()).await {
                                                             Ok(answer) if answer.recorded => {},
                                                             Ok(_) => review_unverified = true,
                                                             Err(_) => match api.v52_review_readback(
@@ -3704,6 +3731,9 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                                         halted = true;
                                                                         note_halt(&mut halt_cause,
                                                                             "review_record_outcome_unknown");
+                                                                    } else {
+                                                                        eprintln!("amux wsl bridge warn: v52 review record for attempt {} is unknown; read back next round, not halted",
+                                                                            entry.delivery.attempt_id);
                                                                     }
                                                                     still_running.push(entry);
                                                                     continue;
@@ -3759,7 +3789,7 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                     &entry.delivery, &session.instance_id,
                                                     session.generation,
                                                     settlement_retry_echo).await },
-                                            Err(error) => Err(error),
+                                            Err(error) => Err(error.context(PRE_SETTLE_WRITE_UNKNOWN)),
                                         }
                                     },
                                     Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
@@ -3776,7 +3806,7 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                             &entry.delivery, &session.instance_id,
                                             session.generation,
                                             settlement_retry_echo).await },
-                                    Err(error) => Err(error),
+                                    Err(error) => Err(error.context(PRE_SETTLE_WRITE_UNKNOWN)),
                                 }
                             } else if api_retry {
                                 Err(anyhow::anyhow!("read-only API receipt unverified"))
@@ -3801,8 +3831,14 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                             ).await
                         }.map(|response| response.settled);
                         let mut result = plan_settle_answer(&settled);
+                        // Only the settle call's own answer is read back, and
+                        // never a paid read-only API retry: a result or usage
+                        // write that failed before it, or an API run, keeps
+                        // its halt (review r-20261114-073121-cf0260).
+                        let settle_answer_only = !matches!(&settled,
+                            Err(error) if error.to_string() == PRE_SETTLE_WRITE_UNKNOWN);
                         if matches!(result, SettleResult::HaltForReadBack | SettleResult::DropAndHalt) &&
-                            bridge_read_back_proceed() {
+                            settle_answer_only && !api_retry_delivery && bridge_read_back_proceed() {
                             if let Some(assignment_id) = entry.delivery.assignment_id.as_deref() {
                                 let state = api.v22_execution_readback(assignment_id,
                                     &entry.delivery.worker, &session.instance_id,
@@ -4276,6 +4312,34 @@ mod tests {
     const ATTEMPT_ID_2: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e70";
     const ATTEMPT_ID_3: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e71";
 
+    /// Owner decision 2026-11-14: a reject's reasons ride the record request
+    /// for the owner; they never change the evidence or the verdict.
+    #[test]
+    fn v52_reject_summary_rides_the_record_only_for_a_reject_with_a_job() {
+        let step: V52ReviewStep = serde_json::from_str(r#"{"kind":"final","evidence":{
+            "job_id":"r-20261114-100000-abcdef","base_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "commit_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","verdict":"reject",
+            "author_vendor":"anthropic","reviewer_vendors":["openai"],"touches_contract":false},
+            "findingsSummary":"- [major · openai] lib/a.ts:1 broken"}"#).unwrap();
+        let V52ReviewStep::Final { evidence, findings_summary } = step else { panic!("final") };
+        assert_eq!(v52_findings_summary_for_record(&evidence, findings_summary.clone()).as_deref(),
+            Some("- [major · openai] lib/a.ts:1 broken"));
+        let mut accepted = evidence.clone();
+        accepted.verdict = "accept".into();
+        assert_eq!(v52_findings_summary_for_record(&accepted, findings_summary.clone()), None);
+        let mut no_job = evidence.clone();
+        no_job.job_id = None;
+        assert_eq!(v52_findings_summary_for_record(&no_job, findings_summary), None);
+        assert_eq!(v52_findings_summary_for_record(&evidence, Some("x".repeat(8_193))), None);
+        assert_eq!(v52_findings_summary_for_record(&evidence, Some("  ".into())), None);
+        // An older launcher's final step carries no summary and still parses.
+        let old: V52ReviewStep = serde_json::from_str(r#"{"kind":"final","evidence":{
+            "job_id":null,"base_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "commit_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","verdict":"unknown",
+            "author_vendor":"anthropic","reviewer_vendors":[],"touches_contract":false}}"#).unwrap();
+        assert!(matches!(old, V52ReviewStep::Final { findings_summary: None, .. }));
+    }
+
     #[test]
     fn read_back_proceed_is_off_unless_enabled() {
         assert!(!bridge_read_back_proceed_enabled(None));
@@ -4309,6 +4373,19 @@ mod tests {
         assert_eq!(plan_heartbeat_read_back(PendingHeartbeat::RetryNextTick),
             PendingHeartbeat::RetryNextTick);
         assert_eq!(plan_heartbeat_read_back(PendingHeartbeat::Keep), PendingHeartbeat::Keep);
+    }
+
+    #[test]
+    fn the_settle_read_back_skips_pre_settle_writes_and_paid_api_retries() {
+        let source = include_str!("wsl_bridge.rs");
+        let production = &source[..source.find("mod tests {").unwrap()];
+        let gate = production.find("let settle_answer_only = ").unwrap();
+        let gate = &production[gate..gate + 700];
+        assert!(gate.contains("PRE_SETTLE_WRITE_UNKNOWN"));
+        assert!(gate.contains("settle_answer_only && !api_retry_delivery && bridge_read_back_proceed()"));
+        assert_eq!(production.matches("Err(error.context(PRE_SETTLE_WRITE_UNKNOWN))").count(), 2);
+        let wrapped = anyhow::anyhow!("transport").context(PRE_SETTLE_WRITE_UNKNOWN);
+        assert_eq!(wrapped.to_string(), PRE_SETTLE_WRITE_UNKNOWN);
     }
 
     #[test]
