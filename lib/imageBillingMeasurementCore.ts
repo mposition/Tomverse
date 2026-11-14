@@ -260,6 +260,23 @@ export const sampleCostMicroUsd = (
 /** Usage keys that would mean a per-image model also bills tokens it generates. */
 const GENERATED_TOKEN_USAGE = /(output|thinking|reasoning|completion)[a-z_.]*tokens?/i;
 
+/**
+ * Usage counters a provider's own reference documents as not billed, per model
+ * family and key. Only these may be noted instead of refused, and only as a
+ * fixed small count: wan2.7-image reports `output_tokens: 2` on every image
+ * (production measurement 2026-11-14, 6 of 6), and its API reference
+ * (wan-image-generation-and-editing-api-reference, read 2026-11-13) calls
+ * those token values "not billed". Any other key or model -- a thinking or
+ * reasoning count anywhere -- still refuses, whatever its size.
+ */
+const UNBILLED_TOKEN_COUNTERS: readonly { model: RegExp; key: string }[] = [
+  { model: /^wan2\.7-image(-pro)?$/, key: "output_tokens" },
+];
+
+/** A documented counter must be this small and identical on every delivered sample, and seen twice. */
+const FIXED_TOKEN_COUNTER_MAX = 8;
+const FIXED_TOKEN_COUNTER_MIN_SAMPLES = 2;
+
 export type MeasurementVerdict = {
   /** True only when every planned sample ran and the samples support `terms`. */
   confirmable: boolean;
@@ -325,13 +342,27 @@ export const measurementVerdict = (plan: MeasurementPlan, samples: readonly Meas
     if (rows.length > 0) terms = { kind: "tokens_per_image", imageOutputUsdPerMTok: plan.imageOutputUsdPerMTok, tokens: rows };
   } else {
     if (delivered.length < samples.length) reasons.push(`image_missing:${samples.length - delivered.length}/${samples.length}`);
-    const tokenKeys = new Set<string>();
+    const tokenValues = new Map<string, number[]>();
     for (const sample of samples) {
       for (const [key, value] of Object.entries(sample.usage ?? {})) {
-        if (value > 0 && GENERATED_TOKEN_USAGE.test(key)) tokenKeys.add(key);
+        if (value > 0 && GENERATED_TOKEN_USAGE.test(key)) tokenValues.set(key, [...(tokenValues.get(key) ?? []), value]);
       }
     }
-    for (const key of tokenKeys) reasons.push(`token_usage_reported:${key}`);
+    for (const [key, values] of tokenValues) {
+      // A fixed counter is noted, not refused: the same small value on every
+      // delivered sample. Anything that moves, or is larger, is generated work.
+      const documented = UNBILLED_TOKEN_COUNTERS.some(
+        (entry) => entry.key === key && entry.model.test(plan.apiModelId)
+      );
+      const fixed =
+        documented &&
+        delivered.length >= FIXED_TOKEN_COUNTER_MIN_SAMPLES &&
+        values.length === delivered.length &&
+        values.every((value) => value === values[0]) &&
+        values[0] <= FIXED_TOKEN_COUNTER_MAX;
+      if (fixed) notes.push(`token_counter_fixed:${key}=${values[0]}`);
+      else reasons.push(`token_usage_reported:${key}`);
+    }
     if (delivered.length > 0) terms = { kind: "per_image_no_thinking" };
   }
 
