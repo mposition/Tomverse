@@ -325,6 +325,29 @@ test("the agents' scripts plan the agents' file, and the default scripts do not"
   }
 });
 
+test("the QA-release services declare exactly the variables their start check accepts", async () => {
+  const { QA_RELEASE_SERVICE_VARIABLES } = await import("../lib/qaReleaseServiceEnvCore.ts");
+  for (const [key, service] of [["qa_release_digest", "digest"], ["qa_release_monitor", "monitor"]]) {
+    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
+    assert.ok(runner, key);
+    // Not on dev: the submit endpoint table names staging and production only.
+    assert.equal(runner.environments.dev, undefined, key);
+    for (const environment of ["production", "staging"]) {
+      assert.deepEqual([...runner.environments[environment]].sort(), [...QA_RELEASE_SERVICE_VARIABLES[service]].sort(), `${key} ${environment}`);
+    }
+  }
+  // The Monitor's 30-minute cron, approved by the operator on 2026-10-03.
+  assert.equal(AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_monitor").cronSchedule, "*/30 * * * *");
+  assert.equal(AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_digest").cronSchedule, "0 21 * * *");
+});
+
+test("the QA-release services start node directly, so npm adds nothing their start check would refuse", () => {
+  for (const key of ["qa_release_digest", "qa_release_monitor"]) {
+    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
+    assert.match(runner.startCommand, /^node --experimental-strip-types scripts\/qa-release-[a-z]+-service\.mjs$/, key);
+  }
+});
+
 test("the region is named rather than left to Railway's default", () => {
   // The approved policy's APP 8 record states where this agent processes
   // data. A service placed by default would be in `sfo`, which that record
