@@ -247,7 +247,7 @@ export const AMUX_V19_REGISTRATION_REFUSAL_SCOPE =
 export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
   "amux-intake-supervisor",
   "amux-intake-retention",
-  "amux-portfolio-scorer",
+  // "amux-portfolio-scorer" is active since 2026-11-14 (score refresh only).
 ] as const;
 
 export const SYSTEM_AUDIT_ACTORS = [
@@ -276,7 +276,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "trace-report-analysis", "develop-ci-repair", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane", "ops-observer", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "model-catalog-renewal", "model-catalog-env-sync",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "trace-report-analysis", "develop-ci-repair", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane", "ops-observer", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "model-catalog-renewal", "model-catalog-env-sync", "amux-portfolio-scorer",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -437,7 +437,7 @@ export const systemAuditActionAllowed = (
   isSystemAuditActor(actor) &&
   (actor !== "product-research-scout" ||
     (action === "product_research.scout.test_session_issued" && targetType === "User")) &&
-  marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) && modelCatalogEnvSyncAuditScope(actor, action, targetType) && supportTriageAuditScope(actor, action, targetType) &&
+  marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) && modelCatalogEnvSyncAuditScope(actor, action, targetType) && supportTriageAuditScope(actor, action, targetType) && amuxPortfolioScorerAuditScope(actor, action, targetType) &&
   (actor !== "trace-report-analysis" ||
     (action === "trace_report_analysis.idea_submitted" && targetType === "AmuxIdeaSubmission")) &&
   (actor !== "develop-ci-repair" ||
@@ -700,4 +700,27 @@ function supportTriageAuditScope(actor: unknown, action: unknown, targetType: un
     (actor !== "support-triage-account-deletion" ||
       (action === "support_triage.account_data_deleted" && targetType === "SupportTriageAccountData"))
   );
+}
+
+/**
+ * The AMUX portfolio score refresher (owner decision 2026-11-14,
+ * docs/policy/amux-intake.md item 740's active window). It writes one thing:
+ * a score snapshot that extends the seven-day active window of a Task whose
+ * confirmed assessments are unchanged. It never confirms evidence, never
+ * writes an assessment and never promotes a Task. The database trigger
+ * `amux_v4_portfolio_score_guard` holds the same limits independently.
+ * Declared at the end of the file, and listed above on an existing line, so
+ * no access above moves.
+ */
+export const AMUX_PORTFOLIO_SCORER_AUDIT_ACTOR =
+  "amux-portfolio-scorer" as const satisfies SystemAuditActor;
+export const AMUX_PORTFOLIO_SCORE_REFRESH_ACTION =
+  "amux.v4.portfolio.score.refresh" as const;
+
+function amuxPortfolioScorerAuditScope(
+  actor: unknown, action: unknown, targetType: unknown,
+): boolean {
+  return actor !== AMUX_PORTFOLIO_SCORER_AUDIT_ACTOR ||
+    (action === AMUX_PORTFOLIO_SCORE_REFRESH_ACTION &&
+      targetType === "AmuxPortfolioScoreSnapshot");
 }

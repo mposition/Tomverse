@@ -214,6 +214,7 @@ test("the system actor list is closed and changes only by review", () => {
     "model-catalog-renewal",
     // The weekly production-to-staging/dev catalogue copy: one action, one target.
     "model-catalog-env-sync",
+    "amux-portfolio-scorer",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
@@ -228,8 +229,18 @@ test("the system actor list is closed and changes only by review", () => {
   assert.deepEqual([...AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS], [
     "amux-intake-supervisor",
     "amux-intake-retention",
-    "amux-portfolio-scorer",
   ]);
+  // Owner decision 2026-11-14: the score refresher writes one action only.
+  assert.equal(systemAuditActionAllowed("amux-portfolio-scorer",
+    "amux.v4.portfolio.score.refresh", "AmuxPortfolioScoreSnapshot"), true);
+  assert.equal(systemAuditActionAllowed("amux-portfolio-scorer",
+    "amux.v4.portfolio.score.confirm", "AmuxPortfolioScoreSnapshot"), false);
+  assert.equal(systemAuditActionAllowed("amux-portfolio-scorer",
+    "amux.v4.portfolio.assessment.approve", "AmuxPortfolioAssessment"), false);
+  assert.equal(systemAuditActionAllowed("amux-portfolio-scorer",
+    "amux.v4.portfolio.score.refresh", "AmuxWorkItem"), false);
+  assert.equal(systemAuditActionAllowed("amux-v4-intake",
+    "amux.v4.portfolio.score.refresh", "AmuxPortfolioScoreSnapshot"), false);
   assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
     "amux.v22.auto_promotion.consumed", "AmuxV22PromotionReceipt"), true);
   assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
@@ -502,6 +513,10 @@ test("no administrator audit call site names the reserved key", () => {
     // Reviewed pair: agent claims and results go to the system writer, the
     // owner-only retry request stays on the administrator writer.
     "lib/dailyProductAgentStore.ts",
+    // Reviewed pair (owner decision 2026-11-14): the owner's score
+    // confirmation stays on the administrator writer, the unchanged-score
+    // refresh goes to the system writer as amux-portfolio-scorer.
+    "lib/amux/portfolioScoreService.ts",
   ]);
   const callSites = ["app", "lib", "components", "scripts", "packages"]
     .flatMap((top) => walk(resolve(ROOT, top)))

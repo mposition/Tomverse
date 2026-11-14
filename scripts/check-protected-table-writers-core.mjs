@@ -1286,6 +1286,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The score guard replacement reads the referenced same-transaction audit to distinguish exact human and scoped system evidence. CREATE OR REPLACE affects only the guard function; it never writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261114100100_amux_portfolio_score_refresh_guard/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "Owner decision 2026-11-14: the score guard replacement reads the referenced audit to admit the system score refresher's same-transaction entry beside the existing confirmations. CREATE OR REPLACE affects only the guard function; it never writes AdminAuditLog.",
+  },
+  {
     path: "prisma/migrations/20261016070500_amux_v19_system_registration_refusal/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
