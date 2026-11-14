@@ -57,6 +57,10 @@ type World = {
   /** Leases of runtimes no bridge runs, returned alongside. */
   otherLeases: Array<{ workerName: string; leaseExpiresAt: Date }>;
   bridgeQueryError: Error | null;
+  /** Null uses the lease names; an explicit answer models the app's scope. */
+  bridgeScope: { listed: true; workers: Array<{ name: string; kind: "v22" }> } |
+    { listed: false; reason: "bridge_scope_off" | "worker_catalog_unavailable" } | null;
+  bridgeScopeError: Error | null;
   /** What the dependency reporter answers; by default, whether it was unhealthy. */
   bridgeNotified: boolean | null;
   /** The Decision Maker relay's last recorded call; null when none was. */
@@ -81,6 +85,8 @@ const world: World = {
   bridgeWorker: "codex-impl",
   otherLeases: [],
   bridgeQueryError: null,
+  bridgeScope: null,
+  bridgeScopeError: null,
   bridgeNotified: null,
   relayLastSyncAt: null,
   relayLastQuestionAt: null,
@@ -102,12 +108,15 @@ const resetWorld = () => {
   world.bridgeWorker = "codex-impl";
   world.otherLeases = [];
   world.bridgeQueryError = null;
+  world.bridgeScope = null;
+  world.bridgeScopeError = null;
   world.bridgeNotified = null;
   world.relayLastSyncAt = null;
   world.relayLastQuestionAt = null;
   world.relayQuestionReads = 0;
   world.relayReadError = null;
   delete process.env.TOMVERSE_AMUX_DM_ROUTING;
+  process.env.APP_ENV = "production";
   world.dependencyReports = [];
   world.incidents = [];
   world.completedResults = [];
@@ -139,6 +148,18 @@ let monitorPromise: Promise<
 
 const loadMonitor = () => {
   if (!monitorPromise) {
+    mock.module(mod("lib/amux/workerBridgeScope.ts"), {
+      namedExports: {
+        readAmuxWorkerBridgeScope: async () => {
+          if (world.bridgeScopeError) throw world.bridgeScopeError;
+          return world.bridgeScope ?? {
+            listed: true,
+            workers: [world.bridgeWorker, ...world.otherLeases.map((lease) => lease.workerName)]
+              .map((name) => ({ name, kind: "v22" })),
+          };
+        },
+      },
+    });
     mock.module(mod("lib/prisma.ts"), {
       namedExports: {
         prisma: {
@@ -479,6 +500,82 @@ test("the incident reports the count the query returned, not the rows it named",
 // about a card or why a bridge stopped.
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000);
 
+test("paused workers' stale leases do not page beside live workers in the bridge scope", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  world.bridgeScope = { listed: true, workers: [{ name: "codex-impl", kind: "v22" }] };
+  world.bridgeLeases = [new Date(Date.now() + 60_000)];
+  world.otherLeases = ["cursor-chore", "copilot-chore"].map((workerName) => ({
+    workerName, leaseExpiresAt: minutesAgo(214),
+  }));
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.equal(result.alerts, 0);
+  assert.equal(world.dependencyReports.length, 1);
+  assert.equal(world.dependencyReports[0].healthy, true);
+  assert.equal((world.completedResults.at(-1) as { amuxBridge: string }).amuxBridge, "live");
+});
+
+test("a listed worker that stops renewing still pages while paused leases are ignored", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  world.bridgeScope = {
+    listed: true,
+    workers: ["codex-impl", "claude-impl"].map((name) => ({ name, kind: "v22" })),
+  };
+  world.bridgeLeases = [new Date(Date.now() + 60_000)];
+  world.otherLeases = ["claude-impl", "cursor-chore", "copilot-chore"].map((workerName) => ({
+    workerName, leaseExpiresAt: minutesAgo(214),
+  }));
+
+  await monitorInfrastructureThresholdsIfDue();
+
+  const report = world.dependencyReports[0];
+  assert.equal(report.healthy, false);
+  assert.equal(report.context?.lostWorkers, "claude-impl");
+  assert.match(String(report.error), /^1 of 2 AMUX worker runtimes stopped renewing/);
+});
+
+test("an empty or disabled bridge scope is unwatched without announcing recovery", async () => {
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  const scopes: NonNullable<World["bridgeScope"]>[] = [
+    { listed: true, workers: [] },
+    { listed: false, reason: "bridge_scope_off" },
+  ];
+  for (const scope of scopes) {
+    resetWorld();
+    world.dashboard = dashboard();
+    world.bridgeScope = scope;
+    world.bridgeLeases = [minutesAgo(214)];
+
+    await monitorInfrastructureThresholdsIfDue();
+
+    assert.deepEqual(world.dependencyReports, []);
+    assert.equal((world.completedResults.at(-1) as { amuxBridge: string }).amuxBridge, "unwatched");
+  }
+});
+
+test("an unavailable bridge scope reports a failed check rather than a healthy fleet", async () => {
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  for (const unreadable of [false, true]) {
+    resetWorld();
+    world.dashboard = dashboard();
+    world.bridgeLeases = [new Date(Date.now() + 60_000)];
+    world.bridgeScope = { listed: false, reason: "worker_catalog_unavailable" };
+    if (unreadable) world.bridgeScopeError = new Error("catalog read failed");
+
+    const result = await monitorInfrastructureThresholdsIfDue();
+
+    assert.equal(result.alerts, 1);
+    assert.deepEqual(world.dependencyReports, []);
+    assert.equal(world.incidents[0].code, "AMUX_EXECUTION_BRIDGE_CHECK_FAILED");
+    assert.equal((world.completedResults.at(-1) as { amuxBridge: null }).amuxBridge, null);
+  }
+});
+
 test("a bridge whose every lease ran out pages, and is counted as an alert", async () => {
   resetWorld();
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
@@ -771,6 +868,22 @@ test("names that cannot be printed are replaced in the alert, not in the compari
 // The relay calls the v22 question sync route every 30 seconds while it is not
 // halted; the route records the call, and the monitor pages when the record is
 // older than five minutes -- only while TOMVERSE_AMUX_DM_ROUTING is enabled.
+
+test("dev and staging do not page for the production relay even with DM routing enabled", async () => {
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  for (const environment of ["dev", "staging"]) {
+    resetWorld();
+    world.dashboard = dashboard();
+    process.env.APP_ENV = environment;
+    process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
+
+    const result = await monitorInfrastructureThresholdsIfDue();
+
+    assert.equal(result.alerts, 0);
+    assert.deepEqual(world.dependencyReports, []);
+    assert.equal((world.completedResults.at(-1) as { amuxDmRelay: string }).amuxDmRelay, "off");
+  }
+});
 
 test("a relay silent past five minutes pages while DM routing is enabled", async () => {
   resetWorld();
