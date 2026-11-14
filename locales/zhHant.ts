@@ -658,6 +658,13 @@ export const zhHant = {
         searchStatusFailed: "網頁搜尋失敗",
         searchStatusDeepResearch: "Deep Research",
         // Generated files (docs/policy/generated-artifacts.md section 9).
+        artifactRevise: "建立修訂版",
+        artifactRevisionPreparing: "正在準備檔案…",
+        artifactRevisionOfficeNotice: "根據擷取的文字建立新檔案。原始格式、圖片和投影片配置可能改變。",
+        artifactRevisionPrompt: "請根據附件 {filename} 的內容，依照以下修改要求建立新檔案。請保留原始檔案。",
+        artifactRevisionOfficePrompt: "請根據附件 {filename} 擷取的文字，依照以下修改要求建立新檔案。格式、圖片和投影片配置可能改變。請保留原始檔案。",
+        artifactRevisionNameConflict: "已附加同名檔案。請移除該附件或重新命名其他輸入檔案後再選擇。",
+        artifactRevisionFailed: "無法準備檔案。草稿保持不變，請重試。",
         artifactSectionLabel: "生成的檔案",
         artifactGenerating: "正在建立檔案…",
         artifactGeneratingNamed: "正在建立{type}…",

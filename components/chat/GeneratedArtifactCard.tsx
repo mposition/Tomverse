@@ -34,6 +34,8 @@ import {
 } from "@/lib/generatedArtifactCore";
 import { saveResponseAsFile } from "@/lib/browserDownload";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { isGeneratedArtifactRevisionSupported } from "@/lib/generatedArtifactRevisionCore";
+import { useArtifactRevisionAction } from "@/components/chat/GeneratedArtifactRevisionContext";
 import {
   localizedProductHref,
   type ChatWorkspaceProduct,
@@ -139,6 +141,11 @@ export function GeneratedArtifactCard({
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const revise = useArtifactRevisionAction();
+  const [isPreparingRevision, setIsPreparingRevision] = useState(false);
+  const [revisionError, setRevisionError] = useState<string | null>(null);
+  const canRevise = Boolean(revise && !isGuestMode && currentProduct === "chat" &&
+    artifact.status === "ready" && isGeneratedArtifactRevisionSupported(artifact));
 
   const attributedModelId = artifact.modelId ?? fallbackModelId ?? null;
   const modelName = attributedModelId
@@ -367,9 +374,32 @@ export function GeneratedArtifactCard({
             {downloadError}
           </p>
         )}
+        {canRevise && (artifact.format === "docx" || artifact.format === "pptx") && (
+          <p data-testid="generated-artifact-revision-office-notice" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            {t("chat.artifactRevisionOfficeNotice")}
+          </p>
+        )}
+        {revisionError && (
+          <p role="alert" data-testid="generated-artifact-revision-error" className="mt-1 text-xs font-semibold text-red-600 dark:text-red-300">
+            {revisionError}
+          </p>
+        )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {canRevise && (
+          <button type="button" data-testid="generated-artifact-revise" disabled={isPreparingRevision}
+            onClick={() => {
+              if (!revise || isPreparingRevision) return;
+              setIsPreparingRevision(true);
+              setRevisionError(null);
+              void revise(artifact).then(setRevisionError).finally(() => setIsPreparingRevision(false));
+            }}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-accent-generated-artifact-300 px-3 text-sm font-bold text-accent-generated-artifact-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-generated-artifact-500 disabled:opacity-60 dark:border-accent-generated-artifact-700 dark:text-accent-generated-artifact-200">
+            {isPreparingRevision && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />}
+            {t(isPreparingRevision ? "chat.artifactRevisionPreparing" : "chat.artifactRevise")}
+          </button>
+        )}
         {isReady && (
           <button
             type="button"

@@ -656,6 +656,13 @@ export const en = {
         searchStatusFailed: "Web search failed",
         searchStatusDeepResearch: "Deep Research",
         // Generated files (docs/policy/generated-artifacts.md section 9).
+        artifactRevise: "Make a revision",
+        artifactRevisionPreparing: "Preparing file…",
+        artifactRevisionOfficeNotice: "Creates a new file from extracted text. Original formatting, images and slide layout may change.",
+        artifactRevisionPrompt: "Create a new file from the attached {filename} with the changes below. Keep the original file.",
+        artifactRevisionOfficePrompt: "Create a new file from the extracted text of the attached {filename} with the changes below. Formatting, images and slide layout may change. Keep the original file.",
+        artifactRevisionNameConflict: "A file with this name is already attached. Remove it or rename your other input before selecting this file.",
+        artifactRevisionFailed: "The file could not be prepared. Your draft is unchanged. Try again.",
         artifactSectionLabel: "Generated file",
         artifactGenerating: "Creating the file…",
         artifactGeneratingNamed: "Creating the {type}…",

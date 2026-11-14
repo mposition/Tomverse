@@ -612,6 +612,13 @@ export const fr = {
         searchStatusFailed: "Échec de la recherche web",
         searchStatusDeepResearch: "Deep Research",
         // Generated files (docs/policy/generated-artifacts.md section 9).
+        artifactRevise: "Créer une révision",
+        artifactRevisionPreparing: "Préparation du fichier…",
+        artifactRevisionOfficeNotice: "Crée un nouveau fichier à partir du texte extrait. La mise en forme, les images et les diapositives peuvent changer.",
+        artifactRevisionPrompt: "Créez un nouveau fichier à partir du fichier joint {filename} avec les modifications ci-dessous. Conservez l’original.",
+        artifactRevisionOfficePrompt: "Créez un nouveau fichier à partir du texte extrait de {filename} avec les modifications ci-dessous. La mise en forme, les images et les diapositives peuvent changer. Conservez l’original.",
+        artifactRevisionNameConflict: "Un fichier portant ce nom est déjà joint. Retirez-le ou renommez l’autre fichier avant cette sélection.",
+        artifactRevisionFailed: "Le fichier n’a pas pu être préparé. Votre brouillon est conservé. Réessayez.",
         artifactSectionLabel: "Fichier généré",
         artifactGenerating: "Création du fichier…",
         artifactGeneratingNamed: "Création du {type}…",

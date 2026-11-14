@@ -655,6 +655,13 @@ export const ko = {
         searchStatusFailed: "웹 검색 실패",
         searchStatusDeepResearch: "심층 조사",
         // Generated files (docs/policy/generated-artifacts.md section 9).
+        artifactRevise: "수정본 만들기",
+        artifactRevisionPreparing: "파일 준비 중…",
+        artifactRevisionOfficeNotice: "추출한 텍스트로 새 파일을 만듭니다. 원본 서식·이미지·슬라이드 배치는 달라질 수 있습니다.",
+        artifactRevisionPrompt: "첨부한 {filename}의 내용을 바탕으로 아래 변경사항을 반영한 새 파일을 만들어 주세요. 원본 파일은 유지해 주세요.",
+        artifactRevisionOfficePrompt: "첨부한 {filename}에서 추출한 텍스트를 바탕으로 아래 변경사항을 반영한 새 파일을 만들어 주세요. 서식·이미지·슬라이드 배치는 달라질 수 있습니다. 원본 파일은 유지해 주세요.",
+        artifactRevisionNameConflict: "같은 이름의 파일이 이미 첨부되어 있습니다. 기존 첨부를 제거하거나 다른 입력 파일의 이름을 바꾼 뒤 선택해 주세요.",
+        artifactRevisionFailed: "파일을 준비하지 못했습니다. 초안은 그대로입니다. 다시 시도해 주세요.",
         artifactSectionLabel: "생성된 파일",
         artifactGenerating: "파일 만드는 중…",
         artifactGeneratingNamed: "{type} 만드는 중…",

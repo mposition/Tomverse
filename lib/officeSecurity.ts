@@ -167,6 +167,10 @@ const { OfficeParser } = require("officeparser");
             { extractAttachments: false, ocr: false }
         );
         const text = (await document.to("text")).value.trim();
+        if (workerData.strictOverflow && text.length > workerData.maxCharacters) {
+            parentPort.postMessage({ ok: false, overflow: true });
+            return;
+        }
         parentPort.postMessage({
             ok: true,
             text:
@@ -180,10 +184,19 @@ const { OfficeParser } = require("officeparser");
 })();
 `;
 
+/** An intact text layer would exceed the caller's remaining extraction budget. */
+export class OfficeTextOverflowError extends Error {
+    constructor() {
+        super("Office text exceeds the extraction limit.");
+        this.name = "OfficeTextOverflowError";
+    }
+}
+
 export const parseOfficeSafely = async (
     buffer: Buffer,
     mediaType: string,
-    maxCharacters: number
+    maxCharacters: number,
+    options: { strictOverflow?: boolean } = {}
 ) => {
     assertSafeOfficeArchive(buffer, mediaType);
 
@@ -193,6 +206,7 @@ export const parseOfficeSafely = async (
         workerData: {
             buffer: transferableBuffer,
             maxCharacters,
+            strictOverflow: options.strictOverflow === true,
         },
         transferList: [transferableBuffer],
         resourceLimits: {
@@ -220,7 +234,11 @@ export const parseOfficeSafely = async (
 
         worker.once(
             "message",
-            (result: { ok?: boolean; text?: unknown }) => {
+            (result: { ok?: boolean; text?: unknown; overflow?: boolean }) => {
+                if (result?.overflow === true) {
+                    finish(new OfficeTextOverflowError());
+                    return;
+                }
                 if (!result?.ok || typeof result.text !== "string") {
                     finish(new Error("The Office file could not be parsed."));
                     return;

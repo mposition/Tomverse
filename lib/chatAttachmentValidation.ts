@@ -24,7 +24,7 @@ import {
     validatePdfSafely,
     type NormalizableImageMediaType,
 } from "@/lib/mediaSecurity";
-import { assertSafeOfficeArchive, parseOfficeSafely } from "@/lib/officeSecurity";
+import { assertSafeOfficeArchive, OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
 import { IworkPackageError, assertSafeIworkPackage } from "@/lib/iworkPackage";
 import {
     extractLegacyOfficeText,
@@ -223,9 +223,13 @@ export async function validateChatAttachmentUpload({
             extracted = await parseOfficeSafely(
                 buffer,
                 format.mediaType,
-                maxExtractedCharacters + 1
+                maxExtractedCharacters,
+                { strictOverflow: true }
             );
-        } catch {
+        } catch (error) {
+            if (error instanceof OfficeTextOverflowError) {
+                throw new ChatAttachmentValidationError("ATTACHMENT_TEXT_TOO_LARGE", 413);
+            }
             throw new ChatAttachmentValidationError("ATTACHMENT_UNREADABLE");
         }
         if (!extracted) throw new ChatAttachmentValidationError("ATTACHMENT_NO_TEXT");

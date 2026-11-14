@@ -85,6 +85,8 @@ export type RegisteredUpload = {
  * handle instead of a second row pointing at the same bytes.
  */
 export const registerFinalizedUpload = async (input: {
+  /** Optional opaque operation identity for a server-side import. */
+  uploadId?: string;
   userId: string;
   objectKey: string;
   ownPrefix: string;
@@ -101,12 +103,12 @@ export const registerFinalizedUpload = async (input: {
    * for every format the table places by extension.
    */
   kind: MessageAttachmentKind;
-}): Promise<RegisteredUpload> => {
+}, db: Pick<Prisma.TransactionClient, "messageAttachmentUpload"> = prisma): Promise<RegisteredUpload> => {
   if (!input.objectKey.startsWith(input.ownPrefix)) {
     throw new Error("Refusing to register an upload outside the caller's prefix.");
   }
   const kind = input.kind;
-  const existing = await prisma.messageAttachmentUpload.findUnique({
+  const existing = await db.messageAttachmentUpload.findUnique({
     where: { objectKey: input.objectKey },
     select: { id: true, userId: true, name: true, mediaType: true, size: true, kind: true },
   });
@@ -125,8 +127,9 @@ export const registerFinalizedUpload = async (input: {
       kind: existing.kind === "text" ? "text" : "file",
     };
   }
-  const created = await prisma.messageAttachmentUpload.create({
+  const created = await db.messageAttachmentUpload.create({
     data: {
+      ...(input.uploadId ? { id: input.uploadId } : {}),
       userId: input.userId,
       objectKey: input.objectKey,
       name: input.name,

@@ -612,6 +612,13 @@ export const pt = {
         searchStatusFailed: "Falha na pesquisa web",
         searchStatusDeepResearch: "Deep Research",
         // Generated files (docs/policy/generated-artifacts.md section 9).
+        artifactRevise: "Criar uma revisão",
+        artifactRevisionPreparing: "Preparando arquivo…",
+        artifactRevisionOfficeNotice: "Cria um novo arquivo a partir do texto extraído. A formatação, as imagens e os slides podem mudar.",
+        artifactRevisionPrompt: "Crie um novo arquivo a partir do anexo {filename} com as alterações abaixo. Mantenha o original.",
+        artifactRevisionOfficePrompt: "Crie um novo arquivo a partir do texto extraído de {filename} com as alterações abaixo. A formatação, as imagens e os slides podem mudar. Mantenha o original.",
+        artifactRevisionNameConflict: "Já existe um anexo com este nome. Remova-o ou renomeie o outro arquivo antes de selecionar este.",
+        artifactRevisionFailed: "Não foi possível preparar o arquivo. Seu rascunho foi mantido. Tente novamente.",
         artifactSectionLabel: "Arquivo gerado",
         artifactGenerating: "Criando o arquivo…",
         artifactGeneratingNamed: "Criando o {type}…",

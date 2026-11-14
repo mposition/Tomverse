@@ -601,6 +601,13 @@ export const de = {
         searchStatusFailed: "Websuche fehlgeschlagen",
         searchStatusDeepResearch: "Deep Research",
         // Generated files (docs/policy/generated-artifacts.md section 9).
+        artifactRevise: "Überarbeitete Datei erstellen",
+        artifactRevisionPreparing: "Datei wird vorbereitet…",
+        artifactRevisionOfficeNotice: "Erstellt eine neue Datei aus extrahiertem Text. Formatierung, Bilder und Folienlayout können sich ändern.",
+        artifactRevisionPrompt: "Erstelle eine neue Datei aus der angehängten Datei {filename} mit den folgenden Änderungen. Behalte das Original.",
+        artifactRevisionOfficePrompt: "Erstelle eine neue Datei aus dem extrahierten Text von {filename} mit den folgenden Änderungen. Formatierung, Bilder und Folienlayout können sich ändern. Behalte das Original.",
+        artifactRevisionNameConflict: "Eine Datei mit diesem Namen ist bereits angehängt. Entferne sie oder benenne die andere Eingabedatei um.",
+        artifactRevisionFailed: "Die Datei konnte nicht vorbereitet werden. Dein Entwurf bleibt erhalten. Versuche es erneut.",
         artifactSectionLabel: "Erzeugte Datei",
         artifactGenerating: "Datei wird erstellt…",
         artifactGeneratingNamed: "{type} wird erstellt…",

@@ -981,3 +981,46 @@ PDF를 원본 그대로 받아 스캔 페이지까지 읽는다. 그래서 "이 
 - 슬라이드(`create_presentation`)와 스프레드시트에 그림 넣기.
 - 원본 PDF의 레이아웃을 그대로 Word로 옮기는 일. 상용 엔진도 완벽하지 않은
   "복원"이며, 여기서는 모델이 다시 쓴다.
+
+## 17. 선택한 생성 파일의 내용으로 새 파일 만들기 (P0)
+
+`GENERATED_ARTIFACT_REVISION_ENABLED=true`일 때만 웹 Chat의 ready 카드에서
+수정 입력을 선택할 수 있다. 기본은 꺼짐이며 이 구현은 운영 활성화 승인이 아니다.
+클릭한 artifact의 opaque ID가 선택 기준이다. 파일명·현재 모델·최신 카드로
+원본을 추정하지 않는다. 기존 다운로드와 Native 다운로드는 그대로 유지한다.
+
+서버는 기존 `PUT /api/chat` import 경로에서 계정과 동일 대화, 현재 unlock,
+ready 상태, 생성/첨부 형식 표의 교집합, 실제 bytes와 기존 첨부 권한·quota를
+확인한다. 원본을 비파괴 bounded read로 읽고 새 private 입력 객체에 복사한 뒤
+기존 opaque uploadId를 반환한다. 같은 준비 operation의 재시도는 원본이나 이미
+결속된 승자 사본을 삭제하지 않는다. 파일 선택만으로 Message나 모델 호출을
+만들지 않는다. 사본의 독립 수명과 미전송 보관 한계는
+`user-attachment-persistence.md` §8.1을 따른다.
+
+준비가 성공하면 원래 계정·대화의 최신 draft에 일반 첨부 chip과 짧고 편집 가능한
+새 파일 생성 요청문을 앞에 추가한다. 기존 글·첨부와 준비 중 작성문을 보존하고,
+동명 입력 충돌·첨부 상한·준비 실패 때 초안을 바꾸지 않는다. 선택은 자동 Send가
+아니다. 사용자가 보는 문장을 그대로 저장하고 Auto와 답변 provider에 전달하며
+Send 때 숨은 wrapper를 붙이지 않는다. reload는 기존 chip과 요청문으로 복원한다.
+
+지원 범위는 TXT/MD, 기존 생성·첨부 표 모두가 허용하는 text/code/config, 한도 내
+CSV와 DOCX/PPTX다. DOCX/PPTX는 기존 Office parser가 추출한 **텍스트 내용으로
+새 문서를 만드는 것**이다. 원본 서식·그림·슬라이드 구조 보존 편집이 아니다.
+준비 시 nonempty와 strict 추출 한도를 확인하고 Send 시 실제 남은 예산으로 다시
+확인한다. 최신 사용자 turn의 일반 Office 첨부에도 strict overflow를 적용한다.
+최신 text/CSV도 조용히 자른 채 실행하지 않는다. 과거 이력 처리의 재설계는 없다.
+
+기존 turn당 5개·전체 이력 30개·파일 10MiB·전체 25MiB·추출 텍스트 300,000자
+상한은 유지한다. 생성 한도와 재입력 한도는 다르므로 모든 생성물이 재입력되거나
+무제한 반복 수정된다고 약속하지 않는다. 초과는 최종 답변 provider dispatch 전에
+거부한다. 현재 Auto는 추출보다 먼저 실행될 수 있으므로 이 거부가 Auto 비용까지
+0임을 뜻하지 않는다. 과거 첨부를 지우거나 상한을 늘려 통과시키지 않는다.
+
+실제 `create_*` 실행 결과가 새 파일 성공의 기준이다. text-only 답변은 수정 성공이
+아니지만 파일 행이 없다면 가짜 failed 카드를 만들지 않는다. 원본과 새 결과의
+카드·다운로드를 모두 유지하며 새 결과를 다시 선택할 수 있다. 기존 모델 capability,
+`requiresFileGeneration`, 도구 제공 turn의 fallback 제한과 token/reservation/settlement를
+그대로 사용하고 별도 classifier·평가 호출·가격 변경은 추가하지 않는다.
+
+canonical spec·버전 계보·migration, XLSX 셀 구조 보존, PDF/ZIP 편집, WYSIWYG,
+Native 수정 CTA와 이미지 생성 workspace 변경은 P1 또는 별도 작업이다.

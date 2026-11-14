@@ -663,6 +663,13 @@ export const zh = {
         searchStatusFailed: "网页搜索失败",
         searchStatusDeepResearch: "Deep Research",
         // Generated files (docs/policy/generated-artifacts.md section 9).
+        artifactRevise: "创建修订版",
+        artifactRevisionPreparing: "正在准备文件…",
+        artifactRevisionOfficeNotice: "根据提取的文本创建新文件。原始格式、图片和幻灯片布局可能变化。",
+        artifactRevisionPrompt: "请根据附件 {filename} 的内容，按照以下修改要求创建一个新文件。请保留原始文件。",
+        artifactRevisionOfficePrompt: "请根据附件 {filename} 提取的文本，按照以下修改要求创建一个新文件。格式、图片和幻灯片布局可能变化。请保留原始文件。",
+        artifactRevisionNameConflict: "已附加同名文件。请移除该附件或重命名其他输入文件后再选择。",
+        artifactRevisionFailed: "无法准备文件。草稿保持不变，请重试。",
         artifactSectionLabel: "生成的文件",
         artifactGenerating: "正在创建文件…",
         artifactGeneratingNamed: "正在创建{type}…",

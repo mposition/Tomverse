@@ -3,6 +3,9 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { renderDocumentDocx } from "../../lib/generatedArtifactDocx";
+import { renderPresentationPptx } from "../../lib/generatedArtifactPptx";
 
 /*
   The real `ai`, imported statically rather than through `createRequire`.
@@ -120,6 +123,8 @@ const world = {
   artifactRows: [] as ArtifactRow[],
   messages: [] as Array<{ id: string; status: string; modelId: string }>,
   providerContexts: [] as Array<{ messageId: string }>,
+  uploads: [] as Array<{ id: string; name: string; mediaType: string; size: number; kind: string; objectKey: string }>,
+  inputObjects: new Map<string, Buffer>(),
 };
 
 mock.module("next-auth/next", {
@@ -252,6 +257,7 @@ const DEFAULTS: Record<string, () => unknown> = {
 };
 
 const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
+  messageAttachmentUpload: { findMany: () => world.uploads },
   conversation: {
     findUnique: () => ({
       id: CONVERSATION_ID,
@@ -409,6 +415,7 @@ const { ROUTER_VERSIONS } = require(resolve(ROOT, "lib/routerDecision.ts")) as {
 };
 
 let forcedAutoRoute: string | null = null;
+let autoSelectionCalls = 0;
 let forcedRouterOutput: Record<string, unknown> | null = null;
 let forcedImageIntent = false;
 let imageIntentCalls = 0;
@@ -475,10 +482,12 @@ const routedSelection = (modelId: string) => ({
 mock.module(mod("lib/autoModelSelection.ts"), {
   namedExports: {
     ...realAutoSelection,
-    selectAutoModel: (input: unknown) =>
-      forcedAutoRoute
+    selectAutoModel: (input: unknown) => {
+      autoSelectionCalls += 1;
+      return forcedAutoRoute
         ? routedSelection(forcedAutoRoute)
-        : realAutoSelection.selectAutoModel(input),
+        : realAutoSelection.selectAutoModel(input);
+    },
   },
 });
 
@@ -522,6 +531,16 @@ mock.module(mod("lib/generatedArtifactStorage.ts"), {
     discardStoredArtifacts: async () => undefined,
   },
 });
+
+const realR2 = require(resolve(ROOT, "lib/r2.ts")) as Record<string, unknown>;
+mock.module(mod("lib/r2.ts"), { namedExports: {
+  ...realR2,
+  readR2Object: async (key: string) => {
+    const bytes = world.inputObjects.get(key);
+    assert.ok(bytes, "only local input fixture objects may be read");
+    return Buffer.from(bytes);
+  },
+} });
 
 // Nothing here may reach a provider or any other network endpoint.
 let networkCalls = 0;
@@ -585,13 +604,17 @@ const ask = async (
     autoRoutedTo = null,
     routerOutput = null,
     imageIntent = false,
-  }: { modelId?: string; autoRoutedTo?: string | null; routerOutput?: Record<string, unknown> | null; imageIntent?: boolean } = {}
+    messages = [{ role: "user", content: "이 PPT를 웹페이지로 만들어줘" }],
+    expectedStatus = 200,
+  }: { modelId?: string; autoRoutedTo?: string | null; routerOutput?: Record<string, unknown> | null; imageIntent?: boolean;
+    messages?: Array<{ role: string; content: string; attachments?: Array<{ uploadId: string }> }>; expectedStatus?: number } = {}
 ) => {
   forcedAutoRoute = autoRoutedTo;
   forcedRouterOutput = routerOutput;
   forcedImageIntent = imageIntent;
   imageIntentCalls = 0;
   routerDecisionKept = null;
+  autoSelectionCalls = 0;
   script = {
     begins: [],
     executes: [],
@@ -612,18 +635,18 @@ const ask = async (
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages: [{ role: "user", content: "이 PPT를 웹페이지로 만들어줘" }],
+        messages,
         modelId,
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
       }),
     })
   );
-  if (response.status !== 200) {
+  if (response.status !== expectedStatus) {
     throw new Error(`status ${response.status}: ${await response.text()}`);
   }
   const body = await response.text();
-  return { body, trailer: readTrailer(body) };
+  return { body, trailer: response.status === 200 ? readTrailer(body) : null };
 };
 
 /**
@@ -1282,3 +1305,84 @@ test(
     );
   }
 );
+
+/* GF-13: latest-turn inputs reach the final answer provider whole or are refused. */
+const officeRevisionMime = {
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+const addInputFixture = (id: string, extension: string, bytes: Buffer) => {
+  const prefix = `attachments/${createHash("sha256").update("artifact-qa@tomverse.app").digest("hex").slice(0, 20)}/`;
+  const row = { id, name: `${id}.${extension}`, mediaType: extension === "csv" ? "text/csv"
+    : extension === "txt" ? "text/plain" : officeRevisionMime[extension as keyof typeof officeRevisionMime],
+    size: bytes.length, kind: extension === "txt" || extension === "csv" ? "text" : "file", objectKey: `${prefix}${id}` };
+  world.uploads.push(row);
+  world.inputObjects.set(row.objectKey, bytes);
+  return { uploadId: id };
+};
+const clearInputFixtures = () => { world.uploads = []; world.inputObjects.clear(); };
+const revisionDocx = (text: string) => Buffer.from(renderDocumentDocx({ filename: "source.docx", format: "docx",
+  blocks: [{ type: "paragraph", text }] }));
+const revisionPptx = (text: string) => Buffer.from(renderPresentationPptx({ filename: "source.pptx", format: "pptx",
+  slides: [{ layout: "titleAndContent", title: "Plan", bullets: [text] }] }));
+
+for (const [extension, render] of [["docx", revisionDocx], ["pptx", revisionPptx]] as const) {
+  test(`GF-13 latest ${extension} overflow uses the actual shared budget and stops before final answer dispatch`, async () => {
+    try {
+      const historical = addInputFixture("previous-text", "txt", Buffer.from("x".repeat(299_990)));
+      const current = addInputFixture("current-office", extension, render("Keep blue. Budget is 200."));
+      const result = await ask({}, { autoRoutedTo: MODEL_ID, expectedStatus: 413, messages: [
+        { role: "user", content: "Earlier input", attachments: [historical] },
+        { role: "assistant", content: "Understood" },
+        { role: "user", content: "Create a revised file from the attachment", attachments: [current] },
+      ] });
+      assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
+      assert.equal(lastStreamTextOptions, null, "final answer provider must not run on partial text");
+      assert.ok(autoSelectionCalls > 0, "Auto selection already occurred; this test does not claim zero Auto cost");
+      assert.equal(world.artifactRows.length, 0);
+    } finally { clearInputFixtures(); }
+  });
+
+  test(`GF-13 latest ${extension} text fits the remaining budget without losing the tail`, async () => {
+    try {
+      const historical = addInputFixture("previous-small", "txt", Buffer.from("x".repeat(299_936)));
+      const current = addInputFixture("current-fitting", extension, render("Keep blue. Budget is 200. Tail confirmed."));
+      await ask({}, { messages: [
+        { role: "user", content: "Earlier input", attachments: [historical] },
+        { role: "assistant", content: "Understood" },
+        { role: "user", content: "Create a revised file from the attachment", attachments: [current] },
+      ] });
+      assert.ok(lastStreamTextOptions, "final answer provider was not dispatched");
+      assert.match(JSON.stringify(lastStreamTextOptions!.messages), /Tail confirmed/);
+      assert.equal(world.artifactRows.length, 0, "text-only answer is not a successful file and gets no fake failed card");
+    } finally { clearInputFixtures(); }
+  });
+}
+
+for (const extension of ["txt", "csv"]) {
+  test(`GF-13 latest ${extension} is refused rather than truncated at Send`, async () => {
+    try {
+      const historical = addInputFixture("past-plain", "txt", Buffer.from("x".repeat(299_990)));
+      const current = addInputFixture("latest-plain", extension, Buffer.from("keep,200\nlast,300\n"));
+      const result = await ask({}, { expectedStatus: 413, messages: [
+        { role: "user", content: "Earlier input", attachments: [historical] },
+        { role: "assistant", content: "Understood" },
+        { role: "user", content: "Create a revised file", attachments: [current] },
+      ] });
+      assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
+      assert.equal(lastStreamTextOptions, null);
+    } finally { clearInputFixtures(); }
+  });
+}
+
+test("GF-13 empty latest Office text stops final answer dispatch with a safe error code", async () => {
+  try {
+    const current = addInputFixture("empty-office", "docx", revisionDocx(""));
+    const result = await ask({}, { expectedStatus: 400, messages: [
+      { role: "user", content: "Create a revised file", attachments: [current] },
+    ] });
+    assert.equal(JSON.parse(result.body).code, "ATTACHMENT_NO_TEXT");
+    assert.equal(lastStreamTextOptions, null);
+    assert.doesNotMatch(result.body, /attachments\//);
+  } finally { clearInputFixtures(); }
+});
