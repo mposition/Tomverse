@@ -153,7 +153,7 @@ Executed locally in the PR worktree:
 
 | Check | Result |
 | --- | --- |
-| `npm run test:continuation-fidelity` | 45 pure/input tests + 156 mocked server cases passed |
+| `npm run test:continuation-fidelity` | 47 pure/input tests + 157 mocked server cases passed |
 | Additional actual-SDK history tool tests, after the parallel-call guard | 6 passed |
 | Continuation contracts, native CORS/proxy/transport, Auto core/UI/product and concurrency regression | 244 passed |
 | Native Chromium continuation + composer submit/tools | 22 passed |
@@ -174,3 +174,19 @@ bounded Router model step and requires approval for that actual paid execution s
 then explicit activation under the existing Router provider budget and continuation gates.
 No operational flags were changed. Native selection/receipt needs no new provider call.
 CI hold, merge/deploy and operational settings remain unchanged.
+
+
+Independent follow-up review `r-20261114-123705-c992d5` accepted `b36089cf4` with both
+Claude and Antigravity; no blocker/major findings. The accepted unchanged authority and
+cost boundary is reused for the following local correctness fixes: preserve the newest v2
+turn before history allocation, escape LIKE percent/underscore/backslash, avoid treating
+old visible text as retry delivery, and suppress the redundant zero-history-count label.
+Post-review core/native transport/real-loader/actual-SDK and upstream Review-to-Chat unit
+regressions: 95 passed, including a large Korean budget case and stale retry trailer.
+
+The completion fetch found `origin/main` at `5b5a83998` (Hono security override) and
+`origin/develop` at `acd9c263f` (including Review-to-Chat #3919). Develop was merged without
+conflict, its handoff implementation preserved byte-for-byte, and `npm ci` rerun against
+its updated lockfile. Installed `@hono/node-server` resolves to 2.1.8. Existing officeparser
+engine warnings remain on local Node 22.22.2; office-file parsing is outside these checks.
+Integrated root TypeScript, changed-file ESLint and native TypeScript/Vite build pass.

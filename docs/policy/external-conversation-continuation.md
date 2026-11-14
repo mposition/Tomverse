@@ -262,7 +262,7 @@ receipt를 만들어내지 않는다. Deep Research 원문 미전달 제약은 �
 `read_imported_source` 도구를 한 번 쓴다. LLM이 원문 언어의 짧은 literal query를 최대 3개 고르고,
 서버는 현재 소유·finalized·잠금·continuation flag를 확인한 snapshot 안에서만 검색한다.
 최근 200개 제한을 검색 대상에 적용하지 않는다. DB 결과는 최대 9개, 추가 발췌는 최대 3×500
-UTF-16 단위다. 직접 선택을 먼저 보존한 뒤 검색 원문과 최근 v2 tail을 같은 3,000 body-token /
+UTF-16 단위다. 직접 선택과 가장 최근 v2 turn을 먼저 보존한 뒤 검색 원문과 나머지 v2 tail을 같은 3,000 body-token /
 메시지당 4,000 code-point 예산에 합성한다. 범위 중복을 제거하며, 검색 활성 시 planner는
 `ext-seed-v4-retrieved`다. 일치 없음·예산 제한을 receipt로 구분한다. 전체 원문을 보냈거나
 모든 사실을 찾았다는 뜻은 아니다. 검색은 literal match이며 원문 언어/표현이 다르면 놓칠 수 있다.

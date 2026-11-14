@@ -19,6 +19,9 @@ export function validHistoryQueries(value: unknown): value is string[] {
         value.every(q => typeof q === "string" && q.trim().length > 0 && q.length <= 80);
 }
 
+/** Prisma contains uses LIKE patterns; preserve literal percent, underscore and backslash. */
+export const historyDatabaseLiteral = (query: string) => query.replace(/[\\%_]/g, "\\$&");
+
 /** Locate exact database matches without semantic ranking or copying client text. */
 export function historyMatchPassages(rows: readonly { ordinal: number; content: string }[], queries: string[]): Passage[] {
     const passages: Passage[] = [];

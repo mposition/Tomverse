@@ -67,7 +67,7 @@ import {
 import type { ContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
 import { LEGACY_CONTINUATION_TITLE } from "@/lib/continuationDisplayTitle";
 import { prisma } from "@/lib/prisma";
-import { historyMatchPassages, validHistoryQueries, HISTORY_SOURCE_MAX_BYTES } from "@/lib/continuationHistorySearch";
+import { historyDatabaseLiteral, historyMatchPassages, validHistoryQueries, HISTORY_SOURCE_MAX_BYTES } from "@/lib/continuationHistorySearch";
 
 /**
  * How many stored messages the seed builder reads.
@@ -841,7 +841,7 @@ export async function searchContinuationHistory(input: {
     const rows = input.queries.length ? await prisma.externalMessage.findMany({
         where: { userId: input.userId, externalConversationId: checked.seed.sourceId,
             role: { in: ["user", "assistant"] },
-            OR: input.queries.map(query => ({ content: { contains: query, mode: "insensitive" as const } })) },
+            OR: input.queries.map(query => ({ content: { contains: historyDatabaseLiteral(query), mode: "insensitive" as const } })) },
         orderBy: { ordinal: "desc" }, take: 9,
         select: { ordinal: true, content: true },
     }) : [];

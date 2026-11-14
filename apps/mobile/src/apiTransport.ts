@@ -191,6 +191,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     const scope = locationIdentity;
     const revision = sessionRevision;
     let sourceReceipt: ContinuationReceipt | undefined;
+    let sourceAttemptTextLength = 0;
     const publishReceipt = (receipt: ContinuationReceipt | undefined) => {
       if (!receipt || revision !== sessionRevision || signal.aborted) return;
       sourceReceipt = receipt; sourceReceiptByMessage.set(assistantMessageId, receipt);
@@ -257,8 +258,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       try {
         const result = await consumeChatStream({ reader, liveness: watchdog, onProgress: ({ displayText, retryingWithModelId }) => {
           if (revision !== sessionRevision || signal.aborted) return;
-          if (retryingWithModelId && sourceReceipt?.attempt === 0) publishReceipt({ ...sourceReceipt, attempt: 1, status: "unknown" });
-          if (displayText.trim() && sourceReceipt?.status === "unknown") publishReceipt({ ...sourceReceipt, status: "dispatched" });
+          const retryStarted = Boolean(retryingWithModelId && sourceReceipt?.attempt === 0);
+          if (displayText.length > sourceAttemptTextLength && displayText.trim() && sourceReceipt?.status === "unknown" && !retryStarted)
+            publishReceipt({ ...sourceReceipt, status: "dispatched" });
+          if (retryStarted && sourceReceipt) {
+            sourceAttemptTextLength = displayText.length;
+            publishReceipt({ ...sourceReceipt, attempt: 1, status: "unknown" });
+          }
           progress(displayText);
         } });
         const trailer = parseChatStreamTrailer(result.searchMetadataJson);

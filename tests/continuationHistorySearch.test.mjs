@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { historyMatchPassages, validHistoryQueries } from "../lib/continuationHistorySearch.ts";
+import { historyDatabaseLiteral, historyMatchPassages, validHistoryQueries } from "../lib/continuationHistorySearch.ts";
 import { planRetrievedContinuationSeed, planContinuationSeed } from "../lib/externalContinuationSeedCore.ts";
 import { continuationReceipt, deliveryReceipt, parseContinuationReceipt } from "../lib/continuationReceipt.ts";
 
@@ -50,4 +50,24 @@ test("manual, retrieved and recent ranges deduplicate without displacing manual 
     assert.deepEqual(plan.turns[0].selectedRanges, [passage].map(({ start, end }) => ({ start, end })));
     assert.equal(planRetrievedContinuationSeed({ messages: [row], selectedMessages: [row], passages: [],
         retrievedMessages: [row], retrievedPassages: [passage] }).turns.length, 0);
+});
+
+
+test("literal database queries escape LIKE wildcards without changing excerpt matching", () => {
+    assert.equal(historyDatabaseLiteral("100%_x"), "100\\%\\_x");
+    const row = { ordinal: 4, content: "The rate is 100%_x, not 100AAx." };
+    assert.ok(historyMatchPassages([row], ["100%_x"]).length);
+});
+
+test("large Korean manual and retrieved passages cannot evict the newest correction", () => {
+    const manual = [1, 2, 3].map(ordinal => ({ role: "user", ordinal, content: "선택".repeat(250), truncated: false }));
+    const retrieved = [4, 5, 6].map(ordinal => ({ role: "user", ordinal, content: "과거".repeat(250), truncated: false }));
+    const latest = { role: "user", ordinal: 999, content: "최신".repeat(700) + " 정정: 예산은 70달러이고 100달러가 아닙니다.", truncated: false };
+    const plan = planRetrievedContinuationSeed({ messages: [latest], selectedMessages: manual,
+        passages: manual.map(row => ({ ordinal: row.ordinal, start: 0, end: 500 })),
+        retrievedMessages: retrieved, retrievedPassages: retrieved.map(row => ({ ordinal: row.ordinal, start: 0, end: 500 })) });
+    assert.equal(plan.turns.filter(turn => turn.selectedRanges?.length).length, 3);
+    assert.ok(plan.turns.find(turn => turn.ordinal === 999)?.text.endsWith("정정: 예산은 70달러이고 100달러가 아닙니다."));
+    assert.ok(plan.estimatedTokens <= 3000);
+    assert.ok(plan.turns.filter(turn => turn.retrievedRanges?.length).length < 3, "history yields to the latest correction");
 });

@@ -444,7 +444,11 @@ test("native retry announcements stay unknown until the matching attempt receipt
             const response = await run(path, init);
             const initial = JSON.parse(response.headers.get("X-Chat-Continuation-Receipt"));
             const receipt = { ...initial, attempt: trailerAttempt, status: "not_sent", selectedCount: 0, recentCount: 0, uniqueMessageCount: 0 };
-            return new Response(buildRoutingRetryChunk("fallback-model") + "\u0000TOMVERSE_SEARCH_METADATA" + JSON.stringify({ continuationReceipt: receipt }), { headers: response.headers });
+            const chunks = ["Earlier text" + buildRoutingRetryChunk("fallback-model"), "\u0000TOMVERSE_SEARCH_METADATA" + JSON.stringify({ continuationReceipt: receipt })];
+            return new Response(new ReadableStream({ start(controller) {
+                for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+                controller.close();
+            } }), { headers: response.headers });
         } });
         await f.transport.send(f.conversation, "Question", [], new AbortController().signal, () => {}, { onReceipt: receipt => received.push(receipt) });
         assert.equal(received.at(-1).attempt, 1);

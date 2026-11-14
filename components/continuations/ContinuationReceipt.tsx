@@ -10,7 +10,7 @@ export function ContinuationReceipt({ receipt, t }: { receipt: Receipt; t: (key:
         .replaceAll("{recent}", String(receipt.recentCount)).replaceAll("{unique}", String(receipt.uniqueMessageCount));
     return <p data-testid="continuation-receipt" className="mt-2 text-xs text-zinc-500 dark:text-zinc-400" role="status">
         {text}
-        {receipt.status === "dispatched" && receipt.historyOutcome
+        {receipt.status === "dispatched" && (receipt.retrievedCount ?? 0) > 0
             ? ` · ${t("journey.receiptRetrieved").replaceAll("{count}", String(receipt.retrievedCount ?? 0))}` : ""}
         {receipt.status === "dispatched" && receipt.historyOutcome === "no_match" ? ` · ${t("journey.historyNoMatch")}` : ""}
         {receipt.status === "dispatched" && receipt.historyOutcome === "budget_limited" ? ` · ${t("journey.historyBudget")}` : ""}

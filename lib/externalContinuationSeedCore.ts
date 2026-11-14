@@ -372,27 +372,8 @@ function composeContinuationSeed(input: ContinuationSeedInput & {
     }
     let spent = [...turns.values()].reduce((sum, turn) => sum + estimateTextTokens(turn.text), 0);
     if (spent > budget) return empty();
-    const retrieved = decodePassages(encodePassages(input.retrievedPassages ?? [])) ?? [];
-    for (const passage of retrieved) {
-        const row = rows.get(passage.ordinal);
-        if (!row || !isContinuationSeedRole(row.role) || passage.end > row.content.length) continue;
-        let { start, end } = passage;
-        if (/[\uDC00-\uDFFF]/u.test(row.content.charAt(start))) start++;
-        if (/[\uD800-\uDBFF]/u.test(row.content.charAt(end - 1))) end--;
-        if (start >= end || !row.content.slice(start, end).trim()) continue;
-        const previous = turns.get(row.ordinal);
-        const ranges = mergeRanges([...(previous?.ranges ?? []), { start, end }]);
-        const text = renderRanges(row.content, ranges);
-        const cost = estimateTextTokens(text);
-        const nextSpent = spent - estimateTextTokens(previous?.text ?? "") + cost;
-        if (nextSpent > budget || Array.from(text).length > CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT) continue;
-        turns.set(row.ordinal, { role: row.role, ordinal: row.ordinal, text, ranges,
-            selectedRanges: previous?.selectedRanges ?? [], retrievedRanges: [{ start, end }], recentRanges: [],
-            shortened: row.truncated || ranges.length !== 1 || ranges[0].start > 0 || ranges[0].end < row.content.length });
-        spent = nextSpent;
-    }
     const recent = planContinuationSeed(input);
-    for (const turn of [...recent.turns].reverse()) {
+    const addRecent = (turn: ContinuationSeedTurn) => {
         const row = rows.get(turn.ordinal)!;
         const previous = turns.get(turn.ordinal);
         const selected = previous?.selectedRanges ?? [];
@@ -430,11 +411,36 @@ function composeContinuationSeed(input: ContinuationSeedInput & {
             kept = suffix(low);
             next = make(kept);
         }
-        if (!kept.length || !next.text.trim() || !fits(next)) continue;
+        if (!kept.length || !next.text.trim() || !fits(next)) return;
         spent = spent - previousCost + next.cost;
         turns.set(row.ordinal, { role: turn.role, ordinal: row.ordinal, text: next.text,
             ranges: next.merged, selectedRanges: selected, retrievedRanges: previous?.retrievedRanges, recentRanges: kept,
             shortened: row.truncated || next.merged.length !== 1 || next.merged[0].start !== 0 || next.merged[0].end !== row.content.length });
+    };
+    // History cannot evict the most recent v2 turn (including its closing correction).
+    const newest = input.retrievedPassages ? recent.turns.at(-1) : undefined;
+    if (newest) addRecent(newest);
+    const retrieved = decodePassages(encodePassages(input.retrievedPassages ?? [])) ?? [];
+    for (const passage of retrieved) {
+        const row = rows.get(passage.ordinal);
+        if (!row || !isContinuationSeedRole(row.role) || passage.end > row.content.length) continue;
+        let { start, end } = passage;
+        if (/[\uDC00-\uDFFF]/u.test(row.content.charAt(start))) start++;
+        if (/[\uD800-\uDBFF]/u.test(row.content.charAt(end - 1))) end--;
+        if (start >= end || !row.content.slice(start, end).trim()) continue;
+        const previous = turns.get(row.ordinal);
+        const ranges = mergeRanges([...(previous?.ranges ?? []), { start, end }]);
+        const text = renderRanges(row.content, ranges);
+        const cost = estimateTextTokens(text);
+        const nextSpent = spent - estimateTextTokens(previous?.text ?? "") + cost;
+        if (nextSpent > budget || Array.from(text).length > CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT) continue;
+        turns.set(row.ordinal, { role: row.role, ordinal: row.ordinal, text, ranges,
+            selectedRanges: previous?.selectedRanges ?? [], retrievedRanges: [{ start, end }], recentRanges: previous?.recentRanges ?? [],
+            shortened: row.truncated || ranges.length !== 1 || ranges[0].start > 0 || ranges[0].end < row.content.length });
+        spent = nextSpent;
+    }
+    for (const turn of [...recent.turns].reverse()) {
+        if (turn.ordinal !== newest?.ordinal) addRecent(turn);
     }
     const ordered = [...turns.values()].sort((a, b) => a.ordinal - b.ordinal);
     const eligible = input.messages.filter(row => isContinuationSeedRole(row.role) && row.content.trim());
