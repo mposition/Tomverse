@@ -7,7 +7,9 @@
  * relay releases every local Decision Maker marker at the start of each tick,
  * so the relay runs as one process of its own (`--dm-relay`), never beside a
  * worker loop. Its switch and token are in a file only this unit reads. It
- * keeps the bridge account and hardening, and has no [Install].
+ * keeps the bridge account and hardening, and an enabled relay starts at boot
+ * like the worker bridges (owner decision 2026-11-14: the static unit stayed
+ * dead after a reboot on 2026-11-09).
  */
 
 import test from "node:test";
@@ -70,9 +72,10 @@ test("a configuration error waits for a person; a start failure is retried", () 
   assert.match(relay, /pub const DM_RELAY_MISCONFIGURED_EXIT: i32 = 2;/);
 });
 
-test("the unit has no [Install]: nothing starts at boot", () => {
-  assert.doesNotMatch(unit, /^\[Install\]/m);
-  assert.doesNotMatch(unit, /^WantedBy=/m);
+test("an enabled relay starts at boot, like the worker bridges", () => {
+  assert.match(unit, /^\[Install\]$/m);
+  assert.deepEqual(values("WantedBy"), ["multi-user.target"]);
+  assert.deepEqual(values("WantedBy"), valuesOf(template, "WantedBy"));
   assert.doesNotMatch(unit, /^Alias=/m);
 });
 
@@ -101,7 +104,7 @@ test("every directive in the unit is one this test names", () => {
     "CapabilityBoundingSet", "AmbientCapabilities", "ProtectHome", "ProtectSystem",
     "PrivateTmp", "PrivateDevices", "ProtectKernelTunables", "ProtectKernelModules",
     "ProtectControlGroups", "RestrictSUIDSGID", "LockPersonality",
-    "RestrictAddressFamilies", "TemporaryFileSystem", "UMask",
+    "RestrictAddressFamilies", "TemporaryFileSystem", "UMask", "WantedBy",
   ]);
   assert.deepEqual(directives.filter((name) => !known.has(name)), []);
   // EnvironmentFile is the one directive given twice.
