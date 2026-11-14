@@ -42,8 +42,15 @@
 #   - the local AMUX server and the Tomverse app answer;
 #   - the unit's run is still the one judged, right before the restart.
 #
-# A relay that exited is systemd's: Restart=on-failure restarts a crash, and
-# exit 2 (enabled without a usable token) waits for a person.
+# One more case is started: a relay that is inactive and has not been active
+# once since this boot (ActiveEnterTimestampMonotonic=0), the state a reboot
+# left the static unit in on 2026-11-09. The unit now has an [Install] section,
+# so an enabled relay starts at boot and this covers a host where it is not
+# enabled. The same hourly bound, health checks and re-read apply.
+#
+# Any other relay that exited is systemd's: Restart=on-failure restarts a
+# crash, exit 2 (enabled without a usable token) waits for a person, and one a
+# person stopped has been active this boot and is left alone.
 #
 # Runs as its own system account. A polkit rule installed with it lets that
 # account restart this one unit and nothing else; it reads the journal through
@@ -96,66 +103,80 @@ answers() {
   curl --silent --show-error --fail --max-time 5 --output /dev/null "$@" 2>/dev/null
 }
 
-# "<ActiveState> <SubState> <InvocationID>" of the relay's current run.
+# "<ActiveState> <SubState> <ActiveEnterTimestampMonotonic> <InvocationID>" of
+# the relay's current run. The id is last: an inactive unit may have none.
 current_run() {
-  printf '%s %s %s' \
-    "$(systemctl show -p ActiveState --value "$unit" 2>/dev/null || true)" \
-    "$(systemctl show -p SubState --value "$unit" 2>/dev/null || true)" \
-    "$(systemctl show -p InvocationID --value "$unit" 2>/dev/null || true)"
+  printf '%s %s %s %s'     "$(systemctl show -p ActiveState --value "$unit" 2>/dev/null || true)"     "$(systemctl show -p SubState --value "$unit" 2>/dev/null || true)"     "$(systemctl show -p ActiveEnterTimestampMonotonic --value "$unit" 2>/dev/null || true)"     "$(systemctl show -p InvocationID --value "$unit" 2>/dev/null || true)"
 }
 
-read -r state sub invocation <<<"$(current_run)"
-# Not running: stopped by a person, off, or failed and left to systemd.
-[[ "$state" == active && "$sub" == running ]] || exit 0
-if [[ ! "$invocation" =~ ^[0-9a-f]{32}$ ]]; then
-  log "$unit is running but its run is unreadable (no invocation id); left alone"
-  exit 0
-fi
-
-if ! lines=$(journalctl "_SYSTEMD_INVOCATION_ID=$invocation" --no-pager -q -o cat 2>/dev/null); then
-  log "$unit's journal is unreadable; left alone"
-  exit 0
-fi
-read -r verdict reason <<<"$(decide "$lines")"
-case "$verdict" in
-  running) exit 0 ;;
-  hold)
-    log "$unit halted; $reason, left halted"
+judged=$(current_run)
+read -r state sub entered invocation <<<"$judged"
+if [[ "$state" == inactive && "$sub" == dead && "$entered" == 0 ]]; then
+  # Never active since this boot: nobody started it and nobody stopped it.
+  # 2026-11-09: a reboot left the then-static unit dead for five days. A relay
+  # a person stopped has been active this boot and is left alone, and one
+  # whose switch is off exits 0 at once and is never started again.
+  if [[ "$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)" != loaded ]]; then
     exit 0
-    ;;
-esac
-cause=$reason
+  fi
+  what="was not started since boot"
+  cause=not_started_since_boot
+elif [[ "$state" == active && "$sub" == running ]]; then
+  if [[ ! "$invocation" =~ ^[0-9a-f]{32}$ ]]; then
+    log "$unit is running but its run is unreadable (no invocation id); left alone"
+    exit 0
+  fi
+  if ! lines=$(journalctl "_SYSTEMD_INVOCATION_ID=$invocation" --no-pager -q -o cat 2>/dev/null); then
+    log "$unit's journal is unreadable; left alone"
+    exit 0
+  fi
+  read -r verdict reason <<<"$(decide "$lines")"
+  case "$verdict" in
+    running) exit 0 ;;
+    hold)
+      log "$unit halted; $reason, left halted"
+      exit 0
+      ;;
+  esac
+  what=halted
+  cause=$reason
+else
+  # Stopped by a person, off, failed (left to systemd and, for exit 2, to a
+  # person) or on its way somewhere.
+  exit 0
+fi
 
 # This script's own journal says whether it restarted the relay in the last
-# hour. Unreadable is not "no": the relay is left halted.
+# hour. Unreadable is not "no": the relay is left as it is.
 if ! recent=$(journalctl -u "$self" --since=-60min --no-pager -q -o cat 2>/dev/null); then
-  log "$unit halted with cause=$cause; this unit's own journal is unreadable, left halted"
+  log "$unit $what with cause=$cause; this unit's own journal is unreadable, left as it is"
   exit 0
 fi
 if grep -qE "$restarted_line" <<<"$recent"; then
-  log "$unit halted with cause=$cause again within an hour of a restart; left halted"
+  log "$unit $what with cause=$cause again within an hour of a restart; left as it is"
   exit 0
 fi
 
 # The local AMUX server's certificate is self-signed; the relay unit's start
 # check reads it the same way.
 if ! answers --insecure "$amux_health"; then
-  log "$unit halted; the local AMUX server does not answer, no restart this run"
+  log "$unit $what; the local AMUX server does not answer, no restart this run"
   exit 0
 fi
 if ! answers --proto '=https' "$app_health"; then
-  log "$unit halted; the Tomverse app does not answer, no restart this run"
+  log "$unit $what; the Tomverse app does not answer, no restart this run"
   exit 0
 fi
 
-# Read again right before the restart: a person may have restarted or stopped
-# the unit while this run was checking, and the new run is not the one judged.
-if [[ "$(current_run)" != "active running $invocation" ]]; then
+# Read again right before the restart: a person may have started, restarted
+# or stopped the unit while this run was checking, and the new state is not
+# the one judged. `restart` starts a unit that is not running.
+if [[ "$(current_run)" != "$judged" ]]; then
   log "$unit changed while it was being checked; left alone"
   exit 0
 fi
 if systemctl restart --no-block "$unit"; then
-  log "$unit halted with cause=$cause; restarted"
+  log "$unit $what with cause=$cause; restarted"
 else
-  log "$unit halted with cause=$cause; the restart was refused" >&2
+  log "$unit $what with cause=$cause; the restart was refused" >&2
 fi

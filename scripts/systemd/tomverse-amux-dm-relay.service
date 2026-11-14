@@ -49,5 +49,12 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 TemporaryFileSystem=/var/lib:ro
 UMask=0077
 
-# Intentionally no [Install]: like the bridges, the relay starts when the
-# operator starts it, never at boot without anyone looking.
+# Owner decision 2026-11-14: the enabled relay starts at boot, as the worker
+# bridges have since 2026-10-20 (tomverse-amux-bridge@.service). Without it
+# the unit was static: a reboot on 2026-11-09 left it inactive (dead) with no
+# halt or exit line, and no worker question reached the Decision Maker for five
+# days. A started relay still does nothing unless TOMVERSE_AMUX_DM_RELAY in
+# dm-relay.env is enabled and the app's TOMVERSE_AMUX_DM_ROUTING is open.
+# `systemctl disable` returns it to start-by-hand.
+[Install]
+WantedBy=multi-user.target

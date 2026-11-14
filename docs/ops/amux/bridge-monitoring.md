@@ -310,6 +310,10 @@ relay(`tomverse-amux-dm-relay.service`, `scripts/systemd/tomverse-amux-dm-relay.
 검토, T2 draft를 DM 카드로 옮기고 확정된 답을 적용한다. 2026-11-09 10:30 AEST부터 이 호출이 끊겼고, 그 사이 worker
 질문 3건이 DM에 가지 못했는데 5일 동안 아무 알림도 없었다. 위 1~5절은 relay를 보지 않았다.
 
+**11-09의 원인:** relay unit에 `[Install]` 절이 없어(`static`) 재부팅 뒤 다시 켜지지 않았다. 박스에서
+`Active: inactive (dead)`, journal에는 halt·exit 줄 없이 11-08 10:08 UTC의 정상 처리 줄이 마지막이었다. 이제 unit에
+`WantedBy=multi-user.target`이 있고(worker bridge와 같은 운영자 결정, 2026-11-14), enable한 relay는 부팅 때 켜진다.
+
 relay는 halt해도 **프로세스가 끝나지 않는다.** `amux dm relay halt: <cause>; …` 한 줄을 남기고 `active`인 채로
 local marker만 풀며 아무 일도 하지 않는다. 그래서 systemd 상태만으로는 halt를 알 수 없고, 앱의 호출 기록이 주
 신호다.
@@ -318,7 +322,38 @@ local marker만 풀며 아무 일도 하지 않는다. 그래서 systemd 상태�
 |---|---|---|---|---|
 | 앱의 호출 기록 | 앱의 15분 인프라 감시 | relay의 마지막 sync 호출 시각(`AppSetting` `amuxDmRelayLastSyncAt`) | halt, 프로세스 정지, 호스트·네트워크 끊김 | `AMUX_DM_RELAY_SILENT` → Slack·운영자 이메일·Sentry |
 | box watchdog(1절) | Ubuntu 호스트, 5분마다 | relay unit의 `systemctl is-active` | `failed`·`inactive` | Healthchecks.io → Slack·이메일 |
-| 자동 재시작(6.2절) | Ubuntu 호스트, 2분마다 | relay 현재 실행의 halt 줄 | 아래 두 읽기 halt만 재시작 | 알림이 아니라 journal 한 줄 |
+| 자동 재시작(6.2절) | Ubuntu 호스트, 2분마다 | relay 현재 실행의 halt 줄, 이번 부팅의 시작 여부 | 두 읽기 halt와 부팅 뒤 한 번도 안 켜진 relay만 시작 | 알림이 아니라 journal 한 줄 |
+
+### 6.0 relay unit 갱신과 부팅 시 시작 (운영자)
+
+실행 위치: Ubuntu 호스트(192.168.0.7)의 bash, 관리자 계정 `tomverse-admin`. sudo가 필요하고 production 자격증명은 필요
+없다. `<SHA>`는 이 절이 들어 있는 병합 commit의 전체 40자리 SHA다. 바이너리와 env 파일은 바꾸지 않는다.
+
+```bash
+sha=<SHA>
+d=$(mktemp -d)
+curl -fsSL --proto '=https' -o "$d/tomverse-amux-dm-relay.service" "https://raw.githubusercontent.com/mposition/Tomverse/$sha/scripts/systemd/tomverse-amux-dm-relay.service"
+sudo install -o root -g root -m 0644 "$d/tomverse-amux-dm-relay.service" /etc/systemd/system/tomverse-amux-dm-relay.service
+sudo systemd-analyze verify /etc/systemd/system/tomverse-amux-dm-relay.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now tomverse-amux-dm-relay.service
+systemctl is-enabled tomverse-amux-dm-relay.service
+```
+
+마지막 줄이 `enabled`이면 끝이다. 부팅 때 켜지지 않게 되돌리려면 `sudo systemctl disable tomverse-amux-dm-relay.service`.
+
+같은 문제가 있는지 다른 unit도 훑었다(2026-11-14, 저장소 기준). 상시 실행되면서 `[Install]`이 없는 것은 relay와
+`amux-v22-read-only-api-sidecar@.service`뿐이고, 뒤의 것은 키·동의 절차를 거친 인스턴스만 손으로 시작하도록 일부러
+뺐다. DM broker와 launcher는 socket(`WantedBy=sockets.target`)으로, recovery controller·inspector·v4 analysis·retention·
+v19 session cycle은 timer(`WantedBy=timers.target`)로 켜진다. worker bridge(`tomverse-amux-bridge@`)와 CLI monitor는
+`multi-user.target`이다. `tomverse-amux-v22-sidecar@`의 unit 파일은 저장소가 아니라 박스 번들에 있어 여기서 볼 수
+없다. 박스에서 한 번 확인한다(읽기 전용):
+
+```bash
+systemctl list-unit-files 'tomverse-amux-*' 'amux-*' --no-pager
+```
+
+`static`이면서 상시 실행돼야 하는 unit이 있으면 알린다.
 
 ### 6.1 알림
 
@@ -377,7 +412,12 @@ journalctl -u tomverse-amux-dm-relay.service -n 50 --no-pager -o short-iso
   앱이 relay가 읽지 못하는 모양으로 계속 답하면(배포 중 계약 불일치) 새 프로세스도 곧 halt하는데, `delivery_read_unreadable`의 halt tick은
   sync를 한 번 부르므로 2분마다 재시작하면 앱의 침묵 알림이 영영 울리지 않는다. 두 번째 halt는 그대로 두어 6.1절 알림이 울린다.
 - 로컬 AMUX `/health`와 Tomverse `/api/health`가 답해야 하고, 재시작 직전에 unit의 실행이 판정한 그 실행인지 다시 읽는다.
-- `failed`·`inactive`인 relay는 건드리지 않는다(종료 코드 2는 사람, 그 밖은 systemd의 `Restart=on-failure`).
+- **이번 부팅에서 한 번도 켜진 적 없는** relay(`inactive`/`dead`, `ActiveEnterTimestampMonotonic=0`, unit 파일 있음)는
+  시작한다(`not_started_since_boot`). 11-09에 재부팅이 남긴 상태다. enable한 relay는 systemd가 부팅 때 켜므로, 이것은
+  enable되지 않은 호스트를 덮는다. 한 시간 제한, health check, 직전 재확인은 같다. relay 스위치가 꺼져 있으면 relay는
+  바로 0으로 끝나고 다시 시작되지 않는다.
+- 이번 부팅에 한 번이라도 켜졌다가 `inactive`인 relay(사람이 멈춤)와 `failed`인 relay는 건드리지 않는다(종료 코드 2는
+  사람, 그 밖은 systemd의 `Restart=on-failure`).
 - 전용 시스템 계정 `tomverse-dm-relay-autorestart`로 돈다. polkit 규칙
   (`/etc/polkit-1/rules.d/50-tomverse-dm-relay-autorestart.rules`)이 그 계정에 `tomverse-amux-dm-relay.service`의
   **restart만** 허용한다. stop·start·bridge·broker·다른 unit은 허용하지 않는다. journal은 `systemd-journal` 보조 그룹으로 읽는다.

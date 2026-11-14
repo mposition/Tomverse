@@ -58,7 +58,8 @@ const V22 = "amux dm relay: v22 questions: resolved false, filed 1, closed 0";
 
 /**
  * `systemctl show` answers the relay's ActiveState, SubState and InvocationID
- * from FAKE_STATE / FAKE_SUB / FAKE_ID; after FAKE_FLIP_AFTER reads the run
+ * from FAKE_STATE / FAKE_SUB / FAKE_ID, ActiveEnterTimestampMonotonic from
+ * FAKE_ENTERED and LoadState from FAKE_LOAD; after FAKE_FLIP_AFTER reads the run
  * changes, as if a person restarted it. `restart` is logged and answered with
  * FAKE_RESTART_STATUS. `journalctl` answers the invocation's lines from
  * relay.log and this unit's own last hour from self.log; FAKE_JOURNAL_FAIL
@@ -69,8 +70,8 @@ const STUBS = [
   '  if [ "$1" = show ]; then',
   '    prop=$3',
   '    n=$(cat show.count 2>/dev/null || echo 0); n=$((n + 1)); echo $n > show.count',
-  '    if [ "$FAKE_FLIP_AFTER" -gt 0 ] && [ $n -gt "$FAKE_FLIP_AFTER" ]; then case "$prop" in ActiveState) echo active ;; SubState) echo running ;; InvocationID) echo ffffffffffffffffffffffffffffffff ;; esac; return 0; fi',
-  '    case "$prop" in ActiveState) echo "$FAKE_STATE" ;; SubState) echo "$FAKE_SUB" ;; InvocationID) echo "$FAKE_ID" ;; esac',
+  '    if [ "$FAKE_FLIP_AFTER" -gt 0 ] && [ $n -gt "$FAKE_FLIP_AFTER" ]; then case "$prop" in ActiveState) echo active ;; SubState) echo running ;; ActiveEnterTimestampMonotonic) echo 999 ;; InvocationID) echo ffffffffffffffffffffffffffffffff ;; LoadState) echo loaded ;; esac; return 0; fi',
+  '    case "$prop" in ActiveState) echo "$FAKE_STATE" ;; SubState) echo "$FAKE_SUB" ;; ActiveEnterTimestampMonotonic) echo "$FAKE_ENTERED" ;; InvocationID) echo "$FAKE_ID" ;; LoadState) echo "$FAKE_LOAD" ;; esac',
   "    return 0",
   "  fi",
   '  if [ "$1" = restart ]; then printf "%s\\n" "$*" >> restart.log; return "$FAKE_RESTART_STATUS"; fi',
@@ -98,6 +99,8 @@ const run = ({
   appUp = true,
   restartStatus = 0,
   flipAfter = 0,
+  entered = "52310449",
+  load = "loaded",
   journalFail = "",
 }) => {
   const dir = mkdtempSync(join(tmpdir(), "dm-relay-autorestart-"));
@@ -117,6 +120,8 @@ const run = ({
         FAKE_APP_STATUS: appUp ? "0" : "22",
         FAKE_RESTART_STATUS: String(restartStatus),
         FAKE_FLIP_AFTER: String(flipAfter),
+        FAKE_ENTERED: entered,
+        FAKE_LOAD: load,
         FAKE_JOURNAL_FAIL: journalFail,
       },
     });
@@ -247,7 +252,7 @@ test("a second halt within an hour of a restart stays halted", { skip: noBash },
   });
   assert.deepEqual(result.restarts, []);
   assert.deepEqual(result.curls, []);
-  assert.match(result.output, /again within an hour of a restart; left halted/);
+  assert.match(result.output, /again within an hour of a restart; left as it is/);
   assert.ok(
     result.journalArgs.some((args) => args.includes("-u tomverse-dm-relay-autorestart.service --since=-60min")),
     result.journalArgs.join("\n")
@@ -301,7 +306,7 @@ test("no restart while the local AMUX server or the app does not answer", { skip
 });
 
 test("a unit that changed while it was being checked is left alone", { skip: noBash }, () => {
-  const result = run({ lines: [deliveryHalt("delivery_read_unreadable")], flipAfter: 3 });
+  const result = run({ lines: [deliveryHalt("delivery_read_unreadable")], flipAfter: 4 });
   assert.deepEqual(result.restarts, []);
   assert.match(result.output, /changed while it was being checked; left alone/);
 });
@@ -381,4 +386,44 @@ test("the installer is valid bash", { skip: noBash }, () => {
     const result = spawnSync(bash, ["-n"], { input: text.replace(/\r\n/g, "\n"), encoding: "utf8" });
     assert.equal(result.status, 0, `${name}: ${result.stderr}`);
   }
+});
+
+// 2026-11-09: a reboot left the then-static relay unit inactive (dead) with no
+// halt or exit line. A relay that has not been active once since this boot is
+// started; one a person stopped has been active and is left alone.
+test("a relay never started since boot is started", { skip: noBash }, () => {
+  const result = run({ lines: [], state: "inactive", sub: "dead", entered: "0", id: "" });
+  assert.deepEqual(result.restarts, [`restart --no-block ${RELAY}`]);
+  assert.match(result.output, /was not started since boot with cause=not_started_since_boot; restarted$/m);
+  assert.equal(result.curls.length, 2, "both health checks first");
+});
+
+test("a relay a person stopped this boot is left alone", { skip: noBash }, () => {
+  const result = run({ lines: ["amux dm relay started"], state: "inactive", sub: "dead", entered: "52310449" });
+  assert.deepEqual(result.restarts, []);
+  assert.equal(result.output, "");
+});
+
+test("a relay unit that is not installed is never started", { skip: noBash }, () => {
+  const result = run({ lines: [], state: "inactive", sub: "dead", entered: "0", id: "", load: "not-found" });
+  assert.deepEqual(result.restarts, []);
+  assert.deepEqual(result.curls, []);
+});
+
+test("a relay not started since boot keeps the hourly bound and the health checks", { skip: noBash }, () => {
+  const bounded = run({
+    lines: [], state: "inactive", sub: "dead", entered: "0", id: "",
+    selfLines: [`tomverse-dm-relay-autorestart: ${RELAY} was not started since boot with cause=not_started_since_boot; restarted`],
+  });
+  assert.deepEqual(bounded.restarts, []);
+  assert.match(bounded.output, /again within an hour of a restart/);
+  const down = run({ lines: [], state: "inactive", sub: "dead", entered: "0", id: "", amuxUp: false });
+  assert.deepEqual(down.restarts, []);
+  assert.match(down.output, /the local AMUX server does not answer/);
+});
+
+test("a relay started by a person while it was being checked is left alone", { skip: noBash }, () => {
+  const result = run({ lines: [], state: "inactive", sub: "dead", entered: "0", id: "", flipAfter: 4 });
+  assert.deepEqual(result.restarts, []);
+  assert.match(result.output, /changed while it was being checked; left alone/);
 });
