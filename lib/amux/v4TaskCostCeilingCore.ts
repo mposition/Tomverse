@@ -381,9 +381,10 @@ export function checkV4TaskApprovedCeiling(
   // default off: v4TaskNewModelRouteSwitch.ts) a route on a model the receipt
   // did not name passes too, but only while its own per-attempt cost times the
   // current attempt bound stays within the approved ceiling and no token or
-  // attempt bound grew. Every attempt reserves its route's per-attempt cost and
-  // attempts never exceed maxAttempts, so such a route cannot spend past the
-  // ceiling the owner approved. Until then every worker added on a new model
+  // attempt bound grew: the same expected-cost test the receipt's own ceiling
+  // applies to the routes it named. It admits a route; it does not bound
+  // cumulative spend (claim and start count attempts against their own
+  // attempt budget, not caps.maxAttempts). Until then every worker added on a new model
   // (antigravity-impl, 2026-11-13) sent every waiting Task of its grade back
   // for reconfirmation.
   const approvedModels = new Set(approved.routes.map((route) =>
