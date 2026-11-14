@@ -17,6 +17,7 @@ import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocale
 import {
   AmuxLegacyCardPanel,
   isAmuxRemakeOnlyCardKind } from "@/components/admin/AmuxLegacyCardPanel";
+import { AmuxOwnerQueueDm } from "@/components/admin/AmuxOwnerQueueDm";
 import { AmuxOwnerQueueEngineeringItems } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
 import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
 import { AmuxTaskUnknownUsageList } from "@/components/admin/AmuxAttemptUsageAcceptance";
@@ -265,6 +266,14 @@ export function AmuxOwnerQueueDecision({
           </div>
         ) : null}
       </div>
+
+      {/* The Decision Maker's proposal for this card (or why it has none, or why the card
+          was left to a person). Confirming it posts to the existing judgment route; the
+          decision below stays the owner's to make either way. */}
+      {group !== "question" && item.dmSettlement ? (
+        <AmuxOwnerQueueDm key={item.taskId + ":" + (item.dmSettlement.status === "read" ? item.dmSettlement.settlementId : "unread")}
+          settlement={item.dmSettlement} />
+      ) : null}
 
       {/* The engineering agent's open items on this card, decided here through
           the engineering routes (the same as Admin › Engineering › Decisions). */}

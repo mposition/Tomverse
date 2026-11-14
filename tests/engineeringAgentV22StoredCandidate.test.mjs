@@ -98,3 +98,16 @@ test("stored v22 patch refuses a missing patch, base drift and candidate errors"
   { ok: false, reason: "tree_verification_failed" });
 });
 
+
+test("stored v22 patch names each read step before it starts", async () => {
+  const stages = [];
+  await loadEngineeringAgentV22StoredCandidate(attemptId,
+    ports({ onStage: (stage) => stages.push(stage) }));
+  assert.deepEqual(stages, ["authorization", "patch_read",
+    "candidate_rebuild", "base_evidence", "recheck"]);
+  const failed = [];
+  await assert.rejects(loadEngineeringAgentV22StoredCandidate(attemptId,
+    ports({ onStage: (stage) => failed.push(stage),
+      readTier: async () => { throw new Error("github"); } })), /github/);
+  assert.equal(failed.at(-1), "base_evidence");
+});

@@ -9,7 +9,7 @@ import {
     isRecommendationSendable,
     RECOMMENDATION_SENDING_STATUS,
     RECOMMENDATION_SENT_STATUS,
-    reportFindings,
+    recommendationFindings,
     withRecommendationStatus,
     type RecommendationStatus,
 } from "@/lib/autoRouterRecommendationsCore";
@@ -93,7 +93,7 @@ export async function readRecommendationForSend(input: { cycleId: string; index:
     if (!cycle || cycle.status === "running") return null;
     const recommendation = actionableRecommendations(cycle.summary).find((item) => item.index === input.index);
     if (!recommendation) return null;
-    return { recommendation, findings: reportFindings(cycle.summary), createdAt: cycle.createdAt.toISOString() };
+    return { recommendation, findings: recommendationFindings(cycle.summary, input.index), createdAt: cycle.createdAt.toISOString() };
 }
 
 /**
