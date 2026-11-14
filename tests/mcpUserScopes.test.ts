@@ -13,7 +13,11 @@ test("published scope lists make providers connectable without an operator scope
   assert.equal(supabase.id, "supabase"); assert.equal(supabase.oauth?.scope, "");
   assert.deepEqual(supabase.oauth?.selectableScopes, preset("supabase").oauth!.allowedScopes);
   // Providers without a published list stay closed ("server configuration required").
-  assert.deepEqual(mcpServers(env("atlassian,canva,monday")), []);
+  assert.deepEqual(mcpServers(env("codspeed,gc-ai,incident-io,monday,postman")), []);
+  // Lists published only in protected-resource metadata (RFC 9728) are the bound too.
+  const opened = mcpServers(env("atlassian,atlassian-2,canva,hostinger,mercadopago,pendo,wix"));
+  assert.deepEqual(opened.map(server => server.id), ["atlassian", "atlassian-2", "canva", "hostinger", "mercadopago", "pendo", "wix"]);
+  for (const server of opened) assert.deepEqual(server.oauth?.selectableScopes, preset(server.id).oauth!.allowedScopes, server.id);
   // The largest published list still validates as policy.
   const [cloudflare] = mcpServers(env("cloudflare"));
   assert.equal(cloudflare.oauth?.selectableScopes?.length, preset("cloudflare").oauth!.allowedScopes.length);
