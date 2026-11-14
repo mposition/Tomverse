@@ -72,6 +72,39 @@ test("only assets one of the accounts' platforms may carry, in id order", () => 
   assert.deepEqual(listed.map((entry) => entry.id), ["asset_a", "asset_z"]);
 });
 
+test("only assets some account could still post stay in the answer (2026-11-14: used cards grew it past the cap)", async () => {
+  const { marketingAssetsSomeAccountCanUse } = await import("@/lib/marketingGeneratorContext");
+  const listed = (id, overrides = {}) => ({
+    id,
+    allowedChannels: ["instagram"],
+    altLocales: ["ko"],
+    claimIds: [],
+    validUntil: "2027-01-31",
+    kind: "video",
+    alt: { ko: "화면" },
+    ...overrides,
+  });
+  const assets = [
+    listed("used-by-both"),
+    listed("used-by-one"),
+    listed("fresh"),
+    listed("no-file", { kind: null }),
+    listed("english-only", { altLocales: ["en"], alt: { en: "screen" } }),
+    listed("x-only", { allowedChannels: ["x"] }),
+  ];
+  const accounts = [
+    { channel: "instagram", allowedLocales: ["ko"], usedAssetIds: ["used-by-both", "used-by-one"] },
+    { channel: "instagram", allowedLocales: ["ko"], usedAssetIds: ["used-by-both"] },
+    { channel: "threads", allowedLocales: ["en"], usedAssetIds: [] },
+  ];
+  assert.deepEqual(
+    marketingAssetsSomeAccountCanUse(assets, accounts).map((asset) => asset.id),
+    ["used-by-one", "fresh"],
+  );
+  // No account, nothing to offer.
+  assert.deepEqual(marketingAssetsSomeAccountCanUse(assets, []), []);
+});
+
 test("each asset's earlier texts are bounded per locale, cut short and capped in all (owner decision 2026-11-06)", async () => {
   const {
     marketingPublishedCopies,

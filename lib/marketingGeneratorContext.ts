@@ -340,6 +340,39 @@ export function generatorAssetProjection(
     .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
 }
 
+/**
+ * Only the assets some account could still post: one on a platform the asset
+ * allows, in a locale it has alt text for, that has not used it, with a stored
+ * file behind it. The rest can never be offered (`marketingA5AssetsFor`
+ * refuses them), yet every approved card stayed in the answer, so the context
+ * grew with each day's cards until it passed `MARKETING_GENERATOR_CONTEXT_MAX_BYTES`
+ * and the 2026-11-14 run stopped on it. What stays is bounded by unused stock.
+ */
+export function marketingAssetsSomeAccountCanUse(
+  assets: readonly MarketingGeneratorAsset[],
+  accounts: ReadonlyArray<{
+    readonly channel: string;
+    readonly allowedLocales: readonly string[];
+    readonly usedAssetIds: readonly string[];
+  }>,
+): MarketingGeneratorAsset[] {
+  const usable = accounts.map((account) => ({
+    channel: account.channel,
+    locales: new Set(account.allowedLocales),
+    used: new Set(account.usedAssetIds),
+  }));
+  return assets.filter(
+    (asset) =>
+      asset.kind !== null &&
+      usable.some(
+        (account) =>
+          asset.allowedChannels.includes(account.channel) &&
+          asset.altLocales.some((locale) => account.locales.has(locale)) &&
+          !account.used.has(asset.id),
+      ),
+  );
+}
+
 export type MarketingGeneratorReport = {
   readonly reportId: string;
   readonly periodEnd: string;
@@ -580,6 +613,13 @@ export async function readMarketingGeneratorContext(
   // The registry (FOR SHARE) and then the stored assets' kinds, as before.
   const assetRegistry = await readMarketingAssetRegistry(db);
   const assetMedia = await readApprovedMarketingAssetMedia(db);
+  const assets = marketingAssetsSomeAccountCanUse(
+    generatorAssetProjection(assetRegistry, channels.map((row) => row.channel), assetMedia.kinds, assetMedia.longForm),
+    channels.map((row) => ({ ...row, usedAssetIds: usedAssets.get(row.id) ?? [] })),
+  );
+  // An account's used ids matter only for the assets still listed; the intake
+  // refuses a reused asset on its own, so the rest would only grow the answer.
+  const listed = new Set(assets.map((asset) => asset.id));
   return {
     channels: channels.map((row) => ({
       id: row.id,
@@ -588,7 +628,7 @@ export async function readMarketingGeneratorContext(
       defaultLocale: row.defaultLocale,
       allowedLocales: [...row.allowedLocales],
       recentClaimIds: [...(recentClaims.get(row.id) ?? [])],
-      usedAssetIds: [...(usedAssets.get(row.id) ?? [])],
+      usedAssetIds: (usedAssets.get(row.id) ?? []).filter((id) => listed.has(id)),
     })),
     claims: generatorClaimContext(
       marketingClaimsWithOpenGates(MARKETING_CLAIMS, gates),
@@ -602,12 +642,7 @@ export async function readMarketingGeneratorContext(
         ]),
       ),
     ),
-    assets: generatorAssetProjection(
-      assetRegistry,
-      channels.map((row) => row.channel),
-      assetMedia.kinds,
-      assetMedia.longForm,
-    ).map((asset) => {
+    assets: assets.map((asset) => {
       const copies = publishedCopies.get(asset.id);
       return copies ? { ...asset, publishedCopies: copies } : asset;
     }),
