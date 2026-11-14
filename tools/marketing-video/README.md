@@ -160,6 +160,11 @@ The design guide every call follows is `HIGGSFIELD-GUIDE.md`.
   `format` -- person, phone, laptop, diagram or object -- a day's concepts are
   each a different one, and the formats of the last 7 days are listed for the
   concept call to use last.
+- Local markets (owner 2026-11-13): ko is Korea, zh-Hant Taiwan and Hong Kong,
+  zh-Hans Singapore and Malaysia (never mainland China). Each version asks
+  its own market's question with its own money, places and seasons (guide 13);
+  the picture, drawn once for all four, shows nothing that belongs to one
+  market only.
 - Native copy (owner 2026-11-13: the Korean and Chinese read as
   translations). After the concepts, one more Claude call (`NATIVE-COPY.md`)
   rewrites only their Korean and Chinese and alt texts as a native copywriter
