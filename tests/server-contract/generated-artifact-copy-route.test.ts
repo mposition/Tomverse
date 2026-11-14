@@ -92,7 +92,7 @@ test("client object keys, URLs, filenames and MIME declarations cannot select th
   }
   assert.equal(copies.length, 0);
 });
-test("protected source and default-off helper refusals retain their code without internal data", async () => {
+test("protected source and disabled helper refusals retain their code without internal data", async () => {
   for (const [code, status] of [["CONVERSATION_LOCKED", 423], ["ATTACHMENT_UNAVAILABLE", 404], ["GENERATED_ARTIFACT_REVISION_DISABLED", 404], ["ATTACHMENT_TEXT_TOO_LARGE", 413]] as const) {
     copyFailure = new revision.GeneratedArtifactRevisionError(code, status);
     const response = await put();

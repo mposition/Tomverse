@@ -1,5 +1,8 @@
 # Generated file revision P1 — local implementation and evidence
 
+아래 초기 기록의 기본 꺼짐은 후속 운영자 요청으로 변경했다. 최종 기본값은 끝의
+"Default-on follow-up" 절을 따른다.
+
 ## 구현 범위
 
 P0의 독립 입력 사본과 보이는 수정 요청문을 재사용하여 XLSX 값 수정, 실제 source/version
@@ -135,3 +138,73 @@ PR 생성·push·CI 시작/재실행·merge·deploy·운영 활성화·유료 �
 수행하지 않았다. 다음 검증 우선순위는 검토 unknown 처리, 승인된 실모델과 Office 앱/
 물리 기기 확인이다. 범용 workbook 구조 편집·다른 포맷의 canonical round-trip,
 PDF/ZIP 편집·WYSIWYG·이미지 workspace 변경은 별도 범위다.
+
+## 2026-11-15 — owner-authorized review retry and develop PR preparation
+
+운영자가 unknown 재요청, 지적 수정·로컬 검증과 PR 작성을 명시적으로 요청했다.
+최신 main `6ca4eccdf011a9c3e13e727caf6a85a1a677a3b5`의 후속 변경은 이번 기능과
+무관했다. develop `549ee223c64d11ef6219d38171f2578cd7e14477`과 main의 분기 이력이
+크므로 기존 main 기반 브랜치를 그대로 PR로 보내지 않았다. 별도
+`codex/generated-file-revision-pr-20261115` worktree에서 네 기능 commit만 develop에
+cherry-pick하여 기능 diff 78개 파일로 제한했다. Native의 이어가기/source 선택과
+receipt 상태를 보존하면서 충돌 4곳을 통합했다. 독립 lockfile 설치를 다시 사용했다.
+
+재검토 `r-20261114-230906-fd3324`는 최종 head `e1a367f4f`에 대해 Anthropic과 Google
+모두 **accept**, blocker/major 없음이다. minor 3건과 nit 1건을 다음과 같이 처리했다.
+
+- 스위치가 꺼지면 새 canonical/parent/group 저장과 기존 app DTO 계보 노출을 모두
+  막는다. 이미 보관한 사본과 다운로드는 유지한다. 저장 직전 꺼진 in-flight 값도 검사한다.
+- source/group 증거를 확인할 수 없어도 완료된 답변과 파일을 버리지 않는다. 확인되지 않은
+  관계만 제외하고 독립 root로 저장한다. 외부 소유자·다른 대화·가공된 group은 연결하지
+  않으며 DB 자체의 실패는 여전히 실패다. 실제 DB에서 source와 입력 증거 모두 삭제된
+  경우, 잘못된 소유자/group/conversation과 정상 관계를 검사했다.
+- Web 8개 locale의 workbook/버전 문구와 Native 지원 7개 언어를 채웠다. Native 한국어
+  준비가 보이는 한국어 요청문과 기존 작성문을 보존하고 Send하지 않는지 검사했다.
+- 경합에서 진 실제 쓰기도 일일 upload byte quota를 사용하며 정리 후 환급하지 않는다는
+  기존 동작을 문서화했다. 등록 완료 재시도는 추가 예약이나 쓰기가 없다.
+
+수정 commit `f736ba685`의 독립 검토 `r-20261114-231805-cc6eb9`도 Anthropic과 Google
+모두 **accept**였다. 추가 minor 2건/nit 1건은 `de4f600f6`에서 처리했다. 최종 stream
+카드의 계보는 기존 ID readback에 저장된 parent/group을 함께 읽어 맞춘다. source 관계를
+제외하거나 저장 전 스위치가 꺼진 경우에도 reload와 같은 카드가 된다. 제외 사유와 건수만
+내용·파일명·ID 없이 기록한다. 두 stream 경우와 content-free log를 회귀 검사에 넣었다.
+이 추가 변경은 응답 일관성·관측·검증이며 accept된 source 검증·접근·삭제 경계는 동일하다.
+
+### Develop checkout 재검증
+
+| 검사 | 결과 |
+| --- | --- |
+| 관련 unit/renderer/Office/Native transport | 359 통과 |
+| 서버 전체 관련 묶음 + 기존 Native 이어가기 read | 182 통과, 기존 TODO 1, 실패 0 |
+| 첫 보완의 DTO/versions/collector/workbook 계약 | 78 통과 |
+| 최종 stream/Send/collector/DTO 계약 | 107 통과, 기존 TODO 1, 실패 0 |
+| PostgreSQL guarded conversations lane | 332 통과, 최종 lineage/race 별도 17 통과 |
+| Native revision/composer/completion/continuation browser | 35 통과 |
+| 최종 Native revision browser, 한국어 포함 | 14 통과 |
+| 최종 Web revision/card/draft/identity/attachment browser | 148 통과, 비대상 2 제외 |
+| Mobile composer | 26 통과 |
+| Root / Native typecheck, full lint + 변경 영역 lint | 통과 |
+| 최종 Web build / Native build | 통과 |
+| Shared package framework boundary / encoding | 통과 |
+| Capacitor bundle / Native token boundary | remote server 0, token boundary 71 files |
+
+검사 묶음은 서로 겹치므로 수를 합산하지 않는다. 위의 실모델·Office 앱·실기기 미검증과
+입력 한도·독립 사본 수명 계약은 그대로다. 테스트 PostgreSQL은 앞서 만든 전용 cluster의
+같은 loopback 대상만 재사용하며 운영 DB를 사용하지 않는다. PR은 develop 대상으로
+`ci:hold`를 붙여 draft로 작성한다. CI를 시작·재개·재실행하거나 auto-merge를 설정하지
+않으며 운영 migration·활성화·merge·deploy는 하지 않는다.
+
+### Default-on follow-up
+
+운영자의 후속 "기본 켜짐으로 해주세요" 지시로 코드 기본값을 켜짐으로 변경했다.
+`GENERATED_ARTIFACT_REVISION_ENABLED` 미설정 또는 `true`는 켜짐, 명시적 `false`와
+잘못된 값은 꺼짐이다. Web·API·Native session·proxy가 같은 resolver를 사용한다.
+기존 Native Chat/Parity gate, attachment 허용 권한, owner/conversation/unlock/ready/
+형식/크기·rate/byte quota 검사는 유지한다. 준비는 자동 Send나 새 모델 호출이 아니다.
+이 지시는 운영 환경변수 변경이나 migration·merge·deploy를 수행한 것으로 해석하지 않았다.
+
+미설정 기본값, 명시적 off, 잘못된 설정, Native의 기존 gate와 bearer 신원, quote/Send의
+동일한 schema token allowance를 검사했다. 브라우저 fixture는 명시적 off로 격리하고
+별도 켜짐 실행에서는 fixture cookie 없이 ready 카드의 진입점과 다운로드를 확인한다.
+초기 token 수 회귀의 기존 기대값도 기본 켜짐의 추가 schema allowance를 반영해 양쪽
+설정을 검증하도록 바꿨다. 가격·credits·예약/정산 정책은 변경하지 않았다.

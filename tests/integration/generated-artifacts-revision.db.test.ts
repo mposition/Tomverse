@@ -224,7 +224,7 @@ test("a bound independent input survives assistant deletion; conversation deleti
 
 test("disabled connection refuses preparation without model or storage activity", async () => {
   const source = await seed();
-  delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "false";
   await assert.rejects(copy(source.input), { code: "GENERATED_ARTIFACT_REVISION_DISABLED" });
   assert.equal(reads.length, 0); assert.equal(writes.length, 0); assert.equal(reservations.length, 0);
 });

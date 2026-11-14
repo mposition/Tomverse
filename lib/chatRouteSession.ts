@@ -7,6 +7,7 @@ import { MOBILE_AUTH_ERROR_CODES } from "@/lib/mobileAuthContract";
 import { nativeChatBearerRoute, nativeParityBearerRoute, nativeArtifactRevisionBearerRoute } from "@/lib/nativeBearerGate";
 import { isNativeAppOrigin } from "@/lib/nativeAppCors";
 import { prisma } from "@/lib/prisma";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 
 /** Never fall back to an ambient cookie when an Authorization header is present. */
 export async function resolveChatRouteSession(request: Request): Promise<
@@ -16,7 +17,7 @@ export async function resolveChatRouteSession(request: Request): Promise<
   const origin = request.headers.get("origin");
   const path = new URL(request.url).pathname;
   const parityEnabled = process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true";
-  const revisionEnabled = process.env.GENERATED_ARTIFACT_REVISION_ENABLED === "true";
+  const revisionEnabled = generatedArtifactRevisionEnabled();
   if (nativeArtifactRevisionBearerRoute(path, request.method, true) && (!parityEnabled || !revisionEnabled)) {
     return { response: Response.json({ code: "NATIVE_PARITY_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }) };
   }

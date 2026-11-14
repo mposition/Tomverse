@@ -22,7 +22,7 @@ import { N1B_BEARER_ROUTES } from "../lib/mobileAuthContract.ts";
 
 const REGISTERED = "/api/conversations";
 
-test("generated-file Native additions are default-off and enroll only read versions and opaque input cleanup", () => {
+test("generated-file Native enrollment fails closed without a resolved switch and permits only versions and input cleanup", () => {
   for (const [path, method] of [["/api/chat", "DELETE"], ["/api/artifacts/file-1/versions", "GET"]]) {
     assert.equal(nativeArtifactRevisionBearerRoute(path, method), false);
     assert.equal(nativeArtifactRevisionBearerRoute(path, method, false), false);

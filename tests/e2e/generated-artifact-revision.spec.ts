@@ -39,9 +39,9 @@ async function copied(page: Page, route: Route, artifactId: string) {
   await route.fulfill({ status: 200, json: { uploadId, ...upload } });
 }
 
-test("revision is default-off and leaves existing downloads available", async ({ page }) => {
+test("the server revision switch governs entry and keeps existing downloads available", async ({ page }) => {
   await open(page, false);
-  await expect(page.getByTestId("generated-artifact-revise")).toHaveCount(0);
+  await expect(page.getByTestId("generated-artifact-revise")).toHaveCount(process.env.E2E_GENERATED_ARTIFACT_REVISION_ENABLED === "true" ? 2 : 0);
   await expect(page.getByTestId("generated-artifact-download")).toHaveCount(2);
 });
 

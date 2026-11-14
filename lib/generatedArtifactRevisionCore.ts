@@ -1,9 +1,9 @@
 import { resolveChatAttachmentFormat } from "@/lib/chatAttachmentFormats";
 import { artifactFormat } from "@/lib/generatedArtifactFormats";
 
-/** The output -> input connection is opt-in; the existing download stays available. */
+/** Enabled by default; an explicit false disables the connection, not downloads. */
 export const generatedArtifactRevisionEnabled = () =>
-  process.env.GENERATED_ARTIFACT_REVISION_ENABLED === "true";
+  (process.env.GENERATED_ARTIFACT_REVISION_ENABLED ?? "true") === "true";
 
 /** A view of the existing write/read tables, never a second format registry. */
 export function generatedArtifactRevisionFormat(input: {

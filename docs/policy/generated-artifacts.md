@@ -984,8 +984,10 @@ PDF를 원본 그대로 받아 스캔 페이지까지 읽는다. 그래서 "이 
 
 ## 17. 선택한 생성 파일의 내용으로 새 파일 만들기 (P0)
 
-`GENERATED_ARTIFACT_REVISION_ENABLED=true`일 때만 웹 Chat의 ready 카드에서
-수정 입력을 선택할 수 있다. 기본은 꺼짐이며 이 구현은 운영 활성화 승인이 아니다.
+운영자 요청(2026-11-15)에 따라 `GENERATED_ARTIFACT_REVISION_ENABLED` 미설정 시
+웹 Chat의 ready 카드에서 수정 입력을 선택할 수 있다. `true`도 켜짐이며 명시적 `false`는
+연결을 끈다. 잘못된 값은 켜짐으로 해석하지 않는다. 이 코드 변경은 merge·deploy나
+운영 설정 변경을 수행하지 않는다.
 클릭한 artifact의 opaque ID가 선택 기준이다. 파일명·현재 모델·최신 카드로
 원본을 추정하지 않는다. 기존 다운로드와 Native 다운로드는 그대로 유지한다.
 
@@ -1029,7 +1031,7 @@ PDF/ZIP 편집, WYSIWYG와 이미지 생성 workspace 변경은 여전히 이 �
 
 ### 18.1 검증된 WorkbookSpec과 값 수정
 
-기존 `GENERATED_ARTIFACT_REVISION_ENABLED` opt-in을 유지한다. 꺼진 상태에서는 새
+`GENERATED_ARTIFACT_REVISION_ENABLED`의 기본 켜짐과 명시적 off를 따른다. 꺼진 상태에서는 새
 canonical 내용 보관과 수정 도구 확장을 활성화하지 않는다. XLSX를 성공적으로 만든
 경우에만 기존 admission을 통과한 WorkbookSpec을 `{version: 1, kind: "spreadsheet",
 spec: ...}` 형태로 저장한다. 전체 직렬화 명세는 기존 300,000자 입력 예산 안이어야
@@ -1094,7 +1096,7 @@ DB 자체의 실패를 성공으로 숨기지는 않는다.
 
 ### 18.3 Native와 export
 
-Native Chat은 서버의 기본 꺼진 `generatedFileRevisions` capability를 따라 같은 준비
+Native Chat은 서버의 `generatedFileRevisions` capability를 따라 같은 준비
 API·동일 artifact ID·보이는 수정 요청문을 사용한다. 선택은 자동 Send가 아니다. 작성 중인
 text·첨부, 준비 중 새 작성문과 원래 대화 scope를 보존하며 상한/동명 충돌 때 사본만 정리한다.
 다른 신원으로 전환된 뒤 완료한 준비는 새 신원 초안에 반영하지 않는다. 기존 다운로드는
@@ -1105,7 +1107,8 @@ Native 첨부 chip은 기존 device draft의 신원·대화 key 아래 opaque up
 객체의 만료가 아니다. 사라진 local draft의 unbound 사본 보관 한계는 §17과 입력 첨부
 정책을 그대로 따른다. 불명확한 Send 결과의 기존 saved-response 복구를 유지하고 자동으로
 재전송하지 않는다. native bearer의 새 versions GET/unbound cleanup DELETE 경로도 같은
-opt-in 아래 기존 owner/unlock/opaque ID 검사로 제한한다. 새 device 권한이나 자격증명은 없다.
+revision switch와 기존 Native Chat/Parity gate 아래 owner/unlock/opaque ID 검사로 제한한다.
+revision 기본값 변경은 기존 Native gate를 켜지 않는다. 새 device 권한이나 자격증명은 없다.
 
 소유자 계정 JSON export에는 새로 보관한 canonical/source 명세의 내용을 포함한다.
 파일 bytes는 여전히 포함하지 않으며, 일반 앱/공유 DTO에 이 내용을 노출하지 않는다.

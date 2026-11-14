@@ -618,8 +618,10 @@ export class GeneratedArtifactCollector {
       if (!persisted) return artifact;
       // Persistence may have dropped an unverifiable edge or disabled metadata.
       // The final card must describe the committed row, just as a reload does.
-      const { parentArtifactId: _parent, lineageId: _lineage, ...card } = artifact;
-      return { ...card, id: persisted.id,
+      const card: ChatStreamArtifact = { ...artifact, id: persisted.id };
+      delete card.parentArtifactId;
+      delete card.lineageId;
+      return { ...card,
         ...(persisted.lineageId ? { lineageId: persisted.lineageId, parentArtifactId: persisted.parentArtifactId ?? null } : {}) };
     });
   }

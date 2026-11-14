@@ -4,12 +4,16 @@ import { ARTIFACT_FORMAT_TABLE } from "../lib/generatedArtifactFormats.ts";
 import { resolveChatAttachmentFormat } from "../lib/chatAttachmentFormats.ts";
 import { generatedArtifactRevisionEnabled, isGeneratedArtifactRevisionSupported } from "../lib/generatedArtifactRevisionCore.ts";
 
-test("revision entry defaults off and requires an explicit local enable", () => {
+test("revision entry defaults on, honors explicit false and refuses invalid configuration", () => {
   const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
   delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
-  assert.equal(generatedArtifactRevisionEnabled(), false);
+  assert.equal(generatedArtifactRevisionEnabled(), true);
   process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
   assert.equal(generatedArtifactRevisionEnabled(), true);
+  for (const value of ["false", "invalid", ""]) {
+    process.env.GENERATED_ARTIFACT_REVISION_ENABLED = value;
+    assert.equal(generatedArtifactRevisionEnabled(), false, value);
+  }
   if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
   else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
 });

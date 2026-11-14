@@ -33,6 +33,7 @@ beforeEach(() => {
 
 for (const [path, method] of [["/api/chat", "DELETE"], ["/api/artifacts/file-1/versions", "GET"]]) {
   test(`Native ${method} ${path} uses the verified bearer identity and never ambient cookies`, async () => {
+    delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
     const response = await resolveChatRouteSession(new Request(`http://localhost${path}`, { method,
       headers: { authorization: "Bearer opaque-fixture" } }));
     assert.equal(response.session?.user?.id, "bearer-person");

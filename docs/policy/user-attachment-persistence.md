@@ -193,7 +193,7 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 `generated-ar
 
 ### 8.1 생성 파일을 독립 입력 사본으로 준비하기
 
-기본 꺼짐인 생성 파일 수정 연결은 `PUT /api/chat`의
+기본 켜짐이며 `GENERATED_ARTIFACT_REVISION_ENABLED=false`로 끌 수 있는 생성 파일 수정 연결은 `PUT /api/chat`의
 `generated-artifact-copy` action을 사용한다. 정확한 artifact ID와 현재 대화,
 소유권·현재 잠금 해제·ready 상태·허용 형식·측정 크기를 서버에서 확인한다.
 기존 첨부 허용 권한과 rate/byte quota도 적용한다. 원본은 비파괴 bounded read로

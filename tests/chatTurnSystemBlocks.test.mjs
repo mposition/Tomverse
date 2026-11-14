@@ -35,15 +35,17 @@ test("enabled revision schema allowance is identical in quote/send and absent fo
   const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
   const now = new Date("2026-11-15T00:00:00Z");
   try {
-    delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "false";
     const normal = build({ now });
     process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
     const enabled = build({ now });
     assert.equal(enabled.promptTokens - normal.promptTokens, ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS);
     assert.equal(build({ now }).promptTokens, enabled.promptTokens);
+    delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    assert.equal(build({ now }).promptTokens, enabled.promptTokens);
     for (const disabled of [{ isAuthenticated: false }, { canPersist: false }, { fileToolsOverride: false }]) {
       const on = build({ now, ...disabled });
-      delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+      process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "false";
       assert.equal(build({ now, ...disabled }).promptTokens, on.promptTokens);
       process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
     }
@@ -100,16 +102,21 @@ test("a model that searches inside its own completion is not told it cannot", ()
   assert.equal(blocks.webSearchCapabilityPrompt, "");
 });
 
-test("the priced tokens are exactly the blocks present plus the tool schema", () => {
-  const blocks = build();
-  const expected =
-    estimateTextTokens(buildChatLocationPrompt()) +
-    estimateTextTokens(buildChatCurrentDatePrompt()) +
-    estimateTextTokens(blocks.artifactPlan.systemPrompt) +
-    estimateTextTokens(blocks.imageCapabilityPrompt) +
-    estimateTextTokens(blocks.webSearchCapabilityPrompt) +
-    (blocks.artifactPlan.registerTool ? ARTIFACT_TOOL_DEFINITION_TOKENS : 0);
-  assert.equal(blocks.promptTokens, expected);
+test("the priced tokens are exactly the blocks present plus the enabled tool schema", (t) => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  t.after(() => { if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED; else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous; });
+  for (const enabled of [false, true]) {
+    process.env.GENERATED_ARTIFACT_REVISION_ENABLED = String(enabled);
+    const blocks = build();
+    const expected =
+      estimateTextTokens(buildChatLocationPrompt()) +
+      estimateTextTokens(buildChatCurrentDatePrompt()) +
+      estimateTextTokens(blocks.artifactPlan.systemPrompt) +
+      estimateTextTokens(blocks.imageCapabilityPrompt) +
+      estimateTextTokens(blocks.webSearchCapabilityPrompt) +
+      (blocks.artifactPlan.registerTool ? ARTIFACT_TOOL_DEFINITION_TOKENS + (enabled ? ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS : 0) : 0);
+    assert.equal(blocks.promptTokens, expected);
+  }
 });
 
 test("the search block is priced, so the quote and the request cannot differ", () => {

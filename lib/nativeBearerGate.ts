@@ -205,7 +205,7 @@ export function nativeParityBearerRoute(path: string, method: string, enabled = 
   return false;
 }
 
-/** File revision additions remain independently default-off within Native parity. */
+/** Callers resolve the revision switch; Native enrollment still fails closed. */
 export function nativeArtifactRevisionBearerRoute(path: string, method: string, enabled = false): boolean {
   if (!enabled) return false;
   if (path === "/api/chat") return method === "DELETE";
