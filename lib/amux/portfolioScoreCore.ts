@@ -1,3 +1,5 @@
+import { AMUX_PORTFOLIO_SCORE_REFRESH_ACTION } from "../adminAuditSystemActors.ts";
+
 /** V4 portfolio scoring is distinct from the legacy scheduler's p0-p3 score.
  * A model may suggest these observations, but only confirmed evidence enters
  * this deterministic calculation. It never changes card status or SEV1. */
@@ -86,3 +88,35 @@ export function scoreAmuxPortfolio(input: PortfolioScoreInput,
     baselineStaleAt: baselineStaleAt.toISOString(),
     activeFresh, baselineFresh };
 }
+
+/** Owner decision 2026-11-14: a Task whose confirmed evidence is unchanged
+ * keeps its active window without a weekly owner action. The system extends
+ * `activeStaleAt` to seven days past the refresh, never past the evidence's
+ * own 28-day baseline, and never rewrites `evidenceAsOf`: the age of the
+ * evidence stays what an owner or the registration last confirmed. */
+export const AMUX_SCORE_REFRESH_ENV = "TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH";
+export const amuxScoreAutoRefreshEnabled = (value: string | undefined) =>
+  value === "enabled";
+/** Refresh a day before the window closes, so a five-minute tick never lets
+ * a ready Task drop out of the candidate list. */
+export const AMUX_SCORE_REFRESH_LEAD_MS = 86_400_000;
+
+/** The extended active deadline, or null when the refresh would not move it
+ * (the baseline caps it, or it is not yet due). */
+export function amuxRefreshedActiveStaleAt(input: { now: Date;
+  activeStaleAt: Date; baselineStaleAt: Date }): Date | null {
+  const now = input.now.getTime();
+  const active = input.activeStaleAt.getTime();
+  const baseline = input.baselineStaleAt.getTime();
+  if (![now, active, baseline].every(Number.isFinite)) return null;
+  if (now >= baseline || active - now > AMUX_SCORE_REFRESH_LEAD_MS) return null;
+  const next = Math.min(now + AMUX_ACTIVE_SCORE_MAX_AGE_MS, baseline);
+  return next > active ? new Date(next) : null;
+}
+
+export const AMUX_SCORE_CONFIRM_ACTION = "amux.v4.portfolio.score.confirm";
+/** The audit actions that bind a score snapshot. A refresh is never a
+ * confirmation: it only repeats one under the same assessments. */
+export const amuxScoreAuditActionBinds = (action: string | null | undefined) =>
+  action === AMUX_SCORE_CONFIRM_ACTION ||
+  action === AMUX_PORTFOLIO_SCORE_REFRESH_ACTION;
