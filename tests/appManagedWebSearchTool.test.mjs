@@ -223,6 +223,26 @@ test("only a successful follow-up containing entirely previously supplied excerp
   }
 });
 
+test("a follow-up that only repeats an earlier follow-up's excerpts gets the repeat notice", async () => {
+  const config = toolFor();
+  const { toModelOutput } = withGroundedSearchDescription(config.tools, "{}").web_search;
+  const project = async output => (await toModelOutput({ toolCallId: "call", input: {}, output })).value;
+  const first = await run(config, { query: "official decision" });
+  assert.deepEqual(await project(first), first);
+  // Re-projecting the output that first carried the sources stays unchanged.
+  assert.deepEqual(await project(first), first);
+
+  const again = { ...first, query: "official decision text" };
+  assert.match((await project(again)).notice, /excerpts already appeared unchanged/);
+  assert.deepEqual(await project(first), first);
+
+  // One new source keeps the original notice, so the search for it still counts.
+  const withNew = { ...first, results: [...first.results, { title: "Decision", url: "https://example.org/decision" }] };
+  assert.deepEqual(await project(withNew), withNew);
+  assert.deepEqual(await project({ status: "failed", searchesRemaining: 1, reason: "backend_timeout" }),
+    { status: "failed", searchesRemaining: 1, reason: "backend_timeout" });
+});
+
 test("one batch starts independent searches together and returns every source in input order", async () => {
   const releases = [];
   globalThis.fetch = async (url) => {
