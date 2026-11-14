@@ -69,6 +69,15 @@ over the supplied synthetic pool, not a change to the product retrieval service.
 
 ## Product retrieval Recall@5 (MEMORY-01)
 
+`top5` and `fullSelectedSet` separately report recall, relevance-gated irrelevant
+inclusion and forbidden/inactive gold counts. Core, pinned and style context is
+counted separately from question-answer evidence. The pool is synthetic and
+does not exercise DB eligibility or the write validator; a forbidden synthetic
+row selected here is not evidence of a product storage success or data leak.
+`answerQuality.status` stays `not_run` until an answer model is actually evaluated.
+The 16 bilingual P0 input fixtures also record answer criteria and the bounded
+middle-query limitation without inventing semantic pass results.
+
 `retrieval` measures what the product actually ships: statements indexed with
 `memoryRetrievalTerms` and ranked by `selectMemoryContext`, the scorer the chat
 context builder uses. It makes no model call and writes no files.
@@ -84,7 +93,8 @@ node --import tsx tools/memory-quality/cli.ts retrieval --corpus all
 - `gatedIrrelevantRate` counts only term-matched memories; core and style are
   never relevance-gated, so `summary.irrelevantInjectionRate` includes them.
 - Only active rows reach the scorer, as in `retrieveMemoryContext`. Forbidden
-  rows are kept: the read path does not remove them, so a selection is reported.
+  gold stays in the synthetic pool and is never passed into the product selector.
+  This does not simulate write validation or database eligibility.
 - `fixtures/retrieval-ko.json` is a synthetic Korean set built on one account
   pool, tagged by failure mode (particle, one_syllable, spacing, ending,
   compound, synonym, nfd, mixed_script, core, abstain). Its overall number
@@ -131,11 +141,19 @@ Node dependencies installed. Saved-score runs need no credentials and no network
 
 ### Memory: `retrieval --semantic`
 
+New saved scores bind corpus, normalized query/candidate hashes, candidate IDs,
+model, collection time, query/selection versions and settings in `provenance`.
+`scoreEvidence` distinguishes provider, mock, oracle and unverified legacy files.
+Mismatch is rejected; incomplete score maps fall back to lexical and are reported
+in coverage. Neither mock scores nor transport tests establish measured semantic
+retrieval or generated-answer accuracy. Memory uses its own head/tail query and
+two-pool candidate budget; knowledge query behavior is unchanged.
+
 Measures lexical `selectMemoryContext` and, beside it, the same function given
 `externalRelevance` scores (the section 9a rerank path). The reranked set is what the
 service sends: the active memories `memoryTier` relevance-gates (core, pinned and
-style memories are never sent or moved), at most 100. The corpus pool is one account,
-so that is every such memory in it.
+style memories are never sent or moved), at most 100 using the shared two-pool
+budget. This small pool does not exercise the DB400 cap or database read filters.
 
 ```powershell
 node --import tsx tools/memory-quality/cli.ts retrieval --semantic --rerank-scores <scores.json>

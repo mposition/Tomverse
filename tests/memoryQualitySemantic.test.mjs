@@ -62,6 +62,10 @@ test("saved scores that rank the synonym memories first raise their Recall@5 and
     assert.equal(comparison.source, "scores_file");
     assert.equal(comparison.paidCalls, 0);
     assert.equal(comparison.live, null);
+    assert.equal(comparison.scoreEvidence.kind, "unverified");
+    assert.equal(comparison.scoreEvidence.identityVerified, false);
+    assert.equal(comparison.scoreEvidence.semanticRetrievalMeasured, false);
+    assert.equal(comparison.answerQuality.status, "not_run");
     assert.equal(comparison.byTag.synonym.lexical.recallAt5, 0);
     assert.equal(comparison.byTag.synonym.semantic.recallAt5, 1);
     assert.equal(comparison.byTag.synonym.delta, 1);
@@ -143,6 +147,10 @@ test("memory --live makes one rerank request per case, meters it, saves the scor
     assert.ok(requests.every((request) => request.url === "https://api.cohere.com/v2/rerank" &&
       request.body.model === "rerank-test-model" && request.authorization === `Bearer ${KEY}`));
     assert.equal(comparison.source, "live");
+    assert.equal(comparison.scoreEvidence.kind, "mock");
+    assert.equal(comparison.scoreEvidence.identityVerified, true);
+    assert.equal(comparison.scoreEvidence.semanticRetrievalMeasured, false);
+    assert.equal(comparison.answerQuality.status, "not_run");
     assert.equal(comparison.paidCalls, planned);
     assert.equal(comparison.live.calls, planned);
     assert.equal(comparison.live.maxCalls, planned);
@@ -156,6 +164,12 @@ test("memory --live makes one rerank request per case, meters it, saves the scor
     assert.deepEqual(replay.semantic["retrieval-ko"].byTag, comparison.byTag);
     assert.deepEqual(replay.semantic["retrieval-ko"].semantic, comparison.semantic);
     assert.equal(requests.length, planned);
+    assert.deepEqual(replay.semantic["retrieval-ko"].scoreEvidence, comparison.scoreEvidence);
+    const snapshot = JSON.parse(await readFile(save, "utf8"));
+    assert.equal(snapshot.provenance.model, ENV.COHERE_RERANK_MODEL);
+    assert.equal(snapshot.provenance.settings.queryVersion, "memory-query-v2");
+    assert.ok(Object.values(snapshot.provenance.requests).every((row) =>
+      row.queryHash && row.candidateIds.length <= 100 && row.candidatesHash));
 
     // A second paid run never overwrites the first.
     const before = await readFile(save, "utf8");
@@ -163,6 +177,41 @@ test("memory --live makes one rerank request per case, meters it, saves the scor
       { env: ENV, fetchImpl }), { code: "save_scores_exists" });
     assert.equal(await readFile(save, "utf8"), before);
     assert.equal(requests.length, planned);
+  });
+});
+
+test("memory score metadata refuses corpus and request mismatch while legacy coverage remains explicit", async () => {
+  await withTemp(async (directory) => {
+    const { fetchImpl } = memoryRerankFake();
+    const save = join(directory, "saved.json");
+    await main(["retrieval", "--semantic", "--live", "--max-calls", "100", "--save-scores", save], { env: ENV, fetchImpl });
+    const original = JSON.parse(await readFile(save, "utf8"));
+    await writeFile(save, JSON.stringify({ ...original, corpus: "other-corpus" }));
+    await assert.rejects(main(["retrieval", "--semantic", "--rerank-scores", save]), { code: "scores_corpus_mismatch" });
+    const changedInput = structuredClone(original);
+    Object.values(changedInput.provenance.requests)[0].candidateIds.push("not-offered");
+    await writeFile(save, JSON.stringify(changedInput));
+    await assert.rejects(main(["retrieval", "--semantic", "--rerank-scores", save]), { code: "scores_input_mismatch" });
+    const changedQuery = structuredClone(original);
+    Object.values(changedQuery.provenance.requests)[0].queryHash = "different-query";
+    await writeFile(save, JSON.stringify(changedQuery));
+    await assert.rejects(main(["retrieval", "--semantic", "--rerank-scores", save]), { code: "scores_input_mismatch" });
+    const missing = structuredClone(original);
+    const caseId = Object.keys(missing.scores)[0];
+    delete missing.scores[caseId];
+    await writeFile(save, JSON.stringify(missing));
+    const replay = (await main(["retrieval", "--semantic", "--rerank-scores", save])).semantic["retrieval-ko"];
+    assert.ok(replay.coverage.casesFallingBackToLexical.includes(caseId));
+    await writeFile(save, JSON.stringify({ [caseId]: { ghost: 0.9 } }));
+    const legacy = (await main(["retrieval", "--semantic", "--rerank-scores", save])).semantic["retrieval-ko"];
+    assert.equal(legacy.scoreEvidence.kind, "unverified");
+    assert.ok(legacy.coverage.documentsWithoutScore > 0);
+    assert.deepEqual(legacy.coverage.scoreDocumentsNotInRequest, [{ caseId, id: "ghost" }]);
+    assert.ok(legacy.coverage.casesWithIncompleteScores.includes(caseId));
+    assert.ok(legacy.coverage.casesFallingBackToLexical.includes(caseId));
+    assert.equal(legacy.delta.koreanRecallAt5, 0);
+    await writeFile(save, JSON.stringify({ [caseId]: { ghost: 1.2 } }));
+    await assert.rejects(main(["retrieval", "--semantic", "--rerank-scores", save]), { code: "scores_file_invalid" });
   });
 });
 

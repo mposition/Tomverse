@@ -183,9 +183,9 @@ export function memoryStateFingerprint(input: {
 
 /** Bind the ordered result and actual priced block, regardless of small changes
  * in ranking scores that leave both the selected rows and rendered text intact. */
-export function pricedMemoryRetrievalHash(orderedIds: readonly string[], rendered: string): string {
-    return "rendered-v1:" + createHash("sha256")
-        .update(JSON.stringify([orderedIds, rendered]), "utf8").digest("hex");
+export function pricedMemoryRetrievalHash(orderedIds: readonly string[], rendered: string, queryPlan: string | null = null): string {
+    return "rendered-v2:" + createHash("sha256")
+        .update(JSON.stringify([orderedIds, rendered, queryPlan]), "utf8").digest("hex");
 }
 
 /** The comparable value. Order is fixed so two identical states agree. */

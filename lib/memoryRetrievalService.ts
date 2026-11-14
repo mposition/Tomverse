@@ -1,13 +1,13 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
+import { buildMemoryQueryPlan } from "@/lib/memoryQueryPlan";
 import {
     CORE_MEMORY_KINDS,
     MEMORY_RETRIEVAL_ALGORITHM_VERSION,
     MEMORY_SEMANTIC_DEFAULTS,
     MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION,
-    memoryTier,
+    memoryRerankCandidates,
     selectMemoryContext,
     type MemoryContextBudget,
     type MemoryContextSelection,
@@ -38,8 +38,7 @@ import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
  * ## Semantic relevance (docs/policy/external-conversation-import-and-memory.md §9a)
  *
  * With the operator's memory-rerank switch on, a second query adds recent
- * relevance-gated memories that share no term with the request -- the point
- * is to find one that shares none -- and the relevance-gated memories are
+ * relevance-gated memories outside the lexical query's returned IDs, and they are
  * scored against the request by an external model. The lexical query and its
  * limit are unchanged, and core, pinned and style memories are untouched.
  * When the switch is off, or the call is refused or fails, the added
@@ -75,7 +74,7 @@ export type MemoryRetrievalResult = MemoryContextSelection & {
     /** Stable hash of the selection, for the §10 context bundle to bind. */
     resultHash: string;
     algorithmVersion: number;
-    /** How many rows the query returned before scoring, for §22 metrics. */
+    /** Rows admitted to selection before relevance/budget filtering, not provider calls. */
     consideredCount: number;
     /** Whether an external ranking shaped this selection (§9a). */
     semanticRerank: boolean;
@@ -192,7 +191,8 @@ export async function retrieveMemoryContext(input: {
         return { ...EMPTY_RESULT, resultHash: hashSignature(EMPTY_RESULT.signature) };
     }
 
-    const queryTerms = memoryRetrievalTerms(input.query);
+    const queryPlan = buildMemoryQueryPlan(input.query);
+    const queryTerms = queryPlan.terms;
 
     // What every candidate has to satisfy, whichever query fetches it.
     const eligible = [
@@ -268,7 +268,8 @@ export async function retrieveMemoryContext(input: {
     // memory that is only here to be reranked -- and when the rerank is
     // refused or fails, the extras are dropped and the selection is the
     // lexical one, row for row. The extras are relevance-gated memories that
-    // share no term with the request, newest first, at most one search unit's
+    // are outside the lexical query's returned IDs (term overlap is allowed),
+    // newest first, at most one search unit's
     // worth. A request with no usable term asks for none: there is nothing to
     // rank them against.
     const rerank =
@@ -327,21 +328,14 @@ export async function retrieveMemoryContext(input: {
     const memories = rows.map(toMemory);
     const extras = extraRows.map(toMemory);
 
-    // Only the memories the selector would relevance-gate are sent -- the
-    // lexical candidates first, in the query's own deterministic order, then
-    // the extras -- and never one that has expired.
+    // Core/pinned/style never leave the app. Both relevant pools get slots;
+    // lexical rows without a score still retain their lexical eligibility.
     const externalRelevance = rerank
         ? await rerankForRetrieval({
               feature: "memoryRerank",
               userId: input.userId,
-              query: input.query,
-              documents: [...memories, ...extras]
-                  .filter(
-                      (memory) =>
-                          memoryTier(memory) === "relevant" &&
-                          !(memory.expiresAt && memory.expiresAt.getTime() <= now.getTime())
-                  )
-                  .slice(0, MEMORY_SEMANTIC_DEFAULTS.maxRerankCandidates)
+              query: queryPlan.semanticQuery,
+              documents: memoryRerankCandidates({ lexical: memories, extras, now })
                   .map((memory) => ({ id: memory.id, text: memory.statement })),
               now,
               mode: input.semantic,
@@ -350,7 +344,9 @@ export async function retrieveMemoryContext(input: {
 
     const selection = selectMemoryContext({
         // Without a ranking the extras were never candidates.
-        memories: externalRelevance ? [...memories, ...extras] : memories,
+        memories: externalRelevance
+            ? [...memories, ...extras.filter(memory => externalRelevance.has(memory.id))]
+            : memories,
         query: queryTerms,
         now,
         styleEnabled: settings.styleEnabled,
@@ -364,7 +360,8 @@ export async function retrieveMemoryContext(input: {
         algorithmVersion: externalRelevance
             ? MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION
             : MEMORY_RETRIEVAL_ALGORITHM_VERSION,
-        consideredCount: rows.length + (externalRelevance ? extraRows.length : 0),
+        consideredCount: rows.length + (externalRelevance
+            ? extras.filter(memory => externalRelevance.has(memory.id)).length : 0),
         semanticRerank: externalRelevance !== null,
     };
 }

@@ -652,7 +652,7 @@ Tomverse 밖으로 나가기 때문입니다.
 | `knowledgeRerank` | lexical·의미 후보를 질문과의 관련도로 다시 정렬 | 질문, 후보 chunk 원문(최대 100개) |
 | `knowledgeEmbed` | chunk마다 vector를 저장하고 질문과 가까운 chunk를 후보에 추가 | chunk 원문(색인 시), 질문 |
 | `knowledgeImagePages` | PDF의 텍스트 없는 페이지를 이미지로 색인 | 그 페이지의 렌더링 이미지 |
-| `memoryRerank` | 관련도로 걸러지는 memory를 질문과의 관련도로 선택. lexical 후보 조회와 그 상한은 그대로 두고, term이 겹치지 않는 최근 memory를 별도 조회로 더합니다(실패 시 더한 것은 버림) | 질문, 해당 memory statement(최대 100개) |
+| `memoryRerank` | 관련도로 걸러지는 memory를 질문과의 관련도로 선택. lexical 조회의 400개 상한을 유지하고, 반환된 ID 밖의 최근 eligible memory를 더합니다. max100 안에서 extra에 최대50개를 확보하고 남는 자리는 다른 pool이 사용합니다(실패 시 extra는 버림) | 질문, 해당 memory statement(최대 100개) |
 | `memoryDuplicates` | 추출 후보가 기존 memory의 다른 표현인지 판정. 관련도로 걸러지는 종류만 대상이며 core·고정·style memory는 후보로도, 색인으로도 보내지 않습니다 | 해당 후보 statement, 계정의 해당 active memory statement |
 
 **켜기 전 조건** (스위치를 켜는 승인이 확인하는 것):
@@ -782,6 +782,12 @@ pointer chunk로 저장합니다. 그래서 스캔 PDF가 `NO_TEXT` 실패 대�
 구현: tokenizer는 `lib/memoryRetrievalTerms.ts`의 `memoryRetrievalTerms()`
 하나뿐이며 **색인과 질의가 같은 함수를 씁니다** — 서로 다른 tokenizer로 색인한
 index를 질의하면 결과가 조용히 비고, "관련 기억 없음"과 구분되지 않습니다.
+저장 index의 기본 64 terms와 token 생성 규칙은 유지합니다. Memory query만
+`memory-query-v2`에서 긴 입력의 앞32·뒤32 unique terms를 선택하고, rerank query는
+앞·뒤를 Unicode 안전하게 합쳐 400 UTF-8 bytes 안에 둡니다. 중간 조건을 모두
+보존하는 것은 아닙니다. DB query와 pure scorer는 같은 query plan을 쓰며,
+prepare/preflight/send의 priced hash는 plan과 버전을 함께 결속합니다. knowledge의
+query 예산과 cache domain은 바꾸지 않습니다. 재색인은 필요하지 않습니다.
 case fold는 locale 비의존(`toLowerCase()`)입니다. locale 의존 fold는 저장된
 term이 서버 locale에 따라 달라지게 만들어(터키어 `I`→`ı`) 같은 문장이 장비마다
 다르게 색인됩니다. statement를 쓰는 모든 경로가 write 시점에 색인하고,
@@ -829,7 +835,11 @@ memory·knowledge·imported content는 untrusted data입니다. 고정 system ru
 주장하지 않음, factual uncertainty 유지, 외부 provider identity 사칭 금지.
 
 구현: memory 블록(3·4번 구획)은 `lib/memoryContextPrompt.ts`가 만들며
-`promptVersion`은 `mem-context-v1`입니다.
+`promptVersion`은 `mem-context-v2`입니다. 앱 작성 `rules`만 system 블록에 두고,
+factual/style statement와 fence인 `data`는 별도 user-role prelude로 한 번 보냅니다.
+Profile instructions·knowledge의 기존 역할은 유지합니다. Memory data는 continuation와
+독립이며 Deep Research에도 유지됩니다. rules와 data의 실제 비용을 각각 더하고
+두 내용·query plan을 retrieval hash/context bundle에 결속합니다.
 
 - **statement는 기계적으로 무해화합니다.** 개행·제어문자·zero-width·bidi
   override를 제거해 한 줄로 만들고, fence marker가 statement 안에 있으면
@@ -840,7 +850,7 @@ memory·knowledge·imported content는 untrusted data입니다. 고정 system ru
   보이지* 않게 할 뿐입니다.
 - **규칙은 항상 블록 앞에 옵니다.** 뒤에 놓으면 주입 payload가 규칙보다 먼저
   읽힙니다.
-- **선택된 memory가 0이면 블록 자체를 만들지 않습니다**(`text: null`). 빈
+- **선택된 memory가 0이면 블록 자체를 만들지 않습니다**(`rules: null, data: null`). 빈
   "account memory" 제목은 오해를 부르는 표시입니다.
 - 서버가 세는 기억 사용 개수(`usedCount`)는 이 모듈이 실제로 렌더한 줄 수이며,
   client 주장 값이 아닙니다. 화면에는 표시하지 않습니다(§13.4).

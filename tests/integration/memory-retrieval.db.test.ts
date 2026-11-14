@@ -4,7 +4,7 @@ import { after, beforeEach, test } from "node:test";
 import { externalContentDigest } from "@/lib/externalImportDigest";
 import { retrieveMemoryContext } from "@/lib/memoryRetrievalService";
 import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
-import { putMemorySettings } from "@/lib/memoryService";
+import { createManualMemory, putMemorySettings } from "@/lib/memoryService";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -185,6 +185,7 @@ test("only active memories reach a prompt", async () => {
         "manual_review_required",
         "suspended_by_source_lock",
         "suspended_by_source_delete",
+        "deleted",
     ]) {
         await seedMemory(user.id, `사용자는 커피를 좋아한다 ${status}`, {
             status,
@@ -380,4 +381,92 @@ test("manual grounds and user edits never bypass extraction pair admission or re
     ] });
     assert.equal(revoked.selected.length, 0);
     assert.equal((await retrieveMemoryContext({ ...request, approvedPairs: [] })).selected.length, 0);
+});
+
+
+const seedSaturatedPool = async (userId: string, kind: string, pinned: boolean) => {
+    await prisma.memoryItem.createMany({
+        data: Array.from({ length: 400 }, (_, index) => ({
+            id: `saturation-${String(index).padStart(3, "0")}`,
+            userId, kind, pinned, statement: `archive irrelevant ${index}`,
+            status: "active", confidence: 0.9, importance: 10,
+            searchTerms: ["archive", "irrelevant", String(index)], retrievalVersion: 1,
+        })),
+    });
+};
+
+for (const pinned of [false, true]) {
+    test(`DB400 saturation by ${pinned ? "pinned" : "core"} rows remains an observable recall limit`, async () => {
+        const user = await createUser();
+        await seedSaturatedPool(user.id, pinned ? "project" : "identity", pinned);
+        const target = await seedMemory(user.id, "coffee target");
+        const result = await retrieveMemoryContext({ userId: user.id, query: "coffee", semantic: "off" });
+        assert.equal(result.consideredCount, 400);
+        assert.ok(!result.selected.some(row => row.memory.id === target.id));
+        assert.ok(result.selected.length <= 24);
+        assert.ok(result.tokens <= 900);
+        // This measures the existing cap, not a promise that P0 solves saturation.
+    });
+}
+
+test("DB400 weak high-importance matches can hide a stronger match beyond the cap", async () => {
+    const user = await createUser();
+    await seedSaturatedPool(user.id, "project", false);
+    const target = await seedMemory(user.id, "archive irrelevant coffee target");
+    const result = await retrieveMemoryContext({ userId: user.id, query: "archive coffee", semantic: "off" });
+    assert.equal(result.consideredCount, 400);
+    assert.ok(!result.selected.some(row => row.memory.id === target.id));
+    assert.ok(result.omitted.item_cap > 0 || result.omitted.token_budget > 0);
+});
+
+test("a long query retrieves its ending condition without rewriting the stored index", async () => {
+    const user = await createUser();
+    const target = await seedMemory(user.id, "커피 디카페인 선택");
+    const query = `시작 조건 ${Array.from({ length: 100 }, (_, index) => `padding${index}`).join(" ")} 커피 디카페인`;
+    const result = await retrieveMemoryContext({ userId: user.id, query, semantic: "off" });
+    assert.ok(result.selected.some(row => row.memory.id === target.id));
+    const stored = await prisma.memoryItem.findUniqueOrThrow({ where: { id: target.id } });
+    assert.deepEqual(stored.searchTerms, memoryRetrievalTerms(target.statement));
+    assert.equal(stored.retrievalVersion, 1);
+});
+
+test("database candidates still obey the total item, token, and nested style budgets", async () => {
+    const user = await createUser();
+    await prisma.memoryItem.createMany({ data: Array.from({ length: 35 }, (_, index) => {
+        const statement = `coffee ${index}`;
+        return { userId: user.id, kind: "project", statement, status: "active",
+            confidence: 0.9, searchTerms: memoryRetrievalTerms(statement), retrievalVersion: 1 };
+    }) });
+    const items = await retrieveMemoryContext({ userId: user.id, query: "coffee", semantic: "off" });
+    assert.equal(items.selected.length, 24);
+    assert.equal(items.omitted.item_cap, 11);
+    assert.ok(items.tokens <= 900);
+    await prisma.memoryItem.deleteMany({ where: { userId: user.id } });
+    for (let index = 0; index < 10; index += 1) {
+        await seedMemory(user.id, `tone ${index}`, { kind: "tone" });
+    }
+    const style = await retrieveMemoryContext({ userId: user.id, query: "coffee", semantic: "off" });
+    assert.equal(style.selected.length, 6);
+    assert.ok(style.tokens <= 200);
+    await prisma.memoryItem.deleteMany({ where: { userId: user.id } });
+    for (let index = 0; index < 12; index += 1) {
+        await seedMemory(user.id, `coffee ${index} ${"detail ".repeat(35)}`);
+    }
+    const tokens = await retrieveMemoryContext({ userId: user.id, query: "coffee", semantic: "off" });
+    assert.ok(tokens.tokens <= 900);
+    assert.ok(tokens.omitted.token_budget > 0);
+});
+
+
+test("a validated directly authored sensitive memory remains eligible with its manual grounds", async () => {
+    const user = await createUser();
+    const id = await createManualMemory({ userId: user.id, kind: "preference",
+        statement: "The user prefers tea", groundsText: "I chose to remember this preference",
+        sensitivity: "sensitive" });
+    const result = await retrieveMemoryContext({ userId: user.id, query: "tea", approvedPairs: [], semantic: "off" });
+    assert.deepEqual(result.selected.map(row => row.memory.id), [id]);
+    const stored = await prisma.memoryItem.findUniqueOrThrow({ where: { id } });
+    assert.equal(stored.sensitivity, "sensitive");
+    assert.equal(stored.status, "active");
+    assert.equal(stored.userEdited, true);
 });

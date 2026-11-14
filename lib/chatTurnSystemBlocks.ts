@@ -333,11 +333,14 @@ export type ChatTurnPreludeMessage =
 
 export const buildChatTurnPrelude = (input: {
   contextSystemPrompt: string | null;
+  /** Account memory is independent of continuation, including Deep Research. */
+  memoryData?: string | null;
   blocks: Pick<ChatTurnSystemBlocks, "systemMessages" | "untrustedDataMessages">;
 }): ChatTurnPreludeMessage[] => [
   ...(input.contextSystemPrompt
     ? [{ role: "system" as const, content: input.contextSystemPrompt }]
     : []),
   ...input.blocks.systemMessages,
+  ...(input.memoryData ? [{ role: "user" as const, content: input.memoryData }] : []),
   ...input.blocks.untrustedDataMessages,
 ];
