@@ -355,6 +355,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // CHECK constraints only; no commit-deadline marker, classifier or deferred
   // trigger changes.
   "20261113200000_amux_dm_owner_settlement",
+  // The portfolio score active-window CHECK and refresh guard act on the score
+  // table only; no commit-deadline marker, classifier or deferred trigger
+  // changes.
+  "20261114100000_amux_portfolio_score_active_window_check",
+  "20261114100100_amux_portfolio_score_refresh_guard",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
