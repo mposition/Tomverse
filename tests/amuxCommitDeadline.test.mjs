@@ -355,6 +355,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // CHECK constraints only; no commit-deadline marker, classifier or deferred
   // trigger changes.
   "20261113200000_amux_dm_owner_settlement",
+  // The portfolio score active-window CHECK and refresh guard act on the score
+  // table only; no commit-deadline marker, classifier or deferred trigger
+  // changes.
+  "20261114100000_amux_portfolio_score_active_window_check",
+  "20261114100100_amux_portfolio_score_refresh_guard",
   // The v52 review findings summary does not touch the commit-deadline marker,
   // classifier or deferred trigger.
   "20261114140000_amux_v52_review_findings_summary",

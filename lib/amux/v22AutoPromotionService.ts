@@ -21,7 +21,8 @@ import { AUTO_PROMOTION_APPLY_ENV, AUTO_PROMOTION_CODE_LATCH,
 import { OWNER_TRANSACTION_LIMITS, TICK_TRANSACTION_LIMITS,
   withAutoTransaction } from
   "./autoPromotionService.ts";
-import { AMUX_PORTFOLIO_SCORE_VERSION } from "./portfolioScoreCore.ts";
+import { AMUX_PORTFOLIO_SCORE_VERSION, amuxScoreAuditActionBinds } from
+  "./portfolioScoreCore.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
@@ -507,7 +508,7 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
         select: { action: true, targetId: true, entryHash: true },
       });
       if (!scoreAudit?.entryHash ||
-          scoreAudit.action !== "amux.v4.portfolio.score.confirm" ||
+          !amuxScoreAuditActionBinds(scoreAudit.action) ||
           scoreAudit.targetId !== score.id) {
         throw new BoardImportError("score_unbound", 409);
       }
