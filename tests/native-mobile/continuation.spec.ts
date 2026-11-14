@@ -13,7 +13,7 @@ import { expect, test } from '@playwright/test';
 const storage = 'tomverse-native-synthetic-demo';
 const importedPage = (offset: number, ids: string[]) => ({
   provider: 'chatgpt', importedAt: '2026-07-02T00:00:00.000Z', status: 'available', offset, pageSize: 2,
-  messages: ids.map((id, index) => ({ id, role: index % 2 ? 'assistant' : 'user', content: `Imported ${id}`, sourceModelLabel: index % 2 ? 'gpt-4-turbo' : null })),
+  messages: ids.map((id, index) => ({ id, ordinal: offset + index, role: index % 2 ? 'assistant' : 'user', content: `Imported ${id}`, sourceModelLabel: index % 2 ? 'gpt-4-turbo' : null })),
 });
 const rows = [
   { id: 'ordinary', title: 'Ordinary chat', surface: 'chat', kind: 'chat', selectedModels: ['demo'], messages: [] },
@@ -101,4 +101,25 @@ test('a deleted original says so in place, and the Tomverse turns stay', async (
   await expect(page.locator('[data-message-source="imported"]')).toHaveCount(0);
   await expect(page.getByTestId('continuation-divider')).toBeVisible();
   await expect(page.locator('.message.user', { hasText: 'A Tomverse question' })).toBeVisible();
+});
+
+test('native source selection is consumed once and actual-attempt receipts stay out of storage', async ({ page }) => {
+  await page.getByRole('button', { name: '대화', exact: true }).click();
+  await page.locator('.conversation-row', { hasText: 'Imported trip plan' }).click();
+  const context = page.getByTestId('native-continuation-context');
+  await context.locator('summary').click();
+  await context.getByRole('checkbox').first().check();
+  await expect(context).toContainText('선택 1개 + 최근 원문');
+  await page.locator('textarea').fill('Use those decisions.');
+  await page.getByRole('button', { name: '메시지 보내기', exact: true }).click();
+  await expect(context).toContainText('최근 원문 자동 발췌');
+  await expect(page.getByTestId('continuation-receipt').first()).toContainText('선택 1개 + 최근 2개');
+  const saved = await page.evaluate(storage => localStorage.getItem(storage), storage);
+  expect(saved).not.toContain('continuationReceipt');
+  expect(saved).not.toContain('sourcePassages');
+  await page.locator('textarea').fill('A second question.');
+  await page.getByRole('button', { name: '메시지 보내기', exact: true }).click();
+  await expect(page.getByTestId('continuation-receipt').last()).toContainText('선택 0개 + 최근 2개');
+  await page.reload();
+  await expect(page.getByTestId('continuation-receipt')).toHaveCount(0);
 });

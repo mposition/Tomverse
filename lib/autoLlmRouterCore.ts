@@ -419,10 +419,12 @@ export const autoLlmRouterUserMessage = (
     previousAnswer: string | null,
     candidates: readonly AutoLlmRouterCandidate[],
     session: AutoLlmRouterSession | null = null,
-    compactMenu = false
+    compactMenu = false,
+    importedSource?: string
 ) => {
     const turn = {
         message: prompt.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS),
+        ...(importedSource ? { importedSource } : {}),
         ...(previousAnswer ? { previousAnswer } : {}),
         ...(session ? { session } : {}),
     };
