@@ -223,7 +223,37 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 내부 USD는 사용자 응답에 노출하지 않습니다
 (`docs/policy/credit-and-cost-limits.md`).
 
-Chat에서는 다음 일반 텍스트 질문에 한해 자동 발췌 대신 원문 메시지에서 직접 고른 구간(최대 3개, 각각 UTF-16 단위 500자)을 쓸 수 있다. 브라우저는 원문 문자열을 채팅 본문으로 복사하지 않고 위치만 보낸다. 서버는 동일 소유권·잠금·삭제·기능 플래그 판단 뒤 해당 원본 안에서만 구간을 읽고 기존 역할·토큰 제한과 비활성 원문 형식을 적용한다. 잘못된 지정은 다른 원문으로 대체하지 않는다. 선택 이력이나 원문 사본을 계정 기억으로 새로 저장하지 않는다.
+Chat에서는 다음 일반 텍스트 질문에 한해 원문 메시지에서 직접 고른 구간과 최근 자동 발췌를 함께(최대 3개, 각각 UTF-16 단위 500자)을 쓸 수 있다. 브라우저는 원문 문자열을 채팅 본문으로 복사하지 않고 위치만 보낸다. 서버는 동일 소유권·잠금·삭제·기능 플래그 판단 뒤 해당 원본 안에서만 구간을 읽고 기존 역할·토큰 제한과 비활성 원문 형식을 적용한다. 잘못된 지정은 다른 원문으로 대체하지 않는다. 선택 이력이나 원문 사본을 계정 기억으로 새로 저장하지 않는다. 선택이 없으면 기존 `ext-seed-v2` 결과를 유지한다. 선택이 있으면 `ext-seed-v3-selected-recent`가 선택 구간을 먼저 보존하고 같은 본문 3,000 추정 토큰·메시지당 4,000 코드 포인트 안에서 최근 원문을 합성한다. ordinal과 UTF-16 문자 범위로 겹침을 제거하며 선택/최근/고유 메시지 개수는 각각 계산한다.
+
+### 4.5 요청 단위 Auto 맥락과 전달 결과 (로컬 구현)
+
+`CHAT_CONTINUATION_AUTO_SOURCE_ENABLED`는 **기본 켜짐**이다(운영자 명시 승인, 2026-11-14).
+승인 범위는 기존 Router 공급사에 동일한 제한 원문을 별도 user 데이터로 전송하고,
+decision sample·optimizer 재전송에서 제외하는 경로다. 명시적 `false` 또는 유효하지 않은
+설정은 이 Router 입력만 끈다. 기존 continuation 기능 flag·소유권·현재 잠금 판정은 그대로이며,
+수동 모델의 원문 전달에는 이 Auto 스위치를 적용하지 않는다. 새 공급사·호출·지출 상한·사용자
+크레딧 규칙은 추가하지 않는다. 이 소스 기본값 변경은 merge·deploy·운영 설정 변경 승인이 아니다.
+
+활성화된 일반 이어가기 Chat에서는 기존 Router request builder가 별도 user payload의
+`importedSource`에 원문을 넣은 뒤 UTF-8 byte 기반 worst-case hold를 계산한다.
+`message`, `previousAnswer`, `session`에는 원문을 섞지 않는다. 원문을 참고하는 호출은
+rewrite·presearch·decision sample 저장을 끄고 모델·파일 capability 판단만 사용한다.
+원문으로 만든 reason/topic은 이후 routing session으로 저장하지 않는다. 이미지 판정 제외를
+유지하며, 원문을 참고하는 location fusion은 이번에 활성화하지 않는다.
+
+Router 전송 전과 최종 답변 전송 전에 접근을 다시 확인한다. 철회되면 원문과 이를 참고한
+Router 결과를 폐기하고 추가 유료 Router 없이 기존 capability·입력 토큰·가격·admission
+경로를 다시 실행한다. 미사용 hold는 정산으로 반환하고 동일한 durable 응답 identity를
+유지한다. 이미 답변 provider가 실패한 뒤의 철회는 추가 source-bearing fallback 전송을
+막는다. 첫 provider에 이미 전달된 입력을 회수한다는 뜻은 아니다.
+
+`X-Chat-Continuation-Receipt`와 기존 stream trailer는 현재 request/attempt의 내용 없는
+전달 metadata만 보낸다. bridge 생성 시 seed 수치는 현재 적용량이 아니다. `not_sent`는
+전달 메시지 0개, `unknown`은 provider 경계 진입 후 전달 확인 불가, `dispatched`는 실제
+답변 진행이 확인된 입력 포함을 뜻한다. 모델 이해나 답변 성공을 보장하지 않으며 timeout
+요청의 provider 수신을 확정하지 않는다. 클라이언트는 trace·assistant 응답·attempt를
+묶고 늦은 이벤트를 버린다. receipt를 DB/localStorage에 저장하지 않으며 새로고침 후 과거
+receipt를 만들어내지 않는다. Deep Research 원문 미전달 제약은 그대로다.
 
 ## 5. Turn 동작
 

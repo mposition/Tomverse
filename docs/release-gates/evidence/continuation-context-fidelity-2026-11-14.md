@@ -1,0 +1,122 @@
+# Continuation context fidelity — local implementation evidence
+
+Date: 2026-11-14 (Australia/Brisbane). Base: `80a95b53ea9fe99f3ef1466fd142cfb0679dddcf`.
+Fresh implementation worktree and lockfile installation; no dependency junction was used.
+
+## Implemented behavior
+
+- CF-01–05: unchanged automatic `ext-seed-v2` tail behavior; selected passages and recent
+  source compose into `ext-seed-v3-selected-recent`. The server reads coordinates from its
+  authorized source, merges ordinal/UTF-16 ranges, preserves source order and enforces the
+  existing 3,000 body-token / 4,000 code-point limits including omission markers. Invalid,
+  blank or stale selections remain empty. Selection stays in memory for the next text turn.
+- CF-06–09: existing Router request accepts the same bounded `importedSource` as user data
+  before its exact-request hold. Source-aware rewrite, presearch and decision sampling are
+  disabled; usage settlement remains. Source access is checked across the Router hold and
+  before final dispatch. Revocation discards source and routing output, refunds unused
+  admission, and re-enters the existing model/capability/token/price/admission path without
+  another Router call. A replan consumes the second build, so it cannot open a third build.
+- CF-10–14: content-free headers/trailer receipts use the actual request/attempt plan.
+  `not_sent`, `unknown` and confirmed input inclusion are distinct. Selected/recent counts
+  may overlap; the unique-message count does not double count them. The web UI no longer
+  substitutes bridge-creation counts. Trace/response/attempt guards and existing runtime
+  identity ownership isolate late events. Serializers exclude receipts from subsequent
+  provider input and browser persistence. Deep Research remains without source context.
+- CF-15–17: 24 independent Korean/English fixtures across hiring, travel, software,
+  procurement, events, operations, education, design, budgeting, publishing, logistics and
+  support. Per-field evidence coverage and visible/full-source answer correctness are
+  separate. A new small prompt candidate exists only in the evaluation runner.
+- CF-18–20: no schema, source-copy store, Memory write, export/share expansion, provider
+  role promotion, new model call or spending ceiling. Review-to-Chat draft/handoff code was
+  not changed. Native transcript viewing remains supported; native selection/receipt parity
+  is outside this patch.
+
+## Validation
+
+All commands run locally, without production credentials or live model evaluation.
+
+| Check | Result |
+| --- | --- |
+| Core seed/passages, existing 8-language probes, retrieval regressions, fidelity and stream tests | 83 passed |
+| Auto limited-release regression script | 141 passed |
+| Continuation/system-block contracts | 125 passed |
+| Router sampling/hold + real source loader + Chat fallback orchestration | 142 passed; prepared-source cache gate regression: 4 passed |
+| Selected-passage once-only + actual receipt E2E | Desktop Chromium and mobile Chromium: 2 passed |
+| Changed-file ESLint | Passed |
+| `npm run typecheck` | Passed with a 12 GiB Node heap |
+| `npm run build` | Passed with a 12 GiB Node heap; existing dynamic-filesystem tracing warnings remain |
+| `report:continuation-seed -- --json` | Executed, no provider calls |
+| `report:continuation-fidelity` | 72/72 declared final-input plans matched |
+
+Default-heap typecheck/build initially exhausted memory. Increasing the local Node heap
+resolved that environment limit. The install reported Node 22.22.2 below the optional
+`officeparser` engine range; no dependency or lockfile was changed to suppress it.
+
+## Proven input coverage, not answer quality
+
+Each arm has 24 cases / 48 evidence fields. Counts refer to final rendered synthetic
+inputs, not model answers, production accuracy, or account-memory performance.
+
+| Arm | Present fields | Partial fields | Absent fields | Cases with all fields present |
+| --- | ---: | ---: | ---: | ---: |
+| Automatic recent window | 40 | 2 | 6 | 18 |
+| Previous selected-only behavior | 16 | 8 | 24 | 4 |
+| Selected + recent | 46 | 0 | 2 | 22 |
+
+The two remaining absent fields deliberately have no shipping-date evidence anywhere in
+the source. Missing unselected history outside the recent scan window is still not searched.
+Field-level partial coverage does not turn every answer field into UNKNOWN.
+
+Model calls: **0**. Answer correctness, condition/negation/target/recency accuracy and the
+new prompt candidate: **not evaluated**. No Cohere, production model, `--live` evaluation,
+model download or new inference service was used. Mock assertions prove transport and
+orchestration behavior, not improved answer quality. PostgreSQL integration tests were
+not executed; source access/ownership/flag behavior was exercised with the real loader
+under mocked DB/lock boundaries, and existing contract tests remain separate evidence.
+
+## Activation and remaining scope
+
+The subsequent owner instruction on 2026-11-14 approved default-on Auto source input.
+Missing `CHAT_CONTINUATION_AUTO_SOURCE_ENABLED` now enables the bounded excerpt for the
+existing configured Router, excluding sampling and optimizer replay. Explicit `false` or
+invalid configuration disables that Auto input. The continuation flag and live source
+access gates remain independent. No operational setting, merge, deployment or paid-call
+allowance has been changed.
+Source-aware location fusion, Deep Research, automatic full-history retrieval, durable pin,
+automatic Memory storage and native selection/receipt parity remain outside the patch.
+
+At the original local-only snapshot no PR or push had been performed. The subsequent owner
+instruction authorizes a `ci:hold` PR. CI admission/re-run, merge, deployment and operational
+flag changes remain outside this work.
+Independent boundary review `r-20261114-113206-da3a43` accepted commit `6069729e0`:
+Claude and Antigravity both returned `accept`, with no blocking/major findings. Follow-up
+fixes reuse the accepted unchanged authority/cost boundary: record the final seed outcome
+once at dispatch, revalidate current access while reusing the request-local immutable source
+plan instead of rescanning messages, and remove a stray BOM. The cache regression proves
+that locking/deletion/flag-off still reject prepared text before reuse.
+
+Non-blocking review observations retained: continuation presearch optimization is suppressed
+while ordinary current-query search tools remain available; the preparation card deliberately
+shows a mode without inferring current coverage from bridge counts; zero-token unused usage
+is settled with the existing `failed` enum while dispatch instrumentation records
+`not_dispatched`. The omission note covers the whole source, including unscanned history.
+
+A completion-time fetch observed `origin/main` at `0155ee7099ce389315403c7709cfaa708ce1ab31`.
+The relevant continuation/Router/Chat transport files had no upstream changes. An object-only
+`git merge-tree` simulation was conflict-free. This local branch retains the documented
+implementation base; no upstream branch or another session's worktree was changed.
+
+
+## Owner-approved default-on follow-up
+
+The owner explicitly requested the new Auto source input to default on before PR creation
+on 2026-11-14. Missing `CHAT_CONTINUATION_AUTO_SOURCE_ENABLED` now enables that input;
+explicit `false` and invalid values opt out. The independent continuation flag and current
+source ownership/deletion/unlock gates remain mandatory. The switch applies to Auto only;
+manual answering source remains independent. No model, call count or spending ceiling is
+added. Source-aware rewrite/presearch/sampling restrictions and final-access fallback stay.
+Default semantics: 41 focused core cases and 144 mocked server contract cases passed.
+This source change does not itself merge, deploy or change an operational setting.
+The requested next development scope is full-history automatic source retrieval and native
+selection/receipt parity; summary/capsule, Research, Memory storage and durable pin are not
+included in that clarified scope.

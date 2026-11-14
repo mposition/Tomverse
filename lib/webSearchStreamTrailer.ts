@@ -1,3 +1,4 @@
+import { parseContinuationReceipt, type ContinuationReceipt } from "./continuationReceipt";
 import {
   isChatCompletionStatus,
   type ChatCompletionStatus,
@@ -34,6 +35,7 @@ export function buildSearchMetadataTrailerChunk(execution: unknown): string {
  */
 export type ChatStreamTrailer = {
   searchMetadata: unknown;
+  continuationReceipt?: ContinuationReceipt;
   completion?: {
     status: ChatCompletionStatus;
     incompleteReason?: ChatIncompleteReason;
@@ -80,6 +82,7 @@ export function parseChatStreamTrailer(
   if (!parsed || typeof parsed !== "object") return null;
   const record = parsed as Record<string, unknown>;
   if (
+    !("continuationReceipt" in record) &&
     !("searchMetadata" in record) &&
     !("completion" in record) &&
     !("artifacts" in record) &&
@@ -100,6 +103,7 @@ export function parseChatStreamTrailer(
       : null;
   return {
     searchMetadata: record.searchMetadata ?? null,
+    ...(parseContinuationReceipt(record.continuationReceipt) ? { continuationReceipt: parseContinuationReceipt(record.continuationReceipt) } : {}),
     ...(completionRecord && isChatCompletionStatus(completionRecord.status)
       ? {
           completion: {

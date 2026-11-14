@@ -60,6 +60,8 @@ export const CONTINUATION_SEED_OUTCOMES = [
      * than an access one.
      */
     "empty_selection",
+    /** Source access could not be verified; no text or derived decision is used. */
+    "read_failed",
 ] as const;
 
 export type ContinuationSeedOutcome =

@@ -28,6 +28,10 @@ export function externalContinuationEnabledFromValue(
     return value === "true";
 }
 
+/** Owner-approved default-on Router input; explicit false or invalid configuration opts out. */
+export const continuationAutoSourceEnabledFromValue = (value: unknown): boolean =>
+    value === undefined || value === "true";
+
 /**
  * What the flag governs, and what it deliberately does not.
  *

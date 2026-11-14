@@ -29,14 +29,16 @@ if (
   url.password
 )
   throw Error("Use a loopback inference endpoint");
-if (!["baseline", "candidate", "compare-excerpts"].includes(variant))
+if (!["baseline", "candidate", "compare-excerpts", "fidelity-baseline", "fidelity-source-order-v1"].includes(variant))
   throw Error("Unknown prompt variant");
+const fidelity = variant.startsWith("fidelity-");
+const { CONTINUATION_FIDELITY_VERSION, FIDELITY_PROMPT_CANDIDATE } = await import("../lib/continuationFidelityProbe.ts");
 const candidate =
   "Distinguish a proposal from the latest confirmed decision. For each case independently, apply the confirmed default unless every stated exception condition is met. If the final decision is absent, do not fill it in.";
 const report = {
   variant,
-  candidate: variant === "candidate" ? candidate : null,
-  version: MEMORY_PROBE_VERSION,
+  candidate: fidelity ? (variant === "fidelity-source-order-v1" ? FIDELITY_PROMPT_CANDIDATE : null) : variant === "candidate" ? candidate : null,
+  version: fidelity ? CONTINUATION_FIDELITY_VERSION : MEMORY_PROBE_VERSION,
   day,
   requestedModel: model,
   startedAt: new Date().toISOString(),
@@ -44,6 +46,17 @@ const report = {
   results: [],
 };
 async function* trials() {
+  if (variant.startsWith("fidelity-")) {
+    const { CONTINUATION_FIDELITY_CASES, FIDELITY_ARMS } = await import("../lib/continuationFidelityCases.ts");
+    const { continuationFidelityProbe } = await import("../lib/continuationFidelityProbe.ts");
+    for (const fixture of CONTINUATION_FIDELITY_CASES) for (const arm of FIDELITY_ARMS) {
+      const probe = continuationFidelityProbe(fixture, arm, variant === "fidelity-baseline" ? "baseline" : "source-order-v1");
+      if (!probe.inputMatchesDeclaration) throw Error("Coverage declaration mismatch: " + fixture.id + "/" + arm);
+      yield { probe, details: { id: fixture.id, arm, coverage: probe.coverage, expectedCoverage: probe.expectedCoverage,
+        expectedVisible: probe.expectedVisible, dimension: fixture.dimension, bodyTokens: probe.plan.estimatedTokens } };
+    }
+    return;
+  }
   if (variant === "compare-excerpts") {
     if (!oldPlannerPath) throw Error("Provide the baseline seed planner module");
     const { compareExcerptCases } = await import("./import-memory-excerpt-comparison.mjs");
@@ -91,7 +104,9 @@ for await (const { probe, details } of trials()) {
       expected: probe.expected,
       original: probe.gold,
       raw,
-      ...assessMemory(probe, raw),
+      ...(variant.startsWith("fidelity-")
+        ? (await import("../lib/continuationFidelityProbe.ts")).assessContinuationFidelity(probe, raw)
+        : assessMemory(probe, raw)),
     });
     await writeFile(output, JSON.stringify(report, null, 2) + "\n");
     console.log(
