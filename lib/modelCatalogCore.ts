@@ -62,7 +62,8 @@ export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> 
   fal: ["fal.ai"],
   deepseek: ["api-docs.deepseek.com"],
   mistral: ["docs.mistral.ai", "mistral.ai"],
-  moonshot: ["platform.moonshot.ai"],
+  // platform.moonshot.ai answers 301 to platform.kimi.ai since 2026-11.
+  moonshot: ["platform.moonshot.ai", "platform.kimi.ai"],
   // QwenCloud is Alibaba's Qwen API site. Its www host also serves sign-in and
   // a playground, so only /pricing/ there counts; docs.qwencloud.com is docs.
   qwen: ["www.alibabacloud.com", "help.aliyun.com", "docs.qwencloud.com", "www.qwencloud.com/pricing/"],

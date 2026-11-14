@@ -11,7 +11,9 @@
  * configuring it is the owner's decision to spend. Runs from the daily
  * catalogue check, at most once per Brisbane ISO week: the week is claimed in
  * AppSetting before any call, so a failed or repeated run that week does not
- * call again. At most three calls a week, `maxRetries: 0`, bounded output, token
+ * call again. A fourth call (2026-11-14) asks for image models of providers
+ * Tomverse is already connected to, which their model-list APIs never return.
+ * At most four calls a week, `maxRetries: 0`, bounded output, token
  * counts logged and never content. Agent spending, not user credits: nothing
  * here touches a credit or a Chat budget.
  */
@@ -23,11 +25,15 @@ import type { JSONSchema7 } from "@ai-sdk/provider";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { listImageModels } from "@/lib/imageModelRegistry";
 import { loadCodingCatalog } from "@/lib/modelCatalog";
+import { OFFICIAL_SOURCE_HOSTS, isOfficialSourceUrl } from "@/lib/modelCatalogCore";
 import {
+  CONNECTED_IMAGE_RESEARCH_SYSTEM,
   NEW_PROVIDER_RESEARCH_PRODUCTS,
   NEW_PROVIDER_RESEARCH_SCHEMA,
   NEW_PROVIDER_RESEARCH_SYSTEM,
+  acceptConnectedImageCandidates,
   acceptNewProviderCandidates,
+  connectedImageResearchPrompt,
   brisbaneIsoWeek,
   newProviderResearchPrompt,
   type AcceptedNewProviderCandidate,
@@ -59,6 +65,12 @@ export type NewProviderResearchSummary =
         accepted: number;
         rejected: NewProviderResearchRejection[];
       }>;
+      connectedImage: {
+        ok: boolean;
+        proposed: number;
+        accepted: number;
+        rejected: NewProviderResearchRejection[];
+      };
       created: Array<{ provider: string; apiModel: string; product: NewProviderResearchProduct }>;
     };
 
@@ -129,7 +141,12 @@ const researchInputs = async () => {
     image: servedImage.map((model) => model.name),
     code: servedCode.map((profile) => profile.name),
   };
-  return { connectedProviders, knownApiModels, currentModels };
+  // Connected providers whose official documentation hosts are known: the
+  // connected-image answer is accepted only when cited there.
+  const imageResearchProviders = connectedProviders.filter((provider) =>
+    Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider)
+  );
+  return { connectedProviders, knownApiModels, currentModels, imageResearchProviders };
 };
 
 export async function runNewProviderModelResearch(
@@ -143,38 +160,76 @@ export async function runNewProviderModelResearch(
 
   const inputs = await researchInputs();
   const today = now.toISOString().slice(0, 10);
+  const ask = async (label: string, system: string, prompt: string) => {
+    const generated = await generateText({
+      model: getActiveAiModel(model),
+      system,
+      prompt,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      maxRetries: 0,
+      abortSignal: AbortSignal.timeout(TIMEOUT_MS),
+      output: Output.object({
+        schema: jsonSchema(NEW_PROVIDER_RESEARCH_SCHEMA as unknown as JSONSchema7),
+        name: "new_provider_research",
+      }),
+      providerOptions: { openai: { strictJsonSchema: true } },
+    });
+    const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+    console.info(
+      JSON.stringify({
+        event: "model_discovery_research_llm_call",
+        product: label,
+        modelId: model.id,
+        inputTokens: usage?.inputTokens ?? null,
+        outputTokens: usage?.outputTokens ?? null,
+      })
+    );
+    return generated.output as { candidates?: unknown[] } | undefined;
+  };
+  const connectedImageRun = (async () => {
+    try {
+      const answer = await ask(
+        "connected_image",
+        CONNECTED_IMAGE_RESEARCH_SYSTEM,
+        connectedImageResearchPrompt({
+          providers: inputs.imageResearchProviders,
+          currentImageModels: inputs.currentModels.image,
+          knownApiModels: inputs.knownApiModels,
+          today,
+        })
+      );
+      const checked = acceptConnectedImageCandidates({
+        answer,
+        connectedProviders: inputs.imageResearchProviders,
+        knownApiModels: inputs.knownApiModels,
+        isOfficial: isOfficialSourceUrl,
+      });
+      return { ok: true, proposed: answer?.candidates?.length ?? 0, ...checked };
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "model_discovery_research_llm_failed",
+          product: "connected_image",
+          modelId: model.id,
+          error: error instanceof Error ? error.name : "unknown",
+        })
+      );
+      return { ok: false, proposed: 0, accepted: [] as AcceptedNewProviderCandidate[], rejected: [] };
+    }
+  })();
   const results = await Promise.all(
     NEW_PROVIDER_RESEARCH_PRODUCTS.map(async (product) => {
       try {
-        const generated = await generateText({
-          model: getActiveAiModel(model),
-          system: NEW_PROVIDER_RESEARCH_SYSTEM,
-          prompt: newProviderResearchPrompt({
+        const answer = await ask(
+          product,
+          NEW_PROVIDER_RESEARCH_SYSTEM,
+          newProviderResearchPrompt({
             product,
             currentModels: inputs.currentModels[product],
             connectedProviders: inputs.connectedProviders,
             today,
-          }),
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
-          maxRetries: 0,
-          abortSignal: AbortSignal.timeout(TIMEOUT_MS),
-          output: Output.object({
-            schema: jsonSchema(NEW_PROVIDER_RESEARCH_SCHEMA as unknown as JSONSchema7),
-            name: "new_provider_research",
-          }),
-          providerOptions: { openai: { strictJsonSchema: true } },
-        });
-        const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
-        console.info(
-          JSON.stringify({
-            event: "model_discovery_research_llm_call",
-            product,
-            modelId: model.id,
-            inputTokens: usage?.inputTokens ?? null,
-            outputTokens: usage?.outputTokens ?? null,
           })
         );
-        const answer = generated.output as { candidates?: unknown[] } | undefined;
         const checked = acceptNewProviderCandidates({
           product,
           answer,
@@ -197,9 +252,10 @@ export async function runNewProviderModelResearch(
     })
   );
 
+  const connectedImage = await connectedImageRun;
   // Products are researched separately, so two answers can name one model.
   const accepted: AcceptedNewProviderCandidate[] = [];
-  for (const candidate of results.flatMap((result) => result.accepted)) {
+  for (const candidate of [...results.flatMap((result) => result.accepted), ...connectedImage.accepted]) {
     if (!accepted.some((other) => other.apiModelId.toLowerCase() === candidate.apiModelId.toLowerCase())) {
       accepted.push(candidate);
     }
@@ -216,6 +272,12 @@ export async function runNewProviderModelResearch(
       accepted: result.accepted.length,
       rejected: result.rejected,
     })),
+    connectedImage: {
+      ok: connectedImage.ok,
+      proposed: connectedImage.proposed,
+      accepted: connectedImage.accepted.length,
+      rejected: connectedImage.rejected,
+    },
     created,
   };
 }

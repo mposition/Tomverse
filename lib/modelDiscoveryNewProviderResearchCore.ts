@@ -198,12 +198,21 @@ const API_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,119}$/;
 export type NewProviderResearchRejection = {
   providerName: string;
   apiModelId: string;
-  reason: "invalid_shape" | "no_public_citation" | "connected_provider" | "known_model" | "duplicate";
+  reason:
+    | "invalid_shape"
+    | "no_public_citation"
+    | "connected_provider"
+    | "known_model"
+    | "duplicate"
+    | "not_connected_provider"
+    | "no_official_citation";
 };
 
 export type AcceptedNewProviderCandidate = NewProviderResearchCandidate & {
   product: NewProviderResearchProduct;
   provider: string;
+  /** Set on an image model of an already-connected provider. */
+  scope?: typeof CONNECTED_IMAGE_RESEARCH_SCOPE;
 };
 
 const clean = (value: unknown, max: number) =>
@@ -277,10 +286,138 @@ export const acceptNewProviderCandidates = (input: {
   return { accepted, rejected };
 };
 
+/**
+ * Image models of providers Tomverse is already connected to (owner request
+ * 2026-11-14). The catalogue scan reads each provider's model-list API, and
+ * several serve image models on a separate endpoint that no list API returns:
+ * MiniMax-H3-Image (POST /v1/images/generations) and Z.ai's glm-image
+ * (POST /api/paas/v4/images/generations) never appeared in the queue. One more
+ * weekly call asks for them, and the check below accepts a candidate only from
+ * a connected provider, cited on that provider's own official documentation.
+ */
+export const CONNECTED_IMAGE_RESEARCH_SCOPE = "connected_image" as const;
+
+export const CONNECTED_IMAGE_RESEARCH_SYSTEM = `You research AI model providers for Tomverse, a multi-model AI platform.
+Search the provider's own official API documentation and pricing pages. List image generation or image editing models that:
+- are offered by one of the named providers through that provider's own public API today (not a reseller, not consumer app only, not waitlist-only);
+- are not in the list of model ids Tomverse already knows.
+Every candidate needs at least one citation: a full https URL of the provider's own official documentation or pricing page that you actually read.
+providerName must be exactly one of the provider ids given. apiModelId is the exact id sent to the image API.
+Prices are approximate USD with their unit (for example per image). Write the fields ending in "Ko" in Korean.
+If you find nothing that meets every condition, return an empty list. Never invent a URL, model id or price.`;
+
+export const connectedImageResearchPrompt = (input: {
+  providers: readonly string[];
+  currentImageModels: readonly string[];
+  knownApiModels: readonly string[];
+  today: string;
+}) =>
+  [
+    `Date: ${input.today}.`,
+    `Providers to check (use these ids as providerName): ${input.providers.join(", ")}.`,
+    `Image models Tomverse serves today: ${input.currentImageModels.slice(0, 40).join(", ") || "(none listed)"}.`,
+    `Model ids Tomverse already knows (exclude): ${Array.from(new Set(input.knownApiModels.map(modelIdKey))).slice(0, 400).join(", ")}.`,
+    `List up to ${NEW_PROVIDER_RESEARCH_MAX_CANDIDATES} image generation or editing models these providers offer by API that are not in that list.`,
+    "For each: providerName (one of the ids above), modelName, apiModelId, comparableTo (the Tomverse image model it is closest to),",
+    "benchmarkBasisKo (what the provider says it is for, and any public evaluation), apiAvailabilityKo (endpoint path and request shape),",
+    "pricingKo (approximate USD and unit), citations (https URLs on the provider's official docs or pricing pages).",
+  ].join("\n");
+
+/** Short published names too short for the alias rule above: "Z.ai" is Zhipu. */
+const EXACT_PROVIDER_NAMES: Readonly<Record<string, string>> = {
+  zai: "zhipu",
+  zhipuai: "zhipu",
+  xaicorp: "xai",
+};
+
+/** The connected provider id a proposed provider name refers to, or null. */
+export const connectedProviderId = (providerName: string, connectedProviders: readonly string[]) => {
+  const token = providerToken(providerName);
+  if (!token) return null;
+  const exact = EXACT_PROVIDER_NAMES[token];
+  if (exact && connectedProviders.includes(exact)) return exact;
+  return (
+    connectedProviders.find((provider) => providerToken(provider) === token) ??
+    connectedProviders.find((provider) => isConnectedProvider(providerName, [provider])) ??
+    null
+  );
+};
+
+/**
+ * The check on the connected-image answer: the provider must be connected,
+ * at least one citation must be on that provider's official documentation
+ * (`isOfficial`, lib/modelCatalogCore.ts isOfficialSourceUrl), and the model id
+ * must be new. Only the official citations are kept.
+ */
+export const acceptConnectedImageCandidates = (input: {
+  answer: unknown;
+  connectedProviders: readonly string[];
+  knownApiModels: readonly string[];
+  isOfficial: (provider: string, url: string) => boolean;
+}): { accepted: AcceptedNewProviderCandidate[]; rejected: NewProviderResearchRejection[] } => {
+  const accepted: AcceptedNewProviderCandidate[] = [];
+  const rejected: NewProviderResearchRejection[] = [];
+  const known = new Set(input.knownApiModels.map(modelIdKey));
+  const raw = (input.answer as { candidates?: unknown } | null)?.candidates;
+  const candidates = Array.isArray(raw) ? raw.slice(0, NEW_PROVIDER_RESEARCH_MAX_CANDIDATES) : [];
+  for (const item of candidates) {
+    const value = (item ?? {}) as Record<string, unknown>;
+    const candidate: NewProviderResearchCandidate = {
+      providerName: clean(value.providerName, 80),
+      modelName: clean(value.modelName, 120),
+      apiModelId: clean(value.apiModelId, 120),
+      comparableTo: clean(value.comparableTo, 120),
+      benchmarkBasisKo: clean(value.benchmarkBasisKo, 400),
+      apiAvailabilityKo: clean(value.apiAvailabilityKo, 300),
+      pricingKo: clean(value.pricingKo, 300),
+      citations: [],
+    };
+    const label = { providerName: candidate.providerName, apiModelId: candidate.apiModelId };
+    if (!candidate.modelName || !API_MODEL_ID.test(candidate.apiModelId) || !candidate.benchmarkBasisKo) {
+      rejected.push({ ...label, reason: "invalid_shape" });
+      continue;
+    }
+    const provider = connectedProviderId(candidate.providerName, input.connectedProviders);
+    if (!provider) {
+      rejected.push({ ...label, reason: "not_connected_provider" });
+      continue;
+    }
+    candidate.citations = Array.from(
+      new Set(
+        (Array.isArray(value.citations) ? value.citations : [])
+          .slice(0, NEW_PROVIDER_RESEARCH_MAX_CITATIONS)
+          .map((url) => publicCitationUrl(url as string))
+          .filter((url): url is string => url !== null && input.isOfficial(provider, url))
+      )
+    );
+    if (candidate.citations.length === 0) {
+      rejected.push({ ...label, reason: "no_official_citation" });
+      continue;
+    }
+    const key = modelIdKey(candidate.apiModelId);
+    if (known.has(key)) {
+      rejected.push({ ...label, reason: "known_model" });
+      continue;
+    }
+    if (accepted.some((other) => modelIdKey(other.apiModelId) === key)) {
+      rejected.push({ ...label, reason: "duplicate" });
+      continue;
+    }
+    accepted.push({
+      ...candidate,
+      product: "image",
+      provider,
+      scope: CONNECTED_IMAGE_RESEARCH_SCOPE,
+    });
+  }
+  return { accepted, rejected };
+};
+
 /** What the work item's evidence stores for one accepted proposal. */
 export const newProviderResearchEvidence = (candidate: AcceptedNewProviderCandidate, modelId: string) => ({
   discoveredBy: NEW_PROVIDER_RESEARCH_SOURCE,
   researchModelId: modelId,
+  ...(candidate.scope ? { scope: candidate.scope } : {}),
   product: candidate.product,
   providerName: candidate.providerName,
   modelName: candidate.modelName,
@@ -294,6 +431,8 @@ export const newProviderResearchEvidence = (candidate: AcceptedNewProviderCandid
 
 export type NewProviderResearchAnalysis = {
   product: NewProviderResearchProduct;
+  /** True for an image model of a provider Tomverse is already connected to. */
+  connected: boolean;
   providerName: string;
   citations: string[];
   verdictKo: string;
@@ -317,17 +456,22 @@ export const newProviderResearchAnalysis = (evidence: unknown): NewProviderResea
   const citations = (Array.isArray(value.citations) ? value.citations : [])
     .map((url) => publicCitationUrl(url as string))
     .filter((url): url is string => url !== null);
-  const verdictKo = `미연결 공급자 ${read("providerName")}의 ${read("modelName")}: Tomverse ${PRODUCT_LABEL_KO[product]}의 ${read("comparableTo") || "현재 모델"}에 견줄 만한 후보(웹 리서치 제안).`;
+  const connected = value.scope === CONNECTED_IMAGE_RESEARCH_SCOPE;
+  const verdictKo = connected
+    ? `연결된 공급자 ${read("providerName")}의 이미지 모델 ${read("modelName")}: 모델 목록 API에는 나오지 않아 공식 문서 리서치로 찾은 후보입니다(${read("comparableTo") || "현재 이미지 모델"}과 비교).`
+    : `미연결 공급자 ${read("providerName")}의 ${read("modelName")}: Tomverse ${PRODUCT_LABEL_KO[product]}의 ${read("comparableTo") || "현재 모델"}에 견줄 만한 후보(웹 리서치 제안).`;
   const pointsKo = [
     `비교 기준: ${read("benchmarkBasisKo")}`,
     `가용 API: ${read("apiAvailabilityKo")}`,
     `대략 가격: ${read("pricingKo")}`,
     `근거 ${citations.length}건: ${citations.join(" ")}`,
   ];
-  const nextStepKo =
-    "공급자 연결(API 키·어댑터·약관·가격 검증)이 먼저 필요해 여기서 바로 채택할 수 없습니다. 연결할 가치가 있으면 연결 작업을 따로 정하고, 아니면 제외합니다.";
+  const nextStepKo = connected
+    ? "이미지 카탈로그로 들이려면 이 공급자의 이미지 어댑터가 있어야 합니다. 있으면 이미지·코딩 카탈로그에서 초안을 만들고, 없으면 어댑터 작업을 따로 정하거나 제외합니다."
+    : "공급자 연결(API 키·어댑터·약관·가격 검증)이 먼저 필요해 여기서 바로 채택할 수 없습니다. 연결할 가치가 있으면 연결 작업을 따로 정하고, 아니면 제외합니다.";
   return {
     product,
+    connected,
     providerName: read("providerName"),
     citations,
     verdictKo,

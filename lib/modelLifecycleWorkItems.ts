@@ -1076,7 +1076,13 @@ export type ModelDiscoveryQueueItem = OpenWorkItem & {
     /** The exclusion that closed this item; only in the excluded view. */
     exclusion: WorkItemExclusionSummary | null;
     /** Set on a proposal of the weekly new-provider research: not adoptable here. */
-    research: { product: NewProviderResearchProduct; providerName: string; citations: string[] } | null;
+    research: {
+        product: NewProviderResearchProduct;
+        /** An image model of an already-connected provider (docs research). */
+        connected: boolean;
+        providerName: string;
+        citations: string[];
+    } | null;
 };
 
 export type WorkItemExclusionSummary = {
@@ -1709,6 +1715,7 @@ export async function listModelDiscoveryQueue(options?: {
             research: research
                 ? {
                       product: research.product,
+                      connected: research.connected,
                       providerName: research.providerName,
                       citations: research.citations,
                   }

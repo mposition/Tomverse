@@ -154,3 +154,101 @@ test("the research is off unless the switch names a model, and spends nothing th
     { status: "off" }
   );
 });
+
+// 2026-11-14: MiniMax-H3-Image and Z.ai glm-image serve on image endpoints no
+// model-list API returns, so the catalogue scan never saw them.
+test("connected-provider image models are accepted only from a connected provider, cited on its official docs", async () => {
+  const {
+    acceptConnectedImageCandidates,
+    connectedProviderId,
+    connectedImageResearchPrompt,
+    CONNECTED_IMAGE_RESEARCH_SCOPE,
+  } = await import("../lib/modelDiscoveryNewProviderResearchCore.ts");
+  const { isOfficialSourceUrl } = await import("../lib/modelCatalogCore.ts");
+  const providers = ["minimax", "zhipu", "qwen", "openai"];
+  const image = (overrides = {}) => ({
+    providerName: "minimax",
+    modelName: "MiniMax-H3-Image",
+    apiModelId: "MiniMax-H3-Image",
+    comparableTo: "GPT Image 2",
+    benchmarkBasisKo: "공식 문서의 텍스트-이미지 생성 모델",
+    apiAvailabilityKo: "POST /v1/images/generations",
+    pricingKo: "문서에 가격 없음",
+    citations: ["https://platform.minimax.io/docs/api-reference/image-generation-h3-generations"],
+    ...overrides,
+  });
+  const { accepted, rejected } = acceptConnectedImageCandidates({
+    answer: {
+      candidates: [
+        image(),
+        image({
+          providerName: "Z.ai",
+          modelName: "GLM-Image",
+          apiModelId: "glm-image",
+          citations: ["https://docs.z.ai/guides/image/glm-image.md", "https://example.com/blog"],
+        }),
+        // Cited only on a third-party page: not official.
+        image({ apiModelId: "image-01", citations: ["https://fal.ai/models/minimax/image-01"] }),
+        // Not a connected provider.
+        image({ providerName: "Black Forest Labs", apiModelId: "flux-3-pro", citations: ["https://bfl.ai/docs"] }),
+        // Already known.
+        image({ apiModelId: "gpt-image-2", providerName: "openai", citations: ["https://platform.openai.com/docs/models/gpt-image-2"] }),
+      ],
+    },
+    connectedProviders: providers,
+    knownApiModels: ["gpt-image-2"],
+    isOfficial: isOfficialSourceUrl,
+  });
+  assert.deepEqual(
+    accepted.map((item) => [item.provider, item.apiModelId, item.scope, item.product]),
+    [
+      ["minimax", "MiniMax-H3-Image", CONNECTED_IMAGE_RESEARCH_SCOPE, "image"],
+      ["zhipu", "glm-image", CONNECTED_IMAGE_RESEARCH_SCOPE, "image"],
+    ]
+  );
+  // Only the official citation is kept.
+  assert.deepEqual(accepted[1].citations, ["https://docs.z.ai/guides/image/glm-image.md"]);
+  assert.deepEqual(
+    rejected.map((item) => item.reason),
+    ["no_official_citation", "not_connected_provider", "known_model"]
+  );
+  assert.equal(connectedProviderId("Zhipu AI", providers), "zhipu");
+  assert.equal(connectedProviderId("Hailuo (MiniMax)", providers), "minimax");
+  assert.equal(connectedProviderId("Cohere", providers), null);
+  const prompt = connectedImageResearchPrompt({
+    providers,
+    currentImageModels: ["GPT Image 2"],
+    knownApiModels: ["openai/gpt-image-2"],
+    today: "2026-11-14",
+  });
+  assert.match(prompt, /minimax, zhipu, qwen, openai/);
+  assert.match(prompt, /gpt-image-2/);
+});
+
+test("a connected-image proposal reads as a connected provider's model in the queue", async () => {
+  const { acceptConnectedImageCandidates, newProviderResearchEvidence, newProviderResearchAnalysis } =
+    await import("../lib/modelDiscoveryNewProviderResearchCore.ts");
+  const { accepted } = acceptConnectedImageCandidates({
+    answer: {
+      candidates: [
+        {
+          providerName: "zhipu",
+          modelName: "GLM-Image",
+          apiModelId: "glm-image",
+          comparableTo: "GPT Image 2",
+          benchmarkBasisKo: "공식 이미지 생성 모델",
+          apiAvailabilityKo: "POST /api/paas/v4/images/generations",
+          pricingKo: "이미지당 US$0.015",
+          citations: ["https://docs.z.ai/guides/overview/pricing.md"],
+        },
+      ],
+    },
+    connectedProviders: ["zhipu"],
+    knownApiModels: [],
+    isOfficial: (provider, url) => provider === "zhipu" && url.startsWith("https://docs.z.ai/"),
+  });
+  const analysis = newProviderResearchAnalysis(JSON.parse(JSON.stringify(newProviderResearchEvidence(accepted[0], "sonar-pro"))));
+  assert.equal(analysis.connected, true);
+  assert.match(analysis.verdictKo, /연결된 공급자 zhipu의 이미지 모델 GLM-Image/);
+  assert.match(analysis.nextStepKo, /이미지 어댑터/);
+});
