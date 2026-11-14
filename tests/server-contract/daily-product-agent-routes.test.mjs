@@ -55,8 +55,10 @@ test("the secret and explicit daily activation fence the expanded source", async
 test("an unavailable timing aggregate leaves the daily product claim available", async () => {
   process.env.DAILY_PRODUCT_AGENT_ENABLED = "true";
   observationFails = true;
+  const before = observations;
   try {
     assert.equal((await dailyClaimRoute.POST(request())).status, 204);
+    assert.equal(observations, before + 1);
     assert.deepEqual(calls, ["daily"]);
   } finally { observationFails = false; }
 });

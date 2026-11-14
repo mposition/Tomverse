@@ -11,6 +11,7 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
 집계를 확인합니다. 검증할 작업은 [Admin → Routing → Optimizer](https://tomverse.app/admin/routing?tab=optimizer)의
 기존 권장안에 추가됩니다. 항목을 펼치면 근거를 읽을 수 있고, 완료·제외·AMUX 전송·작업 지시 복사는
 다른 권장안과 같습니다. 공개 QA 실측과 배포·모델이 섞인 집계는 별도로 표시합니다.
+코딩 에이전트 스위치가 켜져 있으면 이 코드 권장안도 기존 순서·상한대로 작업 대상이 됩니다.
 별도 타이머, 호스트 DB 자격증명, 유료 평가 호출은 필요하지 않습니다.
 `install.sh <검토된 commit SHA> daily-product`가 기존 runner/timer에 이 모드를 설치합니다.
 설치 자체는 타이머를 켜거나 실행하지 않습니다. 기존 시간별 모드가 기본값으로 유지됩니다.

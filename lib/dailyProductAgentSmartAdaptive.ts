@@ -79,22 +79,27 @@ async function appendToRoutingReport(tx: Prisma.TransactionClient, proposal: Dai
   return { outcome: "awaiting_cycle", recommendation: null };
 }
 
-function observedDay(value: string | undefined): string | undefined {
-  if (!value) return;
-  const stored = JSON.parse(value) as { day?: string };
-  return stored.day;
+// This snapshot is replaceable. A corrupt snapshot must not stop observations;
+// the separate listing markers still protect operator decisions.
+function readSnapshot(value?: string): JsonRecord | null {
+  if (!value) return null;
+  try {
+    const snapshot = object(JSON.parse(value));
+    return snapshot && typeof snapshot.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(snapshot.day)
+      ? snapshot : null;
+  } catch { return null; }
 }
 
 export async function readSmartAdaptiveDaily() {
   const row = await prisma.appSetting.findUnique({ where: { key: latestKey }, select: { value: true } });
-  return row ? object(JSON.parse(row.value)) : null;
+  return readSnapshot(row?.value);
 }
 
 /** Called only after the existing Ubuntu daily claim authenticated and its switch passed. */
 export async function observeSmartAdaptiveDaily(now = new Date()) {
   const day = new Date(now.getTime() + 10 * 60 * 60_000).toISOString().slice(0, 10);
   const recorded = await prisma.appSetting.findUnique({ where: { key: latestKey }, select: { value: true } });
-  if ((observedDay(recorded?.value) ?? "") >= day) return;
+  if (String(readSnapshot(recorded?.value)?.day ?? "") >= day) return;
   const [current, prior] = await Promise.all([
     readChatPresearchLatency(now), readChatPresearchLatency(new Date(now.getTime() - dayMs)),
   ]);
@@ -102,7 +107,7 @@ export async function observeSmartAdaptiveDaily(now = new Date()) {
     await takeAuditChainLock(tx);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
     const latest = await tx.appSetting.findUnique({ where: { key: latestKey }, select: { value: true } });
-    if ((observedDay(latest?.value) ?? "") >= day) return;
+    if (String(readSnapshot(latest?.value)?.day ?? "") >= day) return;
     const seed = await appendToRoutingReport(tx, qaFollowup, day, current.asOf);
     const live = liveFollowup(day, current.windows.find(w => w.hours === 24));
     let item = seed;

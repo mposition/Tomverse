@@ -31,6 +31,8 @@ test("daily observations preserve previous work and produce each scoped recommen
   const key = { startsWith: prefix };
   await prisma.appSetting.deleteMany({ where: { key } });
   try {
+    await prisma.appSetting.create({ data: { key: prefix + "latest", value: "invalid snapshot" } });
+    assert.equal(await readSmartAdaptiveDaily(), null);
     const report = { findings: ["original finding"], recommendations: [{kind:"setting",text:"existing item"}] };
     const original = await cycle(1, { report, recommendationStatus: { "0": { status: "dismissed", at: day(1).toISOString(), by: "test" } } });
     const running = await cycle(2, {}, "running");
