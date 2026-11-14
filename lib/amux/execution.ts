@@ -101,6 +101,10 @@ import { amuxV22ReadOnlyApiUsageProjection,
 import { amuxV22WorkerSafeStopFenced } from "@/lib/amux/v22LegacySafeStopFence";
 import { amuxV22OwnerQuestionSettlementPlan } from "@/lib/amux/v22OwnerQuestionCore";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
+import { AMUX_V22_CLI_USAGE_UNREPORTED_REASON,
+  AMUX_V22_LEASE_EXPIRED_RETRY_REASON, amuxExecutionLeaseMs,
+  amuxV22CliUsageRecordOnly, amuxV22ReadBackProceedEnabled } from
+  "@/lib/amux/v22ReadBackProceedCore";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -200,8 +204,9 @@ type TaskLockRow = {
   executionBriefDigest: string | null;
 };
 
+// 180 s while TOMVERSE_AMUX_V22_READ_BACK_PROCEED is enabled (v22ReadBackProceedCore.ts).
 const executionLeaseExpiry = (now: Date) =>
-  new Date(now.getTime() + AMUX_EXECUTION_LEASE_MS);
+  new Date(now.getTime() + Math.max(AMUX_EXECUTION_LEASE_MS, amuxExecutionLeaseMs()));
 
 const lockRuntime = async (
   tx: Prisma.TransactionClient,
@@ -1577,7 +1582,16 @@ export async function settleAmuxV22TaskExecution(input: {
           (!storedResult || storedResult.taskId !== task.id ||
             storedResult.bodyPurgedAt !== null))
         return { settled: false as const, reason: "result_unverified" as const };
-      if (input.outcome !== "blocked" && !receiptsComplete)
+      // A subscription CLI's usage is recorded, never a gate (owner decision
+      // 2026-11-14, v22ReadBackProceedCore.ts): its run goes on through the
+      // judgement below, and one that ended with no receipt goes back to todo
+      // within the attempt budget. A paid route keeps the refusal.
+      const cliUsageRecordOnly = !receiptsComplete && !knownCliFailure &&
+        amuxV22CliUsageRecordOnly({ enabled: amuxV22ReadBackProceedEnabled(),
+          budgetBound: !!settlementRecovery?.riskAcceptanceId,
+          apiReceipt: !!apiExecutionReceipt });
+      const usageSettled = receiptsComplete || cliUsageRecordOnly;
+      if (input.outcome !== "blocked" && !usageSettled)
         return { settled: false as const, reason: "usage_unverified" as const };
       const storedPatch = await tx.amuxV22TaskPatch.findUnique({
         where: { attemptId: attempt.id },
@@ -1691,7 +1705,8 @@ export async function settleAmuxV22TaskExecution(input: {
           reviewDisposition ? reviewDisposition.status :
           conclusionPlan ? conclusionPlan.toStatus :
           input.outcome === "succeeded" ? "review" :
-          input.outcome === "failed" ? "todo" : "blocked",
+          input.outcome === "failed" ? "todo" :
+          cliUsageRecordOnly ? "todo" : "blocked",
         attempt_number: attempt.attemptNumber,
         ...(attempt.taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID &&
           settlementAssignment?.recoveryApprovalId ? {
@@ -1714,6 +1729,7 @@ export async function settleAmuxV22TaskExecution(input: {
         budget.exhausted_limit ?? reviewDisposition?.reason ??
           (receiptsComplete ?
             (input.outcome === "blocked" ? "reported_result" : "execution_blocked") :
+            cliUsageRecordOnly ? AMUX_V22_CLI_USAGE_UNREPORTED_REASON :
             knownCliFailure ?? "usage_outcome_unknown");
       if (gradeEscalated && escalationReceipt) {
         await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
@@ -1748,6 +1764,7 @@ export async function settleAmuxV22TaskExecution(input: {
             next === "blocked" ? blockedReason :
             budget.exhausted_limit ?? reviewDisposition?.reason ??
                 (receiptsComplete ? "reported_result" :
+                  cliUsageRecordOnly ? AMUX_V22_CLI_USAGE_UNREPORTED_REASON :
                   knownCliFailure ?? "usage_outcome_unknown") },
       });
       await tx.amuxWorkerRuntime.updateMany({ where: {
@@ -1851,7 +1868,7 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
     const changed = await withAmuxDbBoundary(
       { ...AMUX_DB_BOUNDARIES.executionRecoveryWrite,
         prismaCallCeiling:
-          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 11 },
+          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 12 },
       async (tx, context) => {
         const now = context.dbNow;
         const runtime = await lockRuntime(tx, candidate.worker);
@@ -1865,15 +1882,27 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
             task.status !== "doing" || task.owner !== attempt.worker ||
             task.revision !== attempt.taskRevision)
           return false;
+        // A subscription CLI run whose lease expired goes back to todo within
+        // its attempt budget (owner decision 2026-11-14,
+        // v22ReadBackProceedCore.ts); a late settle of it is refused and the
+        // bridge reads that back. A budget-bound (paid) run stays quarantined.
+        const assignment = amuxV22ReadBackProceedEnabled() ?
+          await tx.amuxV22WorkerAssignment.findUnique({
+            where: { id: attempt.v22AssignmentId },
+            select: { recoveryApproval: { select: { riskAcceptanceId: true } } } }) : null;
+        const retry = !!assignment && !assignment.recoveryApproval?.riskAcceptanceId &&
+          settlementDestinationForBudget({ requested_status: "todo",
+            attempt_number: attempt.attemptNumber }).to_status === "todo";
+        const toStatus = retry ? "todo" : "blocked";
         await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
-          status: "blocked", owner: null, claimedAt: null,
+          status: toStatus, owner: null, claimedAt: null,
           v22AssignmentId: null, revision: { increment: 1 },
         } });
         await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },
           data: { endedAt: now, leaseExpiresAt: null,
-            outcome: "expired", toStatus: "blocked",
+            outcome: "expired", toStatus,
             endedBy: "system:amux-v22-execution-reaper",
-            reason: "outcome_unknown" },
+            reason: retry ? AMUX_V22_LEASE_EXPIRED_RETRY_REASON : "outcome_unknown" },
         });
         // An owner question this run recorded is not parked by an unknown
         // outcome; it is closed so it never holds the Task's question slot.
@@ -1886,7 +1915,7 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
             workerName: attempt.worker, instanceId: attempt.workerInstanceId,
             generation: attempt.workerGeneration, status: "busy",
           }, data: { status: "error", dispatchReady: false } });
-        await openAmuxHumanEscalation(tx, { taskId: task.id,
+        if (!retry) await openAmuxHumanEscalation(tx, { taskId: task.id,
           specialty: "execution-recovery", reason: "execution_lease_expired",
           openedBy: "system:amux-v22-execution-reaper" });
         await cancelPendingAmuxWorkDelivery(tx, attempt.id, now);
@@ -1897,7 +1926,7 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
           metadata: { attemptId: attempt.id, assignmentId:
             attempt.v22AssignmentId, taskRevision: task.revision + 1,
             reservedCostMicrousd: attempt.reservedCostMicrousd.toString(),
-            outcome: "unknown" },
+            outcome: "unknown", toStatus },
         });
         const run = await tx.engineeringAgentRun.findUnique({
           where: { amuxAttemptId: attempt.id },

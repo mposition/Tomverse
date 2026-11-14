@@ -1056,6 +1056,48 @@ fn apply_settle_followup<T>(
     }
 }
 
+/// Owner decision 2026-11-14 (AMUX process audit bundle 1, AMUXFLOW/B1):
+/// what the app can answer is read back and the bridge goes on. A halt stays
+/// for a paid write's unknown outcome (`read_only_api_*`, `api_model_access_*`)
+/// and for what no read can settle. Off unless
+/// TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED=enabled.
+pub const BRIDGE_READ_BACK_PROCEED_ENV: &str = "TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED";
+
+pub fn bridge_read_back_proceed_enabled(value: Option<&str>) -> bool {
+    value.map(str::trim) == Some("enabled")
+}
+
+fn bridge_read_back_proceed() -> bool {
+    bridge_read_back_proceed_enabled(std::env::var(BRIDGE_READ_BACK_PROCEED_ENV).ok().as_deref())
+}
+
+/// A settle whose answer was lost or refused, after the attempt was read back
+/// by its assignment. An ended attempt is settled (by this call or by the
+/// app's own recovery): drop it, no halt. A started attempt after a lost
+/// answer committed nothing, since settlement ends the attempt in the same
+/// transaction: settle it again next tick. A refused settle of a started
+/// attempt, or no read at all, keeps the halt.
+pub fn plan_settle_read_back(result: SettleResult, state: Option<&str>) -> SettleResult {
+    match (result, state) {
+        (SettleResult::HaltForReadBack | SettleResult::DropAndHalt, Some("ended")) => {
+            SettleResult::Settled
+        }
+        (SettleResult::HaltForReadBack, Some("started")) => SettleResult::RetryNextTick,
+        (other, _) => other,
+    }
+}
+
+/// A heartbeat is idempotent and its refusal is the app's answer that the
+/// attempt already ended. Keep the entry either way: a failed send is sent
+/// again next tick, and a refused one goes on to its settle, which the app
+/// refuses and the read-back above then drops once the run is done.
+pub fn plan_heartbeat_read_back(planned: PendingHeartbeat) -> PendingHeartbeat {
+    match planned {
+        PendingHeartbeat::KeepAndHalt | PendingHeartbeat::DropAndHalt => PendingHeartbeat::Keep,
+        other => other,
+    }
+}
+
 fn should_exit_halted_bridge(halted: bool, pending_count: usize) -> bool {
     halted && pending_count == 0
 }
@@ -3136,7 +3178,18 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                 .execution_heartbeat(&entry.delivery, &session.instance_id, session.generation)
                 .await
                 .map(|response| response.accepted);
-            match plan_heartbeat_answer(&answer) {
+            let planned = plan_heartbeat_answer(&answer);
+            let planned = if bridge_read_back_proceed() {
+                let proceeded = plan_heartbeat_read_back(planned);
+                if proceeded != planned {
+                    eprintln!(
+                        "amux wsl bridge warn: execution heartbeat for attempt {} was not accepted; kept for read-back, not halted",
+                        entry.delivery.attempt_id
+                    );
+                }
+                proceeded
+            } else { planned };
+            match planned {
                 PendingHeartbeat::Keep => still_pending.push(entry),
                 PendingHeartbeat::RetryNextTick => {
                     eprintln!(
@@ -3605,9 +3658,13 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                             Ok(_) => Err(anyhow::anyhow!(
                                                                 "invalid v52 review readback")),
                                                             Err(_) => {
-                                                                halted = true;
-                                                                note_halt(&mut halt_cause,
-                                                                    "review_readback_unknown");
+                                                                // Every round reads the review back first, so a later
+                                                                // round repeats this step safely (AMUXFLOW/B1).
+                                                                if !bridge_read_back_proceed() {
+                                                                    halted = true;
+                                                                    note_halt(&mut halt_cause,
+                                                                        "review_readback_unknown");
+                                                                }
                                                                 still_running.push(entry);
                                                                 continue;
                                                             },
@@ -3643,9 +3700,11 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                                 Ok(readback) if readback.status == "absent" =>
                                                                     review_unverified = true,
                                                                 _ => {
-                                                                    halted = true;
-                                                                    note_halt(&mut halt_cause,
-                                                                        "review_record_outcome_unknown");
+                                                                    if !bridge_read_back_proceed() {
+                                                                        halted = true;
+                                                                        note_halt(&mut halt_cause,
+                                                                            "review_record_outcome_unknown");
+                                                                    }
                                                                     still_running.push(entry);
                                                                     continue;
                                                                 },
@@ -3741,7 +3800,24 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                 (to_status == "review").then_some(review_pr_number),
                             ).await
                         }.map(|response| response.settled);
-                        let result = plan_settle_answer(&settled);
+                        let mut result = plan_settle_answer(&settled);
+                        if matches!(result, SettleResult::HaltForReadBack | SettleResult::DropAndHalt) &&
+                            bridge_read_back_proceed() {
+                            if let Some(assignment_id) = entry.delivery.assignment_id.as_deref() {
+                                let state = api.v22_execution_readback(assignment_id,
+                                    &entry.delivery.worker, &session.instance_id,
+                                    session.generation).await.ok().and_then(|read| read.state);
+                                let read = plan_settle_read_back(result, state.as_deref());
+                                if read != result {
+                                    eprintln!(
+                                        "amux wsl bridge warn: settle for attempt {} read back as {}; not halted",
+                                        entry.delivery.attempt_id,
+                                        state.as_deref().unwrap_or("unknown")
+                                    );
+                                }
+                                result = read;
+                            }
+                        }
                         if result == SettleResult::HaltForReadBack {
                             note_halt(&mut halt_cause, "settle_outcome_unknown");
                             eprintln!(
@@ -4199,6 +4275,53 @@ mod tests {
     const ATTEMPT_ID: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
     const ATTEMPT_ID_2: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e70";
     const ATTEMPT_ID_3: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e71";
+
+    #[test]
+    fn read_back_proceed_is_off_unless_enabled() {
+        assert!(!bridge_read_back_proceed_enabled(None));
+        assert!(!bridge_read_back_proceed_enabled(Some("true")));
+        assert!(bridge_read_back_proceed_enabled(Some(" enabled ")));
+    }
+
+    #[test]
+    fn a_settle_read_back_drops_an_ended_attempt_and_retries_an_uncommitted_one() {
+        assert_eq!(plan_settle_read_back(SettleResult::HaltForReadBack, Some("ended")),
+            SettleResult::Settled);
+        assert_eq!(plan_settle_read_back(SettleResult::DropAndHalt, Some("ended")),
+            SettleResult::Settled);
+        assert_eq!(plan_settle_read_back(SettleResult::HaltForReadBack, Some("started")),
+            SettleResult::RetryNextTick);
+        // A refusal of a running attempt and an unreadable attempt still halt.
+        assert_eq!(plan_settle_read_back(SettleResult::DropAndHalt, Some("started")),
+            SettleResult::DropAndHalt);
+        assert_eq!(plan_settle_read_back(SettleResult::HaltForReadBack, None),
+            SettleResult::HaltForReadBack);
+        assert_eq!(plan_settle_read_back(SettleResult::HaltForReadBack, Some("not_started")),
+            SettleResult::HaltForReadBack);
+        assert_eq!(plan_settle_read_back(SettleResult::Settled, Some("started")),
+            SettleResult::Settled);
+    }
+
+    #[test]
+    fn a_heartbeat_read_back_keeps_the_attempt_without_a_halt() {
+        assert_eq!(plan_heartbeat_read_back(PendingHeartbeat::KeepAndHalt), PendingHeartbeat::Keep);
+        assert_eq!(plan_heartbeat_read_back(PendingHeartbeat::DropAndHalt), PendingHeartbeat::Keep);
+        assert_eq!(plan_heartbeat_read_back(PendingHeartbeat::RetryNextTick),
+            PendingHeartbeat::RetryNextTick);
+        assert_eq!(plan_heartbeat_read_back(PendingHeartbeat::Keep), PendingHeartbeat::Keep);
+    }
+
+    #[test]
+    fn paid_api_halts_never_take_the_read_back_switch() {
+        let source = include_str!("wsl_bridge.rs");
+        let production = &source[..source.find("mod tests {").unwrap()];
+        for cause in ["\"read_only_api_outcome_unknown\"", "\"api_model_access_write_unknown\"",
+            "\"api_model_access_outcome_unknown\""] {
+            let at = production.find(cause).unwrap();
+            let before = &production[at.saturating_sub(400)..at];
+            assert!(!before.contains("bridge_read_back_proceed()"), "{cause}");
+        }
+    }
 
     #[test]
     fn lower_grade_contract_touch_skips_review_before_settlement() {

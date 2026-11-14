@@ -29,9 +29,10 @@ test("the usage gate skips attempts on archived cards and keeps every other unkn
   assert.equal(await amuxV22WorkerUsageUnverified(tx, "codex-impl", null, "task-a"), false);
   assert.equal(calls.length, 1);
   const { sql, values } = calls[0];
+  // The switch is off here: the paid-only filter passes every attempt.
   assert.deepEqual(values, ["codex-impl", null, "task-a",
     ["cli_turn_limit", "cli_execution_error", "cli_budget_limit"],
-    "review_server_rejected_twice"]);
+    "review_server_rejected_twice", true]);
   assert.match(sql, /w\."archivedAt" IS NULL/);
   // The unknown-usage conditions themselves are unchanged.
   assert.match(sql, /a\."endedAt" IS NOT NULL/);
@@ -69,7 +70,7 @@ test("an expired attempt is left out only when the Task's latest stored result i
   // Every branch still needs the owner's retry decision bound to that attempt.
   assert.ok(sql.indexOf("'expired'") < sql.indexOf('FROM "AmuxReviewProposal" p'));
   assert.ok(sql.indexOf("'succeeded'") < sql.indexOf('FROM "AmuxReviewProposal" p'));
-  assert.equal(values.length, 5);
+  assert.equal(values.length, 6);
 });
 
 test("an unsettled worker leaves the claim to the next settled route, checked once per worker", async () => {
@@ -129,4 +130,26 @@ test("the Task's unknown-usage list uses the gate's rule and skips accepted atte
   assert.match(sql, /NOT EXISTS \(SELECT 1 FROM "AmuxCliUsageEvent" u WHERE u\."attemptId" = a\."id"\)/);
   assert.match(sql, /u\."completeness" <> 'reported_complete'/);
   assert.match(sql, /AND NOT EXISTS \(SELECT 1 FROM "AmuxV22AttemptUsageAcceptance" x WHERE x\."attemptId" = a\."id"\)/);
+});
+
+test("with read-back proceed on, only a budget-bound (paid) attempt holds a worker", async () => {
+  const { amuxV22WorkerUsageUnverified } = await import(mod("lib/amux/v22WorkerUsageGate.ts"));
+  const { calls, tx } = capture([]);
+  await amuxV22WorkerUsageUnverified(tx, "codex-impl", null, "task-a", true);
+  const { sql, values } = calls[0];
+  assert.equal(values.at(-1), false);
+  assert.ok(sql.includes(`AND (? OR EXISTS (SELECT 1 FROM "AmuxV22WorkerAssignment" g JOIN "AmuxV22TaskRecoveryApproval" ap ON ap."id" = g."recoveryApprovalId" WHERE g."id" = a."v22AssignmentId" AND ap."riskAcceptanceId" IS NOT NULL))`), sql);
+});
+
+test("the read-back proceed switch is off unless exactly enabled", async () => {
+  const core = await import(mod("lib/amux/v22ReadBackProceedCore.ts"));
+  assert.equal(core.amuxV22ReadBackProceedEnabled(undefined), false);
+  assert.equal(core.amuxV22ReadBackProceedEnabled("true"), false);
+  assert.equal(core.amuxV22ReadBackProceedEnabled("enabled"), true);
+  assert.equal(core.amuxExecutionLeaseMs(false), 90_000);
+  assert.equal(core.amuxExecutionLeaseMs(true), 180_000);
+  assert.equal(core.amuxV22CliUsageRecordOnly({ enabled: true, budgetBound: false, apiReceipt: false }), true);
+  assert.equal(core.amuxV22CliUsageRecordOnly({ enabled: true, budgetBound: true, apiReceipt: false }), false);
+  assert.equal(core.amuxV22CliUsageRecordOnly({ enabled: true, budgetBound: false, apiReceipt: true }), false);
+  assert.equal(core.amuxV22CliUsageRecordOnly({ enabled: false, budgetBound: false, apiReceipt: false }), false);
 });

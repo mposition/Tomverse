@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 
 import { AMUX_V22_CLI_FAILURE_REASON_CODES } from "./v22TaskExecutionCore.ts";
 import { AMUX_V52_REVIEW_REJECTED_TWICE_REASON } from "./v52ReviewCore.ts";
+import { amuxV22ReadBackProceedEnabled } from "./v22ReadBackProceedCore.ts";
 
 /**
  * Whether a worker has an ended v4 attempt whose CLI usage was never reported
@@ -47,9 +48,16 @@ import { AMUX_V52_REVIEW_REJECTED_TWICE_REASON } from "./v52ReviewCore.ts";
  * Admin archives only every card at once, so from 2026-11-09 19:54 AEST the
  * three implement workers stayed refused. The attempt's cap, cost and usage
  * rows are unchanged; only this gate stops counting it.
+ *
+ * With TOMVERSE_AMUX_V22_READ_BACK_PROCEED=enabled (owner decision
+ * 2026-11-14, lib/amux/v22ReadBackProceedCore.ts) only a budget-bound attempt
+ * counts: one whose assignment ran under a risk-accepted recovery approval,
+ * the read-only API route where money is spent. A subscription CLI's unknown
+ * usage is recorded and costs nothing more, so it holds no worker.
  */
 export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
-  workerName: string, priorAttemptId: string | null, taskId: string): Promise<boolean> {
+  workerName: string, priorAttemptId: string | null, taskId: string,
+  paidOnly: boolean = amuxV22ReadBackProceedEnabled()): Promise<boolean> {
   const retryableReasons = [...AMUX_V22_CLI_FAILURE_REASON_CODES];
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT a."id" FROM "AmuxExecutionAttempt" a
@@ -86,6 +94,9 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
             AND d."escalationId" = p."escalationId"
           WHERE p."attemptId" = a."id" AND p."taskId" = a."taskId"
             AND p."outcome" = 'retry' AND d."outcome" = 'retry'), FALSE)
+      AND (${!paidOnly} OR EXISTS (SELECT 1 FROM "AmuxV22WorkerAssignment" g
+        JOIN "AmuxV22TaskRecoveryApproval" ap ON ap."id" = g."recoveryApprovalId"
+        WHERE g."id" = a."v22AssignmentId" AND ap."riskAcceptanceId" IS NOT NULL))
     LIMIT 1`;
   return rows.length > 0;
 }

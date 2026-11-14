@@ -86,6 +86,10 @@ import {
   ENGINEERING_AGENT_PR_RESUME_CLAIMED_REASON,
   ENGINEERING_AGENT_REGISTRATION_SETTING_KEY,
   UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX,
+  ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS,
+  ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV,
+  ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DECISIONS,
+  engineeringAgentUnknownAutoLookupEnabled,
   QUEUE_TTL_DAYS,
   WRITE_ITEM_KINDS,
   decideArmedGate,
@@ -1066,6 +1070,11 @@ export async function claimNextEngineeringAgentPublishWork(
   // item's only for a publisher that also opens drafts.
   const resumeAllowed = publishAllowed && input.resumePullRequests === true;
   const now = await databaseNow(tx);
+  // A lookup only reads: with the switch on, a decision that has waited its
+  // time no longer holds it, up to a bound on the decisions one item opens.
+  const autoLookup = engineeringAgentUnknownAutoLookupEnabled(
+    process.env[ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV]);
+  const autoLookupBefore = new Date(now.getTime() - ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS);
   const candidates = await tx.$queryRaw<Array<{ id: string; state: string; reason: string | null }>>`
     SELECT w."id", w."state", w."reason"
     FROM "EngineeringAgentWorkItem" w
@@ -1074,11 +1083,20 @@ export async function claimNextEngineeringAgentPublishWork(
         w."state" = 'needs_lookup'
         OR (
           w."state" = 'outcome_unknown'
-          AND NOT EXISTS (
+          AND (NOT EXISTS (
             SELECT 1 FROM "EngineeringAgentWorkItem" d
             WHERE d."kind" = 'decision' AND d."state" = 'open'
               AND d."causeKey" LIKE ${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX} || w."id" || ':%'
-          )
+          ) OR (${autoLookup}
+            AND NOT EXISTS (
+              SELECT 1 FROM "EngineeringAgentWorkItem" d
+              WHERE d."kind" = 'decision' AND d."state" = 'open'
+                AND d."causeKey" LIKE ${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX} || w."id" || ':%'
+                AND d."createdAt" > ${autoLookupBefore})
+            AND (SELECT COUNT(*) FROM "EngineeringAgentWorkItem" d
+              WHERE d."kind" = 'decision'
+                AND d."causeKey" LIKE ${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX} || w."id" || ':%')
+              < ${ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DECISIONS}))
           AND (
             w."reason" IS DISTINCT FROM ${ENGINEERING_AGENT_PR_RESUME_APPROVED_REASON}
             OR (
@@ -1217,6 +1235,17 @@ export async function settleEngineeringAgentWorkItem(
     data: { state: to, ...(input.reason !== undefined ? { reason: input.reason } : {}) },
   });
   let decisionItemId: string | null = null;
+  // A lookup that settled the result answers every decision its unknown
+  // outcome opened: they close with it (an automatic lookup, AMUXFLOW/B1).
+  let closedDecisionIds: string[] = [];
+  if (kind === "publish" && item.claimMode === "lookup" && to !== "outcome_unknown") {
+    const open = await tx.engineeringAgentWorkItem.findMany({
+      where: { kind: "decision", state: "open",
+        causeKey: { startsWith: `${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX}${item.id}:` } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } });
+    closedDecisionIds = open.map((row) => row.id);
+    await closeDecisionsAsSeen(tx, closedDecisionIds);
+  }
   if (to === "outcome_unknown") {
     const decision = await tx.engineeringAgentWorkItem.create({
       data: {
@@ -1231,12 +1260,15 @@ export async function settleEngineeringAgentWorkItem(
     });
     decisionItemId = decision.id;
   }
+  const closedDecisionsMetadata: Record<string, string[]> =
+    closedDecisionIds.length ? { closedDecisionIds } : {};
   await systemAudit(tx, "engineering-agent-publisher", ENGINEERING_AGENT_AUDIT_ACTIONS.workItemSettled, "engineering_agent_work_item", item.id, {
     kind,
     outcome: input.outcome,
     state: to,
     fencingToken: input.fencingToken.toString(),
     decisionItemId,
+    ...closedDecisionsMetadata,
   });
   return { state: to, decisionItemId };
 }
