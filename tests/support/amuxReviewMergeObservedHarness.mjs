@@ -107,6 +107,27 @@ assert.deepEqual(await run({ approvalReviewId: null }), { completed: true, taskR
     /^The authorised approver merged it themselves and merge /);
 }
 
+// The Decision Maker's approval, merged by the merge lane into develop (owner
+// decision 2026-11-13): no review id, the basis and the settlement named.
+{
+  const SETTLEMENT = "0123abcd-0000-8000-8000-000000000001";
+  reset();
+  assert.deepEqual(await run({ approvalReviewId: null, dmSettlementId: SETTLEMENT }), { completed: true, taskRevision: 9 });
+  const merged = writes.find(([kind]) => kind === "audit")[1];
+  assert.equal(merged.metadata.approval_basis, "dm_approval");
+  assert.equal(merged.metadata.dm_settlement_id, SETTLEMENT);
+  assert.equal("approval_review_id" in merged.metadata, false);
+  assert.match(writes.find(([kind]) => kind === "escalation")[1].data.resolution,
+    /^The Decision Maker approved it \(owner queue settlement 0123abcd-0000-8000-8000-000000000001\) and the QA-release lane merged it into develop and merge /);
+  // Never beside a review, and never an id that is not a settlement's.
+  for (const overrides of [{ approvalReviewId: 7, dmSettlementId: SETTLEMENT },
+    { approvalReviewId: null, dmSettlementId: "0123abcd-0000-4000-8000-000000000001" }]) {
+    reset();
+    await assert.rejects(run(overrides), /settlement id is invalid/);
+    assert.deepEqual(writes, []);
+  }
+}
+
 // Every refusal writes nothing.
 const refused = async (setup, reason, overrides) => {
   reset();

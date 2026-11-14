@@ -652,6 +652,34 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 3,
     isolation: "read",
   },
+  // A Decision Maker approved review pull request merged into develop (owner
+  // decision 2026-11-13, lib/amux/dmT2MergeService.ts). The lane's list:
+  // setup + switches + the approvals + their visit + fence.
+  dmT2MergeLaneRead: {
+    operation: "dm_t2_merge_lane_read",
+    prismaCallCeiling: 5,
+    isolation: "mutation",
+  },
+  // The observer's read of a merged one: setup + the approval and lane facts + fence.
+  dmT2MergeObservedRead: {
+    operation: "dm_t2_merge_observed_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // The next one to mark ready: setup + the recent readies' audits + the
+  // switches + the approvals + its visit + fence.
+  dmT2MergeReadyPick: {
+    operation: "dm_t2_merge_ready_pick",
+    prismaCallCeiling: 6,
+    isolation: "mutation",
+  },
+  // Its audit before the write: setup + audit chain lock + switches + the
+  // approval read again + canonical audit 4 + fence.
+  dmT2MergeReadyRecord: {
+    operation: "dm_t2_merge_ready_record",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // The Decision Maker as the approver (TOMVERSE_AMUX_DM_APPROVER), its read:
   // setup + switches + the open app-answered cards + the next open proposal
   // among them + request state + result detail + bodies + the open refusal of
