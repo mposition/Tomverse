@@ -179,6 +179,7 @@ mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports:
 mock.module(mod("lib/amux/v4TaskCostCeilingCore.ts"), { namedExports: {
   checkV4TaskApprovedCeiling: () => ({ decision: "allow" }),
   v4TaskCeilingDecision: (check: { decision: string }) => check.decision,
+  v4TaskReceiptForApprovedRoutes: (_approved: unknown, current: unknown) => current,
 } });
 mock.module(mod("lib/amux/ideaKeyStore.ts"), { namedExports: {
   loadAmuxContentKeyRing: async (identities: Array<{ purpose: string }>) => {
