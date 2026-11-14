@@ -5,7 +5,7 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
   en: {
     title: "Auto router guidance optimizer",
     description:
-      "One cycle first compares models directly: on each evaluation message the current guidance's pick and another model of the same credits both answer, and the same model judges the two answers in both orders. It then reads that evidence, recent routing decisions and router statistics, writes a short analysis with recommendations and a new guidance, and replays the evaluation messages with the current and the proposed guidance, comparing answers where the pick changed. When there are too few recent decisions, the model first writes synthetic test messages; they are shown under each cycle. A cycle only proposes; promoting it is your click, and rollback restores the guidance before.",
+      "One cycle freezes proposed guidance using training decisions and pre-cycle operational statistics, then evaluates it on withheld messages. Direct answer comparisons and routing comparisons reuse cached answers and both judge orders. Current-cycle evaluation results never enter the guidance generator. Synthetic messages fill a short sample. Passing a gate is evidence for that sample; it does not establish production quality or savings.",
     modelLabel: "Optimizer and judge model",
     off: "Off (no optimizer calls)",
     save: "Save",
@@ -28,7 +28,9 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
     activePromoted: "Promoted from cycle",
     showGuidance: "Show guidance",
     rollBack: "Roll back one step",
-    spend: "Optimizer spend",
+    spend: "Recorded known optimizer cost",
+    unconfirmedCycles: (count: number) => `${count} monthly cycles with unconfirmed total cost`,
+    totalUnconfirmed: "Total cost coverage unconfirmed",
     today: "today",
     month: "this month",
     caps: "caps per run / day / month",
@@ -140,7 +142,7 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
     spent: "spent",
     loadFailed: "Could not load the optimizer.",
     actionFailed: "The action failed.",
-    costNote: "Optimizer calls are paid from the provider budget, never from users' credits. Turning the model on approves those calls within the caps shown. Caps are checked against actual spend, so calls already running when a cap is reached can finish a little past it.",
+    costNote: "Optimizer costs use reported usage and configured prices, paid from provider budgets separately from user credits. Unknown cost stops further calls in that cycle. Existing in-flight overshoot remains possible; day/month reservation and unknown reconciliation are not implemented.",
     statuses: {
       running: "running",
       passed: "passed",
@@ -148,6 +150,11 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
       error: "error",
     },
     reasons: {
+      cost_unknown: "Costs became unknown; further calls stopped and in-flight results were collected.",
+      cost_unconfirmed: "Promotion refused: cost coverage is incomplete.",
+      legacy_unverified: "Legacy cycle: independent holdout and cost coverage are unverified.",
+      holdout_unverified: "Promotion refused: guidance was not verified frozen before evaluation.",
+      quality_not_passed: "Promotion refused: the existing quality/credit gate did not pass.",
       not_sendable: "It can be sent only while it is open or the agent gave up on it.",
       idea_partial: "AMUX is still finishing this idea. Try again shortly.",
       idea_in_progress: "Another send of this recommendation is still in progress. Try again shortly.",
@@ -190,7 +197,7 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
   ko: {
     title: "Auto 라우터 안내문 자동 개선",
     description:
-      "한 회차는 먼저 모델을 직접 비교합니다. 평가 메시지마다 현재 안내문이 고른 모델과 같은 크레딧의 다른 모델이 모두 답을 쓰고, 같은 모델이 두 답을 순서를 바꿔 두 번 판정합니다. 이어서 이 근거와 최근 라우팅 결정, 라우터 통계를 읽고 짧은 분석과 권장안, 새 안내문을 쓴 뒤, 평가 메시지를 현재 안내문과 제안 안내문으로 각각 다시 돌려 선택이 바뀐 경우의 답을 비교합니다. 최근 결정이 부족하면 모델이 먼저 합성 테스트 메시지를 만들며, 각 회차 아래에서 볼 수 있습니다. 회차는 제안만 하며, 승격은 운영자가 누르고, 되돌리기는 바로 전 안내문으로 돌아갑니다.",
+      "훈련 표본과 회차 시작 전 운영 통계로 제안 지침을 먼저 고정한 뒤, 분리한 평가 표본을 비교합니다. 직접 답변 비교와 라우팅 비교는 같은 답변 cache와 양순서 판정을 재사용합니다. 이번 회차의 평가 결과는 지침 생성기에 전달하지 않습니다. 표본이 부족하면 합성 질문으로 채웁니다. 게이트 통과는 해당 표본의 근거이며 생산 품질이나 비용 절감의 입증은 아닙니다.",
     modelLabel: "개선·판정 모델",
     off: "끔 (optimizer 호출 없음)",
     save: "저장",
@@ -213,7 +220,9 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
     activePromoted: "승격된 회차",
     showGuidance: "안내문 보기",
     rollBack: "한 단계 되돌리기",
-    spend: "optimizer 비용",
+    spend: "기록된 optimizer 확인 비용",
+    unconfirmedCycles: (count: number) => `이번 달 전체 비용 미확정 회차 ${count}건`,
+    totalUnconfirmed: "전체 비용 coverage 미확정",
     today: "오늘",
     month: "이번 달",
     caps: "상한 회차 / 일 / 월",
@@ -325,7 +334,7 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
     spent: "사용",
     loadFailed: "optimizer를 불러오지 못했습니다.",
     actionFailed: "작업에 실패했습니다.",
-    costNote: "optimizer 호출은 사용자 크레딧이 아니라 provider 예산에서 나갑니다. 모델을 켜는 것은 표시된 상한 안의 호출을 승인하는 것입니다. 상한은 실제 지출로 판정하므로, 상한에 닿을 때 이미 진행 중인 호출만큼 조금 넘을 수 있습니다.",
+    costNote: "optimizer 비용은 사용자 credit과 별도로 provider 예산에서 관측 usage와 설정 단가로 계산합니다. 비용 불명은 해당 회차의 후속 호출을 중단합니다. 기존 in-flight 초과 지출은 가능하며, 일·월 예약과 불명 비용 정산은 아직 구현하지 않았습니다.",
     statuses: {
       running: "실행 중",
       passed: "통과",
@@ -333,6 +342,11 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
       error: "오류",
     },
     reasons: {
+      cost_unknown: "비용 불명으로 후속 호출을 중단하고 진행 중 결과를 수집했습니다.",
+      cost_unconfirmed: "승격 거부: 비용 coverage가 불완전합니다.",
+      legacy_unverified: "구형 회차: 독립 holdout과 비용 coverage 미검증입니다.",
+      holdout_unverified: "승격 거부: 평가 전 지침 고정을 확인하지 못했습니다.",
+      quality_not_passed: "승격 거부: 기존 품질·credit 게이트를 통과하지 못했습니다.",
       not_sendable: "열린 상태이거나 에이전트가 포기한 권장안만 보낼 수 있습니다.",
       idea_partial: "AMUX가 이 아이디어를 아직 마무리하는 중입니다. 잠시 뒤 다시 시도하세요.",
       idea_in_progress: "이 권장안을 보내는 다른 요청이 아직 진행 중입니다. 잠시 뒤 다시 시도하세요.",

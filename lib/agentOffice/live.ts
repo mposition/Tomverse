@@ -987,6 +987,7 @@ const ROUTING_GATE_REJECTION: Readonly<Record<OptimizerFailure, boolean>> = {
   // The cycle ran out of its own budget mid-run: nothing was judged, and a
   // recurring one means the cycle cannot finish within its budget.
   budget_exhausted: false,
+  cost_unknown: false,
 };
 
 type RoutingLast = NonNullable<Extract<AgentOfficeRoutingState, { kind: "observed" }>["last"]>;

@@ -242,23 +242,23 @@ test("a proposal equal to the current guidance stops before the proposal is repl
   });
   const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
   assert.equal(result.failure, "candidate_invalid");
-  // Only the current guidance's picks of the evaluation half were replayed.
-  assert.equal(calls.route, 12);
-  assert.equal(result.spentMicroUsd, 100 + 12 * 10);
+  // The proposal is rejected before any holdout work.
+  assert.equal(calls.route, 0);
+  assert.equal(result.spentMicroUsd, 100);
   assert.deepEqual(result.report, REPORT);
 });
 
 test("once actual spend reaches the budget no new call starts, and the cycle never passes", async () => {
-  // The current picks' replay spends the whole budget: the generator never starts.
+  // The frozen proposal spends the budget before any evaluation starts.
   const { calls, deps } = fakeDeps({ budgetMicroUsd: 100 });
   const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
   assert.equal(result.status, "failed");
   assert.equal(result.failure, "budget_exhausted");
-  assert.equal(calls.route, 12);
-  assert.equal(calls.generate, 0);
+  assert.equal(calls.route, 0);
+  assert.equal(calls.generate, 1);
   assert.equal(calls.answer, 0);
   assert.equal(calls.judge, 0);
-  assert.equal(result.spentMicroUsd, 12 * 10);
+  assert.equal(result.spentMicroUsd, 100);
 });
 
 test("calls already in flight when the budget is reached are counted in full", async () => {
@@ -284,32 +284,31 @@ test("a zero budget starts no call", async () => {
   assert.equal(result.spentMicroUsd, 0);
 });
 
-test("a call that throws costs nothing, is counted as failed and reads as no answer", async () => {
-  const { deps } = fakeDeps({
-    route: async () => { throw new Error("provider down"); },
-  });
+test("a thrown call closes scheduling with unknown cost and drains started work", async () => {
+  const { deps } = fakeDeps({ route: async () => { throw new Error("provider down"); } });
   const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
-  assert.equal(result.failure, "too_many_unrouted");
-  assert.equal(result.summary.unrouted, 12);
-  assert.equal(result.failedCalls, 24);
+  assert.equal(result.failure, "cost_unknown");
+  assert.equal(result.quality.status, "unmeasured");
+  assert.equal(result.quality.failure, null);
+  assert.equal(result.failedCalls, AUTO_ROUTER_OPTIMIZER_CONCURRENCY);
+  assert.equal(result.costCoverage.unknownCalls, result.failedCalls);
+  assert.equal(result.costCoverage.started, result.costCoverage.completed);
+  assert.equal(result.costCoverage.complete, false);
   assert.equal(result.spentMicroUsd, 100);
-  assert.deepEqual(result.spentByKind, { ...ALL_KINDS_ZERO, generate: 100 });
   assert.deepEqual(result.spentByProvider, new Map([["opt", 100]]));
 });
 
-test("a reported cost that is not a number counts as nothing and never disables the budget", async () => {
+test("an invalid reported cost closes scheduling instead of becoming known zero", async () => {
   const { calls, deps } = fakeDeps({
     generate: async () => ({ value: proposal(), costMicroUsd: Number.NaN, provider: "opt" }),
-    budgetMicroUsd: 200,
   });
   const result = await runOptimizerCycle({ decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
-  assert.equal(result.spentByKind.generate, 0);
-  // The generator ran (the proposal is replayed only after it), and the
-  // routing calls still stop at the budget: 200 at 10 a call.
-  assert.equal(result.candidateGuidance, NEW_GUIDANCE);
-  assert.equal(result.failure, "budget_exhausted");
-  assert.ok(calls.route >= 20 && calls.route < 20 + AUTO_ROUTER_OPTIMIZER_CONCURRENCY);
-  assert.equal(result.spentMicroUsd, calls.route * 10);
+  assert.equal(result.failure, "cost_unknown");
+  assert.equal(calls.route, 0);
+  assert.equal(result.costCoverage.knownCalls, 0);
+  assert.equal(result.costCoverage.unknownCalls, 1);
+  assert.equal(result.costCoverage.calls[0].reason, "invalid_cost");
+  assert.equal(result.spentMicroUsd, 0); // known subtotal only
 });
 
 test("synthetic messages fill the sample up to its target, never more", () => {
@@ -399,10 +398,10 @@ test("synthesis that cannot fill the sample ends the cycle before the generator"
   assert.equal(short.failure, "too_few_cases");
   assert.equal(few.calls.generate, 0);
   assert.equal(short.spentMicroUsd, 70);
-  // A failed synthesis costs nothing and is counted.
+  // A failed synthesis has unknown cost and stops the cycle.
   const thrown = fakeDeps({ synthesize: async () => { throw new Error("no object"); } });
   const failed = await runOptimizerCycle({ decisions: real, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, thrown.deps);
-  assert.equal(failed.failure, "too_few_cases");
+  assert.equal(failed.failure, "cost_unknown");
   assert.equal(failed.failedCalls, 1);
   assert.equal(failed.spentMicroUsd, 0);
   // A message the Auto menu gives fewer than two candidates is dropped.
@@ -460,10 +459,10 @@ test("a follow-up is answered with the same previous answer the router and the j
   assert.ok(plain.seen.answered.every((turn) => turn.previousAnswer === null));
 });
 
-test("a case whose answer cannot be had is undecided and never judged", async () => {
+test("a known-cost missing answer is undecided and never judged", async () => {
   const thrown = fakeDeps({
     answer: async (modelId) => {
-      if (modelId === "light") throw new Error("timeout");
+      if (modelId === "light") return { value: null, costMicroUsd: 30, provider: "light-co" };
       return { value: ANSWERS.strong, costMicroUsd: 30, provider: "strong-co" };
     },
   });
@@ -475,12 +474,12 @@ test("a case whose answer cannot be had is undecided and never judged", async ()
   assert.deepEqual(result.gate, { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 0 });
   assert.equal(thrown.calls.judge, 0);
   // Each missing answer is asked for once more before the case is undecided.
-  assert.equal(result.failedCalls, 6 * AUTO_ROUTER_ANSWER_ATTEMPTS);
+  assert.equal(result.failedCalls, 0);
   assert.deepEqual(result.answerStats.light, { answered: 0, failed: 6 * AUTO_ROUTER_ANSWER_ATTEMPTS });
   // The answers that came back are still paid for, to their provider.
-  assert.equal(result.spentByKind.answer, 6 * 30);
+  assert.equal(result.spentByKind.answer, 18 * 30);
   assert.equal(result.spentByProvider.get("strong-co"), 6 * 30);
-  assert.equal(result.spentByProvider.has("light-co"), false);
+  assert.equal(result.spentByProvider.get("light-co"), 12 * 30);
 
   const blank = fakeDeps({
     answer: async (modelId) => ({ value: modelId === "light" ? "   " : ANSWERS.strong, costMicroUsd: 30, provider: `${modelId}-co` }),
@@ -494,14 +493,14 @@ test("a case whose answer cannot be had is undecided and never judged", async ()
   assert.equal(admitOptimizerAnswer(null), null);
 });
 
-test("an answer that fails once is asked for again, so its case is still judged", async () => {
+test("a known-cost missing answer is retried within the existing attempt limit", async () => {
   const tries = new Map();
   const flaky = fakeDeps({
     answer: async (modelId, turn) => {
       flaky.calls.answer++;
       const key = `${modelId}:${turn.message}`;
       tries.set(key, (tries.get(key) ?? 0) + 1);
-      if (modelId === "light" && tries.get(key) === 1) throw new Error("timeout");
+      if (modelId === "light" && tries.get(key) === 1) return { value: null, costMicroUsd: 30, provider: "light-co" };
       return { value: ANSWERS[modelId], costMicroUsd: 30, provider: `${modelId}-co` };
     },
   });
@@ -510,7 +509,7 @@ test("an answer that fails once is asked for again, so its case is still judged"
   assert.equal(result.summary.undecided, 0);
   assert.equal(result.summary.candidateWins, 6);
   assert.equal(result.status, "passed");
-  assert.equal(result.failedCalls, 6);
+  assert.equal(result.failedCalls, 0);
   assert.deepEqual(result.answerStats.light, { answered: 6, failed: 6 });
   assert.equal(flaky.calls.answer, 6 + 6 * 2);
 
@@ -574,12 +573,18 @@ const rankedDeps = (overrides = {}) =>
     ...overrides,
   });
 
-test("each evaluation message is answered by its current pick and a same-credit rival before any guidance is written", async () => {
+test("guidance freezes without holdout results and evaluation keeps the existing answer cache", async () => {
   const answered = [];
   const judged = [];
   const { calls, seen, deps } = rankedDeps();
   const counting = {
     ...deps,
+    generate: async (message) => {
+      assert.equal(answered.length, 0);
+      assert.equal(judged.length, 0);
+      assert.equal(calls.route, 0);
+      return deps.generate(message);
+    },
     answer: async (modelId, turn) => { answered.push(modelId); return deps.answer(modelId, turn); },
     judge: async (message) => { judged.push(message); return deps.judge(message); },
   };
@@ -598,9 +603,11 @@ test("each evaluation message is answered by its current pick and a same-credit 
   }
   // The generator read the evidence: verdicts, the models it names, the stats.
   const message = JSON.parse(seen.generated[0]);
-  assert.equal(message.directComparisons.length, 12);
-  assert.deepEqual(message.directComparisons[0], { kind: "chat", a: "strong", b: "rival", verdict: "b" });
-  assert.deepEqual(message.models.map((item) => item.id).sort(), ["rival", "strong"]);
+  assert.deepEqual(message.directComparisons, []);
+  assert.deepEqual(message.models, []);
+  assert.deepEqual(message.answerStats, {});
+  assert.match(message.evidenceScope, /holdout withheld/);
+  assert.equal(result.evaluation.guidanceFrozenBeforeEvaluation, true);
   assert.deepEqual(message.routerStats, routerStats);
   assert.equal(calls.generate, 1);
   // strong answers once per message and is reused by the replay comparison;
@@ -648,6 +655,9 @@ test("with too few judged cases the gate decides on the direct comparisons", asy
   assert.equal(passed.summary.decided, 3);
   assert.deepEqual(passed.gate, { failure: null, basis: "direct", towardWinner: 3, towardLoser: 0 });
   assert.equal(passed.status, "passed");
+  assert.equal(passed.evidence.ownAnswerCases, 3);
+  assert.equal(passed.evidence.proxyTowardWinner, 0);
+  assert.ok(passed.cases.filter(item => item.verdict === "candidate").every(item => item.evaluationEvidence.basis === "own_answers"));
 
   // The same move when strong wins head to head is a move toward the loser.
   const strongBetter = rankedDeps({
@@ -657,6 +667,25 @@ test("with too few judged cases the gate decides on the direct comparisons", asy
   const failed = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, strongBetter.deps);
   assert.deepEqual(failed.gate, { failure: "evidence_below", basis: "direct", towardWinner: 0, towardLoser: 3 });
   assert.equal(failed.status, "failed");
+});
+
+test("a borrowed direct proxy stays undecided as an own-answer verdict and is stored separately", async () => {
+  const moved = new Set(["d1", "d5", "d9"]);
+  const normal = rankedDeps();
+  const { deps } = rankedDeps({
+    route: async (guidance, decision) => ({ value: guidance === NEW_GUIDANCE && moved.has(decision.id) ? "rival" : "strong", costMicroUsd: 10, provider: "rtr" }),
+    judge: async message => JSON.parse(message).message === "hard code question 1"
+      ? { value: null, costMicroUsd: 20, provider: "opt" } : normal.deps.judge(message),
+  });
+  const result = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
+  assert.equal(result.status, "passed");
+  assert.equal(result.gate.basis, "direct");
+  assert.equal(result.evidence.ownAnswerCases, 2);
+  assert.equal(result.evidence.proxyTowardWinner, 1);
+  const borrowed = result.cases.find(item => item.decisionId === "d1");
+  assert.equal(borrowed.verdict, "undecided");
+  assert.deepEqual(borrowed.evaluationEvidence, { basis: "proxy", direction: "toward_winner" });
+  assert.deepEqual(borrowed.judged, [null, null]);
 });
 
 const gateSummary = (overrides) => ({
@@ -1077,20 +1106,20 @@ test("a cycle refuses a proposal that names a model off the menu or without evid
     return { result, calls, rejected };
   };
   const evidenced = await run("Among 5-credit candidates, prefer rival over strong for greetings and small talk.");
-  assert.notEqual(evidenced.result.failure, "candidate_invalid");
-  assert.deepEqual(evidenced.rejected, []);
+  assert.equal(evidenced.result.failure, "candidate_invalid");
+  assert.deepEqual(evidenced.rejected, [{ reason: "unproven_model", ids: ["rival", "strong"] }]);
 
   const unproven = await run("Send greetings and small talk to light, never to rival-2b or strong.");
   assert.equal(unproven.result.failure, "candidate_invalid");
   assert.deepEqual(unproven.rejected, [{ reason: "unknown_model", ids: ["rival-2b"] }]);
   // Refused before the proposal is replayed: only the current picks were routed.
-  assert.equal(unproven.calls.route, 12);
+  assert.equal(unproven.calls.route, 0);
 
   // light is a candidate, but no comparison judged it: named without evidence.
   const offEvidence = await run("Send greetings and small talk to light; keep code on strong.");
   assert.equal(offEvidence.result.failure, "candidate_invalid");
-  assert.deepEqual(offEvidence.rejected, [{ reason: "unproven_model", ids: ["light"] }]);
-  assert.equal(offEvidence.calls.route, 12);
+  assert.deepEqual(offEvidence.rejected, [{ reason: "unproven_model", ids: ["light", "strong"] }]);
+  assert.equal(offEvidence.calls.route, 0);
 });
 
 test("a candidate id counts as named only as a whole word", async () => {
@@ -1144,20 +1173,20 @@ test("a comparison whose judge never answered is no evidence for naming a model"
   const rejected = [];
   const { deps } = rankedDeps({
     judge: async () => ({ value: null, costMicroUsd: 20, provider: "opt" }),
-    generate: async () => ({ value: proposal("Among 5-credit candidates, prefer rival over strong for greetings."), costMicroUsd: 100, provider: "opt" }),
+    generate: async () => ({ value: proposal(), costMicroUsd: 100, provider: "opt" }),
     guidanceRejected: (rejection) => rejected.push(rejection),
   });
   const result = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, deps);
   assert.ok(result.comparisons.every((item) => item.verdict === "undecided" && item.judged[0] === null && item.judged[1] === null));
-  assert.equal(result.judgeFailed, 12 * 2);
-  assert.equal(result.failure, "candidate_invalid");
-  assert.deepEqual(rejected, [{ reason: "unproven_model", ids: ["rival", "strong"] }]);
+  assert.equal(result.judgeFailed, 12 * 2 + 6 * 2);
+  assert.equal(result.failure, "evidence_below");
+  assert.deepEqual(rejected, []);
 
   // A tie both orders did answer is evidence.
   const answered = [];
   const tied = rankedDeps({
     judge: async () => ({ value: "equal", costMicroUsd: 20, provider: "opt" }),
-    generate: async () => ({ value: proposal("Among 5-credit candidates, prefer rival over strong for greetings."), costMicroUsd: 100, provider: "opt" }),
+    generate: async () => ({ value: proposal(), costMicroUsd: 100, provider: "opt" }),
     guidanceRejected: (rejection) => answered.push(rejection),
   });
   const ok = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, tied.deps);
@@ -1219,9 +1248,10 @@ test("answers are counted per model, and a model whose answers all failed is not
     },
   });
   const first = await runOptimizerCycle({ decisions: trioDecisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE }, timedOut.deps);
-  assert.deepEqual(first.answerStats.rival, { answered: 0, failed: 12 * AUTO_ROUTER_ANSWER_ATTEMPTS });
+  assert.equal(first.failure, "cost_unknown");
+  assert.deepEqual(first.answerStats.rival, { answered: 0, failed: AUTO_ROUTER_OPTIMIZER_CONCURRENCY });
   assert.equal(first.answerStats.strong.failed, 0);
-  assert.ok(first.answerStats.strong.answered >= 12);
+  assert.equal(first.answerStats.strong.answered, AUTO_ROUTER_OPTIMIZER_CONCURRENCY);
   assert.deepEqual(unreliableAnswerModels(first.answerStats), ["rival"]);
 
   // The next cycle does not draw rival: strong has no other same-credit or
