@@ -1,8 +1,10 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
 export const fr = {
+    reviewHandoff: reviewHandoffCopy.fr,
     journey: {
         importTitle: "Importer des discussions",
         imported: "Discussions importées",

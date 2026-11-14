@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
+import { ReviewChatAction } from "./ReviewChatHandoff";
 import { ArrowUpRight, Check, ChevronRight, Sparkles, X } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModalDialog } from "@/components/useModalDialog";
@@ -145,6 +146,9 @@ export function StudioAnswerAnalysis({
   const review = entry?.review;
   const source = entry?.setup?.source;
   const persisted = review?.persisted !== false && !isGuest;
+  const handoffSource = review && entry?.setup && conversationId ? {
+    kind: "review" as const, conversationId, setup: entry.setup, review, mode: "balanced" as const, includeSynthesis: false, reviewer,
+  } : null;
   const slots = review ? (["primary", ...(review.result.secondary ? ["secondary"] : [])] as const) : [];
   if (!active) return null;
 
@@ -189,6 +193,7 @@ export function StudioAnswerAnalysis({
               {isGuest && <button type="button" onClick={() => { close(); onSignIn?.(); }}>{copy.signIn}</button>}
             </div>}
             {review && <>
+              <ReviewChatAction source={handoffSource} scope={scope} ready={!busy && ready && !isGuest} />
               {review.result.secondary && <div className="studio-analysis-reviewers" aria-label={copy.reviewer}>
                 {(["primary", "secondary"] as const).map((slot, index) => <button type="button" key={slot} aria-pressed={reviewer === slot} onClick={() => setReviewer(slot)}>{copy.reviewer} {index + 1}</button>)}
               </div>}
@@ -230,6 +235,9 @@ export function StudioAnswerAnalysis({
                           <p className="studio-analysis-fineprint">{copy.external}</p>
                         </>}
                       </>}
+                      <ReviewChatAction source={handoffSource ? { ...handoffSource, reviewer: slot as "primary" | "secondary" } : null} scope={scope}
+                        ready={!busy && ready && !isGuest} selection={{ section: item.section, ordinal: item.ordinal,
+                          itemId: review.reviewItems?.find(value => value.reviewer === slot && value.section === item.section && value.ordinal === item.ordinal)?.id }} />
                       <ReviewItemFeedback conversationId={conversationId} reviewId={review.id} guest={isGuest}
                         itemId={review.reviewItems?.find((value) => value.reviewer === slot && value.section === item.section && value.ordinal === item.ordinal)?.id} />
                     </>} />
