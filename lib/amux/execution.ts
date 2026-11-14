@@ -47,6 +47,7 @@ import { AmuxV4TaskCatalogApprovalError,
   calculateCurrentApprovedAmuxV4TaskCost } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
 import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "@/lib/amux/v4TaskCostCeilingCore";
+import { AMUX_V4_NEW_MODEL_ROUTE_ENV, amuxV4NewModelRouteWithinCeiling } from "@/lib/amux/v4TaskNewModelRouteSwitch";
 import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
   "@/lib/amux/v52GradeReceipt";
 import { amuxV52ReviewRequired, classifyAmuxExecutionPath,
@@ -414,7 +415,8 @@ export async function startAmuxV22TaskExecution(input: {
       // Policy v48: the FIRST Task retry's added route is reconfirmed by the
       // owner's final consent; that is checked once the recovery is read.
       const ceilingAllowed = v4TaskCeilingDecision(checkV4TaskApprovedCeiling(approved,
-        { ok: true, receipt: cost.receipt }), !!assignment.recoveryApprovalId) === "allow";
+        { ok: true, receipt: cost.receipt },
+        amuxV4NewModelRouteWithinCeiling(process.env[AMUX_V4_NEW_MODEL_ROUTE_ENV])), !!assignment.recoveryApprovalId) === "allow";
       if (!ceilingAllowed && !assignment.recoveryApprovalId) {
         return { started: false as const,
           reason: "cost_reconfirmation_required" as const };
