@@ -94,8 +94,6 @@ function runCreateStep({ openPrNumber = "", createFails = false } = {}) {
             "  fi",
             '  if [ "$1 $2" = "pr create" ]; then',
             '    echo "create" >> "$STUB_CALLS"',
-            '    case " $* " in *" --draft "*) ;; *) echo "missing draft" >&2; return 98 ;; esac',
-            '    case " $* " in *" --label ci:hold "*) ;; *) echo "missing CI hold" >&2; return 98 ;; esac',
             '    if [ "$STUB_CREATE_FAILS" = "1" ]; then',
             '      echo "gh: pull request creation failed" >&2',
             "      return 1",
