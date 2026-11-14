@@ -796,7 +796,7 @@ test("the owner queue names, per card, where the Decision Maker stands and what 
         SELECT count(*)::int AS "n" FROM "AppSetting" WHERE "key" = ${AMUX_DM_RELAY_LAST_SYNC_KEY}`;
       assert.equal(rows[0]!.n, 1);
       const after = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
-      assert.equal(after.relay.state, "live");
+      assert.equal(after.relay?.state, "live");
       const { requestAmuxOwnerQueueDm } = await import("@/lib/amux/ownerQueueDmRequestService");
       await requestAmuxOwnerQueueDm({ session: operator(), request: new Request("https://tomverse.app/x"),
         taskId: card.taskId, source: "settlement", action: "request", sourceId: card.escalationId });
