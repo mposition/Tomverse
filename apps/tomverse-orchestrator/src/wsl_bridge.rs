@@ -1062,6 +1062,11 @@ fn apply_settle_followup<T>(
 /// TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED=enabled.
 pub const BRIDGE_READ_BACK_PROCEED_ENV: &str = "TOMVERSE_AMUX_BRIDGE_READ_BACK_PROCEED";
 
+/// The context a result or usage write that failed before the settle call
+/// carries, so the settle read-back below never takes it for the settle's
+/// own lost answer.
+const PRE_SETTLE_WRITE_UNKNOWN: &str = "v22 result or usage write outcome unknown before settle";
+
 pub fn bridge_read_back_proceed_enabled(value: Option<&str>) -> bool {
     value.map(str::trim) == Some("enabled")
 }
@@ -3644,6 +3649,9 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                                     halted = true;
                                                                     note_halt(&mut halt_cause,
                                                                         "review_readback_unknown");
+                                                                } else {
+                                                                    eprintln!("amux wsl bridge warn: v52 review read-back for attempt {} failed; read again next round, not halted",
+                                                                        entry.delivery.attempt_id);
                                                                 }
                                                                 still_running.push(entry);
                                                                 continue;
@@ -3688,6 +3696,9 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                                         halted = true;
                                                                         note_halt(&mut halt_cause,
                                                                             "review_record_outcome_unknown");
+                                                                    } else {
+                                                                        eprintln!("amux wsl bridge warn: v52 review record for attempt {} is unknown; read back next round, not halted",
+                                                                            entry.delivery.attempt_id);
                                                                     }
                                                                     still_running.push(entry);
                                                                     continue;
@@ -3743,7 +3754,7 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                     &entry.delivery, &session.instance_id,
                                                     session.generation,
                                                     settlement_retry_echo).await },
-                                            Err(error) => Err(error),
+                                            Err(error) => Err(error.context(PRE_SETTLE_WRITE_UNKNOWN)),
                                         }
                                     },
                                     Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
@@ -3760,7 +3771,7 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                             &entry.delivery, &session.instance_id,
                                             session.generation,
                                             settlement_retry_echo).await },
-                                    Err(error) => Err(error),
+                                    Err(error) => Err(error.context(PRE_SETTLE_WRITE_UNKNOWN)),
                                 }
                             } else if api_retry {
                                 Err(anyhow::anyhow!("read-only API receipt unverified"))
@@ -3785,8 +3796,14 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                             ).await
                         }.map(|response| response.settled);
                         let mut result = plan_settle_answer(&settled);
+                        // Only the settle call's own answer is read back, and
+                        // never a paid read-only API retry: a result or usage
+                        // write that failed before it, or an API run, keeps
+                        // its halt (review r-20261114-073121-cf0260).
+                        let settle_answer_only = !matches!(&settled,
+                            Err(error) if error.to_string() == PRE_SETTLE_WRITE_UNKNOWN);
                         if matches!(result, SettleResult::HaltForReadBack | SettleResult::DropAndHalt) &&
-                            bridge_read_back_proceed() {
+                            settle_answer_only && !api_retry_delivery && bridge_read_back_proceed() {
                             if let Some(assignment_id) = entry.delivery.assignment_id.as_deref() {
                                 let state = api.v22_execution_readback(assignment_id,
                                     &entry.delivery.worker, &session.instance_id,
@@ -4232,6 +4249,19 @@ mod tests {
         assert_eq!(plan_heartbeat_read_back(PendingHeartbeat::RetryNextTick),
             PendingHeartbeat::RetryNextTick);
         assert_eq!(plan_heartbeat_read_back(PendingHeartbeat::Keep), PendingHeartbeat::Keep);
+    }
+
+    #[test]
+    fn the_settle_read_back_skips_pre_settle_writes_and_paid_api_retries() {
+        let source = include_str!("wsl_bridge.rs");
+        let production = &source[..source.find("mod tests {").unwrap()];
+        let gate = production.find("let settle_answer_only = ").unwrap();
+        let gate = &production[gate..gate + 700];
+        assert!(gate.contains("PRE_SETTLE_WRITE_UNKNOWN"));
+        assert!(gate.contains("settle_answer_only && !api_retry_delivery && bridge_read_back_proceed()"));
+        assert_eq!(production.matches("Err(error.context(PRE_SETTLE_WRITE_UNKNOWN))").count(), 2);
+        let wrapped = anyhow::anyhow!("transport").context(PRE_SETTLE_WRITE_UNKNOWN);
+        assert_eq!(wrapped.to_string(), PRE_SETTLE_WRITE_UNKNOWN);
     }
 
     #[test]
