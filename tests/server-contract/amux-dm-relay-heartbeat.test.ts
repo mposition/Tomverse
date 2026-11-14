@@ -116,8 +116,8 @@ test("calling, asking and silent", () => {
     state: "silent", lastSyncAt: null, minutesSilent: null,
   });
   assert.equal(core.parseAmuxDmRelayLastSync("not a time"), null);
-  assert.equal(core.amuxDmRelayExpected({ TOMVERSE_AMUX_DM_ROUTING: "enabled" } as NodeJS.ProcessEnv), true);
-  assert.equal(core.amuxDmRelayExpected({ TOMVERSE_AMUX_DM_ROUTING: "true" } as NodeJS.ProcessEnv), false);
+  assert.equal(core.amuxDmRelayExpected({ TOMVERSE_AMUX_DM_ROUTING: "enabled" } as unknown as NodeJS.ProcessEnv), true);
+  assert.equal(core.amuxDmRelayExpected({ TOMVERSE_AMUX_DM_ROUTING: "true" } as unknown as NodeJS.ProcessEnv), false);
 });
 
 test("the question window covers the relay's longest wait on one question", () => {
