@@ -204,7 +204,27 @@ receipt 상태를 보존하면서 충돌 4곳을 통합했다. 독립 lockfile �
 이 지시는 운영 환경변수 변경이나 migration·merge·deploy를 수행한 것으로 해석하지 않았다.
 
 미설정 기본값, 명시적 off, 잘못된 설정, Native의 기존 gate와 bearer 신원, quote/Send의
-동일한 schema token allowance를 검사했다. 브라우저 fixture는 명시적 off로 격리하고
-별도 켜짐 실행에서는 fixture cookie 없이 ready 카드의 진입점과 다운로드를 확인한다.
+동일한 schema token allowance를 검사했다. 기본 브라우저 suite도 제품처럼 켜짐을
+사용하며 fixture cookie 없이 ready 카드의 진입점과 다운로드를 확인한다. 별도 실행은
+명시적 off를 확인한다.
 초기 token 수 회귀의 기존 기대값도 기본 켜짐의 추가 schema allowance를 반영해 양쪽
 설정을 검증하도록 바꿨다. 가격·credits·예약/정산 정책은 변경하지 않았다.
+
+기본값 변경 commit `c4cb1c58f`의 검토 `r-20261114-233612-4506c3`도 두 공급사 모두
+**accept**다. 추가 의견은 다음과 같이 처리했다. 실제 스키마의 기존 500토큰 추정 예산이
+도구를 제공하는 인증·저장 가능 turn의 quote/Send에 동일하게 반영되는 효과를 사용자에게
+안내하고 정책·PR에 기록했다. 운영자의 기본 켜짐 요청을 기록하며 별도의 요율·원장 정책
+변경으로 취급하지 않는다. 기본 browser fixture도 켜짐으로 맞췄다. 실제 proxy에서 수정
+스위치 미설정 시 Native 경로가 등록되어 위조 token을 401로 거절하고, 기존 Native gate나
+명시적 off가 그 등록을 막는지 검사했다. 이 proxy/flag/token 묶음은 30건 통과했다.
+
+기본 켜짐의 unit 359건, 서버 계약 185건/기존 TODO 1건, 동일 전용 DB의 파일·계보
+38건이 통과했다. 집중 기본값/꺼짐/잘못된 값/auth/token 검사는 53건 통과했다. DB는
+앞서 대상 검사를 통과한 같은 테스트 cluster만 사용했고 검사 후 다시 중지했다.
+기본 켜짐으로 새로 빌드하여 Web card/revision/draft/identity/attachment browser를
+다시 실행했고 148건 통과, 비대상 2건 제외였다. root typecheck를 포함한 이 Web build도
+통과했다. 이전 default-off 검증 기록을 켜짐 검증으로 바꿔 보고하지 않았다.
+명시적 off의 desktop/mobile 2건도 각각 수정 진입점 없음과 기존 다운로드 유지를
+확인하며 통과했다. 최종 조회 develop `e12b2757cf496d39d166332a1bb06d856dbe3a13`의
+후속 파일과 이번 기능 변경 파일은 겹치지 않았다. 최종 보완은 테스트·설명·기록이며
+기본값과 접근/삭제 동작은 위 accept된 commit에서 바꾸지 않았다.
