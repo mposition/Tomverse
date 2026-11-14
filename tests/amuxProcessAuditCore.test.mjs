@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -17,7 +17,15 @@ import {
   processAuditWindow,
   serializeProcessAuditSettings,
 } from "../lib/amuxProcessAuditCore.ts";
-import { processAuditCodexArguments, runProcessAudit } from "../scripts/amux-process-audit-runner.mjs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  codexReleaseRoot,
+  processAuditCodexArguments,
+  processAuditFilesystemPermissions,
+  runProcessAudit,
+} from "../scripts/amux-process-audit-runner.mjs";
 
 const DAY = 24 * 60 * 60 * 1000;
 const now = new Date("2026-11-21T00:00:00.000Z");
@@ -148,20 +156,36 @@ test("the prompt carries the commit, the window and the figures as data", () => 
   assert.match(prompt, /in Korean/);
 });
 
-test("the CLI runs read-only with web search off and the answer schema", () => {
-  const args = processAuditCodexArguments({ schemaPath: "/tmp/s.json", model: null });
-  assert.deepEqual(args.slice(args.indexOf("--sandbox"), args.indexOf("--sandbox") + 2), ["--sandbox", "read-only"]);
+const ROOTS = ["/tmp/amux-process-audit-x/repo", "/home/tommy/.codex/packages/standalone/releases/0.160.0/"];
+
+test("the model's commands may read only the minimal system paths, the clone and the CLI's release", () => {
+  const args = processAuditCodexArguments({ schemaPath: "/tmp/s.json", model: null, readableRoots: ROOTS });
+  assert.equal(args.includes("--sandbox"), false, "the profile replaces --sandbox; the CLI refuses both");
+  assert.ok(args.includes('default_permissions="process_audit"'));
+  assert.ok(args.includes(`permissions.process_audit.filesystem={":minimal"="read","${ROOTS[0]}"="read","${ROOTS[1]}"="read"}`));
+  assert.equal(args.some((arg) => arg.includes('"write"') || arg.includes('":root"') || arg.includes('"/home/tommy"')), false);
   assert.ok(args.includes('web_search="disabled"'));
   assert.ok(args.includes("--output-schema"));
   assert.equal(args.includes("-m"), false);
-  assert.deepEqual(processAuditCodexArguments({ schemaPath: "/tmp/s.json", model: "gpt-6.1-sol" }).slice(-3), ["-m", "gpt-6.1-sol", "-"]);
+  assert.deepEqual(processAuditCodexArguments({ schemaPath: "/tmp/s.json", model: "gpt-6.1-sol", readableRoots: ROOTS }).slice(-3),
+    ["-m", "gpt-6.1-sol", "-"]);
+  for (const bad of [[], ["relative/path"], ['/tmp/a"b'], ["/tmp/a\nb"]]) {
+    assert.throws(() => processAuditFilesystemPermissions(bad));
+  }
+});
+
+test("the CLI's release directory is opened, never its home or the account's home", async () => {
+  const resolve = async () => "/home/tommy/.codex/packages/standalone/releases/0.160.0/bin/codex";
+  assert.equal(await codexReleaseRoot("/home/tommy/.local/bin/codex", { resolve, home: "/home/tommy" }),
+    "/home/tommy/.codex/packages/standalone/releases/0.160.0");
+  await assert.rejects(codexReleaseRoot("/x", { resolve: async () => "/home/tommy/bin/codex", home: "/home/tommy" }));
+  await assert.rejects(codexReleaseRoot("/x", { resolve: async () => "/home/tommy/.codex/bin/codex", home: "/home/tommy" }));
 });
 
 const ENV = {
   AMUX_PROCESS_AUDIT_APP_URL: "https://app.test/",
   AMUX_PROCESS_AUDIT_SECRET: "s".repeat(40),
   AMUX_PROCESS_AUDIT_CODEX_BIN: "/bin/codex",
-  AMUX_PROCESS_AUDIT_CHECKOUT: "/tmp/checkout",
   HOME: "/home/tommy",
   PATH: "/usr/bin",
 };
@@ -180,30 +204,44 @@ const codexStdout = (content) => [
 test("the runner does nothing when the app says no run is due", async () => {
   const calls = [];
   const code = await runProcessAudit({ env: ENV, fetchImpl: fakeFetch([{ status: 200, body: { due: false, reason: "disabled" } }], calls),
-    runCodex: async () => { throw new Error("must not run"); }, refresh: async () => { throw new Error("must not refresh"); } });
+    runCodex: async () => { throw new Error("must not run"); }, clone: async () => { throw new Error("must not clone"); },
+    releaseRoot: async () => "/opt/codex" });
   assert.equal(code, 0);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "https://app.test/api/internal/amux-process-audit/context");
   assert.equal(calls[0].authorization, `Bearer ${"s".repeat(40)}`);
 });
 
-test("a due run reads develop, gives the CLI none of the runner's secrets and posts the answer", async () => {
+test("a due run clones develop outside home, gives the CLI none of the runner's secrets, posts the answer and cleans up", async () => {
   const calls = [];
   let seen = null;
+  let cloned = null;
+  const workRoot = mkdtempSync(join(tmpdir(), "audit-test-"));
   const code = await runProcessAudit({
     env: ENV,
+    workRoot,
+    releaseRoot: async () => "/opt/codex/releases/0.160.0",
     fetchImpl: fakeFetch([
       { status: 200, body: { due: true, token: ["0b6c3b1e", "9d1e", "4a3f", "8a59", "2e1c0d6f7a11"].join("-"), windowStart: "a", windowEnd: "b", metrics: { x: 1 }, previous: null } },
       { status: 201, body: { state: "stored", id: "r1", removed: 0 } },
     ], calls),
-    refresh: async () => "b".repeat(40),
+    clone: async ({ checkout, repository }) => {
+      cloned = { checkout, repository };
+      return "b".repeat(40);
+    },
     runCodex: async (input) => {
       seen = input;
       return codexStdout(JSON.stringify(analysis()));
     },
   });
   assert.equal(code, 0);
-  assert.equal(seen.cwd, "/tmp/checkout");
+  assert.equal(seen.cwd, cloned.checkout);
+  assert.ok(cloned.checkout.startsWith(workRoot));
+  assert.equal(cloned.repository, "https://github.com/mposition/Tomverse.git");
+  assert.ok(seen.args.includes(`permissions.process_audit.filesystem={":minimal"="read",${JSON.stringify(cloned.checkout)}="read","/opt/codex/releases/0.160.0"="read"}`));
+  // The clone and the schema are gone after the run.
+  assert.deepEqual(readdirSync(workRoot), []);
+  rmSync(workRoot, { recursive: true, force: true });
   assert.deepEqual(Object.keys(seen.env).sort(), ["HOME", "PATH"]);
   assert.equal(JSON.stringify(seen.env).includes("s".repeat(40)), false);
   assert.equal(calls[1].url, "https://app.test/api/internal/amux-process-audit/report");
@@ -218,7 +256,8 @@ test("an answer outside the schema is not posted", async () => {
   const code = await runProcessAudit({
     env: ENV,
     fetchImpl: fakeFetch([{ status: 200, body: { due: true, token: "t", windowStart: "a", windowEnd: "b", metrics: {}, previous: null } }], calls),
-    refresh: async () => "b".repeat(40),
+    clone: async () => "b".repeat(40),
+    releaseRoot: async () => "/opt/codex",
     runCodex: async () => codexStdout("not json"),
   });
   assert.equal(code, 1);

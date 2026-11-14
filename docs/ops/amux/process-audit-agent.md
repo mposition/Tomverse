@@ -14,7 +14,11 @@
   - 읽기 전용 트랜잭션에서 집계 수치와 카드 표시 번호만 읽습니다. 카드 제목·본문, 이메일, 사람이 쓴 글은 읽지 않습니다.
 - **해석·순위·제안**은 AMUX 박스의 Codex CLI 한 번으로 만듭니다(`scripts/amux-process-audit-runner.mjs`).
   - 정액 구독에 로그인된 CLI이고, API 키를 쓰지 않으므로 유료 호출이 아닙니다.
-  - runner가 직접 관리하는 공개 저장소 clone을 `origin/develop`에 맞춘 뒤, 그 안에서 `--sandbox read-only`로 돌아 파일:줄을 인용합니다.
+  - 실행마다 공개 저장소 develop을 홈 밖 임시 폴더(유닛 전용 `/tmp`)에 얕게 새로 받고, 그 안에서 돌아 파일:줄을 인용합니다.
+  - 모델이 실행하는 셸 명령은 Codex 권한 profile(`default_permissions="process_audit"`) 안에서 돕니다. 읽을 수 있는 곳은 허용 목록뿐입니다.
+    - 허용: `:minimal`(셸에 필요한 최소 시스템 경로), 이번 clone, CLI 자신의 release 폴더(sandbox가 다시 실행하는 바이너리)
+    - 막힘: 홈 디렉터리 전체(이 runner의 비밀값, 다른 서비스의 환경 파일, CLI 로그인 파일), 다른 프로세스의 환경 변수(`/proc/*/environ`), 모든 쓰기, 셸의 네트워크
+    - 2026-11-14 박스(Codex 0.160)에서 확인했습니다. `codex sandbox`로 위 항목이 모두 막히는 것을 보았고, `codex exec` 한 번으로 홈의 canary 파일이 모델의 `cat`에 "No such file or directory"로 나오고 clone은 읽히는 것을 보았습니다.
   - 웹검색은 끄고, 답은 `--output-schema`의 구조화된 JSON으로 받습니다.
 - 앱은 모델의 글을 저장하기 전에 비밀값처럼 보이는 문자열과 이메일을 `[가림]`으로 바꿉니다(`maskProcessAuditText`).
   - 화면은 react-markdown으로 그리며, raw HTML과 링크는 렌더링하지 않습니다.
@@ -53,7 +57,7 @@
    ```
 
    ```bash
-   ssh -o IdentitiesOnly=yes -i ~/.ssh/tomverse-migration-20261001 tommy@192.168.0.7 "mkdir -p ~/.local/lib/tomverse-amux-process-audit ~/.config/tomverse-amux-process-audit ~/.local/share/tomverse-amux-process-audit"
+   ssh -o IdentitiesOnly=yes -i ~/.ssh/tomverse-migration-20261001 tommy@192.168.0.7 "mkdir -p ~/.local/lib/tomverse-amux-process-audit ~/.config/tomverse-amux-process-audit"
    ```
 
    ```bash
@@ -94,9 +98,9 @@
 
 ## 알려진 한계
 
-- `runner.env`는 `tommy` 계정 파일입니다. CLI의 read-only sandbox는 홈 디렉터리를 읽을 수 있어서, 모델이 이 비밀값을 읽을 수 있습니다.
-  - 이 비밀값으로 할 수 있는 일은 실행 claim과 보고서 저장뿐입니다.
-  - 마케팅 생성기의 `generator.env`도 같은 한계를 가집니다.
+- 격리는 Codex 권한 profile에 기댑니다. Codex를 올리면 첫 실행 뒤 journal에서 `amux_process_audit_stored`를 확인합니다.
+  - 형식이 바뀌어 profile이 거부되면 CLI가 시작하지 않고 `amux_process_audit_codex_no_answer`로 끝납니다. 넓은 권한으로 돌지는 않습니다.
+- CLI 자신의 프로세스는 sandbox 밖이라 로그인 파일을 읽습니다. 모델의 명령만 그것을 읽지 못합니다.
 - 모델이 수치를 잘못 옮길 수 있습니다. 원 수치는 보고서 행의 `metrics`에 앱이 직접 계산한 값으로 남습니다. runner가 보낸 값은 쓰지 않습니다.
 - 박스가 꺼져 있던 기간의 실행은 나중에 메우지 않습니다. 켜진 뒤 첫 확인에서 차례가 지났으면 바로 돕니다.
 

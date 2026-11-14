@@ -11,7 +11,7 @@ ConditionFileNotEmpty=%h/.local/lib/tomverse-amux-process-audit/amux-process-aud
 Type=oneshot
 WorkingDirectory=%h
 # AMUX_PROCESS_AUDIT_APP_URL, AMUX_PROCESS_AUDIT_SECRET, AMUX_PROCESS_AUDIT_CODEX_BIN,
-# AMUX_PROCESS_AUDIT_CHECKOUT, optional AMUX_PROCESS_AUDIT_MODEL. Mode 600.
+# optional AMUX_PROCESS_AUDIT_MODEL. Mode 600.
 EnvironmentFile=%h/.config/tomverse-amux-process-audit/runner.env
 # The bundle of `npm run build:amux-process-audit-box`: the box's Node has no
 # TypeScript support.
@@ -23,6 +23,7 @@ KillMode=control-group
 TimeoutStopSec=10s
 Nice=10
 NoNewPrivileges=yes
+# The run's clone lives under this unit's own /tmp, outside the home directory.
 PrivateTmp=yes
 StandardOutput=journal
 StandardError=journal
