@@ -424,10 +424,35 @@ export async function readDueAmuxPortfolioScoreTaskIds(
       AND EXISTS (SELECT 1 FROM "AmuxIdeaUnitDecision" d
         WHERE d."id" = w."v4SourceApprovalId" AND d."state" = 'consumed'
           AND d."action" = 'register_card' AND d."registeredWorkItemId" = w."id")
+      -- Behind an archived, unfinished dependency the Task can never pass
+      -- readiness; it is reported apart, for the owner to settle.
+      AND NOT EXISTS (SELECT 1 FROM "AmuxWorkDependency" dep
+        JOIN "AmuxWorkItem" pre ON pre."id" = dep."dependencyId"
+        WHERE dep."taskId" = w."id" AND pre."archivedAt" IS NOT NULL
+          AND (pre."status" <> 'done' OR pre."v4TerminalAt" IS NULL))
     ORDER BY n."activeStaleAt" ASC, n."taskId" ASC
     LIMIT ${AMUX_SCORE_REFRESH_MAX_ATTEMPTS}
   `;
   return due.map((row) => row.taskId);
+}
+
+/** Backlog v4 Tasks that wait on a dependency archived before it was done
+ * (2026-11-14: Tasks whose predecessors were remade as a new series). No
+ * refresh or promotion can move them; the tick logs them for the owner. */
+export async function readAmuxOrphanedBacklogTaskIds(
+  db: Pick<Prisma.TransactionClient, "$queryRaw">): Promise<string[]> {
+  const rows = await db.$queryRaw<Array<{ id: string }>>`
+    SELECT w."id" FROM "AmuxWorkItem" w
+    WHERE w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task'
+      AND w."status" = 'backlog' AND w."archivedAt" IS NULL
+      AND EXISTS (SELECT 1 FROM "AmuxWorkDependency" dep
+        JOIN "AmuxWorkItem" pre ON pre."id" = dep."dependencyId"
+        WHERE dep."taskId" = w."id" AND pre."archivedAt" IS NOT NULL
+          AND (pre."status" <> 'done' OR pre."v4TerminalAt" IS NULL))
+    ORDER BY w."id" ASC
+    LIMIT 50
+  `;
+  return rows.map((row) => row.id);
 }
 
 /** One bounded pass inside the admitted auto-promotion tick. Each Task is its
@@ -444,19 +469,21 @@ export async function refreshDueAmuxPortfolioScores(input: {
 }) {
   const outcomes: Array<AmuxScoreRefreshOutcome |
     { state: "failed"; taskId: string; code: string }> = [];
+  let orphaned: string[] = [];
   const summary = () => ({
     refreshed: outcomes.filter((item) => item.state === "refreshed").length,
     skipped: outcomes.filter((item) => item.state === "skipped").length,
     failed: outcomes.filter((item) => item.state === "failed").length,
-    outcomes,
+    outcomes, orphaned,
   });
   if (input.hasBudget?.() === false) return summary();
   let due: string[];
   try {
     // A read: it writes nothing and records no receipt, so any failure here,
     // a lost COMMIT included, leaves nothing to verify.
-    due = await withAutoTransaction(null, TICK_TRANSACTION_LIMITS,
-      (tx) => readDueAmuxPortfolioScoreTaskIds(tx));
+    ({ due, orphaned } = await withAutoTransaction(null, TICK_TRANSACTION_LIMITS,
+      async (tx) => ({ due: await readDueAmuxPortfolioScoreTaskIds(tx),
+        orphaned: await readAmuxOrphanedBacklogTaskIds(tx) })));
   } catch (error) {
     console.error(JSON.stringify({ event: "amux_score_refresh_read_failed",
       code: error instanceof BoardImportError ||

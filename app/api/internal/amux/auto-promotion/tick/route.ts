@@ -77,10 +77,12 @@ async function refreshScoresBeforePromotion(): Promise<Response | null> {
       // This refresh, then the claim and the promotion transactions.
       hasBudget: () => amuxRouteHasBudgetForMs(3 * AUTO_TICK_TRANSACTION_MAX_MS),
     });
-    if (result.refreshed || result.failed) {
+    if (result.refreshed || result.failed || result.orphaned.length) {
+      // orphanedTaskIds: backlog Tasks behind an archived, unfinished
+      // dependency; no refresh or promotion moves them until the owner does.
       console.info(JSON.stringify({ event: "amux_score_refresh",
         refreshed: result.refreshed, skipped: result.skipped,
-        failed: result.failed }));
+        failed: result.failed, orphanedTaskIds: result.orphaned }));
     }
     return null;
   } catch (error) {

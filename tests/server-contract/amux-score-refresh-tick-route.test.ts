@@ -12,7 +12,7 @@ const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (relative: string) => pathToFileURL(resolve(ROOT, relative)).href;
 
 const calls: string[] = [];
-let refresh: () => Promise<unknown> = async () => ({ refreshed: 0, skipped: 0, failed: 0, outcomes: [] });
+let refresh: () => Promise<unknown> = async () => ({ refreshed: 0, skipped: 0, failed: 0, outcomes: [], orphaned: [] });
 
 mock.module(mod("lib/amux/guard.ts"), { namedExports: { isAmuxSyncAuthorized: () => true } });
 mock.module(mod("lib/amux/internalRoute.ts"), {
@@ -78,7 +78,7 @@ test("the refresh is off by default and runs before claim and promotion when ena
   assert.equal((await tick("true")).status, 200);
   assert.deepEqual(calls, ["claim", "promote"]);
 
-  refresh = async () => ({ refreshed: 2, skipped: 1, failed: 0, outcomes: [] });
+  refresh = async () => ({ refreshed: 2, skipped: 1, failed: 0, outcomes: [], orphaned: [] });
   const on = await tick("enabled");
   assert.equal(on.status, 200);
   assert.deepEqual(calls, ["refresh", "claim", "promote"]);

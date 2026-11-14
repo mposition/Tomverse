@@ -154,6 +154,29 @@ test("a score at its baseline, or whose assessment the owner replaced, waits for
       assert.equal((await newest(tx, taskId)).id, scoreId);
     });
   });
+  await lifecycle(async (tx) => {
+    // 2026-11-14: predecessors archived before they were done (remade as a new
+    // series) leave their dependents waiting forever. Those are not refreshed
+    // but reported; a dependency still in progress keeps the refresh going.
+    const { readAmuxOrphanedBacklogTaskIds } = await services();
+    await dueTask(tx, 6.5 * DAY, async (taskId) => {
+      const predecessorId = `score-refresh-pre-${Date.now()}`;
+      await withoutTriggers(tx, async () => {
+        await tx.$executeRaw`INSERT INTO "AmuxWorkItem" ("id", "title", "status", "updatedAt")
+          VALUES (${predecessorId}, 'Predecessor', 'blocked', CURRENT_TIMESTAMP)`;
+        await tx.$executeRaw`INSERT INTO "AmuxWorkDependency" ("taskId", "dependencyId")
+          VALUES (${taskId}, ${predecessorId})`;
+      });
+      assert.deepEqual(await readDueAmuxPortfolioScoreTaskIds(tx), [taskId]);
+      assert.deepEqual(await readAmuxOrphanedBacklogTaskIds(tx), []);
+      await withoutTriggers(tx, async () => {
+        await tx.$executeRaw`UPDATE "AmuxWorkItem" SET "archivedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = ${predecessorId}`;
+      });
+      assert.deepEqual(await readDueAmuxPortfolioScoreTaskIds(tx), []);
+      assert.deepEqual(await readAmuxOrphanedBacklogTaskIds(tx), [taskId]);
+    });
+  });
 });
 
 after(closeLifecycleHarness);
