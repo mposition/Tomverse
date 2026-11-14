@@ -1,3 +1,4 @@
+import { createWorkspaceTransport } from "./workspaceTransport";
 import { createApiClient, ApiClientError, requestChatLocationIntent } from "@tomverse/api-client";
 import { consumeChatStream } from "../../../lib/chatStreamConsumer";
 import { fitChatRequestTranscript } from "../../../lib/chatRequestLimits";
@@ -246,6 +247,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     } finally { watchdog?.stop(); signal.removeEventListener("abort", abort); }
   }
   return {
+    get workspace() {
+      const revision = sessionRevision;
+      const assertScope = () => { if (revision !== sessionRevision) throw Error("SIGN_IN_REQUIRED"); };
+      return createWorkspaceTransport(async <T,>(path: string, init?: RequestInit) => {
+        assertScope(); const value = await request<T>(path, init); assertScope(); return value;
+      }, async () => { assertScope(); const value = await requireParity(); assertScope(); return value; }, async (url, headers, file) => { assertScope(); await uploadFile(url, headers, file); assertScope(); });
+    },
     location,
     history: {
       projects: async () => { await historySupport(); return (await request<{ projects: import("./chatTransport").HistoryProject[] }>("/api/projects")).projects; },
@@ -344,7 +352,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     unlockDevice: async (reason) => { await bridge.unlockDevice({ reason }); },
     // A Review continuation is listed with Review (owner request 2026-10-26).
     listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations", { headers: displayTimeZoneHeaders() })).filter(row => (row.surface === "workspace" && ["chat", "image"].includes(row.kind)) || (row.surface === "continuation" && row.productKey === "review")),
-    createReview: async (models) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models, webSearchMode: "always" })); return load(value.id); },
+    createReview: async (models, assistantProfileId) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models, webSearchMode: "always", ...(assistantProfileId ? { assistantProfileId } : {}) })); return load(value.id); },
     configureReview: async (id, models) => { await request(pathFor(id), json("PATCH", { selectedModels: models, selectionMode: "manual" })); return load(id); },
     routeReview: async (input) => { await requireParity(); const result = await askReviewRoute(input, (path, init) => { if (typeof path !== "string" || path !== "/api/review/route") throw Error("INVALID_REVIEW_ROUTE"); return run(path, init); }); if (!result || result.kind === "blocked") throw Error("REVIEW_ROUTE_UNAVAILABLE"); return result; },
     reviewPreview: async (id, mode = "balanced", synthesis = false) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews?reviewMode=${encodeURIComponent(mode)}&includeSynthesis=${synthesis}`); },
@@ -400,10 +408,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     models: async () => (await request<{ models: PublicCatalogModel[] }>("/api/models/catalog")).models.filter(isPubliclySelectableModel),
     capabilities: async () => ({ offered: (await request<{ autoSelection: { offered: boolean } }>("/api/products/chat/capabilities")).autoSelection.offered }),
     configure,
-    create: async (title) => {
-      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", { webSearchMode: "always", ...(title ? { title: title.slice(0, 30) } : {}) }));
+    create: async (title, assistantProfileId) => {
+      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", { webSearchMode: "always", ...(assistantProfileId ? { assistantProfileId } : {}), ...(title ? { title: title.slice(0, 30) } : {}) }));
       const detail = await load(item.id);
-      return detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
+      return !assistantProfileId && detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
     },
     send: async (conversation, text, files, signal, onProgress) => {
       const { persisted, sourceId } = await persistQuestion(conversation, text, files, signal);
