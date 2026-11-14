@@ -101,7 +101,7 @@ const LANE_RULES = [
   // accounts held 49 suites.
   [
     "operations",
-    /^(qa-release-|billing-finance-ops-|agent-digest-|auto-router-optimizer|chat-refiner-initial-auto-release|response-latency)/,
+    /^(qa-release-|billing-finance-ops-|agent-digest-|auto-router-optimizer|smart-adaptive-daily|chat-refiner-initial-auto-release|response-latency)/,
   ],
   // The remaining agents and the review machinery around them: marketing,
   // Prompt Refiner shadow runs, and AI Review telemetry and feedback. Below
