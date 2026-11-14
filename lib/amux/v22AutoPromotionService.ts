@@ -32,7 +32,7 @@ import { AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
   AMUX_V22_GRADUATION_EXCEPTION_POLICY_VERSION,
   AMUX_V22_PARALLEL_RESERVED, AMUX_V22_SEV1_RESERVED,
   amuxV22AssessmentIdsCurrent, amuxV22AutoPromotionEnabled, amuxV22Capacity,
-  amuxV22ScoreCurrent, amuxV22GraduationExceptionEnabled,
+  amuxV22ScoreCurrent, amuxV22GraduationExceptionEnabled, amuxV22PromotionFlowEnabled,
   amuxV22GraduationPermitted } from "./v22AutoPromotionCore.ts";
 import { writeV22AutoPromotionAudit } from "./v22AutoPromotionAudit.ts";
 
@@ -292,7 +292,8 @@ async function latestCandidates(tx: Prisma.TransactionClient, now: Date):
     WHERE w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task'
       AND w."status" = 'backlog' AND w."archivedAt" IS NULL
       AND w."owner" IS NULL AND w."claimedAt" IS NULL
-      AND n."activeStaleAt" > ${now} AND n."baselineStaleAt" > ${now}
+      AND (${amuxV22PromotionFlowEnabled()} OR
+        (n."activeStaleAt" > ${now} AND n."baselineStaleAt" > ${now}))
       AND NOT EXISTS (SELECT 1 FROM "AmuxV22PromotionUnknown" u
         WHERE u."workItemId" = w."id")
       -- A Task waiting on an unfinished dependency can never pass readiness
@@ -473,7 +474,8 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
             sourceApprovalId: score.sourceApprovalId,
             currentSourceApprovalId: ready.sourceApprovalId,
             activeStaleAt: score.activeStaleAt,
-            baselineStaleAt: score.baselineStaleAt, now })) {
+            baselineStaleAt: score.baselineStaleAt, now,
+            orderOnly: amuxV22PromotionFlowEnabled() })) {
         throw new BoardImportError("score_changed", 409);
       }
       const initiativeNodeId = score.initiativeAssessment.nodeId;
@@ -502,7 +504,7 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
           where: binding.where,
           orderBy: { assessmentVersion: "desc" }, select: { id: true },
         })));
-      if (!amuxV22AssessmentIdsCurrent(
+      if (!amuxV22PromotionFlowEnabled() && !amuxV22AssessmentIdsCurrent(
         assessmentBindings.map((binding) => binding.id),
         latestAssessments.map((assessment) => assessment?.id ?? null))) {
         throw new BoardImportError("score_changed", 409);

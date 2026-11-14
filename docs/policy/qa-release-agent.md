@@ -218,10 +218,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`. 그 가운데 `docs/policy/**`·`docs/ui-contracts/**`·
      `docs/agents/**`·`app/api/**`, `lib/agentAuthorityFiles.ts`의 control-plane 경로, 이름이나 정책 문서로 정해진 정책 테스트,
      게이트 파일과 가격·크레딧·migration·schema·인증·비밀·감사 체인·삭제·보존 경로(`QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`,
-     대소문자 무시)는 제외). 하나라도 밖이면 `dm_outside_allowlist`로 사람에게 남깁니다. 운영자 결정 2026-11-14(AMUXFLOW/B2):
-     `TOMVERSE_QA_RELEASE_DM_MERGE_BLOCK_LIST_ONLY=enabled`이면 허용 목록 대신 사람 세션 PR과 같은 기준(게이트 파일, block list,
-     정책 테스트, control-plane 경로)에 `docs/policy/**`·`docs/ui-contracts/**`·`docs/agents/**`, 모든 `app/api/**`(삭제 API의 재인증·확인이 있는 곳), 이름에 delete·purge·erase가 들어간 경로를 더해 판정합니다. 켜는 것은 DM의
-     무인 병합 범위를 넓히는 일이라 운영자가 합니다. 기본은 꺼짐입니다. **대상은 develop뿐이고 main은 제외입니다** — main 병합과 배포는 1항대로
+     대소문자 무시)는 제외). 하나라도 밖이면 `dm_outside_allowlist`로 사람에게 남깁니다. **대상은 develop뿐이고 main은 제외입니다** — main 병합과 배포는 1항대로
      사람이 합니다.
    - 변경 파일 목록(전체 페이지, rename은 이전·이후 경로 둘 다)을 끝까지 읽지 못한 PR.
    **migration을 포함한 PR도 무인 병합 대상입니다**(dev의 preDeploy가 적용합니다). git revert는 적용된 migration과 실패한

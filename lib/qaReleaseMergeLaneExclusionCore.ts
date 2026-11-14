@@ -180,28 +180,6 @@ const DM_BLOCK_MATCHERS = [...QA_RELEASE_MERGE_LANE_GATE_PATTERNS, ...QA_RELEASE
   .map((pattern) => new RegExp(compileManifestPattern(pattern).source, "i"));
 
 /**
- * Owner decision 2026-11-14 (AMUX process audit bundle 2, AMUXFLOW/B2): a
- * Decision Maker approved pull request into develop is judged as a person's
- * session pull request is -- the lane's gate paths, the block list of what a
- * revert cannot undo, policy tests, the engineering agent's control plane --
- * instead of an allow list that left every lib/ and API change to a person.
- * The policy, UI contract and agent instruction documents stay a person's.
- * main is never in reach. Off unless
- * TOMVERSE_QA_RELEASE_DM_MERGE_BLOCK_LIST_ONLY=enabled; turning it on widens
- * what the Decision Maker merges unattended, which is the owner's call.
- */
-export const QA_RELEASE_DM_MERGE_BLOCK_LIST_ONLY_ENV = "TOMVERSE_QA_RELEASE_DM_MERGE_BLOCK_LIST_ONLY";
-export const qaReleaseDmMergeBlockListOnly = (
-  value: string | undefined = process.env[QA_RELEASE_DM_MERGE_BLOCK_LIST_ONLY_ENV],
-) => value?.trim() === "enabled";
-// Every API route stays a person's even here: a user data deletion route's
-// re-authentication and confirmation live there, and no name list finds them
-// all (review r-20261114-073121-cf0260). So do paths that name a deletion.
-const DM_DOCUMENT_GATE_MATCHERS = ["docs/policy/**", "docs/ui-contracts/**", "docs/agents/**",
-  "app/api/**", "**/*delet*", "**/*purge*", "**/*erase*"]
-  .map((pattern) => new RegExp(compileManifestPattern(pattern).source, "i"));
-
-/**
  * Whether one changed path may be part of a pull request the Decision Maker
  * merges: a canonical path inside the allow list and outside its exceptions,
  * a product path in the engineering agent's authority manifest (its
@@ -209,17 +187,10 @@ const DM_DOCUMENT_GATE_MATCHERS = ["docs/policy/**", "docs/ui-contracts/**", "do
  * policy test (by name, lib/agentPushPolicy.ts, or named by the policy
  * documents when the caller read them), and on no block list.
  */
-export function qaReleaseDmMergeAllowed(path: unknown, policyTestPaths: readonly string[] = [],
-  blockListOnly: boolean = qaReleaseDmMergeBlockListOnly()): boolean {
+export function qaReleaseDmMergeAllowed(path: unknown, policyTestPaths: readonly string[] = []): boolean {
   if (!isReadablePath(path)) return false;
-  if (blockListOnly) {
-    // AMUXFLOW/B2: the rule a person's pull request meets, plus the
-    // documents that are gates themselves.
-    if (DM_DOCUMENT_GATE_MATCHERS.some((matcher) => matcher.test(path))) return false;
-  } else {
-    if (!DM_ALLOW_MATCHERS.some((matcher) => matcher.test(path))) return false;
-    if (DM_ALLOW_EXCEPT_MATCHERS.some((matcher) => matcher.test(path))) return false;
-  }
+  if (!DM_ALLOW_MATCHERS.some((matcher) => matcher.test(path))) return false;
+  if (DM_ALLOW_EXCEPT_MATCHERS.some((matcher) => matcher.test(path))) return false;
   if (classifyPath(path) !== "product") return false;
   if (isPolicyTestName(path) || policyTestPaths.includes(path)) return false;
   return !DM_BLOCK_MATCHERS.some((matcher) => matcher.test(path));
