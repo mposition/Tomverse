@@ -76,14 +76,18 @@ under mocked DB/lock boundaries, and existing contract tests remain separate evi
 
 ## Activation and remaining scope
 
-`CHAT_CONTINUATION_AUTO_SOURCE_ENABLED` remains absent/off. Activation needs explicit
-owner approval for the bounded excerpt reaching the existing configured Router provider
-with sampling/optimizer exclusion, followed by separately authorized deployment/config
-changes. This local patch does not activate that scope or increase the paid-call allowance.
+The subsequent owner instruction on 2026-11-14 approved default-on Auto source input.
+Missing `CHAT_CONTINUATION_AUTO_SOURCE_ENABLED` now enables the bounded excerpt for the
+existing configured Router, excluding sampling and optimizer replay. Explicit `false` or
+invalid configuration disables that Auto input. The continuation flag and live source
+access gates remain independent. No operational setting, merge, deployment or paid-call
+allowance has been changed.
 Source-aware location fusion, Deep Research, automatic full-history retrieval, durable pin,
 automatic Memory storage and native selection/receipt parity remain outside the patch.
 
-No PR, push, CI admission/re-run, merge, deployment or operational flag change was performed.
+At the original local-only snapshot no PR or push had been performed. The subsequent owner
+instruction authorizes a `ci:hold` PR. CI admission/re-run, merge, deployment and operational
+flag changes remain outside this work.
 Independent boundary review `r-20261114-113206-da3a43` accepted commit `6069729e0`:
 Claude and Antigravity both returned `accept`, with no blocking/major findings. Follow-up
 fixes reuse the accepted unchanged authority/cost boundary: record the final seed outcome

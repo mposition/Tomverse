@@ -132,7 +132,7 @@ test("imported source is separate user data, priced in the exact hold and never 
   readRewriteSwitch = async () => true;
   let checks = 0;
   try {
-    const result = await pick(Promise.resolve(true), { importedSource: source,
+    const result = await pick(Promise.resolve(true), false, { importedSource: source,
       verifyImportedSource: async () => { checks++; return true; },
       prompt: "Make that a table", previousAnswer: "native answer", rewriteAllowed: true, searchPlan: true });
     assert.equal(routerRequests.length, 1);
@@ -161,7 +161,7 @@ test("imported source is separate user data, priced in the exact hold and never 
 test("source access revoked across the hold releases the unused Router hold without a call or sample", async () => {
   created.length = 0; routerRequests.length = 0; holds.length = 0; settlementWrites.length = 0;
   let checks = 0;
-  const result = await pick(Promise.resolve(true), { importedSource: "private source", verifyImportedSource: async () => ++checks === 1 });
+  const result = await pick(Promise.resolve(true), false, { importedSource: "private source", verifyImportedSource: async () => ++checks === 1 });
   assert.equal(result, null);
   assert.equal(routerRequests.length, 0);
   assert.equal(created.length, 0);
