@@ -44,6 +44,7 @@ test("a signed-in account on a verified model gets the tool", () => {
 test("the default model can create files", () => {
   const result = plan();
   assert.equal(result.mode, "generate");
+  assert.equal(result.registerTool, true);
   assert.equal(getArtifactToolSupport(DEFAULT_MODEL_ID), "verified");
 });
 

@@ -813,6 +813,29 @@ test("a result whose patch never reached develop says so and offers no 'no chang
   assert.doesNotMatch(html, /reports the work is already in place/);
 });
 
+test("a change the engineering agent holds is named, never reported as no pull request", () => {
+  // AMUX-IMGOUT-004 / AMUX-MODELTIER-003 (2026-11-14): the pull request lives on
+  // the run's binding, so the card records none; Retry waits for publication.
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const html = (hold: AmuxReviewDetail["publication_hold"]) => decision(card, controller({
+    selectedEscalationId: escalationId, review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      allowed_outcomes: ["block"], approval_basis: null, publication_hold: hold,
+      proposed_transitions: { block: "blocked" },
+    }) }));
+  const open = html({ state: "pr_open", pr_number: 3931 });
+  assert.match(open, /engineering agent opened pull request #3931/);
+  assert.match(open, /cannot be run again while the pull request is open/);
+  assert.doesNotMatch(open, /there is no pull request/);
+  const pending = html({ state: "pending", pr_number: null });
+  assert.match(pending, /not finished judging or opening its pull request/);
+  assert.match(pending, /rejecting it frees the retry/);
+  assert.doesNotMatch(pending, /there is no pull request/);
+  assert.match(html(null), /there is no pull request/, "with nothing held, the old words stand");
+});
+
 test("the list marks a card whose patch has no publication path", () => {
   const marked = view({ read: read({ items: [item({ publicationPathMissing: true })], total: 1 }) });
   assert.match(marked, /data-testid="amux-owner-queue-publication-path-missing"[^>]*>No publication path/);

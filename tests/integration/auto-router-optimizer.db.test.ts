@@ -1,3 +1,6 @@
+import { Prisma } from "@prisma/client";
+import { verifiedOptimizerSummary } from "../fixtures/optimizerVerifiedSummary";
+const VERIFIED_SUMMARY = verifiedOptimizerSummary();
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
@@ -98,6 +101,7 @@ const seedCycle = (data: {
   reservedMicroUsd?: number;
   incumbentGuidance?: string;
   candidateGuidance?: string | null;
+  summary?: Prisma.InputJsonValue | null;
 }) =>
   prisma.autoRouterOptimizerCycle.create({
     data: {
@@ -108,6 +112,7 @@ const seedCycle = (data: {
       reservedMicroUsd: data.reservedMicroUsd ?? 1_000,
       spentMicroUsd: data.spentMicroUsd ?? 0,
       status: data.status,
+      summary: data.summary === null ? Prisma.JsonNull : data.summary ?? VERIFIED_SUMMARY,
       ...(data.createdAt ? { createdAt: data.createdAt } : {}),
     },
   });
@@ -356,7 +361,7 @@ test("promotion is a compare-and-set on the guidance the cycle measured", async 
   const rival = await seedCycle({ status: "passed", candidateGuidance: `${PROPOSAL}\nPrefer fewer credits.` });
   const failed = await seedCycle({ status: "failed", candidateGuidance: PROPOSAL });
 
-  assert.deepEqual(await promoteAutoRouterOptimizerCycle(failed.id, actor), { refused: "not_passed" });
+  assert.deepEqual(await promoteAutoRouterOptimizerCycle(failed.id, actor), { refused: "quality_not_passed" });
   assert.deepEqual(await promoteAutoRouterOptimizerCycle("missing", actor), { refused: "not_found" });
 
   assert.deepEqual(await promoteAutoRouterOptimizerCycle(cycle.id, actor), { ok: true });
@@ -371,6 +376,28 @@ test("promotion is a compare-and-set on the guidance the cycle measured", async 
   // The rival measured itself against the default, which is no longer in force.
   assert.deepEqual(await promoteAutoRouterOptimizerCycle(rival.id, actor), { refused: "stale" });
   assert.equal((await readActiveRouterGuidance()).cycleId, cycle.id);
+});
+
+test("manual and system promotion refuse legacy and incomplete costs without changing active guidance or rollback", async () => {
+  const legacy = await seedCycle({ status: "passed", candidateGuidance: PROPOSAL, summary: null });
+  const unknown = await seedCycle({ status: "passed", candidateGuidance: PROPOSAL,
+    summary: { ...VERIFIED_SUMMARY, costCoverage: { ...VERIFIED_SUMMARY.costCoverage, complete: false, unknownCalls: 1 } } });
+  for (const who of [actor, "system" as const]) {
+    assert.deepEqual(await promoteAutoRouterOptimizerCycle(legacy.id, who), { refused: "legacy_unverified" });
+    assert.deepEqual(await promoteAutoRouterOptimizerCycle(unknown.id, who), { refused: "cost_unconfirmed" });
+  }
+  assert.equal((await readActiveRouterGuidance()).cycleId, null);
+  assert.equal(await auditFor(unknown.id, "auto.llm_router_guidance.promoted"), 0);
+  const valid = await seedCycle({ status: "passed", candidateGuidance: PROPOSAL });
+  assert.deepEqual(await promoteAutoRouterOptimizerCycle(valid.id, actor), { ok: true });
+  // A previously accepted guidance remains active and can roll back even if
+  // its historical evidence is absent. New promotion is a separate gate.
+  await prisma.autoRouterOptimizerCycle.update({ where: { id: valid.id }, data: { summary: Prisma.JsonNull } });
+  assert.equal((await readActiveRouterGuidance()).cycleId, valid.id);
+  assert.deepEqual(await rollBackAutoRouterGuidance(actor), { ok: true });
+  assert.equal((await readActiveRouterGuidance()).cycleId, null);
+  const storedLegacy = await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: legacy.id } });
+  assert.equal(storedLegacy.summary, null);
 });
 
 test("rollback returns one step to the default and is audited", async () => {

@@ -219,8 +219,8 @@ test("the decision version names the rewrite guidance only when a rewrite used i
   assert.equal(version("c1", false, null), autoLlmRouterVersionFor(AUTO_LLM_ROUTER_VERSION, "c1"));
   assert.equal(version("c1", true, null), `${autoLlmRouterVersionFor(AUTO_LLM_ROUTER_VERSION, "c1")}+rewrite`);
   // A promoted rewrite guidance adds its cycle after +rewrite.
-  assert.equal(version(null, true, "r1"), "auto-llm-router-v1+rewrite+r1");
-  assert.equal(version("c1", true, "r1"), "auto-llm-router-v1+c1+rewrite+r1");
+  assert.equal(version(null, true, "r1"), `${AUTO_LLM_ROUTER_VERSION}+rewrite+r1`);
+  assert.equal(version("c1", true, "r1"), `${AUTO_LLM_ROUTER_VERSION}+c1+rewrite+r1`);
   // Rewriting off: the rewrite guidance was not used, so it is not named.
   assert.equal(version(null, false, "r1"), AUTO_LLM_ROUTER_VERSION);
 });
