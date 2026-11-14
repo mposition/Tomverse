@@ -311,3 +311,81 @@ test("an ordinary Task is never stopped by a higher cost, only by a changed rout
   assert.equal(v4TaskCeilingDecision({ decision: "hold", reason: "approval_invalid" }, false), "hold");
   assert.equal(v4TaskCeilingDecision({ decision: "allow", reason: "within_approved_ceiling" }, true), "allow");
 });
+
+test("a new model route within the approved ceiling passes only behind its switch", async () => {
+  const { AMUX_V4_NEW_MODEL_ROUTE_ENV, amuxV4NewModelRouteWithinCeiling } =
+    await import("../lib/amux/v4TaskNewModelRouteSwitch.ts");
+  assert.equal(AMUX_V4_NEW_MODEL_ROUTE_ENV, "TOMVERSE_AMUX_V4_NEW_MODEL_ROUTE_WITHIN_CEILING");
+  for (const value of [undefined, "", "true", "1", "Enabled", "disabled"]) {
+    assert.deepEqual(amuxV4NewModelRouteWithinCeiling(value),
+      { newModelRouteWithinCeiling: false }, String(value));
+  }
+  const on = amuxV4NewModelRouteWithinCeiling("enabled");
+  assert.deepEqual(on, { newModelRouteWithinCeiling: true });
+
+  const old = calculateV4TaskCostCeiling(input());
+  assert.equal(old.ok, true);
+  // antigravity-impl beside the approved route, on a model the receipt did
+  // not name, cheaper than the approved route.
+  const added = (overrides = {}) => route({ routeId: "gemini-standard",
+    workerName: "antigravity-impl", provider: "google", modelId: "gemini-4-argon-medium",
+    routePolicyDigest: "e".repeat(64), outputMicroUsdPerMillion: 1_500_000, ...overrides });
+  const withNew = calculateV4TaskCostCeiling(input({ routes: [route(), added()] }));
+  assert.equal(withNew.ok, true);
+
+  assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, withNew), {
+    decision: "reconfirm", reason: "task_route_changed" }, "default off keeps the old rule");
+  assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, withNew,
+    { newModelRouteWithinCeiling: false }),
+  { decision: "reconfirm", reason: "task_route_changed" });
+  assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, withNew, on), {
+    decision: "allow", reason: "new_model_route_within_ceiling" });
+
+  // Exactly at the approved ceiling still passes; one micro-dollar over asks.
+  const approvedPerAttempt = BigInt(old.receipt.ceilingMicroUsd) / BigInt(2);
+  const atCeiling = calculateV4TaskCostCeiling(input({ routes: [route(), added({
+    outputMicroUsdPerMillion: 2_000_000 })] }));
+  const atCeilingRoute = atCeiling.receipt.routes.find((r) => r.routeId === "gemini-standard");
+  assert.equal(BigInt(atCeilingRoute.perAttemptMicroUsd), approvedPerAttempt);
+  assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, atCeiling, on), {
+    decision: "allow", reason: "new_model_route_within_ceiling" });
+  const dearer = calculateV4TaskCostCeiling(input({ routes: [route(), added({
+    outputMicroUsdPerMillion: 2_000_000, toolCostCapMicroUsdPerAttempt: 501 })] }));
+  assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, dearer, on), {
+    decision: "reconfirm", reason: "task_route_changed" }, "a new route over the ceiling asks");
+  const { v4TaskCeilingDecision } = await import("../lib/amux/v4TaskCostCeilingCore.ts");
+  assert.equal(v4TaskCeilingDecision(checkV4TaskApprovedCeiling(old.receipt, dearer, on), false),
+    "reconfirm", "an ordinary Task does not pass a new route over the ceiling");
+  assert.equal(v4TaskCeilingDecision(checkV4TaskApprovedCeiling(old.receipt, withNew, on), false),
+    "allow");
+
+  // Grown bounds with a new model route ask, even below the old ceiling.
+  const grown = calculateV4TaskCostCeiling(input({
+    caps: { ...input().caps, outputTokens: 1_001 },
+    routes: [route({ outputMicroUsdPerMillion: 1_000_000 }), added({ outputMicroUsdPerMillion: 500_000 })],
+  }));
+  assert.ok(BigInt(grown.receipt.ceilingMicroUsd) < BigInt(old.receipt.ceilingMicroUsd));
+  assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, grown, on), {
+    decision: "reconfirm", reason: "task_route_changed" });
+  const moreAttempts = calculateV4TaskCostCeiling(input({
+    caps: { ...input().caps, maxAttempts: 3 },
+    routes: [route({ outputMicroUsdPerMillion: 100_000 }), added({ outputMicroUsdPerMillion: 100_000 })],
+  }));
+  assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, moreAttempts, on), {
+    decision: "reconfirm", reason: "task_route_changed" });
+
+  // A route the receipt named still has to match it exactly.
+  for (const changed of [{ modelId: "different-model" }, { routePolicyDigest: "c".repeat(64) },
+    { workerName: "renamed-worker" }]) {
+    const namedChanged = calculateV4TaskCostCeiling(input({
+      routes: [route(changed), added()] }));
+    assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, namedChanged, on), {
+      decision: "reconfirm", reason: "task_route_changed" }, JSON.stringify(changed));
+  }
+  // The switch does not loosen hold reasons or an invalid approval.
+  assert.deepEqual(checkV4TaskApprovedCeiling({ ...old.receipt, ceilingMicroUsd: "1" }, withNew, on),
+    { decision: "hold", reason: "approval_invalid" });
+  // With no new model route the reasons are unchanged.
+  assert.deepEqual(checkV4TaskApprovedCeiling(old.receipt, old, on), {
+    decision: "allow", reason: "within_approved_ceiling" });
+});
