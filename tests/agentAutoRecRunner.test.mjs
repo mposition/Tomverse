@@ -112,10 +112,11 @@ test("daily mode continues after a known no-change result and ends at an empty q
 });
 
 test("daily mode stops on unknown publishing or reporting without claiming another task", async () => {
-  for (const gateway of [{ publish: { status: "unknown" } }, { result: { status: "unknown" } }]) {
-    const { deps, gatewayCalls } = fakeRunner({ gateway });
+  for (const gateway of [{ publish: { status: "unknown", step: "pr_not_draft" } }, { result: { status: "unknown" } }]) {
+    const { deps, gatewayCalls, events } = fakeRunner({ gateway });
     assert.equal(await runDailyBatch(deps), 1);
     assert.equal(ops(gatewayCalls).filter((op) => op === "claim").length, 1);
+    if (gateway.publish) assert.equal(events.find((event) => event.event === "publish_answer")?.step, "pr_not_draft");
   }
 });
 

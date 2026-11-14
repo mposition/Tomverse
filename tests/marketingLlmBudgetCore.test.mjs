@@ -203,13 +203,15 @@ test("pin lookup refuses unknown, duplicated, malformed and expired pins", () =>
   assert.equal(resolveMarketingLlmPin([pin()], "fixture-model-2026-10-01", at("2026-09-30T23:59:59Z")).code, "pin_expired");
 });
 
-test("the monthly cap is decimal USD read without floats, capped at US$100", () => {
-  assert.equal(parseMarketingLlmMonthlyCap("100"), MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD);
-  assert.equal(parseMarketingLlmMonthlyCap("100.000000"), 100_000_000);
+test("the monthly cap is decimal USD read without floats, capped at US$500", () => {
+  assert.equal(parseMarketingLlmMonthlyCap("500"), MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD);
+  assert.equal(parseMarketingLlmMonthlyCap("500.000000"), 500_000_000);
+  assert.equal(parseMarketingLlmMonthlyCap("100"), 100_000_000);
+  assert.equal(parseMarketingLlmMonthlyCap("101"), 101_000_000);
   assert.equal(parseMarketingLlmMonthlyCap("0.000001"), 1);
   assert.equal(parseMarketingLlmMonthlyCap("12.34"), 12_340_000);
   assert.equal(parseMarketingLlmMonthlyCap("0.1"), 100_000);
-  for (const bad of [undefined, "", "0", "0.000000", "100.000001", "101", "1000", "1e2", "-1", " 5", "5.", ".5", "5.1234567", "NaN"]) {
+  for (const bad of [undefined, "", "0", "0.000000", "500.000001", "501", "1000", "1e2", "-1", " 5", "5.", ".5", "5.1234567", "NaN"]) {
     assert.equal(parseMarketingLlmMonthlyCap(bad), null, String(bad));
   }
 });
@@ -321,7 +323,7 @@ test("the operator's settings document is read strictly, and anything else is un
     '{"model":null,"monthlyUsdCap":null,"extra":1}',
     '{"model":"has space","monthlyUsdCap":null}',
     '{"model":7,"monthlyUsdCap":null}',
-    '{"model":null,"monthlyUsdCap":"101"}',
+    '{"model":null,"monthlyUsdCap":"501"}',
     '{"model":null,"monthlyUsdCap":"0"}',
     '{"model":null,"monthlyUsdCap":5}',
   ]) {

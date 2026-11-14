@@ -6,6 +6,7 @@ import { claimNextRecommendation } from "@/lib/autoRouterRecAgent";
 import { isAutoRouterRecAgentAuthorized } from "@/lib/autoRouterRecAgentCore";
 import { DAILY_PRODUCT_AGENT_HEADER, DAILY_PRODUCT_AGENT_MODE, dailyProductAgentEnabled } from "@/lib/dailyProductAgentCore";
 import { claimDailyProductTask } from "@/lib/dailyProductAgentStore";
+import { observeSmartAdaptiveDaily } from "@/lib/dailyProductAgentSmartAdaptive";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -24,6 +25,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not found." }, { status: 404, headers: NO_STORE });
   }
   try {
+    if (daily) {
+      await observeSmartAdaptiveDaily().catch(() => {
+        console.warn(JSON.stringify({ event: "smart_adaptive_daily_observation_failed" }));
+      });
+    }
     const claim = daily ? claimDailyProductTask : claimNextRecommendation;
     const claimed = await claim({ origin: new URL(request.url).origin });
     if (!claimed) return new NextResponse(null, { status: 204, headers: NO_STORE });

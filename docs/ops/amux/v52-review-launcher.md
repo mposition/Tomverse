@@ -41,6 +41,16 @@ review client, bridge별 object 읽기 권한과 state directory 순이다. 검�
 같은 diff를 다시 제출하지 않는다. 앱 기록 route의 응답이 불명확하면 앱 DB의
 시도별 검토 기록을 먼저 읽는다.
 
+판정이 `reject`이면 helper는 검토 서버 `status`가 이미 돌려준 구조화 findings로
+짧은 반려 요약(심각도 순, 최대 8줄)을 만들어 최종 결과와 state 파일에 함께 남기고,
+bridge는 그 요약을 기록 요청의 `findings_summary`로 보낸다(운영자 결정 2026-11-14).
+추가 검토 서버 호출은 없다. 앱은 비밀값처럼 보이는 줄을 지우고 링크를 `[link]`로
+바꾸고 2,000자로 줄여 `AmuxV52ReviewRecord.findingsSummary`에 저장하며, Admin 카드
+상세와 owner queue에서 반려된 시도마다 보여 준다. 요약은 표시용일 뿐 요청 digest와
+감사 metadata에 들어가지 않고 판정을 바꾸지 않는다. 요약이 없는 이전 기록은 사유
+원문이 있는 검토 job id를 안내한다. 이 필드를 보내는 bridge는 앱 기록 route가 필드를
+받게 된 뒤에 배치한다. 이전 앱은 모르는 필드가 있는 요청을 거절한다.
+
 검증할 때는 staging의 한 v4 Task에서 Task 등록, 같은 등급 배정, 정상 종료 후
 로컬 commit과 검토 job, 앱의 `amux.review.recorded` 감사, 판정에 따른 상태 전이,
 `develop` PR까지 각각 관측한다. `done`은 PR 병합 관측으로만 확인한다. 운영자가

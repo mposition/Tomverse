@@ -19,6 +19,7 @@ import {
   AmuxOwnerQueueDecision,
   useAmuxOwnerQueueElapsed,
 } from "@/components/admin/AmuxOwnerQueueDecision";
+import { amuxOwnerQueueDmFrom } from "@/components/admin/AmuxOwnerQueueDm";
 import { AdminChannelIcon } from "@/components/admin/ui/AdminChannelIcon";
 import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -300,7 +301,8 @@ export function AmuxOwnerQueueScreen({ canInspectCards, canWriteEngineering = fa
         next = focused ?? amuxOwnerQueueVisible(body.items, { group: null, query: "" })[0]?.taskId ?? null;
       }
       firstRead.current = false;
-      setRead(body);
+      // A settlement this screen cannot draw is shown as unread, never trusted as read.
+      setRead({ ...body, items: body.items.map((item) => ({ ...item, dmSettlement: amuxOwnerQueueDmFrom(item.dmSettlement) })) });
       setStatus("ready");
       setSelectedId(next);
     } catch {

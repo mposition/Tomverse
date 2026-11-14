@@ -23,6 +23,7 @@ import { amuxOwnerRecoveryPreparation, amuxReviewUsageOutcomeUnknown } from "@/l
 import { amuxReviewReadError } from "@/lib/amux/reviewReadErrorCore";
 import { AmuxOwnerRecoveryInspectionPanel } from "./AmuxOwnerRecoveryInspectionPanel";
 import { amuxLegacyCardReadOf, type AmuxLegacyCardRead } from "./AmuxLegacyCardPanel";
+import { amuxRejectedAttemptsOf, type AmuxRejectedAttempt } from "./AmuxReviewRejection";
 
 // The server-side review proxy waits up to 40s. The browser must not abort
 // first; an unknown outcome freezes writes until decision ID/digest lookup.
@@ -124,11 +125,13 @@ export type AmuxOwnerExecutionMetadata = {
 };
 
 // `legacyCard` is the card's owner settlement panel from the same answer, kept
-// whether or not the attempt metadata could be bound to the review.
+// whether or not the attempt metadata could be bound to the review; so are
+// `rejections`, the card's runs its code review rejected, with their reasons.
 type OwnerExecutionState =
   | { state: "idle" | "loading" }
-  | { state: "unavailable"; legacyCard?: AmuxLegacyCardRead | null }
-  | { state: "ready"; metadata: AmuxOwnerExecutionMetadata; legacyCard?: AmuxLegacyCardRead | null };
+  | { state: "unavailable"; legacyCard?: AmuxLegacyCardRead | null; rejections?: AmuxRejectedAttempt[] }
+  | { state: "ready"; metadata: AmuxOwnerExecutionMetadata; legacyCard?: AmuxLegacyCardRead | null;
+      rejections?: AmuxRejectedAttempt[] };
 
 export type AmuxOwnerExecutionReadFetcher = (
   input: RequestInfo | URL,
@@ -304,7 +307,9 @@ export async function readAmuxOwnerExecutionMetadata({
     if (controller.signal.aborted) return { state: "unavailable" };
     const metadata = bindAmuxOwnerExecutionMetadata(review, body);
     const legacyCard = amuxLegacyCardReadOf(review.task.id, body);
-    return metadata ? { state: "ready", metadata, legacyCard } : { state: "unavailable", legacyCard };
+    const rejections = amuxRejectedAttemptsOf(review.task.id, body);
+    return metadata ? { state: "ready", metadata, legacyCard, rejections }
+      : { state: "unavailable", legacyCard, rejections };
   } catch {
     if (!isCurrent()) return null;
     return { state: "unavailable" };

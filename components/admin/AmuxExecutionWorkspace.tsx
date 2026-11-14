@@ -38,6 +38,8 @@ import type { DmAttention, DmAttentionItem } from "@/lib/amux/decisionMakerAtten
 import { AmuxOutcomeObservationForm } from "./AmuxOutcomeObservationForm";
 import { requestArchiveAllActiveCards } from "./amuxExecutionArchiveRequest";
 import { AmuxAttemptUsageAcceptance } from "./AmuxAttemptUsageAcceptance";
+import { AmuxReviewRejectionReason } from "./AmuxReviewRejection";
+import type { AmuxV52AttemptReviewView } from "@/lib/amux/v52ReviewFindingsCore";
 import {
   AMUX_EXECUTION_VISIBLE_LANES,
   amuxVisibleInspectionText,
@@ -104,7 +106,8 @@ type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
     toStatus: string | null; reason: string | null;
     reservedCostMicrousd: string; settledCostMicrousd: string | null;
     costConfirmed: boolean; usageUnknown: boolean;
-    usageAcceptance: { source: string; acceptedAt: string } | null }>;
+    usageAcceptance: { source: string; acceptedAt: string } | null;
+    v52Review?: AmuxV52AttemptReviewView | null }>;
   escalations: Array<{ id: string; reason: string; status: string;
     createdAt: string }>;
   score: { scoreTotal: number; components: unknown; activeFresh: boolean;
@@ -1084,6 +1087,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
           <p>{m.internalCost}: {item.costConfirmed && item.settledCostMicrousd !== null ?
             `$${USD(item.settledCostMicrousd)}` : m.unconfirmed}</p>
           {item.reason && <p>{item.reason}</p>}
+          <AmuxReviewRejectionReason review={item.v52Review} attemptNumber={item.attemptNumber} />
           <AmuxAttemptUsageAcceptance taskId={selected.id} attempt={item}
             canAccept={canReviewCards} date={date}
             onAccepted={() => void openCard(selected.id, false)} />

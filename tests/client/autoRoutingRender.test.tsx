@@ -227,12 +227,13 @@ const webSearchState = (
 
 const webSearchChip = (
   isAutoMode: boolean,
-  state: WebSearchComposerState = webSearchState()
+  state: WebSearchComposerState = webSearchState(),
+  isMobileShell = false
 ) =>
   ChatInputWebSearchChipView({
     state,
     isAutoMode,
-    isMobileShell: false,
+    isMobileShell,
     fullLabel: isAutoMode ? "Web search on" : "Web search · 1/2 supported",
     compactLabel: isAutoMode ? "Web search" : "Web search 1/2",
     description: isAutoMode
@@ -264,6 +265,20 @@ test("Auto web search does not present the manual fallback as the answering mode
   const text = textOf(rendered);
   assert.match(text, /current information or sources are needed/);
   assert.doesNotMatch(text, /selected models|8 extra credits|manual-fallback/);
+});
+
+test("compact mobile web search chip wraps to its own line instead of truncating", () => {
+  const chipOf = (isMobileShell: boolean) =>
+    propsOf(webSearchChip(true, webSearchState(), isMobileShell)).find(
+      (props) => props["data-testid"] === "web-search-mode-chip"
+    );
+  const mobile = chipOf(true);
+  assert.ok(mobile);
+  assert.equal(mobile["data-label-variant"], "compact");
+  assert.match(String(mobile.className), /(^|\s)shrink-0(\s|$)/);
+  assert.match(String(mobile.className), /(^|\s)max-w-full(\s|$)/);
+  assert.match(textOf(webSearchChip(true, webSearchState(), true)), /Web search/);
+  assert.doesNotMatch(String(chipOf(false)?.className), /(^|\s)shrink-0(\s|$)/);
 });
 
 test("manual web search keeps exact support counts and its exception control", () => {

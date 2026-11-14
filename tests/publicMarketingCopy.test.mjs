@@ -62,3 +62,15 @@ test("localized FAQ preserves the same product, cost and support topics", () => 
     assert.match(faq.sections[0].body, /Review/);
   }
 });
+
+test("Korean FAQ names products like the header menu and gives English names only in parentheses", () => {
+  const ko = infoPages.faq.ko;
+  const strings = [ko.description, ...ko.sections.flatMap(section => [
+    section.title, section.body, ...Object.values(section.guestTrialLinks ?? {}),
+  ])];
+  for (const text of strings) {
+    const bare = text.replace(/\((?:AI )?(?:Chat|Review)\)/g, "");
+    assert.doesNotMatch(bare, /\b(?:Chat|Review)\b/, text);
+  }
+  assert.match(ko.sections[0].title, /채팅과 리뷰/);
+});

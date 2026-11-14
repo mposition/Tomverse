@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { AMUX_ESCALATION_AWAITING_STATUSES } from "./humanReviewCore.ts";
+import type { AmuxOwnerQueueDmSettlement } from "./ownerQueueDmCore.ts";
 import type { AmuxWorkerProviderClass } from "./workerRegistryCore.ts";
 import type { EngineeringAgentCardItemView } from "../engineeringAgentOwnerItemContextCore.ts";
 
@@ -70,6 +71,13 @@ export type AmuxOwnerQueueItem = {
    * decided on the card through the engineering routes. Absent: not read.
    */
   engineeringItems?: EngineeringAgentCardItemView[];
+  /**
+   * The Decision Maker's settlement of this card and where its card stands
+   * (docs/policy/amux-decision-maker.md §0a-5). Null: the card's escalation has
+   * no settlement. `{ status: "unread" }`: it could not be read, which is this
+   * card only. Absent: not read.
+   */
+  dmSettlement?: AmuxOwnerQueueDmSettlement | null;
 };
 
 export type AmuxOwnerQueueRead = {
@@ -94,6 +102,19 @@ export const amuxOwnerQueueWithEngineeringItems = (
   ...read,
   items: read.items.map((item) => ({ ...item, engineeringItems: byCard.get(item.taskId) ?? [] })),
 };
+
+/**
+ * The queue with each card's Decision Maker settlement attached. A card whose
+ * escalation has no entry has no settlement (null); a failed read is the
+ * caller's `unread` entry for each card, never a missing one.
+ */
+export const amuxOwnerQueueWithDmSettlements = (
+  read: AmuxOwnerQueueRead,
+  byTask: ReadonlyMap<string, AmuxOwnerQueueDmSettlement>,
+): AmuxOwnerQueueRead => ({
+  ...read,
+  items: read.items.map((item) => ({ ...item, dmSettlement: byTask.get(item.taskId) ?? null })),
+});
 
 /** Reasons where the work itself stopped before it finished (a lost run, a limit, a failed tool). */
 const RECOVER_REASONS: ReadonlySet<string> = new Set([
