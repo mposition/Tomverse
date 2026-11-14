@@ -67,12 +67,14 @@ async function readCandidateRows(tx: Prisma.TransactionClient,
     WITH clock AS (
       SELECT (${now}::timestamptz AT TIME ZONE 'UTC') AS "now"
     ), own AS NOT MATERIALIZED (
-      -- Inlined per idea, so each reference uses the decision's idea index.
+      -- Inlined per idea, so each reference uses the decision's idea index. An
+      -- archived card has left the board: it is neither judged nor closed, and
+      -- stays as it is (an idea whose stopped card was archived and remade).
       SELECT d."ideaId", w."id", w."displayKey", w."cardType", w."status", w."owner", w."claimedAt",
         w."v22AssignmentId", w."updatedAt"
       FROM "AmuxIdeaUnitDecision" d
       JOIN "AmuxWorkItem" w ON w."id" = d."registeredWorkItemId"
-      WHERE d."action" = 'register_card' AND d."state" = 'consumed'
+      WHERE d."action" = 'register_card' AND d."state" = 'consumed' AND w."archivedAt" IS NULL
     )
     SELECT i."id" AS "ideaId",
       -- An owner's direct close is answered as it is written, at the same instant,
@@ -90,7 +92,7 @@ async function readCandidateRows(tx: Prisma.TransactionClient,
             WHERE t."taskId" = c."id" AND t."state" IN ('open', 'answered')),
           'foreignDependent', EXISTS (SELECT 1 FROM "AmuxWorkDependency" e
             JOIN "AmuxWorkItem" o ON o."id" = e."taskId"
-            WHERE e."dependencyId" = c."id" AND o."status" NOT IN ('done', 'cancelled')
+            WHERE e."dependencyId" = c."id" AND o."status" NOT IN ('done', 'cancelled') AND o."archivedAt" IS NULL
               AND NOT EXISTS (SELECT 1 FROM own same WHERE same."ideaId" = i."id" AND same."id" = o."id")),
           -- Why a blocked card is blocked, read as the idea's detail reads it
           -- (lib/amux/ideaProgressRead.ts); the core picks with amuxIdeaBlockReason.
@@ -127,7 +129,7 @@ async function readCandidateRows(tx: Prisma.TransactionClient,
         JOIN "AmuxWorkDependency" e ON e."dependencyId" = c."id"
         JOIN "AmuxWorkItem" o ON o."id" = e."taskId"
         WHERE c."ideaId" = i."id" AND c."status" IN ('backlog', 'blocked', 'todo')
-          AND o."status" NOT IN ('done', 'cancelled')
+          AND o."status" NOT IN ('done', 'cancelled') AND o."archivedAt" IS NULL
           AND NOT EXISTS (SELECT 1 FROM own same WHERE same."ideaId" = i."id" AND same."id" = o."id"))
       AND (EXISTS (SELECT 1 FROM own c WHERE c."ideaId" = i."id" AND c."cardType" = 'task' AND c."status" = 'blocked')
         OR NOT EXISTS (SELECT 1 FROM own c WHERE c."ideaId" = i."id" AND c."status" NOT IN ('done', 'cancelled')
@@ -325,7 +327,7 @@ export async function readOpenAmuxIdeaCardCloseQuestionOfCard(tx: Prisma.Transac
 }
 
 type LockedRow = AmuxIdeaCardCloseCardFact & { questionId: string; ideaId: string;
-  state: string; asked: unknown; ideaCancelled: boolean };
+  state: string; asked: unknown; ideaCancelled: boolean; archived: boolean };
 
 export type AmuxIdeaCardCloseAuditEntry = {
   action: string; summary: string; metadata: Record<string, Prisma.InputJsonValue>;
@@ -342,7 +344,10 @@ export type AmuxIdeaCardCloseApplied =
  * the caller took: unit approval, registration and every other audited writer
  * take the same lock, so a new card cannot land between this read and the
  * write, and a worker's claim locks the same card rows. One statement locks the
- * question and every card of its idea, then the state is judged again: a card
+ * question and every card of its idea, then the state is judged again on the
+ * cards still on the board (an archived card is judged by nothing and left as
+ * it is; filtered here, not in the join, so the question's row still reads
+ * when every card was archived and the answer cancels it): a card
  * that started or a set that changed since the question closes nothing and
  * cancels the question. "keep" only records.
  *
@@ -371,7 +376,7 @@ export async function applyAmuxIdeaCardCloseAnswerInTransaction(tx: Prisma.Trans
   const rows = await tx.$queryRaw<LockedRow[]>`
     SELECT q."id" AS "questionId", q."ideaId", q."state", q."cards" AS "asked",
       (i."cancelledAt" IS NOT NULL OR i."state" = 'cancelled') AS "ideaCancelled",
-      w."id", w."displayKey", w."cardType", w."status",
+      w."id", w."displayKey", w."cardType", w."status", (w."archivedAt" IS NOT NULL) AS "archived",
       (w."owner" IS NOT NULL OR w."claimedAt" IS NOT NULL OR w."v22AssignmentId" IS NOT NULL) AS "assigned",
       (extract(epoch FROM w."updatedAt") * 1000)::double precision AS "updatedAtMs",
       EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" a
@@ -380,7 +385,7 @@ export async function applyAmuxIdeaCardCloseAnswerInTransaction(tx: Prisma.Trans
         WHERE t."taskId" = w."id" AND t."state" IN ('open', 'answered')) AS "workerQuestion",
       EXISTS (SELECT 1 FROM "AmuxWorkDependency" e
         JOIN "AmuxWorkItem" o ON o."id" = e."taskId"
-        WHERE e."dependencyId" = w."id" AND o."status" NOT IN ('done', 'cancelled')
+        WHERE e."dependencyId" = w."id" AND o."status" NOT IN ('done', 'cancelled') AND o."archivedAt" IS NULL
           AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaUnitDecision" same
             WHERE same."registeredWorkItemId" = o."id" AND same."ideaId" = q."ideaId")) AS "foreignDependent"
     FROM "AmuxIdeaCardCloseQuestion" q
@@ -411,7 +416,8 @@ export async function applyAmuxIdeaCardCloseAnswerInTransaction(tx: Prisma.Trans
       summary: "Kept the remaining cards of a stalled AMUX idea.", metadata: base }) };
   }
   const asked = amuxIdeaCardCloseAskedCards(head.asked);
-  const refusal = asked ? amuxIdeaCardCloseRefusal({ ideaCancelled: head.ideaCancelled, asked, cards: rows }) :
+  const onBoard = rows.filter((row) => !row.archived);
+  const refusal = asked ? amuxIdeaCardCloseRefusal({ ideaCancelled: head.ideaCancelled, asked, cards: onBoard }) :
     "cards_changed";
   if (refusal) {
     await finish("cancelled", refusal);
@@ -423,7 +429,7 @@ export async function applyAmuxIdeaCardCloseAnswerInTransaction(tx: Prisma.Trans
   const targets = (asked as AmuxIdeaCardCloseAskedCard[]).map((card) => card.id);
   const moved = await tx.amuxWorkItem.updateMany({
     where: { id: { in: targets }, status: { in: ["backlog", "blocked", "todo"] },
-      owner: null, claimedAt: null, v22AssignmentId: null },
+      owner: null, claimedAt: null, v22AssignmentId: null, archivedAt: null },
     data: { status: "cancelled", revision: { increment: 1 }, v4TerminalAt: input.now },
   });
   if (moved.count !== targets.length) throw new BoardImportError("conflict", 409);
