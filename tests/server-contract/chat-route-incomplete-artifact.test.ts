@@ -6,6 +6,9 @@ import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { renderDocumentDocx } from "../../lib/generatedArtifactDocx";
 import { renderPresentationPptx } from "../../lib/generatedArtifactPptx";
+import { renderWorkbook } from "../../lib/generatedArtifactXlsx";
+import { admitWorkbookSpecSafely } from "../../lib/generatedArtifactCore";
+import { canonicalWorkbookSpecFor } from "../../lib/generatedArtifactWorkbookRevision";
 
 /*
   The real `ai`, imported statically rather than through `createRequire`.
@@ -123,7 +126,8 @@ const world = {
   artifactRows: [] as ArtifactRow[],
   messages: [] as Array<{ id: string; status: string; modelId: string }>,
   providerContexts: [] as Array<{ messageId: string }>,
-  uploads: [] as Array<{ id: string; name: string; mediaType: string; size: number; kind: string; objectKey: string }>,
+  uploads: [] as Array<{ id: string; name: string; mediaType: string; size: number; kind: string; objectKey: string;
+    sourceArtifactId?: string | null; sourceLineageId?: string; sourceConversationId?: string; sourceCanonicalSpec?: unknown }>,
   inputObjects: new Map<string, Buffer>(),
 };
 
@@ -1310,6 +1314,7 @@ test(
 const officeRevisionMime = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 };
 const addInputFixture = (id: string, extension: string, bytes: Buffer) => {
   const prefix = `attachments/${createHash("sha256").update("artifact-qa@tomverse.app").digest("hex").slice(0, 20)}/`;
@@ -1385,4 +1390,86 @@ test("GF-13 empty latest Office text stops final answer dispatch with a safe err
     assert.equal(lastStreamTextOptions, null);
     assert.doesNotMatch(result.body, /attachments\//);
   } finally { clearInputFixtures(); }
+});
+
+const workbookRevisionFixture = () => {
+  const admitted = admitWorkbookSpecSafely({ filename: "source.xlsx", worksheets: [
+    { name: "Revenue", title: "Annual revenue", columns: [{ header: "Name", width: 26 },
+      { header: "Amount", type: "number", width: 14, format: "currency_usd" }], rows: [["Blue", 200], ["TAIL_MARKER", 300]] },
+    { name: "Notes", columns: [{ header: "Active" }], rows: [[false], [null], [""]] },
+  ] });
+  assert.ok(admitted.ok);
+  const canonical = canonicalWorkbookSpecFor(admitted.spec);
+  assert.ok(canonical);
+  const reference = addInputFixture("private-input-copy", "xlsx", Buffer.from(renderWorkbook(admitted.spec, "xlsx").bytes));
+  Object.assign(world.uploads.at(-1)!, { name: "source.xlsx", sourceArtifactId: "private-source-artifact", sourceLineageId: "private-source-lineage",
+    sourceConversationId: CONVERSATION_ID, sourceCanonicalSpec: canonical });
+  return { reference, canonical };
+};
+
+test("XLSX revision Send provides the complete canonical workbook through a request-scoped attachment", async () => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+  try {
+    const { reference, canonical } = workbookRevisionFixture();
+    await ask({}, { messages: [{ role: "user", content: "Create a new workbook with the changed amount", attachments: [reference] }] });
+    assert.ok(lastStreamTextOptions);
+    const prompt = JSON.stringify(lastStreamTextOptions!.messages);
+    assert.match(prompt, /TAIL_MARKER/);
+    assert.match(prompt, /currency_usd/);
+    assert.match(JSON.stringify(lastStreamTextOptions!.instructions), /att_1/);
+    assert.doesNotMatch(prompt, /private-source-artifact|private-source-lineage|private-input-copy|attachments\//);
+    const expected = JSON.stringify(canonical.spec);
+    assert.ok(prompt.includes(JSON.stringify(expected).slice(1, -1)), "the full structured workbook must reach the existing attachment fence");
+    assert.equal(world.artifactRows.length, 0, "a text-only answer must not create a fake file card");
+  } finally {
+    clearInputFixtures();
+    if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
+});
+
+test("XLSX revision Send uses the real remaining extraction budget before final provider dispatch", async () => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+  try {
+    const historical = addInputFixture("historical-budget", "txt", Buffer.from("x".repeat(299_990)));
+    const { reference } = workbookRevisionFixture();
+    const result = await ask({}, { autoRoutedTo: MODEL_ID, expectedStatus: 413, messages: [
+      { role: "user", content: "Earlier input", attachments: [historical] },
+      { role: "assistant", content: "Understood" },
+      { role: "user", content: "Create the revised workbook", attachments: [reference] },
+    ] });
+    assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
+    assert.equal(lastStreamTextOptions, null);
+    assert.ok(autoSelectionCalls > 0, "the existing Auto call precedes extraction; it is not zero-cost validation");
+    assert.equal(world.artifactRows.length, 0);
+  } finally {
+    clearInputFixtures();
+    if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
+});
+
+test("XLSX revision Send refuses missing canonical data and copies from another conversation", async () => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+  try {
+    for (const invalid of ["snapshot", "conversation"]) {
+      clearInputFixtures();
+      const { reference } = workbookRevisionFixture();
+      if (invalid === "snapshot") world.uploads.at(-1)!.sourceCanonicalSpec = null;
+      else world.uploads.at(-1)!.sourceConversationId = "another-conversation";
+      const result = await ask({}, { expectedStatus: 400, messages: [
+        { role: "user", content: "Create the revised workbook", attachments: [reference] },
+      ] });
+      assert.equal(JSON.parse(result.body).code, invalid === "snapshot" ? "ATTACHMENT_UNREADABLE" : "ATTACHMENT_NOT_FOUND");
+      assert.equal(lastStreamTextOptions, null);
+      assert.doesNotMatch(result.body, /private-source|attachments\//);
+    }
+  } finally {
+    clearInputFixtures();
+    if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
 });

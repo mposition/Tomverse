@@ -20,7 +20,7 @@ export function generatedArtifactRevisionFormat(input: {
   if (!attachment) return null;
   if (attachment.category === "text" &&
     (output.kind === "text" || ["txt", "md", "csv"].includes(output.id))) return attachment;
-  if (attachment.category === "office" && ["docx", "pptx"].includes(output.id)) return attachment;
+  if (attachment.category === "office" && ["docx", "pptx", "xlsx"].includes(output.id)) return attachment;
   return null;
 }
 

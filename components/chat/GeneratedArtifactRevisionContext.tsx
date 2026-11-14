@@ -42,6 +42,7 @@ export function useGeneratedArtifactRevision(input: {
         const payload = await response.json().catch(() => null) as {
           uploadId?: string; name?: string; mediaType?: string; size?: number;
           kind?: ChatAttachment["kind"]; code?: string;
+          revisionMode?: "workbook" | "workbook-values";
         } | null;
         if (!response.ok) {
           const copy = chatAttachmentErrorCopyKey(payload?.code);
@@ -56,7 +57,11 @@ export function useGeneratedArtifactRevision(input: {
           uploadId: payload.uploadId, name: payload.name, mediaType: payload.mediaType,
           size: payload.size!, kind: payload.kind! };
         const office = artifact.format === "docx" || artifact.format === "pptx";
-        const request = t(office ? "chat.artifactRevisionOfficePrompt" : "chat.artifactRevisionPrompt")
+        const promptKey = artifact.format === "xlsx"
+          ? payload.revisionMode === "workbook-values"
+            ? "chat.artifactRevisionWorkbookValuesPrompt" : "chat.artifactRevisionWorkbookPrompt"
+          : office ? "chat.artifactRevisionOfficePrompt" : "chat.artifactRevisionPrompt";
+        const request = t(promptKey)
           .replaceAll("{filename}", payload.name);
         let appendConflict: "count" | "name" | null = null;
         updateDraft((current) => {

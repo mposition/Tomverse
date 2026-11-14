@@ -182,7 +182,10 @@ import {
     buildGeneratedArtifactToolConfig,
     GeneratedArtifactCollector,
     GENERATED_ARTIFACT_MAX_STEPS,
+    type ArtifactRevisionSource,
 } from "@/lib/generatedArtifactTool";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
+import { parseCanonicalWorkbookSpec } from "@/lib/generatedArtifactWorkbookRevision";
 import { ArtifactToolCallTracker } from "@/lib/generatedArtifactTurnTracker";
 import { ArtifactToolRejectionLog } from "@/lib/generatedArtifactRejectionLog";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
@@ -1080,7 +1083,9 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     const userId = (session?.user as { id?: string } | undefined)?.id;
     if (!session?.user?.email || !userId) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -2879,6 +2884,8 @@ async function handleChatPost(
             string,
             { name: string; mediaType: string; bytes: Uint8Array }
         >();
+        const revisionEnabled = generatedArtifactRevisionEnabled() && Boolean(session?.user?.id && conversationId && assistantMessageId);
+        const revisionSources = new Map<string, ArtifactRevisionSource>();
         if (latestMessageAttachmentCount > MAX_ATTACHMENTS) {
             throw new ChatAccessError(
                 413,
@@ -4357,6 +4364,13 @@ async function handleChatPost(
                   because the prompt needs them; nothing is read twice for this.
                 */
                 if (isLatestMessage) {
+                    if (revisionEnabled && resolved?.sourceLineageId && resolved.sourceConversationId === conversationId) {
+                        revisionSources.set(turnAttachmentHandle(attachmentIndex), {
+                            sourceArtifactId: resolved.sourceArtifactId ?? null,
+                            lineageId: resolved.sourceLineageId,
+                            canonicalSpec: resolved.sourceCanonicalSpec,
+                        });
+                    }
                     turnAttachmentBytes.set(
                         turnAttachmentHandle(attachmentIndex),
                         {
@@ -4376,6 +4390,21 @@ async function handleChatPost(
                 }
 
                 if (format.category !== "archive") {
+                    if (revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) {
+                        const workbook = parseCanonicalWorkbookSpec(resolved.sourceCanonicalSpec);
+                        if (!workbook) throw new ChatAccessError(400, "ATTACHMENT_UNREADABLE",
+                            "The attached workbook revision source cannot be read completely.");
+                        const structured = JSON.stringify(workbook.spec);
+                        totalExtractedCharacters += structured.length;
+                        if (totalExtractedCharacters > MAX_EXTRACTED_ATTACHMENT_CHARACTERS) {
+                            throw new ChatAccessError(413, "ATTACHMENT_TEXT_TOO_LARGE",
+                                "Extracted attachment text exceeds the request limit.");
+                        }
+                        textAttachments.push({ name: attachment.name,
+                            kind: workbook.fidelity === "values" ? "spreadsheet typed value grid (original layout unavailable)" : "spreadsheet specification",
+                            text: structured });
+                        continue;
+                    }
                     await ingestAttachmentFile({
                         format,
                         name: attachment.name,
@@ -5099,6 +5128,8 @@ async function handleChatPost(
                       conversationId: conversationId ?? null,
                       modelId: modelConfig.id,
                       traceId,
+                      revisionEnabled,
+                      revisionSources,
                       noteRejection: (toolCallId, toolName, input, rejectionCode, diagnostics) =>
                           artifactToolRejectionLog?.record(
                               toolCallId,

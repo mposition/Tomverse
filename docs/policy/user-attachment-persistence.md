@@ -213,6 +213,28 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 `generated-ar
 unbound를 함께 수거한다. 사라진 초안이나 실패한 cleanup의 잔여 객체에는 기존
 자동 만료 부재가 그대로 적용된다. 새 TTL이나 대화별 unbound 수거는 추가하지 않는다.
 계정 JSON export는 기존 첨부 메타데이터를 포함하고 파일 bytes는 포함하지 않는다.
+P1의 독립 workbook 명세와 source 관계는 §8.2를 따른다.
+
+### 8.2 독립 workbook 명세와 생성 파일 계보
+
+P1은 upload/attachment에 별도의 `sourceArtifactId`, `sourceLineageId`,
+`sourceConversationId`, `sourceCanonicalSpec`을 보관한다. 이 값은 서버가 생성 파일의
+owner·같은 conversation·unlock·ready와 bytes를 확인한 뒤만 쓴다. 요청자가 선언한
+source metadata는 받지 않으며 기존 `sourceAttachmentId`에 artifact ID를 넣지 않는다.
+bind·질문 복원/resend도 같은 소유자·대화 범위의 실제 사본 명세를 이어 받는다.
+
+`sourceCanonicalSpec`은 제한된 검증된 WorkbookSpec의 독립 내용 사본이다. 원래
+assistant 파일의 명세를 참조만 하는 구조가 아니므로, 원래 모델 이력을 삭제해도 입력
+사본의 내용을 잃지 않는다. source artifact FK는 삭제 시 null이 되고, 독립 사본의 기존
+보관/cleanup 계약은 바뀌지 않는다. unbound upload의 conversation FK 부재도 그대로다.
+
+일반 app attachment DTO는 이 내부 source 명세를 포함하지 않는다. 모델에는 기존
+request-scoped handle과 실제 읽은 입력 내용만 전달한다. 소유자 계정 JSON export에는
+보관 중인 canonical/source 명세 내용과 관계 metadata를 포함하며, 파일 bytes는 포함하지
+않는다. public 공유·대화 TXT·입력 전용 다운로드를 추가하지 않는다.
+
+XLSX의 새 canonical 명세와 기존 파일의 values-only 복원 한계, 실제 parent/group
+관계, Native의 기존 local draft TTL은 `generated-artifacts.md` §18을 따른다.
 
 ## 9. 게스트
 

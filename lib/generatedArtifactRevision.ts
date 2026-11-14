@@ -13,6 +13,7 @@ import { accountAttachmentPrefix, registerFinalizedUpload, type RegisteredUpload
 import { prisma } from "@/lib/prisma";
 import { readOwnR2ObjectBytes, writeR2Object } from "@/lib/r2";
 import { classifyStorageError } from "@/lib/storageObjectErrors";
+import { parseCanonicalWorkbookSpec, prepareGeneratedWorkbookRevision, WorkbookRevisionError, type CanonicalWorkbookSpec } from "@/lib/generatedArtifactWorkbookRevision";
 
 const opaqueId = z.string().trim().min(1).max(64);
 export const generatedArtifactCopySchema = z.object({
@@ -32,6 +33,7 @@ export class GeneratedArtifactRevisionError extends Error {
 const sourceSelect = {
   id: true, conversationId: true, objectKey: true, format: true, filename: true,
   mediaType: true, byteSize: true, status: true,
+  canonicalSpec: true, lineageId: true,
   conversation: { select: { userId: true, password: true } },
 } as const;
 type Input = z.infer<typeof generatedArtifactCopySchema> & {
@@ -57,9 +59,11 @@ async function readSource(db: Db, input: Input) {
   return source;
 }
 
-const asUpload = (row: { id: string; userId: string; objectKey: string; name: string; mediaType: string; size: number; kind: string }, userId: string, ownPrefix: string): RegisteredUpload => {
+const asUpload = (row: { id: string; userId: string; objectKey: string; name: string; mediaType: string; size: number; kind: string; sourceCanonicalSpec?: unknown }, userId: string, ownPrefix: string): RegisteredUpload => {
   if (row.userId !== userId || !row.objectKey.startsWith(ownPrefix)) throw unavailable();
-  return { uploadId: row.id, name: row.name, mediaType: row.mediaType, size: row.size, kind: row.kind === "text" ? "text" : "file" };
+  const canonical = parseCanonicalWorkbookSpec(row.sourceCanonicalSpec);
+  return { uploadId: row.id, name: row.name, mediaType: row.mediaType, size: row.size, kind: row.kind === "text" ? "text" : "file",
+    ...(canonical ? { revisionMode: canonical.fidelity === "values" ? "workbook-values" : "workbook" } as const : {}) };
 };
 
 /**
@@ -85,7 +89,7 @@ export async function copyGeneratedArtifactForRevision(input: Input): Promise<Re
     await tx.$queryRaw`SELECT "id" FROM "Conversation" WHERE "id" = ${input.conversationId} AND "userId" = ${input.userId} FOR SHARE`;
     await tx.$queryRaw`SELECT "id" FROM "MessageArtifact" WHERE "id" = ${input.artifactId} AND "userId" = ${input.userId} FOR SHARE`;
     const current = await readSource(tx, input);
-    if (current.objectKey !== source.objectKey || current.byteSize !== source.byteSize || current.filename !== source.filename || current.format !== source.format || current.mediaType !== source.mediaType) throw unavailable();
+    if (current.objectKey !== source.objectKey || current.byteSize !== source.byteSize || current.filename !== source.filename || current.format !== source.format || current.mediaType !== source.mediaType || current.lineageId !== source.lineageId || JSON.stringify(current.canonicalSpec) !== JSON.stringify(source.canonicalSpec)) throw unavailable();
     return tx.messageAttachmentUpload.findFirst({ where: { id: uploadId, userId: input.userId } });
   };
   const replay = await prisma.$transaction(authorize);
@@ -98,7 +102,16 @@ export async function copyGeneratedArtifactForRevision(input: Input): Promise<Re
     throw new GeneratedArtifactRevisionError("ATTACHMENT_STORAGE_UNAVAILABLE", 503);
   }
   if (bytes.byteLength !== source.byteSize) throw unavailable();
-  const inspected = await validateChatAttachmentUpload({ buffer: bytes, format, scope: "account", maxExtractedCharacters: MAX_EXTRACTED_ATTACHMENT_CHARACTERS });
+  const inspected = await validateChatAttachmentUpload({ buffer: bytes, format, scope: "account",
+    ...(source.format === "xlsx" ? {} : { maxExtractedCharacters: MAX_EXTRACTED_ATTACHMENT_CHARACTERS }) });
+  let canonical: CanonicalWorkbookSpec | undefined;
+  if (source.format === "xlsx") {
+    try { canonical = await prepareGeneratedWorkbookRevision(bytes, source.canonicalSpec, source.filename); }
+    catch (error) {
+      if (error instanceof WorkbookRevisionError) throw new GeneratedArtifactRevisionError(error.code, error.status);
+      throw error;
+    }
+  }
   if (!inspected.bytes.byteLength) throw new ChatAttachmentValidationError("ATTACHMENT_NO_TEXT");
   if (inspected.bytes.byteLength > input.maxBytes) throw new ChatAttachmentValidationError("ATTACHMENT_TOO_LARGE", 413);
   // Quota includes actual attempted writes. A settled replay above performs no I/O
@@ -111,10 +124,14 @@ export async function copyGeneratedArtifactForRevision(input: Input): Promise<Re
     return await prisma.$transaction(async (tx) => {
       const existing = await authorize(tx);
       if (existing) return asUpload(existing, input.userId, ownPrefix);
-      return registerFinalizedUpload({
+      const registered = await registerFinalizedUpload({
         uploadId, userId: input.userId, objectKey: copyKey, ownPrefix, name: source.filename,
         mediaType: inspected.mediaType, size: inspected.bytes.byteLength, kind: attachmentKindForFormat(format),
+        sourceArtifactId: source.id, sourceLineageId: source.lineageId ?? source.id,
+        sourceConversationId: input.conversationId,
+        ...(canonical ? { sourceCanonicalSpec: canonical as unknown as Prisma.InputJsonValue } : {}),
       }, tx);
+      return { ...registered, ...(canonical ? { revisionMode: canonical.fidelity === "values" ? "workbook-values" : "workbook" } as const : {}) };
     });
   } catch (error) {
     // The unique key is still authoritative if a non-helper registrar won it.

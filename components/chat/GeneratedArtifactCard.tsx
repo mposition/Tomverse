@@ -36,6 +36,7 @@ import { saveResponseAsFile } from "@/lib/browserDownload";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { isGeneratedArtifactRevisionSupported } from "@/lib/generatedArtifactRevisionCore";
 import { useArtifactRevisionAction } from "@/components/chat/GeneratedArtifactRevisionContext";
+import { GeneratedArtifactVersions } from "@/components/chat/GeneratedArtifactVersions";
 import {
   localizedProductHref,
   type ChatWorkspaceProduct,
@@ -457,6 +458,9 @@ export function GeneratedArtifactCard({
         describe a generated picture, and silence would hide from a screen
         reader that a preview is on the card at all.
       */}
+      {isReady && revise && !isGuestMode && currentProduct === "chat" && (
+        <GeneratedArtifactVersions artifact={artifact} />
+      )}
       {previewUrl && (
         <div className="w-full @md/artifacts:basis-full">
           {/* eslint-disable-next-line @next/next/no-img-element -- the source is

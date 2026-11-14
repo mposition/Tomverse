@@ -1227,7 +1227,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "MessageArtifact",
     state: "included_filtered",
     withheldReason:
-      "The files an assistant answer produced for the user: name, format, size, which answer and which model made each one. The file bytes themselves are not in this export -- they are binaries in object storage and a JSON file cannot carry them, which is a gap rather than a withholding, and they remain downloadable from the conversation while it exists. Also withheld: the object storage key, which is Tomverse's internal address for the object and grants nothing on its own.",
+      "The files an assistant answer produced for the user: name, format, size, which answer and model made each one, explicit revision edges and any retained validated workbook specification. The file bytes themselves are not in this export -- they are binaries in object storage, which is a gap rather than a withholding, and remain downloadable from the conversation while it exists. The private object storage key is withheld.",
   },
   {
     domain: "messageAttachment",
@@ -1235,7 +1235,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "MessageAttachment",
     state: "included_filtered",
     withheldReason:
-      "The files the user attached to their own messages: name, type, size and which message each belongs to. The file bytes themselves are not in this export -- they are binaries in object storage and a JSON file cannot carry them, which is a gap rather than a withholding, and the person already holds the originals they uploaded. Also withheld: the object storage key, which is Tomverse's internal address for the object and grants nothing on its own.",
+      "The files the user attached to their messages: name, type, size, message, explicit generated-file source metadata and any independent retained workbook snapshot. Inputs may be copied from generated files without a prior download. File bytes remain in private object storage and are not included; the private storage key is withheld.",
   },
   {
     domain: "messageAttachmentUpload",
@@ -1243,7 +1243,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "MessageAttachmentUpload",
     state: "included_filtered",
     withheldReason:
-      "Files the user uploaded in the composer and never sent: name, type, size and when. Withheld for the same reason as above: the bytes are in object storage and the storage key is an internal address. Rows here are usually transient -- an upload becomes a message attachment the moment the message is saved.",
+      "Finalized composer uploads, including generated-file copies: name, type, size, binding time, explicit source metadata and retained workbook snapshots. These rows remain after binding to support retries. File bytes are not included and the private storage key is withheld.",
   },
   {
     domain: "imageGeneration",

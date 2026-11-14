@@ -6,6 +6,7 @@ import { buildChatLocationPrompt, buildChatLocationContext } from "../lib/chatLo
 import { buildChatCurrentDatePrompt } from "../lib/chatCurrentDatePrompt.ts";
 import {
   ARTIFACT_TOOL_DEFINITION_TOKENS,
+  ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS,
 } from "../lib/generatedArtifactToolPolicy.ts";
 import {
   getInputCreditMultiplier,
@@ -29,6 +30,28 @@ const base = {
 
 const build = (overrides = {}) =>
   buildChatTurnSystemBlocks({ ...base, ...overrides });
+
+test("enabled revision schema allowance is identical in quote/send and absent for guest or unpersistable turns", () => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  const now = new Date("2026-11-15T00:00:00Z");
+  try {
+    delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    const normal = build({ now });
+    process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+    const enabled = build({ now });
+    assert.equal(enabled.promptTokens - normal.promptTokens, ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS);
+    assert.equal(build({ now }).promptTokens, enabled.promptTokens);
+    for (const disabled of [{ isAuthenticated: false }, { canPersist: false }, { fileToolsOverride: false }]) {
+      const on = build({ now, ...disabled });
+      delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+      assert.equal(build({ now, ...disabled }).promptTokens, on.promptTokens);
+      process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+    }
+  } finally {
+    if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
+});
 
 test("a chat turn that cannot search carries file, image, location, date, and search blocks", () => {
   const blocks = build();

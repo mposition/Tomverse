@@ -1424,7 +1424,7 @@ run(
   "Running restored question attachment persistence scenarios"
 );
 run(
-  ["--conditions=react-server", "--experimental-test-module-mocks", "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test", "--test-concurrency=1", "tests/integration/generated-artifacts-revision.db.test.ts"],
+  ["--conditions=react-server", "--experimental-test-module-mocks", "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test", "--test-concurrency=1", "tests/integration/generated-artifacts-revision.db.test.ts", "tests/integration/generated-artifacts-lineage.db.test.ts"],
   "Running exact generated artifact input-copy scenarios"
 );
 // The dynamic model catalogue: a refused enable writes nothing, accepted

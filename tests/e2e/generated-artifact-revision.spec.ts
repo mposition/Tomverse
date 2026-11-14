@@ -2,12 +2,10 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { finalizedUploadRegistry, mockAttachmentUpload, mockAuthenticatedApi, openRecentConversation } from "./support/app-fixtures";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
-import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
+import { artifactFormat, type ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 
 const source = (id: string, format = "md"): ChatStreamArtifact => ({
-  id, ordinal: 0, format, filename: `report.${format}`, mediaType: format === "md" ? "text/markdown"
-    : format === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  id, ordinal: 0, format, filename: `report.${format}`, mediaType: artifactFormat(format)?.mediaType ?? "application/octet-stream",
   byteSize: 30, status: "ready", modelId: "gpt-6-luna",
 });
 const cards = (page: Page) => page.getByTestId("generated-artifact-card");
@@ -254,8 +252,8 @@ test("a failed revision response preserves a newer draft and the saved source at
   await expect(page.locator('[data-testid="generated-artifact-card"][data-artifact-status="failed"]')).toHaveCount(0);
 });
 
-test("Office offers text rewriting with its limit and XLSX keeps download only", async ({ page }) => {
-  await open(page, true, ["docx", "xlsx"]);
+test("Office offers text rewriting with its limit and PDF keeps download only", async ({ page }) => {
+  await open(page, true, ["docx", "pdf"]);
   await expect(cards(page).first().getByTestId("generated-artifact-revise")).toBeVisible();
   await expect(cards(page).first().getByTestId("generated-artifact-revision-office-notice")).toContainText("extracted text");
   await expect(cards(page).last().getByTestId("generated-artifact-revise")).toHaveCount(0);
@@ -294,4 +292,107 @@ test("two explicit revision sends keep the original and both new downloadable re
   }
   expect(selected).toEqual(["artifact-0", "revision-1"]);
   await expect(cards(page).first()).toContainText("report.md");
+});
+
+test("real same-name branches paginate, point to their exact parent and prepare the chosen older version @ui-risk", async ({ page }) => {
+  await open(page, true, ["md"]);
+  const version = (id: string, parentArtifactId: string | null, createdAt: string) => ({
+    ...source(id), parentArtifactId, lineageId: "artifact-0", createdAt,
+  });
+  let selected = "";
+  const versionsReads: string[] = [];
+  await page.route("**/api/artifacts/artifact-0/versions**", async route => {
+    versionsReads.push(route.request().url());
+    return route.fulfill({ json: route.request().url().includes("cursor=")
+      ? { artifacts: [version("artifact-0", null, "2026-11-14T00:00:00.000Z")], nextCursor: null }
+      : { artifacts: [version("branch-b", "artifact-0", "2026-11-15T02:00:00.000Z"),
+        version("branch-a", "artifact-0", "2026-11-15T01:00:00.000Z")], nextCursor: "older-page" } });
+  });
+  await page.route("**/api/chat", async route => {
+    if (route.request().method() === "PUT") {
+      selected = route.request().postDataJSON().artifactId;
+      return copied(page, route, selected);
+    }
+    await route.fallback();
+  });
+  await input(page).fill("Keep my current request");
+  await cards(page).first().getByTestId("generated-artifact-versions-toggle").click();
+  const rows = page.getByTestId("generated-artifact-version");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toHaveAttribute("data-parent-artifact-id", "artifact-0");
+  await expect(rows.nth(1)).toHaveAttribute("data-parent-artifact-id", "artifact-0");
+  await cards(page).first().getByRole("button", { name: "Load earlier versions", exact: true }).click();
+  await expect(rows).toHaveCount(3);
+  expect(versionsReads[1]).toContain("cursor=older-page");
+  const branch = rows.nth(1);
+  await branch.getByTestId("generated-artifact-version-parent").click();
+  await expect(rows.nth(2)).toBeFocused();
+  await branch.getByTestId("generated-artifact-version-revise").click();
+  await expect.poll(() => selected).toBe("branch-a");
+  await expect(page.getByTestId("attachment-complete")).toHaveCount(1);
+  await expect(input(page)).toHaveValue(/Create a new file.*\n\nKeep my current request/);
+});
+
+test("a locked version history preserves the draft and never exposes server metadata", async ({ page }) => {
+  await open(page, true, ["md"]);
+  await page.route("**/api/artifacts/artifact-0/versions**", route => route.fulfill({
+    status: 423, json: { code: "CONVERSATION_LOCKED", objectKey: "private/source" },
+  }));
+  await input(page).fill("Unchanged draft");
+  await cards(page).first().getByTestId("generated-artifact-versions-toggle").click();
+  await expect(page.getByTestId("generated-artifact-versions-error")).toContainText("Unlock");
+  await expect(page.getByTestId("generated-artifact-version")).toHaveCount(0);
+  await expect(input(page)).toHaveValue("Unchanged draft");
+  await expect(cards(page).first()).not.toContainText("private/source");
+});
+
+for (const revisionMode of ["workbook", "workbook-values"]) {
+  test(`${revisionMode} XLSX input adds a visible structure-preserving request with the correct layout limitation`, async ({ page }) => {
+    await open(page, true, ["xlsx"]);
+    await page.route("**/api/chat", async route => {
+      if (route.request().method() !== "PUT") return route.fallback();
+      expect(route.request().postDataJSON().artifactId).toBe("artifact-0");
+      const upload = { name: "report.xlsx", mediaType: source("unused", "xlsx").mediaType, size: 30, kind: "file" as const };
+      finalizedUploadRegistry(page).set("opaque-workbook-copy", upload);
+      await route.fulfill({ json: { uploadId: "opaque-workbook-copy", ...upload, revisionMode } });
+    });
+    await input(page).fill("Change the amount to 42");
+    await cards(page).first().getByTestId("generated-artifact-revise").click();
+    await expect(page.getByTestId("attachment-complete")).toContainText("report.xlsx");
+    await expect(input(page)).toHaveValue(/Create a new Excel workbook.*\n\nChange the amount to 42/);
+    const visible = await input(page).inputValue();
+    expect(visible).toContain(revisionMode === "workbook-values"
+      ? "Column widths and display layout may change" : "Preserve the workbook structure and unchanged cells");
+  });
+}
+
+test("ordinary uploads finishing after a prepared revision cannot create a sixth chip @ui-risk", async ({ page }) => {
+  await open(page, true, ["md"]);
+  let sourcePending: Route | null = null;
+  let uploadPending: Route | null = null;
+  const removed: string[] = [];
+  await page.route("**/api/chat", async route => {
+    const method = route.request().method();
+    if (method === "PUT" && route.request().postDataJSON().action === "generated-artifact-copy") {
+      sourcePending = route; return;
+    }
+    if (method === "PATCH" && !uploadPending) { uploadPending = route; return; }
+    if (method === "DELETE") removed.push(route.request().postDataJSON().uploadId);
+    await route.fallback();
+  });
+  await input(page).fill("Keep this request");
+  await cards(page).first().getByTestId("generated-artifact-revise").click();
+  await expect.poll(() => sourcePending !== null).toBe(true);
+  await page.locator('input[type="file"]').first().setInputFiles(Array.from({ length: 5 }, (_, i) => ({
+    name: `late-${i}.txt`, mimeType: "text/plain", buffer: Buffer.from(`Late file ${i}`),
+  })));
+  await expect.poll(() => uploadPending !== null).toBe(true);
+  await copied(page, sourcePending!, "artifact-0");
+  await uploadPending!.fallback();
+  await expect.poll(() => removed.length).toBe(1);
+  await expect(page.getByTestId("attachment-complete")).toHaveCount(5);
+  await expect(page.getByTestId("attachment-complete").filter({ hasText: "report.md" })).toHaveCount(1);
+  await expect(page.getByTestId("attachment-complete").filter({ hasText: "late-4.txt" })).toHaveCount(0);
+  expect(removed[0]).not.toBe(opaqueCopyId(page, "artifact-0"));
+  await expect(input(page)).toHaveValue(/Create a new file.*\n\nKeep this request/);
 });

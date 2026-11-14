@@ -204,3 +204,10 @@ export function nativeParityBearerRoute(path: string, method: string, enabled = 
   if (/^\/api\/images\/groups\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";
   return false;
 }
+
+/** File revision additions remain independently default-off within Native parity. */
+export function nativeArtifactRevisionBearerRoute(path: string, method: string, enabled = false): boolean {
+  if (!enabled) return false;
+  if (path === "/api/chat") return method === "DELETE";
+  return method === "GET" && /^\/api\/artifacts\/[A-Za-z0-9_-]{1,64}\/versions$/.test(path);
+}

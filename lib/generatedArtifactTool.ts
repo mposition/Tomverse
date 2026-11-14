@@ -48,6 +48,8 @@ import {
   sanitizeArtifactFilename,
   textFileSpecSchema,
   workbookSpecSchema,
+  workbookRevisionToolSchema,
+  artifactRevisionOfSchema,
   type ArtifactAdmission,
   type ArtifactFailureCode,
   type ArchiveSpec,
@@ -76,6 +78,8 @@ import { PdfGenerationError } from "@/lib/generatedArtifactPdf";
 import { TextContentError } from "@/lib/generatedArtifactText";
 import { prepareFileConversion } from "@/lib/fileConversion";
 import { resolveDocumentImages } from "@/lib/documentImages";
+import { canonicalWorkbookSpecFor, parseCanonicalWorkbookSpec, reviseCanonicalWorkbook,
+  type CanonicalWorkbookSpec } from "@/lib/generatedArtifactWorkbookRevision";
 import {
   FILE_CONVERSION_LIMITS,
   FileConversionError,
@@ -422,6 +426,8 @@ export type GeneratedArtifactCollectorOptions = {
   /** Reported per artifact so a comparison turn attributes each file correctly. */
   modelId: string;
   traceId: string;
+  revisionEnabled?: boolean;
+  revisionSources?: ReadonlyMap<string, ArtifactRevisionSource>;
   /**
    * Announces that generation has started, as an out-of-band stream chunk.
    *
@@ -466,6 +472,13 @@ export type GeneratedArtifactCollectorOptions = {
   ) => void;
 };
 
+/** Server-only receipt for a source attached to the latest turn. */
+export type ArtifactRevisionSource = {
+  sourceArtifactId: string | null;
+  lineageId: string;
+  canonicalSpec: unknown;
+};
+
 /**
  * Everything one turn's tool calls produced.
  *
@@ -505,6 +518,8 @@ export class GeneratedArtifactCollector {
   constructor(private readonly options: GeneratedArtifactCollectorOptions) {
     this.modelId = options.modelId;
   }
+
+  get revisionEnabled(): boolean { return this.options.revisionEnabled === true; }
 
   /** Called when a fallback swapped the model that is answering. */
   setModelId(modelId: string) {
@@ -562,6 +577,8 @@ export class GeneratedArtifactCollector {
           mediaType: artifact.mediaType,
           byteSize: artifact.byteSize,
           status: "ready",
+          ...(artifact.parentArtifactId !== undefined ? { parentArtifactId: artifact.parentArtifactId } : {}),
+          ...(artifact.lineageId ? { lineageId: artifact.lineageId } : {}),
           ...(artifact.modelId ? { modelId: artifact.modelId } : {}),
         })
       ),
@@ -839,7 +856,41 @@ export class GeneratedArtifactCollector {
       };
     }
 
-    const admission = handler.admit(rawInput);
+    let admittedInput = rawInput;
+    let revisionSource: ArtifactRevisionSource | undefined;
+    let revisionRejection: string | null = null;
+    if (this.revisionEnabled && rawInput && typeof rawInput === "object") {
+      const raw = rawInput as Record<string, unknown>;
+      if (raw.revisionOf !== undefined || raw.cellUpdates !== undefined) {
+        const handle = artifactRevisionOfSchema.safeParse(raw.revisionOf);
+        if (!handle.success || !this.options.turnAttachments?.has(handle.data)) {
+          revisionRejection = "A revision must name a readable source attached to this turn by its att_1 handle.";
+        } else {
+          revisionSource = this.options.revisionSources?.get(handle.data);
+          if (!revisionSource) revisionRejection = "The named attachment is not a generated-file revision source in this conversation.";
+          else {
+            const { revisionOf: _source, ...withoutSource } = raw;
+            void _source;
+            admittedInput = withoutSource;
+            const workbook = parseCanonicalWorkbookSpec(revisionSource.canonicalSpec);
+            if (kind === "spreadsheet" && workbook) {
+              const parsed = workbookRevisionToolSchema.safeParse(raw);
+              if (!parsed.success || !parsed.data.cellUpdates || parsed.data.worksheets !== undefined || parsed.data.format !== "xlsx") {
+                revisionRejection = "For an XLSX revision, omit worksheets and provide revisionOf plus only the changed data cells in cellUpdates.";
+              } else {
+                try { admittedInput = reviseCanonicalWorkbook(workbook, parsed.data.filename, parsed.data.cellUpdates); }
+                catch { revisionRejection = "Cell updates must name distinct existing data cells in the attached workbook; the source was not changed."; }
+              }
+            } else if (raw.cellUpdates !== undefined) {
+              revisionRejection = "Cell updates require an attached XLSX source with a supported workbook specification.";
+            }
+          }
+        }
+      }
+    }
+    const admission: ArtifactAdmission<ArtifactSpec> = revisionRejection
+      ? { ok: false, code: "SCHEMA_INVALID", detail: revisionRejection }
+      : handler.admit(admittedInput);
     if (!admission.ok) {
       const format = this.failureFormat(kind, rawInput);
       const rejectionCode =
@@ -877,7 +928,8 @@ export class GeneratedArtifactCollector {
     // two calls that differ only in a character the sanitiser removes are one
     // file rather than two.
     const specHash = createHash("sha256")
-      .update(JSON.stringify({ kind, ...spec, filename }))
+      .update(JSON.stringify({ kind, ...spec, filename,
+        ...(revisionSource ? { revision: [revisionSource.lineageId, revisionSource.sourceArtifactId] } : {}) }))
       .digest("hex");
 
     const already = this.seenSpecHashes.get(specHash);
@@ -923,6 +975,10 @@ export class GeneratedArtifactCollector {
       format,
       filename,
       specHash,
+      ...(revisionSource ? { parentArtifactId: revisionSource.sourceArtifactId, lineageId: revisionSource.lineageId } : {}),
+      ...(this.revisionEnabled && kind === "spreadsheet" && format === "xlsx"
+        ? { canonicalSpec: canonicalWorkbookSpecFor({ ...(spec as WorkbookSpec), filename },
+          parseCanonicalWorkbookSpec(revisionSource?.canonicalSpec)?.fidelity) ?? undefined } : {}),
       ...(placesPictures ? { maxBytes: ARTIFACT_LIMITS.maxConvertedOutputBytes } : {}),
       render: placesPictures
         ? async () =>
@@ -1374,6 +1430,9 @@ export class GeneratedArtifactCollector {
     createdNote?: string;
     /** The storage ceiling, when it is not the authoring one. Conversions only. */
     maxBytes?: number;
+    canonicalSpec?: CanonicalWorkbookSpec;
+    parentArtifactId?: string | null;
+    lineageId?: string;
   }): Promise<ArtifactToolReport> {
     const { kind, format, filename, specHash } = job;
 
@@ -1417,6 +1476,9 @@ export class GeneratedArtifactCollector {
         bytes: rendered.bytes,
         modelId: this.modelId,
         ...(job.maxBytes !== undefined ? { maxBytes: job.maxBytes } : {}),
+        ...(job.canonicalSpec ? { canonicalSpec: job.canonicalSpec } : {}),
+        ...(job.parentArtifactId !== undefined ? { parentArtifactId: job.parentArtifactId } : {}),
+        ...(job.lineageId ? { lineageId: job.lineageId } : {}),
       });
     } catch (error) {
       this.recordFailure(filename, format, "storage_failed", specHash);
@@ -1546,17 +1608,26 @@ export const buildGeneratedArtifactToolConfig = (
   } = {}
 ): { tools: ToolSet } => ({
   tools: {
-    [ARTIFACT_TOOL_NAMES.spreadsheet]: tool({
-      description: HANDLERS.spreadsheet.description,
-      inputSchema: workbookSpecSchema,
-      execute: async (input, { toolCallId }) => {
-        noteExecutionStarted?.(toolCallId);
-        return collector.run("spreadsheet", input, toolCallId);
-      },
-    }),
+    [ARTIFACT_TOOL_NAMES.spreadsheet]: collector.revisionEnabled
+      ? tool({
+          description: HANDLERS.spreadsheet.description,
+          inputSchema: workbookRevisionToolSchema,
+          execute: async (input, { toolCallId }) => {
+            noteExecutionStarted?.(toolCallId);
+            return collector.run("spreadsheet", input, toolCallId);
+          },
+        })
+      : tool({
+          description: HANDLERS.spreadsheet.description,
+          inputSchema: workbookSpecSchema,
+          execute: async (input, { toolCallId }) => {
+            noteExecutionStarted?.(toolCallId);
+            return collector.run("spreadsheet", input, toolCallId);
+          },
+        }),
     [ARTIFACT_TOOL_NAMES.document]: tool({
       description: HANDLERS.document.description,
-      inputSchema: documentSpecSchema,
+      inputSchema: collector.revisionEnabled ? documentSpecSchema.extend({ revisionOf: artifactRevisionOfSchema.optional() }) : documentSpecSchema,
       execute: async (input, { toolCallId }) => {
         noteExecutionStarted?.(toolCallId);
         return collector.run("document", input, toolCallId);
@@ -1564,7 +1635,7 @@ export const buildGeneratedArtifactToolConfig = (
     }),
     [ARTIFACT_TOOL_NAMES.presentation]: tool({
       description: HANDLERS.presentation.description,
-      inputSchema: presentationSpecSchema,
+      inputSchema: collector.revisionEnabled ? presentationSpecSchema.extend({ revisionOf: artifactRevisionOfSchema.optional() }) : presentationSpecSchema,
       execute: async (input, { toolCallId }) => {
         noteExecutionStarted?.(toolCallId);
         return collector.run("presentation", input, toolCallId);
@@ -1572,7 +1643,7 @@ export const buildGeneratedArtifactToolConfig = (
     }),
     [ARTIFACT_TOOL_NAMES.text]: tool({
       description: HANDLERS.text.description,
-      inputSchema: textFileSpecSchema,
+      inputSchema: collector.revisionEnabled ? textFileSpecSchema.extend({ revisionOf: artifactRevisionOfSchema.optional() }) : textFileSpecSchema,
       execute: async (input, { toolCallId }) => {
         noteExecutionStarted?.(toolCallId);
         return collector.run("text", input, toolCallId);
@@ -1580,7 +1651,7 @@ export const buildGeneratedArtifactToolConfig = (
     }),
     [ARTIFACT_TOOL_NAMES.archive]: tool({
       description: HANDLERS.archive.description,
-      inputSchema: archiveSpecSchema,
+      inputSchema: collector.revisionEnabled ? archiveSpecSchema.extend({ revisionOf: artifactRevisionOfSchema.optional() }) : archiveSpecSchema,
       execute: async (input, { toolCallId }) => {
         noteExecutionStarted?.(toolCallId);
         return collector.run("archive", input, toolCallId);
