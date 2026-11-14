@@ -169,7 +169,8 @@ test("a DM run that ended unavailable is an operational incident naming only ins
 test("Korean access terms name a grant or change, not a plan's entitlement", () => {
   // AMUX-PRICINGCOPY-002's context: a plan list that tells the tiers apart is not an access change.
   assert.deepEqual(irreversibleTermCategories("플랜별 목록은 Free·Pro·Max 권한을 구분합니다."), []);
-  assert.deepEqual(irreversibleTermCategories("Pro 플랜 권한에 이미지 생성이 있나요?"), []);
+  // A question about a plan's entitlement is not the narrow description exception: it still goes to the operator.
+  assert.deepEqual(irreversibleTermCategories("Pro 플랜 권한에 이미지 생성이 있나요?"), ["access"]);
   assert.deepEqual(irreversibleTermCategories("플랜 권한에 따라 문구가 다릅니다"), []);
   // The card that went to the operator on 2026-11-14, question and worker context as filed.
   assert.deepEqual(irreversibleTermCategories([
@@ -189,6 +190,10 @@ test("Korean access terms name a grant or change, not a plan's entitlement", () 
     "권한 문제로 실패했습니다", "Pro 플랜 권한을 올릴까요?", "Max 권한을 Free에도 줄까요?",
     // Independent review r-20261114-141720-0ec475: the verb before the word, in the same sentence.
     "봇에게 부여할 것은 Pro 권한입니다.", "봇에게 줄 것은 Max 권한입니다.",
+    // Independent review r-20261114-141903-1bbe85: a change verb no list named. The exception now needs a
+    // describing word right after "권한" in a sentence that is not a request.
+    "봇 계정에 Pro 권한을 활성화할까요?", "이 계정의 Max 권한을 비활성화할까요?", "Pro 권한을 비교한 뒤 켜도 될까요?",
+    "Pro 권한을 구분해서 넣을까요?", "Max 권한으로 실행합니다.",
   ]) {
     assert.deepEqual(irreversibleTermCategories(text), ["access"], text);
   }

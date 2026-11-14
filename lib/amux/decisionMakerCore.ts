@@ -154,21 +154,36 @@ export const DM_ESCALATION_MAX_BYTES = 1024;
  * so the list errs wide. Changing it is a policy version change.
  */
 const PLAN_NAME_BEFORE = /(?:free|pro|max|guest|plus|team|플랜|요금제|구독|등급)\s*(?:별\s*)?$/i;
-/** Stems of granting, changing, raising or taking away; wide on purpose ("줄" also hits "줄이다"). */
+/** What may follow "권한" in a plan description: telling the tiers apart, nothing else. */
+const PLAN_DESCRIPTION_AFTER = /^\s*(?:을|를|이|가|은|는|의|에)?\s*(?:구분|비교|차이|따라|따른|설명|안내|표시)/;
+/** A request or question, whatever its verb. */
+const REQUEST_FORM = /까요|까\s|할지|될지|해도|하면|하시겠|주세요|해\s*주|합시다|하자|드릴/;
+/** Stems of granting, changing, switching or taking away; wide on purpose ("줄" also hits "줄이다"). */
 const ACCESS_CHANGE_STEM =
-  /주|줘|줄|준|부여|변경|바꾸|바꿔|바꿀|바뀌|수정|설정|추가|삭제|제거|회수|열|올리|올려|올릴|높|낮|상승|승격|격상|허용|받|얻|요청|필요|빼|넓|확대|축소|위임|할당|박탈|해제|풀|없애/;
+  /주|줘|줄|준|부여|변경|바꾸|바꿔|바꿀|바뀌|수정|설정|추가|삭제|제거|회수|열|올리|올려|올릴|높|낮|상승|승격|격상|허용|받|얻|요청|필요|빼|넓|확대|축소|위임|할당|박탈|해제|풀|없애|활성|비활성|켜|켤|끄|꺼|끌|적용|전환|승인|부활|복구|차단|제한/;
 
-/** Whether a text's Korean "권한" names access: every one does except a plan's entitlement (see the access entry). */
+/**
+ * Whether a text's Korean "권한" names access. Every one does, except a
+ * declarative sentence that describes plans: "권한" right after a plan name,
+ * followed by a describing word (구분·비교·차이·따라·설명·안내·표시), not a
+ * request or question, with no changing verb anywhere in the sentence
+ * ("플랜별 목록은 Free·Pro·Max 권한을 구분합니다."). The exception is narrow on
+ * purpose: four independent review rounds each found an access change that a
+ * list of change verbs alone let through.
+ */
 export function koreanAccessTermHit(text: string): boolean {
   for (let at = text.indexOf("권한"); at !== -1; at = text.indexOf("권한", at + 2)) {
     const before = text.slice(Math.max(0, at - 16), at);
-    // The whole sentence, before the word as well as after it ("봇에게 부여할 것은 Pro 권한입니다").
     const head = text.slice(0, at);
     const start = Math.max(...[".", "?", "!", "\n", "。"].map((mark) => head.lastIndexOf(mark))) + 1;
     const rest = text.slice(at + 2);
     const end = rest.search(/[.?!\n。]/);
-    const sentence = text.slice(start, at) + (end === -1 ? rest : rest.slice(0, end));
-    if (!PLAN_NAME_BEFORE.test(before) || ACCESS_CHANGE_STEM.test(sentence)) return true;
+    const after = end === -1 ? rest : rest.slice(0, end);
+    const sentence = text.slice(start, at) + after;
+    const question = end !== -1 && rest[end] === "?";
+    const planDescription = PLAN_NAME_BEFORE.test(before) && PLAN_DESCRIPTION_AFTER.test(after) &&
+      !question && !REQUEST_FORM.test(sentence) && !ACCESS_CHANGE_STEM.test(sentence);
+    if (!planDescription) return true;
   }
   return false;
 }
