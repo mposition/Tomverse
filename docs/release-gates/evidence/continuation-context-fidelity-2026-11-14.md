@@ -216,3 +216,10 @@ provider hold and budget; it does not change a provider, ceiling, credit price, 
 ownership/lock/continuation gate, persistence rule or final-model admission contract.
 This coding session still runs no live/production model evaluation and changes no
 operational setting, merge or deployment. CI remains held with `ci:hold`.
+
+Validation for this default change: `npm run test:continuation-fidelity` passed 48 pure
+cases and 162 mocked server cases. Root TypeScript and focused ESLint passed. Independent
+review `r-20261114-130127-c6a8a4` accepted `f70b3547b`: Claude and Antigravity both accepted
+with no findings. No live model or additional build/device claim is made for this flag-only
+follow-up. Upstream develop's subsequent marketing-generator change has no overlap with
+these continuation files.
