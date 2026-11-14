@@ -10,6 +10,7 @@ import {
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import { parseDmDeliveryCursor } from "@/lib/amux/decisionMakerDeliveryCore";
+import { recordAmuxDmRelaySync } from "@/lib/amux/dmRelayHeartbeat";
 import {
   dmInternalRoutesEnabled,
   dmRouteErrorResponse,
@@ -90,6 +91,9 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
+  // The relay's last call, before the switch: the monitor's silence alert
+  // (lib/amux/dmRelayHeartbeatCore.ts) reads it. Never throws.
+  await recordAmuxDmRelaySync();
   if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
 
   return withAmuxRouteBudget(async () => {

@@ -1,0 +1,161 @@
+#!/bin/bash
+# Restarts the AMUX Decision Maker relay when it halted on a read that wrote
+# nothing.
+#
+# docs/ops/amux/bridge-monitoring.md §6 is the runbook. Off until the operator
+# installs it (install.sh beside this file); a systemd timer then runs it every
+# two minutes.
+#
+# The relay (tomverse-amux-dm-relay.service, apps/tomverse-orchestrator/src/
+# dm_relay/) does not exit when it halts. It prints one line,
+#
+#   amux dm relay halt: <cause>; ... until the bridge restarts. Read the request in Admin first.
+#
+# and stays active doing nothing but releasing local markers, so systemd's own
+# Restart=on-failure never sees it. A process halts at most once: a halted
+# relay's tick returns before any step that could halt. Every cause but two is
+# a write whose answer was lost, refused or unreadable (assignment, transmit
+# intent and outcome, result-unknown record, discard, cleanup report, delivery
+# decision, pause, not-sent and card records), and a person reads the request
+# in Admin before the relay runs again. The two restarted here are reads:
+#
+#   cause=unsettled_read_unreadable   the start-of-process read of decisions a
+#                                     stopped relay left unsettled
+#   cause=delivery_read_unreadable    the read of the next confirmed answer
+#
+# Each is the first step of its walk and returns before anything is written, so
+# the halted process holds nothing a new one does not rebuild at its start:
+# leftover markers are listed and released, unsettled decisions settled from
+# the local records, cursors started again.
+#
+# A run restarts only when
+#
+#   - the unit is active and its current run printed exactly one halt line,
+#     with an approved cause;
+#   - every line after the halt line is the v22 question summary the halting
+#     tick may still print (that sync is idempotent by its own keys and never
+#     halts);
+#   - this script restarted nothing in the last hour: an app answering in a
+#     shape the relay cannot read halts every new process, and the second halt
+#     stays halted, so the app's own silence alert (AMUX_DM_RELAY_SILENT) pages
+#     instead of being fed by a restart every two minutes;
+#   - the local AMUX server and the Tomverse app answer;
+#   - the unit's run is still the one judged, right before the restart.
+#
+# A relay that exited is systemd's: Restart=on-failure restarts a crash, and
+# exit 2 (enabled without a usable token) waits for a person.
+#
+# Runs as its own system account. A polkit rule installed with it lets that
+# account restart this one unit and nothing else; it reads the journal through
+# the systemd-journal group the unit grants it.
+set -euo pipefail
+
+unit=tomverse-amux-dm-relay.service
+self=tomverse-dm-relay-autorestart.service
+amux_health=https://127.0.0.1:8824/health
+app_health=https://tomverse.app/api/health
+
+log() { echo "tomverse-dm-relay-autorestart: $*"; }
+
+# As apps/tomverse-orchestrator/src/dm_relay/io.rs prints them.
+halt_line='^amux dm relay halt: ([a-z0-9_]+); .* until the bridge restarts\. Read the request in Admin first\.$'
+after_halt='^amux dm relay: v22 questions: resolved (true|false), filed [0-9]+, closed [0-9]+$'
+restarted_line='; restarted$'
+
+approved() {
+  [[ "$1" == unsettled_read_unreadable || "$1" == delivery_read_unreadable ]]
+}
+
+# Prints "restart <cause>", "hold <reason>" or "running" for the relay's lines.
+decide() {
+  local lines=$1 cause="" halts=0 line
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if [[ "$line" =~ $halt_line ]]; then
+      cause=${BASH_REMATCH[1]}
+      halts=$((halts + 1))
+      continue
+    fi
+    if ((halts > 0)) && [[ ! "$line" =~ $after_halt ]]; then
+      echo "hold an unrecognised line after the halt: ${line:0:160}"
+      return
+    fi
+  done <<<"$lines"
+  if ((halts == 0)); then
+    echo running
+  elif ((halts != 1)); then
+    echo "hold $halts halt lines in one run"
+  elif ! approved "$cause"; then
+    echo "hold cause=$cause is not restarted automatically"
+  else
+    echo "restart $cause"
+  fi
+}
+
+answers() {
+  curl --silent --show-error --fail --max-time 5 --output /dev/null "$@" 2>/dev/null
+}
+
+# "<ActiveState> <SubState> <InvocationID>" of the relay's current run.
+current_run() {
+  printf '%s %s %s' \
+    "$(systemctl show -p ActiveState --value "$unit" 2>/dev/null || true)" \
+    "$(systemctl show -p SubState --value "$unit" 2>/dev/null || true)" \
+    "$(systemctl show -p InvocationID --value "$unit" 2>/dev/null || true)"
+}
+
+read -r state sub invocation <<<"$(current_run)"
+# Not running: stopped by a person, off, or failed and left to systemd.
+[[ "$state" == active && "$sub" == running ]] || exit 0
+if [[ ! "$invocation" =~ ^[0-9a-f]{32}$ ]]; then
+  log "$unit is running but its run is unreadable (no invocation id); left alone"
+  exit 0
+fi
+
+if ! lines=$(journalctl "_SYSTEMD_INVOCATION_ID=$invocation" --no-pager -q -o cat 2>/dev/null); then
+  log "$unit's journal is unreadable; left alone"
+  exit 0
+fi
+read -r verdict reason <<<"$(decide "$lines")"
+case "$verdict" in
+  running) exit 0 ;;
+  hold)
+    log "$unit halted; $reason, left halted"
+    exit 0
+    ;;
+esac
+cause=$reason
+
+# This script's own journal says whether it restarted the relay in the last
+# hour. Unreadable is not "no": the relay is left halted.
+if ! recent=$(journalctl -u "$self" --since=-60min --no-pager -q -o cat 2>/dev/null); then
+  log "$unit halted with cause=$cause; this unit's own journal is unreadable, left halted"
+  exit 0
+fi
+if grep -qE "$restarted_line" <<<"$recent"; then
+  log "$unit halted with cause=$cause again within an hour of a restart; left halted"
+  exit 0
+fi
+
+# The local AMUX server's certificate is self-signed; the relay unit's start
+# check reads it the same way.
+if ! answers --insecure "$amux_health"; then
+  log "$unit halted; the local AMUX server does not answer, no restart this run"
+  exit 0
+fi
+if ! answers --proto '=https' "$app_health"; then
+  log "$unit halted; the Tomverse app does not answer, no restart this run"
+  exit 0
+fi
+
+# Read again right before the restart: a person may have restarted or stopped
+# the unit while this run was checking, and the new run is not the one judged.
+if [[ "$(current_run)" != "active running $invocation" ]]; then
+  log "$unit changed while it was being checked; left alone"
+  exit 0
+fi
+if systemctl restart --no-block "$unit"; then
+  log "$unit halted with cause=$cause; restarted"
+else
+  log "$unit halted with cause=$cause; the restart was refused" >&2
+fi

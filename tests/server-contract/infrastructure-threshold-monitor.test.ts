@@ -59,6 +59,9 @@ type World = {
   bridgeQueryError: Error | null;
   /** What the dependency reporter answers; by default, whether it was unhealthy. */
   bridgeNotified: boolean | null;
+  /** The Decision Maker relay's last recorded call; null when none was. */
+  relayLastSyncAt: Date | null;
+  relayReadError: Error | null;
   dependencyReports: DependencyReport[];
   incidents: Incident[];
   completedResults: unknown[];
@@ -76,6 +79,8 @@ const world: World = {
   otherLeases: [],
   bridgeQueryError: null,
   bridgeNotified: null,
+  relayLastSyncAt: null,
+  relayReadError: null,
   dependencyReports: [],
   incidents: [],
   completedResults: [],
@@ -93,6 +98,9 @@ const resetWorld = () => {
   world.otherLeases = [];
   world.bridgeQueryError = null;
   world.bridgeNotified = null;
+  world.relayLastSyncAt = null;
+  world.relayReadError = null;
+  delete process.env.TOMVERSE_AMUX_DM_ROUTING;
   world.dependencyReports = [];
   world.incidents = [];
   world.completedResults = [];
@@ -166,6 +174,15 @@ const loadMonitor = () => {
         },
       },
     });
+    mock.module(mod("lib/amux/dmRelayHeartbeat.ts"), {
+      namedExports: {
+        readAmuxDmRelayLastSyncAt: async () => {
+          if (world.relayReadError) throw world.relayReadError;
+          return world.relayLastSyncAt;
+        },
+        recordAmuxDmRelaySync: async () => {},
+      },
+    });
     mock.module(mod("lib/infrastructureMonitoring.ts"), {
       namedExports: {
         getInfrastructureDashboard: async () => {
@@ -235,6 +252,7 @@ test("PROJECTED_BALANCE_LOW alone reports no incident but stays observable", asy
       },
       silentPublisherRuns: 0,
       amuxBridge: "unwatched",
+      amuxDmRelay: "off",
     },
   ]);
 });
@@ -736,4 +754,106 @@ test("names that cannot be printed are replaced in the alert, not in the compari
   assert.equal(last.context?.lostWorkers, "unnamed-runtime, unnamed-runtime");
   assert.doesNotMatch(String(last.error), /<!here>/);
   assert.doesNotMatch(JSON.stringify(last.context), /<!here>/);
+});
+
+// The AMUX Decision Maker relay watch (docs/ops/amux/bridge-monitoring.md §6).
+// The relay calls the v22 question sync route every 30 seconds while it is not
+// halted; the route records the call, and the monitor pages when the record is
+// older than five minutes -- only while TOMVERSE_AMUX_DM_ROUTING is enabled.
+
+test("a relay silent past five minutes pages while DM routing is enabled", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
+  const lastSyncAt = minutesAgo(12);
+  world.relayLastSyncAt = lastSyncAt;
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
+  const relay = world.dependencyReports.find((report) => report.dependency === "amux-dm-relay");
+  assert.equal(relay?.healthy, false);
+  assert.equal(relay?.code, "AMUX_DM_RELAY_SILENT");
+  assert.equal(relay?.context?.lastSyncAt, lastSyncAt.toISOString());
+  assert.equal(relay?.context?.minutesSilent, "12");
+  assert.match(String(relay?.error), /has not called the app since .* \(12 minutes\)/);
+  assert.match(String(relay?.error), /tomverse-amux-dm-relay\.service's journal/);
+  assert.equal(
+    (world.completedResults.at(-1) as { amuxDmRelay: string }).amuxDmRelay,
+    "silent"
+  );
+});
+
+test("a relay that never called pages too", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
+  const relay = world.dependencyReports.find((report) => report.dependency === "amux-dm-relay");
+  assert.equal(relay?.healthy, false);
+  assert.equal(relay?.context?.lastSyncAt, "never");
+  assert.match(String(relay?.error), /since this check started recording/);
+});
+
+test("a relay that called within five minutes is healthy and pages nothing", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
+  world.relayLastSyncAt = minutesAgo(4);
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 0, advisories: 0 });
+  const relay = world.dependencyReports.find((report) => report.dependency === "amux-dm-relay");
+  assert.equal(relay?.healthy, true);
+  assert.deepEqual(world.incidents, []);
+});
+
+test("with DM routing off the relay is not watched, however long it is silent", async () => {
+  for (const value of [undefined, "disabled", "true", "Enabled"]) {
+    resetWorld();
+    const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+    world.dashboard = dashboard();
+    if (value !== undefined) process.env.TOMVERSE_AMUX_DM_ROUTING = value;
+    world.relayLastSyncAt = minutesAgo(600);
+
+    const result = await monitorInfrastructureThresholdsIfDue();
+
+    assert.deepEqual(result, { checked: true, alerts: 0, advisories: 0 }, String(value));
+    assert.equal(
+      world.dependencyReports.some((report) => report.dependency === "amux-dm-relay"),
+      false
+    );
+    assert.equal(
+      (world.completedResults.at(-1) as { amuxDmRelay: string }).amuxDmRelay,
+      "off"
+    );
+  }
+});
+
+test("a relay check that cannot read records null and pages on its own behalf", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
+  world.relayReadError = new Error("relation is busy");
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 1, advisories: 0 });
+  assert.equal(
+    world.incidents.some((entry) => entry.code === "AMUX_DM_RELAY_CHECK_FAILED"),
+    true
+  );
+  assert.equal(
+    (world.completedResults.at(-1) as { amuxDmRelay: string | null }).amuxDmRelay,
+    null
+  );
+  assert.equal(world.failedRuns, 0);
 });
