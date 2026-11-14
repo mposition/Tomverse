@@ -348,7 +348,7 @@ export const ENGINEERING_AGENT_SERVICES: readonly AgentRunnerService[] = [
     service: "Engineering Agent Publisher",
     image: {
       reference: ENGINEERING_AGENT_IMAGE,
-      digest: "sha256:995e2278d48e7ad1419457a46d194debe6287853f743156442b9221e038dc798",
+      digest: "sha256:40af2b3b937ca9a12012dedeb299cd0b0a54ffdfa98f440d078e82a6b71344ca",
     },
     startCommand: "node --experimental-strip-types scripts/engineering-agent-publisher.mjs",
     cronSchedule: "*/10 * * * *",
