@@ -1,11 +1,16 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import { readAmuxPortfolioClock } from "./portfolioClock.ts";
 
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog, writeSystemAuditLog } from
+  "@/lib/adminAudit";
+import { AMUX_PORTFOLIO_SCORE_REFRESH_ACTION,
+  AMUX_PORTFOLIO_SCORER_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
@@ -13,7 +18,8 @@ import { amuxPortfolioOwnerId, AmuxPortfolioError,
   amuxV4PortfolioWriteEnabled, AMUX_V4_PORTFOLIO_WRITE_ENV } from
   "./portfolioAssessmentService.ts";
 import { amuxContentDigest, type AmuxDigestKey } from "./ideaCrypto.ts";
-import { scoreAmuxPortfolio } from "./portfolioScoreCore.ts";
+import { amuxRefreshedActiveStaleAt, AMUX_SCORE_REFRESH_LEAD_MS,
+  amuxScoreAuditActionBinds, scoreAmuxPortfolio } from "./portfolioScoreCore.ts";
 import type { AmuxPortfolioScorePayload } from "./portfolioScoreSchemas.ts";
 import { amuxRegistrationAuthorityActor,
   amuxRegistrationAuthorityKind,
@@ -254,6 +260,184 @@ export async function confirmAmuxPortfolioScore(
   return commitAmuxPortfolioScore(input);
 }
 
+export type AmuxScoreRefreshOutcome =
+  | { state: "refreshed"; taskId: string; scoreId: string;
+      activeStaleAt: string }
+  | { state: "skipped"; taskId: string; reason: "not_found" | "no_score" |
+      "not_due" | "score_unbound" | "input_changed" | "not_ready" };
+
+/** Owner decision 2026-11-14. Inside the caller's transaction, extend the
+ * active window of one Task's newest score when every input it was confirmed
+ * on is still the latest: the same Task revision and source approval, the
+ * same five assessments and the same calculation. Anything that changed goes
+ * back to the owner's confirm flow, untouched. `evidenceAsOf` and the 28-day
+ * baseline are copied, never moved; the database guard refuses any other
+ * shape. The write is a system entry in the same audit chain. */
+export async function refreshAmuxPortfolioScoreInTx(
+  tx: Prisma.TransactionClient,
+  input: { taskId: string; digestKey: AmuxDigestKey },
+): Promise<AmuxScoreRefreshOutcome> {
+  const { taskId } = input;
+  const skipped = (reason: Extract<AmuxScoreRefreshOutcome,
+    { state: "skipped" }>["reason"]) =>
+    ({ state: "skipped" as const, taskId, reason });
+  await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+  // Same order as the confirm writer and the v22 promotion: chain, then Task.
+  await takeAuditChainLock(tx);
+  const locked = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${taskId} FOR UPDATE`;
+  if (locked.length !== 1) return skipped("not_found");
+  const now = await readAmuxPortfolioClock(tx);
+  const prior = await tx.amuxPortfolioScoreSnapshot.findFirst({
+    where: { taskId }, orderBy: [{ computedAt: "desc" }, { id: "desc" }],
+    select: { id: true, taskRevision: true, sourceApprovalId: true,
+      initiativeAssessmentId: true, epicAssessmentId: true,
+      featureAssessmentId: true, storyAssessmentId: true,
+      taskAssessmentId: true, scoreVersion: true, scoreTotal: true,
+      evidenceAsOf: true, activeStaleAt: true, baselineStaleAt: true,
+      approvedByUserId: true, approvalAuditLogId: true },
+  });
+  if (!prior) return skipped("no_score");
+  const activeStaleAt = amuxRefreshedActiveStaleAt({ now,
+    activeStaleAt: prior.activeStaleAt,
+    baselineStaleAt: prior.baselineStaleAt });
+  if (!activeStaleAt) return skipped("not_due");
+  const priorAudit = await tx.adminAuditLog.findUnique({
+    where: { id: prior.approvalAuditLogId },
+    select: { action: true, targetId: true, entryHash: true },
+  });
+  if (!priorAudit?.entryHash || priorAudit.targetId !== prior.id ||
+      !amuxScoreAuditActionBinds(priorAudit.action)) {
+    return skipped("score_unbound");
+  }
+  const id = randomUUID();
+  let plan: Awaited<ReturnType<typeof buildScorePlan>>;
+  try {
+    plan = await buildScorePlan(tx, prior.approvedByUserId,
+      { id, requestId: randomUUID(), taskId }, input.digestKey);
+  } catch (error) {
+    if (error instanceof AmuxPortfolioError) return skipped("not_ready");
+    throw error;
+  }
+  if (plan.taskRevision !== prior.taskRevision ||
+      plan.sourceApprovalId !== prior.sourceApprovalId ||
+      plan.initiativeAssessmentId !== prior.initiativeAssessmentId ||
+      plan.epicAssessmentId !== prior.epicAssessmentId ||
+      plan.featureAssessmentId !== prior.featureAssessmentId ||
+      plan.storyAssessmentId !== prior.storyAssessmentId ||
+      plan.taskAssessmentId !== prior.taskAssessmentId ||
+      plan.score.version !== prior.scoreVersion ||
+      plan.score.total !== prior.scoreTotal ||
+      plan.score.evidenceConfirmedAt !== prior.evidenceAsOf.toISOString() ||
+      plan.score.baselineStaleAt !== prior.baselineStaleAt.toISOString()) {
+    return skipped("input_changed");
+  }
+  const auditId = await writeSystemAuditLog({ tx,
+    systemActor: AMUX_PORTFOLIO_SCORER_AUDIT_ACTOR,
+    action: AMUX_PORTFOLIO_SCORE_REFRESH_ACTION,
+    targetType: "AmuxPortfolioScoreSnapshot", targetId: id,
+    summary: "Extended the active window of an unchanged portfolio score.",
+    metadata: { taskId, priorScoreId: prior.id,
+      scoreVersion: plan.score.version, scoreTotal: plan.score.total,
+      inputDigest: plan.inputDigest,
+      evidenceAsOf: plan.score.evidenceConfirmedAt,
+      priorActiveStaleAt: prior.activeStaleAt.toISOString(),
+      activeStaleAt: activeStaleAt.toISOString(),
+      baselineStaleAt: plan.score.baselineStaleAt },
+  });
+  await tx.amuxPortfolioScoreSnapshot.create({ data: {
+    id, requestId: randomUUID(), taskId,
+    taskRevision: plan.taskRevision, sourceApprovalId: plan.sourceApprovalId,
+    initiativeAssessmentId: plan.initiativeAssessmentId,
+    epicAssessmentId: plan.epicAssessmentId,
+    featureAssessmentId: plan.featureAssessmentId,
+    storyAssessmentId: plan.storyAssessmentId,
+    taskAssessmentId: plan.taskAssessmentId,
+    scoreVersion: plan.score.version, scoreTotal: plan.score.total,
+    components: plan.score.components, inputDigest: plan.inputDigest,
+    inputDigestKeyId: plan.inputDigestKeyId,
+    evidenceAsOf: prior.evidenceAsOf, activeStaleAt,
+    baselineStaleAt: prior.baselineStaleAt,
+    // The data owner the score was confirmed for; the audit row records
+    // that this snapshot is the system's, not that owner's approval.
+    approvedByUserId: prior.approvedByUserId, approvalAuditLogId: auditId,
+    computedAt: now,
+  } });
+  return { state: "refreshed", taskId, scoreId: id,
+    activeStaleAt: activeStaleAt.toISOString() };
+}
+
+export const AMUX_SCORE_REFRESH_MAX_PER_TICK = 4;
+const AMUX_SCORE_REFRESH_MAX_ATTEMPTS = 12;
+export const AMUX_SCORE_REFRESH_TRANSACTION = { maxWait: 1_000, timeout: 5_000 } as const;
+export const AMUX_SCORE_REFRESH_TRANSACTION_MAX_MS =
+  AMUX_SCORE_REFRESH_TRANSACTION.maxWait + AMUX_SCORE_REFRESH_TRANSACTION.timeout + 200;
+
+/** One bounded pass: backlog v4 Tasks whose newest score closes within a day,
+ * whose baseline is still open and whose assessments are still the latest.
+ * Each Task is its own transaction, so one refusal never blocks the rest.
+ * A lost commit is safe to leave: the next pass rereads the newest snapshot
+ * under the same locks and either finds it extended or extends it. */
+export async function readDueAmuxPortfolioScoreTaskIds(
+  db: Pick<Prisma.TransactionClient, "$queryRaw">): Promise<string[]> {
+  const due = await db.$queryRaw<Array<{ taskId: string }>>`
+    WITH clock AS (SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "now"),
+    newest AS (
+      SELECT DISTINCT ON (s."taskId") s.*
+      FROM "AmuxPortfolioScoreSnapshot" s
+      ORDER BY s."taskId", s."computedAt" DESC, s."id" DESC
+    )
+    SELECT n."taskId"
+    FROM newest n JOIN "AmuxWorkItem" w ON w."id" = n."taskId", clock c
+    WHERE w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task'
+      AND w."status" = 'backlog' AND w."archivedAt" IS NULL
+      AND n."taskRevision" = w."revision"
+      AND n."activeStaleAt" < n."baselineStaleAt"
+      AND n."baselineStaleAt" > c."now"
+      AND n."activeStaleAt" <=
+        c."now" + ${AMUX_SCORE_REFRESH_LEAD_MS}::integer * INTERVAL '1 millisecond'
+      -- An owner's newer assessment means the owner confirms the next score.
+      AND NOT EXISTS (SELECT 1 FROM "AmuxPortfolioAssessment" cur
+        JOIN "AmuxPortfolioAssessment" newer
+          ON (newer."nodeId" = cur."nodeId" OR newer."cardId" = cur."cardId")
+         AND newer."assessmentVersion" > cur."assessmentVersion"
+        WHERE cur."id" IN (n."initiativeAssessmentId", n."epicAssessmentId",
+          n."featureAssessmentId", n."storyAssessmentId", n."taskAssessmentId"))
+    ORDER BY n."activeStaleAt" ASC, n."taskId" ASC
+    LIMIT ${AMUX_SCORE_REFRESH_MAX_ATTEMPTS}
+  `;
+  return due.map((row) => row.taskId);
+}
+
+export async function refreshDueAmuxPortfolioScores(input: {
+  digestKey: AmuxDigestKey; hasBudget?: () => boolean;
+}) {
+  const due = await readDueAmuxPortfolioScoreTaskIds(prisma);
+  const outcomes: Array<AmuxScoreRefreshOutcome |
+    { state: "failed"; taskId: string }> = [];
+  for (const taskId of due) {
+    if (outcomes.filter((item) => item.state === "refreshed").length >=
+        AMUX_SCORE_REFRESH_MAX_PER_TICK || input.hasBudget?.() === false) break;
+    try {
+      outcomes.push(await prisma.$transaction((tx) =>
+        refreshAmuxPortfolioScoreInTx(tx, { taskId,
+          digestKey: input.digestKey }),
+      { isolationLevel: "Serializable", ...AMUX_SCORE_REFRESH_TRANSACTION }));
+    } catch (error) {
+      console.error(JSON.stringify({ event: "amux_score_refresh_failed",
+        taskId,
+        code: error instanceof AmuxPortfolioError ? error.code : "unexpected" }));
+      outcomes.push({ state: "failed", taskId });
+    }
+  }
+  return {
+    refreshed: outcomes.filter((item) => item.state === "refreshed").length,
+    skipped: outcomes.filter((item) => item.state === "skipped").length,
+    failed: outcomes.filter((item) => item.state === "failed").length,
+    outcomes,
+  };
+}
+
 export async function readAmuxPortfolioScore(session: Session, requestId: string) {
   const actorUserId = amuxPortfolioOwnerId(session);
   if (!/^[a-f0-9-]{36}$/.test(requestId)) {
@@ -283,9 +467,12 @@ export async function readAmuxPortfolioScore(session: Session, requestId: string
     select: { action: true, targetId: true, actorUserId: true,
       entryHash: true },
   });
-  if (!audit?.entryHash || audit.action !==
-      "amux.v4.portfolio.score.confirm" ||
-      audit.targetId !== row.id || audit.actorUserId !== actorUserId) {
+  // A refresh is a system entry with no session actor; the snapshot still
+  // belongs to the owner it was confirmed for.
+  if (!audit?.entryHash || !amuxScoreAuditActionBinds(audit.action) ||
+      audit.targetId !== row.id || audit.actorUserId !== (
+        audit.action === AMUX_PORTFOLIO_SCORE_REFRESH_ACTION ? null :
+          actorUserId)) {
     throw new AmuxPortfolioError("integrity_unavailable");
   }
   const now = Date.now();

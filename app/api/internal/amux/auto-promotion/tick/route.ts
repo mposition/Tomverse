@@ -7,6 +7,7 @@ import {
   AUTO_PROMOTION_APPLY_ENV,
   AUTO_PROMOTION_CODE_LATCH,
   AUTO_TICK_ROUTE_BUDGET_MS,
+  AUTO_TICK_TRANSACTION_MAX_MS,
   autoPromotionApplyPermitted,
   autoTickHttpStatus,
 } from "@/lib/amux/autoPromotionCore";
@@ -19,7 +20,12 @@ import { v22PromotionTickWire, v22WorkerClaimTickWire } from
 import { AMUX_V22_WORKER_CLAIM_ENV, amuxV22WorkerClaimEnabled } from
   "@/lib/amux/v22WorkerClaimCore";
 import { tickV22WorkerClaim } from "@/lib/amux/v22WorkerClaimService";
-import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import { amuxRouteHasBudgetForMs, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
+import { AMUX_SCORE_REFRESH_ENV, amuxScoreAutoRefreshEnabled } from
+  "@/lib/amux/portfolioScoreCore";
+import { AMUX_SCORE_REFRESH_TRANSACTION_MAX_MS,
+  refreshDueAmuxPortfolioScores } from "@/lib/amux/portfolioScoreService";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
   admitAmuxOrchestratorRequest,
@@ -52,6 +58,28 @@ import { readAmuxOrchestratorWriteIdentity } from "@/lib/amux/orchestratorHaltCo
 const noStore = { "Cache-Control": "no-store" };
 const requestSchema = z.object({}).strict();
 const OPERATION = "auto_promotion_tick";
+
+/** Owner decision 2026-11-14: before promotion reads its candidates, extend
+ * the active window of scores whose confirmed inputs are unchanged (default
+ * off, `TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH=enabled`). Each refresh must leave
+ * room for the claim and promotion transactions after it, and a refresh
+ * failure never fails the tick. */
+async function refreshScoresBeforePromotion() {
+  try {
+    const result = await refreshDueAmuxPortfolioScores({
+      digestKey: loadCurrentAmuxContentKeys(process.env),
+      hasBudget: () => amuxRouteHasBudgetForMs(
+        AMUX_SCORE_REFRESH_TRANSACTION_MAX_MS + 2 * AUTO_TICK_TRANSACTION_MAX_MS),
+    });
+    if (result.refreshed || result.failed) {
+      console.info(JSON.stringify({ event: "amux_score_refresh",
+        refreshed: result.refreshed, skipped: result.skipped,
+        failed: result.failed }));
+    }
+  } catch {
+    console.error(JSON.stringify({ event: "amux_score_refresh_unavailable" }));
+  }
+}
 
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
@@ -95,6 +123,11 @@ export async function POST(request: Request) {
         !legacyEnabled) {
       return Response.json({ promoted: false, reason: "apply_disabled", expired: 0 },
         { status: 409, headers: noStore });
+    }
+
+    if (v22Enabled && identity.kind === "admitted" &&
+        amuxScoreAutoRefreshEnabled(process.env[AMUX_SCORE_REFRESH_ENV])) {
+      await refreshScoresBeforePromotion();
     }
 
     try {
