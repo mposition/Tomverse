@@ -106,6 +106,9 @@ export type AmuxReviewDetail = {
   /** What an offered approve rests on; "no_change" completes an implement
    * Task that left no change, as no change needed (owner decision 2026-11-11). */
   approval_basis?: "evidence" | "no_change" | null;
+  /** The attempt stored a patch no pull request carries; "no change needed"
+   * is refused for it. */
+  unpublished_patch?: { publication_run_missing: boolean } | null;
   /** Why the server offers no decision at all; null while it offers one. */
   decision_hold?: string | null;
   retry: { used: number; limit: number; remaining: number };
@@ -529,6 +532,18 @@ export function AmuxOwnerReviewView({
           <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-bold text-amber-100">
             {m.reviewDisplayMismatch}
           </p>
+        )}
+        {review.unpublished_patch && (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100"
+            data-testid="admin-amux-unpublished-patch">
+            <p className="font-bold">{m.unpublishedPatch.title}</p>
+            <p className="mt-1 leading-6">{m.unpublishedPatch.body}</p>
+            {review.unpublished_patch.publication_run_missing && (
+              <p className="mt-1 leading-6" data-testid="admin-amux-unpublished-patch-run-missing">
+                {m.unpublishedPatch.runMissing}
+              </p>
+            )}
+          </div>
         )}
       </header>
 

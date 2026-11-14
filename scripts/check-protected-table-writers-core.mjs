@@ -3974,6 +3974,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "The replaced v4 PR-less review guard keeps its three dynamic SELECTs of the fixed task, latest retained result, and attempt, and adds one EXISTS read of the attempt's engineering publication rows for an implement Task completed as no change needed (owner decision 2026-11-11). The trigger's own schema is quoted with %I, the attempt ID is bound with USING, the state literals are fixed, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
   },
   {
+    path: "prisma/migrations/20261114120000_amux_review_no_change_unpublished_patch/migration.sql",
+    count: 5,
+    reason:
+      "The replaced v4 PR-less review guard keeps its three dynamic SELECTs of the fixed task, latest retained result, and attempt and its EXISTS read of the attempt's engineering publication rows, and adds one EXISTS read of the attempt's stored v22 patch, so a no-change completion of an attempt that stored one is refused (AMUX-FILEGEN2-002). The trigger's own schema is quoted with %I, the attempt ID is bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
+  },
+  {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
     count: 1,
     reason:

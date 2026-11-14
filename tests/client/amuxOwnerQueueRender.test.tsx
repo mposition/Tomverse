@@ -794,6 +794,31 @@ test("the card's requests are the console's own, bound to the digest and base sh
   });
 });
 
+test("a result whose patch never reached develop says so and offers no 'no change needed'", () => {
+  // AMUX-FILEGEN2-002 (2026-11-13): the run was never created, so the patch
+  // had no publication path, and the card was closed as no change needed.
+  const card = item({ status: "review", publicationPathMissing: true });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      allowed_outcomes: ["block", "retry"], approval_basis: null,
+      unpublished_patch: { publication_run_missing: true },
+      proposed_transitions: { block: "blocked", retry: "todo" },
+    }) }));
+  assert.match(html, /data-testid="amux-owner-queue-publication-path-missing"[\s\S]*No publication path/);
+  assert.match(html, /no pull request carries the patch, so it has not reached develop/);
+  assert.doesNotMatch(html, /Complete: no change needed/);
+  assert.doesNotMatch(html, /reports the work is already in place/);
+});
+
+test("the list marks a card whose patch has no publication path", () => {
+  const marked = view({ read: read({ items: [item({ publicationPathMissing: true })], total: 1 }) });
+  assert.match(marked, /data-testid="amux-owner-queue-publication-path-missing"[^>]*>No publication path/);
+  assert.doesNotMatch(view(), /amux-owner-queue-publication-path-missing/);
+});
+
 const DM_REQUEST = "0b6f2a3e-5d1c-4e8f-9a7b-2c3d4e5f6a7b";
 const dmProposal = (optionId: string, irreversible = false) => ({
   state: "proposal" as const, requestId: DM_REQUEST, answer: null, optionId,
