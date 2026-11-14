@@ -120,7 +120,7 @@ test("with session intake on, a recommendation enters as a session idea naming t
   assert.deepEqual(inspected.source, { toolName: "tomverse-admin", modelProvider: "operator",
     sessionDisplay: "Auto router recommendation" });
   assert.ok(inspected.input.idea.includes("Retry failed answers on a same-credit model."));
-  assert.ok(inspected.input.idea.includes("/admin/routing#optimizer-cycle-cycle-1"));
+  assert.ok(inspected.input.idea.includes("/admin/routing?tab=optimizer#optimizer-cycle-cycle-1"));
   assert.deepEqual(world.closes, ["session-idea"]);
 });
 
@@ -134,7 +134,7 @@ test("behind the proxy the request names a private address; the idea links the p
     }));
     assert.equal(response.status, 200);
     const { idea } = world.sessionCalls[0].inspected.input;
-    assert.ok(idea.includes("https://tomverse.app/admin/routing#optimizer-cycle-cycle-1"));
+    assert.ok(idea.includes("https://tomverse.app/admin/routing?tab=optimizer#optimizer-cycle-cycle-1"));
     assert.ok(!idea.includes("localhost"));
   } finally {
     if (before === undefined) delete process.env.PUBLIC_APP_URL;

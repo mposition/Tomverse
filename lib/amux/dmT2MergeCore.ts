@@ -14,6 +14,7 @@
  * Decision Maker approved. Default off; off, nothing here is consulted.
  */
 
+import { ciRunKey } from "../ciAdmissionCore.ts";
 import { qaReleaseDmApprovedHumanPaths } from "../qaReleaseMergeLaneExclusionCore.ts";
 
 /** Default off. On, the app marks Decision Maker approved review pull requests ready and the lane may merge them into develop. */
@@ -95,7 +96,7 @@ export function amuxDmT2MergeReadyInFlight(input: {
   nowMs: number;
 }): boolean {
   return input.readies.some((ready) => input.nowMs - ready.atMs < AMUX_DM_T2_MERGE_READY_SETTLE_MS &&
-    !input.running.has(`${ready.prNumber}@${ready.headSha}`));
+    !input.running.has(ciRunKey(ready.prNumber, ready.headSha)));
 }
 
 export type AmuxDmT2MergeApproved = {

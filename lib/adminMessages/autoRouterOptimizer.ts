@@ -89,6 +89,16 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
     briefCopied: "Copied",
     briefCopyFailed: "Could not copy to the clipboard. Select the text and copy it by hand.",
     cycleLink: "Show cycle",
+    dailyEvidence: "Smart Adaptive measurement evidence",
+    dailyRecorded: (day: string) => `Daily agent entry · ${day} AEST`,
+    dailyOutcomes: {
+      added: "recommendation added",
+      already_listed: "recommendation already recorded",
+      awaiting_cycle: "waiting for a completed optimizer report",
+      observed: "observation only",
+    },
+    dailyObservation: (time: string, outcome: string, attempts: number, completions: number) =>
+      `Smart Adaptive · ${time} · ${outcome} · Last 24h: ${attempts} presearch attempts, ${completions} timed completions${completions === 0 ? " (p95 unavailable)" : ""}. Includes QA across deployments and models.`,
     inboxTitle: "Open recommendations",
     inboxDescription: "Code and setting recommendations from the recent cycles that nobody has marked done or dismissed, newest first. Send one to AMUX as an idea, or mark it yourself; a sent recommendation stays here with its status until you mark it, and the coding agent does not take it.",
     inboxEmpty: "No open recommendations.",
@@ -264,6 +274,16 @@ export const adminAutoRouterOptimizerMessages = defineAdminMessages({
     briefCopied: "복사됨",
     briefCopyFailed: "클립보드에 복사하지 못했습니다. 내용을 직접 선택해 복사하세요.",
     cycleLink: "회차 보기",
+    dailyEvidence: "Smart Adaptive 측정 근거",
+    dailyRecorded: (day: string) => `일일 에이전트 기록일 · ${day} AEST`,
+    dailyOutcomes: {
+      added: "권장안 추가",
+      already_listed: "동일 권장안 등록 이력 있음",
+      awaiting_cycle: "완료된 최적화 보고서 대기",
+      observed: "관측만 기록",
+    },
+    dailyObservation: (time: string, outcome: string, attempts: number, completions: number) =>
+      `Smart Adaptive · ${time} · ${outcome} · 최근 24시간 선행검색 시도 ${attempts}건, 완료 시간 표본 ${completions}건${completions === 0 ? " (p95 미측정)" : ""}. QA·배포·모델 구분 전 집계.`,
     inboxTitle: "열린 권장안",
     inboxDescription: "최근 회차의 코드·설정 권장안 중 아직 완료하거나 기각하지 않은 것을 최신순으로 보여 줍니다. AMUX로 보내 아이디어로 만들거나 직접 상태를 표시하세요. 보낸 권장안은 완료나 기각으로 표시할 때까지 상태와 함께 남고, 코딩 에이전트는 가져가지 않습니다.",
     inboxEmpty: "열린 권장안이 없습니다.",

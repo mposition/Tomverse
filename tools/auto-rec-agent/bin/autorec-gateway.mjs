@@ -287,17 +287,13 @@ async function findOpenPr(deps, branch) {
 }
 
 /**
- * Auto PR to Develop opens a draft for the pushed branch; wait for it, and
- * open the draft here only when it has not appeared, so the two never race
- * into two pull requests.
+ * Open the held draft immediately after push. Waiting for Auto PR left its
+ * unlabelled draft in the CI admission queue until our next poll. If that
+ * workflow gets there first, adopt its draft; a create race is looked up once.
  */
 async function ensurePullRequest(deps, branch, text, expectedHead) {
-  const deadline = deps.now() + LIMITS.autoPrWaitMs;
   let found = await findOpenPr(deps, branch);
-  while (!found.pr && deps.now() < deadline) {
-    await deps.sleep(LIMITS.autoPrPollMs);
-    found = await findOpenPr(deps, branch);
-  }
+  if (!found.known) return { status: "unknown", step: "pr_lookup", branch };
   let created = false;
   if (!found.pr) {
     const answer = await githubRequest(deps, "POST", `/repos/${REPO_SLUG}/pulls`, {
@@ -315,21 +311,22 @@ async function ensurePullRequest(deps, branch, text, expectedHead) {
       found = await findOpenPr(deps, branch);
     }
   }
+  if (!found.known) return { status: "unknown", step: "pr_lookup", branch };
   const prUrl = found.pr?.html_url;
   if (!isPrUrl(prUrl)) return { status: "failed", code: "pr_failed", pushed: true, branch };
   // Never adopt an already-ready PR or report success without the owner's CI hold.
   if (found.pr.draft !== true) return { status: "unknown", step: "pr_not_draft", branch };
-  let bodyUpdated = created;
-  if (!created) {
-    const patch = await githubRequest(deps, "PATCH", `/repos/${REPO_SLUG}/pulls/${found.pr.number}`, text);
-    bodyUpdated = patch.ok && patch.status === 200;
-  }
   const labelsPath = `/repos/${REPO_SLUG}/issues/${found.pr.number}/labels`;
   await githubRequest(deps, "POST", labelsPath, { labels: ["ci:hold"] });
   // Even an unanswered label write is read back once; never blindly replay it.
   const labels = await githubRequest(deps, "GET", labelsPath);
   if (!labels.ok || labels.status !== 200 || !Array.isArray(labels.json) || !labels.json.some((label) => label?.name === "ci:hold")) {
     return { status: "unknown", step: "ci_hold_unverified", prUrl, branch };
+  }
+  let bodyUpdated = created;
+  if (!created) {
+    const patch = await githubRequest(deps, "PATCH", `/repos/${REPO_SLUG}/pulls/${found.pr.number}`, text);
+    bodyUpdated = patch.ok && patch.status === 200;
   }
   // Admission or an operator may have changed draft state during the label
   // write. Observe draft, hold and reviewed head together before success.
@@ -516,7 +513,7 @@ async function main() {
   } catch (error) {
     answer = { status: "error", code: error.message === "request_too_large" ? "request_too_large" : "request_invalid" };
   }
-  deps.log("gateway_answer", { op, status: answer.status, code: answer.code ?? null, detail: answer.detail ?? null });
+  deps.log("gateway_answer", { op, status: answer.status, code: answer.code ?? null, detail: answer.detail ?? null, step: answer.step ?? null });
   // stdout is the connection: exit only once the answer has been handed to it.
   await new Promise((resolve) => process.stdout.write(`${JSON.stringify(answer)}\n`, resolve));
 }
