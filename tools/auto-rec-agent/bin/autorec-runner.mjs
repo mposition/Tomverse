@@ -383,7 +383,7 @@ async function cleanup(deps, ctx) {
   }
 }
 
-async function report(deps, claim, outcome) {
+async function report(deps, claim, outcome, onReport) {
   const body =
     outcome.outcome === OUTCOME_PR_OPENED
       ? { op: "result", id: claim.id, claimId: claim.claimId, outcome: OUTCOME_PR_OPENED, prUrl: outcome.prUrl }
@@ -393,13 +393,15 @@ async function report(deps, claim, outcome) {
     reply = await deps.gateway(body, null, 3 * 60_000);
   } catch (error) {
     deps.log("result_no_answer", { message: error.message });
+    onReport("unknown");
     return 1;
   }
   deps.log("result_answer", { status: reply?.status ?? null, code: reply?.code ?? null });
+  onReport(reply?.status === "reported" ? "reported" : reply?.status === "error" || reply?.status === "refused" ? "failed" : "unknown");
   return reply?.status === "reported" ? 0 : 1;
 }
 
-export async function runLocked(deps, { onEmpty = () => {}, onClaim = () => {}, onOutcome = () => {} } = {}) {
+export async function runLocked(deps, { onEmpty = () => {}, onClaim = () => {}, onOutcome = () => {}, onReport = () => {} } = {}) {
   let reply;
   try {
     reply = await deps.gateway({ op: "claim" }, null, 3 * 60_000);
@@ -436,7 +438,7 @@ export async function runLocked(deps, { onEmpty = () => {}, onClaim = () => {}, 
     return 1;
   }
   deps.log("outcome", { outcome: outcome.outcome, reason: outcome.reason ?? null, detail: outcome.detail ?? null, prUrl: outcome.prUrl ?? null });
-  return report(deps, claim, outcome);
+  return report(deps, claim, outcome, onReport);
 }
 
 export async function runOnce(deps) {
@@ -472,14 +474,21 @@ export async function runDailyBatch(deps) {
     for (let count = 0; count < LIMITS.tasksPerDay && deps.now() - started < LIMITS.dailyRunMs; count += 1) {
       let empty = false;
       let outcome = null;
+      let reportState = null;
       const code = await runLocked(deps, {
         onEmpty: () => { empty = true; }, onClaim: () => { notice.attempted += 1; },
+        onReport: (value) => { reportState = value; },
         onOutcome: (value) => {
           outcome = value;
           if (value.outcome === OUTCOME_PR_OPENED) { notice.prOpened += 1; notice.lastPrUrl = value.prUrl; }
         },
       });
-      if (code !== 0) return stopped(outcome?.unknown === "publish" ? "publish_unknown" : outcome ? "result_unknown" : "claim_failed");
+      if (code !== 0) {
+        let reason = "claim_failed";
+        if (outcome?.unknown === "publish") reason = "publish_unknown";
+        else if (outcome) reason = reportState === "failed" ? "result_failed" : "result_unknown";
+        return stopped(reason);
+      }
       if (empty) return 0;
       if (outcome?.outcome === OUTCOME_FAILED && !["no_change", "out_of_scope", "tests", "review_reject"].includes(outcome.reason)) {
         deps.log("daily_batch_paused", { reason: outcome.reason });

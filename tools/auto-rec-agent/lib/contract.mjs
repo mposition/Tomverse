@@ -17,7 +17,7 @@ export const DAILY_APP_CLAIM_PATH = "/api/internal/product-improvements/claim";
 export const DAILY_APP_RESULT_PATH = "/api/internal/product-improvements/result";
 export const DAILY_APP_HALT_PATH = "/api/internal/product-improvements/halt";
 export const DAILY_HALT_REASONS = Object.freeze([
-  "claim_failed", "publish_unknown", "result_unknown", "setup_failed", "agent_error", "timeout",
+  "claim_failed", "publish_unknown", "result_unknown", "result_failed", "setup_failed", "agent_error", "timeout",
   "review_unknown", "lease_expired", "runner_error", "rate_limited", "push_rejected", "push_failed", "pr_failed",
 ]);
 export const appRequestHeaders = (secret) => ({

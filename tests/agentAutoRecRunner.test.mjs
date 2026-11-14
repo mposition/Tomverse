@@ -164,6 +164,16 @@ test("an empty queue and the normal daily cap do not page the operator", async (
   assert.equal(full.gatewayCalls.some(({ header }) => header.op === "halt_notice"), false);
 });
 
+test("a known result refusal is distinct from an unknown publication", async () => {
+  const { deps, gatewayCalls } = fakeRunner({ gateway: { result: { status: "error", code: "http_409" } } });
+  assert.equal(await runDailyBatch(deps), 1);
+  const notice = gatewayCalls.find(({ header }) => header.op === "halt_notice").header;
+  assert.equal(notice.reason, "result_failed");
+  assert.equal(notice.prOpened, 1);
+  assert.equal(notice.lastPrUrl, PR_URL);
+  assert.equal(gatewayCalls.filter(({ header }) => header.op === "claim").length, 1);
+});
+
 test("the same agent call supplies the public commit and PR summary without copying Scout source text", async () => {
   const publicSummary = "Keep the mobile model label visible";
   const privateText = "Private Scout analysis note";

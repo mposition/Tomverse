@@ -2,7 +2,7 @@ import { z } from "zod";
 import { DAILY_HALT_REASONS } from "../tools/auto-rec-agent/lib/contract.mjs";
 
 export const DAILY_PRODUCT_AGENT_ALERT_SWITCH = "DAILY_PRODUCT_AGENT_ALERTS_ENABLED";
-export const DAILY_PRODUCT_AGENT_NOTICE_TARGET = "DailyProductAgentRun";
+export { DAILY_PRODUCT_AGENT_NOTICE_TARGET } from "@/lib/adminNotificationAttention";
 export const dailyProductHaltSchema = z.object({
   runId: z.string().uuid(),
   reason: z.string().refine((value) => DAILY_HALT_REASONS.includes(value)),
