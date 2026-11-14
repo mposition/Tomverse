@@ -70,24 +70,6 @@ import { lockBodyScroll } from "./useBodyScrollLock";
  */
 
 /**
- * Whether another `aria-modal` dialog is later in document order.
- *
- * Only the key handlers ask this, and only as one half of the question:
- * document order is not stacking order, so a dialog can be last in the DOM and
- * underneath, or first and on top. `ownsEvent` survives that because it has a
- * second signal -- where the event came from -- to decide with. Nothing that
- * lacks that second signal may use this.
- *
- * A `null` dialog is not covered. The caller has no element to compare, which
- * is the un-mounted case, not the buried one.
- */
-const laterInDocumentOrder = (dialog: HTMLElement | null) =>
-  dialog !== null &&
-  (Array.from(
-    document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
-  ).at(-1) ?? null) !== dialog;
-
-/**
  * The open modals, in the order they opened.
  *
  * The deferred initial focus needs to know whether something opened *on top of*
@@ -127,6 +109,36 @@ export const modalOpenedOnTop = (dialog: HTMLElement | null) => {
   if (!dialog) return false;
   const index = openModals.lastIndexOf(dialog);
   return index >= 0 && index < openModals.length - 1;
+};
+
+/**
+ * Whether `dialog` is underneath another open modal, for the key handlers.
+ *
+ * Open order decides between dialogs that register. Asking document order
+ * alone broke the model finder on mobile: the drawer stays mounted behind it
+ * and renders after it, so the finder declined every Tab and Escape, the
+ * drawer declined them too (they came from the finder), and Tab walked out of
+ * the finder into the page. Dropping the check instead lets a dialog that is
+ * underneath claim Tab from the one on top.
+ *
+ * Document order stays only as the fallback for a later dialog that does not
+ * register, which has no open order to read -- most of those are portals
+ * appended on top, so later is the best signal there is.
+ *
+ * A `null` dialog is not covered. The caller has no element to compare, which
+ * is the un-mounted case, not the buried one.
+ */
+export const coveredByAnotherModal = (
+  dialog: HTMLElement | null,
+  dialogsInDocumentOrder: readonly HTMLElement[] = Array.from(
+    document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
+  )
+) => {
+  if (!dialog) return false;
+  if (modalOpenedOnTop(dialog)) return true;
+  return dialogsInDocumentOrder
+    .slice(dialogsInDocumentOrder.indexOf(dialog) + 1)
+    .some((other) => other !== dialog && !openModals.includes(other));
 };
 
 const focusableWithin = (panel: HTMLElement) =>
@@ -219,7 +231,7 @@ export function useModalDialog({
       const dialog = dialogRef.current;
       if (!dialog || !panelRef.current) return false;
 
-      if (laterInDocumentOrder(dialog)) return false;
+      if (coveredByAnotherModal(dialog)) return false;
 
       const eventOwner =
         event.target instanceof Element
