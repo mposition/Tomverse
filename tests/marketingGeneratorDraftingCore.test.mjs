@@ -11,6 +11,7 @@ import {
   MARKETING_VIDEO_DAYS,
   marketingA5AssetsFor,
   marketingA5MediaKindFor,
+  marketingVideoDaysFor,
   marketingA5Messages,
   marketingDraftSubmissionBody,
   marketingGeneratorContextSchema,
@@ -283,6 +284,28 @@ test("each platform's video days follow the owner's ratio, spread evenly, with t
   // Instagram alternates rather than bunching its video days.
   const instagram = Array.from({ length: 4 }, (_, index) => marketingA5MediaKindFor(both("instagram"), "instagram", "en", index));
   assert.deepEqual(instagram, ["image", "video", "image", "video"]);
+
+  // Korean Instagram carries a video three days in four (owner decision 2026-11-14); other locales keep two.
+  const bothKo = (channel) => marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: [
+      { id: "media-card", allowedChannels: [channel], altLocales: ["ko"], claimIds: [], validUntil: "2099-12-31", kind: "image" },
+      { id: "media-short", allowedChannels: [channel], altLocales: ["ko"], claimIds: [], validUntil: "2099-12-31", kind: "video" },
+    ],
+  });
+  for (const start of [0, 20_400, 20_761]) {
+    const ko = Array.from({ length: 4 }, (_, index) => marketingA5MediaKindFor(bothKo("instagram"), "instagram", "ko", start + index));
+    assert.equal(ko.filter((kind) => kind === "video").length, 3, `instagram ko from day ${start}`);
+  }
+  assert.deepEqual(marketingVideoDaysFor("instagram", "ko"), { video: 3, of: 4 });
+  assert.deepEqual(marketingVideoDaysFor("instagram", "en"), MARKETING_VIDEO_DAYS.instagram);
+  assert.deepEqual(marketingVideoDaysFor("facebook", "ko"), MARKETING_VIDEO_DAYS.facebook);
+  // With no Korean video left, every Korean Instagram day still carries an image.
+  const koImagesOnly = marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: [{ id: "media-card", allowedChannels: ["instagram"], altLocales: ["ko"], claimIds: [], validUntil: "2099-12-31", kind: "image" }],
+  });
+  for (let day = 0; day < 4; day += 1) assert.equal(marketingA5MediaKindFor(koImagesOnly, "instagram", "ko", day), "image");
 
   // No approved video for Facebook: its video days carry an image instead.
   const imagesOnly = marketingGeneratorContextSchema.parse({
