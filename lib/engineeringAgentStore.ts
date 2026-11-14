@@ -359,7 +359,11 @@ const lockEngineeringAgentHalt = async (tx: EngineeringAgentTransaction) => {
 export async function readEngineeringAgentHaltState(
   db: PrismaClient | Prisma.TransactionClient,
 ): Promise<EngineeringAgentHaltState> {
-  const openStateMismatches = await db.engineeringAgentWorkItem.count({ where: { kind: "state_mismatch", state: "open" } });
+  // One read for both: every open mismatch, and those bound to no run (AMUXFLOW/B2).
+  const [mismatchCounts] = await db.$queryRaw<Array<{ total: bigint; unscoped: bigint }>>`
+    SELECT COUNT(*) AS "total", COUNT(*) FILTER (WHERE "runId" IS NULL) AS "unscoped"
+    FROM "EngineeringAgentWorkItem" WHERE "kind" = 'state_mismatch' AND "state" = 'open'`;
+  const openStateMismatches = Number(mismatchCounts?.total ?? 0);
   const orphaned = await db.engineeringAgentRun.count({
     where: { status: "active", attempt: { endedAt: { not: null } } },
   });
@@ -389,8 +393,7 @@ export async function readEngineeringAgentHaltState(
       ? observed.halt
       : null;
   const cardScoped = engineeringAgentMismatchCardScoped(process.env[ENGINEERING_AGENT_MISMATCH_CARD_SCOPED_ENV]);
-  const unscopedStateMismatches = cardScoped && openStateMismatches > 0 ?
-    await db.engineeringAgentWorkItem.count({ where: { kind: "state_mismatch", state: "open", runId: null } }) : 0;
+  const unscopedStateMismatches = Number(mismatchCounts?.unscoped ?? 0);
   return {
     cardScoped,
     unscopedStateMismatches,
@@ -506,11 +509,10 @@ async function engineeringAgentCardHeld(
   const cardId = input.cardId ?? (input.runId ? (await tx.engineeringAgentRun.findUnique({
     where: { id: input.runId }, select: { cardId: true } }))?.cardId : undefined);
   if (!cardId) return false;
-  const mismatch = await tx.engineeringAgentWorkItem.count({ where: { kind: "state_mismatch", state: "open",
-    run: { cardId } } });
-  if (mismatch > 0) return true;
-  return (await tx.engineeringAgentRun.count({ where: { cardId, status: "active",
-    attempt: { endedAt: { not: null } } } })) > 0;
+  return (await tx.engineeringAgentRun.count({ where: { cardId, OR: [
+    { workItems: { some: { kind: "state_mismatch", state: "open" } } },
+    { status: "active", attempt: { endedAt: { not: null } } },
+  ] } })) > 0;
 }
 
 /** Whether anything halts claims, runs and pushes (§12). */
@@ -526,10 +528,17 @@ export const engineeringAgentHalted = (state: EngineeringAgentHaltState): boolea
  * attempt): the switches allow a claim, nothing halts, and both owner queues
  * have room. The run's INSERT asks the database again.
  */
-export async function requireEngineeringAgentRunAdmission(tx: EngineeringAgentTransaction): Promise<void> {
+export async function requireEngineeringAgentRunAdmission(tx: EngineeringAgentTransaction,
+  card?: { cardId: string }): Promise<void> {
   await requireSwitch(tx, "claimAllowed");
   await lockEngineeringAgentHalt(tx);
-  if (engineeringAgentHalted(await readEngineeringAgentHaltState(tx))) refuse("halted");
+  const haltState = await readEngineeringAgentHaltState(tx);
+  if (engineeringAgentHalted(haltState)) refuse("halted");
+  // A card held by its own record is refused here, before AMUX writes the
+  // run's attempt, so its Task runs with its result kept private (AMUXFLOW/B2).
+  // A start that names no card keeps the agent-wide halt.
+  if (haltState.cardScoped && (card ? await engineeringAgentCardHeld(tx, card) :
+    haltState.openStateMismatches > 0 || haltState.orphanedRuns > 0)) refuse("halted");
   if (!(await readEngineeringAgentOwnerQueues(tx)).claimAllowed) refuse("owner_queue_full");
 }
 
@@ -662,9 +671,8 @@ export async function recordEngineeringAgentRunStart(
   await requireSwitch(tx, "claimAllowed");
   // A halt stops claims (§12), and a run is the claim's work.
   await lockEngineeringAgentHalt(tx);
-  const haltState = await readEngineeringAgentHaltState(tx);
-  if (engineeringAgentHalted(haltState)) refuse("halted");
-  if (haltState.cardScoped && await engineeringAgentCardHeld(tx, { cardId: input.cardId })) refuse("halted");
+  // Admission, in this transaction, already judged the card (AMUXFLOW/B2).
+  if (engineeringAgentHalted(await readEngineeringAgentHaltState(tx))) refuse("halted");
   const now = await databaseNow(tx);
   const run = await tx.engineeringAgentRun.create({
     data: {
@@ -1105,6 +1113,7 @@ export async function claimNextEngineeringAgentPublishWork(
   // item's only for a publisher that also opens drafts.
   const resumeAllowed = publishAllowed && input.resumePullRequests === true;
   const now = await databaseNow(tx);
+  const cardScoped = engineeringAgentMismatchCardScoped(process.env[ENGINEERING_AGENT_MISMATCH_CARD_SCOPED_ENV]);
   // A lookup only reads: with the switch on, a decision that has waited its
   // time no longer holds it, up to a bound on the decisions one item opens.
   const autoLookup = engineeringAgentUnknownAutoLookupEnabled(
@@ -1149,6 +1158,16 @@ export async function claimNextEngineeringAgentPublishWork(
         OR (
           ${publishAllowed} AND w."state" = 'queued'
           AND (${reviewWrites} OR w."causeKey" NOT LIKE ${reviewKeys})
+          -- AMUXFLOW/B2: a card held by its own record is left out, so its
+          -- oldest item never takes every other card's turn.
+          AND (${!cardScoped} OR NOT EXISTS (
+            SELECT 1 FROM "EngineeringAgentRun" own
+            JOIN "EngineeringAgentRun" sib ON sib."cardId" = own."cardId"
+            WHERE own."id" = w."runId" AND (
+              EXISTS (SELECT 1 FROM "EngineeringAgentWorkItem" m
+                WHERE m."kind" = 'state_mismatch' AND m."state" = 'open' AND m."runId" = sib."id")
+              OR (sib."status" = 'active' AND EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" x
+                WHERE x."id" = sib."amuxAttemptId" AND x."endedAt" IS NOT NULL)))))
           AND (${v22PublicationEnabled} OR NOT EXISTS (
             SELECT 1 FROM "EngineeringAgentRun" r
             JOIN "AmuxWorkItem" card ON card."id" = r."cardId"

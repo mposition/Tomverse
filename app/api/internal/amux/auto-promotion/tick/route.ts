@@ -143,39 +143,22 @@ export async function POST(request: Request) {
         { status: 409, headers: noStore });
     }
 
-    // Stopped cards first, so the queue and the Decision Maker see them
-    // (AMUXFLOW/B2, its own switch). Never a reason this tick fails.
-    if (identity.kind === "admitted") {
-      try { await sweepAmuxStalledCards(); }
-      catch (error) {
-        console.error("amux stalled card sweep failed",
-          { error: error instanceof Error ? error.name : "unknown" });
-      }
-    }
-
     if (v22Enabled && identity.kind === "admitted" &&
         amuxScoreAutoRefreshEnabled(process.env[AMUX_SCORE_REFRESH_ENV])) {
       const stopped = await refreshScoresBeforePromotion();
       if (stopped) return stopped;
     }
 
+    const response = await claimAndPromote();
+    // AMUXFLOW/B2: stopped cards go to the owner queue after this tick's
+    // answer is decided, so the sweep's write never turns a later transient
+    // claim or promotion error into an unknown outcome. Its own switch; never
+    // a reason this tick fails.
+    if (identity.kind === "admitted") await sweepStalledCardsAfterTick();
+    return response;
+
+    async function claimAndPromote(): Promise<Response> {
     try {
-      // AMUXFLOW/B3: promote first, several at once, then claim in the same
-      // tick, so a ready backlog Task reaches a worker without waiting for the
-      // next tick (and the claim no longer skips promotion). An unknown
-      // promotion still stops the tick as before.
-      let flowPromotion: Awaited<ReturnType<typeof tickV22AutoPromotion>> | null = null;
-      if (amuxV22PromotionFlowEnabled() && v22Enabled && identity.kind === "admitted") {
-        for (let index = 0; index < AMUX_V22_PROMOTIONS_PER_TICK; index += 1) {
-          const promoted = await tickV22AutoPromotion();
-          if (promoted.promoted) { flowPromotion = promoted; continue; }
-          if (promoted.reason === "outcome_unknown") {
-            return Response.json(v22PromotionTickWire(promoted), {
-              status: autoTickHttpStatus(promoted.reason), headers: noStore });
-          }
-          break;
-        }
-      }
       if (claimEnabled && identity.kind === "admitted") {
         const result = await tickV22WorkerClaim();
         if (result.claimed || result.reason === "outcome_unknown" ||
@@ -186,10 +169,29 @@ export async function POST(request: Request) {
           });
         }
       }
-      if (flowPromotion) {
-        return Response.json(v22PromotionTickWire(flowPromotion), { status: 200, headers: noStore });
+      // AMUXFLOW/B3: a tick whose claim assigned nothing promotes up to
+      // four ready Tasks, not one; the next tick claims them. The claim stays
+      // first, so no promotion write ever turns a later transient claim error
+      // into an unknown outcome (review r-20261114-073121-cf0260). An unknown
+      // promotion still stops the tick as before.
+      if (amuxV22PromotionFlowEnabled() && v22Enabled && identity.kind === "admitted") {
+        let last: Awaited<ReturnType<typeof tickV22AutoPromotion>> | null = null;
+        for (let index = 0; index < AMUX_V22_PROMOTIONS_PER_TICK; index += 1) {
+          const promoted = await tickV22AutoPromotion();
+          if (!last?.promoted) last = promoted;
+          if (promoted.promoted) { last = promoted; continue; }
+          if (promoted.reason === "outcome_unknown") {
+            return Response.json(v22PromotionTickWire(promoted), {
+              status: autoTickHttpStatus(promoted.reason), headers: noStore });
+          }
+          break;
+        }
+        if (last && (last.promoted || !legacyEnabled)) {
+          return Response.json(v22PromotionTickWire(last), {
+            status: last.promoted ? 200 : autoTickHttpStatus(last.reason), headers: noStore });
+        }
       }
-      if (v22Enabled && identity.kind === "admitted") {
+      if (v22Enabled && identity.kind === "admitted" && !amuxV22PromotionFlowEnabled()) {
         const result = await tickV22AutoPromotion();
         if (result.promoted || (!result.promoted && result.reason === "outcome_unknown") ||
             !legacyEnabled) {
@@ -204,5 +206,18 @@ export async function POST(request: Request) {
     } catch (error) {
       return amuxInternalErrorResponse(OPERATION, error);
     }
+    }
   }, AUTO_TICK_ROUTE_BUDGET_MS);
+}
+
+/** The stalled card sweep, only while the route still has room for it. */
+async function sweepStalledCardsAfterTick() {
+  if (!amuxRouteHasBudgetForMs(2 * AUTO_TICK_TRANSACTION_MAX_MS)) return;
+  try {
+    const moved = await sweepAmuxStalledCards(3);
+    if (moved.length) console.info(JSON.stringify({ event: "amux_stalled_card_sweep", moved }));
+  } catch (error) {
+    console.error(JSON.stringify({ event: "amux_stalled_card_sweep_unavailable",
+      error: error instanceof Error ? error.name : "unknown" }));
+  }
 }

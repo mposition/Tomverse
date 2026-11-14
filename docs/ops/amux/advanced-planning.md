@@ -76,7 +76,7 @@ flag 활성화 승인 전에는 flag를 켜지 않으며,
 점수는 선호도를 정하고 hard gate는 실행 가능성을 정한다. 둘을 섞지 않는다.
 v22 승격은 `TOMVERSE_AMUX_V22_PROMOTION_FLOW=enabled`일 때 이 규칙대로 동작한다(운영자 결정 2026-11-14,
 AMUXFLOW/B3): 점수 창이 지났거나 상위 노드에 새 평가가 생겨도 후보에서 빼지 않고 정렬에만 쓰며, readiness는
-idle worker를 기다리지 않고, tick마다 승격을 최대 4건 한 뒤 같은 tick에서 claim한다. 꺼져 있으면 예전과 같다.
+idle worker를 기다리지 않고, claim이 아무것도 배정하지 못한 tick에는 승격을 1건이 아니라 최대 4건 한다(다음 tick이 claim한다). 꺼져 있으면 예전과 같다.
 
 - urgency와 capacity headroom은 scheduler 설명 점수다.
 - worker/project/team WIP, cost budget, high-confidence quota exhaustion,

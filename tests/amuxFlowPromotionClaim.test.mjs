@@ -40,14 +40,16 @@ test("a card's own route or approval reason is skipped, never a stop for the tic
   }
 });
 
-test("the tick promotes several then claims, and an unknown promotion still stops it", () => {
+test("the claim stays first; a tick that assigned nothing promotes several, and an unknown promotion still stops it", () => {
   const source = readFileSync("app/api/internal/amux/auto-promotion/tick/route.ts", "utf8");
-  const flow = source.indexOf("amuxV22PromotionFlowEnabled() && v22Enabled");
+  const flow = source.indexOf("if (amuxV22PromotionFlowEnabled() && v22Enabled");
   const claim = source.indexOf("const result = await tickV22WorkerClaim();");
-  assert.ok(flow > 0 && claim > flow, "promotion runs before the claim");
-  const loop = source.slice(flow, claim);
+  assert.ok(claim > 0 && flow > claim, "the claim runs before any promotion write");
+  const loop = source.slice(flow, flow + 1200);
   assert.match(loop, /AMUX_V22_PROMOTIONS_PER_TICK/);
   assert.match(loop, /promoted\.reason === "outcome_unknown"/);
+  assert.match(source, /if \(v22Enabled && identity\.kind === "admitted" && !amuxV22PromotionFlowEnabled\(\)\)/,
+    "the single promotion is not run again after the loop");
 });
 
 test("the candidate query keeps the score window unless the flow is on", () => {

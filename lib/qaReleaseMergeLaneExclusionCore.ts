@@ -194,7 +194,11 @@ export const QA_RELEASE_DM_MERGE_BLOCK_LIST_ONLY_ENV = "TOMVERSE_QA_RELEASE_DM_M
 export const qaReleaseDmMergeBlockListOnly = (
   value: string | undefined = process.env[QA_RELEASE_DM_MERGE_BLOCK_LIST_ONLY_ENV],
 ) => value?.trim() === "enabled";
-const DM_DOCUMENT_GATE_MATCHERS = ["docs/policy/**", "docs/ui-contracts/**", "docs/agents/**"]
+// Every API route stays a person's even here: a user data deletion route's
+// re-authentication and confirmation live there, and no name list finds them
+// all (review r-20261114-073121-cf0260). So do paths that name a deletion.
+const DM_DOCUMENT_GATE_MATCHERS = ["docs/policy/**", "docs/ui-contracts/**", "docs/agents/**",
+  "app/api/**", "**/*delet*", "**/*purge*", "**/*erase*"]
   .map((pattern) => new RegExp(compileManifestPattern(pattern).source, "i"));
 
 /**

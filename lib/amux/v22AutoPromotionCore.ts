@@ -16,8 +16,10 @@ export const AMUX_V22_SEV1_RESERVED = 1;
  * the score only orders candidates -- an expired window or a newer assessment
  * above the Task no longer takes it out (backlog -> todo is reversible and a
  * v22 receipt costs 0); readiness no longer waits for an idle worker of the
- * grade; and every tick promotes up to AMUX_V22_PROMOTIONS_PER_TICK ready
- * Tasks and then claims, so a ready Task is assigned in the same tick. The
+ * grade; and a tick whose claim assigned nothing promotes up to
+ * AMUX_V22_PROMOTIONS_PER_TICK ready Tasks instead of one, for the next
+ * tick's claim (the claim stays first, so no promotion write can turn a later
+ * transient claim error into an unknown outcome). The
  * score's version, revision and approval binding are still checked, and the
  * capacity reservation is unchanged (its database check pins it). Off by default.
  */
