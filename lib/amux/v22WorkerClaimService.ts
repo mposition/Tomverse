@@ -34,7 +34,7 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND } from
 import { amuxV22SafeStopFencedWorkers } from "./v22LegacySafeStopFence.ts";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "./workerRuntime.ts";
 import { amuxV22RoutesWithSettledUsage } from "./v22WorkerUsageGate.ts";
-import { decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
+import { amuxApprovedCeilingOverrun, decideAmuxAttemptBudget } from "./executionBudgetCore.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
@@ -408,6 +408,16 @@ async function claimCandidate(taskId: string, assignmentId: string,
       if (!routePrice || routePrice.modelId !== route.modelId) {
         throw new BoardImportError("worker_unavailable", 409);
       }
+      // Recorded, never refused (owner decision 2026-11-14): this route's
+      // attempt would take the Task's reserved total past its approved
+      // ceiling. Execution start records the same calculation.
+      const ceilingOverrun = amuxApprovedCeilingOverrun({ approvedReceipt: approvedCost,
+        priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+        nextAttemptMicroUsd: BigInt(route.perAttemptMicroUsd) });
+      if (ceilingOverrun) console.warn(JSON.stringify({ subsystem: "amux",
+        event: "v22_approved_ceiling_overrun", phase: "claim", taskId,
+        assignmentId, workerName: route.workerName, routeId: route.routeId,
+        ...ceilingOverrun }));
       const auditId = await writeSystemAuditLog({ tx,
         systemActor: AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR,
         action: "amux.v22.worker.assigned",
@@ -422,7 +432,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
           ...(recovery ? { recoveryApprovalId: recovery.id,
             recoveryCostDigest: recovery.costDigest } : {}),
           capacityAssigned: occupied.length,
-          verifiedWorkerCount: verifiedNames.size },
+          verifiedWorkerCount: verifiedNames.size,
+          ...(ceilingOverrun ? { ceilingOverrun } : {}) },
       });
       await tx.amuxV22WorkerAssignment.create({ data: {
         id: assignmentId, workItemId: taskId,
