@@ -24,6 +24,7 @@ import { amuxDmOwnerSettlementAnswerOf, type AmuxDmOwnerSettlementAnswer,
 import { continueAmuxDmOwnerSettlementRemake,
   type AmuxDmOwnerSettlementRemakeDeps } from "@/lib/amux/dmOwnerSettlementRemake";
 import { applyAmuxDmOwnerSettlementDecision } from "@/lib/amux/dmOwnerSettlementService";
+import { readAmuxOwnerQueueDmAskedAmong } from "@/lib/amux/dmOwnerSettlementRead";
 
 /**
  * The Decision Maker as the approver (owner decision 2026-11-07: "the
@@ -41,6 +42,11 @@ import { applyAmuxDmOwnerSettlementDecision } from "@/lib/amux/dmOwnerSettlement
  * stops it like any DM path. The request is closed as answered outside the
  * confirm path before the answer applies, so Admin no longer offers it and a
  * person's judgment that came first wins.
+ *
+ * A settlement or result review the owner sent to the DM from the owner
+ * queue (owner decision 2026-11-14: asked for, or sent again) is never
+ * applied here: the owner pressed for an opinion, and its answer stays a
+ * proposal the owner confirms.
  */
 
 export type AmuxDmAutoApplyCandidate =
@@ -96,7 +102,12 @@ export async function readAmuxDmAutoApplyCandidate(tx: Prisma.TransactionClient,
   try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
   catch { killSwitch = null; }
   if (killSwitch !== false) return null;
-  const cards = await readOpenAppAnsweredCards(tx);
+  const sampled = await readOpenAppAnsweredCards(tx);
+  // One more statement, only when the sample holds a settlement or a result review.
+  const ownerAsked = await readAmuxOwnerQueueDmAskedAmong(tx, {
+    settlementIds: sampled.flatMap((card) => card.kind.startsWith("settlement_") ? [card.id] : []),
+    reviewIds: sampled.flatMap((card) => card.kind === "result_review" ? [card.id] : []) });
+  const cards = sampled.filter((card) => !ownerAsked.has(card.id));
   const requestId = await readNextDecisionMakerOpenProposal(tx,
     [...new Set(cards.map((card) => card.cardId))]);
   if (!requestId) return null;

@@ -109,6 +109,10 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    열려 있고 handoff되지 않았고 답이 그 종류의 고정 단어일 때만 "이대로 확인"을 낸다. 이 버튼은 새 쓰기 route 없이 기존
    `POST /api/admin/amux/decision-maker/judgments`(`ops:write`, 최근 재인증)를 쓰고, 적용은 S1의 `dm_confirmed` walk가 한다.
    DM이 아직 답하지 않았으면 "검토 중", handoff된 행이면 사유를 문장으로 보인다. 기존 legacy-card 패널은 그대로다.
+   운영자 결정 2026-11-14("DM 의견이 없으면 'DM으로 의견 요청 보내기' 버튼을 제공합니다"): 스위치가 꺼져 있어도 운영자가
+   운영자 확인 대기의 'DM 의견 요청' 버튼으로 카드 하나를 고르면 그 정리만 올린다(누른 사람의 감사 기록
+   `amux.dm_owner_settlement.requested`). 근거를 한 번 읽지 못한(`evidence_unavailable`) 결과 검토·정리는 같은 칸의 'DM에 다시
+   보내기'로 다시 대기에 넣는다. 답은 그대로 제안이고 운영자가 확정한다.
 
 ## 1. 목적과 경계
 

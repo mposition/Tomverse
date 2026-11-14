@@ -4,6 +4,7 @@ import { AMUX_ESCALATION_AWAITING_STATUSES } from "./humanReviewCore.ts";
 import type { AmuxOwnerQueueDmSettlement } from "./ownerQueueDmCore.ts";
 import type { AmuxWorkerProviderClass } from "./workerRegistryCore.ts";
 import type { EngineeringAgentCardItemView } from "../engineeringAgentOwnerItemContextCore.ts";
+import type { AmuxDmRelayView, AmuxOwnerQueueDmView } from "./ownerQueueDmRequestCore.ts";
 
 /**
  * The owner queue ("Waiting on me"): every card that waits on the owner, from
@@ -78,6 +79,8 @@ export type AmuxOwnerQueueItem = {
    * card only. Absent: not read.
    */
   dmSettlement?: AmuxOwnerQueueDmSettlement | null;
+  /** Which Decision Maker path holds this card, how far it got, and the owner's one action (ownerQueueDmRequestCore.ts). Absent: not read. */
+  dmStatus?: AmuxOwnerQueueDmView;
 };
 
 export type AmuxOwnerQueueRead = {
@@ -88,6 +91,8 @@ export type AmuxOwnerQueueRead = {
   processedToday: number | null;
   /** Server time of the read; the list's "N hours ago" is counted from it. */
   generatedAt: string;
+  /** When the host's DM relay last called. Absent or null: not read. */
+  dmRelay?: AmuxDmRelayView | null;
 };
 
 /**
@@ -115,6 +120,23 @@ export const amuxOwnerQueueWithDmSettlements = (
   ...read,
   items: read.items.map((item) => ({ ...item, dmSettlement: byTask.get(item.taskId) ?? null })),
 });
+
+/**
+ * The queue with the Decision Maker's standing on each card and the relay's
+ * last call. A failed read (null) leaves the cards as they were and says the
+ * relay is unknown, so the queue still opens.
+ */
+export const amuxOwnerQueueWithDmStatus = (
+  read: AmuxOwnerQueueRead,
+  dm: { relay: AmuxDmRelayView | null; byTask: ReadonlyMap<string, AmuxOwnerQueueDmView> } | null,
+): AmuxOwnerQueueRead => dm === null ? { ...read, dmRelay: null } : {
+  ...read,
+  dmRelay: dm.relay,
+  items: read.items.map((item) => {
+    const view = dm.byTask.get(item.taskId);
+    return view ? { ...item, dmStatus: view } : item;
+  }),
+};
 
 /** Reasons where the work itself stopped before it finished (a lost run, a limit, a failed tool). */
 const RECOVER_REASONS: ReadonlySet<string> = new Set([

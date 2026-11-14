@@ -5,8 +5,10 @@ import { NextResponse } from "next/server";
 
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { readAmuxOwnerQueue } from "@/lib/amux/adminOwnerQueueRead";
-import { amuxOwnerQueueWithDmSettlements, amuxOwnerQueueWithEngineeringItems } from "@/lib/amux/ownerQueueCore";
+import { amuxOwnerQueueWithDmSettlements, amuxOwnerQueueWithDmStatus, amuxOwnerQueueWithEngineeringItems }
+  from "@/lib/amux/ownerQueueCore";
 import { readAmuxOwnerQueueDm } from "@/lib/amux/ownerQueueDmRead";
+import { readAmuxOwnerQueueDmStatus } from "@/lib/amux/ownerQueueDmStatusRead";
 import type { AmuxOwnerQueueDmSettlement } from "@/lib/amux/ownerQueueDmCore";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
@@ -29,6 +31,10 @@ import { readEngineeringAgentCardItems } from "@/lib/engineeringAgentConsoleRead
  * posts to the existing judgment route (`ops:write`, recent step-up). A read of
  * either part that fails leaves the queue as it was: the cards say so one by
  * one.
+ *
+ * Each card also says which Decision Maker path holds it, where the Decision Maker stands on it, and the read says
+ * when the host's DM relay last called; asking the DM takes `ops:write` in
+ * ./dm-request.
  */
 export async function GET(request: Request) {
   try {
@@ -51,8 +57,14 @@ export async function GET(request: Request) {
       return new Map(read.items.flatMap((item): Array<[string, AmuxOwnerQueueDmSettlement]> =>
         item.escalationId === null ? [] : [[item.taskId, { status: "unread" }]]));
     });
-    return NextResponse.json(
-      amuxOwnerQueueWithDmSettlements(amuxOwnerQueueWithEngineeringItems(read, engineering), settlements), {
+    // Which Decision Maker path holds each card, and the relay's last call
+    // (owner decision 2026-11-14). A failed read leaves the column out.
+    const dmStatus = await readAmuxOwnerQueueDmStatus(read.items, new Date(read.generatedAt)).catch((error) => {
+      console.error("admin AMUX owner queue Decision Maker status read failed", error);
+      return null;
+    });
+    return NextResponse.json(amuxOwnerQueueWithDmStatus(
+      amuxOwnerQueueWithDmSettlements(amuxOwnerQueueWithEngineeringItems(read, engineering), settlements), dmStatus), {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
