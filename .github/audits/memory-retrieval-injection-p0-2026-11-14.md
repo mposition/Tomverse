@@ -93,6 +93,21 @@ officeparser의 더 높은 Node patch 권고 경고가 있었으며 설치는 �
   사용했다. 최초 cold compile 탐색 제한과 중간 수정 중 dev stream 오류를 최종
   재실행으로 해소했다. 메뉴 link/profile 전달 및 mobile 테스트의 Escape dismissal
   경로를 고친 뒤 통과했으며, screenshot baseline이나 production build 증거는 아니다.
+- 기존 mobile composer의 입력 폭·한국어 IME geometry 회귀2/2 통과.
+
+## 독립 검토와 좁은 후속 보완
+
+`482fd916803b200509940e4fdce8070dec248f17`은 저장소 검토 서버의
+`r-20261114-122047-9b2da8`에서 서로 다른 공급사의 두 reviewer 모두 accept였다.
+blocker/major는 없었다. minor로 제기된 native query 공백 계약을 확인한 결과,
+native Review는 raw preflight 뒤 저장 API의 trim을 거쳤다. preflight와 저장 양쪽이
+같은 trimmed prompt를 쓰도록 client 연결만 보완했다. 긴 한국어/NFD/앞뒤 공백
+fixture로 실제 native transport의 두 모델 send query plan 일치를 검증했다.
+native/history query 확장이나 send-only rewrite는 추가하지 않았다.
+native 관련 unit63/63, mobile workspace typecheck 및 두 변경 파일 ESLint가 통과했다.
+이미 검토된 권한·가격·서명·cached-only 경계는 그대로여서 그 검토를 재사용한다.
+동일 계정 재조회 중에도 미확인 상태를 표시하는 것은 오래된 허용을 활성으로
+단정하지 않기 위한 선택이다. 이 검토는 merge/deploy 승인이 아니다.
 
 ## 검색 수치와 해석
 

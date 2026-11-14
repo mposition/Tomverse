@@ -423,10 +423,12 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, onProgress);
     },
     sendReview: async (conversation, text, files, signal, progress) => {
+      // Match the ordinary message persistence route before pricing its query.
+      const prompt = text.trim();
       let admission: { admissionToken: string; contextBundle?: string } | undefined;
       try { if (conversation.selectedModels.length > 1) {
         await requireParity();
-        const input = { comparisonId: Date.now().toString(), conversationId: conversation.id, modelIds: conversation.selectedModels, prompt: text, attachments: files.map(file => ({ mediaType: file.mediaType, size: file.size })), webSearchMode: conversation.webSearchMode ?? "off" };
+        const input = { comparisonId: Date.now().toString(), conversationId: conversation.id, modelIds: conversation.selectedModels, prompt, attachments: files.map(file => ({ mediaType: file.mediaType, size: file.size })), webSearchMode: conversation.webSearchMode ?? "off" };
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
             const response = await client.response("/api/chat/preflight", { ...json("POST", input), signal });
@@ -450,7 +452,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
         }
       } } catch (error) { throw Object.assign(error instanceof Error ? error : new Error("COMPARISON_PREFLIGHT_FAILED"), { questionPersisted: false }); }
       if (signal.aborted) throw new DOMException("Stopped", "AbortError");
-      const { persisted, sourceId } = await persistQuestion(conversation, text, files, signal);
+      const { persisted, sourceId } = await persistQuestion(conversation, prompt, files, signal);
       const outcomes = await Promise.allSettled(persisted.selectedModels.map(modelId =>
         streamModel(persisted, sourceId, modelId, signal, value => progress(modelId, value), true, admission)));
       return { failedModelIds: persisted.selectedModels.filter((_, index) => outcomes[index].status === "rejected") };
