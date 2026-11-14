@@ -9,6 +9,7 @@ import {
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import { submitDecisionMakerOutput } from "@/lib/amux/decisionMakerBodyStore";
+import { dmRunUnavailableIncident } from "@/lib/amux/decisionMakerCore";
 import { loadDecisionMakerDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
   dmInternalRoutesEnabled,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/amux/decisionMakerInternalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
 /**
  * AMUX Decision Maker result submission (docs/policy/amux-decision-maker.md
@@ -110,6 +112,11 @@ export async function POST(request: Request) {
         case "already_rejected":
           if ((result.status === "accepted" || result.status === "existing") && result.resultKind === "validation_failure") {
             await settleDmValidationLatch(body.instance);
+          }
+          // A failed run is not a judgment: tell the operator once, when the ledger
+          // first records it. Not awaited: the broker's answer never waits on a notice.
+          if (result.status === "accepted" && submission.resultKind === "unavailable") {
+            void reportOperationalIncident(dmRunUnavailableIncident(body.instance, body.request_id)).catch(() => undefined);
           }
           return amuxJsonNoStore({
             submitted: true,

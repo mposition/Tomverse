@@ -10,6 +10,7 @@
  * Pure: the switch, and the card's words.
  */
 
+import { DM_EVIDENCE_CLOSE, DM_EVIDENCE_OPEN } from "./amux/decisionMakerCore.ts";
 import { engineeringAgentPatchFiles } from "./engineeringAgentOwnerItemContextCore.ts";
 
 /** Default off. Filing a card starts a Decision Maker turn. */
@@ -51,11 +52,46 @@ export function patchSections(patch: string): string[] {
 }
 
 /**
+ * The card's context room for a patch, in UTF-16 characters: the local AMUX's
+ * bound on a relay card's context (dm_relay_v22.rs CONTEXT_MAX). The question
+ * keeps its own 2,000, so a patch no longer competes with the words around it.
+ */
+export const DM_PATCH_CONTEXT_MAX = 4_000;
+const NOT_CARD_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+const PATCH_DOES_NOT_FIT = "The patch does not fit this card; judge it from the file list.";
+
+/**
+ * A patch as the card's context: one evidence block (the markers the routing's
+ * word check may skip), each file's diff whole while the room lasts and a
+ * count of the ones left out. `whole` says every file's diff is there; a patch
+ * with control characters a card cannot carry shows none. Null when the text
+ * has no file diff.
+ */
+export function patchEvidenceContext(patch: string): { context: string; whole: boolean } | null {
+  const sections = patchSections(patch);
+  if (sections.length === 0) return null;
+  const wrap = (body: string) => `${DM_EVIDENCE_OPEN}\n${body}\n${DM_EVIDENCE_CLOSE}`;
+  const shown: string[] = [];
+  if (!NOT_CARD_TEXT.test(patch)) {
+    // Room for the wrapper, the heading and the "more" line.
+    let left = DM_PATCH_CONTEXT_MAX - wrap("Patch:\n").length - 60;
+    for (const section of sections) {
+      if (section.length + 1 > left) break;
+      shown.push(section);
+      left -= section.length + 1;
+    }
+  }
+  const omitted = sections.length - shown.length;
+  return { whole: omitted === 0, context: wrap(shown.length === 0 ? PATCH_DOES_NOT_FIT :
+    ["Patch:", ...shown, ...(omitted > 0 ? [`(${omitted} more file diffs are not shown.)`] : [])].join("\n")) };
+}
+
+/**
  * The card the relay files, in the shape of a v22 question's pending entry,
- * or null when there is no patch to show. The draft's files are always listed;
- * each file's diff follows whole while the card has room, and the card says
- * how many were left out, so the advice never reads as a judgment of the
- * whole patch when it saw part of it.
+ * or null when there is no patch to show. The question lists the draft's
+ * files; the patch rides in the card's context, each file's diff whole while
+ * it has room, and the card says how many were left out, so the advice never
+ * reads as a judgment of the whole patch when it saw part of it.
  */
 export function engineeringAgentT2DmCard(input: {
   workItemId: string;
@@ -77,24 +113,9 @@ export function engineeringAgentT2DmCard(input: {
     "Your answer is advice shown beside the patch; it applies nothing.",
     "Should a person apply this patch by hand, or reject it? Say why in one or two sentences.",
   ];
-  const fixed = [...head, ...tail].join("\n");
-  if (fixed.length > ENGINEERING_AGENT_T2_DM_QUESTION_MAX) return null;
-  const shown: string[] = [];
-  let left = ENGINEERING_AGENT_T2_DM_QUESTION_MAX - fixed.length - 80;
-  const sections = patchSections(input.patchBody);
-  for (const section of sections) {
-    if (section.length + 1 > left) break;
-    shown.push(section);
-    left -= section.length + 1;
-  }
-  const omitted = sections.length - shown.length;
-  const body = [
-    ...head,
-    shown.length > 0 ? "Patch:" : "The patch does not fit this card; judge it from the file list.",
-    ...shown,
-    ...(shown.length > 0 && omitted > 0 ? [`(${omitted} more file diffs are not shown.)`] : []),
-    ...tail,
-  ].join("\n");
+  const patch = patchEvidenceContext(input.patchBody);
+  if (!patch) return null;
+  const body = [...head, "The patch is in this card's context.", ...tail].join("\n");
   if (body.length > ENGINEERING_AGENT_T2_DM_QUESTION_MAX) return null;
   return {
     question_id: input.workItemId,
@@ -102,6 +123,7 @@ export function engineeringAgentT2DmCard(input: {
     provider: ENGINEERING_AGENT_T2_DM_PROVIDER,
     title: `Patch review: ${input.cardLabel}`.slice(0, TITLE_MAX),
     question: body,
+    context: patch.context,
     unblocks: "The owner reads this advice beside the patch before deciding it; the answer changes nothing by itself.",
     options: [
       { id: "apply", label: "A person should apply it by hand" },

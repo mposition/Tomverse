@@ -181,7 +181,11 @@ export function AmuxOwnerQueueDecision({
   // result or pending publication leaves no retry.
   // A patch no pull request carries is never "no change"; it is retried or
   // its publication restored (AMUX-FILEGEN2-002).
-  const noPrWhy = reviewMatches && review.unpublished_patch ? copy.why.reviewNoPrUnpublishedPatch
+  const hold = reviewMatches ? review.publication_hold ?? null : null;
+  const noPrWhy = hold?.state === "pr_open" && hold.pr_number !== null ?
+    copy.why.reviewDraftPrOpen(hold.pr_number)
+    : hold?.state === "pending" ? copy.why.reviewPublicationPending
+    : reviewMatches && review.unpublished_patch ? copy.why.reviewNoPrUnpublishedPatch
     : outcomes.includes("approve") ?
     reviewMatches && amuxReviewApprovesNoChange(review) ? copy.why.reviewNoPrNoChange
       : copy.why.reviewNoPrApprovable
