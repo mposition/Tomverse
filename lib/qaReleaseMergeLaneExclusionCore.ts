@@ -59,6 +59,25 @@ export const QA_RELEASE_MERGE_LANE_EXCLUDED_BRANCH_PREFIXES: readonly string[] =
 export const QA_RELEASE_DM_APPROVED_HEAD = /^agent\/engineering\/[0-9]{1,20}$/;
 
 /**
+ * The other exception (owner decision 2026-11-15: "CI Admission Agent에 ...
+ * dependabot이 생성한 PR들 모두 자체 병합 가능하게 권한 주세요"): a Dependabot
+ * npm update into develop. Only when the GitHub read vouches for it
+ * (`dependabot`: not a fork, opened by dependabot[bot], every commit
+ * dependabot[bot]'s and signed by GitHub) and it changes nothing but npm
+ * manifests and lock files -- the root package.json is a gate path for its
+ * scripts, and Dependabot only moves dependency versions. A person's commit on
+ * the branch, a workflow (github_actions updates) or any other path leaves it
+ * to a person.
+ */
+export const QA_RELEASE_DEPENDABOT_HEAD = /^dependabot\/npm_and_yarn\/develop\//;
+export const QA_RELEASE_DEPENDABOT_PATHS: readonly string[] = [
+  "package.json",
+  "package-lock.json",
+  "**/package.json",
+  "**/package-lock.json",
+];
+
+/**
  * The only paths a Decision Maker approved pull request may change and still
  * be merged without a person (review r-20261113-134019-5d8f82: an allow list,
  * not a block list -- a list of what a revert cannot undo always misses one,
@@ -153,6 +172,12 @@ export type QaReleaseExclusionInput = {
    * Absent or false: the `agent` prefix leaves it to a person, as ever.
    */
   dmApproved?: boolean;
+  /**
+   * The GitHub read vouches that this is Dependabot's own pull request
+   * (QA_RELEASE_DEPENDABOT_HEAD). Absent or false: the `dependabot` prefix
+   * leaves it to a person, as ever.
+   */
+  dependabot?: boolean;
 };
 
 export type QaReleaseExclusionReason =
@@ -166,7 +191,9 @@ export type QaReleaseExclusionReason =
   | "protected_table_migration"
   | "excluded_branch"
   /** A Decision Maker approved pull request that changes a path outside its merge allow list. */
-  | "dm_outside_allowlist";
+  | "dm_outside_allowlist"
+  /** A Dependabot pull request that changes a path other than an npm manifest or lock file. */
+  | "dependabot_outside_manifests";
 
 export type QaReleaseExclusion =
   | { excluded: false }
@@ -176,6 +203,7 @@ const GATE_MATCHERS = QA_RELEASE_MERGE_LANE_GATE_PATTERNS.map(compileManifestPat
 const DM_ALLOW_MATCHERS = QA_RELEASE_DM_MERGE_ALLOW_PATTERNS.map(compileManifestPattern);
 const DM_ALLOW_EXCEPT_MATCHERS = QA_RELEASE_DM_MERGE_ALLOW_EXCEPT_PATTERNS
   .map((pattern) => new RegExp(compileManifestPattern(pattern).source, "i"));
+const DEPENDABOT_MATCHERS = QA_RELEASE_DEPENDABOT_PATHS.map(compileManifestPattern);
 const DM_BLOCK_MATCHERS = [...QA_RELEASE_MERGE_LANE_GATE_PATTERNS, ...QA_RELEASE_DM_MERGE_BLOCK_PATTERNS]
   .map((pattern) => new RegExp(compileManifestPattern(pattern).source, "i"));
 
@@ -205,8 +233,9 @@ function isReadablePath(path: unknown): path is string {
   return typeof path === "string" && isCanonicalRepoPath(path);
 }
 
-function branchExcluded(headBranch: string, dmApproved: boolean): boolean {
+function branchExcluded(headBranch: string, dmApproved: boolean, dependabot: boolean): boolean {
   if (dmApproved && QA_RELEASE_DM_APPROVED_HEAD.test(headBranch)) return false;
+  if (dependabot && QA_RELEASE_DEPENDABOT_HEAD.test(headBranch)) return false;
   return QA_RELEASE_MERGE_LANE_EXCLUDED_BRANCH_PREFIXES.some(
     (prefix) => headBranch === prefix || headBranch.startsWith(`${prefix}/`),
   );
@@ -224,8 +253,9 @@ export function qaReleaseDmApprovedHumanPaths(paths: readonly unknown[], policyT
 export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput): QaReleaseExclusion {
   const reasons = new Set<QaReleaseExclusionReason>();
   const dmApproved = input.dmApproved === true;
+  const dependabot = dependabotVouched(input);
 
-  if (typeof input.headBranch !== "string" || input.headBranch === "" || branchExcluded(input.headBranch, dmApproved)) {
+  if (typeof input.headBranch !== "string" || input.headBranch === "" || branchExcluded(input.headBranch, dmApproved, dependabot)) {
     reasons.add("excluded_branch");
   }
   // The lists the judgement depends on must be present; a missing one is not
@@ -243,14 +273,19 @@ export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput)
     return { excluded: true, reasons: [...reasons].sort() };
   }
 
-  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns, dmApproved);
+  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns, dmApproved, dependabot);
   for (const file of changedFiles) for (const reason of judgeFile(file)) reasons.add(reason);
 
   return reasons.size === 0 ? { excluded: false } : { excluded: true, reasons: [...reasons].sort() };
 }
 
+/** Dependabot's exception holds only on its own head prefix, whatever the caller says. */
+function dependabotVouched(input: Pick<QaReleaseExclusionInput, "dependabot" | "headBranch">): boolean {
+  return input.dependabot === true && typeof input.headBranch === "string" && QA_RELEASE_DEPENDABOT_HEAD.test(input.headBranch);
+}
+
 /** The per-file half of the judgement: what one changed file excludes for. */
-function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonly string[], dmApproved = false) {
+function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonly string[], dmApproved = false, dependabot = false) {
   const policyTests = new Set(policyTestPaths);
   const ownMatchers = agentOwnPatterns.map(compileManifestPattern);
   return (file: QaReleaseChangedFile): Set<QaReleaseExclusionReason> => {
@@ -262,7 +297,9 @@ function fileJudge(policyTestPaths: readonly string[], agentOwnPatterns: readonl
         reasons.add("unreadable_path");
         continue;
       }
-      if (GATE_MATCHERS.some((matcher) => matcher.test(path))) {
+      const manifest = DEPENDABOT_MATCHERS.some((matcher) => matcher.test(path));
+      if (dependabot && !manifest) reasons.add("dependabot_outside_manifests");
+      if (GATE_MATCHERS.some((matcher) => matcher.test(path)) && !(dependabot && manifest)) {
         reasons.add("gate_path");
       }
       if (policyTests.has(path)) reasons.add("policy_test");
@@ -288,7 +325,7 @@ export function qaReleaseMergeLaneExcludingFiles(
   limit = 20,
 ): { path: string; reasons: QaReleaseExclusionReason[] }[] {
   if (!Array.isArray(input.changedFiles) || !Array.isArray(input.policyTestPaths) || !Array.isArray(input.agentOwnPatterns)) return [];
-  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns, input.dmApproved === true);
+  const judgeFile = fileJudge(input.policyTestPaths, input.agentOwnPatterns, input.dmApproved === true, dependabotVouched(input));
   const out: { path: string; reasons: QaReleaseExclusionReason[] }[] = [];
   for (const file of input.changedFiles) {
     const reasons = judgeFile(file);
