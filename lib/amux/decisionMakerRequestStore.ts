@@ -725,7 +725,11 @@ export async function recordDecisionMakerRequest(
       r."askingProvider", r."optionSetDigest", r."termListVersion", r."classificationVersion", r."scannerVersion",
       r."route", r."instance", r."refusalCodes",
       floor(extract(epoch FROM r."createdAt") * 1000)::bigint AS "createdAtEpochMs",
-      floor(extract(epoch FROM r."assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs"
+      floor(extract(epoch FROM r."assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs",
+      -- AMUXFLOW/B2: a card the app filed itself, proven by the owner
+      -- settlement row that recorded this local card (no extra statement).
+      EXISTS (SELECT 1 FROM "AmuxDmOwnerSettlement" s
+        WHERE s."localCardId" = ${binding.cardId}) AS "appFiledCard"
     FROM (SELECT 1) AS "probe"
     LEFT JOIN "AmuxDecisionMakerRequest" r
       ON r."cardId" = ${binding.cardId} AND r."questionRevision" = ${binding.questionRevision}
@@ -776,10 +780,9 @@ export async function recordDecisionMakerRequest(
     routingSwitches = dmSwitchInputWithOwedLatch(routingSwitches, owedLatch(switches, instance, load) !== null);
   }
   // AMUXFLOW/B2: the evidence markers count only on a card the app filed
-  // itself, proven by the settlement row that recorded this local card.
+  // itself (the routing read above found its settlement row).
   const evidenceTermsExempt = dmTermsFixedTextOnlyEnabled(process.env[DM_TERMS_FIXED_TEXT_ONLY_ENV]) &&
-    (await tx.$queryRaw<Array<{ one: number }>>`
-      SELECT 1 AS "one" FROM "AmuxDmOwnerSettlement" WHERE "localCardId" = ${binding.cardId} LIMIT 1`).length > 0;
+    found.appFiledCard === true;
   const decision = routeDmQuestion({
     ...routingSwitches,
     card,

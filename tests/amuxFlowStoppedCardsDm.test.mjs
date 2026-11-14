@@ -63,7 +63,7 @@ test("engineering agent: a card-scoped mismatch holds no other card; an unbound 
   assert.equal(engineeringAgentHalted({ ...scoped, unacknowledgedHalt: "unbound_app_pr" }), true);
 });
 
-test("the stalled card sweep reads budget-spent todo and backlog behind an archived unfinished card", async () => {
+test("the stalled card sweep reads only a promoted todo Task whose budget is spent", async () => {
   const sweep = await import("../lib/amux/stalledCardSweep.ts");
   assert.equal(sweep.amuxStalledCardSweepEnabled(undefined), false);
   assert.equal(sweep.amuxStalledCardSweepEnabled("enabled"), true);
@@ -77,25 +77,19 @@ test("the stalled card sweep reads budget-spent todo and backlog behind an archi
   assert.ok(sql.includes(`w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task'`));
   assert.ok(sql.includes(`w."archivedAt" IS NULL AND w."v22AssignmentId" IS NULL`));
   assert.ok(sql.includes(`e."status" IN ('open', 'acknowledged')`), "a card already in the queue is left");
-  assert.ok(sql.includes(`dep."archivedAt" IS NOT NULL AND dep."status" <> 'done'`));
-  assert.ok(values.includes(5) && values.includes("attempt_budget_exhausted") && values.includes("dependency_closed"));
+  assert.ok(sql.includes(`w."status" = 'todo' AND w."v22ReceiptId" IS NOT NULL`),
+    "only a promoted card, which the settlement can file");
+  assert.ok(!sql.includes("backlog"), "a backlog card is not swept: the settlement cannot file it");
+  assert.ok(values.includes(5) && values.includes("attempt_budget_exhausted"));
 });
 
-test("DM merge: block-list-only lets lib code through and keeps API routes, deletions and every gate", async () => {
-  const { qaReleaseDmMergeAllowed, qaReleaseDmMergeBlockListOnly } =
-    await import("../lib/qaReleaseMergeLaneExclusionCore.ts");
-  assert.equal(qaReleaseDmMergeBlockListOnly(undefined), false);
-  for (const path of ["lib/routerFailure.ts", "lib/chatStarterCatalog.ts"]) {
-    assert.equal(qaReleaseDmMergeAllowed(path, [], false), false, `off: ${path} is a person's`);
-    assert.equal(qaReleaseDmMergeAllowed(path, [], true), true, `on: ${path}`);
+test("DM merge keeps its allow list: lib code and API routes stay a person's", async () => {
+  const { qaReleaseDmMergeAllowed } = await import("../lib/qaReleaseMergeLaneExclusionCore.ts");
+  for (const path of ["lib/routerFailure.ts", "lib/sessionRevocationCore.ts", "lib/providerCostBudget.ts",
+    "app/api/user/account/route.ts"]) {
+    assert.equal(qaReleaseDmMergeAllowed(path, []), false, path);
   }
-  for (const path of ["prisma/schema.prisma", "lib/creditLedger.ts", "lib/authSession.ts",
-    "lib/adminAudit.ts", "app/api/chat/route.ts", "app/api/user/account/route.ts", "app/api/memories/delete-all/route.ts", "lib/memoryDeleteAll.ts", "docs/policy/amux-intake.md", "docs/ui-contracts/typography.md",
-    ".github/workflows/ci.yml", "lib/engineeringAgentStore.ts", "lib/amux/routerFailure.ts"]) {
-    assert.equal(qaReleaseDmMergeAllowed(path, [], true), false, `still a person's: ${path}`);
-  }
-  assert.equal(qaReleaseDmMergeAllowed("tests/routerFailure.test.mjs", ["tests/routerFailure.test.mjs"], true), false,
-    "a policy test stays a person's");
+  assert.equal(qaReleaseDmMergeAllowed("components/ChatInput.tsx", []), true);
 });
 
 test("only a card the app filed earns the evidence exemption; a worker's markers are plain text", async () => {
@@ -110,8 +104,9 @@ test("only a card the app filed earns the evidence exemption; a worker's markers
   assert.ok(decision.refusals.includes("irreversible_term"), "absent proof: every word is read");
   const store = readFileSync("lib/amux/decisionMakerRequestStore.ts", "utf8");
   assert.match(store, /dmTermsFixedTextOnlyEnabled\(process\.env\[DM_TERMS_FIXED_TEXT_ONLY_ENV\]\) &&/);
-  assert.ok(store.includes('FROM "AmuxDmOwnerSettlement" WHERE "localCardId" = ${binding.cardId} LIMIT 1'),
+  assert.ok(store.includes('EXISTS (SELECT 1 FROM "AmuxDmOwnerSettlement" s'),
     "the exemption needs the settlement row that recorded this local card");
+  assert.ok(store.includes("found.appFiledCard === true"));
 });
 
 test("a held card is left out of the publisher's queue and refused before its run's AMUX write", () => {

@@ -8,12 +8,14 @@ import { AMUX_MAX_EXECUTION_ATTEMPTS } from "@/lib/amux/executionBudgetCore";
  * One definition of a stopped card (owner decision 2026-11-14, AMUX process
  * audit bundle 2, AMUXFLOW/B2). The owner queue and the Decision Maker's
  * owner settlement read a v22 Task that is blocked or in review with an open
- * escalation. Two kinds of card could never get there and sat on no screen:
+ * escalation. A `todo` Task whose attempt budget is spent could never get
+ * there and sat on no screen: every claim's start refuses it (AMUX-GENFILE-002
+ * was assigned 172 times, then sat 162 h unseen).
  *
- * - a `todo` Task whose attempt budget is spent: every claim's start refuses
- *   it (AMUX-GENFILE-002 was assigned 172 times, then sat 162 h unseen);
- * - a `backlog` Task behind a dependency that was archived without being
- *   done: it can never become ready (13 of 35 backlog Tasks on 2026-11-14).
+ * A `backlog` Task behind a dependency archived unfinished is not swept: it
+ * was never promoted, so it has no v22 receipt and the Decision Maker's
+ * settlement cannot file it (review r-20261114-075921-af6baa). It needs a
+ * settlement path for unpromoted cards first.
  *
  * This sweep moves each to `blocked` with an open escalation, so it joins the
  * same queue and the same Decision Maker path as every other stopped card,
@@ -27,13 +29,12 @@ export const amuxStalledCardSweepEnabled = (
 ) => value?.trim() === "enabled";
 
 export const AMUX_STALLED_BUDGET_REASON = "attempt_budget_exhausted";
-export const AMUX_STALLED_DEPENDENCY_REASON = "dependency_closed";
 export const AMUX_STALLED_CARD_SWEPT_ACTION = "amux.v22.stalled_card.blocked";
 const SWEEPER = "system:amux-stalled-card-sweep";
 
 export type AmuxStalledCardCandidate = {
   id: string;
-  reason: typeof AMUX_STALLED_BUDGET_REASON | typeof AMUX_STALLED_DEPENDENCY_REASON;
+  reason: typeof AMUX_STALLED_BUDGET_REASON;
 };
 
 /** The cards a sweep moves, oldest first, at most `limit`; with `taskId`, that card only. A read. */
@@ -42,23 +43,17 @@ export async function readAmuxStalledCards(
   limit: number, taskId: string | null = null,
 ): Promise<AmuxStalledCardCandidate[]> {
   return tx.$queryRaw<AmuxStalledCardCandidate[]>`
-    SELECT w."id", CASE WHEN w."status" = 'todo' THEN ${AMUX_STALLED_BUDGET_REASON}
-      ELSE ${AMUX_STALLED_DEPENDENCY_REASON} END AS "reason"
+    SELECT w."id", ${AMUX_STALLED_BUDGET_REASON}::text AS "reason"
     FROM "AmuxWorkItem" w
     WHERE w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task'
       AND (${taskId}::text IS NULL OR w."id" = ${taskId})
       AND w."archivedAt" IS NULL AND w."v22AssignmentId" IS NULL
       AND NOT EXISTS (SELECT 1 FROM "AmuxHumanEscalation" e
         WHERE e."taskId" = w."id" AND e."status" IN ('open', 'acknowledged'))
-      AND ((w."status" = 'todo'
-          AND (SELECT GREATEST(COUNT(*), COALESCE(MAX(a."attemptNumber"), 0))
-            FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id")
-            >= ${AMUX_MAX_EXECUTION_ATTEMPTS})
-        OR (w."status" = 'backlog' AND EXISTS (
-          SELECT 1 FROM "AmuxWorkDependency" d
-          JOIN "AmuxWorkItem" dep ON dep."id" = d."dependencyId"
-          WHERE d."taskId" = w."id" AND dep."archivedAt" IS NOT NULL
-            AND dep."status" <> 'done')))
+      AND w."status" = 'todo' AND w."v22ReceiptId" IS NOT NULL
+      AND (SELECT GREATEST(COUNT(*), COALESCE(MAX(a."attemptNumber"), 0))
+        FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id")
+        >= ${AMUX_MAX_EXECUTION_ATTEMPTS}
     ORDER BY w."updatedAt", w."id"
     LIMIT ${limit}`;
 }
