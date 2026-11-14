@@ -8,6 +8,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxProcessAuditMessages } from "@/lib/adminMessages/amuxProcessAudit";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { AMUX_PROCESS_AUDIT_MAX_CADENCE_DAYS, AMUX_PROCESS_AUDIT_MIN_CADENCE_DAYS } from "@/lib/amuxProcessAuditCore";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * The owner's schedule controls. Every change, "run now" included, is one POST
@@ -38,6 +39,8 @@ export function AmuxProcessAuditControls({ enabled, cadenceDays, status }: {
         body: JSON.stringify({ enabled: on, cadenceDays: cadence, runNow, ownerConfirmed: true }),
       });
       if (response.ok) {
+        // The saved state is read again by the refresh; the body is consumed so the request finishes.
+        await discardResponseBody(response);
         setMessage(m.saved);
         router.refresh();
         return;
