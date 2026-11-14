@@ -17,7 +17,7 @@ import {
 } from "./dmOwnerSettlementCore.ts";
 import {
   readAmuxDmOwnerSettlementApprovalFacts, readAmuxDmOwnerSettlementPullEvidence,
-  scanAmuxDmOwnerSettlementCandidates,
+  readAmuxDmOwnerSettlementRequestedIds, scanAmuxDmOwnerSettlementCandidates,
 } from "./dmOwnerSettlementRead.ts";
 import {
   AMUX_DM_OWNER_SETTLEMENT_RESOLVER, closeAmuxStoppedCardAsSystemWithin,
@@ -41,6 +41,10 @@ import { openAmuxV22TaskResultRow, v22TaskResultIdeaId } from "./v22TaskResultSt
  * An approval of a review pull request is recorded only -- the binding, its
  * verified head and diff digest -- for the merge lane's next stage; the Task
  * and its escalation stay as they are.
+ *
+ * Owner decision 2026-11-14: with the switch off, the owner may still ask for
+ * one card from the owner queue (ownerQueueDmRequestService.ts); the tick
+ * files the settlements so asked for, and only those.
  */
 
 const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -77,7 +81,9 @@ type SiblingRow = SealedTitle & { forTaskId: string; id: string; label: string; 
  * up to three new stopped Tasks are filed, and the open settlements with no
  * card yet are read with the rows their cards are opened from; the cards of
  * settlements no longer open that the relay has not closed come back to be
- * closed. At most eight statements past the boundary's own.
+ * closed. While the switch is off, the settlements the owner asked for from
+ * the owner queue are read and opened the same way. At most eight statements
+ * past the boundary's own.
  */
 export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionClient,
   input: { enabled: boolean }) {
@@ -97,6 +103,10 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
   let pending: PendingSettlement[] = [];
   let siblings: SiblingRow[] = [];
   let pulls: Awaited<ReturnType<typeof readAmuxDmOwnerSettlementPullEvidence>> = [];
+  // While the switch is off, only the settlements the owner asked for from the
+  // owner queue are filed (owner decision 2026-11-14): one more statement.
+  const requested = input.enabled ? null :
+    await readAmuxDmOwnerSettlementRequestedIds(tx, AMUX_DM_OWNER_SETTLEMENT_PENDING_SCAN);
   if (input.enabled) {
     const found = await scanAmuxDmOwnerSettlementCandidates(tx, AMUX_DM_OWNER_SETTLEMENT_SYNC_LIMIT);
     const filed = found.flatMap((row) => {
@@ -114,6 +124,8 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
       FROM jsonb_to_recordset(${JSON.stringify(filed)}::jsonb) AS x("id" text, "taskId" text,
         "escalationId" text, "attemptId" text, "kind" text, "taskStatus" text, "bindingId" text)
       ON CONFLICT DO NOTHING`;
+  }
+  if (input.enabled || (requested !== null && requested.length > 0)) {
     pending = await tx.$queryRaw<PendingSettlement[]>`
       SELECT s."id" AS "settlementId", s."kind", s."taskId", s."attemptId", s."bindingId",
         s."taskStatus", e."reason", coalesce(w."displayKey", w."id") AS "taskLabel",
@@ -133,6 +145,7 @@ export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionCl
       JOIN "AmuxHumanEscalation" e ON e."id" = s."escalationId"
       LEFT JOIN "AmuxV22TaskResult" r ON r."attemptId" = s."attemptId" AND r."taskId" = s."taskId"
       WHERE s."state" = 'open' AND s."localCardId" IS NULL AND s."handoffAt" IS NULL
+        AND (${requested === null} OR s."id" = ANY(${requested ?? []}::text[]))
       ORDER BY s."createdAt", s."id"
       LIMIT ${AMUX_DM_OWNER_SETTLEMENT_PENDING_SCAN}`;
     const taskIds = [...new Set(pending.map((row) => row.taskId))];

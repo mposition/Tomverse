@@ -35,6 +35,8 @@ type World = {
   reviewPending: unknown[]; reviewClosing: unknown[]; autoApplied: unknown; autoCalls: number;
   t2Pending: unknown[]; t2Closing: unknown[]; t2Unfilable: string[]; t2Recorded: unknown;
   settlementPending: unknown[]; settlementClosing: unknown[]; settlementEnabled: boolean | null;
+  /** The settlements the owner asked for from the owner queue: the only ones read while the switch is off. */
+  settlementRequested: unknown[];
   heartbeats: number;
 };
 let world: World;
@@ -49,6 +51,7 @@ const reset = (changes: Partial<World> = {}) => {
     reviewPending: [], reviewClosing: [], autoApplied: null, autoCalls: 0,
     t2Pending: [], t2Closing: [], t2Unfilable: [], t2Recorded: null,
     settlementPending: [], settlementClosing: [], settlementEnabled: null,
+    settlementRequested: [],
     heartbeats: 0,
     ...changes,
   };
@@ -122,7 +125,8 @@ mock.module(mod("lib/amux/v22ResultReviewService.ts"), { namedExports: {
 mock.module(mod("lib/amux/dmOwnerSettlementService.ts"), { namedExports: {
   readAmuxDmOwnerSettlementSyncRows: async (_tx: unknown, input: { enabled: boolean }) => {
     world.settlementEnabled = input.enabled;
-    return { pending: world.settlementPending, siblings: [], pulls: [], closing: world.settlementClosing };
+    return { pending: input.enabled ? world.settlementPending : world.settlementRequested, siblings: [], pulls: [],
+      closing: world.settlementClosing };
   },
   openAmuxDmOwnerSettlementCards: async (rows: { pending: unknown[] }) => ({ cards: rows.pending, unfilable: [] }),
   recordAmuxDmOwnerSettlementsUnfilable: async () => ({ recorded: 0 }),
@@ -267,6 +271,9 @@ test("an owner queue settlement rides the tick before the T2 drafts, filed only 
   assert.deepEqual(off.pending, []);
   assert.deepEqual(off.closing, [{ question_id: SETTLEMENT, card_id: "OS-1" }], "its cards still close");
   assert.ok(world.boundaries.includes("decisionMakerOwnerSettlementSync"));
+  // Owner decision 2026-11-14: with the switch off, the one the owner asked for is still filed.
+  reset({ settlementPending: [settlementEntry], settlementRequested: [settlementEntry] });
+  assert.deepEqual((await (await syncRoute.POST(post({}))).json()).pending, [settlementEntry]);
   process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT = "enabled";
   process.env.TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW = "enabled";
   try {

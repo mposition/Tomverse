@@ -76,7 +76,9 @@ import {
  * Owner decision 2026-11-13: a stopped v22 Task in the owner queue that no
  * other path holds rides the tick as an owner queue settlement
  * (lib/amux/dmOwnerSettlementService.ts; new settlements and cards only while
- * TOMVERSE_AMUX_DM_OWNER_SETTLEMENT=enabled), before the T2 drafts.
+ * TOMVERSE_AMUX_DM_OWNER_SETTLEMENT=enabled), before the T2 drafts. With the
+ * switch off, the settlements the owner asked for from the owner queue are
+ * still filed (owner decision 2026-11-14).
  *
  * Operator decision 2026-11-11: an engineering agent T2 draft rides the tick
  * last, for advice only (lib/engineeringAgentT2DmReviewService.ts; new cards
@@ -137,7 +139,7 @@ export async function POST(request: Request) {
       const settlement = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementSync,
         (tx) => readAmuxDmOwnerSettlementSyncRows(tx, { enabled: settlementOn })).then(async (rows) => {
-        if (!settlementOn) return { pending: [], closing: rows.closing };
+        // With the switch off, `pending` holds only what the owner asked for.
         const opened = await openAmuxDmOwnerSettlementCards(rows);
         if (opened.unfilable.length > 0)
           await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementHandoff,
