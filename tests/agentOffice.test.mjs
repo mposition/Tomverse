@@ -1267,6 +1267,7 @@ test("the routing room's colour and lines follow the latest optimizer cycle and 
   // A cycle that stopped at its budget before judging, or an unknown or missing
   // failure code, still needs a look: nothing was judged.
   const budget = room({ last: routingLast({ status: "failed", failure: "budget_exhausted" }) });
+  assert.equal(routingGateRejected({ status: "failed", failure: "cost_unknown" }), false);
   assert.equal(budget.status, "attention");
   assert.equal(budget.badge, "Failed");
   assert.equal(budget.line, "Latest routing cycle failed · 10-20 14:05 AEST");

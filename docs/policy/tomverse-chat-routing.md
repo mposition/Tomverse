@@ -161,7 +161,41 @@ A fallback cannot silently upgrade a user to a model or capability that the orig
 
 Online Router evaluation links final assistant messages, manual model changes, regenerate-with-another-model actions, post-regeneration conversation continuation, fallback outcomes, cost, and provider SLOs to Router/Planner versions. Dashboards expose routing-reason distribution and cost anomalies; product metrics never become an authorization input without a separately reviewed policy.
 
-## 11. Release evidence
+## 11. Optimizer evidence and cost observation
+
+Routing guidance is frozen from training decisions and pre-cycle operational
+statistics before evaluation calls start. Current-cycle direct comparisons,
+judge results, answer failures and holdout performance do not reach the
+generator. Without pre-cycle comparative evidence, new guidance uses general
+work-and-credit rules rather than model-specific preferences. Evaluation
+continues to reuse its existing answer and ordered-judgement caches and caps.
+
+Routing and rewrite summaries distinguish known token-usage cost, verified
+no-dispatch and unknown usage/dispatch or invalid inputs. Configured token
+prices and observed usage produce calculated costs, not provider invoices.
+An unknown call closes further paid scheduling in that cycle; every in-flight
+call is awaited and its observations retained. Timeouts and provider exceptions
+without confirmed usage also close the cycle; remaining answer attempts are
+not scheduled after closure. Known subtotals alone continue through the existing ledger and run/day/month admission. This is not a hard
+total-spend guarantee: accepted in-flight overshoot, future admission against
+historical unknowns, reservations and reconciliation are unchanged.
+
+New manual and automatic guidance promotions share evaluation version,
+holdout, complete cost coverage and the existing quality/credit gates.
+Summary JSON retains quality status separately from cost closure, and own
+answer verdicts separately from same-kind/model-pair proxies. The existing
+direct-proxy thresholds remain unchanged. A catalog credit ratio of at most
+1.1 permits a 10% increase; it is not a savings gate. Admin displays the gate
+basis, observed counts, known cost and unconfirmed total cost together.
+
+Legacy cycles remain unverified for new promotion. Existing active guidance,
+approved rollback, autoPromote off, settingAutoApply and recommendation
+status boundaries remain separate. No new migration or live activation is
+part of this change. These tool-free samples do not establish attachment,
+search, file, Memory or continuation E2E success, production answer quality,
+provider non-inferiority or cost savings.
+
+## 12. Release evidence
 
 The separate owner-approved
 [initial Refiner/Auto release](./chat-refiner-initial-auto-release-v1.md) may

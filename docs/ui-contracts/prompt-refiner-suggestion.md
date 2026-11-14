@@ -457,6 +457,10 @@ rollback할 수 있다. rewrite 필드 정의, 답·요구사항 추가·지시 
 순서를 바꿔 두 번 비교한다. 이 평가에서도 재작성은 live와 같은 router 호출과 `admitRouterRewrite()`를
 거친다. 승격은 통과한 회차에 대해 운영자가 누르거나, 기본 꺼진 rewrite 전용 자동 승격 스위치가 한다.
 두 경우 모두 같은 트랜잭션에서 감사 기록이 남고 한 단계씩 되돌릴 수 있다.
+새 회차는 routing과 같은 평가 version·holdout·비용 coverage·기존 품질/credit 승격
+검사를 쓴다. 비용 불명은 답변 품질 실패와 분리하며 후속 paid scheduling을 중단하고
+진행 중 결과를 수집한다. 구형 회차는 새 승격 근거로 소급 인증하지 않으며, 이미 활성인
+지침과 기존 rollback은 유지한다. 자세한 비용 한계는 routing 정책 §11을 따른다.
 
 검증: `tests/autoLlmRouterCore.test.mjs`가 꺼진 상태의 프롬프트 동일성, 켜진 상태의 규칙과
 schema, `admitRouterRewrite()`의 경계, `withRouterRewrite()`가 마지막 일반 텍스트 사용자

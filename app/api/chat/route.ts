@@ -2512,6 +2512,7 @@ async function handleChatPost(
         const allowRouterSearchPlan = !hasContinuation && routerSearchPlanCandidate && presearchFlagEnabled;
         // Set only when the router model was actually asked.
         let routerCallOutcome = null as string | null;
+        let routerOfferedModelIds: readonly string[] | undefined;
         // A combined router call slower than this starts the separate image
         // classification beside it (off unless CHAT_ROUTER_IMAGE_HEDGE_MS).
         const imageHedgeMs = imageRouting.context ? chatRouterImageHedgeMs() : null;
@@ -2559,6 +2560,7 @@ async function handleChatPost(
                       imageIntent: imageRouting.context,
                       onImageDecision: imageRouting.accept,
                       onCallOutcome: (outcome: string) => { routerCallOutcome = outcome; },
+                      onCandidatesResolved: (ids) => { routerOfferedModelIds = ids; },
                       // An image turn is not a routing decision a chat model
                       // answered; its row would teach the router the wrong thing.
                       recordDecision: (pick) => importedSource ? Promise.resolve(false) : pick?.requiresFileGeneration
@@ -2606,7 +2608,8 @@ async function handleChatPost(
             // The router was asked and gave nothing usable: answer with the
             // requested model (normally the default), not the rule's cheapest
             // fit, which never saw whether this is a file request.
-            routerCallOutcome !== null && routerCallOutcome !== "picked" ? requestedModelId : null
+            routerCallOutcome !== null && routerCallOutcome !== "picked" ? requestedModelId : null,
+            routerOfferedModelIds
         );
         const autoRouted = guestAutoSelection?.routed === true ||
             autoSelection.routed;

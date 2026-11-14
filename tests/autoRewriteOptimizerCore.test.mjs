@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { autoQualityCostCases } from "./fixtures/autoQualityCostCases.mjs";
 
 import {
   AUTO_LLM_ROUTER_DEFAULT_REWRITE_GUIDANCE,
   AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS,
   AUTO_LLM_ROUTER_REWRITE_SOURCE_MAX_CHARS,
+  boundedRouterInput,
 } from "../lib/autoLlmRouterCore.ts";
 import { AUTO_ROUTER_OPTIMIZER_TARGET_SAMPLE } from "../lib/autoRouterOptimizerCore.ts";
 import {
@@ -17,7 +19,28 @@ import {
   rewriteSyntheticCaseViews,
   runRewriteOptimizerCycle,
   scheduledOptimizerTarget,
+  autoRewriteJudgeMessage,
+  rewriteAnswerTurn,
 } from "../lib/autoRewriteOptimizerCore.ts";
+
+test("KO/EN constraint fixtures reach the existing rewrite judge as original bounded data, without claiming semantic or tool success", () => {
+  assert.equal(autoQualityCostCases.length, 24);
+  for (const item of autoQualityCostCases) {
+    const { message, previousAnswer } = boundedRouterInput(item.prompt, item.previousAnswer ?? "Context.");
+    const decision = { routerInput: message, routerContext: previousAnswer, candidates: [{}, {}] };
+    if (item.kind === "long-tail") {
+      assert.equal(isRewriteSampleTurn(decision), false);
+      continue;
+    }
+    const sent = JSON.parse(autoRewriteJudgeMessage(decision, "answer A", "answer B"));
+    assert.equal(sent.message, item.prompt);
+    assert.ok(sent.message.includes(item.constraint));
+    assert.equal(sent.previousAnswer, previousAnswer);
+    assert.deepEqual(rewriteAnswerTurn(decision, null), { message, previousAnswer });
+  }
+  assert.match(AUTO_REWRITE_JUDGE_SYSTEM, /negations, exceptions, exact quantities/);
+  assert.match(AUTO_REWRITE_JUDGE_SYSTEM, /Tool-dependent success cannot be established/);
+});
 
 const candidates = [
   { id: "light", name: "Light", provider: "p", bestFor: "chat", tier: "standard", reasoning: null, contextWindowTokens: null, acceptsImages: false, credits: 1 },
@@ -300,18 +323,21 @@ test("once actual spend reaches the budget no new call starts, and the cycle nev
   assert.deepEqual(zero.calls, { synthesize: 0, generate: 0, rewrite: 0, answer: 0, judge: 0 });
 });
 
-test("a call that throws costs nothing and is counted as failed", async () => {
+test("a thrown call stops new paid work and records unknown cost separately from quality", async () => {
   const { deps } = fakeDeps({
     judge: async () => { throw new Error("provider down"); },
   });
   const result = await run(deps);
-  assert.equal(result.failedCalls, 12);
+  assert.ok(result.failedCalls > 0 && result.failedCalls <= 8);
+  assert.equal(result.costCoverage.unknownCalls, result.failedCalls);
+  assert.equal(result.costCoverage.started, result.costCoverage.completed);
+  assert.equal(result.quality.status, "unmeasured");
   assert.equal(result.spentByKind.judge, 0);
   // Neither order answered: undecided and counted, never a tie or a win.
   assert.equal(result.summary.ties, 0);
   assert.equal(result.summary.undecided, 6);
-  assert.equal(result.judgeFailed, 12);
-  assert.equal(result.failure, "too_few_decided");
+  assert.ok(result.judgeFailed >= result.failedCalls);
+  assert.equal(result.failure, "cost_unknown");
 });
 
 test("a judge order with no verdict leaves a rewrite case undecided, as in the routing cycle", async () => {

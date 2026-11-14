@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { autoQualityCostCases } from "./fixtures/autoQualityCostCases.mjs";
 
 import { AVAILABLE_MODELS, getModelUsageCredits } from "../lib/models.ts";
 import {
@@ -14,6 +15,8 @@ import {
   autoLlmRouterOutputSchema,
   autoLlmRouterSession,
   autoLlmRouterUserMessage,
+  boundedRouterInput,
+  boundedRouterText,
   parseAutoLlmRouterOutput,
   previousAnswerExcerpt,
   resolveAutoLlmRouterModel,
@@ -24,6 +27,40 @@ const ids = ["gpt-5-6-luna", "deepseek-v4-flash", "claude-opus-4-8"];
 const candidates = autoLlmRouterCandidates(ids, AVAILABLE_MODELS, {
   "gpt-5-6-luna": 1,
   "deepseek-v4-flash": 1,
+});
+
+for (const item of autoQualityCostCases) {
+  test(`bounded input preserves constraints: ${item.id} (input contract only)`, () => {
+    const bounded = boundedRouterInput(item.prompt, item.previousAnswer);
+    const message = JSON.parse(autoLlmRouterUserMessage(item.prompt, item.previousAnswer, candidates));
+    assert.equal(message.message, bounded.message);
+    assert.ok(message.message.includes(item.constraint));
+    assert.ok(message.message.length <= AUTO_LLM_ROUTER_MAX_PROMPT_CHARS);
+    if (item.prompt.length <= AUTO_LLM_ROUTER_MAX_PROMPT_CHARS) assert.equal(message.message, item.prompt);
+    else {
+      assert.ok(message.message.startsWith(item.prompt.slice(0, 20)));
+      assert.ok(message.message.endsWith(item.prompt.slice(-50)));
+      assert.ok(message.message.includes("[... middle omitted ...]"));
+    }
+    if (item.previousAnswer) {
+      assert.equal(message.previousAnswer, bounded.previousAnswer);
+      assert.ok(message.previousAnswer.length <= 600);
+      assert.ok(message.previousAnswer.endsWith(item.previousAnswer.slice(-20)));
+      assert.equal(previousAnswerExcerpt([{ role: "assistant", content: item.previousAnswer }, { role: "user", content: item.prompt }]), bounded.previousAnswer);
+    }
+    assert.equal(autoLlmRouterUserMessage(bounded.message, bounded.previousAnswer, candidates),
+      autoLlmRouterUserMessage(item.prompt, item.previousAnswer, candidates));
+  });
+}
+
+test("bounded excerpts never split surrogate pairs and remain idempotent", () => {
+  for (const cap of [600, 4000]) for (const offset of [0, 1, 2]) {
+    const value = "x".repeat(offset) + "😀".repeat(3000);
+    const bounded = boundedRouterText(value, cap);
+    assert.ok(bounded.length <= cap);
+    assert.ok(bounded.isWellFormed());
+    assert.equal(boundedRouterText(bounded, cap), bounded);
+  }
 });
 
 test("router diagnostics keep only bounded metadata, never provider or model content", () => {
