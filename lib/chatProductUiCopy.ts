@@ -70,7 +70,7 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
       open: "Chat 열기",
     },
     review: {
-      shortLabel: "비교",
+      shortLabel: "모델 비교",
       name: "Tomverse Review",
       feature: "모델 비교",
       description: "모델을 직접 선택하고 답변을 나란히 비교.",

@@ -95,8 +95,6 @@ export const LIMITS = Object.freeze({
   tasksPerDay: 24,
   // Leave five hours inside the unit's 23h bound for the last task and cleanup.
   dailyRunMs: 18 * 60 * 60_000,
-  autoPrWaitMs: 5 * 60_000,
-  autoPrPollMs: 15_000,
   bundleBytes: 50 * 1024 * 1024,
   headerBytes: 256 * 1024,
   instructionChars: 20_000,

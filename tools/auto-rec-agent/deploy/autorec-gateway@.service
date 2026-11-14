@@ -31,7 +31,7 @@ ExecStart=/usr/bin/node --disable-sigusr1 --no-warnings=ExperimentalWarning /usr
 StandardInput=socket
 StandardOutput=socket
 StandardError=journal
-# The first publish fetches develop (up to 30 min); push 10 min; Auto PR wait 5 min.
+# The first publish fetches develop (up to 30 min); push takes up to 10 min.
 RuntimeMaxSec=70min
 NoNewPrivileges=yes
 PrivateDevices=yes

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -9,6 +10,9 @@ import {
 } from "@/components/admin/AdminAmuxRoutingPanel";
 import { amuxLegacyCardReadOf, type AmuxLegacyCardRead } from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxOwnerQueueDecision } from "@/components/admin/AmuxOwnerQueueDecision";
+import { AmuxReviewRejectionReason, amuxRejectedAttemptsOf } from "@/components/admin/AmuxReviewRejection";
+import { amuxOwnerQueueDmFrom } from "@/components/admin/AmuxOwnerQueueDm";
+import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue";
 import { AmuxOwnerQueueView, isAmuxOwnerQueueRead } from "@/components/admin/AmuxOwnerQueueScreen";
 import type { AmuxOwnerQueueItem, AmuxOwnerQueueRead } from "@/lib/amux/ownerQueueCore";
 import { amuxOwnerQueueEngineeringButtons } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
@@ -613,7 +617,78 @@ test("the legacy panel comes out of the card detail the review reads and keeps o
     },
   });
   assert.deepEqual(sent, ["/api/admin/amux/execution-view?view=detail&taskId=task-1"]);
-  assert.deepEqual(read, { state: "unavailable", legacyCard: { revision: 8, view: preV22Legacy.view } });
+  assert.deepEqual(read, { state: "unavailable", legacyCard: { revision: 8, view: preV22Legacy.view },
+    rejections: [] });
+});
+
+// Owner decision 2026-11-14: each run the code review rejected shows its
+// reasons beside the retry, recover and close choices; a record from before
+// the reasons were kept says which review job holds them.
+const REJECT_JOB = "r-20261113-111120-93735a";
+const OLD_JOB = "r-20261113-111543-cca3be";
+const rejectedDetail = {
+  id: "task-1", revision: 8, legacyCard: null,
+  attempts: [
+    { id: "attempt-2", attemptNumber: 2, v52Review: { verdict: "reject", jobId: REJECT_JOB,
+      reviewerVendors: ["openai"],
+      findingsSummary: "- [major · openai] lib/chat/stream.ts:42 artifactUnavailable is never set\n- [minor · openai] tests miss the trailer" } },
+    { id: "attempt-1", attemptNumber: 1, v52Review: { verdict: "reject", jobId: OLD_JOB,
+      reviewerVendors: ["moonshot"], findingsSummary: null } },
+    { id: "attempt-0", attemptNumber: 0, v52Review: { verdict: "accept", jobId: "r-20261113-101543-cca3be",
+      reviewerVendors: ["openai"], findingsSummary: null } },
+    { id: "attempt-x", attemptNumber: 3, v52Review: null },
+  ],
+};
+
+test("the owner execution read hands on each rejected run with its reasons", async () => {
+  const read = await readAmuxOwnerExecutionMetadata({
+    review: reviewFor("esc-1"), controller: new AbortController(), isCurrent: () => true,
+    fetcher: async () => Response.json(rejectedDetail),
+  });
+  assert.equal(read?.state, "unavailable");
+  const rejections = read && "rejections" in read ? read.rejections ?? [] : [];
+  assert.deepEqual(rejections.map((attempt) => [attempt.id, attempt.attemptNumber]),
+    [["attempt-2", 2], ["attempt-1", 1]]);
+  assert.deepEqual(amuxRejectedAttemptsOf("task-2", rejectedDetail), []);
+});
+
+test("a rejected run's reasons sit in the why box; an older record names its review job", () => {
+  const escalationId = items[0].escalationId!;
+  const ctl = controller({ selectedEscalationId: escalationId, review: reviewFor(escalationId),
+    ownerExecution: { state: "unavailable", legacyCard: null,
+      rejections: amuxRejectedAttemptsOf("task-1", rejectedDetail) } });
+  const html = decision(items[0], ctl);
+  const why = html.slice(html.indexOf('data-testid="amux-owner-queue-why"'),
+    html.indexOf('data-testid="amux-owner-queue-choices"'));
+  assert.match(why, /data-testid="amux-review-rejection-list"/);
+  assert.match(why, /Run 2 · Why the code review rejected this run/);
+  assert.match(why, /lib\/chat\/stream\.ts:42 artifactUnavailable is never set/);
+  assert.match(why, /tests miss the trailer/);
+  assert.match(why, /data-kind="job"/);
+  assert.match(why, new RegExp(`review server, job ${OLD_JOB}`));
+  assert.match(why, new RegExp(`npm run -s review -- report ${OLD_JOB} --slot 0`));
+  assert.doesNotMatch(why, /r-20261113-101543-cca3be/);
+  // Only the owner reads the card detail, so nobody else sees the reasons.
+  assert.doesNotMatch(decision(items[0], ctl, false), /amux-review-rejection/);
+});
+
+test("the card detail's attempt shows a reject's reasons and nothing for other verdicts", () => {
+  const summary = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={2}
+    review={rejectedDetail.attempts[0].v52Review} />);
+  assert.match(summary, /data-kind="summary"/);
+  assert.match(summary, /reviewed by openai/);
+  assert.match(summary, /shown as data/);
+  assert.equal(renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={0}
+    review={rejectedDetail.attempts[2].v52Review} />), "");
+  assert.equal(renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={3} review={null} />), "");
+  // Two reviewers (a contract change): either slot may hold the reject.
+  const twoSlots = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
+    review={{ verdict: "reject", jobId: OLD_JOB, reviewerVendors: ["openai", "google"], findingsSummary: null }} />);
+  assert.match(twoSlots, new RegExp(`report ${OLD_JOB} --slot 0`));
+  assert.match(twoSlots, new RegExp(`report ${OLD_JOB} --slot 1`));
+  const none = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
+    review={{ verdict: "reject", jobId: null, reviewerVendors: [], findingsSummary: null }} />);
+  assert.match(none, /data-kind="none"/);
 });
 
 // Owner decision 2026-11-10: a run whose CLI usage was never fully reported
@@ -742,4 +817,107 @@ test("the list marks a card whose patch has no publication path", () => {
   const marked = view({ read: read({ items: [item({ publicationPathMissing: true })], total: 1 }) });
   assert.match(marked, /data-testid="amux-owner-queue-publication-path-missing"[^>]*>No publication path/);
   assert.doesNotMatch(view(), /amux-owner-queue-publication-path-missing/);
+});
+
+const DM_REQUEST = "0b6f2a3e-5d1c-4e8f-9a7b-2c3d4e5f6a7b";
+const dmProposal = (optionId: string, irreversible = false) => ({
+  state: "proposal" as const, requestId: DM_REQUEST, answer: null, optionId,
+  rationale: "The Task's work is already in the repository.", irreversible,
+  snapshot: { state: "none" as const, targetSha: null, paths: [] },
+  shown: { answerDigest: null, rationaleDigest: "3".repeat(64), optionId, irreversible,
+    snapshotState: "none" as const, snapshotTargetSha: null, snapshotManifestDigest: null },
+});
+const settlementOf = (overrides: Record<string, unknown> = {}) => ({
+  status: "read" as const, settlementId: "set-1", kind: "stopped" as const, state: "open" as const,
+  decision: null, handoffReason: null, dm: dmProposal("complete"), confirmable: true, ...overrides,
+}) as NonNullable<AmuxOwnerQueueItem["dmSettlement"]>;
+const withDm = (dmSettlement: AmuxOwnerQueueItem["dmSettlement"]) =>
+  decision(item({ dmSettlement }), controller());
+
+test("a Decision Maker proposal shows its choice, why and the confirmation through the existing judgment route", () => {
+  const html = withDm(settlementOf());
+  assert.match(html, /data-testid="amux-owner-queue-dm"[^>]*data-dm-state="proposal"/);
+  assert.match(html, /complete: Mark the Task done; its work is in/);
+  assert.match(html, /The Task&#x27;s work is already in the repository\./);
+  assert.match(html, /data-testid="amux-worker-question-dm-confirm"[^>]*>Confirm as proposed</);
+  assert.match(html, /Card only: no repository snapshot was sent\./);
+  assert.doesNotMatch(html, /amux-worker-question-dm-irreversible/);
+  // The owner's own decision below it is untouched.
+  assert.match(html, /data-testid="amux-owner-queue-why"/);
+  assert.equal(readFileSync("components/admin/AmuxOwnerQueueDm.tsx", "utf8").includes("/api/admin"), false,
+    "no route of its own: the button is the worker question's, on the judgment route");
+});
+
+test("an irreversible proposal says so before it can be confirmed", () => {
+  const html = withDm(settlementOf({ dm: dmProposal("close", true) }));
+  assert.match(html, /data-testid="amux-worker-question-dm-irreversible"/);
+  assert.match(html, /data-testid="amux-worker-question-dm-confirm"/);
+});
+
+test("a card the Decision Maker has not answered says it is reviewing, with no confirmation", () => {
+  for (const dm of [{ state: "filed" }, { state: "working", requestId: DM_REQUEST },
+    { state: "not_sent", reason: "waiting_relay" }] as const) {
+    const html = withDm(settlementOf({ dm, confirmable: false }));
+    assert.match(html, /data-dm-state="reviewing"/);
+    assert.match(html, /The Decision Maker is reviewing this card/);
+    assert.doesNotMatch(html, /amux-worker-question-dm-confirm/);
+  }
+});
+
+test("a handed-off card says why in a sentence, shows the proposal read only, and offers no confirmation", () => {
+  const handed = withDm(settlementOf({ kind: "t2_pr", dm: dmProposal("approve"), confirmable: false,
+    handoffReason: "outside_dm_merge_allowlist" }));
+  assert.match(handed, /data-dm-state="handed_off"/);
+  assert.match(handed, /outside what the Decision Maker may approve for an automatic merge into develop/);
+  assert.match(handed, /approve: Approve the pull request/);
+  assert.doesNotMatch(handed, /amux-worker-question-dm-confirm/);
+  assert.doesNotMatch(handed, /outside_dm_merge_allowlist/, "the stored code is never shown");
+  const noProposal = withDm(settlementOf({ dm: { state: "unavailable" }, confirmable: false,
+    handoffReason: "evidence_unavailable" }));
+  assert.match(noProposal, /never put to the Decision Maker/);
+  assert.match(withDm(settlementOf({ dm: { state: "unavailable" }, confirmable: false,
+    handoffReason: "a_future_reason" })), /could not apply its answer, so this card is left to you/);
+});
+
+test("an answer outside the card's fixed words is shown but not offered for confirmation", () => {
+  const html = withDm(settlementOf({ dm: { ...dmProposal("retry"), optionId: null, answer: "do something else" },
+    confirmable: false }));
+  assert.match(html, /cannot be confirmed as it stands/);
+  assert.doesNotMatch(html, /amux-worker-question-dm-confirm/);
+});
+
+test("a settlement that could not be read says so for this card only; a settled one says how it ended", () => {
+  assert.match(withDm({ status: "unread" }), /data-dm-state="unread"[^>]*>[\s\S]*could not be read/);
+  assert.match(withDm(settlementOf({ state: "applied", decision: "retry" })),
+    /data-dm-state="applied"[\s\S]*answer was applied: Run the Task again/);
+  assert.match(withDm(settlementOf({ state: "claimed" })), /remake this card as a new idea/);
+  assert.match(withDm(settlementOf({ state: "cancelled" })), /was cancelled/);
+  // A card with no settlement, and one the response did not carry, draw no Decision Maker area.
+  assert.doesNotMatch(withDm(null), /amux-owner-queue-dm/);
+  assert.doesNotMatch(withDm(undefined), /amux-owner-queue-dm/);
+});
+
+test("the Decision Maker area is Korean when the console is, and handoff reasons are sentences in both languages", () => {
+  const { en, ko } = adminAmuxOwnerQueueMessages;
+  assert.deepEqual(Object.keys(ko.dm.handoff).sort(), Object.keys(en.dm.handoff).sort());
+  assert.deepEqual(Object.keys(ko.dm.options).sort(), Object.keys(en.dm.options).sort());
+  for (const reason of Object.keys(en.dm.handoff)) {
+    assert.ok(ko.dm.handoff[reason].length > 10 && /[가-힣]/.test(ko.dm.handoff[reason]), reason);
+  }
+  assert.match(ko.dm.reviewing, /검토 중/);
+});
+
+test("the screen draws only a settlement it can check", () => {
+  const good = settlementOf();
+  assert.deepEqual(amuxOwnerQueueDmFrom(good), good);
+  assert.equal(amuxOwnerQueueDmFrom(null), null);
+  assert.equal(amuxOwnerQueueDmFrom(undefined), null);
+  assert.deepEqual(amuxOwnerQueueDmFrom({ status: "unread" }), { status: "unread" });
+  assert.deepEqual(amuxOwnerQueueDmFrom("nonsense"), { status: "unread" });
+  assert.deepEqual(amuxOwnerQueueDmFrom({ ...good, kind: "other" }), { status: "unread" });
+  assert.deepEqual(amuxOwnerQueueDmFrom({ ...good, confirmable: "yes" }), { status: "unread" });
+  // A proposal the shared reader refuses is never confirmable.
+  const broken = amuxOwnerQueueDmFrom({ ...good, dm: { state: "proposal", requestId: DM_REQUEST } });
+  assert.equal(broken?.status === "read" && broken.dm.state, "unavailable");
+  assert.equal(broken?.status === "read" && broken.confirmable, false);
 });

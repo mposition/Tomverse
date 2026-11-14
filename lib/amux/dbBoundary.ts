@@ -644,6 +644,14 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 12,
     isolation: "mutation",
   },
+  // The settlements of the owner queue's cards, for each card's Decision Maker
+  // area (lib/amux/ownerQueueDmRead.ts): setup + ONE statement + fence, pinned
+  // by tests/server-contract/amux-owner-queue-dm-read.test.ts.
+  ownerQueueSettlementRead: {
+    operation: "owner_queue_settlement_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
   // The one remake claim an earlier tick left unfinished: setup + the claim +
   // fence. A remake's idea is guarded inside the idea intake's own commit
   // transaction, which is not an AMUX boundary (ideaSessionSubmissionService.ts).

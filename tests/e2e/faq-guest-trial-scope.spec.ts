@@ -21,11 +21,11 @@ test("Korean FAQ links to current guest limits without rewriting Chat to Review"
   const guestChatAvailable = new URL((await existingEntry.getAttribute("href"))!, page.url()).pathname === "/chat";
   const entries = page.getByTestId("faq-guest-trial-links");
   await expect(entries).toBeVisible();
-  await expect(entries).toContainText(guestChatAvailable ? "현재 비회원 Chat 체험: 제공 중" : "현재 비회원 Chat 체험: 제공하지 않음");
-  const chat = entries.getByRole("link", { name: "Chat에서 현재 비회원 모델·사용량 확인" });
+  await expect(entries).toContainText(guestChatAvailable ? "현재 비회원 채팅 체험: 제공 중" : "현재 비회원 채팅 체험: 제공하지 않음");
+  const chat = entries.getByRole("link", { name: "채팅에서 현재 비회원 모델·사용량 확인" });
   if (guestChatAvailable) await expect(chat).toHaveAttribute("href", "/chat?lang=ko");
   else await expect(chat).toHaveCount(0);
-  await expect(entries.getByRole("link", { name: "Review에서 현재 비회원 모델·사용량 확인" })).toHaveAttribute("href", "/review?lang=ko");
+  await expect(entries.getByRole("link", { name: "리뷰에서 현재 비회원 모델·사용량 확인" })).toHaveAttribute("href", "/review?lang=ko");
   await expect(entries.getByRole("link", { name: "모델별 이용 시작 플랜 확인" })).toHaveAttribute("href", "/ko/models");
   if (guestChatAvailable) {
     await chat.click();

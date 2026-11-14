@@ -15,9 +15,10 @@ import {
     actionableRecommendations,
     buildRecommendationInstruction,
     nextClaimableRecommendation,
+    optimizerCyclePath,
     recommendationResultDecision,
     recommendationStatusEntries,
-    reportFindings,
+    recommendationFindings,
     REC_AGENT_LEASE_MS,
     withRecommendationStatus,
     type RecommendationResultInput,
@@ -128,7 +129,7 @@ export async function claimRecommendationInTransaction(
             // Its place identifies it in the cycle; its text stays out of the chain.
             metadata: { index: next.index, leaseUntil, claimId },
         });
-        const findings = reportFindings(cycle.summary);
+        const findings = recommendationFindings(cycle.summary, next.index);
         return {
             id: recommendationId(next.cycleId, next.index),
             cycleId: next.cycleId,
@@ -140,7 +141,7 @@ export async function claimRecommendationInTransaction(
                 recommendation: { kind: next.kind, text: next.text },
                 findings,
                 cycle: { id: next.cycleId, createdAt: next.createdAt },
-                link: `${origin}/admin/routing#optimizer-cycle-${next.cycleId}`,
+                link: `${origin}${optimizerCyclePath(next.cycleId)}`,
             }),
             leaseUntil,
             claimId,

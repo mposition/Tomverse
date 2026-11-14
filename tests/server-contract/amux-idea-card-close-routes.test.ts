@@ -35,6 +35,7 @@ type World = {
   reviewPending: unknown[]; reviewClosing: unknown[]; autoApplied: unknown; autoCalls: number;
   t2Pending: unknown[]; t2Closing: unknown[]; t2Unfilable: string[]; t2Recorded: unknown;
   settlementPending: unknown[]; settlementClosing: unknown[]; settlementEnabled: boolean | null;
+  heartbeats: number;
 };
 let world: World;
 const reset = (changes: Partial<World> = {}) => {
@@ -48,6 +49,7 @@ const reset = (changes: Partial<World> = {}) => {
     reviewPending: [], reviewClosing: [], autoApplied: null, autoCalls: 0,
     t2Pending: [], t2Closing: [], t2Unfilable: [], t2Recorded: null,
     settlementPending: [], settlementClosing: [], settlementEnabled: null,
+    heartbeats: 0,
     ...changes,
   };
   if (world.routing === undefined) delete process.env.TOMVERSE_AMUX_DM_ROUTING;
@@ -89,6 +91,9 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
     return work({ fake: "tx" }, { dbNow: new Date("2026-11-05T00:00:00.000Z") });
   },
   withAmuxRouteBudget: async (work: () => Promise<unknown>) => work(),
+} });
+mock.module(mod("lib/amux/dmRelayHeartbeat.ts"), { namedExports: {
+  recordAmuxDmRelaySync: async () => { world.heartbeats += 1; },
 } });
 mock.module(mod("lib/amux/decisionMakerDeliveryCore.ts"), { namedExports: {
   parseDmDeliveryCursor: (value: unknown) => value === "bad" ? undefined : value ?? null,
@@ -424,4 +429,16 @@ test("the owner's direct close takes the same gates, closes only, and names no q
   }
   reset({ ownerError: new FakeOwnerError("busy") });
   assert.equal((await closeDirectly()).status, 409);
+});
+
+test("the sync records the relay's call after the token and before the routing switch", async () => {
+  reset({ authorized: false });
+  await syncRoute.POST(post({}));
+  assert.equal(world.heartbeats, 0, "an unauthorised caller is not the relay");
+  reset({ routing: undefined });
+  assert.equal((await syncRoute.POST(post({}))).status, 409);
+  assert.equal(world.heartbeats, 1, "a relay calling while routing is off is still calling");
+  reset();
+  assert.equal((await syncRoute.POST(post({}))).status, 200);
+  assert.equal(world.heartbeats, 1);
 });
