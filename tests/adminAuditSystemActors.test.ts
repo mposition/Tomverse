@@ -50,6 +50,13 @@ import {
   AMUX_V4_IDEA_SYSTEM_ACTOR,
 } from "../lib/amux/ideaIdentityCore.ts";
 
+test("the daily product actor may record its halt notice but cannot gain another audit scope", () => {
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.halt_notified", "DailyProductAgentRun"), true);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.halt_notified", "AdminAuditLog"), false);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.result_recorded", "DailyProductAgentRun"), false);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "product_research.suggestion.completed", "ProductResearchSuggestion"), false);
+});
+
 test("the daily product observation audit is limited to its settings target", () => {
   assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.smart_adaptive_observed", "AppSettings"), true);
   assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.smart_adaptive_observed", "ProductResearchSuggestion"), false);

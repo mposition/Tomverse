@@ -466,8 +466,9 @@ export const systemAuditActionAllowed = (
       targetType === "AutoRouterOptimizerCycle")) &&
   (actor !== DAILY_PRODUCT_AGENT_AUDIT_ACTOR ||
     ((action === "daily_product_agent.claimed" || action === "daily_product_agent.result_recorded") &&
-        targetType === "ProductResearchSuggestion") ||
-      (action === "daily_product_agent.smart_adaptive_observed" && targetType === "AppSettings")) &&
+      targetType === "ProductResearchSuggestion") ||
+    (action === "daily_product_agent.halt_notified" && targetType === "DailyProductAgentRun") ||
+    (action === "daily_product_agent.smart_adaptive_observed" && targetType === "AppSettings")) &&
   (actor !== AUTO_ROUTER_OPTIMIZER_AUDIT_ACTOR ||
     ((action === "auto.llm_router_optimizer.cycle_started" ||
       action === "auto.llm_router_guidance.promoted" ||

@@ -27,6 +27,7 @@ const NUL = String.fromCharCode(0);
 const cmdline = (...argv) => `${argv.join(NUL)}${NUL}`;
 const SEALED_CMDLINE = cmdline("/usr/bin/node", "--disable-sigusr1", "--experimental-strip-types", RUNNER_SCRIPT);
 const PR_URL = "https://github.com/mposition/Tomverse/pull/2900";
+const HALT = { op: "halt_notice", runId: "11111111-2222-4333-8444-555555555555", reason: "publish_unknown", attempted: 2, prOpened: 1, lastPrUrl: PR_URL };
 const raw = (path, mode = "100644") => `:${mode} ${mode} ${"a".repeat(40)} ${"b".repeat(40)} M\0${path}\0`;
 
 function jsonResponse(status, body) {
@@ -402,6 +403,28 @@ test("only the gateway's root-owned daily mode sends the expanded-source header"
   assert.equal((await handleRequest(deps, { op: "claim", mode: "ignored" }, Buffer.alloc(0))).status, "empty");
   assert.equal(fetchCalls[0].init.headers["x-autorec-work-mode"], "daily-product");
   assert.equal(new URL(fetchCalls[0].url).pathname, "/api/internal/product-improvements/claim");
+});
+
+test("only daily mode reports a closed halt notice through the existing app secret", async () => {
+  const denied = fakeDeps();
+  assert.equal((await handleRequest(denied.deps, HALT, Buffer.alloc(0))).code, "daily_mode_required");
+  assert.equal(denied.fetchCalls.length, 0);
+  const { deps, fetchCalls } = fakeDeps({ env: { ...ENV, AUTOREC_WORK_MODE: "daily-product" }, app: [jsonResponse(200, { recorded: true })] });
+  assert.equal((await handleRequest(deps, { ...HALT, modelText: "must not leave" }, Buffer.alloc(0))).status, "recorded");
+  assert.equal(fetchCalls.length, 1);
+  assert.ok(fetchCalls[0].url.endsWith("/product-improvements/halt"));
+  assert.equal(JSON.parse(fetchCalls[0].init.body).modelText, undefined);
+});
+
+test("invalid halt content is refused, and an unanswered notice is not replayed", async () => {
+  for (const change of [{ reason: "arbitrary text" }, { lastPrUrl: "https://example.test" }, { attempted: 25 }, { prOpened: 3 }, { runId: "not-a-run" }]) {
+    const { deps, fetchCalls } = fakeDeps({ env: { ...ENV, AUTOREC_WORK_MODE: "daily-product" } });
+    assert.equal((await handleRequest(deps, { ...HALT, ...change }, Buffer.alloc(0))).code, "halt_notice_invalid");
+    assert.equal(fetchCalls.length, 0);
+  }
+  const { deps, fetchCalls } = fakeDeps({ env: { ...ENV, AUTOREC_WORK_MODE: "daily-product" }, app: [new Error("timeout")] });
+  assert.equal((await handleRequest(deps, HALT, Buffer.alloc(0))).status, "unknown");
+  assert.equal(fetchCalls.length, 1);
 });
 
 test("publication rechecks draft, hold and reviewed head after adding the hold label", async () => {
