@@ -8180,6 +8180,29 @@ model AmuxV22ResultReview {
   @@index([taskId, createdAt])
 }
 
+/// One AMUX process analysis report (owner request 2026-11-14,
+/// lib/amuxProcessAuditStore.ts): the app's deterministic figures for the
+/// window, the box Codex CLI's structured reading and the Markdown shown in
+/// Admin. Kept 26 weeks.
+model AmuxProcessAuditReport {
+  id          String   @id @default(cuid())
+  windowStart DateTime
+  windowEnd   DateTime
+  /// The develop commit the run read.
+  developSha  String
+  /// codex-subscription
+  channel     String
+  model       String?
+  /// schedule | run_now
+  trigger     String
+  metrics     Json
+  analysis    Json
+  markdown    String
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 /// A stopped v22 Task in the owner queue put to the Decision Maker (owner
 /// decision 2026-11-13, lib/amux/dmOwnerSettlementService.ts). One row per
 /// human escalation; the relay files it as a typed-ask card and the app applies
