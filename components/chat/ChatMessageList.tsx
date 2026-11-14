@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { ContinuationReceipt } from "@/components/continuations/ContinuationReceipt";
 import {
   Fragment,
   useCallback,
@@ -1594,6 +1595,7 @@ export function ChatMessageList({
                   ) : (
                     <UserMessageContent content={msg.content} />
                   )}
+                  {!isUser && msg.continuationReceipt && <ContinuationReceipt receipt={msg.continuationReceipt} t={t} />}
                   {!isUser && msg.status === "error" && msg.recoveryNotice !== undefined && (
                     <p data-testid="chat-recovery-notice" className="mt-3 whitespace-pre-wrap text-sm font-medium">
                       {msg.recoveryNotice.split("\n")[0]}

@@ -141,6 +141,29 @@ mock.module(mod("lib/webSearchBackendAdapter.ts"), { namedExports: {
     return { ok: true, results: [{ title: "Search evidence", url: "https://example.com/evidence", snippet: "Verified fixture fact." }] };
   },
 } });
+let continuationScenario: { reads: number; revokeAt: number; outcome: "locked" | "source_deleted" | "flag_off" } | null = null;
+const realContinuation = require(resolve(ROOT, "lib/externalContinuationService.ts")) as typeof import("../../lib/externalContinuationService");
+const { planSelectedContinuationSeed } = require(resolve(ROOT, "lib/externalContinuationSeedCore.ts")) as typeof import("../../lib/externalContinuationSeedCore");
+const { buildContinuationSeedPrompt } = require(resolve(ROOT, "lib/externalContinuationSeedPrompt.ts")) as typeof import("../../lib/externalContinuationSeedPrompt");
+const continuationPlan = planSelectedContinuationSeed({
+  messages: [{ role: "user", ordinal: 200, content: "Latest correction: budget AUD70.", truncated: false }],
+  selectedMessages: [{ role: "user", ordinal: 0, content: "Earlier budget AUD100.", truncated: false }],
+  passages: [{ ordinal: 0, start: 0, end: 22 }], sourceMessageCount: 201,
+});
+const continuationPrompt = buildContinuationSeedPrompt({ provider: "chatgpt", importedAt: null, plan: continuationPlan });
+mock.module(mod("lib/externalContinuationService.ts"), { namedExports: { ...realContinuation,
+  loadContinuationTurnSeed: async (input: Parameters<typeof realContinuation.loadContinuationTurnSeed>[0]) => {
+    if (!continuationScenario) return realContinuation.loadContinuationTurnSeed(input);
+    continuationScenario.reads++;
+    return continuationScenario.reads >= continuationScenario.revokeAt
+      ? { seed: null, outcome: continuationScenario.outcome }
+      : { outcome: "seeded", seed: { plan: continuationPlan, prompt: continuationPrompt } };
+  },
+} });
+const realSettings = require(resolve(ROOT, "lib/appSettings.ts")) as typeof import("../../lib/appSettings");
+mock.module(mod("lib/appSettings.ts"), { namedExports: { ...realSettings,
+  isExternalContinuationEnabledCached: async () => continuationScenario ? true : realSettings.isExternalContinuationEnabledCached(),
+} });
 const realLlmRouter = require(resolve(ROOT, "lib/autoLlmRouter.ts")) as typeof import("../../lib/autoLlmRouter");
 mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
   ...realLlmRouter,
@@ -152,6 +175,11 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
       paidRouterCalls++;
       if (displaceSourceAfterPick) fusionLatestSource = "newer-durable-user";
       return { modelId: input.ruleModelId, rewrite: null, requiresLocation: fusedLocationRequired };
+    }
+    if (continuationScenario && input.importedSource) {
+      input.onCallOutcome?.("picked"); paidRouterCalls++;
+      return { modelId: input.eligibleModelIds.find(id => id !== input.ruleModelId) ?? input.ruleModelId,
+        rewrite: null, requiresFileGeneration: false };
     }
     if (!llmRouterRewrite && !llmSearchQueries) return null;
     if (input.verifyPreparedContext && !(await input.verifyPreparedContext())) return null;
@@ -1330,6 +1358,7 @@ mock.module(mod("lib/guestChatAutoCreditLedger.ts"), {
 });
 
 const ledger = {
+  admittedBudgets: [] as Array<Parameters<typeof import("../../lib/chatSecurity").acquireChatAccess>[1]>,
   accessAcquisitions: 0,
   settlements: [] as Array<{ outcome: string; attempts: number | null }>,
   settledAttempts: [] as Array<{ attemptIndex: number; modelId: string }>,
@@ -1357,7 +1386,8 @@ mock.module(mod("lib/chatSecurity.ts"), {
             subjectKey: GUEST_SUBJECT_KEY,
             ipKey: GUEST_IP_KEY,
           },
-    acquireChatAccess: async () => {
+    acquireChatAccess: async (_access: unknown, budget: Parameters<typeof import("../../lib/chatSecurity").acquireChatAccess>[1]) => {
+      ledger.admittedBudgets.push(budget);
       if (refusePresearchAdmission) throw new (realChatSecurity.ChatAccessError as typeof import("../../lib/chatSecurity").ChatAccessError)(402, "CREDIT_BALANCE_INSUFFICIENT", "fixture");
       ledger.accessAcquisitions += 1;
       return {
@@ -1753,6 +1783,7 @@ const ask = async (
   ledger.attemptBudgetReservations = 0;
   ledger.attemptBudgetReleases = 0;
   ledger.accessAcquisitions = 0;
+  ledger.admittedBudgets.length = 0;
   warnings.length = 0;
   durableRevision = 0;
   durableAttemptAdmissionCalls = 0;
@@ -4384,4 +4415,82 @@ test("only confirmed context drift after a fusion claim opts the one re-quote in
     contextSequence = []; contextConsumeSucceeds = true; llmRouterRewrite = null;
     fusionPayload = undefined; fusionReceipt = null; fusedLocationRequired = undefined;
   }
+});
+
+for (const outcome of ["locked", "source_deleted", "flag_off"] as const) {
+  for (const revokeAt of [2, 3]) test(`continuation ${outcome} at read ${revokeAt} discards source and source-aware routing before native execution`, async t => {
+    const previous = process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED;
+    const priorEnv = process.env.APP_ENV; process.env.APP_ENV = "dev";
+    process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED = "true";
+    continuationBridge = { id: "external-continuation" };
+    continuationScenario = { reads: 0, revokeAt, outcome };
+    llmRouterInputs.length = 0; modelPickResults.length = 0;
+    t.after(() => { process.env.APP_ENV = priorEnv; continuationBridge = null; continuationScenario = null;
+      if (previous === undefined) delete process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED;
+      else process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED = previous; });
+    const { response, body, streamError } = await ask("answers", "claimed", 200, false, undefined, true, false);
+    assert.equal(streamError, null);
+    assert.equal(llmRouterInputs.length, 1, "no second paid routing call");
+    const input = llmRouterInputs[0];
+    assert.equal(input.importedSource, continuationPrompt.transcriptText);
+    assert.equal(input.rewriteAllowed, false);
+    assert.equal(input.searchPlan, false);
+    assert.equal(await (input.recordDecision as (pick: null) => Promise<boolean>)(null), false);
+    assert.equal(attempts.length, 1);
+    assert.doesNotMatch(JSON.stringify(attempts[0].messages), /AUD100|AUD70|IMPORTED_CONVERSATION/);
+    const receipt = JSON.parse(response.headers.get("X-Chat-Continuation-Receipt")!);
+    assert.equal(receipt.status, "not_sent");
+    assert.equal(receipt.outcome, outcome);
+    assert.equal(receipt.uniqueMessageCount, 0);
+    assert.ok(body.includes(ANSWER));
+    assert.equal(ledger.accessAcquisitions, revokeAt === 3 ? 2 : 1, "late revocation rebuilds financial admission");
+    if (revokeAt === 3) {
+      assert.ok(ledger.admittedBudgets[0].inputTokens > ledger.admittedBudgets[1].inputTokens);
+      assert.ok(modelPickResults[0].routed);
+      assert.ok(modelPickResults[1].routed);
+      assert.notEqual(modelPickResults[0].modelId, modelPickResults[1].modelId, "the revoked-source model is replaced");
+      assert.notEqual(ledger.admittedBudgets[0].inputUsdPerMillionTokens,
+        ledger.admittedBudgets[1].inputUsdPerMillionTokens, "the fallback uses its own prices");
+      assert.equal(durableClaimCalls, 1, "one durable response identity survives replan");
+    }
+  });
+}
+
+test("continuation Auto and final provider share the exact transient source with an actual-dispatch receipt", async t => {
+  const previous = process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED;
+  const priorEnv = process.env.APP_ENV; process.env.APP_ENV = "dev";
+  process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED = "true";
+  continuationBridge = { id: "external-continuation" };
+  continuationScenario = { reads: 0, revokeAt: Infinity, outcome: "locked" };
+  llmRouterInputs.length = 0;
+  t.after(() => { process.env.APP_ENV = priorEnv; continuationBridge = null; continuationScenario = null;
+    if (previous === undefined) delete process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED;
+    else process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED = previous; });
+  const { response, body } = await ask("answers", "claimed", 200, false, undefined, true, false);
+  assert.equal(llmRouterInputs.length, 1);
+  assert.equal(llmRouterInputs[0].importedSource, continuationPrompt.transcriptText);
+  const sourceMessage = attempts[0].messages.find(message => JSON.stringify(message.content).includes("AUD70"));
+  assert.equal(sourceMessage?.role, "user");
+  assert.ok(JSON.stringify(sourceMessage?.content).includes("AUD100"));
+  const receipt = JSON.parse(response.headers.get("X-Chat-Continuation-Receipt")!);
+  assert.ok(["unknown", "dispatched"].includes(receipt.status));
+  assert.equal(receipt.uniqueMessageCount, continuationPlan.turns.length);
+  assert.equal(receipt.plannerVersion, "ext-seed-v3-selected-recent");
+  const trailer = parseChatStreamTrailer(splitSearchMetadataTrailer(body).searchMetadataJson);
+  assert.deepEqual(trailer?.continuationReceipt, { ...receipt, status: "dispatched" });
+});
+
+for (const stage of ["before_dispatch", "entered_boundary"] as const) test(`continuation receipt distinguishes ${stage} failure from delivered input`, async t => {
+  continuationBridge = { id: "external-continuation" };
+  continuationScenario = { reads: 0, revokeAt: Infinity, outcome: "locked" };
+  conversationSelectionMode = "manual";
+  failDispatchStart = stage === "before_dispatch";
+  throwAfterPresearch = stage === "entered_boundary";
+  t.after(() => { continuationBridge = null; continuationScenario = null; failDispatchStart = false;
+    throwAfterPresearch = false; conversationSelectionMode = "auto"; });
+  const { response } = await ask("answers", "claimed", 500, false, undefined, true, false);
+  const receipt = JSON.parse(response.headers.get("X-Chat-Continuation-Receipt")!);
+  assert.equal(receipt.status, stage === "before_dispatch" ? "not_sent" : "unknown");
+  if (stage === "before_dispatch") assert.equal(receipt.uniqueMessageCount, 0);
+  assert.equal(attempts.length, 0);
 });

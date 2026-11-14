@@ -972,8 +972,8 @@ test("every seed outcome is recorded, and the healthy ones are not logged", () =
     }
     // And the chat route is what records it.
     const chat = readFileSync("app/api/chat/route.ts", "utf8");
-    assert.match(chat, /recordContinuationSeedOutcome\(outcome\)/);
-    assert.match(chat, /recordContinuationSeedOutcome\("flag_off"\)/);
+    assert.match(chat, /recordContinuationSeedOutcome\(/);
+    assert.match(chat, /outcome: "flag_off"/);
 });
 
 /* --- product identity (external-conversation-continuation.md §3.1, §10) */

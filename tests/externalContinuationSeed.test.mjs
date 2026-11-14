@@ -418,6 +418,7 @@ test("no imported model label can be read as a runtime model id", () => {
     });
     assert.deepEqual(Object.keys(plan.turns[0]).sort(), [
         "ordinal",
+        "ranges",
         "role",
         "shortened",
         "text",

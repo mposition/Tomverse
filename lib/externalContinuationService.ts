@@ -29,7 +29,7 @@
  * the other would send every Review conversation to `/continuations`.
  */
 
-import { decodePassages, PASSAGE_HEADER, selectPassageText, type Passage } from "@/lib/continuationPassages";
+import { decodePassages, PASSAGE_HEADER, type Passage } from "@/lib/continuationPassages";
 import type { Prisma } from "@prisma/client";
 
 import { APP_DEFAULTS } from "@/lib/appDefaults";
@@ -56,6 +56,7 @@ import {
     CONTINUATION_SEED_VERSION,
     emptyContinuationSeedPlan,
     planContinuationSeed,
+    planSelectedContinuationSeed,
     type ContinuationSeedPlan,
 } from "@/lib/externalContinuationSeedCore";
 import {
@@ -167,12 +168,17 @@ async function loadUnlockedSnapshot(
 }
 
 async function readChosenPassages(snapshot: {id:string;messageCount:number}, passages: Passage[]) {
-    const rows = await prisma.externalMessage.findMany({
+    if (!passages.length) return emptyContinuationSeedPlan(snapshot.messageCount);
+    const [rows, recent] = await Promise.all([prisma.externalMessage.findMany({
         where: {externalConversationId:snapshot.id, ordinal:{in:passages.map(p => p.ordinal)}},
         select: {ordinal:true, role:true, content:true, truncated:true},
-    });
-    const messages = selectPassageText(rows, passages);
-    return planContinuationSeed({ messages, sourceMessageCount:snapshot.messageCount });
+    }), prisma.externalMessage.findMany({
+        where: { externalConversationId: snapshot.id }, orderBy: { ordinal: "desc" },
+        take: SEED_SOURCE_MESSAGE_SCAN_LIMIT,
+        select: { ordinal: true, role: true, content: true, truncated: true },
+    })]);
+    return planSelectedContinuationSeed({ messages: recent, selectedMessages: rows, passages,
+        sourceMessageCount: snapshot.messageCount });
 }
 
 async function readSeedPlan(

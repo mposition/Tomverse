@@ -1,5 +1,7 @@
 "use client";
 
+import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceipt } from "@/lib/continuationReceipt";
+
 import { PASSAGE_HEADER } from "@/lib/continuationPassages";
 import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
@@ -1544,6 +1546,7 @@ function ChatAppComponent({
       is not a failure of the run, and offering to retry it would be arguing
       with them.
     */
+    let sourceReceipt: ContinuationReceipt | undefined;
     const writeAssistantMessage = assistantMessageWriter(runKey);
     const setAssistantMessage: typeof writeAssistantMessage = (
       id,
@@ -1568,6 +1571,7 @@ function ChatAppComponent({
         errorMeta,
         {
           ...extraFields,
+          continuationReceipt: sourceReceipt,
           ...(status === "error" && transcriptScope === "conversation"
             ? { recoveryNotice: content, isGeneratingArtifact: false }
             : {}),
@@ -2033,6 +2037,8 @@ function ChatAppComponent({
         latency.headers(res);
         liveness.noteHeaders();
         requestTraceId = res.headers.get("X-Request-ID");
+        sourceReceipt = receiptForAttempt(res.headers.get(CONTINUATION_RECEIPT_HEADER), requestTraceId, assistantMessageId);
+        if (sourceReceipt) setAssistantMessage(assistantMessageId, assistantText, "pending");
         // §13.4: the server's own count, taken from the response rather than
         // derived here. Absent means memory played no part -- which is not
         // the same as zero, and must not be shown as one.
@@ -2337,6 +2343,8 @@ function ChatAppComponent({
         reader: response.body.getReader(),
         liveness,
         onProgress: (progress) => {
+          if (progress.displayText.trim() && sourceReceipt?.status === "unknown") sourceReceipt = { ...sourceReceipt, status: "dispatched" };
+          if (progress.retryingWithModelId && sourceReceipt?.attempt === 0) sourceReceipt = { ...sourceReceipt, attempt: 1, status: "unknown" };
           latency.content(progress.displayText);
           assistantText = progress.displayText;
           setAssistantMessage(
@@ -2375,6 +2383,7 @@ function ChatAppComponent({
       latencyCompleted = !serverStallCode && Boolean(assistantText.trim());
       const searchMetadataJson = streamed.searchMetadataJson;
       const trailer = parseChatStreamTrailer(searchMetadataJson);
+      sourceReceipt = receiptForAttempt(trailer?.continuationReceipt, requestTraceId, assistantMessageId, sourceReceipt) ?? sourceReceipt;
       const searchMetadata =
         (trailer?.searchMetadata as WebSearchExecution | null | undefined) ??
         null;

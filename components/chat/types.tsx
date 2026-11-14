@@ -1,3 +1,4 @@
+import type { ContinuationReceipt } from "@/lib/continuationReceipt";
 ﻿import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import type { MessageErrorReportContext } from "@/lib/errorReportContract";
 import type { ChatImageTurnRef } from "@/lib/chatImageTurnCore";
@@ -78,6 +79,8 @@ export type ChatAttachment = {
 };
 
 export type Message = {
+  /** Request/attempt-scoped metadata; excluded by all message serializers. */
+  continuationReceipt?: ContinuationReceipt;
   id: string;
   role: "user" | "assistant";
   content: string;

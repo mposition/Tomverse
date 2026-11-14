@@ -10,6 +10,8 @@
     "node": "22.x"
   },
   "scripts": {
+    "test:continuation-fidelity": "node --import tsx --test tests/continuationFidelity.test.mjs tests/externalContinuationSeed.test.mjs tests/continuationPassages.test.mjs && node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/server-contract/continuation-source-loader.test.ts tests/server-contract/auto-llm-router-record-gate.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts",
+    "report:continuation-fidelity": "node --import tsx scripts/report-continuation-fidelity.mjs",
     "mcp:providers": "node --conditions=react-server --import tsx scripts/list-mcp-providers.ts",
     "setup:mcp-github": "node --conditions=react-server --import tsx scripts/mcp-github-app-setup.ts",
     "dev:mcp-github": "node --conditions=react-server --import tsx scripts/mcp-github-app-setup.ts --dev",
