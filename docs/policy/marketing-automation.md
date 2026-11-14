@@ -304,7 +304,8 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 영상·이미지 비율(운영자 결정 2026-11-04, 당시 주간 상한을 한 주의 기준으로 정한 비율): Instagram 영상 2·이미지 2, Facebook 영상 2·이미지 3, LinkedIn
 이미지 2·영상 1, X 이미지 7·영상 3, Threads 이미지 5·영상 2, YouTube·TikTok 영상만. 생성기는 계정마다 날짜(UTC)로 그날의
 종류를 정해 이 비율대로 영상의 날과 이미지의 날을 고르게 나누고(`MARKETING_VIDEO_DAYS`), 그날은 그 종류의 승인 자산만 초안
-후보로 준다. 그 종류의 자산이 없으면 다른 종류로 대신한다.
+후보로 준다. 그 종류의 자산이 없으면 다른 종류로 대신한다. 한국어 Instagram은 릴스 노출이 이미지보다 훨씬 커서 4일 중 3일을
+영상의 날로 둔다(운영자 결정 2026-11-14, `MARKETING_VIDEO_DAYS_BY_LOCALE`).
 
 같은 자산은 계정당 다시 쓰지 않는다(운영자 결정 2026-11-04). 그 계정의 게시물 가운데 반려·Guard 거절·만료가 아닌 상태
 (`MARKETING_ASSET_RELEASED_POST_STATUSES` 밖의 모든 상태, 승인 대기 포함)가 이름 댄 자산은 기간 제한 없이 그 계정의 후보에서
