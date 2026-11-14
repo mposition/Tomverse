@@ -301,6 +301,8 @@ const KEEPALIVE_INTERVAL_MS = 25;
 const FIRST_TOKEN_DEADLINE_MS = 1_500;
 
 process.env.E2E_DISABLE_DATABASE = "true";
+// Unrelated continuation cases exercise the explicit history opt-out.
+process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED = "false";
 process.env.DATABASE_URL ||=
   "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1";
 process.env.DIRECT_URL ||= process.env.DATABASE_URL;
@@ -4529,10 +4531,12 @@ test("explicit Auto source opt-out retains the ordinary answer source but omits 
 });
 
 
-for (const revoked of [false, true]) test(`history search final input and receipt follow current access (revoked=${revoked})`, async t => {
+for (const configured of [undefined, "true"]) for (const revoked of [false, true])
+test(`history search final input and receipt follow current access (configured=${configured}, revoked=${revoked})`, async t => {
   const previous = process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED;
   const priorEnv = process.env.APP_ENV; process.env.APP_ENV = "dev";
-  process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED = "true";
+  if (configured === undefined) delete process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED;
+  else process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED = configured;
   continuationBridge = { id: "external-continuation" };
   continuationScenario = { reads: 0, revokeAt: Infinity, outcome: "locked" };
   historyQueries = []; disableHistoryAfterRead = revoked;
@@ -4552,4 +4556,23 @@ for (const revoked of [false, true]) test(`history search final input and receip
     assert.match(JSON.stringify(attempts[0].messages), /Kyoto, not Osaka/);
     assert.match(JSON.stringify(attempts[0].messages), /AUD70/);
   }
+});
+
+
+for (const configured of ["false", "", "invalid"]) test(`history search explicit opt-out avoids the history tool (configured=${configured})`, async t => {
+  const previous = process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED;
+  const priorEnv = process.env.APP_ENV; process.env.APP_ENV = "dev";
+  process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED = configured;
+  continuationBridge = { id: "external-continuation" };
+  continuationScenario = { reads: 0, revokeAt: Infinity, outcome: "locked" };
+  historyQueries = []; llmRouterInputs.length = 0;
+  t.after(() => { process.env.APP_ENV = priorEnv; continuationBridge = null; continuationScenario = null;
+    if (previous === undefined) delete process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED;
+    else process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED = previous; });
+  const { body } = await ask("answers", "claimed", 200, false, undefined, true, false);
+  assert.equal(llmRouterInputs[0].historySearch, undefined);
+  assert.deepEqual(historyQueries, []);
+  assert.match(JSON.stringify(attempts[0].messages), /AUD70/);
+  assert.equal(parseChatStreamTrailer(splitSearchMetadataTrailer(body).searchMetadataJson)?.continuationReceipt?.plannerVersion,
+    "ext-seed-v3-selected-recent");
 });

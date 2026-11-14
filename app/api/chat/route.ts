@@ -174,7 +174,7 @@ import { continuationReceipt, deliveryReceipt, CONTINUATION_RECEIPT_HEADER, type
 import { PASSAGE_HEADER } from "@/lib/continuationPassages";
 import { continuationAutoSourceEnabledFromValue } from "@/lib/externalContinuationAccess";
 import { loadContinuationTurnSeed, searchContinuationHistory, type ContinuationTurnSeedResult } from "@/lib/externalContinuationService";
-import { HISTORY_SOURCE_MAX_BYTES } from "@/lib/continuationHistorySearch";
+import { continuationHistorySearchEnabledFromValue, HISTORY_SOURCE_MAX_BYTES } from "@/lib/continuationHistorySearch";
 import { officeRenderingEnabled } from "@/lib/officeRenderer";
 import { recordContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
 import {
@@ -2482,7 +2482,7 @@ async function handleChatPost(
             if (!session?.user?.id || !conversationId || !hasContinuation) return { seed: null, outcome: "no_bridge" };
             if (deepResearchDepth || requestedModelConfig.usageClass === "deep-research") return { seed: null, outcome: "no_bridge" };
             try {
-                if (historySearchActive && process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED !== "true")
+                if (historySearchActive && !continuationHistorySearchEnabledFromValue(process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED))
                     return { seed: null, outcome: "flag_off" };
                 if (!(await isExternalContinuationEnabledCached())) return { seed: null, outcome: "flag_off" };
                 return await loadContinuationTurnSeed({ userId: session.user.id, conversationId, request: req, prepared: preparedContinuation.seed });
@@ -2501,7 +2501,7 @@ async function handleChatPost(
         let importedSource = deterministicAutoSelection.routed &&
             continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED) && !fusion
             ? preparedContinuation.seed?.prompt.transcriptText ?? undefined : undefined;
-        historySearchActive = Boolean(importedSource && process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED === "true" &&
+        historySearchActive = Boolean(importedSource && continuationHistorySearchEnabledFromValue(process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED) &&
             new TextEncoder().encode(importedSource).length <= HISTORY_SOURCE_MAX_BYTES);
         const verifyImportedSource = async () => {
             const checked = await readContinuation();
@@ -2527,7 +2527,7 @@ async function handleChatPost(
                               if (!preparedContinuation.seed || !session?.user?.id || !conversationId) throw new Error("History access refused");
                               const result = await searchContinuationHistory({ userId: session.user.id, conversationId, request: req,
                                   prepared: preparedContinuation.seed, queries,
-                                  enabled: () => process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED === "true" &&
+                                  enabled: () => continuationHistorySearchEnabledFromValue(process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED) &&
                                       continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED) });
                               preparedContinuation = result;
                               if (!result.seed) throw new Error("History access refused");

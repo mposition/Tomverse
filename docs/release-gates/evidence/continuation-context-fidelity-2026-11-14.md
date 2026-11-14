@@ -169,9 +169,10 @@ quality runs remain zero. No Cohere, production model, `--live`, PostgreSQL inte
 native binary signing or physical-device acceptance was executed.
 
 `CHAT_CONTINUATION_AUTO_SOURCE_ENABLED` stays default-on as explicitly requested.
-`CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED` is separately default-off: live use adds a
-bounded Router model step and requires approval for that actual paid execution scope,
-then explicit activation under the existing Router provider budget and continuation gates.
+`CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED` was initially default-off. A subsequent explicit
+owner request on 2026-11-14 approves default-on bounded history search and its maximum
+second Router step under the existing provider budget and continuation gates. Missing or
+`true` enables it; explicit `false` and invalid configuration disable it.
 No operational flags were changed. Native selection/receipt needs no new provider call.
 CI hold, merge/deploy and operational settings remain unchanged.
 
@@ -199,3 +200,19 @@ balanced-result and Quick Summary handoff E2E cases also passed (2/2), without m
 that feature. No live database was contacted: tests used mocks and the disabled database
 configuration with loopback port 1. The 24-case input report remains 72/72 with zero model
 calls and answer quality explicitly `not_evaluated`.
+
+
+## Owner-approved history default-on follow-up
+
+The owner explicitly requested full-history automatic retrieval to default on on
+2026-11-14. Missing `CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED` now enables it; `true`
+also enables it, while explicit `false` and invalid configuration opt out. The same
+semantics govern tool registration, intermediate source revalidation and the read adapter.
+Both the default and explicit opt-in paths exercise current-access revocation; explicit
+opt-out retains the existing selected-plus-recent source without a history tool.
+
+This authorizes the existing bounded maximum second Router step under the existing
+provider hold and budget; it does not change a provider, ceiling, credit price, source
+ownership/lock/continuation gate, persistence rule or final-model admission contract.
+This coding session still runs no live/production model evaluation and changes no
+operational setting, merge or deployment. CI remains held with `ci:hold`.

@@ -2,6 +2,9 @@ import { MAX_PASSAGES, PASSAGE_LENGTH, type Passage } from "./continuationPassag
 
 /** The model chooses literal queries; code only validates and bounds the read. */
 export const HISTORY_SOURCE_MAX_BYTES = 32_000;
+/** Owner-approved default-on history read; explicit false or invalid configuration opts out. */
+export const continuationHistorySearchEnabledFromValue = (value: unknown): boolean =>
+    value === undefined || value === "true";
 export const HISTORY_QUERY_SCHEMA = {
     type: "object" as const, additionalProperties: false,
     properties: { queries: { type: "array" as const, maxItems: 3,

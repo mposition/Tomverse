@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { historyDatabaseLiteral, historyMatchPassages, validHistoryQueries } from "../lib/continuationHistorySearch.ts";
+import { continuationHistorySearchEnabledFromValue, historyDatabaseLiteral, historyMatchPassages, validHistoryQueries } from "../lib/continuationHistorySearch.ts";
 import { planRetrievedContinuationSeed, planContinuationSeed } from "../lib/externalContinuationSeedCore.ts";
 import { continuationReceipt, deliveryReceipt, parseContinuationReceipt } from "../lib/continuationReceipt.ts";
+
+test("history search defaults on while explicit false and invalid configuration opt out", () => {
+    assert.equal(continuationHistorySearchEnabledFromValue(undefined), true);
+    assert.equal(continuationHistorySearchEnabledFromValue("true"), true);
+    for (const value of ["false", "", "invalid", "TRUE", null, true, false])
+        assert.equal(continuationHistorySearchEnabledFromValue(value), false);
+});
 
 test("history terms are bounded literal data, including regex metacharacters and Korean", () => {
     for (const value of [null, [""], ["a".repeat(81)], ["a", "b", "c", "d"], [2]]) assert.equal(validHistoryQueries(value), false);

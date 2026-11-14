@@ -258,7 +258,7 @@ receipt를 만들어내지 않는다. Deep Research 원문 미전달 제약은 �
 ### 4.6 전체 저장 원문 자동 검색과 Native 선택 (로컬 후속 구현)
 
 운영자 후속 범위(2026-11-14)는 연결된 snapshot의 전체 저장 ordinal 검색과 Native 선택·receipt parity다.
-`CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED=true`인 Auto Chat에 한해 기존 Router의 read-only
+`CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED`가 활성화된 Auto Chat에 한해 기존 Router의 read-only
 `read_imported_source` 도구를 한 번 쓴다. LLM이 원문 언어의 짧은 literal query를 최대 3개 고르고,
 서버는 현재 소유·finalized·잠금·continuation flag를 확인한 snapshot 안에서만 검색한다.
 최근 200개 제한을 검색 대상에 적용하지 않는다. DB 결과는 최대 9개, 추가 발췌는 최대 3×500
@@ -274,10 +274,13 @@ hold에 먼저 넣고 `totalUsage`로 누적 정산한다. 실패·불명 비용
 권한은 도구 실행 전후·최종 Router 전·답변 dispatch 전에 다시 확인한다. 중간 flag off는
 그 요청에서 source 경로를 닫고 원문과 source-aware 결과를 모두 버려 기존 fallback으로 간다.
 
-이 검색 스위치는 **기본 꺼짐**이다. 기존 Auto 원문 입력의 기본 켜짐 승인과 별개로 추가
-Router 모델 단계의 실제 실행·비용 범위를 승인받아야 활성화할 수 있다. 이 로컬 구현·mock
-검증은 그 실행 승인이나 운영 스위치 변경을 대신하지 않는다. 기존 continuation/Auto 공급사·
-가격·admission 한도 안에서만 사용하며 source-aware rewrite/presearch/sample 금지는 유지한다.
+이 검색 스위치는 **기본 켜짐**이다(운영자 명시 승인, 2026-11-14 후속 요청).
+환경값이 없거나 `true`이면 켜지고, 명시적 `false`와 유효하지 않은 값은 끈다. 승인 범위는
+기존 Router 공급사·예산 안의 최대 두 모델 단계와 요청 단위 제한 원문 검색이다. 새 지출 상한·
+공급사·크레딧 규칙을 추가하지 않는다. 기존 continuation flag와 Auto 원문 입력 스위치가 모두
+허용해야 하며, 매 단계의 현재 접근·예산 hold·최종 fallback 판정은 그대로다. 운영 설정 변경·
+merge·deploy 또는 이 개발 세션의 실제 모델 평가 실행을 뜻하지 않는다. Source-aware
+rewrite/presearch/sample 금지는 유지한다.
 
 Native는 기존 원문 열람 위에 같은 좌표 선택을 제공한다. 읽어 온 이전 페이지의 메시지도
 실제 ordinal로 선택하며, 다음 텍스트 질문에만 소비한다. voice·Review에는 선택을 보내지
