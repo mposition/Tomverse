@@ -8,9 +8,18 @@
 import { ENGINEERING_AGENT_V22_TIER_PENDING_REASON } from "@/lib/engineeringAgentCore";
 
 /**
+ * A patch that adds a file. The v22 sparse candidate rebuilds only modified
+ * `100644` files from their pinned base blobs, so a new file has no base blob
+ * and every tier round keeps the draft private as `base_blob_missing`:
+ * reading it again changes nothing.
+ */
+export const engineeringAgentPatchAddsFile = (patch: string): boolean =>
+  /^new file mode /m.test(patch) || /^--- \/dev\/null\r?$/m.test(patch);
+
+/**
  * Whether a person may send a T2 draft back to the publisher's next tier round
  * (POST /api/admin/engineering-agent/rejudge): a v22 draft with its patch kept,
- * not still waiting on its first tier round, from a v4 idea card whose run
+ * not still waiting on its first tier round and adding no file, from a v4 idea card whose run
  * started in T1 on an AMUX attempt. The engineering console and the owner queue
  * card both offer the button from this one rule; the route decides again.
  */
@@ -20,6 +29,7 @@ export const engineeringAgentDraftRejudgeable = (
 ): boolean =>
   item.kind === "t2_draft" && item.patchBody !== null &&
   item.reason !== ENGINEERING_AGENT_V22_TIER_PENDING_REASON &&
+  !engineeringAgentPatchAddsFile(item.patchBody) &&
   run?.card.sourceSystem === "admin-idea-v4" &&
   run.modeAtStart === "t1" && !!run.amuxAttemptId;
 

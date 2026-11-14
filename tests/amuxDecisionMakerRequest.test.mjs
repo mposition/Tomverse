@@ -1716,8 +1716,11 @@ for (const [label, key] of [
       assert.match(sent[1].sql, /floor\(extract\(epoch FROM clock_timestamp\(\)\) \* 1000\)::bigint AS "dbNowEpochMs"/);
       assert.match(sent[1].sql, /ON r\."cardId" = \$ AND r\."questionRevision" = \$/);
       // The first value is the app-filed card probe (AMUXFLOW/B2), in the same statement.
-      assert.deepEqual(sent[1].values, ["card-41", "card-41", 3]);
-      assert.match(sent[1].sql, /EXISTS \(SELECT 1 FROM "AmuxDmOwnerSettlement" s\s+WHERE s\."localCardId" = \$\) AS "appFiledCard"/);
+      // Since 2026-11-14 the probe also counts a T2 draft review's card; a worker's own question table
+      // is never read for it.
+      assert.deepEqual(sent[1].values, ["card-41", "card-41", "card-41", 3]);
+      assert.match(sent[1].sql, /\(EXISTS \(SELECT 1 FROM "AmuxDmOwnerSettlement" s\s+WHERE s\."localCardId" = \$\)\s+OR EXISTS \(SELECT 1 FROM "EngineeringAgentDmReview" e\s+WHERE e\."localCardId" = \$\)\) AS "appFiledCard"/);
+      assert.doesNotMatch(sent[1].sql, /AmuxV22TaskQuestion/);
       assert.match(sent[2].sql, SWITCH_READ);
       assert.match(sent[3].sql, /count\(\*\) FILTER/);
       // The throughput statement carries the instance's result kinds inside its §8 count boundary -- with

@@ -254,7 +254,8 @@ async function snapshot(
       // (reviewPullRequest.ts), so an open or merged binding carries the patch.
       tx.engineeringAgentRun.findUnique({ where: { amuxAttemptId: prlessAttempt.id },
         select: { id: true, bindings: { where: { supersededAt: null },
-          select: { state: true, mergeObservation: true } } } }),
+          select: { state: true, mergeObservation: true, prNumber: true,
+            currentPrNumber: true } } } }),
     ]) : [null, null, null];
   const publicationMayOpenPr = publication !== null &&
     amuxReviewPublicationMayOpenPr(publication, ENGINEERING_AGENT_V22_TIER_PENDING_REASON);
@@ -264,6 +265,12 @@ async function snapshot(
     patchStored: storedPatch !== null, publicationMayOpenPr,
     run: publicationRun === null ? null : { bindings: publicationRun.bindings },
   });
+  // Why an unrecorded card PR is not "no pull request": the run's open binding
+  // carries one, or publication work may still open one.
+  const openBinding = publicationRun?.bindings.find((binding) => binding.state === "open") ?? null;
+  const publicationHold = openBinding ?
+    { state: "pr_open" as const, pr_number: openBinding.currentPrNumber ?? openBinding.prNumber } :
+    publicationMayOpenPr ? { state: "pending" as const, pr_number: null } : null;
   // A twice-rejected run is retryable only with its own audited reject verdict.
   const rejectedReviewAttemptId = task.sourceSystem === "admin-idea-v4" ?
     await amuxV52RejectedTwiceReviewAttemptId(tx, task.id, lastAttempt) : null;
@@ -361,7 +368,8 @@ async function snapshot(
     noChangeCompletion ? "no_change" as const : "evidence" as const;
   return { escalation, task, lastAttempt, budget, used, subject, digest, text,
     context, report, displayTruncated, displayExact, outcomes, artifact,
-    lastAttemptResultStored, decisionHold, approvalBasis, unpublishedPatch };
+    lastAttemptResultStored, decisionHold, approvalBasis, unpublishedPatch,
+    publicationHold };
 }
 
 export async function getAmuxReviewDetail(escalationId: string) {
@@ -371,7 +379,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
   const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
   const { escalation, task, lastAttempt, used, digest, text, context, report,
     displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored,
-    decisionHold, approvalBasis, unpublishedPatch } = state;
+    decisionHold, approvalBasis, unpublishedPatch, publicationHold } = state;
   // The Task's ended runs whose CLI usage is unknown and not yet accepted:
   // each holds its worker in the v22 usage gate (owner decision 2026-11-10).
   const unknownUsageIds = task.sourceSystem === "admin-idea-v4" ?
@@ -435,6 +443,11 @@ export async function getAmuxReviewDetail(escalationId: string) {
     // The attempt stored a patch that no pull request carries to develop:
     // "no change needed" is refused for it; retry or restore the publication.
     unpublished_patch: unpublishedPatch,
+    // A v22 implement Task's pull request lives on its run's binding, so the
+    // card has none of its own: this says the engineering agent has one open
+    // ("pr_open") or may still open one ("pending"), which is also why a retry
+    // is not offered -- running the Task again would race that publication.
+    publication_hold: publicationHold,
     // Why no decision is open at all; null while the server offers one.
     decision_hold: decisionHold,
     retry: { used, limit: AMUX_MAX_EXECUTION_ATTEMPTS, remaining: Math.max(0, AMUX_MAX_EXECUTION_ATTEMPTS - used) },

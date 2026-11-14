@@ -15,6 +15,7 @@ import {
   DM_THROUGHPUT_PER_HOUR,
   dmCardText,
   dmCardTextBytes,
+  dmRunUnavailableIncident,
   encodeRepositoryPath,
   irreversibleTermCategories,
   isFetchableTreeMode,
@@ -155,6 +156,50 @@ test("irreversible terms: Korean substrings, English whole words, case-insensiti
   assert.deepEqual(irreversibleTermCategories("Use a dropdown for the shipping address"), []);
   assert.deepEqual(irreversibleTermCategories("Count the tokens per request"), []);
   assert.deepEqual(irreversibleTermCategories("Which retry approach is simpler?"), []);
+});
+
+test("a DM run that ended unavailable is an operational incident naming only instance and request", () => {
+  const incident = dmRunUnavailableIncident("decision-maker-anthropic", "d85a4806-a06a-40a4-ba65-8ecccdfd4da8");
+  assert.equal(incident.code, "AMUX_DM_RUN_UNAVAILABLE");
+  assert.equal(incident.severity, "warning");
+  assert.deepEqual(incident.context, { instance: "decision-maker-anthropic", requestId: "d85a4806-a06a-40a4-ba65-8ecccdfd4da8" });
+  assert.deepEqual(dmRunUnavailableIncident({ x: 1 }, 7).context, { instance: null, requestId: null });
+});
+
+test("Korean access terms name a grant or change, not a plan's entitlement", () => {
+  // AMUX-PRICINGCOPY-002's context: a plan list that tells the tiers apart is not an access change.
+  assert.deepEqual(irreversibleTermCategories("플랜별 목록은 Free·Pro·Max 권한을 구분합니다."), []);
+  // A question about a plan's entitlement is not the narrow description exception: it still goes to the operator.
+  assert.deepEqual(irreversibleTermCategories("Pro 플랜 권한에 이미지 생성이 있나요?"), ["access"]);
+  assert.deepEqual(irreversibleTermCategories("플랜 권한에 따라 문구가 다릅니다"), []);
+  // The card that went to the operator on 2026-11-14, question and worker context as filed.
+  assert.deepEqual(irreversibleTermCategories([
+    "이미지 생성 안내를 어떤 플랜의 기능 목록에 추가할까요?",
+    "components/marketing/PricingPageContent.tsx의 모든 언어별 플랜 features 배열에는 현재 이미지 생성이 없습니다. FAQ는 'Where available'로 안내하지만, 플랜별 목록은 Free·Pro·Max 권한을 구분합니다. 이미지 생성 플래그는 server-only lib/marketingClaimGates.ts에 연결되어 있고 확인한 공개 설정 신호는 없습니다. 따라서 어떤 플랜 목록에 문구를 넣을지는 제품 동작을 정하는 선택입니다.",
+  ].join("\n")), []);
+  // A change verb in another sentence does not count against this one.
+  assert.deepEqual(irreversibleTermCategories("문구를 고쳤습니다. 플랜별 목록은 Free·Pro·Max 권한을 구분합니다."), []);
+  for (const text of [
+    "저장소 쓰기 권한을 주세요", "관리자 권한을 부여할까요?", "권한 변경이 필요합니다", "접근 권한을 열어 주세요", "접근 설정을 바꿀까요?",
+    // Independent review r-20261114-140745-6ebb4e: real access changes the narrow list missed.
+    "저장소 읽기 권한을 줘도 될까요?", "사용자의 권한을 수정할까요?", "권한 설정을 바꿀까요?", "봇에게 권한이 필요합니다",
+    "이 계정의 권한을 회수할까요?", "Pro 사용자에게 권한을 추가할까요?",
+    // Independent review r-20261114-141502-426751: modifiers between the word and the verb, and raising.
+    "봇의 권한을 더 줄까요?", "이 계정의 권한을 모두 회수할까요?", "계정 권한을 높여도 될까요?",
+    // Any other "권한" is still a hit, as before; a plan's entitlement with a change verb is too.
+    "권한 문제로 실패했습니다", "Pro 플랜 권한을 올릴까요?", "Max 권한을 Free에도 줄까요?",
+    // Independent review r-20261114-141720-0ec475: the verb before the word, in the same sentence.
+    "봇에게 부여할 것은 Pro 권한입니다.", "봇에게 줄 것은 Max 권한입니다.",
+    // Independent review r-20261114-141903-1bbe85: a change verb no list named. The exception now needs a
+    // describing word right after "권한" in a sentence that is not a request.
+    "봇 계정에 Pro 권한을 활성화할까요?", "이 계정의 Max 권한을 비활성화할까요?", "Pro 권한을 비교한 뒤 켜도 될까요?",
+    "Pro 권한을 구분해서 넣을까요?", "Max 권한으로 실행합니다.",
+    // Independent review r-20261114-142113-428be9: an action after the describing word.
+    "Pro 권한을 구분 없이 지급합니다.", "Pro 권한을 비교한 뒤 봇 계정으로 이양합니다.",
+    "봇 계정은 Pro 권한을 구분합니다. 그리고 Max 권한을 이양합니다.",
+  ]) {
+    assert.deepEqual(irreversibleTermCategories(text), ["access"], text);
+  }
 });
 
 test("the term check reads every card text field, including options and context", () => {
