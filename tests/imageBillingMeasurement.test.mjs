@@ -249,6 +249,25 @@ test("Wan 2.7: per-image billing is confirmable only with every image and no gen
     sample(1, { usage: { image_count: 1 } }),
   ]);
   assert.deepEqual(partialCounter.reasons, ["token_usage_reported:output_tokens"]);
+  // Review finding 2026-11-14: only the documented counter, on the documented
+  // model, seen on at least two images. A thinking count is never a counter.
+  const twoImages = (usage) => [sample(0, { usage }), sample(1, { usage })];
+  assert.deepEqual(
+    measurementVerdict(wanPlan, twoImages({ image_count: 1, thinking_tokens: 8 })).reasons,
+    ["token_usage_reported:thinking_tokens"]
+  );
+  assert.deepEqual(
+    measurementVerdict(wanPlan, twoImages({ image_count: 1, reasoning_tokens: 2 })).reasons,
+    ["token_usage_reported:reasoning_tokens"]
+  );
+  assert.deepEqual(
+    measurementVerdict({ ...wanPlan, apiModelId: "qwen-image-3.0" }, twoImages({ image_count: 1, output_tokens: 2 })).reasons,
+    ["token_usage_reported:output_tokens"]
+  );
+  assert.deepEqual(
+    measurementVerdict({ ...wanPlan, samples: 1 }, [sample(0, { usage: { image_count: 1, output_tokens: 2 } })]).reasons,
+    ["token_usage_reported:output_tokens"]
+  );
   // A request shape the endpoint rejects (wrong body for Wan) is no image, not a confirmation.
   const rejected = measurementVerdict(wanPlan, [
     sample(0, { delivered: false, failure: "provider_user_error", httpStatus: 400 }),

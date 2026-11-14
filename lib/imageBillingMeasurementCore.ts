@@ -261,14 +261,21 @@ export const sampleCostMicroUsd = (
 const GENERATED_TOKEN_USAGE = /(output|thinking|reasoning|completion)[a-z_.]*tokens?/i;
 
 /**
- * The largest generated-token count a per-image measurement treats as a fixed
- * counter rather than generated work. wan2.7-image reports `output_tokens: 2`
- * on every image (production measurement 2026-11-14, 6 of 6), and its API
- * reference calls those token values "not billed". Thinking or a rewritten
- * prompt would be hundreds of tokens and would move between requests; a
- * counter this small that never moves is neither.
+ * Usage counters a provider's own reference documents as not billed, per model
+ * family and key. Only these may be noted instead of refused, and only as a
+ * fixed small count: wan2.7-image reports `output_tokens: 2` on every image
+ * (production measurement 2026-11-14, 6 of 6), and its API reference
+ * (wan-image-generation-and-editing-api-reference, read 2026-11-13) calls
+ * those token values "not billed". Any other key or model -- a thinking or
+ * reasoning count anywhere -- still refuses, whatever its size.
  */
+const UNBILLED_TOKEN_COUNTERS: readonly { model: RegExp; key: string }[] = [
+  { model: /^wan2\.7-image(-pro)?$/, key: "output_tokens" },
+];
+
+/** A documented counter must be this small and identical on every delivered sample, and seen twice. */
 const FIXED_TOKEN_COUNTER_MAX = 8;
+const FIXED_TOKEN_COUNTER_MIN_SAMPLES = 2;
 
 export type MeasurementVerdict = {
   /** True only when every planned sample ran and the samples support `terms`. */
@@ -344,7 +351,12 @@ export const measurementVerdict = (plan: MeasurementPlan, samples: readonly Meas
     for (const [key, values] of tokenValues) {
       // A fixed counter is noted, not refused: the same small value on every
       // delivered sample. Anything that moves, or is larger, is generated work.
+      const documented = UNBILLED_TOKEN_COUNTERS.some(
+        (entry) => entry.key === key && entry.model.test(plan.apiModelId)
+      );
       const fixed =
+        documented &&
+        delivered.length >= FIXED_TOKEN_COUNTER_MIN_SAMPLES &&
         values.length === delivered.length &&
         values.every((value) => value === values[0]) &&
         values[0] <= FIXED_TOKEN_COUNTER_MAX;
