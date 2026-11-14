@@ -67,7 +67,7 @@ for (const theme of ["light", "dark"] as const) {
     await page.goto("/chat?lang=en");
     const more = page.getByTestId("starter-scroll-more");
     await expect(more).toBeVisible();
-    await expect(more).toHaveAccessibleName("아래 추천 질문 보기");
+    await expect(more).toHaveAccessibleName("추천 질문 더 보기");
     await expect(more).toBeEnabled();
     await more.click();
     await expect(more).toBeDisabled();

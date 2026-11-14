@@ -360,6 +360,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // changes.
   "20261114100000_amux_portfolio_score_active_window_check",
   "20261114100100_amux_portfolio_score_refresh_guard",
+  // The v52 review findings summary does not touch the commit-deadline marker,
+  // classifier or deferred trigger.
+  "20261114140000_amux_v52_review_findings_summary",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

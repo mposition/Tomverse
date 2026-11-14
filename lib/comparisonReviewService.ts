@@ -1,7 +1,10 @@
 import "server-only";
 
 import { generateText, Output } from "ai";
-import { createReviewAttemptQueue } from "@/lib/comparisonReviewAttempts";
+import {
+  createReviewAttemptQueue,
+  shouldRetryReviewGeneration,
+} from "@/lib/comparisonReviewAttempts";
 import { recordResponseLatency } from "@/lib/responseLatencyStore";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
@@ -384,6 +387,7 @@ export const runComparisonReview = async (
         } catch (error) {
           generationError = error;
           retryCount += 1;
+          if (!shouldRetryReviewGeneration(error)) break;
         }
       }
       if (!generated) throw generationError || new Error("No review output.");

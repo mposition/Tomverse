@@ -124,10 +124,17 @@ days used last. Each one:
   `analysis.realExample.counts.consensus`, `analysis.realExample.contradiction`.
   At least one from today's feature.
 - `translations`: `{"ko": [...], "zh-Hant": [...], "zh-Hans": [...]}`, one entry
-  per entry of `texts`, same order, same `role` and `speaker`. Written as a
-  native copywriter of that market would write it, never a calque of the
-  English (not "한 팬 달걀볶음밥" but "프라이팬 하나로 만드는 달걀볶음밥"); a
-  native-copy editor polishes them after you, but start natural; every model or company name of the English
+  per entry of `texts`, same order, same `role` and `speaker`. Each is that
+  market's version, not a translation (guide 13): headline, subhead and call
+  to action carry the same message in that market's words; a question someone
+  types, the AI's answer and the examples on a display, a diagram or a paper
+  are what a person in that market would really ask and see (a Korean asks
+  about 보일러 or 관리비, a reader in Taiwan about 除濕機 or 冷氣電費, a reader
+  in Singapore about aircon bills or a hawker meal), with local money, units
+  and places, keeping each text's role, purpose and length. Never a calque of
+  the English (not "한 팬 달걀볶음밥" but "프라이팬 하나로 만드는 달걀볶음밥"); a
+  native-copy editor polishes them after you, but start natural. Choose the
+  scene of `prompt_en` so it works in all four markets; every model or company name of the English
   text stays in its translation, in Latin letters, and a recorded answer is
   repeated in English exactly (guide 12, 15, 16, 17). A Korean or Chinese
   headline is at most 40 characters. "무료" and "免費" carry their condition
