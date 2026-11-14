@@ -84,6 +84,17 @@ export async function POST(request: Request) {
   const answer = { context };
   const bytes = Buffer.byteLength(JSON.stringify(answer), "utf8");
   if (bytes > MARKETING_GENERATOR_CONTEXT_MAX_BYTES) {
+    // Which part grew, so the next fix need not guess (2026-11-14 the run only saw "http 500").
+    const part = (value: unknown) => Buffer.byteLength(JSON.stringify(value ?? null), "utf8");
+    const parts = Object.entries(context).map(([key, value]) => [key, part(value)] as const);
+    console.error(
+      JSON.stringify({
+        event: "marketing_generator_context_too_large",
+        bytes,
+        maxBytes: MARKETING_GENERATOR_CONTEXT_MAX_BYTES,
+        parts: Object.fromEntries(parts),
+      }),
+    );
     // Not silent: on 2026-11-14 this refusal stopped the morning run and
     // nothing told the operator.
     void reportOperationalIncident({
@@ -96,8 +107,7 @@ export async function POST(request: Request) {
         component: "marketing-generator-context",
         bytes,
         capBytes: MARKETING_GENERATOR_CONTEXT_MAX_BYTES,
-        largestParts: Object.entries(context)
-          .map(([key, value]) => [key, Buffer.byteLength(JSON.stringify(value ?? null), "utf8")] as const)
+        largestParts: [...parts]
           .sort((a, b) => b[1] - a[1])
           .slice(0, 4)
           .map(([key, size]) => `${key}=${size}`)
