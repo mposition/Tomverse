@@ -39,7 +39,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, lastBuild, packOfRun, stillsIn, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
+import { answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, lastBuild, LIMITS, packOfRun, stillsIn, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
 import { speakLine, VOICE_CAP_ENV, voiceLedgerPath } from "./el-voice-core.mjs";
 import { levelVoice, probe, seconds as lengthOf, stills } from "./ffmpeg-tools.mjs";
 import { FRESH_LOCALES, FRESH_REVIEW_ENV, pickSubject, SUBJECTS } from "./fresh-review.mjs";
@@ -404,7 +404,7 @@ const music = await paid({ model: "elevenlabs_music_v2_5", force_instrumental: t
 if (!music.ok) report.failed.push({ step: "music", reason: music.reason });
 
 // 5. Voice, line by line, each levelled to the same loudness.
-const MAX_SECONDS = 40;
+const MAX_SECONDS = LIMITS.filmSeconds;
 const props = {};
 for (const locale of [...locales]) {
   const words = plan.locales[locale];

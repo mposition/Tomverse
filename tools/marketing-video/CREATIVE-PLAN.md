@@ -77,7 +77,11 @@ competitor's ad (docs/policy/marketing-automation.md §2).
   - `alt`: what the video shows, for a reader who cannot see it (at most 400
     characters), naming which parts are AI-made.
 - `seconds`: 15-38. The narration sets the real length; leave room for a
-  2-second end card.
+  2-second end card. Each locale's narration, end card included, must fit
+  38 s: about 11 characters a second in en, 6 in ko and 5 in zh (spaces not
+  counted), so at most about 380 en, 200 ko or 170 zh characters in all its
+  lines together. A plan whose narration would run longer is refused before
+  anything is paid for.
 - `topic`: the capture pack topic the film uses.
 
 ## Answer
