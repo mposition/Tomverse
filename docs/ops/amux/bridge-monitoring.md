@@ -412,8 +412,11 @@ journalctl -u tomverse-amux-dm-relay.service -n 50 --no-pager -o short-iso
   앱이 relay가 읽지 못하는 모양으로 계속 답하면(배포 중 계약 불일치) 새 프로세스도 곧 halt하는데, `delivery_read_unreadable`의 halt tick은
   sync를 한 번 부르므로 2분마다 재시작하면 앱의 침묵 알림이 영영 울리지 않는다. 두 번째 halt는 그대로 두어 6.1절 알림이 울린다.
 - 로컬 AMUX `/health`와 Tomverse `/api/health`가 답해야 하고, 재시작 직전에 unit의 실행이 판정한 그 실행인지 다시 읽는다.
-- **이번 부팅에서 한 번도 켜진 적 없는** relay(`inactive`/`dead`, `ActiveEnterTimestampMonotonic=0`, unit 파일 있음)는
-  시작한다(`not_started_since_boot`). 11-09에 재부팅이 남긴 상태다. enable한 relay는 systemd가 부팅 때 켜므로, 이것은
+- **이번 부팅에서 한 번도 켜진 적 없는** relay(`inactive`/`dead`, `ActiveEnterTimestampMonotonic=0`, unit 파일 있음, 그리고
+  이번 부팅의 relay journal `journalctl -u tomverse-amux-dm-relay.service -b 0`에 줄이 하나도 없음)는
+  시작한다(`not_started_since_boot`). timestamp만으로는 부족하다: enable되지 않은 unit은 사람이 멈춘 뒤 systemd가 상태를
+  비우면 다시 0으로 읽힌다. journal에는 systemd의 Started·Stopped 줄이 남으므로 사람이 멈춘 relay는 그대로 둔다. journal을
+  읽지 못하면 시작하지 않는다. 11-09에 재부팅이 남긴 상태다. enable한 relay는 systemd가 부팅 때 켜므로, 이것은
   enable되지 않은 호스트를 덮는다. 한 시간 제한, health check, 직전 재확인은 같다. relay 스위치가 꺼져 있으면 relay는
   바로 0으로 끝나고 다시 시작되지 않는다.
 - 이번 부팅에 한 번이라도 켜졌다가 `inactive`인 relay(사람이 멈춤)와 `failed`인 relay는 건드리지 않는다(종료 코드 2는

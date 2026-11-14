@@ -106,19 +106,32 @@ answers() {
 # "<ActiveState> <SubState> <ActiveEnterTimestampMonotonic> <InvocationID>" of
 # the relay's current run. The id is last: an inactive unit may have none.
 current_run() {
-  printf '%s %s %s %s'     "$(systemctl show -p ActiveState --value "$unit" 2>/dev/null || true)"     "$(systemctl show -p SubState --value "$unit" 2>/dev/null || true)"     "$(systemctl show -p ActiveEnterTimestampMonotonic --value "$unit" 2>/dev/null || true)"     "$(systemctl show -p InvocationID --value "$unit" 2>/dev/null || true)"
+  printf '%s %s %s %s' \
+    "$(systemctl show -p ActiveState --value "$unit" 2>/dev/null || true)" \
+    "$(systemctl show -p SubState --value "$unit" 2>/dev/null || true)" \
+    "$(systemctl show -p ActiveEnterTimestampMonotonic --value "$unit" 2>/dev/null || true)" \
+    "$(systemctl show -p InvocationID --value "$unit" 2>/dev/null || true)"
 }
 
 judged=$(current_run)
 read -r state sub entered invocation <<<"$judged"
 if [[ "$state" == inactive && "$sub" == dead && "$entered" == 0 ]]; then
-  # Never active since this boot: nobody started it and nobody stopped it.
-  # 2026-11-09: a reboot left the then-static unit dead for five days. A relay
-  # a person stopped has been active this boot and is left alone, and one
-  # whose switch is off exits 0 at once and is never started again.
+  # Possibly never active since this boot. 2026-11-09: a reboot left the
+  # then-static unit dead for five days. The timestamp alone is not proof: a
+  # stopped unit that is not enabled and that nothing refers to is collected
+  # by systemd, and reads back as dead with a zero timestamp. So the relay's
+  # own journal for this boot decides: any line at all -- its own output, or
+  # systemd's "Started"/"Stopped" lines for the unit -- means it ran this boot,
+  # and a relay a person stopped stays stopped. One whose switch is off exits
+  # 0 at once, leaves lines, and is never started again.
   if [[ "$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)" != loaded ]]; then
     exit 0
   fi
+  if ! booted=$(journalctl -u "$unit" -b 0 -n 1 --no-pager -q -o cat 2>/dev/null); then
+    log "$unit is inactive and its journal for this boot is unreadable; left alone"
+    exit 0
+  fi
+  [[ -z "$booted" ]] || exit 0
   what="was not started since boot"
   cause=not_started_since_boot
 elif [[ "$state" == active && "$sub" == running ]]; then

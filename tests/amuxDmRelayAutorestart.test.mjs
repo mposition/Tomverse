@@ -62,8 +62,8 @@ const V22 = "amux dm relay: v22 questions: resolved false, filed 1, closed 0";
  * FAKE_ENTERED and LoadState from FAKE_LOAD; after FAKE_FLIP_AFTER reads the run
  * changes, as if a person restarted it. `restart` is logged and answered with
  * FAKE_RESTART_STATUS. `journalctl` answers the invocation's lines from
- * relay.log and this unit's own last hour from self.log; FAKE_JOURNAL_FAIL
- * names which one fails.
+ * relay.log, the relay unit's lines for this boot from boot.log and this
+ * unit's own last hour from self.log; FAKE_JOURNAL_FAIL names which one fails.
  */
 const STUBS = [
   "systemctl() {",
@@ -81,8 +81,9 @@ const STUBS = [
   '  printf "%s\\n" "$*" >> journal-args.log',
   '  for arg in "$@"; do case "$arg" in',
   '    _SYSTEMD_INVOCATION_ID=*) [ "$FAKE_JOURNAL_FAIL" = relay ] && return 1; [ "${arg#*=}" = "$FAKE_ID" ] && cat relay.log; return 0 ;;',
-  '    -u) [ "$FAKE_JOURNAL_FAIL" = self ] && return 1; cat self.log; return 0 ;;',
   "  esac; done",
+  '  if [ "$1" = -u ] && [ "$2" = tomverse-amux-dm-relay.service ]; then [ "$FAKE_JOURNAL_FAIL" = boot ] && return 1; cat boot.log; return 0; fi',
+  '  if [ "$1" = -u ]; then [ "$FAKE_JOURNAL_FAIL" = self ] && return 1; cat self.log; return 0; fi',
   "  return 1",
   "}",
   'curl() { printf "%s\\n" "$*" >> curl.log; case "$*" in *127.0.0.1*) return "$FAKE_AMUX_STATUS" ;; *) return "$FAKE_APP_STATUS" ;; esac; }',
@@ -95,6 +96,7 @@ const run = ({
   sub = "running",
   id = INVOCATION,
   selfLines = [],
+  bootLines = [],
   amuxUp = true,
   appUp = true,
   restartStatus = 0,
@@ -108,6 +110,7 @@ const run = ({
     writeFileSync(join(dir, "autorestart"), script.replace(/\r\n/g, "\n"));
     writeFileSync(join(dir, "relay.log"), lines.length ? `${lines.join("\n")}\n` : "");
     writeFileSync(join(dir, "self.log"), selfLines.length ? `${selfLines.join("\n")}\n` : "");
+    writeFileSync(join(dir, "boot.log"), bootLines.length ? `${bootLines.join("\n")}\n` : "");
     const result = spawnSync(bash, ["-c", `${STUBS}\nbash ./autorestart`], {
       cwd: dir,
       encoding: "utf8",
@@ -426,4 +429,29 @@ test("a relay started by a person while it was being checked is left alone", { s
   const result = run({ lines: [], state: "inactive", sub: "dead", entered: "0", id: "", flipAfter: 4 });
   assert.deepEqual(result.restarts, []);
   assert.match(result.output, /changed while it was being checked; left alone/);
+});
+
+// Review r-20261114-035818-9d7986: a stopped unit that is not enabled and that
+// nothing refers to is garbage-collected by systemd and reads back dead with a
+// zero timestamp. The relay's journal for this boot is what says it ran.
+test("a relay a person stopped this boot stays stopped even after systemd forgot its state", { skip: noBash }, () => {
+  for (const bootLines of [
+    ["Stopping tomverse-amux-dm-relay.service - Tomverse AMUX Decision Maker relay..."],
+    ["amux dm relay started"],
+    ["amux dm relay is off"],
+  ]) {
+    const result = run({ lines: [], state: "inactive", sub: "dead", entered: "0", id: "", bootLines });
+    assert.deepEqual(result.restarts, [], bootLines[0]);
+    assert.deepEqual(result.curls, [], bootLines[0]);
+    assert.ok(
+      result.journalArgs.includes("-u tomverse-amux-dm-relay.service -b 0 -n 1 --no-pager -q -o cat"),
+      result.journalArgs.join("\n")
+    );
+  }
+});
+
+test("a relay whose journal for this boot cannot be read is not started", { skip: noBash }, () => {
+  const result = run({ lines: [], state: "inactive", sub: "dead", entered: "0", id: "", journalFail: "boot" });
+  assert.deepEqual(result.restarts, []);
+  assert.match(result.output, /its journal for this boot is unreadable; left alone/);
 });
