@@ -987,8 +987,12 @@ Task의 게시 경로**(버전 2)뿐이다. engineering Agent 자신의 카드 �
    응답한 뒤 대기 초안 하나를 판정한다. T1이면 초안을 `publish_promoted` 사유로 닫고, 같은
    패치로 그 run의 publish 항목과 단회 capability를 연다. DB는 끝난 run의 publish 항목을
    이 경우에만, PR 대기열에 자리가 있을 때만 받는다. 자리가 없으면 판정하지 않고 초안은
-   다음 회차까지 대기로 남는다. T1이 아니거나 근거를 읽지 못하면 그 사유를 단 보통 T2
-   초안으로 둔다. 판정 뒤 쓰는 순간 스위치·동의·대기열이 바뀌어 거절되면 `publish_refused`
+   다음 회차까지 대기로 남는다. T1이 아니면 그 사유를 단 보통 T2 초안으로 둔다. 근거 읽기가
+   예외로 끝나면(GitHub·DB에 닿지 못함 등) 판정이 아니므로 초안은 대기로 남아 다른 대기
+   초안 뒤로 가고, 같은 프로세스에서 3회차째도 예외면 `tier_evidence_unavailable` 사유의 보통
+   T2 초안이 된다. 각 회차의 `v22_tier_promotion` 로그는 예외의 class·code·단계(권한 확인,
+   patch 읽기, candidate 재구성, base 근거, 재확인)만 적고 메시지·patch·파일 내용은 적지 않는다.
+   판정 뒤 쓰는 순간 스위치·동의·대기열이 바뀌어 거절되면 `publish_refused`
    사유의 보통 T2 초안이 된다. 살아 있는 capability 없이 대기 중인 publish 항목(claim되기
    전에 capability가 만료됐거나, claim이 capability를 쓴 뒤 push 전 거절 또는 "이전 쓰기
    없음" 조회로 대기로 돌아온 항목)은 각 회차가 대기 초안보다 먼저 다시 판정해(§10), 같은
