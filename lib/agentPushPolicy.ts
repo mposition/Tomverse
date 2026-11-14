@@ -181,7 +181,8 @@ const extensionOf = (path: string) => {
 
 const basenameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
-const isPolicyTestName = (path: string) =>
+/** A test whose own name says it pins a policy, a contract or an invariant. Also judged by the merge lane's Decision Maker allow list. */
+export const isPolicyTestName = (path: string) =>
   path.startsWith("tests/") && /Policy|Contract|Invariant/.test(basenameOf(path));
 
 /**

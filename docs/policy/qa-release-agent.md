@@ -197,6 +197,28 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      `prisma/migrations/**/migration.sql` 본문에 그 테이블 이름이 나오는지로 하고, 본문을 읽지 못하면 제외합니다.
    - head 브랜치 `agent/**`, `marketing-agent/**`, `feedback-autofix/**`, `feedback-autofix-main/**`, `autofix/**`,
      `visual-baseline/**`, `dependabot/**`.
+     **예외 하나(운영자 결정 2026-11-13, "develop 병합 권한은 DM에게 승인합니다. main은 안됩니다."):** 엔지니어링 에이전트의
+     `agent/engineering/<run>` PR 가운데 앱이 "Decision Maker가 승인했고 조건을 지금 다시 확인했다"고 넘겨준 것만 후보가 될 수
+     있습니다. 레인은 제품 DB가 없으므로 앱이 상태 읽기(`lib/qaReleaseMergeLaneRoutes.ts`)의 `dmApproved`로 PR 번호·head·브랜치를
+     넘겨 줍니다. 앱은 상태 읽기마다 가장 오래 확인하지 않은 승인 한 건만 골라 그 PR의 현재 diff와 파일 목록을 GitHub에서 다시
+     읽어, digest가 승인 때와 같고 파일이 모두 허용 목록 안일 때만 싣습니다(읽지 못하거나 다르면 싣지 않고, 그 승인은 다음
+     차례로 넘어갑니다). 앱이 DM 승인 PR을 ready로 바꾸는 것은 사람이 ready로 바꾸는 것과 같습니다(CI 입장 예약 없음, 앞선 DM
+     ready의 CI가 보이기 전에는 다음 ready를 하지 않으므로 넘침은 PR 한 건으로 묶입니다). **fork PR은 제외합니다**: 앱은 head 저장소가 base 저장소와 다르면 싣지 않고, 레인도 GitHub의
+     `isCrossRepository`가 `false`일 때만 이 예외를 씁니다. 레인은 지금 GitHub가 보여 주는 번호·head commit·브랜치가
+     셋 다 같고 base가 develop일 때만 이 예외를 쓰고, 4항대로 그 head를 `sha`로 고정해 병합합니다. 앱은 병합 직전의 지시 소비에서
+     엔지니어링 PR이면 DM 승인을 같은 트랜잭션에서 다시 판정해(T2 스위치, DM kill switch, applied·approve 행, binding, Task, 그 head와 base)
+     하나라도 맞지 않으면 소비를 거절하고(`dm_approval_not_holding`), 레인은 소비 없이는 병합하지 않습니다. 레인은 소비 직전에
+     그 PR의 현재 diff를 GitHub에서 읽어 엔지니어링 에이전트와 같은 함수(`lib/pullDiffDigestCore.ts`)로 digest를 계산해 소비 요청에
+     싣고, 앱은 그 값이 승인 digest와 같을 때만 소비를 허락합니다(없거나 다르면 `dm_diff_changed`). diff를 읽지 못하면 그 PR은
+     건너뜁니다
+     (`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본 꺼짐; 꺼져 있으면 목록 자체가 없습니다). 그런 PR도 이 3항의 다른 제외(게이트
+     파일, 정책 테스트, 부록 A, 보호 테이블 migration, 목록 미완)와 2항의 CI 판정을 그대로 받습니다. 그리고 **변경 파일이 모두
+     허용 목록 안에 있어야 합니다**(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`, `docs/**`, `locales/**`, `components/**`,
+     `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`. 그 가운데 `docs/policy/**`·`docs/ui-contracts/**`·
+     `docs/agents/**`·`app/api/**`, `lib/agentAuthorityFiles.ts`의 control-plane 경로, 이름이나 정책 문서로 정해진 정책 테스트,
+     게이트 파일과 가격·크레딧·migration·schema·인증·비밀·감사 체인·삭제·보존 경로(`QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`,
+     대소문자 무시)는 제외). 하나라도 밖이면 `dm_outside_allowlist`로 사람에게 남깁니다. **대상은 develop뿐이고 main은 제외입니다** — main 병합과 배포는 1항대로
+     사람이 합니다.
    - 변경 파일 목록(전체 페이지, rename은 이전·이후 경로 둘 다)을 끝까지 읽지 못한 PR.
    **migration을 포함한 PR도 무인 병합 대상입니다**(dev의 preDeploy가 적용합니다). git revert는 적용된 migration과 실패한
    migration 기록을 되돌리지 않습니다. 그래서 dev 배포가 실패하면 레인은 latch하고, 운영자가 dev DB를 복구한 뒤에만
@@ -403,7 +425,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 | digest | cron `0 21 * * *` UTC, hard timeout 15분, 침묵 기준 28시간, 본문 보존 90일, 재실행 권고 상한 2건·7일, issues 배열 40 / 30 / 30, CI 행은 job마다 창 안의 최신 실행 하나(상한 16) | 승인 |
 | CI | PostgreSQL 17 전용 job 하나(17 경로의 시험용) | 승인 |
 | Monitor | cron `*/30 * * * *`, 호출자 timeout 120초(route의 한 회차 예산 110초보다 김) | 승인(2026-10-03) |
-| 병합 레인 | cron `*/10 * * * *` UTC, 서비스 hard timeout 10분, S-M2 진입에 필요한 S-M1 기간 3일(운영자 결정 2026-10-19, 이전 7일). **서비스가 부르는** 본 앱 트랜잭션은 셋이며 위 timeout 행의 식을 따릅니다. **지시 발급** A = 9 → 32초: timeout 설정, 감사 체인 잠금, 최신 revision·스위치·latch·열린 시도를 한 문장으로 읽기, 시도 행 삽입(레인당 하나는 DB 제약), 감사 네 문장, 마감 검사. **지시 소비** A = 9 → 32초: timeout 설정, 감사 체인 잠금, 지시 행을 잠그고 최신 revision·스위치·latch와 함께 한 문장으로 읽기, 소비하지 않은 행만 바꾸는 조건부 갱신, 감사 네 문장, 마감 검사. **결과 보고** A = 10 → 35초: timeout 설정, 감사 체인 잠금, 열린 시도만 바꾸는 조건부 갱신(최신 revision을 같은 문장에서 읽음), latch 기록, latch 알림 큐 행(한 문장), 감사 네 문장, 마감 검사. latch가 없는 경로는 문장이 더 적지만 **한도는 항상 A = 10으로 겁니다** — 같은 호출이 revision 불일치로 latch 경로가 될 수 있기 때문입니다. 결과 보고는 병합 결과, 배포 판정, 불명·미보고 시도의 PR 재조회 판정 세 종류이고 구성이 같습니다(8절 5항). merge commit SHA는 시도를 바꾸는 같은 조건부 갱신에서 기록합니다. **사람의 latch 해제**(Admin 행위) A = 9 → 32초: timeout 설정, 감사 체인 잠금, latch 행과 열린 시도를 한 문장으로 읽기, 사람이 고른 경우 보여 준 attempt id와 상태에 묶인 조건부 갱신으로 시도를 닫거나 옮기기(0행이면 트랜잭션을 되돌림), 사람 감사 네 문장, 그 감사 행을 가리키는 latch 해제 갱신(8절 5항). 시도를 건드리지 않는 경로는 문장이 하나 적지만 한도는 A = 9로 겁니다. 마감 검사는 없습니다(3절). 서비스 한 회차의 본 앱 호출은 **발급·소비·병합 결과 보고 셋(최악 99초 = 32 + 32 + 35)이거나, 열린 시도에 대한 결과 보고 하나(35초)**입니다. 둘을 한 회차에서 함께 하는 것은 8절 5항의 예외(배포됨으로 닫은 보고가 회차 시작 90초 안에 끝난 경우)뿐이고, 그때도 앞의 90초에 병합 경로의 최악을 더한 값이 hard timeout 안에 있습니다 | 승인(버전 4) |
+| 병합 레인 | cron `*/10 * * * *` UTC, 서비스 hard timeout 10분, S-M2 진입에 필요한 S-M1 기간 3일(운영자 결정 2026-10-19, 이전 7일). **서비스가 부르는** 본 앱 트랜잭션은 셋이며 위 timeout 행의 식을 따릅니다. **지시 발급** A = 9 → 32초: timeout 설정, 감사 체인 잠금, 최신 revision·스위치·latch·열린 시도를 한 문장으로 읽기, 시도 행 삽입(레인당 하나는 DB 제약), 감사 네 문장, 마감 검사. **지시 소비** A = 12 → 41초: timeout 설정, 감사 체인 잠금, 지시 행을 잠그고 최신 revision·스위치·latch와 함께 한 문장으로 읽기, 엔지니어링 PR이면 DM 승인 재판정(엔지니어링 PR인지, DM 스위치, 아직 유효한 승인 — 세 문장), 소비하지 않은 행만 바꾸는 조건부 갱신, 감사 네 문장, 마감 검사. **결과 보고** A = 10 → 35초: timeout 설정, 감사 체인 잠금, 열린 시도만 바꾸는 조건부 갱신(최신 revision을 같은 문장에서 읽음), latch 기록, latch 알림 큐 행(한 문장), 감사 네 문장, 마감 검사. latch가 없는 경로는 문장이 더 적지만 **한도는 항상 A = 10으로 겁니다** — 같은 호출이 revision 불일치로 latch 경로가 될 수 있기 때문입니다. 결과 보고는 병합 결과, 배포 판정, 불명·미보고 시도의 PR 재조회 판정 세 종류이고 구성이 같습니다(8절 5항). merge commit SHA는 시도를 바꾸는 같은 조건부 갱신에서 기록합니다. **사람의 latch 해제**(Admin 행위) A = 9 → 32초: timeout 설정, 감사 체인 잠금, latch 행과 열린 시도를 한 문장으로 읽기, 사람이 고른 경우 보여 준 attempt id와 상태에 묶인 조건부 갱신으로 시도를 닫거나 옮기기(0행이면 트랜잭션을 되돌림), 사람 감사 네 문장, 그 감사 행을 가리키는 latch 해제 갱신(8절 5항). 시도를 건드리지 않는 경로는 문장이 하나 적지만 한도는 A = 9로 겁니다. 마감 검사는 없습니다(3절). 서비스 한 회차의 본 앱 호출은 **발급·소비·병합 결과 보고 셋(최악 108초 = 32 + 41 + 35)이거나, 열린 시도에 대한 결과 보고 하나(35초)**입니다. 둘을 한 회차에서 함께 하는 것은 8절 5항의 예외(배포됨으로 닫은 보고가 회차 시작 90초 안에 끝난 경우)뿐이고, 그때도 앞의 90초에 병합 경로의 최악을 더한 값이 hard timeout 안에 있습니다 | 승인(버전 4) |
 
 ## 11. 사람에게 남는 일
 

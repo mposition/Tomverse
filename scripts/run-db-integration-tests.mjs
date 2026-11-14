@@ -444,6 +444,11 @@ run(
     // ceilings; a review pull request's approval only recorded; a Task that
     // moved, or a person who answered first, cancels it.
     "tests/integration/amux-dm-owner-settlement.db.test.ts",
+    // The Decision Maker's develop merge (owner decision 2026-11-13): an
+    // approval marked ready once, audited first, only behind its switch and
+    // beside the line; a change a revert cannot undo left to the person; the
+    // merge lane's list and the observer's read follow the approval.
+    "tests/integration/amux-dm-t2-merge.db.test.ts",
     // A v22 implement Task's review pull request (2026-11-11): its v4 row
     // cannot hold the number, so the engineering binding holds it, the record
     // is never refused, and only the bound pull request's merge completes it.
