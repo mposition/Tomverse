@@ -1,3 +1,4 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -20,6 +21,7 @@ import { en } from "./en";
  * in review rather than a key quietly going missing.
  */
 export const zh = {
+    reviewHandoff: reviewHandoffCopy.zh,
     journey: {
         importTitle: "导入对话",
         imported: "已导入的对话",

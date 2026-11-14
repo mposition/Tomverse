@@ -164,6 +164,8 @@ export async function GET(
     const cached = await prisma.comparisonReview.findUnique({
       where: { userId_inputHash: { userId: session.user.id, inputHash } },
       select: {
+        id: true,
+        reviewerModelId: true,
         result: true,
         assistantMessageIds: true,
         isStale: true,
@@ -186,6 +188,17 @@ export async function GET(
           responseCount: turn.responses.length,
           estimatedCredits: 0,
           cached: true,
+          // The handoff compares a captured version, not just a mutable row id.
+          // This remains inside the existing owner/unlock/read-only cache path.
+          ...(new URL(request.url).searchParams.get("handoff") === "1" && cached ? {
+            source: { question: turn.prompt.content, responses: turn.responses.map(({ messageId, content }) => ({ messageId, content })) },
+            storedSummary: {
+              id: cached.id,
+              reviewerModelId: cached.reviewerModelId,
+              result: verifiedQuickComparisonSummaryResultSchema.parse(cached.result),
+              responseMap: responseMapForCachedSummary(cached.assistantMessageIds, turn.responses),
+            },
+          } : {}),
         },
         { headers: { "Cache-Control": "no-store" } }
       );
@@ -313,6 +326,8 @@ export async function POST(
         return Response.json(
           {
             id: cached.id,
+            promptMessageId: turn.prompt.id,
+            source: { question: turn.prompt.content, responses: turn.responses.map(({ messageId, content }) => ({ messageId, content })) },
             title: conversation.title,
             result: result.data,
             responseMap,
@@ -497,6 +512,8 @@ export async function POST(
         return Response.json(
           {
             id: stored.id,
+            promptMessageId: turn.prompt.id,
+            source: { question: turn.prompt.content, responses: turn.responses.map(({ messageId, content }) => ({ messageId, content })) },
             title: conversation.title,
             result,
             responseMap: summaryPrompt.responseMap,
