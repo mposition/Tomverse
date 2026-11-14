@@ -670,12 +670,12 @@ test.describe("assistant profile settings", () => {
         await expect(page.getByTestId("assistant-models-keep-one")).toBeVisible();
     });
 
-    test("arriving from the chat returns there instead of the edit page", async ({
+    test("arriving from Review returns there instead of the edit page", async ({
         page,
     }) => {
         await prepareGuestPage(page);
         await mockCreate(page);
-        await openCreateForm(page, "/settings/assistants/new?from=chat");
+        await openCreateForm(page, "/settings/assistants/new?from=review");
 
         // The button says where it goes, which the settings entry point's
         // does not promise.
@@ -687,6 +687,35 @@ test.describe("assistant profile settings", () => {
         await create.click();
 
         await expect(page).toHaveURL(/\/review$/);
+    });
+
+    test("arriving from Chat returns to Chat with a single model", async ({
+        page,
+    }) => {
+        // Owner decision 2026-11-14: an assistant starts where it was added.
+        // Chat answers on one model, so its create picks exactly one and a
+        // second tick replaces the first instead of building a profile Chat
+        // would refuse with CHAT_PROFILE_SINGLE_MODEL_REQUIRED.
+        await prepareGuestPage(page);
+        await mockCreate(page);
+        await openCreateForm(page, "/settings/assistants/new?from=chat");
+
+        const create = page.getByTestId("assistant-create");
+        await expect(create).toContainText(/this chat|이 대화/i);
+        await page.getByTestId("assistant-name").fill("From Chat");
+        await page.getByTestId("assistant-instructions").fill("Be brief.");
+        await page.getByTestId("assistant-advanced-toggle").click();
+        await page.getByTestId("assistant-model-mode-explicit").check();
+        const seeded = page.getByTestId(`assistant-model-${APP_DEFAULTS.defaultModelId}`);
+        await expect(seeded).toBeChecked();
+        const other = page.getByTestId("assistant-model-gpt-5-6-luna");
+        await expect(other).toBeEnabled();
+        await other.check();
+        await expect(seeded).not.toBeChecked();
+        await create.click();
+
+        await expect(page).toHaveURL(/\/chat$/);
+        expect(createRequests[0].modelIds).toEqual(["gpt-5-6-luna"]);
     });
 
     test("the edit screen says save, not publish a revision", async ({
@@ -804,13 +833,43 @@ test.describe("assistant profile settings", () => {
         // sits underneath the chat.
         await prepareGuestPage(page);
         await mockCreate(page);
-        await page.goto("/settings/assistants/new?from=chat");
+        await page.goto("/settings/assistants/new?from=review");
 
         const back = page.getByTestId("assistant-create-back");
         await expect(back).toHaveAttribute("href", "/review");
         await expect(back).toContainText(/채팅으로 돌아가기|Back to the chat/);
         await expect(page.getByTestId("settings-breadcrumb")).toHaveCount(0);
+
+        await page.goto("/settings/assistants/new?from=chat");
+        await expect(page.getByTestId("assistant-create-back")).toHaveAttribute("href", "/chat");
     });
+
+    for (const { product, models, destination } of [
+        { product: "chat", models: ["gpt-5-6-luna"], destination: /\/chat$/ },
+        { product: "review", models: ["gpt-5-6-luna"], destination: /\/review$/ },
+        // Chat takes one model; a profile naming two can only start in Review.
+        { product: "chat", models: ["gpt-5-6-luna", APP_DEFAULTS.defaultModelId], destination: /\/review$/ },
+    ]) {
+        test(`settings opened from ${product} start a ${models.length}-model assistant at ${destination}`, async ({
+            page,
+        }) => {
+            await prepareGuestPage(page);
+            await page.addInitScript((value) => {
+                window.sessionStorage.setItem("tomverse.settings.returnProduct", value);
+            }, product);
+            await mockProfileApis(page, {
+                detail: {
+                    profile: {
+                        ...PROFILE_DETAIL.profile,
+                        currentVersion: { ...PROFILE_DETAIL.profile.currentVersion, models },
+                    },
+                },
+            });
+            await page.goto("/settings/assistants/p-published");
+            await page.getByTestId("assistant-start-chat").click();
+            await expect(page).toHaveURL(destination);
+        });
+    }
 
     test("returning from a profile restores its row", async ({ page }) => {
         await prepareGuestPage(page);
