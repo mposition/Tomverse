@@ -14,7 +14,9 @@ test("welcome keeps its import and assistant entries above the composer", async 
   await expect(welcome.getByRole("button", { name: "내 어시스턴트", exact: true })).toBeInViewport({ ratio: 1 });
   const text = await page.getByRole("textbox").boundingBox();
   const tools = await page.locator(".composer-toolbar").boundingBox();
-  expect(text.y + text.height).toBeLessThanOrEqual(tools.y + 1);
+  expect(text).not.toBeNull();
+  expect(tools).not.toBeNull();
+  expect(text!.y + text!.height).toBeLessThanOrEqual(tools!.y + 1);
 });
 
 for (const product of ["Chat", "Review"] as const) {
