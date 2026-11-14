@@ -153,11 +153,28 @@ export const DM_ESCALATION_MAX_BYTES = 1024;
  * words, case-insensitively. A false positive only costs the operator a draft,
  * so the list errs wide. Changing it is a policy version change.
  */
+const PLAN_NAME_BEFORE = /(?:free|pro|max|guest|plus|team|플랜|요금제|구독|등급)\s*(?:별\s*)?$/i;
+/** Stems of granting, changing, raising or taking away; wide on purpose ("줄" also hits "줄이다"). */
+const ACCESS_CHANGE_STEM =
+  /주|줘|줄|준|부여|변경|바꾸|바꿔|바꿀|바뀌|수정|설정|추가|삭제|제거|회수|열|올리|올려|올릴|높|낮|상승|승격|격상|허용|받|얻|요청|필요|빼|넓|확대|축소|위임|할당|박탈|해제|풀|없애/;
+
+/** Whether a text's Korean "권한" names access: every one does except a plan's entitlement (see the access entry). */
+export function koreanAccessTermHit(text: string): boolean {
+  for (let at = text.indexOf("권한"); at !== -1; at = text.indexOf("권한", at + 2)) {
+    const before = text.slice(Math.max(0, at - 16), at);
+    const rest = text.slice(at + 2);
+    const sentenceEnd = rest.search(/[.?!\n。]/);
+    const sentence = sentenceEnd === -1 ? rest : rest.slice(0, sentenceEnd);
+    if (!PLAN_NAME_BEFORE.test(before) || ACCESS_CHANGE_STEM.test(sentence)) return true;
+  }
+  return false;
+}
+
 export const DM_IRREVERSIBLE_TERMS: ReadonlyArray<{
   category: string;
   korean: readonly string[];
-  /** Korean forms a substring cannot say: a word plus any verb of a set. */
-  koreanPatterns?: readonly RegExp[];
+  /** A Korean hit a substring cannot say (the access entry's "권한" rule). */
+  koreanTest?: (text: string) => boolean;
   english: readonly string[];
 }> = [
   { category: "main_merge", korean: ["main 병합", "main에 병합", "main으로 병합"], english: ["merge to main", "merge into main", "merge main"] },
@@ -167,28 +184,19 @@ export const DM_IRREVERSIBLE_TERMS: ReadonlyArray<{
   { category: "money", korean: ["결제", "환불", "청구"], english: ["payment", "refund", "charge", "invoice"] },
   { category: "outbound", korean: ["게시", "발송", "연락"], english: ["publish", "post to", "send to", "send email", "send an email", "email the", "tweet", "notify", "contact"] },
   { category: "secret", korean: ["비밀번호", "비밀값", "토큰", "API 키"], english: ["secret", "token", "password", "api key", "apikey", "credential"] },
-  // Korean "권한" alone also names a plan's entitlement ("Free·Pro·Max 권한을
-  // 구분합니다"), which sent plain pricing questions to the operator
-  // (AMUX-PRICINGCOPY-002, owner decision 2026-11-14). A hit is now a kind of
-  // access ("읽기 권한", "관리자 권한") or "권한" followed by a verb that grants,
-  // changes, asks for or needs it ("권한을 줘도", "권한을 수정", "권한 설정") --
-  // the list still errs wide.
-  {
-    category: "access",
-    korean: ["접근 설정"],
-    koreanPatterns: [
-      /(?:접근|읽기|쓰기|실행|관리자|관리|소유자|어드민|admin|root|write|read|repo|저장소|배포|운영)\s*권한/i,
-      /권한\s*(?:을|를|이|가|은|는|의|도|만)?\s*(?:주|줘|줄|준|부여|변경|바꾸|바꿔|바꿀|바뀌|수정|설정|추가|삭제|제거|회수|열|올리|올려|상승|허용|받|얻|요청|필요|빼|낮추|낮춰|넓히|넓혀|확대|축소|위임|할당|박탈)/,
-    ],
-    english: ["permission", "permissions", "access control"],
-  },
+  // Every Korean "권한" is still a hit, with one exception (owner decision
+  // 2026-11-14, AMUX-PRICINGCOPY-002): a plan's entitlement -- "권한" right after
+  // a plan name ("Free·Pro·Max 권한을 구분합니다") -- whose sentence has no
+  // verb that grants, changes or takes it away. Two independent reviews showed
+  // that listing the access-change forms instead always misses one.
+  { category: "access", korean: ["접근 설정"], koreanTest: (text) => koreanAccessTermHit(text), english: ["permission", "permissions", "access control"] },
   { category: "gate", korean: ["정책 변경", "정책 개정", "정책을 바꾸", "정책을 고치", "워크플로"], english: ["policy change", "change the policy", "amend the policy", "workflow", "workflows", "branch protection"] },
 ];
 
 const englishTermPatterns = DM_IRREVERSIBLE_TERMS.map((entry) => ({
   category: entry.category,
   korean: entry.korean,
-  koreanPatterns: entry.koreanPatterns ?? [],
+  koreanTest: entry.koreanTest ?? (() => false),
   english: entry.english.map(
     (term) => new RegExp(`(?<![A-Za-z0-9_])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[ -]/g, "[ -]")}(?![A-Za-z0-9_])`, "i"),
   ),
@@ -219,7 +227,7 @@ export const dmRunUnavailableIncident = (instance: unknown, requestId: unknown) 
 export const irreversibleTermCategories = (text: string): string[] =>
   englishTermPatterns
     .filter((entry) => entry.korean.some((term) => text.includes(term)) ||
-      entry.koreanPatterns.some((pattern) => pattern.test(text)) || entry.english.some((pattern) => pattern.test(text)))
+      entry.koreanTest(text) || entry.english.some((pattern) => pattern.test(text)))
     .map((entry) => entry.category);
 
 /**

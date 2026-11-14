@@ -241,10 +241,10 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
    카드 전체에 그대로 적용한다. 기본은 꺼짐이다. 아래가 v1 목록이며 바꾸려면 운영자 승인(대화 한 줄, PR에 기록)이 필요하다: main 병합, ship·release·배포·production,
    삭제·delete·drop·truncate·덮어쓰기, migration, 결제·환불·청구, 외부 게시·발송·연락, secret·token·
    password·API key의 제공, 권한·접근 설정 변경, 정책·workflow·branch protection 변경. 정확한 대소문자·
-   어형 규칙과 검사 문자열은 S1의 테스트 고정값이 정한다. 운영자 결정 2026-11-14: 한국어 "권한"은 혼자서는
-   걸리지 않는다. "Free·Pro·Max 권한을 구분"처럼 플랜 이용 범위도 뜻하기 때문이다(AMUX-PRICINGCOPY-002). 권한의
-   종류(접근·읽기·쓰기·관리자·저장소 권한 등)이거나, "권한" 뒤에 주다·부여·변경·수정·설정·추가·회수·요청·필요 같은 동사가
-   오면 걸린다. 목록은 여전히 넓게 잡는다.
+   어형 규칙과 검사 문자열은 S1의 테스트 고정값이 정한다. 운영자 결정 2026-11-14: 한국어 "권한"은 여전히 모두
+   걸리되, 바로 앞이 플랜 이름(Free·Pro·Max·Guest·플랜·요금제 등)이고 같은 문장에 주다·부여·변경·회수·높이다 같은
+   동사가 없는 플랜 이용 범위("Free·Pro·Max 권한을 구분")만 예외다(AMUX-PRICINGCOPY-002). 권한 변경 표현을 나열하는
+   방식은 독립 검토 두 번에서 빈틈이 나와 쓰지 않는다.
 4. `credential`·`access`·`external` 질문의 `resolution`이 `decision_only`가 아님. worker는 이 세 유형에
    `resolution`(`needs_secret`·`needs_permission_change`·`needs_contact`·`decision_only`)을 적는다. 비밀값
    제공, 권한 변경, 제3자 연락은 DM이 도울 수 없는 일이다. DM은 비밀값을 받지도 주지도 않는다.

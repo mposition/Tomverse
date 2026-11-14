@@ -176,6 +176,10 @@ test("Korean access terms name a grant or change, not a plan's entitlement", () 
     // Independent review r-20261114-140745-6ebb4e: real access changes the narrow list missed.
     "저장소 읽기 권한을 줘도 될까요?", "사용자의 권한을 수정할까요?", "권한 설정을 바꿀까요?", "봇에게 권한이 필요합니다",
     "이 계정의 권한을 회수할까요?", "Pro 사용자에게 권한을 추가할까요?",
+    // Independent review r-20261114-141502-426751: modifiers between the word and the verb, and raising.
+    "봇의 권한을 더 줄까요?", "이 계정의 권한을 모두 회수할까요?", "계정 권한을 높여도 될까요?",
+    // Any other "권한" is still a hit, as before; a plan's entitlement with a change verb is too.
+    "권한 문제로 실패했습니다", "Pro 플랜 권한을 올릴까요?", "Max 권한을 Free에도 줄까요?",
   ]) {
     assert.deepEqual(irreversibleTermCategories(text), ["access"], text);
   }
