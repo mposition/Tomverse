@@ -48,7 +48,13 @@ product is recorded per tab by the surface that renders the account controls
 (`AuthButton`), so the panel, the account menu and deep links all return to
 where they started; when nothing usable is recorded (a URL opened directly) it
 is Review. Hierarchical back links to the settings list follow the same
-product. It never creates a conversation and never clears a selection.
+product. So does an assistant profile's "chat with this assistant" action, and
+a profile created from a composer's create link (`?from=chat` or
+`?from=review`) returns to that composer's product: an assistant starts where it
+was added (owner decision 2026-11-14). Chat answers on one model, so a create
+from Chat picks one, and a profile naming several starts in Review
+(`lib/assistantProfileReturn.ts`). It never creates a conversation and never
+clears a selection.
 
 This edge exists because the panel's close button is on the chat surface, and
 the chat surface is precisely what a visitor three levels into settings cannot

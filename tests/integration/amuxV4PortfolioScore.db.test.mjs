@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
 
+import { appendSyntheticAdminAudit } from
+  "./helpers/appendSyntheticAdminAudit.mjs";
 import { seedAmuxV4PortfolioRecoveryPrerequisites } from
   "./helpers/amuxV4PortfolioSeedFixture.mjs";
 import { exerciseAmuxV22LegacySafeStopFenceFixture,
@@ -148,6 +150,114 @@ test("portfolio evidence and score history are audited, path-bound and append-on
     const recovery = await exerciseAmuxV22TaskRecoveryFixture(client, seed);
     await exerciseAmuxV22LegacySafeStopFenceFixture(client,
       recovery.safeStopFenceInput);
+  } finally {
+    await client.query("ROLLBACK").catch(() => undefined);
+    await client.end();
+  }
+});
+
+test("only the system refresher extends an unchanged score's active window", {
+  skip: allowed ? undefined : "requires a dedicated loopback test database",
+}, async () => {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL statement_timeout = '10s'");
+    await client.query("SET LOCAL TIME ZONE 'UTC'");
+    async function rejects(sql, values, constraint) {
+      await client.query("SAVEPOINT refresh_probe");
+      let error;
+      try { await client.query(sql, values); } catch (caught) { error = caught; }
+      await client.query("ROLLBACK TO SAVEPOINT refresh_probe");
+      await client.query("RELEASE SAVEPOINT refresh_probe");
+      assert.ok(error, "invalid score refresh succeeded");
+      assert.equal(error.constraint, constraint, error.message);
+    }
+    // The refresher's audit is a system entry in this very transaction: no
+    // savepoint, so its xmin is the parent transaction's.
+    const systemAudit = (targetId, systemActor = "amux-portfolio-scorer",
+      action = "amux.v4.portfolio.score.refresh") =>
+      appendSyntheticAdminAudit(client, { actorUserId: null, action,
+        targetType: "AmuxPortfolioScoreSnapshot", targetId,
+        summary: "synthetic refresh", metadata: { systemActor },
+        useSavepoint: false });
+    const humanAudit = (targetId, action) => appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action,
+      targetType: "AmuxPortfolioScoreSnapshot", targetId,
+      summary: "synthetic score" });
+    await seedAmuxV4PortfolioRecoveryPrerequisites(client, {
+      recoveryExecutorKind,
+      afterScore: async ({ scoreId }) => {
+        const prior = (await client.query(`SELECT * FROM
+          public."AmuxPortfolioScoreSnapshot" WHERE "id" = $1`, [scoreId])).rows[0];
+        // $1 id, $2 audit, $3 activeStaleAt offset, $4 approvedByUserId,
+        // $5 computedAt offset. Everything else repeats the prior row.
+        const insertRefresh = `INSERT INTO public."AmuxPortfolioScoreSnapshot"
+          ("id", "requestId", "taskId", "taskRevision", "sourceApprovalId",
+           "initiativeAssessmentId", "epicAssessmentId", "featureAssessmentId",
+           "storyAssessmentId", "taskAssessmentId", "scoreVersion", "scoreTotal",
+           "components", "inputDigest", "inputDigestKeyId", "evidenceAsOf",
+           "activeStaleAt", "baselineStaleAt", "approvedByUserId",
+           "approvalAuditLogId", "computedAt")
+          SELECT $1, gen_random_uuid(), p."taskId", p."taskRevision",
+            p."sourceApprovalId", p."initiativeAssessmentId", p."epicAssessmentId",
+            p."featureAssessmentId", p."storyAssessmentId", p."taskAssessmentId",
+            p."scoreVersion", p."scoreTotal", p."components", p."inputDigest",
+            p."inputDigestKeyId", p."evidenceAsOf",
+            c.now + $3::interval, p."baselineStaleAt", $4, $2,
+            c.now + $5::interval
+          FROM public."AmuxPortfolioScoreSnapshot" p,
+            (SELECT date_trunc('milliseconds',
+              clock_timestamp() AT TIME ZONE 'UTC') AS now) c
+          WHERE p."id" = '${scoreId}'`;
+        const probe = async (constraint, { audit = systemAudit,
+          active = "7 days", owner = "synthetic-owner", computed = "0" } = {}) => {
+          const id = randomUUID();
+          const auditId = await audit(id);
+          await rejects(insertRefresh, [id, auditId, active, owner, computed],
+            constraint);
+        };
+        // A person may not write a refresh, nor another system actor.
+        await probe("AmuxPortfolioScoreSnapshot_audit_check", {
+          audit: (id) => humanAudit(id, "amux.v4.portfolio.score.refresh") });
+        await probe("AmuxPortfolioScoreSnapshot_audit_check", {
+          audit: (id) => systemAudit(id, "amux-v4-intake") });
+        // A confirmation never opens more than the evidence's own window.
+        await probe("AmuxPortfolioScoreSnapshot_refresh_check", {
+          audit: (id) => humanAudit(id, "amux.v4.portfolio.score.confirm") });
+        // The CHECK caps the window at the baseline and at computedAt + 7d.
+        await probe("AmuxPortfolioScoreSnapshot_shape_check",
+          { active: "30 days" });
+        await probe("AmuxPortfolioScoreSnapshot_shape_check",
+          { active: "7 days 1 second" });
+        // No refresh that fails to move the deadline, changes the data
+        // owner, or claims a computation time ahead of the database clock.
+        await probe("AmuxPortfolioScoreSnapshot_refresh_check",
+          { active: "5 days" });
+        await probe("AmuxPortfolioScoreSnapshot_refresh_check",
+          { owner: "someone-else" });
+        await probe("AmuxPortfolioScoreSnapshot_refresh_check",
+          { active: "8 days", computed: "1 day" });
+
+        const refreshedId = randomUUID();
+        await client.query(insertRefresh, [refreshedId,
+          await systemAudit(refreshedId), "7 days", "synthetic-owner", "0"]);
+        const refreshed = (await client.query(`SELECT "evidenceAsOf",
+          "baselineStaleAt", "activeStaleAt" > $2 AS "extended"
+          FROM public."AmuxPortfolioScoreSnapshot" WHERE "id" = $1`,
+        [refreshedId, prior.activeStaleAt])).rows[0];
+        assert.deepEqual(refreshed, { evidenceAsOf: prior.evidenceAsOf,
+          baselineStaleAt: prior.baselineStaleAt, extended: true });
+        // A second refresh must move past the first one's deadline.
+        await probe("AmuxPortfolioScoreSnapshot_refresh_check",
+          { active: "6 days" });
+        await rejects(`UPDATE public."AmuxPortfolioScoreSnapshot"
+          SET "activeStaleAt" = "activeStaleAt" + INTERVAL '1 day'
+          WHERE "id" = $1`, [refreshedId],
+        "AmuxPortfolioScoreSnapshot_immutable_check");
+      },
+    });
   } finally {
     await client.query("ROLLBACK").catch(() => undefined);
     await client.end();

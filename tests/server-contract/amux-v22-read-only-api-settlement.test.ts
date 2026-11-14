@@ -583,6 +583,48 @@ test("v52 review record binds an implement patch, assignment and audit once", as
   }
 });
 
+// Owner decision 2026-11-14: a reject keeps its reasons for the owner. The
+// text is display only: normalised, never in the request digest or the audit.
+test("a v52 reject stores its redacted reasons; another verdict stores none", async () => {
+  const previousKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = "v52-review-test-key".repeat(4);
+  try {
+    const summary = `- [major · openai] lib/ordinary.ts:3 leaks ghp_${"A".repeat(36)}\n` +
+      "- [minor · openai] see https://review.internal.example/x for the trace";
+    const evidence = { jobId: "r-20261016-110000-abcdef", baseSha: "a".repeat(40),
+      commitSha: "c".repeat(40), authorVendor: "anthropic", reviewerVendors: ["openai"],
+      touchesContract: false };
+    const recorded: Array<Record<string, unknown> | null | undefined> = [];
+    const digests: unknown[] = [];
+    for (const [verdict, findingsSummary] of [
+      ["reject", summary], ["reject", undefined], ["accept", summary],
+    ] as const) {
+      world = makeWorld("succeeded");
+      world.gradeGuard = true;
+      world.assignmentRole = "implement";
+      world.taskGrade = "advanced";
+      world.patch = { taskId: world.taskId, baseSha: "a".repeat(40),
+        sha256: "b".repeat(64), text: "diff --git a/lib/ordinary.ts b/lib/ordinary.ts\n",
+        files: [{ path: "lib/ordinary.ts", mode: "100644", bytesBase64: "YQ==" }] };
+      const result = await (await execution).recordAmuxV52Review({ attemptId, worker,
+        instanceId, generation: 1, taskRevision: 5, changedPaths: ["lib/ordinary.ts"],
+        evidence: { ...evidence, verdict }, findingsSummary });
+      assert.deepEqual(result, { recorded: true, duplicate: false });
+      recorded.push(world.reviewCreated);
+      digests.push(world.reviewCreated?.requestDigest);
+    }
+    assert.equal(recorded[0]?.findingsSummary,
+      "- [redacted: looked like a credential]\n- [minor · openai] see [link] for the trace");
+    assert.equal(recorded[1]?.findingsSummary, null);
+    assert.equal(recorded[2]?.findingsSummary, null);
+    // The reasons never enter the digest the bridge's readback compares.
+    assert.equal(digests[0], digests[1]);
+  } finally {
+    if (previousKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+    else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousKey;
+  }
+});
+
 test("an accepted patch whose start opened no publication run settles privately for review", async () => {
   // Production 2026-11-06: the Publisher was halted, start skipped the run
   // (v22_publication_skipped), and settlement refused the accepted patch with

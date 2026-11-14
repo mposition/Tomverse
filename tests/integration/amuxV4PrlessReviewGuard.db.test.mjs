@@ -35,6 +35,8 @@ test("v4 PR-less proposal guard accepts only the latest retained non-code or no-
     await db.query(`CREATE TEMP TABLE "AmuxExecutionAttempt" (
       "id" text PRIMARY KEY, "taskId" text,
       "v22AssignmentId" text, "reason" text) ON COMMIT DROP`);
+    await db.query(`CREATE TEMP TABLE "AmuxV22TaskPatch" (
+      "attemptId" text PRIMARY KEY) ON COMMIT DROP`);
     await db.query(`CREATE TEMP TABLE "EngineeringAgentRun" (
       "id" text PRIMARY KEY, "amuxAttemptId" text) ON COMMIT DROP`);
     await db.query(`CREATE TEMP TABLE "EngineeringAgentWorkItem" (
@@ -98,6 +100,9 @@ test("v4 PR-less proposal guard accepts only the latest retained non-code or no-
       SET "reason" = 'usage_outcome_unknown' WHERE "id" = 'attempt'`);
     await reject(`${implement} UPDATE pg_temp."AmuxWorkItem"
       SET "reviewPrNumber" = 42 WHERE "id" = 'card'`);
+    // An attempt that stored a patch changed code: never "no change needed",
+    // even with no publication row at all (AMUX-FILEGEN2-002, 2026-11-13).
+    await reject(`${implement} INSERT INTO pg_temp."AmuxV22TaskPatch" VALUES ('attempt')`);
     // A design Task's approval does not read publication work.
     await accept(`INSERT INTO pg_temp."EngineeringAgentWorkItem"
       VALUES ('run', 'publish', 'queued', NULL)`);

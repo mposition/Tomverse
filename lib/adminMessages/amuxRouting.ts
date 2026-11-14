@@ -248,6 +248,11 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "The stored description exceeds the protected display limit. Only Block is available until the source is shortened and reviewed again.",
     reviewDisplayMismatch:
       "Approval is closed because the source contains hidden or normalized characters. Correct the source and run the Task again, or Block it; the displayed text cannot stand in for the original.",
+    unpublishedPatch: {
+      title: "This result has a patch that has not reached develop",
+      body: "The worker changed code, but no pull request carries the patch. It cannot be completed as no change needed. Run it again, or restore the publication path so the patch opens a pull request.",
+      runMissing: "No engineering agent run was created for this attempt, so nothing could publish it.",
+    },
     approveUnavailable:
       "Approval is unavailable until a verifiable result artifact and its source can be reviewed.",
     noAllowedOutcome: "No task-review decision is currently permitted.",
@@ -584,6 +589,11 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "저장된 설명이 보호 화면 표시 한도를 넘었습니다. 원천 내용을 줄여 다시 검토하기 전에는 차단만 가능합니다.",
     reviewDisplayMismatch:
       "원문에 화면에서 숨겨지거나 정규화되는 문자가 있어 완료 승인을 닫았습니다. 원문을 고쳐 Task를 다시 실행하거나 차단하세요. 표시 문구를 원문 동의로 간주하지 않습니다.",
+    unpublishedPatch: {
+      title: "이 결과에는 develop에 들어가지 않은 patch가 있습니다",
+      body: "작업자가 코드를 바꿨지만 그 patch를 실은 PR이 없습니다. '변경 불필요'로 완료할 수 없습니다. 다시 실행하거나, 게시 경로를 복구해 patch가 PR로 열리게 하세요.",
+      runMissing: "이 실행에는 엔지니어링 에이전트 run이 만들어지지 않아 게시할 경로가 없었습니다.",
+    },
     approveUnavailable:
       "검증 가능한 결과물과 출처를 검토할 수 있을 때까지 완료 승인은 사용할 수 없습니다.",
     noAllowedOutcome: "현재 허용된 작업 검토 결정이 없습니다.",

@@ -56,8 +56,10 @@ const REMOVED_V22 = "tomverse-amux-v22-bridge@claude-impl.service";
  * script itself keeps only the names it watches) or fails when FAKE_LIST_FAIL
  * is 1, and `is-active` answers from FAKE_STATES, `inactive` for a unit it does
  * not know. FAKE_STATES is space-separated, so a space inside an answer
- * travels as `~`. Any other verb is a failure, which is what the script would
- * see if it still asked about a unit by name.
+ * travels as `~`. `show -p LoadState` answers `loaded` for a unit in
+ * FAKE_STATES and `not-found` for one that is not (the relay is asked for by
+ * name), FAKE_RELAY_LOAD overrides it, and FAKE_SHOW_FAIL=1 fails it. Any other
+ * verb is a failure.
  */
 const SYSTEMCTL_STUB = [
   "systemctl() {",
@@ -65,6 +67,12 @@ const SYSTEMCTL_STUB = [
   '    if [ "$FAKE_LIST_FAIL" = 1 ]; then printf "Failed to list units: Access denied\\n" >&2; return 1; fi',
   '    for pair in $FAKE_STATES; do unit=${pair%%=*}; printf "%s loaded active running fake\\n" "$unit"; done',
   "    return 0",
+  "  fi",
+  '  if [ "$1" = show ]; then',
+  '    if [ "$FAKE_SHOW_FAIL" = 1 ]; then printf "Failed to get properties: Access denied\\n" >&2; return 1; fi',
+  '    if [ -n "$FAKE_RELAY_LOAD" ]; then printf "%s\\n" "$FAKE_RELAY_LOAD"; return 0; fi',
+  '    for pair in $FAKE_STATES; do if [ "${pair%%=*}" = "${@: -1}" ]; then printf "loaded\\n"; return 0; fi; done',
+  '    printf "not-found\\n"; return 0',
   "  fi",
   '  if [ "$1" = is-active ]; then',
   '    for pair in $FAKE_STATES; do if [ "${pair%%=*}" = "$2" ]; then answer=${pair#*=}; printf "%s\\n" "${answer//\\~/ }"; [ "$answer" = active ]; return; fi; done',
@@ -81,6 +89,8 @@ const run = ({
   credential = true,
   curlStatus = 0,
   listFails = false,
+  showFails = false,
+  relayLoad = "",
 }) => {
   const dir = mkdtempSync(join(tmpdir(), "bridge-watchdog-"));
   try {
@@ -105,6 +115,8 @@ const run = ({
           .join(" "),
         FAKE_CURL_STATUS: String(curlStatus),
         FAKE_LIST_FAIL: listFails ? "1" : "0",
+        FAKE_SHOW_FAIL: showFails ? "1" : "0",
+        FAKE_RELAY_LOAD: relayLoad,
       },
     });
     const lines = (name) =>
@@ -525,4 +537,54 @@ test("no run is in progress when the cursor is taken", { skip: noBash }, () => {
   const start = result.actions.indexOf("systemctl start tomverse-bridge-watchdog.service");
   assert.ok(stop >= 0 && stop < start, result.actions.join("\n"));
   assert.ok(result.actions.indexOf(TIMER_OFF) < stop, result.actions.join("\n"));
+});
+
+// The AMUX Decision Maker relay (docs/ops/amux/bridge-monitoring.md §6): one
+// unit, asked for by name once its unit file is installed. Its calls stopped
+// on 2026-11-09 and nothing said so for five days.
+const RELAY = "tomverse-amux-dm-relay.service";
+
+test("an active relay beside active bridges sends up", { skip: noBash }, () => {
+  const result = run({ states: { ...allActive, [RELAY]: "active" } });
+  assert.deepEqual(result.requests, [URL_VALUE]);
+  assert.match(result.output, /6 unit\(s\), 0 down/);
+});
+
+for (const state of ["failed", "inactive"]) {
+  test(`a ${state} relay sends the failure signal and names the relay`, { skip: noBash }, () => {
+    const result = run({ states: { ...allActive, [RELAY]: state } });
+    assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+    assert.ok(result.output.includes(`${RELAY} is ${state}`), result.output);
+  });
+}
+
+test("a relay restarting with the bridges up sends nothing", { skip: noBash }, () => {
+  const result = run({ states: { ...allActive, [RELAY]: "activating" } });
+  assert.deepEqual(result.requests, []);
+});
+
+test("a host without the relay's unit file does not watch it", { skip: noBash }, () => {
+  const result = run({ states: allActive });
+  assert.deepEqual(result.requests, [URL_VALUE]);
+  assert.match(result.output, /5 unit\(s\), 0 down/);
+  assert.doesNotMatch(result.output, /dm-relay/);
+});
+
+test("a relay is never a bridge: the relay alone is still down", { skip: noBash }, () => {
+  const result = run({ states: { [RELAY]: "active" } });
+  assert.deepEqual(result.requests, [`${URL_VALUE}/fail`]);
+  assert.match(result.output, /no bridge unit is loaded/);
+});
+
+test("a relay whose load state cannot be read never sends up", { skip: noBash }, () => {
+  for (const options of [{ showFails: true }, { relayLoad: "masked" }]) {
+    const result = run({ states: { ...allActive, [RELAY]: "active" }, ...options });
+    assert.deepEqual(result.requests, [], JSON.stringify(options));
+    assert.match(result.output, /tomverse-amux-dm-relay\.service is unreadable/);
+  }
+});
+
+test("the relay is asked for by name, outside the listed patterns", () => {
+  assert.match(script, /^relay_unit=tomverse-amux-dm-relay\.service$/m);
+  assert.match(script, /systemctl show -p LoadState --value "\$relay_unit"/);
 });

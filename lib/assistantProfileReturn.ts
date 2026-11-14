@@ -1,5 +1,5 @@
 /**
- * The Review → create-a-profile → Review round trip (Release C).
+ * The product → create-a-profile → same product round trip (Release C).
  *
  * docs/policy/external-conversation-import-and-memory.md §14.
  *
@@ -7,10 +7,16 @@
  *
  * The obvious shape for "come back where you were" is a `returnTo` parameter,
  * and it is the shape that turns into an open redirect the first time somebody
- * forgets to validate it. Nothing here needs one: the chat surface is a single
- * route that already restores its own conversation from
- * `GUEST_ACTIVE_CHAT_STORAGE_KEY` on mount, so returning is a fixed push to
- * `/review` and the conversation comes back by itself.
+ * forgets to validate it. Nothing here needs one: each product is a single
+ * route that already restores its own conversation from session storage on
+ * mount, so returning is a fixed push to `/chat` or `/review` and the
+ * conversation comes back by itself.
+ *
+ * Which of the two is the product the assistant was added in (owner decision
+ * 2026-11-14): the composer's create link names its product as one of two
+ * literals, and the settings editor uses the product whose settings panel the
+ * visitor opened (`useSettingsReturnProduct`). Unknown is Review, as before.
+ * Chat answers on one model, so a profile naming several starts in Review.
  *
  * The picker returns to the current conversation. The settings editor and
  * knowledge guide request a new conversation with the saved assistant.
@@ -30,16 +36,18 @@
  * reaching a request at all.
  */
 
-import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+import type { ConversationProductKey } from "@/lib/conversationProduct";
+import {
+    CHAT_WORKSPACE_PATH,
+    REVIEW_WORKSPACE_PATH,
+} from "@/lib/productSurfaceRoutes";
 
 export const ASSISTANT_PROFILE_RETURN_PARAM = "from";
 export const ASSISTANT_PROFILE_RETURN_CHAT = "chat";
+export const ASSISTANT_PROFILE_RETURN_REVIEW = "review";
 
-/** Where the round trip ends. A constant, never a value from the query. */
+/** The Review end of the round trip. A constant, never a value from the query. */
 export const ASSISTANT_PROFILE_REVIEW_PATH = REVIEW_WORKSPACE_PATH;
-
-/** @deprecated Use the product-correct Review destination. */
-export const ASSISTANT_PROFILE_CHAT_PATH = ASSISTANT_PROFILE_REVIEW_PATH;
 
 /**
  * Set by the create or edit screen, read once by the chat surface.
@@ -58,27 +66,60 @@ export const isPlausibleProfileId = (value: unknown): value is string =>
     typeof value === "string" && PROFILE_ID_SHAPE.test(value);
 
 /**
- * Whether this screen was opened from the chat.
+ * Which product's conversation opened this screen, or null for none.
  *
- * Compared against one literal. An unknown value is not a different
- * destination, it is simply not the chat — there is no branch that reads the
+ * Compared against two literals. An unknown value is not a different
+ * destination, it is simply no product — there is no branch that reads the
  * parameter as somewhere to go.
  */
-export const isChatReturnRequest = (search: string): boolean => {
-    const params = new URLSearchParams(
-        search.startsWith("?") ? search.slice(1) : search
-    );
-    return (
-        params.get(ASSISTANT_PROFILE_RETURN_PARAM) ===
-        ASSISTANT_PROFILE_RETURN_CHAT
-    );
+export const assistantProfileReturnProduct = (
+    search: string | URLSearchParams
+): ConversationProductKey | null => {
+    const params =
+        typeof search === "string"
+            ? new URLSearchParams(search.startsWith("?") ? search.slice(1) : search)
+            : search;
+    const value = params.get(ASSISTANT_PROFILE_RETURN_PARAM);
+    if (value === ASSISTANT_PROFILE_RETURN_CHAT) return "chat";
+    if (value === ASSISTANT_PROFILE_RETURN_REVIEW) return "review";
+    return null;
 };
 
-/** The create screen's own href, as the chat's CTA should write it. */
-export const assistantProfileCreateHref = (options?: { fromChat?: boolean }) =>
-    options?.fromChat
-        ? `/settings/assistants/new?${ASSISTANT_PROFILE_RETURN_PARAM}=${ASSISTANT_PROFILE_RETURN_CHAT}`
+/** The create screen's own href, as a composer's CTA should write it. */
+export const assistantProfileCreateHref = (options?: {
+    from?: ConversationProductKey;
+}) =>
+    options?.from
+        ? `/settings/assistants/new?${ASSISTANT_PROFILE_RETURN_PARAM}=${
+              options.from === "chat"
+                  ? ASSISTANT_PROFILE_RETURN_CHAT
+                  : ASSISTANT_PROFILE_RETURN_REVIEW
+          }`
         : "/settings/assistants/new";
+
+/** A product's own route. Never built from a query value. */
+export const assistantProfileProductPath = (product: ConversationProductKey) =>
+    product === "chat" ? CHAT_WORKSPACE_PATH : REVIEW_WORKSPACE_PATH;
+
+/**
+ * Where "start with this assistant" goes: the product it was added in, except
+ * that Chat answers on exactly one model, so a profile naming several starts
+ * in Review rather than being refused with CHAT_PROFILE_SINGLE_MODEL_REQUIRED.
+ * A profile naming none follows the account default, which Chat clamps to one.
+ */
+export const assistantProfileStartPath = (
+    product: ConversationProductKey,
+    profileModelCount: number
+) =>
+    assistantProfileProductPath(
+        product === "chat" && profileModelCount > 1 ? "review" : product
+    );
+
+/** The model ceiling a create from this product may pick. */
+export const assistantProfileCreateModelLimit = (
+    product: ConversationProductKey,
+    profileLimit: number
+) => (product === "chat" ? 1 : profileLimit);
 
 type ProfileEntry = "chat" | "settings" | "guide";
 

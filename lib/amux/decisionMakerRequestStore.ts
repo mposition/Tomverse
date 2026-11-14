@@ -424,6 +424,28 @@ export async function countOpenDecisionMakerRequestsCreatedBetween(
 }
 
 /**
+ * When the newest request created after `afterMs` (epoch milliseconds) was
+ * created, or null when there is none, in one statement. The relay heartbeat
+ * reads it to tell a relay that is asked from one that is silent.
+ */
+export async function readNewestDecisionMakerRequestCreatedAfter(
+  client: LedgerReader,
+  afterMs: number,
+): Promise<Date | null> {
+  if (!Number.isSafeInteger(afterMs) || afterMs < 0) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  const rows = await client.$queryRaw<Array<{ createdAt: Date }>>`
+    SELECT r."createdAt" AS "createdAt"
+    FROM "AmuxDecisionMakerRequest" r
+    WHERE r."createdAt" > 'epoch'::timestamptz + ${afterMs} * INTERVAL '1 millisecond'
+    ORDER BY r."createdAt" DESC
+    LIMIT 1
+  `;
+  return rows[0]?.createdAt ?? null;
+}
+
+/**
  * Requests routed to a DM that no closing event has closed and that are at
  * least 720 hours old by the database clock -- the ones §10's stale close
  * applies to -- oldest first, at most `limit` (1 to 100), in one statement.

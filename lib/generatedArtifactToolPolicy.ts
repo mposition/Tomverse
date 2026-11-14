@@ -174,6 +174,37 @@ export type ArtifactToolPlan = {
   systemPrompt: string;
 };
 
+export const ARTIFACT_UNAVAILABLE_REASONS = [
+  "model_unverified",
+  "native_search_conflict",
+] as const;
+
+export type ArtifactUnavailableNotice = {
+  reason: (typeof ARTIFACT_UNAVAILABLE_REASONS)[number];
+  suggestedModelId?: string;
+};
+
+/** A small, content-free notice for Auto when a requested file cannot be made. */
+export const artifactUnavailableNotice = (
+  plan: ArtifactToolPlan,
+  input: {
+    requiresFileGeneration: boolean;
+    fileCapableModelIds: readonly string[];
+  },
+): ArtifactUnavailableNotice | null => {
+  if (!input.requiresFileGeneration) return null;
+  if (plan.offReason === "native_search_conflict") {
+    return { reason: "native_search_conflict" };
+  }
+  if (plan.offReason === "model_unverified") {
+    const suggestedModelId = input.fileCapableModelIds[0];
+    return suggestedModelId
+      ? { reason: "model_unverified", suggestedModelId }
+      : { reason: "model_unverified" };
+  }
+  return null;
+};
+
 export type ArtifactToolPlanInput = {
   modelId: string;
   provider: string;

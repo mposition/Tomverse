@@ -1,37 +1,61 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-    ASSISTANT_PROFILE_CHAT_PATH,
     ASSISTANT_PROFILE_REVIEW_PATH,
     assistantProfileCreateHref,
+    assistantProfileCreateModelLimit,
+    assistantProfileProductPath,
+    assistantProfileReturnProduct,
+    assistantProfileStartPath,
     consumePendingChatProfile,
-    isChatReturnRequest,
     isPlausibleProfileId,
     stashPendingChatProfile,
 } from "../lib/assistantProfileReturn.ts";
 
 /**
  * The round trip's whole security argument is that nothing it carries is a
- * destination. These tests pin that: the query parameter is compared to one
- * literal and never followed, and the return path is a constant.
+ * destination. These tests pin that: the query parameter is compared to two
+ * literals and never followed, and the return paths are constants.
  */
 
-test("the generic return path is the canonical Review route, not something the caller supplies", () => {
+test("the return paths are the canonical product routes, not something the caller supplies", () => {
     assert.equal(ASSISTANT_PROFILE_REVIEW_PATH, "/review");
-    assert.equal(ASSISTANT_PROFILE_CHAT_PATH, ASSISTANT_PROFILE_REVIEW_PATH);
+    assert.equal(assistantProfileProductPath("review"), "/review");
+    assert.equal(assistantProfileProductPath("chat"), "/chat");
     // The create href is the only URL this module builds, and its only
     // variable part is a flag with two possible values.
     assert.equal(assistantProfileCreateHref(), "/settings/assistants/new");
     assert.equal(
-        assistantProfileCreateHref({ fromChat: true }),
+        assistantProfileCreateHref({ from: "chat" }),
         "/settings/assistants/new?from=chat"
+    );
+    assert.equal(
+        assistantProfileCreateHref({ from: "review" }),
+        "/settings/assistants/new?from=review"
     );
 });
 
-test("only the exact chat flag reads as a return request", () => {
-    assert.equal(isChatReturnRequest("?from=chat"), true);
-    assert.equal(isChatReturnRequest("from=chat"), true);
-    assert.equal(isChatReturnRequest("?lang=ko&from=chat"), true);
+test("an assistant starts in the product it was added in (owner decision 2026-11-14)", () => {
+    assert.equal(assistantProfileStartPath("chat", 0), "/chat");
+    assert.equal(assistantProfileStartPath("chat", 1), "/chat");
+    assert.equal(assistantProfileStartPath("review", 0), "/review");
+    assert.equal(assistantProfileStartPath("review", 3), "/review");
+    // Chat answers on one model, so a multi-model profile starts in Review
+    // instead of being refused with CHAT_PROFILE_SINGLE_MODEL_REQUIRED.
+    assert.equal(assistantProfileStartPath("chat", 2), "/review");
+    assert.equal(assistantProfileCreateModelLimit("chat", 3), 1);
+    assert.equal(assistantProfileCreateModelLimit("review", 3), 3);
+});
+
+test("only the exact product flags read as a return request", () => {
+    assert.equal(assistantProfileReturnProduct("?from=chat"), "chat");
+    assert.equal(assistantProfileReturnProduct("from=chat"), "chat");
+    assert.equal(assistantProfileReturnProduct("?lang=ko&from=chat"), "chat");
+    assert.equal(assistantProfileReturnProduct("?from=review"), "review");
+    assert.equal(
+        assistantProfileReturnProduct(new URLSearchParams("from=review")),
+        "review"
+    );
 
     for (const search of [
         "",
@@ -45,8 +69,8 @@ test("only the exact chat flag reads as a return request", () => {
         "?lang=ko",
     ]) {
         assert.equal(
-            isChatReturnRequest(search),
-            false,
+            assistantProfileReturnProduct(search),
+            null,
             `${search} must not read as a return request`
         );
     }
@@ -55,9 +79,10 @@ test("only the exact chat flag reads as a return request", () => {
 test("a URL in the flag is never treated as a place to go", () => {
     // The failure this exists to make impossible: a `returnTo` parameter that
     // is navigated to. There is no branch that reads the parameter as a
-    // destination, so an absolute URL is simply "not chat".
-    assert.equal(isChatReturnRequest("?from=https://evil.example"), false);
-    assert.equal(isChatReturnRequest("?from=javascript:alert(1)"), false);
+    // destination, so an absolute URL is simply no product.
+    assert.equal(assistantProfileReturnProduct("?from=https://evil.example"), null);
+    assert.equal(assistantProfileReturnProduct("?from=javascript:alert(1)"), null);
+    assert.equal(assistantProfileReturnProduct("?from=Review"), null);
 });
 
 test("only an id shaped like one this product mints is accepted", () => {

@@ -236,6 +236,8 @@ export async function seedAmuxV4PortfolioRecoveryPrerequisites(db, input = {}) {
     SET "state" = 'approved' WHERE "id" = $1`, [unitId]);
   await db.query(`SET CONSTRAINTS amux_v4_consumed_decision_complete,
     amux_v4_registered_card_complete, amux_v4_task_dag_decision IMMEDIATE`);
+  // The registered backlog Task at revision 0, before its promotion.
+  await input.afterSourceConsumed?.({ ids, scoreId, newerAssessmentId: newerId });
 
   const receiptId = randomUUID();
   const receiptAudit = await appendSyntheticAdminAudit(db, {
