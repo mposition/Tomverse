@@ -227,6 +227,28 @@ test("Wan 2.7: per-image billing is confirmable only with every image and no gen
   ]);
   assert.equal(tokens.confirmable, false);
   assert.deepEqual(tokens.reasons, ["token_usage_reported:output_tokens"]);
+  // Production 2026-11-14: wan2.7-image reports output_tokens: 2 on every image,
+  // which its API reference calls not billed. A fixed small counter is noted.
+  const counter = measurementVerdict(wanPlan, [
+    sample(0, { usage: { image_count: 1, input_tokens: 41, output_tokens: 2, total_tokens: 43 } }),
+    sample(1, { usage: { image_count: 1, input_tokens: 41, output_tokens: 2, total_tokens: 43 } }),
+  ]);
+  assert.equal(counter.confirmable, true);
+  assert.deepEqual(counter.notes, ["token_counter_fixed:output_tokens=2"]);
+  assert.deepEqual(counter.terms, { kind: "per_image_no_thinking" });
+  // It moves, it is larger than a counter, or one image did not report it: refused.
+  for (const pair of [
+    [2, 3],
+    [9, 9],
+  ]) {
+    const moved = measurementVerdict(wanPlan, pair.map((value, index) => sample(index, { usage: { image_count: 1, output_tokens: value } })));
+    assert.deepEqual(moved.reasons, ["token_usage_reported:output_tokens"], String(pair));
+  }
+  const partialCounter = measurementVerdict(wanPlan, [
+    sample(0, { usage: { image_count: 1, output_tokens: 2 } }),
+    sample(1, { usage: { image_count: 1 } }),
+  ]);
+  assert.deepEqual(partialCounter.reasons, ["token_usage_reported:output_tokens"]);
   // A request shape the endpoint rejects (wrong body for Wan) is no image, not a confirmation.
   const rejected = measurementVerdict(wanPlan, [
     sample(0, { delivered: false, failure: "provider_user_error", httpStatus: 400 }),
