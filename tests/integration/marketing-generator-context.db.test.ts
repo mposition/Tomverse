@@ -245,8 +245,12 @@ test("the context lists, per account, the assets it has used in any state but a 
     const one = await channelIn("approval_mode");
     const two = await channelIn("approval_mode", "x");
     // The context lists a used id only while the asset itself is still listed,
-    // so each one is an approved registry asset both accounts could post.
-    await approveAssets(["media-published", "media-both", "media-pending", "media-old", "media-elsewhere"]);
+    // so every one is an approved registry asset both accounts could post: the
+    // rejected, refused and expired ones too, or their absence would prove nothing.
+    await approveAssets([
+      "media-published", "media-both", "media-pending", "media-old", "media-elsewhere",
+      "media-rejected", "media-guard", "media-expired",
+    ]);
     await postNaming(one.id, "published", ["media-published", "media-both"]);
     await postNaming(one.id, "pending_approval", ["media-pending"]);
     await postNaming(one.id, "approved", ["media-both"]);
