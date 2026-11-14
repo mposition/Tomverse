@@ -255,7 +255,9 @@ export async function reportOperationalIncident({
   forceNotification = false,
 }: OperationalIncident) {
   const safeContext = sanitizeOperationalContext(context);
-  const message = sanitizeOperationalText(error);
+  // Setting-change notices have a title but no error. Keep their description
+  // in the log and notification instead of manufacturing "Unknown error".
+  const message = sanitizeOperationalText(error || title);
   const timestamp = new Date().toISOString();
   console.error(
     JSON.stringify({
