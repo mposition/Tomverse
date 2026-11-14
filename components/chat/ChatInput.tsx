@@ -4589,7 +4589,7 @@ export function ChatInput({
                   */}
                   <div className="mt-1 flex flex-col gap-1 border-t border-zinc-200 pt-2 dark:border-zinc-800">
                     <Link
-                      href={assistantProfileCreateHref({ fromChat: true })}
+                      href={assistantProfileCreateHref({ from: currentProduct ?? "review" })}
                       data-testid="assistant-create-cta"
                       onClick={() => closeMenu(false)}
                       className={`flex w-full items-center gap-3 rounded-xl px-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-assistant-profile-500 ${
