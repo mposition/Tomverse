@@ -74,3 +74,13 @@ test("Korean FAQ names products like the header menu and gives English names onl
   }
   assert.match(ko.sections[0].title, /채팅과 리뷰/);
 });
+
+test("Korean homepage action buttons name products like the header menu", () => {
+  const { chat, review, reviewInfo } = launchHomepageContent.ko.actions;
+  for (const label of [chat, review, reviewInfo]) {
+    assert.doesNotMatch(label, /\b(?:Chat|Review)\b/, label);
+  }
+  assert.match(chat, /^채팅/);
+  assert.match(review, /^리뷰/);
+  assert.match(reviewInfo, /^리뷰/);
+});
