@@ -434,15 +434,35 @@ export async function readDueAmuxPortfolioScoreTaskIds(
  * own tick transaction (`withAutoTransaction`): it locks the orchestrator
  * admission, fences on the route's database-clock deadline and records a
  * `work_item` write receipt for the Task it extended, like every other write
- * the tick makes. A refusal moves on to the next Task. A deadline or a lost
- * commit ends the pass: the next tick rereads the newest snapshot under the
- * same locks, which is how a lost refresh is verified before it is retried. */
+ * the tick makes; the due list is read in the same bounded transaction shape.
+ * A refusal moves on to the next Task and a deadline ends the pass. A lost
+ * commit (`outcome_unknown`) is thrown to the route, which stops the tick on
+ * it like any other lost tick write; the next tick rereads the newest
+ * snapshot under the same locks, which is how it is verified before a retry. */
 export async function refreshDueAmuxPortfolioScores(input: {
   digestKey: AmuxDigestKey; hasBudget?: () => boolean;
 }) {
-  const due = await readDueAmuxPortfolioScoreTaskIds(prisma);
   const outcomes: Array<AmuxScoreRefreshOutcome |
     { state: "failed"; taskId: string; code: string }> = [];
+  const summary = () => ({
+    refreshed: outcomes.filter((item) => item.state === "refreshed").length,
+    skipped: outcomes.filter((item) => item.state === "skipped").length,
+    failed: outcomes.filter((item) => item.state === "failed").length,
+    outcomes,
+  });
+  if (input.hasBudget?.() === false) return summary();
+  let due: string[];
+  try {
+    // A read: it writes nothing and records no receipt, so any failure here,
+    // a lost COMMIT included, leaves nothing to verify.
+    due = await withAutoTransaction(null, TICK_TRANSACTION_LIMITS,
+      (tx) => readDueAmuxPortfolioScoreTaskIds(tx));
+  } catch (error) {
+    console.error(JSON.stringify({ event: "amux_score_refresh_read_failed",
+      code: error instanceof BoardImportError ||
+        error instanceof AmuxDbBoundaryError ? String(error.code) : "unexpected" }));
+    return summary();
+  }
   for (const taskId of due) {
     if (outcomes.filter((item) => item.state === "refreshed").length >=
         AMUX_SCORE_REFRESH_MAX_PER_TICK || input.hasBudget?.() === false) break;
@@ -455,6 +475,9 @@ export async function refreshDueAmuxPortfolioScores(input: {
           return outcome;
         }));
     } catch (error) {
+      if (error instanceof BoardImportError && error.code === "outcome_unknown") {
+        throw error;
+      }
       const code = error instanceof AmuxPortfolioError ||
         error instanceof BoardImportError || error instanceof AmuxDbBoundaryError ?
         String(error.code) : "unexpected";
@@ -466,12 +489,7 @@ export async function refreshDueAmuxPortfolioScores(input: {
             error.code !== "conflict")) break;
     }
   }
-  return {
-    refreshed: outcomes.filter((item) => item.state === "refreshed").length,
-    skipped: outcomes.filter((item) => item.state === "skipped").length,
-    failed: outcomes.filter((item) => item.state === "failed").length,
-    outcomes,
-  };
+  return summary();
 }
 
 export async function readAmuxPortfolioScore(session: Session, requestId: string) {

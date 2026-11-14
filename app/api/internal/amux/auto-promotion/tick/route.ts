@@ -12,6 +12,7 @@ import {
   autoTickHttpStatus,
 } from "@/lib/amux/autoPromotionCore";
 import { tickAutoPromotion } from "@/lib/amux/autoPromotionService";
+import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { AMUX_V22_AUTO_PROMOTION_ENV,
   amuxV22AutoPromotionEnabled } from "@/lib/amux/v22AutoPromotionCore";
 import { tickV22AutoPromotion } from "@/lib/amux/v22AutoPromotionService";
@@ -61,12 +62,18 @@ const OPERATION = "auto_promotion_tick";
 /** Owner decision 2026-11-14: before promotion reads its candidates, extend
  * the active window of scores whose confirmed inputs are unchanged (default
  * off, `TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH=enabled`). Each refresh must leave
- * room for the claim and promotion transactions after it, and a refresh
- * failure never fails the tick. */
-async function refreshScoresBeforePromotion() {
+ * room for the claim and promotion transactions after it. A refusal never
+ * fails the tick; a refresh whose COMMIT outcome is lost stops it, answered
+ * like the promotion's own lost write, before any claim or promotion runs. */
+async function refreshScoresBeforePromotion(): Promise<Response | null> {
+  let digestKey: ReturnType<typeof loadCurrentAmuxContentKeys>;
+  try { digestKey = loadCurrentAmuxContentKeys(process.env); } catch {
+    console.error(JSON.stringify({ event: "amux_score_refresh_unavailable" }));
+    return null;
+  }
   try {
     const result = await refreshDueAmuxPortfolioScores({
-      digestKey: loadCurrentAmuxContentKeys(process.env),
+      digestKey,
       // This refresh, then the claim and the promotion transactions.
       hasBudget: () => amuxRouteHasBudgetForMs(3 * AUTO_TICK_TRANSACTION_MAX_MS),
     });
@@ -75,8 +82,17 @@ async function refreshScoresBeforePromotion() {
         refreshed: result.refreshed, skipped: result.skipped,
         failed: result.failed }));
     }
-  } catch {
+    return null;
+  } catch (error) {
+    if (error instanceof BoardImportError && error.code === "outcome_unknown") {
+      console.error(JSON.stringify({ event: "amux_score_refresh_outcome_unknown",
+        taskId: error.approvalId }));
+      return Response.json(v22PromotionTickWire({ promoted: false,
+        reason: "outcome_unknown" }), {
+        status: autoTickHttpStatus("outcome_unknown"), headers: noStore });
+    }
     console.error(JSON.stringify({ event: "amux_score_refresh_unavailable" }));
+    return null;
   }
 }
 
@@ -126,7 +142,8 @@ export async function POST(request: Request) {
 
     if (v22Enabled && identity.kind === "admitted" &&
         amuxScoreAutoRefreshEnabled(process.env[AMUX_SCORE_REFRESH_ENV])) {
-      await refreshScoresBeforePromotion();
+      const stopped = await refreshScoresBeforePromotion();
+      if (stopped) return stopped;
     }
 
     try {
