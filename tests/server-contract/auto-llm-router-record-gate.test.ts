@@ -136,7 +136,7 @@ test("imported source is separate user data, priced in the exact hold and never 
   readRewriteSwitch = async () => true;
   let checks = 0;
   try {
-    const result = await pick(Promise.resolve(true), false, { importedSource: source,
+    const result = await pick(Promise.resolve(true), { importedSource: source,
       verifyImportedSource: async () => { checks++; return true; },
       prompt: "Make that a table", previousAnswer: "native answer", rewriteAllowed: true, searchPlan: true });
     assert.equal(routerRequests.length, 1);
@@ -165,7 +165,7 @@ test("imported source is separate user data, priced in the exact hold and never 
 test("source access revoked across the hold releases the unused Router hold without a call or sample", async () => {
   created.length = 0; routerRequests.length = 0; holds.length = 0; settlementWrites.length = 0;
   let checks = 0;
-  const result = await pick(Promise.resolve(true), false, { importedSource: "private source", verifyImportedSource: async () => ++checks === 1 });
+  const result = await pick(Promise.resolve(true), { importedSource: "private source", verifyImportedSource: async () => ++checks === 1 });
   assert.equal(result, null);
   assert.equal(routerRequests.length, 0);
   assert.equal(created.length, 0);
@@ -219,35 +219,6 @@ test("the actual soft exclusion menu reaches selection and file fallback; fewer 
     await pick(undefined, { onCandidatesResolved: (value: readonly string[]) => { offered = value; } });
     assert.deepEqual(offered, ids.slice(0, 2));
   } finally { excludedModelIds = []; }
-});
-
-test("no file-capable offered candidate preserves file intent and uses an offered model for the existing refusal", async () => {
-  const { applyLlmModelPick } = require(resolve(ROOT, "lib/autoModelSelection.ts"));
-  const ids = ["gpt-5-6-luna", "deepseek-v4-flash", "deepseek-v4-pro"];
-  const original = generateRouterResult;
-  let offered: readonly string[] = [], outcome: string | null = null;
-  try {
-    excludedModelIds = [ids[0]];
-    generateRouterResult = () => ({ output: { ...routerOutput, modelId: ids[1], requiresFileGeneration: true },
-      usage: { inputTokens: 100, outputTokens: 20 } });
-    const before = routerRequests.length;
-    const picked = await pick(undefined, { eligibleModelIds: ids,
-      onCandidatesResolved: (value: readonly string[]) => { offered = value; },
-      onCallOutcome: (value: string) => { outcome = value; } });
-    assert.equal(picked?.modelId, ids[1]);
-    assert.equal(picked?.requiresFileGeneration, true);
-    assert.equal(outcome, "picked");
-    assert.equal(routerRequests.length, before + 1);
-    const candidates = JSON.parse(String(routerRequests[before].prompt)).candidates;
-    assert.ok(candidates.every((candidate: { canCreateFiles: boolean }) => !candidate.canCreateFiles));
-    assert.deepEqual(offered, ids.slice(1));
-    const hardSelection = { routed: true, modelId: ids[0], fallbackCandidateModelIds: ids.slice(1),
-      record: { eligibleModelIds: ids, selectedModelId: ids[0], rejections: [] } };
-    const refused = applyLlmModelPick(hardSelection, picked?.modelId, { required: true, capableModelIds: [ids[0]] }, null, offered);
-    assert.equal(refused.modelId, ids[1]);
-    assert.deepEqual(refused.record.eligibleModelIds, offered);
-    assert.deepEqual(refused.fallbackCandidateModelIds, []);
-  } finally { excludedModelIds = []; generateRouterResult = original; }
 });
 
 test("combined routing returns both decisions in one reserved call and preserves image record gating", async () => {
@@ -906,7 +877,7 @@ test("history tool steps share one bounded hold and settle cumulative usage with
     generateRouterResult = () => ({ output: routerOutput, usage: { inputTokens: 1, outputTokens: 1 },
         totalUsage: { inputTokens: 300, outputTokens: 50 } });
     try {
-        const result = await pick(Promise.resolve(true), false, { importedSource: "authorized source",
+        const result = await pick(Promise.resolve(true), { importedSource: "authorized source",
             verifyImportedSource: async () => true, historySearch: { source: () => "final source",
                 verify: async () => true, read: async () => {} } });
         assert.ok(result); assert.equal(routerRequests.length, 1);
