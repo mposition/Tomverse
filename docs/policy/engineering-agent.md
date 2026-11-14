@@ -616,6 +616,11 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 - 결정 항목이 열려 있는 결과 불명 게시 항목은 **다시 조회하지 않는다.** 사람이 그 결정을
   확인하면 다음 회차가 한 번 조회하고, 그래도 모르면 결정 항목 하나를 새로 연다. 같은 게시
   항목의 결정 항목을 확인하면 그 항목의 이전 결정 항목도 함께 확인 처리된다(감사 기록에 목록).
+  예외(운영자 결정 2026-11-14, AMUXFLOW/B1): `ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP=enabled`이면
+  열린 결정 항목이 모두 30분 이상 기다린 게시 항목은 사람 확인 없이 다시 조회한다. 조회는 읽기뿐이고,
+  한 게시 항목이 연 결정 항목이 3개가 되면 더 조회하지 않고 사람을 기다린다. 조회가 결과를 확정하면
+  (`lookup_no_prior_write`, `lookup_found_result`) 그 항목의 열린 결정 항목은 함께 확인 처리되고
+  `work_item_settled` 감사 기록에 `closedDecisionIds`로 남는다. 기본은 꺼짐이다.
 - **branch는 있고 PR이 없으며 branch head가 소비된 capability가 허락한 commit 그대로인 경우**
   (`branch_without_pull_request`), 사람은 결정 항목에서 "이 브랜치로 PR 열기"를 승인할 수 있다.
   승인은 그 게시 항목의 다음 claim 하나에만 실리고 claim이 가져간다. 게시 서비스는
