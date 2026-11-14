@@ -689,12 +689,13 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "mutation",
   },
   // The Decision Maker as the approver (TOMVERSE_AMUX_DM_APPROVER), its read:
-  // setup + switches + the open app-answered cards + the next open proposal
-  // among them + request state + result detail + bodies + the open refusal of
-  // its card + fence. The apply then takes the question type's own boundary.
+  // setup + switches + the open app-answered cards + the settlements and
+  // result reviews among them the owner sent (owner decision 2026-11-14) + the next open
+  // proposal among them + request state + result detail + bodies + the open
+  // refusal of its card + fence. The apply then takes the question type's own boundary.
   decisionMakerAutoApplyRead: {
     operation: "decision_maker_auto_apply_read",
-    prismaCallCeiling: 9,
+    prismaCallCeiling: 10,
     isolation: "read",
   },
   // The approver's one transaction: setup + the request store's direct-answer

@@ -9,6 +9,7 @@ import { DM_TERMS_FIXED_TEXT_ONLY_ENV, dmInstanceForProvider, dmTermsFixedTextOn
   routeDmQuestion } from "@/lib/amux/decisionMakerCore";
 import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
+  DM_CLOSING_EVENT_KINDS,
   DM_ROUTING_BINDING_KEYS,
   DM_STALE_CLOSE_AFTER_MS,
   DM_VALIDATION_LATCH_WINDOW,
@@ -1314,6 +1315,30 @@ export async function readNextDecisionMakerOpenProposal(
   if (id === undefined) return null;
   if (!isDmRequestId(id)) throw new DecisionMakerRequestWriteError("state_unreadable");
   return id;
+}
+
+/**
+ * The owner queue's Decision Maker column: the newest request of each given
+ * card with its terminal result kind, and whether a person (or the router)
+ * has judged it. One statement.
+ */
+export async function readNewestDecisionMakerRequestPerCard(
+  client: LedgerReader,
+  cardIds: readonly string[],
+): Promise<Array<{ id: string; cardId: string; resultKind: string | null; judged: boolean }>> {
+  if (cardIds.length === 0) return [];
+  const ids = [...cardIds];
+  const closing = [...DM_CLOSING_EVENT_KINDS];
+  return client.$queryRaw<Array<{ id: string; cardId: string; resultKind: string | null; judged: boolean }>>`
+    SELECT DISTINCT ON (q."cardId") q."id", q."cardId",
+      (SELECT ev."resultKind" FROM "AmuxDecisionMakerRequestEvent" ev
+        WHERE ev."requestId" = q."id" AND ev."kind" = 'result' LIMIT 1) AS "resultKind",
+      (q."route" <> 'dm_proposal' OR EXISTS (SELECT 1 FROM "AmuxDecisionMakerRequestEvent" e
+        WHERE e."requestId" = q."id" AND e."kind" = ANY(${closing}::text[]))) AS "judged"
+    FROM "AmuxDecisionMakerRequest" q
+    WHERE q."cardId" = ANY(${ids}::text[])
+    ORDER BY q."cardId", q."questionRevision" DESC
+  `;
 }
 
 /**

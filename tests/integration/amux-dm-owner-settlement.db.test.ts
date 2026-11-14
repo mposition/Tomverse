@@ -722,3 +722,98 @@ test("the table refuses what the lifecycle does not allow", async () => {
         'blocked', now())`), true, "one per escalation");
   });
 });
+
+test("the owner asks for one card from the owner queue while the switch is off; the tick files only that one; an unreadable one is sent again", async () => {
+  await lifecycle(async (tx) => {
+    const card = await stoppedTask(tx);
+    const { requestAmuxOwnerQueueDm } = await import("@/lib/amux/ownerQueueDmRequestService");
+    const { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION } = await import("@/lib/amux/ownerQueueDmRequestCore");
+    const { readAmuxDmOwnerSettlementRequestedAmong, readAmuxOwnerQueueDmAskedAmong } =
+      await import("@/lib/amux/dmOwnerSettlementRead");
+    const press = (over: Partial<Parameters<typeof requestAmuxOwnerQueueDm>[0]> = {}) => requestAmuxOwnerQueueDm({
+      session: operator(), request: new Request("https://tomverse.app/api/admin/amux/owner-queue/dm-request"),
+      taskId: card.taskId, source: "settlement", action: "request", sourceId: card.escalationId, ...over });
+    assert.deepEqual((await sync(false)).pending, [], "off files nothing on its own");
+
+    // A Task that is not the escalation's, and a review resend with nothing to resend, change nothing.
+    assert.deepEqual(await press({ taskId: "not-the-escalations-task" }), { outcome: "refused", reason: "not_eligible" });
+    assert.deepEqual(await press({ source: "result_review", action: "resend", sourceId: "no-such-review" }),
+      { outcome: "refused", reason: "not_resendable" });
+    assert.equal(await settlementRow(tx, card.settlementId), undefined);
+
+    assert.deepEqual(await press(), { outcome: "done", settlementId: card.settlementId });
+    const audits = await tx.$queryRaw<Array<{ action: string; actorEmail: string | null; entryHash: string | null }>>`
+      SELECT "action", "actorEmail", "entryHash" FROM "AdminAuditLog" WHERE "targetId" = ${card.settlementId}`;
+    assert.equal(audits.length, 1);
+    assert.equal(audits[0]!.action, AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION);
+    assert.equal(audits[0]!.actorEmail, "operator@example.test");
+    assert.ok(audits[0]!.entryHash, "the person's press is on the hash chain");
+    assert.deepEqual(await press(), { outcome: "refused", reason: "not_eligible" }, "one settlement per escalation");
+    assert.deepEqual([...await readAmuxDmOwnerSettlementRequestedAmong(tx, [card.settlementId])], [card.settlementId]);
+    // The DM approver reads the same entry and leaves the answer to the owner.
+    assert.deepEqual([...await readAmuxOwnerQueueDmAskedAmong(tx,
+      { settlementIds: [card.settlementId, "other"], reviewIds: [card.settlementId] })], [card.settlementId]);
+
+    const off = await sync(false);
+    assert.deepEqual(off.pending.map((row) => row.settlementId), [card.settlementId], "only the one asked for");
+
+    // Its evidence cannot be read (synthetic bytes): handed to the person, then sent again by the owner.
+    const { openAmuxDmOwnerSettlementCards, recordAmuxDmOwnerSettlementsUnfilable, withAmuxDbBoundary,
+      AMUX_DB_BOUNDARIES } = await services();
+    const opened = await openAmuxDmOwnerSettlementCards(off);
+    assert.deepEqual(opened.unfilable, [card.settlementId]);
+    await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementHandoff,
+      (inner, context) => recordAmuxDmOwnerSettlementsUnfilable(inner,
+        { settlementIds: opened.unfilable, now: context.dbNow }));
+    assert.deepEqual((await sync(false)).pending, []);
+    assert.deepEqual(await press({ action: "resend", sourceId: card.settlementId }),
+      { outcome: "done", settlementId: card.settlementId });
+    const resent = await settlementRow(tx, card.settlementId);
+    assert.equal(resent?.handoffReason, null);
+    assert.equal(resent?.handoffAt, null);
+    assert.deepEqual((await sync(false)).pending.map((row) => row.settlementId), [card.settlementId]);
+    assert.deepEqual(await press({ action: "resend", sourceId: card.settlementId }),
+      { outcome: "refused", reason: "not_resendable" }, "nothing left to send again");
+  });
+});
+
+test("the owner queue names, per card, where the Decision Maker stands and what the owner may press", async () => {
+  await lifecycle(async (tx) => {
+    const card = await stoppedTask(tx);
+    const saved = { routing: process.env.TOMVERSE_AMUX_DM_ROUTING, settlement: process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT };
+    process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
+    delete process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT;
+    try {
+      const { readAmuxOwnerQueueDmStatus } = await import("@/lib/amux/ownerQueueDmStatusRead");
+      const { recordAmuxDmRelaySync } = await import("@/lib/amux/dmRelayHeartbeat");
+      const { AMUX_DM_RELAY_LAST_SYNC_KEY } = await import("@/lib/amux/dmRelayHeartbeatCore");
+      const before = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
+      assert.deepEqual(before.byTask.get(card.taskId), { source: "settlement", state: "switch_off", reason: "settlement",
+        requestId: null, action: "request", sourceId: card.escalationId });
+      await recordAmuxDmRelaySync();
+      await recordAmuxDmRelaySync();
+      const rows = await tx.$queryRaw<Array<{ n: number }>>`
+        SELECT count(*)::int AS "n" FROM "AppSetting" WHERE "key" = ${AMUX_DM_RELAY_LAST_SYNC_KEY}`;
+      assert.equal(rows[0]!.n, 1);
+      const after = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
+      assert.equal(after.relay?.state, "live");
+      const { requestAmuxOwnerQueueDm } = await import("@/lib/amux/ownerQueueDmRequestService");
+      await requestAmuxOwnerQueueDm({ session: operator(), request: new Request("https://tomverse.app/x"),
+        taskId: card.taskId, source: "settlement", action: "request", sourceId: card.escalationId });
+      const requested = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
+      assert.deepEqual([requested.byTask.get(card.taskId)?.state, requested.byTask.get(card.taskId)?.action],
+        ["waiting_relay", null]);
+      // Its card filed, and no DM request for it yet: the ledger read runs and finds none.
+      await tx.$executeRaw`UPDATE "AmuxDmOwnerSettlement" SET "localCardId" = ${"OS-" + card.taskId.slice(0, 8)}
+        WHERE "id" = ${card.settlementId}`;
+      const filed = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
+      assert.deepEqual([filed.byTask.get(card.taskId)?.state, filed.byTask.get(card.taskId)?.requestId],
+        ["card_filed", null]);
+    } finally {
+      for (const [name, value] of [["TOMVERSE_AMUX_DM_ROUTING", saved.routing],
+        ["TOMVERSE_AMUX_DM_OWNER_SETTLEMENT", saved.settlement]] as const) {
+        if (value === undefined) delete process.env[name]; else process.env[name] = value;
+      }
+    }
+  });
+});
