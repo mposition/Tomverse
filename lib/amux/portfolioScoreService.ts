@@ -13,7 +13,10 @@ import { AMUX_PORTFOLIO_SCORE_REFRESH_ACTION,
   AMUX_PORTFOLIO_SCORER_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
-import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { withAutoTransaction, TICK_TRANSACTION_LIMITS } from
+  "./autoPromotionService.ts";
+import { amuxCanonicalJson, BoardImportError } from "./boardImportCore.ts";
+import { AmuxDbBoundaryError } from "./dbBoundary.ts";
 import { amuxPortfolioOwnerId, AmuxPortfolioError,
   amuxV4PortfolioWriteEnabled, AMUX_V4_PORTFOLIO_WRITE_ENV } from
   "./portfolioAssessmentService.ts";
@@ -311,10 +314,12 @@ export async function refreshAmuxPortfolioScoreInTx(
     return skipped("score_unbound");
   }
   const id = randomUUID();
+  // One request id, bound into the input digest and stored on the snapshot.
+  const requestId = randomUUID();
   let plan: Awaited<ReturnType<typeof buildScorePlan>>;
   try {
     plan = await buildScorePlan(tx, prior.approvedByUserId,
-      { id, requestId: randomUUID(), taskId }, input.digestKey);
+      { id, requestId, taskId }, input.digestKey);
   } catch (error) {
     if (error instanceof AmuxPortfolioError) return skipped("not_ready");
     throw error;
@@ -346,7 +351,7 @@ export async function refreshAmuxPortfolioScoreInTx(
       baselineStaleAt: plan.score.baselineStaleAt },
   });
   await tx.amuxPortfolioScoreSnapshot.create({ data: {
-    id, requestId: randomUUID(), taskId,
+    id, requestId, taskId,
     taskRevision: plan.taskRevision, sourceApprovalId: plan.sourceApprovalId,
     initiativeAssessmentId: plan.initiativeAssessmentId,
     epicAssessmentId: plan.epicAssessmentId,
@@ -369,15 +374,12 @@ export async function refreshAmuxPortfolioScoreInTx(
 
 export const AMUX_SCORE_REFRESH_MAX_PER_TICK = 4;
 const AMUX_SCORE_REFRESH_MAX_ATTEMPTS = 12;
-export const AMUX_SCORE_REFRESH_TRANSACTION = { maxWait: 1_000, timeout: 5_000 } as const;
-export const AMUX_SCORE_REFRESH_TRANSACTION_MAX_MS =
-  AMUX_SCORE_REFRESH_TRANSACTION.maxWait + AMUX_SCORE_REFRESH_TRANSACTION.timeout + 200;
 
-/** One bounded pass: backlog v4 Tasks whose newest score closes within a day,
- * whose baseline is still open and whose assessments are still the latest.
- * Each Task is its own transaction, so one refusal never blocks the rest.
- * A lost commit is safe to leave: the next pass rereads the newest snapshot
- * under the same locks and either finds it extended or extends it. */
+/** Backlog v4 Tasks whose newest score closes within a day, whose baseline is
+ * still open, and that the refresh can actually extend: the same refusals as
+ * `buildScorePlan` (latest assessments on their unrevised subjects, the
+ * consumed source approval) are applied here, so a Task the refresher would
+ * skip never holds a place ahead of one it would extend. */
 export async function readDueAmuxPortfolioScoreTaskIds(
   db: Pick<Prisma.TransactionClient, "$queryRaw">): Promise<string[]> {
   const due = await db.$queryRaw<Array<{ taskId: string }>>`
@@ -403,31 +405,65 @@ export async function readDueAmuxPortfolioScoreTaskIds(
          AND newer."assessmentVersion" > cur."assessmentVersion"
         WHERE cur."id" IN (n."initiativeAssessmentId", n."epicAssessmentId",
           n."featureAssessmentId", n."storyAssessmentId", n."taskAssessmentId"))
+      -- A subject revised since its assessment needs a new owner assessment.
+      AND NOT EXISTS (SELECT 1 FROM "AmuxPortfolioAssessment" a
+        LEFT JOIN "AmuxPortfolioNode" pn ON pn."id" = a."nodeId"
+        LEFT JOIN "AmuxWorkItem" pc ON pc."id" = a."cardId"
+        WHERE a."id" IN (n."initiativeAssessmentId", n."epicAssessmentId",
+          n."featureAssessmentId", n."storyAssessmentId", n."taskAssessmentId")
+          AND ((a."nodeId" IS NOT NULL AND (pn."id" IS NULL OR
+                pn."state" <> 'active' OR pn."revision" <> a."subjectRevision" OR
+                pn."contentDigest" <> a."subjectDigest" OR
+                pn."contentDigestKeyId" <> a."subjectDigestKeyId")) OR
+               (a."cardId" IS NOT NULL AND (pc."id" IS NULL OR
+                pc."status" IN ('done', 'cancelled') OR
+                pc."revision" <> a."subjectRevision" OR
+                pc."v4BodyDigest" IS DISTINCT FROM a."subjectDigest" OR
+                pc."v4BodyDigestKeyId" IS DISTINCT FROM a."subjectDigestKeyId"))))
+      AND n."sourceApprovalId" = w."v4SourceApprovalId"
+      AND EXISTS (SELECT 1 FROM "AmuxIdeaUnitDecision" d
+        WHERE d."id" = w."v4SourceApprovalId" AND d."state" = 'consumed'
+          AND d."action" = 'register_card' AND d."registeredWorkItemId" = w."id")
     ORDER BY n."activeStaleAt" ASC, n."taskId" ASC
     LIMIT ${AMUX_SCORE_REFRESH_MAX_ATTEMPTS}
   `;
   return due.map((row) => row.taskId);
 }
 
+/** One bounded pass inside the admitted auto-promotion tick. Each Task is its
+ * own tick transaction (`withAutoTransaction`): it locks the orchestrator
+ * admission, fences on the route's database-clock deadline and records a
+ * `work_item` write receipt for the Task it extended, like every other write
+ * the tick makes. A refusal moves on to the next Task. A deadline or a lost
+ * commit ends the pass: the next tick rereads the newest snapshot under the
+ * same locks, which is how a lost refresh is verified before it is retried. */
 export async function refreshDueAmuxPortfolioScores(input: {
   digestKey: AmuxDigestKey; hasBudget?: () => boolean;
 }) {
   const due = await readDueAmuxPortfolioScoreTaskIds(prisma);
   const outcomes: Array<AmuxScoreRefreshOutcome |
-    { state: "failed"; taskId: string }> = [];
+    { state: "failed"; taskId: string; code: string }> = [];
   for (const taskId of due) {
     if (outcomes.filter((item) => item.state === "refreshed").length >=
         AMUX_SCORE_REFRESH_MAX_PER_TICK || input.hasBudget?.() === false) break;
     try {
-      outcomes.push(await prisma.$transaction((tx) =>
-        refreshAmuxPortfolioScoreInTx(tx, { taskId,
-          digestKey: input.digestKey }),
-      { isolationLevel: "Serializable", ...AMUX_SCORE_REFRESH_TRANSACTION }));
+      outcomes.push(await withAutoTransaction(taskId, TICK_TRANSACTION_LIMITS,
+        async (tx, _now, recordReceipt) => {
+          const outcome = await refreshAmuxPortfolioScoreInTx(tx,
+            { taskId, digestKey: input.digestKey });
+          if (outcome.state === "refreshed") recordReceipt("work_item", taskId, 1);
+          return outcome;
+        }));
     } catch (error) {
+      const code = error instanceof AmuxPortfolioError ||
+        error instanceof BoardImportError || error instanceof AmuxDbBoundaryError ?
+        String(error.code) : "unexpected";
       console.error(JSON.stringify({ event: "amux_score_refresh_failed",
-        taskId,
-        code: error instanceof AmuxPortfolioError ? error.code : "unexpected" }));
-      outcomes.push({ state: "failed", taskId });
+        taskId, code }));
+      outcomes.push({ state: "failed", taskId, code });
+      if (error instanceof AmuxDbBoundaryError ||
+          (error instanceof BoardImportError &&
+            error.code !== "conflict")) break;
     }
   }
   return {

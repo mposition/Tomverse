@@ -24,8 +24,7 @@ import { amuxRouteHasBudgetForMs, withAmuxRouteBudget } from "@/lib/amux/dbBound
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
 import { AMUX_SCORE_REFRESH_ENV, amuxScoreAutoRefreshEnabled } from
   "@/lib/amux/portfolioScoreCore";
-import { AMUX_SCORE_REFRESH_TRANSACTION_MAX_MS,
-  refreshDueAmuxPortfolioScores } from "@/lib/amux/portfolioScoreService";
+import { refreshDueAmuxPortfolioScores } from "@/lib/amux/portfolioScoreService";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
   admitAmuxOrchestratorRequest,
@@ -68,8 +67,8 @@ async function refreshScoresBeforePromotion() {
   try {
     const result = await refreshDueAmuxPortfolioScores({
       digestKey: loadCurrentAmuxContentKeys(process.env),
-      hasBudget: () => amuxRouteHasBudgetForMs(
-        AMUX_SCORE_REFRESH_TRANSACTION_MAX_MS + 2 * AUTO_TICK_TRANSACTION_MAX_MS),
+      // This refresh, then the claim and the promotion transactions.
+      hasBudget: () => amuxRouteHasBudgetForMs(3 * AUTO_TICK_TRANSACTION_MAX_MS),
     });
     if (result.refreshed || result.failed) {
       console.info(JSON.stringify({ event: "amux_score_refresh",

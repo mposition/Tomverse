@@ -140,6 +140,20 @@ test("a score at its baseline, or whose assessment the owner replaced, waits for
       assert.equal((await newest(tx, taskId)).id, scoreId);
     }, true);
   });
+  await lifecycle(async (tx) => {
+    // The parent Feature was revised after its assessment: the refresher would
+    // refuse it, so it holds no place in the list ahead of Tasks it can extend.
+    await dueTask(tx, 6.5 * DAY, async (taskId, scoreId) => {
+      await withoutTriggers(tx, async () => {
+        await tx.$executeRaw`UPDATE "AmuxPortfolioNode" SET "revision" = "revision" + 1
+          WHERE "id" = (SELECT "parentFeatureNodeId" FROM "AmuxWorkItem" WHERE "id" = ${taskId})`;
+      });
+      assert.deepEqual(await readDueAmuxPortfolioScoreTaskIds(tx), []);
+      assert.deepEqual(await refreshAmuxPortfolioScoreInTx(tx, { taskId, digestKey }),
+        { state: "skipped", taskId, reason: "not_ready" });
+      assert.equal((await newest(tx, taskId)).id, scoreId);
+    });
+  });
 });
 
 after(closeLifecycleHarness);
