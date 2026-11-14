@@ -10,8 +10,8 @@
 
 import "server-only";
 
-import { createHash } from "node:crypto";
 import { ENGINEERING_AGENT_PR_APPROVER_IDS } from "./engineeringAgentPrApprovalCore.ts";
+import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest } from "./pullDiffDigestCore.ts";
 
 import { checkListing, gitObjectId, type TreeEntry } from
   "@/lib/engineeringAgentTreeVerify";
@@ -301,7 +301,7 @@ export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
 
 const MAX_REVIEWS = 100;
 const MAX_PR_FILES = 3_000;
-const MAX_DIFF_BYTES = 1024 * 1024;
+const MAX_DIFF_BYTES = PULL_DIFF_DIGEST_MAX_BYTES;
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 const FAILING_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out", "action_required", "stale", "startup_failure"]);
 
@@ -398,7 +398,7 @@ async function readPullDiffDigest(
     return null;
   }
   try {
-    return createHash("sha256").update(await readBounded(response, MAX_DIFF_BYTES)).digest("hex");
+    return pullDiffDigest(await readBounded(response, MAX_DIFF_BYTES));
   } catch {
     return null;
   }
@@ -505,6 +505,42 @@ export async function readEngineeringAgentPullMerge(
   }
   return { state, merged, mergedAt, closedAt, baseRef, headRef, mergeCommitSha,
     mergedByKind: mergedByKindOf(pull, merged) };
+}
+
+/**
+ * A pull request's change as it stands now: its base and head, the digest of
+ * its diff as the publisher binds it, and its whole file list at that base
+ * and head (both sides of a rename). What a Decision Maker approval is
+ * checked against before the app marks the pull request ready (owner
+ * decision 2026-11-13). A digest or list that cannot be read whole is null.
+ */
+export async function readEngineeringAgentPullChange(
+  prNumber: number,
+  deps: Deps = {},
+): Promise<{ state: "open" | "closed"; baseRef: string; headRef: string; headSha: string;
+  diffDigest: string | null; changedFiles: string[] | null; crossRepository: boolean }> {
+  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
+  const resolved = withDefaults(deps);
+  const pull = record(await githubJson(`/pulls/${prNumber}`, resolved));
+  const base = record(pull?.base);
+  const head = record(pull?.head);
+  const baseSha = typeof base?.sha === "string" ? base.sha.toLowerCase() : null;
+  const headSha = typeof head?.sha === "string" ? head.sha.toLowerCase() : null;
+  const state = pull?.state;
+  if (pull?.number !== prNumber || (state !== "open" && state !== "closed") ||
+      typeof base?.ref !== "string" || typeof head?.ref !== "string" ||
+      baseSha === null || !SHA.test(baseSha) || headSha === null || !SHA.test(headSha)) {
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  }
+  // A head in another repository -- a fork, or a repository that cannot be read -- is cross-repository.
+  const headRepo = record(head.repo)?.full_name;
+  const baseRepo = record(base.repo)?.full_name;
+  const crossRepository = typeof headRepo !== "string" || headRepo !== baseRepo;
+  return {
+    state, baseRef: base.ref, headRef: head.ref, headSha, crossRepository,
+    diffDigest: await readPullDiffDigest(prNumber, resolved),
+    changedFiles: await readPullFileNames(prNumber, { baseSha, headSha, changedFiles: pull.changed_files as number }, resolved),
+  };
 }
 
 /**
