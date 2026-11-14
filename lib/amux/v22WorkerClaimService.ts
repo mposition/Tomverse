@@ -497,10 +497,15 @@ type ClaimTickResult =
   | { claimed: true; taskId: string; assignmentId: string; workerName: string }
   | { claimed: false; reason: string };
 
-/** Reasons a candidate is passed over while the tick goes on to the next. */
+/** Reasons a candidate is passed over while the tick goes on to the next.
+ * A reason about one card's own route or approval never holds the others
+ * (AMUX process audit bundle 3, AMUXFLOW/B3: a card that needed a cost
+ * reconfirmation stopped every tick from 2026-11-13 22:23 AEST). */
 const SKIPPED_CODES = new Set(["not_unassigned_todo", "task_not_ready",
   "worker_unavailable", "one_shot_role_unavailable", "attempt_budget_exhausted",
-  "review_author_unknown", "conflict", "usage_unverified", "no_worker_for_grade"]);
+  "review_author_unknown", "conflict", "usage_unverified", "no_worker_for_grade",
+  "cost_reconfirmation_required", "lane_unbound", "recovery_approval_changed",
+  "role_unavailable"]);
 
 /**
  * One admitted tick assigns every ready Task it can, one transaction each, up

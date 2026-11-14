@@ -11,8 +11,8 @@ import {
   autoTickHttpStatus,
 } from "@/lib/amux/autoPromotionCore";
 import { tickAutoPromotion } from "@/lib/amux/autoPromotionService";
-import { AMUX_V22_AUTO_PROMOTION_ENV,
-  amuxV22AutoPromotionEnabled } from "@/lib/amux/v22AutoPromotionCore";
+import { AMUX_V22_AUTO_PROMOTION_ENV, AMUX_V22_PROMOTIONS_PER_TICK,
+  amuxV22AutoPromotionEnabled, amuxV22PromotionFlowEnabled } from "@/lib/amux/v22AutoPromotionCore";
 import { tickV22AutoPromotion } from "@/lib/amux/v22AutoPromotionService";
 import { v22PromotionTickWire, v22WorkerClaimTickWire } from
   "@/lib/amux/v22TickWire";
@@ -109,6 +109,22 @@ export async function POST(request: Request) {
     }
 
     try {
+      // AMUXFLOW/B3: promote first, several at once, then claim in the same
+      // tick, so a ready backlog Task reaches a worker without waiting for the
+      // next tick (and the claim no longer skips promotion). An unknown
+      // promotion still stops the tick as before.
+      let flowPromotion: Awaited<ReturnType<typeof tickV22AutoPromotion>> | null = null;
+      if (amuxV22PromotionFlowEnabled() && v22Enabled && identity.kind === "admitted") {
+        for (let index = 0; index < AMUX_V22_PROMOTIONS_PER_TICK; index += 1) {
+          const promoted = await tickV22AutoPromotion();
+          if (promoted.promoted) { flowPromotion = promoted; continue; }
+          if (promoted.reason === "outcome_unknown") {
+            return Response.json(v22PromotionTickWire(promoted), {
+              status: autoTickHttpStatus(promoted.reason), headers: noStore });
+          }
+          break;
+        }
+      }
       if (claimEnabled && identity.kind === "admitted") {
         const result = await tickV22WorkerClaim();
         if (result.claimed || result.reason === "outcome_unknown" ||
@@ -118,6 +134,9 @@ export async function POST(request: Request) {
             headers: noStore,
           });
         }
+      }
+      if (flowPromotion) {
+        return Response.json(v22PromotionTickWire(flowPromotion), { status: 200, headers: noStore });
       }
       if (v22Enabled && identity.kind === "admitted") {
         const result = await tickV22AutoPromotion();

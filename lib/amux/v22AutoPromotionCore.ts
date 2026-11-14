@@ -10,6 +10,23 @@ export const AMUX_V22_WORKER_QUEUE_MULTIPLIER = 3;
 export const AMUX_V22_PARALLEL_RESERVED = 1;
 export const AMUX_V22_SEV1_RESERVED = 1;
 
+/**
+ * Promotion folded into the claim (owner decision 2026-11-14, AMUX process
+ * audit bundle 3, AMUXFLOW/B3). With TOMVERSE_AMUX_V22_PROMOTION_FLOW=enabled:
+ * the score only orders candidates -- an expired window or a newer assessment
+ * above the Task no longer takes it out (backlog -> todo is reversible and a
+ * v22 receipt costs 0); readiness no longer waits for an idle worker of the
+ * grade; and every tick promotes up to AMUX_V22_PROMOTIONS_PER_TICK ready
+ * Tasks and then claims, so a ready Task is assigned in the same tick. The
+ * score's version, revision and approval binding are still checked, and the
+ * capacity reservation is unchanged (its database check pins it). Off by default.
+ */
+export const AMUX_V22_PROMOTION_FLOW_ENV = "TOMVERSE_AMUX_V22_PROMOTION_FLOW";
+export const amuxV22PromotionFlowEnabled = (
+  value: string | undefined = process.env[AMUX_V22_PROMOTION_FLOW_ENV],
+) => value?.trim() === "enabled";
+export const AMUX_V22_PROMOTIONS_PER_TICK = 4;
+
 export const amuxV22AutoPromotionEnabled = (value: string | undefined) =>
   AMUX_V22_AUTO_PROMOTION_CODE_LATCH && value === "enabled";
 
@@ -64,12 +81,14 @@ export function amuxV22ScoreCurrent(input: {
   currentRevision: number; sourceApprovalId: string;
   currentSourceApprovalId: string; activeStaleAt: Date;
   baselineStaleAt: Date; now: Date;
+  /** The score orders only: its window is not checked (AMUXFLOW/B3). */
+  orderOnly?: boolean;
 }) {
   return input.scoreVersion === input.expectedVersion &&
     input.taskRevision === input.currentRevision &&
     input.sourceApprovalId === input.currentSourceApprovalId &&
-    input.now.getTime() < input.activeStaleAt.getTime() &&
-    input.now.getTime() < input.baselineStaleAt.getTime();
+    (input.orderOnly === true || input.now.getTime() < input.activeStaleAt.getTime() &&
+    input.now.getTime() < input.baselineStaleAt.getTime());
 }
 
 /** A newer owner-approved assessment invalidates the score immediately. */

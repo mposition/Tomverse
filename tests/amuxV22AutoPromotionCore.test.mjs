@@ -136,7 +136,7 @@ test("promotion reads the latest assessments only after the audit and task locks
   const auditLock = body.indexOf("await takeAuditChainLock(tx)");
   const taskLock = body.indexOf('FOR UPDATE`');
   const latestRead = body.indexOf("const latestAssessments = await Promise.all");
-  const freshnessGuard = body.indexOf("if (!amuxV22AssessmentIdsCurrent(");
+  const freshnessGuard = body.indexOf("!amuxV22AssessmentIdsCurrent(");
   assert.ok(auditLock > 0 && taskLock > auditLock &&
     latestRead > taskLock && freshnessGuard > latestRead);
 });
