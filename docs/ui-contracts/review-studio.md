@@ -67,6 +67,28 @@ against loopback responses (no provider/DB). It covers one execution across
 reopens, background completion, tabs and evidence, saved reload, changed input,
 identity scope, guest reuse, dark mode and mobile exclusion.
 
+## Continue a saved analysis in Chat (2026-11-14)
+
+Signed-in owners can preview a completed normal Review's current reviewer or
+one finding, then open it as an editable new Chat draft. Studio's balanced
+result needs no synthesis. Classic, mobile web and Quick Summary use the same
+handoff. Quote-match status, original question, model provenance, unresolved
+matters and limitations stay in the reference; separate web checks do not.
+The preview explains that the text is an independent copy of the source.
+
+The handoff makes no model call, reservation, Conversation or Message. It
+rechecks the captured result through the existing owner/unlock GET and passes
+a five-minute, one-use, account/epoch-bound packet in tab memory. Only its
+opaque marker enters the URL. Chat suppresses recent-conversation restoration,
+waits for successful durable `new` draft hydration, and uses the normal draft
+writer. Existing text or attachments require explicit Add or Cancel; CAS and
+sync recovery remain unchanged. Identity changes, expiry and cancellation
+discard the pending packet. Guest, imported continuations, public sharing,
+native analysis entries and Deep Research execution are outside this slice.
+
+Coverage: `tests/reviewToChat.test.mjs` and
+`tests/e2e/review-to-chat.spec.ts` (real route navigation and draft hydration).
+
 ## In-conversation image answers (owner direction, 2026-10-23)
 
 Image prompts stay in the current Review conversation, as in Chat. Easy routes

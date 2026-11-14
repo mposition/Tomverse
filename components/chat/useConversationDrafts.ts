@@ -49,6 +49,8 @@ export type ConversationDraftsApi = {
   activeDraftKey: string;
   draftText: string;
   draftAttachments: ChatAttachment[];
+  /** True only after the current account/scope GET succeeds. Failures stay unready. */
+  draftHydrated: boolean;
   /**
    * Writes text into a draft. `scopeId` is optional and defaults to whatever
    * conversation is open at call time (read through a ref, so a response that
@@ -250,6 +252,7 @@ export function useConversationDrafts(
   const [syncFailureKeys, setSyncFailureKeys] = useState<ReadonlySet<string>>(
     () => new Set()
   );
+  const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
   const [hydrateRetryRevision, setHydrateRetryRevision] = useState(0);
   const activeDraftKey = draftKeyFor(currentConversationId, identityKey);
   const activeScopeKey = serverScopeKey(currentConversationId);
@@ -318,6 +321,7 @@ export function useConversationDrafts(
     const current = identityFenceRef.current;
     identityKeyRef.current = identityKey;
     if (current.identityKey === identityKey) return;
+    setHydratedDraftKey(null);
     identityFenceRef.current = {
       identityKey,
       epoch: current.epoch + 1,
@@ -793,7 +797,13 @@ export function useConversationDrafts(
     }
     const key = activeDraftKey;
     const meta = metaFor(key, activeScopeKey);
-    if (meta.hydrated) return;
+    if (meta.hydrated) {
+      queueMicrotask(() => {
+        if (activeDraftKeyRef.current === key && syncMetaRef.current.get(key) === meta &&
+            identityFenceIsCurrent(meta.identityKey, meta.identityEpoch)) setHydratedDraftKey(key);
+      });
+      return;
+    }
     const expectedIdentityKey = identityKey;
     const expectedIdentityEpoch = identityFenceRef.current.epoch;
     if (!identityFenceIsCurrent(expectedIdentityKey, expectedIdentityEpoch)) return;
@@ -846,6 +856,7 @@ export function useConversationDrafts(
         // information. In particular, never let a late GET erase its 409.
         if (meta.writeEpoch !== writeEpochAtStart || meta.conflict) return;
         meta.hydrated = true;
+        setHydratedDraftKey(key);
         meta.failureCount = 0;
         setSyncFailure(key, false);
         if (pendingConsumesRef.current.has(key)) {
@@ -1492,6 +1503,7 @@ export function useConversationDrafts(
     activeDraftKey,
     draftText: activeDraft.text,
     draftAttachments: activeDraft.attachments,
+    draftHydrated: !durableSyncEnabled || hydratedDraftKey === activeDraftKey,
     setDraftText,
     setDraftAttachments,
     readDraft,

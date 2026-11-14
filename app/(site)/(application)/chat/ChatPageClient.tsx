@@ -1,5 +1,10 @@
 ﻿"use client";
 
+import { ReviewChatHandoffProvider, ReviewChatAction } from "@/components/chat/ReviewChatHandoff";
+import { ReviewChatDraftReceiver } from "@/components/chat/ReviewChatDraftReceiver";
+import { REVIEW_CHAT_PARAM, type ReviewChatSource } from "@/lib/reviewToChat";
+
+
 import { requestChatLocationIntent } from "@tomverse/api-client";
 import { chatLocationSession, prepareFreshChatLocationIntent, type ChatPanelLocationIntent, type FreshChatLocationPreparation, type RouterLocationTurn } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
@@ -117,7 +122,7 @@ import {
 } from "@/lib/promptRefinerProductApiContract";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import {
   CONVERSATION_HANDOFF_PARAM,
   conversationHandoffHref,
@@ -974,6 +979,9 @@ export function ChatPageClient({
   // right one does not push it again (a repeated push of the current path is
   // a history entry that goes nowhere, and Back then appears broken).
   const pathname = usePathname();
+  const reviewChatMarker = useSearchParams().get(REVIEW_CHAT_PARAM);
+  const reviewChatFreshIntentRef = useRef(false);
+  useLayoutEffect(() => { if (reviewChatMarker && mountedSurface === "chat") reviewChatFreshIntentRef.current = true; }, [reviewChatMarker, mountedSurface]);
     const { t, setLang, lang } = useLanguage();
   const formatCopy = (key: string, values: Record<string, string>) =>
     Object.entries(values).reduce(
@@ -1200,6 +1208,7 @@ export function ChatPageClient({
   const {
     activeDraftKey,
     draftText: inputValue,
+    draftHydrated,
     draftAttachments: attachments,
     setDraftText: setInputValue,
     setDraftAttachments,
@@ -1865,7 +1874,10 @@ export function ChatPageClient({
     panelRef: billingSuccessDialogRef,
     initialFocusRef: billingSuccessCloseRef,
   });
+  const [reviewResultRevision, setReviewResultRevision] = useState(0);
+  const [compareSummarySource, setCompareSummarySource] = useState<ReviewChatSource | null>(null);
   const [compareSummary, setCompareSummary] = useState<{
+    id: string;
     title: string;
     result: {
       commonConclusions: Array<{
@@ -5238,6 +5250,11 @@ export function ChatPageClient({
         // case (and its guest-import handoff).
         if (conversations.length === 0 || pendingGuestImportRef.current) return;
 
+        if (reviewChatFreshIntentRef.current || (mountedSurface === "chat" && new URLSearchParams(window.location.search).has(REVIEW_CHAT_PARAM))) {
+          isInitialSelectedRef.current = true;
+          setIsInitialConversationResolved(true);
+          return;
+        }
         const params = new URLSearchParams(window.location.search);
         const hasUrlSelectionPreset = params.has("models") || params.has("prompt");
         // A ?models=/?prompt= landing takes its selection from the URL rather
@@ -7801,6 +7818,7 @@ export function ChatPageClient({
       responseText: string,
       searchMetadata?: WebSearchExecution | null
     ) => {
+      setReviewResultRevision(value => value + 1);
       if (promptId && voiceTurnRef.current?.promptId === promptId && voiceTurnRef.current.sourceUserMessageId && currentChatIdRef.current) {
         voiceTurnRef.current.resolve({ sourceUserMessageId: voiceTurnRef.current.sourceUserMessageId, conversationId: currentChatIdRef.current });
       }
@@ -9378,6 +9396,9 @@ export function ChatPageClient({
 
     const executeCompareSummary = async (conversationId: string) => {
       setIsCompareSummaryLoading(true);
+      setCompareSummarySource(null);
+      const ownerIdentity = identityKey;
+      const ownerTicket = conversationSelectionTicketRef.current;
       try {
         const response = await fetch(
           `/api/conversations/${conversationId}/compare-summary`,
@@ -9400,7 +9421,11 @@ export function ChatPageClient({
           showToast(message, "error");
           return;
         }
-        setCompareSummary(await response.json());
+        const summary = await response.json();
+        if (identityNamespaceKey(identityNamespaceRef.current) !== ownerIdentity || conversationSelectionTicketRef.current !== ownerTicket) return;
+        setCompareSummary(summary);
+        setCompareSummarySource(summary.source ? { kind: "quick", conversationId,
+          setup: { available: true, source: summary.source, promptMessageId: summary.promptMessageId }, review: summary, scope: reviewChatSourceScope } : null);
         setCachedCompareSummaryChatId(conversationId);
         maybeShowValueUpgradePrompt("comparison");
       } catch {
@@ -10416,6 +10441,7 @@ export function ChatPageClient({
     ]
   );
 
+  const reviewChatSourceScope = JSON.stringify([identityKey, currentChatId, promptPayload?.id, reviewResultRevision]);
   const productSwitchHasUnknownWrite =
     selectionModeUnknown?.identityKey === identityKey &&
     selectionModeUnknown.conversationId === currentChatId;
@@ -10458,6 +10484,15 @@ export function ChatPageClient({
     }
     router.push(reviewPrefillHref(seed));
   };
+  const beginReviewChatDraft = useCallback(() => {
+    conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
+    currentChatIdRef.current = null;
+    setCurrentChatId(null);
+    setPromptPayload(null);
+    isInitialSelectedRef.current = true;
+    setIsInitialConversationResolved(true);
+    return conversationSelectionTicketRef.current;
+  }, []);
   const compareChatInReview =
     mountedSurface === "chat" && !isGuestMode ? handleCompareChatInReview : undefined;
   useLayoutEffect(() => {
@@ -10490,6 +10525,14 @@ export function ChatPageClient({
     // composer's chip and credit estimate, the picker's badge and "Web search"
     // filter, and the per-message badge. One provider rather than a prop through
     // five intermediate components that do not use it.
+    <ReviewChatHandoffProvider identity={identityKey}
+      supported={routeSurface === "workspace" && !isGuestMode && Boolean(currentChatId)}
+      sourceScope={reviewChatSourceScope}
+      navigate={id => { if (!handleProductSwitch()) return false; router.push(`/chat?${REVIEW_CHAT_PARAM}=${encodeURIComponent(id)}`); return true; }}>
+    {mountedSurface === "chat" && <ReviewChatDraftReceiver marker={reviewChatMarker} identity={identityKey} conversationId={currentChatId}
+      hydrated={draftHydrated && isInitialConversationResolved} blocked={productSwitchDisabled} beginNew={beginReviewChatDraft}
+      selectionTicket={() => conversationSelectionTicketRef.current} readDraft={readDraft} setDraftText={setInputValue}
+      notify={text => showToast(text, "info")} />}
     <WebSearchBackendReadinessProvider readiness={webSearchBackendReadiness}>
       <ModelFinder
         enabled={Boolean(sessionUserId && isUserSettingsLoaded)}
@@ -11381,6 +11424,7 @@ export function ChatPageClient({
             </button>
           </div>
           <div className="grid min-h-0 flex-1 touch-pan-y gap-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
+            <ReviewChatAction source={compareSummarySource} ready={!isCompareSummaryLoading && !isGuestMode && compareSummarySource?.scope === reviewChatSourceScope} />
             <section data-testid="quick-summary-consensus" className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
               <h3 className="text-sm font-bold text-blue-950 dark:text-blue-100">
                 {t("chat.quickSummaryCommonConclusions")}
@@ -11391,6 +11435,7 @@ export function ChatPageClient({
                     <span className="mt-1 font-bold text-blue-600" aria-hidden="true">•</span>
                     <div className="min-w-0 flex-1">
                       <span>{item.text}</span>
+                      <ReviewChatAction source={compareSummarySource} ready={!isCompareSummaryLoading && !isGuestMode && compareSummarySource?.scope === reviewChatSourceScope} selection={{ section: "commonConclusions", ordinal: index }} />
                       {item.citations.map((citation, citationIndex) => (
                         <QuoteBadge
                           key={`${citationIndex}:${citation.responseId}`}
@@ -11420,6 +11465,7 @@ export function ChatPageClient({
                       <span className="mt-1 font-bold text-zinc-400">{index + 1}.</span>
                       <div className="min-w-0 flex-1">
                         <span>{item.text}</span>
+                      <ReviewChatAction source={compareSummarySource} ready={!isCompareSummaryLoading && !isGuestMode && compareSummarySource?.scope === reviewChatSourceScope} selection={{ section: "importantDifferences", ordinal: index }} />
                         {item.citations.map((citation, citationIndex) => (
                           <QuoteBadge
                             key={`${citationIndex}:${citation.responseId}`}
@@ -11555,7 +11601,7 @@ export function ChatPageClient({
       </div>
     )}
     {showComparisonReview && (
-      <ComparisonReviewDialog
+      <ComparisonReviewDialog key={JSON.stringify([identityKey, currentChatId, reviewResultRevision])}
         conversationId={isGuestMode ? null : currentChatId ?? null}
         guestSource={guestReviewSource}
         open
@@ -11727,5 +11773,6 @@ export function ChatPageClient({
       </div>
     )}
     </WebSearchBackendReadinessProvider>
+    </ReviewChatHandoffProvider>
   );
 }
