@@ -255,6 +255,9 @@ export const MARKETING_CAROUSEL_MAX_IMAGES: Readonly<Record<string, number>> = {
  * How many of an account's days carry a video, per platform: `video` days in
  * every `of` (owner decision 2026-11-04, in the weekly caps of policy §7.6).
  * YouTube and TikTok take only video; a platform not listed carries images.
+ * RedNote, posted by hand, carries a video two days in four (owner decision
+ * 2026-11-15); with few Simplified Chinese videos approved, an image stands
+ * in on a day no video fits.
  */
 export const MARKETING_VIDEO_DAYS: Readonly<Record<string, { readonly video: number; readonly of: number }>> = {
   instagram: { video: 2, of: 4 },
@@ -264,6 +267,7 @@ export const MARKETING_VIDEO_DAYS: Readonly<Record<string, { readonly video: num
   threads: { video: 2, of: 7 },
   youtube: { video: 1, of: 1 },
   tiktok: { video: 1, of: 1 },
+  rednote: { video: 2, of: 4 },
 };
 
 /**

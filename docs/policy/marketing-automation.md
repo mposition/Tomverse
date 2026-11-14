@@ -290,7 +290,7 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 | TikTok | en(자막 3언어) | 영상 | API |
 | Instagram ×3 | en / ko / zh-Hant | 이미지·영상 | API |
 | Threads | zh-Hant | 이미지·영상+텍스트 | API |
-| RedNote | zh-Hans | 이미지+텍스트 | 수동(API 없음) |
+| RedNote | zh-Hans | 이미지·영상+텍스트 | 수동(API 없음) |
 
 **채널별 일/주 게시 상한은 없다**(운영자 결정 2026-11-08, "광고 갯수 제한도 없앴으면 합니다"). 게시물은 여전히 하나하나 Admin에서 사람이 승인한 뒤에만 나가고(§7.4), 자동화 금지(§7.5)도 그대로다. 플랫폼 자체의 한도(예: YouTube Data API의 일일 업로드 할당량, 각 플랫폼의 게시·스팸 제한)는 이 결정과 무관하게 남는다. 운영자는 필요하면 Admin의 "상한 변경"으로 계정마다 일/주 상한을 걸 수 있고(`dailyCapOverride`·`weeklyCapOverride`, 비우면 상한 없음, 0은 그 계정의 게시를 막는다), 게시기는 그 계정 상한만 센다(`daily_cap_reached`·`weekly_cap_reached`). 상한을 내리는 것은 언제나 되고, 올리거나 없애는 것은 kill switch가 켜져 있는 동안 거절한다(`cap_change_raises_limit`). RedNote에는 API 게시 경로가 없으므로 계정 상한도 걸 수 없다(DB 트리거가 거절한다, migration `20261108130000_marketing_channel_caps_removed`). 게시물은 상한이 없어도 claim한 날(UTC) 슬롯을 잡아, 나중에 계정 상한을 걸면 그 집계가 맞는다. 게시기는 한 번 실행할 때 계정마다 한 건만 잡으므로 실제 속도는 실행 주기가 정한다. Admin의 "하루에 하나씩" 일정은 그 기능 자체의 간격이다.
 
@@ -305,7 +305,8 @@ Markdown/HTML link markup·prompt-injection marker는 byte/구조 사실이므�
 이미지 2·영상 1, X 이미지 7·영상 3, Threads 이미지 5·영상 2, YouTube·TikTok 영상만. 생성기는 계정마다 날짜(UTC)로 그날의
 종류를 정해 이 비율대로 영상의 날과 이미지의 날을 고르게 나누고(`MARKETING_VIDEO_DAYS`), 그날은 그 종류의 승인 자산만 초안
 후보로 준다. 그 종류의 자산이 없으면 다른 종류로 대신한다. 한국어 Instagram은 릴스 노출이 이미지보다 훨씬 커서 4일 중 3일을
-영상의 날로 둔다(운영자 결정 2026-11-14, `MARKETING_VIDEO_DAYS_BY_LOCALE`).
+영상의 날로 둔다(운영자 결정 2026-11-14, `MARKETING_VIDEO_DAYS_BY_LOCALE`). RedNote도 4일 중 2일을 영상의 날로 둔다(운영자
+결정 2026-11-15). 승인된 zh-Hans 영상이 적어서, 맞는 영상이 없는 날은 위 대체 규칙대로 이미지 초안이 나간다.
 
 같은 자산은 계정당 다시 쓰지 않는다(운영자 결정 2026-11-04). 그 계정의 게시물 가운데 반려·Guard 거절·만료가 아닌 상태
 (`MARKETING_ASSET_RELEASED_POST_STATUSES` 밖의 모든 상태, 승인 대기 포함)가 이름 댄 자산은 기간 제한 없이 그 계정의 후보에서

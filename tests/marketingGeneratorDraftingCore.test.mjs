@@ -273,6 +273,7 @@ test("each platform's video days follow the owner's ratio, spread evenly, with t
     ["threads", 2, 7],
     ["youtube", 1, 1],
     ["tiktok", 1, 1],
+    ["rednote", 2, 4],
   ]) {
     assert.deepEqual(MARKETING_VIDEO_DAYS[channel], { video, of }, channel);
     // Any run of `of` consecutive days holds exactly `video` video days.
@@ -306,6 +307,26 @@ test("each platform's video days follow the owner's ratio, spread evenly, with t
     assets: [{ id: "media-card", allowedChannels: ["instagram"], altLocales: ["ko"], claimIds: [], validUntil: "2099-12-31", kind: "image" }],
   });
   for (let day = 0; day < 4; day += 1) assert.equal(marketingA5MediaKindFor(koImagesOnly, "instagram", "ko", day), "image");
+
+  // RedNote in Simplified Chinese carries a video two days in four (owner decision 2026-11-15).
+  const bothZhHans = marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: [
+      { id: "media-card", allowedChannels: ["rednote"], altLocales: ["zh-Hans"], claimIds: [], validUntil: "2099-12-31", kind: "image" },
+      { id: "media-short", allowedChannels: ["rednote"], altLocales: ["zh-Hans"], claimIds: [], validUntil: "2099-12-31", kind: "video" },
+    ],
+  });
+  for (const start of [0, 20_400, 20_761]) {
+    const zhHans = Array.from({ length: 4 }, (_, index) => marketingA5MediaKindFor(bothZhHans, "rednote", "zh-Hans", start + index));
+    assert.equal(zhHans.filter((kind) => kind === "video").length, 2, `rednote zh-Hans from day ${start}`);
+  }
+  assert.deepEqual(marketingVideoDaysFor("rednote", "zh-Hans"), { video: 2, of: 4 });
+  // With no Simplified Chinese video approved, every RedNote day still carries an image.
+  const zhHansImagesOnly = marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: [{ id: "media-card", allowedChannels: ["rednote"], altLocales: ["zh-Hans"], claimIds: [], validUntil: "2099-12-31", kind: "image" }],
+  });
+  for (let day = 0; day < 4; day += 1) assert.equal(marketingA5MediaKindFor(zhHansImagesOnly, "rednote", "zh-Hans", day), "image");
 
   // No approved video for Facebook: its video days carry an image instead.
   const imagesOnly = marketingGeneratorContextSchema.parse({
