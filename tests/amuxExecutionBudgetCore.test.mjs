@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   AMUX_MAX_EXECUTION_ATTEMPTS,
+  amuxApprovedCeilingOverrun,
   decideAmuxAttemptBudget,
   settlementDestinationForBudget,
 } from "../lib/amux/executionBudgetCore.ts";
@@ -59,4 +60,29 @@ test("the last failed attempt blocks instead of requeueing forever", () => {
     }).to_status,
     "review",
   );
+});
+
+// Owner decision 2026-11-14: the receipt ceiling (per-attempt maximum times its
+// maxAttempts, 2-3) is below what the five-attempt budget can reserve. Going
+// past it is recorded, never refused.
+test("an attempt past the approved ceiling is reported, one within it is not", () => {
+  const receipt = { ceilingMicroUsd: "6800000" };
+  assert.equal(amuxApprovedCeilingOverrun({ approvedReceipt: receipt,
+    priorReservedMicroUsd: 0n, nextAttemptMicroUsd: 3_400_000n }), null);
+  assert.equal(amuxApprovedCeilingOverrun({ approvedReceipt: receipt,
+    priorReservedMicroUsd: 3_400_000n, nextAttemptMicroUsd: 3_400_000n }), null,
+    "reaching the ceiling exactly is within it");
+  assert.deepEqual(amuxApprovedCeilingOverrun({ approvedReceipt: receipt,
+    priorReservedMicroUsd: 6_800_000n, nextAttemptMicroUsd: 3_400_000n }), {
+    ceilingMicroUsd: "6800000", priorReservedMicroUsd: "6800000",
+    projectedMicroUsd: "10200000" });
+});
+
+test("an unreadable receipt ceiling reports nothing", () => {
+  for (const approvedReceipt of [null, undefined, "6800000", [], {},
+    { ceilingMicroUsd: 6_800_000 }, { ceilingMicroUsd: "-1" },
+    { ceilingMicroUsd: "1e6" }]) {
+    assert.equal(amuxApprovedCeilingOverrun({ approvedReceipt,
+      priorReservedMicroUsd: 50_000_000n, nextAttemptMicroUsd: 1n }), null);
+  }
 });
