@@ -101,8 +101,14 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    digest가 `approvedDiffDigest`와 같고 파일이 모두 허용 목록 안일 때만 싣는다(읽지 못하거나 다르면 싣지 않고, 그 승인은 차례를
    쓴 것으로 본다). 레인은 승인된 head를 `sha`로 고정해 병합한다. 병합 레인은 앱이 넘긴 목록의 PR만
    `agent` 브랜치 제외의 예외로 받고(`docs/policy/qa-release-agent.md` 8절 3항), observer는 그 레인의 병합을 두 번째 승인
-   근거(`dm_approval`, `docs/policy/engineering-agent.md` §9-10)로 판정한다. **대상은 develop뿐이고 main은 제외다.** 다음
-   단계: S3는 사람에게 남는 카드에 DM 제안과 원클릭 확인을 붙인다.
+   근거(`dm_approval`, `docs/policy/engineering-agent.md` §9-10)로 판정한다. **대상은 develop뿐이고 main은 제외다.** S3(구현 완료):
+   사람에게 남는 카드(DM이 `irreversible`로 표시한 제안, 승인자 스위치가 꺼져 있을 때의 제안, handoff된 정리 행)에 DM의 상태를 붙인다.
+   `GET /api/admin/amux/owner-queue`는 카드마다 그 escalation의 `AmuxDmOwnerSettlement`(state, decision, handoffReason)와
+   DM 카드의 상태를 `readAmuxDmLocalCardState`로 읽어 싣는다(`ops:write`가 없으면 제안 본문은 `restricted`, 읽지 못한 카드는 그
+   카드만 `unread`·`unavailable`). 운영자 확인 대기 카드는 제안과 근거, 되돌릴 수 없다는 표시, §6 snapshot을 보이고, 정리 행이
+   열려 있고 handoff되지 않았고 답이 그 종류의 고정 단어일 때만 "이대로 확인"을 낸다. 이 버튼은 새 쓰기 route 없이 기존
+   `POST /api/admin/amux/decision-maker/judgments`(`ops:write`, 최근 재인증)를 쓰고, 적용은 S1의 `dm_confirmed` walk가 한다.
+   DM이 아직 답하지 않았으면 "검토 중", handoff된 행이면 사유를 문장으로 보인다. 기존 legacy-card 패널은 그대로다.
 
 ## 1. 목적과 경계
 
