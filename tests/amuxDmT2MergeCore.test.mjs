@@ -53,7 +53,7 @@ test("only a change wholly inside the allow list takes the automatic path; anyth
   }
   // The lane's gate files are all a person's.
   for (const pattern of QA_RELEASE_MERGE_LANE_GATE_PATTERNS) {
-    const sample = pattern.replace("/**", "/x/y.ts").replace("*", "x");
+    const sample = pattern.replace("/**", "/x/y.ts").replaceAll("*", "x");
     assert.equal(qaReleaseDmApprovedHumanPaths([sample]).length, 1, pattern);
   }
   // A test the policy documents name, when the caller read them.
