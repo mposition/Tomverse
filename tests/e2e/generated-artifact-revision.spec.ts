@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { finalizedUploadRegistry, mockAttachmentUpload, mockAuthenticatedApi, openRecentConversation } from "./support/app-fixtures";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
@@ -11,6 +12,14 @@ const source = (id: string, format = "md"): ChatStreamArtifact => ({
 });
 const cards = (page: Page) => page.getByTestId("generated-artifact-card");
 const input = (page: Page) => page.getByTestId("chat-textarea");
+const copyIds = new WeakMap<Page, Map<string, string>>();
+function opaqueCopyId(page: Page, artifactId: string) {
+  const ids = copyIds.get(page) ?? new Map<string, string>();
+  copyIds.set(page, ids);
+  const id = ids.get(artifactId) ?? randomUUID();
+  ids.set(artifactId, id);
+  return id;
+}
 
 async function open(page: Page, enabled = true, formats = ["md", "md"]) {
   await mockAuthenticatedApi(page, { productKey: "chat", language: "en", selectedModels: ["gpt-6-luna"],
@@ -26,7 +35,7 @@ async function open(page: Page, enabled = true, formats = ["md", "md"]) {
 }
 
 async function copied(page: Page, route: Route, artifactId: string) {
-  const uploadId = `copy-${artifactId}`;
+  const uploadId = opaqueCopyId(page, artifactId);
   const upload = { name: "report.md", mediaType: "text/markdown", size: 30, kind: "text" as const };
   finalizedUploadRegistry(page).set(uploadId, upload);
   await route.fulfill({ status: 200, json: { uploadId, ...upload } });
@@ -132,7 +141,7 @@ test("files added during preparation keep the five-file limit and reclaim only t
   await expect(cards(page).first().getByTestId("generated-artifact-revision-error")).toContainText("up to 5 files");
   await expect(input(page)).toHaveValue("Keep this text");
   await expect(page.getByTestId("attachment-complete")).toHaveCount(5);
-  expect(removed).toEqual(["copy-artifact-0"]);
+  expect(removed).toEqual([opaqueCopyId(page, "artifact-0")]);
 });
 
 test("the ordinary draft reloads and Send carries exactly the visible request and copied upload @ui-risk", async ({ page }) => {
@@ -149,7 +158,19 @@ test("the ordinary draft reloads and Send carries exactly the visible request an
     const data = await page.evaluate(async () => (await fetch("/api/products/chat/drafts/qa-conversation")).json());
     return data.draft?.text;
   }).toBe(visible);
-  await page.reload();
+  // A new document drops all client state. The fake conversation id has no
+  // server-side DB row, so reopen the app entry and restore the stored scope.
+  await page.goto("/chat?lang=en");
+  await expect(input(page)).toBeVisible();
+  // A returning mobile conversation already has a header drawer button,
+  // while a fresh welcome has the recent-conversations disclosure instead.
+  const drawerButton = page.getByTestId("mobile-sidebar-open");
+  if (await drawerButton.isVisible()) {
+    await drawerButton.click();
+    await page.locator('[data-testid="sidebar-conversation-item"][data-conversation-id="qa-conversation"]').click();
+  } else {
+    await openRecentConversation(page);
+  }
   await expect(input(page)).toHaveValue(visible);
   await expect(page.getByTestId("attachment-complete")).toContainText("report.md");
   let sent: Record<string, unknown> | null = null;
@@ -161,7 +182,14 @@ test("the ordinary draft reloads and Send carries exactly the visible request an
   });
   await page.getByTestId("chat-send-button").click();
   await expect.poll(() => sent !== null).toBe(true);
-  expect(JSON.stringify(sent)).toContain(visible.replaceAll("\n", "\\n"));
+  const messages = (sent as unknown as { messages: Array<{
+    role: string; content: string;
+    attachments?: Array<{ id: string; attachmentId?: string; uploadId?: string }>;
+  }> }).messages;
+  const latestUser = messages.filter(message => message.role === "user").at(-1)!;
+  expect(latestUser.content).toBe(visible);
+  expect(latestUser.attachments).toMatchObject([{ id: opaqueCopyId(page, "artifact-0"), attachmentId: expect.stringMatching(/^ma-/) }]);
+  expect(latestUser.attachments![0]).not.toHaveProperty("uploadId");
   expect(JSON.stringify(sent)).not.toContain("artifact-0");
   // A text-only reply creates no new file card and is not revision success.
   await expect(cards(page)).toHaveCount(2);
@@ -191,9 +219,39 @@ test("an account switch never receives another person's late revision input @ui-
   await expect(input(page)).toHaveValue("Account B draft");
   await expect(page.getByTestId("attachment-complete")).toHaveCount(0);
   session.id = "qa-user";
+  const beforeReturn = session.reads;
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect.poll(() => session.reads).toBeGreaterThan(beforeReturn);
+  await openRecentConversation(page);
   await expect(input(page)).toHaveValue(/Create a new file.*\n\nAccount A draft/);
   await expect(page.getByTestId("attachment-complete")).toHaveCount(1);
+});
+
+test("a failed revision response preserves a newer draft and the saved source attachment for retry @ui-risk", async ({ page }) => {
+  await open(page);
+  let pending: Route | null = null;
+  await page.route("**/api/chat", async route => {
+    if (route.request().method() === "PUT") return copied(page, route, "artifact-0");
+    if (route.request().method() === "POST") { pending = route; return; }
+    await route.fallback();
+  });
+  await cards(page).first().getByTestId("generated-artifact-revise").click();
+  await expect(page.getByTestId("attachment-complete")).toHaveCount(1);
+  const submittedText = await input(page).inputValue();
+  await page.getByTestId("chat-send-button").click();
+  await expect.poll(() => pending !== null).toBe(true);
+  await expect(input(page)).toHaveValue("");
+  await input(page).fill("New work typed while the revision response is pending");
+  await pending!.fulfill({ status: 500, json: { error: "The response could not be completed.", code: "PROVIDER_ERROR" } });
+  await expect(page.getByTestId("chat-error-icon")).toBeVisible();
+  await expect(input(page)).toHaveValue("New work typed while the revision response is pending");
+  await expect(page.locator('[data-message-role="user"]').filter({ hasText: submittedText })).toContainText("report.md");
+  const saved = await page.evaluate(async () => (await fetch("/api/conversations/qa-conversation")).json());
+  const question = saved.messages.filter((message: { role: string }) => message.role === "user").at(-1);
+  expect(question.content).toBe(submittedText);
+  expect(question.attachments).toMatchObject([{ name: "report.md", attachmentId: expect.stringMatching(/^ma-/) }]);
+  await expect(cards(page)).toHaveCount(2);
+  await expect(page.locator('[data-testid="generated-artifact-card"][data-artifact-status="failed"]')).toHaveCount(0);
 });
 
 test("Office offers text rewriting with its limit and XLSX keeps download only", async ({ page }) => {
