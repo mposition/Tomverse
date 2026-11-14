@@ -51,7 +51,7 @@ test("instruction consume uses the policy's twelve statements, re-judges a Decis
     "judgeQaReleaseInstructionConsume(",
     "if (!judgement.consume) return",
     "await amuxDmT2MergeConsumeAllowed(tx,",
-    "if (dm === false) return",
+    'if (dm !== "allowed" && dm !== "not_engineering") return',
     "await writeSystemAuditLog({",
     `SET "state" = 'consumed'`,
     "SELECT clock_timestamp() >= ",

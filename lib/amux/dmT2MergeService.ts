@@ -58,7 +58,9 @@ async function recordAmuxDmT2MergeVisit(tx: Prisma.TransactionClient, settlement
 /**
  * The one judgment of a Decision Maker approval at every use of it -- the
  * ready step's pick and its audit, the merge lane's list, and the lane's
- * consume right before the merge (review r-20261114-020758-a98fec): the
+ * consume right before the merge (review r-20261114-020758-a98fec). It gates
+ * what happens next, so it reads the switches; the evidence of a merge that
+ * already happened is readAmuxDmT2MergeEvidence's, which does not. The
  * develop merge switch on, the Decision Maker's kill switch read and off, and
  * the approvals that still hold in the database (readAmuxDmT2MergeApprovals:
  * the settlement applied and approve, the binding open, current and at the
@@ -82,17 +84,21 @@ export async function readAmuxDmT2MergeHolding(tx: Prisma.TransactionClient, inp
  * The merge lane's consume of an instruction, in its own transaction, right
  * before the merge: an engineering agent pull request is let through only
  * while its Decision Maker approval still holds (readAmuxDmT2MergeHolding) at
- * exactly the head the lane will merge, into develop. Null for any other pull
- * request: the lane's own rules decide it. At most three statements.
+ * exactly the head the lane will merge, into develop, and only when the diff
+ * digest the lane read from GitHub right before is the approved one (a merge
+ * base that moved with develop changes it at the same head). Any other pull
+ * request is `not_engineering`: the lane's own rules decide it. At most three
+ * statements.
  */
 export async function amuxDmT2MergeConsumeAllowed(tx: Prisma.TransactionClient, input: {
-  prNumber: number; headSha: string; base: string; env?: Env;
-}): Promise<boolean | null> {
-  if (!(await readAmuxDmT2MergeIsEngineeringPull(tx, input.prNumber))) return null;
-  if (input.base !== "develop") return false;
+  prNumber: number; headSha: string; base: string; diffDigest: string | null; env?: Env;
+}): Promise<"not_engineering" | "allowed" | "dm_approval_not_holding" | "dm_diff_changed"> {
+  if (!(await readAmuxDmT2MergeIsEngineeringPull(tx, input.prNumber))) return "not_engineering";
+  if (input.base !== "develop") return "dm_approval_not_holding";
   const [held] = await readAmuxDmT2MergeHolding(tx, { env: input.env ?? process.env, limit: 1,
     prNumbers: [input.prNumber] });
-  return held !== undefined && held.approvedHeadSha === input.headSha;
+  if (held === undefined || held.approvedHeadSha !== input.headSha) return "dm_approval_not_holding";
+  return input.diffDigest === held.approvedDiffDigest ? "allowed" : "dm_diff_changed";
 }
 
 /**
@@ -126,11 +132,19 @@ export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
   return held.holds ? [{ number: row.prNumber, headSha: row.approvedHeadSha, headRef: row.headRef }] : [];
 }
 
-/** The observer's read of a merged binding's pull request; null while the switch is off. */
-export async function readAmuxDmT2MergeObserved(input: {
+/**
+ * The evidence of a merge that already happened, for the approval observer:
+ * the Decision Maker's approval of this binding's pull request as recorded,
+ * and what the merge lane's own attempts say of this merge commit
+ * (readAmuxDmT2MergeObservedFacts). Unlike readAmuxDmT2MergeHolding it reads
+ * no switch (review r-20261114-021949-8dbd49): the develop merge switch and
+ * the kill switch stop new readies and consumes, never the record of a merge
+ * the lane already made on an approval -- a switch turned off between the
+ * lane's merge and the observer's round must not stop the agent over it.
+ */
+export async function readAmuxDmT2MergeEvidence(input: {
   bindingId: string; prNumber: number; headSha: string; mergeCommitSha: string;
-}, env: Env = process.env) {
-  if (!amuxDmT2MergeEnabled(env)) return null;
+}) {
   return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeObservedRead,
     (tx) => readAmuxDmT2MergeObservedFacts(tx, input));
 }

@@ -103,7 +103,8 @@ export type QaReleaseMergeLanePorts = {
   app: {
     readState: () => Promise<QaReleaseLaneState>;
     issue: (pullRequest: { pullRequestNumber: number; headSha: string }) => Promise<{ issued: true; attemptId: string } | { issued: false; reason: string }>;
-    consume: (request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string }) => Promise<{ consumed: boolean; reason?: string }>;
+    /** `diffDigest`: for a Decision Maker approved pull request, its diff's digest read right before (lib/pullDiffDigestCore.ts). */
+    consume: (request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string; diffDigest?: string }) => Promise<{ consumed: boolean; reason?: string }>;
     report: (attemptId: string, report: QaReleaseMergeReport) => Promise<{ recorded: boolean; reason?: string }>;
   };
   github: {
@@ -111,6 +112,8 @@ export type QaReleaseMergeLanePorts = {
     /** The item 3 inputs for one pull request; the changed-file list is read to its last page. */
     exclusionInputs: (pull: QaReleaseLanePullRequest) => Promise<QaReleaseExclusionInput>;
     readPull: (number: number) => Promise<QaReleasePullRead | null>;
+    /** The digest of the pull request's diff as GitHub serves it now (lib/pullDiffDigestCore.ts); null when it cannot be read whole. */
+    diffDigest: (number: number) => Promise<string | null>;
     /** The merge API with `sha` pinned to the head; never a merge without it. */
     merge: (number: number, headSha: string) => Promise<QaReleaseMergeCall>;
     /** compare/{sha}...develop: true when ahead or identical, false when not, null when unanswered. */
@@ -472,8 +475,18 @@ async function laneRound(
   if (freshDeployments === null || developBroken(freshDeployments) || qaReleaseHoldingDeployments(freshDeployments).length > 0) return abandon();
   if (decideQaReleaseServiceStart("mergeLane", env) !== "run") return abandon();
 
+  // A Decision Maker approved pull request: its diff as GitHub serves it now,
+  // read right before the consume, which lets it merge only at the approved
+  // digest (review r-20261114-021949-8dbd49: a merge base that moved with
+  // develop changes the diff at the same head). Unread, it is not merged.
+  let diffDigest: string | null = null;
+  if (qaReleaseDmApprovedPull(state, pick)) {
+    diffDigest = await ports.github.diffDigest(pick.number).catch(() => null);
+    if (diffDigest === null) return abandon();
+  }
   const consumed = await ports.app
-    .consume({ attemptId, pullRequestNumber: pick.number, headSha: pick.headRefOid, base: "develop" })
+    .consume({ attemptId, pullRequestNumber: pick.number, headSha: pick.headRefOid, base: "develop",
+      ...(diffDigest !== null ? { diffDigest } : {}) })
     .catch(() => null);
   if (consumed === null) return { exitCode: 1, outcome: "state_unknown" };
   if (!consumed.consumed) return abandon();

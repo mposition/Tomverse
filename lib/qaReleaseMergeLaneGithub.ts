@@ -18,6 +18,7 @@
  * (2026-10-29: one 502 held an emergency train for ten minutes).
  */
 import { createSign } from "node:crypto";
+import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest } from "./pullDiffDigestCore.ts";
 
 import type { QaReleaseLanePullRequest } from "./qaReleaseMergeLaneCandidateCore.ts";
 import { type QaReleaseChangedFile, type QaReleaseExclusionInput, QA_RELEASE_MIGRATION_SQL_PATH } from "./qaReleaseMergeLaneExclusionCore.ts";
@@ -357,6 +358,11 @@ export function createQaReleaseGithubPorts(input: {
         policyTestPaths: inputs.tests,
         agentOwnPatterns: inputs.own,
       };
+    },
+
+    async diffDigest(number): Promise<string | null> {
+      const diff = await get(`${REPO_PATH}/pulls/${number}`, "application/vnd.github.diff");
+      return Buffer.byteLength(diff, "utf8") > PULL_DIFF_DIGEST_MAX_BYTES ? null : pullDiffDigest(diff);
     },
 
     async readPull(number): Promise<QaReleasePullRead | null> {

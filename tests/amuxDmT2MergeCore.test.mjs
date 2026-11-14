@@ -242,23 +242,27 @@ test("a lane round merges a reported engineering pull request and leaves an unre
   const run = async (state, answers = {}) => {
     const issued = [];
     const merges = [];
+    const order = [];
+    const consumes = [];
     const ports = {
       app: {
         readState: async () => ({ dbNowMs: 1, latched: false, openAttempt: null, ...state }),
         issue: async (request) => { issued.push(request); return answers.issue ?? { issued: false, reason: "lane_off" }; },
-        consume: async () => answers.consume ?? { consumed: false }, report: async () => ({ recorded: true }),
+        consume: async (request) => { order.push("consume"); consumes.push(request); return answers.consume ?? { consumed: false }; },
+        report: async () => ({ recorded: true }),
       },
       github: {
         listOpenDevelopPulls: async () => [pull],
         exclusionInputs: async (p) => inputs({ headBranch: p.headRefName }),
         readPull: async () => pull,
-        merge: async (number, headSha) => { merges.push([number, headSha]); return { result: "merged", sha: "9".repeat(40) }; },
+        diffDigest: async () => { order.push("diff"); return "diffDigest" in answers ? answers.diffDigest : DIFF; },
+        merge: async (number, headSha) => { order.push("merge"); merges.push([number, headSha]); return { result: "merged", sha: "9".repeat(40) }; },
         onDevelop: async () => true,
         commitsContaining: async () => new Set(), cancelledCommits: async () => new Set(),
       },
       railway: { developDeployments: async () => [] },
     };
-    return { outcome: await runQaReleaseMergeLaneRound(ENV, ports), issued, merges };
+    return { outcome: await runQaReleaseMergeLaneRound(ENV, ports), issued, merges, order, consumes };
   };
   const reported = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] });
   assert.deepEqual(reported.issued, [{ pullRequestNumber: 42, headSha: HEAD }]);
@@ -271,6 +275,13 @@ test("a lane round merges a reported engineering pull request and leaves an unre
   const merged = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] },
     { issue: { issued: true, attemptId: "att-1" }, consume: { consumed: true } });
   assert.deepEqual(merged.merges, [[42, HEAD]]);
+  // Review r-20261114-021949-8dbd49: the diff as GitHub serves it now is read right before the consume and carried in it.
+  assert.deepEqual(merged.order, ["diff", "consume", "merge"]);
+  assert.equal(merged.consumes[0].diffDigest, DIFF);
+  // Its diff unread: no consume, no merge.
+  const unread = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] },
+    { issue: { issued: true, attemptId: "att-1" }, consume: { consumed: true }, diffDigest: null });
+  assert.deepEqual([unread.order, unread.merges], [["diff"], []]);
   // The app refuses the consume (its Decision Maker approval no longer holds): never merged without it.
   const refused = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] },
     { issue: { issued: true, attemptId: "att-1" }, consume: { consumed: false, reason: "dm_approval_not_holding" } });
@@ -292,4 +303,18 @@ test("a Decision Maker ready is a person's: while an earlier one's CI has not sh
   assert.equal(amuxDmT2MergeReadyInFlight({ readies: [{ ...ready, atMs: NOW - AMUX_DM_T2_MERGE_READY_SETTLE_MS }],
     running: new Set(), nowMs: NOW }), false);
   assert.equal(amuxDmT2MergeReadyInFlight({ readies: [], running: new Set(), nowMs: NOW }), false);
+});
+
+test("the engineering agent and the merge lane digest a diff with one function", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { createHash } = await import("node:crypto");
+  const { pullDiffDigest, PULL_DIFF_DIGEST_MAX_BYTES } = await import("../lib/pullDiffDigestCore.ts");
+  const diff = "diff --git a/components/X.tsx b/components/X.tsx\n@@ -1 +1 @@\n-a\n+b\n";
+  assert.equal(pullDiffDigest(diff), createHash("sha256").update(Buffer.from(diff, "utf8")).digest("hex"));
+  assert.equal(pullDiffDigest(Buffer.from(diff, "utf8")), pullDiffDigest(diff), "the bytes and their text agree");
+  assert.equal(PULL_DIFF_DIGEST_MAX_BYTES, 1024 * 1024);
+  for (const file of ["lib/engineeringAgentGitHubRead.ts", "lib/qaReleaseMergeLaneGithub.ts"]) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+    assert.match(source, /import \{ PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest \} from "\.\/pullDiffDigestCore\.ts";/, file);
+  }
 });

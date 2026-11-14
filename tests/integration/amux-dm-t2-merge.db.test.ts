@@ -330,7 +330,7 @@ test("CI admission's round marks the approved draft ready after its line, and on
 test("the merge lane's list and the observer's read follow the approval while it still holds", async () => {
   await lifecycle(async (tx) => {
     const card = await reviewDraft(tx, ORDINARY);
-    const { readAmuxDmT2MergeLanePulls, readAmuxDmT2MergeObserved } = await services();
+    const { readAmuxDmT2MergeLanePulls, readAmuxDmT2MergeEvidence } = await services();
     // The lane's list reads the pull request's change from GitHub every time (review r-20261113-134019-5d8f82).
     const reads: number[] = [];
     const gh = (over: Record<string, unknown> | "throw" = {}) => ({ change: async (prNumber: number) => {
@@ -360,14 +360,15 @@ test("the merge lane's list and the observer's read follow the approval while it
     assert.deepEqual(await mine(gh({ crossRepository: true })), [], "a fork's pull request: not listed");
 
     const merge = "e".repeat(40);
-    const facts = await readAmuxDmT2MergeObserved({ bindingId: card.bindingId, prNumber: card.prNumber, headSha: HEAD,
-      mergeCommitSha: merge }, ON);
+    const facts = await readAmuxDmT2MergeEvidence({ bindingId: card.bindingId, prNumber: card.prNumber, headSha: HEAD,
+      mergeCommitSha: merge });
     assert.equal(facts?.settlementId, card.settlementId);
     assert.equal(facts?.approvedHeadSha, HEAD);
     assert.equal(facts?.approvedDiffDigest, DIFF);
     assert.equal(facts?.laneMerge, null, "the lane never merged it");
-    assert.equal(await readAmuxDmT2MergeObserved({ bindingId: card.bindingId, prNumber: card.prNumber, headSha: HEAD,
-      mergeCommitSha: merge }, {}), null, "off, nothing is read");
+    // The evidence of a merge reads no switch: the same facts with the develop merge switch off.
+    assert.deepEqual(await readAmuxDmT2MergeEvidence({ bindingId: card.bindingId, prNumber: card.prNumber, headSha: HEAD,
+      mergeCommitSha: merge }), facts);
 
     // A Task that moved is not the lane's any more.
     await tx.amuxWorkItem.update({ where: { id: card.taskId }, data: { status: "blocked", revision: { increment: 1 } } });
@@ -400,8 +401,9 @@ test("the lane's consume lets an engineering pull request merge only while its D
     return { attemptId, revision: next };
   };
   const consume = (card: Card, attempt: { attemptId: string; revision: number }, env: Record<string, string | undefined>,
-    headSha = HEAD) => consumeQaReleaseMergeInstruction({ callerRevision: attempt.revision, env,
-    request: { attemptId: attempt.attemptId, pullRequestNumber: card.prNumber, headSha, base: "develop" },
+    headSha = HEAD, diffDigest: string | null = DIFF) => consumeQaReleaseMergeInstruction({ callerRevision: attempt.revision, env,
+    request: { attemptId: attempt.attemptId, pullRequestNumber: card.prNumber, headSha, base: "develop",
+      ...(diffDigest !== null ? { diffDigest } : {}) },
     budget: { startedAt: Date.now(), budgetMs: 50_000, clock: Date.now } });
   const stateOf = async (tx: LifecycleTx, attemptId: string) => (await tx.$queryRaw<Array<{ state: string }>>`
     SELECT "state" FROM "QaReleaseMergeAttempt" WHERE "id" = ${attemptId}`)[0]!.state;
@@ -411,9 +413,16 @@ test("the lane's consume lets an engineering pull request merge only while its D
     const card = await reviewDraft(tx, ORDINARY);
     assert.deepEqual(await approve(card, ON), { applied: true, outcome: "approved" });
     // Not an engineering pull request: the lane's own rules decide it.
-    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: 7, headSha: HEAD, base: "develop", env: ON }), null);
-    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: card.prNumber, headSha: HEAD, base: "develop", env: ON }), true);
+    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: 7, headSha: HEAD, base: "develop", diffDigest: null, env: ON }),
+      "not_engineering");
+    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: card.prNumber, headSha: HEAD, base: "develop",
+      diffDigest: DIFF, env: ON }), "allowed");
     const attempt = await issued(tx, card);
+
+    // Review r-20261114-021949-8dbd49: the diff as the lane read it right before -- another, or none -- is refused.
+    assert.deepEqual(await consume(card, attempt, ON, HEAD, "e".repeat(64)), { consumed: false, reason: "dm_diff_changed" });
+    assert.deepEqual(await consume(card, attempt, ON, HEAD, null), { consumed: false, reason: "dm_diff_changed" },
+      "the lane read no diff");
 
     // The develop merge switch off since the list was read.
     assert.deepEqual(await consume(card, attempt, {}), REFUSED);
@@ -457,8 +466,9 @@ test("the lane's consume lets an engineering pull request merge only while its D
     const card = await reviewDraft(tx, ORDINARY);
     assert.deepEqual(await approve(card, ON), { applied: true, outcome: "approved" });
     await issued(tx, card);
-    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: card.prNumber, headSha: HEAD, base: "develop", env: ON }), true);
-    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: card.prNumber, headSha: HEAD, base: "main", env: ON }), false,
-      "never into main");
+    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: card.prNumber, headSha: HEAD, base: "develop",
+      diffDigest: DIFF, env: ON }), "allowed");
+    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: card.prNumber, headSha: HEAD, base: "main",
+      diffDigest: DIFF, env: ON }), "dm_approval_not_holding", "never into main");
   });
 });

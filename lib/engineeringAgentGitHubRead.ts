@@ -10,8 +10,8 @@
 
 import "server-only";
 
-import { createHash } from "node:crypto";
 import { ENGINEERING_AGENT_PR_APPROVER_IDS } from "./engineeringAgentPrApprovalCore.ts";
+import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest } from "./pullDiffDigestCore.ts";
 
 import { checkListing, gitObjectId, type TreeEntry } from
   "@/lib/engineeringAgentTreeVerify";
@@ -301,7 +301,7 @@ export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
 
 const MAX_REVIEWS = 100;
 const MAX_PR_FILES = 3_000;
-const MAX_DIFF_BYTES = 1024 * 1024;
+const MAX_DIFF_BYTES = PULL_DIFF_DIGEST_MAX_BYTES;
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 const FAILING_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out", "action_required", "stale", "startup_failure"]);
 
@@ -398,7 +398,7 @@ async function readPullDiffDigest(
     return null;
   }
   try {
-    return createHash("sha256").update(await readBounded(response, MAX_DIFF_BYTES)).digest("hex");
+    return pullDiffDigest(await readBounded(response, MAX_DIFF_BYTES));
   } catch {
     return null;
   }

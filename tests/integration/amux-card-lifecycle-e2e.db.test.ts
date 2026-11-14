@@ -297,7 +297,7 @@ test("the Decision Maker's approval, readied by the app and merged by the merge 
   // Every module first: a transaction the services leave bounded by their idle
   // timeouts must not wait on a module's first load.
   const { handleQaReleaseMergeLaneState } = await import("@/lib/qaReleaseMergeLaneRoutes");
-  const { runAmuxDmT2MergeReadyStep, readAmuxDmT2MergeObserved } = await import("@/lib/amux/dmT2MergeService");
+  const { runAmuxDmT2MergeReadyStep, readAmuxDmT2MergeEvidence } = await import("@/lib/amux/dmT2MergeService");
   const { recordDecisionMakerSwitchByOperator } = await import("@/lib/amux/decisionMakerSwitchStore");
   const { withAmuxDbBoundary, AMUX_DB_BOUNDARIES } = await import("@/lib/amux/dbBoundary");
   const { readAmuxDmOwnerSettlementSyncRows, applyAmuxDmOwnerSettlementDecision } =
@@ -360,7 +360,10 @@ test("the Decision Maker's approval, readied by the app and merged by the merge 
       VALUES (${attemptId}, ${card.prNumber}, ${HEAD}, 'develop', 1, 'consumed', ${randomUUID()}, now())`);
     // Merged before the lane reports: the observer waits rather than stop the agent.
     const botMerge = () => mergedPull({ mergedByKind: "bot", mergedByApprover: false });
-    const dmMerge = (input: Parameters<typeof readAmuxDmT2MergeObserved>[0]) => readAmuxDmT2MergeObserved(input, ON);
+    // The observer reads the evidence whatever the switches say now: this process has the develop merge
+    // switch off, as if it was turned off after the lane's merge, and the merge is still judged on what happened.
+    assert.notEqual(process.env.TOMVERSE_AMUX_DM_T2_MERGE, "enabled");
+    const dmMerge = (input: Parameters<typeof readAmuxDmT2MergeEvidence>[0]) => readAmuxDmT2MergeEvidence(input);
     const observeDm = async () => {
       const outcomes = await observeEngineeringAgentPullRequests({ now: () => at(240), dmMerge,
         read: async (prNumber: number) => prNumber === card.prNumber ? botMerge() : openPull() });
@@ -385,13 +388,12 @@ test("the Decision Maker's approval, readied by the app and merged by the merge 
 });
 
 test("a bot's merge of a Decision Maker approved pull request that the lane never merged still stops the agent", async () => {
-  const ON = { TOMVERSE_AMUX_DM_T2_MERGE: "enabled" };
   await lifecycle(async (tx) => {
     const card = await publishedCard(tx);
-    const { readAmuxDmT2MergeObserved } = await import("@/lib/amux/dmT2MergeService");
+    const { readAmuxDmT2MergeEvidence } = await import("@/lib/amux/dmT2MergeService");
     const { observeEngineeringAgentPullRequests } = await services();
     const outcomes = await observeEngineeringAgentPullRequests({ now: () => at(240),
-      dmMerge: (input) => readAmuxDmT2MergeObserved(input, ON),
+      dmMerge: (input) => readAmuxDmT2MergeEvidence(input),
       read: async (prNumber: number) => prNumber === card.prNumber ?
         mergedPull({ mergedByKind: "bot", mergedByApprover: false }) : openPull() });
     assert.equal(outcomes.find((entry) => entry.bindingId === card.bindingId)?.outcome, "merged_without_approval");

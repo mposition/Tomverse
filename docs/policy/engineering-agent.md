@@ -591,6 +591,8 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
     - 병합된 head가 그 행의 `approvedHeadSha`와 같고, PR diff digest가 `approvedDiffDigest`와
       같다. head가 움직였으면 해당하지 않는다(병합 레인은 head를 고정해 병합한다).
     - base가 `develop`이다.
+    - 이 판정은 이미 일어난 병합의 증거를 읽을 뿐이라 `TOMVERSE_AMUX_DM_T2_MERGE`와 DM kill switch를 보지 않는다. 두 스위치는
+      새 ready와 병합 직전 소비만 막는다. 그래서 레인이 병합한 뒤 스위치를 꺼도 이 병합은 승인으로 판정된다.
     - 병합이 병합 레인의 것이다: bot(또는 App)의 병합이고, 앱에 남은 병합 레인의 attempt
       (`QaReleaseMergeAttempt`)가 이 PR·head에 대해 바로 그 병합 commit을 보고했다. 레인이
       아직 보고하지 않은 attempt가 열려 있거나 diff를 읽지 못하면 그 회차에는 판정하지 않는다.

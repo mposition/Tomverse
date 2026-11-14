@@ -92,7 +92,9 @@ export type QaReleaseConsumeRefusal =
   | "lane_state_unknown"
   | "latched"
   /** An engineering agent pull request whose Decision Maker approval no longer holds (lib/amux/dmT2MergeService.ts). */
-  | "dm_approval_not_holding";
+  | "dm_approval_not_holding"
+  /** Its diff, as the lane read it right before, is not the approved one, or the lane read none. */
+  | "dm_diff_changed";
 
 /**
  * Whether a consume may succeed. A revision recorded after the instruction

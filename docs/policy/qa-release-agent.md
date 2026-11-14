@@ -208,7 +208,10 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      `isCrossRepository`가 `false`일 때만 이 예외를 씁니다. 레인은 지금 GitHub가 보여 주는 번호·head commit·브랜치가
      셋 다 같고 base가 develop일 때만 이 예외를 쓰고, 4항대로 그 head를 `sha`로 고정해 병합합니다. 앱은 병합 직전의 지시 소비에서
      엔지니어링 PR이면 DM 승인을 같은 트랜잭션에서 다시 판정해(T2 스위치, DM kill switch, applied·approve 행, binding, Task, 그 head와 base)
-     하나라도 맞지 않으면 소비를 거절하고(`dm_approval_not_holding`), 레인은 소비 없이는 병합하지 않습니다
+     하나라도 맞지 않으면 소비를 거절하고(`dm_approval_not_holding`), 레인은 소비 없이는 병합하지 않습니다. 레인은 소비 직전에
+     그 PR의 현재 diff를 GitHub에서 읽어 엔지니어링 에이전트와 같은 함수(`lib/pullDiffDigestCore.ts`)로 digest를 계산해 소비 요청에
+     싣고, 앱은 그 값이 승인 digest와 같을 때만 소비를 허락합니다(없거나 다르면 `dm_diff_changed`). diff를 읽지 못하면 그 PR은
+     건너뜁니다
      (`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본 꺼짐; 꺼져 있으면 목록 자체가 없습니다). 그런 PR도 이 3항의 다른 제외(게이트
      파일, 정책 테스트, 부록 A, 보호 테이블 migration, 목록 미완)와 2항의 CI 판정을 그대로 받습니다. 그리고 **변경 파일이 모두
      허용 목록 안에 있어야 합니다**(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`, `docs/**`, `locales/**`, `components/**`,

@@ -3,7 +3,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 
 import type { AmuxDmT2MergeObservedFacts } from "@/lib/amux/dmT2MergeRead";
-import { readAmuxDmT2MergeObserved } from "@/lib/amux/dmT2MergeService";
+import { readAmuxDmT2MergeEvidence } from "@/lib/amux/dmT2MergeService";
 import { completeAmuxV22ReviewOnObservedMerge } from "@/lib/amux/reviewMergeObserved";
 import {
   EngineeringAgentGitHubReadError,
@@ -78,8 +78,9 @@ type Ports = {
   /**
    * The Decision Maker's approval of a merged binding's pull request and the
    * merge lane's record of that merge (owner decision 2026-11-13), or null.
-   * Absent -- and null while TOMVERSE_AMUX_DM_T2_MERGE is off -- the second
-   * basis of approval is never consulted.
+   * Evidence, not a gate: read whatever the switches say now, so a merge the
+   * lane made while they were on is judged on what happened. Absent, the
+   * second basis of approval is never consulted.
    */
   dmMerge?: (input: { bindingId: string; prNumber: number; headSha: string; mergeCommitSha: string }) =>
     Promise<AmuxDmT2MergeObservedFacts | null>;
@@ -88,7 +89,7 @@ type Ports = {
 const livePorts: Ports = {
   read: (prNumber) => readEngineeringAgentPullObservation(prNumber),
   now: () => new Date(),
-  dmMerge: (input) => readAmuxDmT2MergeObserved(input),
+  dmMerge: (input) => readAmuxDmT2MergeEvidence(input),
 };
 
 type Approval = { verdict: string; reviewId?: number; observedAt?: string } | null;

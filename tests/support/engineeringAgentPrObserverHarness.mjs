@@ -42,7 +42,7 @@ mock.module(mod("lib/engineeringAgentStore.ts"), {
 });
 // The live Decision Maker read is never reached here: every DM case passes its own port.
 mock.module(mod("lib/amux/dmT2MergeService.ts"), {
-  namedExports: { readAmuxDmT2MergeObserved: async () => { throw new Error("live dm read"); } },
+  namedExports: { readAmuxDmT2MergeEvidence: async () => { throw new Error("live dm read"); } },
 });
 mock.module(mod("lib/amux/reviewMergeObserved.ts"), {
   namedExports: {

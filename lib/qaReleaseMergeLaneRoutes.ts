@@ -39,7 +39,9 @@ const PR = z.number().int().positive().max(1_000_000_000);
 const ATTEMPT = z.string().min(1).max(64);
 
 const issueBody = z.object({ pullRequestNumber: PR, headSha: SHA }).strict();
-const consumeBody = z.object({ attemptId: ATTEMPT, pullRequestNumber: PR, headSha: SHA, base: z.string().min(1).max(255) }).strict();
+const consumeBody = z.object({ attemptId: ATTEMPT, pullRequestNumber: PR, headSha: SHA, base: z.string().min(1).max(255),
+  // A Decision Maker approved pull request's diff digest, read by the lane right before (lib/pullDiffDigestCore.ts).
+  diffDigest: z.string().regex(/^[0-9a-f]{64}$/).optional() }).strict();
 const reportBody = z
   .object({
     attemptId: ATTEMPT,
