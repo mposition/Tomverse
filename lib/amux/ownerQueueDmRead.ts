@@ -1,6 +1,9 @@
 import "server-only";
 
+import { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/prisma";
+import { DM_CLOSING_EVENT_KINDS } from "@/lib/amux/decisionMakerRequestCore";
 import { dmInternalRoutesEnabled } from "@/lib/amux/decisionMakerInternalRoute";
 import { readDecisionMakerSwitches } from "@/lib/amux/decisionMakerSwitchStore";
 import { engineeringAgentT2DmReviewEnabled } from "@/lib/engineeringAgentT2DmReviewCore";
@@ -88,12 +91,14 @@ export async function readAmuxOwnerQueueDm(items: ReadonlyArray<{ taskId: string
     .flatMap((row) => row.localCardId ? [row.localCardId] : []);
   const requests = new Map<string, AmuxOwnerQueueDmRequestFact>();
   if (cardIds.length > 0) {
-    // A proposal the owner can still confirm: a proposal result and no
-    // judgment. Any other result, or a judged one, is `closed`.
+    // A proposal the owner can still confirm: routed to a DM, a proposal
+    // result, and no closing event (a judgment, a stale or direct-answer
+    // close, a discarded assignment). Any other ending is `closed`.
     const rows = await prisma.$queryRaw<Array<{ id: string; cardId: string; resultKind: string | null;
       judged: boolean }>>`
       SELECT DISTINCT ON (q."cardId") q."id", q."cardId", d."resultKind",
-        EXISTS (SELECT 1 FROM "AmuxDecisionMakerJudgment" j WHERE j."requestId" = q."id") AS "judged"
+        (q."route" <> 'dm_proposal' OR EXISTS (SELECT 1 FROM "AmuxDecisionMakerRequestEvent" e
+          WHERE e."requestId" = q."id" AND e."kind" IN (${Prisma.join([...DM_CLOSING_EVENT_KINDS])}))) AS "judged"
       FROM "AmuxDecisionMakerRequest" q
       LEFT JOIN "AmuxDecisionMakerResultDetail" d ON d."requestId" = q."id"
       WHERE q."cardId" = ANY(${cardIds}::text[])

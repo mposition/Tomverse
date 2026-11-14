@@ -214,7 +214,8 @@ export const AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION = "amux.dm_owner_settlement.re
 /** The owner sent a card whose evidence could not be read once back to the relay. */
 export const AMUX_OWNER_QUEUE_DM_RESENT_ACTION = "amux.owner_queue.dm_resent";
 
-/** Where a DM request ended, from its result kind and whether a person judged it. */
+/** Where a DM request ended, from its result kind and whether it was closed
+ * (`judged`: kept with the operator, or a closing event of the ledger). */
 export const amuxOwnerQueueDmRequestResult = (row: { resultKind: string | null; judged: boolean }):
   AmuxOwnerQueueDmRequestFact["result"] => row.judged ? "closed" :
   row.resultKind === null ? null : row.resultKind === "proposal" ? "proposal" : "closed";

@@ -195,10 +195,10 @@ test("a relay read that failed is unknown: it neither hides the button nor claim
   assert.match(read, /readAmuxDmRelaySeenAt\(\)\.then\(\(at\) => amuxDmRelayView\(at, now\), \(\) => null\)/);
 });
 
-test("the DM approver never applies a settlement the owner asked for from the owner queue", () => {
+test("the DM approver never applies a settlement or result review the owner sent from the owner queue", () => {
   const auto = readFileSync("lib/amux/dmAutoApplyService.ts", "utf8");
   const body = auto.slice(auto.indexOf("export async function readAmuxDmAutoApplyCandidate"));
-  assert.ok(body.indexOf("readAmuxDmOwnerSettlementRequestedAmong(tx, settlementIds)") <
+  assert.ok(body.indexOf("readAmuxOwnerQueueDmAskedAmong(tx, {") <
     body.indexOf("readNextDecisionMakerOpenProposal(tx"), "filtered before a proposal is picked");
   assert.match(body, /const cards = sampled\.filter\(\(card\) => !ownerAsked\.has\(card\.id\)\);/);
   assert.match(readFileSync("lib/amux/dbBoundary.ts", "utf8"),

@@ -3,7 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX } from "@/lib/engineeringAgentCore";
-import { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION } from "./ownerQueueDmCore.ts";
+import { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION, AMUX_OWNER_QUEUE_DM_RESENT_ACTION } from "./ownerQueueDmCore.ts";
 
 /**
  * The reads of the owner queue settlement (lib/amux/dmOwnerSettlementService.ts)
@@ -148,5 +148,22 @@ export async function readAmuxDmOwnerSettlementRequestedAmong(tx: Prisma.Transac
     SELECT DISTINCT l."targetId" AS "id" FROM "AdminAuditLog" l
     WHERE l."action" = ${AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION}
       AND l."targetType" = 'AmuxDmOwnerSettlement' AND l."targetId" = ANY(${settlementIds}::text[])`;
+  return new Set(rows.map((row) => row.id));
+}
+
+/**
+ * Which of these settlements and result reviews the owner sent to the DM from
+ * the owner queue -- asked for, or sent again. The DM approver never applies
+ * their answers: they stay proposals the owner confirms. One statement.
+ */
+export async function readAmuxOwnerQueueDmAskedAmong(tx: Prisma.TransactionClient,
+  input: { settlementIds: string[]; reviewIds: string[] }): Promise<Set<string>> {
+  if (input.settlementIds.length === 0 && input.reviewIds.length === 0) return new Set();
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT DISTINCT l."targetId" AS "id" FROM "AdminAuditLog" l
+    WHERE (l."action" = ${AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION} AND l."targetType" = 'AmuxDmOwnerSettlement'
+        AND l."targetId" = ANY(${input.settlementIds}::text[]))
+      OR (l."action" = ${AMUX_OWNER_QUEUE_DM_RESENT_ACTION} AND l."targetType" = 'AmuxV22ResultReview'
+        AND l."targetId" = ANY(${input.reviewIds}::text[]))`;
   return new Set(rows.map((row) => row.id));
 }
