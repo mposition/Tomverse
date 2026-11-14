@@ -43,7 +43,8 @@ export function createDemoTransport(): ChatTransport {
     listReview: async () => read().filter(item => item.surface === "workspace" || (item.surface === "continuation" && item.productKey === "review")),
     createReview: async (models, assistantProfileId) => { const item: Conversation = { id: crypto.randomUUID(), title: "New Review", assistantProfileId, selectedModels: models, selectionMode: "manual", webSearchMode: "always", surface: "workspace", messages: [] }; write([item, ...read()]); return item; },
     configureReview: async (id, models) => { const items = read(); const item = items.find(value => value.id === id)!; item.selectedModels = models; write(items); return item; },
-    routeReview: async input => ({ kind: "text", preset: "standard", choices: input.providers.map(provider => ({ provider, modelId: catalog.find(model => model.provider === provider)?.id ?? null })) }),
+    // Counted so the synthetic UI suite can prove a route was or was not asked for.
+    routeReview: async input => (localStorage.setItem("tomverse-native-synthetic-demo:review-routes", String(Number(localStorage.getItem("tomverse-native-synthetic-demo:review-routes") ?? "0") + 1)), { kind: "text", preset: "standard", choices: input.providers.map(provider => ({ provider, modelId: catalog.find(model => model.provider === provider)?.id ?? null })) }),
     sendReview: async (conversation, text, files, signal, progress) => {
       const item = read().find(value => value.id === conversation.id)!;
       item.title = text.slice(0,48); item.messages.push({ id: crypto.randomUUID(), role: "user", content: text }); write(read().map(value => value.id === item.id ? item : value));
