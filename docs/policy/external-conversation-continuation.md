@@ -227,10 +227,12 @@ Chat에서는 다음 일반 텍스트 질문에 한해 원문 메시지에서 �
 
 ### 4.5 요청 단위 Auto 맥락과 전달 결과 (로컬 구현)
 
-`CHAT_CONTINUATION_AUTO_SOURCE_ENABLED`는 **기본 꺼짐**이다. 활성화하려면 기존 Router
-공급사에 동일한 제한 원문 발췌를 전송하는 범위와 decision sample·optimizer 재전송 제외를
-운영자가 승인해야 한다. 로컬 구현·mock 검증은 이 외부 입력 경계나 배포를 활성화하지 않는다.
-새 공급사·호출·지출 상한·사용자 크레딧 규칙은 추가하지 않는다.
+`CHAT_CONTINUATION_AUTO_SOURCE_ENABLED`는 **기본 켜짐**이다(운영자 명시 승인, 2026-11-14).
+승인 범위는 기존 Router 공급사에 동일한 제한 원문을 별도 user 데이터로 전송하고,
+decision sample·optimizer 재전송에서 제외하는 경로다. 명시적 `false` 또는 유효하지 않은
+설정은 이 Router 입력만 끈다. 기존 continuation 기능 flag·소유권·현재 잠금 판정은 그대로이며,
+수동 모델의 원문 전달에는 이 Auto 스위치를 적용하지 않는다. 새 공급사·호출·지출 상한·사용자
+크레딧 규칙은 추가하지 않는다. 이 소스 기본값 변경은 merge·deploy·운영 설정 변경 승인이 아니다.
 
 활성화된 일반 이어가기 Chat에서는 기존 Router request builder가 별도 user payload의
 `importedSource`에 원문을 넣은 뒤 UTF-8 byte 기반 worst-case hold를 계산한다.

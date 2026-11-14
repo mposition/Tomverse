@@ -4456,10 +4456,10 @@ for (const outcome of ["locked", "source_deleted", "flag_off"] as const) {
   });
 }
 
-test("continuation Auto and final provider share the exact transient source with an actual-dispatch receipt", async t => {
+test("default-on continuation Auto and final provider share the exact transient source with an actual-dispatch receipt", async t => {
   const previous = process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED;
   const priorEnv = process.env.APP_ENV; process.env.APP_ENV = "dev";
-  process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED = "true";
+  delete process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED;
   continuationBridge = { id: "external-continuation" };
   continuationScenario = { reads: 0, revokeAt: Infinity, outcome: "locked" };
   llmRouterInputs.length = 0;
@@ -4493,4 +4493,22 @@ for (const stage of ["before_dispatch", "entered_boundary"] as const) test(`cont
   assert.equal(receipt.status, stage === "before_dispatch" ? "not_sent" : "unknown");
   if (stage === "before_dispatch") assert.equal(receipt.uniqueMessageCount, 0);
   assert.equal(attempts.length, 0);
+});
+
+test("explicit Auto source opt-out retains the ordinary answer source but omits Router importedSource", async t => {
+  const previous = process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED;
+  const priorEnv = process.env.APP_ENV;
+  process.env.APP_ENV = "dev"; process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED = "false";
+  continuationBridge = { id: "external-continuation" };
+  continuationScenario = { reads: 0, revokeAt: Infinity, outcome: "locked" };
+  llmRouterInputs.length = 0;
+  t.after(() => { process.env.APP_ENV = priorEnv; continuationBridge = null; continuationScenario = null;
+    if (previous === undefined) delete process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED;
+    else process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED = previous; });
+  const { body, streamError } = await ask("answers", "claimed", 200, false, undefined, true, false);
+  assert.equal(streamError, null);
+  assert.equal(llmRouterInputs.length, 1);
+  assert.equal(llmRouterInputs[0].importedSource, undefined);
+  assert.ok(attempts[0].messages.some(message => JSON.stringify(message.content).includes("AUD70")));
+  assert.ok(body.includes(ANSWER));
 });

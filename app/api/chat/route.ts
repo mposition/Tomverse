@@ -172,6 +172,7 @@ import {
 } from "@/lib/chatTurnSystemBlocks";
 import { continuationReceipt, deliveryReceipt, CONTINUATION_RECEIPT_HEADER, type ContinuationReceipt } from "@/lib/continuationReceipt";
 import { PASSAGE_HEADER } from "@/lib/continuationPassages";
+import { continuationAutoSourceEnabledFromValue } from "@/lib/externalContinuationAccess";
 import { loadContinuationTurnSeed, type ContinuationTurnSeedResult } from "@/lib/externalContinuationService";
 import { officeRenderingEnabled } from "@/lib/officeRenderer";
 import { recordContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
@@ -2492,8 +2493,9 @@ async function handleChatPost(
                 selected: req.headers.has(PASSAGE_HEADER), outcome: deepResearchDepth || requestedModelConfig.usageClass === "deep-research"
                     ? "unsupported" : preparedContinuation.outcome, plan: preparedContinuation.seed?.plan });
         }
-        // A new external input boundary is implemented but requires explicit activation.
-        const importedSource = process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED === "true" && !fusion
+        // Owner-approved default-on source input; explicit false remains the kill switch.
+        const importedSource = deterministicAutoSelection.routed &&
+            continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED) && !fusion
             ? preparedContinuation.seed?.prompt.transcriptText ?? undefined : undefined;
         const presearchFlagEnabled = process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true";
         const allowRouterSearchPlan = !hasContinuation && routerSearchPlanCandidate && presearchFlagEnabled;
@@ -2509,7 +2511,7 @@ async function handleChatPost(
                       ...(importedSource ? { verifyImportedSource: async () => {
                           const checked = await readContinuation();
                           return checked.seed?.prompt.transcriptText === importedSource &&
-                              process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED === "true";
+                              continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED);
                       } } : {}),
                       prompt: profileTextFor(autoRoutingMessages),
                       previousAnswer: previousAnswerExcerpt(autoRoutingMessages),
@@ -2554,7 +2556,7 @@ async function handleChatPost(
         // A request that started without an authorised plan cannot acquire a new
         // source after the Router has already decided from the native view.
         let afterRoutingContinuation = preparedContinuation.seed ? await readContinuation() : preparedContinuation;
-        if (importedSource && process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED !== "true")
+        if (importedSource && !continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED))
             afterRoutingContinuation = { seed: null, outcome: "flag_off" };
         const continuationRevoked = Boolean(importedSource && (!afterRoutingContinuation.seed ||
             afterRoutingContinuation.seed.prompt.transcriptText !== importedSource));
@@ -5414,7 +5416,7 @@ async function handleChatPost(
         }
         if (continuationSeed && !replanned) {
             let checked = await readContinuation();
-            if (importedSource && process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED !== "true")
+            if (importedSource && !continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED))
                 checked = { seed: null, outcome: "flag_off" };
             if (!checked.seed || checked.seed.prompt.transcriptText !== continuationSeed.transcriptText) {
                 // No answer provider has run. Close this unused plan and rerun the ordinary

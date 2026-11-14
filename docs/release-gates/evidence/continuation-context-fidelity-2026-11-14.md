@@ -101,3 +101,18 @@ A completion-time fetch observed `origin/main` at `0155ee7099ce389315403c7709cfa
 The relevant continuation/Router/Chat transport files had no upstream changes. An object-only
 `git merge-tree` simulation was conflict-free. This local branch retains the documented
 implementation base; no upstream branch or another session's worktree was changed.
+
+
+## Owner-approved default-on follow-up
+
+The owner explicitly requested the new Auto source input to default on before PR creation
+on 2026-11-14. Missing `CHAT_CONTINUATION_AUTO_SOURCE_ENABLED` now enables that input;
+explicit `false` and invalid values opt out. The independent continuation flag and current
+source ownership/deletion/unlock gates remain mandatory. The switch applies to Auto only;
+manual answering source remains independent. No model, call count or spending ceiling is
+added. Source-aware rewrite/presearch/sampling restrictions and final-access fallback stay.
+Default semantics: 41 focused core cases and 144 mocked server contract cases passed.
+This source change does not itself merge, deploy or change an operational setting.
+The requested next development scope is full-history automatic source retrieval and native
+selection/receipt parity; summary/capsule, Research, Memory storage and durable pin are not
+included in that clarified scope.

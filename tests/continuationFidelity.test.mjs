@@ -9,6 +9,15 @@ import { CONTINUATION_FIDELITY_CASES, FIDELITY_ARMS } from "../lib/continuationF
 import { continuationFidelityProbe, assessContinuationFidelity } from "../lib/continuationFidelityProbe.ts";
 import { toChatRequestMessage, toGuestPersistableMessage } from "../lib/chatMessageSerialization.ts";
 
+import { continuationAutoSourceEnabledFromValue } from "../lib/externalContinuationAccess.ts";
+
+test("continuation Auto source defaults on and explicit or invalid opt-outs fail closed", () => {
+    assert.equal(continuationAutoSourceEnabledFromValue(undefined), true);
+    assert.equal(continuationAutoSourceEnabledFromValue("true"), true);
+    for (const value of ["false", "off", "0", "", "TRUE", "invalid", null, true, false, 0])
+        assert.equal(continuationAutoSourceEnabledFromValue(value), false);
+});
+
 const row = (ordinal, content, role = "user") => ({ ordinal, content, role, truncated: false });
 const compose = (messages, selectedMessages, passages, tokenBudget) => planSelectedContinuationSeed({ messages, selectedMessages, passages, tokenBudget });
 
