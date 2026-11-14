@@ -235,7 +235,8 @@ export const engineeringRunEndAttachment = (input: {
       halt: combineRunHalt({
         reported: input.halt,
         circuitLatched: held.circuitLatched,
-        openStateMismatches: held.openStateMismatches,
+        // A card-scoped mismatch is not recorded on another run as a halt.
+        openStateMismatches: held.cardScoped ? 0 : held.openStateMismatches,
       }),
     });
     await input.markCommitted?.(tx);

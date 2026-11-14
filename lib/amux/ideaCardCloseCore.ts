@@ -88,6 +88,7 @@ export const AMUX_IDEA_CARD_CLOSE_BLOCK_REASON_TEXT: Readonly<Record<AmuxIdeaBlo
   human_review_required: "a person was asked to review it",
   execution_blocked: "its run was stopped",
   attempt_budget_exhausted: "it used up its allowed runs",
+  dependency_closed: "a card it depends on was archived unfinished",
   attempts: "its runs kept failing",
   execution_lease_expired: "its run stopped reporting",
   usage_outcome_unknown: "the run's result and cost are unknown",

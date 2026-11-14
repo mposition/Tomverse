@@ -20,6 +20,7 @@ import { AMUX_V22_WORKER_CLAIM_ENV, amuxV22WorkerClaimEnabled } from
   "@/lib/amux/v22WorkerClaimCore";
 import { tickV22WorkerClaim } from "@/lib/amux/v22WorkerClaimService";
 import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import { sweepAmuxStalledCards } from "@/lib/amux/stalledCardSweep";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
   admitAmuxOrchestratorRequest,
@@ -95,6 +96,16 @@ export async function POST(request: Request) {
         !legacyEnabled) {
       return Response.json({ promoted: false, reason: "apply_disabled", expired: 0 },
         { status: 409, headers: noStore });
+    }
+
+    // Stopped cards first, so the queue and the Decision Maker see them
+    // (AMUXFLOW/B2, its own switch). Never a reason this tick fails.
+    if (identity.kind === "admitted") {
+      try { await sweepAmuxStalledCards(); }
+      catch (error) {
+        console.error("amux stalled card sweep failed",
+          { error: error instanceof Error ? error.name : "unknown" });
+      }
     }
 
     try {
