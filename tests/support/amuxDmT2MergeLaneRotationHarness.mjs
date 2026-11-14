@@ -47,8 +47,9 @@ mock.module(mod("lib/amux/dbBoundary.ts"), {
 });
 mock.module(mod("lib/amux/decisionMakerSwitchStore.ts"), {
   namedExports: {
-    readDecisionMakerSwitches: async () => { statements.push("switches"); return { killSwitch: false }; },
-    readDecisionMakerSwitchesOrThrow: async () => ({ killSwitch: false }),
+    // The one judgment reads the switches with the reader that throws (readAmuxDmT2MergeHolding).
+    readDecisionMakerSwitches: async () => { throw new Error("the forgiving reader is not the judgment's"); },
+    readDecisionMakerSwitchesOrThrow: async () => { statements.push("switches"); return { killSwitch: false }; },
   },
 });
 mock.module(mod("lib/amux/dmT2MergeRead.ts"), {
@@ -62,6 +63,7 @@ mock.module(mod("lib/amux/dmT2MergeRead.ts"), {
         .map((row) => ({ ...row }));
     },
     readAmuxDmT2MergeObservedFacts: async () => null,
+    readAmuxDmT2MergeIsEngineeringPull: async () => true,
   },
 });
 mock.module(mod("lib/adminAudit.ts"), {

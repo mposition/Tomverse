@@ -271,6 +271,11 @@ test("a lane round merges a reported engineering pull request and leaves an unre
   const merged = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] },
     { issue: { issued: true, attemptId: "att-1" }, consume: { consumed: true } });
   assert.deepEqual(merged.merges, [[42, HEAD]]);
+  // The app refuses the consume (its Decision Maker approval no longer holds): never merged without it.
+  const refused = await run({ dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] },
+    { issue: { issued: true, attemptId: "att-1" }, consume: { consumed: false, reason: "dm_approval_not_holding" } });
+  assert.deepEqual(refused.issued, [{ pullRequestNumber: 42, headSha: HEAD }]);
+  assert.deepEqual(refused.merges, [], "no merge call without the app's consume");
 });
 
 test("a Decision Maker ready is a person's: while an earlier one's CI has not shown, the next waits, for ten minutes at most", () => {

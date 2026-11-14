@@ -90,7 +90,9 @@ export type QaReleaseConsumeRefusal =
   | "revision_moved"
   | "develop_lane_off"
   | "lane_state_unknown"
-  | "latched";
+  | "latched"
+  /** An engineering agent pull request whose Decision Maker approval no longer holds (lib/amux/dmT2MergeService.ts). */
+  | "dm_approval_not_holding";
 
 /**
  * Whether a consume may succeed. A revision recorded after the instruction

@@ -208,7 +208,7 @@ test("a write whose answer is unknown is not retried; a moved head, a changed fi
     await recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: "kill_switch", value: "on" });
     const killed = github(card);
     assert.deepEqual(await runAmuxDmT2MergeReadyStep({ drafts: draftsOf(card), room: true, running: runningOf(card), ports: killed.ports, env: ON }),
-      { outcome: "held", settlementId: card.settlementId, prNumber: card.prNumber });
+      { outcome: "none" }, "the one judgment reads the kill switch at the pick: nothing is picked");
     assert.deepEqual(killed.writes, []);
     assert.equal((await readyAudits(tx, card.settlementId)).length, 1);
   });
@@ -372,5 +372,93 @@ test("the merge lane's list and the observer's read follow the approval while it
     // A Task that moved is not the lane's any more.
     await tx.amuxWorkItem.update({ where: { id: card.taskId }, data: { status: "blocked", revision: { increment: 1 } } });
     assert.deepEqual(await mine(), []);
+  });
+});
+
+test("the lane's consume lets an engineering pull request merge only while its Decision Maker approval holds, read again then", async () => {
+  // Review r-20261114-020758-a98fec: the lane's list was read a while before
+  // the merge; the consume right before it judges the approval again in its
+  // own transaction, and refuses when anything changed since.
+  const { consumeQaReleaseMergeInstruction } = await import("@/lib/qaReleaseMergeLaneStore");
+  const { amuxDmT2MergeConsumeAllowed, recordDecisionMakerSwitchByOperator } = await services();
+  const OTHER_HEAD = "a".repeat(40);
+
+  /** The lane's issued instruction for this pull request, placed as issue leaves it. */
+  const issued = async (tx: LifecycleTx, card: Card, headSha = HEAD) => {
+    const [{ next }] = await tx.$queryRaw<Array<{ next: number }>>`
+      SELECT (coalesce(max("revision"), 0) + 1)::int AS "next" FROM "QaReleaseOperatorControl"`;
+    const attemptId = randomUUID();
+    await withoutTriggers(tx, async () => {
+      await tx.$executeRaw`INSERT INTO "QaReleaseOperatorControl"
+        ("revision", "digestEnabled", "mergeLaneEnabled", "developLaneOn", "auditLogId")
+        VALUES (${next}, false, true, true, ${randomUUID()})`;
+      await tx.$executeRaw`INSERT INTO "QaReleaseMergeAttempt"
+        ("id", "pullRequestNumber", "headSha", "base", "controlRevision", "state", "lastAuditLogId", "issuedAt", "expiresAt")
+        VALUES (${attemptId}, ${card.prNumber}, ${headSha}, 'develop', ${next}, 'issued', ${randomUUID()},
+          now(), now() + interval '5 minutes')`;
+    });
+    return { attemptId, revision: next };
+  };
+  const consume = (card: Card, attempt: { attemptId: string; revision: number }, env: Record<string, string | undefined>,
+    headSha = HEAD) => consumeQaReleaseMergeInstruction({ callerRevision: attempt.revision, env,
+    request: { attemptId: attempt.attemptId, pullRequestNumber: card.prNumber, headSha, base: "develop" },
+    budget: { startedAt: Date.now(), budgetMs: 50_000, clock: Date.now } });
+  const stateOf = async (tx: LifecycleTx, attemptId: string) => (await tx.$queryRaw<Array<{ state: string }>>`
+    SELECT "state" FROM "QaReleaseMergeAttempt" WHERE "id" = ${attemptId}`)[0]!.state;
+  const REFUSED = { consumed: false, reason: "dm_approval_not_holding" };
+
+  await lifecycle(async (tx) => {
+    const card = await reviewDraft(tx, ORDINARY);
+    assert.deepEqual(await approve(card, ON), { applied: true, outcome: "approved" });
+    // Not an engineering pull request: the lane's own rules decide it.
+    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: 7, headSha: HEAD, base: "develop", env: ON }), null);
+    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: card.prNumber, headSha: HEAD, base: "develop", env: ON }), true);
+    const attempt = await issued(tx, card);
+
+    // The develop merge switch off since the list was read.
+    assert.deepEqual(await consume(card, attempt, {}), REFUSED);
+    // The kill switch on since.
+    await recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: "kill_switch", value: "on" });
+    assert.deepEqual(await consume(card, attempt, ON), REFUSED);
+    await recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: "kill_switch", value: "off" });
+    assert.equal(await stateOf(tx, attempt.attemptId), "issued", "a refusal writes nothing");
+  });
+  // A new head since: the instruction and the merge are for a head the Decision Maker never approved.
+  await lifecycle(async (tx) => {
+    const card = await reviewDraft(tx, ORDINARY);
+    assert.deepEqual(await approve(card, ON), { applied: true, outcome: "approved" });
+    const attempt = await issued(tx, card, OTHER_HEAD);
+    assert.deepEqual(await consume(card, attempt, ON, OTHER_HEAD), REFUSED);
+    assert.equal(await stateOf(tx, attempt.attemptId), "issued");
+  });
+  // The Task moved since.
+  await lifecycle(async (tx) => {
+    const card = await reviewDraft(tx, ORDINARY);
+    assert.deepEqual(await approve(card, ON), { applied: true, outcome: "approved" });
+    const attempt = await issued(tx, card);
+    await tx.amuxWorkItem.update({ where: { id: card.taskId }, data: { status: "blocked", revision: { increment: 1 } } });
+    assert.deepEqual(await consume(card, attempt, ON), REFUSED);
+  });
+  // The binding was superseded since.
+  await lifecycle(async (tx) => {
+    const card = await reviewDraft(tx, ORDINARY);
+    assert.deepEqual(await approve(card, ON), { applied: true, outcome: "approved" });
+    const attempt = await issued(tx, card);
+    await withoutTriggers(tx, () => tx.$executeRaw`
+      UPDATE "EngineeringAgentBinding" SET "supersededAt" = now(), "currentPrNumber" = NULL
+      WHERE "id" = ${card.bindingId}`);
+    assert.deepEqual(await consume(card, attempt, ON), REFUSED);
+  });
+  // Still as approved: the judgment lets it through. (The consume's own write
+  // needs its audit under the top transaction's id, which no savepoint of this
+  // harness has; tests/integration/qa-release-merge-lane-store.db.test.ts runs
+  // that write against a committing database.)
+  await lifecycle(async (tx) => {
+    const card = await reviewDraft(tx, ORDINARY);
+    assert.deepEqual(await approve(card, ON), { applied: true, outcome: "approved" });
+    await issued(tx, card);
+    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: card.prNumber, headSha: HEAD, base: "develop", env: ON }), true);
+    assert.equal(await amuxDmT2MergeConsumeAllowed(tx, { prNumber: card.prNumber, headSha: HEAD, base: "main", env: ON }), false,
+      "never into main");
   });
 });

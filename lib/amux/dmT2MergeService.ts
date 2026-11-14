@@ -5,13 +5,15 @@ import type { Prisma } from "@prisma/client";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
-import { readDecisionMakerSwitches, readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
+import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import {
   AMUX_DM_T2_MERGE_HEAD, AMUX_DM_T2_MERGE_READY_SETTLE_MS, amuxDmT2MergeChangeVerdict, amuxDmT2MergeEnabled,
   amuxDmT2MergeReadyInFlight, amuxDmT2MergeReadyVerdict,
   type AmuxDmT2MergeChangeNow,
 } from "@/lib/amux/dmT2MergeCore";
-import { readAmuxDmT2MergeApprovals, readAmuxDmT2MergeObservedFacts } from "@/lib/amux/dmT2MergeRead";
+import {
+  readAmuxDmT2MergeApprovals, readAmuxDmT2MergeIsEngineeringPull, readAmuxDmT2MergeObservedFacts,
+} from "@/lib/amux/dmT2MergeRead";
 import type { CiAdmissionPull } from "@/lib/ciAdmissionCore";
 import type { CiAdmissionGithub } from "@/lib/ciAdmissionGithub";
 import { readEngineeringAgentPullChange } from "@/lib/engineeringAgentGitHubRead";
@@ -54,6 +56,46 @@ async function recordAmuxDmT2MergeVisit(tx: Prisma.TransactionClient, settlement
 }
 
 /**
+ * The one judgment of a Decision Maker approval at every use of it -- the
+ * ready step's pick and its audit, the merge lane's list, and the lane's
+ * consume right before the merge (review r-20261114-020758-a98fec): the
+ * develop merge switch on, the Decision Maker's kill switch read and off, and
+ * the approvals that still hold in the database (readAmuxDmT2MergeApprovals:
+ * the settlement applied and approve, the binding open, current and at the
+ * approved head and digest, the Task in review, not archived, its newest run
+ * the settled one). Anything unread or off holds nothing. A kill switch that
+ * cannot be read has aborted the caller's transaction: nothing after it runs.
+ */
+export async function readAmuxDmT2MergeHolding(tx: Prisma.TransactionClient, input: {
+  env: Env; limit: number; settlementId?: string | null; prNumbers?: readonly number[] | null;
+}) {
+  if (!amuxDmT2MergeEnabled(input.env)) return [];
+  let killSwitch: boolean | null;
+  try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
+  catch { return []; }
+  if (killSwitch !== false) return [];
+  return readAmuxDmT2MergeApprovals(tx, { limit: input.limit, settlementId: input.settlementId,
+    prNumbers: input.prNumbers });
+}
+
+/**
+ * The merge lane's consume of an instruction, in its own transaction, right
+ * before the merge: an engineering agent pull request is let through only
+ * while its Decision Maker approval still holds (readAmuxDmT2MergeHolding) at
+ * exactly the head the lane will merge, into develop. Null for any other pull
+ * request: the lane's own rules decide it. At most three statements.
+ */
+export async function amuxDmT2MergeConsumeAllowed(tx: Prisma.TransactionClient, input: {
+  prNumber: number; headSha: string; base: string; env?: Env;
+}): Promise<boolean | null> {
+  if (!(await readAmuxDmT2MergeIsEngineeringPull(tx, input.prNumber))) return null;
+  if (input.base !== "develop") return false;
+  const [held] = await readAmuxDmT2MergeHolding(tx, { env: input.env ?? process.env, limit: 1,
+    prNumbers: [input.prNumber] });
+  return held !== undefined && held.approvedHeadSha === input.headSha;
+}
+
+/**
  * The pull request the merge lane may take this round although its branch is
  * the engineering agent's: one approval per state read (review
  * r-20261113-140634-2ede9b; the lane merges at most one pull request a round
@@ -71,8 +113,7 @@ export async function readAmuxDmT2MergeLanePulls(env: Env = process.env, deps: {
 } = {}) {
   if (!amuxDmT2MergeEnabled(env)) return [];
   const row = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeLaneRead, async (tx) => {
-    if ((await readDecisionMakerSwitches(tx)).killSwitch !== false) return null;
-    const [next] = await readAmuxDmT2MergeApprovals(tx, { limit: 1 });
+    const [next] = await readAmuxDmT2MergeHolding(tx, { env, limit: 1 });
     if (next) await recordAmuxDmT2MergeVisit(tx, next.settlementId);
     return next ?? null;
   });
@@ -147,7 +188,8 @@ export async function runAmuxDmT2MergeReadyStep(input: {
   env?: Env;
   nowMs?: number;
 }): Promise<AmuxDmT2MergeReadyOutcome> {
-  if (!amuxDmT2MergeEnabled(input.env ?? process.env)) return { outcome: "off" };
+  const env = input.env ?? process.env;
+  if (!amuxDmT2MergeEnabled(env)) return { outcome: "off" };
   const drafts = input.drafts.filter((pull) => pull.draft && !pull.fork && pull.base === "develop" &&
     AMUX_DM_T2_MERGE_HEAD.test(pull.head));
   if (drafts.length === 0) return { outcome: "none" };
@@ -165,7 +207,7 @@ export async function runAmuxDmT2MergeReadyStep(input: {
         ? [{ prNumber: metadata.prNumber, headSha: metadata.headSha, atMs: entry.createdAt.getTime() }] : [];
     });
     if (amuxDmT2MergeReadyInFlight({ readies, running: input.running, nowMs })) return { inFlight: true as const };
-    const [next] = await readAmuxDmT2MergeApprovals(tx, { limit: 1, prNumbers: drafts.map((pull) => pull.number) });
+    const [next] = await readAmuxDmT2MergeHolding(tx, { env, limit: 1, prNumbers: drafts.map((pull) => pull.number) });
     if (!next) return null;
     await recordAmuxDmT2MergeVisit(tx, next.settlementId);
     return { row: next };
@@ -195,11 +237,7 @@ export async function runAmuxDmT2MergeReadyStep(input: {
 
   const recorded = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeReadyRecord, async (tx) => {
     await takeAuditChainLock(tx);
-    let killSwitch: boolean | null;
-    try { killSwitch = (await readDecisionMakerSwitchesOrThrow(tx)).killSwitch; }
-    catch { killSwitch = null; }
-    if (killSwitch !== false) return false;
-    const [still] = await readAmuxDmT2MergeApprovals(tx, { limit: 1, settlementId: row.settlementId });
+    const [still] = await readAmuxDmT2MergeHolding(tx, { env, limit: 1, settlementId: row.settlementId });
     if (!still || still.prNumber !== row.prNumber || still.approvedHeadSha !== row.approvedHeadSha ||
         still.approvedDiffDigest !== row.approvedDiffDigest || still.headRef !== row.headRef) return false;
     await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR, action: AMUX_DM_T2_MERGE_READY_ACTION,

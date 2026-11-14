@@ -27,7 +27,7 @@ import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/li
  * transaction's last statement checks it on the database clock.
  */
 
-/** One call's budget: above the longest transaction's Prisma limit (40 s), below the service's call timeout. */
+/** One call's budget: above the longest transaction's Prisma limit (46 s, consume), below the service's call timeout. */
 export const QA_RELEASE_MERGE_LANE_CALL_BUDGET_MS = 50_000;
 
 export type QaReleaseMergeLaneAnswer = { status: number; body: Record<string, unknown> };
@@ -135,6 +135,7 @@ export async function handleQaReleaseMergeConsume(request: Request, env: Env = p
       callerRevision: auth.callerRevision,
       request: parsed.data,
       budget: { startedAt, budgetMs: QA_RELEASE_MERGE_LANE_CALL_BUDGET_MS, clock },
+      env,
     });
     return result.consumed ? answer(200, { consumed: true }) : answer(409, { consumed: false, reason: result.reason });
   });

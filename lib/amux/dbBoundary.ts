@@ -667,10 +667,10 @@ export const AMUX_DB_BOUNDARIES = {
     isolation: "read",
   },
   // The next one to mark ready: setup + the recent readies' audits + the
-  // approvals + its visit + fence.
+  // switches + the approvals + its visit + fence.
   dmT2MergeReadyPick: {
     operation: "dm_t2_merge_ready_pick",
-    prismaCallCeiling: 5,
+    prismaCallCeiling: 6,
     isolation: "mutation",
   },
   // Its audit before the write: setup + audit chain lock + switches + the

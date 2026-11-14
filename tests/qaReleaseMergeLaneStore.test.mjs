@@ -38,11 +38,11 @@ test("issue locks after the limits, judges before writing, audits before the ins
   assert.ok(fn.includes("new Date(Number(read.dbNowMs) + input.budget.budgetMs - (input.budget.clock() - input.budget.startedAt))"));
 });
 
-test("instruction consume uses the policy's nine statements and audits before its conditional update, deadline last", () => {
+test("instruction consume uses the policy's twelve statements, re-judges a Decision Maker approval and audits before its conditional update, deadline last", () => {
   const block = SOURCE.slice(SOURCE.indexOf("QA_RELEASE_CONSUME_LIMITS = Object.freeze({"));
-  assert.match(block, /statements: 9,/);
-  assert.match(block, /transactionMs: \(3 \* 9 \+ 5\) \* 1_000,/);
-  assert.match(block, /prismaMs: \(3 \* 9 \+ 5\) \* 1_000 \+ 5_000,/);
+  assert.match(block, /statements: 12,/);
+  assert.match(block, /transactionMs: \(3 \* 12 \+ 5\) \* 1_000,/);
+  assert.match(block, /prismaMs: \(3 \* 12 \+ 5\) \* 1_000 \+ 5_000,/);
   const fn = SOURCE.slice(SOURCE.indexOf("export async function consumeQaReleaseMergeInstruction"));
   const order = [
     "set_config('statement_timeout'",
@@ -50,6 +50,8 @@ test("instruction consume uses the policy's nine statements and audits before it
     "FOR UPDATE",
     "judgeQaReleaseInstructionConsume(",
     "if (!judgement.consume) return",
+    "await amuxDmT2MergeConsumeAllowed(tx,",
+    "if (dm === false) return",
     "await writeSystemAuditLog({",
     `SET "state" = 'consumed'`,
     "SELECT clock_timestamp() >= ",

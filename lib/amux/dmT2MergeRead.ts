@@ -100,3 +100,15 @@ export async function readAmuxDmT2MergeObservedFacts(db: Reader, input: {
     LIMIT 1`;
   return rows[0] ?? null;
 }
+
+/**
+ * Whether a pull request number is the engineering agent's (any binding of
+ * it, current or not): the merge lane's consume then lets it merge only on a
+ * Decision Maker approval that still holds (lib/amux/dmT2MergeService.ts).
+ */
+export async function readAmuxDmT2MergeIsEngineeringPull(db: Reader, prNumber: number) {
+  const rows = await db.$queryRaw<Array<{ engineering: boolean }>>`
+    SELECT EXISTS (SELECT 1 FROM "EngineeringAgentBinding" b
+      WHERE b."prNumber" = ${prNumber} OR b."currentPrNumber" = ${prNumber}) AS "engineering"`;
+  return rows[0]?.engineering === true;
+}
