@@ -355,6 +355,7 @@ export function v4TaskCeilingDecision(
 export function checkV4TaskApprovedCeiling(
   approved: unknown,
   current: V4TaskCostCeilingResult,
+  options: { newModelRouteWithinCeiling?: boolean } = {},
 ): { decision: "allow" | "reconfirm" | "hold"; reason: string } {
   if (!approvedReceiptValid(approved)) {
     return { decision: "hold", reason: "approval_invalid" };
@@ -375,28 +376,50 @@ export function checkV4TaskApprovedCeiling(
   // gpt-6-luna -- sent every waiting Task back for reconfirmation. A route the
   // receipt named must still match it exactly, a new model still asks, and the
   // bounds and ceiling checks below still apply.
+  //
+  // With options.newModelRouteWithinCeiling (owner decision 2026-11-14,
+  // default off: v4TaskNewModelRouteSwitch.ts) a route on a model the receipt
+  // did not name passes too, but only while its own per-attempt cost times the
+  // current attempt bound stays within the approved ceiling and no token or
+  // attempt bound grew: the same expected-cost test the receipt's own ceiling
+  // applies to the routes it named. It admits a route; it does not bound
+  // cumulative spend (claim and start count attempts against their own
+  // attempt budget, not caps.maxAttempts). Until then every worker added on a new model
+  // (antigravity-impl, 2026-11-13) sent every waiting Task of its grade back
+  // for reconfirmation.
   const approvedModels = new Set(approved.routes.map((route) =>
     JSON.stringify([route.provider, route.modelId])));
-  if (current.receipt.routes.some((route) => {
-    const old = approvedRoutes.get(route.routeId);
-    if (!old) return !approvedModels.has(JSON.stringify([route.provider, route.modelId]));
-    return old.workerName !== route.workerName ||
-      old.provider !== route.provider || old.modelId !== route.modelId ||
-      old.routePolicyDigest !== route.routePolicyDigest;
-  })) {
-    return { decision: "reconfirm", reason: "task_route_changed" };
-  }
-  if (
+  const boundsIncreased =
     current.receipt.caps.uncachedInputTokens > approved.caps.uncachedInputTokens ||
     current.receipt.caps.outputTokens > approved.caps.outputTokens ||
     current.receipt.caps.cacheReadTokens > approved.caps.cacheReadTokens ||
     current.receipt.caps.cacheWriteTokens > approved.caps.cacheWriteTokens ||
-    current.receipt.caps.maxAttempts > approved.caps.maxAttempts
-  ) {
+    current.receipt.caps.maxAttempts > approved.caps.maxAttempts;
+  let newModelRoute = false;
+  for (const route of current.receipt.routes) {
+    const old = approvedRoutes.get(route.routeId);
+    if (old) {
+      if (old.workerName !== route.workerName ||
+        old.provider !== route.provider || old.modelId !== route.modelId ||
+        old.routePolicyDigest !== route.routePolicyDigest) {
+        return { decision: "reconfirm", reason: "task_route_changed" };
+      }
+      continue;
+    }
+    if (approvedModels.has(JSON.stringify([route.provider, route.modelId]))) continue;
+    if (!options.newModelRouteWithinCeiling || boundsIncreased ||
+      BigInt(route.perAttemptMicroUsd) * BigInt(current.receipt.caps.maxAttempts) >
+        approvedAmount) {
+      return { decision: "reconfirm", reason: "task_route_changed" };
+    }
+    newModelRoute = true;
+  }
+  if (boundsIncreased) {
     return { decision: "reconfirm", reason: "task_bounds_increased" };
   }
   if (BigInt(current.receipt.ceilingMicroUsd) > approvedAmount) {
     return { decision: "reconfirm", reason: "ceiling_increased" };
   }
-  return { decision: "allow", reason: "within_approved_ceiling" };
+  return { decision: "allow",
+    reason: newModelRoute ? "new_model_route_within_ceiling" : "within_approved_ceiling" };
 }

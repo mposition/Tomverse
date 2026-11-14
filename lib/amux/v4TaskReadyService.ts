@@ -17,6 +17,7 @@ import type { AmuxIdeaUnitConfirmationSnapshot } from
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "./v4TaskCostCeilingCore.ts";
+import { AMUX_V4_NEW_MODEL_ROUTE_ENV, amuxV4NewModelRouteWithinCeiling } from "./v4TaskNewModelRouteSwitch.ts";
 import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
 import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
@@ -307,7 +308,8 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
           where: { taskId, afterRevision: card.revision, assignment: null },
           select: { id: true } });
         cost = v4TaskCeilingDecision(checkV4TaskApprovedCeiling(
-          approvedCost, { ok: true, receipt: current.receipt }),
+          approvedCost, { ok: true, receipt: current.receipt },
+          amuxV4NewModelRouteWithinCeiling(process.env[AMUX_V4_NEW_MODEL_ROUTE_ENV])),
           expectedStatus === "blocked" || !!recovery);
         // Worker availability is its own fact (policy v48): a cost that needs
         // reconfirmation must not also read as "no worker", or the FIRST Task
