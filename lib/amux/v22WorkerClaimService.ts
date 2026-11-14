@@ -20,7 +20,8 @@ import { TICK_TRANSACTION_LIMITS, withAutoTransaction } from
   "./autoPromotionService.ts";
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
-import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "./v4TaskCostCeilingCore.ts";
+import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision,
+  v4TaskReceiptForApprovedRoutes } from "./v4TaskCostCeilingCore.ts";
 import { AMUX_V4_NEW_MODEL_ROUTE_ENV, amuxV4NewModelRouteWithinCeiling } from "./v4TaskNewModelRouteSwitch.ts";
 import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
 import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
@@ -247,9 +248,13 @@ async function claimCandidate(taskId: string, assignmentId: string,
         amuxV22RecoveryAddedRouteConsented(approvedCost, approved.receipt, recovery.routeId);
       if (reconfirmOnly && !addedRouteConsented)
         throw new BoardImportError("task_not_ready", 409);
+      const routeOptions = amuxV4NewModelRouteWithinCeiling(process.env[AMUX_V4_NEW_MODEL_ROUTE_ENV]);
+      // Only routes this Task's approval can run on are judged and offered; a
+      // recovery binds its own added route (policy v48) and keeps them all.
+      const runnable = recovery ? approved.receipt :
+        v4TaskReceiptForApprovedRoutes(approvedCost, approved.receipt, routeOptions);
       if (v4TaskCeilingDecision(checkV4TaskApprovedCeiling(approvedCost,
-        { ok: true, receipt: approved.receipt },
-        amuxV4NewModelRouteWithinCeiling(process.env[AMUX_V4_NEW_MODEL_ROUTE_ENV])), !!recovery) !== "allow" && !addedRouteConsented) {
+        { ok: true, receipt: runnable }, routeOptions), !!recovery) !== "allow" && !addedRouteConsented) {
         throw new BoardImportError("cost_reconfirmation_required", 409);
       }
       const executionRole = amuxV22ExecutionRole(card.taskRole);
@@ -260,7 +265,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
         AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
         currentAmuxV22ReadOnlyApiExecutionFrame(
           recovery.apiExecutionFrame, { now }) : null;
-      const matchingRoutes = approved.receipt.routes.filter((route) => {
+      const matchingRoutes = runnable.routes.filter((route) => {
         const worker = catalog.find((item) => item.worker_name === route.workerName);
         const runtime = liveByName.get(route.workerName);
         const nativeApiOnly = !!runtime &&

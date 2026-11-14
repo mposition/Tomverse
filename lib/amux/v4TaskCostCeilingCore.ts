@@ -423,3 +423,51 @@ export function checkV4TaskApprovedCeiling(
   return { decision: "allow",
     reason: newModelRoute ? "new_model_route_within_ceiling" : "within_approved_ceiling" };
 }
+
+/**
+ * The current receipt with only the routes this Task's approval can run on
+ * (owner decision 2026-11-14: "구조 수정").
+ *
+ * A route on a model the approval did not name, that the switch does not admit
+ * (off, a grown bound, or its own per-attempt cost times the attempt bound over
+ * the approved ceiling), is left out for this Task instead of sending the whole
+ * Task back for reconfirmation. On 2026-11-14 antigravity-impl (Gemini 4 Argon,
+ * $5.90 x 2) held three advanced Tasks approved at $8.20 although the two
+ * routes they were approved on were unchanged and idle.
+ *
+ * Every other route stays, so `checkV4TaskApprovedCeiling` still decides on
+ * it: a route the approval named but that changed still asks for
+ * reconfirmation, and a new worker on an approved model still passes. The
+ * readiness check, the claim and the execution start all narrow with this, so
+ * a left-out route can neither be counted nor be claimed nor start. An invalid
+ * approval returns the receipt unchanged (the check holds it).
+ */
+export function v4TaskReceiptForApprovedRoutes(
+  approved: unknown,
+  current: V4TaskCostCeilingReceipt,
+  options: { newModelRouteWithinCeiling?: boolean } = {},
+): V4TaskCostCeilingReceipt {
+  if (!approvedReceiptValid(approved) ||
+    approved.role !== current.role || approved.grade !== current.grade) return current;
+  const approvedAmount = BigInt(approved.ceilingMicroUsd);
+  const approvedIds = new Set(approved.routes.map((route) => route.routeId));
+  const approvedModels = new Set(approved.routes.map((route) =>
+    JSON.stringify([route.provider, route.modelId])));
+  const boundsIncreased =
+    current.caps.uncachedInputTokens > approved.caps.uncachedInputTokens ||
+    current.caps.outputTokens > approved.caps.outputTokens ||
+    current.caps.cacheReadTokens > approved.caps.cacheReadTokens ||
+    current.caps.cacheWriteTokens > approved.caps.cacheWriteTokens ||
+    current.caps.maxAttempts > approved.caps.maxAttempts;
+  const routes = current.routes.filter((route) =>
+    approvedIds.has(route.routeId) ||
+    approvedModels.has(JSON.stringify([route.provider, route.modelId])) ||
+    (!!options.newModelRouteWithinCeiling && !boundsIncreased &&
+      BigInt(route.perAttemptMicroUsd) * BigInt(current.caps.maxAttempts) <= approvedAmount));
+  if (routes.length === current.routes.length) return current;
+  const ceiling = routes.reduce((max, route) => {
+    const amount = BigInt(route.perAttemptMicroUsd);
+    return amount > max ? amount : max;
+  }, BigInt(0)) * BigInt(current.caps.maxAttempts);
+  return { ...current, routes, ceilingMicroUsd: ceiling.toString() };
+}

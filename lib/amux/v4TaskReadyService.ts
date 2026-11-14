@@ -16,7 +16,8 @@ import type { AmuxIdeaUnitConfirmationSnapshot } from
   "./ideaUnitConfirmationCore.ts";
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
-import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "./v4TaskCostCeilingCore.ts";
+import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision,
+  v4TaskReceiptForApprovedRoutes } from "./v4TaskCostCeilingCore.ts";
 import { AMUX_V4_NEW_MODEL_ROUTE_ENV, amuxV4NewModelRouteWithinCeiling } from "./v4TaskNewModelRouteSwitch.ts";
 import { amuxV22PromotionFlowEnabled } from "./v22AutoPromotionCore.ts";
 import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
@@ -309,9 +310,14 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
         const recovery = await tx.amuxV22TaskRecoveryApproval.findFirst({
           where: { taskId, afterRevision: card.revision, assignment: null },
           select: { id: true } });
+        const routeOptions = amuxV4NewModelRouteWithinCeiling(process.env[AMUX_V4_NEW_MODEL_ROUTE_ENV]);
+        // A new model route the approval cannot run on is left out, not a
+        // reason to stop the Task (v4TaskReceiptForApprovedRoutes).
+        // A recovery binds its own added route (policy v48) and keeps the whole receipt.
+        const runnable = expectedStatus === "blocked" || recovery ? current.receipt :
+          v4TaskReceiptForApprovedRoutes(approvedCost, current.receipt, routeOptions);
         cost = v4TaskCeilingDecision(checkV4TaskApprovedCeiling(
-          approvedCost, { ok: true, receipt: current.receipt },
-          amuxV4NewModelRouteWithinCeiling(process.env[AMUX_V4_NEW_MODEL_ROUTE_ENV])),
+          approvedCost, { ok: true, receipt: runnable }, routeOptions),
           expectedStatus === "blocked" || !!recovery);
         // Worker availability is its own fact (policy v48): a cost that needs
         // reconfirmation must not also read as "no worker", or the FIRST Task
@@ -323,7 +329,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
           const { v22: configured, ceilings } = await readAmuxAssignmentCatalogs(tx);
           const gradeCatalogValid = !exactGradeRouting ||
             inspectV52TaskCatalogGrades(current.catalog, ceilings).ok;
-          workerNames = gradeCatalogValid ? current.receipt.routes.filter((route) =>
+          workerNames = gradeCatalogValid ? runnable.routes.filter((route) =>
             configured?.some((worker) =>
               worker.worker_name === route.workerName &&
               worker.provider === route.provider.toLowerCase() &&
