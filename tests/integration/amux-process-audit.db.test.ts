@@ -182,6 +182,9 @@ test("one run: off by default, run now claims once, the report clears the claim 
   assert.equal(view.selected?.id, stored.id);
   assert.equal(view.selected?.trigger, "run_now");
   assert.equal(view.selected?.model, "gpt-6.1-sol");
+  // The stored figures are the claim's snapshot, the ones the model was given.
+  const row = await prisma.amuxProcessAuditReport.findUniqueOrThrow({ where: { id: stored.id }, select: { metrics: true } });
+  assert.deepEqual(row.metrics, claimed.metrics);
   assert.equal(view.selected?.analysis?.headline, "합성 보고서");
   assert.match(view.selected?.markdown ?? "", /\| 시도 \| 2 \|/);
 
@@ -193,7 +196,20 @@ test("one run: off by default, run now claims once, the report clears the claim 
   await prisma.$transaction((tx) => changeProcessAuditSettings(tx, { enabled: true, cadenceDays: 7, runNow: true }));
   const next = await claimProcessAuditRun();
   assert.equal(next.due, true);
-  if (next.due) assert.equal(next.previous?.analysis.headline, "합성 보고서");
+  if (!next.due) return;
+  assert.equal(next.previous?.analysis.headline, "합성 보고서");
+  // "Run now" pressed while that run is in flight is not lost: its report
+  // leaves the request, and the next poll runs again.
+  await new Promise((done) => setTimeout(done, 5));
+  await prisma.$transaction((tx) => changeProcessAuditSettings(tx, { enabled: false, cadenceDays: 7, runNow: true }));
+  assert.deepEqual(await claimProcessAuditRun(), { due: false, reason: "running" });
+  await recordProcessAuditReport({ token: next.token, developSha: sha, model: null, analysis });
+  const kept = await prisma.$transaction((tx) => readProcessAuditSettings(tx));
+  assert.equal(kept.claim, null);
+  assert.notEqual(kept.runRequestedAt, null);
+  const again = await claimProcessAuditRun();
+  assert.equal(again.due, true);
+  if (again.due) assert.equal(again.trigger, "run_now");
 });
 
 test("the table refuses a report outside its shape", async () => {

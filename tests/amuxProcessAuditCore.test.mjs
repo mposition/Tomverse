@@ -10,6 +10,7 @@ import {
   parseProcessAuditAnalysis,
   parseProcessAuditSettings,
   previousReportForPrompt,
+  processAuditRequestAfterRun,
   processAuditDue,
   processAuditNextRunAt,
   processAuditPrompt,
@@ -47,8 +48,13 @@ test("settings default off and survive malformed rows as the defaults", () => {
     claim: { token: "x", at: now.toISOString(), windowStart: now.toISOString(), windowEnd: now.toISOString() } }));
   assert.deepEqual(odd, AMUX_PROCESS_AUDIT_DEFAULT_SETTINGS);
   const kept = { enabled: true, cadenceDays: 3, runRequestedAt: now.toISOString(),
-    claim: { token: ["0b6c3b1e", "9d1e", "4a3f", "8a59", "2e1c0d6f7a11"].join("-"), at: now.toISOString(), windowStart: now.toISOString(), windowEnd: now.toISOString() } };
+    claim: { token: ["0b6c3b1e", "9d1e", "4a3f", "8a59", "2e1c0d6f7a11"].join("-"), at: now.toISOString(), windowStart: now.toISOString(), windowEnd: now.toISOString(),
+      trigger: "run_now", metrics: { tasks: { created: 3 } } } };
   assert.deepEqual(parseProcessAuditSettings(serializeProcessAuditSettings(kept)), kept);
+  // A claim without its trigger or its figures is not a claim.
+  for (const broken of [{ ...kept.claim, trigger: "other" }, { ...kept.claim, metrics: null }, { ...kept.claim, metrics: [] }]) {
+    assert.equal(parseProcessAuditSettings(JSON.stringify({ ...kept, claim: broken })).claim, null);
+  }
 });
 
 test("a run is due on the cadence only while the schedule is on", () => {
@@ -65,18 +71,30 @@ test("a run is due on the cadence only while the schedule is on", () => {
 test("run now wins over a schedule that is off, once", () => {
   const requested = { ...AMUX_PROCESS_AUDIT_DEFAULT_SETTINGS, runRequestedAt: new Date(now.getTime() - 60_000).toISOString() };
   assert.deepEqual(processAuditDue({ settings: requested, lastReportAt: null, now }), { due: true, trigger: "run_now" });
-  // A report stored after the request answered it.
+  // Still recorded means no run claimed after it answered it, whatever report came since.
   assert.deepEqual(processAuditDue({ settings: requested, lastReportAt: new Date(now.getTime() - 1_000), now }),
+    { due: true, trigger: "run_now" });
+  assert.deepEqual(processAuditDue({ settings: { ...requested, runRequestedAt: null }, lastReportAt: new Date(now.getTime() - 1_000), now }),
     { due: false, reason: "disabled" });
 });
 
 test("a claim in flight holds every poll until it lapses", () => {
   const claim = (ageMs) => ({ token: ["0b6c3b1e", "9d1e", "4a3f", "8a59", "2e1c0d6f7a11"].join("-"), at: new Date(now.getTime() - ageMs).toISOString(),
-    windowStart: now.toISOString(), windowEnd: now.toISOString() });
+    windowStart: now.toISOString(), windowEnd: now.toISOString(), trigger: "schedule", metrics: {} });
   const settings = { ...AMUX_PROCESS_AUDIT_DEFAULT_SETTINGS, enabled: true, runRequestedAt: now.toISOString(), claim: claim(60_000) };
   assert.deepEqual(processAuditDue({ settings, lastReportAt: null, now }), { due: false, reason: "running" });
   const lapsed = { ...settings, claim: claim(AMUX_PROCESS_AUDIT_CLAIM_HOLD_MS) };
   assert.equal(processAuditDue({ settings: lapsed, lastReportAt: null, now: new Date(now.getTime() + 1) }).due, true);
+});
+
+test("a finished run clears the request it answered and keeps one pressed while it ran", () => {
+  const claimed = { token: ["0b6c3b1e", "9d1e", "4a3f", "8a59", "2e1c0d6f7a11"].join("-"), at: now.toISOString(), windowStart: now.toISOString(),
+    windowEnd: now.toISOString(), trigger: "run_now", metrics: {} };
+  assert.equal(processAuditRequestAfterRun(null, claimed), null);
+  assert.equal(processAuditRequestAfterRun(new Date(now.getTime() - 1).toISOString(), claimed), null);
+  assert.equal(processAuditRequestAfterRun(now.toISOString(), claimed), null);
+  const later = new Date(now.getTime() + 60_000).toISOString();
+  assert.equal(processAuditRequestAfterRun(later, claimed), later);
 });
 
 test("the window is the fourteen days before the claim, and the next run follows the cadence", () => {

@@ -43,13 +43,24 @@ export type AmuxProcessAuditClaim = {
   readonly at: string;
   readonly windowStart: string;
   readonly windowEnd: string;
+  /** What started this run, decided when it was claimed. */
+  readonly trigger: "schedule" | "run_now";
+  /**
+   * The figures the run was given, computed once at the claim. The stored
+   * report keeps exactly these, so its figures are the ones the model read.
+   */
+  readonly metrics: Readonly<Record<string, unknown>>;
 };
 
 export type AmuxProcessAuditSettings = {
   /** The schedule. Off by default: the owner turns it on in Admin. */
   readonly enabled: boolean;
   readonly cadenceDays: number;
-  /** "Run now": a request the next poll answers whether or not the schedule is on. */
+  /**
+   * "Run now": a request the next poll answers whether or not the schedule is
+   * on. Cleared only by the report of a run claimed after it, so a press made
+   * while a run is in flight waits for the next run instead of being lost.
+   */
   readonly runRequestedAt: string | null;
   readonly claim: AmuxProcessAuditClaim | null;
 };
@@ -90,8 +101,13 @@ export function parseProcessAuditSettings(raw: string | null | undefined): AmuxP
     runRequestedAt: isIsoInstant(value.runRequestedAt) ? value.runRequestedAt : null,
     claim:
       claim && typeof claim === "object" && typeof claim.token === "string" && CLAIM_TOKEN.test(claim.token) &&
-      isIsoInstant(claim.at) && isIsoInstant(claim.windowStart) && isIsoInstant(claim.windowEnd)
-        ? { token: claim.token, at: claim.at, windowStart: claim.windowStart, windowEnd: claim.windowEnd }
+      isIsoInstant(claim.at) && isIsoInstant(claim.windowStart) && isIsoInstant(claim.windowEnd) &&
+      (claim.trigger === "schedule" || claim.trigger === "run_now") &&
+      claim.metrics !== null && typeof claim.metrics === "object" && !Array.isArray(claim.metrics)
+        ? {
+          token: claim.token, at: claim.at, windowStart: claim.windowStart, windowEnd: claim.windowEnd,
+          trigger: claim.trigger, metrics: claim.metrics as Record<string, unknown>,
+        }
         : null,
   };
 }
@@ -117,15 +133,22 @@ export function processAuditDue(input: {
   if (claim && now.getTime() - Date.parse(claim.at) < AMUX_PROCESS_AUDIT_CLAIM_HOLD_MS) {
     return { due: false, reason: "running" };
   }
-  if (settings.runRequestedAt !== null &&
-    (lastReportAt === null || Date.parse(settings.runRequestedAt) > lastReportAt.getTime())) {
-    return { due: true, trigger: "run_now" };
-  }
+  // A request still recorded is one no run claimed after it has answered.
+  if (settings.runRequestedAt !== null) return { due: true, trigger: "run_now" };
   if (!settings.enabled) return { due: false, reason: "disabled" };
   if (lastReportAt === null || now.getTime() - lastReportAt.getTime() >= settings.cadenceDays * DAY_MS) {
     return { due: true, trigger: "schedule" };
   }
   return { due: false, reason: "not_yet" };
+}
+
+/**
+ * The request a finished run leaves behind: cleared when it was made at or
+ * before the run's claim (that run answered it), kept when it came later.
+ */
+export function processAuditRequestAfterRun(runRequestedAt: string | null, claim: AmuxProcessAuditClaim): string | null {
+  if (runRequestedAt === null) return null;
+  return Date.parse(runRequestedAt) <= Date.parse(claim.at) ? null : runRequestedAt;
 }
 
 /** The window a run claimed at `now` reads. */

@@ -27,6 +27,7 @@ import {
   parseProcessAuditAnalysis,
   parseProcessAuditSettings,
   processAuditDue,
+  processAuditRequestAfterRun,
   processAuditWindow,
   serializeProcessAuditSettings,
   type AmuxProcessAuditAnalysis,
@@ -119,48 +120,44 @@ export type ProcessAuditContext =
   };
 
 /**
- * The box's poll. Not due: nothing is written. Due: the run is claimed (a
- * token and the window, under the settings row's lock), then the figures and
- * the previous report are read in a read-only transaction of their own.
+ * The box's poll. Not due: nothing is written. Due: in one transaction under
+ * the settings row's lock, the figures for the window are computed and the run
+ * is claimed with them (token, window, trigger, figures), so the report stores
+ * exactly the figures the model was given.
  */
 export async function claimProcessAuditRun(): Promise<ProcessAuditContext> {
-  const claimed = await prisma.$transaction(async (db) => {
+  return prisma.$transaction(async (db) => {
     await limitTransaction(db);
     const settings = await lockProcessAuditSettings(db);
     const now = await dbNow(db);
     const due = processAuditDue({ settings, lastReportAt: await lastReportAt(db), now });
-    if (!due.due) return due;
+    if (!due.due) return { due: false, reason: due.reason };
     const window = processAuditWindow(now);
+    const metrics = await readProcessAuditMetrics(db, window);
     const claim = {
       token: randomUUID(),
       at: now.toISOString(),
       windowStart: window.start.toISOString(),
       windowEnd: window.end.toISOString(),
+      trigger: due.trigger,
+      metrics,
     };
     await saveProcessAuditSettings(db, { ...settings, claim });
-    return { ...due, claim };
-  }, TRANSACTION);
-  if (!claimed.due) return { due: false, reason: claimed.reason };
-  const { claim } = claimed;
-  const read = await prisma.$transaction(async (db) => {
-    await db.$executeRaw`SET TRANSACTION READ ONLY`;
-    await limitTransaction(db);
-    const metrics = await readProcessAuditMetrics(db, { start: new Date(claim.windowStart), end: new Date(claim.windowEnd) });
     const last = await db.amuxProcessAuditReport.findFirst({
       orderBy: { createdAt: "desc" },
       select: { createdAt: true, analysis: true },
     });
     const analysis = last ? parseProcessAuditAnalysis(last.analysis) : null;
-    return { metrics, previous: last && analysis ? { createdAt: last.createdAt.toISOString(), analysis } : null };
+    return {
+      due: true,
+      trigger: due.trigger,
+      token: claim.token,
+      windowStart: claim.windowStart,
+      windowEnd: claim.windowEnd,
+      metrics,
+      previous: last && analysis ? { createdAt: last.createdAt.toISOString(), analysis } : null,
+    };
   }, TRANSACTION);
-  return {
-    due: true,
-    trigger: claimed.trigger,
-    token: claim.token,
-    windowStart: claim.windowStart,
-    windowEnd: claim.windowEnd,
-    ...read,
-  };
 }
 
 export class ProcessAuditReportRefused extends Error {
@@ -171,9 +168,10 @@ export class ProcessAuditReportRefused extends Error {
 
 /**
  * One finished run. The token must be the claim in flight, so a late or
- * repeated post stores nothing. The figures are the app's own, read again for
- * the claimed window: the box never supplies them. The claim and an answered
- * "run now" are cleared, and reports past the retention are removed.
+ * repeated post stores nothing. The figures are the claim's own snapshot, the
+ * ones the model was given: the box never supplies them. The claim is cleared,
+ * and so is a "run now" this run answered (one made during the run stays for
+ * the next poll); reports past the retention are removed.
  */
 export async function recordProcessAuditReport(input: {
   readonly token: string;
@@ -189,10 +187,7 @@ export async function recordProcessAuditReport(input: {
     const claim = settings.claim;
     if (claim === null || claim.token !== input.token) throw new ProcessAuditReportRefused("no_claim");
     const window = { start: new Date(claim.windowStart), end: new Date(claim.windowEnd) };
-    const metrics = await readProcessAuditMetrics(db, window);
     const now = await dbNow(db);
-    const trigger = settings.runRequestedAt !== null && Date.parse(settings.runRequestedAt) <= Date.parse(claim.at)
-      ? "run_now" : "schedule";
     const created = await db.amuxProcessAuditReport.create({
       data: {
         windowStart: window.start,
@@ -200,8 +195,8 @@ export async function recordProcessAuditReport(input: {
         developSha: input.developSha,
         channel: AMUX_PROCESS_AUDIT_CHANNEL,
         model: input.model,
-        trigger,
-        metrics: metrics as Prisma.InputJsonValue,
+        trigger: claim.trigger,
+        metrics: claim.metrics as Prisma.InputJsonValue,
         analysis: analysis as unknown as Prisma.InputJsonValue,
         markdown: analysis.markdown,
       },
@@ -213,7 +208,7 @@ export async function recordProcessAuditReport(input: {
     await saveProcessAuditSettings(db, {
       ...settings,
       claim: null,
-      runRequestedAt: trigger === "run_now" ? null : settings.runRequestedAt,
+      runRequestedAt: processAuditRequestAfterRun(settings.runRequestedAt, claim),
     });
     return { id: created.id, removed: removed.count };
   }, TRANSACTION);
