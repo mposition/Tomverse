@@ -83,14 +83,19 @@ export type MarketingLlmCloseAction = (typeof MARKETING_LLM_CLOSE_ACTIONS)[numbe
 export const MARKETING_LLM_RESERVATION_TTL_MS = 15 * 60 * 1000;
 export const MARKETING_LLM_DISPATCH_TTL_MS = 60 * 60 * 1000;
 
-/** The most the operator may set the cap to: US$100, policy v4 (D2). */
-export const MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD = 100_000_000;
+/**
+ * The most the operator may set the monthly cap to: US$500 (owner 2026-11-14;
+ * US$100 under policy v4 D2 before).
+ */
+export const MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD = 500_000_000;
 
 /** Row bounds the migration's CHECKs repeat; a pin outside them is unusable. */
 export const MARKETING_LLM_ROW_LIMITS = {
   reservedInputTokensMax: 10_000_000,
   reservedOutputTokensMax: 100_000,
-  reservedMicroUsdMax: MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD,
+  // One call's reservation, which the migrations' CHECKs bound at US$100. Not
+  // the monthly ceiling: raising that left this row bound where it was.
+  reservedMicroUsdMax: 100_000_000,
 } as const;
 
 export type MarketingLlmPricePin = {
