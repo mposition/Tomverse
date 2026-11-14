@@ -17,8 +17,8 @@ export const workspaceWelcomeCopy = {
                 seed: "Explain in plain language what a vector database is for, in about 200 words.",
             },
             documentQuestions: {
-                label: "Ask several models about a PDF",
-                outcome: "Attach an 18 page PDF and ask several models the same question about it",
+                label: "Ask questions about a PDF",
+                outcome: "Attach an 18 page PDF and get the decisions and deadlines it holds",
                 seed: "I attached a document. Summarise what it asks me to decide, and list every deadline it names.",
             },
             sourcedAnswer: {
@@ -51,6 +51,36 @@ export const workspaceWelcomeCopy = {
                 outcome: "Send one sentence to several image models and compare what each returns",
                 seed: "A quiet reading room at dawn, warm light through tall windows, photographic.",
             },
+            makeAnImage: {
+                label: "Make an image from a sentence",
+                outcome: "Describe a picture in one sentence and get the image in this chat",
+                seed: "Make an image: a quiet reading room at dawn, warm light through tall windows, photographic.",
+            },
+            summarizeText: {
+                label: "Summarise a long text in three lines",
+                outcome: "Paste a long text and get a three line summary with its key numbers",
+                seed: "Summarise the text below in three lines, and list the numbers it mentions separately:",
+            },
+            draftReply: {
+                label: "Draft a reply to an email",
+                outcome: "Paste an email you received and get a polite reply to edit",
+                seed: "Write a short, polite reply to the email below:",
+            },
+            explainCode: {
+                label: "Explain code line by line",
+                outcome: "Paste some code and get each line explained in plain words",
+                seed: "Explain in plain words what the code below does, line by line:",
+            },
+            learnAConcept: {
+                label: "Learn a hard idea simply",
+                outcome: "Learn an unfamiliar idea in plain words with one everyday example",
+                seed: "Explain how compound interest works using one everyday example.",
+            },
+            planAWeek: {
+                label: "Plan your week",
+                outcome: "List what you need to do and get a day by day plan",
+                seed: "Here is what I need to do this week. Spread it over the days in a realistic plan:",
+            },
             speakAQuestion: {
                 label: "Speak a question, edit the text",
                 outcome: "Speak a long question instead of typing it, and edit the text before it is sent",
@@ -76,8 +106,8 @@ export const workspaceWelcomeCopy = {
                 seed: "벡터 데이터베이스가 어떤 문제를 푸는지 쉬운 말로 200자 정도로 설명해 주세요.",
             },
             documentQuestions: {
-                label: "PDF 붙여 여러 모델에 질문",
-                outcome: "18페이지 PDF를 붙여 여러 모델에게 같은 질문 하기",
+                label: "PDF 붙여 질문하기",
+                outcome: "18페이지 PDF를 붙여 결정할 일과 기한 받기",
                 seed: "문서를 첨부했습니다. 제가 무엇을 결정해야 하는지 요약하고, 문서에 나오는 기한을 모두 뽑아 주세요.",
             },
             sourcedAnswer: {
@@ -110,6 +140,36 @@ export const workspaceWelcomeCopy = {
                 outcome: "문장 하나를 여러 이미지 모델에 보내고 결과를 비교하기",
                 seed: "새벽의 조용한 열람실, 높은 창으로 들어오는 따뜻한 빛, 사진 느낌.",
             },
+            makeAnImage: {
+                label: "문장으로 이미지 만들기",
+                outcome: "장면을 한 문장으로 쓰고 이 대화 안에서 이미지 받기",
+                seed: "이미지를 만들어 주세요: 새벽의 조용한 열람실, 높은 창으로 들어오는 따뜻한 빛, 사진 느낌.",
+            },
+            summarizeText: {
+                label: "긴 글 세 줄로 요약",
+                outcome: "긴 글을 붙여 넣고 세 줄 요약과 핵심 숫자 받기",
+                seed: "아래 글을 세 줄로 요약하고, 글에 나오는 숫자는 따로 정리해 주세요:",
+            },
+            draftReply: {
+                label: "메일 답장 초안 쓰기",
+                outcome: "받은 메일을 붙여 넣고 고쳐 쓸 수 있는 정중한 답장 초안 받기",
+                seed: "아래 메일에 정중하게 답하는 짧은 답장 초안을 써 주세요:",
+            },
+            explainCode: {
+                label: "코드 한 줄씩 설명 받기",
+                outcome: "코드를 붙여 넣고 한 줄씩 무엇을 하는지 쉬운 말로 설명 받기",
+                seed: "아래 코드가 무엇을 하는지 한 줄씩 쉬운 말로 설명해 주세요:",
+            },
+            learnAConcept: {
+                label: "어려운 개념 쉽게 배우기",
+                outcome: "낯선 개념을 일상 예시 하나와 함께 쉬운 말로 배우기",
+                seed: "복리가 어떻게 작동하는지 일상적인 예시 하나로 쉽게 설명해 주세요.",
+            },
+            planAWeek: {
+                label: "일주일 계획 세우기",
+                outcome: "할 일을 적으면 요일별 계획으로 정리 받기",
+                seed: "이번 주에 할 일을 적을게요. 요일별로 무리 없는 계획을 세워 주세요:",
+            },
             speakAQuestion: {
                 label: "말로 질문하고 글로 고치기",
                 outcome: "긴 질문을 말로 입력하고 보내기 전에 글로 고치기",
@@ -135,8 +195,8 @@ export const workspaceWelcomeCopy = {
                 seed: "用通俗的语言解释向量数据库用来解决什么问题，大约 200 字。",
             },
             documentQuestions: {
-                label: "就一份 PDF 问多个模型",
-                outcome: "上传一份 18 页的 PDF，向多个模型提出同一个问题",
+                label: "上传 PDF 提问",
+                outcome: "上传一份 18 页的 PDF，得到其中要做的决定和截止日期",
                 seed: "我上传了一份文档。请概括它要我做出什么决定，并列出其中提到的所有截止日期。",
             },
             sourcedAnswer: {
@@ -169,6 +229,36 @@ export const workspaceWelcomeCopy = {
                 outcome: "把同一句话发给多个图像模型，比较各自的结果",
                 seed: "清晨安静的阅览室，暖光从高窗照入，摄影风格。",
             },
+            makeAnImage: {
+                label: "用一句话生成图像",
+                outcome: "用一句话描述画面，在这个对话里得到图像",
+                seed: "请生成一张图像：清晨安静的阅览室，暖光从高窗照入，摄影风格。",
+            },
+            summarizeText: {
+                label: "三行总结长文",
+                outcome: "粘贴长文，得到三行摘要和其中的关键数字",
+                seed: "请用三行总结下面的文字，并把其中提到的数字单独列出：",
+            },
+            draftReply: {
+                label: "起草邮件回复",
+                outcome: "粘贴收到的邮件，得到一份可修改的礼貌回复",
+                seed: "请为下面的邮件写一封简短、礼貌的回复：",
+            },
+            explainCode: {
+                label: "逐行解释代码",
+                outcome: "粘贴代码，逐行得到通俗易懂的解释",
+                seed: "请用通俗的语言逐行解释下面这段代码在做什么：",
+            },
+            learnAConcept: {
+                label: "轻松理解难懂概念",
+                outcome: "用一个日常例子和通俗的语言理解陌生概念",
+                seed: "请用一个日常例子简单解释复利是如何运作的。",
+            },
+            planAWeek: {
+                label: "制定一周计划",
+                outcome: "写下要做的事，得到按天安排的计划",
+                seed: "这是我这周要做的事，请按天安排一个可行的计划：",
+            },
             speakAQuestion: {
                 label: "用语音提问，再改文字",
                 outcome: "用语音说出较长的问题，在发送前再修改文字",
@@ -194,8 +284,8 @@ export const workspaceWelcomeCopy = {
                 seed: "用淺顯的語言解釋向量資料庫用來解決什麼問題，大約 200 字。",
             },
             documentQuestions: {
-                label: "就一份 PDF 詢問多個模型",
-                outcome: "上傳一份 18 頁的 PDF，向多個模型提出同一個問題",
+                label: "上傳 PDF 提問",
+                outcome: "上傳一份 18 頁的 PDF，得到其中要做的決定和截止日期",
                 seed: "我上傳了一份文件。請摘要它要我做出什麼決定，並列出其中提到的所有截止日期。",
             },
             sourcedAnswer: {
@@ -228,6 +318,36 @@ export const workspaceWelcomeCopy = {
                 outcome: "把同一句話傳給多個圖像模型，比較各自的結果",
                 seed: "清晨安靜的閱覽室，暖光從高窗照入，攝影風格。",
             },
+            makeAnImage: {
+                label: "用一句話生成圖像",
+                outcome: "用一句話描述畫面，在這個對話裡得到圖像",
+                seed: "請生成一張圖像：清晨安靜的閱覽室，暖光從高窗照入，攝影風格。",
+            },
+            summarizeText: {
+                label: "三行摘要長文",
+                outcome: "貼上長文，得到三行摘要和其中的關鍵數字",
+                seed: "請用三行摘要下面的文字，並把其中提到的數字另外列出：",
+            },
+            draftReply: {
+                label: "草擬郵件回覆",
+                outcome: "貼上收到的郵件，得到一份可修改的禮貌回覆",
+                seed: "請為下面的郵件寫一封簡短、禮貌的回覆：",
+            },
+            explainCode: {
+                label: "逐行解釋程式碼",
+                outcome: "貼上程式碼，逐行得到淺白的解釋",
+                seed: "請用淺白的語言逐行解釋下面這段程式碼在做什麼：",
+            },
+            learnAConcept: {
+                label: "輕鬆理解難懂概念",
+                outcome: "用一個日常例子和淺白的語言理解陌生概念",
+                seed: "請用一個日常例子簡單解釋複利是如何運作的。",
+            },
+            planAWeek: {
+                label: "規劃一週",
+                outcome: "寫下要做的事，得到按天安排的計畫",
+                seed: "這是我這週要做的事，請按天安排一個可行的計畫：",
+            },
             speakAQuestion: {
                 label: "用語音提問，再改文字",
                 outcome: "用語音說出較長的問題，在傳送前再修改文字",
@@ -253,8 +373,8 @@ export const workspaceWelcomeCopy = {
                 seed: "Erklären Sie in einfachen Worten, wofür eine Vektordatenbank gedacht ist, in etwa 200 Wörtern.",
             },
             documentQuestions: {
-                label: "Mehrere Modelle zu einem PDF fragen",
-                outcome: "Ein PDF mit 18 Seiten anhängen und mehreren Modellen dieselbe Frage dazu stellen",
+                label: "Fragen zu einem PDF stellen",
+                outcome: "Ein PDF mit 18 Seiten anhängen und die Entscheidungen und Fristen darin erhalten",
                 seed: "Ich habe ein Dokument angehängt. Fassen Sie zusammen, worüber ich entscheiden soll, und nennen Sie alle Fristen darin.",
             },
             sourcedAnswer: {
@@ -287,6 +407,36 @@ export const workspaceWelcomeCopy = {
                 outcome: "Einen Satz an mehrere Bildmodelle schicken und die Ergebnisse vergleichen",
                 seed: "Ein ruhiger Lesesaal im Morgengrauen, warmes Licht durch hohe Fenster, fotografisch.",
             },
+            makeAnImage: {
+                label: "Ein Bild aus einem Satz machen",
+                outcome: "Ein Bild in einem Satz beschreiben und es in diesem Chat erhalten",
+                seed: "Erstelle ein Bild: ein ruhiger Lesesaal im Morgengrauen, warmes Licht durch hohe Fenster, fotografisch.",
+            },
+            summarizeText: {
+                label: "Langen Text in drei Zeilen zusammenfassen",
+                outcome: "Einen langen Text einfügen und eine dreizeilige Zusammenfassung mit den wichtigsten Zahlen erhalten",
+                seed: "Fasse den folgenden Text in drei Zeilen zusammen und liste die genannten Zahlen separat auf:",
+            },
+            draftReply: {
+                label: "Antwort auf eine E-Mail entwerfen",
+                outcome: "Eine erhaltene E-Mail einfügen und einen höflichen Antwortentwurf zum Bearbeiten erhalten",
+                seed: "Schreibe eine kurze, höfliche Antwort auf die folgende E-Mail:",
+            },
+            explainCode: {
+                label: "Code Zeile für Zeile erklären",
+                outcome: "Code einfügen und jede Zeile in einfachen Worten erklärt bekommen",
+                seed: "Erkläre in einfachen Worten Zeile für Zeile, was der folgende Code macht:",
+            },
+            learnAConcept: {
+                label: "Schwierige Begriffe einfach lernen",
+                outcome: "Einen unbekannten Begriff in einfachen Worten mit einem Alltagsbeispiel lernen",
+                seed: "Erkläre mit einem Alltagsbeispiel, wie Zinseszins funktioniert.",
+            },
+            planAWeek: {
+                label: "Die Woche planen",
+                outcome: "Aufgaben aufschreiben und einen Plan nach Wochentagen erhalten",
+                seed: "Das muss ich diese Woche erledigen. Verteile es in einem realistischen Plan auf die Tage:",
+            },
             speakAQuestion: {
                 label: "Frage diktieren, Text bearbeiten",
                 outcome: "Eine lange Frage diktieren statt tippen und den Text vor dem Senden bearbeiten",
@@ -312,8 +462,8 @@ export const workspaceWelcomeCopy = {
                 seed: "Expliquez simplement à quoi sert une base de données vectorielle, en 200 mots environ.",
             },
             documentQuestions: {
-                label: "Interrogez plusieurs modèles sur un PDF",
-                outcome: "Joignez un PDF de 18 pages et posez la même question à plusieurs modèles",
+                label: "Posez vos questions sur un PDF",
+                outcome: "Joignez un PDF de 18 pages et obtenez les décisions et échéances qu'il contient",
                 seed: "J'ai joint un document. Résumez ce qu'il me demande de décider et listez toutes les échéances qu'il cite.",
             },
             sourcedAnswer: {
@@ -346,6 +496,36 @@ export const workspaceWelcomeCopy = {
                 outcome: "Envoyez une phrase à plusieurs modèles d'image et comparez leurs rendus",
                 seed: "Une salle de lecture calme à l'aube, lumière chaude par de hautes fenêtres, style photographique.",
             },
+            makeAnImage: {
+                label: "Créez une image à partir d'une phrase",
+                outcome: "Décrivez une image en une phrase et recevez-la dans ce chat",
+                seed: "Crée une image : une salle de lecture calme à l'aube, lumière chaude par de hautes fenêtres, style photographique.",
+            },
+            summarizeText: {
+                label: "Résumez un long texte en trois lignes",
+                outcome: "Collez un long texte et obtenez un résumé en trois lignes avec ses chiffres clés",
+                seed: "Résume le texte ci-dessous en trois lignes et liste à part les chiffres qu'il mentionne :",
+            },
+            draftReply: {
+                label: "Rédigez une réponse à un e-mail",
+                outcome: "Collez un e-mail reçu et obtenez une réponse polie à retoucher",
+                seed: "Écris une réponse courte et polie à l'e-mail ci-dessous :",
+            },
+            explainCode: {
+                label: "Faites expliquer du code ligne par ligne",
+                outcome: "Collez du code et obtenez une explication simple de chaque ligne",
+                seed: "Explique simplement, ligne par ligne, ce que fait le code ci-dessous :",
+            },
+            learnAConcept: {
+                label: "Comprenez simplement une notion difficile",
+                outcome: "Découvrez une notion inconnue en mots simples avec un exemple du quotidien",
+                seed: "Explique le fonctionnement des intérêts composés avec un exemple du quotidien.",
+            },
+            planAWeek: {
+                label: "Planifiez votre semaine",
+                outcome: "Listez vos tâches et obtenez un plan jour par jour",
+                seed: "Voici ce que je dois faire cette semaine. Répartis-le sur les jours dans un plan réaliste :",
+            },
             speakAQuestion: {
                 label: "Dictez une question, corrigez le texte",
                 outcome: "Dictez une longue question au lieu de la taper, et corrigez le texte avant l'envoi",
@@ -371,8 +551,8 @@ export const workspaceWelcomeCopy = {
                 seed: "Explica en lenguaje sencillo para qué sirve una base de datos vectorial, en unas 200 palabras.",
             },
             documentQuestions: {
-                label: "Pregunta a varios modelos por un PDF",
-                outcome: "Adjunta un PDF de 18 páginas y haz la misma pregunta a varios modelos",
+                label: "Pregunta sobre un PDF",
+                outcome: "Adjunta un PDF de 18 páginas y obtén las decisiones y plazos que contiene",
                 seed: "He adjuntado un documento. Resume qué me pide decidir y enumera todos los plazos que menciona.",
             },
             sourcedAnswer: {
@@ -405,6 +585,36 @@ export const workspaceWelcomeCopy = {
                 outcome: "Envía una frase a varios modelos de imagen y compara lo que devuelve cada uno",
                 seed: "Una sala de lectura tranquila al amanecer, luz cálida por ventanales altos, estilo fotográfico.",
             },
+            makeAnImage: {
+                label: "Crea una imagen con una frase",
+                outcome: "Describe una imagen en una frase y recíbela en este chat",
+                seed: "Crea una imagen: una sala de lectura tranquila al amanecer, luz cálida por ventanales altos, estilo fotográfico.",
+            },
+            summarizeText: {
+                label: "Resume un texto largo en tres líneas",
+                outcome: "Pega un texto largo y obtén un resumen de tres líneas con sus cifras clave",
+                seed: "Resume el texto de abajo en tres líneas y enumera aparte las cifras que menciona:",
+            },
+            draftReply: {
+                label: "Redacta una respuesta a un correo",
+                outcome: "Pega un correo recibido y obtén una respuesta cortés para editar",
+                seed: "Escribe una respuesta breve y cortés al correo de abajo:",
+            },
+            explainCode: {
+                label: "Explica código línea por línea",
+                outcome: "Pega código y obtén cada línea explicada con palabras sencillas",
+                seed: "Explica con palabras sencillas, línea por línea, qué hace el código de abajo:",
+            },
+            learnAConcept: {
+                label: "Aprende una idea difícil fácilmente",
+                outcome: "Aprende una idea desconocida con palabras sencillas y un ejemplo cotidiano",
+                seed: "Explica cómo funciona el interés compuesto con un ejemplo cotidiano.",
+            },
+            planAWeek: {
+                label: "Planifica tu semana",
+                outcome: "Anota tus tareas y obtén un plan día por día",
+                seed: "Esto es lo que tengo que hacer esta semana. Repártelo en los días con un plan realista:",
+            },
             speakAQuestion: {
                 label: "Dicta una pregunta y edita el texto",
                 outcome: "Dicta una pregunta larga en vez de escribirla y edita el texto antes de enviarlo",
@@ -430,8 +640,8 @@ export const workspaceWelcomeCopy = {
                 seed: "Explique em linguagem simples para que serve um banco de dados vetorial, em cerca de 200 palavras.",
             },
             documentQuestions: {
-                label: "Pergunte a vários modelos sobre um PDF",
-                outcome: "Anexe um PDF de 18 páginas e faça a mesma pergunta a vários modelos",
+                label: "Pergunte sobre um PDF",
+                outcome: "Anexe um PDF de 18 páginas e receba as decisões e prazos que ele contém",
                 seed: "Anexei um documento. Resuma o que ele pede que eu decida e liste todos os prazos citados.",
             },
             sourcedAnswer: {
@@ -463,6 +673,36 @@ export const workspaceWelcomeCopy = {
                 label: "Compare modelos de imagem",
                 outcome: "Envie uma frase para vários modelos de imagem e compare o que cada um devolve",
                 seed: "Uma sala de leitura tranquila ao amanhecer, luz quente por janelas altas, estilo fotográfico.",
+            },
+            makeAnImage: {
+                label: "Crie uma imagem com uma frase",
+                outcome: "Descreva uma imagem em uma frase e receba-a neste chat",
+                seed: "Crie uma imagem: uma sala de leitura tranquila ao amanhecer, luz quente por janelas altas, estilo fotográfico.",
+            },
+            summarizeText: {
+                label: "Resuma um texto longo em três linhas",
+                outcome: "Cole um texto longo e receba um resumo de três linhas com os números principais",
+                seed: "Resuma o texto abaixo em três linhas e liste à parte os números que ele menciona:",
+            },
+            draftReply: {
+                label: "Escreva uma resposta a um e-mail",
+                outcome: "Cole um e-mail recebido e receba uma resposta educada para editar",
+                seed: "Escreva uma resposta curta e educada ao e-mail abaixo:",
+            },
+            explainCode: {
+                label: "Explique código linha por linha",
+                outcome: "Cole um código e receba cada linha explicada em palavras simples",
+                seed: "Explique em palavras simples, linha por linha, o que o código abaixo faz:",
+            },
+            learnAConcept: {
+                label: "Aprenda uma ideia difícil de forma simples",
+                outcome: "Aprenda uma ideia desconhecida em palavras simples com um exemplo do dia a dia",
+                seed: "Explique como funcionam os juros compostos com um exemplo do dia a dia.",
+            },
+            planAWeek: {
+                label: "Planeje sua semana",
+                outcome: "Liste suas tarefas e receba um plano dia a dia",
+                seed: "Isto é o que preciso fazer esta semana. Distribua pelos dias em um plano realista:",
             },
             speakAQuestion: {
                 label: "Dite uma pergunta e edite o texto",

@@ -205,6 +205,70 @@ test("an attempt awaiting deploy is judged by deploymentOutcome, with the observ
   assert.deepEqual(reports(dark.calls), [{ kind: "deploy", outcome: "unreadable", observation: [] }]);
 });
 
+test("a deploy closed as deployed lets the same round merge the next pull request, once the app reads the lane free", async () => {
+  const FREE = { dbNowMs: NOW, latched: false, openAttempt: null };
+  const sequence = (...states) => {
+    let index = 0;
+    return () => {
+      const next = states[Math.min(index, states.length - 1)];
+      index += 1;
+      if (next instanceof Error) throw next;
+      return next;
+    };
+  };
+  const mergedAfterCall = (calls) => (n) => (calls.filter((c) => c[0] === "merge").length ? pull(n, { merged: true, mergeCommitSha: MERGE }) : pull(n));
+  const quick = () => NOW;
+  const timed = (overrides) => {
+    const run = ports(overrides);
+    run.ports.clock = overrides.clock ?? quick;
+    return run;
+  };
+
+  // Every service serving the merge, and CI passed with the build still running: both move on.
+  for (const [status, detail] of [["SUCCESS", "succeeded"], ["BUILDING", "ci_passed"]]) {
+    const run = timed({ state: sequence(awaiting(), FREE), deployments: [deployment(status)] });
+    run.ports.github.readPull = async (n) => {
+      run.calls.push(["readPull", n]);
+      return mergedAfterCall(run.calls)(n);
+    };
+    assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, run.ports), { exitCode: 0, outcome: "merged", pullRequestNumber: 7, afterDeploy: detail }, status);
+    assert.deepEqual(reports(run.calls).map((r) => r.kind), ["deploy", "merge"], status);
+    assert.equal(names(run.calls).filter((n) => n === "readState").length, 2, status);
+  }
+
+  // The app still shows an attempt, a latch, or cannot be read: the round ends at the deploy report.
+  for (const [label, second] of [
+    ["attempt still open", awaiting()],
+    ["latched", { ...FREE, latched: true }],
+    ["unreadable", new Error("app down")],
+  ]) {
+    const run = timed({ state: sequence(awaiting(), second), deployments: [deployment("SUCCESS")] });
+    assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, run.ports), { exitCode: 0, outcome: "reported", report: "deploy", detail: "succeeded" }, label);
+    assert.equal(names(run.calls).includes("issue"), false, label);
+  }
+
+  // A slow judgement, or no clock to measure it by, leaves the merge to the next round.
+  const ticks = [NOW, NOW + 91 * 1000];
+  for (const [label, clock] of [["slow", () => ticks.shift() ?? NOW + 91 * 1000], ["no clock", null]]) {
+    const run = ports({ state: sequence(awaiting(), FREE), deployments: [deployment("SUCCESS")] });
+    if (clock) run.ports.clock = clock;
+    assert.equal((await runQaReleaseMergeLaneRound(ENV, run.ports)).outcome, "reported", label);
+    assert.equal(names(run.calls).filter((n) => n === "readState").length, 1, label);
+  }
+
+  // A failed deploy never goes on, even when the app would read the lane free.
+  const failed = timed({ state: sequence(awaiting(), FREE), deployments: [deployment("FAILED")] });
+  assert.equal((await runQaReleaseMergeLaneRound(ENV, failed.ports)).detail, "failed");
+  assert.equal(names(failed.calls).filter((n) => n === "readState").length, 1);
+  assert.equal(names(failed.calls).includes("issue"), false);
+
+  // Going on is a fresh start: a deploy of something else still waiting for CI holds it.
+  const pushedMeanwhile = deployment("WAITING", 0, "f".repeat(40));
+  const held = timed({ state: sequence(awaiting(), FREE), deployments: sequence([deployment("SUCCESS")], [pushedMeanwhile, deployment("SUCCESS")]) });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, held.ports), { exitCode: 0, outcome: "hold", afterDeploy: "succeeded" });
+  assert.equal(names(held.calls).includes("issue"), false);
+});
+
 test("a latched lane still judges its open attempt", async () => {
   const { ports: p, calls } = ports({ state: { ...awaiting(), latched: true }, deployments: [deployment("SUCCESS")] });
   await runQaReleaseMergeLaneRound(ENV, p);

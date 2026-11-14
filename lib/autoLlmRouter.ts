@@ -36,6 +36,7 @@ import {
     autoLlmRouterFileDiagnostics,
     autoLlmRouterOutputSchema,
     autoLlmRouterProviderOptions,
+    autoLlmRouterReasoningEffort,
     autoLlmRouterSession,
     autoLlmRouterUserMessage,
     autoLlmRouterWorstCaseMicroUsd,
@@ -59,7 +60,7 @@ import {
 export type AutoLlmRouterCallResult = {
     outcome: "picked" | "invalid" | "error" | "timeout";
     pick: AutoLlmRouterPick | null;
-    usage: { inputTokens?: number; outputTokens?: number } | undefined;
+    usage: { inputTokens?: number; outputTokens?: number; reasoningTokens?: number } | undefined;
     failure?: AutoLlmRouterFailure;
     imageDecision?: ChatImageDecision;
     searchQueries?: string[];
@@ -210,7 +211,13 @@ async function callPreparedAutoLlmRouter(
             }),
             providerOptions: autoLlmRouterProviderOptions(input.routerModel.provider),
         });
-        usage = generated.usage as AutoLlmRouterCallResult["usage"];
+        const raw = generated.usage as { inputTokens?: number; outputTokens?: number;
+            reasoningTokens?: number; outputTokenDetails?: { reasoningTokens?: number } } | undefined;
+        // Reasoning tokens are output the answer never shows; at the router's
+        // effort they are what a slow call would be spending its time on.
+        const reasoningTokens = raw?.outputTokenDetails?.reasoningTokens ?? raw?.reasoningTokens;
+        usage = raw ? { inputTokens: raw.inputTokens, outputTokens: raw.outputTokens,
+            ...(typeof reasoningTokens === "number" ? { reasoningTokens } : {}) } : undefined;
         finishReason = generated.finishReason;
         stage = "output";
         const output = generated.output;
@@ -575,6 +582,11 @@ export async function pickAutoModelWithLlm(input: {
             outcome,
             latencyMs,
             timeoutMs: call.timeoutMs,
+            // Sizes, never text: what a slow call was asked to read and how
+            // much it thought, so a timeout can be told from a slow provider.
+            requestChars: request.system.length + request.prompt.length,
+            reasoningEffort: routerModel.provider === "openai" ? autoLlmRouterReasoningEffort() : null,
+            reasoningTokens: usage?.reasoningTokens ?? null,
             ...(failure ? { failure } : {}),
         })
     );

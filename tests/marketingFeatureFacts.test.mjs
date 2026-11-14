@@ -51,10 +51,10 @@ const proposal = (kind, id, extra = {}) => ({
 });
 
 test("the migration seeds every entry of features.json, in order", () => {
+  // Ids and order only: after the seed the Admin list is the source, and this
+  // file is its fallback copy, so its wording moves with the list (2026-11-13).
   repoFeatures.forEach((feature, index) => {
     assert.ok(MIGRATION.includes(`('${feature.id}', ${index}, `), feature.id);
-    assert.ok(MIGRATION.includes(`'${feature.source.replaceAll("'", "''")}'`), `${feature.id} source`);
-    if (feature.hold) assert.ok(MIGRATION.includes(`'${feature.hold.replaceAll("'", "''")}'`), `${feature.id} hold`);
   });
 });
 

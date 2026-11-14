@@ -583,6 +583,35 @@ for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const)
     });
   }
 
+test("Easy marks the providers that can draw, from the active image catalogue", async ({ page }) => {
+  // Owner report 2026-11-13: every row read the same, so nothing said which
+  // provider could answer an image request. The badge follows the catalogue.
+  await prepare(page, 1440);
+  await page.locator(".review-participants-heading").click();
+  const row = (name: string) => page.locator(".review-participant-list>button").filter({ has: page.locator("strong", { hasText: new RegExp(`^${name}`) }) });
+  for (const name of ["OpenAI", "Google", "xAI"]) await expect(row(name).getByTestId("review-provider-image-badge")).toHaveText("이미지");
+  await expect(row("Anthropic").getByTestId("review-provider-image-badge")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
+test("the Review image card arms image mode on an active model in both modes", async ({ page }) => {
+  // The card is v2's multi-model image entry. Easy sends the sentence to every
+  // selected provider; Professional starts on an active catalogue model, never
+  // a fixed default that may have been disabled.
+  await prepare(page, 1440);
+  await page.locator(".review-image-starter:visible").click();
+  await expect(page.getByTestId("review-image-mode")).toBeVisible();
+  await expect(page.getByTestId("chat-textarea")).not.toHaveValue("");
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+  await page.getByTestId("review-image-mode").getByRole("button").click();
+  await page.getByTestId("chat-textarea").fill("");
+  await page.getByTestId("composer-review-mode").getByRole("button", { name: "전문가", exact: true }).click();
+  await page.locator(".review-image-starter:visible").click();
+  await expect(page.getByTestId("review-image-mode")).toContainText("GPT Image 2");
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/review/);
+});
+
 test("Professional image selection stages the composer, then answers inline without automatic routing", async ({ page }) => {
   const calls = await installInlineImageAnswers(page);
   await prepare(page, 1440);

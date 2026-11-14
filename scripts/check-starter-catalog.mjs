@@ -96,7 +96,7 @@ for (const [capability, descriptor] of Object.entries(STARTER_CAPABILITIES)) {
   }
   const source = readFileSync(descriptor.resolvedBy, "utf8");
   const exported = new RegExp(
-    `export (?:const|function|type|class) ${descriptor.resolvedByExport}\\b`
+    `export (?:const|(?:async )?function|type|class) ${descriptor.resolvedByExport}\\b`
   );
   if (!exported.test(source)) {
     fail(

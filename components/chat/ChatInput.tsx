@@ -3,6 +3,7 @@
 import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
 import { McpChatPicker } from "@/components/plugins/McpChatPicker";
 import { ChatLocationControl } from "./ChatLocationControl";
+import { composerModelCountLabel } from "./composerModelCountLabel";
 import { ReviewModeSwitcher, ReviewParticipants } from "./ReviewStudioChrome";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
@@ -1159,7 +1160,7 @@ export function ChatInput({
     const isAutoCapabilityPending =
       isAutoMode && draftLocked && !autoSelectionOffered;
     const modelsSelectedLabel = (count: number) =>
-      `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
+      composerModelCountLabel(count, t("chat.modelsSelectedOne"), t("chat.modelsSelectedOther"));
     const signInCallbackUrl = withChatLanguage(
       currentProduct === "review" ? "/review" : "/chat",
       lang
@@ -3052,7 +3053,7 @@ export function ChatInput({
               ref={modelMenuButtonRef}
               type="button"
               onClick={(event) => toggleModelPicker(event.currentTarget)}
-              className="flex h-11 min-w-0 max-w-[4rem] touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:max-w-[8.5rem] md:[@media(pointer:fine)]:h-9"
+              className="flex h-11 min-w-0 max-w-[6.5rem] touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:max-w-[8.5rem] md:[@media(pointer:fine)]:h-9"
               data-testid="composer-model-select"
               title={isAutoMode ? autoCopy.activeSummary : activeModelNames.join(", ")}
               aria-label={
@@ -3076,7 +3077,7 @@ export function ChatInput({
                   </span>
                 ) : (
                   // Between the 240px icon-only rule and md the label below
-                  // already reads "3 AIs", and the 4rem button cannot hold both
+                  // already reads "3 AIs", and the 6.5rem button cannot hold both
                   // a count badge and that label: the badge left the label 6px
                   // and clipped it to "3 A". The badge returns where the label
                   // is hidden (240px and below) and where the button is wider.
@@ -3098,7 +3099,7 @@ export function ChatInput({
               )}
               <span
                 data-testid="composer-active-model-count"
-                className={`min-w-0 line-clamp-2 break-keep ${
+                className={`min-w-0 truncate ${
                   isAutoMode ? "" : "max-[240px]:sr-only"
                 }`}
               >

@@ -358,6 +358,18 @@ export async function detectChatTurnImage(input: ChatTurnImageInput): Promise<Ch
 export const combinedChatImageIntentEnabled = () => process.env.CHAT_AUTO_COMBINED_INTENT_ENABLED === "true";
 
 /**
+ * How long a combined router call may run before the separate image
+ * classification is started beside it (`hedge` above). Off unless
+ * `CHAT_ROUTER_IMAGE_HEDGE_MS` is set (1,000-20,000): the early call is a
+ * second paid classification on every slow turn, used only when the router
+ * then fails.
+ */
+export const chatRouterImageHedgeMs = (raw = process.env.CHAT_ROUTER_IMAGE_HEDGE_MS): number | null => {
+    const value = Number(raw?.trim());
+    return raw && Number.isInteger(value) && value >= 1_000 && value <= 20_000 ? value : null;
+};
+
+/**
  * Legacy starts immediately beside routing. Combined prepares the same gated
  * context, then runs the standalone classifier only if routing did not return
  * an image decision (disabled router, budget refusal, invalid output or error).
@@ -367,9 +379,22 @@ export function createChatTurnImageRouting(input: ChatTurnImageInput | null, com
     let decision: ChatImageDecision | undefined;
     let fallback = !input || savedDecision ? Promise.resolve(NOT_IMAGE)
         : !combined ? detectChatTurnImage(input) : undefined;
+    const startFallback = () => fallback ??= prepared!.then(value => value
+        ? runPreparedChatImageRequest(value, input!.traceId) : NOT_IMAGE).catch(() => NOT_IMAGE);
     return {
         context: combined ? prepared : undefined,
         accept: (value: ChatImageDecision) => { decision = value; },
+        /**
+         * Starts the separate image classification now, while the combined
+         * router call is still running, so a router that then times out does
+         * not add a second serial wait (2026-11-13: 8 s, then 4.7 s more).
+         * Only on a combined turn whose router has not decided yet; a decision
+         * that arrives later still wins, and the early call's answer is unused.
+         */
+        hedge: () => {
+            if (!combined || savedDecision || decision || !prepared) return;
+            void startFallback();
+        },
         resolve: (): Promise<ChatImageDecision> => {
             if (savedDecision?.image) {
                 return prepared ? prepared.then(context => {
@@ -381,8 +406,7 @@ export function createChatTurnImageRouting(input: ChatTurnImageInput | null, com
             }
             if (savedDecision) return Promise.resolve(savedDecision);
             if (decision) return Promise.resolve(decision);
-            return fallback ??= prepared!.then(value => value
-                ? runPreparedChatImageRequest(value, input!.traceId) : NOT_IMAGE).catch(() => NOT_IMAGE);
+            return startFallback();
         },
     };
 }
