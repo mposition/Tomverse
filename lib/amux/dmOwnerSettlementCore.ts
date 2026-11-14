@@ -16,6 +16,21 @@ import { createHash } from "node:crypto";
 
 import { engineeringAgentPatchFiles } from "../engineeringAgentOwnerItemContextCore.ts";
 import { patchSections } from "../engineeringAgentT2DmReviewCore.ts";
+import { DM_EVIDENCE_CLOSE, DM_EVIDENCE_OPEN } from "./decisionMakerCore.ts";
+
+const CUT_NOTE = " (cut to fit this card)";
+
+/**
+ * A run's words as one evidence block within `room` characters, markers
+ * included, cut with a note when longer; null when not even the note fits.
+ */
+function evidenceBlock(text: string, room: number): string | null {
+  const wrap = (body: string) => `${DM_EVIDENCE_OPEN}\n${body}\n${DM_EVIDENCE_CLOSE}`;
+  const whole = wrap(text);
+  if (whole.length <= room) return whole;
+  const keep = room - wrap("").length - CUT_NOTE.length;
+  return keep > 40 ? wrap(text.slice(0, keep) + CUT_NOTE) : null;
+}
 
 /** Default off. Filing a settlement card starts a Decision Maker turn. */
 export const AMUX_DM_OWNER_SETTLEMENT_ENV = "TOMVERSE_AMUX_DM_OWNER_SETTLEMENT";
@@ -131,6 +146,7 @@ export const AMUX_DM_OWNER_SETTLEMENT_REASON_TEXT: Readonly<Record<string, strin
   human_review_required: "it waits for a person to review its result",
   execution_blocked: "its run was stopped and it waits for a person",
   attempt_budget_exhausted: "it has used every run it is allowed",
+  dependency_closed: "a card it depends on was archived without being done, so it can never start",
   execution_lease_expired: "its run stopped answering before it finished",
   usage_outcome_unknown: "how much its run used is not known",
   cli_turn_limit: "its run reached the command line tool's turn limit",
@@ -220,8 +236,14 @@ export function amuxDmOwnerSettlementCard(input: {
   const siblings = siblingLines(input.siblings, input.siblingTotal);
   const max = AMUX_DM_OWNER_SETTLEMENT_QUESTION_MAX;
   if (input.kind === "stopped") {
-    const question = [...head, findingsLine, ...rejected, ...siblings, REMAKE_LINE,
-      "Should the Task run again, be marked done because its work is in, or be closed?"].join("\n");
+    // The run's words are evidence (AMUXFLOW/B2): marked for the term check,
+    // and cut to the room the card has rather than leaving the card unfiled.
+    const ask = "Should the Task run again, be marked done because its work is in, or be closed?";
+    const fixed = [...head, ...rejected, ...siblings, REMAKE_LINE, ask].join("\n");
+    const room = max - fixed.length - 1;
+    const evidence = evidenceBlock(findingsLine, room);
+    const question = [...head, ...(evidence ? [evidence] : []), ...rejected, ...siblings,
+      REMAKE_LINE, ask].join("\n");
     if (question.length > max) return null;
     return {
       question_id: input.settlementId,
@@ -245,10 +267,13 @@ export function amuxDmOwnerSettlementCard(input: {
   const tail = ["Should the pull request be approved, the Task run again, or the card closed?"];
   const fixed = [...head, ...rejected, ...siblings, ...pullHead, ...tail].join("\n");
   if (fixed.length > max) return null;
-  // Room for the findings first, whole, then for the diffs, each whole.
-  const findingsFit = fixed.length + 1 + findingsLine.length + 80 <= max;
-  const shownFindings = findingsFit ? findingsLine : "Its run's report does not fit this card; judge it from the patch.";
-  let left = max - fixed.length - shownFindings.length - 1 - 80;
+  // Room for the findings first, whole, then for the diffs, each whole. Both
+  // are evidence (AMUXFLOW/B2): each block carries its markers.
+  const marks = DM_EVIDENCE_OPEN.length + DM_EVIDENCE_CLOSE.length + 2;
+  const findingsFit = fixed.length + 1 + findingsLine.length + marks + 80 <= max;
+  const shownFindings = findingsFit ? evidenceBlock(findingsLine, Number.MAX_SAFE_INTEGER)! :
+    "Its run's report does not fit this card; judge it from the patch.";
+  let left = max - fixed.length - shownFindings.length - 1 - 80 - marks;
   const shown: string[] = [];
   const sections = patchSections(patch);
   for (const section of sections) {
@@ -259,7 +284,7 @@ export function amuxDmOwnerSettlementCard(input: {
   const omitted = sections.length - shown.length;
   const question = [...head, shownFindings, ...rejected, ...siblings, ...pullHead,
     shown.length > 0 ? "Patch:" : "The patch does not fit this card; judge it from the file list.",
-    ...shown,
+    ...(shown.length > 0 ? [DM_EVIDENCE_OPEN, ...shown, DM_EVIDENCE_CLOSE] : []),
     ...(shown.length > 0 && omitted > 0 ? [`(${omitted} more file diffs are not shown.)`] : []),
     ...tail].join("\n");
   if (question.length > max) return null;

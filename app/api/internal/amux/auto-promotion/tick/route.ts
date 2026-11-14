@@ -22,6 +22,7 @@ import { AMUX_V22_WORKER_CLAIM_ENV, amuxV22WorkerClaimEnabled } from
   "@/lib/amux/v22WorkerClaimCore";
 import { tickV22WorkerClaim } from "@/lib/amux/v22WorkerClaimService";
 import { amuxRouteHasBudgetForMs, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import { sweepAmuxStalledCards } from "@/lib/amux/stalledCardSweep";
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
 import { AMUX_SCORE_REFRESH_ENV, amuxScoreAutoRefreshEnabled } from
   "@/lib/amux/portfolioScoreCore";
@@ -142,6 +143,15 @@ export async function POST(request: Request) {
         { status: 409, headers: noStore });
     }
 
+    // Stopped cards first, so the queue and the Decision Maker see them
+    // (AMUXFLOW/B2, its own switch). Never a reason this tick fails.
+    if (identity.kind === "admitted") {
+      try { await sweepAmuxStalledCards(); }
+      catch (error) {
+        console.error("amux stalled card sweep failed",
+          { error: error instanceof Error ? error.name : "unknown" });
+      }
+    }
     if (v22Enabled && identity.kind === "admitted" &&
         amuxScoreAutoRefreshEnabled(process.env[AMUX_SCORE_REFRESH_ENV])) {
       const stopped = await refreshScoresBeforePromotion();

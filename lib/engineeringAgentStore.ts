@@ -86,6 +86,8 @@ import {
   ENGINEERING_AGENT_PR_RESUME_CLAIMED_REASON,
   ENGINEERING_AGENT_REGISTRATION_SETTING_KEY,
   UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX,
+  ENGINEERING_AGENT_MISMATCH_CARD_SCOPED_ENV,
+  engineeringAgentMismatchCardScoped,
   ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS,
   ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV,
   ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DECISIONS,
@@ -322,6 +324,10 @@ export type EngineeringAgentHaltState = {
    */
   unacknowledgedHalt: HaltValue | null;
   circuitLatched: boolean;
+  /** Mismatches and orphaned runs hold only their card (AMUXFLOW/B2). */
+  cardScoped?: boolean;
+  /** Open mismatches bound to no run: no card to hold, so they still halt. */
+  unscopedStateMismatches?: number;
 };
 
 // A halt the database holds that this build does not know is still a halt.
@@ -382,7 +388,12 @@ export async function readEngineeringAgentHaltState(
     observed !== null && (acknowledgedAt === null || observed.at.getTime() > acknowledgedAt.getTime())
       ? observed.halt
       : null;
+  const cardScoped = engineeringAgentMismatchCardScoped(process.env[ENGINEERING_AGENT_MISMATCH_CARD_SCOPED_ENV]);
+  const unscopedStateMismatches = cardScoped && openStateMismatches > 0 ?
+    await db.engineeringAgentWorkItem.count({ where: { kind: "state_mismatch", state: "open", runId: null } }) : 0;
   return {
+    cardScoped,
+    unscopedStateMismatches,
     openStateMismatches,
     orphanedRuns: orphaned,
     unacknowledgedHalt:
@@ -413,7 +424,8 @@ export const currentEngineeringAgentHalt = (state: EngineeringAgentHaltState): H
     return state.circuitLatched ? higherHalt(state.unacknowledgedHalt, "circuit_open") : state.unacknowledgedHalt;
   }
   if (state.circuitLatched) return "circuit_open";
-  if (state.openStateMismatches > 0 || state.orphanedRuns > 0) return "state_mismatch";
+  if (state.cardScoped ? (state.unscopedStateMismatches ?? 0) > 0 :
+    state.openStateMismatches > 0 || state.orphanedRuns > 0) return "state_mismatch";
   return "none";
 };
 
@@ -483,10 +495,28 @@ export async function openEngineeringAgentRunMismatches(tx: EngineeringAgentTran
   return runs.length;
 }
 
+/**
+ * Whether one card is held by its own record (AMUXFLOW/B2): an open state
+ * mismatch on a run of that card, or a run of it still active after its AMUX
+ * attempt ended. Given a run, its card is the one asked about.
+ */
+async function engineeringAgentCardHeld(
+  tx: EngineeringAgentTransaction, input: { cardId?: string; runId?: string },
+): Promise<boolean> {
+  const cardId = input.cardId ?? (input.runId ? (await tx.engineeringAgentRun.findUnique({
+    where: { id: input.runId }, select: { cardId: true } }))?.cardId : undefined);
+  if (!cardId) return false;
+  const mismatch = await tx.engineeringAgentWorkItem.count({ where: { kind: "state_mismatch", state: "open",
+    run: { cardId } } });
+  if (mismatch > 0) return true;
+  return (await tx.engineeringAgentRun.count({ where: { cardId, status: "active",
+    attempt: { endedAt: { not: null } } } })) > 0;
+}
+
 /** Whether anything halts claims, runs and pushes (§12). */
 export const engineeringAgentHalted = (state: EngineeringAgentHaltState): boolean =>
-  state.openStateMismatches > 0 ||
-  state.orphanedRuns > 0 ||
+  (state.cardScoped ? (state.unscopedStateMismatches ?? 0) > 0 :
+    state.openStateMismatches > 0 || state.orphanedRuns > 0) ||
   state.unacknowledgedHalt !== null ||
   state.circuitLatched;
 
@@ -632,7 +662,9 @@ export async function recordEngineeringAgentRunStart(
   await requireSwitch(tx, "claimAllowed");
   // A halt stops claims (§12), and a run is the claim's work.
   await lockEngineeringAgentHalt(tx);
-  if (engineeringAgentHalted(await readEngineeringAgentHaltState(tx))) refuse("halted");
+  const haltState = await readEngineeringAgentHaltState(tx);
+  if (engineeringAgentHalted(haltState)) refuse("halted");
+  if (haltState.cardScoped && await engineeringAgentCardHeld(tx, { cardId: input.cardId })) refuse("halted");
   const now = await databaseNow(tx);
   const run = await tx.engineeringAgentRun.create({
     data: {
@@ -941,7 +973,10 @@ export async function claimEngineeringAgentWorkItem(
     // A halt stops a write claim here, in the function that spends the
     // capability, and under the lock every halt is written under (§12).
     await lockEngineeringAgentHalt(tx);
-    if (engineeringAgentHalted(await readEngineeringAgentHaltState(tx))) refuse("halted");
+    const haltState = await readEngineeringAgentHaltState(tx);
+    if (engineeringAgentHalted(haltState)) refuse("halted");
+    if (haltState.cardScoped && item.runId &&
+        await engineeringAgentCardHeld(tx, { runId: item.runId })) refuse("halted");
     capability = await lockLiveCapability(tx, item.id);
     if (!capability) refuse("capability_unavailable");
     if (capability!.expiresAt.getTime() <= now.getTime()) refuse("capability_expired");

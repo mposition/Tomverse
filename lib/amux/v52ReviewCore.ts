@@ -48,6 +48,19 @@ export function validAmuxV52ReviewEvidence(value: AmuxV52ReviewEvidence) {
 export const AMUX_V52_REVIEW_REJECTED_TWICE_REASON =
   "review_server_rejected_twice";
 
+/**
+ * Owner decision 2026-11-14 (AMUX process audit bundle 2, AMUXFLOW/B2): a
+ * review is an internal signal and merging has its own gate, so every
+ * rejection returns the Task to `todo`; the attempt budget
+ * (lib/amux/executionBudgetCore.ts) ends the repeats and a spent budget
+ * blocks the Task for the owner queue and the Decision Maker. Off unless
+ * TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET=enabled.
+ */
+export const AMUX_V52_REJECT_RETRY_IN_BUDGET_ENV = "TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET";
+export const amuxV52RejectRetryInBudgetEnabled = (
+  value: string | undefined = process.env[AMUX_V52_REJECT_RETRY_IN_BUDGET_ENV],
+) => value?.trim() === "enabled";
+
 /** A first rejection returns to the same grade; a second needs a person.
  * `priorRejections` counts the Task's other rejected attempts since the
  * owner last retried a twice-rejected run (lib/amux/execution.ts), so an
@@ -55,12 +68,13 @@ export const AMUX_V52_REVIEW_REJECTED_TWICE_REASON =
  * first rejection. */
 export function decideAmuxV52ReviewDisposition(
   verdict: AmuxV52ReviewVerdict, priorRejections: number,
+  rejectRetryInBudget: boolean = amuxV52RejectRetryInBudgetEnabled(),
 ): { status: "review" | "todo" | "blocked"; reason: string } {
   if (!Number.isSafeInteger(priorRejections) || priorRejections < 0)
     return { status: "blocked", reason: "review_history_unavailable" };
   if (verdict === "accept")
     return { status: "review", reason: "review_server_accepted" };
-  if (verdict === "reject" && priorRejections === 0)
+  if (verdict === "reject" && (priorRejections === 0 || rejectRetryInBudget))
     return { status: "todo", reason: "review_server_rejected" };
   if (verdict === "reject")
     return { status: "blocked", reason: AMUX_V52_REVIEW_REJECTED_TWICE_REASON };

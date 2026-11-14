@@ -829,6 +829,20 @@ export type RunnerReportableHalt = (typeof RUNNER_REPORTABLE_HALTS)[number];
  * holds, in the policy's priority, so a report of `none` can never lower a
  * halt the app can see.
  */
+/**
+ * Owner decision 2026-11-14 (AMUX process audit bundle 2, AMUXFLOW/B2): an
+ * open state mismatch or an orphaned run is a record about one card's run --
+ * a merged pull request, an ended attempt -- so it holds that card, not the
+ * whole agent. With the switch on it no longer halts claims, runs and
+ * publication everywhere; a new run of the same card and a publish write for
+ * the same run are refused until the mismatch is resolved. The unbound app
+ * pull request and ref readings, a recorded halt and the circuit still halt
+ * everything. Off unless exactly `enabled`.
+ */
+export const ENGINEERING_AGENT_MISMATCH_CARD_SCOPED_ENV = "ENGINEERING_AGENT_MISMATCH_CARD_SCOPED";
+export const engineeringAgentMismatchCardScoped = (value: string | undefined) =>
+  value?.trim() === "enabled";
+
 export const combineRunHalt = (input: {
   reported: RunnerReportableHalt;
   circuitLatched: boolean;
