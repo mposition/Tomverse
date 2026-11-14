@@ -164,7 +164,7 @@ const RESPONSE_MAP = [
 async function mockMarketingReview(page: Page, lang: (typeof LOCALES)[number]) {
   const c = REVIEW_CONTENT[lang];
   await page.route(
-    "**/api/conversations/qa-conversation/comparison-reviews",
+    /\/api\/conversations\/qa-conversation\/comparison-reviews(?:\?.*)?$/,
     async (route) => {
       if (route.request().method() === "GET") {
         await route.fulfill({
