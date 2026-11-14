@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -9,6 +10,8 @@ import {
 } from "@/components/admin/AdminAmuxRoutingPanel";
 import { amuxLegacyCardReadOf, type AmuxLegacyCardRead } from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxOwnerQueueDecision } from "@/components/admin/AmuxOwnerQueueDecision";
+import { amuxOwnerQueueDmFrom } from "@/components/admin/AmuxOwnerQueueDm";
+import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue";
 import { AmuxOwnerQueueView, isAmuxOwnerQueueRead } from "@/components/admin/AmuxOwnerQueueScreen";
 import type { AmuxOwnerQueueItem, AmuxOwnerQueueRead } from "@/lib/amux/ownerQueueCore";
 import { amuxOwnerQueueEngineeringButtons } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
@@ -717,4 +720,107 @@ test("the card's requests are the console's own, bound to the digest and base sh
     url: "/api/admin/engineering-agent/mismatches",
     body: { workItemId: "item-mismatch", action: "record_bound_review_pr" },
   });
+});
+
+const DM_REQUEST = "0b6f2a3e-5d1c-4e8f-9a7b-2c3d4e5f6a7b";
+const dmProposal = (optionId: string, irreversible = false) => ({
+  state: "proposal" as const, requestId: DM_REQUEST, answer: null, optionId,
+  rationale: "The Task's work is already in the repository.", irreversible,
+  snapshot: { state: "none" as const, targetSha: null, paths: [] },
+  shown: { answerDigest: null, rationaleDigest: "3".repeat(64), optionId, irreversible,
+    snapshotState: "none" as const, snapshotTargetSha: null, snapshotManifestDigest: null },
+});
+const settlementOf = (overrides: Record<string, unknown> = {}) => ({
+  status: "read" as const, settlementId: "set-1", kind: "stopped" as const, state: "open" as const,
+  decision: null, handoffReason: null, dm: dmProposal("complete"), confirmable: true, ...overrides,
+}) as NonNullable<AmuxOwnerQueueItem["dmSettlement"]>;
+const withDm = (dmSettlement: AmuxOwnerQueueItem["dmSettlement"]) =>
+  decision(item({ dmSettlement }), controller());
+
+test("a Decision Maker proposal shows its choice, why and the confirmation through the existing judgment route", () => {
+  const html = withDm(settlementOf());
+  assert.match(html, /data-testid="amux-owner-queue-dm"[^>]*data-dm-state="proposal"/);
+  assert.match(html, /complete: Mark the Task done; its work is in/);
+  assert.match(html, /The Task&#x27;s work is already in the repository\./);
+  assert.match(html, /data-testid="amux-worker-question-dm-confirm"[^>]*>Confirm as proposed</);
+  assert.match(html, /Card only: no repository snapshot was sent\./);
+  assert.doesNotMatch(html, /amux-worker-question-dm-irreversible/);
+  // The owner's own decision below it is untouched.
+  assert.match(html, /data-testid="amux-owner-queue-why"/);
+  assert.equal(readFileSync("components/admin/AmuxOwnerQueueDm.tsx", "utf8").includes("/api/admin"), false,
+    "no route of its own: the button is the worker question's, on the judgment route");
+});
+
+test("an irreversible proposal says so before it can be confirmed", () => {
+  const html = withDm(settlementOf({ dm: dmProposal("close", true) }));
+  assert.match(html, /data-testid="amux-worker-question-dm-irreversible"/);
+  assert.match(html, /data-testid="amux-worker-question-dm-confirm"/);
+});
+
+test("a card the Decision Maker has not answered says it is reviewing, with no confirmation", () => {
+  for (const dm of [{ state: "filed" }, { state: "working", requestId: DM_REQUEST },
+    { state: "not_sent", reason: "waiting_relay" }] as const) {
+    const html = withDm(settlementOf({ dm, confirmable: false }));
+    assert.match(html, /data-dm-state="reviewing"/);
+    assert.match(html, /The Decision Maker is reviewing this card/);
+    assert.doesNotMatch(html, /amux-worker-question-dm-confirm/);
+  }
+});
+
+test("a handed-off card says why in a sentence, shows the proposal read only, and offers no confirmation", () => {
+  const handed = withDm(settlementOf({ kind: "t2_pr", dm: dmProposal("approve"), confirmable: false,
+    handoffReason: "outside_dm_merge_allowlist" }));
+  assert.match(handed, /data-dm-state="handed_off"/);
+  assert.match(handed, /outside what the Decision Maker may approve for an automatic merge into develop/);
+  assert.match(handed, /approve: Approve the pull request/);
+  assert.doesNotMatch(handed, /amux-worker-question-dm-confirm/);
+  assert.doesNotMatch(handed, /outside_dm_merge_allowlist/, "the stored code is never shown");
+  const noProposal = withDm(settlementOf({ dm: { state: "unavailable" }, confirmable: false,
+    handoffReason: "evidence_unavailable" }));
+  assert.match(noProposal, /never put to the Decision Maker/);
+  assert.match(withDm(settlementOf({ dm: { state: "unavailable" }, confirmable: false,
+    handoffReason: "a_future_reason" })), /could not apply its answer, so this card is left to you/);
+});
+
+test("an answer outside the card's fixed words is shown but not offered for confirmation", () => {
+  const html = withDm(settlementOf({ dm: { ...dmProposal("retry"), optionId: null, answer: "do something else" },
+    confirmable: false }));
+  assert.match(html, /cannot be confirmed as it stands/);
+  assert.doesNotMatch(html, /amux-worker-question-dm-confirm/);
+});
+
+test("a settlement that could not be read says so for this card only; a settled one says how it ended", () => {
+  assert.match(withDm({ status: "unread" }), /data-dm-state="unread"[^>]*>[\s\S]*could not be read/);
+  assert.match(withDm(settlementOf({ state: "applied", decision: "retry" })),
+    /data-dm-state="applied"[\s\S]*answer was applied: Run the Task again/);
+  assert.match(withDm(settlementOf({ state: "claimed" })), /remake this card as a new idea/);
+  assert.match(withDm(settlementOf({ state: "cancelled" })), /was cancelled/);
+  // A card with no settlement, and one the response did not carry, draw no Decision Maker area.
+  assert.doesNotMatch(withDm(null), /amux-owner-queue-dm/);
+  assert.doesNotMatch(withDm(undefined), /amux-owner-queue-dm/);
+});
+
+test("the Decision Maker area is Korean when the console is, and handoff reasons are sentences in both languages", () => {
+  const { en, ko } = adminAmuxOwnerQueueMessages;
+  assert.deepEqual(Object.keys(ko.dm.handoff).sort(), Object.keys(en.dm.handoff).sort());
+  assert.deepEqual(Object.keys(ko.dm.options).sort(), Object.keys(en.dm.options).sort());
+  for (const reason of Object.keys(en.dm.handoff)) {
+    assert.ok(ko.dm.handoff[reason].length > 10 && /[가-힣]/.test(ko.dm.handoff[reason]), reason);
+  }
+  assert.match(ko.dm.reviewing, /검토 중/);
+});
+
+test("the screen draws only a settlement it can check", () => {
+  const good = settlementOf();
+  assert.deepEqual(amuxOwnerQueueDmFrom(good), good);
+  assert.equal(amuxOwnerQueueDmFrom(null), null);
+  assert.equal(amuxOwnerQueueDmFrom(undefined), null);
+  assert.deepEqual(amuxOwnerQueueDmFrom({ status: "unread" }), { status: "unread" });
+  assert.deepEqual(amuxOwnerQueueDmFrom("nonsense"), { status: "unread" });
+  assert.deepEqual(amuxOwnerQueueDmFrom({ ...good, kind: "other" }), { status: "unread" });
+  assert.deepEqual(amuxOwnerQueueDmFrom({ ...good, confirmable: "yes" }), { status: "unread" });
+  // A proposal the shared reader refuses is never confirmable.
+  const broken = amuxOwnerQueueDmFrom({ ...good, dm: { state: "proposal", requestId: DM_REQUEST } });
+  assert.equal(broken?.status === "read" && broken.dm.state, "unavailable");
+  assert.equal(broken?.status === "read" && broken.confirmable, false);
 });

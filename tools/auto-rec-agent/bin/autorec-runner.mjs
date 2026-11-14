@@ -363,7 +363,7 @@ async function work(deps, claim, ctx) {
     deps.log("publish_no_answer", { message: error.message });
     return { unknown: "publish" };
   }
-  deps.log("publish_answer", { status: reply?.status ?? null, code: reply?.code ?? null, detail: reply?.detail ?? null });
+  deps.log("publish_answer", { status: reply?.status ?? null, code: reply?.code ?? null, detail: reply?.detail ?? null, step: reply?.step ?? null });
   if (reply?.status === "published") return { outcome: OUTCOME_PR_OPENED, prUrl: reply.prUrl };
   if (reply?.status === "refused") return failed(FAILURE_REASONS.includes(reply.code) ? reply.code : "runner_error");
   if (reply?.status === "failed" && reply.code === "pr_failed") return failed("pr_failed");
