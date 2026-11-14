@@ -40,7 +40,7 @@ All commands run locally, without production credentials or live model evaluatio
 | Core seed/passages, existing 8-language probes, retrieval regressions, fidelity and stream tests | 83 passed |
 | Auto limited-release regression script | 141 passed |
 | Continuation/system-block contracts | 125 passed |
-| Router sampling/hold + real source loader + Chat fallback orchestration | 140 passed; 2 additional receipt failure cases passed |
+| Router sampling/hold + real source loader + Chat fallback orchestration | 142 passed; prepared-source cache gate regression: 4 passed |
 | Selected-passage once-only + actual receipt E2E | Desktop Chromium and mobile Chromium: 2 passed |
 | Changed-file ESLint | Passed |
 | `npm run typecheck` | Passed with a 12 GiB Node heap |
@@ -84,5 +84,20 @@ Source-aware location fusion, Deep Research, automatic full-history retrieval, d
 automatic Memory storage and native selection/receipt parity remain outside the patch.
 
 No PR, push, CI admission/re-run, merge, deployment or operational flag change was performed.
-Independent boundary review is requested against the finished committed diff; its result
-is reported separately from these local checks.
+Independent boundary review `r-20261114-113206-da3a43` accepted commit `6069729e0`:
+Claude and Antigravity both returned `accept`, with no blocking/major findings. Follow-up
+fixes reuse the accepted unchanged authority/cost boundary: record the final seed outcome
+once at dispatch, revalidate current access while reusing the request-local immutable source
+plan instead of rescanning messages, and remove a stray BOM. The cache regression proves
+that locking/deletion/flag-off still reject prepared text before reuse.
+
+Non-blocking review observations retained: continuation presearch optimization is suppressed
+while ordinary current-query search tools remain available; the preparation card deliberately
+shows a mode without inferring current coverage from bridge counts; zero-token unused usage
+is settled with the existing `failed` enum while dispatch instrumentation records
+`not_dispatched`. The omission note covers the whole source, including unscanned history.
+
+A completion-time fetch observed `origin/main` at `0155ee7099ce389315403c7709cfaa708ce1ab31`.
+The relevant continuation/Router/Chat transport files had no upstream changes. An object-only
+`git merge-tree` simulation was conflict-free. This local branch retains the documented
+implementation base; no upstream branch or another session's worktree was changed.

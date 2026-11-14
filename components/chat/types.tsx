@@ -1,5 +1,5 @@
 import type { ContinuationReceipt } from "@/lib/continuationReceipt";
-﻿import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
+import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import type { MessageErrorReportContext } from "@/lib/errorReportContract";
 import type { ChatImageTurnRef } from "@/lib/chatImageTurnCore";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";

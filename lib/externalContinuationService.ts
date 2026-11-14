@@ -688,6 +688,8 @@ export async function getContinuationTimeline(
 }
 
 export type ContinuationTurnSeed = {
+    /** Request-local provenance used only to revalidate this immutable snapshot. */
+    sourceId?: string;
     prompt: ContinuationSeedPrompt;
     plan: ContinuationSeedPlan;
 };
@@ -723,6 +725,8 @@ export async function loadContinuationTurnSeed(input: {
     userId: string;
     conversationId: string;
     request: Request;
+    /** Reuse text only after every current access gate below has passed again. */
+    prepared?: ContinuationTurnSeed | null;
 }): Promise<ContinuationTurnSeedResult> {
     const bridge = await prisma.conversationContinuationBridge.findFirst({
         where: { conversationId: input.conversationId, userId: input.userId },
@@ -793,6 +797,9 @@ export async function loadContinuationTurnSeed(input: {
         return { seed: null, outcome: "locked" };
     }
 
+    if (input.prepared?.sourceId === snapshot.id && input.prepared.plan.sourceMessageCount === snapshot.messageCount) {
+        return { seed: input.prepared, outcome: "seeded" };
+    }
     const passages = decodePassages(input.request.headers.get(PASSAGE_HEADER));
     const plan = passages === null ? await readSeedPlan(prisma, snapshot.id, snapshot.messageCount)
         : await readChosenPassages(snapshot, passages);
@@ -803,6 +810,7 @@ export async function loadContinuationTurnSeed(input: {
     return {
         outcome: "seeded",
         seed: {
+            sourceId: snapshot.id,
             plan,
             prompt: buildContinuationSeedPrompt({
                 provider: bridge.provider,

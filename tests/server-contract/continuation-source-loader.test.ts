@@ -33,9 +33,9 @@ const settings = require(resolve(root, "lib/appSettings.ts"));
 mock.module(mod("lib/appSettings.ts"), { namedExports: { ...settings, isExternalContinuationEnabled: async () => enabled } });
 const locks = require(resolve(root, "lib/conversationLock.ts"));
 mock.module(mod("lib/conversationLock.ts"), { namedExports: { ...locks, hasResourceUnlockGrant: () => unlocked } });
-const load = async (header?: string) => {
+const load = async (header?: string, prepared?: import("../../lib/externalContinuationService").ContinuationTurnSeed) => {
     const { loadContinuationTurnSeed } = await import(mod("lib/externalContinuationService.ts"));
-    return loadContinuationTurnSeed({ userId: "owner", conversationId: "chat",
+    return loadContinuationTurnSeed({ userId: "owner", conversationId: "chat", prepared,
     request: new Request("http://localhost/chat", { headers: header === undefined ? {} : { "x-tomverse-source-passages": header } }) });
 };
 
@@ -73,4 +73,17 @@ test("empty, invalid and stale selection stay empty while an absent header retai
     const automatic = await load();
     assert.equal(automatic.seed.plan.seedVersion, "ext-seed-v2");
     assert.match(automatic.seed.prompt.transcriptText, /AUD70/);
+});
+
+test("prepared source text is reused without another scan only after current access gates pass", async () => {
+    const first = await load("0:0:27");
+    queries.length = 0;
+    const checked = await load("0:0:27", first.seed);
+    assert.equal(checked.seed, first.seed);
+    assert.equal(queries.filter(query => query.table === "message").length, 0);
+    for (const reason of ["locked", "source_deleted", "flag_off_stale_cache"]) {
+        unlocked = reason !== "locked"; deleted = reason === "source_deleted"; enabled = reason !== "flag_off_stale_cache";
+        assert.equal((await load("0:0:27", first.seed)).seed, null);
+    }
+    enabled = true; unlocked = true; deleted = false;
 });

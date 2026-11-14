@@ -1322,13 +1322,13 @@ async function handleChatPost(
         return response;
     };
     type DurableAttempt = {
-              userId: string;
-              assistantMessageId: string;
-              sourceUserMessageId: string;
-              ownerId: string;
-              revision: number;
-              partialContent: string;
-          };
+        userId: string;
+        assistantMessageId: string;
+        sourceUserMessageId: string;
+        ownerId: string;
+        revision: number;
+        partialContent: string;
+    };
     let durableAttempt: DurableAttempt | null = null;
     let durableCheckpointWriter: ChatResponseAttemptCheckpointWriter | null = null;
     let durableAttemptAdmissionConsumed = false;
@@ -2480,7 +2480,7 @@ async function handleChatPost(
             if (deepResearchDepth || requestedModelConfig.usageClass === "deep-research") return { seed: null, outcome: "no_bridge" };
             try {
                 if (!(await isExternalContinuationEnabledCached())) return { seed: null, outcome: "flag_off" };
-                return await loadContinuationTurnSeed({ userId: session.user.id, conversationId, request: req });
+                return await loadContinuationTurnSeed({ userId: session.user.id, conversationId, request: req, prepared: preparedContinuation.seed });
             } catch (error) {
                 logRequestError("chat_continuation_seed_failed", traceId, error);
                 return { seed: null, outcome: "read_failed" };
@@ -2551,7 +2551,9 @@ async function handleChatPost(
         // A document about images is still a file request, not an image turn.
         const autoImageDecision = llmPick?.requiresFileGeneration
             ? { image: false as const } : detectedImageDecision;
-        let afterRoutingContinuation = hasContinuation ? await readContinuation() : preparedContinuation;
+        // A request that started without an authorised plan cannot acquire a new
+        // source after the Router has already decided from the native view.
+        let afterRoutingContinuation = preparedContinuation.seed ? await readContinuation() : preparedContinuation;
         if (importedSource && process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED !== "true")
             afterRoutingContinuation = { seed: null, outcome: "flag_off" };
         const continuationRevoked = Boolean(importedSource && (!afterRoutingContinuation.seed ||
@@ -3581,7 +3583,6 @@ async function handleChatPost(
             continuation.receipt = continuationReceipt({ traceId, assistantMessageId: assistantMessageId ?? "",
                 selected: req.headers.has(PASSAGE_HEADER), outcome: isDeepResearchTurn ? "unsupported" : finalContinuation.outcome,
                 plan: continuationSeed ? finalContinuation.seed?.plan : null });
-            if (!isDeepResearchTurn) void recordContinuationSeedOutcome(finalContinuation.outcome);
         }
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             currentLocation,
@@ -5442,6 +5443,7 @@ async function handleChatPost(
         if (hasContinuation) recordAutoSelection();
         const initialAttemptAbortController = new AbortController();
         await recordDispatchStarted(dispatchRecord);
+        if (hasContinuation) void recordContinuationSeedOutcome(finalContinuation.outcome);
         latency.provider();
         if (continuation.receipt && continuationSeed) continuation.receipt.status = "unknown";
         const result = await beginProviderCall(
