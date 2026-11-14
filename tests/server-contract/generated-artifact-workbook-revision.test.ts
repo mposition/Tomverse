@@ -67,6 +67,36 @@ test("existing create_spreadsheet produces two exact cell revisions and carries 
   assert.doesNotMatch(JSON.stringify(firstReport), /stored-private-id|private\/|canonicalSpec/);
 });
 
+test("the final stream card uses the committed standalone edge when source evidence disappeared", async () => {
+  stored = [];
+  await subject().run("spreadsheet", base);
+  const original = stored[0], collector = subject(original);
+  await collector.run("spreadsheet", edit(200));
+  const revised = stored[1];
+  assert.equal(collector.toStreamArtifacts()[0].parentArtifactId, original.id);
+  const [card] = collector.withPersistedIds([
+    { id: revised.id, ordinal: 0, parentArtifactId: null, lineageId: revised.id },
+  ]);
+  assert.equal(card.parentArtifactId, null); assert.equal(card.lineageId, revised.id);
+  assert.doesNotMatch(JSON.stringify(card), new RegExp(original.id));
+});
+
+test("a flag disabled between storage and final save removes old lineage from the final stream card", async (t) => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  t.after(() => { if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED; else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous; });
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+  stored = [];
+  await subject().run("spreadsheet", base);
+  const collector = subject(stored[0]);
+  await collector.run("spreadsheet", edit(200));
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "false";
+  const [card] = collector.withPersistedIds([
+    { id: stored[1].id, ordinal: 0, parentArtifactId: null, lineageId: null },
+  ]);
+  assert.equal(card.status, "ready"); assert.equal(card.id, stored[1].id);
+  assert.equal(card.parentArtifactId, undefined); assert.equal(card.lineageId, undefined);
+});
+
 test("a revision requires an actual readable latest input handle, not ids, stale handles or metadata alone", async () => {
   for (const options of [{}, { revisionSources: new Map([["att_1", { sourceArtifactId: "private", lineageId: "line", canonicalSpec: canonicalWorkbookSpecFor(base as never) }]]) }]) {
     stored = [];

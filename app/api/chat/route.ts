@@ -7494,7 +7494,7 @@ async function handleChatPost(
                                     const persistedRows =
                                         await prisma.messageArtifact.findMany({
                                             where: { messageId: assistantMessageId },
-                                            select: { id: true, ordinal: true },
+                                            select: { id: true, ordinal: true, parentArtifactId: true, lineageId: true },
                                         });
                                     artifactsForTrailer =
                                         artifactCollector.withPersistedIds(persistedRows);

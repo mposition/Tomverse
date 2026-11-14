@@ -120,6 +120,8 @@ type ArtifactRow = {
   objectKey: string | null;
   failureCode?: string;
   modelId: string | null;
+  parentArtifactId?: string | null;
+  lineageId?: string | null;
 };
 
 const world = {
@@ -308,6 +310,8 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
       world.artifactRows.map((row, index) => ({
         id: `row_${index + 1}`,
         ordinal: row.ordinal,
+        parentArtifactId: row.parentArtifactId ?? null,
+        lineageId: row.lineageId ?? null,
       })),
   },
 };

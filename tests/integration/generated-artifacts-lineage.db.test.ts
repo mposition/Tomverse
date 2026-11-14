@@ -164,7 +164,8 @@ test("foreign owner, conversation, source and invented lineage cannot create an 
   assert.equal(await prisma.messageArtifact.count({ where: { userId: source.userId } }), 5);
 });
 
-test("source and receipt deletion before final persistence keeps the answer and file without an unverified edge", async () => {
+test("source and receipt deletion before final persistence keeps the answer and file without an unverified edge", async (t) => {
+  const warnings = t.mock.method(console, "warn", () => {});
   const source = await seed(), upload = await prepare(source), bound = await bind(source, upload.uploadId);
   await prisma.message.deleteMany({ where: { id: { in: [source.messageId, bound.messageId] } } });
   await prisma.messageAttachmentUpload.delete({ where: { id: upload.uploadId } });
@@ -173,6 +174,9 @@ test("source and receipt deletion before final persistence keeps the answer and 
   assert.equal(saved.parentArtifactId, null); assert.equal(saved.lineageId, id);
   assert.deepEqual(saved.canonicalSpec, source.canonical);
   assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: saved.messageId } })).content, "Revision");
+  assert.deepEqual(warnings.mock.calls.map(call => JSON.parse(call.arguments[0])), [
+    { event: "generated_artifact_lineage_dropped", reason: "source_evidence_missing", count: 1 },
+  ]);
 });
 
 test("version reads are owner/unlock scoped, default-off and reject foreign cursors", async () => {

@@ -611,11 +611,16 @@ export class GeneratedArtifactCollector {
    * card. Matching is by ordinal, which is exactly what the unique index is
    * on.
    */
-  withPersistedIds(rows: Array<{ id: string; ordinal: number }>): ChatStreamArtifact[] {
-    const byOrdinal = new Map(rows.map((row) => [row.ordinal, row.id]));
+  withPersistedIds(rows: Array<{ id: string; ordinal: number; parentArtifactId?: string | null; lineageId?: string | null }>): ChatStreamArtifact[] {
+    const byOrdinal = new Map(rows.map((row) => [row.ordinal, row]));
     return this.toStreamArtifacts().map((artifact) => {
       const persisted = byOrdinal.get(artifact.ordinal);
-      return persisted ? { ...artifact, id: persisted } : artifact;
+      if (!persisted) return artifact;
+      // Persistence may have dropped an unverifiable edge or disabled metadata.
+      // The final card must describe the committed row, just as a reload does.
+      const { parentArtifactId: _parent, lineageId: _lineage, ...card } = artifact;
+      return { ...card, id: persisted.id,
+        ...(persisted.lineageId ? { lineageId: persisted.lineageId, parentArtifactId: persisted.parentArtifactId ?? null } : {}) };
     });
   }
 

@@ -195,6 +195,9 @@ export const persistArtifactRows = async (
   // and the new file as an independent root without claiming an unverified edge.
   const revisionEnabled = generatedArtifactRevisionEnabled();
   const lineage = new Map<string, { parentArtifactId: string | null; lineageId: string }>();
+  const noteDroppedLineage = (reason: "parent_mismatch" | "source_evidence_missing") => {
+    console.warn(JSON.stringify({ event: "generated_artifact_lineage_dropped", reason, count: 1 }));
+  };
   for (const artifact of revisionEnabled ? input.stored : []) {
     lineage.set(artifact.id, { parentArtifactId: null, lineageId: artifact.id });
     const lineageId = artifact.lineageId ?? artifact.id;
@@ -211,7 +214,10 @@ export const persistArtifactRows = async (
       });
       if (parent) {
         const actualLineageId = parent.lineageId ?? parent.id;
-        if (actualLineageId !== lineageId || parent.id === artifact.id) continue;
+        if (actualLineageId !== lineageId || parent.id === artifact.id) {
+          noteDroppedLineage("parent_mismatch");
+          continue;
+        }
         lineage.set(artifact.id, { parentArtifactId: parent.id, lineageId });
         continue;
       }
@@ -226,7 +232,10 @@ export const persistArtifactRows = async (
         sourceLineageId: lineageId,
       }, select: { id: true } }),
     ]);
-    if (!boundReceipt && !uploadReceipt) continue;
+    if (!boundReceipt && !uploadReceipt) {
+      noteDroppedLineage("source_evidence_missing");
+      continue;
+    }
     lineage.set(artifact.id, { parentArtifactId: null, lineageId });
   }
   const rows = [
