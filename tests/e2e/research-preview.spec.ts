@@ -140,7 +140,7 @@ test.describe("Research Preview", () => {
     await expect(page.getByTestId("research-preview-blocked")).toContainText("1–4,000");
     await expect(page.getByTestId("chat-send-button")).toBeDisabled();
     await expect(page.getByTestId("chat-textarea")).toHaveValue("x".repeat(4001));
-    expect(await page.evaluate(() => (window as unknown as { __chatModelStubRequests: unknown[] }).__chatModelStubRequests)).toHaveLength(0);
+    expect(await page.evaluate(() => (window as unknown as { __chatModelStubRequests?: unknown[] }).__chatModelStubRequests ?? [])).toHaveLength(0);
   });
 
   test("reload restores a limited report and its citation without starting another run", async ({ page }) => {
@@ -150,6 +150,6 @@ test.describe("Research Preview", () => {
     await expect(page.getByTestId("search-citation-item").getByRole("link")).toHaveAttribute("href", "https://example.org/specification");
     await page.reload();
     await expect(page.getByTestId("research-preview-result")).toHaveAttribute("data-outcome", "partial");
-    expect(await page.evaluate(() => (window as unknown as { __chatModelStubRequests: unknown[] }).__chatModelStubRequests)).toHaveLength(0);
+    expect(await page.evaluate(() => (window as unknown as { __chatModelStubRequests?: unknown[] }).__chatModelStubRequests ?? [])).toHaveLength(0);
   });
 });

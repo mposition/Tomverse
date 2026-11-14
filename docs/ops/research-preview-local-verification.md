@@ -85,6 +85,26 @@ TypeScript check, whole-repository ESLint, model pricing, accent-token and
 database enum-constraint checks passed. The build and browser harness block
 external network access and use local fixture credentials, not production ones.
 
+Browser regressions passed 21/21 on this worktree's build, using a separate local
+port without reusing another session's server: Research Preview 5, existing
+Perplexity 1, Auto 9, and composer/mobile input 6. They cover one-shot follow-up,
+unchanged model/product selection, attached and oversized draft preservation,
+reload without dispatch, 320px attachments, Korean IME, keyboard and 200% text.
+
+## Independent review and Git state
+
+Implementation commit: `43e5de354645e6312b497cd080cfafea3ee90f45`.
+Independent review job: `r-20261114-150628-1b42c3`, reviewer vendor Google,
+provider `antigravity`. The prose report described no defects and supported the
+change, but omitted the required verdict JSON block. The orchestrator therefore
+returned `unknown` / `no_verdict_block` (exit 2), not an accepted review.
+Per the repository's unknown-outcome rule, the review was not resubmitted.
+The remaining follow-up changes contain only the verified browser fixture
+assertion and this verification record; the reviewed production code is unchanged.
+
+No PR, push, CI start/retry, merge, deployment, AMUX mutation, feature activation,
+pricing/budget increase or paid model/search evaluation was performed.
+
 ## Limits and next validation
 
 No real model/search call or production activation was performed. Source URL
