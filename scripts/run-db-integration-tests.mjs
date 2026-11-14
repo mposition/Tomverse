@@ -434,6 +434,7 @@ run(
     // during 2026-11. It found, on its first run, that the observer's two
     // mismatch cause keys were longer than the store admits.
     "tests/integration/amux-card-lifecycle-e2e.db.test.ts",
+    "tests/integration/amux-stalled-card-sweep.db.test.ts",
     // AMUX-FILEREQ-004 (2026-11-09): the owner closes the escalation an
     // earlier attempt left open on a done or todo card, with one chained
     // audit entry; review, blocked and running cards refuse.
