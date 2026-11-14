@@ -31,6 +31,7 @@ const approved = { approvalId: "catalog-one", catalogDigest: receipt.catalogDige
     outputMicroUsdPerMillion: 2_000_000 }] }, receipt };
 const attempts: Record<string, number> = { [spentTask]: 5, [freshTask]: 0 };
 const assigned: string[] = [];
+const auditMetadata: Array<Record<string, unknown>> = [];
 
 const workers = [workerName, "copilot-chore", "claude-review"].map((name) => ({
   worker_name: name, provider: "openai", model: "gpt-6-1-sol",
@@ -90,7 +91,10 @@ mock.module(mod("lib/prisma.ts"), { namedExports: {
 } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
   takeAuditChainLock: async () => {},
-  writeSystemAuditLog: async () => "assignment-audit",
+  writeSystemAuditLog: async (input: { metadata: Record<string, unknown> }) => {
+    auditMetadata.push(input.metadata);
+    return "assignment-audit";
+  },
 } });
 mock.module(mod("lib/amux/incident.ts"), { namedExports: {
   lockAmuxAdmissionAndReadIncident: async () => ({ blocks_admission: false }),
@@ -149,10 +153,29 @@ test("a Task with its attempts spent is skipped and the next Task is assigned", 
     assert.deepEqual(none, { claimed: false, reason: "no_ready_candidate" });
     assert.deepEqual(assigned, []);
 
-    // One attempt left still assigns (the fifth attempt is allowed).
+    assert.equal(auditMetadata.length, 1);
+    assert.equal(Object.hasOwn(auditMetadata[0], "ceilingOverrun"), false,
+      "the first attempt reaches the approved ceiling exactly");
+
+    // One attempt left still assigns (the fifth attempt is allowed). Its
+    // reservation passes the receipt's approved ceiling: recorded on the
+    // assignment and logged, never refused (owner decision 2026-11-14).
     attempts[freshTask] = 4;
-    const last = await (await service).tickV22WorkerClaim();
+    const warn = mock.method(console, "warn", () => undefined);
+    let last;
+    try {
+      last = await (await service).tickV22WorkerClaim();
+    } finally { warn.mock.restore(); }
     assert.equal(last.claimed && last.taskId, freshTask);
+    const overrun = { ceilingMicroUsd: "3400000",
+      priorReservedMicroUsd: "13600000", projectedMicroUsd: "17000000" };
+    assert.deepEqual(auditMetadata.at(-1)?.ceilingOverrun, overrun);
+    const logged = warn.mock.calls.map((call) => JSON.parse(String(call.arguments[0])))
+      .filter((line) => line.event === "v22_approved_ceiling_overrun");
+    assert.equal(logged.length, 1);
+    assert.equal(logged[0].phase, "claim");
+    assert.equal(logged[0].taskId, freshTask);
+    assert.equal(logged[0].projectedMicroUsd, overrun.projectedMicroUsd);
   } finally {
     if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM;
     else process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM = previous;

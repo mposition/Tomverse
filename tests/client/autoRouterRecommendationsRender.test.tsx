@@ -79,6 +79,55 @@ test("an empty inbox says so and still states what it read", () => {
   const body = text(html);
   assert.ok(body.includes(m.inboxEmpty));
   assert.ok(body.includes(m.inboxShowing(0, 1)));
+  assert.ok(!html.includes("admin-auto-router-daily-status"));
+});
+
+test("the existing inbox explains a daily result even when no new recommendation is present", () => {
+  const previous = { hours: 168, serverAttempts: 9, completed: 7 };
+  for (const outcome of ["added", "already_listed", "awaiting_cycle", "observed"] as const) {
+    const html = renderToStaticMarkup(createElement(OpenRecommendationsInbox, {
+      cycles: [], busy: false, canSend: true, onSetStatus: noop, onSend: noop,
+      dailyObservation: { asOf: "2026-11-14T23:00:00Z", outcome, current: { windows: [
+        previous, { hours: 24, serverAttempts: 0, completed: 0 },
+      ] } },
+    }));
+    assert.equal(count(html, 'data-testid="admin-auto-router-daily-status"'), 1);
+    assert.ok(text(html).includes(m.dailyObservation("2026-11-15 09:00 AEST", m.dailyOutcomes[outcome], 0, 0)));
+    assert.equal(count(html, 'data-testid="admin-auto-router-recommendation-open"'), 0);
+  }
+});
+
+test("the routing inbox handles a daily Smart Adaptive item beside another recommendation and copies its own evidence", () => {
+  const text = "Reduce repeat searches before the first Smart Adaptive answer.";
+  const evidence = "Three selected searches finished in 12 seconds and two in 30 seconds.";
+  const cycle = {
+    id: "mixed-cycle",
+    createdAt: "2026-11-11T00:00:00.000Z",
+    summary: {
+      report: { ...report, recommendations: [...report.recommendations, { kind: "code", text }] },
+      smartAdaptiveDaily: { 3: { source: "smart_adaptive_daily", day: "2026-11-14", asOf: "2026-11-14T00:00:00.000Z", evidence } },
+    },
+  };
+  const inbox = renderToStaticMarkup(createElement(OpenRecommendationsInbox, {
+    cycles: [cycle], busy: false, canSend: true, onSetStatus: noop, onSend: noop,
+  }));
+  const row = inbox.split('<li ').find((item) => item.includes(text));
+  assert.ok(row);
+  assert.ok(inbox.includes("CODE-REC-A"));
+  assert.equal(count(inbox, 'data-testid="admin-auto-router-daily-evidence"'), 1);
+  assert.ok(row.includes(m.dailyEvidence) && row.includes(m.dailyRecorded("2026-11-14")));
+  assert.ok(row.includes(evidence) && !row.includes(report.findings[0]));
+  for (const action of ["done", "dismiss", "send", "copy-brief"]) {
+    assert.equal(count(row, `data-testid="admin-auto-router-recommendation-${action}"`), 1);
+  }
+  const [ordinary, , daily] = actionableRecommendations(cycle.summary);
+  const origin = "https://tomverse.app";
+  const brief = recommendationBrief(cycle, daily, origin);
+  assert.ok(brief.includes(text) && brief.includes(evidence));
+  assert.ok(brief.includes(`${origin}/admin/routing?tab=optimizer#optimizer-cycle-mixed-cycle`));
+  assert.ok(!brief.includes(report.findings[0]));
+  const ordinaryBrief = recommendationBrief(cycle, ordinary, origin);
+  assert.ok(ordinaryBrief.includes(report.findings[0]) && !ordinaryBrief.includes(evidence));
 });
 
 test("a handled recommendation offers reopen, not done and dismiss; buttons are disabled while busy", () => {
@@ -243,6 +292,6 @@ test("each recommendation offers Copy brief beside the AMUX button, and the brie
   const ko = adminAutoRouterOptimizerMessages.ko.instruction;
   assert.ok(brief.startsWith(`# ${ko.heading}\n\nCODE-REC-A`));
   assert.ok(brief.includes("- answer calls failed for two models"));
-  assert.ok(brief.includes("https://tomverse.app/admin/routing#optimizer-cycle-cyc_new"));
+  assert.ok(brief.includes("https://tomverse.app/admin/routing?tab=optimizer#optimizer-cycle-cyc_new"));
   assert.ok(brief.endsWith(ko.closing));
 });

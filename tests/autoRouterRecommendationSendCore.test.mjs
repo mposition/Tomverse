@@ -39,7 +39,7 @@ test("the idea carries the recommendation, findings and cycle link, and passes A
     cycle: { id: "cyc_1", createdAt: at },
     origin: "https://tomverse.app",
   });
-  for (const part of ["CODE-A", "answer calls failed for two models", "https://tomverse.app/admin/routing#optimizer-cycle-cyc_1"]) {
+  for (const part of ["CODE-A", "answer calls failed for two models", "https://tomverse.app/admin/routing?tab=optimizer#optimizer-cycle-cyc_1"]) {
     assert.ok(idea.includes(part), part);
   }
   const inspected = inspectAmuxIdeaSubmission(

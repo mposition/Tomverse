@@ -72,3 +72,36 @@ export const settlementDestinationForBudget = (input: {
     max_attempts: maxAttempts,
   };
 };
+
+export type AmuxApprovedCeilingOverrun = {
+  ceilingMicroUsd: string;
+  priorReservedMicroUsd: string;
+  projectedMicroUsd: string;
+};
+
+/**
+ * Whether one more attempt takes a Task's reserved total past the ceiling its
+ * owner approved (the receipt's per-attempt maximum times its maxAttempts).
+ * The attempt budget above still counts AMUX_MAX_EXECUTION_ATTEMPTS, so an
+ * ordinary Task can reserve more than that ceiling. Owner decision 2026-11-14:
+ * the overrun is recorded, never refused -- a higher cost still never stops an
+ * ordinary Task (v4TaskCeilingDecision). Claim and execution start share this
+ * one calculation. An unreadable receipt records nothing.
+ */
+export const amuxApprovedCeilingOverrun = (input: {
+  approvedReceipt: unknown;
+  priorReservedMicroUsd: bigint;
+  nextAttemptMicroUsd: bigint;
+}): AmuxApprovedCeilingOverrun | null => {
+  const receipt = input.approvedReceipt;
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt) ||
+      !("ceilingMicroUsd" in receipt) ||
+      typeof receipt.ceilingMicroUsd !== "string" ||
+      !/^\d{1,30}$/.test(receipt.ceilingMicroUsd)) return null;
+  const ceiling = BigInt(receipt.ceilingMicroUsd);
+  const projected = input.priorReservedMicroUsd + input.nextAttemptMicroUsd;
+  if (projected <= ceiling) return null;
+  return { ceilingMicroUsd: ceiling.toString(),
+    priorReservedMicroUsd: input.priorReservedMicroUsd.toString(),
+    projectedMicroUsd: projected.toString() };
+};

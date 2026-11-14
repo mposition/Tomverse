@@ -24,12 +24,13 @@ import { adminFetch } from "@/lib/adminFetch";
 import {
   OpenRecommendationsInbox,
   RecommendationControls,
-  optimizerCycleAnchor,
   recommendationKey,
+  type DailyRoutingObservation,
   type RecommendationSendState,
 } from "@/components/admin/AdminAutoRouterRecommendations";
 import {
   actionableRecommendations,
+  optimizerCycleAnchor,
   type RecommendationStatus,
 } from "@/lib/autoRouterRecommendationsCore";
 
@@ -75,6 +76,7 @@ type Cycle = {
 };
 
 type OptimizerState = {
+  smartAdaptiveDaily?: DailyRoutingObservation | null;
   responseLatency?: ResponseLatencyEvidence;
   optimizerModelId: string | null;
   automation: { daily: boolean; autoPromote: boolean };
@@ -168,6 +170,15 @@ export function AdminAutoRouterOptimizerPanel({
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load]);
+
+  // A link from a copied brief may arrive before its cycle has been fetched.
+  const hasCycles = Boolean(state?.cycles.length);
+  useEffect(() => {
+    const anchor = window.location.hash.slice(1);
+    if (hasCycles && anchor.startsWith("optimizer-cycle-")) {
+      document.getElementById(anchor)?.scrollIntoView({ block: "start" });
+    }
+  }, [hasCycles]);
 
   const running = state?.cycles.some((cycle) => cycle.status === "running") ?? false;
   useEffect(() => {
@@ -405,6 +416,7 @@ export function AdminAutoRouterOptimizerPanel({
       {state ? (
         <OpenRecommendationsInbox
           cycles={state.cycles}
+          dailyObservation={state.smartAdaptiveDaily}
           busy={busy}
           canSend={canSendToAmux}
           sendState={sendState}
