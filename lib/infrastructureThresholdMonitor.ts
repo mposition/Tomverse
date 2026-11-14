@@ -20,6 +20,7 @@ import {
   judgeAmuxDmRelayLiveness,
   type AmuxDmRelayLiveness,
 } from "@/lib/amux/dmRelayHeartbeatCore";
+import { readAmuxWorkerBridgeScope } from "@/lib/amux/workerBridgeScope";
 import { planInfrastructureAlerts } from "@/lib/infrastructureAlertPolicy";
 import { getInfrastructureDashboard } from "@/lib/infrastructureMonitoring";
 import { findSilentMarketingPublisherRuns } from "@/lib/marketingPublisherRun";
@@ -127,12 +128,21 @@ const describeLostRuntimes = (
 async function reportAmuxBridgeLiveness(
   now: Date
 ): Promise<{ state: AmuxBridgeLiveness["state"]; notified: boolean }> {
+  const scope = await readAmuxWorkerBridgeScope();
+  if (!scope.listed && scope.reason === "worker_catalog_unavailable") {
+    throw new Error("AMUX bridge watch could not read the worker catalog.");
+  }
+  const expectedWorkers = new Set(scope.listed ? scope.workers.map((worker) => worker.name) : []);
   const leases = await prisma.amuxWorkerRuntime.findMany({
     where: { leaseExpiresAt: { gt: amuxBridgeWatchHorizonStart(now) } },
     select: { workerName: true, leaseExpiresAt: true },
   });
-  // The judgement drops runtimes no bridge runs (AMUX_NON_BRIDGE_WORKERS).
-  const verdict = judgeAmuxBridgeLiveness(leases, now);
+  // A paused, retired or stopped worker is no longer listed by its bridge.
+  // Its old runtime row can remain for 48 hours without being a failed bridge.
+  const verdict = judgeAmuxBridgeLiveness(
+    leases.filter((lease) => expectedWorkers.has(lease.workerName)),
+    now,
+  );
   const previouslyLost = bridgeAlertMemory.__tomverseAmuxBridgeLostWorkers ?? new Set();
   const newlyLost = newlyLostAmuxWorkers(previouslyLost, verdict);
   if (verdict.state !== "lost" && verdict.state !== "live") {
@@ -184,8 +194,9 @@ async function reportAmuxBridgeLiveness(
  * The AMUX Decision Maker relay on the Ubuntu host, judged by the last time it
  * called the app (lib/amux/dmRelayHeartbeatCore.ts,
  * docs/ops/amux/bridge-monitoring.md §6). Only while the app's DM routes are
- * open: with `TOMVERSE_AMUX_DM_ROUTING` off the relay has nothing to do and
- * nothing is reported, not even healthy.
+ * open in the production deployment served by the Ubuntu relay. Enabling the
+ * routes in dev or staging alone does not install a relay there; those
+ * environments are not watched and do not report a recovery.
  *
  * A dependency status like the bridge watch: the first silent check pages, the
  * same silence pages again every `AMUX_DM_RELAY_REMINDER_MS`, and the first

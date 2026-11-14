@@ -116,8 +116,25 @@ test("calling, asking and silent", () => {
     state: "silent", lastSyncAt: null, minutesSilent: null,
   });
   assert.equal(core.parseAmuxDmRelayLastSync("not a time"), null);
-  assert.equal(core.amuxDmRelayExpected({ TOMVERSE_AMUX_DM_ROUTING: "enabled" } as unknown as NodeJS.ProcessEnv), true);
+  assert.equal(core.amuxDmRelayExpected({ NODE_ENV: "production", TOMVERSE_AMUX_DM_ROUTING: "enabled", APP_ENV: "production" }), true);
   assert.equal(core.amuxDmRelayExpected({ TOMVERSE_AMUX_DM_ROUTING: "true" } as unknown as NodeJS.ProcessEnv), false);
+});
+
+test("the production relay is not expected in dev or staging production builds", () => {
+  for (const environment of ["dev", "staging", "test", "development"]) {
+    assert.equal(core.amuxDmRelayExpected({
+      NODE_ENV: "production",
+      RAILWAY_ENVIRONMENT_NAME: environment,
+      TOMVERSE_AMUX_DM_ROUTING: "enabled",
+    }), false, environment);
+  }
+  assert.equal(core.amuxDmRelayExpected({
+    NODE_ENV: "production", TOMVERSE_AMUX_DM_ROUTING: "enabled",
+  }), true, "unlabelled production builds remain monitored");
+  assert.equal(core.amuxDmRelayExpected({
+    NODE_ENV: "production", APP_ENV: "dev", RAILWAY_ENVIRONMENT_NAME: "production",
+    TOMVERSE_AMUX_DM_ROUTING: "enabled",
+  }), false, "the deployment resolver's explicit override is respected");
 });
 
 test("the question window covers the relay's longest wait on one question", () => {
