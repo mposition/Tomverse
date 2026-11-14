@@ -2342,7 +2342,13 @@ fn v22_digest(value: &str) -> bool {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum V52ReviewStep {
     Pending { #[serde(rename = "jobId")] job_id: String },
-    Final { evidence: V52ReviewEvidence },
+    Final {
+        evidence: V52ReviewEvidence,
+        /// A reject's reasons for the owner (display only; the app bounds
+        /// and redacts it again, and it never decides the settlement).
+        #[serde(default, rename = "findingsSummary")]
+        findings_summary: Option<String>,
+    },
     Findings { text: String },
 }
 
@@ -2451,6 +2457,15 @@ async fn v52_review_helper_call(payload: serde_json::Value) -> Result<V52ReviewS
 #[cfg(not(unix))]
 async fn v52_review_helper_call(_payload: serde_json::Value) -> Result<V52ReviewStep> {
     bail!("v52 review helper requires Ubuntu")
+}
+
+/// The launcher's reject summary as the record route takes it: only for a
+/// reject with a job id, and within the route's input bound (a longer one is
+/// dropped rather than turning the record into a refused request).
+fn v52_findings_summary_for_record(evidence: &V52ReviewEvidence,
+    summary: Option<String>) -> Option<String> {
+    summary.filter(|text| evidence.verdict == "reject" && evidence.job_id.is_some() &&
+        !text.trim().is_empty() && text.encode_utf16().count() <= 8_192)
 }
 
 fn v52_review_evidence_matches_readback(
@@ -3561,7 +3576,7 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                                     Err(anyhow::anyhow!(
                                                                         "v52 review readback conflict"))
                                                                 } else { Ok(V52ReviewStep::Final {
-                                                                    evidence: prior }) }
+                                                                    evidence: prior, findings_summary: None }) }
                                                             },
                                                             Ok(readback) if readback.status == "absent" =>
                                                                 v52_review_helper_call(serde_json::json!({
@@ -3577,13 +3592,17 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                                 continue;
                                                             },
                                                         };
-                                                        let evidence = match review {
+                                                        let (evidence, findings_summary) = match review {
                                                             Ok(V52ReviewStep::Pending { job_id: _job_id }) => {
                                                                 still_running.push(entry);
                                                                 continue;
                                                             },
-                                                            Ok(V52ReviewStep::Final { evidence }) => evidence,
-                                                            Ok(V52ReviewStep::Findings { .. }) | Err(_) =>
+                                                            Ok(V52ReviewStep::Final { evidence, findings_summary }) => {
+                                                                let summary = v52_findings_summary_for_record(
+                                                                    &evidence, findings_summary);
+                                                                (evidence, summary)
+                                                            },
+                                                            Ok(V52ReviewStep::Findings { .. }) | Err(_) => (
                                                                 V52ReviewEvidence {
                                                                     job_id: None,
                                                                     base_sha: base.to_owned(),
@@ -3592,12 +3611,12 @@ async fn run_bridge(mut scope: WorkerScope) -> i32 {
                                                                     author_vendor: author_vendor.to_owned(),
                                                                     reviewer_vendors: Vec::new(),
                                                                     touches_contract: touches,
-                                                                },
+                                                                }, None),
                                                         };
                                                         match api.v52_review_record(&entry.delivery,
                                                             &session.instance_id, session.generation,
                                                             result.changed_paths.as_deref().unwrap_or(&[]),
-                                                            &evidence).await {
+                                                            &evidence, findings_summary.as_deref()).await {
                                                             Ok(answer) if answer.recorded => {},
                                                             Ok(_) => review_unverified = true,
                                                             Err(_) => match api.v52_review_readback(
@@ -4075,6 +4094,34 @@ mod tests {
     const ATTEMPT_ID: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
     const ATTEMPT_ID_2: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e70";
     const ATTEMPT_ID_3: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e71";
+
+    /// Owner decision 2026-11-14: a reject's reasons ride the record request
+    /// for the owner; they never change the evidence or the verdict.
+    #[test]
+    fn v52_reject_summary_rides_the_record_only_for_a_reject_with_a_job() {
+        let step: V52ReviewStep = serde_json::from_str(r#"{"kind":"final","evidence":{
+            "job_id":"r-20261114-100000-abcdef","base_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "commit_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","verdict":"reject",
+            "author_vendor":"anthropic","reviewer_vendors":["openai"],"touches_contract":false},
+            "findingsSummary":"- [major · openai] lib/a.ts:1 broken"}"#).unwrap();
+        let V52ReviewStep::Final { evidence, findings_summary } = step else { panic!("final") };
+        assert_eq!(v52_findings_summary_for_record(&evidence, findings_summary.clone()).as_deref(),
+            Some("- [major · openai] lib/a.ts:1 broken"));
+        let mut accepted = evidence.clone();
+        accepted.verdict = "accept".into();
+        assert_eq!(v52_findings_summary_for_record(&accepted, findings_summary.clone()), None);
+        let mut no_job = evidence.clone();
+        no_job.job_id = None;
+        assert_eq!(v52_findings_summary_for_record(&no_job, findings_summary), None);
+        assert_eq!(v52_findings_summary_for_record(&evidence, Some("x".repeat(8_193))), None);
+        assert_eq!(v52_findings_summary_for_record(&evidence, Some("  ".into())), None);
+        // An older launcher's final step carries no summary and still parses.
+        let old: V52ReviewStep = serde_json::from_str(r#"{"kind":"final","evidence":{
+            "job_id":null,"base_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "commit_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","verdict":"unknown",
+            "author_vendor":"anthropic","reviewer_vendors":[],"touches_contract":false}}"#).unwrap();
+        assert!(matches!(old, V52ReviewStep::Final { findings_summary: None, .. }));
+    }
 
     #[test]
     fn lower_grade_contract_touch_skips_review_before_settlement() {

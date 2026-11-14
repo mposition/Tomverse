@@ -1611,6 +1611,31 @@ mod tests {
         thread,
     };
 
+    /// A record without reasons keeps the exact body an app without the
+    /// field accepts; a reject's reasons are a top-level field, outside the
+    /// evidence the app digests.
+    #[test]
+    fn v52_review_record_request_adds_reasons_only_when_present() {
+        let evidence = V52ReviewEvidence {
+            job_id: Some("r-20261114-100000-abcdef".into()),
+            base_sha: "a".repeat(40), commit_sha: "b".repeat(40),
+            verdict: "reject".into(), author_vendor: "anthropic".into(),
+            reviewer_vendors: vec!["openai".into()], touches_contract: false,
+        };
+        let paths = vec!["lib/a.ts".to_owned()];
+        let request = |findings_summary| serde_json::to_value(V52ReviewRecordRequest {
+            attempt_id: "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", worker: "codex-impl",
+            instance_id: "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e70", generation: 1,
+            task_revision: 2, changed_paths: &paths, evidence: &evidence, findings_summary,
+        }).unwrap();
+        let without = request(None);
+        assert!(without.get("findings_summary").is_none());
+        assert!(without["evidence"].get("findings_summary").is_none());
+        let with = request(Some("- [major] lib/a.ts:1 broken"));
+        assert_eq!(with["findings_summary"], "- [major] lib/a.ts:1 broken");
+        assert_eq!(with["evidence"], without["evidence"]);
+    }
+
     fn answer_once(status: &'static str, body: String) -> (TomverseApi, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -3119,6 +3144,10 @@ struct V52ReviewRecordRequest<'a> {
     task_revision: i64,
     changed_paths: &'a [String],
     evidence: &'a V52ReviewEvidence,
+    /// Display-only reasons of a reject; omitted otherwise so an app without
+    /// the field still takes the record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    findings_summary: Option<&'a str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3973,7 +4002,8 @@ impl TomverseApi {
     pub async fn v52_review_record(&self, delivery: &PulledDelivery,
         instance_id: &str, generation: i64,
         changed_paths: &[String],
-        evidence: &V52ReviewEvidence) -> Result<V52ReviewRecordResponse> {
+        evidence: &V52ReviewEvidence,
+        findings_summary: Option<&str>) -> Result<V52ReviewRecordResponse> {
         let response = self.client
             .post(format!("{}/api/internal/amux/v22/review/record", self.base_url))
             .timeout(TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT)
@@ -3982,6 +4012,7 @@ impl TomverseApi {
                 attempt_id: &delivery.attempt_id,
                 worker: &delivery.worker, instance_id, generation,
                 task_revision: delivery.task_revision, changed_paths, evidence,
+                findings_summary,
             }).send().await?;
         let (status, body): (_, V52ReviewRecordResponse) = read_bounded_json(response,
             &[StatusCode::OK, StatusCode::CONFLICT],
