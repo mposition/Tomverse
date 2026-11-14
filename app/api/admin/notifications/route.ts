@@ -9,6 +9,7 @@ import {
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
 import { prisma } from "@/lib/prisma";
+import { ADMIN_NOTIFICATION_ATTENTION_WHERE } from "@/lib/adminNotificationAttention";
 
 export async function GET(req: Request) {
   try {
@@ -46,7 +47,7 @@ export async function GET(req: Request) {
           _count: { _all: true },
         }),
         prisma.adminNotificationLog.count({
-          where: { status: "failed", acknowledgedAt: null },
+          where: ADMIN_NOTIFICATION_ATTENTION_WHERE,
         }),
         prisma.adminNotificationLog.count(),
         status

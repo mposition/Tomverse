@@ -61,6 +61,12 @@ export type AmuxOwnerQueueItem = {
   /** When the card started waiting (ISO). */
   waitingSince: string;
   /**
+   * The newest attempt stored a patch but no engineering agent run was ever
+   * created for it, so nothing can publish the patch to develop (AMUX-FILEGEN2-002,
+   * 2026-11-13). Absent: not read.
+   */
+  publicationPathMissing?: boolean;
+  /**
    * The engineering agent's open T2 drafts and state mismatches on this card,
    * decided on the card through the engineering routes. Absent: not read.
    */
@@ -175,3 +181,14 @@ export const amuxOwnerQueueVisible = (
     .filter((group) => filter.group === null || filter.group === group)
     .flatMap((group) => items.filter((item) => amuxOwnerQueueGroup(item) === group && matches(item)));
 };
+
+/**
+ * A card whose newest attempt stored a patch with no engineering agent run and
+ * no pull request: the patch has no way to reach develop. Same newest-attempt
+ * order as the owner review (taskRevision, startedAt, id, all descending).
+ */
+export const amuxOwnerQueuePublicationPathMissing = (input: {
+  reviewPrNumber: number | null;
+  newestAttempt: { hasPatch: boolean; hasRun: boolean } | null;
+}) => input.reviewPrNumber === null && input.newestAttempt !== null &&
+  input.newestAttempt.hasPatch && !input.newestAttempt.hasRun;

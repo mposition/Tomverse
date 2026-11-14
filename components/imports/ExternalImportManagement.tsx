@@ -27,6 +27,7 @@ import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     formatBytes,
     interpolate,
+    koreanWordWrapClass,
     primaryButtonClass,
     providerLabel,
     secondaryButtonClass,
@@ -445,7 +446,7 @@ export function ExternalImportManagement() {
 
     if (capacityState.kind === "unauthenticated") {
         return (
-            <div className="mx-auto w-full max-w-3xl px-4 py-10">
+            <div className={`mx-auto w-full max-w-3xl px-4 py-10 ${koreanWordWrapClass}`}>
                 <section className={sectionClass}>
                     <h1 className="text-lg font-bold">
                         {t("externalImport.pageTitle")}
@@ -478,7 +479,7 @@ export function ExternalImportManagement() {
             : [];
 
     return (
-        <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8">
+        <div className={`mx-auto w-full max-w-3xl space-y-4 px-4 py-8 ${koreanWordWrapClass}`}>
             <div>
                 <SettingsDetailNav
                     section="external-import"

@@ -7,6 +7,7 @@ export type AmuxV4TaskReadyReason =
   | "source_approval_invalid" | "brief_or_scope_missing"
   | "role_or_grade_missing" | "parent_path_changed"
   | "dependency_set_changed" | "dependency_incomplete"
+  | "dependency_unpublished"
   | "cost_reconfirmation_required" | "cost_unavailable"
   | "worker_unavailable" | "no_worker_for_grade" | "orchestrator_halted";
 
@@ -19,7 +20,10 @@ export type AmuxV4TaskReadyFacts = {
   parentPathCurrent: boolean;
   approvedDependencyIds: readonly string[] | null;
   dependencies: readonly { id: string; approvedTask: boolean;
-    status: string; terminal: boolean }[];
+    status: string; terminal: boolean;
+    /** Done, but its newest attempt stored a patch no recorded merge carries
+     * to develop (v4DependencyPublication.ts). Absent: no patch. */
+    unpublishedPatch?: boolean }[];
   cost: "allow" | "reconfirm" | "hold";
   compatibleWorkerCount: number;
   exactGradeRouting?: boolean;
@@ -50,6 +54,9 @@ export function evaluateAmuxV4TaskReady(facts: AmuxV4TaskReadyFacts,
   } else if (facts.dependencies.some((item) =>
     item.status !== "done" || !item.terminal)) {
     reasons.push("dependency_incomplete");
+  } else if (facts.dependencies.some((item) => item.unpublishedPatch === true)) {
+    // A done dependency whose patch never reached develop (AMUX-FILEGEN2-002).
+    reasons.push("dependency_unpublished");
   }
   if (facts.cost === "reconfirm") reasons.push("cost_reconfirmation_required");
   if (facts.cost === "hold") reasons.push("cost_unavailable");

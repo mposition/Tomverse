@@ -1286,6 +1286,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The score guard replacement reads the referenced same-transaction audit to distinguish exact human and scoped system evidence. CREATE OR REPLACE affects only the guard function; it never writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261114100100_amux_portfolio_score_refresh_guard/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "Owner decision 2026-11-14: the score guard replacement reads the referenced audit to admit the system score refresher's same-transaction entry beside the existing confirmations. CREATE OR REPLACE affects only the guard function; it never writes AdminAuditLog.",
+  },
+  {
     path: "prisma/migrations/20261016070500_amux_v19_system_registration_refusal/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -2835,10 +2843,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
     table: "AmuxDecisionMakerRequest",
-    tableMentions: 10,
+    tableMentions: 11,
     writeVerbs: 4,
     reason:
-      "The request ledger's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the request table in nine constant SELECTs (the throughput count, the request state, the request already recorded for a card revision, -- since S1d, 2026-10-08 -- the open requests created in a key period, read for a digest key's destruction, -- since S1e -- each instance's proposals for section 4's report, -- since S1g, 2026-10-12 -- the stale-close candidates the retention sweep reads, -- since S2, 2026-10-13 -- Admin's newest requests, and -- since S2-2b4, 2026-10-18 -- the id of the one request of a (card, question revision) the operator answered directly, which the store then closes with an event, and -- since 2026-11-07 -- the oldest open proposal no person has judged on one of the app-answered cards, which the Decision Maker as the approver applies) and one constant INSERT ... RETURNING; every value is a bound parameter. The other verbs are the event INSERT and the word in the two errors raised when an insert returns no row. It never updates or deletes a request, and it writes the audit log only through lib/amux/decisionMakerRequestSystemAudit.ts.",
+      "The request ledger's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the request table in ten constant SELECTs (the throughput count, the request state, the request already recorded for a card revision, -- since S1d, 2026-10-08 -- the open requests created in a key period, read for a digest key's destruction, -- since S1e -- each instance's proposals for section 4's report, -- since S1g, 2026-10-12 -- the stale-close candidates the retention sweep reads, -- since S2, 2026-10-13 -- Admin's newest requests, and -- since S2-2b4, 2026-10-18 -- the id of the one request of a (card, question revision) the operator answered directly, which the store then closes with an event, and -- since 2026-11-07 -- the oldest open proposal no person has judged on one of the app-answered cards, which the Decision Maker as the approver applies) and one constant INSERT ... RETURNING; every value is a bound parameter. The other verbs are the event INSERT and the word in the two errors raised when an insert returns no row. It never updates or deletes a request, and it writes the audit log only through lib/amux/decisionMakerRequestSystemAudit.ts.",
   },
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
@@ -3964,6 +3972,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 4,
     reason:
       "The replaced v4 PR-less review guard keeps its three dynamic SELECTs of the fixed task, latest retained result, and attempt, and adds one EXISTS read of the attempt's engineering publication rows for an implement Task completed as no change needed (owner decision 2026-11-11). The trigger's own schema is quoted with %I, the attempt ID is bound with USING, the state literals are fixed, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
+  },
+  {
+    path: "prisma/migrations/20261114120000_amux_review_no_change_unpublished_patch/migration.sql",
+    count: 5,
+    reason:
+      "The replaced v4 PR-less review guard keeps its three dynamic SELECTs of the fixed task, latest retained result, and attempt and its EXISTS read of the attempt's engineering publication rows, and adds one EXISTS read of the attempt's stored v22 patch, so a no-change completion of an attempt that stored one is refused (AMUX-FILEGEN2-002). The trigger's own schema is quoted with %I, the attempt ID is bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
   },
   {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",

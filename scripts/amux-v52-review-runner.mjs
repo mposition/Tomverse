@@ -152,7 +152,7 @@ export function reviewStep(input, options = {}) {
   const run = options.run ?? checkedRun;
   const fresh = claim(path, input);
   let state = readState(path, input);
-  if (state.final) return { kind: "final", evidence: state.final };
+  if (state.final) return finalStep(state);
   if (fresh) {
     let repository;
     try {
@@ -217,8 +217,65 @@ export function reviewStep(input, options = {}) {
     status.status : "unknown";
   const final = evidence(input, verdict, state.jobId,
     verdict === "unknown" ? [] : vendors);
-  durableWrite(path, { input, final });
-  return { kind: "final", evidence: final };
+  let findingsSummary = null;
+  if (verdict === "reject") {
+    // Display text only: a summary that cannot be built never changes the verdict.
+    try { findingsSummary = rejectionSummary(status); } catch {}
+  }
+  const done = findingsSummary ? { input, final, findingsSummary } : { input, final };
+  durableWrite(path, done);
+  return finalStep(done);
+}
+
+function finalStep(state) {
+  return state.final?.verdict === "reject" &&
+    typeof state.findingsSummary === "string" && state.findingsSummary ?
+    { kind: "final", evidence: state.final, findingsSummary: state.findingsSummary } :
+    { kind: "final", evidence: state.final };
+}
+
+const SEVERITY_ORDER = ["blocker", "major", "minor", "nit"];
+const SUMMARY_LINES = 8;
+const SUMMARY_LINE_CHARS = 280;
+const SUMMARY_CHARS = 2_000;
+
+/**
+ * The owner's short reason for a reject, built from the structured findings
+ * the review server's own status already returned, so it costs no extra call
+ * inside the step's time bound. Display text only: the app redacts and bounds
+ * it again before storing it (lib/amux/v52ReviewFindingsCore.ts).
+ */
+export function rejectionSummary(status) {
+  const found = [];
+  for (const review of Array.isArray(status?.reviews) ? status.reviews : []) {
+    if (review?.verdict !== "reject" || !Array.isArray(review.findings)) continue;
+    const vendor = VENDOR.test(review.vendor ?? "") ? review.vendor : null;
+    for (const finding of review.findings) {
+      const rank = SEVERITY_ORDER.indexOf(finding?.severity);
+      if (rank < 0 || typeof finding.summary !== "string" ||
+          !finding.summary.trim()) continue;
+      found.push({ rank, vendor, finding });
+    }
+  }
+  found.sort((a, b) => a.rank - b.rank);
+  const lines = [];
+  let length = 0;
+  for (const { vendor, finding } of found.slice(0, SUMMARY_LINES)) {
+    const line = typeof finding.line === "number" && Number.isInteger(finding.line) &&
+      finding.line > 0 ? `:${finding.line}` : "";
+    const where = typeof finding.file === "string" && finding.file.trim() ?
+      ` ${finding.file.trim()}${line}` : "";
+    const tag = vendor ? `${finding.severity} · ${vendor}` : finding.severity;
+    let text = `- [${tag}]${where} ${finding.summary.replace(/\s+/g, " ").trim()}`;
+    if (text.length > SUMMARY_LINE_CHARS)
+      text = `${text.slice(0, SUMMARY_LINE_CHARS - 1)}…`;
+    if (length + text.length + 1 > SUMMARY_CHARS) break;
+    lines.push(text);
+    length += text.length + 1;
+  }
+  if (lines.length && found.length > lines.length)
+    lines.push(`- … ${found.length - lines.length} more`);
+  return lines.length ? lines.join("\n") : null;
 }
 
 export function reviewFindings(jobId, options = {}) {

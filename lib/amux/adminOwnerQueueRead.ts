@@ -9,6 +9,7 @@ import { AMUX_ESCALATION_AWAITING_STATUSES } from "./humanReviewCore.ts";
 import {
   AMUX_OWNER_QUEUE_LIMIT,
   amuxAestDayStartMs,
+  amuxOwnerQueuePublicationPathMissing,
   amuxOwnerQueueWhere,
   type AmuxOwnerQueueItem,
   type AmuxOwnerQueueRead,
@@ -25,7 +26,7 @@ export const countAmuxOwnerQueue = () =>
 
 const rowSelect = {
   id: true, title: true, displayKey: true, sourceKey: true, sourceSystem: true,
-  sourceSnapshot: true, status: true, updatedAt: true,
+  sourceSnapshot: true, status: true, updatedAt: true, reviewPrNumber: true,
   v4TitleCiphertext: true, v4TitleKeyId: true, v4TitleKeyVersion: true,
   v4TitleDigest: true, v4TitleDigestKeyId: true,
   v22AcceptedAssignment: { select: { workerName: true } },
@@ -34,6 +35,12 @@ const rowSelect = {
     where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } },
     orderBy: { createdAt: "desc" }, take: 1,
     select: { id: true, reason: true, specialty: true, createdAt: true },
+  },
+  // The newest attempt, in the owner review's order: whether it stored a
+  // patch that no engineering agent run can publish.
+  executionAttempts: {
+    orderBy: [{ taskRevision: "desc" }, { startedAt: "desc" }, { id: "desc" }], take: 1,
+    select: { id: true, v22TaskPatch: { select: { attemptId: true } } },
   },
   // A worker question still waiting: open, or answered but not yet resumed.
   v22OwnerQuestions: {
@@ -79,6 +86,12 @@ export async function readAmuxOwnerQueue(now: Date = new Date()): Promise<AmuxOw
     readProcessedToday(now),
   ]);
   const titles = await Promise.all(rows.map(readAmuxCardTitle));
+  // Which newest attempts that stored a patch have an engineering run at all.
+  const patchAttemptIds = rows.flatMap((row) => row.executionAttempts[0]?.v22TaskPatch ?
+    [row.executionAttempts[0].id] : []);
+  const withRun = new Set(patchAttemptIds.length ? (await prisma.engineeringAgentRun.findMany({
+    where: { amuxAttemptId: { in: patchAttemptIds } }, select: { amuxAttemptId: true },
+  })).map((run) => run.amuxAttemptId) : []);
   const items: AmuxOwnerQueueItem[] = rows.map((row, index) => {
     const escalation = row.humanEscalations[0] ?? null;
     const question = row.v22OwnerQuestions[0] ?? null;
@@ -94,6 +107,13 @@ export async function readAmuxOwnerQueue(now: Date = new Date()): Promise<AmuxOw
       attentionReason: escalation ? storedAmuxEscalationReasonCode(escalation.reason, escalation.specialty) : null,
       ownerQuestion: question ? (question.state === "open" ? "open" : "answered") : null,
       escalationId: escalation?.id ?? null,
+      publicationPathMissing: amuxOwnerQueuePublicationPathMissing({
+        reviewPrNumber: row.reviewPrNumber,
+        newestAttempt: row.executionAttempts[0] ? {
+          hasPatch: row.executionAttempts[0].v22TaskPatch !== null,
+          hasRun: withRun.has(row.executionAttempts[0].id),
+        } : null,
+      }),
       waitingSince: (escalation?.createdAt ?? (question?.state === "open" ? question.createdAt : null) ?? row.updatedAt)
         .toISOString(),
     };

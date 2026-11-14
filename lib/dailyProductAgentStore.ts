@@ -16,12 +16,45 @@ import {
   type DailyProductResult, type DailyProductSource,
 } from "@/lib/dailyProductAgentCore";
 import { prisma } from "@/lib/prisma";
+import { DAILY_PRODUCT_AGENT_ALERT_SWITCH, DAILY_PRODUCT_AGENT_NOTICE_TARGET, dailyProductHaltNotice, dailyProductHaltSchema, type DailyProductHalt } from "@/lib/dailyProductAgentAlertCore";
 import { suggestionWorkBrief } from "@/lib/productResearchScoutIdeaText";
 
 type DailyProductClaim = Omit<ClaimedRecommendation, "cycleId" | "index">;
 
 async function saveSetting(tx: Prisma.TransactionClient, key: string, value: string) {
   await tx.appSetting.upsert({ where: { key }, create: { key, value }, update: { value } });
+}
+
+/** Persist the Admin notice once before any external alert is attempted. */
+export async function recordDailyProductHalt(input: DailyProductHalt) {
+  if (process.env[DAILY_PRODUCT_AGENT_ALERT_SWITCH] !== "true") return { refused: "disabled" as const };
+  const body = dailyProductHaltSchema.parse(input);
+  return prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    const key = `${DAILY_PRODUCT_AGENT_PREFIX}halt.${body.runId}`;
+    if (await tx.appSetting.findUnique({ where: { key }, select: { key: true } })) return { ok: true as const, changed: false };
+    const dayKey = `${DAILY_PRODUCT_AGENT_PREFIX}haltDay`;
+    const day = new Date(Date.now() + 10 * 60 * 60_000).toISOString().slice(0, 10);
+    const prior = await tx.appSetting.findUnique({ where: { key: dayKey }, select: { value: true } });
+    let count = 0;
+    if (prior) {
+      const parsed = dailyProductDaySchema.safeParse(JSON.parse(prior.value));
+      if (!parsed.success || parsed.data.day > day) return { refused: "alert_budget_invalid" as const };
+      if (parsed.data.day === day) count = parsed.data.count;
+    }
+    if (count >= DAILY_PRODUCT_AGENT_TASK_CAP) return { refused: "alert_budget_exhausted" as const };
+    const notice = await tx.adminNotificationLog.create({ data: {
+      channel: "in_app", status: "sent", ...dailyProductHaltNotice(body),
+      targetType: DAILY_PRODUCT_AGENT_NOTICE_TARGET, targetId: body.runId,
+    }, select: { id: true } });
+    await saveSetting(tx, key, JSON.stringify({ notificationId: notice.id }));
+    await saveSetting(tx, dayKey, JSON.stringify({ day, count: count + 1 }));
+    await writeSystemAuditLog({ tx, systemActor: DAILY_PRODUCT_AGENT_AUDIT_ACTOR,
+      action: "daily_product_agent.halt_notified", targetType: "DailyProductAgentRun", targetId: body.runId,
+      summary: "Recorded a content-free daily product agent halt notice for the operator.",
+      metadata: { notificationId: notice.id, reason: body.reason, attempted: body.attempted, prOpened: body.prOpened } });
+    return { ok: true as const, changed: true };
+  });
 }
 
 async function audit(tx: Prisma.TransactionClient, id: string, action: "claimed" | "result_recorded", metadata: Prisma.InputJsonObject) {

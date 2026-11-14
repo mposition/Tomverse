@@ -23,6 +23,7 @@ import { amuxOwnerRecoveryPreparation, amuxReviewUsageOutcomeUnknown } from "@/l
 import { amuxReviewReadError } from "@/lib/amux/reviewReadErrorCore";
 import { AmuxOwnerRecoveryInspectionPanel } from "./AmuxOwnerRecoveryInspectionPanel";
 import { amuxLegacyCardReadOf, type AmuxLegacyCardRead } from "./AmuxLegacyCardPanel";
+import { amuxRejectedAttemptsOf, type AmuxRejectedAttempt } from "./AmuxReviewRejection";
 
 // The server-side review proxy waits up to 40s. The browser must not abort
 // first; an unknown outcome freezes writes until decision ID/digest lookup.
@@ -105,6 +106,9 @@ export type AmuxReviewDetail = {
   /** What an offered approve rests on; "no_change" completes an implement
    * Task that left no change, as no change needed (owner decision 2026-11-11). */
   approval_basis?: "evidence" | "no_change" | null;
+  /** The attempt stored a patch no pull request carries; "no change needed"
+   * is refused for it. */
+  unpublished_patch?: { publication_run_missing: boolean } | null;
   /** Why the server offers no decision at all; null while it offers one. */
   decision_hold?: string | null;
   retry: { used: number; limit: number; remaining: number };
@@ -121,11 +125,13 @@ export type AmuxOwnerExecutionMetadata = {
 };
 
 // `legacyCard` is the card's owner settlement panel from the same answer, kept
-// whether or not the attempt metadata could be bound to the review.
+// whether or not the attempt metadata could be bound to the review; so are
+// `rejections`, the card's runs its code review rejected, with their reasons.
 type OwnerExecutionState =
   | { state: "idle" | "loading" }
-  | { state: "unavailable"; legacyCard?: AmuxLegacyCardRead | null }
-  | { state: "ready"; metadata: AmuxOwnerExecutionMetadata; legacyCard?: AmuxLegacyCardRead | null };
+  | { state: "unavailable"; legacyCard?: AmuxLegacyCardRead | null; rejections?: AmuxRejectedAttempt[] }
+  | { state: "ready"; metadata: AmuxOwnerExecutionMetadata; legacyCard?: AmuxLegacyCardRead | null;
+      rejections?: AmuxRejectedAttempt[] };
 
 export type AmuxOwnerExecutionReadFetcher = (
   input: RequestInfo | URL,
@@ -301,7 +307,9 @@ export async function readAmuxOwnerExecutionMetadata({
     if (controller.signal.aborted) return { state: "unavailable" };
     const metadata = bindAmuxOwnerExecutionMetadata(review, body);
     const legacyCard = amuxLegacyCardReadOf(review.task.id, body);
-    return metadata ? { state: "ready", metadata, legacyCard } : { state: "unavailable", legacyCard };
+    const rejections = amuxRejectedAttemptsOf(review.task.id, body);
+    return metadata ? { state: "ready", metadata, legacyCard, rejections }
+      : { state: "unavailable", legacyCard, rejections };
   } catch {
     if (!isCurrent()) return null;
     return { state: "unavailable" };
@@ -524,6 +532,18 @@ export function AmuxOwnerReviewView({
           <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-bold text-amber-100">
             {m.reviewDisplayMismatch}
           </p>
+        )}
+        {review.unpublished_patch && (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100"
+            data-testid="admin-amux-unpublished-patch">
+            <p className="font-bold">{m.unpublishedPatch.title}</p>
+            <p className="mt-1 leading-6">{m.unpublishedPatch.body}</p>
+            {review.unpublished_patch.publication_run_missing && (
+              <p className="mt-1 leading-6" data-testid="admin-amux-unpublished-patch-run-missing">
+                {m.unpublishedPatch.runMissing}
+              </p>
+            )}
+          </div>
         )}
       </header>
 

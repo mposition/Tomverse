@@ -54,6 +54,7 @@ import { amuxV52ReviewRequired, classifyAmuxExecutionPath,
   decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
 import { decideAmuxV52ReviewDisposition, validAmuxV52ReviewEvidence,
   type AmuxV52ReviewEvidence } from "@/lib/amux/v52ReviewCore";
+import { normalizeAmuxV52FindingsSummary } from "@/lib/amux/v52ReviewFindingsCore";
 import { amuxV52PriorReviewRejections } from "@/lib/amux/v52ReviewRejections";
 import { ENGINEERING_AGENT_POLICY_VERSION,
   v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
@@ -1248,6 +1249,8 @@ export async function recordAmuxV52Review(input: {
   generation: number; taskRevision: number;
   changedPaths: string[];
   evidence: AmuxV52ReviewEvidence;
+  /** The launcher's reasons for a reject; display only, never in the digest. */
+  findingsSummary?: string;
 }) {
   if (!validAmuxV52ReviewEvidence(input.evidence))
     return { recorded: false as const, reason: "review_evidence_invalid" as const };
@@ -1355,6 +1358,8 @@ export async function recordAmuxV52Review(input: {
         verdict: evidence.verdict, authorVendor: evidence.authorVendor,
         reviewerVendors: evidence.reviewerVendors,
         touchesContract: evidence.touchesContract, requestDigest, auditLogId,
+        findingsSummary: evidence.verdict === "reject" ?
+          normalizeAmuxV52FindingsSummary(input.findingsSummary) : null,
       } });
       context.requireLeaseAt(runtime.leaseExpiresAt);
       context.requireLeaseAt(attempt.leaseExpiresAt);

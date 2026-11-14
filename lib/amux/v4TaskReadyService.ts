@@ -22,6 +22,7 @@ import { amuxV22PromotionFlowEnabled } from "./v22AutoPromotionCore.ts";
 import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
 import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
+import { amuxDependencyUnpublishedPatchSql } from "./v4DependencyPublication.ts";
 import { evaluateAmuxV4TaskReady, type AmuxV4TaskReadyFacts } from
   "./v4TaskReadyCore.ts";
 import { AMUX_UNIT_DECISION_AUDIT_SELECT, amuxUnitDecisionAuditActorValid,
@@ -349,6 +350,14 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
       select: { id: true, state: true, action: true, registeredWorkItemId: true },
     });
     const approvedDeps = new Map(approvals.map((item) => [item.id, item]));
+    // One read for every done dependency whose patch never reached develop.
+    const unpublished = card.dependencies.some((edge) => edge.dependency.status === "done") ?
+      new Set((await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT d."dependencyId" AS "id" FROM "AmuxWorkDependency" d
+        JOIN "AmuxWorkItem" dep ON dep."id" = d."dependencyId"
+        WHERE d."taskId" = ${taskId} AND dep."status" = 'done'
+          AND ${amuxDependencyUnpublishedPatchSql()}`).map((row) => row.id)) :
+      new Set<string>();
     const dependencies = card.dependencies.map((edge) => {
       const dependency = edge.dependency;
       const approval = dependency.v4SourceApprovalId ?
@@ -358,7 +367,8 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
           dependency.cardType === "task" && approval?.state === "consumed" &&
           approval.action === "register_card" &&
           approval.registeredWorkItemId === dependency.id,
-        status: dependency.status, terminal: dependency.v4TerminalAt !== null };
+        status: dependency.status, terminal: dependency.v4TerminalAt !== null,
+        unpublishedPatch: unpublished.has(edge.dependencyId) };
     });
     const halted = await findOpenAmuxOrchestratorHalt(tx);
     const approvedIds = snapshot?.card?.dependencies;

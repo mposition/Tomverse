@@ -247,7 +247,7 @@
   .modelStamp { padding: 16px 10px; border-radius: 12px; }
   .modelStamp strong { font-size: 1rem; }
   .modelStamp span { display: none; }
-  .mobileModelNote { display: block; position: relative; z-index: 1; margin: 12px 0 0; padding: 4px; background: var(--launch-surface); color: var(--launch-secondary); font-size: .875rem; line-height: 1.5; text-align: center; }
+  .mobileModelNote { display: block; position: relative; z-index: 1; margin: 12px 0 0; padding: 8px 10px; border-radius: 12px; background: var(--launch-panel); color: #d4d4d8; font-size: .875rem; line-height: 1.5; text-align: center; }
   .stamp1 { margin-top: -6px; }
   .stamp2 { margin-top: 14px; }
   .rails { left: -6px; top: 16px; transform: scale(.5); }
