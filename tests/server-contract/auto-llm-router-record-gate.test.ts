@@ -29,6 +29,7 @@ let readGuidance: (db?: unknown, kind?: string) => Promise<{ guidance: string; c
   async () => ({ guidance: "", cycleId: null });
 const holds: number[] = [];
 let budgetAllowed = true;
+let excludedModelIds: string[] = [];
 let routerFailure: unknown = null;
 let outputFailure: unknown = null;
 let waitForAbort = false;
@@ -87,6 +88,10 @@ async function load() {
       namedExports: {
         readActiveRouterGuidance: (db?: unknown, kind?: string) => readGuidance(db, kind),
       },
+    });
+    mock.module(mod("lib/autoRouterTunablesRead.ts"), {
+      namedExports: { readAutoRouterTunables: async () => ({ routerTimeoutMs: null, timeoutRevertedAt: null,
+        excluded: excludedModelIds.map(modelId => ({ modelId, until: new Date(Date.now() + 3600_000).toISOString() })) }) },
     });
     mock.module(mod("lib/chatSecurity.ts"), {
       namedExports: { holdChatUsageBucket: async (...args: unknown[]) => {
@@ -195,6 +200,28 @@ test("live, allowed sample, replay and hold share the bounded request", async ()
   const expected = autoLlmRouterWorstCaseMicroUsd({ ...live,
     inputUsdPerMillionTokens: prices.inputUsdPerMillionTokens, outputUsdPerMillionTokens: prices.outputUsdPerMillionTokens });
   assert.deepEqual(holds, [expected, expected]);
+});
+
+test("the actual soft exclusion menu reaches selection and file fallback; fewer than two keeps the original menu", async () => {
+  const { applyLlmModelPick } = require(resolve(ROOT, "lib/autoModelSelection.ts"));
+  const ids = ["gpt-5-6-luna", "deepseek-v4-flash", "gpt-6-luna"];
+  const excluded = ids[0];
+  let offered: readonly string[] = [];
+  const selection = { routed: true, modelId: excluded, fallbackCandidateModelIds: ids.slice(1),
+    record: { eligibleModelIds: ids, selectedModelId: excluded, rejections: [] } };
+  try {
+    excludedModelIds = [excluded];
+    const picked = await pick(undefined, { eligibleModelIds: ids, onCandidatesResolved: (value: readonly string[]) => { offered = value; } });
+    assert.deepEqual(offered, ids.slice(1));
+    const applied = applyLlmModelPick(selection, picked?.modelId ?? null, undefined, null, offered);
+    assert.ok(!applied.fallbackCandidateModelIds.includes(excluded));
+    assert.ok(!applied.record.eligibleModelIds.includes(excluded));
+    const filePick = applyLlmModelPick(selection, ids[2], { required: true, capableModelIds: [excluded, ids[2]] }, null, offered);
+    assert.deepEqual(filePick.record.eligibleModelIds, [ids[2]]);
+    assert.deepEqual(filePick.fallbackCandidateModelIds, []);
+    await pick(undefined, { onCandidatesResolved: (value: readonly string[]) => { offered = value; } });
+    assert.deepEqual(offered, ids.slice(0, 2));
+  } finally { excludedModelIds = []; }
 });
 
 test("combined routing returns both decisions in one reserved call and preserves image record gating", async () => {

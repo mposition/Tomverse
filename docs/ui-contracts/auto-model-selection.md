@@ -120,6 +120,21 @@ timed-out Router left a two-photo PDF request with a model that had no file
 tools. The reason stays `fallback_order`. A turn the Router never looked at
 (no Router model, too few candidates, budget) keeps the rule's choice.
 
+The router's question (4,000 UTF-16 units) and previous answer (600) retain
+both ends when long, with an explicit omitted-middle marker and no split
+surrogate pairs. Short inputs remain unchanged. Live requests, permitted
+decision samples and replay use the same bounded representation; old samples
+retain only the text that was stored. Version `auto-llm-router-v2-bounded`
+identifies this input contract. Extra image, location and search-plan inputs
+are not retained for replay, so those combined calls are excluded from the
+tool-free optimizer sample.
+
+Temporary exclusions remain soft: fewer than two remaining models restores
+the original eligible menu. When applied, the exact offered menu bounds the
+normal LLM selection and its fallback candidates, further narrowed by file
+capability for an identified file request. The requested-model recovery on
+an actual router failure remains a separate path using hard eligibility.
+
 Guest Chat follows a narrower one-turn contract. Entry and the visible default
 remain rowless and free. Immediately before Send, the client obtains a fresh
 opaque authority bound to the signed Guest principal and exact activated

@@ -21,7 +21,7 @@ import { getWebSearchCapability, nativeSearchIsDispatchable } from "@/lib/webSea
 
 export const AUTO_LLM_ROUTER_VERSION = "auto-llm-router-v2-bounded";
 
-/** The prompt is cut here before it leaves; routing needs the gist, not all of it. */
+/** Maximum bounded question length, including its omitted-middle marker. */
 export const AUTO_LLM_ROUTER_MAX_PROMPT_CHARS = 4_000;
 
 /**
@@ -33,6 +33,8 @@ export const AUTO_LLM_ROUTER_MAX_PROMPT_CHARS = 4_000;
 export const AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS = 600;
 
 export const AUTO_LLM_ROUTER_INPUT_VERSION = "head-tail-v1";
+/** These calls include additional input that decision rows do not retain. */
+export const AUTO_LLM_ROUTER_UNREPLAYABLE_CONTEXT = ["+image-intent-", "+location-v1", "+search-plan-"] as const;
 const OMITTED_MIDDLE = "\n[... middle omitted ...]\n";
 
 /** UTF-16 bounds shared by live requests, stored samples and replay. */
@@ -258,7 +260,7 @@ export const autoLlmRouterCandidates = (
 };
 
 /**
- * The start of the assistant answer just before the latest user message, or
+ * The bounded assistant answer just before the latest user message, or
  * null when there is none (a first turn) or it is not plain text.
  */
 export const previousAnswerExcerpt = (

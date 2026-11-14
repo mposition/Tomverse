@@ -1,4 +1,5 @@
 import "server-only";
+import { observeOptimizerCost, optimizerCostFields } from "@/lib/autoOptimizerCost";
 
 import { generateText, jsonSchema, Output } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
@@ -10,6 +11,7 @@ import { writeAutoRouterOptimizerSystemAudit } from "@/lib/autoRouterOptimizerSy
 import { callAutoLlmRouter } from "@/lib/autoLlmRouter";
 import {
     AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
+    AUTO_LLM_ROUTER_UNREPLAYABLE_CONTEXT,
     resolveAutoLlmRouterModel,
 } from "@/lib/autoLlmRouterCore";
 import {
@@ -36,7 +38,9 @@ import {
 } from "@/lib/autoRouterOptimizer";
 import {
     AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
-    callCostMicroUsd,
+    optimizerPromotionEligibility,
+    optimizerVerificationSummary,
+    type OptimizerPromotionRefusal,
     optimizerAnswerOptions,
     optimizerCallFailureDetail,
     traceOptimizerCall,
@@ -136,11 +140,12 @@ async function writeRewriteOptimizerAutomation(
 export async function loadRewriteDecisions(): Promise<RewriteOptimizerDecision[]> {
     const rows = await prisma.autoRouterDecision.findMany({
         where: { outcome: "picked", version: { contains: "+rewrite" }, routerContext: { not: null },
-            NOT: { version: { contains: "+image-intent-" } } },
+            NOT: AUTO_LLM_ROUTER_UNREPLAYABLE_CONTEXT.map(marker => ({ version: { contains: marker } })) },
         orderBy: { createdAt: "desc" },
         take: AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX * SAMPLE_READ_FACTOR,
         select: {
             id: true,
+            version: true,
             routerInput: true,
             routerContext: true,
             routerSession: true,
@@ -154,6 +159,7 @@ export async function loadRewriteDecisions(): Promise<RewriteOptimizerDecision[]
         if (!isRewriteSampleTurn(turn) || !row.routerContext) return [];
         return [{
             id: row.id,
+            inputVersion: row.version,
             routerInput: row.routerInput,
             routerContext: row.routerContext,
             routerSession: asSession(row.routerSession),
@@ -257,7 +263,7 @@ async function runInBackground(input: {
         }
     };
     const cost = (prices: Prices, usage: { inputTokens?: number; outputTokens?: number } | undefined) =>
-        callCostMicroUsd({ inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, ...prices });
+        optimizerCostFields(observeOptimizerCost(usage, prices));
     const answerModels = new Map(
         input.models
             .filter((model) => model.enabled && !model.catalogDeleted)
@@ -300,7 +306,7 @@ async function runInBackground(input: {
                     }));
                     return {
                         value: output,
-                        costMicroUsd: cost(input.optimizerPrices, generated.usage),
+                        ...cost(input.optimizerPrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
                 },
@@ -330,7 +336,7 @@ async function runInBackground(input: {
                     }
                     return {
                         value: typeof guidance === "string" ? guidance : null,
-                        costMicroUsd: cost(input.optimizerPrices, generated.usage),
+                        ...cost(input.optimizerPrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
                 },
@@ -364,7 +370,7 @@ async function runInBackground(input: {
                     }
                     return {
                         value: routed.pick ? { modelId: routed.pick.modelId, rewrite: routed.pick.rewrite } : null,
-                        costMicroUsd: cost(input.routerPrices, routed.usage),
+                        ...cost(input.routerPrices, routed.usage),
                         provider: input.routerModel.provider,
                     };
                 },
@@ -373,7 +379,7 @@ async function runInBackground(input: {
                     const prices = model ? pricesOf(model) : null;
                     // No call without a price: its spend could not be recorded.
                     if (!model || !prices) {
-                        return { value: null, costMicroUsd: 0, provider: model?.provider ?? "unknown" };
+                        return { value: null, ...optimizerCostFields({ state: "no_dispatch", reason: !model ? "model_unavailable" : "unpriced" }), provider: model?.provider ?? "unknown" };
                     }
                     // The routing cycle's answer request: the model's own generation
                     // settings, as a chat turn gets them.
@@ -385,7 +391,7 @@ async function runInBackground(input: {
                     }), model);
                     return {
                         value: generated.text,
-                        costMicroUsd: cost(prices, generated.usage),
+                        ...cost(prices, generated.usage),
                         provider: model.provider,
                     };
                 },
@@ -399,7 +405,7 @@ async function runInBackground(input: {
                     }));
                     return {
                         value: parseJudgeWinner(outputOf("judge", generated)),
-                        costMicroUsd: cost(input.optimizerPrices, generated.usage),
+                        ...cost(input.optimizerPrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
                 },
@@ -413,7 +419,7 @@ async function runInBackground(input: {
                 failure: result.failure,
                 candidateGuidance: result.candidateGuidance,
                 cases: result.cases,
-                summary: { ...result.summary, failedCalls: result.failedCalls, judgeFailed: result.judgeFailed },
+                summary: { ...result.summary, ...optimizerVerificationSummary(result), failedCalls: result.failedCalls, failedByKind: result.failedByKind, judgeFailed: result.judgeFailed },
                 spentMicroUsd: result.spentMicroUsd,
                 finishedAt: new Date(),
             },
@@ -475,22 +481,23 @@ type AdminActor = { session: Session; request: Request };
 export async function promoteAutoRewriteOptimizerCycle(
     cycleId: string,
     actor: OptimizerActor
-): Promise<{ ok: true } | { refused: "not_found" | "not_passed" | "already_promoted" | "stale" }> {
+): Promise<{ ok: true } | { refused: "not_found" | "not_passed" | "already_promoted" | "stale" | OptimizerPromotionRefusal }> {
     return prisma.$transaction(async (tx) => {
         await takeAuditChainLock(tx);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
         const cycle = await tx.autoRouterOptimizerCycle.findUnique({
             where: { id: cycleId },
-            select: { status: true, candidateGuidance: true, incumbentGuidance: true, promotedAt: true, target: true },
+            select: { status: true, candidateGuidance: true, incumbentGuidance: true, promotedAt: true, target: true, summary: true },
         });
         if (!cycle || cycle.target !== "rewrite") return { refused: "not_found" as const };
         if (cycle.promotedAt) return { refused: "already_promoted" as const };
-        if (cycle.status !== "passed" || !cycle.candidateGuidance) return { refused: "not_passed" as const };
+        const eligibility = optimizerPromotionEligibility(cycle);
+        if (!eligibility.eligible) return { refused: eligibility.refusal };
         const active = await readActiveRouterGuidance(tx, "rewrite");
         if (active.guidance !== cycle.incumbentGuidance) return { refused: "stale" as const };
         await writeActiveRouterGuidance(
             tx,
-            promotedRouterGuidance(active, { guidance: cycle.candidateGuidance, cycleId }),
+            promotedRouterGuidance(active, { guidance: cycle.candidateGuidance!, cycleId }),
             "rewrite"
         );
         await tx.autoRouterOptimizerCycle.update({ where: { id: cycleId }, data: { promotedAt: new Date() } });
@@ -561,6 +568,7 @@ export type RewriteOptimizerCycleView = {
     optimizerModelId: string;
     candidateGuidance: string | null;
     summary: unknown;
+    promotionEligibility: ReturnType<typeof optimizerPromotionEligibility>;
     spentMicroUsd: number;
     promotedAt: string | null;
     syntheticCases: RewriteSyntheticCaseView[];
@@ -597,6 +605,7 @@ export async function readAutoRewriteOptimizerState() {
         cycles: cycles.map(({ cases, ...cycle }): RewriteOptimizerCycleView => ({
             ...cycle,
             ...optimizerCycleView(cycle, now),
+            promotionEligibility: optimizerPromotionEligibility(cycle),
             syntheticCases: rewriteSyntheticCaseViews(cases),
             createdAt: cycle.createdAt.toISOString(),
             promotedAt: cycle.promotedAt?.toISOString() ?? null,

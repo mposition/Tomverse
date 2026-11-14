@@ -1,5 +1,6 @@
 "use client";
 
+import { OptimizerEvidenceView, type OptimizerEvidenceSummary } from "@/components/admin/OptimizerEvidenceView";
 import { formatAestDateTime } from "@/lib/adminUiCore";
 import { ResponseLatencyEvidenceView } from "@/components/admin/ResponseLatencyEvidenceView";
 import type { ResponseLatencyEvidence } from "@/lib/responseLatencyCore";
@@ -34,7 +35,7 @@ import {
   type RecommendationStatus,
 } from "@/lib/autoRouterRecommendationsCore";
 
-type Summary = {
+type Summary = OptimizerEvidenceSummary & {
   responseLatency?: ResponseLatencyEvidence;
   evaluated: number;
   unchanged: number;
@@ -66,6 +67,7 @@ type Cycle = {
   summary: Summary | null;
   spentMicroUsd: number;
   promotedAt: string | null;
+  promotionEligibility?: { eligible: boolean; refusal: string | null };
   syntheticCases?: {
     message: string;
     kind: "easy" | "hard" | null;
@@ -84,6 +86,7 @@ type OptimizerState = {
   active: { cycleId: string | null; guidance: string; canRollBack: boolean };
   cycles: Cycle[];
   spend: {
+    unconfirmedCycles?: number;
     todayMicroUsd: number;
     monthMicroUsd: number;
     runCapMicroUsd: number;
@@ -355,6 +358,7 @@ export function AdminAutoRouterOptimizerPanel({
         <p className="text-xs text-zinc-400" data-testid="admin-auto-router-optimizer-spend">
           {m.spend}: {usd(state.spend.todayMicroUsd)} {m.today} · {usd(state.spend.monthMicroUsd)} {m.month} ·{" "}
           {m.caps} {usd(state.spend.runCapMicroUsd)} / {usd(state.spend.dayCapMicroUsd)} / {usd(state.spend.monthCapMicroUsd)}
+          {state.spend.unconfirmedCycles !== undefined ? ` · ${m.unconfirmedCycles(state.spend.unconfirmedCycles)}` : ` · ${m.totalUnconfirmed}`}
         </p>
       ) : null}
 
@@ -441,7 +445,7 @@ export function AdminAutoRouterOptimizerPanel({
                 <AdminStatusChip tone={optimizerCycleTone(cycle.status)}>{status(cycle.status)}</AdminStatusChip>
                 {cycle.promotedAt ? <AdminStatusChip tone="info">{m.promoted}</AdminStatusChip> : null}
               </span>
-              {cycle.status === "passed" && !cycle.promotedAt ? (
+              {cycle.status === "passed" && cycle.promotionEligibility?.eligible === true && !cycle.promotedAt ? (
                 <AdminWriteButton
                   {...writeProps}
                   onClick={() => setConfirming({ kind: "promote", cycleId: cycle.id })}
@@ -452,6 +456,8 @@ export function AdminAutoRouterOptimizerPanel({
                 </AdminWriteButton>
               ) : null}
             </div>
+            {cycle.promotionEligibility?.refusal && !cycle.promotedAt ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.promotionEligibility.refusal)}</p> : null}
+            <OptimizerEvidenceView summary={cycle.summary} spentMicroUsd={cycle.spentMicroUsd} />
             {cycle.failure ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.failure)}</p> : null}
             {cycle.summary ? (
               <p className="mt-1 text-xs text-zinc-400">
@@ -548,7 +554,7 @@ export function AdminAutoRouterOptimizerPanel({
               </details>
             ) : null}
             <p className="mt-1 text-xs text-zinc-500">
-              {cycle.optimizerModelId} · {m.spent} {usd(cycle.spentMicroUsd)}
+              {cycle.optimizerModelId}
             </p>
             {cycle.candidateGuidance ? (
               <details className="mt-2">
