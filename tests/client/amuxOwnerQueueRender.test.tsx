@@ -10,6 +10,7 @@ import {
 } from "@/components/admin/AdminAmuxRoutingPanel";
 import { amuxLegacyCardReadOf, type AmuxLegacyCardRead } from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxOwnerQueueDecision } from "@/components/admin/AmuxOwnerQueueDecision";
+import { AmuxReviewRejectionReason, amuxRejectedAttemptsOf } from "@/components/admin/AmuxReviewRejection";
 import { amuxOwnerQueueDmFrom } from "@/components/admin/AmuxOwnerQueueDm";
 import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue";
 import { AmuxOwnerQueueView, isAmuxOwnerQueueRead } from "@/components/admin/AmuxOwnerQueueScreen";
@@ -616,7 +617,78 @@ test("the legacy panel comes out of the card detail the review reads and keeps o
     },
   });
   assert.deepEqual(sent, ["/api/admin/amux/execution-view?view=detail&taskId=task-1"]);
-  assert.deepEqual(read, { state: "unavailable", legacyCard: { revision: 8, view: preV22Legacy.view } });
+  assert.deepEqual(read, { state: "unavailable", legacyCard: { revision: 8, view: preV22Legacy.view },
+    rejections: [] });
+});
+
+// Owner decision 2026-11-14: each run the code review rejected shows its
+// reasons beside the retry, recover and close choices; a record from before
+// the reasons were kept says which review job holds them.
+const REJECT_JOB = "r-20261113-111120-93735a";
+const OLD_JOB = "r-20261113-111543-cca3be";
+const rejectedDetail = {
+  id: "task-1", revision: 8, legacyCard: null,
+  attempts: [
+    { id: "attempt-2", attemptNumber: 2, v52Review: { verdict: "reject", jobId: REJECT_JOB,
+      reviewerVendors: ["openai"],
+      findingsSummary: "- [major · openai] lib/chat/stream.ts:42 artifactUnavailable is never set\n- [minor · openai] tests miss the trailer" } },
+    { id: "attempt-1", attemptNumber: 1, v52Review: { verdict: "reject", jobId: OLD_JOB,
+      reviewerVendors: ["moonshot"], findingsSummary: null } },
+    { id: "attempt-0", attemptNumber: 0, v52Review: { verdict: "accept", jobId: "r-20261113-101543-cca3be",
+      reviewerVendors: ["openai"], findingsSummary: null } },
+    { id: "attempt-x", attemptNumber: 3, v52Review: null },
+  ],
+};
+
+test("the owner execution read hands on each rejected run with its reasons", async () => {
+  const read = await readAmuxOwnerExecutionMetadata({
+    review: reviewFor("esc-1"), controller: new AbortController(), isCurrent: () => true,
+    fetcher: async () => Response.json(rejectedDetail),
+  });
+  assert.equal(read?.state, "unavailable");
+  const rejections = read && "rejections" in read ? read.rejections ?? [] : [];
+  assert.deepEqual(rejections.map((attempt) => [attempt.id, attempt.attemptNumber]),
+    [["attempt-2", 2], ["attempt-1", 1]]);
+  assert.deepEqual(amuxRejectedAttemptsOf("task-2", rejectedDetail), []);
+});
+
+test("a rejected run's reasons sit in the why box; an older record names its review job", () => {
+  const escalationId = items[0].escalationId!;
+  const ctl = controller({ selectedEscalationId: escalationId, review: reviewFor(escalationId),
+    ownerExecution: { state: "unavailable", legacyCard: null,
+      rejections: amuxRejectedAttemptsOf("task-1", rejectedDetail) } });
+  const html = decision(items[0], ctl);
+  const why = html.slice(html.indexOf('data-testid="amux-owner-queue-why"'),
+    html.indexOf('data-testid="amux-owner-queue-choices"'));
+  assert.match(why, /data-testid="amux-review-rejection-list"/);
+  assert.match(why, /Run 2 · Why the code review rejected this run/);
+  assert.match(why, /lib\/chat\/stream\.ts:42 artifactUnavailable is never set/);
+  assert.match(why, /tests miss the trailer/);
+  assert.match(why, /data-kind="job"/);
+  assert.match(why, new RegExp(`review server, job ${OLD_JOB}`));
+  assert.match(why, new RegExp(`npm run -s review -- report ${OLD_JOB} --slot 0`));
+  assert.doesNotMatch(why, /r-20261113-101543-cca3be/);
+  // Only the owner reads the card detail, so nobody else sees the reasons.
+  assert.doesNotMatch(decision(items[0], ctl, false), /amux-review-rejection/);
+});
+
+test("the card detail's attempt shows a reject's reasons and nothing for other verdicts", () => {
+  const summary = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={2}
+    review={rejectedDetail.attempts[0].v52Review} />);
+  assert.match(summary, /data-kind="summary"/);
+  assert.match(summary, /reviewed by openai/);
+  assert.match(summary, /shown as data/);
+  assert.equal(renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={0}
+    review={rejectedDetail.attempts[2].v52Review} />), "");
+  assert.equal(renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={3} review={null} />), "");
+  // Two reviewers (a contract change): either slot may hold the reject.
+  const twoSlots = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
+    review={{ verdict: "reject", jobId: OLD_JOB, reviewerVendors: ["openai", "google"], findingsSummary: null }} />);
+  assert.match(twoSlots, new RegExp(`report ${OLD_JOB} --slot 0`));
+  assert.match(twoSlots, new RegExp(`report ${OLD_JOB} --slot 1`));
+  const none = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
+    review={{ verdict: "reject", jobId: null, reviewerVendors: [], findingsSummary: null }} />);
+  assert.match(none, /data-kind="none"/);
 });
 
 // Owner decision 2026-11-10: a run whose CLI usage was never fully reported

@@ -19,6 +19,7 @@ import {
   isAmuxRemakeOnlyCardKind } from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxOwnerQueueDm } from "@/components/admin/AmuxOwnerQueueDm";
 import { AmuxOwnerQueueEngineeringItems } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
+import { AmuxReviewRejectionList } from "@/components/admin/AmuxReviewRejection";
 import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
 import { AmuxTaskUnknownUsageList } from "@/components/admin/AmuxAttemptUsageAcceptance";
 import { AmuxTaskQuestionSection } from "@/components/admin/AmuxWorkerQuestion";
@@ -161,6 +162,10 @@ export function AmuxOwnerQueueDecision({
     (ownerExecution.state === "ready" || ownerExecution.state === "unavailable") ?
     ownerExecution.legacyCard ?? null : null;
   const legacyCard = legacyRead?.view ? { revision: legacyRead.revision, view: legacyRead.view } : null;
+  // The same owner-only detail answer carries the runs the code review rejected.
+  const reviewRejections = canInspectCards && group !== "question" && reviewMatches &&
+    (ownerExecution.state === "ready" || ownerExecution.state === "unavailable") ?
+    ownerExecution.rejections ?? [] : [];
   // Once the review is read, the legacy panel stands in for a decision only
   // when none is open and the card is one no decision ever opens on.
   const legacyOnly = legacyCard !== null && outcomes.length === 0 &&
@@ -265,6 +270,9 @@ export function AmuxOwnerQueueDecision({
             </pre>
           </div>
         ) : null}
+        {/* Each rejected run's reasons, beside the retry, recover and close
+            choices below (owner decision 2026-11-14). */}
+        {reviewRejections.length > 0 ? <AmuxReviewRejectionList attempts={reviewRejections} /> : null}
       </div>
 
       {/* The Decision Maker's proposal for this card (or why it has none, or why the card
