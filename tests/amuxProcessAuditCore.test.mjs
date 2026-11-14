@@ -273,6 +273,10 @@ test("the box unit runs the bundle and the timer only polls", () => {
   const timer = readFileSync(new URL("../scripts/systemd/tomverse-amux-process-audit.timer", import.meta.url), "utf8");
   assert.match(unit, /ExecStart=\/usr\/bin\/node %h\/\.local\/lib\/tomverse-amux-process-audit\/amux-process-audit-runner\.mjs/);
   assert.match(unit, /KillMode=control-group/);
+  assert.match(unit, /^NoNewPrivileges=yes$/m);
+  // A --user unit's PrivateTmp puts the service in a user namespace in which
+  // the Codex sandbox's bwrap cannot create its own (box, 2026-11-14).
+  assert.equal(/^\s*PrivateTmp\s*=/m.test(unit), false);
   assert.match(timer, /OnUnitInactiveSec=1h/);
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.match(pkg.scripts["build:amux-process-audit-box"], /scripts\/amux-process-audit-runner\.mjs --bundle/);
