@@ -131,7 +131,7 @@ test("the card's fixed words hit no routing term, so it reaches a DM", () => {
   }
 });
 
-test("a stopped Task's card carries the whole evidence, or nothing", () => {
+test("a stopped Task's card carries its evidence, marked, and cuts it to fit (AMUXFLOW/B2)", () => {
   const card = amuxDmOwnerSettlementCard({ ...base, kind: "stopped" });
   assert.deepEqual(card.options.map((option) => option.id), ["retry", "complete", "close"]);
   assert.match(card.question, /Task: AMUX-ROUTERFAIL2-002 "Name the router failure" \(implement Task, grade routine, now blocked\)/);
@@ -144,8 +144,13 @@ test("a stopped Task's card carries the whole evidence, or nothing", () => {
     /Its run left no result to read\./, "a run that left no result says so");
   assert.equal(amuxDmOwnerSettlementCard({ ...base, kind: "stopped", criteria: [] }), null,
     "no approved criteria: the person decides");
-  assert.equal(amuxDmOwnerSettlementCard({ ...base, kind: "stopped",
-    findings: "x".repeat(AMUX_DM_OWNER_SETTLEMENT_QUESTION_MAX) }), null, "findings are never cut");
+  assert.ok(card.question.includes("[evidence]\nIts findings: Added the function; the caller is in the next card.\n[/evidence]"),
+    "the run's words are an evidence block the term check can skip");
+  const long = amuxDmOwnerSettlementCard({ ...base, kind: "stopped",
+    findings: "x".repeat(AMUX_DM_OWNER_SETTLEMENT_QUESTION_MAX) });
+  assert.ok(long, "long findings no longer leave the card unfiled");
+  assert.ok(long.question.length <= AMUX_DM_OWNER_SETTLEMENT_QUESTION_MAX);
+  assert.ok(long.question.includes("x (cut to fit this card)\n[/evidence]"));
   const many = Array.from({ length: 11 }, (_, index) => ({ label: `L-${index}`, title: "t".repeat(200),
     status: "todo", waitsOnThis: false }));
   const listed = amuxDmOwnerSettlementCard({ ...base, kind: "stopped", siblings: many, siblingTotal: 11 });
@@ -158,7 +163,8 @@ test("a review pull request's card always lists its files and shows whole diffs 
     reason: "human_review_required", rejections: 0, pull: { number: 3812, patch: PATCH } });
   assert.deepEqual(card.options.map((option) => option.id), ["approve", "retry", "close"]);
   assert.match(card.question, /Pull request #3812, files \(2\):\n- lib\/amux\/routerFailure\.ts \(\+1 -0\)\n- tests\/routerFailure\.test\.mjs \(\+1 -0\)/);
-  assert.match(card.question, /Patch:\ndiff --git a\/lib\/amux\/routerFailure\.ts/);
+  assert.ok(card.question.includes("Patch:\n[evidence]\ndiff --git a/lib/amux/routerFailure.ts"));
+  assert.ok(card.question.includes("[/evidence]\nShould the pull request be approved"));
   assert.ok(!card.question.includes("more file diffs"));
   assert.ok(!card.question.includes("remake"), "a pull request is not remade");
   const big = `${PATCH}\n${["diff --git a/big.ts b/big.ts", "@@ -0,0 +1 @@", `+${"z".repeat(1_900)}`].join("\n")}`;

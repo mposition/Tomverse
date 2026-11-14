@@ -433,6 +433,7 @@ run(
     // during 2026-11. It found, on its first run, that the observer's two
     // mismatch cause keys were longer than the store admits.
     "tests/integration/amux-card-lifecycle-e2e.db.test.ts",
+    "tests/integration/amux-stalled-card-sweep.db.test.ts",
     // Owner decision 2026-11-14: an unchanged score's active window is
     // extended by the system refresher, up to its baseline, never past it.
     "tests/integration/amux-portfolio-score-refresh.db.test.ts",
