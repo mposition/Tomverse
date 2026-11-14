@@ -1,3 +1,4 @@
+import { mobileIosWorkspaceCopy } from "../../../locales/mobileIosWorkspace";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { mobileCopy, mobileLanguages, type MobileLanguage } from "../../../locales/mobile";
 import { mobileParityCopy } from "../../../locales/mobileParity";
@@ -14,10 +15,11 @@ import "./settings.css";
 
 const tabIcons: Record<AccountSettingsTab, LucideIcon> = { account: UserRound, preferences: Settings2, assistants: Bot, ai: Brain, data: Database, plan: CreditCard };
 
-export function SettingsScreen({ transport, signedIn, language, theme, onLanguage, onTheme, onAccount, onSignOut, initialTab = "account" }: {
+export function SettingsScreen({ transport, signedIn, language, theme, onLanguage, onTheme, onAccount, onSignOut, onAssistants, onImports, initialTab = "account" }: {
   transport: ChatTransport; signedIn: boolean; language: MobileLanguage; theme: string;
   onLanguage: (language: MobileLanguage) => void; onTheme: (theme: string) => void;
   onAccount: () => void; onSignOut: () => void;
+  onAssistants?: () => void; onImports?: () => void;
   initialTab?: AccountSettingsTab;
 }) {
   const copy = mobileCopy[language]; const c = mobileParityCopy(language); const navigation = mobileSettingsCopy(language);
@@ -121,7 +123,7 @@ export function SettingsScreen({ transport, signedIn, language, theme, onLanguag
       <h3>{navigation.assistants}</h3>
       {!!assistants.length && <div className="settings-group settings-assistant-list">{assistants.map(assistant => <article className="settings-assistant" key={assistant.id}><span className="settings-assistant-avatar" aria-hidden="true"><Bot size={22} /></span><div><strong>{assistant.name}</strong>{assistant.description && <p>{assistant.description}</p>}</div></article>)}</div>}
       {!loading && !readFailed && !assistants.length && <div className="settings-group settings-empty"><Bot size={28} aria-hidden="true" /><p>{navigation.noAssistants}</p></div>}
-      <button type="button" className="settings-inline-action" disabled={!signedIn} onClick={() => website("/settings/assistants")}><ExternalLink size={18} aria-hidden="true" /><span>{navigation.manageOnWeb}</span><ChevronRight size={18} aria-hidden="true" /></button>
+      <button type="button" className="settings-inline-action" disabled={!signedIn} onClick={() => onAssistants ? onAssistants() : website("/settings/assistants")}>{onAssistants ? <Bot size={18} aria-hidden="true" /> : <ExternalLink size={18} aria-hidden="true" />}<span>{onAssistants ? mobileIosWorkspaceCopy(language).assistants : navigation.manageOnWeb}</span><ChevronRight size={18} aria-hidden="true" /></button>
     </section>}
     {!detail && tab === "ai" && <section className="settings-fields">
       <h3>{navigation.newConversationModels}</h3>
@@ -135,7 +137,7 @@ export function SettingsScreen({ transport, signedIn, language, theme, onLanguag
       <button type="button" className="settings-inline-action" onClick={() => website("/settings/memory")}><ExternalLink size={18} aria-hidden="true" /><span>{navigation.manageOnWeb}</span><ChevronRight size={18} aria-hidden="true" /></button>
     </section>}
     {!detail && tab === "data" && <section className="settings-fields"><h3>{navigation.dataManagement}</h3>
-      <div className="settings-group">{entry("import", navigation.externalImport, navigation.importDescription, () => website("/settings/imports"), !signedIn)}
+      <div className="settings-group">{entry("import", navigation.externalImport, navigation.importDescription, onImports ?? (() => website("/settings/imports")), !signedIn)}
       {entry("account-data", navigation.accountData, navigation.accountDataDescription, onAccount, !signedIn)}</div>
       <div className="settings-resource-links"><a href="https://tomverse.app/privacy" target="_blank" rel="noreferrer"><LockKeyhole size={16} aria-hidden="true" />{copy.privacy}<ExternalLink size={14} aria-hidden="true" /></a><a href="https://tomverse.app/support" target="_blank" rel="noreferrer"><MessageSquare size={16} aria-hidden="true" />{copy.support}<ExternalLink size={14} aria-hidden="true" /></a></div>
     </section>}
