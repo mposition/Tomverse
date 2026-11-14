@@ -454,6 +454,9 @@ run(
     // beside the line; a change a revert cannot undo left to the person; the
     // merge lane's list and the observer's read follow the approval.
     "tests/integration/amux-dm-t2-merge.db.test.ts",
+    // The AMUX process analysis agent (owner request 2026-11-14): the figures'
+    // SQL over the real schema, and one run's claim, report and retention.
+    "tests/integration/amux-process-audit.db.test.ts",
     // A v22 implement Task's review pull request (2026-11-11): its v4 row
     // cannot hold the number, so the engineering binding holds it, the record
     // is never refused, and only the bound pull request's merge completes it.

@@ -65,7 +65,7 @@ page and never the table. A tab with no screen draws `AdminTabPlaceholder`
 | AI Agents | SRE | `/admin/sre-ops` | `overview`, `daily`, `settings` |
 | AI Agents | Billing & finance | `/admin/finance-agent` | `overview`, `report`, `settings` |
 | Development | Ideas (owner only) | `/admin/amux-backlog` | `ideas`, `list`, `portfolio` |
-| Development | Execution board | `/admin/amux-execution` | `cards` (owner only), `review`, `diagnostics` |
+| Development | Execution board | `/admin/amux-execution` | `cards` (owner only), `review`, `diagnostics`, `process-audit` (owner only) |
 | Development | Release | `/admin/release` | `qa`, `ci` |
 | Development | AMUX settings | `/admin/amux-settings` | `automatic-admission` (owner only), `workers`, `decision-maker`, `analysis` (owner only) |
 | Development | Safety & recovery | `/admin/amux-recovery` | `safety`, `reservations` (owner only), `legacy` (owner only) |
@@ -888,6 +888,16 @@ console has no copy for (French, German, …) reads English.
 | `ALL_ITEMS.slice(0, 9)` in the empty palette | Pinned, Recent, and every page grouped exactly as the sidebar groups them |
 | `AdminMemoryImportPanel` stacked under the product funnel, so opening either fetched both | its own `?tab=imports` section |
 
+
+### Execution board process analysis (2026-11-14)
+
+The Execution board has an owner-only `process-audit` tab ("프로세스 분석"):
+the scheduled AMUX process analysis reports (`lib/amuxProcessAuditStore.ts`,
+runbook `docs/ops/amux/process-audit-agent.md`) and their schedule controls
+(on/off, cadence, run now; `POST /api/admin/amux/process-audit/settings`,
+owner after a recent sign-in, audited). The page refuses a non-owner in the
+tab's own branch, as it does the board. It is a new tab, not a moved one, so
+it retires no URL and adds no redirect.
 
 ### AMUX operations settings (2026-10-12)
 

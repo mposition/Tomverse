@@ -654,8 +654,8 @@ test.describe("admin console shell", () => {
   }) => {
     await page.goto("/admin/amux-execution");
     const strip = page.getByRole("navigation", { name: "Execution board sections" });
-    // Board, Waiting on me and Diagnostics; Workers and Decision Maker are AMUX settings sections.
-    await expect(strip.getByRole("link")).toHaveCount(3);
+    // Board, Waiting on me, Diagnostics and Process analysis (owner only); Workers and Decision Maker are AMUX settings sections.
+    await expect(strip.getByRole("link")).toHaveCount(4);
     await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=decision-maker"]')).toHaveCount(0);
     await expect(strip.locator('a[href$="tab=workers"]')).toHaveCount(0);
