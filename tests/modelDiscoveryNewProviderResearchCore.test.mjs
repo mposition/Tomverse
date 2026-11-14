@@ -261,7 +261,7 @@ test("the connected-image call has its own default-off switch", async () => {
   assert.equal(MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV, "MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED");
   // Only the literal "true" turns it on; without it no fourth call is made.
   assert.ok(runner.includes('env[MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV]?.trim() === "true"'));
-  assert.match(runner, /if \(!connectedImageEnabled\) \{\s*return \{ ok: true, proposed: 0/);
+  assert.match(runner, /= \{ ok: true, proposed: 0, accepted: \[\], rejected: \[\] \};\s*if \(connectedImageEnabled\) \{/);
 });
 
 test("research rows are never judged by the catalogue scan, so the vanished-ID exclusion cannot close them", async () => {
@@ -277,4 +277,23 @@ test("research rows are never judged by the catalogue scan, so the vanished-ID e
     excluded: [],
   });
   assert.deepEqual(exclude, []);
+});
+
+// 2026-11-12 production: run in parallel, image and code failed with a bare
+// AI_APICallError and nothing said why.
+test("research calls run one at a time and a failure logs its HTTP status, never content", async () => {
+  const { readFileSync } = await import("node:fs");
+  const runner = readFileSync("lib/modelDiscoveryNewProviderResearch.ts", "utf8");
+  assert.match(runner, /for \(const product of NEW_PROVIDER_RESEARCH_PRODUCTS\) \{\s*try \{\s*const answer = await ask\(/);
+  assert.equal(/NEW_PROVIDER_RESEARCH_PRODUCTS\.map\(async/.test(runner), false);
+  assert.match(runner, /const TOTAL_BUDGET_MS = 150_000;/);
+  const { researchFailureFacts } = await import("../lib/modelDiscoveryNewProviderResearch.ts");
+  const apiError = Object.assign(new Error("Too many requests: the full provider message"), {
+    name: "AI_APICallError",
+    statusCode: 429,
+    isRetryable: true,
+    responseBody: "{\"error\":\"secret-ish provider text\"}",
+  });
+  assert.deepEqual(researchFailureFacts(apiError), { error: "AI_APICallError", statusCode: 429, retryable: true });
+  assert.deepEqual(researchFailureFacts("nope"), { error: "unknown", statusCode: null, retryable: null });
 });
