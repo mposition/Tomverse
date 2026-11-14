@@ -17,7 +17,7 @@ const world = {
   statements: [] as string[],
   upserts: [] as unknown[],
   transactionError: null as Error | null,
-  questionWhere: null as unknown,
+  questionAfterMs: null as number | null,
 };
 
 mock.module(mod("lib/prisma.ts"), {
@@ -43,12 +43,15 @@ mock.module(mod("lib/prisma.ts"), {
         });
       },
       appSetting: { findUnique: async () => ({ value: "2026-11-14T00:00:00.000Z" }) },
-      amuxDecisionMakerRequest: {
-        findFirst: async (args: { where: unknown }) => {
-          world.questionWhere = args.where;
-          return null;
-        },
-      },
+    },
+  },
+});
+
+mock.module(mod("lib/amux/decisionMakerRequestStore.ts"), {
+  namedExports: {
+    readNewestDecisionMakerRequestCreatedAfter: async (_client: unknown, afterMs: number) => {
+      world.questionAfterMs = afterMs;
+      return null;
     },
   },
 });
@@ -65,7 +68,7 @@ const reset = () => {
   world.statements = [];
   world.upserts = [];
   world.transactionError = null;
-  world.questionWhere = null;
+  world.questionAfterMs = null;
 };
 
 test("the heartbeat writes one row, bounded in connection wait, time and locks", async () => {
@@ -95,7 +98,7 @@ test("the question read looks back only the question window", async () => {
   reset();
   const now = new Date("2026-11-14T03:00:00.000Z");
   await heartbeat.readAmuxDmRelayLastQuestionAt(now);
-  assert.deepEqual(world.questionWhere, { createdAt: { gt: new Date("2026-11-14T02:20:00.000Z") } });
+  assert.equal(world.questionAfterMs, new Date("2026-11-14T02:20:00.000Z").getTime());
 });
 
 test("calling, asking and silent", () => {

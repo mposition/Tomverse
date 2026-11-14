@@ -2,6 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 
+import { readNewestDecisionMakerRequestCreatedAfter } from "@/lib/amux/decisionMakerRequestStore";
 import {
   AMUX_DM_RELAY_LAST_SYNC_KEY,
   AMUX_DM_RELAY_QUESTION_MS,
@@ -70,10 +71,5 @@ export async function readAmuxDmRelayLastSyncAt(): Promise<Date | null> {
  * was created, or null when none is that recent. Throws like the read above.
  */
 export async function readAmuxDmRelayLastQuestionAt(now = new Date()): Promise<Date | null> {
-  const row = await prisma.amuxDecisionMakerRequest.findFirst({
-    where: { createdAt: { gt: new Date(now.getTime() - AMUX_DM_RELAY_QUESTION_MS) } },
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-  });
-  return row?.createdAt ?? null;
+  return readNewestDecisionMakerRequestCreatedAfter(prisma, now.getTime() - AMUX_DM_RELAY_QUESTION_MS);
 }
