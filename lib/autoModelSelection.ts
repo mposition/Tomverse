@@ -447,9 +447,14 @@ export const applyLlmModelPick = (
     ...(files?.required ? selection.record.eligibleModelIds : []),
   ])];
   const offered = selection.record.eligibleModelIds.filter(id => !offeredModelIds || offeredModelIds.includes(id));
-  const eligible = files?.required
+  const capable = files?.required
     ? offered.filter(id => files.capableModelIds.includes(id))
     : offered;
+  // The current router preserves file intent even when tools are unavailable.
+  // Keep its offered model for the existing refusal, with no file failover.
+  const fileUnavailable = files?.required && capable.length === 0 && offeredModelIds !== undefined &&
+    pickedModelId !== null && offered.includes(pickedModelId);
+  const eligible = fileUnavailable ? offered : capable;
   const chosen = pickedModelId && eligible.includes(pickedModelId)
     ? pickedModelId
     : files?.required ? ranked.find(id => eligible.includes(id)) : null;
@@ -460,12 +465,12 @@ export const applyLlmModelPick = (
     modelId: chosen,
     sticky: keepDecision ? selection.sticky : { modelId: chosen, turnsFavouringChallenger: 0 },
     stickyMemoryModelId: keepDecision ? selection.stickyMemoryModelId : undefined,
-    fallbackCandidateModelIds: ranked.filter(id => id !== chosen && eligible.includes(id)),
+    fallbackCandidateModelIds: fileUnavailable ? [] : ranked.filter(id => id !== chosen && eligible.includes(id)),
     record: {
       ...selection.record,
       selectedModelId: chosen,
       eligibleModelIds: eligible,
-      rejections: files?.required ? [
+      rejections: files?.required && !fileUnavailable ? [
         ...selection.record.rejections,
         ...selection.record.eligibleModelIds.filter(id => !eligible.includes(id))
           .map(modelId => ({ modelId, reason: "file_generation_unsupported" as const })),

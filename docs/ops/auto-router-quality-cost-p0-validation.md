@@ -64,9 +64,12 @@ permission/cost boundary at `111ee710942e8c10d13d71a95298db0ba669687e` with
 two independent vendors. Minor follow-up clarifies the generator's pre-cycle
 evidence rule, unverified running-state copy and timeout consequences, and
 adds a no-file-capable-menu regression. The reviewed boundary is unchanged.
-With no file-capable offered candidate, the actual parser returns invalid;
-the existing requested-model recovery handles that failure. A new hard-menu
-file fallback was not added. Running/legacy cycles correctly count as having
+On the original main baseline, no file-capable offered candidate made the
+parser return invalid, using existing requested-model recovery. The develop
+integration preserves the newer parser contract instead: file intent remains
+true, the offered model gives the existing unavailable-file explanation and
+its fallback list is empty. No excluded model or file tool is added.
+Running/legacy cycles correctly count as having
 unconfirmed total cost. Guest Auto keeps its separate authority path.
 
 ## What remains unmeasured

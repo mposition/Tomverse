@@ -224,7 +224,7 @@ test("the actual soft exclusion menu reaches selection and file fallback; fewer 
   } finally { excludedModelIds = []; }
 });
 
-test("no file-capable offered candidate is a router failure with separate requested-model recovery", async () => {
+test("no file-capable offered candidate preserves file intent and uses an offered model for the existing refusal", async () => {
   const { applyLlmModelPick } = require(resolve(ROOT, "lib/autoModelSelection.ts"));
   const ids = ["gpt-5-6-luna", "deepseek-v4-flash", "deepseek-v4-pro"];
   const original = generateRouterResult;
@@ -237,17 +237,19 @@ test("no file-capable offered candidate is a router failure with separate reques
     const picked = await pick(undefined, { eligibleModelIds: ids,
       onCandidatesResolved: (value: readonly string[]) => { offered = value; },
       onCallOutcome: (value: string) => { outcome = value; } });
-    assert.equal(picked, null);
-    assert.equal(outcome, "invalid");
+    assert.equal(picked?.modelId, ids[1]);
+    assert.equal(picked?.requiresFileGeneration, true);
+    assert.equal(outcome, "picked");
     assert.equal(routerRequests.length, before + 1);
     const candidates = JSON.parse(String(routerRequests[before].prompt)).candidates;
     assert.ok(candidates.every((candidate: { canCreateFiles: boolean }) => !candidate.canCreateFiles));
     assert.deepEqual(offered, ids.slice(1));
-    const hardSelection = { routed: true, modelId: ids[1], fallbackCandidateModelIds: [ids[0], ids[2]],
-      record: { eligibleModelIds: ids, selectedModelId: ids[1], rejections: [] } };
-    const recovered = applyLlmModelPick(hardSelection, null, undefined, ids[0], offered);
-    assert.equal(recovered.modelId, ids[0]);
-    assert.equal(recovered.record.selectionReason, "fallback_order");
+    const hardSelection = { routed: true, modelId: ids[0], fallbackCandidateModelIds: ids.slice(1),
+      record: { eligibleModelIds: ids, selectedModelId: ids[0], rejections: [] } };
+    const refused = applyLlmModelPick(hardSelection, picked?.modelId, { required: true, capableModelIds: [ids[0]] }, null, offered);
+    assert.equal(refused.modelId, ids[1]);
+    assert.deepEqual(refused.record.eligibleModelIds, offered);
+    assert.deepEqual(refused.fallbackCandidateModelIds, []);
   } finally { excludedModelIds = []; generateRouterResult = original; }
 });
 

@@ -134,6 +134,9 @@ the original eligible menu. When applied, the exact offered menu bounds the
 normal LLM selection and its fallback candidates, further narrowed by file
 capability for an identified file request. The requested-model recovery on
 an actual router failure remains a separate path using hard eligibility.
+If the offered menu has no file-capable model, file intent remains explicit
+and an offered model gives the existing unavailable-file response without
+file failover. This grants no artifact tool capability.
 
 Guest Chat follows a narrower one-turn contract. Entry and the visible default
 remain rowless and free. Immediately before Send, the client obtains a fresh
