@@ -383,11 +383,14 @@ journalctl -u tomverse-amux-dm-relay.service -n 50 --no-pager -o short-iso
   relay는 bridge로 세지 않는다. relay만 있고 bridge가 없으면 여전히 down이다. watchdog을 이미 설치했다면 1.2절 명령을
   새 SHA로 다시 실행하면 relay도 보기 시작한다.
 
-### 6.2 자동 재시작 (기본 꺼짐, 운영자 승인 필요)
+### 6.2 자동 재시작 (설치해야 켜짐)
 
 코드: `scripts/amux-dm-relay-autorestart/`. 테스트: `tests/amuxDmRelayAutorestart.test.mjs`.
 
-자율 장치에 relay 재시작 권한을 새로 주는 일이라 **설치가 곧 켜는 것**이고, 운영자가 승인하고 직접 설치한다. 설치하지
+**승인:** 운영자, 2026-11-14(대화에서 "승인, 병합 후 설치"). 범위는 아래 표의 두 읽기 halt와 이번 부팅에 한 번도 켜지지
+않은 relay의 시작, 한 시간에 한 번까지다. 범위를 넓히려면 다시 승인을 받는다.
+
+자율 장치에 relay 재시작 권한을 새로 주는 일이라 **설치가 곧 켜는 것**이고, 운영자가 병합 뒤 직접 설치한다. 설치하지
 않으면 아무것도 하지 않는다. relay의 halt 원인은 `apps/tomverse-orchestrator/src/dm_relay/`의 `flow.rs`와
 `delivery.rs`에 있고, 테스트가 그 목록 전체가 아래 표 어디엔가 있는지 확인한다(새 원인이 생기면 테스트가 실패한다).
 
