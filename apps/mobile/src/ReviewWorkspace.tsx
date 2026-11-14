@@ -1,3 +1,5 @@
+import { isIosWorkspace } from "./iosWorkspaceContract";
+import { IosAssistantBadge } from "./IosWorkspace";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ConversationHistory } from "./ConversationHistory";
 import { ConversationListScreen } from "./ConversationListScreen";
@@ -9,7 +11,7 @@ import { mobileErrorText } from "../../../locales/mobileErrors";
 import { canUseModelWithPlan } from "../../../lib/models";
 import type { ChatSummary, ChatTransport, Conversation, MobileAttachment, MobileCapabilities, MobileModel } from "./chatTransport";
 import { Composer } from "./Composer";
-import type { ToolChange } from "./ComposerTools";
+import type { ComposerAction, ToolChange } from "./ComposerTools";
 import { AnswerContent } from "./AnswerContent";
 import { NativeImageWorkspace } from "./NativeImageWorkspace";
 import { useReviewWorkspace } from "../../../components/chat/useReviewWorkspace";
@@ -18,8 +20,9 @@ import { ReviewModelPicker } from "./ReviewModelPicker";
 import { useDeviceDraft, preserveNativeDraft } from "./useDeviceDraft";
 import type { MobileProduct } from "./WorkspaceNavigation";
 
-export function ReviewWorkspace({ transport, language, owner, historyOpen, onCloseHistory, onBusyChange, onLoadingChange, onProductChange, historyFooter, newConversationRequest = 0 }: {
+export function ReviewWorkspace({ transport, language, owner, historyOpen, onCloseHistory, onBusyChange, onLoadingChange, onProductChange, historyFooter, newConversationRequest = 0, conversationRequest, extraTools }: {
   transport: ChatTransport; language: MobileLanguage; owner: string | null; historyOpen: boolean;
+  conversationRequest?: { id?: string; draft?: string; nonce: number }; extraTools?: ComposerAction[];
   historyFooter?: ReactNode; newConversationRequest?: number;
   onCloseHistory: () => void; onBusyChange: (busy: boolean) => void;
   onLoadingChange: (loading: boolean) => void; onProductChange: (product: MobileProduct) => void;
@@ -99,6 +102,18 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     } catch { if (current === request.current) setError(copy.unavailable); }
     finally { if (current === request.current) setLoading(false); }
   }
+  const handledConversationRequest = useRef<number | null>(null);
+  useEffect(() => {
+    if (!capability || !conversationRequest || handledConversationRequest.current === conversationRequest.nonce) return;
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      handledConversationRequest.current = conversationRequest.nonce;
+      if (conversationRequest.id) void open(conversationRequest.id);
+      else if (conversationRequest.draft !== undefined) { newReview(); setDraft(conversationRequest.draft, "review:new"); }
+    });
+    return () => { active = false; };
+  }, [capability, conversationRequest]); // eslint-disable-line react-hooks/exhaustive-deps -- Open after capability initialization without replacing this workspace.
   async function ensureConversation(modelIds: string[], epoch = request.current, preserveDraft = true) {
     if (conversation) return conversation;
     if (!transport.createReview) throw Error("REVIEW_UNAVAILABLE");
@@ -178,12 +193,13 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   </ConversationListScreen>;
   return <section className="review-workspace">
     {error && <p role="alert" className="notice error">{error}</p>}
+    {isIosWorkspace && conversation?.assistantProfileId && <IosAssistantBadge id={conversation.assistantProfileId} transport={transport} />}
     {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" ? <div className="review-intro" data-testid="review-landing"><WorkspaceWelcome product="review" language={language} /></div> : <>
 
       <div className="transcript review-transcript" aria-live="off" aria-busy={streaming} onScroll={event => { const node = event.currentTarget; followOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120; }}><div className="review-context-bar"><select className="review-response-select" aria-label={c.models} value={activeModel} onChange={event => { followOutput.current = true; setActiveModel(event.target.value); }}>{visibleModels.map(id => <option value={id} key={id}>{name(id)}{streaming ? " ···" : ""}</option>)}</select></div>{conversation?.surface === "continuation" && <ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} />}{messages.map(message => <article className={`message ${message.role}`} id={`review-message-${message.id}`} key={message.id}>{message.role === "assistant" && <span className="message-label">{name(message.modelId ?? activeModel)}</span>}<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} citations={message.searchMetadata?.citations} transport={transport} language={language} /></article>)}{pendingQuestion !== null && <><article className="message user"><AnswerContent content={pendingQuestion} transport={transport} language={language} /></article><article className="message assistant"><AnswerContent content={copy.waiting} transport={transport} language={language} /></article></>}{partial[activeModel] !== undefined && <article className="message assistant"><span className="message-label">{name(activeModel)}</span><AnswerContent content={partial[activeModel] || copy.waiting} transport={transport} language={language} /></article>}<div ref={end} /></div>
     </>}
     {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore}</button>}
-    <Composer product="review" onProductChange={onProductChange} productBusy={loading || streaming || uncertain || actionBusy} productLoading={loading}
+    <Composer extraTools={extraTools} product="review" onProductChange={onProductChange} productBusy={loading || streaming || uncertain || actionBusy} productLoading={loading}
       selectionControl={<button type="button" className="review-setup-trigger" aria-label={`${c.choose} · ${mode === "easy" ? "Easy" : "Professional"}`} disabled={streaming || uncertain || loading} onClick={() => setPicker(true)}><span>{mode === "easy" ? "Easy" : "Professional"}</span><span className="participant-count">{mode === "easy" ? providers.length : selected.length}</span><span aria-hidden="true">⌄</span></button>}
       locationIdentity={owner} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || !capability || uncertain} offline={!navigator.onLine} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={send} onStop={() => abort.current?.abort()} />
     {picker && <ReviewModelPicker language={language} mode={mode} onMode={setMode} easyOffered={capability?.reviewEasy ?? false} busy={streaming || uncertain} models={models} selected={selected} providers={providers} providerOptions={providerOptions} maxModels={capability?.maxModels ?? 1} onModels={setSelected} onProviders={setProviders} onClose={() => setPicker(false)} />}
