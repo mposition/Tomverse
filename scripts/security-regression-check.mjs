@@ -4007,7 +4007,6 @@ const checks = [
       const block = source.slice(start, stop);
       const declared = [...block.matchAll(/"([A-Z][A-Z0-9_]+)"/g)].map((match) => match[1]).sort();
       const allowed = [
-        "ENGINEERING_AGENT_ANTHROPIC_API_KEY",
         "ENGINEERING_AGENT_APP_URL",
         "ENGINEERING_AGENT_APP_URL",
         "ENGINEERING_AGENT_GITHUB_READ_TOKEN",

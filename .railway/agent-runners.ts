@@ -345,7 +345,7 @@ export const ENGINEERING_AGENT_SERVICES: readonly AgentRunnerService[] = [
     service: "Engineering Agent Runner",
     image: {
       reference: ENGINEERING_AGENT_IMAGE,
-      digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
+      digest: "sha256:40af2b3b937ca9a12012dedeb299cd0b0a54ffdfa98f440d078e82a6b71344ca",
     },
     startCommand: "node --experimental-strip-types scripts/engineering-agent-runner.mjs",
     cronSchedule: "*/30 * * * *",
@@ -353,7 +353,6 @@ export const ENGINEERING_AGENT_SERVICES: readonly AgentRunnerService[] = [
       production: [
         "ENGINEERING_AGENT_APP_URL",
         "ENGINEERING_AGENT_RUNNER_SECRET",
-        "ENGINEERING_AGENT_ANTHROPIC_API_KEY",
         "ENGINEERING_AGENT_GITHUB_READ_TOKEN",
         "ENGINEERING_AGENT_RUNNER_DEADMAN_URL",
       ],
@@ -364,7 +363,7 @@ export const ENGINEERING_AGENT_SERVICES: readonly AgentRunnerService[] = [
     service: "Engineering Agent Publisher",
     image: {
       reference: ENGINEERING_AGENT_IMAGE,
-      digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
+      digest: "sha256:40af2b3b937ca9a12012dedeb299cd0b0a54ffdfa98f440d078e82a6b71344ca",
     },
     startCommand: "node --experimental-strip-types scripts/engineering-agent-publisher.mjs",
     cronSchedule: "*/10 * * * *",
