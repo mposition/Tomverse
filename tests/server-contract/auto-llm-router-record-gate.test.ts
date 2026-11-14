@@ -224,6 +224,33 @@ test("the actual soft exclusion menu reaches selection and file fallback; fewer 
   } finally { excludedModelIds = []; }
 });
 
+test("no file-capable offered candidate is a router failure with separate requested-model recovery", async () => {
+  const { applyLlmModelPick } = require(resolve(ROOT, "lib/autoModelSelection.ts"));
+  const ids = ["gpt-5-6-luna", "deepseek-v4-flash", "deepseek-v4-pro"];
+  const original = generateRouterResult;
+  let offered: readonly string[] = [], outcome: string | null = null;
+  try {
+    excludedModelIds = [ids[0]];
+    generateRouterResult = () => ({ output: { ...routerOutput, modelId: ids[1], requiresFileGeneration: true },
+      usage: { inputTokens: 100, outputTokens: 20 } });
+    const before = routerRequests.length;
+    const picked = await pick(undefined, { eligibleModelIds: ids,
+      onCandidatesResolved: (value: readonly string[]) => { offered = value; },
+      onCallOutcome: (value: string) => { outcome = value; } });
+    assert.equal(picked, null);
+    assert.equal(outcome, "invalid");
+    assert.equal(routerRequests.length, before + 1);
+    const candidates = JSON.parse(String(routerRequests[before].prompt)).candidates;
+    assert.ok(candidates.every((candidate: { canCreateFiles: boolean }) => !candidate.canCreateFiles));
+    assert.deepEqual(offered, ids.slice(1));
+    const hardSelection = { routed: true, modelId: ids[1], fallbackCandidateModelIds: [ids[0], ids[2]],
+      record: { eligibleModelIds: ids, selectedModelId: ids[1], rejections: [] } };
+    const recovered = applyLlmModelPick(hardSelection, null, undefined, ids[0], offered);
+    assert.equal(recovered.modelId, ids[0]);
+    assert.equal(recovered.record.selectionReason, "fallback_order");
+  } finally { excludedModelIds = []; generateRouterResult = original; }
+});
+
 test("combined routing returns both decisions in one reserved call and preserves image record gating", async () => {
   const context = {
     modelId: "gpt-6-luna",

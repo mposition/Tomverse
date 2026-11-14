@@ -290,7 +290,7 @@ export function AdminAutoRewriteOptimizerPanel({ canWrite = true }: { canWrite?:
                 </AdminWriteButton>
               ) : null}
             </div>
-            {cycle.promotionEligibility?.refusal && !cycle.promotedAt ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.promotionEligibility.refusal)}</p> : null}
+            {cycle.status !== "running" && cycle.promotionEligibility?.refusal && !cycle.promotedAt ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.promotionEligibility.refusal)}</p> : null}
             <OptimizerEvidenceView summary={cycle.summary} spentMicroUsd={cycle.spentMicroUsd} />
             {cycle.failure ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.failure)}</p> : null}
             {cycle.summary ? (

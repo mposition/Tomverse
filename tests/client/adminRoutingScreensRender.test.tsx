@@ -84,10 +84,10 @@ test("optimizer rendering separates known cost, incomplete total, credit ratio a
   assert.match(html, /answer\/exception: 1/);
   assert.doesNotMatch(html, /invoice|saving|gate failed/i);
   const legacy = renderToStaticMarkup(<OptimizerEvidenceView spentMicroUsd={0} summary={null} />);
-  assert.match(legacy, /Legacy cycle/);
+  assert.match(legacy, /Holdout and cost coverage unverified/);
   assert.match(legacy, /Total optimizer cost unconfirmed/);
   const complete = renderToStaticMarkup(<OptimizerEvidenceView spentMicroUsd={2} summary={summary} />);
-  assert.doesNotMatch(complete, /Total optimizer cost unconfirmed|Legacy cycle/);
+  assert.doesNotMatch(complete, /Total optimizer cost unconfirmed|Holdout and cost coverage unverified/);
 });
 
 test("the shadow split is agreed, moved and no-candidate, and is null when nothing was recorded", () => {

@@ -174,8 +174,9 @@ Routing and rewrite summaries distinguish known token-usage cost, verified
 no-dispatch and unknown usage/dispatch or invalid inputs. Configured token
 prices and observed usage produce calculated costs, not provider invoices.
 An unknown call closes further paid scheduling in that cycle; every in-flight
-call is awaited and its observations retained. Known subtotals alone continue
-through the existing ledger and run/day/month admission. This is not a hard
+call is awaited and its observations retained. Timeouts and provider exceptions
+without confirmed usage also close the cycle; remaining answer attempts are
+not scheduled after closure. Known subtotals alone continue through the existing ledger and run/day/month admission. This is not a hard
 total-spend guarantee: accepted in-flight overshoot, future admission against
 historical unknowns, reservations and reconciliation are unchanged.
 
