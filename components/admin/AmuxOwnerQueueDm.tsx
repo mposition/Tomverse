@@ -63,7 +63,8 @@ export function AmuxOwnerQueueDmPanel({ taskId, dm, relay, canAsk, onChanged }: 
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<"done" | "refused" | "failed" | null>(null);
   if (!dm) return null;
-  const button = amuxOwnerQueueDmButton(dm, relay ?? { state: "never" });
+  // Absent (not read) or null (the read failed): the relay is not judged down.
+  const button = amuxOwnerQueueDmButton(dm, relay ?? null);
   const reason = reasonText(copy.dm.reason, copy.dm.reasonFallback, dm.reason);
   const press = async () => {
     if (!dm.action || !dm.sourceId || (dm.source !== "result_review" && dm.source !== "settlement")) return;
@@ -93,10 +94,10 @@ export function AmuxOwnerQueueDmPanel({ taskId, dm, relay, canAsk, onChanged }: 
       <p className="mt-1.5 text-sm leading-6 text-zinc-300">{copy.dm.state[dm.state]}</p>
       {reason ? <p className="text-sm leading-6 text-zinc-400" data-testid="amux-owner-queue-dm-reason">{reason}</p> : null}
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        {dm.requestId && dm.state === "proposed" ? (
+        {dm.requestId && (dm.state === "proposed" || dm.state === "dm_closed") ? (
           <Link href={`/admin/amux-execution?tab=review&dmRequest=${encodeURIComponent(dm.requestId)}`}
             className="text-sm font-bold text-blue-300 underline" data-testid="amux-owner-queue-dm-open">
-            {copy.dm.openProposal}
+            {dm.state === "proposed" ? copy.dm.openProposal : copy.dm.openRequest}
           </Link>
         ) : null}
         {button === "relay_check" ? (

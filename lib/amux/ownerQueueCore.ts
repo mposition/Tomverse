@@ -101,7 +101,7 @@ export const amuxOwnerQueueWithEngineeringItems = (
  */
 export const amuxOwnerQueueWithDm = (
   read: AmuxOwnerQueueRead,
-  dm: { relay: AmuxDmRelayView; byTask: ReadonlyMap<string, AmuxOwnerQueueDmView> } | null,
+  dm: { relay: AmuxDmRelayView | null; byTask: ReadonlyMap<string, AmuxOwnerQueueDmView> } | null,
 ): AmuxOwnerQueueRead => dm === null ? { ...read, dmRelay: null } : {
   ...read,
   dmRelay: dm.relay,

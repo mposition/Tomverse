@@ -10,7 +10,7 @@ import {
 } from "./dmOwnerSettlementRead.ts";
 import { readAmuxDmRelaySeenAt } from "./dmRelayLivenessStore.ts";
 import {
-  amuxDmRelayView, amuxOwnerQueueDmView,
+  amuxDmRelayView, amuxOwnerQueueDmRequestResult, amuxOwnerQueueDmView,
   type AmuxDmRelayView, type AmuxOwnerQueueDmFacts, type AmuxOwnerQueueDmRequestFact,
   type AmuxOwnerQueueDmSwitches, type AmuxOwnerQueueDmView,
 } from "./ownerQueueDmCore.ts";
@@ -34,13 +34,14 @@ type SettlementRow = { id: string; escalationId: string; state: string; localCar
   handoffReason: string | null; cancelReason: string | null };
 
 export type AmuxOwnerQueueDmRead = {
-  relay: AmuxDmRelayView;
+  /** Null when the relay record could not be read (unknown, not "never"). */
+  relay: AmuxDmRelayView | null;
   byTask: Map<string, AmuxOwnerQueueDmView>;
 };
 
 export async function readAmuxOwnerQueueDm(items: ReadonlyArray<{ taskId: string; escalationId: string | null }>,
   now: Date = new Date()): Promise<AmuxOwnerQueueDmRead> {
-  const relay = amuxDmRelayView(await readAmuxDmRelaySeenAt().catch(() => null), now);
+  const relay = await readAmuxDmRelaySeenAt().then((at) => amuxDmRelayView(at, now), () => null);
   const taskIds = items.map((item) => item.taskId);
   const escalationIds = items.flatMap((item) => item.escalationId ? [item.escalationId] : []);
   if (taskIds.length === 0) return { relay, byTask: new Map() };
@@ -87,12 +88,18 @@ export async function readAmuxOwnerQueueDm(items: ReadonlyArray<{ taskId: string
     .flatMap((row) => row.localCardId ? [row.localCardId] : []);
   const requests = new Map<string, AmuxOwnerQueueDmRequestFact>();
   if (cardIds.length > 0) {
-    const rows = await prisma.$queryRaw<Array<{ id: string; cardId: string; answered: boolean }>>`
-      SELECT DISTINCT ON (q."cardId") q."id", q."cardId",
-        EXISTS (SELECT 1 FROM "AmuxDecisionMakerResultDetail" d WHERE d."requestId" = q."id") AS "answered"
-      FROM "AmuxDecisionMakerRequest" q WHERE q."cardId" = ANY(${cardIds}::text[])
+    // A proposal the owner can still confirm: a proposal result and no
+    // judgment. Any other result, or a judged one, is `closed`.
+    const rows = await prisma.$queryRaw<Array<{ id: string; cardId: string; resultKind: string | null;
+      judged: boolean }>>`
+      SELECT DISTINCT ON (q."cardId") q."id", q."cardId", d."resultKind",
+        EXISTS (SELECT 1 FROM "AmuxDecisionMakerJudgment" j WHERE j."requestId" = q."id") AS "judged"
+      FROM "AmuxDecisionMakerRequest" q
+      LEFT JOIN "AmuxDecisionMakerResultDetail" d ON d."requestId" = q."id"
+      WHERE q."cardId" = ANY(${cardIds}::text[])
       ORDER BY q."cardId", q."questionRevision" DESC`;
-    for (const row of rows) requests.set(row.cardId, { requestId: row.id, answered: row.answered });
+    for (const row of rows) requests.set(row.cardId, { requestId: row.id,
+      result: amuxOwnerQueueDmRequestResult(row) });
   }
   const requestOf = (cardId: string | null) => (cardId ? requests.get(cardId) : undefined) ?? null;
 

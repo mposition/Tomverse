@@ -152,6 +152,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       },
       state: {
         proposed: "The DM answered. Confirm or reject its proposal.",
+        dm_closed: "The DM request ended: judged, or closed with no proposal to confirm.",
         asked: "The DM has the card and has not answered yet.",
         card_filed: "The card is filed; the DM has not taken it yet.",
         unfilable: "No card was filed for the DM.",
@@ -182,6 +183,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       },
       reasonFallback: (code: string) => `Reason: ${code}`,
       openProposal: "Open the DM proposal",
+      openRequest: "Open the DM request",
       resend: "Send to the DM again",
       request: "Ask the DM",
       busy: "Sending...",
@@ -331,6 +333,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       },
       state: {
         proposed: "DM이 답했어요. 제안을 확정하거나 거절하세요.",
+        dm_closed: "DM 요청이 끝났어요. 확정·거절됐거나, 확정할 제안 없이 닫혔어요.",
         asked: "DM이 카드를 받았고 아직 답하지 않았어요.",
         card_filed: "카드는 올라갔고 DM이 아직 가져가지 않았어요.",
         unfilable: "DM 카드를 만들지 못했어요.",
@@ -361,6 +364,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       },
       reasonFallback: (code: string) => `사유: ${code}`,
       openProposal: "DM 제안 열기",
+      openRequest: "DM 요청 열기",
       resend: "DM에 다시 보내기",
       request: "DM 의견 요청",
       busy: "보내는 중...",

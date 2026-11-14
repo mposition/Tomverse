@@ -44,6 +44,8 @@ export type AmuxOwnerQueueDmSource = (typeof AMUX_OWNER_QUEUE_DM_SOURCES)[number
 export const AMUX_OWNER_QUEUE_DM_STATES = [
   /** The DM answered; the proposal waits for the owner's confirmation. */
   "proposed",
+  /** The DM request ended: judged by a person, or closed with no proposal to confirm. */
+  "dm_closed",
   /** The card reached the DM; no answer yet. */
   "asked",
   /** The relay filed the card; the DM has not taken it yet. */
@@ -76,8 +78,13 @@ export type AmuxOwnerQueueDmView = {
   sourceId: string | null;
 };
 
-/** A DM request filed from a card, and whether its answer came. */
-export type AmuxOwnerQueueDmRequestFact = { requestId: string; answered: boolean };
+/**
+ * A DM request filed from a card, and where it ended: `proposal` is one the
+ * owner can still confirm (a proposal result, no judgment, not closed);
+ * `closed` is any other ending (judged, cannot answer, failed, closed);
+ * null while it has no result yet.
+ */
+export type AmuxOwnerQueueDmRequestFact = { requestId: string; result: "proposal" | "closed" | null };
 
 export type AmuxOwnerQueueDmFacts = {
   question: {
@@ -124,7 +131,8 @@ const view = (source: AmuxOwnerQueueDmSource | null, state: AmuxOwnerQueueDmStat
 /** A filed card: answered, taken, or waiting for the DM. */
 const filed = (source: AmuxOwnerQueueDmSource, request: AmuxOwnerQueueDmRequestFact | null,
   sourceId: string) => request === null ? view(source, "card_filed", { sourceId }) :
-  view(source, request.answered ? "proposed" : "asked", { requestId: request.requestId, sourceId });
+  view(source, request.result === "proposal" ? "proposed" : request.result === "closed" ? "dm_closed" : "asked",
+    { requestId: request.requestId, sourceId });
 
 /**
  * The one judgment the screen draws. A worker question comes first (the card
@@ -192,9 +200,10 @@ export function amuxOwnerQueueDmView(facts: AmuxOwnerQueueDmFacts,
  * its place when the relay is not calling -- a card sent again, or asked for,
  * would wait for a relay that is not there, and so would one already waiting.
  */
-export function amuxOwnerQueueDmButton(dm: AmuxOwnerQueueDmView, relay: AmuxDmRelayView):
+export function amuxOwnerQueueDmButton(dm: AmuxOwnerQueueDmView, relay: AmuxDmRelayView | null):
   "resend" | "request" | "relay_check" | null {
-  const relayDown = relay.state !== "live";
+  // A relay read that failed says nothing about the relay: the button stays.
+  const relayDown = relay !== null && relay.state !== "live";
   if (relayDown && (dm.action !== null || dm.state === "waiting_relay" || dm.state === "card_filed"))
     return "relay_check";
   return dm.action;
@@ -204,3 +213,8 @@ export function amuxOwnerQueueDmButton(dm: AmuxOwnerQueueDmView, relay: AmuxDmRe
 export const AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION = "amux.dm_owner_settlement.requested";
 /** The owner sent a card whose evidence could not be read once back to the relay. */
 export const AMUX_OWNER_QUEUE_DM_RESENT_ACTION = "amux.owner_queue.dm_resent";
+
+/** Where a DM request ended, from its result kind and whether a person judged it. */
+export const amuxOwnerQueueDmRequestResult = (row: { resultKind: string | null; judged: boolean }):
+  AmuxOwnerQueueDmRequestFact["result"] => row.judged ? "closed" :
+  row.resultKind === null ? null : row.resultKind === "proposal" ? "proposal" : "closed";

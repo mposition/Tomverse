@@ -10,6 +10,7 @@ import {
   amuxOwnerQueueDmButton,
   amuxOwnerQueueDmView,
 } from "../lib/amux/ownerQueueDmCore.ts";
+import { amuxOwnerQueueDmRequestResult } from "../lib/amux/ownerQueueDmCore.ts";
 import { amuxOwnerQueueWithDm } from "../lib/amux/ownerQueueCore.ts";
 
 const read = (path) => readFileSync(path, "utf8");
@@ -42,10 +43,10 @@ test("a worker question says how far it got and why it has no card", () => {
   const filed = amuxOwnerQueueDmView(facts({ question: question({ localCardId: "card-1" }) }), on);
   assert.equal(filed.state, "card_filed");
   const asked = amuxOwnerQueueDmView(facts({ question: question({ localCardId: "card-1",
-    request: { requestId: "r1", answered: false } }) }), on);
+    request: { requestId: "r1", result: null } }) }), on);
   assert.deepEqual([asked.state, asked.requestId], ["asked", "r1"]);
   const proposed = amuxOwnerQueueDmView(facts({ question: question({ localCardId: "card-1",
-    request: { requestId: "r1", answered: true } }) }), on);
+    request: { requestId: "r1", result: "proposal" } }) }), on);
   assert.equal(proposed.state, "proposed");
   // No question can be sent again from here: the button is never offered.
   assert.equal(amuxOwnerQueueDmView(facts({ question: question() }), on).action, null);
@@ -100,7 +101,7 @@ test("a settlement row: requested waits, unreadable is sent again, cancelled and
   assert.deepEqual([amuxOwnerQueueDmView(row({ state: "cancelled", cancelReason: "task_moved" }), on).state,
     amuxOwnerQueueDmView(row({ state: "cancelled", cancelReason: "task_moved" }), on).reason], ["settled", "task_moved"]);
   assert.equal(amuxOwnerQueueDmView(row({ state: "applied" }), on).reason, "applied");
-  assert.equal(amuxOwnerQueueDmView(row({ localCardId: "c", request: { requestId: "r", answered: true } }), on).state,
+  assert.equal(amuxOwnerQueueDmView(row({ localCardId: "c", request: { requestId: "r", result: "proposal" } }), on).state,
     "proposed");
 });
 
@@ -174,4 +175,32 @@ test("the owner's press is one transaction under the audit chain lock, with the 
   const route = read("app/api/admin/amux/owner-queue/dm-request/route.ts");
   assert.match(route, /hasAdminPermission\(session, "ops:write"\)/);
   assert.match(route, /hasValidMutationOrigin\(request\)/);
+});
+
+test("only an unjudged proposal is one to confirm; any other ending is closed", () => {
+  assert.equal(amuxOwnerQueueDmRequestResult({ resultKind: null, judged: false }), null);
+  assert.equal(amuxOwnerQueueDmRequestResult({ resultKind: "proposal", judged: false }), "proposal");
+  assert.equal(amuxOwnerQueueDmRequestResult({ resultKind: "proposal", judged: true }), "closed");
+  assert.equal(amuxOwnerQueueDmRequestResult({ resultKind: "escalation", judged: false }), "closed");
+  assert.equal(amuxOwnerQueueDmRequestResult({ resultKind: "failed", judged: false }), "closed");
+  const closed = amuxOwnerQueueDmView(facts({ question: question({ localCardId: "c",
+    request: { requestId: "r9", result: "closed" } }) }), on);
+  assert.deepEqual([closed.state, closed.requestId], ["dm_closed", "r9"]);
+});
+
+test("a relay read that failed is unknown: it neither hides the button nor claims the relay is down", () => {
+  const ask = amuxOwnerQueueDmView(facts({ escalationId: "e1", settlementEligible: true }), off);
+  assert.equal(amuxOwnerQueueDmButton(ask, null), "request");
+  const read = readFileSync("lib/amux/ownerQueueDmRead.ts", "utf8");
+  assert.match(read, /readAmuxDmRelaySeenAt\(\)\.then\(\(at\) => amuxDmRelayView\(at, now\), \(\) => null\)/);
+});
+
+test("the DM approver never applies a settlement the owner asked for from the owner queue", () => {
+  const auto = readFileSync("lib/amux/dmAutoApplyService.ts", "utf8");
+  const body = auto.slice(auto.indexOf("export async function readAmuxDmAutoApplyCandidate"));
+  assert.ok(body.indexOf("readAmuxDmOwnerSettlementRequestedAmong(tx, settlementIds)") <
+    body.indexOf("readNextDecisionMakerOpenProposal(tx"), "filtered before a proposal is picked");
+  assert.match(body, /const cards = sampled\.filter\(\(card\) => !ownerAsked\.has\(card\.id\)\);/);
+  assert.match(readFileSync("lib/amux/dbBoundary.ts", "utf8"),
+    /decisionMakerAutoApplyRead: \{\s+operation: "decision_maker_auto_apply_read",\s+prismaCallCeiling: 10,/);
 });
