@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { APP_DEFAULTS } from "../lib/appDefaults.ts";
-import { ENABLED_MODELS } from "../lib/models.ts";
+import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, ENABLED_MODELS } from "../lib/models.ts";
 import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
 import {
   ARTIFACT_TOOL_CAPABILITIES,
@@ -32,6 +32,16 @@ const plan = (overrides = {}) =>
 
 test("a signed-in account on a verified model gets the tool", () => {
   const result = plan();
+  assert.equal(result.mode, "generate");
+  assert.equal(result.registerTool, true);
+});
+
+test("the default model can create files", () => {
+  const model = AVAILABLE_MODELS.find(({ id }) => id === DEFAULT_MODEL_ID);
+  assert.ok(model, `default model ${DEFAULT_MODEL_ID} must be in the catalogue`);
+  assert.equal(getArtifactToolSupport(DEFAULT_MODEL_ID), "verified");
+
+  const result = plan({ modelId: DEFAULT_MODEL_ID, provider: model.provider });
   assert.equal(result.mode, "generate");
   assert.equal(result.registerTool, true);
 });
