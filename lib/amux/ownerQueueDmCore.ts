@@ -158,9 +158,11 @@ export function amuxOwnerQueueDmView(facts: AmuxOwnerQueueDmFacts,
   }
   if (review) {
     if (review.localCardId) return filed("result_review", review.request, review.id);
+    // Sent again only where the tick would file it: routing on, no kill switch, its own switch on.
     if (review.handoffReason) return view("result_review", "unfilable", { reason: review.handoffReason,
       sourceId: review.id,
-      action: review.handoffReason === AMUX_OWNER_QUEUE_DM_RESENDABLE_HANDOFF ? "resend" : null });
+      action: review.handoffReason === AMUX_OWNER_QUEUE_DM_RESENDABLE_HANDOFF && !held && switches.resultReview ?
+        "resend" : null });
     if (held) return routingOff("result_review", review.id);
     return switches.resultReview ? view("result_review", "waiting_relay", { sourceId: review.id }) :
       view("result_review", "switch_off", { reason: "result_review", sourceId: review.id });
@@ -181,7 +183,8 @@ export function amuxOwnerQueueDmView(facts: AmuxOwnerQueueDmFacts,
     if (settlement.localCardId) return filed("settlement", settlement.request, sourceId);
     if (settlement.handoffReason) return view("settlement", "unfilable", { reason: settlement.handoffReason,
       sourceId,
-      action: settlement.handoffReason === AMUX_OWNER_QUEUE_DM_RESENDABLE_HANDOFF ? "resend" : null });
+      // A resend is marked requested, so its own switch does not matter; the routing does.
+      action: settlement.handoffReason === AMUX_OWNER_QUEUE_DM_RESENDABLE_HANDOFF && !held ? "resend" : null });
     if (held) return routingOff("settlement", sourceId);
     return switches.settlement || settlement.requested ? view("settlement", "waiting_relay", { sourceId }) :
       view("settlement", "switch_off", { reason: "settlement", sourceId, action: "request" });

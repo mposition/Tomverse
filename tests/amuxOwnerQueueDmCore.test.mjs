@@ -69,6 +69,9 @@ test("a result review sent back only when its evidence could not be read and it 
   const unreadable = amuxOwnerQueueDmView(review({ handoffReason: "evidence_unavailable" }), on);
   assert.deepEqual([unreadable.state, unreadable.action, unreadable.sourceId], ["unfilable", "resend", "v1"]);
   assert.equal(amuxOwnerQueueDmView(review({ handoffReason: "dm_undecided" }), on).action, null);
+  // Not offered where the tick would not file it.
+  assert.equal(amuxOwnerQueueDmView(review({ handoffReason: "evidence_unavailable" }), { ...on, resultReview: false }).action, null);
+  assert.equal(amuxOwnerQueueDmView(review({ handoffReason: "evidence_unavailable" }), { ...on, killSwitch: true }).action, null);
   assert.equal(amuxOwnerQueueDmView(review({}), { ...on, resultReview: false }).reason, "result_review");
   assert.equal(amuxOwnerQueueDmView(review({ localCardId: "c" }), on).state, "card_filed");
 });
@@ -97,6 +100,7 @@ test("a settlement row: requested waits, unreadable is sent again, cancelled and
   assert.deepEqual([amuxOwnerQueueDmView(row({}), off).action, amuxOwnerQueueDmView(row({}), off).sourceId], ["request", "s1"]);
   assert.equal(amuxOwnerQueueDmView(row({ requested: true }), off).state, "waiting_relay");
   assert.equal(amuxOwnerQueueDmView(row({ handoffReason: "evidence_unavailable" }), off).action, "resend");
+  assert.equal(amuxOwnerQueueDmView(row({ handoffReason: "evidence_unavailable" }), { ...off, routing: false }).action, null);
   assert.equal(amuxOwnerQueueDmView(row({ handoffReason: "dm_undecided" }), off).action, null);
   assert.deepEqual([amuxOwnerQueueDmView(row({ state: "cancelled", cancelReason: "task_moved" }), on).state,
     amuxOwnerQueueDmView(row({ state: "cancelled", cancelReason: "task_moved" }), on).reason], ["settled", "task_moved"]);
