@@ -7,7 +7,8 @@ import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { readDecisionMakerSwitches, readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 import {
-  AMUX_DM_T2_MERGE_HEAD, amuxDmT2MergeChangeVerdict, amuxDmT2MergeEnabled, amuxDmT2MergeReadyVerdict,
+  AMUX_DM_T2_MERGE_HEAD, AMUX_DM_T2_MERGE_READY_SETTLE_MS, amuxDmT2MergeChangeVerdict, amuxDmT2MergeEnabled,
+  amuxDmT2MergeReadyInFlight, amuxDmT2MergeReadyVerdict,
   type AmuxDmT2MergeChangeNow,
 } from "@/lib/amux/dmT2MergeCore";
 import { readAmuxDmT2MergeApprovals, readAmuxDmT2MergeObservedFacts } from "@/lib/amux/dmT2MergeRead";
@@ -98,58 +99,53 @@ export type AmuxDmT2MergeReadyPorts = {
   pull: (prNumber: number) => Promise<{ pull: CiAdmissionPull; open: boolean } | null>;
   /** Its change as the engineering agent's read-only token reads it now. */
   change: (prNumber: number) => Promise<AmuxDmT2MergeChangeNow>;
-  /**
-   * CI admission's reservation of its runners, judged and committed under the
-   * admission lock before the write (lib/ciAdmissionRound.ts); false when the
-   * line leaves no room now or another round reserved it first.
-   */
-  reserve: (pull: { number: number; headSha: string; base: string }) => Promise<boolean>;
   /** CI admission's App's write: draft to ready. */
   markReady: (pull: CiAdmissionPull) => Promise<void>;
 };
 
-export const amuxDmT2MergeReadyPorts = (github: Pick<CiAdmissionGithub, "pull" | "markReady">,
-  reserve: AmuxDmT2MergeReadyPorts["reserve"]): AmuxDmT2MergeReadyPorts => ({
+export const amuxDmT2MergeReadyPorts = (github: Pick<CiAdmissionGithub, "pull" | "markReady">): AmuxDmT2MergeReadyPorts => ({
   pull: (prNumber) => github.pull(prNumber),
   change: (prNumber) => readEngineeringAgentPullChange(prNumber),
-  reserve,
   markReady: (pull) => github.markReady(pull),
 });
 
 export type AmuxDmT2MergeReadyOutcome =
-  | { outcome: "off" | "none" | "no_room" }
+  /** in_flight: an earlier Decision Maker ready's CI has not shown yet (amuxDmT2MergeReadyInFlight). */
+  | { outcome: "off" | "none" | "no_room" | "in_flight" }
   | { outcome: "held"; settlementId: string; prNumber: number }
   | { outcome: "skipped"; settlementId: string; prNumber: number; reason: string }
   | { outcome: "already_ready"; settlementId: string; prNumber: number }
-  /** Marked ready at this head, its runners reserved before the write. */
+  /** Marked ready at this head, as a person would. */
   | { outcome: "marked_ready"; settlementId: string; prNumber: number; headSha: string }
-  /**
-   * The write's answer is unknown: nothing is retried now; a later round reads
-   * the pull request first. Its reservation stays, as if it had happened.
-   */
+  /** The write's answer is unknown: nothing is retried now; a later round reads the pull request first. */
   | { outcome: "write_unknown"; settlementId: string; prNumber: number; headSha: string; code: string };
 
 const failureCode = (error: unknown) => (error instanceof Error ? error.message : "unknown").slice(0, 80);
 
 /**
  * One step, at most one pull request. `drafts` are the open pull requests CI
- * admission's round read; `room` is whether its line leaves room
- * (amuxDmT2MergeRoomBesideLine). The approval read next is the least recently
+ * admission's round read, `running` the pull_request runs it saw; `room` is
+ * whether its line leaves room now (amuxDmT2MergeRoomBesideLine). A Decision
+ * Maker ready is a person's ready: nothing is reserved, and while an earlier
+ * one's CI has not shown on GitHub (its audit within ten minutes, its head not
+ * running) no next one is made, so what can overflow is one pull request's
+ * CI (amuxDmT2MergeReadyInFlight). The approval read next is the least recently
  * visited one among the engineering drafts, and its visit is recorded first,
  * so one that cannot move goes to the back. It is read fresh from GitHub --
  * CI admission's App for its stage and head, the engineering read token for
  * its diff and files -- and judged (amuxDmT2MergeReadyVerdict). A fork's pull
  * request is never taken. Only a pull request still exactly as approved, with
- * every path on the allow list, has its runners reserved under CI admission's
- * lock (the room judged again there), is audited, and then marked ready. A
- * write whose answer is unknown is never retried here: its reservation stays,
- * the next round reads the pull request, and one already ready needs nothing.
+ * every path on the allow list, is audited and then marked ready. A write
+ * whose answer is unknown is never retried here: the next round reads the
+ * pull request, and one already ready needs nothing.
  */
 export async function runAmuxDmT2MergeReadyStep(input: {
   drafts: readonly Pick<CiAdmissionPull, "number" | "head" | "headSha" | "base" | "draft" | "fork">[];
   room: boolean;
+  running: ReadonlySet<string>;
   ports: AmuxDmT2MergeReadyPorts;
   env?: Env;
+  nowMs?: number;
 }): Promise<AmuxDmT2MergeReadyOutcome> {
   if (!amuxDmT2MergeEnabled(input.env ?? process.env)) return { outcome: "off" };
   const drafts = input.drafts.filter((pull) => pull.draft && !pull.fork && pull.base === "develop" &&
@@ -157,13 +153,26 @@ export async function runAmuxDmT2MergeReadyStep(input: {
   if (drafts.length === 0) return { outcome: "none" };
   if (!input.room) return { outcome: "no_room" };
 
-  const row = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeReadyPick, async (tx) => {
+  const nowMs = input.nowMs ?? Date.now();
+  const picked = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeReadyPick, async (tx) => {
+    // The Decision Maker readies of the last ten minutes, from their chain audits (written before each write).
+    const recent = await tx.adminAuditLog.findMany({
+      where: { action: AMUX_DM_T2_MERGE_READY_ACTION, createdAt: { gte: new Date(nowMs - AMUX_DM_T2_MERGE_READY_SETTLE_MS) } },
+      orderBy: { createdAt: "desc" }, take: 20, select: { createdAt: true, metadata: true } });
+    const readies = recent.flatMap((entry) => {
+      const metadata = entry.metadata as { prNumber?: unknown; headSha?: unknown } | null;
+      return typeof metadata?.prNumber === "number" && typeof metadata.headSha === "string"
+        ? [{ prNumber: metadata.prNumber, headSha: metadata.headSha, atMs: entry.createdAt.getTime() }] : [];
+    });
+    if (amuxDmT2MergeReadyInFlight({ readies, running: input.running, nowMs })) return { inFlight: true as const };
     const [next] = await readAmuxDmT2MergeApprovals(tx, { limit: 1, prNumbers: drafts.map((pull) => pull.number) });
     if (!next) return null;
     await recordAmuxDmT2MergeVisit(tx, next.settlementId);
-    return next;
+    return { row: next };
   });
-  if (!row) return { outcome: "none" };
+  if (picked && "inFlight" in picked) return { outcome: "in_flight" };
+  if (!picked) return { outcome: "none" };
+  const { row } = picked;
   const at = { settlementId: row.settlementId, prNumber: row.prNumber };
 
   let now: Awaited<ReturnType<AmuxDmT2MergeReadyPorts["pull"]>>;
@@ -184,10 +193,6 @@ export async function runAmuxDmT2MergeReadyStep(input: {
   if (verdict.verdict === "already_ready") return { outcome: "already_ready", ...at };
   if (verdict.verdict === "skip") return { outcome: "skipped", ...at, reason: verdict.reason };
 
-  // Its runners first, under CI admission's lock, as a release takes them: two
-  // rounds can never both take the same free runners.
-  if (!(await input.ports.reserve({ number: row.prNumber, headSha: row.approvedHeadSha, base: "develop" })))
-    return { outcome: "no_room" };
   const recorded = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeReadyRecord, async (tx) => {
     await takeAuditChainLock(tx);
     let killSwitch: boolean | null;

@@ -327,14 +327,13 @@ test("the Decision Maker's approval, readied by the app and merged by the merge 
     // The app marks the draft ready, beside an empty line.
     const ref = `agent/engineering/${card.runId}`;
     const readied: number[] = [];
-    const step = await runAmuxDmT2MergeReadyStep({ env: ON, room: true,
+    const step = await runAmuxDmT2MergeReadyStep({ env: ON, room: true, running: new Set<string>(),
       drafts: [{ number: card.prNumber, head: ref, headSha: HEAD, base: "develop", draft: true, fork: false }],
       ports: {
         pull: async (number) => ({ open: true, pull: { number, nodeId: "PR_node", title: "t", base: "develop", head: ref,
           headSha: HEAD, draft: true, fork: false, labels: [] } }),
         change: async () => ({ state: "open", baseRef: "develop", headRef: ref, headSha: HEAD, diffDigest: DIFF,
           changedFiles: ["components/Ordinary.tsx"], crossRepository: false }),
-        reserve: async () => true,
         markReady: async (pull) => { readied.push(pull.number); },
       } });
     assert.equal(step.outcome, "marked_ready");

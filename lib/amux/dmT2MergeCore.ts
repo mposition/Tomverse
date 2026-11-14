@@ -14,7 +14,6 @@
  * Decision Maker approved. Default off; off, nothing here is consulted.
  */
 
-import { ciAdmissionRoomOutsideLine } from "../ciAdmissionCore.ts";
 import { qaReleaseDmApprovedHumanPaths } from "../qaReleaseMergeLaneExclusionCore.ts";
 
 /** Default off. On, the app marks Decision Maker approved review pull requests ready and the lane may merge them into develop. */
@@ -59,13 +58,45 @@ export function amuxDmT2MergeGate(paths: readonly string[] | null): AmuxDmT2Merg
   return human.length === 0 ? { pass: true } : { pass: false, reason: "outside_dm_merge_allowlist", paths: human.slice(0, 20) };
 }
 
+/** Line statuses of a draft that still waits for runners: the line goes first. */
+const LINE_WAITING = new Set(["waiting", "checking", "next", "updating"]);
+
 /**
- * Whether CI admission's line leaves room for one more develop pull request's
- * CI after this round: the admission's own rule (lib/ciAdmissionCore.ts),
- * judged once early to skip the GitHub reads, and again under its lock when
- * the reservation is written.
+ * Whether CI admission's line leaves room now for one more develop pull
+ * request's CI. A Decision Maker ready is a person's ready
+ * (lib/ciAdmissionCore.ts): nothing is reserved, so this only says whether
+ * there is room at this moment -- no draft in the line waits for runners, and
+ * the whole need fits beside every run counted. It never jumps the line.
  */
-export const amuxDmT2MergeRoomBesideLine = ciAdmissionRoomOutsideLine;
+export function amuxDmT2MergeRoomBesideLine(input: {
+  queue: readonly { draft: boolean; status: string }[];
+  used: number;
+  capacity: number;
+  need: number;
+}): boolean {
+  if (input.queue.some((entry) => entry.draft && LINE_WAITING.has(entry.status))) return false;
+  return Number.isFinite(input.used) && input.used + input.need <= input.capacity;
+}
+
+/** How long a Decision Maker ready holds the next one back while its CI has not shown on GitHub. */
+export const AMUX_DM_T2_MERGE_READY_SETTLE_MS = 10 * 60 * 1000;
+
+/**
+ * Whether an earlier Decision Maker ready still holds the next one back: one
+ * made within AMUX_DM_T2_MERGE_READY_SETTLE_MS whose head has no CI run queued
+ * or in progress on GitHub yet. Its CI, once it shows, is counted as running;
+ * until then the next ready waits, so what can overflow the runners is one
+ * pull request's CI, as when a person marks one ready by hand.
+ */
+export function amuxDmT2MergeReadyInFlight(input: {
+  readies: readonly { prNumber: number; headSha: string; atMs: number }[];
+  /** `<number>@<head>` of every pull_request run queued or in progress (lib/ciAdmissionCore.ts ciRunKey). */
+  running: ReadonlySet<string>;
+  nowMs: number;
+}): boolean {
+  return input.readies.some((ready) => input.nowMs - ready.atMs < AMUX_DM_T2_MERGE_READY_SETTLE_MS &&
+    !input.running.has(`${ready.prNumber}@${ready.headSha}`));
+}
 
 export type AmuxDmT2MergeApproved = {
   prNumber: number; headRef: string; approvedHeadSha: string; approvedDiffDigest: string;

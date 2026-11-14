@@ -1,9 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import {
-  CI_ADMISSION_RELEASE_GRACE_MS,
   CI_ADMISSION_STATE_SETTING_KEY,
-  ciAdmissionReserveOutsideLine,
   ciAdmissionDraftsToCheck,
   evaluateCiAdmission,
   parseCiAdmissionMode,
@@ -146,12 +144,8 @@ export type CiAdmissionRoundOutcome =
 
 type RoundDeps = {
   mode?: CiAdmissionMode; github?: CiAdmissionGithub | null; now?: () => number;
-  /**
-   * The Decision Maker ready step's GitHub ports; by default CI admission's
-   * App and the engineering read token. Its reservation is this round's own
-   * unless a test names another.
-   */
-  dmT2MergePorts?: Omit<AmuxDmT2MergeReadyPorts, "reserve"> & Partial<Pick<AmuxDmT2MergeReadyPorts, "reserve">>;
+  /** The Decision Maker ready step's GitHub ports; by default CI admission's App and the engineering read token. */
+  dmT2MergePorts?: AmuxDmT2MergeReadyPorts;
 };
 
 const numbersOf = (actions: CiAdmissionAction[], kind: "hold" | "release" | "cancel") =>
@@ -259,26 +253,13 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
   }
 
   // One review pull request the Decision Maker approved (owner decision
-  // 2026-11-13: develop only). It is not in the line: it is marked ready only
-  // after the line, when no draft in it waits for runners and its whole need
-  // fits. Its runners are reserved like a release's (state.released), judged
-  // and committed under this admission's lock before the write, so two rounds
-  // in two processes never take the same free runners; a write whose answer
-  // is unknown keeps its reservation, and one that never happened is dropped
-  // once GitHub still shows a draft (lib/ciAdmissionCore.ts). The service is
-  // loaded only while the switch is on.
-  let dmReserved = false;
-  const reserveForDm = async (pull: { number: number; headSha: string; base: string }) =>
-    prisma.$transaction(
-      async (tx) => {
-        await takeLock(tx);
-        const reserved = ciAdmissionReserveOutsideLine(await readState(tx), { ...pull, nowMs: now() });
-        if (reserved === null) return false;
-        await writeState(tx, reserved);
-        return (dmReserved = true);
-      },
-      { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
-    );
+  // 2026-11-13: develop only). A Decision Maker ready is a person's ready
+  // (lib/ciAdmissionCore.ts): the pull request stays out of the line, nothing
+  // is reserved, and its CI counts as another workflow's once it shows. It is
+  // marked ready only after the line, when the line leaves room now, and not
+  // while an earlier one's CI has not shown yet -- so what can overflow is one
+  // pull request's CI, as by hand. The service is loaded only while the switch
+  // is on.
   if (amuxDmT2MergeEnabled()) {
     try {
       const { amuxDmT2MergeReadyPorts, runAmuxDmT2MergeReadyStep } = await import("@/lib/amux/dmT2MergeService");
@@ -286,8 +267,9 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
         drafts: openPulls,
         room: amuxDmT2MergeRoomBesideLine({ queue: evaluation.state.queue, used: evaluation.used,
           capacity: evaluation.state.capacity, need: evaluation.state.needs.develop }),
-        ports: deps.dmT2MergePorts ? { ...deps.dmT2MergePorts, reserve: deps.dmT2MergePorts.reserve ?? reserveForDm }
-          : amuxDmT2MergeReadyPorts(github, reserveForDm),
+        running,
+        nowMs: now(),
+        ports: deps.dmT2MergePorts ?? amuxDmT2MergeReadyPorts(github),
       });
       if (step.outcome === "marked_ready") {
         extra.push({ at, kind: "released", number: step.prNumber, shadow: false, detail: "dm_approved" });
@@ -326,10 +308,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
       { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },
     );
   }
-  // A reservation made here is judged again when its grace period ends, as a release's.
-  scheduleRecheck(failures.length > 0 ? RETRY_AFTER_FAILURE_MS :
-    dmReserved ? Math.min(evaluation.nextCheckInMs ?? CI_ADMISSION_RELEASE_GRACE_MS, CI_ADMISSION_RELEASE_GRACE_MS) :
-    evaluation.nextCheckInMs);
+  scheduleRecheck(failures.length > 0 ? RETRY_AFTER_FAILURE_MS : evaluation.nextCheckInMs);
   return { outcome: "done", mode, ...summary, failures, nextCheckInMs: evaluation.nextCheckInMs };
 }
 

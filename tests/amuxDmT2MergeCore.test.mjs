@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AMUX_DM_T2_MERGE_ENV, amuxDmT2MergeChangeVerdict, amuxDmT2MergeEnabled, amuxDmT2MergeGate,
+  AMUX_DM_T2_MERGE_ENV, AMUX_DM_T2_MERGE_READY_SETTLE_MS, amuxDmT2MergeChangeVerdict, amuxDmT2MergeEnabled,
+  amuxDmT2MergeGate, amuxDmT2MergeReadyInFlight,
   amuxDmT2MergePatchPaths, amuxDmT2MergeReadyVerdict, amuxDmT2MergeRoomBesideLine,
 } from "../lib/amux/dmT2MergeCore.ts";
 import { decideEngineeringAgentDmApprovedMerge, decideEngineeringAgentMergedPr } from "../lib/engineeringAgentPrApprovalCore.ts";
@@ -272,77 +273,18 @@ test("a lane round merges a reported engineering pull request and leaves an unre
   assert.deepEqual(merged.merges, [[42, HEAD]]);
 });
 
-test("a Decision Maker ready pull request outside CI admission's line is reserved like a release until its runs show", async () => {
-  const { evaluateCiAdmission, parseCiAdmissionState, ciRunKey, CI_ADMISSION_RELEASE_GRACE_MS } =
-    await import("../lib/ciAdmissionCore.ts");
+test("a Decision Maker ready is a person's: while an earlier one's CI has not shown, the next waits, for ten minutes at most", () => {
   const NOW = Date.parse("2026-11-13T10:00:00Z");
-  const agent = { number: 42, nodeId: "PR_a", title: "agent", base: "develop", head: REF, headSha: HEAD,
-    draft: false, fork: false, labels: [] };
-  const line = { number: 7, nodeId: "PR_l", title: "line", base: "develop", head: "claude/to-develop/x",
-    headSha: OTHER, draft: true, fork: false, labels: [] };
-  const deploys = [{ branch: "develop", sha: "2".repeat(40), title: "push" }];
-  const judge = (released, over = {}) => evaluateCiAdmission({
-    state: { ...parseCiAdmissionState(undefined), released }, openPulls: [agent, line], running: new Set(),
-    deploys, checks: new Map([[7, { conflict: false, behind: false }]]), runners: [], nowMs: NOW, shadow: false, ...over });
-  // Without a reservation, its CI not yet shown, the line draft fits beside the deploy (18 + 15 <= 40).
-  assert.ok(judge([]).actions.some((action) => action.kind === "release" && action.pull.number === 7));
-  // Reserved at its need (15): 18 + 15 + 15 > 40, so the line draft waits for it.
-  const reserved = judge([{ number: 42, headSha: HEAD, atMs: NOW - 1_000 }]);
-  assert.equal(reserved.actions.some((action) => action.kind === "release"), false);
-  assert.equal(reserved.used, 18 + 15);
-  assert.deepEqual(reserved.state.released, [{ number: 42, headSha: HEAD, atMs: NOW - 1_000 }], "kept");
-  assert.ok(reserved.state.lastRound.running.some((entry) => entry.number === 42 && entry.runners === 15));
-  // Its runs shown: counted as running, not twice.
-  const shown = judge([{ number: 42, headSha: HEAD, atMs: NOW - 1_000 }], { running: new Set([ciRunKey(42, HEAD)]),
-    runningBases: new Map([[42, "develop"]]) });
-  assert.equal(shown.used, 18 + 15);
-  assert.deepEqual(shown.state.released, []);
-  // Expired, still a draft (a write that never happened), or another head: no reservation.
-  for (const [entry, pulls] of [
-    [{ number: 42, headSha: HEAD, atMs: NOW - CI_ADMISSION_RELEASE_GRACE_MS - 1 }, [agent, line]],
-    // Still a draft past the settle window: the write never happened.
-    [{ number: 42, headSha: HEAD, atMs: NOW - 61_000 }, [{ ...agent, draft: true }, line]],
-    [{ number: 42, headSha: OTHER, atMs: NOW - 1_000 }, [agent, line]],
-  ]) {
-    const judged = judge([entry], { openPulls: pulls });
-    assert.deepEqual(judged.state.released.filter((kept) => kept.number === 42), [], JSON.stringify(entry));
-  }
-});
-
-test("a reservation outside the line is judged and taken under the lock: the second of two never takes the same runners", async () => {
-  const { ciAdmissionReserveOutsideLine, parseCiAdmissionState } = await import("../lib/ciAdmissionCore.ts");
-  const NOW = Date.parse("2026-11-13T10:00:00Z");
-  const base = parseCiAdmissionState(undefined);
-  const counted = { ...base, lastRound: { at: new Date(NOW).toISOString(), used: 18, running: [], deploys: [], others: 0 } };
-  // Not counted yet by any round: nothing to judge room on.
-  assert.equal(ciAdmissionReserveOutsideLine(base, { number: 42, headSha: HEAD, base: "develop", nowMs: NOW }), null);
-  const first = ciAdmissionReserveOutsideLine(counted, { number: 42, headSha: HEAD, base: "develop", nowMs: NOW });
-  assert.deepEqual(first?.released, [{ number: 42, headSha: HEAD, atMs: NOW }]);
-  assert.equal(first?.lastRound?.used, 18 + 15, "its need is counted at once");
-  // The same pull request again (another round, another process): already reserved.
-  assert.equal(ciAdmissionReserveOutsideLine(first, { number: 42, headSha: HEAD, base: "develop", nowMs: NOW + 1 }), null);
-  // Another approved pull request after it: 18 + 15 + 15 > 40, no room.
-  assert.equal(ciAdmissionReserveOutsideLine(first, { number: 43, headSha: OTHER, base: "develop", nowMs: NOW + 1 }), null);
-  // A draft in the line still waiting for runners goes first.
-  const waiting = { ...counted, queue: [{ number: 7, title: "", base: "develop", head: "x", headSha: OTHER,
-    queuedAt: new Date(NOW).toISOString(), draft: true, status: "waiting" }] };
-  assert.equal(ciAdmissionReserveOutsideLine(waiting, { number: 42, headSha: HEAD, base: "develop", nowMs: NOW }), null);
-  // Not a develop or main base: CI admission does not count it.
-  assert.equal(ciAdmissionReserveOutsideLine(counted, { number: 42, headSha: HEAD, base: "feature", nowMs: NOW }), null);
-});
-
-test("an outside reservation whose pull request GitHub still shows as a draft settles for a minute, then is dropped", async () => {
-  const { evaluateCiAdmission, parseCiAdmissionState, CI_ADMISSION_OUTSIDE_SETTLE_MS } = await import("../lib/ciAdmissionCore.ts");
-  const NOW = Date.parse("2026-11-13T10:00:00Z");
-  const agent = { number: 42, nodeId: "PR_a", title: "agent", base: "develop", head: REF, headSha: HEAD,
-    draft: true, fork: false, labels: [] };
-  const judge = (atMs) => evaluateCiAdmission({ state: { ...parseCiAdmissionState(undefined),
-    released: [{ number: 42, headSha: HEAD, atMs }] }, openPulls: [agent], running: new Set(), runners: [],
-    nowMs: NOW, shadow: false });
-  // A round whose GitHub read came before the write still counts it.
-  assert.equal(judge(NOW - 1_000).used, 15);
-  assert.equal(judge(NOW - 1_000).state.released.length, 1);
-  // Past the settle window and still a draft: the write never happened.
-  assert.equal(judge(NOW - CI_ADMISSION_OUTSIDE_SETTLE_MS - 1).used, 0);
-  assert.deepEqual(judge(NOW - CI_ADMISSION_OUTSIDE_SETTLE_MS - 1).state.released, []);
+  const ready = { prNumber: 42, headSha: HEAD, atMs: NOW - 60_000 };
+  // Its CI not on GitHub yet: the next ready waits, so at most one pull request's CI can overflow.
+  assert.equal(amuxDmT2MergeReadyInFlight({ readies: [ready], running: new Set(), nowMs: NOW }), true);
+  // Its run shows (queued or in progress at that head): counted as running, the hold is off.
+  assert.equal(amuxDmT2MergeReadyInFlight({ readies: [ready], running: new Set([`42@${HEAD}`]), nowMs: NOW }), false);
+  // A run of another head is not its CI.
+  assert.equal(amuxDmT2MergeReadyInFlight({ readies: [ready], running: new Set([`42@${OTHER}`]), nowMs: NOW }), true);
+  // Ten minutes after the ready with no run: the hold is off.
+  assert.equal(AMUX_DM_T2_MERGE_READY_SETTLE_MS, 10 * 60 * 1000);
+  assert.equal(amuxDmT2MergeReadyInFlight({ readies: [{ ...ready, atMs: NOW - AMUX_DM_T2_MERGE_READY_SETTLE_MS }],
+    running: new Set(), nowMs: NOW }), false);
+  assert.equal(amuxDmT2MergeReadyInFlight({ readies: [], running: new Set(), nowMs: NOW }), false);
 });
