@@ -82,3 +82,12 @@ test("generated images always carry the AI-generated label", () => {
     `${WORKSPACE} must label a generated image in both its alt text and a visible caption (found ${occurrences}).`
   );
 });
+
+test("the image tab groups models by owner under a heading, like the chat list", () => {
+  // Owner request 2026-11-13: the chat list groups by provider; the image tab
+  // listed eight models in one run.
+  const source = read(IMAGE_TAB);
+  assert.match(source, /groupImageModelsByOwner\(models\)/, `${IMAGE_TAB} must group the runnable models by owner.`);
+  assert.match(source, /data-testid="image-model-group"/, `${IMAGE_TAB} must render one group per owner.`);
+  assert.match(source, /OWNER_LABELS\[group\.owner\]\.toUpperCase\(\)/, `${IMAGE_TAB} must head each group with the owner's brand.`);
+});

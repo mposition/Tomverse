@@ -630,12 +630,14 @@ test.describe("Chat starter catalogue", () => {
     expect(labelWordBreak).not.toBe("keep-all");
   });
 
-  test("the image card is locked for a Free account rather than hidden", { tag: "@ui-risk" }, async ({
+  test("a Free account can run the Review image card", { tag: "@ui-risk" }, async ({
     page,
   }) => {
-    // Locked and hidden are different answers, and this is the one the
-    // image-generation contract cares about: a feature the account could buy
-    // must not be invisible to it.
+    // Every signed-in plan may draw (planAllowsImageGeneration), so the card
+    // carries no plan lock. It still has a requirement (sign-in), so the
+    // reserved slot keeps it on screen when the cap would cut it. The guest's
+    // locked state is covered in tests/chatStarterCatalog.test.mjs: on screen
+    // a guest's one reserved slot goes to the .xlsx card first.
     await enableStarterFlag(page);
     await enableImageFlag(page);
     await mockAuthenticatedApi(page);
@@ -644,8 +646,8 @@ test.describe("Chat starter catalogue", () => {
 
     const imageCard = page.locator('[data-starter-id="compare-image-models"]');
     await expect(imageCard).toBeVisible();
-    await expect(imageCard).toHaveAttribute("data-starter-state", "locked");
-    await expect(imageCard.getByTestId("chat-starter-lock")).toBeVisible();
+    await expect(imageCard).toHaveAttribute("data-starter-state", "available");
+    await expect(imageCard.getByTestId("chat-starter-lock")).toHaveCount(0);
   });
 
   test("the image card refuses typed work like every other card", { tag: "@ui-risk" }, async ({
@@ -730,4 +732,80 @@ test.describe("Chat starter catalogue", () => {
       page.locator('[data-starter-id="compare-image-models"]')
     ).toHaveCount(0);
   });
+  test("Chat offers one-model cards and makes images in the conversation", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // Owner report 2026-11-13: Chat is one model, yet its gallery offered
+    // three-model and image-model comparisons, and the image card opened the
+    // retired image workspace. Comparison cards are Review's; Chat's image
+    // card seeds a request the send answers with an image in place.
+    await enableStarterFlag(page);
+    await enableImageFlag(page);
+    await page.context().addCookies([
+      { name: "__tomverse_e2e_chat_image_intent", value: "1", url: BASE_URL },
+    ]);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Free" });
+    await page.goto("/chat");
+    await expect(page.getByTestId("chat-empty-state")).toBeVisible();
+    await expect(gallery(page)).toBeVisible();
+
+    for (const id of ["compare-answers", "translate-and-compare", "compare-image-models"]) {
+      await expect(page.locator(`[data-starter-id="${id}"]`)).toHaveCount(0);
+    }
+    const imageCard = page.locator('[data-starter-id="make-an-image"]');
+    await expect(imageCard).toHaveAttribute("data-starter-state", "available");
+    await imageCard.click();
+    await expect(page.getByTestId("chat-textarea")).not.toHaveValue("");
+    await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/chat/);
+  });
+
+  test("without image triage Chat's image card is absent", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // Without triage the seeded sentence would be answered in text, so the
+    // card would promise an image the send cannot make.
+    await enableStarterFlag(page);
+    await enableImageFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Free" });
+    await page.goto("/chat");
+    await expect(gallery(page)).toBeVisible();
+    await expect(page.locator('[data-starter-id="make-an-image"]')).toHaveCount(0);
+  });
+  test("Chat keeps one card order for the browser session", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // Owner decision 2026-11-13: Chat shows a different selection from a
+    // larger pool, fixed for the session. The server reads the order from the
+    // session cookie, so a reload keeps it and the hydrated page agrees.
+    await enableStarterFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    const cardIds = () =>
+      page.getByTestId("chat-starter-card").evaluateAll((cards) =>
+        cards.filter((card) => (card as HTMLElement).offsetParent !== null)
+          .map((card) => card.getAttribute("data-starter-id")));
+    const setSeed = (seed: string) =>
+      page.context().addCookies([{ name: "tomverse_starter_order", value: seed, url: BASE_URL }]);
+
+    await setSeed("7");
+    await page.goto("/chat");
+    await expect(gallery(page)).toBeVisible();
+    const first = [
+      "draft-reply", "summarize-text", "learn-a-concept",
+      "sourced-answer", "debug-stack-trace", "spreadsheet-from-answer",
+    ];
+    await expect.poll(cardIds).toEqual(first);
+    await page.reload();
+    await expect(gallery(page)).toBeVisible();
+    await expect.poll(cardIds).toEqual(first);
+
+    await setSeed("1234");
+    await page.reload();
+    await expect(gallery(page)).toBeVisible();
+    await expect.poll(cardIds).not.toEqual(first);
+  });
+
 });

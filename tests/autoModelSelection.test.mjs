@@ -6,6 +6,7 @@ import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { autoLlmRouterCandidates, autoLlmRouterFileDiagnostics, parseAutoLlmRouterOutput } from "../lib/autoLlmRouterCore.ts";
 import {
   applyLlmModelPick,
+  fileGenerationRetryModelId,
   selectAutoModel,
   selectionDisclosure,
 } from "../lib/autoModelSelection.ts";
@@ -75,6 +76,71 @@ const initialReleaseAuthority = () =>
     runtimeCommitSha: "a".repeat(40),
     runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
   });
+
+test("file generation retry declines in every no-retry branch", () => {
+  const candidates = autoLlmRouterCandidates(
+    ["gpt-5-6-luna", "deepseek-v4-flash"],
+    AVAILABLE_MODELS,
+    { "gpt-5-6-luna": 1, "deepseek-v4-flash": 2 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+  );
+  const capable = candidates.filter(candidate => candidate.canCreateFiles);
+  assert.equal(capable.some(candidate => candidate.id === "gpt-5-6-luna"), true);
+  assert.equal(candidates.find(candidate => candidate.id === "deepseek-v4-flash").canCreateFiles, false);
+
+  assert.equal(fileGenerationRetryModelId({
+    requiresFileGeneration: false,
+    answeredModelId: "deepseek-v4-flash",
+    fileCapableCandidates: capable,
+  }), null);
+  assert.equal(fileGenerationRetryModelId({
+    requiresFileGeneration: true,
+    answeredModelId: "gpt-5-6-luna",
+    fileCapableCandidates: capable,
+  }), null);
+  assert.equal(fileGenerationRetryModelId({
+    requiresFileGeneration: true,
+    answeredModelId: "deepseek-v4-flash",
+    fileCapableCandidates: [],
+  }), null);
+});
+
+test("file generation retry picks the first eligible candidate in input order", () => {
+  const candidates = autoLlmRouterCandidates(
+    ["deepseek-v4-flash", "gpt-5-6-luna", "claude-haiku-4-5"],
+    AVAILABLE_MODELS,
+    { "deepseek-v4-flash": 1, "gpt-5-6-luna": 2, "claude-haiku-4-5": 3 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+  );
+  const capable = candidates.filter(candidate => candidate.canCreateFiles);
+  const before = capable.map(candidate => candidate.canCreateFiles);
+  const retry = fileGenerationRetryModelId({
+    requiresFileGeneration: true,
+    answeredModelId: "deepseek-v4-flash",
+    fileCapableCandidates: capable,
+  });
+  assert.equal(retry, capable[0].id);
+  assert.equal(retry, "gpt-5-6-luna");
+  assert.deepEqual(capable.map(candidate => candidate.canCreateFiles), before);
+});
+
+test("file generation retry excludes deep research and unverified candidates", () => {
+  const candidates = autoLlmRouterCandidates(
+    ["perplexity/sonar-deep-research", "gpt-5-6-luna", "deepseek-v4-flash"],
+    AVAILABLE_MODELS,
+    { "perplexity/sonar-deep-research": 1, "gpt-5-6-luna": 2, "deepseek-v4-flash": 3 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+  );
+  const before = candidates.map(candidate => candidate.canCreateFiles);
+  assert.equal(candidates.find(candidate => candidate.id === "perplexity/sonar-deep-research").canCreateFiles, false);
+  assert.equal(candidates.find(candidate => candidate.id === "deepseek-v4-flash").canCreateFiles, false);
+  assert.equal(fileGenerationRetryModelId({
+    requiresFileGeneration: true,
+    answeredModelId: "another-model",
+    fileCapableCandidates: candidates,
+  }), "gpt-5-6-luna");
+  assert.deepEqual(candidates.map(candidate => candidate.canCreateFiles), before);
+});
 
 test("file diagnostics default missing intent to false and count only offered capable candidates", () => {
   const candidates = [
@@ -190,6 +256,24 @@ test("an unsupported raw file pick preserves a capable primary instead of fabric
     }
     assert.ok(routed.fallbackCandidateModelIds.every(id => capable.includes(id)));
   }
+});
+
+test("file intent parsing preserves explicit false and rejects non-boolean values", () => {
+  const candidates = autoLlmRouterCandidates(
+    ["gpt-5-6-luna"], AVAILABLE_MODELS, { "gpt-5-6-luna": 1 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+  );
+  const withoutIntent = parseAutoLlmRouterOutput({ modelId: "gpt-5-6-luna" }, candidates);
+  assert.equal("requiresFileGeneration" in withoutIntent, false);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: false,
+  }, candidates).requiresFileGeneration, false);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: true,
+  }, candidates).requiresFileGeneration, true);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: "true",
+  }, candidates), null);
 });
 
 test("file enforcement considers all eligible candidates even when a capable model is absent from ranked fallbacks", () => {

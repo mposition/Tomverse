@@ -26,7 +26,22 @@ export const AI_LINE = Object.freeze({
   "zh-Hant": "影片：部分由 AI 生成",
   "zh-Hans": "视频：部分由 AI 生成",
 });
-export const LIMITS = Object.freeze({ shots: 3, lines: [3, 10], lineChars: 200, localeChars: 700, screenLines: 16, screenChars: 60, altChars: 400, promptChars: 2500, seconds: [15, 38] });
+export const LIMITS = Object.freeze({ shots: 3, lines: [3, 10], lineChars: 200, localeChars: 700, screenLines: 16, screenChars: 60, altChars: 400, promptChars: 2500, seconds: [15, 38], filmSeconds: 40 });
+
+/**
+ * Characters (spaces left out) each locale's fixed ElevenLabs voice speaks a second, measured on
+ * this job's own takes (38 lines each, runs 20261112-20261113-2): the estimate came within about
+ * 2 s of the real narration on every run.
+ */
+export const SPEECH_RATE = Object.freeze({ en: 11.5, ko: 6.0, "zh-Hant": 5.2, "zh-Hans": 5.2 });
+/** Room left for the estimate's error. */
+export const NARRATION_MARGIN = 1.5;
+/** About how long a locale's narration runs, with the breaths between lines and the end card (as the voice step counts it). */
+export function narrationSeconds(lines, locale) {
+  const rate = SPEECH_RATE[locale] ?? SPEECH_RATE.en;
+  const chars = lines.reduce((sum, line) => sum + String(line).replace(/\s+/gu, "").length, 0);
+  return chars / rate + 0.35 * Math.max(0, lines.length - 1) + 2.5;
+}
 const URL_LIKE = /https?:|www\.|\b[a-z0-9-]+\.(?:com|net|org|ai|io|co)\b/iu;
 
 const isText = (value, max) => typeof value === "string" && value.trim().length > 0 && value.length <= max;
@@ -153,7 +168,18 @@ export function checkPlan(answer, { packs, history = [] }) {
     if (!Array.isArray(words.lines) || words.lines.length < LIMITS.lines[0] || words.lines.length > LIMITS.lines[1]) return refuse(`${locale}: lines is a list of ${LIMITS.lines[0]}-${LIMITS.lines[1]} narration lines`);
     if (!words.lines.every((line) => isText(line, LIMITS.lineChars))) return refuse(`${locale}: a narration line is empty or longer than ${LIMITS.lineChars}`);
     if (words.lines.join("").length > LIMITS.localeChars) return refuse(`${locale}: the narration is longer than ${LIMITS.localeChars} characters`);
-    if (!Array.isArray(words.screen) || words.screen.length > LIMITS.screenLines || !words.screen.every((line) => isText(line, LIMITS.screenChars))) return refuse(`${locale}: screen is at most ${LIMITS.screenLines} lines of at most ${LIMITS.screenChars}`);
+    // Before anything is paid for: the voice step drops a locale whose narration runs past the film's
+    // length, after paying for it (run 20261113-3: 42-50 s, all three dropped).
+    const runs = narrationSeconds(words.lines, locale);
+    if (runs > LIMITS.filmSeconds - NARRATION_MARGIN) {
+      const rate = SPEECH_RATE[locale] ?? SPEECH_RATE.en;
+      return refuse(`${locale}: the narration would run about ${runs.toFixed(0)} s with the end card, more than ${LIMITS.filmSeconds - NARRATION_MARGIN}; cut about ${Math.ceil((runs - (LIMITS.filmSeconds - NARRATION_MARGIN)) * rate)} characters from its lines`);
+    }
+    if (!Array.isArray(words.screen) || words.screen.length > LIMITS.screenLines || !words.screen.every((line) => isText(line, LIMITS.screenChars))) {
+      // Name the line to mend, so a retry changes that line and nothing else.
+      const long = Array.isArray(words.screen) ? words.screen.find((line) => !isText(line, LIMITS.screenChars)) : undefined;
+      return refuse(`${locale}: screen is at most ${LIMITS.screenLines} lines of at most ${LIMITS.screenChars} characters${Array.isArray(words.screen) && words.screen.length > LIMITS.screenLines ? ` (it has ${words.screen.length})` : ""}${long !== undefined ? `; shorten or split ${JSON.stringify(String(long).slice(0, 120))}` : ""}`);
+    }
     if (!words.screen.includes(AI_LINE[locale])) return refuse(`${locale}: screen must include the AI line "${AI_LINE[locale]}" exactly`);
     if (!isText(words.alt, LIMITS.altChars)) return refuse(`${locale}: alt is missing or longer than ${LIMITS.altChars}`);
     if ([...words.lines, ...words.screen].some((line) => URL_LIKE.test(line))) return refuse(`${locale}: no web address in the words (the end card carries tomverse.app)`);
@@ -326,28 +352,37 @@ export function creativeAsset({ id, locale, words, captureWords = [], claimIds =
   const channels = CHANNELS[locale];
   if (!channels) throw new Error(`no channels for ${locale}`);
   const validUntil = new Date(today.getTime() + 90 * 86_400_000).toISOString().slice(0, 10);
-  const inside = captureWords.map((text) => String(text).replace(/\s+/gu, " ").trim()).filter(Boolean);
+  // A space after an ideographic stop before Latin letters, as it is typeset: the Guard reads
+  // "分析。AI 生成" as the host 析.ai (".ai" is a top-level domain) and says to write it this way
+  // (lib/marketingGuardNormalise.ts); run 20261113-2's zh-Hant alt was refused on it.
+  const spaced = (text) => String(text).replace(/。(?=[A-Za-z])/gu, "。 ");
+  const inside = captureWords.map((text) => spaced(text).replace(/\s+/gu, " ").trim()).filter(Boolean);
   return {
     asset: {
       id,
       provenance: "capture_with_ai_media",
       allowedChannels: [...channels],
-      alt: { [locale]: words.alt },
+      alt: { [locale]: spaced(words.alt) },
       claimIds: [...new Set(claimIds)],
       validUntil,
       disclosure: Object.fromEntries(channels.map((channel) => [channel, DISCLOSURE[channel]])),
       depictsProductInterface: true,
     },
-    transcript: { [locale]: [words.lines.join(" "), [...words.screen, "tomverse.app"].join("\n"), ...(inside.length > 0 ? [inside.join("\n")] : [])].join("\n\n") },
+    transcript: { [locale]: [spaced(words.lines.join(" ")), [...words.screen.map(spaced), "tomverse.app"].join("\n"), ...(inside.length > 0 ? [inside.join("\n")] : [])].join("\n\n") },
   };
 }
 
-/** The scores CREATIVE-REVIEW.md asks for; a pass needs every one at 8 or more. */
+/** The scores CREATIVE-REVIEW.md asks for: notes for the person in Admin, not a gate. */
 export const REVIEW_SCORES = Object.freeze(["creative", "craft", "readability", "truth", "disclosure"]);
-/** Whether the review call's answer passes the film: the verdict and every score, checked here. */
+/**
+ * The gates a film must clear to reach Admin (owner 2026-11-13: only what must never reach a
+ * person is held back; craft is judged there). Each must be exactly true in the answer.
+ */
+export const REVIEW_GATES = Object.freeze(["truth", "tone", "disclosure"]);
+/** Whether the review call's answer lets the film go to Admin: a `pass` with every gate true, checked here. */
 export function reviewPassed(review) {
-  if (review?.verdict !== "pass" || !review.scores || typeof review.scores !== "object") return false;
-  return REVIEW_SCORES.every((key) => Number.isFinite(review.scores[key]) && review.scores[key] >= 8 && review.scores[key] <= 10);
+  if (review?.verdict !== "pass" || !review.gates || typeof review.gates !== "object") return false;
+  return REVIEW_GATES.every((key) => review.gates[key] === true);
 }
 
 const PACK_LOCALE = /-(?:en|ko|zh-hant|zh-hans)$/u;

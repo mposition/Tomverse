@@ -25,6 +25,8 @@ export type ReviewWorkspaceControls = {
   imageRequest: boolean;
   imagePromptMode: boolean;
   imageModelLabel?: string;
+  /** Providers with an active image model; their rows carry an image badge. */
+  imageProviders?: readonly string[];
   setImagePromptMode: (value: boolean) => void;
 };
 

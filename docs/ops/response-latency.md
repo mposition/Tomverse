@@ -78,6 +78,30 @@ effort, output limits, validators and fallback remain the same.
 Their image context is not stored in router decisions, so both routing and
 rewrite optimizers exclude all `+image-intent-` versions from text-only
 replay; normal session memory and aggregate routing diagnostics remain available.
+
+### Router latency (2026-11-13)
+
+Live router calls took 2.9-5.5 s against a 7 s deadline (8 s with combined image
+intent), up from 1.9-2.3 s when there were 17 candidates; one combined call
+timed out at 8 s and its standalone image fallback added 4.7 s more. What
+changed, and what stays a switch:
+
+- A router that was asked and failed now hands the turn to the requested model
+  (docs/ui-contracts/auto-model-selection.md), so a timeout no longer drops a
+  file request onto a model without file tools.
+- `chat_auto_llm_router` logs `requestChars`, `reasoningEffort` and
+  `reasoningTokens` (sizes only, never text), so a slow call can be told apart
+  from a slow provider.
+- `AUTO_LLM_ROUTER_REASONING_EFFORT` (`none` | `minimal` | `low`, default
+  `low`) sets the OpenAI router's effort. It is never raised and an unknown value
+  is ignored. Lowering it is the operator's trial: a model that does not
+  implement an effort rejects every router call (each then falls back to the
+  requested model), so watch `auto_llm_router_call_failed` after setting it.
+- `CHAT_ROUTER_IMAGE_HEDGE_MS` (1,000-20,000; unset = off) starts the standalone
+  image classification beside a combined router call that is still running at
+  that point, so a router failure costs one wait rather than two. It is a second
+  paid classification on every slow combined turn, used only when the router
+  then fails, so it is off until the owner turns it on.
 Before enabling this switch, compare routing/image accuracy and latency against
 the legacy path using approved evaluation traffic, including text, files, image
 generation, photo analysis/editing and image follow-ups. Local mocked tests check

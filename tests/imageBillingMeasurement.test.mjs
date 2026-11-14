@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { suggestsMeasurement } from "../lib/adminModelCatalogFlow.ts";
+import { measurementApplies, suggestsMeasurement } from "../lib/adminModelCatalogFlow.ts";
 import { IMAGE_PROMPT_BUDGET_MICRO_USD as PROMPT } from "../lib/imageGenerationPricing.ts";
 import {
   emptyMeasurementForm,
@@ -401,6 +401,12 @@ test("the panel offers a measurement for an unbounded or unpriced refusal on a m
   assert.equal(suggestsMeasurement("openai", ["draft_rejected"], "no_options: only per-token rates"), true);
   assert.equal(suggestsMeasurement("qwen", ["credits_below_floor:low/1024x1024"]), false);
   assert.equal(suggestsMeasurement("fal", ["worst_case_cost_unbounded"]), false);
+  // A model that already serves a cap of its own takes a new draft, not a measurement.
+  const flash = { provider: "google", served: { priceVerification: { thinkingCapMicroUsd: 12_288 } } };
+  assert.equal(measurementApplies(flash, ["worst_case_cost_unbounded"]), false);
+  const pro = { provider: "google", served: { priceVerification: { thinkingCapMicroUsd: null } } };
+  assert.equal(measurementApplies(pro, ["worst_case_cost_unbounded"]), true);
+  assert.equal(measurementApplies({ provider: "qwen", served: null }, ["worst_case_cost_unbounded"]), true);
 });
 
 test("a price older than the confirmed tokens per image is refused until a new draft", () => {
