@@ -26,6 +26,7 @@ import {
   AMUX_PROCESS_AUDIT_SETTINGS_KEY,
   parseProcessAuditAnalysis,
   parseProcessAuditSettings,
+  previousReportForPrompt,
   processAuditDue,
   processAuditRequestAfterRun,
   processAuditWindow,
@@ -116,7 +117,7 @@ export type ProcessAuditContext =
     readonly windowStart: string;
     readonly windowEnd: string;
     readonly metrics: AmuxProcessAuditMetrics;
-    readonly previous: { readonly createdAt: string; readonly analysis: AmuxProcessAuditAnalysis } | null;
+    readonly previous: { readonly createdAt: string; readonly analysis: Omit<AmuxProcessAuditAnalysis, "markdown"> } | null;
   };
 
 /**
@@ -155,7 +156,8 @@ export async function claimProcessAuditRun(): Promise<ProcessAuditContext> {
       windowStart: claim.windowStart,
       windowEnd: claim.windowEnd,
       metrics,
-      previous: last && analysis ? { createdAt: last.createdAt.toISOString(), analysis } : null,
+      // Its conclusions, not its prose.
+      previous: last && analysis ? { createdAt: last.createdAt.toISOString(), analysis: previousReportForPrompt(analysis) } : null,
     };
   }, TRANSACTION);
 }

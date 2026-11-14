@@ -238,3 +238,19 @@ test("the box unit runs the bundle and the timer only polls", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.match(pkg.scripts["build:amux-process-audit-box"], /scripts\/amux-process-audit-runner\.mjs --bundle/);
 });
+
+test("the report's Markdown makes no request: links and images render as text, no raw HTML", () => {
+  const panel = readFileSync(new URL("../components/admin/AmuxProcessAuditPanel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /\n  a: \(\{ children \}\) => <span/);
+  assert.match(panel, /\n  img: \(\{ alt \}\) => <span/);
+  assert.match(panel, /components=\{MARKDOWN_COMPONENTS\}/);
+  assert.equal(/rehypeRaw|rehype-raw|dangerouslySetInnerHTML/.test(panel), false);
+});
+
+test("every grouped text column passes only as a code-shaped value", () => {
+  const metrics = readFileSync(new URL("../lib/amuxProcessAuditMetrics.ts", import.meta.url), "utf8");
+  for (const column of ['a."reason"', '"reason"', '"resolutionOutcome"', '"verdict"', '"route"', '"action"', '"answerSource"']) {
+    assert.ok(metrics.includes(`WHEN ${column} ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN ${column} ELSE 'other_text' END`), column);
+  }
+  assert.equal(/left\("?a?\.?"?reason/.test(metrics), false);
+});

@@ -12,7 +12,10 @@ import type { ProcessAuditAdminView } from "@/lib/amuxProcessAuditStore";
 
 const BASE = "/admin/amux-execution?tab=process-audit";
 
-/** The console has no typography plugin, so each Markdown element gets its classes here. */
+/**
+ * The console has no typography plugin, so each Markdown element gets its classes here.
+ * Links and images render as text: nothing in a report makes the browser leave Tomverse.
+ */
 const MARKDOWN_COMPONENTS: Components = {
   h1: ({ children }) => <h2 className="text-lg font-semibold text-zinc-50">{children}</h2>,
   h2: ({ children }) => <h3 className="mt-2 text-base font-semibold text-zinc-100">{children}</h3>,
@@ -24,6 +27,9 @@ const MARKDOWN_COMPONENTS: Components = {
   td: ({ children }) => <td className="border-b border-zinc-800 px-2 py-1 align-top">{children}</td>,
   code: ({ children }) => <code className="rounded bg-zinc-800 px-1 text-[0.85em] text-zinc-100">{children}</code>,
   a: ({ children }) => <span className="underline decoration-dotted">{children}</span>,
+  // The model's text is not trusted: an image would make the owner's browser
+  // fetch a URL it chose. Its alt text is shown instead, with no request.
+  img: ({ alt }) => <span className="text-zinc-500">[{alt || "image"}]</span>,
 };
 
 /**

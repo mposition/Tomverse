@@ -1,7 +1,11 @@
 // The figures of the AMUX process analysis agent (lib/amuxProcessAuditCore.ts):
 // deterministic, read-only SQL over the AMUX and engineering tables for one
 // window. Aggregates and card display keys only: no title, body, brief,
-// e-mail or free text a person wrote. A module of reads only, apart from the
+// e-mail or free text a person wrote. Every text column that is grouped
+// (reasons, outcomes, routes, actions) passes only as a code-shaped value; a
+// row holding anything else -- a worker's free text, for one -- is counted as
+// `other_text`, so no stored text reaches the model's prompt
+// (docs/policy/amux-agent-approval-contract.md §2). A module of reads only, apart from the
 // store that writes the agent's own rows, so no write can sit beside a read of
 // a protected table (scripts/check-protected-table-writers.mjs).
 
@@ -76,7 +80,7 @@ export async function readProcessAuditMetrics(db: Db, window: { start: Date; end
     GROUP BY 1 ORDER BY 1`;
   // Why attempts ended, and how long until the same card ran again.
   const stopReasons = await db.$queryRaw`
-    SELECT a."outcome", a."toStatus", left(a."reason", 120) AS reason, count(*)::int AS count,
+    SELECT a."outcome", a."toStatus", CASE WHEN a."reason" IS NULL THEN NULL WHEN a."reason" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN a."reason" ELSE 'other_text' END AS reason, count(*)::int AS count,
       round((percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (n."startedAt" - a."endedAt")) / 3600)
         FILTER (WHERE n."startedAt" IS NOT NULL))::numeric, 1)::float8 AS "medianHoursToNextAttempt",
       count(*) FILTER (WHERE n."startedAt" IS NULL)::int AS "noNextAttempt"
@@ -92,7 +96,7 @@ export async function readProcessAuditMetrics(db: Db, window: { start: Date; end
     ORDER BY count DESC
     LIMIT 40`;
   const escalations = await db.$queryRaw`
-    SELECT left("reason", 80) AS reason, "status", "resolutionOutcome", count(*)::int AS count,
+    SELECT CASE WHEN "reason" IS NULL THEN NULL WHEN "reason" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "reason" ELSE 'other_text' END AS reason, "status", CASE WHEN "resolutionOutcome" IS NULL THEN NULL WHEN "resolutionOutcome" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "resolutionOutcome" ELSE 'other_text' END AS "resolutionOutcome", count(*)::int AS count,
       -- A person resolves with their admin e-mail; the system resolvers have none. Counted, never read.
       count(*) FILTER (WHERE "resolvedAt" IS NOT NULL AND "resolvedByEmail" IS NOT NULL)::int AS "resolvedByPerson",
       round((percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) / 3600)
@@ -111,25 +115,25 @@ export async function readProcessAuditMetrics(db: Db, window: { start: Date; end
     JOIN "AmuxWorkItem" w ON w."id" = h."taskId"
     WHERE h."status" IN ('open', 'acknowledged')`;
   const v52Reviews = await db.$queryRaw`
-    SELECT "verdict", count(*)::int AS count
+    SELECT CASE WHEN "verdict" IS NULL THEN NULL WHEN "verdict" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "verdict" ELSE 'other_text' END AS verdict, count(*)::int AS count
     FROM "AmuxV52ReviewRecord"
     WHERE "createdAt" >= (${s}::timestamptz AT TIME ZONE 'UTC')
       AND "createdAt" < (${e}::timestamptz AT TIME ZONE 'UTC')
     GROUP BY 1 ORDER BY count DESC`;
   const resultReviews = await db.$queryRaw`
-    SELECT "kind", "state", "answerSource", count(*)::int AS count
+    SELECT CASE WHEN "kind" IS NULL THEN NULL WHEN "kind" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "kind" ELSE 'other_text' END AS kind, CASE WHEN "state" IS NULL THEN NULL WHEN "state" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "state" ELSE 'other_text' END AS state, CASE WHEN "answerSource" IS NULL THEN NULL WHEN "answerSource" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "answerSource" ELSE 'other_text' END AS "answerSource", count(*)::int AS count
     FROM "AmuxV22ResultReview"
     WHERE "createdAt" >= (${s}::timestamptz AT TIME ZONE 'UTC')
       AND "createdAt" < (${e}::timestamptz AT TIME ZONE 'UTC')
     GROUP BY 1, 2, 3 ORDER BY count DESC`;
   const decisionMakerRequests = await db.$queryRaw`
-    SELECT "route", count(*)::int AS count
+    SELECT CASE WHEN "route" IS NULL THEN NULL WHEN "route" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "route" ELSE 'other_text' END AS route, count(*)::int AS count
     FROM "AmuxDecisionMakerRequest"
     WHERE "createdAt" >= (${s}::timestamptz AT TIME ZONE 'UTC')
       AND "createdAt" < (${e}::timestamptz AT TIME ZONE 'UTC')
     GROUP BY 1 ORDER BY count DESC`;
   const engineeringRuns = await db.$queryRaw`
-    SELECT "status", "outcome", count(*)::int AS count
+    SELECT CASE WHEN "status" IS NULL THEN NULL WHEN "status" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "status" ELSE 'other_text' END AS status, CASE WHEN "outcome" IS NULL THEN NULL WHEN "outcome" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "outcome" ELSE 'other_text' END AS outcome, count(*)::int AS count
     FROM "EngineeringAgentRun"
     WHERE "startedAt" >= (${s}::timestamptz AT TIME ZONE 'UTC')
       AND "startedAt" < (${e}::timestamptz AT TIME ZONE 'UTC')
@@ -137,7 +141,7 @@ export async function readProcessAuditMetrics(db: Db, window: { start: Date; end
   // What people did by hand on AMUX and the engineering agent. Action names
   // only: the actor is not named.
   const humanActions = await db.$queryRaw`
-    SELECT "action", count(*)::int AS count
+    SELECT CASE WHEN "action" IS NULL THEN NULL WHEN "action" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "action" ELSE 'other_text' END AS action, count(*)::int AS count
     FROM "AdminAuditLog"
     WHERE "actorUserId" IS NOT NULL
       AND ("action" LIKE 'amux.%' OR "action" LIKE 'engineering%' OR "action" LIKE 'ci_admission%' OR "action" LIKE 'qa_release%')
@@ -159,7 +163,7 @@ export async function readProcessAuditMetrics(db: Db, window: { start: Date; end
     WHERE "createdAt" >= (${s}::timestamptz AT TIME ZONE 'UTC')
       AND "createdAt" < (${e}::timestamptz AT TIME ZONE 'UTC')`;
   const auditTopActions = await db.$queryRaw`
-    SELECT "action", count(*)::int AS count
+    SELECT CASE WHEN "action" IS NULL THEN NULL WHEN "action" ~ '^[a-z][a-z0-9_.:-]{0,79}$' THEN "action" ELSE 'other_text' END AS action, count(*)::int AS count
     FROM "AdminAuditLog"
     WHERE "createdAt" >= (${s}::timestamptz AT TIME ZONE 'UTC')
       AND "createdAt" < (${e}::timestamptz AT TIME ZONE 'UTC')
