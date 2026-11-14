@@ -155,3 +155,61 @@ test("a no-change completion is refused while the run's usage outcome is unknown
       attemptId: seed.priorAttemptId, escalationId }));
   });
 });
+
+async function storePatch(db, seed) {
+  await db.query(`INSERT INTO public."AmuxV22TaskPatch"
+    ("attemptId", "taskId", "ideaId", "ciphertext", "keyId", "keyVersion",
+     "digest", "digestKeyId", "patchSha256", "baseSha", "byteLength", "createdAt")
+    VALUES ($1, $2, $3, convert_to('synthetic-patch', 'UTF8'), 'synthetic', 1,
+      $4, 'synthetic', $4, $5, 15, CURRENT_TIMESTAMP)`,
+  [seed.priorAttemptId, seed.taskId, seed.ideaId, "e".repeat(64), "1".repeat(40)]);
+}
+
+test("a no-change completion is refused when the attempt stored a patch", {
+  skip: allowed ? undefined : "requires a dedicated loopback test database",
+}, async () => {
+  // AMUX-FILEGEN2-002 (2026-11-13): the run was never created, so no
+  // publication row existed, and "no change needed" closed a real patch.
+  await inRollback(async (tx, db) => {
+    const seed = await seedAmuxV4PortfolioRecoveryPrerequisites(db,
+      { taskRole: "implement", settlementReason: "reported_result" });
+    await storeResult(db, seed);
+    await storePatch(db, seed);
+    const escalationId = await openEscalation(db, seed.taskId);
+    await tx.$executeRawUnsafe("SAVEPOINT refused_write");
+    await assert.rejects(insertApproval(db, { taskId: seed.taskId,
+      attemptId: seed.priorAttemptId, escalationId }),
+    /stored a patch no pull request carries/);
+    await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT refused_write");
+  });
+});
+
+test("a done dependency is unpublished while its newest attempt's patch has no recorded merge", {
+  skip: allowed ? undefined : "requires a dedicated loopback test database",
+}, async () => {
+  const { amuxDependencyUnpublishedPatchSql, AMUX_V22_REVIEW_MERGE_OBSERVED_ACTION } =
+    await import("../../lib/amux/v4DependencyPublication.ts");
+  await inRollback(async (tx, db) => {
+    const seed = await seedAmuxV4PortfolioRecoveryPrerequisites(db,
+      { taskRole: "implement", settlementReason: "reported_result" });
+    const unpublished = async () => (await tx.$queryRaw`SELECT dep."id"
+      FROM "AmuxWorkItem" dep WHERE dep."id" = ${seed.taskId}
+        AND ${amuxDependencyUnpublishedPatchSql()}`).length === 1;
+    // No patch: an investigation or a real no-change is judged on done alone.
+    await storeResult(db, seed);
+    assert.equal(await unpublished(), false);
+    await storePatch(db, seed);
+    assert.equal(await unpublished(), true);
+    // A merge observed for some other attempt does not carry this one's patch.
+    await appendSyntheticAdminAudit(db, { actorUserId: owner,
+      action: AMUX_V22_REVIEW_MERGE_OBSERVED_ACTION, targetType: "AmuxWorkItem",
+      targetId: seed.taskId, summary: "Synthetic merge of another attempt.",
+      metadata: { attempt_id: randomUUID(), pr_number: 1 } });
+    assert.equal(await unpublished(), true);
+    await appendSyntheticAdminAudit(db, { actorUserId: owner,
+      action: AMUX_V22_REVIEW_MERGE_OBSERVED_ACTION, targetType: "AmuxWorkItem",
+      targetId: seed.taskId, summary: "Synthetic merge of this attempt.",
+      metadata: { attempt_id: seed.priorAttemptId, pr_number: 2 } });
+    assert.equal(await unpublished(), false);
+  });
+});
