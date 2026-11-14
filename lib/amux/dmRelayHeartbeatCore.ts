@@ -11,6 +11,11 @@
  * halted one. On 2026-11-09 the calls stopped at 10:30 AEST and nothing said so
  * for five days.
  *
+ * One tick can be long: a question the relay routed is handed to the broker,
+ * and the relay waits for its answer (up to `DM_BROKER_RESPONSE_DEADLINE`, 34
+ * minutes, after an assignment window of 2 minutes) before the next sync. So a
+ * relay that routed a question recently is asking, not silent.
+ *
  * Pure: the monitor (lib/infrastructureThresholdMonitor.ts) and any screen that
  * shows the relay's state use the same rule.
  */
@@ -24,6 +29,13 @@ export const AMUX_DM_RELAY_LAST_SYNC_KEY = "amuxDmRelayLastSyncAt";
  * the hour.
  */
 export const AMUX_DM_RELAY_SILENT_MS = 5 * 60_000;
+
+/**
+ * How long after a Decision Maker request was created the relay may still be
+ * inside that question's tick: the 2-minute assignment window, the broker's
+ * 34-minute response deadline, and 4 minutes for the result's writes.
+ */
+export const AMUX_DM_RELAY_QUESTION_MS = 40 * 60_000;
 
 /** How often a relay that stays silent pages again. */
 export const AMUX_DM_RELAY_REMINDER_MS = 3 * 60 * 60_000;
@@ -46,19 +58,31 @@ export const parseAmuxDmRelayLastSync = (value: string | null | undefined): Date
 
 export type AmuxDmRelayLiveness =
   | { state: "calling"; lastSyncAt: Date }
+  | { state: "asking"; lastSyncAt: Date | null; lastQuestionAt: Date }
   | { state: "silent"; lastSyncAt: Date | null; minutesSilent: number | null };
 
 /**
- * Silent when no call was ever recorded or the last one is older than
- * `AMUX_DM_RELAY_SILENT_MS`. A record from the future (a clock step) counts as
- * calling: it is a call, just mis-dated.
+ * Calling when the last sync is at most `AMUX_DM_RELAY_SILENT_MS` old (a record
+ * from the future, a clock step, counts: it is a call, just mis-dated). Asking
+ * when it is older but the newest Decision Maker request is at most
+ * `AMUX_DM_RELAY_QUESTION_MS` old: the relay may be waiting for that answer.
+ * Silent otherwise, including when no call was ever recorded.
  */
 export const judgeAmuxDmRelayLiveness = (
   lastSyncAt: Date | null,
+  lastQuestionAt: Date | null,
   now: Date
 ): AmuxDmRelayLiveness => {
+  if (lastSyncAt && now.getTime() - lastSyncAt.getTime() <= AMUX_DM_RELAY_SILENT_MS) {
+    return { state: "calling", lastSyncAt };
+  }
+  if (lastQuestionAt && now.getTime() - lastQuestionAt.getTime() <= AMUX_DM_RELAY_QUESTION_MS) {
+    return { state: "asking", lastSyncAt, lastQuestionAt };
+  }
   if (!lastSyncAt) return { state: "silent", lastSyncAt: null, minutesSilent: null };
-  const age = now.getTime() - lastSyncAt.getTime();
-  if (age <= AMUX_DM_RELAY_SILENT_MS) return { state: "calling", lastSyncAt };
-  return { state: "silent", lastSyncAt, minutesSilent: Math.floor(age / 60_000) };
+  return {
+    state: "silent",
+    lastSyncAt,
+    minutesSilent: Math.floor((now.getTime() - lastSyncAt.getTime()) / 60_000),
+  };
 };

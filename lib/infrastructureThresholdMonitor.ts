@@ -9,7 +9,10 @@ import {
   newlyLostAmuxWorkers,
   type AmuxBridgeLiveness,
 } from "@/lib/amux/bridgeLivenessCore";
-import { readAmuxDmRelayLastSyncAt } from "@/lib/amux/dmRelayHeartbeat";
+import {
+  readAmuxDmRelayLastQuestionAt,
+  readAmuxDmRelayLastSyncAt,
+} from "@/lib/amux/dmRelayHeartbeat";
 import {
   AMUX_DM_RELAY_REMINDER_MS,
   AMUX_DM_RELAY_SILENT_MS,
@@ -194,7 +197,18 @@ async function reportAmuxDmRelayLiveness(
   now: Date
 ): Promise<{ state: AmuxDmRelayLiveness["state"] | "off"; notified: boolean }> {
   if (!amuxDmRelayExpected()) return { state: "off", notified: false };
-  const verdict = judgeAmuxDmRelayLiveness(await readAmuxDmRelayLastSyncAt(), now);
+  const lastSyncAt = await readAmuxDmRelayLastSyncAt();
+  // The request ledger is read only when the sync is stale: a relay inside a
+  // question's tick waits for the broker without calling sync.
+  const fresh = judgeAmuxDmRelayLiveness(lastSyncAt, null, now);
+  const verdict =
+    fresh.state === "calling"
+      ? fresh
+      : judgeAmuxDmRelayLiveness(lastSyncAt, await readAmuxDmRelayLastQuestionAt(now), now);
+  // Asking is not evidence either way: reporting it healthy would announce a
+  // recovery for a relay that may have died mid-question. Nothing is reported
+  // until the question's window has passed.
+  if (verdict.state === "asking") return { state: "asking", notified: false };
   const silentFor =
     verdict.state !== "silent"
       ? ""

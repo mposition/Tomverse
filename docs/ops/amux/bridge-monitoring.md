@@ -327,6 +327,12 @@ local marker만 풀며 아무 일도 하지 않는다. 그래서 systemd 상태�
 - 감시는 **`TOMVERSE_AMUX_DM_ROUTING=enabled`일 때만** 본다. 마지막 호출이 **5분**(idle tick 10번)보다 오래됐거나
   기록이 없으면 `AMUX_DM_RELAY_SILENT`를 보내고, 같은 상태는 3시간마다 다시 알린다. 다시 호출하면 `…_RECOVERED`가 간다.
   감시가 15분마다 돌므로 멈춘 뒤 알림까지는 5~20분이다. 기록을 읽지 못하면 `AMUX_DM_RELAY_CHECK_FAILED`를 따로 보낸다.
+- 예외 하나: relay는 DM 질문 하나를 broker에 맡기면 그 답을 최대 34분(`DM_BROKER_RESPONSE_DEADLINE`, 그 앞의 배정
+  창 2분) 기다리고, 그동안 sync를 부르지 않는다. 그래서 sync가 5분 넘게 없어도 **40분 안에 만들어진 DM 요청**
+  (`AmuxDecisionMakerRequest.createdAt`)이 있으면 "질문 중"으로 보고 아무것도 보내지 않는다(정상이라고도 하지 않는다).
+  질문 중에 relay가 죽었다면 알림은 그 요청 뒤 40분이 지나서 간다.
+- heartbeat 쓰기는 sync route의 예산(15초) 안에서 맨 먼저 돌고, 연결 대기 0.5초·transaction 1.5초·문장 1초·잠금 0.5초로
+  묶여 있다. 넘으면 버리고 sync는 그대로 진행한다.
 - 알림을 받으면 호스트에서 relay의 journal을 먼저 읽는다(읽기 전용, `tommy`로도 된다).
 
 ```bash

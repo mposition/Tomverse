@@ -61,6 +61,9 @@ type World = {
   bridgeNotified: boolean | null;
   /** The Decision Maker relay's last recorded call; null when none was. */
   relayLastSyncAt: Date | null;
+  /** The newest Decision Maker request inside the question window, if any. */
+  relayLastQuestionAt: Date | null;
+  relayQuestionReads: number;
   relayReadError: Error | null;
   dependencyReports: DependencyReport[];
   incidents: Incident[];
@@ -80,6 +83,8 @@ const world: World = {
   bridgeQueryError: null,
   bridgeNotified: null,
   relayLastSyncAt: null,
+  relayLastQuestionAt: null,
+  relayQuestionReads: 0,
   relayReadError: null,
   dependencyReports: [],
   incidents: [],
@@ -99,6 +104,8 @@ const resetWorld = () => {
   world.bridgeQueryError = null;
   world.bridgeNotified = null;
   world.relayLastSyncAt = null;
+  world.relayLastQuestionAt = null;
+  world.relayQuestionReads = 0;
   world.relayReadError = null;
   delete process.env.TOMVERSE_AMUX_DM_ROUTING;
   world.dependencyReports = [];
@@ -179,6 +186,10 @@ const loadMonitor = () => {
         readAmuxDmRelayLastSyncAt: async () => {
           if (world.relayReadError) throw world.relayReadError;
           return world.relayLastSyncAt;
+        },
+        readAmuxDmRelayLastQuestionAt: async () => {
+          world.relayQuestionReads += 1;
+          return world.relayLastQuestionAt;
         },
         recordAmuxDmRelaySync: async () => {},
       },
@@ -856,4 +867,39 @@ test("a relay check that cannot read records null and pages on its own behalf", 
     null
   );
   assert.equal(world.failedRuns, 0);
+});
+
+test("a relay waiting on a recent question is not paged, and not called healthy", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
+  // The relay routed a question 20 minutes ago and has been waiting on the
+  // broker since (up to 34 minutes), so it has not called sync for 19.
+  world.relayLastSyncAt = minutesAgo(19);
+  world.relayLastQuestionAt = minutesAgo(20);
+
+  const result = await monitorInfrastructureThresholdsIfDue();
+
+  assert.deepEqual(result, { checked: true, alerts: 0, advisories: 0 });
+  assert.equal(
+    world.dependencyReports.some((report) => report.dependency === "amux-dm-relay"),
+    false
+  );
+  assert.equal(
+    (world.completedResults.at(-1) as { amuxDmRelay: string }).amuxDmRelay,
+    "asking"
+  );
+});
+
+test("a calling relay does not read the request ledger", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard();
+  process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
+  world.relayLastSyncAt = minutesAgo(1);
+
+  await monitorInfrastructureThresholdsIfDue();
+
+  assert.equal(world.relayQuestionReads, 0);
 });
