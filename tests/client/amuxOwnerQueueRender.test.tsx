@@ -678,6 +678,11 @@ test("the card detail's attempt shows a reject's reasons and nothing for other v
   assert.equal(renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={0}
     review={rejectedDetail.attempts[2].v52Review} />), "");
   assert.equal(renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={3} review={null} />), "");
+  // Two reviewers (a contract change): either slot may hold the reject.
+  const twoSlots = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
+    review={{ verdict: "reject", jobId: OLD_JOB, reviewerVendors: ["openai", "google"], findingsSummary: null }} />);
+  assert.match(twoSlots, new RegExp(`report ${OLD_JOB} --slot 0`));
+  assert.match(twoSlots, new RegExp(`report ${OLD_JOB} --slot 1`));
   const none = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
     review={{ verdict: "reject", jobId: null, reviewerVendors: [], findingsSummary: null }} />);
   assert.match(none, /data-kind="none"/);

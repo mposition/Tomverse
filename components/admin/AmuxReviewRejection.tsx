@@ -59,10 +59,13 @@ export function AmuxReviewRejectionReason({ review, attemptNumber, showAttempt =
         <div className="mt-1 text-zinc-300">
           <p>{m.noSummary(view.jobId)}</p>
           <p className="mt-1 text-xs text-zinc-400">{m.noSummaryCommand}</p>
-          <code className="mt-0.5 block break-all font-mono text-xs text-zinc-200"
-            data-testid="amux-review-rejection-command">
-            npm run -s review -- report {view.jobId} --slot 0
-          </code>
+          {/* A contract change has two reviewers; either slot may hold the reject. */}
+          {Array.from({ length: Math.max(1, view.reviewerVendors.length) }, (_, slot) => (
+            <code key={slot} className="mt-0.5 block break-all font-mono text-xs text-zinc-200"
+              data-testid="amux-review-rejection-command">
+              npm run -s review -- report {view.jobId} --slot {slot}
+            </code>
+          ))}
         </div>
       ) : (
         <p className="mt-1 text-zinc-400">{m.noJob}</p>
