@@ -1,8 +1,10 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { englishLocationBody } from "./privacyLocation";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 
 export const en = {
+    reviewHandoff: reviewHandoffCopy.en,
     journey: {
         receiptSent: "Source included in this attempt: {selected} selected + {recent} recent ({unique} unique messages)",
         receiptRetrieved: "{count} history matches included",

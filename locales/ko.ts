@@ -1,3 +1,4 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -5,6 +6,7 @@ import { en } from "./en";
 // UX-020. Korean is a primary locale and is complete; this check is what keeps
 // it that way. It was the only complete locale with nothing enforcing it.
 export const ko = {
+    reviewHandoff: reviewHandoffCopy.ko,
     journey: {
         receiptSent: "이번 시도 입력에 원문 포함: 선택 {selected}개 + 최근 {recent}개 (고유 메시지 {unique}개)",
         receiptRetrieved: "과거 검색 {count}개 포함",

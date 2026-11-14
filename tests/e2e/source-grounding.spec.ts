@@ -89,7 +89,7 @@ function singleReviewResult({
 
 async function mockComparisonReview(page: Page, options: GroundingOptions = {}) {
   await page.route(
-    "**/api/conversations/qa-conversation/comparison-reviews",
+    /\/api\/conversations\/qa-conversation\/comparison-reviews(?:\?.*)?$/,
     async (route) => {
       if (route.request().method() === "GET") {
         await route.fulfill({

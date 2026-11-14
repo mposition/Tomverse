@@ -1,3 +1,4 @@
+import { reviewHandoffCopy } from "./reviewHandoff";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -11,6 +12,7 @@ import { en } from "./en";
  * in `lib/localeLaunchPolicy.ts`. A string fixed in `zh` needs fixing here.
  */
 export const zhHant = {
+    reviewHandoff: reviewHandoffCopy.zhHant,
     journey: {
         receiptSent: "本次嘗試的輸入包含原文：已選 {selected} 個 + 最近 {recent} 個（去重後 {unique} 則訊息）",
         receiptRetrieved: "包含 {count} 條歷史比對",

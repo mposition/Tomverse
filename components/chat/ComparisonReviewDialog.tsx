@@ -1,5 +1,6 @@
 "use client";
 
+import { ReviewChatAction } from "./ReviewChatHandoff";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -514,6 +515,7 @@ export function ComparisonReviewDialog({
     if (!open) return;
     if (!conversationId && !guestSource) return;
     const controller = new AbortController();
+    queueMicrotask(() => { if (!controller.signal.aborted) { setSetup(null); setReview(null); setLoading(true); setError(""); } });
     // The guest preview is a POST because the thing being previewed is the
     // payload: there is no saved conversation to name in a URL. It spends
     // nothing and reserves nothing -- it exists so the price, the reviewer
@@ -530,7 +532,7 @@ export function ComparisonReviewDialog({
             language: guestSource.language,
           }),
         })
-      : fetch(`/api/conversations/${conversationId}/comparison-reviews`, {
+      : fetch(`/api/conversations/${conversationId}/comparison-reviews?${new URLSearchParams({ reviewMode: mode, includeSynthesis: String(includeSynthesis) })}`, {
           cache: "no-store",
           signal: controller.signal,
         });
@@ -541,7 +543,9 @@ export function ComparisonReviewDialog({
           error?: string;
         };
         if (!response.ok) throw new Error(data.error || t("chat.aiReviewPrepareFailed"));
+        if (controller.signal.aborted) return;
         setSetup(data);
+        if (data.storedReview) setReview(data.storedReview);
         trackProductEvent(
           "comparison_review_viewed",
           data.responses?.length || 0
@@ -559,7 +563,7 @@ export function ComparisonReviewDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [conversationId, guestSource, open, t]);
+  }, [conversationId, guestSource, open, t, mode, includeSynthesis]);
 
   useEffect(() => {
     if (open && !idempotencyKeyRef.current) {
@@ -618,6 +622,9 @@ export function ComparisonReviewDialog({
       `chat.aiReviewSourceGroundingLevel${level.charAt(0).toUpperCase()}${level.slice(1)}`
     );
 
+  const handoffSource = review && setup && conversationId ? {
+    kind: "review" as const, conversationId, setup, review, mode, includeSynthesis, reviewer: activeReviewer,
+  } : null;
   if (!open || (!conversationId && !guestSource)) return null;
 
   const runReview = async () => {
@@ -924,6 +931,7 @@ export function ComparisonReviewDialog({
                     )}
                   </div>
 
+                  <ReviewChatAction source={handoffSource} ready={!running && !loading && !isGuestReview} />
                   {(["primary", "secondary"] as const).map((reviewer) => {
                     const entry = review.result[reviewer];
                     if (!entry) return null;
@@ -951,6 +959,8 @@ export function ComparisonReviewDialog({
                               <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{t("chat.aiReviewWebSeparate")}</p>
                             </div>
                           )}
+                          <ReviewChatAction source={handoffSource ? { ...handoffSource, reviewer } : null} ready={!running && !loading && !isGuestReview}
+                            selection={{ section: item.section, ordinal: item.ordinal, itemId: reviewItemIds.get(`${reviewer}:${item.section}:${item.ordinal}`) }} />
                           <ReviewItemFeedback
                             conversationId={conversationId}
                             reviewId={review.id}
