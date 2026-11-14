@@ -192,7 +192,7 @@ test("the coding agent claims the open code recommendation once, then reports a 
     assert.equal(claimed.index, 1);
     assert.equal(claimed.id, `${cycle.id}:1`);
     assert.match(claimed.instruction, /retry on a same-credit model/);
-    assert.match(claimed.instruction, new RegExp(`https://tomverse.test/admin/routing#optimizer-cycle-${cycle.id}`));
+    assert.ok(claimed.instruction.includes(`https://tomverse.test/admin/routing?tab=optimizer#optimizer-cycle-${cycle.id}`));
     // Only one code recommendation: the second claim finds nothing.
     assert.equal(await claimNextRecommendation({ origin: "https://tomverse.test" }), null);
 

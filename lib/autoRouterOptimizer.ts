@@ -1,6 +1,7 @@
 import "server-only";
 import { readResponseLatencyEvidence } from "@/lib/responseLatencyStore";
 import { readChatPresearchLatency } from "@/lib/chatPresearchLatency";
+import { readSmartAdaptiveDaily } from "@/lib/dailyProductAgentSmartAdaptive";
 
 import { generateText, jsonSchema, Output } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
@@ -1077,7 +1078,7 @@ export type OptimizerCycleView = {
  */
 export async function readAutoRouterOptimizerState() {
     const now = new Date();
-    const [optimizerModelId, automation, active, cycles, monthCycles] = await Promise.all([
+    const [optimizerModelId, automation, active, cycles, monthCycles, smartAdaptiveDaily] = await Promise.all([
         readOptimizerModelId(),
         readOptimizerAutomation(),
         readActiveRouterGuidance(),
@@ -1097,9 +1098,11 @@ export async function readAutoRouterOptimizerState() {
             where: { createdAt: { gte: utcMonthStart(now) } },
             select: { createdAt: true, spentMicroUsd: true },
         }),
+        readSmartAdaptiveDaily().catch(() => null),
     ]);
     return {
         optimizerModelId,
+        smartAdaptiveDaily,
         automation,
         active: {
             cycleId: active.cycleId,

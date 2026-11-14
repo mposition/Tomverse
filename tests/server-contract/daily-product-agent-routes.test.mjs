@@ -5,6 +5,13 @@ import { pathToFileURL } from "node:url";
 
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 let calls = [];
+let observations = 0, observationFails = false;
+mock.module(mod("lib/dailyProductAgentSmartAdaptive.ts"), { namedExports: {
+  observeSmartAdaptiveDaily: async () => {
+    observations++;
+    if (observationFails) throw new Error("test read failure");
+  },
+} });
 mock.module(mod("lib/autoRouterRecAgent.ts"), { namedExports: {
   claimNextRecommendation: async () => { calls.push("legacy"); return null; },
   parseRecommendationId: (id) => id === "cycle:0" ? { cycleId: "cycle", index: 0 } : null,
@@ -33,13 +40,27 @@ test.after(() => {
 });
 
 test("the secret and explicit daily activation fence the expanded source", async () => {
+  observations = 0;
   assert.equal((await claimRoute.POST(request({ auth: false }))).status, 404);
   assert.equal((await claimRoute.POST(request())).status, 404);
   assert.deepEqual(calls, []);
   assert.equal((await claimRoute.POST(request({ daily: false }))).status, 204);
+  assert.equal(observations, 0);
   process.env.DAILY_PRODUCT_AGENT_ENABLED = "true";
   assert.equal((await claimRoute.POST(request())).status, 204);
   assert.deepEqual(calls, ["legacy", "daily"]);
+  assert.equal(observations, 1);
+});
+
+test("an unavailable timing aggregate leaves the daily product claim available", async () => {
+  process.env.DAILY_PRODUCT_AGENT_ENABLED = "true";
+  observationFails = true;
+  const before = observations;
+  try {
+    assert.equal((await dailyClaimRoute.POST(request())).status, 204);
+    assert.equal(observations, before + 1);
+    assert.deepEqual(calls, ["daily"]);
+  } finally { observationFails = false; }
 });
 
 test("stopping new claims still allows the current claim to report an outcome", async () => {
