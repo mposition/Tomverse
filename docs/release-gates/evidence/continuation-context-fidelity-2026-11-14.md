@@ -3,7 +3,7 @@
 Date: 2026-11-14 (Australia/Brisbane). Base: `80a95b53ea9fe99f3ef1466fd142cfb0679dddcf`.
 Fresh implementation worktree and lockfile installation; no dependency junction was used.
 
-## Implemented behavior
+## Initial core implementation
 
 - CF-01–05: unchanged automatic `ext-seed-v2` tail behavior; selected passages and recent
   source compose into `ext-seed-v3-selected-recent`. The server reads coordinates from its
@@ -29,7 +29,7 @@ Fresh implementation worktree and lockfile installation; no dependency junction 
 - CF-18–20: no schema, source-copy store, Memory write, export/share expansion, provider
   role promotion, new model call or spending ceiling. Review-to-Chat draft/handoff code was
   not changed. Native transcript viewing remains supported; native selection/receipt parity
-  is outside this patch.
+  was outside the initial core; the follow-up section below adds that parity.
 
 ## Validation
 
@@ -190,3 +190,12 @@ conflict, its handoff implementation preserved byte-for-byte, and `npm ci` rerun
 its updated lockfile. Installed `@hono/node-server` resolves to 2.1.8. Existing officeparser
 engine warnings remain on local Node 22.22.2; office-file parsing is outside these checks.
 Integrated root TypeScript, changed-file ESLint and native TypeScript/Vite build pass.
+
+Final integrated Next.js production build passed (Next 16.4.5; TypeScript 3.3 minutes),
+with existing dynamic-filesystem tracing warnings. The first web E2E attempt correctly
+refused to start before a production build existed; after building in this worktree,
+web receipt tests passed on desktop and mobile Chromium (2/2). Existing Review-to-Chat
+balanced-result and Quick Summary handoff E2E cases also passed (2/2), without modifying
+that feature. No live database was contacted: tests used mocks and the disabled database
+configuration with loopback port 1. The 24-case input report remains 72/72 with zero model
+calls and answer quality explicitly `not_evaluated`.
