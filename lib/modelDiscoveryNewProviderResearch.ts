@@ -11,9 +11,10 @@
  * configuring it is the owner's decision to spend. Runs from the daily
  * catalogue check, at most once per Brisbane ISO week: the week is claimed in
  * AppSetting before any call, so a failed or repeated run that week does not
- * call again. A fourth call (2026-11-14) asks for image models of providers
- * Tomverse is already connected to, which their model-list APIs never return.
- * At most four calls a week, `maxRetries: 0`, bounded output, token
+ * call again. A fourth call (2026-11-14, off unless
+ * MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED=true) asks for image models
+ * of providers Tomverse is already connected to, which their model-list APIs
+ * never return. Three calls a week, four with that switch on, `maxRetries: 0`, bounded output, token
  * counts logged and never content. Agent spending, not user credits: nothing
  * here touches a credit or a Chat budget.
  */
@@ -47,6 +48,12 @@ import { prisma } from "@/lib/prisma";
 import { RUNTIME_IMAGE_PROVIDERS } from "@/lib/runtimeImageProviders";
 
 export const MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ENV = "MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID";
+/**
+ * The fourth weekly call (connected providers' image models) has its own
+ * default-off switch: turning the research on once approved three calls, and a
+ * deploy must not raise that to four by itself.
+ */
+export const MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV = "MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED";
 export const NEW_PROVIDER_RESEARCH_WEEK_SETTING_KEY = "modelDiscovery.newProviderResearchWeek";
 const MAX_OUTPUT_TOKENS = 2_500;
 /** All three calls run in parallel with the catalogue scan, inside the route's 180 s. */
@@ -66,6 +73,7 @@ export type NewProviderResearchSummary =
         rejected: NewProviderResearchRejection[];
       }>;
       connectedImage: {
+        enabled: boolean;
         ok: boolean;
         proposed: number;
         accepted: number;
@@ -186,7 +194,11 @@ export async function runNewProviderModelResearch(
     );
     return generated.output as { candidates?: unknown[] } | undefined;
   };
+  const connectedImageEnabled = env[MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV]?.trim() === "true";
   const connectedImageRun = (async () => {
+    if (!connectedImageEnabled) {
+      return { ok: true, proposed: 0, accepted: [] as AcceptedNewProviderCandidate[], rejected: [] };
+    }
     try {
       const answer = await ask(
         "connected_image",
@@ -273,6 +285,7 @@ export async function runNewProviderModelResearch(
       rejected: result.rejected,
     })),
     connectedImage: {
+      enabled: connectedImageEnabled,
       ok: connectedImage.ok,
       proposed: connectedImage.proposed,
       accepted: connectedImage.accepted.length,

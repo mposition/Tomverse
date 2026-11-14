@@ -1631,11 +1631,18 @@ export async function listModelDiscoveryQueue(options?: {
                 ? "current"
                 : "stale";
         });
-        const availability: ModelAvailability = observedStates.includes("current")
-            ? "current"
-            : observedStates.includes("unknown")
-              ? "unknown"
-              : "stale";
+        // A research proposal was never seen by a catalogue scan -- that is why
+        // research found it (an image endpoint no list API returns, or a
+        // provider not connected at all). Reading it as absent from the scan
+        // would show it as stale and let the vanished-ID exclusion close it.
+        const availability: ModelAvailability =
+            newProviderResearchAnalysis(row.evidence) !== null
+                ? "unknown"
+                : observedStates.includes("current")
+                  ? "current"
+                  : observedStates.includes("unknown")
+                    ? "unknown"
+                    : "stale";
         const lifecycle = observedVia
             .map((observation) =>
                 entryByObservation.get(

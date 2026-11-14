@@ -252,3 +252,29 @@ test("a connected-image proposal reads as a connected provider's model in the qu
   assert.match(analysis.verdictKo, /연결된 공급자 zhipu의 이미지 모델 GLM-Image/);
   assert.match(analysis.nextStepKo, /이미지 어댑터/);
 });
+
+// Review r-20261114-092556-5da66a.
+test("the connected-image call has its own default-off switch", async () => {
+  const { readFileSync } = await import("node:fs");
+  const runner = readFileSync("lib/modelDiscoveryNewProviderResearch.ts", "utf8");
+  const { MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV } = await import("../lib/modelDiscoveryNewProviderResearch.ts");
+  assert.equal(MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV, "MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED");
+  // Only the literal "true" turns it on; without it no fourth call is made.
+  assert.ok(runner.includes('env[MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV]?.trim() === "true"'));
+  assert.match(runner, /if \(!connectedImageEnabled\) \{\s*return \{ ok: true, proposed: 0/);
+});
+
+test("research rows are never judged by the catalogue scan, so the vanished-ID exclusion cannot close them", async () => {
+  const { readFileSync } = await import("node:fs");
+  const queue = readFileSync("lib/modelLifecycleWorkItems.ts", "utf8");
+  assert.match(
+    queue,
+    /const availability: ModelAvailability =\s*newProviderResearchAnalysis\(row\.evidence\) !== null\s*\? "unknown"/
+  );
+  const { vanishedDiscoveryChanges } = await import("../lib/modelLifecycleWorkItemCore.ts");
+  const { exclude } = vanishedDiscoveryChanges({
+    undecided: [{ id: "r1", action: "add", familyKey: "minimax-h3-image", availability: "unknown" }],
+    excluded: [],
+  });
+  assert.deepEqual(exclude, []);
+});
