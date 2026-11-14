@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { AMUX_ESCALATION_AWAITING_STATUSES } from "./humanReviewCore.ts";
 import type { AmuxWorkerProviderClass } from "./workerRegistryCore.ts";
 import type { EngineeringAgentCardItemView } from "../engineeringAgentOwnerItemContextCore.ts";
+import type { AmuxDmRelayView, AmuxOwnerQueueDmView } from "./ownerQueueDmCore.ts";
 
 /**
  * The owner queue ("Waiting on me"): every card that waits on the owner, from
@@ -64,6 +65,8 @@ export type AmuxOwnerQueueItem = {
    * decided on the card through the engineering routes. Absent: not read.
    */
   engineeringItems?: EngineeringAgentCardItemView[];
+  /** Where the Decision Maker stands on this card (ownerQueueDmCore.ts). Absent: not read. */
+  dm?: AmuxOwnerQueueDmView;
 };
 
 export type AmuxOwnerQueueRead = {
@@ -74,6 +77,8 @@ export type AmuxOwnerQueueRead = {
   processedToday: number | null;
   /** Server time of the read; the list's "N hours ago" is counted from it. */
   generatedAt: string;
+  /** When the host's DM relay last called. Absent or null: not read. */
+  dmRelay?: AmuxDmRelayView | null;
 };
 
 /**
@@ -87,6 +92,23 @@ export const amuxOwnerQueueWithEngineeringItems = (
 ): AmuxOwnerQueueRead => byCard === null ? read : {
   ...read,
   items: read.items.map((item) => ({ ...item, engineeringItems: byCard.get(item.taskId) ?? [] })),
+};
+
+/**
+ * The queue with the Decision Maker's standing on each card and the relay's
+ * last call. A failed read (null) leaves the cards as they were and says the
+ * relay is unknown, so the queue still opens.
+ */
+export const amuxOwnerQueueWithDm = (
+  read: AmuxOwnerQueueRead,
+  dm: { relay: AmuxDmRelayView; byTask: ReadonlyMap<string, AmuxOwnerQueueDmView> } | null,
+): AmuxOwnerQueueRead => dm === null ? { ...read, dmRelay: null } : {
+  ...read,
+  dmRelay: dm.relay,
+  items: read.items.map((item) => {
+    const view = dm.byTask.get(item.taskId);
+    return view ? { ...item, dm: view } : item;
+  }),
 };
 
 /** Reasons where the work itself stopped before it finished (a lost run, a limit, a failed tool). */

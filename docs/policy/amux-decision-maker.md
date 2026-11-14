@@ -83,6 +83,10 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    `TOMVERSE_AMUX_DM_OWNER_SETTLEMENT=enabled`(기본 꺼짐)를 켜는 것은 운영자 몫이다. 가격·크레딧·migration·삭제·인증·감사
    체인 경로와 병합 레인 게이트 파일, main 병합과 배포는 사람에게 남는다. 다음 단계: S2는 기록된 `approve`로 PR을 ready로
    바꾸고 CI 통과 뒤 develop에 병합하며(병합 레인 예외, observer 판정), S3는 사람에게 남는 카드에 DM 제안과 원클릭 확인을 붙인다.
+   운영자 결정 2026-11-14("DM 의견이 없으면 'DM으로 의견 요청 보내기' 버튼을 제공합니다"): 스위치가 꺼져 있어도 운영자가
+   운영자 확인 대기의 'DM 의견 요청' 버튼으로 카드 하나를 고르면 그 정리만 올린다(누른 사람의 감사 기록
+   `amux.dm_owner_settlement.requested`). 근거를 한 번 읽지 못한(`evidence_unavailable`) 결과 검토·정리는 같은 칸의 'DM에 다시
+   보내기'로 다시 대기에 넣는다. 답은 그대로 제안이고 운영자가 확정한다.
 
 ## 1. 목적과 경계
 

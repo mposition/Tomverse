@@ -301,3 +301,28 @@ sudo rm -f /etc/systemd/system/tomverse-bridge-autorestart.service /etc/systemd/
 sudo systemctl daemon-reload
 sudo userdel tomverse-bridge-autorestart
 ```
+
+## 6. DM relay 확인
+
+DM relay(`tomverse-amux-dm-relay.service`, 바이너리 `tomverse-wsl-bridge --dm-relay`)는 30초마다
+`POST /api/internal/amux/decision-maker/v22-questions/sync`를 부른다. 앱은 인증된 호출을 받을 때마다(최대 1분에 한 번)
+`AppSetting`의 `amux.dm_relay.last_sync` 행 시각을 옮기고, Admin › AMUX 실행 › 내 확인 대기의 머리 띠가 그 시각을 보인다.
+5분 넘게 호출이 없으면 띠와 각 카드의 Decision Maker 칸이 "DM relay 확인 필요"를 띄우고 이 절로 연결한다. relay가
+멈춘 동안에는 워커 질문·결과 검토·T2 draft·운영자 대기 정리 어느 카드도 DM에게 가지 않는다(2026-11-09 10:30 AEST부터
+11-14까지 그랬다).
+
+실행 위치: Ubuntu 호스트, 운영자 셸. 읽기만 하는 명령이고 production 자격증명은 필요 없다.
+
+```bash
+systemctl status tomverse-amux-dm-relay.service --no-pager
+journalctl -u tomverse-amux-dm-relay.service -n 50 --no-pager -o short-iso
+```
+
+- `inactive (dead)`이고 마지막 종료 코드가 2면 unit이 일부러 재시작하지 않는 종료다(`RestartPreventExitStatus=2`). journal의
+  마지막 줄이 원인이다. 원인을 고친 뒤 다시 켜는 것은 sudo가 있는 운영자 몫이다: `sudo systemctl restart tomverse-amux-dm-relay.service`.
+- `activating (auto-restart)`가 반복되면 `ExecStartPre`의 로컬 AMUX health(`https://127.0.0.1:8824/health`)가 실패하는 중이다.
+  로컬 AMUX가 떠 있는지 먼저 본다.
+- `active (running)`인데 띠가 끊김으로 보이면 relay의 호출이 401·409로 끝나는지 journal에서 본다(token이나
+  `TOMVERSE_AMUX_DM_ROUTING`, `/etc/tomverse-bridge/dm-relay.env`). 401은 기록되지 않는다. 409(routing 꺼짐)는 기록된다.
+
+relay가 다시 부르기 시작하면 다음 호출에서 띠가 "마지막 접속"으로 돌아온다. 카드가 없던 질문은 다음 tick부터 차례로 올라간다.

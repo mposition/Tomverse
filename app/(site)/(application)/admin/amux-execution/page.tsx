@@ -184,7 +184,8 @@ export default async function AdminAmuxExecutionPage({
         typeof query.focusEscalation === "string" &&
         /^c[a-z0-9]{20,}$/i.test(query.focusEscalation) ?
           query.focusEscalation : null}
-        canWriteEngineering={hasAdminPermission(session, "engineering-agent:write")} />
+        canWriteEngineering={hasAdminPermission(session, "engineering-agent:write")}
+        canAskDecisionMaker={canJudge} />
     </div>
   );
 }

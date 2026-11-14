@@ -5,7 +5,8 @@ import { NextResponse } from "next/server";
 
 import { isAdminSession } from "@/lib/adminAuth";
 import { readAmuxOwnerQueue } from "@/lib/amux/adminOwnerQueueRead";
-import { amuxOwnerQueueWithEngineeringItems } from "@/lib/amux/ownerQueueCore";
+import { amuxOwnerQueueWithDm, amuxOwnerQueueWithEngineeringItems } from "@/lib/amux/ownerQueueCore";
+import { readAmuxOwnerQueueDm } from "@/lib/amux/ownerQueueDmRead";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { readEngineeringAgentCardItems } from "@/lib/engineeringAgentConsoleRead";
@@ -18,6 +19,9 @@ import { readEngineeringAgentCardItems } from "@/lib/engineeringAgentConsoleRead
  * Each card carries its open engineering items (T2 drafts, state mismatches),
  * which Admin › Engineering › Decisions reads with the same admin
  * authentication; deciding them takes `engineering-agent:write` in those routes.
+ * Each card also says where the Decision Maker stands on it, and the read says
+ * when the host's DM relay last called; asking the DM takes `ops:write` in
+ * ./dm-request.
  */
 export async function GET(request: Request) {
   try {
@@ -34,7 +38,13 @@ export async function GET(request: Request) {
       console.error("admin AMUX owner queue engineering items read failed", error);
       return null;
     });
-    return NextResponse.json(amuxOwnerQueueWithEngineeringItems(read, engineering), {
+    // Where the Decision Maker stands on each card, and the relay's last call
+    // (owner decision 2026-11-14). A failed read leaves the column out.
+    const dm = await readAmuxOwnerQueueDm(read.items, new Date(read.generatedAt)).catch((error) => {
+      console.error("admin AMUX owner queue Decision Maker read failed", error);
+      return null;
+    });
+    return NextResponse.json(amuxOwnerQueueWithDm(amuxOwnerQueueWithEngineeringItems(read, engineering), dm), {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

@@ -718,3 +718,43 @@ test("the card's requests are the console's own, bound to the digest and base sh
     body: { workItemId: "item-mismatch", action: "record_bound_review_pr" },
   });
 });
+
+test("the strip says when the DM relay last called, and points to the check when it stopped", async () => {
+  const { AmuxOwnerQueueDmRelayChip } = await import("@/components/admin/AmuxOwnerQueueDm");
+  const live = renderToStaticMarkup(<AmuxOwnerQueueDmRelayChip relay={{ state: "live", lastSeenAt: "2026-11-14T02:59:30.000Z" }} />);
+  assert.match(live, /data-state="live"/);
+  assert.match(live, /Last call 2026-11-14 12:59 AEST/);
+  assert.doesNotMatch(live, /amux-owner-queue-dm-relay-check/);
+  const stale = renderToStaticMarkup(<AmuxOwnerQueueDmRelayChip relay={{ state: "stale", lastSeenAt: "2026-11-09T00:30:00.000Z" }} />);
+  assert.match(stale, /No call since 2026-11-09 10:30 AEST/);
+  assert.match(stale, /amux-owner-queue-dm-relay-check/);
+  assert.match(stale, /bridge-monitoring\.md#6-dm-relay-/);
+  assert.match(renderToStaticMarkup(<AmuxOwnerQueueDmRelayChip relay={null} />), /Unavailable/);
+  assert.equal(renderToStaticMarkup(<AmuxOwnerQueueDmRelayChip relay={undefined} />), "");
+});
+
+test("a card with no DM word offers the one button, or the relay check while the relay is down", async () => {
+  const { AmuxOwnerQueueDmPanel } = await import("@/components/admin/AmuxOwnerQueueDm");
+  const ask = { source: "settlement" as const, state: "switch_off" as const, reason: "settlement", requestId: null,
+    action: "request" as const, sourceId: "clescalation1234567890123" };
+  const live = { state: "live" as const, lastSeenAt: "2026-11-14T02:59:30.000Z" };
+  const panel = (props: Partial<Parameters<typeof AmuxOwnerQueueDmPanel>[0]>) => renderToStaticMarkup(
+    <AmuxOwnerQueueDmPanel taskId="task-1" dm={ask} relay={live} canAsk onChanged={() => {}} {...props} />);
+  const offered = panel({});
+  assert.match(offered, /data-action="request"/);
+  assert.match(offered, />Ask the DM</);
+  assert.match(offered, /Owner queue settlement/);
+  assert.match(offered, /only a proposal/);
+  assert.doesNotMatch(panel({ canAsk: false }), /amux-owner-queue-dm-button/);
+  const down = panel({ relay: { state: "stale", lastSeenAt: "2026-11-09T00:30:00.000Z" } });
+  assert.doesNotMatch(down, /amux-owner-queue-dm-button/);
+  assert.match(down, /amux-owner-queue-dm-relay-needed/);
+  assert.match(down, /Check the DM relay/);
+  const resend = panel({ dm: { ...ask, source: "result_review", state: "unfilable", reason: "evidence_unavailable",
+    action: "resend", sourceId: "review-1" } });
+  assert.match(resend, />Send to the DM again</);
+  const proposed = panel({ dm: { ...ask, state: "proposed", action: null, requestId: "dmreq-1" } });
+  assert.match(proposed, /dmRequest=dmreq-1/);
+  assert.doesNotMatch(proposed, /amux-owner-queue-dm-button/);
+  assert.equal(panel({ dm: undefined }), "");
+});

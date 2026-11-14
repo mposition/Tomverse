@@ -17,6 +17,7 @@ import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocale
 import {
   AmuxLegacyCardPanel,
   isAmuxRemakeOnlyCardKind } from "@/components/admin/AmuxLegacyCardPanel";
+import { AmuxOwnerQueueDmPanel } from "@/components/admin/AmuxOwnerQueueDm";
 import { AmuxOwnerQueueEngineeringItems } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
 import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
 import { AmuxTaskUnknownUsageList } from "@/components/admin/AmuxAttemptUsageAcceptance";
@@ -32,6 +33,7 @@ import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue"
 import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { amuxElapsed } from "@/lib/adminAmuxFlow";
 import { amuxVisibleInspectionText } from "@/lib/amux/adminExecutionViewCore";
+import type { AmuxDmRelayView } from "@/lib/amux/ownerQueueDmCore";
 import { amuxReviewUsageOutcomeUnknown } from "@/lib/amux/ownerRecoveryCore";
 import { isAmuxSettledCardWithOpenEscalation } from "@/lib/amux/settledCardEscalationCore";
 import {
@@ -104,7 +106,7 @@ export const useAmuxOwnerQueueElapsed = (generatedAt: string) => {
 export function AmuxOwnerQueueDecision({
   item, controller, canInspectCards, index, total, generatedAt, navLocked, advance,
   onAdvanceChange, onPrevious, onNext, onAnswered,
-  canWriteEngineering = false, onEngineeringChanged,
+  canWriteEngineering = false, onEngineeringChanged, dmRelay, canAskDecisionMaker = false,
 }: {
   item: AmuxOwnerQueueItem;
   controller: AmuxOwnerReviewController;
@@ -124,6 +126,10 @@ export function AmuxOwnerQueueDecision({
   canWriteEngineering?: boolean;
   /** An engineering action was recorded: read this card again without leaving it. */
   onEngineeringChanged?: () => void;
+  /** When the host's DM relay last called (null: unknown; absent: not read). */
+  dmRelay?: AmuxDmRelayView | null;
+  /** `ops:write`: the Decision Maker box offers its button. */
+  canAskDecisionMaker?: boolean;
 }) {
   const copy = useAdminMessages(adminAmuxOwnerQueueMessages);
   const execution = useAdminMessages(adminAmuxExecutionMessages);
@@ -265,6 +271,11 @@ export function AmuxOwnerQueueDecision({
           </div>
         ) : null}
       </div>
+
+      {/* Where the Decision Maker stands on this card, and the owner's one
+          button when it has no word yet (owner decision 2026-11-14). */}
+      <AmuxOwnerQueueDmPanel taskId={item.taskId} dm={item.dm} relay={dmRelay}
+        canAsk={canAskDecisionMaker} onChanged={onEngineeringChanged ?? onAnswered} />
 
       {/* The engineering agent's open items on this card, decided here through
           the engineering routes (the same as Admin › Engineering › Decisions). */}
