@@ -22,11 +22,11 @@ import { AMUX_V22_WORKER_CLAIM_ENV, amuxV22WorkerClaimEnabled } from
   "@/lib/amux/v22WorkerClaimCore";
 import { tickV22WorkerClaim } from "@/lib/amux/v22WorkerClaimService";
 import { amuxRouteHasBudgetForMs, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import { sweepAmuxStalledCards } from "@/lib/amux/stalledCardSweep";
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
 import { AMUX_SCORE_REFRESH_ENV, amuxScoreAutoRefreshEnabled } from
   "@/lib/amux/portfolioScoreCore";
 import { refreshDueAmuxPortfolioScores } from "@/lib/amux/portfolioScoreService";
-import { sweepAmuxStalledCards } from "@/lib/amux/stalledCardSweep";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
   admitAmuxOrchestratorRequest,
