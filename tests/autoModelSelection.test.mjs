@@ -174,6 +174,23 @@ test("file routing keeps the primary and every failover inside the capable eligi
   assert.equal(original.record.eligibleModelIds.length > capable.length, true);
 });
 
+test("the applied soft menu bounds normal picks and fallbacks, while router failure uses hard eligibility", () => {
+  const original = selectAutoModel(input());
+  const offered = original.record.eligibleModelIds.filter(id => id !== original.modelId).slice(0, 2);
+  assert.equal(offered.length, 2);
+  const routed = applyLlmModelPick(original, offered[0], undefined, null, offered);
+  assert.deepEqual(routed.record.eligibleModelIds, offered);
+  assert.ok(routed.fallbackCandidateModelIds.every(id => offered.includes(id)));
+  assert.ok(!routed.fallbackCandidateModelIds.includes(original.modelId));
+  const files = applyLlmModelPick(original, offered[0], { required: true, capableModelIds: [offered[0], original.modelId] }, null, offered);
+  assert.deepEqual(files.record.eligibleModelIds, [offered[0]]);
+  assert.deepEqual(files.fallbackCandidateModelIds, []);
+  const requested = original.record.eligibleModelIds.find(id => !offered.includes(id) && id !== original.modelId);
+  assert.ok(requested);
+  assert.equal(applyLlmModelPick(original, null, undefined, requested, offered).modelId, requested);
+  assert.equal(applyLlmModelPick(original, null, undefined, null, offered), original);
+});
+
 test("a known file request without a usable model pick uses a capable eligible fallback", () => {
   const original = selectAutoModel(input());
   const capable = ["gpt-5-6-luna"];

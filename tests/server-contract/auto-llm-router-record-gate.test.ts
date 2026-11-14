@@ -101,7 +101,9 @@ async function load() {
   return import(mod("lib/autoLlmRouter.ts"));
 }
 
-const pick = async (recordDecision?: Promise<boolean>, canPersist = false, extra: Record<string, unknown> = {}) => {
+const pick = async (recordDecision?: Promise<boolean> | (() => Promise<boolean>), canPersistOrExtra: boolean | Record<string, unknown> = false, extras: Record<string, unknown> = {}) => {
+  const canPersist = typeof canPersistOrExtra === "boolean" ? canPersistOrExtra : true;
+  const extra = typeof canPersistOrExtra === "boolean" ? extras : canPersistOrExtra;
   const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts")) as {
     AVAILABLE_MODELS: Array<{ id: string }>;
   };
@@ -167,6 +169,32 @@ test("source access revoked across the hold releases the unused Router hold with
   assert.equal(created.length, 0);
   assert.equal(holds.length, 2);
   assert.equal(settlementWrites.length, 2);
+});
+
+test("live, allowed sample, replay and hold share the bounded request", async () => {
+  const { boundedRouterInput, autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
+  const { resolveModelPricing } = require(resolve(ROOT, "lib/modelPricing.ts"));
+  const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));
+  const routerModel = AVAILABLE_MODELS.find((m: { id: string }) => m.id === "gpt-6-luna");
+  const prices = resolveModelPricing(routerModel);
+  const prompt = "Opening requirement. " + "😀long data ".repeat(700) + " Do not create images; deliver Excel.";
+  const previousAnswer = "First choice. " + "😀context ".repeat(100) + " Final choice: B.";
+  created.length = routerRequests.length = holds.length = 0;
+  let offered: readonly string[] = [];
+  await pick(undefined, { prompt, previousAnswer, onCandidatesResolved: (ids: readonly string[]) => { offered = ids; } });
+  const live = routerRequests[0];
+  const sample = created[0] as { routerInput: string; routerContext: string; candidates: []; routerSession: null };
+  assert.deepEqual({ message: sample.routerInput, previousAnswer: sample.routerContext }, boundedRouterInput(prompt, previousAnswer));
+  assert.deepEqual(offered, JSON.parse(String(live.prompt)).candidates.map((c: { id: string }) => c.id));
+  const { callAutoLlmRouter } = await load();
+  await callAutoLlmRouter({ routerModel, guidance: "", prompt: sample.routerInput, previousAnswer: sample.routerContext,
+    candidates: sample.candidates, session: sample.routerSession ?? null, source: "routing_optimizer" });
+  const replay = routerRequests[1];
+  for (const key of ["system", "prompt", "maxOutputTokens", "maxRetries"]) assert.deepEqual(replay[key], live[key], key);
+  assert.equal(live.maxRetries, 0);
+  const expected = autoLlmRouterWorstCaseMicroUsd({ ...live,
+    inputUsdPerMillionTokens: prices.inputUsdPerMillionTokens, outputUsdPerMillionTokens: prices.outputUsdPerMillionTokens });
+  assert.deepEqual(holds, [expected, expected]);
 });
 
 test("combined routing returns both decisions in one reserved call and preserves image record gating", async () => {
@@ -701,7 +729,10 @@ test("fresh location prices the authored 8k and reuses its dated search decision
     assert.match(String(routerRequests[0].system), /CURRENT DEVICE LOCATION/);
     assert.match(String(routerRequests[0].system), /2026-11-10/);
     assert.match(String(routerRequests[0].prompt), /near me\?/);
-    assert.ok(!String(routerRequests[0].prompt).includes("overflow"));
+    // The authored location excerpt keeps its 8k contract; the bounded
+    // router message now also retains the end of the question.
+    assert.ok(String(routerRequests[0].prompt).includes("overflow"));
+    assert.ok(String(routerRequests[0].prompt).includes(JSON.stringify({ authoredMessage: text.slice(0, 8_000) })));
     const { autoLlmRouterWorstCaseMicroUsd } = require(resolve(ROOT, "lib/autoLlmRouterCore.ts"));
     const { resolveModelPricing } = require(resolve(ROOT, "lib/modelPricing.ts"));
     const { AVAILABLE_MODELS } = require(resolve(ROOT, "lib/models.ts"));

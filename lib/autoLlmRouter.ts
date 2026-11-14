@@ -32,6 +32,7 @@ import {
     AUTO_LLM_ROUTER_SESSION_PICKS,
     AUTO_LLM_ROUTER_TIMEOUT_MS,
     autoLlmRouterCandidates,
+    boundedRouterInput,
     autoLlmRouterDecisionVersion,
     autoLlmRouterFailureDetail,
     autoLlmRouterFileDiagnostics,
@@ -510,6 +511,8 @@ export async function pickAutoModelWithLlm(input: {
      * caller treats differently from a turn the router never looked at.
      */
     onCallOutcome?: (outcome: string) => void;
+    /** The soft-filtered menu, reused by normal selection and fallback. */
+    onCandidatesResolved?: (modelIds: readonly string[]) => void;
 }): Promise<RouterLocationPick | null> {
     const [configuredModelId, tunables] = await Promise.all([
         readAutoLlmRouterModelId(), readAutoRouterTunables(),
@@ -528,6 +531,8 @@ export async function pickAutoModelWithLlm(input: {
         Date.now()
     );
     if (candidates.length < 2 || !input.prompt.trim()) return null;
+    input.onCandidatesResolved?.(candidates.map(candidate => candidate.id));
+    const bounded = boundedRouterInput(input.prompt, input.previousAnswer);
 
     // A held Refiner decision, attachments or a long message already rules out
     // a rewrite. For eligible turns only the Admin switch gates its guidance.
@@ -669,8 +674,8 @@ export async function pickAutoModelWithLlm(input: {
                         traceId: input.traceId,
                         userId,
                         conversationId,
-                        routerInput: input.prompt.slice(0, AUTO_LLM_ROUTER_MAX_PROMPT_CHARS),
-                        routerContext: input.previousAnswer,
+                        routerInput: bounded.message,
+                        routerContext: bounded.previousAnswer,
                         routerSession: session ?? undefined,
                         candidates,
                         taskKind: input.taskKind,

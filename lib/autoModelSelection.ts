@@ -413,7 +413,8 @@ export const applyLlmModelPick = (
    * PDF request answered by a model with no file tools). Only an eligible
    * model; the reason stays `fallback_order`.
    */
-  routerFailedModelId?: string | null
+  routerFailedModelId?: string | null,
+  offeredModelIds?: readonly string[]
 ): AutoSelection => {
   if (!selection.routed) return selection;
   if (
@@ -445,9 +446,10 @@ export const applyLlmModelPick = (
     selection.modelId, ...selection.fallbackCandidateModelIds,
     ...(files?.required ? selection.record.eligibleModelIds : []),
   ])];
+  const offered = selection.record.eligibleModelIds.filter(id => !offeredModelIds || offeredModelIds.includes(id));
   const eligible = files?.required
-    ? selection.record.eligibleModelIds.filter(id => files.capableModelIds.includes(id))
-    : selection.record.eligibleModelIds;
+    ? offered.filter(id => files.capableModelIds.includes(id))
+    : offered;
   const chosen = pickedModelId && eligible.includes(pickedModelId)
     ? pickedModelId
     : files?.required ? ranked.find(id => eligible.includes(id)) : null;
