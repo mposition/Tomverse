@@ -21,6 +21,10 @@
 export const RECOMMENDATION_STATUSES = ["open", "done", "dismissed"] as const;
 export type RecommendationStatus = (typeof RECOMMENDATION_STATUSES)[number];
 
+export const optimizerCycleAnchor = (cycleId: string) => `optimizer-cycle-${cycleId}`;
+export const optimizerCyclePath = (cycleId: string) =>
+    `/admin/routing?tab=optimizer#${optimizerCycleAnchor(cycleId)}`;
+
 /**
  * What only the coding agent's internal API sets (owner approval 2026-10-20:
  * an agent on the Ubuntu runner may open develop PRs on its own; merging stays
@@ -212,6 +216,19 @@ export const reportFindings = (summary: unknown): string[] => {
     const findings = record(record(summary)?.report)?.findings;
     return Array.isArray(findings) ? findings.filter((item): item is string => typeof item === "string") : [];
 };
+
+/** A daily observation belongs to the appended recommendation, not the optimizer's earlier report. */
+export function dailyRecommendationEvidence(summary: unknown, index: number) {
+    const entry = record(record(record(summary)?.smartAdaptiveDaily)?.[String(index)]);
+    return entry?.source === "smart_adaptive_daily" && typeof entry.evidence === "string"
+        ? { evidence: entry.evidence, day: typeof entry.day === "string" ? entry.day : null }
+        : null;
+}
+
+export function recommendationFindings(summary: unknown, index: number): string[] {
+    const daily = dailyRecommendationEvidence(summary, index);
+    return daily ? [daily.evidence] : reportFindings(summary);
+}
 
 /**
  * The summary with one recommendation's status set. Every other field,

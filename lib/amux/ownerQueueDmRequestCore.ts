@@ -5,8 +5,9 @@
  *
  * Every Decision Maker card is filed by the host's DM relay, which calls
  * `POST /api/internal/amux/decision-maker/v22-questions/sync` every thirty
- * seconds. The server records when it last heard from it
- * (dmRelayLivenessStore.ts). From 2026-11-09 to 2026-11-14 the relay was down
+ * seconds. The server records when it last heard from it, and judges it with
+ * the same rule the relay alert uses (dmRelayHeartbeat.ts,
+ * dmRelayHeartbeatCore.ts). From 2026-11-09 to 2026-11-14 the relay was down
  * and nothing on the screen said so: questions waited with no card and no
  * reason. This module names, for one queue card, which path would ask the
  * Decision Maker, how far it got, why it stopped, and the one action the owner
@@ -16,25 +17,26 @@
  * Pure. The DM's answer is still only a proposal the owner confirms.
  */
 
-/** How long since the relay's last call before the screen says to check it. */
-export const AMUX_DM_RELAY_STALE_AFTER_MS = 5 * 60 * 1_000;
-/** The relay calls every 30 s; the server records at most once per this. */
-export const AMUX_DM_RELAY_RECORD_EVERY_MS = 60 * 1_000;
-export const AMUX_DM_RELAY_SEEN_SETTING_KEY = "amux.dm_relay.last_sync";
+import type { AmuxDmRelayLiveness } from "./dmRelayHeartbeatCore.ts";
 
 /** The runbook section the screen links to for the host checks. */
 export const AMUX_DM_RELAY_RUNBOOK_URL =
-  "https://github.com/mposition/Tomverse/blob/develop/docs/ops/amux/bridge-monitoring.md#6-dm-relay-확인";
+  "https://github.com/mposition/Tomverse/blob/develop/docs/ops/amux/bridge-monitoring.md#6-decision-maker-relay";
 
-export type AmuxDmRelayView =
-  /** No call recorded yet (a fresh database, or the relay never ran here). */
-  | { state: "never" }
-  | { state: "live" | "stale"; lastSeenAt: string };
+/**
+ * The relay as the screen draws it, from the alert's own judgment
+ * (judgeAmuxDmRelayLiveness): `live` is calling; `asking` is waiting up to
+ * 34 minutes on one question it handed to the broker, so it does not call --
+ * not stopped; `stale` is silent after a call; `never` is silent with no
+ * call recorded.
+ */
+export type AmuxDmRelayView = { state: "live" | "asking" | "stale" | "never"; lastSeenAt: string | null };
 
-export function amuxDmRelayView(lastSeenAt: Date | null, now: Date): AmuxDmRelayView {
-  if (lastSeenAt === null || !Number.isFinite(lastSeenAt.getTime())) return { state: "never" };
-  const stale = now.getTime() - lastSeenAt.getTime() > AMUX_DM_RELAY_STALE_AFTER_MS;
-  return { state: stale ? "stale" : "live", lastSeenAt: lastSeenAt.toISOString() };
+export function amuxDmRelayView(liveness: AmuxDmRelayLiveness): AmuxDmRelayView {
+  const lastSeenAt = liveness.lastSyncAt ? liveness.lastSyncAt.toISOString() : null;
+  if (liveness.state === "calling") return { state: "live", lastSeenAt };
+  if (liveness.state === "asking") return { state: "asking", lastSeenAt };
+  return { state: lastSeenAt === null ? "never" : "stale", lastSeenAt };
 }
 
 /** The Decision Maker paths a queue card can ride, in the order they are judged. */
@@ -206,7 +208,8 @@ export function amuxOwnerQueueDmView(facts: AmuxOwnerQueueDmFacts,
 export function amuxOwnerQueueDmButton(dm: AmuxOwnerQueueDmView, relay: AmuxDmRelayView | null):
   "resend" | "request" | "relay_check" | null {
   // A relay read that failed says nothing about the relay: the button stays.
-  const relayDown = relay !== null && relay.state !== "live";
+  // So does a relay waiting on a question: it calls again when that ends.
+  const relayDown = relay !== null && (relay.state === "stale" || relay.state === "never");
   if (relayDown && (dm.action !== null || dm.state === "waiting_relay" || dm.state === "card_filed"))
     return "relay_check";
   return dm.action;

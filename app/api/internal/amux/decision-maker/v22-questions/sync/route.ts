@@ -10,6 +10,7 @@ import {
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import { parseDmDeliveryCursor } from "@/lib/amux/decisionMakerDeliveryCore";
+import { recordAmuxDmRelaySync } from "@/lib/amux/dmRelayHeartbeat";
 import {
   dmInternalRoutesEnabled,
   dmRouteErrorResponse,
@@ -41,7 +42,6 @@ import {
   recordAmuxDmOwnerSettlementsUnfilable,
 } from "@/lib/amux/dmOwnerSettlementService";
 import { resumeAmuxDmOwnerSettlementRemake } from "@/lib/amux/dmOwnerSettlementRemake";
-import { recordAmuxDmRelaySeen } from "@/lib/amux/dmRelayLivenessStore";
 import { engineeringAgentT2DmReviewEnabled } from "@/lib/engineeringAgentT2DmReviewCore";
 import {
   engineeringAgentT2DmCards,
@@ -80,9 +80,6 @@ import {
  * switch off, the settlements the owner asked for from the owner queue are
  * still filed (owner decision 2026-11-14).
  *
- * Every authorized call is recorded first (at most once a minute), so the
- * owner queue can say when the relay last called and whether it stopped.
- *
  * Operator decision 2026-11-11: an engineering agent T2 draft rides the tick
  * last, for advice only (lib/engineeringAgentT2DmReviewService.ts; new cards
  * only while TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW=enabled). Its answer is
@@ -96,11 +93,12 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  // The owner queue shows when the relay last called (owner decision 2026-11-14).
-  await recordAmuxDmRelaySeen();
-  if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
-
   return withAmuxRouteBudget(async () => {
+    // The relay's last call, before the switch: the monitor's silence alert
+    // (lib/amux/dmRelayHeartbeatCore.ts) reads it. Inside the route budget and
+    // bounded to about two seconds of it; never throws.
+    await recordAmuxDmRelaySync();
+    if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
     try {
       const body = await readLimitedJson(request, 1_024, requestSchema);
       const after = parseDmDeliveryCursor(body.after);

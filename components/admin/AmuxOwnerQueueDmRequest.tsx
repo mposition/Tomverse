@@ -21,9 +21,10 @@ const at = (value: string) => formatAestDateTime(value, { seconds: false }) ?? v
 export function AmuxOwnerQueueDmRelayChip({ relay }: { relay: AmuxDmRelayView | null | undefined }) {
   const copy = useAdminMessages(adminAmuxOwnerQueueMessages).dmRequest.relay;
   if (relay === undefined) return null;
-  const down = relay === null || relay.state !== "live";
-  const text = relay === null ? copy.unknown : relay.state === "never" ? copy.never
-    : relay.state === "live" ? copy.live(at(relay.lastSeenAt)) : copy.stale(at(relay.lastSeenAt));
+  const down = relay === null || relay.state === "stale" || relay.state === "never";
+  const seen = relay?.lastSeenAt ? at(relay.lastSeenAt) : null;
+  const text = relay === null ? copy.unknown : relay.state === "asking" ? copy.asking
+    : seen === null ? copy.never : relay.state === "live" ? copy.live(seen) : copy.stale(seen);
   return (
     <div className="flex items-center gap-2 text-sm" data-testid="amux-owner-queue-dm-relay"
       data-state={relay === null ? "unknown" : relay.state}>

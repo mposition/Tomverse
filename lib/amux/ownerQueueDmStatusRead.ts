@@ -11,7 +11,8 @@ import { amuxDmOwnerSettlementEnabled } from "./dmOwnerSettlementCore.ts";
 import {
   readAmuxDmOwnerSettlementRequestedAmong, scanAmuxDmOwnerSettlementCandidates,
 } from "./dmOwnerSettlementRead.ts";
-import { readAmuxDmRelaySeenAt } from "./dmRelayLivenessStore.ts";
+import { readAmuxDmRelayLastQuestionAt, readAmuxDmRelayLastSyncAt } from "./dmRelayHeartbeat.ts";
+import { judgeAmuxDmRelayLiveness } from "./dmRelayHeartbeatCore.ts";
 import {
   amuxDmRelayView, amuxOwnerQueueDmRequestResult, amuxOwnerQueueDmView,
   type AmuxDmRelayView, type AmuxOwnerQueueDmFacts, type AmuxOwnerQueueDmRequestFact,
@@ -44,7 +45,9 @@ export type AmuxOwnerQueueDmStatusRead = {
 
 export async function readAmuxOwnerQueueDmStatus(items: ReadonlyArray<{ taskId: string; escalationId: string | null }>,
   now: Date = new Date()): Promise<AmuxOwnerQueueDmStatusRead> {
-  const relay = await readAmuxDmRelaySeenAt().then((at) => amuxDmRelayView(at, now), () => null);
+  // The relay alert's own reads and rule; a read that fails is unknown (null).
+  const relay = await Promise.all([readAmuxDmRelayLastSyncAt(), readAmuxDmRelayLastQuestionAt(now)])
+    .then(([sync, question]) => amuxDmRelayView(judgeAmuxDmRelayLiveness(sync, question, now)), () => null);
   const taskIds = items.map((item) => item.taskId);
   const escalationIds = items.flatMap((item) => item.escalationId ? [item.escalationId] : []);
   if (taskIds.length === 0) return { relay, byTask: new Map() };

@@ -785,14 +785,15 @@ test("the owner queue names, per card, where the Decision Maker stands and what 
     delete process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT;
     try {
       const { readAmuxOwnerQueueDmStatus } = await import("@/lib/amux/ownerQueueDmStatusRead");
-      const { recordAmuxDmRelaySeen } = await import("@/lib/amux/dmRelayLivenessStore");
+      const { recordAmuxDmRelaySync } = await import("@/lib/amux/dmRelayHeartbeat");
+      const { AMUX_DM_RELAY_LAST_SYNC_KEY } = await import("@/lib/amux/dmRelayHeartbeatCore");
       const before = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
       assert.deepEqual(before.byTask.get(card.taskId), { source: "settlement", state: "switch_off", reason: "settlement",
         requestId: null, action: "request", sourceId: card.escalationId });
-      await recordAmuxDmRelaySeen();
-      await recordAmuxDmRelaySeen();
+      await recordAmuxDmRelaySync();
+      await recordAmuxDmRelaySync();
       const rows = await tx.$queryRaw<Array<{ n: number }>>`
-        SELECT count(*)::int AS "n" FROM "AppSetting" WHERE "key" = 'amux.dm_relay.last_sync'`;
+        SELECT count(*)::int AS "n" FROM "AppSetting" WHERE "key" = ${AMUX_DM_RELAY_LAST_SYNC_KEY}`;
       assert.equal(rows[0]!.n, 1);
       const after = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
       assert.equal(after.relay.state, "live");

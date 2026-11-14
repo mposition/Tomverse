@@ -36,7 +36,8 @@ type World = {
   t2Pending: unknown[]; t2Closing: unknown[]; t2Unfilable: string[]; t2Recorded: unknown;
   settlementPending: unknown[]; settlementClosing: unknown[]; settlementEnabled: boolean | null;
   /** The settlements the owner asked for from the owner queue: the only ones read while the switch is off. */
-  settlementRequested: unknown[]; relaySeen: number;
+  settlementRequested: unknown[];
+  heartbeats: number;
 };
 let world: World;
 const reset = (changes: Partial<World> = {}) => {
@@ -50,7 +51,8 @@ const reset = (changes: Partial<World> = {}) => {
     reviewPending: [], reviewClosing: [], autoApplied: null, autoCalls: 0,
     t2Pending: [], t2Closing: [], t2Unfilable: [], t2Recorded: null,
     settlementPending: [], settlementClosing: [], settlementEnabled: null,
-    settlementRequested: [], relaySeen: 0,
+    settlementRequested: [],
+    heartbeats: 0,
     ...changes,
   };
   if (world.routing === undefined) delete process.env.TOMVERSE_AMUX_DM_ROUTING;
@@ -93,6 +95,9 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
   },
   withAmuxRouteBudget: async (work: () => Promise<unknown>) => work(),
 } });
+mock.module(mod("lib/amux/dmRelayHeartbeat.ts"), { namedExports: {
+  recordAmuxDmRelaySync: async () => { world.heartbeats += 1; },
+} });
 mock.module(mod("lib/amux/decisionMakerDeliveryCore.ts"), { namedExports: {
   parseDmDeliveryCursor: (value: unknown) => value === "bad" ? undefined : value ?? null,
 } });
@@ -125,9 +130,6 @@ mock.module(mod("lib/amux/dmOwnerSettlementService.ts"), { namedExports: {
   },
   openAmuxDmOwnerSettlementCards: async (rows: { pending: unknown[] }) => ({ cards: rows.pending, unfilable: [] }),
   recordAmuxDmOwnerSettlementsUnfilable: async () => ({ recorded: 0 }),
-} });
-mock.module(mod("lib/amux/dmRelayLivenessStore.ts"), { namedExports: {
-  recordAmuxDmRelaySeen: async () => { world.relaySeen += 1; },
 } });
 mock.module(mod("lib/amux/dmOwnerSettlementRemake.ts"), { namedExports: {
   resumeAmuxDmOwnerSettlementRemake: async () => { world.calls.push("remake-resume"); return null; },
@@ -269,7 +271,6 @@ test("an owner queue settlement rides the tick before the T2 drafts, filed only 
   assert.deepEqual(off.pending, []);
   assert.deepEqual(off.closing, [{ question_id: SETTLEMENT, card_id: "OS-1" }], "its cards still close");
   assert.ok(world.boundaries.includes("decisionMakerOwnerSettlementSync"));
-  assert.equal(world.relaySeen, 1, "the relay's call is recorded");
   // Owner decision 2026-11-14: with the switch off, the one the owner asked for is still filed.
   reset({ settlementPending: [settlementEntry], settlementRequested: [settlementEntry] });
   assert.deepEqual((await (await syncRoute.POST(post({}))).json()).pending, [settlementEntry]);
@@ -435,4 +436,16 @@ test("the owner's direct close takes the same gates, closes only, and names no q
   }
   reset({ ownerError: new FakeOwnerError("busy") });
   assert.equal((await closeDirectly()).status, 409);
+});
+
+test("the sync records the relay's call after the token and before the routing switch", async () => {
+  reset({ authorized: false });
+  await syncRoute.POST(post({}));
+  assert.equal(world.heartbeats, 0, "an unauthorised caller is not the relay");
+  reset({ routing: undefined });
+  assert.equal((await syncRoute.POST(post({}))).status, 409);
+  assert.equal(world.heartbeats, 1, "a relay calling while routing is off is still calling");
+  reset();
+  assert.equal((await syncRoute.POST(post({}))).status, 200);
+  assert.equal(world.heartbeats, 1);
 });

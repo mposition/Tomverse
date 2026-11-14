@@ -4,7 +4,6 @@ import test from "node:test";
 
 import { adminAmuxOwnerQueueMessages } from "../lib/adminMessages/amuxOwnerQueue.ts";
 import {
-  AMUX_DM_RELAY_STALE_AFTER_MS,
   AMUX_OWNER_QUEUE_DM_STATES,
   amuxDmRelayView,
   amuxOwnerQueueDmButton,
@@ -12,6 +11,7 @@ import {
 } from "../lib/amux/ownerQueueDmRequestCore.ts";
 import { amuxOwnerQueueDmRequestResult } from "../lib/amux/ownerQueueDmRequestCore.ts";
 import { amuxOwnerQueueWithDmStatus } from "../lib/amux/ownerQueueCore.ts";
+import { AMUX_DM_RELAY_SILENT_MS, judgeAmuxDmRelayLiveness } from "../lib/amux/dmRelayHeartbeatCore.ts";
 
 const read = (path) => readFileSync(path, "utf8");
 const on = { routing: true, killSwitch: false, resultReview: true, t2: true, settlement: true };
@@ -24,13 +24,16 @@ const question = (over = {}) => ({ id: "q1", localCardId: null, request: null, p
 const live = { state: "live", lastSeenAt: "2026-11-14T00:00:00.000Z" };
 const stale = { state: "stale", lastSeenAt: "2026-11-09T00:30:00.000Z" };
 
-test("the relay is live within five minutes of its last call, and stale after", () => {
+test("the screen draws the relay from the alert's own judgment", () => {
   const now = new Date("2026-11-14T03:00:00.000Z");
-  assert.deepEqual(amuxDmRelayView(null, now), { state: "never" });
-  assert.equal(amuxDmRelayView(new Date(now.getTime() - 30_000), now).state, "live");
-  assert.equal(amuxDmRelayView(new Date(now.getTime() - AMUX_DM_RELAY_STALE_AFTER_MS), now).state, "live");
-  assert.equal(amuxDmRelayView(new Date(now.getTime() - AMUX_DM_RELAY_STALE_AFTER_MS - 1), now).state, "stale");
-  assert.equal(amuxDmRelayView(new Date("2026-11-09T00:30:00.000Z"), now).lastSeenAt, "2026-11-09T00:30:00.000Z");
+  const at = (ms) => new Date(now.getTime() - ms);
+  assert.deepEqual(amuxDmRelayView(judgeAmuxDmRelayLiveness(null, null, now)), { state: "never", lastSeenAt: null });
+  assert.equal(amuxDmRelayView(judgeAmuxDmRelayLiveness(at(30_000), null, now)).state, "live");
+  assert.equal(amuxDmRelayView(judgeAmuxDmRelayLiveness(at(AMUX_DM_RELAY_SILENT_MS), null, now)).state, "live");
+  assert.deepEqual(amuxDmRelayView(judgeAmuxDmRelayLiveness(at(AMUX_DM_RELAY_SILENT_MS + 1), null, now)),
+    { state: "stale", lastSeenAt: at(AMUX_DM_RELAY_SILENT_MS + 1).toISOString() });
+  // Waiting on a question it handed to the broker: not stopped.
+  assert.equal(amuxDmRelayView(judgeAmuxDmRelayLiveness(at(20 * 60_000), at(10 * 60_000), now)).state, "asking");
 });
 
 test("a worker question says how far it got and why it has no card", () => {
@@ -121,7 +124,8 @@ test("while the relay is not calling, the button gives way to the relay check", 
   const ask = amuxOwnerQueueDmView(facts({ escalationId: "e1", settlementEligible: true }), off);
   assert.equal(amuxOwnerQueueDmButton(ask, live), "request");
   assert.equal(amuxOwnerQueueDmButton(ask, stale), "relay_check");
-  assert.equal(amuxOwnerQueueDmButton(ask, { state: "never" }), "relay_check");
+  assert.equal(amuxOwnerQueueDmButton(ask, { state: "never", lastSeenAt: null }), "relay_check");
+  assert.equal(amuxOwnerQueueDmButton(ask, { state: "asking", lastSeenAt: null }), "request");
   const waiting = amuxOwnerQueueDmView(facts({ question: question() }), on);
   assert.equal(amuxOwnerQueueDmButton(waiting, live), null);
   assert.equal(amuxOwnerQueueDmButton(waiting, stale), "relay_check");
@@ -156,12 +160,12 @@ test("every state and reason the core names has words in both languages", () => 
   }
 });
 
-test("the sync records the relay's call after authorization and before anything else", () => {
+test("the screen reads the relay record the alert writes, and the sync opens what the owner asked for", () => {
   const route = read("app/api/internal/amux/decision-maker/v22-questions/sync/route.ts");
-  const auth = route.indexOf("isAmuxSyncAuthorized(request)");
-  const seen = route.indexOf("await recordAmuxDmRelaySeen()");
-  const routing = route.indexOf("if (!dmInternalRoutesEnabled())");
-  assert.ok(auth > 0 && auth < seen && seen < routing);
+  assert.equal((route.match(/recordAmuxDmRelaySync\(/g) ?? []).length, 1, "one writer: the heartbeat's");
+  const status = read("lib/amux/ownerQueueDmStatusRead.ts");
+  assert.match(status, /readAmuxDmRelayLastSyncAt\(\), readAmuxDmRelayLastQuestionAt\(now\)/);
+  assert.match(status, /judgeAmuxDmRelayLiveness\(sync, question, now\)/);
   // With the switch off the settlement still opens what the owner asked for.
   assert.doesNotMatch(route, /if \(!settlementOn\) return \{ pending: \[\]/);
   const service = read("lib/amux/dmOwnerSettlementService.ts");
@@ -196,7 +200,7 @@ test("a relay read that failed is unknown: it neither hides the button nor claim
   const ask = amuxOwnerQueueDmView(facts({ escalationId: "e1", settlementEligible: true }), off);
   assert.equal(amuxOwnerQueueDmButton(ask, null), "request");
   const read = readFileSync("lib/amux/ownerQueueDmStatusRead.ts", "utf8");
-  assert.match(read, /readAmuxDmRelaySeenAt\(\)\.then\(\(at\) => amuxDmRelayView\(at, now\), \(\) => null\)/);
+  assert.match(read, /\.then\(\(\[sync, question\]\) => amuxDmRelayView\(judgeAmuxDmRelayLiveness\(sync, question, now\)\), \(\) => null\)/);
 });
 
 test("the DM approver never applies a settlement or result review the owner sent from the owner queue", () => {

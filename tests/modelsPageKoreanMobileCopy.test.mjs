@@ -14,3 +14,14 @@ test("Korean models page mobile intro uses the same product names as the Korean 
   assert.match(match[1], /채팅과 리뷰/);
   assert.doesNotMatch(match[1], /\bChat\b|\bReview\b/);
 });
+
+test("collapsed mobile filters still show the shown/total model count", () => {
+  const start = source.indexOf('data-testid="models-mobile-results-count"');
+  assert.ok(start > 0, "mobile results count is rendered");
+  const line = source.slice(source.lastIndexOf("\n", start), source.indexOf("\n", start));
+  assert.match(line, /sm:hidden/);
+  assert.match(line, /\{filters\.results\}: \{filteredModels\.length\} \/ \{ENABLED_MODELS\.length\}/);
+  assert.doesNotMatch(line, /role="status"/, "only the filter panel owns the live status region");
+  const guard = source.slice(source.lastIndexOf("{(", start), start);
+  assert.match(guard, /!mobileFiltersOpen/);
+});

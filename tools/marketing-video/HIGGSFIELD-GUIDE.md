@@ -57,7 +57,18 @@ Every concept follows these rules, and every review judges against them.
     Rejected 2026-11-08: name tags reading "지피티·클로드" and "克劳德·双子座".
     A recorded quote is not translated either: that screen stays in its own
     language and only the headline is translated.
-13. Languages: `en`, `ko`, `zh-Hant`, `zh-Hans` (Simplified characters).
+13. Languages and markets: `en` (Australia and other English-speaking
+    readers), `ko` (Korea), `zh-Hant` (Taiwan and Hong Kong), `zh-Hans`
+    (Simplified-script readers in Singapore and Malaysia; mainland China is out
+    of scope, 2026-09-16). Each version speaks to its own market (owner
+    2026-11-13): the question a person types, the answer's example, money,
+    units, places, seasons and everyday objects are that market's, not a
+    translation of the English example. Rejected 2026-11-13: "1970년대에 지은
+    우리 집, 히트펌프 놓을만할까?" (Korea heats with ondol and boilers; Taiwan
+    and Hong Kong do not need heat pumps). The picture is drawn once for all
+    four, so the scene shows nothing that belongs to one market only (a heat
+    pump outdoor unit, a local landmark); what differs by market lives in the
+    words.
 14. The image model never draws Korean or Chinese letters (owner: "an AI-looking
     font that feels foreign"). In those versions the headline and subhead go on
     the space the model cleared, set by code in the product fonts. The English
