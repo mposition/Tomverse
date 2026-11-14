@@ -16,7 +16,8 @@ import { reissueEngineeringAgentV22Capability,
   "@/lib/engineeringAgentV22ProductStore";
 import { v22PublishCandidateMatches, v22ReviewCandidateMatches } from
   "@/lib/engineeringAgentV22PublicationDecision";
-import { loadEngineeringAgentV22StoredCandidate } from
+import { type EngineeringAgentV22StoredCandidateStage,
+  loadEngineeringAgentV22StoredCandidate } from
   "@/lib/engineeringAgentV22StoredCandidate";
 import { prisma } from "@/lib/prisma";
 
@@ -24,11 +25,16 @@ type Pending = { workItemId: string; runId: string; attemptId: string;
   taskId: string; modeAtStart: string; patchDigest: string; baseSha: string };
 type Lapsed = Pending & { expectedTreeId: string; ownerReview: boolean };
 type Stored = Awaited<ReturnType<typeof loadEngineeringAgentV22StoredCandidate>>;
+type Stage = EngineeringAgentV22StoredCandidateStage;
 type Ports = {
   readLapsed: () => Promise<Lapsed | null>;
-  readPending: () => Promise<Pending | null>;
+  /** The oldest pending draft, one not in `behind` first while there is one. */
+  readPending: (behind: ReadonlySet<string>) => Promise<Pending | null>;
   prQueueFull: () => Promise<boolean>;
-  loadStored: (item: Pending, still: () => Promise<boolean>) => Promise<Stored>;
+  loadStored: (item: Pending, still: () => Promise<boolean>,
+    onStage: (stage: Stage) => void) => Promise<Stored>;
+  /** Evidence reads that threw, by pending draft, in this process. */
+  failures: Map<string, number>;
   stillLapsed: (item: Lapsed) => Promise<boolean>;
   stillPending: (item: Pending) => Promise<boolean>;
   reissue: (input: Parameters<typeof reissueEngineeringAgentV22Capability>[1]) =>
@@ -40,6 +46,32 @@ type Ports = {
 };
 
 const REASON = /^[a-z_]{1,64}$/;
+/** Rounds a pending draft's evidence read may throw before the draft is kept
+ * private as `tier_evidence_unavailable`. A throw (GitHub or the database
+ * unreachable, say) is not a verdict; one that repeats every round is. */
+export const ENGINEERING_AGENT_V22_TIER_EVIDENCE_ATTEMPTS = 3;
+/** Drafts whose failures are remembered at once; the oldest is forgotten. */
+const FAILURES_REMEMBERED = 32;
+const SAFE = /^[A-Za-z0-9_.:-]{1,64}$/;
+
+/** A failed read, by class name, code and step: never its message, which can
+ * carry a path, file text or a response body. */
+const describeFailure = (error: unknown, stage: Stage) => {
+  const name = error instanceof Error ? error.name : typeof error;
+  const code = (error as { code?: unknown } | null)?.code;
+  return { stage, error: SAFE.test(name) ? name : "unknown",
+    code: typeof code === "string" && SAFE.test(code) ? code :
+      Number.isInteger(code) ? String(code) : null };
+};
+
+/** One evidence read, the step it reached kept beside a throw. */
+const readStored = async (ports: Ports, item: Pending,
+  still: () => Promise<boolean>) => {
+  let stage: Stage = "authorization";
+  return ports.loadStored(item, still, (next) => { stage = next; }).then(
+    (stored) => ({ stored, failure: null }),
+    (error: unknown) => ({ stored: null, failure: describeFailure(error, stage) }));
+};
 const runSelect = { select: { id: true, amuxAttemptId: true, cardId: true,
   modeAtStart: true } } as const;
 const asPending = (item: { id: string; patchDigest: string | null;
@@ -51,14 +83,18 @@ const asPending = (item: { id: string; patchDigest: string | null;
     modeAtStart: item.run.modeAtStart, patchDigest: item.patchDigest,
     baseSha: item.baseSha } : null;
 
-async function readPending(): Promise<Pending | null> {
-  const item = await prisma.engineeringAgentWorkItem.findFirst({
+/** A draft whose read just threw goes behind the others, so a failure that
+ * repeats holds no other draft back while it uses up its rounds. */
+async function readPending(behind: ReadonlySet<string>): Promise<Pending | null> {
+  const items = await prisma.engineeringAgentWorkItem.findMany({
     where: { kind: "t2_draft", state: "open",
       reason: ENGINEERING_AGENT_V22_TIER_PENDING_REASON,
       run: { card: { sourceSystem: "admin-idea-v4" } } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: Math.min(behind.size, FAILURES_REMEMBERED) + 1,
     select: { id: true, patchDigest: true, baseSha: true, run: runSelect },
   });
+  const item = items.find((row) => !behind.has(row.id)) ?? items[0];
   return item ? asPending(item) : null;
 }
 
@@ -90,8 +126,10 @@ async function readLapsed(): Promise<Lapsed | null> {
 /** The run has ended, so the item still waiting is the snapshot the
  * candidate's reads are repeated against. Develop may have moved since
  * settlement; the base need only be one of its commits. */
-const loadStored = (item: Pending, still: () => Promise<boolean>) =>
+const loadStored = (item: Pending, still: () => Promise<boolean>,
+  onStage: (stage: Stage) => void) =>
   loadEngineeringAgentV22StoredCandidate(item.attemptId, {
+    onStage,
     readSnapshot: async () => await still() ?
       { runId: item.runId, taskId: item.taskId, baseSha: item.baseSha } : null,
     loadCandidate: (input) =>
@@ -99,7 +137,7 @@ const loadStored = (item: Pending, still: () => Promise<boolean>) =>
   });
 
 const livePorts: Ports = {
-  readLapsed, readPending, loadStored,
+  readLapsed, readPending, loadStored, failures: new Map(),
   stillLapsed: async (item) => (await prisma.engineeringAgentWorkItem.count({
     where: { id: item.workItemId, ...lapsedWhere() } })) === 1,
   stillPending: async (item) => (await prisma.engineeringAgentWorkItem.count({
@@ -155,18 +193,25 @@ const reviewCandidate = (item: Pending, stored: Stored | null) =>
  * pull request; anything else leaves an ordinary draft for the owner. While
  * the pull request queue is full no draft's tier is read; a promotion the
  * database still refuses becomes an ordinary draft, so no draft is read
- * again and again. A failure to reach the database leaves it pending. */
+ * again and again. A failure to reach the database leaves it pending. A
+ * draft whose evidence read throws stays pending, behind the other drafts,
+ * for `ENGINEERING_AGENT_V22_TIER_EVIDENCE_ATTEMPTS` rounds of this process,
+ * and is then kept private as `tier_evidence_unavailable`; each round names
+ * the failure's class, code and step. */
 export async function promoteEngineeringAgentV22Draft(
   ports: Ports = livePorts,
 ): Promise<{ outcome: "none" | "waiting" | "promoted" | "review_promoted" |
-  "kept" | "stale" | "reissued" | "reissue_refused"; reason?: string }> {
+  "kept" | "stale" | "reissued" | "reissue_refused" | "retry";
+  reason?: string; workItemId?: string; attempt?: number;
+  stage?: Stage; error?: string; code?: string | null }> {
   const lapsed = await ports.readLapsed();
   if (lapsed) {
-    const stored = await ports.loadStored(lapsed,
-      () => ports.stillLapsed(lapsed)).catch(() => null);
+    const { stored, failure } = await readStored(ports, lapsed,
+      () => ports.stillLapsed(lapsed));
     // Unreadable now (GitHub, say) is not a verdict: a later round reads it.
     if (stored === null) return { outcome: "reissue_refused",
-      reason: "tier_evidence_unavailable" };
+      reason: "tier_evidence_unavailable", workItemId: lapsed.workItemId,
+      ...failure };
     const reviewOn = lapsed.ownerReview && ports.reviewPrEnabled();
     const candidate = lapsed.ownerReview ?
       (reviewOn ? t1Candidate(lapsed, stored) ?? reviewCandidate(lapsed, stored) : null) :
@@ -182,11 +227,23 @@ export async function promoteEngineeringAgentV22Draft(
       baseSha: lapsed.baseSha, candidate });
     return { outcome: "reissued" };
   }
-  const pending = await ports.readPending();
+  const pending = await ports.readPending(new Set(ports.failures.keys()));
   if (!pending) return { outcome: "none" };
   if (await ports.prQueueFull()) return { outcome: "waiting" };
-  const stored = await ports.loadStored(pending,
-    () => ports.stillPending(pending)).catch(() => null);
+  const { stored, failure } = await readStored(ports, pending,
+    () => ports.stillPending(pending));
+  const attempt = (ports.failures.get(pending.workItemId) ?? 0) + 1;
+  ports.failures.delete(pending.workItemId);
+  if (failure && attempt < ENGINEERING_AGENT_V22_TIER_EVIDENCE_ATTEMPTS) {
+    // Re-set last, so the oldest remembered failure is the one forgotten.
+    ports.failures.set(pending.workItemId, attempt);
+    for (const id of ports.failures.keys()) {
+      if (ports.failures.size <= FAILURES_REMEMBERED) break;
+      ports.failures.delete(id);
+    }
+    return { outcome: "retry", reason: "tier_evidence_unavailable",
+      workItemId: pending.workItemId, attempt, ...failure };
+  }
   const t1 = t1Candidate(pending, stored);
   const review = t1 || !ports.reviewPrEnabled() ? null :
     reviewCandidate(pending, stored);
@@ -201,7 +258,8 @@ export async function promoteEngineeringAgentV22Draft(
     baseSha: pending.baseSha };
   const keep = async (why: string) => {
     const kept = await ports.resolve({ ...draft, reason: why, candidate: null });
-    return "kept" in kept && kept.kept ? { outcome: "kept" as const, reason: why } :
+    return "kept" in kept && kept.kept ? { outcome: "kept" as const, reason: why,
+      ...(failure ? { workItemId: pending.workItemId, attempt, ...failure } : {}) } :
       { outcome: "stale" as const };
   };
   if (!candidate) return keep(reason);
