@@ -51,6 +51,14 @@ while a send or draft conflict is open), and sends nothing. The Chat
 conversation, its `productKey` and its models are unchanged; Review never
 converts back into Chat.
 
+Saved normal Review analyses also offer an explicit "Continue in Chat" action
+through the same product-switch admission. It projects one reviewer or finding
+into a new editable Chat draft, rather than rewriting the source conversation.
+Only an opaque marker travels in the URL; an account-bound memory packet carries
+the reference. Existing durable Chat text or attachments require an explicit
+append or cancellation after successful hydration. No execution occurs until
+the ordinary Chat Send action. See `review-studio.md` for scope and lifecycle.
+
 The navigation callback may stage one idle in-memory draft snapshot immediately
 before following a product link. It does not persist, publish or copy that draft
 into the other product. While a send, stream, mode write, recovered unknown

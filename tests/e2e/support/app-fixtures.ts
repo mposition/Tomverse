@@ -688,6 +688,7 @@ export async function mockAuthenticatedApi(
     extraConversations?: Array<{
       id: string;
       title?: string;
+      productKey?: "chat" | "review";
       selectedModels?: string[];
       messages?: QaConversationMessage[];
     }>;
@@ -1018,6 +1019,7 @@ export async function mockAuthenticatedApi(
   const extras = (options.extraConversations || []).map((extra) => ({
     id: extra.id,
     title: extra.title || extra.id,
+    productKey: extra.productKey ?? options.productKey,
     selectedModels: extra.selectedModels ||
       options.selectedModels || ["gpt-5-6-luna"],
     savedMessages: [...(extra.messages || [])],
@@ -1031,8 +1033,8 @@ export async function mockAuthenticatedApi(
     isLocked: false,
     shareEnabled: false,
     shareExpiresAt: null,
-    productKey: options.productKey ?? null,
-    surface: options.productKey === "chat" ? "chat" : "workspace",
+    productKey: extra.productKey ?? null,
+    surface: extra.productKey === "chat" ? "chat" : "workspace",
   });
 
   const handleConversationCollection = async (route: Route) => {
