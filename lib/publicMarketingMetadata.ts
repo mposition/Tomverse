@@ -24,7 +24,7 @@ export const publicMarketingMetadataCopy = {
   ),
   "/faq": localized(
     ["Tomverse FAQ | Chat, Review and Credits", "Find answers about Chat and Review, guest access, Smart Adaptive, question refinement, AI Review, files, plans and credit usage."],
-    ["Tomverse 자주 묻는 질문 | Chat·Review·크레딧", "Chat과 Review, 비회원 이용, Smart Adaptive, 질문 다듬기, AI Review, 파일과 플랜·크레딧 사용에 대한 답변을 확인하세요."],
+    ["Tomverse 자주 묻는 질문 | 채팅·리뷰·크레딧", "채팅(Chat)과 리뷰(Review), 비회원 이용, Smart Adaptive, 질문 다듬기, AI 교차검토, 파일과 플랜·크레딧 사용에 대한 답변을 확인하세요."],
     ["Tomverse 常见问题 | Chat、Review 与积分", "查看 Chat 与 Review、访客体验、Smart Adaptive、提问优化、AI Review、文件、套餐和积分使用的常见问题。"],
     ["Tomverse 常見問題 | Chat、Review 與點數", "查看 Chat 與 Review、訪客體驗、Smart Adaptive、提問優化、AI Review、檔案、方案與點數使用的常見問題。"],
     ["FAQ Tomverse | Chat, Review et crédits", "Retrouvez les réponses sur Chat et Review, le mode invité, Smart Adaptive, la reformulation, AI Review, les fichiers, les offres et les crédits."],
