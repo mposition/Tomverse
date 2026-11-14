@@ -318,3 +318,50 @@ test("the engineering agent and the merge lane digest a diff with one function",
     assert.match(source, /import \{ PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest \} from "\.\/pullDiffDigestCore\.ts";/, file);
   }
 });
+
+test("a diff with bytes that are not UTF-8 digests the same in the engineering read and in the merge lane", async () => {
+  // Review r-20261114-023008-48bc7e: both sides digest the response's own bytes.
+  const { createHash } = await import("node:crypto");
+  const { pullDiffDigest } = await import("../lib/pullDiffDigestCore.ts");
+  const { createQaReleaseGithubPorts } = await import("../lib/qaReleaseMergeLaneGithub.ts");
+  const { readEngineeringAgentPullChange, ENGINEERING_AGENT_GITHUB_READ_TOKEN_ENV } =
+    await import("../lib/engineeringAgentGitHubRead.ts");
+  const raw = Buffer.concat([Buffer.from("diff --git a/components/X.tsx b/components/X.tsx\n@@ -1 +1 @@\n-caf"),
+    Buffer.from([0xe9, 0xff, 0xfe]), Buffer.from("\n+cafe\n")]);
+  const expected = createHash("sha256").update(raw).digest("hex");
+  assert.notEqual(expected, pullDiffDigest(new TextDecoder().decode(raw)), "its text would digest otherwise");
+
+  // The lane, through the service's own way of answering: the bytes beside their text.
+  const lane = createQaReleaseGithubPorts({ token: async () => "t", http: async (request) => {
+    assert.equal(request.headers.accept, "application/vnd.github.diff");
+    return { status: 200, text: new TextDecoder().decode(raw), bytes: new Uint8Array(raw) };
+  } });
+  assert.equal(await lane.diffDigest(42), expected);
+  // An answer without its bytes gives no digest, so the pull request is not merged on one.
+  const textOnly = createQaReleaseGithubPorts({ token: async () => "t",
+    http: async () => ({ status: 200, text: new TextDecoder().decode(raw) }) });
+  assert.equal(await textOnly.diffDigest(42), null);
+  const tooBig = createQaReleaseGithubPorts({ token: async () => "t",
+    http: async () => ({ status: 200, text: "", bytes: new Uint8Array(1024 * 1024 + 1) }) });
+  assert.equal(await tooBig.diffDigest(42), null);
+
+  // The engineering agent's read of the same pull request.
+  const HEAD_SHA = "c".repeat(40);
+  const BASE_SHA = "b".repeat(40);
+  const pull = { number: 42, state: "open", changed_files: 1,
+    base: { ref: "develop", sha: BASE_SHA, repo: { full_name: "mposition/Tomverse" } },
+    head: { ref: "agent/engineering/1", sha: HEAD_SHA, repo: { full_name: "mposition/Tomverse" } } };
+  const fetchImpl = async (url, init) => {
+    const path = String(url).replace("https://api.github.com/repos/mposition/Tomverse", "");
+    if (path === "/pulls/42" && init.headers.Accept === "application/vnd.github.diff") return new Response(raw, { status: 200 });
+    if (path === "/pulls/42") return new Response(JSON.stringify(pull), { status: 200 });
+    if (path.startsWith("/pulls/42/files")) {
+      return new Response(JSON.stringify([{ filename: "components/X.tsx", status: "modified" }]), { status: 200 });
+    }
+    return new Response("{}", { status: 404 });
+  };
+  const change = await readEngineeringAgentPullChange(42, { env: { [ENGINEERING_AGENT_GITHUB_READ_TOKEN_ENV]: "t" }, fetchImpl });
+  assert.equal(change.diffDigest, expected);
+  assert.equal(change.crossRepository, false);
+  assert.deepEqual(change.changedFiles, ["components/X.tsx"]);
+});

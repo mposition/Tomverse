@@ -45,7 +45,11 @@ export type QaReleaseHttpRequest = {
   headers: Record<string, string>;
   body?: string;
 };
-export type QaReleaseHttp = (request: QaReleaseHttpRequest) => Promise<{ status: number; text: string }>;
+/**
+ * `bytes`: the body as it came, beside its text, for what must be digested
+ * over the raw bytes (a pull request's diff, lib/pullDiffDigestCore.ts).
+ */
+export type QaReleaseHttp = (request: QaReleaseHttpRequest) => Promise<{ status: number; text: string; bytes?: Uint8Array }>;
 
 const SHA = /^[0-9a-f]{40}$/;
 /** GitHub lists at most 3,000 files for a pull request; a larger one is never complete. */
@@ -360,9 +364,16 @@ export function createQaReleaseGithubPorts(input: {
       };
     },
 
+    // Over the response's own bytes, as the engineering agent's read digests them: a diff whose
+    // removed lines hold bytes that are not UTF-8 must digest the same on both sides (review
+    // r-20261114-023008-48bc7e). No raw bytes, no digest.
     async diffDigest(number): Promise<string | null> {
-      const diff = await get(`${REPO_PATH}/pulls/${number}`, "application/vnd.github.diff");
-      return Buffer.byteLength(diff, "utf8") > PULL_DIFF_DIGEST_MAX_BYTES ? null : pullDiffDigest(diff);
+      const response = await http({ method: "GET", url: `${QA_RELEASE_GITHUB_API}${REPO_PATH}/pulls/${number}`,
+        headers: await headers("application/vnd.github.diff") });
+      if (response.status !== 200) throw new Error(`github_${response.status}`);
+      const bytes = response.bytes;
+      if (!(bytes instanceof Uint8Array) || bytes.byteLength > PULL_DIFF_DIGEST_MAX_BYTES) return null;
+      return pullDiffDigest(bytes);
     },
 
     async readPull(number): Promise<QaReleasePullRead | null> {
