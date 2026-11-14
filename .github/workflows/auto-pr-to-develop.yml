@@ -141,10 +141,11 @@ jobs:
           fi
           if ! gh pr create \
             --draft \
+            --label ci:hold \
             --head "$BRANCH" \
             --base develop \
             --title "$BRANCH -> develop" \
-            --body "Auto-created by the Auto PR to Develop workflow, as a draft: pull-request CI runs nothing on a draft. Mark it ready (gh pr ready <number>) when the branch is complete; that starts CI once. Auto-merge is not armed: green, non-draft PRs are merged one at a time by the QA-release merge lane; one it leaves to a person is listed in Admin with the reason."; then
+            --body "Auto-created as a draft with ci:hold. Keep both until the owner explicitly releases CI. Auto-merge is not armed; the QA-release merge lane handles eligible pull requests."; then
             echo "::error::gh pr create failed for $BRANCH -> develop."
             exit 1
           fi
