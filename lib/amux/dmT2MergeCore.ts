@@ -90,7 +90,7 @@ export const AMUX_DM_T2_MERGE_READY_SETTLE_MS = 10 * 60 * 1000;
  */
 export function amuxDmT2MergeReadyInFlight(input: {
   readies: readonly { prNumber: number; headSha: string; atMs: number }[];
-  /** `<number>@<head>` of every pull_request run queued or in progress (lib/ciAdmissionCore.ts ciRunKey). */
+  /** Keys (pull request number, "@", head sha) of every pull_request run queued or in progress (lib/ciAdmissionCore.ts ciRunKey). */
   running: ReadonlySet<string>;
   nowMs: number;
 }): boolean {
