@@ -205,6 +205,11 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     실행 결과, 검토 서버 거절 횟수, 같은 부모의 형제 카드와 이 카드에 의존하는지)로 만든다. 검토 서버 거절의 findings는 앱에
     저장되지 않으므로 싣지 않는다. 검토 PR이면 PR 번호, 파일 목록 전체, 들어가는 만큼의 파일 diff(통째로)와 빠진 수를 싣는다.
     증거를 읽을 수 없거나 카드 한 장(2,000자)에 통째로 들어가지 않으면 DM에 올리지 않고 사람에게 넘긴다(`evidence_unavailable`).
+    운영자 결정 2026-11-14: patch는 질문(2,000자)이 아니라 relay가 전달하는 카드 `context`(4,000자, `[evidence]` 블록)에 싣는다.
+    정리·T2 초안 카드는 들어가는 파일 diff만 싣고 빠진 수를 밝힌다. v22 결과 검토 카드도 그 시도의 엔지니어링 patch와 열린 PR
+    번호를 싣되, patch가 통째로 들어가지 않으면 카드를 만들지 않고 사람에게 넘긴다(`evidence_unavailable`). v22 implement
+    Task의 PR은 카드가 아니라 run의 binding에 있으므로, 운영자 확인 대기 화면은 그 PR(`publication_hold`)을 "PR 없음" 대신 보인다.
+    `tier_pending` 초안이 있는 동안 retry가 막히는 것은 이중 실행 방지이며, 화면은 초안을 거절하면 retry가 열린다고 알린다.
     선택지는 멈춘 Task가 `retry`(시도 예산 안에서 `todo`, 넘으면 사람에게)·`complete`(done, `v4TerminalAt`)·`close`(archive)·
     `remake`(자유 텍스트로 첫 줄 `remake`, 그다음 새 아이디어), 검토 PR이 `approve`·`retry`·`close`다. `remake`는 세 단계다.
     먼저 요청을 붙잡은 트랜잭션(DM 승인자의 선점, 또는 운영자 확정 뒤) 안에서 감사 체인 잠금과 kill switch 아래 행을 `claimed`로
@@ -230,12 +235,15 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
 2. `ask_type`이 허용된 여섯(§0-1) 밖. `customer_outbound`도 여기다.
 3. 되돌릴 수 없는 행위 용어 목록에 걸림. 판정 입력은 카드의 type·tag·제목·질문·선택지·해제 조건·worker가
    적은 맥락. 운영자 결정 2026-11-14(AMUXFLOW/B2): `TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY=enabled`이면 앱이 직접 만든
-   owner settlement 카드(그 local card를 기록한 `AmuxDmOwnerSettlement` 행이 있는 카드)가 `[evidence]`…`[/evidence]`로 감싼
+   카드(그 local card를 기록한 `AmuxDmOwnerSettlement` 행, 2026-11-14부터는 `AmuxV22ResultReview`·`EngineeringAgentDmReview`
+   행도 있는 카드)가 `[evidence]`…`[/evidence]`로 감싼
    증거(실행 결과, diff)는 용어 판정에서 뺀다. worker 카드의 표식은 보통 글자로 읽는다. 닫히지 않은 표식은 빼지 않고, secret 검사는
    카드 전체에 그대로 적용한다. 기본은 꺼짐이다. 아래가 v1 목록이며 바꾸려면 운영자 승인(대화 한 줄, PR에 기록)이 필요하다: main 병합, ship·release·배포·production,
    삭제·delete·drop·truncate·덮어쓰기, migration, 결제·환불·청구, 외부 게시·발송·연락, secret·token·
    password·API key의 제공, 권한·접근 설정 변경, 정책·workflow·branch protection 변경. 정확한 대소문자·
-   어형 규칙과 검사 문자열은 S1의 테스트 고정값이 정한다.
+   어형 규칙과 검사 문자열은 S1의 테스트 고정값이 정한다. 운영자 결정 2026-11-14: 한국어 "권한"은 혼자서는
+   걸리지 않는다. "Free·Pro·Max 권한"처럼 플랜 이용 범위도 뜻하기 때문이다(AMUX-PRICINGCOPY-002). 권한을 주거나
+   바꾸는 표현(권한 부여·변경·추가·회수, 접근·쓰기·관리자 권한, 접근 설정)만 걸린다.
 4. `credential`·`access`·`external` 질문의 `resolution`이 `decision_only`가 아님. worker는 이 세 유형에
    `resolution`(`needs_secret`·`needs_permission_change`·`needs_contact`·`decision_only`)을 적는다. 비밀값
    제공, 권한 변경, 제3자 연락은 DM이 도울 수 없는 일이다. DM은 비밀값을 받지도 주지도 않는다.
@@ -395,6 +403,9 @@ claude -p --tools "" --restricted --strict-mcp-config --setting-sources "" --dis
   문자열은 결과로 쓰지 않는다(S0에서 codex는 한 turn에 `agent_message`를 둘 낸 적이 있다).
 - 실패 판정: codex는 종료 코드 `1`과 `turn.failed`, claude는 종료 코드 `1`과 `is_error:true`다. 둘 중 하나라도 실패면
   결과가 없는 것이고 §9의 "DM 불가"다. 강제 종료(hard timeout)는 시간 초과다.
+- 운영자 결정 2026-11-14: "DM 불가"는 판단이 아니라 실행 실패이므로, 원장이 처음 기록할 때 결과 route가 운영 장애
+  `AMUX_DM_RUN_UNAVAILABLE`(warning, 인스턴스와 요청 id만)을 한 번 알린다. 원인은 box broker journal에 있다. 같은 인스턴스로
+  자동 재전송하는 것은 원장의 요청당 전송 1회 제약 때문에 migration이 필요해 이번에 하지 않는다.
 
 **거부 argv.** 위와 바이트 단위로 같지 않으면 시작을 거부하므로 목록은 테스트의 기준이다. 전용 launcher의 테스트는
 적어도 다음이 섞이면 거부함을 고정한다. codex: `--dangerously-bypass-approvals-and-sandbox`,

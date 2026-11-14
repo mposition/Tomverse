@@ -158,20 +158,23 @@ test("a stopped Task's card carries its evidence, marked, and cuts it to fit (AM
   assert.ok(listed.question.split("\n").every((line) => line.length < 300), "sibling titles are shortened");
 });
 
-test("a review pull request's card always lists its files and shows whole diffs while they fit", () => {
+test("a review pull request's card lists its files in the question and carries the diffs in its context", () => {
   const card = amuxDmOwnerSettlementCard({ ...base, kind: "t2_pr", taskStatus: "review",
     reason: "human_review_required", rejections: 0, pull: { number: 3812, patch: PATCH } });
   assert.deepEqual(card.options.map((option) => option.id), ["approve", "retry", "close"]);
   assert.match(card.question, /Pull request #3812, files \(2\):\n- lib\/amux\/routerFailure\.ts \(\+1 -0\)\n- tests\/routerFailure\.test\.mjs \(\+1 -0\)/);
-  assert.ok(card.question.includes("Patch:\n[evidence]\ndiff --git a/lib/amux/routerFailure.ts"));
-  assert.ok(card.question.includes("[/evidence]\nShould the pull request be approved"));
-  assert.ok(!card.question.includes("more file diffs"));
+  assert.ok(card.context.startsWith("[evidence]\nPatch:\ndiff --git a/lib/amux/routerFailure.ts"));
+  assert.ok(card.context.endsWith("\n[/evidence]"));
+  assert.ok(card.question.includes("The patch is in this card's context.\nShould the pull request be approved"));
+  assert.ok(!card.question.includes("diff --git"), "the diffs no longer compete with the question's words");
+  assert.ok(!card.context.includes("more file diffs"));
   assert.ok(!card.question.includes("remake"), "a pull request is not remade");
-  const big = `${PATCH}\n${["diff --git a/big.ts b/big.ts", "@@ -0,0 +1 @@", `+${"z".repeat(1_900)}`].join("\n")}`;
+  const big = `${PATCH}\n${["diff --git a/big.ts b/big.ts", "@@ -0,0 +1 @@", `+${"z".repeat(4_000)}`].join("\n")}`;
   const cut = amuxDmOwnerSettlementCard({ ...base, kind: "t2_pr", pull: { number: 1, patch: big } });
   assert.match(cut.question, /- big\.ts \(\+1 -0\)/, "every file is listed");
-  assert.match(cut.question, /\(1 more file diffs are not shown\.\)/);
+  assert.match(cut.context, /\(1 more file diffs are not shown\.\)/);
   assert.ok(cut.question.length <= AMUX_DM_OWNER_SETTLEMENT_QUESTION_MAX);
+  assert.ok(cut.context.length <= 4_000, "the context stays inside the local AMUX bound");
   const longFindings = amuxDmOwnerSettlementCard({ ...base, kind: "t2_pr", findings: "f".repeat(1_700),
     pull: { number: 1, patch: PATCH } });
   assert.match(longFindings.question, /Its run's report does not fit this card; judge it from the patch\./);

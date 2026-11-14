@@ -15,7 +15,7 @@
 import { createHash } from "node:crypto";
 
 import { engineeringAgentPatchFiles } from "../engineeringAgentOwnerItemContextCore.ts";
-import { patchSections } from "../engineeringAgentT2DmReviewCore.ts";
+import { patchEvidenceContext } from "../engineeringAgentT2DmReviewCore.ts";
 import { DM_EVIDENCE_CLOSE, DM_EVIDENCE_OPEN } from "./decisionMakerCore.ts";
 
 const CUT_NOTE = " (cut to fit this card)";
@@ -193,9 +193,9 @@ const REMAKE_LINE =
  * The card the relay files, in the shape of a v22 question's pending entry,
  * or null when the evidence does not fit whole (the person decides it then).
  * The criteria and, for a stopped Task, the run's findings are never cut. A
- * review pull request's file list is always there; its file diffs follow whole
- * while the card has room, its findings only when they fit beside them, and
- * the card says what it left out. Words in the evidence may send the card to
+ * review pull request's file list is in the question and its file diffs ride
+ * in the card's context, whole while that has room; its findings are there
+ * only when they fit, and the card says what it left out. Words in the evidence may send the card to
  * the operator: that is the routing working.
  */
 export function amuxDmOwnerSettlementCard(input: {
@@ -267,26 +267,18 @@ export function amuxDmOwnerSettlementCard(input: {
   const tail = ["Should the pull request be approved, the Task run again, or the card closed?"];
   const fixed = [...head, ...rejected, ...siblings, ...pullHead, ...tail].join("\n");
   if (fixed.length > max) return null;
-  // Room for the findings first, whole, then for the diffs, each whole. Both
-  // are evidence (AMUXFLOW/B2): each block carries its markers.
+  // The findings are evidence (AMUXFLOW/B2): whole when they fit beside the
+  // rest, in their markers. The patch no longer shares this room: it rides in
+  // the card's context (patchEvidenceContext), so the question keeps the
+  // findings and the diffs get a room of their own.
   const marks = DM_EVIDENCE_OPEN.length + DM_EVIDENCE_CLOSE.length + 2;
   const findingsFit = fixed.length + 1 + findingsLine.length + marks + 80 <= max;
   const shownFindings = findingsFit ? evidenceBlock(findingsLine, Number.MAX_SAFE_INTEGER)! :
     "Its run's report does not fit this card; judge it from the patch.";
-  let left = max - fixed.length - shownFindings.length - 1 - 80 - marks;
-  const shown: string[] = [];
-  const sections = patchSections(patch);
-  for (const section of sections) {
-    if (section.length + 1 > left) break;
-    shown.push(section);
-    left -= section.length + 1;
-  }
-  const omitted = sections.length - shown.length;
+  const evidence = patchEvidenceContext(patch);
+  if (!evidence) return null;
   const question = [...head, shownFindings, ...rejected, ...siblings, ...pullHead,
-    shown.length > 0 ? "Patch:" : "The patch does not fit this card; judge it from the file list.",
-    ...(shown.length > 0 ? [DM_EVIDENCE_OPEN, ...shown, DM_EVIDENCE_CLOSE] : []),
-    ...(shown.length > 0 && omitted > 0 ? [`(${omitted} more file diffs are not shown.)`] : []),
-    ...tail].join("\n");
+    "The patch is in this card's context.", ...tail].join("\n");
   if (question.length > max) return null;
   return {
     question_id: input.settlementId,
@@ -294,6 +286,7 @@ export function amuxDmOwnerSettlementCard(input: {
     provider: AMUX_DM_OWNER_SETTLEMENT_DM_PROVIDER,
     title: `Owner queue: ${input.taskLabel}`.slice(0, TITLE_MAX),
     question,
+    context: evidence.context,
     unblocks: "An approval is kept for the merge lane, which acts on it later; a retry runs the Task again; a close takes the card off the board and leaves the pull request.",
     options: [
       { id: "approve", label: "Approve the pull request" },

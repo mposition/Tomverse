@@ -165,7 +165,10 @@ export const DM_IRREVERSIBLE_TERMS: ReadonlyArray<{
   { category: "money", korean: ["결제", "환불", "청구"], english: ["payment", "refund", "charge", "invoice"] },
   { category: "outbound", korean: ["게시", "발송", "연락"], english: ["publish", "post to", "send to", "send email", "send an email", "email the", "tweet", "notify", "contact"] },
   { category: "secret", korean: ["비밀번호", "비밀값", "토큰", "API 키"], english: ["secret", "token", "password", "api key", "apikey", "credential"] },
-  { category: "access", korean: ["권한", "접근 설정"], english: ["permission", "permissions", "access control"] },
+  // Korean "권한" alone also names a plan's entitlement ("Free·Pro·Max 권한"), which
+  // sent plain pricing questions to the operator (AMUX-PRICINGCOPY-002, owner
+  // decision 2026-11-14). Only a grant or change of access is a hit.
+  { category: "access", korean: ["권한 부여", "권한을 부여", "권한 변경", "권한을 변경", "권한을 바꾸", "권한을 주", "권한 추가", "권한을 추가", "권한 회수", "권한을 회수", "권한을 열", "권한 상승", "권한을 올리", "접근 권한", "쓰기 권한", "관리자 권한", "접근 설정"], english: ["permission", "permissions", "access control"] },
   { category: "gate", korean: ["정책 변경", "정책 개정", "정책을 바꾸", "정책을 고치", "워크플로"], english: ["policy change", "change the policy", "amend the policy", "workflow", "workflows", "branch protection"] },
 ];
 
@@ -176,6 +179,27 @@ const englishTermPatterns = DM_IRREVERSIBLE_TERMS.map((entry) => ({
     (term) => new RegExp(`(?<![A-Za-z0-9_])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[ -]/g, "[ -]")}(?![A-Za-z0-9_])`, "i"),
   ),
 }));
+
+/**
+ * The operational incident for a DM run that ended `unavailable` (owner
+ * decision 2026-11-14). That result is a failed process -- a CLI that could not
+ * start, sign in or write its output -- not a judgment, yet the question still
+ * goes to the operator as if the DM had looked at it. On 2026-11-14 the
+ * anthropic instance's first run in six days exited 1 within two seconds, and
+ * every codex worker's question routes to that instance (§7). The incident
+ * names the instance and request only; the reason is in the box's broker
+ * journal (`amux_dm_broker_request`).
+ */
+export const dmRunUnavailableIncident = (instance: unknown, requestId: unknown) => ({
+  code: "AMUX_DM_RUN_UNAVAILABLE",
+  title: "AMUX Decision Maker run failed before judging",
+  error: "The Decision Maker process ended without a result; its question went to the operator. Check the instance's CLI sign-in on the AMUX box.",
+  severity: "warning" as const,
+  context: {
+    instance: typeof instance === "string" ? instance.slice(0, 64) : null,
+    requestId: typeof requestId === "string" ? requestId.slice(0, 64) : null,
+  },
+});
 
 /** The categories of the term list that a text hits, in list order. Never the text. */
 export const irreversibleTermCategories = (text: string): string[] =>

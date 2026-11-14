@@ -13,6 +13,7 @@ import {
   amuxV22ResultReviewKind,
   amuxV22ResultReviewRelayCard,
   amuxV22ResultReviewTarget,
+  AMUX_V22_RESULT_REVIEW_QUESTION_MAX,
 } from "../lib/amux/v22ResultReviewCore.ts";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -60,6 +61,43 @@ test("the card's fixed words hit no routing term, so it reaches a DM", () => {
     assert.equal(amuxV22ResultReviewRelayCard({ reviewId: "00000000-0000-4000-8000-00000000000a",
       taskLabel: "T", role: null, kind: "needs_owner", criteria, findings }), null,
       "evidence that does not fit whole, or is missing, is left to the person");
+});
+
+const filePatch = (path, lines) =>
+  [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, "@@ -1 +1 @@", ...lines].join("\n");
+
+test("the engineering agent's change rides in the card: files in the question, whole diffs in the context", () => {
+  const base = { reviewId: "00000000-0000-4000-8000-00000000000a", taskLabel: "AMUX-IMGOUT-004",
+    role: "implement", kind: "prless_implement", criteria: ["The route streams the file"],
+    findings: "Changed the route; its tests passed." };
+  const patch = [filePatch("app/api/download/route.ts", ["-a", "+b"]),
+    filePatch("tests/download.test.ts", Array.from({ length: 40 }, (_, i) => `+case ${i}`))].join("\n");
+  const card = amuxV22ResultReviewRelayCard({ ...base, patch, pullNumber: 3931 });
+  assert.match(card.question, /Its change, pull request #3931, files \(2\):\n- app\/api\/download\/route\.ts \(\+1 -1\)\n- tests\/download\.test\.ts \(\+40 -0\)\nThe patch is in this card's context\./);
+  assert.doesNotMatch(card.question, /diff --git/);
+  assert.match(card.context, /^\[evidence\]\nPatch:\ndiff --git a\/app\/api\/download\/route\.ts[\s\S]*\+case 39\n\[\/evidence\]$/);
+  assert.ok(card.question.length <= AMUX_V22_RESULT_REVIEW_QUESTION_MAX);
+  assert.ok(card.context.length <= 4_000);
+
+  const without = amuxV22ResultReviewRelayCard(base);
+  assert.equal("context" in without, false, "no change, no context: the card is what it was");
+  assert.doesNotMatch(without.question, /Its change/);
+
+  // Never judged on part of a change: one that does not fit whole, or that a
+  // card cannot carry, leaves the review to the person.
+  const tooBig = [filePatch("a.ts", ["+short"]),
+    filePatch("b.ts", Array.from({ length: 700 }, (_, i) => `+line ${i}`))].join("\n");
+  assert.equal(amuxV22ResultReviewRelayCard({ ...base, patch: tooBig }), null);
+  assert.equal(amuxV22ResultReviewRelayCard({ ...base, patch: filePatch("a.ts", ["+bell\u0007"]) }), null);
+  assert.equal(amuxV22ResultReviewRelayCard({ ...base, patch: "not a diff" }), null);
+});
+
+test("the sync reads the run's engineering change for the card and hands a review it cannot show whole to the person", () => {
+  const service = read("lib/amux/v22ResultReviewService.ts");
+  assert.match(service, /er\."amuxAttemptId" = v\."attemptId" AND i\."kind" IN \('publish', 't2_draft'\)/);
+  assert.match(service, /patch: row\.patchBody \?\? null, pullNumber: row\.pullNumber \?\? null/);
+  assert.match(service, /if \(card\) cards\.push\(card\);\s+else unfilable\.push\(row\.reviewId\);/,
+    "a card that is null (a patch that does not fit whole) is handed to the person, once, with its audit");
 });
 
 test("an answer decides only by its fixed words, with the delivery's precedence", () => {

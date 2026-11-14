@@ -15,6 +15,7 @@ import {
   DM_THROUGHPUT_PER_HOUR,
   dmCardText,
   dmCardTextBytes,
+  dmRunUnavailableIncident,
   encodeRepositoryPath,
   irreversibleTermCategories,
   isFetchableTreeMode,
@@ -155,6 +156,23 @@ test("irreversible terms: Korean substrings, English whole words, case-insensiti
   assert.deepEqual(irreversibleTermCategories("Use a dropdown for the shipping address"), []);
   assert.deepEqual(irreversibleTermCategories("Count the tokens per request"), []);
   assert.deepEqual(irreversibleTermCategories("Which retry approach is simpler?"), []);
+});
+
+test("a DM run that ended unavailable is an operational incident naming only instance and request", () => {
+  const incident = dmRunUnavailableIncident("decision-maker-anthropic", "d85a4806-a06a-40a4-ba65-8ecccdfd4da8");
+  assert.equal(incident.code, "AMUX_DM_RUN_UNAVAILABLE");
+  assert.equal(incident.severity, "warning");
+  assert.deepEqual(incident.context, { instance: "decision-maker-anthropic", requestId: "d85a4806-a06a-40a4-ba65-8ecccdfd4da8" });
+  assert.deepEqual(dmRunUnavailableIncident({ x: 1 }, 7).context, { instance: null, requestId: null });
+});
+
+test("Korean access terms name a grant or change, not a plan's entitlement", () => {
+  // AMUX-PRICINGCOPY-002's context: a plan list that tells the tiers apart is not an access change.
+  assert.deepEqual(irreversibleTermCategories("플랜별 목록은 Free·Pro·Max 권한을 구분합니다."), []);
+  assert.deepEqual(irreversibleTermCategories("Pro 플랜 권한에 이미지 생성이 있나요?"), []);
+  for (const text of ["저장소 쓰기 권한을 주세요", "관리자 권한을 부여할까요?", "권한 변경이 필요합니다", "접근 권한을 열어 주세요", "접근 설정을 바꿀까요?"]) {
+    assert.deepEqual(irreversibleTermCategories(text), ["access"], text);
+  }
 });
 
 test("the term check reads every card text field, including options and context", () => {
