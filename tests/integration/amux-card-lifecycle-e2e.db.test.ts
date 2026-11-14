@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 import type { Session } from "next-auth";
 
@@ -239,6 +239,50 @@ test("the owner settles the card first: the later merge is recorded and nothing 
     assert.equal(done.status, "done");
     assert.equal(done.revision, 5);
     assert.equal(((await bindingRow(tx, card)).mergeObservation as { merged: boolean }).merged, true);
+    assert.equal(await openMismatches(tx, card), 0);
+  });
+});
+
+test("the Decision Maker approves the review draft from the owner queue: recorded only, and the approver's merge still completes the card", async () => {
+  // Owner decision 2026-11-13 (S1): the approval is kept for the merge lane;
+  // the card waits in review with its escalation open until the merge.
+  await lifecycle(async (tx) => {
+    const card = await publishedCard(tx);
+    const patch = ["diff --git a/lib/ordinary.ts b/lib/ordinary.ts", "@@ -1 +1 @@", "-a", "+b", ""].join("\n");
+    await withoutTriggers(tx, () => tx.$executeRaw`INSERT INTO "EngineeringAgentWorkItem"
+      ("id", "kind", "state", "causeKey", "runId", "patchBody", "patchDigest", "baseSha", "expectedTreeId",
+       "updatedAt", "closedAt")
+      VALUES (${randomUUID()}, 'publish', 'published', ${`publish_review:${card.runId}`}, ${card.runId}, ${patch},
+        ${createHash("sha256").update(patch, "utf8").digest("hex")}, ${BASE}, ${"f".repeat(40)},
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`);
+    const { recordDecisionMakerSwitchByOperator } = await import("@/lib/amux/decisionMakerSwitchStore");
+    await recordDecisionMakerSwitchByOperator(tx, { session: owner(), scope: "kill_switch", value: "off" });
+    await fixtureCommitted(tx);
+    const { withAmuxDbBoundary, AMUX_DB_BOUNDARIES } = await import("@/lib/amux/dbBoundary");
+    const { readAmuxDmOwnerSettlementSyncRows, applyAmuxDmOwnerSettlementDecision } =
+      await import("@/lib/amux/dmOwnerSettlementService");
+    const { amuxDmOwnerSettlementId } = await import("@/lib/amux/dmOwnerSettlementCore");
+    const settlementId = amuxDmOwnerSettlementId(card.escalationId);
+    const rows = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementSync,
+      (inner) => readAmuxDmOwnerSettlementSyncRows(inner, { enabled: true }));
+    const filed = rows.pending.find((row) => row.settlementId === settlementId);
+    assert.equal(filed?.kind, "t2_pr");
+    assert.equal(filed?.bindingId, card.bindingId);
+    const applied = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementApply,
+      (inner, context) => applyAmuxDmOwnerSettlementDecision(inner, { settlementId, answer: { decision: "approve" },
+        source: "dm", requestId: "req-lifecycle-approve", now: context.dbNow }));
+    assert.deepEqual(applied, { applied: true, outcome: "approved" });
+    const [recorded] = await tx.$queryRaw<Array<{ state: string; approvedHeadSha: string; approvedDiffDigest: string }>>`
+      SELECT "state", "approvedHeadSha", "approvedDiffDigest" FROM "AmuxDmOwnerSettlement" WHERE "id" = ${settlementId}`;
+    assert.deepEqual(recorded, { state: "applied", approvedHeadSha: HEAD, approvedDiffDigest: DIFF });
+    assert.equal((await cardRow(tx, card)).status, "review", "the approval alone changes nothing");
+    assert.equal((await escalationRow(tx, card)).status, "open");
+
+    assert.equal((await observe(card, () => mergedPull({ mergedByApprover: true })))?.outcome, "completed");
+    assert.equal((await cardRow(tx, card)).status, "done");
+    const after = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementSync,
+      (inner) => readAmuxDmOwnerSettlementSyncRows(inner, { enabled: true }));
+    assert.ok(!after.pending.some((row) => row.taskId === card.taskId), "a done card is not filed again");
     assert.equal(await openMismatches(tx, card), 0);
   });
 });

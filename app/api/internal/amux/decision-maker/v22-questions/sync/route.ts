@@ -34,6 +34,13 @@ import {
   readAmuxV22ResultReviewSyncRows,
   recordAmuxV22ResultReviewsUnfilable,
 } from "@/lib/amux/v22ResultReviewService";
+import { amuxDmOwnerSettlementEnabled } from "@/lib/amux/dmOwnerSettlementCore";
+import {
+  openAmuxDmOwnerSettlementCards,
+  readAmuxDmOwnerSettlementSyncRows,
+  recordAmuxDmOwnerSettlementsUnfilable,
+} from "@/lib/amux/dmOwnerSettlementService";
+import { resumeAmuxDmOwnerSettlementRemake } from "@/lib/amux/dmOwnerSettlementRemake";
 import { engineeringAgentT2DmReviewEnabled } from "@/lib/engineeringAgentT2DmReviewCore";
 import {
   engineeringAgentT2DmCards,
@@ -64,6 +71,11 @@ import {
  * TOMVERSE_AMUX_V22_RESULT_REVIEW_DM=enabled), and while
  * TOMVERSE_AMUX_DM_APPROVER=enabled one Decision Maker proposal per tick is
  * applied without the operator (lib/amux/dmAutoApplyService.ts).
+ *
+ * Owner decision 2026-11-13: a stopped v22 Task in the owner queue that no
+ * other path holds rides the tick as an owner queue settlement
+ * (lib/amux/dmOwnerSettlementService.ts; new settlements and cards only while
+ * TOMVERSE_AMUX_DM_OWNER_SETTLEMENT=enabled), before the T2 drafts.
  *
  * Operator decision 2026-11-11: an engineering agent T2 draft rides the tick
  * last, for advice only (lib/engineeringAgentT2DmReviewService.ts; new cards
@@ -112,6 +124,26 @@ export async function POST(request: Request) {
         console.warn(JSON.stringify({ subsystem: "amux", event: "v22_result_review_sync_failed" }));
         return { pending: [], closing: [] };
       });
+      // A remake an earlier tick claimed and did not finish: its idea read back,
+      // never filed again, and its cards closed or the person told.
+      await resumeAmuxDmOwnerSettlementRemake().catch(() => {
+        console.warn(JSON.stringify({ subsystem: "amux", event: "dm_owner_settlement_resume_failed" }));
+      });
+      const settlementOn = amuxDmOwnerSettlementEnabled();
+      const settlement = await withAmuxDbBoundary(
+        AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementSync,
+        (tx) => readAmuxDmOwnerSettlementSyncRows(tx, { enabled: settlementOn })).then(async (rows) => {
+        if (!settlementOn) return { pending: [], closing: rows.closing };
+        const opened = await openAmuxDmOwnerSettlementCards(rows);
+        if (opened.unfilable.length > 0)
+          await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerOwnerSettlementHandoff,
+            (tx, context) => recordAmuxDmOwnerSettlementsUnfilable(tx,
+              { settlementIds: opened.unfilable, now: context.dbNow }));
+        return { pending: opened.cards, closing: rows.closing };
+      }).catch(() => {
+        console.warn(JSON.stringify({ subsystem: "amux", event: "dm_owner_settlement_sync_failed" }));
+        return { pending: [], closing: [] };
+      });
       const t2 = await withAmuxDbBoundary(
         AMUX_DB_BOUNDARIES.engineeringAgentT2DmReviewRead,
         (tx) => readEngineeringAgentT2DmSyncRows(tx)).then(async (rows) => {
@@ -133,9 +165,10 @@ export async function POST(request: Request) {
         cursor: cursor.move === "advance" ? { move: "advance",
           judged_at_ms: cursor.judgedAtMs, request_id: cursor.requestId } :
           { move: cursor.move },
-        pending: [...cards, ...cardClose.pending, ...review.pending, ...t2.pending]
-          .slice(0, AMUX_V22_QUESTION_SYNC_LIMIT),
-        closing: [...rows.closing, ...cardClose.closing, ...review.closing, ...t2.closing]
+        pending: [...cards, ...cardClose.pending, ...review.pending, ...settlement.pending,
+          ...t2.pending].slice(0, AMUX_V22_QUESTION_SYNC_LIMIT),
+        closing: [...rows.closing, ...cardClose.closing, ...review.closing, ...settlement.closing,
+          ...t2.closing]
           .slice(0, AMUX_V22_QUESTION_SYNC_LIMIT)
           .map((row) => ({ question_id: row.questionId, card_id: row.cardId })),
       });
