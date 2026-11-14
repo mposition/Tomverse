@@ -242,8 +242,9 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
    삭제·delete·drop·truncate·덮어쓰기, migration, 결제·환불·청구, 외부 게시·발송·연락, secret·token·
    password·API key의 제공, 권한·접근 설정 변경, 정책·workflow·branch protection 변경. 정확한 대소문자·
    어형 규칙과 검사 문자열은 S1의 테스트 고정값이 정한다. 운영자 결정 2026-11-14: 한국어 "권한"은 혼자서는
-   걸리지 않는다. "Free·Pro·Max 권한"처럼 플랜 이용 범위도 뜻하기 때문이다(AMUX-PRICINGCOPY-002). 권한을 주거나
-   바꾸는 표현(권한 부여·변경·추가·회수, 접근·쓰기·관리자 권한, 접근 설정)만 걸린다.
+   걸리지 않는다. "Free·Pro·Max 권한을 구분"처럼 플랜 이용 범위도 뜻하기 때문이다(AMUX-PRICINGCOPY-002). 권한의
+   종류(접근·읽기·쓰기·관리자·저장소 권한 등)이거나, "권한" 뒤에 주다·부여·변경·수정·설정·추가·회수·요청·필요 같은 동사가
+   오면 걸린다. 목록은 여전히 넓게 잡는다.
 4. `credential`·`access`·`external` 질문의 `resolution`이 `decision_only`가 아님. worker는 이 세 유형에
    `resolution`(`needs_secret`·`needs_permission_change`·`needs_contact`·`decision_only`)을 적는다. 비밀값
    제공, 권한 변경, 제3자 연락은 DM이 도울 수 없는 일이다. DM은 비밀값을 받지도 주지도 않는다.

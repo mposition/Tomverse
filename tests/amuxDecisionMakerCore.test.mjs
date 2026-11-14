@@ -170,7 +170,13 @@ test("Korean access terms name a grant or change, not a plan's entitlement", () 
   // AMUX-PRICINGCOPY-002's context: a plan list that tells the tiers apart is not an access change.
   assert.deepEqual(irreversibleTermCategories("플랜별 목록은 Free·Pro·Max 권한을 구분합니다."), []);
   assert.deepEqual(irreversibleTermCategories("Pro 플랜 권한에 이미지 생성이 있나요?"), []);
-  for (const text of ["저장소 쓰기 권한을 주세요", "관리자 권한을 부여할까요?", "권한 변경이 필요합니다", "접근 권한을 열어 주세요", "접근 설정을 바꿀까요?"]) {
+  assert.deepEqual(irreversibleTermCategories("플랜 권한에 따라 문구가 다릅니다"), []);
+  for (const text of [
+    "저장소 쓰기 권한을 주세요", "관리자 권한을 부여할까요?", "권한 변경이 필요합니다", "접근 권한을 열어 주세요", "접근 설정을 바꿀까요?",
+    // Independent review r-20261114-140745-6ebb4e: real access changes the narrow list missed.
+    "저장소 읽기 권한을 줘도 될까요?", "사용자의 권한을 수정할까요?", "권한 설정을 바꿀까요?", "봇에게 권한이 필요합니다",
+    "이 계정의 권한을 회수할까요?", "Pro 사용자에게 권한을 추가할까요?",
+  ]) {
     assert.deepEqual(irreversibleTermCategories(text), ["access"], text);
   }
 });

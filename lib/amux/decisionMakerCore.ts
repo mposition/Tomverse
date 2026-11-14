@@ -156,6 +156,8 @@ export const DM_ESCALATION_MAX_BYTES = 1024;
 export const DM_IRREVERSIBLE_TERMS: ReadonlyArray<{
   category: string;
   korean: readonly string[];
+  /** Korean forms a substring cannot say: a word plus any verb of a set. */
+  koreanPatterns?: readonly RegExp[];
   english: readonly string[];
 }> = [
   { category: "main_merge", korean: ["main 병합", "main에 병합", "main으로 병합"], english: ["merge to main", "merge into main", "merge main"] },
@@ -165,16 +167,28 @@ export const DM_IRREVERSIBLE_TERMS: ReadonlyArray<{
   { category: "money", korean: ["결제", "환불", "청구"], english: ["payment", "refund", "charge", "invoice"] },
   { category: "outbound", korean: ["게시", "발송", "연락"], english: ["publish", "post to", "send to", "send email", "send an email", "email the", "tweet", "notify", "contact"] },
   { category: "secret", korean: ["비밀번호", "비밀값", "토큰", "API 키"], english: ["secret", "token", "password", "api key", "apikey", "credential"] },
-  // Korean "권한" alone also names a plan's entitlement ("Free·Pro·Max 권한"), which
-  // sent plain pricing questions to the operator (AMUX-PRICINGCOPY-002, owner
-  // decision 2026-11-14). Only a grant or change of access is a hit.
-  { category: "access", korean: ["권한 부여", "권한을 부여", "권한 변경", "권한을 변경", "권한을 바꾸", "권한을 주", "권한 추가", "권한을 추가", "권한 회수", "권한을 회수", "권한을 열", "권한 상승", "권한을 올리", "접근 권한", "쓰기 권한", "관리자 권한", "접근 설정"], english: ["permission", "permissions", "access control"] },
+  // Korean "권한" alone also names a plan's entitlement ("Free·Pro·Max 권한을
+  // 구분합니다"), which sent plain pricing questions to the operator
+  // (AMUX-PRICINGCOPY-002, owner decision 2026-11-14). A hit is now a kind of
+  // access ("읽기 권한", "관리자 권한") or "권한" followed by a verb that grants,
+  // changes, asks for or needs it ("권한을 줘도", "권한을 수정", "권한 설정") --
+  // the list still errs wide.
+  {
+    category: "access",
+    korean: ["접근 설정"],
+    koreanPatterns: [
+      /(?:접근|읽기|쓰기|실행|관리자|관리|소유자|어드민|admin|root|write|read|repo|저장소|배포|운영)\s*권한/i,
+      /권한\s*(?:을|를|이|가|은|는|의|도|만)?\s*(?:주|줘|줄|준|부여|변경|바꾸|바꿔|바꿀|바뀌|수정|설정|추가|삭제|제거|회수|열|올리|올려|상승|허용|받|얻|요청|필요|빼|낮추|낮춰|넓히|넓혀|확대|축소|위임|할당|박탈)/,
+    ],
+    english: ["permission", "permissions", "access control"],
+  },
   { category: "gate", korean: ["정책 변경", "정책 개정", "정책을 바꾸", "정책을 고치", "워크플로"], english: ["policy change", "change the policy", "amend the policy", "workflow", "workflows", "branch protection"] },
 ];
 
 const englishTermPatterns = DM_IRREVERSIBLE_TERMS.map((entry) => ({
   category: entry.category,
   korean: entry.korean,
+  koreanPatterns: entry.koreanPatterns ?? [],
   english: entry.english.map(
     (term) => new RegExp(`(?<![A-Za-z0-9_])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[ -]/g, "[ -]")}(?![A-Za-z0-9_])`, "i"),
   ),
@@ -204,7 +218,8 @@ export const dmRunUnavailableIncident = (instance: unknown, requestId: unknown) 
 /** The categories of the term list that a text hits, in list order. Never the text. */
 export const irreversibleTermCategories = (text: string): string[] =>
   englishTermPatterns
-    .filter((entry) => entry.korean.some((term) => text.includes(term)) || entry.english.some((pattern) => pattern.test(text)))
+    .filter((entry) => entry.korean.some((term) => text.includes(term)) ||
+      entry.koreanPatterns.some((pattern) => pattern.test(text)) || entry.english.some((pattern) => pattern.test(text)))
     .map((entry) => entry.category);
 
 /**
