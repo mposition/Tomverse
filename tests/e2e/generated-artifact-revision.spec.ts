@@ -368,6 +368,7 @@ for (const revisionMode of ["workbook", "workbook-values"]) {
 
 test("ordinary uploads finishing after a prepared revision cannot create a sixth chip @ui-risk", async ({ page }) => {
   await open(page, true, ["md"]);
+  await mockAttachmentUpload(page);
   let sourcePending: Route | null = null;
   let uploadPending: Route | null = null;
   const removed: string[] = [];
@@ -388,6 +389,7 @@ test("ordinary uploads finishing after a prepared revision cannot create a sixth
   })));
   await expect.poll(() => uploadPending !== null).toBe(true);
   await copied(page, sourcePending!, "artifact-0");
+  await expect(page.getByTestId("attachment-complete").filter({ hasText: "report.md" })).toHaveCount(1);
   await uploadPending!.fallback();
   await expect.poll(() => removed.length).toBe(1);
   await expect(page.getByTestId("attachment-complete")).toHaveCount(5);
