@@ -149,7 +149,8 @@ export const putArtifactObject = async (input: {
     format: input.format,
   });
 
-  const canonicalSpec = generatedArtifactRevisionEnabled() && input.format === "xlsx"
+  const revisionEnabled = generatedArtifactRevisionEnabled();
+  const canonicalSpec = revisionEnabled && input.format === "xlsx"
     ? parseCanonicalWorkbookSpec(input.canonicalSpec) : null;
 
   await writeR2Object(objectKey, Buffer.from(input.bytes), input.mediaType);
@@ -164,8 +165,10 @@ export const putArtifactObject = async (input: {
     objectKey,
     modelId: input.modelId,
     ...(canonicalSpec ? { canonicalSpec } : {}),
-    ...(input.parentArtifactId ? { parentArtifactId: input.parentArtifactId } : {}),
-    lineageId: input.lineageId ?? id,
+    ...(revisionEnabled ? {
+      ...(input.parentArtifactId ? { parentArtifactId: input.parentArtifactId } : {}),
+      lineageId: input.lineageId ?? id,
+    } : {}),
   };
 };
 
@@ -188,10 +191,12 @@ export const persistArtifactRows = async (
   }
 ): Promise<number> => {
   // Metadata never grants access: every source edge is verified again inside
-  // the message transaction. A deleted source may leave its independently
-  // owned input receipt, but can no longer be exposed as a live parent.
+  // the message transaction. If its evidence has disappeared, keep the answer
+  // and the new file as an independent root without claiming an unverified edge.
+  const revisionEnabled = generatedArtifactRevisionEnabled();
   const lineage = new Map<string, { parentArtifactId: string | null; lineageId: string }>();
-  for (const artifact of input.stored) {
+  for (const artifact of revisionEnabled ? input.stored : []) {
+    lineage.set(artifact.id, { parentArtifactId: null, lineageId: artifact.id });
     const lineageId = artifact.lineageId ?? artifact.id;
     if (!artifact.parentArtifactId && lineageId === artifact.id) {
       lineage.set(artifact.id, { parentArtifactId: null, lineageId });
@@ -206,7 +211,7 @@ export const persistArtifactRows = async (
       });
       if (parent) {
         const actualLineageId = parent.lineageId ?? parent.id;
-        if (actualLineageId !== lineageId || parent.id === artifact.id) throw new Error("Invalid generated artifact source.");
+        if (actualLineageId !== lineageId || parent.id === artifact.id) continue;
         lineage.set(artifact.id, { parentArtifactId: parent.id, lineageId });
         continue;
       }
@@ -221,7 +226,7 @@ export const persistArtifactRows = async (
         sourceLineageId: lineageId,
       }, select: { id: true } }),
     ]);
-    if (!boundReceipt && !uploadReceipt) throw new Error("Invalid generated artifact source.");
+    if (!boundReceipt && !uploadReceipt) continue;
     lineage.set(artifact.id, { parentArtifactId: null, lineageId });
   }
   const rows = [
@@ -238,7 +243,7 @@ export const persistArtifactRows = async (
       status: "ready",
       objectKey: artifact.objectKey,
       modelId: artifact.modelId,
-      ...(generatedArtifactRevisionEnabled() && artifact.canonicalSpec ? { canonicalSpec: artifact.canonicalSpec as unknown as Prisma.InputJsonValue } : {}),
+      ...(revisionEnabled && artifact.canonicalSpec ? { canonicalSpec: artifact.canonicalSpec as unknown as Prisma.InputJsonValue } : {}),
       ...lineage.get(artifact.id),
     })),
     // A failed generation is recorded too, so reopening the conversation still

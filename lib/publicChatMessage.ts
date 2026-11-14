@@ -6,6 +6,7 @@ import {
   toPublicMessageAttachment,
 } from "@/lib/messageAttachmentCore";
 import type { ChatResponseAttemptRecord } from "@/lib/chatResponseAttemptCore";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 
 /**
  * The one allowlist used whenever an authenticated Chat message crosses the
@@ -119,7 +120,7 @@ export const toPublicChatMessage = (row: PublicChatMessageRow) => ({
           status: artifact.status,
           failureCode: artifact.failureCode,
           modelId: artifact.modelId,
-          ...(artifact.lineageId ? { lineageId: artifact.lineageId, parentArtifactId: artifact.parentArtifactId ?? null } : {}),
+          ...(generatedArtifactRevisionEnabled() && artifact.lineageId ? { lineageId: artifact.lineageId, parentArtifactId: artifact.parentArtifactId ?? null } : {}),
         })),
       }
     : {}),

@@ -149,12 +149,30 @@ test("branches persist actual parent identities and never group another same-nam
 
 test("foreign owner, conversation, source and invented lineage cannot create an output edge", async () => {
   const source = await seed(), foreign = await seed();
-  await assert.rejects(child(source, foreign.id, foreign.id));
-  await assert.rejects(child(source, randomUUID(), randomUUID()));
+  const foreignParent = await child(source, foreign.id, foreign.id);
+  const inventedParent = await child(source, randomUUID(), randomUUID());
+  const mismatchedGroup = await child(source, source.id, foreign.id);
   const other = randomUUID();
   await prisma.conversation.create({ data: { id: other, userId: source.userId, title: "Revision", selectedModels: '["gpt-6-luna"]' } });
-  await assert.rejects(child({ ...source, conversationId: other }, source.id, source.id));
-  assert.equal(await prisma.messageArtifact.count({ where: { userId: source.userId } }), 1);
+  const wrongConversation = await child({ ...source, conversationId: other }, source.id, source.id);
+  for (const id of [foreignParent, inventedParent, mismatchedGroup, wrongConversation]) {
+    const row = await prisma.messageArtifact.findUniqueOrThrow({ where: { id } });
+    assert.equal(row.parentArtifactId, null);
+    assert.equal(row.lineageId, id);
+    assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: row.messageId } })).content, "Revision");
+  }
+  assert.equal(await prisma.messageArtifact.count({ where: { userId: source.userId } }), 5);
+});
+
+test("source and receipt deletion before final persistence keeps the answer and file without an unverified edge", async () => {
+  const source = await seed(), upload = await prepare(source), bound = await bind(source, upload.uploadId);
+  await prisma.message.deleteMany({ where: { id: { in: [source.messageId, bound.messageId] } } });
+  await prisma.messageAttachmentUpload.delete({ where: { id: upload.uploadId } });
+  const id = await child(source);
+  const saved = await prisma.messageArtifact.findUniqueOrThrow({ where: { id } });
+  assert.equal(saved.parentArtifactId, null); assert.equal(saved.lineageId, id);
+  assert.deepEqual(saved.canonicalSpec, source.canonical);
+  assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: saved.messageId } })).content, "Revision");
 });
 
 test("version reads are owner/unlock scoped, default-off and reject foreign cursors", async () => {
@@ -211,16 +229,19 @@ test("resend copies preserve independent snapshots after the original output is 
   assert.deepEqual(copied.sourceCanonicalSpec, source.canonical); assert.notEqual(copied.objectKey, bound.objectKey);
 });
 
-test("flag-off ordinary generation stores no canonical content", async () => {
+test("flag-off ordinary generation stores no canonical content or lineage even from an in-flight revision", async () => {
   const source = await seed(); process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "false";
   const rendered = render(source.canonical.spec);
   const stored = await artifactStorage.putArtifactObject({ userId: source.userId, conversationId: source.conversationId,
     ordinal: 1, format: "xlsx", filename: "new.xlsx", mediaType: rendered.mediaType, bytes: rendered.bytes,
-    modelId: "gpt-6-luna", canonicalSpec: source.canonical });
+    modelId: "gpt-6-luna", canonicalSpec: source.canonical, parentArtifactId: source.id, lineageId: source.id });
   assert.equal(stored.canonicalSpec, undefined);
+  assert.equal(stored.parentArtifactId, undefined); assert.equal(stored.lineageId, undefined);
   await prisma.$transaction(tx => artifactStorage.persistArtifactRows(tx, { userId: source.userId,
-    conversationId: source.conversationId, messageId: source.messageId, stored: [stored], failed: [] }));
-  assert.equal((await prisma.messageArtifact.findUniqueOrThrow({ where: { id: stored.id } })).canonicalSpec, null);
+    conversationId: source.conversationId, messageId: source.messageId,
+    stored: [{ ...stored, parentArtifactId: source.id, lineageId: source.id, canonicalSpec: source.canonical }], failed: [] }));
+  const row = await prisma.messageArtifact.findUniqueOrThrow({ where: { id: stored.id } });
+  assert.equal(row.canonicalSpec, null); assert.equal(row.parentArtifactId, null); assert.equal(row.lineageId, null);
 });
 
 test("account JSON includes the owner's retained canonical content but no storage keys or foreign content", async () => {

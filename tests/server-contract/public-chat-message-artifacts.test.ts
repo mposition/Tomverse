@@ -119,7 +119,10 @@ test("a message that made no file has no artifacts key at all", async () => {
   assert.equal("artifacts" in toPublicChatMessage(row([])), false);
 });
 
-test("recorded lineage survives reload while retained workbook content stays private", async () => {
+test("recorded lineage survives reload while retained workbook content stays private", async (t) => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+  t.after(() => { if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED; else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous; });
   const { toPublicChatMessage } = await load();
   const message = toPublicChatMessage(row([{
     id: "revision-2", ordinal: 0, format: "xlsx", filename: "same.xlsx",
@@ -131,6 +134,21 @@ test("recorded lineage survives reload while retained workbook content stays pri
   assert.equal(message.artifacts![0].parentArtifactId, "source-1");
   assert.equal(message.artifacts![0].lineageId, "root-1");
   assert.doesNotMatch(JSON.stringify(message), /canonicalSpec|confidential|workbook content|private\/object/);
+});
+
+test("disabling revisions hides previously recorded lineage without removing the file card", async (t) => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "false";
+  t.after(() => { if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED; else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous; });
+  const { toPublicChatMessage } = await load();
+  const message = toPublicChatMessage(row([{
+    id: "revision-2", ordinal: 0, format: "xlsx", filename: "same.xlsx",
+    mediaType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", byteSize: 100,
+    status: "ready", failureCode: null, modelId: "gpt-6-luna", parentArtifactId: "source-1", lineageId: "root-1",
+  }]));
+  assert.equal(message.artifacts![0].id, "revision-2");
+  assert.equal(message.artifacts![0].parentArtifactId, undefined);
+  assert.equal(message.artifacts![0].lineageId, undefined);
 });
 
 test("the conversation GET reads messages through the shared select and serializer", () => {

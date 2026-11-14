@@ -14,22 +14,22 @@ type Fixture = { enabled: boolean; hold: boolean; release?: () => void; fails: n
   removed: string[]; sends: Array<{ text: string; uploads: string[] }>; owner: string; lose?: () => void; values: boolean; paged: boolean;
   uploadHold: boolean; uploadStarted: boolean; releaseUpload?: () => void; holdSend: boolean; releaseSend?: () => void; textOnly: boolean };
 
-async function openConversation(page: Page, name = "Revision source") {
-  await page.getByRole("button", { name: "Conversations", exact: true }).click();
+async function openConversation(page: Page, name = "Revision source", label = "Conversations") {
+  await page.getByRole("button", { name: label, exact: true }).click();
   await page.locator(".conversation-row").filter({ hasText: name }).click();
   await expect(input(page)).toBeEnabled();
 }
-async function open(page: Page, options: { enabled?: boolean; formats?: string[] } = {}) {
+async function open(page: Page, options: { enabled?: boolean; formats?: string[]; language?: "en" | "ko" } = {}) {
   const formats = options.formats ?? ["md", "md"];
   const rows = [{ id: "source-chat", title: "Revision source", selectedModels: ["demo"], surface: "chat", messages: formats.flatMap((format, index) => [
     { id: `user-${index}`, role: "user", content: "Create a file" },
     { id: `answer-${index}`, role: "assistant", content: "Created a file", modelId: "demo", artifacts: [artifact(index === 0 ? "source-old" : "source-new", index === 0 ? null : "source-old", format)] },
   ]) }, { id: "other-chat", title: "Other conversation", selectedModels: ["demo"], surface: "chat", messages: [] }];
-  await page.addInitScript(({ storage, rows, enabled }) => {
+  await page.addInitScript(({ storage, rows, enabled, language }) => {
     if (!localStorage.getItem(storage)) localStorage.setItem(storage, JSON.stringify(rows));
-    localStorage.setItem(storage + ":session", "signed-in"); localStorage.setItem("tomverse-language", "en");
+    localStorage.setItem(storage + ":session", "signed-in"); localStorage.setItem("tomverse-language", language);
     (window as unknown as { revisionEnabled: boolean }).revisionEnabled = enabled;
-  }, { storage, rows, enabled: options.enabled !== false });
+  }, { storage, rows, enabled: options.enabled !== false, language: options.language ?? "en" });
   await page.route("https://tomverse.app/**", route => route.abort());
   await page.route("**/src/main.tsx*", async route => {
     const response = await route.fetch();
@@ -70,12 +70,20 @@ async function open(page: Page, options: { enabled?: boolean; formats?: string[]
     `;
     await route.fulfill({ response, body: (await response.text()).replace("createRoot(container).render(", fixture + "createRoot(container).render(") });
   });
-  await page.goto("/"); await openConversation(page);
+  await page.goto("/"); await openConversation(page, "Revision source", options.language === "ko" ? "대화" : "Conversations");
   await expect(cards(page)).toHaveCount(formats.length);
 }
 const fixture = (page: Page, update: Partial<Fixture>) => page.evaluate(update => Object.assign((window as unknown as { artifactRevisionFixture: Fixture }).artifactRevisionFixture, update), update);
 const read = (page: Page) => page.evaluate(() => (window as unknown as { artifactRevisionFixture: Fixture }).artifactRevisionFixture);
 const release = (page: Page) => page.evaluate(() => (window as unknown as { artifactRevisionFixture: Fixture }).artifactRevisionFixture.release!());
+
+test("Native Korean workbook preparation keeps the visible localized request and the user's draft", async ({ page }) => {
+  await open(page, { formats: ["xlsx"], language: "ko" });
+  await input(page).fill("금액을 42로 바꿔 주세요");
+  await cards(page).first().getByTestId("native-artifact-revise").click();
+  await expect(input(page)).toHaveValue(/첨부한 report.xlsx.*통합 문서 구조.*\n\n금액을 42로 바꿔 주세요/);
+  expect((await read(page)).sends).toHaveLength(0);
+});
 
 test("Native revision is capability-off by default while Save file remains", async ({ page }) => {
   await open(page, { enabled: false });
