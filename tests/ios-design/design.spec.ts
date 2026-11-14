@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mobileCopy } from "../../locales/mobile";
 
 for (const theme of ["light", "dark"]) {
-  test(`iOS workspaces, controls and settings fit in ${theme}`, async ({ page }, info) => {
+  test(`Android's shared workspace, controls and settings fit iOS in ${theme}`, async ({ page }, info) => {
     const copy = mobileCopy.ko;
     await page.addInitScript(theme => {
       localStorage.setItem("tomverse-language", "ko");

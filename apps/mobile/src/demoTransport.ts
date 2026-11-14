@@ -1,4 +1,3 @@
-import { createDemoWorkspace } from "./demoWorkspace";
 import type { ChatTransport, Conversation, UserPreferences, MemoryPreferences, HistoryProject, ChatSummary } from "./chatTransport";
 
 /** Synthetic transport. Imported only by the explicitly selected development demo. */
@@ -17,9 +16,7 @@ export function createDemoTransport(): ChatTransport {
   ];
   const preferences = (): UserPreferences => JSON.parse(localStorage.getItem(key + ":preferences") ?? JSON.stringify({ theme: "system", language: "en", defaultModel: "demo", timeZone: "UTC", imageHandoffAutoGenerate: false, reviewEasyEffectiveProviders: ["Synthetic A", "Synthetic B", "Synthetic C"], reviewEasyProviderOptions: ["Synthetic A", "Synthetic B", "Synthetic C"], reviewEasyMaxProviders: 3 }));
   const memory = (): MemoryPreferences => JSON.parse(localStorage.getItem(key + ":memory") ?? JSON.stringify({ masterEnabled: true, styleEnabled: true, defaultConversationMode: "on" }));
-  const workspaceFixture = createDemoWorkspace(key, item => write([item, ...read()]));
   return {
-    workspace: workspaceFixture.workspace,
     history: {
       projects: async () => projects(),
       saveProject: async (id, name) => { const rows = projects(); localStorage.setItem(key + ':projects', JSON.stringify(id ? rows.map(row => row.id === id ? { ...row, name } : row) : [...rows, { id: crypto.randomUUID(), name }])); },
@@ -32,16 +29,16 @@ export function createDemoTransport(): ChatTransport {
       password: async (id, password, currentPassword) => { if (password === null && passwords.get(id) !== currentPassword) throw { status: 403 }; if (password) passwords.set(id, password); else passwords.delete(id); unlocked.delete(id); await patch(id, { isLocked: password !== null }); },
       unlock: async (id, password) => { if (passwords.get(id) !== password) throw { status: 403 }; unlocked.add(id); }, unlocked: id => unlocked.has(id),
     },
-    mobileCapabilities: async () => ({ workspace: { assistantEditing: true, assistantKnowledge: true, externalImport: true }, historyActions: true, historyFeatures: { sharing: true, downloads: true }, reviewEasy: true, maxModels: 3, assistants: true, plan: "Max" }),
+    mobileCapabilities: async () => ({ historyActions: true, historyFeatures: { sharing: true, downloads: true }, reviewEasy: true, maxModels: 3, assistants: true, plan: "Max" }),
     preferences: async () => preferences(),
     savePreferences: async input => { localStorage.setItem(key + ":preferences", JSON.stringify({ ...preferences(), ...input })); },
     reportAnswer: async input => { const reports = [...JSON.parse(localStorage.getItem(key + ":reports") ?? "[]"), input]; localStorage.setItem(key + ":reports", JSON.stringify(reports)); return { reference: `TV-DEMO-${reports.length}` }; },
     memoryPreferences: async () => memory(),
     saveMemoryPreferences: async input => { localStorage.setItem(key + ":memory", JSON.stringify(input)); },
-    assistants: async () => workspaceFixture.profiles().map(row => ({ id: row.id, name: row.name })),
+    assistants: async () => [{ id: "demo-assistant", name: "Synthetic writing assistant" }],
     configureTools: async (id, input) => { const items = read(); const item = items.find(value => value.id === id)!; Object.assign(item, input); write(items); return item; },
     listReview: async () => read().filter(item => item.surface === "workspace" || (item.surface === "continuation" && item.productKey === "review")),
-    createReview: async (models, assistantProfileId) => { const item: Conversation = { id: crypto.randomUUID(), title: "New Review", assistantProfileId, selectedModels: models, selectionMode: "manual", webSearchMode: "always", surface: "workspace", messages: [] }; write([item, ...read()]); return item; },
+    createReview: async models => { const item: Conversation = { id: crypto.randomUUID(), title: "New Review", selectedModels: models, selectionMode: "manual", webSearchMode: "always", surface: "workspace", messages: [] }; write([item, ...read()]); return item; },
     configureReview: async (id, models) => { const items = read(); const item = items.find(value => value.id === id)!; item.selectedModels = models; write(items); return item; },
     routeReview: async input => ({ kind: "text", preset: "standard", choices: input.providers.map(provider => ({ provider, modelId: catalog.find(model => model.provider === provider)?.id ?? null })) }),
     sendReview: async (conversation, text, files, signal, progress) => {
@@ -68,8 +65,8 @@ export function createDemoTransport(): ChatTransport {
     // by offset, so the older-messages button can be exercised without a server.
     continuationSource: async (id, offset) => { const item = read().find(value => value.id === id) as (Conversation & { importedPages?: Record<string, NonNullable<Conversation["imported"]>> }) | undefined; const page = offset === undefined ? item?.imported : item?.importedPages?.[String(offset)]; if (!page) throw Error("Conversation unavailable"); return page; },
     load: async (id) => { const item = read().find((c) => c.id === id); if (!item) throw Error("Conversation unavailable"); return item; },
-    create: async (title, assistantProfileId) => {
-      const item: Conversation = { id: crypto.randomUUID(), title: title ?? "New chat", assistantProfileId, selectedModels: ["demo"], selectionMode: "auto", autoSelection: { offered: true }, webSearchMode: "always", surface: "chat", messages: [] };
+    create: async () => {
+      const item: Conversation = { id: crypto.randomUUID(), title: "New chat", selectedModels: ["demo"], selectionMode: "auto", autoSelection: { offered: true }, webSearchMode: "always", surface: "chat", messages: [] };
       write([item, ...read()]); return item;
     },
     models: async () => catalog,
