@@ -383,6 +383,18 @@ export const opensDecisionOnEntry = (to: string) => to === "outcome_unknown";
  * the same key in a deferred trigger and refuses the commit without it.
  */
 export const UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX = "unknown:";
+/**
+ * Read back, then proceed (owner decision 2026-11-14, AMUXFLOW/B1): an
+ * unknown outcome is looked up again by the publisher on its own once its
+ * decision has waited this long, at most this many times per publish item.
+ * A lookup only reads GitHub, and a lookup that settles the result closes
+ * the open decisions with it. Off unless exactly `enabled`.
+ */
+export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_ENV = "ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP";
+export const engineeringAgentUnknownAutoLookupEnabled = (value: string | undefined) =>
+  value?.trim() === "enabled";
+export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS = 30 * 60_000;
+export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DECISIONS = 3;
 export const unknownOutcomeDecisionCauseKey = (workItemId: string, fencingToken: bigint | number) =>
   `${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX}${workItemId}:${fencingToken}`;
 
