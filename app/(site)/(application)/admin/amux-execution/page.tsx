@@ -11,6 +11,7 @@ import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
 import { AmuxDiagnosticsPanel } from "@/components/admin/AmuxDiagnosticsPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
 import { AmuxIncidentBand } from "@/components/admin/AmuxIncidentBand";
+import { AmuxProcessAuditPanel } from "@/components/admin/AmuxProcessAuditPanel";
 import { AmuxDecisionMakerRequestDrawer } from "@/components/admin/AmuxDecisionMakerRequestDrawer";
 import type { DmAdminRequestDetailView } from "@/components/admin/AmuxDecisionMakerRequestDetailPanel";
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
@@ -31,6 +32,7 @@ import { readDecisionMakerRequestDetailForAdmin } from "@/lib/amux/decisionMaker
 import { countDecisionMakerAttention, readDecisionMakerAttentionForAdmin } from "@/lib/amux/decisionMakerAttention";
 import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
 import { readAmuxIdeaLaneBoardForOwner } from "@/lib/amux/ideaLaneBoardRead";
+import { readProcessAuditForAdmin } from "@/lib/amuxProcessAuditStore";
 import { authOptions } from "@/lib/auth";
 
 const TABS = adminNavItemTabs("amux-execution");
@@ -153,6 +155,20 @@ export default async function AdminAmuxExecutionPage({
         <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} laneIdeas={laneIdeas}
           workerChannels={workerChannels} cardList={cardList} ownerQueue={ownerQueue} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
+      </div>
+    );
+  }
+
+  if (tab.id === "process-audit") {
+    // The owner's, as the route table says; decided here too, as the board is.
+    if (!isOwner) notFound();
+    const reportId = typeof query.report === "string" && /^[a-z0-9]{20,40}$/.test(query.report) ? query.report : null;
+    const view = await readProcessAuditForAdmin(reportId).catch(() => null);
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        {drawer}
+        <AmuxProcessAuditPanel view={view} />
       </div>
     );
   }

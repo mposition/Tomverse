@@ -1,0 +1,32 @@
+# The AMUX process analysis agent on the AMUX box, over the signed-in Codex
+# CLI. A systemd --user unit of the account that holds the login. Runbook:
+# docs/ops/amux/process-audit-agent.md
+[Unit]
+Description=Tomverse AMUX process analysis (Codex subscription channel)
+After=network-online.target
+Wants=network-online.target
+ConditionFileNotEmpty=%h/.local/lib/tomverse-amux-process-audit/amux-process-audit-runner.mjs
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+# AMUX_PROCESS_AUDIT_APP_URL, AMUX_PROCESS_AUDIT_SECRET, AMUX_PROCESS_AUDIT_CODEX_BIN,
+# AMUX_PROCESS_AUDIT_CHECKOUT, optional AMUX_PROCESS_AUDIT_MODEL. Mode 600.
+EnvironmentFile=%h/.config/tomverse-amux-process-audit/runner.env
+# The bundle of `npm run build:amux-process-audit-box`: the box's Node has no
+# TypeScript support.
+ExecStart=/usr/bin/node %h/.local/lib/tomverse-amux-process-audit/amux-process-audit-runner.mjs
+# The CLI's forty-five minutes plus the checkout and the two app calls.
+TimeoutStartSec=60min
+# The Codex call is its own process group; this ends one left behind.
+KillMode=control-group
+TimeoutStopSec=10s
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tomverse-amux-process-audit
+
+[Install]
+WantedBy=default.target
