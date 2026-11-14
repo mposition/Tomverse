@@ -171,6 +171,13 @@ test("Korean access terms name a grant or change, not a plan's entitlement", () 
   assert.deepEqual(irreversibleTermCategories("플랜별 목록은 Free·Pro·Max 권한을 구분합니다."), []);
   assert.deepEqual(irreversibleTermCategories("Pro 플랜 권한에 이미지 생성이 있나요?"), []);
   assert.deepEqual(irreversibleTermCategories("플랜 권한에 따라 문구가 다릅니다"), []);
+  // The card that went to the operator on 2026-11-14, question and worker context as filed.
+  assert.deepEqual(irreversibleTermCategories([
+    "이미지 생성 안내를 어떤 플랜의 기능 목록에 추가할까요?",
+    "components/marketing/PricingPageContent.tsx의 모든 언어별 플랜 features 배열에는 현재 이미지 생성이 없습니다. FAQ는 'Where available'로 안내하지만, 플랜별 목록은 Free·Pro·Max 권한을 구분합니다. 이미지 생성 플래그는 server-only lib/marketingClaimGates.ts에 연결되어 있고 확인한 공개 설정 신호는 없습니다. 따라서 어떤 플랜 목록에 문구를 넣을지는 제품 동작을 정하는 선택입니다.",
+  ].join("\n")), []);
+  // A change verb in another sentence does not count against this one.
+  assert.deepEqual(irreversibleTermCategories("문구를 고쳤습니다. 플랜별 목록은 Free·Pro·Max 권한을 구분합니다."), []);
   for (const text of [
     "저장소 쓰기 권한을 주세요", "관리자 권한을 부여할까요?", "권한 변경이 필요합니다", "접근 권한을 열어 주세요", "접근 설정을 바꿀까요?",
     // Independent review r-20261114-140745-6ebb4e: real access changes the narrow list missed.
@@ -180,6 +187,8 @@ test("Korean access terms name a grant or change, not a plan's entitlement", () 
     "봇의 권한을 더 줄까요?", "이 계정의 권한을 모두 회수할까요?", "계정 권한을 높여도 될까요?",
     // Any other "권한" is still a hit, as before; a plan's entitlement with a change verb is too.
     "권한 문제로 실패했습니다", "Pro 플랜 권한을 올릴까요?", "Max 권한을 Free에도 줄까요?",
+    // Independent review r-20261114-141720-0ec475: the verb before the word, in the same sentence.
+    "봇에게 부여할 것은 Pro 권한입니다.", "봇에게 줄 것은 Max 권한입니다.",
   ]) {
     assert.deepEqual(irreversibleTermCategories(text), ["access"], text);
   }

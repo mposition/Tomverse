@@ -162,9 +162,12 @@ const ACCESS_CHANGE_STEM =
 export function koreanAccessTermHit(text: string): boolean {
   for (let at = text.indexOf("권한"); at !== -1; at = text.indexOf("권한", at + 2)) {
     const before = text.slice(Math.max(0, at - 16), at);
+    // The whole sentence, before the word as well as after it ("봇에게 부여할 것은 Pro 권한입니다").
+    const head = text.slice(0, at);
+    const start = Math.max(...[".", "?", "!", "\n", "。"].map((mark) => head.lastIndexOf(mark))) + 1;
     const rest = text.slice(at + 2);
-    const sentenceEnd = rest.search(/[.?!\n。]/);
-    const sentence = sentenceEnd === -1 ? rest : rest.slice(0, sentenceEnd);
+    const end = rest.search(/[.?!\n。]/);
+    const sentence = text.slice(start, at) + (end === -1 ? rest : rest.slice(0, end));
     if (!PLAN_NAME_BEFORE.test(before) || ACCESS_CHANGE_STEM.test(sentence)) return true;
   }
   return false;
