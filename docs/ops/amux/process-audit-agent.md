@@ -14,7 +14,8 @@
   - 읽기 전용 트랜잭션에서 집계 수치와 카드 표시 번호만 읽습니다. 카드 제목·본문, 이메일, 사람이 쓴 글은 읽지 않습니다.
 - **해석·순위·제안**은 AMUX 박스의 Codex CLI 한 번으로 만듭니다(`scripts/amux-process-audit-runner.mjs`).
   - 정액 구독에 로그인된 CLI이고, API 키를 쓰지 않으므로 유료 호출이 아닙니다.
-  - 실행마다 공개 저장소 develop을 홈 밖 임시 폴더(유닛 전용 `/tmp`)에 얕게 새로 받고, 그 안에서 돌아 파일:줄을 인용합니다.
+  - 실행마다 공개 저장소 develop을 홈 밖 임시 폴더(`/tmp` 아래 새 0700 `mkdtemp` 폴더, 실행 뒤 삭제)에 얕게 새로 받고, 그 안에서 돌아 파일:줄을 인용합니다.
+  - 유닛에 `PrivateTmp`를 두지 않습니다. user unit의 `PrivateTmp`는 서비스를 systemd가 만든 user namespace 안에서 띄우고, Ubuntu의 AppArmor userns 제한 아래에서는 그 안의 bwrap이 sandbox namespace를 만들지 못해 Codex가 시작하지 않습니다(2026-11-14 박스, `bwrap: No permissions to create a new namespace`). 같은 날 `NoNewPrivileges=yes`만 둔 `systemd-run --user`에서 sandbox가 홈 읽기와 쓰기를 막는 것을 확인했습니다.
   - 모델이 실행하는 셸 명령은 Codex 권한 profile(`default_permissions="process_audit"`) 안에서 돕니다. 읽을 수 있는 곳은 허용 목록뿐입니다.
     - 허용: `:minimal`(셸에 필요한 최소 시스템 경로), 이번 clone, CLI 자신의 release 폴더(sandbox가 다시 실행하는 바이너리)
     - 막힘: 홈 디렉터리 전체(이 runner의 비밀값, 다른 서비스의 환경 파일, CLI 로그인 파일), 다른 프로세스의 환경 변수(`/proc/*/environ`), 모든 쓰기, 셸의 네트워크
