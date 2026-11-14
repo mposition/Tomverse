@@ -328,12 +328,13 @@ test("the Decision Maker's approval, readied by the app and merged by the merge 
     const ref = `agent/engineering/${card.runId}`;
     const readied: number[] = [];
     const step = await runAmuxDmT2MergeReadyStep({ env: ON, room: true,
-      drafts: [{ number: card.prNumber, head: ref, headSha: HEAD, base: "develop", draft: true }],
+      drafts: [{ number: card.prNumber, head: ref, headSha: HEAD, base: "develop", draft: true, fork: false }],
       ports: {
         pull: async (number) => ({ open: true, pull: { number, nodeId: "PR_node", title: "t", base: "develop", head: ref,
           headSha: HEAD, draft: true, fork: false, labels: [] } }),
         change: async () => ({ state: "open", baseRef: "develop", headRef: ref, headSha: HEAD, diffDigest: DIFF,
-          changedFiles: ["components/Ordinary.tsx"] }),
+          changedFiles: ["components/Ordinary.tsx"], crossRepository: false }),
+        reserve: async () => true,
         markReady: async (pull) => { readied.push(pull.number); },
       } });
     assert.equal(step.outcome, "marked_ready");
@@ -350,7 +351,7 @@ test("the Decision Maker's approval, readied by the app and merged by the merge 
       "https://staging.tomverse.app/api/internal/agents/qa-release/merge-lane/state",
       { method: "POST", headers: { authorization: `Bearer ${LANE}`, "content-type": "application/json" }, body: "{}" }),
     laneEnv, { change: async () => ({ state: "open", baseRef: "develop", headRef: ref, headSha: HEAD, diffDigest: DIFF,
-      changedFiles: ["components/Ordinary.tsx"] }) });
+      changedFiles: ["components/Ordinary.tsx"], crossRepository: false }) });
     assert.equal(state.status, 200, JSON.stringify(state.body));
     assert.deepEqual((state.body.dmApproved as unknown[]).filter((entry) =>
       (entry as { number: number }).number === card.prNumber), [{ number: card.prNumber, headSha: HEAD, headRef: ref }]);

@@ -81,12 +81,13 @@ export type QaReleaseDmApprovedPull = { number: number; headSha: string; headRef
 
 /**
  * Whether the app's report covers this pull request as GitHub lists it now:
- * the same number, head commit and branch, into develop. Anything else -- a
- * moved head, another base -- is a person's, as every `agent` branch was.
+ * the same number, head commit and branch, into develop, from this repository.
+ * Anything else -- a moved head, another base, a fork, or a pull request
+ * GitHub did not say is not one -- is a person's, as every `agent` branch was.
  */
 export const qaReleaseDmApprovedPull = (state: Pick<QaReleaseLaneState, "dmApproved">,
-  pull: Pick<QaReleaseLanePullRequest, "number" | "headRefOid" | "headRefName" | "baseRefName">): boolean =>
-  pull.baseRefName === "develop" && (state.dmApproved ?? []).some((entry) =>
+  pull: Pick<QaReleaseLanePullRequest, "number" | "headRefOid" | "headRefName" | "baseRefName" | "isCrossRepository">): boolean =>
+  pull.baseRefName === "develop" && pull.isCrossRepository === false && (state.dmApproved ?? []).some((entry) =>
     entry.number === pull.number && entry.headSha === pull.headRefOid && entry.headRef === pull.headRefName);
 
 /** What GitHub says about one pull request, read fresh. */

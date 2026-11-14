@@ -54,9 +54,10 @@
  *   every changed path on its merge allow list, is marked ready by the round's own step after
  *   the line (lib/amux/dmT2MergeService.ts, TOMVERSE_AMUX_DM_T2_MERGE, default
  *   off) -- only when no draft in the line waits for runners and its whole
- *   need fits. It stays out of the line: it is reserved like a release (a
- *   write whose answer is unknown too) until its runs show, and its CI then
- *   counts as another workflow's, which the line never sends back.
+ *   need fits, and never from a fork. It stays out of the line: its runners
+ *   are reserved like a release's under this lock before the write
+ *   (ciAdmissionReserveOutsideLine), kept until its runs show, and its CI
+ *   then counts as another workflow's, which the line never sends back.
  *
  * Pure: no clock, network or database. lib/ciAdmissionRound.ts passes what it
  * read and carries out the actions.
@@ -77,6 +78,12 @@ export const CI_ADMISSION_RAMP_MS = 2 * 60 * 1000;
 export const CI_ADMISSION_WAIT_RECHECK_MS = 60_000;
 /** How long a released pull request is reserved before GitHub shows its runs. */
 export const CI_ADMISSION_RELEASE_GRACE_MS = 5 * 60 * 1000;
+/**
+ * How long a reservation outside the line is kept while GitHub still shows a
+ * draft: its write follows the reservation, and a round that read GitHub just
+ * before it must not give its runners away.
+ */
+export const CI_ADMISSION_OUTSIDE_SETTLE_MS = 60_000;
 /** How long after admission marks a pull request ready it is never sent back to draft. */
 export const CI_ADMISSION_HOLD_GRACE_MS = 10 * 60 * 1000;
 /** How long one head is left alone after its branch update was asked for, done or failed. */
@@ -503,12 +510,20 @@ export function evaluateCiAdmission(input: {
   const line = ciAdmissionOrder(state.queue, input.openPulls);
   const open = new Map(input.openPulls.map((pull) => [pull.number, pull]));
   const runningNumbers = new Set([...input.running].map((key) => Number(key.split("@")[0])));
+  const inLineNumbers = new Set(line.map((pull) => pull.number));
   // A reservation lasts until runs for its head show or the grace period ends.
+  // One outside the line was written under the lock before its write
+  // (ciAdmissionReserveOutsideLine), so a round whose GitHub read came first
+  // may still see a draft: it is kept while younger than
+  // CI_ADMISSION_OUTSIDE_SETTLE_MS, and dropped after that if GitHub still
+  // shows a draft -- a write that never happened.
   const released = state.released.filter((entry) => {
     const pull = open.get(entry.number);
+    const settling = !inLineNumbers.has(entry.number) && pull?.draft === true &&
+      nowMs - entry.atMs < CI_ADMISSION_OUTSIDE_SETTLE_MS;
     return (
       nowMs - entry.atMs < CI_ADMISSION_RELEASE_GRACE_MS &&
-      pull?.draft === false &&
+      pull !== undefined && (pull.draft === false || settling) &&
       pull.headSha === entry.headSha &&
       !input.running.has(ciRunKey(entry.number, entry.headSha))
     );
@@ -533,7 +548,6 @@ export function evaluateCiAdmission(input: {
   // Runners nobody here can give back: deploy CI, and runs of pull requests
   // not in the line -- closed, or open with a ci:hold label -- counted at
   // their need when GitHub's jobs are unread, like any other.
-  const inLineNumbers = new Set(line.map((pull) => pull.number));
   const closedRunning = [...runningNumbers]
     .filter((number) => !inLineNumbers.has(number))
     .flatMap((number) => {
@@ -724,6 +738,48 @@ export function evaluateCiAdmission(input: {
             CI_ADMISSION_WAIT_RECHECK_MS,
           )
         : null,
+  };
+}
+
+/** Line statuses of a draft that still waits for runners: the line goes first. */
+const LINE_WAITING = new Set(["waiting", "checking", "next", "updating"]);
+
+/**
+ * Whether the line leaves room for one more pull request's CI outside it: no
+ * draft in the line still waits for runners, and its whole need fits beside
+ * every run counted. Such a pull request never jumps the line.
+ */
+export function ciAdmissionRoomOutsideLine(input: {
+  queue: readonly { draft: boolean; status: string }[];
+  used: number;
+  capacity: number;
+  need: number;
+}): boolean {
+  if (input.queue.some((entry) => entry.draft && LINE_WAITING.has(entry.status))) return false;
+  return Number.isFinite(input.used) && input.used + input.need <= input.capacity;
+}
+
+/**
+ * A reservation for a pull request outside the line -- the Decision Maker
+ * ready step's -- judged on the state as it stands under the admission lock
+ * and written in that same transaction, before the write it is for, as a
+ * release is: the room is judged on the last round's count plus every
+ * reservation made since, and the reservation adds its need to that count, so
+ * two rounds can never both take the same free runners. Null when there is no
+ * room, no round has counted yet, or that head is reserved already.
+ */
+export function ciAdmissionReserveOutsideLine(state: CiAdmissionState,
+  input: { number: number; headSha: string; base: string; nowMs: number }): CiAdmissionState | null {
+  if (state.lastRound === null || !SHA.test(input.headSha)) return null;
+  const need = ciAdmissionUnits({ base: input.base, fork: false }, state.needs);
+  if (need === null) return null;
+  if (state.released.some((entry) => entry.number === input.number &&
+      input.nowMs - entry.atMs < CI_ADMISSION_RELEASE_GRACE_MS)) return null;
+  if (!ciAdmissionRoomOutsideLine({ queue: state.queue, used: state.lastRound.used, capacity: state.capacity, need })) return null;
+  return {
+    ...state,
+    released: [...state.released, { number: input.number, headSha: input.headSha, atMs: input.nowMs }].slice(-MAX_QUEUE),
+    lastRound: { ...state.lastRound, used: state.lastRound.used + need },
   };
 }
 

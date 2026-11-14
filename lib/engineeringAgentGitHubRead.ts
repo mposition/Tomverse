@@ -518,7 +518,7 @@ export async function readEngineeringAgentPullChange(
   prNumber: number,
   deps: Deps = {},
 ): Promise<{ state: "open" | "closed"; baseRef: string; headRef: string; headSha: string;
-  diffDigest: string | null; changedFiles: string[] | null }> {
+  diffDigest: string | null; changedFiles: string[] | null; crossRepository: boolean }> {
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
   const resolved = withDefaults(deps);
   const pull = record(await githubJson(`/pulls/${prNumber}`, resolved));
@@ -532,8 +532,12 @@ export async function readEngineeringAgentPullChange(
       baseSha === null || !SHA.test(baseSha) || headSha === null || !SHA.test(headSha)) {
     throw new EngineeringAgentGitHubReadError("invalid_response");
   }
+  // A head in another repository -- a fork, or a repository that cannot be read -- is cross-repository.
+  const headRepo = record(head.repo)?.full_name;
+  const baseRepo = record(base.repo)?.full_name;
+  const crossRepository = typeof headRepo !== "string" || headRepo !== baseRepo;
   return {
-    state, baseRef: base.ref, headRef: head.ref, headSha,
+    state, baseRef: base.ref, headRef: head.ref, headSha, crossRepository,
     diffDigest: await readPullDiffDigest(prNumber, resolved),
     changedFiles: await readPullFileNames(prNumber, { baseSha, headSha, changedFiles: pull.changed_files as number }, resolved),
   };

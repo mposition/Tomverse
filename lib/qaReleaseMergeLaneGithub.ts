@@ -129,7 +129,7 @@ export function qaReleaseInstallationToken(
 }
 
 const PULL_FIELDS = `
-  number title createdAt baseRefName headRefName headRefOid isDraft mergeable state
+  number title createdAt baseRefName headRefName headRefOid isDraft isCrossRepository mergeable state
   commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) {
     pageInfo { hasNextPage }
     nodes {
@@ -215,6 +215,7 @@ function pullOf(raw: unknown): QaReleaseLanePullRequest {
     headRefName: str(pull.headRefName),
     headRefOid: str(pull.headRefOid).toLowerCase(),
     isDraft: pull.isDraft,
+    ...(typeof pull.isCrossRepository === "boolean" ? { isCrossRepository: pull.isCrossRepository } : {}),
     mergeable: str(pull.mergeable),
     state: str(pull.state),
     statusCheckRollup: rollupOf(pull),

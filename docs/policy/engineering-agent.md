@@ -595,6 +595,7 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
       (`QaReleaseMergeAttempt`)가 이 PR·head에 대해 바로 그 병합 commit을 보고했다. 레인이
       아직 보고하지 않은 attempt가 열려 있거나 diff를 읽지 못하면 그 회차에는 판정하지 않는다.
 
+    fork에서 온 PR은 이 경로를 타지 않는다(head 저장소가 base 저장소와 다르면 ready·레인 목록·레인 병합 모두에서 제외).
     이 경로는 **변경 파일이 모두 허용 목록 안에 있는 PR만** 탄다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`와
     `qaReleaseDmMergeAllowed`: 테스트, 정책·UI 계약·에이전트 지시가 아닌 문서, locale, 컴포넌트, app의 page·layout·loading·error
     파일; 이 manifest의 control-plane 경로, 정책 테스트, 레인 게이트 파일, 가격·크레딧·migration·삭제·인증·감사 체인 경로는

@@ -14,6 +14,7 @@
  * Decision Maker approved. Default off; off, nothing here is consulted.
  */
 
+import { ciAdmissionRoomOutsideLine } from "../ciAdmissionCore.ts";
 import { qaReleaseDmApprovedHumanPaths } from "../qaReleaseMergeLaneExclusionCore.ts";
 
 /** Default off. On, the app marks Decision Maker approved review pull requests ready and the lane may merge them into develop. */
@@ -58,41 +59,32 @@ export function amuxDmT2MergeGate(paths: readonly string[] | null): AmuxDmT2Merg
   return human.length === 0 ? { pass: true } : { pass: false, reason: "outside_dm_merge_allowlist", paths: human.slice(0, 20) };
 }
 
-/** Line statuses of a draft that still waits for runners: the line goes first. */
-const LINE_WAITING = new Set(["waiting", "checking", "next", "updating"]);
-
 /**
  * Whether CI admission's line leaves room for one more develop pull request's
- * CI after this round. The engineering agent's pull requests are not in the
- * line (lib/ciAdmissionCore.ts): once ready, their CI counts as another
- * workflow's, which the line cannot send back. So one is marked ready only
- * when no draft in the line still waits for runners, and its whole need fits
- * beside every run counted now: it never jumps the line.
+ * CI after this round: the admission's own rule (lib/ciAdmissionCore.ts),
+ * judged once early to skip the GitHub reads, and again under its lock when
+ * the reservation is written.
  */
-export function amuxDmT2MergeRoomBesideLine(input: {
-  queue: readonly { draft: boolean; status: string }[];
-  used: number;
-  capacity: number;
-  need: number;
-}): boolean {
-  if (input.queue.some((entry) => entry.draft && LINE_WAITING.has(entry.status))) return false;
-  return Number.isFinite(input.used) && input.used + input.need <= input.capacity;
-}
+export const amuxDmT2MergeRoomBesideLine = ciAdmissionRoomOutsideLine;
 
 export type AmuxDmT2MergeApproved = {
   prNumber: number; headRef: string; approvedHeadSha: string; approvedDiffDigest: string;
 };
 
-/** The pull request as CI admission's App reads it now. */
-export type AmuxDmT2MergePullNow = { open: boolean; draft: boolean; base: string; head: string; headSha: string };
+/** The pull request as CI admission's App reads it now; `fork` when its head is not this repository's. */
+export type AmuxDmT2MergePullNow = {
+  open: boolean; draft: boolean; base: string; head: string; headSha: string; fork: boolean;
+};
 
 /** The pull request's change as the engineering agent's read-only token reads it now. */
 export type AmuxDmT2MergeChangeNow = {
   state: "open" | "closed"; baseRef: string; headRef: string; headSha: string;
   diffDigest: string | null; changedFiles: string[] | null;
+  /** The head is in another repository than the base (a fork), or that could not be read. */
+  crossRepository: boolean;
 };
 
-export type AmuxDmT2MergeSkipReason = "pull_closed" | "base_not_develop" | "branch_moved" | "head_moved" |
+export type AmuxDmT2MergeSkipReason = "pull_closed" | "fork_pr" | "base_not_develop" | "branch_moved" | "head_moved" |
   "diff_unreadable" | "diff_changed" | "paths_unreadable" | "outside_dm_merge_allowlist";
 
 /**
@@ -111,6 +103,8 @@ export function amuxDmT2MergeChangeVerdict(input: {
   if (!SHA.test(approved.approvedHeadSha) || !DIGEST.test(approved.approvedDiffDigest) ||
       !AMUX_DM_T2_MERGE_HEAD.test(approved.headRef)) return { holds: false, reason: "head_moved" };
   if (change.state !== "open") return { holds: false, reason: "pull_closed" };
+  // A fork's pull request is never on the automatic path (review r-20261113-141554-d75157).
+  if (change.crossRepository !== false) return { holds: false, reason: "fork_pr" };
   if (change.baseRef !== "develop") return { holds: false, reason: "base_not_develop" };
   if (change.headRef !== approved.headRef) return { holds: false, reason: "branch_moved" };
   if (change.headSha !== approved.approvedHeadSha) return { holds: false, reason: "head_moved" };
@@ -141,6 +135,7 @@ export function amuxDmT2MergeReadyVerdict(input: {
   if (!SHA.test(approved.approvedHeadSha) || !DIGEST.test(approved.approvedDiffDigest) ||
       !AMUX_DM_T2_MERGE_HEAD.test(approved.headRef)) return { verdict: "skip", reason: "head_moved" };
   if (pull === null || !pull.open) return { verdict: "skip", reason: "pull_closed" };
+  if (pull.fork !== false) return { verdict: "skip", reason: "fork_pr" };
   if (pull.base !== "develop") return { verdict: "skip", reason: "base_not_develop" };
   if (pull.head !== approved.headRef) return { verdict: "skip", reason: "branch_moved" };
   if (pull.headSha !== approved.approvedHeadSha) return { verdict: "skip", reason: "head_moved" };

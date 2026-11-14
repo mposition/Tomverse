@@ -96,14 +96,23 @@ test("a ready pull request never jumps CI admission's line", () => {
 
 test("a pull request read fresh is marked ready only as the Decision Maker approved it", () => {
   const approved = { prNumber: 42, headRef: REF, approvedHeadSha: HEAD, approvedDiffDigest: DIFF };
-  const pull = (over = {}) => ({ open: true, draft: true, base: "develop", head: REF, headSha: HEAD, ...over });
+  const pull = (over = {}) => ({ open: true, draft: true, base: "develop", head: REF, headSha: HEAD, fork: false, ...over });
   const change = (over = {}) => ({ state: "open", baseRef: "develop", headRef: REF, headSha: HEAD, diffDigest: DIFF,
+    crossRepository: false,
     changedFiles: ["components/X.tsx"], ...over });
   const verdict = (p = pull(), c = change()) => amuxDmT2MergeReadyVerdict({ approved, pull: p, change: c });
   assert.deepEqual(verdict(), { verdict: "ready" });
   assert.deepEqual(verdict(pull({ draft: false })), { verdict: "already_ready" });
   assert.deepEqual(verdict(null), { verdict: "skip", reason: "pull_closed" });
   assert.deepEqual(verdict(pull({ open: false })), { verdict: "skip", reason: "pull_closed" });
+  // A fork's pull request never takes the automatic path, as CI admission or the engineering token reads it.
+  assert.deepEqual(verdict(pull({ fork: true })), { verdict: "skip", reason: "fork_pr" });
+  assert.deepEqual(verdict(pull({ fork: true, draft: false })), { verdict: "skip", reason: "fork_pr" });
+  assert.deepEqual(verdict(pull(), change({ crossRepository: true })), { verdict: "skip", reason: "fork_pr" });
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change({ crossRepository: true }) }),
+    { holds: false, reason: "fork_pr" });
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change({ crossRepository: undefined }) }),
+    { holds: false, reason: "fork_pr" }, "unread is a fork");
   assert.deepEqual(verdict(pull({ base: "main" })), { verdict: "skip", reason: "base_not_develop" });
   assert.deepEqual(verdict(pull(), change({ baseRef: "main" })), { verdict: "skip", reason: "base_not_develop" });
   assert.deepEqual(verdict(pull({ head: "agent/engineering/1" })), { verdict: "skip", reason: "branch_moved" });
@@ -190,10 +199,12 @@ test("the merge lane takes an engineering branch only on the app's report, and s
 
 test("the app's report counts only for the same number, head and branch, into develop", () => {
   const state = { dmApproved: [{ number: 42, headSha: HEAD, headRef: REF }] };
-  const pull = (over = {}) => ({ number: 42, headRefOid: HEAD, headRefName: REF, baseRefName: "develop", ...over });
+  const pull = (over = {}) => ({ number: 42, headRefOid: HEAD, headRefName: REF, baseRefName: "develop",
+    isCrossRepository: false, ...over });
   assert.equal(qaReleaseDmApprovedPull(state, pull()), true);
   assert.equal(qaReleaseDmApprovedPull({}, pull()), false);
-  for (const over of [{ number: 43 }, { headRefOid: OTHER }, { headRefName: "agent/engineering/2" }, { baseRefName: "main" }])
+  for (const over of [{ number: 43 }, { headRefOid: OTHER }, { headRefName: "agent/engineering/2" }, { baseRefName: "main" },
+    { isCrossRepository: true }, { isCrossRepository: undefined }])
     assert.equal(qaReleaseDmApprovedPull(state, pull(over)), false, JSON.stringify(over));
 });
 
@@ -224,7 +235,7 @@ test("a lane round merges a reported engineering pull request and leaves an unre
     QA_RELEASE_MERGE_LANE_ENABLED: "true", QA_RELEASE_MERGE_LANE_KILL_SWITCH: "", QA_RELEASE_CONTROL_REVISION: "4",
   };
   const GREEN = [{ __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS", workflowName: "PR Fast Gate" }];
-  const pull = { number: 42, createdAt: "2026-11-13T00:00:00Z", baseRefName: "develop", headRefName: REF,
+  const pull = { number: 42, createdAt: "2026-11-13T00:00:00Z", baseRefName: "develop", headRefName: REF, isCrossRepository: false,
     headRefOid: HEAD, isDraft: false, mergeable: "MERGEABLE", state: "OPEN", statusCheckRollup: GREEN,
     merged: false, mergeCommitSha: null };
   const run = async (state, answers = {}) => {
@@ -289,10 +300,49 @@ test("a Decision Maker ready pull request outside CI admission's line is reserve
   // Expired, still a draft (a write that never happened), or another head: no reservation.
   for (const [entry, pulls] of [
     [{ number: 42, headSha: HEAD, atMs: NOW - CI_ADMISSION_RELEASE_GRACE_MS - 1 }, [agent, line]],
-    [{ number: 42, headSha: HEAD, atMs: NOW - 1_000 }, [{ ...agent, draft: true }, line]],
+    // Still a draft past the settle window: the write never happened.
+    [{ number: 42, headSha: HEAD, atMs: NOW - 61_000 }, [{ ...agent, draft: true }, line]],
     [{ number: 42, headSha: OTHER, atMs: NOW - 1_000 }, [agent, line]],
   ]) {
     const judged = judge([entry], { openPulls: pulls });
     assert.deepEqual(judged.state.released.filter((kept) => kept.number === 42), [], JSON.stringify(entry));
   }
+});
+
+test("a reservation outside the line is judged and taken under the lock: the second of two never takes the same runners", async () => {
+  const { ciAdmissionReserveOutsideLine, parseCiAdmissionState } = await import("../lib/ciAdmissionCore.ts");
+  const NOW = Date.parse("2026-11-13T10:00:00Z");
+  const base = parseCiAdmissionState(undefined);
+  const counted = { ...base, lastRound: { at: new Date(NOW).toISOString(), used: 18, running: [], deploys: [], others: 0 } };
+  // Not counted yet by any round: nothing to judge room on.
+  assert.equal(ciAdmissionReserveOutsideLine(base, { number: 42, headSha: HEAD, base: "develop", nowMs: NOW }), null);
+  const first = ciAdmissionReserveOutsideLine(counted, { number: 42, headSha: HEAD, base: "develop", nowMs: NOW });
+  assert.deepEqual(first?.released, [{ number: 42, headSha: HEAD, atMs: NOW }]);
+  assert.equal(first?.lastRound?.used, 18 + 15, "its need is counted at once");
+  // The same pull request again (another round, another process): already reserved.
+  assert.equal(ciAdmissionReserveOutsideLine(first, { number: 42, headSha: HEAD, base: "develop", nowMs: NOW + 1 }), null);
+  // Another approved pull request after it: 18 + 15 + 15 > 40, no room.
+  assert.equal(ciAdmissionReserveOutsideLine(first, { number: 43, headSha: OTHER, base: "develop", nowMs: NOW + 1 }), null);
+  // A draft in the line still waiting for runners goes first.
+  const waiting = { ...counted, queue: [{ number: 7, title: "", base: "develop", head: "x", headSha: OTHER,
+    queuedAt: new Date(NOW).toISOString(), draft: true, status: "waiting" }] };
+  assert.equal(ciAdmissionReserveOutsideLine(waiting, { number: 42, headSha: HEAD, base: "develop", nowMs: NOW }), null);
+  // Not a develop or main base: CI admission does not count it.
+  assert.equal(ciAdmissionReserveOutsideLine(counted, { number: 42, headSha: HEAD, base: "feature", nowMs: NOW }), null);
+});
+
+test("an outside reservation whose pull request GitHub still shows as a draft settles for a minute, then is dropped", async () => {
+  const { evaluateCiAdmission, parseCiAdmissionState, CI_ADMISSION_OUTSIDE_SETTLE_MS } = await import("../lib/ciAdmissionCore.ts");
+  const NOW = Date.parse("2026-11-13T10:00:00Z");
+  const agent = { number: 42, nodeId: "PR_a", title: "agent", base: "develop", head: REF, headSha: HEAD,
+    draft: true, fork: false, labels: [] };
+  const judge = (atMs) => evaluateCiAdmission({ state: { ...parseCiAdmissionState(undefined),
+    released: [{ number: 42, headSha: HEAD, atMs }] }, openPulls: [agent], running: new Set(), runners: [],
+    nowMs: NOW, shadow: false });
+  // A round whose GitHub read came before the write still counts it.
+  assert.equal(judge(NOW - 1_000).used, 15);
+  assert.equal(judge(NOW - 1_000).state.released.length, 1);
+  // Past the settle window and still a draft: the write never happened.
+  assert.equal(judge(NOW - CI_ADMISSION_OUTSIDE_SETTLE_MS - 1).used, 0);
+  assert.deepEqual(judge(NOW - CI_ADMISSION_OUTSIDE_SETTLE_MS - 1).state.released, []);
 });

@@ -88,7 +88,8 @@ const github = (behaviour) => {
       const kind = behaviour(prNumber);
       if (kind === "throw") throw new Error("http_error");
       return { state: "open", baseRef: "develop", headRef: `agent/engineering/${700 + prNumber - 1000}`,
-        headSha: HEAD, diffDigest: kind === "good" ? DIFF : "e".repeat(64), changedFiles: ["components/X.tsx"] };
+        headSha: HEAD, diffDigest: kind === "good" ? DIFF : "e".repeat(64), changedFiles: ["components/X.tsx"],
+        crossRepository: false };
     },
   };
 };

@@ -91,8 +91,11 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    handoff(`outside_dm_merge_allowlist`·`paths_unreadable`)를 남긴다. 앱은 CI 입장 round가
    한 번 돌 때마다 승인된 검토 초안 하나를 GitHub에서 다시 읽어(CI 입장 App으로 단계·head, 엔지니어링 읽기 토큰으로 diff와
    파일 목록) 대기열의 draft가 runner를 기다리지 않고 그 CI가 통째로 들어갈 때만, 해시 체인 감사를 먼저 남기고 ready로
-   바꾼다. 쓰기 결과를 모르면 그 round에 다시 쓰지 않고 다음 round가 PR을 읽고 판단한다. ready로 바꾼 PR(결과를 모르는 것도)은
-   일반 입장과 같은 CI 입장 예약(`state.released`)에 넣어 실행이 보이거나 예약이 끝날 때까지 그 용량을 센다. 앱은 레인의 상태
+   바꾼다. 쓰기 결과를 모르면 그 round에 다시 쓰지 않고 다음 round가 PR을 읽고 판단한다. ready로 바꾸기 전에
+   CI 입장 잠금 아래에서 여유를 다시 확인하고 일반 입장과 같은 예약(`state.released`)을 먼저 커밋한 뒤 쓴다. 예약은 실행이
+   보이거나 끝날 때까지 용량으로 세고, 결과를 모르는 쓰기의 예약은 유지하며, GitHub가 1분 넘게 draft로 보여 주면 버린다.
+   **fork PR은 제외한다**: CI 입장 App과 엔지니어링 읽기 토큰이 보여 주는 head 저장소가 base 저장소와 다르면 ready로 바꾸지
+   않고 레인 목록에도 싣지 않는다. 앱은 레인의 상태
    읽기마다 가장 오래 확인하지 않은 승인 **한 건**만 골라 방문을 기록하고, 그 PR의 현재 diff와 파일 목록을 GitHub에서 다시 읽어
    digest가 `approvedDiffDigest`와 같고 파일이 모두 허용 목록 안일 때만 싣는다(읽지 못하거나 다르면 싣지 않고, 그 승인은 차례를
    쓴 것으로 본다). 레인은 승인된 head를 `sha`로 고정해 병합한다. 병합 레인은 앱이 넘긴 목록의 PR만

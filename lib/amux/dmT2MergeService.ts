@@ -98,13 +98,21 @@ export type AmuxDmT2MergeReadyPorts = {
   pull: (prNumber: number) => Promise<{ pull: CiAdmissionPull; open: boolean } | null>;
   /** Its change as the engineering agent's read-only token reads it now. */
   change: (prNumber: number) => Promise<AmuxDmT2MergeChangeNow>;
+  /**
+   * CI admission's reservation of its runners, judged and committed under the
+   * admission lock before the write (lib/ciAdmissionRound.ts); false when the
+   * line leaves no room now or another round reserved it first.
+   */
+  reserve: (pull: { number: number; headSha: string; base: string }) => Promise<boolean>;
   /** CI admission's App's write: draft to ready. */
   markReady: (pull: CiAdmissionPull) => Promise<void>;
 };
 
-export const amuxDmT2MergeReadyPorts = (github: Pick<CiAdmissionGithub, "pull" | "markReady">): AmuxDmT2MergeReadyPorts => ({
+export const amuxDmT2MergeReadyPorts = (github: Pick<CiAdmissionGithub, "pull" | "markReady">,
+  reserve: AmuxDmT2MergeReadyPorts["reserve"]): AmuxDmT2MergeReadyPorts => ({
   pull: (prNumber) => github.pull(prNumber),
   change: (prNumber) => readEngineeringAgentPullChange(prNumber),
+  reserve,
   markReady: (pull) => github.markReady(pull),
 });
 
@@ -113,11 +121,11 @@ export type AmuxDmT2MergeReadyOutcome =
   | { outcome: "held"; settlementId: string; prNumber: number }
   | { outcome: "skipped"; settlementId: string; prNumber: number; reason: string }
   | { outcome: "already_ready"; settlementId: string; prNumber: number }
-  /** Marked ready at this head: CI admission reserves its runners as for a release. */
+  /** Marked ready at this head, its runners reserved before the write. */
   | { outcome: "marked_ready"; settlementId: string; prNumber: number; headSha: string }
   /**
    * The write's answer is unknown: nothing is retried now; a later round reads
-   * the pull request first. Reserved as if it had happened.
+   * the pull request first. Its reservation stays, as if it had happened.
    */
   | { outcome: "write_unknown"; settlementId: string; prNumber: number; headSha: string; code: string };
 
@@ -130,20 +138,21 @@ const failureCode = (error: unknown) => (error instanceof Error ? error.message 
  * visited one among the engineering drafts, and its visit is recorded first,
  * so one that cannot move goes to the back. It is read fresh from GitHub --
  * CI admission's App for its stage and head, the engineering read token for
- * its diff and files -- and judged (amuxDmT2MergeReadyVerdict). Only a pull
- * request still exactly as approved, with no path a person merges, is
- * audited and then marked ready. A write whose answer is unknown is never
- * retried here: the next round reads the pull request, and one already ready
- * needs nothing.
+ * its diff and files -- and judged (amuxDmT2MergeReadyVerdict). A fork's pull
+ * request is never taken. Only a pull request still exactly as approved, with
+ * every path on the allow list, has its runners reserved under CI admission's
+ * lock (the room judged again there), is audited, and then marked ready. A
+ * write whose answer is unknown is never retried here: its reservation stays,
+ * the next round reads the pull request, and one already ready needs nothing.
  */
 export async function runAmuxDmT2MergeReadyStep(input: {
-  drafts: readonly Pick<CiAdmissionPull, "number" | "head" | "headSha" | "base" | "draft">[];
+  drafts: readonly Pick<CiAdmissionPull, "number" | "head" | "headSha" | "base" | "draft" | "fork">[];
   room: boolean;
   ports: AmuxDmT2MergeReadyPorts;
   env?: Env;
 }): Promise<AmuxDmT2MergeReadyOutcome> {
   if (!amuxDmT2MergeEnabled(input.env ?? process.env)) return { outcome: "off" };
-  const drafts = input.drafts.filter((pull) => pull.draft && pull.base === "develop" &&
+  const drafts = input.drafts.filter((pull) => pull.draft && !pull.fork && pull.base === "develop" &&
     AMUX_DM_T2_MERGE_HEAD.test(pull.head));
   if (drafts.length === 0) return { outcome: "none" };
   if (!input.room) return { outcome: "no_room" };
@@ -169,12 +178,16 @@ export async function runAmuxDmT2MergeReadyStep(input: {
     approved: { prNumber: row.prNumber, headRef: row.headRef, approvedHeadSha: row.approvedHeadSha,
       approvedDiffDigest: row.approvedDiffDigest },
     pull: now ? { open: now.open, draft: now.pull.draft, base: now.pull.base, head: now.pull.head,
-      headSha: now.pull.headSha } : null,
+      headSha: now.pull.headSha, fork: now.pull.fork } : null,
     change,
   });
   if (verdict.verdict === "already_ready") return { outcome: "already_ready", ...at };
   if (verdict.verdict === "skip") return { outcome: "skipped", ...at, reason: verdict.reason };
 
+  // Its runners first, under CI admission's lock, as a release takes them: two
+  // rounds can never both take the same free runners.
+  if (!(await input.ports.reserve({ number: row.prNumber, headSha: row.approvedHeadSha, base: "develop" })))
+    return { outcome: "no_room" };
   const recorded = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.dmT2MergeReadyRecord, async (tx) => {
     await takeAuditChainLock(tx);
     let killSwitch: boolean | null;

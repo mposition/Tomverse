@@ -93,21 +93,30 @@ async function approve(card: Card, env: Record<string, string | undefined>) {
 const ORDINARY = "diff --git a/components/Ordinary.tsx b/components/Ordinary.tsx\n@@ -1 +1 @@\n-a\n+b\n";
 
 /** GitHub as the step reads it: the draft as approved unless told otherwise. */
-function github(card: Card, over: { draft?: boolean; headSha?: string; files?: string[]; markReady?: () => void } = {}) {
+function github(card: Card, over: { draft?: boolean; headSha?: string; files?: string[]; markReady?: () => void;
+  fork?: boolean; reserve?: boolean } = {}) {
   const writes: number[] = [];
+  const reserved: number[] = [];
   return {
     writes,
+    reserved,
     ports: {
       pull: async (prNumber: number) => prNumber !== card.prNumber ? null : ({ open: true, pull: {
         number: prNumber, nodeId: "PR_node", title: "t", base: "develop", head: card.ref,
-        headSha: over.headSha ?? HEAD, draft: over.draft ?? true, fork: false, labels: [] } }),
+        headSha: over.headSha ?? HEAD, draft: over.draft ?? true, fork: over.fork ?? false, labels: [] } }),
       change: async () => ({ state: "open" as const, baseRef: "develop", headRef: card.ref,
-        headSha: over.headSha ?? HEAD, diffDigest: DIFF, changedFiles: over.files ?? ["components/Ordinary.tsx"] }),
-      markReady: async (pull: { number: number }) => { writes.push(pull.number); over.markReady?.(); },
+        headSha: over.headSha ?? HEAD, diffDigest: DIFF, changedFiles: over.files ?? ["components/Ordinary.tsx"],
+        crossRepository: over.fork ?? false }),
+      reserve: async (pull: { number: number }) => { reserved.push(pull.number); return over.reserve ?? true; },
+      markReady: async (pull: { number: number }) => {
+        assert.ok(reserved.includes(pull.number), "its runners are reserved before the write");
+        writes.push(pull.number); over.markReady?.();
+      },
     },
   };
 }
-const draftsOf = (card: Card) => [{ number: card.prNumber, head: card.ref, headSha: HEAD, base: "develop", draft: true }];
+const draftsOf = (card: Card) => [{ number: card.prNumber, head: card.ref, headSha: HEAD, base: "develop", draft: true,
+  fork: false }];
 
 const readyAudits = (tx: LifecycleTx, settlementId: string) => tx.adminAuditLog.findMany({
   where: { targetId: settlementId, action: "amux.dm_t2_merge.ready_requested" },
@@ -178,6 +187,20 @@ test("a write whose answer is unknown is not retried; a moved head, a changed fi
     }
     assert.equal((await readyAudits(tx, card.settlementId)).length, 1);
 
+    // No room under CI admission's lock (another round took it): nothing is audited or written.
+    const full = github(card, { reserve: false });
+    assert.deepEqual(await runAmuxDmT2MergeReadyStep({ drafts: draftsOf(card), room: true, ports: full.ports, env: ON }),
+      { outcome: "no_room" });
+    assert.deepEqual([full.reserved, full.writes], [[card.prNumber], []]);
+    // A fork's pull request, as GitHub reads it now: never reserved, never written.
+    const forked = github(card, { fork: true });
+    const forkStep = await runAmuxDmT2MergeReadyStep({ drafts: draftsOf(card), room: true, ports: forked.ports, env: ON });
+    assert.equal((forkStep as { reason?: string }).reason, "fork_pr");
+    assert.deepEqual([forked.reserved, forked.writes], [[], []]);
+    assert.deepEqual(await runAmuxDmT2MergeReadyStep({ drafts: [{ ...draftsOf(card)[0]!, fork: true }], room: true,
+      ports: github(card).ports, env: ON }), { outcome: "none" }, "a fork in CI admission's own list is not even picked");
+    assert.equal((await readyAudits(tx, card.settlementId)).length, 1);
+
     await recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: "kill_switch", value: "on" });
     const killed = github(card);
     assert.deepEqual(await runAmuxDmT2MergeReadyStep({ drafts: draftsOf(card), room: true, ports: killed.ports, env: ON }),
@@ -204,7 +227,8 @@ test("an approval of a change a revert cannot undo is left to the person, and no
       { outcome: "none" });
     assert.deepEqual(step.writes, []);
     assert.ok(!(await readAmuxDmT2MergeLanePulls(ON, { change: async () => ({ state: "open" as const,
-      baseRef: "develop", headRef: card.ref, headSha: HEAD, diffDigest: DIFF, changedFiles: ["prisma/schema.prisma"] }) }))
+      baseRef: "develop", headRef: card.ref, headSha: HEAD, diffDigest: DIFF, changedFiles: ["prisma/schema.prisma"],
+      crossRepository: false }) }))
       .some((entry) => entry.number === card.prNumber));
   });
   // Switch off, the same approval is recorded exactly as before.
@@ -233,6 +257,7 @@ test("CI admission's round marks the approved draft ready after its line, and on
         headSha: "1".repeat(40), draft: true, fork: false, labels: [] };
       const fake = (pulls: typeof agentDraft[], deploys: { branch: string; sha: string; title: string }[]) => {
         const readied: number[] = [];
+        const reservedAtWrite: boolean[] = [];
         const github = {
           openPulls: async () => pulls,
           runningPulls: async () => ({ keys: new Set<string>(), bases: new Map<number, string>(), deploys }),
@@ -241,14 +266,23 @@ test("CI admission's round marks the approved draft ready after its line, and on
             return pull ? { pull, open: true } : null;
           },
           check: async () => ({ conflict: false, behind: false }),
-          convertToDraft: async () => {}, markReady: async (pull: { number: number }) => { readied.push(pull.number); },
+          convertToDraft: async () => {},
+          markReady: async (pull: { number: number }) => {
+            if (pull.number === card.prNumber) {
+              // The reservation is committed before the write, under the admission lock.
+              const now = await tx.appSetting.findUniqueOrThrow({ where: { key: CI_ADMISSION_STATE_SETTING_KEY } });
+              reservedAtWrite.push((JSON.parse(now.value) as { released: Array<{ number: number }> }).released
+                .some((entry) => entry.number === pull.number));
+            }
+            readied.push(pull.number);
+          },
           personReady: async () => new Set<number>(), updateBranch: async () => {}, cancelRuns: async () => 0,
           runnerUsage: async () => [], setStatus: async () => {}, readRepo: async () => ({}),
         };
         const dmT2MergePorts = { pull: github.pull, markReady: github.markReady,
           change: async () => ({ state: "open" as const, baseRef: "develop", headRef: card.ref, headSha: HEAD,
-            diffDigest: DIFF, changedFiles: ["components/Ordinary.tsx"] }) };
-        return { github, dmT2MergePorts, readied };
+            diffDigest: DIFF, changedFiles: ["components/Ordinary.tsx"], crossRepository: false }) };
+        return { github, dmT2MergePorts, readied, reservedAtWrite };
       };
 
       // A line draft takes the room first (develop push CI holds 18 of 40): the approved draft waits.
@@ -265,6 +299,7 @@ test("CI admission's round marks the approved draft ready after its line, and on
         dmT2MergePorts: free.dmT2MergePorts });
       assert.equal(second.outcome, "done");
       assert.deepEqual(free.readied, [card.prNumber]);
+      assert.deepEqual(free.reservedAtWrite, [true], "reserved and committed before the write");
       assert.equal((await readyAudits(tx, card.settlementId)).length, 1);
       const stored = await tx.appSetting.findUniqueOrThrow({ where: { key: CI_ADMISSION_STATE_SETTING_KEY } });
       const events = (JSON.parse(stored.value) as { events: Array<{ kind: string; number: number; detail: string | null }> }).events;
@@ -296,10 +331,31 @@ test("CI admission's round marks the approved draft ready after its line, and on
       assert.deepEqual((await releasedOf()).map((entry) => entry.headSha), [HEAD], "reserved although unknown");
       // GitHub shows it still a draft: the write never happened, its reservation is dropped, and the line
       // draft takes the room it held (18 + 15); the approved draft then finds no room and waits.
+      // (Within its first minute a round whose GitHub read came before the write still counts it.)
       const stillDraft = fake([agentDraft, lineDraft], [{ branch: "develop", sha: "2".repeat(40), title: "push" }]);
-      await runCiAdmissionRound({ mode: "on", github: stillDraft.github as never, now: () => Date.now(),
+      await runCiAdmissionRound({ mode: "on", github: stillDraft.github as never, now: () => Date.now() + 61_000,
         dmT2MergePorts: stillDraft.dmT2MergePorts });
       assert.deepEqual(stillDraft.readied, [lineDraft.number]);
+      assert.deepEqual(await releasedOf(), []);
+
+      // Two rounds at once on one approval -- two processes racing for the same free runners: one
+      // reservation, one write.
+      await tx.appSetting.deleteMany({ where: { key: CI_ADMISSION_STATE_SETTING_KEY } });
+      const one = fake([agentDraft], []);
+      const two = fake([agentDraft], []);
+      await Promise.all([
+        runCiAdmissionRound({ mode: "on", github: one.github as never, now: () => Date.now(), dmT2MergePorts: one.dmT2MergePorts }),
+        runCiAdmissionRound({ mode: "on", github: two.github as never, now: () => Date.now(), dmT2MergePorts: two.dmT2MergePorts }),
+      ]);
+      assert.equal([...one.readied, ...two.readied].filter((number) => number === card.prNumber).length, 1);
+      assert.equal((await releasedOf()).length, 1);
+
+      // A fork's pull request is never taken, whatever it holds.
+      await tx.appSetting.deleteMany({ where: { key: CI_ADMISSION_STATE_SETTING_KEY } });
+      const forked = fake([{ ...agentDraft, fork: true }], []);
+      await runCiAdmissionRound({ mode: "on", github: forked.github as never, now: () => Date.now(),
+        dmT2MergePorts: forked.dmT2MergePorts });
+      assert.deepEqual(forked.readied, []);
       assert.deepEqual(await releasedOf(), []);
 
       // Shadow mode writes nothing on GitHub.
@@ -324,7 +380,7 @@ test("the merge lane's list and the observer's read follow the approval while it
       reads.push(prNumber);
       if (over === "throw") throw new Error("http_error");
       return { state: "open" as const, baseRef: "develop", headRef: card.ref, headSha: HEAD, diffDigest: DIFF,
-        changedFiles: ["components/Ordinary.tsx"], ...over };
+        changedFiles: ["components/Ordinary.tsx"], crossRepository: false, ...over };
     } });
     const mine = async (deps = gh()) => (await readAmuxDmT2MergeLanePulls(ON, deps))
       .filter((entry) => entry.number === card.prNumber);
@@ -344,6 +400,7 @@ test("the merge lane's list and the observer's read follow the approval while it
     assert.deepEqual(await mine(gh({ changedFiles: ["components/Ordinary.tsx", "lib/providerCostBudget.ts"] })), [],
       "a file outside the allow list: not listed");
     assert.deepEqual(await mine(gh({ headSha: "a".repeat(40) })), [], "another head: not listed");
+    assert.deepEqual(await mine(gh({ crossRepository: true })), [], "a fork's pull request: not listed");
 
     const merge = "e".repeat(40);
     const facts = await readAmuxDmT2MergeObserved({ bindingId: card.bindingId, prNumber: card.prNumber, headSha: HEAD,
