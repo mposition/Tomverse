@@ -63,3 +63,22 @@ test("Chat attachment errors classify the recovery notice, not an empty or unrel
     content: "Invalid PDF document", errorHadAttachments: true }], false);
   assert.match(review, /Attachment troubleshooting/);
 });
+
+test("Chat error cards offer the model picker beside question restoration; Review does not", () => {
+  const failed: Message = { id: "a", role: "assistant", status: "error", content: "",
+    recoveryNotice: "Connection interrupted" };
+  const withPicker = (recovering: boolean, retry?: () => void) => renderToStaticMarkup(
+    <SessionProvider session={null}>
+      <LanguageProvider initialLang="en">
+        <ChatMessageList messages={[question, failed]} currentChatId="c"
+          onRestoreQuestion={recovering ? () => {} : undefined}
+          onRetryLast={retry} onRequestCloseModel={() => {}} />
+      </LanguageProvider>
+    </SessionProvider>
+  );
+  const chat = withPicker(true);
+  assert.equal((chat.match(/data-testid="chat-error-choose-model"/g) ?? []).length, 1);
+  assert.match(chat, /restore-chat-question/);
+  assert.doesNotMatch(withPicker(false, () => {}), /chat-error-choose-model/);
+  assert.doesNotMatch(render([question, failed]), /chat-error-choose-model/);
+});
