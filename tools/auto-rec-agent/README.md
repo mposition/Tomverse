@@ -96,9 +96,10 @@ PC가 꺼져 있어도 Ubuntu 서버가 켜져 있으면 실행합니다. 첫 �
    에이전트 코드가 옮길 수 있으므로, 검토 범위를 job 결과로 확인합니다. reject는 `review_reject`,
    그 밖은 `review_unknown`이며 다시 보내지 않습니다.
 7. **publish** — gateway는 자기가 fetch한 develop과의 fork point 위 commit 하나인지 다시 확인하고
-   (아니면 `runner_error`), 브랜치를 push하고, Auto PR to Develop이 여는 draft PR을 최대 5분
-   기다렸다가 제목과 본문(권장안, cycle 링크, 검토 job id, "자동 생성, 병합은 사람")을 바꿉니다.
-   5분 안에 열리지 않으면 gateway가 draft로 직접 엽니다.
+   (아니면 `runner_error`), 브랜치를 push한 직후 draft PR을 직접 열고 즉시 `ci:hold`를 붙입니다.
+   Auto PR to Develop이 먼저 열었으면 해당 draft를 쓰며, 생성 요청이 겹치거나 응답이 없으면
+   한 번 조회합니다. 기존 PR의 제목·본문 수정 전에도 먼저 보류 라벨을 확인합니다. 마지막으로
+   draft·보류 라벨·검토한 head를 함께 확인하며, 하나라도 달라지면 게시 결과 불명으로 멈춥니다.
 8. **result** — `POST /api/internal/auto-router/recommendations/result`로
    `{id, outcome: "pr_opened", prUrl}` 또는 `{id, outcome: "failed", reason}`을 보냅니다.
 9. worktree와 로컬 브랜치를 지웁니다.
