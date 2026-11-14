@@ -65,12 +65,12 @@ test("every prepared profile validates as fixed HTTPS destinations using synthet
 });
 
 test("providers without a published scope list require an explicit token scope bound without guessing broad consent", () => {
-  const base = { MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "atlassian,dropbox" };
+  const base = { MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "monday,dropbox" };
   // Dropbox publishes its scopes, so the user chooses within them at connect time.
   assert.deepEqual(mcpServers(base).map(s => [s.id, s.oauth?.scope, s.oauth?.selectableScopes?.includes("files.metadata.read")]), [["dropbox", "", true]]);
-  const [server] = mcpServers({ ...base, MCP_PROVIDER_ATLASSIAN_TOKEN_SCOPE: "documents:read" });
-  assert.equal(server.id, "atlassian"); assert.equal(server.oauth?.scope, "");
+  const [server] = mcpServers({ ...base, MCP_PROVIDER_MONDAY_TOKEN_SCOPE: "documents:read" });
+  assert.equal(server.id, "monday"); assert.equal(server.oauth?.scope, "");
   assert.equal(server.oauth?.tokenScope, "documents:read");
   assert.deepEqual(mcpServers({ ...base, MCP_PROVIDER_DROPBOX_TOKEN_SCOPE: "unadvertised:admin" }), []);
-  assert.deepEqual(mcpServers({ ...base, MCP_PROVIDER_ATLASSIAN_TOKEN_SCOPE: "" }).map(s => s.id), ["atlassian", "dropbox"]);
+  assert.deepEqual(mcpServers({ ...base, MCP_PROVIDER_MONDAY_TOKEN_SCOPE: "" }).map(s => s.id), ["monday", "dropbox"]);
 });
