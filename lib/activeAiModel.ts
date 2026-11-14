@@ -2,9 +2,10 @@ import "server-only";
 
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogle } from "@ai-sdk/google";
+import { createMistral } from "@ai-sdk/mistral";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createMoonshotAI } from "@ai-sdk/moonshotai";
-import type { StepResult, ToolSet } from "ai";
+import { defaultSettingsMiddleware, wrapLanguageModel, type StepResult, type ToolSet } from "ai";
 import type { AiModel } from "@/lib/models";
 import {
   decideOpenRouterDispatch,
@@ -93,7 +94,16 @@ export const getActiveAiModel = (
         model.apiModel
       );
     case "mistral":
-      return createOpenAI(configuration).chat(model.apiModel);
+      // Mistral returns thinking/text chunks in message.content. The OpenAI
+      // adapter accepts only a string there and rejects successful responses.
+      // Keep its pinned SDK version on the AI core's provider protocol.
+      return wrapLanguageModel({
+        model: createMistral(configuration)(model.apiModel),
+        // Preserve the OpenAI adapter's strict structured-output default.
+        middleware: defaultSettingsMiddleware({
+          settings: { providerOptions: { mistral: { strictJsonSchema: true } } },
+        }),
+      });
     case "xai":
       return createOpenAI(configuration).chat(model.apiModel);
     case "moonshot":
