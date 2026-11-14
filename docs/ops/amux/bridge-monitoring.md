@@ -140,6 +140,11 @@ sudo systemctl daemon-reload
 bridge는 세션마다 `AmuxWorkerRuntime` lease(90초)를 약 31초마다 갱신한다. `Credit Reconciliation` cron(15분)이
 부르는 인프라 감시가 최근 48시간 안에 끝난 lease를 읽고 판정한다.
 
+판정 대상은 worker bridge와 같은 `readAmuxWorkerBridgeScope` 목록이다. 운영자가 pause·retire했거나 stop latch로
+빠진 worker의 예전 runtime은 제외한다. 2026-11-14에는 이미 pause된 `cursor-chore`와 `copilot-chore`의 lease가
+장애로 집계됐다. 목록을 읽지 못하면 `AMUX_EXECUTION_BRIDGE_CHECK_FAILED`이고, 빈 목록이나 꺼진 scope는
+`unwatched`다. 이를 정상 복구로 알리지 않는다.
+
 bridge가 돌리지 않는 runtime은 판정에서 뺀다(`AMUX_NON_BRIDGE_WORKERS`). 지금은 `engineering-runner` 하나다 —
 engineering Agent가 30분마다 실행할 때 앱이 직접 90초짜리 runtime을 등록한다. 2026-10-12 밤 bridge가 모두 멈춘
 동안 이 lease가 세 번 "복구"로 읽혀 거짓 복구 알림과 재알림이 나갔다. 앱 코드에 runtime을 등록하는 곳이 새로
@@ -359,7 +364,10 @@ systemctl list-unit-files 'tomverse-amux-*' 'amux-*' --no-pager
 
 - sync route는 sync token이 맞으면 라우팅 스위치를 보기 전에 호출 시각을 기록한다(`lib/amux/dmRelayHeartbeat.ts`, 쓰는
   곳은 이 route 하나). 기록에 실패해도 relay의 tick은 실패하지 않는다.
-- 감시는 **`TOMVERSE_AMUX_DM_ROUTING=enabled`일 때만** 본다. 마지막 호출이 **5분**(idle tick 10번)보다 오래됐거나
+- 감시는 **production 배포에서 `TOMVERSE_AMUX_DM_ROUTING=enabled`일 때만** 본다. 전용 Ubuntu relay는 production을
+  부른다. dev·staging에 라우팅 스위치가 켜져 있어도 그 환경에 relay가 설치됐다는 뜻이 아니므로 감시하거나 복구를 알리지
+  않는다. 배포 환경은 `resolveDeploymentEnvironment`로 판정하며 `NODE_ENV=production`만으로 dev를 production으로 보지
+  않는다. 마지막 호출이 **5분**(idle tick 10번)보다 오래됐거나
   기록이 없으면 `AMUX_DM_RELAY_SILENT`를 보내고, 같은 상태는 3시간마다 다시 알린다. 다시 호출하면 `…_RECOVERED`가 간다.
   감시가 15분마다 돌므로 멈춘 뒤 알림까지는 5~20분이다. 기록을 읽지 못하면 `AMUX_DM_RELAY_CHECK_FAILED`를 따로 보낸다.
 - 예외 하나: relay는 DM 질문 하나를 broker에 맡기면 그 답을 최대 34분(`DM_BROKER_RESPONSE_DEADLINE`, 그 앞의 배정
