@@ -355,10 +355,6 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // CHECK constraints only; no commit-deadline marker, classifier or deferred
   // trigger changes.
   "20261113200000_amux_dm_owner_settlement",
-  // Owner request 2026-11-14: the process analysis report table, CHECK
-  // constraints only; no commit-deadline marker, classifier or deferred
-  // trigger changes.
-  "20261114120000_amux_process_audit_report",
   // The portfolio score active-window CHECK and refresh guard act on the score
   // table only; no commit-deadline marker, classifier or deferred trigger
   // changes.
@@ -370,6 +366,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // The v52 review findings summary does not touch the commit-deadline marker,
   // classifier or deferred trigger.
   "20261114140000_amux_v52_review_findings_summary",
+  // Owner request 2026-11-14: the process analysis report table, CHECK
+  // constraints only; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261114160000_amux_process_audit_report",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
