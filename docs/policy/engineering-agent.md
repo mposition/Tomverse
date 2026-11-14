@@ -577,6 +577,35 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
     승인으로 인정하는 것이며, 에이전트나 게시 App에 새 권한을 주지 않는다 — 둘 다
     `develop`에 병합할 수 없다는 조건은 그대로다.
 
+    **두 번째 근거: Decision Maker의 승인과 병합 레인의 `develop` 병합(운영자 결정
+    2026-11-13).** 채팅 원문: "develop 병합 권한은 DM에게 승인합니다. main은 안됩니다.",
+    "1~4까지 DM에게 자동으로 하도록 승인합니다." 대상은 **`develop`뿐이고 `main`은 제외**다.
+    운영자 확인 대기의 검토 PR을 DM이 승인하면(`docs/policy/amux-decision-maker.md` §0a-5,
+    §2-11) 앱이 그 PR을 ready로 바꾸고 CI가 통과하면 QA·릴리스 병합 레인이 `develop`에
+    병합한다(`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본 꺼짐). 이 병합은 다음을 모두 만족할
+    때 승인으로 보고 카드를 완료하며 불일치를 열지 않는다. 감사 기록의 `approval_basis`는
+    `dm_approval`이다.
+
+    - 병합 전에 기록된 DM 승인(`AmuxDmOwnerSettlement`의 `t2_pr`·`applied`·`approve` 행)이
+      이 binding과 그 run에 있다.
+    - 병합된 head가 그 행의 `approvedHeadSha`와 같고, PR diff digest가 `approvedDiffDigest`와
+      같다. head가 움직였으면 해당하지 않는다(병합 레인은 head를 고정해 병합한다).
+    - base가 `develop`이다.
+    - 이 판정은 이미 일어난 병합의 증거를 읽을 뿐이라 `TOMVERSE_AMUX_DM_T2_MERGE`와 DM kill switch를 보지 않는다. 두 스위치는
+      새 ready와 병합 직전 소비만 막는다. 그래서 레인이 병합한 뒤 스위치를 꺼도 이 병합은 승인으로 판정된다.
+    - 병합이 병합 레인의 것이다: bot(또는 App)의 병합이고, 앱에 남은 병합 레인의 attempt
+      (`QaReleaseMergeAttempt`)가 이 PR·head에 대해 바로 그 병합 commit을 보고했다. 레인이
+      아직 보고하지 않은 attempt가 열려 있거나 diff를 읽지 못하면 그 회차에는 판정하지 않는다.
+
+    fork에서 온 PR은 이 경로를 타지 않는다(head 저장소가 base 저장소와 다르면 ready·레인 목록·레인 병합 모두에서 제외).
+    이 경로는 **변경 파일이 모두 허용 목록 안에 있는 PR만** 탄다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`와
+    `qaReleaseDmMergeAllowed`: 테스트, 정책·UI 계약·에이전트 지시가 아닌 문서, locale, 컴포넌트, app의 page·layout·loading·error
+    파일; 이 manifest의 control-plane 경로, 정책 테스트, 레인 게이트 파일, 가격·크레딧·migration·삭제·인증·감사 체인 경로는
+    그 안에 있어도 제외). 하나라도 밖이면 DM 승인을 기록하지 않고 사람에게 넘긴다. 앱이 레인에 승인을 넘길 때마다 현재 PR
+    diff와 파일 목록을 다시 읽어 같을 때만 넘기고, 레인은 승인된 head를 고정해 병합한다. 위 조건에
+    하나라도 맞지 않는 병합은 종전대로 비승인이고 정지 대상이다. `main` 병합과 배포는 사람의
+    몫이다. 게시 App과 에이전트에는 여전히 병합 권한이 없다 — 병합하는 것은 병합 레인 App이다.
+
 ## 10. 결과를 모를 때
 
 회수되지 않는 쓰기에서 "결과 모름"(timeout·연결 종료·5xx·응답 파싱 실패)은 실패와
@@ -958,8 +987,12 @@ Task의 게시 경로**(버전 2)뿐이다. engineering Agent 자신의 카드 �
    응답한 뒤 대기 초안 하나를 판정한다. T1이면 초안을 `publish_promoted` 사유로 닫고, 같은
    패치로 그 run의 publish 항목과 단회 capability를 연다. DB는 끝난 run의 publish 항목을
    이 경우에만, PR 대기열에 자리가 있을 때만 받는다. 자리가 없으면 판정하지 않고 초안은
-   다음 회차까지 대기로 남는다. T1이 아니거나 근거를 읽지 못하면 그 사유를 단 보통 T2
-   초안으로 둔다. 판정 뒤 쓰는 순간 스위치·동의·대기열이 바뀌어 거절되면 `publish_refused`
+   다음 회차까지 대기로 남는다. T1이 아니면 그 사유를 단 보통 T2 초안으로 둔다. 근거 읽기가
+   예외로 끝나면(GitHub·DB에 닿지 못함 등) 판정이 아니므로 초안은 대기로 남아 다른 대기
+   초안 뒤로 가고, 같은 프로세스에서 3회차째도 예외면 `tier_evidence_unavailable` 사유의 보통
+   T2 초안이 된다. 각 회차의 `v22_tier_promotion` 로그는 예외의 class·code·단계(권한 확인,
+   patch 읽기, candidate 재구성, base 근거, 재확인)만 적고 메시지·patch·파일 내용은 적지 않는다.
+   판정 뒤 쓰는 순간 스위치·동의·대기열이 바뀌어 거절되면 `publish_refused`
    사유의 보통 T2 초안이 된다. 살아 있는 capability 없이 대기 중인 publish 항목(claim되기
    전에 capability가 만료됐거나, claim이 capability를 쓴 뒤 push 전 거절 또는 "이전 쓰기
    없음" 조회로 대기로 돌아온 항목)은 각 회차가 대기 초안보다 먼저 다시 판정해(§10), 같은

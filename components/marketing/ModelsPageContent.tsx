@@ -292,6 +292,9 @@ export function ModelsPageContent() {
             {filterCopy[lang].toggle}<ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 transition-transform ${mobileFiltersOpen ? "rotate-180" : ""}`} />
           </button>
         ) : null}
+        {(lang === "ko" || lang === "en") && !mobileFiltersOpen ? (
+          <p data-testid="models-mobile-results-count" className="mt-2 text-sm text-zinc-600 dark:text-zinc-300 sm:hidden">{filters.results}: {filteredModels.length} / {ENABLED_MODELS.length}</p>
+        ) : null}
         <div id="models-catalog-filters" role="search" aria-label={filters.search}
           className={`mt-5 min-w-0 gap-4 sm:mt-10 sm:grid-cols-3 ${(lang === "ko" || lang === "en") && !mobileFiltersOpen ? "hidden sm:grid" : "grid"}`}>
           <label className="min-w-0 text-sm font-bold">

@@ -57,6 +57,12 @@ test("the daily product actor may record its halt notice but cannot gain another
   assert.equal(systemAuditActionAllowed("daily-product-agent", "product_research.suggestion.completed", "ProductResearchSuggestion"), false);
 });
 
+test("the daily product observation audit is limited to its settings target", () => {
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.smart_adaptive_observed", "AppSettings"), true);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.smart_adaptive_observed", "ProductResearchSuggestion"), false);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.claimed", "AppSettings"), false);
+});
+
 test("the Prompt Refiner Auto budget actor has only its audited hold transitions", () => {
   for (const action of ["prompt_refiner.auto_budget_reserved",
     "prompt_refiner.auto_budget_dispatch_intent_recorded",

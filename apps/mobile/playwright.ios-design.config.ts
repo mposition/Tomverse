@@ -11,7 +11,7 @@ export default defineConfig({
   outputDir: "../../test-results/ios-design",
   timeout: 45_000,
   use: { ...base.use, baseURL: "http://127.0.0.1:15188" },
-  webServer: { ...webServer, command: "npm run dev -- --host 127.0.0.1 --port 15188 --strictPort", url: "http://127.0.0.1:15188" },
+  webServer: { ...webServer, env: { ...webServer.env, VITE_TOMVERSE_IOS_PREVIEW: "true" }, command: "npm run dev -- --host 127.0.0.1 --port 15188 --strictPort", url: "http://127.0.0.1:15188" },
   projects: [
     { name: "ios-iphone", use: { ...devices["iPhone 13"], browserName: "webkit" } },
     { name: "ios-ipad-7", use: { ...devices["iPad (gen 7)"], browserName: "webkit" } },

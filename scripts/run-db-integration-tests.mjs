@@ -445,6 +445,11 @@ run(
     // ceilings; a review pull request's approval only recorded; a Task that
     // moved, or a person who answered first, cancels it.
     "tests/integration/amux-dm-owner-settlement.db.test.ts",
+    // The Decision Maker's develop merge (owner decision 2026-11-13): an
+    // approval marked ready once, audited first, only behind its switch and
+    // beside the line; a change a revert cannot undo left to the person; the
+    // merge lane's list and the observer's read follow the approval.
+    "tests/integration/amux-dm-t2-merge.db.test.ts",
     // A v22 implement Task's review pull request (2026-11-11): its v4 row
     // cannot hold the number, so the engineering binding holds it, the record
     // is never refused, and only the bound pull request's merge completes it.
@@ -911,6 +916,7 @@ run(
     // An operator's status for a cycle's code and setting recommendations:
     // stored in the summary with its audit entry, never losing a concurrent one.
     "tests/integration/auto-router-optimizer-recommendations.db.test.ts",
+    "tests/integration/smart-adaptive-daily.db.test.ts",
     // Excluding a discovered model and reviewing it again: the structured
     // decision record, a rescan that leaves the exclusion alone, and the
     // history constraints that refuse a decision without its record.

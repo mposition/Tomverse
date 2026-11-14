@@ -4,6 +4,7 @@ import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
+import { isAmuxDmOwnerSettlementId } from "@/lib/amux/dmOwnerSettlementCore";
 import { decideAmuxV52ChangedPaths } from "@/lib/amux/executionGradeCore";
 import {
   AMUX_DB_BOUNDARIES,
@@ -72,11 +73,17 @@ export async function completeAmuxV22ReviewOnObservedMerge(
     attemptId: string;
     prNumber: number;
     mergeCommitSha: string;
-    /** The approval review observed before the merge; null when the approver's own merge is the approval. */
+    /** The approval review observed before the merge; null when the approver's own merge, or the Decision Maker's approval, is the approval. */
     approvalReviewId: number | null;
     changedFiles?: string[] | null;
     /** The engineering binding whose approval and merge the caller observed. */
     bindingId?: string | null;
+    /**
+     * The owner queue settlement whose Decision Maker approval, recorded
+     * before the merge lane's own merge into develop, is the approval (owner
+     * decision 2026-11-13). Only with no approval review.
+     */
+    dmSettlementId?: string | null;
   },
   attachment?: AmuxAttachment<AmuxReviewMergeObservedFact>,
 ): Promise<
@@ -91,7 +98,14 @@ export async function completeAmuxV22ReviewOnObservedMerge(
       (!Number.isSafeInteger(input.approvalReviewId) || input.approvalReviewId <= 0)) {
     throw new Error("AMUX approval review id is invalid");
   }
-  const approvedBy = input.approvalReviewId === null ?
+  const dmSettlementId = input.dmSettlementId ?? null;
+  if (dmSettlementId !== null &&
+      (input.approvalReviewId !== null || !isAmuxDmOwnerSettlementId(dmSettlementId))) {
+    throw new Error("AMUX Decision Maker settlement id is invalid");
+  }
+  const approvedBy = dmSettlementId !== null ?
+    `The Decision Maker approved it (owner queue settlement ${dmSettlementId}) and the QA-release lane merged it into develop` :
+    input.approvalReviewId === null ?
     "The authorised approver merged it themselves" : `GitHub approval review ${input.approvalReviewId}`;
   const boundary = amuxBoundaryWithAttachment(
     AMUX_DB_BOUNDARIES.reviewMergeObserved, attachment);
@@ -213,7 +227,8 @@ export async function completeAmuxV22ReviewOnObservedMerge(
           attempt_id: input.attemptId,
           pr_number: input.prNumber,
           merge_commit_sha: input.mergeCommitSha,
-          ...(input.approvalReviewId === null ? { approval_basis: "approver_merge" } :
+          ...(dmSettlementId !== null ? { approval_basis: "dm_approval", dm_settlement_id: dmSettlementId } :
+            input.approvalReviewId === null ? { approval_basis: "approver_merge" } :
             { approval_review_id: input.approvalReviewId }),
           ...(heldByBinding === null ? {} : { binding_id: heldByBinding }),
           previous_revision: task.revision,

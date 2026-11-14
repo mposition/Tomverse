@@ -23,6 +23,7 @@ import {
   type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
 import {
+  amuxApprovedCeilingOverrun,
   decideAmuxAttemptBudget,
   settlementDestinationForBudget,
 } from "@/lib/amux/executionBudgetCore";
@@ -53,6 +54,7 @@ import { amuxV52ReviewRequired, classifyAmuxExecutionPath,
   decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
 import { decideAmuxV52ReviewDisposition, validAmuxV52ReviewEvidence,
   type AmuxV52ReviewEvidence } from "@/lib/amux/v52ReviewCore";
+import { normalizeAmuxV52FindingsSummary } from "@/lib/amux/v52ReviewFindingsCore";
 import { amuxV52PriorReviewRejections } from "@/lib/amux/v52ReviewRejections";
 import { ENGINEERING_AGENT_POLICY_VERSION,
   v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
@@ -539,6 +541,15 @@ export async function startAmuxV22TaskExecution(input: {
       if (busy.count !== 1) throw new Error("v22 runtime changed during start");
       const attemptId = randomUUID();
       const leaseExpiresAt = executionLeaseExpiry(now);
+      // Recorded, never refused (owner decision 2026-11-14): the same
+      // calculation the claim recorded for this assignment.
+      const ceilingOverrun = amuxApprovedCeilingOverrun({ approvedReceipt: approved,
+        priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+        nextAttemptMicroUsd: assignment.perAttemptMicroUsd });
+      if (ceilingOverrun) console.warn(JSON.stringify({ subsystem: "amux",
+        event: "v22_approved_ceiling_overrun", phase: "execution_start",
+        taskId: input.taskId, assignmentId: input.assignmentId,
+        attemptNumber: budget.next_attempt_number, ...ceilingOverrun }));
       await tx.amuxExecutionAttempt.create({ data: {
         id: attemptId, taskId: input.taskId, worker: input.worker,
         workerInstanceId: input.instanceId,
@@ -572,7 +583,8 @@ export async function startAmuxV22TaskExecution(input: {
         summary: "Started one assignment-bound AMUX v22 Task attempt.",
         metadata: { taskId: input.taskId, assignmentId: input.assignmentId,
           worker: input.worker, taskRevision: input.expectedRevision + 1,
-          reservedCostMicrousd: assignment.perAttemptMicroUsd.toString() },
+          reservedCostMicrousd: assignment.perAttemptMicroUsd.toString(),
+          ...(ceilingOverrun ? { ceilingOverrun } : {}) },
       });
       context.requireLeaseAt(runtime.leaseExpiresAt);
       context.requireLeaseAt(leaseExpiresAt);
@@ -1232,6 +1244,8 @@ export async function recordAmuxV52Review(input: {
   generation: number; taskRevision: number;
   changedPaths: string[];
   evidence: AmuxV52ReviewEvidence;
+  /** The launcher's reasons for a reject; display only, never in the digest. */
+  findingsSummary?: string;
 }) {
   if (!validAmuxV52ReviewEvidence(input.evidence))
     return { recorded: false as const, reason: "review_evidence_invalid" as const };
@@ -1339,6 +1353,8 @@ export async function recordAmuxV52Review(input: {
         verdict: evidence.verdict, authorVendor: evidence.authorVendor,
         reviewerVendors: evidence.reviewerVendors,
         touchesContract: evidence.touchesContract, requestDigest, auditLogId,
+        findingsSummary: evidence.verdict === "reject" ?
+          normalizeAmuxV52FindingsSummary(input.findingsSummary) : null,
       } });
       context.requireLeaseAt(runtime.leaseExpiresAt);
       context.requireLeaseAt(attempt.leaseExpiresAt);

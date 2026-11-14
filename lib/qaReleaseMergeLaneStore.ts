@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { amuxDmT2MergeConsumeAllowed } from "@/lib/amux/dmT2MergeService";
 import { NOTIFICATION_KIND, enqueueNotificationDeliveryOnce } from "@/lib/notificationDeliveries";
 import { prisma } from "@/lib/prisma";
 import {
@@ -152,17 +153,20 @@ export async function issueQaReleaseMergeInstruction(input: {
 export const QA_RELEASE_MERGE_ATTEMPT_CONSUMED_ACTION = "qa_release.merge_attempt_consumed";
 
 /**
- * Instruction consume (policy section 10): nine statements -- the limits,
+ * Instruction consume (policy section 10): twelve statements -- the limits,
  * the audit chain lock, one read of the attempt (locked) with the newest
- * operator control revision, switch and latch event, the four of the audit
- * append, the conditional update and the deadline check -- so 3A + 5 = 32 s.
+ * operator control revision, switch and latch event, the Decision Maker
+ * re-check of an engineering agent pull request (whether it is one, the
+ * Decision Maker's switches, its approvals that still hold), the four of the
+ * audit append, the conditional update and the deadline check -- so
+ * 3A + 5 = 41 s.
  */
 export const QA_RELEASE_CONSUME_LIMITS = Object.freeze({
   statementMs: 2_000,
   idleMs: 1_000,
-  statements: 9,
-  transactionMs: (3 * 9 + 5) * 1_000,
-  prismaMs: (3 * 9 + 5) * 1_000 + 5_000,
+  statements: 12,
+  transactionMs: (3 * 12 + 5) * 1_000,
+  prismaMs: (3 * 12 + 5) * 1_000 + 5_000,
 });
 const CONSUME = QA_RELEASE_CONSUME_LIMITS;
 
@@ -191,8 +195,10 @@ type ConsumeRead = {
  */
 export async function consumeQaReleaseMergeInstruction(input: {
   callerRevision: number | null;
-  request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string };
+  request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string; diffDigest?: string };
   budget: QaReleaseRoundBudget;
+  /** The environment the Decision Maker's develop merge switch is read from; the process's by default. */
+  env?: Readonly<Record<string, string | undefined>>;
 }): Promise<QaReleaseConsumeResult> {
   return prisma.$transaction(
     async (tx) => {
@@ -246,6 +252,17 @@ export async function consumeQaReleaseMergeInstruction(input: {
         dbNowMs: Number(read.dbNowMs),
       });
       if (!judgement.consume) return { consumed: false as const, reason: judgement.reason };
+      // An engineering agent pull request is merged only on a Decision Maker
+      // approval that still holds now, at exactly this head, into develop, and
+      // only at the approved diff digest the lane read right before (owner
+      // decision 2026-11-13; reviews r-20261114-020758-a98fec,
+      // r-20261114-021949-8dbd49): its list entry was read a while ago, and a
+      // kill switch, a moved Task, a superseded binding, a new head or a diff
+      // changed by develop since then refuses the merge here.
+      const dm = await amuxDmT2MergeConsumeAllowed(tx, { prNumber: input.request.pullRequestNumber,
+        headSha: input.request.headSha, base: input.request.base, diffDigest: input.request.diffDigest ?? null,
+        env: input.env });
+      if (dm !== "allowed" && dm !== "not_engineering") return { consumed: false as const, reason: dm };
 
       const auditLogId = await writeSystemAuditLog({
         tx,

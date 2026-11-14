@@ -10,6 +10,7 @@
  * unknown and does not retry (section 3).
  */
 import { assertQaReleaseMergeLaneEndpoint, qaReleaseMergeLaneEndpoint, type QaReleaseMergeLaneCall } from "./qaReleaseDigestEndpointCore.ts";
+import { QA_RELEASE_DM_APPROVED_HEAD } from "./qaReleaseMergeLaneExclusionCore.ts";
 import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import type { QaReleaseMergeLanePorts, QaReleaseLaneState } from "./qaReleaseMergeLaneServiceCore.ts";
 import type { QaReleaseLaneVerdict } from "./qaReleaseMergeLaneVerdictCore.ts";
@@ -18,6 +19,7 @@ import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts"
 type Json = Record<string, unknown>;
 const SHA = /^[0-9a-f]{40}$/;
 const OPEN_STATES = new Set(["issued", "consumed", "awaiting_deploy"]);
+const MAX_DM_APPROVED = 50;
 
 const record = (value: unknown): Json => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("app_shape");
@@ -33,7 +35,17 @@ function stateOf(body: Json): QaReleaseLaneState {
   const open = body.openAttempt;
   // The operator's priority is a preference: a body without a usable one means oldest first.
   const priority = Array.isArray(body.priority) ? body.priority.filter((n): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0) : [];
-  const ordering = priority.length > 0 ? { priority } : {};
+  // Decision Maker approved engineering pull requests (owner decision 2026-11-13):
+  // an entry of any other shape is dropped, so its pull request stays a person's.
+  const dmApproved = (Array.isArray(body.dmApproved) ? body.dmApproved : []).slice(0, MAX_DM_APPROVED).flatMap((raw) => {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return [];
+    const entry = raw as Json;
+    return typeof entry.number === "number" && Number.isSafeInteger(entry.number) && entry.number > 0 &&
+      typeof entry.headSha === "string" && SHA.test(entry.headSha) &&
+      typeof entry.headRef === "string" && QA_RELEASE_DM_APPROVED_HEAD.test(entry.headRef)
+      ? [{ number: entry.number, headSha: entry.headSha, headRef: entry.headRef }] : [];
+  });
+  const ordering = { ...(priority.length > 0 ? { priority } : {}), ...(dmApproved.length > 0 ? { dmApproved } : {}) };
   if (open === null) return { dbNowMs: finite(body.dbNowMs), latched: body.latched, openAttempt: null, ...ordering };
   const attempt = record(open);
   const state = attempt.state;
