@@ -3,7 +3,7 @@
  * digest the ledger stores or compares, the reservation a pin implies, the
  * monthly cap read from the environment, and the outcome a settle report maps
  * to. No I/O. docs/policy/marketing-automation.md §5 (policy v4) approved the
- * table, the dedicated OpenAI key and the US$100 monthly cap.
+ * table, the dedicated OpenAI key and the monthly cap (US$100 then, US$500 since 2026-11-14).
  *
  * The app cannot see what the generator actually sent, so the ledger admits
  * a call only when its reservation -- the most a pinned model can cost for one
