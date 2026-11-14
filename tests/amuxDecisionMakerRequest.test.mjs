@@ -1715,7 +1715,9 @@ for (const [label, key] of [
       // The routing read carries the database clock, whose period keys the option set digest.
       assert.match(sent[1].sql, /floor\(extract\(epoch FROM clock_timestamp\(\)\) \* 1000\)::bigint AS "dbNowEpochMs"/);
       assert.match(sent[1].sql, /ON r\."cardId" = \$ AND r\."questionRevision" = \$/);
-      assert.deepEqual(sent[1].values, ["card-41", 3]);
+      // The first value is the app-filed card probe (AMUXFLOW/B2), in the same statement.
+      assert.deepEqual(sent[1].values, ["card-41", "card-41", 3]);
+      assert.match(sent[1].sql, /EXISTS \(SELECT 1 FROM "AmuxDmOwnerSettlement" s\s+WHERE s\."localCardId" = \$\) AS "appFiledCard"/);
       assert.match(sent[2].sql, SWITCH_READ);
       assert.match(sent[3].sql, /count\(\*\) FILTER/);
       // The throughput statement carries the instance's result kinds inside its §8 count boundary -- with

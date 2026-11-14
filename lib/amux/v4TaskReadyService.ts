@@ -18,6 +18,7 @@ import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "./v4TaskCostCeilingCore.ts";
 import { AMUX_V4_NEW_MODEL_ROUTE_ENV, amuxV4NewModelRouteWithinCeiling } from "./v4TaskNewModelRouteSwitch.ts";
+import { amuxV22PromotionFlowEnabled } from "./v22AutoPromotionCore.ts";
 import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
 import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
@@ -338,7 +339,8 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
     }
     const workers = workerNames.length ? await tx.amuxWorkerRuntime.findMany({
       where: { workerName: { in: workerNames }, dispatchReady: true,
-        status: exactGradeRouting ? "idle" : { in: ["idle", "busy"] },
+        // The claim waits for an idle worker; readiness need not (AMUXFLOW/B3).
+        status: exactGradeRouting && !amuxV22PromotionFlowEnabled() ? "idle" : { in: ["idle", "busy"] },
         leaseExpiresAt: { gt: now } },
       select: { workerName: true },
     }) : [];

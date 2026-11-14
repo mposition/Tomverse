@@ -13,8 +13,8 @@ import {
 } from "@/lib/amux/autoPromotionCore";
 import { tickAutoPromotion } from "@/lib/amux/autoPromotionService";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
-import { AMUX_V22_AUTO_PROMOTION_ENV,
-  amuxV22AutoPromotionEnabled } from "@/lib/amux/v22AutoPromotionCore";
+import { AMUX_V22_AUTO_PROMOTION_ENV, AMUX_V22_PROMOTIONS_PER_TICK,
+  amuxV22AutoPromotionEnabled, amuxV22PromotionFlowEnabled } from "@/lib/amux/v22AutoPromotionCore";
 import { tickV22AutoPromotion } from "@/lib/amux/v22AutoPromotionService";
 import { v22PromotionTickWire, v22WorkerClaimTickWire } from
   "@/lib/amux/v22TickWire";
@@ -169,7 +169,29 @@ export async function POST(request: Request) {
           });
         }
       }
-      if (v22Enabled && identity.kind === "admitted") {
+      // AMUXFLOW/B3: a tick whose claim assigned nothing promotes up to
+      // four ready Tasks, not one; the next tick claims them. The claim stays
+      // first, so no promotion write ever turns a later transient claim error
+      // into an unknown outcome (review r-20261114-073121-cf0260). An unknown
+      // promotion still stops the tick as before.
+      if (amuxV22PromotionFlowEnabled() && v22Enabled && identity.kind === "admitted") {
+        let last: Awaited<ReturnType<typeof tickV22AutoPromotion>> | null = null;
+        for (let index = 0; index < AMUX_V22_PROMOTIONS_PER_TICK; index += 1) {
+          const promoted = await tickV22AutoPromotion();
+          if (!last?.promoted) last = promoted;
+          if (promoted.promoted) { last = promoted; continue; }
+          if (promoted.reason === "outcome_unknown") {
+            return Response.json(v22PromotionTickWire(promoted), {
+              status: autoTickHttpStatus(promoted.reason), headers: noStore });
+          }
+          break;
+        }
+        if (last && (last.promoted || !legacyEnabled)) {
+          return Response.json(v22PromotionTickWire(last), {
+            status: last.promoted ? 200 : autoTickHttpStatus(last.reason), headers: noStore });
+        }
+      }
+      if (v22Enabled && identity.kind === "admitted" && !amuxV22PromotionFlowEnabled()) {
         const result = await tickV22AutoPromotion();
         if (result.promoted || (!result.promoted && result.reason === "outcome_unknown") ||
             !legacyEnabled) {
