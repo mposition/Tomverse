@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { discardResponseBody } from "@/lib/discardResponseBody";
+
 export type AccountMemorySettings = {
   masterEnabled: boolean;
   defaultConversationMode: "on" | "off";
@@ -28,7 +30,10 @@ export function useAccountMemorySettings(userId: string | null) {
     let current = true;
     void fetch("/api/memories/settings", { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        if (!response.ok) return null;
+        if (!response.ok) {
+          await discardResponseBody(response);
+          return null;
+        }
         const value = await response.json() as Partial<AccountMemorySettings>;
         return typeof value.masterEnabled === "boolean" &&
           (value.defaultConversationMode === "on" || value.defaultConversationMode === "off")
