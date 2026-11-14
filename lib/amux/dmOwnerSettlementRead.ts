@@ -101,18 +101,24 @@ export async function readAmuxDmOwnerSettlementPullEvidence(tx: Prisma.Transacti
 /**
  * What an approval of a review pull request names: the binding's verified
  * head and the diff digest its snapshot holds, while the binding is still the
- * open, current one for the settled run. Null when it is not.
+ * open, current one for the settled run, and the patch its publisher applied
+ * (null when it is gone), which the develop merge gate judges (owner decision
+ * 2026-11-13, lib/amux/dmT2MergeCore.ts). Null when the binding is not.
  */
 export async function readAmuxDmOwnerSettlementApprovalFacts(tx: Prisma.TransactionClient,
   input: { bindingId: string; attemptId: string }) {
-  const rows = await tx.$queryRaw<Array<{ verifiedHeadSha: string; diffDigest: string | null }>>`
-    SELECT b."verifiedHeadSha", b."snapshot"->>'diffDigest' AS "diffDigest"
+  const reviewPrefix = ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX;
+  const rows = await tx.$queryRaw<Array<{ verifiedHeadSha: string; diffDigest: string | null;
+    patchBody: string | null }>>`
+    SELECT b."verifiedHeadSha", b."snapshot"->>'diffDigest' AS "diffDigest", i."patchBody"
     FROM "EngineeringAgentBinding" b
     JOIN "EngineeringAgentRun" r ON r."id" = b."runId"
+    LEFT JOIN "EngineeringAgentWorkItem" i
+      ON i."causeKey" = (${reviewPrefix}::text || r."id") AND i."kind" = 'publish'
     WHERE b."id" = ${input.bindingId} AND r."amuxAttemptId" = ${input.attemptId}
       AND b."state" = 'open' AND b."supersededAt" IS NULL`;
   const row = rows[0];
   if (!row || !/^[0-9a-f]{40}$/.test(row.verifiedHeadSha) ||
       !row.diffDigest || !/^[0-9a-f]{64}$/.test(row.diffDigest)) return null;
-  return { verifiedHeadSha: row.verifiedHeadSha, diffDigest: row.diffDigest };
+  return { verifiedHeadSha: row.verifiedHeadSha, diffDigest: row.diffDigest, patchBody: row.patchBody };
 }

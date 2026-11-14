@@ -60,6 +60,13 @@ export type QaReleaseLaneState = {
   latched: boolean;
   /** The operator's priority from CI admission; absent, the lane takes the oldest first. */
   priority?: readonly number[];
+  /**
+   * Engineering agent pull requests the app reports approved by the Decision
+   * Maker, their conditions re-checked (owner decision 2026-11-13), each at
+   * the one head and branch approved. Absent: none, and every `agent` branch
+   * is a person's as before.
+   */
+  dmApproved?: readonly QaReleaseDmApprovedPull[];
   openAttempt: {
     id: string;
     state: "issued" | "consumed" | "awaiting_deploy";
@@ -71,6 +78,19 @@ export type QaReleaseLaneState = {
     mergeNotBeforeMs: number;
   } | null;
 };
+
+export type QaReleaseDmApprovedPull = { number: number; headSha: string; headRef: string };
+
+/**
+ * Whether the app's report covers this pull request as GitHub lists it now:
+ * the same number, head commit and branch, into develop, from this repository.
+ * Anything else -- a moved head, another base, a fork, or a pull request
+ * GitHub did not say is not one -- is a person's, as every `agent` branch was.
+ */
+export const qaReleaseDmApprovedPull = (state: Pick<QaReleaseLaneState, "dmApproved">,
+  pull: Pick<QaReleaseLanePullRequest, "number" | "headRefOid" | "headRefName" | "baseRefName" | "isCrossRepository">): boolean =>
+  pull.baseRefName === "develop" && pull.isCrossRepository === false && (state.dmApproved ?? []).some((entry) =>
+    entry.number === pull.number && entry.headSha === pull.headRefOid && entry.headRef === pull.headRefName);
 
 /** What GitHub says about one pull request, read fresh. */
 export type QaReleasePullRead = QaReleaseLanePullRequest & {
@@ -85,7 +105,8 @@ export type QaReleaseMergeLanePorts = {
   app: {
     readState: () => Promise<QaReleaseLaneState>;
     issue: (pullRequest: { pullRequestNumber: number; headSha: string }) => Promise<{ issued: true; attemptId: string } | { issued: false; reason: string }>;
-    consume: (request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string }) => Promise<{ consumed: boolean; reason?: string }>;
+    /** `diffDigest`: for a Decision Maker approved pull request, its diff's digest read right before (lib/pullDiffDigestCore.ts). */
+    consume: (request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string; diffDigest?: string }) => Promise<{ consumed: boolean; reason?: string }>;
     report: (attemptId: string, report: QaReleaseMergeReport) => Promise<{ recorded: boolean; reason?: string }>;
   };
   github: {
@@ -93,6 +114,8 @@ export type QaReleaseMergeLanePorts = {
     /** The item 3 inputs for one pull request; the changed-file list is read to its last page. */
     exclusionInputs: (pull: QaReleaseLanePullRequest) => Promise<QaReleaseExclusionInput>;
     readPull: (number: number) => Promise<QaReleasePullRead | null>;
+    /** The digest of the pull request's diff as GitHub serves it now (lib/pullDiffDigestCore.ts); null when it cannot be read whole. */
+    diffDigest: (number: number) => Promise<string | null>;
     /** The merge API with `sha` pinned to the head; never a merge without it. */
     merge: (number: number, headSha: string) => Promise<QaReleaseMergeCall>;
     /** compare/{sha}...develop: true when ahead or identical, false when not, null when unanswered. */
@@ -313,13 +336,15 @@ async function observeVerdicts(
   excludingFiles: Map<number, ReturnType<typeof qaReleaseMergeLaneExcludingFiles>>,
   pickNumber: number | null,
   priority?: readonly number[],
+  state: Pick<QaReleaseLaneState, "dmApproved"> = {},
 ): Promise<void> {
   const shown = new Map(exclusions);
   for (const pull of ordered) {
     if (shown.has(pull.number) || pull.number === pickNumber) continue;
     if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
-    const inputs = await ports.github.exclusionInputs(pull).catch(() => null);
-    if (inputs === null) continue;
+    const read = await ports.github.exclusionInputs(pull).catch(() => null);
+    if (read === null) continue;
+    const inputs = { ...read, dmApproved: qaReleaseDmApprovedPull(state, pull) };
     const judged = judgeQaReleaseMergeLaneExclusion(inputs);
     shown.set(pull.number, judged);
     if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
@@ -459,7 +484,8 @@ async function startNextAttempt(
     // a pull request that cannot be merged anyway.
     for (const pull of ordered) {
       if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
-      const inputs = await ports.github.exclusionInputs(pull);
+      // The one exception to the `agent` branch rule is the app's report, at this very head.
+      const inputs = { ...(await ports.github.exclusionInputs(pull)), dmApproved: qaReleaseDmApprovedPull(state, pull) };
       const judged = judgeQaReleaseMergeLaneExclusion(inputs);
       exclusions.set(pull.number, judged);
       if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
@@ -469,7 +495,7 @@ async function startNextAttempt(
     return { exitCode: 1, outcome: "candidates_unknown" };
   }
   const { pick } = pickQaReleaseLaneCandidate(pulls, exclusions, state.priority);
-  if (observer) await observeVerdicts(ports, observer, ordered, exclusions, excludingFiles, pick?.number ?? null, state.priority);
+  if (observer) await observeVerdicts(ports, observer, ordered, exclusions, excludingFiles, pick?.number ?? null, state.priority, state);
   if (pick === null) return { exitCode: 0, outcome: "idle" };
 
   const issued = await ports.app.issue({ pullRequestNumber: pick.number, headSha: pick.headRefOid }).catch(() => null);
@@ -506,8 +532,18 @@ async function startNextAttempt(
   if (freshDeployments === null || developBroken(freshDeployments) || qaReleaseHoldingDeployments(freshDeployments).length > 0) return abandon();
   if (decideQaReleaseServiceStart("mergeLane", env) !== "run") return abandon();
 
+  // A Decision Maker approved pull request: its diff as GitHub serves it now,
+  // read right before the consume, which lets it merge only at the approved
+  // digest (review r-20261114-021949-8dbd49: a merge base that moved with
+  // develop changes the diff at the same head). Unread, it is not merged.
+  let diffDigest: string | null = null;
+  if (qaReleaseDmApprovedPull(state, pick)) {
+    diffDigest = await ports.github.diffDigest(pick.number).catch(() => null);
+    if (diffDigest === null) return abandon();
+  }
   const consumed = await ports.app
-    .consume({ attemptId, pullRequestNumber: pick.number, headSha: pick.headRefOid, base: "develop" })
+    .consume({ attemptId, pullRequestNumber: pick.number, headSha: pick.headRefOid, base: "develop",
+      ...(diffDigest !== null ? { diffDigest } : {}) })
     .catch(() => null);
   if (consumed === null) return { exitCode: 1, outcome: "state_unknown" };
   if (!consumed.consumed) return abandon();
