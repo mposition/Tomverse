@@ -53,6 +53,7 @@ function fakeRunner({ rules = [], gateway = {}, now = NOW, lockFree = true, file
     claim: { status: "claimed", claim: CLAIM },
     publish: { status: "published", prUrl: PR_URL, number: 2900, bodyUpdated: true },
     result: { status: "reported" },
+    halt_notice: { status: "recorded" },
     ...gateway,
   };
   const deps = {
@@ -116,6 +117,9 @@ test("daily mode stops on unknown publishing or reporting without claiming anoth
     const { deps, gatewayCalls, events } = fakeRunner({ gateway });
     assert.equal(await runDailyBatch(deps), 1);
     assert.equal(ops(gatewayCalls).filter((op) => op === "claim").length, 1);
+    const notice = gatewayCalls.filter(({ header }) => header.op === "halt_notice");
+    assert.equal(notice.length, 1);
+    assert.equal(notice[0].header.reason, gateway.publish ? "publish_unknown" : "result_unknown");
     if (gateway.publish) assert.equal(events.find((event) => event.event === "publish_answer")?.step, "pr_not_draft");
   }
 });
@@ -129,9 +133,35 @@ test("a daily batch is bounded by the existing 24-publication daily ceiling", as
 test("a reported infrastructure failure pauses the batch before it can consume more suggestions", async () => {
   const { deps, gatewayCalls, events } = fakeRunner({ rules: [[/^claude /, exit(1)]] });
   assert.equal(await runDailyBatch(deps), 1);
-  assert.deepEqual(ops(gatewayCalls), ["claim", "result"]);
+  assert.deepEqual(ops(gatewayCalls), ["claim", "result", "halt_notice"]);
   assert.equal(gatewayCalls[1].header.reason, "agent_error");
   assert.ok(events.some((event) => event.event === "daily_batch_paused"));
+});
+
+test("a halt notice carries the last confirmed PR and never retries an unknown notice", async () => {
+  let publications = 0;
+  const { deps, gatewayCalls, events } = fakeRunner({ gateway: {
+    publish: () => ++publications === 1 ? { status: "published", prUrl: PR_URL } : { status: "unknown" },
+    halt_notice: new Error("lost answer"),
+  } });
+  assert.equal(await runDailyBatch(deps), 1);
+  const notices = gatewayCalls.filter(({ header }) => header.op === "halt_notice");
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].header.attempted, 2);
+  assert.equal(notices[0].header.prOpened, 1);
+  assert.equal(notices[0].header.lastPrUrl, PR_URL);
+  assert.equal(notices[0].header.reason, "publish_unknown");
+  assert.equal(gatewayCalls.filter(({ header }) => header.op === "claim").length, 2);
+  assert.ok(events.some(({ event }) => event === "halt_notice_unknown"));
+});
+
+test("an empty queue and the normal daily cap do not page the operator", async () => {
+  const { deps, gatewayCalls } = fakeRunner({ gateway: { claim: { status: "empty" } } });
+  assert.equal(await runDailyBatch(deps), 0);
+  assert.deepEqual(ops(gatewayCalls), ["claim"]);
+  const full = fakeRunner({ rules: [[/^git .* diff --raw/, ok("")]] });
+  assert.equal(await runDailyBatch(full.deps), 0);
+  assert.equal(full.gatewayCalls.some(({ header }) => header.op === "halt_notice"), false);
 });
 
 test("the same agent call supplies the public commit and PR summary without copying Scout source text", async () => {

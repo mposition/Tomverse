@@ -50,6 +50,13 @@ import {
   AMUX_V4_IDEA_SYSTEM_ACTOR,
 } from "../lib/amux/ideaIdentityCore.ts";
 
+test("the daily product actor may record its halt notice but cannot gain another audit scope", () => {
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.halt_notified", "DailyProductAgentRun"), true);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.halt_notified", "AdminAuditLog"), false);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.result_recorded", "DailyProductAgentRun"), false);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "product_research.suggestion.completed", "ProductResearchSuggestion"), false);
+});
+
 test("the Prompt Refiner Auto budget actor has only its audited hold transitions", () => {
   for (const action of ["prompt_refiner.auto_budget_reserved",
     "prompt_refiner.auto_budget_dispatch_intent_recorded",

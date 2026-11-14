@@ -18,6 +18,7 @@
  * unknown outcome (see the run log).
  */
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
 import {
   appendFileSync,
@@ -398,7 +399,7 @@ async function report(deps, claim, outcome) {
   return reply?.status === "reported" ? 0 : 1;
 }
 
-export async function runLocked(deps, { onEmpty = () => {}, onOutcome = () => {} } = {}) {
+export async function runLocked(deps, { onEmpty = () => {}, onClaim = () => {}, onOutcome = () => {} } = {}) {
   let reply;
   try {
     reply = await deps.gateway({ op: "claim" }, null, 3 * 60_000);
@@ -416,6 +417,7 @@ export async function runLocked(deps, { onEmpty = () => {}, onOutcome = () => {}
     return 1;
   }
   const claim = reply.claim;
+  onClaim();
   deps.startRunLog(claim.id);
   deps.log("claimed", { id: claim.id, leaseUntil: claim.leaseUntil });
   const ctx = { stage: "claimed", worktree: null, branch: null, reviewJobId: null };
@@ -428,12 +430,12 @@ export async function runLocked(deps, { onEmpty = () => {}, onOutcome = () => {}
   } finally {
     await cleanup(deps, ctx);
   }
+  onOutcome(outcome);
   if (outcome.unknown) {
     deps.log("outcome_unknown", { step: outcome.unknown, id: claim.id });
     return 1;
   }
   deps.log("outcome", { outcome: outcome.outcome, reason: outcome.reason ?? null, detail: outcome.detail ?? null, prUrl: outcome.prUrl ?? null });
-  onOutcome(outcome);
   return report(deps, claim, outcome);
 }
 
@@ -455,15 +457,37 @@ export async function runOnce(deps) {
 /** Task failures advance; infrastructure failures and unknown outcomes stop the batch. */
 export async function runDailyBatch(deps) {
   const started = deps.now();
-  for (let count = 0; count < LIMITS.tasksPerDay && deps.now() - started < LIMITS.dailyRunMs; count += 1) {
-    let empty = false;
-    let outcome = null;
-    const code = await runLocked(deps, { onEmpty: () => { empty = true; }, onOutcome: (value) => { outcome = value; } });
-    if (code !== 0 || empty) return code;
-    if (outcome?.outcome === OUTCOME_FAILED && !["no_change", "out_of_scope", "tests", "review_reject"].includes(outcome.reason)) {
-      deps.log("daily_batch_paused", { reason: outcome.reason });
-      return 1;
+  const notice = { runId: randomUUID(), attempted: 0, prOpened: 0, lastPrUrl: null };
+  const stopped = async (reason) => {
+    try {
+      // One attempt only. An unanswered notice may already have reached the app.
+      const answer = await deps.gateway({ op: "halt_notice", ...notice, reason }, null, 90_000);
+      deps.log("halt_notice_answer", { status: answer?.status ?? null, code: answer?.code ?? null });
+    } catch {
+      deps.log("halt_notice_unknown");
     }
+    return 1;
+  };
+  try {
+    for (let count = 0; count < LIMITS.tasksPerDay && deps.now() - started < LIMITS.dailyRunMs; count += 1) {
+      let empty = false;
+      let outcome = null;
+      const code = await runLocked(deps, {
+        onEmpty: () => { empty = true; }, onClaim: () => { notice.attempted += 1; },
+        onOutcome: (value) => {
+          outcome = value;
+          if (value.outcome === OUTCOME_PR_OPENED) { notice.prOpened += 1; notice.lastPrUrl = value.prUrl; }
+        },
+      });
+      if (code !== 0) return stopped(outcome?.unknown === "publish" ? "publish_unknown" : outcome ? "result_unknown" : "claim_failed");
+      if (empty) return 0;
+      if (outcome?.outcome === OUTCOME_FAILED && !["no_change", "out_of_scope", "tests", "review_reject"].includes(outcome.reason)) {
+        deps.log("daily_batch_paused", { reason: outcome.reason });
+        return stopped(outcome.reason);
+      }
+    }
+  } catch {
+    return stopped("runner_error");
   }
   deps.log("daily_batch_limit");
   return 0;

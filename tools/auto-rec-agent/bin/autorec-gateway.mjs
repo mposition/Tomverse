@@ -44,6 +44,7 @@ import {
   APP_RESULT_PATH,
   DAILY_APP_CLAIM_PATH,
   DAILY_APP_RESULT_PATH,
+  DAILY_APP_HALT_PATH,
   GITHUB_API,
   LIMITS,
   REPO_OWNER,
@@ -57,6 +58,7 @@ import {
   boundPrText,
   branchNameFor,
   buildResultBody,
+  buildHaltBody,
   checkChangeScope,
   isAutoRecBranch,
   isPrUrl,
@@ -195,6 +197,16 @@ async function result(deps, header) {
   const answer = await appPost(deps, deps.config.dailyProduct ? DAILY_APP_RESULT_PATH : APP_RESULT_PATH, body);
   if (answer.kind === "unknown") return { status: "unknown", code: answer.status ? `http_${answer.status}` : "network" };
   if (answer.status >= 200 && answer.status < 300) return { status: "reported" };
+  return { status: "error", code: `http_${answer.status}` };
+}
+
+async function haltNotice(deps, header) {
+  if (!deps.config.dailyProduct) return { status: "error", code: "daily_mode_required" };
+  let body;
+  try { body = buildHaltBody(header); } catch { return { status: "error", code: "halt_notice_invalid" }; }
+  const answer = await appPost(deps, DAILY_APP_HALT_PATH, body);
+  if (answer.kind === "unknown") return { status: "unknown", code: "halt_notice_unknown" };
+  if (answer.status === 200 && answer.json?.recorded === true) return { status: "recorded" };
   return { status: "error", code: `http_${answer.status}` };
 }
 
@@ -423,6 +435,7 @@ export async function handleRequest(deps, header, payload) {
   if (header.op === "claim") return claim(deps);
   if (header.op === "result") return result(deps, header);
   if (header.op === "publish") return publish(deps, header, payload);
+  if (header.op === "halt_notice") return haltNotice(deps, header);
   return { status: "error", code: "op_invalid" };
 }
 

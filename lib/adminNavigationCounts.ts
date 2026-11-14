@@ -9,6 +9,7 @@ import { AMUX_ESCALATION_AWAITING_STATUSES } from "@/lib/amux/humanReviewCore";
 import { countOpenAmuxOrchestratorHalts } from "@/lib/amux/orchestratorHaltStore";
 import { countDecisionMakerAttention } from "@/lib/amux/decisionMakerAttention";
 import { countAmuxOwnerQueue } from "@/lib/amux/adminOwnerQueueRead";
+import { DAILY_PRODUCT_AGENT_NOTICE_TARGET } from "@/lib/dailyProductAgentAlertCore";
 
 export {
   EMPTY_ADMIN_NAVIGATION_COUNTS,
@@ -87,7 +88,10 @@ export async function getAdminNavigationCounts(): Promise<{
     prisma.stripeWebhookEventLog.count({ where: { status: "failed" } }),
     getScheduledJobsDashboard(),
     prisma.adminNotificationLog.count({
-      where: { status: "failed", acknowledgedAt: null },
+      where: { acknowledgedAt: null, OR: [
+        { status: "failed" },
+        { channel: "in_app", targetType: DAILY_PRODUCT_AGENT_NOTICE_TARGET },
+      ] },
     }),
     abandonedLegalEmailCount(),
     // Families, not rows: the discovery tab lists and decides by family.
