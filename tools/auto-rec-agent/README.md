@@ -42,6 +42,8 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
 
 운영자 2026-11-14 요청: 회차가 장애로 멈추면 기존 운영 알림 경로로 알립니다.
 앱의 `DAILY_PRODUCT_AGENT_ALERTS_ENABLED=true`를 별도로 운영 활성화한 뒤 사용합니다.
+배포 순서는 앱의 새 API 반영 → 알림 스위치 활성화 → Ubuntu 프로그램 갱신입니다. 구버전 앱에
+새 서버를 먼저 연결하면 알림을 받을 수 없습니다.
 runner는 한 회차의 중단을 gateway에 한 번만 보고하고, gateway는 기존 앱 공유 비밀로
 `/api/internal/product-improvements/halt`에 닫힌 사유 코드·시도 수·확인된 PR 수·마지막 PR 링크만
 보냅니다. 작업문·모델 출력·stderr·자격증명·임의 수신자·임의 URL은 받지 않습니다.

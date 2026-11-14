@@ -17,7 +17,9 @@ export const dailyProductHaltNotice = (input: DailyProductHalt) => ({
   detail: [
     `Reason: ${input.reason}. Attempts: ${input.attempted}; PRs opened: ${input.prOpened}.`,
     input.lastPrUrl ? `Last confirmed PR: ${input.lastPrUrl}` : "No PR was confirmed in this run.",
-    ["publish_unknown", "result_unknown", "review_unknown"].includes(input.reason)
+    input.reason === "result_failed"
+      ? "Check the existing claim and any confirmed PR before restarting; do not repeat a confirmed publication."
+      : ["publish_unknown", "result_unknown", "review_unknown"].includes(input.reason)
       ? "Look up the existing PR or review before restarting; do not resubmit an unknown outcome."
       : "Inspect the service failure before restarting. The daily task cap still applies.",
     "Open /admin/product-research?tab=suggestions and /admin/routing?tab=optimizer for task state.",
