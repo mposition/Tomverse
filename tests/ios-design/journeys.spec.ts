@@ -63,6 +63,16 @@ for (const product of ["Chat", "Review"] as const) {
       await expect(page.getByRole("dialog")).toHaveCount(0);
       await expect(page.getByTestId("ios-active-assistant")).toHaveText("Review guide");
       expect(await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo") ?? "[]"))).toHaveLength(2);
+      // The assistant's own models answer: Easy routing is not asked and does not replace them.
+      const before = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo") ?? "[]"));
+      const bound = before.find((row: { assistantProfileId?: string; messages: unknown[] }) => row.assistantProfileId && row.messages.length === 0);
+      await page.getByRole("textbox").fill("What should I check first?");
+      await page.getByRole("button", { name: "메시지 보내기", exact: true }).click();
+      await expect.poll(async () => (await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo") ?? "[]")))
+        .find((row: { id: string }) => row.id === bound.id)?.messages.length ?? 0).toBeGreaterThan(0);
+      expect(await page.evaluate(() => localStorage.getItem("tomverse-native-synthetic-demo:review-routes"))).toBeNull();
+      const after = (await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo") ?? "[]"))).find((row: { id: string }) => row.id === bound.id);
+      expect(after.selectedModels).toEqual(bound.selectedModels);
     }
   });
 }

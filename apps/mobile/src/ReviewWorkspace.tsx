@@ -133,7 +133,10 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   }
   async function send(text: string, files: MobileAttachment[]) {
     if (streaming || uncertain || !capability) return false;
-    if (!(mode === "easy" ? providers : selected).length) { setError(c.noParticipants); return false; }
+    // A conversation bound to a saved assistant answers with that assistant's models;
+    // Easy routing never replaces them (IOS_WORKSPACE_API.md).
+    const easy = mode === "easy" && !conversation?.assistantProfileId;
+    if (!(easy ? providers : selected).length) { setError(c.noParticipants); return false; }
     const titleEpoch = titleScope.current;
     const current = ++request.current; const controller = new AbortController(); abort.current = controller;
     setStreaming(true); setError(""); setPartial({}); setPendingQuestion(text); setDraft("");
@@ -142,8 +145,8 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
       if (!transport.configureReview || !transport.sendReview) throw Error("REVIEW_UNAVAILABLE");
       item = await ensureConversation(selected, current, false);
       if (current !== request.current || controller.signal.aborted) return false;
-      let participants = selected;
-      if (mode === "easy") {
+      let participants = mode === "easy" && item.assistantProfileId ? item.selectedModels : selected;
+      if (easy && !item.assistantProfileId) {
         if (!capability.reviewEasy || !transport.routeReview) throw Error("EASY_UNAVAILABLE");
         const decision = await transport.routeReview({ text, context: item.messages.filter(message => message.role === "user").at(-1)?.content.slice(0, 1200) ?? "", providers, hasImages: files.some(file => file.mediaType.startsWith("image/")) || item.messages.some(message => message.attachments?.some(file => file.mediaType.startsWith("image/"))) });
         if (current !== request.current) return false;
