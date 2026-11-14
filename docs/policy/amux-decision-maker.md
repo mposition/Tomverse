@@ -206,8 +206,8 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     저장되지 않으므로 싣지 않는다. 검토 PR이면 PR 번호, 파일 목록 전체, 들어가는 만큼의 파일 diff(통째로)와 빠진 수를 싣는다.
     증거를 읽을 수 없거나 카드 한 장(2,000자)에 통째로 들어가지 않으면 DM에 올리지 않고 사람에게 넘긴다(`evidence_unavailable`).
     운영자 결정 2026-11-14: patch는 질문(2,000자)이 아니라 relay가 전달하는 카드 `context`(4,000자, `[evidence]` 블록)에 싣는다.
-    정리·T2 초안 카드는 들어가는 파일 diff만 싣고 빠진 수를 밝힌다. v22 결과 검토 카드도 그 시도의 엔지니어링 patch와 열린 PR
-    번호를 싣되, patch가 통째로 들어가지 않으면 카드를 만들지 않고 사람에게 넘긴다(`evidence_unavailable`). v22 implement
+    정리·T2 초안 카드는 들어가는 파일 diff만 싣고 빠진 수를 밝힌다. v22 결과 검토는 patch가 없는 실행에서만 생기므로
+    (`amuxV22ResultReviewKind`) patch를 싣지 않는다. v22 implement
     Task의 PR은 카드가 아니라 run의 binding에 있으므로, 운영자 확인 대기 화면은 그 PR(`publication_hold`)을 "PR 없음" 대신 보인다.
     `tier_pending` 초안이 있는 동안 retry가 막히는 것은 이중 실행 방지이며, 화면은 초안을 거절하면 retry가 열린다고 알린다.
     선택지는 멈춘 Task가 `retry`(시도 예산 안에서 `todo`, 넘으면 사람에게)·`complete`(done, `v4TerminalAt`)·`close`(archive)·
@@ -235,7 +235,7 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
 2. `ask_type`이 허용된 여섯(§0-1) 밖. `customer_outbound`도 여기다.
 3. 되돌릴 수 없는 행위 용어 목록에 걸림. 판정 입력은 카드의 type·tag·제목·질문·선택지·해제 조건·worker가
    적은 맥락. 운영자 결정 2026-11-14(AMUXFLOW/B2): `TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY=enabled`이면 앱이 직접 만든
-   카드(그 local card를 기록한 `AmuxDmOwnerSettlement` 행, 2026-11-14부터는 `AmuxV22ResultReview`·`EngineeringAgentDmReview`
+   카드(그 local card를 기록한 `AmuxDmOwnerSettlement` 행, 2026-11-14부터는 `EngineeringAgentDmReview`
    행도 있는 카드)가 `[evidence]`…`[/evidence]`로 감싼
    증거(실행 결과, diff)는 용어 판정에서 뺀다. worker 카드의 표식은 보통 글자로 읽는다. 닫히지 않은 표식은 빼지 않고, secret 검사는
    카드 전체에 그대로 적용한다. 기본은 꺼짐이다. 아래가 v1 목록이며 바꾸려면 운영자 승인(대화 한 줄, PR에 기록)이 필요하다: main 병합, ship·release·배포·production,

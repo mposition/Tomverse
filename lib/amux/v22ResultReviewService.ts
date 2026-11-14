@@ -39,8 +39,7 @@ type PendingReview = AmuxV22SealedRow & { reviewId: string; taskId: string;
   role: string | null; sourceSha256: string;
   bodyCiphertext: Uint8Array | null; bodyKeyId: string | null;
   bodyKeyVersion: number | null; bodyDigest: string | null;
-  bodyDigestKeyId: string | null;
-  patchBody?: string | null; pullNumber?: number | null };
+  bodyDigestKeyId: string | null };
 
 /** Open reviews with no card yet, on a Task still in review, with their run's
  * result rows; and cards of reviews no longer open that the relay has not
@@ -59,18 +58,7 @@ export async function readAmuxV22ResultReviewSyncRows(tx: Prisma.TransactionClie
       w."v4BodyKeyVersion" AS "bodyKeyVersion", w."v4BodyDigest" AS "bodyDigest",
       w."v4BodyDigestKeyId" AS "bodyDigestKeyId",
       r."ideaId", r."ciphertext", r."keyId", r."keyVersion", r."digest",
-      r."digestKeyId", r."sourceSha256", r."bodyPurgedAt",
-      -- The change the engineering agent holds for this run, and the pull
-      -- request it opened: the evidence the card carries beside the findings.
-      (SELECT i."patchBody" FROM "EngineeringAgentWorkItem" i
-        JOIN "EngineeringAgentRun" er ON er."id" = i."runId"
-        WHERE er."amuxAttemptId" = v."attemptId" AND i."kind" IN ('publish', 't2_draft')
-          AND i."patchBody" IS NOT NULL
-        ORDER BY (i."kind" = 'publish') DESC, i."createdAt" DESC, i."id" DESC LIMIT 1) AS "patchBody",
-      (SELECT coalesce(b."currentPrNumber", b."prNumber") FROM "EngineeringAgentBinding" b
-        JOIN "EngineeringAgentRun" er ON er."id" = b."runId"
-        WHERE er."amuxAttemptId" = v."attemptId" AND b."state" = 'open' AND b."supersededAt" IS NULL
-        ORDER BY b."createdAt" DESC, b."id" DESC LIMIT 1) AS "pullNumber"
+      r."digestKeyId", r."sourceSha256", r."bodyPurgedAt"
     FROM "AmuxV22ResultReview" v
     JOIN "AmuxWorkItem" w ON w."id" = v."taskId"
     JOIN "AmuxV22TaskResult" r ON r."attemptId" = v."attemptId" AND r."taskId" = v."taskId"
@@ -115,13 +103,10 @@ export async function openCompletionCriteria(row: Pick<PendingReview, "ideaId" |
 /**
  * The cards the relay files, opened outside the DB transaction: the Task's
  * completion criteria and the run's findings (its conclusion's, else the whole
- * result), both whole, and the run's change when the engineering agent holds
- * one (its files in the question, its diffs in the context). A review whose
- * evidence cannot be read, or does not fit a card whole, is not put to the
- * Decision Maker -- approving what it cannot see would be a blind approval --
- * and comes back in `unfilable` to be handed to the person (reason
- * `evidence_unavailable`, with one system audit), so it never holds back the
- * reviews behind it.
+ * result), both whole. A review whose evidence cannot be read, or does not fit
+ * a card whole, is not put to the Decision Maker -- approving what it cannot
+ * see would be a blind approval -- and comes back in `unfilable` to be handed
+ * to the person, so it never holds back the reviews behind it.
  */
 export async function openAmuxV22ResultReviewCards(pending: PendingReview[]) {
   const cards = [];
@@ -134,8 +119,7 @@ export async function openAmuxV22ResultReviewCards(pending: PendingReview[]) {
       const criteria = text ? await openCompletionCriteria(row) : null;
       if (text && criteria) card = amuxV22ResultReviewRelayCard({ reviewId: row.reviewId,
         taskLabel: row.taskLabel, role: row.role, kind: row.kind, criteria,
-        findings: parseAmuxV22Conclusion(text)?.findings ?? text,
-        patch: row.patchBody ?? null, pullNumber: row.pullNumber ?? null });
+        findings: parseAmuxV22Conclusion(text)?.findings ?? text });
     } catch { card = null; }
     if (card) cards.push(card);
     else unfilable.push(row.reviewId);

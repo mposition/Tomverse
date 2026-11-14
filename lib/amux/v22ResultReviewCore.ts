@@ -11,9 +11,6 @@
  * Pure: who is asked about, the card's words, and what an answer says.
  */
 
-import { engineeringAgentPatchFiles } from "../engineeringAgentOwnerItemContextCore.ts";
-import { patchEvidenceContext } from "../engineeringAgentT2DmReviewCore.ts";
-
 /** Default off. Filing a review card starts a Decision Maker turn. */
 export const AMUX_V22_RESULT_REVIEW_DM_ENV = "TOMVERSE_AMUX_V22_RESULT_REVIEW_DM";
 /** Default off. A Decision Maker proposal for a question the app answers
@@ -84,21 +81,8 @@ export function amuxV22ResultReviewRelayCard(input: {
   kind: AmuxV22ResultReviewKind;
   criteria: readonly string[];
   findings: string;
-  /**
-   * The change the engineering agent holds for this run (a publish item's or
-   * a T2 draft's patch) and the pull request it opened, when there is one.
-   * The files are listed in the question and the diffs ride in the card's
-   * context, whole: a patch that does not fit whole, or that a card cannot
-   * carry, leaves the card unfiled and the review to the person -- the
-   * Decision Maker would otherwise rule on a change it saw part of.
-   */
-  patch?: string | null;
-  pullNumber?: number | null;
 }) {
   if (input.criteria.length === 0 || !input.findings.trim()) return null;
-  const evidence = input.patch ? patchEvidenceContext(input.patch) : null;
-  if (input.patch && (!evidence || !evidence.whole)) return null;
-  const files = input.patch ? engineeringAgentPatchFiles(input.patch) : [];
   const question = [
     "A v22 Task finished and waits for review before it can be marked done.",
     `Task: ${input.taskLabel} (${input.role ?? "task"} Task)`,
@@ -106,11 +90,6 @@ export function amuxV22ResultReviewRelayCard(input: {
     "Its completion criteria:",
     ...input.criteria.map((criterion) => `- ${criterion}`),
     `Its findings: ${input.findings}`,
-    ...(evidence ? [
-      `Its change${input.pullNumber ? `, pull request #${input.pullNumber}` : ""}, files (${files.length}):`,
-      ...files.map((file) => `- ${file.path} (+${file.added} -${file.removed})`),
-      "The patch is in this card's context.",
-    ] : []),
     "Should its result be approved as done, the Task run again, or the Task blocked for a person?",
   ].join("\n");
   if (question.length > AMUX_V22_RESULT_REVIEW_QUESTION_MAX) return null;
@@ -120,7 +99,6 @@ export function amuxV22ResultReviewRelayCard(input: {
     provider: AMUX_V22_RESULT_REVIEW_DM_PROVIDER,
     title: `Result review: ${input.taskLabel}`.slice(0, AMUX_V22_RESULT_REVIEW_TITLE_MAX),
     question,
-    ...(evidence ? { context: evidence.context } : {}),
     unblocks: "An approved result finishes the Task so the Tasks after it can start; a retry runs it again; a block leaves it for a person.",
     options: [
       { id: "approve", label: "Approve the result; the Task is done" },
