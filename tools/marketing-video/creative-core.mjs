@@ -26,7 +26,22 @@ export const AI_LINE = Object.freeze({
   "zh-Hant": "影片：部分由 AI 生成",
   "zh-Hans": "视频：部分由 AI 生成",
 });
-export const LIMITS = Object.freeze({ shots: 3, lines: [3, 10], lineChars: 200, localeChars: 700, screenLines: 16, screenChars: 60, altChars: 400, promptChars: 2500, seconds: [15, 38] });
+export const LIMITS = Object.freeze({ shots: 3, lines: [3, 10], lineChars: 200, localeChars: 700, screenLines: 16, screenChars: 60, altChars: 400, promptChars: 2500, seconds: [15, 38], filmSeconds: 40 });
+
+/**
+ * Characters (spaces left out) each locale's fixed ElevenLabs voice speaks a second, measured on
+ * this job's own takes (38 lines each, runs 20261112-20261113-2): the estimate came within about
+ * 2 s of the real narration on every run.
+ */
+export const SPEECH_RATE = Object.freeze({ en: 11.5, ko: 6.0, "zh-Hant": 5.2, "zh-Hans": 5.2 });
+/** Room left for the estimate's error. */
+export const NARRATION_MARGIN = 1.5;
+/** About how long a locale's narration runs, with the breaths between lines and the end card (as the voice step counts it). */
+export function narrationSeconds(lines, locale) {
+  const rate = SPEECH_RATE[locale] ?? SPEECH_RATE.en;
+  const chars = lines.reduce((sum, line) => sum + String(line).replace(/\s+/gu, "").length, 0);
+  return chars / rate + 0.35 * Math.max(0, lines.length - 1) + 2.5;
+}
 const URL_LIKE = /https?:|www\.|\b[a-z0-9-]+\.(?:com|net|org|ai|io|co)\b/iu;
 
 const isText = (value, max) => typeof value === "string" && value.trim().length > 0 && value.length <= max;
@@ -153,6 +168,13 @@ export function checkPlan(answer, { packs, history = [] }) {
     if (!Array.isArray(words.lines) || words.lines.length < LIMITS.lines[0] || words.lines.length > LIMITS.lines[1]) return refuse(`${locale}: lines is a list of ${LIMITS.lines[0]}-${LIMITS.lines[1]} narration lines`);
     if (!words.lines.every((line) => isText(line, LIMITS.lineChars))) return refuse(`${locale}: a narration line is empty or longer than ${LIMITS.lineChars}`);
     if (words.lines.join("").length > LIMITS.localeChars) return refuse(`${locale}: the narration is longer than ${LIMITS.localeChars} characters`);
+    // Before anything is paid for: the voice step drops a locale whose narration runs past the film's
+    // length, after paying for it (run 20261113-3: 42-50 s, all three dropped).
+    const runs = narrationSeconds(words.lines, locale);
+    if (runs > LIMITS.filmSeconds - NARRATION_MARGIN) {
+      const rate = SPEECH_RATE[locale] ?? SPEECH_RATE.en;
+      return refuse(`${locale}: the narration would run about ${runs.toFixed(0)} s with the end card, more than ${LIMITS.filmSeconds - NARRATION_MARGIN}; cut about ${Math.ceil((runs - (LIMITS.filmSeconds - NARRATION_MARGIN)) * rate)} characters from its lines`);
+    }
     if (!Array.isArray(words.screen) || words.screen.length > LIMITS.screenLines || !words.screen.every((line) => isText(line, LIMITS.screenChars))) {
       // Name the line to mend, so a retry changes that line and nothing else.
       const long = Array.isArray(words.screen) ? words.screen.find((line) => !isText(line, LIMITS.screenChars)) : undefined;

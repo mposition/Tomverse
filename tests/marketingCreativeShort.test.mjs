@@ -279,6 +279,19 @@ test("a refused plan is mended, not rewritten, and a run whose plan was refused 
   assert.ok(packsIn > 0 && packsIn < runner.indexOf('halt("no_capture_packs")'));
 });
 
+test("a plan whose narration would run past the film is refused before anything is paid for", async () => {
+  const { narrationSeconds } = await import("../tools/marketing-video/creative-core.mjs");
+  // Run 20261113-3's ko lines: the voice step later measured 47 s and dropped the locale after paying for it.
+  const { ko } = JSON.parse(readFileSync(resolve("tests/fixtures/creative-20261113-3-ko-lines.json"), "utf8"));
+  const seconds = narrationSeconds(ko, "ko");
+  assert.ok(seconds > 45 && seconds < 50, String(seconds));
+  const long = plan();
+  long.locales.ko = { ...words("ko"), lines: ko };
+  assert.match(checkPlan(answer(long), { packs: PACKS }).refusal, /ko: the narration would run about 4\d s with the end card, more than 38\.5; cut about \d+ characters/u);
+  // The short plan of every other test fits.
+  assert.ok(narrationSeconds(words("en").lines, "en") < 10);
+});
+
 test("a concept or logline used before is refused", () => {
   const history = [{ concept: "Night  Market!", logline: "something else" }];
   assert.match(checkPlan(answer(plan()), { packs: PACKS, history }).refusal, /used before/u);
