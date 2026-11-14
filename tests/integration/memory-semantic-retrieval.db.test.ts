@@ -8,12 +8,18 @@ import {
     verifyChatContextBundle,
 } from "@/lib/chatContextBundleService";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
+import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { pricedMemoryRetrievalHash } from "@/lib/chatContextBundleCore";
+import { buildMemoryQueryPlan } from "@/lib/memoryQueryPlan";
+import { putMemorySettings } from "@/lib/memoryService";
 import { MEMORY_INJECTION_FLAG_KEY } from "@/lib/memoryAccess";
 import { externalContentDigest } from "@/lib/externalImportDigest";
 import { leaseStillHolds } from "@/lib/memoryExtractionCommit";
 import { persistExtractionChunkDecisions } from "@/lib/memoryExtractionPersistence";
 import type { ExtractionDecision } from "@/lib/memoryExtractionPipeline";
 import { retrieveMemoryContext } from "@/lib/memoryRetrievalService";
+import { MEMORY_RETRIEVAL_ALGORITHM_VERSION, MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION } from "@/lib/memoryRetrievalScoring";
 import { MEMORY_RETRIEVAL_VERSION, memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
 import {
     memoryEmbeddingLabel,
@@ -112,7 +118,7 @@ test("with the switch off a memory that shares no term with the request is not s
     const result = await retrieveMemoryContext({ userId: user.id, query: COFFEE_QUESTION, now: NOW });
 
     assert.equal(provider.state.calls.length, 0);
-    assert.equal(result.algorithmVersion, 2);
+    assert.equal(result.algorithmVersion, MEMORY_RETRIEVAL_ALGORITHM_VERSION);
     assert.deepEqual(
         result.selected.map((entry) => entry.memory.statement),
         [ENGINEER]
@@ -130,7 +136,7 @@ test("reranking selects a relevant memory by meaning and never removes a core on
 
     const result = await retrieveMemoryContext({ userId: user.id, query: COFFEE_QUESTION, now: NOW });
 
-    assert.equal(result.algorithmVersion, 3);
+    assert.equal(result.algorithmVersion, MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION);
     assert.deepEqual(
         result.selected.map((entry) => entry.memory.statement).sort(),
         [CAFFEINE, ENGINEER].sort()
@@ -164,7 +170,7 @@ test("a failed rerank falls back to the lexical selection and its version", asyn
 
     const result = await retrieveMemoryContext({ userId: user.id, query: COFFEE_QUESTION, now: NOW });
 
-    assert.equal(result.algorithmVersion, 2);
+    assert.equal(result.algorithmVersion, MEMORY_RETRIEVAL_ALGORITHM_VERSION);
     assert.deepEqual(
         result.selected.map((entry) => entry.memory.statement),
         [ENGINEER]
@@ -508,14 +514,14 @@ test("extra candidates never push a lexical one out, and a failed rerank restore
     await turnOn("memoryRerank");
     provider.state.failing = true;
     const fallback = await retrieveMemoryContext(input);
-    assert.equal(fallback.algorithmVersion, 2);
+    assert.equal(fallback.algorithmVersion, MEMORY_RETRIEVAL_ALGORITHM_VERSION);
     assert.equal(fallback.resultHash, lexical.resultHash);
 
     // On, and the provider answers: the lexical match is still a candidate.
     provider.state.failing = false;
     provider.state.rerankScore = (_query, document) => (document.includes("커피") ? 0.9 : 0);
     const ranked = await retrieveMemoryContext({ ...input, query: `${COFFEE_QUESTION} 부탁해` });
-    assert.equal(ranked.algorithmVersion, 3);
+    assert.equal(ranked.algorithmVersion, MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION);
     assert.deepEqual(
         ranked.selected.map((entry) => entry.memory.id),
         [match.id]
@@ -534,7 +540,7 @@ test("a request with no usable term asks the reranker nothing", async () => {
     const result = await retrieveMemoryContext({ userId: user.id, query: "?!", now: NOW });
 
     assert.equal(provider.state.calls.length, 0);
-    assert.equal(result.algorithmVersion, 2);
+    assert.equal(result.algorithmVersion, MEMORY_RETRIEVAL_ALGORITHM_VERSION);
 });
 
 /* ------------------------------------------------ the route that verifies */
@@ -550,10 +556,10 @@ test("the verifying route reuses the issued ranking and never asks the reranker 
     // Verified without ever having been issued: lexical, and nobody is asked.
     const cold = await retrieveMemoryContext({ ...input, semantic: "cached_only" });
     assert.equal(provider.state.calls.length, 0);
-    assert.equal(cold.algorithmVersion, 2);
+    assert.equal(cold.algorithmVersion, MEMORY_RETRIEVAL_ALGORITHM_VERSION);
 
     const issued = await retrieveMemoryContext(input);
-    assert.equal(issued.algorithmVersion, 3);
+    assert.equal(issued.algorithmVersion, MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION);
     assert.equal(provider.state.calls.length, 1);
 
     provider.state.failing = true;
@@ -571,7 +577,7 @@ test("a bundle issued over a failed rerank verifies as lexical after the provide
 
     provider.state.failing = true;
     const issued = await retrieveMemoryContext(input);
-    assert.equal(issued.algorithmVersion, 2);
+    assert.equal(issued.algorithmVersion, MEMORY_RETRIEVAL_ALGORITHM_VERSION);
 
     provider.state.failing = false;
     provider.state.rerankScore = () => 0.9;
@@ -754,4 +760,223 @@ test("a core memory with a stored vector is still not compared", async () => {
         (await prisma.memoryItem.findUniqueOrThrow({ where: { id: core.id } })).status,
         "active"
     );
+});
+
+
+// These are synthetic provider scores, testing candidate supply and fallback only.
+// They are not evidence of semantic quality or a successful external evaluation.
+test("a saturated lexical pool leaves rerank slots for recent extras, including term matches beyond DB400", async () => {
+    const user = await createUser();
+    await prisma.memoryItem.createMany({
+        data: Array.from({ length: 400 }, (_, index) => ({
+            id: `lexical-${String(index).padStart(3, "0")}`,
+            userId: user.id, kind: "project", statement: `coffee archive ${index}`,
+            status: "active", confidence: 0.1, importance: 10,
+            createdAt: new Date("2026-10-01T00:00:00Z"),
+            approvedAt: NOW, searchTerms: ["coffee", "archive", String(index)],
+            retrievalVersion: MEMORY_RETRIEVAL_VERSION,
+        })),
+    });
+    const overflow = await createMemory(user.id, "project", "coffee overflow target");
+    const semanticOnly = await createMemory(user.id, "project", "caffeine target");
+    await createMemory(user.id, "identity", ENGINEER);
+    await createMemory(user.id, "tone", "Respond politely");
+    const pinned = await createMemory(user.id, "preference", "Pinned preference");
+    await prisma.memoryItem.update({ where: { id: pinned.id }, data: { pinned: true } });
+    await turnOn("memoryRerank");
+    provider.state.rerankScore = (_query, document) => document.includes("target") ? 0.95 : 0;
+
+    const result = await retrieveMemoryContext({ userId: user.id, query: "coffee", now: NOW });
+    const sent = provider.state.calls[0].body.documents as string[];
+    assert.equal(sent.length, 100);
+    assert.ok(sent.some(text => text.startsWith("coffee archive")), "lexical pool keeps slots");
+    assert.ok(sent.includes(overflow.statement), "extra is ID-based, even with a matching word");
+    assert.ok(sent.includes(semanticOnly.statement), "recent nonmatching extras keep slots");
+    for (const text of [ENGINEER, "Respond politely", "Pinned preference"]) assert.ok(!sent.includes(text));
+    const selected = result.selected.map(row => row.memory.id);
+    assert.ok(selected.includes(overflow.id));
+    assert.ok(selected.includes(semanticOnly.id));
+    assert.equal(new Set(sent).size, sent.length);
+    assert.equal(result.algorithmVersion, MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION);
+});
+
+test("extras the provider did not score cannot enter by lexical overlap", async () => {
+    const user = await createUser();
+    await prisma.memoryItem.createMany({
+        data: Array.from({ length: 400 }, (_, index) => ({
+            id: `lexical-${String(index).padStart(3, "0")}`,
+            userId: user.id, kind: "project", statement: `coffee lexical ${index}`,
+            status: "active", confidence: 0.1, importance: 10,
+            createdAt: new Date("2026-10-01T00:00:00Z"),
+            searchTerms: ["coffee", "lexical", String(index)], retrievalVersion: MEMORY_RETRIEVAL_VERSION,
+        })),
+    });
+    await prisma.memoryItem.createMany({
+        data: Array.from({ length: 100 }, (_, index) => ({
+            id: `extra-${String(index).padStart(3, "0")}`,
+            userId: user.id, kind: "project", statement: `coffee extra ${index}`,
+            status: "active", confidence: 1, importance: 0,
+            createdAt: new Date(NOW.getTime() - index * 1_000),
+            approvedAt: NOW, searchTerms: ["coffee", "extra", String(index)],
+            retrievalVersion: MEMORY_RETRIEVAL_VERSION,
+        })),
+    });
+    await turnOn("memoryRerank");
+    provider.state.rerankScore = () => 0;
+    const result = await retrieveMemoryContext({ userId: user.id, query: "coffee", now: NOW });
+    const sent = new Set(provider.state.calls[0].body.documents as string[]);
+    assert.equal(sent.size, 100);
+    for (const row of result.selected) {
+        if (row.memory.id.startsWith("extra-")) {
+            assert.ok(sent.has(row.memory.statement), "only scored extras may enter selection");
+        }
+    }
+    assert.ok(result.selected.some(row => row.memory.id.startsWith("lexical-")), "unscored original lexical rows remain eligible");
+});
+
+test("invalid scores and a refused budget reproduce the new-query lexical baseline", async () => {
+    const user = await createUser();
+    await createMemory(user.id, "project", "coffee target");
+    await createMemory(user.id, "project", "caffeine target");
+    const query = `start ${Array.from({ length: 120 }, (_, index) => `filler${index}`).join(" ")} coffee`;
+    const input = { userId: user.id, query, now: NOW };
+    const baseline = await retrieveMemoryContext({ ...input, semantic: "off" });
+    await turnOn("memoryRerank");
+    provider.state.rerankScore = () => Number.NaN;
+    const invalid = await retrieveMemoryContext(input);
+    assert.equal(invalid.resultHash, baseline.resultHash);
+    assert.equal(invalid.algorithmVersion, MEMORY_RETRIEVAL_ALGORITHM_VERSION);
+    assert.equal(provider.state.calls.length, 1);
+    const verified = await retrieveMemoryContext({ ...input, semantic: "cached_only" });
+    assert.equal(verified.resultHash, baseline.resultHash);
+    assert.equal(provider.state.calls.length, 1);
+
+    await prisma.semanticRetrievalCache.deleteMany();
+    provider.setEnv("RETRIEVAL_PROVIDER_COHERE_COST_MICROUSD_PER_DAY", "1");
+    provider.state.rerankScore = () => 1;
+    const refused = await retrieveMemoryContext(input);
+    assert.equal(refused.resultHash, baseline.resultHash);
+    assert.equal(provider.state.calls.length, 1, "refused budget makes no request");
+});
+
+test("an unconfirmed cache write discards extras and preserves the lexical baseline", async () => {
+    const user = await createUser();
+    await createMemory(user.id, "project", "coffee preference");
+    await createMemory(user.id, "project", "caffeine preference");
+    const input = { userId: user.id, query: "coffee", now: NOW };
+    const baseline = await retrieveMemoryContext({ ...input, semantic: "off" });
+    await turnOn("memoryRerank");
+    provider.state.rerankScore = () => 1;
+    const fallback = await withCacheUnavailable(() => retrieveMemoryContext(input));
+    assert.equal(fallback.resultHash, baseline.resultHash);
+    assert.equal(fallback.algorithmVersion, MEMORY_RETRIEVAL_ALGORITHM_VERSION);
+    assert.equal(provider.state.calls.length, 1);
+    const verified = await retrieveMemoryContext({ ...input, semantic: "off" });
+    assert.equal(verified.resultHash, baseline.resultHash);
+    assert.equal(provider.state.calls.length, 1);
+});
+
+
+test("all semantic candidate entry paths enforce owner, active, expiry, provenance, and reachable evidence", async () => {
+    const { user, older } = await seedSource();
+    const stranger = await createUser();
+    await createMemory(stranger.id, "project", "stranger caffeine");
+    for (const status of ["superseded", "deleted", "candidate", "suspended_by_source_delete"]) {
+        const item = await createMemory(user.id, "project", `inactive caffeine ${status}`);
+        await prisma.memoryItem.update({ where: { id: item.id }, data: { status } });
+    }
+    const expired = await createMemory(user.id, "project", "expired caffeine");
+    await prisma.memoryItem.update({ where: { id: expired.id }, data: { expiresAt: NOW } });
+    const revoked = await createMemory(user.id, "project", "revoked caffeine");
+    await prisma.memoryItem.update({ where: { id: revoked.id }, data: {
+        extractionModelId: "revoked-model", promptVersion: "revoked-prompt",
+    } });
+    const locked = await createMemory(user.id, "project", "locked caffeine");
+    const manualBacked = await createMemory(user.id, "project", "manual caffeine");
+    for (const item of [locked, manualBacked]) {
+        await prisma.memoryEvidence.create({ data: {
+            userId: user.id, memoryItemId: item.id, sourceType: "external_message",
+            externalMessageId: older.id, evidenceDigest: older.contentDigest,
+        } });
+    }
+    await prisma.externalConversation.update({ where: { id: older.externalConversationId }, data: { password: "locked" } });
+    await prisma.memoryEvidence.create({ data: {
+        userId: user.id, memoryItemId: manualBacked.id, sourceType: "manual",
+        manualContent: "The user independently confirmed this preference", evidenceDigest: "manual-fixture",
+    } });
+    const evidenceLess = await createMemory(user.id, "project", "independent caffeine");
+    await turnOn("memoryRerank");
+    provider.state.rerankScore = () => 0.8;
+    const result = await retrieveMemoryContext({ userId: user.id, query: "coffee", now: NOW, approvedPairs: [] });
+    const sent = provider.state.calls[0].body.documents as string[];
+    assert.deepEqual([...sent].sort(), [manualBacked.statement, evidenceLess.statement].sort());
+    assert.deepEqual(result.selected.map(row => row.memory.id).sort(), [manualBacked.id, evidenceLess.id].sort());
+});
+
+test("conversation and profile off skip semantic work without changing saved account settings", async () => {
+    const user = await createUser();
+    await createMemory(user.id, "project", "coffee preference");
+    await prisma.appSetting.create({ data: { key: MEMORY_INJECTION_FLAG_KEY, value: "true" } });
+    await turnOn("memoryRerank");
+    const input = { userId: user.id, query: "coffee", now: NOW };
+    const conversationOff = await buildChatMemoryContext({ ...input, conversationMode: "off" });
+    assert.deepEqual(conversationOff.decision, { allowed: false, reason: "conversation_off" });
+    const profileOff = await buildChatMemoryContext({ ...input, profileMemoryPolicy: { useAccountMemory: false } });
+    assert.deepEqual(profileOff.decision, { allowed: false, reason: "profile_off" });
+    await putMemorySettings(user.id, { masterEnabled: false, styleEnabled: true, defaultConversationMode: "on" });
+    const accountOff = await buildChatMemoryContext({ ...input, conversationMode: "on" });
+    assert.deepEqual(accountOff.decision, { allowed: false, reason: "account_off" });
+    for (const context of [conversationOff, profileOff, accountOff]) {
+        assert.equal(context.memoryTokens, 0);
+        assert.equal(context.prompt.data, null);
+        assert.equal(context.prompt.rules, null);
+    }
+    assert.equal(provider.state.calls.length, 0);
+    const settings = await prisma.userMemorySettings.findUniqueOrThrow({ where: { userId: user.id } });
+    assert.equal(settings.masterEnabled, false);
+    assert.equal(settings.defaultConversationMode, "on");
+});
+
+test("an account state change after preparation makes the signed memory bundle stale", async () => {
+    const user = await createUser();
+    await createMemory(user.id, "identity", ENGINEER);
+    await prisma.appSetting.create({ data: { key: MEMORY_INJECTION_FLAG_KEY, value: "true" } });
+    const issued = await issueTurn(user.id, COFFEE_QUESTION);
+    assert.equal(issued.context.memory.prompt.usedCount, 1);
+    await putMemorySettings(user.id, { masterEnabled: false, styleEnabled: true, defaultConversationMode: "on" });
+    assert.deepEqual(await verifyTurn(user.id, COFFEE_QUESTION, issued.token), { ok: false, reason: "stale" });
+    assert.equal(provider.state.calls.length, 0);
+});
+
+
+test("prepared context prices and binds memory rules and user data together", async () => {
+    const user = await createUser();
+    const item = await createMemory(user.id, "identity", ENGINEER);
+    await prisma.appSetting.create({ data: { key: MEMORY_INJECTION_FLAG_KEY, value: "true" } });
+    const query = COFFEE_QUESTION;
+    const issued = await issueTurn(user.id, query);
+    const prompt = issued.context.memory.prompt;
+    assert.ok(prompt.rules && prompt.data);
+    assert.equal(issued.context.memoryTokens, estimatePromptTokens(prompt.rules) + estimatePromptTokens(prompt.data));
+    assert.equal(issued.context.memoryTokens, issued.context.memory.memoryTokens);
+    assert.ok(issued.context.systemPrompt?.includes(prompt.rules));
+    assert.ok(!issued.context.systemPrompt?.includes(ENGINEER));
+    assert.equal(issued.context.fingerprintInput.retrievalHash, pricedMemoryRetrievalHash(
+        [item.id], JSON.stringify({ rules: prompt.rules, data: prompt.data }), JSON.stringify(buildMemoryQueryPlan(query))));
+    assert.equal((await verifyTurn(user.id, query, issued.token)).ok, true);
+    // Same selected rows and state timestamp: only rendered data/hash changes.
+    await prisma.memoryItem.update({ where: { id: item.id }, data: {
+        statement: `${ENGINEER} and maintains storage systems`, updatedAt: item.updatedAt,
+    } });
+    assert.deepEqual(await verifyTurn(user.id, query, issued.token), { ok: false, reason: "stale" });
+    assert.equal(provider.state.calls.length, 0);
+});
+
+test("the signed query plan changes even when lexical terms and selected memories stay equal", async () => {
+    const user = await createUser();
+    await createMemory(user.id, "identity", ENGINEER);
+    await prisma.appSetting.create({ data: { key: MEMORY_INJECTION_FLAG_KEY, value: "true" } });
+    const issued = await issueTurn(user.id, COFFEE_QUESTION);
+    assert.deepEqual(await verifyTurn(user.id, `${COFFEE_QUESTION}!!!`, issued.token), { ok: false, reason: "stale" });
+    assert.equal(provider.state.calls.length, 0);
 });

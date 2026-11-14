@@ -343,7 +343,9 @@ type MobileChatShellProps = {
   assistantProfileOptions?: ChatAssistantProfileOption[];
   onAssistantProfileChange?: (profileId: string | null) => void;
   onMemoryModeChange?: (mode: ConversationMemoryMode) => void;
-  accountMemoryDefault?: "on" | "off";
+  accountMemoryDefault?: "on" | "off" | null;
+  accountMemoryMasterEnabled?: boolean | null;
+  onMemorySettingsRefresh?: () => void;
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
@@ -553,6 +555,8 @@ export function MobileChatShell({
   onAssistantProfileChange,
   onMemoryModeChange,
   accountMemoryDefault,
+  accountMemoryMasterEnabled,
+  onMemorySettingsRefresh,
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
@@ -1952,6 +1956,8 @@ export function MobileChatShell({
             onAssistantProfileChange={onAssistantProfileChange}
             onMemoryModeChange={onMemoryModeChange}
             accountMemoryDefault={accountMemoryDefault}
+            accountMemoryMasterEnabled={accountMemoryMasterEnabled}
+            onMemorySettingsRefresh={onMemorySettingsRefresh}
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}

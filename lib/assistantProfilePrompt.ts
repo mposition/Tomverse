@@ -154,7 +154,7 @@ export function buildProfileInstructionPrompt(
 export type ProfileSystemBlocks = {
     /** §9.1 step 2. */
     instructions: string | null;
-    /** §9.1 step 3, from `buildMemoryContextPrompt`. */
+    /** App-authored memory rules only; statements are separate user-role data. */
     memory: string | null;
     /** §9.1 step 4. */
     knowledge: string | null;

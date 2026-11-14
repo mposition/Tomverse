@@ -41,6 +41,7 @@ import { prepareChatSendInputs } from "@/lib/chatSendPreparation";
 import { boundedLatencyMs, createLatencyStages } from "@/lib/responseLatencyStages";
 import type { ClientLatencyStages } from "@/lib/responseLatencyCore";
 import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
+import { useAccountMemorySettings } from "@/components/chat/useAccountMemorySettings";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import { saveResponseAsFile, saveVerifiedResponseAsFile } from "@/lib/browserDownload";
@@ -2077,13 +2078,8 @@ export function ChatPageClient({
     promptRefinerFixtureOffered || promptRefinerProductExplicitOffered;
   const promptRefinerProductMode =
     !promptRefinerFixtureOffered && promptRefinerProductExplicitOffered;
-  // What `inherit` currently resolves to, so the menu can say which way that
-  // choice points rather than only that it follows something. Fetched once
-  // per signed-in session; "on" until it answers, matching the server's own
-  // default so the label cannot briefly claim memory is off when it is not.
-  const [accountMemoryDefault, setAccountMemoryDefault] = useState<"on" | "off">(
-    "on"
-  );
+  const { settings: accountMemorySettings, refresh: refreshAccountMemorySettings } =
+    useAccountMemorySettings(sessionUserId);
   // §14. Two pieces of state, because a profile can be chosen before the
   // conversation that will carry it exists: `assistantProfile` is what the
   // server says this conversation is bound to, and `pendingProfileId` is what
@@ -8130,30 +8126,6 @@ export function ChatPageClient({
   // for models with confirmed support, instead of forcing a Perplexity
   // model into the selection -- selectedModels and their order are never
   // touched by a web-search-mode change.
-  useEffect(() => {
-    if (!sessionUserId) return;
-    let cancelled = false;
-    void fetch("/api/memories/settings", { cache: "no-store" })
-      .then((response) =>
-        response.ok
-          ? response.json()
-          : discardResponseBody(response).then(() => null)
-      )
-      .then((body: { defaultConversationMode?: unknown } | null) => {
-        if (cancelled) return;
-        // Only the explicit "off" moves it, the same direction the server
-        // resolver takes: an unreadable value must not make the menu say
-        // memory is off for conversations it is on for.
-        setAccountMemoryDefault(
-          body?.defaultConversationMode === "off" ? "off" : "on"
-        );
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionUserId]);
-
   /**
    * §14. The account's published profiles, loaded once per signed-in session.
    *
@@ -10662,9 +10634,11 @@ export function ChatPageClient({
           selectionMode={selectionMode}
           selectionModePending={selectionModePending}
           onSelectionModeChange={handleSelectionModeChange}
-          accountMemoryDefault={accountMemoryDefault}
+          accountMemoryDefault={accountMemorySettings?.defaultConversationMode ?? null}
+          accountMemoryMasterEnabled={accountMemorySettings?.masterEnabled ?? null}
+          onMemorySettingsRefresh={refreshAccountMemorySettings}
           assistantProfile={
-            assistantProfileOptions ? effectiveAssistantProfile : undefined
+            effectiveAssistantProfile ?? (assistantProfileOptions ? null : undefined)
           }
           assistantProfileRemovedAt={assistantProfileRemovedAt}
           assistantProfileOptions={assistantProfileOptions ?? []}
@@ -10852,9 +10826,11 @@ export function ChatPageClient({
           selectionMode={selectionMode}
           selectionModePending={selectionModePending}
           onSelectionModeChange={handleSelectionModeChange}
-          accountMemoryDefault={accountMemoryDefault}
+          accountMemoryDefault={accountMemorySettings?.defaultConversationMode ?? null}
+          accountMemoryMasterEnabled={accountMemorySettings?.masterEnabled ?? null}
+          onMemorySettingsRefresh={refreshAccountMemorySettings}
           assistantProfile={
-            assistantProfileOptions ? effectiveAssistantProfile : undefined
+            effectiveAssistantProfile ?? (assistantProfileOptions ? null : undefined)
           }
           assistantProfileRemovedAt={assistantProfileRemovedAt}
           assistantProfileOptions={assistantProfileOptions ?? []}

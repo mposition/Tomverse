@@ -4,8 +4,48 @@ import { createApiTransport } from "../apps/mobile/src/apiTransport.ts";
 import { nativeParityBearerRoute } from "../lib/nativeBearerGate.ts";
 import { validateMobileUpload } from "../apps/mobile/src/nativeUpload.ts";
 import { mobileErrorText } from "../locales/mobileErrors.ts";
+import { buildMemoryQueryPlan } from "../lib/memoryQueryPlan.ts";
+import { latestUserPromptText } from "../lib/chatMemoryContextCore.ts";
 const bridge = { hasSession: async () => ({ signedIn: true }), signOut: async () => {} };
 const capability = { reviewEasy: true, assistants: true, maxModels: 3, plan: "Max" };
+
+test("Review preflight and persisted send use the same bounded Memory query for padded long text", async () => {
+  const conversation = { id: "memory-review", selectedModels: ["a", "b"], messages: [] };
+  const text = ` \n커피 ${Array.from({ length: 100 }, (_, i) => `condition${i}`).join(" ")} 마지막 일정 e\u0301\n `;
+  assert.notDeepEqual(buildMemoryQueryPlan(text), buildMemoryQueryPlan(text.trim()), "padding must expose the previous drift");
+  let prepared;
+  let saved;
+  let sends = 0;
+  const sentPlans = [];
+  const transport = createApiTransport(async (path, init = {}) => {
+    if (typeof init === "function") init = init();
+    if (path.includes("capabilities")) return Response.json(capability);
+    if (path === "/api/chat/preflight") {
+      prepared = buildMemoryQueryPlan(JSON.parse(init.body).prompt);
+      return Response.json({ ok: true, admissionToken: "admission", contextBundle: "context" });
+    }
+    if (path.endsWith("/messages")) {
+      const input = JSON.parse(init.body).messages[0];
+      saved = input.content.trim(); // The real persistence route trims ordinary messages.
+      conversation.messages.push({ id: "source", role: "user", content: saved });
+      return Response.json({ messageMappings: [{ requestId: input.clientRequestId, messageId: "source" }] });
+    }
+    if (path === "/api/chat") {
+      const input = JSON.parse(init.body);
+      sentPlans.push(buildMemoryQueryPlan(latestUserPromptText(input.messages)));
+      assert.equal(input.contextBundle, "context");
+      sends += 1;
+      conversation.messages.push({ id: input.assistantMessageId, role: "assistant", modelId: input.modelId, content: "Answer", status: "normal" });
+      return new Response("Answer");
+    }
+    return Response.json(conversation);
+  }, bridge);
+  const outcome = await transport.sendReview(conversation, text, [], new AbortController().signal, () => {});
+  assert.equal(saved, text.trim());
+  assert.equal(sends, 2);
+  assert.deepEqual(sentPlans, [prepared, prepared]);
+  assert.deepEqual(outcome.failedModelIds, []);
+});
 
 test("parity enrollment is default-off and never includes adjacent administrative or publishing operations", () => {
   const allowed = [["/api/products/mobile/capabilities", "GET"], ["/api/user/settings", "POST"], ["/api/memories/settings", "PUT"], ["/api/images/groups/g1", "GET"], ["/api/images/generations", "POST"], ["/api/conversations/c1/comparison-reviews", "POST"], ["/api/conversations/c1/comparison-reviews/item-feedback", "PUT"], ["/api/conversations/c1/comparison-reviews/item-feedback", "DELETE"], ["/api/feedback", "POST"]];

@@ -859,7 +859,9 @@ type ChatInputProps = {
   /** `null` detaches. Re-sending the bound id moves it to the newest revision. */
   onAssistantProfileChange?: (profileId: string | null) => void;
   /** The account default `inherit` resolves to, for describing that choice. */
-  accountMemoryDefault?: "on" | "off";
+  accountMemoryDefault?: "on" | "off" | null;
+  accountMemoryMasterEnabled?: boolean | null;
+  onMemorySettingsRefresh?: () => void;
   onWebSearchModeChange?: (mode: WebSearchMode) => void;
   onOpenDeepResearchSetup?: () => void;
   /**
@@ -1061,7 +1063,9 @@ export function ChatInput({
   assistantProfileRemovedAt,
   assistantProfileOptions = [],
   onAssistantProfileChange,
-  accountMemoryDefault = "on",
+  accountMemoryDefault = null,
+  accountMemoryMasterEnabled = null,
+  onMemorySettingsRefresh,
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
   onStartImageDraft,
@@ -3798,6 +3802,7 @@ export function ChatInput({
                 return;
               }
               setMenuView("actions");
+              onMemorySettingsRefresh?.();
               setIsMenuOpen(true);
               trackProductEvent("chat_tool_menu_opened", selectedModels.length, {});
             }}
@@ -4195,9 +4200,20 @@ export function ChatInput({
                             ? t("chat.toolsMemoryOn")
                             : memoryMode === "off"
                               ? t("chat.toolsMemoryOff")
-                              : accountMemoryDefault === "off"
+                              : accountMemoryDefault === null
+                                ? t("chat.toolsMemoryInherit")
+                                : accountMemoryDefault === "off"
                                 ? t("chat.toolsMemoryInheritOff")
                                 : t("chat.toolsMemoryInheritOn")}
+                        </span>
+                        <span className="text-xs text-zinc-500" data-testid="memory-account-status">
+                          {t(accountMemoryMasterEnabled === null
+                            ? "chat.toolsMemoryStatusUnknown"
+                            : !accountMemoryMasterEnabled
+                              ? "chat.toolsMemoryAccountOff"
+                              : assistantProfile?.useAccountMemory === false
+                                ? "chat.toolsMemoryProfileOff"
+                                : "chat.toolsMemoryAccountAllowed")}
                         </span>
                       </span>
                     </button>
@@ -4265,7 +4281,9 @@ export function ChatInput({
                             ? t("chat.toolsMemoryOnDescription")
                             : mode === "off"
                               ? t("chat.toolsMemoryOffDescription")
-                              : accountMemoryDefault === "off"
+                              : accountMemoryDefault === null
+                                ? t("chat.toolsMemoryStatusUnknown")
+                                : accountMemoryDefault === "off"
                                 ? t("chat.toolsMemoryInheritOffDescription")
                                 : t("chat.toolsMemoryInheritOnDescription")}
                         </span>
@@ -4278,6 +4296,18 @@ export function ChatInput({
                       )}
                     </button>
                   ))}
+                  <p className="px-3 py-2 text-xs text-zinc-500">
+                    {t(accountMemoryMasterEnabled === null
+                      ? "chat.toolsMemoryStatusUnknown"
+                      : !accountMemoryMasterEnabled
+                        ? "chat.toolsMemoryAccountOff"
+                        : assistantProfile?.useAccountMemory === false
+                          ? "chat.toolsMemoryProfileOff"
+                          : "chat.toolsMemoryAccountAllowed")}
+                  </p>
+                  <Link href="/settings/memory" className="block rounded-xl px-3 py-2 text-sm text-accent-account-memory-500">
+                    {t("helpGuide.destinations.settingsSection.memory")}
+                  </Link>
                 </div>
               ) : menuView === "attachSource" ? (
                 /*

@@ -107,6 +107,7 @@ export type ConversationProfileSummary = {
     revision: number;
     latestRevision: number;
     status: "current" | "superseded";
+    useAccountMemory: boolean;
     /** The version's own starters, for an empty conversation's suggestions. */
     starters: string[];
 };
@@ -139,6 +140,7 @@ export async function readConversationProfile(input: {
             id: true,
             revision: true,
             starters: true,
+            memoryPolicy: true,
             profile: {
                 select: {
                     id: true,
@@ -158,6 +160,7 @@ export async function readConversationProfile(input: {
         icon: version.profile.icon,
         revision: version.revision,
         latestRevision,
+        useAccountMemory: (version.memoryPolicy as { useAccountMemory?: unknown } | null)?.useAccountMemory === true,
         status: profileBindingStatus({
             pinnedRevision: version.revision,
             latestRevision,

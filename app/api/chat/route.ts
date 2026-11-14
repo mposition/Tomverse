@@ -3236,6 +3236,7 @@ async function handleChatPost(
         // because Release C put three things in it, and only one of them is
         // memory.
         let contextSystemPrompt: string | null = null;
+        let memoryData: string | null = null;
         let memoryUsedCount = 0;
         let knowledgeChunkCount = 0;
         // §22 attribution, written onto the answer rather than counted.
@@ -3263,7 +3264,7 @@ async function handleChatPost(
                   bundleId: string;
                   expiresAt: Date;
                   systemPrompt: string | null;
-                  memoryText: string;
+                  memoryData: string | null;
                   memoryUsedCount: number;
                   memoryTokens: number;
                   profileTokens: number;
@@ -3300,7 +3301,7 @@ async function handleChatPost(
                 bundleId: verification.payload.bundleId,
                 expiresAt: new Date(verification.payload.expiresAtMs),
                 systemPrompt: turnContext.systemPrompt,
-                memoryText: turnContext.memory.prompt.text ?? "",
+                memoryData: turnContext.memory.prompt.data,
                 memoryUsedCount: turnContext.memory.prompt.usedCount,
                 memoryTokens: verification.payload.memoryTokens,
                 profileTokens: verification.payload.profileTokens,
@@ -3541,6 +3542,7 @@ async function handleChatPost(
             }
             continuationContextConsumed = true;
             contextSystemPrompt = verifiedContext.systemPrompt;
+            memoryData = verifiedContext.memoryData;
             memoryUsedCount = verifiedContext.memoryUsedCount;
             knowledgeChunkCount = verifiedContext.knowledgeChunkCount;
             contextAttribution = {
@@ -3548,7 +3550,7 @@ async function handleChatPost(
                 memoryTokens: verifiedContext.memoryTokens,
                 knowledgeChunkCount,
             };
-            if (verifiedContext.memoryText) {
+            if (verifiedContext.memoryData) {
                 void recordMemoryCounter("chat_memory_injected");
                 if (verifiedContext.memoryTruncatedByBudget) {
                     void recordMemoryCounter("injected_context_truncated");
@@ -3653,6 +3655,7 @@ async function handleChatPost(
         // reading each part are stated inside it, before the part they govern.
         const formattedMessages: ModelMessage[] = buildChatTurnPrelude({
             contextSystemPrompt,
+            memoryData,
             blocks: turnSystemBlocks,
         });
         if (mcpConnector) {

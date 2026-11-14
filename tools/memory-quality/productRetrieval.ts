@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { memoryRetrievalTerms } from "../../lib/memoryRetrievalTerms";
+import { buildMemoryQueryPlan } from "../../lib/memoryQueryPlan";
 import {
-  MEMORY_SEMANTIC_DEFAULTS, memoryTier, selectMemoryContext, type RetrievableMemory,
+  memoryRerankCandidates, memoryTier, selectMemoryContext, type RetrievableMemory,
 } from "../../lib/memoryRetrievalScoring";
 import { evaluateRetrieval, retrievalTargetFailures, summarizeRetrieval } from "./evaluator";
 import { corpusSchema, retrievalCorpusSchema, type QualityCase } from "./schema";
@@ -22,8 +23,9 @@ export type RetrievalCase = Pick<QualityCase, "id" | "language" | "retrieval"> &
  * `selectMemoryContext` the chat context builder uses.
  *
  * Like `retrieveMemoryContext`, only active rows reach the scorer. Forbidden
- * rows stay in the pool: nothing on the read path removes them (the write-time
- * validator is the product's defence), so a forbidden selection is a finding.
+ * rows stay in this synthetic pool to measure the selector alone. This harness
+ * does not exercise the write validator, provenance or database eligibility;
+ * selecting a known invalid fixture is not evidence of a product data leak.
  */
 function productMemories(retrieval: QualityCase["retrieval"]): RetrievableMemory[] {
   return retrieval.pool
@@ -42,9 +44,13 @@ function productMemories(retrieval: QualityCase["retrieval"]): RetrievableMemory
  * service adds are all of it. A query with no usable term asks for nothing.
  */
 export function rerankDocuments(retrieval: QualityCase["retrieval"]) {
-  if (memoryRetrievalTerms(retrieval.query).length === 0) return [];
-  return productMemories(retrieval).filter((memory) => memoryTier(memory) === "relevant")
-    .slice(0, MEMORY_SEMANTIC_DEFAULTS.maxRerankCandidates)
+  const plan = buildMemoryQueryPlan(retrieval.query);
+  if (plan.terms.length === 0) return [];
+  const all = productMemories(retrieval).sort((left, right) => left.id.localeCompare(right.id));
+  const lexical = all.filter((memory) => memoryTier(memory) !== "relevant" ||
+    memory.searchTerms.some((term) => plan.terms.includes(term)));
+  const ids = new Set(lexical.map((memory) => memory.id));
+  return memoryRerankCandidates({ lexical, extras: all.filter((memory) => !ids.has(memory.id)), now: NOW })
     .map((memory) => ({ id: memory.id, text: memory.statement }));
 }
 
@@ -71,6 +77,9 @@ export function measureProductRetrievalDetailed(cases: readonly RetrievalCase[],
     const topItems = injected.slice(0, RECALL_K);
     const top = topItems.map((item) => item.id);
     const gated = topItems.filter((item) => item.tier === "relevant");
+    const full = injected.map((item) => item.id);
+    const fullGated = injected.filter((item) => item.tier === "relevant");
+    const { pool } = testCase.retrieval;
     return {
       ...evaluateRetrieval(testCase, top), tag: testCase.tag, top,
       recalledInjected: relevantIds.filter((id) => injected.some((item) => item.id === id)).length,
@@ -80,6 +89,18 @@ export function measureProductRetrievalDetailed(cases: readonly RetrievalCase[],
       // apart from the term matches that MEMORY-02 is about.
       gatedSelected: gated.length,
       gatedIrrelevant: gated.filter((item) => !relevantIds.includes(item.id)).length,
+      full: {
+        selected: full.length, relevant: relevantIds.length,
+        recalled: relevantIds.filter((id) => full.includes(id)).length,
+        irrelevant: full.filter((id) => !relevantIds.includes(id)).length,
+        forbidden: full.filter((id) => pool.find((item) => item.id === id)!.forbidden).length,
+        inactive: full.filter((id) => pool.find((item) => item.id === id)!.status !== "active").length,
+        gatedSelected: fullGated.length,
+        gatedIrrelevant: fullGated.filter((item) => !relevantIds.includes(item.id)).length,
+        // Contractually allowed context is separate from question-answer gold.
+        alwaysOnSelected: injected.filter((item) => item.tier !== "relevant").length,
+        ids: full,
+      },
     };
   });
   const summary = summarizeRetrieval(rows);
@@ -93,11 +114,30 @@ export function measureProductRetrievalDetailed(cases: readonly RetrievalCase[],
     entry.recallAt5 = entry.relevant ? entry.recalled / entry.relevant : null;
   }
   const gatedSelected = rows.reduce((n, row) => n + row.gatedSelected, 0);
+  const fullSum = (key: "selected" | "relevant" | "recalled" | "irrelevant" | "forbidden" |
+    "inactive" | "gatedSelected" | "gatedIrrelevant" | "alwaysOnSelected", source = rows) =>
+    source.reduce((n, row) => n + row.full[key], 0);
+  const fullSelectedSet = {
+    selected: fullSum("selected"), relevant: fullSum("relevant"), recalled: fullSum("recalled"),
+    recall: fullSum("relevant") ? fullSum("recalled") / fullSum("relevant") : null,
+    koreanRecall: fullSum("relevant", ko) ? fullSum("recalled", ko) / fullSum("relevant", ko) : null,
+    irrelevant: fullSum("irrelevant"), forbidden: fullSum("forbidden"), inactive: fullSum("inactive"),
+    gatedSelected: fullSum("gatedSelected"), gatedIrrelevant: fullSum("gatedIrrelevant"),
+    gatedIrrelevantRate: fullSum("gatedSelected") ? fullSum("gatedIrrelevant") / fullSum("gatedSelected") : 0,
+    alwaysOnSelected: fullSum("alwaysOnSelected"),
+  };
   const result = {
     path: "product:selectMemoryContext" as const, k: RECALL_K, cases: rows.length,
     // Without kinds every row is treated as relevance-gated, which the product never does for core/style.
     poolKinds: cases.every((row) => row.retrieval.pool.every((item) => item.kind)) ? "annotated" : "defaulted",
     summary,
+    top5: { ...summary, gatedSelected,
+      gatedIrrelevant: rows.reduce((n, row) => n + row.gatedIrrelevant, 0),
+      gatedIrrelevantRate: gatedSelected
+        ? rows.reduce((n, row) => n + row.gatedIrrelevant, 0) / gatedSelected : 0 },
+    fullSelectedSet,
+    scope: "pure_selector_synthetic_pool" as const,
+    answerQuality: { status: "not_run" as const, reason: "no_answer_model_executed" as const },
     // Everything the prompt would carry, not only the first five.
     koreanRecallInjected: injectedRelevant
       ? ko.reduce((n, row) => n + row.recalledInjected, 0) / injectedRelevant : null,

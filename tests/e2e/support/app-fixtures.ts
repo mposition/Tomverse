@@ -481,6 +481,7 @@ export type AuthenticatedQaState = {
     revision: number;
     latestRevision: number;
     status: "current" | "superseded";
+    useAccountMemory?: boolean;
   } | null;
   theme: "dark" | "light" | "system";
   language: Language;
@@ -663,6 +664,7 @@ export async function mockAuthenticatedApi(
       revision: number;
       latestRevision: number;
       status: "current" | "superseded";
+      useAccountMemory?: boolean;
     } | null;
     /** What `inherit` resolves to, served by /api/memories/settings. */
     accountMemoryDefault?: "on" | "off";
