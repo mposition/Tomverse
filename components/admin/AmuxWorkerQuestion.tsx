@@ -111,8 +111,12 @@ export const amuxWorkerQuestionDmConfirmBody = (dm: Extract<AmuxV22QuestionDm, {
  * Nothing here applies an answer. Every other state says in one line why the
  * Decision Maker has no answer to confirm.
  */
-export function AmuxWorkerQuestionDm({ dm, options, io }: {
+export function AmuxWorkerQuestionDm({ dm, options, io, canConfirm = true, line: stateLine, confirmedLine }: {
   dm: AmuxV22QuestionDm; options: AmuxWorkerQuestion["options"]; io?: DmJudgmentIo;
+  /** The owner queue's settlement cards: false shows the proposal without the confirmation. */
+  canConfirm?: boolean;
+  /** Replaces the state line and the confirmed line, for a card whose answer is not a worker's. */
+  line?: string; confirmedLine?: string;
 }) {
   const messages = useAdminMessages(adminAmuxCardsMessages);
   const judgment = useAdminMessages(adminAmuxDecisionMakerJudgmentMessages);
@@ -120,7 +124,8 @@ export function AmuxWorkerQuestionDm({ dm, options, io }: {
   const [state, setState] = useState<DmJudgmentState>({ phase: "editing" });
   const [failure, setFailure] = useState<AdminApiFailure | null>(null);
   const reason = (code: string) => messages.dmReasons[code] ?? code;
-  const line = state.phase === "recorded" ? messages.dmConfirmed : messages.dmState(dm, reason);
+  const line = state.phase === "recorded" ? confirmedLine ?? messages.dmConfirmed :
+    stateLine ?? messages.dmState(dm, reason);
   const send: DmJudgmentIo = io ?? {
     post: (body) => adminFetch(JUDGMENT_PATH, { method: "POST",
       headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
@@ -157,7 +162,7 @@ export function AmuxWorkerQuestionDm({ dm, options, io }: {
           )}
           {dm.irreversible && <p className="font-semibold text-red-300"
             data-testid="amux-worker-question-dm-irreversible">{messages.dmIrreversible}</p>}
-          <div className="mt-1 flex flex-wrap items-center gap-3">
+          {canConfirm && <div className="mt-1 flex flex-wrap items-center gap-3">
             <button type="button" className="rounded border px-3 py-1 border-sky-500"
               data-testid="amux-worker-question-dm-confirm"
               disabled={state.phase !== "editing"}
@@ -172,7 +177,7 @@ export function AmuxWorkerQuestionDm({ dm, options, io }: {
             </button>
             <a className="text-sky-300 underline" href={dmAdminRequestDetailHref(dm.requestId)}>
               {messages.dmOpenDetail}</a>
-          </div>
+          </div>}
         </div>
       )}
       {settled !== null && <p role="status" className="mt-1 text-sm"
