@@ -81,8 +81,34 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    있는 정리(`retry`·`complete`·`close`·`remake`)를 DM 승인자(1)가 켜져 있을 때 앱이 적용한다. 검토 PR(`t2_pr`)의
    `approve`는 적용하지 않고 승인 사실만 기록한다. 카드를 올리는 것이 유료 DM 호출을 부르므로
    `TOMVERSE_AMUX_DM_OWNER_SETTLEMENT=enabled`(기본 꺼짐)를 켜는 것은 운영자 몫이다. 가격·크레딧·migration·삭제·인증·감사
-   체인 경로와 병합 레인 게이트 파일, main 병합과 배포는 사람에게 남는다. 다음 단계: S2는 기록된 `approve`로 PR을 ready로
-   바꾸고 CI 통과 뒤 develop에 병합하며(병합 레인 예외, observer 판정), S3는 사람에게 남는 카드에 DM 제안과 원클릭 확인을 붙인다.
+   체인 경로와 병합 레인 게이트 파일, main 병합과 배포는 사람에게 남는다. S2(`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본
+   꺼짐): 기록된 `approve`를 쓸 때마다 binding이 열려 있고 head·diff digest가 승인 때와 같고 base가 develop이고 Task가
+   review인지 다시 읽는다. 자동 병합은 **변경 파일이 모두 허용 목록 안에 있을 때만** 한다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`:
+   `tests/**`, `docs/**`, `locales/**`, `components/**`, `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`; 그
+   가운데 `docs/policy/**`·`docs/ui-contracts/**`·`docs/agents/**`·`app/api/**`, 엔지니어링 에이전트 권한 manifest의
+   control-plane 경로, 정책 테스트, 레인 게이트 파일과 되돌릴 수 없는 경로는 제외). 하나라도 밖이면 사람에게 남는다. 스위치가
+   켜져 있으면 승인을 기록하는 순간 patch의 경로를 판정해, 허용 목록 밖의 경로가 있거나 경로를 읽지 못하면 승인 대신
+   handoff(`outside_dm_merge_allowlist`·`paths_unreadable`)를 남긴다. 앱은 CI 입장 round가
+   한 번 돌 때마다 승인된 검토 초안 하나를 GitHub에서 다시 읽어(CI 입장 App으로 단계·head, 엔지니어링 읽기 토큰으로 diff와
+   파일 목록) 대기열의 draft가 runner를 기다리지 않고 그 CI가 통째로 들어갈 때만, 해시 체인 감사를 먼저 남기고 ready로
+   바꾼다. 쓰기 결과를 모르면 그 round에 다시 쓰지 않고 다음 round가 PR을 읽고 판단한다. **DM ready는
+   사람 ready와 같다**: PR은 CI 입장 대기열 밖에 있고 아무것도 예약하지 않으며, 그 CI는 다른 workflow로 계산된다. 대기열에
+   지금 여유가 있을 때만 하고, 앞선 DM ready의 CI가 GitHub에 아직 보이지 않으면(ready 감사 기록 뒤 10분까지) 다음 ready를
+   하지 않는다. **넘침은 PR 한 건으로 묶인다.**
+   **fork PR은 제외한다**: CI 입장 App과 엔지니어링 읽기 토큰이 보여 주는 head 저장소가 base 저장소와 다르면 ready로 바꾸지
+   않고 레인 목록에도 싣지 않는다. 앱은 레인의 상태
+   읽기마다 가장 오래 확인하지 않은 승인 **한 건**만 골라 방문을 기록하고, 그 PR의 현재 diff와 파일 목록을 GitHub에서 다시 읽어
+   digest가 `approvedDiffDigest`와 같고 파일이 모두 허용 목록 안일 때만 싣는다(읽지 못하거나 다르면 싣지 않고, 그 승인은 차례를
+   쓴 것으로 본다). 레인은 승인된 head를 `sha`로 고정해 병합한다. 병합 레인은 앱이 넘긴 목록의 PR만
+   `agent` 브랜치 제외의 예외로 받고(`docs/policy/qa-release-agent.md` 8절 3항), observer는 그 레인의 병합을 두 번째 승인
+   근거(`dm_approval`, `docs/policy/engineering-agent.md` §9-10)로 판정한다. **대상은 develop뿐이고 main은 제외다.** S3(구현 완료):
+   사람에게 남는 카드(DM이 `irreversible`로 표시한 제안, 승인자 스위치가 꺼져 있을 때의 제안, handoff된 정리 행)에 DM의 상태를 붙인다.
+   `GET /api/admin/amux/owner-queue`는 카드마다 그 escalation의 `AmuxDmOwnerSettlement`(state, decision, handoffReason)와
+   DM 카드의 상태를 `readAmuxDmLocalCardState`로 읽어 싣는다(`ops:write`가 없으면 제안 본문은 `restricted`, 읽지 못한 카드는 그
+   카드만 `unread`·`unavailable`). 운영자 확인 대기 카드는 제안과 근거, 되돌릴 수 없다는 표시, §6 snapshot을 보이고, 정리 행이
+   열려 있고 handoff되지 않았고 답이 그 종류의 고정 단어일 때만 "이대로 확인"을 낸다. 이 버튼은 새 쓰기 route 없이 기존
+   `POST /api/admin/amux/decision-maker/judgments`(`ops:write`, 최근 재인증)를 쓰고, 적용은 S1의 `dm_confirmed` walk가 한다.
+   DM이 아직 답하지 않았으면 "검토 중", handoff된 행이면 사유를 문장으로 보인다. 기존 legacy-card 패널은 그대로다.
    운영자 결정 2026-11-14("DM 의견이 없으면 'DM으로 의견 요청 보내기' 버튼을 제공합니다"): 스위치가 꺼져 있어도 운영자가
    운영자 확인 대기의 'DM 의견 요청' 버튼으로 카드 하나를 고르면 그 정리만 올린다(누른 사람의 감사 기록
    `amux.dm_owner_settlement.requested`). 근거를 한 번 읽지 못한(`evidence_unavailable`) 결과 검토·정리는 같은 칸의 'DM에 다시

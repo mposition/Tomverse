@@ -2357,6 +2357,12 @@ type BindingObservationInput =
        * the stored observation's shape is fixed by its CHECK.
        */
       approvedByMerge?: true;
+      /**
+       * The Decision Maker's approval, recorded before the merge lane's own
+       * merge into develop, stood as the approval (owner decision 2026-11-13).
+       * Kept in the audit entry, as approvedByMerge.
+       */
+      approvedByDm?: true;
     };
 
 export async function recordEngineeringAgentBindingObservation(
@@ -2377,6 +2383,7 @@ const bindingObservationAudit = (input: BindingObservationInput) => ({
   verdict: input.kind === "approval" ? input.observation.verdict : null,
   merged: input.kind === "merge" ? input.observation.merged : null,
   ...("approvedByMerge" in input && input.approvedByMerge ? { approvedByMerge: true } : {}),
+  ...("approvedByDm" in input && input.approvedByDm ? { approvedByDm: true } : {}),
 });
 
 /**

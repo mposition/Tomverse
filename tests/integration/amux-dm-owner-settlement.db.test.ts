@@ -727,7 +727,7 @@ test("the owner asks for one card from the owner queue while the switch is off; 
   await lifecycle(async (tx) => {
     const card = await stoppedTask(tx);
     const { requestAmuxOwnerQueueDm } = await import("@/lib/amux/ownerQueueDmRequestService");
-    const { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION } = await import("@/lib/amux/ownerQueueDmCore");
+    const { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION } = await import("@/lib/amux/ownerQueueDmRequestCore");
     const { readAmuxDmOwnerSettlementRequestedAmong, readAmuxOwnerQueueDmAskedAmong } =
       await import("@/lib/amux/dmOwnerSettlementRead");
     const press = (over: Partial<Parameters<typeof requestAmuxOwnerQueueDm>[0]> = {}) => requestAmuxOwnerQueueDm({
@@ -784,9 +784,9 @@ test("the owner queue names, per card, where the Decision Maker stands and what 
     process.env.TOMVERSE_AMUX_DM_ROUTING = "enabled";
     delete process.env.TOMVERSE_AMUX_DM_OWNER_SETTLEMENT;
     try {
-      const { readAmuxOwnerQueueDm } = await import("@/lib/amux/ownerQueueDmRead");
+      const { readAmuxOwnerQueueDmStatus } = await import("@/lib/amux/ownerQueueDmStatusRead");
       const { recordAmuxDmRelaySeen } = await import("@/lib/amux/dmRelayLivenessStore");
-      const before = await readAmuxOwnerQueueDm([{ taskId: card.taskId, escalationId: card.escalationId }]);
+      const before = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
       assert.deepEqual(before.byTask.get(card.taskId), { source: "settlement", state: "switch_off", reason: "settlement",
         requestId: null, action: "request", sourceId: card.escalationId });
       await recordAmuxDmRelaySeen();
@@ -794,18 +794,18 @@ test("the owner queue names, per card, where the Decision Maker stands and what 
       const rows = await tx.$queryRaw<Array<{ n: number }>>`
         SELECT count(*)::int AS "n" FROM "AppSetting" WHERE "key" = 'amux.dm_relay.last_sync'`;
       assert.equal(rows[0]!.n, 1);
-      const after = await readAmuxOwnerQueueDm([{ taskId: card.taskId, escalationId: card.escalationId }]);
+      const after = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
       assert.equal(after.relay.state, "live");
       const { requestAmuxOwnerQueueDm } = await import("@/lib/amux/ownerQueueDmRequestService");
       await requestAmuxOwnerQueueDm({ session: operator(), request: new Request("https://tomverse.app/x"),
         taskId: card.taskId, source: "settlement", action: "request", sourceId: card.escalationId });
-      const requested = await readAmuxOwnerQueueDm([{ taskId: card.taskId, escalationId: card.escalationId }]);
+      const requested = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
       assert.deepEqual([requested.byTask.get(card.taskId)?.state, requested.byTask.get(card.taskId)?.action],
         ["waiting_relay", null]);
       // Its card filed, and no DM request for it yet: the ledger read runs and finds none.
       await tx.$executeRaw`UPDATE "AmuxDmOwnerSettlement" SET "localCardId" = ${"OS-" + card.taskId.slice(0, 8)}
         WHERE "id" = ${card.settlementId}`;
-      const filed = await readAmuxOwnerQueueDm([{ taskId: card.taskId, escalationId: card.escalationId }]);
+      const filed = await readAmuxOwnerQueueDmStatus([{ taskId: card.taskId, escalationId: card.escalationId }]);
       assert.deepEqual([filed.byTask.get(card.taskId)?.state, filed.byTask.get(card.taskId)?.requestId],
         ["card_filed", null]);
     } finally {

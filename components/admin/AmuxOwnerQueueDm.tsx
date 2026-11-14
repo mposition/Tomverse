@@ -1,128 +1,106 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import { Bot, Radio } from "lucide-react";
-
+import { AmuxWorkerQuestionDm, amuxWorkerQuestionDmFrom } from "@/components/admin/AmuxWorkerQuestion";
+import type { DmJudgmentIo } from "@/components/admin/AmuxDecisionMakerJudgmentPanel";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue";
-import { formatAestDateTime } from "@/lib/adminUiCore";
 import {
-  AMUX_DM_RELAY_RUNBOOK_URL, amuxOwnerQueueDmButton,
-  type AmuxDmRelayView, type AmuxOwnerQueueDmView,
+  AMUX_OWNER_QUEUE_DM_SETTLEMENT_STATES,
+  type AmuxOwnerQueueDmSettlement,
+  type AmuxOwnerQueueDmSettlementState,
 } from "@/lib/amux/ownerQueueDmCore";
+import type { AmuxV22QuestionDm } from "@/lib/amux/v22OwnerQuestionDmCore";
 
-type DmReasonCopy = Readonly<Record<string, string>>;
+/** The settlement's fixed choices per kind, in the words the card offers them. */
+const KIND_OPTIONS = {
+  stopped: ["retry", "complete", "close"],
+  t2_pr: ["approve", "retry", "close"],
+} as const;
 
-const at = (value: string) => formatAestDateTime(value, { seconds: false }) ?? value;
-
-/** The strip's relay line: when the host's DM relay last called, and whether it stopped. */
-export function AmuxOwnerQueueDmRelayChip({ relay }: { relay: AmuxDmRelayView | null | undefined }) {
-  const copy = useAdminMessages(adminAmuxOwnerQueueMessages).dm.relay;
-  if (relay === undefined) return null;
-  const down = relay === null || relay.state !== "live";
-  const text = relay === null ? copy.unknown : relay.state === "never" ? copy.never
-    : relay.state === "live" ? copy.live(at(relay.lastSeenAt)) : copy.stale(at(relay.lastSeenAt));
-  return (
-    <div className="flex items-center gap-2 text-sm" data-testid="amux-owner-queue-dm-relay"
-      data-state={relay === null ? "unknown" : relay.state}>
-      <Radio className={`h-4 w-4 ${down ? "text-red-400" : "text-emerald-400"}`} aria-hidden />
-      <span className="text-zinc-300">{copy.label}</span>
-      <span className={down ? "font-bold text-red-300" : "text-zinc-100"}>{text}</span>
-      {down ? (
-        <a href={AMUX_DM_RELAY_RUNBOOK_URL} target="_blank" rel="noreferrer"
-          className="text-xs font-bold text-red-200 underline" data-testid="amux-owner-queue-dm-relay-check">
-          {copy.check}
-        </a>
-      ) : null}
-    </div>
-  );
-}
-
-const reasonText = (reasons: DmReasonCopy, fallback: (code: string) => string, code: string | null) =>
-  code === null ? null : Object.hasOwn(reasons, code) ? reasons[code]! : fallback(code);
+/** Whether the Decision Maker has not answered yet: its card is filed, or being worked, or waits for the relay. */
+const dmPending = (dm: AmuxV22QuestionDm) =>
+  dm.state === "filed" || dm.state === "working" || (dm.state === "not_sent" && dm.reason === "waiting_relay");
 
 /**
- * The card's Decision Maker box: which path holds it, how far it got and why
- * it stopped, and the one button the owner may press. While the relay is not
- * calling, the button gives way to the relay check: a card sent now would wait
- * for nothing. Pressing it changes nothing with the DM directly
- * (/api/admin/amux/owner-queue/dm-request); the list is read again after it,
- * whatever came back.
+ * A card's settlement as the route returned it, or null when it has none.
+ * A value this screen cannot draw is `unread`, never a proposal it could not
+ * check; a proposal the shared reader refuses is not offered for confirmation.
  */
-export function AmuxOwnerQueueDmPanel({ taskId, dm, relay, canAsk, onChanged }: {
-  taskId: string;
-  dm: AmuxOwnerQueueDmView | undefined;
-  relay: AmuxDmRelayView | null | undefined;
-  /** `ops:write`: the button is offered. */
-  canAsk: boolean;
-  onChanged: () => void;
+export const amuxOwnerQueueDmFrom = (raw: unknown): AmuxOwnerQueueDmSettlement | null => {
+  if (raw === null || raw === undefined) return null;
+  const unread: AmuxOwnerQueueDmSettlement = { status: "unread" };
+  if (typeof raw !== "object") return unread;
+  const r = raw as Record<string, unknown>;
+  if (r.status === "unread") return unread;
+  if (r.status !== "read" || typeof r.settlementId !== "string" ||
+      (r.kind !== "stopped" && r.kind !== "t2_pr") ||
+      typeof r.state !== "string" || !(AMUX_OWNER_QUEUE_DM_SETTLEMENT_STATES as readonly string[]).includes(r.state) ||
+      (r.decision !== null && typeof r.decision !== "string") ||
+      (r.handoffReason !== null && typeof r.handoffReason !== "string") ||
+      typeof r.confirmable !== "boolean") return unread;
+  const dm = amuxWorkerQuestionDmFrom({ decisionMaker: r.dm }) ?? { state: "unavailable" as const };
+  return {
+    status: "read", settlementId: r.settlementId, kind: r.kind,
+    state: r.state as AmuxOwnerQueueDmSettlementState,
+    decision: r.decision as string | null, handoffReason: r.handoffReason as string | null,
+    dm, confirmable: r.confirmable && dm.state === "proposal",
+  };
+};
+
+const BOX = "mt-2 rounded border p-2 border-zinc-700";
+
+/**
+ * The Decision Maker's part of an owner queue card (owner decision 2026-11-13,
+ * docs/policy/amux-decision-maker.md §0a-5). A proposal shows its choice and
+ * why, with "Confirm as proposed" through the existing judgment route
+ * (`AmuxWorkerQuestionDm`: `ops:write`, a recent step-up, the values Admin
+ * showed); the settlement's `dm_confirmed` walk applies a confirmed answer on
+ * the relay's next sync. No answer yet says the Decision Maker is reviewing; a
+ * card the Decision Maker's path handed to a person says why. The decision the
+ * card needs from the owner is still drawn below, unchanged. Writes nothing.
+ */
+export function AmuxOwnerQueueDm({ settlement, io }: {
+  settlement: AmuxOwnerQueueDmSettlement; io?: DmJudgmentIo;
 }) {
   const copy = useAdminMessages(adminAmuxOwnerQueueMessages);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<"done" | "refused" | "failed" | null>(null);
-  if (!dm) return null;
-  // Absent (not read) or null (the read failed): the relay is not judged down.
-  const button = amuxOwnerQueueDmButton(dm, relay ?? null);
-  const reason = reasonText(copy.dm.reason, copy.dm.reasonFallback, dm.reason);
-  const press = async () => {
-    if (!dm.action || !dm.sourceId || (dm.source !== "result_review" && dm.source !== "settlement")) return;
-    setBusy(true);
-    setNotice(null);
-    try {
-      const response = await adminFetch("/api/admin/amux/owner-queue/dm-request", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ taskId, source: dm.source, action: dm.action, sourceId: dm.sourceId }),
-      });
-      setNotice(response.ok ? "done" : response.status === 409 ? "refused" : "failed");
-    } catch {
-      setNotice("failed");
-    } finally {
-      setBusy(false);
-      onChanged();
-    }
-  };
-  return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4" data-testid="amux-owner-queue-dm"
-      data-source={dm.source ?? "none"} data-state={dm.state}>
-      <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-zinc-100">
-        <Bot className="h-4 w-4" aria-hidden />
-        {copy.dm.title}
-        {dm.source ? <span className="text-xs font-normal text-zinc-400">{copy.dm.source[dm.source]}</span> : null}
-      </p>
-      <p className="mt-1.5 text-sm leading-6 text-zinc-300">{copy.dm.state[dm.state]}</p>
-      {reason ? <p className="text-sm leading-6 text-zinc-400" data-testid="amux-owner-queue-dm-reason">{reason}</p> : null}
-      <div className="mt-2 flex flex-wrap items-center gap-3">
-        {dm.requestId && (dm.state === "proposed" || dm.state === "dm_closed") ? (
-          <Link href={`/admin/amux-execution?tab=review&dmRequest=${encodeURIComponent(dm.requestId)}`}
-            className="text-sm font-bold text-blue-300 underline" data-testid="amux-owner-queue-dm-open">
-            {dm.state === "proposed" ? copy.dm.openProposal : copy.dm.openRequest}
-          </Link>
-        ) : null}
-        {button === "relay_check" ? (
-          <span className="text-sm" data-testid="amux-owner-queue-dm-relay-needed">
-            <span className="font-bold text-red-300">{copy.dm.relay.check}</span>{" "}
-            <a href={AMUX_DM_RELAY_RUNBOOK_URL} target="_blank" rel="noreferrer" className="text-red-200 underline">
-              {copy.dm.relay.runbook}
-            </a>
-          </span>
-        ) : button !== null && canAsk ? (
-          <button type="button" onClick={() => void press()} disabled={busy}
-            data-testid="amux-owner-queue-dm-button" data-action={button}
-            className="inline-flex min-h-9 items-center rounded-xl border border-blue-500/50 bg-blue-500/15 px-3 text-sm font-bold text-blue-100 hover:bg-blue-500/25 disabled:opacity-50">
-            {busy ? copy.dm.busy : button === "resend" ? copy.dm.resend : copy.dm.request}
-          </button>
-        ) : null}
+  if (settlement.status === "unread") {
+    return (
+      <div className={BOX} data-testid="amux-owner-queue-dm" data-dm-state="unread">
+        <p className="text-sm text-zinc-300" data-testid="amux-owner-queue-dm-line">{copy.dm.unread}</p>
       </div>
-      {button === "relay_check" ? <p className="mt-1 text-xs text-zinc-500">{copy.dm.relay.checkHint}</p> : null}
-      {notice ? (
-        <p className={`mt-2 text-sm ${notice === "done" ? "text-emerald-300" : "text-amber-200"}`}
-          role="status" data-testid="amux-owner-queue-dm-notice">{copy.dm[notice]}</p>
-      ) : null}
-      {button === "resend" || button === "request" ? (
-        <p className="mt-1 text-xs text-zinc-500">{copy.dm.confirmNote}</p>
-      ) : null}
+    );
+  }
+  const optionLabel = (id: string | null) => (id !== null ? copy.dm.options[id] : undefined) ?? id ?? "";
+  if (settlement.state !== "open") {
+    const line = settlement.state === "claimed" ? copy.dm.claimed
+      : settlement.state === "applied" ? copy.dm.applied(optionLabel(settlement.decision))
+      : copy.dm.cancelled;
+    return (
+      <div className={BOX} data-testid="amux-owner-queue-dm" data-dm-state={settlement.state}>
+        <p className="text-sm text-zinc-300" data-testid="amux-owner-queue-dm-line">{line}</p>
+      </div>
+    );
+  }
+  const { dm, handoffReason, confirmable } = settlement;
+  const handedOff = handoffReason !== null;
+  const line = handedOff ? copy.dm.handoff[handoffReason] ?? copy.dm.handoffFallback
+    : dmPending(dm) ? copy.dm.reviewing
+    : dm.state === "proposal" && !confirmable ? copy.dm.answerUnreadable
+    : undefined;
+  const options = KIND_OPTIONS[settlement.kind].map((id) => ({ id, label: copy.dm.options[id] ?? id }));
+  const view = handedOff ? "handed_off" : dmPending(dm) ? "reviewing" : dm.state;
+  // Pending or handed off with no proposal to show: one line, no Decision Maker chrome to read around.
+  if (line !== undefined && dm.state !== "proposal") {
+    return (
+      <div className={BOX} data-testid="amux-owner-queue-dm" data-dm-state={view}>
+        <p className="text-sm text-zinc-300" data-testid="amux-owner-queue-dm-line">{line}</p>
+      </div>
+    );
+  }
+  return (
+    <div data-testid="amux-owner-queue-dm" data-dm-state={view}>
+      <AmuxWorkerQuestionDm dm={dm} options={options} io={io} canConfirm={confirmable && !handedOff}
+        line={line} confirmedLine={copy.dm.confirmedLine} />
     </div>
   );
 }

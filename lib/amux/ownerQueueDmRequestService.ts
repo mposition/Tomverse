@@ -9,7 +9,7 @@ import { amuxDmOwnerSettlementId, amuxDmOwnerSettlementKind, isAmuxDmOwnerSettle
 import { scanAmuxDmOwnerSettlementCandidates } from "./dmOwnerSettlementRead.ts";
 import {
   AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION, AMUX_OWNER_QUEUE_DM_RESENDABLE_HANDOFF, AMUX_OWNER_QUEUE_DM_RESENT_ACTION,
-} from "./ownerQueueDmCore.ts";
+} from "./ownerQueueDmRequestCore.ts";
 
 /**
  * The owner's "ask the Decision Maker" button on a card in the owner queue

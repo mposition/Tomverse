@@ -644,6 +644,14 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 12,
     isolation: "mutation",
   },
+  // The settlements of the owner queue's cards, for each card's Decision Maker
+  // area (lib/amux/ownerQueueDmRead.ts): setup + ONE statement + fence, pinned
+  // by tests/server-contract/amux-owner-queue-dm-read.test.ts.
+  ownerQueueSettlementRead: {
+    operation: "owner_queue_settlement_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
   // The one remake claim an earlier tick left unfinished: setup + the claim +
   // fence. A remake's idea is guarded inside the idea intake's own commit
   // transaction, which is not an AMUX boundary (ideaSessionSubmissionService.ts).
@@ -651,6 +659,34 @@ export const AMUX_DB_BOUNDARIES = {
     operation: "decision_maker_owner_settlement_remake_read",
     prismaCallCeiling: 3,
     isolation: "read",
+  },
+  // A Decision Maker approved review pull request merged into develop (owner
+  // decision 2026-11-13, lib/amux/dmT2MergeService.ts). The lane's list:
+  // setup + switches + the approvals + their visit + fence.
+  dmT2MergeLaneRead: {
+    operation: "dm_t2_merge_lane_read",
+    prismaCallCeiling: 5,
+    isolation: "mutation",
+  },
+  // The observer's read of a merged one: setup + the approval and lane facts + fence.
+  dmT2MergeObservedRead: {
+    operation: "dm_t2_merge_observed_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // The next one to mark ready: setup + the recent readies' audits + the
+  // switches + the approvals + its visit + fence.
+  dmT2MergeReadyPick: {
+    operation: "dm_t2_merge_ready_pick",
+    prismaCallCeiling: 6,
+    isolation: "mutation",
+  },
+  // Its audit before the write: setup + audit chain lock + switches + the
+  // approval read again + canonical audit 4 + fence.
+  dmT2MergeReadyRecord: {
+    operation: "dm_t2_merge_ready_record",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
   },
   // The Decision Maker as the approver (TOMVERSE_AMUX_DM_APPROVER), its read:
   // setup + switches + the open app-answered cards + the settlements and

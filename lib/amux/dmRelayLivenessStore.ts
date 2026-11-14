@@ -1,7 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import { AMUX_DM_RELAY_RECORD_EVERY_MS, AMUX_DM_RELAY_SEEN_SETTING_KEY } from "./ownerQueueDmCore.ts";
+import { AMUX_DM_RELAY_RECORD_EVERY_MS, AMUX_DM_RELAY_SEEN_SETTING_KEY } from "./ownerQueueDmRequestCore.ts";
 
 /**
  * When the server last heard from the host's DM relay: one `AppSetting` row

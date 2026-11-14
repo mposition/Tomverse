@@ -9,9 +9,9 @@ import {
   amuxDmRelayView,
   amuxOwnerQueueDmButton,
   amuxOwnerQueueDmView,
-} from "../lib/amux/ownerQueueDmCore.ts";
-import { amuxOwnerQueueDmRequestResult } from "../lib/amux/ownerQueueDmCore.ts";
-import { amuxOwnerQueueWithDm } from "../lib/amux/ownerQueueCore.ts";
+} from "../lib/amux/ownerQueueDmRequestCore.ts";
+import { amuxOwnerQueueDmRequestResult } from "../lib/amux/ownerQueueDmRequestCore.ts";
+import { amuxOwnerQueueWithDmStatus } from "../lib/amux/ownerQueueCore.ts";
 
 const read = (path) => readFileSync(path, "utf8");
 const on = { routing: true, killSwitch: false, resultReview: true, t2: true, settlement: true };
@@ -133,26 +133,26 @@ test("while the relay is not calling, the button gives way to the relay check", 
 test("the queue carries the view per card and says the relay is unknown when the read failed", () => {
   const queue = { items: [{ taskId: "a" }, { taskId: "b" }], total: 2, processedToday: 0, generatedAt: "x" };
   const view = amuxOwnerQueueDmView(facts(), on);
-  const attached = amuxOwnerQueueWithDm(queue, { relay: live, byTask: new Map([["a", view]]) });
-  assert.deepEqual(attached.items[0].dm, view);
-  assert.equal("dm" in attached.items[1], false);
+  const attached = amuxOwnerQueueWithDmStatus(queue, { relay: live, byTask: new Map([["a", view]]) });
+  assert.deepEqual(attached.items[0].dmStatus, view);
+  assert.equal("dmStatus" in attached.items[1], false);
   assert.deepEqual(attached.dmRelay, live);
-  assert.equal(amuxOwnerQueueWithDm(queue, null).dmRelay, null);
+  assert.equal(amuxOwnerQueueWithDmStatus(queue, null).dmRelay, null);
 });
 
 test("every state and reason the core names has words in both languages", () => {
   for (const locale of ["en", "ko"]) {
-    const dm = adminAmuxOwnerQueueMessages[locale].dm;
+    const dm = adminAmuxOwnerQueueMessages[locale].dmRequest;
     for (const state of AMUX_OWNER_QUEUE_DM_STATES) assert.equal(typeof dm.state[state], "string", `${locale} ${state}`);
   }
-  const core = read("lib/amux/ownerQueueDmCore.ts");
+  const core = read("lib/amux/ownerQueueDmRequestCore.ts");
   const reasons = new Set([...core.matchAll(/reason: "([a-z_]+)"/g)].map((match) => match[1]));
   for (const code of ["dm_routing", "kill_switch", "switches_unreadable", "evidence_unavailable", "task_moved",
     "question_not_parked", "task_not_blocked", "result_body_gone", "provider_unknown", "escalation_resolved",
     "applied", "claimed"]) reasons.add(code);
   for (const code of reasons) {
-    assert.equal(typeof adminAmuxOwnerQueueMessages.en.dm.reason[code], "string", code);
-    assert.equal(typeof adminAmuxOwnerQueueMessages.ko.dm.reason[code], "string", code);
+    assert.equal(typeof adminAmuxOwnerQueueMessages.en.dmRequest.reason[code], "string", code);
+    assert.equal(typeof adminAmuxOwnerQueueMessages.ko.dmRequest.reason[code], "string", code);
   }
 });
 
@@ -195,7 +195,7 @@ test("only an unjudged proposal is one to confirm; any other ending is closed", 
 test("a relay read that failed is unknown: it neither hides the button nor claims the relay is down", () => {
   const ask = amuxOwnerQueueDmView(facts({ escalationId: "e1", settlementEligible: true }), off);
   assert.equal(amuxOwnerQueueDmButton(ask, null), "request");
-  const read = readFileSync("lib/amux/ownerQueueDmRead.ts", "utf8");
+  const read = readFileSync("lib/amux/ownerQueueDmStatusRead.ts", "utf8");
   assert.match(read, /readAmuxDmRelaySeenAt\(\)\.then\(\(at\) => amuxDmRelayView\(at, now\), \(\) => null\)/);
 });
 

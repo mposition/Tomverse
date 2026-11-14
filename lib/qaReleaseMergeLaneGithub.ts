@@ -18,6 +18,7 @@
  * (2026-10-29: one 502 held an emergency train for ten minutes).
  */
 import { createSign } from "node:crypto";
+import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest } from "./pullDiffDigestCore.ts";
 
 import type { QaReleaseLanePullRequest } from "./qaReleaseMergeLaneCandidateCore.ts";
 import { type QaReleaseChangedFile, type QaReleaseExclusionInput, QA_RELEASE_MIGRATION_SQL_PATH } from "./qaReleaseMergeLaneExclusionCore.ts";
@@ -44,7 +45,11 @@ export type QaReleaseHttpRequest = {
   headers: Record<string, string>;
   body?: string;
 };
-export type QaReleaseHttp = (request: QaReleaseHttpRequest) => Promise<{ status: number; text: string }>;
+/**
+ * `bytes`: the body as it came, beside its text, for what must be digested
+ * over the raw bytes (a pull request's diff, lib/pullDiffDigestCore.ts).
+ */
+export type QaReleaseHttp = (request: QaReleaseHttpRequest) => Promise<{ status: number; text: string; bytes?: Uint8Array }>;
 
 const SHA = /^[0-9a-f]{40}$/;
 /** GitHub lists at most 3,000 files for a pull request; a larger one is never complete. */
@@ -129,7 +134,7 @@ export function qaReleaseInstallationToken(
 }
 
 const PULL_FIELDS = `
-  number title createdAt baseRefName headRefName headRefOid isDraft mergeable state
+  number title createdAt baseRefName headRefName headRefOid isDraft isCrossRepository mergeable state
   commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) {
     pageInfo { hasNextPage }
     nodes {
@@ -215,6 +220,7 @@ function pullOf(raw: unknown): QaReleaseLanePullRequest {
     headRefName: str(pull.headRefName),
     headRefOid: str(pull.headRefOid).toLowerCase(),
     isDraft: pull.isDraft,
+    ...(typeof pull.isCrossRepository === "boolean" ? { isCrossRepository: pull.isCrossRepository } : {}),
     mergeable: str(pull.mergeable),
     state: str(pull.state),
     statusCheckRollup: rollupOf(pull),
@@ -356,6 +362,18 @@ export function createQaReleaseGithubPorts(input: {
         policyTestPaths: inputs.tests,
         agentOwnPatterns: inputs.own,
       };
+    },
+
+    // Over the response's own bytes, as the engineering agent's read digests them: a diff whose
+    // removed lines hold bytes that are not UTF-8 must digest the same on both sides (review
+    // r-20261114-023008-48bc7e). No raw bytes, no digest.
+    async diffDigest(number): Promise<string | null> {
+      const response = await http({ method: "GET", url: `${QA_RELEASE_GITHUB_API}${REPO_PATH}/pulls/${number}`,
+        headers: await headers("application/vnd.github.diff") });
+      if (response.status !== 200) throw new Error(`github_${response.status}`);
+      const bytes = response.bytes;
+      if (!(bytes instanceof Uint8Array) || bytes.byteLength > PULL_DIFF_DIGEST_MAX_BYTES) return null;
+      return pullDiffDigest(bytes);
     },
 
     async readPull(number): Promise<QaReleasePullRead | null> {
