@@ -96,6 +96,7 @@ export const getActiveAiModel = (
     case "mistral":
       // Mistral returns thinking/text chunks in message.content. The OpenAI
       // adapter accepts only a string there and rejects successful responses.
+      // Keep its pinned SDK version on the AI core's provider protocol.
       return wrapLanguageModel({
         model: createMistral(configuration)(model.apiModel),
         // Preserve the OpenAI adapter's strict structured-output default.

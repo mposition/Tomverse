@@ -29,7 +29,8 @@ test("Mistral HTTP 200 thinking chunks produce an answer and retain usage", asyn
     assert.equal(String(url), "https://api.mistral.ai/v1/chat/completions");
     const body = JSON.parse(init.body);
     assert.equal(body.model, mistral.apiModel);
-    assert.equal(body.reasoning_effort, "medium");
+    // Preserve the existing provider default; the fix changes response parsing.
+    assert.equal(body.reasoning_effort, undefined);
     return Response.json({
       id: "test-mistral", object: "chat.completion", created: 1, model: mistral.apiModel,
       choices: [{ index: 0, message: { role: "assistant", content: [thinking, answer] }, finish_reason: "stop" }],
@@ -77,34 +78,6 @@ test("Mistral still accepts a plain text response", async t => {
   }));
   const result = await generateText({ model: getActiveAiModel(getModel("mistral-small-4")), prompt: "Hello.", maxRetries: 0 });
   assert.equal(result.text, "Hello.");
-});
-
-test("Mistral effort is mapped to each model's supported values", async t => {
-  let expected;
-  t.mock.method(globalThis, "fetch", async (_url, init) => {
-    const body = JSON.parse(init.body);
-    assert.equal(body.reasoning_effort, expected);
-    return Response.json({
-      id: "test-mistral", object: "chat.completion", created: 1, model: body.model,
-      choices: [{ index: 0, message: { role: "assistant", content: answer.text }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
-    });
-  });
-  for (const [apiModel, reasoning, effort] of [
-    ["mistral-large-4-0", "none", "low"],
-    ["mistral-large-4-0", "low", "low"],
-    ["mistral-large-4-0", "medium", "medium"],
-    ["mistral-small-latest", "medium", "high"],
-    ["mistral-large-latest", "high", undefined],
-  ]) {
-    const model = { ...mistral, apiModel, reasoning };
-    expected = effort;
-    const result = await generateText({
-      model: getActiveAiModel(model), prompt: "Calculate 6 * 7.", maxRetries: 0,
-      ...getModelGenerationSettings(model),
-    });
-    assert.equal(result.text, answer.text);
-  }
 });
 
 test("Mistral structured output preserves the previous strict schema default", async t => {

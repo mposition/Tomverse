@@ -77,13 +77,6 @@ test("MiniMax M3.1 Flash sends its catalogue effort instead of defaulting to max
   }
 });
 
-test("Mistral reasoning settings let the native SDK resolve supported effort", () => {
-  const model = { ...getModel("mistral-large-3"), apiModel: "mistral-large-4-0", reasoning: "medium" };
-  assert.deepEqual(getModelGenerationSettings(model), {
-    reasoning: "medium",
-  });
-});
-
 test("new Gemini request paths omit unsupported sampling parameters", () => {
   for (const id of ["gemini-3-6-flash", "gemini-2-5-flash", "gemini-flash-lite-latest"]) {
     assert.deepEqual(getModelGenerationSettings(getModel(id), { temperature: 0.1 }), {});

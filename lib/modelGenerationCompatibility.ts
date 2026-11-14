@@ -155,11 +155,6 @@ export const getModelGenerationSettings = (
       : undefined
   );
   return {
-    // The native SDK maps this to the effort levels each Mistral model
-    // supports, instead of sending an unsupported provider override verbatim.
-    ...(model.provider === "mistral" && model.reasoning !== undefined
-      ? { reasoning: model.reasoning }
-      : {}),
     ...(options?.temperature !== undefined &&
     !GEMINI_STRICT_GENERATION_MODEL_IDS.has(model.id) &&
     model.reasoning === undefined
