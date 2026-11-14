@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { autoQualityCostCases } from "./fixtures/autoQualityCostCases.mjs";
 
-import { AVAILABLE_MODELS, getModelUsageCredits } from "../lib/models.ts";
+import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, getModelUsageCredits } from "../lib/models.ts";
 import {
   AUTO_LLM_ROUTER_CREDITS_RULE,
   AUTO_LLM_ROUTER_SYSTEM,
@@ -308,6 +308,12 @@ test("candidate file capability follows authentication, persistence and the actu
   assert.equal(searching[0].canCreateFiles, true);
   const research = AVAILABLE_MODELS.find(m => m.usageClass === "deep-research");
   assert.equal(autoLlmRouterCandidates([research.id], AVAILABLE_MODELS, {}, context)[0].canCreateFiles, false);
+});
+
+test("the default model can create files", () => {
+  const context = { isAuthenticated: true, canPersist: true, webSearchRequested: false };
+  const candidate = autoLlmRouterCandidates([DEFAULT_MODEL_ID], AVAILABLE_MODELS, {}, context)[0];
+  assert.equal(candidate.canCreateFiles, true);
 });
 
 test("a rewrite is kept only when asked for, bounded and different", async () => {
