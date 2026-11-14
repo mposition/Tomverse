@@ -439,6 +439,12 @@ run(
     // audit entry; review, blocked and running cards refuse.
     "tests/integration/amux-settled-card-escalation.db.test.ts",
     "tests/integration/amux-v22-result-review.db.test.ts",
+    // The owner queue through the Decision Maker (owner decision 2026-11-13):
+    // one settlement per escalation, filed only behind its switch; retry,
+    // complete, close and remake applied as the system within their statement
+    // ceilings; a review pull request's approval only recorded; a Task that
+    // moved, or a person who answered first, cancels it.
+    "tests/integration/amux-dm-owner-settlement.db.test.ts",
     // A v22 implement Task's review pull request (2026-11-11): its v4 row
     // cannot hold the number, so the engineering binding holds it, the record
     // is never refused, and only the bound pull request's merge completes it.

@@ -8049,6 +8049,7 @@ model AmuxWorkItem {
   v22TaskPatches    AmuxV22TaskPatch[]
   v22OwnerQuestions AmuxV22TaskQuestion[]
   v22ResultReviews  AmuxV22ResultReview[]
+  dmOwnerSettlements AmuxDmOwnerSettlement[]
   v52ReviewRecords  AmuxV52ReviewRecord[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
@@ -8168,6 +8169,7 @@ model AmuxExecutionAttempt {
   v22TaskPatch      AmuxV22TaskPatch?
   v22OwnerQuestion  AmuxV22TaskQuestion?
   v22ResultReview   AmuxV22ResultReview?
+  dmOwnerSettlements AmuxDmOwnerSettlement[]
   v52ReviewRecord   AmuxV52ReviewRecord?
   v22AssignmentId   String? @unique @db.Uuid
   v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -8310,6 +8312,51 @@ model AmuxV22ResultReview {
   task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([attemptId, taskId])
+  @@index([state, createdAt])
+  @@index([taskId, createdAt])
+}
+
+/// A stopped v22 Task in the owner queue put to the Decision Maker (owner
+/// decision 2026-11-13, lib/amux/dmOwnerSettlementService.ts). One row per
+/// human escalation; the relay files it as a typed-ask card and the app applies
+/// the answer. The id is a version 8 UUID derived from the escalation.
+model AmuxDmOwnerSettlement {
+  id                 String    @id
+  taskId             String
+  escalationId       String    @unique
+  attemptId          String?
+  /// t2_pr | stopped
+  kind               String
+  /// review | blocked, as the Task stood when it was filed
+  taskStatus         String
+  /// The engineering binding of the pull request (t2_pr), named, not referenced.
+  bindingId          String?
+  /// open | claimed (a remake decided, its idea not filed yet) | applied | cancelled
+  state              String    @default("open")
+  /// stopped: retry | complete | close | remake; t2_pr: approve | retry | close
+  decision           String?
+  /// dm | dm_confirmed
+  answerSource       String?
+  requestId          String?
+  /// An approval: the verified head and diff digest it approved, for the next stage.
+  approvedHeadSha    String?
+  approvedDiffDigest String?
+  /// A remake's idea request id, recorded by its claim before the idea is filed.
+  remakeRequestId    String?
+  remakeIdeaId       String?
+  cancelReason       String?
+  handoffReason      String?
+  handoffAt          DateTime?
+  decidedAt          DateTime?
+  localCardId        String?   @unique
+  localCardClosedAt  DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  task       AmuxWorkItem          @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  escalation AmuxHumanEscalation   @relation(fields: [escalationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attempt    AmuxExecutionAttempt? @relation(fields: [attemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
   @@index([state, createdAt])
   @@index([taskId, createdAt])
 }
@@ -8493,6 +8540,7 @@ model AmuxHumanEscalation {
 
   task            AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict)
   reviewProposals AmuxReviewProposal[]
+  dmOwnerSettlement AmuxDmOwnerSettlement?
 
   @@unique([id, taskId])
   @@index([status, createdAt])

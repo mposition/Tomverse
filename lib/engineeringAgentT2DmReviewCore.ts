@@ -40,7 +40,7 @@ export const ENGINEERING_AGENT_T2_DM_REASON_TEXT: Readonly<Record<string, string
 const OTHER_REASON = "it was kept for a person";
 
 /** Splits a patch into its per-file sections, whole. */
-function patchSections(patch: string): string[] {
+export function patchSections(patch: string): string[] {
   const lines = patch.replace(/\r\n/g, "\n").split("\n");
   const sections: string[][] = [];
   for (const line of lines) {
