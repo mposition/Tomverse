@@ -420,7 +420,11 @@ export type DmRoutingInput = {
   askingProvider: string;
   /** Requests already routed to the instance in the trailing hour and day. */
   throughput: { lastHour: number; lastDay: number };
-  /** Skip evidence blocks in the term check (AMUXFLOW/B2); defaults to its switch. */
+  /**
+   * Skip evidence blocks in the term check (AMUXFLOW/B2): true only for a
+   * card the app filed itself (an owner settlement card, by its recorded
+   * local card) while its switch is on. Absent: every word is read.
+   */
   evidenceTermsExempt?: boolean;
 };
 
@@ -463,8 +467,9 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
   // Section 3-3's inputs. An option's effect class and paths are not among
   // them: they are section 4's declaration, which the router does not route on,
   // and a path is no more prose than a context path, which is not read either.
-  const evidenceExempt = input.evidenceTermsExempt ??
-    dmTermsFixedTextOnlyEnabled(process.env[DM_TERMS_FIXED_TEXT_ONLY_ENV]);
+  // Only a card the app itself filed earns the exemption (the caller proves
+  // it); a worker's markers are plain text here.
+  const evidenceExempt = input.evidenceTermsExempt === true;
   const termCategories = irreversibleTermCategories(
     [card.type, ...card.tags, card.title, dmTermCheckText(card.question, evidenceExempt),
       ...card.options.map((option) => option.label), card.unblocks,

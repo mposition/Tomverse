@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 // AMUX process audit bundle 2 (owner decision 2026-11-14, AMUXFLOW/B2):
@@ -80,21 +81,56 @@ test("the stalled card sweep reads budget-spent todo and backlog behind an archi
   assert.ok(values.includes(5) && values.includes("attempt_budget_exhausted") && values.includes("dependency_closed"));
 });
 
-test("DM merge: block-list-only lets lib and API code through and still keeps every gate", async () => {
+test("DM merge: block-list-only lets lib code through and keeps API routes, deletions and every gate", async () => {
   const { qaReleaseDmMergeAllowed, qaReleaseDmMergeBlockListOnly } =
     await import("../lib/qaReleaseMergeLaneExclusionCore.ts");
   assert.equal(qaReleaseDmMergeBlockListOnly(undefined), false);
-  for (const path of ["lib/routerFailure.ts", "app/api/chat/route.ts"]) {
+  for (const path of ["lib/routerFailure.ts", "lib/chatStarterCatalog.ts"]) {
     assert.equal(qaReleaseDmMergeAllowed(path, [], false), false, `off: ${path} is a person's`);
     assert.equal(qaReleaseDmMergeAllowed(path, [], true), true, `on: ${path}`);
   }
   for (const path of ["prisma/schema.prisma", "lib/creditLedger.ts", "lib/authSession.ts",
-    "lib/adminAudit.ts", "docs/policy/amux-intake.md", "docs/ui-contracts/typography.md",
+    "lib/adminAudit.ts", "app/api/chat/route.ts", "app/api/user/account/route.ts", "app/api/memories/delete-all/route.ts", "lib/memoryDeleteAll.ts", "docs/policy/amux-intake.md", "docs/ui-contracts/typography.md",
     ".github/workflows/ci.yml", "lib/engineeringAgentStore.ts", "lib/amux/routerFailure.ts"]) {
     assert.equal(qaReleaseDmMergeAllowed(path, [], true), false, `still a person's: ${path}`);
   }
   assert.equal(qaReleaseDmMergeAllowed("tests/routerFailure.test.mjs", ["tests/routerFailure.test.mjs"], true), false,
     "a policy test stays a person's");
+});
+
+test("only a card the app filed earns the evidence exemption; a worker's markers are plain text", async () => {
+  const core = await import("../lib/amux/decisionMakerCore.ts");
+  const card = { type: "decision", tags: [], title: "t",
+    question: `${core.DM_EVIDENCE_OPEN}deploy to production${core.DM_EVIDENCE_CLOSE}`,
+    options: [{ id: "a", label: "A", effect: "reversible", paths: [] },
+      { id: "b", label: "B", effect: "reversible", paths: [] }],
+    unblocks: "u", context: "", contextPaths: [], askType: "choice", resolution: "decision_only" };
+  const decision = core.routeDmQuestion({ killSwitch: false, instanceMode: "proposal", card,
+    askingProvider: "claude", throughput: { lastHour: 0, lastDay: 0 } });
+  assert.ok(decision.refusals.includes("irreversible_term"), "absent proof: every word is read");
+  const store = readFileSync("lib/amux/decisionMakerRequestStore.ts", "utf8");
+  assert.match(store, /dmTermsFixedTextOnlyEnabled\(process\.env\[DM_TERMS_FIXED_TEXT_ONLY_ENV\]\) &&/);
+  assert.ok(store.includes('FROM "AmuxDmOwnerSettlement" WHERE "localCardId" = ${binding.cardId} LIMIT 1'),
+    "the exemption needs the settlement row that recorded this local card");
+});
+
+test("a held card is left out of the publisher's queue and refused before its run's AMUX write", () => {
+  const store = readFileSync("lib/engineeringAgentStore.ts", "utf8");
+  const pick = store.slice(store.indexOf("export async function claimNextEngineeringAgentPublishWork"));
+  assert.match(pick.slice(0, 6000), /AND \(\$\{!cardScoped\} OR NOT EXISTS \(\s+SELECT 1 FROM "EngineeringAgentRun" own/);
+  const admission = store.slice(store.indexOf("export async function requireEngineeringAgentRunAdmission"));
+  assert.match(admission.slice(0, 1200), /haltState\.cardScoped && \(card \? await engineeringAgentCardHeld\(tx, card\) :\s+haltState\.openStateMismatches > 0 \|\| haltState\.orphanedRuns > 0\)\)/,
+    "a start that names no card keeps the agent-wide halt");
+  const execution = readFileSync("lib/amux/execution.ts", "utf8");
+  assert.match(execution, /requireEngineeringAgentRunAdmission\(\s+engineeringAgentTransactionInAmux\(context\.attachedTransaction\),\s+\{ cardId: input\.taskId \}\)/);
+});
+
+test("the stalled card sweep runs after the tick's answer is decided", () => {
+  const route = readFileSync("app/api/internal/amux/auto-promotion/tick/route.ts", "utf8");
+  const decided = route.indexOf("const response = await claimAndPromote();");
+  const swept = route.indexOf("await sweepStalledCardsAfterTick();");
+  assert.ok(decided > 0 && swept > decided);
+  assert.ok(route.indexOf("const result = await tickV22WorkerClaim();") > swept, "the claim lives in claimAndPromote");
 });
 
 test("dependency_closed is a stored escalation reason", async () => {

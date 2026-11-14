@@ -5,7 +5,8 @@ import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { dmKeyPeriodOf, dmOptionSetDigest, dmRequestDigestKey } from "@/lib/amux/decisionMakerBodyCore";
-import { dmInstanceForProvider, routeDmQuestion } from "@/lib/amux/decisionMakerCore";
+import { DM_TERMS_FIXED_TEXT_ONLY_ENV, dmInstanceForProvider, dmTermsFixedTextOnlyEnabled,
+  routeDmQuestion } from "@/lib/amux/decisionMakerCore";
 import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
   DM_CLOSING_EVENT_KINDS,
@@ -775,11 +776,17 @@ export async function recordDecisionMakerRequest(
     // §5, §8: an owed latch is the instance off -- the question goes to the operator.
     routingSwitches = dmSwitchInputWithOwedLatch(routingSwitches, owedLatch(switches, instance, load) !== null);
   }
+  // AMUXFLOW/B2: the evidence markers count only on a card the app filed
+  // itself, proven by the settlement row that recorded this local card.
+  const evidenceTermsExempt = dmTermsFixedTextOnlyEnabled(process.env[DM_TERMS_FIXED_TEXT_ONLY_ENV]) &&
+    (await tx.$queryRaw<Array<{ one: number }>>`
+      SELECT 1 AS "one" FROM "AmuxDmOwnerSettlement" WHERE "localCardId" = ${binding.cardId} LIMIT 1`).length > 0;
   const decision = routeDmQuestion({
     ...routingSwitches,
     card,
     askingProvider: binding.askingProvider,
     throughput,
+    evidenceTermsExempt,
   });
   const requestId = randomUUID();
   const optionSetDigest = dmOptionSetDigest(dmRequestDigestKey(periodKey, requestId), card.options);
