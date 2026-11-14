@@ -2272,7 +2272,7 @@ test.describe("a continuation opens in its product's workspace", () => {
         return api;
     };
 
-    test("an empty automatic excerpt can be replaced for just the next text answer", async ({page}) => {
+    test("selected excerpts and recent source apply once and report actual attempt coverage", async ({page}) => {
         await prepareGuestPage(page, "ko");
         await mockAuthenticatedApi(page, {autoSelectionOffered:true, messageConversationId:CONVERSATION_ID});
         const api=await mockContinuationApi(page,{product:"chat",seedMessageCount:0});
@@ -2282,24 +2282,35 @@ test.describe("a continuation opens in its product's workspace", () => {
         await page.route("**/api/chat/location-intent", route => route.fulfill(json({ requiresLocation: false })));
         await page.route("**/api/chat/availability", route => route.fulfill(json({ runnable: true, plan: "Free", blockCode: null,
             estimate: { requiredCredits: 1, models: [] }, entitlement: { dailyCreditLimit: 300, creditsAvailableNow: 300, creditShortfall: 0 } })));
-        await page.route("**/api/chat/router-location", route => {
-            api.pickedHeaders.push(route.request().headers()["x-tomverse-source-passages"]);
-            return route.fulfill({status: 200, headers: {"X-Chat-Router-Location-Version":"1"}, contentType:"text/plain", body:"A second answer."});
-        });
+        const answer = async (route: import("@playwright/test").Route) => {
+            const picked = route.request().headers()["x-tomverse-source-passages"];
+            api.pickedHeaders.push(picked);
+            const body = route.request().postDataJSON();
+            const receipt = { traceId: "cf-browser-trace", assistantMessageId: body.assistantMessageId, attempt: 0,
+                mode: picked ? "selected_recent" : "automatic", status: "dispatched", outcome: "seeded",
+                plannerVersion: picked ? "ext-seed-v3-selected-recent" : "ext-seed-v2",
+                selectedCount: picked ? 1 : 0, recentCount: 2, uniqueMessageCount: 2, partial: true, omitted: false };
+            return route.fulfill({status: 200, headers: {"X-Chat-Router-Location-Version":"1", "X-Request-ID":"cf-browser-trace",
+                "X-Chat-Continuation-Receipt": JSON.stringify(receipt)}, contentType:"text/plain", body:"A second answer."});
+        };
+        await page.route("**/api/chat/router-location", answer);
+        await page.route("**/api/chat", answer);
         await mockConversationList(page,[{id:CONVERSATION_ID,title:"Continued conversation",surface:"continuation",sourceTitle:SOURCE_CONVERSATION_TITLE}]);
         await page.goto(`/continuations/${CONVERSATION_ID}`);
         const card=page.getByTestId("continuation-context").first();
-        await expect(card).toContainText("참고할 원문이 없어요");
+        await expect(card).toContainText("최근 원문 자동 발췌");
         await card.getByRole("button",{name:"참고할 원문 선택"}).click();
         const picker=page.getByRole("dialog",{name:"참고할 원문 선택"});
         await picker.getByRole("checkbox").last().check();
         await test.info().attach("source-picker",{body:await page.screenshot(),contentType:"image/png"});
         await picker.getByRole("button",{name:"선택한 원문으로 이어가기"}).click();
-        await expect(card).toContainText("선택한 원문 1개");
+        await expect(card).toContainText("선택 1개 + 최근 원문");
         await page.getByTestId("chat-textarea").fill("What did we decide?");
         await page.getByTestId("chat-send-button").click();
         await expect.poll(()=>api.pickedHeaders[0]).toMatch(/^1:0:[0-9]+$/);
-        await expect(card).toContainText("참고할 원문이 없어요");
+        await expect(page.getByTestId("continuation-receipt").first()).toContainText("선택 1개 + 최근 2개");
+        await expect(page.getByTestId("continuation-receipt").first()).toContainText("고유 메시지 2개");
+        await expect(card).toContainText("최근 원문 자동 발췌");
         await page.getByTestId("chat-textarea").fill("Another question.");
         await page.getByTestId("chat-send-button").click();
         await expect.poll(()=>api.pickedHeaders.length).toBe(2);

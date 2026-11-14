@@ -1,4 +1,5 @@
 export type ChatMessage = {
+  continuationReceipt?: import("../../../lib/continuationReceipt").ContinuationReceipt;
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -17,7 +18,8 @@ export type ImportedTranscript = {
   provider: string;
   importedAt: string;
   status: "available" | "deleted" | "locked";
-  messages: Array<{ id: string; role: "user" | "assistant"; content: string; sourceModelLabel: string | null }>;
+  messages: Array<{ id: string; ordinal?: number; role: "user" | "assistant"; content: string; sourceModelLabel: string | null }>;
+  messageTotal?: number;
   /** Index of the first loaded message; earlier ones load a page at a time. */
   offset: number;
   pageSize: number;
@@ -68,6 +70,10 @@ export interface HistoryTransport {
   unlocked(id: string): boolean;
 }
 export type MobileAttachment = { uploadId: string; name: string; mediaType: string; size: number };
+export type ContinuationTurnContext = {
+  sourcePassages?: readonly import("../../../lib/continuationPassages").Passage[];
+  onReceipt?: (receipt: import("../../../lib/continuationReceipt").ContinuationReceipt) => void;
+};
 export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"] };
 export interface ChatTransport {
   workspace?: import("./iosWorkspaceContract").WorkspaceTransport;
@@ -123,7 +129,7 @@ export interface ChatTransport {
   capabilities(): Promise<{ offered: boolean }>;
   configure(id: string, modelId: string, auto: boolean): Promise<Conversation>;
   send(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal,
-    progress: (text: string) => void): Promise<void>;
+    progress: (text: string) => void, continuation?: ContinuationTurnContext): Promise<void>;
   upload(file: File): Promise<MobileAttachment>;
   transcribe(clip: Blob, signal?: AbortSignal): Promise<string>;
 }

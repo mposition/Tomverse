@@ -1,3 +1,4 @@
+import type { ContinuationReceipt } from "../../../lib/continuationReceipt";
 import { createDemoWorkspace } from "./demoWorkspace";
 import type { ChatTransport, Conversation, UserPreferences, MemoryPreferences, HistoryProject, ChatSummary } from "./chatTransport";
 
@@ -5,8 +6,11 @@ import type { ChatTransport, Conversation, UserPreferences, MemoryPreferences, H
 export function createDemoTransport(): ChatTransport {
   const key = "tomverse-native-synthetic-demo";
   let signedIn = localStorage.getItem(key + ":session") === "signed-in";
-  const read = (): Conversation[] => JSON.parse(localStorage.getItem(key) ?? "[]");
-  const write = (items: Conversation[]) => localStorage.setItem(key, JSON.stringify(items));
+  const sourceReceipts = new Map<string, ContinuationReceipt>();
+  const read = (): Conversation[] => (JSON.parse(localStorage.getItem(key) ?? "[]") as Conversation[]).map(item => ({ ...item,
+    messages: item.messages.map(message => ({ ...message, ...(sourceReceipts.has(message.id) ? { continuationReceipt: sourceReceipts.get(message.id) } : {}) })) }));
+  const write = (items: Conversation[]) => localStorage.setItem(key, JSON.stringify(items.map(item => ({ ...item,
+    messages: item.messages.map(message => { const value = { ...message }; delete value.continuationReceipt; return value; }) }))));
   const projects = (): HistoryProject[] => JSON.parse(localStorage.getItem(key + ':projects') ?? '[]');
   const passwords = new Map<string, string>(); const unlocked = new Set<string>();
   const patch = async (id: string, data: object) => { write(read().map(item => item.id === id ? { ...item, ...data } : item)); };
@@ -63,7 +67,7 @@ export function createDemoTransport(): ChatTransport {
     downloadArtifact: async () => {},
     session: async () => signedIn,
     signIn: async () => { signedIn = true; localStorage.setItem(key + ":session", "signed-in"); },
-    signOut: async () => { signedIn = false; localStorage.removeItem(key + ":session"); localStorage.removeItem(key); },
+    signOut: async () => { sourceReceipts.clear(); signedIn = false; localStorage.removeItem(key + ":session"); localStorage.removeItem(key); },
     list: async () => read().filter(item => item.surface !== "workspace" && !(item.surface === "continuation" && item.productKey === "review")),
     // A fixture continuation stores its end page as `imported` and earlier pages
     // by offset, so the older-messages button can be exercised without a server.
@@ -79,7 +83,7 @@ export function createDemoTransport(): ChatTransport {
       const items = read(); const item = items.find((c) => c.id === id)!;
       item.selectedModels = [modelId]; item.selectionMode = auto ? "auto" : "manual"; write(items); return item;
     },
-    send: async (conversation, text, files, signal, progress) => {
+    send: async (conversation, text, files, signal, progress, continuation) => {
       const item = read().find((c) => c.id === conversation.id)!;
       item.messages.push({ id: crypto.randomUUID(), role: "user", content: text, attachments: files.map((file) => ({ id: file.uploadId, uploadId: file.uploadId, name: file.name, mediaType: file.mediaType, size: file.size, kind: "file" })) });
       item.title = text.slice(0, 48) || files[0]?.name || item.title;
@@ -93,7 +97,19 @@ export function createDemoTransport(): ChatTransport {
         await new Promise((resolve) => setTimeout(resolve, 18));
       }
       progress(answer);
-      item.messages.push({ id: crypto.randomUUID(), role: "assistant", modelId: item.selectedModels[0], content: answer });
+      const answerId = crypto.randomUUID();
+      if (item.surface === "continuation") {
+        const selected = continuation?.sourcePassages ?? [];
+        const recent = item.imported?.messages.slice(-2) ?? [];
+        const receipt: ContinuationReceipt = { traceId: crypto.randomUUID(), assistantMessageId: answerId, attempt: 0,
+          mode: selected.length ? "selected_recent" : "automatic", status: item.imported?.status === "available" ? "dispatched" : "not_sent",
+          outcome: item.imported?.status === "available" ? "seeded" : item.imported?.status ?? "source_deleted",
+          plannerVersion: selected.length ? "ext-seed-v3-selected-recent" : "ext-seed-v2", selectedCount: selected.length,
+          recentCount: recent.length, uniqueMessageCount: new Set([...selected.map(part => part.ordinal), ...recent.map(message => message.ordinal)]).size,
+          partial: selected.length > 0, omitted: (item.imported?.offset ?? 0) > 0 };
+        sourceReceipts.set(answerId, receipt); continuation?.onReceipt?.(receipt);
+      }
+      item.messages.push({ id: answerId, role: "assistant", modelId: item.selectedModels[0], content: answer });
       write(read().map((c) => c.id === item.id ? item : c));
     },
     upload: async (file) => ({ uploadId: crypto.randomUUID(), key: "synthetic", name: file.name, mediaType: file.type, size: file.size }),

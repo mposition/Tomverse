@@ -1,5 +1,8 @@
 import { createWorkspaceTransport } from "./workspaceTransport";
 import { createApiClient, ApiClientError, requestChatLocationIntent } from "@tomverse/api-client";
+import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceipt } from "../../../lib/continuationReceipt";
+import { PASSAGE_HEADER, encodePassages } from "../../../lib/continuationPassages";
+import { parseChatStreamTrailer } from "../../../lib/webSearchStreamTrailer";
 import { consumeChatStream } from "../../../lib/chatStreamConsumer";
 import { fitChatRequestTranscript } from "../../../lib/chatRequestLimits";
 import { toChatRequestMessage } from "../../../lib/chatMessageSerialization";
@@ -16,7 +19,7 @@ import { readChatImageTurnRequest, readChatImageTurnRef, type ChatImageTurnReque
 import { askChatImageIntent } from "../../../lib/chatImageIntentClient";
 import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "../../../lib/imageGenerationPricing";
 import { uploadMobileFile } from "./nativeUpload";
-import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities } from "./chatTransport";
+import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities, ContinuationTurnContext } from "./chatTransport";
 
 import { nativeChatLocation } from "./chatLocation";
 import type { MobileRequestInit } from "./authenticatedFetch";
@@ -34,7 +37,8 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   let capabilityCache: { value: MobileCapabilities; expires: number } | null = null;
   let capabilityRequest: Promise<MobileCapabilities> | null = null;
   const routedModelByMessage = new Map<string, string>();
-  const clearSessionState = () => { sessionRevision++; locationIdentity = null; location.setIdentity(null); capabilityCache = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); };
+  const sourceReceiptByMessage = new Map<string, ContinuationReceipt>();
+  const clearSessionState = () => { sessionRevision++; locationIdentity = null; location.setIdentity(null); capabilityCache = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); sourceReceiptByMessage.clear(); };
   const notifySessionLost = () => { clearSessionState(); for (const listener of listeners) listener(); };
   const run = async (path: string, init?: MobileRequestInit): Promise<Response> => {
     try {
@@ -111,7 +115,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     const withRouting = messages.map(message => {
       const attempt = item.responseAttempts?.find(value => value.assistantMessageId === message.id);
       const modelId = attempt?.actualModelId ?? message.modelId;
-      return { ...message, ...(modelId ? { modelId } : {}), ...(routedModelByMessage.has(message.id) ? { routedModelId: attempt?.actualModelId ?? routedModelByMessage.get(message.id) } : {}) };
+      return { ...message, ...(sourceReceiptByMessage.has(message.id) ? { continuationReceipt: sourceReceiptByMessage.get(message.id) } : {}), ...(modelId ? { modelId } : {}), ...(routedModelByMessage.has(message.id) ? { routedModelId: attempt?.actualModelId ?? routedModelByMessage.get(message.id) } : {}) };
     });
     // A continuation carries its imported original; an unreadable source is
     // drawn as the divider alone rather than as an ordinary empty chat.
@@ -122,12 +126,12 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   // omitted asks for the page that ends at the divider (policy §8.2 of
   // docs/policy/external-conversation-continuation.md).
   async function continuationSource(id: string, offset?: number): Promise<ImportedTranscript> {
-    const value = await request<{ provider: string; importedAt: string; source: { status: string; messageTotal?: number; offset?: number; limit?: number; messages?: Array<{ id: string; role: string; content: string; sourceModelLabel?: string | null }> } }>(
+    const value = await request<{ provider: string; importedAt: string; source: { status: string; messageTotal?: number; offset?: number; limit?: number; messages?: Array<{ id: string; role: string; content: string; ordinal?: number; sourceModelLabel?: string | null }> } }>(
       `${pathFor(id)}/continuation?offset=${offset === undefined ? "end" : Math.max(0, Math.trunc(offset))}`, { cache: "no-store" });
     const status = value.source.status === "deleted" || value.source.status === "locked" ? value.source.status : "available";
     const messages = status === "available" ? (value.source.messages ?? []).filter(message => message.role === "user" || message.role === "assistant")
-      .map(message => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content, sourceModelLabel: message.sourceModelLabel ?? null })) : [];
-    return { provider: value.provider, importedAt: value.importedAt, status, messages, offset: value.source.offset ?? 0, pageSize: value.source.limit ?? 100 };
+      .map(message => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content, ordinal: message.ordinal, sourceModelLabel: message.sourceModelLabel ?? null })) : [];
+    return { provider: value.provider, importedAt: value.importedAt, status, messages, messageTotal: value.source.messageTotal, offset: value.source.offset ?? 0, pageSize: value.source.limit ?? 100 };
   }
   async function configure(id: string, modelId: string, auto: boolean) {
     await request(pathFor(id), json("PATCH", { selectionMode: auto ? "auto" : "manual", ...(!auto ? { selectedModels: [modelId] } : {}) }));
@@ -175,7 +179,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       ? { modelIds: decision.modelId ? [decision.modelId] : [], preset: decision.preset, edit: true }
       : null;
   }
-  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }) {
+  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }, continuation?: ContinuationTurnContext) {
     const messages = fitChatRequestTranscript(persisted.messages.filter(message =>
       (message.role === "user" || !review || message.modelId === modelId) &&
       (message.role === "user" || message.status === "normal" || message.status === "incomplete" || !message.status))
@@ -186,6 +190,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     if (signal.aborted) controller.abort();
     const scope = locationIdentity;
     const revision = sessionRevision;
+    let sourceReceipt: ContinuationReceipt | undefined;
+    let sourceAttemptTextLength = 0;
+    const publishReceipt = (receipt: ContinuationReceipt | undefined) => {
+      if (!receipt || revision !== sessionRevision || signal.aborted) return;
+      sourceReceipt = receipt; sourceReceiptByMessage.set(assistantMessageId, receipt);
+      continuation?.onReceipt?.(receipt);
+    };
     let watchdog: ReturnType<typeof createChatLivenessWatchdog> | undefined;
     try {
       const fix = await location.readForTurn(scope, controller.signal, {
@@ -202,9 +213,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
         if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
         return { ...json("POST", { messages, modelId, webSearchMode: persisted.webSearchMode ?? "off", conversationId: persisted.id,
           assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}),
-          ...(fix && location.canShare(fix, scope) ? { currentLocation: fix } : {}) }), signal: controller.signal };
+          ...(fix && location.canShare(fix, scope) ? { currentLocation: fix } : {}) }),
+          ...(continuation?.sourcePassages !== undefined && !review ? { headers: { "Content-Type": "application/json",
+            [PASSAGE_HEADER]: encodePassages(continuation.sourcePassages) } } : {}), signal: controller.signal };
       });
       watchdog.noteHeaders();
+      const traceId = response.headers.get("X-Request-ID");
+      publishReceipt(receiptForAttempt(response.headers.get(CONTINUATION_RECEIPT_HEADER), traceId, assistantMessageId));
       // Auto's choice arrives only as a header, as on the web; it is kept for
       // this session and attached to the message when the conversation reloads.
       const routed = response.headers.get("X-Chat-Routed-Model");
@@ -240,7 +255,21 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       }
       if (!response.body) throw Error("CHAT_STREAM_MISSING");
       const reader = response.body.getReader();
-      try { await consumeChatStream({ reader, liveness: watchdog, onProgress: ({ displayText }) => progress(displayText) }); }
+      try {
+        const result = await consumeChatStream({ reader, liveness: watchdog, onProgress: ({ displayText, retryingWithModelId }) => {
+          if (revision !== sessionRevision || signal.aborted) return;
+          const retryStarted = Boolean(retryingWithModelId && sourceReceipt?.attempt === 0);
+          if (displayText.length > sourceAttemptTextLength && displayText.trim() && sourceReceipt?.status === "unknown" && !retryStarted)
+            publishReceipt({ ...sourceReceipt, status: "dispatched" });
+          if (retryStarted && sourceReceipt) {
+            sourceAttemptTextLength = displayText.length;
+            publishReceipt({ ...sourceReceipt, attempt: 1, status: "unknown" });
+          }
+          progress(displayText);
+        } });
+        const trailer = parseChatStreamTrailer(result.searchMetadataJson);
+        publishReceipt(receiptForAttempt(trailer?.continuationReceipt, traceId, assistantMessageId, sourceReceipt));
+      }
       finally { reader.releaseLock(); }
       const final = await load(persisted.id);
       if (!final.messages.some(message => message.id === assistantMessageId && ["normal", "incomplete"].includes(message.status ?? ""))) throw Error("CHAT_OUTCOME_PENDING");
@@ -368,6 +397,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const revision = sessionRevision;
       const profile = await request<{ id: string; name?: string | null; email?: string | null; actionsEnabled: boolean }>("/api/user/account");
       if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      if (locationIdentity && locationIdentity !== profile.id) clearSessionState();
       locationIdentity = profile.id; location.setIdentity(profile.id);
       return profile;
     },
@@ -413,14 +443,14 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const detail = await load(item.id);
       return !assistantProfileId && detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
     },
-    send: async (conversation, text, files, signal, onProgress) => {
+    send: async (conversation, text, files, signal, onProgress, continuation) => {
       const { persisted, sourceId } = await persistQuestion(conversation, text, files, signal);
       const edit = await manualPhotoEdit(persisted, text, files, signal);
       if (edit) {
         await postImageTurn(persisted.id, sourceId, crypto.randomUUID(), persisted.selectedModels[0], edit, signal);
         return;
       }
-      await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, onProgress);
+      await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, onProgress, false, undefined, continuation);
     },
     sendReview: async (conversation, text, files, signal, progress) => {
       let admission: { admissionToken: string; contextBundle?: string } | undefined;
