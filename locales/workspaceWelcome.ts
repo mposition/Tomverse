@@ -94,7 +94,7 @@ export const workspaceWelcomeCopy = {
     starter: {
         title: "여기서 할 수 있는 일",
         hint: "하나를 고르면 입력창에 질문이 채워집니다. 보내기를 누르기 전에는 아무것도 전송되지 않습니다.",
-        scrollMore: "아래 추천 질문 보기",
+        scrollMore: "추천 질문 더 보기",
         lockedSignIn: "로그인하면 사용할 수 있습니다",
         lockedPlan: "{plan} 플랜이 필요합니다",
         lockedSignInShort: "로그인 필요",
