@@ -86,7 +86,7 @@ Release = 릴리스, Safety & recovery = 안전·복구, Feature flags = 기능 
 Messaging = 메시징). `tests/adminNavigation.test.mjs` writes the whole table out
 and fails when the code and this list disagree.
 
-The Models `discovery` tab also lists the weekly new-provider research proposals (Chat, Image and Code providers Tomverse is not connected to, with cited sources; off unless `MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID` is set) in the same queue, marked "새 공급자 리서치" and excludable but never adoptable there; it is not a new tab.
+The Models `discovery` tab also lists the weekly new-provider research proposals (Chat, Image and Code providers Tomverse is not connected to, with cited sources; off unless `MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID` is set) in the same queue, marked "새 공급자 리서치" and excludable but never adoptable there; it is not a new tab. Image models of already-connected providers found by the same research (their model-list APIs do not return image models) appear there too, marked "이미지 모델 리서치 (연결 공급자)".
 
 ### The 2026-11-07 restructuring
 

@@ -65,7 +65,12 @@ export type ModelWorkItemRow = {
   /** The three above joined; what a decision records as the analysis shown. */
   analysisKo: string;
   /** A proposal of the weekly new-provider research: no adapter yet, so not adoptable. */
-  research?: { product: "chat" | "image" | "code"; providerName: string; citations: string[] } | null;
+  research?: {
+    product: "chat" | "image" | "code";
+    connected?: boolean;
+    providerName: string;
+    citations: string[];
+  } | null;
   /** Present only in the excluded view: what closed the item, and who. */
   exclusion?: {
     reasonCode: string | null;
@@ -698,7 +703,9 @@ export function AdminModelDiscoveryPanel() {
               {row.research ? (
                 <AdminStatusChip tone="info">
                   <span data-testid="model-discovery-research-chip">
-                    {m.table.researchChip(row.research.product === "image" ? "Image" : row.research.product === "code" ? "Code" : "Chat")}
+                    {row.research.connected
+                      ? m.table.connectedImageResearchChip
+                      : m.table.researchChip(row.research.product === "image" ? "Image" : row.research.product === "code" ? "Code" : "Chat")}
                   </span>
                 </AdminStatusChip>
               ) : (
