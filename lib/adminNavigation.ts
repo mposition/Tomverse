@@ -762,6 +762,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "worker performance",
       "decision log",
       "incident",
+      "process analysis",
     ],
     tabs: [
       {
@@ -781,6 +782,14 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "diagnostics",
         label: "Diagnostics",
         description: "Worker performance and the decision log",
+      },
+      {
+        // The scheduled AMUX process analysis reports (owner request
+        // 2026-11-14, lib/amuxProcessAuditStore.ts) and their schedule.
+        id: "process-audit",
+        label: "Process analysis",
+        description: "Scheduled reports on where AMUX stops, over-tight constraints and needless steps",
+        viewRoles: ["owner"],
       },
     ],
   },

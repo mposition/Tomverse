@@ -13,6 +13,7 @@ import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { AMUX_INCIDENT_SETTING_KEY, parseAmuxIncidentSetting } from
   "./incidentCore.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
+import { amuxDependencyUnpublishedPatchSql } from "./v4DependencyPublication.ts";
 import { AUTO_PROMOTION_APPLY_ENV, AUTO_PROMOTION_CODE_LATCH,
   AUTO_UNKNOWN_BURST_COUNT, AUTO_UNKNOWN_BURST_MS,
   autoCostAccepted, autoGraduationAccepted, autoUnknownEvents,
@@ -21,7 +22,8 @@ import { AUTO_PROMOTION_APPLY_ENV, AUTO_PROMOTION_CODE_LATCH,
 import { OWNER_TRANSACTION_LIMITS, TICK_TRANSACTION_LIMITS,
   withAutoTransaction } from
   "./autoPromotionService.ts";
-import { AMUX_PORTFOLIO_SCORE_VERSION } from "./portfolioScoreCore.ts";
+import { AMUX_PORTFOLIO_SCORE_VERSION, amuxScoreAuditActionBinds } from
+  "./portfolioScoreCore.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
@@ -30,7 +32,7 @@ import { AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
   AMUX_V22_GRADUATION_EXCEPTION_POLICY_VERSION,
   AMUX_V22_PARALLEL_RESERVED, AMUX_V22_SEV1_RESERVED,
   amuxV22AssessmentIdsCurrent, amuxV22AutoPromotionEnabled, amuxV22Capacity,
-  amuxV22ScoreCurrent, amuxV22GraduationExceptionEnabled,
+  amuxV22ScoreCurrent, amuxV22GraduationExceptionEnabled, amuxV22PromotionFlowEnabled,
   amuxV22GraduationPermitted } from "./v22AutoPromotionCore.ts";
 import { writeV22AutoPromotionAudit } from "./v22AutoPromotionAudit.ts";
 
@@ -290,16 +292,20 @@ async function latestCandidates(tx: Prisma.TransactionClient, now: Date):
     WHERE w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task'
       AND w."status" = 'backlog' AND w."archivedAt" IS NULL
       AND w."owner" IS NULL AND w."claimedAt" IS NULL
-      AND n."activeStaleAt" > ${now} AND n."baselineStaleAt" > ${now}
+      AND (${amuxV22PromotionFlowEnabled()} OR
+        (n."activeStaleAt" > ${now} AND n."baselineStaleAt" > ${now}))
       AND NOT EXISTS (SELECT 1 FROM "AmuxV22PromotionUnknown" u
         WHERE u."workItemId" = w."id")
       -- A Task waiting on an unfinished dependency can never pass readiness
       -- (dependency_incomplete). Left in, eight such Tasks with higher scores
       -- filled every tick's window and a ready Task below them was never read.
+      -- A done dependency whose patch never reached develop holds it the same
+      -- way (dependency_unpublished).
       AND NOT EXISTS (SELECT 1 FROM "AmuxWorkDependency" d
         JOIN "AmuxWorkItem" dep ON dep."id" = d."dependencyId"
         WHERE d."taskId" = w."id"
-          AND (dep."status" <> 'done' OR dep."v4TerminalAt" IS NULL))
+          AND (dep."status" <> 'done' OR dep."v4TerminalAt" IS NULL
+            OR ${amuxDependencyUnpublishedPatchSql()}))
     ORDER BY n."scoreTotal" DESC, n."taskId" ASC
     LIMIT ${MAX_CANDIDATES_PER_TICK}
   `;
@@ -468,7 +474,8 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
             sourceApprovalId: score.sourceApprovalId,
             currentSourceApprovalId: ready.sourceApprovalId,
             activeStaleAt: score.activeStaleAt,
-            baselineStaleAt: score.baselineStaleAt, now })) {
+            baselineStaleAt: score.baselineStaleAt, now,
+            orderOnly: amuxV22PromotionFlowEnabled() })) {
         throw new BoardImportError("score_changed", 409);
       }
       const initiativeNodeId = score.initiativeAssessment.nodeId;
@@ -497,7 +504,7 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
           where: binding.where,
           orderBy: { assessmentVersion: "desc" }, select: { id: true },
         })));
-      if (!amuxV22AssessmentIdsCurrent(
+      if (!amuxV22PromotionFlowEnabled() && !amuxV22AssessmentIdsCurrent(
         assessmentBindings.map((binding) => binding.id),
         latestAssessments.map((assessment) => assessment?.id ?? null))) {
         throw new BoardImportError("score_changed", 409);
@@ -507,7 +514,7 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
         select: { action: true, targetId: true, entryHash: true },
       });
       if (!scoreAudit?.entryHash ||
-          scoreAudit.action !== "amux.v4.portfolio.score.confirm" ||
+          !amuxScoreAuditActionBinds(scoreAudit.action) ||
           scoreAudit.targetId !== score.id) {
         throw new BoardImportError("score_unbound", 409);
       }

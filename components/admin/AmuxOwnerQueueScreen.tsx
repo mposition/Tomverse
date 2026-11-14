@@ -19,6 +19,8 @@ import {
   AmuxOwnerQueueDecision,
   useAmuxOwnerQueueElapsed,
 } from "@/components/admin/AmuxOwnerQueueDecision";
+import { amuxOwnerQueueDmFrom } from "@/components/admin/AmuxOwnerQueueDm";
+import { AmuxOwnerQueueDmRelayChip } from "@/components/admin/AmuxOwnerQueueDmRequest";
 import { AdminChannelIcon } from "@/components/admin/ui/AdminChannelIcon";
 import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -115,6 +117,7 @@ export function AmuxOwnerQueueView({
             {read === null ? copy.strip.unknown : read.total}
           </strong>
         </div>
+        <AmuxOwnerQueueDmRelayChip relay={read?.dmRelay} />
         <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2">
           <p className="hidden items-center gap-1.5 text-xs text-zinc-400 md:flex" data-testid="amux-owner-queue-keys">
             <kbd className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300">J</kbd>
@@ -209,6 +212,12 @@ export function AmuxOwnerQueueView({
                                   {amuxVisibleInspectionText(item.displayKey ?? item.taskId)}
                                 </span>
                                 <span className="text-xs text-zinc-400">{reason ?? copy.group[group]}</span>
+                                {item.publicationPathMissing ? (
+                                  <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-xs font-bold text-amber-200"
+                                    data-testid="amux-owner-queue-publication-path-missing">
+                                    {copy.list.publicationPathMissing}
+                                  </span>
+                                ) : null}
                               </span>
                               <span className="mt-0.5 block break-words text-sm font-bold text-zinc-100">
                                 {item.title === null ? copy.list.untitled : amuxVisibleInspectionText(item.title)}
@@ -249,8 +258,11 @@ const isEditable = (target: EventTarget | null) => {
  * recorded only by those parts and their routes: this screen reads, selects and
  * moves on, and never skips a confirmation.
  */
-export function AmuxOwnerQueueScreen({ canInspectCards, canWriteEngineering = false, focusEscalationId = null }: {
+export function AmuxOwnerQueueScreen({ canInspectCards, canWriteEngineering = false, canAskDecisionMaker = false,
+  focusEscalationId = null }: {
   canInspectCards: boolean;
+  /** `ops:write`: the Decision Maker box offers its button. */
+  canAskDecisionMaker?: boolean;
   /** `engineering-agent:write`: a card's engineering items offer their buttons. */
   canWriteEngineering?: boolean;
   /** A step-up that came back here names the escalation it was working on. */
@@ -294,7 +306,8 @@ export function AmuxOwnerQueueScreen({ canInspectCards, canWriteEngineering = fa
         next = focused ?? amuxOwnerQueueVisible(body.items, { group: null, query: "" })[0]?.taskId ?? null;
       }
       firstRead.current = false;
-      setRead(body);
+      // A settlement this screen cannot draw is shown as unread, never trusted as read.
+      setRead({ ...body, items: body.items.map((item) => ({ ...item, dmSettlement: amuxOwnerQueueDmFrom(item.dmSettlement) })) });
       setStatus("ready");
       setSelectedId(next);
     } catch {
@@ -393,7 +406,8 @@ export function AmuxOwnerQueueScreen({ canInspectCards, canWriteEngineering = fa
       generatedAt={read.generatedAt} navLocked={navLocked} advance={advance} onAdvanceChange={setAdvance}
       onPrevious={selectedIndex > 0 ? () => step(-1) : null}
       onNext={selectedIndex >= 0 && selectedIndex < visible.length - 1 ? () => step(1) : null}
-      onAnswered={decided} canWriteEngineering={canWriteEngineering} onEngineeringChanged={refreshCard} />
+      onAnswered={decided} canWriteEngineering={canWriteEngineering} onEngineeringChanged={refreshCard}
+      dmRelay={read.dmRelay} canAskDecisionMaker={canAskDecisionMaker} />
   );
 
   return (

@@ -19,7 +19,11 @@ import { prisma } from "@/lib/prisma";
 
 type Candidate = Awaited<ReturnType<typeof loadEngineeringAgentV22Candidate>>;
 type Snapshot = { runId: string; taskId: string; baseSha: string } | null;
+/** Which read a failure came from, for a log line that names no content. */
+export type EngineeringAgentV22StoredCandidateStage = "authorization" |
+  "patch_read" | "candidate_rebuild" | "base_evidence" | "recheck";
 type Ports = {
+  onStage: (stage: EngineeringAgentV22StoredCandidateStage) => void;
   readSnapshot: (attemptId: string) => Promise<Snapshot>;
   readPatch: typeof readAmuxV22TaskPatchEvidence;
   readConsent: typeof readAmuxV22PublicPrConsent;
@@ -73,6 +77,7 @@ async function readSnapshot(attemptId: string): Promise<Snapshot> {
 }
 
 const livePorts: Ports = {
+  onStage: () => {},
   readSnapshot,
   readPatch: readAmuxV22TaskPatchEvidence,
   readConsent: readAmuxV22PublicPrConsent,
@@ -97,21 +102,26 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
     { ok: false; reason: string }
   > {
   const ports = { ...livePorts, ...given };
+  ports.onStage("authorization");
   const first = await ports.readSnapshot(attemptId);
   if (!first || !ports.publicationEnabled() ||
       !(await ports.readSwitch()) ||
       !(await ports.readConsent(first.taskId)))
     return { ok: false, reason: "publication_not_authorized" };
+  ports.onStage("patch_read");
   const patch = await ports.readPatch(attemptId, first.taskId);
   if (!patch || patch.baseSha !== first.baseSha)
     return { ok: false, reason: "patch_unavailable" };
   // Evidence over the sidecar's file limits carries the patch text only; the
   // loader then rebuilds the changed files from the pinned base blobs.
+  ports.onStage("candidate_rebuild");
   const candidate = await ports.loadCandidate(patch.files ?
     { baseSha: first.baseSha, files: patch.files } :
     { baseSha: first.baseSha, patchText: patch.text });
   if (!candidate.ok) return { ok: false, reason: candidate.reason };
+  ports.onStage("base_evidence");
   const tierEvidence = await ports.readTier(candidate);
+  ports.onStage("recheck");
   const current = await ports.readSnapshot(attemptId);
   if (!current || current.runId !== first.runId ||
       current.taskId !== first.taskId || current.baseSha !== first.baseSha ||

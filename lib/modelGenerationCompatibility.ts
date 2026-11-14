@@ -16,9 +16,23 @@ export const GEMINI_STRICT_GENERATION_MODEL_IDS = new Set([
   "gemini-flash-lite-latest",
 ]);
 
+type GenerationModel = Pick<AiModel, "id" | "provider" | "reasoning" | "apiModel">;
+
 export const getModelProviderOptions = (
-  model: Pick<AiModel, "id" | "provider" | "reasoning">
+  model: GenerationModel
 ): ProviderOptions | undefined => {
+  // M3.1 Flash always thinks and defaults to max effort if omitted. Honour
+  // the catalogue effort so a short answer budget is not all spent thinking.
+  // Match the upstream ID: a stable Tomverse ID can be remapped in Admin.
+  if (model.provider === "minimax" && model.apiModel?.toLowerCase() === "minimax-m3.1-flash") {
+    return {
+      anthropic: {
+        thinking: { type: "adaptive" },
+        effort: model.reasoning === "none" ? "low" : model.reasoning ?? "medium",
+      },
+    };
+  }
+
   if (model.reasoning === undefined) {
     return undefined;
   }
@@ -35,8 +49,7 @@ export const getModelProviderOptions = (
   if (model.provider === "minimax") {
     return {
       anthropic: {
-        // MiniMax supports adaptive thinking on its Anthropic-compatible
-        // endpoint, but not Anthropic's separate `effort` field.
+        // M3 supports adaptive thinking, but only M3.1 Flash accepts effort.
         thinking: { type: "adaptive" },
       },
     };
@@ -91,7 +104,7 @@ export const mergeProviderOptions = (
 };
 
 export const getModelGenerationSettings = (
-  model: Pick<AiModel, "id" | "provider" | "reasoning">,
+  model: GenerationModel,
   options?: {
     temperature?: number;
     /**

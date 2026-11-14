@@ -5,9 +5,11 @@ import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { dmKeyPeriodOf, dmOptionSetDigest, dmRequestDigestKey } from "@/lib/amux/decisionMakerBodyCore";
-import { dmInstanceForProvider, routeDmQuestion } from "@/lib/amux/decisionMakerCore";
+import { DM_TERMS_FIXED_TEXT_ONLY_ENV, dmInstanceForProvider, dmTermsFixedTextOnlyEnabled,
+  routeDmQuestion } from "@/lib/amux/decisionMakerCore";
 import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
+  DM_CLOSING_EVENT_KINDS,
   DM_ROUTING_BINDING_KEYS,
   DM_STALE_CLOSE_AFTER_MS,
   DM_VALIDATION_LATCH_WINDOW,
@@ -424,6 +426,28 @@ export async function countOpenDecisionMakerRequestsCreatedBetween(
 }
 
 /**
+ * When the newest request created after `afterMs` (epoch milliseconds) was
+ * created, or null when there is none, in one statement. The relay heartbeat
+ * reads it to tell a relay that is asked from one that is silent.
+ */
+export async function readNewestDecisionMakerRequestCreatedAfter(
+  client: LedgerReader,
+  afterMs: number,
+): Promise<Date | null> {
+  if (!Number.isSafeInteger(afterMs) || afterMs < 0) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  const rows = await client.$queryRaw<Array<{ createdAt: Date }>>`
+    SELECT r."createdAt" AS "createdAt"
+    FROM "AmuxDecisionMakerRequest" r
+    WHERE r."createdAt" > 'epoch'::timestamptz + ${afterMs} * INTERVAL '1 millisecond'
+    ORDER BY r."createdAt" DESC
+    LIMIT 1
+  `;
+  return rows[0]?.createdAt ?? null;
+}
+
+/**
  * Requests routed to a DM that no closing event has closed and that are at
  * least 720 hours old by the database clock -- the ones §10's stale close
  * applies to -- oldest first, at most `limit` (1 to 100), in one statement.
@@ -702,7 +726,11 @@ export async function recordDecisionMakerRequest(
       r."askingProvider", r."optionSetDigest", r."termListVersion", r."classificationVersion", r."scannerVersion",
       r."route", r."instance", r."refusalCodes",
       floor(extract(epoch FROM r."createdAt") * 1000)::bigint AS "createdAtEpochMs",
-      floor(extract(epoch FROM r."assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs"
+      floor(extract(epoch FROM r."assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs",
+      -- AMUXFLOW/B2: a card the app filed itself, proven by the owner
+      -- settlement row that recorded this local card (no extra statement).
+      EXISTS (SELECT 1 FROM "AmuxDmOwnerSettlement" s
+        WHERE s."localCardId" = ${binding.cardId}) AS "appFiledCard"
     FROM (SELECT 1) AS "probe"
     LEFT JOIN "AmuxDecisionMakerRequest" r
       ON r."cardId" = ${binding.cardId} AND r."questionRevision" = ${binding.questionRevision}
@@ -752,11 +780,16 @@ export async function recordDecisionMakerRequest(
     // §5, §8: an owed latch is the instance off -- the question goes to the operator.
     routingSwitches = dmSwitchInputWithOwedLatch(routingSwitches, owedLatch(switches, instance, load) !== null);
   }
+  // AMUXFLOW/B2: the evidence markers count only on a card the app filed
+  // itself (the routing read above found its settlement row).
+  const evidenceTermsExempt = dmTermsFixedTextOnlyEnabled(process.env[DM_TERMS_FIXED_TEXT_ONLY_ENV]) &&
+    found.appFiledCard === true;
   const decision = routeDmQuestion({
     ...routingSwitches,
     card,
     askingProvider: binding.askingProvider,
     throughput,
+    evidenceTermsExempt,
   });
   const requestId = randomUUID();
   const optionSetDigest = dmOptionSetDigest(dmRequestDigestKey(periodKey, requestId), card.options);
@@ -1282,6 +1315,30 @@ export async function readNextDecisionMakerOpenProposal(
   if (id === undefined) return null;
   if (!isDmRequestId(id)) throw new DecisionMakerRequestWriteError("state_unreadable");
   return id;
+}
+
+/**
+ * The owner queue's Decision Maker column: the newest request of each given
+ * card with its terminal result kind, and whether a person (or the router)
+ * has judged it. One statement.
+ */
+export async function readNewestDecisionMakerRequestPerCard(
+  client: LedgerReader,
+  cardIds: readonly string[],
+): Promise<Array<{ id: string; cardId: string; resultKind: string | null; judged: boolean }>> {
+  if (cardIds.length === 0) return [];
+  const ids = [...cardIds];
+  const closing = [...DM_CLOSING_EVENT_KINDS];
+  return client.$queryRaw<Array<{ id: string; cardId: string; resultKind: string | null; judged: boolean }>>`
+    SELECT DISTINCT ON (q."cardId") q."id", q."cardId",
+      (SELECT ev."resultKind" FROM "AmuxDecisionMakerRequestEvent" ev
+        WHERE ev."requestId" = q."id" AND ev."kind" = 'result' LIMIT 1) AS "resultKind",
+      (q."route" <> 'dm_proposal' OR EXISTS (SELECT 1 FROM "AmuxDecisionMakerRequestEvent" e
+        WHERE e."requestId" = q."id" AND e."kind" = ANY(${closing}::text[]))) AS "judged"
+    FROM "AmuxDecisionMakerRequest" q
+    WHERE q."cardId" = ANY(${ids}::text[])
+    ORDER BY q."cardId", q."questionRevision" DESC
+  `;
 }
 
 /**

@@ -119,7 +119,7 @@ test("the approved sitemap is the table: every group, entry and tab, in order", 
     ],
     Development: [
       ["amux-backlog", "/admin/amux-backlog", ["ideas", "list", "portfolio"]],
-      ["amux-execution", "/admin/amux-execution", ["cards", "review", "diagnostics"]],
+      ["amux-execution", "/admin/amux-execution", ["cards", "review", "diagnostics", "process-audit"]],
       ["release", "/admin/release", ["qa", "ci"]],
       ["amux-settings", "/admin/amux-settings", ["automatic-admission", "workers", "decision-maker", "analysis"]],
       ["amux-recovery", "/admin/amux-recovery", ["safety", "reservations", "legacy"]],
@@ -618,7 +618,7 @@ test("the Development group holds Ideas, the execution board, Release, AMUX sett
   );
   assert.deepEqual(
     adminNavItemTabs("amux-execution").map((tab) => tab.id),
-    ["cards", "review", "diagnostics"]
+    ["cards", "review", "diagnostics", "process-audit"]
   );
   assert.deepEqual(
     adminNavItemTabs("amux-settings").map((tab) => tab.id),
@@ -874,6 +874,7 @@ test("view roles never promise more than the pages grant, nor hide what they gra
   assert.deepEqual(restrictedTabs, [
     "routing/stats",
     "amux-execution/cards",
+    "amux-execution/process-audit",
     "amux-settings/automatic-admission",
     "amux-settings/analysis",
     "amux-recovery/reservations",

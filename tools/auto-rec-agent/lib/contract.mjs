@@ -15,6 +15,11 @@ export const APP_RESULT_PATH = "/api/internal/auto-router/recommendations/result
 // a legacy router claim that ignores the daily-mode header.
 export const DAILY_APP_CLAIM_PATH = "/api/internal/product-improvements/claim";
 export const DAILY_APP_RESULT_PATH = "/api/internal/product-improvements/result";
+export const DAILY_APP_HALT_PATH = "/api/internal/product-improvements/halt";
+export const DAILY_HALT_REASONS = Object.freeze([
+  "claim_failed", "publish_unknown", "result_unknown", "result_failed", "setup_failed", "agent_error", "timeout",
+  "review_unknown", "lease_expired", "runner_error", "rate_limited", "push_rejected", "push_failed", "pr_failed",
+]);
 export const appRequestHeaders = (secret) => ({
   authorization: `Bearer ${secret}`,
   "content-type": "application/json",
@@ -95,8 +100,6 @@ export const LIMITS = Object.freeze({
   tasksPerDay: 24,
   // Leave five hours inside the unit's 23h bound for the last task and cleanup.
   dailyRunMs: 18 * 60 * 60_000,
-  autoPrWaitMs: 5 * 60_000,
-  autoPrPollMs: 15_000,
   bundleBytes: 50 * 1024 * 1024,
   headerBytes: 256 * 1024,
   instructionChars: 20_000,

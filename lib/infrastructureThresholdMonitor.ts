@@ -9,6 +9,18 @@ import {
   newlyLostAmuxWorkers,
   type AmuxBridgeLiveness,
 } from "@/lib/amux/bridgeLivenessCore";
+import {
+  readAmuxDmRelayLastQuestionAt,
+  readAmuxDmRelayLastSyncAt,
+} from "@/lib/amux/dmRelayHeartbeat";
+import {
+  AMUX_DM_RELAY_REMINDER_MS,
+  AMUX_DM_RELAY_SILENT_MS,
+  amuxDmRelayExpected,
+  judgeAmuxDmRelayLiveness,
+  type AmuxDmRelayLiveness,
+} from "@/lib/amux/dmRelayHeartbeatCore";
+import { readAmuxWorkerBridgeScope } from "@/lib/amux/workerBridgeScope";
 import { planInfrastructureAlerts } from "@/lib/infrastructureAlertPolicy";
 import { getInfrastructureDashboard } from "@/lib/infrastructureMonitoring";
 import { findSilentMarketingPublisherRuns } from "@/lib/marketingPublisherRun";
@@ -116,12 +128,21 @@ const describeLostRuntimes = (
 async function reportAmuxBridgeLiveness(
   now: Date
 ): Promise<{ state: AmuxBridgeLiveness["state"]; notified: boolean }> {
+  const scope = await readAmuxWorkerBridgeScope();
+  if (!scope.listed && scope.reason === "worker_catalog_unavailable") {
+    throw new Error("AMUX bridge watch could not read the worker catalog.");
+  }
+  const expectedWorkers = new Set(scope.listed ? scope.workers.map((worker) => worker.name) : []);
   const leases = await prisma.amuxWorkerRuntime.findMany({
     where: { leaseExpiresAt: { gt: amuxBridgeWatchHorizonStart(now) } },
     select: { workerName: true, leaseExpiresAt: true },
   });
-  // The judgement drops runtimes no bridge runs (AMUX_NON_BRIDGE_WORKERS).
-  const verdict = judgeAmuxBridgeLiveness(leases, now);
+  // A paused, retired or stopped worker is no longer listed by its bridge.
+  // Its old runtime row can remain for 48 hours without being a failed bridge.
+  const verdict = judgeAmuxBridgeLiveness(
+    leases.filter((lease) => expectedWorkers.has(lease.workerName)),
+    now,
+  );
   const previouslyLost = bridgeAlertMemory.__tomverseAmuxBridgeLostWorkers ?? new Set();
   const newlyLost = newlyLostAmuxWorkers(previouslyLost, verdict);
   if (verdict.state !== "lost" && verdict.state !== "live") {
@@ -166,6 +187,69 @@ async function reportAmuxBridgeLiveness(
     },
   });
   bridgeAlertMemory.__tomverseAmuxBridgeLostWorkers = new Set(lostAmuxWorkers(verdict));
+  return { state: verdict.state, notified: report.notified };
+}
+
+/**
+ * The AMUX Decision Maker relay on the Ubuntu host, judged by the last time it
+ * called the app (lib/amux/dmRelayHeartbeatCore.ts,
+ * docs/ops/amux/bridge-monitoring.md §6). Only while the app's DM routes are
+ * open in the production deployment served by the Ubuntu relay. Enabling the
+ * routes in dev or staging alone does not install a relay there; those
+ * environments are not watched and do not report a recovery.
+ *
+ * A dependency status like the bridge watch: the first silent check pages, the
+ * same silence pages again every `AMUX_DM_RELAY_REMINDER_MS`, and the first
+ * check that finds it calling again says it recovered. The message says how
+ * long it has been silent and where to look -- the halt line on the host names
+ * the cause, which the app does not know.
+ */
+async function reportAmuxDmRelayLiveness(
+  now: Date
+): Promise<{ state: AmuxDmRelayLiveness["state"] | "off"; notified: boolean }> {
+  if (!amuxDmRelayExpected()) return { state: "off", notified: false };
+  const lastSyncAt = await readAmuxDmRelayLastSyncAt();
+  // The request ledger is read only when the sync is stale: a relay inside a
+  // question's tick waits for the broker without calling sync.
+  const fresh = judgeAmuxDmRelayLiveness(lastSyncAt, null, now);
+  const verdict =
+    fresh.state === "calling"
+      ? fresh
+      : judgeAmuxDmRelayLiveness(lastSyncAt, await readAmuxDmRelayLastQuestionAt(now), now);
+  // Asking is not evidence either way: reporting it healthy would announce a
+  // recovery for a relay that may have died mid-question. Nothing is reported
+  // until the question's window has passed.
+  if (verdict.state === "asking") return { state: "asking", notified: false };
+  const silentFor =
+    verdict.state !== "silent"
+      ? ""
+      : verdict.lastSyncAt
+        ? `since ${verdict.lastSyncAt.toISOString()} (${verdict.minutesSilent} minutes)`
+        : "since this check started recording";
+  const report = await reportOperationalDependencyStatus({
+    dependency: "amux-dm-relay",
+    healthy: verdict.state === "calling",
+    code: "AMUX_DM_RELAY_SILENT",
+    title: "AMUX Decision Maker relay stopped calling",
+    error:
+      verdict.state === "silent"
+        ? `The Decision Maker relay has not called the app ${silentFor}; ` +
+          `worker questions, result reviews and confirmed answers are not moving. ` +
+          "Read tomverse-amux-dm-relay.service's journal on the Ubuntu host: a halt line " +
+          "names the cause. Restart it only after reading that line."
+        : "The Decision Maker relay is calling.",
+    severity: "error",
+    cooldownMs: AMUX_DM_RELAY_REMINDER_MS,
+    context: {
+      component: "amux-dm-relay",
+      adminPath: "/admin/office",
+      silentAfterMinutes: String(AMUX_DM_RELAY_SILENT_MS / 60_000),
+      lastSyncAt: verdict.lastSyncAt?.toISOString() ?? "never",
+      ...(verdict.state === "silent" && verdict.minutesSilent !== null
+        ? { minutesSilent: String(verdict.minutesSilent) }
+        : {}),
+    },
+  });
   return { state: verdict.state, notified: report.notified };
 }
 
@@ -258,7 +342,25 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
     );
     // A reminder held back by its cooldown was not sent, so it is not counted.
     const bridgeAlerts = amuxBridge === null || amuxBridge.notified ? 1 : 0;
-    const alerts = plan.incidents.length + publisherAlerts + bridgeAlerts;
+    // The same rule again for the Decision Maker relay.
+    const amuxDmRelay = await reportAmuxDmRelayLiveness(now).catch(
+      async (error: unknown) => {
+        console.error("AMUX Decision Maker relay check failed:", error);
+        await reportOperationalIncident({
+          code: "AMUX_DM_RELAY_CHECK_FAILED",
+          title: "The AMUX Decision Maker relay check could not run",
+          error,
+          severity: "error",
+          cooldownMs: 30 * 60 * 1_000,
+          context: { component: "amux-dm-relay" },
+        }).catch((reportError: unknown) => {
+          console.error("Relay-check incident could not be reported:", reportError);
+        });
+        return null;
+      },
+    );
+    const relayAlerts = amuxDmRelay === null || amuxDmRelay.notified ? 1 : 0;
+    const alerts = plan.incidents.length + publisherAlerts + bridgeAlerts + relayAlerts;
     await completeScheduledJob({
       runId: run?.id,
       processedCount: plan.decisions.length,
@@ -269,6 +371,7 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
         statuses: plan.statuses,
         silentPublisherRuns,
         amuxBridge: amuxBridge?.state ?? null,
+        amuxDmRelay: amuxDmRelay?.state ?? null,
       },
     });
     return {

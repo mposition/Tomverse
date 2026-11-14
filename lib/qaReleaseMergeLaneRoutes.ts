@@ -9,6 +9,8 @@ import {
   readQaReleaseMergeLaneState,
   reportQaReleaseMergeResult,
 } from "@/lib/qaReleaseMergeLaneStore";
+import { amuxDmT2MergeEnabled } from "@/lib/amux/dmT2MergeCore";
+import { readAmuxDmT2MergeLanePulls } from "@/lib/amux/dmT2MergeService";
 import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
 import { qaReleaseDeployObservation } from "@/lib/qaReleaseMergeLaneReportCore";
 import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/lib/qaReleaseRouteAuthCore";
@@ -25,7 +27,7 @@ import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/li
  * transaction's last statement checks it on the database clock.
  */
 
-/** One call's budget: above the longest transaction's Prisma limit (40 s), below the service's call timeout. */
+/** One call's budget: above the longest transaction's Prisma limit (46 s, consume), below the service's call timeout. */
 export const QA_RELEASE_MERGE_LANE_CALL_BUDGET_MS = 50_000;
 
 export type QaReleaseMergeLaneAnswer = { status: number; body: Record<string, unknown> };
@@ -37,7 +39,9 @@ const PR = z.number().int().positive().max(1_000_000_000);
 const ATTEMPT = z.string().min(1).max(64);
 
 const issueBody = z.object({ pullRequestNumber: PR, headSha: SHA }).strict();
-const consumeBody = z.object({ attemptId: ATTEMPT, pullRequestNumber: PR, headSha: SHA, base: z.string().min(1).max(255) }).strict();
+const consumeBody = z.object({ attemptId: ATTEMPT, pullRequestNumber: PR, headSha: SHA, base: z.string().min(1).max(255),
+  // A Decision Maker approved pull request's diff digest, read by the lane right before (lib/pullDiffDigestCore.ts).
+  diffDigest: z.string().regex(/^[0-9a-f]{64}$/).optional() }).strict();
 const reportBody = z
   .object({
     attemptId: ATTEMPT,
@@ -133,6 +137,7 @@ export async function handleQaReleaseMergeConsume(request: Request, env: Env = p
       callerRevision: auth.callerRevision,
       request: parsed.data,
       budget: { startedAt, budgetMs: QA_RELEASE_MERGE_LANE_CALL_BUDGET_MS, clock },
+      env,
     });
     return result.consumed ? answer(200, { consumed: true }) : answer(409, { consumed: false, reason: result.reason });
   });
@@ -160,7 +165,8 @@ export async function handleQaReleaseMergeReport(request: Request, env: Env = pr
  * attempt it holds, on the database clock. A read with no write, so it needs
  * no revision -- the calls that write judge the revision themselves.
  */
-export async function handleQaReleaseMergeLaneState(request: Request, env: Env = process.env) {
+export async function handleQaReleaseMergeLaneState(request: Request, env: Env = process.env,
+  deps: Parameters<typeof readAmuxDmT2MergeLanePulls>[1] = {}) {
   const auth = authenticate(request, env);
   if (!auth) return answer(401, { error: "unauthorized" });
   return guarded(async () => {
@@ -168,6 +174,12 @@ export async function handleQaReleaseMergeLaneState(request: Request, env: Env =
     const priority = await readCiAdmissionAdminView()
       .then((view) => view.state.queue.map((entry) => entry.number))
       .catch(() => [] as number[]);
-    return answer(200, { ...(await readQaReleaseMergeLaneState()), priority });
+    // Owner decision 2026-11-13 (develop only, TOMVERSE_AMUX_DM_T2_MERGE): the
+    // engineering pull requests the Decision Maker approved, their conditions
+    // and their current GitHub diff and files read again now. Unread, none:
+    // every `agent` branch stays a person's.
+    const dmApproved = amuxDmT2MergeEnabled(env)
+      ? { dmApproved: await readAmuxDmT2MergeLanePulls(env, deps).catch(() => []) } : {};
+    return answer(200, { ...(await readQaReleaseMergeLaneState()), priority, ...dmApproved });
   });
 }

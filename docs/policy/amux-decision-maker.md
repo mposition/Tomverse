@@ -75,6 +75,44 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    형식 불일치는 지금처럼 review(그리고 2의 결과 검토)로 간다. 적용은 해시 체인 시스템 감사로 남는다.
 4. **사람에게 남는 것.** 실제 돈이 나가는 새 유료 호출 승인과 한도 상향, 외부 게시와 발송, 사용자 데이터 삭제,
    자격증명과 보안 경계, production 병합과 배포. DM은 이것들의 승인자가 아니다.
+5. **운영자 확인 대기의 정리 (운영자 결정 2026-11-13).** 채팅 원문: "develop 병합 권한은 DM에게 승인합니다. main은
+   안됩니다.", "1~4까지 DM에게 자동으로 하도록 승인합니다." 운영자 확인 대기(Admin 운영자 확인 대기)의 카드도 DM에 올린다.
+   S1(이 절이 들어간 변경)은 다른 DM 경로가 맡지 않는 멈춘 v22 Task를 §2-11의 정리 카드로 올리고, DM이 고른 되돌릴 수
+   있는 정리(`retry`·`complete`·`close`·`remake`)를 DM 승인자(1)가 켜져 있을 때 앱이 적용한다. 검토 PR(`t2_pr`)의
+   `approve`는 적용하지 않고 승인 사실만 기록한다. 카드를 올리는 것이 유료 DM 호출을 부르므로
+   `TOMVERSE_AMUX_DM_OWNER_SETTLEMENT=enabled`(기본 꺼짐)를 켜는 것은 운영자 몫이다. 가격·크레딧·migration·삭제·인증·감사
+   체인 경로와 병합 레인 게이트 파일, main 병합과 배포는 사람에게 남는다. S2(`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본
+   꺼짐): 기록된 `approve`를 쓸 때마다 binding이 열려 있고 head·diff digest가 승인 때와 같고 base가 develop이고 Task가
+   review인지 다시 읽는다. 자동 병합은 **변경 파일이 모두 허용 목록 안에 있을 때만** 한다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`:
+   `tests/**`, `docs/**`, `locales/**`, `components/**`, `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`; 그
+   가운데 `docs/policy/**`·`docs/ui-contracts/**`·`docs/agents/**`·`app/api/**`, 엔지니어링 에이전트 권한 manifest의
+   control-plane 경로, 정책 테스트, 레인 게이트 파일과 되돌릴 수 없는 경로는 제외). 하나라도 밖이면 사람에게 남는다. 스위치가
+   켜져 있으면 승인을 기록하는 순간 patch의 경로를 판정해, 허용 목록 밖의 경로가 있거나 경로를 읽지 못하면 승인 대신
+   handoff(`outside_dm_merge_allowlist`·`paths_unreadable`)를 남긴다. 앱은 CI 입장 round가
+   한 번 돌 때마다 승인된 검토 초안 하나를 GitHub에서 다시 읽어(CI 입장 App으로 단계·head, 엔지니어링 읽기 토큰으로 diff와
+   파일 목록) 대기열의 draft가 runner를 기다리지 않고 그 CI가 통째로 들어갈 때만, 해시 체인 감사를 먼저 남기고 ready로
+   바꾼다. 쓰기 결과를 모르면 그 round에 다시 쓰지 않고 다음 round가 PR을 읽고 판단한다. **DM ready는
+   사람 ready와 같다**: PR은 CI 입장 대기열 밖에 있고 아무것도 예약하지 않으며, 그 CI는 다른 workflow로 계산된다. 대기열에
+   지금 여유가 있을 때만 하고, 앞선 DM ready의 CI가 GitHub에 아직 보이지 않으면(ready 감사 기록 뒤 10분까지) 다음 ready를
+   하지 않는다. **넘침은 PR 한 건으로 묶인다.**
+   **fork PR은 제외한다**: CI 입장 App과 엔지니어링 읽기 토큰이 보여 주는 head 저장소가 base 저장소와 다르면 ready로 바꾸지
+   않고 레인 목록에도 싣지 않는다. 앱은 레인의 상태
+   읽기마다 가장 오래 확인하지 않은 승인 **한 건**만 골라 방문을 기록하고, 그 PR의 현재 diff와 파일 목록을 GitHub에서 다시 읽어
+   digest가 `approvedDiffDigest`와 같고 파일이 모두 허용 목록 안일 때만 싣는다(읽지 못하거나 다르면 싣지 않고, 그 승인은 차례를
+   쓴 것으로 본다). 레인은 승인된 head를 `sha`로 고정해 병합한다. 병합 레인은 앱이 넘긴 목록의 PR만
+   `agent` 브랜치 제외의 예외로 받고(`docs/policy/qa-release-agent.md` 8절 3항), observer는 그 레인의 병합을 두 번째 승인
+   근거(`dm_approval`, `docs/policy/engineering-agent.md` §9-10)로 판정한다. **대상은 develop뿐이고 main은 제외다.** S3(구현 완료):
+   사람에게 남는 카드(DM이 `irreversible`로 표시한 제안, 승인자 스위치가 꺼져 있을 때의 제안, handoff된 정리 행)에 DM의 상태를 붙인다.
+   `GET /api/admin/amux/owner-queue`는 카드마다 그 escalation의 `AmuxDmOwnerSettlement`(state, decision, handoffReason)와
+   DM 카드의 상태를 `readAmuxDmLocalCardState`로 읽어 싣는다(`ops:write`가 없으면 제안 본문은 `restricted`, 읽지 못한 카드는 그
+   카드만 `unread`·`unavailable`). 운영자 확인 대기 카드는 제안과 근거, 되돌릴 수 없다는 표시, §6 snapshot을 보이고, 정리 행이
+   열려 있고 handoff되지 않았고 답이 그 종류의 고정 단어일 때만 "이대로 확인"을 낸다. 이 버튼은 새 쓰기 route 없이 기존
+   `POST /api/admin/amux/decision-maker/judgments`(`ops:write`, 최근 재인증)를 쓰고, 적용은 S1의 `dm_confirmed` walk가 한다.
+   DM이 아직 답하지 않았으면 "검토 중", handoff된 행이면 사유를 문장으로 보인다. 기존 legacy-card 패널은 그대로다.
+   운영자 결정 2026-11-14("DM 의견이 없으면 'DM으로 의견 요청 보내기' 버튼을 제공합니다"): 스위치가 꺼져 있어도 운영자가
+   운영자 확인 대기의 'DM 의견 요청' 버튼으로 카드 하나를 고르면 그 정리만 올린다(누른 사람의 감사 기록
+   `amux.dm_owner_settlement.requested`). 근거를 한 번 읽지 못한(`evidence_unavailable`) 결과 검토·정리는 같은 칸의 'DM에 다시
+   보내기'로 다시 대기에 넣는다. 답은 그대로 제안이고 운영자가 확정한다.
 
 ## 1. 목적과 경계
 
@@ -153,7 +191,35 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     열린 질문이 없어도 운영자는 같은 패널에서 남은 카드를 직접 닫을 수 있다(운영자 결정 2026-11-06). 대상 판정은 질문과
     같고 하루 한도와 유지·취소 뒤 다시 묻지 않는 기간만 적용하지 않는다. owner 출처 질문 행을 만들어 같은 트랜잭션에서
     `close`로 답하므로 카드·escalation 정리와 사람 감사(`direct: true`)가 위 적용 경로를 그대로 탄다. DM을 부르지 않으므로
-    스위치와 무관하게 보이며, 그 행은 하루 한도에 세지 않는다.
+    스위치와 무관하게 보이며, 그 행은 하루 한도에 세지 않는다. archive된 카드(`archivedAt`)는 보드를 떠난 카드라 판정(진행
+    중·배정·질문·다른 아이디어의 의존 카드)에도 닫는 대상에도 들지 않고 그대로 남는다(2026-11-14). 멈춘 앞 카드를 archive하고
+    다시 만든 아이디어의 남은 backlog 카드도 이 경로로 닫는다.
+11. **운영자 확인 대기의 멈춘 Task (운영자 결정 2026-11-13, §0a-5).** worker가 묻는 것이 아니라 relay의 sync가 찾는다.
+    대상은 archive되지 않은 `admin-idea-v4` v22 Task(receipt·역할·grade가 있는 것) 가운데 `review`·`blocked`이고 열린
+    human escalation이 있으며 실행 중인 것이 없는 Task다. 결과 검토(§0a-2)가 열려 있거나 그 실행에서 DM이 `block`한 Task,
+    v22 worker 질문(8)이 기다리는 Task, 그 아이디어에 계획 거부(9)나 남은 카드 닫기 질문(10)이 열린 Task는 제외한다. 엔지니어링
+    쪽 작업이 남은 Task(진행 중인 publish·정리 항목, 열린 T2 초안·결정·불일치)와 publisher가 draft로 연 검토 PR이 아닌 열린 PR이
+    있는 Task(merge observer 경로)도 제외한다. escalation 하나에 `AmuxDmOwnerSettlement` 행 하나이고(행 id는 escalation에서
+    유도한 version 8 UUID), tick마다 새 행 3건, 카드 3장까지다. 카드는 8과 같은 형식이며 세션 이름은 `amux-owner-settlement`,
+    provider는 `claude`다. 고정 영어 문장과 증거(표시 번호와 제목, 역할과 grade, 멈춘 사유의 고정 문장, 승인된 완료 조건,
+    실행 결과, 검토 서버 거절 횟수, 같은 부모의 형제 카드와 이 카드에 의존하는지)로 만든다. 검토 서버 거절의 findings는 앱에
+    저장되지 않으므로 싣지 않는다. 검토 PR이면 PR 번호, 파일 목록 전체, 들어가는 만큼의 파일 diff(통째로)와 빠진 수를 싣는다.
+    증거를 읽을 수 없거나 카드 한 장(2,000자)에 통째로 들어가지 않으면 DM에 올리지 않고 사람에게 넘긴다(`evidence_unavailable`).
+    선택지는 멈춘 Task가 `retry`(시도 예산 안에서 `todo`, 넘으면 사람에게)·`complete`(done, `v4TerminalAt`)·`close`(archive)·
+    `remake`(자유 텍스트로 첫 줄 `remake`, 그다음 새 아이디어), 검토 PR이 `approve`·`retry`·`close`다. `remake`는 세 단계다.
+    먼저 요청을 붙잡은 트랜잭션(DM 승인자의 선점, 또는 운영자 확정 뒤) 안에서 감사 체인 잠금과 kill switch 아래 행을 `claimed`로
+    바꾸고 아이디어 요청 id를 적는다. 사람이 먼저 판정했거나 kill switch가 켜져 있으면 여기서 멈추고 아이디어는 접수되지 않는다.
+    다음으로 새 아이디어를 세션 접수(`submitAmuxIdeaFromSession`)로 접수한다(접수의 입력 검사와 분석 예산을 그대로 거친다).
+    접수의 커밋 트랜잭션 안에서 아이디어와 분석 예약을 쓰기 전에 guard가 감사 체인 잠금, kill switch, 선점 행과 카드의 잠금,
+    같은 판정 함수로 Task가 움직였는지를 다시 확인하고, 통과하면 같은 트랜잭션에서 선점 행에 아이디어 id를 적는다. Task가
+    움직였으면 선점을 취소하고, kill switch가 켜졌거나 카드를 다른 writer가 잡고 있으면 사람에게 넘긴다. 어느 쪽도 아이디어를
+    쓰지 않는다. 접수가 거절되면 사람에게 넘기고, 결과를 모르면 같은 요청 id로 한 번 다시 읽어 없으면 사람에게 넘긴다. 다시
+    접수하지 않는다. 끝으로 이 카드와 같은 부모 아래 이 카드에 (직간접으로) 의존하며 시작하지
+    않은 카드를 한 트랜잭션에서 archive한다. 끝나지 않은 선점은 다음 tick이 다시 읽기만으로 마치거나 사람에게 넘긴다. `approve`는 binding id와 그 binding의 `verifiedHeadSha`·`snapshot.diffDigest`, 요청 id,
+    결정 시각을 행에 기록할 뿐 Task와 escalation은 그대로 둔다. 적용은 시스템 주체로 해시 체인 감사 한 건을 남기고, 운영자의
+    unknown usage 수락은 하지 않는다. Task가 움직였거나(상태, 새 실행, archive) 사람이 escalation을 해결했으면 행은 취소된다.
+    그 밖의 답은 사람에게 넘긴다. 1~6은 위와 같고, 7은 8처럼 다르다. 확정 답(`dm_confirmed`)과 DM 승인자의 답(`dm`)을 같은
+    적용 함수가 쓴다. 꺼도 이미 열린 행의 취소와 카드 닫기, 답 적용은 그대로다.
 
 ## 3. 라우팅 — 앱 route의 결정적 판정
 
@@ -163,7 +229,10 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
 1. 전체 kill switch가 켜짐, 배정될 인스턴스 스위치가 `off`, 설정을 읽지 못함.
 2. `ask_type`이 허용된 여섯(§0-1) 밖. `customer_outbound`도 여기다.
 3. 되돌릴 수 없는 행위 용어 목록에 걸림. 판정 입력은 카드의 type·tag·제목·질문·선택지·해제 조건·worker가
-   적은 맥락. 아래가 v1 목록이며 바꾸려면 운영자 승인(대화 한 줄, PR에 기록)이 필요하다: main 병합, ship·release·배포·production,
+   적은 맥락. 운영자 결정 2026-11-14(AMUXFLOW/B2): `TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY=enabled`이면 앱이 직접 만든
+   owner settlement 카드(그 local card를 기록한 `AmuxDmOwnerSettlement` 행이 있는 카드)가 `[evidence]`…`[/evidence]`로 감싼
+   증거(실행 결과, diff)는 용어 판정에서 뺀다. worker 카드의 표식은 보통 글자로 읽는다. 닫히지 않은 표식은 빼지 않고, secret 검사는
+   카드 전체에 그대로 적용한다. 기본은 꺼짐이다. 아래가 v1 목록이며 바꾸려면 운영자 승인(대화 한 줄, PR에 기록)이 필요하다: main 병합, ship·release·배포·production,
    삭제·delete·drop·truncate·덮어쓰기, migration, 결제·환불·청구, 외부 게시·발송·연락, secret·token·
    password·API key의 제공, 권한·접근 설정 변경, 정책·workflow·branch protection 변경. 정확한 대소문자·
    어형 규칙과 검사 문자열은 S1의 테스트 고정값이 정한다.

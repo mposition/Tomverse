@@ -541,9 +541,10 @@ export const AMUX_DB_BOUNDARIES = {
   // the open question of its card + the open refusal of its card + the open
   // idea card close question of its card + result detail + bodies + fence.
   // + the open v22 result review of its card (owner decision 2026-11-07).
+  // + the open owner queue settlement of its card (owner decision 2026-11-13).
   decisionMakerV22QuestionResolve: {
     operation: "decision_maker_v22_question_resolve",
-    prismaCallCeiling: 11,
+    prismaCallCeiling: 12,
     isolation: "read",
   },
   // Answer: setup + audit chain lock + switches + the locked question, Task
@@ -616,13 +617,85 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 8,
     isolation: "mutation",
   },
+  // A stopped v22 Task in the owner queue put to the Decision Maker (owner
+  // decision 2026-11-13, lib/amux/dmOwnerSettlementService.ts), each within
+  // the same 12 statements. Sync: setup + the facts of open and claimed
+  // settlements + the cancel of those whose Task moved + the candidate scan +
+  // the insert + pending + their sibling cards + their pull request evidence +
+  // closing + fence.
+  decisionMakerOwnerSettlementSync: {
+    operation: "decision_maker_owner_settlement_sync",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
+  // Hand off (unfilable evidence, or an answer that decides nothing): setup +
+  // audit chain lock + settlement + canonical audit 4 + fence.
+  decisionMakerOwnerSettlementHandoff: {
+    operation: "decision_maker_owner_settlement_handoff",
+    prismaCallCeiling: 8,
+    isolation: "mutation",
+  },
+  // Apply: setup + audit chain lock + switches + the locked settlement and card
+  // + the approval read, or the card write and the escalation write + the
+  // settlement + canonical audit 4 + fence. A remake's claim and its close of
+  // the cards once the idea is filed take the same.
+  decisionMakerOwnerSettlementApply: {
+    operation: "decision_maker_owner_settlement_apply",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
+  // The settlements of the owner queue's cards, for each card's Decision Maker
+  // area (lib/amux/ownerQueueDmRead.ts): setup + ONE statement + fence, pinned
+  // by tests/server-contract/amux-owner-queue-dm-read.test.ts.
+  ownerQueueSettlementRead: {
+    operation: "owner_queue_settlement_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // The one remake claim an earlier tick left unfinished: setup + the claim +
+  // fence. A remake's idea is guarded inside the idea intake's own commit
+  // transaction, which is not an AMUX boundary (ideaSessionSubmissionService.ts).
+  decisionMakerOwnerSettlementRemakeRead: {
+    operation: "decision_maker_owner_settlement_remake_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // A Decision Maker approved review pull request merged into develop (owner
+  // decision 2026-11-13, lib/amux/dmT2MergeService.ts). The lane's list:
+  // setup + switches + the approvals + their visit + fence.
+  dmT2MergeLaneRead: {
+    operation: "dm_t2_merge_lane_read",
+    prismaCallCeiling: 5,
+    isolation: "mutation",
+  },
+  // The observer's read of a merged one: setup + the approval and lane facts + fence.
+  dmT2MergeObservedRead: {
+    operation: "dm_t2_merge_observed_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // The next one to mark ready: setup + the recent readies' audits + the
+  // switches + the approvals + its visit + fence.
+  dmT2MergeReadyPick: {
+    operation: "dm_t2_merge_ready_pick",
+    prismaCallCeiling: 6,
+    isolation: "mutation",
+  },
+  // Its audit before the write: setup + audit chain lock + switches + the
+  // approval read again + canonical audit 4 + fence.
+  dmT2MergeReadyRecord: {
+    operation: "dm_t2_merge_ready_record",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // The Decision Maker as the approver (TOMVERSE_AMUX_DM_APPROVER), its read:
-  // setup + switches + the open app-answered cards + the next open proposal
-  // among them + request state + result detail + bodies + the open refusal of
-  // its card + fence. The apply then takes the question type's own boundary.
+  // setup + switches + the open app-answered cards + the settlements and
+  // result reviews among them the owner sent (owner decision 2026-11-14) + the next open
+  // proposal among them + request state + result detail + bodies + the open
+  // refusal of its card + fence. The apply then takes the question type's own boundary.
   decisionMakerAutoApplyRead: {
     operation: "decision_maker_auto_apply_read",
-    prismaCallCeiling: 9,
+    prismaCallCeiling: 10,
     isolation: "read",
   },
   // The approver's one transaction: setup + the request store's direct-answer

@@ -155,6 +155,9 @@ const CONTROL_PLANE_PATTERNS = [
   "tests/client/marketingAgentScreensRender.test.tsx",
   // §4-4: the whole AMUX execution control plane, and its tests.
   "lib/amux/**",
+  // The AMUX process analysis agent (owner request 2026-11-14): its box runner's
+  // routes, claim and the prompt it builds.
+  "lib/amuxProcessAudit*",
   "crates/**",
   "apps/**",
   "app/api/internal/**",

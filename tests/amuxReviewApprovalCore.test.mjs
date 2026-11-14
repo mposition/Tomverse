@@ -17,6 +17,7 @@ import {
   amuxReviewPublicationMayOpenPr,
   amuxReviewTargetStatus,
   amuxV22NoChangeCompletionAllowed,
+  amuxV22UnpublishedPatchNotice,
   amuxV22PrlessReviewRetryAllowed,
   amuxV22ReviewRetryHasVerifiedOutcome,
   amuxV4ReviewEvidenceMatches,
@@ -374,8 +375,15 @@ test("publication that has opened or may still open the PR holds the retry", () 
 
 test("an implement Task that left no change may be completed as no change needed", () => {
   // AMUX-ARTFMT-002 (owner decision 2026-11-11): the change was already there.
-  const noChange = { ...prlessImplement, taskRole: "implement" };
+  const noChange = { ...prlessImplement, taskRole: "implement",
+    patchStored: false };
   assert.equal(amuxV22NoChangeCompletionAllowed(noChange), true);
+  // A stored patch is a change: it is never closed as "no change needed"
+  // (AMUX-FILEGEN2-002), though the PR-less retry stays open for it.
+  assert.equal(amuxV22NoChangeCompletionAllowed({ ...noChange,
+    patchStored: true }), false);
+  assert.equal(amuxV22PrlessReviewRetryAllowed({ ...noChange,
+    patchStored: true }), true);
   for (const [field, value] of [
     ["taskRole", "design"], ["taskRole", "test"], ["taskRole", null],
     ["sourceSystem", "legacy"], ["cardType", "idea"], ["reviewPrNumber", 3501],
@@ -485,4 +493,24 @@ test("the decision hold names what keeps every outcome closed, first cause first
     "escalation_closed");
   assert.equal(amuxReviewDecisionHold({ ...open, taskStatus: "todo" }), "task_status");
   assert.equal(amuxReviewDecisionHold({ ...open, taskStatus: "review" }), "review_attempt_mismatch");
+});
+
+test("the unpublished-patch notice reads the run's binding, not the card's PR number", () => {
+  // A v22 implement Task keeps reviewPrNumber null while its PR is open on
+  // the run's binding (reviewPullRequest.ts); only a patch no PR carries,
+  // open, merged or still pending, has not reached develop (AMUX-FILEGEN2-002).
+  const base = { patchStored: true, publicationMayOpenPr: false, run: { bindings: [] } };
+  assert.deepEqual(amuxV22UnpublishedPatchNotice(base), { publication_run_missing: false });
+  assert.deepEqual(amuxV22UnpublishedPatchNotice({ ...base, run: null }),
+    { publication_run_missing: true });
+  assert.equal(amuxV22UnpublishedPatchNotice({ ...base, patchStored: false }), null);
+  assert.equal(amuxV22UnpublishedPatchNotice({ ...base, publicationMayOpenPr: true }), null);
+  assert.equal(amuxV22UnpublishedPatchNotice({ ...base, run: { bindings: [
+    { state: "open", mergeObservation: null }] } }), null);
+  assert.equal(amuxV22UnpublishedPatchNotice({ ...base, run: { bindings: [
+    { state: "closed", mergeObservation: { merged: true } }] } }), null);
+  // A PR closed unmerged carries nothing.
+  assert.deepEqual(amuxV22UnpublishedPatchNotice({ ...base, run: { bindings: [
+    { state: "closed", mergeObservation: { merged: false } }] } }),
+  { publication_run_missing: false });
 });

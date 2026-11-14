@@ -54,6 +54,7 @@
     "build:amux-v4-analysis-agent-once": "esbuild scripts/amux-v4-analysis-agent-once.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-analysis-agent-once.mjs",
     "build:amux-v19-session-queue-once": "esbuild scripts/amux-v19-session-queue-once.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v19-session-queue-once.mjs",
     "build:amux-v19-max-session-queue-once": "esbuild scripts/amux-v19-max-session-queue-once.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v19-max-session-queue-once.mjs",
+    "build:amux-process-audit-box": "esbuild scripts/amux-process-audit-runner.mjs --bundle --platform=node --format=esm --target=node22 --outdir=.next/amux-process-audit-box --out-extension:.js=.mjs",
     "build:marketing-generator-box": "esbuild scripts/marketing-generator-service.mjs scripts/marketing-generator-worker.mjs scripts/marketing-ai-visibility-worker.mjs --bundle --platform=node --format=esm --target=node22 --outdir=.next/marketing-generator-box --out-extension:.js=.mjs",
     "build:amux-v22-task-sidecar": "esbuild scripts/amux-v22-task-sidecar.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v22-task-sidecar.mjs",
     "build:amux-v22-read-only-api-sidecar": "esbuild scripts/amux-v22-read-only-api-sidecar.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v22-read-only-api-sidecar.mjs",
@@ -385,6 +386,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.96",
     "@ai-sdk/google": "^4.0.111",
+    "@ai-sdk/mistral": "4.0.79",
     "@ai-sdk/moonshotai": "^3.0.84",
     "@ai-sdk/openai": "^4.0.108",
     "@auth/prisma-adapter": "^2.11.3",

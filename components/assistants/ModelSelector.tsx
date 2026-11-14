@@ -75,6 +75,7 @@ export function ModelSelector({
     onChange,
     t,
     testIdPrefix = "assistant",
+    maxModels = ASSISTANT_PROFILE_LIMITS.maxModels,
 }: {
     label: string;
     hint: string;
@@ -84,8 +85,15 @@ export function ModelSelector({
     onChange: (next: string[]) => void;
     t: (key: string) => string;
     testIdPrefix?: string;
+    /**
+     * The ceiling for this screen, never above the profile's own. One for a
+     * create started in single-model Chat, where ticking another model
+     * replaces the current one rather than being refused.
+     */
+    maxModels?: number;
 }) {
-    const atLimit = selected.length >= ASSISTANT_PROFILE_LIMITS.maxModels;
+    const singleChoice = maxModels === 1;
+    const atLimit = selected.length >= maxModels;
     const modeName = useId();
     const options = modelSelectorOptions(useModelCatalog(), selected);
     return (
@@ -129,7 +137,7 @@ export function ModelSelector({
                 <div className="ml-6 flex flex-col gap-2">
                     <p className="text-xs text-zinc-500">
                         {interpolate(t("assistantProfiles.modelsLimitHint"), {
-                            max: ASSISTANT_PROFILE_LIMITS.maxModels,
+                            max: maxModels,
                         })}
                     </p>
                     {options.map((model) => {
@@ -151,14 +159,18 @@ export function ModelSelector({
                                     // who ticks one model too many should
                                     // find out here rather than discover
                                     // later that one of their choices went
-                                    // missing.
+                                    // missing. A single choice has nothing to
+                                    // drop: the new tick is the whole answer.
                                     disabled={
-                                        isLastSelected || (!checked && atLimit)
+                                        isLastSelected ||
+                                        (!checked && atLimit && !singleChoice)
                                     }
                                     onChange={(event) =>
                                         onChange(
                                             event.target.checked
-                                                ? [...selected, model.id]
+                                                ? singleChoice
+                                                    ? [model.id]
+                                                    : [...selected, model.id]
                                                 : selected.filter(
                                                       (id) => id !== model.id
                                                   )

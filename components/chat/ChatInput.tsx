@@ -261,7 +261,7 @@ export function ChatInputWebSearchChipView({
       data-tone={tone}
       data-supported-count={isAutoMode ? undefined : state.supportedCount}
       data-unsupported-count={isAutoMode ? undefined : state.unsupportedCount}
-      className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold max-[360px]:gap-1 max-[360px]:pl-2 max-[360px]:pr-0.5 ${isMobileShell ? "min-h-8" : "min-h-9"} ${
+      className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold max-[360px]:gap-1 max-[360px]:pl-2 max-[360px]:pr-0.5 ${isMobileShell ? "min-h-8 shrink-0" : "min-h-9"} ${
         tone === "blocked"
           ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
           : tone === "warning"
@@ -4589,7 +4589,7 @@ export function ChatInput({
                   */}
                   <div className="mt-1 flex flex-col gap-1 border-t border-zinc-200 pt-2 dark:border-zinc-800">
                     <Link
-                      href={assistantProfileCreateHref({ fromChat: true })}
+                      href={assistantProfileCreateHref({ from: currentProduct ?? "review" })}
                       data-testid="assistant-create-cta"
                       onClick={() => closeMenu(false)}
                       className={`flex w-full items-center gap-3 rounded-xl px-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-assistant-profile-500 ${

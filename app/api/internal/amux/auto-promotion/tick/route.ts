@@ -7,19 +7,26 @@ import {
   AUTO_PROMOTION_APPLY_ENV,
   AUTO_PROMOTION_CODE_LATCH,
   AUTO_TICK_ROUTE_BUDGET_MS,
+  AUTO_TICK_TRANSACTION_MAX_MS,
   autoPromotionApplyPermitted,
   autoTickHttpStatus,
 } from "@/lib/amux/autoPromotionCore";
 import { tickAutoPromotion } from "@/lib/amux/autoPromotionService";
-import { AMUX_V22_AUTO_PROMOTION_ENV,
-  amuxV22AutoPromotionEnabled } from "@/lib/amux/v22AutoPromotionCore";
+import { BoardImportError } from "@/lib/amux/boardImportCore";
+import { AMUX_V22_AUTO_PROMOTION_ENV, AMUX_V22_PROMOTIONS_PER_TICK,
+  amuxV22AutoPromotionEnabled, amuxV22PromotionFlowEnabled } from "@/lib/amux/v22AutoPromotionCore";
 import { tickV22AutoPromotion } from "@/lib/amux/v22AutoPromotionService";
 import { v22PromotionTickWire, v22WorkerClaimTickWire } from
   "@/lib/amux/v22TickWire";
 import { AMUX_V22_WORKER_CLAIM_ENV, amuxV22WorkerClaimEnabled } from
   "@/lib/amux/v22WorkerClaimCore";
 import { tickV22WorkerClaim } from "@/lib/amux/v22WorkerClaimService";
-import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import { amuxRouteHasBudgetForMs, withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
+import { sweepAmuxStalledCards } from "@/lib/amux/stalledCardSweep";
+import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
+import { AMUX_SCORE_REFRESH_ENV, amuxScoreAutoRefreshEnabled } from
+  "@/lib/amux/portfolioScoreCore";
+import { refreshDueAmuxPortfolioScores } from "@/lib/amux/portfolioScoreService";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
   admitAmuxOrchestratorRequest,
@@ -52,6 +59,45 @@ import { readAmuxOrchestratorWriteIdentity } from "@/lib/amux/orchestratorHaltCo
 const noStore = { "Cache-Control": "no-store" };
 const requestSchema = z.object({}).strict();
 const OPERATION = "auto_promotion_tick";
+
+/** Owner decision 2026-11-14: before promotion reads its candidates, extend
+ * the active window of scores whose confirmed inputs are unchanged (default
+ * off, `TOMVERSE_AMUX_V4_SCORE_AUTO_REFRESH=enabled`). Each refresh must leave
+ * room for the claim and promotion transactions after it. A refusal never
+ * fails the tick; a refresh whose COMMIT outcome is lost stops it, answered
+ * like the promotion's own lost write, before any claim or promotion runs. */
+async function refreshScoresBeforePromotion(): Promise<Response | null> {
+  let digestKey: ReturnType<typeof loadCurrentAmuxContentKeys>;
+  try { digestKey = loadCurrentAmuxContentKeys(process.env); } catch {
+    console.error(JSON.stringify({ event: "amux_score_refresh_unavailable" }));
+    return null;
+  }
+  try {
+    const result = await refreshDueAmuxPortfolioScores({
+      digestKey,
+      // This refresh, then the claim and the promotion transactions.
+      hasBudget: () => amuxRouteHasBudgetForMs(3 * AUTO_TICK_TRANSACTION_MAX_MS),
+    });
+    if (result.refreshed || result.failed || result.orphaned.length) {
+      // orphanedTaskIds: backlog Tasks behind an archived, unfinished
+      // dependency; no refresh or promotion moves them until the owner does.
+      console.info(JSON.stringify({ event: "amux_score_refresh",
+        refreshed: result.refreshed, skipped: result.skipped,
+        failed: result.failed, orphanedTaskIds: result.orphaned }));
+    }
+    return null;
+  } catch (error) {
+    if (error instanceof BoardImportError && error.code === "outcome_unknown") {
+      console.error(JSON.stringify({ event: "amux_score_refresh_outcome_unknown",
+        taskId: error.approvalId }));
+      return Response.json(v22PromotionTickWire({ promoted: false,
+        reason: "outcome_unknown" }), {
+        status: autoTickHttpStatus("outcome_unknown"), headers: noStore });
+    }
+    console.error(JSON.stringify({ event: "amux_score_refresh_unavailable" }));
+    return null;
+  }
+}
 
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
@@ -97,6 +143,21 @@ export async function POST(request: Request) {
         { status: 409, headers: noStore });
     }
 
+    if (v22Enabled && identity.kind === "admitted" &&
+        amuxScoreAutoRefreshEnabled(process.env[AMUX_SCORE_REFRESH_ENV])) {
+      const stopped = await refreshScoresBeforePromotion();
+      if (stopped) return stopped;
+    }
+
+    const response = await claimAndPromote();
+    // AMUXFLOW/B2: stopped cards go to the owner queue after this tick's
+    // answer is decided, so the sweep's write never turns a later transient
+    // claim or promotion error into an unknown outcome. Its own switch; never
+    // a reason this tick fails.
+    if (identity.kind === "admitted") await sweepStalledCardsAfterTick();
+    return response;
+
+    async function claimAndPromote(): Promise<Response> {
     try {
       if (claimEnabled && identity.kind === "admitted") {
         const result = await tickV22WorkerClaim();
@@ -108,7 +169,29 @@ export async function POST(request: Request) {
           });
         }
       }
-      if (v22Enabled && identity.kind === "admitted") {
+      // AMUXFLOW/B3: a tick whose claim assigned nothing promotes up to
+      // four ready Tasks, not one; the next tick claims them. The claim stays
+      // first, so no promotion write ever turns a later transient claim error
+      // into an unknown outcome (review r-20261114-073121-cf0260). An unknown
+      // promotion still stops the tick as before.
+      if (amuxV22PromotionFlowEnabled() && v22Enabled && identity.kind === "admitted") {
+        let last: Awaited<ReturnType<typeof tickV22AutoPromotion>> | null = null;
+        for (let index = 0; index < AMUX_V22_PROMOTIONS_PER_TICK; index += 1) {
+          const promoted = await tickV22AutoPromotion();
+          if (!last?.promoted) last = promoted;
+          if (promoted.promoted) { last = promoted; continue; }
+          if (promoted.reason === "outcome_unknown") {
+            return Response.json(v22PromotionTickWire(promoted), {
+              status: autoTickHttpStatus(promoted.reason), headers: noStore });
+          }
+          break;
+        }
+        if (last && (last.promoted || !legacyEnabled)) {
+          return Response.json(v22PromotionTickWire(last), {
+            status: last.promoted ? 200 : autoTickHttpStatus(last.reason), headers: noStore });
+        }
+      }
+      if (v22Enabled && identity.kind === "admitted" && !amuxV22PromotionFlowEnabled()) {
         const result = await tickV22AutoPromotion();
         if (result.promoted || (!result.promoted && result.reason === "outcome_unknown") ||
             !legacyEnabled) {
@@ -123,5 +206,18 @@ export async function POST(request: Request) {
     } catch (error) {
       return amuxInternalErrorResponse(OPERATION, error);
     }
+    }
   }, AUTO_TICK_ROUTE_BUDGET_MS);
+}
+
+/** The stalled card sweep, only while the route still has room for it. */
+async function sweepStalledCardsAfterTick() {
+  if (!amuxRouteHasBudgetForMs(2 * AUTO_TICK_TRANSACTION_MAX_MS)) return;
+  try {
+    const moved = await sweepAmuxStalledCards(3);
+    if (moved.length) console.info(JSON.stringify({ event: "amux_stalled_card_sweep", moved }));
+  } catch (error) {
+    console.error(JSON.stringify({ event: "amux_stalled_card_sweep_unavailable",
+      error: error instanceof Error ? error.name : "unknown" }));
+  }
 }

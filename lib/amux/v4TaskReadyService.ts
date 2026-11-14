@@ -17,9 +17,12 @@ import type { AmuxIdeaUnitConfirmationSnapshot } from
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "./v4TaskCostCatalogApprovalService.ts";
 import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "./v4TaskCostCeilingCore.ts";
+import { AMUX_V4_NEW_MODEL_ROUTE_ENV, amuxV4NewModelRouteWithinCeiling } from "./v4TaskNewModelRouteSwitch.ts";
+import { amuxV22PromotionFlowEnabled } from "./v22AutoPromotionCore.ts";
 import { readAmuxV52TaskReceipt } from "./v52GradeReceipt.ts";
 import { inspectV52TaskCatalogGrades } from "./v4TaskCostCatalogCore.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
+import { amuxDependencyUnpublishedPatchSql } from "./v4DependencyPublication.ts";
 import { evaluateAmuxV4TaskReady, type AmuxV4TaskReadyFacts } from
   "./v4TaskReadyCore.ts";
 import { AMUX_UNIT_DECISION_AUDIT_SELECT, amuxUnitDecisionAuditActorValid,
@@ -307,7 +310,8 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
           where: { taskId, afterRevision: card.revision, assignment: null },
           select: { id: true } });
         cost = v4TaskCeilingDecision(checkV4TaskApprovedCeiling(
-          approvedCost, { ok: true, receipt: current.receipt }),
+          approvedCost, { ok: true, receipt: current.receipt },
+          amuxV4NewModelRouteWithinCeiling(process.env[AMUX_V4_NEW_MODEL_ROUTE_ENV])),
           expectedStatus === "blocked" || !!recovery);
         // Worker availability is its own fact (policy v48): a cost that needs
         // reconfirmation must not also read as "no worker", or the FIRST Task
@@ -335,7 +339,8 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
     }
     const workers = workerNames.length ? await tx.amuxWorkerRuntime.findMany({
       where: { workerName: { in: workerNames }, dispatchReady: true,
-        status: exactGradeRouting ? "idle" : { in: ["idle", "busy"] },
+        // The claim waits for an idle worker; readiness need not (AMUXFLOW/B3).
+        status: exactGradeRouting && !amuxV22PromotionFlowEnabled() ? "idle" : { in: ["idle", "busy"] },
         leaseExpiresAt: { gt: now } },
       select: { workerName: true },
     }) : [];
@@ -345,6 +350,14 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
       select: { id: true, state: true, action: true, registeredWorkItemId: true },
     });
     const approvedDeps = new Map(approvals.map((item) => [item.id, item]));
+    // One read for every done dependency whose patch never reached develop.
+    const unpublished = card.dependencies.some((edge) => edge.dependency.status === "done") ?
+      new Set((await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT d."dependencyId" AS "id" FROM "AmuxWorkDependency" d
+        JOIN "AmuxWorkItem" dep ON dep."id" = d."dependencyId"
+        WHERE d."taskId" = ${taskId} AND dep."status" = 'done'
+          AND ${amuxDependencyUnpublishedPatchSql()}`).map((row) => row.id)) :
+      new Set<string>();
     const dependencies = card.dependencies.map((edge) => {
       const dependency = edge.dependency;
       const approval = dependency.v4SourceApprovalId ?
@@ -354,7 +367,8 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
           dependency.cardType === "task" && approval?.state === "consumed" &&
           approval.action === "register_card" &&
           approval.registeredWorkItemId === dependency.id,
-        status: dependency.status, terminal: dependency.v4TerminalAt !== null };
+        status: dependency.status, terminal: dependency.v4TerminalAt !== null,
+        unpublishedPatch: unpublished.has(edge.dependencyId) };
     });
     const halted = await findOpenAmuxOrchestratorHalt(tx);
     const approvedIds = snapshot?.card?.dependencies;

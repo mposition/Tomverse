@@ -50,6 +50,19 @@ import {
   AMUX_V4_IDEA_SYSTEM_ACTOR,
 } from "../lib/amux/ideaIdentityCore.ts";
 
+test("the daily product actor may record its halt notice but cannot gain another audit scope", () => {
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.halt_notified", "DailyProductAgentRun"), true);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.halt_notified", "AdminAuditLog"), false);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.result_recorded", "DailyProductAgentRun"), false);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "product_research.suggestion.completed", "ProductResearchSuggestion"), false);
+});
+
+test("the daily product observation audit is limited to its settings target", () => {
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.smart_adaptive_observed", "AppSettings"), true);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.smart_adaptive_observed", "ProductResearchSuggestion"), false);
+  assert.equal(systemAuditActionAllowed("daily-product-agent", "daily_product_agent.claimed", "AppSettings"), false);
+});
+
 test("the Prompt Refiner Auto budget actor has only its audited hold transitions", () => {
   for (const action of ["prompt_refiner.auto_budget_reserved",
     "prompt_refiner.auto_budget_dispatch_intent_recorded",
@@ -179,6 +192,7 @@ test("the system actor list is closed and changes only by review", () => {
     "model-catalog-renewal",
     // The weekly production-to-staging/dev catalogue copy: one action, one target.
     "model-catalog-env-sync",
+    "amux-portfolio-scorer",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
@@ -193,8 +207,18 @@ test("the system actor list is closed and changes only by review", () => {
   assert.deepEqual([...AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS], [
     "amux-intake-supervisor",
     "amux-intake-retention",
-    "amux-portfolio-scorer",
   ]);
+  // Owner decision 2026-11-14: the score refresher writes one action only.
+  assert.equal(systemAuditActionAllowed("amux-portfolio-scorer",
+    "amux.v4.portfolio.score.refresh", "AmuxPortfolioScoreSnapshot"), true);
+  assert.equal(systemAuditActionAllowed("amux-portfolio-scorer",
+    "amux.v4.portfolio.score.confirm", "AmuxPortfolioScoreSnapshot"), false);
+  assert.equal(systemAuditActionAllowed("amux-portfolio-scorer",
+    "amux.v4.portfolio.assessment.approve", "AmuxPortfolioAssessment"), false);
+  assert.equal(systemAuditActionAllowed("amux-portfolio-scorer",
+    "amux.v4.portfolio.score.refresh", "AmuxWorkItem"), false);
+  assert.equal(systemAuditActionAllowed("amux-v4-intake",
+    "amux.v4.portfolio.score.refresh", "AmuxPortfolioScoreSnapshot"), false);
   assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
     "amux.v22.auto_promotion.consumed", "AmuxV22PromotionReceipt"), true);
   assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
@@ -467,6 +491,10 @@ test("no administrator audit call site names the reserved key", () => {
     // Reviewed pair: agent claims and results go to the system writer, the
     // owner-only retry request stays on the administrator writer.
     "lib/dailyProductAgentStore.ts",
+    // Reviewed pair (owner decision 2026-11-14): the owner's score
+    // confirmation stays on the administrator writer, the unchanged-score
+    // refresh goes to the system writer as amux-portfolio-scorer.
+    "lib/amux/portfolioScoreService.ts",
   ]);
   const callSites = ["app", "lib", "components", "scripts", "packages"]
     .flatMap((top) => walk(resolve(ROOT, top)))

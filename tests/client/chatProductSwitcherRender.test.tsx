@@ -45,6 +45,16 @@ test("Review is current without pretending Smart Adaptive is a product", () => {
   );
 });
 
+test("Korean product labels are shown once without a repeated caption", () => {
+  const html = renderSwitcher({ currentProduct: "review", language: "ko" });
+  const visible = html.replace(/<[^>]*>/g, "|");
+
+  assert.equal(chatProductUiCopy.ko.review.shortLabel, "모델 비교");
+  assert.equal((visible.match(/\|채팅\|/g) ?? []).length, 1);
+  assert.equal((visible.match(/\|모델 비교\|/g) ?? []).length, 1);
+  assert.doesNotMatch(visible, /\|비교\|/);
+});
+
 test("every locale distinguishes the two products and names both features", () => {
   for (const language of SUPPORTED_LANGUAGES) {
     const copy = chatProductUiCopy[language];

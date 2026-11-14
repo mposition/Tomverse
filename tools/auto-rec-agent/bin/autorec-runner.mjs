@@ -18,6 +18,7 @@
  * unknown outcome (see the run log).
  */
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
 import {
   appendFileSync,
@@ -363,7 +364,7 @@ async function work(deps, claim, ctx) {
     deps.log("publish_no_answer", { message: error.message });
     return { unknown: "publish" };
   }
-  deps.log("publish_answer", { status: reply?.status ?? null, code: reply?.code ?? null, detail: reply?.detail ?? null });
+  deps.log("publish_answer", { status: reply?.status ?? null, code: reply?.code ?? null, detail: reply?.detail ?? null, step: reply?.step ?? null });
   if (reply?.status === "published") return { outcome: OUTCOME_PR_OPENED, prUrl: reply.prUrl };
   if (reply?.status === "refused") return failed(FAILURE_REASONS.includes(reply.code) ? reply.code : "runner_error");
   if (reply?.status === "failed" && reply.code === "pr_failed") return failed("pr_failed");
@@ -382,7 +383,7 @@ async function cleanup(deps, ctx) {
   }
 }
 
-async function report(deps, claim, outcome) {
+async function report(deps, claim, outcome, onReport) {
   const body =
     outcome.outcome === OUTCOME_PR_OPENED
       ? { op: "result", id: claim.id, claimId: claim.claimId, outcome: OUTCOME_PR_OPENED, prUrl: outcome.prUrl }
@@ -392,13 +393,15 @@ async function report(deps, claim, outcome) {
     reply = await deps.gateway(body, null, 3 * 60_000);
   } catch (error) {
     deps.log("result_no_answer", { message: error.message });
+    onReport("unknown");
     return 1;
   }
   deps.log("result_answer", { status: reply?.status ?? null, code: reply?.code ?? null });
+  onReport(reply?.status === "reported" ? "reported" : reply?.status === "error" || reply?.status === "refused" ? "failed" : "unknown");
   return reply?.status === "reported" ? 0 : 1;
 }
 
-export async function runLocked(deps, { onEmpty = () => {}, onOutcome = () => {} } = {}) {
+export async function runLocked(deps, { onEmpty = () => {}, onClaim = () => {}, onOutcome = () => {}, onReport = () => {} } = {}) {
   let reply;
   try {
     reply = await deps.gateway({ op: "claim" }, null, 3 * 60_000);
@@ -416,6 +419,7 @@ export async function runLocked(deps, { onEmpty = () => {}, onOutcome = () => {}
     return 1;
   }
   const claim = reply.claim;
+  onClaim();
   deps.startRunLog(claim.id);
   deps.log("claimed", { id: claim.id, leaseUntil: claim.leaseUntil });
   const ctx = { stage: "claimed", worktree: null, branch: null, reviewJobId: null };
@@ -428,13 +432,13 @@ export async function runLocked(deps, { onEmpty = () => {}, onOutcome = () => {}
   } finally {
     await cleanup(deps, ctx);
   }
+  onOutcome(outcome);
   if (outcome.unknown) {
     deps.log("outcome_unknown", { step: outcome.unknown, id: claim.id });
     return 1;
   }
   deps.log("outcome", { outcome: outcome.outcome, reason: outcome.reason ?? null, detail: outcome.detail ?? null, prUrl: outcome.prUrl ?? null });
-  onOutcome(outcome);
-  return report(deps, claim, outcome);
+  return report(deps, claim, outcome, onReport);
 }
 
 export async function runOnce(deps) {
@@ -455,15 +459,44 @@ export async function runOnce(deps) {
 /** Task failures advance; infrastructure failures and unknown outcomes stop the batch. */
 export async function runDailyBatch(deps) {
   const started = deps.now();
-  for (let count = 0; count < LIMITS.tasksPerDay && deps.now() - started < LIMITS.dailyRunMs; count += 1) {
-    let empty = false;
-    let outcome = null;
-    const code = await runLocked(deps, { onEmpty: () => { empty = true; }, onOutcome: (value) => { outcome = value; } });
-    if (code !== 0 || empty) return code;
-    if (outcome?.outcome === OUTCOME_FAILED && !["no_change", "out_of_scope", "tests", "review_reject"].includes(outcome.reason)) {
-      deps.log("daily_batch_paused", { reason: outcome.reason });
-      return 1;
+  const notice = { runId: randomUUID(), attempted: 0, prOpened: 0, lastPrUrl: null };
+  const stopped = async (reason) => {
+    try {
+      // One attempt only. An unanswered notice may already have reached the app.
+      const answer = await deps.gateway({ op: "halt_notice", ...notice, reason }, null, 90_000);
+      deps.log("halt_notice_answer", { status: answer?.status ?? null, code: answer?.code ?? null });
+    } catch {
+      deps.log("halt_notice_unknown");
     }
+    return 1;
+  };
+  try {
+    for (let count = 0; count < LIMITS.tasksPerDay && deps.now() - started < LIMITS.dailyRunMs; count += 1) {
+      let empty = false;
+      let outcome = null;
+      let reportState = null;
+      const code = await runLocked(deps, {
+        onEmpty: () => { empty = true; }, onClaim: () => { notice.attempted += 1; },
+        onReport: (value) => { reportState = value; },
+        onOutcome: (value) => {
+          outcome = value;
+          if (value.outcome === OUTCOME_PR_OPENED) { notice.prOpened += 1; notice.lastPrUrl = value.prUrl; }
+        },
+      });
+      if (code !== 0) {
+        let reason = "claim_failed";
+        if (outcome?.unknown === "publish") reason = "publish_unknown";
+        else if (outcome) reason = reportState === "failed" ? "result_failed" : "result_unknown";
+        return stopped(reason);
+      }
+      if (empty) return 0;
+      if (outcome?.outcome === OUTCOME_FAILED && !["no_change", "out_of_scope", "tests", "review_reject"].includes(outcome.reason)) {
+        deps.log("daily_batch_paused", { reason: outcome.reason });
+        return stopped(outcome.reason);
+      }
+    }
+  } catch {
+    return stopped("runner_error");
   }
   deps.log("daily_batch_limit");
   return 0;

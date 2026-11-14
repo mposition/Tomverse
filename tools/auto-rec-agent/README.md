@@ -7,6 +7,12 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
 ### 일일 제품 개선 모드 (2026-11-13 운영자 요청)
 
 로컬 PC/Codex 자동화와 별개로 Ubuntu의 systemd가 매일 **09:00 Australia/Brisbane**에 실행합니다.
+인증된 일일 실행이 앱에 작업을 요청하면, 앱은 Smart Adaptive 선행검색의 최근 24시간·직전 24시간·7일
+집계를 확인합니다. 검증할 작업은 [Admin → Routing → Optimizer](https://tomverse.app/admin/routing?tab=optimizer)의
+기존 권장안에 추가됩니다. 항목을 펼치면 근거를 읽을 수 있고, 완료·제외·AMUX 전송·작업 지시 복사는
+다른 권장안과 같습니다. 공개 QA 실측과 배포·모델이 섞인 집계는 별도로 표시합니다.
+코딩 에이전트 스위치가 켜져 있으면 이 코드 권장안도 기존 순서·상한대로 작업 대상이 됩니다.
+별도 타이머, 호스트 DB 자격증명, 유료 평가 호출은 필요하지 않습니다.
 `install.sh <검토된 commit SHA> daily-product`가 기존 runner/timer에 이 모드를 설치합니다.
 설치 자체는 타이머를 켜거나 실행하지 않습니다. 기존 시간별 모드가 기본값으로 유지됩니다.
 
@@ -37,6 +43,24 @@ Auto router optimizer가 cycle마다 쌓는 `code` 권장안(예: "answer 호출
   제안과 전달 예약도 제외하며, 같은 잠금으로 claim과 전달 예약의 중복 소유를 막습니다.
   AMUX 전달이 실패하거나 불명이면 예약을 보존하고, 같은 Send to AMUX를 다시 사용해 기존의
   결정적 request id로 결과를 읽어 마칩니다. 예약을 자동 삭제하거나 에이전트가 인수하지 않습니다.
+
+### 일일 회차 중단 알림
+
+운영자 2026-11-14 요청: 회차가 장애로 멈추면 기존 운영 알림 경로로 알립니다.
+앱의 `DAILY_PRODUCT_AGENT_ALERTS_ENABLED=true`를 별도로 운영 활성화한 뒤 사용합니다.
+배포 순서는 앱의 새 API 반영 → 알림 스위치 활성화 → Ubuntu 프로그램 갱신입니다. 구버전 앱에
+새 서버를 먼저 연결하면 알림을 받을 수 없습니다.
+runner는 한 회차의 중단을 gateway에 한 번만 보고하고, gateway는 기존 앱 공유 비밀로
+`/api/internal/product-improvements/halt`에 닫힌 사유 코드·시도 수·확인된 PR 수·마지막 PR 링크만
+보냅니다. 작업문·모델 출력·stderr·자격증명·임의 수신자·임의 URL은 받지 않습니다.
+
+앱은 회차 id별로 Admin 알림과 감사를 먼저 함께 저장하고, 새 알림만 기존 운영 이메일·설정된
+채팅 채널로 전달합니다. 같은 회차는 다시 발송하지 않고 새 회차 알림도 AEST 하루 24건 이하입니다.
+Admin 알림 화면에서 확인하면 종 표시·미확인 건수·개요·대기 목록에서 함께 해제됩니다.
+알림 전달의 응답이 없어도 재전송하거나 원래 작업을 재제출하지 않습니다. `no_change`·검증 거절 등
+다음 작업으로 진행하는 결과와 정상적인 빈 대기열·일일 한도 도달은 중단 알림을 만들지 않습니다.
+앱이나 gateway에 닿지 못하면 알림도 전달할 수 없고 로그에 남습니다. 호스트 강제 종료·부팅 실패는
+이 runner 자체의 보고 경로 밖이며 별도의 호스트 감시가 필요합니다.
 
 **운영 반영 순서 — Ubuntu 서버, sudo 가능한 관리자 계정의 bash, 임의 디렉터리.**
 먼저 이 변경을 담은 앱 버전을 운영에 배포하고 앱의 `DAILY_PRODUCT_AGENT_ENABLED=true`를
@@ -96,9 +120,10 @@ PC가 꺼져 있어도 Ubuntu 서버가 켜져 있으면 실행합니다. 첫 �
    에이전트 코드가 옮길 수 있으므로, 검토 범위를 job 결과로 확인합니다. reject는 `review_reject`,
    그 밖은 `review_unknown`이며 다시 보내지 않습니다.
 7. **publish** — gateway는 자기가 fetch한 develop과의 fork point 위 commit 하나인지 다시 확인하고
-   (아니면 `runner_error`), 브랜치를 push하고, Auto PR to Develop이 여는 draft PR을 최대 5분
-   기다렸다가 제목과 본문(권장안, cycle 링크, 검토 job id, "자동 생성, 병합은 사람")을 바꿉니다.
-   5분 안에 열리지 않으면 gateway가 draft로 직접 엽니다.
+   (아니면 `runner_error`), 브랜치를 push한 직후 draft PR을 직접 열고 즉시 `ci:hold`를 붙입니다.
+   Auto PR to Develop이 먼저 열었으면 해당 draft를 쓰며, 생성 요청이 겹치거나 응답이 없으면
+   한 번 조회합니다. 기존 PR의 제목·본문 수정 전에도 먼저 보류 라벨을 확인합니다. 마지막으로
+   draft·보류 라벨·검토한 head를 함께 확인하며, 하나라도 달라지면 게시 결과 불명으로 멈춥니다.
 8. **result** — `POST /api/internal/auto-router/recommendations/result`로
    `{id, outcome: "pr_opened", prUrl}` 또는 `{id, outcome: "failed", reason}`을 보냅니다.
 9. worktree와 로컬 브랜치를 지웁니다.

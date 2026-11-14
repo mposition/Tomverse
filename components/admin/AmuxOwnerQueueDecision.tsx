@@ -17,7 +17,10 @@ import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocale
 import {
   AmuxLegacyCardPanel,
   isAmuxRemakeOnlyCardKind } from "@/components/admin/AmuxLegacyCardPanel";
+import { AmuxOwnerQueueDm } from "@/components/admin/AmuxOwnerQueueDm";
+import { AmuxOwnerQueueDmRequestPanel } from "@/components/admin/AmuxOwnerQueueDmRequest";
 import { AmuxOwnerQueueEngineeringItems } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
+import { AmuxReviewRejectionList } from "@/components/admin/AmuxReviewRejection";
 import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
 import { AmuxTaskUnknownUsageList } from "@/components/admin/AmuxAttemptUsageAcceptance";
 import { AmuxTaskQuestionSection } from "@/components/admin/AmuxWorkerQuestion";
@@ -32,6 +35,7 @@ import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue"
 import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { amuxElapsed } from "@/lib/adminAmuxFlow";
 import { amuxVisibleInspectionText } from "@/lib/amux/adminExecutionViewCore";
+import type { AmuxDmRelayView } from "@/lib/amux/ownerQueueDmRequestCore";
 import { amuxReviewUsageOutcomeUnknown } from "@/lib/amux/ownerRecoveryCore";
 import { isAmuxSettledCardWithOpenEscalation } from "@/lib/amux/settledCardEscalationCore";
 import {
@@ -104,7 +108,7 @@ export const useAmuxOwnerQueueElapsed = (generatedAt: string) => {
 export function AmuxOwnerQueueDecision({
   item, controller, canInspectCards, index, total, generatedAt, navLocked, advance,
   onAdvanceChange, onPrevious, onNext, onAnswered,
-  canWriteEngineering = false, onEngineeringChanged,
+  canWriteEngineering = false, onEngineeringChanged, dmRelay, canAskDecisionMaker = false,
 }: {
   item: AmuxOwnerQueueItem;
   controller: AmuxOwnerReviewController;
@@ -124,6 +128,10 @@ export function AmuxOwnerQueueDecision({
   canWriteEngineering?: boolean;
   /** An engineering action was recorded: read this card again without leaving it. */
   onEngineeringChanged?: () => void;
+  /** When the host's DM relay last called (null: unknown; absent: not read). */
+  dmRelay?: AmuxDmRelayView | null;
+  /** `ops:write`: the Decision Maker box offers its button. */
+  canAskDecisionMaker?: boolean;
 }) {
   const copy = useAdminMessages(adminAmuxOwnerQueueMessages);
   const execution = useAdminMessages(adminAmuxExecutionMessages);
@@ -160,6 +168,10 @@ export function AmuxOwnerQueueDecision({
     (ownerExecution.state === "ready" || ownerExecution.state === "unavailable") ?
     ownerExecution.legacyCard ?? null : null;
   const legacyCard = legacyRead?.view ? { revision: legacyRead.revision, view: legacyRead.view } : null;
+  // The same owner-only detail answer carries the runs the code review rejected.
+  const reviewRejections = canInspectCards && group !== "question" && reviewMatches &&
+    (ownerExecution.state === "ready" || ownerExecution.state === "unavailable") ?
+    ownerExecution.rejections ?? [] : [];
   // Once the review is read, the legacy panel stands in for a decision only
   // when none is open and the card is one no decision ever opens on.
   const legacyOnly = legacyCard !== null && outcomes.length === 0 &&
@@ -167,7 +179,10 @@ export function AmuxOwnerQueueDecision({
   // The words follow the choices actually shown, not the PR alone: a verified
   // non-code Task is approved without one, and a spent budget, an unverified
   // result or pending publication leaves no retry.
-  const noPrWhy = outcomes.includes("approve") ?
+  // A patch no pull request carries is never "no change"; it is retried or
+  // its publication restored (AMUX-FILEGEN2-002).
+  const noPrWhy = reviewMatches && review.unpublished_patch ? copy.why.reviewNoPrUnpublishedPatch
+    : outcomes.includes("approve") ?
     reviewMatches && amuxReviewApprovesNoChange(review) ? copy.why.reviewNoPrNoChange
       : copy.why.reviewNoPrApprovable
     : outcomes.includes("retry") ? copy.why.reviewNoPr
@@ -208,6 +223,11 @@ export function AmuxOwnerQueueDecision({
         <AdminStatusChip tone={AMUX_OWNER_QUEUE_GROUP_TONE[group]}>
           {reasonLabel ?? copy.group[group]}
         </AdminStatusChip>
+        {item.publicationPathMissing || (reviewMatches && review.unpublished_patch?.publication_run_missing) ? (
+          <span data-testid="amux-owner-queue-publication-path-missing">
+            <AdminStatusChip tone="warn">{copy.list.publicationPathMissing}</AdminStatusChip>
+          </span>
+        ) : null}
         {waiting ? <span className="text-xs text-zinc-400">{waiting}</span> : null}
         {index > 0 ? (
           <span className="text-xs text-zinc-500" data-testid="amux-owner-queue-position">
@@ -264,7 +284,25 @@ export function AmuxOwnerQueueDecision({
             </pre>
           </div>
         ) : null}
+        {/* Each rejected run's reasons, beside the retry, recover and close
+            choices below (owner decision 2026-11-14). */}
+        {reviewRejections.length > 0 ? <AmuxReviewRejectionList attempts={reviewRejections} /> : null}
       </div>
+
+      {/* The Decision Maker's proposal for this card (or why it has none, or why the card
+          was left to a person). Confirming it posts to the existing judgment route; the
+          decision below stays the owner's to make either way. */}
+      {group !== "question" && item.dmSettlement ? (
+        <AmuxOwnerQueueDm key={item.taskId + ":" + (item.dmSettlement.status === "read" ? item.dmSettlement.settlementId : "unread")}
+          settlement={item.dmSettlement} />
+      ) : null}
+
+      {/* Which Decision Maker path holds this card and why it has no word yet, with the
+          owner's one button (owner decision 2026-11-14). A settlement the panel above
+          already shows keeps only the button or the relay check here. */}
+      <AmuxOwnerQueueDmRequestPanel taskId={item.taskId} dm={item.dmStatus} relay={dmRelay}
+        canAsk={canAskDecisionMaker} onChanged={onEngineeringChanged ?? onAnswered}
+        settlementShown={group !== "question" && item.dmSettlement?.status === "read"} />
 
       {/* The engineering agent's open items on this card, decided here through
           the engineering routes (the same as Admin › Engineering › Decisions). */}

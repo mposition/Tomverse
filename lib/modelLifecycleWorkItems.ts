@@ -1076,7 +1076,13 @@ export type ModelDiscoveryQueueItem = OpenWorkItem & {
     /** The exclusion that closed this item; only in the excluded view. */
     exclusion: WorkItemExclusionSummary | null;
     /** Set on a proposal of the weekly new-provider research: not adoptable here. */
-    research: { product: NewProviderResearchProduct; providerName: string; citations: string[] } | null;
+    research: {
+        product: NewProviderResearchProduct;
+        /** An image model of an already-connected provider (docs research). */
+        connected: boolean;
+        providerName: string;
+        citations: string[];
+    } | null;
 };
 
 export type WorkItemExclusionSummary = {
@@ -1625,11 +1631,18 @@ export async function listModelDiscoveryQueue(options?: {
                 ? "current"
                 : "stale";
         });
-        const availability: ModelAvailability = observedStates.includes("current")
-            ? "current"
-            : observedStates.includes("unknown")
-              ? "unknown"
-              : "stale";
+        // A research proposal was never seen by a catalogue scan -- that is why
+        // research found it (an image endpoint no list API returns, or a
+        // provider not connected at all). Reading it as absent from the scan
+        // would show it as stale and let the vanished-ID exclusion close it.
+        const availability: ModelAvailability =
+            newProviderResearchAnalysis(row.evidence) !== null
+                ? "unknown"
+                : observedStates.includes("current")
+                  ? "current"
+                  : observedStates.includes("unknown")
+                    ? "unknown"
+                    : "stale";
         const lifecycle = observedVia
             .map((observation) =>
                 entryByObservation.get(
@@ -1709,6 +1722,7 @@ export async function listModelDiscoveryQueue(options?: {
             research: research
                 ? {
                       product: research.product,
+                      connected: research.connected,
                       providerName: research.providerName,
                       citations: research.citations,
                   }
