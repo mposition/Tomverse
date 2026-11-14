@@ -493,7 +493,7 @@
     "glob": {
       "minimatch": "^11.0.1"
     },
-    "pdfjs-dist": "^6.2.108",
+    "pdfjs-dist": "$pdfjs-dist",
     "postcss": {
       ".": "8.5.25",
       "nanoid": "^3.3.17"
