@@ -11,7 +11,10 @@
  * configuring it is the owner's decision to spend. Runs from the daily
  * catalogue check, at most once per Brisbane ISO week: the week is claimed in
  * AppSetting before any call, so a failed or repeated run that week does not
- * call again. At most three calls a week, `maxRetries: 0`, bounded output, token
+ * call again. A fourth call (2026-11-14, off unless
+ * MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED=true) asks for image models
+ * of providers Tomverse is already connected to, which their model-list APIs
+ * never return. Three calls a week, four with that switch on, `maxRetries: 0`, bounded output, token
  * counts logged and never content. Agent spending, not user credits: nothing
  * here touches a credit or a Chat budget.
  */
@@ -23,11 +26,15 @@ import type { JSONSchema7 } from "@ai-sdk/provider";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { listImageModels } from "@/lib/imageModelRegistry";
 import { loadCodingCatalog } from "@/lib/modelCatalog";
+import { OFFICIAL_SOURCE_HOSTS, isOfficialSourceUrl } from "@/lib/modelCatalogCore";
 import {
+  CONNECTED_IMAGE_RESEARCH_SYSTEM,
   NEW_PROVIDER_RESEARCH_PRODUCTS,
   NEW_PROVIDER_RESEARCH_SCHEMA,
   NEW_PROVIDER_RESEARCH_SYSTEM,
+  acceptConnectedImageCandidates,
   acceptNewProviderCandidates,
+  connectedImageResearchPrompt,
   brisbaneIsoWeek,
   newProviderResearchPrompt,
   type AcceptedNewProviderCandidate,
@@ -41,10 +48,41 @@ import { prisma } from "@/lib/prisma";
 import { RUNTIME_IMAGE_PROVIDERS } from "@/lib/runtimeImageProviders";
 
 export const MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ENV = "MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID";
+/**
+ * The fourth weekly call (connected providers' image models) has its own
+ * default-off switch: turning the research on once approved three calls, and a
+ * deploy must not raise that to four by itself.
+ */
+export const MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV = "MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED";
 export const NEW_PROVIDER_RESEARCH_WEEK_SETTING_KEY = "modelDiscovery.newProviderResearchWeek";
 const MAX_OUTPUT_TOKENS = 2_500;
-/** All three calls run in parallel with the catalogue scan, inside the route's 180 s. */
-const TIMEOUT_MS = 100_000;
+/**
+ * The calls run one after another, beside the catalogue scan, inside the
+ * route's 180 s. Run in parallel on 2026-11-12, two of three failed with
+ * AI_APICallError, most likely the provider's concurrency limit. Each call gets
+ * at most PER_CALL_TIMEOUT_MS, all of them together TOTAL_BUDGET_MS; a call
+ * that would start with too little time left is skipped and logged, not run.
+ */
+const PER_CALL_TIMEOUT_MS = 45_000;
+const TOTAL_BUDGET_MS = 150_000;
+const MIN_CALL_MS = 10_000;
+
+/** What a failed call's log line says: the error class and HTTP status, never content. */
+export const researchFailureFacts = (error: unknown) => {
+  const value = error as { name?: unknown; statusCode?: unknown; isRetryable?: unknown } | null;
+  return {
+    error: error instanceof Error ? error.name : "unknown",
+    statusCode: typeof value?.statusCode === "number" ? value.statusCode : null,
+    retryable: typeof value?.isRetryable === "boolean" ? value.isRetryable : null,
+  };
+};
+
+class ResearchBudgetSpent extends Error {
+  constructor() {
+    super("research_budget_spent");
+    this.name = "ResearchBudgetSpent";
+  }
+}
 
 export type NewProviderResearchSummary =
   | { status: "off" | "already_ran_this_week" }
@@ -59,6 +97,13 @@ export type NewProviderResearchSummary =
         accepted: number;
         rejected: NewProviderResearchRejection[];
       }>;
+      connectedImage: {
+        enabled: boolean;
+        ok: boolean;
+        proposed: number;
+        accepted: number;
+        rejected: NewProviderResearchRejection[];
+      };
       created: Array<{ provider: string; apiModel: string; product: NewProviderResearchProduct }>;
     };
 
@@ -129,7 +174,12 @@ const researchInputs = async () => {
     image: servedImage.map((model) => model.name),
     code: servedCode.map((profile) => profile.name),
   };
-  return { connectedProviders, knownApiModels, currentModels };
+  // Connected providers whose official documentation hosts are known: the
+  // connected-image answer is accepted only when cited there.
+  const imageResearchProviders = connectedProviders.filter((provider) =>
+    Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider)
+  );
+  return { connectedProviders, knownApiModels, currentModels, imageResearchProviders };
 };
 
 export async function runNewProviderModelResearch(
@@ -143,63 +193,116 @@ export async function runNewProviderModelResearch(
 
   const inputs = await researchInputs();
   const today = now.toISOString().slice(0, 10);
-  const results = await Promise.all(
-    NEW_PROVIDER_RESEARCH_PRODUCTS.map(async (product) => {
-      try {
-        const generated = await generateText({
-          model: getActiveAiModel(model),
-          system: NEW_PROVIDER_RESEARCH_SYSTEM,
-          prompt: newProviderResearchPrompt({
-            product,
-            currentModels: inputs.currentModels[product],
-            connectedProviders: inputs.connectedProviders,
-            today,
-          }),
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
-          maxRetries: 0,
-          abortSignal: AbortSignal.timeout(TIMEOUT_MS),
-          output: Output.object({
-            schema: jsonSchema(NEW_PROVIDER_RESEARCH_SCHEMA as unknown as JSONSchema7),
-            name: "new_provider_research",
-          }),
-          providerOptions: { openai: { strictJsonSchema: true } },
-        });
-        const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
-        console.info(
-          JSON.stringify({
-            event: "model_discovery_research_llm_call",
-            product,
-            modelId: model.id,
-            inputTokens: usage?.inputTokens ?? null,
-            outputTokens: usage?.outputTokens ?? null,
-          })
-        );
-        const answer = generated.output as { candidates?: unknown[] } | undefined;
-        const checked = acceptNewProviderCandidates({
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
+  const ask = async (label: string, system: string, prompt: string) => {
+    const remaining = deadline - Date.now();
+    if (remaining < MIN_CALL_MS) throw new ResearchBudgetSpent();
+    const generated = await generateText({
+      model: getActiveAiModel(model),
+      system,
+      prompt,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      maxRetries: 0,
+      abortSignal: AbortSignal.timeout(Math.min(PER_CALL_TIMEOUT_MS, remaining)),
+      output: Output.object({
+        schema: jsonSchema(NEW_PROVIDER_RESEARCH_SCHEMA as unknown as JSONSchema7),
+        name: "new_provider_research",
+      }),
+      providerOptions: { openai: { strictJsonSchema: true } },
+    });
+    const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+    console.info(
+      JSON.stringify({
+        event: "model_discovery_research_llm_call",
+        product: label,
+        modelId: model.id,
+        inputTokens: usage?.inputTokens ?? null,
+        outputTokens: usage?.outputTokens ?? null,
+      })
+    );
+    return generated.output as { candidates?: unknown[] } | undefined;
+  };
+  const failed = (product: string, error: unknown) => {
+    // Not retried: the call may have been billed. Next week's run tries again.
+    console.error(
+      JSON.stringify({
+        event: error instanceof ResearchBudgetSpent
+          ? "model_discovery_research_llm_skipped"
+          : "model_discovery_research_llm_failed",
+        product,
+        modelId: model.id,
+        ...researchFailureFacts(error),
+      })
+    );
+  };
+  // One call at a time (see PER_CALL_TIMEOUT_MS).
+  const results: Array<{
+    product: NewProviderResearchProduct;
+    ok: boolean;
+    proposed: number;
+    accepted: AcceptedNewProviderCandidate[];
+    rejected: NewProviderResearchRejection[];
+  }> = [];
+  for (const product of NEW_PROVIDER_RESEARCH_PRODUCTS) {
+    try {
+      const answer = await ask(
+        product,
+        NEW_PROVIDER_RESEARCH_SYSTEM,
+        newProviderResearchPrompt({
           product,
-          answer,
+          currentModels: inputs.currentModels[product],
           connectedProviders: inputs.connectedProviders,
+          today,
+        })
+      );
+      const checked = acceptNewProviderCandidates({
+        product,
+        answer,
+        connectedProviders: inputs.connectedProviders,
+        knownApiModels: inputs.knownApiModels,
+      });
+      results.push({ product, ok: true, proposed: answer?.candidates?.length ?? 0, ...checked });
+    } catch (error) {
+      failed(product, error);
+      results.push({ product, ok: false, proposed: 0, accepted: [], rejected: [] });
+    }
+  }
+
+  const connectedImageEnabled = env[MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV]?.trim() === "true";
+  let connectedImage: {
+    ok: boolean;
+    proposed: number;
+    accepted: AcceptedNewProviderCandidate[];
+    rejected: NewProviderResearchRejection[];
+  } = { ok: true, proposed: 0, accepted: [], rejected: [] };
+  if (connectedImageEnabled) {
+    try {
+      const answer = await ask(
+        "connected_image",
+        CONNECTED_IMAGE_RESEARCH_SYSTEM,
+        connectedImageResearchPrompt({
+          providers: inputs.imageResearchProviders,
+          currentImageModels: inputs.currentModels.image,
           knownApiModels: inputs.knownApiModels,
-        });
-        return { product, ok: true, proposed: answer?.candidates?.length ?? 0, ...checked };
-      } catch (error) {
-        // Not retried: the call may have been billed. Next week's run tries again.
-        console.error(
-          JSON.stringify({
-            event: "model_discovery_research_llm_failed",
-            product,
-            modelId: model.id,
-            error: error instanceof Error ? error.name : "unknown",
-          })
-        );
-        return { product, ok: false, proposed: 0, accepted: [] as AcceptedNewProviderCandidate[], rejected: [] };
-      }
-    })
-  );
+          today,
+        })
+      );
+      const checked = acceptConnectedImageCandidates({
+        answer,
+        connectedProviders: inputs.imageResearchProviders,
+        knownApiModels: inputs.knownApiModels,
+        isOfficial: isOfficialSourceUrl,
+      });
+      connectedImage = { ok: true, proposed: answer?.candidates?.length ?? 0, ...checked };
+    } catch (error) {
+      failed("connected_image", error);
+      connectedImage = { ok: false, proposed: 0, accepted: [], rejected: [] };
+    }
+  }
 
   // Products are researched separately, so two answers can name one model.
   const accepted: AcceptedNewProviderCandidate[] = [];
-  for (const candidate of results.flatMap((result) => result.accepted)) {
+  for (const candidate of [...results.flatMap((result) => result.accepted), ...connectedImage.accepted]) {
     if (!accepted.some((other) => other.apiModelId.toLowerCase() === candidate.apiModelId.toLowerCase())) {
       accepted.push(candidate);
     }
@@ -216,6 +319,13 @@ export async function runNewProviderModelResearch(
       accepted: result.accepted.length,
       rejected: result.rejected,
     })),
+    connectedImage: {
+      enabled: connectedImageEnabled,
+      ok: connectedImage.ok,
+      proposed: connectedImage.proposed,
+      accepted: connectedImage.accepted.length,
+      rejected: connectedImage.rejected,
+    },
     created,
   };
 }
