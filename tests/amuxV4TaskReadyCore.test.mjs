@@ -85,6 +85,29 @@ test("only explicit approved completed dependencies count", () => {
   assert.deepEqual(unfinished.reasons, ["dependency_incomplete"]);
 });
 
+test("a done dependency whose patch never reached develop holds its dependents", () => {
+  // AMUX-FILEGEN2-002 (2026-11-13): done as "no change needed" with its patch
+  // unpublished; FILEGEN2-003 then asked for a function develop did not have.
+  const unpublished = evaluateAmuxV4TaskReady({ ...base(), dependencies: [
+    { id: "design-task", approvedTask: true, status: "done", terminal: true,
+      unpublishedPatch: true },
+  ] });
+  assert.equal(unpublished.ready, false);
+  assert.deepEqual(unpublished.reasons, ["dependency_unpublished"]);
+  // A merged patch, and a dependency with no patch, are judged on done alone.
+  for (const unpublishedPatch of [false, undefined]) {
+    assert.equal(evaluateAmuxV4TaskReady({ ...base(), dependencies: [
+      { id: "design-task", approvedTask: true, status: "done", terminal: true,
+        unpublishedPatch },
+    ] }).ready, true);
+  }
+  // An unfinished dependency still reads as incomplete first.
+  assert.deepEqual(evaluateAmuxV4TaskReady({ ...base(), dependencies: [
+    { id: "design-task", approvedTask: true, status: "review", terminal: false,
+      unpublishedPatch: true },
+  ] }).reasons, ["dependency_incomplete"]);
+});
+
 test("malformed parent Story or hierarchy content is refused before path access", () => {
   const content = { digest: "a".repeat(64), keyId: "key" };
   const valid = { action: "register_card", card: {

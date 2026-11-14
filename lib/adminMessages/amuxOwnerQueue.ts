@@ -32,6 +32,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       ago: (time: string) => `${time} ago`,
       noMatches: "No card matches that search.",
       untitled: "Title unavailable or expired",
+      publicationPathMissing: "No publication path",
       partial: (shown: number, total: number) =>
         `Showing the newest ${shown} of ${total} cards. The rest appear as you finish these.`,
       listLabel: "Cards waiting on you",
@@ -86,6 +87,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       settledTodo: "The card is waiting to run again; only the escalation an earlier attempt left is still open.",
       settledAction: "Press \"Close only\" just below and the card leaves this queue. Its status, results and history stay.",
       reviewNoPrApprovable: "The work result is saved with no pull request; this kind of task is approved on its verified result. Check the worker report before deciding.",
+      reviewNoPrUnpublishedPatch: "The worker changed code, but no pull request carries the patch, so it has not reached develop. It cannot be completed as no change needed: run it again or restore the publication path.",
       reviewNoPrNoChange: "The worker made no change and reports the work is already in place, so there is no pull request. If the worker report and the current code show nothing left to change, complete it as no change needed; otherwise run it again or block it.",
       reviewUsageUnknown: "The run finished, but its usage was never reported, so it cannot be approved or run again yet. You can still block it.",
       // A blocked run's own attempt reason, which the escalation stores only
@@ -158,6 +160,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       ago: (time: string) => `${time} 전`,
       noMatches: "찾는 카드가 없어요.",
       untitled: "제목 확인 불가 또는 보존 만료",
+      publicationPathMissing: "게시 경로 없음",
       partial: (shown: number, total: number) =>
         `전체 ${total}장 중 최근 ${shown}장만 보여 드려요. 이 카드를 처리하면 나머지가 이어서 나와요.`,
       listLabel: "내 확인을 기다리는 카드",
@@ -212,6 +215,7 @@ export const adminAmuxOwnerQueueMessages = defineAdminMessages({
       settledTodo: "카드는 다시 실행을 기다리고 있고, 이전 시도가 남긴 escalation만 열려 있어요.",
       settledAction: "바로 아래에서 \"닫기만\"을 누르면 확인 대기에서 빠져요. 카드 상태, 결과, 이력은 그대로예요.",
       reviewNoPrApprovable: "작업 결과가 PR 없이 저장됐어요. 이 종류의 작업은 검증된 결과로 승인해요. 결정하기 전에 작업자 보고를 확인해 주세요.",
+      reviewNoPrUnpublishedPatch: "작업자가 코드를 바꿨지만 그 patch를 실은 PR이 없어 develop에 들어가지 않았어요. '변경 불필요'로 완료할 수 없어요. 다시 실행하거나 게시 경로를 복구해 주세요.",
       reviewNoPrNoChange: "작업자가 이미 반영돼 있다며 아무것도 바꾸지 않아 PR이 없어요. 작업자 보고와 현재 코드를 보고 바꿀 것이 없으면 '변경 불필요로 완료'를 고르고, 아니면 다시 실행하거나 차단해 주세요.",
       reviewUsageUnknown: "실행은 끝났지만 사용량 기록이 들어오지 않아서, 아직 승인하거나 다시 실행할 수 없어요. 차단은 할 수 있어요.",
       byAttemptReason: {

@@ -243,6 +243,11 @@ export const amuxV22PrlessReviewRetryAllowed = (input: {
  * and the database guard repeats the publication check
  * (20261111120000_amux_review_no_change_completion). Other roles, and a Task
  * with a pull request, keep their own approval evidence.
+ *
+ * An attempt that stored a patch did change something: "no change needed"
+ * would close it with the patch never reaching develop (AMUX-FILEGEN2-002,
+ * 2026-11-13, whose run was never created and so had no publication rows).
+ * Its owner may retry it or restore the publication path instead.
  */
 export const amuxV22NoChangeCompletionAllowed = (input: {
   sourceSystem: string | null;
@@ -255,7 +260,9 @@ export const amuxV22NoChangeCompletionAllowed = (input: {
   publicationMayOpenPr: boolean;
   displayTruncated: boolean;
   displayExact: boolean;
-}) => input.taskRole === "implement" && amuxV22PrlessReviewRetryAllowed(input);
+  unpublishedPatch: boolean;
+}) => input.taskRole === "implement" && !input.unpublishedPatch &&
+  amuxV22PrlessReviewRetryAllowed(input);
 
 /**
  * The outcomes the server offers for one escalation, from the evidence the

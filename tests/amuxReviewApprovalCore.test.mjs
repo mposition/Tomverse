@@ -374,8 +374,15 @@ test("publication that has opened or may still open the PR holds the retry", () 
 
 test("an implement Task that left no change may be completed as no change needed", () => {
   // AMUX-ARTFMT-002 (owner decision 2026-11-11): the change was already there.
-  const noChange = { ...prlessImplement, taskRole: "implement" };
+  const noChange = { ...prlessImplement, taskRole: "implement",
+    unpublishedPatch: false };
   assert.equal(amuxV22NoChangeCompletionAllowed(noChange), true);
+  // A stored patch is a change: it is never closed as "no change needed"
+  // (AMUX-FILEGEN2-002), though the PR-less retry stays open for it.
+  assert.equal(amuxV22NoChangeCompletionAllowed({ ...noChange,
+    unpublishedPatch: true }), false);
+  assert.equal(amuxV22PrlessReviewRetryAllowed({ ...noChange,
+    unpublishedPatch: true }), true);
   for (const [field, value] of [
     ["taskRole", "design"], ["taskRole", "test"], ["taskRole", null],
     ["sourceSystem", "legacy"], ["cardType", "idea"], ["reviewPrNumber", 3501],

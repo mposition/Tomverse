@@ -11,6 +11,7 @@ import {
   amuxAestDayStartMs,
   amuxOwnerQueueGroup,
   amuxOwnerQueueGroupCounts,
+  amuxOwnerQueuePublicationPathMissing,
   amuxOwnerQueueVisible,
   amuxOwnerQueueWhere,
 } from "../lib/amux/ownerQueueCore.ts";
@@ -193,4 +194,16 @@ test("each card carries its open engineering items, and a failed engineering rea
   // The buttons follow the engineering write permission, decided on the server.
   const page = read("app/(site)/(application)/admin/amux-execution/page.tsx");
   assert.match(page, /canWriteEngineering=\{hasAdminPermission\(session, "engineering-agent:write"\)\}/);
+});
+
+test("a card whose newest attempt stored a patch with no engineering run has no publication path", () => {
+  // AMUX-FILEGEN2-002 (2026-11-13): the publisher was halted, no run was made.
+  const missing = { reviewPrNumber: null, newestAttempt: { hasPatch: true, hasRun: false } };
+  assert.equal(amuxOwnerQueuePublicationPathMissing(missing), true);
+  for (const change of [
+    { reviewPrNumber: 3501 },
+    { newestAttempt: null },
+    { newestAttempt: { hasPatch: false, hasRun: false } },
+    { newestAttempt: { hasPatch: true, hasRun: true } },
+  ]) assert.equal(amuxOwnerQueuePublicationPathMissing({ ...missing, ...change }), false);
 });

@@ -13,6 +13,7 @@ import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { AMUX_INCIDENT_SETTING_KEY, parseAmuxIncidentSetting } from
   "./incidentCore.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
+import { amuxDependencyUnpublishedPatchSql } from "./v4DependencyPublication.ts";
 import { AUTO_PROMOTION_APPLY_ENV, AUTO_PROMOTION_CODE_LATCH,
   AUTO_UNKNOWN_BURST_COUNT, AUTO_UNKNOWN_BURST_MS,
   autoCostAccepted, autoGraduationAccepted, autoUnknownEvents,
@@ -296,10 +297,13 @@ async function latestCandidates(tx: Prisma.TransactionClient, now: Date):
       -- A Task waiting on an unfinished dependency can never pass readiness
       -- (dependency_incomplete). Left in, eight such Tasks with higher scores
       -- filled every tick's window and a ready Task below them was never read.
+      -- A done dependency whose patch never reached develop holds it the same
+      -- way (dependency_unpublished).
       AND NOT EXISTS (SELECT 1 FROM "AmuxWorkDependency" d
         JOIN "AmuxWorkItem" dep ON dep."id" = d."dependencyId"
         WHERE d."taskId" = w."id"
-          AND (dep."status" <> 'done' OR dep."v4TerminalAt" IS NULL))
+          AND (dep."status" <> 'done' OR dep."v4TerminalAt" IS NULL
+            OR ${amuxDependencyUnpublishedPatchSql()}))
     ORDER BY n."scoreTotal" DESC, n."taskId" ASC
     LIMIT ${MAX_CANDIDATES_PER_TICK}
   `;

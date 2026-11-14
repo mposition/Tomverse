@@ -209,6 +209,12 @@ export function AmuxOwnerQueueView({
                                   {amuxVisibleInspectionText(item.displayKey ?? item.taskId)}
                                 </span>
                                 <span className="text-xs text-zinc-400">{reason ?? copy.group[group]}</span>
+                                {item.publicationPathMissing ? (
+                                  <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-xs font-bold text-amber-200"
+                                    data-testid="amux-owner-queue-publication-path-missing">
+                                    {copy.list.publicationPathMissing}
+                                  </span>
+                                ) : null}
                               </span>
                               <span className="mt-0.5 block break-words text-sm font-bold text-zinc-100">
                                 {item.title === null ? copy.list.untitled : amuxVisibleInspectionText(item.title)}
