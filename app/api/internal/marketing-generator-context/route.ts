@@ -82,7 +82,40 @@ export async function POST(request: Request) {
   // Outside the transaction: the morning report's counts (best effort).
   context = await withMarketingMorningInputs(context);
   const answer = { context };
-  if (Buffer.byteLength(JSON.stringify(answer), "utf8") > MARKETING_GENERATOR_CONTEXT_MAX_BYTES) {
+  const bytes = Buffer.byteLength(JSON.stringify(answer), "utf8");
+  if (bytes > MARKETING_GENERATOR_CONTEXT_MAX_BYTES) {
+    // Which part grew, so the next fix need not guess (2026-11-14 the run only saw "http 500").
+    const part = (value: unknown) => Buffer.byteLength(JSON.stringify(value ?? null), "utf8");
+    const parts = Object.entries(context).map(([key, value]) => [key, part(value)] as const);
+    console.error(
+      JSON.stringify({
+        event: "marketing_generator_context_too_large",
+        bytes,
+        maxBytes: MARKETING_GENERATOR_CONTEXT_MAX_BYTES,
+        parts: Object.fromEntries(parts),
+      }),
+    );
+    // Not silent: on 2026-11-14 this refusal stopped the morning run and
+    // nothing told the operator.
+    void reportOperationalIncident({
+      code: "MARKETING_GENERATOR_CONTEXT_TOO_LARGE",
+      title: "Marketing generator context is over its size cap",
+      error: new Error(`context ${bytes} bytes, cap ${MARKETING_GENERATOR_CONTEXT_MAX_BYTES}`),
+      severity: "error",
+      cooldownMs: 6 * 60 * 60 * 1_000,
+      context: {
+        component: "marketing-generator-context",
+        bytes,
+        capBytes: MARKETING_GENERATOR_CONTEXT_MAX_BYTES,
+        largestParts: [...parts]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 4)
+          .map(([key, size]) => `${key}=${size}`)
+          .join(","),
+      },
+    }).catch((reportError: unknown) => {
+      console.error("Marketing generator incident could not be reported:", reportError);
+    });
     return json({ code: "context_too_large" }, 500);
   }
   return json(answer, 200);
