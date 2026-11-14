@@ -67,8 +67,14 @@ export const marketingGeneratorContextAllowed = (killSwitchValue: {
   killSwitchValue.ok &&
   !(typeof killSwitchValue.value === "string" && killSwitchValue.value.trim().length > 0);
 
-/** The largest answer, so a report that grew cannot grow the prompt with it. */
-export const MARKETING_GENERATOR_CONTEXT_MAX_BYTES = 128 * 1024;
+/**
+ * The largest answer, so a report that grew cannot grow the prompt with it.
+ * 256 KiB since 2026-11-14: the production context reached 136,138 bytes
+ * (assets with their published copies 41 KB, market intel 32 KB, market prices
+ * 16 KB) and the 07:00 AEST run got a 500. The generator runs on the box's
+ * flat-rate Codex subscription, so the larger prompt spends no money.
+ */
+export const MARKETING_GENERATOR_CONTEXT_MAX_BYTES = 256 * 1024;
 
 export type MarketingGeneratorContext = {
   readonly channels: ReadonlyArray<{
