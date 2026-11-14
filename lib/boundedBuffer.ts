@@ -9,25 +9,35 @@ export class BoundedBufferError extends Error {
 
 export async function readWebStreamToBuffer(
   stream: ReadableStream<Uint8Array>,
-  maxBytes: number
+  maxBytes: number,
+  signal?: AbortSignal
 ) {
   const reader = stream.getReader();
   const chunks: Buffer[] = [];
   let totalBytes = 0;
+  const abort = () => { void reader.cancel(signal?.reason).catch(() => {}); };
+  signal?.addEventListener("abort", abort, { once: true });
 
   try {
+    if (signal?.aborted) {
+      abort();
+      signal.throwIfAborted();
+    }
     while (true) {
       const { done, value } = await reader.read();
+      signal?.throwIfAborted();
       if (done) break;
 
       totalBytes += value.byteLength;
       if (totalBytes > maxBytes) {
-        await reader.cancel("Size limit exceeded.");
+        // A remote stream's cancellation handshake must not hold up rejection.
+        void reader.cancel("Size limit exceeded.").catch(() => {});
         throw new BoundedBufferError();
       }
       chunks.push(Buffer.from(value));
     }
   } finally {
+    signal?.removeEventListener("abort", abort);
     reader.releaseLock();
   }
 
@@ -36,19 +46,20 @@ export async function readWebStreamToBuffer(
 
 export async function readResponseToBuffer(
   response: Response,
-  maxBytes: number
+  maxBytes: number,
+  signal?: AbortSignal
 ) {
   const declaredLength = Number(response.headers.get("content-length"));
   if (
     Number.isFinite(declaredLength) &&
     declaredLength > maxBytes
   ) {
-    await response.body?.cancel("Size limit exceeded.");
+    void response.body?.cancel("Size limit exceeded.").catch(() => {});
     throw new BoundedBufferError();
   }
   if (!response.body) {
     throw new Error("Response has no body.");
   }
 
-  return readWebStreamToBuffer(response.body, maxBytes);
+  return readWebStreamToBuffer(response.body, maxBytes, signal);
 }

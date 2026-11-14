@@ -16,6 +16,18 @@ import {
 } from "@/lib/accountDataExportDomains";
 import { prisma } from "@/lib/prisma";
 import { decryptOAuthToken } from "@/lib/oauthTokenCrypto";
+import { researchPreviewExportFields } from "@/lib/researchPreviewMetadata";
+
+export function toAccountExportMessage(message: {
+  role: string; content: string; modelId: string | null; createdAt: Date;
+  searchMetadata?: unknown;
+}) {
+  return {
+    role: message.role, content: message.content, modelId: message.modelId,
+    createdAt: message.createdAt,
+    ...researchPreviewExportFields(message.searchMetadata),
+  };
+}
 
 /**
  * Bumped whenever the shape of the file changes in a way a reader has to know
@@ -90,8 +102,8 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       select: { analyticsUserId: true, createdAt: true },
     }),
 
-  conversation: (userId) =>
-    prisma.conversation.findMany({
+  conversation: async (userId) =>
+    (await prisma.conversation.findMany({
       where: { userId },
       select: {
         id: true,
@@ -109,13 +121,18 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         createdAt: true,
         updatedAt: true,
         messages: {
-          select: { role: true, content: true, modelId: true, createdAt: true },
+          select: { role: true, content: true, modelId: true, createdAt: true, searchMetadata: true },
           orderBy: { createdAt: "asc" },
         },
       },
       orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,
-    }),
+    })).map((conversation) => ({
+      id: conversation.id, title: conversation.title, kind: conversation.kind,
+      productKey: conversation.productKey, pinnedAt: conversation.pinnedAt,
+      createdAt: conversation.createdAt, updatedAt: conversation.updatedAt,
+      messages: conversation.messages.map(toAccountExportMessage),
+    })),
 
   conversationProject: (userId) =>
     prisma.conversationProject.findMany({

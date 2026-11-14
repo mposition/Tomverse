@@ -8,6 +8,7 @@ import {
   parseChatStreamArtifacts,
   type ChatStreamArtifact,
 } from "@/lib/generatedArtifactCore";
+import { projectResearchSearchMetadata } from "@/lib/researchPreviewMetadata";
 
 // A provider-executed search tool call only resolves once the whole
 // streamText() turn settles (tool-result/source parts only exist in the
@@ -25,7 +26,10 @@ const NUL = String.fromCharCode(0);
 export const SEARCH_METADATA_TRAILER_MARKER = `${NUL}TOMVERSE_SEARCH_METADATA`;
 
 export function buildSearchMetadataTrailerChunk(execution: unknown): string {
-  return `${SEARCH_METADATA_TRAILER_MARKER}${JSON.stringify(execution)}`;
+  const projected = execution && typeof execution === "object" && "searchMetadata" in execution
+    ? { ...execution, searchMetadata: projectResearchSearchMetadata(execution.searchMetadata) }
+    : projectResearchSearchMetadata(execution);
+  return `${SEARCH_METADATA_TRAILER_MARKER}${JSON.stringify(projected)}`;
 }
 
 /**
@@ -88,7 +92,7 @@ export function parseChatStreamTrailer(
     !("artifacts" in record) &&
     !("fileGenerationRetry" in record)
   ) {
-    return { searchMetadata: parsed };
+    return { searchMetadata: projectResearchSearchMetadata(parsed) };
   }
   const completion = record.completion;
   const completionRecord =
@@ -102,7 +106,7 @@ export function parseChatStreamTrailer(
       ? (fileGenerationRetry as Record<string, unknown>)
       : null;
   return {
-    searchMetadata: record.searchMetadata ?? null,
+    searchMetadata: projectResearchSearchMetadata(record.searchMetadata ?? null),
     ...(parseContinuationReceipt(record.continuationReceipt) ? { continuationReceipt: parseContinuationReceipt(record.continuationReceipt) } : {}),
     ...(completionRecord && isChatCompletionStatus(completionRecord.status)
       ? {

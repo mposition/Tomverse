@@ -264,6 +264,12 @@ export const buildAppManagedWebSearchTool = (input: {
   defaultSearchLang?: string;
   /** Owned by the server; the model cannot change it for a tool call. */
   extraSnippets?: boolean;
+  /** Refuse a new backend dispatch after a terminal Research report wins. */
+  canDispatch?: () => boolean;
+  /** Project the bounded result before it is returned to the model. */
+  transformResult?: (
+    result: AppManagedSearchToolResult | AppManagedSearchBatchResult
+  ) => AppManagedSearchToolResult | AppManagedSearchBatchResult;
   /** Structured observation. Never given the query text. */
   onOutcome?: (event: {
     status: AppManagedSearchToolResult["status"];
@@ -309,6 +315,14 @@ export const buildAppManagedWebSearchTool = (input: {
       return result;
     };
 
+    if (input.canDispatch && !input.canDispatch()) {
+      const refused: AppManagedSearchToolResult = {
+        status: "failed",
+        reason: "terminal_report_accepted",
+        searchesRemaining: session.remaining(),
+      };
+      return input.transformResult?.(refused) ?? refused;
+    }
     if (Array.isArray(raw?.query) && (batchSize === 0 || batchSize > APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest)) {
       session.recordRefusal("invalid_query");
       return report({ status: "invalid_query", reason: "invalid_batch_size", searchesRemaining: session.remaining() }, 0);
@@ -405,15 +419,19 @@ export const buildAppManagedWebSearchTool = (input: {
         throw error;
       }
     };
-    if (!Array.isArray(raw?.query)) return runQuery(raw?.query);
+    if (!Array.isArray(raw?.query)) {
+      const result = await runQuery(raw?.query);
+      return input.transformResult?.(result) ?? result;
+    }
     // Claims happen synchronously before the first await, across this
     // batch AND other concurrent calls. The existing attempt cap applies.
     const searches = await Promise.all(raw.query.map(runQuery));
-    return {
+    const result: AppManagedSearchBatchResult = {
       status: "batch",
       searchesRemaining: session.remaining(),
       searches: searches.map(result => ({ ...result, searchesRemaining: session.remaining() })),
     };
+    return input.transformResult?.(result) ?? result;
   };
   // Only the presearch sizer can ask for this view. SDK tool output and the
   // request cache continue to carry the enriched results and no metadata.

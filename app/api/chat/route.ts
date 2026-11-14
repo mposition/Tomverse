@@ -163,6 +163,24 @@ import {
     getWebSearchSurchargeCredits,
 } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
+import {
+    decideResearchPreviewAdmission,
+    researchPreviewGate,
+    type ResearchPreviewAdmission,
+} from "@/lib/researchPreviewAdmission";
+import { createResearchPreviewBudget } from "@/lib/researchPreviewBudget";
+import {
+    createResearchPreviewExecution,
+    ResearchPreviewBudgetExhaustedError,
+    ResearchPreviewMissingReportError,
+    ResearchPreviewRunStoppedError,
+    ResearchPreviewUsageUnknownError,
+    researchPreviewInputEstimate,
+    researchPreviewInstructions,
+    researchPreviewLocale,
+    researchPreviewMessages,
+} from "@/lib/researchPreviewExecution";
+import { buildResearchPreviewMetadata } from "@/lib/researchPreviewMetadata";
 import { hasSearchPath, resolveAttemptSearchPath } from "@/lib/webSearchPath";
 import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
@@ -1449,7 +1467,18 @@ async function handleChatPost(
             promptRefinerDecision,
             guestAutoCapability,
             guestClientTurnId,
+            researchMode,
         } = validateChatPayload(body);
+        const isResearchPreview = researchMode === "preview";
+        const researchPreviewQuestion = isResearchPreview
+            ? requestMessages[0]!.content.trim()
+            : null;
+        const researchPreviewLanguage = isResearchPreview
+            ? researchPreviewLocale(req.headers.get("accept-language"))
+            : "en";
+        const researchPreviewCurrentDate = new Date(requestReceivedAt)
+            .toISOString()
+            .slice(0, 10);
         const fusionBody = body as Record<string, unknown>;
         const wantsFusion = fusionBody.routerLocationFusion === true;
         const existingFusion = wantsFusion && fusionBody.routerLocationScope === "existing";
@@ -1505,7 +1534,13 @@ async function handleChatPost(
         }
         // The durable source remains authored. Only the server's atomic
         // consume may select a different current-turn execution view.
-        let executionMessages = messages;
+        let executionMessages = isResearchPreview
+            ? [{
+                  id: sourceUserMessageId,
+                  role: "user" as const,
+                  content: researchPreviewQuestion!,
+              }]
+            : messages;
         type RefinerExecution = { mode: "explicit" | "auto"; applied: boolean };
         let refinerExecution: RefinerExecution | null = null;
         let refinerPreview: Awaited<ReturnType<typeof previewPromptRefinerChatExecution>> | null = null;
@@ -1569,6 +1604,13 @@ async function handleChatPost(
             }),
             session?.user?.id ?? null,
         ) === "entered";
+        if (isResearchPreview && pinnedDeploymentEntered) {
+            throw new ChatAccessError(
+                409,
+                "RESEARCH_PREVIEW_UNAVAILABLE",
+                "Research Preview is unavailable for this execution path."
+            );
+        }
         if (wantsFusion && pinnedDeploymentEntered) return refuseFusion();
         // The pinned experiment owns a separate placement/budget refusal
         // pipeline. It has no preview-before-reserve seam, so a Refiner
@@ -1761,6 +1803,91 @@ async function handleChatPost(
                 400,
                 traceId
             );
+        }
+
+        let researchPreviewAdmission: ResearchPreviewAdmission | null = null;
+        if (isResearchPreview) {
+            if (!session?.user?.id || !conversationId) {
+                throw new ChatAccessError(
+                    401,
+                    "AUTHENTICATION_REQUIRED",
+                    "Authentication required."
+                );
+            }
+            await assertUserOperationalAccess(session.user.id);
+            const [researchConversation, featureFlags] = await Promise.all([
+                prisma.conversation.findFirst({
+                    where: { id: conversationId, userId: session.user.id },
+                    select: {
+                        id: true,
+                        password: true,
+                        kind: true,
+                        productKey: true,
+                        selectionMode: true,
+                        selectedModels: true,
+                        assistantProfileVersionId: true,
+                    },
+                }),
+                getOperationalFeatureFlags(),
+            ]);
+            let profileTools: {
+                webSearch: boolean;
+                deepResearch: boolean;
+            } | null = null;
+            if (researchConversation?.assistantProfileVersionId) {
+                // The profile may narrow tools, but its instructions and
+                // knowledge never enter this one-shot execution.
+                const profile = await prisma.assistantProfileVersion.findFirst({
+                    where: {
+                        id: researchConversation.assistantProfileVersionId,
+                        userId: session.user.id,
+                    },
+                    select: { toolPolicy: true },
+                });
+                const policy = profile?.toolPolicy as
+                    | Record<string, unknown>
+                    | undefined;
+                profileTools = {
+                    webSearch: policy?.webSearch === true,
+                    deepResearch: policy?.deepResearch === true,
+                };
+            }
+            await refreshSearchQueryCeilingBreaches();
+            researchPreviewAdmission = decideResearchPreviewAdmission({
+                signedIn: true,
+                plan: accountPlan?.tier ?? null,
+                conversationAvailable: Boolean(researchConversation),
+                conversationLocked: Boolean(
+                    researchConversation &&
+                        !hasConversationUnlockGrant(
+                            req,
+                            session.user.id,
+                            researchConversation.id,
+                            researchConversation.password
+                        )
+                ),
+                productKey: researchConversation?.productKey ?? null,
+                kind: researchConversation?.kind ?? null,
+                selectionMode: researchConversation?.selectionMode ?? null,
+                selectedModelIds: parseStoredModelIds(
+                    researchConversation?.selectedModels
+                ),
+                model: requestedModelConfig,
+                backendReadiness: resolveWebSearchBackendReadiness(),
+                profileTools,
+                gateEnabled:
+                    featureFlags.aiChatEnabled &&
+                    researchPreviewGate(requestedModelConfig),
+                modelOutputTokenCap:
+                    resolveModelPricing(requestedModelConfig).maxOutputTokens,
+            });
+            if (!researchPreviewAdmission.offered) {
+                throw new ChatAccessError(
+                    409,
+                    "RESEARCH_PREVIEW_UNAVAILABLE",
+                    "Research Preview is unavailable for this conversation."
+                );
+            }
         }
 
         // ---- Auto routing (routing policy §5; delivery plan step 4) -------
@@ -2233,10 +2360,11 @@ async function handleChatPost(
             );
         }
         const deterministicAutoSelection = selectAutoModel({
-            explorationEnabled: await isAutoExplorationEnabled(),
+            explorationEnabled:
+                !isResearchPreview && (await isAutoExplorationEnabled()),
             conversationId: conversationId ?? null,
             requestedModelId,
-            conversation: conversationRouting,
+            conversation: isResearchPreview ? null : conversationRouting,
             // The stored product, never the surface the request came from:
             // §6 forbids a surfaceProductKey fallback at dispatch. Null when
             // there is no conversation, which is `no_conversation` further
@@ -2318,6 +2446,7 @@ async function handleChatPost(
             }
         }
         const autoTextTurnEligible =
+            !isResearchPreview &&
             conversationRouting?.selectionMode === "auto" &&
             !guestAutoSelection?.routed &&
             Boolean(session?.user?.id && conversationId && assistantMessageId) &&
@@ -2505,7 +2634,7 @@ async function handleChatPost(
         const hasContinuation = Boolean(conversationRouting?.continuationBridge);
         const readContinuation = async (): Promise<ContinuationTurnSeedResult> => {
             if (!session?.user?.id || !conversationId || !hasContinuation) return { seed: null, outcome: "no_bridge" };
-            if (deepResearchDepth || requestedModelConfig.usageClass === "deep-research") return { seed: null, outcome: "no_bridge" };
+            if (isResearchPreview || deepResearchDepth || requestedModelConfig.usageClass === "deep-research") return { seed: null, outcome: "no_bridge" };
             try {
                 if (historySearchActive && !continuationHistorySearchEnabledFromValue(process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED))
                     return { seed: null, outcome: "flag_off" };
@@ -2519,7 +2648,7 @@ async function handleChatPost(
         if (hasContinuation) {
             preparedContinuation = await readContinuation();
             continuation.receipt = continuationReceipt({ traceId, assistantMessageId: assistantMessageId ?? "",
-                selected: req.headers.has(PASSAGE_HEADER), outcome: deepResearchDepth || requestedModelConfig.usageClass === "deep-research"
+                selected: req.headers.has(PASSAGE_HEADER), outcome: isResearchPreview || deepResearchDepth || requestedModelConfig.usageClass === "deep-research"
                     ? "unsupported" : preparedContinuation.outcome, plan: preparedContinuation.seed?.plan });
         }
         // Owner-approved default-on source input; explicit false remains the kill switch.
@@ -2834,7 +2963,10 @@ async function handleChatPost(
         const promptCachePath: AnthropicPromptCachePath = nativeSearchEnabled
             ? "chat_turn_native_search"
             : "chat_turn";
-        const requestAttachments = messages.flatMap((message) =>
+        const requestAttachments = (isResearchPreview
+            ? executionMessages
+            : messages
+        ).flatMap((message) =>
             Array.isArray(message.attachments)
                 ? (message.attachments as IncomingAttachment[])
                 : []
@@ -3202,6 +3334,7 @@ async function handleChatPost(
 
         const providerContextQueues = new Map<string, ModelMessage[][]>();
         if (
+            !isResearchPreview &&
             conversationId &&
             session?.user?.id &&
             modelConfig.reasoning !== undefined
@@ -3307,7 +3440,7 @@ async function handleChatPost(
                   };
               }
             | null = null;
-        if (session?.user?.id) {
+        if (session?.user?.id && !isResearchPreview) {
             // §22's injection denominator. Recorded before the bundle branch
             // so it counts every authenticated request, including the ones
             // that carry no bundle — the share of requests that had no memory
@@ -3473,6 +3606,7 @@ async function handleChatPost(
                 messages: executionMessages,
                 requestedModelId,
                 webSearchMode: webSearchMode ?? "off",
+                researchMode: researchMode ?? null,
                 context: verifiedContext?.requestIdentity ?? null,
                 acknowledgedUnavailableAttachmentIds:
                     acknowledgedUnavailableAttachmentIds ?? [],
@@ -3628,15 +3762,15 @@ async function handleChatPost(
         // Cached rather than a per-turn row read (isImageGenerationEnabledCached),
         // and skipped entirely on a deep-research turn, which carries no
         // capability blocks for it to decide.
-        const imageGenerationFlagEnabled = isDeepResearchTurn
+        const imageGenerationFlagEnabled = isDeepResearchTurn || isResearchPreview
             ? false
             : await isImageGenerationEnabledCached();
         const finalContinuation = preparedContinuation;
-        const continuationSeed = !isDeepResearchTurn && finalContinuation.seed?.prompt.rulesText && finalContinuation.seed.prompt.transcriptText
+        const continuationSeed = !isResearchPreview && !isDeepResearchTurn && finalContinuation.seed?.prompt.rulesText && finalContinuation.seed.prompt.transcriptText
             ? { rulesText: finalContinuation.seed.prompt.rulesText, transcriptText: finalContinuation.seed.prompt.transcriptText } : undefined;
         if (hasContinuation) {
             continuation.receipt = continuationReceipt({ traceId, assistantMessageId: assistantMessageId ?? "",
-                selected: req.headers.has(PASSAGE_HEADER), outcome: isDeepResearchTurn ? "unsupported" : finalContinuation.outcome,
+                selected: req.headers.has(PASSAGE_HEADER), outcome: isResearchPreview || isDeepResearchTurn ? "unsupported" : finalContinuation.outcome,
                 plan: continuationSeed ? finalContinuation.seed?.plan : null });
         }
         const turnSystemBlocks = buildChatTurnSystemBlocks({
@@ -3666,7 +3800,9 @@ async function handleChatPost(
             ),
             continuationSeed,
         });
-        const artifactToolPlan = turnSystemBlocks.artifactPlan;
+        const artifactToolPlan = isResearchPreview
+            ? null
+            : turnSystemBlocks.artifactPlan;
         if (mcpConnectionId) {
             if (conversationProductKey !== "chat" || isDeepResearchTurn) throw new ChatAccessError(400, "MCP_CHAT_REQUIRED", "Plugins are available in Chat with a model that supports tools.");
             try {
@@ -4550,6 +4686,22 @@ async function handleChatPost(
                 ],
             });
         }
+        if (isResearchPreview) {
+            // Replace every ordinary Chat prelude with the same one-shot
+            // payload the offer and reservation helpers measured.
+            formattedMessages.splice(
+                0,
+                formattedMessages.length,
+                {
+                    role: "system",
+                    content: researchPreviewInstructions({
+                        locale: researchPreviewLanguage,
+                        currentDate: researchPreviewCurrentDate,
+                    }),
+                },
+                ...researchPreviewMessages(researchPreviewQuestion!)
+            );
+        }
         const uncachedLocationMessages = [...formattedMessages];
         appendChatLocationContext(uncachedLocationMessages, currentLocation);
         const locationCacheBreakpoint = appendChatLocationContext(
@@ -4626,11 +4778,27 @@ async function handleChatPost(
         if (!nativeSearchReservation.ok) {
             throw webSearchCostRefusalError(nativeSearchReservation.reason);
         }
-        const budget = createChatBudget(
-            access.kind,
-            modelConfig,
-            inputEstimate.breakdown(),
-            {
+        const budget = isResearchPreview
+            ? createResearchPreviewBudget({
+                  accessKind: access.kind,
+                  model: modelConfig,
+                  input: researchPreviewInputEstimate({
+                      question: researchPreviewQuestion!,
+                      locale: researchPreviewLanguage,
+                      currentDate: researchPreviewCurrentDate,
+                  }),
+                  webSearchSurchargeCredits: getWebSearchSurchargeCredits(
+                      "always",
+                      webSearchCapability,
+                      searchBackendReadiness
+                  ),
+                  searchReservation: nativeSearchReservation,
+              })
+            : createChatBudget(
+                  access.kind,
+                  modelConfig,
+                  inputEstimate.breakdown(),
+                  {
                 webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                     webSearchMode ?? "off",
                     webSearchCapability,
@@ -4650,8 +4818,18 @@ async function handleChatPost(
                 reservationOnlyInputTokens,
                 additionalToolInputTokens: mcpConnector ? mcpConnector.definitionTokens + mcpConnector.resultInputAllowance : 0,
                 toolInputPasses: mcpConnector ? MCP_CHAT_MAX_STEPS : 1,
-            }
-        );
+                  }
+              );
+        if (
+            isResearchPreview &&
+            budget.maxOutputTokens !== researchPreviewAdmission?.limits?.totalOutputTokens
+        ) {
+            throw new ChatAccessError(
+                409,
+                "RESEARCH_PREVIEW_BUDGET_MISMATCH",
+                "Research Preview budget is unavailable."
+            );
+        }
         // `budget.inputTokens`, not the raw estimate: what this guard has to
         // bound is what the request really sends, and a provider-native search
         // adds 6,400 input tokens on top of the conversation (6,000 of
@@ -4702,7 +4880,7 @@ async function handleChatPost(
         // left to record, and a row here would enter the same decision twice
         // -- once as a shadow prediction and once as the real run -- into
         // metrics that read the two as independent.
-        if (!autoRouted) scheduleRoutingShadowRun(() => {
+        if (!autoRouted && !isResearchPreview) scheduleRoutingShadowRun(() => {
             const lastUserTurn = [...formattedMessages]
                 .reverse()
                 .find((message) => message.role === "user");
@@ -5009,8 +5187,51 @@ async function handleChatPost(
           disconnects mid-answer does not leave a search running for a turn
           nobody is reading.
         */
+        const researchPreviewRunSignal = isResearchPreview
+            ? AbortSignal.any([req.signal, AbortSignal.timeout(120_000)])
+            : req.signal;
+        const recordAppManagedSearchOutcome = (event: {
+            status: string;
+            reason?: string;
+            queryLength: number;
+            resultCount: number;
+            durationMs: number;
+            reused: boolean;
+            toolCallIndex: number;
+            batchSize: number;
+        }) => {
+            // Content-free. The query text is deliberately absent.
+            console.info(
+                JSON.stringify({
+                    event: "app_managed_web_search",
+                    traceId,
+                    modelId: modelConfig.id,
+                    backend: webSearchCapability.searchBackend,
+                    status: event.status,
+                    reason: event.reason ?? null,
+                    queryLength: event.queryLength,
+                    resultCount: event.resultCount,
+                    durationMs: event.durationMs,
+                    reused: event.reused,
+                    toolCallIndex: event.toolCallIndex,
+                    batchSize: event.batchSize,
+                    timestamp: new Date().toISOString(),
+                })
+            );
+        };
+        const researchPreviewExecution =
+            isResearchPreview && webSearchCapability.searchBackend
+                ? createResearchPreviewExecution({
+                      backend: webSearchCapability.searchBackend,
+                      totalOutputTokens: budget.maxOutputTokens,
+                      locale: researchPreviewLanguage,
+                      signal: researchPreviewRunSignal,
+                      onSearchOutcome: recordAppManagedSearchOutcome,
+                  })
+                : null;
         const appManagedSearchTool =
-            appManagedSearchEnabled && webSearchCapability.searchBackend
+            researchPreviewExecution ??
+            (appManagedSearchEnabled && webSearchCapability.searchBackend
                 ? buildAppManagedWebSearchTool({
                       backend: webSearchCapability.searchBackend,
                       extraSnippets: Boolean(presearchQueries?.length),
@@ -5021,31 +5242,9 @@ async function handleChatPost(
                               webSearchEnabled: true,
                           }) ?? 0,
                       signal: req.signal,
-                      onOutcome: (event) => {
-                          // Content-free. The query text is deliberately absent:
-                          // it is the user's question, or a paraphrase of it,
-                          // and a log line is not a place for either. What is
-                          // here is enough to see a backend degrading.
-                          console.info(
-                              JSON.stringify({
-                                  event: "app_managed_web_search",
-                                  traceId,
-                                  modelId: modelConfig.id,
-                                  backend: webSearchCapability.searchBackend,
-                                  status: event.status,
-                                  reason: event.reason ?? null,
-                                  queryLength: event.queryLength,
-                                  resultCount: event.resultCount,
-                                  durationMs: event.durationMs,
-                                  reused: event.reused,
-                                  toolCallIndex: event.toolCallIndex,
-                                  batchSize: event.batchSize,
-                                  timestamp: new Date().toISOString(),
-                              })
-                          );
-                      },
+                      onOutcome: recordAppManagedSearchOutcome,
                   })
-                : null;
+                : null);
         // Whether this dispatch will actually be able to search, as opposed to
         // being allowed to. The Router's filter answers the second: it keeps a
         // native model for a turn that needs current information because the
@@ -5565,18 +5764,27 @@ async function handleChatPost(
                     // separately so replacing or timing out one attempt never
                     // aborts a later fallback attempt.
                     abortSignal: AbortSignal.any([
-                        req.signal,
+                        researchPreviewRunSignal,
                         initialAttemptAbortController.signal,
                     ]),
                     ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
                     maxOutputTokens: requestMaxOutputTokens,
-                    maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
+                    maxRetries:
+                        isResearchPreview || modelConfig.provider === "zhipu"
+                            ? 0
+                            : undefined,
                     headers:
                         modelConfig.provider === "perplexity"
                             ? perplexityUsageHeaders(traceId)
                             : undefined,
                     ...generationSettings,
-                    ...(combinedToolConfig ?? {}),
+                    ...(researchPreviewExecution
+                        ? {
+                              tools: researchPreviewExecution.tools,
+                              stopWhen: researchPreviewExecution.stopWhen,
+                              prepareStep: researchPreviewExecution.prepareStep,
+                          }
+                        : combinedToolConfig ?? {}),
                     ...searchObservation?.sdk,
                     ...(lookupStep ? { prepareStep: lookupStep } : {}),
                     ...(mcpConnector ? {
@@ -5635,7 +5843,18 @@ async function handleChatPost(
             reasoning: modelConfig.reasoning,
             abortController: initialAttemptAbortController,
             stream: result,
-            reader: faultedReader(result.textStream.getReader(), injectedFault, 0),
+            reader: faultedReader(
+                (researchPreviewExecution
+                    ? researchPreviewExecution.finalTextStream(
+                          result.textStream,
+                          result.usage,
+                          result.steps
+                      )
+                    : result.textStream
+                ).getReader(),
+                injectedFault,
+                0
+            ),
             // Perplexity buffers response bodies under this key and consuming
             // the capture releases it, so it is per attempt rather than per
             // trace. The primary keeps the bare trace id, which is what the
@@ -5798,6 +6017,13 @@ async function handleChatPost(
         // says -- settlement records the frozen authorization as an upper
         // bound rather than pretending the count is zero.
         const earlyCancelSearchFields = {
+            ...(isResearchPreview
+                ? {
+                      inputTokens: budget.inputTokens,
+                      outputTokens: budget.reservedOutputTokens,
+                      usageFromProvider: false,
+                  }
+                : {}),
             searchSurchargeCredits: getWebSearchSurchargeCredits(
                 webSearchMode ?? "off",
                 webSearchCapability,
@@ -6469,6 +6695,7 @@ async function handleChatPost(
             error: unknown,
             nextAttemptAbortController: AbortController
         ): Promise<boolean> => {
+            if (isResearchPreview) return false;
             const classified = classifyStreamFailure({
                 error,
                 phase: "read",
@@ -7192,6 +7419,25 @@ async function handleChatPost(
                                     : undefined,
                             providerCitations: perplexitySearchCitations,
                         });
+                        if (researchPreviewExecution) {
+                            const report = researchPreviewExecution.finalReport();
+                            if (!report) {
+                                throw new Error(
+                                    "Research Preview completed without an accepted report."
+                                );
+                            }
+                            webSearchExecution.citations = report.citations;
+                            webSearchExecution.research =
+                                buildResearchPreviewMetadata({
+                                    outcome: report.outcome,
+                                    startedAt: new Date(
+                                        requestReceivedAt
+                                    ).toISOString(),
+                                    completedAt: new Date().toISOString(),
+                                    stopReason: "report_submitted",
+                                    citedSources: report.citedSources,
+                                });
+                        }
                         if (mcpConnector) {
                             webSearchExecution.citations = sanitizeWebSearchCitations([
                                 ...webSearchExecution.citations, ...mcpConnector.sources(),
@@ -7772,7 +8018,33 @@ async function handleChatPost(
                       one layer down. The typed error is what tells them apart.
                     */
                     const streamFailureIsLocal =
-                        isStorageError(error) || isChatLocalFailure(error);
+                        isStorageError(error) ||
+                        isChatLocalFailure(error) ||
+                        error instanceof ResearchPreviewBudgetExhaustedError ||
+                        error instanceof ResearchPreviewUsageUnknownError ||
+                        error instanceof ResearchPreviewMissingReportError ||
+                        error instanceof ResearchPreviewRunStoppedError;
+                    const researchStopReason =
+                        error instanceof ResearchPreviewBudgetExhaustedError
+                            ? "budget_exhausted"
+                            : error instanceof ResearchPreviewUsageUnknownError
+                              ? "usage_unknown"
+                              : error instanceof ResearchPreviewMissingReportError
+                                ? error.stopReason
+                                : error instanceof ResearchPreviewRunStoppedError
+                                  ? error.stopReason
+                                : null;
+                    if (researchStopReason) {
+                        console.info(
+                            JSON.stringify({
+                                event: "research_preview_stopped",
+                                traceId,
+                                modelId: dispatched.modelId,
+                                stopReason: researchStopReason,
+                                timestamp: new Date().toISOString(),
+                            })
+                        );
+                    }
                     if (streamFailureIsLocal) {
                         logRequestError(
                             "chat_local_failure",
@@ -7834,9 +8106,45 @@ async function handleChatPost(
                     // user-ledger fields are left alone -- only the provider
                     // ledger is told that the count is unknown rather than
                     // zero.
+                    let researchFailureUsage: NonNullable<
+                        Parameters<typeof settleSafely>[1]
+                    > = {};
+                    if (isResearchPreview) {
+                        if (error instanceof ResearchPreviewUsageUnknownError) {
+                            researchFailureUsage = {
+                                inputTokens: budget.inputTokens,
+                                outputTokens: budget.reservedOutputTokens,
+                                usageFromProvider: false,
+                            };
+                        } else {
+                            try {
+                                const usage = await dispatched.stream.usage;
+                                researchFailureUsage = {
+                                    inputTokens: usage.inputTokens,
+                                    cachedInputTokens:
+                                        usage.inputTokenDetails.cacheReadTokens,
+                                    cacheWriteInputTokens:
+                                        usage.inputTokenDetails.cacheWriteTokens,
+                                    outputTokens: usage.outputTokens,
+                                    reasoningTokens:
+                                        usage.outputTokenDetails.reasoningTokens,
+                                    usageFromProvider: true,
+                                };
+                            } catch {
+                                researchFailureUsage = {
+                                    inputTokens: budget.inputTokens,
+                                    outputTokens: budget.reservedOutputTokens,
+                                    usageFromProvider: false,
+                                };
+                            }
+                        }
+                    }
                     await settleSafely(
                         "failed",
-                        { searchQueriesObserved: false },
+                        {
+                            ...researchFailureUsage,
+                            searchQueriesObserved: false,
+                        },
                         // What was observed, not what was decided. See
                         // `lastStreamFailure`.
                         lastStreamFailure

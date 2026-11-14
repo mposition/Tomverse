@@ -1561,6 +1561,19 @@ export function ChatMessageList({
                           format={msg.generatingArtifactFormat}
                         />
                       )}
+                    {!isUser && msg.searchMetadata?.research && (
+                      <div data-testid="research-preview-result" data-outcome={msg.searchMetadata.research.outcome}
+                        className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                        <p className="font-semibold">{t({
+                          complete: "chat.researchPreviewOutcomeComplete",
+                          partial: "chat.researchPreviewOutcomePartial",
+                          insufficient_evidence: "chat.researchPreviewOutcomeInsufficient",
+                          failed: "chat.researchPreviewOutcomeFailed",
+                          cancelled: "chat.researchPreviewOutcomeCancelled",
+                        }[msg.searchMetadata.research.outcome])}</p>
+                        <p>{t("chat.researchPreviewEvidence")}</p>
+                      </div>
+                    )}
                     {msg.searchMetadata && msg.searchMetadata.citations.length > 0 && (
                       <div
                         data-testid="search-citation-list"

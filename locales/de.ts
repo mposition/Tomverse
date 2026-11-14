@@ -1,4 +1,5 @@
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -200,6 +201,7 @@ export const de = {
         projectDeleteFailed: "Projekt konnte nicht gelöscht werden.",
     },
     chat: {
+        ...researchPreviewCopy["de"],
        ...en.chat,
         draftConflictTitle: "Dieser Entwurf wurde in einem anderen Tab geändert",
         draftConflictBody: "Wähle den Serverentwurf oder überschreibe ihn ausdrücklich mit dem in diesem Tab behaltenen Entwurf.",

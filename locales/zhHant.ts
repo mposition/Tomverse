@@ -1,4 +1,5 @@
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -212,6 +213,7 @@ export const zhHant = {
         projectDeleteFailed: "無法刪除專案。",
     },
     chat: {
+        ...researchPreviewCopy["zh-Hant"],
        ...en.chat,
         aiReviewComparedQuestion: "比較的問題",
         aiReviewFindings: "審查發現",

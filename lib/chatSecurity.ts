@@ -947,6 +947,19 @@ export const createChatBudget = (
         additionalToolInputTokens?: number;
         /** Server-selected model passes; used only for internal cost holds. */
         toolInputPasses?: number;
+        /** Keep the deterministic tool envelope outside the authored-input
+         * clamp so a multi-step run cannot silently under-reserve it. */
+        toolInputAboveAuthoredLimit?: boolean;
+        /**
+         * One aggregate output allowance shared by every paid tool pass.
+         *
+         * Ordinary Chat omits this and keeps the model pricing profile's
+         * request/reservation values. Research Preview supplies its smaller
+         * run-wide ceiling: the provider may receive several sequential
+         * requests, but their combined output (reasoning included) may never
+         * reserve or consume more than this value.
+         */
+        totalOutputTokenCap?: number;
     }
 ): ChatBudget => {
     const maxInputTokens =
@@ -1001,17 +1014,26 @@ export const createChatBudget = (
         0,
         Math.trunc(options?.reservationOnlyInputTokens ?? 0)
     );
-    const contextInputTokens =
-        Math.min(
-            maxInputTokens,
-            toReservedInputTokens(estimatedInput, {
-                toolOverheadTokens: estimateToolInputTokenOverhead({
-                    nativeSearchEnabled: options?.nativeSearchEnabled === true,
-                    appManagedSearchEnabled:
-                        options?.appManagedSearchEnabled === true,
-                }) + Math.max(0, Math.trunc(options?.additionalToolInputTokens ?? 0)),
-            })
-        ) + reservationOnlyInputTokens;
+    const toolInputTokens =
+        estimateToolInputTokenOverhead({
+            nativeSearchEnabled: options?.nativeSearchEnabled === true,
+            appManagedSearchEnabled:
+                options?.appManagedSearchEnabled === true,
+        }) + Math.max(0, Math.trunc(options?.additionalToolInputTokens ?? 0));
+    // The authored-input limit applies to authored input. Tool definitions and
+    // bounded tool results are provider input too, so they stay outside that
+    // clamp; otherwise a large deterministic tool envelope would be silently
+    // under-reserved at exactly the point the limit was reached.
+    const contextInputTokens = options?.toolInputAboveAuthoredLimit
+        ? Math.min(maxInputTokens, toReservedInputTokens(estimatedInput)) +
+          toolInputTokens +
+          reservationOnlyInputTokens
+        : Math.min(
+              maxInputTokens,
+              toReservedInputTokens(estimatedInput, {
+                  toolOverheadTokens: toolInputTokens,
+              })
+          ) + reservationOnlyInputTokens;
     const passes = Math.max(1, Math.min(4, Math.trunc(options?.toolInputPasses ?? 1)));
     let pricing = resolveModelRequestPricing(model, {
         estimatedPromptTokens: contextInputTokens,
@@ -1021,7 +1043,14 @@ export const createChatBudget = (
     });
     // Every paid step re-sends its context. Earlier assistant output can also
     // be re-sent; reserve it without changing authored-input credit weight.
-    const reservedInputTokens = contextInputTokens * passes + pricing.maxOutputTokens * (passes - 1);
+    const requestedTotalOutputCap = options?.totalOutputTokenCap;
+    const totalOutputTokens =
+        Number.isSafeInteger(requestedTotalOutputCap) &&
+        requestedTotalOutputCap! > 0
+            ? Math.min(pricing.maxOutputTokens, requestedTotalOutputCap!)
+            : pricing.maxOutputTokens;
+    const reservedInputTokens =
+        contextInputTokens * passes + totalOutputTokens * (passes - 1);
 
     return {
         modelId: model.id,
@@ -1035,9 +1064,12 @@ export const createChatBudget = (
             (options?.webSearchSurchargeCredits || 0),
         inputTokens: reservedInputTokens,
         ...(passes > 1 ? { contextInputTokens } : {}),
-        maxOutputTokens: pricing.maxOutputTokens,
+        maxOutputTokens: totalOutputTokens,
         providerMaxOutputTokens: pricing.providerMaxOutputTokens,
-        reservedOutputTokens: pricing.reservationOutputTokens,
+        reservedOutputTokens:
+            requestedTotalOutputCap === undefined
+                ? pricing.reservationOutputTokens
+                : totalOutputTokens,
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
@@ -5744,6 +5776,7 @@ export const validateChatPayload = (body: unknown) => {
         promptRefinerDecision?: unknown;
         guestAutoCapability?: unknown;
         guestClientTurnId?: unknown;
+        researchMode?: unknown;
     };
     if (payload.mcpConnectionId !== undefined && (typeof payload.mcpConnectionId !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(payload.mcpConnectionId))) {
         throw new ChatAccessError(400, "INVALID_CONNECTOR_SELECTION", "Invalid connector selection.");
@@ -5888,6 +5921,16 @@ export const validateChatPayload = (body: unknown) => {
         );
     }
     if (
+        payload.researchMode !== undefined &&
+        payload.researchMode !== "preview"
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_RESEARCH_MODE",
+            "Invalid Research mode."
+        );
+    }
+    if (
         payload.webSearchMode !== undefined &&
         !isWebSearchMode(payload.webSearchMode)
     ) {
@@ -5896,6 +5939,45 @@ export const validateChatPayload = (body: unknown) => {
             "INVALID_WEB_SEARCH_MODE",
             "Invalid web search mode."
         );
+    }
+    if (payload.researchMode === "preview") {
+        const allowedKeys = new Set([
+            "messages",
+            "modelId",
+            "conversationId",
+            "assistantMessageId",
+            "sourceUserMessageId",
+            "webSearchMode",
+            "researchMode",
+        ]);
+        const unknownKey = Object.keys(body as Record<string, unknown>).find(
+            (key) => !allowedKeys.has(key)
+        );
+        const message = payload.messages[0] as {
+            role?: unknown;
+            content?: unknown;
+            attachments?: unknown;
+        } | undefined;
+        if (
+            unknownKey ||
+            payload.messages.length !== 1 ||
+            message?.role !== "user" ||
+            typeof message.content !== "string" ||
+            message.content.trim().length < 1 ||
+            message.content.length > 4_000 ||
+            (Array.isArray(message.attachments) && message.attachments.length > 0) ||
+            !payload.modelId ||
+            !payload.conversationId ||
+            !payload.assistantMessageId ||
+            !payload.sourceUserMessageId ||
+            payload.webSearchMode !== "always"
+        ) {
+            throw new ChatAccessError(
+                400,
+                "INVALID_RESEARCH_PREVIEW_REQUEST",
+                "Research Preview requires one saved, attachment-free question."
+            );
+        }
     }
     // Shape only. A token that is well-formed but forged, expired, issued to
     // another subject or already consumed is rejected where it is used, and
@@ -6041,6 +6123,7 @@ export const validateChatPayload = (body: unknown) => {
         promptRefinerDecision?: PromptRefinerChatDecision;
         guestAutoCapability?: string;
         guestClientTurnId?: string;
+        researchMode?: "preview";
     };
 };
 

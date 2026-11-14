@@ -1,5 +1,7 @@
 "use client";
 
+import type { ResearchPreviewControls } from "@/components/chat/useResearchPreview";
+
 import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLocationClient";
 
 import type { ReactNode } from "react";
@@ -111,6 +113,7 @@ type PromptPayload = {
   /** The models this send was made for; other panels must not consume it. */
   modelIds: string[];
   attachments: ChatAttachment[];
+  researchMode?: "preview";
   deepResearchDepth?: "quick" | "standard" | "deep";
   admissionToken?: string | null;
   contextBundle?: string | null;
@@ -310,6 +313,7 @@ export type DesktopChatShellProps = {
   accountMemoryDefault?: "on" | "off" | null;
   accountMemoryMasterEnabled?: boolean | null;
   onMemorySettingsRefresh?: () => void;
+  researchPreview?: ResearchPreviewControls;
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
@@ -521,6 +525,7 @@ export function DesktopChatShell({
   accountMemoryDefault,
   accountMemoryMasterEnabled,
   onMemorySettingsRefresh,
+  researchPreview,
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
@@ -1625,6 +1630,7 @@ export function DesktopChatShell({
               accountMemoryDefault={accountMemoryDefault}
               accountMemoryMasterEnabled={accountMemoryMasterEnabled}
               onMemorySettingsRefresh={onMemorySettingsRefresh}
+              researchPreview={researchPreview}
               onOpenDeepResearchSetup={onOpenDeepResearchSetup}
               isDeepResearchPending={isDeepResearchPending}
               onDismissDeepResearchChip={onDismissDeepResearchChip}

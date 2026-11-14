@@ -1,4 +1,5 @@
 import { reviewHandoffCopy } from "./reviewHandoff";
+import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
@@ -200,6 +201,7 @@ export const pt = {
         projectDeleteFailed: "Não foi possível excluir o projeto.",
     },
     chat: {
+        ...researchPreviewCopy["pt"],
        ...en.chat,
         aiReviewComparedQuestion: "Pergunta comparada",
         aiReviewFindings: "Constatações da revisão",

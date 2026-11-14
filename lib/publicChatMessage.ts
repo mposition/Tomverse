@@ -7,6 +7,7 @@ import {
 } from "@/lib/messageAttachmentCore";
 import type { ChatResponseAttemptRecord } from "@/lib/chatResponseAttemptCore";
 import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
+import { projectResearchSearchMetadata } from "@/lib/researchPreviewMetadata";
 
 /**
  * The one allowlist used whenever an authenticated Chat message crosses the
@@ -94,7 +95,7 @@ export const toPublicChatMessage = (row: PublicChatMessageRow) => ({
   status: row.status,
   modelId: row.modelId,
   pendingJobId: row.pendingJobId,
-  searchMetadata: row.searchMetadata,
+  searchMetadata: projectResearchSearchMetadata(row.searchMetadata),
   createdAt: row.createdAt,
   ...(row.attachments.length
     ? {
