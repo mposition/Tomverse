@@ -3720,7 +3720,7 @@ async function handleChatPost(
             scope: "current_turn" | "past_turn";
         }> = [];
 
-        for (const msg of executionMessages) {
+        for (const [messageIndex, msg] of executionMessages.entries()) {
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
                 const preserved = providerContextQueues.get(content)?.shift();
@@ -3743,7 +3743,17 @@ async function handleChatPost(
             const fileParts: FilePart[] = [];
             // One entry per image in `fileParts`, from the bytes sent.
             const imageInputTokenEstimates: number[] = [];
-            const isLatestMessage = msg === latestMessage;
+            /*
+              By position, not by identity. `latestMessage` was taken before
+              `consumeRefinerPreview()` replaced `executionMessages` with the
+              consumed view, which is read back from the store as new objects.
+              An identity check therefore never matched on a turn carrying a
+              Prompt Refiner decision: the turn's own files were never handed
+              to the file tools, and every "make these images into a PDF"
+              answered SOURCE_UNREAD (traces 0daea561, d937b61b, 2026-11-15).
+            */
+            const isLatestMessage =
+                messageIndex === executionMessages.length - 1;
 
             /**
              * Reads one file into the turn -- attached directly, or lifted
