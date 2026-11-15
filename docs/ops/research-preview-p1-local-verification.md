@@ -565,3 +565,70 @@ the repository's TypeScript loader. This session did not trigger that earlier
 CI execution or its publisher. The deployed runtime behavior remains the
 validated source above; the later commits contain evidence, query formatting
 and those test-assertion repairs.
+
+### PR #3977 failure repair
+
+The failing `dedb18851` Fast Gate stopped at locale translation and reported
+32 unit failures. Localized Research copy was spread before the English
+fallback in six dictionaries. Applying it afterwards restores the prepared
+translations. Only the two shared Research Preview brand headings are
+allowlisted; locale parity ceilings record the measured brand/cognate counts.
+
+Cohere now has an unverified context inventory row, neutral Router enrollment,
+catalogue URL coverage and an explicit unproven data-destination profile.
+The existing sixteen provider disclosures remain visible; Cohere Inc. and its
+official privacy-policy link accompany an account-specific processing,
+training and retention-unverified notice. No missing fact is promoted to a
+no-training/no-retention promise. The owner-requested default-on Chat switch
+and the separate semantic-search gate are unchanged.
+
+Research expiry accounting moved into the existing lower-level settlement
+handoff adapter without changing known, unknown or undispatched-zero usage.
+The Cohere strict-tool shim moved into its existing provider factory. These
+changes preserve Prompt Refiner's 190-file runtime closure and its existing
+approval generation rather than expanding that unrelated authority contract.
+
+The already-applied Cohere migration SQL is byte-for-byte unchanged. Its new
+sidecar binds the SQL checksum and the previous Sail-era CHECK definition,
+derived with PostgreSQL 17 in a rolled-back local temporary-table transaction.
+The current CHECK round-trip matches the migrated local table first. The
+baseline parser accepts adjacent DROP/ADD statements only for the same table
+and constraint, rejecting missing halves, intervening DDL or a transaction
+boundary. Dedicated durable-Research and Perplexity DB suites pass 38/38.
+
+Offline fixtures retain all current catalogue rows but do not grant Cohere a
+collector adapter. Unobserved Cohere selections remain unavailable, so the
+mock v2 report keeps null whole-population quality deltas. The historical v1
+digest-equivalence fixture explicitly retains its prior 45-model input.
+
+Review `r-20261115-045043-096f83` accepted the accounting/baseline work in one
+slot and rejected the initial hidden-table regression in the other. The
+corrected disclosure review `r-20261115-050356-e1172b` accepted `4e5e508be`.
+Its minor test-label and stale-comment findings are corrected without changing
+that reviewed boundary. Render regressions pass 2/2, disclosure/locale/source
+checks 55/55, final publication/provider/source regressions 54/54, and Research
+adapter/evaluation regressions 33/33. Whole-repository TypeScript passes with
+an 8 GiB Node heap; changed-file ESLint passes.
+
+The privacy effective date remains the existing draft date, 2026-11-16, for
+the eventual publication decision. Both table components now participate in
+the observed document digest. `APPROVED_AMENDED_DIGESTS` is byte-for-byte
+unchanged; updating observed evidence grants no publication or email authority.
+No new paid model/search run, merge or deployment is part of this repair.
+Concurrent CI publisher commits `f73de157d` and `0ef9ee08c` are preserved by
+normal merges. The PR is kept draft with `ci:hold`; no CI rerun was requested.
+
+The complete local server unit sweep ran 19,801 tests: 19,695 passed, 102
+skipped and four failed. All four were then checked independently: the final
+observed privacy digest passes publication regressions; installing the separate
+marketing-video lockfile dependencies restores its sandbox guard; the PDF
+native-worker case passes 7/7 in isolation; and using Git Bash in this process's
+PATH restores the shell syntax check on Windows. The separate serial lane
+passes 21/21. The aggregate server command was not rerun or reported as green.
+
+The complete client lane exposed three Node render-file load failures because
+the shared Research card imported plain CSS. Web and Native now load that same
+stylesheet from their respective global CSS entry points. The final complete
+client lane passes 1,022/1,022 with no skips. Native production bundling passes,
+and its emitted CSS includes the Research card styles. Changed-file lint and
+whitespace checks pass.

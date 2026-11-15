@@ -5,7 +5,6 @@ import type { ResearchPreviewRunDto } from "../../lib/researchPreviewRunTypes";
 import { researchRunNeedsPolling, type ResearchPreviewRunTransport } from "../../lib/researchPreviewRunClient";
 import { researchPreviewCopy } from "../../locales/researchPreview";
 import type { Language } from "../../lib/language";
-import "./researchPreviewRun.css";
 
 export function ResearchPreviewRunCard({ runId, conversationId, assistantMessageId, language, transport, onMessage }: {
   runId: string; conversationId: string; assistantMessageId: string; language: Language;
