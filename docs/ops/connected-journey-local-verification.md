@@ -67,7 +67,10 @@ product execution or cost. Entry and new/existing continuation groups remain
 separate. Orphan, missing dispatch, property/time mismatch and reversed evidence
 are diagnostics, never inferred success. Issues can precede success. Unobserved
 is not abandonment or failure. No mature denominator displays no ratio; a
-query failure displays unavailable.
+query failure displays unavailable without hiding unrelated dashboard metrics.
+Diagnostics describe the bounded read: a stage more than 24 hours after a start
+older than the 31-day lookback can appear as missing-start evidence; it cannot
+enter the mature success numerator.
 
 ## Local verification
 
@@ -78,6 +81,13 @@ credentials. The browser harness blocks external network and uses mock answers.
 ```powershell
 node --import tsx --test tests/connectedJourney.test.mjs tests/productAnalyticsShared.test.mjs tests/productAnalyticsDelivery.test.mjs tests/analyticsConsentPolicy.test.mjs tests/reviewToChat.test.mjs tests/continuationQuickAction.test.mjs
 node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/server-contract/connected-journey-dashboard.test.mjs tests/server-contract/analytics-events-marketing-touch-route.test.ts
+$env:NODE_OPTIONS = "--max-old-space-size=12288"
+$env:DATABASE_URL = "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1"
+$env:DIRECT_URL = $env:DATABASE_URL
+$env:E2E_AUTH_BYPASS = "true"
+$env:E2E_DISABLE_DATABASE = "true"
+$env:NEXTAUTH_SECRET = "tomverse-e2e-nextauth-secret-only-2026"
+$env:NEXT_TELEMETRY_DISABLED = "1"
 npm run build
 npm run test:e2e:run -- tests/e2e/review-to-chat.spec.ts tests/e2e/external-conversation-continuation.spec.ts tests/e2e/import-list-continuation-quick-action.spec.ts --project=desktop-chromium
 ```
@@ -92,6 +102,52 @@ The existing-database deployment guard was exercised separately: the isolated
 cluster was placed at the preceding CHECK/history state, then `npm run db:migrate`
 verified the exact previous constraint through `baseline-check.json` and applied
 the pending migration. The sidecar binds the migration SQL checksum, constraint
-target and the prior `pg_get_constraintdef` digest. Constraint tests (5) and the
+target and the prior `pg_get_constraintdef` digest. On 2026-11-15, constraint tests (5) and the
 migration baseline suite (37) passed. No `migrate resolve --applied` shortcut was
 used for the new constraint.
+
+## Verification run: 2026-11-15
+
+- Core event, consent, delivery, journey lifecycle, aggregation, Review packet and
+  continuation action tests: 54 passed.
+- Authenticated analytics route, dashboard failure isolation and server GA4
+  exclusion tests: 16 passed.
+- Static CHECK/baseline sidecar tests: 5 passed; migration baseline suite: 37 passed.
+- Changed TypeScript/TSX/MJS files: lint passed, including the final browser
+  fixture corrections. A focused strict TypeScript check of both changed E2E
+  files and their dependencies (with the existing Turnstile global declaration)
+  also passed after those corrections.
+- Desktop Chromium: 93 distinct scenarios verified. The initial full run passed
+  92/93; the new Import scenario submitted before its fixture's draft save.
+  After waiting for the actual PUT response, all five connected Import cases
+  passed again. The full 18-case desktop Review suite also passed after the
+  final shared readiness correction.
+- Mobile Chromium: 25 distinct scenarios passed (six continuation cases, three
+  list-action cases and all 16 applicable Review cases). Two desktop-only
+  Review cases were intentionally skipped. The initial Studio fixture assumed
+  a visible composer on the mobile results tab; using the existing analysis CTA
+  as the readiness condition corrected it. The final complete desktop/mobile
+  Review run passed 34 cases with those two intentional skips.
+- Final `npm run build`: passed, including its full TypeScript check and all
+  224 static pages. The standalone non-incremental typecheck was stopped to
+  reduce memory contention; it is not counted as a separate passing run.
+
+The application bundle was built from `f093a84ae`; subsequent changes only
+synchronize browser fixtures with draft saving/mobile readiness and record the
+results. No application code changed after the successful build.
+
+The browser run uses the repository Playwright environment and external-network
+block, with a local override serving the production build via
+`npx next start -H 127.0.0.1 -p 3194` (base URL and allowed request hosts match).
+It uses mocked answers and the existing loopback-only fixture switches, with no
+production credentials or paid provider execution.
+
+## Independent review and release state
+
+The initial completed-diff review (`r-20261115-104722-ba3d49`) rejected the missing
+migration baseline sidecar. The follow-up commit `f093a84ae` adds the verified
+sidecar and the GA4 flush/dashboard corrections. Follow-up review
+`r-20261115-111014-641d68` received Claude accept, but the other reviewer exited
+abnormally (`reviewer_exit_1`), so the aggregate verdict is **unknown**, not accept.
+The owner explicitly chose to record unknown without resubmission on 2026-11-15.
+No push, PR, production database change, merge or deployment was performed.

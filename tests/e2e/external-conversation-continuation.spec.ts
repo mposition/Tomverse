@@ -2781,7 +2781,9 @@ for (const [product, action] of [["chat", "new"], ["chat", "existing"], ["review
     }
     await expect(page).toHaveURL(`/continuations/${CONVERSATION_ID}`);
     await expect.poll(() => journeys.some(e => e.journey_stage === "ready")).toBe(true);
+    const draftSaved = product === "chat" ? page.waitForResponse(response => response.url().includes(`/api/products/chat/drafts/${CONVERSATION_ID}`) && response.request().method() === "PUT") : Promise.resolve();
     await page.locator('[data-testid="chat-input"]:visible textarea').fill("Continue the original discussion");
+    await draftSaved;
     await page.getByTestId("chat-send-button").click();
     await expect.poll(() => journeys.some(e => e.journey_stage === "reply_observed")).toBe(true);
     expect(api.createBodies).toHaveLength(action === "new" ? 1 : 0);

@@ -20,7 +20,8 @@ async function setup(page: Page, baseURL: string, appearance: "studio" | "classi
   const api = await mockComparisonReview(page, { withSecondary: true, recoverStored: true, withoutSynthesis: true });
   await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL }]);
   await page.goto("/review?lang=ko&conversation=qa-conversation");
-  await expect(page.locator('[data-testid="chat-input"]:visible')).toBeVisible();
+  await expect(page.getByTestId("studio-analysis-entry")
+    .or(page.getByRole("button", { name: "AI 답변 교차검토" }))).toBeVisible();
   return { ...api, journeys, getSetup: () => analysisSetup };
 }
 async function openAnalysis(page: Page) {
