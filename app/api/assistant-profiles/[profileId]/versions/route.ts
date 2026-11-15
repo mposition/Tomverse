@@ -11,7 +11,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -30,7 +30,6 @@ import {
 import { ASSISTANT_KNOWLEDGE_LIMITS } from "@/lib/assistantKnowledgeLimits";
 import { resolveProfileModelIds } from "@/lib/assistantProfileModels";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
-import { authOptions } from "@/lib/auth";
 
 const publishSchema = z
     .object({
@@ -68,8 +67,10 @@ const publishSchema = z
     })
     .strict();
 
-const requireOwner = async () => {
-    const session = await getServerSession(authOptions);
+const requireOwner = async (req: Request) => {
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
     const userId = session?.user?.id;
     if (!userId) return null;
     if (!(await isAssistantProfilesEnabled())) {
@@ -83,7 +84,8 @@ export async function GET(
     { params }: { params: Promise<{ profileId: string }> }
 ) {
     try {
-        const userId = await requireOwner();
+        const userId = await requireOwner(req);
+        if (userId instanceof Response) return userId;
         if (!userId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
@@ -118,7 +120,8 @@ export async function POST(
     { params }: { params: Promise<{ profileId: string }> }
 ) {
     try {
-        const userId = await requireOwner();
+        const userId = await requireOwner(req);
+        if (userId instanceof Response) return userId;
         if (!userId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }

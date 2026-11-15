@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import {
     apiSecurityResponse,
     consumeApiRateLimit,
@@ -8,7 +8,6 @@ import {
     assertExternalImportEnabled,
     ExternalImportDisabledError,
 } from "@/lib/appSettings";
-import { authOptions } from "@/lib/auth";
 import { lockErrorResponse } from "@/lib/conversationLock";
 import {
     deleteExternalConversationSnapshot,
@@ -45,7 +44,9 @@ export async function GET(
     context: RouteContext<"/api/external-conversations/[conversationId]">
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         if (!session?.user) {
             return NextResponse.json({ error: "권한 없음" }, { status: 401 });
         }
@@ -119,7 +120,9 @@ export async function DELETE(
     context: RouteContext<"/api/external-conversations/[conversationId]">
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         if (!session?.user) {
             return NextResponse.json({ error: "권한 없음" }, { status: 401 });
         }

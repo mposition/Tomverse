@@ -21,7 +21,7 @@ export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 
 import { NextResponse, after } from "next/server";
-import { getServerSession } from "next-auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -40,7 +40,6 @@ import {
     listKnowledgeFiles,
     prepareKnowledgeUpload,
 } from "@/lib/assistantKnowledgeService";
-import { authOptions } from "@/lib/auth";
 
 const requestSchema = z.discriminatedUnion("action", [
     z
@@ -96,7 +95,9 @@ export async function GET(
     { params }: { params: Promise<{ profileId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         const userId = session?.user?.id;
         if (!userId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -134,7 +135,9 @@ export async function POST(
     { params }: { params: Promise<{ profileId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         const userId = session?.user?.id;
         if (!userId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
