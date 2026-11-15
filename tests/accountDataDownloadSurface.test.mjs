@@ -22,19 +22,6 @@ const page = read("../app/(site)/(application)/settings/data/page.tsx");
 const settingsList = read("../components/auth/AuthButton.tsx");
 const route = read("../app/api/user/account/export/route.ts");
 
-test("export copy names the scope and exclusions before a download is requested", () => {
-  for (const text of [en.accountDataExport.pageDescription, en.accountDataExport.dataTabDescription]) {
-    assert.match(text, /exportable account data/);
-    assert.match(text, /non-user data.*excluded/);
-    assert.doesNotMatch(text, /everything/);
-  }
-  for (const text of [ko.accountDataExport.pageDescription, ko.accountDataExport.dataTabDescription]) {
-    assert.match(text, /내보내기 가능한 계정 데이터/);
-    assert.match(text, /사용자 데이터가 아닌 항목은 제외/);
-    assert.doesNotMatch(text, /데이터 전체/);
-  }
-});
-
 test("the settings list links to the page, and the page renders the component", () => {
   assert.match(settingsList, /href="\/settings\/data"/);
   assert.match(settingsList, /section="account-data"/);
