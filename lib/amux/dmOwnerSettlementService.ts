@@ -50,8 +50,8 @@ import { openAmuxV52ReviewHistory, readAmuxV52RejectedReviews,
  */
 
 const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
-/** Statements the sync makes for the rejected reviews' findings: one for every pending Task. */
-export const AMUX_DM_OWNER_SETTLEMENT_REVIEW_PRISMA_CALLS = 1;
+/** Statements the sync makes for the rejected reviews' findings: the ranked ids and the rows, for every pending Task. */
+export const AMUX_DM_OWNER_SETTLEMENT_REVIEW_PRISMA_CALLS = 2;
 /** New settlements filed per tick, and cards handed to the relay per tick. */
 export const AMUX_DM_OWNER_SETTLEMENT_SYNC_LIMIT = 3;
 /** Pending settlements read per tick, so a few that cannot be filed never hide the rest. */
@@ -86,9 +86,9 @@ type SiblingRow = SealedTitle & { forTaskId: string; id: string; label: string; 
  * card yet are read with the rows their cards are opened from; the cards of
  * settlements no longer open that the relay has not closed come back to be
  * closed. While the switch is off, the settlements the owner asked for from
- * the owner queue are read and opened the same way. At most nine statements
- * past the boundary's own (the ninth reads the pending Tasks' rejected
- * reviews, owner decision 2026-11-15).
+ * the owner queue are read and opened the same way. At most ten statements
+ * past the boundary's own (the ninth and tenth rank and read the pending
+ * Tasks' rejected reviews, owner decision 2026-11-15).
  */
 export async function readAmuxDmOwnerSettlementSyncRows(tx: Prisma.TransactionClient,
   input: { enabled: boolean }) {

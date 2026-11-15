@@ -22,9 +22,10 @@ const SEVERITY_SYNONYMS = new Map([
 ]);
 
 const FENCE = /```[ \t]*([A-Za-z0-9_-]*)[ \t]*\r?\n([\s\S]*?)\r?\n?[ \t]*```/g;
-// How many `{` positions are tried outward from the final "verdict" key to find
-// the object that holds it, so a long answer full of braces cannot make the scan slow.
-const MAX_ENCLOSING_STARTS = 20;
+// Looking outward from the final "verdict" key for the objects that hold it costs
+// at most this many characters scanned in all, so a long answer full of braces
+// cannot make the scan slow (the answer itself is bounded at 8 MiB).
+const ENCLOSING_SCAN_BUDGET = 24_000_000;
 
 const unknown = (reason) => ({ verdict: "unknown", reason, findings: [] });
 
@@ -53,11 +54,12 @@ function normaliseFinding(raw) {
 
 const asObject = (value) => (value !== null && typeof value === "object" && !Array.isArray(value) ? value : null);
 
-/** The span of the balanced {...} that starts at `start`, or null when it never closes. */
-function balancedFrom(text, start) {
+/** The end of the balanced {...} that starts at `start`, or null when it never closes. `budget.left` counts the characters scanned. */
+function balancedFrom(text, start, budget) {
   let depth = 0;
   let inString = false;
   for (let i = start; i < text.length; i += 1) {
+    if (budget.left-- <= 0) return null;
     const char = text[i];
     if (inString) {
       if (char === "\\") i += 1;
@@ -112,25 +114,29 @@ function finalVerdict(text) {
     try { return { parsed: asObject(JSON.parse(fence.body)) }; } catch { return { parsed: null }; }
   }
   if (keyAt < 0) return null;
-  // Unfenced: the object that holds the key, found outward from it. An object
-  // that closes before the key (a nested finding) does not hold it; keys may
-  // come in any order.
-  let from = keyAt;
-  for (let step = 0; step < MAX_ENCLOSING_STARTS; step += 1) {
+  // Unfenced: the OUTERMOST object that holds the key, found outward from it. An
+  // object that closes before the key (a nested finding) does not hold it, and
+  // one that holds it but sits inside the answer (`"expected": {"verdict": ...}`
+  // in a finding) is not the answer: the answer is the widest object around the
+  // key that is JSON and has a verdict of its own. Keys may come in any order.
+  const budget = { left: ENCLOSING_SCAN_BUDGET };
+  let answer = null;
+  let broken = false;
+  for (let from = keyAt; from >= 0;) {
     const start = text.lastIndexOf("{", from);
     if (start < 0) break;
-    const end = balancedFrom(text, start);
-    if (end !== null && end > keyAt) {
-      try {
-        const parsed = asObject(JSON.parse(text.slice(start, end)));
-        if (parsed && "verdict" in parsed) return { parsed };
-      } catch { /* an enclosing object that is not JSON: the final block is unreadable */ }
-      return { parsed: null };
-    }
     from = start - 1;
-    if (from < 0) break;
+    const end = balancedFrom(text, start, budget);
+    // A `{` before the key that never closes means the final block is unfinished.
+    if (end === null) { broken = true; if (budget.left <= 0) break; continue; }
+    if (end <= keyAt) continue;
+    try {
+      const parsed = asObject(JSON.parse(text.slice(start, end)));
+      if (parsed && "verdict" in parsed) answer = parsed;
+    } catch { broken = true; }
   }
-  return { parsed: null };
+  // Anything unfinished or not JSON around the key: the final block is unreadable, not absent.
+  return { parsed: broken ? null : answer };
 }
 
 function verdictOf(value) {

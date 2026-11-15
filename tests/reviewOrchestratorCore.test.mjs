@@ -243,6 +243,13 @@ test("verdict parsing never guesses a verdict, reads what it can, and blocking f
   // Keys in any order: a nested object before the verdict does not hide it.
   assert.equal(parseReviewerOutput(`${accept}\n{"findings":[{"severity":"major","summary":"bad"}],"verdict":"reject"}`).verdict, "reject");
   assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"findings":[{"severity":"nit","summary":"x"}],"verdict":"reject"}\n${fence}`).verdict, "reject");
+  // The answer is the widest object with a verdict of its own, not one nested in a finding,
+  // and not limited by how many findings come before the verdict key.
+  const nested = parseReviewerOutput(`{"verdict":"reject","findings":[{"severity":"major","summary":"broken","expected":{"verdict":"accept"}}]}`);
+  assert.deepEqual([nested.verdict, nested.findings.length], ["reject", 1]);
+  const many = parseReviewerOutput(`{"findings":[${Array.from({ length: 60 }, (_, i) => `{"severity":"nit","summary":"n${i}"}`).join(",")}],"verdict":"reject"}`);
+  assert.deepEqual([many.verdict, many.findings.length], ["reject", 60]);
+  assert.equal(parseReviewerOutput(`{"verdict":"reject","findings":[{"expected":{"verdict":"accept"}}`).verdict, "unknown");
   // A later json block with no verdict is the later answer, and says nothing: unknown.
   assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"note":"see above"}\n${fence}`).verdict, "unknown");
   // A code block after the verdict is not mistaken for a verdict.

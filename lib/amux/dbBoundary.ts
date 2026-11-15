@@ -623,10 +623,10 @@ export const AMUX_DB_BOUNDARIES = {
   // the same 12 statements. Sync: setup + the facts of open and claimed
   // settlements + the cancel of those whose Task moved + the candidate scan +
   // the insert + pending + their sibling cards + their pull request evidence +
-  // their rejected reviews' findings + closing + fence.
+  // their rejected reviews' findings (ranked ids, then rows) + closing + fence.
   decisionMakerOwnerSettlementSync: {
     operation: "decision_maker_owner_settlement_sync",
-    prismaCallCeiling: 11,
+    prismaCallCeiling: 12,
     isolation: "mutation",
   },
   // Hand off (unfilable evidence, or an answer that decides nothing): setup +

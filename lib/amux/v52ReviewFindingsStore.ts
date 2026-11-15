@@ -169,8 +169,10 @@ export async function openAmuxV52ReviewFindingsRow(attemptId: string,
   finally { plain?.fill(0); keys?.masterKey.fill(0); }
 }
 
-/** Prisma calls `readAmuxV52ReviewHistory` and `readAmuxV52RejectedReviews` make, for their caller's boundary. */
+/** Prisma calls `readAmuxV52ReviewHistory` makes, for its caller's boundary. */
 export const AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS = 1;
+/** Prisma calls `readAmuxV52RejectedReviews` makes: the ranked ids, then the rows. */
+export const AMUX_V52_REJECTED_REVIEWS_PRISMA_CALLS = 2;
 /** Reviews read per Task: the newest few explain a retry; older ones add noise. */
 export const AMUX_V52_REVIEW_HISTORY_TAKE = 4;
 /** Rejected reviews of one Task a card shows. */
@@ -206,24 +208,28 @@ export type AmuxV52ReviewHistoryRow =
   Awaited<ReturnType<typeof readAmuxV52ReviewHistory>>[number];
 
 /**
- * The newest rejected reviews of several Tasks, still one statement: at most
- * three per Task, newest first, for the cards the Decision Maker is shown.
+ * The newest rejected reviews of several Tasks: at most three per Task, newest
+ * first, for the cards the Decision Maker is shown. The Task's rank is taken in
+ * SQL first, so a Task with many rejections cannot crowd another Task out of a
+ * shared limit.
  */
 export async function readAmuxV52RejectedReviews(tx: Prisma.TransactionClient,
   taskIds: readonly string[]): Promise<AmuxV52ReviewHistoryRow[]> {
   if (taskIds.length === 0) return [];
+  const ranked = await tx.$queryRaw<Array<{ attemptId: string }>>`
+    SELECT r."attemptId" FROM (
+      SELECT "attemptId", row_number() OVER (PARTITION BY "taskId"
+        ORDER BY "createdAt" DESC, "attemptId" DESC) AS "rank"
+      FROM "AmuxV52ReviewRecord"
+      WHERE "taskId" = ANY(${[...taskIds]}) AND "verdict" = 'reject'
+    ) r WHERE r."rank" <= ${AMUX_V52_REJECTED_REVIEWS_PER_TASK}`;
+  if (ranked.length === 0) return [];
   const rows = await tx.amuxV52ReviewRecord.findMany({
-    where: { taskId: { in: [...taskIds] }, verdict: "reject" },
+    where: { attemptId: { in: ranked.map((row) => row.attemptId) } },
     orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
-    take: Math.min(60, taskIds.length * AMUX_V52_REJECTED_REVIEWS_PER_TASK * 2),
     select: HISTORY_SELECT,
   });
-  const seen = new Map<string, number>();
-  return rows.map(historyRow).filter((row) => {
-    const count = (seen.get(row.taskId) ?? 0) + 1;
-    seen.set(row.taskId, count);
-    return count <= AMUX_V52_REJECTED_REVIEWS_PER_TASK;
-  });
+  return rows.map(historyRow);
 }
 
 export type AmuxV52OpenedReview = AmuxV52ReviewHistoryRow & {
