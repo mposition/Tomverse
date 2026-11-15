@@ -87,6 +87,11 @@ export const AMUX_DM_T2_MERGE_CONTENT_ALARMS: readonly RegExp[] = [
   /\b(?:auth\w*|session\w*|secret\w*|token|password\w*|cookie\w*|csrf\w*|permission\w*|api_?key\w*|bearer|credential\w*|reauth\w*|require(?:Admin|User|Session|Auth)\w*)\b/i,
   /\b(?:send\w*(?:Email|Mail)\w*|mail\w*|resend|smtp|webhook\w*|notify\w*)\b/i,
   /\w*(?:userid|ownerid|tenantid|accountid|organizationid|orgid|createdbyid|authorid|memberid)\b|\b(?:user|owner|session|viewer|actor|member)\.id\b|\bsession\.user\b|\bis(?:Admin|Owner|Member)\b|\bvisibility\b|\bisPublic\b/i,
+  // Anything leaving Tomverse by a call of its own (review r-20261115-115539-709020: a route that posts the
+  // request body to an outside URL with fetch): the network, another process, code assembled at run time.
+  /\bfetch\s*\(|https?:\/\/|\bXMLHttpRequest\b|\bWebSocket\b|\bEventSource\b|\bsendBeacon\b|\b(?:axios|undici|node-fetch|got)\b|\bhttps?\.(?:request|get)\s*\(|\bnet\.(?:connect|createConnection)\b|\bdgram\b|\bchild_process\b|\b(?:exec|execFile|execSync|spawn|spawnSync|fork)\s*\(|\beval\s*\(|\bnew\s+Function\b|\bimport\s*\(\s*[^"'`\s]/,
+  // Data at rest: the database (any query decides whose rows it reads or writes) and the file system.
+  /\b(?:prisma|tx|db|client)\.[a-z]\w*\.(?:find\w*|create\w*|update\w*|upsert|delete\w*|count|aggregate|groupBy)\s*\(|\$queryRaw|@prisma\/client|@\/lib\/prisma\b|\b(?:writeFile|appendFile|unlink|rmdir|rm|mkdir|rename|copyFile|createWriteStream)(?:Sync)?\s*\(/,
   /\bdangerouslySetInnerHTML\b/,
   /^Subproject commit [0-9a-f]+$/,
 ];
