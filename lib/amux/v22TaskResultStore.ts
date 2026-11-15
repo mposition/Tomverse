@@ -15,11 +15,19 @@ import { decodeV22PatchEvidence, encodeV22PatchEvidence,
 import { loadAmuxContentUnitKeys } from "@/lib/amux/ideaKeyStore";
 import { amuxV22ConclusionSha256, parseAmuxV22Conclusion } from
   "@/lib/amux/v22ConclusionCore";
+import { AMUX_V22_TRANSPORT_MAX_BYTES, amuxV22LocalCliFlowEnabled } from
+  "@/lib/amux/v22LocalCliFlowCore";
 import { amuxV22OwnerQuestionSettlement, amuxV22OwnerQuestionSha256,
   parseAmuxV22OwnerQuestion } from "@/lib/amux/v22OwnerQuestionCore";
 import { prisma } from "@/lib/prisma";
 
+/** The earlier flow's report bound. The local CLI flow (v22LocalCliFlowCore.ts)
+ * takes a report up to the transport backstop; the sidecar shortens a longer
+ * one in the middle, never drops it. A patch keeps its own bound. */
 export const AMUX_V22_RESULT_MAX_BYTES = 65_536;
+export const AMUX_V22_PATCH_MAX_BYTES = 65_536;
+export const amuxV22ResultMaxBytes = (flow = amuxV22LocalCliFlowEnabled()) =>
+  flow ? AMUX_V22_TRANSPORT_MAX_BYTES : AMUX_V22_RESULT_MAX_BYTES;
 const IDEA_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[0-9a-f]{12}$/;
 
 export class AmuxV22TaskResultError extends Error {
@@ -36,12 +44,17 @@ export function v22TaskResultIdeaId(sourceSnapshot: unknown): string | null {
     ? record.ideaId : null;
 }
 
-export function v22TaskResultSha256(text: string): string {
+export function v22TaskResultSha256(text: string,
+  maxBytes: number = amuxV22ResultMaxBytes()): string {
   const bytes = Buffer.from(text, "utf8");
-  if (bytes.length < 1 || bytes.length > AMUX_V22_RESULT_MAX_BYTES ||
+  if (bytes.length < 1 || bytes.length > maxBytes ||
       text.includes("\0")) throw new AmuxV22TaskResultError("result_invalid");
   return createHash("sha256").update(bytes).digest("hex");
 }
+
+/** A patch text's digest, under the patch's own bound (unchanged by the flow). */
+export const v22TaskPatchSha256 = (text: string) =>
+  v22TaskResultSha256(text, AMUX_V22_PATCH_MAX_BYTES);
 
 /** Called with a new per-attempt key created outside the DB transaction. */
 export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
@@ -52,7 +65,7 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
   if (v22TaskResultSha256(input.text) !== input.sourceSha256 ||
       !IDEA_ID.test(input.ideaId))
     throw new AmuxV22TaskResultError("result_invalid");
-  if (input.patch && (v22TaskResultSha256(input.patch.text) !==
+  if (input.patch && (v22TaskPatchSha256(input.patch.text) !==
       input.patch.sha256 || !/^[0-9a-f]{40}$/.test(input.patch.baseSha) ||
       !input.patch.text.startsWith("diff --git ")))
     throw new AmuxV22TaskResultError("result_invalid");
@@ -290,7 +303,7 @@ export async function readAmuxV22TaskPatchEvidence(attemptId: string,
       patch.digest, patch.digestKeyId, keys))
       throw new AmuxV22TaskResultError("result_invalid");
     const evidence = decodeV22PatchEvidence(plain);
-    if (v22TaskResultSha256(evidence.text) !== patch.patchSha256)
+    if (v22TaskPatchSha256(evidence.text) !== patch.patchSha256)
       throw new AmuxV22TaskResultError("result_invalid");
     return { ...evidence, sha256: patch.patchSha256,
       baseSha: patch.baseSha };
@@ -340,7 +353,7 @@ export async function openAmuxV22TaskPatchRow(attemptId: string,
       row.digest, row.digestKeyId, keys))
       throw new AmuxV22TaskResultError("result_invalid");
     const evidence = decodeV22PatchEvidence(plain);
-    if (v22TaskResultSha256(evidence.text) !== row.patchSha256)
+    if (v22TaskPatchSha256(evidence.text) !== row.patchSha256)
       throw new AmuxV22TaskResultError("result_invalid");
     return evidence.text;
   } finally { plain?.fill(0); keys.masterKey.fill(0); }

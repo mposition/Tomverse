@@ -11,18 +11,24 @@ import { amuxContentDigest } from "@/lib/amux/ideaCrypto";
 import { normalizeV22OptionalPatch } from "@/lib/amux/v22OptionalPatch";
 import { encodeV22PatchEvidence, v22PublishFilesSha256 } from
   "@/lib/amux/v22PatchEvidence";
-import { AmuxV22TaskResultError, recordAmuxV22TaskResult,
+import { AmuxV22TaskResultError, amuxV22ResultMaxBytes, recordAmuxV22TaskResult,
   readAmuxV22TaskPatchEvidence, v22TaskResultIdeaId,
   v22TaskResultSha256 } from
   "@/lib/amux/v22TaskResultStore";
+import { AMUX_V22_TRANSPORT_MAX_BYTES, amuxV22LocalCliFlowEnabled } from
+  "@/lib/amux/v22LocalCliFlowCore";
 import { prisma } from "@/lib/prisma";
 
 const WRITE_CODE_LATCH = true;
 const WRITE_ENV = "TOMVERSE_AMUX_V22_TASK_RESULT_WRITE";
 const id = z.string().uuid();
+// The local CLI flow (v22LocalCliFlowCore.ts) takes a report up to the
+// transport backstop; v22TaskResultSha256 checks its UTF-8 bytes. The request
+// also carries the bounded patch evidence.
+const localCliFlow = () => amuxV22LocalCliFlowEnabled();
 const bodySchema = z.object({
   attemptId: id, worker: z.string().regex(/^[A-Za-z0-9._:-]{1,120}$/),
-  resultText: z.string().min(1).max(65_536),
+  resultText: z.string().min(1).refine((text) => text.length <= amuxV22ResultMaxBytes()),
   sourceSha256: z.string().regex(/^[0-9a-f]{64}$/),
   // Patch evidence is an optional private result. A malformed or unsafe patch
   // must not discard the already-paid Task response.
@@ -73,7 +79,8 @@ export async function POST(request: Request): Promise<Response> {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   let body: z.infer<typeof bodySchema>;
   try {
-    body = await readLimitedJson(request, 327_680, bodySchema);
+    body = await readLimitedJson(request, localCliFlow() ?
+      2 * AMUX_V22_TRANSPORT_MAX_BYTES + 327_680 : 327_680, bodySchema);
     if (v22TaskResultSha256(body.resultText) !== body.sourceSha256)
       return amuxJsonNoStore({ error: "Invalid request." }, 400);
   } catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }

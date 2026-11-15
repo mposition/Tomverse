@@ -174,3 +174,51 @@ only; no geographic or data-processing expansion; synthetic checks then
 review/CI before installation; existing Ubuntu sidecar/bridge split; app DB
 and Admin remain authoritative. Publishing and deployment of Task results
 are outside this repair.
+
+## Local CLI flow (owner decision 2026-11-15)
+
+A v22 one-shot run behaves like a local CLI session; this is the default.
+`TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled` restores the earlier behaviour in
+the app, the sidecar and the bridge, so set it the same way on Railway and in
+the box's sidecar and bridge unit drop-ins. Source:
+`lib/amux/v22LocalCliFlowCore.ts`; policy: `docs/policy/development-agent-orchestration.md`
+"v22 worker 실행: 로컬 CLI 흐름".
+
+What a worker gets:
+
+- Every role (`design`, `implement`, `review`, `investigate`, and `verify`,
+  which runs as investigate) has the jailed shell and can run tests: Claude
+  `Read,Grep,Glob,Bash` (implement adds `Edit,Write`), Codex's workspace-write
+  sandbox, Copilot's shell tools, Antigravity's `run_command`. The jail, the
+  network block and the credential isolation are unchanged. Cursor keeps its
+  read-only ask mode (its shell cannot be jailed); `operate` stays a person's
+  step. A read role's checkout change is reported in its result and kept as a
+  preserved patch, then the checkout goes back to its base; it is never
+  published. Profiles still name roles and tools as before.
+- Every role installs the checkout's locked dependencies (30 minutes); a
+  failure is told to the worker and recorded in the result's `dependencies`.
+- The brief, the owner's answer, the previous patch (already applied for
+  implement), prior conclusions and review findings are files under
+  `.amux/context/` in the checkout, kept out of Git by `.git/info/exclude`.
+- No fixed deadline: a run stops only at a 30-minute stall (no output and no
+  checkout change), the operator's stop, or the 6-hour safety cap. Its change
+  and output are kept.
+
+What the sidecar keeps in its state directory (mode 0600, beside the journal,
+never in it): `<attempt>.transcript.jsonl` (the CLI's whole stdout; Claude
+runs `--output-format stream-json --verbose`) and `<attempt>.preserved.patch`
+(the change a stopped or failed run, or a read role, left). Both are removed
+30 days after they were written, when a later run starts. The app does not
+store transcripts yet.
+
+Operator stop of a live run: send `{"op":"stop","attemptId":"<id>"}` on the
+worker's sidecar socket as the bridge account, or `systemctl stop` the sidecar
+unit (SIGTERM stops every live run the same way and writes its terminal
+before the process exits; give the unit a `TimeoutStopSec` of at least 120 s).
+
+Box rollout order: build and install the bridge binary and the sidecar bundle
+from the same commit before the app release that carries this flow reaches
+production. An earlier bridge refuses prompts over 64 KiB and does not review
+a lower grade's kept contract change; an earlier sidecar refuses prompts over
+32 KiB. Either way the content is never lost (the app keeps the result and
+patch rows), but such runs go to a person until the box is updated.

@@ -229,6 +229,30 @@ const MAX_ROUTING_RESPONSE_BYTES: usize = 512 * 1024;
 const MAX_LIFECYCLE_RESPONSE_BYTES: usize = 128 * 1024;
 const MAX_QUEUE_ITEMS: usize = 512;
 
+/// The v22 local CLI flow (owner decision 2026-11-15,
+/// lib/amux/v22LocalCliFlowCore.ts): on unless
+/// TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW is exactly `disabled`.
+pub fn v22_local_cli_flow() -> bool {
+    std::env::var("TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW")
+        .map(|value| value.trim() != "disabled").unwrap_or(true)
+}
+
+/// A memory backstop for one prompt, context set or report crossing the
+/// bridge (AMUX_V22_TRANSPORT_MAX_BYTES), not a work limit.
+pub const V22_TRANSPORT_MAX_BYTES: usize = 32 * 1024 * 1024;
+
+/// A report's bound: the earlier flow's 64 KiB, or the transport backstop.
+pub fn v22_result_max_bytes() -> usize {
+    if v22_local_cli_flow() { V22_TRANSPORT_MAX_BYTES } else { 65_536 }
+}
+
+/// A delivery pull answer carries the prompt and, in the local CLI flow, its
+/// context files (the brief, the previous patch, prior conclusions).
+fn v22_delivery_response_max_bytes() -> usize {
+    if v22_local_cli_flow() { 2 * V22_TRANSPORT_MAX_BYTES + MAX_LIFECYCLE_RESPONSE_BYTES }
+    else { MAX_LIFECYCLE_RESPONSE_BYTES }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueueTask {
@@ -1412,7 +1436,7 @@ impl TomverseApi {
         publish_files: Option<&Value>,
         publish_files_digest: Option<&str>,
     ) -> Result<V22UsageRecord> {
-        if result_text.is_empty() || result_text.len() > 65_536 ||
+        if result_text.is_empty() || result_text.len() > v22_result_max_bytes() ||
             result_text.contains('\0') || expected_digest.len() != 64 ||
             !expected_digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             bail!("invalid v22 result envelope");
@@ -3803,7 +3827,7 @@ impl TomverseApi {
         let (status, body): (_, DeliveryPullResponse) = read_bounded_json(
             response,
             &[StatusCode::OK, StatusCode::CONFLICT],
-            MAX_LIFECYCLE_RESPONSE_BYTES,
+            v22_delivery_response_max_bytes(),
         )
         .await?;
         let valid = match status {

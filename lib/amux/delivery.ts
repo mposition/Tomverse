@@ -19,10 +19,14 @@ import { AMUX_V22_DELIVERY_BASE_SHA_ENV, AMUX_V22_TASK_EXECUTION_ENV,
 import { AMUX_V22_WORKER_AUTHORITY_NOTICE, amuxV22WorkspaceNotice } from
   "@/lib/amux/v22ExternalAuthorityCore";
 import { AMUX_V22_OWNER_QUESTION_RULES, AMUX_V22_RESUME_PROMPT_MAX_BYTES,
-  buildAmuxV22ResumeSection } from "@/lib/amux/v22OwnerQuestionCore";
-import { AMUX_V22_CONCLUSION_ENV, AMUX_V22_CONCLUSION_RULES,
+  buildAmuxV22ResumeContextFile, buildAmuxV22ResumeSection } from
+  "@/lib/amux/v22OwnerQuestionCore";
+import { AMUX_V22_CONCLUSION_ENV, amuxV22ConclusionRules,
   amuxV22ConclusionMode, buildAmuxV22PriorConclusionSection } from
   "@/lib/amux/v22ConclusionCore";
+import { AMUX_V22_CONTEXT_DIR, AMUX_V22_CONTEXT_FILES,
+  amuxV22ContextPromptSection, amuxV22EmbedContextFiles, amuxV22LocalCliFlowEnabled,
+  type AmuxV22ContextFile } from "@/lib/amux/v22LocalCliFlowCore";
 import { AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS,
   openAmuxV22PriorConclusions, readAmuxV22PriorConclusionRows } from
   "@/lib/amux/v22PriorConclusionService";
@@ -312,6 +316,7 @@ export async function pullAmuxWorkDelivery(input: {
   const v22Enabled = amuxV22TaskExecutionEnabled(
     process.env[AMUX_V22_TASK_EXECUTION_ENV]);
   const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
+  const localCliFlow = amuxV22LocalCliFlowEnabled();
   const { sealedCandidate, candidateCard, resumeRows, priorRows } = v22Enabled ?
     await withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.deliveryKeyRead,
       prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryKeyRead.prismaCallCeiling +
@@ -585,7 +590,67 @@ export async function pullAmuxWorkDelivery(input: {
       // An investigate (or verify) run ends with a structured conclusion.
       const conclusionRules = conclusionMode !== "off" &&
         amuxV22ExecutionRole(assignment.role) === "investigate" ?
-        `${AMUX_V22_CONCLUSION_RULES}\n\n` : "";
+        `${amuxV22ConclusionRules(localCliFlow)}\n\n` : "";
+      // The sidecar runs the execution role; the assignment keeps the Task's.
+      const v22ExecutionProfile = () => ({ modelId: assignment.modelId,
+        role: amuxV22ExecutionRole(assignment.role),
+        budgetMicrousd: amuxV22DeliveryBudgetMicrousd(budgetMicrousd, !!readOnlyRetry),
+        ...(baseSha ? { baseSha } : {}),
+        ...(gradeGuard ? { gradeGuard: true as const,
+          executionGrade: assignment.grade,
+          ...(reviewScope ? {
+            // The review server's author is the CLI that wrote the change.
+            reviewAuthor: (() => {
+              const provider = amuxV22Provider(assignment.provider);
+              return provider ? AMUX_V22_PROVIDERS[provider].cli : assignment.provider;
+            })(),
+            reviewAuthorVendor: assignment.provider,
+            reviewScope,
+            ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}) } : {}),
+        } : {}),
+        ...(readOnlyRetry ? { readOnlyRetry } : {}) });
+      // The local CLI flow (v22LocalCliFlowCore.ts): a CLI run with a checkout
+      // gets its brief, resume answer, previous change and prior conclusions
+      // as whole files in that checkout, and a prompt that points at them. No
+      // byte budget leaves anything out. The read-only API executor has no
+      // checkout and keeps the inline prompt.
+      if (localCliFlow && workspace !== "") {
+        const contextFiles: AmuxV22ContextFile[] = [
+          { name: AMUX_V22_CONTEXT_FILES.brief, text: plain.toString("utf8") }];
+        if (resume) {
+          contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.ownerAnswer,
+            text: buildAmuxV22ResumeContextFile({ question: resume.question,
+              answer: resume.answer, answerSource: resume.answerSource,
+              previousPatchFile: resume.previousPatch ?
+                `${AMUX_V22_CONTEXT_DIR}/${AMUX_V22_CONTEXT_FILES.priorPatch}` : null }) });
+          if (resume.previousPatch)
+            contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.priorPatch,
+              text: resume.previousPatch });
+        }
+        const priorWhole = priorRows?.taskId === delivery.taskId && priorEntries.length > 0 ?
+          buildAmuxV22PriorConclusionSection({ entries: priorEntries, budgetBytes: null }) : null;
+        if (priorWhole) contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.priorConclusions,
+          text: priorWhole.section });
+        if (resumeRows?.question.state === "answered") {
+          const marked = await tx.amuxV22TaskQuestion.updateMany({ where: {
+            id: resumeRows.question.id, taskId: delivery.taskId,
+            state: "answered" }, data: { state: "resumed",
+            resumedAttemptId: delivery.attemptId } });
+          if (marked.count !== 1) throw new Error("v22 resume question changed");
+        }
+        // The files ride at the end of the prompt in one bounded block that
+        // only the sidecar's exact boundary opens: a bridge passes the prompt
+        // through unchanged, and an earlier sidecar shows the same text inline.
+        return {
+          prompt: head + `${amuxV22ContextPromptSection(contextFiles)}\n\n` +
+            `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` + conclusionRules +
+            AMUX_V22_WORKER_AUTHORITY_NOTICE + "\n\n" +
+            amuxV22EmbedContextFiles(contextFiles),
+          priorConclusionDigest: priorWhole?.digest ?? null,
+          v22Execution: v22ExecutionProfile(),
+          recoveryApprovalId,
+        };
+      }
       const tail = `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
         `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` + conclusionRules +
         AMUX_V22_WORKER_AUTHORITY_NOTICE;
@@ -617,24 +682,7 @@ export async function pullAmuxWorkDelivery(input: {
       return {
         prompt: head + resumeSection + priorSection + tail,
         priorConclusionDigest: prior?.digest ?? null,
-        // The sidecar runs the execution role; the assignment keeps the Task's.
-        v22Execution: { modelId: assignment.modelId,
-          role: amuxV22ExecutionRole(assignment.role),
-          budgetMicrousd: amuxV22DeliveryBudgetMicrousd(budgetMicrousd, !!readOnlyRetry),
-          ...(baseSha ? { baseSha } : {}),
-          ...(gradeGuard ? { gradeGuard: true as const,
-            executionGrade: assignment.grade,
-            ...(reviewScope ? {
-              // The review server's author is the CLI that wrote the change.
-              reviewAuthor: (() => {
-                const provider = amuxV22Provider(assignment.provider);
-                return provider ? AMUX_V22_PROVIDERS[provider].cli : assignment.provider;
-              })(),
-              reviewAuthorVendor: assignment.provider,
-              reviewScope,
-              ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}) } : {}),
-          } : {}),
-          ...(readOnlyRetry ? { readOnlyRetry } : {}) },
+        v22Execution: v22ExecutionProfile(),
         recoveryApprovalId,
       };
     } finally { plain?.fill(0); title?.fill(0); body?.fill(0); }

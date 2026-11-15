@@ -51,8 +51,11 @@ import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision,
 import { amuxV4NewModelRouteOptions } from "@/lib/amux/v4TaskNewModelRouteSwitch";
 import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
   "@/lib/amux/v52GradeReceipt";
-import { amuxV52ReviewRequired, classifyAmuxExecutionPath,
+import { amuxV52InPlaceEscalationAllowed, amuxV52ReviewRequired,
+  classifyAmuxExecutionPath,
   decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
+import { amuxV22LocalCliFlowEnabled, amuxV22LocalCliLeaseMs } from
+  "@/lib/amux/v22LocalCliFlowCore";
 import { decideAmuxV52ReviewDisposition, validAmuxV52ReviewEvidence,
   type AmuxV52ReviewEvidence } from "@/lib/amux/v52ReviewCore";
 import { normalizeAmuxV52FindingsSummary } from "@/lib/amux/v52ReviewFindingsCore";
@@ -206,9 +209,12 @@ type TaskLockRow = {
   executionBriefDigest: string | null;
 };
 
-// 180 s while TOMVERSE_AMUX_V22_READ_BACK_PROCEED is enabled (v22ReadBackProceedCore.ts).
+// 180 s while TOMVERSE_AMUX_V22_READ_BACK_PROCEED is enabled (v22ReadBackProceedCore.ts)
+// or the local CLI flow is on (v22LocalCliFlowCore.ts). The lease is liveness,
+// renewed by every bridge heartbeat; it never bounds how long a run lasts.
 const executionLeaseExpiry = (now: Date) =>
-  new Date(now.getTime() + Math.max(AMUX_EXECUTION_LEASE_MS, amuxExecutionLeaseMs()));
+  new Date(now.getTime() + Math.max(AMUX_EXECUTION_LEASE_MS, amuxExecutionLeaseMs(),
+    amuxV22LocalCliLeaseMs()));
 
 const lockRuntime = async (
   tx: Prisma.TransactionClient,
@@ -1321,8 +1327,13 @@ export async function recordAmuxV52Review(input: {
           assignment.provider !== evidence.authorVendor)
         return { recorded: false as const,
           reason: "review_assignment_unverified" as const };
-      if (decideAmuxV52SettlementPaths(assignment.grade,
-          input.changedPaths, candidate.files) !== "pass")
+      // The local CLI flow also reviews a lower grade's kept contract change,
+      // which its settlement then judges at frontier in place.
+      const recordDecision = decideAmuxV52SettlementPaths(assignment.grade,
+        input.changedPaths, candidate.files);
+      if (recordDecision !== "pass" && !(amuxV22LocalCliFlowEnabled() &&
+          recordDecision === "escalate" &&
+          amuxV52InPlaceEscalationAllowed(input.changedPaths, candidate.files)))
         return { recorded: false as const,
           reason: "review_patch_unverified" as const };
       const patch = await tx.amuxV22TaskPatch.findUnique({
@@ -1396,8 +1407,10 @@ export async function settleAmuxV22TaskExecution(input: {
   // GitHub outside any route budget (lib/engineeringAgentV22TierPromotion.ts).
   // + 6: an applied investigate conclusion writes its own system audit (4)
   // and a result put to Decision Maker review its row (1), with one spare.
+  // + 1: the local CLI flow's in-place escalation reads its review record.
   const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 44 + 6 };
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 44 + 6 + 1 };
+  const localCliFlow = amuxV22LocalCliFlowEnabled();
   const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
   const resultReviewDm = amuxV22ResultReviewDmEnabled();
   const publicationEligible = v22PublishPreflightEligible({
@@ -1458,10 +1471,25 @@ export async function settleAmuxV22TaskExecution(input: {
       if (gradeGuard && (!settlementAssignment || !assignmentAuditVerified))
         return { settled: false as const,
           reason: "assignment_audit_unverified" as const };
-      const pathDecision = gradeGuard && settlementAssignment &&
+      const reportedPathDecision = gradeGuard && settlementAssignment &&
         input.outcome !== "blocked" && !ownerQuestion ?
         decideAmuxV52SettlementPaths(settlementAssignment.grade,
           input.changedPaths, patch?.files ?? null) : "pass";
+      // Local CLI flow (owner decision 2026-11-15): a lower grade's contract
+      // change whose patch was kept and independently reviewed is judged at
+      // frontier in place -- the grade rises with this settlement and the
+      // result goes on to the frontier review path -- instead of being
+      // discarded and re-run. Without a recorded review (a bridge that does
+      // not review it yet) the earlier escalation applies; the patch row
+      // stays either way.
+      const inPlaceCandidate = localCliFlow && reportedPathDecision === "escalate" &&
+        input.outcome === "succeeded" && patch !== null && !!settlementAssignment &&
+        amuxV22TaskWritesPatch(settlementAssignment.role) &&
+        amuxV52InPlaceEscalationAllowed(input.changedPaths, patch.files ?? null);
+      const inPlaceEscalation = inPlaceCandidate &&
+        await tx.amuxV52ReviewRecord.findUnique({ where: { attemptId: attempt.id },
+          select: { attemptId: true } }) !== null;
+      const pathDecision = inPlaceEscalation ? "pass" as const : reportedPathDecision;
       const reviewRequired = !ownerQuestion && amuxV52ReviewRequired({ gradeGuard,
         role: settlementAssignment ?
           amuxV22ExecutionRole(settlementAssignment.role) : null,
@@ -1621,7 +1649,8 @@ export async function settleAmuxV22TaskExecution(input: {
         ["routine", "advanced"].includes(task.executionGrade ?? "") &&
         !!task.v4SourceApprovalId &&
         settlementAssignment?.grade === task.executionGrade;
-      if (pathDecision === "escalate" && escalationBindingValid) {
+      const escalating = pathDecision === "escalate" || inPlaceEscalation;
+      if (escalating && escalationBindingValid) {
         try {
           const source = await tx.amuxIdeaUnitDecision.findUnique({
             where: { id: task.v4SourceApprovalId! },
@@ -1643,7 +1672,7 @@ export async function settleAmuxV22TaskExecution(input: {
           if (!(error instanceof AmuxV4TaskCatalogApprovalError)) throw error;
         }
       }
-      const effectivePathDecision = pathDecision === "escalate" &&
+      const effectivePathDecision = escalating &&
         escalationReceipt === null ? "blocked" : pathDecision;
       const escalationBlockReason = escalationBindingValid ?
         "grade_receipt_unavailable" : "grade_binding_unverified";
@@ -1729,6 +1758,10 @@ export async function settleAmuxV22TaskExecution(input: {
         budget.to_status;
       const gradeEscalated = effectivePathDecision === "escalate" &&
         next === "todo";
+      // The in-place escalation raises the grade whatever the review decided
+      // (review, a retry at frontier, or a person); the DB guard allows those.
+      const gradeRaisedInPlace = inPlaceEscalation && escalationReceipt !== null &&
+        effectivePathDecision === "pass";
       const conclusionApplied = conclusionPlan !== null &&
         next === conclusionPlan.toStatus;
       const blockedReason = questionPlan ? questionPlan.reason :
@@ -1736,18 +1769,20 @@ export async function settleAmuxV22TaskExecution(input: {
         effectivePathDecision === "escalate" ?
         "attempt_budget_exhausted" :
         effectivePathDecision === "blocked" ?
-          (pathDecision === "escalate" ? escalationBlockReason :
+          (escalating ? escalationBlockReason :
             "changed_paths_unavailable") :
         budget.exhausted_limit ?? reviewDisposition?.reason ??
           (receiptsComplete ?
             (input.outcome === "blocked" ? "reported_result" : "execution_blocked") :
             cliUsageRecordOnly ? AMUX_V22_CLI_USAGE_UNREPORTED_REASON :
             knownCliFailure ?? "usage_outcome_unknown");
-      if (gradeEscalated && escalationReceipt) {
+      if ((gradeEscalated || gradeRaisedInPlace) && escalationReceipt) {
         await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
           action: AMUX_GRADE_ESCALATED_ACTION,
           targetType: "AmuxWorkItem", targetId: task.id,
-          summary: "Escalated an AMUX Task after a contract path touch.",
+          summary: gradeRaisedInPlace ?
+            "Raised an AMUX Task to frontier in place after a contract path touch." :
+            "Escalated an AMUX Task after a contract path touch.",
           metadata: { attemptId: attempt.id,
             assignmentId: attempt.v22AssignmentId,
             fromRevision: task.revision,
@@ -1755,13 +1790,14 @@ export async function settleAmuxV22TaskExecution(input: {
             previousGrade: task.executionGrade, nextGrade: "frontier",
             originalReceiptDigest,
             newReceipt: escalationReceipt, classificationFailure: true,
+            ...(gradeRaisedInPlace ? { inPlace: true, toStatus: next } : {}),
           },
         });
       }
       await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
         status: next, owner: null, claimedAt: null, v22AssignmentId: null,
         reviewPrNumber: null,
-        ...(gradeEscalated ?
+        ...(gradeEscalated || gradeRaisedInPlace ?
           { executionGrade: "frontier" } : {}),
         // A proceed conclusion is the completion judgement in place of a
         // person's approval: terminal once, on the DB clock, so dependents

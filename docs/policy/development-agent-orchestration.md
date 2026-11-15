@@ -2821,9 +2821,11 @@ v16 역할 판정이 생기면 2항의 유도를 그 값으로 바꾸는 것은 
    독립 검토 서버에 요청한다.
 5. Task의 `done`은 지금처럼 본 앱이 관측한 병합이다(v49·v50). PR 없는 Task의 `done`은 운영자 결정
    2026-11-07부터 사람 승인, DM 결과 검토, investigate `proceed` 결론 중 하나다(`amux-decision-maker.md` §0a).
-6. 실행 뒤 chore·implementation worker의 변경이 contract 경로에 닿으면, 그 변경을 버리고 Task의
-   등급을 `frontier`로 올려 처음부터 다시 실행한다. 그러면 Task 전체를 contract worker가 다시 하므로
-   남는 작업이 없다.
+6. 실행 뒤 chore·implementation worker의 변경이 contract 경로에 닿으면, 그 변경을 보존한 채 Task의
+   등급을 `frontier`로 올리고 그 결과를 frontier의 검토(독립 검토 서버, 그다음 사람)로 보낸다. 시도를
+   새로 쓰지 않는다(운영자 결정 2026-11-15, 아래 "v22 worker 실행: 로컬 CLI 흐름"). 검토 기록이 없으면
+   (그 검토를 하지 않는 이전 bridge) 이전 방식대로 `frontier`로 다시 실행하되 저장된 patch는 남긴다.
+   `TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled`이면 이전 방식(변경을 버리고 처음부터 다시 실행)이다.
 
 ### 1. 적용 범위
 
@@ -3325,13 +3327,25 @@ r-20261018-063042-a41ba9에서 codex와 copilot이 둘 다 accept했다. 이 승
 
 ## v22 worker의 운영자 질문 (운영자 결정 2026-10-30)
 
-v22 실행은 마감 10분인 CLI 한 번이라 실행 중에 답을 기다릴 수 없다. 그래서 운영자 결정이 필요한 worker는 추측하지 않고, 결과의 마지막 줄에 `AMUX_OWNER_QUESTION: {"question", "unblocks", "options"}`를 남기고 끝낸다(`lib/amux/v22OwnerQuestionCore.ts`).
+v22 실행은 CLI 한 번이라 실행 중에 답을 기다릴 수 없다. 그래서 운영자 결정이 필요한 worker는 추측하지 않고, 결과의 마지막 줄에 `AMUX_OWNER_QUESTION: {"question", "unblocks", "options"}`를 남기고 끝낸다(`lib/amux/v22OwnerQuestionCore.ts`).
 
 - **완료가 아니다.** 질문으로 끝난 실행은 정산에서 review·게시·등급 판정을 받지 않는다. Task는 `blocked`(attempt 사유 `owner_question`)로 답을 기다리고, 사람 escalation은 열지 않는다.
 - **질문은 Task당 3번까지다.** 네 번째 질문은 `owner_question_limit`으로 막히고 사람 escalation이 열린다.
-- **답하면 같은 worker가 이어서 한다.** 답이 기록되면 Task는 `todo`로 돌아간다. 배정은 질문한 worker에 그 Task의 경로가 남아 있는 한 그 worker를 기다린다. 다음 전달에는 질문, 답, 이전 실행의 변경이 붙는다. 변경은 프롬프트 상한에 들어갈 때만 붙인다.
+- **답하면 같은 worker가 이어서 한다.** 답이 기록되면 Task는 `todo`로 돌아간다. 배정은 질문한 worker에 그 Task의 경로가 남아 있는 한 그 worker를 기다린다. 다음 전달에는 질문, 답, 이전 실행의 변경이 붙는다. 로컬 CLI 흐름(아래)에서는 셋 다 크기와 상관없이 checkout의 context 파일로 가고, implement의 이전 변경은 sidecar가 CLI 시작 전에 checkout에 적용해 둔다. 이전 흐름에서는 변경을 프롬프트 상한에 들어갈 때만 붙인다.
 - **기록 방식.** 질문 원문은 그 attempt의 암호화된 결과 본문에 남고, `AmuxV22TaskQuestion`에는 digest·상태·순번만 둔다. 답은 재개된 실행이 정산될 때 지운다. 상태는 `open → answered | cancelled`, `answered → resumed`로만 움직이고 행은 지우지 않는다(DB trigger).
 - **답하는 길.** 1단계에서는 운영자가 Admin › AMUX 카드의 결과 보기에서 직접 답한다. Decision Maker 경로는 그 다음 단계다: 질문을 박스 로컬 카드의 typed ask로 올려 DM이 제안하고, 운영자가 Admin에서 확정하면 그 답으로 재개한다.
+
+## v22 worker 실행: 로컬 CLI 흐름 (운영자 결정 2026-11-15)
+
+운영자 지시: "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI에 명령했을 때 제가 받는 답처럼 편리한 Flow였으면 합니다." 이 흐름이 기본이다. `TOMVERSE_AMUX_V22_LOCAL_CLI_FLOW=disabled`이면 앱·sidecar·bridge가 각각 이전 동작으로 돌아간다(코드: `lib/amux/v22LocalCliFlowCore.ts`). 스위치는 Railway와 box의 sidecar·bridge unit에 같은 값으로 둔다.
+
+- **고정 마감 없음.** sidecar는 10분 마감(`AMUX_V22_SIDECAR_DEADLINE_MS`) 대신 진행을 본다. 출력도 checkout 변화도 30분 없으면 `stalled`, 6시간 안전 상한이면 `run_cap`, 운영자 중지(sidecar `stop` op, unit의 SIGTERM)면 `operator_stop`으로 끝난다. 어떤 이유로 끝나든 checkout 변경은 버리지 않는다. 그 자리에 두고(다음 attempt의 base 동기화가 정리한다) sidecar state 디렉터리의 `<attempt>.preserved.patch`(0600)에 복사한다. 결과 분류(`outcome_unknown`과 그 정산)는 바꾸지 않는다. execution lease는 생존 표시라 heartbeat마다 갱신되고, 이 흐름에서는 180초다.
+- **크기 상한 없음.** 프롬프트 32 KiB, Claude stdout 256 KiB, 보고 64 KiB, 결론 형식 한도(findings 4,000자, handoff 12개 등), 이전 결론 8 KiB·의존 8개를 두지 않는다. 남는 것은 bridge를 건너는 메시지 하나의 메모리 backstop(32 MiB)뿐이고, 그보다 긴 보고는 처음과 끝(결론과 질문이 있는 마지막 줄)을 남기고 가운데를 줄인다. 결론은 관대하게 읽는다(모르는 키 무시, 여러 줄 JSON, 잘못된 항목만 버림, verdict만 필수).
+- **context 파일.** brief, 운영자·DM 답, 이전 patch, 이전 결론, 검토 지적(`review-findings.md`)은 worker checkout의 `.amux/context/`로 간다. delivery는 이 파일들을 프롬프트 끝의 경계 토큰 블록에 싣고(bridge는 프롬프트를 그대로 넘긴다), sidecar가 블록을 꺼내 파일로 쓴 뒤 프롬프트는 그 파일을 가리킨다. 디렉터리는 checkout의 `.git/info/exclude`에 들어가 patch와 변경 경로 목록에 들어가지 않는다. implement의 이전 patch는 CLI 시작 전에 `git apply --3way`로 적용해 둔다.
+- **transcript.** Claude는 `--output-format stream-json --verbose`로 돌고, 모든 CLI의 stdout 전체가 sidecar state 디렉터리의 `<attempt>.transcript.jsonl`(0600, 30일 뒤 정리)에 남는다. journal에는 들어가지 않는다. 앱 저장과 Admin 보기는 아직 없다.
+- **모든 역할에 shell.** design·investigate·review(verify 포함)도 jail 안의 shell로 테스트를 돌린다(Claude `Read,Grep,Glob,Bash`, Codex workspace-write sandbox, Copilot shell 도구, Antigravity `run_command`). 파일 쓰기 도구는 implement만 가진다. 읽기 역할이 checkout을 바꾸면 그 diff를 보고 앞에 싣고 preserved patch로 남긴 뒤 checkout을 base로 되돌린다. 게시 후보가 아니므로 등급 판정의 변경 경로에는 넣지 않고 `readRoleChangedPaths`로 따로 적는다. Cursor는 shell을 jail에 가둘 수 없어 읽기 전용 ask mode 그대로다. operate는 사람 몫이다(운영자 결정 2026-10-30). 네트워크 차단, checkout만 쓰는 jail, 자격 증명 격리는 그대로다. 복구 점검은 shell을 가진 모든 역할에 checkout이 base 위에서 깨끗할 것을 요구한다.
+- **의존성 설치.** 모든 역할이 설치하고 시간은 30분이다. 실패하면 worker 프롬프트에 그 사실과 이유를 적고 결과의 `dependencies`에 남긴다.
+- **계약 경로 변경 보존.** 위 v52 6항. 아래 등급의 계약 경로 변경도 patch와 v52 검토 commit을 만들고, bridge는 frontier처럼 독립 검토를 돌리며, 정산은 그 검토 기록이 있을 때 등급을 `frontier`로 올리면서 검토 결과(review·todo·blocked)로 보낸다. DB guard(`amux_v4_task_approval_binding_guard`)는 그 승급의 도착 상태로 `todo` 외에 `review`·`blocked`도 받는다(migration `20261115140000`). 승급 감사 기록은 Task당 하나인 그대로다.
 
 ## v22 sidecar 재시작 뒤의 종료 증거 (운영자 결정 2026-11-07)
 
