@@ -180,7 +180,7 @@ test("an offered account opens Chat and sees account-specific access copy", asyn
     status: 200, contentType: "application/json", body: JSON.stringify({ offered: true }),
   }));
   await page.goto("/ko");
-  await expect(page.getByTestId("landing-primary-cta")).toHaveAccessibleName("Chat 시작하기");
+  await expect(page.getByTestId("landing-primary-cta")).toHaveAccessibleName("채팅 시작하기");
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", `${CHAT_WORKSPACE_PATH}?lang=ko`);
   await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(launchAccountEntryCopy.ko.heroAccess);
   await expect(page.locator("#launch-guest-title")).toHaveText("나에게 맞는 AI, 한곳에서 시작하세요.");
