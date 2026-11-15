@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   mockAuthenticatedApi,
   prepareGuestPage,
+  selectModelsViaPicker,
 } from "./support/app-fixtures";
 
 // Regression coverage for the "Chrome browser test error" hotfix (PR #76,
@@ -138,7 +139,10 @@ test.describe("desktop model selection readiness", () => {
     releaseConversationList!();
 
     await expect(firstPanel.locator("select")).toBeEnabled();
-    await firstPanel.locator("select").selectOption("gemini-2-5-flash");
+    // /review lands on the welcome screen, where the panels sit `inert` behind
+    // its surface (UI-EMPTY-001); the composer's picker is the control a
+    // person changes the model with here.
+    await selectModelsViaPicker(page, ["gemini-2-5-flash"]);
     await expect(firstPanel).toHaveAttribute("data-model-id", "gemini-2-5-flash");
   });
 });
