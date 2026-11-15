@@ -52,16 +52,38 @@ const iso = (ms) => (ms === null || ms === undefined ? null : new Date(ms).toISO
  * process ends (a non-zero exit rejects); `log(object)` writes one line.
  */
 export async function runClaudeLoginKeepalive({ readLogin, runCli, runStage, log,
-  now = () => Date.now() }) {
-  const read = async () => claudeLoginState(await readLogin(), now());
+  readCopyExpiries = async () => [], now = () => Date.now() }) {
+  const read = async () => {
+    let bytes;
+    // A login file that is gone is the operator's to renew, like a cleared one.
+    try { bytes = await readLogin(); }
+    catch (error) {
+      if (error?.code === "ENOENT") return { state: "missing" };
+      return { state: "unreadable" };
+    }
+    return claudeLoginState(bytes, now());
+  };
   let login = await read();
   const reloginSoon = (state) => state.refreshExpiresAt !== null &&
     state.refreshExpiresAt - now() <= CLAUDE_KEEPALIVE_RELOGIN_WARN_MS;
   if (login.state === "fresh") {
+    // A copy behind the login (a restage that failed after a refresh, or a
+    // worker added since) is restaged here instead of waiting for the hourly
+    // stage timer.
+    let behind = false;
+    try {
+      behind = (await readCopyExpiries()).some((expiresAt) =>
+        expiresAt === null || expiresAt < login.expiresAt);
+    } catch { behind = true; }
+    let staged;
+    if (behind) {
+      try { await runStage(); staged = "ok"; } catch { staged = "failed"; }
+    }
     log({ outcome: "fresh", expiresAt: iso(login.expiresAt),
       refreshTokenExpiresAt: iso(login.refreshExpiresAt),
+      ...(staged ? { restaged: staged } : {}),
       ...(reloginSoon(login) ? { warning: "relogin_soon" } : {}) });
-    return 0;
+    return staged === "failed" ? 1 : 0;
   }
   if (login.state !== "refresh_due") {
     log({ outcome: "login_required", state: login.state,
@@ -112,6 +134,14 @@ async function main() {
   try {
     return await runClaudeLoginKeepalive({
       readLogin: () => readFile(join(home, ".claude/.credentials.json")),
+      // Each worker copy's expiry only; an unreadable copy counts as behind.
+      readCopyExpiries: () => Promise.all(workers.map(async (worker) => {
+        try {
+          const state = claudeLoginState(await readFile(
+            join("/var/lib", `tomverse-amux-v22-${worker}`, "cli", ".credentials.json")), Date.now());
+          return state.expiresAt ?? null;
+        } catch { return null; }
+      })),
       runCli: (args) => run(cli, args, { cwd: workDir, timeout: 180_000 }),
       runStage: () => (stageScript && workers.length > 0 ?
         run(process.execPath, [stageScript, ...workers.map((w) => `anthropic:${w}`)],

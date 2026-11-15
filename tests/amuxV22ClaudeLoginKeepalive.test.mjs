@@ -37,7 +37,7 @@ test("the state never carries a token", () => {
   assert.doesNotMatch(JSON.stringify(state), /aaaa|rrrr/);
 });
 
-function harness(logins, { cliFails = false, stageFails = false } = {}) {
+function harness(logins, { cliFails = false, stageFails = false, copies = [] } = {}) {
   const calls = [];
   const lines = [];
   let index = 0;
@@ -45,7 +45,12 @@ function harness(logins, { cliFails = false, stageFails = false } = {}) {
     calls, lines,
     deps: {
       now: () => NOW,
-      readLogin: async () => logins[Math.min(index, logins.length - 1)],
+      readCopyExpiries: async () => copies,
+      readLogin: async () => {
+        const next = logins[Math.min(index, logins.length - 1)];
+        if (next instanceof Error) throw next;
+        return next;
+      },
       runCli: async (args) => {
         calls.push(args[0] === "-p" ? "prompt" : args.join(" "));
         index += 1;
@@ -100,6 +105,36 @@ test("a failed restage after a refresh fails the unit", async () => {
     { stageFails: true });
   assert.equal(await runClaudeLoginKeepalive(h.deps), 1);
   assert.equal(h.lines[0].staged, "failed");
+});
+
+test("a fresh login restages copies left behind by a failed restage, until one succeeds", async () => {
+  const source = login({});
+  const behind = [NOW + 6 * HOUR, NOW + 5 * 60_000];
+  const failing = harness([source], { copies: behind, stageFails: true });
+  assert.equal(await runClaudeLoginKeepalive(failing.deps), 1);
+  assert.deepEqual(failing.calls, ["stage"]);
+  assert.equal(failing.lines[0].restaged, "failed");
+  // The next round still sees the copy behind, so it tries again.
+  const retry = harness([source], { copies: behind });
+  assert.equal(await runClaudeLoginKeepalive(retry.deps), 0);
+  assert.deepEqual(retry.calls, ["stage"]);
+  assert.equal(retry.lines[0].restaged, "ok");
+});
+
+test("copies level with a fresh login are left alone", async () => {
+  const h = harness([login({})], { copies: [NOW + 6 * HOUR, NOW + 6 * HOUR] });
+  assert.equal(await runClaudeLoginKeepalive(h.deps), 0);
+  assert.deepEqual(h.calls, []);
+  assert.equal(h.lines[0].restaged, undefined);
+});
+
+test("a missing login file is reported for the operator, not thrown", async () => {
+  const gone = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+  const h = harness([gone]);
+  assert.equal(await runClaudeLoginKeepalive(h.deps), 1);
+  assert.deepEqual(h.calls, []);
+  assert.equal(h.lines[0].outcome, "login_required");
+  assert.equal(h.lines[0].state, "missing");
 });
 
 test("a refresh token with less than a day left warns", async () => {
