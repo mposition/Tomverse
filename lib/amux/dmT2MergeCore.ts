@@ -19,7 +19,7 @@
 import { DECISION_VALUE_ALARMS } from "../agentPushPolicy.ts";
 import { CI_ADMISSION_HOLD_LABEL, ciRunKey } from "../ciAdmissionCore.ts";
 import {
-  qaReleaseDmApprovedHumanPaths, qaReleaseDmMergeInAllowList, type QaReleaseDmMergeScope,
+  qaReleaseDmApprovedHumanPaths, qaReleaseDmMergeAllowed, qaReleaseDmMergeInAllowList, type QaReleaseDmMergeScope,
 } from "../qaReleaseMergeLaneExclusionCore.ts";
 
 /** Default off. On, the app marks Decision Maker approved review pull requests ready and the lane may merge them into develop. */
@@ -89,7 +89,9 @@ export const AMUX_DM_T2_MERGE_CONTENT_ALARMS: readonly RegExp[] = [
   /\w*(?:userid|ownerid|tenantid|accountid|organizationid|orgid|createdbyid|authorid|memberid)\b|\b(?:user|owner|session|viewer|actor|member)\.id\b|\bsession\.user\b|\bis(?:Admin|Owner|Member)\b|\bvisibility\b|\bisPublic\b/i,
   // Anything leaving Tomverse by a call of its own (review r-20261115-115539-709020: a route that posts the
   // request body to an outside URL with fetch): the network, another process, code assembled at run time.
-  /\bfetch\s*\(|https?:\/\/|\bXMLHttpRequest\b|\bWebSocket\b|\bEventSource\b|\bsendBeacon\b|\b(?:axios|undici|node-fetch|got)\b|\bhttps?\.(?:request|get)\s*\(|\bnet\.(?:connect|createConnection)\b|\bdgram\b|\bchild_process\b|\b(?:exec|execFile|execSync|spawn|spawnSync|fork)\s*\(|\beval\s*\(|\bnew\s+Function\b|\bimport\s*\(\s*[^"'`\s]/,
+  /\bfetch\b|https?:\/\/|\bXMLHttpRequest\b|\bWebSocket\b|\bEventSource\b|\bsendBeacon\b|\b(?:axios|undici|node-fetch|got)\b|\bhttps?\.(?:request|get)\s*\(|\bnet\.(?:connect|createConnection)\b|\bdgram\b|\bchild_process\b|\b(?:exec|execFile|execSync|spawn|spawnSync|fork)\s*\(|\beval\s*\(|\bFunction\s*\(|\bimport\s*\(\s*[^"'`\s]|\b(?:import|require)\s*\(\s*`[^`]*\$\{|\bglobalThis\b|\bprocess\.\w|\brequire\s*\(\s*[^"'`\s]/,
+  // A Node built-in named anywhere (review r-20261115-120924-b09623: `import { request } from "node:https"`).
+  /["'`]node:[a-z_/]+["'`]|["'`](?:https?|http2|net|tls|dgram|dns|child_process|fs|fs\/promises|worker_threads|cluster|vm|inspector)["'`]/,
   // Data at rest: the database (any query decides whose rows it reads or writes) and the file system.
   /\b(?:prisma|tx|db|client)\.[a-z]\w*\.(?:find\w*|create\w*|update\w*|upsert|delete\w*|count|aggregate|groupBy)\s*\(|\$queryRaw|@prisma\/client|@\/lib\/prisma\b|\b(?:writeFile|appendFile|unlink|rmdir|rm|mkdir|rename|copyFile|createWriteStream)(?:Sync)?\s*\(/,
   /\bdangerouslySetInnerHTML\b/,
@@ -128,6 +130,60 @@ export const AMUX_DM_T2_MERGE_FILE_ALARMS: readonly RegExp[] = [
 ];
 
 /**
+ * The packages a newly admitted file may import (review
+ * r-20261115-120924-b09623: a word list cannot know what an imported name
+ * does). Anything else from npm, and every Node built-in, leaves the file to
+ * a person: a package can reach the network, a process or the disk under a
+ * name no alarm lists. `next/headers` (the request's cookies and headers) is
+ * not among them.
+ */
+export const AMUX_DM_T2_MERGE_SAFE_IMPORTS: readonly string[] = [
+  "react", "react-dom", "react/jsx-runtime", "next/link", "next/image", "next/navigation", "next/dynamic", "next/server",
+  "zod", "clsx", "server-only", "client-only",
+];
+
+const IMPORT_SPECIFIER = /(?:\bfrom|\bimport|\brequire)\s*\(?\s*["'`]([^"'`\n]+)["'`]/g;
+const SOURCE_EXTENSIONS = ["", ".ts", ".tsx", ".mjs", ".js", ".jsx", "/index.ts", "/index.tsx", "/index.js"];
+
+/** Where a repository import points, or null when it leaves the repository. */
+function resolveRepoImport(fromPath: string, specifier: string): string | null {
+  const segments = specifier.startsWith("@/") ? specifier.slice(2).split("/") :
+    [...fromPath.split("/").slice(0, -1), ...specifier.split("/")];
+  const out: string[] = [];
+  for (const segment of segments) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (out.length === 0) return null;
+      out.pop();
+    } else out.push(segment);
+  }
+  return out.length > 0 ? out.join("/") : null;
+}
+
+/**
+ * The imports of a file that leave it to a person: a Node built-in, a package
+ * outside AMUX_DM_T2_MERGE_SAFE_IMPORTS, or a repository module that the
+ * block list scope would not merge on its path (control plane, a block list
+ * pattern, a block name) under any of the names it could resolve to -- a file
+ * that calls into what a person decides takes part in it.
+ */
+export function amuxDmT2MergeImportAlarms(path: string, text: string): string[] {
+  const alarms: string[] = [];
+  for (const match of text.matchAll(IMPORT_SPECIFIER)) {
+    const specifier = match[1]!;
+    if (specifier.startsWith("@/") || specifier.startsWith(".")) {
+      const target = resolveRepoImport(path, specifier);
+      if (target === null || SOURCE_EXTENSIONS.some((ext) => !qaReleaseDmMergeAllowed(target + ext, [], "blocklist"))) {
+        alarms.push(specifier);
+      }
+    } else if (!AMUX_DM_T2_MERGE_SAFE_IMPORTS.includes(specifier)) {
+      alarms.push(specifier);
+    }
+  }
+  return alarms;
+}
+
+/**
  * The changed paths whose whole text the block list scope must read: every
  * path outside the allow list of 2026-11-13. None in the allow list scope.
  */
@@ -149,7 +205,10 @@ export function amuxDmT2MergeFileGate(paths: readonly string[] | null, files: Re
   const needed = amuxDmT2MergeFilesToRead(paths, scope);
   const unread = needed.filter((path) => typeof files?.get(path) !== "string");
   if (unread.length > 0) return { pass: false, reason: "paths_unreadable", paths: unread.slice(0, 20) };
-  const alarmed = needed.filter((path) => AMUX_DM_T2_MERGE_FILE_ALARMS.some((alarm) => alarm.test(files!.get(path)!)));
+  const alarmed = needed.filter((path) => {
+    const text = files!.get(path)!;
+    return AMUX_DM_T2_MERGE_FILE_ALARMS.some((alarm) => alarm.test(text)) || amuxDmT2MergeImportAlarms(path, text).length > 0;
+  });
   return alarmed.length === 0 ? { pass: true } : { pass: false, reason: "outside_dm_merge_allowlist", paths: alarmed.slice(0, 20) };
 }
 

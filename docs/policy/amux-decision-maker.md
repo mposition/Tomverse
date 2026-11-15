@@ -92,8 +92,8 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    예약된 값, 돈·환경 변수·저장된 스위치·삭제·raw SQL·인증·비밀·메일의 단어, 스스로 하는 외부 전송·다른 프로세스 실행·DB 질의·
    파일 쓰기, binary·실행 비트가 있으면 사람에게 남긴다
    (`AMUX_DM_T2_MERGE_CONTENT_ALARMS`), hunk 문맥 줄에 인가·소유권·접근 검사가 있어도 남긴다(`AMUX_DM_T2_MERGE_HUNK_ALARMS`).
-   ready와 레인 목록에서는 허용 목록 밖의 바뀐 파일 전체를 승인된 head에서 읽어, 어디에든 경보가 울리거나 읽지 못하면 남긴다
-   (`amuxDmT2MergeFileGate`). control-plane 경로(AMUX와 에이전트 자신, admin, 실행 환경, 정책과 지시)는 어느 범위에서도
+   ready와 레인 목록에서는 허용 목록 밖의 바뀐 파일 전체를 승인된 head에서 읽어, 어디에든 경보가 울리거나 Node 내장 모듈·허용
+   목록 밖 패키지·사람 몫 모듈을 import하거나 읽지 못하면 남긴다(`amuxDmT2MergeFileGate`, `amuxDmT2MergeImportAlarms`). control-plane 경로(AMUX와 에이전트 자신, admin, 실행 환경, 정책과 지시)는 어느 범위에서도
    사람에게 남는다. 앱 서비스의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`에 `blocklist`가 아닌 값(예: `allowlist`)을 두면 kill switch로
    2026-11-13의 **허용 목록**(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`, `docs/**`, `locales/**`, `components/**`,
    `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`; 그 가운데 `docs/policy/**`·`docs/ui-contracts/**`·
