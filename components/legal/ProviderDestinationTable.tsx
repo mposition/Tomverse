@@ -117,7 +117,7 @@ export function ProviderDestinationTable({
                                             rel="noopener noreferrer"
                                             target="_blank"
                                         >
-                                            {t("privacyPolicy.providerSource")}
+                                            {t(destinationIsDisclosable(row) ? "privacyPolicy.providerSource" : "privacyPolicy.title")}
                                         </a>
                                     ) : null}
                                 </th>

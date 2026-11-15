@@ -770,10 +770,11 @@ export const providerDestinationIsEstablished = (
 };
 
 /**
- * The entries a user-facing notice may print.
+ * The entries whose reviewed facts a user-facing notice may print.
  *
- * The Privacy page prints this list only when its length equals the
- * enrolment. A shorter list would leave a live provider out of the notice.
+ * The Privacy page also names every other enrolled provider with an explicit
+ * unverified notice. This filtered list still serves callers that require
+ * reviewed destination facts; it does not authorize claims for omitted rows.
  */
 export const disclosableDataDestinations = (): readonly ProviderDataDestination[] =>
     PROVIDER_DATA_DESTINATIONS.filter(destinationIsDisclosable);

@@ -26,5 +26,5 @@ test("unverified facts cannot become training or retention promises", () => {
   }));
   assert.match(html, /have not verified the account-specific/);
   assert.doesNotMatch(html, />No</);
-  assert.doesNotMatch(html, /No persistent storage/);
+  assert.doesNotMatch(html, /Not stored/);
 });
