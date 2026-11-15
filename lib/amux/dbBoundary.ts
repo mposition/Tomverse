@@ -662,10 +662,11 @@ export const AMUX_DB_BOUNDARIES = {
   // Apply: setup + audit chain lock + switches + the locked settlement and card
   // + the approval read, or the card write and the escalation write + the
   // settlement + canonical audit 4 + fence. A remake's claim and its close of
-  // the cards once the idea is filed take the same.
+  // the cards once the idea is filed take the same. + 1 (2026-11-15): a retry
+  // reads the card's attempt budget facts, as the claim does.
   decisionMakerOwnerSettlementApply: {
     operation: "decision_maker_owner_settlement_apply",
-    prismaCallCeiling: 12,
+    prismaCallCeiling: 13,
     isolation: "mutation",
   },
   // The settlements of the owner queue's cards, for each card's Decision Maker

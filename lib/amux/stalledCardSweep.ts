@@ -5,6 +5,7 @@ import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import { amuxDefaultMaxAttempts } from "@/lib/amux/executionBudgetCore";
 import { AMUX_INFRA_FAILURE_REASONS, AMUX_MAX_INFRA_FAILURES_PER_TASK,
   amuxInfraFailureRoutingEnabled } from "@/lib/amux/infraFailureCore";
+import { AMUX_INFRA_WINDOW_RETRY_SQL } from "@/lib/amux/infraFailureStore";
 
 /**
  * One definition of a stopped card (owner decision 2026-11-14, AMUX process
@@ -67,8 +68,7 @@ export async function readAmuxStalledCards(
             COUNT(*) FILTER (WHERE a."reason" = ANY(${infra}::text[]) AND (r."at" IS NULL OR
               a."startedAt" > r."at")) AS "infraWindow"
           FROM "AmuxExecutionAttempt" a CROSS JOIN (SELECT MAX(e."resolvedAt") AS "at"
-            FROM "AmuxHumanEscalation" e WHERE e."taskId" = w."id" AND e."status" = 'resolved'
-              AND e."resolutionOutcome" = 'retry') r
+            FROM "AmuxHumanEscalation" e WHERE e."taskId" = w."id" AND ${AMUX_INFRA_WINDOW_RETRY_SQL}) r
           WHERE a."taskId" = w."id") b
         WHERE b."numbered" - b."infra" >= ${max}
           OR b."infraWindow" >= ${AMUX_MAX_INFRA_FAILURES_PER_TASK})

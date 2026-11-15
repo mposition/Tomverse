@@ -6,7 +6,8 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
-import { settlementDestinationForBudget } from "@/lib/amux/executionBudgetCore";
+import { decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
+import { readAmuxAttemptBudgetFacts } from "@/lib/amux/infraFailureStore";
 import { readAmuxCardTitle } from "./adminExecutionRead.ts";
 import { amuxDatabaseDiagnosticCode } from "./readFailureCore.ts";
 import {
@@ -519,8 +520,15 @@ export async function applyAmuxDmOwnerSettlementDecision(tx: Prisma.TransactionC
   }
 
   if (decision === "retry") {
-    if (settlementDestinationForBudget({ requested_status: "todo",
-      attempt_number: row.lastAttempt?.attemptNumber ?? null }).to_status !== "todo")
+    // The claim's own rule (executionBudgetCore.ts): the card's counted
+    // attempts against the runaway guard, and its platform failures since a
+    // person's last retry against their bound. The settlement's own retry
+    // never starts that bound over (infraFailureStore.ts), so a card that
+    // used it goes to a person instead of running again with no one looking.
+    const facts = await readAmuxAttemptBudgetFacts(tx, row.taskId);
+    if (!decideAmuxAttemptBudget({ historical_rows: facts.historicalRows,
+      greatest_attempt_number: facts.greatestAttemptNumber, infra_rows: facts.infraRows,
+      infra_window_rows: facts.infraWindowRows }).allowed)
       return handOff("attempt_budget_spent");
     const changed = await tx.amuxWorkItem.updateMany({
       where: { id: row.taskId, revision: row.revision, status: row.status, archivedAt: null },
