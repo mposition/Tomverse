@@ -42,7 +42,7 @@ const withRouting = (value, run) => {
 test("the review proposal guard counts attempts as the app does", async () => {
   const { readFile } = await import("node:fs/promises");
   const sql = await readFile(new URL(
-    "../prisma/migrations/20261115140100_amux_review_retry_no_fixed_count/migration.sql", import.meta.url), "utf8");
+    "../prisma/migrations/20261116011400_amux_review_retry_no_fixed_count/migration.sql", import.meta.url), "utf8");
   const listed = sql.match(/"reason" IN \(([^)]*)\)/)?.[1] ?? "";
   assert.deepEqual([...listed.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]).sort(),
     [...AMUX_INFRA_FAILURE_REASONS].sort());
@@ -50,9 +50,9 @@ test("the review proposal guard counts attempts as the app does", async () => {
   // The attempt-number bounds hold every number the app can reach: the
   // runaway guard plus the infrastructure bound.
   for (const [file, pattern] of [
-    ["20261115140200_amux_v22_attempt_number_bound", /NEW\."attemptNumber" NOT BETWEEN 1 AND (\d+) THEN/],
-    ["20261115140300_amux_v22_recovery_attempt_bound", /recovery\."nextAttemptNumber" NOT BETWEEN 1 AND (\d+) OR/],
-    ["20261115140400_amux_v22_recovery_approval_attempt_bound", /"nextAttemptNumber" BETWEEN 1 AND (\d+) AND/],
+    ["20261116011500_amux_v22_attempt_number_bound", /NEW\."attemptNumber" NOT BETWEEN 1 AND (\d+) THEN/],
+    ["20261116011600_amux_v22_recovery_attempt_bound", /recovery\."nextAttemptNumber" NOT BETWEEN 1 AND (\d+) OR/],
+    ["20261116011700_amux_v22_recovery_approval_attempt_bound", /"nextAttemptNumber" BETWEEN 1 AND (\d+) AND/],
   ]) {
     const text = await readFile(new URL(`../prisma/migrations/${file}/migration.sql`, import.meta.url), "utf8");
     const bound = Number(text.match(pattern)?.[1]);

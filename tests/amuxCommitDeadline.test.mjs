@@ -375,11 +375,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // review proposal, v22 attempt and recovery guards and the recovery
   // approval CHECK; no commit-deadline marker, classifier or deferred
   // trigger changes.
-  "20261115140000_amux_wait_reasons_worker_health",
-  "20261115140100_amux_review_retry_no_fixed_count",
-  "20261115140200_amux_v22_attempt_number_bound",
-  "20261115140300_amux_v22_recovery_attempt_bound",
-  "20261115140400_amux_v22_recovery_approval_attempt_bound",
+  "20261116011300_amux_wait_reasons_worker_health",
+  "20261116011400_amux_review_retry_no_fixed_count",
+  "20261116011500_amux_v22_attempt_number_bound",
+  "20261116011600_amux_v22_recovery_attempt_bound",
+  "20261116011700_amux_v22_recovery_approval_attempt_bound",
   // Owner decision 2026-11-15: the Decision Maker body store's caps grow, a CHECK
   // and one number of the body guard; no commit-deadline marker, classifier or
   // deferred trigger changes.

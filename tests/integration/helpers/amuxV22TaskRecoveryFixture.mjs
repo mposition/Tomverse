@@ -675,7 +675,7 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   await reject(() => db.query(`DELETE FROM public."AdminAuditLog" WHERE "id"=$1`, [approvalAuditId]),
     null);
   // Owner direction 2026-11-15: the shape bound is 64, above the app's
-  // runaway guard plus its infrastructure bound (20261115140400).
+  // runaway guard plus its infrastructure bound (20261116011700_amux_v22_recovery_approval_attempt_bound).
   await reject(() => insert("AmuxV22TaskRecoveryApproval", { ...approvalRow, id: randomUUID(), nextAttemptNumber: 65 }),
     "AmuxV22RecoveryApproval_shape_check");
   const duplicateApprovalId = randomUUID(); const duplicateOwnerRequestId = randomUUID();
