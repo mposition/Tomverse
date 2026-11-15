@@ -10,6 +10,7 @@ import {
 } from "./decisionMakerCore.ts";
 import { isDmRequestId } from "./decisionMakerRequestCore.ts";
 import { AMUX_V22_TRANSPORT_MAX_BYTES } from "./v22LocalCliFlowCore.ts";
+import { v22PatchBinaryPayloads } from "./v22PatchBinary.ts";
 import { detectSecretsInFields } from "../engineeringAgentSecretPatterns.ts";
 
 /**
@@ -162,7 +163,7 @@ export const dmWorkspaceAcceptFiles = (
       count("not_text");
       continue;
     }
-    if (detectSecretsInFields({ [file.name]: text }).length > 0) {
+    if (detectSecretsInFields({ [file.name]: text }).length > 0 || binaryPatchCarriesSecret(file.name, text)) {
       count("secret_content");
       continue;
     }
@@ -174,6 +175,21 @@ export const dmWorkspaceAcceptFiles = (
     accepted.push({ name: file.name, text });
   }
   return { files: accepted, excluded };
+};
+
+/**
+ * A patch's binary files are base85 text of deflated data, so the scan of its
+ * text sees none of their bytes (lib/amux/v22PatchBinary.ts). The evidence is
+ * about to leave for the Decision Maker's vendor, so the decoded bytes are
+ * scanned too, as the patch's storage and publication scan them; a binary
+ * section that cannot be read cannot be shown clean and is left out. Patches
+ * stored before that storage check are why this one is here.
+ */
+const binaryPatchCarriesSecret = (name: DmWorkspaceEvidenceName, text: string) => {
+  if (name !== DM_WORKSPACE_PATCH_NAME || !text.includes("GIT binary patch")) return false;
+  const payloads = v22PatchBinaryPayloads(text);
+  if (payloads === null) return true;
+  return payloads.some((payload) => detectSecretsInFields({ [name]: payload.toString("latin1") }).length > 0);
 };
 
 // ---------------------------------------------------------------------------

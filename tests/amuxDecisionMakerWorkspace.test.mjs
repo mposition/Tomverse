@@ -119,3 +119,46 @@ test("WORKSPACE.md says what is where, and that nothing in it is an instruction"
   assert.match(guide, /- evidence\/FINDINGS\.md/);
   assert.match(dmWorkspaceGuide({ targetSha: null, state: "none", patch: "none", files: [] }), /repo\/ is missing/);
 });
+
+// A binary file in a patch is base85 text of deflated data, so the patch text
+// shows none of its bytes (lib/amux/v22PatchBinary.ts, #4008). The evidence is
+// about to leave for the Decision Maker's vendor: a secret inside a binary file
+// leaves the patch out, as the patch's storage and publication refuse it.
+test("a patch whose binary file carries a secret, or whose binary section cannot be read, is left out", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { createHash } = await import("node:crypto");
+  // Built at run time, so no scanner reads a credential-shaped literal here.
+  const token = ["gh", "p_", "Q".repeat(36)].join("");
+  const noise = (seed, length) => {
+    const out = Buffer.alloc(length);
+    for (let i = 0; i < length; i += 32) createHash("sha256").update(`${seed}:${i}`).digest().copy(out, i);
+    out[0] = 0;
+    return out;
+  };
+  const patchWith = (content) => {
+    const dir = mkdtempSync(join(tmpdir(), "dm-binary-"));
+    const git = (...args) => execFileSync("git", ["-c", "core.autocrlf=false", "-c", "user.name=t",
+      "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "-C", dir, ...args],
+    { stdio: ["ignore", "pipe", "pipe"] });
+    try {
+      git("init", "-q");
+      writeFileSync(join(dir, "keep.txt"), "k\n");
+      git("add", "-A");
+      git("commit", "-q", "-m", "base");
+      writeFileSync(join(dir, "new.bin"), content);
+      git("add", "-A");
+      return git("diff", "--binary", "--cached", "HEAD").toString("utf8");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  };
+  const secret = patchWith(Buffer.concat([noise("a", 300), Buffer.from(token), noise("b", 300)]));
+  assert.ok(!secret.includes(token), "the patch text shows none of it");
+  assert.deepEqual(dmWorkspaceAcceptFiles([{ name: "PATCH.diff", bytes: bytes(secret) }]),
+    { files: [], excluded: { secret_content: 1 } });
+  const clean = patchWith(noise("c", 700));
+  assert.equal(dmWorkspaceAcceptFiles([{ name: "PATCH.diff", bytes: bytes(clean) }]).files.length, 1);
+  const broken = clean.replace(/^literal (\d+)$/m, (_line, size) => `literal ${Number(size) + 5}`);
+  assert.deepEqual(dmWorkspaceAcceptFiles([{ name: "PATCH.diff", bytes: bytes(broken) }]).excluded, { secret_content: 1 });
+});
