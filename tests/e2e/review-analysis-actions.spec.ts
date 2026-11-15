@@ -87,15 +87,20 @@ test("footer keeps Chat immediately left of Close and exports complete verified 
   }
   expect(requests).toEqual(["pdf", "docx", "txt", "md"]);
   await page.setViewportSize({ width: 320, height: 800 });
-  // Studio deliberately hands narrow viewports to the Classic surface.
-  if (await footer.isVisible()) {
+  // Studio deliberately hands narrow viewports to the Classic surface. The
+  // hand-off renders after the resize, so a footer read at once can be the
+  // Studio one being torn down: its buttons then have no box (CI) or never
+  // resolve (local). Retry until the layout settles into either no footer or
+  // one whose every button fits 320px.
+  await expect(async () => {
+    if (!(await footer.isVisible())) return;
     await expectNoHorizontalOverflow(page);
     for (const button of await footer.getByRole("button").all()) {
-      const bounds = await button.boundingBox();
+      const bounds = await button.boundingBox({ timeout: 1_000 });
       expect(bounds?.x).toBeGreaterThanOrEqual(0);
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(321);
     }
-  }
+  }).toPass({ timeout: 10_000 });
 });
 
 test("sharing previews the selected reviewer, publishes once on confirmation and supports revocation", async ({ page, baseURL }) => {
