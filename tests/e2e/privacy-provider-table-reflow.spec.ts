@@ -85,7 +85,10 @@ test("the provider section wraps at 320px while its table scrolls", {
                 candidate.querySelector("h2") !== null
         );
         const prose = section
-            ? Array.from(section.querySelectorAll("p, li, h2, h3"))
+            ? Array.from(section.querySelectorAll("p, li, h2, h3")).filter(
+                  // Paragraphs inside the table cells scroll with the table.
+                  (element) => element.closest("table, [role='region']") === null
+              )
             : [];
         let widest = 0;
         let offender: string | null = null;
