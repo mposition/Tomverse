@@ -55,15 +55,15 @@ import { reportOperationalIncident } from "@/lib/operationalMonitoring";
  */
 
 /**
- * The largest valid output is an 8 KiB answer and a 4 KiB rationale (§6); as
- * JSON text a byte takes at most 6 characters, and carried here as a JSON
- * string at most 7, so under 84 KiB. The options are the routed card's, whose
- * serialized text is at most 16 KiB (§5), and the binding is a few hundred
- * bytes: under 102 KiB in all. 256 KiB holds every output the store could
- * accept with room to record an oversized one as a validation failure; a
- * larger body is refused before the store and records nothing.
+ * The raw output is at most 256 KiB (DM_LAUNCH_OUTPUT_MAX_BYTES, the
+ * launcher's); it is JSON text already, so carried here as a JSON string a
+ * byte takes at most two (an escape's backslash doubles). The options are the
+ * routed card's, whose card text is at most 256 KiB (§5), at most two again;
+ * the binding is a few hundred bytes. 1,152 KiB holds all of it (2026-11-15:
+ * the DM output's field caps were raised to the whole output's); a larger
+ * body is refused before the store and records nothing.
  */
-const MAX_BODY_BYTES = 256 * 1_024;
+const MAX_BODY_BYTES = 1152 * 1_024;
 
 const requestSchema = z
   .object({

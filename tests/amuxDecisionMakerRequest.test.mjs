@@ -212,7 +212,7 @@ test("every event kind is a §10 audit action, by the router or by the request's
   assert.throws(() => dmEventAuditActor("result", null), /needs an instance/);
 });
 
-test("the refusal codes are exactly the ones routeDmQuestion() records", () => {
+test("the refusal codes are the ones routeDmQuestion() records, and throughput_exceeded is kept only to read old rows", () => {
   const card = {
     askType: "decision",
     resolution: null,
@@ -246,13 +246,18 @@ test("the refusal codes are exactly the ones routeDmQuestion() records", () => {
     route({}, { title: "Deploy the cache to production" }),
     route({}, { askType: "credential", resolution: "needs_secret" }),
     route({ askingProvider: "gemini" }),
-    route({ throughput: { lastHour: 20, lastDay: 20 } }),
     route({}, { contextPaths: ["../outside"] }),
     route({}, { context: `ghp_${"a".repeat(36)}` }),
   ]) {
     for (const refusal of decision.refusals) produced.add(refusal);
   }
-  assert.deepEqual([...produced].sort(), [...DM_ROUTING_REFUSAL_CODES].sort());
+  // The throughput cap is gone (owner decision 2026-11-15): no count of recent questions refuses, however
+  // large. The code stays on the list so a ledger row recorded under it still reads back.
+  for (const throughput of [{ lastHour: 20, lastDay: 100 }, { lastHour: 1_000_000, lastDay: 1_000_000 }]) {
+    assert.deepEqual(route({ throughput }).refusals, []);
+  }
+  assert.ok(DM_ROUTING_REFUSAL_CODES.includes("throughput_exceeded"));
+  assert.deepEqual([...produced].sort(), DM_ROUTING_REFUSAL_CODES.filter((code) => code !== "throughput_exceeded").sort());
 });
 
 // ---------------------------------------------------------------------------
@@ -2040,7 +2045,7 @@ test("routing without the key of its period writes nothing, and a routing that c
   );
 });
 
-test("the router decides on the switches and the throughput it reads after the lock", async () => {
+test("the router decides on the switches it reads after the lock; the throughput it reads refuses nothing", async () => {
   const routed = async (options, bindingOverrides = {}) => {
     const { tx } = recordingTx(options);
     return recordDecisionMakerRequest(tx, { binding: routingBinding(bindingOverrides), card: routedCard(), keyRing: RING });
@@ -2055,7 +2060,11 @@ test("the router decides on the switches and the throughput it reads after the l
   assert.deepEqual((await routed({ switches: [{ scope: "decision-maker-openai", value: "autonomous" }] })).refusalCodes, [
     "settings_unreadable",
   ]);
-  assert.deepEqual((await routed({ throughput: { lastHour: 20n, lastDay: 20n } })).refusalCodes, ["throughput_exceeded"]);
+  // No throughput cap (owner decision 2026-11-15): the counts are read and recorded, and refuse nothing.
+  for (const throughput of [{ lastHour: 20n, lastDay: 20n }, { lastHour: 500n, lastDay: 5_000n }]) {
+    const decided = await routed({ throughput });
+    assert.deepEqual([decided.route, decided.refusalCodes], ["dm_proposal", []]);
+  }
   assert.deepEqual((await routed({}, { askingProvider: "codex" })).instance, "decision-maker-anthropic");
 });
 

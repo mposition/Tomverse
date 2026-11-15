@@ -6,7 +6,7 @@
 //!
 //! 1. **The typed-ask extension.** Options (each with an id, a label, an
 //!    effect class and the paths a change option would touch), `resolution`,
-//!    free-text context and up to 64 context paths, beside the existing
+//!    free-text context and its context paths, beside the existing
 //!    `ask_type`/`ask_question`/`ask_unblocks` columns, which this module never
 //!    writes. A worker sends it as `typed_ask` on the same create/PATCH that
 //!    carries the base ask.
@@ -25,7 +25,7 @@
 //!    before sending, and only the first claim is delivered.
 //!
 //! The grammar of the extension is the app's, not a local variant: the option
-//! id pattern, the closed `resolution` list, the 64-path context limit and the
+//! id pattern, the closed `resolution` list, the one size cap and the
 //! repository path rules match `lib/amux/decisionMakerCore.ts`, and the effect
 //! classes and the 1 to 50 change paths match docs/policy/amux-decision-maker.md §4.
 //! A card that passes here therefore never fails the app's routing on a
@@ -50,17 +50,18 @@ use amux_core::board::TaskStatus;
 /// The layout of a stored extension. A change of layout is a new value.
 pub const TYPED_ASK_FORMAT: &str = "amux-typed-ask-v1";
 
-/// docs/policy/amux-decision-maker.md §5: at most 64 context paths.
-pub const CONTEXT_PATHS_MAX: usize = 64;
 /// docs/policy/amux-decision-maker.md §5: a repository path is at most 200 bytes.
 pub const REPOSITORY_PATH_MAX_BYTES: usize = 200;
 /// docs/policy/amux-decision-maker.md §4: a change option names 1 to 50 paths.
 pub const CHANGE_PATHS_MIN: usize = 1;
 pub const CHANGE_PATHS_MAX: usize = 50;
-/// docs/policy/amux-decision-maker.md §5 caps a card's text at 16 KiB. The app
+/// docs/policy/amux-decision-maker.md §5: a card's one size cap, the app's
+/// `DM_CARD_TEXT_MAX_BYTES` (the vendor CLI's prompt the card becomes). The app
 /// measures the whole card; this bounds the extension alone, which is the part
-/// this table stores, so an extension no card could carry is refused here.
-pub const TYPED_ASK_MAX_BYTES: usize = 16 * 1024;
+/// this table stores, so an extension no card could carry is refused here. No
+/// field has a cap of its own, nor the number of context paths (Tomverse owner
+/// decision 2026-11-15); it was 16 KiB and 64 paths.
+pub const TYPED_ASK_MAX_BYTES: usize = 256 * 1024;
 /// The app's `DM_OPTION_ID_PATTERN` allows 32 characters.
 pub const OPTION_ID_MAX_CHARS: usize = 32;
 
@@ -313,8 +314,8 @@ pub fn recorded_effect(declared: Option<&str>, paths: &[String]) -> (String, Vec
 
 /// Parse and check the `typed_ask` value of a request body. Every structural
 /// rule refuses (an unknown key, a wrong JSON type, an option id outside the
-/// app's grammar or repeated, a `resolution` outside the closed list, a bad or
-/// 65th context path, an extension over 16 KiB). Effect declarations are
+/// app's grammar or repeated, a `resolution` outside the closed list, a bad
+/// context path, an extension over its one cap). Effect declarations are
 /// recorded, not refused; see [`recorded_effect`].
 pub fn parse_typed_ask(value: &Value) -> Result<TypedAskInput, TypedAskRefusal> {
     if value.is_null() {
@@ -442,16 +443,6 @@ pub fn parse_typed_ask(value: &Value) -> Result<TypedAskInput, TypedAskRefusal> 
         None | Some(Value::Null) => vec![],
         Some(raw) => string_list(raw, "typed_ask.context_paths")?,
     };
-    if context_paths.len() > CONTEXT_PATHS_MAX {
-        return Err(TypedAskRefusal::new(
-            "typed_ask_context_paths_limit",
-            "typed_ask.context_paths",
-            format!(
-                "at most {CONTEXT_PATHS_MAX} paths, got {}",
-                context_paths.len()
-            ),
-        ));
-    }
     for (index, path) in context_paths.iter().enumerate() {
         if let Some(reason) = repository_path_refusal(path) {
             return Err(TypedAskRefusal::new(
@@ -1387,8 +1378,8 @@ mod tests {
             ["decision-maker-openai", "decision-maker-anthropic"]
         );
         assert_eq!(
-            (CONTEXT_PATHS_MAX, CHANGE_PATHS_MIN, CHANGE_PATHS_MAX),
-            (64, 1, 50)
+            (TYPED_ASK_MAX_BYTES, CHANGE_PATHS_MIN, CHANGE_PATHS_MAX),
+            (256 * 1024, 1, 50)
         );
     }
 
@@ -1460,13 +1451,10 @@ mod tests {
             refused(json!({"context_paths": ["../secrets"]})),
             "typed_ask_path"
         );
-        let paths: Vec<String> = (0..65).map(|i| format!("docs/{i}.md")).collect();
-        assert_eq!(
-            refused(json!({"context_paths": paths})),
-            "typed_ask_context_paths_limit"
-        );
-        let paths: Vec<String> = (0..64).map(|i| format!("docs/{i}.md")).collect();
-        assert_eq!(ask(json!({"context_paths": paths})).context_paths.len(), 64);
+        // No count cap: the paths are hints into the Decision Maker's
+        // workspace, bounded only by the one size cap (it was 64 paths).
+        let paths: Vec<String> = (0..500).map(|i| format!("docs/{i}.md")).collect();
+        assert_eq!(ask(json!({"context_paths": paths})).context_paths.len(), 500);
         assert_eq!(
             refused(json!({"context": "x".repeat(TYPED_ASK_MAX_BYTES)})),
             "typed_ask_too_large"

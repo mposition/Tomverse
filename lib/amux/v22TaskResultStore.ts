@@ -181,7 +181,7 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
           id: randomUUID(), taskId: task.id, attemptId: input.attemptId,
           worker: input.worker, sequence: questionSequence,
           questionSha256: amuxV22OwnerQuestionSha256(question),
-          state: amuxV22OwnerQuestionSettlement(questionSequence).questionState,
+          state: amuxV22OwnerQuestionSettlement().questionState,
         } });
       }
     }

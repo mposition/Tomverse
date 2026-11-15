@@ -34,14 +34,14 @@ use amux_core::revision::{EntityType, MutationKind};
 /// Every v22 question card carries this tag.
 pub const V22_QUESTION_TAG: &str = "v22-question";
 
-const QUESTION_MAX: usize = 2_000;
-const UNBLOCKS_MAX: usize = 1_000;
-const TITLE_MAX: usize = 200;
-const LABEL_MAX: usize = 300;
 const OPTIONS_MAX: usize = 6;
-/// The app's card context bound (`amuxV22QuestionDmCard`): the card line and
-/// what the worker found.
-const CONTEXT_MAX: usize = 4_000;
+/// A filed card's one size cap, over its title, question, unblocks, option
+/// labels and context together (UTF-8 bytes): the app's
+/// `DM_CARD_TEXT_MAX_BYTES` (lib/amux/decisionMakerCore.ts), the vendor CLI's
+/// prompt that the card becomes. No field has a length cap of its own (Tomverse
+/// owner decision 2026-11-15: "4000자 제한도 없애주세요"); the evidence a card is
+/// about goes to the Decision Maker's workspace, not into the card.
+pub const CARD_MAX_BYTES: usize = 256 * 1024;
 
 /// The tag naming the app's question id on its card.
 pub fn question_tag(question_id: &str) -> String {
@@ -63,14 +63,25 @@ fn is_question_id(value: &str) -> bool {
             .all(|(i, b)| if [8, 13, 18, 23].contains(&i) { b == b'-' } else { b.is_ascii_hexdigit() && !b.is_ascii_uppercase() })
 }
 
-fn bounded(value: &str, max: usize) -> bool {
-    // The app's bounds: UTF-16 length, and its control set (C0 but tab,
-    // newline and carriage return, and DEL).
-    !value.trim().is_empty()
-        && value.encode_utf16().count() <= max
-        && !value
-            .chars()
-            .any(|c| matches!(c, '\u{0}'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}' | '\u{7f}'))
+fn text_ok(value: &str) -> bool {
+    // The app's control set (C0 but tab, newline and carriage return, and DEL).
+    !value
+        .chars()
+        .any(|c| matches!(c, '\u{0}'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}' | '\u{7f}'))
+}
+
+fn present(value: &str) -> bool {
+    !value.trim().is_empty() && text_ok(value)
+}
+
+/// The card's text fields together, within [`CARD_MAX_BYTES`].
+fn card_fits(body: &FileBody) -> bool {
+    body.title.len()
+        + body.question.len()
+        + body.unblocks.len()
+        + body.context.len()
+        + body.options.iter().map(|option| option.label.len()).sum::<usize>()
+        <= CARD_MAX_BYTES
 }
 
 #[derive(Deserialize)]
@@ -160,16 +171,17 @@ pub(crate) async fn file_with(state: &AppState, configured: Option<&str>, header
         return super::dm_relay::invalid_request();
     };
     let options_ok = body.options.len() <= OPTIONS_MAX
-        && body.options.iter().all(|option| dm_ask::is_option_id(&option.id) && bounded(&option.label, LABEL_MAX))
+        && body.options.iter().all(|option| dm_ask::is_option_id(&option.id) && present(&option.label))
         && body.options.iter().map(|option| option.id.as_str()).collect::<std::collections::HashSet<_>>().len()
             == body.options.len();
     if !is_question_id(&body.question_id)
         || !super::dm_relay::is_lane_name(&body.worker)
         || !V22_PROVIDERS.contains(&body.provider.as_str())
-        || !bounded(&body.title, TITLE_MAX)
-        || !bounded(&body.question, QUESTION_MAX)
-        || !bounded(&body.unblocks, UNBLOCKS_MAX)
-        || !(body.context.is_empty() || bounded(&body.context, CONTEXT_MAX))
+        || !present(&body.title)
+        || !present(&body.question)
+        || !present(&body.unblocks)
+        || !text_ok(&body.context)
+        || !card_fits(&body)
         || !options_ok
     {
         return super::dm_relay::invalid_request();
@@ -475,13 +487,32 @@ mod tests {
     }
 
     #[test]
-    fn bounded_text_refuses_blank_long_and_control_text() {
-        assert!(bounded("Which copy?", 20));
-        assert!(bounded("two\nlines", 20));
-        assert!(bounded("tab\tbed\r\n", 20));
-        assert!(!bounded("  ", 20));
-        assert!(!bounded("bell\u{7}", 20));
-        assert!(!bounded(&"x".repeat(21), 20));
+    fn card_text_refuses_blank_and_control_text_and_nothing_for_its_length_but_the_one_cap() {
+        assert!(present("Which copy?"));
+        assert!(present("two\nlines"));
+        assert!(present("tab\tbed\r\n"));
+        assert!(!present("  "));
+        assert!(!present("bell\u{7}"));
+        assert!(text_ok(""));
+        // A field far past the 2,000 and 4,000 characters it once had.
+        assert!(present(&"x".repeat(100_000)));
+    }
+
+    #[tokio::test]
+    async fn a_long_question_and_context_file_whole_and_only_the_one_cap_refuses() {
+        let (state, _dir) = state();
+        let digest = digest();
+        let mut body: Value = serde_json::from_slice(&question()).unwrap();
+        body["question"] = json!(format!("{}?", "q".repeat(5_000)));
+        body["context"] = json!("c".repeat(40_000));
+        let (status, filed) =
+            json_of(file_with(&state, Some(&digest), &headers(TOKEN), body.to_string().as_bytes()).await).await;
+        assert_eq!(status, StatusCode::OK, "{filed}");
+        let mut over: Value = serde_json::from_slice(&question()).unwrap();
+        over["question_id"] = json!("00000000-0000-4000-8000-00000000000c");
+        over["context"] = json!("c".repeat(CARD_MAX_BYTES));
+        let (status, _) = json_of(file_with(&state, Some(&digest), &headers(TOKEN), over.to_string().as_bytes()).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

@@ -14,7 +14,7 @@ KillMode=control-group
 UMask=0077
 # docs/policy/amux-decision-maker.md §5: the broker writes only the request
 # directories, and its network is the bridge's and the launchers' local
-# sockets plus, for the S2b snapshot, GitHub's two public hosts over HTTPS
+# sockets plus, for the workspace (2026-11-15), GitHub's public API and git host over HTTPS
 # (the host egress rules hold it to GITHUB_HOSTS of the S0 isolation config).
 ProtectSystem=strict
 ReadWritePaths=/var/lib/amux-dm/requests

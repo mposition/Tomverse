@@ -278,7 +278,7 @@ const ROUTES: Route[] = [
     operation: "decision_maker_result_submission",
     store: "submitDecisionMakerOutput",
     envelope: "submitted",
-    maxBodyBytes: 256 * 1_024,
+    maxBodyBytes: 1152 * 1_024,
     body: {
       request_id: REQUEST_ID,
       instance: "decision-maker-openai",
@@ -686,21 +686,23 @@ test("a body outside each route's strict shape or size never reaches the store",
   }
 });
 
-test("the result route's size cap holds the largest output the store could accept", async () => {
-  // §6's largest answer and rationale, every byte a control character, which JSON writes as six
-  // characters and the request body carries as seven, with options as long as §5's card allows.
+test("the result route's size cap holds the largest output the launcher returns", async () => {
+  // A raw output just under the launcher's 256 KiB, every byte a control character (six
+  // characters as JSON, seven as the request carries it), with options as long as §5's one card
+  // cap (256 KiB since 2026-11-15) allows.
   const route = ROUTES.find((entry) => entry.name === "result submission")!;
   const { POST } = await loadRoute(route);
   const raw = JSON.stringify({
     kind: "free_text",
-    answer: "\u0001".repeat(8 * 1_024),
-    rationale: "\u0001".repeat(4 * 1_024),
+    answer: "\u0001".repeat(40 * 1_024),
+    rationale: "\u0001".repeat(2 * 1_024),
     irreversible: false,
   });
-  const options = [{ id: "a", label: "x".repeat(16 * 1_024) }];
+  assert.ok(Buffer.byteLength(raw, "utf8") < 256 * 1_024, String(raw.length));
+  const options = [{ id: "a", label: "x".repeat(250 * 1_024) }];
   const body = { ...route.body, output: { kind: "output", raw, options } };
   const bytes = Buffer.byteLength(JSON.stringify(body), "utf8");
-  assert.ok(bytes > 96 * 1_024 && bytes < route.maxBodyBytes, String(bytes));
+  assert.ok(bytes > 512 * 1_024 && bytes < route.maxBodyBytes, String(bytes));
   reset();
   const answer = await POST(post(route, body));
   assert.equal(answer.status, 200);
