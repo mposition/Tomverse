@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  AMUX_V22_PROMOTION_BLOCKED_NOTICE_TASKS,
   amuxV22PromotionBlockedByOperator,
   amuxV22PromotionBlockedNotice,
 } from "../lib/amux/v22PromotionBlockedCore.ts";
@@ -42,11 +41,11 @@ test("every operator reason of the readiness check is reported; an unknown reaso
   assert.equal(amuxV22PromotionBlockedByOperator([task("AMUX-B-002", "a_reason_from_tomorrow")]).length, 0);
 });
 
-test("one notice names at most ten Tasks, counts them all and falls back to the id", () => {
+test("one notice names every Task, counts them all and falls back to the id", () => {
   const many = Array.from({ length: 12 }, (_, i) => task(`AMUX-C-${String(i).padStart(3, "0")}`, "worker_unavailable"));
   const notice = amuxV22PromotionBlockedNotice([...many, { taskId: "raw-id", displayKey: null, reasons: ["cost_unavailable"] }]);
   assert.equal(notice.count, 13);
-  assert.equal(notice.tasks.split("; ").length, AMUX_V22_PROMOTION_BLOCKED_NOTICE_TASKS);
+  assert.equal(notice.tasks.split("; ").length, 13, "no Task is left unnamed (owner decision 2026-11-15)");
   assert.ok(amuxV22PromotionBlockedNotice([{ taskId: "raw-id", displayKey: null, reasons: ["cost_unavailable"] }])
     .tasks.startsWith("raw-id: "));
 });

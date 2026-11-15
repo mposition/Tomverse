@@ -30,7 +30,7 @@ CREATE TABLE "AmuxV52ReviewFindings" (
   CONSTRAINT "AmuxV52ReviewFindings_digest_check" CHECK (
     "digest" ~ '^[0-9a-f]{64}$' AND
     "digestKeyId" ~ '^[A-Za-z0-9_-]{1,64}$' AND
-    "byteLength" BETWEEN 1 AND 1048576 AND
+    "byteLength" BETWEEN 1 AND 4194304 AND
     "findingCount" BETWEEN 0 AND 100000
   )
 );

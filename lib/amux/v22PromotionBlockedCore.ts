@@ -36,8 +36,6 @@ const WAITING_REASONS = new Set([
 
 const OPERATOR_REASONS = new Set<string>(AMUX_V22_PROMOTION_OPERATOR_REASONS);
 
-/** The most Tasks one notice names; the count says how many there were. */
-export const AMUX_V22_PROMOTION_BLOCKED_NOTICE_TASKS = 10;
 
 export type AmuxV22PromotionNotReady = {
   readonly taskId: string;
@@ -48,7 +46,7 @@ export type AmuxV22PromotionNotReady = {
 export type AmuxV22PromotionBlockedNotice = {
   readonly count: number;
   readonly reasons: Readonly<Record<string, number>>;
-  /** `AMUX-KEY: reason+reason`, at most AMUX_V22_PROMOTION_BLOCKED_NOTICE_TASKS. */
+  /** `AMUX-KEY: reason+reason` for every Task (owner decision 2026-11-15: no display cap). */
   readonly tasks: string;
 };
 
@@ -79,7 +77,7 @@ export function amuxV22PromotionBlockedNotice(
   return {
     count: blocked.length,
     reasons,
-    tasks: blocked.slice(0, AMUX_V22_PROMOTION_BLOCKED_NOTICE_TASKS)
+    tasks: blocked
       .map((task) => `${task.displayKey ?? task.taskId}: ${task.reasons.join("+")}`)
       .join("; "),
   };

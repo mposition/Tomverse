@@ -36,6 +36,7 @@ import { AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
   amuxV22GraduationPermitted } from "./v22AutoPromotionCore.ts";
 import { writeV22AutoPromotionAudit } from "./v22AutoPromotionAudit.ts";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { sanitizeOperationalText } from "@/lib/operationalMonitoringCore";
 import { type AmuxCardWaitEntry, recordAmuxCardWaitReasons } from "./cardWaitReasonStore.ts";
 import { amuxInfraFailureRoutingEnabled } from "./infraFailureCore.ts";
 import { AUTO_TICK_TRANSACTION_MAX_MS } from "./autoPromotionCore.ts";
@@ -80,11 +81,14 @@ async function reportPromotionBlocked(notReady: AmuxV22PromotionNotReady[]) {
       cooldownMs: 6 * 60 * 60 * 1_000,
       context: { component: "amux-v22-auto-promotion", count: notice.count,
         reasons: Object.entries(notice.reasons).map(([reason, n]) => `${reason}=${n}`).join(","),
-        tasks: notice.tasks, admin: "/admin/amux-backlog" },
+        // Every Task is named; the shared incident report bounds what leaves
+        // for its notification, and each card's own reason is on the board.
+        tasks: notice.tasks, admin: "/admin/amux-execution?tab=cards" },
     });
   } catch (error) {
     console.error(JSON.stringify({ event: "amux_v22_promotion_blocked_report_failed",
-      message: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
+      // Whole, with credential-shaped text hidden (it was cut to 200 characters).
+      message: error instanceof Error ? sanitizeOperationalText(error, Number.MAX_SAFE_INTEGER) : "unknown" }));
   }
 }
 type OwnerMoveCommand = {

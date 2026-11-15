@@ -5,7 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { rejectionFindings, reviewStep } from "../scripts/amux-v52-review-runner.mjs";
+import { AMUX_CONTENT_UNIT_MAX_BYTES } from "../lib/amux/ideaCrypto.ts";
 import {
+  AMUX_V52_FINDINGS_MAX_BYTES,
   AMUX_V52_FINDINGS_SUMMARY_MAX_CHARS,
   AMUX_V52_FINDINGS_SUMMARY_MAX_LINES,
   amuxV52FindingLines,
@@ -84,7 +86,11 @@ test("a reject with no listed finding keeps its reason code and the report prose
     "  The image path never checks the mime type."]);
 });
 
-test("findings travel whole: no cap on how many or how long, and only past 1 MB are the least severe left out and counted", () => {
+test("findings travel whole: no cap on how many or how long, and only past the sealed unit are the least severe left out and counted", () => {
+  // One bound, the sealed unit's (lib/amux/ideaCrypto.ts), here and in the table's CHECK.
+  assert.equal(AMUX_V52_FINDINGS_MAX_BYTES, AMUX_CONTENT_UNIT_MAX_BYTES);
+  assert.match(readFileSync(new URL("../prisma/migrations/20261116010000_amux_v52_review_findings_body/migration.sql", import.meta.url), "utf8"),
+    new RegExp(`"byteLength" BETWEEN 1 AND ${AMUX_CONTENT_UNIT_MAX_BYTES} AND`));
   const whole = rejectionFindings({ reviews: [{ slot: 0, vendor: "openai", verdict: "reject", findings: [
     ...Array.from({ length: 300 }, (_, index) => ({ severity: "nit", summary: `nit ${index} ${"x".repeat(1_000)}` })),
     { severity: "blocker", file: "a.ts", line: 1, summary: `the blocker stays ${"y".repeat(50_000)}` },
@@ -94,34 +100,37 @@ test("findings travel whole: no cap on how many or how long, and only past 1 MB 
   assert.equal(kept.omitted, 0);
   assert.ok(kept.findings[0].summary.length > 50_000);
   const huge = rejectionFindings({ reviews: [{ slot: 0, vendor: "openai", verdict: "reject", findings: [
-    ...Array.from({ length: 2_000 }, (_, index) => ({ severity: "nit", summary: `nit ${index} ${"x".repeat(1_000)}` })),
+    ...Array.from({ length: 5_000 }, (_, index) => ({ severity: "nit", summary: `nit ${index} ${"x".repeat(1_000)}` })),
     { severity: "blocker", file: "a.ts", line: 1, summary: "the blocker stays" },
   ] }] });
-  assert.ok(huge.length <= 900_000);
+  assert.ok(huge.length <= 3_900_000, "under the bridge's and the route's 4,000,000 characters");
   const doc = JSON.parse(huge).reviewers[0];
   assert.equal(doc.findings[0].summary, "the blocker stays");
   assert.ok(doc.omitted > 0);
-  assert.equal(doc.findings.length + doc.omitted, 2_001);
+  assert.equal(doc.findings.length + doc.omitted, 5_001);
   const app = normalizeAmuxV52FindingsDoc(JSON.parse(huge));
-  assert.equal(countAmuxV52Findings(app), 2_001);
+  assert.equal(countAmuxV52Findings(app), 5_001);
   assert.match(amuxV52FindingLines(app).at(-1), /^- … \d+ more not kept$/);
   // The app keeps a finding's own words, line breaks included, and fits a document to one sealed unit.
   const multi = normalizeAmuxV52FindingsDoc({ version: 1, reviewers: [{ vendor: "openai", verdict: "reject", findings: [
     { severity: "major", summary: "first line\nsecond line: keep\n  indented" }] }] });
   assert.equal(multi.reviewers[0].findings[0].summary, "first line\nsecond line: keep\nindented");
   const big = { version: 1, reviewers: [{ vendor: "openai", verdict: "reject", reason: null, note: null, omitted: 0,
-    findings: Array.from({ length: 3_000 }, (_, index) => ({ severity: index === 0 ? "major" : "nit",
+    findings: Array.from({ length: 6_000 }, (_, index) => ({ severity: index === 0 ? "major" : "nit",
       summary: `finding ${index} ${"z".repeat(900)}`, file: null, line: null })) }] };
   // A slice never crosses into a more severe finding: 40 majors and one nit lose the nit only.
   const mixed = fitAmuxV52FindingsDoc({ version: 1, reviewers: [{ vendor: "openai", verdict: "reject", reason: null, note: null, omitted: 0,
-    findings: [...Array.from({ length: 40 }, (_, index) => ({ severity: "major", summary: `m${index} ${"q".repeat(30_000)}`, file: null, line: null })),
+    findings: [...Array.from({ length: 40 }, (_, index) => ({ severity: "major", summary: `m${index} ${"q".repeat(120_000)}`, file: null, line: null })),
       { severity: "nit", summary: "n".repeat(10), file: null, line: null }] }] });
   assert.equal(mixed.reviewers[0].findings.filter((finding) => finding.severity === "nit").length, 0);
   assert.ok(mixed.reviewers[0].findings.filter((finding) => finding.severity === "major").length >= 30);
   const fitted = fitAmuxV52FindingsDoc(big);
-  assert.ok(Buffer.byteLength(JSON.stringify(fitted)) <= 1_000_000);
+  assert.ok(Buffer.byteLength(JSON.stringify(fitted)) <= AMUX_V52_FINDINGS_MAX_BYTES);
   assert.equal(fitted.reviewers[0].findings[0].severity, "major");
-  assert.equal(fitted.reviewers[0].findings.length + fitted.reviewers[0].omitted, 3_000);
+  assert.equal(fitted.reviewers[0].findings.length + fitted.reviewers[0].omitted, 6_000);
+  // A review well past the old 1 MB is now kept whole: nothing is dropped early.
+  const earlier = fitAmuxV52FindingsDoc({ ...big, reviewers: [{ ...big.reviewers[0], findings: big.reviewers[0].findings.slice(0, 2_000) }] });
+  assert.equal(earlier.reviewers[0].omitted, 0);
   assert.doesNotThrow(() => encodeAmuxV52FindingsDoc(fitted));
 });
 

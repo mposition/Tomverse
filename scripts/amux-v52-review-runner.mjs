@@ -257,11 +257,12 @@ const SEVERITY_ORDER = ["blocker", "major", "minor", "nit"];
 const REASON = /^[a-z0-9_]{1,80}$/;
 /**
  * What the helper hands the bridge: the findings as the reviewers wrote them,
- * whole. The guard is the sealed unit's own 1 MB; only past it are the least
- * severe findings left out and counted. The app redacts and bounds the text
- * once more before sealing it.
+ * whole. The guard is what the transport carries: the bridge's and the record
+ * route's 4,000,000 characters (the sealed unit is 4 MiB); only past it are
+ * the least severe findings left out and counted. The app redacts and bounds
+ * the text once more before sealing it.
  */
-const FINDINGS_JSON_CHARS = 900_000;
+const FINDINGS_JSON_CHARS = 3_900_000;
 const REPORT_TIMEOUT_MS = 8_000;
 
 const clean = (value) => String(value).trim();

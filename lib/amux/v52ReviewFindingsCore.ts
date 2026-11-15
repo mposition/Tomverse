@@ -57,7 +57,7 @@ export type AmuxV52FindingsDoc = { version: 1; reviewers: AmuxV52ReviewerFinding
 export const AMUX_V52_FINDINGS_MAX_REVIEWERS = 4;
 // Internal development flow (owner decision 2026-11-15): no working cap on what
 // a review said. These are guards against a runaway document, set far above
-// any real review; the only hard bound is the sealed unit's 1 MiB (below).
+// any real review; the only hard bound is the sealed unit's 4 MiB (below).
 export const AMUX_V52_FINDINGS_MAX_PER_REVIEWER = 5_000;
 export const AMUX_V52_FINDINGS_SUMMARY_FIELD_MAX = 200_000;
 const FILE_MAX = 1_000;
@@ -178,12 +178,18 @@ export function parseAmuxV52FindingsTransport(value: unknown): AmuxV52FindingsDo
 export const countAmuxV52Findings = (doc: AmuxV52FindingsDoc) =>
   doc.reviewers.reduce((sum, reviewer) => sum + reviewer.findings.length + reviewer.omitted, 0);
 
-/** The most one sealed content unit holds (lib/amux/ideaCrypto.ts bounds a unit at 1 MiB). */
-export const AMUX_V52_FINDINGS_MAX_BYTES = 1_000_000;
+/**
+ * The most one sealed content unit holds: ideaCrypto.ts's
+ * AMUX_CONTENT_UNIT_MAX_BYTES (4 MiB; it was 1 MiB), named here as a number
+ * because a client component reads this module and must not import Node
+ * crypto (tests/amuxV52ReviewFindingsSummary.test.mjs keeps the two equal).
+ * The table's byteLength CHECK holds the same bound.
+ */
+export const AMUX_V52_FINDINGS_MAX_BYTES = 4 * 1024 * 1024;
 
 /**
  * The document, made to fit one sealed unit. A review that fits is kept
- * whole; only past 1 MB are the least severe findings dropped, and counted in
+ * whole; only past 4 MiB are the least severe findings dropped, and counted in
  * `omitted`, then the notes cut. Never throws.
  */
 export function fitAmuxV52FindingsDoc(doc: AmuxV52FindingsDoc): AmuxV52FindingsDoc {
