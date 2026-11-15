@@ -37,7 +37,8 @@ export async function POST(request: Request) {
   return withAmuxRouteBudget(async () => {
     try {
       const body = await readLimitedJson(request, 4 * 1_024, schema);
-      const { v22 } = await prisma.$transaction((tx) => readAmuxAssignmentCatalogs(tx));
+      // A membership check only; it opens no transaction of its own.
+      const { v22 } = await readAmuxAssignmentCatalogs(prisma);
       if (!v22?.some((worker) => worker.worker_name === body.worker))
         return amuxJsonNoStore({ recorded: 0, reason: "worker_unknown" }, 409);
       const now = new Date();

@@ -71,7 +71,10 @@ export const amuxIsInfraFailureReason = (reason: string | null | undefined) =>
  */
 export const AMUX_MAX_INFRA_FAILURES_PER_TASK = 12;
 
-/** The escalation and attempt reason of a card that reached that bound. */
+/**
+ * The escalation reason of a card that reached that bound. The attempt that
+ * reached it keeps its own `infra_<kind>` reason, so it is still counted.
+ */
 export const AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON = "infra_attempts_exhausted";
 
 /** Below this, an unreadable result right after start is an early exit. */

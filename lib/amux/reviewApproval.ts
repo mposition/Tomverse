@@ -189,10 +189,13 @@ async function snapshot(
         select: { attemptId: true, sourceSha256: true, bodyPurgedAt: true } }) :
       Promise.resolve(null),
   ]);
+  // A person's decision is not refused by the infrastructure bound; their
+  // retry starts it over (lib/amux/infraFailureStore.ts).
   const budget = decideAmuxAttemptBudget({
     historical_rows: attemptFacts.historicalRows,
     greatest_attempt_number: attemptFacts.greatestAttemptNumber,
     infra_rows: attemptFacts.infraRows,
+    infra_window_rows: 0,
   });
   const used = Math.max(0, Math.max(attemptFacts.historicalRows,
     attemptFacts.greatestAttemptNumber ?? 0) - attemptFacts.infraRows);

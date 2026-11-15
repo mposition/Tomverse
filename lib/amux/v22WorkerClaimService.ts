@@ -192,7 +192,8 @@ async function claimCandidate(taskId: string, assignmentId: string,
       const prior = await readAmuxAttemptBudgetFacts(tx, taskId);
       const priorReserved = prior.reservedMicrousd;
       const attemptBudget = decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
-        greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows });
+        greatest_attempt_number: prior.greatestAttemptNumber, infra_rows: prior.infraRows,
+        infra_window_rows: prior.infraWindowRows });
       if (!attemptBudget.allowed) {
         throw new AmuxClaimSkipError("attempt_budget_exhausted", {
           limit: attemptBudget.exhausted_limit, attemptsUsed: attemptBudget.attempts_used,

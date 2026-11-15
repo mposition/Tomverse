@@ -1,28 +1,44 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { AMUX_INFRA_FAILURE_REASONS, amuxInfraFailureRoutingEnabled,
   amuxIsInfraFailureReason } from "./infraFailureCore.ts";
 
 /**
+ * The infrastructure failures the bound counts start after a person last
+ * sent the card back with `retry` -- an owner's review decision or the
+ * Decision Maker's settlement, both of which resolve the escalation with that
+ * outcome. Their earlier failures still use none of the card's attempts.
+ */
+const lastRetry = (taskId: string) => Prisma.sql`(SELECT MAX(e."resolvedAt")
+  FROM "AmuxHumanEscalation" e
+  WHERE e."taskId" = ${taskId} AND e."status" = 'resolved' AND e."resolutionOutcome" = 'retry')`;
+
+/**
  * A Task's attempts as the budget reads them, in one statement: every row,
- * the greatest number, the reserved total, and how many ended as an
- * infrastructure failure (lib/amux/infraFailureCore.ts). With
- * TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=disabled the last is always 0, so every
- * attempt counts again as before.
+ * the greatest number, the reserved total, how many ended as an
+ * infrastructure failure (lib/amux/infraFailureCore.ts), and how many of those
+ * came after a person's last retry (`infraWindowRows`, what the
+ * infrastructure bound counts). With TOMVERSE_AMUX_INFRA_FAILURE_ROUTING=
+ * disabled both are always 0, so every attempt counts again as before.
  */
 export async function readAmuxAttemptBudgetFacts(tx: Prisma.TransactionClient,
   taskId: string, enabled = amuxInfraFailureRoutingEnabled()) {
   const reasons = enabled ? [...AMUX_INFRA_FAILURE_REASONS] : [];
   const [row] = await tx.$queryRaw<Array<{ rows: number; greatest: number | null;
-    infra: number; reserved: bigint | null }>>`
+    infra: number; infraWindow?: number; reserved: bigint | null }>>`
     SELECT COUNT(*)::int AS "rows", MAX(a."attemptNumber") AS "greatest",
       (COUNT(*) FILTER (WHERE a."reason" = ANY(${reasons}::text[])))::int AS "infra",
+      (COUNT(*) FILTER (WHERE a."reason" = ANY(${reasons}::text[]) AND
+        (r."at" IS NULL OR a."startedAt" > r."at")))::int AS "infraWindow",
       SUM(a."reservedCostMicrousd")::bigint AS "reserved"
-    FROM "AmuxExecutionAttempt" a WHERE a."taskId" = ${taskId}`;
+    FROM "AmuxExecutionAttempt" a CROSS JOIN (SELECT ${lastRetry(taskId)} AS "at") r
+    WHERE a."taskId" = ${taskId}`;
+  const infraRows = row?.infra ?? 0;
   return {
     historicalRows: row?.rows ?? 0,
     greatestAttemptNumber: row?.greatest ?? null,
-    infraRows: row?.infra ?? 0,
+    infraRows,
+    infraWindowRows: row?.infraWindow ?? infraRows,
     reservedMicrousd: row?.reserved ?? BigInt(0),
   };
 }
@@ -62,10 +78,21 @@ export async function readAmuxRecentResultSignatures(tx: Prisma.TransactionClien
   return rows.map((row) => `${row.outcome ?? "unknown"}:${row.reason ?? "unknown"}`);
 }
 
-/** The Task's infrastructure failures other than this attempt. */
+/**
+ * The Task's infrastructure failures other than this attempt: all of them
+ * (`total`, which the attempt number still counts) and those since a
+ * person's last retry (`window`, which the bound counts). One statement.
+ */
 export async function countAmuxInfraAttemptsBefore(tx: Prisma.TransactionClient,
-  taskId: string, attemptId: string, enabled = amuxInfraFailureRoutingEnabled()) {
-  if (!enabled) return 0;
-  return tx.amuxExecutionAttempt.count({ where: { taskId, id: { not: attemptId },
-    reason: { in: [...AMUX_INFRA_FAILURE_REASONS] } } });
+  taskId: string, attemptId: string, enabled = amuxInfraFailureRoutingEnabled()):
+  Promise<{ total: number; window: number }> {
+  if (!enabled) return { total: 0, window: 0 };
+  const [row] = await tx.$queryRaw<Array<{ total: number; infraWindow: number }>>`
+    SELECT COUNT(*)::int AS "total",
+      (COUNT(*) FILTER (WHERE r."at" IS NULL OR a."startedAt" > r."at"))::int AS "infraWindow"
+    FROM "AmuxExecutionAttempt" a CROSS JOIN (SELECT ${lastRetry(taskId)} AS "at") r
+    WHERE a."taskId" = ${taskId} AND a."id" <> ${attemptId}
+      AND a."reason" = ANY(${[...AMUX_INFRA_FAILURE_REASONS]}::text[])`;
+  const total = Number(row?.total ?? 0);
+  return { total, window: Math.min(total, Number(row?.infraWindow ?? total)) };
 }

@@ -478,7 +478,7 @@ export async function startAmuxV22TaskExecution(input: {
         greatestAttemptNumber: prior.greatestAttemptNumber,
       }) : decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
         greatest_attempt_number: prior.greatestAttemptNumber,
-        infra_rows: prior.infraRows });
+        infra_rows: prior.infraRows, infra_window_rows: prior.infraWindowRows });
       if (!budget.allowed) return { started: false as const,
         reason: "attempt_budget_exhausted" as const };
       // v47: the retry receipt is recomputed as of its launch check.
@@ -1644,7 +1644,8 @@ export async function settleAmuxV22TaskExecution(input: {
         resultStored: storedResult !== null, patchStored: storedPatch !== null,
         usageEventCount: storedEvents.length, failure: input.failure ?? null });
       const infraBefore = infraRouting ?
-        await countAmuxInfraAttemptsBefore(tx, task.id, attempt.id, true) : 0;
+        await countAmuxInfraAttemptsBefore(tx, task.id, attempt.id, true) :
+        { total: 0, window: 0 };
       let escalationReceipt: Awaited<ReturnType<
         typeof calculateCurrentApprovedAmuxV4TaskCost>>["receipt"] | null = null;
       let originalReceiptDigest: string | null = null;
@@ -1767,7 +1768,8 @@ export async function settleAmuxV22TaskExecution(input: {
       const budget = settlementDestinationForBudget({
         requested_status: requestedStatus,
         attempt_number: attempt.attemptNumber,
-        infra_attempts_before: infraBefore,
+        infra_attempts_before: infraBefore.total,
+        infra_window_before: infraBefore.window,
         infra_failure: infraKind !== null,
         repeated_failure: repeatedFailure,
         ...(attempt.taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID &&
@@ -1825,7 +1827,11 @@ export async function settleAmuxV22TaskExecution(input: {
       await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },
         data: { endedAt: now, leaseExpiresAt: null, heartbeatAt: now,
           outcome: input.outcome, toStatus: next, endedBy: input.worker,
+          // An infrastructure failure keeps its own reason even when it is
+          // the one that reaches the bound (the escalation names the bound),
+          // so the budget and the worker quarantine still count it.
           reason: gradeEscalated ? "contract_path_touched" :
+            infraKind ? amuxInfraFailureReason(infraKind) :
             next === "blocked" ? blockedReason :
             exhaustedReason ?? reviewDisposition?.reason ??
                 (receiptsComplete ? "reported_result" : unverifiedReason) },
@@ -1960,10 +1966,12 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
             select: { recoveryApproval: { select: { riskAcceptanceId: true } } } }) : null;
         const cliRoute = !!assignment && !assignment.recoveryApproval?.riskAcceptanceId;
         const infraBefore = cliRoute && infraRetry ?
-          await countAmuxInfraAttemptsBefore(tx, task.id, attempt.id, true) : 0;
+          await countAmuxInfraAttemptsBefore(tx, task.id, attempt.id, true) :
+          { total: 0, window: 0 };
         const destination = cliRoute ? settlementDestinationForBudget({
           requested_status: "todo", attempt_number: attempt.attemptNumber,
-          infra_attempts_before: infraBefore, infra_failure: infraRetry }) : null;
+          infra_attempts_before: infraBefore.total, infra_window_before: infraBefore.window,
+          infra_failure: infraRetry }) : null;
         const retry = destination?.to_status === "todo";
         const infraExhausted = destination?.exhausted_limit === "infra_attempts";
         const toStatus = retry ? "todo" : "blocked";
@@ -1975,9 +1983,10 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
           data: { endedAt: now, leaseExpiresAt: null,
             outcome: "expired", toStatus,
             endedBy: "system:amux-v22-execution-reaper",
-            reason: retry ? (infraRetry ? amuxInfraFailureReason("lease_expired") :
-              AMUX_V22_LEASE_EXPIRED_RETRY_REASON) :
-              infraExhausted ? AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON : "outcome_unknown" },
+            // The bound reached is named by the escalation below; the attempt
+            // keeps its infrastructure reason so it is still counted.
+            reason: retry || infraExhausted ? (infraRetry ? amuxInfraFailureReason("lease_expired") :
+              AMUX_V22_LEASE_EXPIRED_RETRY_REASON) : "outcome_unknown" },
         });
         // An owner question this run recorded is not parked by an unknown
         // outcome; it is closed so it never holds the Task's question slot.

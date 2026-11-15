@@ -118,6 +118,21 @@ test("infrastructure failures keep their number but use none of the card's attem
     greatest_attempt_number: AMUX_MAX_EXECUTION_ATTEMPTS }).allowed, false, "the runaway guard");
   // A paid retry still names its own exact bound.
   assert.equal(decideAmuxAttemptBudget({ historical_rows: 2, greatest_attempt_number: 2, max_attempts: 2 }).allowed, false);
+  // A person's retry starts the infrastructure bound over: only the failures
+  // since it count, and none of them use the card's attempts.
+  const afterRetry = decideAmuxAttemptBudget({ historical_rows: 14, greatest_attempt_number: 14,
+    infra_rows: 13, infra_window_rows: 1 });
+  assert.deepEqual(afterRetry, { allowed: true, next_attempt_number: 15, max_attempts: AMUX_MAX_EXECUTION_ATTEMPTS });
+  assert.equal(decideAmuxAttemptBudget({ historical_rows: 25, greatest_attempt_number: 25,
+    infra_rows: 24, infra_window_rows: AMUX_MAX_INFRA_FAILURES_PER_TASK }).exhausted_limit, "infra_attempts");
+  // The window is never larger than the total.
+  assert.equal(decideAmuxAttemptBudget({ historical_rows: 3, greatest_attempt_number: 3,
+    infra_rows: 2, infra_window_rows: 50 }).allowed, true);
+  assert.equal(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 15,
+    infra_attempts_before: 13, infra_window_before: 2, infra_failure: true }).to_status, "todo");
+  assert.equal(settlementDestinationForBudget({ requested_status: "todo", attempt_number: 25,
+    infra_attempts_before: 23, infra_window_before: AMUX_MAX_INFRA_FAILURES_PER_TASK - 1,
+    infra_failure: true }).exhausted_limit, "infra_attempts");
 }));
 
 test("the kill switch restores the five-attempt count", () => withRouting("disabled", () => {
@@ -143,6 +158,23 @@ test("settlement hands a repeated failure to a person; an infrastructure failure
   assert.equal(settlementDestinationForBudget({ requested_status: "review", attempt_number: 40,
     repeated_failure: true }).to_status, "review");
 }));
+
+test("the infrastructure failure that reaches the bound keeps its own attempt reason", async () => {
+  // Review r-20261115-120153-60193b: the twelfth failure was stored as
+  // infra_attempts_exhausted, so the budget read eleven and the worker's
+  // quarantine streak reset. The bound is named by the escalation only.
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../lib/amux/execution.ts", import.meta.url), "utf8");
+  const settle = source.slice(source.indexOf("await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },\n        data: { endedAt: now, leaseExpiresAt: null, heartbeatAt: now,"));
+  assert.match(settle.slice(0, 900), /reason: gradeEscalated \? "contract_path_touched" :\s+infraKind \? amuxInfraFailureReason\(infraKind\) :\s+next === "blocked" \? blockedReason :/);
+  assert.match(source, /const blockedReason = [\s\S]{0,400}exhaustedReason \?\? reviewDisposition\?\.reason/,
+    "the escalation still names the bound");
+  const reaper = source.slice(source.indexOf("endedBy: \"system:amux-v22-execution-reaper\","));
+  assert.match(reaper.slice(0, 500), /reason: retry \|\| infraExhausted \? \(infraRetry \? amuxInfraFailureReason\("lease_expired"\) :/);
+  assert.match(reaper.slice(0, 1600), /reason: infraExhausted \?\s+AMUX_INFRA_ATTEMPTS_EXHAUSTED_REASON : "execution_lease_expired"/);
+  assert.ok(!AMUX_INFRA_FAILURE_REASONS.includes("infra_attempts_exhausted"),
+    "the bound's name is not itself a counted failure");
+});
 
 test("only the same result failure three runs in a row is a repeat", () => {
   const failed = amuxResultFailureSignature("failed", "reported_result");

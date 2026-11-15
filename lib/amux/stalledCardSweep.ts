@@ -61,10 +61,17 @@ export async function readAmuxStalledCards(
       AND w."status" = 'todo' AND w."v22ReceiptId" IS NOT NULL
       AND EXISTS (SELECT 1 FROM (
           SELECT GREATEST(COUNT(*), COALESCE(MAX(a."attemptNumber"), 0)) AS "numbered",
-            COUNT(*) FILTER (WHERE a."reason" = ANY(${infra}::text[])) AS "infra"
-          FROM "AmuxExecutionAttempt" a WHERE a."taskId" = w."id") b
+            COUNT(*) FILTER (WHERE a."reason" = ANY(${infra}::text[])) AS "infra",
+            -- The bound counts the failures since a person's last retry
+            -- (lib/amux/infraFailureStore.ts).
+            COUNT(*) FILTER (WHERE a."reason" = ANY(${infra}::text[]) AND (r."at" IS NULL OR
+              a."startedAt" > r."at")) AS "infraWindow"
+          FROM "AmuxExecutionAttempt" a CROSS JOIN (SELECT MAX(e."resolvedAt") AS "at"
+            FROM "AmuxHumanEscalation" e WHERE e."taskId" = w."id" AND e."status" = 'resolved'
+              AND e."resolutionOutcome" = 'retry') r
+          WHERE a."taskId" = w."id") b
         WHERE b."numbered" - b."infra" >= ${max}
-          OR b."infra" >= ${AMUX_MAX_INFRA_FAILURES_PER_TASK})
+          OR b."infraWindow" >= ${AMUX_MAX_INFRA_FAILURES_PER_TASK})
     ORDER BY w."updatedAt", w."id"
     LIMIT ${limit}`;
 }

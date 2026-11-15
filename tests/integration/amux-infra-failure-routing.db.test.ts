@@ -99,7 +99,8 @@ test("a worker that exits right after start: attempts kept, other worker first, 
     assert.equal(budget.allowed, true);
     assert.equal((budget as { next_attempt_number: number }).next_attempt_number, 5,
       "the number stays unique; the count is the card's own");
-    assert.equal(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID(), true), 3);
+    assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID(), true),
+      { total: 3, window: 3 });
     assert.deepEqual(await s.readAmuxRecentResultSignatures(tx, taskId, randomUUID(), 2),
       ["failed:reported_result"], "an infrastructure failure is never a repeat of the card's own result");
 
@@ -141,6 +142,47 @@ test("a worker that exits right after start: attempts kept, other worker first, 
     const [signal] = await tx.$queryRaw<Array<{ reportedAt: Date | null }>>`
       SELECT "reportedAt" FROM "AmuxWorkerHealthSignal" WHERE "workerName" = 'worker-two'`;
     assert.ok(signal?.reportedAt);
+  });
+});
+
+test("the twelfth platform failure is still counted, so the card stops at the bound", async () => {
+  // Review r-20261115-120153-60193b: the failure that reaches the bound keeps
+  // its own infra_<kind> reason (the escalation names the bound), so the
+  // budget reads twelve, not eleven, and the next claim is refused.
+  await lifecycle(async (tx) => {
+    const seed = await seedAmuxV4PortfolioRecoveryPrerequisites(queryAdapter(tx),
+      { taskRole: "investigate" }) as { taskId: string };
+    const taskId = await secondCard(tx, seed.taskId);
+    await earlyExits(tx, taskId, [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+    await fixtureCommitted(tx);
+    const s = await services();
+    const facts = await s.readAmuxAttemptBudgetFacts(tx, taskId);
+    assert.equal(facts.historicalRows, 13);
+    assert.equal(facts.infraRows, 12);
+    const budget = s.decideAmuxAttemptBudget({ historical_rows: facts.historicalRows,
+      greatest_attempt_number: facts.greatestAttemptNumber, infra_rows: facts.infraRows });
+    assert.equal(budget.allowed, false);
+    assert.equal((budget as { exhausted_limit?: string }).exhausted_limit, "infra_attempts");
+    // A person sends the card back with retry after the twelve: the bound
+    // starts over, the earlier failures still use none of its attempts.
+    await withoutTriggers(tx, async () => {
+      await tx.$executeRaw`INSERT INTO "AmuxHumanEscalation"
+        ("id", "taskId", "specialty", "reason", "status", "openedBy", "resolvedById",
+         "resolvedAt", "resolution", "resolutionOutcome", "updatedAt")
+        VALUES (${randomUUID()}, ${taskId}, 'execution-recovery', 'infra_attempts_exhausted',
+          'resolved', 'system:amux-v22-settlement', 'synthetic-owner', now(),
+          'Signed the worker in again.', 'retry', now())`;
+    });
+    const after = await s.readAmuxAttemptBudgetFacts(tx, taskId);
+    assert.equal(after.infraRows, 12);
+    assert.equal(after.infraWindowRows, 0);
+    const again = s.decideAmuxAttemptBudget({ historical_rows: after.historicalRows,
+      greatest_attempt_number: after.greatestAttemptNumber, infra_rows: after.infraRows,
+      infra_window_rows: after.infraWindowRows });
+    assert.deepEqual(again, { allowed: true, next_attempt_number: 14,
+      max_attempts: s.AMUX_MAX_EXECUTION_ATTEMPTS });
+    assert.deepEqual(await s.countAmuxInfraAttemptsBefore(tx, taskId, randomUUID(), true),
+      { total: 12, window: 0 });
   });
 });
 

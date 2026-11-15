@@ -370,6 +370,16 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // constraints only; no commit-deadline marker, classifier or deferred
   // trigger changes.
   "20261114160000_amux_process_audit_report",
+  // Owner decision 2026-11-15: the card wait reason and worker health signal
+  // tables (CHECK constraints only), and the attempt-number bounds of the
+  // review proposal, v22 attempt and recovery guards and the recovery
+  // approval CHECK; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261115140000_amux_wait_reasons_worker_health",
+  "20261115140100_amux_review_retry_no_fixed_count",
+  "20261115140200_amux_v22_attempt_number_bound",
+  "20261115140300_amux_v22_recovery_attempt_bound",
+  "20261115140400_amux_v22_recovery_approval_attempt_bound",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

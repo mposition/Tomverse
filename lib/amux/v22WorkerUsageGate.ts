@@ -75,7 +75,6 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
       AND a."endedAt" IS NOT NULL
       AND w."sourceSystem" = 'admin-idea-v4'
       AND w."archivedAt" IS NULL
-      AND COALESCE(a."reason", '') <> ALL(${infraReasons}::text[])
       AND NOT EXISTS (SELECT 1 FROM "AmuxV22AttemptUsageAcceptance" x
         WHERE x."attemptId" = a."id")
       AND (NOT EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" u
@@ -106,6 +105,7 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
       AND (${!paidOnly} OR EXISTS (SELECT 1 FROM "AmuxV22WorkerAssignment" g
         JOIN "AmuxV22TaskRecoveryApproval" ap ON ap."id" = g."recoveryApprovalId"
         WHERE g."id" = a."v22AssignmentId" AND ap."riskAcceptanceId" IS NOT NULL))
+      AND COALESCE(a."reason", '') <> ALL(${infraReasons}::text[])
     LIMIT 1`;
   return rows.length > 0;
 }
