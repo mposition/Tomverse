@@ -1,7 +1,7 @@
 // A queue longer than one wire answer is answered with its head, not refused:
 // the selection read keeps the first rows in the orchestrator's own ranking
-// (score, oldest, id), and the owned read keeps the oldest rows. Only a read
-// larger than one transaction can score still refuses.
+// (score, oldest, id), and the owned read keeps the oldest rows. A board larger
+// than one transaction can score is read oldest first and the rest are logged.
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -31,6 +31,7 @@ const fakeTx = {
       if (args.take !== undefined) lastTake = args.take;
       return todoRows.slice(0, args.take);
     },
+    count: async () => todoRows.length,
   },
   amuxResourcePolicy: { findMany: async () => [] },
 };
@@ -82,13 +83,21 @@ test("a selection queue over the wire limit is answered with its ranked head", a
   assert.equal(lastTake, store.AMUX_QUEUE_READ_MAX_ROWS + 1);
 });
 
-test("a queue that fits is returned as read, and one past the read ceiling still refuses", async () => {
+test("a queue that fits is returned as read; one past the read ceiling scores its oldest rows and logs the rest", async (t) => {
   const store = await import(mod("lib/amux/store.ts"));
   todoRows = Array.from({ length: 10 }, (_, i) => row(i, "p3"));
   assert.equal((await store.listDispatchable()).length, 10);
-  todoRows = Array.from({ length: store.AMUX_QUEUE_READ_MAX_ROWS + 1 }, (_, i) => row(i, "p3"));
-  await assert.rejects(store.listDispatchable(), (error: { code?: string }) =>
-    error.code === "AMUX_QUEUE_CAPACITY_EXCEEDED");
+  // Owner decision 2026-11-15: a board past one read is not refused.
+  const warnings: string[] = [];
+  t.mock.method(console, "warn", (line: string) => { warnings.push(line); });
+  todoRows = Array.from({ length: store.AMUX_QUEUE_READ_MAX_ROWS + 300 }, (_, i) => row(i, "p3"));
+  const queue = await store.listDispatchable();
+  assert.equal(queue.length, store.AMUX_QUEUE_MAX_ITEMS);
+  const read = new Set(todoRows.slice(0, store.AMUX_QUEUE_READ_MAX_ROWS).map((task) => task.id));
+  assert.ok(queue.every((task: { id: string }) => read.has(task.id)), "only the oldest rows read are scored");
+  const trimmed = warnings.map((line) => JSON.parse(line)).find((event) => event.event === "queue_read_trimmed_to_oldest");
+  assert.deepEqual(trimmed, { subsystem: "amux", event: "queue_read_trimmed_to_oldest", queue: "selection",
+    read_rows: store.AMUX_QUEUE_READ_MAX_ROWS, unread_rows: 300 });
 });
 
 test("an owned queue longer than the wire limit answers its oldest rows instead of refusing", async () => {

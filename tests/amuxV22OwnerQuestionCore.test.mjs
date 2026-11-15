@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DM_CARD_TEXT_MAX_BYTES } from "../lib/amux/decisionMakerCore.ts";
+import { dmWorkspaceCardPointer } from "../lib/amux/decisionMakerWorkspaceCore.ts";
 import {
   AMUX_V22_OWNER_ANSWER_MAX_BYTES,
   AMUX_V22_OWNER_ANSWER_MAX_CHARS,
@@ -79,19 +80,25 @@ test("a Task may ask as many questions as it needs: every one opens", () => {
     { questionState: "open", reason: "owner_question" }, String(sequence));
 });
 
-test("an answer is trimmed, bounded by the resumed prompt and free of control characters", () => {
+test("an answer is trimmed, bounded by its one backstop and free of control characters", () => {
   assert.equal(normalizeAmuxV22OwnerAnswer("  Name it.\r\nThanks  "), "Name it.\nThanks");
-  // The one cap is the resumed prompt's (the sidecar's real 30 KiB limit), the same in bytes and characters.
-  assert.equal(AMUX_V22_OWNER_ANSWER_MAX_BYTES, AMUX_V22_RESUME_PROMPT_MAX_BYTES);
-  assert.equal(AMUX_V22_OWNER_ANSWER_MAX_CHARS, AMUX_V22_RESUME_PROMPT_MAX_BYTES);
-  // The old 8,000-character answer is no limit: it goes whole.
+  // Owner decision 2026-11-15: the answer is a context file in the local CLI
+  // flow, so its one cap holds the Decision Maker's or an operator's longest
+  // answer (256 KiB) with the line naming who gave it, in bytes and characters.
+  assert.equal(AMUX_V22_OWNER_ANSWER_MAX_BYTES, 512 * 1_024);
+  assert.equal(AMUX_V22_OWNER_ANSWER_MAX_CHARS, AMUX_V22_OWNER_ANSWER_MAX_BYTES);
+  assert.ok(AMUX_V22_OWNER_ANSWER_MAX_BYTES > AMUX_V22_RESUME_PROMPT_MAX_BYTES,
+    "the earlier flow's 30 KiB prompt is checked by the service when the answer is given");
+  // The old 8,000-character and 30 KiB answers are no limit: they go whole.
   assert.equal(normalizeAmuxV22OwnerAnswer("x".repeat(8_001)), "x".repeat(8_001));
-  assert.equal(normalizeAmuxV22OwnerAnswer("x".repeat(AMUX_V22_RESUME_PROMPT_MAX_BYTES)), "x".repeat(AMUX_V22_RESUME_PROMPT_MAX_BYTES));
-  for (const bad of ["", "   ", 7, null, "x".repeat(AMUX_V22_RESUME_PROMPT_MAX_BYTES + 1),
-    // Within the characters, over the bytes: 10,241 three-byte characters.
-    "가".repeat(AMUX_V22_RESUME_PROMPT_MAX_BYTES / 3 + 1), "a\u0000b"])
+  assert.equal(normalizeAmuxV22OwnerAnswer("x".repeat(AMUX_V22_RESUME_PROMPT_MAX_BYTES + 1)), "x".repeat(AMUX_V22_RESUME_PROMPT_MAX_BYTES + 1));
+  assert.equal(normalizeAmuxV22OwnerAnswer("x".repeat(AMUX_V22_OWNER_ANSWER_MAX_BYTES)), "x".repeat(AMUX_V22_OWNER_ANSWER_MAX_BYTES));
+  const threeByteChars = Math.floor(AMUX_V22_OWNER_ANSWER_MAX_BYTES / 3);
+  for (const bad of ["", "   ", 7, null, "x".repeat(AMUX_V22_OWNER_ANSWER_MAX_BYTES + 1),
+    // Within the characters, over the bytes.
+    "가".repeat(threeByteChars + 1), "a\u0000b"])
     assert.equal(normalizeAmuxV22OwnerAnswer(bad), null);
-  assert.equal(normalizeAmuxV22OwnerAnswer("가".repeat(AMUX_V22_RESUME_PROMPT_MAX_BYTES / 3)), "가".repeat(AMUX_V22_RESUME_PROMPT_MAX_BYTES / 3));
+  assert.equal(normalizeAmuxV22OwnerAnswer("가".repeat(threeByteChars)), "가".repeat(threeByteChars));
 });
 
 test("the worker reads how to ask, and that the Task is not finished", () => {
@@ -160,10 +167,15 @@ test("a question may carry what the worker found and the files to read; a bad on
   const longContext = parseAmuxV22OwnerQuestion(line({ ...asked, context: "x".repeat(50_000), paths: "not a list" }));
   assert.equal(longContext.context, "x".repeat(50_000));
   assert.equal("paths" in longContext, false);
+  // Past the card's one cap too (owner decision 2026-11-15): kept whole, for the
+  // Decision Maker's workspace (evidence/CONTEXT.md), never dropped for its length.
   const tooLong = parseAmuxV22OwnerQuestion(line({ ...asked, context: "x".repeat(AMUX_V22_OWNER_TEXT_MAX_CHARS + 1), paths: "not a list" }));
   assert.equal(tooLong.question, asked.question);
-  assert.equal("context" in tooLong, false);
+  assert.equal(tooLong.context, "x".repeat(AMUX_V22_OWNER_TEXT_MAX_CHARS + 1));
   assert.equal("paths" in tooLong, false);
+  // A context that is no text, or carries a control character, is still left out.
+  assert.equal("context" in parseAmuxV22OwnerQuestion(line({ ...asked, context: 7 })), false);
+  assert.equal("context" in parseAmuxV22OwnerQuestion(line({ ...asked, context: "a\u0007b" })), false);
   // No count cap on the paths (it was 32): every distinct valid one is kept.
   const manyPaths = Array.from({ length: 100 }, (_, i) => `lib/dir/file${i}.ts`);
   assert.deepEqual(parseAmuxV22OwnerQuestion(line({ ...asked, paths: manyPaths })).paths, manyPaths);
@@ -177,7 +189,7 @@ test("the Decision Maker's card names the asking card and carries the worker's c
     paths: ["lib/amux/fileRetry.ts"] }));
   const card = amuxV22QuestionDmCard({ questionId: "q-1", worker: "codex-impl", providerClass: "codex",
     taskId: "cdd90973-16bd-4729-8940-1219cc639be5", sequence: 1, displayKey: "AMUX-AUTOFILE-003",
-    cardTitle: "File retry trailer signal", question });
+    cardTitle: "File retry trailer signal", question, workspace: false });
   assert.equal(card.title, "AMUX-AUTOFILE-003 File retry trailer signal");
   assert.equal(card.context, 'Card: AMUX-AUTOFILE-003 "File retry trailer signal", question 1 from worker codex-impl.\n\nTwo retry paths exist.');
   assert.deepEqual(card.context_paths, ["lib/amux/fileRetry.ts"]);
@@ -185,17 +197,25 @@ test("the Decision Maker's card names the asking card and carries the worker's c
   assert.equal(card.provider, "codex");
   // No key or title: the Task id, as before, and still the card line.
   const bare = amuxV22QuestionDmCard({ questionId: "q-1", worker: "codex-impl", providerClass: "codex",
-    taskId: "t-1", sequence: 2, displayKey: null, cardTitle: null, question: parseAmuxV22OwnerQuestion(line(asked)) });
+    taskId: "t-1", sequence: 2, displayKey: null, cardTitle: null, question: parseAmuxV22OwnerQuestion(line(asked)),
+    workspace: true });
   assert.equal(bare.title, "v22 Task t-1 question 2");
   assert.equal(bare.context, "Card: v22 Task t-1, question 2 from worker codex-impl.");
   assert.deepEqual(bare.context_paths, []);
   // Nothing is cut: no 200-unit title, no 4000-unit context (owner decision 2026-11-15).
   const long = amuxV22QuestionDmCard({ questionId: "q-1", worker: "w", providerClass: "codex", taskId: "t",
     sequence: 1, displayKey: "K-1", cardTitle: "가".repeat(400),
-    question: { ...question, context: "y".repeat(10_000) } });
+    question: { ...question, context: "y".repeat(10_000) }, workspace: false });
   assert.equal(long.title, `K-1 ${"가".repeat(400)}`);
   assert.ok(!long.title.endsWith("…"));
   assert.equal(long.context, `Card: K-1 "${"가".repeat(400)}", question 1 from worker w.\n\n${"y".repeat(10_000)}`);
+  // With the workspace on (the default), what the worker found is the
+  // workspace's evidence/CONTEXT.md, whole; the card points at it.
+  const huge = amuxV22QuestionDmCard({ questionId: "q-1", worker: "w", providerClass: "codex", taskId: "t",
+    sequence: 1, displayKey: "K-1", cardTitle: null, question: { ...question, context: "z".repeat(400_000) },
+    workspace: true });
+  assert.equal(huge.context, `Card: K-1, question 1 from worker w.\n\n${dmWorkspaceCardPointer(["CONTEXT.md"])}`);
+  assert.deepEqual(huge.context_paths, ["lib/amux/fileRetry.ts"]);
 });
 
 test("the rules ask for options, context and paths, and say the Decision Maker escalates without grounds", () => {
@@ -212,7 +232,7 @@ test("a card keeps every part of what the worker wrote: nothing is given up to f
   const question = parseAmuxV22OwnerQuestion(line(big));
   assert.equal(question.paths.length, 64);
   const card = amuxV22QuestionDmCard({ questionId: "q-1", worker: "codex-impl", providerClass: "codex",
-    taskId: "t", sequence: 1, displayKey: "AMUX-AUTOFILE-003", cardTitle: "File retry", question });
+    taskId: "t", sequence: 1, displayKey: "AMUX-AUTOFILE-003", cardTitle: "File retry", question, workspace: false });
   // Far past the 16 KiB the card used to be fitted into: still every path, option and word.
   assert.ok(Buffer.byteLength(JSON.stringify(card), "utf8") > 16 * 1_024);
   assert.equal(card.question, big.question);

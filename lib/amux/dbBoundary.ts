@@ -118,9 +118,10 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 2,
     isolation: "read",
   },
+  // +1 (2026-11-15): a board past one read counts the rows it leaves for later.
   queueRead: {
     operation: "queue_read",
-    prismaCallCeiling: 6,
+    prismaCallCeiling: 7,
     isolation: "read",
   },
   // 7: the busy-owner read (one open card per worker) joined the snapshot.

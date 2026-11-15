@@ -120,12 +120,12 @@ export default async function AdminAmuxBacklogPage({
   const search = amuxBacklogSearch(query.cardNumber);
   const backlogList = tab.id === "list" && search.valid && hasRecentAdminAuthentication(session)
     ? await readAmuxBacklogList(search.search, amuxBacklogPage(query.page)) : null;
-  // The counts and each card's kind, priority and state come from the newest
-  // cards' own read, only once the paged list itself was readable. A failed
-  // read is drawn as unavailable, never as zero.
-  const cardSummary = backlogList === null ? null : await listAmuxCardsForAdmin().then((read) => ({
+  // The whole board's counts, and the kind, priority and state of the page's
+  // own cards, only once the paged list itself was readable. A failed read is
+  // drawn as unavailable, never as zero.
+  const cardSummary = backlogList === null ? null : await listAmuxCardsForAdmin(backlogList.rows.map((row) => row.id)).then((read) => ({
     total: read.total,
-    limit: read.limit,
+    statusCounts: read.statusCounts,
     cards: read.rows.map(({ id, status, kind, priority }) => ({ id, status, kind, priority })),
   })).catch((error: unknown) => {
     console.warn(JSON.stringify({ subsystem: "amux", event: "backlog_card_summary_read_failed",

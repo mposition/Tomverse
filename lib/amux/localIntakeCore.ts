@@ -612,7 +612,8 @@ export const buildLocalIntakeSnapshot = (
   generatedAt: string,
 ): { ok: true; generatedAt: string; digest: string; cards: LocalIntakeSnapshotCard[] } | { ok: false; code: string } => {
   if (!ISO_PATTERN.test(generatedAt)) return { ok: false, code: "schema_rejected" };
-  if (cards.length > 256) return { ok: false, code: "snapshot_too_large" };
+  // No card count refuses a snapshot (owner decision 2026-11-15): the whole
+  // board is the intake's context; each title is already bounded below.
   const normalized = [...cards]
     .map((card) => ({
       id: card.id,

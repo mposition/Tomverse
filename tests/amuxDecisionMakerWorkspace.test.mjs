@@ -81,7 +81,7 @@ test("the payload names the commit and each file by its blob id, never its text,
   assert.equal(dmParseLaunchWorkspace({ state: "develop", targetSha: SHA, files: [{ name: "x.sh", content: "eA==" }] }), undefined);
 });
 
-test("evidence near its 16 MiB cap is read as base64 without overflowing a regex, and only canonical base64", () => {
+test("evidence of many megabytes is read as base64 without overflowing a regex, and only canonical base64", () => {
   const big = dmParseWorkspaceFiles([{ name: "PATCH.diff", content: "A".repeat(16_000_000) }]);
   assert.equal(big?.[0].bytes.length, 12_000_000);
   for (const content of ["AAA", "AA=A", "A===", "AB==", "@@@@"]) {

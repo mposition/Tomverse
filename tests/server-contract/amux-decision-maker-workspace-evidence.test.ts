@@ -49,6 +49,31 @@ test("a T2 draft's workspace is its whole patch on the commit it was made on", a
   assert.deepEqual(evidence.excluded, {});
 });
 
+test("a v22 question's workspace holds what the worker found, whole, as CONTEXT.md", async () => {
+  const { openDecisionMakerWorkspaceEvidence } = await service;
+  const { AMUX_V22_OWNER_QUESTION_MARKER } = await import(mod("lib/amux/v22OwnerQuestionCore.ts"));
+  const found = "The retry path loses the error. ".repeat(20_000).trim();
+  const { taskId: _task, sourceSnapshot: _snapshot, bodyCiphertext: _body, bodyKeyId: _bk, bodyKeyVersion: _bv,
+    bodyDigest: _bd, bodyDigestKeyId: _bdk, ...result } = sealed;
+  resultText = `Work so far.\n${AMUX_V22_OWNER_QUESTION_MARKER} ${JSON.stringify({ question: "Which path?",
+    unblocks: "the fix", options: [{ id: "a", label: "A" }], context: found })}`;
+  try {
+    const asked = (await openDecisionMakerWorkspaceEvidence({ kind: "v22_question", ...result }))!;
+    assert.equal(asked.targetSha, null, "develop's public head");
+    assert.deepEqual(asked.files, [{ name: "CONTEXT.md", text: found }], "far past the card's 256 KiB, whole");
+    assert.deepEqual(asked.excluded, {});
+    // A question with no context has no file, and nothing is missing.
+    resultText = `${AMUX_V22_OWNER_QUESTION_MARKER} ${JSON.stringify({ question: "Which?", unblocks: "u", options: [] })}`;
+    const bare = (await openDecisionMakerWorkspaceEvidence({ kind: "v22_question", ...result }))!;
+    assert.deepEqual([bare.files, bare.excluded], [[], {}]);
+    // Its run's result cannot be opened: the card's evidence is missing, so nothing is sent.
+    resultText = null;
+    assert.deepEqual((await openDecisionMakerWorkspaceEvidence({ kind: "v22_question", ...result }))!.excluded, { unreadable: 1 });
+  } finally {
+    resultText = "The run's whole report.";
+  }
+});
+
 test("a settlement's and a result review's workspace hold the criteria and the whole report", async () => {
   const { openDecisionMakerWorkspaceEvidence } = await service;
   const review = (await openDecisionMakerWorkspaceEvidence({ kind: "result_review", ...sealed }))!;

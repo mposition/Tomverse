@@ -4920,9 +4920,10 @@ test("the admin card list reads attempt counts and the latest attempt in set que
       data: { drag: 0 },
     });
 
-    const list = await listAmuxCardsForAdmin();
+    const list = await listAmuxCardsForAdmin([taskId]);
     const row = list.rows.find((candidate) => candidate.id === taskId);
-    assert.ok(row, "the freshly updated card is within the newest rows");
+    assert.ok(row, "the card the page names is read");
+    assert.ok((list.statusCounts.todo ?? 0) >= 1, "the board's counts include it");
     assert.equal(row.attemptCount, 2);
     assert.equal(row.lastAttemptOutcome, "blocked");
     assert.equal(row.lastAttemptToStatus, "blocked");

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
-import { DM_CARD_TEXT_MAX_BYTES, repositoryPathRefusal } from "./decisionMakerCore.ts";
+import { DM_CARD_TEXT_MAX_BYTES, DM_OUTPUT_TEXT_MAX_BYTES, repositoryPathRefusal } from "./decisionMakerCore.ts";
+import { amuxDmWorkspaceEnabled, dmWorkspaceCardPointer } from "./decisionMakerWorkspaceCore.ts";
 
 /**
  * A v22 worker's question to the owner (operator decision 2026-10-30).
@@ -36,11 +37,16 @@ export const AMUX_V22_OWNER_OPTIONS_MAX = 6;
  * is applied to the checkout. */
 export const AMUX_V22_RESUME_PROMPT_MAX_BYTES = 30 * 1_024;
 /**
- * An answer always goes whole into the resumed prompt, never cut, so its one
- * cap is that prompt's (the sidecar's real limit above), in UTF-8 bytes and so
- * also in characters. Before 2026-11-15 it was 8,000 characters and 12 KiB.
+ * An answer always goes whole to the resumed run, never cut. In the local CLI
+ * flow it is a context file (owner-answer.md) with no prompt bound, so its one
+ * cap is a memory backstop that holds the longest answer the Decision Maker or
+ * an operator can give (DM_OUTPUT_TEXT_MAX_BYTES, 256 KiB) with the line that
+ * names who gave it; the database holds the same bound (answerText). The
+ * earlier flow still refuses, when it is given, an answer its 30 KiB prompt
+ * cannot hold beside the brief (v22OwnerQuestionService.ts). In UTF-8 bytes
+ * and so also in characters. It was 8,000 characters and 12 KiB, then 30 KiB.
  */
-export const AMUX_V22_OWNER_ANSWER_MAX_BYTES = AMUX_V22_RESUME_PROMPT_MAX_BYTES;
+export const AMUX_V22_OWNER_ANSWER_MAX_BYTES = 2 * DM_OUTPUT_TEXT_MAX_BYTES;
 export const AMUX_V22_OWNER_ANSWER_MAX_CHARS = AMUX_V22_OWNER_ANSWER_MAX_BYTES;
 
 export const AMUX_V22_OWNER_QUESTION_STATES =
@@ -103,9 +109,11 @@ export function parseAmuxV22OwnerQuestion(resultText: string):
         !label || options.some((seen) => seen.id === option.id)) return null;
     options.push({ id: option.id, label });
   }
-  // The context and the paths only help the decider: one that does not fit is
-  // left out, never a reason to lose the question.
-  const context = boundedText(record.context, AMUX_V22_OWNER_TEXT_MAX_CHARS);
+  // The context and the paths only help the decider, so a malformed one is
+  // left out, never a reason to lose the question. Its length is no reason
+  // (owner decision 2026-11-15): a context of any size is kept whole and goes
+  // to the Decision Maker as its workspace's evidence/CONTEXT.md.
+  const context = boundedText(record.context, Number.POSITIVE_INFINITY);
   const paths = Array.isArray(record.paths) ? [...new Set(record.paths.filter(
     (path): path is string => typeof path === "string" && repositoryPathRefusal(path) === null))] : [];
   return { question, unblocks, options, ...(context ? { context } : {}),
@@ -120,20 +128,26 @@ export function parseAmuxV22OwnerQuestion(resultText: string):
  * title names the card; the context starts with the card line; the paths are
  * the worker's, hints into the Decision Maker's workspace (a checkout of the
  * repository). Nothing is cut or dropped to fit a card (owner decision
- * 2026-11-15): a card over the one cap goes to the operator by the routing.
+ * 2026-11-15): with the workspace on, what the worker found goes whole as
+ * evidence/CONTEXT.md (lib/amux/decisionMakerWorkspaceService.ts re-reads it)
+ * and the card points at it; with the workspace off it rides in the context,
+ * and a card over the one cap goes to the operator by the routing.
  */
 export function amuxV22QuestionDmCard(input: { questionId: string; worker: string;
   providerClass: string; taskId: string; sequence: number; displayKey: string | null;
-  cardTitle: string | null; question: AmuxV22OwnerQuestion }) {
+  cardTitle: string | null; question: AmuxV22OwnerQuestion; workspace?: boolean }) {
   const name = input.displayKey ?? `v22 Task ${input.taskId}`;
   const title = input.cardTitle?.trim() ? `${name} ${input.cardTitle.trim()}` :
     `${name} question ${input.sequence}`;
   const cardLine = `Card: ${name}${input.cardTitle?.trim() ? ` "${input.cardTitle.trim()}"` : ""}` +
     `, question ${input.sequence} from worker ${input.worker}.`;
+  const found = input.question.context ?? null;
+  const context = found !== null && (input.workspace ?? amuxDmWorkspaceEnabled()) ?
+    `${cardLine}\n\n${dmWorkspaceCardPointer(["CONTEXT.md"])}` :
+    [cardLine, found].filter(Boolean).join("\n\n");
   return { question_id: input.questionId, worker: input.worker, provider: input.providerClass,
     title: title.replace(/\s+/g, " "), question: input.question.question, unblocks: input.question.unblocks,
-    options: input.question.options,
-    context: [cardLine, input.question.context].filter(Boolean).join("\n\n"),
+    options: input.question.options, context,
     context_paths: [...(input.question.paths ?? [])] };
 }
 

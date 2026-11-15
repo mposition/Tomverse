@@ -44,10 +44,11 @@ import {
 export const AMUX_QUEUE_MAX_ITEMS = 512;
 export const AMUX_OWNED_QUEUE_MAX_ITEMS = 512;
 /**
- * The most todo rows one selection read scores. The rows are ranked in this
- * process after the read, so the read has to see every runnable row; this is
- * the size one read transaction finishes inside its 200 ms statement timeout
- * and the queue route's 2.8 s budget, not a policy about the board.
+ * The most todo rows one selection read scores: the size one read transaction
+ * finishes inside its 200 ms statement timeout and the queue route's 2.8 s
+ * budget, not a policy about the board. A longer board is not refused: the
+ * oldest rows (the read's own order) are scored and the rest are counted in
+ * the log; they are read on a later tick.
  */
 export const AMUX_QUEUE_READ_MAX_ROWS = 2_000;
 export const PRISMA_INT_MAX = 2_147_483_647;
@@ -299,15 +300,16 @@ export async function listDispatchable(): Promise<AmuxQueueTask[]> {
         return [];
       }
 
-      const rows = await tx.amuxWorkItem.findMany({
-        where: {
-          status: "todo",
-          ...legacyDispatchSourceFilter(),
-          owner: null,
-          archivedAt: null,
-          dueParseState: { in: ["none", "valid"] },
-          dependencies: runnableDependencyFilter(),
-        },
+      const runnable: Prisma.AmuxWorkItemWhereInput = {
+        status: "todo",
+        ...legacyDispatchSourceFilter(),
+        owner: null,
+        archivedAt: null,
+        dueParseState: { in: ["none", "valid"] },
+        dependencies: runnableDependencyFilter(),
+      };
+      const read = await tx.amuxWorkItem.findMany({
+        where: runnable,
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
           id: true,
@@ -347,8 +349,19 @@ export async function listDispatchable(): Promise<AmuxQueueTask[]> {
         take: AMUX_QUEUE_READ_MAX_ROWS + 1,
       });
 
-      if (rows.length > AMUX_QUEUE_READ_MAX_ROWS) {
-        throw new AmuxQueueCapacityError("selection");
+      // A longer board is not refused (owner decision 2026-11-15): the oldest
+      // rows are scored, and the rest wait for a tick after these leave the
+      // queue. Only then is the rest counted, for the log.
+      const rows = read.slice(0, AMUX_QUEUE_READ_MAX_ROWS);
+      if (read.length > AMUX_QUEUE_READ_MAX_ROWS) {
+        const total = await tx.amuxWorkItem.count({ where: runnable });
+        console.warn(JSON.stringify({
+          subsystem: "amux",
+          event: "queue_read_trimmed_to_oldest",
+          queue: "selection",
+          read_rows: rows.length,
+          unread_rows: Math.max(0, total - rows.length),
+        }));
       }
 
       const schedulerInputs = await schedulerInputsForRows(rows, tx);

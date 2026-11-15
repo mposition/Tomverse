@@ -14,6 +14,7 @@ import {
 import { amuxDmOwnerSettlementFindingsText } from "@/lib/amux/dmOwnerSettlementCore";
 import { readAmuxDmOwnerSettlementPullEvidence } from "@/lib/amux/dmOwnerSettlementRead";
 import { parseAmuxV22Conclusion } from "@/lib/amux/v22ConclusionCore";
+import { parseAmuxV22OwnerQuestion } from "@/lib/amux/v22OwnerQuestionCore";
 import { openCompletionCriteria } from "@/lib/amux/v22ResultReviewService";
 import { openAmuxV22TaskResultRow, v22TaskResultIdeaId } from "@/lib/amux/v22TaskResultStore";
 import {
@@ -34,6 +35,7 @@ import { isSnapshotTargetSha } from "@/lib/amux/decisionMakerCore";
  *   owner settlement (AmuxDmOwnerSettlement)  CRITERIA.md, FINDINGS.md (the run's report, then
  *                                             every rejected review's findings), a review PR's PATCH.diff
  *   result review (AmuxV22ResultReview)       CRITERIA.md, FINDINGS.md
+ *   v22 question (AmuxV22TaskQuestion)        CONTEXT.md: what the worker found, whole; develop's public head
  *   anything else (a worker's own typed ask)   no evidence; develop's public head
  *
  * Every file passes the workspace's checks (`dmWorkspaceAcceptFiles`: closed
@@ -63,7 +65,8 @@ export type DmWorkspaceSource =
   | { kind: "t2_draft"; patchBody: string | null; baseSha: string | null }
   | ({ kind: "settlement"; settlementKind: string; pullPatch: string | null;
       reviews: AmuxV52ReviewHistoryRow[] } & SealedBody & SealedResult)
-  | ({ kind: "result_review" } & SealedBody & SealedResult);
+  | ({ kind: "result_review" } & SealedBody & SealedResult)
+  | ({ kind: "v22_question" } & SealedResult);
 
 /**
  * The request's card and the one row it was filed from. Null for a request
@@ -78,7 +81,7 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
   if (cardId === null) return null;
   const request = { cardId };
   const rows = await tx.$queryRaw<Array<{
-    source: "t2_draft" | "settlement" | "result_review"; patchBody: string | null; baseSha: string | null;
+    source: "t2_draft" | "settlement" | "result_review" | "v22_question"; patchBody: string | null; baseSha: string | null;
     settlementKind: string | null; bindingId: string | null;
   } & Partial<SealedBody> & Partial<SealedResult>>>`
     SELECT 't2_draft' AS "source", w."patchBody", w."baseSha", NULL::text AS "settlementKind",
@@ -106,6 +109,13 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
     FROM "AmuxV22ResultReview" v JOIN "AmuxWorkItem" w ON w."id" = v."taskId"
     LEFT JOIN "AmuxV22TaskResult" r ON r."attemptId" = v."attemptId" AND r."taskId" = v."taskId"
     WHERE v."localCardId" = ${request.cardId}
+    UNION ALL
+    SELECT 'v22_question', NULL, NULL, NULL, NULL, q."taskId", NULL, NULL, NULL, NULL, NULL, NULL,
+      q."attemptId", r."ideaId", r."ciphertext", r."keyId", r."keyVersion", r."digest", r."digestKeyId",
+      r."sourceSha256", r."bodyPurgedAt"
+    FROM "AmuxV22TaskQuestion" q
+    LEFT JOIN "AmuxV22TaskResult" r ON r."attemptId" = q."attemptId" AND r."taskId" = q."taskId"
+    WHERE q."localCardId" = ${request.cardId}
     LIMIT 2`;
   // A card is one source's; two would mean the card ids were reused.
   if (rows.length !== 1) return { kind: "none" };
@@ -120,6 +130,11 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
     sourceSha256: row.sourceSha256 ?? null, bodyPurgedAt: row.bodyPurgedAt ?? null,
   };
   if (row.source === "result_review") return { kind: "result_review", ...sealed };
+  if (row.source === "v22_question") {
+    const { attemptId, resultIdeaId, ciphertext, keyId, keyVersion, digest, digestKeyId, sourceSha256, bodyPurgedAt } = sealed;
+    return { kind: "v22_question", attemptId, resultIdeaId, ciphertext, keyId, keyVersion, digest, digestKeyId,
+      sourceSha256, bodyPurgedAt };
+  }
   const pulls = row.settlementKind === "t2_pr" && row.bindingId ?
     await readAmuxDmOwnerSettlementPullEvidence(tx, [row.bindingId]) : [];
   // The card says its rejections' findings are in FINDINGS.md: read every one, as the card's sync did.
@@ -128,12 +143,17 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
     reviews, ...sealed };
 }
 
-/** The run's findings (its conclusion's, else the whole result), or null when it left none or it cannot be opened. */
-const openFindings = async (row: SealedResult) => {
+/** The run's whole result text, or null when it left none or it cannot be opened. */
+const openResultText = async (row: SealedResult) => {
   if (!row.attemptId || !row.resultIdeaId || !row.digest || !row.digestKeyId || !row.sourceSha256) return null;
-  const text = await openAmuxV22TaskResultRow(row.attemptId, { ideaId: row.resultIdeaId, ciphertext: row.ciphertext,
+  return openAmuxV22TaskResultRow(row.attemptId, { ideaId: row.resultIdeaId, ciphertext: row.ciphertext,
     keyId: row.keyId, keyVersion: row.keyVersion, digest: row.digest, digestKeyId: row.digestKeyId,
     bodyPurgedAt: row.bodyPurgedAt, sourceSha256: row.sourceSha256 }).catch(() => null);
+};
+
+/** The run's findings (its conclusion's, else the whole result), or null when it left none or it cannot be opened. */
+const openFindings = async (row: SealedResult) => {
+  const text = await openResultText(row);
   return text === null ? null : parseAmuxV22Conclusion(text)?.findings ?? text;
 };
 
@@ -181,6 +201,12 @@ export async function openDecisionMakerWorkspaceEvidence(source: DmWorkspaceSour
     } else {
       files.push({ name: "FINDINGS.md", text: report, missing: reportMissing });
     }
+  } else if (source.kind === "v22_question") {
+    // The question's own line, read again from its run's result: what the
+    // worker found, whole (the card points at it only when there is some).
+    const text = await openResultText(source);
+    const context = text === null ? null : parseAmuxV22OwnerQuestion(text)?.context ?? null;
+    files.push({ name: "CONTEXT.md", text: context, missing: text === null && source.resultIdeaId !== null });
   }
   const accepted = dmWorkspaceAcceptFiles(files.flatMap((file) =>
     file.text ? [{ name: file.name, bytes: Buffer.from(file.text, "utf8") }] : []));

@@ -9,6 +9,7 @@ import {
   isSnapshotTargetSha,
 } from "./decisionMakerCore.ts";
 import { isDmRequestId } from "./decisionMakerRequestCore.ts";
+import { AMUX_V22_TRANSPORT_MAX_BYTES } from "./v22LocalCliFlowCore.ts";
 import { detectSecretsInFields } from "../engineeringAgentSecretPatterns.ts";
 
 /**
@@ -64,11 +65,13 @@ export const DM_WORKSPACE_HISTORY_DEPTH = 100;
 /**
  * The evidence the app hands over for one request, in UTF-8 bytes, all files
  * together. It crosses three processes in memory (the app's answer, the
- * bridge, the broker's socket line, base64), so it is bounded; it is far above
- * what the app stores for one card (an engineering patch is at most 64 KiB,
- * ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES).
+ * bridge, the broker's socket line, base64), so it is bounded, as a memory
+ * backstop only: twice the v22 transport backstop, so a run's report kept at
+ * that backstop (lib/amux/v22LocalCliFlowCore.ts) fits beside its patch and
+ * criteria (it was 16 MiB, under the 32 MiB report the local CLI flow keeps).
+ * The broker and the bridge mirror it (dm_relay/workspace.rs).
  */
-export const DM_WORKSPACE_EVIDENCE_MAX_BYTES = 16 * 1024 * 1024;
+export const DM_WORKSPACE_EVIDENCE_MAX_BYTES = 2 * AMUX_V22_TRANSPORT_MAX_BYTES;
 /** The request directory on the box's disk after the checkout: two requests may run at once (one per instance). */
 export const DM_WORKSPACE_DISK_MAX_BYTES = 4 * 1024 * 1024 * 1024;
 /**
@@ -252,7 +255,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const hasExactKeys = (record: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(record).length === keys.length && keys.every((key) => Object.hasOwn(record, key));
-/** The base64 alphabet and its padding, checked without a repeated group (a 16 MiB text would overflow the regex stack); the round trip below holds the rest. */
+/** The base64 alphabet and its padding, checked without a repeated group (a text of many megabytes would overflow the regex stack); the round trip below holds the rest. */
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** Canonical base64 within the evidence cap, or null. */

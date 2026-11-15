@@ -10,9 +10,12 @@ import { prisma } from "@/lib/prisma";
  * promoted card was a database query. The rows carry identifiers and state,
  * never the brief, the description or any free text a worker could have
  * written.
+ *
+ * Owner decision 2026-11-15 (no display cap): the counts are the whole board's
+ * (one grouped count), and the rows are the cards the caller names -- the page
+ * the list shows -- so a card on any page has its state. It read the newest
+ * 200 cards before, and counted only those.
  */
-
-export const AMUX_ADMIN_CARD_LIST_LIMIT = 200;
 
 const STATUS_ORDER = ["doing", "review", "blocked", "todo", "backlog", "done", "cancelled"];
 
@@ -34,17 +37,17 @@ export type AmuxAdminCardRow = {
   updatedAt: string;
 };
 
-export async function listAmuxCardsForAdmin(): Promise<{
+export async function listAmuxCardsForAdmin(ids: readonly string[]): Promise<{
   rows: AmuxAdminCardRow[];
   total: number;
-  limit: number;
+  /** Cards per stored status, over every card that is not archived. */
+  statusCounts: Record<string, number>;
 }> {
-  const [total, cards] = await Promise.all([
-    prisma.amuxWorkItem.count({ where: { archivedAt: null } }),
-    prisma.amuxWorkItem.findMany({
-      where: { archivedAt: null },
+  const [grouped, cards] = await Promise.all([
+    prisma.amuxWorkItem.groupBy({ by: ["status"], where: { archivedAt: null }, _count: { _all: true } }),
+    ids.length === 0 ? [] : prisma.amuxWorkItem.findMany({
+      where: { archivedAt: null, id: { in: [...ids] } },
       orderBy: [{ updatedAt: "desc" }],
-      take: AMUX_ADMIN_CARD_LIST_LIMIT,
       select: {
         id: true,
         displayKey: true,
@@ -61,22 +64,24 @@ export async function listAmuxCardsForAdmin(): Promise<{
       },
     }),
   ]);
-  const ids = cards.map((card) => card.id);
+  const statusCounts = Object.fromEntries(grouped.map((row) => [row.status, row._count._all]));
+  const total = grouped.reduce((sum, row) => sum + row._count._all, 0);
+  const cardIds = cards.map((card) => card.id);
   // Two set queries for the whole page, not one per card: a nested `take` on
   // a to-many relation is loaded per parent row.
-  const [counts, latest] = ids.length === 0
+  const [counts, latest] = cardIds.length === 0
     ? [[], []]
     : await Promise.all([
         prisma.amuxExecutionAttempt.groupBy({
           by: ["taskId"],
-          where: { taskId: { in: ids } },
+          where: { taskId: { in: cardIds } },
           _count: { _all: true },
         }),
         // attemptNumber is null on historical rows; start time orders every row.
         prisma.$queryRaw<Array<{ taskId: string; outcome: string | null; toStatus: string | null }>>`
           SELECT DISTINCT ON ("taskId") "taskId", "outcome", "toStatus"
           FROM "AmuxExecutionAttempt"
-          WHERE "taskId" = ANY(${ids}::text[])
+          WHERE "taskId" = ANY(${cardIds}::text[])
           ORDER BY "taskId", "startedAt" DESC
         `,
       ]);
@@ -110,5 +115,5 @@ export async function listAmuxCardsForAdmin(): Promise<{
         (left.displayKey ?? left.sourceKey ?? left.id).localeCompare(
           right.displayKey ?? right.sourceKey ?? right.id, undefined, { numeric: true }),
     );
-  return { rows, total, limit: AMUX_ADMIN_CARD_LIST_LIMIT };
+  return { rows, total, statusCounts };
 }
