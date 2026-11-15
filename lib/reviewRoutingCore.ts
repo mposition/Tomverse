@@ -27,6 +27,8 @@ export function reviewRoutingCandidates(input: {
   imageModels: readonly ImageModelProfile[];
   plan: ModelTier | "Guest";
   hasImages: boolean;
+  /** Measured typical seconds per image model id, when the caller has them. */
+  imageSeconds?: Readonly<Record<string, number>>;
 }) {
   const models = input.models.filter(model =>
     input.providers.includes(model.provider) && model.enabled && !model.catalogDeleted &&
@@ -34,7 +36,7 @@ export function reviewRoutingCandidates(input: {
     (!input.hasImages || modelSupportsImageInput(model)));
   const text = autoLlmRouterCandidates(models.map(m => m.id), models,
     Object.fromEntries(models.map(m => [m.id, getModelUsageProfile(m).credits])));
-  const images = chatImageModelCandidates(input.imageModels).flatMap(candidate => {
+  const images = chatImageModelCandidates(input.imageModels, input.imageSeconds).flatMap(candidate => {
     const model = input.imageModels.find(m => m.id === candidate.id)!;
     const provider = imageModelOwner(model);
     return input.providers.includes(provider) ? [{ ...candidate, provider }] : [];

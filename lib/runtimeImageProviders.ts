@@ -49,6 +49,15 @@ const GOOGLE_RUNTIME_PROFILE = {
 const QWEN_RUNTIME_SIZES = ["1024x1024"] as const;
 
 /**
+ * xAI's request maps 1K square only, and a Grok Imagine Image 2.x model takes
+ * `low` or `medium` (lib/xaiImageRequest.ts). Anything else builds no request,
+ * so the starting profile never offers it. Literals because this module is
+ * dependency-free; tests/xaiImageRequest.test.mjs holds them to the adapter's.
+ */
+const XAI_RUNTIME_SIZES = ["1024x1024"] as const;
+const XAI_RUNTIME_QUALITIES = ["low", "medium"] as const;
+
+/**
  * The starting profile for a runtime image model handed over from the
  * discovery queue. Every field is the operator's to correct; the schema and
  * the judge decide whether it can serve.
@@ -70,6 +79,14 @@ export const runtimeImageProfileTemplate = (
   provenance: [] as string[],
   outputMimeTypes: ["image/png"] as string[],
   ...(provider === "qwen" ? { sizes: [...QWEN_RUNTIME_SIZES] } : {}),
+  ...(provider === "xai"
+    ? {
+        sizes: [...XAI_RUNTIME_SIZES],
+        qualities: (choices.qualities?.length ? choices.qualities : XAI_RUNTIME_QUALITIES).filter((quality) =>
+          (XAI_RUNTIME_QUALITIES as readonly string[]).includes(quality)
+        ),
+      }
+    : {}),
   // A Google request has one shape whatever the form chose.
   ...(provider === "google"
     ? {
@@ -81,6 +98,20 @@ export const runtimeImageProfileTemplate = (
       }
     : {}),
 });
+
+/**
+ * The longest image router note (a profile's routingNote). Capped so every
+ * listed model's note fits the router call's prompt budget.
+ */
+export const IMAGE_ROUTING_NOTE_MAX_CHARS = 400;
+
+/**
+ * What an image model is for, in the user's words: the line under its name in
+ * the image model list, the way a chat model shows "Fast everyday questions".
+ * A key, not text, so the eight locales carry the copy (chat.imageModelUse*).
+ */
+export const IMAGE_USE_CASES = ["text", "detail", "fast", "edit", "layout", "reference", "value", "general"] as const;
+export type ImageUseCase = (typeof IMAGE_USE_CASES)[number];
 
 /** The sizes and qualities a runtime image profile may list (the profile schema's enums). */
 export const RUNTIME_IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536"] as const;

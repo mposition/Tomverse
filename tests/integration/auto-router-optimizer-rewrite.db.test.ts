@@ -416,7 +416,7 @@ test("only follow-ups the live router was asked to rewrite are sampled", async (
   await decision({ version: "auto-llm-router-v1+rewrite", routerContext: null }); // not a follow-up
   await decision({ version: "auto-llm-router-v1+rewrite", outcome: "error" });
   await decision({ version: "auto-llm-router-v1+rewrite", routerInput: "x".repeat(1_501) });
-  for (const marker of ["+image-intent-v2", "+search-plan-v2", "+location-v1"]) {
+  for (const marker of ["+image-intent-v3", "+search-plan-v2", "+location-v1"]) {
     await decision({ version: `auto-llm-router-v2-bounded+rewrite${marker}` });
   }
 

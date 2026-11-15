@@ -24,6 +24,10 @@ export type ImageCatalogItem = {
   source: "code" | "catalog";
   sizes: string[];
   qualities: string[];
+  /** What the image router is told the model is good and bad at; null when unset. */
+  routingNote: string | null;
+  /** What users are told the model is for (a chat.imageModelUse* key); null when unset. */
+  useCase: string | null;
   /** Null until the model resolves (a runtime model with no price yet). */
   served: null | {
     enabled: boolean | null;
@@ -354,6 +358,8 @@ export const imageCatalogItems = (report: {
     apiModelId?: string;
     sizes?: string[];
     qualities?: string[];
+    routingNote?: string | null;
+    useCase?: string | null;
     source: "code" | "catalog";
     enabled: boolean | null;
     holdReason: string | null;
@@ -385,6 +391,8 @@ export const imageCatalogItems = (report: {
       source: row.source,
       sizes: row.sizes ?? [],
       qualities: row.qualities ?? [],
+      routingNote: row.routingNote ?? null,
+      useCase: row.useCase ?? null,
       served: {
         enabled: row.enabled,
         holdReason: row.holdReason,
@@ -403,7 +411,7 @@ export const imageCatalogItems = (report: {
     })
   );
   const pending = (report.pending ?? []).map((row): ImageCatalogItem => {
-    const profile = (row.profile ?? {}) as Partial<{ provider: string; apiModelId: string; name: string; sizes: string[]; qualities: string[] }>;
+    const profile = (row.profile ?? {}) as Partial<{ provider: string; apiModelId: string; name: string; sizes: string[]; qualities: string[]; routingNote: string }>;
     return {
       id: row.modelId,
       name: typeof profile.name === "string" ? profile.name : row.modelId,
@@ -412,6 +420,8 @@ export const imageCatalogItems = (report: {
       source: "catalog",
       sizes: Array.isArray(profile.sizes) ? profile.sizes : [],
       qualities: Array.isArray(profile.qualities) ? profile.qualities : [],
+      routingNote: typeof profile.routingNote === "string" ? profile.routingNote : null,
+      useCase: null,
       served: null,
       problem: row.problem,
       draft: (row.draft as ImageDraft | null) ?? null,

@@ -89,6 +89,18 @@ export const groupImageModelsByOwner = <T extends Parameters<typeof imageModelBr
     .map(([owner, grouped]) => ({ owner, models: grouped }));
 };
 
+/** What the model is for, in the user's words; the chat list's "Fast everyday questions". */
+export const IMAGE_USE_CASE_LABEL_KEYS = {
+  text: "chat.imageModelUseText",
+  detail: "chat.imageModelUseDetail",
+  fast: "chat.imageModelUseFast",
+  edit: "chat.imageModelUseEdit",
+  layout: "chat.imageModelUseLayout",
+  reference: "chat.imageModelUseReference",
+  value: "chat.imageModelUseValue",
+  general: "chat.imageModelUseGeneral",
+} as const;
+
 const LATENCY_LABEL_KEYS = {
   fast: "chat.imageModelLatencyFast",
   balanced: "chat.imageModelLatencyBalanced",
@@ -142,7 +154,8 @@ export function ImageModelTabPanel({
           <div className="px-2 text-[11px] font-bold uppercase tracking-wide text-zinc-400">
             {OWNER_LABELS[group.owner].toUpperCase()}
           </div>
-          <ul className="space-y-2">
+          {/* Two to a row where there is room, like the chat list; one on a phone. */}
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid="image-model-grid">
             {group.models.map((model) => {
               const brand = imageModelBrandParts(model);
               // "From" pricing: the picker does not know which quality and size the
@@ -152,7 +165,7 @@ export function ImageModelTabPanel({
                 ? Math.min(...model.prices.map((price) => price.credits))
                 : null;
               return (
-                <li key={model.id}>
+                <li key={model.id} className="min-w-0">
                   <button
                     type="button"
                     data-testid="image-model-option"
@@ -165,7 +178,7 @@ export function ImageModelTabPanel({
                       }
                       onSelectModel(model.id);
                     }}
-                    className={`flex w-full items-start gap-3 rounded-xl border px-3 text-left transition ${
+                    className={`flex h-full w-full items-start gap-3 rounded-xl border px-3 text-left transition ${
                       touchTarget ? "min-h-14 py-2.5" : "py-2.5"
                     } border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800`}
                   >
@@ -176,6 +189,14 @@ export function ImageModelTabPanel({
                       <span className="truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">
                         {model.name}
                       </span>
+                      {model.useCase && (
+                        <span
+                          data-testid="image-model-use-case"
+                          className="mt-0.5 text-xs leading-4 text-zinc-600 dark:text-zinc-300"
+                        >
+                          {t(IMAGE_USE_CASE_LABEL_KEYS[model.useCase])}
+                        </span>
+                      )}
                       <span className="mt-0.5 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
                         {/* Brand names, not copy: never translated. */}
                         {OWNER_LABELS[brand.owner]}

@@ -69,7 +69,7 @@ usage retaining the hold. No budget or user credit price changes.
 The standalone fallback can add latency after a failed combined call; include
 these failures in p95 comparisons before enabling the switch.
 
-Combined decisions now carry `+image-intent-v2` in their version. Ordinary chat
+Combined decisions now carry `+image-intent-v3` in their version. Ordinary chat
 returns `imageIntent: null` instead of generating unused image fields. An exact
 shared message is sent once; distinct bounded image text is retained. Follow-up
 and photo-edit instructions are included when their prepared context is present;
