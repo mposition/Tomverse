@@ -67,33 +67,13 @@ export async function prepareAmuxV52ReviewFindings(input: { attemptId: string;
   const doc = fitAmuxV52FindingsDoc(parsed);
   const attempt = await prisma.amuxExecutionAttempt.findUnique({
     where: { id: input.attemptId },
-    select: { taskId: true, task: { select: { sourceSnapshot: true } } },
+    select: { task: { select: { sourceSnapshot: true } } },
   });
   const ideaId = v22TaskResultIdeaId(attempt?.task.sourceSnapshot);
   if (!attempt || !ideaId) return null;
   const keys = await createAmuxV52ReviewFindingsKeys(ideaId, input.attemptId);
   if (!keys) return null;
-  return { doc, ideaId, keys, repeatsPrior: await repeatsPreviousRejection(attempt.taskId,
-    input.attemptId, doc) };
-}
-
-/**
- * Whether the review about to be recorded says the same thing, from the same
- * vendor, as the Task's previous rejection. Best effort: a previous body that
- * cannot be opened means "not known to repeat", never a reason to fail.
- */
-async function repeatsPreviousRejection(taskId: string, attemptId: string,
-  doc: AmuxV52FindingsDoc): Promise<boolean> {
-  try {
-    const previous = await prisma.amuxV52ReviewRecord.findFirst({
-      where: { taskId, verdict: "reject", attemptId: { not: attemptId } },
-      orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
-      select: HISTORY_SELECT,
-    });
-    if (!previous) return false;
-    const [opened] = await openAmuxV52ReviewHistory([historyRow(previous)]);
-    return opened?.opened?.doc ? amuxV52FindingsRepeat(doc, opened.opened.doc) : false;
-  } catch { return false; }
+  return { doc, ideaId, keys, repeatsPrior: amuxV52FindingsRepeat(doc) };
 }
 
 export type AmuxV52SealedFindings = {

@@ -239,6 +239,12 @@ test("verdict parsing never guesses a verdict, reads what it can, and blocking f
   assert.equal(parseReviewerOutput(`${accept}\n{"verdict":"reject","findings":[{"severity":"major","summary":"late"}]}`).verdict, "reject");
   // A final block that never closes, fenced or not, is unknown, not the accept before it.
   assert.equal(parseReviewerOutput(`${accept}\n{"verdict":"reject","findings":[`).verdict, "unknown");
+  // A brace inside a JSON string is not an object start.
+  assert.equal(parseReviewerOutput(`{"findings":[{"severity":"major","summary":"The parser fails on { in a string."}],"verdict":"reject"}`).verdict, "reject");
+  // The reviewer's own flag that a finding repeats an earlier one is kept.
+  const flagged = parseReviewerOutput(block({ verdict: "reject", findings: [
+    { severity: "major", summary: "again", repeats_earlier: true }, { severity: "major", summary: "new" }] }));
+  assert.deepEqual(flagged.findings.map((finding) => finding.repeats_earlier ?? false), [true, false]);
   assert.equal(parseReviewerOutput(`${accept}\n${fence}json\n{"verdict":"reject","findings":[]}`).verdict, "unknown");
   // Keys in any order: a nested object before the verdict does not hide it.
   assert.equal(parseReviewerOutput(`${accept}\n{"findings":[{"severity":"major","summary":"bad"}],"verdict":"reject"}`).verdict, "reject");

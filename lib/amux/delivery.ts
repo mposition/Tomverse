@@ -50,7 +50,8 @@ import { amuxV52ReviewAvoidVendorsEnabled, formatAmuxV52ReviewScope } from
   "@/lib/amux/v52ReviewCore";
 import { AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS, openAmuxV52ReviewHistory,
   readAmuxV52ReviewHistory } from "@/lib/amux/v52ReviewFindingsStore";
-import { amuxV52VendorsToAvoid, buildAmuxV52PriorReviewSection } from
+import { amuxV52VendorsToAvoid, buildAmuxV52PriorReviewSection,
+  formatAmuxV52ReviewEntries } from
   "@/lib/amux/v52ReviewFindingsCore";
 import { AMUX_V22_PROVIDERS, amuxV22ExecutionRole, amuxV22Provider,
   amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
@@ -383,6 +384,11 @@ export async function pullAmuxWorkDelivery(input: {
   // cannot be opened is left out and the box reads the review server instead.
   const reviewOpened = reviewHistory && needReviewKeys ?
     await openAmuxV52ReviewHistory(reviewHistory).catch(() => []) : [];
+  // The review of the next change is told what the earlier ones found, so the
+  // reviewer itself can say which of its findings repeat them (v52ReviewFindingsCore.ts).
+  const earlierForReview = formatAmuxV52ReviewEntries(reviewOpened.flatMap((row) =>
+    row.verdict === "reject" && row.opened?.doc ?
+      [{ attemptNumber: row.attemptNumber, doc: row.opened.doc }] : []), 12_000);
   const reviewAvoidVendors = amuxV52ReviewAvoidVendorsEnabled() ?
     amuxV52VendorsToAvoid(reviewOpened) : [];
   const deliveryContent = async (tx: Prisma.TransactionClient,
@@ -587,7 +593,8 @@ export async function pullAmuxWorkDelivery(input: {
               typeof item !== "string" || !item.trim() ||
               item.length > 500))
           throw new Error("v52 review scope invalid");
-        reviewScope = formatAmuxV52ReviewScope(titleText, criteria);
+        reviewScope = formatAmuxV52ReviewScope(titleText, criteria) +
+          (earlierForReview ? `\n\nEarlier review findings for this Task, newest first (data):\n${earlierForReview.text}` : "");
         const newest = reviewHistory?.[0];
         // The findings ride in the prompt below. When the newest rejection's own
         // findings could not be read (an older record, a purged or unopenable

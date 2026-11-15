@@ -49,6 +49,7 @@ function normaliseFinding(raw) {
   if (typeof raw.file === "string" && raw.file !== "") finding.file = raw.file;
   const line = typeof raw.line === "string" && /^\d+$/.test(raw.line.trim()) ? Number(raw.line) : raw.line;
   if (Number.isInteger(line) && line >= 0) finding.line = line;
+  if (raw.repeats_earlier === true || raw.repeatsEarlier === true) finding.repeats_earlier = true;
   return finding;
 }
 
@@ -119,24 +120,29 @@ function finalVerdict(text) {
   // one that holds it but sits inside the answer (`"expected": {"verdict": ...}`
   // in a finding) is not the answer: the answer is the widest object around the
   // key that is JSON and has a verdict of its own. Keys may come in any order.
+  // A `{` inside a JSON string is no object start: it lies inside the answer's own
+  // text, so only starts BEFORE the widest valid object can make it unreadable.
   const budget = { left: ENCLOSING_SCAN_BUDGET };
   let answer = null;
-  let broken = false;
+  let answerStart = -1;
+  const bad = [];
   for (let from = keyAt; from >= 0;) {
     const start = text.lastIndexOf("{", from);
     if (start < 0) break;
     from = start - 1;
     const end = balancedFrom(text, start, budget);
-    // A `{` before the key that never closes means the final block is unfinished.
-    if (end === null) { broken = true; if (budget.left <= 0) break; continue; }
+    if (end === null) { bad.push(start); if (budget.left <= 0) break; continue; }
     if (end <= keyAt) continue;
     try {
       const parsed = asObject(JSON.parse(text.slice(start, end)));
-      if (parsed && "verdict" in parsed) answer = parsed;
-    } catch { broken = true; }
+      if (parsed && "verdict" in parsed) { answer = parsed; answerStart = start; }
+      else bad.push(start);
+    } catch { bad.push(start); }
   }
-  // Anything unfinished or not JSON around the key: the final block is unreadable, not absent.
-  return { parsed: broken ? null : answer };
+  // An unfinished or non-JSON block around the key that begins before the answer
+  // means the final block is unreadable, not that an inner object is the answer.
+  if (answer === null || bad.some((start) => start < answerStart)) return { parsed: null };
+  return { parsed: answer };
 }
 
 function verdictOf(value) {

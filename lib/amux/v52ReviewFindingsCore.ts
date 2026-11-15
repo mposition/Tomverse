@@ -35,6 +35,8 @@ export type AmuxV52Finding = {
   summary: string;
   file: string | null;
   line: number | null;
+  /** The reviewer says this finding repeats one listed from an earlier review of the Task. */
+  repeatsEarlier?: true;
 };
 
 export type AmuxV52ReviewerFindings = {
@@ -118,7 +120,8 @@ function normalizeFinding(value: unknown): AmuxV52Finding | null {
   const file = oneLine(item.file, FILE_MAX);
   const line = typeof item.line === "number" && Number.isSafeInteger(item.line) &&
     item.line > 0 && item.line < 10_000_000 ? item.line : null;
-  return { severity, summary, file, line: file ? line : null };
+  return { severity, summary, file, line: file ? line : null,
+    ...(item.repeatsEarlier === true ? { repeatsEarlier: true as const } : {}) };
 }
 
 function normalizeReviewer(value: unknown): AmuxV52ReviewerFindings | null {
@@ -227,7 +230,7 @@ const SEVERITY_RANK = new Map(AMUX_V52_FINDING_SEVERITIES.map((name, index) => [
 /** One finding as a line: `- [major · openai] <file>:<line> <what is wrong>`. */
 export function amuxV52FindingLine(finding: AmuxV52Finding, vendor: string | null): string {
   const where = finding.file ? ` ${finding.file}${finding.line ? `:${finding.line}` : ""}` : "";
-  return `- [${vendor ? `${finding.severity} · ${vendor}` : finding.severity}]${where} ${finding.summary}`;
+  return `- [${vendor ? `${finding.severity} · ${vendor}` : finding.severity}]${where}${finding.repeatsEarlier ? " (repeats an earlier finding)" : ""} ${finding.summary}`;
 }
 
 /**
@@ -400,33 +403,21 @@ export function amuxV52RejectionView(review: unknown):
   return { kind: "none", reviewerVendors };
 }
 
-const tokensOf = (text: string) => new Set(text.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []);
-const overlap = (a: Set<string>, b: Set<string>) => {
-  if (a.size === 0 || b.size === 0) return 0;
-  let shared = 0;
-  for (const token of a) if (b.has(token)) shared += 1;
-  return shared / (a.size + b.size - shared);
-};
-
 /**
- * Whether this review repeats the previous one: a reviewer vendor that
- * rejected both, with a blocking (blocker or major) finding now that says
- * about the same thing as a blocking one before -- the same file with the same
- * line or similar words, or very similar words alone. The Task is then not run
- * again on its own: a person or the Decision Maker decides, with the reason
- * (owner decision 2026-11-15; no fixed count of rejections blocks a Task).
+ * Whether this review repeats an earlier one, as the reviewer says it: the
+ * review's scope note lists the Task's earlier findings (lib/amux/delivery.ts)
+ * and the reviewer marks each blocker or major finding of its own that says
+ * the same thing, still unfixed, with `repeats_earlier` (a model reading a
+ * model; no hand-made similarity score). The one deterministic check is on the
+ * flag itself: it counts only on a blocking finding of a reviewer that rejected.
+ * The Task is then not run again on its own: a person or the Decision Maker
+ * decides, with the reason (owner decision 2026-11-15; no fixed count of
+ * rejections blocks a Task).
  */
-export function amuxV52FindingsRepeat(current: AmuxV52FindingsDoc, previous: AmuxV52FindingsDoc): boolean {
-  const blocking = (doc: AmuxV52FindingsDoc) => doc.reviewers.flatMap((reviewer) =>
-    reviewer.verdict !== "reject" || !reviewer.vendor ? [] : reviewer.findings
-      .filter((finding) => finding.severity === "blocker" || finding.severity === "major")
-      .map((finding) => ({ vendor: reviewer.vendor!, finding, tokens: tokensOf(finding.summary) })));
-  const before = blocking(previous);
-  return blocking(current).some((now) => before.some((then) => then.vendor === now.vendor && (
-    (now.finding.file !== null && now.finding.file === then.finding.file &&
-      ((now.finding.line !== null && now.finding.line === then.finding.line) ||
-        overlap(now.tokens, then.tokens) >= 0.5)) ||
-    overlap(now.tokens, then.tokens) >= 0.6)));
+export function amuxV52FindingsRepeat(doc: AmuxV52FindingsDoc): boolean {
+  return doc.reviewers.some((reviewer) => reviewer.verdict === "reject" &&
+    reviewer.findings.some((finding) => finding.repeatsEarlier === true &&
+      (finding.severity === "blocker" || finding.severity === "major")));
 }
 
 /**

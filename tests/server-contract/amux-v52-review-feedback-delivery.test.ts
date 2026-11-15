@@ -196,8 +196,21 @@ test("a retried run's prompt carries the earlier rejections' findings, newest fi
   assert.equal(got.v22Execution?.reviewFeedbackJobId, undefined);
   assert.equal(got.v22Execution?.reviewAvoidVendors, undefined, "the vendor preference is off until the operator turns it on");
   assert.ok(Buffer.byteLength(got.prompt) <= 30 * 1_024);
+  // The review of the next change is told what the earlier ones found, so the
+  // reviewer can mark the blocking findings of its own that repeat them.
+  const scope = got.v22Execution?.reviewScope ?? "";
+  assert.match(scope, /^Title: Fix the image output\nCompletion criteria:\n- The output file is written/);
+  assert.match(scope, /Earlier review findings for this Task, newest first \(data\):\nAttempt 2 \(rejected by moonshot\):\n- \[major · moonshot\] lib\/image\/out\.ts:17/);
+  assert.match(scope, /Attempt 1 \(rejected by moonshot\):\n- \[blocker · moonshot\] lib\/image\/retry\.ts:4/);
   const receipt = audits.find((audit) => audit.action === "amux.delivery.receipt_issued");
   assert.match(String((receipt?.metadata as Record<string, unknown>).review_feedback_digest), /^[0-9a-f]{64}$/);
+});
+
+test("a first review has no earlier findings in its scope", async () => {
+  reset();
+  history = [];
+  const got = await pull();
+  assert.equal(got.v22Execution?.reviewScope, "Title: Fix the image output\nCompletion criteria:\n- The output file is written");
 });
 
 test("an older record without sealed findings falls back to the box reading the review server", async () => {

@@ -119,25 +119,27 @@ test("findings travel whole: no cap on how many or how long, and only past 1 MB 
   assert.doesNotThrow(() => encodeAmuxV52FindingsDoc(fitted));
 });
 
-test("a review repeats the previous one only for the same reviewer's similar blocking finding", () => {
-  const doc = (vendor, ...findings) => normalizeAmuxV52FindingsDoc({ version: 1, reviewers: [{ vendor, verdict: "reject",
-    findings: findings.map(([severity, summary, file, line]) => ({ severity, summary, file, line })) }] });
-  const before = doc("moonshot", ["major", "The output is written after the redirect, so the file is empty.", "lib/image/out.ts", 17]);
-  assert.equal(amuxV52FindingsRepeat(doc("moonshot", ["major", "Output written after redirect so file stays empty", "lib/image/out.ts", 20]), before), true,
-    "same file and the same worry in other words");
-  assert.equal(amuxV52FindingsRepeat(doc("moonshot", ["blocker", "Different words entirely about quota", "lib/image/out.ts", 17]), before), true,
-    "same file and line");
-  assert.equal(amuxV52FindingsRepeat(doc("moonshot", ["major", "Completely different worry about quota", "lib/image/out.ts", null]),
-    doc("moonshot", ["major", "Something unrelated: retries loop forever", "lib/image/out.ts", null])), false,
-  "no line numbers on either side is not a line match");
-  assert.equal(amuxV52FindingsRepeat(doc("moonshot", ["major", "The output is written after the redirect, so the file is empty."]), before), true,
-    "the same sentence without a file");
-  assert.equal(amuxV52FindingsRepeat(doc("openai", ["major", "The output is written after the redirect, so the file is empty.", "lib/image/out.ts", 17]), before), false,
-    "another reviewer");
-  assert.equal(amuxV52FindingsRepeat(doc("moonshot", ["major", "The retry cap is dropped", "lib/other.ts", 3]), before), false,
-    "a new finding");
-  assert.equal(amuxV52FindingsRepeat(doc("moonshot", ["minor", "The output is written after the redirect, so the file is empty.", "lib/image/out.ts", 17]), before), false,
-    "a minor finding does not block");
+// LLM first: the reviewer, which was shown the Task's earlier findings in its scope
+// note, marks the blocking findings of its own that repeat them. The app only
+// checks the flag where it counts: a blocking finding of a reviewer that rejected.
+test("a review repeats an earlier one only when the rejecting reviewer says so on a blocking finding", () => {
+  const doc = (verdict, ...findings) => normalizeAmuxV52FindingsDoc({ version: 1, reviewers: [{ vendor: "moonshot", verdict,
+    findings: findings.map(([severity, repeatsEarlier]) => ({ severity, summary: "The output is written after the redirect.", repeatsEarlier })) }] });
+  assert.equal(amuxV52FindingsRepeat(doc("reject", ["major", true])), true);
+  assert.equal(amuxV52FindingsRepeat(doc("reject", ["blocker", true], ["nit", false])), true);
+  assert.equal(amuxV52FindingsRepeat(doc("reject", ["major", false])), false, "a new finding");
+  assert.equal(amuxV52FindingsRepeat(doc("reject", ["minor", true])), false, "a minor finding does not block");
+  assert.equal(amuxV52FindingsRepeat(doc("unknown", ["major", true])), false, "only a reviewer that rejected counts");
+  assert.equal(amuxV52FindingsRepeat(doc("reject", ["major", "yes"])), false, "only the boolean true counts");
+  // The flag survives the round trip and shows in the lines a person or the prompt reads.
+  const flagged = doc("reject", ["major", true]);
+  assert.equal(flagged.reviewers[0].findings[0].repeatsEarlier, true);
+  assert.match(amuxV52FindingLines(flagged)[0], /^- \[major · moonshot\] \(repeats an earlier finding\) The output/);
+  assert.equal("repeatsEarlier" in doc("reject", ["major", false]).reviewers[0].findings[0], false);
+  // The launcher carries the flag the review server kept from the reviewer's answer.
+  const sent = JSON.parse(rejectionFindings({ reviews: [{ slot: 0, vendor: "moonshot", verdict: "reject", findings: [
+    { severity: "major", summary: "again", repeats_earlier: true }, { severity: "major", summary: "new" }] }] }));
+  assert.deepEqual(sent.reviewers[0].findings.map((finding) => finding.repeatsEarlier ?? false), [true, false]);
 });
 
 test("a reject step returns and keeps its findings; an accept carries none", () => {

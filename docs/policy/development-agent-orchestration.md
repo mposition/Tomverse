@@ -3002,11 +3002,12 @@ Task의 `taskRole`, 예상 경로(`expectedPaths`), intake의 등급 제안뿐�
   - **운영자 결정 2026-11-15, 고정 횟수로 막지 않는다.** reject는 횟수와 무관하게 같은 등급으로 `todo`에
     돌아가고(`TOMVERSE_AMUX_V52_REJECT_RETRY_IN_BUDGET`은 기본 켜짐, `disabled`로 옛 규칙), 다음 시도의
     prompt는 직전 시도들의 지적(최근 세 번의 reject, 새것부터, 들어가는 만큼 통째로, 잘렸으면 잘렸다고
-    표시)을 데이터로 받는다. 저장된 지적을 열 수 없을 때만 box가 검토 서버에서 job id로 읽는다. **같은 reviewer
-    공급사가 이전 reject의 blocker·major와 같은 말(같은 파일과 줄 또는 비슷한 단어)로 다시 거절할
-    때만** Task가 `blocked`(`review_server_rejected_twice`)가 되어 이유와 함께 사람·Decision Maker로 간다.
-    그 판단은 기록할 때 한 번 하고(`AmuxV52ReviewFindings.repeatsPrior`), 소유자가 재시도한 뒤에는 그 이후
-    reject만 센다. 같은 공급사가 두 번 연달아 거절하면 다음 검토는 다른 공급사를 우선한다(`--avoid-vendor`,
+    표시)을 데이터로 받는다. 저장된 지적을 열 수 없을 때만 box가 검토 서버에서 job id로 읽는다. **reviewer
+    자신이 "이 blocker·major 지적은 앞선 검토의 지적이 그대로 남은 것"이라고 표시했을 때만**(다음 검토의 scope note에
+    이 Task의 이전 지적이 데이터로 실리고, reviewer가 지적에 `repeats_earlier`를 붙인다. LLM first: 손으로 만든 유사도
+    점수를 쓰지 않고, 앱은 그 표시가 거절한 reviewer의 blocker·major 지적에 있는지만 확인한다) Task가
+    `blocked`(`review_server_rejected_twice`)가 되어 이유와 함께 사람·Decision Maker로 간다. 그 판단은 기록할 때
+    한 번 하고(`AmuxV52ReviewFindings.repeatsPrior`), 소유자가 재시도한 뒤에는 그 이후 reject만 센다. 같은 공급사가 두 번 연달아 거절하면 다음 검토는 다른 공급사를 우선한다(`--avoid-vendor`,
     기본 꺼진 스위치 `TOMVERSE_AMUX_V52_REVIEW_AVOID_VENDORS`, 배정 규칙은 `tools/review-orchestrator/README.md`).
   - `unknown`(판정을 읽을 수 없음, 요청·서버 오류 포함): Task는 같은 등급으로 `todo`에 돌아가 다시 실행되며 그
     실행이 검토 서버에 새로 제출된다. 같은 diff를 같은 attempt에서 두 번 제출하지는 않는다. 시도 예산이 끝나면

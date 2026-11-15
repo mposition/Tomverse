@@ -316,6 +316,7 @@ export function rejectionFindings(status, notes = {}) {
         entry.file = clean(finding.file);
         if (Number.isInteger(finding.line) && finding.line > 0) entry.line = finding.line;
       }
+      if (finding.repeats_earlier === true) entry.repeatsEarlier = true;
       findings.push(entry);
     }
     findings.sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
