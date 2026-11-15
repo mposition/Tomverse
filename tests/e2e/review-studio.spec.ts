@@ -740,15 +740,16 @@ for (const [width, theme] of [[1600, "light"], [430, "dark"]] as const) {
     };
     const history = await openHistory();
     await history.getByTestId("sidebar-conversation-item").filter({ hasText: "Other Studio task" }).click();
-    await expect(page.getByText("The other task's saved answer.", { exact: true })).toBeVisible();
-    await page.keyboard.press("Escape");
+    // Opening a conversation closes the history drawer by itself.
     await expect(history).toHaveCount(0);
+    await expect(page.getByText("The other task's saved answer.", { exact: true })).toBeVisible();
     await expect(page.getByTestId("chat-textarea")).toBeEnabled();
     await pushControlledChunk(page, "studio-history", "-TWO");
     await expect(page.getByText("STUDIO-PARTIAL-ONE-TWO", { exact: true })).toHaveCount(0);
     const returnHistory = await openHistory();
-    await returnHistory.locator('[data-testid="sidebar-conversation-item"][data-conversation-id="qa-conversation"]').click();
-    await page.keyboard.press("Escape");
+    await returnHistory.locator('[data-testid="sidebar-conversation-item"][data-conversation-id="qa-conversation"]').focus();
+    await page.keyboard.press("Enter");
+    await expect(returnHistory).toHaveCount(0);
     await expect(page.getByText("STUDIO-PARTIAL-ONE-TWO", { exact: true })).toBeVisible();
     await expect(page.getByTestId("chat-textarea")).toBeDisabled();
     await finishControlledStream(page, "studio-history");
