@@ -600,10 +600,11 @@ export const AMUX_DB_BOUNDARIES = {
   },
   // A Decision Maker request's workspace evidence
   // (lib/amux/decisionMakerWorkspaceService.ts): setup + the request's card +
-  // the one source row of that card + a pull request's patch + fence.
+  // the one source row of that card + a pull request's patch + (with the
+  // workspace switched off) the card text + fence.
   decisionMakerWorkspaceRead: {
     operation: "decision_maker_workspace_read",
-    prismaCallCeiling: 5,
+    prismaCallCeiling: 6,
     isolation: "read",
   },
   // Drafts no card could be written for, recorded once: setup + insert + fence.

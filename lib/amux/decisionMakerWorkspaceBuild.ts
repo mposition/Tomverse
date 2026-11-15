@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { chmodSync, lchownSync, lstatSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -159,16 +159,49 @@ export const dmWorkspaceSystemGitEnvironment = (home: string): NodeJS.ProcessEnv
   GIT_TERMINAL_PROMPT: "0",
 });
 
+/**
+ * One git command in a process group of its own: a deadline or the stop
+ * signal kills the whole group (git's fetch runs git-remote-https and
+ * index-pack under it, which a kill of git alone would leave writing), and the
+ * step resolves only once git has exited. Off POSIX (the test host on
+ * Windows) only git itself is killed.
+ */
 const runGit = (executable: string, env: NodeJS.ProcessEnv, extraFlags: string[]): DmGitRunner =>
   (args, options) =>
     new Promise((resolve) => {
-      execFile(
-        executable,
-        [...DM_WORKSPACE_GIT_FLAGS, ...extraFlags, ...args],
-        { cwd: options.cwd, env, timeout: options.timeoutMs, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true,
-          ...(options.signal ? { signal: options.signal } : {}) },
-        (error, stdout) => resolve({ ok: error === null, stdout: String(stdout ?? "") }),
-      );
+      const posix = process.platform !== "win32";
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = spawn(executable, [...DM_WORKSPACE_GIT_FLAGS, ...extraFlags, ...args],
+          { cwd: options.cwd, env, detached: posix, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+      } catch {
+        resolve({ ok: false, stdout: "" });
+        return;
+      }
+      let stdout = "";
+      let killed = false;
+      child.stdout?.on("data", (chunk: Buffer) => {
+        if (stdout.length < 1024 * 1024) stdout += chunk.toString("utf8");
+      });
+      const kill = () => {
+        killed = true;
+        try {
+          if (posix && child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+          else child.kill("SIGKILL");
+        } catch {
+          // Already gone.
+        }
+      };
+      const timer = setTimeout(kill, options.timeoutMs);
+      if (options.signal?.aborted) kill();
+      options.signal?.addEventListener("abort", kill, { once: true });
+      const finish = (ok: boolean) => {
+        clearTimeout(timer);
+        options.signal?.removeEventListener("abort", kill);
+        resolve({ ok: ok && !killed, stdout });
+      };
+      child.once("error", () => finish(false));
+      child.once("close", (code) => finish(code === 0));
     });
 
 export type DmWorkspaceBuildOptions = {
