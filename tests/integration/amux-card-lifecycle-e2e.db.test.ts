@@ -267,6 +267,10 @@ test("a reviewed result whose publication never opened is kept for publication, 
   // chose "run again" each time, until all five attempts were spent.
   const { readAmuxV22KeptResultCandidates } = await import("@/lib/amux/v22KeptResultRead");
   const { scanAmuxDmOwnerSettlementCandidates } = await import("@/lib/amux/dmOwnerSettlementRead");
+  // Kept results are published, and so left out of the DM, only while v22 publication is on.
+  const publicationBefore = process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION;
+  process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION = "enabled";
+  try {
   await lifecycle(async (tx) => {
     const card = await keptCard(tx);
     const kept = await readAmuxV22KeptResultCandidates(tx, 10, card.taskId);
@@ -285,6 +289,14 @@ test("a reviewed result whose publication never opened is kept for publication, 
         .map((row) => row.taskId), [card.taskId]);
     } finally {
       delete process.env.ENGINEERING_AGENT_LEGACY_HALTS;
+    }
+    // With v22 publication off nothing would publish it, so it is filed as before.
+    delete process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION;
+    try {
+      assert.deepEqual((await scanAmuxDmOwnerSettlementCandidates(tx, 10, [card.escalationId]))
+        .map((row) => row.taskId), [card.taskId]);
+    } finally {
+      process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION = "enabled";
     }
 
     // Its budget spent on later failures, it is still the card's result to publish.
@@ -313,6 +325,10 @@ test("a reviewed result whose publication never opened is kept for publication, 
       WHERE "id" = ${card.escalationId}`;
     assert.deepEqual(await readAmuxV22KeptResultCandidates(tx, 10, card.taskId), []);
   });
+  } finally {
+    if (publicationBefore === undefined) delete process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION;
+    else process.env.TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION = publicationBefore;
+  }
 });
 
 test("an approver's merge of a branch brought up to date still counts: same diff, later head", async () => {

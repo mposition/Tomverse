@@ -736,17 +736,21 @@ Publisher의 실제 적용 tree hash 대조는 그대로다. tier 라운드가 �
   **게시 대기(kept result)**다: 그 카드에서 가장 최근에 `succeeded`로 `review`에 간 시도이고, patch
   본문이 남아 있고, 그 시도의 engineering run이 없다. 사람이 그 결과를 retry·block으로 되돌렸으면
   (시스템이 아닌 해결자) 게시 대기가 아니다. runner의 관측 round(`observe/pull-requests`)가 매번
-  최대 3개를, 막힌 조건이 풀렸으면(게시 스위치·mode·동의·AMUX 정지·전체 정지·그 카드의 보류)
-  실행 시작과 정산이 했을 일 그대로 게시 경로에 태운다 — 그 시도의 run을 열고(같은 admission
-  판정), 정산이 여는 산출물(T1이면 tier 판정을 기다리는 초안 → PR 또는 T2 초안)을 열고, run을
-  그 결과로 끝낸다. 시도를 다 써 `blocked`가 된 카드도 보존된 결과가 있으면 `review`로 돌아가
+  최대 3개를 실행 시작과 정산이 했을 일 그대로 다음 경로에 태운다 — 그 시도의 run을 열고(같은
+  admission 판정: 전체 정지·그 카드의 보류), 정산이 여는 산출물을 열고, run을 그 결과로 끝낸다.
+  공개 PR이 허용되면(`t1`, 카드의 공개 PR 동의) tier 판정을 기다리는 초안 → PR 또는 T2 초안이고,
+  허용되지 않으면(`shadow`, 동의 없음) 바로 소유자의 T2 초안(공개 쓰기가 없는 내부 결정 항목)이다.
+  사람은 게시가 허용된 뒤 그 초안을 tier round로 돌려보낼 수 있다. 기다리는 것은 에이전트가
+  꺼졌거나(mode `off`) 동결됐거나 AMUX가 정지했거나 run admission이 거절할 때뿐이고, 기다린 결과는
+  10분 동안 뒤로 미뤄 가장 오래된 것이 다른 결과의 차례를 막지 않게 한다. 시도를 다 써 `blocked`가 된 카드도 보존된 결과가 있으면 `review`로 돌아가
   그 PR을 기다린다. 카드의 검토 대상 시도는 "가장 최근의 시도"가 아니라 "가장 최근에 성공해
   `review`로 간 시도"다(뒤의 실패한 시도는 검토가 없다; `lib/amux/reviewPullRequest.ts`,
   `lib/amux/reviewMergeObserved.ts`). 막힌 상태가 오래 갈 것이 분명해도 배정을 미루지 않는다:
   막는 조건은 대개 한 시간 안에 풀리고, 미루면 worker가 놀고 이미 시작된 run의 결과는 어차피
   보존해야 한다. 보존은 행 하나이고 시도를 쓰지 않는다. 이 시도들은 DM에게 다시 실행을
-  묻지 않는다(`docs/policy/amux-decision-maker.md`). `ENGINEERING_AGENT_LEGACY_HALTS=enabled`이면
-  보존된 결과를 게시하지 않고 종전대로 사람 검토에만 남긴다.
+  묻지 않는다(`docs/policy/amux-decision-maker.md`). `ENGINEERING_AGENT_LEGACY_HALTS=enabled`이거나
+  v22 게시(`TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION`)가 꺼져 있으면 보존된 결과를 게시하지 않고
+  종전대로 사람·DM 검토에 남긴다.
 - engineering run은 AMUX 실행 시도 하나와 1:1이고 AMUX 실행 시작과 같은 트랜잭션에서
   만들어진다(게시 대기 결과를 나중에 게시하는 run은 이미 끝난 시도에 열리고 같은 트랜잭션에서
   끝난다). 두 쪽 상태가 어긋나면 한쪽을 다른 쪽에 맞춰 고치지 않고 **불일치 항목**을

@@ -9,10 +9,9 @@ import { findOpenAmuxOrchestratorHalt } from "@/lib/amux/orchestratorHaltStore";
 import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
   amuxV22EngineeringPublicationEnabled } from "@/lib/amux/v22TaskExecutionCore";
 import { readAmuxV22PublicPrConsent } from "@/lib/amux/v22PublicPrConsent";
-import { decideAmuxV22KeptResult } from "@/lib/amux/v22KeptResultCore";
+import { amuxV22KeptResultPublicationEnabled, decideAmuxV22KeptResult } from "@/lib/amux/v22KeptResultCore";
 import { readAmuxV22KeptResultCandidates, type AmuxV22KeptResultCandidate } from "@/lib/amux/v22KeptResultRead";
-import { ENGINEERING_AGENT_LEGACY_HALTS_ENV, ENGINEERING_AGENT_POLICY_VERSION, engineeringAgentLegacyHalts,
-  v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
+import { ENGINEERING_AGENT_POLICY_VERSION, v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
 import {
   EngineeringAgentStoreRefusedError,
   endEngineeringAgentRun,
@@ -48,8 +47,9 @@ export const AMUX_V22_KEPT_RESULT_PUBLISHED_ACTION = "amux.v22.kept_result.publi
 const RUN_LEASE_MS = 10 * 60 * 1000;
 /**
  * A kept result that waited or failed is left out of the reads for this long
- * (in this process), so the oldest -- a card with no consent, one held by its
- * own mismatch -- never takes every round's turn from the ones behind it.
+ * (in this process), so the oldest -- a card held by its own mismatch, one
+ * whose publication keeps failing -- never takes every round's turn from the
+ * ones behind it.
  * It is read again after it; nothing about it is decided by the wait.
  */
 export const AMUX_V22_KEPT_RESULT_DEFER_MS = 10 * 60 * 1000;
@@ -68,10 +68,6 @@ export type AmuxV22KeptResultOutcome = {
   outcome: "published" | "waiting" | "moved" | "failed";
   reason?: string;
 };
-
-export const amuxV22KeptResultPublicationEnabled = (env: Record<string, string | undefined> = process.env) =>
-  !engineeringAgentLegacyHalts(env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]) &&
-  amuxV22EngineeringPublicationEnabled(env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]);
 
 type Patch = NonNullable<Awaited<ReturnType<typeof loadEngineeringAgentV22SettlementPatch>>>;
 
@@ -100,6 +96,7 @@ async function publishOne(candidate: AmuxV22KeptResultCandidate, patch: Patch): 
         publicationEnabled: amuxV22EngineeringPublicationEnabled(process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) }),
       legacy: false,
       orchestratorHalted: (await findOpenAmuxOrchestratorHalt(tx)) !== null,
+      claimAllowed: switches.claimAllowed,
       publishAllowed: switches.publishAllowed,
       mode: switches.mode,
       consent: await readAmuxV22PublicPrConsent(taskId, tx),
@@ -153,8 +150,8 @@ async function publishOne(candidate: AmuxV22KeptResultCandidate, patch: Patch): 
 /**
  * One round: up to AMUX_V22_KEPT_RESULT_ROUND_LIMIT kept results, oldest
  * first, each on its own so one that cannot be published never holds the
- * rest. One that waits (no consent, its card held, the queue under the kill
- * switch) or fails is deferred, so the next round reads the ones behind it
+ * rest. One that waits (the agent off or frozen, AMUX halted, its card held)
+ * or fails is deferred, so the next round reads the ones behind it
  * instead of the same few again. Off with ENGINEERING_AGENT_LEGACY_HALTS or
  * with v22 publication off.
  */

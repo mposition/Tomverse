@@ -29,6 +29,9 @@
  * published now.
  */
 
+import { AMUX_V22_ENGINEERING_PUBLICATION_ENV, amuxV22EngineeringPublicationEnabled } from "./v22TaskExecutionCore.ts";
+import { ENGINEERING_AGENT_LEGACY_HALTS_ENV, engineeringAgentLegacyHalts } from "../engineeringAgentCore.ts";
+
 /** Read newest first; more attempts than this are never a card's review (the budget is 5). */
 export const AMUX_V22_REVIEW_ATTEMPT_SCAN = 20;
 
@@ -62,12 +65,25 @@ export function amuxV22ReviewAttempt<T extends AmuxV22ReviewAttemptRow>(
   return null;
 }
 
+/**
+ * Whether kept results are published at all: v22 publication is on and the
+ * kill switch is off. While they are not, a kept result is an ordinary private
+ * result again, and the Decision Maker's owner settlement files it as before.
+ */
+export const amuxV22KeptResultPublicationEnabled = (env: Record<string, string | undefined> = process.env) =>
+  !engineeringAgentLegacyHalts(env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]) &&
+  amuxV22EngineeringPublicationEnabled(env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]);
+
 export type AmuxV22KeptResultFacts = {
   publicationEnabled: boolean;
   legacy: boolean;
   orchestratorHalted: boolean;
+  /** A run may be admitted at all: the mode is shadow or t1 and nothing is frozen. */
+  claimAllowed: boolean;
+  /** A public pull request may be written: the mode is t1 and nothing is frozen. */
   publishAllowed: boolean;
   mode: string;
+  /** The Task's public pull request consent. */
   consent: boolean;
   /** The Task's status now: a kept result waits in review, or blocked once the budget is spent. */
   taskStatus: string;
@@ -75,23 +91,29 @@ export type AmuxV22KeptResultFacts = {
 
 export type AmuxV22KeptResultVerdict =
   | { publish: true; moveToReview: boolean; tierPending: boolean }
-  | { publish: false; reason: "disabled" | "orchestrator_halted" | "publish_switch_off" | "mode_off" |
-    "public_pr_consent_unverified" | "task_moved" };
+  | { publish: false; reason: "disabled" | "orchestrator_halted" | "engineering_off" | "task_moved" };
 
 /**
- * Whether a kept result is published now, with what settlement would have
- * used: a T1 run's product waits for the tier judgement (tier pending), a
- * shadow run's is the owner's T2 draft. A blocked card -- one whose later
- * attempts failed until its budget ran out -- goes back to review, where its
- * pull request is what it waits on. Anything that would have kept the run
- * from opening at its start keeps it waiting now, and the next round asks again.
+ * Whether a kept result goes on its way now, and how. Wherever a run can be
+ * admitted, it opens one of the two products settlement opens: with a public
+ * pull request allowed (t1, the Task's consent) a draft whose tier the
+ * Publisher reads next, which becomes a pull request or the owner's T2 draft;
+ * otherwise -- shadow, or no consent -- the owner's T2 draft directly, an
+ * internal decision item with the patch, never a public write (review
+ * r-20261115-112638-578ac8: waiting for t1 or consent left a shadow result
+ * with no path at all). A person can send that draft back to the tier round
+ * once publishing is allowed (rejudgeEngineeringAgentV22Draft). A blocked card
+ * -- one whose later attempts failed until its budget ran out -- goes back to
+ * review. Only an engineering agent that is off or frozen, or a halted AMUX,
+ * keeps it waiting, and the next round asks again.
  */
 export function decideAmuxV22KeptResult(facts: AmuxV22KeptResultFacts): AmuxV22KeptResultVerdict {
   if (!facts.publicationEnabled || facts.legacy) return { publish: false, reason: "disabled" };
   if (facts.orchestratorHalted) return { publish: false, reason: "orchestrator_halted" };
   if (facts.taskStatus !== "review" && facts.taskStatus !== "blocked") return { publish: false, reason: "task_moved" };
-  if (!facts.publishAllowed) return { publish: false, reason: "publish_switch_off" };
-  if (facts.mode !== "shadow" && facts.mode !== "t1") return { publish: false, reason: "mode_off" };
-  if (!facts.consent) return { publish: false, reason: "public_pr_consent_unverified" };
-  return { publish: true, moveToReview: facts.taskStatus === "blocked", tierPending: facts.mode === "t1" };
+  if (!facts.claimAllowed || (facts.mode !== "shadow" && facts.mode !== "t1")) {
+    return { publish: false, reason: "engineering_off" };
+  }
+  return { publish: true, moveToReview: facts.taskStatus === "blocked",
+    tierPending: facts.mode === "t1" && facts.publishAllowed && facts.consent };
 }

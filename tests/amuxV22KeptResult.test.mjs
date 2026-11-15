@@ -70,18 +70,26 @@ test("a card's review is its newest accepted result; a later failure does not hi
 });
 
 test("a kept result is published once publication could open, the way settlement would have", async () => {
-  const { decideAmuxV22KeptResult } = await import("../lib/amux/v22KeptResultCore.ts");
-  const open = { publicationEnabled: true, legacy: false, orchestratorHalted: false, publishAllowed: true,
-    mode: "t1", consent: true, taskStatus: "review" };
+  const { decideAmuxV22KeptResult, amuxV22KeptResultPublicationEnabled } = await import("../lib/amux/v22KeptResultCore.ts");
+  const open = { publicationEnabled: true, legacy: false, orchestratorHalted: false, claimAllowed: true,
+    publishAllowed: true, mode: "t1", consent: true, taskStatus: "review" };
   assert.deepEqual(decideAmuxV22KeptResult(open), { publish: true, moveToReview: false, tierPending: true });
   assert.deepEqual(decideAmuxV22KeptResult({ ...open, taskStatus: "blocked" }),
     { publish: true, moveToReview: true, tierPending: true }, "a card whose budget ran out goes back to review");
+  // No public pull request allowed (shadow, or no consent): the owner's T2 draft, never a wait for t1.
+  for (const change of [{ mode: "shadow", publishAllowed: false }, { consent: false }])
+    assert.deepEqual(decideAmuxV22KeptResult({ ...open, ...change }), { publish: true, moveToReview: false, tierPending: false },
+      JSON.stringify(change));
   for (const [change, reason] of [
     [{ publicationEnabled: false }, "disabled"], [{ legacy: true }, "disabled"],
     [{ orchestratorHalted: true }, "orchestrator_halted"], [{ taskStatus: "todo" }, "task_moved"],
-    [{ publishAllowed: false }, "publish_switch_off"], [{ mode: "off" }, "mode_off"],
-    [{ consent: false }, "public_pr_consent_unverified"]])
+    [{ mode: "off", claimAllowed: false }, "engineering_off"], [{ claimAllowed: false }, "engineering_off"]])
     assert.deepEqual(decideAmuxV22KeptResult({ ...open, ...change }), { publish: false, reason }, JSON.stringify(change));
+  // Whether kept results are published at all, which also decides whether the DM leaves them out.
+  assert.equal(amuxV22KeptResultPublicationEnabled({ TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION: "enabled" }), true);
+  assert.equal(amuxV22KeptResultPublicationEnabled({}), false);
+  assert.equal(amuxV22KeptResultPublicationEnabled({ TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION: "enabled",
+    ENGINEERING_AGENT_LEGACY_HALTS: "enabled" }), false);
 });
 
 test("the Decision Maker is never asked to run a kept result again, and the reads only read", () => {

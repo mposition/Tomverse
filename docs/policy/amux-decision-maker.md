@@ -204,7 +204,8 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     2026-11-15).** 그런 결과에 필요한 일은 다시 실행이 아니라 게시이고, 이 카드의 선택지에는 `retry`가 있다. 게시는 엔지니어링
     관측 round가 맡는다(`docs/policy/engineering-agent.md` §11). 2026-11-14 AMUX-IMGOUT-003은 정지 중 검토를 통과한 결과 두 번이
     비공개로 남은 뒤 DM이 매번 "다시 실행"을 골라 시도 5회를 모두 썼다. 사람은 운영자 확인 대기 화면에서 그대로 정리할 수 있고,
-    사람의 retry·block은 그 결과의 거절로 존중된다. `ENGINEERING_AGENT_LEGACY_HALTS=enabled`이면 종전대로 올린다.
+    사람의 retry·block은 그 결과의 거절로 존중된다. `ENGINEERING_AGENT_LEGACY_HALTS=enabled`이거나 v22 게시
+    (`TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION`)가 꺼져 있으면 게시할 곳이 없으므로 종전대로 올린다.
     retry는 실패하거나 거절된 결과에만 남는다: patch 없이 끝난 실행의 결과 검토(§0a-2)는 DM이 검토자이므로 retry가 그 거절이다.
     escalation 하나에 `AmuxDmOwnerSettlement` 행 하나이고(행 id는 escalation에서
     유도한 version 8 UUID), tick마다 새 행 3건, 카드 3장까지다. 카드는 8과 같은 형식이며 세션 이름은 `amux-owner-settlement`,

@@ -2,9 +2,9 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { ENGINEERING_AGENT_LEGACY_HALTS_ENV, ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX,
-  engineeringAgentLegacyHalts } from "@/lib/engineeringAgentCore";
+import { ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX } from "@/lib/engineeringAgentCore";
 import { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION, AMUX_OWNER_QUEUE_DM_RESENT_ACTION } from "./ownerQueueDmRequestCore.ts";
+import { amuxV22KeptResultPublicationEnabled } from "./v22KeptResultCore.ts";
 import { amuxV22KeptResultExistsSql } from "./v22KeptResultRead.ts";
 
 /**
@@ -43,9 +43,9 @@ export async function scanAmuxDmOwnerSettlementCandidates(tx: Prisma.Transaction
   // patch whose publication never opened -- needs publishing, not running
   // again, so it is never put to the Decision Maker, whose answers include a
   // retry (v22KeptResultCore.ts). The publication round takes it; a person
-  // still settles it from the owner queue. With ENGINEERING_AGENT_LEGACY_HALTS
-  // it is filed as before.
-  const keepsNoResult = engineeringAgentLegacyHalts(process.env[ENGINEERING_AGENT_LEGACY_HALTS_ENV]);
+  // still settles it from the owner queue. With ENGINEERING_AGENT_LEGACY_HALTS,
+  // or with v22 publication off, nothing publishes it, and it is filed as before.
+  const keepsNoResult = !amuxV22KeptResultPublicationEnabled();
   return tx.$queryRaw<AmuxDmOwnerSettlementCandidate[]>`
     SELECT w."id" AS "taskId", e."id" AS "escalationId", w."status" AS "taskStatus",
       a."id" AS "attemptId", b."id" AS "bindingId"

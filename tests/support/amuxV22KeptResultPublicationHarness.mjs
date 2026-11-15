@@ -158,10 +158,25 @@ assert.deepEqual(moved.where, { id: "card", status: "blocked", owner: null, arch
 assert.deepEqual(moved.data, { status: "review", revision: { increment: 1 } });
 assert.ok(kinds().indexOf("task") > kinds().indexOf("admission") && kinds().indexOf("task") < kinds().indexOf("run_start"));
 
-// Anything that would have kept the run from opening at its start keeps the result waiting, and nothing is written.
+// Review r-20261115-112638-578ac8: with no public pull request allowed --
+// shadow mode, or no consent -- the result still goes on: as the owner's T2
+// draft, an internal decision item, never waiting for t1 or consent.
+for (const setup of [
+  () => { switches = { ...switches, mode: "shadow", publishAllowed: false }; modeAtStart = "shadow"; },
+  () => { consent = false; },
+]) {
+  reset();
+  setup();
+  assert.deepEqual(await round(), [{ taskId: "card", attemptId: "attempt-3", outcome: "published" }]);
+  assert.equal(calls.find(([kind]) => kind === "product")[1].tierPending, false, "the owner's T2 draft");
+  assert.equal(calls.find(([kind]) => kind === "audit")[1].metadata.tierPending, false);
+}
+
+// Only an agent that is off or frozen, a halted AMUX or the run's own
+// admission keeps the result waiting, and then nothing is written.
 for (const [setup, reason] of [
-  [() => { switches = { ...switches, publishAllowed: false }; }, "publish_switch_off"],
-  [() => { consent = false; }, "public_pr_consent_unverified"],
+  [() => { switches = { ...switches, mode: "off", claimAllowed: false, publishAllowed: false }; }, "engineering_off"],
+  [() => { switches = { ...switches, frozen: true, claimAllowed: false, publishAllowed: false }; }, "engineering_off"],
   [() => { orchestratorHalt = { id: "halt" }; }, "orchestrator_halted"],
   [() => { admission = "halted"; }, "run_admission_halted"],
   [() => { admission = "owner_queue_full"; }, "run_admission_owner_queue_full"],
@@ -202,10 +217,10 @@ const after = await round(1);
 assert.deepEqual(after.map((row) => [row.taskId, row.outcome]), [["card-3", "published"]],
   "a card that keeps failing never holds the others back");
 assert.deepEqual(skipped, [[], ["card", "card-2"]], "the round's reads leave out what it deferred");
-consent = false;
+admission = "halted";
 clock += AMUX_V22_KEPT_RESULT_DEFER_MS + 1;
 assert.deepEqual((await round(1)).map((row) => [row.taskId, row.outcome]), [["card", "waiting"]], "read again after it");
-consent = true;
+admission = null;
 assert.deepEqual((await round(1)).map((row) => [row.taskId, row.outcome]), [["card-2", "published"]],
   "a waiting card is deferred as a failing one is");
 
